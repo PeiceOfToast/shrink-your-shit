@@ -142,6 +142,7 @@ func (s *Store) backup(version int) (string, error) {
 	}
 	// VACUUM INTO writes a complete, consistent copy, including anything still in the WAL file.
 	if _, err := s.db.Exec(`VACUUM INTO ?`, dest); err != nil {
+		os.Remove(dest) // a failed copy (disk full...) must not be left looking like a backup
 		return "", err
 	}
 	s.pruneBackups()

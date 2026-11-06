@@ -325,3 +325,43 @@ func TestBackupsAreLimitedToTheNewest(t *testing.T) {
 		t.Errorf("the oldest backups should have been removed: %v", got)
 	}
 }
+
+func TestFailedBackupLeavesNoFileAndNoUpgrade(t *testing.T) {
+	path := legacyDB(t)
+	// A directory where the backup file should go makes the copy fail (like a full disk would).
+	if err := os.Mkdir(path+".bak-v0", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// os.Remove of an empty directory succeeds, so block that too with a file inside.
+	if err := os.WriteFile(filepath.Join(path+".bak-v0", "keep"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(path)
+	if err == nil {
+		s.Close()
+		t.Fatal("Open must fail when the backup cannot be made")
+	}
+	if !strings.Contains(err.Error(), "not upgrading") {
+		t.Errorf("message should say the upgrade did not happen: %q", err)
+	}
+	db := rawDB(t, path)
+	if version(t, db) != 0 || tableExists(t, db, "app_meta") || count(t, db, "jobs") != 3 {
+		t.Error("the database must be unchanged when the backup fails")
+	}
+}
+
+func TestBackupFailureCleansUpPartialFile(t *testing.T) {
+	// VACUUM INTO an unwritable place fails; no stray file remains at the target.
+	s, err := Open(filepath.Join(t.TempDir(), "syp.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.path = filepath.Join(t.TempDir(), "no-such-dir", "syp.db")
+	if _, err := s.backup(7); err == nil {
+		t.Fatal("expected the backup to fail")
+	}
+	if _, err := os.Stat(s.path + ".bak-v7"); err == nil {
+		t.Error("a failed backup left a file behind")
+	}
+}
