@@ -1,0 +1,67 @@
+/* Folder picker with its checks: the one "enter a folder" component, used by first-run and
+   by Add a library. Needs the folderpicker markup (ids path, browse, check, browser, checks).
+   opt.onChange(passed, path) tells the page when Continue / Add may turn on. */
+(function (g) {
+  "use strict";
+  var ui = g.SYP.ui, api = g.SYP.api;
+  var COPY = {
+    unreadable: "We can't open this folder. Check the path, and that shrink-your-shit is allowed to read it.",
+    read_only: "This folder is read-only. Make it writable, then press Check again.",
+    no_converter: "The converter is not installed correctly.",
+    no_videos: "We found no videos here. Pick the folder that holds them."
+  };
+  function $(id) { return document.getElementById(id); }
+  function line(cls, word, text) {
+    var li = ui.el("li"); li.appendChild(ui.el("span", "badge " + cls, word)); li.appendChild(document.createTextNode(" " + text)); return li;
+  }
+
+  g.SYP.folder = function (opt) {
+    var passed = false, pending = null;
+    function set(ok) { passed = ok; if (opt.onChange) opt.onChange(ok, $("path").value.trim()); }
+    function check() {
+      var path = $("path").value.trim(), list = $("checks"); set(false);
+      list.textContent = "";
+      if (!path) return Promise.resolve();
+      list.appendChild(ui.el("li", "muted", "Checking this folder..."));
+      return api.checkLibrary({}, { path: path }).then(function (r) {
+        if ($("path").value.trim() !== path) return;
+        list.textContent = "";
+        (r.blockers || []).forEach(function (b) { list.appendChild(line("bad", "Fix this", COPY[b.code] || b.message)); });
+        if (!(r.blockers || []).length) {
+          list.appendChild(line("ok", "OK", "We can read and change files in this folder."));
+          list.appendChild(line("ok", "OK", ui.num(r.videoCount) + " videos found (" + ui.bytes(r.totalBytes) + ")."));
+        }
+        (r.notes || []).forEach(function (n) {
+          list.appendChild(n.code === "no_hw_encoder" ? line("idle", "Not found", "No graphics card help found. That is fine; the processor will be used.")
+            : line("warn", "Heads up", n.message));
+        });
+        set(!!r.ok);
+      }, function (e) { list.textContent = ""; list.appendChild(line("bad", "Fix this", e.message)); });
+    }
+    // Browse: lists folders on the machine running the program.
+    function browse(path) {
+      api.browseDirs({ path: path }).then(function (r) {
+        var box = $("browser"), ul = ui.el("ul"); box.hidden = false; box.textContent = "";
+        ul.style.cssText = "list-style:none;padding:0;margin:0 0 12px";
+        box.appendChild(ui.el("p", "mono", r.path));
+        if (r.parent && r.parent !== r.path) { var up = ui.el("button", "btn small", "Up one folder"); up.type = "button"; up.onclick = function () { browse(r.parent); }; box.appendChild(up); }
+        r.dirs.forEach(function (d) {
+          var li = ui.el("li"), b = ui.el("button", "btn small", d); b.type = "button";
+          b.onclick = function () { browse(r.path.replace(/[\\/]$/, "") + (r.path.indexOf("\\") >= 0 ? "\\" : "/") + d); }; li.appendChild(b); ul.appendChild(li);
+        });
+        box.appendChild(ul);
+        var use = ui.el("button", "btn", "Use this folder"); use.type = "button";
+        use.onclick = function () { $("path").value = r.path; box.hidden = true; check(); $("path").focus(); };
+        box.appendChild(use);
+      }, function (e) { if (opt.onError) opt.onError(e); });
+    }
+    $("path").addEventListener("change", function () { pending = check(); });
+    $("check").onclick = function () { pending = check(); };
+    $("browse").onclick = function () { browse($("path").value.trim() || "/"); };
+    return {
+      check: function () { pending = check(); return pending; }, pending: function () { return pending; }, passed: function () { return passed; }, path: function () { return $("path").value.trim(); },
+      set: function (p) { $("path").value = p; },
+      clear: function () { $("path").value = ""; $("checks").textContent = ""; $("browser").hidden = true; set(false); }
+    };
+  };
+})(window);

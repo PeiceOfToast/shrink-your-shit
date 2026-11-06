@@ -26,13 +26,23 @@
     return e;
   };
 
-  // Preview card: host is the element (give it aria-live="polite"). start(body) asks for an
-  // estimate; mark() says the estimate is out of date. Always a range, never one figure.
+  // Status badge for a library, from its state. Words as well as colour.
+  ui.stateBadge = function (l) {
+    var cls = "idle", txt = "Idle";
+    if (l.state === "working") { cls = "ok"; txt = "Working: " + l.workingFiles + (l.workingFiles === 1 ? " file" : " files"); }
+    else if (l.state === "needs_attention") { cls = "warn"; txt = "Needs attention"; }
+    else if (l.state === "paused") txt = "Paused";
+    else if (l.state === "not_started") { cls = "info"; txt = "Not started"; }
+    else if (l.nextScan) txt = "Idle - next scan " + new Date(l.nextScan).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return ui.el("span", "badge " + cls, txt);
+  };
+
+  // Preview card body: host is the element (give it aria-live="polite"; the caller adds the heading).
+  // start() asks for an estimate; mark() says it is out of date. Always a range, never one figure.
   ui.preview = function (host, libId, getSetting) {
     var timer, poll, tries, gen = 0;
-    function say(heading, rows) {
+    function say(rows) {
       host.textContent = "";
-      host.appendChild(ui.el("h2", null, "Estimate for your files")).style.marginTop = "0";
       rows.forEach(function (r) { host.appendChild(r); });
     }
     function note(t) { return ui.el("p", "muted", t); }
@@ -46,12 +56,12 @@
       ul.appendChild(ui.el("li", null, ui.num(r.files) + " videos found (" + ui.bytes(r.totalBytes) + ")"));
       ul.appendChild(ui.el("li", null, ui.num(r.canShrink) + " can be shrunk"));
       if (skipped) ul.appendChild(ui.el("li", null, ui.num(skipped) + " will be skipped: " + parts.join(", ")));
-      say("", [big, ul, ui.el("p", "hint", "This is a guess, not a promise. Real savings are measured on each file.")]);
+      say([big, ul, ui.el("p", "hint", "This is a guess, not a promise. Real savings are measured on each file.")]);
     }
-    function giveUp() { say("", [note("We couldn't estimate this library. You can still start.")]); }
+    function giveUp() { say([note("We couldn't estimate this library. You can still start.")]); }
     function ask() {
       var my = ++gen; tries = 0;
-      say("", [note("Working out an estimate...")]);
+      say([note("Working out an estimate...")]);
       (function once() {
         g.SYP.api.preview({ id: libId }, { setting: getSetting() }).then(function (r) {
           if (my !== gen) return;
@@ -66,7 +76,7 @@
       // The setting changed: say so now, and refresh shortly after the last change.
       mark: function () {
         clearTimeout(timer); clearTimeout(poll); gen++;
-        say("", [note("Your choice changed. Updating the estimate...")]);
+        say([note("Your choice changed. Updating the estimate...")]);
         timer = setTimeout(ask, 500);
       },
       stop: function () { clearTimeout(timer); clearTimeout(poll); gen++; }

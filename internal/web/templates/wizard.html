@@ -19,18 +19,14 @@
 
 <section id="s3" aria-labelledby="t3" hidden><h1 id="t3" tabindex="-1">Add your first library</h1>
 <p class="muted">A library is a folder of videos. You can add more later.</p>
-<div class="field"><label for="path">Folder</label><div class="row"><input id="path" type="text" size="34" aria-describedby="path-hint" autocomplete="off" spellcheck="false"><button class="btn" type="button" id="browse">Browse...</button><button class="btn" type="button" id="check">Check again</button></div>
-<span id="path-hint" class="hint">Type a path, or press Browse. This is a folder on the computer running shrink-your-shit.</span></div>
-<div class="card" id="browser" hidden></div>
-<h2>Checking this folder</h2>
-<ul class="stack" id="checks" style="list-style:none;padding:0" aria-label="Folder checks" aria-live="polite"></ul>
+{{template "folderpicker"}}
 <p id="why3" class="hint">Continue turns on when the folder passes the checks.</p>
 <div class="row"><button class="btn" type="button" data-back>Back</button><button class="btn primary" type="button" id="go3" aria-disabled="true" aria-describedby="why3">Continue</button></div></section>
 
 <section id="s4" aria-labelledby="t4" hidden><h1 id="t4" tabindex="-1">Set it up</h1>
 <p class="muted">Pick how aggressively to shrink <strong id="lib-name"></strong>. Nothing changes until you press Start.</p>
 <div class="grid-2"><div id="editor"></div>
-<div class="card" id="preview" aria-live="polite"></div></div>
+<div class="card"><h2 style="margin-top:0">Estimate for your files</h2><div id="preview" aria-live="polite"></div></div></div>
 <div class="row"><button class="btn" type="button" data-back>Back</button><button class="btn primary" type="button" id="go4">Continue</button></div></section>
 
 <section id="s5" aria-labelledby="t5" hidden><h1 id="t5" tabindex="-1">Ready to start</h1>

@@ -157,6 +157,13 @@ func TestCopyBannedWords(t *testing.T) {
 			t.Errorf("COPY-1: %q in %s", m, name)
 		}
 	}
+	// Design decision: no raw "quality N" / CRF number on screen at Basic or Standard.
+	number := regexp.MustCompile(`(?i)\b(quality|crf) \d`)
+	for name, s := range texts {
+		if m := number.FindString(s); m != "" {
+			t.Errorf("COPY: %q in %s (names and plain effects only)", m, name)
+		}
+	}
 }
 
 // NAV-7: at Basic and Standard the word "flow" is nowhere in the UI. Every page except the Flows page
@@ -172,10 +179,18 @@ func TestNoFlowWordOutsideFlows(t *testing.T) {
 			t.Errorf("NAV-7: %q on %s", m, p.Path)
 		}
 	}
-	// Scripts: only the Flows menu entry (nav.json) and code names may use it; no string literal in app.js.
-	js := allText(t)["static/app.js"]
-	if m := flow.FindString(js); m != "" {
-		t.Errorf("NAV-7: %q in app.js", m)
+	// Scripts: only the Flows menu entry (nav.json) and code names may use it; no text a script shows.
+	for name, js := range allText(t) {
+		if path.Ext(name) != ".js" || name == "static/mock.js" {
+			continue
+		}
+		if m := regexp.MustCompile(`"[^"\n]*"`).FindAllString(js, -1); m != nil {
+			for _, lit := range m {
+				if flow.MatchString(lit) && !strings.HasPrefix(lit, `"/api/`) { // address of a call, not text on screen
+					t.Errorf("NAV-7: %s in %s", lit, name)
+				}
+			}
+		}
 	}
 }
 
@@ -192,34 +207,45 @@ func TestNoExternalRequests(t *testing.T) {
 	}
 }
 
-// PKG-2: size budget. CSS under 20 KB, page scripts under 30 KB in total. mock.js is a stand-in for
-// the server that goes away when the real endpoints land, so it is reported but not counted.
+// PKG-2: size budget, per page load. CSS under 20 KB; the scripts a page loads under 30 KB in total.
+// mock.js is a stand-in for the server that goes away when the real endpoints land, so it is not counted.
+// Every script a page names must exist, and every script must be used by some page.
 func TestAssetSizes(t *testing.T) {
-	var css, js, mock int
-	fs.WalkDir(static, "static", func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
+	size := func(name string) int {
+		b, err := fs.ReadFile(static, "static/"+name)
+		if err != nil {
+			t.Errorf("a page loads %s, which is not embedded", name)
 		}
-		b, _ := fs.ReadFile(static, p)
-		switch path.Ext(p) {
-		case ".css":
-			css += len(b)
-		case ".js":
-			if path.Base(p) == "mock.js" {
-				mock = len(b)
-			} else {
-				js += len(b)
-			}
-		}
-		return nil
-	})
-	t.Logf("css %d bytes, js %d bytes (mock.js %d bytes not counted)", css, js, mock)
+		return len(b)
+	}
+	css := size("app.css")
 	if css >= 20*1024 {
 		t.Errorf("PKG-2: css %d bytes, limit 20 KB", css)
 	}
-	if js >= 30*1024 {
-		t.Errorf("PKG-2: js %d bytes, limit 30 KB", js)
+	used := map[string]bool{}
+	worst, worstPage := 0, ""
+	for _, p := range pages {
+		total := 0
+		for _, js := range scripts(p.Kind) {
+			used[js] = true
+			if js != "mock.js" {
+				total += size(js)
+			}
+		}
+		if total > worst {
+			worst, worstPage = total, p.Path
+		}
+		if total >= 30*1024 {
+			t.Errorf("PKG-2: %s loads %d bytes of script, limit 30 KB", p.Path, total)
+		}
 	}
+	fs.WalkDir(static, "static", func(p string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && path.Ext(p) == ".js" && !used[path.Base(p)] {
+			t.Errorf("%s is not loaded by any page", p)
+		}
+		return nil
+	})
+	t.Logf("css %d bytes; largest page %s loads %d bytes of script (mock.js not counted)", css, worstPage, worst)
 }
 
 // First-run: a wizard with five steps and no menu in the top bar; every step has one primary button.
@@ -244,5 +270,19 @@ func TestFirstRunPage(t *testing.T) {
 	}
 	if !strings.Contains(body, `aria-label="Setup progress"`) || !strings.Contains(body, "<noscript>") {
 		t.Error("missing stepper or no-script note")
+	}
+}
+
+// ACCEPTANCE: no screen has more than one primary button.
+func TestOnePrimaryButtonPerPage(t *testing.T) {
+	srv := newServer(t)
+	for _, p := range pages {
+		if p.Kind == "wizard" {
+			continue // one per step, checked in TestFirstRunPage
+		}
+		_, body, _ := get(t, srv.URL+p.Path)
+		if n := strings.Count(body, "btn primary"); n > 1 {
+			t.Errorf("%s has %d primary buttons", p.Path, n)
+		}
 	}
 }
