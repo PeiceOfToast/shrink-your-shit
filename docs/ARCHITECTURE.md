@@ -54,7 +54,8 @@ The schema version is SQLite's `PRAGMA user_version`. `internal/jobs/migrate.go`
 of numbered steps; on every open the program runs the steps newer than the database's version, all in
 one transaction (a failing step rolls everything back and the program refuses to start). Before
 upgrading an existing database it saves a copy next to it as `syp.db.bak-v<old version>` (newest 3
-kept). A database from a newer program is refused with "this database is from a newer
+kept). The backup needs free disk space about the size of the database; if it cannot be made
+(for instance a full disk) the upgrade does not happen and the program says so. A database from a newer program is refused with "this database is from a newer
 shrink-your-shit; upgrade the program" and is not touched. Databases created before migrations
 existed (version 0, tables already there) are adopted as version 1.
 

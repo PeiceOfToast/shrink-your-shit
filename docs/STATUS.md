@@ -58,7 +58,9 @@ marked **never verified** has not been seen working by anyone. Update this file 
 written by the previous build, with real jobs, it upgrades in place, keeps the data, and the new
 binary refuses a database marked as newer (checked with the real binaries). An older binary does not
 refuse a newer database (it predates the check), so downgrading after an upgrade is unsupported;
-restore the `.bak-v<N>` file if you must.
+restore the `.bak-v<N>` file if you must. An upgrade needs free disk space about the size of the
+database for its backup (a full disk blocks the upgrade, with a clear message); the time and space for a
+very large database were not measured.
 
 ## Known limitations and follow-ups
 
