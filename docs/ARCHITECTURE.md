@@ -17,7 +17,7 @@ library folders --scanner--> files table + jobs table (SQLite) <--worker (pulls 
 | Path | Job |
 |---|---|
 | `main.go`, `platform.go` | flags and env, finding ffmpeg/ffprobe, default data dir, starts the scanner, worker and web server, handles Ctrl+C/SIGTERM |
-| `internal/scanner` | walks library folders every `-scan-every`, probes new or changed video files, asks the rule, queues jobs. Skips hidden files and folders (names starting with `.`), `@eaDir`, `$RECYCLE.BIN`, `System Volume Information`, files changed within `-settle`, and our own `*.syp-tmp.*` / `*.hevc.*` files |
+| `internal/scanner` | walks library folders every `-scan-every`, probes new or changed video files, asks the rule, queues jobs. Skips hidden files and folders (names starting with `.`), `@eaDir`, `$RECYCLE.BIN`, `System Volume Information`, files changed within `-settle`, and our own temp and output files (names whose part before the extension ends in `.syp-tmp` or `.hevc`, e.g. `a.hevc.mkv`) |
 | `internal/rules` | `Rule.Match(info)`: source codec equals `-from-codec` and video bitrate at least `-min-bitrate`; returns a reason string shown in the UI. Only one rule exists today |
 | `internal/media` | wraps ffprobe and ffmpeg behind the `Exec` interface (`OSExec` is real, `FakeExec` is for tests); parses probe JSON; builds the ffmpeg arguments (`HEVCArgs`); parses `-progress` output |
 | `internal/jobs` | SQLite store (pure-Go `modernc.org/sqlite`, no cgo): `files` (what the scanner last saw) and `jobs` tables, and the job state machine |
