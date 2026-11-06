@@ -3,7 +3,7 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/PeiceOfToast/shrink-your-shit/main/install.sh | sh
 #
-# It downloads the program (checksum verified), installs ffmpeg if it is missing, sets the
+# It downloads the program (checking it against the release's checksum file), installs ffmpeg if it is missing, sets the
 # program up as a service that starts on boot (systemd on Linux, a launchd agent on macOS),
 # starts it and prints the web address. Running it again upgrades to the newest release and
 # keeps your settings. Options go after "sh -s --":
@@ -142,11 +142,13 @@ install_ffmpeg() {
 
 install_ffmpeg
 ffmpeg -hide_banner -encoders 2>/dev/null | grep -q libx265 \
-  || die "the installed ffmpeg cannot encode HEVC (no libx265). Install a full ffmpeg build and run this again."
+  || die "the installed ffmpeg cannot encode HEVC (no libx265). Install a full ffmpeg build and run this again. On Fedora/RHEL that means enabling RPM Fusion (https://rpmfusion.org) and running: sudo dnf swap ffmpeg-free ffmpeg --allowerasing"
 
 # ---- download and verify ----
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT INT TERM
+trap 'rm -rf "$tmp"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 name=shrink-your-shit_${OS}_${ARCH}.tar.gz
 say "Downloading $name from $BASE_URL ..."
 fetch "$BASE_URL/$name" "$tmp/$name" || die "could not download $BASE_URL/$name. Is there a published release yet? (--version X.Y.Z picks one; SYP_BASE_URL points elsewhere)"
@@ -160,13 +162,25 @@ tar -xzf "$tmp/$name" -C "$tmp/x" --strip-components=1 --no-same-owner
 [ -f "$tmp/x/shrink-your-shit" ] || die "the download did not contain the program"
 
 PORT_ADDR=${ADDR:-127.0.0.1:8484}
-PORT=${PORT_ADDR##*:}
+
+# The address to ask "are you up?" on: the host part of the listen address; "all addresses"
+# (0.0.0.0, ::, nothing) means ask on this computer.
+check_host() {
+  h=${1%:*}
+  h=${h#[}
+  h=${h%]}
+  case $h in ''|0.0.0.0|::) h=127.0.0.1 ;; esac
+  printf '%s' "$h"
+}
 
 health_check() {
+  host=$(check_host "$PORT_ADDR")
+  case $host in *:*) host="[$host]" ;; esac
+  url="http://$host:${PORT_ADDR##*:}/api/status"
   i=0
   while [ $i -lt 20 ]; do
-    if have curl; then curl -fsS -o /dev/null "http://127.0.0.1:$PORT/api/status" 2>/dev/null && return 0
-    elif have wget; then wget -q -O /dev/null "http://127.0.0.1:$PORT/api/status" 2>/dev/null && return 0
+    if have curl; then curl -fsS -o /dev/null "$url" 2>/dev/null && return 0
+    elif have wget; then wget -q -O /dev/null "$url" 2>/dev/null && return 0
     else return 2
     fi
     i=$((i + 1)); sleep 1
@@ -189,7 +203,16 @@ if [ "$OS" = linux ]; then
   UNIT=/etc/systemd/system/shrink-your-shit.service
   SETTINGS_NOTE="$ENV_FILE (then: sudo systemctl restart shrink-your-shit)   Logs: journalctl -u shrink-your-shit -f"
 
-  id syp >/dev/null 2>&1 || $SUDO useradd --system --user-group --home-dir "$DATA_DIR" --shell /usr/sbin/nologin syp
+  if ! id syp >/dev/null 2>&1; then
+    if have useradd; then
+      $SUDO useradd --system --user-group --home-dir "$DATA_DIR" --shell /usr/sbin/nologin syp
+    elif have adduser; then # Alpine / busybox
+      $SUDO addgroup -S syp 2>/dev/null || true
+      $SUDO adduser -S -D -H -h "$DATA_DIR" -s /sbin/nologin -G syp syp
+    else
+      die "can't create the service user 'syp': neither useradd nor adduser was found"
+    fi
+  fi
   $SUDO install -d -o syp -g syp -m 0750 "$DATA_DIR"
 
   # Library: given, or kept from a previous install, or a fresh empty folder.
@@ -221,6 +244,7 @@ if [ "$OS" = linux ]; then
   haskv SYP_DATA || setkv SYP_DATA "$DATA_DIR"
   PORT_ADDR=$(sed -n 's/^SYP_ADDR=//p' "$newenv" | tail -n 1)
   PORT=${PORT_ADDR##*:}
+  $SUDO mkdir -p "$(dirname "$ENV_FILE")"   # Alpine has no /etc/default
   $SUDO install -m 0644 "$newenv" "$ENV_FILE"
 
   $SUDO install -m 0755 "$tmp/x/shrink-your-shit" "$BIN"
@@ -269,8 +293,13 @@ UNIT
   # No systemd (a container, Alpine/OpenRC, WSL without systemd...): the program is installed, no service.
   say "No systemd here, so no service was set up. The program is installed at $BIN."
   if [ -n "$RUN_FG" ]; then
-    say "Running it now (Ctrl+C stops it) at http://127.0.0.1:$PORT"
-    while IFS='=' read -r k v; do [ -n "$k" ] && export "$k=$v"; done < "$ENV_FILE"
+    say "Running it now (Ctrl+C stops it) at http://$(check_host "$PORT_ADDR"):$PORT"
+    say "(--run starts it as the user running this installer, not as 'syp', so files it replaces will be owned by that user.)"
+    while IFS='=' read -r k v; do
+      case $k in ''|'#'*) continue ;; esac
+      export "$k=$v"
+    done < "$ENV_FILE"
+    rm -rf "$tmp"; trap - EXIT   # exec replaces this shell, so clean up first
     exec "$BIN"
   fi
   say "Start it with:  set -a; . $ENV_FILE; set +a; $BIN"
@@ -286,6 +315,18 @@ PLIST=$HOME/Library/LaunchAgents/dev.shrink-your-shit.plist
 LOG=$HOME/Library/Logs/shrink-your-shit.log
 SETTINGS_NOTE="$PLIST (then: launchctl kickstart -k gui/$(id -u)/dev.shrink-your-shit)   Log: $LOG"
 
+# Settings from a previous install are kept unless a flag says otherwise (upgrade = re-run).
+plist_get() { # plist_get KEY  (reads our own plist, where each key and its string share a line)
+  [ -f "$PLIST" ] || return 0
+  sed -n "s|.*<key>$1</key><string>\(.*\)</string>.*|\1|p" "$PLIST" | head -n 1 \
+    | sed -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&amp;/\&/g'
+}
+if [ -z "$LIBS" ]; then LIBS=$(plist_get SYP_LIBRARIES); fi
+if [ -z "$ADDR" ]; then
+  old_addr=$(plist_get SYP_ADDR)
+  [ -z "$old_addr" ] || PORT_ADDR=$old_addr
+fi
+PORT=${PORT_ADDR##*:}
 if [ -z "$LIBS" ]; then
   LIBS=$DATA_DIR/library
   mkdir -p "$LIBS"
@@ -329,7 +370,13 @@ PL
 
 if [ -n "$NO_START" ]; then say "Installed, not started (--no-start). Start it with: launchctl bootstrap gui/$(id -u) $PLIST"; exit 0; fi
 launchctl bootout "gui/$(id -u)/dev.shrink-your-shit" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$PLIST" || die "launchd would not load the service. See $LOG"
+# bootout can still be finishing when bootstrap runs, which fails with an I/O error: retry briefly.
+i=0
+until launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null; do
+  i=$((i + 1))
+  [ $i -lt 5 ] || die "launchd would not load the service. See $LOG"
+  sleep 1
+done
 if health_check; then :; else
   rc=$?
   [ "$rc" = 2 ] || die "the service did not answer on port $PORT. See $LOG"

@@ -20,7 +20,8 @@ Licensed under **AGPL-3.0-or-later** (see `LICENSE`). No paid tiers, ever.
 curl -fsSL https://raw.githubusercontent.com/PeiceOfToast/shrink-your-shit/main/install.sh | sh
 ```
 
-It downloads the program (and checks its checksum), installs ffmpeg if you don't have it,
+It downloads the program (and compares it with the checksum file published beside it, which
+catches a damaged download, not a compromised release), installs ffmpeg if you don't have it,
 sets the program up as a service that starts on boot, starts it, and prints the web address.
 Run the same line again later to upgrade; your settings are kept. It uses `sudo` on Linux
 and tells you when it does; on macOS it installs for your user only (no sudo).
@@ -31,6 +32,10 @@ network in. There is no login yet, so only do that on a network you trust:
 ```
 curl -fsSL https://raw.githubusercontent.com/PeiceOfToast/shrink-your-shit/main/install.sh | sh -s -- --library /path/to/videos --addr 0.0.0.0:8484
 ```
+
+On macOS the service is a login item (a launchd agent), so the installer must be run in a
+normal desktop session (Terminal.app), not over plain SSH; the service then starts at login.
+The program is unsigned: macOS or Windows may warn the first time it runs.
 
 > **Not working yet:** the installer downloads a published release, and none has been
 > published. Until the first release exists it stops with "could not download", and you need
