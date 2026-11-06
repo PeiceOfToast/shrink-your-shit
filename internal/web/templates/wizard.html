@@ -1,0 +1,40 @@
+{{define "wizard"}}<noscript><div class="notice info" role="note"><div><strong>Turn on scripts to set up</strong>Setup saves each step as you go, which needs scripts enabled.</div></div></noscript>
+<div class="notice bad" id="err" role="alert" tabindex="-1" hidden></div>
+<ol class="stepper" id="stepper" aria-label="Setup progress"><li aria-current="step">1. Welcome</li><li>2. Control level</li><li>3. Add a library</li><li>4. Set it up</li><li>5. Start</li></ol>
+<div id="wizard" hidden>
+<section id="s1" aria-labelledby="t1"><h1 id="t1" tabindex="-1">Make your video library smaller, safely</h1>
+<p>shrink-your-shit converts videos to a more efficient format so they take less space. It checks every new file before it replaces anything, and it keeps your original for 7 days so you can get it back.</p>
+<div class="notice info"><div><strong>What to expect</strong>Most libraries shrink by about 10-20%. Files that came from Blu-ray rips can shrink more. We tell you the real number once files are done.</div></div>
+<p><button class="btn primary" type="button" id="go1">Continue</button></p></section>
+
+<section id="s2" aria-labelledby="t2" hidden><h1 id="t2" tabindex="-1">How much control do you want?</h1>
+<p class="muted">You can change this any time in Settings. Nothing you set up is lost.</p>
+<fieldset class="stack"><legend class="label">Control level</legend>
+<div class="grid-3">
+<label class="card selectable"><span class="check"><input type="radio" name="lvl" value="basic" checked> <span><strong>Basic</strong><br><span class="muted">One slider per library, from smallest file to best quality. Best if you just want it to work.</span></span></span></label>
+<label class="card selectable"><span class="check"><input type="radio" name="lvl" value="standard"> <span><strong>Standard</strong><br><span class="muted">Simple choices for resolution, audio, subtitles, file format and quality.</span></span></span></label>
+<label class="card selectable"><span class="check"><input type="radio" name="lvl" value="advanced"> <span><strong>Advanced</strong><br><span class="muted">A visual builder where you draw exactly what should happen to each file.</span></span></span></label>
+</div></fieldset>
+<div class="row"><button class="btn" type="button" data-back>Back</button><button class="btn primary" type="button" id="go2">Continue</button></div></section>
+
+<section id="s3" aria-labelledby="t3" hidden><h1 id="t3" tabindex="-1">Add your first library</h1>
+<p class="muted">A library is a folder of videos. You can add more later.</p>
+<div class="field"><label for="path">Folder</label><div class="row"><input id="path" type="text" size="34" aria-describedby="path-hint" autocomplete="off" spellcheck="false"><button class="btn" type="button" id="browse">Browse...</button><button class="btn" type="button" id="check">Check again</button></div>
+<span id="path-hint" class="hint">Type a path, or press Browse. This is a folder on the computer running shrink-your-shit.</span></div>
+<div class="card" id="browser" hidden></div>
+<h2>Checking this folder</h2>
+<ul class="stack" id="checks" style="list-style:none;padding:0" aria-label="Folder checks" aria-live="polite"></ul>
+<p id="why3" class="hint">Continue turns on when the folder passes the checks.</p>
+<div class="row"><button class="btn" type="button" data-back>Back</button><button class="btn primary" type="button" id="go3" aria-disabled="true" aria-describedby="why3">Continue</button></div></section>
+
+<section id="s4" aria-labelledby="t4" hidden><h1 id="t4" tabindex="-1">Set it up</h1>
+<p class="muted">Pick how aggressively to shrink <strong id="lib-name"></strong>. Nothing changes until you press Start.</p>
+<div class="grid-2"><div id="editor"></div>
+<div class="card" id="preview" aria-live="polite"></div></div>
+<div class="row"><button class="btn" type="button" data-back>Back</button><button class="btn primary" type="button" id="go4">Continue</button></div></section>
+
+<section id="s5" aria-labelledby="t5" hidden><h1 id="t5" tabindex="-1">Ready to start</h1>
+<div class="notice ok"><div><strong>You are safe to start</strong>Your original files are kept for 7 days. Every new file is checked before it replaces the original. You can pause at any time.</div></div>
+<div class="row"><button class="btn primary" type="button" id="start">Start shrinking</button><button class="btn" type="button" id="notyet">Not yet, just save my library</button></div>
+<p class="hint">"Not yet" saves the library. You can start it whenever you are ready.</p></section>
+</div>{{end}}

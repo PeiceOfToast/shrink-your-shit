@@ -5,13 +5,13 @@
 <body data-section="{{.Section}}">
 <a class="skip" href="#main">Skip to content</a>
 <header class="topbar"><a class="brand" href="/libraries/">shrink-your-shit</a>
-<nav aria-label="Main"><ul class="nav" id="main-nav">{{range .Nav}}<li><a data-id="{{.ID}}" href="{{.Href}}"{{if eq .ID $.Section}} aria-current="page"{{end}}>{{.Label}}</a></li>
-{{end}}</ul></nav><span class="spacer"></span>
-<a class="small" id="working" href="/activity/" hidden></a>
+{{if .Nav}}<nav aria-label="Main"><ul class="nav" id="main-nav">{{range .Nav}}<li><a data-id="{{.ID}}" href="{{.Href}}"{{if eq .ID $.Section}} aria-current="page"{{end}}>{{.Label}}</a></li>
+{{end}}</ul></nav>{{end}}<span class="spacer"></span>
+{{if .Nav}}<a class="small" id="working" href="/activity/" hidden></a>{{end}}
 <button class="btn small" type="button" id="theme" hidden>Theme: Auto</button></header>
 <main id="main" tabindex="-1">
 <div class="mock-note card" role="note" id="mock-note" hidden>Showing sample data. Nothing here is real yet.</div>
-<div class="page-head"><h1>{{.Heading}}</h1></div>
+{{if eq .Kind "wizard"}}{{template "wizard" .}}{{else}}<div class="page-head"><h1>{{.Heading}}</h1></div>
 {{with .Tabs}}<nav aria-label="{{$.Heading}} sections" class="tabs">{{range .}}<a href="{{.Href}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}</nav>{{end}}
 {{if eq .Kind "settings-general"}}<noscript><div class="notice info" role="note"><div><strong>Turn on scripts to change these</strong>Control level can only be changed with scripts enabled.</div></div></noscript>
 <form class="stack" id="general-form" hidden>
@@ -26,7 +26,7 @@
 </fieldset>
 <div class="row"><button class="btn primary" type="submit">Save</button><span id="saved" class="muted" role="status"></span></div>
 </form>
-{{else}}<div class="card empty"><p>{{.Empty}}</p></div>{{end}}
+{{else}}<div class="card empty"><p>{{.Empty}}</p></div>{{end}}{{end}}
 </main>
-<script src="/assets/api.js"></script><script src="/assets/mock.js"></script><script src="/assets/app.js"></script>
+<script src="/assets/api.js"></script><script src="/assets/mock.js"></script><script src="/assets/ui.js"></script><script src="/assets/editors.js"></script><script src="/assets/app.js"></script>{{if eq .Kind "wizard"}}<script src="/assets/firstrun.js"></script>{{end}}
 </body></html>

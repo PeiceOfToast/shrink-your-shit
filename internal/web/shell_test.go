@@ -87,7 +87,7 @@ func TestPagesServeWithShell(t *testing.T) {
 			continue
 		}
 		want := []string{`class="skip" href="#main"`, `<main id="main"`, `href="/assets/app.css"`}
-		if p.Section != "flows" { // the sent menu is the Basic one; the browser adds Flows
+		if p.Section != "flows" && p.Kind != "wizard" { // the sent menu is the Basic one; the browser adds Flows
 			want = append(want, `aria-current="page"`)
 		}
 		for _, w := range want {
@@ -219,5 +219,30 @@ func TestAssetSizes(t *testing.T) {
 	}
 	if js >= 30*1024 {
 		t.Errorf("PKG-2: js %d bytes, limit 30 KB", js)
+	}
+}
+
+// First-run: a wizard with five steps and no menu in the top bar; every step has one primary button.
+func TestFirstRunPage(t *testing.T) {
+	srv := newServer(t)
+	code, body, _ := get(t, srv.URL+"/welcome/")
+	if code != 200 {
+		t.Fatalf("/welcome/: %d", code)
+	}
+	if strings.Contains(body, `aria-label="Main"`) || strings.Contains(body, "main-nav") {
+		t.Error("the wizard shows the menu")
+	}
+	for _, id := range []string{"s1", "s2", "s3", "s4", "s5"} {
+		sec := body[strings.Index(body, `<section id="`+id+`"`):]
+		sec = sec[:strings.Index(sec, "</section>")]
+		if n := strings.Count(sec, "btn primary"); n != 1 {
+			t.Errorf("step %s has %d primary buttons, want 1", id, n)
+		}
+		if !strings.Contains(sec, "<h1") {
+			t.Errorf("step %s has no heading", id)
+		}
+	}
+	if !strings.Contains(body, `aria-label="Setup progress"`) || !strings.Contains(body, "<noscript>") {
+		t.Error("missing stepper or no-script note")
 	}
 }

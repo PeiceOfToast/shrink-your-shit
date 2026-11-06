@@ -35,6 +35,7 @@
   // The server sends the Basic menu. Entries that depend on settings are added here (nav.json says when).
   function menu(s) {
     var ul = $("main-nav"), section = doc.body.getAttribute("data-section");
+    if (!ul) return Promise.resolve(); // the wizard has no menu
     return fetch("/assets/nav.json").then(function (r) { return r.json(); }).then(function (items) {
       ul.textContent = "";
       items.forEach(function (n) {
@@ -49,6 +50,7 @@
   }
 
   function working() {
+    if (!$("working")) return;
     api.activitySummary().then(function (s) {
       var el = $("working"), n = s.workingFiles;
       if (!n) { el.hidden = true; return; }
@@ -69,10 +71,19 @@
     });
   }
 
-  signIn().then(function () {
+  // First visit with nothing set up lands in the wizard.
+  function firstRun(s) {
+    if (s.firstRunDone || doc.body.getAttribute("data-section") !== "libraries") return Promise.resolve();
+    return api.listLibraries().then(function (l) { if (!l.total) location.replace("/welcome/"); });
+  }
+
+  window.SYP.ready = signIn();
+  window.SYP.ready.then(function () {
     theme();
     if (api.mocked) $("mock-note").hidden = false;
     working();
-    return api.getSettings().then(function (s) { return menu(s).then(function () { generalForm(s); }); });
+    return api.getSettings().then(function (s) {
+      return firstRun(s).then(function () { return menu(s); }).then(function () { generalForm(s); });
+    });
   }).catch(function () {});
 })();
