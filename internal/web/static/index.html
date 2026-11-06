@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>shrink-your-shit</title>
+<style>
+  body { font: 15px system-ui, sans-serif; margin: 0 auto; max-width: 62rem; padding: 1rem; color: #222; background: #fafafa; }
+  h1 { margin: 0 0 .5rem; } h2 { margin-top: 1.5rem; }
+  table { width: 100%; border-collapse: collapse; background: #fff; }
+  th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid #e3e3e3; vertical-align: top; }
+  .path { word-break: break-all; } .small { color: #666; font-size: 13px; }
+  .badge { padding: .1rem .5rem; border-radius: 1rem; font-size: 13px; background: #ddd; }
+  .running { background: #cfe4ff; } .done { background: #cdeccd; } .failed { background: #f6cccc; }
+  progress { width: 7rem; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #181818; color: #ddd; } table { background: #222; } th, td { border-color: #333; }
+    .small { color: #999; } .badge { background: #444; } .running { background: #24456e; } .done { background: #25522a; } .failed { background: #6a2a2a; }
+  }
+</style>
+</head>
+<body>
+<h1>shrink-your-shit</h1>
+<div class="small" id="msg">Loading…</div>
+<h2>Libraries</h2>
+<ul id="libs"></ul>
+<h2>Jobs</h2>
+<table>
+  <thead><tr><th>#</th><th>File</th><th>Status</th><th>Progress</th><th>Why / result</th></tr></thead>
+  <tbody id="jobs"></tbody>
+</table>
+<script>
+const $ = id => document.getElementById(id);
+const mb = n => (n / 1048576).toFixed(0) + " MB";
+function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+async function retry(id) { await fetch("/api/jobs/" + id + "/retry", { method: "POST" }); refresh(); }
+async function refresh() {
+  try {
+    const r = await (await fetch("/api/status")).json();
+    $("libs").innerHTML = r.libraries.map(l => "<li class=path>" + esc(l) + "</li>").join("") || "<li>none configured</li>";
+    $("jobs").innerHTML = r.jobs.map(j => {
+      let note = esc(j.reason);
+      if (j.status === "done") note = mb(j.sizeBefore) + " → " + mb(j.sizeAfter);
+      if (j.status === "failed") note = esc(j.error) + ' <button onclick="retry(' + j.id + ')">Retry</button>';
+      return "<tr><td>" + j.id + "</td><td class=path>" + esc(j.path) + "</td><td><span class='badge " + j.status + "'>" + j.status + "</span></td>" +
+        "<td>" + (j.status === "running" ? "<progress max=100 value=" + j.progress + "></progress> " + j.progress.toFixed(0) + "%" : "") + "</td>" +
+        "<td class=small>" + note + "</td></tr>";
+    }).join("") || "<tr><td colspan=5 class=small>No jobs yet. Drop a video into a library folder.</td></tr>";
+    $("msg").textContent = "Updated " + new Date().toLocaleTimeString();
+  } catch (e) { $("msg").textContent = "Can't reach the server: " + e; }
+}
+refresh(); setInterval(refresh, 2000);
+</script>
+</body>
+</html>

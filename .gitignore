@@ -1,0 +1,4 @@
+shrink-your-shit
+*.db
+*.db-*
+/data/
