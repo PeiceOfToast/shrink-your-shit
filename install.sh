@@ -372,9 +372,9 @@ if [ -n "$NO_START" ]; then say "Installed, not started (--no-start). Start it w
 launchctl bootout "gui/$(id -u)/dev.shrink-your-shit" 2>/dev/null || true
 # bootout can still be finishing when bootstrap runs, which fails with an I/O error: retry briefly.
 i=0
-until launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null; do
+until lc_err=$(launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>&1); do
   i=$((i + 1))
-  [ $i -lt 5 ] || die "launchd would not load the service. See $LOG"
+  [ $i -lt 5 ] || die "launchd would not load the service ($lc_err). Is this a normal desktop login session? See also $LOG"
   sleep 1
 done
 if health_check; then :; else
