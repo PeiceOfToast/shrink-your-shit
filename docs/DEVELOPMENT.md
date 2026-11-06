@@ -13,6 +13,9 @@ When this file and the code disagree, trust the code and fix this file.
 | Docker | optional (tested 29.1) | to build/run the container image |
 | shellcheck, actionlint | optional | lint `deploy/install.sh` and `.github/workflows/ci.yml` |
 
+`go` and `ffmpeg`/`ffprobe` must be on your `PATH`. For the run-it-for-real steps, port 8484
+must be free (change it with `-addr`).
+
 No C compiler is needed: the SQLite driver is pure Go and all builds use `CGO_ENABLED=0`.
 Install Go from https://go.dev/dl/ (a tarball unpacked anywhere is enough; no root needed).
 
@@ -52,21 +55,26 @@ The program **replaces originals by default**. Always develop against a copy (or
 ### Making a test video
 
 No sample files are stored in the repo; generate them with ffmpeg's built-in test source.
+Work in a **scratch folder**, and make the library a **separate folder holding only the final
+file**: anything in the library that matches the rule gets converted, including intermediates.
 This makes a 12-second 720p H.264 file at 8 Mbps with audio and a subtitle track (large
-enough to match the default rule, which needs H.264 above 4000 kbps):
+enough to match the default rule, which needs H.264 of at least 4000 kbps):
 
 ```
+mkdir -p scratch/lib && cd scratch
 ffmpeg -f lavfi -i testsrc2=duration=12:size=1280x720:rate=30 \
        -f lavfi -i sine=duration=12 -c:v libx264 -b:v 8M -c:a aac in.mp4
 printf '1\n00:00:00,000 --> 00:00:02,000\nhi\n' > s.srt
-ffmpeg -i in.mp4 -i s.srt -map 0 -map 1 -c copy -c:s srt movie.mkv
-touch -d '1 minute ago' movie.mkv      # the scanner ignores files changed in the last -settle (15s)
+ffmpeg -i in.mp4 -i s.srt -map 0 -map 1 -c copy -c:s srt lib/movie.mkv
+touch -d '1 minute ago' lib/movie.mkv      # GNU/Linux syntax; macOS: touch -t "$(date -v-1M +%Y%m%d%H%M.%S)" lib/movie.mkv
 ```
 
-Use `-preset ultrafast` to make the encode quick. Expected result (observed many times):
+The last line backdates the file: the scanner ignores files changed in the last `-settle`
+(15 s). The macOS form was **not run** (no Mac available). Then run the program with
+`-library scratch/lib` (see above). Use `-preset ultrafast` to make the encode quick. Expected result (observed many times):
 the file becomes HEVC, roughly a third of the size, with audio and subtitles kept, and the
 job shows `done`. Check with
-`ffprobe -v error -show_entries stream=codec_name -of csv=p=0 movie.mkv`.
+`ffprobe -v error -show_entries stream=codec_name -of csv=p=0 scratch/lib/movie.mkv`.
 
 ### In Docker
 
@@ -92,7 +100,7 @@ Docker creates itself is root-owned and the non-root program cannot open its dat
 | `docker` | `docker build`, then starts the container and curls `/api/status` |
 
 Go version comes from `go.mod`. Actions are pinned to major versions. Check a PR's status
-with `gh pr checks <number>`. I have not re-checked the latest CI results for this document.
+with `gh pr checks <number>`; what has been observed so far is in [STATUS.md](STATUS.md).
 
 ## How changes have been made
 

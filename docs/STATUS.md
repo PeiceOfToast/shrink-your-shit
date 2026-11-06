@@ -7,7 +7,7 @@ marked **never verified** has not been seen working by anyone. Update this file 
 
 | Slice | What | How it landed |
 |---|---|---|
-| 1 | Go foundation: scanner, rule (H.264 > 4000 kbps -> HEVC), SQLite job queue, built-in ffmpeg worker, embedded web page, AGPL-3.0 | commits on `main` directly (no PR) |
+| 1 | Go foundation: scanner, rule (H.264 at 4000+ kbps -> HEVC), SQLite job queue, built-in ffmpeg worker, embedded web page, AGPL-3.0 | commits on `main` directly (no PR) |
 | 2 | Cross-platform: user config data dir, finding ffmpeg/ffprobe, Windows rename retry, hidden-folder skipping, per-OS README notes | PR #1 |
 | 3 | GitHub Actions CI: tests on Linux/Windows/macOS, 5-target cross-compile, Docker build + smoke test | PR #2 |
 | 4 | Dockerfile, compose example, Debian/Ubuntu install script and systemd unit, `docs/proxmox.md`, `SYP_ADDR` / `SYP_LIBRARIES` | PR #3, docs follow-up PR #4 |
@@ -22,11 +22,12 @@ marked **never verified** has not been seen working by anyone. Update this file 
 - **Docker 29.1:** image builds, container healthy, real conversion from a mounted folder,
   named volume for `/config`, clean stop, compose file accepted, `compose up` worked
   (QA pass). The root-owned bind-mount failure was reproduced.
-- **GitHub Actions, real runners** (read with `gh run view` while writing this): `go vet` and
-  `go test` passed on **ubuntu and windows** for the PR runs of slices 3 and 4, and on
-  **macOS** for slice 3's PR run (the macOS job for the PR #4 run was still queued when
-  checked). All five cross-compile builds and the Docker job passed. This also shows
-  `setup-go` can fetch the Go version in `go.mod`.
+- **GitHub Actions, real runners** (read with `gh run view`, as of 2026-11-06): in the latest completed
+  runs (PR runs for slices 3 and 4, and pushes to `main`) every job succeeded: `go vet` and
+  `go test` on **ubuntu, windows and macOS**, all five cross-compile builds, and the Docker
+  job. A newer run on `main` was still queued when checked. This also shows `setup-go` can
+  fetch the Go version in `go.mod`. CI runs the unit tests only (fake ffmpeg), so it says
+  nothing about real encodes on Windows or macOS.
 - `install.sh` passes `shellcheck` 0.10; the systemd unit passes `systemd-analyze verify`.
 
 ## Never verified
@@ -59,7 +60,7 @@ Collected from the reviews; none is fixed.
 - **No authentication.** Anyone who can reach the web page can see file names and retry jobs.
   Do not expose it to the internet.
 - **Software encoding only** (x265); no GPU/hardware encoding.
-- **One rule, one target:** H.264 above a bitrate to HEVC. No other codecs, no per-library rules,
+- **One rule, one target:** H.264 at or above a bitrate to HEVC. No other codecs, no per-library rules,
   no flow builder.
 - Failed jobs are not retried automatically (manual Retry button).
 - Subtitle/attachment copying relies on keeping the input's container; data streams are dropped.

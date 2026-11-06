@@ -7,7 +7,7 @@
 
 Free, open-source tool that shrinks your video library. Point it at a folder: new
 video files are checked with `ffprobe`, and the ones that match a simple rule
-(default: **H.264 above 4000 kbps → HEVC**) are re-encoded with `ffmpeg` in the
+(default: **H.264 at 4000 kbps or more → HEVC**) are re-encoded with `ffmpeg` in the
 background. A small web page shows the queue and progress.
 
 Licensed under **AGPL-3.0-or-later** (see `LICENSE`). No paid tiers, ever.
@@ -82,7 +82,7 @@ Run `./shrink-your-shit -h` for all of them. The main ones:
 | `-library` | (required) | folder to watch (repeatable; or env `SYP_LIBRARIES`) |
 | `-data` | user config folder | where the database lives |
 | `-from-codec` | `h264` | only convert this video codec |
-| `-min-bitrate` | `4000` | only convert files above this video bitrate (kbps) |
+| `-min-bitrate` | `4000` | only convert files at or above this video bitrate (kbps) |
 | `-crf` | `26` | quality: lower is better and bigger |
 | `-preset` | `medium` | x265 speed: `ultrafast` … `veryslow` |
 | `-output` | `replace` | `replace` or `beside` |
