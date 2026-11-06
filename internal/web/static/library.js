@@ -29,7 +29,7 @@
     $("share-q").textContent = "This setting is also used by " + used.join(", ");
     $("sh1l").textContent = n === 1 ? "Change it for both libraries" : "Change it for all " + (n + 1) + " libraries";
     $("sh2l").textContent = "Make a separate copy for " + lib.name + " only";
-    box.hidden = false; $("sh1").focus();
+    box.hidden = false; $("applies").hidden = true; $("sh1").focus();
   }
   function save() {
     var body = editor.get(), choice = !$("share").hidden && document.querySelector('input[name="sh"]:checked').value;
@@ -45,7 +45,7 @@
     var ul = $("sample-lines"); ul.textContent = "";
     if (!sm) { $("sample-size").textContent = ""; return; }
     sm.lines.forEach(function (l) { ul.appendChild(ui.el("li", null, l)); });
-    $("sample-size").textContent = "Expected size: about " + ui.range(sm.expectedLow, sm.expectedHigh);
+    $("sample-size").textContent = "Expected size: about " + ui.range(sm.expectedBytesLow, sm.expectedBytesHigh);
   }
 
   function init() {
@@ -66,13 +66,13 @@
         $("save").onclick = save; $("applies").textContent = "Applies to " + lib.name + " only."; $("applies").hidden = false;
         $("sample").hidden = false; $("sf").onchange = function () { prev.start(); };
         api.listFiles({ id: id }).then(function (r) {
-          r.items.forEach(function (f) { var o = ui.el("option", null, f.path.split("/").pop() + " (" + ui.bytes(f.bytes) + ")"); o.value = f.path; $("sf").appendChild(o); });
+          r.items.forEach(function (f) { var o = ui.el("option", null, f.path.split(/[\\/]/).pop() + " (" + ui.bytes(f.bytes) + ")"); o.value = f.path; $("sf").appendChild(o); });
           prev.start();
-        }, fail);
+        }, function (e) { fail(e); prev.start(); });
       } else if (level !== "basic") {
         $("later").hidden = false; $("save").hidden = true; $("desc").hidden = true; $("facts").hidden = true;
       } else {
-        custom = setting.quality == null;
+        custom = setting.quality == null || setting.speed != null; // a Standard setting has more than a slider can show
         $("custom").hidden = !custom;
         editor = slider = ed.slider($("slider"), setting.quality || 3, function () { facts(); prev.mark(); }, lib.name + ": smallest file to best quality");
         if (custom) $("save").textContent = "Use this slider setting";
