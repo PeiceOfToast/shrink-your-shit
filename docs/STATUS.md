@@ -1,6 +1,6 @@
 # Status and roadmap
 
-True for: `main` after PR #4 (slices 1-4). The "verified" claims say how and by whom; anything
+True for: `main` after PR #7 (slices 1-7a) plus the one-step installer (slice 7b, this change). The "verified" claims say how and by whom; anything
 marked **never verified** has not been seen working by anyone. Update this file when that changes.
 
 ## What exists
@@ -11,7 +11,10 @@ marked **never verified** has not been seen working by anyone. Update this file 
 | 2 | Cross-platform: user config data dir, finding ffmpeg/ffprobe, Windows rename retry, hidden-folder skipping, per-OS README notes | PR #1 |
 | 3 | GitHub Actions CI: tests on Linux/Windows/macOS, 5-target cross-compile, Docker build + smoke test | PR #2 |
 | 4 | Dockerfile, compose example, Debian/Ubuntu install script and systemd unit, `docs/proxmox.md`, `SYP_ADDR` / `SYP_LIBRARIES` | PR #3, docs follow-up PR #4 |
-| 5 | These docs (DEVELOPMENT, ARCHITECTURE, STATUS) | this change |
+| 5 | Docs (DEVELOPMENT, ARCHITECTURE, STATUS) | PR #5 |
+| 6 | Workflow that publishes a multi-arch image to GHCR on version tags (never run) | PR #6 |
+| 7a | Workflow + `scripts/build-release.sh` that build the 5 binaries and attach them to a GitHub Release on version tags (never run), `-version` flag | PR #7 |
+| 7b | `install.sh` at the repo root: one-line installer for Linux/macOS (replaces the old `deploy/install.sh`) | this change |
 
 ## What has been verified, and how
 
@@ -28,14 +31,23 @@ marked **never verified** has not been seen working by anyone. Update this file 
   job. A newer run on `main` was still queued when checked. This also shows `setup-go` can
   fetch the Go version in `go.mod`. CI runs the unit tests only (fake ffmpeg), so it says
   nothing about real encodes on Windows or macOS.
-- `install.sh` passes `shellcheck` 0.10; the systemd unit passes `systemd-analyze verify`.
+- **`install.sh` in clean Debian 12 containers**, against a locally built release served with
+  `SYP_BASE_URL=file://...`: ffmpeg installed from apt, checksum verified, a real file converted;
+  in a container running systemd the service was created, enabled, restarted after a kill and
+  after a container restart; re-run kept settings; non-root with sudo works; failures (no sudo,
+  tampered download, missing release, missing library folder, unsupported CPU) give clear errors.
+  `shellcheck` 0.10 is clean.
 
 ## Never verified
 
 - A real Windows or macOS **run** of the program (CI only runs the unit tests there, which use
   a fake ffmpeg). Includes: the Windows replace-retry against a genuinely locked file, SQLite on
   a Windows path, UNC and long paths, Ctrl+C on Windows.
-- `deploy/install.sh` actually executing on a Debian/Ubuntu machine (it was only linted and read).
+- `install.sh` on **macOS** (launchd agent, Homebrew, quarantine flag), on Fedora/Arch/Alpine/openSUSE
+  package managers, downloading from real GitHub release URLs (no release exists yet), and
+  inside a real Proxmox LXC.
+- The two release workflows (`release-binaries.yml`, `release-image.yml`) on GitHub: they have
+  only been linted with `actionlint` and their steps run by hand.
 - Every Proxmox step in `docs/proxmox.md`: LXC bind mounts and the UID shift, running the
   service in an unprivileged LXC, Docker inside an LXC (nesting/keyctl), Proxmox's OCI image
   import.
@@ -65,7 +77,8 @@ Collected from the reviews; none is fixed.
 - Failed jobs are not retried automatically (manual Retry button).
 - Subtitle/attachment copying relies on keeping the input's container; data streams are dropped.
 - `go test -race` has not been run (needs cgo).
-- No release binaries or published container image yet.
+- No release has been published: the release workflows exist but no version tag has been pushed, so
+  the installer has nothing to download and the GHCR package does not exist (and will start private).
 
 ## Planned next
 
@@ -76,4 +89,4 @@ Roughly in the order discussed, none started:
 3. Authentication.
 4. Hardware encoding (GPU passthrough on Proxmox).
 5. A visual flow/rule builder and more rules than "H.264 to HEVC".
-6. Published release binaries and container image.
+6. Cut the first release (push a version tag), make the GHCR package public, and run the installer against it.

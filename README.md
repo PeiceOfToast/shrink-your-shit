@@ -12,7 +12,41 @@ background. A small web page shows the queue and progress.
 
 Licensed under **AGPL-3.0-or-later** (see `LICENSE`). No paid tiers, ever.
 
-## Run it
+## Install (one step)
+
+**Linux and macOS** (also a Proxmox/Debian container): paste this into a terminal.
+
+```
+curl -fsSL https://raw.githubusercontent.com/PeiceOfToast/shrink-your-shit/main/install.sh | sh
+```
+
+It downloads the program (and compares it with the checksum file published beside it, which
+catches a damaged download, not a compromised release), installs ffmpeg if you don't have it,
+sets the program up as a service that starts on boot, starts it, and prints the web address.
+Run the same line again later to upgrade; your settings are kept. It uses `sudo` on Linux
+and tells you when it does; on macOS it installs for your user only (no sudo).
+
+Point it at your videos, and (on a server you will open from another computer) let the
+network in. There is no login yet, so only do that on a network you trust:
+
+```
+curl -fsSL https://raw.githubusercontent.com/PeiceOfToast/shrink-your-shit/main/install.sh | sh -s -- --library /path/to/videos --addr 0.0.0.0:8484
+```
+
+On macOS the service is a login item (a launchd agent), so the installer must be run in a
+normal desktop session (Terminal.app), not over plain SSH; the service then starts at login.
+The program is unsigned: macOS or Windows may warn the first time it runs.
+
+> **Not working yet:** the installer downloads a published release, and none has been
+> published. Until the first release exists it stops with "could not download", and you need
+> the manual steps below. The macOS part has never been run on a Mac.
+
+**Windows:** a one-file installer is planned but does not exist yet. Use the manual steps below.
+
+The program **replaces your original video files** once it has checked the result is good.
+Start with a copy of some videos. Other install options (Docker, Proxmox): [docs/proxmox.md](docs/proxmox.md).
+
+## Manual / advanced
 
 You need ffmpeg (which includes ffprobe) and Go 1.26+ to build. It builds without a C
 compiler, and the same source builds for Linux, Windows and macOS (Intel and ARM).
