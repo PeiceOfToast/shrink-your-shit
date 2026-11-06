@@ -240,3 +240,42 @@ func TestAssetSizes(t *testing.T) {
 	})
 	t.Logf("css %d bytes; largest page %s loads %d bytes of script (mock.js not counted)", css, worstPage, worst)
 }
+
+// First-run: a wizard with five steps and no menu in the top bar; every step has one primary button.
+func TestFirstRunPage(t *testing.T) {
+	srv := newServer(t)
+	code, body, _ := get(t, srv.URL+"/welcome/")
+	if code != 200 {
+		t.Fatalf("/welcome/: %d", code)
+	}
+	if strings.Contains(body, `aria-label="Main"`) || strings.Contains(body, "main-nav") {
+		t.Error("the wizard shows the menu")
+	}
+	for _, id := range []string{"s1", "s2", "s3", "s4", "s5"} {
+		sec := body[strings.Index(body, `<section id="`+id+`"`):]
+		sec = sec[:strings.Index(sec, "</section>")]
+		if n := strings.Count(sec, "btn primary"); n != 1 {
+			t.Errorf("step %s has %d primary buttons, want 1", id, n)
+		}
+		if !strings.Contains(sec, "<h1") {
+			t.Errorf("step %s has no heading", id)
+		}
+	}
+	if !strings.Contains(body, `aria-label="Setup progress"`) || !strings.Contains(body, "<noscript>") {
+		t.Error("missing stepper or no-script note")
+	}
+}
+
+// ACCEPTANCE: no screen has more than one primary button.
+func TestOnePrimaryButtonPerPage(t *testing.T) {
+	srv := newServer(t)
+	for _, p := range pages {
+		if p.Kind == "wizard" {
+			continue // one per step, checked in TestFirstRunPage
+		}
+		_, body, _ := get(t, srv.URL+p.Path)
+		if n := strings.Count(body, "btn primary"); n > 1 {
+			t.Errorf("%s has %d primary buttons", p.Path, n)
+		}
+	}
+}

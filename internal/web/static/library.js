@@ -20,6 +20,7 @@
   function head() {
     $("lib-title").textContent = lib.name; $("lib-path").textContent = lib.path; document.title = lib.name + " - shrink-your-shit";
     $("lib-state").textContent = ""; $("lib-state").appendChild(ui.stateBadge(lib));
+    $("scan").textContent = lib.state === "not_started" ? "Start" : "Scan now";
   }
 
   // 409 flow_shared: ask once whether to change it for everyone or make a copy.
@@ -44,7 +45,7 @@
     Promise.all([api.getSettings(), api.getLibrary({ id: id }), api.getSetting({ id: id })]).then(function (r) {
       var level = r[0].controlLevel, setting = r[2]; lib = r[1];
       head(); $("lib-body").hidden = false;
-      var get = function () { return slider ? slider.get() : {}; };
+      var get = function () { return slider ? slider.get() : setting; }; // the loaded setting until a level has its own editor
       prev = ui.preview($("pv"), id, get);
       if (level !== "basic") {
         $("later").hidden = false; $("save").hidden = true; $("desc").hidden = true; $("facts").hidden = true;
@@ -62,7 +63,7 @@
       };
       $("update").onclick = function () { prev.start(); };
       // Remove: the one place; a confirm first (native dialog).
-      $("remove").onclick = function () { $("rm-q").textContent = "Remove " + lib.name + "?"; $("rm-dialog").showModal(); };
+      $("remove").onclick = function () { $("rm-q").textContent = "Remove " + lib.name + "?"; $("rm-dialog").returnValue = ""; $("rm-dialog").showModal(); };
       $("rm-dialog").addEventListener("close", function () {
         if ($("rm-dialog").returnValue !== "remove") { $("remove").focus(); return; }
         api.deleteLibrary({ id: id }).then(function () { location.href = "/libraries/"; }, fail);
