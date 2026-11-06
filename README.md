@@ -52,6 +52,10 @@ program; point at it explicitly with `-ffmpeg` / `-ffprobe` or `SYP_FFMPEG` /
 - File permission bits are copied on Linux/macOS. Windows has no equivalent, so the
   new file just gets the folder's normal permissions.
 
+**Proxmox / Docker / a Linux server:** see [docs/proxmox.md](docs/proxmox.md). The web page
+only listens on this computer by default (`127.0.0.1`). `-addr 0.0.0.0:8484` (or `SYP_ADDR`)
+lets other machines in. There is no login yet, so only do that on a network you trust.
+
 ## Is it safe for my files?
 
 Yes by design. The new file is written next to the original under a temporary
@@ -82,7 +86,7 @@ Run `./shrink-your-shit -h` for all of them. The main ones:
 | `-output` | `replace` | `replace` or `beside` |
 | `-scan-every` | `30s` | how often to look for new files |
 | `-settle` | `15s` | skip files changed this recently (still copying) |
-| `-addr` | `127.0.0.1:8484` | web UI address |
+| `-addr` | `127.0.0.1:8484` | web UI address (env `SYP_ADDR`) |
 
 ## For developers
 

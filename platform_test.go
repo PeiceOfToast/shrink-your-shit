@@ -63,3 +63,38 @@ func TestResolveToolMissingIsClear(t *testing.T) {
 		t.Errorf("unhelpful error: %v", err)
 	}
 }
+
+func TestEnvOr(t *testing.T) {
+	t.Setenv("SYP_TEST_X", "")
+	if envOr("SYP_TEST_X", "d") != "d" {
+		t.Error("empty should fall back")
+	}
+	t.Setenv("SYP_TEST_X", "v")
+	if envOr("SYP_TEST_X", "d") != "v" {
+		t.Error("set value should win")
+	}
+}
+
+func TestLibrariesFromEnv(t *testing.T) {
+	a, b := filepath.Join("x", "a b"), filepath.Join("y", "c")
+	t.Setenv("SYP_LIBRARIES", a+string(filepath.ListSeparator)+string(filepath.ListSeparator)+b)
+	got := librariesFromEnv()
+	if len(got) != 2 || got[0] != a || got[1] != b {
+		t.Errorf("%q", got)
+	}
+	t.Setenv("SYP_LIBRARIES", "")
+	if len(librariesFromEnv()) != 0 {
+		t.Error("unset should give none")
+	}
+}
+
+func TestExposedToNetwork(t *testing.T) {
+	for addr, want := range map[string]bool{
+		"127.0.0.1:8484": false, "localhost:8484": false, "[::1]:8484": false,
+		"0.0.0.0:8484": true, ":8484": true, "192.168.1.5:8484": true, "[::]:8484": true,
+	} {
+		if got := exposedToNetwork(addr); got != want {
+			t.Errorf("%s: got %v want %v", addr, got, want)
+		}
+	}
+}

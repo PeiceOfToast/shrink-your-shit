@@ -1,0 +1,12 @@
+.git
+.github
+.worktrees
+.claude
+.openrig
+CLAUDE.local.md
+shrink-your-shit
+data
+*.db
+*.db-*
+docs
+deploy

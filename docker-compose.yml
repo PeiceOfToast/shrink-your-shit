@@ -1,0 +1,15 @@
+# Example: copy this file, change the media path, then run `docker compose up -d`.
+# WARNING: shrink-your-shit REPLACES original files. Start with a copy of your media.
+services:
+  shrink-your-shit:
+    build: .
+    # user: "1000:1000"    # must be able to read AND write the media folder; change to match its owner
+    ports:
+      - "8484:8484"        # no login yet: never expose this port to the internet
+    volumes:
+      - ./config:/config                # database
+      - /path/to/COPY-of-your-videos:/media
+    # environment:
+    #   SYP_LIBRARIES: /media:/media2   # several folders, separated by ":"
+    # command: ["-min-bitrate", "3000", "-crf", "24"]   # extra settings, same flags as the program
+    restart: unless-stopped
