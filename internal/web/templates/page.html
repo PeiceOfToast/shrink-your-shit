@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><title>{{.Title}} - shrink-your-shit</title>
+<link rel="stylesheet" href="/assets/app.css"></head>
+<body data-section="{{.Section}}">
+<a class="skip" href="#main">Skip to content</a>
+<header class="topbar"><a class="brand" href="/libraries/">shrink-your-shit</a>
+<nav aria-label="Main"><ul class="nav" id="main-nav">{{range .Nav}}<li><a data-id="{{.ID}}" href="{{.Href}}"{{if eq .ID $.Section}} aria-current="page"{{end}}>{{.Label}}</a></li>
+{{end}}</ul></nav><span class="spacer"></span>
+<a class="small" id="working" href="/activity/" hidden></a>
+<button class="btn small" type="button" id="theme" hidden>Theme: Auto</button></header>
+<main id="main" tabindex="-1">
+<div class="mock-note card" role="note" id="mock-note" hidden>Showing sample data. Nothing here is real yet.</div>
+<div class="page-head"><h1>{{.Heading}}</h1></div>
+{{with .Tabs}}<nav aria-label="{{$.Heading}} sections" class="tabs">{{range .}}<a href="{{.Href}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}</nav>{{end}}
+{{if eq .Kind "settings-general"}}<noscript><div class="notice info" role="note"><div><strong>Turn on scripts to change these</strong>Control level can only be changed with scripts enabled.</div></div></noscript>
+<form class="stack" id="general-form" hidden>
+<fieldset><legend>Control level</legend>
+<p class="muted">How much control you have over each library. Changing this never deletes or resets anything.</p>
+<div class="check"><input id="lvl-basic" type="radio" name="controlLevel" value="basic"><label for="lvl-basic"><strong>Basic</strong><br><span class="muted">One slider per library.</span></label></div>
+<div class="check"><input id="lvl-standard" type="radio" name="controlLevel" value="standard"><label for="lvl-standard"><strong>Standard</strong><br><span class="muted">Simple choices for resolution, audio, subtitles, file type and quality.</span></label></div>
+<div class="check"><input id="lvl-advanced" type="radio" name="controlLevel" value="advanced"><label for="lvl-advanced"><strong>Advanced</strong><br><span class="muted">Visual builder. Adds one more menu item.</span></label></div>
+</fieldset>
+<fieldset><legend>Per-library choices</legend>
+<div class="check"><input id="per-library" type="checkbox" name="perLibraryFlow"><label for="per-library">Let me choose per library<br><span class="hint">Adds an extra choice to each library and one more menu item. The control level above stays the same for every library.</span></label></div>
+</fieldset>
+<div class="row"><button class="btn primary" type="submit">Save</button><span id="saved" class="muted" role="status"></span></div>
+</form>
+{{else}}<div class="card empty"><p>{{.Empty}}</p></div>{{end}}
+</main>
+<script src="/assets/api.js"></script><script src="/assets/mock.js"></script><script src="/assets/app.js"></script>
+</body></html>

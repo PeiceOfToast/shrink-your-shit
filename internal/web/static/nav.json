@@ -1,0 +1,6 @@
+[
+  {"id": "libraries", "label": "Libraries", "href": "/libraries/"},
+  {"id": "activity",  "label": "Activity",  "href": "/activity/"},
+  {"id": "flows",     "label": "Flows",     "href": "/flows/", "showAt": ["advanced"], "showWithPerLibraryChoice": true},
+  {"id": "settings",  "label": "Settings",  "href": "/settings/"}
+]
