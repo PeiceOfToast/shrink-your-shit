@@ -72,10 +72,12 @@
       } else if (level !== "basic") {
         $("later").hidden = false; $("save").hidden = true; $("desc").hidden = true; $("facts").hidden = true;
       } else {
-        custom = setting.quality == null || setting.speed != null; // a Standard setting has more than a slider can show
-        $("custom").hidden = !custom;
+        custom = setting.kind === "custom";
+        var more = setting.speed != null; // saved with Standard choices: more than a slider can show
+        $("custom").hidden = !(custom || more);
+        if (more) $("custom").querySelector("strong").textContent = "This setting has more choices than a slider shows";
         editor = slider = ed.slider($("slider"), setting.quality || 3, function () { facts(); prev.mark(); }, lib.name + ": smallest file to best quality");
-        if (custom) $("save").textContent = "Use this slider setting";
+        if (custom || more) $("save").textContent = "Use this slider setting";
         $("save").onclick = save;
         // The slider's table comes from the server (echoed in the setting, or on its own for a custom setting).
         Promise.resolve(setting.positions ? setting : api.getSliderTable()).then(function (t) { table = t.positions; facts(); }, facts);

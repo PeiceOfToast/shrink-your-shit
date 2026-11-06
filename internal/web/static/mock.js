@@ -124,6 +124,7 @@
         var nf = { id: "f" + (flows.length + 10), name: libs[i].name + " - " + (b.quality ? SLIDER[b.quality - 1].name : "Copy"), usedBy: [libs[i].name], madeWith: "slider", changedAt: iso(0) };
         flows.push(nf); libs[i].flowId = nf.id; saveLibs();
       }
+      if (b.quality && !b.speed) delete libs[i].sel; // a slider save replaces Standard choices
       if (b.quality) { libs[i].quality = b.quality; libs[i].settingLabel = ["Smallest file", "Smaller", "Balanced", "Better quality", "Best quality"][b.quality - 1]; libs[i].settingKind = "slider"; saveLibs(); }
       if (b.speed) { libs[i].sel = copy(b); libs[i].settingKind = "selectors"; libs[i].settingLabel = ["Smallest file", "Smaller", "Balanced", "Better quality", "Best quality"][(b.quality || 3) - 1]; saveLibs(); }
       return ok();
