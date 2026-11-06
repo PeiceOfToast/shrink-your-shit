@@ -58,32 +58,20 @@
     }, function () {});
   }
 
-  function generalForm(s) {
-    var f = $("general-form"); if (!f) return;
-    f.hidden = false;
-    f.elements.controlLevel.value = s.controlLevel;
-    f.elements.perLibraryFlow.checked = !!s.perLibraryFlow;
-    f.addEventListener("submit", function (ev) {
-      ev.preventDefault();
-      var body = { controlLevel: f.elements.controlLevel.value, perLibraryFlow: f.elements.perLibraryFlow.checked };
-      api.patchSettings({}, body).then(function (ns) { text($("saved"), "Saved."); return menu(ns); },
-        function (e) { text($("saved"), e.message); });
-    });
-  }
-
   // First visit with nothing set up lands in the wizard.
   function firstRun(s) {
     if (s.firstRunDone || doc.body.getAttribute("data-section") !== "libraries") return Promise.resolve();
     return api.listLibraries().then(function (l) { if (!l.total) location.replace("/welcome/"); });
   }
 
+  window.SYP.menu = menu;
   window.SYP.ready = signIn();
   window.SYP.ready.then(function () {
     theme();
     if (api.mocked) $("mock-note").hidden = false;
     working();
     return api.getSettings().then(function (s) {
-      return firstRun(s).then(function () { return menu(s); }).then(function () { generalForm(s); });
+      return firstRun(s).then(function () { return menu(s); });
     });
   }).catch(function () {});
 })();

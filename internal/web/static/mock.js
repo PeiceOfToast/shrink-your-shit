@@ -27,6 +27,7 @@
   var libs = [
     { id: "1", name: "Movies", path: "/media/movies", state: "working", workingFiles: 2, waitingFiles: 590, nextScan: iso(-6 * 3600e3), freedBytes: 410 * GB, flowId: "f1", settingLabel: "Balanced", settingKind: "slider" },
     { id: "2", name: "TV Shows", path: "/media/tv", state: "idle", workingFiles: 0, waitingFiles: 0, nextScan: iso(-6 * 3600e3), freedBytes: 230 * GB, flowId: "f2", settingLabel: "Smaller", settingKind: "slider" },
+    { id: "4", name: "Anime", path: "/media/anime", state: "idle", workingFiles: 0, waitingFiles: 40, nextScan: iso(-6 * 3600e3), freedBytes: 12 * GB, flowId: "f2", settingLabel: "Smaller", settingKind: "slider" },
     { id: "3", name: "Home videos", path: "/media/home", state: "needs_attention", workingFiles: 0, waitingFiles: 12, nextScan: iso(-6 * 3600e3), freedBytes: 0, flowId: "f3", settingLabel: "Custom", settingKind: "custom" }
   ];
   try { var sl = sessionStorage.getItem("syp-mock-libs"); if (sl) libs = JSON.parse(sl); } catch (e) {}
@@ -35,7 +36,7 @@
   function saveLibs() { try { sessionStorage.setItem("syp-mock-libs", JSON.stringify(libs)); } catch (e) {} }
   var flows = [
     { id: "f1", name: "Movies - Balanced", usedBy: ["Movies"], madeWith: "slider", changedAt: iso(9 * 864e5) },
-    { id: "f2", name: "TV Shows - Smaller", usedBy: ["TV Shows"], madeWith: "slider", changedAt: iso(20 * 864e5) },
+    { id: "f2", name: "TV Shows - Smaller", usedBy: ["TV Shows", "Anime"], madeWith: "slider", changedAt: iso(20 * 864e5) },
     { id: "f3", name: "Home videos - hand made", usedBy: ["Home videos"], madeWith: "builder", changedAt: iso(3 * 864e5) },
     { id: "f4", name: "Old setting", usedBy: [], madeWith: "slider", changedAt: iso(60 * 864e5) }
   ];
@@ -99,16 +100,17 @@
       var i = find(libs, "id", p.id);
       if (i < 0) return fail(404, "not_found", "That library is gone. Nothing was changed.");
       if (libs[i].settingKind === "custom") return ok({ kind: "custom" });
-      return ok({ quality: libs[i].settingLabel === "Smaller" ? 2 : 3 });
+      return ok({ quality: libs[i].quality || (libs[i].settingLabel === "Smaller" ? 2 : 3) });
     },
     putSetting: function (p, b) {
       var i = find(libs, "id", p.id);
       if (i < 0) return fail(404, "not_found", "That library is gone. Nothing was changed.");
       var f = flows[find(flows, "id", libs[i].flowId)];
-      if (f && f.usedBy.length > 1 && !b.sharedFlowChoice) return fail(409, "flow_shared", "Another library uses this setting. Nothing was changed.", { usedBy: f.usedBy });
+      if (f && f.usedBy.length > 1 && !b.sharedFlowChoice) return fail(409, "flow_shared", "Another library uses this setting. Nothing was changed.", { usedBy: f.usedBy.filter(function (n) { return n !== libs[i].name; }) });
+      if (b.quality) { libs[i].quality = b.quality; libs[i].settingLabel = ["Smallest file", "Smaller", "Balanced", "Better quality", "Best quality"][b.quality - 1]; libs[i].settingKind = "slider"; saveLibs(); }
       return ok();
     },
-    replaceCustom: function () { return ok(); },
+    replaceCustom: function (p) { var i = find(libs, "id", p.id); if (i >= 0) { libs[i].settingKind = "slider"; libs[i].settingLabel = "Balanced"; libs[i].state = "idle"; libs[i].quality = 3; saveLibs(); } return ok(); },
     putLibraryFlow: function (p, b) { var i = find(libs, "id", p.id); if (i >= 0) libs[i].flowId = b.flowId; saveLibs(); return ok(); },
     // Answers "computing" first, then "ready", so the waiting state gets exercised.
     preview: function () { pv = !pv; return ok(pv ? { status: "computing", stale: false } : previewResult()); },

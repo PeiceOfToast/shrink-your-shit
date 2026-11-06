@@ -1,0 +1,38 @@
+{{define "folderpicker"}}<div class="field"><label for="path">Folder</label><div class="row"><input id="path" type="text" size="34" aria-describedby="path-hint" autocomplete="off" spellcheck="false"><button class="btn" type="button" id="browse">Browse...</button><button class="btn" type="button" id="check">Check again</button></div>
+<span id="path-hint" class="hint">Type a path, or press Browse. This is a folder on the computer running shrink-your-shit.</span></div>
+<div class="card" id="browser" hidden></div>
+<h2>Checking this folder</h2>
+<ul class="stack" id="checks" style="list-style:none;padding:0" aria-label="Folder checks" aria-live="polite"></ul>{{end}}
+
+{{define "libraries"}}<noscript><div class="notice info" role="note"><div><strong>Turn on scripts to see your libraries</strong>The list and Add a library need scripts enabled.</div></div></noscript>
+<div class="page-head"><div><h1>Libraries</h1><p class="muted">Each library is a folder of videos with its own shrink setting.</p></div><a class="btn primary" href="#add">Add library</a></div>
+<div class="notice bad" id="err" role="alert" hidden></div>
+<div id="lib-list"></div>
+<div class="card empty" id="empty"><p>{{.Empty}}</p></div>
+<section id="add" class="card" aria-labelledby="addh"><h2 id="addh" style="margin-top:0">Add a library</h2>
+{{template "folderpicker"}}
+<p id="added" class="muted" role="status"></p>
+<div class="row"><button class="btn primary" type="button" id="addbtn" aria-disabled="true">Add library</button></div></section>{{end}}
+
+{{define "library"}}<noscript><div class="notice info" role="note"><div><strong>Turn on scripts to use this page</strong>The library details need scripts enabled.</div></div></noscript>
+<p class="small"><a href="/libraries/">&larr; Libraries</a></p>
+<div class="notice bad" id="err" role="alert" hidden><div></div></div>
+<div id="lib-body" hidden>
+<div class="page-head"><div><h1 id="lib-title" tabindex="-1">Library</h1><p class="mono muted" id="lib-path"></p></div><span id="lib-state"></span></div>
+<div class="grid-2">
+<section class="card" aria-labelledby="qh"><h2 id="qh" style="margin-top:0">Smaller file or better quality?</h2>
+<div class="notice warn" id="custom" hidden><div><strong>This setting is too custom to show as a slider</strong>It keeps working exactly as before. Saving a slider setting here replaces it for this library; the old one is kept.</div></div>
+<div class="notice info" id="later" hidden><div><strong>Detailed choices for this library are not here yet</strong>Your setting keeps working as it is.</div></div>
+<div id="slider"></div>
+<p id="desc" class="muted"></p>
+<ul class="small" id="facts"><li></li><li>Audio and subtitles: kept exactly as they are</li><li></li></ul>
+<fieldset id="share" hidden><legend id="share-q"></legend>
+<div class="check"><input id="sh1" type="radio" name="sh" value="change_both" checked><label for="sh1" id="sh1l"></label></div>
+<div class="check"><input id="sh2" type="radio" name="sh" value="make_copy"><label for="sh2" id="sh2l"></label></div></fieldset>
+<div class="row"><button class="btn primary" type="button" id="save">Save</button><button class="btn" type="button" id="scan">Scan now</button></div>
+<p id="said" class="muted" role="status"></p></section>
+<section class="card" id="preview" aria-labelledby="ph2"><h2 id="ph2" style="margin-top:0">Preview</h2>
+<p class="muted">See what would happen, without changing any file.</p>
+<div id="pv" aria-live="polite"></div>
+<div class="row" style="margin-top:12px"><button class="btn" type="button" id="update">Update preview</button><a class="btn" href="/activity/skipped/">See skipped files</a></div></section>
+</div></div>{{end}}

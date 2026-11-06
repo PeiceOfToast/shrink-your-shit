@@ -73,7 +73,8 @@ var settingsTabs = []tab{
 
 var pages = []page{
 	{Path: "/welcome/", Kind: "wizard", Tab: "Welcome"},
-	{Path: "/libraries/", Section: "libraries", Empty: "Your libraries will show up here. A library is a folder of videos you want to make smaller."},
+	{Path: "/libraries/", Section: "libraries", Kind: "libraries", Empty: "Your libraries will show up here. A library is a folder of videos you want to make smaller."},
+	{Path: "/library/", Section: "libraries", Kind: "library", Tab: "Library"},
 	{Path: "/activity/", Section: "activity", Tab: "Queue", Empty: "Nothing is being converted right now. Files waiting for their turn will be listed here."},
 	{Path: "/activity/skipped/", Section: "activity", Tab: "Skipped", Empty: "Files that were left alone, and why, will be listed here."},
 	{Path: "/activity/failed/", Section: "activity", Tab: "Failed", Empty: "Files that could not be converted will be listed here. Your originals are never touched when something fails."},
@@ -92,7 +93,25 @@ type tabView struct {
 	Current     bool
 }
 
+// scripts lists what a page loads: the shared core, then only what that screen needs. mock.js is the
+// stand-in server and goes away when the real endpoints land.
+func scripts(kind string) []string {
+	core := []string{"api.js", "mock.js", "app.js"}
+	switch kind {
+	case "wizard":
+		return append(core, "ui.js", "folder.js", "editors.js", "firstrun.js")
+	case "libraries":
+		return append(core, "ui.js", "folder.js", "libraries.js")
+	case "library":
+		return append(core, "ui.js", "editors.js", "library.js")
+	case "settings-general":
+		return append(core, "settings.js")
+	}
+	return core
+}
+
 type pageView struct {
+	Scripts                              []string
 	Title, Heading, Section, Kind, Empty string
 	Nav                                  []navItem
 	Tabs                                 []tabView
@@ -107,13 +126,13 @@ func render(items []navItem, p page) ([]byte, error) {
 			heading = n.Label
 		}
 	}
-	v := pageView{Title: heading, Heading: heading, Section: p.Section, Kind: p.Kind, Empty: p.Empty}
+	v := pageView{Title: heading, Heading: heading, Section: p.Section, Kind: p.Kind, Empty: p.Empty, Scripts: scripts(p.Kind)}
 	if p.Kind == "wizard" { // the top bar has no menu during first-run
 		v.Title, v.Heading = "Set up", "Set up"
 	} else {
 		v.Nav = navFor(items, "basic", false)
 	}
-	if p.Tab != "" && p.Kind != "wizard" {
+	if p.Tab != "" && p.Kind != "wizard" && p.Kind != "library" {
 		v.Title = p.Tab + " - " + heading
 		list := activityTabs
 		if p.Section == "settings" {
