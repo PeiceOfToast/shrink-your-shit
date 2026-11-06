@@ -61,6 +61,12 @@
           .then(function (l) { lib = l; head(); }, fail);
       };
       $("update").onclick = function () { prev.start(); };
+      // Remove: the one place; a confirm first (native dialog).
+      $("remove").onclick = function () { $("rm-q").textContent = "Remove " + lib.name + "?"; $("rm-dialog").showModal(); };
+      $("rm-dialog").addEventListener("close", function () {
+        if ($("rm-dialog").returnValue !== "remove") { $("remove").focus(); return; }
+        api.deleteLibrary({ id: id }).then(function () { location.href = "/libraries/"; }, fail);
+      });
       prev.start();
       if (location.hash === "#preview") $("preview").scrollIntoView();
     }).catch(fail);

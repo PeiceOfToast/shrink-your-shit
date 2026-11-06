@@ -35,4 +35,11 @@
 <p class="muted">See what would happen, without changing any file.</p>
 <div id="pv" aria-live="polite"></div>
 <div class="row" style="margin-top:12px"><button class="btn" type="button" id="update">Update preview</button><a class="btn" href="/activity/skipped/">See skipped files</a></div></section>
-</div></div>{{end}}
+</div>
+<section class="card" aria-labelledby="rmh"><h2 id="rmh" style="margin-top:0">Remove this library</h2>
+<p class="muted">Stops watching this folder. Your videos are not deleted, and files already converted stay converted.</p>
+<button class="btn danger" type="button" id="remove">Remove library...</button></section>
+<dialog id="rm-dialog" aria-labelledby="rm-q"><form method="dialog" class="stack"><h2 id="rm-q" style="margin-top:0"></h2>
+<p>Nothing in the folder is changed or deleted.</p>
+<div class="row"><button class="btn danger" value="remove" id="rm-yes">Remove library</button><button class="btn" value="keep" autofocus>Keep it</button></div></form></dialog>
+</div>{{end}}
