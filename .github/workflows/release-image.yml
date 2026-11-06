@@ -1,0 +1,64 @@
+name: Publish image
+
+# Pushing a tag like v0.1.0 builds a linux/amd64 + linux/arm64 image and publishes it to
+# ghcr.io/<owner>/<repo> as 0.1.0 and latest. Running it by hand on a branch only builds and
+# smoke-tests (nothing is pushed); running it by hand on a tag publishes.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PUBLISH: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@v3
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+      - uses: docker/login-action@v3
+        if: env.PUBLISH == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build amd64 image for the smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: syp-smoke
+          cache-from: type=gha
+      - name: Smoke test (non-root, web page answers)
+        run: |
+          test "$(docker run --rm --entrypoint id syp-smoke -u)" = 1000
+          docker run -d --name syp -p 8484:8484 -v "$RUNNER_TEMP":/media syp-smoke
+          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8484/api/status && exit 0; sleep 1; done
+          docker logs syp
+          exit 1
+      - name: Build and push multi-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ env.PUBLISH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

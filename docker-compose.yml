@@ -2,7 +2,11 @@
 # WARNING: shrink-your-shit REPLACES original files. Start with a copy of your media.
 services:
   shrink-your-shit:
-    build: .
+    # Pull the published image (only works once a release has been published, and the
+    # package has been made public; see docs/proxmox.md):
+    image: ghcr.io/peiceoftoast/shrink-your-shit:latest
+    # ...or build it from this source folder instead: comment out "image:" above and use
+    # build: .
     # user: "1000:1000"    # must be able to read AND write the media folder; change to match its owner
     ports:
       - "8484:8484"        # no login yet: never expose this port to the internet
