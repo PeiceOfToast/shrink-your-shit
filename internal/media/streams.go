@@ -19,6 +19,11 @@ type Stream struct {
 	Language string `json:"language,omitempty"` // as tagged (usually ISO 639-2, "und" when unknown); "" when untagged
 	Title    string `json:"title,omitempty"`
 
+	// StartTime is when the stream's first frame is shown, in seconds (0 when not reported). Encoders
+	// often delay the first frame slightly, so the same picture sits at a slightly different time in
+	// the original and in a converted file.
+	StartTime float64 `json:"startTime,omitempty"`
+
 	Default bool `json:"default,omitempty"`
 	Forced  bool `json:"forced,omitempty"`
 	// AttachedPic is true for cover art stored as a video stream (typical in mp4/mp3): it is not
@@ -230,6 +235,7 @@ func parseStream(m map[string]any, position int) Stream {
 		Forced:      disposition(m, "forced"),
 		AttachedPic: disposition(m, "attached_pic"),
 		BitrateKbps: int(num(m, "bit_rate") / 1000),
+		StartTime:   num(m, "start_time"),
 	}
 	if _, ok := m["index"]; ok {
 		s.Index = int(num(m, "index"))

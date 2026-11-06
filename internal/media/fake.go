@@ -18,10 +18,24 @@ type FakeExec struct {
 	OnCall func(name string, args []string)
 	// Handler, if set, answers Output, Stream and Capture: stdout, stderr and an error (nil = exit 0).
 	Handler func(name string, args []string) (stdout, stderr string, err error)
+	// Block, if set and it returns true for a call, makes that call wait until its context ends and
+	// return the context's error: a stuck ffmpeg.
+	Block func(name string, args []string) bool
+}
+
+func (f *FakeExec) blocked(ctx context.Context, name string, args []string) error {
+	if f.Block != nil && f.Block(name, args) {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return nil
 }
 
 func (f *FakeExec) Capture(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
 	f.Calls = append(f.Calls, append([]string{name}, args...))
+	if err := f.blocked(ctx, name, args); err != nil {
+		return nil, nil, err
+	}
 	if f.Handler != nil {
 		o, e, err := f.Handler(name, args)
 		return []byte(o), []byte(e), err
@@ -31,6 +45,9 @@ func (f *FakeExec) Capture(ctx context.Context, name string, args ...string) ([]
 
 func (f *FakeExec) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
 	f.Calls = append(f.Calls, append([]string{name}, args...))
+	if err := f.blocked(ctx, name, args); err != nil {
+		return nil, err
+	}
 	if f.Handler != nil {
 		o, _, err := f.Handler(name, args)
 		return []byte(o), err
@@ -38,16 +55,19 @@ func (f *FakeExec) Output(ctx context.Context, name string, args ...string) ([]b
 	return f.Out, f.Err
 }
 
-func (f *FakeExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) error {
+func (f *FakeExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
 	f.Calls = append(f.Calls, append([]string{name}, args...))
+	if err := f.blocked(ctx, name, args); err != nil {
+		return "", err
+	}
 	if f.Handler != nil {
-		o, _, err := f.Handler(name, args)
+		o, e, err := f.Handler(name, args)
 		for _, l := range strings.Split(o, "\n") {
 			if l != "" {
 				onLine(l)
 			}
 		}
-		return err
+		return e, err
 	}
 	if f.OnCall != nil {
 		f.OnCall(name, args)
@@ -55,5 +75,5 @@ func (f *FakeExec) Stream(ctx context.Context, onLine func(string), name string,
 	for _, l := range f.Lines {
 		onLine(l)
 	}
-	return f.Err
+	return "", f.Err
 }

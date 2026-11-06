@@ -127,7 +127,7 @@ func (w *Worker) run(t *testing.T) error {
 // mapping would.
 type dropAudioExec struct{ media.OSExec }
 
-func (d dropAudioExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) error {
+func (d dropAudioExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
 	for i, a := range args {
 		if a == "-map" && i+1 < len(args) && args[i+1] == "-0:d" {
 			args = append(append(append([]string{}, args[:i+2]...), "-map", "-0:a:1"), args[i+2:]...)
@@ -221,5 +221,86 @@ func TestRealCorruptSourceIsKeptNotReplaced(t *testing.T) {
 	}
 	if _, err := os.Stat(TempPath(src)); err == nil {
 		t.Error("temp file left")
+	}
+}
+
+// A long file: segments after the first are where the encoder's start delay used to make a good
+// conversion score 0.93 and be refused at the default threshold. mkv, mp4 and ts, default thresholds.
+func TestRealLongFilesPassTheDefaultPictureCheckInEveryContainer(t *testing.T) {
+	needTools(t)
+	if testing.Short() {
+		t.Skip("slow: encodes 70 seconds of 720p three times")
+	}
+	dir := t.TempDir()
+	mkv := filepath.Join(dir, "a.mkv")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=25:duration=70", "-f", "lavfi", "-i", "sine=duration=70",
+		"-c:v", "libx264", "-b:v", "8M", "-c:a", "aac", mkv)
+	files := []string{mkv}
+	for _, ext := range []string{"mp4", "ts"} {
+		out := filepath.Join(dir, "b."+ext)
+		runFFmpeg(t, "-i", mkv, "-c", "copy", out)
+		files = append(files, out)
+	}
+	for _, f := range files {
+		t.Run(filepath.Ext(f), func(t *testing.T) {
+			st, id := realJob(t, f, 70)
+			w := realWorker(st, media.OSExec{})
+			w.Rule.CRF = 26
+			if err := w.run(t); err != nil {
+				t.Fatal(err)
+			}
+			if j, _ := st.Get(id); j.Status != jobs.Done {
+				t.Fatalf("a good conversion of a long %s file was refused: %s %q", filepath.Ext(f), j.Status, j.Error)
+			}
+		})
+	}
+}
+
+// An original that is itself damaged must not be converted (and so replaced).
+func TestRealDamagedOriginalIsKeptNotConverted(t *testing.T) {
+	needTools(t)
+	dir := t.TempDir()
+	ts := filepath.Join(dir, "clip.ts")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25:duration=20", "-c:v", "libx264", "-b:v", "2M", "-f", "mpegts", ts)
+	data, _ := os.ReadFile(ts)
+	for i := len(data) / 3; i < len(data)/3+20000 && i < len(data); i++ { // wreck a stretch in the middle
+		data[i] = byte(i * 7)
+	}
+	os.WriteFile(ts, data, 0o644)
+	orig, _ := os.ReadFile(ts)
+	st, id := realJob(t, ts, 20)
+	realWorker(st, media.OSExec{}).run(t)
+	j, _ := st.Get(id)
+	if j.Status != jobs.Kept || !strings.Contains(j.Error, "the original file has errors") {
+		t.Fatalf("a damaged original must be kept, not converted: %s %q", j.Status, j.Error)
+	}
+	if now, _ := os.ReadFile(ts); string(now) != string(orig) {
+		t.Error("the original changed")
+	}
+	if _, err := os.Stat(TempPath(ts)); err == nil {
+		t.Error("temp file left")
+	}
+}
+
+// A broadcast recording that begins in the middle of a group of pictures prints harmless messages at
+// its start; that must not stop a good file from being converted.
+func TestRealRecordingStartingMidStreamIsStillConverted(t *testing.T) {
+	needTools(t)
+	dir := t.TempDir()
+	full := filepath.Join(dir, "full.ts")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25:duration=20", "-c:v", "libx264", "-b:v", "2M", "-g", "100", "-f", "mpegts", full)
+	data, _ := os.ReadFile(full)
+	cut := filepath.Join(dir, "cut.ts")
+	os.WriteFile(cut, data[188*400:], 0o644) // start on a packet boundary, but not at a keyframe
+	info, err := media.Probe(context.Background(), media.OSExec{}, "ffprobe", cut)
+	if err != nil {
+		t.Skipf("the cut file is not readable here: %v", err)
+	}
+	st, id := realJob(t, cut, info.DurationSec)
+	realWorker(st, media.OSExec{}).run(t)
+	j, _ := st.Get(id)
+	t.Logf("status %s %q", j.Status, j.Error)
+	if j.Status == jobs.Kept && strings.Contains(j.Error, "the original file has errors") {
+		t.Errorf("harmless start-of-stream messages were taken for damage: %q", j.Error)
 	}
 }

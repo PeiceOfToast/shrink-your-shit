@@ -138,8 +138,8 @@ Run `./shrink-your-shit -h` for all of them. The main ones:
 | `-crf` | `26` | quality: lower is better and bigger |
 | `-preset` | `medium` | x265 speed: `ultrafast` … `veryslow` |
 | `-output` | `replace` | `replace` or `beside` |
-| `-decode-check` | `auto` | play the new file through a decoder before replacing the original: `auto`, `always` or `off` |
-| `-min-ssim` | `0.95` | how similar the new picture must be to the original (0.5-1.0); an untuned starting value |
+| `-decode-check` | `auto` | play the new file through a decoder before replacing the original: `auto` (completely up to 3 hours long, else at 3 places) or `always` |
+| `-min-ssim` | `0.95` | how similar the new picture must be to the original (0.90-1.0); an untuned starting value |
 | `-scan-every` | `30s` | how often to look for new files |
 | `-settle` | `15s` | skip files changed this recently (still copying) |
 | `-addr` | `127.0.0.1:8484` | web UI address (env `SYP_ADDR`) |

@@ -4,12 +4,14 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 )
@@ -22,6 +24,35 @@ const (
 	// DefaultFullDecodeMaxSec is the longest file that is decoded completely in "auto" mode.
 	DefaultFullDecodeMaxSec = 3 * 3600
 )
+
+// Time limits for single ffmpeg/ffprobe calls in the checks, so a hung child cannot freeze the worker:
+// it becomes "kept original: ... timed out". (The encode itself has no limit here: it legitimately
+// takes hours; a watchdog for it is a later slice.) They are generous guesses and variables so tests
+// can shorten them.
+var (
+	quickTimeout  = 60 * time.Second // ffprobe of one file, listing filters
+	countTimeout  = 30 * time.Minute // reading every packet of a very large file
+	sampleTimeout = 10 * time.Minute // one sampled playback or picture comparison
+	// a full playback gets 10 minutes plus twice the file's length, but never more than 6 hours
+	fullDecodeBase, fullDecodeCap = 10 * time.Minute, 6 * time.Hour
+)
+
+func fullDecodeTimeout(durationSec float64) time.Duration {
+	d := fullDecodeBase + time.Duration(2*durationSec*float64(time.Second))
+	if d > fullDecodeCap {
+		d = fullDecodeCap
+	}
+	return d
+}
+
+// checkFailed turns an error from a check's ffmpeg/ffprobe call into the refusal reason, saying so
+// plainly when it was our time limit that ended it.
+func checkFailed(cctx context.Context, what string, err error) error {
+	if errors.Is(cctx.Err(), context.DeadlineExceeded) {
+		return kept("%s timed out; the original is kept (ffmpeg may be stuck or the file very slow to read)", what)
+	}
+	return kept("%s failed (%v)", what, err)
+}
 
 // KeptError means a safety check refused the new file (or could not run): the original is kept.
 type KeptError struct{ Reason string }
@@ -72,8 +103,13 @@ func (w *Worker) verify(ctx context.Context, src media.Info, exp Expect, srcPath
 	if st.Size() == 0 {
 		return kept("the new file is empty")
 	}
-	out, err := media.Probe(ctx, w.Exec, w.FFprobe, tmp)
+	pctx, cancel := context.WithTimeout(ctx, quickTimeout)
+	out, err := media.Probe(pctx, w.Exec, w.FFprobe, tmp)
+	cancel()
 	if err != nil {
+		if errors.Is(pctx.Err(), context.DeadlineExceeded) {
+			return checkFailed(pctx, "reading the new file", err)
+		}
 		return kept("the new file cannot be read (%v)", err)
 	}
 	outPackets := int64(-1)
@@ -82,8 +118,11 @@ func (w *Worker) verify(ctx context.Context, src media.Info, exp Expect, srcPath
 		if ord < 0 {
 			return kept("the new file has no video")
 		}
-		if outPackets, err = media.CountVideoPackets(ctx, w.Exec, w.FFprobe, tmp, ord); err != nil {
-			return kept("could not count the new file's video frames (%v)", err)
+		cctx, ccancel := context.WithTimeout(ctx, countTimeout)
+		outPackets, err = media.CountVideoPackets(cctx, w.Exec, w.FFprobe, tmp, ord)
+		ccancel()
+		if err != nil {
+			return checkFailed(cctx, "counting the new file's video frames", err)
 		}
 	}
 	if problems := exp.Compare(out, outPackets); len(problems) > 0 {
@@ -104,33 +143,27 @@ func (w *Worker) verify(ctx context.Context, src media.Info, exp Expect, srcPath
 
 // ---- playback test ----
 
-// decodeCheck plays the new file through ffmpeg's decoder to /dev/null: any error means a damaged file.
+// decodeCheck plays the new file through ffmpeg's decoder to nowhere: any error means a damaged file.
+// There is no way to turn it off: the floor is not removable (only "always" vs the default "auto").
 func (w *Worker) decodeCheck(ctx context.Context, out media.Info, tmp string) error {
-	mode := w.DecodeCheck
-	if mode == "" {
-		mode = "auto"
-	}
-	if mode == "off" {
-		return nil
-	}
 	limit := w.FullDecodeMaxSec
 	if limit <= 0 {
 		limit = DefaultFullDecodeMaxSec
 	}
 	ord := out.MainVideoOrdinal()
-	if mode == "always" || out.DurationSec <= 0 || out.DurationSec <= limit {
-		return w.decodeRun(ctx, tmp, ord, 0, 0)
+	if w.DecodeCheck == "always" || out.DurationSec <= 0 || out.DurationSec <= limit {
+		return w.decodeRun(ctx, tmp, ord, 0, 0, out.DurationSec)
 	}
 	// Long file: three samples of a minute each, at the start, middle and end.
 	for _, start := range []float64{0, out.DurationSec/2 - 30, out.DurationSec - 65} {
-		if err := w.decodeRun(ctx, tmp, ord, start, 60); err != nil {
+		if err := w.decodeRun(ctx, tmp, ord, start, 60, 60); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (w *Worker) decodeRun(ctx context.Context, tmp string, videoOrd int, start, length float64) error {
+func (w *Worker) decodeRun(ctx context.Context, tmp string, videoOrd int, start, length, playSec float64) error {
 	args := []string{"-v", "error", "-xerror", "-nostdin"}
 	if length > 0 {
 		args = append(args, "-ss", secs(start))
@@ -139,9 +172,20 @@ func (w *Worker) decodeRun(ctx context.Context, tmp string, videoOrd int, start,
 	if length > 0 {
 		args = append(args, "-t", secs(length))
 	}
-	args = append(args, "-map", fmt.Sprintf("0:v:%d", videoOrd), "-map", "0:a?", "-f", "null", "-")
-	_, stderr, err := w.Exec.Capture(ctx, w.FFmpeg, args...)
+	// Only the video is played: it is the part this program re-encoded. The audio and subtitles are
+	// copied bit for bit from the original, so any oddity in them was already in the original.
+	args = append(args, "-map", fmt.Sprintf("0:v:%d", videoOrd), "-f", "null", "-")
+	timeout := sampleTimeout
+	if length == 0 {
+		timeout = fullDecodeTimeout(playSec)
+	}
+	dctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	_, stderr, err := w.Exec.Capture(dctx, w.FFmpeg, args...)
 	text := strings.TrimSpace(string(stderr))
+	if errors.Is(dctx.Err(), context.DeadlineExceeded) {
+		return checkFailed(dctx, "the playback test of the new file", err)
+	}
 	if err != nil || text != "" {
 		if text == "" {
 			text = err.Error()
@@ -171,19 +215,35 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 		return kept("this ffmpeg has no 'ssim' filter, which shrink-your-shit needs to check picture quality; install a complete ffmpeg build")
 	}
 	threshold := w.minSSIM()
-	worst, worstAt := 2.0, 0.0
-	for _, seg := range sampleSegments(src.DurationSec) {
-		score, err := w.ssimSegment(ctx, srcPath, tmp, sv, ov, seg)
-		if err != nil {
-			return err
-		}
-		if score < worst {
-			worst, worstAt = score, seg.start
-		}
+	// Where the same picture sits in each file differs by the encoder's start delay: seeking both to
+	// "S seconds" can land on different frames (measured: a good encode scored 0.93 instead of 0.985).
+	// So the new file is sought to S plus the difference of the two start times. If that still scores
+	// low, one frame earlier and later are tried too and the best counts: a genuinely bad encode stays
+	// low at every alignment, a merely misaligned good one jumps up.
+	sMain, oMain := src.Video(), out.Video()
+	delta := oMain.StartTime - sMain.StartTime
+	frame := 1.0 / 25
+	if sMain.FrameRate > 0 {
+		frame = 1 / sMain.FrameRate
 	}
-	if worst < threshold {
-		return kept("the picture of the new file is too different from the original (similarity %.3f at %s, %.2f is required)",
-			worst, clock(worstAt), threshold)
+	for _, seg := range sampleSegments(src.DurationSec) {
+		best := -1.0
+		for _, shift := range []float64{delta, delta - frame, delta + frame} {
+			score, err := w.ssimSegment(ctx, srcPath, tmp, sv, ov, seg, shift)
+			if err != nil {
+				return err
+			}
+			if score > best {
+				best = score
+			}
+			if best >= threshold {
+				break
+			}
+		}
+		if best < threshold { // one place that is too different is enough
+			return kept("the picture of the new file is too different from the original (similarity %.3f at %s, %.2f is required)",
+				best, clock(seg.start), threshold)
+		}
 	}
 	return nil
 }
@@ -202,18 +262,20 @@ func sampleSegments(duration float64) []segment {
 	return []segment{{0, 10}, {duration/2 - 5, 10}, {duration - 15, 10}}
 }
 
-func (w *Worker) ssimSegment(ctx context.Context, srcPath, tmp string, sv, ov int, seg segment) (float64, error) {
+func (w *Worker) ssimSegment(ctx context.Context, srcPath, tmp string, sv, ov int, seg segment, outShift float64) (float64, error) {
 	args := []string{"-hide_banner", "-nostdin", "-v", "info", "-nostats",
 		"-ss", secs(seg.start), "-t", secs(seg.length), "-i", srcPath,
-		"-ss", secs(seg.start), "-t", secs(seg.length), "-i", tmp,
+		"-ss", secs(seg.start + outShift), "-t", secs(seg.length), "-i", tmp,
 		// Each picture starts at time zero before comparing: the encoder can delay the first frame
 		// (measured: 0.04s), which would otherwise pair every frame with its neighbour and score a
 		// perfectly good file at 0.89.
 		"-lavfi", fmt.Sprintf("[0:v:%d]setpts=PTS-STARTPTS[a];[1:v:%d]setpts=PTS-STARTPTS[b];[a][b]ssim", sv, ov),
 		"-f", "null", "-"}
-	_, stderr, err := w.Exec.Capture(ctx, w.FFmpeg, args...)
+	sctx, cancel := context.WithTimeout(ctx, sampleTimeout)
+	defer cancel()
+	_, stderr, err := w.Exec.Capture(sctx, w.FFmpeg, args...)
 	if err != nil {
-		return 0, kept("the picture comparison failed at %s (%v)", clock(seg.start), err)
+		return 0, checkFailed(sctx, fmt.Sprintf("the picture comparison at %s", clock(seg.start)), err)
 	}
 	m := ssimRe.FindSubmatch(stderr)
 	if m == nil {
@@ -233,7 +295,9 @@ func (w *Worker) hasFilter(ctx context.Context, name string) (bool, error) {
 	if v, ok := w.filterMemo[name]; ok {
 		return v, nil
 	}
-	stdout, _, err := w.Exec.Capture(ctx, w.FFmpeg, "-hide_banner", "-filters")
+	fctx, cancel := context.WithTimeout(ctx, quickTimeout)
+	defer cancel()
+	stdout, _, err := w.Exec.Capture(fctx, w.FFmpeg, "-hide_banner", "-filters")
 	if err != nil {
 		return false, err
 	}
@@ -259,4 +323,33 @@ func firstLines(s string, n int) string {
 		lines = append(lines[:n], "...")
 	}
 	return strings.Join(lines, " | ")
+}
+
+// ---- damage in the ORIGINAL, seen while it was being converted ----
+
+// benignRe matches ffmpeg messages that appear on perfectly usable files (a broadcast recording that
+// starts in the middle of a group of pictures, for instance) and so must not count as damage.
+var benignRe = regexp.MustCompile(`(?i)last message repeated|non-existing pps|non-existing sps|no frame!|decode_slice_header error|mmco: unref short failure|increasing reorder buffer|timestamps are unset|^x265 \[`)
+
+// damageRe matches ffmpeg messages that mean the coded data itself is broken.
+var damageRe = regexp.MustCompile(`(?i)error while decoding|invalid nal|concealing|corrupt|invalid data found|overread|cabac decode|slice end not reached|damaged|truncated|unexpected end|moov atom not found|header missing|out of range|missing reference|reference picture missing`)
+
+// sourceDamage looks at what ffmpeg printed (at the error level) while converting and returns the first
+// few lines that show the original file itself is damaged, or "" if there are none. The encode decodes
+// the original's video, so decode errors in it show up here at no extra cost.
+func sourceDamage(stderr string) string {
+	var hits []string
+	for _, line := range strings.Split(stderr, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || benignRe.MatchString(line) {
+			continue
+		}
+		if damageRe.MatchString(line) {
+			hits = append(hits, line)
+		}
+	}
+	if len(hits) == 0 {
+		return ""
+	}
+	return firstLines(strings.Join(hits, "\n"), 3)
 }

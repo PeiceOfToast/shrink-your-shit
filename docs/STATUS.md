@@ -109,13 +109,22 @@ threshold while CRF 16 passes; a truncated source is never "done". Things to kno
 - **The 0.95 SSIM threshold is a starting value, not a tuned one.** Measured here on synthetic video only
   (testsrc2 and mandelbrot at 1280x720, x265): CRF 26 medium scores about 0.985-0.995, CRF 30 about
   0.977-0.989, CRF 36 about 0.957-0.979, CRF 51 about 0.86-0.93. Real film will differ; tune with real files.
-- A bug found only by running real files: the encoder delays the first frame (0.04 s), so comparing the two
-  files without shifting each to start at time zero paired every frame with its neighbour and scored a good
-  encode at 0.89. The comparison now aligns them.
+- Two bugs found only by running real files: the encoder delays the first frame (0.04 s), so the two files
+  must be aligned, first at time zero (a good encode scored 0.89), then, for samples later in the file, by
+  the difference of the start times plus a one-frame retry (a good 70-second mp4 scored 0.93 at 0:55 and
+  was refused). A test with 70-second files in mkv, mp4 and ts at the default threshold now covers it.
 - Sources that ffmpeg turns into a constant frame rate (avi, wmv) may legitimately change the frame count by
   more than 1% and will be refused (safe direction).
 - A 10-bit source with an ffmpeg whose x265 is 8-bit only would lose depth and is refused, not converted.
-- `-decode-check=off` exists as asked in the brief but it removes a safety check; consider removing it.
+- There is no way to switch the playback test off (`-decode-check` is `auto` or `always`) and `-min-ssim`
+  cannot go below 0.90: the floor is not removable, only tunable.
+- A recording that starts in the middle of a group of pictures (broadcast TV captures) loses its
+  undecodable first seconds in the new file, so the length and frame-count checks refuse it (safe,
+  clear message, but it will not convert). A damaged original (decode errors during the conversion) is
+  refused as "the original file has errors"; which ffmpeg messages count as damage versus harmless is a
+  hand-made list (`damageRe`/`benignRe` in `worker/verify.go`) tested only on synthetic damage and one
+  mid-stream cut, not on a library of real recordings.
+- The time limits on the checks are guesses.
 - Not covered: HDR/Dolby Vision loss (a later slice skips those sources), real Windows/macOS runs of the new
   checks, a very large file (the playback test of a 3-hour file was not timed).
 

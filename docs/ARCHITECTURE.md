@@ -45,11 +45,22 @@ the result and the original was deliberately left alone, with the reason in the 
    subtitle and attachment streams, in order; same codec for copied streams, languages, channel
    counts, subtitle kinds and forced flags, attachment names, picture size, colour depth; same
    chapter count); duration within 2%; video frame count within 1%; **smaller** than the original
-   (or by `MinSavings`). Then the **playback test** (`-decode-check`: the whole file through ffmpeg's
-   decoder with `-xerror` up to 3 hours long, else three one-minute samples; any decode error fails),
-   then the **picture comparison** (SSIM on three 10-second samples at the start, middle and end, each
-   input shifted to start at time zero; the worst must reach `-min-ssim`, default 0.95, an untuned
-   starting value). Last, the source must not have changed during the encode.
+   (or by `MinSavings`). Then the **playback test** (`-decode-check auto|always`; there is no "off":
+   the new file's video through ffmpeg's decoder with `-xerror`, completely up to 3 hours long, else
+   three one-minute samples; any decode error fails), then the **picture comparison** (SSIM on three
+   10-second samples at the start, middle and end; the worst must reach `-min-ssim`, default 0.95 and
+   at least 0.90, an untuned starting value). The new file is sought to the sample time plus the
+   difference between the two files' video start times (an encoder delays the first frame, and
+   without this a good file scored 0.93), and if a sample still scores low it is re-measured one frame
+   earlier and later, best counts. Last, the source must not have changed during the encode; that is
+   also checked first, before the expensive checks, so it is reported plainly.
+   **The original is checked too:** while converting, ffmpeg's error output is read, and decode errors
+   in the original (corrupt data, not the harmless messages a recording that starts mid-picture-group
+   prints) make the job `kept` with "the original file has errors; not converting it", so a damaged
+   file is never silently replaced by a clean-looking copy of the damage.
+   Every ffprobe/ffmpeg call in the checks has a time limit (1 minute for a probe, 10 minutes per
+   sample, 30 minutes to count frames, 10 minutes plus twice the file's length for a full playback,
+   at most 6 hours); a stuck call ends as `kept` with "timed out". These are guesses.
    **Fail-safe:** a check that errors or cannot run (no `ssim` filter in this ffmpeg, free space
    unreadable) is a refusal, never a pass.
 4. Replace: the temp file is renamed over the original (retried for ~10 s on Windows, where

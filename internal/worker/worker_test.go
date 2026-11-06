@@ -7,11 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
@@ -93,6 +95,8 @@ type scenario struct {
 	srcPackets, outPackets int
 	content                string // what the fake encoder writes
 	encodeErr              error
+	encodeStderr           string                                // what ffmpeg prints while converting (decode errors in the original show up here)
+	hang                   func(name string, args []string) bool // if it returns true the call blocks until its context ends
 	decodeStderr           string
 	decodeErr              error
 	hasSSIM                bool
@@ -124,7 +128,7 @@ func newScenario(t *testing.T) *scenario {
 		hasSSIM: true, ssimStderr: "[Parsed_ssim_0] SSIM Y:0.99 U:0.99 V:0.99 All:0.990000 (20.0)",
 		freeBytes: 1 << 40,
 	}
-	s.exec = &media.FakeExec{Handler: s.handle}
+	s.exec = &media.FakeExec{Handler: s.handle, Block: func(name string, args []string) bool { return s.hang != nil && s.hang(name, args) }}
 	return s
 }
 
@@ -170,7 +174,7 @@ func (s *scenario) handle(name string, args []string) (string, string, error) {
 				return "out_time_us=50000000\n", "", s.encodeErr
 			}
 			os.WriteFile(last, []byte(s.content), 0o644)
-			return "out_time_us=50000000\n", "", nil
+			return "out_time_us=50000000\n", s.encodeStderr, nil
 		case s.has(args, "-filters"):
 			if s.hasSSIM {
 				return " T.C ssim              VV->V      Calculate the SSIM between two video streams.\n", "", nil
@@ -344,7 +348,7 @@ func TestRejections(t *testing.T) {
 		}, "too different"},
 		{"ssim filter missing", func(s *scenario) { s.hasSSIM = false }, "no 'ssim' filter"},
 		{"ssim gives no result", func(s *scenario) { s.ssimStderr = "nothing useful" }, "gave no result"},
-		{"ssim run fails", func(s *scenario) { s.ssimErr = errors.New("exit status 1") }, "picture comparison failed"},
+		{"ssim run fails", func(s *scenario) { s.ssimErr = errors.New("exit status 1") }, "picture comparison at"},
 		{"not enough disk space", func(s *scenario) { s.freeBytes = 1 << 20 }, "not enough free disk space"},
 		{"cannot check disk space", func(s *scenario) { s.freeErr = errors.New("no such device") }, "free disk space"},
 		{"source cannot be read", func(s *scenario) { s.srcProbeFails = true }, "cannot be read any more"},
@@ -485,7 +489,6 @@ func TestDecodeModes(t *testing.T) {
 		{"default mode is auto", "", 100, 1, false},
 		{"auto, long file: three samples", "auto", 5 * 3600, 3, true},
 		{"always: full even when long", "always", 5 * 3600, 1, false},
-		{"off: none", "off", 100, 0, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			s := newScenario(t)
@@ -553,8 +556,9 @@ func TestSSIMWorstSegmentDecides(t *testing.T) {
 	inner := s.exec.Handler
 	s.exec.Handler = func(name string, args []string) (string, string, error) {
 		if name == "ffmpeg" && s.has(args, "-lavfi") {
+			s.calls = append(s.calls, name+" "+strings.Join(args, " "))
 			n++
-			if n == 3 { // the sample at the end of the file is the bad one
+			if n >= 3 { // the sample at the end of the file is bad at every alignment tried
 				return "", bad, nil
 			}
 			return "", good, nil
@@ -563,8 +567,8 @@ func TestSSIMWorstSegmentDecides(t *testing.T) {
 	}
 	s.run(Replace)
 	s.assertKept("0.700")
-	if n != 3 {
-		t.Errorf("three samples expected, got %d", n)
+	if n != 5 { // two good samples, then the bad one tried at three alignments
+		t.Errorf("expected 2 + 3 comparisons, got %d", n)
 	}
 }
 
@@ -598,4 +602,181 @@ func TestSSIMComparesTheMainVideoNotCoverArt(t *testing.T) {
 	if s.count("-lavfi") > 0 && !strings.Contains(joined, "[0:v:1]setpts=PTS-STARTPTS[a];[1:v:1]setpts=PTS-STARTPTS[b];[a][b]ssim") {
 		t.Errorf("the comparison must use the main video (v:1) of both files, aligned at time zero, calls:\n%s", joined)
 	}
+}
+
+// ---- picture comparison alignment ----
+
+// ssimAt returns a handler wrapper that scores 0.93 unless the output is sought exactly delta seconds
+// after the source (what a correct alignment of a delayed encoder does), then 0.99.
+func ssimAligned(s *scenario, delta float64) {
+	inner := s.exec.Handler
+	s.exec.Handler = func(name string, args []string) (string, string, error) {
+		if name == "ffmpeg" && s.has(args, "-lavfi") {
+			s.calls = append(s.calls, name+" "+strings.Join(args, " "))
+			var seeks []float64
+			for i, a := range args {
+				if a == "-ss" {
+					var v float64
+					fmt.Sscanf(args[i+1], "%f", &v)
+					seeks = append(seeks, v)
+				}
+			}
+			if len(seeks) == 2 && math.Abs(seeks[1]-seeks[0]-delta) < 0.0005 {
+				return "", "SSIM Y:1 U:1 V:1 All:0.990000 (20.0)", nil
+			}
+			return "", "SSIM Y:1 U:1 V:1 All:0.930000 (11.0)", nil
+		}
+		return inner(name, args)
+	}
+}
+
+func TestSSIMSeeksTheNewFileByTheEncodersStartDelay(t *testing.T) {
+	s := newScenario(t)
+	s.srcSpec.streams[0]["start_time"] = "0.023"
+	s.outSpec.streams[0]["start_time"] = "0.040" // the encoder delays the first frame by 17 ms more
+	s.srcSpec.duration, s.outSpec.duration = 110, 110
+	ssimAligned(s, 0.017)
+	s.run(Replace)
+	if j := s.job(); j.Status != jobs.Done {
+		t.Fatalf("a good conversion must pass when aligned by the start-time difference: %+v", j)
+	}
+	joined := strings.Join(s.calls, "\n")
+	if !strings.Contains(joined, "-ss 50.017 -t 10.000 -i") {
+		t.Errorf("the new file should be sought to 50.017 (source 50 + 0.017):\n%s", joined)
+	}
+}
+
+func TestSSIMTriesOneFrameEitherWayWhenTheStartTimesLie(t *testing.T) {
+	s := newScenario(t)
+	// start times say "no difference", but the good alignment is one frame (1/25 s) later
+	ssimAligned(s, 0.04)
+	s.run(Replace)
+	if j := s.job(); j.Status != jobs.Done {
+		t.Fatalf("one frame of misalignment must be forgiven by the retry: %+v", j)
+	}
+}
+
+func TestSSIMGenuinelyBadStaysBadAtEveryAlignment(t *testing.T) {
+	s := newScenario(t)
+	s.ssimStderr = "SSIM Y:1 U:1 V:1 All:0.700000 (5.0)"
+	s.run(Replace)
+	s.assertKept("too different")
+	if s.count("-lavfi") != 3 {
+		t.Errorf("the first sample is tried at 3 alignments and the file refused right there, was %d runs", s.count("-lavfi"))
+	}
+}
+
+// ---- damage in the original, seen while converting ----
+
+func TestOriginalWithDecodeErrorsIsNotConverted(t *testing.T) {
+	for _, stderr := range []string{
+		"[h264 @ 0x55] error while decoding MB 41 22, bytestream -5",
+		"[h264 @ 0x55] concealing 120 DC, 120 AC, 120 MV errors in P frame",
+		"[matroska,webm @ 0x1] Invalid data found when processing input",
+		"[mov,mp4 @ 0x1] moov atom not found",
+	} {
+		s := newScenario(t)
+		s.encodeStderr = stderr
+		s.run(Replace)
+		s.assertKept("the original file has errors")
+		if s.count("-xerror") != 0 {
+			t.Error("no point verifying a conversion of a damaged original")
+		}
+	}
+}
+
+func TestBenignMessagesDoNotRefuseAGoodFile(t *testing.T) {
+	s := newScenario(t)
+	s.encodeStderr = "[h264 @ 0x55] non-existing PPS 0 referenced\n[h264 @ 0x55] decode_slice_header error\n[h264 @ 0x55] no frame!\nx265 [info]: HEVC encoder version 4.1\nx265 [warning]: halving the quality when psy-rd is enabled for 444 input\n[h264 @ 0x55] Last message repeated 4 times"
+	s.run(Replace)
+	if j := s.job(); j.Status != jobs.Done {
+		t.Errorf("harmless start-of-stream messages must not refuse a good file: %+v", j)
+	}
+}
+
+func TestSourceDamageClassifier(t *testing.T) {
+	if sourceDamage("") != "" || sourceDamage("\n  \n") != "" {
+		t.Error("nothing printed means nothing wrong")
+	}
+	got := sourceDamage("noise\n[h264 @ 1] error while decoding MB 1 2\n[h264 @ 1] Last message repeated 3 times\n[h264 @ 1] concealing 5 DC")
+	if !strings.Contains(got, "error while decoding") || !strings.Contains(got, "concealing") || strings.Contains(got, "repeated") {
+		t.Errorf("%q", got)
+	}
+}
+
+// ---- order and time limits ----
+
+func TestSourceChangeIsReportedBeforeTheExpensiveChecks(t *testing.T) {
+	s := newScenario(t)
+	s.onEncode = func() { os.WriteFile(s.src, []byte("user replaced this file meanwhile"), 0o644) }
+	s.outSpec.streams = goodOutput().streams[:2] // would also fail parity
+	s.run(Replace)
+	j := s.job()
+	if j.Status != jobs.Kept || !strings.Contains(j.Error, "changed while") || strings.Contains(j.Error, "subtitle") {
+		t.Errorf("the change must be reported first, not a confusing parity message: %+v", j)
+	}
+	if s.count("-count_packets") > 1 || s.count("-xerror") != 0 {
+		t.Errorf("no verification should run after the source changed: %v", s.calls)
+	}
+}
+
+func withTimeouts(t *testing.T, quick, count, sample time.Duration) {
+	t.Helper()
+	q, c, sm := quickTimeout, countTimeout, sampleTimeout
+	quickTimeout, countTimeout, sampleTimeout = quick, count, sample
+	t.Cleanup(func() { quickTimeout, countTimeout, sampleTimeout = q, c, sm })
+}
+
+func TestAHungCheckKeepsTheOriginalInsteadOfFreezingTheWorker(t *testing.T) {
+	cases := []struct {
+		name string
+		hang func(name string, args []string) bool
+		want string
+	}{
+		{"probe of the new file", func(n string, a []string) bool {
+			return n == "ffprobe" && !strings.Contains(strings.Join(a, " "), "movie.mkv ") && strings.HasSuffix(a[len(a)-1], ".syp-tmp.mkv") && !strings.Contains(strings.Join(a, " "), "count_packets")
+		}, "reading the new file timed out"},
+		{"frame count of the new file", func(n string, a []string) bool {
+			return n == "ffprobe" && strings.Contains(strings.Join(a, " "), "count_packets") && strings.HasSuffix(a[len(a)-1], ".syp-tmp.mkv")
+		}, "counting the new file's video frames timed out"},
+		{"playback test", func(n string, a []string) bool {
+			return n == "ffmpeg" && strings.Contains(strings.Join(a, " "), "-xerror")
+		}, "playback test of the new file timed out"},
+		{"picture comparison", func(n string, a []string) bool {
+			return n == "ffmpeg" && strings.Contains(strings.Join(a, " "), "-lavfi")
+		}, "picture comparison at 0:00:00 timed out"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			withTimeouts(t, 150*time.Millisecond, 150*time.Millisecond, 150*time.Millisecond)
+			oldBase, oldCap := fullDecodeBase, fullDecodeCap
+			fullDecodeBase, fullDecodeCap = 150*time.Millisecond, 300*time.Millisecond
+			t.Cleanup(func() { fullDecodeBase, fullDecodeCap = oldBase, oldCap })
+			s := newScenario(t)
+			s.hang = c.hang
+			start := time.Now()
+			s.run(Replace)
+			s.assertKept(c.want)
+			if time.Since(start) > 10*time.Second {
+				t.Error("the worker took far too long to give up")
+			}
+		})
+	}
+}
+
+func TestShutdownDuringACheckReleasesTheJob(t *testing.T) {
+	s := newScenario(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	s.hang = func(n string, a []string) bool {
+		if n == "ffmpeg" && strings.Contains(strings.Join(a, " "), "-xerror") {
+			go cancel() // Ctrl+C while the playback test runs
+			return true
+		}
+		return false
+	}
+	s.worker(Replace).RunOne(ctx)
+	if j := s.job(); j.Status != jobs.Queued {
+		t.Errorf("Ctrl+C during a check puts the job back in the queue, not 'kept': %+v", j)
+	}
+	s.assertOriginalSafe()
 }

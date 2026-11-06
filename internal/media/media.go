@@ -19,8 +19,10 @@ import (
 type Exec interface {
 	// Output runs a program and returns its stdout.
 	Output(ctx context.Context, name string, args ...string) ([]byte, error)
-	// Stream runs a program and calls onLine for each stdout line.
-	Stream(ctx context.Context, onLine func(string), name string, args ...string) error
+	// Stream runs a program, calls onLine for each stdout line, and returns the first part of its
+	// stderr (ffmpeg reports decode errors there, even when it exits 0). err is non-nil if it
+	// exited non-zero or could not start.
+	Stream(ctx context.Context, onLine func(string), name string, args ...string) (stderr string, err error)
 	// Capture runs a program and returns its stdout and (the first part of) its stderr, which is
 	// where ffmpeg reports decode errors and filter results. err is non-nil if it exited non-zero;
 	// the output is returned either way.
@@ -97,25 +99,26 @@ func (h *headBuffer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (OSExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) error {
+func (OSExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return err
+		return "", err
 	}
-	var stderr strings.Builder
-	cmd.Stderr = &tail{b: &stderr, max: 2000}
+	var last strings.Builder
+	head := headBuffer{max: maxStderrBytes}
+	cmd.Stderr = io.MultiWriter(&tail{b: &last, max: 2000}, &head)
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("%s: %w", name, err)
+		return "", fmt.Errorf("%s: %w", name, err)
 	}
 	sc := bufio.NewScanner(stdout)
 	for sc.Scan() {
 		onLine(sc.Text())
 	}
 	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(stderr.String()))
+		return string(head.buf), fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(last.String()))
 	}
-	return nil
+	return string(head.buf), nil
 }
 
 // tail keeps only the last max bytes written (ffmpeg's error is at the end).
@@ -260,8 +263,9 @@ func ParseProgress(line string, durationSec float64) (float64, bool) {
 	return pct, true
 }
 
-// Transcode runs ffmpeg and reports progress percent through onProgress.
-func Transcode(ctx context.Context, x Exec, ffmpeg string, args []string, durationSec float64, onProgress func(float64)) error {
+// Transcode runs ffmpeg and reports progress percent through onProgress. It returns what ffmpeg
+// printed on stderr (at the error level the args ask for), which includes decode errors in the source.
+func Transcode(ctx context.Context, x Exec, ffmpeg string, args []string, durationSec float64, onProgress func(float64)) (string, error) {
 	return x.Stream(ctx, func(line string) {
 		if pct, ok := ParseProgress(line, durationSec); ok {
 			onProgress(pct)

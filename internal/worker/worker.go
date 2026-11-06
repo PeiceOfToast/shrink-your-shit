@@ -161,8 +161,13 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}()
 
 	// What the source looks like (and so what the new file must look like).
-	src, perr := media.Probe(ctx, w.Exec, w.FFprobe, job.Path)
+	pctx, pcancel := context.WithTimeout(ctx, quickTimeout)
+	src, perr := media.Probe(pctx, w.Exec, w.FFprobe, job.Path)
+	pcancel()
 	if perr != nil {
+		if errors.Is(pctx.Err(), context.DeadlineExceeded) {
+			return "", checkFailed(pctx, "reading the original", perr)
+		}
 		return "", kept("the original cannot be read any more (%v)", perr)
 	}
 	if err := w.preflight(job.Path, before.Size()); err != nil {
@@ -170,9 +175,11 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	var packets int64
 	if ord := src.MainVideoOrdinal(); ord >= 0 {
-		n, cerr := media.CountVideoPackets(ctx, w.Exec, w.FFprobe, job.Path, ord)
+		cctx, ccancel := context.WithTimeout(ctx, countTimeout)
+		n, cerr := media.CountVideoPackets(cctx, w.Exec, w.FFprobe, job.Path, ord)
+		ccancel()
 		if cerr != nil {
-			return "", kept("could not count the original's video frames (%v)", cerr)
+			return "", checkFailed(cctx, "counting the original's video frames", cerr)
 		}
 		packets = n
 	}
@@ -182,18 +189,28 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 
 	args := media.HEVCArgs(job.Path, tmp, w.Rule.CRF, w.Rule.Preset)
-	if terr := media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p float64) {
+	encErr, terr := media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p float64) {
 		w.Queue.Progress(job.ID, p)
-	}); terr != nil {
+	})
+	if terr != nil {
 		return "", terr
 	}
+	// Errors ffmpeg reported while reading the original mean it is damaged: converting it would bake
+	// the damage in and delete the only copy that might still be repaired or fetched again.
+	if damage := sourceDamage(encErr); damage != "" {
+		return "", kept("the original file has errors (%s); not converting it", damage)
+	}
 
+	// If the source changed while we encoded, the new file is stale: say so first (otherwise the
+	// checks would report a confusing mismatch), and check again right before replacing.
+	if err := sourceUnchanged(job.Path, before); err != nil {
+		return "", err
+	}
 	if err := w.verify(ctx, src, exp, job.Path, tmp, before.Size()); err != nil {
 		return "", err
 	}
-	// If the source changed while we encoded, our result is stale: don't clobber it.
-	if now, nerr := os.Stat(job.Path); nerr != nil || now.Size() != before.Size() || !now.ModTime().Equal(before.ModTime()) {
-		return "", kept("the original file changed while it was being converted, so the new file is out of date")
+	if err := sourceUnchanged(job.Path, before); err != nil {
+		return "", err
 	}
 	os.Chmod(tmp, before.Mode().Perm()) // keep the original's permissions
 	final = job.Path
@@ -206,6 +223,14 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	done = true
 	return final, nil
+}
+
+func sourceUnchanged(path string, before os.FileInfo) error {
+	now, err := os.Stat(path)
+	if err != nil || now.Size() != before.Size() || !now.ModTime().Equal(before.ModTime()) {
+		return kept("the original file changed while it was being converted, so the new file is out of date")
+	}
+	return nil
 }
 
 // moveIntoPlace renames tmp over final. On Windows the rename fails while

@@ -45,8 +45,8 @@ func main() {
 	crf := flag.Int("crf", def.CRF, "HEVC quality (lower = better quality, bigger file)")
 	preset := flag.String("preset", def.Preset, "x265 speed preset (ultrafast … veryslow)")
 	mode := flag.String("output", string(worker.Replace), "replace: swap in the new file once it is complete; beside: keep the original, write name.hevc.ext")
-	decode := flag.String("decode-check", "auto", "play the new file through a decoder before replacing the original: auto (completely if up to 3 hours long, otherwise at 3 places), always, or off")
-	minSSIM := flag.Float64("min-ssim", worker.DefaultMinSSIM, "lowest picture similarity (0.5-1.0) between the original and the new file; a starting value that has not been tuned on real material")
+	decode := flag.String("decode-check", "auto", "play the new file through a decoder before replacing the original: auto (completely if up to 3 hours long, otherwise at 3 places) or always")
+	minSSIM := flag.Float64("min-ssim", worker.DefaultMinSSIM, "lowest picture similarity (0.90-1.0) between the original and the new file; a starting value that has not been tuned on real material")
 	every := flag.Duration("scan-every", 30*time.Second, "how often to look for new files")
 	settle := flag.Duration("settle", 15*time.Second, "ignore files modified more recently than this (still copying)")
 	ffmpeg := flag.String("ffmpeg", os.Getenv("SYP_FFMPEG"), "path to ffmpeg (default: find it; env SYP_FFMPEG)")
@@ -66,12 +66,12 @@ func main() {
 		os.Exit(2)
 	}
 	switch *decode {
-	case "auto", "always", "off":
+	case "auto", "always":
 	default:
-		log.Fatalf("-decode-check must be auto, always or off, not %q", *decode)
+		log.Fatalf("-decode-check must be auto or always, not %q", *decode)
 	}
-	if *minSSIM < 0.5 || *minSSIM > 1 {
-		log.Fatalf("-min-ssim must be between 0.5 and 1.0, not %v", *minSSIM)
+	if *minSSIM < 0.90 || *minSSIM > 1 {
+		log.Fatalf("-min-ssim must be between 0.90 and 1.0, not %v", *minSSIM)
 	}
 	if *mode != string(worker.Replace) && *mode != string(worker.Beside) {
 		log.Fatalf("-output must be %q or %q", worker.Replace, worker.Beside)
