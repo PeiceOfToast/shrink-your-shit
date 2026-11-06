@@ -301,6 +301,7 @@ func TestBitDepth(t *testing.T) {
 		{"10", "yuv420p10le", 10}, {"", "yuv420p10le", 10}, {"", "yuv420p", 8}, {"", "nv12", 8},
 		{"", "p010le", 10}, {"", "yuv444p12be", 12}, {"", "gray16le", 16}, {"", "", 0},
 		{"junk", "yuv420p", 8}, {"0", "yuv420p10le", 10}, {"99", "yuv420p", 8},
+		{"", "y210le", 0}, {"", "rgb48le", 0},
 	} {
 		if got := bitDepth(c.raw, c.pix); got != c.want {
 			t.Errorf("bitDepth(%q,%q)=%d want %d", c.raw, c.pix, got, c.want)

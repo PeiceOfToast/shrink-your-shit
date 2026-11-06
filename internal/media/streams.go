@@ -31,7 +31,9 @@ type Stream struct {
 	FrameRate float64 `json:"frameRate,omitempty"`
 	// VFR is true when the average frame rate clearly differs from the nominal one. That is
 	// reliable for mp4/mov; for mkv ffprobe reports the nominal rate as the average, so a variable
-	// frame rate mkv is NOT detected here (it needs a scan of packet timestamps).
+	// frame rate mkv is NOT detected here (it needs a scan of packet timestamps). Untested on real
+	// interlaced broadcast captures, where the nominal rate may be the field rate: before using VFR
+	// for a decision, ignore it when FieldOrder is not progressive or check such a file.
 	VFR bool `json:"vfr,omitempty"`
 	// PixFmt is e.g. yuv420p10le; BitDepth is derived from it (0 when unknown).
 	PixFmt         string `json:"pixFmt,omitempty"`
@@ -209,6 +211,7 @@ func bitDepth(raw, pixFmt string) int {
 		if n, _ := strconv.Atoi(m[1]); n > 0 && n <= 32 {
 			return n
 		}
+		return 0 // a number that is not a bit depth (y210le, rgb48le): unknown, not "8"
 	}
 	if pixFmt != "" {
 		return 8
