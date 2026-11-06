@@ -1,0 +1,99 @@
+{
+ "streams": [
+  {
+   "disposition": {
+    "default": 0,
+    "forced": 0,
+    "attached_pic": 0
+   },
+   "index": 0,
+   "codec_name": "h264",
+   "codec_type": "video",
+   "width": 1920,
+   "height": 1080,
+   "pix_fmt": "yuv420p",
+   "r_frame_rate": "24000/1001",
+   "avg_frame_rate": "24000/1001",
+   "field_order": "progressive",
+   "bit_rate": "25000000"
+  },
+  {
+   "disposition": {
+    "default": 0,
+    "forced": 0,
+    "attached_pic": 0
+   },
+   "index": 1,
+   "codec_name": "truehd",
+   "codec_type": "audio",
+   "sample_rate": "48000",
+   "channels": 8,
+   "channel_layout": "7.1",
+   "tags": {
+    "language": "eng"
+   }
+  },
+  {
+   "disposition": {
+    "default": 0,
+    "forced": 0,
+    "attached_pic": 0
+   },
+   "index": 2,
+   "codec_name": "ac3",
+   "codec_type": "audio",
+   "sample_rate": "48000",
+   "channels": 6,
+   "channel_layout": "5.1(side)",
+   "bit_rate": "640000",
+   "tags": {
+    "language": "eng"
+   }
+  },
+  {
+   "disposition": {
+    "default": 0,
+    "forced": 0,
+    "attached_pic": 0
+   },
+   "index": 3,
+   "codec_name": "hdmv_pgs_subtitle",
+   "codec_type": "subtitle",
+   "tags": {
+    "language": "eng"
+   }
+  },
+  {
+   "disposition": {
+    "default": 0,
+    "forced": 0,
+    "attached_pic": 0
+   },
+   "index": 4,
+   "codec_name": "subrip",
+   "codec_type": "subtitle",
+   "tags": {
+    "language": "eng"
+   }
+  },
+  {
+   "disposition": {
+    "default": 0,
+    "forced": 0,
+    "attached_pic": 0
+   },
+   "index": 5,
+   "codec_name": "dvd_subtitle",
+   "codec_type": "subtitle",
+   "tags": {
+    "language": "fra"
+   }
+  }
+ ],
+ "format": {
+  "format_name": "matroska,webm",
+  "duration": "7260.5",
+  "size": "41000000000",
+  "bit_rate": "45000000"
+ }
+}
