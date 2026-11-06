@@ -160,6 +160,9 @@ func TestCopyBannedWords(t *testing.T) {
 	// Design decision: no raw "quality N" / CRF number on screen at Basic or Standard.
 	number := regexp.MustCompile(`(?i)\b(quality|crf) \d`)
 	for name, s := range texts {
+		if name == "static/mock.js" { // server data: a flow step's detail may carry the raw number
+			continue
+		}
 		if m := number.FindString(s); m != "" {
 			t.Errorf("COPY: %q in %s (names and plain effects only)", m, name)
 		}
@@ -181,7 +184,7 @@ func TestNoFlowWordOutsideFlows(t *testing.T) {
 	}
 	// Scripts: only the Flows menu entry (nav.json) and code names may use it; no text a script shows.
 	for name, js := range allText(t) {
-		if path.Ext(name) != ".js" || name == "static/mock.js" {
+		if path.Ext(name) != ".js" || name == "static/mock.js" || strings.Contains(name, "flow") { // flows.js, flow.js, flowpick.js: shown only on Flows pages or with per-library choices on
 			continue
 		}
 		if m := regexp.MustCompile(`"[^"\n]*"`).FindAllString(js, -1); m != nil {
@@ -226,7 +229,7 @@ func TestAssetSizes(t *testing.T) {
 	worst, worstPage := 0, ""
 	for _, p := range pages {
 		total := 0
-		for _, js := range scripts(p.Kind) {
+		for _, js := range append(scripts(p.Kind), lazyScripts(p.Kind)...) {
 			used[js] = true
 			if js != "mock.js" {
 				total += size(js)

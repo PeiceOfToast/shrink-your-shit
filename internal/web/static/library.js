@@ -53,6 +53,10 @@
     Promise.all([api.getSettings(), api.getLibrary({ id: id }), api.getSetting({ id: id })]).then(function (r) {
       var level = r[0].controlLevel, setting = r[2]; lib = r[1];
       head(); $("lib-body").hidden = false;
+      if (r[0].perLibraryFlow) { // the Flow choice comes first; its code loads only when this is on
+        var sc = document.createElement("script"); sc.src = "/assets/flowpick.js";
+        sc.onload = function () { S.flowpick($("flowpick"), lib, say); }; document.head.appendChild(sc);
+      }
       var get = function () { return editor ? editor.get() : setting; }; // the loaded setting until a level has its own editor
       var extra = level === "standard" ? { sample: function () { return $("sf").value || null; }, onSample: showSample } : null;
       prev = ui.preview($("pv"), id, get, extra);

@@ -37,14 +37,26 @@
   var flows = [
     { id: "f1", name: "Movies - Balanced", usedBy: ["Movies"], madeWith: "slider", changedAt: iso(9 * 864e5) },
     { id: "f2", name: "TV Shows - Smaller", usedBy: ["TV Shows", "Anime"], madeWith: "slider", changedAt: iso(20 * 864e5) },
-    { id: "f3", name: "Home videos - hand made", usedBy: ["Home videos"], madeWith: "builder", changedAt: iso(3 * 864e5) },
-    { id: "f4", name: "Old setting", usedBy: [], madeWith: "slider", changedAt: iso(60 * 864e5) }
+    { id: "f3", name: "Home videos - my rules", usedBy: ["Home videos"], madeWith: "builder", changedAt: iso(3 * 864e5) },
+    { id: "f4", name: "Home videos - Legacy", usedBy: [], madeWith: "slider", changedAt: iso(60 * 864e5) }
   ];
   try { var sf = sessionStorage.getItem("syp-mock-flows"); if (sf) flows = JSON.parse(sf); } catch (e) {}
   // The slider table is the engine's (untuned starting values): crf is x265's, lower = better quality.
   var SLIDER = [{ position: 1, name: "Smallest", crf: 27, minSavingPct: 20 }, { position: 2, name: "Smaller", crf: 25, minSavingPct: 15 },
     { position: 3, name: "Balanced", crf: 23, minSavingPct: 10 }, { position: 4, name: "Better quality", crf: 21, minSavingPct: 8 },
     { position: 5, name: "Best quality", crf: 19, minSavingPct: 5 }];
+  // Read-only steps for a flow. The raw CRF number appears only here, in a flow step's detail.
+  function stepsFor(f) {
+    var crf = { f1: 23, f2: 25, f3: 22, f4: 21 }[f.id] || 23, n = 3, chain = [];
+    chain.push({ n: n++, kind: "video", label: "Convert to HEVC", detail: "CRF " + crf + " (lower = better quality)" });
+    if (f.madeWith === "builder") chain.push({ n: n++, kind: "resolution", label: "At most 1080p" });
+    chain.push({ n: n++, kind: "audio", label: "Keep all tracks" }, { n: n++, kind: "subtitles", label: "Keep text subtitles" }, { n: n++, kind: "filetype", label: "Keep as is" },
+      { n: n++, kind: "finish", label: "Replace the original if the new file passes the checks" });
+    return [{ n: 1, kind: "start", label: "A video in the library folder" },
+      { n: 2, kind: "check", label: "Is it worth converting?", detail: "H.264 or older, not HDR or Dolby Vision, not already small",
+        branches: [{ label: "Yes", steps: chain }, { label: "No", steps: [{ n: n, kind: "skip", label: "Show the reason in Activity" }] }] }];
+  }
+  var nextFlow = 20; function fid() { return "f" + nextFlow++; } // ids never repeat after a delete
   var paused = false, pv = false;
   var working = [{ jobId: "j1", library: "Movies", path: "/media/movies/The Long Road (2014).mkv", phase: "converting", percent: 62, etaSeconds: 840, fromBytes: 8.2 * GB, expectedBytes: 4.5 * GB },
                  { jobId: "j2", library: "Movies", path: "/media/movies/Harbour Lights (2019).mkv", phase: "checking", percent: 100, etaSeconds: 0, fromBytes: 7 * GB, expectedBytes: 3 * GB }];
@@ -141,7 +153,7 @@
       if (f && f.usedBy.length > 1 && !b.sharedFlowChoice) return fail(409, "flow_shared", "Another library uses this setting. Nothing was changed.", { usedBy: f.usedBy.filter(function (n) { return n !== libs[i].name; }) });
       if (f && f.usedBy.length > 1 && b.sharedFlowChoice === "make_copy") {
         f.usedBy = f.usedBy.filter(function (n) { return n !== libs[i].name; });
-        var nf = { id: "f" + (flows.length + 10), name: libs[i].name + " - " + (b.quality ? SLIDER[b.quality - 1].name : "Copy"), usedBy: [libs[i].name], madeWith: "slider", changedAt: iso(0) };
+        var nf = { id: fid(), name: libs[i].name + " - " + (b.quality ? SLIDER[b.quality - 1].name : "Copy"), usedBy: [libs[i].name], madeWith: "slider", changedAt: iso(0) };
         flows.push(nf); libs[i].flowId = nf.id; saveLibs();
       }
       if (b.quality && !b.speed) delete libs[i].sel; // a slider save replaces Standard choices
@@ -150,7 +162,12 @@
       return ok();
     },
     replaceCustom: function (p) { var i = find(libs, "id", p.id); if (i >= 0) { libs[i].settingKind = "slider"; libs[i].settingLabel = "Balanced"; libs[i].state = "idle"; libs[i].quality = 3; saveLibs(); } return ok(); },
-    putLibraryFlow: function (p, b) { var i = find(libs, "id", p.id); if (i >= 0) libs[i].flowId = b.flowId; saveLibs(); return ok(); },
+    putLibraryFlow: function (p, b) {
+      var i = find(libs, "id", p.id), nf = find(flows, "id", b.flowId);
+      if (i < 0 || nf < 0) return gone();
+      flows.forEach(function (f) { f.usedBy = f.usedBy.filter(function (n) { return n !== libs[i].name; }); });
+      flows[nf].usedBy.push(libs[i].name); libs[i].flowId = b.flowId; saveLibs(); return ok();
+    },
     // Answers "computing" first, then "ready", so the waiting state gets exercised.
     preview: function (p, b) {
       var li = find(libs, "id", p.id);
@@ -196,21 +213,24 @@
       saveAct(); return ok();
     },
     listFlows: function () { return ok(list(flows)); },
-    createFlow: function (p, b) { var f = { id: "f" + (flows.length + 10), name: b.name || "New flow", usedBy: [], madeWith: "builder", changedAt: iso(0) }; flows.push(f); saveLibs(); return ok(f); },
+    createFlow: function (p, b) { var f = { id: fid(), name: b.name || "New flow", usedBy: [], madeWith: "builder", changedAt: iso(0) }; flows.push(f); saveLibs(); return ok(f); },
     renameFlow: function (p, b) { var i = find(flows, "id", p.id); if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed."); flows[i].name = b.name || flows[i].name; saveLibs(); return ok(flows[i]); },
-    duplicateFlow: function (p) { var i = find(flows, "id", p.id); if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed."); var f = copy(flows[i]); f.id = "f" + (flows.length + 10); f.name += " (copy)"; f.usedBy = []; flows.push(f); saveLibs(); return ok(f); },
+    duplicateFlow: function (p) { var i = find(flows, "id", p.id); if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed."); var f = copy(flows[i]); f.id = fid(); f.name += " (copy)"; f.usedBy = []; flows.push(f); saveLibs(); return ok(f); },
     deleteFlow: function (p) {
       var i = find(flows, "id", p.id);
       if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed.");
       if (flows[i].usedBy.length) return fail(409, "flow_in_use", "In use by " + flows[i].usedBy.join(", ") + ". Nothing was deleted.", { usedBy: flows[i].usedBy });
       flows.splice(i, 1); saveLibs(); return ok();
     },
-    importFlow: function () { return ok(); },
-    exportFlow: function (p) { var i = find(flows, "id", p.id); return i < 0 ? fail(404, "not_found", "That flow is gone.") : ok(flows[i]); },
+    importFlow: function (p, b) {
+      if (!b || !b.name) return fail(400, "bad_flow", "That file is not a flow. Nothing was imported.");
+      var f = { id: fid(), name: b.name, usedBy: [], madeWith: "builder", changedAt: iso(0) }; flows.push(f); saveLibs(); return ok(f);
+    },
+    exportFlow: function (p) { var i = find(flows, "id", p.id); return i < 0 ? fail(404, "not_found", "That flow is gone.") : ok({ name: flows[i].name, steps: stepsFor(flows[i]) }); },
     getFlow: function (p) {
       var i = find(flows, "id", p.id);
       if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed.");
-      return ok({ id: flows[i].id, name: flows[i].name, steps: [{ n: 1, kind: "check", label: "Check the file can be read", branches: [] }, { n: 2, kind: "convert", label: "Make it smaller", branches: [] }] });
+      return ok({ id: flows[i].id, name: flows[i].name, steps: stepsFor(flows[i]) });
     }
   };
   g.SYP = g.SYP || {};

@@ -80,7 +80,8 @@ var pages = []page{
 	{Path: "/activity/failed/", Section: "activity", Kind: "activity", Tab: "Failed", Empty: "Files that could not be converted will be listed here. Your originals are never touched when something fails."},
 	{Path: "/activity/done/", Section: "activity", Kind: "activity", Tab: "Done", Empty: "Converted files will be listed here."},
 	{Path: "/activity/kept/", Section: "activity", Kind: "activity", Tab: "Kept originals", Empty: "Originals we are keeping for you will be listed here, with the date they will be deleted."},
-	{Path: "/flows/", Section: "flows", Empty: "Your flows will be listed here."},
+	{Path: "/flow/", Section: "flows", Kind: "flow", Tab: "Flow"},
+	{Path: "/flows/", Section: "flows", Kind: "flows", Empty: "Your flows will be listed here."},
 	{Path: "/settings/", Section: "settings", Tab: "General", Kind: "settings-general"},
 	{Path: "/settings/safety/", Section: "settings", Tab: "Safety", Empty: "How long originals are kept will be set here."},
 	{Path: "/settings/performance/", Section: "settings", Tab: "Performance", Empty: "How many files convert at once, quiet hours and how often to look for new files will be set here."},
@@ -104,12 +105,24 @@ func scripts(kind string) []string {
 		return append(core, "ui.js", "badge.js", "folder.js", "libraries.js")
 	case "library":
 		return append(core, "ui.js", "badge.js", "editors.js", "library.js")
+	case "flows":
+		return append(core, "ui.js", "flows.js")
+	case "flow":
+		return append(core, "ui.js", "flow.js")
 	case "activity":
 		return append(core, "ui.js", "activity.js")
 	case "settings-general":
 		return append(core, "settings.js")
 	}
 	return core
+}
+
+// lazyScripts are loaded by a page's own script, only when a setting calls for them.
+func lazyScripts(kind string) []string {
+	if kind == "library" {
+		return []string{"flowpick.js"} // the Flow choice, only with "Let me choose per library"
+	}
+	return nil
 }
 
 type pageView struct {
@@ -135,7 +148,7 @@ func render(items []navItem, p page) ([]byte, error) {
 	} else {
 		v.Nav = navFor(items, "basic", false)
 	}
-	if p.Tab != "" && p.Kind != "wizard" && p.Kind != "library" {
+	if p.Tab != "" && p.Kind != "wizard" && p.Kind != "library" && p.Kind != "flow" {
 		v.Title = p.Tab + " - " + heading
 		list := activityTabs
 		if p.Section == "settings" {

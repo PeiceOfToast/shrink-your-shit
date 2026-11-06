@@ -20,7 +20,7 @@
 <div class="page-head"><div><h1 id="lib-title" tabindex="-1">Library</h1><p class="mono muted" id="lib-path"></p></div><span id="lib-state"></span></div>
 <div id="lib-body" hidden>
 <div class="grid-2">
-<section class="card" aria-labelledby="qh"><h2 id="qh" style="margin-top:0">Smaller file or better quality?</h2>
+<section class="card" aria-labelledby="qh"><div id="flowpick"></div><h2 id="qh" style="margin-top:0">Smaller file or better quality?</h2>
 <div class="notice warn" id="custom" hidden><div><strong>This setting is too custom to show as a slider</strong>It keeps working exactly as before. Saving here replaces it for this library; the old one is kept.</div></div>
 <div class="notice info" id="later" hidden><div><strong>Detailed choices for this library are not here yet</strong>Your setting keeps working as it is.</div></div>
 <div id="slider"></div><div id="selectors"></div>
@@ -60,3 +60,28 @@
 <div class="card"><div class="stat" id="st-work"></div><div class="stat-label" id="st-work-l"></div></div></div>
 {{template "tabs" .}}
 <div id="pane" data-tab="{{.Tab}}"><div class="card empty"><p>{{.Empty}}</p></div></div>{{end}}
+
+{{define "flows"}}<noscript><div class="notice info" role="note"><div><strong>Turn on scripts to see your flows</strong>The list needs scripts enabled.</div></div></noscript>
+<div class="page-head"><div><h1>Flows</h1><p class="muted">Every flow lives here. A flow says what happens to a video. Each library uses one flow.</p></div>
+<div class="row"><button class="btn" type="button" id="import">Import a flow</button><button class="btn primary" type="button" id="newflow">New flow</button></div></div>
+<input type="file" id="importfile" accept=".json,application/json" hidden>
+<div class="notice bad" id="err" role="alert" hidden></div>
+<div id="flow-list"><div class="card empty"><p>{{.Empty}}</p></div></div>
+<p class="hint">Choosing which flow a library uses is done on that library, not here. A flow in use cannot be deleted. Slider and selector settings are named automatically when they create a flow (and never renamed after; use Rename); <strong>New flow</strong> is the only way to start one by hand.</p>
+<dialog id="del-dialog" aria-labelledby="del-q"><form method="dialog" class="stack"><h2 id="del-q" style="margin-top:0"></h2>
+<p>Nothing else changes. This cannot be undone.</p>
+<div class="row"><button class="btn danger" value="delete">Delete flow</button><button class="btn" value="keep" autofocus>Keep it</button></div></form></dialog>{{end}}
+
+{{define "flow"}}<noscript><div class="notice info" role="note"><div><strong>Turn on scripts to see this flow</strong>The diagram needs scripts enabled.</div></div></noscript>
+<p class="small"><a href="/flows/">&larr; Flows</a></p>
+<div class="notice bad" id="err" role="alert" hidden></div>
+<div class="page-head"><div><h1 id="f-title" tabindex="-1">Flow</h1><p class="muted" id="f-meta"></p></div>
+<div class="row"><button class="btn" type="button" id="export" hidden>Export</button><button class="btn" type="button" aria-disabled="true" hidden id="builder">Edit in builder (coming)</button></div></div>
+<div id="f-body" hidden>
+<div class="notice info"><div><strong>Read-only view</strong><span id="f-note"></span></div></div>
+<h2>What happens to each file</h2>
+<div class="graph" id="graph" role="img" aria-label="Flow diagram. Text version follows below."></div>
+<h2>Text version</h2>
+<ol id="f-text"></ol>
+<div class="card"><h3>Always checked, cannot be removed</h3><p class="small" style="margin:0">After converting, the new file must play fully, match what this flow intended, and be smaller by at least the minimum saving. If not, your original is kept and the reason is shown in Activity. Original files are kept for the time set in <a href="/settings/safety/">Settings &rarr; Safety</a>.</p></div>
+</div>{{end}}
