@@ -99,6 +99,26 @@ restore the `.bak-v<N>` file if you must. An upgrade needs free disk space about
 database for its backup (a full disk blocks the upgrade, with a clear message); the time and space for a
 very large database were not measured.
 
+**Verify hardening (slice 10):** a converted file now replaces the original only after stream parity,
+duration/frame-count, a decode test and a picture (SSIM) comparison pass, with a free-disk-space check
+before starting; any refusal or check that cannot run leaves the original and marks the job "original
+kept" with a plain-words reason. Checked with real ffmpeg: a file with two audio tracks with languages, two
+subtitle tracks (one forced), a font attachment and chapters, in 8-bit and 10-bit, converts and passes; an
+encode that drops one audio track is refused; a very low quality encode (CRF 51) is refused at the default
+threshold while CRF 16 passes; a truncated source is never "done". Things to know:
+- **The 0.95 SSIM threshold is a starting value, not a tuned one.** Measured here on synthetic video only
+  (testsrc2 and mandelbrot at 1280x720, x265): CRF 26 medium scores about 0.985-0.995, CRF 30 about
+  0.977-0.989, CRF 36 about 0.957-0.979, CRF 51 about 0.86-0.93. Real film will differ; tune with real files.
+- A bug found only by running real files: the encoder delays the first frame (0.04 s), so comparing the two
+  files without shifting each to start at time zero paired every frame with its neighbour and scored a good
+  encode at 0.89. The comparison now aligns them.
+- Sources that ffmpeg turns into a constant frame rate (avi, wmv) may legitimately change the frame count by
+  more than 1% and will be refused (safe direction).
+- A 10-bit source with an ffmpeg whose x265 is 8-bit only would lose depth and is refused, not converted.
+- `-decode-check=off` exists as asked in the brief but it removes a safety check; consider removing it.
+- Not covered: HDR/Dolby Vision loss (a later slice skips those sources), real Windows/macOS runs of the new
+  checks, a very large file (the playback test of a 3-hour file was not timed).
+
 ## Known limitations and follow-ups
 
 Collected from the reviews; none is fixed.

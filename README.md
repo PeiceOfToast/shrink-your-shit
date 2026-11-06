@@ -120,8 +120,10 @@ with a Retry button.
 The first video stream becomes HEVC; audio, subtitles, attachments (fonts) and extra
 streams are copied unchanged. The new file keeps the original's container (`.mkv` stays
 `.mkv`). Data streams (e.g. timecode) are dropped. Before replacing anything the program
-checks that the result is readable, about the same length, and **smaller** than the original;
-otherwise the original is kept and the job fails.
+checks that the new file has the same streams (audio, subtitles, chapters...), the same length and frame count, plays
+without decode errors, looks like the original, and is **smaller**. If any check fails, or cannot run, the original
+is kept and the job shows "original kept" with the reason in plain words. It also needs free disk space about the
+size of the original.
 
 ## Settings
 
@@ -136,6 +138,8 @@ Run `./shrink-your-shit -h` for all of them. The main ones:
 | `-crf` | `26` | quality: lower is better and bigger |
 | `-preset` | `medium` | x265 speed: `ultrafast` … `veryslow` |
 | `-output` | `replace` | `replace` or `beside` |
+| `-decode-check` | `auto` | play the new file through a decoder before replacing the original: `auto`, `always` or `off` |
+| `-min-ssim` | `0.95` | how similar the new picture must be to the original (0.5-1.0); an untuned starting value |
 | `-scan-every` | `30s` | how often to look for new files |
 | `-settle` | `15s` | skip files changed this recently (still copying) |
 | `-addr` | `127.0.0.1:8484` | web UI address (env `SYP_ADDR`) |

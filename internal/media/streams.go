@@ -278,3 +278,19 @@ func parseStream(m map[string]any, position int) Stream {
 	}
 	return s
 }
+
+// MainVideoOrdinal is the position of the main video stream among the file's video streams (the N
+// in ffmpeg's "0:v:N"), or -1 if there is none.
+func (i Info) MainVideoOrdinal() int {
+	n := 0
+	for k := range i.Streams {
+		if i.Streams[k].Type != "video" {
+			continue
+		}
+		if !i.Streams[k].AttachedPic {
+			return n
+		}
+		n++
+	}
+	return -1
+}

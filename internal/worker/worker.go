@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
@@ -29,6 +30,8 @@ type Queue interface {
 	Fail(id int64, msg string) error
 	// Release puts a running job back in the queue (used on shutdown).
 	Release(id int64) error
+	// Keep marks a job "kept original": a safety check refused the result (reason says why).
+	Keep(id int64, reason string) error
 }
 
 // OutputMode says what happens to the result.
@@ -54,6 +57,18 @@ type Worker struct {
 	Poll    time.Duration
 	// OnDone is called after a job succeeds with the final path (optional).
 	OnDone func(job jobs.Job, finalPath string)
+
+	// Safety checks (see verify.go). Zero values mean the defaults.
+	DecodeCheck string  // "auto" (default), "always" or "off"
+	MinSSIM     float64 // 0 = DefaultMinSSIM
+	// FullDecodeMaxSec: in "auto" mode, files up to this length are decoded completely, longer ones at
+	// three sampled places. 0 = 3 hours.
+	FullDecodeMaxSec float64
+	// FreeSpace reports the writable bytes on the volume holding dir; nil = the real thing.
+	FreeSpace func(dir string) (uint64, error)
+
+	mu         sync.Mutex
+	filterMemo map[string]bool
 }
 
 // Run processes jobs until ctx is cancelled.
@@ -87,6 +102,14 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 			// Shutting down: not the file's fault, so run it again next start.
 			return true, w.Queue.Release(job.ID)
 		}
+		var ke *KeptError
+		if errors.As(err, &ke) {
+			// A safety check said no: the original is untouched, the temp file is gone.
+			if kerr := w.Queue.Keep(job.ID, ke.Reason); kerr != nil {
+				return true, kerr
+			}
+			return true, err
+		}
 		if ferr := w.Queue.Fail(job.ID, err.Error()); ferr != nil {
 			return true, ferr
 		}
@@ -119,62 +142,70 @@ func BesidePath(src string) string {
 	return strings.TrimSuffix(src, ext) + ".hevc" + ext
 }
 
-func (w *Worker) process(ctx context.Context, job jobs.Job) (string, error) {
-	if _, err := os.Stat(job.Path); err != nil {
-		return "", fmt.Errorf("source file: %w", err)
+// process converts one file and replaces the original only if every safety check passes. The order is
+// the safety story: nothing is written until the pre-checks pass; the new file is only ever a temp
+// file next to the original; every check runs on that temp file; the rename is the very last step, and
+// any error or "no" before it removes the temp file and leaves the original exactly as it was.
+func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err error) {
+	before, serr := os.Stat(job.Path)
+	if serr != nil {
+		return "", fmt.Errorf("source file: %w", serr)
 	}
-	before, _ := os.Stat(job.Path)
 	tmp := TempPath(job.Path)
 	os.Remove(tmp) // leftover from a crash
-	args := media.HEVCArgs(job.Path, tmp, w.Rule.CRF, w.Rule.Preset)
-	err := media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p float64) {
-		w.Queue.Progress(job.ID, p)
-	})
-	if err != nil {
-		os.Remove(tmp)
+	done := false
+	defer func() {
+		if !done {
+			os.Remove(tmp)
+		}
+	}()
+
+	// What the source looks like (and so what the new file must look like).
+	src, perr := media.Probe(ctx, w.Exec, w.FFprobe, job.Path)
+	if perr != nil {
+		return "", kept("the original cannot be read any more (%v)", perr)
+	}
+	if err := w.preflight(job.Path, before.Size()); err != nil {
 		return "", err
 	}
-	st, err := os.Stat(tmp)
-	if err != nil || st.Size() == 0 {
-		os.Remove(tmp)
-		return "", fmt.Errorf("ffmpeg produced no output")
+	var packets int64
+	if ord := src.MainVideoOrdinal(); ord >= 0 {
+		n, cerr := media.CountVideoPackets(ctx, w.Exec, w.FFprobe, job.Path, ord)
+		if cerr != nil {
+			return "", kept("could not count the original's video frames (%v)", cerr)
+		}
+		packets = n
 	}
-	// Sanity-check the result: same length as the source, and actually smaller.
-	if err := w.verify(ctx, job, tmp, before.Size()); err != nil {
-		os.Remove(tmp)
+	exp := DefaultExpect(src, packets)
+	if exp.DurationSec <= 0 {
+		exp.DurationSec = job.DurationSec
+	}
+
+	args := media.HEVCArgs(job.Path, tmp, w.Rule.CRF, w.Rule.Preset)
+	if terr := media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p float64) {
+		w.Queue.Progress(job.ID, p)
+	}); terr != nil {
+		return "", terr
+	}
+
+	if err := w.verify(ctx, src, exp, job.Path, tmp, before.Size()); err != nil {
 		return "", err
 	}
 	// If the source changed while we encoded, our result is stale: don't clobber it.
-	if now, err := os.Stat(job.Path); err != nil || now.Size() != before.Size() || !now.ModTime().Equal(before.ModTime()) {
-		os.Remove(tmp)
-		return "", fmt.Errorf("source file changed while encoding; not replacing it")
+	if now, nerr := os.Stat(job.Path); nerr != nil || now.Size() != before.Size() || !now.ModTime().Equal(before.ModTime()) {
+		return "", kept("the original file changed while it was being converted, so the new file is out of date")
 	}
 	os.Chmod(tmp, before.Mode().Perm()) // keep the original's permissions
-	final := job.Path
+	final = job.Path
 	if w.Mode == Beside {
 		final = BesidePath(job.Path)
 	}
 	// Rename is atomic on one filesystem: the original is only replaced by a complete file.
 	if err := moveIntoPlace(ctx, tmp, final); err != nil {
-		os.Remove(tmp)
 		return "", fmt.Errorf("move result into place: %w", err)
 	}
+	done = true
 	return final, nil
-}
-
-// verify refuses output that looks truncated or did not save space.
-func (w *Worker) verify(ctx context.Context, job jobs.Job, tmp string, origSize int64) error {
-	info, err := media.Probe(ctx, w.Exec, w.FFprobe, tmp)
-	if err != nil {
-		return fmt.Errorf("result is not a readable video: %w", err)
-	}
-	if job.DurationSec > 0 && (info.DurationSec < job.DurationSec*0.98 || info.DurationSec > job.DurationSec*1.02) {
-		return fmt.Errorf("result is %.0fs long, source is %.0fs; keeping the original", info.DurationSec, job.DurationSec)
-	}
-	if st, err := os.Stat(tmp); err == nil && st.Size() >= origSize {
-		return fmt.Errorf("result (%d bytes) is not smaller than the original (%d bytes); keeping the original", st.Size(), origSize)
-	}
-	return nil
 }
 
 // moveIntoPlace renames tmp over final. On Windows the rename fails while
