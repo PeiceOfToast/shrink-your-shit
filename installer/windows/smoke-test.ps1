@@ -31,6 +31,7 @@ function RunSetup([string[]]$extra) {
   # Not "-Wait": that also waits for every process the installer started, and the program it starts
   # is meant to keep running.
   $p = Start-Process -FilePath $Setup -ArgumentList $setupArgs -PassThru
+  $null = $p.Handle   # keeps ExitCode readable in Windows PowerShell 5.1
   $p.WaitForExit()
   if ($p.ExitCode -ne 0) { Fail "installer exit code $($p.ExitCode)" }
 }
@@ -88,6 +89,7 @@ Step 'uninstall'
 $un = Get-ChildItem $app -Filter 'unins*.exe' | Select-Object -First 1
 if (-not $un) { Fail 'no uninstaller found' }
 $p = Start-Process -FilePath $un.FullName -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -PassThru
+$null = $p.Handle
 $p.WaitForExit()
 if ($p.ExitCode -ne 0) { Fail "uninstaller exit code $($p.ExitCode)" }
 WaitFor 'the program to stop' { -not (Get-Process shrink-your-shit -ErrorAction SilentlyContinue) } 30
