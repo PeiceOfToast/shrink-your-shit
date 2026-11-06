@@ -49,3 +49,17 @@ jobs:
           go-version-file: go.mod
       - run: go build ./...
       - run: go vet ./...
+
+  docker:
+    name: docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t shrink-your-shit .
+      - name: smoke test (web page answers inside the container)
+        run: |
+          docker run -d --name syp -p 8484:8484 -v "$RUNNER_TEMP":/media shrink-your-shit
+          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8484/api/status && exit 0; sleep 1; done
+          docker logs syp
+          exit 1

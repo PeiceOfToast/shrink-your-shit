@@ -33,10 +33,10 @@ func (l *libFlag) Set(v string) error { *l = append(*l, v); return nil }
 
 func main() {
 	var libs libFlag
-	flag.Var(&libs, "library", "folder to watch (repeat for several)")
+	flag.Var(&libs, "library", "folder to watch (repeat for several; or env SYP_LIBRARIES, separated by : on Linux/macOS, ; on Windows)")
 	def := rules.Default()
 	data := flag.String("data", defaultDataDir(), "folder for the database (default: your user config folder; env SYP_DATA)")
-	addr := flag.String("addr", "127.0.0.1:8484", "web UI address")
+	addr := flag.String("addr", envOr("SYP_ADDR", "127.0.0.1:8484"), "web UI address; use 0.0.0.0:8484 to allow other machines (no login yet, see README) (env SYP_ADDR)")
 	from := flag.String("from-codec", def.FromCodec, "only convert files with this video codec")
 	minKbps := flag.Int("min-bitrate", def.MinBitrateKbps, "only convert files above this video bitrate (kbps)")
 	crf := flag.Int("crf", def.CRF, "HEVC quality (lower = better quality, bigger file)")
@@ -49,7 +49,10 @@ func main() {
 	flag.Parse()
 
 	if len(libs) == 0 {
-		fmt.Fprintln(os.Stderr, "Tell me which folder to watch, e.g.:\n  shrink-your-shit -library /path/to/videos")
+		libs = librariesFromEnv()
+	}
+	if len(libs) == 0 {
+		fmt.Fprintln(os.Stderr, "Tell me which folder to watch, e.g.:\n  shrink-your-shit -library /path/to/videos\n(or set SYP_LIBRARIES)")
 		os.Exit(2)
 	}
 	if *mode != string(worker.Replace) && *mode != string(worker.Beside) {
@@ -102,6 +105,9 @@ func main() {
 		<-ctx.Done()
 		srv.Shutdown(context.Background())
 	}()
+	if exposedToNetwork(*addr) {
+		log.Print("WARNING: the web page is reachable from other machines and has no login yet. Only use this on a network you trust; never expose it to the internet.")
+	}
 	log.Printf("watching %v; web UI at http://%s", []string(libs), *addr)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		stop()

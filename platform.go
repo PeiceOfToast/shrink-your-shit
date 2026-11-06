@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -64,4 +65,37 @@ func installHint() string {
 	default:
 		return "Install ffmpeg (Debian/Ubuntu/WSL2: sudo apt install ffmpeg)."
 	}
+}
+
+// envOr returns the environment variable key, or def if it is unset or empty.
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+// librariesFromEnv reads SYP_LIBRARIES: folders separated by the OS list
+// separator (":" on Linux/macOS, ";" on Windows). Used when no -library flag is given.
+func librariesFromEnv() []string {
+	var out []string
+	for _, p := range filepath.SplitList(os.Getenv("SYP_LIBRARIES")) {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// exposedToNetwork reports whether addr lets other machines connect (anything but loopback).
+func exposedToNetwork(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return true
+	}
+	if host == "localhost" {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip == nil || !ip.IsLoopback()
 }
