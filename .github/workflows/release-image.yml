@@ -46,6 +46,7 @@ jobs:
           load: true
           tags: syp-smoke
           cache-from: type=gha
+          cache-to: type=gha,mode=max
       - name: Smoke test (non-root, web page answers)
         run: |
           test "$(docker run --rm --entrypoint id syp-smoke -u)" = 1000
