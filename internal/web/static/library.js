@@ -7,15 +7,15 @@
   var DESC = ["Shrinks the most. Some files may lose a little detail. Best for space-starved drives.", "Smaller files, small quality trade-off.",
     "Shrinks most files with little visible change. A good start for most people.", "Keeps more detail. Only touches files with lots of room to shrink.",
     "Keeps nearly all detail. Only touches files with lots of room to shrink, so savings are small."];
-  var Q = [27, 25, 23, 21, 19], M = [20, 15, 10, 8, 5];
+  var table = []; // the engine's slider table (crf, minSavingPct per position), read from the server
 
   function say(t) { $("said").textContent = t; }
   function fail(e) { var b = $("err"); b.firstChild.textContent = e && e.message || "Something went wrong. Nothing was changed."; b.hidden = false; }
   function facts() {
-    var v = slider.get().quality - 1, li = $("facts").children;
+    var v = slider.get().quality - 1, li = $("facts").children, row = table[v];
     $("desc").textContent = DESC[v];
-    li[0].textContent = "Video: converted to a smaller format at quality " + Q[v];
-    li[2].textContent = "Skipped: HDR and Dolby Vision files, files that are already small, files that would shrink by less than " + M[v] + "%";
+    li[0].textContent = "Video: converted to a smaller format";
+    li[2].textContent = "Skipped: HDR and Dolby Vision files, files that are already small" + (row ? ", files that would shrink by less than " + row.minSavingPct + "%" : "");
   }
   function head() {
     $("lib-title").textContent = lib.name; $("lib-path").textContent = lib.path; document.title = lib.name + " - shrink-your-shit";
@@ -53,9 +53,10 @@
         custom = setting.quality == null;
         $("custom").hidden = !custom;
         slider = ed.slider($("slider"), setting.quality || 3, function () { facts(); prev.mark(); }, lib.name + ": smallest file to best quality");
-        facts();
         if (custom) $("save").textContent = "Use this slider setting";
         $("save").onclick = save;
+        // The slider's table comes from the server (echoed in the setting, or on its own for a custom setting).
+        Promise.resolve(setting.positions ? setting : api.getSliderTable()).then(function (t) { table = t.positions; facts(); }, facts);
       }
       $("scan").onclick = function () {
         api.scanLibrary({ id: id }).then(function () { say("Scan started. Progress shows in Activity."); return api.getLibrary({ id: id }); })

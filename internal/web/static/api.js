@@ -14,6 +14,7 @@
     checkLibrary: ["POST", "/api/libraries/check"], browseDirs: ["GET", "/api/fs/dirs"],
     getLibrary: ["GET", "/api/libraries/{id}"], patchLibrary: ["PATCH", "/api/libraries/{id}"],
     deleteLibrary: ["DELETE", "/api/libraries/{id}"], scanLibrary: ["POST", "/api/libraries/{id}/scan"],
+    getSliderTable: ["GET", "/api/settings/slider"],
     getSetting: ["GET", "/api/libraries/{id}/setting"], putSetting: ["PUT", "/api/libraries/{id}/setting"],
     replaceCustom: ["POST", "/api/libraries/{id}/setting/replace-custom"],
     putLibraryFlow: ["PUT", "/api/libraries/{id}/flow"],

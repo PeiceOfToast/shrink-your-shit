@@ -157,6 +157,13 @@ func TestCopyBannedWords(t *testing.T) {
 			t.Errorf("COPY-1: %q in %s", m, name)
 		}
 	}
+	// Design decision: no raw "quality N" / CRF number on screen at Basic or Standard.
+	number := regexp.MustCompile(`(?i)\b(quality|crf) \d`)
+	for name, s := range texts {
+		if m := number.FindString(s); m != "" {
+			t.Errorf("COPY: %q in %s (names and plain effects only)", m, name)
+		}
+	}
 }
 
 // NAV-7: at Basic and Standard the word "flow" is nowhere in the UI. Every page except the Flows page

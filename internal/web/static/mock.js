@@ -33,13 +33,18 @@
   try { var sl = sessionStorage.getItem("syp-mock-libs"); if (sl) libs = JSON.parse(sl); } catch (e) {}
   // ?fresh=1 on the wizard starts over: no libraries, first-run not done.
   if (/[?&]fresh=1/.test(location.search)) { libs = []; settings.firstRunDone = false; settings.firstRunStep = 1; persist(); saveLibs(); }
-  function saveLibs() { try { sessionStorage.setItem("syp-mock-libs", JSON.stringify(libs)); } catch (e) {} }
+  function saveLibs() { try { sessionStorage.setItem("syp-mock-libs", JSON.stringify(libs)); sessionStorage.setItem("syp-mock-flows", JSON.stringify(flows)); } catch (e) {} }
   var flows = [
     { id: "f1", name: "Movies - Balanced", usedBy: ["Movies"], madeWith: "slider", changedAt: iso(9 * 864e5) },
     { id: "f2", name: "TV Shows - Smaller", usedBy: ["TV Shows", "Anime"], madeWith: "slider", changedAt: iso(20 * 864e5) },
     { id: "f3", name: "Home videos - hand made", usedBy: ["Home videos"], madeWith: "builder", changedAt: iso(3 * 864e5) },
     { id: "f4", name: "Old setting", usedBy: [], madeWith: "slider", changedAt: iso(60 * 864e5) }
   ];
+  try { var sf = sessionStorage.getItem("syp-mock-flows"); if (sf) flows = JSON.parse(sf); } catch (e) {}
+  // The slider table is the engine's (untuned starting values): crf is x265's, lower = better quality.
+  var SLIDER = [{ position: 1, name: "Smallest", crf: 27, minSavingPct: 20 }, { position: 2, name: "Smaller", crf: 25, minSavingPct: 15 },
+    { position: 3, name: "Balanced", crf: 23, minSavingPct: 10 }, { position: 4, name: "Better quality", crf: 21, minSavingPct: 8 },
+    { position: 5, name: "Best quality", crf: 19, minSavingPct: 5 }];
   var paused = false, pv = false;
   var working = [{ jobId: "j1", library: "Movies", path: "/media/movies/Alien (1979).mkv", phase: "converting", percent: 42, etaSeconds: 1500, fromBytes: 9 * GB, expectedBytes: 4 * GB },
                  { jobId: "j2", library: "Movies", path: "/media/movies/Heat (1995).mkv", phase: "checking", percent: 96, etaSeconds: 60, fromBytes: 7 * GB, expectedBytes: 3 * GB }];
@@ -101,17 +106,23 @@
       return r ? ok() : gone();
     },
     scanLibrary: function (p) { var i = find(libs, "id", p.id); if (i >= 0) { libs[i].started = true; libs[i].state = "working"; saveLibs(); } return ok(); },
+    getSliderTable: function () { return ok({ positions: SLIDER }); },
     getSetting: function (p) {
       var i = find(libs, "id", p.id);
       if (i < 0) return fail(404, "not_found", "That library is gone. Nothing was changed.");
       if (libs[i].settingKind === "custom") return ok({ kind: "custom" });
-      return ok({ quality: libs[i].quality || (libs[i].settingLabel === "Smaller" ? 2 : 3) });
+      return ok({ quality: libs[i].quality || (libs[i].settingLabel === "Smaller" ? 2 : 3), positions: SLIDER });
     },
     putSetting: function (p, b) {
       var i = find(libs, "id", p.id);
       if (i < 0) return fail(404, "not_found", "That library is gone. Nothing was changed.");
       var f = flows[find(flows, "id", libs[i].flowId)];
       if (f && f.usedBy.length > 1 && !b.sharedFlowChoice) return fail(409, "flow_shared", "Another library uses this setting. Nothing was changed.", { usedBy: f.usedBy.filter(function (n) { return n !== libs[i].name; }) });
+      if (f && f.usedBy.length > 1 && b.sharedFlowChoice === "make_copy") {
+        f.usedBy = f.usedBy.filter(function (n) { return n !== libs[i].name; });
+        var nf = { id: "f" + (flows.length + 10), name: libs[i].name + " - " + (b.quality ? SLIDER[b.quality - 1].name : "Copy"), usedBy: [libs[i].name], madeWith: "slider", changedAt: iso(0) };
+        flows.push(nf); libs[i].flowId = nf.id; saveLibs();
+      }
       if (b.quality) { libs[i].quality = b.quality; libs[i].settingLabel = ["Smallest file", "Smaller", "Balanced", "Better quality", "Best quality"][b.quality - 1]; libs[i].settingKind = "slider"; saveLibs(); }
       return ok();
     },
@@ -143,14 +154,14 @@
     },
     restoreKept: function (p) { return removeFrom(keptList, "keptId", p.id) ? ok() : gone(); },
     listFlows: function () { return ok(list(flows)); },
-    createFlow: function (p, b) { var f = { id: "f" + (flows.length + 10), name: b.name || "New flow", usedBy: [], madeWith: "builder", changedAt: iso(0) }; flows.push(f); return ok(f); },
-    renameFlow: function (p, b) { var i = find(flows, "id", p.id); if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed."); flows[i].name = b.name || flows[i].name; return ok(flows[i]); },
-    duplicateFlow: function (p) { var i = find(flows, "id", p.id); if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed."); var f = copy(flows[i]); f.id = "f" + (flows.length + 10); f.name += " (copy)"; f.usedBy = []; flows.push(f); return ok(f); },
+    createFlow: function (p, b) { var f = { id: "f" + (flows.length + 10), name: b.name || "New flow", usedBy: [], madeWith: "builder", changedAt: iso(0) }; flows.push(f); saveLibs(); return ok(f); },
+    renameFlow: function (p, b) { var i = find(flows, "id", p.id); if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed."); flows[i].name = b.name || flows[i].name; saveLibs(); return ok(flows[i]); },
+    duplicateFlow: function (p) { var i = find(flows, "id", p.id); if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed."); var f = copy(flows[i]); f.id = "f" + (flows.length + 10); f.name += " (copy)"; f.usedBy = []; flows.push(f); saveLibs(); return ok(f); },
     deleteFlow: function (p) {
       var i = find(flows, "id", p.id);
       if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed.");
       if (flows[i].usedBy.length) return fail(409, "flow_in_use", "In use by " + flows[i].usedBy.join(", ") + ". Nothing was deleted.", { usedBy: flows[i].usedBy });
-      flows.splice(i, 1); return ok();
+      flows.splice(i, 1); saveLibs(); return ok();
     },
     importFlow: function () { return ok(); },
     exportFlow: function (p) { var i = find(flows, "id", p.id); return i < 0 ? fail(404, "not_found", "That flow is gone.") : ok(flows[i]); },
