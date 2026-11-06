@@ -12,7 +12,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -36,7 +35,7 @@ func main() {
 	var libs libFlag
 	flag.Var(&libs, "library", "folder to watch (repeat for several)")
 	def := rules.Default()
-	data := flag.String("data", "./data", "folder for the database")
+	data := flag.String("data", defaultDataDir(), "folder for the database (default: your user config folder; env SYP_DATA)")
 	addr := flag.String("addr", "127.0.0.1:8484", "web UI address")
 	from := flag.String("from-codec", def.FromCodec, "only convert files with this video codec")
 	minKbps := flag.Int("min-bitrate", def.MinBitrateKbps, "only convert files above this video bitrate (kbps)")
@@ -45,8 +44,8 @@ func main() {
 	mode := flag.String("output", string(worker.Replace), "replace: swap in the new file once it is complete; beside: keep the original, write name.hevc.ext")
 	every := flag.Duration("scan-every", 30*time.Second, "how often to look for new files")
 	settle := flag.Duration("settle", 15*time.Second, "ignore files modified more recently than this (still copying)")
-	ffmpeg := flag.String("ffmpeg", "ffmpeg", "path to ffmpeg")
-	ffprobe := flag.String("ffprobe", "ffprobe", "path to ffprobe")
+	ffmpeg := flag.String("ffmpeg", os.Getenv("SYP_FFMPEG"), "path to ffmpeg (default: find it; env SYP_FFMPEG)")
+	ffprobe := flag.String("ffprobe", os.Getenv("SYP_FFPROBE"), "path to ffprobe (default: find it; env SYP_FFPROBE)")
 	flag.Parse()
 
 	if len(libs) == 0 {
@@ -66,10 +65,13 @@ func main() {
 		}
 		libs[i] = abs
 	}
-	for _, tool := range []string{*ffmpeg, *ffprobe} {
-		if _, err := exec.LookPath(tool); err != nil {
-			log.Fatalf("can't find %q. Install ffmpeg (Ubuntu/WSL2: sudo apt install ffmpeg) and try again.", tool)
-		}
+	ffmpegPath, err := resolveTool("ffmpeg", *ffmpeg)
+	if err != nil {
+		log.Fatal(err)
+	}
+	ffprobePath, err := resolveTool("ffprobe", *ffprobe)
+	if err != nil {
+		log.Fatal(err)
 	}
 	if err := os.MkdirAll(*data, 0o755); err != nil {
 		log.Fatal(err)
@@ -84,13 +86,13 @@ func main() {
 	}
 
 	rule := rules.Rule{FromCodec: *from, MinBitrateKbps: *minKbps, CRF: *crf, Preset: *preset}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM) // SIGTERM is a no-op on Windows; Ctrl+C works everywhere
 	defer stop()
 
 	x := media.OSExec{}
-	sc := &scanner.Scanner{Store: store, Exec: x, FFprobe: *ffprobe, Rule: rule, Libraries: libs, MinAge: *settle}
+	sc := &scanner.Scanner{Store: store, Exec: x, FFprobe: ffprobePath, Rule: rule, Libraries: libs, MinAge: *settle}
 	go sc.Run(ctx, *every)
-	w := &worker.Worker{ID: "builtin", Queue: store, Exec: x, FFmpeg: *ffmpeg, FFprobe: *ffprobe, Rule: rule,
+	w := &worker.Worker{ID: "builtin", Queue: store, Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath, Rule: rule,
 		Mode: worker.OutputMode(*mode), Poll: 3 * time.Second}
 	workerDone := make(chan struct{})
 	go func() { w.Run(ctx); close(workerDone) }()

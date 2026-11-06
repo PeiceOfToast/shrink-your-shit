@@ -33,7 +33,7 @@ func setup(t *testing.T, probe string) (*Scanner, *jobs.Store, string, *media.Fa
 }
 
 func TestIsVideo(t *testing.T) {
-	for p, want := range map[string]bool{"a.mkv": true, "A.MP4": true, "a.txt": false, "a.syp-tmp.mkv": false, "a.hevc.mkv": false, "Show.S01E01.hevc.x265.mkv": true} {
+	for p, want := range map[string]bool{"a.mkv": true, "A.MP4": true, "a.txt": false, "a.syp-tmp.mkv": false, "a.hevc.mkv": false, "._a.mp4": false, "B.MKV": true, "Show.S01E01.hevc.x265.mkv": true} {
 		if IsVideo(p) != want {
 			t.Errorf("%s: want %v", p, want)
 		}
@@ -96,5 +96,23 @@ func TestNoSecondJobWhileOpen(t *testing.T) {
 	}
 	if l, _ := st.List(10); len(l) != 1 {
 		t.Errorf("%+v", l)
+	}
+}
+
+func TestSkipsHiddenFolders(t *testing.T) {
+	s, st, lib, _ := setup(t, h264Big)
+	for _, d := range []string{".Trash/files", "@eaDir/x", "$RECYCLE.BIN/s", "Movies/Action"} {
+		os.MkdirAll(filepath.Join(lib, d), 0o755)
+		os.WriteFile(filepath.Join(lib, d, "t.mkv"), []byte("12345"), 0o644)
+	}
+	s.ScanOnce(context.Background())
+	l, _ := st.List(10)
+	got := map[string]bool{}
+	for _, j := range l {
+		rel, _ := filepath.Rel(lib, j.Path)
+		got[filepath.ToSlash(rel)] = true
+	}
+	if len(got) != 2 || !got["a.mkv"] || !got["Movies/Action/t.mkv"] {
+		t.Errorf("queued %v", got)
 	}
 }

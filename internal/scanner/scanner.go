@@ -24,12 +24,28 @@ var videoExt = map[string]bool{".mkv": true, ".mp4": true, ".m4v": true, ".avi":
 // Our own temp and output files are ignored.
 func IsVideo(path string) bool {
 	base := strings.ToLower(filepath.Base(path))
+	if strings.HasPrefix(base, ".") {
+		return false // hidden files, e.g. macOS "._name.mp4" metadata stubs
+	}
 	ext := filepath.Ext(base)
 	stem := strings.TrimSuffix(base, ext)
 	if strings.HasSuffix(stem, ".syp-tmp") || strings.HasSuffix(stem, ".hevc") {
 		return false
 	}
 	return videoExt[ext]
+}
+
+// SkipDir reports whether a folder should not be scanned: hidden folders
+// (.Trash, .AppleDouble, ...), Synology's @eaDir and Windows' recycle bin.
+func SkipDir(name string) bool {
+	if strings.HasPrefix(name, ".") {
+		return true
+	}
+	switch strings.ToLower(name) {
+	case "@eadir", "$recycle.bin", "system volume information":
+		return true
+	}
+	return false
 }
 
 // Scanner finds work.
@@ -56,7 +72,16 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			if err != nil || d.IsDir() || !IsVideo(path) {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() {
+				if path != lib && SkipDir(d.Name()) {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if !IsVideo(path) {
 				return nil
 			}
 			info, err := d.Info()
