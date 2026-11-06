@@ -29,7 +29,8 @@
   }
   function btn(txt, key, fn, cls) { var b = el("button", cls || "btn small", txt); b.type = "button"; b.setAttribute("data-key", key); b.onclick = fn; return b; }
   function empty(t) { var c = el("div", "card empty"); c.appendChild(el("p", null, t)); return c; }
-  function act(p) { return p.then(refresh, fail); }
+  // Run an action, refresh, and (when a row went away) land on the heading AFTER the redraw, so focus is not lost.
+  function act(p, land) { return p.then(refresh).then(land ? after : null).catch(fail); }
 
   // ---- header
   var paused = false;
@@ -61,7 +62,7 @@
           var line = el("p", "small muted", conv ? j.percent + "% · " + eta(j.etaSeconds) + " · " + ui.bytes(j.fromBytes) + " → expected about " + ui.bytes(j.expectedBytes)
             : "Playing the new file start to end before it replaces the original"); line.style.margin = "8px 0";
           c.appendChild(line);
-          if (conv) { c.appendChild(btn("Stop this file", "stop-" + j.jobId, function () { act(api.stopJob({ id: j.jobId })); })); c.appendChild(el("span", "hint small", " It moves to Skipped, where you can convert it again.")); }
+          if (conv) { c.appendChild(btn("Stop this file", "stop-" + j.jobId, function () { act(api.stopJob({ id: j.jobId }), true); })); c.appendChild(el("span", "hint small", " It moves to Skipped, where you can convert it again.")); }
           pane.appendChild(c);
         });
         pane.appendChild(el("h2", null, "Up next"));
@@ -99,7 +100,7 @@
           var why = el("div"), known = ui.REASONS[i.reason];
           why.appendChild(el("span", "badge " + (KIND[i.reason] || "idle"), known ? cap(known) : "Other reason")); why.appendChild(document.createElement("br")); why.appendChild(document.createTextNode(i.detail || (known ? "" : i.reason)));
           var a = null;
-          if (i.reason === "user_stopped" || i.reason === "restored") a = btn("Convert again", "again-" + i.id, function () { act(api.convertAgain({ id: i.id }).then(after)); });
+          if (i.reason === "user_stopped" || i.reason === "restored") a = btn("Convert again", "again-" + i.id, function () { act(api.convertAgain({ id: i.id }), true); });
           else if (i.libraryId && RULE[i.reason]) { a = el("a", "btn small", "Change rule"); a.href = "/library/?id=" + encodeURIComponent(i.libraryId); }
           tb.row([nameOf(i), why, a]);
         });
@@ -127,7 +128,7 @@
         r.items.forEach(function (i) {
           var why = el("div"); why.appendChild(el("span", "badge bad", "Failed")); why.appendChild(document.createTextNode(" ")); why.appendChild(el("strong", null, i.title)); why.appendChild(document.createElement("br")); why.appendChild(document.createTextNode(i.detail));
           if (i.originalUntouched === false) { why.appendChild(document.createElement("br")); why.appendChild(el("strong", null, "Check this file before trying again: the original may have changed.")); }
-          t.row([nameOf(i), why, btn("Retry", "retry-" + i.jobId, function () { act(api.retryJob({ id: i.jobId }).then(after)); })]);
+          t.row([nameOf(i), why, btn("Retry", "retry-" + i.jobId, function () { act(api.retryJob({ id: i.jobId }), true); })]);
         });
         pane.appendChild(t.wrap);
       });
@@ -160,7 +161,7 @@
     var h = el("h3", null, "Get the original of “" + base(i.path) + "” back?"); h.tabIndex = -1; h.setAttribute("data-key", "panel-h"); panel.appendChild(h);
     panel.appendChild(el("p", null, "The original (" + ui.bytes(i.originalBytes) + ") goes back in place. The smaller version is moved to the trash for a while, so you can switch back. This file will not be converted again unless you press Convert again, under Activity > Skipped."));
     var row = el("div", "row");
-    row.appendChild(btn("Get original back", "confirm", function () { act(api.restoreKept({ id: i.keptId }).then(function () { closePanel(); restoredNote = "Original of " + base(i.path) + " is back in place."; seen.kept = null; after(); })); }, "btn primary"));
+    row.appendChild(btn("Get original back", "confirm", function () { act(api.restoreKept({ id: i.keptId }).then(function () { closePanel(); restoredNote = "Original of " + base(i.path) + " is back in place."; seen.kept = null; }), true); }, "btn primary"));
     row.appendChild(btn("Cancel", "cancel", function () { closePanel(i.keptId); }, "btn")); panel.appendChild(row);
     panel.hidden = false; panel.scrollIntoView({ block: "nearest" }); h.focus();
   }
