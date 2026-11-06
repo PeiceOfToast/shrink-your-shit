@@ -157,7 +157,7 @@
   function closePanel(back) { panel.hidden = true; openFor = null; if (back) { var b = pane.querySelector('[data-key="restore-' + back + '"]'); if (b) b.focus(); } }
   function openPanel(i) {
     openFor = i.keptId; panel.textContent = "";
-    var h = el("h3", null, "Get the original of “" + base(i.path) + "” back?"); h.tabIndex = -1; panel.appendChild(h);
+    var h = el("h3", null, "Get the original of “" + base(i.path) + "” back?"); h.tabIndex = -1; h.setAttribute("data-key", "panel-h"); panel.appendChild(h);
     panel.appendChild(el("p", null, "The original (" + ui.bytes(i.originalBytes) + ") goes back in place. The smaller version is moved to the trash for a while, so you can switch back. This file will not be converted again unless you press Convert again, under Activity > Skipped."));
     var row = el("div", "row");
     row.appendChild(btn("Get original back", "confirm", function () { act(api.restoreKept({ id: i.keptId }).then(function () { closePanel(); restoredNote = "Original of " + base(i.path) + " is back in place."; seen.kept = null; after(); })); }, "btn primary"));
