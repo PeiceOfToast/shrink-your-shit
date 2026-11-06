@@ -46,21 +46,37 @@
     { position: 3, name: "Balanced", crf: 23, minSavingPct: 10 }, { position: 4, name: "Better quality", crf: 21, minSavingPct: 8 },
     { position: 5, name: "Best quality", crf: 19, minSavingPct: 5 }];
   var paused = false, pv = false;
-  var working = [{ jobId: "j1", library: "Movies", path: "/media/movies/Alien (1979).mkv", phase: "converting", percent: 42, etaSeconds: 1500, fromBytes: 9 * GB, expectedBytes: 4 * GB },
-                 { jobId: "j2", library: "Movies", path: "/media/movies/Heat (1995).mkv", phase: "checking", percent: 96, etaSeconds: 60, fromBytes: 7 * GB, expectedBytes: 3 * GB }];
+  var working = [{ jobId: "j1", library: "Movies", path: "/media/movies/The Long Road (2014).mkv", phase: "converting", percent: 62, etaSeconds: 840, fromBytes: 8.2 * GB, expectedBytes: 4.5 * GB },
+                 { jobId: "j2", library: "Movies", path: "/media/movies/Harbour Lights (2019).mkv", phase: "checking", percent: 100, etaSeconds: 0, fromBytes: 7 * GB, expectedBytes: 3 * GB }];
   var skippedList = [
-    { id: "s1", library: "TV Shows", path: "/media/tv/Show S01E01.mkv", reason: "already_efficient", detail: "Already small for its length.", libraryId: "2" },
-    { id: "s2", library: "Movies", path: "/media/movies/Dune.mkv", reason: "hdr_dv", detail: "HDR picture would lose its colours.", libraryId: "1" },
-    { id: "s3", library: "Movies", path: "/media/movies/Up.mkv", reason: "user_stopped", detail: "You stopped it.", libraryId: "1" },
-    { id: "s4", library: "Movies", path: "/media/movies/Tenet.mkv", reason: "some_future_code", detail: "A reason this version does not know by name.", libraryId: null }
+    { id: "s1", library: "TV Shows", path: "/media/tv/Show S01E01.mkv", reason: "already_efficient", detail: "Already small for its quality. Converting would save about 3%, less than the 10% minimum.", libraryId: "2" },
+    { id: "s2", library: "Movies", path: "/media/movies/Dune Sands (2021).mkv", reason: "hdr_dv", detail: "Skipped to protect the picture.", libraryId: "1" },
+    { id: "s3", library: "Movies", path: "/media/movies/Old Town (2008).mkv", reason: "already_hevc", detail: "Nothing to gain.", libraryId: null },
+    { id: "s4", library: "Movies", path: "/media/movies/Night Train (2016).mp4", reason: "shared_file", detail: "Another folder uses this same file (for example Radarr). Changing it would break that.", libraryId: null },
+    { id: "s5", library: "Movies", path: "/media/movies/Home Reel.avi", reason: "cannot_keep_track", detail: "The MP4 file type cannot hold the subtitle track, so the file was skipped rather than lose it.", libraryId: "1" },
+    { id: "s6", library: "Movies", path: "/media/movies/Cut Loose (2015).mkv", reason: "user_stopped", detail: "You pressed Stop this file while it was converting. Your original is untouched.", libraryId: "1" },
+    { id: "s7", library: "Movies", path: "/media/movies/Ocean Floor (2017).mkv", reason: "restored", detail: "Left alone so it is not converted again by surprise.", libraryId: "1" },
+    { id: "s8", library: "Movies", path: "/media/movies/Tenet (2020).mkv", reason: "some_future_code", detail: "A reason this version does not know by name.", libraryId: null },
+    { id: "s9", library: "TV Shows", path: "/media/tv/Blue Hour.mkv", reason: "would_not_shrink", detail: "The new file was only 2% smaller, less than the 10% minimum, so the original was kept.", libraryId: "2" }
   ];
-  var failedList = [{ jobId: "j9", library: "Movies", path: "/media/movies/Broken.mkv", title: "The new file did not pass the check", detail: "Your original was not touched. Try again, or leave it.", originalUntouched: true }];
-  var doneList = [{ jobId: "j5", library: "TV Shows", path: "/media/tv/Show S01E02.mkv", beforeBytes: 3 * GB, afterBytes: 1.2 * GB, originalState: "kept", keptDaysLeft: 5, keptId: "k1" }];
-  var keptList = [{ keptId: "k1", library: "TV Shows", path: "/media/tv/Show S01E02.mkv", originalBytes: 3 * GB, nowBytes: 1.2 * GB, deleteOn: iso(-5 * 864e5) }];
+  for (var gi = 1; gi <= 70; gi++) skippedList.push({ id: "g" + gi, library: "TV Shows", path: "/media/tv/Season 2/E" + (gi < 10 ? "0" : "") + gi + ".mkv", reason: "already_efficient", detail: "Already small for its quality.", libraryId: "2" });
+  var failedList = [
+    { jobId: "j9", library: "Movies", path: "/media/movies/Cut Short (2012).mkv", title: "The new file did not pass the check", detail: "The new file is 3 minutes shorter than the original, so it was thrown away. Try again; if it fails again, the original file may be damaged.", originalUntouched: true },
+    { jobId: "j10", library: "TV Shows", path: "/media/tv/Season 1/E03.mkv", title: "Not enough space", detail: "Needs about 14 GB free, only 6 GB is free. Free some space, then press Retry.", originalUntouched: true }
+  ];
+  var doneList = [
+    { jobId: "j5", library: "Movies", path: "/media/movies/Ocean Floor (2017).mkv", beforeBytes: 6.4 * GB, afterBytes: 3.3 * GB, originalState: "kept", keptDaysLeft: 5, keptId: "k1" },
+    { jobId: "j6", library: "Movies", path: "/media/movies/Paper Moon (2010).mkv", beforeBytes: 4 * GB, afterBytes: 2.2 * GB, originalState: "kept", keptDaysLeft: 6, keptId: "k2" },
+    { jobId: "j7", library: "TV Shows", path: "/media/tv/Season 1/E01.mkv", beforeBytes: 3 * GB, afterBytes: 1.4 * GB, originalState: "deleted", keptDaysLeft: 0, keptId: null }
+  ];
+  var keptList = [
+    { keptId: "k1", library: "Movies", path: "/media/movies/Ocean Floor (2017).mkv", originalBytes: 6.4 * GB, nowBytes: 3.3 * GB, deleteOn: iso(-5 * 864e5) },
+    { keptId: "k2", library: "Movies", path: "/media/movies/Paper Moon (2010).mkv", originalBytes: 4 * GB, nowBytes: 2.2 * GB, deleteOn: iso(-6 * 864e5) }
+  ];
 
   function summary() {
-    var kept = 0; keptList.forEach(function (k) { kept += k.originalBytes - k.nowBytes; });
-    return { freedBytes: 640 * GB, waitingBytes: kept, workingFiles: paused ? 0 : working.length, waitingFiles: 602, paused: paused,
+    var kept = 0; keptList.forEach(function (k) { kept += k.originalBytes; });
+    return { freedBytes: 310 * GB, waitingBytes: kept, workingFiles: paused ? 0 : working.length, waitingFiles: 590, paused: paused,
              counts: { skipped: skippedList.length, failed: failedList.length } };
   }
   function previewResult() {
@@ -69,6 +85,10 @@
   }
   function gone() { return fail(404, "not_found", "That item is gone. Nothing was changed. Reload the page."); }
   function removeFrom(arr, key, id) { var i = find(arr, key, id); return i < 0 ? null : arr.splice(i, 1)[0]; }
+
+  // Activity state survives page changes within the tab, like settings and libraries do.
+  try { var sa = JSON.parse(sessionStorage.getItem("syp-mock-act")); if (sa) { skippedList = sa.s; failedList = sa.f; doneList = sa.d; keptList = sa.k; working = sa.w; paused = sa.p; } } catch (e) {}
+  function saveAct() { try { sessionStorage.setItem("syp-mock-act", JSON.stringify({ s: skippedList, f: failedList, d: doneList, k: keptList, w: working, p: paused })); } catch (e) {} }
 
   var m = {
     login: function (p, b) { return b.token ? ok() : fail(401, "bad_token", "That token was not accepted. Nothing was changed. Check the address you were given."); },
@@ -147,26 +167,34 @@
       return ok(list([{ path: root + "/Alien (1979).mkv", bytes: 9 * GB }, { path: root + "/Heat (1995).mkv", bytes: 7 * GB }, { path: root + "/Show S02E04.mkv", bytes: 4.1 * GB }]));
     },
     activitySummary: function () { return ok(summary()); },
-    pause: function () { paused = true; return ok(); },
-    resume: function () { paused = false; return ok(); },
-    queue: function () { return ok({ working: paused ? [] : working, upNext: [{ library: "Movies", count: 590, order: "Smallest first" }] }); },
+    pause: function () { paused = true; saveAct(); return ok(); },
+    resume: function () { paused = false; saveAct(); return ok(); },
+    queue: function () {
+      if (!paused && working[0] && working[0].percent < 99) working[0].percent++; // moves a little on every look
+      return ok({ working: paused ? [] : working, upNext: [{ library: "Movies", count: 590, order: "Newest first" }, { library: "TV Shows", count: 0, order: "" }] });
+    },
     stopJob: function (p) {
       var j = removeFrom(working, "jobId", p.id); if (!j) return gone();
-      skippedList.push({ id: "s" + p.id, library: j.library, path: j.path, reason: "user_stopped", detail: "You stopped it.", libraryId: "1" }); return ok();
+      skippedList.push({ id: "s" + p.id, library: j.library, path: j.path, reason: "user_stopped", detail: "You stopped it.", libraryId: "1" }); saveAct(); return ok();
     },
-    retryJob: function (p) { return removeFrom(failedList, "jobId", p.id) ? ok() : gone(); },
+    retryJob: function (p) { var r = removeFrom(failedList, "jobId", p.id); saveAct(); return r ? ok() : gone(); },
     skipped: function (p) {
-      var r = skippedList.filter(function (s) { return !p.reason || s.reason === p.reason; });
-      return ok(list(r));
+      var r = skippedList.filter(function (x) { return !p.reason || x.reason === p.reason; }), off = +p.offset || 0, lim = +p.limit || 50;
+      return ok({ items: r.slice(off, off + lim), total: r.length });
     },
-    convertAgain: function (p) { return removeFrom(skippedList, "id", p.id) ? ok() : gone(); },
+    convertAgain: function (p) { var r = removeFrom(skippedList, "id", p.id); saveAct(); return r ? ok() : gone(); },
     failed: function () { return ok(list(failedList)); },
     done: function () { return ok(list(doneList)); },
     kept: function () {
       var b = 0; keptList.forEach(function (k) { b += k.originalBytes; });
       return ok({ keptBytes: b, count: keptList.length, days: settings.keepOriginalsDays, items: keptList });
     },
-    restoreKept: function (p) { return removeFrom(keptList, "keptId", p.id) ? ok() : gone(); },
+    restoreKept: function (p) {
+      var k = removeFrom(keptList, "keptId", p.id); if (!k) return gone();
+      removeFrom(doneList, "keptId", p.id);
+      skippedList.unshift({ id: "r" + p.id, library: k.library, path: k.path, reason: "restored", detail: "Left alone so it is not converted again by surprise.", libraryId: "1" });
+      saveAct(); return ok();
+    },
     listFlows: function () { return ok(list(flows)); },
     createFlow: function (p, b) { var f = { id: "f" + (flows.length + 10), name: b.name || "New flow", usedBy: [], madeWith: "builder", changedAt: iso(0) }; flows.push(f); saveLibs(); return ok(f); },
     renameFlow: function (p, b) { var i = find(flows, "id", p.id); if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed."); flows[i].name = b.name || flows[i].name; saveLibs(); return ok(flows[i]); },

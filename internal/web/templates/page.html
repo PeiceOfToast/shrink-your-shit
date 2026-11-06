@@ -11,8 +11,8 @@
 <button class="btn small" type="button" id="theme" hidden>Theme: Auto</button></header>
 <main id="main" tabindex="-1">
 <div class="mock-note card" role="note" id="mock-note" hidden>Showing sample data. Nothing here is real yet.</div>
-{{if eq .Kind "wizard"}}{{template "wizard" .}}{{else if eq .Kind "libraries"}}{{template "libraries" .}}{{else if eq .Kind "library"}}{{template "library" .}}{{else}}<div class="page-head"><h1>{{.Heading}}</h1></div>
-{{with .Tabs}}<nav aria-label="{{$.Heading}} sections" class="tabs">{{range .}}<a href="{{.Href}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}</nav>{{end}}
+{{if eq .Kind "wizard"}}{{template "wizard" .}}{{else if eq .Kind "libraries"}}{{template "libraries" .}}{{else if eq .Kind "library"}}{{template "library" .}}{{else if eq .Kind "activity"}}{{template "activity" .}}{{else}}<div class="page-head"><h1>{{.Heading}}</h1></div>
+{{template "tabs" .}}
 {{if eq .Kind "settings-general"}}<noscript><div class="notice info" role="note"><div><strong>Turn on scripts to change these</strong>Control level can only be changed with scripts enabled.</div></div></noscript>
 <form class="stack" id="general-form" hidden>
 <fieldset><legend>Control level</legend>

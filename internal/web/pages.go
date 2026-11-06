@@ -75,11 +75,11 @@ var pages = []page{
 	{Path: "/welcome/", Kind: "wizard", Tab: "Welcome"},
 	{Path: "/libraries/", Section: "libraries", Kind: "libraries", Empty: "Your libraries will show up here. A library is a folder of videos you want to make smaller."},
 	{Path: "/library/", Section: "libraries", Kind: "library", Tab: "Library"},
-	{Path: "/activity/", Section: "activity", Tab: "Queue", Empty: "Nothing is being converted right now. Files waiting for their turn will be listed here."},
-	{Path: "/activity/skipped/", Section: "activity", Tab: "Skipped", Empty: "Files that were left alone, and why, will be listed here."},
-	{Path: "/activity/failed/", Section: "activity", Tab: "Failed", Empty: "Files that could not be converted will be listed here. Your originals are never touched when something fails."},
-	{Path: "/activity/done/", Section: "activity", Tab: "Done", Empty: "Converted files will be listed here."},
-	{Path: "/activity/kept/", Section: "activity", Tab: "Kept originals", Empty: "Originals we are keeping for you will be listed here, with the date they will be deleted."},
+	{Path: "/activity/", Section: "activity", Kind: "activity", Tab: "Queue", Empty: "Nothing is being converted right now. Files waiting for their turn will be listed here."},
+	{Path: "/activity/skipped/", Section: "activity", Kind: "activity", Tab: "Skipped", Empty: "Files that were left alone, and why, will be listed here."},
+	{Path: "/activity/failed/", Section: "activity", Kind: "activity", Tab: "Failed", Empty: "Files that could not be converted will be listed here. Your originals are never touched when something fails."},
+	{Path: "/activity/done/", Section: "activity", Kind: "activity", Tab: "Done", Empty: "Converted files will be listed here."},
+	{Path: "/activity/kept/", Section: "activity", Kind: "activity", Tab: "Kept originals", Empty: "Originals we are keeping for you will be listed here, with the date they will be deleted."},
 	{Path: "/flows/", Section: "flows", Empty: "Your flows will be listed here."},
 	{Path: "/settings/", Section: "settings", Tab: "General", Kind: "settings-general"},
 	{Path: "/settings/safety/", Section: "settings", Tab: "Safety", Empty: "How long originals are kept will be set here."},
@@ -104,6 +104,8 @@ func scripts(kind string) []string {
 		return append(core, "ui.js", "badge.js", "folder.js", "libraries.js")
 	case "library":
 		return append(core, "ui.js", "badge.js", "editors.js", "library.js")
+	case "activity":
+		return append(core, "ui.js", "activity.js")
 	case "settings-general":
 		return append(core, "settings.js")
 	}
@@ -112,6 +114,7 @@ func scripts(kind string) []string {
 
 type pageView struct {
 	Scripts                              []string
+	Tab                                  string
 	Title, Heading, Section, Kind, Empty string
 	Nav                                  []navItem
 	Tabs                                 []tabView
@@ -126,7 +129,7 @@ func render(items []navItem, p page) ([]byte, error) {
 			heading = n.Label
 		}
 	}
-	v := pageView{Title: heading, Heading: heading, Section: p.Section, Kind: p.Kind, Empty: p.Empty, Scripts: scripts(p.Kind)}
+	v := pageView{Title: heading, Heading: heading, Section: p.Section, Kind: p.Kind, Empty: p.Empty, Scripts: scripts(p.Kind), Tab: p.Tab}
 	if p.Kind == "wizard" { // the top bar has no menu during first-run
 		v.Title, v.Heading = "Set up", "Set up"
 	} else {
