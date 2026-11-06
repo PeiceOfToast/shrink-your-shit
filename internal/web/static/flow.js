@@ -48,7 +48,8 @@
       if (meta.madeWith !== "builder" && lib) { note.appendChild(document.createTextNode("Change the setting on the ")); var a = el("a", null, lib.name + " library"); a.href = "/library/?id=" + encodeURIComponent(lib.id); note.appendChild(a); note.appendChild(document.createTextNode(" and this flow updates.")); }
       drawSteps(f.steps, $("graph")); text(f.steps, $("f-text"));
       $("f-body").hidden = false;
-      $("export").hidden = false; $("builder").hidden = false;
+      $("builder").hidden = false;
+      api.exportFlow({ id: id }).then(function () { $("export").hidden = false; }, function () {}); // Export shows only when the server can export
       $("export").onclick = function () {
         api.exportFlow({ id: id }).then(function (j) {
           var u = URL.createObjectURL(new Blob([JSON.stringify(j, null, 2)], { type: "application/json" })), a = el("a"); a.href = u; a.download = f.name + ".json"; a.click(); URL.revokeObjectURL(u);

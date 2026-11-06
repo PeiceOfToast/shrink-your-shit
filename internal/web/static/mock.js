@@ -58,6 +58,11 @@
   }
   var nextFlow = 20; function fid() { return "f" + nextFlow++; } // ids never repeat, also across page loads
   flows.forEach(function (f) { nextFlow = Math.max(nextFlow, (parseInt(f.id.slice(1), 10) || 0) + 1); });
+  // Import/export wait for the engine's own flow file format: until then the server answers 501 not_available.
+  // ?flowio=1 in the address turns them on in this mock (remembered for the tab).
+  var flowIO = false;
+  try { if (/[?&]flowio=1/.test(location.search)) sessionStorage.setItem("syp-mock-flowio", "1"); if (/[?&]flowio=0/.test(location.search)) sessionStorage.removeItem("syp-mock-flowio"); flowIO = sessionStorage.getItem("syp-mock-flowio") === "1"; } catch (e) {}
+  function notAvailable() { return fail(501, "not_available", "This is not available yet. Nothing was changed."); }
   var paused = false, pv = false;
   var working = [{ jobId: "j1", library: "Movies", path: "/media/movies/The Long Road (2014).mkv", phase: "converting", percent: 62, etaSeconds: 840, fromBytes: 8.2 * GB, expectedBytes: 4.5 * GB },
                  { jobId: "j2", library: "Movies", path: "/media/movies/Harbour Lights (2019).mkv", phase: "checking", percent: 100, etaSeconds: 0, fromBytes: 7 * GB, expectedBytes: 3 * GB }];
@@ -224,10 +229,11 @@
       flows.splice(i, 1); saveLibs(); return ok();
     },
     importFlow: function (p, b) {
+      if (!flowIO) return notAvailable();
       if (!b || !b.name) return fail(400, "bad_flow", "That file is not a flow. Nothing was imported.");
       var f = { id: fid(), name: b.name, usedBy: [], madeWith: "builder", changedAt: iso(0) }; flows.push(f); saveLibs(); return ok(f);
     },
-    exportFlow: function (p) { var i = find(flows, "id", p.id); return i < 0 ? fail(404, "not_found", "That flow is gone.") : ok({ name: flows[i].name, steps: stepsFor(flows[i]) }); },
+    exportFlow: function (p) { if (!flowIO) return notAvailable(); var i = find(flows, "id", p.id); return i < 0 ? fail(404, "not_found", "That flow is gone.") : ok({ name: flows[i].name, steps: stepsFor(flows[i]) }); },
     getFlow: function (p) {
       var i = find(flows, "id", p.id);
       if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed.");

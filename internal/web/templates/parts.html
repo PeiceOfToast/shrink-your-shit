@@ -63,7 +63,7 @@
 
 {{define "flows"}}<noscript><div class="notice info" role="note"><div><strong>Turn on scripts to see your flows</strong>The list needs scripts enabled.</div></div></noscript>
 <div class="page-head"><div><h1>Flows</h1><p class="muted">Every flow lives here. A flow says what happens to a video. Each library uses one flow.</p></div>
-<div class="row"><button class="btn" type="button" id="import">Import a flow</button><button class="btn primary" type="button" id="newflow">New flow</button></div></div>
+<div class="row"><button class="btn" type="button" id="import" hidden>Import a flow</button><button class="btn primary" type="button" id="newflow">New flow</button></div></div>
 <input type="file" id="importfile" accept=".json,application/json" hidden>
 <div class="notice bad" id="err" role="alert" hidden></div>
 <div id="flow-list"><div class="card empty"><p>{{.Empty}}</p></div></div>

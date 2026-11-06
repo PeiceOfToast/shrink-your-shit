@@ -9,6 +9,7 @@
     var d = Math.floor((Date.now() - new Date(iso)) / 864e5);
     return d < 1 ? "Today" : d < 14 ? d + (d === 1 ? " day ago" : " days ago") : Math.floor(d / 7) + " weeks ago";
   }
+  var probed = false;
   function btn(txt, cls, fn) { var b = el("button", "btn small " + (cls || ""), txt); b.type = "button"; b.onclick = fn; return b; }
 
   function rename(f, cell) {
@@ -16,6 +17,7 @@
     lb.htmlFor = id; inp.id = id; inp.type = "text"; inp.value = f.name; inp.size = 26;
     var ok = el("button", "btn small primary", "Save"), no = btn("Cancel", "", function () { load("f-" + f.id); });
     form.appendChild(lb); form.appendChild(inp); form.appendChild(ok); form.appendChild(no);
+    inp.onkeydown = function (e) { if (e.key === "Escape") { e.preventDefault(); load("f-" + f.id); } };
     form.onsubmit = function (e) { e.preventDefault(); if (inp.value.trim()) api.renameFlow({ id: f.id }, { name: inp.value.trim() }).then(function () { return load("f-" + f.id); }, fail); };
     cell.textContent = ""; cell.appendChild(form); inp.focus(); inp.select();
   }
@@ -40,7 +42,9 @@
   function load(key) {
     return api.listFlows().then(function (r) {
       var box = $("flow-list"); box.textContent = "";
-      if (!r.items.length) { var c = el("div", "card empty"); c.appendChild(el("p", null, "No flows yet. Press New flow to start one.")); box.appendChild(c); return; }
+      // Import is shown only when the server can do it (the engine's flow file format arrives later): ask once, with an export.
+      if (!probed) { probed = true; if (r.items.length) api.exportFlow({ id: r.items[0].id }).then(function () { $("import").hidden = false; }, function () {}); }
+      if (!r.items.length) { var c = el("div", "card empty"); c.appendChild(el("p", null, "No flows yet. Press New flow to start one.")); box.appendChild(c); if (key === "top") { var h0 = document.querySelector("h1"); h0.tabIndex = -1; h0.focus(); } return; }
       var w = el("div", "table-wrap"), t = el("table"), cap = el("caption", "small muted"), hd = el("thead"), hr = el("tr"), tb = el("tbody");
       var unused = r.items.filter(function (f) { return !f.usedBy.length; });
       cap.style.cssText = "text-align:left;padding-bottom:8px";
