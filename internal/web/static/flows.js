@@ -14,27 +14,30 @@
   function rename(f, cell) {
     var form = el("form", "row"), id = "rn-" + f.id, lb = el("label", "sr", "New name for " + f.name), inp = el("input");
     lb.htmlFor = id; inp.id = id; inp.type = "text"; inp.value = f.name; inp.size = 26;
-    var ok = el("button", "btn small primary", "Save"), no = btn("Cancel", "", function () { load(); });
+    var ok = el("button", "btn small primary", "Save"), no = btn("Cancel", "", function () { load("f-" + f.id); });
     form.appendChild(lb); form.appendChild(inp); form.appendChild(ok); form.appendChild(no);
-    form.onsubmit = function (e) { e.preventDefault(); if (inp.value.trim()) api.renameFlow({ id: f.id }, { name: inp.value.trim() }).then(load, fail); };
+    form.onsubmit = function (e) { e.preventDefault(); if (inp.value.trim()) api.renameFlow({ id: f.id }, { name: inp.value.trim() }).then(function () { return load("f-" + f.id); }, fail); };
     cell.textContent = ""; cell.appendChild(form); inp.focus(); inp.select();
   }
 
   function row(f, tb) {
     var tr = el("tr"), th = el("th"), a = el("a", null, f.name);
-    th.scope = "row"; th.style.cssText = "background:none;color:inherit"; a.href = "/flow/?id=" + encodeURIComponent(f.id); th.appendChild(a); tr.appendChild(th);
+    a.setAttribute("data-key", "f-" + f.id); th.scope = "row"; th.style.cssText = "background:none;color:inherit"; a.href = "/flow/?id=" + encodeURIComponent(f.id); th.appendChild(a); tr.appendChild(th);
     var used = el("td");
     if (f.usedBy.length) { used.appendChild(document.createTextNode(f.usedBy.join(", "))); if (f.madeWith === "builder") { used.appendChild(document.createTextNode(" ")); used.appendChild(el("span", "badge warn", "too custom for a slider")); } }
     else used.appendChild(el("span", "muted", "No library"));
     tr.appendChild(used); tr.appendChild(el("td", null, MADE[f.madeWith] || f.madeWith)); tr.appendChild(el("td", null, ago(f.changedAt)));
     var act = el("td"), r = el("div", "row"), v = el("a", "btn small", "View"); v.href = a.href;
-    r.appendChild(v); r.appendChild(btn("Rename", "", function () { rename(f, th); })); r.appendChild(btn("Duplicate", "", function () { api.duplicateFlow({ id: f.id }).then(load, fail); }));
-    if (f.usedBy.length) r.appendChild(el("span", "hint small", "Delete: in use by " + f.usedBy.join(", ")));
-    else r.appendChild(btn("Delete", "danger", function () { $("del-q").textContent = "Delete " + f.name + "?"; $("del-dialog").returnValue = ""; $("del-dialog").setAttribute("data-id", f.id); $("del-dialog").showModal(); }));
+    r.appendChild(v); r.appendChild(btn("Rename", "", function () { rename(f, th); })); r.appendChild(btn("Duplicate", "", function () { api.duplicateFlow({ id: f.id }).then(function (n) { return load("f-" + n.id); }, fail); }));
+    if (f.usedBy.length) { // a real control, disabled, with the reason beside it
+      var d = el("button", "btn small danger", "Delete"), why = el("span", "hint small", "In use by " + f.usedBy.join(", ")); d.type = "button"; d.setAttribute("aria-disabled", "true");
+      why.id = "why-" + f.id; d.setAttribute("aria-describedby", why.id); r.appendChild(d); r.appendChild(why);
+    } else r.appendChild(btn("Delete", "danger", function () { $("del-q").textContent = "Delete " + f.name + "?"; $("del-dialog").returnValue = ""; $("del-dialog").setAttribute("data-id", f.id); $("del-dialog").showModal(); }));
     act.appendChild(r); tr.appendChild(act); tb.appendChild(tr);
   }
 
-  function load() {
+  // key: the control to focus once the list is redrawn ("top" = the page heading).
+  function load(key) {
     return api.listFlows().then(function (r) {
       var box = $("flow-list"); box.textContent = "";
       if (!r.items.length) { var c = el("div", "card empty"); c.appendChild(el("p", null, "No flows yet. Press New flow to start one.")); box.appendChild(c); return; }
@@ -46,11 +49,18 @@
       ["Name", "Used by", "Made with", "Last changed", ""].forEach(function (c) { var th = el("th"); th.scope = "col"; if (c) th.textContent = c; else th.appendChild(el("span", "sr", "Actions")); hr.appendChild(th); });
       hd.appendChild(hr); t.appendChild(hd); t.appendChild(tb); w.appendChild(t); box.appendChild(w);
       r.items.forEach(function (f) { row(f, tb); });
+      var t0 = key === "top" ? document.querySelector("h1") : typeof key === "string" && box.querySelector('[data-key="' + key + '"]');
+      if (t0) { t0.tabIndex = -1; t0.focus(); }
     }, fail);
   }
 
   function init() {
-    $("newflow").onclick = function () { api.createFlow({}, { name: "New flow" }).then(function (f) { location.href = "/flow/?id=" + encodeURIComponent(f.id); }, fail); };
+    $("newflow").onclick = function () { // each one gets a name of its own: New flow, New flow 2, ...
+      api.listFlows().then(function (r) {
+        var taken = r.items.map(function (f) { return f.name; }), n = 1, name = "New flow";
+        while (taken.indexOf(name) >= 0) name = "New flow " + (++n);
+        return api.createFlow({}, { name: name });
+      }).then(function (f) { location.href = "/flow/?id=" + encodeURIComponent(f.id); }, fail); };
     $("import").onclick = function () { $("importfile").click(); };
     $("importfile").onchange = function () {
       var f = this.files[0]; if (!f) return;
@@ -63,7 +73,7 @@
     };
     $("del-dialog").addEventListener("close", function () {
       if ($("del-dialog").returnValue !== "delete") return;
-      api.deleteFlow({ id: $("del-dialog").getAttribute("data-id") }).then(load, fail);
+      api.deleteFlow({ id: $("del-dialog").getAttribute("data-id") }).then(function () { return load("top"); }, fail);
     });
     load();
   }

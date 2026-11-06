@@ -29,7 +29,9 @@
   function text(steps, ol) {
     steps.forEach(function (s) {
       ol.appendChild(el("li", null, (HEAD[s.kind] ? HEAD[s.kind] + ": " : "") + s.label + (s.detail ? " - " + s.detail : "") + "."));
-      (s.branches || []).forEach(function (b) { if (b.steps.length > 1 || b.label !== "Yes") { var li = el("li", null, b.label + ":"); var sub = el("ol"); text(b.steps, sub); li.appendChild(sub); ol.appendChild(li); } else text(b.steps, ol); });
+      (s.branches || []).forEach(function (b) { // every branch is said under its own label
+        var li = el("li", null, (b.label === "Yes" ? "If yes" : b.label === "No" ? "If no" : b.label) + ":"), sub = el("ol"); text(b.steps, sub); li.appendChild(sub); ol.appendChild(li);
+      });
     });
   }
 
