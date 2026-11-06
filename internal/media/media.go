@@ -27,14 +27,35 @@ type Exec interface {
 type OSExec struct{}
 
 func (OSExec) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
-	out, err := exec.CommandContext(ctx, name, args...).Output()
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			return out, fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(string(ee.Stderr)))
+	cmd := exec.CommandContext(ctx, name, args...)
+	var out limitedBuffer
+	var stderr tail
+	var errText strings.Builder
+	stderr.b, stderr.max = &errText, 2000
+	cmd.Stdout, cmd.Stderr = &out, &stderr
+	if err := cmd.Run(); err != nil {
+		if out.over {
+			return nil, fmt.Errorf("%s: output is larger than %d bytes", name, maxProbeBytes)
 		}
-		return out, fmt.Errorf("%s: %w", name, err)
+		return out.buf, fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(errText.String()))
 	}
-	return out, nil
+	return out.buf, nil
+}
+
+// limitedBuffer collects output but refuses more than maxProbeBytes (the writer error stops the
+// program), so a runaway ffprobe cannot use unbounded memory.
+type limitedBuffer struct {
+	buf  []byte
+	over bool
+}
+
+func (l *limitedBuffer) Write(p []byte) (int, error) {
+	if len(l.buf)+len(p) > maxProbeBytes {
+		l.over = true
+		return 0, fmt.Errorf("output too large")
+	}
+	l.buf = append(l.buf, p...)
+	return len(p), nil
 }
 
 func (OSExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) error {
@@ -83,27 +104,35 @@ type Info struct {
 	BitrateKbps int     `json:"bitrateKbps"`
 	DurationSec float64 `json:"durationSec"`
 	SizeBytes   int64   `json:"sizeBytes"`
+	// Streams lists every stream in file order; Chapters is the chapter count.
+	Streams  []Stream `json:"streams,omitempty"`
+	Chapters int      `json:"chapters,omitempty"`
 }
 
 // Probe runs ffprobe on path.
 func Probe(ctx context.Context, x Exec, ffprobe, path string) (Info, error) {
 	out, err := x.Output(ctx, ffprobe, "-v", "error", "-print_format", "json",
-		"-show_format", "-show_streams", path)
+		"-show_format", "-show_streams", "-show_chapters", path)
 	if err != nil {
 		return Info{}, err
 	}
 	return ParseProbe(out)
 }
 
-// ParseProbe turns ffprobe JSON into Info. It errors if there is no video stream.
+// maxProbeBytes bounds how much ffprobe output is accepted (a file with thousands of chapters or
+// streams can produce a lot; a few MB is already far more than any real video needs).
+const maxProbeBytes = 8 << 20
+
+// ParseProbe turns ffprobe JSON into Info. It errors if there is no video stream. Missing or odd
+// fields are tolerated (they stay zero); garbage input returns an error and never panics.
 func ParseProbe(data []byte) (Info, error) {
+	if len(data) > maxProbeBytes {
+		return Info{}, fmt.Errorf("ffprobe output is too large (%d bytes)", len(data))
+	}
 	var p struct {
-		Streams []struct {
-			CodecType string `json:"codec_type"`
-			CodecName string `json:"codec_name"`
-			BitRate   string `json:"bit_rate"`
-		} `json:"streams"`
-		Format struct {
+		Streams  []map[string]any `json:"streams"`
+		Chapters []any            `json:"chapters"`
+		Format   struct {
 			FormatName string `json:"format_name"`
 			Duration   string `json:"duration"`
 			Size       string `json:"size"`
@@ -113,13 +142,18 @@ func ParseProbe(data []byte) (Info, error) {
 	if err := json.Unmarshal(data, &p); err != nil {
 		return Info{}, fmt.Errorf("parse ffprobe output: %w", err)
 	}
-	info := Info{Container: p.Format.FormatName}
+	info := Info{Container: p.Format.FormatName, Chapters: len(p.Chapters)}
+	for i, raw := range p.Streams {
+		info.Streams = append(info.Streams, parseStream(raw, i))
+	}
 	found := false
 	streamRate := 0
-	for _, s := range p.Streams {
-		if s.CodecType == "video" {
-			info.VideoCodec = s.CodecName
-			streamRate, _ = strconv.Atoi(s.BitRate)
+	// The headline codec/bitrate come from the first video stream in the file, exactly as before
+	// the per-stream model existed (so nothing that is converted today changes).
+	for i, st := range info.Streams {
+		if st.Type == "video" {
+			info.VideoCodec = st.Codec
+			streamRate = int(num(p.Streams[i], "bit_rate"))
 			found = true
 			break
 		}
