@@ -86,29 +86,22 @@ tried this. Route B is simpler for a Proxmox LXC.
 
 1. In Proxmox, create a Debian 12 (or Ubuntu) container from a normal template. 2 cores,
    1 GB RAM and 4 GB disk are plenty (the videos live on the mounted folder, not the disk).
-2. **On your own computer**, build the Linux program (Go 1.26+):
+2. Mount your media into the container (see the next section) and start it.
+3. In the container (the console, or `pct enter 101`), run the installer:
    ```
-   GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o shrink-your-shit .
+   apt-get update && apt-get install -y curl
+   curl -fsSL https://raw.githubusercontent.com/PeiceOfToast/shrink-your-shit/main/install.sh | sh -s -- --library /media --addr 0.0.0.0:8484
    ```
-   (Use `GOARCH=arm64` for an ARM host.)
-3. Copy the program and the `deploy/` folder into the container, from the Proxmox host
-   (replace `101` with your container id):
-   ```
-   pct push 101 shrink-your-shit /root/shrink-your-shit
-   pct push 101 deploy/install.sh /root/install.sh
-   pct push 101 deploy/shrink-your-shit.service /root/shrink-your-shit.service
-   ```
-4. Mount your media into the container (see the next section), then in the container:
-   ```
-   sh /root/install.sh /root/shrink-your-shit
-   ```
-   It installs ffmpeg, creates a `syp` user, installs the program to `/usr/local/bin`,
-   and starts the service on boot. Running it again later updates the program and keeps
-   your settings.
-5. Settings are in `/etc/default/shrink-your-shit` (`SYP_LIBRARIES`, `SYP_ADDR`, `SYP_DATA`).
+   It installs ffmpeg, creates a `syp` user, installs the program to `/usr/local/bin`, starts a
+   systemd service (also on boot) and prints the address. Run it again later to upgrade; your
+   settings are kept. `--addr 0.0.0.0:8484` lets other computers open the page; there is no
+   login yet, so only do that on a network you trust.
+   > Needs a published release (none yet; see the README). Until then it stops with "could not
+   > download".
+4. Settings are in `/etc/default/shrink-your-shit` (`SYP_LIBRARIES`, `SYP_ADDR`, `SYP_DATA`).
    After editing: `systemctl restart shrink-your-shit`. To change the service itself, use
-   `systemctl edit shrink-your-shit` (a drop-in); `install.sh` overwrites the unit file each run. Logs: `journalctl -u shrink-your-shit -f`.
-   The database is in `/var/lib/shrink-your-shit`.
+   `systemctl edit shrink-your-shit` (a drop-in); the installer rewrites the unit file each run.
+   Logs: `journalctl -u shrink-your-shit -f`. The database is in `/var/lib/shrink-your-shit`.
 
 ## Mounting your media into the container
 
@@ -141,8 +134,11 @@ and real files (an mkv with subtitles and an mp4) were converted to HEVC from a 
 folder, with the database in a named volume. `docker stop` ends it cleanly in under a
 second. A host `/config` folder that Docker creates itself (root-owned) does fail with
 "unable to open database file", as described above. `docker compose config` accepts the
-compose file. `install.sh` passes `shellcheck`; the systemd unit passes
-`systemd-analyze verify`.
+compose file. `install.sh` (repository root) passes `shellcheck`. In clean Debian 12 containers it was run
+with a locally served release: ffmpeg installed from apt, checksum verified, a real file
+converted; in a container running systemd it created and enabled the service, which restarted
+after a kill and after a container restart. It was also run as a non-root user with sudo, and
+failed clearly without sudo, on a tampered download and on a missing library folder.
 
 The Dockerfile cross-compiles the Go program for the target platform; a `linux/arm64` build of
 that stage produced an aarch64 binary. **Not checked:** the arm64 image actually running (no
@@ -150,6 +146,7 @@ emulation was available when this was written), the release workflow
 (`release-image.yml`; it has been through `actionlint` only, and has never run on GitHub),
 and pulling the image from `ghcr.io`.
 
-**Not checked** (no Proxmox host or Debian container was available): the install script
-actually running, the Proxmox mount and permission steps, running Docker inside an LXC,
-and Proxmox's OCI import.
+**Not checked** (no Proxmox host was available): the installer inside a real Proxmox LXC, the
+Proxmox mount and permission steps, running Docker inside an LXC, Proxmox's OCI import, the
+installer's downloading from GitHub (it was tested against a locally served copy of a release;
+no release exists yet), and Fedora/Arch/Alpine/openSUSE package installs and macOS (never run).
