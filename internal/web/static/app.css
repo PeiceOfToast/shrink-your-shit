@@ -123,3 +123,5 @@ fieldset{min-width:0}
 #checks{min-height:12rem} /* room for all the checks, so the button below does not move while they load */
 #why3{min-height:3.2rem}
 @media (max-width:40rem){#checks{min-height:18rem}}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.table-wrap{position:relative} /* keeps the screen-reader-only header text inside the scrolling box */

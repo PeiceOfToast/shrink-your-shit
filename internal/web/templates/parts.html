@@ -48,3 +48,15 @@
 <p>Waiting and running conversions for it are stopped. Nothing in the folder is changed or deleted.</p>
 <div class="row"><button class="btn danger" value="remove" id="rm-yes">Remove library</button><button class="btn" value="keep" autofocus>Keep it</button></div></form></dialog>
 </div>{{end}}
+
+{{define "tabs"}}{{with .Tabs}}<nav aria-label="{{$.Heading}} sections" class="tabs">{{range .}}<a href="{{.Href}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}</nav>{{end}}{{end}}
+
+{{define "activity"}}<noscript><div class="notice info" role="note"><div><strong>Turn on scripts to see live activity</strong>This page updates as files are converted, which needs scripts enabled.</div></div></noscript>
+<div class="page-head"><h1>Activity</h1><div class="row"><button class="btn" type="button" id="pause" hidden>Pause all</button></div></div>
+<div class="notice bad" id="err" role="alert" hidden></div>
+<div class="grid-3" id="stats" style="margin-bottom:16px" hidden>
+<div class="card"><div class="stat" id="st-freed"></div><div class="stat-label">Space freed (originals already deleted)</div></div>
+<div class="card"><div class="stat" id="st-wait"></div><div class="stat-label">Waiting to be freed when kept originals expire</div></div>
+<div class="card"><div class="stat" id="st-work"></div><div class="stat-label" id="st-work-l"></div></div></div>
+{{template "tabs" .}}
+<div id="pane" data-tab="{{.Tab}}"><div class="card empty"><p>{{.Empty}}</p></div></div>{{end}}
