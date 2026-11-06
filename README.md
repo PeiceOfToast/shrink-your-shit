@@ -14,7 +14,7 @@ Licensed under **AGPL-3.0-or-later** (see `LICENSE`). No paid tiers, ever.
 
 ## Run it
 
-You need ffmpeg (which includes ffprobe) and Go 1.22+ to build. It builds without a C
+You need ffmpeg (which includes ffprobe) and Go 1.26+ to build. It builds without a C
 compiler, and the same source builds for Linux, Windows and macOS (Intel and ARM).
 
 1. Install ffmpeg:
