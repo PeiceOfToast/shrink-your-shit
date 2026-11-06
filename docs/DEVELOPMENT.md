@@ -106,6 +106,15 @@ docker run --rm -v "$PWD/install.sh:/install.sh:ro" -v "$PWD/dist:/release:ro" -
 systemd path was tested the same way in a privileged `jrei/systemd-debian:12` container. Neither
 has been run against a real GitHub release.
 
+### The Windows installer
+
+`installer/windows/` has the Inno Setup script (`shrink-your-shit.iss`), `build.ps1` (builds the
+exe, then runs `ISCC.exe`; Windows with Go and Inno Setup 6 only), `extract-ffmpeg.ps1` and
+`smoke-test.ps1` (the CI test). The `.iss` can be compiled on Linux with the Docker image
+`amake/innosetup` (that was done to check it compiles); running the installer needs Windows, and
+only CI has done that. To refresh the pinned ffmpeg, change the URL and SHA-256 at the top of the
+`.iss` together (`sha256sum` the zip you downloaded).
+
 ## Continuous integration
 
 `.github/workflows/ci.yml`, triggered on pull requests and pushes to `main`:
@@ -115,6 +124,7 @@ has been run against a real GitHub release.
 | `test` (ubuntu, windows, macos) | `go vet ./...` and `go test -count=1 ./...` on each OS |
 | `build` (5 targets) | `go build ./...` and `go vet ./...` with `CGO_ENABLED=0` for linux amd64/arm64, windows amd64, darwin arm64/amd64 |
 | `docker` | `docker build`, then starts the container and curls `/api/status` |
+| `windows-installer` | builds the Windows installer, then on the runner: silent install, real conversion, upgrade, uninstall |
 
 Go version comes from `go.mod`. Actions are pinned to major versions. Check a PR's status
 with `gh pr checks <number>`; what has been observed so far is in [STATUS.md](STATUS.md).

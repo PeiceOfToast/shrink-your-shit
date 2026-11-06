@@ -14,7 +14,8 @@ marked **never verified** has not been seen working by anyone. Update this file 
 | 5 | Docs (DEVELOPMENT, ARCHITECTURE, STATUS) | PR #5 |
 | 6 | Workflow that publishes a multi-arch image to GHCR on version tags (never run) | PR #6 |
 | 7a | Workflow + `scripts/build-release.sh` that build the 5 binaries and attach them to a GitHub Release on version tags (never run), `-version` flag | PR #7 |
-| 7b | `install.sh` at the repo root: one-line installer for Linux/macOS (replaces the old `deploy/install.sh`) | this change |
+| 7b | `install.sh` at the repo root: one-line installer for Linux/macOS (replaces the old `deploy/install.sh`) | PR #8 |
+| 7c | Windows installer (`installer/windows`, Inno Setup), built and tested on a Windows runner in CI and attached to releases | this change |
 
 ## What has been verified, and how
 
@@ -37,6 +38,18 @@ marked **never verified** has not been seen working by anyone. Update this file 
   after a container restart; re-run kept settings; non-root with sudo works; failures (no sudo,
   tampered download, missing release, missing library folder, unsupported CPU) give clear errors.
   `shellcheck` 0.10 is clean.
+
+## Never verified (Windows installer)
+
+CI builds the installer on a Windows runner and runs `installer/windows/smoke-test.ps1` (silent
+install, ffmpeg download, real conversion, upgrade, uninstall). **Until that job has been seen
+passing on GitHub, treat the installer as unverified.** Even after it passes, nobody has checked on a
+real Windows desktop: the SmartScreen/Defender experience, the wizard pages, the Start Menu shortcut
+and logon autostart behaving for a normal user, upgrading over an older install, a library path with
+non-ASCII characters (the launcher script is written in the system's ANSI code page), or antivirus
+reactions to the unsigned file. The pinned ffmpeg download (Gyan 9.0.2 essentials, SHA-256 recorded
+when the installer was written) was checked to contain ffmpeg.exe/ffprobe.exe with libx265 strings,
+not run.
 
 ## Never verified
 
