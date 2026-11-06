@@ -41,6 +41,12 @@ on a tag it publishes).
 `shrink-your-shit` package > *Package settings* > *Change visibility* > **Public**, or nobody
 else can `docker pull` it without logging in.
 
+If the first tag push fails, look first at the image name: GHCR only accepts lowercase, and
+the repository name is mixed-case (`PeiceOfToast/...`). The workflow relies on
+`docker/metadata-action` lowercasing it (its documented behaviour, never run here). Next,
+check that the workflow had `packages: write` permission and the repository allows Actions
+to publish packages. Tags like `v0.1.0-rc1` publish a version tag but not `latest`.
+
 ### Option 2: build the image from this repository
 
 Build it yourself (works today):
