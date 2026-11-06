@@ -108,7 +108,7 @@ has been run against a real GitHub release.
 
 ## Continuous integration
 
-`.github/workflows/ci.yml`, triggered on pull requests and pushes to `main`:
+`.github/workflows/ci.yml`, triggered on pull requests and pushes to `main` and `dev`:
 
 | Job | Checks |
 |---|---|
