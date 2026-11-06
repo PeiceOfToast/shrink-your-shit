@@ -54,7 +54,7 @@
       hd.appendChild(hr); t.appendChild(hd); t.appendChild(tb); w.appendChild(t); box.appendChild(w);
       r.items.forEach(function (f) { row(f, tb); });
       var t0 = key === "top" ? document.querySelector("h1") : typeof key === "string" && box.querySelector('[data-key="' + key + '"]');
-      if (t0) { t0.tabIndex = -1; t0.focus(); }
+      if (t0) { if (t0.tagName === "H1") t0.tabIndex = -1; t0.focus(); } // a link is focusable already; tabIndex -1 would take it out of the Tab order
     }, fail);
   }
 
