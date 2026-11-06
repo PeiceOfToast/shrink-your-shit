@@ -1,5 +1,10 @@
 # shrink-your-shit
 
+> **⚠️ Work in progress. Not finished and not ready for use.**
+> Expect breakage, missing features and changes without notice. It re-encodes and
+> can replace your video files, so do not point it at media you can't afford to lose.
+
+
 Free, open-source tool that shrinks your video library. Point it at a folder: new
 video files are checked with `ffprobe`, and the ones that match a simple rule
 (default: **H.264 above 4000 kbps → HEVC**) are re-encoded with `ffmpeg` in the
