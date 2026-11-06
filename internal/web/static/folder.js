@@ -22,11 +22,15 @@
       var path = $("path").value.trim(), list = $("checks"); set(false);
       list.textContent = "";
       if (!path) return Promise.resolve();
+      $("checks-h").hidden = $("check").hidden = false; // shown once the first check has started
       list.appendChild(ui.el("li", "muted", "Checking this folder..."));
       return api.checkLibrary({}, { path: path }).then(function (r) {
         if ($("path").value.trim() !== path) return;
         list.textContent = "";
-        (r.blockers || []).forEach(function (b) { list.appendChild(line("bad", "Fix this", COPY[b.code] || b.message)); });
+        var bl = r.blockers || [], has = function (c) { return bl.some(function (b) { return b.code === c; }); };
+        bl.forEach(function (b) { list.appendChild(line("bad", "Fix this", COPY[b.code] || b.message)); });
+        if (!has("low_space")) list.appendChild(line("ok", "OK", "Enough free space."));
+        if (!has("no_converter")) list.appendChild(line("ok", "OK", "Video converter works."));
         if (!(r.blockers || []).length) {
           list.appendChild(line("ok", "OK", "We can read and change files in this folder."));
           list.appendChild(line("ok", "OK", ui.num(r.videoCount) + " videos found (" + ui.bytes(r.totalBytes) + ")."));
@@ -61,7 +65,7 @@
     return {
       check: function () { pending = check(); return pending; }, pending: function () { return pending; }, passed: function () { return passed; }, path: function () { return $("path").value.trim(); },
       set: function (p) { $("path").value = p; },
-      clear: function () { $("path").value = ""; $("checks").textContent = ""; $("browser").hidden = true; set(false); }
+      clear: function () { $("path").value = ""; $("checks").textContent = ""; $("checks-h").hidden = $("check").hidden = true; $("browser").hidden = true; set(false); }
     };
   };
 })(window);

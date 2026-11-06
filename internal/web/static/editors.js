@@ -72,10 +72,25 @@
         });
         var ms = el("div", "field"), msId = uid(), msIn = el("input"), ml = el("label", null, "Keep the new file only if it is at least this much smaller (%)");
         msIn.type = "number"; msIn.id = msId; msIn.min = 1; msIn.max = 90; msIn.value = v.minSavingPct != null ? v.minSavingPct : 10; msIn.style.width = "6rem"; ml.htmlFor = msId;
-        ms.appendChild(ml); ms.appendChild(msIn); fs.appendChild(ms); rules.minSavingPct = msIn; msIn.addEventListener("change", changed);
+        var msH = el("span", "hint"); msH.id = msId + "h"; msIn.setAttribute("aria-describedby", msH.id);
+        ms.appendChild(ml); ms.appendChild(msIn); ms.appendChild(msH); fs.appendChild(ms); rules.minSavingPct = msIn; rules.msHint = msH; msIn.addEventListener("change", changed);
+        msIn.addEventListener("input", function () { edited = true; });
       }
       host.appendChild(fs);
     });
+    // Minimum saving follows Quality (the slider's value for that position) until the person types their own.
+    var table = null, edited = false;
+    function follow() {
+      var p = table && table[+fields.quality.value - 1]; if (!p) return;
+      if (!edited) rules.minSavingPct.value = p.minSavingPct;
+      rules.msHint.textContent = "Follows Quality (" + p.minSavingPct + "% for " + p.name + "). If you change it, it stays as you set it.";
+    }
+    fields.quality.addEventListener("change", follow);
+    g.SYP.api.getSliderTable().then(function (t) {
+      table = t.positions; var p = table[+fields.quality.value - 1];
+      if (v.minSavingPct != null && p && v.minSavingPct !== p.minSavingPct) edited = true; // a saved value of its own stays put
+      follow();
+    }, function () {});
     return {
       get: function () {
         var b = {}, k;
