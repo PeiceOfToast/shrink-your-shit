@@ -33,7 +33,7 @@ func setup(t *testing.T, probe string) (*Scanner, *jobs.Store, string, *media.Fa
 }
 
 func TestIsVideo(t *testing.T) {
-	for p, want := range map[string]bool{"a.mkv": true, "A.MP4": true, "a.txt": false, "a.syp-tmp.mkv": false, "a.hevc.mkv": false} {
+	for p, want := range map[string]bool{"a.mkv": true, "A.MP4": true, "a.txt": false, "a.syp-tmp.mkv": false, "a.hevc.mkv": false, "Show.S01E01.hevc.x265.mkv": true} {
 		if IsVideo(p) != want {
 			t.Errorf("%s: want %v", p, want)
 		}
@@ -84,5 +84,17 @@ func TestMinAgeSkipsFreshFiles(t *testing.T) {
 	s.MinAge = time.Hour
 	if n := s.ScanOnce(context.Background()); n != 0 || len(f.Calls) != 0 {
 		t.Errorf("fresh file should be left alone: %d %d", n, len(f.Calls))
+	}
+}
+
+func TestNoSecondJobWhileOpen(t *testing.T) {
+	s, st, lib, _ := setup(t, h264Big)
+	s.ScanOnce(context.Background())
+	os.WriteFile(filepath.Join(lib, "a.mkv"), []byte("changed-before-worker-ran"), 0o644)
+	if n := s.ScanOnce(context.Background()); n != 0 {
+		t.Errorf("queued a duplicate: %d", n)
+	}
+	if l, _ := st.List(10); len(l) != 1 {
+		t.Errorf("%+v", l)
 	}
 }

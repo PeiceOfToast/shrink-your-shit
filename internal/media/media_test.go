@@ -49,7 +49,7 @@ func TestProbeErrors(t *testing.T) {
 
 func TestHEVCArgs(t *testing.T) {
 	a := strings.Join(HEVCArgs("in.mkv", "out.mkv", 26, "medium"), " ")
-	for _, want := range []string{"-i in.mkv", "-c:v libx265", "-crf 26", "-preset medium", "-progress pipe:1"} {
+	for _, want := range []string{"-i in.mkv", "-c:v:0 libx265", "-crf 26", "-preset medium", "-progress pipe:1"} {
 		if !strings.Contains(a, want) {
 			t.Errorf("args %q missing %q", a, want)
 		}

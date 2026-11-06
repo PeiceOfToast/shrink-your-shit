@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +26,8 @@ type Queue interface {
 	Progress(id int64, pct float64) error
 	Complete(id int64, outputPath string, sizeAfter int64) error
 	Fail(id int64, msg string) error
+	// Release puts a running job back in the queue (used on shutdown).
+	Release(id int64) error
 }
 
 // OutputMode says what happens to the result.
@@ -43,9 +46,11 @@ type Worker struct {
 	Queue  Queue
 	Exec   media.Exec
 	FFmpeg string
-	Rule   rules.Rule
-	Mode   OutputMode
-	Poll   time.Duration
+	// FFprobe checks the result before it replaces anything.
+	FFprobe string
+	Rule    rules.Rule
+	Mode    OutputMode
+	Poll    time.Duration
 	// OnDone is called after a job succeeds with the final path (optional).
 	OnDone func(job jobs.Job, finalPath string)
 }
@@ -53,7 +58,10 @@ type Worker struct {
 // Run processes jobs until ctx is cancelled.
 func (w *Worker) Run(ctx context.Context) {
 	for ctx.Err() == nil {
-		ran, _ := w.RunOne(ctx)
+		ran, err := w.RunOne(ctx)
+		if err != nil {
+			log.Printf("worker %s: %v", w.ID, err)
+		}
 		if !ran {
 			select {
 			case <-ctx.Done():
@@ -74,6 +82,10 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 	}
 	final, err := w.process(ctx, job)
 	if err != nil {
+		if ctx.Err() != nil {
+			// Shutting down: not the file's fault, so run it again next start.
+			return true, w.Queue.Release(job.ID)
+		}
 		if ferr := w.Queue.Fail(job.ID, err.Error()); ferr != nil {
 			return true, ferr
 		}
@@ -110,6 +122,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (string, error) {
 	if _, err := os.Stat(job.Path); err != nil {
 		return "", fmt.Errorf("source file: %w", err)
 	}
+	before, _ := os.Stat(job.Path)
 	tmp := TempPath(job.Path)
 	os.Remove(tmp) // leftover from a crash
 	args := media.HEVCArgs(job.Path, tmp, w.Rule.CRF, w.Rule.Preset)
@@ -125,6 +138,17 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (string, error) {
 		os.Remove(tmp)
 		return "", fmt.Errorf("ffmpeg produced no output")
 	}
+	// Sanity-check the result: same length as the source, and actually smaller.
+	if err := w.verify(ctx, job, tmp, before.Size()); err != nil {
+		os.Remove(tmp)
+		return "", err
+	}
+	// If the source changed while we encoded, our result is stale: don't clobber it.
+	if now, err := os.Stat(job.Path); err != nil || now.Size() != before.Size() || !now.ModTime().Equal(before.ModTime()) {
+		os.Remove(tmp)
+		return "", fmt.Errorf("source file changed while encoding; not replacing it")
+	}
+	os.Chmod(tmp, before.Mode().Perm()) // keep the original's permissions
 	final := job.Path
 	if w.Mode == Beside {
 		final = BesidePath(job.Path)
@@ -135,4 +159,19 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (string, error) {
 		return "", fmt.Errorf("move result into place: %w", err)
 	}
 	return final, nil
+}
+
+// verify refuses output that looks truncated or did not save space.
+func (w *Worker) verify(ctx context.Context, job jobs.Job, tmp string, origSize int64) error {
+	info, err := media.Probe(ctx, w.Exec, w.FFprobe, tmp)
+	if err != nil {
+		return fmt.Errorf("result is not a readable video: %w", err)
+	}
+	if job.DurationSec > 0 && (info.DurationSec < job.DurationSec*0.98 || info.DurationSec > job.DurationSec*1.02) {
+		return fmt.Errorf("result is %.0fs long, source is %.0fs; keeping the original", info.DurationSec, job.DurationSec)
+	}
+	if st, err := os.Stat(tmp); err == nil && st.Size() >= origSize {
+		return fmt.Errorf("result (%d bytes) is not smaller than the original (%d bytes); keeping the original", st.Size(), origSize)
+	}
+	return nil
 }

@@ -90,9 +90,10 @@ func main() {
 	x := media.OSExec{}
 	sc := &scanner.Scanner{Store: store, Exec: x, FFprobe: *ffprobe, Rule: rule, Libraries: libs, MinAge: *settle}
 	go sc.Run(ctx, *every)
-	w := &worker.Worker{ID: "builtin", Queue: store, Exec: x, FFmpeg: *ffmpeg, Rule: rule,
+	w := &worker.Worker{ID: "builtin", Queue: store, Exec: x, FFmpeg: *ffmpeg, FFprobe: *ffprobe, Rule: rule,
 		Mode: worker.OutputMode(*mode), Poll: 3 * time.Second}
-	go w.Run(ctx)
+	workerDone := make(chan struct{})
+	go func() { w.Run(ctx); close(workerDone) }()
 
 	srv := &http.Server{Addr: *addr, Handler: web.Handler(store, libs)}
 	go func() {
@@ -101,6 +102,10 @@ func main() {
 	}()
 	log.Printf("watching %v; web UI at http://%s", []string(libs), *addr)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatal(err)
+		stop()
+		<-workerDone
+		log.Print(err)
+		return // deferred store.Close runs after the worker has stopped
 	}
+	<-workerDone // let an interrupted job go back in the queue before closing the database
 }

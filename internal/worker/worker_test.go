@@ -5,6 +5,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -36,12 +37,16 @@ func newSetup(t *testing.T) setup {
 }
 
 func (s setup) worker(x media.Exec, mode OutputMode) *Worker {
-	return &Worker{ID: "t", Queue: s.store, Exec: x, FFmpeg: "ffmpeg", Rule: rules.Default(), Mode: mode}
+	return &Worker{ID: "t", Queue: s.store, Exec: x, FFmpeg: "ffmpeg", FFprobe: "ffprobe", Rule: rules.Default(), Mode: mode}
+}
+
+func probeOut(dur int) string {
+	return fmt.Sprintf(`{"streams":[{"codec_type":"video","codec_name":"hevc"}],"format":{"duration":"%d"}}`, dur)
 }
 
 // fakeFFmpeg writes the output file like ffmpeg would (last arg is the output path).
 func fakeFFmpeg(content string) *media.FakeExec {
-	f := &media.FakeExec{Lines: []string{"out_time_us=50000000"}}
+	f := &media.FakeExec{Lines: []string{"out_time_us=50000000"}, Out: []byte(probeOut(100))}
 	f.OnCall = func(name string, args []string) {
 		os.WriteFile(args[len(args)-1], []byte(content), 0o644)
 	}
@@ -144,5 +149,67 @@ func TestProgressReported(t *testing.T) {
 	w.RunOne(context.Background())
 	if len(rq.progress) != 1 || rq.progress[0] != 50 {
 		t.Errorf("want [50] (50s of 100s), got %v", rq.progress)
+	}
+}
+
+func TestShutdownRequeuesInsteadOfFailing(t *testing.T) {
+	s := newSetup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	f := fakeFFmpeg("partial")
+	f.OnCall = func(name string, args []string) { cancel() }
+	f.Err = errors.New("signal: killed")
+	s.worker(f, Replace).RunOne(ctx)
+	if j, _ := s.store.Get(s.id); j.Status != jobs.Queued {
+		t.Errorf("want queued after shutdown, got %+v", j)
+	}
+	if b, _ := os.ReadFile(s.src); string(b) != "original-bytes" {
+		t.Error("original must survive")
+	}
+}
+
+func TestChangedSourceNotClobbered(t *testing.T) {
+	s := newSetup(t)
+	f := fakeFFmpeg("new")
+	inner := f.OnCall
+	f.OnCall = func(name string, args []string) {
+		inner(name, args)
+		os.WriteFile(s.src, []byte("user replaced this file meanwhile"), 0o644)
+	}
+	s.worker(f, Replace).RunOne(context.Background())
+	if b, _ := os.ReadFile(s.src); string(b) != "user replaced this file meanwhile" {
+		t.Errorf("newer file clobbered: %q", b)
+	}
+	if j, _ := s.store.Get(s.id); j.Status != jobs.Failed {
+		t.Errorf("%+v", j)
+	}
+}
+
+func TestPermissionsKept(t *testing.T) {
+	s := newSetup(t)
+	os.Chmod(s.src, 0o640)
+	s.worker(fakeFFmpeg("new"), Replace).RunOne(context.Background())
+	if st, _ := os.Stat(s.src); st.Mode().Perm() != 0o640 {
+		t.Errorf("perm %v", st.Mode().Perm())
+	}
+}
+
+func TestTruncatedOutputRejected(t *testing.T) {
+	s := newSetup(t)
+	f := fakeFFmpeg("new")
+	f.Out = []byte(probeOut(40)) // source is 100s
+	s.worker(f, Replace).RunOne(context.Background())
+	if b, _ := os.ReadFile(s.src); string(b) != "original-bytes" {
+		t.Errorf("original replaced by truncated output: %q", b)
+	}
+	if j, _ := s.store.Get(s.id); j.Status != jobs.Failed {
+		t.Errorf("%+v", j)
+	}
+}
+
+func TestBiggerOutputRejected(t *testing.T) {
+	s := newSetup(t)
+	s.worker(fakeFFmpeg("this is much longer than the original bytes"), Replace).RunOne(context.Background())
+	if b, _ := os.ReadFile(s.src); string(b) != "original-bytes" {
+		t.Errorf("original replaced by bigger file: %q", b)
 	}
 }

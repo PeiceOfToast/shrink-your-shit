@@ -24,10 +24,12 @@ var videoExt = map[string]bool{".mkv": true, ".mp4": true, ".m4v": true, ".avi":
 // Our own temp and output files are ignored.
 func IsVideo(path string) bool {
 	base := strings.ToLower(filepath.Base(path))
-	if strings.Contains(base, ".syp-tmp.") || strings.Contains(base, ".hevc.") {
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	if strings.HasSuffix(stem, ".syp-tmp") || strings.HasSuffix(stem, ".hevc") {
 		return false
 	}
-	return videoExt[filepath.Ext(base)]
+	return videoExt[ext]
 }
 
 // Scanner finds work.
@@ -78,6 +80,9 @@ func (s *Scanner) scanFile(ctx context.Context, lib, path string, st os.FileInfo
 	}
 	if prev != nil && prev.Size == st.Size() && prev.ModTime == st.ModTime().UnixNano() {
 		return false // unchanged since last look
+	}
+	if open, _ := s.Store.HasOpenJob(path); open {
+		return false // already waiting or running; it will be re-checked after it finishes
 	}
 	pi, err := media.Probe(ctx, s.Exec, s.FFprobe, path)
 	rec := jobs.File{Path: path, Size: st.Size(), ModTime: st.ModTime().UnixNano()}

@@ -19,8 +19,8 @@ Licensed under **AGPL-3.0-or-later** (see `LICENSE`). No paid tiers, ever.
    go build -o shrink-your-shit .
    ./shrink-your-shit -library /path/to/your/videos
    ```
-3. Open http://127.0.0.1:8484 to watch the queue. Stop with Ctrl+C; unfinished jobs
-   are queued again next start.
+3. Open http://127.0.0.1:8484 to watch the queue. Stop with Ctrl+C; a job in progress
+   is put back in the queue and starts over next time.
 
 Add `-library` more than once to watch several folders. The database lives in
 `./data` (change with `-data`).
@@ -36,7 +36,9 @@ with a Retry button.
 - `replace` (default): the new HEVC file takes the original's name.
 - `beside`: keep the original and write `name.hevc.mkv` next to it.
 
-Tip: `.mkv` files work best, since they accept almost any audio/subtitle track.
+Tip: `.mkv` files work best. Audio and subtitles are copied unchanged; `.mp4`/`.mov`
+files with text/image subtitles will fail safely (original untouched). Attachments
+(fonts, cover art) and extra video streams are not carried over.
 
 ## Settings
 

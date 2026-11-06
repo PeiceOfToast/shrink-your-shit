@@ -215,6 +215,13 @@ func (s *Store) Claim(worker string) (Job, error) {
 	return s.Get(id)
 }
 
+// HasOpenJob reports whether path already has a queued or running job.
+func (s *Store) HasOpenJob(path string) (bool, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM jobs WHERE path=? AND status IN (?,?)`, path, Queued, Running).Scan(&n)
+	return n > 0, err
+}
+
 // Progress records percent done for a running job.
 func (s *Store) Progress(id int64, pct float64) error {
 	_, err := s.db.Exec(`UPDATE jobs SET progress=?, updated=? WHERE id=? AND status=?`, pct, s.stamp(), id, Running)
@@ -234,6 +241,11 @@ func (s *Store) Fail(id int64, msg string) error {
 // Retry puts a failed job back in the queue.
 func (s *Store) Retry(id int64) error {
 	return s.transition(id, Queued, `, progress=0, error='', worker=''`)
+}
+
+// Release puts a running job back in the queue (the worker was told to stop).
+func (s *Store) Release(id int64) error {
+	return s.transition(id, Queued, `, progress=0, worker=''`)
 }
 
 // RequeueRunning puts jobs left "running" by a crashed process back in the queue.
