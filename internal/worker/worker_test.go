@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -186,6 +187,9 @@ func TestChangedSourceNotClobbered(t *testing.T) {
 }
 
 func TestPermissionsKept(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no Unix permission bits")
+	}
 	s := newSetup(t)
 	os.Chmod(s.src, 0o640)
 	s.worker(fakeFFmpeg("new"), Replace).RunOne(context.Background())
