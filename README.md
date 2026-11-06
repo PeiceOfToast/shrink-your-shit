@@ -40,8 +40,9 @@ The program is unsigned: macOS or Windows may warn the first time it runs.
 > **Not working yet:** the installer downloads a published release, and none has been
 > published. Until the first release exists the Linux/macOS installer stops with "could not
 > download" and the Windows download link gives a "not found" page; use the manual steps below
-> instead. The macOS installer has never been run on a Mac, and the Windows installer has not been run
-> anywhere yet: its automated test on GitHub is its first run, and it has not been tried on a real PC.
+> instead. The macOS installer has never been run on a Mac. The Windows installer passed an automated
+> silent install / convert a video / upgrade / uninstall test on a GitHub Windows runner, but it has
+> **not** been tried on a real PC.
 
 **Windows:** download **[shrink-your-shit-setup.exe](https://github.com/PeiceOfToast/shrink-your-shit/releases/latest/download/shrink-your-shit-setup.exe)**
 and run it. It installs for your user only (no administrator prompt), asks which folder holds your
@@ -54,7 +55,9 @@ your settings are kept. For scripts: `shrink-your-shit-setup.exe /VERYSILENT /LI
 The Windows installer is **unsigned**, so Windows SmartScreen will say "Windows protected your
 PC": click **More info**, then **Run anyway**. That warning is about the file having no paid
 publisher signature, not about anything found in it. The same goes for Chrome or Edge saying the
-file "isn't commonly downloaded".
+file "isn't commonly downloaded". On Windows 11, if **Smart App Control** is turned ON, it can block
+an unsigned program outright, with no "Run anyway" option; you would have to turn Smart App Control
+off (Windows Security > App & browser control) to install.
 
 The program **replaces your original video files** once it has checked the result is good.
 Start with a copy of some videos. Other install options (Docker, Proxmox): [docs/proxmox.md](docs/proxmox.md).

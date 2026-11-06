@@ -39,17 +39,33 @@ marked **never verified** has not been seen working by anyone. Update this file 
   tampered download, missing release, missing library folder, unsupported CPU) give clear errors.
   `shellcheck` 0.10 is clean.
 
-## Never verified (Windows installer)
+## Windows installer: what has and has not been proven
 
-CI builds the installer on a Windows runner and runs `installer/windows/smoke-test.ps1` (silent
-install, ffmpeg download, real conversion, upgrade, uninstall). **Until that job has been seen
-passing on GitHub, treat the installer as unverified.** Even after it passes, nobody has checked on a
-real Windows desktop: the SmartScreen/Defender experience, the wizard pages, the Start Menu shortcut
-and logon autostart behaving for a normal user, upgrading over an older install, a library path with
-non-ASCII characters (the launcher script is written in the system's ANSI code page), or antivirus
-reactions to the unsigned file. The pinned ffmpeg download (Gyan 9.0.2 essentials, SHA-256 recorded
-when the installer was written) was checked to contain ffmpeg.exe/ffprobe.exe with libx265 strings,
-not run.
+**Proven:** the installer builds on a GitHub `windows-latest` runner, and `installer/windows/smoke-test.ps1`
+passed there (run 42282614770 at commit `6c5e88d`, all jobs green): silent install, ffmpeg download with
+the SHA-256 check, the web page answering, a real conversion to HEVC, running the installer again
+(upgrade), and uninstall (program, autostart entry and shortcut gone, page stopped).
+
+**Not proven, and not covered by that test:**
+- the GUI wizard (the folder page, the download progress page): the test runs `/VERYSILENT`;
+- the Start Menu shortcut being *used*, and the program starting at logon (only that the entries exist);
+- the "no administrator prompt" claim: the CI runner's user is an administrator, so a standard user
+  was never tried;
+- Mark-of-the-Web, SmartScreen, Defender, and Windows 11 Smart App Control (a downloaded copy is never
+  what the runner tests);
+- library paths with non-ASCII characters or network (UNC) paths: the launcher script is written in
+  the system's ANSI code page;
+- upgrading from an older real install: the test only upgrades over the same build and does not
+  check that the web address setting (`SYP_ADDR`) was kept;
+- a custom `/ADDR` with a LAN address: the launcher checks `127.0.0.1`, so it would think the page is
+  down (the app itself would still run);
+- other Windows versions or machines: only `windows-latest` (a Server edition), x64;
+- the VBScript launcher's future (below);
+- `shrink-your-shit-setup.exe` is not listed in `checksums.txt` (built by a different job);
+- uninstall leaves the job database in `%LOCALAPPDATA%\shrink-your-shit\data` on purpose.
+
+The pinned ffmpeg download (Gyan 9.0.2 essentials, SHA-256 recorded when the installer was written)
+was extracted and run by the CI test.
 
 - **Windows launcher depends on VBScript (`wscript`)**, which Microsoft is phasing out (optional feature
   on Windows 11 24H2, removal announced), and a hidden `cmd` started from a script is a pattern some
