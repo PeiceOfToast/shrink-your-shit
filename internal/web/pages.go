@@ -101,9 +101,9 @@ func scripts(kind string) []string {
 	case "wizard":
 		return append(core, "ui.js", "folder.js", "editors.js", "firstrun.js")
 	case "libraries":
-		return append(core, "ui.js", "folder.js", "libraries.js")
+		return append(core, "ui.js", "badge.js", "folder.js", "libraries.js")
 	case "library":
-		return append(core, "ui.js", "editors.js", "library.js")
+		return append(core, "ui.js", "badge.js", "editors.js", "library.js")
 	case "settings-general":
 		return append(core, "settings.js")
 	}

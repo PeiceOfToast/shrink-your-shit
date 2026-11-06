@@ -26,20 +26,11 @@
     return e;
   };
 
-  // Status badge for a library, from its state. Words as well as colour.
-  ui.stateBadge = function (l) {
-    var cls = "idle", txt = "Idle";
-    if (l.state === "working") { cls = "ok"; txt = "Working: " + l.workingFiles + (l.workingFiles === 1 ? " file" : " files"); }
-    else if (l.state === "needs_attention") { cls = "warn"; txt = "Needs attention"; }
-    else if (l.state === "paused") txt = "Paused";
-    else if (l.state === "not_started") { cls = "info"; txt = "Not started"; }
-    else if (l.nextScan) txt = "Idle - next scan " + new Date(l.nextScan).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    return ui.el("span", "badge " + cls, txt);
-  };
-
   // Preview card body: host is the element (give it aria-live="polite"; the caller adds the heading).
   // start() asks for an estimate; mark() says it is out of date. Always a range, never one figure.
-  ui.preview = function (host, libId, getSetting) {
+  // extra (optional): {sample: () => path of the sample file or null, onSample: (sample or null) => ...}.
+  ui.preview = function (host, libId, getSetting, extra) {
+    extra = extra || {};
     var timer, poll, tries, gen = 0;
     function say(rows) {
       host.textContent = "";
@@ -63,9 +54,9 @@
       var my = ++gen; tries = 0;
       say([note("Working out an estimate...")]);
       (function once() {
-        g.SYP.api.preview({ id: libId }, { setting: getSetting() }).then(function (r) {
+        g.SYP.api.preview({ id: libId }, { setting: getSetting(), sampleFile: extra.sample ? extra.sample() : null }).then(function (r) {
           if (my !== gen) return;
-          if (r.status === "ready") return show(r);
+          if (r.status === "ready") { show(r); if (extra.onSample) extra.onSample(r.sample || null); return; }
           if (r.status === "failed" || ++tries > 30) return giveUp();
           poll = setTimeout(once, 2000);
         }, function () { if (my === gen) giveUp(); });
@@ -76,7 +67,7 @@
       // The setting changed: say so now, and refresh shortly after the last change.
       mark: function () {
         clearTimeout(timer); clearTimeout(poll); gen++;
-        say([note("Your choice changed. Updating the estimate...")]);
+        say([note("Your choice changed. Updating the estimate...")]); if (extra.onSample) extra.onSample(null);
         timer = setTimeout(ask, 500);
       },
       stop: function () { clearTimeout(timer); clearTimeout(poll); gen++; }

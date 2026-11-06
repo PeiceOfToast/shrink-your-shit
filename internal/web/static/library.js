@@ -3,7 +3,7 @@
   "use strict";
   var S = window.SYP, api = S.api, ui = S.ui, ed = S.editors;
   function $(id) { return document.getElementById(id); }
-  var id = new URLSearchParams(location.search).get("id"), lib, slider, prev, custom = false, ask = {};
+  var id = new URLSearchParams(location.search).get("id"), lib, slider, editor, prev, custom = false;
   var DESC = ["Shrinks the most. Some files may lose a little detail. Best for space-starved drives.", "Smaller files, small quality trade-off.",
     "Shrinks most files with little visible change. A good start for most people.", "Keeps more detail. Only touches files with lots of room to shrink.",
     "Keeps nearly all detail. Only touches files with lots of room to shrink, so savings are small."];
@@ -32,7 +32,7 @@
     box.hidden = false; $("sh1").focus();
   }
   function save() {
-    var body = slider.get(), choice = !$("share").hidden && document.querySelector('input[name="sh"]:checked').value;
+    var body = editor.get(), choice = !$("share").hidden && document.querySelector('input[name="sh"]:checked').value;
     if (choice) body.sharedFlowChoice = choice;
     var first = custom ? api.replaceCustom({ id: id }).then(function () { custom = false; $("custom").hidden = true; }) : Promise.resolve();
     first.then(function () { return api.putSetting({ id: id }, body); }).then(function () {
@@ -40,19 +40,41 @@
     }, function (e) { if (e.code === "flow_shared") askShared(e.usedBy || []); else fail(e); });
   }
 
+  // One-file breakdown beside the whole-library estimate.
+  function showSample(sm) {
+    var ul = $("sample-lines"); ul.textContent = "";
+    if (!sm) { $("sample-size").textContent = ""; return; }
+    sm.lines.forEach(function (l) { ul.appendChild(ui.el("li", null, l)); });
+    $("sample-size").textContent = "Expected size: about " + ui.range(sm.expectedLow, sm.expectedHigh);
+  }
+
   function init() {
     if (!id) { fail({ message: "No library was chosen. Open one from the Libraries page." }); return; }
     Promise.all([api.getSettings(), api.getLibrary({ id: id }), api.getSetting({ id: id })]).then(function (r) {
       var level = r[0].controlLevel, setting = r[2]; lib = r[1];
       head(); $("lib-body").hidden = false;
-      var get = function () { return slider ? slider.get() : setting; }; // the loaded setting until a level has its own editor
-      prev = ui.preview($("pv"), id, get);
-      if (level !== "basic") {
+      var get = function () { return editor ? editor.get() : setting; }; // the loaded setting until a level has its own editor
+      var extra = level === "standard" ? { sample: function () { return $("sf").value || null; }, onSample: showSample } : null;
+      prev = ui.preview($("pv"), id, get, extra);
+      if (level === "standard") {
+        custom = setting.kind === "custom";
+        $("custom").hidden = !custom; $("desc").hidden = true; $("facts").hidden = true;
+        $("custom").querySelector("strong").textContent = "This setting is too custom to show as choices";
+        $("qh").textContent = "Choices for " + lib.name;
+        editor = ed.selectors($("selectors"), function () { prev.mark(); }, custom ? {} : setting);
+        if (custom) $("save").textContent = "Use these choices instead";
+        $("save").onclick = save; $("applies").textContent = "Applies to " + lib.name + " only."; $("applies").hidden = false;
+        $("sample").hidden = false; $("sf").onchange = function () { prev.start(); };
+        api.listFiles({ id: id }).then(function (r) {
+          r.items.forEach(function (f) { var o = ui.el("option", null, f.path.split("/").pop() + " (" + ui.bytes(f.bytes) + ")"); o.value = f.path; $("sf").appendChild(o); });
+          prev.start();
+        }, fail);
+      } else if (level !== "basic") {
         $("later").hidden = false; $("save").hidden = true; $("desc").hidden = true; $("facts").hidden = true;
       } else {
         custom = setting.quality == null;
         $("custom").hidden = !custom;
-        slider = ed.slider($("slider"), setting.quality || 3, function () { facts(); prev.mark(); }, lib.name + ": smallest file to best quality");
+        editor = slider = ed.slider($("slider"), setting.quality || 3, function () { facts(); prev.mark(); }, lib.name + ": smallest file to best quality");
         if (custom) $("save").textContent = "Use this slider setting";
         $("save").onclick = save;
         // The slider's table comes from the server (echoed in the setting, or on its own for a custom setting).
@@ -69,7 +91,7 @@
         if ($("rm-dialog").returnValue !== "remove") { $("remove").focus(); return; }
         api.deleteLibrary({ id: id }).then(function () { location.href = "/libraries/"; }, fail);
       });
-      prev.start();
+      if (level !== "standard") prev.start();
       if (location.hash === "#preview") $("preview").scrollIntoView();
     }).catch(fail);
   }
