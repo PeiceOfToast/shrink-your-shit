@@ -32,9 +32,9 @@ or, with the example `docker-compose.yml`: comment out `build: .`, enable the `i
 shown in the file, then `docker compose pull && docker compose up -d`.
 
 The images are built for `linux/amd64` and `linux/arm64`, by the workflow in
-`.github/workflows/release-image.yml`, only when a tag starting with `v` is pushed (it can
-also be started by hand from the Actions tab: on a branch it only builds and smoke-tests,
-on a tag it publishes).
+`.github/workflows/release-image.yml`, only when a version tag such as `v0.1.0` (or
+`v0.1.0-rc1`) is pushed. It can also be started by hand from the Actions tab, but that only
+builds and smoke-tests; a manual run never publishes, even on a tag.
 
 **For the repository owner, one manual step:** the first publish creates the package
 **private**. CI cannot change that. In GitHub go to the repository's *Packages* > the
