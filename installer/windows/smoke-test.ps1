@@ -12,12 +12,38 @@ $app = Join-Path $env:LOCALAPPDATA 'shrink-your-shit'
 $statusUrl = "http://127.0.0.1:$Port/api/status"
 $setupLog = Join-Path $env:TEMP 'syp-setup.log'
 
+$diag = Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path 'dist\diag'
+
 function Step($m) { Write-Host "=== $m" }
+
+# What is running that could be part of the installer / program chain (names and parents).
+function ProcessReport() {
+  try {
+    Get-CimInstance Win32_Process |
+      Where-Object { $_.Name -match 'wscript|cscript|powershell|pwsh|shrink-your-shit|ffmpeg|ffprobe|setup|unins|cmd|conhost' } |
+      Select-Object ProcessId, ParentProcessId, Name, CommandLine |
+      Format-Table -AutoSize -Wrap | Out-String -Width 250
+  } catch { "could not list processes: $_" }
+}
+
+# Copy what helps to debug into dist\diag (CI uploads that folder even when the test fails).
+function SaveDiagnostics() {
+  New-Item -ItemType Directory -Force -Path $diag | Out-Null
+  foreach ($f in @($setupLog, (Join-Path $app 'shrink-your-shit.log'), (Join-Path $app 'launch.vbs'))) {
+    if (Test-Path $f) { Copy-Item $f $diag -Force }
+  }
+  ProcessReport | Out-File (Join-Path $diag 'processes.txt')
+  if (Test-Path $app) { Get-ChildItem $app -Recurse -ErrorAction SilentlyContinue | Select-Object FullName, Length | Out-File (Join-Path $diag 'app-files.txt') }
+}
+
 function Fail($m) {
   Write-Host "FAIL: $m"
   foreach ($f in @($setupLog, (Join-Path $app 'shrink-your-shit.log'))) {
-    if (Test-Path $f) { Write-Host "--- $f"; Get-Content $f -Tail 60 }
+    if (Test-Path $f) { Write-Host "--- $f (last 80 lines)"; Get-Content $f -Tail 80 }
   }
+  Write-Host '--- processes'
+  Write-Host (ProcessReport)
+  SaveDiagnostics
   exit 1
 }
 function Status() { try { Invoke-RestMethod -Uri $statusUrl -TimeoutSec 3 } catch { $null } }
@@ -26,14 +52,27 @@ function WaitFor($what, [scriptblock]$cond, $seconds) {
   while ((Get-Date) -lt $end) { if (& $cond) { return } Start-Sleep -Seconds 2 }
   Fail "timed out waiting for $what"
 }
-function RunSetup([string[]]$extra) {
-  $setupArgs = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$setupLog") + $extra
-  # Not "-Wait": that also waits for every process the installer started, and the program it starts
-  # is meant to keep running.
-  $p = Start-Process -FilePath $Setup -ArgumentList $setupArgs -PassThru
+
+# Run an installer/uninstaller and wait for THAT process only, but never forever: after four minutes
+# print what is going on, kill everything we started, and fail.
+function RunAndWait([string]$exe, [string[]]$procArgs, [string]$label) {
+  $p = Start-Process -FilePath $exe -ArgumentList $procArgs -PassThru
   $null = $p.Handle   # keeps ExitCode readable in Windows PowerShell 5.1
-  $p.WaitForExit()
-  if ($p.ExitCode -ne 0) { Fail "installer exit code $($p.ExitCode)" }
+  if (-not $p.WaitForExit(240000)) {
+    Write-Host "TIMEOUT: $label did not finish within 4 minutes (pid $($p.Id))"
+    Write-Host '--- processes at the time of the timeout'
+    Write-Host (ProcessReport)
+    if (Test-Path $setupLog) { Write-Host "--- $setupLog (last 80 lines)"; Get-Content $setupLog -Tail 80 }
+    SaveDiagnostics
+    & taskkill.exe /F /T /PID $p.Id 2>&1 | Out-Null
+    & taskkill.exe /F /T /IM shrink-your-shit.exe 2>&1 | Out-Null
+    & taskkill.exe /F /T /IM wscript.exe 2>&1 | Out-Null
+    Fail "$label hung"
+  }
+  if ($p.ExitCode -ne 0) { Fail "$label exit code $($p.ExitCode)" }
+}
+function RunSetup([string[]]$extra) {
+  RunAndWait $Setup (@('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$setupLog") + $extra) 'the installer'
 }
 
 # Make sure the installer has to download its own ffmpeg: hide any ffmpeg already on this machine.
@@ -88,10 +127,7 @@ WaitFor 'the web page after upgrade' { $null -ne (Status) } 60
 Step 'uninstall'
 $un = Get-ChildItem $app -Filter 'unins*.exe' | Select-Object -First 1
 if (-not $un) { Fail 'no uninstaller found' }
-$p = Start-Process -FilePath $un.FullName -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -PassThru
-$null = $p.Handle
-$p.WaitForExit()
-if ($p.ExitCode -ne 0) { Fail "uninstaller exit code $($p.ExitCode)" }
+RunAndWait $un.FullName @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') 'the uninstaller'
 WaitFor 'the program to stop' { -not (Get-Process shrink-your-shit -ErrorAction SilentlyContinue) } 30
 if (Test-Path (Join-Path $app 'shrink-your-shit.exe')) { Fail 'program file still there after uninstall' }
 if ((Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).'shrink-your-shit') { Fail 'Run key still there after uninstall' }

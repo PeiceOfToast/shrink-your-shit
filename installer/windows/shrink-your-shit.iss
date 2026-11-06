@@ -44,18 +44,18 @@ RestartApplications=no
 
 [Files]
 Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "shrink-your-shit.exe"; Flags: ignoreversion
-Source: "..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion; AfterInstall: FinishInstall
 Source: "extract-ffmpeg.ps1"; Flags: dontcopy
 
 [Icons]
-Name: "{autoprograms}\shrink-your-shit"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\launch.vbs"" open"; WorkingDir: "{app}"; Comment: "Start shrink-your-shit and open its web page"
+Name: "{autoprograms}\shrink-your-shit"; Filename: "{sys}\wscript.exe"; Parameters: "//B //Nologo ""{app}\launch.vbs"" open"; WorkingDir: "{app}"; Comment: "Start shrink-your-shit and open its web page"
 Name: "{autoprograms}\Uninstall shrink-your-shit"; Filename: "{uninstallexe}"
 
 [Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "shrink-your-shit"; ValueData: """{sys}\wscript.exe"" ""{app}\launch.vbs"""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "shrink-your-shit"; ValueData: """{sys}\wscript.exe"" //B //Nologo ""{app}\launch.vbs"""; Flags: uninsdeletevalue
 
 [Run]
-Filename: "{sys}\wscript.exe"; Parameters: """{app}\launch.vbs"" wait"; WorkingDir: "{app}"; StatusMsg: "Starting shrink-your-shit..."; Flags: runhidden
+Filename: "{sys}\wscript.exe"; Parameters: "//B //Nologo ""{app}\launch.vbs"" wait"; WorkingDir: "{app}"; StatusMsg: "Starting shrink-your-shit..."; Flags: runhidden
 Filename: "http://{code:HostForBrowser}"; Description: "Open the shrink-your-shit web page"; Flags: shellexec postinstall nowait skipifsilent
 
 [UninstallRun]
@@ -241,12 +241,13 @@ begin
   SaveStringsToFile(ExpandConstant('{app}\launch.vbs'), L, False);
 end;
 
-procedure CurStepChanged(CurStep: TSetupStep);
+{ Runs right after the last installed file is copied, so it is certain to happen before any [Run]
+  entry starts the launcher (CurStepChanged(ssPostInstall) is not guaranteed to come first). }
+procedure FinishInstall;
 var
   Code: Integer;
   Zip: String;
 begin
-  if CurStep <> ssPostInstall then Exit;
   Zip := ExpandConstant('{tmp}\ffmpeg.zip');
   if FileExists(Zip) then
   begin
