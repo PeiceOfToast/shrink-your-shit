@@ -21,18 +21,23 @@
 <div id="lib-body" hidden>
 <div class="grid-2">
 <section class="card" aria-labelledby="qh"><h2 id="qh" style="margin-top:0">Smaller file or better quality?</h2>
-<div class="notice warn" id="custom" hidden><div><strong>This setting is too custom to show as a slider</strong>It keeps working exactly as before. Saving a slider setting here replaces it for this library; the old one is kept.</div></div>
+<div class="notice warn" id="custom" hidden><div><strong>This setting is too custom to show as a slider</strong>It keeps working exactly as before. Saving here replaces it for this library; the old one is kept.</div></div>
 <div class="notice info" id="later" hidden><div><strong>Detailed choices for this library are not here yet</strong>Your setting keeps working as it is.</div></div>
-<div id="slider"></div>
+<div id="slider"></div><div id="selectors"></div>
 <p id="desc" class="muted"></p>
 <ul class="small" id="facts"><li></li><li>Audio and subtitles: kept exactly as they are</li><li></li></ul>
 <fieldset id="share" hidden><legend id="share-q"></legend>
 <div class="check"><input id="sh1" type="radio" name="sh" value="change_both" checked><label for="sh1" id="sh1l"></label></div>
 <div class="check"><input id="sh2" type="radio" name="sh" value="make_copy"><label for="sh2" id="sh2l"></label></div></fieldset>
 <div class="row"><button class="btn primary" type="button" id="save">Save</button><button class="btn" type="button" id="scan">Scan now</button></div>
-<p id="said" class="muted" role="status"></p></section>
+<p class="hint" id="applies" hidden></p><p id="said" class="muted" role="status"></p></section>
 <section class="card" id="preview" aria-labelledby="ph2"><h2 id="ph2" style="margin-top:0">Preview</h2>
 <p class="muted">See what would happen, without changing any file.</p>
+<div id="sample" hidden><h3>What would happen to one file</h3>
+<label class="label" for="sf">Pick a sample file</label><select id="sf"></select>
+<ul id="sample-lines" style="margin-top:12px"></ul>
+<p aria-live="polite"><strong id="sample-size"></strong><br><span class="hint">Estimate. The real result is measured and checked after converting.</span></p>
+<hr style="border:0;border-top:1px solid var(--border)"><h3>Whole library</h3></div>
 <div id="pv" aria-live="polite"></div>
 <div class="row" style="margin-top:12px"><button class="btn" type="button" id="update">Update preview</button><a class="btn" href="/activity/skipped/">See skipped files</a></div></section>
 </div>

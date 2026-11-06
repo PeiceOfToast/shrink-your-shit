@@ -110,8 +110,9 @@
     getSetting: function (p) {
       var i = find(libs, "id", p.id);
       if (i < 0) return fail(404, "not_found", "That library is gone. Nothing was changed.");
+      if (libs[i].sel) return ok(Object.assign({ kind: "selectors", availableFormats: ["hevc"] }, libs[i].sel));
       if (libs[i].settingKind === "custom") return ok({ kind: "custom" });
-      return ok({ quality: libs[i].quality || (libs[i].settingLabel === "Smaller" ? 2 : 3), positions: SLIDER });
+      return ok({ kind: "slider", quality: libs[i].quality || (libs[i].settingLabel === "Smaller" ? 2 : 3), positions: SLIDER });
     },
     putSetting: function (p, b) {
       var i = find(libs, "id", p.id);
@@ -123,15 +124,28 @@
         var nf = { id: "f" + (flows.length + 10), name: libs[i].name + " - " + (b.quality ? SLIDER[b.quality - 1].name : "Copy"), usedBy: [libs[i].name], madeWith: "slider", changedAt: iso(0) };
         flows.push(nf); libs[i].flowId = nf.id; saveLibs();
       }
+      if (b.quality && !b.speed) delete libs[i].sel; // a slider save replaces Standard choices
       if (b.quality) { libs[i].quality = b.quality; libs[i].settingLabel = ["Smallest file", "Smaller", "Balanced", "Better quality", "Best quality"][b.quality - 1]; libs[i].settingKind = "slider"; saveLibs(); }
+      if (b.speed) { libs[i].sel = copy(b); libs[i].settingKind = "selectors"; libs[i].settingLabel = ["Smallest file", "Smaller", "Balanced", "Better quality", "Best quality"][(b.quality || 3) - 1]; saveLibs(); }
       return ok();
     },
     replaceCustom: function (p) { var i = find(libs, "id", p.id); if (i >= 0) { libs[i].settingKind = "slider"; libs[i].settingLabel = "Balanced"; libs[i].state = "idle"; libs[i].quality = 3; saveLibs(); } return ok(); },
     putLibraryFlow: function (p, b) { var i = find(libs, "id", p.id); if (i >= 0) libs[i].flowId = b.flowId; saveLibs(); return ok(); },
     // Answers "computing" first, then "ready", so the waiting state gets exercised.
-    preview: function () { pv = !pv; return ok(pv ? { status: "computing", stale: false } : previewResult()); },
-    previewSample: function () { return ok({ lines: ["Video: HEVC, about half the size"], expectedLow: 2 * GB, expectedHigh: 3 * GB }); },
-    listFiles: function () { return ok(list([{ path: "/media/movies/Alien (1979).mkv", bytes: 9 * GB }])); },
+    preview: function (p, b) {
+      var li = find(libs, "id", p.id);
+      if (b.sampleFile && li >= 0 && b.sampleFile.indexOf(libs[li].path + "/") !== 0) return fail(400, "outside_library", "That file is not inside this library. Nothing was changed.");
+      pv = !pv;
+      if (pv) return ok({ status: "computing", stale: false });
+      var r = previewResult(), q = b.setting && b.setting.quality || 3;
+      if (b.sampleFile) r.sample = { lines: ["Video: converted to the smaller format (" + SLIDER[q - 1].name.toLowerCase() + " setting)", "Audio: 2 tracks kept", "Subtitles: 3 kept (all text)", "File type: MKV, unchanged", "Replaces the original; original kept for 7 days"],
+        expectedBytesLow: ((b.sampleFile.length % 5) + 2.2 - 0.2 * q) * GB, expectedBytesHigh: ((b.sampleFile.length % 5) + 3.1 - 0.2 * q) * GB };
+      return ok(r);
+    },
+    listFiles: function (p) {
+      var i = find(libs, "id", p.id), root = i < 0 ? "/media" : libs[i].path;
+      return ok(list([{ path: root + "/Alien (1979).mkv", bytes: 9 * GB }, { path: root + "/Heat (1995).mkv", bytes: 7 * GB }, { path: root + "/Show S02E04.mkv", bytes: 4.1 * GB }]));
+    },
     activitySummary: function () { return ok(summary()); },
     pause: function () { paused = true; return ok(); },
     resume: function () { paused = false; return ok(); },

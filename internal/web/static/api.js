@@ -18,7 +18,7 @@
     getSetting: ["GET", "/api/libraries/{id}/setting"], putSetting: ["PUT", "/api/libraries/{id}/setting"],
     replaceCustom: ["POST", "/api/libraries/{id}/setting/replace-custom"],
     putLibraryFlow: ["PUT", "/api/libraries/{id}/flow"],
-    preview: ["POST", "/api/libraries/{id}/preview"], previewSample: ["GET", "/api/libraries/{id}/preview/sample"],
+    preview: ["POST", "/api/libraries/{id}/preview"],
     listFiles: ["GET", "/api/libraries/{id}/files"],
     activitySummary: ["GET", "/api/activity/summary"], pause: ["POST", "/api/queue/pause"],
     resume: ["POST", "/api/queue/resume"], queue: ["GET", "/api/activity/queue"],
