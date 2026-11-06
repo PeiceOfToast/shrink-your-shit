@@ -33,7 +33,7 @@ func setup(t *testing.T, probe string) (*Scanner, *jobs.Store, string, *media.Fa
 }
 
 func TestIsVideo(t *testing.T) {
-	for p, want := range map[string]bool{"a.mkv": true, "A.MP4": true, "a.txt": false, "a.syp-tmp.mkv": false, "a.hevc.mkv": false, "Show.S01E01.hevc.x265.mkv": true} {
+	for p, want := range map[string]bool{"a.mkv": true, "A.MP4": true, "a.txt": false, "a.syp-tmp.mkv": false, "a.hevc.mkv": false, "._a.mp4": false, "B.MKV": true, "Show.S01E01.hevc.x265.mkv": true} {
 		if IsVideo(p) != want {
 			t.Errorf("%s: want %v", p, want)
 		}

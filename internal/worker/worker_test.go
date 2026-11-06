@@ -213,3 +213,31 @@ func TestBiggerOutputRejected(t *testing.T) {
 		t.Errorf("original replaced by bigger file: %q", b)
 	}
 }
+
+func TestRenameRetry(t *testing.T) {
+	calls := 0
+	flaky := func(a, b string) error {
+		calls++
+		if calls < 3 {
+			return errors.New("file in use")
+		}
+		return nil
+	}
+	if err := renameRetry(flaky, "a", "b", 5, 0); err != nil || calls != 3 {
+		t.Errorf("calls=%d err=%v", calls, err)
+	}
+	calls = 0
+	never := func(a, b string) error { calls++; return errors.New("locked") }
+	if err := renameRetry(never, "a", "b", 4, 0); err == nil || calls != 4 {
+		t.Errorf("should give up after 4 tries: calls=%d err=%v", calls, err)
+	}
+}
+
+func TestPathsWithSpacesAndDots(t *testing.T) {
+	if got := TempPath(filepath.Join("a b", "My.Movie (2020).MKV")); filepath.Base(got) != "My.Movie (2020).syp-tmp.MKV" {
+		t.Errorf("%q", got)
+	}
+	if got := BesidePath(filepath.Join("a", "x.mp4")); filepath.Base(got) != "x.hevc.mp4" {
+		t.Errorf("%q", got)
+	}
+}

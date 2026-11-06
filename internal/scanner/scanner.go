@@ -24,6 +24,9 @@ var videoExt = map[string]bool{".mkv": true, ".mp4": true, ".m4v": true, ".avi":
 // Our own temp and output files are ignored.
 func IsVideo(path string) bool {
 	base := strings.ToLower(filepath.Base(path))
+	if strings.HasPrefix(base, ".") {
+		return false // hidden files, e.g. macOS "._name.mp4" metadata stubs
+	}
 	ext := filepath.Ext(base)
 	stem := strings.TrimSuffix(base, ext)
 	if strings.HasSuffix(stem, ".syp-tmp") || strings.HasSuffix(stem, ".hevc") {
