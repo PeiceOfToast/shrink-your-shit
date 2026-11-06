@@ -49,6 +49,11 @@
 <div class="row"><button class="btn danger" value="remove" id="rm-yes">Remove library</button><button class="btn" value="keep" autofocus>Keep it</button></div></form></dialog>
 </div>{{end}}
 
+{{define "settings"}}<noscript><div class="notice info" role="note"><div><strong>Turn on scripts to change settings</strong>Settings can only be changed with scripts enabled.</div></div></noscript>
+<div class="page-head"><h1>Settings</h1></div>
+{{template "tabs" .}}
+<div id="host" data-tab="{{.Tab}}"></div>{{end}}
+
 {{define "tabs"}}{{with .Tabs}}<nav aria-label="{{$.Heading}} sections" class="tabs">{{range .}}<a href="{{.Href}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}</nav>{{end}}{{end}}
 
 {{define "activity"}}<noscript><div class="notice info" role="note"><div><strong>Turn on scripts to see live activity</strong>This page updates as files are converted, which needs scripts enabled.</div></div></noscript>

@@ -1,4 +1,4 @@
-/* Page shell: sign-in from ?token=, menu, theme, working-files link, settings form. */
+/* Page shell: sign-in from ?token=, menu, theme, working-files link, update notice. */
 (function () {
   "use strict";
   var api = window.SYP.api, doc = document;
@@ -64,6 +64,15 @@
     return api.listLibraries().then(function (l) { if (!l.total) location.replace("/welcome/"); });
   }
 
+  // A new version: one line on every page that links to Settings > System, which says how to update.
+  function update(s) {
+    if (!s.updateAvailable || !$("main-nav") || location.pathname === "/settings/system/") return;
+    var n = doc.createElement("div"), a = doc.createElement("a");
+    n.className = "notice info"; n.setAttribute("role", "note"); a.href = "/settings/system/"; a.textContent = "See how to update";
+    n.appendChild(doc.createTextNode("Version " + s.updateAvailable.version + " is available. ")); n.appendChild(a);
+    $("main").insertBefore(n, $("mock-note").nextSibling);
+  }
+
   window.SYP.menu = menu;
   window.SYP.ready = signIn();
   window.SYP.ready.then(function () {
@@ -71,6 +80,7 @@
     if (api.mocked) $("mock-note").hidden = false;
     working();
     return api.getSettings().then(function (s) {
+      update(s);
       return firstRun(s).then(function () { return menu(s); });
     });
   }).catch(function () {});

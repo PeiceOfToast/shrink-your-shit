@@ -3,6 +3,7 @@
 package web
 
 import (
+	"encoding/json"
 	"io"
 	"io/fs"
 	"net/http"
@@ -189,7 +190,7 @@ func TestNoFlowWordOutsideFlows(t *testing.T) {
 		}
 		if m := regexp.MustCompile(`"[^"\n]*"`).FindAllString(js, -1); m != nil {
 			for _, lit := range m {
-				if flow.MatchString(lit) && !strings.HasPrefix(lit, `"/api/`) { // address of a call, not text on screen
+				if flow.MatchString(lit) && !strings.HasPrefix(lit, `"/api/`) && !strings.HasPrefix(lit, `"/assets/`) { // an address, not text on screen
 					t.Errorf("NAV-7: %s in %s", lit, name)
 				}
 			}
@@ -306,5 +307,59 @@ func TestActivityPages(t *testing.T) {
 		if strings.Count(body, `aria-current="page"`) != 2 { // the menu's Activity and the current tab
 			t.Errorf("%s: want the menu and one tab marked current", p.Path)
 		}
+	}
+}
+
+// NAV-2: the settings registry gives every setting exactly one home. It fails on a setting listed twice,
+// on one the contract does not have, and on a contract setting with no home at all.
+func TestSettingsRegistry(t *testing.T) {
+	b, err := fs.ReadFile(static, "static/settings.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reg []struct {
+		Key, Tab, Type, Label string
+		Options               []struct{ Value, Label string }
+	}
+	if err := json.Unmarshal(b, &reg); err != nil {
+		t.Fatal(err)
+	}
+	// GET /api/settings fields (UI-API-CONTRACT.md); "token" has its own endpoint.
+	contract := []string{"controlLevel", "perLibraryFlow", "firstRunDone", "firstRunStep", "authRequired", "keepOriginalsDays", "trashPath",
+		"parallelJobs", "quietHours", "lowPriority", "scanSchedule", "integrations", "updateAvailable"}
+	known := map[string]bool{"token": true}
+	for _, k := range contract {
+		known[k] = true
+	}
+	tabs := map[string]bool{"general": true, "safety": true, "performance": true, "integrations": true, "system": true, "first-run": true}
+	types := map[string]bool{"radio": true, "checkbox": true, "number": true, "time": true, "text": true, "secret": true, "readout": true, "token": true, "info": true}
+	seen, homes := map[string]bool{}, map[string]bool{}
+	for _, e := range reg {
+		if seen[e.Key] {
+			t.Errorf("NAV-2: %s is listed twice", e.Key)
+		}
+		seen[e.Key] = true
+		top := strings.SplitN(e.Key, ".", 2)[0]
+		homes[top] = true
+		if !known[top] {
+			t.Errorf("NAV-2: %s is not a setting in the contract", e.Key)
+		}
+		if !tabs[e.Tab] || !types[e.Type] {
+			t.Errorf("NAV-2: %s has an unknown tab %q or type %q", e.Key, e.Tab, e.Type)
+		}
+		if e.Type == "radio" && len(e.Options) == 0 {
+			t.Errorf("NAV-2: %s has no options", e.Key)
+		} else if e.Type != "info" && e.Type != "radio" && e.Label == "" {
+			t.Errorf("NAV-2: %s has no label", e.Key)
+		}
+	}
+	for _, k := range contract {
+		if !homes[k] {
+			t.Errorf("NAV-2: contract setting %s has no home in the registry", k)
+		}
+	}
+	// NAV-7: nothing the registry says uses the word "flow".
+	if m := regexp.MustCompile(`(?i)\bflows?\b`).FindString(string(b)); m != "" {
+		t.Errorf("NAV-7: %q in settings.json", m)
 	}
 }
