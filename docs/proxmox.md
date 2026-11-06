@@ -41,7 +41,8 @@ Then open `http://<host>:8484`.
   `docker run ... shrink-your-shit -min-bitrate 3000 -crf 24` (see `-h`).
 
 **Docker inside an LXC.** If you run Docker *inside* a Proxmox container (rather than on a
-VM or the host), enable *Nesting* (and *keyctl*) in the container's Options > Features first.
+VM or the host), enable *Nesting* and *keyctl* first: in the Proxmox web page under the container's
+Options > Features, or on the host: `pct set 101 -features nesting=1,keyctl=1` (then restart it).
 
 **Proxmox VE with OCI images (tech preview in recent versions).** Proxmox can create an LXC
 from an OCI image pulled from a registry. Because this project doesn't publish an image
