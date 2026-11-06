@@ -132,6 +132,15 @@ threshold while CRF 16 passes; a truncated source is never "done". Things to kno
 
 Collected from the reviews; none is fixed.
 
+- **Last check to rename (slice 10 residue; slice 12 file-guards owns the rest):** right before the
+  rename the worker checks that the original is still the file it read and the temp file is still the
+  one it created and checked, but a plain rename cannot make that check and the move one step. A
+  program that edits or replaces the original, or swaps the temp file, in the instant between them is
+  not caught, and its file is overwritten or used. Also not covered: a program that rewrites our own
+  temp file in place (same identity) after the checks; a program that removes our temp file and puts
+  a link under the same random name before ffmpeg opens it (ffmpeg follows it); an edit that keeps
+  size and modification time on Windows, where no change time is read; and the moment a read-only
+  original's permissions are put back on the checked temp file.
 - **Crash between rename and "done":** if the process dies after the new file replaced the
   original but before the job is marked done, the next start requeues it and re-encodes the HEVC
   file. The "output must be smaller" check should make that fail safely, but this was reasoned

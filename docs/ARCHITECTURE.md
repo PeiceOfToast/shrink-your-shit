@@ -37,8 +37,13 @@ the result and the original was deliberately left alone, with the reason in the 
    is open for the same path). Unchanged files (same size and mtime) are not re-probed.
 2. Worker claims the job, probes the source again (`media.Info` with every stream), checks there is
    free disk space for the new file, and counts the source's video frames. From these it builds an
-   `Expect` (below). Then it runs ffmpeg into `name.syp-tmp.<ext>` next to the original, same
-   container as the input. First video stream to HEVC; everything else copied except data streams.
+   `Expect` (below). Then it runs ffmpeg into a temp file next to the original, same container as
+   the input. The temp file (`worker/tempfile.go`) has an unpredictable name
+   (`name.<random>.syp-tmp.<ext>`), is created exclusively and with the original's permissions, and
+   the worker remembers its identity (device and inode, or Windows file ID): if that name later
+   refers to anything else, the result is not used. Leftover temp files from a crash (and the old
+   fixed name `name.syp-tmp.<ext>`) are removed first; if one cannot be removed, the job fails
+   before ffmpeg starts. First video stream to HEVC; everything else copied except data streams.
 3. **Safety floor** (`worker/verify.go`; not removable by a flow, only the thresholds are tunable).
    The new file is compared with the `Expect`, never directly with the original. Cheap checks first:
    it exists and is not empty; it is readable; **stream parity** (same number of video, audio,
@@ -52,8 +57,11 @@ the result and the original was deliberately left alone, with the reason in the 
    at least 0.90, an untuned starting value). The new file is sought to the sample time plus the
    difference between the two files' video start times (an encoder delays the first frame, and
    without this a good file scored 0.93), and if a sample still scores low it is re-measured one frame
-   earlier and later, best counts. Last, the source must not have changed during the encode; that is
-   also checked first, before the expensive checks, so it is reported plainly.
+   earlier and later, best counts. The source must not have changed during the encode: still the same
+   file (identity), size and modification time, and on Linux and macOS the same change time (which
+   catches an edit that keeps the size and puts the modification time back). That is checked before
+   the expensive checks, so it is reported plainly, and again right before each rename attempt,
+   together with the temp file's identity.
    **The original is checked too:** while converting, ffmpeg's error output is read, and decode errors
    in the original (corrupt data, not the harmless messages a recording that starts mid-picture-group
    prints) make the job `kept` with "the original file has errors; not converting it", so a damaged

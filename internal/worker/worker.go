@@ -129,13 +129,6 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-// TempPath is where ffmpeg writes before the file is trusted. It keeps the
-// original extension so ffmpeg picks the right container.
-func TempPath(src string) string {
-	ext := filepath.Ext(src)
-	return strings.TrimSuffix(src, ext) + ".syp-tmp" + ext
-}
-
 // BesidePath is the output name in Beside mode.
 func BesidePath(src string) string {
 	ext := filepath.Ext(src)
@@ -151,11 +144,13 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if serr != nil {
 		return "", fmt.Errorf("source file: %w", serr)
 	}
-	tmp := TempPath(job.Path)
-	os.Remove(tmp) // leftover from a crash
+	if err := removeLeftoverTemps(job.Path); err != nil {
+		return "", err
+	}
+	var tmp string
 	done := false
 	defer func() {
-		if !done {
+		if !done && tmp != "" {
 			os.Remove(tmp)
 		}
 	}()
@@ -188,6 +183,10 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		exp.DurationSec = job.DurationSec
 	}
 
+	tmp, tmpID, err := newTemp(job.Path, before.Mode().Perm())
+	if err != nil {
+		return "", err
+	}
 	args := media.HEVCArgs(job.Path, tmp, w.Rule.CRF, w.Rule.Preset)
 	encErr, terr := media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p float64) {
 		w.Queue.Progress(job.ID, p)
@@ -206,29 +205,52 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if err := sourceUnchanged(job.Path, before); err != nil {
 		return "", err
 	}
+	if err := tempIntact(tmp, tmpID); err != nil {
+		return "", err
+	}
 	if err := w.verify(ctx, src, exp, job.Path, tmp, before.Size()); err != nil {
 		return "", err
 	}
-	if err := sourceUnchanged(job.Path, before); err != nil {
+	if err := readOnlyAgain(tmp, tmpID, before.Mode().Perm()); err != nil {
 		return "", err
 	}
-	os.Chmod(tmp, before.Mode().Perm()) // keep the original's permissions
 	final = job.Path
 	if w.Mode == Beside {
 		final = BesidePath(job.Path)
 	}
-	// Rename is atomic on one filesystem: the original is only replaced by a complete file.
-	if err := moveIntoPlace(ctx, tmp, final); err != nil {
+	// Rename is atomic on one filesystem: the original is only replaced by a complete file. Right
+	// before each try, the original must still be the file we read and the temp file still the one
+	// we created and checked. A plain rename cannot make that last check and the move one step, so a
+	// change in the instant between them is not caught (see docs/STATUS.md).
+	if err := moveIntoPlace(ctx, tmp, final, func() error {
+		if err := sourceUnchanged(job.Path, before); err != nil {
+			return err
+		}
+		return tempIntact(tmp, tmpID)
+	}); err != nil {
+		var k *KeptError
+		if errors.As(err, &k) {
+			return "", err
+		}
 		return "", fmt.Errorf("move result into place: %w", err)
 	}
 	done = true
 	return final, nil
 }
 
+// sourceUnchanged refuses the new file if the original is no longer the file that was read: a
+// different file now (another device or inode, or Windows file ID), or the same file with another
+// size, modification time or (where the system records one) change time. The change time catches
+// an edit that keeps the size and puts the modification time back, as some tag editors do.
 func sourceUnchanged(path string, before os.FileInfo) error {
 	now, err := os.Stat(path)
-	if err != nil || now.Size() != before.Size() || !now.ModTime().Equal(before.ModTime()) {
+	if err != nil || !os.SameFile(now, before) || now.Size() != before.Size() || !now.ModTime().Equal(before.ModTime()) {
 		return kept("the original file changed while it was being converted, so the new file is out of date")
+	}
+	if b, ok := changeTime(before); ok {
+		if n, ok := changeTime(now); !ok || !n.Equal(b) {
+			return kept("the original file changed while it was being converted, so the new file is out of date")
+		}
 	}
 	return nil
 }
@@ -236,12 +258,17 @@ func sourceUnchanged(path string, before os.FileInfo) error {
 // moveIntoPlace renames tmp over final. On Windows the rename fails while
 // another program (a media player, a virus scanner) holds the target open, so
 // it is retried for a while there. Elsewhere one try is enough.
-func moveIntoPlace(ctx context.Context, tmp, final string) error {
+func moveIntoPlace(ctx context.Context, tmp, final string, stillOK func() error) error {
 	tries := 1
 	if runtime.GOOS == "windows" {
 		tries = 10
 	}
-	return renameRetry(ctx, os.Rename, tmp, final, tries, time.Second)
+	return renameRetry(ctx, func(a, b string) error {
+		if err := stillOK(); err != nil {
+			return err
+		}
+		return os.Rename(a, b)
+	}, tmp, final, tries, time.Second)
 }
 
 func renameRetry(ctx context.Context, rename func(a, b string) error, a, b string, tries int, wait time.Duration) error {
@@ -256,6 +283,10 @@ func renameRetry(ctx context.Context, rename func(a, b string) error, a, b strin
 		}
 		if err = rename(a, b); err == nil {
 			return nil
+		}
+		var k *KeptError
+		if errors.As(err, &k) {
+			return err // a refusal, not a locked file: trying again will not help
 		}
 	}
 	return err

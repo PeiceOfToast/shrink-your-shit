@@ -105,6 +105,7 @@ type scenario struct {
 	freeBytes              uint64
 	freeErr                error
 	onEncode               func() // runs while "encoding", e.g. to modify the source
+	afterChecks            func() // runs at the picture comparison, the last check
 
 	calls []string
 	exec  *media.FakeExec
@@ -183,6 +184,10 @@ func (s *scenario) handle(name string, args []string) (string, string, error) {
 		case s.has(args, "-xerror"):
 			return "", s.decodeStderr, s.decodeErr
 		case s.has(args, "-lavfi"):
+			if s.afterChecks != nil {
+				s.afterChecks()
+				s.afterChecks = nil
+			}
 			return "", s.ssimStderr, s.ssimErr
 		}
 	}
@@ -223,7 +228,7 @@ func (s *scenario) assertOriginalSafe() {
 	if b, err := os.ReadFile(s.src); err != nil || string(b) != "original-bytes" {
 		s.t.Errorf("the original was touched: %q %v", b, err)
 	}
-	if _, err := os.Stat(TempPath(s.src)); err == nil {
+	if tempLeft(s.src) {
 		s.t.Error("a temp file was left behind")
 	}
 	if _, err := os.Stat(BesidePath(s.src)); err == nil {
@@ -254,7 +259,7 @@ func TestReplaceSuccess(t *testing.T) {
 	if b, _ := os.ReadFile(s.src); string(b) != "new" {
 		t.Errorf("original should be replaced, has %q", b)
 	}
-	if _, err := os.Stat(TempPath(s.src)); err == nil {
+	if tempLeft(s.src) {
 		t.Error("temp file should be gone")
 	}
 	j := s.job()
@@ -289,11 +294,16 @@ func TestPermissionsKept(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows has no Unix permission bits")
 	}
-	s := newScenario(t)
-	os.Chmod(s.src, 0o640)
-	s.run(Replace)
-	if st, _ := os.Stat(s.src); st.Mode().Perm() != 0o640 {
-		t.Errorf("perm %v", st.Mode().Perm())
+	for _, perm := range []os.FileMode{0o640, 0o444} {
+		s := newScenario(t)
+		os.Chmod(s.src, perm)
+		s.run(Replace)
+		if j := s.job(); j.Status != jobs.Done {
+			t.Errorf("%v: %s %q", perm, j.Status, j.Error)
+		}
+		if st, _ := os.Stat(s.src); st.Mode().Perm() != perm {
+			t.Errorf("perm %v, want %v", st.Mode().Perm(), perm)
+		}
 	}
 }
 
@@ -428,7 +438,7 @@ func TestSourceChangedWhileEncodingIsKept(t *testing.T) {
 	if b, _ := os.ReadFile(s.src); string(b) != "user replaced this file meanwhile" {
 		t.Errorf("newer file clobbered: %q", b)
 	}
-	if _, err := os.Stat(TempPath(s.src)); err == nil {
+	if tempLeft(s.src) {
 		t.Error("temp left behind")
 	}
 }

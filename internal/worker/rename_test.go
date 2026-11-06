@@ -30,9 +30,6 @@ func TestRenameRetry(t *testing.T) {
 }
 
 func TestPathsWithSpacesAndDots(t *testing.T) {
-	if got := TempPath(filepath.Join("a b", "My.Movie (2020).MKV")); filepath.Base(got) != "My.Movie (2020).syp-tmp.MKV" {
-		t.Errorf("%q", got)
-	}
 	if got := BesidePath(filepath.Join("a", "x.mp4")); filepath.Base(got) != "x.hevc.mp4" {
 		t.Errorf("%q", got)
 	}

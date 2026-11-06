@@ -109,7 +109,7 @@ lets other machines in. There is no login yet, so only do that on a network you 
 ## Is it safe for my files?
 
 Yes by design. The new file is written next to the original under a temporary
-name (`name.syp-tmp.mkv`). Only when ffmpeg finishes successfully is it moved into
+name (like `name.4185293.syp-tmp.mkv`). Only when ffmpeg finishes successfully is it moved into
 place. If anything fails, the original is untouched and the job shows as *failed*
 with a Retry button.
 

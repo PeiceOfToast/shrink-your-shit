@@ -109,7 +109,7 @@ func TestRealFileWithEverythingIsConvertedAndVerified(t *testing.T) {
 			if len(after.Audio()) != 2 || len(after.Subtitles()) != 2 || len(after.Attachments()) != 1 || after.Chapters != 2 {
 				t.Errorf("streams lost: audio %d subs %d att %d chapters %d", len(after.Audio()), len(after.Subtitles()), len(after.Attachments()), after.Chapters)
 			}
-			if _, err := os.Stat(TempPath(src)); err == nil {
+			if tempLeft(src) {
 				t.Error("temp file left")
 			}
 		})
@@ -151,7 +151,7 @@ func TestRealEncodeThatDropsAnAudioTrackIsRejected(t *testing.T) {
 	if now, _ := os.ReadFile(src); string(now) != string(orig) {
 		t.Error("the original changed")
 	}
-	if _, err := os.Stat(TempPath(src)); err == nil {
+	if tempLeft(src) {
 		t.Error("temp file left")
 	}
 }
@@ -219,7 +219,7 @@ func TestRealCorruptSourceIsKeptNotReplaced(t *testing.T) {
 	if now, _ := os.ReadFile(src); string(now) != string(orig) {
 		t.Error("the original changed")
 	}
-	if _, err := os.Stat(TempPath(src)); err == nil {
+	if tempLeft(src) {
 		t.Error("temp file left")
 	}
 }
@@ -277,7 +277,7 @@ func TestRealDamagedOriginalIsKeptNotConverted(t *testing.T) {
 	if now, _ := os.ReadFile(ts); string(now) != string(orig) {
 		t.Error("the original changed")
 	}
-	if _, err := os.Stat(TempPath(ts)); err == nil {
+	if tempLeft(ts) {
 		t.Error("temp file left")
 	}
 }
