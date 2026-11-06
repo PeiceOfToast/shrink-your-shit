@@ -40,14 +40,15 @@ The program is unsigned: macOS or Windows may warn the first time it runs.
 > **Not working yet:** the installer downloads a published release, and none has been
 > published. Until the first release exists the Linux/macOS installer stops with "could not
 > download" and the Windows download link gives a "not found" page; use the manual steps below
-> instead. The macOS installer has never been run on a Mac, and the Windows installer has only run
-> in GitHub's automated tests, not yet on someone's own PC.
+> instead. The macOS installer has never been run on a Mac, and the Windows installer has not been run
+> anywhere yet: its automated test on GitHub is its first run, and it has not been tried on a real PC.
 
 **Windows:** download **[shrink-your-shit-setup.exe](https://github.com/PeiceOfToast/shrink-your-shit/releases/latest/download/shrink-your-shit-setup.exe)**
 and run it. It installs for your user only (no administrator prompt), asks which folder holds your
 videos, downloads ffmpeg if you don't have a suitable one (about 115 MB, once), starts the program,
 adds a Start Menu shortcut, starts it again whenever you log in, and opens the web page
-(http://127.0.0.1:8484). Uninstall from Settings > Apps. Run the new setup file again to upgrade;
+(http://127.0.0.1:8484). Uninstall from Settings > Apps (your job database in
+`%LOCALAPPDATA%\shrink-your-shit\data` is left behind; delete that folder if you want it gone). Run the new setup file again to upgrade;
 your settings are kept. For scripts: `shrink-your-shit-setup.exe /VERYSILENT /LIBRARY=D:\Videos`.
 
 The Windows installer is **unsigned**, so Windows SmartScreen will say "Windows protected your

@@ -28,7 +28,10 @@ function WaitFor($what, [scriptblock]$cond, $seconds) {
 }
 function RunSetup([string[]]$extra) {
   $setupArgs = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$setupLog") + $extra
-  $p = Start-Process -FilePath $Setup -ArgumentList $setupArgs -Wait -PassThru
+  # Not "-Wait": that also waits for every process the installer started, and the program it starts
+  # is meant to keep running.
+  $p = Start-Process -FilePath $Setup -ArgumentList $setupArgs -PassThru
+  $p.WaitForExit()
   if ($p.ExitCode -ne 0) { Fail "installer exit code $($p.ExitCode)" }
 }
 
@@ -84,7 +87,8 @@ WaitFor 'the web page after upgrade' { $null -ne (Status) } 60
 Step 'uninstall'
 $un = Get-ChildItem $app -Filter 'unins*.exe' | Select-Object -First 1
 if (-not $un) { Fail 'no uninstaller found' }
-$p = Start-Process -FilePath $un.FullName -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
+$p = Start-Process -FilePath $un.FullName -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -PassThru
+$p.WaitForExit()
 if ($p.ExitCode -ne 0) { Fail "uninstaller exit code $($p.ExitCode)" }
 WaitFor 'the program to stop' { -not (Get-Process shrink-your-shit -ErrorAction SilentlyContinue) } 30
 if (Test-Path (Join-Path $app 'shrink-your-shit.exe')) { Fail 'program file still there after uninstall' }

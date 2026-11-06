@@ -59,7 +59,7 @@ Filename: "{sys}\wscript.exe"; Parameters: """{app}\launch.vbs"" wait"; WorkingD
 Filename: "http://{code:HostForBrowser}"; Description: "Open the shrink-your-shit web page"; Flags: shellexec postinstall nowait skipifsilent
 
 [UninstallRun]
-Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM shrink-your-shit.exe"; Flags: runhidden; RunOnceId: "StopApp"
+Filename: "{sys}\taskkill.exe"; Parameters: "/F /T /IM shrink-your-shit.exe"; Flags: runhidden; RunOnceId: "StopApp"
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\ffmpeg"
@@ -69,6 +69,12 @@ Type: files; Name: "{app}\shrink-your-shit.log"
 [Code]
 var
   LibraryPage: TInputDirWizardPage;
+  DownloadPage: TDownloadWizardPage;
+
+function OnDownloadProgress(const Url, FileName: String; const Progress, ProgressMax: Int64): Boolean;
+begin
+  Result := True;
+end;
 
 function Addr: String;
 begin
@@ -108,6 +114,9 @@ begin
     False, '');
   LibraryPage.Add('');
   LibraryPage.Values[0] := GetPreviousData('Library', ExpandConstant('{%USERPROFILE}\Videos'));
+  DownloadPage := CreateDownloadPage('Downloading ffmpeg',
+    'shrink-your-shit needs ffmpeg to re-encode videos. Downloading it now (about 115 MB, one time).',
+    @OnDownloadProgress);
 end;
 
 procedure RegisterPreviousData(PreviousDataKey: Integer);
@@ -142,7 +151,8 @@ var
 begin
   Result := '';
   { an older copy may be running: stop it so its file can be replaced }
-  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM shrink-your-shit.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  { /T also ends ffmpeg if a conversion is running, so nothing keeps files open }
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM shrink-your-shit.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
 
   if not DirExists(LibraryFolder) then
     if not ForceDirectories(LibraryFolder) then
@@ -153,9 +163,19 @@ begin
 
   if HasOwnFfmpeg or HasHevcFfmpegOnPath then Exit;
   try
-    WizardForm.PreparingLabel.Caption := 'Downloading ffmpeg (about 115 MB, one time)...';
-    WizardForm.PreparingLabel.Visible := True;
-    DownloadTemporaryFile('{#FfmpegUrl}', 'ffmpeg.zip', '{#FfmpegSha256}', nil);
+    if WizardSilent then
+      DownloadTemporaryFile('{#FfmpegUrl}', 'ffmpeg.zip', '{#FfmpegSha256}', nil)
+    else
+    begin
+      DownloadPage.Clear;
+      DownloadPage.Add('{#FfmpegUrl}', 'ffmpeg.zip', '{#FfmpegSha256}');
+      DownloadPage.Show;
+      try
+        DownloadPage.Download;
+      finally
+        DownloadPage.Hide;
+      end;
+    end;
   except
     Result := 'Could not download ffmpeg, which shrink-your-shit needs: ' + GetExceptionMessage + #13#10 +
       'Check the internet connection and run the installer again, or install ffmpeg yourself ' +

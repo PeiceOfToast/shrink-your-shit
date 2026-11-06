@@ -51,6 +51,14 @@ reactions to the unsigned file. The pinned ffmpeg download (Gyan 9.0.2 essential
 when the installer was written) was checked to contain ffmpeg.exe/ffprobe.exe with libx265 strings,
 not run.
 
+- **Windows launcher depends on VBScript (`wscript`)**, which Microsoft is phasing out (optional feature
+  on Windows 11 24H2, removal announced), and a hidden `cmd` started from a script is a pattern some
+  antivirus flags. A GUI-subsystem build (`-ldflags -H=windowsgui`) or a direct hidden launch would replace it.
+- **Windows launcher decision:** the installer keeps the VBScript launcher for now (smallest untested
+  surface for the first CI run); a GUI-subsystem build with direct launch would also need a `-log`
+  flag and console attachment for `-version`/`-h`, so it is a follow-up once CI is green.
+- **The Windows download page** in the installer is not exercised by CI (silent mode skips it).
+
 ## Never verified
 
 - A real Windows or macOS **run** of the program (CI only runs the unit tests there, which use

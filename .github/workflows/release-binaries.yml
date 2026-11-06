@@ -1,9 +1,10 @@
 name: Release binaries
 
-# Pushing a version tag like v0.1.0 builds the program for Linux, macOS and Windows and attaches
-# the archives and checksums.txt to a GitHub Release (pre-release tags like v0.1.0-rc1 are marked
-# as pre-releases). Running it by hand (even on a tag) only builds and uploads the files as a
-# workflow artifact; only a pushed tag creates a release.
+# Pushing a version tag like v0.1.0 builds the program for Linux, macOS and Windows, builds and
+# tests the Windows installer, and only then creates a GitHub Release with all of it attached
+# (pre-release tags like v0.1.0-rc1 are marked as pre-releases), so a release never exists with
+# files missing. Running it by hand (even on a tag) builds and tests everything and uploads the
+# files as workflow artifacts; only a pushed tag creates a release.
 # Independent of release-image.yml (the container image), which uses the same tags.
 on:
   push:
@@ -11,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   binaries:
@@ -33,24 +34,12 @@ jobs:
         run: |
           tar -xzf dist/shrink-your-shit_linux_amd64.tar.gz -C "$RUNNER_TEMP"
           "$RUNNER_TEMP/shrink-your-shit_linux_amd64/shrink-your-shit" -version
-      - name: Attach to the GitHub Release
-        if: github.event_name == 'push' && github.ref_type == 'tag'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          case "$TAG" in *-*) pre=--prerelease ;; *) pre= ;; esac
-          # shellcheck disable=SC2086
-          gh release create "$TAG" dist/* --title "$TAG" --generate-notes $pre
       - uses: actions/upload-artifact@v4
-        if: github.event_name != 'push'
         with:
           name: release-files
           path: dist/*
 
   windows-installer:
-    # Needs the release to exist (created by the job above), so it runs after it.
-    needs: binaries
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -67,14 +56,31 @@ jobs:
         run: pwsh installer/windows/build.ps1 -Version ($env:VER -replace '^v', '')
       - name: Silent install, real conversion, upgrade, uninstall
         run: pwsh installer/windows/smoke-test.ps1 -Setup dist/shrink-your-shit-setup.exe
-      - name: Attach to the GitHub Release
-        if: github.event_name == 'push' && github.ref_type == 'tag'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
-        run: gh release upload $env:TAG dist/shrink-your-shit-setup.exe
       - uses: actions/upload-artifact@v4
-        if: github.event_name != 'push'
         with:
           name: windows-installer
           path: dist/shrink-your-shit-setup.exe
+
+  publish:
+    # Only a pushed tag releases, and only when both builds above succeeded.
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [binaries, windows-installer]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          ls -l dist
+          case "$TAG" in *-*) pre=--prerelease ;; *) pre= ;; esac
+          # shellcheck disable=SC2086
+          gh release create "$TAG" dist/* --title "$TAG" --generate-notes $pre
