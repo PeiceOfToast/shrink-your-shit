@@ -31,7 +31,11 @@ for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; d
       (cd "$stage" && python3 -m zipfile -c "$dist/$name.zip" "$name")
     fi
   else
-    tar -C "$stage" -czf "$dist/$name.tar.gz" "$name"
+    # GNU tar can drop the builder's user/group from the archive; bsdtar (macOS) has other flags.
+    owner=
+    tar --version 2>/dev/null | grep -q GNU && owner="--owner=0 --group=0 --numeric-owner"
+    # shellcheck disable=SC2086
+    tar $owner -C "$stage" -czf "$dist/$name.tar.gz" "$name"
   fi
 done
 

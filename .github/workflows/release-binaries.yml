@@ -2,7 +2,8 @@ name: Release binaries
 
 # Pushing a version tag like v0.1.0 builds the program for Linux, macOS and Windows and attaches
 # the archives and checksums.txt to a GitHub Release (pre-release tags like v0.1.0-rc1 are marked
-# as pre-releases). Running it by hand only builds and uploads the files as a workflow artifact.
+# as pre-releases). Running it by hand (even on a tag) only builds and uploads the files as a
+# workflow artifact; only a pushed tag creates a release.
 # Independent of release-image.yml (the container image), which uses the same tags.
 on:
   push:
@@ -24,13 +25,16 @@ jobs:
       - name: Test before releasing
         run: go vet ./... && go test -count=1 ./...
       - name: Build archives
-        run: sh scripts/build-release.sh "${{ github.ref_type == 'tag' && github.ref_name || format('0.0.0-dev.{0}', github.run_number) }}"
+        env:
+          # via env, never pasted into the script text: a tag name can contain shell characters
+          VER: ${{ github.ref_type == 'tag' && github.ref_name || format('0.0.0-dev.{0}', github.run_number) }}
+        run: sh scripts/build-release.sh "$VER"
       - name: Check the linux/amd64 binary reports its version
         run: |
           tar -xzf dist/shrink-your-shit_linux_amd64.tar.gz -C "$RUNNER_TEMP"
           "$RUNNER_TEMP/shrink-your-shit_linux_amd64/shrink-your-shit" -version
       - name: Attach to the GitHub Release
-        if: github.ref_type == 'tag'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
@@ -39,7 +43,7 @@ jobs:
           # shellcheck disable=SC2086
           gh release create "$TAG" dist/* --title "$TAG" --generate-notes $pre
       - uses: actions/upload-artifact@v4
-        if: github.ref_type != 'tag'
+        if: github.event_name != 'push'
         with:
           name: release-files
           path: dist/*
