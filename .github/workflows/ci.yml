@@ -63,3 +63,31 @@ jobs:
           for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8484/api/status && exit 0; sleep 1; done
           docker logs syp
           exit 1
+
+  windows-installer:
+    name: windows installer (build + install/convert/uninstall test)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install Inno Setup if the runner lacks it
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+      - name: Build the installer
+        run: pwsh installer/windows/build.ps1 -Version 0.0.0-ci
+      - name: Silent install, real conversion, upgrade, uninstall
+        run: pwsh installer/windows/smoke-test.ps1 -Setup dist/shrink-your-shit-setup.exe
+      - name: Keep the installer's logs when something went wrong
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer-diagnostics
+          path: dist/diag
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/shrink-your-shit-setup.exe

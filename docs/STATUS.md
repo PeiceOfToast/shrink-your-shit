@@ -14,7 +14,8 @@ marked **never verified** has not been seen working by anyone. Update this file 
 | 5 | Docs (DEVELOPMENT, ARCHITECTURE, STATUS) | PR #5 |
 | 6 | Workflow that publishes a multi-arch image to GHCR on version tags (never run) | PR #6 |
 | 7a | Workflow + `scripts/build-release.sh` that build the 5 binaries and attach them to a GitHub Release on version tags (never run), `-version` flag | PR #7 |
-| 7b | `install.sh` at the repo root: one-line installer for Linux/macOS (replaces the old `deploy/install.sh`) | this change |
+| 7b | `install.sh` at the repo root: one-line installer for Linux/macOS (replaces the old `deploy/install.sh`) | PR #8 |
+| 7c | Windows installer (`installer/windows`, Inno Setup), built and tested on a Windows runner in CI and attached to releases | this change |
 
 ## What has been verified, and how
 
@@ -37,6 +38,42 @@ marked **never verified** has not been seen working by anyone. Update this file 
   after a container restart; re-run kept settings; non-root with sudo works; failures (no sudo,
   tampered download, missing release, missing library folder, unsupported CPU) give clear errors.
   `shellcheck` 0.10 is clean.
+
+## Windows installer: what has and has not been proven
+
+**Proven:** the installer builds on a GitHub `windows-latest` runner, and `installer/windows/smoke-test.ps1`
+passed there (run 42282614770 at commit `6c5e88d`, all jobs green): silent install, ffmpeg download with
+the SHA-256 check, the web page answering, a real conversion to HEVC, running the installer again
+(upgrade), and uninstall (program, autostart entry and shortcut gone, page stopped).
+
+**Not proven, and not covered by that test:**
+- the GUI wizard (the folder page, the download progress page): the test runs `/VERYSILENT`;
+- the Start Menu shortcut being *used*, and the program starting at logon (only that the entries exist);
+- the "no administrator prompt" claim: the CI runner's user is an administrator, so a standard user
+  was never tried;
+- Mark-of-the-Web, SmartScreen, Defender, and Windows 11 Smart App Control (a downloaded copy is never
+  what the runner tests);
+- library paths with non-ASCII characters or network (UNC) paths: the launcher script is written in
+  the system's ANSI code page;
+- upgrading from an older real install: the test only upgrades over the same build and does not
+  check that the web address setting (`SYP_ADDR`) was kept;
+- a custom `/ADDR` with a LAN address: the launcher checks `127.0.0.1`, so it would think the page is
+  down (the app itself would still run);
+- other Windows versions or machines: only `windows-latest` (a Server edition), x64;
+- the VBScript launcher's future (below);
+- `shrink-your-shit-setup.exe` is not listed in `checksums.txt` (built by a different job);
+- uninstall leaves the job database in `%LOCALAPPDATA%\shrink-your-shit\data` on purpose.
+
+The pinned ffmpeg download (Gyan 9.0.2 essentials, SHA-256 recorded when the installer was written)
+was extracted and run by the CI test.
+
+- **Windows launcher depends on VBScript (`wscript`)**, which Microsoft is phasing out (optional feature
+  on Windows 11 24H2, removal announced), and a hidden `cmd` started from a script is a pattern some
+  antivirus flags. A GUI-subsystem build (`-ldflags -H=windowsgui`) or a direct hidden launch would replace it.
+- **Windows launcher decision:** the installer keeps the VBScript launcher for now (smallest untested
+  surface for the first CI run); a GUI-subsystem build with direct launch would also need a `-log`
+  flag and console attachment for `-version`/`-h`, so it is a follow-up once CI is green.
+- **The Windows download page** in the installer is not exercised by CI (silent mode skips it).
 
 ## Never verified
 
