@@ -48,6 +48,21 @@ Shutdown: on Ctrl+C/SIGTERM the running job is released back to `queued`, and `m
 the worker before closing the database. On startup, jobs left `running` by a crash are
 requeued.
 
+## Database schema and migrations
+
+The schema version is SQLite's `PRAGMA user_version`. `internal/jobs/migrate.go` holds an ordered list
+of numbered steps; on every open the program runs the steps newer than the database's version, all in
+one transaction (a failing step rolls everything back and the program refuses to start). Before
+upgrading an existing database it saves a copy next to it as `syp.db.bak-v<old version>` (newest 3
+kept). A database from a newer program is refused with "this database is from a newer
+shrink-your-shit; upgrade the program" and is not touched. Databases created before migrations
+existed (version 0, tables already there) are adopted as version 1.
+
+**To change the schema:** add a step at the END of `migrations` with the next number and write it so
+it only needs to run once (`ALTER TABLE ... ADD COLUMN`, `CREATE TABLE`). Never edit or reorder a step
+that has been released. Add a test that opens a database at the previous version (see
+`migrate_test.go`, which builds the pre-migration schema by hand) and checks the data survives.
+
 ## Configuration surface
 
 Flags (see `go run . -h`) with environment equivalents:

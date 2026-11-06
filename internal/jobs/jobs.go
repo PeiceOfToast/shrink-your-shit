@@ -74,18 +74,25 @@ type File struct {
 
 // Store is the SQLite-backed store.
 type Store struct {
-	db  *sql.DB
-	now func() time.Time
+	db   *sql.DB
+	path string
+	now  func() time.Time
 }
 
-// Open opens (creating if needed) the database at path.
+// Open opens (creating if needed) the database at path and brings its schema up to date
+// (see migrate.go). It refuses a database written by a newer program (ErrNewerDatabase).
 func Open(path string) (*Store, error) {
 	db, err := sql.Open("sqlite", path) // plain path: no URI query, so Windows drive letters and backslashes are safe
 	if err != nil {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1) // SQLite: one writer; keeps claims atomic and simple
-	s := &Store{db: db, now: time.Now}
+	s := &Store{db: db, path: path, now: time.Now}
+	// Look at the schema version before changing anything (even the journal mode writes to the file).
+	if err := s.checkNotNewer(); err != nil {
+		db.Close()
+		return nil, err
+	}
 	// One connection only (above), so these settings stay in force for the whole process.
 	if _, err := db.Exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;`); err != nil {
 		db.Close()
@@ -99,23 +106,6 @@ func Open(path string) (*Store, error) {
 }
 
 func (s *Store) Close() error { return s.db.Close() }
-
-func (s *Store) migrate() error {
-	_, err := s.db.Exec(`
-CREATE TABLE IF NOT EXISTS files (
-  path TEXT PRIMARY KEY, size INTEGER, mtime INTEGER, codec TEXT, decision TEXT);
-CREATE TABLE IF NOT EXISTS jobs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  library TEXT NOT NULL, path TEXT NOT NULL,
-  status TEXT NOT NULL, progress REAL NOT NULL DEFAULT 0,
-  reason TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT '',
-  worker TEXT NOT NULL DEFAULT '', duration REAL NOT NULL DEFAULT 0,
-  size_before INTEGER NOT NULL DEFAULT 0, size_after INTEGER NOT NULL DEFAULT 0,
-  output_path TEXT NOT NULL DEFAULT '',
-  created TEXT NOT NULL, updated TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status);`)
-	return err
-}
 
 func (s *Store) stamp() string { return s.now().UTC().Format(time.RFC3339) }
 

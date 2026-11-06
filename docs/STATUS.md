@@ -54,6 +54,12 @@ marked **never verified** has not been seen working by anyone. Update this file 
 - The `winget install Gyan.FFmpeg` package id in the README, and `brew install ffmpeg`.
 - Hardware or very large libraries: nothing here has run on more than a handful of small files.
 
+**Database upgrades (slice 8):** schema versioning with automatic backup is in; run on a database
+written by the previous build, with real jobs, it upgrades in place, keeps the data, and the new
+binary refuses a database marked as newer (checked with the real binaries). An older binary does not
+refuse a newer database (it predates the check), so downgrading after an upgrade is unsupported;
+restore the `.bak-v<N>` file if you must.
+
 ## Known limitations and follow-ups
 
 Collected from the reviews; none is fixed.
