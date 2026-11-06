@@ -35,6 +35,12 @@ func IsVideo(path string) bool {
 	return videoExt[ext]
 }
 
+// SkipDir reports whether a folder should not be scanned: hidden folders
+// (.Trash, .AppleDouble, ...) and Synology's @eaDir.
+func SkipDir(name string) bool {
+	return strings.HasPrefix(name, ".") || name == "@eaDir"
+}
+
 // Scanner finds work.
 type Scanner struct {
 	Store     *jobs.Store
@@ -59,7 +65,16 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			if err != nil || d.IsDir() || !IsVideo(path) {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() {
+				if path != lib && SkipDir(d.Name()) {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if !IsVideo(path) {
 				return nil
 			}
 			info, err := d.Info()

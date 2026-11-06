@@ -98,3 +98,21 @@ func TestNoSecondJobWhileOpen(t *testing.T) {
 		t.Errorf("%+v", l)
 	}
 }
+
+func TestSkipsHiddenFolders(t *testing.T) {
+	s, st, lib, _ := setup(t, h264Big)
+	for _, d := range []string{".Trash/files", "@eaDir/x", "Movies/Action"} {
+		os.MkdirAll(filepath.Join(lib, d), 0o755)
+		os.WriteFile(filepath.Join(lib, d, "t.mkv"), []byte("12345"), 0o644)
+	}
+	s.ScanOnce(context.Background())
+	l, _ := st.List(10)
+	got := map[string]bool{}
+	for _, j := range l {
+		rel, _ := filepath.Rel(lib, j.Path)
+		got[filepath.ToSlash(rel)] = true
+	}
+	if len(got) != 2 || !got["a.mkv"] || !got["Movies/Action/t.mkv"] {
+		t.Errorf("queued %v", got)
+	}
+}

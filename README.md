@@ -20,7 +20,7 @@ compiler, and the same source builds for Linux, Windows and macOS (Intel and ARM
 1. Install ffmpeg:
    - **Linux / WSL2:** `sudo apt install ffmpeg`
    - **macOS:** `brew install ffmpeg`
-   - **Windows:** `winget install ffmpeg`, or put `ffmpeg.exe` and `ffprobe.exe` in the
+   - **Windows:** `winget install Gyan.FFmpeg`, or put `ffmpeg.exe` and `ffprobe.exe` in the
      same folder as `shrink-your-shit.exe`.
 2. Build and start (Windows: `go build -o shrink-your-shit.exe .` and run
    `shrink-your-shit.exe -library "D:\Videos"`):
@@ -45,7 +45,8 @@ program; point at it explicitly with `-ffmpeg` / `-ffprobe` or `SYP_FFMPEG` /
   ready, replacing it is retried for about 10 seconds, then the job fails safely and
   can be retried. Very long paths (over 260 characters) are not specially handled.
 - macOS/Windows file names are case-insensitive; `.MKV` and `.mkv` are both recognised.
-  Hidden files (names starting with `.`, such as macOS `._name.mp4`) are ignored.
+  Hidden files and folders (names starting with `.`, such as macOS `._name.mp4` or
+  `.Trash`) and Synology `@eaDir` folders are ignored.
 - Files being copied in are skipped until they have not changed for `-settle`
   (15 seconds by default); on a slow network share raise it.
 - File permission bits are copied on Linux/macOS. Windows has no equivalent, so the
