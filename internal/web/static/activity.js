@@ -73,6 +73,7 @@
 
   // ---- Skipped
   var KIND = { user_stopped: "info", restored: "info", hdr_dv: "warn", shared_file: "warn", cannot_keep_track: "warn", bitmap_subs: "warn", symlink: "warn", unreadable: "warn" };
+  var RULE = { already_efficient: 1, would_not_shrink: 1, hdr_dv: 1, cannot_keep_track: 1 }; // reasons a library rule causes
   var reason = "", shown = 0, tb, more, count;
   T.skipped = function () {
     if (!$("reason")) {
@@ -99,7 +100,7 @@
           why.appendChild(el("span", "badge " + (KIND[i.reason] || "idle"), known ? cap(known) : "Other reason")); why.appendChild(document.createElement("br")); why.appendChild(document.createTextNode(i.detail || (known ? "" : i.reason)));
           var a = null;
           if (i.reason === "user_stopped" || i.reason === "restored") a = btn("Convert again", "again-" + i.id, function () { act(api.convertAgain({ id: i.id }).then(after)); });
-          else if (i.libraryId) { a = el("a", "btn small", "Change rule"); a.href = "/library/?id=" + encodeURIComponent(i.libraryId); }
+          else if (i.libraryId && RULE[i.reason]) { a = el("a", "btn small", "Change rule"); a.href = "/library/?id=" + encodeURIComponent(i.libraryId); }
           tb.row([nameOf(i), why, a]);
         });
         tb.wrap.hidden = !r.items.length; more.hidden = r.items.length >= r.total;
@@ -117,7 +118,11 @@
         pane.textContent = "";
         pane.appendChild(heading("Failed: " + ui.num(r.total) + (r.total === 1 ? " file" : " files"), "fh"));
         if (!r.items.length) { pane.appendChild(empty("Nothing has failed.")); return; }
-        var n = el("div", "notice ok"), d = el("div"); d.appendChild(el("strong", null, "Your original files were not touched")); d.appendChild(document.createTextNode("A file only replaces the original after it passes every check.")); n.appendChild(d); pane.appendChild(n);
+        var bad = r.items.filter(function (i) { return i.originalUntouched === false; }).length;
+        var n = el("div", "notice " + (bad ? "warn" : "ok")), d = el("div");
+        if (bad) { d.appendChild(el("strong", null, bad + (bad === 1 ? " original may have changed" : " originals may have changed"))); d.appendChild(document.createTextNode("Those rows say so. Check them before trying again. For the others, the original was not touched.")); }
+        else { d.appendChild(el("strong", null, "Your original files were not touched")); d.appendChild(document.createTextNode("A file only replaces the original after it passes every check.")); }
+        n.appendChild(d); pane.appendChild(n);
         var t = table(["File", "What went wrong", ""]);
         r.items.forEach(function (i) {
           var why = el("div"); why.appendChild(el("span", "badge bad", "Failed")); why.appendChild(document.createTextNode(" ")); why.appendChild(el("strong", null, i.title)); why.appendChild(document.createElement("br")); why.appendChild(document.createTextNode(i.detail));
@@ -187,7 +192,11 @@
     confirmId = new URLSearchParams(location.search).get("confirm");
     $("pause").onclick = function () { act(paused ? api.resume() : api.pause()); };
     refresh().then(function () {
-      setInterval(function () { if (!document.hidden) refresh(); }, 3000);
+      var busy = false;
+      setInterval(function () { // one refresh at a time; a failed poll leaves the last good data on screen
+        if (document.hidden || busy) return;
+        busy = true; refresh().then(function () { busy = false; }, function () { busy = false; });
+      }, 3000);
     });
   }
   S.ready.then(init);

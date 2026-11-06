@@ -286,3 +286,22 @@ func TestOnePrimaryButtonPerPage(t *testing.T) {
 		}
 	}
 }
+
+// The five Activity pages share the header and tab row, and each loads the Activity script.
+func TestActivityPages(t *testing.T) {
+	srv := newServer(t)
+	for _, p := range pages {
+		if p.Section != "activity" {
+			continue
+		}
+		_, body, _ := get(t, srv.URL+p.Path)
+		for _, want := range []string{"<h1>Activity</h1>", `/assets/activity.js`, `aria-label="Activity sections"`, `id="pause"`, `href="/activity/kept/"`} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s: missing %s", p.Path, want)
+			}
+		}
+		if strings.Count(body, `aria-current="page"`) != 2 { // the menu's Activity and the current tab
+			t.Errorf("%s: want the menu and one tab marked current", p.Path)
+		}
+	}
+}
