@@ -94,7 +94,12 @@
     browseDirs: function (p) { return ok({ path: p.path || "/media", parent: "/", dirs: ["movies", "tv", "home"] }); },
     getLibrary: function (p) { var i = find(libs, "id", p.id); return i < 0 ? fail(404, "not_found", "That library is gone. Nothing was changed.") : ok(libs[i]); },
     patchLibrary: function (p, b) { var i = find(libs, "id", p.id); if (i < 0) return fail(404, "not_found", "That library is gone. Nothing was changed."); Object.assign(libs[i], { name: b.name || libs[i].name, path: b.path || libs[i].path }); saveLibs(); return ok(libs[i]); },
-    deleteLibrary: function (p) { var r = removeFrom(libs, "id", p.id); saveLibs(); return r ? ok() : gone(); },
+    // Record only: its queued and running jobs stop (originals untouched); kept originals and Activity rows stay.
+    deleteLibrary: function (p) {
+      var r = removeFrom(libs, "id", p.id); saveLibs();
+      if (r) working = working.filter(function (j) { return j.library !== r.name; });
+      return r ? ok() : gone();
+    },
     scanLibrary: function (p) { var i = find(libs, "id", p.id); if (i >= 0) { libs[i].started = true; libs[i].state = "working"; saveLibs(); } return ok(); },
     getSetting: function (p) {
       var i = find(libs, "id", p.id);
