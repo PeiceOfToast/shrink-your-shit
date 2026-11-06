@@ -102,10 +102,15 @@ container avoids the shift but is less isolated.
 
 ## What has and hasn't been checked
 
-Checked: the program runs with the container's environment variables, answers on all
-addresses, and converts a real file; `install.sh` passes `shellcheck`; the systemd unit
-passes `systemd-analyze verify`.
+Checked: the Docker image builds; in it the program runs as uid 1000, ffmpeg 6.1 (with
+libx265) and ffprobe are present, the web page answers and the healthcheck goes healthy,
+and real files (an mkv with subtitles and an mp4) were converted to HEVC from a mounted
+folder, with the database in a named volume. `docker stop` ends it cleanly in under a
+second. A host `/config` folder that Docker creates itself (root-owned) does fail with
+"unable to open database file", as described above. `docker compose config` accepts the
+compose file. `install.sh` passes `shellcheck`; the systemd unit passes
+`systemd-analyze verify`.
 
-**Not checked** (no Docker and no Proxmox host were available when this was written): building
-and running the image, the install script actually running on Debian, the Proxmox mount and
-permission steps, and Proxmox's OCI import.
+**Not checked** (no Proxmox host or Debian container was available): the install script
+actually running, the Proxmox mount and permission steps, running Docker inside an LXC,
+and Proxmox's OCI import.
