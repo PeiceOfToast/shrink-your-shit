@@ -14,7 +14,6 @@ RestartSec=5
 Nice=10
 IOSchedulingClass=idle
 NoNewPrivileges=true
-PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target

@@ -40,6 +40,9 @@ Then open `http://<host>:8484`.
 - Extra settings are the normal program flags, e.g.
   `docker run ... shrink-your-shit -min-bitrate 3000 -crf 24` (see `-h`).
 
+**Docker inside an LXC.** If you run Docker *inside* a Proxmox container (rather than on a
+VM or the host), enable *Nesting* (and *keyctl*) in the container's Options > Features first.
+
 **Proxmox VE with OCI images (tech preview in recent versions).** Proxmox can create an LXC
 from an OCI image pulled from a registry. Because this project doesn't publish an image
 yet, you would have to push the image you built to a registry you control first. We have not
@@ -69,7 +72,8 @@ tried this. Route B is simpler for a Proxmox LXC.
    and starts the service on boot. Running it again later updates the program and keeps
    your settings.
 5. Settings are in `/etc/default/shrink-your-shit` (`SYP_LIBRARIES`, `SYP_ADDR`, `SYP_DATA`).
-   After editing: `systemctl restart shrink-your-shit`. Logs: `journalctl -u shrink-your-shit -f`.
+   After editing: `systemctl restart shrink-your-shit`. To change the service itself, use
+   `systemctl edit shrink-your-shit` (a drop-in); `install.sh` overwrites the unit file each run. Logs: `journalctl -u shrink-your-shit -f`.
    The database is in `/var/lib/shrink-your-shit`.
 
 ## Mounting your media into the container
