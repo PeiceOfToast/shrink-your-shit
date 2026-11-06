@@ -29,13 +29,17 @@
     { id: "2", name: "TV Shows", path: "/media/tv", state: "idle", workingFiles: 0, waitingFiles: 0, nextScan: iso(-6 * 3600e3), freedBytes: 230 * GB, flowId: "f2", settingLabel: "Smaller", settingKind: "slider" },
     { id: "3", name: "Home videos", path: "/media/home", state: "needs_attention", workingFiles: 0, waitingFiles: 12, nextScan: iso(-6 * 3600e3), freedBytes: 0, flowId: "f3", settingLabel: "Custom", settingKind: "custom" }
   ];
+  try { var sl = sessionStorage.getItem("syp-mock-libs"); if (sl) libs = JSON.parse(sl); } catch (e) {}
+  // ?fresh=1 on the wizard starts over: no libraries, first-run not done.
+  if (/[?&]fresh=1/.test(location.search)) { libs = []; settings.firstRunDone = false; settings.firstRunStep = 1; persist(); saveLibs(); }
+  function saveLibs() { try { sessionStorage.setItem("syp-mock-libs", JSON.stringify(libs)); } catch (e) {} }
   var flows = [
     { id: "f1", name: "Movies - Balanced", usedBy: ["Movies"], madeWith: "slider", changedAt: iso(9 * 864e5) },
     { id: "f2", name: "TV Shows - Smaller", usedBy: ["TV Shows"], madeWith: "slider", changedAt: iso(20 * 864e5) },
     { id: "f3", name: "Home videos - hand made", usedBy: ["Home videos"], madeWith: "builder", changedAt: iso(3 * 864e5) },
     { id: "f4", name: "Old setting", usedBy: [], madeWith: "slider", changedAt: iso(60 * 864e5) }
   ];
-  var paused = false;
+  var paused = false, pv = false;
   var working = [{ jobId: "j1", library: "Movies", path: "/media/movies/Alien (1979).mkv", phase: "converting", percent: 42, etaSeconds: 1500, fromBytes: 9 * GB, expectedBytes: 4 * GB },
                  { jobId: "j2", library: "Movies", path: "/media/movies/Heat (1995).mkv", phase: "checking", percent: 96, etaSeconds: 60, fromBytes: 7 * GB, expectedBytes: 3 * GB }];
   var skippedList = [
@@ -76,15 +80,21 @@
     backup: function () { return ok(); },
     listLibraries: function () { return ok(list(libs)); },
     addLibrary: function (p, b) {
-      var l = { id: String(libs.length + 10), name: b.name || "New library", path: b.path || "", state: "idle", workingFiles: 0, waitingFiles: 0, nextScan: iso(-6 * 3600e3), freedBytes: 0, flowId: "fn", settingLabel: "Balanced", settingKind: "slider" };
-      libs.push(l); return ok(l);
+      var l = { id: String(libs.length + 10), name: b.name || "New library", path: b.path || "", state: "not_started", started: false, workingFiles: 0, waitingFiles: 0, nextScan: iso(-6 * 3600e3), freedBytes: 0, flowId: "fn", settingLabel: "Balanced", settingKind: "slider" };
+      libs.push(l); saveLibs(); return ok(l);
     },
-    checkLibrary: function () { return ok({ ok: true, blockers: [], notes: [], videoCount: 1284, totalBytes: 1100 * GB }); },
+    // Try these folder names to see each state: "missing", "readonly", "full", "empty", "nocodec".
+    checkLibrary: function (p, b) {
+      var path = b.path || "", codes = { missing: "unreadable", readonly: "read_only", full: "low_space", empty: "no_videos", nocodec: "no_converter" }, bl = [], k;
+      for (k in codes) if (path.indexOf(k) >= 0) bl.push({ code: codes[k], message: k === "full" ? "Only 6 GB free on this disk. Free up space (about 15 GB is enough to start), then press Check again." : "Cannot use this folder." });
+      return ok({ ok: !bl.length, blockers: bl, notes: bl.length ? [] : [{ code: "hardlinks", message: "212 files are shared with another folder (for example by Radarr). We will leave them alone, because changing one would break the link." }, { code: "no_hw_encoder", message: "" }],
+                  videoCount: 1284, totalBytes: 1100 * GB });
+    },
     browseDirs: function (p) { return ok({ path: p.path || "/media", parent: "/", dirs: ["movies", "tv", "home"] }); },
     getLibrary: function (p) { var i = find(libs, "id", p.id); return i < 0 ? fail(404, "not_found", "That library is gone. Nothing was changed.") : ok(libs[i]); },
-    patchLibrary: function (p, b) { var i = find(libs, "id", p.id); if (i < 0) return fail(404, "not_found", "That library is gone. Nothing was changed."); Object.assign(libs[i], { name: b.name || libs[i].name, path: b.path || libs[i].path }); return ok(libs[i]); },
-    deleteLibrary: function (p) { return removeFrom(libs, "id", p.id) ? ok() : gone(); },
-    scanLibrary: function () { return ok(); },
+    patchLibrary: function (p, b) { var i = find(libs, "id", p.id); if (i < 0) return fail(404, "not_found", "That library is gone. Nothing was changed."); Object.assign(libs[i], { name: b.name || libs[i].name, path: b.path || libs[i].path }); saveLibs(); return ok(libs[i]); },
+    deleteLibrary: function (p) { var r = removeFrom(libs, "id", p.id); saveLibs(); return r ? ok() : gone(); },
+    scanLibrary: function (p) { var i = find(libs, "id", p.id); if (i >= 0) { libs[i].started = true; libs[i].state = "working"; saveLibs(); } return ok(); },
     getSetting: function (p) {
       var i = find(libs, "id", p.id);
       if (i < 0) return fail(404, "not_found", "That library is gone. Nothing was changed.");
@@ -99,8 +109,9 @@
       return ok();
     },
     replaceCustom: function () { return ok(); },
-    putLibraryFlow: function (p, b) { var i = find(libs, "id", p.id); if (i >= 0) libs[i].flowId = b.flowId; return ok(); },
-    preview: function () { return ok(previewResult()); },
+    putLibraryFlow: function (p, b) { var i = find(libs, "id", p.id); if (i >= 0) libs[i].flowId = b.flowId; saveLibs(); return ok(); },
+    // Answers "computing" first, then "ready", so the waiting state gets exercised.
+    preview: function () { pv = !pv; return ok(pv ? { status: "computing", stale: false } : previewResult()); },
     previewSample: function () { return ok({ lines: ["Video: HEVC, about half the size"], expectedLow: 2 * GB, expectedHigh: 3 * GB }); },
     listFiles: function () { return ok(list([{ path: "/media/movies/Alien (1979).mkv", bytes: 9 * GB }])); },
     activitySummary: function () { return ok(summary()); },

@@ -72,6 +72,7 @@ var settingsTabs = []tab{
 }
 
 var pages = []page{
+	{Path: "/welcome/", Kind: "wizard", Tab: "Welcome"},
 	{Path: "/libraries/", Section: "libraries", Empty: "Your libraries will show up here. A library is a folder of videos you want to make smaller."},
 	{Path: "/activity/", Section: "activity", Tab: "Queue", Empty: "Nothing is being converted right now. Files waiting for their turn will be listed here."},
 	{Path: "/activity/skipped/", Section: "activity", Tab: "Skipped", Empty: "Files that were left alone, and why, will be listed here."},
@@ -106,9 +107,13 @@ func render(items []navItem, p page) ([]byte, error) {
 			heading = n.Label
 		}
 	}
-	v := pageView{Title: heading, Heading: heading, Section: p.Section, Kind: p.Kind, Empty: p.Empty,
-		Nav: navFor(items, "basic", false)}
-	if p.Tab != "" {
+	v := pageView{Title: heading, Heading: heading, Section: p.Section, Kind: p.Kind, Empty: p.Empty}
+	if p.Kind == "wizard" { // the top bar has no menu during first-run
+		v.Title, v.Heading = "Set up", "Set up"
+	} else {
+		v.Nav = navFor(items, "basic", false)
+	}
+	if p.Tab != "" && p.Kind != "wizard" {
 		v.Title = p.Tab + " - " + heading
 		list := activityTabs
 		if p.Section == "settings" {
@@ -123,7 +128,7 @@ func render(items []navItem, p page) ([]byte, error) {
 	return buf.Bytes(), err
 }
 
-var pageTmpl = template.Must(template.ParseFS(templates, "templates/page.html"))
+var pageTmpl = template.Must(template.ParseFS(templates, "templates/*.html"))
 
 func pageHandler(items []navItem, p page) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
