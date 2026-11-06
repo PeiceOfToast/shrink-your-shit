@@ -21,7 +21,7 @@ Build the image from this repository (nothing is published to a registry yet):
 ```
 docker build -t shrink-your-shit .
 docker run -d --name syp -p 8484:8484 \
-  -v /srv/syp-config:/config \
+  -v syp-config:/config \
   -v /path/to/COPY-of-videos:/media \
   shrink-your-shit
 ```
@@ -29,7 +29,10 @@ docker run -d --name syp -p 8484:8484 \
 Or copy `docker-compose.yml`, edit the media path, and run `docker compose up -d`.
 Then open `http://<host>:8484`.
 
-- `/config` holds the database. `/media` is the library. For more folders set
+- `/config` holds the database. It is a Docker *named volume* here so it is writable by the
+  program. If you use a host folder instead, create it first and give it to uid 1000
+  (`mkdir -p /srv/syp-config && chown 1000:1000 /srv/syp-config`); Docker would otherwise
+  create it owned by root and the program can't start. `/media` is the library. For more folders set
   `SYP_LIBRARIES=/media:/more` and mount each one.
 - The program runs as user `1000:1000`. That user must be able to **read and write** the media
   folder. If your files belong to someone else, run with `--user <uid>:<gid>` (compose:
