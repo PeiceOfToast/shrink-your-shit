@@ -110,9 +110,9 @@
     getSetting: function (p) {
       var i = find(libs, "id", p.id);
       if (i < 0) return fail(404, "not_found", "That library is gone. Nothing was changed.");
-      if (libs[i].sel) return ok(Object.assign({ availableFormats: ["hevc"] }, libs[i].sel));
+      if (libs[i].sel) return ok(Object.assign({ kind: "selectors", availableFormats: ["hevc"] }, libs[i].sel));
       if (libs[i].settingKind === "custom") return ok({ kind: "custom" });
-      return ok({ quality: libs[i].quality || (libs[i].settingLabel === "Smaller" ? 2 : 3), positions: SLIDER });
+      return ok({ kind: "slider", quality: libs[i].quality || (libs[i].settingLabel === "Smaller" ? 2 : 3), positions: SLIDER });
     },
     putSetting: function (p, b) {
       var i = find(libs, "id", p.id);

@@ -73,7 +73,7 @@
         $("later").hidden = false; $("save").hidden = true; $("desc").hidden = true; $("facts").hidden = true;
       } else {
         custom = setting.kind === "custom";
-        var more = setting.speed != null; // saved with Standard choices: more than a slider can show
+        var more = setting.kind === "selectors"; // saved with Standard choices: more than a slider can show
         $("custom").hidden = !(custom || more);
         if (more) $("custom").querySelector("strong").textContent = "This setting has more choices than a slider shows";
         editor = slider = ed.slider($("slider"), setting.quality || 3, function () { facts(); prev.mark(); }, lib.name + ": smallest file to best quality");
