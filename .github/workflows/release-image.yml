@@ -1,7 +1,7 @@
 name: Publish image
 
 # Pushing a tag like v0.1.0 builds a linux/amd64 + linux/arm64 image and publishes it to
-# ghcr.io/<owner>/<repo> as 0.1.0 and latest. Running it by hand on a branch only builds and
+# ghcr.io/<owner>/<repo> as 0.1.0 and latest (pre-releases like v0.1.0-rc1 get no latest). Running it by hand on a branch only builds and
 # smoke-tests (nothing is pushed); running it by hand on a tag publishes.
 on:
   push:
@@ -28,9 +28,10 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
+          # "latest" is added automatically for stable versions (v0.1.0), not for pre-releases (v0.1.0-rc1)
+          flavor: latest=auto
           tags: |
             type=semver,pattern={{version}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
       - uses: docker/login-action@v3
         if: env.PUBLISH == 'true'
         with:

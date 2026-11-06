@@ -28,8 +28,8 @@ docker run -d --name syp -p 8484:8484 -v syp-config:/config -v /path/to/COPY-of-
   ghcr.io/peiceoftoast/shrink-your-shit:latest
 ```
 
-or, with the example `docker-compose.yml` (it already points at that image):
-`docker compose pull && docker compose up -d`.
+or, with the example `docker-compose.yml`: comment out `build: .`, enable the `image:` line
+shown in the file, then `docker compose pull && docker compose up -d`.
 
 The images are built for `linux/amd64` and `linux/arm64`, by the workflow in
 `.github/workflows/release-image.yml`, only when a tag starting with `v` is pushed (it can
@@ -53,8 +53,7 @@ docker run -d --name syp -p 8484:8484 \
   shrink-your-shit
 ```
 
-Or copy `docker-compose.yml`, edit the media path, switch it to `build: .` (see the comment
-in the file) and run `docker compose up -d`.
+Or copy `docker-compose.yml`, edit the media path, run `docker compose up -d` (it builds the image from this folder by default).
 Then open `http://<host>:8484`.
 
 - `/config` holds the database. It is a Docker *named volume* here so it is writable by the
