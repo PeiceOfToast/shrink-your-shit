@@ -1,6 +1,6 @@
 // Copyright (C) shrink-your-shit contributors. Licensed under AGPL-3.0-or-later.
 
-// Package web serves the status page and its JSON API.
+// Package web serves the app's pages, its embedded assets and its JSON API.
 package web
 
 import (
@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 )
@@ -16,11 +17,25 @@ import (
 //go:embed static
 var static embed.FS
 
-// Handler returns the HTTP handler: static page at / and JSON under /api.
+// Handler returns the HTTP handler: pages, assets under /assets and JSON under /api.
 func Handler(store *jobs.Store, libraries []string) http.Handler {
 	mux := http.NewServeMux()
 	sub, _ := fs.Sub(static, "static")
-	mux.Handle("/", http.FileServer(http.FS(sub)))
+	files := http.StripPrefix("/assets/", http.FileServer(http.FS(sub)))
+	mux.HandleFunc("GET /assets/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/") { // no directory listing
+			http.NotFound(w, r)
+			return
+		}
+		files.ServeHTTP(w, r)
+	})
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/libraries/", http.StatusFound)
+	})
+	items := loadNav()
+	for _, p := range pages {
+		mux.HandleFunc("GET "+p.Path+"{$}", pageHandler(items, p))
+	}
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
 		list, err := store.List(200)
 		if err != nil {
