@@ -101,7 +101,7 @@ func TestNoSecondJobWhileOpen(t *testing.T) {
 
 func TestSkipsHiddenFolders(t *testing.T) {
 	s, st, lib, _ := setup(t, h264Big)
-	for _, d := range []string{".Trash/files", "@eaDir/x", "Movies/Action"} {
+	for _, d := range []string{".Trash/files", "@eaDir/x", "$RECYCLE.BIN/s", "Movies/Action"} {
 		os.MkdirAll(filepath.Join(lib, d), 0o755)
 		os.WriteFile(filepath.Join(lib, d, "t.mkv"), []byte("12345"), 0o644)
 	}

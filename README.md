@@ -46,7 +46,7 @@ program; point at it explicitly with `-ffmpeg` / `-ffprobe` or `SYP_FFMPEG` /
   can be retried. Very long paths (over 260 characters) are not specially handled.
 - macOS/Windows file names are case-insensitive; `.MKV` and `.mkv` are both recognised.
   Hidden files and folders (names starting with `.`, such as macOS `._name.mp4` or
-  `.Trash`) and Synology `@eaDir` folders are ignored.
+  `.Trash`) and the Synology `@eaDir` and Windows `$RECYCLE.BIN` folders are ignored.
 - Files being copied in are skipped until they have not changed for `-settle`
   (15 seconds by default); on a slow network share raise it.
 - File permission bits are copied on Linux/macOS. Windows has no equivalent, so the

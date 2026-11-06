@@ -36,9 +36,16 @@ func IsVideo(path string) bool {
 }
 
 // SkipDir reports whether a folder should not be scanned: hidden folders
-// (.Trash, .AppleDouble, ...) and Synology's @eaDir.
+// (.Trash, .AppleDouble, ...), Synology's @eaDir and Windows' recycle bin.
 func SkipDir(name string) bool {
-	return strings.HasPrefix(name, ".") || name == "@eaDir"
+	if strings.HasPrefix(name, ".") {
+		return true
+	}
+	switch strings.ToLower(name) {
+	case "@eadir", "$recycle.bin", "system volume information":
+		return true
+	}
+	return false
 }
 
 // Scanner finds work.

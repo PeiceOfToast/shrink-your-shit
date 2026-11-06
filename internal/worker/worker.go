@@ -155,7 +155,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (string, error) {
 		final = BesidePath(job.Path)
 	}
 	// Rename is atomic on one filesystem: the original is only replaced by a complete file.
-	if err := moveIntoPlace(tmp, final); err != nil {
+	if err := moveIntoPlace(ctx, tmp, final); err != nil {
 		os.Remove(tmp)
 		return "", fmt.Errorf("move result into place: %w", err)
 	}
@@ -180,19 +180,23 @@ func (w *Worker) verify(ctx context.Context, job jobs.Job, tmp string, origSize 
 // moveIntoPlace renames tmp over final. On Windows the rename fails while
 // another program (a media player, a virus scanner) holds the target open, so
 // it is retried for a while there. Elsewhere one try is enough.
-func moveIntoPlace(tmp, final string) error {
+func moveIntoPlace(ctx context.Context, tmp, final string) error {
 	tries := 1
 	if runtime.GOOS == "windows" {
 		tries = 10
 	}
-	return renameRetry(os.Rename, tmp, final, tries, time.Second)
+	return renameRetry(ctx, os.Rename, tmp, final, tries, time.Second)
 }
 
-func renameRetry(rename func(a, b string) error, a, b string, tries int, wait time.Duration) error {
+func renameRetry(ctx context.Context, rename func(a, b string) error, a, b string, tries int, wait time.Duration) error {
 	var err error
 	for i := 0; i < tries; i++ {
 		if i > 0 {
-			time.Sleep(wait)
+			select {
+			case <-ctx.Done():
+				return ctx.Err() // shutting down: stop waiting, the job goes back in the queue
+			case <-time.After(wait):
+			}
 		}
 		if err = rename(a, b); err == nil {
 			return nil
