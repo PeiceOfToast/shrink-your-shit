@@ -2,7 +2,7 @@ name: Publish image
 
 # Pushing a version tag like v0.1.0 (vN.N.N, optionally with a -rc1 suffix) builds a linux/amd64 + linux/arm64 image and publishes it to
 # ghcr.io/<owner>/<repo> as 0.1.0 and latest (pre-releases like v0.1.0-rc1 get no latest). Running it by hand on a branch only builds and
-# smoke-tests (nothing is pushed); running it by hand on a tag publishes.
+# smoke-tests (nothing is pushed); running it by hand, even on a tag, never publishes: only a pushed tag does.
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      PUBLISH: ${{ startsWith(github.ref, 'refs/tags/v') }}
+      PUBLISH: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3
