@@ -80,21 +80,21 @@
     backup: function () { return ok(); },
     listLibraries: function () { return ok(list(libs)); },
     addLibrary: function (p, b) {
-      var l = { id: String(libs.length + 10), name: b.name || "New library", path: b.path || "", state: "idle", workingFiles: 0, waitingFiles: 0, nextScan: iso(-6 * 3600e3), freedBytes: 0, flowId: "fn", settingLabel: "Balanced", settingKind: "slider" };
+      var l = { id: String(libs.length + 10), name: b.name || "New library", path: b.path || "", state: "not_started", started: false, workingFiles: 0, waitingFiles: 0, nextScan: iso(-6 * 3600e3), freedBytes: 0, flowId: "fn", settingLabel: "Balanced", settingKind: "slider" };
       libs.push(l); saveLibs(); return ok(l);
     },
     // Try these folder names to see each state: "missing", "readonly", "full", "empty", "nocodec".
     checkLibrary: function (p, b) {
       var path = b.path || "", codes = { missing: "unreadable", readonly: "read_only", full: "low_space", empty: "no_videos", nocodec: "no_converter" }, bl = [], k;
       for (k in codes) if (path.indexOf(k) >= 0) bl.push({ code: codes[k], message: k === "full" ? "Only 6 GB free on this disk. Free up space (about 15 GB is enough to start), then press Check again." : "Cannot use this folder." });
-      return ok({ ok: !bl.length, blockers: bl, notes: [{ code: "hardlinks", message: "212 files are shared with another folder (for example by Radarr). We will leave them alone, because changing one would break the link." }, { code: "no_hw_encoder", message: "" }],
+      return ok({ ok: !bl.length, blockers: bl, notes: bl.length ? [] : [{ code: "hardlinks", message: "212 files are shared with another folder (for example by Radarr). We will leave them alone, because changing one would break the link." }, { code: "no_hw_encoder", message: "" }],
                   videoCount: 1284, totalBytes: 1100 * GB });
     },
     browseDirs: function (p) { return ok({ path: p.path || "/media", parent: "/", dirs: ["movies", "tv", "home"] }); },
     getLibrary: function (p) { var i = find(libs, "id", p.id); return i < 0 ? fail(404, "not_found", "That library is gone. Nothing was changed.") : ok(libs[i]); },
     patchLibrary: function (p, b) { var i = find(libs, "id", p.id); if (i < 0) return fail(404, "not_found", "That library is gone. Nothing was changed."); Object.assign(libs[i], { name: b.name || libs[i].name, path: b.path || libs[i].path }); saveLibs(); return ok(libs[i]); },
     deleteLibrary: function (p) { var r = removeFrom(libs, "id", p.id); saveLibs(); return r ? ok() : gone(); },
-    scanLibrary: function () { return ok(); },
+    scanLibrary: function (p) { var i = find(libs, "id", p.id); if (i >= 0) { libs[i].started = true; libs[i].state = "working"; saveLibs(); } return ok(); },
     getSetting: function (p) {
       var i = find(libs, "id", p.id);
       if (i < 0) return fail(404, "not_found", "That library is gone. Nothing was changed.");

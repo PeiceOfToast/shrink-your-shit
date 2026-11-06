@@ -5,7 +5,7 @@
   var S = window.SYP, api = S.api, ui = S.ui, ed = S.editors;
   function $(id) { return document.getElementById(id); }
   var steps = [].slice.call(document.querySelectorAll("#wizard > section"));
-  var st = { level: "basic", path: "", lib: null, passed: false, editor: null, prev: null, maxStep: 1 };
+  var st = { level: "basic", path: "", lib: null, passed: false, checking: null, editor: null, prev: null, maxStep: 1 };
 
   function fail(e) {
     var box = $("err"); box.textContent = e && e.message || "Something went wrong. Nothing was changed."; box.hidden = false;
@@ -46,13 +46,15 @@
   function setPassed(ok) {
     st.passed = ok;
     var b = $("go3"); b.setAttribute("aria-disabled", ok ? "false" : "true");
-    $("why3").hidden = ok;
+    $("why3").textContent = ok ? "This folder passes the checks. Press Continue." : "Continue turns on when the folder passes the checks."; // same height either way, so the button never moves
   }
+  // check() returns its promise and keeps it in st.checking, so Continue can wait for a check
+  // that the field's change event (on blur) just started.
   function check() {
     var path = $("path").value.trim(), list = $("checks"); st.path = path; setPassed(false);
-    if (!path) { list.textContent = ""; return; }
+    if (!path) { list.textContent = ""; return Promise.resolve(); }
     list.textContent = ""; list.appendChild(ui.el("li", "muted", "Checking this folder..."));
-    api.checkLibrary({}, { path: path }).then(function (r) {
+    return api.checkLibrary({}, { path: path }).then(function (r) {
       if ($("path").value.trim() !== path) return;
       list.textContent = "";
       (r.blockers || []).forEach(function (b) { list.appendChild(line("bad", "Fix this", COPY[b.code] || b.message)); });
@@ -78,7 +80,7 @@
       if (r.parent && r.parent !== r.path) { var up = ui.el("button", "btn small", "Up one folder"); up.type = "button"; up.onclick = function () { browse(r.parent); }; box.appendChild(up); }
       r.dirs.forEach(function (d) {
         var li = ui.el("li"), b = ui.el("button", "btn small", d); b.type = "button";
-        b.onclick = function () { browse(r.path.replace(/\/$/, "") + "/" + d); }; li.appendChild(b); ul.appendChild(li);
+        b.onclick = function () { browse(r.path.replace(/[\\/]$/, "") + (r.path.indexOf("\\") >= 0 ? "\\" : "/") + d); }; li.appendChild(b); ul.appendChild(li);
       });
       box.appendChild(ul);
       var use = ui.el("button", "btn", "Use this folder"); use.type = "button";
@@ -114,14 +116,18 @@
   function wire() {
     $("go1").onclick = function () { next(1); };
     $("go2").onclick = function () { st.level = levelNow(); next(2, function () { return api.patchSettings({}, { controlLevel: st.level }); }); };
-    $("path").addEventListener("change", check);
-    $("check").onclick = check;
+    $("path").addEventListener("change", function () { st.checking = check(); });
+    $("check").onclick = function () { st.checking = check(); };
     $("browse").onclick = function () { browse($("path").value.trim() || "/"); };
     $("go3").onclick = function () {
-      if (!st.passed) { $("path").focus(); return; }
-      next(3, function () {
-        if (st.lib && st.lib.path === st.path) return;
-        return api.addLibrary({}, { name: nameOf(st.path), path: st.path, startFrom: "balanced" }).then(function (l) { st.lib = l; });
+      Promise.resolve(st.checking).then(function () {
+        if (!st.passed) { $("path").focus(); return; }
+        next(3, function () {
+          var body = { name: nameOf(st.path), path: st.path };
+          if (!st.lib) return api.addLibrary({}, { name: body.name, path: body.path, startFrom: "balanced" }).then(function (l) { st.lib = l; });
+          // Coming back and choosing another folder changes this library; it never adds a second one.
+          if (st.lib.path !== st.path) return api.patchLibrary({ id: st.lib.id }, body).then(function (l) { st.lib = l; });
+        });
       });
     };
     $("go4").onclick = function () { next(4, function () { return api.putSetting({ id: st.lib.id }, st.editor.get()); }); };
@@ -146,7 +152,7 @@
         if (st.maxStep >= 4 && !st.lib) st.maxStep = 3;
         wire(); $("wizard").hidden = false;
         go(st.maxStep);
-        if (st.lib) check();
+        if (st.lib) st.checking = check();
       });
     }).catch(fail);
   }

@@ -25,19 +25,21 @@
   }
 
   // The nine dropdowns, in four groups, all at their defaults (the same as Balanced).
+  // [field, label, [value, text] choices, default index, hint]. The values are what the setting call
+  // carries; the table is written down in UI-API-CONTRACT.md.
   var GROUPS = [
     ["Video", [
-      ["quality", "Quality", ui.QUALITY, 2, "Same scale as the slider in Basic."],
-      ["speed", "Speed", ["Faster", "Normal", "Slower, slightly smaller files"], 1, "Slower takes about twice as long."],
-      ["format", "Format", ["HEVC - smaller files"], 0, ""],
-      ["resolution", "Resolution", ["Keep as is", "At most 1080p", "At most 720p", "At most 480p"], 0, "Videos are only ever made smaller, never stretched."]]],
+      ["quality", "Quality", [[1, "Smallest file"], [2, "Smaller"], [3, "Balanced"], [4, "Better quality"], [5, "Best quality"]], 2, "Same scale as the slider in Basic."],
+      ["speed", "Speed", [["faster", "Faster"], ["normal", "Normal"], ["slower", "Slower, slightly smaller files"]], 1, "Slower takes about twice as long."],
+      ["format", "Format", [["hevc", "HEVC - smaller files"]], 0, ""],
+      ["resolution", "Resolution", [["keep", "Keep as is"], ["1080", "At most 1080p"], ["720", "At most 720p"], ["480", "At most 480p"]], 0, "Videos are only ever made smaller, never stretched."]]],
     ["Audio and subtitles", [
-      ["audio", "Audio", ["Keep all tracks", "Keep only my languages", "Convert to AAC", "Convert lossless tracks only"], 0, ""],
-      ["subtitles", "Subtitles", ["Keep all", "Keep only my languages", "Text subtitles only", "Save as separate .srt files"], 0, "Subtitle pictures are never burned into the video."]]],
+      ["audio", "Audio", [["keep_all", "Keep all tracks"], ["my_languages", "Keep only my languages"], ["aac", "Convert to AAC"], ["lossless_only", "Convert lossless tracks only"]], 0, ""],
+      ["subtitles", "Subtitles", [["keep_all", "Keep all"], ["my_languages", "Keep only my languages"], ["text_only", "Text subtitles only"], ["srt", "Save as separate .srt files"]], 0, "Subtitle pictures are never burned into the video."]]],
     ["New file", [
-      ["fileType", "File type", ["Keep as is", "MKV", "MP4"], 0, "If MP4 cannot hold a track, the file is skipped and the reason is shown. Nothing is dropped silently."],
-      ["afterConverting", "After converting", ["Replace the original", "Put the new file next to the original"], 0, "How long originals are kept is set in Settings."]]],
-    ["Which files", [["order", "Do first", ["Newest files", "Oldest files", "Largest files", "Smallest files"], 0, ""]]]
+      ["fileType", "File type", [["keep", "Keep as is"], ["mkv", "MKV"], ["mp4", "MP4"]], 0, "If MP4 cannot hold a track, the file is skipped and the reason is shown. Nothing is dropped silently."],
+      ["afterConverting", "After converting", [["replace", "Replace the original"], ["beside", "Put the new file next to the original"]], 0, "How long originals are kept is set in Settings."]]],
+    ["Which files", [["order", "Do first", [["newest", "Newest files"], ["oldest", "Oldest files"], ["largest", "Largest files"], ["smallest", "Smallest files"]], 0, ""]]]
   ];
   function selectors(host, onChange) {
     var fields = {}, rules = {};
@@ -47,8 +49,8 @@
       gr[1].forEach(function (f) {
         var id = uid(), box = el("div", "field"), lab = el("label", null, f[1]), sel = el("select");
         lab.htmlFor = id; sel.id = id;
-        f[2].forEach(function (o, i) { var op = el("option", null, o); op.value = i; sel.appendChild(op); });
-        sel.value = f[3]; fields[f[0]] = sel; sel.addEventListener("change", changed);
+        f[2].forEach(function (o) { var op = el("option", null, o[1]); op.value = o[0]; sel.appendChild(op); });
+        sel.value = f[2][f[3]][0]; fields[f[0]] = sel; sel.addEventListener("change", changed);
         box.appendChild(lab); box.appendChild(sel);
         if (f[4]) { var h = el("span", "hint", f[4]); h.id = id + "h"; sel.setAttribute("aria-describedby", h.id); box.appendChild(h); }
         fs.appendChild(box);
@@ -66,7 +68,7 @@
           row.appendChild(cb); row.appendChild(lb); fs.appendChild(row); rules[c[0]] = cb; cb.addEventListener("change", changed);
         });
         var ms = el("div", "field"), msId = uid(), msIn = el("input"), ml = el("label", null, "Keep the new file only if it is at least this much smaller (%)");
-        msIn.type = "number"; msIn.id = msId; msIn.min = 1; msIn.max = 90; msIn.value = 15; msIn.style.width = "6rem"; ml.htmlFor = msId;
+        msIn.type = "number"; msIn.id = msId; msIn.min = 1; msIn.max = 90; msIn.value = 10; msIn.style.width = "6rem"; ml.htmlFor = msId;
         ms.appendChild(ml); ms.appendChild(msIn); fs.appendChild(ms); rules.minSavingPct = msIn; msIn.addEventListener("change", changed);
       }
       host.appendChild(fs);
@@ -74,7 +76,7 @@
     return {
       get: function () {
         var b = {}, k;
-        for (k in fields) b[k] = k === "quality" ? +fields[k].value + 1 : +fields[k].value;
+        for (k in fields) b[k] = k === "quality" ? +fields[k].value : fields[k].value;
         b.ignore = rules.ignore.value ? rules.ignore.value.split("\n") : [];
         b.skipHdr = rules.skipHdr.checked; b.skipSmall = rules.skipSmall.checked; b.minSavingPct = +rules.minSavingPct.value;
         return b;

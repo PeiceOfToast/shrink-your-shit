@@ -119,3 +119,7 @@ input[type=range]{width:100%;height:44px;accent-color:var(--accent)}
 [hidden]{display:none!important}
 main:focus{outline:none}
 .card.selectable:has(input:checked){border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+fieldset{min-width:0}
+#checks{min-height:12rem} /* room for all the checks, so the button below does not move while they load */
+#why3{min-height:3.2rem}
+@media (max-width:40rem){#checks{min-height:18rem}}
