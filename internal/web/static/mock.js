@@ -117,6 +117,8 @@
     patchSettings: function (p, b) {
       var level = b.controlLevel;
       if (level && ["basic", "standard", "advanced"].indexOf(level) < 0) return fail(400, "bad_value", "Control level must be Basic, Standard or Advanced. Nothing was changed.");
+      if (b.quietHours) { var qf = "from" in b.quietHours ? b.quietHours.from : settings.quietHours.from, qt = "to" in b.quietHours ? b.quietHours.to : settings.quietHours.to;
+        if (!qf !== !qt) return fail(400, "bad_value", "Set both a start and an end, or leave both empty. Nothing was changed."); }
       if (b.keepOriginalsDays != null && !(b.keepOriginalsDays >= 0 && b.keepOriginalsDays <= 365)) return fail(400, "bad_value", "Keep originals for 0 to 365 days. Nothing was changed.");
       // Deep merge. A secret (apiKey, token) is never stored or returned: only that one is saved shows as hasKey.
       (function merge(dst, src) {
@@ -135,7 +137,7 @@
         checks: [{ id: "converter", label: "Video converter found", status: "ok", detail: "" }, { id: "encoder", label: "Hardware encoder", status: "warn", detail: "Not found. That is fine; the processor will be used" },
                  { id: "disk", label: "Free space", status: "ok", detail: "1.4 TB free" }, { id: "db", label: "Library database", status: "ok", detail: "" }] });
     },
-    backup: function () { return ok(); },
+    backup: function () { return Promise.resolve({ blob: function () { return Promise.resolve(new Blob(["Sample backup from the stand-in server. A real backup holds your settings and the list of converted files."], { type: "text/plain" })); } }); },
     listLibraries: function () { return ok(list(libs)); },
     addLibrary: function (p, b) {
       var l = { id: String(libs.length + 10), name: b.name || "New library", path: b.path || "", state: "not_started", started: false, workingFiles: 0, waitingFiles: 0, nextScan: iso(-6 * 3600e3), freedBytes: 0, flowId: "fn", settingLabel: "Balanced", settingKind: "slider" };

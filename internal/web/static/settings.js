@@ -18,6 +18,8 @@
     row.appendChild(cb); row.appendChild(lb); return [row, cb];
   }
 
+  function keyHint(e, s) { return get(s, e.hasKey) ? "A key is saved. Type a new one to replace it." : "Not set."; }
+
   // ---- the registry-driven tabs
   function form(reg, s) {
     var f = el("form", "stack"), ctl = {}, fs = null, last = null, libs = [], say = el("span", "muted"), noteFor = {};
@@ -48,7 +50,7 @@
         if (e.type === "number") { inp.min = e.min; inp.max = e.max; inp.step = 1; inp.style.width = "7rem"; }
         if (e.type === "text") inp.size = 34;
         if (e.type !== "secret") inp.value = v == null ? "" : v; else inp.autocomplete = "new-password";
-        var hint = e.hint; if (e.type === "secret") hint = get(s, e.hasKey) ? "A key is saved. Type a new one to replace it." : "Not set.";
+        var hint = e.type === "secret" ? keyHint(e, s) : e.hint;
         fs.appendChild(field(e, inp, hint)); ctl[e.key] = { get: function () { return e.type === "number" ? (inp.value === "" ? null : +inp.value) : inp.value; }, el: inp, e: e };
       }
     });
@@ -64,8 +66,14 @@
         if (c.e && c.e.type === "secret") { if (v) { put(patch, k, v); n++; } continue; }
         if (v !== (old == null ? (typeof v === "string" ? "" : old) : old)) { put(patch, k, v); n++; }
       }
+      var qf = ctl["quietHours.from"], qt = ctl["quietHours.to"];
+      if (qf && qt && !qf.get() !== !qt.get()) { say.textContent = "Set both a start and an end, or leave both empty."; (qf.get() ? qt : qf).el.focus(); return; }
       if (!n) { say.textContent = "Nothing was changed."; return; }
-      api.patchSettings({}, patch).then(function (ns) { s = ns; say.textContent = "Saved."; f.querySelectorAll('input[type="password"]').forEach(function (i) { i.value = ""; }); return S.menu(ns); },
+      api.patchSettings({}, patch).then(function (ns) {
+        s = ns; say.textContent = "Saved."; downgrade();
+        for (var k in ctl) if (ctl[k].e && ctl[k].e.type === "secret") { ctl[k].el.value = ""; $(ctl[k].el.id + "-h").textContent = keyHint(ctl[k].e, ns); }
+        return S.menu(ns);
+      },
         function (er) { say.textContent = er.message; });
     };
     host.appendChild(f);
@@ -104,6 +112,7 @@
       api.getToken().then(function (t) { inp.value = t.token; show.textContent = "Hide"; }, function (er) { msg.textContent = er.message; });
     };
     mk.onclick = function () {
+      var open = box.querySelector(".notice.warn"); if (open) { open.querySelector(".btn.danger").focus(); return; } // one confirm at a time
       msg.textContent = ""; var n = el("div", "notice warn"), d = el("div"), r2 = el("div", "row"), yes = el("button", "btn danger", "Make a new one"), no = el("button", "btn", "Cancel");
       yes.type = no.type = "button"; d.appendChild(el("strong", null, "Make a new token?")); d.appendChild(document.createTextNode("The old one stops working, so other devices must use the new one."));
       r2.style.marginTop = "8px"; r2.appendChild(yes); r2.appendChild(no); d.appendChild(r2); n.appendChild(d); n.setAttribute("role", "group"); box.appendChild(n); yes.focus();
@@ -137,7 +146,9 @@
     btn.onclick = load;
     bk.onclick = function () {
       api.backup().then(function (r) {
-        return r && r.blob ? r.blob() : new Blob(["sample backup"], { type: "text/plain" });
+        if (r && r.blob) return r.blob(); // a file the server sent
+        if (r && typeof r === "object") return new Blob([JSON.stringify(r, null, 2)], { type: "application/json" }); // the server sent the backup as JSON
+        throw { message: "The server sent no backup. Nothing was downloaded." };
       }).then(function (b) { var u = URL.createObjectURL(b), a = el("a"); a.href = u; a.download = "shrink-your-shit-backup"; a.click(); URL.revokeObjectURL(u); say.textContent = "Backup downloaded."; }, function (er) { say.textContent = er.message; });
     };
     load();

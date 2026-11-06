@@ -83,10 +83,10 @@ var pages = []page{
 	{Path: "/flow/", Section: "flows", Kind: "flow", Tab: "Flow"},
 	{Path: "/flows/", Section: "flows", Kind: "flows", Empty: "Your flows will be listed here."},
 	{Path: "/settings/", Section: "settings", Tab: "General", Kind: "settings"},
-	{Path: "/settings/safety/", Section: "settings", Tab: "Safety", Kind: "settings", Empty: "How long originals are kept will be set here."},
-	{Path: "/settings/performance/", Section: "settings", Tab: "Performance", Kind: "settings", Empty: "How many files convert at once, quiet hours and how often to look for new files will be set here."},
-	{Path: "/settings/integrations/", Section: "settings", Tab: "Integrations", Kind: "settings", Empty: "Connections to Sonarr, Radarr, Plex and Jellyfin, and notifications, will be set here."},
-	{Path: "/settings/system/", Section: "settings", Tab: "System", Kind: "settings", Empty: "Health checks, logs, backup and updates will be shown here."},
+	{Path: "/settings/safety/", Section: "settings", Tab: "Safety", Kind: "settings"},
+	{Path: "/settings/performance/", Section: "settings", Tab: "Performance", Kind: "settings"},
+	{Path: "/settings/integrations/", Section: "settings", Tab: "Integrations", Kind: "settings"},
+	{Path: "/settings/system/", Section: "settings", Tab: "System", Kind: "settings"},
 }
 
 type tabView struct {
