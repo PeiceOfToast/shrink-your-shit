@@ -26,6 +26,9 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
 
+// version is set at release time: go build -ldflags "-X main.version=1.2.3".
+var version = "dev"
+
 type libFlag []string
 
 func (l *libFlag) String() string     { return strings.Join(*l, ",") }
@@ -46,7 +49,12 @@ func main() {
 	settle := flag.Duration("settle", 15*time.Second, "ignore files modified more recently than this (still copying)")
 	ffmpeg := flag.String("ffmpeg", os.Getenv("SYP_FFMPEG"), "path to ffmpeg (default: find it; env SYP_FFMPEG)")
 	ffprobe := flag.String("ffprobe", os.Getenv("SYP_FFPROBE"), "path to ffprobe (default: find it; env SYP_FFPROBE)")
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println("shrink-your-shit", version)
+		return
+	}
 
 	if len(libs) == 0 {
 		libs = librariesFromEnv()
@@ -108,7 +116,7 @@ func main() {
 	if exposedToNetwork(*addr) {
 		log.Print("WARNING: the web page is reachable from other machines and has no login yet. Only use this on a network you trust; never expose it to the internet.")
 	}
-	log.Printf("watching %v; web UI at http://%s", []string(libs), *addr)
+	log.Printf("shrink-your-shit %s: watching %v; web UI at http://%s", version, []string(libs), *addr)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		stop()
 		<-workerDone
