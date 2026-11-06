@@ -12,6 +12,7 @@ jobs:
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -27,6 +28,7 @@ jobs:
   build:
     name: build (${{ matrix.goos }}/${{ matrix.goarch }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       CGO_ENABLED: "0"
       GOOS: ${{ matrix.goos }}
