@@ -3,6 +3,9 @@
 services:
   shrink-your-shit:
     build: .
+    # Once a release has been published (and the package made public, see docs/proxmox.md) you
+    # can pull instead of building: comment out "build: ." above and use
+    # image: ghcr.io/peiceoftoast/shrink-your-shit:latest
     # user: "1000:1000"    # must be able to read AND write the media folder; change to match its owner
     ports:
       - "8484:8484"        # no login yet: never expose this port to the internet

@@ -16,7 +16,40 @@
 
 ## Route A: Docker / Podman / docker-compose (also the Proxmox OCI route)
 
-Build the image from this repository (nothing is published to a registry yet):
+### Option 1: pull the published image
+
+> **Not usable yet.** No image has been published. This works only after a version tag
+> (`v0.1.0`, ...) has been pushed and CI has published it, **and** the package has been made
+> public (see below). Until then use Option 2.
+
+```
+docker pull ghcr.io/peiceoftoast/shrink-your-shit:latest        # or a version, e.g. :0.1.0
+docker run -d --name syp -p 8484:8484 -v syp-config:/config -v /path/to/COPY-of-videos:/media \
+  ghcr.io/peiceoftoast/shrink-your-shit:latest
+```
+
+or, with the example `docker-compose.yml`: comment out `build: .`, enable the `image:` line
+shown in the file, then `docker compose pull && docker compose up -d`.
+
+The images are built for `linux/amd64` and `linux/arm64`, by the workflow in
+`.github/workflows/release-image.yml`, only when a version tag such as `v0.1.0` (or
+`v0.1.0-rc1`) is pushed. It can also be started by hand from the Actions tab, but that only
+builds and smoke-tests; a manual run never publishes, even on a tag.
+
+**For the repository owner, one manual step:** the first publish creates the package
+**private**. CI cannot change that. In GitHub go to the repository's *Packages* > the
+`shrink-your-shit` package > *Package settings* > *Change visibility* > **Public**, or nobody
+else can `docker pull` it without logging in.
+
+If the first tag push fails, look first at the image name: GHCR only accepts lowercase, and
+the repository name is mixed-case (`PeiceOfToast/...`). The workflow relies on
+`docker/metadata-action` lowercasing it (its documented behaviour, never run here). Next,
+check that the workflow had `packages: write` permission and the repository allows Actions
+to publish packages. Tags like `v0.1.0-rc1` publish a version tag but not `latest`.
+
+### Option 2: build the image from this repository
+
+Build it yourself (works today):
 
 ```
 docker build -t shrink-your-shit .
@@ -26,7 +59,7 @@ docker run -d --name syp -p 8484:8484 \
   shrink-your-shit
 ```
 
-Or copy `docker-compose.yml`, edit the media path, and run `docker compose up -d`.
+Or copy `docker-compose.yml`, edit the media path, run `docker compose up -d` (it builds the image from this folder by default).
 Then open `http://<host>:8484`.
 
 - `/config` holds the database. It is a Docker *named volume* here so it is writable by the
@@ -45,8 +78,8 @@ VM or the host), enable *Nesting* and *keyctl* first: in the Proxmox web page un
 Options > Features, or on the host: `pct set 101 -features nesting=1,keyctl=1` (then restart it).
 
 **Proxmox VE with OCI images (tech preview in recent versions).** Proxmox can create an LXC
-from an OCI image pulled from a registry. Because this project doesn't publish an image
-yet, you would have to push the image you built to a registry you control first. We have not
+from an OCI image pulled from a registry. Once the image is published (Option 1) Proxmox can pull it from `ghcr.io`; until then you
+would have to push an image you built to a registry you control first. We have not
 tried this. Route B is simpler for a Proxmox LXC.
 
 ## Route B: a plain Debian/Ubuntu LXC with a systemd service
@@ -110,6 +143,12 @@ second. A host `/config` folder that Docker creates itself (root-owned) does fai
 "unable to open database file", as described above. `docker compose config` accepts the
 compose file. `install.sh` passes `shellcheck`; the systemd unit passes
 `systemd-analyze verify`.
+
+The Dockerfile cross-compiles the Go program for the target platform; a `linux/arm64` build of
+that stage produced an aarch64 binary. **Not checked:** the arm64 image actually running (no
+emulation was available when this was written), the release workflow
+(`release-image.yml`; it has been through `actionlint` only, and has never run on GitHub),
+and pulling the image from `ghcr.io`.
 
 **Not checked** (no Proxmox host or Debian container was available): the install script
 actually running, the Proxmox mount and permission steps, running Docker inside an LXC,
