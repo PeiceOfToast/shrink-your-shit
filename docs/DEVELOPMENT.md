@@ -11,7 +11,7 @@ When this file and the code disagree, trust the code and fix this file.
 | Go | 1.26 or newer | `go.mod` says `go 1.26.0`; that is the minimum `modernc.org/sqlite` needs. Official `golang` Docker images do not auto-download toolchains, so the `Dockerfile` base (`golang:1.26-alpine`) must be kept in step with `go.mod`. |
 | ffmpeg + ffprobe | any recent (tested 6.1 and 8.0) with libx265 | the real encoder. **Unit tests do not need it** (they use a fake runner); only manual end-to-end runs do. |
 | Docker | optional (tested 29.1) | to build/run the container image |
-| shellcheck, actionlint | optional | lint `deploy/install.sh` and `.github/workflows/ci.yml` |
+| shellcheck, actionlint | optional | lint `install.sh`, `scripts/build-release.sh` and the workflows in `.github/workflows/` |
 
 `go` and `ffmpeg`/`ffprobe` must be on your `PATH`. For the run-it-for-real steps, port 8484
 must be free (change it with `-addr`).
@@ -88,6 +88,23 @@ docker stop syp                                           # exits 0, well under 
 Run end to end (build, healthy, real conversion, clean stop). More detail and the Proxmox
 steps are in [proxmox.md](proxmox.md). Use a **named volume** for `/config`: a host folder
 Docker creates itself is root-owned and the non-root program cannot open its database.
+
+## Releases and the installer
+
+`scripts/build-release.sh <version>` builds the release files into `dist/` (archives for the 5
+platforms plus `checksums.txt`) exactly as the release workflow does. To test `install.sh` without
+a published release, build a release, serve it as a local folder, and run the installer in a clean
+container (this is how it was tested):
+
+```
+sh scripts/build-release.sh 0.0.1-test
+docker run --rm -v "$PWD/install.sh:/install.sh:ro" -v "$PWD/dist:/release:ro" -v "$PWD/media:/media" \
+  debian:12-slim sh -c 'SYP_BASE_URL=file:///release sh /install.sh --library /media --run'
+```
+
+(`--run` starts the program in the foreground because a plain container has no systemd.) The
+systemd path was tested the same way in a privileged `jrei/systemd-debian:12` container. Neither
+has been run against a real GitHub release.
 
 ## Continuous integration
 
