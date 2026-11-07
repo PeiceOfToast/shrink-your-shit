@@ -21,7 +21,7 @@
     if (w.state === "unreachable") return ["bad", "Can't reach this worker"];
     return ["idle", "Stopped"];
   }
-  function act(p, words) { return p.then(function () { $("err").hidden = true; if (words) say(words); asking = null; seen = ""; return refresh(); }, fail); }
+  function act(p, words) { return p.then(function () { $("err").hidden = true; if (words) say(words); asking = null; seen = ""; return refresh().then(next); }, fail); } // next: poll fast at once while stopping
   function stop(w, when) { return act(api.stopWorker({ id: w.id }, { when: when }), when === "now" ? "Stopped. The files go back to wait for their turn." : "Stopping after these files."); }
 
   function card(w) {
@@ -82,10 +82,15 @@
     var n = k ? document.querySelector('[data-key="' + k + '"]') : null; if (n) n.focus();
   }
   function refresh() { return api.listWorkers().then(function (r) { last = r; draw(r); }, fail); }
+  // Poll every 3 s; while a worker is stopping, every 0.5 s, so "Stopping..." goes as soon as the server says stopped
+  // (a Stop now answers "stopping" and is stopped about 0.2 s later; QA saw the badge linger for the 3 s poll).
+  var timer = null;
+  function next() { var stopping = last && last.workers.some(function (w) { return w.state === "stopping"; }); clearTimeout(timer); timer = setTimeout(tick, stopping ? 500 : 3000); }
+  function tick() { (document.hidden ? Promise.resolve() : refresh()).then(null, function () {}).then(next); }
 
   function init() {
     $("got-it").onclick = function () { api.dismissWorkerNotice().then(function () { $("update-note").hidden = true; seen = ""; $("worker-list").querySelector("button, select") && $("worker-list").querySelector("button, select").focus(); }, fail); };
-    refresh(); setInterval(function () { if (!document.hidden) refresh(); }, 3000);
+    tick();
   }
   S.ready.then(init);
 })();
