@@ -55,19 +55,20 @@
       }
       var fld = el("div", "field"), lb = el("label", null, "Files at once"), sel = el("select"), id = "fa-" + w.id;
       sel.id = id; lb.htmlFor = id; sel.setAttribute("data-key", id);
-      [1, 2, 3, 4].forEach(function (k) { var o = el("option", null, String(k)); o.value = k; sel.appendChild(o); });
+      [1, 2, 3, 4, 5, 6, 7, 8].forEach(function (k) { var o = el("option", null, String(k)); o.value = k; sel.appendChild(o); });
       sel.value = w.filesAtOnce || 1;
       sel.onchange = function () { act(api.setWorker({ id: w.id }, { filesAtOnce: +sel.value }), "Files at once: " + sel.value + "."); };
       fld.style.marginTop = "12px"; fld.appendChild(lb); fld.appendChild(sel); c.appendChild(fld);
     }
-    c.appendChild(el("p", "small muted", "Graphics card: " + (w.gpu ? w.gpu + ": used for converting" : "None found. The processor is used.")));
+    // The graphics card by vendor (design 20:17Z): "" = none found; null = not known, so no line.
+    if (w.gpu != null) c.appendChild(el("p", "small muted", w.gpu ? "An " + w.gpu + " graphics card found. Converting uses the processor for now." : "None found. Converting uses the processor."));
     return c;
   }
 
   function draw(r) {
     var j = JSON.stringify([r, asking]); if (j === seen) return; seen = j;
     var a = document.activeElement, k = a && a.getAttribute && a.getAttribute("data-key");
-    $("update-note").hidden = !r.stoppedByUpdate;
+    $("update-note").hidden = !r.stoppedByUpdate; // its second sentence (S4) comes with piece B, which retires NAV-7
     var list = $("worker-list"); list.textContent = "";
     r.items.forEach(function (w) { list.appendChild(card(w)); });
     // Start all / Stop all only with more than one worker (D3).

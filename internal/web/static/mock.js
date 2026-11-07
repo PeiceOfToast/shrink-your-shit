@@ -125,7 +125,8 @@
 
   // Workers (redesign D; workshop S2 shapes as proposed): one, "This computer". It starts stopped, after an update that
   // stopped it (the one-time notice). ?worker=running or ?worker=paused (quiet hours) starts it that way instead.
-  var worker = { id: "local", name: "This computer", host: "nas01", state: "stopped", pausedUntil: null, filesAtOnce: 1, gpu: "NVIDIA GeForce GTX 1660" }, stoppedByUpdate = true, stopAt = 0;
+  // gpu is the vendor; "" none found, null not known.
+  var worker = { id: "local", name: "This computer", host: "nas01", state: "stopped", pausedUntil: null, filesAtOnce: 1, gpu: "NVIDIA" }, stoppedByUpdate = true, stopAt = 0;
   try { var sw = JSON.parse(sessionStorage.getItem("syp-mock-workers")); if (sw) { worker = sw.w; stoppedByUpdate = sw.u; stopAt = sw.t; } } catch (e) {}
   var wm = /[?&]worker=(running|paused)/.exec(location.search);
   if (wm) { worker.state = wm[1]; stoppedByUpdate = false; worker.pausedUntil = wm[1] === "paused" ? new Date(new Date().setHours(31, 0, 0, 0)).toISOString() : null; }
@@ -317,7 +318,7 @@
       saveWorkers(); return ok(workerView());
     },
     setWorker: function (p, b) {
-      if ([1, 2, 3, 4].indexOf(b.filesAtOnce) < 0) return fail(400, "invalid", "Files at once must be 1 to 4. Nothing was changed.");
+      if (!(b.filesAtOnce >= 1 && b.filesAtOnce <= 8)) return fail(400, "invalid", "Files at once must be 1 to 8. Nothing was changed.");
       worker.filesAtOnce = b.filesAtOnce; saveWorkers(); return ok(workerView());
     },
     dismissWorkerNotice: function () { stoppedByUpdate = false; saveWorkers(); return ok(); },
