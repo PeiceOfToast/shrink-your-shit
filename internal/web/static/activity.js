@@ -93,7 +93,7 @@
       pane.appendChild(el("div", null)).id = "empty-slot";
     }
     var want = Math.max(shown, 50);
-    if (level === null) return api.getSettings().then(function (s) { level = RANK[s.controlLevel] || 0; return T.skipped(); });
+    if (level === null) return api.getSettings().then(function (s) { level = RANK[s.controlLevel] || 0; }, function () { level = 0; }).then(T.skipped); // unknown level: Basic's links only
     return api.skipped({ reason: reason || null, limit: want, offset: 0 }).then(function (r) {
       shown = want;
       draw("skipped", r, function () {

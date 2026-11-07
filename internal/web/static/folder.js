@@ -27,11 +27,10 @@
       return api.checkLibrary({}, { path: path }).then(function (r) {
         if ($("path").value.trim() !== path) return;
         list.textContent = "";
-        var bl = r.blockers || [], has = function (c) { return bl.some(function (b) { return b.code === c; }); };
-        bl.forEach(function (b) { list.appendChild(line("bad", "Fix this", COPY[b.code] || b.message)); });
-        if (!has("low_space")) list.appendChild(line("ok", "OK", "Enough free space."));
-        if (!has("no_converter")) list.appendChild(line("ok", "OK", "Video converter works."));
-        if (!(r.blockers || []).length) {
+        (r.blockers || []).forEach(function (b) { list.appendChild(line("bad", "Fix this", COPY[b.code] || b.message)); });
+        if (!(r.blockers || []).length) { // OK lines only when every check passed: beside a blocker some never ran
+          list.appendChild(line("ok", "OK", "Enough free space."));
+          list.appendChild(line("ok", "OK", "Video converter works."));
           list.appendChild(line("ok", "OK", "We can read and change files in this folder."));
           list.appendChild(line("ok", "OK", ui.num(r.videoCount) + " videos found (" + ui.bytes(r.totalBytes) + ")."));
         }

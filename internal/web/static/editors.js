@@ -74,7 +74,7 @@
         msIn.type = "number"; msIn.id = msId; msIn.min = 1; msIn.max = 90; msIn.value = v.minSavingPct != null ? v.minSavingPct : 10; msIn.style.width = "6rem"; ml.htmlFor = msId;
         var msH = el("span", "hint"); msH.id = msId + "h"; msIn.setAttribute("aria-describedby", msH.id);
         ms.appendChild(ml); ms.appendChild(msIn); ms.appendChild(msH); fs.appendChild(ms); rules.minSavingPct = msIn; rules.msHint = msH; msIn.addEventListener("change", changed);
-        msIn.addEventListener("input", function () { edited = true; });
+        msIn.addEventListener("input", function () { edited = true; follow(); });
       }
       host.appendChild(fs);
     });
@@ -83,7 +83,8 @@
     function follow() {
       var p = table && table[+fields.quality.value - 1]; if (!p) return;
       if (!edited) rules.minSavingPct.value = p.minSavingPct;
-      rules.msHint.textContent = "Follows Quality (" + p.minSavingPct + "% for " + p.name + "). If you change it, it stays as you set it.";
+      rules.msHint.textContent = edited ? "Your own value. Quality's default is " + p.minSavingPct + "% for " + p.name + "."
+        : "Follows Quality (" + p.minSavingPct + "% for " + p.name + "). If you change it, it stays as you set it.";
     }
     fields.quality.addEventListener("change", follow);
     g.SYP.api.getSliderTable().then(function (t) {
