@@ -109,10 +109,10 @@ func TestJobRecordsItsPlan(t *testing.T) {
 		t.Fatalf("plan %q: %v", j.Plan, err)
 	}
 	p := snap.Plan
-	if p.Kind != rules.KindSlider || p.Video.CRF != 20 || p.MinSavingPct != 8 || p.MinSSIM != 0.965 || p.Eligibility.FromCodec != "h264" {
+	if p.Kind != rules.KindSlider || p.Video.CRF != 20 || p.MinSavingPct != 8 || p.MinSSIM != 0.965 || p.Eligibility.MinBitsPerPixel != 0.10 {
 		t.Errorf("recorded plan %+v", p)
 	}
-	if len(snap.Expect.Streams) != 4 || snap.Expect.MinSavings != 0.08 || snap.Verify.MinSSIM != DefaultMinSSIM || snap.Verify.DecodeCheck != "auto" {
+	if len(snap.Expect.Streams) != 4 || snap.Expect.MinSavings != 0.08 || snap.Verify.MinSSIM != 0.965 || snap.Verify.DecodeCheck != "auto" {
 		t.Errorf("recorded expect/verify %+v %+v", snap.Expect, snap.Verify)
 	}
 	if j.PlanPrint != snap.Fingerprint() {
