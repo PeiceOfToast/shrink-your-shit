@@ -9,6 +9,30 @@ permissions:
   contents: read
 
 jobs:
+  # Code the tests do not look at: the web page's JavaScript (a syntax error there passes go vet and go
+  # test, and shows the user a blank page) and Go formatting.
+  lint:
+    name: lint (gofmt, UI JavaScript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then echo "Not gofmt-formatted (run gofmt -w on them):"; echo "$unformatted"; exit 1; fi
+      - name: UI JavaScript syntax
+        run: |
+          status=0
+          for f in $(find internal/web/static -name '*.js'); do node --check "$f" || { echo "syntax error in $f"; status=1; }; done
+          exit $status
+
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
