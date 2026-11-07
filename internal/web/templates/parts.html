@@ -1,7 +1,7 @@
-{{define "folderpicker"}}<div class="field"><label for="path">Folder</label><div class="row"><input id="path" type="text" size="34" aria-describedby="path-hint" autocomplete="off" spellcheck="false"><button class="btn" type="button" id="browse">Browse...</button><button class="btn" type="button" id="check">Check again</button></div>
+{{define "folderpicker"}}<div class="field"><label for="path">Folder</label><div class="row"><input id="path" type="text" size="34" aria-describedby="path-hint" autocomplete="off" spellcheck="false"><button class="btn" type="button" id="browse">Browse...</button><button class="btn" type="button" id="check" hidden>Check again</button></div>
 <span id="path-hint" class="hint">Type a path, or press Browse. This is a folder on the computer running shrink-your-shit.</span></div>
 <div class="card" id="browser" hidden></div>
-<h2>Checking this folder</h2>
+<h2 id="checks-h" hidden>Checking this folder</h2>
 <ul class="stack" id="checks" style="list-style:none;padding:0" aria-label="Folder checks" aria-live="polite"></ul>{{end}}
 
 {{define "libraries"}}<noscript><div class="notice info" role="note"><div><strong>Turn on scripts to see your libraries</strong>The list and Add a library need scripts enabled.</div></div></noscript>

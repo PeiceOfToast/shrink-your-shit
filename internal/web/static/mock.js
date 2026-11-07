@@ -37,10 +37,10 @@
   if (/[?&]fresh=1/.test(location.search)) { libs = []; settings.firstRunDone = false; settings.firstRunStep = 1; persist(); saveLibs(); }
   function saveLibs() { try { sessionStorage.setItem("syp-mock-libs", JSON.stringify(libs)); sessionStorage.setItem("syp-mock-flows", JSON.stringify(flows)); } catch (e) {} }
   var flows = [
-    { id: "f1", name: "Movies - Balanced", usedBy: ["Movies"], madeWith: "slider", changedAt: iso(9 * 864e5) },
-    { id: "f2", name: "TV Shows - Smaller", usedBy: ["TV Shows", "Anime"], madeWith: "slider", changedAt: iso(20 * 864e5) },
-    { id: "f3", name: "Home videos - my rules", usedBy: ["Home videos"], madeWith: "builder", changedAt: iso(3 * 864e5) },
-    { id: "f4", name: "Home videos - Legacy", usedBy: [], madeWith: "slider", changedAt: iso(60 * 864e5) }
+    { id: "f1", name: "Movies", usedBy: ["Movies"], madeWith: "slider", changedAt: iso(9 * 864e5) },
+    { id: "f2", name: "TV Shows", usedBy: ["TV Shows", "Anime"], madeWith: "slider", changedAt: iso(20 * 864e5) },
+    { id: "f3", name: "Home videos 2", usedBy: ["Home videos"], madeWith: "builder", changedAt: iso(3 * 864e5) },
+    { id: "f4", name: "Home videos", usedBy: [], madeWith: "slider", changedAt: iso(60 * 864e5) }
   ];
   try { var sf = sessionStorage.getItem("syp-mock-flows"); if (sf) flows = JSON.parse(sf); } catch (e) {}
   // The slider table is the engine's (untuned starting values): crf is x265's, lower = better quality.
@@ -64,6 +64,8 @@
   // ?flowio=1 in the address turns them on in this mock (remembered for the tab).
   var flowIO = false;
   try { if (/[?&]flowio=1/.test(location.search)) sessionStorage.setItem("syp-mock-flowio", "1"); if (/[?&]flowio=0/.test(location.search)) sessionStorage.removeItem("syp-mock-flowio"); flowIO = sessionStorage.getItem("syp-mock-flowio") === "1"; } catch (e) {}
+  // An editor names a new flow once, after its library ("Movies"); it is never renamed. A clash adds " 2", " 3", ...
+  function flowName(base) { var name = base, n = 1; while (flows.some(function (f) { return f.name === name; })) name = base + " " + (++n); return name; }
   function notAvailable() { return fail(501, "not_available", "This is not available yet. Nothing was changed."); }
   var paused = false, pv = false;
   var working = [{ jobId: "j1", library: "Movies", path: "/media/movies/The Long Road (2014).mkv", phase: "converting", percent: 62, etaSeconds: 840, fromBytes: 8.2 * GB, expectedBytes: 4.5 * GB },
@@ -95,13 +97,23 @@
   ];
 
   function summary() {
-    var kept = 0; keptList.forEach(function (k) { kept += k.originalBytes; });
-    return { freedBytes: 310 * GB, waitingBytes: kept, workingFiles: paused ? 0 : working.length, waitingFiles: 590, paused: paused,
+    // Waiting to be freed = the space the kept originals will give back (original - new); the whole
+    // originals' size is only the Kept originals figure (keptBytes). Contract, workshop response to F1.
+    var kept = 0; keptList.forEach(function (k) { kept += k.originalBytes - k.nowBytes; });
+    var freed = 0; libs.forEach(function (l) { freed += l.freedBytes; }); // the libraries' own numbers, added up
+    return { freedBytes: freed, waitingBytes: kept, workingFiles: paused ? 0 : working.length, waitingFiles: 590, paused: paused,
              counts: { skipped: skippedList.length, failed: failedList.length } };
   }
   function previewResult() {
-    return { stale: false, status: "ready", estimateBytesLow: 300 * GB, estimateBytesHigh: 420 * GB, files: 1284, totalBytes: 1100 * GB, canShrink: 912,
-             skipped: { already_efficient: 281, hdr_dv: 62, shared_file: 29 } };
+    // About 10-20% of 1.1 TB, as first-run step 1 promises; 79 skipped, the same as the Skipped list.
+    return { stale: false, status: "ready", estimateBytesLow: 110 * GB, estimateBytesHigh: 220 * GB, files: 1284, totalBytes: 1100 * GB, canShrink: 1205,
+             skipped: { already_efficient: 71, hdr_dv: 5, shared_file: 3 } };
+  }
+  // Standard's defaults are the slider's: the same choices with that position's minimum saving (contract addendum 6).
+  function isSliderPosition(b) {
+    var d = { speed: "normal", format: "hevc", resolution: "keep", audio: "keep_all", subtitles: "keep_all", fileType: "keep", afterConverting: "replace", order: "newest", skipHdr: true, skipSmall: true }, k;
+    for (k in d) if (b[k] !== d[k]) return false;
+    return !(b.ignore || []).length && SLIDER[b.quality - 1] && b.minSavingPct === SLIDER[b.quality - 1].minSavingPct;
   }
   function gone() { return fail(404, "not_found", "That item is gone. Nothing was changed. Reload the page."); }
   function removeFrom(arr, key, id) { var i = find(arr, key, id); return i < 0 ? null : arr.splice(i, 1)[0]; }
@@ -140,7 +152,8 @@
     backup: function () { return Promise.resolve({ blob: function () { return Promise.resolve(new Blob(["Sample backup from the stand-in server. A real backup holds your settings and the list of converted files."], { type: "text/plain" })); } }); },
     listLibraries: function () { return ok(list(libs)); },
     addLibrary: function (p, b) {
-      var l = { id: String(libs.length + 10), name: b.name || "New library", path: b.path || "", state: "not_started", started: false, workingFiles: 0, waitingFiles: 0, nextScan: iso(-6 * 3600e3), freedBytes: 0, flowId: "fn", settingLabel: "Balanced", settingKind: "slider" };
+      var l = { id: String(libs.length + 10), name: b.name || "New library", path: b.path || "", state: "not_started", started: false, workingFiles: 0, waitingFiles: 0, nextScan: iso(-6 * 3600e3), freedBytes: 0, settingLabel: "Balanced", settingKind: "slider" };
+      var f = { id: fid(), name: flowName(l.name), usedBy: [l.name], madeWith: "slider", changedAt: iso(0) }; flows.push(f); l.flowId = f.id;
       libs.push(l); saveLibs(); return ok(l);
     },
     // Try these folder names to see each state: "missing", "readonly", "full", "empty", "nocodec".
@@ -175,11 +188,12 @@
       if (f && f.usedBy.length > 1 && !b.sharedFlowChoice) return fail(409, "flow_shared", "Another library uses this setting. Nothing was changed.", { usedBy: f.usedBy.filter(function (n) { return n !== libs[i].name; }) });
       if (f && f.usedBy.length > 1 && b.sharedFlowChoice === "make_copy") {
         f.usedBy = f.usedBy.filter(function (n) { return n !== libs[i].name; });
-        var nf = { id: fid(), name: libs[i].name + " - " + (b.quality ? SLIDER[b.quality - 1].name : "Copy"), usedBy: [libs[i].name], madeWith: "slider", changedAt: iso(0) };
+        var nf = { id: fid(), name: flowName(libs[i].name + " (own copy)"), usedBy: [libs[i].name], madeWith: b.speed ? "selectors" : "slider", changedAt: iso(0) };
         flows.push(nf); libs[i].flowId = nf.id; saveLibs();
       }
       if (b.quality && !b.speed) delete libs[i].sel; // a slider save replaces Standard choices
       if (b.quality) { libs[i].quality = b.quality; libs[i].settingLabel = ["Smallest file", "Smaller", "Balanced", "Better quality", "Best quality"][b.quality - 1]; libs[i].settingKind = "slider"; saveLibs(); }
+      if (b.speed && isSliderPosition(b)) { delete libs[i].sel; libs[i].quality = b.quality; libs[i].settingKind = "slider"; saveLibs(); return ok(); }
       if (b.speed) { libs[i].sel = copy(b); libs[i].settingKind = "selectors"; libs[i].settingLabel = ["Smallest file", "Smaller", "Balanced", "Better quality", "Best quality"][(b.quality || 3) - 1]; saveLibs(); }
       return ok();
     },

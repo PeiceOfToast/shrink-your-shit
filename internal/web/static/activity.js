@@ -74,7 +74,8 @@
 
   // ---- Skipped
   var KIND = { user_stopped: "info", restored: "info", hdr_dv: "warn", shared_file: "warn", cannot_keep_track: "warn", bitmap_subs: "warn", symlink: "warn", unreadable: "warn" };
-  var RULE = { already_efficient: 1, would_not_shrink: 1, hdr_dv: 1, cannot_keep_track: 1 }; // reasons a library rule causes
+  // Reasons a library rule causes, with the lowest control level whose library page can change that rule.
+  var RULE = { already_efficient: 0, would_not_shrink: 0, hdr_dv: 1, cannot_keep_track: 1 }, RANK = { basic: 0, standard: 1, advanced: 2 }, level = null;
   var reason = "", shown = 0, tb, more, count;
   T.skipped = function () {
     if (!$("reason")) {
@@ -92,6 +93,7 @@
       pane.appendChild(el("div", null)).id = "empty-slot";
     }
     var want = Math.max(shown, 50);
+    if (level === null) return api.getSettings().then(function (s) { level = RANK[s.controlLevel] || 0; }, function () { level = 0; }).then(T.skipped); // unknown level: Basic's links only
     return api.skipped({ reason: reason || null, limit: want, offset: 0 }).then(function (r) {
       shown = want;
       draw("skipped", r, function () {
@@ -101,7 +103,7 @@
           why.appendChild(el("span", "badge " + (KIND[i.reason] || "idle"), known ? cap(known) : "Other reason")); why.appendChild(document.createElement("br")); why.appendChild(document.createTextNode(i.detail || (known ? "" : i.reason)));
           var a = null;
           if (i.reason === "user_stopped" || i.reason === "restored") a = btn("Convert again", "again-" + i.id, function () { act(api.convertAgain({ id: i.id }), true); });
-          else if (i.libraryId && RULE[i.reason]) { a = el("a", "btn small", "Change rule"); a.href = "/library/?id=" + encodeURIComponent(i.libraryId); }
+          else if (i.libraryId && RULE[i.reason] != null && level >= RULE[i.reason]) { a = el("a", "btn small", "Change rule"); a.href = "/library/?id=" + encodeURIComponent(i.libraryId); }
           tb.row([nameOf(i), why, a]);
         });
         tb.wrap.hidden = !r.items.length; more.hidden = r.items.length >= r.total;
