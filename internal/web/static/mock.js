@@ -51,9 +51,9 @@
   ];
   try { var sf = sessionStorage.getItem("syp-mock-flows"); if (sf) flows = JSON.parse(sf); } catch (e) {}
   // The slider table is the engine's (untuned starting values): crf is x265's, lower = better quality.
-  var SLIDER = [{ position: 1, name: "Smallest", crf: 27, minSavingPct: 20 }, { position: 2, name: "Smaller", crf: 25, minSavingPct: 15 },
-    { position: 3, name: "Balanced", crf: 23, minSavingPct: 10 }, { position: 4, name: "Better quality", crf: 21, minSavingPct: 8 },
-    { position: 5, name: "Best quality", crf: 19, minSavingPct: 5 }];
+  var SLIDER = [{ position: 1, name: "Smallest", crf: 27 }, { position: 2, name: "Smaller", crf: 25 },
+    { position: 3, name: "Balanced", crf: 23 }, { position: 4, name: "Better quality", crf: 21 },
+    { position: 5, name: "Best quality", crf: 19 }]; // {position, name, crf} since workshop S1
   // Read-only steps for a flow. The raw CRF number appears only here, in a flow step's detail.
   function stepsFor(f) {
     var crf = { f1: 23, f2: 25, f3: 22, f4: 21 }[f.id] || 23, n = 3, chain = [];
@@ -64,7 +64,7 @@
     chain.push({ n: n++, kind: "audio", label: "Keep all tracks" }, { n: n++, kind: "subtitles", label: "Keep text subtitles" }, { n: n++, kind: "filetype", label: "Keep as is" },
       { n: n++, kind: "finish", label: "Replace the original if the new file passes the checks" });
     return [{ n: 1, kind: "start", label: "A video in the library folder" },
-      { n: 2, kind: "check", label: "Is it worth converting?", detail: "H.264 or older, not HDR or Dolby Vision, not already small",
+      { n: 2, kind: "check", label: "Is it worth converting?", detail: "H.264 or older, not HDR or Dolby Vision",
         branches: [{ label: "Yes", steps: chain }, { label: "No", steps: [{ n: n, kind: "skip", label: "Show the reason in Activity" }] }] }];
   }
   var nextFlow = 20; function fid() { return "f" + nextFlow++; } // ids never repeat, also across page loads
@@ -93,11 +93,9 @@
     { id: "s6", library: "Movies", path: "/media/movies/Cut Loose (2015).mkv", reason: "user_stopped", detail: "You pressed Stop this file while it was converting. Your original is untouched.", libraryId: "1" },
     { id: "s7", library: "Movies", path: "/media/movies/Ocean Floor (2017).mkv", reason: "restored", detail: "Left alone so it is not converted again by surprise.", libraryId: "1" },
     { id: "s8", library: "Movies", path: "/media/movies/Tenet (2020).mkv", reason: "some_future_code", detail: "A reason this version does not know by name.", libraryId: null },
-    { id: "s9", library: "TV Shows", path: "/media/tv/Blue Hour.mkv", reason: "would_not_shrink", detail: "The new file was only 2% smaller, less than the 10% minimum, so the original was kept.", libraryId: "2" },
     // Workshop slice 19's four new reasons, one each (the Preview counts one of each too).
     { id: "s10", library: "Movies", path: "/media/movies/Old Reel.rm", reason: "format_not_converted", detail: "RealVideo is not a format this version converts.", libraryId: null },
     { id: "s11", library: "Movies", path: "/media/movies/Soundtrack.mkv", reason: "no_video", detail: "The file holds only audio.", libraryId: null },
-    { id: "s12", library: "TV Shows", path: "/media/tv/Pilot (raw).ts", reason: "unknown_bitrate", detail: "The file does not say its bitrate, so we could not tell whether converting is safe.", libraryId: null },
     // Stopped, then converted later with "MKV": Convert again on the old name answers 409 renamed (25a-2).
     { id: "s17", library: "Movies", path: "/media/movies/Night Train (2009).mp4", reason: "user_stopped", detail: "You pressed Stop this file while it was converting. Your original is untouched.", libraryId: "1" },
     { id: "s13", library: "Movies", path: "/media/movies/Short (2003).avi", reason: "setting_cannot_run", detail: "MP4 is the chosen file type, and it cannot hold this file's audio.", libraryId: "1" },
@@ -107,7 +105,7 @@
     // After workshop slice 23 (file guards) shared files are skipped, not converted (sharedNoSaving is 0).
     { id: "s16", library: "Movies", path: "/media/movies/Night Train (2016).mp4", reason: "shared_file", detail: "Another folder uses this same file (for example Radarr). Changing it would break that.", libraryId: null }
   ];
-  for (var gi = 1; gi <= 95; gi++) skippedList.push({ id: "g" + gi, library: "TV Shows", path: "/media/tv/Season 2/E" + (gi < 10 ? "0" : "") + gi + ".mkv", reason: "already_efficient", detail: "Already small for its quality.", libraryId: "2" });
+  for (var gi = 1; gi <= 96; gi++) skippedList.push({ id: "g" + gi, library: "TV Shows", path: "/media/tv/Season 2/E" + (gi < 10 ? "0" : "") + gi + ".mkv", reason: "already_efficient", detail: "Already small for its quality.", libraryId: "2" });
   var failedList = [
     { jobId: "j9", library: "Movies", path: "/media/movies/Cut Short (2012).mkv", title: "The new file did not pass the check", detail: "The new file is 3 minutes shorter than the original, so it was thrown away. Try again; if it fails again, the original file may be damaged.", originalUntouched: true },
     { jobId: "j10", library: "TV Shows", path: "/media/tv/Season 1/E03.mkv", title: "Not enough space", detail: "Needs about 14 GB free, only 6 GB is free. Free some space, then press Retry.", originalUntouched: true }
@@ -134,16 +132,16 @@
              counts: { skipped: skippedList.length, failed: failedList.length } };
   }
   function previewResult() {
-    // About 10-20% of 1.1 TB, as first-run step 1 promises. files = canShrink + skipped (1284 = 1173 + 111; the Skipped list has 111 rows too, F4).
+    // About 10-20% of 1.1 TB, as first-run step 1 promises. files = canShrink + skipped (1284 = 1174 + 110; the Skipped list has 110 rows too, F4).
     // Since workshop slice 23 (file guards) shared files are skipped (skipped.shared_file) and sharedNoSaving is 0 (addendum 12).
-    return { stale: false, status: "ready", estimateBytesLow: 110 * GB, estimateBytesHigh: 220 * GB, files: 1284, totalBytes: 1100 * GB, canShrink: 1173, sharedNoSaving: 0,
-             skipped: { already_efficient: 71, hdr_dv: 5, format_not_converted: 1, no_video: 1, unknown_bitrate: 1, setting_cannot_run: 1, still_changing: 1, symlink: 1, shared_file: 29 } };
+    return { stale: false, status: "ready", estimateBytesLow: 110 * GB, estimateBytesHigh: 220 * GB, files: 1284, totalBytes: 1100 * GB, canShrink: 1174, sharedNoSaving: 0,
+             skipped: { already_efficient: 71, hdr_dv: 5, format_not_converted: 1, no_video: 1, setting_cannot_run: 1, still_changing: 1, symlink: 1, shared_file: 29 } };
   }
-  // Standard's defaults are the slider's: the same choices with that position's minimum saving (contract addendum 6).
+  // Standard's defaults are the slider's: the same choices (contract addendum 6; no minimum saving since S1).
   function isSliderPosition(b) {
-    var d = { speed: "normal", format: "hevc", resolution: "keep", audio: "keep_all", subtitles: "keep_all", fileType: "keep", afterConverting: "replace", maxBitrate: "none", skipHdr: true, skipSmall: true }, k;
+    var d = { speed: "normal", format: "hevc", resolution: "keep", audio: "keep_all", subtitles: "keep_all", fileType: "keep", afterConverting: "replace", maxBitrate: "none", skipHdr: true }, k;
     for (k in d) if (b[k] !== d[k]) return false;
-    return !(b.ignore || []).length && SLIDER[b.quality - 1] && b.minSavingPct === SLIDER[b.quality - 1].minSavingPct;
+    return !(b.ignore || []).length && !!SLIDER[b.quality - 1];
   }
   var ORDER = ["newest", "oldest", "largest", "smallest"], CAPS = ["none", "40", "20", "10", "6", "4"]; // contract addenda 10 and 9
   // Which choices this version can save, on every setting answer (addendum 13 and its correction). ?selectors= picks

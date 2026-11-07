@@ -8,16 +8,15 @@
     "Shrinks most files with little visible change. A good start for most people.", "Keeps more detail. Only touches files with lots of room to shrink.",
     "Keeps nearly all detail. Only touches files with lots of room to shrink, so savings are small."];
   var warn = null; // the warnings notice above Save
-  var table = []; // the engine's slider table (crf, minSavingPct per position), read from the server
 
   function say(t) { $("said").textContent = t; }
   // An earlier "Saved." must not stand beside the error.
   function fail(e) { say(""); var b = $("err"); b.firstChild.textContent = e && e.message || "Something went wrong. Nothing was changed."; b.hidden = false; }
   function facts() {
-    var v = slider.get().quality - 1, li = $("facts").children, row = table[v];
+    var v = slider.get().quality - 1, li = $("facts").children;
     $("desc").textContent = DESC[v];
     li[0].textContent = "Video: converted to a smaller format";
-    li[2].textContent = "Skipped: HDR and Dolby Vision files, files that are already small" + (row ? ", files that would shrink by less than " + row.minSavingPct + "%" : "");
+    li[2].textContent = "Skipped: HDR and Dolby Vision files"; // S1: no "already small" and no minimum saving
   }
   function head() {
     $("lib-title").textContent = lib.name; $("lib-path").textContent = lib.path; document.title = lib.name + " - shrink-your-shit";
@@ -91,8 +90,7 @@
         editor = slider = ed.slider($("slider"), setting.quality || 3, function () { facts(); prev.mark(); }, lib.name + ": smallest file to best quality");
         if (custom || more) $("save").textContent = "Use this slider setting";
         $("save").onclick = save;
-        // The slider's table comes from the server (echoed in the setting, or on its own for a custom setting).
-        Promise.resolve(setting.positions ? setting : api.getSliderTable()).then(function (t) { table = t.positions; facts(); }, facts);
+        facts();
       }
       $("scan").onclick = function () {
         api.scanLibrary({ id: id }).then(function () { say("Scan started. Progress shows in Activity."); return api.getLibrary({ id: id }); })
