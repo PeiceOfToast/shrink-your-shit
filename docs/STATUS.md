@@ -19,6 +19,8 @@ marked **never verified** has not been seen working by anyone. Update this file 
 | 11 | Access token beyond loopback: sign-in cookie or Bearer, CSRF checks on writes, `token` command, `GET /healthz` for health checks, installer prints the sign-in address | this change |
 | 15a | Libraries and flows as records: add/rename/delete/start libraries on the web page, each with its own flow; `-library` adds missing ones; upgrade gives existing libraries a "<folder> - Legacy" flow with the old flag values | this change |
 | 15b | Flow endpoints (list, create, rename, duplicate, delete, choose a library's flow) and global settings (`GET/PATCH /api/settings`, stored and checked, used by later slices) | this change |
+| 16a | Plans: each file's conversion compiled from its library's flow (scanner decides, worker runs and verifies against it, the job keeps it); legacy flows convert exactly as before | this change |
+| 16b | The slider's full recipe (CRF by resolution, bits-per-pixel eligibility, D5 formats, SSIM gate), the setting endpoints and plain-word flow steps | this change |
 
 ## What has been verified, and how
 

@@ -4,9 +4,11 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -340,4 +342,64 @@ func TestRealCFRAviAndMovPassTheStartSample(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The slider's recipe on real files (slice 16b): what the scanner's Plan decides, and what the worker
+// produces, at Balanced.
+func TestRealSliderBalanced(t *testing.T) {
+	needTools(t)
+	dir := t.TempDir()
+	gen := func(name, size, codec string, kbps int, extra ...string) string {
+		p := filepath.Join(dir, name)
+		args := []string{"-f", "lavfi", "-i", "testsrc2=duration=2:size=" + size + ":rate=25", "-c:v", codec, "-b:v", fmt.Sprint(kbps) + "k"}
+		runFFmpeg(t, append(append(args, extra...), p)...)
+		return p
+	}
+	balanced := rules.SliderTemplate(3)
+	convert := func(t *testing.T, path string) string {
+		t.Helper()
+		if p := balanced.Compile(probe(t, path)); p.Skip != "" {
+			t.Fatalf("the scanner would skip it: %s", p.Skip)
+		}
+		st, id := realJob(t, path, 2)
+		w := realWorker(st, media.OSExec{})
+		w.Template = func(jobs.Job) (rules.Template, error) { return balanced, nil }
+		if err := w.run(t); err != nil {
+			t.Fatal(err)
+		}
+		if j, _ := st.Get(id); j.Status != jobs.Done {
+			t.Fatalf("%s %q", j.Status, j.Error)
+		}
+		b, _ := os.ReadFile(path)
+		return regexp.MustCompile(`crf=[0-9.]+`).FindString(string(b)) // x265 writes its settings into the file
+	}
+	t.Run("1080p H.264 at CRF 23", func(t *testing.T) {
+		if crf := convert(t, gen("a1080.mkv", "1920x1080", "libx264", 8000)); crf != "crf=23.0" {
+			t.Errorf("got %q", crf)
+		}
+	})
+	t.Run("720p at CRF 22", func(t *testing.T) {
+		if crf := convert(t, gen("a720.mkv", "1280x720", "libx264", 5000)); crf != "crf=22.0" {
+			t.Errorf("got %q", crf)
+		}
+	})
+	t.Run("10-bit stays 10-bit", func(t *testing.T) {
+		p := gen("a10.mkv", "1280x720", "libx264", 5000, "-pix_fmt", "yuv420p10le")
+		convert(t, p)
+		if v := probe(t, p).Video(); v == nil || v.Codec != "hevc" || v.BitDepth != 10 {
+			t.Errorf("%+v", v)
+		}
+	})
+	t.Run("HEVC is skipped", func(t *testing.T) {
+		p := gen("h.mkv", "1280x720", "libx265", 5000, "-x265-params", "log-level=error")
+		if s := balanced.Compile(probe(t, p)).Skip; s != "HEVC is already an efficient format" {
+			t.Errorf("%q", s)
+		}
+	})
+	t.Run("a small file is skipped as already efficient", func(t *testing.T) {
+		p := gen("small.mkv", "1920x1080", "libx264", 300)
+		if s := balanced.Compile(probe(t, p)).Skip; !strings.HasPrefix(s, "already efficient") {
+			t.Errorf("%q", s)
+		}
+	})
 }
