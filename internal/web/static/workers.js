@@ -17,12 +17,15 @@
     if (w.state === "converting") return ["ok", "Converting " + ui.count(n, "file", "files")];
     if (w.state === "idle") return ["ok", "Running, waiting for files"];
     if (w.state === "quiet_hours") return ["info", "Paused for quiet hours" + (w.quietUntil ? " until " + at(w.quietUntil) : "")];
-    if (w.state === "stopping") return ["info", "Stopping after the current file..."];
+    // After Stop now the server says "stopping" for a moment while it puts the files back: the page knows it asked for
+    // "now", so it says a neutral "Stopping…" instead of "after the current file" (lead, 22:01Z).
+    if (w.state === "stopping") return ["info", stoppedNow[w.id] ? "Stopping…" : "Stopping after the current file..."];
     if (w.state === "unreachable") return ["bad", "Can't reach this worker"];
     return ["idle", "Stopped"];
   }
   function act(p, words) { return p.then(function () { $("err").hidden = true; if (words) say(words); asking = null; seen = ""; return refresh().then(next); }, fail); } // next: poll fast at once while stopping
-  function stop(w, when) { return act(api.stopWorker({ id: w.id }, { when: when }), when === "now" ? "Stopped. The files go back to wait for their turn." : "Stopping after these files."); }
+  var stoppedNow = {};
+  function stop(w, when) { if (when === "now") stoppedNow[w.id] = true; else delete stoppedNow[w.id]; return act(api.stopWorker({ id: w.id }, { when: when }), when === "now" ? "Stopped. The files go back to wait for their turn." : "Stopping after these files."); }
 
   function card(w) {
     var c = el("div", "card"), top = el("div", "row between"), left = el("div"), h = el("h2", null, w.name), st = status(w), n = (w.converting || []).length;
@@ -71,6 +74,7 @@
     var j = JSON.stringify([r, asking]); if (j === seen) return; seen = j;
     var a = document.activeElement, k = a && a.getAttribute && a.getAttribute("data-key");
     $("update-note").hidden = !r.stoppedByUpdate; // its second sentence (S4) comes with piece B, which retires NAV-7
+    r.workers.forEach(function (w) { if (w.state !== "stopping") delete stoppedNow[w.id]; }); // stopped (or started again): forget the "now"
     var list = $("worker-list"); list.textContent = "";
     r.workers.forEach(function (w) { list.appendChild(card(w)); });
     // Start all / Stop all only with more than one worker (D3).
