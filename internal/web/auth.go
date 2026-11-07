@@ -149,9 +149,7 @@ func writeErrorWith(w http.ResponseWriter, status int, code, message string, mor
 	for k, v := range more {
 		e[k] = v
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]any{"error": e})
+	writeJSONStatus(w, status, map[string]any{"error": e})
 }
 
 func writes(method string) bool {

@@ -4,8 +4,10 @@
 package web
 
 import (
+	"database/sql"
 	"embed"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"net/http"
 	"strconv"
@@ -59,12 +61,12 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	api.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
 		list, err := store.List(200)
 		if err != nil {
-			http.Error(w, err.Error(), 500)
+			serverError(w, err)
 			return
 		}
 		libs, err := store.Libraries()
 		if err != nil {
-			http.Error(w, err.Error(), 500)
+			serverError(w, err)
 			return
 		}
 		paths := []string{}
@@ -76,11 +78,15 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	api.HandleFunc("POST /api/jobs/{id}/retry", func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 		if err != nil {
-			http.Error(w, "bad id", 400)
+			apiError(w, http.StatusNotFound, "not_found", "There is no such job.")
 			return
 		}
 		if err := store.Retry(id); err != nil {
-			http.Error(w, err.Error(), 409)
+			if errors.Is(err, sql.ErrNoRows) || errors.Is(err, jobs.ErrNotFound) {
+				apiError(w, http.StatusNotFound, "not_found", "There is no such job.")
+			} else {
+				apiError(w, http.StatusConflict, "cannot_retry", "This job can't be tried again now: "+err.Error())
+			}
 			return
 		}
 		writeJSON(w, map[string]bool{"ok": true})
@@ -88,7 +94,13 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	return mux
 }
 
-func writeJSON(w http.ResponseWriter, v any) {
+func writeJSON(w http.ResponseWriter, v any) { writeJSONStatus(w, http.StatusOK, v) }
+
+// writeJSONStatus answers v as JSON with status. The Content-Type is set before WriteHeader: headers
+// set after it are dropped, and the page only reads answers labelled JSON (a 201 without it left
+// first-run without the new library's id).
+func writeJSONStatus(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
 }
