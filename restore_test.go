@@ -136,7 +136,8 @@ func TestRestoreForceIsCommandLineOnly(t *testing.T) {
 	}
 	helper.Process.Kill() // the service stopped: its lock goes with it
 	helper.Wait()
-	if code := restoreCommand([]string{"--force", path}, &out, &errOut); code != 0 || !strings.Contains(out.String(), "The original is back") {
+	t.Setenv("SYP_DATA", "") // a service started with its own -data: --data names the folder
+	if code := restoreCommand([]string{"--force", "--data", data, path}, &out, &errOut); code != 0 || !strings.Contains(out.String(), "The original is back") {
 		t.Fatalf("--force: %d %q %q", code, out.String(), errOut.String())
 	}
 	if b, _ := os.ReadFile(path); string(b) != "original-bytes" {
@@ -185,4 +186,29 @@ func TestDataLockIsExclusive(t *testing.T) {
 		t.Errorf("after release: %v", err)
 	}
 	r2()
+}
+
+// restore --force never guesses a data folder: without an installed service or --data it refuses, and
+// a folder with no database is refused too (opening it would make an empty one).
+func TestRestoreForceRefusesWithoutTheServicesDataFolder(t *testing.T) {
+	if _, err := os.Stat(linuxEnvFile); err == nil {
+		t.Skip("this machine has an installed Linux service's settings file")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv("SYP_DATA", "")
+	var out, errOut bytes.Buffer
+	if code := restoreCommand([]string{"--force", "1"}, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "--data <folder>") {
+		t.Errorf("no service found: %d %q", code, errOut.String())
+	}
+	empty := t.TempDir()
+	errOut.Reset()
+	if code := restoreCommand([]string{"--force", "--data", empty, "1"}, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "There is no shrink-your-shit database") {
+		t.Errorf("no database: %d %q", code, errOut.String())
+	}
+	if _, err := os.Stat(filepath.Join(empty, "syp.db")); err == nil {
+		t.Error("an empty database was made")
+	}
 }

@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"io/fs"
 	"net"
@@ -71,6 +72,8 @@ func installedAddr(env map[string]string) string {
 var (
 	plistAddr = regexp.MustCompile(`<key>SYP_ADDR</key><string>([^<]+)</string>`) // as install.sh writes it
 	vbsAddr   = regexp.MustCompile(`env\("SYP_ADDR"\) = "([^"]+)"`)               // as the Windows installer writes it
+	plistData = regexp.MustCompile(`<key>SYP_DATA</key><string>([^<]+)</string>`)
+	vbsData   = regexp.MustCompile(`env\("SYP_DATA"\) = "([^"]+)"`)
 )
 
 func matchIn(path string, re *regexp.Regexp) string {
@@ -84,10 +87,28 @@ func matchIn(path string, re *regexp.Regexp) string {
 	return ""
 }
 
-// tokenDirs lists where a data folder may be, most specific first: SYP_DATA, the Linux service's (from
-// its settings file, then its usual place), the Windows installer's, then this user's default.
+// installedDataDir is the data folder the installed service uses, from where its setup recorded it:
+// SYP_DATA, the Linux settings file, the macOS LaunchAgent, the Windows launcher; "" if none says.
+// The token command and restore --force both use it, so they find the same folder as the service.
+func installedDataDir(env map[string]string) string {
+	if d := firstNonEmpty(os.Getenv("SYP_DATA"), env["SYP_DATA"]); d != "" {
+		return d
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		if d := matchIn(filepath.Join(home, "Library", "LaunchAgents", "dev.shrink-your-shit.plist"), plistData); d != "" {
+			return html.UnescapeString(d) // install.sh escapes &, < and >
+		}
+	}
+	if la := os.Getenv("LOCALAPPDATA"); la != "" {
+		return matchIn(filepath.Join(la, "shrink-your-shit", "launch.vbs"), vbsData)
+	}
+	return ""
+}
+
+// tokenDirs lists where a data folder may be, most specific first: the installed service's, the usual
+// Linux and Windows places, then this user's default.
 func tokenDirs(env map[string]string) []string {
-	dirs := []string{os.Getenv("SYP_DATA"), env["SYP_DATA"], "/var/lib/shrink-your-shit"}
+	dirs := []string{installedDataDir(env), "/var/lib/shrink-your-shit"}
 	if la := os.Getenv("LOCALAPPDATA"); la != "" {
 		dirs = append(dirs, filepath.Join(la, "shrink-your-shit", "data"))
 	}

@@ -93,3 +93,39 @@ func TestTokenCommandFindsTheInstalledAddress(t *testing.T) {
 		t.Errorf("macOS LaunchAgent address:\n%s", got)
 	}
 }
+
+// The installed service's data folder, on each install layout (restore --force and token both use it).
+func TestInstalledDataDirOnEachLayout(t *testing.T) {
+	home, la := t.TempDir(), t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("LOCALAPPDATA", la)
+	t.Setenv("SYP_DATA", "")
+	none := map[string]string{}
+	if got := installedDataDir(none); got != "" {
+		t.Errorf("nothing installed: %q, want none (never a guess)", got)
+	}
+	// the Windows launcher sets SYP_DATA only for itself; the folder is read from launch.vbs
+	os.MkdirAll(filepath.Join(la, "shrink-your-shit"), 0o755)
+	os.WriteFile(filepath.Join(la, "shrink-your-shit", "launch.vbs"),
+		[]byte("Set env = sh.Environment(\"Process\")\r\nenv(\"SYP_ADDR\") = \"127.0.0.1:8484\"\r\nenv(\"SYP_DATA\") = \"C:\\Users\\a b\\AppData\\Local\\shrink-your-shit\\data\"\r\n"), 0o644)
+	if got := installedDataDir(none); got != `C:\Users\a b\AppData\Local\shrink-your-shit\data` {
+		t.Errorf("Windows launcher: %q", got)
+	}
+	// the macOS LaunchAgent, as install.sh writes it (escaped)
+	os.MkdirAll(filepath.Join(home, "Library", "LaunchAgents"), 0o755)
+	os.WriteFile(filepath.Join(home, "Library", "LaunchAgents", "dev.shrink-your-shit.plist"),
+		[]byte("    <key>SYP_DATA</key><string>/Users/a/Library/Application Support/R&amp;D</string>\n"), 0o644)
+	if got := installedDataDir(none); got != "/Users/a/Library/Application Support/R&D" {
+		t.Errorf("macOS LaunchAgent: %q", got)
+	}
+	// the Linux settings file
+	if got := installedDataDir(map[string]string{"SYP_DATA": "/var/lib/shrink-your-shit"}); got != "/var/lib/shrink-your-shit" {
+		t.Errorf("Linux settings file: %q", got)
+	}
+	// SYP_DATA in this process comes first
+	t.Setenv("SYP_DATA", "/srv/own")
+	if got := installedDataDir(map[string]string{"SYP_DATA": "/var/lib/shrink-your-shit"}); got != "/srv/own" {
+		t.Errorf("SYP_DATA: %q", got)
+	}
+}

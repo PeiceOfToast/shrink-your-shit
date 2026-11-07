@@ -28,15 +28,16 @@ func restoreCommand(args []string, out, errOut io.Writer) int {
 	fs := flag.NewFlagSet("restore", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	force := fs.Bool("force", false, "put the original back even if the converted file was changed since")
+	data := fs.String("data", "", "with --force: the service's data folder, if it was started with its own -data (default: the installed service's)")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 1 {
-		fmt.Fprintln(errOut, "usage: shrink-your-shit restore [--force] <kept id | path of the converted file>")
+		fmt.Fprintln(errOut, "usage: shrink-your-shit restore [--force [--data <folder>]] <kept id | path of the converted file>")
 		fmt.Fprintln(errOut, "The kept originals and their ids are listed under Activity > Kept originals.")
 		return 2
 	}
 	env := envFile(linuxEnvFile)
 	addr, tok := serviceAddr(env)
 	if *force {
-		return restoreForced(fs.Arg(0), env, out, errOut)
+		return restoreForced(fs.Arg(0), firstNonEmpty(*data, installedDataDir(env)), out, errOut)
 	}
 	call := func(method, path string, body any, v any) (int, error) {
 		var r io.Reader
@@ -101,8 +102,17 @@ func restoreCommand(args []string, out, errOut io.Writer) int {
 }
 
 // restoreForced is restore --force: on the database directly, so the HTTP API never offers force.
-func restoreForced(which string, env map[string]string, out, errOut io.Writer) int {
-	data := firstNonEmpty(os.Getenv("SYP_DATA"), env["SYP_DATA"], defaultDataDir())
+// data is the service's data folder ("" if no installed service says which): never guessed, because a
+// different folder's lock would not stop the running service.
+func restoreForced(which, data string, out, errOut io.Writer) int {
+	if data == "" {
+		fmt.Fprintln(errOut, "No installed shrink-your-shit service was found, so it is not clear which data folder to use. Run it again with --data <folder>: the folder the service was started with (its -data or SYP_DATA). Nothing was changed.")
+		return 1
+	}
+	if _, err := os.Stat(filepath.Join(data, "syp.db")); err != nil {
+		fmt.Fprintf(errOut, "There is no shrink-your-shit database in %s (%v). Run it again with --data <folder>: the folder the service was started with. Nothing was changed.\n", data, err)
+		return 1
+	}
 	// The data folder's lock, held for the whole restore: with the service running (it holds the lock
 	// for its life, on any address) two programs would move the same files and rows.
 	release, err := lockDataDir(data)

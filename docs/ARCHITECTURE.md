@@ -270,7 +270,11 @@ and the setup checks skip it.
 running service (`--force` only on the command line, on the database directly, holding the data folder's lock
 `<data>/syp.lock` for the whole restore; the service holds that lock for its whole life (flock on
 Linux and macOS, LockFileEx on Windows), so a forced restore never runs beside it and a second service
-on the same data folder refuses to start; the API never forces). Refused, with nothing moved, if the kept original is missing or not the recorded file
+on the same data folder refuses to start; the API never forces). The forced restore uses the installed
+service's data folder, found the same way as the token command (`installedDataDir`: SYP_DATA, the Linux
+settings file, the macOS LaunchAgent, the Windows launcher), or `--data <folder>` for a service started
+with its own `-data`; with neither, or with no database there, it refuses instead of guessing (a
+different folder's lock would not stop the service). Refused, with nothing moved, if the kept original is missing or not the recorded file
 (size + sampled hash), or if the converted file changed since it was made (size, modification time and
 sampled hash recorded at the swap, migration 7; `--force` on the command line only). Otherwise, on the
 same journal row: state `restoring` with a free name for the converted file allocated and recorded
