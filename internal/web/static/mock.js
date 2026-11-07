@@ -193,6 +193,8 @@
 
   // Activity's Files view (redesign C; workshop S5, UI-API-CONTRACT.md 21:00Z), built from the lists above. Codec,
   // resolution and length are made up from the name; Unprocessed has two retrying files first, then 590 waiting.
+  try { if (/[?&]finish=1/.test(location.search)) sessionStorage.setItem("syp-mock-finish", "1"); if (/[?&]finish=0/.test(location.search)) sessionStorage.removeItem("syp-mock-finish"); } catch (e) {}
+  function finishing() { try { return sessionStorage.getItem("syp-mock-finish") === "1"; } catch (e) { return false; } }
   function nameOf2(p) { return p.split("/").pop(); }
   function probe(path) { var h = 0; for (var i = 0; i < path.length; i++) h = (h * 31 + path.charCodeAt(i)) >>> 0;
     return { codec: ["H.264", "H.264", "MPEG-4", "HEVC", "VC-1"][h % 5], resolution: ["1080p", "4K", "720p", "1080p", "480p"][(h >>> 3) % 5], durationSec: 1800 + h % 6000 }; }
@@ -415,7 +417,14 @@
     firstFilesFor: function (p, b) { return ok(firstFive(b.path || "/media")); },
     activitySummary: function () { return ok(summary()); },
     activityFiles: function (p) {
-      if (workerOn() && working[0] && working[0].percent < 99) working[0].percent++; // moves a little on every look
+      // ?finish=1 (remembered for the tab): the first converting file advances quickly and, at 100%, moves to Processed,
+      // so the "finished" message and a live log can be seen. Otherwise it only creeps.
+      if (workerOn() && working[0]) {
+        if (finishing()) {
+          working[0].percent = Math.min(100, working[0].percent + 9);
+          if (working[0].percent >= 100) { var j = working.shift(); doneList.unshift({ jobId: j.jobId, library: j.library, path: j.path, beforeBytes: j.fromBytes, afterBytes: Math.round(j.fromBytes * 0.55), originalState: "deleted", keptDaysLeft: 0, keptId: null }); saveAct(); }
+        } else if (working[0].percent < 99) working[0].percent++; // moves a little on every look
+      }
       var all = filesFiltered(p.show, p), counts = {};
       ["unprocessed", "processing", "processed", "skipped", "failed"].forEach(function (k) { counts[k] = filesFiltered(k, { library: p.library, q: p.q }).length; });
       counts.keptOriginals = filesFiltered("processed", { library: p.library, q: p.q, kept: 1 }).length;
