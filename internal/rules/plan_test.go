@@ -164,7 +164,7 @@ func TestSliderKeepsTenBit(t *testing.T) {
 func TestSliderEncodesTheMainVideoNotCoverArt(t *testing.T) {
 	info := probe("mjpeg", 600, 600, 0, 12000)
 	info.Streams[0].AttachedPic = true
-	info.Streams = append(info.Streams, media.Stream{Type: "video", Codec: "h264", Width: 1920, Height: 1080, FrameRate: 24})
+	info.Streams = append(info.Streams, media.Stream{Type: "video", Codec: "h264", Width: 1920, Height: 1080, FrameRate: 24, BitrateKbps: 12000})
 	p := SliderTemplate(3).Compile(info)
 	args := strings.Join(p.FFmpegArgs("a.mp4", "b.mp4"), " ")
 	if p.Skip != "" || !strings.Contains(args, "-c:v:1 libx265") || !strings.Contains(args, "-tag:v:1 hvc1") {
