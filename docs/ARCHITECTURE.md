@@ -338,9 +338,15 @@ sampled hash (otherwise it is left alone and the row marked `needs_attention`); 
   swap, so a stop that reached no worker still prevents the swap. Either way the job record goes and
   the file is recorded as skipped with reason `user_stopped`, which the scanner honours (like
   `restored`) until Convert again. The answer says what happened: 200 once it has ended as stopped,
-  409 `already_finished` if it was already being put in place and ended done, and 202 `stopping` if it
-  has not ended within 30 s. A finished job: 409 `not_stoppable`. A marked job left by a stopped
+  409 `already_finished` if it was already being put in place and ended done, and 202
+  `{"status":"stopping"}` if it has not ended within 30 s. A finished job: 409 `not_stoppable`. A marked job left by a stopped
   program ends as stopped at the next start.
+- **Removing a library** (`DELETE /api/libraries/{id}`): its waiting and running jobs are marked
+  (`stop_requested` = 2, "library removed": dropped, not recorded as stopped by the person) and the
+  running ones stopped; the record goes only once none of them runs (at most 5 s). A conversion already
+  inside its swap finishes first (the answer comes after it; with retention > 0 its original is kept
+  and restorable). If one has not ended in time, nothing is removed, the marks are undone and the
+  answer is 409 `busy`.
 - **Swap window:** once the new file has passed its checks the rest of the job runs with a context
   that cannot be cancelled, so a stop or pause arriving then lets the swap finish and the job ends
   done, never half swapped.

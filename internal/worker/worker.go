@@ -38,8 +38,9 @@ type Queue interface {
 	Drop(id int64) error
 	// UserStopped turns a job the person stopped into a file skipped as user_stopped.
 	UserStopped(id int64) error
-	// StopRequested reports whether "Stop this file" was asked for a running job (checked before the swap).
-	StopRequested(id int64) (bool, error)
+	// StopRequested is why a stop was asked for a running job (jobs.StopByPerson, jobs.StopLibraryRemoved;
+	// 0: none), checked before the swap.
+	StopRequested(id int64) (int, error)
 	// Keep marks a job "kept original": a safety check refused the result (reason says why).
 	Keep(id int64, reason string) error
 	// RecordPlan stores the Plan a running job converts with (JSON) and its fingerprint.
@@ -217,15 +218,21 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 		w.current, w.cancelJob, w.stopped = 0, nil, stopNone
 		w.mu.Unlock()
 	}()
-	if errors.Is(err, errStopRequested) {
-		stopped = stopUser
-	}
 	// A stop asked for on the job's record wins over a pause or a shutdown, so it never waits in the
 	// queue as a job no claim takes. Once the new file is in place (err == nil) the job is done.
-	if err != nil && stopped != stopUser {
-		if req, rerr := w.Queue.StopRequested(job.ID); rerr == nil && req {
-			stopped = stopUser
+	if err != nil {
+		if req, rerr := w.Queue.StopRequested(job.ID); rerr == nil {
+			switch req {
+			case jobs.StopByPerson:
+				stopped = stopUser
+			case jobs.StopLibraryRemoved:
+				stopped = stopDrop
+			}
 		}
+	}
+	if err != nil && stopped == stopDrop {
+		log.Printf("worker %s: job %d: its library is being removed; stopped, original untouched", w.ID, job.ID)
+		return true, w.Queue.Drop(job.ID)
 	}
 	if err != nil && stopped == stopUser {
 		log.Printf("worker %s: job %d: stopped by the person, original untouched", w.ID, job.ID)
@@ -310,7 +317,8 @@ func plainFailure(err error) string {
 	return "Converting did not finish. Your original was not touched. Press Retry; if it keeps failing, Settings > System shows what went wrong."
 }
 
-// errStopRequested: "Stop this file" was recorded on the job before its swap; nothing was replaced.
+// errStopRequested: a stop was recorded on the job before its swap (by the person, or its library being
+// removed); nothing was replaced.
 var errStopRequested = errors.New("stopped by the person before the new file was put in place")
 
 // testHook, if set, is called at named points of RunOne ("registered"), so tests can land a pause or a
@@ -493,7 +501,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	if req, err := w.Queue.StopRequested(job.ID); err != nil {
 		return "", fmt.Errorf("checking for a stop: %w", err)
-	} else if req {
+	} else if req != 0 {
 		return "", errStopRequested
 	}
 	ctx = context.WithoutCancel(ctx)

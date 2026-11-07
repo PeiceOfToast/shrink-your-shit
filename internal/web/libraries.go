@@ -55,6 +55,9 @@ type libraryItem struct {
 // startFrom maps POST /api/libraries "startFrom" to a slider position.
 var startFrom = map[string]int{"smallest": 1, "balanced": 3, "better": 4}
 
+// libraryStopWait is how long removing a library waits for its running conversions to end.
+var libraryStopWait = 5 * time.Second
+
 func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 	item := func(l jobs.Library, counts map[int64]jobs.LibraryCounts) libraryItem {
 		c := counts[l.ID]
@@ -210,19 +213,46 @@ func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 
 	// DELETE removes the record only: no media file is touched, queued jobs are cancelled, a running
 	// one is stopped (original untouched, temp files removed), the flow stays in Flows, finished jobs
-	// stay in the activity lists.
+	// stay in the activity lists. A conversion already inside its swap (milliseconds, already checked)
+	// cannot be stopped without a half swap, so the jobs are marked and stopped first and the record
+	// goes only once none of them runs: a swap in progress finishes before the answer. If one has not
+	// ended within libraryStopWait, nothing is removed (409).
 	api.HandleFunc("DELETE /api/libraries/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id, ok := libID(w, r)
 		if !ok {
 			return
 		}
-		running, err := store.DeleteLibrary(id)
+		running, err := store.MarkLibraryStop(id)
 		if err != nil {
 			storeErr(w, err)
 			return
 		}
-		if running > 0 && eng.StopJob != nil {
-			eng.StopJob(running)
+		for _, j := range running {
+			if eng.StopJob != nil {
+				eng.StopJob(j)
+			}
+		}
+		for deadline := time.Now().Add(libraryStopWait); ; time.Sleep(25 * time.Millisecond) {
+			n, err := store.LibraryRunning(id)
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+			if n == 0 {
+				break
+			}
+			if time.Now().After(deadline) {
+				if err := store.ClearLibraryStop(id); err != nil {
+					serverError(w, err)
+					return
+				}
+				apiError(w, http.StatusConflict, "busy", "A file in this library is just being finished; try again in a moment. Nothing was removed.")
+				return
+			}
+		}
+		if _, err := store.DeleteLibrary(id); err != nil {
+			storeErr(w, err)
+			return
 		}
 		writeJSON(w, map[string]bool{"ok": true})
 	})

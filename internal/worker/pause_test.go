@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
 // runHung starts RunOne with the encode hanging (no progress) and returns once the encode has begun,
@@ -249,7 +250,7 @@ func TestRequestStopOnARunningJobOnlyMarksIt(t *testing.T) {
 	if got := s.job(); got.Status != jobs.Running {
 		t.Errorf("status %s", got.Status)
 	}
-	if req, _ := s.store.StopRequested(j.ID); !req {
+	if req, _ := s.store.StopRequested(j.ID); req != jobs.StopByPerson {
 		t.Error("the stop is not recorded")
 	}
 	s.store.Release(j.ID)
@@ -364,5 +365,53 @@ func TestPoolDownThenUpWhileBusy(t *testing.T) {
 	case <-stopped:
 	case <-time.After(10 * time.Second):
 		t.Fatal("the pool did not stop")
+	}
+}
+
+// Removing a library marks its jobs (jobs.StopLibraryRemoved): a running job that reaches its last check
+// before the swap with that mark is dropped, nothing replaced (retention 0).
+func TestLibraryRemovalBeforeTheSwapDropsTheJob(t *testing.T) {
+	s := newScenario(t)
+	w := s.worker(Replace)
+	l, _ := s.store.AddLibrary("Movies", s.dir, rules.SliderTemplate(3), true)
+	s.store.Drop(s.id) // the scenario's job again, now in that library
+	s.id, _ = s.store.Enqueue(jobs.Job{Library: s.dir, LibraryID: l.ID, Path: s.src, DurationSec: 100, SizeBefore: 14})
+	s.afterChecks = func() {
+		if running, err := s.store.MarkLibraryStop(l.ID); err != nil || len(running) != 1 {
+			t.Errorf("MarkLibraryStop: %v %v", running, err)
+		}
+	}
+	w.RunOne(context.Background())
+	if _, err := s.store.Get(s.id); err == nil {
+		t.Errorf("the job should be dropped: %+v", s.job())
+	}
+	if f, _ := s.store.GetFile(s.src); f != nil && f.Reason == jobs.UserStoppedReason {
+		t.Error("a library removal is not a stop by the person")
+	}
+	s.assertOriginalSafe()
+}
+
+// The same mark arriving once the swap has begun changes nothing: the swap finishes and the job is done
+// (DELETE waits for that before it answers).
+func TestLibraryRemovalInsideTheSwapFinishesIt(t *testing.T) {
+	s := newScenario(t)
+	w := s.keeping(7)
+	l, _ := s.store.AddLibrary("Movies", s.dir, rules.SliderTemplate(3), true)
+	s.store.Drop(s.id) // the scenario's job again, now in that library
+	s.id, _ = s.store.Enqueue(jobs.Job{Library: s.dir, LibraryID: l.ID, Path: s.src, DurationSec: 100, SizeBefore: 14})
+	swapHook = func(at string) error {
+		if at == "before swap" {
+			s.store.MarkLibraryStop(l.ID)
+			w.StopJob(s.id)
+		}
+		return nil
+	}
+	defer func() { swapHook = nil }()
+	w.RunOne(context.Background())
+	if j := s.job(); j.Status != jobs.Done {
+		t.Errorf("status %s %q", j.Status, j.Error)
+	}
+	if read(s.src) != "new" || read(s.trash()) != "original-bytes" {
+		t.Errorf("at the name %q, kept %q", read(s.src), read(s.trash()))
 	}
 }

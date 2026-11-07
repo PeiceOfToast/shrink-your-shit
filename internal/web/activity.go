@@ -315,8 +315,7 @@ func activityRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, no
 				apiError(w, http.StatusConflict, "already_finished", "This file had just finished, so it was not stopped. Its result is shown under Activity.")
 				return
 			case time.Now().After(deadline):
-				w.WriteHeader(http.StatusAccepted)
-				writeJSON(w, map[string]bool{"ok": true, "stopping": true})
+				writeJSONStatus(w, http.StatusAccepted, map[string]string{"status": "stopping"})
 				return
 			}
 		}

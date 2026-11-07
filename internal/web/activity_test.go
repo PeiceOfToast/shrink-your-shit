@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -381,8 +382,9 @@ func TestPauseResumeAndStop(t *testing.T) {
 	r, _ := st.Enqueue(jobs.Job{Library: "/m", Path: "/m/r.mkv"})
 	st.Claim("w")
 	running[r] = "slow" // a worker has it and has not ended it yet: "stopping", never "stopped"
-	if code, b := post(t, srv, "POST", fmt.Sprintf("/api/jobs/%d/stop", r), `{}`); code != 202 || !strings.Contains(b, `"stopping":true`) {
-		t.Errorf("stop running, not ended yet: %d %s", code, b)
+	if code, b, resp := do(t, nil, srv, call{method: "POST", path: fmt.Sprintf("/api/jobs/%d/stop", r), body: `{}`, ctype: "application/json"}); code != 202 ||
+		strings.TrimSpace(b) != `{"status":"stopping"}` || !strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
+		t.Errorf("stop running, not ended yet: %d %q %q", code, b, resp.Header.Get("Content-Type"))
 	}
 	if j, err := st.Get(r); err != nil || j.Status != jobs.Running {
 		t.Errorf("a running job's record must stay until its worker ends it: %+v %v", j, err)
@@ -405,5 +407,61 @@ func TestPauseResumeAndStop(t *testing.T) {
 	}
 	if code, _ := post(t, srv, "POST", "/api/jobs/999/stop", `{}`); code != 404 {
 		t.Errorf("stop missing %d", code)
+	}
+}
+
+// DELETE /api/libraries/{id} never answers 200 while one of its conversions is inside its swap: it waits
+// for that to finish (the job ends done), or answers 409 and removes nothing (review 1f54465).
+func TestDeleteLibraryWaitsForASwapInProgress(t *testing.T) {
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	a, _, _ := OpenAccess(t.TempDir(), false)
+	a.FailDelay = 0
+	stopped := map[int64]bool{}
+	var mu sync.Mutex
+	srv := httptest.NewServer(Handler(st, a, Engine{StopJob: func(id int64) { mu.Lock(); stopped[id] = true; mu.Unlock() }}))
+	defer srv.Close()
+	defer func(d time.Duration) { libraryStopWait = d }(libraryStopWait)
+	libraryStopWait = 2 * time.Second
+
+	// a conversion inside its swap: it ends done 300 ms after the delete arrives (the stop cannot cut it)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	j, _ := st.Enqueue(jobs.Job{Library: l.Path, LibraryID: l.ID, Path: l.Path + "/a.mkv"})
+	st.Claim("w")
+	done := make(chan time.Time, 1)
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		st.Complete(j, l.Path+"/a.mkv", 1)
+		done <- time.Now()
+	}()
+	code, b := post(t, srv, "DELETE", fmt.Sprintf("/api/libraries/%d", l.ID), "")
+	answered := time.Now()
+	finished := <-done
+	if code != 200 || answered.Before(finished) {
+		t.Errorf("delete answered %d %s before the swap finished (%v)", code, b, finished.Sub(answered))
+	}
+	if !stopped[j] {
+		t.Error("the running job was not asked to stop")
+	}
+
+	// one that does not end in time: 409, nothing removed, its mark undone
+	l2, _ := st.AddLibrary("Shows", t.TempDir(), rules.SliderTemplate(3), true)
+	j2, _ := st.Enqueue(jobs.Job{Library: l2.Path, LibraryID: l2.ID, Path: l2.Path + "/b.mkv"})
+	q2, _ := st.Enqueue(jobs.Job{Library: l2.Path, LibraryID: l2.ID, Path: l2.Path + "/c.mkv"})
+	st.Claim("w")
+	libraryStopWait = 200 * time.Millisecond
+	if code, b := post(t, srv, "DELETE", fmt.Sprintf("/api/libraries/%d", l2.ID), ""); code != 409 || errCode(b) != "busy" {
+		t.Errorf("not ended in time: %d %s", code, b)
+	}
+	if _, err := st.GetLibrary(l2.ID); err != nil {
+		t.Errorf("the library must stay: %v", err)
+	}
+	for _, id := range []int64{j2, q2} {
+		if req, _ := st.StopRequested(id); req != 0 {
+			t.Errorf("job %d is still marked", id)
+		}
 	}
 }

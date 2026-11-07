@@ -218,7 +218,7 @@ func (s *Store) RequestStop(id int64) (running bool, err error) {
 			return false, err
 		}
 	case Running:
-		if _, err := tx.Exec(`UPDATE jobs SET stop_requested=1 WHERE id=?`, id); err != nil {
+		if _, err := tx.Exec(`UPDATE jobs SET stop_requested=? WHERE id=? AND stop_requested=0`, StopByPerson, id); err != nil {
 			return false, err
 		}
 		running = true
@@ -228,35 +228,99 @@ func (s *Store) RequestStop(id int64) (running bool, err error) {
 	return running, tx.Commit()
 }
 
-// StopRequested reports whether "Stop this file" was asked for job id (false if it has no record).
-func (s *Store) StopRequested(id int64) (bool, error) {
+// Why a job's stop was requested (jobs.stop_requested; 0: it was not).
+const (
+	StopByPerson       = 1 // "Stop this file": it ends as skipped, user_stopped
+	StopLibraryRemoved = 2 // its library is being removed: its record is dropped
+)
+
+// StopRequested is why a stop was asked for job id (StopByPerson, StopLibraryRemoved), 0 if none or it
+// has no record.
+func (s *Store) StopRequested(id int64) (int, error) {
 	var v int
 	err := s.db.QueryRow(`SELECT stop_requested FROM jobs WHERE id=?`, id).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+		return 0, nil
 	}
-	return v == 1, err
+	return v, err
+}
+
+// MarkLibraryStop is the first step of removing library id (UI-API-CONTRACT.md, DELETE): every job of
+// it that waits or runs is marked, so none is claimed any more and a running one stops at its last
+// check before the swap (one already inside its swap finishes). It returns the running ones.
+func (s *Store) MarkLibraryStop(id int64) ([]int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var n int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM libraries WHERE id=?`, id).Scan(&n); err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		return nil, ErrNotFound
+	}
+	if _, err := tx.Exec(`UPDATE jobs SET stop_requested=? WHERE library_id=? AND status IN (?,?) AND stop_requested=0`,
+		StopLibraryRemoved, id, Queued, Running); err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(`SELECT id FROM jobs WHERE library_id=? AND status=?`, id, Running)
+	if err != nil {
+		return nil, err
+	}
+	var ids []int64
+	for rows.Next() {
+		var j int64
+		if err := rows.Scan(&j); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, j)
+	}
+	rows.Close()
+	return ids, tx.Commit()
+}
+
+// LibraryRunning is how many jobs of library id are running.
+func (s *Store) LibraryRunning(id int64) (int, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM jobs WHERE library_id=? AND status=?`, id, Running).Scan(&n)
+	return n, err
+}
+
+// ClearLibraryStop undoes MarkLibraryStop when the library is not removed after all.
+func (s *Store) ClearLibraryStop(id int64) error {
+	_, err := s.db.Exec(`UPDATE jobs SET stop_requested=0 WHERE library_id=? AND stop_requested=?`, id, StopLibraryRemoved)
+	return err
 }
 
 // finishRequestedStops ends, as stopped, the jobs whose stop was requested but whose worker is gone (the
 // program stopped first): run at startup, before the queue runs.
 func (s *Store) finishRequestedStops() error {
-	rows, err := s.db.Query(`SELECT id FROM jobs WHERE stop_requested=1 AND status IN (?,?)`, Queued, Running)
+	rows, err := s.db.Query(`SELECT id, stop_requested FROM jobs WHERE stop_requested!=0 AND status IN (?,?)`, Queued, Running)
 	if err != nil {
 		return err
 	}
-	var ids []int64
+	why := map[int64]int{}
 	for rows.Next() {
 		var id int64
-		if err := rows.Scan(&id); err != nil {
+		var v int
+		if err := rows.Scan(&id, &v); err != nil {
 			rows.Close()
 			return err
 		}
-		ids = append(ids, id)
+		why[id] = v
 	}
 	rows.Close()
-	for _, id := range ids {
-		if err := s.UserStopped(id); err != nil {
+	for id, v := range why {
+		var err error
+		if v == StopLibraryRemoved {
+			err = s.Drop(id)
+		} else {
+			err = s.UserStopped(id)
+		}
+		if err != nil {
 			return err
 		}
 	}
