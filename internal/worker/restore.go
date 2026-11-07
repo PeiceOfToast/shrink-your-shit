@@ -132,7 +132,7 @@ func finishRestore(st Store, o jobs.Original) error {
 	if err != nil {
 		return err
 	}
-	if err := st.PutFile(jobs.File{Path: o.Path, Size: rst.Size(), ModTime: rst.ModTime().UnixNano(), Decision: jobs.DecisionRestored}); err != nil {
+	if err := st.PutFile(jobs.File{Path: o.Path, Size: rst.Size(), ModTime: rst.ModTime().UnixNano(), Decision: jobs.DecisionRestored, Reason: jobs.DecisionRestored}); err != nil {
 		return fmt.Errorf("the original is back, but it could not be marked as restored, so it may be converted again: %w", err)
 	}
 	removeIfEmpty(filepath.Dir(o.Trash))

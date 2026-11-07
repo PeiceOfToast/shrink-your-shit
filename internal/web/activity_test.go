@@ -327,4 +327,9 @@ func TestRestoreThroughTheAPI(t *testing.T) {
 	if !strings.Contains(body, `"count":0`) {
 		t.Errorf("%s", body)
 	}
+	// listed under Skipped as restored (the page offers Convert again there), although a done job wrote it
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/activity/skipped?reason=restored"})
+	if !strings.Contains(body, `"total":1`) || !strings.Contains(body, "you put its original back") && !strings.Contains(body, "You put its original back") {
+		t.Errorf("skipped: %s", body)
+	}
 }

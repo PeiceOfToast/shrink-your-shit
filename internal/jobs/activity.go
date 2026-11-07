@@ -120,9 +120,10 @@ FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id WHERE j.status IN (?,?) O
 // It is that output only while it is the file the job wrote: the size and modification time recorded
 // when the job was done (jobs.output_mtime). 0 means unknown (not readable then, or not recoverable for
 // a job done before it was recorded): such a job hides nothing, so a skip shows rather than wrongly
-// hiding. A different file put at that path later is listed.
-const convertedSQL = `EXISTS (SELECT 1 FROM jobs WHERE jobs.status='done' AND jobs.output_path=files.path AND jobs.size_after=files.size
-  AND jobs.output_mtime<>0 AND jobs.output_mtime=files.mtime)`
+// hiding. A different file put at that path later is listed. A file whose original was put back
+// (slice 18) is skipped as restored, even though a done job wrote it once.
+const convertedSQL = `(files.reason<>'restored' AND EXISTS (SELECT 1 FROM jobs WHERE jobs.status='done' AND jobs.output_path=files.path AND jobs.size_after=files.size
+  AND jobs.output_mtime<>0 AND jobs.output_mtime=files.mtime))`
 
 // Skipped is a file the scanner decided not to convert, with the row id the Skipped list uses.
 type Skipped struct {
