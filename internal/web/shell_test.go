@@ -297,6 +297,18 @@ func TestAssetsGzip(t *testing.T) {
 			}
 		}
 	}
+	// The same types on every OS, gzip or not (CI on Windows got application/javascript from the registry).
+	for name, want := range map[string]string{"app.js": "text/javascript; charset=utf-8", "app.css": "text/css; charset=utf-8", "nav.json": "application/json"} {
+		for _, accept := range []string{"", "gzip"} {
+			req := httptest.NewRequest("GET", "/assets/"+name, nil)
+			req.Header.Set("Accept-Encoding", accept)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if got := rec.Header().Get("Content-Type"); got != want {
+				t.Errorf("%s (Accept-Encoding %q): type %q, want %q", name, accept, got, want)
+			}
+		}
+	}
 	for _, url := range []string{"/assets/", "/assets/nope.js"} {
 		req := httptest.NewRequest("GET", url, nil)
 		req.Header.Set("Accept-Encoding", "gzip")

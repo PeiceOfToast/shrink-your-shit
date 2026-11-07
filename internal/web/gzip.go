@@ -7,18 +7,30 @@ import (
 	"compress/gzip"
 	"io/fs"
 	"net/http"
+	"path"
 	"strings"
 	"sync"
 	"time"
 )
 
-// gzipAssets wraps the /assets/ handler: a browser that accepts gzip gets each embedded file
-// compressed (once, on first use, then kept); anything else goes to next unchanged.
+// assetTypes are the Content-Types /assets/ sends, the same on every OS. Go otherwise reads them from the
+// system (on Windows, the registry), which can say application/javascript or even text/plain for .js.
+var assetTypes = map[string]string{
+	".js":   "text/javascript; charset=utf-8",
+	".css":  "text/css; charset=utf-8",
+	".json": "application/json",
+}
+
+// gzipAssets wraps the /assets/ handler: it sets the Content-Type, and a browser that accepts gzip gets
+// each embedded file compressed (once, on first use, then kept); anything else goes to next as before.
 func gzipAssets(files fs.FS, next http.HandlerFunc) http.HandlerFunc {
 	var cache sync.Map // file name -> gzip bytes
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Vary", "Accept-Encoding")
 		name := strings.TrimPrefix(r.URL.Path, "/assets/")
+		if t, ok := assetTypes[path.Ext(name)]; ok {
+			w.Header().Set("Content-Type", t) // both the file server and ServeContent keep a type already set
+		}
 		if !acceptsGzip(r.Header.Get("Accept-Encoding")) || name == "" || strings.HasSuffix(name, "/") {
 			next(w, r)
 			return
