@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 )
@@ -464,4 +465,37 @@ func TestGPU(t *testing.T) {
 			t.Errorf("%v: %v %q", c.hw, f, v)
 		}
 	}
+}
+
+// The hardware test's encodes never hold up the converter check (startup, the health page) or a
+// Workers answer: a refresh running in the background with a slow encode leaves Converter and ToolsNow
+// answering at once (review 0605262).
+func TestHardwareTestDoesNotHoldUpTheConverterCheck(t *testing.T) {
+	x := &media.FakeExec{Handler: func(name string, args []string) (string, string, error) {
+		for i, a := range args {
+			if a == "-c:v" && i+1 < len(args) && args[i+1] == "hevc_nvenc" {
+				time.Sleep(time.Second) // the hardware test encode
+			}
+		}
+		return "ffmpeg version 7.1\n V..... libx265  x\n V..... hevc_nvenc  x\n", "", nil
+	}}
+	c := &Checker{Exec: x, FFmpeg: "/usr/bin/ffmpeg", FFprobe: "/usr/bin/ffprobe"}
+	c.Converter(context.Background()) // as startup does first
+	c.toolsAt = time.Time{}           // stale, so the next one checks again
+	c.ToolsNow()                      // the background refresh: its hardware encode takes a second
+	time.Sleep(50 * time.Millisecond) // let it reach the encode
+	start := time.Now()
+	c.Converter(context.Background())
+	c.ToolsNow()
+	if took := time.Since(start); took > 300*time.Millisecond {
+		t.Errorf("the converter check waited %s for the hardware test", took)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if tl, ok := c.ToolsNow(); ok && len(tl.Hardware) == 1 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Error("the background check never stored its result")
 }

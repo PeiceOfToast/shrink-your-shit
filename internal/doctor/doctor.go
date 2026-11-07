@@ -74,12 +74,19 @@ const toolsTTL = 10 * time.Minute
 
 // Tools checks the converter, hardware encoders included (cached for ten minutes: the hardware test
 // encodes take a moment).
+//
+// The hardware test encodes run without the lock (it is taken only to read and store the result), so
+// Converter, ToolsNow and the startup check never wait for them (review 0605262).
 func (c *Checker) Tools(ctx context.Context) Tools {
 	t := c.Converter(ctx)
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.hw == nil || time.Since(c.hwAt) >= toolsTTL {
-		var hw [2][]string
+	fresh := c.hw != nil && time.Since(c.hwAt) < toolsTTL
+	var hw [2][]string
+	if fresh {
+		hw = *c.hw
+	}
+	c.mu.Unlock()
+	if !fresh {
 		if t.FFmpeg != "" {
 			if out, _ := c.Exec.Output(ctx, t.FFmpeg, "-hide_banner", "-encoders"); len(out) > 0 {
 				for _, enc := range []string{"hevc_nvenc", "hevc_qsv", "hevc_vaapi", "hevc_videotoolbox", "hevc_amf", "hevc_mf", "hevc_v4l2m2m"} {
@@ -93,9 +100,11 @@ func (c *Checker) Tools(ctx context.Context) Tools {
 				}
 			}
 		}
+		c.mu.Lock()
 		c.hw, c.hwAt = &hw, time.Now()
+		c.mu.Unlock()
 	}
-	t.Hardware, t.HardwareListed = c.hw[0], c.hw[1]
+	t.Hardware, t.HardwareListed = hw[0], hw[1]
 	return t
 }
 
