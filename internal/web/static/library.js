@@ -32,7 +32,7 @@
     if (!id) { fail({ message: "No library was chosen. Open one from the Libraries page." }); return; }
     Promise.all([api.getLibrary({ id: id }), api.listFlows()]).then(function (r) {
       lib = r[0]; flows = r[1].items; head(); pick(); $("lib-body").hidden = false;
-      ui.firstFive($("first5-card"), lib.path, function () { return api.firstFiles({ id: id }); }, "h2", "/activity/");
+      ui.firstFive($("first5-card"), lib.path, function () { return api.firstFiles({ id: id }); }, "h2", "/activity/?show=unprocessed&library=" + encodeURIComponent(id));
       // Scan reads the folder and changes nothing on disk (workshop S2: nothing converts until a worker runs).
       $("scan").onclick = function () {
         api.scanLibrary({ id: id }).then(function () { say("Scan started. Progress shows in Activity."); return api.getLibrary({ id: id }); })

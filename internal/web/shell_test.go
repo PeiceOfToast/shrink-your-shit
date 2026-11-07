@@ -338,7 +338,7 @@ func TestOnePrimaryButtonPerPage(t *testing.T) {
 	}
 }
 
-// The five Activity pages share the header and tab row, and each loads the Activity script.
+// The Activity pages (its old addresses) all serve the one Files view and load the Activity script.
 func TestActivityPages(t *testing.T) {
 	srv := newServer(t)
 	for _, p := range pages {
@@ -346,13 +346,14 @@ func TestActivityPages(t *testing.T) {
 			continue
 		}
 		_, body, _ := get(t, srv.URL+p.Path)
-		for _, want := range []string{"<h1>Activity</h1>", `/assets/activity.js`, `aria-label="Activity sections"`, `href="/activity/kept/"`} {
+		// One Files view (redesign C): the filter cards are drawn by the script; no tab row any more.
+		for _, want := range []string{"<h1>Activity</h1>", `/assets/activity.js`, `id="cards"`, `id="log"`} {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s: missing %s", p.Path, want)
 			}
 		}
-		if strings.Count(body, `aria-current="page"`) != 2 { // the menu's Activity and the current tab
-			t.Errorf("%s: want the menu and one tab marked current", p.Path)
+		if strings.Contains(body, `aria-label="Activity sections"`) {
+			t.Errorf("%s: still has the old tab row", p.Path)
 		}
 	}
 }

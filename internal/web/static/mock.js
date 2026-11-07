@@ -112,7 +112,7 @@
   for (var gi = 1; gi <= 93; gi++) skippedList.push({ id: "g" + gi, library: "TV Shows", path: "/media/tv/Season 2/E" + (gi < 10 ? "0" : "") + gi + ".mkv", reason: "already_efficient", detail: "Already small for its quality.", libraryId: "2" });
   var failedList = [
     { jobId: "j9", library: "Movies", path: "/media/movies/Cut Short (2012).mkv", title: "The new file did not pass the check", detail: "The new file is 3 minutes shorter than the original, so it was thrown away. Try again; if it fails again, the original file may be damaged.", originalUntouched: true },
-    { jobId: "j10", library: "TV Shows", path: "/media/tv/Season 1/E03.mkv", title: "Not enough space", detail: "Needs about 14 GB free, only 6 GB is free. Free some space, then press Retry.", originalUntouched: true }
+    { jobId: "j10", attempts: 3, library: "TV Shows", path: "/media/tv/Season 1/E03.mkv", title: "Not enough space", detail: "Needs about 14 GB free, only 6 GB is free. Free some space, then press Retry.", originalUntouched: true }
   ];
   var doneList = [
     { jobId: "j5", library: "Movies", path: "/media/movies/Ocean Floor (2017).mkv", beforeBytes: 6.4 * GB, afterBytes: 3.3 * GB, originalState: "kept", keptDaysLeft: 5, keptId: "k1" },
@@ -120,7 +120,9 @@
     { jobId: "j7", library: "TV Shows", path: "/media/tv/Season 1/E01.mkv", beforeBytes: 3 * GB, afterBytes: 1.4 * GB, originalState: "deleted", keptDaysLeft: 0, keptId: null },
     // Converted with "Put the new file next to the original": kept, but not in the trash, so no keptId (contract, slice 18).
     { jobId: "j8", library: "Movies", path: "/media/movies/Long Walk (2012).mkv", beforeBytes: 5.1 * GB, afterBytes: 2.6 * GB, originalState: "kept", keptDaysLeft: 0, keptId: null },
-    { jobId: "j9", library: "Movies", path: "/media/movies/Cut Loose (2015).mkv", beforeBytes: 4.4 * GB, afterBytes: 2.1 * GB, originalState: "restored", keptDaysLeft: 0, keptId: null }
+    { jobId: "j9", library: "Movies", path: "/media/movies/Cut Loose (2015).mkv", beforeBytes: 4.4 * GB, afterBytes: 2.1 * GB, originalState: "restored", keptDaysLeft: 0, keptId: null },
+    // Always standardize (S1): a file kept even though it got bigger (Activity shows it as plain text).
+    { jobId: "j12", library: "TV Shows", path: "/media/tv/Season 1/E02.mkv", beforeBytes: 1.2 * GB, afterBytes: 1.3 * GB, originalState: "deleted", keptDaysLeft: 0, keptId: null }
   ];
   var keptList = [
     { keptId: "k1", library: "Movies", path: "/media/movies/Ocean Floor (2017).mkv", originalBytes: 6.4 * GB, nowBytes: 3.3 * GB, deleteOn: iso(-5 * 864e5) },
@@ -187,6 +189,39 @@
   function applySetting(r, b) { // a PUT body onto a record: {quality, audio} = Basic, selector fields = Standard
     if (b.speed) { r.sel = copy(b); r.settingKind = "selectors"; r.settingLabel = QN[(b.quality || 3) - 1]; return; }
     delete r.sel; r.quality = b.quality || 3; r.audio = b.audio || "stereo_aac"; r.settingKind = "slider"; r.settingLabel = QN[r.quality - 1];
+  }
+
+  // Activity's Files view (redesign C; workshop S5, UI-API-CONTRACT.md 21:00Z), built from the lists above. Codec,
+  // resolution and length are made up from the name; Unprocessed has two retrying files first, then 590 waiting.
+  function nameOf2(p) { return p.split("/").pop(); }
+  function probe(path) { var h = 0; for (var i = 0; i < path.length; i++) h = (h * 31 + path.charCodeAt(i)) >>> 0;
+    return { codec: ["H.264", "H.264", "MPEG-4", "HEVC", "VC-1"][h % 5], resolution: ["1080p", "4K", "720p", "1080p", "480p"][(h >> 3) % 5], durationSec: 1800 + h % 6000 }; }
+  function fileOf(o, extra) {
+    var lid = o.libraryId || (libs[find(libs, "name", o.library)] || {}).id || null, li = find(libs, "id", lid), root = li >= 0 ? libs[li].path : "", d = o.path.slice(0, o.path.length - nameOf2(o.path).length).replace(/\/+$/, "");
+    return Object.assign({ libraryId: lid, library: o.library, path: o.path, folder: root && d.indexOf(root) === 0 && d.length > root.length ? d.slice(root.length + 1) : ".", name: nameOf2(o.path),
+      bytes: o.bytes || o.beforeBytes || o.fromBytes || 3 * GB, newPath: o.newPath || undefined }, probe(o.path), extra);
+  }
+  var RETRYING = [{ jobId: "j31", library: "Movies", path: "/media/movies/Busy Night (2011).mkv", retryAt: iso(-12 * 60e3), attempts: 1, detail: "The file was in use by another program." },
+    { jobId: "j32", library: "TV Shows", path: "/media/tv/Season 3/E07.mkv", retryAt: iso(-31 * 60e3), attempts: 2, detail: "There was not enough free space." }];
+  function filesFor(show) {
+    if (show === "processing") return workerOn() ? working.map(function (j, k) { return fileOf(j, { id: "job-" + j.jobId, jobId: j.jobId, percent: j.percent, etaSeconds: j.etaSeconds,
+      convertingTo: "HEVC · MKV", encoder: "x265 (processor)", decoder: "H.264 (processor)", bitrateKbps: 4800 - k * 700, fps: 62 - k * 9, worker: "This computer" }); }) : [];
+    if (show === "unprocessed") {
+      var r = RETRYING.map(function (j) { return fileOf(j, { id: "job-" + j.jobId, status: "retrying", retryAt: j.retryAt, attempts: j.attempts, detail: j.detail }); });
+      for (var n = 1; n <= 590; n++) r.push(fileOf({ library: "Movies", path: "/media/movies/Queued " + (n < 10 ? "00" : n < 100 ? "0" : "") + n + ".mkv" }, { id: "q" + n, status: "waiting" }));
+      return r;
+    }
+    if (show === "processed") return doneList.map(function (d, k) { var f = flows[find(flows, "id", (libs[find(libs, "name", d.library)] || {}).flowId)];
+      return fileOf(d, { id: "done-" + d.jobId, jobId: d.jobId, beforeBytes: d.beforeBytes, afterBytes: d.afterBytes, flow: f ? { id: f.id, name: f.name } : null, finishedAt: iso(-(k + 1) * 3600e3),
+        originalState: d.originalState === "kept" ? (d.keptId ? "kept" : "kept_beside") : d.originalState, keptId: d.keptId, keptDaysLeft: d.keptDaysLeft }); });
+    if (show === "skipped") return skippedList.map(function (x) { return fileOf(x, { id: "skip-" + x.id, skippedId: x.id, reason: x.reason, detail: x.detail }); });
+    return failedList.map(function (x) { return fileOf(x, { id: "fail-" + x.jobId, jobId: x.jobId, title: x.title, detail: x.detail, attempts: x.attempts || 1 }); });
+  }
+  function filesFiltered(show, p) {
+    var q = (p.q || "").toLowerCase();
+    return filesFor(show).filter(function (f) {
+      return (!p.library || f.libraryId === p.library) && (!q || f.name.toLowerCase().indexOf(q) >= 0 || (f.newPath && nameOf2(f.newPath).toLowerCase().indexOf(q) >= 0)) && (!(+p.kept) || show !== "processed" || !!f.keptId);
+    });
   }
 
   function summary() {
@@ -379,6 +414,24 @@
     firstFiles: function (p) { var i = find(libs, "id", p.id); return i < 0 ? fail(404, "not_found", "There is no such library.") : ok(firstFive(libs[i].path)); },
     firstFilesFor: function (p, b) { return ok(firstFive(b.path || "/media")); },
     activitySummary: function () { return ok(summary()); },
+    activityFiles: function (p) {
+      if (workerOn() && working[0] && working[0].percent < 99) working[0].percent++; // moves a little on every look
+      var all = filesFiltered(p.show, p), counts = {};
+      ["unprocessed", "processing", "processed", "skipped", "failed"].forEach(function (k) { counts[k] = filesFiltered(k, { library: p.library, q: p.q }).length; });
+      counts.keptOriginals = filesFiltered("processed", { library: p.library, q: p.q, kept: 1 }).length;
+      var off = +p.offset || 0, lim = +p.limit || 50;
+      return ok({ items: all.slice(off, off + lim), total: all.length, counts: counts });
+    },
+    fileLog: function (p) {
+      var j = working.filter(function (w) { return "job-" + w.jobId === p.id; })[0], live = !!j && workerOn(), from = +p.from || 0;
+      var lines = ["ffprobe: Input #0, matroska,webm", "  Stream #0:0: Video: h264 (High), yuv420p, 1920x1080, 23.98 fps", "  Stream #0:1(eng): Audio: ac3, 48000 Hz, 5.1(side)",
+        "ffmpeg -i input.mkv -map 0 -c:v libx265 -crf 23 -c:a copy -c:s copy output.mkv", "frame= 1200 fps= 62 q=28.0 size= 102400kB time=00:00:50.05 bitrate=4800.0kbits/s speed=2.58x"];
+      var text = from === 0 ? lines.join("\n") + "\n" : live ? "frame= " + (1200 + from * 3) + " fps= 61 q=28.0 time=00:0" + Math.min(9, 1 + (from % 9)) + ":00.00 bitrate=4790.0kbits/s\n" : "";
+      var steps = [{ step: "found", at: iso(-5 * 3600e3), ok: true, words: "Found in the library." }, { step: "checked", at: iso(-5 * 3600e3 + 60e3), ok: true, words: "H.264, 1080p: will be converted." }];
+      if (!live && /^done-/.test(p.id)) steps.push({ step: "converted", at: iso(-4 * 3600e3), ok: true, words: "Converted to HEVC." }, { step: "verified", at: iso(-4 * 3600e3 + 30e3), ok: true, words: "Plays all the way through and looks like the original." }, { step: "replaced", at: iso(-4 * 3600e3 + 40e3), ok: true, words: "Replaced the original, which is kept for now." });
+      if (/^fail-/.test(p.id)) steps.push({ step: "converted", at: iso(-3 * 3600e3), ok: false, words: "Converting did not finish." });
+      return ok({ summary: steps, text: text, next: from + 1, live: live });
+    },
     listWorkers: function () { return ok({ workers: [workerView()], stoppedByUpdate: stoppedByUpdate, basicFlowsChanged: stoppedByUpdate && /[?&]basicchanged=1/.test(location.search) }); }, // ?basicchanged=1: S4's flag
     startWorker: function (p) { if (p.id !== "this") return fail(404, "not_found", "There is no such worker. Nothing was changed."); worker.on = true; worker.stopping = false; stoppedByUpdate = false; saveWorkers(); return ok(workerView()); },
     stopWorker: function (p, b) {

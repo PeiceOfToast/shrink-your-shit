@@ -23,6 +23,8 @@
     listFiles: ["GET", "/api/libraries/{id}/files"],
     // "Is this the right folder?" (redesign A3; workshop slice A, UI-API-CONTRACT.md 20:25Z): a library, or a folder.
     firstFiles: ["GET", "/api/libraries/{id}/first-files"], firstFilesFor: ["POST", "/api/libraries/first-files"],
+    // Activity's Files view (redesign C; workshop S5, UI-API-CONTRACT.md 21:00Z): one list per card, and each file's log.
+    activityFiles: ["GET", "/api/activity/files"], fileLog: ["GET", "/api/activity/files/{id}/log"],
     // Workers (redesign D; workshop S2, UI-API-CONTRACT.md 20:25Z): list, start, stop {when}, Files at once, the update notice.
     listWorkers: ["GET", "/api/workers"], startWorker: ["POST", "/api/workers/{id}/start"], stopWorker: ["POST", "/api/workers/{id}/stop"],
     setWorker: ["PATCH", "/api/workers/{id}"], dismissWorkerNotice: ["POST", "/api/workers/notice/dismiss"],

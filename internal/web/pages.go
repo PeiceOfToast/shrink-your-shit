@@ -62,10 +62,6 @@ type page struct {
 	Path, Section, Tab, Kind, Empty string
 }
 
-var activityTabs = []tab{
-	{"Queue", "/activity/"}, {"Skipped", "/activity/skipped/"}, {"Failed", "/activity/failed/"},
-	{"Done", "/activity/done/"}, {"Kept originals", "/activity/kept/"},
-}
 var settingsTabs = []tab{
 	{"General", "/settings/"}, {"Safety", "/settings/safety/"}, {"Performance", "/settings/performance/"},
 	{"Integrations", "/settings/integrations/"}, {"System", "/settings/system/"},
@@ -148,13 +144,10 @@ func render(items []navItem, p page) ([]byte, error) {
 	} else {
 		v.Nav = navFor(items, "basic", false)
 	}
-	if p.Tab != "" && p.Kind != "wizard" && p.Kind != "library" && p.Kind != "flow" {
+	// Settings has a tab row. Activity is one Files view (redesign C): its old addresses stay, each opening its card.
+	if p.Tab != "" && p.Section == "settings" {
 		v.Title = p.Tab + " - " + heading
-		list := activityTabs
-		if p.Section == "settings" {
-			list = settingsTabs
-		}
-		for _, t := range list {
+		for _, t := range settingsTabs {
 			v.Tabs = append(v.Tabs, tabView{t.Label, t.Href, t.Label == p.Tab})
 		}
 	}
