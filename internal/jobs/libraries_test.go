@@ -299,3 +299,50 @@ func TestJobsOnlyForStartedLibraries(t *testing.T) {
 		t.Errorf("removed: %v", err)
 	}
 }
+
+func TestChangingALibrarysFlowForgetsItsFiles(t *testing.T) {
+	s := open(t)
+	media := realDir(t, filepath.Join(t.TempDir(), "media")) // real OS paths: the scanner records these
+	a, _ := s.AddLibrary("A", filepath.Join(media, "a"), rules.SliderTemplate(3), true)
+	other, _ := s.AddFlow("Other", rules.SliderTemplate(1))
+	files := map[string]bool{ // path -> kept after the flow change
+		filepath.Join(media, "a", "x.mkv"):        false,
+		filepath.Join(media, "a", "sub", "y.mkv"): false,
+		filepath.Join(media, "ab", "z.mkv"):       true, // a sibling whose name starts the same
+		filepath.Join(media, "b", "w.mkv"):        true,
+	}
+	for p := range files {
+		s.PutFile(File{Path: p, Size: 1, Decision: "skip: rule"})
+	}
+	if _, err := s.SetLibraryFlow(a.ID, other.ID); err != nil {
+		t.Fatal(err)
+	}
+	for p, kept := range files {
+		if f, _ := s.GetFile(p); (f != nil) != kept {
+			t.Errorf("%s: kept=%v, want %v (only the library's own files are forgotten)", p, f != nil, kept)
+		}
+	}
+	if _, err := s.SetLibraryFlow(a.ID, 999); err != ErrNotFound {
+		t.Errorf("unknown flow: %v", err)
+	}
+}
+
+func TestFlowNamesAreUniqueInTheDatabase(t *testing.T) {
+	s := open(t)
+	s.AddFlow("Movies", rules.SliderTemplate(3))
+	// past the name check, as two requests at the same moment could be: the index refuses it
+	if _, err := s.addFlow(s.db, "Movies", rules.SliderTemplate(3)); nameErr(err) != ErrNameTaken {
+		t.Errorf("duplicate name: %v", err)
+	}
+}
+
+func TestAFlowInUseCannotBeDeletedEvenBehindTheAPI(t *testing.T) {
+	s := open(t)
+	l, _ := s.AddLibrary("A", "/a", rules.SliderTemplate(3), true)
+	if _, err := s.db.Exec(`DELETE FROM flows WHERE id=?`, l.FlowID); err == nil {
+		t.Error("foreign keys must refuse deleting a flow a library uses")
+	}
+	if err := s.DeleteFlow(l.FlowID); err == nil {
+		t.Error("DeleteFlow must refuse too")
+	}
+}
