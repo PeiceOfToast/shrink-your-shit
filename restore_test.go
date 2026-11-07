@@ -4,10 +4,13 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -112,15 +115,27 @@ func TestRestoreForceIsCommandLineOnly(t *testing.T) {
 	if b, _ := os.ReadFile(path); string(b) != "edited by the person" {
 		t.Fatal("nothing may move without --force")
 	}
-	// --force while the service runs: refused, nothing moved
+	// --force while another process holds the data folder's lock (as the service does for its life):
+	// refused, nothing moved
+	helper := exec.Command(os.Args[0], "-test.run=^TestLockHelperProcess$")
+	helper.Env = append(os.Environ(), "SYP_LOCK_HELPER="+data)
+	stdout, _ := helper.StdoutPipe()
+	if err := helper.Start(); err != nil {
+		t.Fatal(err)
+	}
+	line := make([]byte, 6)
+	if _, err := io.ReadFull(stdout, line); err != nil || string(line) != "locked" {
+		t.Fatalf("helper: %q %v", line, err)
+	}
 	errOut.Reset()
-	if code := restoreCommand([]string{"--force", path}, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "Stop the service first") {
-		t.Errorf("--force with the service running: %d %q", code, errOut.String())
+	if code := restoreCommand([]string{"--force", path}, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "The service is running; stop it first or use Get original back in the web page.") {
+		t.Errorf("--force while the lock is held: %d %q", code, errOut.String())
 	}
 	if b, _ := os.ReadFile(path); string(b) != "edited by the person" {
-		t.Fatal("nothing may move while the service runs")
+		t.Fatal("nothing may move while the lock is held")
 	}
-	srv.Close() // the service stopped
+	helper.Process.Kill() // the service stopped: its lock goes with it
+	helper.Wait()
 	if code := restoreCommand([]string{"--force", path}, &out, &errOut); code != 0 || !strings.Contains(out.String(), "The original is back") {
 		t.Fatalf("--force: %d %q %q", code, out.String(), errOut.String())
 	}
@@ -138,4 +153,36 @@ func TestRestoreForceIsCommandLineOnly(t *testing.T) {
 	if !kept {
 		t.Error("the person's edited file must be kept in .syp-trash")
 	}
+}
+
+// TestLockHelperProcess is the second process for TestRestoreForceIsCommandLineOnly: it holds the data
+// folder's lock until it is killed.
+func TestLockHelperProcess(t *testing.T) {
+	dir := os.Getenv("SYP_LOCK_HELPER")
+	if dir == "" {
+		t.Skip("only as a helper")
+	}
+	if _, err := lockDataDir(dir); err != nil {
+		os.Exit(3)
+	}
+	fmt.Print("locked")
+	time.Sleep(time.Minute)
+	os.Exit(0)
+}
+
+func TestDataLockIsExclusive(t *testing.T) {
+	dir := t.TempDir()
+	release, err := lockDataDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lockDataDir(dir); !errors.Is(err, errDataLocked) {
+		t.Errorf("a second lock: %v", err)
+	}
+	release()
+	r2, err := lockDataDir(dir)
+	if err != nil {
+		t.Errorf("after release: %v", err)
+	}
+	r2()
 }

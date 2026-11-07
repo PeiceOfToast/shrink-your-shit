@@ -267,8 +267,10 @@ and the setup checks skip it.
 
 **Getting an original back (slice 18, `internal/worker/restore.go`):** `POST /api/kept/{keptId}/restore`
 (the page's "Get original back") or `shrink-your-shit restore [--force] <kept id | path>`, which asks the
-running service (`--force` only on the command line, on the database directly and only while the service does not
-answer on its address: two programs moving the same files and rows is not safe; the API never forces). Refused, with nothing moved, if the kept original is missing or not the recorded file
+running service (`--force` only on the command line, on the database directly, holding the data folder's lock
+`<data>/syp.lock` for the whole restore; the service holds that lock for its whole life (flock on
+Linux and macOS, LockFileEx on Windows), so a forced restore never runs beside it and a second service
+on the same data folder refuses to start; the API never forces). Refused, with nothing moved, if the kept original is missing or not the recorded file
 (size + sampled hash), or if the converted file changed since it was made (size, modification time and
 sampled hash recorded at the swap, migration 7; `--force` on the command line only). Otherwise, on the
 same journal row: state `restoring` with a free name for the converted file allocated and recorded

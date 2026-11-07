@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -35,12 +36,6 @@ func restoreCommand(args []string, out, errOut io.Writer) int {
 	env := envFile(linuxEnvFile)
 	addr, tok := serviceAddr(env)
 	if *force {
-		// Done on the database directly, so only while the service is stopped: two programs moving
-		// the same files and rows (its worker, its hourly purge) is not safe.
-		if serviceAnswers(addr) {
-			fmt.Fprintf(errOut, "shrink-your-shit is running (%s), so --force was not used. Stop the service first, then run this again; or use Get original back on the web page (it never forces). Nothing was changed.\n", localURL(addr))
-			return 1
-		}
 		return restoreForced(fs.Arg(0), env, out, errOut)
 	}
 	call := func(method, path string, body any, v any) (int, error) {
@@ -108,6 +103,18 @@ func restoreCommand(args []string, out, errOut io.Writer) int {
 // restoreForced is restore --force: on the database directly, so the HTTP API never offers force.
 func restoreForced(which string, env map[string]string, out, errOut io.Writer) int {
 	data := firstNonEmpty(os.Getenv("SYP_DATA"), env["SYP_DATA"], defaultDataDir())
+	// The data folder's lock, held for the whole restore: with the service running (it holds the lock
+	// for its life, on any address) two programs would move the same files and rows.
+	release, err := lockDataDir(data)
+	if errors.Is(err, errDataLocked) {
+		fmt.Fprintln(errOut, "The service is running; stop it first or use Get original back in the web page. Nothing was changed.")
+		return 1
+	}
+	if err != nil {
+		fmt.Fprintf(errOut, "Could not use the data folder %s (%v). Nothing was changed.\n", data, err)
+		return 1
+	}
+	defer release()
 	st, err := jobs.Open(filepath.Join(data, "syp.db"))
 	if err != nil {
 		fmt.Fprintf(errOut, "Could not open the data folder %s (%v). Nothing was changed.\n", data, err)
@@ -146,14 +153,4 @@ func restoreForced(which string, env map[string]string, out, errOut io.Writer) i
 		fmt.Fprintln(out, "The original is back, but its identity could not be confirmed. It will not be converted again.")
 	}
 	return 0
-}
-
-// serviceAnswers reports whether the program answers at addr (its health page).
-func serviceAnswers(addr string) bool {
-	resp, err := (&http.Client{Timeout: 2 * time.Second}).Get(localURL(addr) + "/healthz")
-	if err != nil {
-		return false
-	}
-	resp.Body.Close()
-	return true
 }

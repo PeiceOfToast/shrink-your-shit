@@ -336,3 +336,35 @@ func TestRestoreAsideNeverTouchesOtherFiles(t *testing.T) {
 		}
 	}
 }
+
+// The link-then-unlink fallback (macOS, filesystems without renameat2) stopped between link and unlink
+// while putting the original back: recovery finishes the restore and removes the original's second
+// name in .syp-trash, so no hidden duplicate is left (review 34cb07f).
+func TestRecoveryAfterALinkWithoutUnlink(t *testing.T) {
+	s, o := keptOne(t)
+	swapHook = func(at string) error {
+		if at == "converted moved aside" {
+			// the fallback's first half for the original: a second name at the file's name
+			if err := os.Link(s.trash(), s.src); err != nil {
+				t.Fatal(err)
+			}
+			return errCrash // and the process stops before the unlink
+		}
+		return nil
+	}
+	_, err := Restore(s.store, o.ID, false)
+	swapHook = nil
+	if !errors.Is(err, errCrash) {
+		t.Fatal(err)
+	}
+	RecoverSwaps(s.store, s.store, 7, keepNow)
+	if read(s.src) != "original-bytes" {
+		t.Errorf("at the name %q", read(s.src))
+	}
+	if _, err := os.Lstat(s.trash()); err == nil {
+		t.Error("the original's second name must not stay in .syp-trash")
+	}
+	if r, _ := s.store.OriginalByID(o.ID); r.State != jobs.OriginalRestored {
+		t.Errorf("row %s", r.State)
+	}
+}

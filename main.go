@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -110,6 +111,15 @@ func main() {
 	if err := os.MkdirAll(*data, 0o755); err != nil {
 		log.Fatal(err)
 	}
+	// One program per data folder: held for the service's whole life (a restore --force takes it too).
+	releaseLock, err := lockDataDir(*data)
+	if errors.Is(err, errDataLocked) {
+		log.Fatalf("Another shrink-your-shit is already using the data folder %s (a running service, or a restore --force). Stop it first.", *data)
+	}
+	if err != nil {
+		log.Fatalf("data folder %s: %v", *data, err)
+	}
+	defer releaseLock()
 	store, err := jobs.Open(filepath.Join(*data, "syp.db"))
 	if err != nil {
 		log.Fatal(err)

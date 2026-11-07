@@ -180,16 +180,25 @@ func recoverRestores(st Store, say func(string, ...any)) {
 		return
 	}
 	exists := func(p string) bool { _, err := os.Lstat(p); return p != "" && err == nil }
+	// sameFile: the two names are one file (the link fallback stopped between link and unlink).
+	sameFile := func(a, b string) bool {
+		sa, err1 := os.Lstat(a)
+		sb, err2 := os.Lstat(b)
+		return err1 == nil && err2 == nil && os.SameFile(sa, sb)
+	}
 	for _, o := range rows {
 		switch {
 		case isOriginal(o.Path, o):
+			if sameFile(o.Trash, o.Path) {
+				os.Remove(o.Trash) // the original's second name: no hidden duplicate is left in .syp-trash
+			}
 			if err := finishRestore(st, o); err != nil {
 				say("%s: %v", o.Path, err)
 				continue
 			}
 			say("%s: finished putting the original back", o.Path)
 		case exists(o.Path) && isOriginal(o.Trash, o):
-			if exists(o.Aside) && isConvertedFile(o.Aside, o) && isConvertedFile(o.Path, o) {
+			if exists(o.Aside) && sameFile(o.Aside, o.Path) && isConvertedFile(o.Path, o) {
 				os.Remove(o.Aside) // the same file under a second name (link fallback stopped half way)
 			}
 			st.SetSwapState(o.ID, jobs.OriginalKept)
