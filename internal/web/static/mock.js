@@ -378,7 +378,8 @@
     },
     retryJob: function (p) { var r = removeFrom(failedList, "jobId", p.id); saveAct(); return r ? ok() : gone(); },
     skipped: function (p) {
-      var r = skippedList.filter(function (x) { return !p.reason || x.reason === p.reason; }), off = +p.offset || 0, lim = +p.limit || 50;
+      var want = p.reason ? String(p.reason).split(",") : null; // reason=a,b: any of them (contract 22:30Z)
+      var r = skippedList.filter(function (x) { return !want || want.indexOf(x.reason) >= 0; }), off = +p.offset || 0, lim = +p.limit || 50;
       return ok({ items: r.slice(off, off + lim), total: r.length });
     },
     convertAgain: function (p) {

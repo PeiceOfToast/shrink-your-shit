@@ -120,11 +120,11 @@
       pane.appendChild(el("p", "muted", "Nothing was changed on these files. To change a rule, open the library."));
       var f = el("div", "field"), lb = el("label", null, "Show"), sel = el("select"); lb.htmlFor = "reason"; sel.id = "reason";
       sel.appendChild(el("option", null, "All reasons")).value = "";
-      // One entry per label (already_hevc and already_in_format share one, design). The server filters by one code, so the
-      // shared entry asks for already_in_format only, until workshop gives one code or a multi-reason filter (lead 22:28Z).
+      // One entry per label (already_hevc and already_in_format share one, design); a shared entry sends its codes in one
+      // request, reason=a,b, which the server pages as one list (UI-API-CONTRACT.md 22:30Z).
       var byLabel = {}, order = [];
       Object.keys(ui.REASONS).forEach(function (k) { var t = ui.badge(k); if (!byLabel[t]) { byLabel[t] = []; order.push(t); } byLabel[t].push(k); });
-      order.forEach(function (t) { var c = byLabel[t]; sel.appendChild(el("option", null, t)).value = c.indexOf("already_in_format") >= 0 ? "already_in_format" : c[0]; });
+      order.forEach(function (t) { sel.appendChild(el("option", null, t)).value = byLabel[t].join(","); });
       sel.onchange = function () { reason = sel.value; shown = 0; seen.skipped = null; refresh(); };
       f.appendChild(lb); f.appendChild(sel); pane.appendChild(f);
       var t = table(["File", "Why it was skipped", ""]); tb = t; pane.appendChild(t.wrap);
