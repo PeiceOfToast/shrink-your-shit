@@ -45,7 +45,10 @@
       big.appendChild(ui.el("span", "stat-label", "possible saving, an estimate from file sizes"));
       var ul = ui.el("ul");
       ul.appendChild(ui.el("li", null, ui.num(r.files) + " videos found (" + ui.bytes(r.totalBytes) + ")"));
-      ul.appendChild(ui.el("li", null, ui.num(r.canShrink) + " can be shrunk"));
+      // Before slice 12 shared (hardlinked) files are converted but free nothing (contract addendum 12).
+      var sh = r.sharedNoSaving || 0;
+      ul.appendChild(ui.el("li", null, sh ? ui.num(r.canShrink) + " will be converted; " + ui.num(sh) + " of them " + (sh === 1 ? "is" : "are") + " shared with another folder and will free no space"
+        : ui.num(r.canShrink) + " can be shrunk"));
       if (skipped) ul.appendChild(ui.el("li", null, ui.num(skipped) + " will be skipped: " + parts.join(", ")));
       say([big, ul, ui.el("p", "hint", "This is a guess, not a promise. Real savings are measured on each file.")]);
     }

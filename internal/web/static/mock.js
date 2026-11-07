@@ -114,9 +114,10 @@
              counts: { skipped: skippedList.length, failed: failedList.length } };
   }
   function previewResult() {
-    // About 10-20% of 1.1 TB, as first-run step 1 promises; 79 skipped, the same as the Skipped list.
-    return { stale: false, status: "ready", estimateBytesLow: 110 * GB, estimateBytesHigh: 220 * GB, files: 1284, totalBytes: 1100 * GB, canShrink: 1205,
-             skipped: { already_efficient: 71, hdr_dv: 5, shared_file: 3 } };
+    // About 10-20% of 1.1 TB, as first-run step 1 promises. files = canShrink + skipped (1284 = 1208 + 76).
+    // Until workshop slice 12, shared files are converted (in canShrink, not skipped) and free nothing: sharedNoSaving (addendum 12).
+    return { stale: false, status: "ready", estimateBytesLow: 110 * GB, estimateBytesHigh: 220 * GB, files: 1284, totalBytes: 1100 * GB, canShrink: 1208, sharedNoSaving: 29,
+             skipped: { already_efficient: 71, hdr_dv: 5 } };
   }
   // Standard's defaults are the slider's: the same choices with that position's minimum saving (contract addendum 6).
   function isSliderPosition(b) {
@@ -174,7 +175,7 @@
     checkLibrary: function (p, b) {
       var path = b.path || "", codes = { missing: "unreadable", readonly: "read_only", full: "low_space", empty: "no_videos", nocodec: "no_converter" }, bl = [], k;
       for (k in codes) if (path.indexOf(k) >= 0) bl.push({ code: codes[k], message: k === "full" ? "Only 6 GB free on this disk. Free up space (about 15 GB is enough to start), then press Check again." : "Cannot use this folder." });
-      return ok({ ok: !bl.length, blockers: bl, notes: bl.length ? [] : [{ code: "hardlinks", message: "212 files are shared with another folder (for example by Radarr). We will leave them alone, because changing one would break the link." }, { code: "no_hw_encoder", message: "" }],
+      return ok({ ok: !bl.length, blockers: bl, notes: bl.length ? [] : [{ code: "hardlinks", message: "212 files are shared with another folder (for example by Radarr). This version still converts them, but that frees no space, because the other folder keeps its copy. Leaving them alone comes in a later update." }, { code: "no_hw_encoder", message: "" }],
                   videoCount: 1284, totalBytes: 1100 * GB });
     },
     browseDirs: function (p) { return ok({ path: p.path || "/media", parent: "/", dirs: ["movies", "tv", "home"] }); },
