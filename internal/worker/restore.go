@@ -22,6 +22,7 @@ import (
 type Store interface {
 	Journal
 	OriginalByID(id int64) (jobs.Original, error)
+	SetRestoring(id int64, aside string) error
 	PutFile(f jobs.File) error
 }
 
@@ -31,8 +32,16 @@ type RestoreError struct{ Code, Message string }
 
 func (e *RestoreError) Error() string { return e.Message }
 
-// asidePath is where the converted file waits while its original is put back.
-func asidePath(o jobs.Original) string { return o.Trash + ".converted" }
+// isConvertedFile reports whether the file at p is the converted file as recorded at the swap: size,
+// modification time and sampled hash.
+func isConvertedFile(p string, o jobs.Original) bool {
+	st, err := os.Lstat(p)
+	if err != nil || !st.Mode().IsRegular() || st.Size() != o.NewBytes || st.ModTime().UnixNano() != o.NewMTime {
+		return false
+	}
+	h, err := SampleHash(p)
+	return err == nil && h == o.NewHash
+}
 
 // isOriginal reports whether the file at p is the kept original as recorded: size, modification time
 // (renames keep it) and sampled hash (review 9cb9617: an edit between the samples changes the time).
@@ -45,23 +54,12 @@ func isOriginal(p string, o jobs.Original) bool {
 	return err == nil && h == o.Hash
 }
 
-// convertedUnchanged reports whether the file at p is still the converted file as it was put in place.
-// Rows from before slice 18 recorded only its size.
-func convertedUnchanged(st os.FileInfo, p string, o jobs.Original) bool {
-	if st.Size() != o.NewBytes || o.NewMTime != 0 && st.ModTime().UnixNano() != o.NewMTime {
-		return false
-	}
-	if o.NewHash == "" {
-		return true
-	}
-	h, err := SampleHash(p)
-	return err == nil && h == o.NewHash
-}
-
 // Restore puts kept original id back at its name and removes the converted file. It refuses (a
 // *RestoreError, nothing moved) if the original is not kept any more, is not the file that was kept,
-// or if the converted file was changed since it was made (unless force). After it, the file is marked
-// restored so it is not converted again. The returned Original is the row as restored.
+// or if the converted file was changed since it was made (unless force, which only the command line
+// offers). Every rename refuses to replace a file (renameNoReplace), and the converted file is checked
+// again right before it moves, so a change or a new file meanwhile stops the restore with nothing
+// lost. After it, the file is marked restored so it is not converted again.
 func Restore(st Store, id int64, force bool) (jobs.Original, error) {
 	o, err := st.OriginalByID(id)
 	if errors.Is(err, jobs.ErrNotFound) {
@@ -76,38 +74,56 @@ func Restore(st Store, id int64, force bool) (jobs.Original, error) {
 	if !isOriginal(o.Trash, o) {
 		return o, &RestoreError{"original_missing", fmt.Sprintf("The kept original (%s) is missing or is not the file that was kept, so it can't be put back safely. Nothing was changed; the converted file is still in place.", o.Trash)}
 	}
-	cst, err := os.Stat(o.Path)
+	changed := &RestoreError{"converted_changed", "The converted file was changed since it was made, so putting the original back would lose those changes. Nothing was changed. To put it back anyway, run shrink-your-shit restore --force in a terminal."}
+	_, err = os.Lstat(o.Path)
 	converted := err == nil
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return o, err
 	}
-	if converted && !force && !convertedUnchanged(cst, o.Path, o) {
-		return o, &RestoreError{"converted_changed", "The converted file was changed since it was made, so putting the original back would lose those changes. Nothing was changed. To put it back anyway, run shrink-your-shit restore --force in a terminal."}
+	if converted && !force && !isConvertedFile(o.Path, o) {
+		return o, changed
 	}
-	if err := st.SetSwapState(id, jobs.Restoring); err != nil {
+	aside, err := trashPath(filepath.Dir(o.Trash), "converted-"+filepath.Base(o.Path), o.JobID)
+	if err != nil {
+		return o, fmt.Errorf("could not find a place for the converted file in %s (%v); nothing was changed", filepath.Dir(o.Trash), err)
+	}
+	if err := st.SetRestoring(id, aside); err != nil {
 		return o, err
 	}
+	o.Aside = aside
 	if err := hook("restore journal written"); err != nil {
 		return o, err
 	}
-	aside := asidePath(o)
+	backToKept := func(e error) (jobs.Original, error) {
+		if serr := st.SetSwapState(id, jobs.OriginalKept); serr != nil {
+			log.Printf("restore %d: %v (it is put right at the next start)", id, serr)
+		}
+		return o, e
+	}
 	if converted {
-		if err := os.Rename(o.Path, aside); err != nil {
-			st.SetSwapState(id, jobs.OriginalKept)
-			return o, fmt.Errorf("could not move the converted file aside (%v); nothing was changed", err)
+		// Checked again right before it moves: an edit since the first check stops it here.
+		if !force && !isConvertedFile(o.Path, o) {
+			return backToKept(changed)
+		}
+		if err := renameNoReplace(o.Path, aside); err != nil {
+			return backToKept(fmt.Errorf("could not move the converted file aside (%v); nothing was changed", err))
 		}
 		if err := hook("converted moved aside"); err != nil {
 			return o, err
 		}
 	}
-	if err := os.Rename(o.Trash, o.Path); err != nil {
+	if err := renameNoReplace(o.Trash, o.Path); err != nil {
+		occupied := errors.Is(err, fs.ErrExist)
 		if converted {
-			if rerr := os.Rename(aside, o.Path); rerr != nil {
-				return o, fmt.Errorf("could not put the original back (%v), nor the converted file (%v); it is in %s and is put back at the next start", err, rerr, aside)
+			if rerr := renameNoReplace(aside, o.Path); rerr != nil {
+				st.SetSwapState(id, jobs.SwapAttention)
+				return o, &RestoreError{"needs_attention", fmt.Sprintf("Another file appeared at %s while the original was being put back. Nothing was deleted: the converted file is in %s and the original in %s. Please choose which to keep.", o.Path, aside, o.Trash)}
 			}
 		}
-		st.SetSwapState(id, jobs.OriginalKept)
-		return o, fmt.Errorf("could not put the original back (%v); nothing was changed", err)
+		if occupied {
+			return backToKept(&RestoreError{"path_occupied", fmt.Sprintf("A new file appeared at %s, so the original was not put back. Nothing was changed.", o.Path)})
+		}
+		return backToKept(fmt.Errorf("could not put the original back (%v); nothing was changed", err))
 	}
 	if err := hook("original back"); err != nil {
 		return o, err
@@ -123,10 +139,16 @@ func IdentityConfirmed(o jobs.Original) bool {
 	return err == nil && st.ModTime().UnixNano() == o.ModTime && isOriginal(o.Path, o)
 }
 
-// finishRestore removes the converted file set aside, marks the file restored and the row restored.
+// finishRestore removes the converted file set aside (only the recorded file, and only if it is the
+// converted file as recorded: a forced restore of an edited file keeps it), marks the file restored and
+// the row restored.
 func finishRestore(st Store, o jobs.Original) error {
-	if err := os.Remove(asidePath(o)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		log.Printf("restore %s: the converted file %s is left: %v", o.Path, asidePath(o), err)
+	if o.Aside != "" && isConvertedFile(o.Aside, o) {
+		if err := os.Remove(o.Aside); err != nil {
+			log.Printf("restore %s: the converted file %s is left: %v", o.Path, o.Aside, err)
+		}
+	} else if _, err := os.Lstat(o.Aside); o.Aside != "" && err == nil {
+		log.Printf("restore %s: the changed converted file is kept at %s", o.Path, o.Aside)
 	}
 	rst, err := os.Stat(o.Path)
 	if err != nil {
@@ -148,15 +170,16 @@ func removeIfEmpty(dir string) {
 }
 
 // recoverRestores ends restores a crash interrupted (rows "restoring"): the original back at its name
-// finishes it; the converted file still at its name means nothing moved (back to kept); the name empty
-// with the original still in the trash means it was half done: the original is put back.
+// finishes it; the converted file still at its name means nothing moved (back to kept; a second name
+// left by the link fallback is removed after its identity is checked); the name empty with the original
+// still in the trash means it was half done: the original is put back (never over another file).
 func recoverRestores(st Store, say func(string, ...any)) {
 	rows, err := st.Originals(jobs.Restoring)
 	if err != nil {
 		say("cannot read the restore journal: %v", err)
 		return
 	}
-	exists := func(p string) bool { _, err := os.Lstat(p); return err == nil }
+	exists := func(p string) bool { _, err := os.Lstat(p); return p != "" && err == nil }
 	for _, o := range rows {
 		switch {
 		case isOriginal(o.Path, o):
@@ -166,10 +189,13 @@ func recoverRestores(st Store, say func(string, ...any)) {
 			}
 			say("%s: finished putting the original back", o.Path)
 		case exists(o.Path) && isOriginal(o.Trash, o):
+			if exists(o.Aside) && isConvertedFile(o.Aside, o) && isConvertedFile(o.Path, o) {
+				os.Remove(o.Aside) // the same file under a second name (link fallback stopped half way)
+			}
 			st.SetSwapState(o.ID, jobs.OriginalKept)
 			say("%s: the restore was interrupted before anything moved; the original is still kept", o.Path)
 		case !exists(o.Path) && isOriginal(o.Trash, o):
-			if err := os.Rename(o.Trash, o.Path); err != nil {
+			if err := renameNoReplace(o.Trash, o.Path); err != nil {
 				say("%s: could not put the original back: %v", o.Path, err)
 				continue
 			}
@@ -205,9 +231,10 @@ func Purge(st Store, days int, now time.Time) []string {
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			said = append(said, fmt.Sprintf("%s: its kept original was already gone", o.Path))
-		case err != nil || !fi.Mode().IsRegular() || fi.Size() != o.Bytes:
+		case err != nil || !fi.Mode().IsRegular() || !isOriginal(o.Trash, o):
+			// size, time and sampled hash: anything else at that name is not ours to delete
 			st.SetSwapState(o.ID, jobs.SwapAttention)
-			said = append(said, fmt.Sprintf("%s: the file in %s is not the kept original, so it was left alone", o.Path, o.Trash))
+			said = append(said, fmt.Sprintf("%s: the file in %s is not the kept original (it was changed or replaced), so it was left alone", o.Path, o.Trash))
 			continue
 		default:
 			if err := os.Remove(o.Trash); err != nil {

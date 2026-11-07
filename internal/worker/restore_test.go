@@ -5,8 +5,10 @@ package worker
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -137,8 +139,8 @@ func TestCrashDuringRestoreRecovers(t *testing.T) {
 					t.Errorf("%s, trash %q", r.State, read(s.trash()))
 				}
 			case "original-bytes":
-				if r.State != jobs.OriginalRestored || !strings.HasPrefix(read(s.trash()), "<") || !strings.HasPrefix(read(asidePath(o)), "<") {
-					t.Errorf("%s, trash %q, aside %q", r.State, read(s.trash()), read(asidePath(o)))
+				if r.State != jobs.OriginalRestored || !strings.HasPrefix(read(s.trash()), "<") || !strings.HasPrefix(read(r.Aside), "<") {
+					t.Errorf("%s, trash %q, aside %q", r.State, read(s.trash()), read(r.Aside))
 				}
 				if f, _ := s.store.GetFile(s.src); f == nil || f.Decision != jobs.DecisionRestored {
 					t.Errorf("file record %+v", f)
@@ -207,5 +209,130 @@ func TestPurgeLeavesAReplacedTrashFile(t *testing.T) {
 	}
 	if r, _ := s.store.OriginalByID(o.ID); r.State != jobs.SwapAttention {
 		t.Errorf("row %s", r.State)
+	}
+}
+
+func TestRenameNoReplace(t *testing.T) {
+	dir := t.TempDir()
+	a, b := filepath.Join(dir, "a"), filepath.Join(dir, "b")
+	os.WriteFile(a, []byte("a"), 0o644)
+	os.WriteFile(b, []byte("b"), 0o644)
+	if err := renameNoReplace(a, b); !errors.Is(err, fs.ErrExist) || read(a) != "a" || read(b) != "b" {
+		t.Errorf("occupied: %v %q %q", err, read(a), read(b))
+	}
+	os.Remove(b)
+	if err := renameNoReplace(a, b); err != nil || read(b) != "a" || !strings.HasPrefix(read(a), "<") {
+		t.Errorf("free: %v", err)
+	}
+	if err := linkRename(b, a); err != nil || read(a) != "a" {
+		t.Errorf("link fallback: %v", err)
+	}
+	os.WriteFile(b, []byte("b"), 0o644)
+	if err := linkRename(a, b); !errors.Is(err, fs.ErrExist) || read(a) != "a" {
+		t.Errorf("link fallback occupied: %v", err)
+	}
+}
+
+// Purge deletes only the kept original as recorded: a replacement of the same size and time but other
+// content is left alone (review 172f049).
+func TestPurgeLeavesASameSizeSameTimeReplacement(t *testing.T) {
+	s, o := keptOne(t)
+	st, _ := os.Stat(s.trash())
+	os.WriteFile(s.trash(), []byte("OTHER-content!"), 0o644) // 14 bytes, like "original-bytes"
+	os.Chtimes(s.trash(), st.ModTime(), st.ModTime())
+	kept, _ := time.Parse(time.RFC3339, o.KeptAt)
+	said := Purge(s.store, 1, kept.Add(48*time.Hour))
+	if read(s.trash()) != "OTHER-content!" || len(said) != 1 || !strings.Contains(said[0], "left alone") {
+		t.Errorf("%q %q", said, read(s.trash()))
+	}
+	if r, _ := s.store.OriginalByID(o.ID); r.State != jobs.SwapAttention {
+		t.Errorf("row %s", r.State)
+	}
+}
+
+// The converted file edited between the first check and the move: refused, nothing moved, still kept.
+func TestRestoreRechecksRightBeforeTheMove(t *testing.T) {
+	s, o := keptOne(t)
+	swapHook = func(at string) error {
+		if at == "restore journal written" {
+			os.WriteFile(s.src, []byte("edited!"), 0o644)
+		}
+		return nil
+	}
+	defer func() { swapHook = nil }()
+	if _, err := Restore(s.store, o.ID, false); !isCode(err, "converted_changed") {
+		t.Fatalf("%v", err)
+	}
+	if read(s.src) != "edited!" || read(s.trash()) != "original-bytes" {
+		t.Errorf("nothing may move: %q %q", read(s.src), read(s.trash()))
+	}
+	if r, _ := s.store.OriginalByID(o.ID); r.State != jobs.OriginalKept {
+		t.Errorf("row %s", r.State)
+	}
+}
+
+// A new file appearing at the name during a restore is never overwritten.
+func TestRestoreNeverOverwritesANewFile(t *testing.T) {
+	t.Run("converted file already gone", func(t *testing.T) {
+		s, o := keptOne(t)
+		os.Remove(s.src)
+		swapHook = func(at string) error {
+			if at == "restore journal written" {
+				os.WriteFile(s.src, []byte("a new download"), 0o644)
+			}
+			return nil
+		}
+		defer func() { swapHook = nil }()
+		if _, err := Restore(s.store, o.ID, false); !isCode(err, "path_occupied") || !strings.Contains(err.Error(), "Nothing was changed") {
+			t.Fatalf("%v", err)
+		}
+		if read(s.src) != "a new download" || read(s.trash()) != "original-bytes" {
+			t.Errorf("%q %q", read(s.src), read(s.trash()))
+		}
+		if r, _ := s.store.OriginalByID(o.ID); r.State != jobs.OriginalKept {
+			t.Errorf("row %s", r.State)
+		}
+	})
+	t.Run("after the converted file moved aside", func(t *testing.T) {
+		s, o := keptOne(t)
+		swapHook = func(at string) error {
+			if at == "converted moved aside" {
+				os.WriteFile(s.src, []byte("a new download"), 0o644)
+			}
+			return nil
+		}
+		defer func() { swapHook = nil }()
+		_, err := Restore(s.store, o.ID, false)
+		if !isCode(err, "needs_attention") || !strings.Contains(err.Error(), "Nothing was deleted") {
+			t.Fatalf("%v", err)
+		}
+		r, _ := s.store.OriginalByID(o.ID)
+		if read(s.src) != "a new download" || read(s.trash()) != "original-bytes" || read(r.Aside) != "new" || r.State != jobs.SwapAttention {
+			t.Errorf("%q %q %q %s", read(s.src), read(s.trash()), read(r.Aside), r.State)
+		}
+	})
+}
+
+// The converted file's place during a restore is a free name recorded in the journal: files at the
+// old fixed name, or at the first free candidate, are never touched (review 172f049).
+func TestRestoreAsideNeverTouchesOtherFiles(t *testing.T) {
+	for _, gone := range []bool{false, true} {
+		s, o := keptOne(t)
+		if gone {
+			os.Remove(s.src)
+		}
+		old := s.trash() + ".converted"
+		first := filepath.Join(s.dir, TrashDir, "converted-movie."+strconv.FormatInt(s.id, 10)+".mkv")
+		os.WriteFile(old, []byte("someone's file"), 0o644)
+		os.WriteFile(first, []byte("another one"), 0o644)
+		if _, err := Restore(s.store, o.ID, false); err != nil {
+			t.Fatalf("converted gone %v: %v", gone, err)
+		}
+		if read(old) != "someone's file" || read(first) != "another one" || read(s.src) != "original-bytes" {
+			t.Errorf("converted gone %v: %q %q %q", gone, read(old), read(first), read(s.src))
+		}
+		if r, _ := s.store.OriginalByID(o.ID); r.Aside == first || r.Aside == old || r.Aside == "" {
+			t.Errorf("aside %q", r.Aside)
+		}
 	}
 }

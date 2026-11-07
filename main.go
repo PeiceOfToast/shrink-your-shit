@@ -169,21 +169,22 @@ func main() {
 	w := &worker.Worker{ID: "builtin", Queue: store, Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath,
 		Template: store.TemplateFor, Poll: 3 * time.Second,
 		DecodeCheck: *decode, MinSSIM: *minSSIM, KeepDays: keepDays, Journal: store}
+	// Kept originals are purged every hour whether or not converting can run (review 172f049).
+	go func() {
+		t := time.NewTicker(time.Hour)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				purge()
+			}
+		}
+	}()
 	workerDone := make(chan struct{})
 	if converts {
 		go func() { w.Run(ctx); close(workerDone) }()
-		go func() {
-			t := time.NewTicker(time.Hour)
-			defer t.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-t.C:
-					purge()
-				}
-			}
-		}()
 	} else {
 		close(workerDone)
 	}

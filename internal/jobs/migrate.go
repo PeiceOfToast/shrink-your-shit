@@ -120,6 +120,12 @@ DELETE FROM files WHERE decision LIKE 'skip:%' AND reason = '';
 -- output's; otherwise it stays 0 (unknown), and such a job hides nothing from the Skipped list
 UPDATE jobs SET output_mtime = (SELECT f.mtime FROM files f WHERE f.path=jobs.output_path AND f.size=jobs.size_after)
 WHERE status='done' AND EXISTS (SELECT 1 FROM files f WHERE f.path=jobs.output_path AND f.size=jobs.size_after);`},
+
+	// Slice 18: where a restore puts the converted file while the original goes back, a free name
+	// allocated per restore and recorded before anything moves (only that recorded file is ever removed,
+	// and only after its identity is checked).
+	{8, "restore aside path", `
+ALTER TABLE originals ADD COLUMN aside TEXT NOT NULL DEFAULT '';`},
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.

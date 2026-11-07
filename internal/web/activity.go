@@ -101,10 +101,10 @@ func activityRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, no
 		writeJSON(w, map[string]any{"keptBytes": bytes, "count": len(items), "days": s.KeepOriginalsDays, "items": out})
 	})
 
-	// Get original back (the one restore, after the page's confirm). force is for the command line
-	// only (restore --force): the page never sends it.
+	// Get original back (the one restore, after the page's confirm). Never forced: putting an original
+	// back over a converted file that was changed is the command line's restore --force only.
 	api.HandleFunc("POST /api/kept/{keptId}/restore", func(w http.ResponseWriter, r *http.Request) {
-		var in struct{ Force bool }
+		var in struct{}
 		if !readJSON(w, r, &in) {
 			return
 		}
@@ -113,7 +113,7 @@ func activityRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, no
 			apiError(w, http.StatusNotFound, "not_found", "There is no such kept original. Nothing was changed.")
 			return
 		}
-		o, err := worker.Restore(store, id, in.Force)
+		o, err := worker.Restore(store, id, false)
 		var re *worker.RestoreError
 		switch {
 		case errors.As(err, &re) && re.Code == "not_found":

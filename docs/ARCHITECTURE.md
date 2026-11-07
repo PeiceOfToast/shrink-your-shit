@@ -267,11 +267,15 @@ and the setup checks skip it.
 
 **Getting an original back (slice 18, `internal/worker/restore.go`):** `POST /api/kept/{keptId}/restore`
 (the page's "Get original back") or `shrink-your-shit restore [--force] <kept id | path>`, which asks the
-running service. Refused, with nothing moved, if the kept original is missing or not the recorded file
+running service (`--force` only on the command line, on the database directly; the API never forces). Refused, with nothing moved, if the kept original is missing or not the recorded file
 (size + sampled hash), or if the converted file changed since it was made (size, modification time and
 sampled hash recorded at the swap, migration 7; `--force` on the command line only). Otherwise, on the
-same journal row: state `restoring`, the converted file renamed to `<trash name>.converted`, the
-original renamed back, the converted file deleted, the file record's decision set to `restored` (the
+same journal row: state `restoring` with a free name for the converted file allocated and recorded
+(migration 8; never a fixed name), the converted file checked again and renamed there, the original
+renamed back, the converted file deleted only if it is still the recorded one (a forced restore of an
+edited file keeps it there). Every rename refuses to replace a file (`renameNoReplace`: renameat2
+RENAME_NOREPLACE on Linux, MoveFileEx without replace on Windows, else link then unlink): a file that
+appears at the name meanwhile stops the restore with nothing deleted. Then the file record's decision set to `restored` (the
 scanner and the Preview skip it until "Convert again" clears it), state `restored`, and the empty
 `.syp-trash` removed. `RecoverSwaps` finishes a `restoring` row at startup: the original back finishes
 it, the converted file still in place means nothing moved (kept), an empty name puts the original
@@ -280,8 +284,8 @@ prove every byte.
 
 **Purge:** at startup and every hour, kept originals whose `kept_at` + `keepOriginalsDays` (the setting
 now, so lowering it applies at the next purge; the lists show the same date) has passed are deleted,
-only if the file at the recorded trash path still has the recorded size (otherwise it is left alone and
-the row marked `needs_attention`); the row becomes `purged`, its saving counts as freed, and an empty
+only if the file at the recorded trash path is still the kept original: size, modification time and
+sampled hash (otherwise it is left alone and the row marked `needs_attention`); the row becomes `purged`, its saving counts as freed, and an empty
 `.syp-trash` is removed. Nothing else in `.syp-trash` is ever deleted. Library records do not matter.
 
 ## Activity (slice 21b)

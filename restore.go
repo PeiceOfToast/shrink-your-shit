@@ -9,17 +9,20 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
 
 // restoreCommand is "shrink-your-shit restore [--force] <kept id or file path>": put a kept original back
 // (slice 18). It asks the running service to do it, so it is done by the user the service runs as, with
 // the same journal as the page's "Get original back". --force puts it back even if the converted file
-// was changed since it was made (the page never does that).
+// was changed since it was made: only here, not over the web page or its API, so it is done directly on
+// the database (SYP_DATA or the installed data folder), as the user running this command.
 func restoreCommand(args []string, out, errOut io.Writer) int {
 	fs := flag.NewFlagSet("restore", flag.ContinueOnError)
 	fs.SetOutput(errOut)
@@ -29,7 +32,11 @@ func restoreCommand(args []string, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, "The kept originals and their ids are listed under Activity > Kept originals.")
 		return 2
 	}
-	addr, tok := serviceAddr(envFile(linuxEnvFile))
+	env := envFile(linuxEnvFile)
+	if *force {
+		return restoreForced(fs.Arg(0), env, out, errOut)
+	}
+	addr, tok := serviceAddr(env)
 	call := func(method, path string, body any, v any) (int, error) {
 		var r io.Reader
 		if body != nil {
@@ -89,5 +96,48 @@ func restoreCommand(args []string, out, errOut io.Writer) int {
 		return 1
 	}
 	fmt.Fprintln(out, res.Message)
+	return 0
+}
+
+// restoreForced is restore --force: on the database directly, so the HTTP API never offers force.
+func restoreForced(which string, env map[string]string, out, errOut io.Writer) int {
+	data := firstNonEmpty(os.Getenv("SYP_DATA"), env["SYP_DATA"], defaultDataDir())
+	st, err := jobs.Open(filepath.Join(data, "syp.db"))
+	if err != nil {
+		fmt.Fprintf(errOut, "Could not open the data folder %s (%v). Nothing was changed.\n", data, err)
+		return 1
+	}
+	defer st.Close()
+	id, err := strconv.ParseInt(which, 10, 64)
+	if err != nil {
+		want, _ := filepath.Abs(which)
+		if real, err := jobs.RealPath(which); err == nil {
+			want = real
+		}
+		items, err := st.KeptItems()
+		if err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+		for _, k := range items {
+			if k.Path == want || k.Path == which {
+				id = k.ID
+			}
+		}
+		if id == 0 {
+			fmt.Fprintf(errOut, "No kept original for %s. Nothing was changed.\n", which)
+			return 1
+		}
+	}
+	o, err := worker.Restore(st, id, true)
+	if err != nil {
+		fmt.Fprintln(errOut, err)
+		return 1
+	}
+	if worker.IdentityConfirmed(o) {
+		fmt.Fprintln(out, "The original is back, and its identity is confirmed. It will not be converted again.")
+	} else {
+		fmt.Fprintln(out, "The original is back, but its identity could not be confirmed. It will not be converted again.")
+	}
 	return 0
 }
