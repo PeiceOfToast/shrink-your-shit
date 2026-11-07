@@ -212,3 +212,42 @@ func TestFsDirsListsFoldersOnly(t *testing.T) {
 		t.Errorf("top level: %d %s", code, body)
 	}
 }
+
+func TestLibraryListShapeAndVersionHeader(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), false)
+	code, body, resp := do(t, nil, srv, call{method: "GET", path: "/api/libraries"})
+	if code != 200 || !strings.Contains(body, `"total":1`) || !strings.Contains(body, `"id":"1"`) || !strings.Contains(body, `"flowId":"1"`) {
+		t.Errorf("want total and string ids (UI-API-CONTRACT.md): %s", body)
+	}
+	if resp.Header.Get("X-SYP-API") != "1" {
+		t.Errorf("X-SYP-API = %q", resp.Header.Get("X-SYP-API"))
+	}
+	srv2, _, _, _ := libServer(t, true)
+	if _, _, resp := do(t, nil, srv2, call{method: "GET", path: "/api/libraries"}); resp.StatusCode != 401 || resp.Header.Get("X-SYP-API") != "1" {
+		t.Errorf("a refused /api answer carries the version too: %d %q", resp.StatusCode, resp.Header.Get("X-SYP-API"))
+	}
+	if _, _, resp := do(t, nil, srv, call{method: "GET", path: "/healthz"}); resp.Header.Get("X-SYP-API") != "" {
+		t.Error("only /api answers carry X-SYP-API")
+	}
+}
+
+func TestLinkedFolderIsStoredAsTheRealFolder(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("making links needs extra rights on Windows")
+	}
+	srv, _, _, _ := libServer(t, false)
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "videos")
+	os.Symlink(real, link)
+	code, body := post(t, srv, "POST", "/api/libraries", fmt.Sprintf(`{"name":"Linked","path":%q}`, link))
+	var lib libraryItem
+	json.Unmarshal([]byte(body), &lib)
+	want, _ := filepath.EvalSymlinks(real)
+	if code != 201 || lib.Path != want {
+		t.Errorf("%d %s: want the real folder %s stored", code, body, want)
+	}
+	if code, body = post(t, srv, "POST", "/api/libraries", fmt.Sprintf(`{"name":"Again","path":%q}`, real)); code != 409 || errCode(body) != "path_taken" {
+		t.Errorf("the same folder by its real name: %d %s", code, body)
+	}
+}

@@ -6,6 +6,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"log"
 	"os"
@@ -144,7 +145,9 @@ func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.Fil
 	}
 	rec.Decision = "queued: " + why
 	if _, err := s.Store.Enqueue(jobs.Job{Library: t.Path, LibraryID: t.LibraryID, Path: path, Reason: why, DurationSec: pi.DurationSec, SizeBefore: st.Size()}); err != nil {
-		log.Printf("enqueue %s: %v", path, err)
+		if !errors.Is(err, jobs.ErrLibraryGone) { // removed or stopped while this pass ran: nothing to do
+			log.Printf("enqueue %s: %v", path, err)
+		}
 		return false
 	}
 	s.Store.PutFile(rec)

@@ -5,7 +5,10 @@ package jobs
 import (
 	"database/sql"
 	"fmt"
+	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,23 +42,51 @@ func v2DB(t *testing.T) string {
 	return path
 }
 
+// realDir makes dir and returns it as a library stores it (links resolved).
+func realDir(t *testing.T, dir string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r, err := RealPath(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+// moveJobs points a fixture's jobs (library "/lib") at dir.
+func moveJobs(t *testing.T, dbPath, dir string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`UPDATE jobs SET library=?, path=?||substr(path,5)`, dir, dir); err != nil {
+		t.Fatal(err)
+	}
+}
+
 var flagRule = rules.Rule{FromCodec: "h264", MinBitrateKbps: 3000, CRF: 24, Preset: "fast"}
 
 func TestUpgradeAdoptsFlagLibrariesAsLegacyFlows(t *testing.T) {
 	for name, path := range map[string]string{"from v2 (slice 08-14)": v2DB(t), "from before migrations": legacyDB(t)} {
 		t.Run(name, func(t *testing.T) {
+			dir := realDir(t, filepath.Join(t.TempDir(), "lib"))
+			moveJobs(t, path, dir)
 			s, err := Open(path)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer s.Close()
 			before, _ := s.List(100)
-			n, err := s.EnsureLibraries([]string{"/lib"}, rules.LegacyTemplate(flagRule, "beside"))
+			n, _, err := s.EnsureLibraries([]string{dir}, rules.LegacyTemplate(flagRule, "beside"))
 			if err != nil || n != 1 {
 				t.Fatalf("added %d, %v", n, err)
 			}
 			libs, _ := s.Libraries()
-			if len(libs) != 1 || libs[0].Name != "lib" || libs[0].Path != "/lib" || !libs[0].Started {
+			if len(libs) != 1 || libs[0].Name != "lib" || libs[0].Path != dir || !libs[0].Started {
 				t.Fatalf("%+v", libs)
 			}
 			f, _ := s.GetFlow(libs[0].FlowID)
@@ -76,7 +107,7 @@ func TestUpgradeAdoptsFlagLibrariesAsLegacyFlows(t *testing.T) {
 				}
 			}
 			// the next start changes nothing, and a library added later is named normally
-			if n, _ := s.EnsureLibraries([]string{"/lib", "/new"}, rules.LegacyTemplate(rules.Default(), "replace")); n != 1 {
+			if n, _, _ := s.EnsureLibraries([]string{dir, realDir(t, filepath.Join(t.TempDir(), "new"))}, rules.LegacyTemplate(rules.Default(), "replace")); n != 1 {
 				t.Errorf("second start added %d, want only /new", n)
 			}
 			libs, _ = s.Libraries()
@@ -91,7 +122,8 @@ func TestUpgradeAdoptsFlagLibrariesAsLegacyFlows(t *testing.T) {
 
 func TestFreshInstallFlowNames(t *testing.T) {
 	s := open(t)
-	s.EnsureLibraries([]string{"/a/lib", "/b/lib"}, rules.LegacyTemplate(rules.Default(), "replace"))
+	root := t.TempDir()
+	s.EnsureLibraries([]string{realDir(t, filepath.Join(root, "a", "lib")), realDir(t, filepath.Join(root, "b", "lib"))}, rules.LegacyTemplate(rules.Default(), "replace"))
 	libs, _ := s.Libraries()
 	f0, _ := s.GetFlow(libs[0].FlowID)
 	f1, _ := s.GetFlow(libs[1].FlowID)
@@ -154,7 +186,7 @@ func TestCounts(t *testing.T) {
 	for i, size := range []int64{1000, 2000} {
 		id, _ := s.Enqueue(Job{LibraryID: l.ID, Path: fmt.Sprint(i), SizeBefore: size})
 		s.Claim("w")
-		s.Complete(id, "x", size/4)
+		s.Complete(id, fmt.Sprint(i), size/4) // replaced in place
 	}
 	f, _ := s.Enqueue(Job{LibraryID: l.ID, Path: "f"})
 	s.Claim("w")
@@ -165,5 +197,98 @@ func TestCounts(t *testing.T) {
 	c, _ := s.Counts()
 	if got := c[l.ID]; got != (LibraryCounts{Working: 1, Waiting: 1, Failed: 1, FreedBytes: 750 + 1500}) {
 		t.Errorf("%+v", got)
+	}
+}
+
+func TestFlagLibrariesMayNotOverlap(t *testing.T) {
+	s := open(t)
+	root := t.TempDir()
+	media, tv := filepath.Join(root, "media"), filepath.Join(root, "media", "tv")
+	os.MkdirAll(tv, 0o755)
+	n, skipped, err := s.EnsureLibraries([]string{media, tv}, rules.LegacyTemplate(rules.Default(), "replace"))
+	if err != nil || n != 1 || len(skipped) != 1 || !strings.Contains(skipped[0], tv) || !strings.Contains(skipped[0], "inside") {
+		t.Fatalf("added %d, skipped %q, %v", n, skipped, err)
+	}
+	// the other way round too: a folder around an existing library
+	other := t.TempDir()
+	os.Mkdir(filepath.Join(other, "inner"), 0o755)
+	s.EnsureLibraries([]string{filepath.Join(other, "inner")}, rules.LegacyTemplate(rules.Default(), "replace"))
+	if n, skipped, _ := s.EnsureLibraries([]string{other}, rules.LegacyTemplate(rules.Default(), "replace")); n != 0 || len(skipped) != 1 {
+		t.Errorf("a folder holding a library: added %d, skipped %q", n, skipped)
+	}
+}
+
+func TestFlagLibraryLinkIsStoredAsTheRealFolder(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("making links needs extra rights on Windows")
+	}
+	s := open(t)
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "videos")
+	os.Symlink(real, link)
+	s.EnsureLibraries([]string{link}, rules.LegacyTemplate(rules.Default(), "replace"))
+	libs, _ := s.Libraries()
+	want, _ := filepath.EvalSymlinks(real)
+	if len(libs) != 1 || libs[0].Path != want {
+		t.Fatalf("%+v, want the real folder %s", libs, want)
+	}
+	if n, _, _ := s.EnsureLibraries([]string{link, real}, rules.LegacyTemplate(rules.Default(), "replace")); n != 0 {
+		t.Errorf("the same folder by another name was added again (%d)", n)
+	}
+}
+
+// An upgraded install whose flags had a folder inside another: the inner one is not added, and its
+// old jobs belong to the library that holds them.
+func TestUpgradeLinksJobsOfASkippedNestedFolder(t *testing.T) {
+	root := t.TempDir()
+	media, tv := filepath.Join(root, "media"), filepath.Join(root, "media", "tv")
+	os.MkdirAll(tv, 0o755)
+	path := v2DB(t)
+	db, _ := sql.Open("sqlite", path)
+	db.Exec(`UPDATE jobs SET library=?, path=?||'/'||id||'.mkv'`, tv, tv)
+	db.Close()
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.EnsureLibraries([]string{media, tv}, rules.LegacyTemplate(rules.Default(), "replace"))
+	libs, _ := s.Libraries()
+	list, _ := s.List(10)
+	for _, j := range list {
+		if j.LibraryID != libs[0].ID {
+			t.Errorf("job %d (%s) linked to %d, want the library holding it (%d)", j.ID, j.Path, j.LibraryID, libs[0].ID)
+		}
+	}
+}
+
+func TestFreedBytesLeavesOutBesideResults(t *testing.T) {
+	s := open(t)
+	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
+	a, _ := s.Enqueue(Job{LibraryID: l.ID, Path: "/m/a.mkv", SizeBefore: 1000})
+	s.Claim("w")
+	s.Complete(a, "/m/a.mkv", 400) // replaced: 600 freed
+	b, _ := s.Enqueue(Job{LibraryID: l.ID, Path: "/m/b.mkv", SizeBefore: 1000})
+	s.Claim("w")
+	s.Complete(b, "/m/b.hevc.mkv", 400) // beside: the original is still there
+	c, _ := s.Counts()
+	if c[l.ID].FreedBytes != 600 {
+		t.Errorf("freed %d, want 600 (beside results free nothing)", c[l.ID].FreedBytes)
+	}
+}
+
+func TestJobsOnlyForStartedLibraries(t *testing.T) {
+	s := open(t)
+	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), false)
+	if _, err := s.Enqueue(Job{LibraryID: l.ID, Path: "/m/a.mkv"}); err != ErrLibraryGone {
+		t.Errorf("not started: %v", err)
+	}
+	s.StartLibrary(l.ID)
+	if _, err := s.Enqueue(Job{LibraryID: l.ID, Path: "/m/a.mkv"}); err != nil {
+		t.Errorf("started: %v", err)
+	}
+	s.DeleteLibrary(l.ID)
+	if _, err := s.Enqueue(Job{LibraryID: l.ID, Path: "/m/b.mkv"}); err != ErrLibraryGone {
+		t.Errorf("removed: %v", err)
 	}
 }

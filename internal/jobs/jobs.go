@@ -136,14 +136,24 @@ ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,codec=ex
 // Enqueue adds a queued job.
 func (s *Store) Enqueue(j Job) (int64, error) {
 	now := s.stamp()
-	var lib any
-	if j.LibraryID > 0 {
-		lib = j.LibraryID
+	if j.LibraryID == 0 {
+		r, err := s.db.Exec(`INSERT INTO jobs(library,path,status,reason,duration,size_before,created,updated)
+VALUES(?,?,?,?,?,?,?,?)`, j.Library, j.Path, Queued, j.Reason, j.DurationSec, j.SizeBefore, now, now)
+		if err != nil {
+			return 0, err
+		}
+		return r.LastInsertId()
 	}
+	// One statement: the job is added only if its library still exists and is started, so a library
+	// removed (or a scan that started before the removal) cannot leave a job behind.
 	r, err := s.db.Exec(`INSERT INTO jobs(library,library_id,path,status,reason,duration,size_before,created,updated)
-VALUES(?,?,?,?,?,?,?,?,?)`, j.Library, lib, j.Path, Queued, j.Reason, j.DurationSec, j.SizeBefore, now, now)
+SELECT ?,?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM libraries WHERE id=? AND started=1)`,
+		j.Library, j.LibraryID, j.Path, Queued, j.Reason, j.DurationSec, j.SizeBefore, now, now, j.LibraryID)
 	if err != nil {
 		return 0, err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return 0, ErrLibraryGone
 	}
 	return r.LastInsertId()
 }

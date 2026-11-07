@@ -27,7 +27,7 @@ type Engine struct {
 
 // libraryItem is a library as GET /api/libraries shows it (UI-API-CONTRACT.md "Libraries").
 type libraryItem struct {
-	ID           int64   `json:"id"`
+	ID           int64   `json:"id,string"` // ids are opaque strings in the API (UI-API-CONTRACT.md)
 	Name         string  `json:"name"`
 	Path         string  `json:"path"`
 	State        string  `json:"state"` // working|idle|needs_attention|not_started (paused: slice 35)
@@ -36,7 +36,7 @@ type libraryItem struct {
 	WaitingFiles int     `json:"waitingFiles"`
 	NextScan     *string `json:"nextScan"`
 	FreedBytes   int64   `json:"freedBytes"`
-	FlowID       int64   `json:"flowId"`
+	FlowID       int64   `json:"flowId,string"`
 	SettingLabel string  `json:"settingLabel"`
 	SettingKind  string  `json:"settingKind"`
 }
@@ -113,7 +113,7 @@ func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		for _, l := range libs {
 			items = append(items, item(l, counts))
 		}
-		writeJSON(w, map[string]any{"items": items})
+		writeJSON(w, map[string]any{"items": items, "total": len(items)})
 	})
 
 	api.HandleFunc("POST /api/libraries", func(w http.ResponseWriter, r *http.Request) {
@@ -243,10 +243,14 @@ func libraryPath(w http.ResponseWriter, store *jobs.Store, raw string, except in
 		apiError(w, http.StatusBadRequest, "invalid_path", "Choose a folder by its full path.")
 		return "", false
 	}
-	p := filepath.Clean(raw)
-	st, err := os.Stat(p)
+	st, err := os.Stat(raw)
 	if err != nil || !st.IsDir() {
 		apiError(w, http.StatusBadRequest, "not_a_folder", "That folder does not exist, or the program cannot see it.")
+		return "", false
+	}
+	p, err := jobs.RealPath(raw) // a link to a folder is stored as the folder it points to
+	if err != nil {
+		apiError(w, http.StatusBadRequest, "not_a_folder", "That folder cannot be opened: "+err.Error())
 		return "", false
 	}
 	libs, err := store.Libraries()
@@ -262,18 +266,12 @@ func libraryPath(w http.ResponseWriter, store *jobs.Store, raw string, except in
 			apiError(w, http.StatusConflict, "path_taken", "Another library already uses this folder: "+l.Name+".")
 			return "", false
 		}
-		if within(p, l.Path) || within(l.Path, p) {
+		if jobs.Within(p, l.Path) || jobs.Within(l.Path, p) {
 			apiError(w, http.StatusConflict, "path_overlaps", "This folder is inside, or contains, the folder of library "+l.Name+". Choose a folder that doesn't overlap.")
 			return "", false
 		}
 	}
 	return p, true
-}
-
-// within reports whether p is inside dir.
-func within(p, dir string) bool {
-	rel, err := filepath.Rel(dir, p)
-	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
 // fsDirs lists the folders in one folder, for choosing a library's folder: names of folders only (no

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
@@ -39,6 +40,26 @@ var ErrNotFound = errors.New("not found")
 
 // ErrPathTaken: another library already has this folder.
 var ErrPathTaken = errors.New("another library already uses this folder")
+
+// ErrLibraryGone: a job was not added because its library was removed or is not started.
+var ErrLibraryGone = errors.New("its library was removed or is not started")
+
+// RealPath is a library folder as stored: absolute, cleaned and with links resolved, so the scanner
+// (which does not follow a link at the top of a folder tree) walks the real folder, and two names
+// for one folder are seen as one.
+func RealPath(p string) (string, error) {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(abs)
+}
+
+// Within reports whether p is inside dir (not equal to it).
+func Within(p, dir string) bool {
+	rel, err := filepath.Rel(dir, p)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+}
 
 const libCols = `id,name,path,flow_id,started,created`
 
@@ -169,20 +190,40 @@ func (s *Store) addLibrary(name, path, flowBase string, t rules.Template, starte
 }
 
 // EnsureLibraries adds a started library for each folder in paths that no library has yet, each
-// with its own flow made from t (the program's flags). It never changes or removes a library. On
-// the first start after an upgrade, those flows are named "<folder> - Legacy". It also links jobs
-// made before libraries were records to their library by folder.
-func (s *Store) EnsureLibraries(paths []string, t rules.Template) (added int, err error) {
+// with its own flow made from t (the program's flags). It never changes or removes a library. A
+// folder inside, or around, another library's folder is not added: skipped says why, for a log
+// line (their files would belong to two libraries). On the first start after an upgrade, the flows
+// are named "<folder> - Legacy". Jobs made before libraries were records are linked to the library
+// whose folder holds them.
+func (s *Store) EnsureLibraries(paths []string, t rules.Template) (added int, skipped []string, err error) {
 	var marker int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM app_meta WHERE key='legacy_flows'`).Scan(&marker); err != nil {
-		return 0, err
+		return 0, nil, err
 	}
-	for _, p := range paths {
-		var c int
-		if err := s.db.QueryRow(`SELECT COUNT(*) FROM libraries WHERE path=?`, p).Scan(&c); err != nil {
-			return added, err
+	for _, given := range paths {
+		p, err := RealPath(given)
+		if err != nil {
+			skipped = append(skipped, fmt.Sprintf("%s: %v", given, err))
+			continue
 		}
-		if c > 0 {
+		libs, err := s.Libraries()
+		if err != nil {
+			return added, skipped, err
+		}
+		have, clash := false, ""
+		for _, l := range libs {
+			switch {
+			case l.Path == p || l.Path == given:
+				have = true
+			case Within(p, l.Path) || Within(l.Path, p):
+				clash = l.Path
+			}
+		}
+		if have {
+			continue
+		}
+		if clash != "" {
+			skipped = append(skipped, fmt.Sprintf("%s: it is inside, or contains, the folder of another library (%s)", given, clash))
 			continue
 		}
 		name := filepath.Base(p)
@@ -191,18 +232,57 @@ func (s *Store) EnsureLibraries(paths []string, t rules.Template) (added int, er
 			flowBase = name + " - Legacy"
 		}
 		if _, err := s.addLibrary(name, p, flowBase, t, true); err != nil {
-			return added, err
+			return added, skipped, err
 		}
 		added++
 	}
 	if marker > 0 {
 		if _, err := s.db.Exec(`DELETE FROM app_meta WHERE key='legacy_flows'`); err != nil {
-			return added, err
+			return added, skipped, err
 		}
 	}
-	_, err = s.db.Exec(`UPDATE jobs SET library_id=(SELECT id FROM libraries WHERE libraries.path=jobs.library)
-WHERE library_id IS NULL`)
-	return added, err
+	return added, skipped, s.linkOldJobs()
+}
+
+// linkOldJobs gives jobs made before libraries were records the library whose folder holds the file.
+func (s *Store) linkOldJobs() error {
+	rows, err := s.db.Query(`SELECT id, path FROM jobs WHERE library_id IS NULL`)
+	if err != nil {
+		return err
+	}
+	type old struct {
+		id   int64
+		path string
+	}
+	var olds []old
+	for rows.Next() {
+		var o old
+		rows.Scan(&o.id, &o.path)
+		olds = append(olds, o)
+	}
+	rows.Close()
+	if len(olds) == 0 {
+		return nil
+	}
+	libs, err := s.Libraries()
+	if err != nil {
+		return err
+	}
+	for _, o := range olds {
+		real := o.path
+		if r, err := RealPath(filepath.Dir(o.path)); err == nil {
+			real = filepath.Join(r, filepath.Base(o.path))
+		}
+		for _, l := range libs {
+			if Within(o.path, l.Path) || Within(real, l.Path) {
+				if _, err := s.db.Exec(`UPDATE jobs SET library_id=? WHERE id=?`, l.ID, o.id); err != nil {
+					return err
+				}
+				break
+			}
+		}
+	}
+	return nil
 }
 
 // UpdateLibrary changes a library's name and/or folder (nil leaves it as it is).
@@ -314,7 +394,7 @@ type LibraryCounts struct {
 func (s *Store) Counts() (map[int64]LibraryCounts, error) {
 	rows, err := s.db.Query(`SELECT library_id,
   SUM(status=?), SUM(status=?), SUM(status=?),
-  COALESCE(SUM(CASE WHEN status=? AND size_after>0 THEN size_before-size_after END),0)
+  COALESCE(SUM(CASE WHEN status=? AND size_after>0 AND output_path=path THEN size_before-size_after END),0)
 FROM jobs WHERE library_id IS NOT NULL GROUP BY library_id`, Running, Queued, Failed, Done)
 	if err != nil {
 		return nil, err

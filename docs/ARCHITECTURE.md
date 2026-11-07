@@ -42,7 +42,13 @@ rule the scanner matches with and the CRF, preset, output mode and minimum savin
   Jobs made before libraries existed are linked to their library by folder.
 - Deleting a library removes the record and its queued jobs, stops its running job (the worker
   drops it; the original is untouched) and keeps its flow and finished jobs.
-- Library folders may not be inside one another (their files would belong to two libraries).
+- Library folders are stored as their real folder (links resolved: the scanner does not follow a link
+  at the top of a tree) and may not be inside one another, whether added on the web page (409
+  `path_overlaps`) or by `-library` (the folder is not added and a startup log line says why; the
+  program still starts). A job is only added while its library exists and is started, checked in the
+  same SQL statement, so a library removed during a scan gets no job afterwards.
+- `freedBytes` counts only conversions that replaced their original (`beside` frees nothing).
+- Every `/api` answer carries `X-SYP-API: 1`; ids in the API are strings.
 - `GET /api/fs/dirs?path=` lists folder names (never files or sizes) for choosing a library's folder.
 
 ## Job lifecycle

@@ -107,9 +107,14 @@ func main() {
 	}
 
 	rule := rules.Rule{FromCodec: *from, MinBitrateKbps: *minKbps, CRF: *crf, Preset: *preset}
-	if n, err := store.EnsureLibraries(libs, rules.LegacyTemplate(rule, *mode)); err != nil {
+	n, skipped, err := store.EnsureLibraries(libs, rules.LegacyTemplate(rule, *mode))
+	if err != nil {
 		log.Fatalf("libraries: %v", err)
-	} else if n > 0 {
+	}
+	for _, why := range skipped { // not fatal: the libraries that are fine still run
+		log.Printf("NOT added as a library from -library/SYP_LIBRARIES: %s", why)
+	}
+	if n > 0 {
 		log.Printf("added %d librar%s from -library/SYP_LIBRARIES", n, map[bool]string{true: "y", false: "ies"}[n == 1])
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM) // SIGTERM is a no-op on Windows; Ctrl+C works everywhere
