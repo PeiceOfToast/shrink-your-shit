@@ -28,14 +28,15 @@
         if ($("path").value.trim() !== path) return;
         list.textContent = "";
         (r.blockers || []).forEach(function (b) {
-          var li = line("bad", "Fix this", COPY[b.code] || b.message);
+          var li = line("bad", "Fix this", b.message || COPY[b.code] || "We can't use this folder."); // the server's words (they carry fix steps); ours only if it sends none
           if (b.code === "no_converter") { // the health report says what is missing; it stays open during first-run
             var a = ui.el("a", null, "See the health report"); a.href = "/settings/system/"; li.appendChild(document.createTextNode(" ")); li.appendChild(a);
           }
           list.appendChild(li);
         });
         if (!(r.blockers || []).length) { // OK lines only when every check passed: beside a blocker some never ran
-          list.appendChild(line("ok", "OK", "Enough free space."));
+          var spaceUnknown = (r.notes || []).some(function (n) { return n.code === "space_unknown"; });
+          if (!spaceUnknown) list.appendChild(line("ok", "OK", "Enough free space.")); // not an OK when it couldn't be read: the note says so
           list.appendChild(line("ok", "OK", "Video converter works."));
           list.appendChild(line("ok", "OK", "We can read and change files in this folder."));
           list.appendChild(line("ok", "OK", ui.num(r.videoCount) + " videos found (" + ui.bytes(r.totalBytes) + ")."));
