@@ -28,6 +28,9 @@ type Template struct {
 	Params          Params     `json:"params"`
 	Selectors       *Selectors `json:"selectors,omitempty"` // a selectors flow's choices (selectors.go)
 	CompilerVersion int        `json:"compilerVersion"`
+	// Languages are the person's languages (Settings > General, ISO 639-2 codes, comma-separated) for
+	// "Keep only my languages": a program-wide setting, filled in when the flow is read, never stored in it.
+	Languages string `json:"-"`
 }
 
 // Params are a template's values. A slider template uses Quality; a legacy one the rule fields

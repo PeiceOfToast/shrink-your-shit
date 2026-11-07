@@ -30,7 +30,7 @@
     }
     var s = el("p"); s.style.margin = "12px 0 0"; s.appendChild(document.createTextNode("Setting: ")); s.appendChild(el("strong", null, l.settingLabel)); c.appendChild(s);
     var m = el("p", "muted small", l.state === "not_started" ? "Added but not started. Nothing has been changed on disk."
-      : "Space freed so far: " + ui.bytes(l.freedBytes) + " \u00b7 " + ui.count(l.waitingFiles, "file", "files") + " waiting");
+      : "Space freed so far: " + ui.bytes(l.freedBytes) + " \u00b7 " + ui.num(l.waitingFiles) + " files waiting");
     m.style.margin = "0"; c.appendChild(m);
     var r = el("div", "row"), x = el("a", "btn small", "Change setting"), y = el("a", "btn small", "Preview");
     r.style.marginTop = "12px"; x.href = href; y.href = href + "#preview"; r.appendChild(x); r.appendChild(y); c.appendChild(r);

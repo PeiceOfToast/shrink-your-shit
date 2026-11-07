@@ -32,8 +32,8 @@ type Selectors struct {
 // What this version can save and run (UI-API-CONTRACT.md addendum 13): the UI shows the rest disabled.
 var (
 	AvailableFormats   = []string{"hevc"}
-	AvailableAudio     = []string{"keep_all"}
-	AvailableSubtitles = []string{"keep_all"}
+	AvailableAudio     = []string{"keep_all", "my_languages", "aac", "eac3", "opus", "lossless_only"}
+	AvailableSubtitles = []string{"keep_all", "my_languages", "text_only", "srt"}
 )
 
 // AvailableFileTypes are the file types each "after converting" choice can save (25a: changing the type
@@ -48,7 +48,7 @@ var maxBitrates = map[string]int{"none": 0, "40": 40, "20": 20, "10": 10, "6": 6
 
 var (
 	resolutions = map[string]int{"keep": 0, "1080": 1080, "720": 720, "480": 480}
-	allAudio    = []string{"keep_all", "my_languages", "aac", "lossless_only"}
+	allAudio    = []string{"keep_all", "my_languages", "aac", "eac3", "opus", "lossless_only"}
 	allSubs     = []string{"keep_all", "my_languages", "text_only", "srt"}
 	allFormats  = []string{"hevc", "av1"}
 )

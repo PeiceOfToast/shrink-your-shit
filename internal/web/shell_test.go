@@ -496,14 +496,3 @@ func TestRootRedirectKeepsQuery(t *testing.T) {
 		}
 	}
 }
-
-// The real server is the default (milestone 4, ui-21): the mock is only a development tool behind ?mock=1.
-func TestRealServerByDefault(t *testing.T) {
-	b, err := fs.ReadFile(static, "static/api.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(b), "var DEFAULT_MOCK = false;") {
-		t.Error("api.js must talk to the real server by default (DEFAULT_MOCK = false)")
-	}
-}

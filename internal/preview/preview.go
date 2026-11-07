@@ -124,7 +124,7 @@ func list(root string) ([]file, string, error) {
 
 // settingKey identifies a setting: equal templates compile every file to the same Plan.
 func settingKey(libID int64, t rules.Template) string {
-	b, _ := json.Marshal(t)
+	b, _ := json.Marshal([]any{t, t.Languages}) // the person's languages are not in the template's JSON
 	h := sha256.Sum256(b)
 	return fmt.Sprintf("%d/%x", libID, h[:8])
 }

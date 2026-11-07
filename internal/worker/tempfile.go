@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -62,6 +63,9 @@ func TempFiles(src string) ([]string, error) {
 // removeFile is os.Remove; tests make it fail on every OS (Windows ignores POSIX permission bits).
 var removeFile = os.Remove
 
+// stagedSrt is an extracted subtitle in a staging folder (rules.StagedSrt).
+var stagedSrt = regexp.MustCompile(`^sub\.[0-9]+\.srt$`)
+
 // removeLeftoverTemps removes what earlier runs left next to src: a file under the old fixed temp
 // name, and staging folders that hold nothing but our one temp file, a regular file (that file is
 // removed, then the empty folder). Anything else with a matching name, such as a folder holding other
@@ -93,7 +97,19 @@ func removeLeftoverTemps(src string) error {
 			if err != nil {
 				return fmt.Errorf("cannot check the old temp folder %s: %w", p, err)
 			}
-			ours := len(entries) == 0 || (len(entries) == 1 && isStaged(entries[0].Name()) && entries[0].Type().IsRegular())
+			ours := true
+			news := 0
+			for _, e := range entries { // our temp file and, for extracted subtitles, sub.N.srt
+				switch {
+				case !e.Type().IsRegular():
+					ours = false
+				case isStaged(e.Name()):
+					news++
+				case !stagedSrt.MatchString(e.Name()):
+					ours = false
+				}
+			}
+			ours = ours && news <= 1
 			if !ours {
 				log.Printf("leaving %s alone: it holds files shrink-your-shit did not put there", p)
 				continue

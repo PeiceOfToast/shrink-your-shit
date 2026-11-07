@@ -43,7 +43,24 @@ var selectorFields = map[string]bool{"speed": true, "format": true, "resolution"
 
 // readSelectors is a selectors body: what it leaves out is the quality's own value (so minSavingPct
 // follows Quality unless given). A client's kind, positions, available* and the removed order are ignored.
-func readSelectors(body map[string]json.RawMessage) (rules.Selectors, error) {
+// settingEcho are the fields a setting answer carries that a client may send back unchanged: ignored.
+var settingEcho = map[string]bool{"kind": true, "positions": true, "order": true, "availableformats": true, "availableaudio": true,
+	"availablesubtitles": true, "availablefiletypes": true, "warnings": true, "sharedflowchoice": true}
+
+// readSelectors reads a selectors body (see below); langs are the person's languages, needed for
+// "Keep only my languages".
+func readSelectors(body map[string]json.RawMessage, langs []string) (rules.Selectors, error) {
+	s, err := readSelectorsBody(body)
+	if err != nil {
+		return s, err
+	}
+	if (s.Audio == "my_languages" || s.Subtitles == "my_languages") && len(langs) == 0 {
+		return s, &rules.SelectorError{Code: "languages_needed", Message: rules.LanguagesNeeded}
+	}
+	return s, nil
+}
+
+func readSelectorsBody(body map[string]json.RawMessage) (rules.Selectors, error) {
 	var q struct{ Quality int }
 	if b, err := json.Marshal(body); err != nil || json.Unmarshal(b, &q) != nil {
 		return rules.Selectors{}, &rules.SelectorError{Code: "invalid_json", Message: "The request body is not valid JSON."}
@@ -54,8 +71,12 @@ func readSelectors(body map[string]json.RawMessage) (rules.Selectors, error) {
 	s := rules.DefaultSelectors(q.Quality)
 	in := map[string]json.RawMessage{}
 	for k, v := range body {
-		if k = strings.ToLower(k); selectorFields[k] || k == "quality" {
+		switch k = strings.ToLower(k); {
+		case selectorFields[k] || k == "quality":
 			in[k] = v
+		case settingEcho[k]:
+		default: // e.g. audioBitrate: Standard has no such choice (slice 25b)
+			return s, &rules.SelectorError{Code: "invalid", Message: "There is no choice called " + k + ". Nothing was changed."}
 		}
 	}
 	b, _ := json.Marshal(in)
@@ -140,9 +161,15 @@ func settingRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			apiError(w, http.StatusBadRequest, "invalid_choice", "sharedFlowChoice must be change_both or make_copy. Nothing was changed.")
 			return
 		}
+		for k := range body { // a field no setting has (audioBitrate, a typo) is refused whatever the shape
+			if lk := strings.ToLower(k); !selectorFields[lk] && lk != "quality" && !settingEcho[lk] {
+				apiError(w, http.StatusBadRequest, "invalid", "There is no choice called "+k+". Nothing was changed.")
+				return
+			}
+		}
 		for k := range body {
 			if selectorFields[strings.ToLower(k)] { // the body's shape decides (addendum 7): a selectors save
-				s, err := readSelectors(body)
+				s, err := readSelectors(body, store.Languages())
 				var se *rules.SelectorError
 				if errors.As(err, &se) {
 					apiError(w, http.StatusBadRequest, se.Code, se.Message)
@@ -227,8 +254,27 @@ func flowSteps(t rules.Template) []map[string]any {
 			n, _ := strconv.Atoi(s.MaxBitrate)
 			add("video", "Limit to "+s.MaxBitrate+" Mbps", fmt.Sprintf("maxrate %dk, bufsize %dk", n*1000, 2*n*1000))
 		}
-		add("audio", "Keep every audio track as it is", "")
-		add("subtitles", "Keep every subtitle as it is", "")
+		switch s.Audio {
+		case "my_languages":
+			add("audio", "Keep only audio in my languages", "tracks with no language are kept; if none is in your languages, all are kept")
+		case "aac", "eac3", "opus":
+			add("audio", map[string]string{"aac": "Convert to AAC", "eac3": "Convert to E-AC-3", "opus": "Convert to Opus"}[s.Audio],
+				"only tracks it makes smaller; tracks already in that format are kept as they are")
+		case "lossless_only":
+			add("audio", "Convert lossless tracks only", "to E-AC-3; other tracks are kept as they are")
+		default:
+			add("audio", "Keep every audio track as it is", "")
+		}
+		switch s.Subtitles {
+		case "my_languages":
+			add("subtitles", "Keep only subtitles in my languages", "subtitles with no language are kept")
+		case "text_only":
+			add("subtitles", "Text subtitles only", "subtitle pictures (PGS, VobSub) are removed")
+		case "srt":
+			add("subtitles", "Save as separate .srt files", "text subtitles go next to the new file, named by language; subtitle pictures stay inside; an existing file is never replaced")
+		default:
+			add("subtitles", "Keep every subtitle as it is", "")
+		}
 		if s.FileType == "keep" {
 			add("filetype", "Keep the file type", "")
 		} else {

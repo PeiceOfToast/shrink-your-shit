@@ -94,7 +94,9 @@ func TestPreviewEndpoint(t *testing.T) {
 
 	for body, want := range map[string]string{
 		`{"setting":{"quality":0}}`:                                       "400 invalid_setting",
-		`{"setting":{"quality":3,"audio":"aac"}}`:                         "400 not_available",
+		`{"setting":{"quality":3,"format":"av1"}}`:                        "400 not_available",
+		`{"setting":{"quality":3,"audio":"my_languages"}}`:                "400 languages_needed",
+		`{"setting":{"quality":3,"audioBitrate":"128"}}`:                  "400 invalid_setting",
 		`{"setting":{"quality":3,"fileType":"mp4"}}`:                      "400 not_available",
 		`{"setting":{"quality":3,"speed":"fast"}}`:                        "400 invalid_setting",
 		fmt.Sprintf(`{"sampleFile":%q}`, outside):                         "400 outside_library",

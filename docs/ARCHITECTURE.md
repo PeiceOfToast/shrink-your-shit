@@ -118,6 +118,31 @@ A **selectors** flow (`internal/rules/selectors.go`, slice 25a) stores the Stand
 - Audio and Subtitles are `keep_all` only; the other values, AV1, and a new file type when replacing
   are 400 `not_available`, nothing written.
 - A selectors setting equal to a position is saved as the slider (kind derived, addendum 6).
+- **Audio and subtitles** (slice 25b, `internal/rules/audio.go`), as `Plan.Tracks` (one op per track
+  dropped, converted or saved as a file; the rest copied):
+  - Audio `my_languages` keeps tracks in the person's languages and untagged ones. If none would be
+    left, all are kept (no choice drops all audio). With no languages chosen nothing is dropped.
+  - Audio `aac`, `eac3` and `opus` convert at a fixed bitrate per channel (AAC 64k, Opus 48k, E-AC-3 96k,
+    capped 640k). A track is never re-encoded into its own codec or made bigger: a lossless track is
+    always converted, a lossy one only if its bitrate is known to be higher, and a lossy one of unknown
+    bitrate is copied. `lossless_only` converts only lossless tracks (TrueHD, DTS-HD MA, FLAC, ALAC,
+    PCM), to E-AC-3. No downmix.
+  - Subtitles `my_languages` follow the same language rule. `text_only` drops picture subtitles.
+  - Subtitles `srt` save text subtitles beside the new file as `<new name>.<lang>[.forced][.n].srt`,
+    written by the same ffmpeg run into the staging folder. They are checked to exist, recorded first
+    (`sidecars`, migration 10: path, size, time and full SHA-256, and the new video's size and sample hash), put in
+    place with `renameNoReplace` before the swap, and removed again only while still exactly ours if the
+    swap does not happen. `RecoverSidecars` at start ends a crash in between: the new video in place
+    keeps them, otherwise our own files go. A name
+    already taken fails the job before converting. Picture subtitles stay inside. A later restore of the
+    original (slice 18) leaves the .srt files.
+  - `Expect` lists exactly the tracks that remain (dropped ones absent, converted ones in their new
+    codec), so verify refuses anything else. The new-type check looks at what remains.
+  - Languages are a program setting (`languages` on `/api/settings`, checked against the full ISO 639-2
+    list from the Library of Congress (`rules/iso639.go`), stored in one form: `rules.CanonLang` maps every
+    639-1 code and the 639-2/T forms, so `fra` and `fre` are one language). The store fills them into every flow it reads
+    (`Template.Languages`, never stored in the flow). A selectors body with "my languages" and no
+    languages gives 400 `languages_needed`, and any unknown field (e.g. `audioBitrate`) gives 400 `invalid`.
 
 The library's **setting** (`internal/web/setting.go`) is its flow seen through the editors:
 `GET /api/settings/slider`, `GET/PUT /api/libraries/{id}/setting`, `POST .../setting/replace-custom`.

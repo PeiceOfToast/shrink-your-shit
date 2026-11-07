@@ -7,9 +7,12 @@ package worker
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"os"
@@ -95,6 +98,9 @@ type Worker struct {
 	cancelJob  context.CancelFunc // stops only the running job
 	stopped    stopKind           // why the running job was stopped (stopNone: it was not)
 	progressAt atomic.Int64       // UnixNano of the running encode's last progress (stall watchdog)
+	// Sidecars records .srt files before they are put beside a new file (slice 25b); nil: not recorded
+	// (they are still only removed while they are ours).
+	Sidecars SidecarJournal
 }
 
 // stopKind is why a running job was stopped, which decides what becomes of it.
@@ -462,6 +468,17 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			return "", failed(fmt.Sprintf("There is already a file named %s next to the original, so the new file was not made. Nothing was changed. Move or rename that file, then press Retry.", filepath.Base(BesidePathAs(job.Path, ext))), fs.ErrExist)
 		}
 	}
+	// Subtitles saved as .srt files go beside the new file and never over another file: a name taken
+	// already stops the job before anything is converted (checked again when they are put in place).
+	newName := job.Path
+	if OutputMode(plan.Output) == Beside {
+		newName = BesidePathAs(job.Path, ext)
+	}
+	for _, o := range plan.SubtitleFiles() {
+		if name := rules.SrtName(newName, o.Extract); exists(name) {
+			return "", failed(srtTaken(name), fs.ErrExist)
+		}
+	}
 	stage, err = newStaged(job.Path, ext)
 	if err != nil {
 		return "", err
@@ -500,6 +517,11 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	if err := w.verify(ctx, src, exp, job.Path, tmp, before.Size()); err != nil {
 		return "", err
+	}
+	for k := range plan.SubtitleFiles() { // each subtitle that was to be saved as a file was saved
+		if st, err := os.Lstat(rules.StagedSrt(tmp, k)); err != nil || !st.Mode().IsRegular() || st.Size() == 0 {
+			return "", kept("a subtitle could not be saved as a separate file")
+		}
 	}
 	// The original's permissions, only now that the file has been checked.
 	if err := stage.intact(); err != nil {
@@ -547,6 +569,23 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 		return stage.intact()
 	}
+	placed, err := w.installSubtitles(plan, job.ID, tmp, final)
+	if err != nil {
+		return "", err
+	}
+	if len(placed) > 0 {
+		if err := hook("subtitles placed"); err != nil {
+			return "", err // a crash here: RecoverSidecars removes them at the next start
+		}
+	}
+	removePlaced := func() { // the swap did not happen: the .srt files we put beside it go again
+		w.removeSidecars(job.ID, placed)
+	}
+	swapped := func() { // the swap is done: the .srt files stay; their record goes
+		if w.Sidecars != nil && len(placed) > 0 {
+			w.Sidecars.DropSidecars(job.ID)
+		}
+	}
 	days := 0
 	if w.KeepDays != nil {
 		days = w.KeepDays()
@@ -554,8 +593,10 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if final == job.Path && days > 0 && w.Journal != nil {
 		// The original is kept: moved into .syp-trash, journaled (keep.go).
 		if err := w.keepAndReplace(ctx, job, stage, before, days, stillOK); err != nil {
+			removePlaced()
 			return "", err
 		}
+		swapped()
 		return final, nil
 	}
 	move := moveIntoPlace
@@ -563,6 +604,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		move = moveBeside // "Put the new file next to the original": never over another file
 	}
 	if err := move(ctx, tmp, final, stillOK); err != nil {
+		removePlaced()
 		var f *FailedError
 		if errors.As(err, &f) {
 			return "", err
@@ -573,8 +615,208 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 		return "", failed("The new file could not be put in place, so your original was kept as it was. Press Retry.", fmt.Errorf("move result into place: %w", err))
 	}
+	swapped()
 	return final, nil
 }
+
+// SidecarJournal records subtitles saved as .srt files before they are put beside a new file
+// (jobs.Store), so a crash in between leaves nothing of ours behind (RecoverSidecars).
+type SidecarJournal interface {
+	AddSidecars([]jobs.Sidecar) error
+	DropSidecars(jobID int64) error
+	DropSidecar(jobID int64, path string) error
+	Sidecars() ([]jobs.Sidecar, error)
+}
+
+// placeSidecar is renameNoReplace; tests make it fail after placing the file.
+var placeSidecar = renameNoReplace
+
+// installSubtitles puts the Plan's extracted subtitles (written next to tmp) beside final, never over
+// another file (renameNoReplace). Each is recorded first, with what it is and what the new video is, so
+// only our own file is ever removed again (here if a name is taken or the swap fails, or at the next
+// start after a crash). It returns the records of those placed.
+func (w *Worker) installSubtitles(plan rules.Plan, jobID int64, tmp, final string) ([]jobs.Sidecar, error) {
+	files := plan.SubtitleFiles()
+	if len(files) == 0 {
+		return nil, nil
+	}
+	vst, err := os.Stat(tmp)
+	if err != nil {
+		return nil, err
+	}
+	vhash, err := SampleHash(tmp)
+	if err != nil {
+		return nil, err
+	}
+	var recs []jobs.Sidecar
+	for k, o := range files {
+		staged := rules.StagedSrt(tmp, k)
+		st, err := os.Stat(staged)
+		if err != nil {
+			return nil, err
+		}
+		h, err := fullHash(staged) // .srt files are small: their whole content identifies them
+		if err != nil {
+			return nil, err
+		}
+		recs = append(recs, jobs.Sidecar{JobID: jobID, Path: rules.SrtName(final, o.Extract), Bytes: st.Size(),
+			MTime: st.ModTime().UnixNano(), Hash: h, VideoPath: final, VideoBytes: vst.Size(), VideoHash: vhash})
+	}
+	if w.Sidecars != nil {
+		if err := w.Sidecars.AddSidecars(recs); err != nil {
+			return nil, fmt.Errorf("record the subtitle files: %w", err)
+		}
+	}
+	var placed []jobs.Sidecar
+	for k, c := range recs {
+		err := placeSidecar(rules.StagedSrt(tmp, k), c.Path)
+		if errors.Is(err, errPlacedSourceLeft) {
+			// linked into place, the staged name not removed (the link fallback): the file is ours and
+			// placed; the staging folder's cleanup removes the leftover name (review 25b-939e790)
+			log.Printf("worker %s: job %d: %s placed; %v", w.ID, jobID, c.Path, err)
+			err = nil
+		}
+		if err != nil {
+			if w.Sidecars != nil { // this one and the rest were never put there: their names are not ours
+				for _, u := range recs[k:] {
+					w.Sidecars.DropSidecar(jobID, u.Path)
+				}
+			}
+			w.removeSidecars(jobID, placed)
+			if errors.Is(err, fs.ErrExist) {
+				return nil, failed(srtTaken(c.Path), err)
+			}
+			return nil, failed("A subtitle file could not be put next to the new file, so nothing was changed. Press Retry.", err)
+		}
+		placed = append(placed, c)
+	}
+	return placed, nil
+}
+
+// removeSidecars removes the .srt files we placed, each only if it is still exactly the one we wrote
+// (size, time and full SHA-256): one replaced meanwhile is someone else's and stays. A record goes once
+// its file is gone or not ours; one that could not be removed keeps its record, so the next start
+// tries again and a Retry knows the file is ours (review 25b-1e31bdb).
+func (w *Worker) removeSidecars(jobID int64, list []jobs.Sidecar) {
+	for _, c := range list {
+		if _, err := removeIfOurs(c); err != nil {
+			log.Printf("worker %s: job %d: could not remove %s (it is kept on record and tried again): %v", w.ID, jobID, c.Path, err)
+			continue
+		}
+		if w.Sidecars != nil {
+			w.Sidecars.DropSidecar(jobID, c.Path)
+		}
+	}
+}
+
+// removeIfOurs removes c's file if it is still exactly ours. removed says it was; nil error means the
+// record can go (the file is gone, someone else's, or removed). When we could not tell whether the file
+// is ours (Lstat or reading it failed), it is left alone and the error keeps the record, so a later
+// start checks again (review 25b-28abb71).
+func removeIfOurs(c jobs.Sidecar) (removed bool, err error) {
+	switch o, err := sidecarIsOurs(c); o {
+	case sidecarUnknown:
+		return false, fmt.Errorf("could not tell whether it is ours: %w", err)
+	case sidecarNotOurs:
+		return false, nil
+	}
+	if err := os.Remove(c.Path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return false, err
+	}
+	return true, nil
+}
+
+// sidecarOwner is what sidecarIsOurs found out about a recorded .srt file.
+type sidecarOwner int
+
+const (
+	sidecarNotOurs sidecarOwner = iota // gone, or not exactly the file we wrote: its record can go
+	sidecarOurs                        // still exactly the file we wrote
+	sidecarUnknown                     // could not check (Lstat or reading failed): keep the record
+)
+
+// sidecarLstat and sidecarHash are os.Lstat and fullHash; tests make them fail.
+var (
+	sidecarLstat = os.Lstat
+	sidecarHash  = fullHash
+)
+
+// sidecarIsOurs compares c's file with what we wrote: regular file, size, time and full SHA-256.
+func sidecarIsOurs(c jobs.Sidecar) (sidecarOwner, error) {
+	st, err := sidecarLstat(c.Path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return sidecarNotOurs, nil
+	case err != nil:
+		return sidecarUnknown, err
+	case !st.Mode().IsRegular() || st.Size() != c.Bytes || st.ModTime().UnixNano() != c.MTime:
+		return sidecarNotOurs, nil
+	}
+	h, err := sidecarHash(c.Path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return sidecarNotOurs, nil
+	case err != nil:
+		return sidecarUnknown, err
+	case h != c.Hash:
+		return sidecarNotOurs, nil
+	}
+	return sidecarOurs, nil
+}
+
+// fullHash is the SHA-256 of the whole file.
+func fullHash(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// RecoverSidecars ends what a crash left between putting .srt files beside a new file and the swap (run
+// at start, after RecoverSwaps): where the new video is in place (its recorded size and sample hash at
+// VideoPath), the swap happened and the files stay; otherwise each file that is still exactly ours is
+// removed, so a Retry finds no name taken by our own file. A record stays only when its file could not
+// be checked or removed; the next start tries again.
+func RecoverSidecars(sj SidecarJournal) []string {
+	list, err := sj.Sidecars()
+	if err != nil {
+		return []string{fmt.Sprintf("subtitle files: %v", err)}
+	}
+	var said []string
+	for _, c := range list {
+		swapped := false
+		if st, err := os.Stat(c.VideoPath); err == nil && st.Size() == c.VideoBytes {
+			if h, err := SampleHash(c.VideoPath); err == nil && h == c.VideoHash {
+				swapped = true // the swap happened: the subtitles belong to the new file
+			}
+		}
+		if !swapped {
+			removed, err := removeIfOurs(c)
+			if err != nil {
+				said = append(said, fmt.Sprintf("job %d: could not remove %s, kept on record to try again: %v", c.JobID, c.Path, err))
+				continue // its record stays
+			}
+			if removed {
+				said = append(said, fmt.Sprintf("job %d: removed %s (put there before a swap that did not happen)", c.JobID, c.Path))
+			}
+		}
+		sj.DropSidecar(c.JobID, c.Path)
+	}
+	return said
+}
+
+// srtTaken is design's sentence for an .srt name already there.
+func srtTaken(name string) string {
+	return fmt.Sprintf("A subtitle file named %s is already there. Nothing was changed. Move or rename that file, then press Retry.", filepath.Base(name))
+}
+
+func exists(p string) bool { _, err := os.Lstat(p); return err == nil }
 
 // statOpen is os.Stat through an open file, so the file's identity (device and inode, or the Windows
 // file ID) is read now. On Windows, os.Stat by path reads that ID only when os.SameFile first needs it,

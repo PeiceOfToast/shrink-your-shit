@@ -112,17 +112,19 @@ func previewTemplate(w http.ResponseWriter, store *jobs.Store, l jobs.Library, s
 		}
 		return f.Template, true
 	}
-	sel, err := readSelectors(s)
+	sel, err := readSelectors(s, store.Languages())
 	var se *rules.SelectorError
 	if errors.As(err, &se) {
 		code := se.Code
-		if code != "not_available" {
+		if code != "not_available" && code != "languages_needed" {
 			code = "invalid_setting"
 		}
 		apiError(w, http.StatusBadRequest, code, strings.TrimSuffix(se.Message, " Nothing was changed."))
 		return rules.Template{}, false
 	}
-	return sel.Template(), true
+	t := sel.Template()
+	t.Languages = strings.Join(store.Languages(), ",") // the person's, as a saved flow gets them
+	return t, true
 }
 
 // sampleFile resolves the chosen sample and checks it is a video inside the library's folder. The

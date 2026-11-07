@@ -23,11 +23,15 @@ type Plan struct {
 	Reason          string      `json:"reason,omitempty"`   // why it is converted, shown on the job
 	Eligibility     Eligibility `json:"eligibility"`        // the rule that decided Skip (part of the fingerprint)
 	Video           VideoEncode `json:"video"`
-	Output          string      `json:"output"`                 // replace | beside
-	Container       string      `json:"container,omitempty"`    // the new file's type (its extension, "mkv" or "mp4"); "" = the original's
-	MinSavingPct    int         `json:"minSavingPct,omitempty"` // the new file must be this much smaller (0: just smaller)
-	MinSSIM         float64     `json:"minSSIM,omitempty"`      // picture threshold; 0 = the program's -min-ssim
-	Kind            string      `json:"kind"`                   // the template kind it was compiled from
+	Output          string      `json:"output"`                  // replace | beside
+	Container       string      `json:"container,omitempty"`     // the new file's type (its extension, "mkv" or "mp4"); "" = the original's
+	Tracks          []TrackOp   `json:"tracks,omitempty"`        // audio and subtitle tracks dropped or converted (slice 25b); others copied
+	AllAudioKept    bool        `json:"allAudioKept,omitempty"`  // "my languages" matched no audio track, so all of it is kept
+	AudioOrder      []int       `json:"audioOrder,omitempty"`    // the original's audio stream indexes in order, when Tracks has any
+	SubtitleOrder   []int       `json:"subtitleOrder,omitempty"` // and its subtitle stream indexes
+	MinSavingPct    int         `json:"minSavingPct,omitempty"`  // the new file must be this much smaller (0: just smaller)
+	MinSSIM         float64     `json:"minSSIM,omitempty"`       // picture threshold; 0 = the program's -min-ssim
+	Kind            string      `json:"kind"`                    // the template kind it was compiled from
 	CompilerVersion int         `json:"compilerVersion"`
 }
 
@@ -99,13 +103,13 @@ func (t Template) Compile(info media.Info) Plan {
 			p.Skip, p.SkipCode = fmt.Sprintf("slider position %d does not exist", t.Params.Quality), SkipSettingCannotRun
 			return p
 		}
-		return compileSelectors(p, DefaultSelectors(pos.Position), info)
+		return compileSelectors(p, DefaultSelectors(pos.Position), info, nil)
 	case KindSelectors:
 		if t.Selectors == nil || t.Selectors.Validate() != nil {
 			p.Skip, p.SkipCode = "its library's setting has a choice this version cannot run", SkipSettingCannotRun
 			return p
 		}
-		return compileSelectors(p, *t.Selectors, info)
+		return compileSelectors(p, *t.Selectors, info, SplitLanguages(t.Languages))
 	default:
 		p.Skip, p.SkipCode = fmt.Sprintf("flows of kind %q cannot run yet", t.Kind), SkipSettingCannotRun
 		return p
@@ -145,11 +149,48 @@ func (p Plan) FFmpegArgs(in, out string) []string {
 	if p.Video.Height > 0 {
 		args = append(args, "-filter:"+v, "scale=-2:"+strconv.Itoa(p.Video.Height))
 	}
+	args = append(args, p.trackArgs()...)
 	if p.Video.MaxRateKbps > 0 {
 		k := strconv.Itoa(p.Video.MaxRateKbps) + "k"
 		args = append(args, "-maxrate:"+v, k, "-bufsize:"+v, strconv.Itoa(2*p.Video.MaxRateKbps)+"k")
 	}
-	return append(args, "-tag:"+v, p.Video.Tag, out)
+	args = append(args, "-tag:"+v, p.Video.Tag, out)
+	// extracted subtitles: one more output each, next to the new file (the worker installs them)
+	for k, o := range p.SubtitleFiles() {
+		args = append(args, "-map", "0:"+strconv.Itoa(o.Index), "-c:s", "srt", StagedSrt(out, k))
+	}
+	return args
+}
+
+// trackArgs are the ffmpeg arguments for the Plan's TrackOps: a dropped track is unmapped (-map -0:N),
+// a converted one gets its encoder and bitrate by its place among the new file's audio tracks.
+func (p Plan) trackArgs() []string {
+	if len(p.Tracks) == 0 {
+		return nil
+	}
+	var args []string
+	dropped := map[int]bool{}
+	for _, op := range p.Tracks {
+		if op.Drop {
+			dropped[op.Index] = true
+			args = append(args, "-map", "-0:"+strconv.Itoa(op.Index))
+		}
+	}
+	// the k-th audio track kept is a:k in the new file
+	k := 0
+	for _, idx := range p.AudioOrder {
+		if dropped[idx] {
+			continue
+		}
+		for _, op := range p.Tracks {
+			if op.Index == idx && op.Encoder != "" {
+				a := "a:" + strconv.Itoa(k)
+				args = append(args, "-c:"+a, op.Encoder, "-b:"+a, strconv.Itoa(op.Kbps)+"k")
+			}
+		}
+		k++
+	}
+	return args
 }
 
 // Expect is what the new file must look like: the source's streams kept, the main video in the
@@ -188,9 +229,65 @@ func (p Plan) Expect(src media.Info, packets int64) Expect {
 	if p.Container != "" {
 		e.Container = Containers[p.Container]
 	}
+	e = p.expectTracks(e)
 	e.MinSavings = float64(p.MinSavingPct) / 100
 	e.MinSSIM = p.MinSSIM
 	return e
+}
+
+// expectTracks applies the TrackOps to e: a dropped audio track is not expected, a converted one is
+// expected in its new codec (same channels and language). The k-th audio expectation is the original's
+// k-th audio track (DefaultExpect keeps their order).
+func (p Plan) expectTracks(e Expect) Expect {
+	if len(p.Tracks) == 0 {
+		return e
+	}
+	op := map[int]TrackOp{}
+	for _, o := range p.Tracks {
+		op[o.Index] = o
+	}
+	order := map[string][]int{"audio": p.AudioOrder, "subtitle": p.SubtitleOrder}
+	seen := map[string]int{}
+	var out []StreamExpect
+	for _, s := range e.Streams {
+		if idx, ok := order[s.Type]; ok && seen[s.Type] < len(idx) {
+			o, has := op[idx[seen[s.Type]]]
+			seen[s.Type]++
+			switch {
+			case has && o.Drop:
+				continue
+			case has && o.Codec != "":
+				s.Codec = o.Codec
+			}
+		}
+		out = append(out, s)
+	}
+	e.Streams = out
+	return e
+}
+
+// remaining is info with the tracks the Plan drops left out, as the new file will have them.
+func (p Plan) remaining(info media.Info) media.Info {
+	if len(p.Tracks) == 0 {
+		return info
+	}
+	op := map[int]TrackOp{}
+	for _, o := range p.Tracks {
+		op[o.Index] = o
+	}
+	out := info
+	out.Streams = nil
+	for _, s := range info.Streams {
+		o, has := op[s.Index]
+		switch {
+		case has && o.Drop:
+			continue
+		case has && o.Codec != "":
+			s.Codec = o.Codec // converted: the new file holds the new codec
+		}
+		out.Streams = append(out.Streams, s)
+	}
+	return out
 }
 
 // Snapshot is what a job records when it starts: the Plan, the Expect verification checks the result
@@ -230,7 +327,7 @@ func (s Snapshot) Fingerprint() string {
 // resolution; every audio track and subtitle copied; the quality's SSIM gate and the minimum saving.
 // Only D5's source formats are converted; HDR and Dolby Vision are left alone unless SkipHDR is off,
 // and files already small for their picture size unless SkipSmall is off.
-func compileSelectors(p Plan, s Selectors, info media.Info) Plan {
+func compileSelectors(p Plan, s Selectors, info media.Info, langs []string) Plan {
 	pos, _ := SliderAt(s.Quality)
 	v := info.Video()
 	p.Output, p.MinSavingPct, p.MinSSIM = s.AfterConverting, s.MinSavingPct, pos.MinSSIM
@@ -274,7 +371,17 @@ func compileSelectors(p Plan, s Selectors, info media.Info) Plan {
 		p.Skip, p.SkipCode = hdrSkip, SkipHDR
 		return p
 	}
-	if why := tracksNotKept(info, p.Container); why != "" {
+	p.Tracks, p.AllAudioKept = planAudio(s.Audio, langs, info)
+	p.Tracks = append(p.Tracks, planSubtitles(s.Subtitles, langs, info)...)
+	if len(p.Tracks) > 0 {
+		for _, a := range info.Audio() {
+			p.AudioOrder = append(p.AudioOrder, a.Index)
+		}
+		for _, t := range info.Subtitles() {
+			p.SubtitleOrder = append(p.SubtitleOrder, t.Index)
+		}
+	}
+	if why := tracksNotKept(p.remaining(info), p.Container); why != "" {
 		p.Skip, p.SkipCode = why, SkipCannotKeepTrack
 		return p
 	}

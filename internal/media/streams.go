@@ -58,6 +58,8 @@ type Stream struct {
 	SampleRate    int    `json:"sampleRate,omitempty"`
 	// BitrateKbps is the stream's own bitrate when ffprobe reports one (many mkv streams do not).
 	BitrateKbps int `json:"bitrateKbps,omitempty"`
+	// Profile is the codec profile ffprobe names, e.g. "DTS-HD MA" (lossless) or "DTS" (lossy).
+	Profile string `json:"profile,omitempty"`
 
 	// Subtitle: "text" (subrip, ass, mov_text, webvtt...), "bitmap" (pgs, vobsub, dvb), or "" if unknown.
 	SubKind string `json:"subKind,omitempty"`
@@ -235,6 +237,7 @@ func parseStream(m map[string]any, position int) Stream {
 		Forced:      disposition(m, "forced"),
 		AttachedPic: disposition(m, "attached_pic"),
 		BitrateKbps: int(num(m, "bit_rate") / 1000),
+		Profile:     str(m, "profile"),
 		StartTime:   num(m, "start_time"),
 	}
 	if _, ok := m["index"]; ok {
@@ -299,4 +302,18 @@ func (i Info) MainVideoOrdinal() int {
 		n++
 	}
 	return -1
+}
+
+// Lossless reports whether an audio stream is stored without loss (TrueHD/MLP, FLAC, ALAC, PCM, DTS-HD
+// Master Audio): converting it to a lossy format always makes it much smaller.
+func (s Stream) Lossless() bool {
+	switch {
+	case s.Codec == "truehd" || s.Codec == "mlp" || s.Codec == "flac" || s.Codec == "alac":
+		return true
+	case strings.HasPrefix(s.Codec, "pcm_"):
+		return true
+	case s.Codec == "dts" && strings.Contains(s.Profile, "MA"):
+		return true
+	}
+	return false
 }

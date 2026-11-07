@@ -57,9 +57,29 @@ func (p *Previewer) Sample(ctx context.Context, root, path string, st fs.FileInf
 		video += fmt.Sprintf(", at most %d Mbps", plan.Video.MaxRateKbps/1000)
 	}
 	s.Lines = append(s.Lines, video)
-	s.Lines = append(s.Lines, "Audio: "+tracks(len(info.Audio()), "track"))
+	s.Lines = append(s.Lines, audioLine(plan, len(info.Audio())))
 	if n := len(info.Subtitles()); n > 0 {
-		s.Lines = append(s.Lines, "Subtitles: "+tracks(n, "subtitle"))
+		dropped, files := 0, 0
+		for _, op := range plan.Tracks {
+			switch {
+			case op.ToFile:
+				files++
+			case op.Type == "subtitle" && op.Drop:
+				dropped++
+			}
+		}
+		var parts []string
+		if kept := n - dropped - files; kept > 0 || dropped+files == 0 {
+			parts = append(parts, tracks(kept, "subtitle"))
+		}
+		if files > 0 {
+			parts = append(parts, fmt.Sprintf("%d saved as separate .srt files", files))
+		}
+		if dropped > 0 {
+			parts = append(parts, fmt.Sprintf("%d removed", dropped))
+		}
+		line := "Subtitles: " + strings.Join(parts, ", ")
+		s.Lines = append(s.Lines, line)
 	}
 	if plan.MinSavingPct > 0 {
 		s.Lines = append(s.Lines, fmt.Sprintf("Kept as it is if the new file is not at least %d%% smaller", plan.MinSavingPct))
@@ -82,4 +102,35 @@ func tracks(n int, what string) string {
 		return "1 " + what + " kept"
 	}
 	return fmt.Sprintf("%d %ss kept", n, what)
+}
+
+// audioLine says what happens to the audio in plain words (slice 25b).
+func audioLine(plan rules.Plan, n int) string {
+	if plan.AllAudioKept {
+		return "Audio: " + rules.NoAudioInMyLanguages
+	}
+	dropped, converted, to := 0, 0, ""
+	for _, op := range plan.Tracks {
+		if op.Type != "audio" {
+			continue
+		}
+		switch {
+		case op.Drop:
+			dropped++
+		case op.Encoder != "":
+			converted++
+			to = map[string]string{"aac": "AAC", "eac3": "E-AC-3", "opus": "Opus"}[op.Codec]
+		}
+	}
+	var parts []string
+	if kept := n - dropped - converted; kept > 0 || converted+dropped == 0 {
+		parts = append(parts, tracks(kept, "track"))
+	}
+	if converted > 0 {
+		parts = append(parts, fmt.Sprintf("%d converted to %s", converted, to))
+	}
+	if dropped > 0 {
+		parts = append(parts, fmt.Sprintf("%d removed (not in your languages)", dropped))
+	}
+	return "Audio: " + strings.Join(parts, ", ")
 }

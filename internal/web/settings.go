@@ -4,11 +4,13 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
 	"sync"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
 // Settings are the global settings (UI-API-CONTRACT.md "Settings and first-run"). This slice stores
@@ -25,6 +27,9 @@ type Settings struct {
 	LowPriority       bool       `json:"lowPriority"`
 	ScanSchedule      string     `json:"scanSchedule"` // "HH:MM", or "" for none
 	QueueOrder        string     `json:"queueOrder"`   // newest|oldest|largest|smallest
+	// Languages are the person's languages for "Keep only my languages" (slice 25b): ISO 639-2 codes,
+	// stored in one form (rules.CanonLang); two-letter codes and the 639-2/T forms are accepted.
+	Languages []string `json:"languages"`
 }
 
 // QuietHours: both "HH:MM", or both "".
@@ -44,7 +49,7 @@ const (
 
 func defaultSettings() Settings {
 	return Settings{ControlLevel: FreshControlLevel, FirstRunStep: 1, KeepOriginalsDays: 7, ParallelJobs: 1,
-		LowPriority: true, ScanSchedule: "02:00", QueueOrder: "newest"}
+		LowPriority: true, ScanSchedule: "02:00", QueueOrder: "newest", Languages: []string{}}
 }
 
 var hhmm = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
@@ -56,6 +61,8 @@ func (s Settings) problem() (code, msg string) {
 		return "invalid_setting", "controlLevel must be basic, standard or advanced."
 	case s.FirstRunStep < 1 || s.FirstRunStep > 5:
 		return "invalid_setting", "firstRunStep must be from 1 to 5."
+	case badLanguage(s.Languages) != "":
+		return "invalid_setting", fmt.Sprintf("%q is not a language code (use codes like eng, fre, ger, or en, fr, de).", badLanguage(s.Languages))
 	case s.KeepOriginalsDays < 0 || s.KeepOriginalsDays > 365:
 		return "invalid_setting", "Enter a whole number of days, from 0 to 365."
 	case s.ParallelJobs < 1 || s.ParallelJobs > 8:
@@ -202,10 +209,33 @@ func settingsRoutes(api *http.ServeMux, ss *settingsStore, access *Access) {
 			apiError(w, http.StatusBadRequest, code, msg+" Nothing was changed.")
 			return
 		}
+		next.Languages = canonLanguages(next.Languages)
 		if err := ss.save(next); err != nil {
 			serverError(w, err)
 			return
 		}
 		writeJSON(w, view(next))
 	})
+}
+
+// badLanguage is the first entry of langs that is not a language code ("" if they all are).
+func badLanguage(langs []string) string {
+	for _, l := range langs {
+		if rules.CanonLang(l) == "" {
+			return l
+		}
+	}
+	return ""
+}
+
+// canonLanguages stores the languages in one form, each once, in the order given.
+func canonLanguages(langs []string) []string {
+	out, seen := []string{}, map[string]bool{}
+	for _, l := range langs {
+		if c := rules.CanonLang(l); c != "" && !seen[c] {
+			seen[c] = true
+			out = append(out, c)
+		}
+	}
+	return out
 }
