@@ -42,6 +42,11 @@
       ["afterConverting", "After converting", [["replace", "Replace the original"], ["beside", "Put the new file next to the original"]], 0, "How long originals are kept is set in Settings."]]],
     ["Which files", []] // which files go first is one global setting: Settings > Performance, "Do first"
   ];
+  // Choices this version can save, from the setting answer (contract addendum 13): the others stay visible but
+  // disabled, with design's line. A missing list (an older server) means every choice is available.
+  var AVAIL = { audio: "availableAudio", subtitles: "availableSubtitles" };
+  var ONLY_KEEP = { audio: "For now every audio track is kept. The other choices come in a later update.",
+    subtitles: "For now every subtitle is kept. The other choices come in a later update." };
   // values (optional): a saved setting to show; anything missing stays at its default.
   function selectors(host, onChange, values) {
     var fields = {}, rules = {}, v = values || {};
@@ -56,7 +61,15 @@
         if (sel.selectedIndex < 0) sel.value = f[2][f[3]][0];
         fields[f[0]] = sel; sel.addEventListener("change", changed);
         box.appendChild(lab); box.appendChild(sel);
-        if (f[4]) { var h = el("span", "hint", f[4]); h.id = id + "h"; sel.setAttribute("aria-describedby", h.id); box.appendChild(h); }
+        var avail = AVAIL[f[0]] && v[AVAIL[f[0]]], said = [];
+        if (Array.isArray(avail) && avail.length < f[2].length) {
+          Array.prototype.forEach.call(sel.options, function (op) { op.disabled = avail.indexOf(op.value) < 0; });
+          if (sel.options[sel.selectedIndex].disabled) sel.value = avail[0] || f[2][f[3]][0];
+          var only = avail.length === 1 && avail[0] === "keep_all", nt = el("span", "hint", only ? ONLY_KEEP[f[0]] : "Some choices come in a later update.");
+          nt.id = id + "n"; box.appendChild(nt); said.push(nt.id);
+        }
+        if (f[4]) { var h = el("span", "hint", f[4]); h.id = id + "h"; box.appendChild(h); said.push(h.id); }
+        if (said.length) sel.setAttribute("aria-describedby", said.join(" "));
         fs.appendChild(box);
       });
       if (gr[0] === "Which files") {

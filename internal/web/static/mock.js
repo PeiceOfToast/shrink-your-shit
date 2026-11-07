@@ -134,6 +134,17 @@
     return !(b.ignore || []).length && SLIDER[b.quality - 1] && b.minSavingPct === SLIDER[b.quality - 1].minSavingPct;
   }
   var ORDER = ["newest", "oldest", "largest", "smallest"], CAPS = ["none", "40", "20", "10", "6", "4"]; // contract addenda 10 and 9
+  // Which choices this version can save, on every setting answer (addendum 13 and its correction). ?selectors= picks
+  // the state (remembered for the tab): keep (default: slice 25a, keep_all only), some (wider, not complete), full
+  // (slice 25b: everything), old (an older server: no lists at all).
+  try { var sm = /[?&]selectors=(keep|some|full|old)/.exec(location.search); if (sm) sessionStorage.setItem("syp-mock-avail", sm[1]); } catch (e) {}
+  function avail() {
+    var mode = "keep"; try { mode = sessionStorage.getItem("syp-mock-avail") || "keep"; } catch (e) {}
+    if (mode === "old") return {};
+    var a = mode === "full" ? ["keep_all", "my_languages", "aac", "lossless_only"] : mode === "some" ? ["keep_all", "my_languages"] : ["keep_all"];
+    var s = mode === "full" ? ["keep_all", "my_languages", "text_only", "srt"] : mode === "some" ? ["keep_all", "text_only"] : ["keep_all"];
+    return { availableFormats: ["hevc"], availableAudio: a, availableSubtitles: s };
+  }
   function gone() { return fail(404, "not_found", "That item is gone. Nothing was changed. Reload the page."); }
   function removeFrom(arr, key, id) { var i = find(arr, key, id); return i < 0 ? null : arr.splice(i, 1)[0]; }
 
@@ -207,9 +218,10 @@
     getSetting: function (p) {
       var i = find(libs, "id", p.id);
       if (i < 0) return fail(404, "not_found", "That library is gone. Nothing was changed.");
-      if (libs[i].sel) return ok(Object.assign({ kind: "selectors", availableFormats: ["hevc"] }, libs[i].sel));
-      if (libs[i].settingKind === "custom") return ok({ kind: "custom" });
-      return ok({ kind: "slider", quality: libs[i].quality || (libs[i].settingLabel === "Smaller" ? 2 : 3), positions: SLIDER });
+      var av = avail();
+      if (libs[i].sel) return ok(Object.assign({ kind: "selectors" }, av, libs[i].sel));
+      if (libs[i].settingKind === "custom") return ok(Object.assign({ kind: "custom" }, av));
+      return ok(Object.assign({ kind: "slider", quality: libs[i].quality || (libs[i].settingLabel === "Smaller" ? 2 : 3), positions: SLIDER }, av));
     },
     putSetting: function (p, b) {
       var i = find(libs, "id", p.id);
