@@ -126,7 +126,7 @@
     var NAME = { audio: "Audio", fileType: "File type", format: "Video format" }, notes = {}, live = el("p", "sr");
     live.setAttribute("role", "status");
     function choiceText(name, val) { var g2 = GROUPS.reduce(function (a, gr) { return a.concat(gr[1]); }, []).filter(function (x) { return x[0] === name; })[0]; return (g2[2].filter(function (o) { return String(o[0]) === val; })[0] || [0, val])[1]; }
-    function move(name, val, reason, said) { fields[name].value = val; var t = NAME[name] + " changed to " + choiceText(name, val) + ": " + reason; notes[name].textContent = t; notes[name].hidden = false; said.push(t); }
+    function move(name, val, reason, said) { fields[name].value = val; said.push([name, NAME[name] + " changed to " + choiceText(name, val) + ": " + reason]); }
     function resolve(changed) {
       var F = fields, said = [], fmt = F.format.value, au = F.audio.value, ft = F.fileType.value;
       if (changed === "fileType" && ft === "mp4" && au === "stereo_opus") move("audio", "stereo_aac", "MP4 files can't hold Opus.", said);
@@ -137,7 +137,12 @@
       if (changed === "audio" && au === "stereo_opus" && ft === "mp4") move("fileType", "mkv", "MP4 files can't hold Opus.", said);
       if (changed === "audio" && au !== "stereo_opus" && ft === "webm") move("fileType", "mkv", "WebM files need Opus audio.", said);
       if (changed === "format" && (fmt === "hevc" || fmt === "h264") && ft === "webm") move("fileType", "mkv", "WebM files can only hold AV1 or VP9 video.", said);
-      if (said.length) { live.textContent = ""; live.textContent = said.join(" "); }
+      // A new move replaces earlier notes (their reason may no longer hold, e.g. WebM is gone); otherwise notes stay.
+      if (said.length) {
+        Object.keys(notes).forEach(function (k) { notes[k].hidden = true; notes[k].textContent = ""; });
+        said.forEach(function (x) { notes[x[0]].textContent = x[1]; notes[x[0]].hidden = false; });
+        live.textContent = ""; live.textContent = said.map(function (x) { return x[1]; }).join(" ");
+      }
     }
     function label(name, o) { // Max bitrate carries its 1080p number for the chosen Video format (the server's ladder)
       if (name !== "maxBitrate" || o[0] === "none" || !ladder || !fields.format) return o[1];
