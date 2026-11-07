@@ -338,3 +338,29 @@ func TestStartReusesThePreviewsProbes(t *testing.T) {
 		t.Errorf("the scan probed %d files again", extra)
 	}
 }
+
+// A link made or removed in another folder changes which files free nothing: the cached Preview is
+// not served as fresh (review 34ab633).
+func TestPreviewSeesLinksMadeElsewhere(t *testing.T) {
+	p := &Previewer{Store: store(t), Exec: &probes{}, FFprobe: "ffprobe"}
+	dir := library(t)
+	first := p.Library(1, dir, rules.SliderTemplate(3), 10*time.Second)
+	elsewhere := filepath.Join(t.TempDir(), "copy.mkv")
+	if err := os.Link(filepath.Join(dir, "a.mkv"), elsewhere); err != nil {
+		t.Skip("cannot make links here")
+	}
+	var r Result
+	for i := 0; i < 100 && (r.Status != "ready" || r.SharedNoSaving != first.SharedNoSaving+1); i++ {
+		r = p.Library(1, dir, rules.SliderTemplate(3), 100*time.Millisecond)
+	}
+	if r.SharedNoSaving != first.SharedNoSaving+1 || r.EstimateBytesHigh >= first.EstimateBytesHigh {
+		t.Fatalf("after a link elsewhere: %+v (before %+v)", r, first)
+	}
+	os.Remove(elsewhere)
+	for i := 0; i < 100 && (r.Status != "ready" || r.SharedNoSaving != first.SharedNoSaving); i++ {
+		r = p.Library(1, dir, rules.SliderTemplate(3), 100*time.Millisecond)
+	}
+	if r.SharedNoSaving != first.SharedNoSaving || r.EstimateBytesHigh != first.EstimateBytesHigh {
+		t.Errorf("after removing it: %+v", r)
+	}
+}

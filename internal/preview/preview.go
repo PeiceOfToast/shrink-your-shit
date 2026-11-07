@@ -84,7 +84,8 @@ type file struct {
 }
 
 // list walks the library like the scanner does (same folders skipped, same videos counted) and returns
-// its videos with a signature of the listing: it changes when a file is added, removed or changed.
+// its videos with a signature of the listing: it changes when a file is added, removed or changed, or
+// gains or loses a link elsewhere.
 func list(root string) ([]file, string, error) {
 	var out []file
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
@@ -110,7 +111,9 @@ func list(root string) ([]file, string, error) {
 	})
 	h := sha256.New()
 	for _, f := range out {
-		b, _ := json.Marshal([]any{f.path, f.st.Size(), f.st.ModTime().UnixNano()})
+		// The link count too: a link made or removed in another folder changes no size or time here,
+		// but changes which files free no space (sharedNoSaving).
+		b, _ := json.Marshal([]any{f.path, f.st.Size(), f.st.ModTime().UnixNano(), media.LinkCount(f.path, f.st)})
 		h.Write(b)
 	}
 	return out, hex.EncodeToString(h.Sum(nil)[:8]), err
