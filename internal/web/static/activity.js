@@ -114,7 +114,7 @@
       else if (RULE[f.reason] && flowOf[f.libraryId] && flowOf[f.libraryId].kind === "standard") { var a = el("a", "btn small", "Change rule"); a.href = "/flow/?id=" + encodeURIComponent(flowOf[f.libraryId].id); d.appendChild(a); }
     }
     if (s === "failed") d.appendChild(btn("Retry", "retry-" + f.jobId, function () { act(api.retryJob({ id: f.jobId }), "Queued to try again."); }));
-    d.appendChild(btn("Log", "log-" + f.id, function () { openLog(f, this); }));
+    d.appendChild(btn("Log", "log-" + f.id, function () { openLog(f); }));
     return d;
   }
   var EMPTY = { unprocessed: function () { return "Nothing waiting. New videos are found at the next scan" + (summary.nextScan ? " (" + at(summary.nextScan) + ")" : "") + "."; },
@@ -177,7 +177,7 @@
   }
 
   // ---- the Log panel: a plain summary, then the full log as recorded; it follows live on a Processing row.
-  var logFor = null, logFrom = 0, logTimer = null, logButton = null, following = true, logText = "";
+  var logFor = null, logFrom = 0, logTimer = null, following = true, logText = "";
   var STEP = { found: "Found", checked: "Checked", converted: "Converted", verified: "Checked the result", kept: "Kept", replaced: "Replaced" };
   function pullLog() {
     if (!logFor) return;
@@ -189,20 +189,21 @@
       clearTimeout(logTimer); if (r.live && following) logTimer = setTimeout(pullLog, 2000);
     }, function (e) { $("log-text").textContent = e && e.message || "This log can't be read."; });
   }
-  function openLog(f, b) {
-    logFor = f; logFrom = 0; logText = ""; following = true; logButton = b;
+  function openLog(f) {
+    logFor = f; logFrom = 0; logText = ""; following = true;
     $("log-h").textContent = "Log: " + (f.newPath ? base(f.newPath) : f.name); $("log-sum").textContent = ""; $("log-text").textContent = "";
     $("log-follow").textContent = "Stop following"; $("log-follow").setAttribute("aria-pressed", "true");
     $("log").showModal(); $("log-close").focus(); pullLog();
   }
 
   function init() {
-    readUrl();
+    readUrl(); if (st.show) writeUrl(); // an old tab address becomes the Files view's own (?show=...)
     $("q").value = st.q;
     var t = null; $("q").addEventListener("input", function () { clearTimeout(t); t = setTimeout(function () { st.q = $("q").value.trim(); st.limit = 50; seen = ""; writeUrl(); refresh(); }, 300); });
     $("lib").onchange = function () { st.library = $("lib").value; st.limit = 50; seen = ""; writeUrl(); refresh(); };
     $("log-close").onclick = function () { $("log").close(); };
-    $("log").addEventListener("close", function () { clearTimeout(logTimer); logFor = null; if (logButton) logButton.focus(); }); // Escape closes it too
+    // Escape closes it too. Focus returns to that row's Log button (found again: a poll may have redrawn the row).
+    $("log").addEventListener("close", function () { clearTimeout(logTimer); var b = logFor && document.querySelector('[data-key="log-' + logFor.id + '"]'); logFor = null; if (b) b.focus(); });
     $("log-follow").onclick = function () { following = !following; this.textContent = following ? "Stop following" : "Follow"; this.setAttribute("aria-pressed", following ? "true" : "false"); if (following) pullLog(); };
     $("log-copy").onclick = function () { (navigator.clipboard ? navigator.clipboard.writeText(logText) : Promise.reject()).then(function () { $("log-said").textContent = "Log copied."; }, function () { $("log-said").textContent = "Copying isn't possible here. Select the text instead."; }); };
     $("log-dl").onclick = function () { var u = URL.createObjectURL(new Blob([logText], { type: "text/plain" })), a = el("a"); a.href = u; a.download = (logFor ? base(logFor.name) : "file") + ".log"; a.click(); URL.revokeObjectURL(u); };

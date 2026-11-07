@@ -195,7 +195,7 @@
   // resolution and length are made up from the name; Unprocessed has two retrying files first, then 590 waiting.
   function nameOf2(p) { return p.split("/").pop(); }
   function probe(path) { var h = 0; for (var i = 0; i < path.length; i++) h = (h * 31 + path.charCodeAt(i)) >>> 0;
-    return { codec: ["H.264", "H.264", "MPEG-4", "HEVC", "VC-1"][h % 5], resolution: ["1080p", "4K", "720p", "1080p", "480p"][(h >> 3) % 5], durationSec: 1800 + h % 6000 }; }
+    return { codec: ["H.264", "H.264", "MPEG-4", "HEVC", "VC-1"][h % 5], resolution: ["1080p", "4K", "720p", "1080p", "480p"][(h >>> 3) % 5], durationSec: 1800 + h % 6000 }; }
   function fileOf(o, extra) {
     var lid = o.libraryId || (libs[find(libs, "name", o.library)] || {}).id || null, li = find(libs, "id", lid), root = li >= 0 ? libs[li].path : "", d = o.path.slice(0, o.path.length - nameOf2(o.path).length).replace(/\/+$/, "");
     return Object.assign({ libraryId: lid, library: o.library, path: o.path, folder: root && d.indexOf(root) === 0 && d.length > root.length ? d.slice(root.length + 1) : ".", name: nameOf2(o.path),
