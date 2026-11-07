@@ -10,7 +10,7 @@
 #
 #   curl -fsSL <url>/install.sh | sh -s -- --library /srv/videos --addr 0.0.0.0:8484
 #
-#   --library DIR     folder to watch (repeat for several). Default: an empty folder in the data dir.
+#   --library DIR     folder to watch (repeat for several). Default: none; add folders on the web page.
 #   --addr ADDR       web address (default 127.0.0.1:8484, this computer only; with 0.0.0.0:8484
 #                     other machines sign in with an access token, shown at the end)
 #   --version X.Y.Z   install that release instead of the newest
@@ -38,7 +38,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 usage() {
   cat <<'USAGE'
 Usage: install.sh [--library DIR]... [--addr ADDR] [--version X.Y.Z] [--no-start] [--run]
-  --library DIR    folder to watch (repeat for several); default: an empty folder in the data dir
+  --library DIR    folder to watch (repeat for several); default: none, add folders on the web page
   --addr ADDR      web address, default 127.0.0.1:8484 (this computer only); beyond it, an access token is needed
   --version X.Y.Z  install that release instead of the newest
   --no-start       install but do not start
@@ -228,16 +228,11 @@ if [ "$OS" = linux ]; then
   fi
   $SUDO install -d -o syp -g syp -m 0750 "$DATA_DIR"
 
-  # Library: given, or kept from a previous install, or a fresh empty folder.
+  # Library: given, or kept from a previous install, or none (the web page's first run asks for it).
   if [ -z "$LIBS" ] && [ -f "$ENV_FILE" ]; then
     LIBS=$(sed -n 's/^SYP_LIBRARIES=//p' "$ENV_FILE" | tail -n 1)
   fi
-  if [ -z "$LIBS" ]; then
-    LIBS=$DATA_DIR/library
-    $SUDO install -d -o syp -g syp -m 0775 "$LIBS"
-    say "No library folder given: watching the empty folder $LIBS."
-    say "To watch your videos run this again with: --library /path/to/videos"
-  fi
+  [ -n "$LIBS" ] || say "No library folder given: add your video folders on the web page."
   OLDIFS=$IFS; IFS=:
   for d in $LIBS; do
     [ -d "$d" ] || die "library folder '$d' does not exist"
@@ -252,7 +247,7 @@ if [ "$OS" = linux ]; then
   if [ -f "$ENV_FILE" ]; then cp "$ENV_FILE" "$newenv"; else : > "$newenv"; fi
   setkv() { grep -v "^$1=" "$newenv" > "$newenv.n" || true; printf '%s=%s\n' "$1" "$2" >> "$newenv.n"; mv "$newenv.n" "$newenv"; }
   haskv() { grep -q "^$1=" "$newenv"; }
-  if [ -n "$FLAG_LIBS" ] || [ -n "${SYP_LIBRARIES:-}" ] || ! haskv SYP_LIBRARIES; then setkv SYP_LIBRARIES "$LIBS"; fi
+  if [ -n "$LIBS" ] && { [ -n "$FLAG_LIBS" ] || [ -n "${SYP_LIBRARIES:-}" ] || ! haskv SYP_LIBRARIES; }; then setkv SYP_LIBRARIES "$LIBS"; fi
   if [ -n "$ADDR" ] || ! haskv SYP_ADDR; then setkv SYP_ADDR "$PORT_ADDR"; fi
   haskv SYP_DATA || setkv SYP_DATA "$DATA_DIR"
   PORT_ADDR=$(sed -n 's/^SYP_ADDR=//p' "$newenv" | tail -n 1)
@@ -343,12 +338,7 @@ if [ -z "$ADDR" ]; then
   [ -z "$old_addr" ] || PORT_ADDR=$old_addr
 fi
 PORT=${PORT_ADDR##*:}
-if [ -z "$LIBS" ]; then
-  LIBS=$DATA_DIR/library
-  mkdir -p "$LIBS"
-  say "No library folder given: watching the empty folder $LIBS."
-  say "To watch your videos run this again with: --library /path/to/videos"
-fi
+[ -n "$LIBS" ] || say "No library folder given: add your video folders on the web page."
 OLDIFS=$IFS; IFS=:
 for d in $LIBS; do [ -d "$d" ] || die "library folder '$d' does not exist"; done
 IFS=$OLDIFS
