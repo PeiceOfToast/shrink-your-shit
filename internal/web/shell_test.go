@@ -126,10 +126,7 @@ func TestServedMenuIsBasicAndRoutesExist(t *testing.T) {
 			t.Errorf("nav item %s has no page at %s", n.Label, n.Href)
 		}
 	}
-	b, _ := render(items, pages[0])
-	if strings.Contains(string(b), "Flows") {
-		t.Error("the page sent for Basic mentions Flows")
-	}
+	// Since piece B, Flows is in the menu at every level, so the page sent is no longer checked for the word.
 }
 
 // Text of every embedded asset and template, plus every rendered page.
