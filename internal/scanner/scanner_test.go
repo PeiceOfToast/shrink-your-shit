@@ -290,6 +290,13 @@ func TestStillChangingWaitsForTwoLooks(t *testing.T) {
 	look(0, rules.SkipStillChanging)
 	clock = clock.Add(2 * time.Minute)
 	look(1, "") // unchanged for MinAge: decided (queued)
+	// and no longer listed as skipped (ui-shop's S4 run saw a queued file still listed as still_changing)
+	if r, _ := st.GetFile(a); r == nil || r.Reason != "" || !strings.HasPrefix(r.Decision, "queued: ") {
+		t.Errorf("queued file's record %+v", r)
+	}
+	if items, total, _ := st.SkippedFiles("", 10, 0); total != 0 {
+		t.Errorf("skipped list %d %+v", total, items)
+	}
 }
 
 // A file with another name elsewhere (a hardlink: a seeding torrent, a media manager's copy) is left
@@ -529,5 +536,38 @@ func TestUnreadableFileStateIsNeverReady(t *testing.T) {
 	}
 	if n := scan(); n != 1 {
 		t.Errorf("readable and unchanged since: queued %d, want 1", n)
+	}
+}
+
+// ui-shop's S4 run: a file is queued, then the library's setting is saved (its file decisions are
+// forgotten; the job stays). The next scans must not list the waiting file as still_changing: it is
+// decided already, and the skipped list would show it next to To do for as long as the job waits.
+func TestQueuedFileIsNotStillChangingAfterASave(t *testing.T) {
+	s, st, lib, _ := setup(t, h264Big)
+	clock := time.Now()
+	s.Now, s.MinAge = func() time.Time { return clock }, time.Minute
+	a := filepath.Join(lib, "a.mkv")
+	os.Chtimes(a, clock.Add(-time.Hour), clock.Add(-time.Hour))
+	s.ScanOnce(context.Background())
+	clock = clock.Add(2 * time.Minute)
+	if n := s.ScanOnce(context.Background()); n != 1 {
+		t.Fatalf("queued %d", n)
+	}
+	libs, _ := st.Libraries()
+	if _, err := st.SaveSlider(libs[0].ID, 2, ""); err != nil { // forgets the library's file decisions
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		clock = clock.Add(2 * time.Minute)
+		s.ScanOnce(context.Background())
+		if r, _ := st.GetFile(a); r != nil && r.Reason == rules.SkipStillChanging {
+			t.Fatalf("scan %d: the waiting file is listed as still changing: %+v", i+1, r)
+		}
+	}
+	if items, total, _ := st.SkippedFiles("", 10, 0); total != 0 {
+		t.Errorf("skipped %d %+v", total, items)
+	}
+	if open, _ := st.HasOpenJob(a); !open {
+		t.Error("its job is still waiting")
 	}
 }
