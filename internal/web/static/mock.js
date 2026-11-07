@@ -434,7 +434,7 @@
     listFlows: function () { return ok(list(flows.map(flowView))); },
     createFlow: function (p, b) {
       var std = b.kind === "standard", f = { id: fid(), name: flowName(b.name || (std ? "Standard flow" : "Basic flow")), usedBy: [], madeWith: std ? "selectors" : "slider", changedAt: iso(0), rec: {} };
-      applySetting(f.rec, std ? { speed: "normal", format: "hevc", quality: 3, resolution: "keep", maxBitrate: "none", audio: "stereo_aac", subtitles: "keep_all", fileType: "mkv", afterConverting: "replace", ignore: [], skipHdr: true } : { quality: 3, audio: "stereo_aac" });
+      applySetting(f.rec, std ? { speed: "normal", format: "hevc", quality: 3, resolution: "keep", maxBitrate: "none", audio: "keep_all", subtitles: "keep_all", fileType: "mkv", afterConverting: "replace", ignore: [], skipHdr: true } : { quality: 3, audio: "stereo_aac" }); // Standard: the selectors' own defaults
       flows.push(f); saveLibs(); return ok(flowView(f));
     },
     getFlowSetting: function (p) { var i = find(flows, "id", p.id); if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed.");
