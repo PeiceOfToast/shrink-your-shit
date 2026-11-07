@@ -93,7 +93,7 @@
     api.activitySummary().then(function (s) {
       var el = $("working"), n = s.workingFiles;
       // Files waiting and no worker running (redesign D4): say so, with the way to start one.
-      if (!n && s.workersRunning === 0 && s.waitingFiles > 0) { text(el, "Workers stopped"); el.href = "/workers/"; el.hidden = false; return; }
+      if (!n && s.workersRunning === false && s.waitingFiles > 0) { text(el, "Workers stopped"); el.href = "/workers/"; el.hidden = false; return; }
       if (!n) { el.hidden = true; return; }
       text(el, n + (n === 1 ? " file working" : " files working")); el.href = "/activity/"; el.hidden = false;
     }, function () {});

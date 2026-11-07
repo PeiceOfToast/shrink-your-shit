@@ -9,12 +9,14 @@
   function say(t) { $("said").textContent = ""; $("said").textContent = t; }
   function at(t) { return new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
   function btn(txt, key, fn, cls) { var b = el("button", cls || "btn", txt); b.type = "button"; b.setAttribute("data-key", key); b.onclick = fn; return b; }
-  function running(w) { return w.state === "running" || w.state === "paused"; }
+  // S2 states: stopped | idle (running, no files) | converting | stopping | quiet_hours | unreachable.
+  function running(w) { return w.state === "idle" || w.state === "converting" || w.state === "quiet_hours"; }
 
   function status(w) {
-    var n = (w.files || []).length;
-    if (w.state === "running") return n ? ["ok", "Converting " + ui.count(n, "file", "files")] : ["ok", "Running, waiting for files"];
-    if (w.state === "paused") return ["info", "Paused for quiet hours" + (w.pausedUntil ? " until " + at(w.pausedUntil) : "")];
+    var n = (w.converting || []).length;
+    if (w.state === "converting") return ["ok", "Converting " + ui.count(n, "file", "files")];
+    if (w.state === "idle") return ["ok", "Running, waiting for files"];
+    if (w.state === "quiet_hours") return ["info", "Paused for quiet hours" + (w.quietUntil ? " until " + at(w.quietUntil) : "")];
     if (w.state === "stopping") return ["info", "Stopping after the current file..."];
     if (w.state === "unreachable") return ["bad", "Can't reach this worker"];
     return ["idle", "Stopped"];
@@ -23,15 +25,15 @@
   function stop(w, when) { return act(api.stopWorker({ id: w.id }, { when: when }), when === "now" ? "Stopped. The files go back to wait for their turn." : "Stopping after these files."); }
 
   function card(w) {
-    var c = el("div", "card"), top = el("div", "row between"), left = el("div"), h = el("h2", null, w.name), st = status(w), n = (w.files || []).length;
+    var c = el("div", "card"), top = el("div", "row between"), left = el("div"), h = el("h2", null, w.name), st = status(w), n = (w.converting || []).length;
     h.style.margin = "0"; left.appendChild(h); if (w.host) left.appendChild(el("span", "mono muted", w.host));
     top.appendChild(left); top.appendChild(el("span", "badge " + st[0], st[1])); c.appendChild(top);
-    if (w.state === "running" && n) {
+    if (n) {
       var ul = el("ul", "small");
-      w.files.forEach(function (f) { var li = el("li"), a = el("a", null, f.path.split(/[\\/]/).pop()); a.href = "/activity/"; li.appendChild(a); li.appendChild(document.createTextNode(" " + f.percent + "%")); ul.appendChild(li); });
+      w.converting.forEach(function (f) { var li = el("li"), a = el("a", null, f.path.split(/[\\/]/).pop()); a.href = "/activity/"; li.appendChild(a); li.appendChild(document.createTextNode(" " + f.percent + "%")); ul.appendChild(li); });
       c.appendChild(ul);
     }
-    if (w.state === "paused") { var q = el("p", "small"), qa = el("a", null, "Quiet hours are set in Settings > Performance."); qa.href = "/settings/performance/"; q.appendChild(qa); c.appendChild(q); }
+    if (w.state === "quiet_hours") { var q = el("p", "small"), qa = el("a", null, "Quiet hours are set in Settings > Performance."); qa.href = "/settings/performance/"; q.appendChild(qa); c.appendChild(q); }
     if (w.state !== "unreachable") {
       var row = el("div", "row"); row.style.marginTop = "12px";
       if (w.state === "stopped") row.appendChild(btn("Start", "toggle-" + w.id, function () { act(api.startWorker({ id: w.id }), "Started."); }, "btn primary"));
@@ -60,8 +62,8 @@
       sel.onchange = function () { act(api.setWorker({ id: w.id }, { filesAtOnce: +sel.value }), "Files at once: " + sel.value + "."); };
       fld.style.marginTop = "12px"; fld.appendChild(lb); fld.appendChild(sel); c.appendChild(fld);
     }
-    // The graphics card by vendor (design 20:17Z): "" = none found; null = not known, so no line.
-    if (w.gpu != null) c.appendChild(el("p", "small muted", w.gpu ? "An " + w.gpu + " graphics card found. Converting uses the processor for now." : "None found. Converting uses the processor."));
+    // The graphics card by vendor (design 20:17Z; S2 gpu {found, vendor}); null = detection didn't run, so no line.
+    if (w.gpu) c.appendChild(el("p", "small muted", w.gpu.found ? "An " + w.gpu.vendor + " graphics card found. Converting uses the processor for now." : "None found. Converting uses the processor."));
     return c;
   }
 
@@ -70,12 +72,12 @@
     var a = document.activeElement, k = a && a.getAttribute && a.getAttribute("data-key");
     $("update-note").hidden = !r.stoppedByUpdate; // its second sentence (S4) comes with piece B, which retires NAV-7
     var list = $("worker-list"); list.textContent = "";
-    r.items.forEach(function (w) { list.appendChild(card(w)); });
+    r.workers.forEach(function (w) { list.appendChild(card(w)); });
     // Start all / Stop all only with more than one worker (D3).
-    var all = $("all"); all.textContent = ""; all.hidden = r.items.length < 2;
-    if (r.items.length > 1) {
-      all.appendChild(btn("Start all", "start-all", function () { act(Promise.all(r.items.filter(function (w) { return w.state === "stopped"; }).map(function (w) { return api.startWorker({ id: w.id }); })), "Started."); }));
-      all.appendChild(btn("Stop all", "stop-all", function () { act(Promise.all(r.items.filter(running).map(function (w) { return api.stopWorker({ id: w.id }, { when: "after_current" }); })), "Stopping after the current files."); }));
+    var all = $("all"); all.textContent = ""; all.hidden = r.workers.length < 2;
+    if (r.workers.length > 1) {
+      all.appendChild(btn("Start all", "start-all", function () { act(Promise.all(r.workers.filter(function (w) { return w.state === "stopped"; }).map(function (w) { return api.startWorker({ id: w.id }); })), "Started."); }));
+      all.appendChild(btn("Stop all", "stop-all", function () { act(Promise.all(r.workers.filter(running).map(function (w) { return api.stopWorker({ id: w.id }, { when: "after_current" }); })), "Stopping after the current files."); }));
     }
     var n = k ? document.querySelector('[data-key="' + k + '"]') : null; if (n) n.focus();
   }
