@@ -155,7 +155,8 @@ type Info struct {
 
 // ProbeVersion is what Probe reads; raise it when it reads more, so cached probes are taken again.
 // 2 (S3): the first frame's HDR side data, the Dolby Vision profile and tag, mastering display and CLL.
-const ProbeVersion = 2
+// 3 (review 7ab8f72): the Dolby Vision compatibility id (DVCompat).
+const ProbeVersion = 3
 
 // Probe runs ffprobe on path. For a video that may carry HDR or Dolby Vision (HEVC, AV1, or PQ/HLG) it
 // also reads the main video's first frame: in TS files and raw streams, the Dolby Vision RPU, the

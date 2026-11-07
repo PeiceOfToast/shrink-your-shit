@@ -488,8 +488,8 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// Dolby Vision the flow leaves alone is never encoded, whatever was decided when the job was queued
 	// (review a09f6f5: a job queued before migration 17 or a setting change). Only these skips: the
 	// others stay the scanner's decision, as before Plans.
-	if plan.SkipCode == rules.SkipDV || plan.SkipCode == rules.SkipDVProfile5 {
-		return "", &SkippedError{Words: plan.Skip, Code: plan.SkipCode}
+	if words, code := tmpl.DolbyVisionHold(src); code != "" { // from the probe, not the Plan's skip (review 7ab8f72)
+		return "", &SkippedError{Words: words, Code: code}
 	}
 	if plan.Video.Codec == "" {
 		return "", failed("This library's setting can't convert this file, so it was left as it is.", fmt.Errorf("its library's flow cannot convert it: %s", plan.Skip))

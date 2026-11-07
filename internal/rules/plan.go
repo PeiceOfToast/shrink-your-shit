@@ -515,15 +515,10 @@ func (p *Plan) applyHDR(info media.Info, includeDV bool) bool {
 		return false
 	}
 	tr := v.ColorTransfer
-	if v.DolbyVision {
-		switch {
-		case !includeDV:
-			return skip(dvSkip, SkipDV)
-		case v.DVProfile != 7 && v.DVProfile != 8, tr != "smpte2084" && tr != "arib-std-b67",
-			v.DVCompat != nil && *v.DVCompat == 0: // no HDR10/HLG base to keep (review a09f6f5)
-			return skip(dv5Skip, SkipDVProfile5)
-		}
-	} else if tr != "smpte2084" && tr != "arib-std-b67" {
+	if words, code := dvHold(v, includeDV); code != "" {
+		return skip(words, code)
+	}
+	if !v.DolbyVision && tr != "smpte2084" && tr != "arib-std-b67" {
 		tr = "smpte2084" // HDR10+ without a transfer in the stream: HDR10+ is PQ
 	}
 	if p.Video.Copy {
@@ -671,4 +666,31 @@ func (p Plan) changesTracks() bool {
 		}
 	}
 	return false
+}
+
+// dvHold says whether video v is Dolby Vision that is left alone (S3): dv when includeDV is off;
+// dv_profile5 for profile 5, a profile that can't be read, compatibility id 0, or no HDR10/HLG base in
+// the stream (converting those would show wrong colours). "" when v is not Dolby Vision or is converted.
+func dvHold(v *media.Stream, includeDV bool) (words, code string) {
+	if v == nil || !v.DolbyVision {
+		return "", ""
+	}
+	tr := v.ColorTransfer
+	switch {
+	case !includeDV:
+		return dvSkip, SkipDV
+	case v.DVProfile != 7 && v.DVProfile != 8, tr != "smpte2084" && tr != "arib-std-b67",
+		v.DVCompat != nil && *v.DVCompat == 0: // no HDR10/HLG base to keep (review a09f6f5)
+		return dv5Skip, SkipDVProfile5
+	}
+	return "", ""
+}
+
+// DolbyVisionHold is dvHold for t's flow: whether the file is Dolby Vision this flow leaves alone,
+// decided from the probe alone, whatever else the Plan says (review 7ab8f72: an earlier skip such as
+// already_hevc, or a legacy rule's, must not let a queued job encode it). Only a Standard flow can
+// include Dolby Vision.
+func (t Template) DolbyVisionHold(info media.Info) (words, code string) {
+	include := t.Kind == KindSelectors && t.Selectors != nil && t.Selectors.IncludeDolbyVision
+	return dvHold(info.Video(), include)
 }

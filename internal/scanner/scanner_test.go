@@ -550,3 +550,20 @@ func TestScanRecordsTheLibrarysLastScan(t *testing.T) {
 		t.Errorf("still scanning: %v", s.Scanning())
 	}
 }
+
+// A probe cached by an older version is taken again (review 7ab8f72: version 2 had no Dolby Vision
+// compatibility id, so a cached profile 8 looked convertible).
+func TestOldProbeCacheIsTakenAgain(t *testing.T) {
+	s, st, lib, f := setup(t, `{"streams":[{"codec_type":"video","codec_name":"hevc","side_data_list":[{"side_data_type":"DOVI configuration record","dv_profile":8,"dv_bl_signal_compatibility_id":0}]}],"format":{}}`)
+	_ = s
+	p := filepath.Join(lib, "a.mkv")
+	fi, _ := os.Stat(p)
+	st.PutProbe(p, fi.Size(), fi.ModTime().UnixNano(), `{"probe":2,"container":"matroska,webm","videoCodec":"hevc","streams":[{"type":"video","codec":"hevc","dolbyVision":true,"dvProfile":8}]}`)
+	info, err := Probe(context.Background(), st, f, "ffprobe", p, fi)
+	if err != nil || len(f.Calls) == 0 {
+		t.Fatalf("the old cache was used: %v, %d calls", err, len(f.Calls))
+	}
+	if v := info.Video(); v.DVCompat == nil || *v.DVCompat != 0 || info.Probe != media.ProbeVersion {
+		t.Errorf("re-probed: %+v", v)
+	}
+}
