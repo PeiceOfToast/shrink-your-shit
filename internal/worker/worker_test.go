@@ -946,3 +946,60 @@ func TestFailedDetailsArePlain(t *testing.T) {
 		assertPlain(t, ke.Reason)
 	}
 }
+
+// A job whose file became a link or gained another name after it was queued is refused before anything
+// is written (slice 23's file guards, again at the start).
+func TestWorkerRefusesLinksAndSharedFiles(t *testing.T) {
+	t.Run("shared", func(t *testing.T) {
+		s := newScenario(t)
+		if err := os.Link(s.src, filepath.Join(t.TempDir(), "seeding.mkv")); err != nil {
+			t.Skip(err)
+		}
+		s.run(Replace)
+		s.assertKept("shared with another folder")
+		if n := s.count("libx265"); n != 0 {
+			t.Errorf("%d encodes", n)
+		}
+	})
+	t.Run("link", func(t *testing.T) {
+		s := newScenario(t)
+		real := filepath.Join(t.TempDir(), "real.mkv")
+		os.Rename(s.src, real)
+		if err := os.Symlink(real, s.src); err != nil {
+			t.Skip(err)
+		}
+		s.run(Replace)
+		j := s.job()
+		if j.Status != jobs.Kept || !strings.Contains(j.Error, "a link to a file") {
+			t.Errorf("%s %q", j.Status, j.Error)
+		}
+		if lst, _ := os.Lstat(s.src); lst.Mode()&os.ModeSymlink == 0 {
+			t.Error("the link must stay a link")
+		}
+		if b, _ := os.ReadFile(real); string(b) != "original-bytes" {
+			t.Errorf("the real file changed: %q", b)
+		}
+	})
+}
+
+// The converted file keeps the original's modification time (slice 23): media servers and backups key on it.
+func TestModificationTimeKept(t *testing.T) {
+	for _, mode := range []OutputMode{Replace, Beside} {
+		t.Run(string(mode), func(t *testing.T) {
+			s := newScenario(t)
+			old := time.Date(2019, 5, 4, 3, 2, 1, 0, time.UTC)
+			os.Chtimes(s.src, old, old)
+			s.run(mode)
+			if j := s.job(); j.Status != jobs.Done {
+				t.Fatalf("%s %q", j.Status, j.Error)
+			}
+			out := s.src
+			if mode == Beside {
+				out = BesidePath(s.src)
+			}
+			if st, _ := os.Stat(out); st == nil || !st.ModTime().Equal(old) {
+				t.Errorf("new file's time %v, want %v", st.ModTime(), old)
+			}
+		})
+	}
+}

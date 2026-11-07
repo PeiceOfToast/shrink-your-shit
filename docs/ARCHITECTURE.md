@@ -17,7 +17,7 @@ library folders --scanner--> files table + jobs table (SQLite) <--worker (pulls 
 | Path | Job |
 |---|---|
 | `main.go`, `platform.go` | flags and env, finding ffmpeg/ffprobe, default data dir, starts the scanner, worker and web server, handles Ctrl+C/SIGTERM |
-| `internal/scanner` | every `-scan-every` (or at once on `ScanNow`), walks the folders of the **started** libraries (`Targets`, read from the database each pass), probes new or changed video files, asks each library's own rule, queues jobs tagged with the library id. Skips hidden files and folders (names starting with `.`), `@eaDir`, `$RECYCLE.BIN`, `System Volume Information`, files changed within `-settle`, and our own temp and output files (names whose part before the extension ends in `.syp-tmp` or `.hevc`, e.g. `a.hevc.mkv`) |
+| `internal/scanner` | every `-scan-every` (or at once on `ScanNow`), walks the folders of the **started** libraries (`Targets`, read from the database each pass), probes new or changed video files, asks each library's own rule, queues jobs tagged with the library id. Skips hidden files and folders (names starting with `.`), `@eaDir`, `$RECYCLE.BIN`, `System Volume Information`, files changed within `-settle`, and our own temp and output files (names whose part before the extension ends in `.syp-tmp` or `.hevc`, e.g. `a.hevc.mkv`). The **file guards** (slice 23, `scanner.Guard`, shared with the Preview) come before any probe: a link is never followed or converted (one leading outside the library is skipped as `symlink`, one inside is not looked at since its real file is converted under its own name); a file with more than one name is skipped as `shared_file`; and a file is decided only when unchanged since the previous look at least `-settle` earlier (`still_changing` in between; the look time is kept in memory) |
 | `internal/rules` | `Rule.Match(info)`: source codec and minimum video bitrate; returns a reason string shown in the UI. `flow.go`: a flow's `Template` (kind `slider`, `legacy`, later `selectors`/`custom`, with params and a compiler version) and `Template.Settings()`, the one mapping from a flow to what the scanner and worker use (rule, CRF, preset, output, minimum saving); the slider table (`Slider`, positions 1-5) lives here |
 | `internal/media` | wraps ffprobe and ffmpeg behind the `Exec` interface (`OSExec` is real, `FakeExec` is for tests); parses probe JSON into `Info` (container, duration, bitrate, plus a per-stream `Streams` list: codec, language, flags, video size/fps/bit depth/HDR and Dolby Vision markers, audio channels, subtitle text-vs-bitmap, attachments, chapter count; helpers `Video()`, `Audio()`, `IsHDR()`, `HasBitmapSubs()`...); parses `-progress` output |
 | `internal/jobs` | SQLite store (pure-Go `modernc.org/sqlite`, no cgo): `files` (what the scanner last saw), `jobs`, `libraries` and `flows` tables, and the job state machine. `libraries.go`: library and flow records (`AddLibrary`, `EnsureLibraries` for `-library`, `DeleteLibrary`, `SettingsFor(job)`, per-library `Counts`) |
@@ -140,10 +140,12 @@ flows in plain words, raw numbers only in `detail`.
   it). Hardware HEVC encoders are only a note, and only those that encode a test frame here count:
   converting always uses the processor for now (slice 37).
 - **Folder:** a folder chosen through a link is checked as the folder it points to (`jobs.RealPath`,
-  as it is stored); it opens; it is writable by the user the program runs as (a temp file is created and
+  as it is stored); it is not a system folder, `/` or a whole home folder (`jobs.SystemFolder`, blocker
+  `system_folder`; the store refuses such a library too, however it would be made, moved or started); it opens; it is writable by the user the program runs as (a temp file is created and
   removed, so the check is the service's own); it holds videos (counted with the scanner's rules); its
   disk has room to convert the largest one (`worker.SpaceNeeded`, the worker's own preflight rule);
-  hardlinked files are a note (link counts on Linux, macOS and Windows); folders inside that cannot
+  files shared with another folder are a note saying they will be left alone (link counts on Linux,
+  macOS and Windows); folders inside that cannot
   be read are counted in a note, and free space that cannot be read is a note, never a silent pass. A read-only folder's message gives the fix for the system: the `syp`
   service user's `chown` on Linux, the container's user on Docker, Get Info on macOS, Security on Windows.
 - `doctor` asks the running program for its health report (with the token, like `token`), so its

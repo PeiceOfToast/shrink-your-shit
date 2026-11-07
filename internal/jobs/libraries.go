@@ -198,6 +198,9 @@ func (s *Store) AddLibrary(name, path string, t rules.Template, started bool) (L
 
 func (s *Store) addLibrary(name, path, flowBase string, t rules.Template, started bool) (Library, error) {
 	path = canonical(path)
+	if SystemFolder(path) {
+		return Library{}, ErrSystemFolder
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return Library{}, err
@@ -254,6 +257,10 @@ func (s *Store) EnsureLibraries(paths []string, legacy rules.Template) (added in
 		p, err := RealPath(given)
 		if err != nil {
 			skipped = append(skipped, fmt.Sprintf("%s: %v", given, err))
+			continue
+		}
+		if SystemFolder(p) {
+			skipped = append(skipped, fmt.Sprintf("%s: %v", given, ErrSystemFolder))
 			continue
 		}
 		libs, err := s.Libraries()
@@ -356,6 +363,9 @@ func (s *Store) UpdateLibrary(id int64, name, path *string) (Library, error) {
 	}
 	if path != nil {
 		p := canonical(*path)
+		if SystemFolder(p) {
+			return Library{}, ErrSystemFolder
+		}
 		path = &p
 		if err := s.pathTaken(tx, *path, id); err != nil {
 			return Library{}, err
@@ -376,6 +386,10 @@ func (s *Store) StartLibrary(id int64) error {
 	defer s.removeMu.Unlock()
 	if s.removing[id] {
 		return ErrLibraryBusy // being removed (BeginRemove)
+	}
+	var p string // a library made at a system folder before slice 23 is not started
+	if err := s.db.QueryRow(`SELECT path FROM libraries WHERE id=?`, id).Scan(&p); err == nil && SystemFolder(p) {
+		return ErrSystemFolder
 	}
 	r, err := s.db.Exec(`UPDATE libraries SET started=1 WHERE id=?`, id)
 	if err != nil {

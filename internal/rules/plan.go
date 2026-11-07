@@ -42,7 +42,11 @@ const (
 	SkipCannotKeepTrack  = "cannot_keep_track"  // a track (its subtitles) cannot stay in its container
 	SkipSettingCannotRun = "setting_cannot_run" // the flow cannot run (missing values, a kind not built yet)
 	SkipHDR              = "hdr_dv"             // HDR or Dolby Vision: left as it is (D3), unless the flow says otherwise
-	SkipUnreadable       = "unreadable"         // the file could not be read (the probe failed); set by callers
+	// File guards (slice 23, SAF-4), decided from the file itself before any probe (scanner.Guard):
+	SkipSharedFile    = "shared_file"    // shared with another folder (more than one name): converting frees no space
+	SkipSymlink       = "symlink"        // a link to a file outside the library: never followed
+	SkipStillChanging = "still_changing" // changed since the last look (still downloading?): looked at again next scan
+	SkipUnreadable    = "unreadable"     // the file could not be read (the probe failed); set by callers
 )
 
 // Eligibility is the rule a Plan decides with: which source format, from which bitrate.

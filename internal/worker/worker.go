@@ -370,6 +370,14 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 		return "", fmt.Errorf("source file: %w", serr)
 	}
+	// The file guards again (slice 23; the scanner decided earlier, and the file may have become a link
+	// or gained another name since): a link is never converted, a shared file is left alone.
+	if lst, err := os.Lstat(job.Path); err == nil && lst.Mode()&fs.ModeSymlink != 0 {
+		return "", kept("%s", rules.SkipWords[rules.SkipSymlink])
+	}
+	if media.LinkCount(job.Path, before) > 1 {
+		return "", kept("%s", rules.SkipWords[rules.SkipSharedFile])
+	}
 	if err := removeLeftoverTemps(job.Path); err != nil {
 		return "", err
 	}
@@ -484,6 +492,15 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	if err := os.Chmod(tmp, before.Mode().Perm()); err != nil {
 		return "", fmt.Errorf("temp file permissions: %w", err)
+	}
+	// Its modification time and owner too (slice 23), where the system allows: media servers and
+	// backups key on the time, and the file stays the user's. Set before the swap, so the identity the
+	// swap records is the one the file keeps.
+	if err := os.Chtimes(tmp, time.Now(), before.ModTime()); err != nil {
+		log.Printf("worker %s: job %d: could not keep the modification time: %v", w.ID, job.ID, err)
+	}
+	if err := keepOwner(tmp, before); err != nil {
+		log.Printf("worker %s: job %d: could not keep the owner: %v", w.ID, job.ID, err)
 	}
 	final = job.Path
 	if OutputMode(plan.Output) == Beside {

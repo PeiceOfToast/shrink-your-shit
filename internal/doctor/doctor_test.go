@@ -152,13 +152,13 @@ func TestHardlinkedFilesAreANote(t *testing.T) {
 	if !r.OK || !strings.Contains(strings.Join(codes(r.Notes), ","), "hardlinks") {
 		t.Fatalf("%+v", r)
 	}
-	want := "2 files are shared with another folder (for example by Radarr). This version still converts them, but that frees no space, because the other folder keeps its copy. Leaving them alone comes in a later update."
+	want := "2 files are shared with another folder (for example by Radarr). We will leave them alone, because changing one would break the link and free no space."
 	if n := r.Notes[0]; n.Message != want {
 		t.Errorf("%q", n.Message)
 	}
 	os.Remove(filepath.Join(dir, "copy.mkv"))
 	os.Link(filepath.Join(dir, "moviea.mkv"), filepath.Join(t.TempDir(), "elsewhere.mkv")) // shared with another folder
-	if n := checker(1<<40).Folder(context.Background(), dir).Notes[0]; !strings.HasPrefix(n.Message, "1 file is shared with another folder") || !strings.Contains(n.Message, "converts it,") || !strings.Contains(n.Message, "Leaving it alone") {
+	if n := checker(1<<40).Folder(context.Background(), dir).Notes[0]; !strings.HasPrefix(n.Message, "1 file is shared with another folder") || !strings.Contains(n.Message, "We will leave it alone, because changing it") {
 		t.Errorf("singular: %q", n.Message)
 	}
 }
@@ -361,5 +361,13 @@ func TestHealthCarriesLibraryNotes(t *testing.T) {
 	}
 	if !(Health{Checks: checks}).Bad() {
 		t.Error("the blocker makes the report bad")
+	}
+}
+
+// A system folder is a blocker with a plain message (slice 23): the doctor says so before anything else.
+func TestFolderRefusesSystemFolders(t *testing.T) {
+	r := checker(1<<40).Folder(context.Background(), "/")
+	if r.OK || len(r.Blockers) != 1 || r.Blockers[0].Code != "system_folder" || !strings.Contains(r.Blockers[0].Message, "Pick the folder that holds your videos") {
+		t.Errorf("%+v", r)
 	}
 }

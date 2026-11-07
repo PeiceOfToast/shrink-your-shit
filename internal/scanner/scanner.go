@@ -62,9 +62,10 @@ type Scanner struct {
 	MinAge time.Duration
 	Now    func() time.Time
 
-	wake     chan struct{}
-	mu       sync.Mutex
-	nextScan time.Time
+	wake      chan struct{}
+	mu        sync.Mutex
+	nextScan  time.Time
+	firstLook map[string]time.Time // when each file was first seen as it is now (the two-look rule)
 }
 
 // Target is one library to scan.
@@ -110,8 +111,17 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 			if !IsVideo(path) {
 				return nil
 			}
-			info, err := d.Info()
-			if err != nil || now().Sub(info.ModTime()) < s.MinAge {
+			info, err := d.Info() // Lstat: a link is seen as a link
+			if err != nil {
+				return nil
+			}
+			if code, ignore := Guard(lib, path, info); ignore {
+				return nil
+			} else if code != "" {
+				s.recordSkip(path, info, code)
+				return nil
+			}
+			if now().Sub(info.ModTime()) < s.MinAge {
 				return nil
 			}
 			if s.scanFile(ctx, t, path, info) {
@@ -123,7 +133,49 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 	return queued
 }
 
+// recordSkip records a file the guards leave alone (unless it is recorded so already).
+func (s *Scanner) recordSkip(path string, st os.FileInfo, code string) {
+	if prev, _ := s.Store.GetFile(path); prev != nil && prev.Reason == code && prev.Size == st.Size() && prev.ModTime == st.ModTime().UnixNano() {
+		return
+	}
+	s.Store.PutFile(jobs.File{Path: path, Size: st.Size(), ModTime: st.ModTime().UnixNano(), Decision: "skip: " + rules.SkipWords[code], Reason: code})
+}
+
+// markLook notes t as the time path was seen as it is now (its first look, or a change).
+func (s *Scanner) markLook(path string, t time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.firstLook == nil {
+		s.firstLook = map[string]time.Time{}
+	}
+	s.firstLook[path] = t
+}
+
+// lookedAgo reports whether path has been seen unchanged since at least MinAge ago, noting now as its
+// first look if it was not seen yet (after a restart).
+func (s *Scanner) lookedAgo(path string, now func() time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.firstLook == nil {
+		s.firstLook = map[string]time.Time{}
+	}
+	at, ok := s.firstLook[path]
+	if !ok {
+		s.firstLook[path] = now()
+		return false
+	}
+	if now().Sub(at) < max(s.MinAge, time.Nanosecond) {
+		return false
+	}
+	delete(s.firstLook, path)
+	return true
+}
+
 func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.FileInfo) bool {
+	now := time.Now
+	if s.Now != nil {
+		now = s.Now
+	}
 	prev, err := s.Store.GetFile(path)
 	if err != nil {
 		log.Printf("scan %s: %v", path, err)
@@ -132,8 +184,20 @@ func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.Fil
 	if prev != nil && (prev.Decision == jobs.DecisionRestored || prev.Reason == jobs.UserStoppedReason) {
 		return false // its original was put back, or the person stopped it: not again until "Convert again"
 	}
-	if prev != nil && prev.Size == st.Size() && prev.ModTime == st.ModTime().UnixNano() {
-		return false // unchanged since last look
+	same := prev != nil && prev.Size == st.Size() && prev.ModTime == st.ModTime().UnixNano()
+	if same && prev.Reason != rules.SkipStillChanging {
+		return false // unchanged since it was decided
+	}
+	// A file is decided only when it has not changed since the previous look, at least MinAge earlier
+	// (a download in progress, an import being copied): the first look, or a change, records it as
+	// still changing, and the next scan decides. The look's time is kept in memory; after a restart the
+	// wait starts again.
+	if !same {
+		s.markLook(path, now())
+	}
+	if !same || !s.lookedAgo(path, now) {
+		s.recordSkip(path, st, rules.SkipStillChanging)
+		return false
 	}
 	if open, _ := s.Store.HasOpenJob(path); open {
 		return false // already waiting or running; it will be re-checked after it finishes
@@ -163,6 +227,31 @@ func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.Fil
 	}
 	s.Store.PutFile(rec)
 	return true
+}
+
+// Guard is what the file guards (slice 23, SAF-4) decide about the file at path in the library at root,
+// from the file itself (lst is its Lstat), before anything reads it:
+//   - a link is never followed or converted: one leading outside the library is skipped (symlink); one
+//     inside it is not looked at (Ignore), as its real file is converted under its own name;
+//   - a file shared with another folder (more than one name) is skipped (shared_file): converting it
+//     frees no space, and the other name (a seeding torrent, a media manager's copy) keeps the old data.
+//
+// The scanner and the Preview both use it, so their decisions match.
+func Guard(root, path string, lst fs.FileInfo) (code string, ignore bool) {
+	if lst.Mode()&fs.ModeSymlink != 0 {
+		real, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			return "", true // a broken link: nothing to convert
+		}
+		if rel, err := filepath.Rel(root, real); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return "", true
+		}
+		return rules.SkipSymlink, false
+	}
+	if media.LinkCount(path, lst) > 1 {
+		return rules.SkipSharedFile, false
+	}
+	return "", false
 }
 
 // Probe is ffprobe's view of path, from the store's probe cache when the file has the same size and

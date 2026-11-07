@@ -292,3 +292,12 @@ func TestOneFolderByTwoNames(t *testing.T) {
 		t.Errorf("PATCH to the other name of a used folder: %d %s", code, body)
 	}
 }
+
+// A library at a system folder is refused with a plain message (slice 23).
+func TestLibraryAtASystemFolderIsRefused(t *testing.T) {
+	srv, _, _, _ := libServer(t, false)
+	code, body := post(t, srv, "POST", "/api/libraries", `{"name":"All","path":"/","startFrom":"balanced"}`)
+	if code != 400 || errCode(body) != "system_folder" || !strings.Contains(body, "Pick the folder that holds your videos") {
+		t.Errorf("%d %s", code, body)
+	}
+}

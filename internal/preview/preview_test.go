@@ -107,17 +107,17 @@ func TestPreviewCountsAndEstimates(t *testing.T) {
 	p := &Previewer{Store: store(t), Exec: x, FFprobe: "ffprobe"}
 	dir := library(t)
 	r := p.Library(1, dir, rules.SliderTemplate(3), 10*time.Second)
-	if r.Status != "ready" || r.Files != 6 || r.TotalBytes != 7_900_000 || r.CanShrink != 3 {
+	if r.Status != "ready" || r.Files != 6 || r.TotalBytes != 7_900_000 || r.CanShrink != 2 {
 		t.Fatalf("%+v", r)
 	}
-	if fmt.Sprint(r.Skipped) != "map[already_efficient:1 already_hevc:1 unreadable:1]" {
+	// the shared file is skipped (slice 23's file guards), as the scanner skips it
+	if fmt.Sprint(r.Skipped) != "map[already_efficient:1 already_hevc:1 shared_file:1 unreadable:1]" {
 		t.Errorf("skipped %v", r.Skipped)
 	}
-	if r.SharedNoSaving != 1 {
-		t.Errorf("shared %d", r.SharedNoSaving)
+	if r.SharedNoSaving != 0 {
+		t.Errorf("shared %d: always 0 since the file guards", r.SharedNoSaving)
 	}
-	// a.mkv and b.mp4 are 3 MB of video at 0.16 bits per pixel; Balanced saves 10% to 55% of it. The
-	// shared file (4 MB) frees nothing and is left out.
+	// a.mkv and b.mp4 are 3 MB of video at 0.16 bits per pixel; Balanced saves 10% to 55% of it.
 	if r.EstimateBytesLow != 300_000 || r.EstimateBytesHigh != 1_650_000 {
 		t.Errorf("estimate %d - %d", r.EstimateBytesLow, r.EstimateBytesHigh)
 	}
@@ -134,8 +134,8 @@ func TestPreviewIsCached(t *testing.T) {
 	dir := library(t)
 	first := p.Library(1, dir, rules.SliderTemplate(3), 10*time.Second)
 	n := x.n()
-	if n != 6 {
-		t.Fatalf("%d probes for 6 videos", n)
+	if n != 5 {
+		t.Fatalf("%d probes for 6 videos (the shared one is never read)", n)
 	}
 	if again := p.Library(1, dir, rules.SliderTemplate(3), 0); fmt.Sprint(again) != fmt.Sprint(first) {
 		t.Errorf("second preview %+v, first %+v", again, first)
@@ -162,7 +162,7 @@ func TestPreviewComputingAndStale(t *testing.T) {
 	x := &probes{gate: make(chan struct{})}
 	p := &Previewer{Store: store(t), Exec: x, FFprobe: "ffprobe"}
 	dir := library(t)
-	if r := p.Library(1, dir, rules.SliderTemplate(3), 50*time.Millisecond); r.Status != "computing" || r.Stale || r.Progress == nil || *r.Progress != (Progress{0, 6}) {
+	if r := p.Library(1, dir, rules.SliderTemplate(3), 50*time.Millisecond); r.Status != "computing" || r.Stale || r.Progress == nil || r.Progress.Total != 6 || r.Progress.Done > 1 { // the shared file needs no probe
 		t.Fatalf("%+v %+v", r, r.Progress)
 	}
 	close(x.gate)
@@ -331,16 +331,17 @@ func TestStartReusesThePreviewsProbes(t *testing.T) {
 	sc := &scanner.Scanner{Store: st, Exec: x, FFprobe: "ffprobe", Targets: func() ([]scanner.Target, error) {
 		return []scanner.Target{{LibraryID: l.ID, Path: dir, Template: rules.SliderTemplate(3)}}, nil
 	}}
-	if n := sc.ScanOnce(context.Background()); n != 3 {
-		t.Errorf("queued %d, want the 3 the Preview said can be shrunk", n)
+	sc.ScanOnce(context.Background()) // the first look (slice 23: decided on the second)
+	if n := sc.ScanOnce(context.Background()); n != 2 {
+		t.Errorf("queued %d, want the 2 the Preview said can be shrunk", n)
 	}
 	if extra := x.n() - before; extra != 1 { // only bad.mkv, whose probe failed and so was not kept
 		t.Errorf("the scan probed %d files again", extra)
 	}
 }
 
-// A link made or removed in another folder changes which files free nothing: the cached Preview is
-// not served as fresh (review 34ab633).
+// A link made or removed in another folder changes which files are shared: the cached Preview is not
+// served as fresh (review 34ab633), and the shared file moves to skipped.shared_file (slice 23).
 func TestPreviewSeesLinksMadeElsewhere(t *testing.T) {
 	p := &Previewer{Store: store(t), Exec: &probes{}, FFprobe: "ffprobe"}
 	dir := library(t)
@@ -350,17 +351,17 @@ func TestPreviewSeesLinksMadeElsewhere(t *testing.T) {
 		t.Skip("cannot make links here")
 	}
 	var r Result
-	for i := 0; i < 100 && (r.Status != "ready" || r.SharedNoSaving != first.SharedNoSaving+1); i++ {
+	for i := 0; i < 100 && (r.Status != "ready" || r.Skipped["shared_file"] != first.Skipped["shared_file"]+1); i++ {
 		r = p.Library(1, dir, rules.SliderTemplate(3), 100*time.Millisecond)
 	}
-	if r.SharedNoSaving != first.SharedNoSaving+1 || r.EstimateBytesHigh >= first.EstimateBytesHigh {
+	if r.Skipped["shared_file"] != first.Skipped["shared_file"]+1 || r.CanShrink != first.CanShrink-1 || r.EstimateBytesHigh >= first.EstimateBytesHigh {
 		t.Fatalf("after a link elsewhere: %+v (before %+v)", r, first)
 	}
 	os.Remove(elsewhere)
-	for i := 0; i < 100 && (r.Status != "ready" || r.SharedNoSaving != first.SharedNoSaving); i++ {
+	for i := 0; i < 100 && (r.Status != "ready" || r.Skipped["shared_file"] != first.Skipped["shared_file"]); i++ {
 		r = p.Library(1, dir, rules.SliderTemplate(3), 100*time.Millisecond)
 	}
-	if r.SharedNoSaving != first.SharedNoSaving || r.EstimateBytesHigh != first.EstimateBytesHigh {
+	if r.CanShrink != first.CanShrink || r.EstimateBytesHigh != first.EstimateBytesHigh {
 		t.Errorf("after removing it: %+v", r)
 	}
 }
@@ -371,7 +372,7 @@ func TestPreviewCountsRestoredFilesAsSkipped(t *testing.T) {
 	dir := library(t)
 	st.PutFile(jobs.File{Path: filepath.Join(dir, "a.mkv"), Decision: jobs.DecisionRestored})
 	r := (&Previewer{Store: st, Exec: &probes{}, FFprobe: "ffprobe"}).Library(1, dir, rules.SliderTemplate(3), 10*time.Second)
-	if r.Skipped["restored"] != 1 || r.CanShrink != 2 {
+	if r.Skipped["restored"] != 1 || r.CanShrink != 1 { // b.mp4 (the shared file is skipped too)
 		t.Errorf("%+v", r)
 	}
 }

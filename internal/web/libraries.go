@@ -108,6 +108,8 @@ func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			apiError(w, http.StatusNotFound, "not_found", "There is no such library.")
 		case errors.Is(err, jobs.ErrPathTaken):
 			apiError(w, http.StatusConflict, "path_taken", "Another library already uses this folder.")
+		case errors.Is(err, jobs.ErrSystemFolder):
+			apiError(w, http.StatusBadRequest, "system_folder", jobs.ErrSystemFolder.Error())
 		case errors.Is(err, jobs.ErrLibraryBusy):
 			apiError(w, http.StatusConflict, "busy", "This library is being removed. Nothing was changed.")
 		default:
