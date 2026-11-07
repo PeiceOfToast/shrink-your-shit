@@ -277,9 +277,16 @@
       if (!paused && working[0] && working[0].percent < 99) working[0].percent++; // moves a little on every look
       return ok({ working: paused ? [] : working, upNext: [{ library: "Movies", count: 590, order: settings.queueOrder }, { library: "TV Shows", count: 0, order: "" }] });
     },
+    // A running file answers 202 "stopping" and leaves the queue a few seconds later, as the worker stops it
+    // cleanly (contract, slice 24); a file no longer working answers 409 already_finished.
     stopJob: function (p) {
-      var j = removeFrom(working, "jobId", p.id); if (!j) return gone();
-      skippedList.push({ id: "s" + p.id, library: j.library, path: j.path, reason: "user_stopped", detail: "You stopped it.", libraryId: "1" }); saveAct(); return ok();
+      var i = find(working, "jobId", p.id);
+      if (i < 0) return fail(409, "already_finished", "That file had already finished. Nothing was changed.");
+      setTimeout(function () {
+        var j = removeFrom(working, "jobId", p.id); if (!j) return;
+        skippedList.push({ id: "s" + p.id, library: j.library, path: j.path, reason: "user_stopped", detail: "You stopped it.", libraryId: "1" }); saveAct();
+      }, 4000);
+      return ok({ status: "stopping" });
     },
     retryJob: function (p) { var r = removeFrom(failedList, "jobId", p.id); saveAct(); return r ? ok() : gone(); },
     skipped: function (p) {
