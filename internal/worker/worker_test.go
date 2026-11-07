@@ -3,6 +3,7 @@
 package worker
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -30,6 +31,7 @@ type spec struct {
 	duration float64
 	chapters int
 	streams  []map[string]any
+	format   string // ffprobe's format_name; "" is Matroska
 }
 
 func vid(codec string, w, h int, pix string) map[string]any {
@@ -66,7 +68,7 @@ func (s spec) json() string {
 	b, _ := json.Marshal(map[string]any{
 		"streams":  s.streams,
 		"chapters": chapters,
-		"format":   map[string]any{"format_name": "matroska,webm", "duration": fmt.Sprint(s.duration), "size": "14"},
+		"format":   map[string]any{"format_name": cmp.Or(s.format, "matroska,webm"), "duration": fmt.Sprint(s.duration), "size": "14"},
 	})
 	return string(b)
 }
@@ -116,7 +118,10 @@ type scenario struct {
 	srtBytes int             // the size the fake encoder gives an extracted .srt (0: a few bytes)
 }
 
-func newScenario(t *testing.T) *scenario {
+func newScenario(t *testing.T) *scenario { t.Helper(); return newScenarioNamed(t, "movie.mkv") }
+
+// newScenarioNamed is newScenario with the original named name (in the scenario's folder).
+func newScenarioNamed(t *testing.T, name string) *scenario {
 	t.Helper()
 	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
@@ -124,7 +129,7 @@ func newScenario(t *testing.T) *scenario {
 	}
 	t.Cleanup(func() { st.Close() })
 	dir := t.TempDir()
-	src := filepath.Join(dir, "movie.mkv")
+	src := filepath.Join(dir, name)
 	os.WriteFile(src, []byte("original-bytes"), 0o644)
 	id, _ := st.Enqueue(jobs.Job{Library: dir, Path: src, DurationSec: 100, SizeBefore: 14})
 	s := &scenario{

@@ -97,7 +97,6 @@ func TestPreviewEndpoint(t *testing.T) {
 		`{"setting":{"quality":3,"format":"av1"}}`:                        "400 not_available",
 		`{"setting":{"quality":3,"audio":"my_languages"}}`:                "400 languages_needed",
 		`{"setting":{"quality":3,"audioBitrate":"128"}}`:                  "400 invalid_setting",
-		`{"setting":{"quality":3,"fileType":"mp4"}}`:                      "400 not_available",
 		`{"setting":{"quality":3,"speed":"fast"}}`:                        "400 invalid_setting",
 		fmt.Sprintf(`{"sampleFile":%q}`, outside):                         "400 outside_library",
 		fmt.Sprintf(`{"sampleFile":%q}`, dir):                             "400 outside_library",

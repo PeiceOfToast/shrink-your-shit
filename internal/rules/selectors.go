@@ -36,9 +36,9 @@ var (
 	AvailableSubtitles = []string{"keep_all", "my_languages", "text_only", "srt"}
 )
 
-// AvailableFileTypes are the file types each "after converting" choice can save (25a: changing the type
-// needs the original kept beside; replacing with a new type is 25a-2).
-var AvailableFileTypes = map[string][]string{"replace": {"keep"}, "beside": {"keep", "mkv", "mp4"}}
+// AvailableFileTypes are the file types each "after converting" choice can save (25a beside; 25a-2
+// replace, where a new type renames the file: movie.mp4 becomes movie.mkv).
+var AvailableFileTypes = map[string][]string{"replace": {"keep", "mkv", "mp4"}, "beside": {"keep", "mkv", "mp4"}}
 
 // SpeedPresets maps the Speed choice to the x265 preset (normal is the slider's).
 var SpeedPresets = map[string]string{"faster": "fast", "normal": SliderPreset, "slower": "slow"}
@@ -231,10 +231,18 @@ func canonIgnore(e string) string { return strings.TrimSuffix(path.Clean(slash(e
 
 // Warnings are what the person should know about a flow's choices before it runs.
 func (t Template) Warnings() []string {
-	if s, ok := t.SelectorsView(); ok && !s.SkipHDR {
-		return []string{`HDR and Dolby Vision files will be converted without their HDR information, so they can look washed out. Turn "Skip HDR and Dolby Vision files" back on to leave them as they are.`}
+	out := []string{}
+	s, ok := t.SelectorsView()
+	if !ok {
+		return out
 	}
-	return []string{}
+	if !s.SkipHDR {
+		out = append(out, `HDR and Dolby Vision files will be converted without their HDR information, so they can look washed out. Turn "Skip HDR and Dolby Vision files" back on to leave them as they are.`)
+	}
+	if w := RenameWarning(s.AfterConverting, s.FileType); w != "" { // 25a-2
+		out = append(out, w)
+	}
+	return out
 }
 
 func contains(list []string, v string) bool {

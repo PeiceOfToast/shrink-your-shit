@@ -203,7 +203,6 @@ func TestSelectorsSaveAndReadBack(t *testing.T) {
 		`"audio":"my_languages"`:                 "languages_needed",
 		`"subtitles":"burn_in"`:                  "invalid",
 		`"format":"av1"`:                         "not_available",
-		`"fileType":"mp4"`:                       "not_available", // replace mode
 		`"fileType":"mp4","afterConverting":"x"`: "invalid",
 		`"speed":"fast"`:                         "invalid",
 		`"resolution":"720p"`:                    "invalid",
@@ -307,4 +306,24 @@ func TestSrtFlowStepSaysPicturesStayInside(t *testing.T) {
 		}
 	}
 	t.Error("no subtitles step")
+}
+
+// Replace mode with a new file type is saved (25a-2), and GET, PUT and the Preview carry the warning
+// that files are renamed (design's sentence, a plain string in warnings).
+func TestReplaceWithNewFileTypeIsSavedWithAWarning(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	path := fmt.Sprintf("/api/libraries/%d/setting", l.ID)
+	want := "Changing the file type renames each file (movie.mp4 becomes movie.mkv). Radarr, Sonarr, Plex or Jellyfin may lose track of the renamed files: after converting, rescan this library in those apps."
+	code, body := post(t, srv, "PUT", path, `{"quality":3,"fileType":"mkv","afterConverting":"replace"}`)
+	if code != 200 || !strings.Contains(body, want) {
+		t.Fatalf("put: %d %s", code, body)
+	}
+	if _, body, _ := do(t, nil, srv, call{method: "GET", path: path}); !strings.Contains(body, `"warnings":["`+want+`"]`) {
+		t.Errorf("get: %s", body)
+	}
+	code, body = post(t, srv, "POST", fmt.Sprintf("/api/libraries/%d/preview", l.ID), `{"setting":{"quality":3,"fileType":"mkv","afterConverting":"replace"}}`)
+	if code != 200 || !strings.Contains(body, want) {
+		t.Errorf("preview: %d %s", code, body)
+	}
 }

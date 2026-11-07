@@ -195,3 +195,47 @@ func bitrates(t *testing.T, path string) (avg, peak float64) {
 	}
 	return total / max(last, 1), peak
 }
+
+// Replace mode with "Make it an MKV file" on a real MP4 (25a-2): Movie.mp4 becomes Movie.mkv (a real
+// Matroska file, audio kept), the original is kept, and Get original back brings Movie.mp4 back and
+// removes Movie.mkv.
+func TestRealReplaceWithNewFileType(t *testing.T) {
+	needTools(t)
+	dir := t.TempDir()
+	src := filepath.Join(dir, "Movie.mp4")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=5:size=1280x720:rate=25", "-f", "lavfi", "-i", "sine=duration=5:frequency=440",
+		"-map", "0", "-map", "1", "-c:v", "libx264", "-b:v", "5000k", "-c:a", "aac", "-b:a", "96k", "-metadata:s:a:0", "language=eng", src)
+	before, _ := os.ReadFile(src)
+	sel := rules.DefaultSelectors(3)
+	sel.FileType, sel.SkipSmall = "mkv", false
+	tmpl := sel.Template()
+	st, id := realJob(t, src, 5)
+	w := realWorker(st, media.OSExec{})
+	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.KeepDays, w.Journal = func() int { return 7 }, st
+	w.run(t)
+	mkv := filepath.Join(dir, "Movie.mkv")
+	if j, _ := st.Get(id); j.Status != jobs.Done || j.OutputPath != mkv {
+		t.Fatalf("%+v", j)
+	}
+	if _, err := os.Stat(src); err == nil {
+		t.Error("Movie.mp4 is still there")
+	}
+	info := probe(t, mkv)
+	if info.Container != "matroska,webm" || info.Video().Codec != "hevc" || len(info.Audio()) != 1 {
+		t.Errorf("Movie.mkv: %s %s, %d audio", info.Container, info.Video().Codec, len(info.Audio()))
+	}
+	o, err := st.OriginalOfJob(id)
+	if err != nil || o.NewPath != mkv {
+		t.Fatalf("%+v %v", o, err)
+	}
+	if _, err := Restore(st, o.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(src); string(b) != string(before) {
+		t.Error("Movie.mp4 did not come back as it was")
+	}
+	if _, err := os.Stat(mkv); err == nil {
+		t.Error("Movie.mkv is still there after getting the original back")
+	}
+}

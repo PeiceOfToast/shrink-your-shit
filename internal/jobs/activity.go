@@ -23,8 +23,8 @@ type Summary struct {
 func (s *Store) ActivitySummary() (Summary, error) {
 	var a Summary
 	err := s.db.QueryRow(`SELECT
-  COALESCE(SUM(CASE WHEN status=? AND size_after>0 AND output_path=path AND NOT `+keptSQL+` THEN size_before-size_after END),0),
-  COALESCE(SUM(CASE WHEN status=? AND size_after>0 AND output_path=path AND `+keptSQL+` THEN size_before-size_after END),0),
+  COALESCE(SUM(CASE WHEN status=? AND size_after>0 AND `+replacedSQL+` AND NOT `+keptSQL+` THEN size_before-size_after END),0),
+  COALESCE(SUM(CASE WHEN status=? AND size_after>0 AND `+replacedSQL+` AND `+keptSQL+` THEN size_before-size_after END),0),
   COALESCE(SUM(status=?),0), COALESCE(SUM(status=?),0), COALESCE(SUM(status IN (?,?)),0)
 FROM jobs`, Done, OriginalKept, Done, OriginalKept, Running, Queued, Failed, Kept).Scan(&a.FreedBytes, &a.WaitingBytes, &a.WorkingFiles, &a.WaitingFiles, &a.Failed)
 	if err != nil {
@@ -162,6 +162,25 @@ func (s *Store) SkippedFiles(reason string, limit, offset int) ([]Skipped, int, 
 
 // ForgetSkipped removes a skipped file's record ("Convert again"): the next scan looks at it afresh.
 // ErrNotFound if there is no such skipped file.
+// SkippedPath is the path of skipped record id (ErrNotFound if there is none).
+func (s *Store) SkippedPath(id int64) (string, error) {
+	var path string
+	err := s.db.QueryRow(`SELECT path FROM files WHERE rowid=? AND reason<>''`, id).Scan(&path)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return path, err
+}
+
+// RenamedTo reports where a finished conversion moved the file at path when it changed its type in
+// replace mode (25a-2): the converted file's name.
+func (s *Store) RenamedTo(path string) (string, bool) {
+	var to string
+	err := s.db.QueryRow(`SELECT o.new_path FROM originals o JOIN jobs j ON j.id=o.job_id
+WHERE o.path=? AND o.new_path<>'' AND o.state IN (?,?) AND j.status=? ORDER BY o.id DESC LIMIT 1`, path, OriginalKept, OriginalPurged, Done).Scan(&to)
+	return to, err == nil
+}
+
 func (s *Store) ForgetSkipped(id int64) (string, error) {
 	var path string
 	err := s.db.QueryRow(`SELECT path FROM files WHERE rowid=? AND reason<>''`, id).Scan(&path)

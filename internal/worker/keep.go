@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
 // Keeping originals (slice 17, QOL-SAFETY-PLAN.md S2): in replace mode the original is moved into a
@@ -112,7 +113,12 @@ func trashPath(dir, base string, id int64) (string, error) {
 // keepAndReplace moves the original of job into .syp-trash and the checked new file (stage) to its
 // name, journaled. stillOK is called right before each rename (the original and the new file must
 // still be the ones that were read and checked). On any refusal or error the original is back in place.
-func (w *Worker) keepAndReplace(ctx context.Context, job jobs.Job, stage *staged, before os.FileInfo, days int, stillOK func() error) error {
+//
+// dest is where the new file goes: job.Path, or another name when the file type changes (25a-2). Then
+// the new file never replaces anything at dest (renameNoReplace), the original goes back with
+// renameNoReplace if that fails, and with 0 days the kept original is deleted right after the swap.
+func (w *Worker) keepAndReplace(ctx context.Context, job jobs.Job, stage *staged, before os.FileInfo, dest string, days int, stillOK func() error) error {
+	renaming := dest != job.Path
 	dir := filepath.Join(filepath.Dir(job.Path), TrashDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		log.Printf("folder for kept originals %s: %v", dir, err)
@@ -138,6 +144,9 @@ func (w *Worker) keepAndReplace(ctx context.Context, job jobs.Job, stage *staged
 	o := jobs.Original{JobID: job.ID, LibraryID: job.LibraryID, Path: job.Path, Trash: trash,
 		Staged: stage.path, Bytes: before.Size(), ModTime: before.ModTime().UnixNano(), Hash: hash, NewBytes: nst.Size(),
 		NewMTime: nst.ModTime().UnixNano(), NewHash: newHash}
+	if renaming {
+		o.NewPath = dest
+	}
 	id, err := w.Journal.BeginSwap(o)
 	if err != nil {
 		return fmt.Errorf("could not record the swap, so nothing was moved; the original is untouched (%v)", err)
@@ -162,15 +171,25 @@ func (w *Worker) keepAndReplace(ctx context.Context, job jobs.Job, stage *staged
 	if err := hook("original moved"); err != nil {
 		return err
 	}
-	// 2. The new file to the original's name. If that fails, the original goes back.
-	err = moveIntoPlace(ctx, stage.path, job.Path, stage.intact)
+	// 2. The new file to the original's name (or its new name: never over another file). If that
+	// fails, the original goes back.
+	if renaming {
+		err = moveNoClobber(ctx, stage.path, dest, stage.intact, rules.NameTaken)
+	} else {
+		err = moveIntoPlace(ctx, stage.path, job.Path, stage.intact)
+	}
 	if err != nil {
-		if rerr := os.Rename(o.Trash, job.Path); rerr != nil {
+		putBack := os.Rename
+		if renaming { // its name was free for a moment: something put there meanwhile is not replaced
+			putBack = renameNoReplace
+		}
+		if rerr := putBack(o.Trash, job.Path); rerr != nil {
 			// Leave the row "moving": the next start puts the original back.
 			return fmt.Errorf("the new file could not be moved into place (%v), and putting the original back failed (%v); it is in %s and is put back at the next start", err, rerr, o.Trash)
 		}
 		var k *KeptError
-		if errors.As(err, &k) {
+		var f *FailedError
+		if errors.As(err, &k) || errors.As(err, &f) {
 			return undo(err)
 		}
 		return undo(fmt.Errorf("move result into place: %w", err))
@@ -181,6 +200,13 @@ func (w *Worker) keepAndReplace(ctx context.Context, job jobs.Job, stage *staged
 	if err := w.Journal.FinishSwap(id, w.now().AddDate(0, 0, days)); err != nil {
 		// Both files are where they belong; the next start finishes the record.
 		log.Printf("swap %d: %v (finished at the next start)", id, err)
+		return hook("done")
+	}
+	if days == 0 { // kept only because the name changed: deleted now (or by the next purge)
+		if isOriginal(o.Trash, o) && os.Remove(o.Trash) == nil {
+			w.Journal.SetSwapState(id, jobs.OriginalPurged)
+			removeIfEmpty(dir)
+		}
 	}
 	return hook("done")
 }
@@ -201,9 +227,9 @@ type Completer interface {
 // RequeueRunning). For each row still "moving":
 //   - the original is still at its name: nothing was moved; the row is rolled back and the job runs
 //     again (its temp files are cleaned up as usual);
-//   - the original is in the trash and the new file at its name: the swap is finished and the job
-//     marked done, so the new file is not converted again;
-//   - the original is in the trash and nothing at its name: the original is put back (rolled back).
+//   - the original is in the trash and the new file at its name (Dest: another name when the file type
+//     changed, 25a-2): the swap is finished and the job marked done, so the new file is not converted again;
+//   - the original is in the trash and nothing at Dest: the original is put back (rolled back).
 //
 // Anything else is left untouched and reported: the row is marked needs_attention.
 // keepDays is how long a finished original is kept.
@@ -240,25 +266,34 @@ func RecoverSwaps(j Store, done Completer, keepDays int, now time.Time) []string
 		case isOriginal(o.Path, o):
 			j.SetSwapState(o.ID, jobs.SwapRolledBack)
 			say("%s: the conversion was interrupted before anything was moved; it runs again", o.Path)
-		case isOriginal(o.Trash, o) && exists(o.Path) && !isNew(o.Path, o):
+		case isOriginal(o.Trash, o) && exists(o.Dest()) && !isNew(o.Dest(), o):
 			j.SetSwapState(o.ID, jobs.SwapAttention)
-			say("%s: a file that is not the converted one is at this name, and the original is kept in %s. Nothing was moved; please check which one you want", o.Path, o.Trash)
-		case isOriginal(o.Trash, o) && exists(o.Path):
+			say("%s: a file that is not the converted one is at this name, and the original is kept in %s. Nothing was moved; please check which one you want", o.Dest(), o.Trash)
+		case isOriginal(o.Trash, o) && exists(o.Dest()):
 			if err := j.FinishSwap(o.ID, now.AddDate(0, 0, keepDays)); err != nil {
 				say("%s: %v", o.Path, err)
 				continue
 			}
 			size := int64(0)
-			if st, err := os.Stat(o.Path); err == nil {
+			if st, err := os.Stat(o.Dest()); err == nil {
 				size = st.Size()
 			}
-			if err := done.Complete(o.JobID, o.Path, size); err != nil {
+			if err := done.Complete(o.JobID, o.Dest(), size); err != nil {
 				say("%s: the swap was finished, but the job could not be marked done: %v", o.Path, err)
 				continue
 			}
-			say("%s: finished the interrupted swap; the original is kept in %s", o.Path, o.Trash)
-		case isOriginal(o.Trash, o) && !exists(o.Path):
-			if err := os.Rename(o.Trash, o.Path); err != nil {
+			say("%s: finished the interrupted swap; the original is kept in %s", o.Dest(), o.Trash)
+		case isOriginal(o.Trash, o) && !exists(o.Dest()):
+			putBack := os.Rename
+			if o.NewPath != "" { // the original's own name was free meanwhile: never over a file put there
+				putBack = renameNoReplace
+			}
+			if err := putBack(o.Trash, o.Path); err != nil {
+				if errors.Is(err, fs.ErrExist) { // another file took the original's name meanwhile (25a-2)
+					j.SetSwapState(o.ID, jobs.SwapAttention)
+					say("%s: another file is at this name now, and the original is kept in %s. Nothing was moved; please check which one you want", o.Path, o.Trash)
+					continue
+				}
 				say("%s: the original is in %s but could not be put back: %v", o.Path, o.Trash, err)
 				continue
 			}

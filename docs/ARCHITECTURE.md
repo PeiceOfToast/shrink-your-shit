@@ -109,14 +109,17 @@ A **selectors** flow (`internal/rules/selectors.go`, slice 25a) stores the Stand
 - Resolution keep/1080/720/480 scales down only (`scale=-2:H`, CRF by the new height). `Expect` then
   wants that picture size, and the picture comparison scales the original to it.
 - maxBitrate is a VBV cap (maxrate = value, bufsize = 2x).
-- File type keep/mkv/mp4 applies with "Put the new file next to the original" (beside) only; an existing file at that name is never replaced (the job fails with a plain reason) (`name.hevc.mkv`; replacing with a new type
-  is 25a-2). A track the new type cannot hold skips the file with a reason (`cannot_keep_track`).
+- File type keep/mkv/mp4. Beside: `name.hevc.mkv`. Replace (25a-2): the new file takes the original's name
+  with the new extension (`movie.mp4` becomes `movie.mkv`; an extension that differs only in case is no
+  change), through the journaled swap below, and the setting answers a warning that files are renamed
+  (other apps may lose track of them). Either way an existing file at the new name is never replaced (the
+  job fails with a plain reason, before converting and again at the rename). A track the new type cannot
+  hold skips the file with a reason (`cannot_keep_track`).
 - Ignore is a list of folders, files or patterns inside the library that the scanner and the
   Preview do not look at.
 - Skip HDR (on by default; off converts HDR and the setting answers a warning), Skip small (off
   converts whatever its bits per pixel), and the minimum saving (follows Quality unless given).
-- Audio and Subtitles are `keep_all` only; the other values, AV1, and a new file type when replacing
-  are 400 `not_available`, nothing written.
+- AV1 is 400 `not_available`, nothing written.
 - A selectors setting equal to a position is saved as the slider (kind derived, addendum 6).
 - **Audio and subtitles** (slice 25b, `internal/rules/audio.go`), as `Plan.Tracks` (one op per track
   dropped, converted or saved as a file; the rest copied):
@@ -313,6 +316,15 @@ trash and the new file at its name, the swap is finished and the job marked done
 trash and nothing at its name, it is put back. Anything else is left alone and marked
 `needs_attention`. Jobs still `running` whose row is `kept` are marked done, so a crash between the
 swap and the job record never converts the new file again. 0 days: one rename, as before.
+
+**A new file type in replace mode (25a-2):** the row also records `new_path` (migration 11; `''` for
+the same name), the name the new file takes. The same steps run with the new file going to `new_path`
+without ever replacing a file there (`renameNoReplace`; taken: the original goes back and the job fails
+with design's sentence). Recovery and restore look for the converted file at `new_path` and put the
+original back at `path`, never over a file that took that name meanwhile (then `needs_attention`). A
+change of name is always journaled; with 0 days the kept original is deleted right after the swap
+(state `purged`). Done and Kept items carry `newPath`; "Convert again" on a record of a name that a
+conversion renamed away answers 409 `renamed`.
 `GET /api/activity/done` says per job whether the original is `kept` (with `keptId`, `keptDaysLeft`)
 or `deleted`; `GET /api/activity/kept` lists the kept ones. `freedBytes` counts originals already
 gone, `waitingBytes` those still kept (contract F1). `.syp-trash` is hidden, so the scanner, the Preview
