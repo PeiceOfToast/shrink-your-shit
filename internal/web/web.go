@@ -39,7 +39,11 @@ func Handler(store *jobs.Store, libraries []string, access *Access) http.Handler
 		files.ServeHTTP(w, r)
 	}))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/libraries/", http.StatusFound)
+		to := "/libraries/"
+		if r.URL.RawQuery != "" { // keep ?token=: the printed sign-in link points at the root
+			to += "?" + r.URL.RawQuery
+		}
+		http.Redirect(w, r, to, http.StatusFound)
 	})
 	items := loadNav()
 	for _, p := range pages {
