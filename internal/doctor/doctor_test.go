@@ -5,6 +5,7 @@ package doctor
 import (
 	"context"
 	"errors"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -366,7 +367,7 @@ func TestHealthCarriesLibraryNotes(t *testing.T) {
 
 // A system folder is a blocker with a plain message (slice 23): the doctor says so before anything else.
 func TestFolderRefusesSystemFolders(t *testing.T) {
-	r := checker(1<<40).Folder(context.Background(), "/")
+	r := checker(1<<40).Folder(context.Background(), jobs.SystemDriveRootForTest())
 	if r.OK || len(r.Blockers) != 1 || r.Blockers[0].Code != "system_folder" || !strings.Contains(r.Blockers[0].Message, "Pick the folder that holds your videos") {
 		t.Errorf("%+v", r)
 	}

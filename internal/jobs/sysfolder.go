@@ -18,8 +18,12 @@ var ErrSystemFolder = errors.New("This is a system folder, a whole disk or a who
 // SystemFolder reports whether p (an absolute path, as stored) is refused as a library: the root of the
 // disk, a home folder or the folder of all home folders, or a system folder or anything inside one.
 func SystemFolder(p string) bool {
-	if abs, err := filepath.Abs(p); err == nil {
-		p = abs // "/" on Windows is the current drive's root
+	// A relative path is made absolute; on Windows a path rooted without a drive ("/", "\x") is left as
+	// it is: systemFolder reads it on the system drive (filepath.Abs would use the current one).
+	if !(runtime.GOOS == "windows" && filepath.VolumeName(p) == "" && (strings.HasPrefix(p, "/") || strings.HasPrefix(p, `\`))) {
+		if abs, err := filepath.Abs(p); err == nil {
+			p = abs
+		}
 	}
 	home, _ := os.UserHomeDir()
 	return systemFolder(p, runtime.GOOS, home, os.Getenv("SystemDrive"), os.Getenv("SystemRoot"))
@@ -41,7 +45,13 @@ func systemFolder(p, goos, home, sysDrive, sysRoot string) bool {
 		return s
 	}
 	if goos == "windows" {
+		if sysDrive == "" {
+			sysDrive = "C:"
+		}
 		s := strings.ReplaceAll(p, `\`, "/")
+		if strings.HasPrefix(s, "/") && !strings.HasPrefix(s, "//") { // rooted, no drive: on the system drive
+			p, s = sysDrive+p, sysDrive+s
+		}
 		if DevicePath(p) { // other names for any path, the system's too: never a library (review 75e86eb)
 			return true
 		}
@@ -107,4 +117,16 @@ func SystemDirForTest() string {
 func DevicePath(p string) bool {
 	s := strings.ReplaceAll(strings.TrimSpace(p), `\`, "/")
 	return strings.HasPrefix(s, "//?/") || strings.HasPrefix(s, "//./")
+}
+
+// SystemDriveRootForTest is the whole system disk on the running system: "/", or %SystemDrive%\.
+func SystemDriveRootForTest() string {
+	if runtime.GOOS == "windows" {
+		d := os.Getenv("SystemDrive")
+		if d == "" {
+			d = "C:"
+		}
+		return d + `\`
+	}
+	return "/"
 }

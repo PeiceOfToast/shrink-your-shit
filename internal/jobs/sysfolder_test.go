@@ -47,7 +47,13 @@ func TestSystemFolders(t *testing.T) {
 		{"windows", `C:\Users\ann`, `E:`, false},
 		{"windows", `C:\Users\ann`, `\\nas\media`, false}, // a NAS share root too
 		{"windows", `C:\Users\ann`, `\\nas\media\Movies`, false},
-		{"windows", `C:\Users\ann`, `\\nas`, true},   // a bare host, no share
+		{"windows", `C:\Users\ann`, `\\nas`, true}, // a bare host, no share
+		{"windows", `C:\Users\ann`, `/`, true},     // rooted, no drive: the system drive's root
+		{"windows", `C:\Users\ann`, `\`, true},
+		{"windows", `C:\Users\ann`, `C:/`, true},
+		{"windows", `C:\Users\ann`, `c:\`, true},
+		{"windows", `C:\Users\ann`, `/Windows`, true},
+		{"windows", `C:\Users\ann`, `\Movies`, false},
 		{"windows", `C:\Users\ann`, `\\?\C:\`, true}, // the device namespace: other names (review 75e86eb)
 		{"windows", `C:\Users\ann`, `\\.\C:\`, true},
 		{"windows", `C:\Users\ann`, `\\?\C:\Windows\System32`, true},
@@ -64,11 +70,11 @@ func TestSystemFolders(t *testing.T) {
 // there before.
 func TestStoreRefusesSystemFolders(t *testing.T) {
 	s := open(t)
-	if _, err := s.AddLibrary("Everything", "/", rules.SliderTemplate(3), true); !errors.Is(err, ErrSystemFolder) {
+	if _, err := s.AddLibrary("Everything", SystemDriveRootForTest(), rules.SliderTemplate(3), true); !errors.Is(err, ErrSystemFolder) {
 		t.Errorf("add /: %v", err)
 	}
 	l, _ := s.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), false)
-	root := "/"
+	root := SystemDriveRootForTest()
 	if _, err := s.UpdateLibrary(l.ID, nil, &root); !errors.Is(err, ErrSystemFolder) {
 		t.Errorf("move to /: %v", err)
 	}
@@ -83,7 +89,7 @@ func TestStoreRefusesSystemFolders(t *testing.T) {
 
 // The real system folders of the system running the tests are refused through the exported check.
 func TestSystemFolderOnThisSystem(t *testing.T) {
-	for _, p := range []string{"/", SystemDirForTest()} {
+	for _, p := range []string{"/", SystemDriveRootForTest(), SystemDirForTest()} {
 		if !SystemFolder(p) {
 			t.Errorf("%s is not refused", p)
 		}
