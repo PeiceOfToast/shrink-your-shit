@@ -19,7 +19,9 @@
     controlLevel: "basic", perLibraryFlow: false, firstRunDone: true, firstRunStep: 1, authRequired: false,
     keepOriginalsDays: 7, trashPath: "Kept next to each file, in a folder called .syp-trash",
     parallelJobs: 1, quietHours: { from: "", to: "" }, lowPriority: true, scanSchedule: "02:00",
-    integrations: {}, updateAvailable: null
+    integrations: { sonarr: { url: "", hasKey: false }, radarr: { url: "", hasKey: false }, plex: { url: "", hasKey: false }, jellyfin: { url: "", hasKey: false },
+      notifications: { webhookUrl: "", onDone: false, onFailed: true, onNeedsAttention: true } },
+    updateAvailable: /[?&]update=1/.test(location.search) ? { version: "1.2.0" } : null // ?update=1 shows the update notice
   };
   try { var saved = sessionStorage.getItem("syp-mock-settings"); if (saved) Object.assign(settings, JSON.parse(saved)); } catch (e) {}
   function persist() { try { sessionStorage.setItem("syp-mock-settings", JSON.stringify(settings)); } catch (e) {} }
@@ -113,15 +115,29 @@
     logout: function () { return ok(); },
     getSettings: function () { return ok(settings); },
     patchSettings: function (p, b) {
-      var k, level = b.controlLevel;
+      var level = b.controlLevel;
       if (level && ["basic", "standard", "advanced"].indexOf(level) < 0) return fail(400, "bad_value", "Control level must be Basic, Standard or Advanced. Nothing was changed.");
-      for (k in b) if (k in settings && k !== "authRequired" && k !== "trashPath") settings[k] = b[k];
+      if (b.quietHours) { var qf = "from" in b.quietHours ? b.quietHours.from : settings.quietHours.from, qt = "to" in b.quietHours ? b.quietHours.to : settings.quietHours.to;
+        if (!qf !== !qt) return fail(400, "bad_value", "Set both a start and an end, or leave both empty. Nothing was changed."); }
+      if (b.keepOriginalsDays != null && !(b.keepOriginalsDays >= 0 && b.keepOriginalsDays <= 365)) return fail(400, "bad_value", "Keep originals for 0 to 365 days. Nothing was changed.");
+      // Deep merge. A secret (apiKey, token) is never stored or returned: only that one is saved shows as hasKey.
+      (function merge(dst, src) {
+        Object.keys(src).forEach(function (k) {
+          if (k === "authRequired" || k === "trashPath" || k === "updateAvailable") return;
+          if (k === "apiKey" || k === "token") { if (src[k]) dst.hasKey = true; return; }
+          if (src[k] && typeof src[k] === "object") merge(dst[k] = dst[k] || {}, src[k]); else dst[k] = src[k];
+        });
+      })(settings, b);
       persist(); return ok(settings);
     },
     getToken: function () { return ok({ token: "sample-token-not-real" }); },
     rotateToken: function () { return ok({ token: "sample-token-new" }); },
-    getHealth: function () { return ok({ version: "sample", logsTail: [], checks: [{ id: "converter", label: "Video converter found", status: "ok", detail: "" }] }); },
-    backup: function () { return ok(); },
+    getHealth: function () {
+      return ok({ version: "1.1.0 (sample)", logsTail: ["20:01:12 started", "20:01:13 watching /media/movies", "20:02:40 converted Ocean Floor (2017).mkv", "20:03:02 skipped Dune Sands (2021).mkv: HDR"],
+        checks: [{ id: "converter", label: "Video converter found", status: "ok", detail: "" }, { id: "encoder", label: "Hardware encoder", status: "warn", detail: "Not found. That is fine; the processor will be used" },
+                 { id: "disk", label: "Free space", status: "ok", detail: "1.4 TB free" }, { id: "db", label: "Library database", status: "ok", detail: "" }] });
+    },
+    backup: function () { return Promise.resolve({ blob: function () { return Promise.resolve(new Blob(["Sample backup from the stand-in server. A real backup holds your settings and the list of converted files."], { type: "text/plain" })); } }); },
     listLibraries: function () { return ok(list(libs)); },
     addLibrary: function (p, b) {
       var l = { id: String(libs.length + 10), name: b.name || "New library", path: b.path || "", state: "not_started", started: false, workingFiles: 0, waitingFiles: 0, nextScan: iso(-6 * 3600e3), freedBytes: 0, flowId: "fn", settingLabel: "Balanced", settingKind: "slider" };

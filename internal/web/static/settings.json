@@ -1,0 +1,48 @@
+[
+  {"key": "controlLevel", "tab": "general", "group": "Control level", "type": "radio", "idPrefix": "lvl",
+   "intro": "How much control you have over each library. Changing this never deletes or resets anything.",
+   "options": [
+     {"value": "basic", "label": "Basic", "hint": "One slider per library."},
+     {"value": "standard", "label": "Standard", "hint": "Simple choices for resolution, audio, subtitles, file type and quality."},
+     {"value": "advanced", "label": "Advanced", "hint": "Visual builder. Adds one more menu item."}]},
+  {"key": "perLibraryFlow", "tab": "general", "group": "Per-library choices", "type": "checkbox", "id": "per-library",
+   "label": "Let me choose per library",
+   "hint": "Adds an extra choice to each library and one more menu item. The control level above always stays the same for every library."},
+  {"key": "token", "tab": "general", "group": "Access", "type": "token", "label": "Access token",
+   "hint": "Needed to open shrink-your-shit from another device."},
+  {"key": "authRequired", "tab": "general", "type": "info"},
+  {"key": "firstRunDone", "tab": "first-run", "type": "info"},
+  {"key": "firstRunStep", "tab": "first-run", "type": "info"},
+
+  {"key": "keepOriginalsDays", "tab": "safety", "group": "Keeping originals", "type": "number", "min": 0, "max": 365,
+   "label": "Keep originals for (days)", "hint": "0 means the original is deleted right after the new file has been checked.",
+   "error": "Enter a whole number of days, from 0 to 365."},
+  {"key": "trashPath", "tab": "safety", "group": "Keeping originals", "type": "readout", "label": "Where originals are kept"},
+
+  {"key": "parallelJobs", "tab": "performance", "group": "Speed", "type": "number", "min": 1, "max": 8,
+   "label": "Files converting at the same time", "hint": "More is faster but uses more of the computer.",
+   "error": "Enter a whole number from 1 to 8."},
+  {"key": "lowPriority", "tab": "performance", "group": "Speed", "type": "checkbox", "label": "Run at low priority",
+   "hint": "Keeps the computer responsive while converting."},
+  {"key": "quietHours.from", "tab": "performance", "group": "Quiet hours", "type": "time", "label": "Quiet hours start",
+   "intro": "No new file starts between these times. Leave both empty for no quiet hours."},
+  {"key": "quietHours.to", "tab": "performance", "group": "Quiet hours", "type": "time", "label": "Quiet hours end"},
+  {"key": "scanSchedule", "tab": "performance", "group": "Looking for new files", "type": "time",
+   "label": "Look for new files every day at", "hint": "Each library also shows when its next look is."},
+
+  {"key": "integrations.sonarr.url", "tab": "integrations", "group": "Sonarr", "type": "text", "label": "Address", "hint": "The address you open Sonarr at."},
+  {"key": "integrations.sonarr.apiKey", "tab": "integrations", "group": "Sonarr", "type": "secret", "label": "API key", "hasKey": "integrations.sonarr.hasKey"},
+  {"key": "integrations.radarr.url", "tab": "integrations", "group": "Radarr", "type": "text", "label": "Address", "hint": "The address you open Radarr at."},
+  {"key": "integrations.radarr.apiKey", "tab": "integrations", "group": "Radarr", "type": "secret", "label": "API key", "hasKey": "integrations.radarr.hasKey"},
+  {"key": "integrations.plex.url", "tab": "integrations", "group": "Plex", "type": "text", "label": "Address", "hint": "The address you open Plex at."},
+  {"key": "integrations.plex.token", "tab": "integrations", "group": "Plex", "type": "secret", "label": "Plex token", "hasKey": "integrations.plex.hasKey"},
+  {"key": "integrations.jellyfin.url", "tab": "integrations", "group": "Jellyfin", "type": "text", "label": "Address", "hint": "The address you open Jellyfin at."},
+  {"key": "integrations.jellyfin.apiKey", "tab": "integrations", "group": "Jellyfin", "type": "secret", "label": "API key", "hasKey": "integrations.jellyfin.hasKey"},
+  {"key": "integrations.notifications.webhookUrl", "tab": "integrations", "group": "Notifications", "type": "text", "label": "Webhook address",
+   "intro": "Send a short message to a web address when something happens.", "hint": "Leave empty to turn notifications off."},
+  {"key": "integrations.notifications.onDone", "tab": "integrations", "group": "Notifications", "type": "checkbox", "label": "Tell me when a file is done"},
+  {"key": "integrations.notifications.onFailed", "tab": "integrations", "group": "Notifications", "type": "checkbox", "label": "Tell me when a file fails"},
+  {"key": "integrations.notifications.onNeedsAttention", "tab": "integrations", "group": "Notifications", "type": "checkbox", "label": "Tell me when a library needs attention"},
+
+  {"key": "updateAvailable", "tab": "system", "type": "info"}
+]

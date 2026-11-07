@@ -82,11 +82,11 @@ var pages = []page{
 	{Path: "/activity/kept/", Section: "activity", Kind: "activity", Tab: "Kept originals", Empty: "Originals we are keeping for you will be listed here, with the date they will be deleted."},
 	{Path: "/flow/", Section: "flows", Kind: "flow", Tab: "Flow"},
 	{Path: "/flows/", Section: "flows", Kind: "flows", Empty: "Your flows will be listed here."},
-	{Path: "/settings/", Section: "settings", Tab: "General", Kind: "settings-general"},
-	{Path: "/settings/safety/", Section: "settings", Tab: "Safety", Empty: "How long originals are kept will be set here."},
-	{Path: "/settings/performance/", Section: "settings", Tab: "Performance", Empty: "How many files convert at once, quiet hours and how often to look for new files will be set here."},
-	{Path: "/settings/integrations/", Section: "settings", Tab: "Integrations", Empty: "Connections to Sonarr, Radarr, Plex and Jellyfin, and notifications, will be set here."},
-	{Path: "/settings/system/", Section: "settings", Tab: "System", Empty: "Health checks, logs, backup and updates will be shown here."},
+	{Path: "/settings/", Section: "settings", Tab: "General", Kind: "settings"},
+	{Path: "/settings/safety/", Section: "settings", Tab: "Safety", Kind: "settings"},
+	{Path: "/settings/performance/", Section: "settings", Tab: "Performance", Kind: "settings"},
+	{Path: "/settings/integrations/", Section: "settings", Tab: "Integrations", Kind: "settings"},
+	{Path: "/settings/system/", Section: "settings", Tab: "System", Kind: "settings"},
 }
 
 type tabView struct {
@@ -111,16 +111,19 @@ func scripts(kind string) []string {
 		return append(core, "ui.js", "flow.js")
 	case "activity":
 		return append(core, "ui.js", "activity.js")
-	case "settings-general":
-		return append(core, "settings.js")
+	case "settings":
+		return append(core, "ui.js", "settings.js")
 	}
 	return core
 }
 
 // lazyScripts are loaded by a page's own script, only when a setting calls for them.
 func lazyScripts(kind string) []string {
-	if kind == "library" {
+	switch kind {
+	case "library":
 		return []string{"flowpick.js"} // the Flow choice, only with "Let me choose per library"
+	case "settings":
+		return []string{"settings-flow.js"} // the preview under "Let me choose per library", only when it is on
 	}
 	return nil
 }
