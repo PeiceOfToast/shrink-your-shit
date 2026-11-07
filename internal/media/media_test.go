@@ -66,9 +66,31 @@ func TestParseProgress(t *testing.T) {
 func TestTranscodeReportsProgress(t *testing.T) {
 	f := &FakeExec{Lines: []string{"out_time_us=30000000", "progress=continue", "out_time_us=60000000"}}
 	var got []float64
-	_, err := Transcode(context.Background(), f, "ffmpeg", []string{"-i", "x"}, 60, func(p float64) { got = append(got, p) })
+	_, err := Transcode(context.Background(), f, "ffmpeg", []string{"-i", "x"}, 60, func(p Progress) { got = append(got, p.Percent) })
 	if err != nil || len(got) != 2 || got[1] != 100 {
 		t.Errorf("got %v %v", got, err)
+	}
+}
+
+// A real -progress block (S5): fps, bitrate and speed come with the percent, and the ETA is the
+// source time left at that speed; "N/A" reads as unknown.
+func TestTranscodeProgressFields(t *testing.T) {
+	f := &FakeExec{Lines: []string{"frame=750", "fps=50.0", "bitrate=4074.8kbits/s", "out_time_us=29000000", "speed=2.00x", "progress=continue",
+		"fps=48.5", "bitrate=4100.2kbits/s", "out_time_us=30000000", "speed=2.00x", "progress=continue",
+		"bitrate=N/A", "speed=N/A", "out_time_us=31000000"}}
+	var got []Progress
+	Transcode(context.Background(), f, "ffmpeg", nil, 60, func(p Progress) { got = append(got, p) })
+	if len(got) != 3 {
+		t.Fatalf("%+v", got)
+	}
+	if g := got[0]; g.FPS != 50 || g.BitrateKbps != 4074.8 || g.Speed != 0 || g.ETASeconds != -1 { // speed comes after out_time in a block
+		t.Errorf("first %+v", g)
+	}
+	if g := got[1]; g.Percent != 50 || g.FPS != 48.5 || g.Speed != 2 || g.ETASeconds != 15 {
+		t.Errorf("second %+v", g)
+	}
+	if g := got[2]; g.BitrateKbps != 0 || g.Speed != 0 || g.ETASeconds != -1 {
+		t.Errorf("N/A %+v", g)
 	}
 }
 

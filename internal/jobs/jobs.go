@@ -339,3 +339,66 @@ func (s *Store) RequeueRunning() (int64, error) {
 	}
 	return r.RowsAffected()
 }
+
+// Step is one line of a job's step summary (S5): found, checked, converted, verified, kept, replaced.
+type Step struct {
+	Step  string `json:"step"`
+	At    string `json:"at"`
+	OK    bool   `json:"ok"`
+	Words string `json:"words"`
+}
+
+// AddStep adds a step to job id's summary.
+func (s *Store) AddStep(id int64, step string, ok bool, words string) error {
+	_, err := s.db.Exec(`INSERT INTO job_steps(job_id,step,at,ok,words) VALUES(?,?,?,?,?)`, id, step, s.stamp(), ok, words)
+	return err
+}
+
+// Steps is job id's step summary, in the order the steps happened.
+func (s *Store) Steps(id int64) ([]Step, error) {
+	rows, err := s.db.Query(`SELECT step,at,ok,words FROM job_steps WHERE job_id=? ORDER BY rowid`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Step{}
+	for rows.Next() {
+		var st Step
+		if err := rows.Scan(&st.Step, &st.At, &st.OK, &st.Words); err != nil {
+			return nil, err
+		}
+		out = append(out, st)
+	}
+	return out, rows.Err()
+}
+
+// ForgetGoneJobSteps removes the steps of jobs that no longer exist (stopped, removed with their
+// library, skipped by their worker), and returns the ids of the jobs that still exist, so their logs
+// are kept and the others removed.
+func (s *Store) ForgetGoneJobSteps() (map[int64]bool, error) {
+	if _, err := s.db.Exec(`DELETE FROM job_steps WHERE job_id NOT IN (SELECT id FROM jobs)`); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Query(`SELECT id FROM jobs`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := map[int64]bool{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids[id] = true
+	}
+	return ids, rows.Err()
+}
+
+// LatestProbe is the newest stored probe (JSON) of path, whatever size and time it was taken at: the
+// Files view's codec, resolution and length (S5). false if it was never probed.
+func (s *Store) LatestProbe(path string) (string, bool) {
+	var info string
+	err := s.db.QueryRow(`SELECT info FROM probes WHERE path=? ORDER BY rowid DESC LIMIT 1`, path).Scan(&info)
+	return info, err == nil
+}

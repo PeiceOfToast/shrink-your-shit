@@ -18,6 +18,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/preview"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/runlog"
 )
 
 // Engine is what the API needs from the running scanner and worker. Nil functions do nothing.
@@ -30,6 +31,7 @@ type Engine struct {
 	FirstFiles *preview.FirstLister // the first 5 videos of a folder (slice A)
 	StopFile   func(id int64) bool  // stop a running job the person stopped; false if no worker runs it
 	Preview    *preview.Previewer   // the dry run (slice 19)
+	RunLogs    *runlog.Logs         // each job's run log (S5, the Files view); nil: none
 
 	Doctor  *doctor.Checker // the setup checks (nil: not available)
 	DataDir string          // the data folder, for the health report
