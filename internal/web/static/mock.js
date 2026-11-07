@@ -123,8 +123,11 @@
   function saveAct() { try { sessionStorage.setItem("syp-mock-act", JSON.stringify({ s: skippedList, f: failedList, d: doneList, k: keptList, w: working, p: paused })); } catch (e) {} }
 
   var m = {
-    login: function (p, b) { return b.token ? ok() : fail(401, "bad_token", "That token was not accepted. Nothing was changed. Check the address you were given."); },
-    logout: function () { return ok(); },
+    login: function (p, b) {
+      if (auth && b.token !== token()) return fail(401, "bad_token", "That token was not accepted. Check it and try again.");
+      store("syp-mock-session", "1"); return ok();
+    },
+    logout: function () { store("syp-mock-session", null); return ok(); },
     getSettings: function () { return ok(settings); },
     patchSettings: function (p, b) {
       var level = b.controlLevel;
@@ -142,8 +145,8 @@
       })(settings, b);
       persist(); return ok(settings);
     },
-    getToken: function () { return ok({ token: "sample-token-not-real" }); },
-    rotateToken: function () { return ok({ token: "sample-token-new" }); },
+    getToken: function () { return ok({ token: token() }); },
+    rotateToken: function () { store("syp-mock-token-n", String(+(read("syp-mock-token-n") || 0) + 1)); return ok({ token: token() }); },
     getHealth: function () {
       return ok({ version: "1.1.0 (sample)", logsTail: ["20:01:12 started", "20:01:13 watching /media/movies", "20:02:40 converted Ocean Floor (2017).mkv", "20:03:02 skipped Dune Sands (2021).mkv: HDR"],
         checks: [{ id: "converter", label: "Video converter found", status: "ok", detail: "" }, { id: "encoder", label: "Hardware encoder", status: "warn", detail: "Not found. That is fine; the processor will be used" },
@@ -270,6 +273,18 @@
       return ok({ id: flows[i].id, name: flows[i].name, steps: stepsFor(flows[i]) });
     }
   };
+  // ?auth=1: the mock requires a session, as the server does beyond loopback (?auth=0 turns it off; remembered
+  // for the tab). Every call but login answers 401 until you sign in with the token Settings > General shows.
+  // Only "signed in" and a counter are kept, never the token itself.
+  function read(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }
+  function store(k, v) { try { if (v == null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, v); } catch (e) {} }
+  function token() { var n = read("syp-mock-token-n"); return n ? "sample-token-new-" + n : "sample-token-not-real"; }
+  var am = /[?&]auth=([01])/.exec(location.search); if (am) store("syp-mock-auth", am[1] === "1" ? "1" : null);
+  var auth = read("syp-mock-auth") === "1"; settings.authRequired = auth;
+  Object.keys(m).forEach(function (name) {
+    var f = m[name];
+    if (name !== "login") m[name] = function (p, b) { return auth && !read("syp-mock-session") ? fail(401, "unauthorized", "Sign in to continue.") : f(p, b); };
+  });
   g.SYP = g.SYP || {};
   g.SYP.mock = m;
 })(window);

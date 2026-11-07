@@ -66,9 +66,18 @@
     });
   }
 
+  // 401: no session, or it ran out: app.js shows the sign-in screen (login's own 401 is a wrong token).
+  // 403 csrf: the server refused a write it did not trust; say so in plain words.
+  function guard(name, e) {
+    if (e && e.status === 401 && name !== "login" && g.SYP.needSignIn) g.SYP.needSignIn();
+    if (e && e.status === 403 && e.code === "csrf") e.message = "This change was refused because it did not come from this page. Nothing was changed. Reload the page and try again.";
+    return Promise.reject(e);
+  }
   var api = { mocked: mocked, names: Object.keys(E) };
   Object.keys(E).forEach(function (name) {
-    api[name] = function (p, body) { return mocked ? g.SYP.mock[name](p || {}, body || {}) : real(name, p, body); };
+    api[name] = function (p, body) {
+      return (mocked ? g.SYP.mock[name](p || {}, body || {}) : real(name, p, body)).then(null, function (e) { return guard(name, e); });
+    };
   });
   g.SYP = g.SYP || {};
   g.SYP.api = api;
