@@ -195,6 +195,7 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 	jobCtx, cancel := context.WithCancel(ctx)
 	w.current, w.cancelJob, w.stopped = job.ID, cancel, stopNone
 	w.mu.Unlock()
+	log.Printf("worker %s: job %d: started", w.ID, job.ID)
 	if testHook != nil {
 		testHook("registered")
 	}
@@ -227,12 +228,14 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 		}
 	}
 	if err != nil && stopped == stopUser {
+		log.Printf("worker %s: job %d: stopped by the person, original untouched", w.ID, job.ID)
 		return true, w.Queue.UserStopped(job.ID)
 	}
 	// A stop that came after the new file was in place changes nothing: the job is done (below).
 	if err != nil && stopped != stopNone && ctx.Err() == nil {
 		switch stopped {
 		case stopPause:
+			log.Printf("worker %s: job %d: paused, back in the queue", w.ID, job.ID)
 			return true, w.Queue.Release(job.ID)
 		case stopUser:
 			return true, w.Queue.UserStopped(job.ID)
