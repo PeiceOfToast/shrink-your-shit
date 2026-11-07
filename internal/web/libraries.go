@@ -253,23 +253,17 @@ func libraryPath(w http.ResponseWriter, store *jobs.Store, raw string, except in
 		apiError(w, http.StatusBadRequest, "not_a_folder", "That folder cannot be opened: "+err.Error())
 		return "", false
 	}
-	libs, err := store.Libraries()
-	if err != nil {
+	l, same, clash, err := store.FolderClash(p, except)
+	switch {
+	case err != nil:
 		serverError(w, err)
 		return "", false
-	}
-	for _, l := range libs {
-		if l.ID == except {
-			continue
-		}
-		if l.Path == p {
-			apiError(w, http.StatusConflict, "path_taken", "Another library already uses this folder: "+l.Name+".")
-			return "", false
-		}
-		if jobs.Within(p, l.Path) || jobs.Within(l.Path, p) {
-			apiError(w, http.StatusConflict, "path_overlaps", "This folder is inside, or contains, the folder of library "+l.Name+". Choose a folder that doesn't overlap.")
-			return "", false
-		}
+	case clash && same:
+		apiError(w, http.StatusConflict, "path_taken", "Another library already uses this folder: "+l.Name+".")
+		return "", false
+	case clash:
+		apiError(w, http.StatusConflict, "path_overlaps", "This folder is inside, or contains, the folder of library "+l.Name+". Choose a folder that doesn't overlap.")
+		return "", false
 	}
 	return p, true
 }
@@ -298,6 +292,10 @@ func fsDirs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := filepath.Clean(raw) // removes "..": the answer is always about the folder actually listed
+	if st, err := os.Stat(p); err == nil && !st.IsDir() { // Windows reads a file as "path not found"
+		apiError(w, http.StatusBadRequest, "not_a_folder", "That is not a folder the program can open.")
+		return
+	}
 	entries, err := os.ReadDir(p)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):

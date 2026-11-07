@@ -79,8 +79,9 @@ compiler, and the same source builds for Linux, Windows and macOS (Intel and ARM
    go build -o shrink-your-shit .
    ./shrink-your-shit -library /path/to/your/videos
    ```
-3. Open http://127.0.0.1:8484 to watch the queue. Stop with Ctrl+C (works on every OS); a
-   job in progress is put back in the queue and starts over next time.
+3. Open http://127.0.0.1:8484. The first run shows your folder, lets you choose how much to
+   shrink, and starts it when you press Start; nothing is converted before that. Stop with Ctrl+C
+   (works on every OS); a job in progress is put back in the queue and starts over next time.
 
 Add `-library` more than once to watch several folders.
 

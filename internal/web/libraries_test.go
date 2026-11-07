@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -80,7 +81,7 @@ func TestLibraryLifecycle(t *testing.T) {
 	other := t.TempDir()
 	code, body = post(t, srv, "PATCH", "/api/libraries/"+id, fmt.Sprintf(`{"name":"Films","path":%q}`, other))
 	json.Unmarshal([]byte(body), &lib)
-	if code != 200 || lib.Name != "Films" || lib.Path != other {
+	if real, _ := jobs.RealPath(other); code != 200 || lib.Name != "Films" || lib.Path != real {
 		t.Errorf("patch: %d %s", code, body)
 	}
 	if f, _ := st.GetFlow(lib.FlowID); f.Name != "Movies" {
@@ -174,7 +175,7 @@ func TestFsDirsListsFoldersOnly(t *testing.T) {
 		os.Symlink(filepath.Join(dir, "a"), filepath.Join(dir, "link-to-a"))
 		os.Symlink(filepath.Join(dir, "movie.mkv"), filepath.Join(dir, "link-to-file"))
 	}
-	code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/fs/dirs?path=" + dir + "/b/.."})
+	code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/fs/dirs?path=" + url.QueryEscape(filepath.Join(dir, "b", ".."))})
 	var out struct {
 		Path   string
 		Parent *string
@@ -196,7 +197,7 @@ func TestFsDirsListsFoldersOnly(t *testing.T) {
 		filepath.Join(dir, "nope"):      "not_found",
 		filepath.Join(dir, "movie.mkv"): "not_a_folder",
 	} {
-		if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/fs/dirs?path=" + p}); errCode(body) != want {
+		if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/fs/dirs?path=" + url.QueryEscape(p)}); errCode(body) != want {
 			t.Errorf("%s: %d %s, want %s", p, code, body, want)
 		}
 	}
@@ -204,7 +205,7 @@ func TestFsDirsListsFoldersOnly(t *testing.T) {
 		locked := filepath.Join(dir, "a")
 		os.Chmod(locked, 0)
 		t.Cleanup(func() { os.Chmod(locked, 0o755) })
-		if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/fs/dirs?path=" + locked}); code != 403 || errCode(body) != "not_readable" {
+		if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/fs/dirs?path=" + url.QueryEscape(locked)}); code != 403 || errCode(body) != "not_readable" {
 			t.Errorf("unreadable folder: %d %s", code, body)
 		}
 	}
@@ -249,5 +250,36 @@ func TestLinkedFolderIsStoredAsTheRealFolder(t *testing.T) {
 	}
 	if code, body = post(t, srv, "POST", "/api/libraries", fmt.Sprintf(`{"name":"Again","path":%q}`, real)); code != 409 || errCode(body) != "path_taken" {
 		t.Errorf("the same folder by its real name: %d %s", code, body)
+	}
+}
+
+// The same folder by two names (a link; macOS's /var for /private/var; a Windows short name) is one
+// library folder: the second name is taken, and a folder inside it overlaps.
+func TestOneFolderByTwoNames(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("making links needs extra rights on Windows")
+	}
+	srv, st, _, _ := libServer(t, false)
+	real := t.TempDir()
+	os.Mkdir(filepath.Join(real, "inner"), 0o755)
+	alias := filepath.Join(t.TempDir(), "alias")
+	os.Symlink(real, alias)
+	l, err := st.AddLibrary("Via alias", alias, rules.SliderTemplate(3), false) // not through the API
+	if want, _ := jobs.RealPath(real); err != nil || l.Path != want {
+		t.Fatalf("stored %q %v, want the real folder %q", l.Path, err, want)
+	}
+	for _, c := range []struct{ path, code string }{
+		{real, "path_taken"},
+		{alias, "path_taken"},
+		{filepath.Join(alias, "inner"), "path_overlaps"},
+		{filepath.Join(real, "inner"), "path_overlaps"},
+	} {
+		if code, body := post(t, srv, "POST", "/api/libraries", fmt.Sprintf(`{"name":"x","path":%q}`, c.path)); code != 409 || errCode(body) != c.code {
+			t.Errorf("%s: %d %s, want 409 %s", c.path, code, body, c.code)
+		}
+	}
+	other, _ := st.AddLibrary("Other", t.TempDir(), rules.SliderTemplate(3), false)
+	if code, body := post(t, srv, "PATCH", fmt.Sprintf("/api/libraries/%d", other.ID), fmt.Sprintf(`{"path":%q}`, alias)); code != 409 || errCode(body) != "path_taken" {
+		t.Errorf("PATCH to the other name of a used folder: %d %s", code, body)
 	}
 }

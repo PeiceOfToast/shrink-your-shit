@@ -46,13 +46,49 @@ var ErrLibraryGone = errors.New("its library was removed or is not started")
 
 // RealPath is a library folder as stored: absolute, cleaned and with links resolved, so the scanner
 // (which does not follow a link at the top of a folder tree) walks the real folder, and two names
-// for one folder are seen as one.
+// for one folder (a link, macOS's /var for /private/var, a Windows short name like RUNNER~1) are
+// seen as one. Every comparison of library folders uses it.
 func RealPath(p string) (string, error) {
 	abs, err := filepath.Abs(p)
 	if err != nil {
 		return "", err
 	}
 	return filepath.EvalSymlinks(abs)
+}
+
+// canonical is RealPath, or the cleaned absolute path when the folder cannot be resolved (it is
+// gone, or not reachable just now): stored paths are compared in this form.
+func canonical(p string) string {
+	if r, err := RealPath(p); err == nil {
+		return r
+	}
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return filepath.Clean(p)
+}
+
+// FolderClash returns the library whose folder is p, or holds it, or is inside it (comparing real
+// paths), except the library with id except; ok is false if none.
+func (s *Store) FolderClash(p string, except int64) (l Library, same bool, ok bool, err error) {
+	libs, err := s.Libraries()
+	if err != nil {
+		return Library{}, false, false, err
+	}
+	p = canonical(p)
+	for _, l := range libs {
+		if l.ID == except {
+			continue
+		}
+		lp := canonical(l.Path)
+		switch {
+		case lp == p:
+			return l, true, true, nil
+		case Within(p, lp) || Within(lp, p):
+			return l, false, true, nil
+		}
+	}
+	return Library{}, false, false, nil
 }
 
 // Within reports whether p is inside dir (not equal to it).
@@ -161,6 +197,7 @@ func (s *Store) AddLibrary(name, path string, t rules.Template, started bool) (L
 }
 
 func (s *Store) addLibrary(name, path, flowBase string, t rules.Template, started bool) (Library, error) {
+	path = canonical(path)
 	tx, err := s.db.Begin()
 	if err != nil {
 		return Library{}, err
@@ -225,10 +262,11 @@ func (s *Store) EnsureLibraries(paths []string, legacy rules.Template) (added in
 		}
 		have, clash := false, ""
 		for _, l := range libs {
+			lp := canonical(l.Path)
 			switch {
-			case l.Path == p || l.Path == given:
+			case lp == p || l.Path == given:
 				have = true
-			case Within(p, l.Path) || Within(l.Path, p):
+			case Within(p, lp) || Within(lp, p):
 				clash = l.Path
 			}
 		}
@@ -317,6 +355,8 @@ func (s *Store) UpdateLibrary(id int64, name, path *string) (Library, error) {
 		}
 	}
 	if path != nil {
+		p := canonical(*path)
+		path = &p
 		if err := s.pathTaken(tx, *path, id); err != nil {
 			return Library{}, err
 		}
