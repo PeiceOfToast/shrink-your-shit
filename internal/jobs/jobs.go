@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver, no cgo
@@ -267,7 +268,13 @@ func (s *Store) Progress(id int64, pct float64) error {
 
 // Complete marks a running job done.
 func (s *Store) Complete(id int64, outputPath string, sizeAfter int64) error {
-	return s.transition(id, Done, `, progress=100, output_path=?, size_after=?`, outputPath, sizeAfter)
+	// The output as it is now, so the file can later be recognised as this conversion's (Activity's
+	// Skipped list leaves it out only while it still is). 0 if it cannot be read.
+	var mtime int64
+	if st, err := os.Stat(outputPath); err == nil {
+		mtime = st.ModTime().UnixNano()
+	}
+	return s.transition(id, Done, `, progress=100, output_path=?, size_after=?, output_mtime=?`, outputPath, sizeAfter, mtime)
 }
 
 // Fail marks a running job failed.

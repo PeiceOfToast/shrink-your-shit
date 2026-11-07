@@ -97,6 +97,7 @@ CREATE INDEX originals_job ON originals(job_id);`},
 	// file's reason as a code (files.decision keeps the sentence).
 	{7, "job start time and skip reason code", `
 ALTER TABLE jobs ADD COLUMN started TEXT;
+ALTER TABLE jobs ADD COLUMN output_mtime INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE files ADD COLUMN reason TEXT NOT NULL DEFAULT '';
 CREATE INDEX files_reason ON files(reason);
 CREATE INDEX jobs_output ON jobs(output_path, status);

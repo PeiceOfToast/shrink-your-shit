@@ -5,6 +5,7 @@ package web
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -221,5 +222,64 @@ func TestUpNextIsPerLibraryNotPerName(t *testing.T) {
 	json.Unmarshal([]byte(body), &q)
 	if len(q.UpNext) != 2 || q.UpNext[0]["count"] != 1.0 || q.UpNext[1]["count"] != 2.0 {
 		t.Errorf("%s", body)
+	}
+}
+
+// doneWithFile finishes a job whose output is the real file p (so its time is recorded).
+func doneWithFile(t *testing.T, st *jobs.Store, libID int64, p string) int64 {
+	t.Helper()
+	id, _ := st.Enqueue(jobs.Job{Library: filepath.Dir(p), LibraryID: libID, Path: p, SizeBefore: 1000})
+	st.Claim("t")
+	fi, _ := os.Stat(p)
+	if err := st.Complete(id, p, fi.Size()); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func skippedHEVC(st *jobs.Store, p string) {
+	fi, _ := os.Stat(p)
+	st.PutFile(jobs.File{Path: p, Size: fi.Size(), ModTime: fi.ModTime().UnixNano(), Decision: "skip: HEVC is already an efficient format", Reason: rules.SkipAlreadyHEVC})
+}
+
+// Retention 0 (no kept original, so no journal row): a different file of the same size later at the
+// converted path is listed; the converted file itself is not (review 3c66783).
+func TestSkippedAfterRetentionZeroSeesAReplacement(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	p := filepath.Join(l.Path, "a.mkv")
+	os.WriteFile(p, []byte("converted"), 0o644)
+	doneWithFile(t, st, l.ID, p)
+	skippedHEVC(st, p)
+	if _, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/activity/skipped"}); !strings.Contains(body, `"total":0`) {
+		t.Errorf("the converted file: %s", body)
+	}
+	os.WriteFile(p, []byte("different"), 0o644) // same size
+	later := time.Now().Add(time.Hour)
+	os.Chtimes(p, later, later)
+	skippedHEVC(st, p)
+	if _, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/activity/skipped"}); !strings.Contains(body, `"total":1`) {
+		t.Errorf("a same-size replacement: %s", body)
+	}
+}
+
+// A swap rolled back (its journal row records another new file), then a successful retry: the retry's
+// output is recognised, not listed as skipped (review 3c66783).
+func TestSkippedAfterRollbackAndRetry(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	p := filepath.Join(l.Path, "a.mkv")
+	os.WriteFile(p, []byte("converted"), 0o644)
+	id, _ := st.Enqueue(jobs.Job{Library: l.Path, LibraryID: l.ID, Path: p, SizeBefore: 1000})
+	st.Claim("t")
+	oid, _ := st.BeginSwap(jobs.Original{JobID: id, Path: p, Trash: "t", Staged: "s", Bytes: 1000, Hash: "h", NewBytes: 9, NewMTime: 12345})
+	st.SetSwapState(oid, jobs.SwapRolledBack)
+	st.Release(id) // queued again, then converted successfully
+	st.Claim("t")
+	fi, _ := os.Stat(p)
+	st.Complete(id, p, fi.Size())
+	skippedHEVC(st, p)
+	if _, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/activity/skipped"}); !strings.Contains(body, `"total":0`) {
+		t.Errorf("the retry's output: %s", body)
 	}
 }
