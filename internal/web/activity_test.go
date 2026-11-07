@@ -110,6 +110,8 @@ func TestActivitySummaryQueueFailedSkipped(t *testing.T) {
 	st.PutFile(jobs.File{Path: dir + "/lean.mkv", Decision: "skip: already efficient: 0.02 bits per pixel", Reason: rules.SkipAlreadyEfficient})
 	st.PutFile(jobs.File{Path: "/elsewhere/x.mkv", Decision: "unreadable", Reason: rules.SkipUnreadable})
 	st.PutFile(jobs.File{Path: dir + "/queued.mkv", Decision: "queued: H.264"}) // not skipped
+	// a converted file, which the scanner then skips as already HEVC: done, not "skipped"
+	st.PutFile(jobs.File{Path: dir + "/gone.mkv", Decision: "skip: HEVC is already an efficient format", Reason: rules.SkipAlreadyHEVC})
 
 	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/activity/summary"})
 	if body != `{"counts":{"failed":2,"skipped":3},"freedBytes":300,"paused":false,"waitingBytes":600,"waitingFiles":2,"workingFiles":1}`+"\n" {

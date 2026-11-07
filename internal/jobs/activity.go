@@ -28,7 +28,7 @@ FROM jobs`, Done, OriginalKept, Done, OriginalKept, Running, Queued, Failed, Kep
 	if err != nil {
 		return a, err
 	}
-	err = s.db.QueryRow(`SELECT COUNT(*) FROM files WHERE reason<>''`).Scan(&a.Skipped)
+	err = s.db.QueryRow(`SELECT COUNT(*) FROM files WHERE reason<>'' AND NOT ` + convertedSQL).Scan(&a.Skipped)
 	return a, err
 }
 
@@ -114,6 +114,10 @@ FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id WHERE j.status IN (?,?) O
 	return out, total, rows.Err()
 }
 
+// convertedSQL is true for a files row that is the output of a done conversion: the scanner skips it
+// afterwards (already the new format), but it is not "skipped" for the person, it is done.
+const convertedSQL = `EXISTS (SELECT 1 FROM jobs WHERE jobs.status='done' AND jobs.output_path=files.path)`
+
 // Skipped is a file the scanner decided not to convert, with the row id the Skipped list uses.
 type Skipped struct {
 	ID int64
@@ -122,9 +126,9 @@ type Skipped struct {
 
 // SkippedFiles lists the skipped files (reason = "" lists every reason), by path; and how many there are.
 func (s *Store) SkippedFiles(reason string, limit, offset int) ([]Skipped, int, error) {
-	where, args := `reason<>''`, []any{}
+	where, args := `reason<>'' AND NOT `+convertedSQL, []any{}
 	if reason != "" {
-		where, args = `reason=?`, []any{reason}
+		where, args = `reason=? AND NOT `+convertedSQL, []any{reason}
 	}
 	var total int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM files WHERE `+where, args...).Scan(&total); err != nil {

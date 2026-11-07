@@ -98,7 +98,8 @@ CREATE INDEX originals_job ON originals(job_id);`},
 	{7, "job start time and skip reason code", `
 ALTER TABLE jobs ADD COLUMN started TEXT;
 ALTER TABLE files ADD COLUMN reason TEXT NOT NULL DEFAULT '';
-CREATE INDEX files_reason ON files(reason);`},
+CREATE INDEX files_reason ON files(reason);
+CREATE INDEX jobs_output ON jobs(output_path, status);`},
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.
