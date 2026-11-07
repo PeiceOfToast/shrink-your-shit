@@ -11,12 +11,14 @@
   function fail(e) { var b = $("err"); b.textContent = e && e.message || "Something went wrong. Nothing was changed."; b.hidden = false; }
   function clear() { $("err").hidden = true; }
 
-  // Draw only when the data changed, and give focus back to the same control (data-key) afterwards.
+  // Draw only when the data changed, and give focus back to the same control (data-key) afterwards,
+  // or to the same heading (id), such as "Working now" after the last Stop, so a redraw does not drop it.
   function draw(key, data, fn) {
     var j = JSON.stringify(data); if (seen[key] === j) return; seen[key] = j;
-    var a = document.activeElement, k = a && a.getAttribute && a.getAttribute("data-key");
+    var a = document.activeElement, k = a && a.getAttribute && a.getAttribute("data-key"), id = !k && a && a.id && pane.contains(a) ? a.id : "";
     fn();
-    if (k) { var n = pane.querySelector('[data-key="' + k + '"]'); if (n) n.focus(); }
+    var n = k ? pane.querySelector('[data-key="' + k + '"]') : id ? $(id) : null;
+    if (n) n.focus();
   }
   function heading(t, id) { var h = el("h2", null, t); h.id = id; h.tabIndex = -1; h.style.marginTop = "0"; return h; }
   function after() { var h = pane.querySelector("h2"); if (h) h.focus(); } // a row went away: land on the heading
@@ -55,8 +57,27 @@
     parts.push(ui.bytes(j.fromBytes) + (j.expectedBytes != null ? " → expected about " + ui.bytes(j.expectedBytes) : ""));
     return parts.join(" · ");
   }
+  // Stop on a running file can answer 202 "stopping": the worker stops it within moments (contract, slice 24).
+  // Until it leaves the queue its row says "Stopping…" and its Stop is aria-disabled (a real disabled button would
+  // drop focus); "Stopping…" is announced once in a polite live region outside the redrawn pane. When it leaves,
+  // focus goes to the next row's Stop, or to the Queue heading (design, 2026-11-07).
+  var stopping = {}, live = null;
+  function say(t) {
+    if (!live) { live = el("p", "sr"); live.setAttribute("role", "status"); live.setAttribute("aria-live", "polite"); pane.parentNode.insertBefore(live, pane.nextSibling); }
+    live.textContent = t;
+  }
+  function stop(j) {
+    if (stopping[j.jobId]) return; // already asked: ignore further clicks
+    api.stopJob({ id: j.jobId }).then(function (r) {
+      if (r && r.status === "stopping") { stopping[j.jobId] = true; say("Stopping " + base(j.path) + "…"); seen.queue = null; return refresh(); }
+      return refresh().then(after);
+    }).catch(fail);
+  }
   T.queue = function () {
     return api.queue().then(function (q) {
+      var gone = Object.keys(stopping).filter(function (id) { return !q.working.some(function (j) { return j.jobId === id; }); });
+      gone.forEach(function (id) { delete stopping[id]; });
+      var wasOnStop = gone.some(function (id) { var a = document.activeElement; return a && a.getAttribute && a.getAttribute("data-key") === "stop-" + id; });
       draw("queue", q, function () {
         pane.textContent = "";
         pane.appendChild(heading("Working now", "qh"));
@@ -70,13 +91,15 @@
           var line = el("p", "small muted", conv ? working(j)
             : "Playing the new file start to end before it replaces the original"); line.style.margin = "8px 0";
           c.appendChild(line);
-          if (conv) { c.appendChild(btn("Stop this file", "stop-" + j.jobId, function () { act(api.stopJob({ id: j.jobId }), true); })); c.appendChild(el("span", "hint small", " It moves to Skipped, where you can convert it again.")); }
+          if (stopping[j.jobId]) line.textContent = "Stopping…";
+          if (conv) { var sb = btn("Stop this file", "stop-" + j.jobId, function () { stop(j); }); if (stopping[j.jobId]) sb.setAttribute("aria-disabled", "true"); c.appendChild(sb); c.appendChild(el("span", "hint small", " It moves to Skipped, where you can convert it again.")); }
           pane.appendChild(c);
         });
         pane.appendChild(el("h2", null, "Up next"));
         var next = q.upNext.map(function (u) { return u.library + ": " + ui.num(u.count) + " files" + (u.count && u.order ? ", " + (FIRST[u.order] || u.order) + " first" : ""); });
         pane.appendChild(el("p", "muted", next.length ? next.join(". ") + "." : "Nothing is waiting."));
       });
+      if (wasOnStop) { var nx = pane.querySelector('[data-key^="stop-"]:not([aria-disabled="true"])'); (nx || $("qh")).focus(); }
     });
   };
 
