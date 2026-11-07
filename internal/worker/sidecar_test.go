@@ -260,3 +260,46 @@ func TestSrtLateCollisionLeavesNoRecord(t *testing.T) {
 	}
 	s.assertOriginalSafe()
 }
+
+// The no-replace fallback (macOS, and Linux filesystems without renameat2) links the .srt into place and
+// then removes the staged name. When only that removal fails, the file is in place and ours: it counts
+// as placed, keeps its record, and a crash right after is recovered like any other; a Retry then
+// finishes (review 25b-939e790).
+func TestSrtLinkedButStagedNameLeftCountsAsPlaced(t *testing.T) {
+	s, w, srt := srtScenario(t)
+	placeSidecar = linkRename // the fallback, on every OS
+	linkRemove = func(p string) error { return &os.PathError{Op: "remove", Path: p, Err: syscall.EACCES} }
+	t.Cleanup(func() { placeSidecar, linkRemove, swapHook = renameNoReplace, os.Remove, nil })
+	swapHook = func(at string) error {
+		if at == "subtitles placed" {
+			return errCrash
+		}
+		return nil
+	}
+	w.RunOne(context.Background())
+	swapHook = nil
+	if left, _ := s.store.Sidecars(); len(left) != 1 {
+		t.Fatalf("the placed .srt must keep its record: %+v", left)
+	}
+	if _, err := os.Stat(srt); err != nil {
+		t.Fatalf("the .srt should be in place: %v", err)
+	}
+	s.assertOriginalSafe()
+	if said := RecoverSidecars(s.store); len(said) != 1 {
+		t.Errorf("recovery: %v", said)
+	}
+	if _, err := os.Stat(srt); err == nil {
+		t.Error("recovery should remove our .srt")
+	}
+	if left, _ := s.store.Sidecars(); len(left) != 0 {
+		t.Errorf("records left: %+v", left)
+	}
+	s.store.Retry(s.id) // the removal still fails: the job finishes all the same
+	w.RunOne(context.Background())
+	if j := s.job(); j.Status != jobs.Done {
+		t.Fatalf("retry: %s %q", j.Status, j.Error)
+	}
+	if _, err := os.Stat(srt); err != nil {
+		t.Errorf("the .srt is missing after the retry: %v", err)
+	}
+}

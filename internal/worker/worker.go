@@ -622,6 +622,9 @@ type SidecarJournal interface {
 	Sidecars() ([]jobs.Sidecar, error)
 }
 
+// placeSidecar is renameNoReplace; tests make it fail after placing the file.
+var placeSidecar = renameNoReplace
+
 // installSubtitles puts the Plan's extracted subtitles (written next to tmp) beside final, never over
 // another file (renameNoReplace). Each is recorded first, with what it is and what the new video is, so
 // only our own file is ever removed again (here if a name is taken or the swap fails, or at the next
@@ -660,7 +663,14 @@ func (w *Worker) installSubtitles(plan rules.Plan, jobID int64, tmp, final strin
 	}
 	var placed []jobs.Sidecar
 	for k, c := range recs {
-		if err := renameNoReplace(rules.StagedSrt(tmp, k), c.Path); err != nil {
+		err := placeSidecar(rules.StagedSrt(tmp, k), c.Path)
+		if errors.Is(err, errPlacedSourceLeft) {
+			// linked into place, the staged name not removed (the link fallback): the file is ours and
+			// placed; the staging folder's cleanup removes the leftover name (review 25b-939e790)
+			log.Printf("worker %s: job %d: %s placed; %v", w.ID, jobID, c.Path, err)
+			err = nil
+		}
+		if err != nil {
 			if w.Sidecars != nil { // this one and the rest were never put there: their names are not ours
 				for _, u := range recs[k:] {
 					w.Sidecars.DropSidecar(jobID, u.Path)

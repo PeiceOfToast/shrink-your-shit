@@ -4,6 +4,7 @@ package worker
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 )
@@ -23,5 +24,15 @@ func linkRename(src, dst string) error {
 		}
 		return err
 	}
-	return os.Remove(src)
+	if err := linkRemove(src); err != nil {
+		return fmt.Errorf("%w: %w", errPlacedSourceLeft, err)
+	}
+	return nil
 }
+
+// errPlacedSourceLeft: linkRename put the file at dst (it is there, the same file), but the source name
+// could not be removed. Callers that only need dst in place (an .srt beside the video) can go on.
+var errPlacedSourceLeft = errors.New("in place, but the old name is still there")
+
+// linkRemove is os.Remove; tests make it fail.
+var linkRemove = os.Remove
