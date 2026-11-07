@@ -70,6 +70,8 @@ type Job struct {
 	PlanPrint   string  `json:"planFingerprint,omitempty"` // its conversion settings' fingerprint
 	Created     string  `json:"created"`
 	Updated     string  `json:"updated"`
+	Attempts    int     `json:"attempts"`          // tries finished (failed, kept, or waiting to be tried again: DD-2)
+	RetryAt     string  `json:"retryAt,omitempty"` // a queued job waiting to be tried again: not before then (RFC3339)
 }
 
 // File is what the scanner last saw for a path, so unchanged files are not re-probed.
@@ -182,12 +184,12 @@ SELECT ?,?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM libraries WHERE id=? AND st
 	return r.LastInsertId()
 }
 
-const cols = `id,library,COALESCE(library_id,0),path,status,progress,reason,error,worker,duration,size_before,size_after,output_path,COALESCE(plan,''),COALESCE(plan_fingerprint,''),created,updated`
+const cols = `id,library,COALESCE(library_id,0),path,status,progress,reason,error,worker,duration,size_before,size_after,output_path,COALESCE(plan,''),COALESCE(plan_fingerprint,''),created,updated,attempts,retry_at`
 
 func scan(r interface{ Scan(...any) error }) (Job, error) {
 	var j Job
 	err := r.Scan(&j.ID, &j.Library, &j.LibraryID, &j.Path, &j.Status, &j.Progress, &j.Reason, &j.Error, &j.Worker,
-		&j.DurationSec, &j.SizeBefore, &j.SizeAfter, &j.OutputPath, &j.Plan, &j.PlanPrint, &j.Created, &j.Updated)
+		&j.DurationSec, &j.SizeBefore, &j.SizeAfter, &j.OutputPath, &j.Plan, &j.PlanPrint, &j.Created, &j.Updated, &j.Attempts, &j.RetryAt)
 	return j, err
 }
 
@@ -252,8 +254,10 @@ func (s *Store) Claim(worker string) (Job, error) {
 		skip += " AND (library_id IS NULL OR library_id != ?)" // a job made before libraries belongs to none
 		args = append(args, lib)
 	}
+	// A job waiting to be tried again (DD-2) is not taken before its time.
+	args = append(args, now)
 	err := s.db.QueryRow(`UPDATE jobs SET status=?, updated=?, worker=?, progress=0, error='', started=?
-WHERE id=(SELECT id FROM jobs WHERE status=? AND stop_requested=0`+skip+` ORDER BY id LIMIT 1) AND status=?
+WHERE id=(SELECT id FROM jobs WHERE status=? AND stop_requested=0`+skip+` AND (retry_at='' OR retry_at<=?) ORDER BY id LIMIT 1) AND status=?
 AND NOT EXISTS (SELECT 1 FROM app_meta WHERE key='paused' AND value='1') RETURNING id`,
 		append(args, Queued)...).Scan(&id)
 	s.removeMu.Unlock()
@@ -298,17 +302,23 @@ func (s *Store) Complete(id int64, outputPath string, sizeAfter int64) error {
 
 // Fail marks a running job failed.
 func (s *Store) Fail(id int64, msg string) error {
-	return s.transition(id, Failed, `, error=?`, msg)
+	return s.transition(id, Failed, `, error=?, attempts=attempts+1, retry_at=''`, msg)
+}
+
+// RetryLater puts a running job back in the queue after a failure that may pass (DD-2): one more try
+// counted, not taken before at; reason (its plain words) stays on it meanwhile.
+func (s *Store) RetryLater(id int64, at time.Time, reason string) error {
+	return s.transition(id, Queued, `, progress=0, worker='', error=?, attempts=attempts+1, retry_at=?`, reason, at.UTC().Format(time.RFC3339))
 }
 
 // Keep marks a running job "kept original": a safety check refused the result, reason says why.
 func (s *Store) Keep(id int64, reason string) error {
-	return s.transition(id, Kept, `, error=?`, reason)
+	return s.transition(id, Kept, `, error=?, attempts=attempts+1, retry_at=''`, reason)
 }
 
-// Retry puts a failed or kept job back in the queue.
+// Retry puts a failed or kept job back in the queue: a fresh start (no tries counted, no wait).
 func (s *Store) Retry(id int64) error {
-	return s.transition(id, Queued, `, progress=0, error='', worker=''`)
+	return s.transition(id, Queued, `, progress=0, error='', worker='', attempts=0, retry_at=''`)
 }
 
 // Release puts a running job back in the queue (the worker was told to stop).

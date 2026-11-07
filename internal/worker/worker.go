@@ -43,6 +43,8 @@ type Queue interface {
 	StopRequested(id int64) (bool, error)
 	// Keep marks a job "kept original": a safety check refused the result (reason says why).
 	Keep(id int64, reason string) error
+	// RetryLater puts a job whose failure may pass back in the queue, not to be taken before at (DD-2).
+	RetryLater(id int64, at time.Time, reason string) error
 	// RecordPlan stores the Plan a running job converts with (JSON) and its fingerprint.
 	RecordPlan(id int64, plan, fingerprint string) error
 }
@@ -249,6 +251,11 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 			// Shutting down: not the file's fault, so run it again next start.
 			return true, w.Queue.Release(job.ID)
 		}
+		// A failure that may pass, with a try left: back in the queue for later, from the start (DD-2).
+		if wait, ok := retryIn(err, job.Attempts); ok {
+			log.Printf("worker %s: job %d (%s): try %d of %d failed, trying again in %s: %v", w.ID, job.ID, job.Path, job.Attempts+1, maxTries, wait, err)
+			return true, w.Queue.RetryLater(job.ID, w.now().Add(wait), plainReason(err))
+		}
 		var ke *KeptError
 		if errors.As(err, &ke) {
 			// A safety check said no: the original is untouched, the temp file is gone.
@@ -310,6 +317,15 @@ func plainFailure(err error) string {
 	return "Converting did not finish. Your original was not touched. Press Retry; if it keeps failing, Settings > System shows what went wrong."
 }
 
+// plainReason is the plain words of a failed or refused conversion.
+func plainReason(err error) string {
+	var ke *KeptError
+	if errors.As(err, &ke) {
+		return ke.Reason
+	}
+	return plainFailure(err)
+}
+
 // errIsLink: the file is a link (or another reparse point), which is never followed (slice 23).
 var errIsLink = errors.New("the file is a link")
 
@@ -369,7 +385,11 @@ func BesidePathAs(src, ext string) string {
 func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err error) {
 	tmpl, err := w.templateFor(job)
 	if err != nil {
-		return "", failed("This library's setting could not be read, so converting did not start. Your original was not touched. Open the library and save its setting again, then press Retry.", err)
+		ferr := failed("This library's setting could not be read, so converting did not start. Your original was not touched. Open the library and save its setting again, then press Retry.", err)
+		if errors.Is(err, jobs.ErrLibraryGone) || errors.Is(err, jobs.ErrNotFound) { // gone: trying again changes nothing
+			return "", ferr
+		}
+		return "", retryable(ferr, retryGeneral) // the database was busy
 	}
 	// A link is never followed: checked before opening, and the open itself does not follow one (slice 23).
 	if lst, err := os.Lstat(job.Path); err == nil && lst.Mode()&fs.ModeSymlink != 0 {
@@ -452,7 +472,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		err = w.Queue.RecordPlan(job.ID, string(b), snap.Fingerprint())
 	}
 	if err != nil {
-		return "", failed("What this conversion will do could not be recorded, so it did not start. Your original was not touched. Press Retry.", err)
+		return "", retryable(failed("What this conversion will do could not be recorded, so it did not start. Your original was not touched. Press Retry.", err), retryGeneral)
 	}
 
 	ext := filepath.Ext(job.Path)
@@ -496,9 +516,13 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			return "", terr // stopped or shutting down: RunOne decides, not a failure of the file
 		}
 		if errors.Is(terr, syscall.ENOSPC) || strings.Contains(encErr+terr.Error(), "No space left on device") {
-			return "", failed(diskFull, terr)
+			return "", retryable(failed(diskFull, terr), retrySpace)
 		}
-		return "", failed("Converting stopped with an error. Your original was not touched. Press Retry; if it keeps failing, the file may be damaged.", fmt.Errorf("%w: %s", terr, firstLines(encErr, 3)))
+		ferr := failed("Converting stopped with an error. Your original was not touched. Press Retry; if it keeps failing, the file may be damaged.", fmt.Errorf("%w: %s", terr, firstLines(encErr, 3)))
+		if killedBySignal(terr) { // stopped by the system (out of memory...), not a problem of the file
+			return "", retryable(ferr, retryGeneral)
+		}
+		return "", ferr
 	}
 	// Errors ffmpeg reported while reading the original mean it is damaged: converting it would bake
 	// the damage in and delete the only copy that might still be repaired or fetched again.
@@ -615,7 +639,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		if errors.As(err, &k) {
 			return "", err
 		}
-		return "", failed("The new file could not be put in place, so your original was kept as it was. Press Retry.", fmt.Errorf("move result into place: %w", err))
+		return "", retryable(failed("The new file could not be put in place, so your original was kept as it was. Press Retry.", fmt.Errorf("move result into place: %w", err)), retryGeneral) // busy or locked
 	}
 	swapped()
 	return final, nil
@@ -688,7 +712,7 @@ func (w *Worker) installSubtitles(plan rules.Plan, jobID int64, tmp, final strin
 			if errors.Is(err, fs.ErrExist) {
 				return nil, failed(srtTaken(c.Path), err)
 			}
-			return nil, failed("A subtitle file could not be put next to the new file, so nothing was changed. Press Retry.", err)
+			return nil, retryable(failed("A subtitle file could not be put next to the new file, so nothing was changed. Press Retry.", err), retryGeneral)
 		}
 		placed = append(placed, c)
 	}
@@ -843,16 +867,16 @@ var readSourceState = media.FileState
 func sourceUnchanged(path string, before os.FileInfo, beforeState media.State) error {
 	now, err := os.Stat(path)
 	if err != nil || !os.SameFile(now, before) || now.Size() != before.Size() || !now.ModTime().Equal(before.ModTime()) {
-		return kept("the original file changed while it was being converted, so the new file is out of date")
+		return retryable(kept("the original file changed while it was being converted, so the new file is out of date"), retryGeneral) // still being written
 	}
 	// media.FileState too: on Windows it carries the change time, which the Stat above does not (an edit
 	// that keeps the size and puts the modification time back); unreadable now counts as changed
 	if st, err := readSourceState(path, now); err != nil || !st.Same(beforeState) {
-		return kept("the original file changed while it was being converted, so the new file is out of date")
+		return retryable(kept("the original file changed while it was being converted, so the new file is out of date"), retryGeneral) // still being written
 	}
 	if b, ok := media.ChangeTime(before); ok {
 		if n, ok := media.ChangeTime(now); !ok || !n.Equal(b) {
-			return kept("the original file changed while it was being converted, so the new file is out of date")
+			return retryable(kept("the original file changed while it was being converted, so the new file is out of date"), retryGeneral) // still being written
 		}
 	}
 	if media.LinkCount(path, now) > 1 { // another name appeared while converting (Windows has no ctime to see it)

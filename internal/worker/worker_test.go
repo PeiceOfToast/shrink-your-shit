@@ -382,6 +382,7 @@ func TestPermissionsKept(t *testing.T) {
 // ---- every rejection keeps the original ----
 
 func TestRejections(t *testing.T) {
+	oneTry(t) // the outcome of one try (failures that may pass are tried again: DD-2)
 	cases := []struct {
 		name   string
 		mutate func(s *scenario)
@@ -447,6 +448,7 @@ func TestRejections(t *testing.T) {
 }
 
 func TestPreflightRunsBeforeAnyEncoding(t *testing.T) {
+	oneTry(t) // the outcome of one try (failures that may pass are tried again: DD-2)
 	s := newScenario(t)
 	s.freeBytes = 1 << 20
 	s.run(Replace)
@@ -501,6 +503,7 @@ func TestMissingSourceFails(t *testing.T) {
 }
 
 func TestSourceChangedWhileEncodingIsKept(t *testing.T) {
+	oneTry(t) // the outcome of one try (failures that may pass are tried again: DD-2)
 	s := newScenario(t)
 	s.onEncode = func() { os.WriteFile(s.src, []byte("user replaced this file meanwhile"), 0o644) }
 	s.run(Replace)
@@ -796,6 +799,7 @@ func TestSourceDamageClassifier(t *testing.T) {
 // ---- order and time limits ----
 
 func TestSourceChangeIsReportedBeforeTheExpensiveChecks(t *testing.T) {
+	oneTry(t) // the outcome of one try (failures that may pass are tried again: DD-2)
 	s := newScenario(t)
 	s.onEncode = func() { os.WriteFile(s.src, []byte("user replaced this file meanwhile"), 0o644) }
 	s.outSpec.streams = goodOutput().streams[:2] // would also fail parity
@@ -817,6 +821,7 @@ func withTimeouts(t *testing.T, quick, count, sample time.Duration) {
 }
 
 func TestAHungCheckKeepsTheOriginalInsteadOfFreezingTheWorker(t *testing.T) {
+	oneTry(t) // the outcome of one try (failures that may pass are tried again: DD-2)
 	cases := []struct {
 		name string
 		hang func(name string, args []string) bool
@@ -895,6 +900,7 @@ func TestSSIMStartSampleDoesNotSeek(t *testing.T) {
 
 // Every way a conversion fails leaves a plain detail (COPY-1/COPY-2): the raw error goes to the log only.
 func TestFailedDetailsArePlain(t *testing.T) {
+	oneTry(t) // the outcome of one try (failures that may pass are tried again: DD-2)
 	cases := []struct {
 		name   string
 		mutate func(s *scenario)
@@ -1025,6 +1031,7 @@ func TestModificationTimeKept(t *testing.T) {
 // Another name for the original appearing while it converts stops the swap (review f4c41fd): Linux and
 // macOS see it as a change (ctime), Windows, which has no ctime, by the link count checked in stillOK.
 func TestSharedDuringConversionIsRefusedAtTheSwap(t *testing.T) {
+	oneTry(t) // the outcome of one try (failures that may pass are tried again: DD-2)
 	for _, mode := range []OutputMode{Replace, Beside} {
 		t.Run(string(mode), func(t *testing.T) {
 			s := newScenario(t)
@@ -1053,6 +1060,7 @@ func TestSharedDuringConversionIsRefusedAtTheSwap(t *testing.T) {
 // (the check before each rename). The edit is simulated by moving the reported change time, as Windows
 // would (review 86970d8).
 func TestInFlightEditSeenOnlyInFileStateIsRefused(t *testing.T) {
+	oneTry(t) // the outcome of one try (failures that may pass are tried again: DD-2)
 	for _, when := range []string{"encode", "before swap"} {
 		for _, mode := range []OutputMode{Replace, Beside} {
 			t.Run(when+"/"+string(mode), func(t *testing.T) {
@@ -1084,4 +1092,12 @@ func TestInFlightEditSeenOnlyInFileStateIsRefused(t *testing.T) {
 			})
 		}
 	}
+}
+
+// oneTry gives jobs a single try for the rest of t, so a test sees what one try ends in, also for
+// failures that are otherwise tried again later (DD-2).
+func oneTry(t *testing.T) {
+	old := maxTries
+	maxTries = 1
+	t.Cleanup(func() { maxTries = old })
 }

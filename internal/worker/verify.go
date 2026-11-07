@@ -51,10 +51,11 @@ func fullDecodeTimeout(durationSec float64) time.Duration {
 // plainly when it was our time limit that ended it.
 func checkFailed(cctx context.Context, what string, err error) error {
 	log.Printf("check failed: %s: %v", what, err) // the technical detail, for the log and Settings > System
+	// both may pass (a slow or busy disk, a crash of the tool): tried again later (DD-2)
 	if errors.Is(cctx.Err(), context.DeadlineExceeded) {
-		return kept("%s took too long, so the original is kept. Press Retry later; a very slow disk or a damaged file can cause this", what)
+		return retryable(kept("%s took too long, so the original is kept. Press Retry later; a very slow disk or a damaged file can cause this", what), retryGeneral)
 	}
-	return kept("%s could not be done, so the original is kept. Press Retry; if it keeps failing, the file may be damaged", what)
+	return retryable(kept("%s could not be done, so the original is kept. Press Retry; if it keeps failing, the file may be damaged", what), retryGeneral)
 }
 
 // KeptError means a safety check refused the new file (or could not run): the original is kept.
@@ -110,12 +111,12 @@ func (w *Worker) preflight(sourcePath string, sourceSize int64) error {
 	free, err := w.freeSpace(dir)
 	if err != nil {
 		log.Printf("free space of %s: %v", dir, err)
-		return kept("the free disk space could not be checked, so converting did not start. Press Retry")
+		return retryable(kept("the free disk space could not be checked, so converting did not start. Press Retry"), retryGeneral)
 	}
 	need := SpaceNeeded(sourceSize)
 	if free < need {
-		return kept("there is not enough free disk space next to this file: about %s is needed to convert it safely, %s is free",
-			rules.HumanBytes(int64(need)), rules.HumanBytes(int64(free)))
+		return retryable(kept("there is not enough free disk space next to this file: about %s is needed to convert it safely, %s is free",
+			rules.HumanBytes(int64(need)), rules.HumanBytes(int64(free))), retrySpace)
 	}
 	return nil
 }

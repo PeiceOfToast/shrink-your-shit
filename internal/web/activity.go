@@ -190,7 +190,18 @@ func activityRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, no
 		for _, q := range next {
 			up = append(up, map[string]any{"library": q.Library, "count": q.Count, "order": s.QueueOrder})
 		}
-		writeJSON(w, map[string]any{"working": out, "upNext": up})
+		// jobs waiting to be tried again after a failure that may pass (DD-2), so none looks stuck
+		waiting, err := store.Retrying()
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		retrying := []map[string]any{}
+		for _, j := range waiting {
+			retrying = append(retrying, map[string]any{"jobId": strconv.FormatInt(j.ID, 10), "library": j.LibraryName, "path": j.Path,
+				"retryAt": j.RetryAt, "attempts": j.Attempts, "detail": j.Error})
+		}
+		writeJSON(w, map[string]any{"working": out, "upNext": up, "retrying": retrying})
 	})
 
 	// Failed conversions and originals a check kept (Retry: POST /api/jobs/{id}/retry).
@@ -208,7 +219,7 @@ func activityRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, no
 				title = "A check said no, so the original was kept"
 			}
 			out = append(out, map[string]any{"jobId": strconv.FormatInt(j.ID, 10), "library": j.LibraryName, "path": j.Path,
-				"title": title, "detail": j.Error, "originalUntouched": true})
+				"title": title, "detail": j.Error, "originalUntouched": true, "attempts": max(j.Attempts, 1)}) // tries made (DD-2; older rows: 1)
 		}
 		writeJSON(w, map[string]any{"items": out, "total": total})
 	})
