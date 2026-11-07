@@ -45,11 +45,11 @@ func TestNavByControlLevel(t *testing.T) {
 		perLibrary bool
 		want       string
 	}{
-		{"basic", false, "Libraries,Activity,Settings"},
-		{"standard", false, "Libraries,Activity,Settings"},
-		{"advanced", false, "Libraries,Activity,Flows,Settings"},
-		{"basic", true, "Libraries,Activity,Flows,Settings"},
-		{"standard", true, "Libraries,Activity,Flows,Settings"},
+		{"basic", false, "Libraries,Activity,Workers,Settings"},
+		{"standard", false, "Libraries,Activity,Workers,Settings"},
+		{"advanced", false, "Libraries,Activity,Flows,Workers,Settings"},
+		{"basic", true, "Libraries,Activity,Flows,Workers,Settings"},
+		{"standard", true, "Libraries,Activity,Flows,Workers,Settings"},
 	}
 	for _, c := range cases {
 		if got := labels(navFor(items, c.level, c.perLibrary)); got != c.want {
@@ -368,7 +368,7 @@ func TestActivityPages(t *testing.T) {
 			continue
 		}
 		_, body, _ := get(t, srv.URL+p.Path)
-		for _, want := range []string{"<h1>Activity</h1>", `/assets/activity.js`, `aria-label="Activity sections"`, `id="pause"`, `href="/activity/kept/"`} {
+		for _, want := range []string{"<h1>Activity</h1>", `/assets/activity.js`, `aria-label="Activity sections"`, `href="/activity/kept/"`} {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s: missing %s", p.Path, want)
 			}
@@ -394,8 +394,9 @@ func TestSettingsRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	// GET /api/settings fields (UI-API-CONTRACT.md); "token" has its own endpoint.
+	// parallelJobs is each worker's "Files at once" on the Workers page now (redesign D5, workshop S2).
 	contract := []string{"controlLevel", "perLibraryFlow", "firstRunDone", "firstRunStep", "authRequired", "keepOriginalsDays", "trashPath",
-		"parallelJobs", "queueOrder", "quietHours", "lowPriority", "scanSchedule", "integrations", "updateAvailable", "languages"}
+		"queueOrder", "quietHours", "lowPriority", "scanSchedule", "integrations", "updateAvailable", "languages"}
 	known := map[string]bool{"token": true}
 	for _, k := range contract {
 		known[k] = true

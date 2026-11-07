@@ -82,6 +82,7 @@ var pages = []page{
 	{Path: "/activity/kept/", Section: "activity", Kind: "activity", Tab: "Kept originals", Empty: "Originals we are keeping for you will be listed here, with the date they will be deleted."},
 	{Path: "/flow/", Section: "flows", Kind: "flow", Tab: "Flow"},
 	{Path: "/flows/", Section: "flows", Kind: "flows", Empty: "Your flows will be listed here."},
+	{Path: "/workers/", Section: "workers", Kind: "workers"},
 	{Path: "/settings/", Section: "settings", Tab: "General", Kind: "settings"},
 	{Path: "/settings/safety/", Section: "settings", Tab: "Safety", Kind: "settings"},
 	{Path: "/settings/performance/", Section: "settings", Tab: "Performance", Kind: "settings"},
@@ -113,6 +114,8 @@ func scripts(kind string) []string {
 		return append(core, "ui.js", "activity.js")
 	case "settings":
 		return append(core, "ui.js", "settings.js")
+	case "workers":
+		return append(core, "ui.js", "workers.js")
 	}
 	return core
 }

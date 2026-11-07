@@ -21,6 +21,9 @@
     putLibraryFlow: ["PUT", "/api/libraries/{id}/flow"],
     preview: ["POST", "/api/libraries/{id}/preview"],
     listFiles: ["GET", "/api/libraries/{id}/files"],
+    // Workers (redesign D; workshop S2, shapes as proposed): list, start, stop {when}, Files at once, the update notice.
+    listWorkers: ["GET", "/api/workers"], startWorker: ["POST", "/api/workers/{id}/start"], stopWorker: ["POST", "/api/workers/{id}/stop"],
+    setWorker: ["PATCH", "/api/workers/{id}"], dismissWorkerNotice: ["POST", "/api/workers/dismiss-notice"],
     activitySummary: ["GET", "/api/activity/summary"], pause: ["POST", "/api/queue/pause"],
     resume: ["POST", "/api/queue/resume"], queue: ["GET", "/api/activity/queue"],
     stopJob: ["POST", "/api/jobs/{id}/stop"], retryJob: ["POST", "/api/jobs/{id}/retry"],

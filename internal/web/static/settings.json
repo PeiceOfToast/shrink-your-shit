@@ -21,9 +21,6 @@
    "error": "Enter a whole number of days, from 0 to 365."},
   {"key": "trashPath", "tab": "safety", "group": "Keeping originals", "type": "readout", "label": "Where originals are kept"},
 
-  {"key": "parallelJobs", "tab": "performance", "group": "Speed", "type": "number", "min": 1, "max": 8,
-   "label": "Files converting at the same time", "hint": "More is faster but uses more of the computer.",
-   "error": "Enter a whole number from 1 to 8."},
   {"key": "lowPriority", "tab": "performance", "group": "Speed", "type": "checkbox", "label": "Run at low priority",
    "hint": "Keeps the computer responsive while converting."},
   {"key": "quietHours.from", "tab": "performance", "group": "Quiet hours", "type": "time", "label": "Quiet hours start",

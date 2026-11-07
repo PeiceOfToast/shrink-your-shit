@@ -123,12 +123,27 @@
     { keptId: "k2", library: "Movies", path: "/media/movies/Paper Moon (2010).mp4", newPath: "/media/movies/Paper Moon (2010).mkv", originalBytes: 4 * GB, nowBytes: 2.2 * GB, deleteOn: iso(-6 * 864e5) }
   ];
 
+  // Workers (redesign D; workshop S2 shapes as proposed): one, "This computer". It starts stopped, after an update that
+  // stopped it (the one-time notice). ?worker=running or ?worker=paused (quiet hours) starts it that way instead.
+  var worker = { id: "local", name: "This computer", host: "nas01", state: "stopped", pausedUntil: null, filesAtOnce: 1, gpu: "NVIDIA GeForce GTX 1660" }, stoppedByUpdate = true, stopAt = 0;
+  try { var sw = JSON.parse(sessionStorage.getItem("syp-mock-workers")); if (sw) { worker = sw.w; stoppedByUpdate = sw.u; stopAt = sw.t; } } catch (e) {}
+  var wm = /[?&]worker=(running|paused)/.exec(location.search);
+  if (wm) { worker.state = wm[1]; stoppedByUpdate = false; worker.pausedUntil = wm[1] === "paused" ? new Date(new Date().setHours(31, 0, 0, 0)).toISOString() : null; }
+  function saveWorkers() { try { sessionStorage.setItem("syp-mock-workers", JSON.stringify({ w: worker, u: stoppedByUpdate, t: stopAt })); } catch (e) {} }
+  function workerOn() { return worker.state === "running" || worker.state === "paused" || worker.state === "stopping"; }
+  function workerView() {
+    if (worker.state === "stopping" && Date.now() >= stopAt) { worker.state = "stopped"; saveWorkers(); } // the current files finished
+    var v = copy(worker), busy = worker.state === "running" || worker.state === "stopping";
+    v.files = busy ? working.slice(0, worker.filesAtOnce).map(function (j) { return { jobId: j.jobId, library: j.library, path: j.path, percent: j.percent }; }) : [];
+    return v;
+  }
+
   function summary() {
     // Waiting to be freed = the space the kept originals will give back (original - new); the whole
     // originals' size is only the Kept originals figure (keptBytes). Contract, workshop response to F1.
     var kept = 0; keptList.forEach(function (k) { kept += k.originalBytes - k.nowBytes; });
     var freed = 0; libs.forEach(function (l) { freed += l.freedBytes; }); // the libraries' own numbers, added up
-    return { freedBytes: freed, waitingBytes: kept, workingFiles: paused ? 0 : working.length, waitingFiles: 590, paused: paused,
+    return { freedBytes: freed, waitingBytes: kept, workingFiles: paused || !workerOn() ? 0 : working.length, waitingFiles: 590, paused: paused, workersRunning: workerOn() ? 1 : 0,
              counts: { skipped: skippedList.length, failed: failedList.length } };
   }
   function previewResult() {
@@ -295,6 +310,17 @@
       return ok(list([{ path: root + "/Alien (1979).mkv", bytes: 9 * GB }, { path: root + "/Heat (1995).mkv", bytes: 7 * GB }, { path: root + "/Show S02E04.mkv", bytes: 4.1 * GB }]));
     },
     activitySummary: function () { return ok(summary()); },
+    listWorkers: function () { return ok({ items: [workerView()], stoppedByUpdate: stoppedByUpdate }); },
+    startWorker: function () { worker.state = "running"; stoppedByUpdate = false; saveWorkers(); return ok(workerView()); },
+    stopWorker: function (p, b) {
+      if (b.when === "after_current" && workerView().files.length) { worker.state = "stopping"; stopAt = Date.now() + 6000; } else worker.state = "stopped";
+      saveWorkers(); return ok(workerView());
+    },
+    setWorker: function (p, b) {
+      if ([1, 2, 3, 4].indexOf(b.filesAtOnce) < 0) return fail(400, "invalid", "Files at once must be 1 to 4. Nothing was changed.");
+      worker.filesAtOnce = b.filesAtOnce; saveWorkers(); return ok(workerView());
+    },
+    dismissWorkerNotice: function () { stoppedByUpdate = false; saveWorkers(); return ok(); },
     pause: function () { paused = true; saveAct(); return ok(); },
     resume: function () { paused = false; saveAct(); return ok(); },
     queue: function () {
