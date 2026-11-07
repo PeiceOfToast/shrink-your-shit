@@ -215,9 +215,6 @@ func (a *Access) routes(api *http.ServeMux) {
 			HttpOnly: true, SameSite: http.SameSiteStrictMode})
 		writeJSON(w, map[string]bool{"ok": true})
 	})
-	api.HandleFunc("GET /api/settings", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, map[string]bool{"authRequired": a.Required()})
-	})
 	api.HandleFunc("GET /api/settings/token", func(w http.ResponseWriter, r *http.Request) {
 		tok := a.Token()
 		if tok == "" {

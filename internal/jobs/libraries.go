@@ -483,3 +483,155 @@ func (s *Store) SetMeta(key, value string) error {
 	_, err := s.db.Exec(`INSERT INTO app_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)
 	return err
 }
+
+// ErrNameTaken: another flow already has this name.
+var ErrNameTaken = errors.New("another flow already has this name")
+
+// ErrFlowInUse: libraries use this flow, so it cannot be deleted.
+type ErrFlowInUse struct{ UsedBy []string }
+
+func (e ErrFlowInUse) Error() string { return "the flow is used by libraries" }
+
+// FlowUse is a flow with the names of the libraries that use it.
+type FlowUse struct {
+	Flow
+	UsedBy []string
+}
+
+// Flows lists every flow, oldest first, with who uses it.
+func (s *Store) Flows() ([]FlowUse, error) {
+	rows, err := s.db.Query(`SELECT id FROM flows ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		rows.Scan(&id)
+		ids = append(ids, id)
+	}
+	rows.Close()
+	out := []FlowUse{}
+	for _, id := range ids {
+		f, err := s.GetFlow(id)
+		if err != nil {
+			return nil, err
+		}
+		used, err := s.usedBy(s.db, id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, FlowUse{Flow: f, UsedBy: used})
+	}
+	return out, nil
+}
+
+func (s *Store) usedBy(q interface {
+	Query(string, ...any) (*sql.Rows, error)
+}, flowID int64) ([]string, error) {
+	rows, err := q.Query(`SELECT name FROM libraries WHERE flow_id=? ORDER BY name`, flowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	names := []string{}
+	for rows.Next() {
+		var n string
+		rows.Scan(&n)
+		names = append(names, n)
+	}
+	return names, rows.Err()
+}
+
+func (s *Store) nameFree(q execer, name string, except int64) error {
+	var c int
+	if err := q.QueryRow(`SELECT COUNT(*) FROM flows WHERE name=? AND id<>?`, name, except).Scan(&c); err != nil {
+		return err
+	}
+	if c > 0 {
+		return ErrNameTaken
+	}
+	return nil
+}
+
+// AddFlow adds a flow named name (ErrNameTaken if one already is).
+func (s *Store) AddFlow(name string, t rules.Template) (Flow, error) {
+	if err := s.nameFree(s.db, name, 0); err != nil {
+		return Flow{}, err
+	}
+	id, err := s.addFlow(s.db, name, t)
+	if err != nil {
+		return Flow{}, err
+	}
+	return s.GetFlow(id)
+}
+
+// RenameFlow renames a flow. Nothing renames a flow but this.
+func (s *Store) RenameFlow(id int64, name string) (Flow, error) {
+	if _, err := s.GetFlow(id); err != nil {
+		return Flow{}, err
+	}
+	if err := s.nameFree(s.db, name, id); err != nil {
+		return Flow{}, err
+	}
+	if _, err := s.db.Exec(`UPDATE flows SET name=?, changed=? WHERE id=?`, name, s.stamp(), id); err != nil {
+		return Flow{}, err
+	}
+	return s.GetFlow(id)
+}
+
+// DuplicateFlow copies a flow as "<name> (copy)" (a clash adds " 2", " 3"...), used by no library.
+func (s *Store) DuplicateFlow(id int64) (Flow, error) {
+	f, err := s.GetFlow(id)
+	if err != nil {
+		return Flow{}, err
+	}
+	name, err := uniqueFlowName(s.db, f.Name+" (copy)")
+	if err != nil {
+		return Flow{}, err
+	}
+	nid, err := s.addFlow(s.db, name, f.Template)
+	if err != nil {
+		return Flow{}, err
+	}
+	return s.GetFlow(nid)
+}
+
+// DeleteFlow deletes a flow no library uses (ErrFlowInUse otherwise).
+func (s *Store) DeleteFlow(id int64) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	used, err := s.usedBy(tx, id)
+	if err != nil {
+		return err
+	}
+	if len(used) > 0 {
+		return ErrFlowInUse{UsedBy: used}
+	}
+	r, err := tx.Exec(`DELETE FROM flows WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
+}
+
+// SetLibraryFlow gives a library another existing flow.
+func (s *Store) SetLibraryFlow(libraryID, flowID int64) (Library, error) {
+	if _, err := s.GetFlow(flowID); err != nil {
+		return Library{}, err
+	}
+	r, err := s.db.Exec(`UPDATE libraries SET flow_id=? WHERE id=?`, flowID, libraryID)
+	if err != nil {
+		return Library{}, err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return Library{}, ErrNotFound
+	}
+	return s.GetLibrary(libraryID)
+}

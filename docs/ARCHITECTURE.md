@@ -57,6 +57,18 @@ rule the scanner matches with and the CRF, preset, output mode and minimum savin
 - `freedBytes` counts only conversions that replaced their original (`beside` frees nothing).
 - Every `/api` answer carries `X-SYP-API: 1`; ids in the API are strings.
 - `GET /api/fs/dirs?path=` lists folder names (never files or sizes) for choosing a library's folder.
+- Flows (`internal/web/flows.go`): list with who uses each (`usedBy`, `madeWith`), create (default
+  template: slider Balanced), rename (the only way a flow is ever renamed), duplicate ("<name> (copy)"),
+  delete (refused with `flow_in_use` while a library uses it). `PUT /api/libraries/{id}/flow` gives a
+  library another flow, only when the `perLibraryFlow` setting is on. Import/export answer 501 until
+  slice 30; `GET /api/flows/{id}` has no steps until slice 16.
+- Global settings (`internal/web/settings.go`, stored as JSON in `app_meta` key `settings`):
+  `GET/PATCH /api/settings`. A PATCH may hold any subset; the result is checked as a whole and saved
+  only if all of it is valid. Read-only fields (`authRequired`, `trashPath`, `updateAvailable`) are
+  ignored in a PATCH; `integrations` is refused until its slice. When settings are first created,
+  `firstRunDone` is true if a library already exists (an upgrade, or `-library`). This slice stores
+  `parallelJobs`, `quietHours`, `lowPriority`, `scanSchedule`, `queueOrder` and `keepOriginalsDays`;
+  later slices use them.
 
 ## Job lifecycle
 

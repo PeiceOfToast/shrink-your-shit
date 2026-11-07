@@ -18,6 +18,7 @@ marked **never verified** has not been seen working by anyone. Update this file 
 | 7c | Windows installer (`installer/windows`, Inno Setup), built and tested on a Windows runner in CI and attached to releases | this change |
 | 11 | Access token beyond loopback: sign-in cookie or Bearer, CSRF checks on writes, `token` command, `GET /healthz` for health checks, installer prints the sign-in address | this change |
 | 15a | Libraries and flows as records: add/rename/delete/start libraries on the web page, each with its own flow; `-library` adds missing ones; upgrade gives existing libraries a "<folder> - Legacy" flow with the old flag values | this change |
+| 15b | Flow endpoints (list, create, rename, duplicate, delete, choose a library's flow) and global settings (`GET/PATCH /api/settings`, stored and checked, used by later slices) | this change |
 
 ## What has been verified, and how
 
