@@ -27,10 +27,10 @@
   function persist() { try { sessionStorage.setItem("syp-mock-settings", JSON.stringify(settings)); } catch (e) {} }
 
   var libs = [
-    { id: "1", name: "Movies", path: "/media/movies", state: "working", workingFiles: 2, waitingFiles: 590, nextScan: iso(-6 * 3600e3), freedBytes: 410 * GB, flowId: "f1", settingLabel: "Balanced", settingKind: "slider" },
-    { id: "2", name: "TV Shows", path: "/media/tv", state: "idle", workingFiles: 0, waitingFiles: 0, nextScan: iso(-6 * 3600e3), freedBytes: 230 * GB, flowId: "f2", settingLabel: "Smaller", settingKind: "slider" },
-    { id: "4", name: "Anime", path: "/media/anime", state: "idle", workingFiles: 0, waitingFiles: 40, nextScan: iso(-6 * 3600e3), freedBytes: 12 * GB, flowId: "f2", settingLabel: "Smaller", settingKind: "slider" },
-    { id: "3", name: "Home videos", path: "/media/home", state: "needs_attention", workingFiles: 0, waitingFiles: 12, nextScan: iso(-6 * 3600e3), freedBytes: 0, flowId: "f3", settingLabel: "Custom", settingKind: "custom" }
+    { id: "1", name: "Movies", path: "/media/movies", started: true, state: "working", workingFiles: 2, waitingFiles: 590, nextScan: iso(-6 * 3600e3), freedBytes: 410 * GB, flowId: "f1", settingLabel: "Balanced", settingKind: "slider" },
+    { id: "2", name: "TV Shows", path: "/media/tv", started: true, state: "idle", workingFiles: 0, waitingFiles: 0, nextScan: iso(-6 * 3600e3), freedBytes: 230 * GB, flowId: "f2", settingLabel: "Smaller", settingKind: "slider" },
+    { id: "4", name: "Anime", path: "/media/anime", started: true, state: "idle", workingFiles: 0, waitingFiles: 40, nextScan: iso(-6 * 3600e3), freedBytes: 12 * GB, flowId: "f2", settingLabel: "Smaller", settingKind: "slider" },
+    { id: "3", name: "Home videos", path: "/media/home", started: true, state: "needs_attention", workingFiles: 0, waitingFiles: 12, nextScan: iso(-6 * 3600e3), freedBytes: 0, flowId: "f3", settingLabel: "Custom", settingKind: "custom" }
   ];
   try { var sl = sessionStorage.getItem("syp-mock-libs"); if (sl) libs = JSON.parse(sl); } catch (e) {}
   // ?fresh=1 on the wizard starts over: no libraries, first-run not done.

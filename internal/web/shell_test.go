@@ -570,3 +570,17 @@ func TestSkipReasonsHaveWords(t *testing.T) {
 		t.Errorf("found only %d reasons in mock.js; the pattern may be wrong", len(seen))
 	}
 }
+
+// The library cards carry no sizes, savings or estimates (redesign A2, RD-A2; the user's review): real numbers live in
+// Activity. A merge that brings an old libraries.js back would fail here.
+func TestLibraryCardsHaveNoEstimates(t *testing.T) {
+	b, err := fs.ReadFile(static, "static/libraries.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"ui.bytes(", "freedBytes", "waitingBytes", "Space freed", "saving", "Change setting", "\"Preview\"", "estimate"} {
+		if strings.Contains(string(b), bad) {
+			t.Errorf("libraries.js contains %q: the cards show no sizes, savings, estimates or Preview/Change setting buttons", bad)
+		}
+	}
+}
