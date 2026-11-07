@@ -1163,3 +1163,41 @@ func hdrVid(codec string, md bool) map[string]any {
 	}
 	return v
 }
+
+// A Dolby Vision job queued before migration 17 (or before its flow changed) is never encoded when the
+// flow now leaves it alone (review a09f6f5): it ends as a skipped file with that reason, not failed.
+func TestQueuedDolbyVisionIsSkippedNotEncoded(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		profile int
+		include bool
+		code    string
+	}{
+		{"profile 5, Dolby Vision included", 5, true, rules.SkipDVProfile5},
+		{"profile 8, Dolby Vision left alone", 8, false, rules.SkipDV},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s := newScenario(t)
+			v := hdrVid("h264", true)
+			v["side_data_list"] = append(v["side_data_list"].([]any), map[string]any{"side_data_type": "DOVI configuration record", "dv_profile": c.profile, "dv_bl_signal_compatibility_id": 1})
+			s.srcSpec.streams[0] = v
+			w := s.worker(Replace)
+			sel := rules.DefaultSelectors(3)
+			sel.Speed, sel.IncludeDolbyVision = "slower", c.include
+			tmpl := sel.Template()
+			w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+			w.RunOne(context.Background())
+			if s.count("libx265") != 0 {
+				t.Fatalf("encoded:\n%s", strings.Join(s.calls, "\n"))
+			}
+			if _, err := s.store.Get(s.id); err == nil {
+				t.Errorf("the job is still there: %+v", s.job())
+			}
+			if f, _ := s.store.GetFile(s.src); f == nil || f.Reason != c.code || !strings.HasPrefix(f.Decision, "skip: ") {
+				t.Errorf("file record %+v, want %s", f, c.code)
+			}
+			s.t = t
+			s.assertOriginalSafe()
+		})
+	}
+}

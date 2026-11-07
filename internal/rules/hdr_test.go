@@ -97,6 +97,9 @@ func TestDolbyVision(t *testing.T) {
 		{"profile 5, not included", hdr10(dv(5, "")), false, SkipDV, ""},
 		{"unknown profile (a dvh1 tag alone), included", hdr10(dv(0, "smpte2084")), true, SkipDVProfile5, ""},
 		{"profile 8 without an HDR10 base in the stream, included", hdr10(dv(8, "")), true, SkipDVProfile5, ""},
+		{"profile 8, compatibility id 0, included (review a09f6f5)", hdr10(dv(8, "smpte2084"), compat(0)), true, SkipDVProfile5, ""},
+		{"profile 8, compatibility id 1, included", hdr10(dv(8, "smpte2084"), compat(1)), true, "", DVRemovedNote},
+		{"profile 7, compatibility id 0, included", hdr10(dv(7, "smpte2084"), compat(0)), true, SkipDVProfile5, ""},
 	} {
 		p := stdDV(c.includeDV).Compile(c.info)
 		if p.SkipCode != c.code || p.HDRNote != c.note || (c.code == "" && p.Video.HDR == nil) {
@@ -171,3 +174,5 @@ func TestHDRIsCheckedInTheNewFile(t *testing.T) {
 		}
 	}
 }
+
+func compat(c int) func(*media.Stream) { return func(v *media.Stream) { v.DVCompat = &c } }

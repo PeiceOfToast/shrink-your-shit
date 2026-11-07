@@ -26,8 +26,13 @@ func TestHDRSideData(t *testing.T) {
 	}
 	v := i.Video()
 	if v.MasteringDisplay != "G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,50)" || v.CLL != "1000,400" ||
-		!v.DolbyVision || v.DVProfile != 8 || !i.IsHDR() || i.Probe != ProbeVersion {
+		!v.DolbyVision || v.DVProfile != 8 || v.DVCompat == nil || *v.DVCompat != 1 || !i.IsHDR() || i.Probe != ProbeVersion {
 		t.Errorf("%+v", v)
+	}
+	// compatibility id 0 is kept as 0 (no HDR10 fallback), not as "not given" (review a09f6f5)
+	i, _ = ParseProbe([]byte(`{"streams":[{"codec_type":"video","codec_name":"hevc","side_data_list":[{"side_data_type":"DOVI configuration record","dv_profile":8,"dv_bl_signal_compatibility_id":0}]}],"format":{}}`))
+	if v := i.Video(); v.DVCompat == nil || *v.DVCompat != 0 {
+		t.Errorf("compat 0: %+v", v.DVCompat)
 	}
 	// ffprobe versions that print plain numbers (cd/m², 0..1) give the same values
 	i, _ = ParseProbe([]byte(`{"streams":[{"codec_type":"video","codec_name":"hevc","side_data_list":[{"side_data_type":"Mastering display metadata",
@@ -43,7 +48,7 @@ func TestHDRSideData(t *testing.T) {
 	// Dolby Vision from the MP4 sample entry alone (no record): the profile is not known
 	for _, tag := range []string{"dvh1", "dvhe", "dav1"} {
 		i, _ = ParseProbe([]byte(`{"streams":[{"codec_type":"video","codec_name":"hevc","codec_tag_string":"` + tag + `"}],"format":{}}`))
-		if v := i.Video(); !v.DolbyVision || v.DVProfile != 0 {
+		if v := i.Video(); !v.DolbyVision || v.DVProfile != 0 || v.DVCompat != nil {
 			t.Errorf("%s: %+v", tag, v)
 		}
 	}

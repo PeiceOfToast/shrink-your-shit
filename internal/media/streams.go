@@ -55,6 +55,9 @@ type Stream struct {
 	// DVProfile is the Dolby Vision profile from the DOVI configuration record (0: not known, e.g. a
 	// dvh1 tag or RPU data alone). Profile 5 has no HDR10 base and must never be re-encoded (S3).
 	DVProfile int `json:"dvProfile,omitempty"`
+	// DVCompat is the record's dv_bl_signal_compatibility_id, nil when not given: 0 means the base layer
+	// has no HDR10/SDR/HLG fallback (like profile 5), so re-encoding it would show wrong colours.
+	DVCompat *int `json:"dvCompat,omitempty"`
 	// MasteringDisplay is the HDR10 mastering display in x265's master-display form,
 	// G(x,y)B(x,y)R(x,y)WP(x,y)L(max,min); CLL is "MaxCLL,MaxFALL" (x265's max-cll). Empty when absent.
 	MasteringDisplay string `json:"masteringDisplay,omitempty"`
@@ -89,6 +92,10 @@ func (s *Stream) addSideData(m map[string]any) {
 			s.DolbyVision = true
 			if p := int(num(sd, "dv_profile")); p > 0 {
 				s.DVProfile = p
+			}
+			if _, ok := sd["dv_bl_signal_compatibility_id"]; ok {
+				c := int(num(sd, "dv_bl_signal_compatibility_id"))
+				s.DVCompat = &c
 			}
 		case strings.Contains(t, "hdr10+") || strings.Contains(t, "2094-40"):
 			s.HDR10Plus = true

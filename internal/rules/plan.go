@@ -491,7 +491,7 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 // What S3 says about HDR (design's sentences; the notes go to the job's log and the Preview's sample).
 const (
 	dvSkip        = "it is Dolby Vision, left as it is by this flow's setting"
-	dv5Skip       = "it is Dolby Vision profile 5 (or a profile we can't read): converting it would show wrong colours"
+	dv5Skip       = "it is Dolby Vision profile 5, or another kind with no HDR10 picture to keep (or one we can't read): converting it would show wrong colours"
 	HDR10PlusNote = "HDR10+ scene data isn't kept; the file is HDR10."
 	DVRemovedNote = "Dolby Vision removed, HDR10 kept."
 	DVRemovedHLG  = "Dolby Vision removed, HLG kept."
@@ -519,7 +519,8 @@ func (p *Plan) applyHDR(info media.Info, includeDV bool) bool {
 		switch {
 		case !includeDV:
 			return skip(dvSkip, SkipDV)
-		case v.DVProfile != 7 && v.DVProfile != 8, tr != "smpte2084" && tr != "arib-std-b67":
+		case v.DVProfile != 7 && v.DVProfile != 8, tr != "smpte2084" && tr != "arib-std-b67",
+			v.DVCompat != nil && *v.DVCompat == 0: // no HDR10/HLG base to keep (review a09f6f5)
 			return skip(dv5Skip, SkipDVProfile5)
 		}
 	} else if tr != "smpte2084" && tr != "arib-std-b67" {
