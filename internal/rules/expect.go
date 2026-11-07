@@ -11,7 +11,8 @@ import (
 )
 
 // StreamExpect says what one stream of the new file must look like. A zero value is not checked,
-// except Language, which must match exactly (including "no language").
+// except Language, which must match exactly (including "no language"; "und", "undetermined", is the same
+// as none: MP4 writes it where MKV writes nothing).
 type StreamExpect struct {
 	Type     string // video, audio, subtitle, attachment
 	Codec    string
@@ -224,14 +225,14 @@ func compareStream(w StreamExpect, g media.Stream, n int) []string {
 			differ("the colour depth", fmt.Sprintf("%d-bit", w.BitDepth), fmt.Sprintf("%d-bit", g.BitDepth))
 		}
 	case "audio":
-		if !strings.EqualFold(w.Language, g.Language) {
+		if !sameLanguage(w.Language, g.Language) {
 			differ("the language", quoteLang(w.Language), quoteLang(g.Language))
 		}
 		if w.Channels > 0 && g.Channels != w.Channels {
 			differ("the channel count", fmt.Sprint(w.Channels), fmt.Sprint(g.Channels))
 		}
 	case "subtitle":
-		if !strings.EqualFold(w.Language, g.Language) {
+		if !sameLanguage(w.Language, g.Language) {
 			differ("the language", quoteLang(w.Language), quoteLang(g.Language))
 		}
 		if w.SubKind != "" && w.SubKind != g.SubKind {
@@ -273,4 +274,14 @@ func HumanBytes(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+func sameLanguage(a, b string) bool {
+	norm := func(s string) string {
+		if strings.EqualFold(s, "und") {
+			return ""
+		}
+		return strings.ToLower(s)
+	}
+	return norm(a) == norm(b)
 }

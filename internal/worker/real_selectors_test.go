@@ -24,8 +24,9 @@ func TestRealSelectors(t *testing.T) {
 	dir := t.TempDir()
 	gen := func(name, size string, kbps int, extra ...string) string {
 		p := filepath.Join(dir, name)
-		args := []string{"-f", "lavfi", "-i", "testsrc2=duration=2:size=" + size + ":rate=25",
-			"-f", "lavfi", "-i", "sine=duration=2", "-c:v", "libx264", "-b:v", fmt.Sprint(kbps) + "k", "-c:a", "aac"}
+		// 5 s, so the length check's 2% (100 ms) is well above an audio frame's padding
+		args := []string{"-f", "lavfi", "-i", "testsrc2=duration=5:size=" + size + ":rate=25",
+			"-f", "lavfi", "-i", "sine=duration=5", "-c:v", "libx264", "-b:v", fmt.Sprint(kbps) + "k", "-c:a", "aac"}
 		runFFmpeg(t, append(append(args, extra...), p)...)
 		return p
 	}
@@ -42,7 +43,7 @@ func TestRealSelectors(t *testing.T) {
 		if p := tmpl.Compile(probe(t, path)); p.Skip != "" {
 			t.Fatalf("the scanner would skip it: %s", p.Skip)
 		}
-		st, id := realJob(t, path, 2)
+		st, id := realJob(t, path, 5)
 		w := realWorker(st, media.OSExec{})
 		w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
 		if err := w.run(t); err != nil {
@@ -114,7 +115,8 @@ func TestRealSelectors(t *testing.T) {
 		}
 	})
 	t.Run("HDR is skipped unless Skip HDR is off", func(t *testing.T) {
-		p := gen("hdr.mkv", "1280x720", 5000, "-pix_fmt", "yuv420p10le", "-color_primaries", "bt2020", "-color_trc", "smpte2084", "-colorspace", "bt2020nc")
+		// x264's own VUI flags: ffmpeg's -color_trc does not reach an mkv stream from libx264
+		p := gen("hdr.mkv", "1280x720", 5000, "-pix_fmt", "yuv420p10le", "-x264-params", "colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc")
 		info := probe(t, p)
 		if plan := rules.SliderTemplate(3).Compile(info); plan.SkipCode != rules.SkipHDR {
 			t.Errorf("slider: %q", plan.Skip)
@@ -155,8 +157,9 @@ func TestRealMaxBitrateCap(t *testing.T) {
 	if freeAvg < 15 {
 		t.Skipf("the test file is not demanding enough here (uncapped average %.1f Mbps)", freeAvg)
 	}
-	// VBV: maxrate 10 Mbps with a 20 Mb buffer; one second can hold at most maxrate plus what the buffer had
-	if capAvg > 11 || capPeak > 30 {
+	// VBV: maxrate 10 Mbps with a 20 Mb buffer, which starts full: over the 4 s the average can be up to
+	// 10 + 20/4 Mbps, and one second can hold at most maxrate plus the buffer
+	if capAvg > 10+20/4.0 || capPeak > 30 {
 		t.Errorf("capped at 10 Mbps: average %.1f, peak second %.1f", capAvg, capPeak)
 	}
 	if capPeak >= freePeak {
