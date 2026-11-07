@@ -221,3 +221,30 @@ func TestSubtitlesToSrt(t *testing.T) {
 		t.Errorf("expected %d streams", n)
 	}
 }
+
+// A subtitle of no known kind (TTML: ffmpeg has no decoder for it) stays inside in "Save as separate .srt
+// files" and is kept by "Text subtitles only": it is copied, never converted (a conversion would fail).
+func TestUnknownKindSubtitleIsCopied(t *testing.T) {
+	info := h264(1920, 1080, 8000,
+		media.Stream{Index: 1, Type: "subtitle", Codec: "ttml", Language: "eng"},
+		media.Stream{Index: 2, Type: "subtitle", Codec: "subrip", SubKind: "text", Language: "eng"})
+	for _, choice := range []string{"srt", "text_only"} {
+		s := DefaultSelectors(3)
+		s.Subtitles = choice
+		p := s.Template().Compile(info)
+		for _, o := range p.Tracks {
+			if o.Index == 1 {
+				t.Errorf("%s: the TTML subtitle has an op %+v", choice, o)
+			}
+		}
+		n := 0
+		for _, st := range p.Expect(info, 0).Streams {
+			if st.Type == "subtitle" {
+				n++
+			}
+		}
+		if choice == "srt" && n != 1 || choice == "text_only" && n != 2 {
+			t.Errorf("%s: %d subtitles expected in the new file", choice, n)
+		}
+	}
+}

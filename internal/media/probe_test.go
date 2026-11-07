@@ -497,3 +497,23 @@ func TestInfoSurvivesJSON(t *testing.T) {
 		}
 	}
 }
+
+// TTML is text, but ffmpeg cannot read it: it has no kind, so it is never converted to .srt (and "Text
+// subtitles only" keeps it). Subrip and PGS keep their kinds.
+func TestTTMLSubtitlesHaveNoKind(t *testing.T) {
+	info, err := ParseProbe([]byte(`{"streams":[
+ {"index":0,"codec_type":"video","codec_name":"h264"},
+ {"index":1,"codec_type":"subtitle","codec_name":"ttml"},
+ {"index":2,"codec_type":"subtitle","codec_name":"subrip"},
+ {"index":3,"codec_type":"subtitle","codec_name":"hdmv_pgs_subtitle"}],"format":{"format_name":"mp4"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kinds []string
+	for _, s := range info.Subtitles() {
+		kinds = append(kinds, s.Codec+"="+s.SubKind)
+	}
+	if got := strings.Join(kinds, " "); got != "ttml= subrip=text hdmv_pgs_subtitle=bitmap" {
+		t.Errorf("kinds %s", got)
+	}
+}

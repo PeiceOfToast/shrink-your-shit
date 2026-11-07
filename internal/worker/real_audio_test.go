@@ -81,11 +81,13 @@ func TestRealSubtitlesAsSrtFiles(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "a.srt"), []byte("1\n00:00:00,000 --> 00:00:02,000\nhello\n"), 0o644)
 	os.WriteFile(filepath.Join(dir, "b.srt"), []byte("1\n00:00:00,000 --> 00:00:02,000\nbonjour\n"), 0o644)
 	src := filepath.Join(dir, "Movie.mkv")
-	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=5:size=1280x720:rate=25", "-i", filepath.Join(dir, "a.srt"), "-i", filepath.Join(dir, "b.srt"),
-		"-map", "0", "-map", "1", "-map", "2", "-c:v", "libx264", "-b:v", "5000k", "-c:s", "srt",
-		"-metadata:s:s:0", "language=eng", "-metadata:s:s:1", "language=fre", "-disposition:s:1", "forced", src)
+	// with an AAC track: saving the subtitles as files leaves the audio alone (qa-5903756)
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=5:size=1280x720:rate=25", "-f", "lavfi", "-i", "sine=duration=5:frequency=440",
+		"-i", filepath.Join(dir, "a.srt"), "-i", filepath.Join(dir, "b.srt"),
+		"-map", "0", "-map", "1", "-map", "2", "-map", "3", "-c:v", "libx264", "-b:v", "5000k", "-c:a", "aac", "-b:a", "96k", "-c:s", "srt",
+		"-metadata:s:a:0", "language=eng", "-metadata:s:s:0", "language=eng", "-metadata:s:s:1", "language=fre", "-disposition:s:1", "forced", src)
 	s := rules.DefaultSelectors(3)
-	s.Subtitles, s.SkipSmall = "srt", false
+	s.Subtitles, s.Audio, s.SkipSmall = "srt", "aac", false
 	tmpl := s.Template()
 	run := func() jobs.Job {
 		st, id := realJob(t, src, 5)
@@ -116,8 +118,12 @@ func TestRealSubtitlesAsSrtFiles(t *testing.T) {
 	if j := run(); j.Status != jobs.Done {
 		t.Fatalf("%s %q", j.Status, j.Error)
 	}
-	if n := len(probe(t, src).Subtitles()); n != 0 {
+	after := probe(t, src)
+	if n := len(after.Subtitles()); n != 0 {
 		t.Errorf("%d subtitles still inside", n)
+	}
+	if a := after.Audio(); len(a) != 1 || a[0].Codec != "aac" || a[0].Language != "eng" {
+		t.Errorf("the audio did not survive: %+v", a)
 	}
 	for name, want := range map[string]string{"Movie.eng.srt": "hello", "Movie.fre.forced.srt": "bonjour"} {
 		if b, _ := os.ReadFile(filepath.Join(dir, name)); !strings.Contains(string(b), want) {

@@ -51,6 +51,10 @@ func AutoAudioKbps(target string, channels int) int {
 // every audio track is kept (no choice drops all audio; design's words).
 const NoAudioInMyLanguages = "None of the audio is in your languages, so all audio tracks are kept."
 
+// SubtitlesStayInside is said when "Save as separate .srt files" leaves subtitles inside the new file:
+// pictures (PGS, VobSub) and formats ffmpeg cannot turn into text (TTML) (design's words).
+const SubtitlesStayInside = "Picture subtitles stay inside the file; only text subtitles are saved as .srt files."
+
 // LanguagesNeeded is the 400 for "my languages" before any language is chosen (design's words).
 const LanguagesNeeded = "Choose your languages first, in Settings > General."
 

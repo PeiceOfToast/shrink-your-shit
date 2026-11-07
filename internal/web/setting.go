@@ -271,7 +271,7 @@ func flowSteps(t rules.Template) []map[string]any {
 		case "text_only":
 			add("subtitles", "Text subtitles only", "subtitle pictures (PGS, VobSub) are removed")
 		case "srt":
-			add("subtitles", "Save as separate .srt files", "text subtitles go next to the new file, named by language; subtitle pictures stay inside; an existing file is never replaced")
+			add("subtitles", "Save as separate .srt files", strings.TrimSuffix(rules.SubtitlesStayInside, ".")+"; an existing file is never replaced")
 		default:
 			add("subtitles", "Keep every subtitle as it is", "")
 		}
