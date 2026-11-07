@@ -688,7 +688,13 @@ func (e ErrFlowShared) Error() string { return "the flow is shared with other li
 // The files of every library whose setting changed are forgotten by the scanner's cache, so the next
 // scan looks at them again with the new setting.
 func (s *Store) SaveSlider(libraryID int64, quality int, choice string) (Library, error) {
-	t := rules.SliderTemplate(quality)
+	return s.SaveTemplate(libraryID, rules.SliderTemplate(quality), choice)
+}
+
+// SaveTemplate saves an editor's setting (the slider's or the Standard selectors') as library
+// libraryID's flow, with the same rules as SaveSlider: a flow the editors cannot show (legacy, custom)
+// is never overwritten, it gets a new one; a shared flow needs choice.
+func (s *Store) SaveTemplate(libraryID int64, t rules.Template, choice string) (Library, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return Library{}, err
@@ -707,7 +713,7 @@ func (s *Store) SaveSlider(libraryID int64, quality int, choice string) (Library
 		return Library{}, err
 	}
 	switch {
-	case f.Template.Kind != rules.KindSlider:
+	case f.Template.Kind != rules.KindSlider && f.Template.Kind != rules.KindSelectors:
 		err = s.newFlowFor(tx, l, l.Name, t)
 	case len(users) > 1 && choice == "change_both":
 		err = s.setTemplate(tx, l.FlowID, t)

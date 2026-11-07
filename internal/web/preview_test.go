@@ -75,11 +75,18 @@ func TestPreviewEndpoint(t *testing.T) {
 		t.Errorf("sample: %d %s", code, b)
 	}
 
+	// the Standard selectors are previewed as they would run (slice 25a)
+	code, out, b = pv(fmt.Sprintf(`{"setting":{"quality":3,"resolution":"720","maxBitrate":"10","fileType":"mkv","afterConverting":"beside"},"sampleFile":%q}`, filepath.Join(dir, "a.mkv")))
+	if code != 200 || out.Sample == nil || out.Sample.Lines[0] != "Video: converted to the smaller format and made 720 lines high (from 1080), same length, at most 10 Mbps" ||
+		!strings.Contains(strings.Join(out.Sample.Lines, "|"), "The new MKV file is written next to the original") {
+		t.Errorf("selectors sample: %d %s", code, b)
+	}
+
 	for body, want := range map[string]string{
 		`{"setting":{"quality":0}}`:                                       "400 invalid_setting",
-		`{"setting":{"quality":3,"speed":"faster"}}`:                      "400 not_available",
-		`{"setting":{"quality":3,"minSavingPct":20}}`:                     "400 not_available",
-		`{"setting":{"quality":3,"ignore":["Extras"]}}`:                   "400 not_available",
+		`{"setting":{"quality":3,"audio":"aac"}}`:                         "400 not_available",
+		`{"setting":{"quality":3,"fileType":"mp4"}}`:                      "400 not_available",
+		`{"setting":{"quality":3,"speed":"fast"}}`:                        "400 invalid_setting",
 		fmt.Sprintf(`{"sampleFile":%q}`, outside):                         "400 outside_library",
 		fmt.Sprintf(`{"sampleFile":%q}`, dir):                             "400 outside_library",
 		fmt.Sprintf(`{"sampleFile":%q}`, filepath.Join(dir, "../x.mkv")):  "400 outside_library",

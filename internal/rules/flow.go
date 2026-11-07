@@ -24,9 +24,10 @@ const CompilerVersion = 1
 
 // Template is what a flow stores about how it was made.
 type Template struct {
-	Kind            string `json:"kind"`
-	Params          Params `json:"params"`
-	CompilerVersion int    `json:"compilerVersion"`
+	Kind            string     `json:"kind"`
+	Params          Params     `json:"params"`
+	Selectors       *Selectors `json:"selectors,omitempty"` // a selectors flow's choices (selectors.go)
+	CompilerVersion int        `json:"compilerVersion"`
 }
 
 // Params are a template's values. A slider template uses Quality; a legacy one the rule fields
@@ -103,6 +104,10 @@ func (t Template) EstimatePosition() SliderPosition {
 	if p, ok := SliderAt(t.Params.Quality); ok && t.Kind == KindSlider {
 		return p
 	}
+	if s, ok := t.SelectorsView(); ok {
+		p, _ := SliderAt(s.Quality)
+		return p
+	}
 	best := Slider[DefaultSliderPosition-1]
 	for _, p := range Slider {
 		if abs(p.CRF-t.Params.CRF) <= abs(best.CRF-t.Params.CRF) { // a tie goes to the smaller saving
@@ -136,6 +141,10 @@ func (t Template) Label() (kind, label string) {
 		if p, ok := SliderAt(t.Params.Quality); ok {
 			return KindSlider, p.Name
 		}
+	}
+	if s, ok := t.SelectorsView(); ok { // the quality's name, the word the slider would show (addendum 6)
+		p, _ := SliderAt(s.Quality)
+		return KindSelectors, p.Name
 	}
 	return KindCustom, "Custom"
 }

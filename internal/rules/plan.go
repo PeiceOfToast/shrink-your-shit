@@ -24,6 +24,7 @@ type Plan struct {
 	Eligibility     Eligibility `json:"eligibility"`        // the rule that decided Skip (part of the fingerprint)
 	Video           VideoEncode `json:"video"`
 	Output          string      `json:"output"`                 // replace | beside
+	Container       string      `json:"container,omitempty"`    // the new file's type (its extension, "mkv" or "mp4"); "" = the original's
 	MinSavingPct    int         `json:"minSavingPct,omitempty"` // the new file must be this much smaller (0: just smaller)
 	MinSSIM         float64     `json:"minSSIM,omitempty"`      // picture threshold; 0 = the program's -min-ssim
 	Kind            string      `json:"kind"`                   // the template kind it was compiled from
@@ -40,6 +41,7 @@ const (
 	SkipUnknownBitrate   = "unknown_bitrate"    // its saving cannot be judged
 	SkipCannotKeepTrack  = "cannot_keep_track"  // a track (its subtitles) cannot stay in its container
 	SkipSettingCannotRun = "setting_cannot_run" // the flow cannot run (missing values, a kind not built yet)
+	SkipHDR              = "hdr_dv"             // HDR or Dolby Vision: left as it is (D3), unless the flow says otherwise
 	SkipUnreadable       = "unreadable"         // the file could not be read (the probe failed); set by callers
 )
 
@@ -60,6 +62,8 @@ type VideoEncode struct {
 	Tag    string `json:"tag"`
 	// MaxRateKbps caps the bitrate (VBV), for the Standard selectors' maxBitrate (slice 25); 0 = none.
 	MaxRateKbps int `json:"maxRateKbps,omitempty"`
+	// Height scales the picture down to this height, keeping its shape (selectors' resolution); 0 = as it is.
+	Height int `json:"height,omitempty"`
 }
 
 // Compile makes the Plan for one file. Skip says whether it should be converted (the scanner's
@@ -77,13 +81,27 @@ func (t Template) Compile(info media.Info) Plan {
 		}
 		r = Rule{FromCodec: pr.FromCodec, MinBitrateKbps: pr.MinBitrateKbps, CRF: pr.CRF, Preset: pr.Preset}
 		p.Output = outputOr(pr.Output)
+		// D3, on purpose since slice 25a: an HDR file the rule would convert is left as it is
+		// (converting drops its HDR information); everything else decides exactly as before.
+		if ok, _ := r.Match(info); ok && info.IsHDR() {
+			p.Eligibility = Eligibility{FromCodec: r.FromCodec, MinBitrateKbps: r.MinBitrateKbps}
+			p.Video = VideoEncode{Codec: "libx265", CRF: r.CRF, Preset: r.Preset, Tag: "hvc1"}
+			p.Skip, p.SkipCode = hdrSkip, SkipHDR
+			return p
+		}
 	case KindSlider:
 		pos, ok := SliderAt(t.Params.Quality)
 		if !ok {
 			p.Skip, p.SkipCode = fmt.Sprintf("slider position %d does not exist", t.Params.Quality), SkipSettingCannotRun
 			return p
 		}
-		return compileSlider(p, pos, info)
+		return compileSelectors(p, DefaultSelectors(pos.Position), info)
+	case KindSelectors:
+		if t.Selectors == nil || t.Selectors.Validate() != nil {
+			p.Skip, p.SkipCode = "its library's setting has a choice this version cannot run", SkipSettingCannotRun
+			return p
+		}
+		return compileSelectors(p, *t.Selectors, info)
 	default:
 		p.Skip, p.SkipCode = fmt.Sprintf("flows of kind %q cannot run yet", t.Kind), SkipSettingCannotRun
 		return p
@@ -120,6 +138,9 @@ func (p Plan) FFmpegArgs(in, out string) []string {
 		"-c", "copy",
 		"-c:" + v, p.Video.Codec, "-crf", strconv.Itoa(p.Video.CRF), "-preset", p.Video.Preset,
 	}
+	if p.Video.Height > 0 {
+		args = append(args, "-filter:"+v, "scale=-2:"+strconv.Itoa(p.Video.Height))
+	}
 	if p.Video.MaxRateKbps > 0 {
 		k := strconv.Itoa(p.Video.MaxRateKbps) + "k"
 		args = append(args, "-maxrate:"+v, k, "-bufsize:"+v, strconv.Itoa(2*p.Video.MaxRateKbps)+"k")
@@ -144,6 +165,18 @@ func (p Plan) Expect(src media.Info, packets int64) Expect {
 				e.Streams[k].Codec = src.ByType("video")[0].Codec // copied as it is
 			case p.Video.Index:
 				e.Streams[k].Codec = "hevc"
+			}
+			n++
+		}
+	}
+	if p.Video.Height > 0 { // scaled down: the encoded stream's picture size is the new one
+		n := 0
+		for k := range e.Streams {
+			if e.Streams[k].Type != "video" {
+				continue
+			}
+			if n == p.Video.Index {
+				e.Streams[k].Width, e.Streams[k].Height = ScaledWidth(e.Streams[k].Width, e.Streams[k].Height, p.Video.Height), p.Video.Height
 			}
 			n++
 		}
@@ -184,45 +217,66 @@ func (s Snapshot) Fingerprint() string {
 	return hex.EncodeToString(h[:8])
 }
 
-// compileSlider is a slider position's recipe for one file (TIERS-PLAN.md 2.1): HEVC at the position's
-// CRF (one lower up to 720p, one higher at 2160p), medium preset, the source's bit depth, resolution
-// and container; every audio track and subtitle copied; the position's minimum saving and SSIM gate.
-// Only D5's source formats with enough bits per pixel are converted.
-func compileSlider(p Plan, pos SliderPosition, info media.Info) Plan {
+// compileSelectors is the recipe for one file from the Standard choices; a slider position is its
+// DefaultSelectors (TIERS-PLAN.md 2.1): HEVC at the quality's CRF (one lower up to 720p, one higher at
+// 2160p, by the new picture size), the Speed's preset, the source's bit depth and (unless capped)
+// resolution; every audio track and subtitle copied; the quality's SSIM gate and the minimum saving.
+// Only D5's source formats are converted; HDR and Dolby Vision are left alone unless SkipHDR is off,
+// and files already small for their picture size unless SkipSmall is off.
+func compileSelectors(p Plan, s Selectors, info media.Info) Plan {
+	pos, _ := SliderAt(s.Quality)
 	v := info.Video()
-	p.Output, p.MinSavingPct, p.MinSSIM = "replace", pos.MinSavingPct, pos.MinSSIM
-	p.Eligibility = Eligibility{MinBitsPerPixel: pos.MinBPP}
+	p.Output, p.MinSavingPct, p.MinSSIM = s.AfterConverting, s.MinSavingPct, pos.MinSSIM
+	if s.FileType != "keep" {
+		p.Container = s.FileType
+	}
+	if s.SkipSmall {
+		p.Eligibility = Eligibility{MinBitsPerPixel: pos.MinBPP}
+	}
 	if v == nil {
 		p.Skip, p.SkipCode = "it has no video", SkipNoVideo
 		return p
 	}
+	height := 0
+	if limit := resolutions[s.Resolution]; limit > 0 && v.Height > limit {
+		height = limit // only ever smaller
+	}
+	w, h := v.Width, v.Height
+	if height > 0 {
+		w, h = ScaledWidth(v.Width, v.Height, height), height
+	}
 	crf := pos.CRF
 	switch {
-	case v.Height > 0 && v.Height <= 720:
+	case h > 0 && h <= 720:
 		crf--
-	case v.Height >= 2160 || v.Width >= 3840:
+	case h >= 2160 || w >= 3840:
 		crf++
 	}
-	p.Video = VideoEncode{Codec: "libx265", CRF: crf, Preset: SliderPreset, Tag: "hvc1", Index: info.MainVideoOrdinal()}
+	p.Video = VideoEncode{Codec: "libx265", CRF: crf, Preset: SpeedPresets[s.Speed], Tag: "hvc1",
+		Index: info.MainVideoOrdinal(), MaxRateKbps: maxBitrates[s.MaxBitrate] * 1000, Height: height}
 	if name, ok := alreadyEfficient[v.Codec]; ok {
 		p.Skip, p.SkipCode = name+" is already an efficient format", SkipAlreadyHEVC
 		return p
 	}
 	name, ok := SliderSources[v.Codec]
 	if !ok {
-		p.Skip, p.SkipCode = fmt.Sprintf("%s is not a format the slider converts", v.Codec), SkipOtherFormat
+		p.Skip, p.SkipCode = fmt.Sprintf("%s is not a format this setting converts", v.Codec), SkipOtherFormat
 		return p
 	}
-	if why := contentSkip(info); why != "" {
-		p.Skip = why
+	if s.SkipHDR && info.IsHDR() {
+		p.Skip, p.SkipCode = hdrSkip, SkipHDR
 		return p
 	}
-	if why := subtitlesNotKept(info); why != "" {
+	if why := tracksNotKept(info, p.Container); why != "" {
 		p.Skip, p.SkipCode = why, SkipCannotKeepTrack
 		return p
 	}
 	kbps := videoKbps(info, v)
 	bpp := bitsPerPixel(kbps, v)
+	if !s.SkipSmall {
+		p.Reason = fmt.Sprintf("%s at %d kbps", name, kbps)
+		return p
+	}
 	if bpp <= 0 {
 		p.Skip, p.SkipCode = "its bitrate, picture size or frame rate is unknown, so its saving cannot be judged", SkipUnknownBitrate
 		return p
@@ -233,6 +287,18 @@ func compileSlider(p Plan, pos SliderPosition, info media.Info) Plan {
 	}
 	p.Reason = fmt.Sprintf("%s at %d kbps, %.3f bits per pixel (more than %.3f)", name, kbps, bpp, pos.MinBPP)
 	return p
+}
+
+// hdrSkip is why an HDR or Dolby Vision file is left as it is (D3).
+const hdrSkip = "it is HDR or Dolby Vision, which is left as it is (converting would lose its HDR information)"
+
+// ScaledWidth is the width ffmpeg's scale=-2:height gives a w x h picture: the same shape, rounded to
+// the nearest even number.
+func ScaledWidth(w, h, height int) int {
+	if w <= 0 || h <= 0 {
+		return 0
+	}
+	return int((int64(height)*int64(w)+int64(h))/(2*int64(h))) * 2
 }
 
 // videoKbps is the main video's bitrate: its own stream bitrate. When the stream does not say (many
@@ -271,28 +337,46 @@ func bitsPerPixel(kbps int, v *media.Stream) float64 {
 	return float64(kbps) * 1000 / (float64(v.Width) * float64(v.Height) * v.FrameRate)
 }
 
-// contentSkip is where files whose content is not converted are recognised: HDR and Dolby Vision
-// (slices 13/14 add them with typed reasons, as conditions every template has). Nothing yet.
-func contentSkip(media.Info) string { return "" }
-
-// subtitlesNotKept says why the file's subtitles could not be copied into its own container ("" if
-// they can). The container is kept, so only a format the container cannot hold stops it.
-func subtitlesNotKept(info media.Info) string {
-	// MP4 and MOV hold only these subtitle formats; other containers here hold any. ffprobe names a
-	// container by its alias list ("mov,mp4,m4a,3gp,3g2,mj2"), so every alias is looked at.
-	ok := map[string]bool{"mov_text": true, "dvd_subtitle": true}
-	limited := false
-	for _, alias := range strings.Split(info.Container, ",") {
-		if a := strings.TrimSpace(alias); a == "mp4" || a == "mov" {
-			limited = true
+// tracksNotKept says why a track of the file could not be copied into the new file's type ("" if every
+// one can): container is the new type ("mkv", "mp4"), "" for the original's own. MP4 and MOV hold only a
+// few subtitle and audio formats and no attachments (fonts); MKV holds everything except MP4's own text
+// subtitles. ffprobe names a container by its alias list ("mov,mp4,m4a,3gp,3g2,mj2"), so every alias is
+// looked at.
+func tracksNotKept(info media.Info, container string) string {
+	target := container
+	if target == "" {
+		for _, alias := range strings.Split(info.Container, ",") {
+			if a := strings.TrimSpace(alias); a == "mp4" || a == "mov" {
+				target = "mp4"
+			}
+		}
+		if target == "" {
+			return "" // its own container held them already
 		}
 	}
-	if !limited {
-		return ""
+	name := map[string]string{"mp4": "MP4", "mkv": "MKV"}[target]
+	if container == "" {
+		name = info.Container
 	}
-	for _, s := range info.Subtitles() {
-		if !ok[s.Codec] {
-			return fmt.Sprintf("its %s subtitles cannot be kept in %s", s.Codec, info.Container)
+	switch target {
+	case "mp4":
+		subs := map[string]bool{"mov_text": true, "dvd_subtitle": true}
+		audio := map[string]bool{"aac": true, "ac3": true, "eac3": true, "mp3": true, "alac": true, "opus": true, "flac": true}
+		for _, s := range info.Streams {
+			switch {
+			case s.Type == "subtitle" && !subs[s.Codec]:
+				return fmt.Sprintf("its %s subtitles cannot be kept in %s", s.Codec, name)
+			case s.Type == "audio" && container != "" && !audio[s.Codec]:
+				return fmt.Sprintf("its %s audio cannot be kept in %s", s.Codec, name)
+			case s.Type == "attachment" && container != "":
+				return fmt.Sprintf("its attached files (such as fonts) cannot be kept in %s", name)
+			}
+		}
+	case "mkv":
+		for _, s := range info.Subtitles() {
+			if s.Codec == "mov_text" {
+				return "its mov_text subtitles cannot be kept in MKV"
+			}
 		}
 	}
 	return ""

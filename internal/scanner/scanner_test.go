@@ -226,3 +226,28 @@ func TestRestoredFileIsNotQueued(t *testing.T) {
 		t.Errorf("queued %d", n)
 	}
 }
+
+// A selectors flow's Ignore list (slice 25a): folders, files and patterns in it are not looked at.
+func TestIgnoredPathsAreNotLookedAt(t *testing.T) {
+	s, st, lib, f := setup(t, h264Big)
+	os.MkdirAll(filepath.Join(lib, "Extras", "deep"), 0o755)
+	os.WriteFile(filepath.Join(lib, "Extras", "deep", "x.mkv"), []byte("1"), 0o644)
+	os.WriteFile(filepath.Join(lib, "trailer.sample.mkv"), []byte("1"), 0o644)
+	os.MkdirAll(filepath.Join(lib, "Shows", "Extras"), 0o755)
+	os.WriteFile(filepath.Join(lib, "Shows", "Extras", "y.mkv"), []byte("1"), 0o644)
+	sel := rules.DefaultSelectors(3)
+	sel.SkipSmall, sel.Ignore = false, []string{"Extras", "*.sample.mkv"}
+	tmpl := sel.Template()
+	s.Targets = func() ([]Target, error) { return []Target{{LibraryID: 1, Path: lib, Template: tmpl}}, nil }
+	if n := s.ScanOnce(context.Background()); n != 1 {
+		t.Errorf("queued %d, want only a.mkv", n)
+	}
+	if len(f.Calls) != 1 {
+		t.Errorf("probed %d files, want only a.mkv: %v", len(f.Calls), f.Calls)
+	}
+	for _, p := range []string{"Extras/deep/x.mkv", "trailer.sample.mkv", "Shows/Extras/y.mkv"} {
+		if r, _ := st.GetFile(filepath.Join(lib, p)); r != nil {
+			t.Errorf("%s was looked at: %+v", p, r)
+		}
+	}
+}

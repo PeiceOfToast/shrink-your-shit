@@ -22,11 +22,11 @@ func tempLeft(src string) bool {
 func TestStagingFoldersAreUnpredictableAndFound(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "My.Movie (2020).MKV")
-	a, err := newStaged(src)
+	a, err := newStaged(src, filepath.Ext(src))
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _ := newStaged(src)
+	b, _ := newStaged(src, filepath.Ext(src))
 	if a.dir == b.dir {
 		t.Fatalf("two staging folders got the same name %q", a.dir)
 	}

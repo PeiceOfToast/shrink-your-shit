@@ -263,7 +263,7 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 	for _, seg := range sampleSegments(src.DurationSec) {
 		best := -1.0
 		for _, nudge := range []float64{0, -frame, frame} {
-			score, err := w.ssimSegment(ctx, srcPath, tmp, sv, ov, seg, sMain.StartTime, oMain.StartTime+nudge)
+			score, err := w.ssimSegment(ctx, srcPath, tmp, sv, ov, seg, sMain.StartTime, oMain.StartTime+nudge, scaleTo(sMain, oMain))
 			if err != nil {
 				return err
 			}
@@ -304,17 +304,26 @@ func sampleSegments(duration float64) []segment {
 // stretch that is compared; it cannot pair different pictures.
 const seekMargin = 12.0
 
+// scaleTo is the filter that brings the original's picture to the new file's size when a flow scaled it
+// down (selectors' resolution), so the comparison pairs pictures of one size: "" when they are equal.
+func scaleTo(src, out *media.Stream) string {
+	if src == nil || out == nil || out.Width <= 0 || out.Height <= 0 || (src.Width == out.Width && src.Height == out.Height) {
+		return ""
+	}
+	return fmt.Sprintf(",scale=%d:%d", out.Width, out.Height)
+}
+
 // ssimSegment compares seg (in seconds from the start of the video) of the original's video stream
 // sv and the new file's video stream ov. srcStart and outStart are the times at which each file's
 // video starts; subtracting them puts both on one timeline, where the ssim filter pairs frames by
 // time.
-func (w *Worker) ssimSegment(ctx context.Context, srcPath, tmp string, sv, ov int, seg segment, srcStart, outStart float64) (float64, error) {
+func (w *Worker) ssimSegment(ctx context.Context, srcPath, tmp string, sv, ov int, seg segment, srcStart, outStart float64, scale string) (float64, error) {
 	from := max(seg.start-seekMargin, 0)
 	read := secs(seg.start + seg.length - from + 1)
-	cut := func(in, stream int, start float64, label string) string {
+	cut := func(in, stream int, start float64, extra, label string) string {
 		// a start time can be negative (MP4 edit lists), so it is not formatted with secs
-		return fmt.Sprintf("[%d:v:%d]setpts=PTS-(%s)/TB,trim=start=%s:duration=%s[%s]",
-			in, stream, strconv.FormatFloat(start, 'f', 6, 64), secs(seg.start), secs(seg.length), label)
+		return fmt.Sprintf("[%d:v:%d]setpts=PTS-(%s)/TB,trim=start=%s:duration=%s%s[%s]",
+			in, stream, strconv.FormatFloat(start, 'f', 6, 64), secs(seg.start), secs(seg.length), extra, label)
 	}
 	// Reading from the start needs no seek, and must not have one: in an AVI, "-ss 0" jumps to a
 	// later keyframe (measured: 8.4 s in the original, 1.4 s in the new file), so a good file's
@@ -330,7 +339,7 @@ func (w *Worker) ssimSegment(ctx context.Context, srcPath, tmp string, sv, ov in
 	args = append(args, input(srcPath)...)
 	args = append(args, input(tmp)...)
 	args = append(args,
-		"-lavfi", cut(0, sv, srcStart, "a")+";"+cut(1, ov, outStart, "b")+";[a][b]ssim",
+		"-lavfi", cut(0, sv, srcStart, scale, "a")+";"+cut(1, ov, outStart, "", "b")+";[a][b]ssim",
 		"-f", "null", "-")
 	sctx, cancel := context.WithTimeout(ctx, sampleTimeout)
 	defer cancel()

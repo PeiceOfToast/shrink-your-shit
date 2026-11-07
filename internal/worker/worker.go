@@ -212,9 +212,11 @@ func plainFailure(err error) string {
 }
 
 // BesidePath is the output name in Beside mode.
-func BesidePath(src string) string {
-	ext := filepath.Ext(src)
-	return strings.TrimSuffix(src, ext) + ".hevc" + ext
+func BesidePath(src string) string { return BesidePathAs(src, filepath.Ext(src)) }
+
+// BesidePathAs is the output name in Beside mode for a new file of type ext (".mkv"): name.hevc.mkv.
+func BesidePathAs(src, ext string) string {
+	return strings.TrimSuffix(src, filepath.Ext(src)) + ".hevc" + ext
 }
 
 // process converts one file and replaces the original only if every safety check passes. The order is
@@ -292,7 +294,15 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		return "", failed("What this conversion will do could not be recorded, so it did not start. Your original was not touched. Press Retry.", err)
 	}
 
-	stage, err = newStaged(job.Path)
+	ext := filepath.Ext(job.Path)
+	if plan.Container != "" {
+		if OutputMode(plan.Output) != Beside { // refused when saved (25a); a flow made otherwise stops here
+			return "", failed("This library's setting changes the file type while replacing the original, which this version can't do yet. Your original was not touched. Choose 'Keep both' or keep the file type, then press Retry.",
+				fmt.Errorf("container %s with output %s", plan.Container, plan.Output))
+		}
+		ext = "." + plan.Container
+	}
+	stage, err = newStaged(job.Path, ext)
 	if err != nil {
 		return "", err
 	}
@@ -337,7 +347,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	final = job.Path
 	if OutputMode(plan.Output) == Beside {
-		final = BesidePath(job.Path)
+		final = BesidePathAs(job.Path, ext)
 	}
 	// Rename is atomic on one filesystem: the original is only replaced by a complete file. Right
 	// before each try, the original must still be the file we read and the temp file still the one

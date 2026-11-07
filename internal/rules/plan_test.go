@@ -53,7 +53,8 @@ func probeSet(t *testing.T) map[string]media.Info {
 }
 
 // The legacy regression (D13): an upgraded install's flow converts exactly as before Plans, with the
-// same decisions, reasons and ffmpeg arguments, for every probe.
+// same decisions, reasons and ffmpeg arguments, for every probe. One change on purpose (slice 25a, D3):
+// an HDR or Dolby Vision file the rule would convert is now skipped as hdr_dv.
 func TestLegacyPlanIsExactlyTodaysBehaviour(t *testing.T) {
 	for _, r := range []Rule{Default(), {FromCodec: "h264", MinBitrateKbps: 3000, CRF: 24, Preset: "fast"}, {FromCodec: "mpeg2video", MinBitrateKbps: 0, CRF: 30, Preset: "ultrafast"}} {
 		for _, out := range []string{"replace", "beside"} {
@@ -61,6 +62,12 @@ func TestLegacyPlanIsExactlyTodaysBehaviour(t *testing.T) {
 			for name, info := range probeSet(t) {
 				p := tmpl.Compile(info)
 				ok, why := r.Match(info)
+				if ok && info.IsHDR() {
+					if p.SkipCode != SkipHDR {
+						t.Errorf("%s %+v: an HDR file the rule converts must be skipped as hdr_dv, got %q", name, r, p.Skip)
+					}
+					continue
+				}
 				if ok != (p.Skip == "") || (ok && p.Reason != why) || (!ok && p.Skip != why) {
 					t.Errorf("%s %+v: plan skip %q reason %q; today match=%v %q", name, r, p.Skip, p.Reason, ok, why)
 				}
@@ -121,7 +128,7 @@ func TestSliderCRFFollowsTheResolution(t *testing.T) {
 func TestSliderConvertsOnlyOlderFormats(t *testing.T) {
 	for codec, wantSkip := range map[string]string{
 		"hevc": "HEVC is already an efficient format", "av1": "AV1 is already an efficient format",
-		"vp9": "VP9 is already an efficient format", "prores": "prores is not a format the slider converts",
+		"vp9": "VP9 is already an efficient format", "prores": "prores is not a format this setting converts",
 		"h264": "", "mpeg2video": "", "mpeg4": "", "vc1": "", "wmv3": "",
 	} {
 		if p := SliderTemplate(3).Compile(probe(codec, 1920, 1080, 25, 20000)); p.Skip != wantSkip {
@@ -317,7 +324,7 @@ func TestSliderSubtitleCheckWithTheRealMP4Name(t *testing.T) {
 // of the fingerprint, so jobs recorded before it existed keep theirs.
 func TestEverySkipHasACode(t *testing.T) {
 	codes := map[string]bool{SkipAlreadyEfficient: true, SkipAlreadyHEVC: true, SkipOtherFormat: true, SkipNoVideo: true,
-		SkipUnknownBitrate: true, SkipCannotKeepTrack: true, SkipSettingCannotRun: true}
+		SkipUnknownBitrate: true, SkipCannotKeepTrack: true, SkipSettingCannotRun: true, SkipHDR: true}
 	tmpls := []Template{LegacyTemplate(Default(), "replace"), SliderTemplate(9), {Kind: KindCustom}}
 	for q := 1; q <= 5; q++ {
 		tmpls = append(tmpls, SliderTemplate(q))
