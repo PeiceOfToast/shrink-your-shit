@@ -5,7 +5,7 @@
   function $(id) { return document.getElementById(id); }
   function fail(e) { var b = $("err"); b.textContent = e && e.message || "Something went wrong. Nothing was changed."; b.hidden = false; }
   var HEAD = { start: "Start", check: "Check", video: "Video", audio: "Audio", subtitles: "Subtitles", filetype: "File type", finish: "Finish", skip: "Skip", resolution: "Resolution" };
-  var MADE = { slider: "Made with the slider", selectors: "Made with the simple choices", builder: "Made with the builder", legacy: "From an earlier install" };
+  var MADE = { slider: "Made with the slider", selectors: "Made with the simple choices", builder: "Made with the builder", legacy: "Made from an earlier install" };
 
   // Steps run left to right; a step with branches is followed by a column of labelled rows.
   function drawSteps(steps, parent) {
@@ -41,7 +41,7 @@
     Promise.all([api.getFlow({ id: id }), api.listFlows(), api.listLibraries()]).then(function (r) {
       var f = r[0], meta = r[1].items.filter(function (x) { return x.id === id; })[0] || { usedBy: [], madeWith: "" }, libs = r[2].items;
       $("f-title").textContent = f.name; document.title = f.name + " - shrink-your-shit";
-      $("f-meta").textContent = (meta.usedBy.length ? "Used by " + meta.usedBy.length + (meta.usedBy.length === 1 ? " library: " : " libraries: ") + meta.usedBy.join(", ") : "Not used by any library") + " · " + (MADE[meta.madeWith] || "Made with something else");
+      $("f-meta").textContent = (meta.usedBy.length ? "Used by " + meta.usedBy.length + (meta.usedBy.length === 1 ? " library: " : " libraries: ") + meta.usedBy.join(", ") : "Not used by any library") + " · " + (MADE[meta.madeWith] || "Made another way");
       var note = $("f-note");
       note.textContent = " This shows what happens to each video, from left to right. ";
       var lib = libs.filter(function (l) { return meta.usedBy.length === 1 && l.name === meta.usedBy[0]; })[0];
