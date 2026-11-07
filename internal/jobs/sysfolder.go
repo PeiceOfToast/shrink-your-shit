@@ -42,6 +42,9 @@ func systemFolder(p, goos, home, sysDrive, sysRoot string) bool {
 	}
 	if goos == "windows" {
 		s := strings.ReplaceAll(p, `\`, "/")
+		if DevicePath(p) { // other names for any path, the system's too: never a library (review 75e86eb)
+			return true
+		}
 		if strings.HasPrefix(s, "//") { // a UNC path: a bare \\host is refused; a share (\\nas\movies) is fine
 			parts := strings.FieldsFunc(s, func(r rune) bool { return r == '/' })
 			return len(parts) <= 1
@@ -96,4 +99,12 @@ func SystemDirForTest() string {
 		return `C:\Windows`
 	}
 	return "/etc"
+}
+
+// DevicePath reports whether p is in a Windows device namespace (\\?\..., \\.\...): other names for
+// ordinary paths, system folders included. A library folder is chosen by its ordinary full path, so
+// these are refused (invalid_path), not translated (lead, 14:06Z).
+func DevicePath(p string) bool {
+	s := strings.ReplaceAll(strings.TrimSpace(p), `\`, "/")
+	return strings.HasPrefix(s, "//?/") || strings.HasPrefix(s, "//./")
 }

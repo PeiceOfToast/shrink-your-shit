@@ -147,36 +147,46 @@ func (s *Scanner) recordSkip(path string, st os.FileInfo, code string) {
 	s.Store.PutFile(jobs.File{Path: path, Size: st.Size(), ModTime: st.ModTime().UnixNano(), Decision: "skip: " + rules.SkipWords[code], Reason: code})
 }
 
-// look is a file as it was first seen unchanged: when, and what it was (identity, size, times).
+// look is a file as it was first seen unchanged: when, and what it was.
 type look struct {
-	at time.Time
-	fi os.FileInfo
+	at    time.Time
+	state fileState
 }
 
-// sameFile reports whether a and b are the same file in the same state: the same file (device and
-// inode, or the Windows file ID), size, modification time and, where the system has one, change time
-// (so a file deleted and made again with the same size and times is a different one).
-func sameFile(a, b os.FileInfo) bool {
-	if !os.SameFile(a, b) || a.Size() != b.Size() || !a.ModTime().Equal(b.ModTime()) {
-		return false
-	}
-	ca, okA := media.ChangeTime(a)
-	cb, okB := media.ChangeTime(b)
-	return okA == okB && ca.Equal(cb)
+// fileState is what tells one state of a file from another: which file it is (device and inode, or the
+// Windows volume and file index; empty where the system does not say), its size, and its modification
+// and change times (no change time on Windows). A file made again under the same name with the same
+// size and times is a different one.
+type fileState struct {
+	key          string
+	size         int64
+	mtime, ctime time.Time
+	hasCtime     bool
+}
+
+func stateOf(path string, st os.FileInfo) fileState {
+	key, _ := media.FileKey(path, st)
+	c, hasC := media.ChangeTime(st)
+	return fileState{key: key, size: st.Size(), mtime: st.ModTime(), ctime: c, hasCtime: hasC}
+}
+
+func (a fileState) same(b fileState) bool {
+	return a.key == b.key && a.size == b.size && a.mtime.Equal(b.mtime) && a.hasCtime == b.hasCtime && a.ctime.Equal(b.ctime)
 }
 
 // observe notes path as seen now in state st, and reports whether this is its first look in that
 // state (a new file, a changed one, or one made again): then it is never decided in the same pass.
 func (s *Scanner) observe(path string, st os.FileInfo, now time.Time) (first bool) {
+	cur := stateOf(path, st)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.firstLook == nil {
 		s.firstLook = map[string]look{}
 	}
-	if l, ok := s.firstLook[path]; ok && sameFile(l.fi, st) {
+	if l, ok := s.firstLook[path]; ok && l.state.same(cur) {
 		return false
 	}
-	s.firstLook[path] = look{now, st}
+	s.firstLook[path] = look{now, cur}
 	return true
 }
 
@@ -186,7 +196,7 @@ func (s *Scanner) ready(path string, st os.FileInfo, now time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	l, ok := s.firstLook[path]
-	if !ok || !sameFile(l.fi, st) || now.Sub(l.at) < max(s.MinAge, time.Nanosecond) {
+	if !ok || !l.state.same(stateOf(path, st)) || now.Sub(l.at) < max(s.MinAge, time.Nanosecond) {
 		return false
 	}
 	delete(s.firstLook, path)

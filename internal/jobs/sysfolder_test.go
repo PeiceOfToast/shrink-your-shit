@@ -47,7 +47,11 @@ func TestSystemFolders(t *testing.T) {
 		{"windows", `C:\Users\ann`, `E:`, false},
 		{"windows", `C:\Users\ann`, `\\nas\media`, false}, // a NAS share root too
 		{"windows", `C:\Users\ann`, `\\nas\media\Movies`, false},
-		{"windows", `C:\Users\ann`, `\\nas`, true}, // a bare host, no share
+		{"windows", `C:\Users\ann`, `\\nas`, true},   // a bare host, no share
+		{"windows", `C:\Users\ann`, `\\?\C:\`, true}, // the device namespace: other names (review 75e86eb)
+		{"windows", `C:\Users\ann`, `\\.\C:\`, true},
+		{"windows", `C:\Users\ann`, `\\?\C:\Windows\System32`, true},
+		{"windows", `C:\Users\ann`, `\\?\D:\Movies`, true}, // any device path, even to a fine folder
 		{"windows", `C:\Users\ann`, `D:\Movies`, false},
 	} {
 		if got := systemFolder(c.p, c.goos, c.home, "", ""); got != c.want {
@@ -86,5 +90,13 @@ func TestSystemFolderOnThisSystem(t *testing.T) {
 	}
 	if SystemFolder(t.TempDir()) {
 		t.Error("a temp folder is refused")
+	}
+}
+
+func TestDevicePath(t *testing.T) {
+	for p, want := range map[string]bool{`\\?\C:\`: true, `\\.\C:\`: true, `//?/D:/x`: true, `\\nas\share`: false, `D:\`: false, `/home/x`: false} {
+		if DevicePath(p) != want {
+			t.Errorf("%q: want %v", p, want)
+		}
 	}
 }

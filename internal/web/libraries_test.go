@@ -296,7 +296,12 @@ func TestOneFolderByTwoNames(t *testing.T) {
 // A library at a system folder is refused with a plain message (slice 23).
 func TestLibraryAtASystemFolderIsRefused(t *testing.T) {
 	srv, _, _, _ := libServer(t, false)
-	code, body := post(t, srv, "POST", "/api/libraries", `{"name":"All","path":"/","startFrom":"balanced"}`)
+	root := "/"
+	if runtime.GOOS == "windows" {
+		root = os.Getenv("SystemDrive") + `\` // "/" is not a full path there
+	}
+	b, _ := json.Marshal(map[string]string{"name": "All", "path": root, "startFrom": "balanced"})
+	code, body := post(t, srv, "POST", "/api/libraries", string(b))
 	if code != 400 || errCode(body) != "system_folder" || !strings.Contains(body, "Pick the folder that holds your videos") {
 		t.Errorf("%d %s", code, body)
 	}
