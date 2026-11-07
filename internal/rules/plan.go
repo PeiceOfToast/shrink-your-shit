@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 )
@@ -198,7 +199,8 @@ func compileSlider(p Plan, pos SliderPosition, info media.Info) Plan {
 		p.Skip = why
 		return p
 	}
-	bpp := bitsPerPixel(info, v)
+	kbps := videoKbps(info, v)
+	bpp := bitsPerPixel(kbps, v)
 	if bpp <= 0 {
 		p.Skip = "its bitrate, picture size or frame rate is unknown, so its saving cannot be judged"
 		return p
@@ -207,16 +209,33 @@ func compileSlider(p Plan, pos SliderPosition, info media.Info) Plan {
 		p.Skip = fmt.Sprintf("already efficient: %.3f bits per pixel, %s needs more than %.3f", bpp, pos.Name, pos.MinBPP)
 		return p
 	}
-	p.Reason = fmt.Sprintf("%s at %d kbps, %.3f bits per pixel (more than %.3f)", name, info.BitrateKbps, bpp, pos.MinBPP)
+	p.Reason = fmt.Sprintf("%s at %d kbps, %.3f bits per pixel (more than %.3f)", name, kbps, bpp, pos.MinBPP)
 	return p
 }
 
+// videoKbps is the main video's bitrate: its own stream bitrate. When the stream does not say (many
+// mkv files), it falls back on purpose to the whole file's average (size x 8 / length), which
+// includes audio and so slightly overstates the video. info.BitrateKbps is not used: it belongs to
+// the first video stream, which is the cover art in many media-manager files.
+func videoKbps(info media.Info, v *media.Stream) int {
+	if v.BitrateKbps > 0 {
+		return v.BitrateKbps
+	}
+	if info.SizeBytes > 0 && info.DurationSec > 0 {
+		return int(float64(info.SizeBytes) * 8 / info.DurationSec / 1000)
+	}
+	if info.MainVideoOrdinal() == 0 { // the first video is the main one, so its headline rate is too
+		return info.BitrateKbps
+	}
+	return 0
+}
+
 // bitsPerPixel is the video's bits per pixel per frame: how much data each pixel gets.
-func bitsPerPixel(info media.Info, v *media.Stream) float64 {
-	if info.BitrateKbps <= 0 || v.Width <= 0 || v.Height <= 0 || v.FrameRate <= 0 {
+func bitsPerPixel(kbps int, v *media.Stream) float64 {
+	if kbps <= 0 || v.Width <= 0 || v.Height <= 0 || v.FrameRate <= 0 {
 		return 0
 	}
-	return float64(info.BitrateKbps) * 1000 / (float64(v.Width) * float64(v.Height) * v.FrameRate)
+	return float64(kbps) * 1000 / (float64(v.Width) * float64(v.Height) * v.FrameRate)
 }
 
 // contentSkip is where files whose content is not converted are recognised: HDR and Dolby Vision
@@ -226,10 +245,15 @@ func contentSkip(media.Info) string { return "" }
 // subtitlesNotKept says why the file's subtitles could not be copied into its own container ("" if
 // they can). The container is kept, so only a format the container cannot hold stops it.
 func subtitlesNotKept(info media.Info) string {
-	holds := map[string]map[string]bool{ // containers with a short list; others hold any subtitle
-		"mp4": {"mov_text": true, "dvd_subtitle": true}, "mov": {"mov_text": true, "dvd_subtitle": true},
+	// MP4 and MOV hold only these subtitle formats; other containers here hold any. ffprobe names a
+	// container by its alias list ("mov,mp4,m4a,3gp,3g2,mj2"), so every alias is looked at.
+	ok := map[string]bool{"mov_text": true, "dvd_subtitle": true}
+	limited := false
+	for _, alias := range strings.Split(info.Container, ",") {
+		if a := strings.TrimSpace(alias); a == "mp4" || a == "mov" {
+			limited = true
+		}
 	}
-	ok, limited := holds[info.Container]
 	if !limited {
 		return ""
 	}

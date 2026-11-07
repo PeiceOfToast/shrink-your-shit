@@ -252,3 +252,63 @@ func TestSliderEligibilityIsInTheFingerprint(t *testing.T) {
 		t.Error("another bits-per-pixel threshold must change the fingerprint")
 	}
 }
+
+// fixture parses a probe from internal/media/testdata.
+func fixture(t *testing.T, rel string) media.Info {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("..", "media", "testdata", rel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := media.ParseProbe(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info
+}
+
+// Cover art first, as media managers write it: eligibility uses the main video's own bitrate, not the
+// file's headline rate (which belongs to the first video stream: the picture).
+func TestSliderUsesTheMainVideosBitrate(t *testing.T) {
+	info := fixture(t, "crafted/cover_art_first.json")
+	v := info.Video()
+	if v == nil || v.BitrateKbps != 5000 || info.MainVideoOrdinal() != 1 {
+		t.Fatalf("fixture changed: %+v", v)
+	}
+	p := SliderTemplate(3).Compile(info)
+	if strings.Contains(p.Skip, "unknown") || !strings.Contains(p.Reason+p.Skip, "5000 kbps") && !strings.Contains(p.Skip, "already efficient") {
+		t.Errorf("skip %q reason %q: the main stream's 5000 kbps must be judged", p.Skip, p.Reason)
+	}
+	if p.Video.Index != 1 {
+		t.Errorf("encodes video stream %d, want the main one (1)", p.Video.Index)
+	}
+	// a stream without its own bitrate falls back to the file's average
+	noRate := probe("h264", 1920, 1080, 24, 0)
+	noRate.SizeBytes, noRate.DurationSec = 75_000_000, 60 // 10000 kbps on average
+	if p := SliderTemplate(3).Compile(noRate); p.Skip != "" || !strings.Contains(p.Reason, "10000 kbps") {
+		t.Errorf("fallback: skip %q reason %q", p.Skip, p.Reason)
+	}
+}
+
+// ffprobe names MP4/MOV by their alias list; the subtitle check must see through it.
+func TestSliderSubtitleCheckWithTheRealMP4Name(t *testing.T) {
+	info := fixture(t, "real/plain.json")
+	if !strings.Contains(info.Container, "mp4") || info.Container == "mp4" {
+		t.Fatalf("fixture's format_name is %q", info.Container)
+	}
+	pgs := info
+	pgs.Streams = append(append([]media.Stream{}, info.Streams...), media.Stream{Type: "subtitle", Codec: "hdmv_pgs_subtitle"})
+	if p := SliderTemplate(1).Compile(pgs); !strings.Contains(p.Skip, "hdmv_pgs_subtitle subtitles cannot be kept") {
+		t.Errorf("PGS in %q: skip %q", info.Container, p.Skip)
+	}
+	movText := info
+	movText.Streams = append(append([]media.Stream{}, info.Streams...), media.Stream{Type: "subtitle", Codec: "mov_text"})
+	if p := SliderTemplate(1).Compile(movText); strings.Contains(p.Skip, "subtitles") {
+		t.Errorf("mov_text in %q: skip %q", info.Container, p.Skip)
+	}
+	mkv := pgs
+	mkv.Container = "matroska,webm"
+	if p := SliderTemplate(1).Compile(mkv); strings.Contains(p.Skip, "subtitles") {
+		t.Errorf("PGS in mkv: skip %q", p.Skip)
+	}
+}
