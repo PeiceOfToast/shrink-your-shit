@@ -34,13 +34,16 @@
     say(code);
     row.appendChild(inp); row.appendChild(show); fld.appendChild(lb); fld.appendChild(row); fld.appendChild(err);
     f.appendChild(fld); f.appendChild(el("div", null, "row")).appendChild(go);
-    [["Linux", "sudo shrink-your-shit token"], ["macOS", "shrink-your-shit token"], ["Windows, in a terminal", "shrink-your-shit token"], ["Docker", "docker exec <container name> shrink-your-shit token"]].forEach(function (c) {
-      var li = el("li", c[0] + ": "); li.appendChild(el("code", c[1])); help.appendChild(li);
+    [["Linux", "sudo shrink-your-shit token", ""], ["Mac", "shrink-your-shit token", "in Terminal"], ["Windows", "shrink-your-shit token", "in Command Prompt or PowerShell"],
+     ["Docker", "docker exec <container name> shrink-your-shit token", "use your container's name"]].forEach(function (c) {
+      var li = el("li", c[0] + ": "), code = el("code", c[1]); code.style.userSelect = "all"; // one click selects the whole line to copy
+      li.appendChild(code); if (c[2]) li.appendChild(doc.createTextNode(" (" + c[2] + ")")); help.appendChild(li);
     });
     box.appendChild(el("h1", "Sign in")); box.appendChild(el("p", "Paste the access token for this shrink-your-shit server.")); box.appendChild(f);
     box.appendChild(el("h2", "Where do I find it?"));
     box.appendChild(el("p", "It was shown at the end of the install, as part of the web address (the part after ?token=)."));
-    box.appendChild(el("p", "On the server, run this to see it again:")); box.appendChild(help);
+    box.appendChild(el("p", "Or see it again on the computer running shrink-your-shit. Run the line for that computer:")); box.appendChild(help);
+    box.appendChild(el("p", "It prints the token and a sign-in link you can open directly."));
     main.insertBefore(box, main.firstChild); inp.focus();
     f.onsubmit = function (ev) {
       ev.preventDefault();
