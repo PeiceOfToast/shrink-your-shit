@@ -31,14 +31,14 @@ type Plan struct {
 }
 
 // Skip codes: why a file is not converted, as the Preview counts them (UI-API-CONTRACT.md, the open
-// "skipped" enum). The Plan's Skip says the same in a sentence for the job record.
+// "skipped" enum, shared with the Skipped list). The Plan's Skip says the same in a sentence for the job record.
 const (
 	SkipAlreadyEfficient = "already_efficient"    // enough data per pixel already, or below the legacy bitrate
-	SkipHEVCOrNewer      = "hevc_or_newer"        // HEVC, AV1, VP9: never converted
+	SkipAlreadyHEVC      = "already_hevc"         // HEVC, AV1, VP9: never converted
 	SkipOtherFormat      = "format_not_converted" // a format this setting does not convert
 	SkipNoVideo          = "no_video"
 	SkipUnknownBitrate   = "unknown_bitrate"    // its saving cannot be judged
-	SkipSubtitlesNotKept = "subtitles_not_kept" // its subtitles cannot stay in its container
+	SkipCannotKeepTrack  = "cannot_keep_track"  // a track (its subtitles) cannot stay in its container
 	SkipSettingCannotRun = "setting_cannot_run" // the flow cannot run (missing values, a kind not built yet)
 	SkipUnreadable       = "unreadable"         // the file could not be read (the probe failed); set by callers
 )
@@ -98,7 +98,7 @@ func (t Template) Compile(info media.Info) Plan {
 		p.Skip = why
 		switch _, modern := alreadyEfficient[info.VideoCodec]; {
 		case info.VideoCodec != r.FromCodec && modern:
-			p.SkipCode = SkipHEVCOrNewer
+			p.SkipCode = SkipAlreadyHEVC
 		case info.VideoCodec != r.FromCodec:
 			p.SkipCode = SkipOtherFormat
 		default:
@@ -205,7 +205,7 @@ func compileSlider(p Plan, pos SliderPosition, info media.Info) Plan {
 	}
 	p.Video = VideoEncode{Codec: "libx265", CRF: crf, Preset: SliderPreset, Tag: "hvc1", Index: info.MainVideoOrdinal()}
 	if name, ok := alreadyEfficient[v.Codec]; ok {
-		p.Skip, p.SkipCode = name+" is already an efficient format", SkipHEVCOrNewer
+		p.Skip, p.SkipCode = name+" is already an efficient format", SkipAlreadyHEVC
 		return p
 	}
 	name, ok := SliderSources[v.Codec]
@@ -218,7 +218,7 @@ func compileSlider(p Plan, pos SliderPosition, info media.Info) Plan {
 		return p
 	}
 	if why := subtitlesNotKept(info); why != "" {
-		p.Skip, p.SkipCode = why, SkipSubtitlesNotKept
+		p.Skip, p.SkipCode = why, SkipCannotKeepTrack
 		return p
 	}
 	kbps := videoKbps(info, v)

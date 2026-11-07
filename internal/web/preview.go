@@ -83,8 +83,16 @@ func previewRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		root, err := jobs.RealPath(l.Path)
 		if err == nil {
 			var files []preview.Candidate
-			if files, err = preview.Files(root, r.URL.Query().Get("q"), 50); err == nil {
-				writeJSON(w, map[string]any{"files": files})
+			if files, err = preview.Files(root, r.URL.Query().Get("q")); err == nil {
+				// a list: {items, total}, paged with ?limit=&offset= (default 50; UI-API-CONTRACT.md)
+				limit, offset := 50, 0
+				if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 {
+					limit = min(n, 500)
+				}
+				if n, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && n > 0 {
+					offset = min(n, len(files))
+				}
+				writeJSON(w, map[string]any{"items": files[offset:min(offset+limit, len(files))], "total": len(files)})
 				return
 			}
 		}

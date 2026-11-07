@@ -273,8 +273,8 @@ func Saving(plan rules.Plan, info media.Info, size int64) (low, high int64) {
 }
 
 // Files lists the library's videos whose path (inside the library) contains q, case-insensitively,
-// sorted by that path, at most limit of them: the choices for a sample file.
-func Files(root, q string, limit int) ([]Candidate, error) {
+// sorted by that path: the choices for a sample file.
+func Files(root, q string) ([]Candidate, error) {
 	files, _, err := list(root)
 	if err != nil {
 		return nil, err
@@ -284,19 +284,16 @@ func Files(root, q string, limit int) ([]Candidate, error) {
 	for _, f := range files {
 		rel, _ := filepath.Rel(root, f.path)
 		if q == "" || strings.Contains(strings.ToLower(rel), q) {
-			out = append(out, Candidate{Path: f.path, Name: filepath.ToSlash(rel), SizeBytes: f.st.Size()})
+			out = append(out, Candidate{Path: f.path, Name: filepath.ToSlash(rel), Bytes: f.st.Size()})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	if len(out) > limit {
-		out = out[:limit]
-	}
 	return out, nil
 }
 
 // Candidate is a file that can be chosen as the sample.
 type Candidate struct {
-	Path      string `json:"path"`
-	Name      string `json:"name"` // its path inside the library
-	SizeBytes int64  `json:"sizeBytes"`
+	Path  string `json:"path"`
+	Name  string `json:"name"` // its path inside the library
+	Bytes int64  `json:"bytes"`
 }

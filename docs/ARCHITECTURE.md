@@ -141,8 +141,8 @@ also for a library that is not started. An empty `setting` is the saved one; oth
 skipped folders and files), probes each video through the probe cache (`probes` table, migration 5:
 ffprobe's answer per path while size and modification time stay the same; the scanner fills it too)
 and compiles the setting's Plan for it, so the counts come from the scanner's own decision.
-`skipped` counts the Plan's `SkipCode` (`already_efficient`, `hevc_or_newer`,
-`format_not_converted`, `no_video`, `unknown_bitrate`, `subtitles_not_kept`, `setting_cannot_run`,
+`skipped` counts the Plan's `SkipCode` (`already_efficient`, `already_hevc`,
+`format_not_converted`, `no_video`, `unknown_bitrate`, `cannot_keep_track`, `setting_cannot_run`,
 `unreadable`). Files with more than one link stay in `canShrink`, are counted in `sharedNoSaving`
 and are left out of the range (until slice 12 skips them as `shared_file`).
 
@@ -155,7 +155,7 @@ once; a change starts a new computation, shown as `stale` with `status: computin
 A request waits up to 2 s, then answers `computing` and the page asks again. Probes run 4 at a time.
 `sampleFile` must be a video inside the library folder after links are resolved (400
 `outside_library` / `not_a_video`, 404 `not_found`); `sample.lines` are plain words.
-`GET /api/libraries/{id}/files?q=` lists up to 50 videos whose path inside the library contains `q`.
+`GET /api/libraries/{id}/files?q=` lists the videos whose path inside the library contains `q` (`{items:[{path,name,bytes}],total}`, `limit`/`offset`, default 50).
 
 ## Job lifecycle
 

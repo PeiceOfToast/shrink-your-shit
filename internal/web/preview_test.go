@@ -116,16 +116,20 @@ func TestLibraryFilesEndpoint(t *testing.T) {
 	l, _ := st.AddLibrary("Movies", dir, rules.SliderTemplate(3), false)
 	_, body, _ := do(t, nil, srv, call{method: "GET", path: fmt.Sprintf("/api/libraries/%d/files?q=heat", l.ID)})
 	var out struct {
-		Files []struct {
+		Items []struct {
 			Path, Name string
-			SizeBytes  int64
+			Bytes      int64
 		}
+		Total int
 	}
 	json.Unmarshal([]byte(body), &out)
-	if len(out.Files) != 1 || out.Files[0].Name != "Films/Heat (1995).mkv" || out.Files[0].SizeBytes != 2 || out.Files[0].Path != filepath.Join(dir, "Films", "Heat (1995).mkv") {
+	if out.Total != 1 || len(out.Items) != 1 || out.Items[0].Name != "Films/Heat (1995).mkv" || out.Items[0].Bytes != 2 || out.Items[0].Path != filepath.Join(dir, "Films", "Heat (1995).mkv") {
 		t.Errorf("%s", body)
 	}
-	if _, body, _ := do(t, nil, srv, call{method: "GET", path: fmt.Sprintf("/api/libraries/%d/files", l.ID)}); !strings.Contains(body, "clip.mp4") {
-		t.Errorf("%s", body)
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: fmt.Sprintf("/api/libraries/%d/files?limit=1&offset=1", l.ID)})
+	out.Items = nil
+	json.Unmarshal([]byte(body), &out)
+	if out.Total != 2 || len(out.Items) != 1 || out.Items[0].Name != "clip.mp4" { // sorted: "Films/..." < "clip.mp4"
+		t.Errorf("paged: %s", body)
 	}
 }

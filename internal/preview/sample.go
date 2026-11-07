@@ -23,11 +23,11 @@ type Sample struct {
 // skipWords says each skip code in plain words, for the sample's first line.
 var skipWords = map[string]string{
 	rules.SkipAlreadyEfficient: "it is already stored efficiently, so converting it would save little",
-	rules.SkipHEVCOrNewer:      "it already uses a modern, efficient format",
+	rules.SkipAlreadyHEVC:      "it already uses a modern, efficient format",
 	rules.SkipOtherFormat:      "its format is not one this setting converts",
 	rules.SkipNoVideo:          "it has no video",
 	rules.SkipUnknownBitrate:   "we can't tell how much it would shrink",
-	rules.SkipSubtitlesNotKept: "its subtitles could not be kept in its file type",
+	rules.SkipCannotKeepTrack:  "its subtitles could not be kept in its file type",
 	rules.SkipSettingCannotRun: "this setting can't convert files yet",
 	rules.SkipUnreadable:       "it can't be read",
 }

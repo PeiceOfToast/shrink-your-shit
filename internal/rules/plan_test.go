@@ -316,8 +316,8 @@ func TestSliderSubtitleCheckWithTheRealMP4Name(t *testing.T) {
 // Every skip has a code the Preview can count, and a converted file has none; the code is not part
 // of the fingerprint, so jobs recorded before it existed keep theirs.
 func TestEverySkipHasACode(t *testing.T) {
-	codes := map[string]bool{SkipAlreadyEfficient: true, SkipHEVCOrNewer: true, SkipOtherFormat: true, SkipNoVideo: true,
-		SkipUnknownBitrate: true, SkipSubtitlesNotKept: true, SkipSettingCannotRun: true}
+	codes := map[string]bool{SkipAlreadyEfficient: true, SkipAlreadyHEVC: true, SkipOtherFormat: true, SkipNoVideo: true,
+		SkipUnknownBitrate: true, SkipCannotKeepTrack: true, SkipSettingCannotRun: true}
 	tmpls := []Template{LegacyTemplate(Default(), "replace"), SliderTemplate(9), {Kind: KindCustom}}
 	for q := 1; q <= 5; q++ {
 		tmpls = append(tmpls, SliderTemplate(q))
@@ -330,7 +330,7 @@ func TestEverySkipHasACode(t *testing.T) {
 			}
 		}
 	}
-	if p := LegacyTemplate(Default(), "replace").Compile(media.Info{VideoCodec: "hevc", BitrateKbps: 9000}); p.SkipCode != SkipHEVCOrNewer {
+	if p := LegacyTemplate(Default(), "replace").Compile(media.Info{VideoCodec: "hevc", BitrateKbps: 9000}); p.SkipCode != SkipAlreadyHEVC {
 		t.Errorf("legacy hevc: %q", p.SkipCode)
 	}
 	if p := LegacyTemplate(Default(), "replace").Compile(media.Info{VideoCodec: "h264", BitrateKbps: 100}); p.SkipCode != SkipAlreadyEfficient {

@@ -109,7 +109,7 @@ func TestPreviewCountsAndEstimates(t *testing.T) {
 	if r.Status != "ready" || r.Files != 6 || r.TotalBytes != 7_900_000 || r.CanShrink != 3 {
 		t.Fatalf("%+v", r)
 	}
-	if fmt.Sprint(r.Skipped) != "map[already_efficient:1 hevc_or_newer:1 unreadable:1]" {
+	if fmt.Sprint(r.Skipped) != "map[already_efficient:1 already_hevc:1 unreadable:1]" {
 		t.Errorf("skipped %v", r.Skipped)
 	}
 	if r.SharedNoSaving != 1 {
@@ -289,14 +289,11 @@ func TestSampleInPlainWords(t *testing.T) {
 
 func TestFiles(t *testing.T) {
 	dir := library(t)
-	all, err := Files(dir, "", 50)
+	all, err := Files(dir, "")
 	if err != nil || len(all) != 6 || all[0].Name != "a.mkv" || all[len(all)-1].Name != "sub/b.mp4" {
 		t.Fatalf("%v %+v", err, all)
 	}
-	if some, _ := Files(dir, "SUB", 50); len(some) != 1 || some[0].Path != filepath.Join(dir, "sub", "b.mp4") || some[0].SizeBytes != 2_000_000 {
+	if some, _ := Files(dir, "SUB"); len(some) != 1 || some[0].Path != filepath.Join(dir, "sub", "b.mp4") || some[0].Bytes != 2_000_000 {
 		t.Errorf("%+v", some)
-	}
-	if two, _ := Files(dir, "", 2); len(two) != 2 {
-		t.Errorf("%+v", two)
 	}
 }
