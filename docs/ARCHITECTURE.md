@@ -108,6 +108,29 @@ stays in Flows); a flow other libraries share needs `sharedFlowChoice` (`change_
 libraries' files and wakes the scanner. `GET /api/flows/{id}` describes slider and legacy flows in
 plain words, raw numbers only in `detail`.
 
+## Setup checks (the doctor)
+
+`internal/doctor` is the one set of checks behind three places (FEATURE-PLAN FR-3):
+`POST /api/libraries/check {path}` (first-run checks a folder as soon as it is chosen),
+`GET /api/system/health` (Settings > System) and `shrink-your-shit doctor`.
+
+- **Converter:** ffmpeg and ffprobe found (with versions), libx265, the `ssim` filter (verify needs
+  it). Hardware HEVC encoders are only a note, and only those that encode a test frame here count:
+  converting always uses the processor for now (slice 37).
+- **Folder:** a folder chosen through a link is checked as the folder it points to (`jobs.RealPath`,
+  as it is stored); it opens; it is writable by the user the program runs as (a temp file is created and
+  removed, so the check is the service's own); it holds videos (counted with the scanner's rules); its
+  disk has room to convert the largest one (`worker.SpaceNeeded`, the worker's own preflight rule);
+  hardlinked files are a note (link counts on Linux, macOS and Windows); folders inside that cannot
+  be read are counted in a note, and free space that cannot be read is a note, never a silent pass. A read-only folder's message gives the fix for the system: the `syp`
+  service user's `chown` on Linux, the container's user on Docker, Get Info on macOS, Security on Windows.
+- `doctor` asks the running program for its health report (with the token, like `token`), so its
+  folder checks are the service user's even under `sudo`; if nothing answers it checks the converter
+  and data folder from the terminal and says which user it checked as. Exit status 1 if anything is bad.
+
+If the converter is missing or incomplete, the program still starts so the web page and the health
+report can say what is wrong, but it does not scan or convert until it is fixed and restarted.
+
 ## Job lifecycle
 
 States: `queued -> running -> done | failed | kept`. Legal moves are in `internal/jobs/jobs.go`

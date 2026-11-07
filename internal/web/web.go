@@ -25,6 +25,7 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	mux.Handle("/api/", access.guard(api))
 	access.routes(api)
 	libraryRoutes(api, store, eng)
+	systemRoutes(api, store, eng)
 	ss := &settingsStore{store: store}
 	settingsRoutes(api, ss, access)
 	flowRoutes(api, store, ss, eng)
