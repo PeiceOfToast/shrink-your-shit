@@ -27,7 +27,13 @@
       return api.checkLibrary({}, { path: path }).then(function (r) {
         if ($("path").value.trim() !== path) return;
         list.textContent = "";
-        (r.blockers || []).forEach(function (b) { list.appendChild(line("bad", "Fix this", COPY[b.code] || b.message)); });
+        (r.blockers || []).forEach(function (b) {
+          var li = line("bad", "Fix this", COPY[b.code] || b.message);
+          if (b.code === "no_converter") { // the health report says what is missing; it stays open during first-run
+            var a = ui.el("a", null, "See the health report"); a.href = "/settings/system/"; li.appendChild(document.createTextNode(" ")); li.appendChild(a);
+          }
+          list.appendChild(li);
+        });
         if (!(r.blockers || []).length) { // OK lines only when every check passed: beside a blocker some never ran
           list.appendChild(line("ok", "OK", "Enough free space."));
           list.appendChild(line("ok", "OK", "Video converter works."));

@@ -103,17 +103,16 @@
   function firstRun(s) {
     if (s.firstRunDone || location.pathname === "/welcome/") return true;
     if (location.pathname === "/settings/system/") { setupOnly(); return true; }
-    var m = /[?&](mock=[01])/.exec(location.search);
-    location.replace("/welcome/" + (m ? "?" + m[1] : ""));
+    location.replace(welcome());
     return false;
   }
+  function welcome() { var m = /[?&](mock=[01])/.exec(location.search); return "/welcome/" + (m ? "?" + m[1] : ""); }
   function setupOnly() {
     var nav = $("main-nav"), tabs = doc.querySelector("nav.tabs"), p = doc.createElement("p"), a = doc.createElement("a");
     if (nav) nav.parentNode.hidden = true;
     if (tabs) tabs.hidden = true;
     if ($("working")) $("working").remove();
-    doc.querySelector(".brand").href = "/welcome/";
-    a.href = "/welcome/"; a.textContent = "Back to setup"; p.appendChild(a);
+    doc.querySelector(".brand").href = a.href = welcome(); a.textContent = "Back to setup"; p.appendChild(a);
     $("main").insertBefore(p, $("mock-note").nextSibling);
   }
 
