@@ -99,13 +99,40 @@ func TestSliderPlanUsesTheTable(t *testing.T) {
 	}
 }
 
-// The fingerprint names the conversion settings, not the file.
-func TestPlanFingerprint(t *testing.T) {
-	a := SliderTemplate(3).Compile(media.Info{VideoCodec: "h264", BitrateKbps: 8000})
-	b := SliderTemplate(3).Compile(media.Info{VideoCodec: "h264", BitrateKbps: 12000})
-	c := SliderTemplate(4).Compile(media.Info{VideoCodec: "h264", BitrateKbps: 8000})
-	if a.Fingerprint() != b.Fingerprint() || a.Fingerprint() == c.Fingerprint() || len(a.Fingerprint()) != 16 {
-		t.Errorf("same settings on two files: %s %s; other settings: %s", a.Fingerprint(), b.Fingerprint(), c.Fingerprint())
+// The fingerprint names the settings that decide and judge a conversion, not the file.
+func TestSnapshotFingerprint(t *testing.T) {
+	info := media.Info{VideoCodec: "h264", BitrateKbps: 8000, DurationSec: 60, Streams: []media.Stream{{Type: "video", Codec: "h264"}}}
+	other := media.Info{VideoCodec: "h264", BitrateKbps: 12000, DurationSec: 90, Streams: []media.Stream{{Type: "video", Codec: "h264"}, {Type: "audio", Codec: "aac"}}}
+	verify := Verification{MinSSIM: 0.95, DecodeCheck: "auto", FullDecodeMaxSec: 10800}
+	snap := func(t Template, i media.Info, v Verification) Snapshot {
+		p := t.Compile(i)
+		return Snapshot{Plan: p, Expect: p.Expect(i, 100), Verify: v}
+	}
+	base := LegacyTemplate(Default(), "replace")
+	a := snap(base, info, verify).Fingerprint()
+	if b := snap(base, other, verify).Fingerprint(); a != b || len(a) != 16 {
+		t.Errorf("the same settings on two files: %s %s", a, b)
+	}
+	// two legacy flows with the same encoder but another eligibility rule must differ
+	for name, r := range map[string]Rule{
+		"other source codec": {FromCodec: "mpeg2video", MinBitrateKbps: 4000, CRF: 26, Preset: "medium"},
+		"other bitrate":      {FromCodec: "h264", MinBitrateKbps: 6000, CRF: 26, Preset: "medium"},
+		"other crf":          {FromCodec: "h264", MinBitrateKbps: 4000, CRF: 24, Preset: "medium"},
+	} {
+		if snap(LegacyTemplate(r, "replace"), info, verify).Fingerprint() == a {
+			t.Errorf("%s: same fingerprint", name)
+		}
+	}
+	if snap(LegacyTemplate(Default(), "beside"), info, verify).Fingerprint() == a {
+		t.Error("output mode: same fingerprint")
+	}
+	for name, v := range map[string]Verification{
+		"decode check always": {MinSSIM: 0.95, DecodeCheck: "always", FullDecodeMaxSec: 10800},
+		"another SSIM":        {MinSSIM: 0.97, DecodeCheck: "auto", FullDecodeMaxSec: 10800},
+	} {
+		if snap(base, info, v).Fingerprint() == a {
+			t.Errorf("%s: same fingerprint", name)
+		}
 	}
 }
 

@@ -62,6 +62,21 @@ func (e *KeptError) Error() string { return "kept original: " + e.Reason }
 
 func kept(format string, a ...any) error { return &KeptError{Reason: fmt.Sprintf(format, a...)} }
 
+// verification is the judging settings in force for a result checked against exp.
+func (w *Worker) verification(exp rules.Expect) rules.Verification {
+	v := rules.Verification{MinSSIM: w.minSSIM(), DecodeCheck: "auto", FullDecodeMaxSec: w.FullDecodeMaxSec}
+	if exp.MinSSIM > 0 {
+		v.MinSSIM = exp.MinSSIM
+	}
+	if w.DecodeCheck == "always" {
+		v.DecodeCheck = "always"
+	}
+	if v.FullDecodeMaxSec <= 0 {
+		v.FullDecodeMaxSec = DefaultFullDecodeMaxSec
+	}
+	return v
+}
+
 func (w *Worker) minSSIM() float64 {
 	if w.MinSSIM > 0 {
 		return w.MinSSIM

@@ -19,12 +19,19 @@ import (
 type Plan struct {
 	Skip            string      `json:"skip,omitempty"`   // why this file is not converted ("" = convert it)
 	Reason          string      `json:"reason,omitempty"` // why it is converted, shown on the job
+	Eligibility     Eligibility `json:"eligibility"`      // the rule that decided Skip (part of the fingerprint)
 	Video           VideoEncode `json:"video"`
 	Output          string      `json:"output"`                 // replace | beside
 	MinSavingPct    int         `json:"minSavingPct,omitempty"` // the new file must be this much smaller (0: just smaller)
 	MinSSIM         float64     `json:"minSSIM,omitempty"`      // picture threshold; 0 = the program's -min-ssim
 	Kind            string      `json:"kind"`                   // the template kind it was compiled from
 	CompilerVersion int         `json:"compilerVersion"`
+}
+
+// Eligibility is the rule a Plan decides with: which source format, from which bitrate.
+type Eligibility struct {
+	FromCodec      string `json:"fromCodec,omitempty"`
+	MinBitrateKbps int    `json:"minBitrateKbps,omitempty"`
 }
 
 // VideoEncode is how the main video is encoded. Everything else is copied.
@@ -67,6 +74,7 @@ func (t Template) Compile(info media.Info) Plan {
 	}
 	// How it is converted is set first, so a Plan that skips the file still says what converting
 	// it would mean; whether it is converted is the scanner's decision (Skip).
+	p.Eligibility = Eligibility{FromCodec: r.FromCodec, MinBitrateKbps: r.MinBitrateKbps}
 	p.Video = VideoEncode{Codec: "libx265", CRF: r.CRF, Preset: r.Preset, Tag: "hvc1"}
 	if ok, why := r.Match(info); ok {
 		p.Reason = why
@@ -105,11 +113,33 @@ func (p Plan) Expect(src media.Info, packets int64) Expect {
 	return e
 }
 
-// Fingerprint identifies the settings a Plan converts with (not the file): equal fingerprints, the
-// same conversion settings. It is stored on the job.
-func (p Plan) Fingerprint() string {
+// Snapshot is what a job records when it starts: the Plan, the Expect verification checks the result
+// against, and the verification settings in force. It is enough to say afterwards exactly what was
+// intended and how the result was judged.
+type Snapshot struct {
+	Plan   Plan         `json:"plan"`
+	Expect Expect       `json:"expect"`
+	Verify Verification `json:"verify"`
+}
+
+// Verification are the program-wide settings that judge a result (the flags -min-ssim, -decode-check).
+type Verification struct {
+	MinSSIM          float64 `json:"minSSIM"`          // the threshold actually used
+	DecodeCheck      string  `json:"decodeCheck"`      // auto | always
+	FullDecodeMaxSec float64 `json:"fullDecodeMaxSec"` // auto: files up to this long are played completely
+}
+
+// Fingerprint identifies the settings that decide whether a file is converted, how, and how the
+// result is judged (QOL-SAFETY-PLAN.md: codec rule, CRF, preset, thresholds): equal fingerprints, the
+// same answer. It leaves out what belongs to the one file (the reason text, its streams, its length).
+func (s Snapshot) Fingerprint() string {
+	p := s.Plan
 	p.Skip, p.Reason = "", ""
-	b, _ := json.Marshal(p)
+	b, _ := json.Marshal(struct {
+		Plan                                      Plan
+		Verify                                    Verification
+		DurationTol, PacketsTol, MinSavings, SSIM float64
+	}{p, s.Verify, s.Expect.DurationTol, s.Expect.PacketsTol, s.Expect.MinSavings, s.Expect.MinSSIM})
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:8])
 }

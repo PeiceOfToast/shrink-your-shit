@@ -96,21 +96,50 @@ func TestStopJobDropsTheRunningJob(t *testing.T) {
 	s.assertOriginalSafe()
 }
 
-// The job keeps the Plan it ran with, and its settings' fingerprint.
+// The job keeps the Plan it ran with, the Expect it was checked against and the settings that judged
+// it, with their fingerprint.
 func TestJobRecordsItsPlan(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
 	w.Template = func(jobs.Job) (rules.Template, error) { return rules.SliderTemplate(4), nil }
 	w.RunOne(context.Background())
 	j := s.job()
-	var p rules.Plan
-	if err := json.Unmarshal([]byte(j.Plan), &p); err != nil {
+	var snap rules.Snapshot
+	if err := json.Unmarshal([]byte(j.Plan), &snap); err != nil {
 		t.Fatalf("plan %q: %v", j.Plan, err)
 	}
-	if p.Kind != rules.KindSlider || p.Video.CRF != 21 || p.MinSavingPct != 8 || j.PlanPrint != p.Fingerprint() {
-		t.Errorf("recorded plan %+v, fingerprint %q", p, j.PlanPrint)
+	p := snap.Plan
+	if p.Kind != rules.KindSlider || p.Video.CRF != 21 || p.MinSavingPct != 8 || p.Eligibility.FromCodec != "h264" {
+		t.Errorf("recorded plan %+v", p)
+	}
+	if len(snap.Expect.Streams) != 4 || snap.Expect.MinSavings != 0.08 || snap.Verify.MinSSIM != DefaultMinSSIM || snap.Verify.DecodeCheck != "auto" {
+		t.Errorf("recorded expect/verify %+v %+v", snap.Expect, snap.Verify)
+	}
+	if j.PlanPrint != snap.Fingerprint() {
+		t.Errorf("fingerprint %q, want %q", j.PlanPrint, snap.Fingerprint())
 	}
 	if s.count("-crf 21 -preset medium") != 1 {
 		t.Errorf("the encode must run the recorded plan:\n%s", strings.Join(s.calls, "\n"))
 	}
+}
+
+// failingRecord is the store with RecordPlan failing, like a database write error.
+type failingRecord struct{ Queue }
+
+func (failingRecord) RecordPlan(int64, string, string) error { return errors.New("disk I/O error") }
+
+// If the job's Plan cannot be recorded, nothing is converted: the job fails before any file is written.
+func TestJobStopsIfItsPlanCannotBeRecorded(t *testing.T) {
+	s := newScenario(t)
+	w := s.worker(Replace)
+	w.Queue = failingRecord{s.store}
+	w.RunOne(context.Background())
+	j := s.job()
+	if j.Status != jobs.Failed || !strings.Contains(j.Error, "could not record what this conversion will do") || !strings.Contains(j.Error, "original is untouched") {
+		t.Errorf("%s %q", j.Status, j.Error)
+	}
+	if s.count("libx265") != 0 {
+		t.Error("ffmpeg must not run")
+	}
+	s.assertOriginalSafe()
 }

@@ -229,12 +229,19 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if plan.Video.Codec == "" {
 		return "", fmt.Errorf("its library's flow cannot convert it: %s", plan.Skip)
 	}
-	if b, err := json.Marshal(plan); err == nil {
-		w.Queue.RecordPlan(job.ID, string(b), plan.Fingerprint())
-	}
 	exp := plan.Expect(src, packets)
 	if exp.DurationSec <= 0 {
 		exp.DurationSec = job.DurationSec
+	}
+	// The job keeps what it is about to do and how the result will be judged. If that cannot be
+	// recorded, it does not start: nothing has been written yet.
+	snap := rules.Snapshot{Plan: plan, Expect: exp, Verify: w.verification(exp)}
+	b, err := json.Marshal(snap)
+	if err == nil {
+		err = w.Queue.RecordPlan(job.ID, string(b), snap.Fingerprint())
+	}
+	if err != nil {
+		return "", fmt.Errorf("could not record what this conversion will do, so it did not start; the original is untouched (%v)", err)
 	}
 
 	stage, err = newStaged(job.Path)

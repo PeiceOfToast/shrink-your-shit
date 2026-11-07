@@ -81,8 +81,12 @@ template and the file's probe: `Skip` (why not to convert it, the scanner's deci
 the video encode (`libx265`, CRF, preset, tag; a bitrate cap can be added for slice 25), the output
 mode, and the thresholds (minimum saving; an SSIM gate, 0 = `-min-ssim`). The scanner compiles a Plan
 per file to decide; the worker compiles it again from the probe it takes, runs `Plan.FFmpegArgs`,
-checks the result against `Plan.Expect` (slice 10's `Expect`, now in `internal/rules`) and stores
-the Plan and its settings fingerprint on the job (migration 4). Whether to convert stays the
+checks the result against `Plan.Expect` (slice 10's `Expect`, now in `internal/rules`) and stores a
+`Snapshot` on the job (migration 4): the Plan (with the eligibility rule that decided it), the
+Expect verification uses and the verification settings in force (SSIM threshold, playback-test
+mode), plus a fingerprint of everything that can change eligibility, the encode or the verdict
+(not the file's own streams or length). If the snapshot cannot be stored, the job fails before
+anything is written. Whether to convert stays the
 scanner's decision; the worker only refuses a flow that cannot say how. A legacy flow compiles to
 exactly the arguments and decisions of the program before Plans (`TestLegacyPlanIsExactlyTodaysBehaviour`
 over every probe in `internal/media/testdata`). The slider's full recipe is slice 16b.
