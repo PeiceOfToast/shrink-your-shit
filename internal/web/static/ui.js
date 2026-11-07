@@ -15,7 +15,10 @@
     format_not_converted: "a format this version doesn't convert", no_video: "no video in the file",
     setting_cannot_run: "the library's setting can't be used on it",
     // Workshop slice 23 (file guards); design's words, 13:00Z.
-    still_changing: "still changing, we'll look again on the next scan"
+    still_changing: "still changing, we'll look again on the next scan",
+    // Workshop S4/S3 (contract 21:10Z, item 8); design's words (REDESIGN E); dv says library where design says flow, until piece B (NAV-7). S4 sends already_in_format.
+    dv: "Dolby Vision (left alone by this library's setting)", dv_profile5: "Dolby Vision profile 5: converting it would show wrong colours",
+    already_in_format: "already in this format"
   };
   // A badge is the reason with a capital letter, unless design gave it a shorter name.
   ui.BADGES = { still_changing: "Still changing", symlink: "Link to outside this library" };

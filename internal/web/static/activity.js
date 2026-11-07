@@ -109,9 +109,9 @@
 
   // ---- Skipped
   // Badge style per reason: info for what resolves itself or was the person's own doing, warn for a risk, idle otherwise.
-  var KIND = { user_stopped: "info", restored: "info", still_changing: "info", hdr_dv: "warn", shared_file: "warn", cannot_keep_track: "warn", bitmap_subs: "warn", symlink: "idle", unreadable: "warn" };
+  var KIND = { user_stopped: "info", restored: "info", still_changing: "info", hdr_dv: "warn", shared_file: "warn", cannot_keep_track: "warn", bitmap_subs: "warn", symlink: "idle", unreadable: "warn", dv: "info", dv_profile5: "idle", already_in_format: "idle" };
   // Reasons a library rule causes, with the lowest control level whose library page can change that rule.
-  var RULE = { hdr_dv: 1, cannot_keep_track: 1, setting_cannot_run: 1 }, RANK = { basic: 0, standard: 1, advanced: 2 }, level = null;
+  var RULE = { hdr_dv: 1, cannot_keep_track: 1, setting_cannot_run: 1, dv: 1 }, RANK = { basic: 0, standard: 1, advanced: 2 }, level = null;
   var reason = "", shown = 0, tb, more, count;
   T.skipped = function () {
     if (!$("reason")) {
