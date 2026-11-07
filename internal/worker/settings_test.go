@@ -4,6 +4,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -19,8 +20,8 @@ import (
 func TestJobUsesItsLibrarysFlow(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
-	w.Settings = func(j jobs.Job) (rules.Settings, error) {
-		return rules.Settings{Rule: rules.Rule{FromCodec: "h264", CRF: 21, Preset: "slow"}, Output: "beside"}, nil
+	w.Template = func(j jobs.Job) (rules.Template, error) {
+		return rules.LegacyTemplate(rules.Rule{FromCodec: "h264", CRF: 21, Preset: "slow"}, "beside"), nil
 	}
 	w.RunOne(context.Background())
 	if s.count("-crf 21 -preset slow") != 1 {
@@ -32,21 +33,24 @@ func TestJobUsesItsLibrarysFlow(t *testing.T) {
 	if b, _ := os.ReadFile(s.src); string(b) != "original-bytes" {
 		t.Error("beside keeps the original")
 	}
-	// minimum saving: "new" (3 bytes) against "original-bytes" (14) saves 79%, so 80% refuses it
+	// minimum saving: the slider at Smallest needs 20%; a 12-byte result for the 14-byte original
+	// saves 14%, so it is refused
 	s2 := newScenario(t)
+	s2.content = "0123456789ab"
 	w2 := s2.worker(Replace)
-	w2.Settings = func(j jobs.Job) (rules.Settings, error) {
-		return rules.Settings{Rule: rules.Default(), Output: "replace", MinSavingPct: 80}, nil
-	}
+	w2.Template = func(j jobs.Job) (rules.Template, error) { return rules.SliderTemplate(1), nil }
 	w2.RunOne(context.Background())
-	s2.assertKept("saves less than the required 80%")
+	s2.assertKept("saves less than the required 20%")
+	if s2.count("-crf 27 -preset medium") != 1 {
+		t.Errorf("Smallest encodes at crf 27, medium:\n%s", strings.Join(s2.calls, "\n"))
+	}
 }
 
 func TestJobOfARemovedLibraryFails(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
-	w.Settings = func(jobs.Job) (rules.Settings, error) {
-		return rules.Settings{}, errors.New("its library no longer exists")
+	w.Template = func(jobs.Job) (rules.Template, error) {
+		return rules.Template{}, errors.New("its library no longer exists")
 	}
 	w.RunOne(context.Background())
 	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "library no longer exists") {
@@ -88,6 +92,54 @@ func TestStopJobDropsTheRunningJob(t *testing.T) {
 	}
 	if _, err := s.store.Get(s.id); err == nil {
 		t.Error("the stopped job must be dropped, not requeued")
+	}
+	s.assertOriginalSafe()
+}
+
+// The job keeps the Plan it ran with, the Expect it was checked against and the settings that judged
+// it, with their fingerprint.
+func TestJobRecordsItsPlan(t *testing.T) {
+	s := newScenario(t)
+	w := s.worker(Replace)
+	w.Template = func(jobs.Job) (rules.Template, error) { return rules.SliderTemplate(4), nil }
+	w.RunOne(context.Background())
+	j := s.job()
+	var snap rules.Snapshot
+	if err := json.Unmarshal([]byte(j.Plan), &snap); err != nil {
+		t.Fatalf("plan %q: %v", j.Plan, err)
+	}
+	p := snap.Plan
+	if p.Kind != rules.KindSlider || p.Video.CRF != 21 || p.MinSavingPct != 8 || p.Eligibility.FromCodec != "h264" {
+		t.Errorf("recorded plan %+v", p)
+	}
+	if len(snap.Expect.Streams) != 4 || snap.Expect.MinSavings != 0.08 || snap.Verify.MinSSIM != DefaultMinSSIM || snap.Verify.DecodeCheck != "auto" {
+		t.Errorf("recorded expect/verify %+v %+v", snap.Expect, snap.Verify)
+	}
+	if j.PlanPrint != snap.Fingerprint() {
+		t.Errorf("fingerprint %q, want %q", j.PlanPrint, snap.Fingerprint())
+	}
+	if s.count("-crf 21 -preset medium") != 1 {
+		t.Errorf("the encode must run the recorded plan:\n%s", strings.Join(s.calls, "\n"))
+	}
+}
+
+// failingRecord is the store with RecordPlan failing, like a database write error.
+type failingRecord struct{ Queue }
+
+func (failingRecord) RecordPlan(int64, string, string) error { return errors.New("disk I/O error") }
+
+// If the job's Plan cannot be recorded, nothing is converted: the job fails before any file is written.
+func TestJobStopsIfItsPlanCannotBeRecorded(t *testing.T) {
+	s := newScenario(t)
+	w := s.worker(Replace)
+	w.Queue = failingRecord{s.store}
+	w.RunOne(context.Background())
+	j := s.job()
+	if j.Status != jobs.Failed || !strings.Contains(j.Error, "could not record what this conversion will do") || !strings.Contains(j.Error, "original is untouched") {
+		t.Errorf("%s %q", j.Status, j.Error)
+	}
+	if s.count("libx265") != 0 {
+		t.Error("ffmpeg must not run")
 	}
 	s.assertOriginalSafe()
 }

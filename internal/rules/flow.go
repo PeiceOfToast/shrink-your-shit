@@ -3,13 +3,12 @@
 package rules
 
 import (
-	"fmt"
 	"strings"
 )
 
 // A flow says which files of a library are converted and how. Until the flow graph engine (slice
-// 30) and the Plan compiler (slice 16), a flow's behaviour is its template: a kind plus parameters,
-// turned into Settings here. This is the one place that mapping lives.
+// 30), a flow's behaviour is its template: a kind plus parameters, compiled per file into a Plan
+// (plan.go). The slider table below is the one place its numbers live.
 
 // Flow template kinds.
 const (
@@ -39,13 +38,6 @@ type Params struct {
 	CRF            int    `json:"crf,omitempty"`
 	Preset         string `json:"preset,omitempty"`
 	Output         string `json:"output,omitempty"`
-}
-
-// Settings are what the scanner and the worker need from a library's flow.
-type Settings struct {
-	Rule
-	Output       string // "replace" or "beside"
-	MinSavingPct int    // the new file must be at least this much smaller (0: just smaller)
 }
 
 // SliderPosition is one position of the Basic slider.
@@ -81,28 +73,6 @@ func SliderTemplate(quality int) Template {
 func LegacyTemplate(r Rule, output string) Template {
 	return Template{Kind: KindLegacy, CompilerVersion: CompilerVersion, Params: Params{
 		FromCodec: r.FromCodec, MinBitrateKbps: r.MinBitrateKbps, CRF: r.CRF, Preset: r.Preset, Output: output}}
-}
-
-// Settings turns a template into what the scanner and worker use.
-func (t Template) Settings() (Settings, error) {
-	switch t.Kind {
-	case KindLegacy:
-		p := t.Params
-		if p.FromCodec == "" || p.CRF <= 0 || p.Preset == "" {
-			return Settings{}, fmt.Errorf("legacy flow is missing values: %+v", p)
-		}
-		return Settings{Rule: Rule{FromCodec: p.FromCodec, MinBitrateKbps: p.MinBitrateKbps, CRF: p.CRF, Preset: p.Preset},
-			Output: outputOr(p.Output)}, nil
-	case KindSlider:
-		pos, ok := SliderAt(t.Params.Quality)
-		if !ok {
-			return Settings{}, fmt.Errorf("slider position %d does not exist", t.Params.Quality)
-		}
-		d := Default()
-		return Settings{Rule: Rule{FromCodec: d.FromCodec, MinBitrateKbps: d.MinBitrateKbps, CRF: pos.CRF, Preset: SliderPreset},
-			Output: "replace", MinSavingPct: pos.MinSavingPct}, nil
-	}
-	return Settings{}, fmt.Errorf("flows of kind %q cannot run yet", t.Kind)
 }
 
 // SliderAt returns the slider position q (1..5).

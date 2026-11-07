@@ -101,9 +101,9 @@ func TestUpgradeAdoptsFlagLibrariesAsLegacyFlows(t *testing.T) {
 				if after[i].Status != before[i].Status || after[i].LibraryID != libs[0].ID {
 					t.Errorf("job %d: %s -> %s, library %d", after[i].ID, before[i].Status, after[i].Status, after[i].LibraryID)
 				}
-				set, err := s.SettingsFor(after[i])
-				if err != nil || set.Rule != flagRule || set.Output != "beside" {
-					t.Errorf("job %d settings %+v %v, want the flags' values", after[i].ID, set, err)
+				tmpl, err := s.TemplateFor(after[i])
+				if err != nil || tmpl != rules.LegacyTemplate(flagRule, "beside") {
+					t.Errorf("job %d template %+v %v, want the flags' values", after[i].ID, tmpl, err)
 				}
 			}
 			// the next start changes nothing, and a library added later is named normally
@@ -144,9 +144,8 @@ func TestFreshInstallFlowNames(t *testing.T) {
 	if _, err := s.AddLibrary("Other", "/m", rules.SliderTemplate(3), false); err != ErrPathTaken {
 		t.Errorf("same folder twice: %v", err)
 	}
-	set, _ := s.SettingsFor(Job{LibraryID: l.ID})
-	if set.CRF != 23 || set.Preset != "medium" || set.MinSavingPct != 10 || set.Output != "replace" {
-		t.Errorf("balanced slider settings %+v", set)
+	if tmpl, _ := s.TemplateFor(Job{LibraryID: l.ID}); tmpl != rules.SliderTemplate(3) {
+		t.Errorf("balanced slider template %+v", tmpl)
 	}
 }
 
@@ -182,7 +181,7 @@ func TestDeleteLibraryKeepsFlowAndFinishedJobs(t *testing.T) {
 	if _, err := s.DeleteLibrary(l.ID); err != ErrNotFound {
 		t.Errorf("second delete: %v", err)
 	}
-	if _, err := s.SettingsFor(Job{LibraryID: l.ID}); err == nil {
+	if _, err := s.TemplateFor(Job{LibraryID: l.ID}); err == nil {
 		t.Error("a job of a removed library has no settings")
 	}
 }
@@ -344,5 +343,35 @@ func TestAFlowInUseCannotBeDeletedEvenBehindTheAPI(t *testing.T) {
 	}
 	if err := s.DeleteFlow(l.FlowID); err == nil {
 		t.Error("DeleteFlow must refuse too")
+	}
+}
+
+// Migration 4 adds the plan snapshot to jobs; a database at version 3 keeps its jobs.
+func TestMigration4AddsThePlanSnapshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "syp.db")
+	db, _ := sql.Open("sqlite", path)
+	db.SetMaxOpenConns(1)
+	for _, m := range migrations[:3] {
+		if _, err := db.Exec(m.sql); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Exec(`PRAGMA user_version=3`)
+	db.Exec(`INSERT INTO jobs(library,path,status,created,updated) VALUES('/m','/m/a.mkv','done','x','x')`)
+	db.Close()
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	list, _ := s.List(10)
+	if len(list) != 1 || list[0].Plan != "" {
+		t.Fatalf("%+v", list)
+	}
+	if err := s.RecordPlan(list[0].ID, `{"kind":"legacy"}`, "abc"); err != nil {
+		t.Fatal(err)
+	}
+	if j, _ := s.Get(list[0].ID); j.Plan != `{"kind":"legacy"}` || j.PlanPrint != "abc" {
+		t.Errorf("%+v", j)
 	}
 }

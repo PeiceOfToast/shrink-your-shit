@@ -1,6 +1,6 @@
 // Copyright (C) shrink-your-shit contributors. Licensed under AGPL-3.0-or-later.
 
-package worker
+package rules
 
 import (
 	"os"
@@ -106,11 +106,11 @@ func TestCompareExplainsEverythingInPlainWords(t *testing.T) {
 
 func TestHumanBytesAndClock(t *testing.T) {
 	for in, want := range map[int64]string{0: "0 B", 1023: "1023 B", 1024: "1.0 KB", 1536: "1.5 KB", 5 << 20: "5.0 MB", 3 << 30: "3.0 GB"} {
-		if got := humanBytes(in); got != want {
-			t.Errorf("humanBytes(%d)=%q want %q", in, got, want)
+		if got := HumanBytes(in); got != want {
+			t.Errorf("HumanBytes(%d)=%q want %q", in, got, want)
 		}
 	}
-	if clock(0) != "0:00:00" || clock(3725) != "1:02:05" || clock(59.6) != "0:01:00" {
-		t.Errorf("%s %s %s", clock(0), clock(3725), clock(59.6))
+	if Clock(0) != "0:00:00" || Clock(3725) != "1:02:05" || Clock(59.6) != "0:01:00" {
+		t.Errorf("%s %s %s", Clock(0), Clock(3725), Clock(59.6))
 	}
 }

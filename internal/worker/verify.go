@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
 // Defaults for the safety checks.
@@ -61,6 +62,21 @@ func (e *KeptError) Error() string { return "kept original: " + e.Reason }
 
 func kept(format string, a ...any) error { return &KeptError{Reason: fmt.Sprintf(format, a...)} }
 
+// verification is the judging settings in force for a result checked against exp.
+func (w *Worker) verification(exp rules.Expect) rules.Verification {
+	v := rules.Verification{MinSSIM: w.minSSIM(), DecodeCheck: "auto", FullDecodeMaxSec: w.FullDecodeMaxSec}
+	if exp.MinSSIM > 0 {
+		v.MinSSIM = exp.MinSSIM
+	}
+	if w.DecodeCheck == "always" {
+		v.DecodeCheck = "always"
+	}
+	if v.FullDecodeMaxSec <= 0 {
+		v.FullDecodeMaxSec = DefaultFullDecodeMaxSec
+	}
+	return v
+}
+
 func (w *Worker) minSSIM() float64 {
 	if w.MinSSIM > 0 {
 		return w.MinSSIM
@@ -86,7 +102,7 @@ func (w *Worker) preflight(sourcePath string, sourceSize int64) error {
 	need := uint64(sourceSize) + uint64(sourceSize)/10 + 64<<20
 	if free < need {
 		return kept("not enough free disk space in %s: about %s is needed to convert this file safely, %s is free",
-			dir, humanBytes(int64(need)), humanBytes(int64(free)))
+			dir, rules.HumanBytes(int64(need)), rules.HumanBytes(int64(free)))
 	}
 	return nil
 }
@@ -95,7 +111,7 @@ func (w *Worker) preflight(sourcePath string, sourceSize int64) error {
 // comparing it with exp (what it must look like), never with the original directly. Every failure, and
 // every check that cannot run, is a KeptError: there is no "replace anyway". Cheap checks first, the
 // expensive ones (playback test, picture comparison) only for files that already look right.
-func (w *Worker) verify(ctx context.Context, src media.Info, exp Expect, srcPath, tmp string, origSize int64) error {
+func (w *Worker) verify(ctx context.Context, src media.Info, exp rules.Expect, srcPath, tmp string, origSize int64) error {
 	st, err := os.Stat(tmp)
 	if err != nil {
 		return kept("the new file is missing (%v)", err)
@@ -131,14 +147,14 @@ func (w *Worker) verify(ctx context.Context, src media.Info, exp Expect, srcPath
 	if limit := float64(origSize) * (1 - exp.MinSavings); float64(st.Size()) >= limit {
 		if exp.MinSavings > 0 {
 			return kept("the new file (%s) saves less than the required %.0f%% of the original (%s)",
-				humanBytes(st.Size()), exp.MinSavings*100, humanBytes(origSize))
+				rules.HumanBytes(st.Size()), exp.MinSavings*100, rules.HumanBytes(origSize))
 		}
-		return kept("the new file (%s) is not smaller than the original (%s)", humanBytes(st.Size()), humanBytes(origSize))
+		return kept("the new file (%s) is not smaller than the original (%s)", rules.HumanBytes(st.Size()), rules.HumanBytes(origSize))
 	}
 	if err := w.decodeCheck(ctx, out, tmp); err != nil {
 		return err
 	}
-	return w.ssimCheck(ctx, src, out, srcPath, tmp)
+	return w.ssimCheck(ctx, src, out, srcPath, tmp, exp.MinSSIM)
 }
 
 // ---- playback test ----
@@ -202,7 +218,7 @@ var ssimRe = regexp.MustCompile(`SSIM\b.*\bAll:([0-9.]+)`)
 // ssimCheck compares the picture of the original and the new file at up to three places, using
 // ffmpeg's built-in SSIM measure (1.0 = identical). It needs ffmpeg's ssim filter; without it the
 // check cannot run, and then the original is kept.
-func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tmp string) error {
+func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tmp string, planSSIM float64) error {
 	sv, ov := src.MainVideoOrdinal(), out.MainVideoOrdinal()
 	if sv < 0 || ov < 0 {
 		return kept("there is no video to compare")
@@ -215,6 +231,9 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 		return kept("this ffmpeg has no 'ssim' filter, which shrink-your-shit needs to check picture quality; install a complete ffmpeg build")
 	}
 	threshold := w.minSSIM()
+	if planSSIM > 0 { // the flow's own threshold (a slider position's SSIM gate)
+		threshold = planSSIM
+	}
 	// Both pictures are put on one timeline by their own video start time (the encoder can delay the
 	// first frame: measured, a good encode scored 0.93 instead of 0.985 without this). If that still
 	// scores low, the new file is tried one frame earlier and later too and the best counts: a
@@ -240,7 +259,7 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 		}
 		if best < threshold { // one place that is too different is enough
 			return kept("the picture of the new file is too different from the original (similarity %.3f at %s, %.2f is required)",
-				best, clock(seg.start), threshold)
+				best, rules.Clock(seg.start), threshold)
 		}
 	}
 	return nil
@@ -300,15 +319,15 @@ func (w *Worker) ssimSegment(ctx context.Context, srcPath, tmp string, sv, ov in
 	defer cancel()
 	_, stderr, err := w.Exec.Capture(sctx, w.FFmpeg, args...)
 	if err != nil {
-		return 0, checkFailed(sctx, fmt.Sprintf("the picture comparison at %s", clock(seg.start)), err)
+		return 0, checkFailed(sctx, fmt.Sprintf("the picture comparison at %s", rules.Clock(seg.start)), err)
 	}
 	m := ssimRe.FindSubmatch(stderr)
 	if m == nil {
-		return 0, kept("the picture comparison at %s gave no result", clock(seg.start))
+		return 0, kept("the picture comparison at %s gave no result", rules.Clock(seg.start))
 	}
 	score, perr := strconv.ParseFloat(string(m[1]), 64)
 	if perr != nil {
-		return 0, kept("the picture comparison at %s gave an unreadable result", clock(seg.start))
+		return 0, kept("the picture comparison at %s gave an unreadable result", rules.Clock(seg.start))
 	}
 	return score, nil
 }

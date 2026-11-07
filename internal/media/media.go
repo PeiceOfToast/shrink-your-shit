@@ -229,22 +229,6 @@ func ParseProbe(data []byte) (Info, error) {
 	return info, nil
 }
 
-// HEVCArgs builds the ffmpeg arguments to convert in to out: the first video
-// stream becomes HEVC, everything else (audio, subtitles, attachments, extra
-// streams) is copied. Output uses the input's container, so copies always fit.
-// Progress is written to stdout as key=value lines.
-func HEVCArgs(in, out string, crf int, preset string) []string {
-	return []string{
-		"-y", "-nostdin", "-v", "error", "-progress", "pipe:1", "-nostats",
-		"-i", in,
-		"-map", "0", "-map", "-0:d",
-		"-c", "copy",
-		"-c:v:0", "libx265", "-crf", strconv.Itoa(crf), "-preset", preset,
-		"-tag:v:0", "hvc1",
-		out,
-	}
-}
-
 // ParseProgress reads one line of ffmpeg -progress output. If the line reports
 // the encoded position, it returns the percent done (0-100) and true.
 func ParseProgress(line string, durationSec float64) (float64, bool) {

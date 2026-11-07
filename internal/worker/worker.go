@@ -7,6 +7,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -34,6 +35,8 @@ type Queue interface {
 	Drop(id int64) error
 	// Keep marks a job "kept original": a safety check refused the result (reason says why).
 	Keep(id int64, reason string) error
+	// RecordPlan stores the Plan a running job converts with (JSON) and its fingerprint.
+	RecordPlan(id int64, plan, fingerprint string) error
 }
 
 // OutputMode says what happens to the result.
@@ -54,8 +57,9 @@ type Worker struct {
 	FFmpeg string
 	// FFprobe checks the result before it replaces anything.
 	FFprobe string
-	// Settings returns what a job's library's flow says to do. Nil: Rule and Mode for every job.
-	Settings func(jobs.Job) (rules.Settings, error)
+	// Template returns the template of a job's library's flow, compiled per file into the job's Plan.
+	// Nil: a legacy template from Rule and Mode for every job.
+	Template func(jobs.Job) (rules.Template, error)
 	Rule     rules.Rule
 	Mode     OutputMode
 	Poll     time.Duration
@@ -89,11 +93,11 @@ func (w *Worker) StopJob(id int64) {
 	}
 }
 
-func (w *Worker) settingsFor(job jobs.Job) (rules.Settings, error) {
-	if w.Settings == nil {
-		return rules.Settings{Rule: w.Rule, Output: string(w.Mode)}, nil
+func (w *Worker) templateFor(job jobs.Job) (rules.Template, error) {
+	if w.Template == nil {
+		return rules.LegacyTemplate(w.Rule, string(w.Mode)), nil
 	}
-	return w.Settings(job)
+	return w.Template(job)
 }
 
 // Run processes jobs until ctx is cancelled.
@@ -177,7 +181,7 @@ func BesidePath(src string) string {
 // file next to the original; every check runs on that temp file; the rename is the very last step, and
 // any error or "no" before it removes the temp file and leaves the original exactly as it was.
 func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err error) {
-	set, err := w.settingsFor(job)
+	tmpl, err := w.templateFor(job)
 	if err != nil {
 		return "", fmt.Errorf("cannot read what to do with it: %w", err)
 	}
@@ -218,10 +222,26 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 		packets = n
 	}
-	exp := DefaultExpect(src, packets)
-	exp.MinSavings = float64(set.MinSavingPct) / 100
+	// The Plan for this file, from its library's flow and the probe just taken: what to run, and what
+	// the result must look like. Whether to convert it was the scanner's decision (as before Plans);
+	// only a flow that cannot say how to convert stops the job here.
+	plan := tmpl.Compile(src)
+	if plan.Video.Codec == "" {
+		return "", fmt.Errorf("its library's flow cannot convert it: %s", plan.Skip)
+	}
+	exp := plan.Expect(src, packets)
 	if exp.DurationSec <= 0 {
 		exp.DurationSec = job.DurationSec
+	}
+	// The job keeps what it is about to do and how the result will be judged. If that cannot be
+	// recorded, it does not start: nothing has been written yet.
+	snap := rules.Snapshot{Plan: plan, Expect: exp, Verify: w.verification(exp)}
+	b, err := json.Marshal(snap)
+	if err == nil {
+		err = w.Queue.RecordPlan(job.ID, string(b), snap.Fingerprint())
+	}
+	if err != nil {
+		return "", fmt.Errorf("could not record what this conversion will do, so it did not start; the original is untouched (%v)", err)
 	}
 
 	stage, err = newStaged(job.Path)
@@ -229,7 +249,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		return "", err
 	}
 	tmp := stage.path
-	args := media.HEVCArgs(job.Path, tmp, set.CRF, set.Preset)
+	args := plan.FFmpegArgs(job.Path, tmp)
 	encErr, terr := media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p float64) {
 		w.Queue.Progress(job.ID, p)
 	})
@@ -261,7 +281,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		return "", fmt.Errorf("temp file permissions: %w", err)
 	}
 	final = job.Path
-	if OutputMode(set.Output) == Beside {
+	if OutputMode(plan.Output) == Beside {
 		final = BesidePath(job.Path)
 	}
 	// Rename is atomic on one filesystem: the original is only replaced by a complete file. Right

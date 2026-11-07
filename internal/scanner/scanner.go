@@ -55,7 +55,7 @@ type Scanner struct {
 	Store   *jobs.Store
 	Exec    media.Exec
 	FFprobe string
-	// Targets lists what to scan on each pass: the started libraries, each with its flow's rule.
+	// Targets lists what to scan on each pass: the started libraries, each with its flow's template.
 	Targets func() ([]Target, error)
 	// MinAge skips files modified more recently than this (still being copied).
 	MinAge time.Duration
@@ -70,7 +70,7 @@ type Scanner struct {
 type Target struct {
 	LibraryID int64
 	Path      string
-	Rule      rules.Rule
+	Template  rules.Template // compiled per file into a Plan, which decides whether to convert it
 }
 
 // ScanOnce walks every library once and returns how many jobs it queued.
@@ -137,12 +137,13 @@ func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.Fil
 		return false
 	}
 	rec.Codec = pi.VideoCodec
-	ok, why := t.Rule.Match(pi)
-	if !ok {
-		rec.Decision = "skip: " + why
+	plan := t.Template.Compile(pi)
+	if plan.Skip != "" {
+		rec.Decision = "skip: " + plan.Skip
 		s.Store.PutFile(rec)
 		return false
 	}
+	why := plan.Reason
 	rec.Decision = "queued: " + why
 	if _, err := s.Store.Enqueue(jobs.Job{Library: t.Path, LibraryID: t.LibraryID, Path: path, Reason: why, DurationSec: pi.DurationSec, SizeBefore: st.Size()}); err != nil {
 		if !errors.Is(err, jobs.ErrLibraryGone) { // removed or stopped while this pass ran: nothing to do

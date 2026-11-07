@@ -64,6 +64,8 @@ type Job struct {
 	SizeBefore  int64   `json:"sizeBefore"`
 	SizeAfter   int64   `json:"sizeAfter,omitempty"`
 	OutputPath  string  `json:"outputPath,omitempty"`
+	Plan        string  `json:"-"`                         // the Plan it ran with, JSON (RecordPlan)
+	PlanPrint   string  `json:"planFingerprint,omitempty"` // its conversion settings' fingerprint
 	Created     string  `json:"created"`
 	Updated     string  `json:"updated"`
 }
@@ -158,12 +160,12 @@ SELECT ?,?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM libraries WHERE id=? AND st
 	return r.LastInsertId()
 }
 
-const cols = `id,library,COALESCE(library_id,0),path,status,progress,reason,error,worker,duration,size_before,size_after,output_path,created,updated`
+const cols = `id,library,COALESCE(library_id,0),path,status,progress,reason,error,worker,duration,size_before,size_after,output_path,COALESCE(plan,''),COALESCE(plan_fingerprint,''),created,updated`
 
 func scan(r interface{ Scan(...any) error }) (Job, error) {
 	var j Job
 	err := r.Scan(&j.ID, &j.Library, &j.LibraryID, &j.Path, &j.Status, &j.Progress, &j.Reason, &j.Error, &j.Worker,
-		&j.DurationSec, &j.SizeBefore, &j.SizeAfter, &j.OutputPath, &j.Created, &j.Updated)
+		&j.DurationSec, &j.SizeBefore, &j.SizeAfter, &j.OutputPath, &j.Plan, &j.PlanPrint, &j.Created, &j.Updated)
 	return j, err
 }
 
@@ -234,6 +236,12 @@ func (s *Store) HasOpenJob(path string) (bool, error) {
 	var n int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM jobs WHERE path=? AND status IN (?,?)`, path, Queued, Running).Scan(&n)
 	return n > 0, err
+}
+
+// RecordPlan stores the Plan a running job converts with (JSON) and its fingerprint.
+func (s *Store) RecordPlan(id int64, plan, fingerprint string) error {
+	_, err := s.db.Exec(`UPDATE jobs SET plan=?, plan_fingerprint=?, updated=? WHERE id=?`, plan, fingerprint, s.stamp(), id)
+	return err
 }
 
 // Progress records percent done for a running job.
