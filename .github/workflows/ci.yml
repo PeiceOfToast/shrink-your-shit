@@ -28,6 +28,7 @@ jobs:
           unformatted=$(gofmt -l .)
           if [ -n "$unformatted" ]; then echo "Not gofmt-formatted (run gofmt -w on them):"; echo "$unformatted"; exit 1; fi
       - name: UI JavaScript syntax
+        if: ${{ !cancelled() }} # runs even when gofmt failed, so one run reports both
         run: |
           status=0
           for f in $(find internal/web/static -name '*.js'); do node --check "$f" || { echo "syntax error in $f"; status=1; }; done
