@@ -661,6 +661,11 @@ func (w *Worker) installSubtitles(plan rules.Plan, jobID int64, tmp, final strin
 	var placed []jobs.Sidecar
 	for k, c := range recs {
 		if err := renameNoReplace(rules.StagedSrt(tmp, k), c.Path); err != nil {
+			if w.Sidecars != nil { // this one and the rest were never put there: their names are not ours
+				for _, u := range recs[k:] {
+					w.Sidecars.DropSidecar(jobID, u.Path)
+				}
+			}
 			w.removeSidecars(jobID, placed)
 			if errors.Is(err, fs.ErrExist) {
 				return nil, failed(srtTaken(c.Path), err)
@@ -678,7 +683,7 @@ func (w *Worker) installSubtitles(plan rules.Plan, jobID int64, tmp, final strin
 // tries again and a Retry knows the file is ours (review 25b-1e31bdb).
 func (w *Worker) removeSidecars(jobID int64, list []jobs.Sidecar) {
 	for _, c := range list {
-		if err := removeIfOurs(c); err != nil {
+		if _, err := removeIfOurs(c); err != nil {
 			log.Printf("worker %s: job %d: could not remove %s (it is kept on record and tried again): %v", w.ID, jobID, c.Path, err)
 			continue
 		}
@@ -688,24 +693,59 @@ func (w *Worker) removeSidecars(jobID int64, list []jobs.Sidecar) {
 	}
 }
 
-// removeIfOurs removes c's file if it is still exactly ours; nil when it is gone, not ours, or removed.
-func removeIfOurs(c jobs.Sidecar) error {
-	if !sidecarIsOurs(c) {
-		return nil
+// removeIfOurs removes c's file if it is still exactly ours. removed says it was; nil error means the
+// record can go (the file is gone, someone else's, or removed). When we could not tell whether the file
+// is ours (Lstat or reading it failed), it is left alone and the error keeps the record, so a later
+// start checks again (review 25b-28abb71).
+func removeIfOurs(c jobs.Sidecar) (removed bool, err error) {
+	switch o, err := sidecarIsOurs(c); o {
+	case sidecarUnknown:
+		return false, fmt.Errorf("could not tell whether it is ours: %w", err)
+	case sidecarNotOurs:
+		return false, nil
 	}
 	if err := os.Remove(c.Path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
+		return false, err
 	}
-	return nil
+	return true, nil
 }
 
-func sidecarIsOurs(c jobs.Sidecar) bool {
-	st, err := os.Lstat(c.Path)
-	if err != nil || !st.Mode().IsRegular() || st.Size() != c.Bytes || st.ModTime().UnixNano() != c.MTime {
-		return false
+// sidecarOwner is what sidecarIsOurs found out about a recorded .srt file.
+type sidecarOwner int
+
+const (
+	sidecarNotOurs sidecarOwner = iota // gone, or not exactly the file we wrote: its record can go
+	sidecarOurs                        // still exactly the file we wrote
+	sidecarUnknown                     // could not check (Lstat or reading failed): keep the record
+)
+
+// sidecarLstat and sidecarHash are os.Lstat and fullHash; tests make them fail.
+var (
+	sidecarLstat = os.Lstat
+	sidecarHash  = fullHash
+)
+
+// sidecarIsOurs compares c's file with what we wrote: regular file, size, time and full SHA-256.
+func sidecarIsOurs(c jobs.Sidecar) (sidecarOwner, error) {
+	st, err := sidecarLstat(c.Path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return sidecarNotOurs, nil
+	case err != nil:
+		return sidecarUnknown, err
+	case !st.Mode().IsRegular() || st.Size() != c.Bytes || st.ModTime().UnixNano() != c.MTime:
+		return sidecarNotOurs, nil
 	}
-	h, err := fullHash(c.Path)
-	return err == nil && h == c.Hash
+	h, err := sidecarHash(c.Path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return sidecarNotOurs, nil
+	case err != nil:
+		return sidecarUnknown, err
+	case h != c.Hash:
+		return sidecarNotOurs, nil
+	}
+	return sidecarOurs, nil
 }
 
 // fullHash is the SHA-256 of the whole file.
@@ -725,7 +765,8 @@ func fullHash(path string) (string, error) {
 // RecoverSidecars ends what a crash left between putting .srt files beside a new file and the swap (run
 // at start, after RecoverSwaps): where the new video is in place (its recorded size and sample hash at
 // VideoPath), the swap happened and the files stay; otherwise each file that is still exactly ours is
-// removed, so a Retry finds no name taken by our own file. The records go either way.
+// removed, so a Retry finds no name taken by our own file. A record stays only when its file could not
+// be checked or removed; the next start tries again.
 func RecoverSidecars(sj SidecarJournal) []string {
 	list, err := sj.Sidecars()
 	if err != nil {
@@ -740,12 +781,12 @@ func RecoverSidecars(sj SidecarJournal) []string {
 			}
 		}
 		if !swapped {
-			ours := sidecarIsOurs(c)
-			if err := removeIfOurs(c); err != nil {
+			removed, err := removeIfOurs(c)
+			if err != nil {
 				said = append(said, fmt.Sprintf("job %d: could not remove %s, kept on record to try again: %v", c.JobID, c.Path, err))
 				continue // its record stays
 			}
-			if ours {
+			if removed {
 				said = append(said, fmt.Sprintf("job %d: removed %s (put there before a swap that did not happen)", c.JobID, c.Path))
 			}
 		}
