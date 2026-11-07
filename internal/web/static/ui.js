@@ -6,7 +6,7 @@
   ui.QUALITY = ["Smallest file", "Smaller", "Balanced", "Better quality", "Best quality"];
   // Skipped reasons are an open list: anything not named here is shown from its own text.
   ui.REASONS = {
-    already_efficient: "already efficient", already_hevc: "already in the new format",
+    already_efficient: "already efficient", already_hevc: "already in this format", // one label with already_in_format (design)
     hdr_dv: "HDR or Dolby Vision", bitmap_subs: "picture subtitles that cannot be kept", shared_file: "shared with another folder",
     // symlink: only links pointing outside the library (workshop, slice 23).
     symlink: "a link to a file outside this library", unreadable: "unreadable", cannot_keep_track: "a track that cannot be kept",
