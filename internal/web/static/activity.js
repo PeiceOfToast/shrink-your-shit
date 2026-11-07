@@ -133,13 +133,14 @@
       e.appendChild(p); pane.appendChild(e);
     } else {
       var cols = ["Folder", "File name", "Codec", "Resolution", "Size", "Length"].concat(EXTRA[st.show], [""]);
-      var w = el("div", "table-wrap"), t = el("table"), hr = el("tr"), tb = el("tbody");
+      var w = el("div", "table-wrap"), t = el("table", "files"), hr = el("tr"), tb = el("tbody");
       cols.forEach(function (c) { var th = el("th"); th.scope = "col"; if (c) th.textContent = c; else th.appendChild(el("span", "sr", "Actions")); hr.appendChild(th); });
       var hd = el("thead"); hd.appendChild(hr); t.appendChild(hd); t.appendChild(tb); w.appendChild(t); pane.appendChild(w);
       r.items.forEach(function (f) {
         var tr = el("tr");
-        [folderCell(f), nameCell(f), f.codec || "", f.resolution || "", ui.bytes(f.bytes), f.durationSec != null ? length(f.durationSec) : ""].concat(extra(f), [actions(f)]).forEach(function (c) {
-          var td = el("td"); if (typeof c === "string") td.textContent = c; else if (c) td.appendChild(c); tr.appendChild(td);
+        [folderCell(f), nameCell(f), f.codec || "", f.resolution || "", ui.bytes(f.bytes), f.durationSec != null ? length(f.durationSec) : ""].concat(extra(f), [actions(f)]).forEach(function (c, i) {
+          var td = el("td"); td.setAttribute("data-label", cols[i]); // the label a narrow screen shows before each value
+          if (typeof c === "string") td.textContent = c; else if (c) td.appendChild(c); tr.appendChild(td);
         });
         tb.appendChild(tr);
         if (st.show === "processing") { // the live values, in a second line under the row
