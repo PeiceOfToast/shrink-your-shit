@@ -5,6 +5,7 @@ package web
 import (
 	"encoding/json"
 	"fmt"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -331,5 +332,55 @@ func TestRestoreThroughTheAPI(t *testing.T) {
 	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/activity/skipped?reason=restored"})
 	if !strings.Contains(body, `"total":1`) || !strings.Contains(body, "you put its original back") && !strings.Contains(body, "You put its original back") {
 		t.Errorf("skipped: %s", body)
+	}
+}
+
+// Pause all / Resume and Stop this file through the API (slice 24).
+func TestPauseResumeAndStop(t *testing.T) {
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	a, _, _ := OpenAccess(t.TempDir(), false)
+	a.FailDelay = 0
+	paused, running := 0, map[int64]bool{}
+	srv := httptest.NewServer(Handler(st, a, Engine{PauseNow: func() { paused++ },
+		StopFile: func(id int64) bool { return running[id] }}))
+	defer srv.Close()
+
+	if code, b := post(t, srv, "POST", "/api/queue/pause", `{}`); code != 200 || paused != 1 || !st.Paused() {
+		t.Errorf("pause %d %s", code, b)
+	}
+	if _, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/activity/summary"}); !strings.Contains(body, `"paused":true`) {
+		t.Errorf("%s", body)
+	}
+	if code, _ := post(t, srv, "POST", "/api/queue/resume", `{}`); code != 200 || st.Paused() {
+		t.Errorf("resume %d", code)
+	}
+
+	q, _ := st.Enqueue(jobs.Job{Library: "/m", Path: "/m/q.mkv"})
+	if code, b := post(t, srv, "POST", fmt.Sprintf("/api/jobs/%d/stop", q), `{}`); code != 200 {
+		t.Errorf("stop queued %d %s", code, b)
+	}
+	if _, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/activity/skipped?reason=user_stopped"}); !strings.Contains(body, `"total":1`) || !strings.Contains(body, "You stopped it") {
+		t.Errorf("skipped %s", body)
+	}
+	r, _ := st.Enqueue(jobs.Job{Library: "/m", Path: "/m/r.mkv"})
+	st.Claim("w")
+	running[r] = true // a worker has it: it records the stop itself
+	if code, _ := post(t, srv, "POST", fmt.Sprintf("/api/jobs/%d/stop", r), `{}`); code != 200 {
+		t.Errorf("stop running %d", code)
+	}
+	d, _ := st.Enqueue(jobs.Job{Library: "/m", Path: "/m/d.mkv"})
+	running[r] = false
+	st.Complete(r, "/m/r.mkv", 1)
+	st.Claim("w")
+	st.Complete(d, "/m/d.mkv", 1)
+	if code, b := post(t, srv, "POST", fmt.Sprintf("/api/jobs/%d/stop", d), `{}`); code != 409 || !strings.Contains(b, "not_stoppable") {
+		t.Errorf("stop done %d %s", code, b)
+	}
+	if code, _ := post(t, srv, "POST", "/api/jobs/999/stop", `{}`); code != 404 {
+		t.Errorf("stop missing %d", code)
 	}
 }

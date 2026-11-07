@@ -123,8 +123,8 @@ func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.Fil
 		log.Printf("scan %s: %v", path, err)
 		return false
 	}
-	if prev != nil && prev.Decision == jobs.DecisionRestored {
-		return false // its original was put back: not converted again until "Convert again"
+	if prev != nil && (prev.Decision == jobs.DecisionRestored || prev.Reason == jobs.UserStoppedReason) {
+		return false // its original was put back, or the person stopped it: not again until "Convert again"
 	}
 	if prev != nil && prev.Size == st.Size() && prev.ModTime == st.ModTime().UnixNano() {
 		return false // unchanged since last look

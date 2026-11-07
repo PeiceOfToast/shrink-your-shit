@@ -232,16 +232,17 @@ func (s *Store) transition(id int64, to Status, set string, args ...any) error {
 }
 
 // Claim hands the oldest queued job to worker and marks it running.
+// One statement, so several workers (parallelJobs) never take the same job.
 func (s *Store) Claim(worker string) (Job, error) {
+	now := s.stamp()
 	var id int64
-	err := s.db.QueryRow(`SELECT id FROM jobs WHERE status=? ORDER BY id LIMIT 1`, Queued).Scan(&id)
+	err := s.db.QueryRow(`UPDATE jobs SET status=?, updated=?, worker=?, progress=0, error='', started=?
+WHERE id=(SELECT id FROM jobs WHERE status=? ORDER BY id LIMIT 1) AND status=? RETURNING id`,
+		Running, now, worker, now, Queued, Queued).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Job{}, ErrNoJob
 	}
 	if err != nil {
-		return Job{}, err
-	}
-	if err := s.transition(id, Running, `, worker=?, progress=0, error='', started=?`, worker, s.stamp()); err != nil {
 		return Job{}, err
 	}
 	return s.Get(id)

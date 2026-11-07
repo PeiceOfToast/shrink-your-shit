@@ -22,10 +22,12 @@ import (
 
 // Engine is what the API needs from the running scanner and worker. Nil functions do nothing.
 type Engine struct {
-	ScanNow  func()             // start a scan pass now
-	NextScan func() time.Time   // when the next regular pass starts
-	StopJob  func(id int64)     // stop a running job (its library was removed)
-	Preview  *preview.Previewer // the dry run (slice 19)
+	ScanNow  func()              // start a scan pass now
+	NextScan func() time.Time    // when the next regular pass starts
+	StopJob  func(id int64)      // stop a running job (its library was removed)
+	PauseNow func()              // stop the running jobs and put them back in the queue (Pause all)
+	StopFile func(id int64) bool // stop a running job the person stopped; false if no worker runs it
+	Preview  *preview.Previewer  // the dry run (slice 19)
 
 	Doctor  *doctor.Checker // the setup checks (nil: not available)
 	DataDir string          // the data folder, for the health report

@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"sync/atomic"
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
@@ -35,6 +36,8 @@ type Queue interface {
 	Release(id int64) error
 	// Drop deletes a job that was stopped because its library was removed.
 	Drop(id int64) error
+	// UserStopped turns a job the person stopped into a file skipped as user_stopped.
+	UserStopped(id int64) error
 	// Keep marks a job "kept original": a safety check refused the result (reason says why).
 	Keep(id int64, reason string) error
 	// RecordPlan stores the Plan a running job converts with (JSON) and its fingerprint.
@@ -76,6 +79,10 @@ type Worker struct {
 	FullDecodeMaxSec float64
 	// FreeSpace reports the writable bytes on the volume holding dir; nil = the real thing.
 	FreeSpace func(dir string) (uint64, error)
+	// Paused, when it says so, makes the worker take no new job (Pause all, slice 24).
+	Paused func() bool
+	// StallAfter: an encode with no progress for this long is stopped and fails (0: DefaultStallAfter).
+	StallAfter time.Duration
 	// KeepDays is how many days a replaced original is kept in .syp-trash (keep.go); 0 or nil: it is
 	// deleted by the rename, as before slice 17. Journal records those swaps (needed when keeping).
 	KeepDays func() int
@@ -86,18 +93,54 @@ type Worker struct {
 	filterMemo map[string]bool
 	current    int64              // the running job's id (0: none)
 	cancelJob  context.CancelFunc // stops only the running job
-	stopped    bool               // StopJob was called for the running job
+	stopped    stopKind           // why the running job was stopped (stopNone: it was not)
+	progressAt atomic.Int64       // UnixNano of the running encode's last progress (stall watchdog)
 }
+
+// stopKind is why a running job was stopped, which decides what becomes of it.
+type stopKind int
+
+const (
+	stopNone  stopKind = iota
+	stopDrop           // its library was removed: the job record goes
+	stopPause          // Pause all: back to the queue
+	stopUser           // Stop this file: skipped, reason user_stopped
+	stopStall          // no progress for StallAfter: failed
+)
+
+// DefaultStallAfter is how long an encode may go without progress before the watchdog stops it.
+const DefaultStallAfter = 10 * time.Minute
 
 // StopJob stops job id if this worker is running it: the original is left untouched, the temp files
 // removed, and the job record dropped (its library was removed). It does not wait.
-func (w *Worker) StopJob(id int64) {
+func (w *Worker) StopJob(id int64) { w.stop(id, stopDrop) }
+
+// StopFile stops job id if this worker is running it ("Stop this file"): the original is untouched,
+// and the file is recorded as stopped by the person. It reports whether this worker was running it.
+func (w *Worker) StopFile(id int64) bool { return w.stop(id, stopUser) }
+
+// PauseNow stops this worker's running job, if any, and puts it back in the queue (Pause all; the
+// worker takes no new job while Paused says so).
+func (w *Worker) PauseNow() {
+	w.mu.Lock()
+	id := w.current
+	w.mu.Unlock()
+	if id != 0 {
+		w.stop(id, stopPause)
+	}
+}
+
+func (w *Worker) stop(id int64, why stopKind) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.current == id && w.cancelJob != nil {
-		w.stopped = true
+		if w.stopped == stopNone {
+			w.stopped = why
+		}
 		w.cancelJob()
+		return true
 	}
+	return false
 }
 
 func (w *Worker) templateFor(job jobs.Job) (rules.Template, error) {
@@ -125,6 +168,9 @@ func (w *Worker) Run(ctx context.Context) {
 
 // RunOne claims and processes a single job. It reports whether a job was run.
 func (w *Worker) RunOne(ctx context.Context) (bool, error) {
+	if w.Paused != nil && w.Paused() {
+		return false, nil
+	}
 	job, err := w.Queue.Claim(w.ID)
 	if errors.Is(err, jobs.ErrNoJob) {
 		return false, nil
@@ -134,15 +180,24 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 	}
 	jobCtx, cancel := context.WithCancel(ctx)
 	w.mu.Lock()
-	w.current, w.cancelJob, w.stopped = job.ID, cancel, false
+	w.current, w.cancelJob, w.stopped = job.ID, cancel, stopNone
 	w.mu.Unlock()
 	final, err := w.process(jobCtx, job)
 	cancel()
 	w.mu.Lock()
 	stopped := w.stopped
-	w.current, w.cancelJob, w.stopped = 0, nil, false
+	w.current, w.cancelJob, w.stopped = 0, nil, stopNone
 	w.mu.Unlock()
-	if err != nil && stopped && ctx.Err() == nil {
+	// A stop that came after the new file was in place changes nothing: the job is done (below).
+	if err != nil && stopped != stopNone && ctx.Err() == nil {
+		switch stopped {
+		case stopPause:
+			return true, w.Queue.Release(job.ID)
+		case stopUser:
+			return true, w.Queue.UserStopped(job.ID)
+		case stopStall:
+			return true, w.Queue.Fail(job.ID, fmt.Sprintf("Stopped: no progress for %s. The original is untouched; press Retry to try again.", w.stallAfter()))
+		}
 		return true, w.Queue.Drop(job.ID)
 	}
 	if err != nil {
@@ -209,6 +264,38 @@ func plainFailure(err error) string {
 		return "shrink-your-shit is not allowed to write in this folder, so converting stopped. Your original was not touched. Let it write there (Settings > System says how), then press Retry."
 	}
 	return "Converting did not finish. Your original was not touched. Press Retry; if it keeps failing, Settings > System shows what went wrong."
+}
+
+func (w *Worker) stallAfter() time.Duration {
+	if w.StallAfter > 0 {
+		return w.StallAfter
+	}
+	return DefaultStallAfter
+}
+
+// watchStall stops job id (stopStall) if its encode reports no progress for stallAfter. The returned
+// func ends the watch. Checks after the encode have their own time limits (slice 10).
+func (w *Worker) watchStall(id int64) func() {
+	w.progressAt.Store(time.Now().UnixNano())
+	after := w.stallAfter()
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(max(after/20, 10*time.Millisecond))
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				if time.Since(time.Unix(0, w.progressAt.Load())) >= after {
+					log.Printf("worker %s: job %d: no progress for %s, stopping it", w.ID, id, after)
+					w.stop(id, stopStall)
+					return
+				}
+			}
+		}
+	}()
+	return func() { close(done) }
 }
 
 // BesidePath is the output name in Beside mode.
@@ -298,9 +385,12 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	tmp := stage.path
 	args := plan.FFmpegArgs(job.Path, tmp)
+	stopWatch := w.watchStall(job.ID)
 	encErr, terr := media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p float64) {
+		w.progressAt.Store(time.Now().UnixNano())
 		w.Queue.Progress(job.ID, p)
 	})
+	stopWatch()
 	if terr != nil {
 		if errors.Is(terr, context.Canceled) || ctx.Err() != nil {
 			return "", terr // stopped or shutting down: RunOne decides, not a failure of the file
@@ -343,6 +433,12 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// before each try, the original must still be the file we read and the temp file still the one
 	// we created and checked. A plain rename cannot make that last check and the move one step, so a
 	// change in the instant between them is not caught (see docs/STATUS.md).
+	// From here the swap runs to its end even if the job is stopped meanwhile (it takes milliseconds,
+	// or a few seconds of retries on Windows): a stop never leaves half a swap, and the job is done.
+	ctx = context.WithoutCancel(ctx)
+	if err := hook("before swap"); err != nil {
+		return "", err
+	}
 	stillOK := func() error {
 		if err := sourceUnchanged(job.Path, before); err != nil {
 			return err

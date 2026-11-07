@@ -4,8 +4,10 @@ package jobs
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -193,5 +195,72 @@ func TestSwapJournal(t *testing.T) {
 	}
 	if err := s.SetSwapState(999, SwapRolledBack); err != ErrNotFound {
 		t.Errorf("%v", err)
+	}
+}
+
+// Several workers claiming at once never take the same job, and none gets an error for another
+// having been faster (parallelJobs, slice 24).
+func TestClaimIsAtomic(t *testing.T) {
+	s := open(t)
+	for i := 0; i < 20; i++ {
+		s.Enqueue(Job{Library: "/m", Path: fmt.Sprintf("/m/%d.mkv", i)})
+	}
+	var mu sync.Mutex
+	got := map[int64]int{}
+	var wg sync.WaitGroup
+	for g := 0; g < 8; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				j, err := s.Claim("w")
+				if err != nil {
+					if !errors.Is(err, ErrNoJob) {
+						t.Errorf("a concurrent claim failed: %v", err) // the old two-step claim: "changed under us"
+					}
+					return
+				}
+				mu.Lock()
+				got[j.ID]++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if len(got) != 20 {
+		t.Errorf("%d jobs claimed, want 20", len(got))
+	}
+	for id, n := range got {
+		if n != 1 {
+			t.Errorf("job %d claimed %d times", id, n)
+		}
+	}
+}
+
+func TestPausedAndUserStopped(t *testing.T) {
+	s := open(t)
+	if s.Paused() {
+		t.Fatal("not paused at first")
+	}
+	s.SetPaused(true)
+	if !s.Paused() {
+		t.Error("paused")
+	}
+	s.SetPaused(false)
+	id, _ := s.Enqueue(Job{Library: "/m", Path: "/m/a.mkv"})
+	if err := s.UserStopped(id); err != nil {
+		t.Fatal(err)
+	}
+	if f, _ := s.GetFile("/m/a.mkv"); f == nil || f.Reason != UserStoppedReason {
+		t.Errorf("%+v", f)
+	}
+	if err := s.UserStopped(id); err != ErrNotFound {
+		t.Errorf("gone: %v", err)
+	}
+	done, _ := s.Enqueue(Job{Library: "/m", Path: "/m/b.mkv"})
+	s.Claim("w")
+	s.Complete(done, "/m/b.mkv", 1)
+	if err := s.UserStopped(done); err != ErrNotStoppable {
+		t.Errorf("done: %v", err)
 	}
 }

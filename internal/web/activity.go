@@ -18,7 +18,8 @@ import (
 
 // The Done and Kept originals lists (UI-API-CONTRACT.md "Activity", slice 17). Restore and purge are
 // slice 18.
-func activityRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, now func() time.Time, scanNow func()) {
+func activityRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, now func() time.Time, eng Engine) {
+	scanNow := eng.ScanNow
 	page := func(r *http.Request) (limit, offset int) {
 		limit, offset = 50, 0
 		if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 {
@@ -142,7 +143,7 @@ func activityRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, no
 			return
 		}
 		writeJSON(w, map[string]any{"freedBytes": a.FreedBytes, "waitingBytes": a.WaitingBytes, "workingFiles": a.WorkingFiles,
-			"waitingFiles": a.WaitingFiles, "paused": false, "counts": map[string]int{"skipped": a.Skipped, "failed": a.Failed}})
+			"waitingFiles": a.WaitingFiles, "paused": store.Paused(), "counts": map[string]int{"skipped": a.Skipped, "failed": a.Failed}})
 	})
 
 	// What is converting now, and what waits per library.
@@ -251,6 +252,50 @@ func activityRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, no
 			scanNow()
 		}
 		writeJSON(w, map[string]bool{"ok": true})
+	})
+
+	// Pause all / Resume (slice 24): the flag survives a restart; pausing puts the running conversions
+	// back in the queue (originals untouched), resuming lets the workers take work again.
+	api.HandleFunc("POST /api/queue/pause", func(w http.ResponseWriter, r *http.Request) {
+		if err := store.SetPaused(true); err != nil {
+			serverError(w, err)
+			return
+		}
+		if eng.PauseNow != nil {
+			eng.PauseNow()
+		}
+		writeJSON(w, map[string]bool{"ok": true, "paused": true})
+	})
+	api.HandleFunc("POST /api/queue/resume", func(w http.ResponseWriter, r *http.Request) {
+		if err := store.SetPaused(false); err != nil {
+			serverError(w, err)
+			return
+		}
+		writeJSON(w, map[string]bool{"ok": true, "paused": false})
+	})
+
+	// Stop this file: a running or waiting conversion stops (original untouched) and the file goes to
+	// Skipped as user_stopped, not tried again until Convert again.
+	api.HandleFunc("POST /api/jobs/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			apiError(w, http.StatusNotFound, "not_found", "There is no such file in the queue.")
+			return
+		}
+		if eng.StopFile != nil && eng.StopFile(id) {
+			writeJSON(w, map[string]bool{"ok": true}) // the worker records it as it stops
+			return
+		}
+		switch err := store.UserStopped(id); {
+		case errors.Is(err, jobs.ErrNotFound):
+			apiError(w, http.StatusNotFound, "not_found", "There is no such file in the queue.")
+		case errors.Is(err, jobs.ErrNotStoppable):
+			apiError(w, http.StatusConflict, "not_stoppable", "This file has already finished, so there is nothing to stop. Nothing was changed.")
+		case err != nil:
+			serverError(w, err)
+		default:
+			writeJSON(w, map[string]bool{"ok": true})
+		}
 	})
 
 	api.HandleFunc("POST /api/system/backup", func(w http.ResponseWriter, r *http.Request) {

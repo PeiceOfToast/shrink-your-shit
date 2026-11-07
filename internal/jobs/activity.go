@@ -5,6 +5,7 @@ package jobs
 import (
 	"database/sql"
 	"errors"
+	"os"
 )
 
 // Activity's figures and lists (slice 21b, UI-API-CONTRACT.md "Activity"). They only read.
@@ -172,3 +173,51 @@ func (s *Store) ForgetSkipped(id int64) (string, error) {
 	_, err = s.db.Exec(`DELETE FROM files WHERE rowid=?`, id)
 	return path, err
 }
+
+// Pause all (slice 24): a flag that survives a restart; workers take no job while it is set.
+
+// Paused reports whether converting is paused.
+func (s *Store) Paused() bool {
+	v, _, _ := s.Meta("paused")
+	return v == "1"
+}
+
+// SetPaused sets or clears the pause.
+func (s *Store) SetPaused(on bool) error {
+	v := "0"
+	if on {
+		v = "1"
+	}
+	return s.SetMeta("paused", v)
+}
+
+// UserStopped turns job id into a file the person stopped ("Stop this file", DESIGN decision 7): the
+// job record goes, and the file is recorded as skipped with reason user_stopped, which the scanner
+// honours until Convert again. Only a queued or running job can be stopped (ErrNotStoppable otherwise).
+func (s *Store) UserStopped(id int64) error {
+	j, err := s.Get(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if j.Status != Queued && j.Status != Running {
+		return ErrNotStoppable
+	}
+	f := File{Path: j.Path, Decision: "skip: you stopped it", Reason: UserStoppedReason}
+	if st, err := os.Stat(j.Path); err == nil {
+		f.Size, f.ModTime = st.Size(), st.ModTime().UnixNano()
+	}
+	if err := s.PutFile(f); err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`DELETE FROM jobs WHERE id=?`, id)
+	return err
+}
+
+// UserStoppedReason is the skip reason of a file the person stopped.
+const UserStoppedReason = "user_stopped"
+
+// ErrNotStoppable: the job is not queued or running.
+var ErrNotStoppable = errors.New("this file is not waiting or converting")
