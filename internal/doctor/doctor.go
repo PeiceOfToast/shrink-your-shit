@@ -196,7 +196,7 @@ func (c *Checker) Folder(ctx context.Context, path string) (r FolderReport) {
 		r.VideoCount++
 		r.TotalBytes += info.Size()
 		largest = max(largest, info.Size())
-		if linkCount(p, info) > 1 {
+		if media.LinkCount(p, info) > 1 {
 			hardlinked++
 		}
 		return nil
