@@ -12,8 +12,13 @@
     user_stopped: "you stopped it", restored: "you restored the original",
     // Workshop slice 19 (contract: four more skipped reason codes); design's words, 2026-11-07.
     format_not_converted: "a format this version doesn't convert", no_video: "no video in the file",
-    unknown_bitrate: "not enough information to judge safely", setting_cannot_run: "the library's setting can't be used on it"
+    unknown_bitrate: "not enough information to judge safely", setting_cannot_run: "the library's setting can't be used on it",
+    // Workshop slice 23 (file guards); design's words, 13:00Z. (The link reason waits for workshop's one answer.)
+    still_changing: "still changing, we'll look again on the next scan"
   };
+  // A badge is the reason with a capital letter, unless design gave it a shorter name.
+  ui.BADGES = { still_changing: "Still changing" };
+  ui.badge = function (code) { var t = ui.BADGES[code] || ui.REASONS[code] || ui.OTHER_REASON; return t.charAt(0).toUpperCase() + t.slice(1); };
   ui.OTHER_REASON = "another reason"; // a code this version doesn't know: never show the raw code
   ui.reason = function (code, detail) { return ui.REASONS[code] || detail || ui.OTHER_REASON; };
 

@@ -5,7 +5,6 @@
   var S = window.SYP, api = S.api, ui = S.ui, el = ui.el;
   var pane = document.getElementById("pane"), tab = pane.getAttribute("data-tab"), seen = {}, T = {}, confirmId = null;
   function $(id) { return document.getElementById(id); }
-  function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
   function base(p) { return p.split(/[\\/]/).pop(); }
   function nameOf(i) { return i.library + " / " + base(i.path); }
   function fail(e) { var b = $("err"); b.textContent = e && e.message || "Something went wrong. Nothing was changed."; b.hidden = false; }
@@ -104,7 +103,8 @@
   };
 
   // ---- Skipped
-  var KIND = { user_stopped: "info", restored: "info", hdr_dv: "warn", shared_file: "warn", cannot_keep_track: "warn", bitmap_subs: "warn", symlink: "warn", unreadable: "warn" };
+  // Badge style per reason: info for what resolves itself or was the person's own doing, warn for a risk, idle otherwise.
+  var KIND = { user_stopped: "info", restored: "info", still_changing: "info", hdr_dv: "warn", shared_file: "warn", cannot_keep_track: "warn", bitmap_subs: "warn", symlink: "warn", unreadable: "warn" };
   // Reasons a library rule causes, with the lowest control level whose library page can change that rule.
   var RULE = { already_efficient: 0, would_not_shrink: 0, hdr_dv: 1, cannot_keep_track: 1, setting_cannot_run: 1 }, RANK = { basic: 0, standard: 1, advanced: 2 }, level = null;
   var reason = "", shown = 0, tb, more, count;
@@ -115,7 +115,7 @@
       pane.appendChild(el("p", "muted", "Nothing was changed on these files. To change a rule, open the library."));
       var f = el("div", "field"), lb = el("label", null, "Show"), sel = el("select"); lb.htmlFor = "reason"; sel.id = "reason";
       sel.appendChild(el("option", null, "All reasons")).value = "";
-      Object.keys(ui.REASONS).forEach(function (k) { sel.appendChild(el("option", null, cap(ui.REASONS[k]))).value = k; });
+      Object.keys(ui.REASONS).forEach(function (k) { sel.appendChild(el("option", null, ui.badge(k))).value = k; });
       sel.onchange = function () { reason = sel.value; shown = 0; seen.skipped = null; refresh(); };
       f.appendChild(lb); f.appendChild(sel); pane.appendChild(f);
       var t = table(["File", "Why it was skipped", ""]); tb = t; pane.appendChild(t.wrap);
@@ -130,8 +130,8 @@
       draw("skipped", r, function () {
         tb.body.textContent = "";
         r.items.forEach(function (i) {
-          var why = el("div"), known = ui.REASONS[i.reason];
-          why.appendChild(el("span", "badge " + (KIND[i.reason] || "idle"), cap(known || ui.OTHER_REASON))); why.appendChild(document.createElement("br")); why.appendChild(document.createTextNode(i.detail || "")); // the engine's detail; never the raw code
+          var why = el("div");
+          why.appendChild(el("span", "badge " + (KIND[i.reason] || "idle"), ui.badge(i.reason))); why.appendChild(document.createElement("br")); why.appendChild(document.createTextNode(i.detail || "")); // the engine's detail; never the raw code
           var a = null;
           if (i.reason === "user_stopped" || i.reason === "restored") a = btn("Convert again", "again-" + i.id, function () { act(api.convertAgain({ id: i.id }), true); });
           else if (i.libraryId && RULE[i.reason] != null && level >= RULE[i.reason]) { a = el("a", "btn small", "Change rule"); a.href = "/library/?id=" + encodeURIComponent(i.libraryId); }
