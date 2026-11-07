@@ -328,7 +328,14 @@ func TestOnePrimaryButtonPerPage(t *testing.T) {
 			continue // one per step, checked in TestFirstRunPage
 		}
 		_, body, _ := get(t, srv.URL+p.Path)
-		if n := strings.Count(body, "btn primary"); n > 1 {
+		// A modal <dialog> is a screen of its own (the page behind it is inert): it may have its one primary too.
+		dialogs := regexp.MustCompile(`(?s)<dialog.*?</dialog>`)
+		for _, d := range dialogs.FindAllString(body, -1) {
+			if n := strings.Count(d, "btn primary"); n > 1 {
+				t.Errorf("%s: a dialog has %d primary buttons", p.Path, n)
+			}
+		}
+		if n := strings.Count(dialogs.ReplaceAllString(body, ""), "btn primary"); n > 1 {
 			t.Errorf("%s has %d primary buttons", p.Path, n)
 		}
 	}
