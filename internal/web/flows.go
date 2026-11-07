@@ -103,7 +103,7 @@ func flowRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng En
 		}
 		writeJSON(w, map[string]any{"items": items, "total": len(items)})
 	})
-	// The steps of a flow, as plain text, come with the Plan compiler (slice 16); until then none.
+	// The flow's steps in plain words (setting.go flowSteps).
 	api.HandleFunc("GET /api/flows/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id, ok := flowID(w, r)
 		if !ok {
@@ -114,7 +114,7 @@ func flowRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng En
 			storeErr(w, err)
 			return
 		}
-		writeJSON(w, map[string]any{"id": strconv.FormatInt(f.ID, 10), "name": f.Name, "madeWith": madeWith(f.Template.Kind), "steps": []any{}})
+		writeJSON(w, map[string]any{"id": strconv.FormatInt(f.ID, 10), "name": f.Name, "madeWith": madeWith(f.Template.Kind), "steps": flowSteps(f.Template)})
 	})
 	api.HandleFunc("POST /api/flows", func(w http.ResponseWriter, r *http.Request) {
 		name, ok := readName(w, r)

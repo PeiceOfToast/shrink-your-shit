@@ -30,13 +30,16 @@ type Plan struct {
 
 // Eligibility is the rule a Plan decides with: which source format, from which bitrate.
 type Eligibility struct {
-	FromCodec      string `json:"fromCodec,omitempty"`
-	MinBitrateKbps int    `json:"minBitrateKbps,omitempty"`
+	FromCodec      string `json:"fromCodec,omitempty"`      // legacy: this source codec only
+	MinBitrateKbps int    `json:"minBitrateKbps,omitempty"` // legacy: from this bitrate
+	// MinBitsPerPixel: slider, the formats in SliderSources above this many bits per pixel per frame.
+	MinBitsPerPixel float64 `json:"minBitsPerPixel,omitempty"`
 }
 
 // VideoEncode is how the main video is encoded. Everything else is copied.
 type VideoEncode struct {
-	Codec  string `json:"codec"` // ffmpeg encoder
+	Codec  string `json:"codec"`           // ffmpeg encoder
+	Index  int    `json:"index,omitempty"` // which video stream is encoded (0 = the first; cover art is skipped)
 	CRF    int    `json:"crf"`
 	Preset string `json:"preset"`
 	Tag    string `json:"tag"`
@@ -65,9 +68,7 @@ func (t Template) Compile(info media.Info) Plan {
 			p.Skip = fmt.Sprintf("slider position %d does not exist", t.Params.Quality)
 			return p
 		}
-		d := Default()
-		r = Rule{FromCodec: d.FromCodec, MinBitrateKbps: d.MinBitrateKbps, CRF: pos.CRF, Preset: SliderPreset}
-		p.Output, p.MinSavingPct = "replace", pos.MinSavingPct
+		return compileSlider(p, pos, info)
 	default:
 		p.Skip = fmt.Sprintf("flows of kind %q cannot run yet", t.Kind)
 		return p
@@ -88,18 +89,19 @@ func (t Template) Compile(info media.Info) Plan {
 // the Plan says, everything else (audio, subtitles, attachments, extra streams) is copied, data
 // streams are dropped, and the container stays the input's. Progress goes to stdout.
 func (p Plan) FFmpegArgs(in, out string) []string {
+	v := "v:" + strconv.Itoa(p.Video.Index)
 	args := []string{
 		"-y", "-nostdin", "-v", "error", "-progress", "pipe:1", "-nostats",
 		"-i", in,
 		"-map", "0", "-map", "-0:d",
 		"-c", "copy",
-		"-c:v:0", p.Video.Codec, "-crf", strconv.Itoa(p.Video.CRF), "-preset", p.Video.Preset,
+		"-c:" + v, p.Video.Codec, "-crf", strconv.Itoa(p.Video.CRF), "-preset", p.Video.Preset,
 	}
 	if p.Video.MaxRateKbps > 0 {
 		k := strconv.Itoa(p.Video.MaxRateKbps) + "k"
-		args = append(args, "-maxrate:v:0", k, "-bufsize:v:0", strconv.Itoa(2*p.Video.MaxRateKbps)+"k")
+		args = append(args, "-maxrate:"+v, k, "-bufsize:"+v, strconv.Itoa(2*p.Video.MaxRateKbps)+"k")
 	}
-	return append(args, "-tag:v:0", p.Video.Tag, out)
+	return append(args, "-tag:"+v, p.Video.Tag, out)
 }
 
 // Expect is what the new file must look like: the source's streams kept, the main video in the
@@ -108,6 +110,21 @@ func (p Plan) FFmpegArgs(in, out string) []string {
 // changes this, not the checks.
 func (p Plan) Expect(src media.Info, packets int64) Expect {
 	e := DefaultExpect(src, packets)
+	if p.Video.Index > 0 { // the encoded stream is not the first video (cover art comes first)
+		n := 0
+		for k := range e.Streams {
+			if e.Streams[k].Type != "video" {
+				continue
+			}
+			switch n {
+			case 0:
+				e.Streams[k].Codec = src.ByType("video")[0].Codec // copied as it is
+			case p.Video.Index:
+				e.Streams[k].Codec = "hevc"
+			}
+			n++
+		}
+	}
 	e.MinSavings = float64(p.MinSavingPct) / 100
 	e.MinSSIM = p.MinSSIM
 	return e
@@ -142,4 +159,84 @@ func (s Snapshot) Fingerprint() string {
 	}{p, s.Verify, s.Expect.DurationTol, s.Expect.PacketsTol, s.Expect.MinSavings, s.Expect.MinSSIM})
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:8])
+}
+
+// compileSlider is a slider position's recipe for one file (TIERS-PLAN.md 2.1): HEVC at the position's
+// CRF (one lower up to 720p, one higher at 2160p), medium preset, the source's bit depth, resolution
+// and container; every audio track and subtitle copied; the position's minimum saving and SSIM gate.
+// Only D5's source formats with enough bits per pixel are converted.
+func compileSlider(p Plan, pos SliderPosition, info media.Info) Plan {
+	v := info.Video()
+	p.Output, p.MinSavingPct, p.MinSSIM = "replace", pos.MinSavingPct, pos.MinSSIM
+	p.Eligibility = Eligibility{MinBitsPerPixel: pos.MinBPP}
+	if v == nil {
+		p.Skip = "it has no video"
+		return p
+	}
+	crf := pos.CRF
+	switch {
+	case v.Height > 0 && v.Height <= 720:
+		crf--
+	case v.Height >= 2160 || v.Width >= 3840:
+		crf++
+	}
+	p.Video = VideoEncode{Codec: "libx265", CRF: crf, Preset: SliderPreset, Tag: "hvc1", Index: info.MainVideoOrdinal()}
+	if name, ok := alreadyEfficient[v.Codec]; ok {
+		p.Skip = name + " is already an efficient format"
+		return p
+	}
+	name, ok := SliderSources[v.Codec]
+	if !ok {
+		p.Skip = fmt.Sprintf("%s is not a format the slider converts", v.Codec)
+		return p
+	}
+	if why := contentSkip(info); why != "" {
+		p.Skip = why
+		return p
+	}
+	if why := subtitlesNotKept(info); why != "" {
+		p.Skip = why
+		return p
+	}
+	bpp := bitsPerPixel(info, v)
+	if bpp <= 0 {
+		p.Skip = "its bitrate, picture size or frame rate is unknown, so its saving cannot be judged"
+		return p
+	}
+	if bpp <= pos.MinBPP {
+		p.Skip = fmt.Sprintf("already efficient: %.3f bits per pixel, %s needs more than %.3f", bpp, pos.Name, pos.MinBPP)
+		return p
+	}
+	p.Reason = fmt.Sprintf("%s at %d kbps, %.3f bits per pixel (more than %.3f)", name, info.BitrateKbps, bpp, pos.MinBPP)
+	return p
+}
+
+// bitsPerPixel is the video's bits per pixel per frame: how much data each pixel gets.
+func bitsPerPixel(info media.Info, v *media.Stream) float64 {
+	if info.BitrateKbps <= 0 || v.Width <= 0 || v.Height <= 0 || v.FrameRate <= 0 {
+		return 0
+	}
+	return float64(info.BitrateKbps) * 1000 / (float64(v.Width) * float64(v.Height) * v.FrameRate)
+}
+
+// contentSkip is where files whose content is not converted are recognised: HDR and Dolby Vision
+// (slices 13/14 add them with typed reasons, as conditions every template has). Nothing yet.
+func contentSkip(media.Info) string { return "" }
+
+// subtitlesNotKept says why the file's subtitles could not be copied into its own container ("" if
+// they can). The container is kept, so only a format the container cannot hold stops it.
+func subtitlesNotKept(info media.Info) string {
+	holds := map[string]map[string]bool{ // containers with a short list; others hold any subtitle
+		"mp4": {"mov_text": true, "dvd_subtitle": true}, "mov": {"mov_text": true, "dvd_subtitle": true},
+	}
+	ok, limited := holds[info.Container]
+	if !limited {
+		return ""
+	}
+	for _, s := range info.Subtitles() {
+		if !ok[s.Codec] {
+			return fmt.Sprintf("its %s subtitles cannot be kept in %s", s.Codec, info.Container)
+		}
+	}
+	return ""
 }

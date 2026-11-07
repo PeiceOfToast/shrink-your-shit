@@ -140,9 +140,18 @@ func setSession(w http.ResponseWriter, tok string) {
 
 // apiError writes the contract's error object: {"error":{"code","message"}}.
 func apiError(w http.ResponseWriter, status int, code, message string) {
+	writeErrorWith(w, status, code, message, nil)
+}
+
+// writeErrorWith is apiError with more fields in the error object (e.g. usedBy).
+func writeErrorWith(w http.ResponseWriter, status int, code, message string, more map[string]any) {
+	e := map[string]any{"code": code, "message": message}
+	for k, v := range more {
+		e[k] = v
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": code, "message": message}})
+	json.NewEncoder(w).Encode(map[string]any{"error": e})
 }
 
 func writes(method string) bool {
