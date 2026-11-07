@@ -22,13 +22,13 @@ func Handler(store *jobs.Store, libraries []string) http.Handler {
 	mux := http.NewServeMux()
 	sub, _ := fs.Sub(static, "static")
 	files := http.StripPrefix("/assets/", http.FileServer(http.FS(sub)))
-	mux.HandleFunc("GET /assets/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /assets/", gzipAssets(sub, func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/") { // no directory listing
 			http.NotFound(w, r)
 			return
 		}
 		files.ServeHTTP(w, r)
-	})
+	}))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/libraries/", http.StatusFound)
 	})
