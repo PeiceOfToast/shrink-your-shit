@@ -35,7 +35,7 @@
       ["resolution", "Resolution", [["keep", "Keep as is"], ["1080", "At most 1080p"], ["720", "At most 720p"], ["480", "At most 480p"]], 0, "Videos are only ever made smaller, never stretched."],
       ["maxBitrate", "Max bitrate", [["none", "No limit"], ["40", "40 Mbps - 4K streaming"], ["20", "20 Mbps - 1080p, fast home network"], ["10", "10 Mbps - 1080p, most home networks"], ["6", "6 Mbps - 720p or slower Wi-Fi"], ["4", "4 Mbps - streaming away from home"]], 0, "Keeps files small enough to stream over slower connections. Quality still sets the picture; a low limit can soften very busy scenes."]]],
     ["Audio and subtitles", [
-      ["audio", "Audio", [["keep_all", "Keep all tracks"], ["my_languages", "Keep only my languages"], ["aac", "Convert to AAC"], ["lossless_only", "Convert lossless tracks only"]], 0, ""],
+      ["audio", "Audio", [["keep_all", "Keep all tracks"], ["my_languages", "Keep only my languages"], ["aac", "Convert to AAC"], ["eac3", "Convert to E-AC-3"], ["opus", "Convert to Opus"], ["lossless_only", "Convert lossless tracks only"]], 0, ""],
       ["subtitles", "Subtitles", [["keep_all", "Keep all"], ["my_languages", "Keep only my languages"], ["text_only", "Text subtitles only"], ["srt", "Save as separate .srt files"]], 0, "Subtitle pictures are never burned into the video."]]],
     ["New file", [
       ["fileType", "File type", [["keep", "Keep as is"], ["mkv", "MKV"], ["mp4", "MP4"]], 0, "If MP4 cannot hold a track, the file is skipped and the reason is shown. Nothing is dropped silently."],
@@ -47,9 +47,13 @@
   var AVAIL = { audio: "availableAudio", subtitles: "availableSubtitles" };
   var ONLY_KEEP = { audio: "For now every audio track is kept. The other choices come in a later update.",
     subtitles: "For now every subtitle is kept. The other choices come in a later update." };
+  // Lines that show under Audio or Subtitles only for some choices (slice 25b, design): "Keep only my languages"
+  // while no language is chosen yet (it links to where they are chosen, so the server's 400 languages_needed
+  // doesn't happen), and what "Save as separate .srt files" does with picture subtitles.
+  var NEEDS = "Keep only my languages needs your languages. Choose them in ", SRT = "Picture subtitles stay inside the file; only text subtitles are saved as .srt files.";
   // values (optional): a saved setting to show; anything missing stays at its default.
   function selectors(host, onChange, values) {
-    var fields = {}, rules = {}, v = values || {};
+    var fields = {}, rules = {}, v = values || {}, syncs = [], noLanguages = false;
     function changed() { if (onChange) onChange(); }
     GROUPS.forEach(function (gr) {
       var fs = el("fieldset"); fs.appendChild(el("legend", null, gr[0]));
@@ -68,8 +72,26 @@
           var only = avail.length === 1 && avail[0] === "keep_all", nt = el("span", "hint", only ? ONLY_KEEP[f[0]] : "Some choices come in a later update.");
           nt.id = id + "n"; box.appendChild(nt); said.push(nt.id);
         }
-        if (f[4]) { var h = el("span", "hint", f[4]); h.id = id + "h"; box.appendChild(h); said.push(h.id); }
-        if (said.length) sel.setAttribute("aria-describedby", said.join(" "));
+        var lines = [];
+        if (AVAIL[f[0]]) {
+          var need = el("span", "hint", NEEDS), go = el("a", null, "Settings > General"); go.href = "/settings/";
+          need.appendChild(go); need.appendChild(document.createTextNode(".")); need.id = id + "l";
+          lines.push([need, function (val) { return noLanguages && val === "my_languages"; }]);
+        }
+        if (f[0] === "subtitles") { var srt = el("span", "hint", SRT); srt.id = id + "s"; lines.push([srt, function (val) { return val === "srt"; }]); }
+        lines.forEach(function (l) { box.appendChild(l[0]); });
+        var hint = null;
+        if (f[4]) { hint = el("span", "hint", f[4]); hint.id = id + "h"; box.appendChild(hint); }
+        var sync = (function (sel, said, lines, hint) {
+          return function () {
+            var ids = said.slice();
+            lines.forEach(function (l) { var on = l[1](sel.value); l[0].hidden = !on; if (on) ids.push(l[0].id); });
+            if (hint) ids.push(hint.id);
+            if (ids.length) sel.setAttribute("aria-describedby", ids.join(" ")); else sel.removeAttribute("aria-describedby");
+          };
+        })(sel, said, lines, hint);
+        sync(); // the others keep this; File type's note (addendum 14) is added to it below
+        if (lines.length) { sel.addEventListener("change", sync); syncs.push(sync); }
         fs.appendChild(box);
       });
       if (gr[0] === "Which files") {
@@ -123,6 +145,8 @@
         : "Follows Quality (" + p.minSavingPct + "% for " + p.name + "). If you change it, it stays as you set it.";
     }
     fields.quality.addEventListener("change", follow);
+    // The person's languages are one global setting (Settings > General), not part of the library's setting.
+    g.SYP.api.getSettings().then(function (st) { noLanguages = !(st.languages || []).length; syncs.forEach(function (f) { f(); }); }, function () {});
     g.SYP.api.getSliderTable().then(function (t) {
       table = t.positions; var p = table[+fields.quality.value - 1];
       if (v.minSavingPct != null && p && v.minSavingPct !== p.minSavingPct) edited = true; // a saved value of its own stays put
