@@ -3,6 +3,8 @@
 package web
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"io"
 	"io/fs"
@@ -211,37 +213,46 @@ func TestNoExternalRequests(t *testing.T) {
 	}
 }
 
-// PKG-2: size budget, per page load. CSS under 20 KB; the scripts a page loads under 30 KB in total.
-// mock.js is a stand-in for the server that goes away when the real endpoints land, so it is not counted.
-// Every script a page names must exist, and every script must be used by some page.
+// PKG-2: size budget, per page load, measured as the bytes the server sends a browser (gzip; ACCEPTANCE.md):
+// CSS under 20 KB; the scripts a page loads, lazy ones included, under 30 KB in total. Sizes go through the
+// /assets/ handler, so this fails if compression ever stops. mock.js is a stand-in for the server that goes
+// away when the real endpoints land, so it is not counted. Every script a page names must be served, and
+// every script must be used by some page.
 func TestAssetSizes(t *testing.T) {
-	size := func(name string) int {
-		b, err := fs.ReadFile(static, "static/"+name)
-		if err != nil {
-			t.Errorf("a page loads %s, which is not embedded", name)
+	h := Handler(nil, nil) // /assets/ never touches the store
+	sent := func(name string) (raw, gz int) {
+		req := httptest.NewRequest("GET", "/assets/"+name, nil)
+		req.Header.Set("Accept-Encoding", "gzip")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != 200 {
+			t.Errorf("a page loads %s, which is not served (%d)", name, rec.Code)
 		}
-		return len(b)
+		if rec.Header().Get("Content-Encoding") != "gzip" {
+			t.Errorf("PKG-2: %s is not sent gzipped", name)
+		}
+		b, _ := fs.ReadFile(static, "static/"+name)
+		return len(b), rec.Body.Len()
 	}
-	css := size("app.css")
+	cssRaw, css := sent("app.css")
 	if css >= 20*1024 {
-		t.Errorf("PKG-2: css %d bytes, limit 20 KB", css)
+		t.Errorf("PKG-2: css sends %d bytes, limit 20 KB", css)
 	}
+	t.Logf("css: %d bytes raw, %d sent", cssRaw, css)
 	used := map[string]bool{}
-	worst, worstPage := 0, ""
 	for _, p := range pages {
-		total := 0
+		raw, total := 0, 0
 		for _, js := range append(scripts(p.Kind), lazyScripts(p.Kind)...) {
 			used[js] = true
 			if js != "mock.js" {
-				total += size(js)
+				r, g := sent(js)
+				raw, total = raw+r, total+g
 			}
 		}
-		if total > worst {
-			worst, worstPage = total, p.Path
-		}
 		if total >= 30*1024 {
-			t.Errorf("PKG-2: %s loads %d bytes of script, limit 30 KB", p.Path, total)
+			t.Errorf("PKG-2: %s sends %d bytes of script, limit 30 KB", p.Path, total)
 		}
+		t.Logf("%-24s script %6d bytes raw, %5d sent", p.Path, raw, total) // CI's report
 	}
 	fs.WalkDir(static, "static", func(p string, d fs.DirEntry, err error) error {
 		if err == nil && !d.IsDir() && path.Ext(p) == ".js" && !used[path.Base(p)] {
@@ -249,7 +260,64 @@ func TestAssetSizes(t *testing.T) {
 		}
 		return nil
 	})
-	t.Logf("css %d bytes; largest page %s loads %d bytes of script (mock.js not counted)", css, worstPage, worst)
+}
+
+// Assets go gzipped only to a browser that asks for it, and unzip to exactly the embedded file.
+func TestAssetsGzip(t *testing.T) {
+	h := Handler(nil, nil)
+	want, _ := fs.ReadFile(static, "static/app.js")
+	for _, c := range []struct{ accept, enc string }{{"", ""}, {"identity", ""}, {"gzip;q=0", ""}, {"gzip, deflate, br", "gzip"}, {"br;q=1.0, gzip;q=0.8", "gzip"}} {
+		for _, method := range []string{"GET", "HEAD"} {
+			req := httptest.NewRequest(method, "/assets/app.js", nil)
+			if c.accept != "" {
+				req.Header.Set("Accept-Encoding", c.accept)
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			hd := rec.Header()
+			if rec.Code != 200 || hd.Get("Content-Encoding") != c.enc || !strings.Contains(hd.Get("Vary"), "Accept-Encoding") || !strings.HasPrefix(hd.Get("Content-Type"), "text/javascript") {
+				t.Errorf("%s %q: %d, encoding %q, vary %q, type %q", method, c.accept, rec.Code, hd.Get("Content-Encoding"), hd.Get("Vary"), hd.Get("Content-Type"))
+			}
+			if method == "HEAD" {
+				if rec.Body.Len() != 0 {
+					t.Errorf("HEAD %q sent a body", c.accept)
+				}
+				continue
+			}
+			body := rec.Body.Bytes()
+			if c.enc == "gzip" {
+				zr, err := gzip.NewReader(bytes.NewReader(body))
+				if err != nil {
+					t.Fatal(err)
+				}
+				body, _ = io.ReadAll(zr)
+			}
+			if !bytes.Equal(body, want) {
+				t.Errorf("GET %q: body differs from the embedded app.js", c.accept)
+			}
+		}
+	}
+	// The same types on every OS, gzip or not (CI on Windows got application/javascript from the registry).
+	for name, want := range map[string]string{"app.js": "text/javascript; charset=utf-8", "app.css": "text/css; charset=utf-8", "nav.json": "application/json"} {
+		for _, accept := range []string{"", "gzip"} {
+			req := httptest.NewRequest("GET", "/assets/"+name, nil)
+			req.Header.Set("Accept-Encoding", accept)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if got := rec.Header().Get("Content-Type"); got != want {
+				t.Errorf("%s (Accept-Encoding %q): type %q, want %q", name, accept, got, want)
+			}
+		}
+	}
+	for _, url := range []string{"/assets/", "/assets/nope.js"} {
+		req := httptest.NewRequest("GET", url, nil)
+		req.Header.Set("Accept-Encoding", "gzip")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != 404 {
+			t.Errorf("%s with gzip: %d, want 404", url, rec.Code)
+		}
+	}
 }
 
 // First-run: a wizard with five steps and no menu in the top bar; every step has one primary button.
