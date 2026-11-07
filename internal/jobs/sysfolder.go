@@ -42,13 +42,12 @@ func systemFolder(p, goos, home, sysDrive, sysRoot string) bool {
 	}
 	if goos == "windows" {
 		s := strings.ReplaceAll(p, `\`, "/")
-		if strings.HasPrefix(s, "//") { // a UNC path: \\host\share is a whole share
+		if strings.HasPrefix(s, "//") { // a UNC path: a bare \\host is refused; a share (\\nas\movies) is fine
 			parts := strings.FieldsFunc(s, func(r rune) bool { return r == '/' })
-			return len(parts) <= 2
+			return len(parts) <= 1
 		}
-		if len(s) >= 2 && s[1] == ':' && strings.Trim(s[2:], "/") == "" { // C: or C:\ — a whole drive, any drive
-			return true
-		}
+		// A drive root: only the system drive's (where "/" resolves to) is refused, below; a whole data
+		// drive (D:\) is a normal place for videos (lead, 13:59Z).
 	}
 	p = norm(p)
 	if p == "" || p == "." {

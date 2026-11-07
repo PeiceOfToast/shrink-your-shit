@@ -43,11 +43,11 @@ func TestSystemFolders(t *testing.T) {
 		{"windows", `C:\Users\ann`, `C:\Windows\System32`, true},
 		{"windows", `C:\Users\ann`, `C:\Program Files (x86)\x`, true},
 		{"windows", `C:\Users\ann`, `C:\ProgramData`, true},
-		{"windows", `C:\Users\ann`, `D:\`, true}, // any whole drive (lead 13:48Z)
-		{"windows", `C:\Users\ann`, `D:`, true},
-		{"windows", `C:\Users\ann`, `\\nas\media`, true}, // a whole share
+		{"windows", `C:\Users\ann`, `D:\`, false}, // a whole data drive is a normal place for videos (lead 13:59Z)
+		{"windows", `C:\Users\ann`, `E:`, false},
+		{"windows", `C:\Users\ann`, `\\nas\media`, false}, // a NAS share root too
 		{"windows", `C:\Users\ann`, `\\nas\media\Movies`, false},
-		{"windows", `C:\Users\ann`, `\\nas`, true},
+		{"windows", `C:\Users\ann`, `\\nas`, true}, // a bare host, no share
 		{"windows", `C:\Users\ann`, `D:\Movies`, false},
 	} {
 		if got := systemFolder(c.p, c.goos, c.home, "", ""); got != c.want {
