@@ -487,7 +487,7 @@ func TestAuthClient(t *testing.T) {
 
 // AUTH-UI-1: the root redirect keeps the query, so the printed link http://host:8484/?token=... reaches the page.
 func TestRootRedirectKeepsQuery(t *testing.T) {
-	h := Handler(nil, nil, openAccess(t))
+	h := Handler(nil, openAccess(t), Engine{})
 	for in, want := range map[string]string{"/": "/libraries/", "/?token=abc&mock=0": "/libraries/?token=abc&mock=0"} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest("GET", in, nil))
