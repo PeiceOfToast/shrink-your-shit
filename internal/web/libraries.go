@@ -22,12 +22,14 @@ import (
 
 // Engine is what the API needs from the running scanner and worker. Nil functions do nothing.
 type Engine struct {
-	ScanNow    func()              // start a scan pass now
-	NextScan   func() time.Time    // when the next regular pass starts
-	RequeueJob func(id int64)      // stop a running job and put it back in the queue (its library is being removed)
-	PauseNow   func()              // stop the running jobs and put them back in the queue (Pause all)
-	StopFile   func(id int64) bool // stop a running job the person stopped; false if no worker runs it
-	Preview    *preview.Previewer  // the dry run (slice 19)
+	ScanNow    func()               // start a scan pass now
+	NextScan   func() time.Time     // when the next regular pass starts
+	RequeueJob func(id int64)       // stop a running job and put it back in the queue (its library is being removed)
+	PauseNow   func()               // stop the running jobs and put them back in the queue (Pause all)
+	Scanning   func() map[int64]int // libraries being scanned now, with the videos found so far (slice A)
+	FirstFiles *preview.FirstLister // the first 5 videos of a folder (slice A)
+	StopFile   func(id int64) bool  // stop a running job the person stopped; false if no worker runs it
+	Preview    *preview.Previewer   // the dry run (slice 19)
 
 	Doctor  *doctor.Checker // the setup checks (nil: not available)
 	DataDir string          // the data folder, for the health report
@@ -50,6 +52,23 @@ type libraryItem struct {
 	FlowID       int64   `json:"flowId,string"`
 	SettingLabel string  `json:"settingLabel"`
 	SettingKind  string  `json:"settingKind"`
+	// slice A's card: what it is doing, in words the page builds (DESIGN/REDESIGN A2); failed and kept
+	// jobs; the flow's kind as GET /api/flows says it. state, workingFiles, waitingFiles, freedBytes and
+	// waitingBytes stay one release, unused by the new card, so the current page keeps working.
+	Status      libraryStatus `json:"status"`
+	FailedFiles int           `json:"failedFiles"`
+	MadeWith    string        `json:"madeWith"`
+}
+
+// libraryStatus is the card's status line: kind not_scanned|scanning|scanned|converting|waiting_for_worker.
+type libraryStatus struct {
+	Kind       string  `json:"kind"`
+	Videos     int     `json:"videos"`     // found by the last finished scan
+	FoundSoFar *int    `json:"foundSoFar"` // while scanning
+	LastScan   *string `json:"lastScan"`
+	NextScan   *string `json:"nextScan"`
+	Converting int     `json:"converting"` // its files converting now
+	ToDo       int     `json:"toDo"`       // its files waiting
 }
 
 // startFrom maps POST /api/libraries "startFrom" to a slider position.
@@ -79,10 +98,34 @@ func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 				it.NextScan = &s
 			}
 		}
-		it.SettingKind, it.SettingLabel = rules.KindCustom, "Custom"
+		it.SettingKind, it.SettingLabel, it.MadeWith = rules.KindCustom, "Custom", "builder"
 		if f, err := store.GetFlow(l.FlowID); err == nil {
 			it.SettingKind, it.SettingLabel = f.Template.Label()
+			it.MadeWith = madeWith(f.Template.Kind)
 		}
+		it.FailedFiles = c.Failed
+		st := libraryStatus{Videos: l.LastScanVideos, NextScan: it.NextScan, Converting: c.Working, ToDo: c.Waiting}
+		if l.LastScan != "" {
+			st.LastScan = &l.LastScan
+		}
+		var scanning map[int64]int
+		if eng.Scanning != nil {
+			scanning = eng.Scanning()
+		}
+		found, isScanning := scanning[l.ID]
+		switch {
+		case c.Working > 0:
+			st.Kind = "converting"
+		case c.Waiting > 0 && store.Paused(): // files to do and no worker running (S2)
+			st.Kind = "waiting_for_worker"
+		case isScanning:
+			st.Kind, st.FoundSoFar = "scanning", &found
+		case l.LastScan != "":
+			st.Kind = "scanned"
+		default:
+			st.Kind = "not_scanned"
+		}
+		it.Status = st
 		return it
 	}
 	oneStatus := func(w http.ResponseWriter, status int, l jobs.Library) {

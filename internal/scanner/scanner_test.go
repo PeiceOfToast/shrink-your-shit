@@ -532,3 +532,20 @@ func TestUnreadableFileStateIsNeverReady(t *testing.T) {
 		t.Errorf("readable and unchanged since: queued %d, want 1", n)
 	}
 }
+
+// A finished walk records when and how many videos it found, for the library card (slice A).
+func TestScanRecordsTheLibrarysLastScan(t *testing.T) {
+	s, st, _, _ := setup(t, h264Big)
+	libs, _ := st.Libraries()
+	if libs[0].LastScan != "" {
+		t.Fatalf("before any scan: %+v", libs[0])
+	}
+	s.ScanOnce(context.Background())
+	libs, _ = st.Libraries()
+	if libs[0].LastScan == "" || libs[0].LastScanVideos != 1 { // a.mkv (the temp file b.syp-tmp.mkv is not counted)
+		t.Errorf("after a scan: %+v", libs[0])
+	}
+	if len(s.Scanning()) != 0 {
+		t.Errorf("still scanning: %v", s.Scanning())
+	}
+}

@@ -5,6 +5,7 @@ package web
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/doctor"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -305,5 +306,122 @@ func TestLibraryAtASystemFolderIsRefused(t *testing.T) {
 	code, body := post(t, srv, "POST", "/api/libraries", string(b))
 	if code != 400 || errCode(body) != "system_folder" || !strings.Contains(body, "Pick the folder that holds your videos") {
 		t.Errorf("%d %s", code, body)
+	}
+}
+
+// The library card's status (slice A, DESIGN/REDESIGN A2), the first that applies: converting, waiting
+// for a worker, scanning, scanned, not scanned; failed files (failed and kept); madeWith.
+func TestLibraryCardStatus(t *testing.T) {
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	a, _, _ := OpenAccess(t.TempDir(), false)
+	a.FailDelay = 0
+	scanning := map[int64]int{}
+	srv := httptest.NewServer(Handler(st, a, Engine{Scanning: func() map[int64]int { return scanning },
+		NextScan: func() time.Time { return time.Date(2026, 11, 8, 2, 0, 0, 0, time.UTC) }}))
+	defer srv.Close()
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	card := func() map[string]any {
+		_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/libraries"})
+		var out struct{ Items []map[string]any }
+		json.Unmarshal([]byte(body), &out)
+		if len(out.Items) != 1 {
+			t.Fatalf("%s", body)
+		}
+		return out.Items[0]
+	}
+	status := func() map[string]any { return card()["status"].(map[string]any) }
+	if s := status(); s["kind"] != "not_scanned" || s["nextScan"] != "2026-11-08T02:00:00Z" || s["lastScan"] != nil {
+		t.Errorf("new: %v", s)
+	}
+	if c := card(); c["madeWith"] != "slider" || c["failedFiles"] != 0.0 {
+		t.Errorf("card: %v", c)
+	}
+	scanning[l.ID] = 120
+	if s := status(); s["kind"] != "scanning" || s["foundSoFar"] != 120.0 {
+		t.Errorf("scanning: %v", s)
+	}
+	delete(scanning, l.ID)
+	st.SetLibraryScanned(l.ID, 1284)
+	if s := status(); s["kind"] != "scanned" || s["videos"] != 1284.0 || s["lastScan"] == nil {
+		t.Errorf("scanned: %v", s)
+	}
+	// queued while the worker is stopped: waiting for a worker
+	a1, _ := st.Enqueue(jobs.Job{LibraryID: l.ID, Path: "/m/a.mkv"})
+	st.Enqueue(jobs.Job{LibraryID: l.ID, Path: "/m/b.mkv"})
+	if s := status(); s["kind"] != "waiting_for_worker" || s["toDo"] != 2.0 {
+		t.Errorf("waiting: %v", s)
+	}
+	st.SetPaused(false)
+	st.Claim("w")
+	if s := status(); s["kind"] != "converting" || s["converting"] != 1.0 || s["toDo"] != 1.0 {
+		t.Errorf("converting: %v", s)
+	}
+	st.Fail(a1, "x")
+	b, _ := st.Claim("w")
+	st.Keep(b.ID, "y")
+	if c := card(); c["failedFiles"] != 2.0 {
+		t.Errorf("failed and kept: %v", c["failedFiles"])
+	}
+}
+
+// First files through the API (slice A): a library's, and a folder's that is not a library yet;
+// refusals as the folder check says them.
+func TestFirstFilesRoutes(t *testing.T) {
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	a, _, _ := OpenAccess(t.TempDir(), false)
+	a.FailDelay = 0
+	chk := &doctor.Checker{Exec: h264Probe, FFmpeg: "/usr/bin/ffmpeg", FFprobe: "/usr/bin/ffprobe", FreeSpace: func(string) (uint64, error) { return 1 << 40, nil }}
+	srv := httptest.NewServer(Handler(st, a, Engine{Doctor: chk, FirstFiles: &preview.FirstLister{Exec: h264Probe, FFprobe: "ffprobe"}}))
+	defer srv.Close()
+	dir := t.TempDir()
+	for _, n := range []string{"b.mkv", "a.mkv", "Extras/x.mkv"} {
+		os.MkdirAll(filepath.Dir(filepath.Join(dir, n)), 0o755)
+		os.WriteFile(filepath.Join(dir, n), []byte("x"), 0o644)
+	}
+	poll := func(method, path, body string) (int, map[string]any) {
+		for i := 0; i < 500; i++ {
+			code, b := post(t, srv, method, path, body)
+			var r map[string]any
+			json.Unmarshal([]byte(b), &r)
+			if code != 200 || r["stillLooking"] == false {
+				return code, r
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatal("still looking")
+		return 0, nil
+	}
+	code, r := poll("POST", "/api/libraries/first-files", fmt.Sprintf(`{"path":%q}`, dir))
+	items, _ := r["items"].([]any)
+	if code != 200 || len(items) != 3 || r["total"] != 3.0 || items[0].(map[string]any)["name"] != "x.mkv" || items[1].(map[string]any)["codec"] != "H.264" {
+		t.Fatalf("folder: %d %v", code, r) // A to Z by path: Extras/x.mkv first
+	}
+	sel := rules.DefaultSelectors(3)
+	sel.Ignore = []string{"Extras"}
+	l, _ := st.AddLibrary("Movies", dir, sel.Template(), true)
+	code, r = poll("GET", fmt.Sprintf("/api/libraries/%d/first-files", l.ID), "")
+	if items, _ := r["items"].([]any); code != 200 || len(items) != 2 || r["total"] != 2.0 {
+		t.Errorf("library (Extras ignored): %d %v", code, r)
+	}
+	if code, _ := post(t, srv, "GET", "/api/libraries/999/first-files", ""); code != 404 {
+		t.Errorf("unknown library: %d", code)
+	}
+	if code, body := post(t, srv, "POST", "/api/libraries/first-files", `{"path":"relative/x"}`); code != 400 || errCode(body) != "invalid_path" {
+		t.Errorf("relative: %d %s", code, body)
+	}
+	if code, body := post(t, srv, "POST", "/api/libraries/first-files", fmt.Sprintf(`{"path":%q}`, filepath.Join(dir, "missing"))); code != 400 || errCode(body) != "unreadable" {
+		t.Errorf("missing folder: %d %s", code, body)
+	}
+	empty := t.TempDir() // no videos: listed as nothing (200); the folder check says "no videos"
+	if code, r := poll("POST", "/api/libraries/first-files", fmt.Sprintf(`{"path":%q}`, empty)); code != 200 || r["total"] != 0.0 {
+		t.Errorf("empty: %d %v", code, r)
 	}
 }

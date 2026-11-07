@@ -24,6 +24,10 @@ type Library struct {
 	FlowID  int64  `json:"flowId"`
 	Started bool   `json:"started"`
 	Created string `json:"createdAt"`
+	// LastScan is when the scanner last finished walking it (RFC3339; "" never), LastScanVideos how many
+	// videos it found then (slice A's card).
+	LastScan       string `json:"lastScan"`
+	LastScanVideos int    `json:"lastScanVideos"`
 }
 
 // Flow is one flow record. Its behaviour is its template until the graph engine (slice 30).
@@ -97,11 +101,11 @@ func Within(p, dir string) bool {
 	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
-const libCols = `id,name,path,flow_id,started,created`
+const libCols = `id,name,path,flow_id,started,created,last_scan,last_scan_videos`
 
 func scanLibrary(r interface{ Scan(...any) error }) (Library, error) {
 	var l Library
-	err := r.Scan(&l.ID, &l.Name, &l.Path, &l.FlowID, &l.Started, &l.Created)
+	err := r.Scan(&l.ID, &l.Name, &l.Path, &l.FlowID, &l.Started, &l.Created, &l.LastScan, &l.LastScanVideos)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
 	}
@@ -471,20 +475,27 @@ func (s *Store) TemplateFor(j Job) (rules.Template, error) {
 
 // LibraryCounts are a library's job figures for its card.
 type LibraryCounts struct {
-	Working, Waiting, Failed int
+	Working, Waiting int
+	Failed           int // failed, and kept by a check: the Failed list's (slice A: "3 files failed")
 	// FreedBytes: original minus new, summed over done jobs whose original is gone (replaced and not
 	// kept); WaitingBytes: the same over done jobs whose original is still kept in .syp-trash
 	// (UI-API-CONTRACT.md F1: freed + waiting = all saved).
 	FreedBytes, WaitingBytes int64
 }
 
+// SetLibraryScanned records a finished scan of library id: when, and how many videos it found.
+func (s *Store) SetLibraryScanned(id int64, videos int) error {
+	_, err := s.db.Exec(`UPDATE libraries SET last_scan=?, last_scan_videos=? WHERE id=?`, s.stamp(), videos, id)
+	return err
+}
+
 // Counts returns LibraryCounts by library id.
 func (s *Store) Counts() (map[int64]LibraryCounts, error) {
 	rows, err := s.db.Query(`SELECT library_id,
-  SUM(status=?), SUM(status=?), SUM(status=?),
+  SUM(status=?), SUM(status=?), SUM(status IN (?,?)),
   COALESCE(SUM(CASE WHEN status=? AND size_after>0 AND `+replacedSQL+` AND NOT `+keptSQL+` THEN size_before-size_after END),0),
   COALESCE(SUM(CASE WHEN status=? AND size_after>0 AND `+replacedSQL+` AND `+keptSQL+` THEN size_before-size_after END),0)
-FROM jobs WHERE library_id IS NOT NULL GROUP BY library_id`, Running, Queued, Failed, Done, OriginalKept, Done, OriginalKept)
+FROM jobs WHERE library_id IS NOT NULL GROUP BY library_id`, Running, Queued, Failed, Kept, Done, OriginalKept, Done, OriginalKept)
 	if err != nil {
 		return nil, err
 	}

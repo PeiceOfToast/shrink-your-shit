@@ -76,6 +76,61 @@ func previewRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		}{res, sample, t.Warnings()})
 	})
 
+	// The first 5 videos of a library, A to Z, with codec, resolution and length ("Is this the right
+	// folder?", slice A); called again until stillLooking is false.
+	api.HandleFunc("GET /api/libraries/{id}/first-files", func(w http.ResponseWriter, r *http.Request) {
+		l, ok := library(w, r)
+		if !ok {
+			return
+		}
+		root, err := jobs.RealPath(l.Path)
+		if err != nil || eng.FirstFiles == nil {
+			apiError(w, http.StatusConflict, "folder_unreadable", "We can't open this library's folder. Check the path, and that shrink-your-shit is allowed to read it.")
+			return
+		}
+		var ignored func(string) bool
+		key := root + "\x00library"
+		if f, err := store.GetFlow(l.FlowID); err == nil {
+			ignored = f.Template.Ignored
+			if s, ok := f.Template.SelectorsView(); ok {
+				key += "\x00" + strings.Join(s.Ignore, "\x00")
+			}
+		}
+		writeJSON(w, eng.FirstFiles.Get(key, root, ignored))
+	})
+	// The same for a folder that is not a library yet (Add a library, first-run step 3): checked as
+	// POST /api/libraries/check checks it (once per walk), refused for a system folder or one it cannot open.
+	api.HandleFunc("POST /api/libraries/first-files", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Path string }
+		if !readJSON(w, r, &in) {
+			return
+		}
+		p := strings.TrimSpace(in.Path)
+		if p == "" || !filepath.IsAbs(p) || jobs.DevicePath(p) {
+			apiError(w, http.StatusBadRequest, "invalid_path", "Choose a folder by its full path.")
+			return
+		}
+		if eng.Doctor == nil || eng.FirstFiles == nil {
+			apiError(w, http.StatusServiceUnavailable, "not_available", "The checks are not available.")
+			return
+		}
+		p = filepath.Clean(p)
+		root, err := jobs.RealPath(p)
+		if err != nil {
+			root = p
+		}
+		if !eng.FirstFiles.Known(root) {
+			// only what stops listing it: a system folder, or one that cannot be opened. No videos, read-only,
+			// low space and the converter are the folder check's to say; an empty folder lists nothing (200).
+			for _, b := range eng.Doctor.Folder(r.Context(), p).Blockers {
+				if b.Code == "system_folder" || b.Code == "unreadable" {
+					apiError(w, http.StatusBadRequest, b.Code, b.Message)
+					return
+				}
+			}
+		}
+		writeJSON(w, eng.FirstFiles.Get(root, root, nil))
+	})
 	api.HandleFunc("GET /api/libraries/{id}/files", func(w http.ResponseWriter, r *http.Request) {
 		l, ok := library(w, r)
 		if !ok {
