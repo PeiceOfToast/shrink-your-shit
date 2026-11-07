@@ -20,7 +20,7 @@ func systemRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			return
 		}
 		p := strings.TrimSpace(in.Path)
-		if p == "" || !filepath.IsAbs(p) {
+		if p == "" || !filepath.IsAbs(p) || jobs.DevicePath(p) {
 			apiError(w, http.StatusBadRequest, "invalid_path", "Choose a folder by its full path.")
 			return
 		}

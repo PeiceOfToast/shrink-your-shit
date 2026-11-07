@@ -103,7 +103,13 @@ program; point at it explicitly with `-ffmpeg` / `-ffprobe` or `SYP_FFMPEG` /
   setting, unless a Standard setting turns "Skip HDR" off. Converting them would drop their HDR
   information and can make the picture look washed out. Before this version an existing library could
   convert them; it no longer does.
-- Files being copied in are skipped until they have not changed for `-settle`
+- **Files shared with another folder** (a hardlink, as Radarr, Sonarr and torrent clients make) are left as
+  they are: converting one would free no space, because the other folder keeps the old copy. **Links**
+  are never followed: a link to a file outside the library is skipped, and a link to a file inside it is
+  converted once, under the real file's name. A library can't be a system folder, `/` or a whole home folder.
+- The converted file keeps the original's modification time, permissions and (where allowed) owner.
+- A new or changed file is converted only after it has not changed between two scans (so a download or
+  copy in progress is left alone), and never within `-settle` of its last change
   (15 seconds by default); on a slow network share raise it.
 - File permission bits are copied on Linux/macOS. Windows has no equivalent, so the
   new file just gets the folder's normal permissions.

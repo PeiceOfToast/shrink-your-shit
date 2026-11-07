@@ -153,6 +153,10 @@ func (c *Checker) Folder(ctx context.Context, path string) (r FolderReport) {
 	if real, err := jobs.RealPath(path); err == nil {
 		path = real // a folder chosen through a link is checked as the folder it points to, as it is stored
 	}
+	if jobs.SystemFolder(path) { // never a library (slice 23): nothing else to check
+		r.Blockers = append(r.Blockers, Issue{"system_folder", jobs.ErrSystemFolder.Error()})
+		return r
+	}
 	st, err := os.Stat(path)
 	if err == nil && !st.IsDir() {
 		err = fmt.Errorf("not a folder")
@@ -218,9 +222,9 @@ func (c *Checker) Folder(ctx context.Context, path string) (r FolderReport) {
 	// Messages here are shown as they are in first-run: plain words only (DESIGN/ACCEPTANCE.md COPY-1,
 	// FIRST-RUN.md "States and errors"). The health report's details may be technical.
 	if hardlinked == 1 {
-		r.Notes = append(r.Notes, Issue{"hardlinks", "1 file is shared with another folder (for example by Radarr). This version still converts it, but that frees no space, because the other folder keeps its copy. Leaving it alone comes in a later update."})
+		r.Notes = append(r.Notes, Issue{"hardlinks", "1 file is shared with another folder (for example by Radarr). We will leave it alone, because changing it would break the link."})
 	} else if hardlinked > 1 {
-		r.Notes = append(r.Notes, Issue{"hardlinks", fmt.Sprintf("%d files are shared with another folder (for example by Radarr). This version still converts them, but that frees no space, because the other folder keeps its copy. Leaving them alone comes in a later update.", hardlinked)})
+		r.Notes = append(r.Notes, Issue{"hardlinks", fmt.Sprintf("%d files are shared with another folder (for example by Radarr). We will leave them alone, because changing one would break the link.", hardlinked)})
 	}
 	if unreadable == 1 {
 		// A note, not a blocker: a disk's root often holds a folder only the system may open

@@ -51,7 +51,7 @@ func TestIsVideo(t *testing.T) {
 
 func TestQueuesMatchingFileOnce(t *testing.T) {
 	s, st, lib, f := setup(t, h264Big)
-	if n := s.ScanOnce(context.Background()); n != 1 {
+	if n := settle(s); n != 1 {
 		t.Fatalf("queued %d", n)
 	}
 	if len(f.Calls) != 1 {
@@ -62,14 +62,14 @@ func TestQueuesMatchingFileOnce(t *testing.T) {
 		t.Errorf("%+v", l)
 	}
 	// Second scan: unchanged file is neither probed nor queued again.
-	if n := s.ScanOnce(context.Background()); n != 0 || len(f.Calls) != 1 {
+	if n := settle(s); n != 0 || len(f.Calls) != 1 {
 		t.Errorf("rescan queued %d, calls %d", n, len(f.Calls))
 	}
 }
 
 func TestSkipsNonMatching(t *testing.T) {
 	s, st, _, _ := setup(t, hevcBig)
-	if n := s.ScanOnce(context.Background()); n != 0 {
+	if n := settle(s); n != 0 {
 		t.Errorf("queued %d", n)
 	}
 	if l, _ := st.List(10); len(l) != 0 {
@@ -79,11 +79,11 @@ func TestSkipsNonMatching(t *testing.T) {
 
 func TestChangedFileIsRescanned(t *testing.T) {
 	s, _, lib, f := setup(t, hevcBig)
-	s.ScanOnce(context.Background())
+	settle(s)
 	p := filepath.Join(lib, "a.mkv")
 	os.WriteFile(p, []byte("123456789"), 0o644)
 	f.Out = []byte(h264Big)
-	if n := s.ScanOnce(context.Background()); n != 1 {
+	if n := settle(s); n != 1 {
 		t.Errorf("changed file should be rescanned and queued, got %d", n)
 	}
 }
@@ -91,16 +91,16 @@ func TestChangedFileIsRescanned(t *testing.T) {
 func TestMinAgeSkipsFreshFiles(t *testing.T) {
 	s, _, _, f := setup(t, h264Big)
 	s.MinAge = time.Hour
-	if n := s.ScanOnce(context.Background()); n != 0 || len(f.Calls) != 0 {
+	if n := settle(s); n != 0 || len(f.Calls) != 0 {
 		t.Errorf("fresh file should be left alone: %d %d", n, len(f.Calls))
 	}
 }
 
 func TestNoSecondJobWhileOpen(t *testing.T) {
 	s, st, lib, _ := setup(t, h264Big)
-	s.ScanOnce(context.Background())
+	settle(s)
 	os.WriteFile(filepath.Join(lib, "a.mkv"), []byte("changed-before-worker-ran"), 0o644)
-	if n := s.ScanOnce(context.Background()); n != 0 {
+	if n := settle(s); n != 0 {
 		t.Errorf("queued a duplicate: %d", n)
 	}
 	if l, _ := st.List(10); len(l) != 1 {
@@ -114,7 +114,7 @@ func TestSkipsHiddenFolders(t *testing.T) {
 		os.MkdirAll(filepath.Join(lib, d), 0o755)
 		os.WriteFile(filepath.Join(lib, d, "t.mkv"), []byte("12345"), 0o644)
 	}
-	s.ScanOnce(context.Background())
+	settle(s)
 	l, _ := st.List(10)
 	got := map[string]bool{}
 	for _, j := range l {
@@ -140,7 +140,7 @@ func TestLibraryRemovedDuringScanGetsNoJob(t *testing.T) {
 		}
 		return string(f.Out), "", nil
 	}
-	if n := sc.ScanOnce(context.Background()); n != 0 {
+	if n := settle(sc); n != 0 {
 		t.Errorf("queued %d", n)
 	}
 	if list, _ := st.List(10); len(list) != 0 {
@@ -169,7 +169,7 @@ func TestLinkedLibraryFolderIsScanned(t *testing.T) {
 	sc.Targets = func() ([]Target, error) {
 		return []Target{{LibraryID: l.ID, Path: l.Path, Template: rules.LegacyTemplate(rules.Default(), "replace")}}, nil
 	}
-	if n := sc.ScanOnce(context.Background()); n != 1 {
+	if n := settle(sc); n != 1 {
 		t.Errorf("queued %d from a linked library folder, want 1", n)
 	}
 }
@@ -177,7 +177,7 @@ func TestLinkedLibraryFolderIsScanned(t *testing.T) {
 // The scan keeps what ffprobe said, for the Preview; a changed file is probed again (above).
 func TestScanFillsTheProbeCache(t *testing.T) {
 	s, st, lib, f := setup(t, h264Big)
-	s.ScanOnce(context.Background())
+	settle(s)
 	p := filepath.Join(lib, "a.mkv")
 	fi, _ := os.Stat(p)
 	if v, ok := st.GetProbe(p, fi.Size(), fi.ModTime().UnixNano()); !ok || !strings.Contains(v, `"videoCodec":"h264"`) {
@@ -194,7 +194,7 @@ func TestTrashIsNeverScanned(t *testing.T) {
 	s, _, lib, f := setup(t, h264Big)
 	os.MkdirAll(filepath.Join(lib, ".syp-trash"), 0o755)
 	os.WriteFile(filepath.Join(lib, ".syp-trash", "old.7.mkv"), []byte("kept original"), 0o644)
-	s.ScanOnce(context.Background())
+	settle(s)
 	for _, c := range f.Calls {
 		if strings.Contains(strings.Join(c, " "), ".syp-trash") {
 			t.Errorf("probed a kept original: %v", c)
@@ -211,7 +211,7 @@ func TestSkipRecordsItsCode(t *testing.T) {
 	s.Targets = func() ([]Target, error) {
 		return []Target{{Path: lib, Template: rules.SliderTemplate(3)}}, nil
 	}
-	s.ScanOnce(context.Background())
+	settle(s)
 	if f, _ := st.GetFile(filepath.Join(lib, "a.mkv")); f == nil || f.Reason != rules.SkipAlreadyHEVC || !strings.HasPrefix(f.Decision, "skip: ") {
 		t.Errorf("%+v", f)
 	}
@@ -222,7 +222,7 @@ func TestRestoredFileIsNotQueued(t *testing.T) {
 	s, st, lib, _ := setup(t, h264Big)
 	p := filepath.Join(lib, "a.mkv")
 	st.PutFile(jobs.File{Path: p, Size: 1, ModTime: 1, Decision: jobs.DecisionRestored})
-	if n := s.ScanOnce(context.Background()); n != 0 {
+	if n := settle(s); n != 0 {
 		t.Errorf("queued %d", n)
 	}
 }
@@ -239,7 +239,7 @@ func TestIgnoredPathsAreNotLookedAt(t *testing.T) {
 	sel.SkipSmall, sel.Ignore = false, []string{"Extras", "*.sample.mkv"}
 	tmpl := sel.Template()
 	s.Targets = func() ([]Target, error) { return []Target{{LibraryID: 1, Path: lib, Template: tmpl}}, nil }
-	if n := s.ScanOnce(context.Background()); n != 1 {
+	if n := settle(s); n != 1 {
 		t.Errorf("queued %d, want only a.mkv", n)
 	}
 	if len(f.Calls) != 1 {
@@ -249,5 +249,199 @@ func TestIgnoredPathsAreNotLookedAt(t *testing.T) {
 		if r, _ := st.GetFile(filepath.Join(lib, p)); r != nil {
 			t.Errorf("%s was looked at: %+v", p, r)
 		}
+	}
+}
+
+// settle scans twice, as two scans a while apart do: a file is decided on the second look at it
+// unchanged (the two-look rule, slice 23). MinAge is 0 in these tests.
+func settle(s *Scanner) int {
+	s.ScanOnce(context.Background())
+	return s.ScanOnce(context.Background())
+}
+
+// A file is decided only once it has not changed between two looks at least MinAge apart (slice 23): the
+// first look and every change record it as still_changing, without reading it.
+func TestStillChangingWaitsForTwoLooks(t *testing.T) {
+	s, st, lib, f := setup(t, h264Big)
+	clock := time.Now()
+	s.Now, s.MinAge = func() time.Time { return clock }, time.Minute
+	a := filepath.Join(lib, "a.mkv")
+	os.Chtimes(a, clock.Add(-time.Hour), clock.Add(-time.Hour))
+	look := func(want int, wantReason string) {
+		t.Helper()
+		if n := s.ScanOnce(context.Background()); n != want {
+			t.Errorf("queued %d, want %d", n, want)
+		}
+		if r, _ := st.GetFile(a); wantReason != "" && (r == nil || r.Reason != wantReason) {
+			t.Errorf("record %+v, want %s", r, wantReason)
+		}
+	}
+	look(0, rules.SkipStillChanging) // first look
+	if len(f.Calls) != 0 {
+		t.Errorf("a file still changing must not be read: %v", f.Calls)
+	}
+	clock = clock.Add(10 * time.Second)
+	look(0, rules.SkipStillChanging) // unchanged, but not MinAge since the first look
+	// it grows (a download goes on): the wait starts again
+	os.WriteFile(a, []byte("123456789"), 0o644)
+	os.Chtimes(a, clock.Add(-time.Hour), clock.Add(-time.Hour))
+	clock = clock.Add(2 * time.Minute)
+	look(0, rules.SkipStillChanging)
+	clock = clock.Add(2 * time.Minute)
+	look(1, "") // unchanged for MinAge: decided (queued)
+}
+
+// A file with another name elsewhere (a hardlink: a seeding torrent, a media manager's copy) is left
+// alone as shared_file, unread, and both names stay byte-identical.
+func TestSharedFileIsLeftAlone(t *testing.T) {
+	s, st, lib, f := setup(t, h264Big)
+	other := filepath.Join(t.TempDir(), "seeding.mkv")
+	if err := os.Link(filepath.Join(lib, "a.mkv"), other); err != nil {
+		t.Skipf("no hardlinks here: %v", err)
+	}
+	if n := settle(s); n != 0 || len(f.Calls) != 0 {
+		t.Errorf("queued %d, probed %v", n, f.Calls)
+	}
+	if r, _ := st.GetFile(filepath.Join(lib, "a.mkv")); r == nil || r.Reason != rules.SkipSharedFile {
+		t.Errorf("record %+v", r)
+	}
+	a, _ := os.ReadFile(filepath.Join(lib, "a.mkv"))
+	b, _ := os.ReadFile(other)
+	if string(a) != "12345" || string(b) != "12345" {
+		t.Errorf("both names must keep their bytes: %q %q", a, b)
+	}
+}
+
+// Links are never followed or converted: one leading outside the library is recorded as symlink; one to
+// a file inside it is not looked at, and its real file is converted once, under its own name.
+func TestLinksAreNeverConverted(t *testing.T) {
+	s, st, lib, f := setup(t, h264Big)
+	outside := filepath.Join(t.TempDir(), "elsewhere.mkv")
+	os.WriteFile(outside, []byte("x"), 0o644)
+	if err := os.Symlink(outside, filepath.Join(lib, "out.mkv")); err != nil {
+		t.Skipf("no symlinks here: %v", err)
+	}
+	os.Symlink(filepath.Join(lib, "a.mkv"), filepath.Join(lib, "in.mkv"))
+	os.Symlink(filepath.Join(lib, "gone.mkv"), filepath.Join(lib, "broken.mkv"))
+	if n := settle(s); n != 1 {
+		t.Errorf("queued %d, want only a.mkv", n)
+	}
+	if len(f.Calls) != 1 {
+		t.Errorf("probed %d files, want only a.mkv: %v", len(f.Calls), f.Calls)
+	}
+	if r, _ := st.GetFile(filepath.Join(lib, "out.mkv")); r == nil || r.Reason != rules.SkipSymlink {
+		t.Errorf("outside link: %+v", r)
+	}
+	for _, n := range []string{"in.mkv", "broken.mkv"} {
+		if r, _ := st.GetFile(filepath.Join(lib, n)); r != nil {
+			t.Errorf("%s must not be listed: %+v", n, r)
+		}
+	}
+	if l, _ := st.List(10); len(l) != 1 || filepath.Base(l[0].Path) != "a.mkv" {
+		t.Errorf("jobs %+v", l)
+	}
+}
+
+// The first look is tied to the file itself, not just its path, size and times: a file deleted and made
+// again between two looks (same name, size and modification time) starts its wait again, and so does
+// one that disappears for a pass and comes back (review f4c41fd).
+func TestStillChangingFollowsTheFileNotThePath(t *testing.T) {
+	s, _, lib, _ := setup(t, h264Big)
+	a := filepath.Join(lib, "a.mkv")
+	old := time.Now().Add(-time.Hour)
+	os.Chtimes(a, old, old)
+	s.ScanOnce(context.Background()) // first look
+	time.Sleep(20 * time.Millisecond)
+	os.Remove(a) // made again: same name, size and times, but another file
+	os.WriteFile(a, []byte("12345"), 0o644)
+	os.Chtimes(a, old, old)
+	if n := s.ScanOnce(context.Background()); n != 0 {
+		t.Errorf("a file made again was decided on its first look: queued %d", n)
+	}
+	if n := s.ScanOnce(context.Background()); n != 1 {
+		t.Errorf("unchanged since: queued %d, want 1", n)
+	}
+
+	// gone for a pass, then back: its earlier look is forgotten
+	b := filepath.Join(lib, "b.mkv")
+	os.WriteFile(b, []byte("abcde"), 0o644)
+	os.Chtimes(b, old, old)
+	s.ScanOnce(context.Background()) // first look at b
+	os.Rename(b, b+".away")
+	s.ScanOnce(context.Background()) // b not seen: its look goes
+	os.Rename(b+".away", b)
+	if n := s.ScanOnce(context.Background()); n != 0 {
+		t.Errorf("b came back and was decided at once: queued %d", n)
+	}
+}
+
+// A guard is looked at again on every scan: a file that stops being shared (its other name removed) is
+// no longer skipped as shared (review f4c41fd), and it then waits like any new file: never read before
+// -settle has passed since it was first seen eligible (review 7ff706c).
+func TestGuardIsReevaluatedEveryScan(t *testing.T) {
+	s, st, lib, _ := setup(t, h264Big)
+	clock := time.Now()
+	s.Now, s.MinAge = func() time.Time { return clock }, time.Minute
+	os.Chtimes(filepath.Join(lib, "a.mkv"), clock.Add(-time.Hour), clock.Add(-time.Hour))
+	other := filepath.Join(t.TempDir(), "seeding.mkv")
+	if err := os.Link(filepath.Join(lib, "a.mkv"), other); err != nil {
+		t.Skipf("no hardlinks here: %v", err)
+	}
+	settle(s)
+	if r, _ := st.GetFile(filepath.Join(lib, "a.mkv")); r == nil || r.Reason != rules.SkipSharedFile {
+		t.Fatalf("record %+v", r)
+	}
+	os.Remove(other)
+	clock = clock.Add(10 * time.Second) // well within -settle
+	if n := s.ScanOnce(context.Background()); n != 0 {
+		t.Errorf("first scan after it stopped being shared: queued %d, want 0 (it waits)", n)
+	}
+	if r, _ := st.GetFile(filepath.Join(lib, "a.mkv")); r == nil || r.Reason != rules.SkipStillChanging {
+		t.Errorf("record %+v, want still_changing", r)
+	}
+	clock = clock.Add(2 * time.Minute)
+	if n := s.ScanOnce(context.Background()); n != 1 {
+		t.Errorf("after -settle: queued %d, want 1", n)
+	}
+}
+
+// A library reached through a linked folder (on macOS every temp folder is: /var is a link to
+// /private/var) still sees a link to one of its own files as inside it (CI on #54, macOS).
+func TestGuardResolvesTheLibraryRoot(t *testing.T) {
+	real := t.TempDir()
+	os.WriteFile(filepath.Join(real, "a.mkv"), []byte("x"), 0o644)
+	root := filepath.Join(t.TempDir(), "linked")
+	if err := os.Symlink(real, root); err != nil {
+		t.Skip(err)
+	}
+	in := filepath.Join(root, "in.mkv")
+	os.Symlink(filepath.Join(real, "a.mkv"), in)
+	lst, _ := os.Lstat(in)
+	if code, ignore := Guard(root, in, lst); code != "" || !ignore {
+		t.Errorf("a link inside a library reached through a linked folder: code %q ignore %v, want not listed", code, ignore)
+	}
+}
+
+// A link out of the library is never looked into: no identity is read through it, so on Windows (where
+// reading one opens the file) the target outside is never opened (review aa9cd46).
+func TestOutsideLinkIsNeverOpened(t *testing.T) {
+	s, _, lib, _ := setup(t, h264Big)
+	outside := filepath.Join(t.TempDir(), "elsewhere.mkv")
+	os.WriteFile(outside, []byte("x"), 0o644)
+	link := filepath.Join(lib, "out.mkv")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skip(err)
+	}
+	var keyed []string
+	defer func(f func(string, os.FileInfo) (string, bool)) { fileKey = f }(fileKey)
+	fileKey = func(p string, fi os.FileInfo) (string, bool) { keyed = append(keyed, p); return "k:" + p, true }
+	settle(s)
+	for _, p := range keyed {
+		if p == link || p == outside {
+			t.Errorf("an identity was read through the link: %s", p)
+		}
+	}
+	if len(keyed) == 0 {
+		t.Error("the watch saw nothing (a.mkv should have been keyed)")
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"os"
 	"strings"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
@@ -22,12 +23,18 @@ type Sample struct {
 }
 
 // Sample probes one file (read only) and says what the setting would do with it.
-func (p *Previewer) Sample(ctx context.Context, path string, st fs.FileInfo, t rules.Template) Sample {
+func (p *Previewer) Sample(ctx context.Context, root, path string, st fs.FileInfo, t rules.Template) Sample {
 	size := st.Size()
-	info, err := scanner.Probe(ctx, p.Store, p.Exec, p.FFprobe, path, st)
 	plan := rules.Plan{Skip: "unreadable", SkipCode: rules.SkipUnreadable}
-	if err == nil {
-		plan = t.Compile(info)
+	var info media.Info
+	// The file guards first, as the scanner and the library Preview decide (slice 23): a shared file or a
+	// link out of the library is left as it is, and is not read.
+	if lst, err := os.Lstat(path); err == nil {
+		if code, _ := scanner.Guard(root, path, lst); code != "" {
+			plan = rules.Plan{Skip: rules.SkipWords[code], SkipCode: code}
+		} else if i, err := scanner.Probe(ctx, p.Store, p.Exec, p.FFprobe, path, st); err == nil {
+			info, plan = i, t.Compile(i)
+		}
 	}
 	if plan.Skip != "" {
 		why := rules.SkipWords[plan.SkipCode]
@@ -63,9 +70,6 @@ func (p *Previewer) Sample(ctx context.Context, path string, st fs.FileInfo, t r
 			kind = strings.ToUpper(plan.Container) + " file"
 		}
 		s.Lines = append(s.Lines, "The new "+kind+" is written next to the original, which stays as it is")
-	}
-	if media.LinkCount(path, st) > 1 {
-		s.Lines = append(s.Lines, "Shared with another folder: converting it frees no space, because the other folder keeps its copy")
 	}
 	return s
 }

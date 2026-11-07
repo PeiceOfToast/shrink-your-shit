@@ -36,8 +36,8 @@ type Result struct {
 	TotalBytes        int64          `json:"totalBytes"`
 	CanShrink         int            `json:"canShrink"`
 	Skipped           map[string]int `json:"skipped"`
-	// SharedNoSaving: of CanShrink, the files shared with another folder (link count > 1). Converting
-	// them frees nothing, so the estimate leaves them out. Slice 12 moves them to skipped.shared_file.
+	// SharedNoSaving is always 0 since the file guards (slice 23): files shared with another folder are
+	// skipped (skipped.shared_file), not converted. Kept for the contract (addendum 12).
 	SharedNoSaving int    `json:"sharedNoSaving"`
 	Status         string `json:"status"` // ready | computing | failed
 	// Progress, while computing: how many of the videos have been looked at, so a page can show it
@@ -104,8 +104,10 @@ func list(root string) ([]file, string, error) {
 		if !scanner.IsVideo(p) {
 			return nil
 		}
-		if st, err := d.Info(); err == nil {
-			out = append(out, file{p, st})
+		if st, err := d.Info(); err == nil { // Lstat, as the scanner: a link is seen as a link
+			if _, ignore := scanner.Guard(root, p, st); !ignore {
+				out = append(out, file{p, st})
+			}
 		}
 		return nil
 	})
@@ -161,7 +163,7 @@ func (p *Previewer) Library(libID int64, root string, t rules.Template, wait tim
 		r = &run{sig: sig, finished: make(chan struct{}), prev: prev, total: len(files)}
 		p.cache[key] = r
 		go func(r *run) {
-			r.res = p.compute(files, t, &r.done)
+			r.res = p.compute(root, files, t, &r.done)
 			close(r.finished)
 		}(r)
 	}
@@ -187,7 +189,7 @@ func (p *Previewer) Library(libID int64, root string, t rules.Template, wait tim
 }
 
 // compute probes every file (a few at a time) and adds up their Plans.
-func (p *Previewer) compute(files []file, t rules.Template, done *atomic.Int64) Result {
+func (p *Previewer) compute(root string, files []file, t rules.Template, done *atomic.Int64) Result {
 	p.mu.Lock()
 	if p.slots == nil {
 		n := p.Probes
@@ -202,7 +204,6 @@ func (p *Previewer) compute(files []file, t rules.Template, done *atomic.Int64) 
 	type one struct {
 		plan    rules.Plan
 		save    [2]int64
-		shared  bool
 		skipped string
 	}
 	results := make([]one, len(files))
@@ -215,6 +216,10 @@ func (p *Previewer) compute(files []file, t rules.Template, done *atomic.Int64) 
 			// Each probe gets its own time limit; a computation is not tied to the request that started it.
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
+			if code, _ := scanner.Guard(root, f.path, f.st); code != "" {
+				results[i].skipped = code // the file guards, exactly as the scanner decides
+				return
+			}
 			if rec, _ := p.Store.GetFile(f.path); rec != nil && rec.Decision == jobs.DecisionRestored {
 				results[i].skipped = jobs.DecisionRestored // the scanner skips it too
 				return
@@ -233,11 +238,8 @@ func (p *Previewer) compute(files []file, t rules.Template, done *atomic.Int64) 
 				return
 			}
 			results[i].plan = plan
-			results[i].shared = media.LinkCount(f.path, f.st) > 1
-			if !results[i].shared {
-				lo, hi := Saving(t, plan, info, f.st.Size())
-				results[i].save = [2]int64{lo, hi}
-			}
+			lo, hi := Saving(t, plan, info, f.st.Size())
+			results[i].save = [2]int64{lo, hi}
 		}(i, f)
 	}
 	wg.Wait()
@@ -250,9 +252,6 @@ func (p *Previewer) compute(files []file, t rules.Template, done *atomic.Int64) 
 			continue
 		}
 		res.CanShrink++
-		if r.shared {
-			res.SharedNoSaving++
-		}
 		res.EstimateBytesLow += r.save[0]
 		res.EstimateBytesHigh += r.save[1]
 	}
