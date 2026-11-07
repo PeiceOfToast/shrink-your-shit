@@ -333,3 +333,19 @@ func TestLibraryRemoval(t *testing.T) {
 		}
 	}
 }
+
+// A job made before libraries were records (no library) is still claimed while some library is being
+// removed: the removal guard only holds back that library's jobs (review c41c9db).
+func TestRemovalGuardKeepsJobsWithoutALibrary(t *testing.T) {
+	s := open(t)
+	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
+	old, err := s.Enqueue(Job{Library: "/old", Path: "/old/a.mkv"}) // LibraryID 0: library_id NULL
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, _ := s.BeginRemove(l.ID)
+	defer release()
+	if j, err := s.Claim("w"); err != nil || j.ID != old {
+		t.Errorf("the unlinked job must be claimable: %+v %v", j, err)
+	}
+}

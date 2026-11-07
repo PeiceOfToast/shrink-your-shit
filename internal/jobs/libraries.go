@@ -416,12 +416,6 @@ func (s *Store) DeleteLibrary(id int64) error {
 	return tx.Commit()
 }
 
-// Drop deletes a job record that was stopped because its library was removed.
-func (s *Store) Drop(id int64) error {
-	_, err := s.db.Exec(`DELETE FROM jobs WHERE id=?`, id)
-	return err
-}
-
 // TemplateFor returns the template of the job's library's flow, which the worker compiles into the
 // job's Plan. A job made before libraries were records is matched to its library by folder.
 func (s *Store) TemplateFor(j Job) (rules.Template, error) {

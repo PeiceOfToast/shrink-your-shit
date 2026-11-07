@@ -249,7 +249,7 @@ func (s *Store) Claim(worker string) (Job, error) {
 	s.removeMu.Lock()
 	skip, args := "", []any{Running, now, worker, now, Queued}
 	for lib := range s.removing {
-		skip += " AND library_id != ?"
+		skip += " AND (library_id IS NULL OR library_id != ?)" // a job made before libraries belongs to none
 		args = append(args, lib)
 	}
 	err := s.db.QueryRow(`UPDATE jobs SET status=?, updated=?, worker=?, progress=0, error='', started=?

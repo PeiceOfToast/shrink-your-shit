@@ -374,7 +374,8 @@ func TestLibraryRemovalInsideTheSwapFinishesIt(t *testing.T) {
 	s := newScenario(t)
 	w := s.keeping(7)
 	l, _ := s.store.AddLibrary("Movies", s.dir, rules.SliderTemplate(3), true)
-	s.store.Drop(s.id) // the scenario's job again, now in that library
+	s.store.Claim("setup") // the scenario's own job is set aside (failed); the test uses one in that library
+	s.store.Fail(s.id, "set aside by the test")
 	s.id, _ = s.store.Enqueue(jobs.Job{Library: s.dir, LibraryID: l.ID, Path: s.src, DurationSec: 100, SizeBefore: 14})
 	swapHook = func(at string) error {
 		if at == "before swap" {
