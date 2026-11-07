@@ -120,10 +120,11 @@
       pane.appendChild(el("p", "muted", "Nothing was changed on these files. To change a rule, open the library."));
       var f = el("div", "field"), lb = el("label", null, "Show"), sel = el("select"); lb.htmlFor = "reason"; sel.id = "reason";
       sel.appendChild(el("option", null, "All reasons")).value = "";
-      // One entry per label: codes that share a label (already_hevc and already_in_format, design) share an entry.
+      // One entry per label (already_hevc and already_in_format share one, design). The server filters by one code, so the
+      // shared entry asks for already_in_format only, until workshop gives one code or a multi-reason filter (lead 22:28Z).
       var byLabel = {}, order = [];
       Object.keys(ui.REASONS).forEach(function (k) { var t = ui.badge(k); if (!byLabel[t]) { byLabel[t] = []; order.push(t); } byLabel[t].push(k); });
-      order.forEach(function (t) { sel.appendChild(el("option", null, t)).value = byLabel[t].join(","); });
+      order.forEach(function (t) { var c = byLabel[t]; sel.appendChild(el("option", null, t)).value = c.indexOf("already_in_format") >= 0 ? "already_in_format" : c[0]; });
       sel.onchange = function () { reason = sel.value; shown = 0; seen.skipped = null; refresh(); };
       f.appendChild(lb); f.appendChild(sel); pane.appendChild(f);
       var t = table(["File", "Why it was skipped", ""]); tb = t; pane.appendChild(t.wrap);
@@ -133,11 +134,7 @@
     }
     var want = Math.max(shown, 50);
     if (level === null) return api.getSettings().then(function (s) { level = RANK[s.controlLevel] || 0; }, function () { level = 0; }).then(T.skipped); // unknown level: Basic's links only
-    // An entry for several codes asks for each (the server filters by one) and merges them by path, as one list would be.
-    var codes = reason ? reason.split(",") : [null];
-    return Promise.all(codes.map(function (c) { return api.skipped({ reason: c, limit: want, offset: 0 }); })).then(function (rs) {
-      var r = rs.length === 1 ? rs[0] : { items: rs.reduce(function (a, x) { return a.concat(x.items); }, []).sort(function (a, b) { return a.path < b.path ? -1 : a.path > b.path ? 1 : 0; }).slice(0, want),
-        total: rs.reduce(function (a, x) { return a + x.total; }, 0) };
+    return api.skipped({ reason: reason || null, limit: want, offset: 0 }).then(function (r) {
       shown = want;
       draw("skipped", r, function () {
         tb.body.textContent = "";
