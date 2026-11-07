@@ -256,12 +256,15 @@ func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.Fil
 	// The two-look rule, also for a file a guard no longer holds back (its other name was removed): its
 	// wait starts when it is first seen eligible, so -settle always passes before it is read (review
 	// 7ff706c).
+	// A file already waiting or converting is decided: it is re-checked after its job ends. Before the
+	// two-look rule, or a file whose decision was forgotten (its library's setting was saved) would be
+	// recorded as still changing for as long as its job waits (ui-shop's S4 run).
+	if open, _ := s.Store.HasOpenJob(path); open {
+		return false
+	}
 	if s.observe(path, st, now()) || !s.ready(path, st, now()) {
 		s.recordSkip(path, st, rules.SkipStillChanging)
 		return false
-	}
-	if open, _ := s.Store.HasOpenJob(path); open {
-		return false // already waiting or running; it will be re-checked after it finishes
 	}
 	pi, err := Probe(ctx, s.Store, s.Exec, s.FFprobe, path, st)
 	rec := jobs.File{Path: path, Size: st.Size(), ModTime: st.ModTime().UnixNano()}
