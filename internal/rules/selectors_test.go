@@ -118,7 +118,7 @@ func TestSelectorsCompile(t *testing.T) {
 	}
 	// a selectors flow saved with a choice this version cannot run (an older or edited record)
 	bad := DefaultSelectors(3)
-	bad.Audio = "aac"
+	bad.Format = "av1"
 	if p := (Template{Kind: KindSelectors, Selectors: &bad}).Compile(h264(1920, 1080, 8000)); p.SkipCode != SkipSettingCannotRun {
 		t.Errorf("not runnable: %q", p.Skip)
 	}
@@ -129,8 +129,8 @@ func TestSelectorsValidate(t *testing.T) {
 		f    func(*Selectors)
 		code string
 	}{
-		"audio not yet":               {func(s *Selectors) { s.Audio = "aac" }, "not_available"},
-		"subtitles not yet":           {func(s *Selectors) { s.Subtitles = "srt" }, "not_available"},
+		"audio unknown":               {func(s *Selectors) { s.Audio = "mp3" }, "invalid"},
+		"subtitles unknown":           {func(s *Selectors) { s.Subtitles = "burn_in" }, "invalid"},
 		"av1 not yet":                 {func(s *Selectors) { s.Format = "av1" }, "not_available"},
 		"new type when replacing":     {func(s *Selectors) { s.FileType = "mkv" }, "not_available"},
 		"unknown speed":               {func(s *Selectors) { s.Speed = "ultrafast" }, "invalid"},

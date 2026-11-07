@@ -27,8 +27,6 @@
     return a[1] === b[1] ? num1(lo, b) + " - " + num1(hi, b) + " " + b[1] : ui.bytes(lo) + " - " + ui.bytes(hi);
   };
   ui.num = function (n) { return Number(n).toLocaleString("en-US"); };
-  // "1 video", "2 videos": a count with its noun in the right number.
-  ui.count = function (n, one, many) { return ui.num(n) + " " + (Number(n) === 1 ? one : many); };
   ui.el = function (tag, cls, txt) {
     var e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -54,7 +52,7 @@
       big.appendChild(document.createElement("br"));
       big.appendChild(ui.el("span", "stat-label", "possible saving, an estimate from file sizes"));
       var ul = ui.el("ul");
-      ul.appendChild(ui.el("li", null, ui.count(r.files, "video", "videos") + " found (" + ui.bytes(r.totalBytes) + ")"));
+      ul.appendChild(ui.el("li", null, ui.num(r.files) + " videos found (" + ui.bytes(r.totalBytes) + ")"));
       // Before slice 12 shared (hardlinked) files are converted but free nothing (contract addendum 12).
       var sh = r.sharedNoSaving || 0;
       ul.appendChild(ui.el("li", null, sh ? ui.num(r.canShrink) + " will be converted; " + ui.num(sh) + " of them " + (sh === 1 ? "is" : "are") + " shared with another folder and will free no space"
@@ -78,7 +76,7 @@
       }
       if (pr && pr.total > 0) {
         var pct = Math.min(100, Math.floor(pr.done * 100 / pr.total));
-        w.text.textContent = "Checking " + ui.num(pr.done) + " of " + ui.count(pr.total, "file", "files") + "...";
+        w.text.textContent = "Checking " + ui.num(pr.done) + " of " + ui.num(pr.total) + " files...";
         w.bar.hidden = false; w.bar.setAttribute("aria-valuenow", pct); w.fill.style.width = pct + "%";
         if (Math.floor(pct / 10) !== w.step) { w.step = Math.floor(pct / 10); w.sr.textContent = "Checking files, " + w.step * 10 + "% done."; }
       }

@@ -456,6 +456,17 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			return "", failed(fmt.Sprintf("There is already a file named %s next to the original, so the new file was not made. Nothing was changed. Move or rename that file, then press Retry.", filepath.Base(BesidePathAs(job.Path, ext))), fs.ErrExist)
 		}
 	}
+	// Subtitles saved as .srt files go beside the new file and never over another file: a name taken
+	// already stops the job before anything is converted (checked again when they are put in place).
+	newName := job.Path
+	if OutputMode(plan.Output) == Beside {
+		newName = BesidePathAs(job.Path, ext)
+	}
+	for _, o := range plan.SubtitleFiles() {
+		if name := rules.SrtName(newName, o.Extract); exists(name) {
+			return "", failed(srtTaken(name), fs.ErrExist)
+		}
+	}
 	stage, err = newStaged(job.Path, ext)
 	if err != nil {
 		return "", err
@@ -494,6 +505,11 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	if err := w.verify(ctx, src, exp, job.Path, tmp, before.Size()); err != nil {
 		return "", err
+	}
+	for k := range plan.SubtitleFiles() { // each subtitle that was to be saved as a file was saved
+		if st, err := os.Lstat(rules.StagedSrt(tmp, k)); err != nil || !st.Mode().IsRegular() || st.Size() == 0 {
+			return "", kept("a subtitle could not be saved as a separate file")
+		}
 	}
 	// The original's permissions, only now that the file has been checked.
 	if err := stage.intact(); err != nil {
@@ -541,6 +557,15 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 		return stage.intact()
 	}
+	placed, err := installSubtitles(plan, tmp, final)
+	if err != nil {
+		return "", err
+	}
+	removePlaced := func() { // the swap did not happen: the .srt files put beside it go again
+		for _, p := range placed {
+			os.Remove(p)
+		}
+	}
 	days := 0
 	if w.KeepDays != nil {
 		days = w.KeepDays()
@@ -548,6 +573,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if final == job.Path && days > 0 && w.Journal != nil {
 		// The original is kept: moved into .syp-trash, journaled (keep.go).
 		if err := w.keepAndReplace(ctx, job, stage, before, days, stillOK); err != nil {
+			removePlaced()
 			return "", err
 		}
 		return final, nil
@@ -557,6 +583,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		move = moveBeside // "Put the new file next to the original": never over another file
 	}
 	if err := move(ctx, tmp, final, stillOK); err != nil {
+		removePlaced()
 		var f *FailedError
 		if errors.As(err, &f) {
 			return "", err
@@ -569,6 +596,34 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	return final, nil
 }
+
+// installSubtitles puts the Plan's extracted subtitles (written next to tmp) beside final, never over
+// another file (renameNoReplace). If a name is taken, the ones already placed go again and the job
+// fails with design's words. It returns the paths placed.
+func installSubtitles(plan rules.Plan, tmp, final string) ([]string, error) {
+	var placed []string
+	for k, o := range plan.SubtitleFiles() {
+		name := rules.SrtName(final, o.Extract)
+		if err := renameNoReplace(rules.StagedSrt(tmp, k), name); err != nil {
+			for _, p := range placed {
+				os.Remove(p)
+			}
+			if errors.Is(err, fs.ErrExist) {
+				return nil, failed(srtTaken(name), err)
+			}
+			return nil, failed("A subtitle file could not be put next to the new file, so nothing was changed. Press Retry.", err)
+		}
+		placed = append(placed, name)
+	}
+	return placed, nil
+}
+
+// srtTaken is design's sentence for an .srt name already there.
+func srtTaken(name string) string {
+	return fmt.Sprintf("A subtitle file named %s is already there. Nothing was changed. Move or rename that file, then press Retry.", filepath.Base(name))
+}
+
+func exists(p string) bool { _, err := os.Lstat(p); return err == nil }
 
 // statOpen is os.Stat through an open file, so the file's identity (device and inode, or the Windows
 // file ID) is read now. On Windows, os.Stat by path reads that ID only when os.SameFile first needs it,

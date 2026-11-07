@@ -198,8 +198,10 @@ func TestSelectorsSaveAndReadBack(t *testing.T) {
 		}
 	}
 	for f, want := range map[string]string{
-		`"audio":"aac"`:                          "not_available",
-		`"subtitles":"srt"`:                      "not_available",
+		`"audio":"mp3"`:                          "invalid",
+		`"audioBitrate":"128"`:                   "invalid", // no bitrate choice at Standard (25b)
+		`"audio":"my_languages"`:                 "languages_needed",
+		`"subtitles":"burn_in"`:                  "invalid",
 		`"format":"av1"`:                         "not_available",
 		`"fileType":"mp4"`:                       "not_available", // replace mode
 		`"fileType":"mp4","afterConverting":"x"`: "invalid",
@@ -213,7 +215,8 @@ func TestSelectorsSaveAndReadBack(t *testing.T) {
 		`"quality":9,"speed":"faster"`:           "invalid_quality",
 	} {
 		code, body := post(t, srv, "PUT", path, `{"quality":4,`+f+`}`)
-		if code != 400 || errCode(body) != want || !strings.Contains(body, "Nothing was changed") {
+		// every refusal says nothing changed, except languages_needed, which is design's sentence as it is
+		if code != 400 || errCode(body) != want || (want != "languages_needed" && !strings.Contains(body, "Nothing was changed")) {
 			t.Errorf("%s: %d %s, want 400 %s", f, code, body, want)
 		}
 	}
@@ -260,4 +263,26 @@ func listLibraries(t *testing.T, srv *httptest.Server) []map[string]any {
 	var v struct{ Items []map[string]any }
 	json.Unmarshal([]byte(body), &v)
 	return v.Items
+}
+
+// The person's languages (Settings > General, slice 25b): stored in one form; "my languages" can be
+// saved once there are some.
+func TestLanguagesSetting(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	if code, body := post(t, srv, "PATCH", "/api/settings", `{"languages":["en","deu","fre","EN"]}`); code != 200 || !strings.Contains(body, `"languages":["eng","ger","fre"]`) {
+		t.Errorf("%d %s", code, body)
+	}
+	if got := st.Languages(); strings.Join(got, ",") != "eng,ger,fre" {
+		t.Errorf("store sees %v", got)
+	}
+	if code, body := post(t, srv, "PATCH", "/api/settings", `{"languages":["xx"]}`); code != 400 || errCode(body) != "invalid_setting" {
+		t.Errorf("bad code: %d %s", code, body)
+	}
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	if code, body := post(t, srv, "PUT", fmt.Sprintf("/api/libraries/%d/setting", l.ID), `{"quality":3,"audio":"my_languages","subtitles":"keep_all"}`); code != 200 {
+		t.Errorf("my languages with languages set: %d %s", code, body)
+	}
+	if f, _ := st.GetFlow(l.FlowID); f.Template.Languages != "eng,ger,fre" {
+		t.Errorf("the flow is read with the person's languages: %q", f.Template.Languages)
+	}
 }

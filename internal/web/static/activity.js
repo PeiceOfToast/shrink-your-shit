@@ -74,7 +74,7 @@
           pane.appendChild(c);
         });
         pane.appendChild(el("h2", null, "Up next"));
-        var next = q.upNext.map(function (u) { return u.library + ": " + ui.count(u.count, "file", "files") + (u.count && u.order ? ", " + (FIRST[u.order] || u.order) + " first" : ""); });
+        var next = q.upNext.map(function (u) { return u.library + ": " + ui.num(u.count) + " files" + (u.count && u.order ? ", " + (FIRST[u.order] || u.order) + " first" : ""); });
         pane.appendChild(el("p", "muted", next.length ? next.join(". ") + "." : "Nothing is waiting."));
       });
     });
@@ -183,7 +183,7 @@
     return api.kept().then(function (r) {
       draw("kept", r, function () {
         pane.textContent = ""; pane.appendChild(heading("Kept originals", "kh"));
-        var p = el("p", "muted"); p.appendChild(document.createTextNode("After a file is converted, the original is kept for " + ui.count(r.days, "day", "days") + " in a folder called .syp-trash next to it, so you can get it back. Change this in "));
+        var p = el("p", "muted"); p.appendChild(document.createTextNode("After a file is converted, the original is kept for " + r.days + " days in a folder called .syp-trash next to it, so you can get it back. Change this in "));
         var a = el("a", null, "Settings → Safety"); a.href = "/settings/safety/"; p.appendChild(a); p.appendChild(document.createTextNode(".")); pane.appendChild(p);
         pane.appendChild(el("p", "muted", restoredNote)).id = "restored"; $("restored").setAttribute("role", "status");
         if (!r.items.length) { pane.appendChild(empty("No kept originals yet. Originals appear here after the first file is converted.")); pane.appendChild(panel); return; }

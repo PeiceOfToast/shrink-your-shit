@@ -143,7 +143,23 @@ func (s *Store) GetFlow(id int64) (Flow, error) {
 	if err != nil {
 		return f, err
 	}
-	return f, json.Unmarshal([]byte(t), &f.Template)
+	if err := json.Unmarshal([]byte(t), &f.Template); err != nil {
+		return f, err
+	}
+	f.Template.Languages = strings.Join(s.Languages(), ",") // the person's, not stored in the flow
+	return f, nil
+}
+
+// Languages are the person's languages (the program settings' "languages", Settings > General), read
+// here so every flow compiled for a file sees the current ones.
+func (s *Store) Languages() []string {
+	v, ok, err := s.Meta("settings")
+	if err != nil || !ok {
+		return nil
+	}
+	var st struct{ Languages []string }
+	json.Unmarshal([]byte(v), &st)
+	return st.Languages
 }
 
 type execer interface {
