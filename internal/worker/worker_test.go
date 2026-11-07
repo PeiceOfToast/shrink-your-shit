@@ -110,8 +110,9 @@ type scenario struct {
 	onEncode               func() // runs while "encoding", e.g. to modify the source
 	afterChecks            func() // runs at the picture comparison, the last check
 
-	calls []string
-	exec  *media.FakeExec
+	calls    []string
+	exec     *media.FakeExec
+	moreSrcs map[string]bool // other originals in the queue (probed like src)
 }
 
 func newScenario(t *testing.T) *scenario {
@@ -150,7 +151,7 @@ func (s *scenario) handle(name string, args []string) (string, string, error) {
 	last := args[len(args)-1]
 	switch name {
 	case "ffprobe":
-		isSrc := last == s.src
+		isSrc := last == s.src || s.moreSrcs[last]
 		if s.has(args, "-count_packets") {
 			if isSrc {
 				return fmt.Sprint(s.srcPackets), "", nil

@@ -4,6 +4,8 @@ package worker
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -169,4 +171,198 @@ func eventually(t *testing.T, ok func() bool, what string) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("never: %s", what)
+}
+
+// claimGap is the store with a Claim that lets f run in the gap right after the claim (the job is
+// running in the database) and before RunOne returns from it.
+type claimGap struct {
+	*jobs.Store
+	f func(jobs.Job)
+}
+
+func (q claimGap) Claim(worker string) (jobs.Job, error) {
+	j, err := q.Store.Claim(worker)
+	if err == nil && q.f != nil {
+		q.f(j)
+	}
+	return j, err
+}
+
+// stopFromThePage is what POST /api/jobs/{id}/stop does: record the stop, then stop the worker.
+func stopFromThePage(st *jobs.Store, w *Worker, id int64) {
+	if running, err := st.RequestStop(id); err == nil && running {
+		w.StopFile(id)
+	}
+}
+
+// Stop this file landing between the claim and the worker registering the job: it is not lost. The
+// job ends stopped by the person, nothing is replaced (retention 0: a replace would be final).
+func TestStopInTheClaimGapStopsTheJob(t *testing.T) {
+	s := newScenario(t)
+	w := s.worker(Replace) // no KeepDays: retention 0
+	stopped := make(chan struct{})
+	w.Queue = claimGap{s.store, func(j jobs.Job) {
+		go func() { stopFromThePage(s.store, w, j.ID); close(stopped) }()
+		time.Sleep(50 * time.Millisecond) // the stop runs now, in the gap
+	}}
+	w.RunOne(context.Background())
+	<-stopped
+	if _, err := s.store.Get(s.id); err == nil {
+		t.Errorf("the job should be gone (stopped): %+v", s.job())
+	}
+	if f, _ := s.store.GetFile(s.src); f == nil || f.Reason != jobs.UserStoppedReason {
+		t.Errorf("file record %+v", f)
+	}
+	s.assertOriginalSafe()
+}
+
+// A stop recorded on the job that reached no worker (or came late) is seen at the last check before
+// the swap: nothing is replaced, the job ends stopped. Retention 0.
+func TestStopRecordedBeforeTheSwapPreventsIt(t *testing.T) {
+	s := newScenario(t)
+	w := s.worker(Replace)
+	s.afterChecks = func() { // the picture comparison, the last check
+		if running, err := s.store.RequestStop(s.id); err != nil || !running {
+			t.Errorf("RequestStop: %v %v", running, err)
+		}
+	}
+	w.RunOne(context.Background())
+	if _, err := s.store.Get(s.id); err == nil {
+		t.Errorf("the job should be gone (stopped): %+v", s.job())
+	}
+	if f, _ := s.store.GetFile(s.src); f == nil || f.Reason != jobs.UserStoppedReason {
+		t.Errorf("file record %+v", f)
+	}
+	s.assertOriginalSafe()
+}
+
+// A stop for a running job never deletes its record: only the worker ends it.
+func TestRequestStopOnARunningJobOnlyMarksIt(t *testing.T) {
+	s := newScenario(t)
+	j, err := s.store.Claim("other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if running, err := s.store.RequestStop(j.ID); err != nil || !running {
+		t.Fatalf("%v %v", running, err)
+	}
+	if got := s.job(); got.Status != jobs.Running {
+		t.Errorf("status %s", got.Status)
+	}
+	if req, _ := s.store.StopRequested(j.ID); !req {
+		t.Error("the stop is not recorded")
+	}
+	s.store.Release(j.ID)
+	if _, err := s.store.Claim("again"); err == nil {
+		t.Error("a job whose stop was requested must not be claimed again")
+	}
+	// after a restart, such a job ends stopped
+	s.store.RequeueRunning()
+	if _, err := s.store.Get(j.ID); err == nil {
+		t.Error("the job should have ended stopped at startup")
+	}
+}
+
+// Pause all landing between the worker's pause check and its claim: the claim refuses (it checks the
+// pause itself), so nothing starts.
+func TestPauseBetweenTheCheckAndTheClaim(t *testing.T) {
+	s := newScenario(t)
+	w := s.worker(Replace)
+	first := true
+	w.Paused = func() bool {
+		if first { // the page's Pause all, right after this check
+			first = false
+			s.store.SetPaused(true)
+			go w.PauseNow()
+			return false
+		}
+		return s.store.Paused()
+	}
+	if ran, _ := w.RunOne(context.Background()); ran {
+		t.Error("no job may run")
+	}
+	if j := s.job(); j.Status != jobs.Queued {
+		t.Errorf("status %s", j.Status)
+	}
+	if n := s.count("libx265"); n != 0 {
+		t.Errorf("%d encodes started", n)
+	}
+}
+
+// Pause landing after the claim, before converting starts (only the flag, no PauseNow yet): the
+// worker checks again and puts the job back.
+func TestPauseAfterTheClaimBeforeConverting(t *testing.T) {
+	s := newScenario(t)
+	w := s.worker(Replace)
+	w.Paused = s.store.Paused
+	testHook = func(at string) {
+		if at == "registered" {
+			s.store.SetPaused(true)
+		}
+	}
+	defer func() { testHook = nil }()
+	w.RunOne(context.Background())
+	if j := s.job(); j.Status != jobs.Queued {
+		t.Errorf("status %s", j.Status)
+	}
+	if n := s.count("libx265"); n != 0 {
+		t.Errorf("%d encodes started", n)
+	}
+	s.assertOriginalSafe()
+}
+
+// The pool never has more conversions running than parallelJobs allows after it was lowered and
+// raised again while its workers were busy: busy retiring workers are taken back, none added beside them.
+func TestPoolDownThenUpWhileBusy(t *testing.T) {
+	s := newScenario(t)
+	s.moreSrcs = map[string]bool{}
+	for i := 1; i <= 3; i++ {
+		p := filepath.Join(s.dir, "movie"+string(rune('0'+i))+".mkv")
+		os.WriteFile(p, []byte("original-bytes"), 0o644)
+		s.moreSrcs[p] = true
+		s.store.Enqueue(jobs.Job{Library: s.dir, Path: p, DurationSec: 100, SizeBefore: 14})
+	}
+	var mu sync.Mutex
+	s.hang = func(name string, args []string) bool { return name == "ffmpeg" && s.has(args, "libx265") }
+	var size atomic.Int64
+	size.Store(4)
+	made := 0
+	p := &Pool{
+		New: func(n int) *Worker {
+			mu.Lock()
+			made++
+			mu.Unlock()
+			w := s.worker(Replace)
+			w.ID = "w" + string(rune('0'+n))
+			w.Poll = 10 * time.Millisecond
+			return w
+		},
+		Size:  func() int { return int(size.Load()) },
+		Every: 20 * time.Millisecond,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() { p.Run(ctx); close(stopped) }()
+	eventually(t, func() bool { return p.Busy() == 4 }, "4 conversions running")
+	size.Store(1)
+	eventually(t, func() bool { return p.Running() == 1 }, "down to 1 (3 retiring, still busy)")
+	size.Store(2)
+	eventually(t, func() bool { return p.Running() == 2 }, "up to 2")
+	for i := 0; i < 10; i++ { // several resizes
+		time.Sleep(20 * time.Millisecond)
+		mu.Lock()
+		n := made
+		mu.Unlock()
+		if b := p.Busy(); b > 4 || n > 4 {
+			t.Fatalf("busy %d, workers made %d: more than the 4 already converting", b, n)
+		}
+	}
+	size.Store(99)
+	eventually(t, func() bool { return p.Running() == MaxParallel }, "capped")
+	cancel()
+	select {
+	case <-stopped:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the pool did not stop")
+	}
 }

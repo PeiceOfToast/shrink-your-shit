@@ -3,6 +3,7 @@
 package web
 
 import (
+	"database/sql"
 	"errors"
 	"math"
 	"net/http"
@@ -282,19 +283,42 @@ func activityRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, no
 			apiError(w, http.StatusNotFound, "not_found", "There is no such file in the queue.")
 			return
 		}
-		if eng.StopFile != nil && eng.StopFile(id) {
-			writeJSON(w, map[string]bool{"ok": true}) // the worker records it as it stops
-			return
-		}
-		switch err := store.UserStopped(id); {
+		running, err := store.RequestStop(id) // recorded on the job first: its worker checks it before the swap
+		switch {
 		case errors.Is(err, jobs.ErrNotFound):
 			apiError(w, http.StatusNotFound, "not_found", "There is no such file in the queue.")
+			return
 		case errors.Is(err, jobs.ErrNotStoppable):
 			apiError(w, http.StatusConflict, "not_stoppable", "This file has already finished, so there is nothing to stop. Nothing was changed.")
+			return
 		case err != nil:
 			serverError(w, err)
-		default:
+			return
+		case !running:
 			writeJSON(w, map[string]bool{"ok": true})
+			return
+		}
+		if eng.StopFile != nil {
+			eng.StopFile(id) // ends the conversion now instead of at its last check
+		}
+		// Answer with what happened, never "stopped" while the worker may still finish it.
+		for deadline := time.Now().Add(stopWait); ; time.Sleep(50 * time.Millisecond) {
+			j, err := store.Get(id)
+			switch {
+			case errors.Is(err, sql.ErrNoRows): // the worker recorded it as stopped
+				writeJSON(w, map[string]bool{"ok": true})
+				return
+			case err != nil:
+				serverError(w, err)
+				return
+			case j.Status != jobs.Running:
+				apiError(w, http.StatusConflict, "already_finished", "This file had just finished, so it was not stopped. Its result is shown under Activity.")
+				return
+			case time.Now().After(deadline):
+				w.WriteHeader(http.StatusAccepted)
+				writeJSON(w, map[string]bool{"ok": true, "stopping": true})
+				return
+			}
 		}
 	})
 
@@ -302,6 +326,10 @@ func activityRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, no
 		apiError(w, http.StatusNotImplemented, "not_available", "Backups come in a later update. Nothing was downloaded.")
 	})
 }
+
+// stopWait is how long "Stop this file" waits for the running conversion to end before it answers
+// "stopping" (202) instead of "stopped".
+var stopWait = 30 * time.Second
 
 func upperFirst(s string) string {
 	if s == "" {

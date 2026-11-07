@@ -130,8 +130,10 @@ func (s *Store) GetFile(path string) (*File, error) {
 }
 
 // PutFile records what was seen for a path.
-func (s *Store) PutFile(f File) error {
-	_, err := s.db.Exec(`INSERT INTO files(path,size,mtime,codec,decision,reason) VALUES(?,?,?,?,?,?)
+func (s *Store) PutFile(f File) error { return putFile(s.db, f) }
+
+func putFile(x execer, f File) error {
+	_, err := x.Exec(`INSERT INTO files(path,size,mtime,codec,decision,reason) VALUES(?,?,?,?,?,?)
 ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,codec=excluded.codec,decision=excluded.decision,reason=excluded.reason`,
 		f.Path, f.Size, f.ModTime, f.Codec, f.Decision, f.Reason)
 	return err
@@ -236,8 +238,11 @@ func (s *Store) transition(id int64, to Status, set string, args ...any) error {
 func (s *Store) Claim(worker string) (Job, error) {
 	now := s.stamp()
 	var id int64
+	// One statement, so a pause or a stop request set before it is always seen: no job is taken while
+	// paused, and none whose stop was requested.
 	err := s.db.QueryRow(`UPDATE jobs SET status=?, updated=?, worker=?, progress=0, error='', started=?
-WHERE id=(SELECT id FROM jobs WHERE status=? ORDER BY id LIMIT 1) AND status=? RETURNING id`,
+WHERE id=(SELECT id FROM jobs WHERE status=? AND stop_requested=0 ORDER BY id LIMIT 1) AND status=?
+AND NOT EXISTS (SELECT 1 FROM app_meta WHERE key='paused' AND value='1') RETURNING id`,
 		Running, now, worker, now, Queued, Queued).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Job{}, ErrNoJob
@@ -301,6 +306,9 @@ func (s *Store) Release(id int64) error {
 // RequeueRunning puts jobs left "running" by a crashed process back in the queue.
 // Call once at startup, before workers start.
 func (s *Store) RequeueRunning() (int64, error) {
+	if err := s.finishRequestedStops(); err != nil {
+		return 0, err
+	}
 	r, err := s.db.Exec(`UPDATE jobs SET status=?, progress=0, worker='', updated=? WHERE status=?`,
 		Queued, s.stamp(), Running)
 	if err != nil {

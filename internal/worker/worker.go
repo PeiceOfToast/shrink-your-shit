@@ -17,8 +17,8 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
@@ -38,6 +38,8 @@ type Queue interface {
 	Drop(id int64) error
 	// UserStopped turns a job the person stopped into a file skipped as user_stopped.
 	UserStopped(id int64) error
+	// StopRequested reports whether "Stop this file" was asked for a running job (checked before the swap).
+	StopRequested(id int64) (bool, error)
 	// Keep marks a job "kept original": a safety check refused the result (reason says why).
 	Keep(id int64, reason string) error
 	// RecordPlan stores the Plan a running job converts with (JSON) and its fingerprint.
@@ -130,6 +132,12 @@ func (w *Worker) PauseNow() {
 	}
 }
 
+func (w *Worker) busy() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.current != 0
+}
+
 func (w *Worker) stop(id int64, why stopKind) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -168,26 +176,59 @@ func (w *Worker) Run(ctx context.Context) {
 
 // RunOne claims and processes a single job. It reports whether a job was run.
 func (w *Worker) RunOne(ctx context.Context) (bool, error) {
+	// The claim and this worker's "current" are set under its lock, so a pause or a stop that looks for
+	// the job waits for the claim and finds it: there is no moment when a job is claimed but not
+	// stoppable. (The claim itself takes no job while paused or once its stop was requested.)
+	w.mu.Lock()
 	if w.Paused != nil && w.Paused() {
+		w.mu.Unlock()
 		return false, nil
 	}
 	job, err := w.Queue.Claim(w.ID)
-	if errors.Is(err, jobs.ErrNoJob) {
-		return false, nil
-	}
 	if err != nil {
+		w.mu.Unlock()
+		if errors.Is(err, jobs.ErrNoJob) {
+			return false, nil
+		}
 		return false, err
 	}
 	jobCtx, cancel := context.WithCancel(ctx)
-	w.mu.Lock()
 	w.current, w.cancelJob, w.stopped = job.ID, cancel, stopNone
 	w.mu.Unlock()
-	final, err := w.process(jobCtx, job)
+	if testHook != nil {
+		testHook("registered")
+	}
+	var final string
+	if w.Paused != nil && w.Paused() { // a pause that landed after the check above: nothing has started
+		w.stop(job.ID, stopPause)
+		err = context.Canceled
+	} else {
+		final, err = w.process(jobCtx, job)
+	}
 	cancel()
 	w.mu.Lock()
 	stopped := w.stopped
-	w.current, w.cancelJob, w.stopped = 0, nil, stopNone
 	w.mu.Unlock()
+	// The job stays this worker's "current" until its outcome is recorded (deferred), so a stop in the
+	// meantime is still answered by this worker.
+	defer func() {
+		w.mu.Lock()
+		w.current, w.cancelJob, w.stopped = 0, nil, stopNone
+		w.mu.Unlock()
+	}()
+	if errors.Is(err, errStopRequested) {
+		stopped = stopUser
+	}
+	// A stop asked for on the job's record wins over a pause or a shutdown, so it never waits in the
+	// queue as a job no claim takes. Once the new file is in place (err == nil) the job is done.
+	if err != nil && stopped != stopUser {
+		if req, rerr := w.Queue.StopRequested(job.ID); rerr == nil && req {
+			stopped = stopUser
+		}
+	}
+	if err != nil && stopped == stopUser {
+		return true, w.Queue.UserStopped(job.ID)
+	}
 	// A stop that came after the new file was in place changes nothing: the job is done (below).
 	if err != nil && stopped != stopNone && ctx.Err() == nil {
 		switch stopped {
@@ -265,6 +306,13 @@ func plainFailure(err error) string {
 	}
 	return "Converting did not finish. Your original was not touched. Press Retry; if it keeps failing, Settings > System shows what went wrong."
 }
+
+// errStopRequested: "Stop this file" was recorded on the job before its swap; nothing was replaced.
+var errStopRequested = errors.New("stopped by the person before the new file was put in place")
+
+// testHook, if set, is called at named points of RunOne ("registered"), so tests can land a pause or a
+// stop exactly there.
+var testHook func(at string)
 
 func (w *Worker) stallAfter() time.Duration {
 	if w.StallAfter > 0 {
@@ -435,6 +483,16 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// change in the instant between them is not caught (see docs/STATUS.md).
 	// From here the swap runs to its end even if the job is stopped meanwhile (it takes milliseconds,
 	// or a few seconds of retries on Windows): a stop never leaves half a swap, and the job is done.
+	// The last moment a stop can still prevent the swap: one that cancelled the job, or one recorded on
+	// the job (it may have reached no worker).
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if req, err := w.Queue.StopRequested(job.ID); err != nil {
+		return "", fmt.Errorf("checking for a stop: %w", err)
+	} else if req {
+		return "", errStopRequested
+	}
 	ctx = context.WithoutCancel(ctx)
 	if err := hook("before swap"); err != nil {
 		return "", err

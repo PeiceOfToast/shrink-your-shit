@@ -344,9 +344,21 @@ func TestPauseResumeAndStop(t *testing.T) {
 	defer st.Close()
 	a, _, _ := OpenAccess(t.TempDir(), false)
 	a.FailDelay = 0
-	paused, running := 0, map[int64]bool{}
+	// the fake worker: "stop" ends its job as stopped, "finish" means it was already being put in place
+	// (it ends done), "slow" means it has not ended yet
+	paused, running := 0, map[int64]string{}
 	srv := httptest.NewServer(Handler(st, a, Engine{PauseNow: func() { paused++ },
-		StopFile: func(id int64) bool { return running[id] }}))
+		StopFile: func(id int64) bool {
+			switch running[id] {
+			case "stop":
+				go st.UserStopped(id)
+			case "finish":
+				go st.Complete(id, "/m/x.mkv", 1)
+			}
+			return running[id] != ""
+		}}))
+	defer func(d time.Duration) { stopWait = d }(stopWait)
+	stopWait = 300 * time.Millisecond
 	defer srv.Close()
 
 	if code, b := post(t, srv, "POST", "/api/queue/pause", `{}`); code != 200 || paused != 1 || !st.Paused() {
@@ -368,13 +380,24 @@ func TestPauseResumeAndStop(t *testing.T) {
 	}
 	r, _ := st.Enqueue(jobs.Job{Library: "/m", Path: "/m/r.mkv"})
 	st.Claim("w")
-	running[r] = true // a worker has it: it records the stop itself
-	if code, _ := post(t, srv, "POST", fmt.Sprintf("/api/jobs/%d/stop", r), `{}`); code != 200 {
-		t.Errorf("stop running %d", code)
+	running[r] = "slow" // a worker has it and has not ended it yet: "stopping", never "stopped"
+	if code, b := post(t, srv, "POST", fmt.Sprintf("/api/jobs/%d/stop", r), `{}`); code != 202 || !strings.Contains(b, `"stopping":true`) {
+		t.Errorf("stop running, not ended yet: %d %s", code, b)
+	}
+	if j, err := st.Get(r); err != nil || j.Status != jobs.Running {
+		t.Errorf("a running job's record must stay until its worker ends it: %+v %v", j, err)
+	}
+	running[r] = "stop" // the worker ends it as stopped: the answer is "stopped"
+	if code, b := post(t, srv, "POST", fmt.Sprintf("/api/jobs/%d/stop", r), `{}`); code != 200 {
+		t.Errorf("stop running %d %s", code, b)
+	}
+	f, _ := st.Enqueue(jobs.Job{Library: "/m", Path: "/m/f.mkv"})
+	st.Claim("w")
+	running[f] = "finish" // already being put in place: it ends done, and the answer says so
+	if code, b := post(t, srv, "POST", fmt.Sprintf("/api/jobs/%d/stop", f), `{}`); code != 409 || !strings.Contains(b, "already_finished") {
+		t.Errorf("stop a file that finishes: %d %s", code, b)
 	}
 	d, _ := st.Enqueue(jobs.Job{Library: "/m", Path: "/m/d.mkv"})
-	running[r] = false
-	st.Complete(r, "/m/r.mkv", 1)
 	st.Claim("w")
 	st.Complete(d, "/m/d.mkv", 1)
 	if code, b := post(t, srv, "POST", fmt.Sprintf("/api/jobs/%d/stop", d), `{}`); code != 409 || !strings.Contains(b, "not_stoppable") {

@@ -74,6 +74,14 @@ func (p *Pool) resize(ctx context.Context) {
 			active++
 		}
 	}
+	// Workers asked to retire that are still here (finishing a file) are taken back first: a new one
+	// beside them would make more conversions run at once than parallelJobs (or MaxParallel) allows.
+	for _, m := range p.workers {
+		if active < want && m.retire.Load() {
+			m.retire.Store(false)
+			active++
+		}
+	}
 	for ; active < want; active++ {
 		p.next++
 		m := &member{w: p.New(p.next), done: make(chan struct{})}
@@ -124,6 +132,17 @@ func (p *Pool) StopFile(id int64) bool {
 // PauseNow stops every running job and puts it back in the queue; set the paused flag first, so no
 // worker takes a new one.
 func (p *Pool) PauseNow() { p.each(func(w *Worker) { w.PauseNow() }) }
+
+// Busy is how many workers are converting a file now, retiring ones included.
+func (p *Pool) Busy() int {
+	n := 0
+	p.each(func(w *Worker) {
+		if w.busy() {
+			n++
+		}
+	})
+	return n
+}
 
 // Running is how many workers are not retiring (for tests and the log).
 func (p *Pool) Running() int {

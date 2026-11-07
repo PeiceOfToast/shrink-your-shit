@@ -126,6 +126,11 @@ WHERE status='done' AND EXISTS (SELECT 1 FROM files f WHERE f.path=jobs.output_p
 	// and only after its identity is checked).
 	{8, "restore aside path", `
 ALTER TABLE originals ADD COLUMN aside TEXT NOT NULL DEFAULT '';`},
+
+	// Slice 24: "Stop this file" on a running job is recorded on its row, so the worker sees it at its
+	// last check before the swap even if the stop reached no running worker (claims skip such rows).
+	{9, "stop requested", `
+ALTER TABLE jobs ADD COLUMN stop_requested INTEGER NOT NULL DEFAULT 0;`},
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.
