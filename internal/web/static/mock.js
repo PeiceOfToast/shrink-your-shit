@@ -44,7 +44,8 @@
   function saveLibs() { try { sessionStorage.setItem("syp-mock-libs", JSON.stringify(libs)); sessionStorage.setItem("syp-mock-flows", JSON.stringify(flows)); } catch (e) {} }
   var flows = [
     { id: "f1", name: "Movies", usedBy: ["Movies"], madeWith: "slider", changedAt: iso(9 * 864e5) },
-    { id: "f2", name: "TV Shows", usedBy: ["TV Shows", "Anime"], madeWith: "slider", changedAt: iso(20 * 864e5) },
+    { id: "f2", name: "TV Shows", usedBy: ["TV Shows", "Anime"], madeWith: "slider", changedAt: iso(20 * 864e5),
+      notes: ["Your audio choice 'Surround as it is' is now 'Keep all audio', which keeps the same tracks."] }, // S6 migrated its audio: notes until its next save
     { id: "f3", name: "Home videos 2", usedBy: ["Home videos"], madeWith: "builder", changedAt: iso(3 * 864e5) },
     { id: "f4", name: "Home videos", usedBy: [], madeWith: "slider", changedAt: iso(60 * 864e5) },
     { id: "f5", name: "Old settings", usedBy: [], madeWith: "legacy", changedAt: iso(120 * 864e5) } // carried over by an upgrade (addendum 11)
@@ -102,6 +103,7 @@
     { id: "s18", library: "Movies", path: "/media/movies/Night Sky (2019) DV.mkv", reason: "dv", detail: "This flow leaves Dolby Vision files as they are.", libraryId: "1" },
     { id: "s19", library: "Movies", path: "/media/movies/Streamed (2021) P5.mp4", reason: "dv_profile5", detail: "Dolby Vision profile 5 has no HDR10 layer to keep.", libraryId: "1" },
     { id: "s20", library: "TV Shows", path: "/media/tv/Season 4/E02.mkv", reason: "already_in_format", detail: "It is already HEVC in MKV with the audio you chose.", libraryId: "2" },
+    { id: "s21", library: "Movies", path: "/media/movies/Glass River (2022).mkv", reason: "modern_format", codec: "AV1", detail: "It is already AV1, which is as small as HEVC, so it was left as it is.", libraryId: "1" }, // S6; the engine's sentence
     { id: "s13", library: "Movies", path: "/media/movies/Short (2003).avi", reason: "setting_cannot_run", detail: "MP4 is the chosen file type, and it cannot hold this file's audio.", libraryId: "1" },
     // Workshop slice 23's temporary guard: the next scan looks again, so no Convert again and no Change rule.
     { id: "s14", library: "TV Shows", path: "/media/tv/Season 4/E01.mkv", reason: "still_changing", detail: "The file was still being written when we looked.", libraryId: "2" },
@@ -202,7 +204,7 @@
   function fileOf(o, extra) {
     var lid = o.libraryId || (libs[find(libs, "name", o.library)] || {}).id || null, li = find(libs, "id", lid), root = li >= 0 ? libs[li].path : "", d = o.path.slice(0, o.path.length - nameOf2(o.path).length).replace(/\/+$/, "");
     return Object.assign({ libraryId: lid, library: o.library, path: o.path, folder: root && d.indexOf(root) === 0 && d.length > root.length ? d.slice(root.length + 1) : ".", name: nameOf2(o.path),
-      bytes: o.bytes || o.beforeBytes || o.fromBytes || 3 * GB, newPath: o.newPath || undefined }, probe(o.path), extra);
+      bytes: o.bytes || o.beforeBytes || o.fromBytes || 3 * GB, newPath: o.newPath || undefined }, probe(o.path), o.codec ? { codec: o.codec } : null, extra);
   }
   var RETRYING = [{ jobId: "j31", library: "Movies", path: "/media/movies/Busy Night (2011).mkv", retryAt: iso(-12 * 60e3), attempts: 1, detail: "The file was in use by another program." },
     { jobId: "j32", library: "TV Shows", path: "/media/tv/Season 3/E07.mkv", retryAt: iso(-31 * 60e3), attempts: 2, detail: "There was not enough free space." }];
@@ -365,7 +367,7 @@
       if (libs[i].settingKind === "custom") return ok(Object.assign({ kind: "custom", warnings: [] }, av));
       // A Basic flow (redesign A1, contract A5 as proposed): its audio choice and its fixed facts.
       return ok(Object.assign({ kind: "slider", quality: libs[i].quality || (libs[i].settingLabel === "Smaller" ? 2 : 3), positions: SLIDER, warnings: [],
-        audio: libs[i].audio || "stereo_aac", becomes: { video: "HEVC", resolution: "same", fileType: "MKV" } }, av));
+        audio: libs[i].audio || "stereo_aac", becomes: { video: "HEVC", resolution: "same", fileType: "MKV" } }, av, (flows[find(flows, "id", libs[i].flowId)] || {}).notes ? { notes: flows[find(flows, "id", libs[i].flowId)].notes } : {}));
     },
     putSetting: function (p, b) {
       var i = find(libs, "id", p.id);
@@ -516,7 +518,7 @@
       return ok({ blockers: [], notes: [] });
     },
     getFlowSetting: function (p) { var i = find(flows, "id", p.id); if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed.");
-      var f = flows[i]; return ok(f.madeWith === "builder" || f.madeWith === "legacy" ? Object.assign({ kind: "custom", warnings: [] }, avail()) : settingOf(recOf(f))); },
+      var f = flows[i]; return ok(f.madeWith === "builder" || f.madeWith === "legacy" ? Object.assign({ kind: "custom", warnings: [] }, avail()) : Object.assign(settingOf(recOf(f)), f.notes ? { notes: f.notes } : {})); },
     putFlowSetting: function (p, b) {
       var i = find(flows, "id", p.id); if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed.");
       var f = flows[i]; if (f.madeWith === "builder" || f.madeWith === "legacy") return fail(409, "flow_read_only", "This flow can't be changed here yet. Nothing was changed.");
@@ -525,7 +527,7 @@
       if (b.speed && b.afterConverting === "folder" && !b.outputDir) return fail(400, "invalid", "Choose the folder for new files. Nothing was changed.");
       var r = recOf(f); applySetting(r, b); f.madeWith = r.sel ? "selectors" : "slider"; f.changedAt = iso(0);
       libs.forEach(function (l) { if (l.flowId === f.id && l !== r) ["quality", "audio", "settingKind", "settingLabel"].forEach(function (k) { l[k] = r[k]; }), r.sel ? (l.sel = copy(r.sel)) : delete l.sel; });
-      saveLibs(); return ok(settingOf(r));
+      delete f.notes; saveLibs(); return ok(settingOf(r));
     },
     renameFlow: function (p, b) { var i = find(flows, "id", p.id); if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed."); flows[i].name = b.name || flows[i].name; saveLibs(); return ok(flowView(flows[i])); },
     duplicateFlow: function (p) { var i = find(flows, "id", p.id); if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed."); var f = copy(flows[i]); f.rec = copy(recOf(flows[i])); f.id = fid(); f.name = flowName(flows[i].name); f.usedBy = []; flows.push(f); saveLibs(); return ok(flowView(f)); },

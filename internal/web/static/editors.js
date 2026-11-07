@@ -37,6 +37,12 @@
   var FIXED = ["Every video not already in this format is converted, even if the new file isn't smaller, so your library ends up in one format. Activity shows the size before and after.",
     "Each new file is checked against the original before it is kept. If the check fails, the original stays.",
     "HDR stays HDR. Dolby Vision files are left as they are."];
+  // S6 (contract 23:32Z): sentences about audio choices the update moved; design (REDESIGN E): one muted line under
+  // the Audio field, each sentence as it is. The server stops sending them after the next save.
+  function audioNotes(s) {
+    var n = (s.notes || []).filter(function (x) { return typeof x === "string" && x; }); if (!n.length) return null;
+    var p = el("span", "hint muted", n.join(" ")); p.id = uid(); p.style.display = "block"; return p;
+  }
   function basic(host, s, langs, names, onChange, label, noLangLine) {
     var sl = slider(host, s.quality, function () { draw(); if (onChange) onChange(); }, label), range = host.querySelector("input[type=range]");
     var box = el("div", "become"), line = el("span"), pic = el("p"), pt = el("span"), f = el("div", "field"), lb = el("label", null, "Audio"),
@@ -64,6 +70,7 @@
     }
     sel.addEventListener("change", function () { draw(); if (onChange) onChange(); });
     f.appendChild(lb); f.appendChild(sel); f.appendChild(hint); if (noLangLine) sel.setAttribute("aria-describedby", hint.id); else f.appendChild(mine);
+    var moved = audioNotes(s); if (moved) { f.appendChild(moved); sel.setAttribute("aria-describedby", sel.getAttribute("aria-describedby") + " " + moved.id); }
     FIXED.forEach(function (t) { ul.appendChild(el("li", null, t)); });
     if (s.becomes) host.appendChild(box);
     host.appendChild(pic); host.appendChild(f); host.appendChild(ul); draw();
@@ -162,8 +169,9 @@
           lines.push([need, function (val) { return noLanguages && val === "my_languages"; }]);
           var srt = el("span", "hint", SRT); srt.id = id + "s"; lines.push([srt, function (val) { return val === "srt"; }]);
         }
+        var moved = f[0] === "audio" && audioNotes(v);
         if (f[0] === "audio") { var sur = el("span", "hint", SURROUND); sur.id = id + "r"; lines.push([sur, function (val) { return val === "eac3_surround" || val === "ac3_surround"; }]); }
-        box.appendChild(note); lines.forEach(function (l) { box.appendChild(l[0]); }); box.appendChild(hint);
+        box.appendChild(note); lines.forEach(function (l) { box.appendChild(l[0]); }); box.appendChild(hint); if (moved) box.appendChild(moved);
         syncs.push(function () {
           Array.prototype.forEach.call(sel.options, function (op, k) { var why = blocked(f[0], op.value); op.disabled = !!why; op.textContent = label(f[0], f[2][k]) + (why || pairWhy(f[0], op.value)); });
           if (sel.options[sel.selectedIndex].disabled) { var first = Array.prototype.filter.call(sel.options, function (op) { return !op.disabled; })[0]; if (first) sel.value = first.value; }
@@ -173,7 +181,7 @@
             text = "Limits each file by its size: 4K " + r["2160"] + " · 1440p " + r["1440"] + " · 1080p " + r["1080"] + " · 720p " + r["720"] + " · SD " + r.sd + " Mbps. A file is never given more than it has now. Quality still sets the picture; the limit only affects busy scenes.";
           }
           hint.textContent = text || ""; hint.hidden = !text;
-          var ids = note.hidden ? [] : [note.id]; lines.forEach(function (l) { var on = l[1](sel.value); l[0].hidden = !on; if (on) ids.push(l[0].id); }); if (text) ids.push(hint.id);
+          var ids = note.hidden ? [] : [note.id]; lines.forEach(function (l) { var on = l[1](sel.value); l[0].hidden = !on; if (on) ids.push(l[0].id); }); if (text) ids.push(hint.id); if (moved) ids.push(moved.id);
           if (ids.length) sel.setAttribute("aria-describedby", ids.join(" ")); else sel.removeAttribute("aria-describedby");
         });
         // The person's own change clears this field's note, then may move another field (with its note).

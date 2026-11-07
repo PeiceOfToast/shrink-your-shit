@@ -9,7 +9,7 @@
   var CARDS = [["unprocessed", "Unprocessed"], ["processing", "Processing"], ["processed", "Processed"], ["skipped", "Skipped"], ["failed", "Failed"]];
   // The old tab addresses open their card.
   var FROM_TAB = { Queue: null, Skipped: "skipped", Failed: "failed", Done: "processed", "Kept originals": "processed" };
-  var KIND = { user_stopped: "info", restored: "info", still_changing: "info", hdr_dv: "warn", shared_file: "warn", cannot_keep_track: "warn", bitmap_subs: "warn", symlink: "idle", unreadable: "warn", dv: "info", dv_profile5: "idle", already_in_format: "idle" };
+  var KIND = { user_stopped: "info", restored: "info", still_changing: "info", hdr_dv: "warn", shared_file: "warn", cannot_keep_track: "warn", bitmap_subs: "warn", symlink: "idle", unreadable: "warn", dv: "info", dv_profile5: "idle", already_in_format: "idle", modern_format: "idle" }; // modern_format: no Change rule (contract 23:33Z)
   var RULE = { hdr_dv: 1, cannot_keep_track: 1, setting_cannot_run: 1, dv: 1 }; // rules a Standard flow can change ("Change rule")
   var st = { show: null, library: "", q: "", kept: false, limit: 50 }, processing = {}, stopping = {};
 
