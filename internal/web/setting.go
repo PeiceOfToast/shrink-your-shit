@@ -232,7 +232,7 @@ func flowSteps(t rules.Template) []map[string]any {
 		if s.FileType == "keep" {
 			add("filetype", "Keep the file type", "")
 		} else {
-			add("filetype", "Make it a "+strings.ToUpper(s.FileType)+" file", "")
+			add("filetype", "Make it an "+strings.ToUpper(s.FileType)+" file", "") // MKV and MP4 both start with a vowel sound
 		}
 		smaller := "smaller"
 		if s.MinSavingPct > 0 {
