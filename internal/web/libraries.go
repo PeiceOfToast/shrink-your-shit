@@ -77,14 +77,15 @@ func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		}
 		return it
 	}
-	one := func(w http.ResponseWriter, l jobs.Library) {
+	oneStatus := func(w http.ResponseWriter, status int, l jobs.Library) {
 		counts, err := store.Counts()
 		if err != nil {
 			serverError(w, err)
 			return
 		}
-		writeJSON(w, item(l, counts))
+		writeJSONStatus(w, status, item(l, counts))
 	}
+	one := func(w http.ResponseWriter, l jobs.Library) { oneStatus(w, http.StatusOK, l) }
 	libID := func(w http.ResponseWriter, r *http.Request) (int64, bool) {
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 		if err != nil || id <= 0 {
@@ -150,8 +151,7 @@ func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			return
 		}
 		w.Header().Set("Location", "/api/libraries/"+strconv.FormatInt(l.ID, 10))
-		w.WriteHeader(http.StatusCreated)
-		one(w, l)
+		oneStatus(w, http.StatusCreated, l)
 	})
 
 	api.HandleFunc("GET /api/libraries/{id}", func(w http.ResponseWriter, r *http.Request) {

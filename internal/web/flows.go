@@ -49,11 +49,9 @@ func flowRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng En
 		var inUse jobs.ErrFlowInUse
 		switch {
 		case errors.As(err, &inUse):
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "flow_in_use",
-				"message": "Libraries use this flow (" + strings.Join(inUse.UsedBy, ", ") + "), so it can't be deleted. Nothing was changed.",
-				"usedBy":  inUse.UsedBy}})
+			writeErrorWith(w, http.StatusConflict, "flow_in_use",
+				"Libraries use this flow ("+strings.Join(inUse.UsedBy, ", ")+"), so it can't be deleted. Nothing was changed.",
+				map[string]any{"usedBy": inUse.UsedBy})
 		case errors.Is(err, jobs.ErrNotFound):
 			apiError(w, http.StatusNotFound, "not_found", "There is no such flow.")
 		case errors.Is(err, jobs.ErrNameTaken):
@@ -82,9 +80,7 @@ func flowRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng En
 		}
 		for _, fu := range all {
 			if fu.ID == f.ID {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(status)
-				json.NewEncoder(w).Encode(view(fu.Flow, fu.UsedBy))
+				writeJSONStatus(w, status, view(fu.Flow, fu.UsedBy))
 				return
 			}
 		}
