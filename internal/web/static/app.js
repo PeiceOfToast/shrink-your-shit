@@ -30,7 +30,7 @@
     show.type = "button"; show.setAttribute("aria-controls", inp.id);
     show.onclick = function () { var on = inp.type === "password"; inp.type = on ? "text" : "password"; show.textContent = on ? "Hide" : "Show"; };
     err.id = "signin-err"; err.setAttribute("role", "alert"); err.style.color = "var(--bad)"; inp.setAttribute("aria-describedby", err.id);
-    function say(c) { err.textContent = !c ? "" : c === "bad_token" ? "That token doesn't match this server. Check you copied all of it." : "We couldn't reach the server. Check it is running, then try again."; }
+    function say(c) { err.textContent = !c ? "" : c === "empty" ? "Paste the access token first." : c === "bad_token" ? "That token doesn't match this server. Check you copied all of it." : "We couldn't reach the server. Check it is running, then try again."; }
     say(code);
     row.appendChild(inp); row.appendChild(show); fld.appendChild(lb); fld.appendChild(row); fld.appendChild(err);
     f.appendChild(fld); f.appendChild(el("div", null, "row")).appendChild(go);
@@ -44,10 +44,10 @@
     box.appendChild(el("p", "It was shown at the end of the install, as part of the web address (the part after ?token=)."));
     box.appendChild(el("p", "Or see it again on the computer running shrink-your-shit. Run the line for that computer:")); box.appendChild(help);
     box.appendChild(el("p", "It prints the token and a sign-in link you can open directly."));
-    main.insertBefore(box, main.firstChild); inp.focus();
+    main.insertBefore(box, main.firstChild); doc.title = "Sign in - shrink-your-shit"; inp.focus();
     f.onsubmit = function (ev) {
       ev.preventDefault();
-      var t = inp.value.trim(); if (!t) { say("bad_token"); inp.focus(); return; }
+      var t = inp.value.trim(); if (!t) { say("empty"); inp.focus(); return; }
       api.login({}, { token: t }).then(function () { inp.value = ""; location.reload(); },
         function (e) { say(e && e.status === 401 ? "bad_token" : "offline"); inp.focus(); inp.select(); });
     };
