@@ -146,7 +146,9 @@
     if (mode === "old") return {};
     var a = mode === "full" ? ["keep_all", "my_languages", "aac", "lossless_only"] : mode === "some" ? ["keep_all", "my_languages"] : ["keep_all"];
     var s = mode === "full" ? ["keep_all", "my_languages", "text_only", "srt"] : mode === "some" ? ["keep_all", "text_only"] : ["keep_all"];
-    return { availableFormats: ["hevc"], availableAudio: a, availableSubtitles: s };
+    // File types by "After converting" (addendum 14): 25a keeps the type when replacing; "full" lists every type.
+    var t = mode === "full" ? { replace: ["keep", "mkv", "mp4"], beside: ["keep", "mkv", "mp4"] } : { replace: ["keep"], beside: ["keep", "mkv", "mp4"] };
+    return { availableFormats: ["hevc"], availableAudio: a, availableSubtitles: s, availableFileTypes: t };
   }
   function gone() { return fail(404, "not_found", "That item is gone. Nothing was changed. Reload the page."); }
   function removeFrom(arr, key, id) { var i = find(arr, key, id); return i < 0 ? null : arr.splice(i, 1)[0]; }

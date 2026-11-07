@@ -92,6 +92,28 @@
       }
       host.appendChild(fs);
     });
+    // File type depends on "After converting" (contract addendum 14): types not listed for the chosen mode stay
+    // visible but disabled, with design's line. Switching to a mode that can't keep the chosen type sets it back to
+    // "Keep as is" and announces why; the mode itself is never blocked. No list, or every type in every mode: nothing.
+    var ft = v.availableFileTypes, ftSel = fields.fileType, acSel = fields.afterConverting;
+    if (ft && typeof ft === "object" && ftSel && acSel) {
+      var allTypes = Array.prototype.map.call(ftSel.options, function (o) { return o.value; });
+      var complete = Object.keys(ft).every(function (k) { return allTypes.every(function (t) { return (ft[k] || []).indexOf(t) >= 0; }); });
+      if (!complete) {
+        var ftNote = el("span", "hint", 'To change the file type, choose "Put the new file next to the original" under After converting. Changing the type while replacing the original comes in a later update.');
+        ftNote.id = ftSel.id + "n"; ftSel.parentNode.insertBefore(ftNote, ftSel.nextSibling);
+        var ftLive = el("p", "sr"); ftLive.setAttribute("role", "status"); ftLive.setAttribute("aria-live", "polite"); host.appendChild(ftLive);
+        var ftHint = ftSel.getAttribute("aria-describedby") || "";
+        var syncFt = function (announce) {
+          var ok = ft[acSel.value] || allTypes, some = ok.length < allTypes.length;
+          Array.prototype.forEach.call(ftSel.options, function (o) { o.disabled = ok.indexOf(o.value) < 0; });
+          ftNote.hidden = !some; ftSel.setAttribute("aria-describedby", ((some ? ftNote.id + " " : "") + ftHint).trim());
+          if (ftSel.options[ftSel.selectedIndex].disabled) { ftSel.value = "keep"; if (announce) { ftLive.textContent = ""; ftLive.textContent = "File type set back to Keep as is. " + ftNote.textContent; } changed(); }
+        };
+        acSel.addEventListener("change", function () { syncFt(true); });
+        syncFt(false);
+      }
+    }
     // Minimum saving follows Quality (the slider's value for that position) until the person types their own.
     var table = null, edited = false;
     function follow() {
