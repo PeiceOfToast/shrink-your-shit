@@ -51,9 +51,13 @@
       kind = k; var host = $("f-editor"), sw = $("f-switch"); host.textContent = ""; sw.textContent = "";
       $("f-qh").hidden = k !== "basic";
       if (k === "basic") {
-        editor = S.editors.basic(host, s, langs, names, function () { say(""); }, f.name + ": smallest file to best quality");
-        var a = el("a", null, "Switch to Standard"); a.href = "#"; sw.appendChild(a);
-        a.onclick = function (e) { e.preventDefault(); var v = editor.get();
+        // A Basic choice Standard can't hold (Stereo AAC, until piece E adds it to the server's available audio) would
+        // change quietly on Save, so the switch is off (still focusable) with design's line under it (REDESIGN B3).
+        var a = el("a", null, "Switch to Standard"), why = el("span", "hint", "Switching to Standard comes in a later update for flows with Stereo AAC."); a.href = "#"; why.id = "f-switch-why"; why.style.display = "block";
+        var syncSwitch = function () { var off = !!editor && (s.availableAudio || []).indexOf(editor.get().audio) < 0; a.setAttribute("aria-disabled", off ? "true" : "false"); why.hidden = !off; if (off) a.setAttribute("aria-describedby", why.id); else a.removeAttribute("aria-describedby"); };
+        editor = S.editors.basic(host, s, langs, names, function () { say(""); syncSwitch(); }, f.name + ": smallest file to best quality");
+        sw.appendChild(a); sw.appendChild(why); syncSwitch();
+        a.onclick = function (e) { e.preventDefault(); if (a.getAttribute("aria-disabled") === "true") return; var v = editor.get();
           build("standard", { quality: v.quality, speed: "normal", format: "hevc", resolution: "keep", maxBitrate: "none", audio: v.audio, subtitles: "keep_all", fileType: "mkv", afterConverting: "replace", skipHdr: true, fitsBasic: true, becomes: s.becomes, availableFileTypes: s.availableFileTypes, availableAudio: s.availableAudio, availableSubtitles: s.availableSubtitles });
           say("Standard choices. They take effect when you press Save."); };
       } else {
