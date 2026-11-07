@@ -15,3 +15,8 @@ type State struct {
 	Born    time.Time
 	Changed time.Time
 }
+
+// Same reports whether a and b are the same state of the same file: every field equal.
+func (a State) Same(b State) bool {
+	return a.Key == b.Key && a.Size == b.Size && a.MTime.Equal(b.MTime) && a.Born.Equal(b.Born) && a.Changed.Equal(b.Changed)
+}

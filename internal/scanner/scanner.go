@@ -185,8 +185,7 @@ func stateOf(path string, st os.FileInfo) fileState {
 }
 
 func (a fileState) same(b fileState) bool {
-	return !a.unknown && !b.unknown && a.Key == b.Key && a.Size == b.Size && a.MTime.Equal(b.MTime) &&
-		a.Born.Equal(b.Born) && a.Changed.Equal(b.Changed) && a.hasCtime == b.hasCtime && a.ctime.Equal(b.ctime)
+	return !a.unknown && !b.unknown && a.State.Same(b.State) && a.hasCtime == b.hasCtime && a.ctime.Equal(b.ctime)
 }
 
 // observe notes path as seen now in state st, and reports whether this is its first look in that
