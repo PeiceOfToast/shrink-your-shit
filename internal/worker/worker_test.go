@@ -127,6 +127,7 @@ func newScenarioNamed(t *testing.T, name string) *scenario {
 	if err != nil {
 		t.Fatal(err)
 	}
+	st.SetPaused(false) // the test's worker is started (S2: a new install starts stopped)
 	t.Cleanup(func() { st.Close() })
 	dir := t.TempDir()
 	src := filepath.Join(dir, name)

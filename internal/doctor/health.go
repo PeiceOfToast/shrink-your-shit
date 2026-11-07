@@ -150,3 +150,19 @@ func (t *LogTail) Lines() []string {
 	defer t.mu.Unlock()
 	return append([]string{}, t.lines...)
 }
+
+// gpuVendors are the vendors whose ffmpeg hardware encoders name them; the others (VA-API, VideoToolbox,
+// Media Foundation, V4L2) do not say which card they drive.
+var gpuVendors = map[string]string{"hevc_nvenc": "NVIDIA", "hevc_amf": "AMD", "hevc_qsv": "Intel"}
+
+// GPU is what the Workers page says about the graphics card (S2): whether doctor's hardware test found a
+// working hardware encoder, and its vendor when the encoder names one ("" otherwise). Converting uses the
+// processor either way, for now.
+func GPU(t Tools) (found bool, vendor string) {
+	for _, enc := range t.Hardware {
+		if v, ok := gpuVendors[enc]; ok {
+			return true, v
+		}
+	}
+	return len(t.Hardware) > 0, ""
+}

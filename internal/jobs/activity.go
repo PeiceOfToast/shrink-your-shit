@@ -233,6 +233,26 @@ func (s *Store) SetPaused(on bool) error {
 	return s.SetMeta("paused", v)
 }
 
+// StoppedByUpdate reports whether the one-time notice "Converting is stopped after the update" is due
+// (S2): an update stopped a worker that had been running, and nobody has started one or dismissed it since.
+func (s *Store) StoppedByUpdate() bool {
+	v, _, _ := s.Meta("stopped_by_update")
+	return v == "1"
+}
+
+// BasicChangedByUpdate reports whether that notice also says what changed for Basic flows (set by the
+// update that changed them, S4; cleared with it).
+func (s *Store) BasicChangedByUpdate() bool {
+	v, _, _ := s.Meta("basic_changed_by_update")
+	return v == "1"
+}
+
+// ClearStoppedByUpdate ends that notice for good, its Basic sentence too (a worker started, or "Got it").
+func (s *Store) ClearStoppedByUpdate() error {
+	_, err := s.db.Exec(`DELETE FROM app_meta WHERE key IN ('stopped_by_update', 'basic_changed_by_update')`)
+	return err
+}
+
 // RequestStop is "Stop this file" from the page (DESIGN decision 7), in one transaction, so no claim
 // falls between the look and the change. A waiting job stops at once: UserStopped. A running job is only
 // marked (stop_requested; running is true): its worker ends it as stopped, or, if the new file was

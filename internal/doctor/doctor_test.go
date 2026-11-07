@@ -450,3 +450,18 @@ func TestKnownOriginalThroughALinkIsNotOrphaned(t *testing.T) {
 		}
 	}
 }
+
+// The Workers page's graphics card (S2): found when a hardware encoder works here, with its vendor when
+// the encoder names one.
+func TestGPU(t *testing.T) {
+	for _, c := range []struct {
+		hw     []string
+		found  bool
+		vendor string
+	}{{nil, false, ""}, {[]string{"hevc_nvenc"}, true, "NVIDIA"}, {[]string{"hevc_vaapi", "hevc_qsv"}, true, "Intel"},
+		{[]string{"hevc_amf"}, true, "AMD"}, {[]string{"hevc_vaapi"}, true, ""}} {
+		if f, v := GPU(Tools{Hardware: c.hw}); f != c.found || v != c.vendor {
+			t.Errorf("%v: %v %q", c.hw, f, v)
+		}
+	}
+}

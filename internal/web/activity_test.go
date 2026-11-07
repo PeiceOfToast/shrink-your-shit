@@ -4,6 +4,7 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http/httptest"
 	"os"
@@ -126,7 +127,7 @@ func TestActivitySummaryQueueFailedSkipped(t *testing.T) {
 	skippedHEVC(st, dir+"/gone.mkv")
 
 	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/activity/summary"})
-	if body != `{"counts":{"failed":2,"skipped":3},"freedBytes":300,"paused":false,"waitingBytes":600,"waitingFiles":2,"workingFiles":1}`+"\n" {
+	if body != `{"counts":{"failed":2,"skipped":3},"freedBytes":300,"paused":false,"waitingBytes":600,"waitingFiles":2,"workersRunning":true,"workingFiles":1}`+"\n" {
 		t.Errorf("summary %s", body)
 	}
 
@@ -342,6 +343,7 @@ func TestPauseResumeAndStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	st.SetPaused(false) // the test's worker is started (S2: a new install starts stopped)
 	defer st.Close()
 	a, _, _ := OpenAccess(t.TempDir(), false)
 	a.FailDelay = 0
@@ -419,6 +421,7 @@ func TestDeleteLibraryLeavesNothingHalfDone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	st.SetPaused(false) // the test's worker is started (S2: a new install starts stopped)
 	defer st.Close()
 	a, _, _ := OpenAccess(t.TempDir(), false)
 	a.FailDelay = 0
@@ -601,5 +604,108 @@ func TestRetryingAndAttempts(t *testing.T) {
 	}
 	if _, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/activity/queue"}); !strings.Contains(body, `"retrying":[{`) {
 		t.Errorf("a still waits: %s", body)
+	}
+}
+
+// Workers (S2): this computer's worker, as agreed (proposal + 20:25Z amendments). Stopped: nothing is
+// claimed (the scanner still queues). Stop after the current files lets them finish; stop now puts them
+// back in the queue. Start clears the update notice; so does notice/dismiss. Files at once is parallelJobs (1-8).
+func TestWorkersAPI(t *testing.T) {
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	a, _, _ := OpenAccess(t.TempDir(), false)
+	a.FailDelay = 0
+	pausedNow := 0
+	srv := httptest.NewServer(Handler(st, a, Engine{PauseNow: func() { pausedNow++ }}))
+	defer srv.Close()
+	get := func() (map[string]any, string) {
+		_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/workers"})
+		var out struct{ Workers []map[string]any }
+		json.Unmarshal([]byte(body), &out)
+		if len(out.Workers) != 1 {
+			t.Fatalf("workers %s", body)
+		}
+		return out.Workers[0], body
+	}
+	summary := func() any {
+		_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/activity/summary"})
+		var s map[string]any
+		json.Unmarshal([]byte(body), &s)
+		return s["workersRunning"]
+	}
+	// a new install: stopped, no notice, gpu null without the checks, quietUntil null
+	w, body := get()
+	if w["id"] != "this" || w["name"] != "This computer" || w["state"] != "stopped" || w["filesAtOnce"] != 1.0 || w["gpu"] != nil ||
+		!strings.Contains(body, `"quietUntil":null`) || !strings.Contains(body, `"converting":[]`) ||
+		!strings.Contains(body, `"stoppedByUpdate":false`) || !strings.Contains(body, `"basicFlowsChanged":false`) || summary() != false {
+		t.Fatalf("new install: %s", body)
+	}
+	id, _ := st.Enqueue(jobs.Job{Path: "/m/a.mkv"})
+	if _, err := st.Claim("w"); !errors.Is(err, jobs.ErrNoJob) {
+		t.Fatalf("a job was claimed while the worker is stopped: %v", err)
+	}
+	// start: idle (running, waiting for files), the update notice cleared
+	st.SetMeta("stopped_by_update", "1")
+	if code, body := post(t, srv, "POST", "/api/workers/this/start", `{}`); code != 200 || !strings.Contains(body, `"state":"idle"`) {
+		t.Fatalf("start: %d %s", code, body)
+	}
+	if st.StoppedByUpdate() || summary() != true {
+		t.Error("start must clear the notice and say a worker runs")
+	}
+	st.Claim("w")
+	st.Progress(id, 40)
+	if w, _ := get(); w["state"] != "converting" {
+		t.Errorf("with a file: %v", w["state"])
+	}
+	// stop after the current files: they finish (nothing put back), the worker is stopping
+	if code, body := post(t, srv, "POST", "/api/workers/this/stop", `{"when":"after_current"}`); code != 200 || !strings.Contains(body, `"state":"stopping"`) ||
+		!strings.Contains(body, `"jobId":"`+fmt.Sprint(id)+`","path":"/m/a.mkv","percent":40`) || pausedNow != 0 {
+		t.Fatalf("stop after current: %d %s (put back %d)", code, body, pausedNow)
+	}
+	st.Complete(id, "/m/a.mkv", 1)
+	if w, _ := get(); w["state"] != "stopped" {
+		t.Errorf("after the file finished: %v", w["state"])
+	}
+	// stop now: the running files go back to the queue; stop with no "when" means after_current
+	post(t, srv, "POST", "/api/workers/this/start", `{}`)
+	if code, _ := post(t, srv, "POST", "/api/workers/this/stop", `{"when":"now"}`); code != 200 || pausedNow != 1 || !st.Paused() {
+		t.Errorf("stop now: %d, put back %d", code, pausedNow)
+	}
+	post(t, srv, "POST", "/api/workers/this/start", `{}`)
+	if code, body := post(t, srv, "POST", "/api/workers/this/stop", `{}`); code != 200 || !strings.Contains(body, `"state":"stopped"`) || pausedNow != 1 {
+		t.Errorf("stop with nothing converting: %d %s", code, body)
+	}
+	// files at once (1-8)
+	if code, body := post(t, srv, "PATCH", "/api/workers/this", `{"filesAtOnce":6}`); code != 200 || !strings.Contains(body, `"filesAtOnce":6`) {
+		t.Errorf("files at once: %d %s", code, body)
+	}
+	if s, _ := LoadSettings(st); s.ParallelJobs != 6 {
+		t.Errorf("parallelJobs %d", s.ParallelJobs)
+	}
+	for _, bad := range []string{`{"filesAtOnce":0}`, `{"filesAtOnce":9}`} {
+		if code, body := post(t, srv, "PATCH", "/api/workers/this", bad); code != 400 || errCode(body) != "invalid_setting" || !strings.Contains(body, "from 1 to 8") {
+			t.Errorf("%s: %d %s", bad, code, body)
+		}
+	}
+	// Got it
+	st.SetMeta("stopped_by_update", "1")
+	if code, body := post(t, srv, "POST", "/api/workers/notice/dismiss", `{}`); code != 200 || st.StoppedByUpdate() || body != `{"stoppedByUpdate":false}`+"\n" {
+		t.Errorf("dismiss: %d %s", code, body)
+	}
+	// refusals
+	if code, body := post(t, srv, "POST", "/api/workers/other/start", `{}`); code != 404 || errCode(body) != "not_found" {
+		t.Errorf("unknown worker: %d %s", code, body)
+	}
+	if code, body := post(t, srv, "POST", "/api/workers/this/stop", `{"when":"later"}`); code != 400 || errCode(body) != "invalid" {
+		t.Errorf("bad when: %d %s", code, body)
+	}
+	// the old Resume starts this worker and clears the notice too (one release, until ui-shop switches)
+	post(t, srv, "POST", "/api/workers/this/stop", `{}`)
+	st.SetMeta("stopped_by_update", "1")
+	if code, _ := post(t, srv, "POST", "/api/queue/resume", `{}`); code != 200 || st.Paused() || st.StoppedByUpdate() {
+		t.Errorf("resume: %d paused %v notice %v", code, st.Paused(), st.StoppedByUpdate())
 	}
 }

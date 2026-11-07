@@ -19,6 +19,7 @@ func TestStatusAndRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	st.SetPaused(false) // the test's worker is started (S2: a new install starts stopped)
 	defer st.Close()
 	st.AddLibrary("lib", "/videos", rules.SliderTemplate(3), true)
 	id, _ := st.Enqueue(jobs.Job{Library: "/videos", Path: "/videos/a.mkv"})

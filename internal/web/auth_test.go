@@ -37,6 +37,7 @@ func server(t *testing.T, exposed bool) (*httptest.Server, *Access, *jobs.Store)
 	if err != nil {
 		t.Fatal(err)
 	}
+	st.SetPaused(false) // the test's worker is started (S2: a new install starts stopped)
 	t.Cleanup(func() { st.Close() })
 	a, _, err := OpenAccess(t.TempDir(), exposed)
 	if err != nil {

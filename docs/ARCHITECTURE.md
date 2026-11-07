@@ -387,6 +387,25 @@ sampled hash (otherwise it is left alone and the row marked `needs_attention`); 
   the scanner, which looks at the file afresh (and may skip it again for the same reason).
 - `POST /api/system/backup` answers 501 `not_available` until slice 38.
 
+## Workers: nothing converts until one is started (S2, `internal/web/workers.go`)
+
+USER-REVIEW 2026-11-07: "i dont want it to just start before the user wants". Today there is one worker,
+this computer's (`id` `this`): the worker pool below. Started or stopped is the `paused` flag, which
+`Claim` honours in the same statement, so no job is taken while it is stopped; scanning and the Preview go
+on. Migration 14 stops it on every install, new or upgraded; an upgraded install whose worker was running
+(and that had libraries or jobs) gets a one-time notice (`stopped_by_update`, `stoppedByUpdate` in the API)
+that starting a worker or `POST /api/workers/notice/dismiss` ends for good, together with
+`basic_changed_by_update` (`basicFlowsChanged`, which S4's migration sets). `GET /api/workers` gives
+`{workers: [{id, name, host, state stopped|idle|converting|stopping (quiet_hours, unreachable: later),
+filesAtOnce, converting [{jobId, path, percent, etaSeconds}], quietUntil (null until quiet hours), gpu}],
+stoppedByUpdate, basicFlowsChanged}`; `gpu` is doctor's hardware test, `{found, vendor}` (vendor NVIDIA,
+AMD or Intel when the working encoder names one, else null), or null when the checks are not available.
+`POST /api/workers/{id}/start`; `POST /api/workers/{id}/stop` with `when` `after_current` (default: the
+flag only, running files finish, state `stopping`) or `now` (also `PauseNow`: they go back to the queue,
+originals untouched); `PATCH /api/workers/{id}` with `filesAtOnce` (1-8, stored as `parallelJobs`, which
+the pool follows). Activity's Pause/Resume stay as aliases (Resume also ends the notice) until the page
+moves; `GET /api/activity/summary` adds `workersRunning` (bool).
+
 ## Pause, stop and the stall watchdog (slice 24)
 
 - **Workers:** `worker.Pool` runs as many workers as the `parallelJobs` setting (1 by default, at most

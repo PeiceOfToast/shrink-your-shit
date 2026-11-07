@@ -157,6 +157,15 @@ UPDATE jobs SET status='queued', progress=0, worker='', error='', attempts=0, re
 WHERE status='kept' AND (error LIKE 'the new file (%) saves less than the required %% of the original (%)'
   OR error LIKE 'the new file (%) is not smaller than the original (%)');
 DELETE FROM files WHERE reason IN ('already_efficient', 'would_not_shrink', 'unknown_bitrate');`},
+	// S2, no auto-start (USER-REVIEW 2026-11-07): every install starts with its worker stopped (the paused
+	// flag, which Claim honours). One that was running before gets a one-time notice (stopped_by_update),
+	// a brand-new one (no libraries, no jobs yet) does not. (The notice's Basic sentence is S4's: its
+	// migration sets basic_changed_by_update.)
+	{14, "workers start stopped", `
+INSERT INTO app_meta(key, value) SELECT 'stopped_by_update', '1'
+WHERE COALESCE((SELECT value FROM app_meta WHERE key='paused'), '0') <> '1'
+  AND (EXISTS (SELECT 1 FROM libraries) OR EXISTS (SELECT 1 FROM jobs));
+INSERT INTO app_meta(key, value) VALUES ('paused', '1') ON CONFLICT(key) DO UPDATE SET value='1';`},
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.

@@ -32,6 +32,7 @@ func libServer(t *testing.T, exposed bool) (*httptest.Server, *jobs.Store, *Acce
 	if err != nil {
 		t.Fatal(err)
 	}
+	st.SetPaused(false) // the test's worker is started (S2: a new install starts stopped)
 	t.Cleanup(func() { st.Close() })
 	a, _, _ := OpenAccess(t.TempDir(), exposed)
 	a.FailDelay = 0

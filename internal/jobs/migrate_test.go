@@ -459,6 +459,7 @@ func TestAlwaysStandardizeMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	s.SetPaused(false) // claims below (S2: a new database starts with its worker stopped)
 	kept := map[string]string{
 		"/m/less.mkv":    "the new file (1.0 MB) saves less than the required 20% of the original (1.1 MB)",
 		"/m/bigger.mkv":  "the new file (2.0 MB) is not smaller than the original (1.1 MB)",
@@ -494,8 +495,8 @@ func TestAlwaysStandardizeMigration(t *testing.T) {
 		}
 	}
 	// a second start: the migration does not run again
-	s.Claim("w")
-	s.Keep(ids["/m/less.mkv"], kept["/m/less.mkv"])
+	// (set back to kept directly: claiming "the next job" would pick whichever was queued first)
+	s.db.Exec(`UPDATE jobs SET status='kept', error=? WHERE id=?`, kept["/m/less.mkv"], ids["/m/less.mkv"])
 	s.Close()
 	s, err = Open(path)
 	if err != nil {
@@ -504,5 +505,42 @@ func TestAlwaysStandardizeMigration(t *testing.T) {
 	defer s.Close()
 	if j, _ := s.Get(ids["/m/less.mkv"]); j.Status != Kept {
 		t.Errorf("queued again on a second start: %+v", j)
+	}
+}
+
+// Migration 14 (S2): every install starts with its worker stopped; the one-time notice only for an
+// existing install whose worker was running. A brand-new database gets none; a paused one gets none.
+// Starting (or Got it) clears it, and it stays cleared after a restart.
+func TestWorkersStartStoppedMigration(t *testing.T) {
+	fresh := open(t)
+	fresh.SetPaused(true) // open() starts it for tests; as migrated, before that:
+	if s, _ := Open(filepath.Join(t.TempDir(), "new.db")); !s.Paused() || s.StoppedByUpdate() || s.BasicChangedByUpdate() {
+		t.Errorf("a new install: paused %v, notice %v", s.Paused(), s.StoppedByUpdate())
+	}
+	upgrade := func(paused string) *Store {
+		path := filepath.Join(t.TempDir(), "syp.db")
+		s, _ := Open(path)
+		s.Enqueue(Job{Path: "/m/a.mkv"}) // an install in use
+		s.SetMeta("paused", paused)
+		s.db.Exec(`DELETE FROM app_meta WHERE key='stopped_by_update'`)
+		s.db.Exec(`PRAGMA user_version = 13`) // as an install from before S2 left it
+		s.Close()
+		s, err := Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { s.Close() })
+		return s
+	}
+	if s := upgrade("0"); !s.Paused() || !s.StoppedByUpdate() || s.BasicChangedByUpdate() {
+		t.Errorf("a running install after the update: paused %v, notice %v", s.Paused(), s.StoppedByUpdate())
+	}
+	if s := upgrade("1"); !s.Paused() || s.StoppedByUpdate() {
+		t.Errorf("a paused install after the update: paused %v, notice %v", s.Paused(), s.StoppedByUpdate())
+	}
+	s := upgrade("0")
+	s.SetMeta("basic_changed_by_update", "1") // as S4's migration will
+	if err := s.ClearStoppedByUpdate(); err != nil || s.StoppedByUpdate() || s.BasicChangedByUpdate() {
+		t.Errorf("cleared: %v %v %v", err, s.StoppedByUpdate(), s.BasicChangedByUpdate())
 	}
 }
