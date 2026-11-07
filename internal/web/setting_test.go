@@ -335,3 +335,18 @@ func TestReplaceWithNewFileTypeIsSavedWithAWarning(t *testing.T) {
 		t.Errorf("preview: %d %s", code, body)
 	}
 }
+
+// No flow's steps promise a smaller file any more (always standardize): a legacy flow, replacing or beside,
+// says the original is replaced once the new file is checked (review 4542610).
+func TestLegacyFlowStepsHaveNoSizeCondition(t *testing.T) {
+	for _, out := range []string{"replace", "beside"} {
+		for _, s := range flowSteps(rules.LegacyTemplate(rules.Default(), out)) {
+			if d := fmt.Sprint(s["label"], s["detail"]); strings.Contains(d, "smaller than") || strings.Contains(d, "and smaller") {
+				t.Errorf("%s: %q", out, d)
+			}
+			if s["kind"] == "finish" && out == "replace" && s["label"] != "Replace the original once the new file is checked" {
+				t.Errorf("replace finish: %q", s["label"])
+			}
+		}
+	}
+}

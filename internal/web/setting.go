@@ -295,7 +295,7 @@ func flowSteps(t rules.Template) []map[string]any {
 		if p.Output == "beside" {
 			add("finish", "Write the new file next to the original and keep the original", "")
 		} else {
-			add("finish", "Replace the original once the new file is checked and smaller", "")
+			add("finish", "Replace the original once the new file is checked", "") // always standardize: no size condition
 		}
 	default:
 		return []map[string]any{}
