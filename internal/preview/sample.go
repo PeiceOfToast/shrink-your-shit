@@ -47,7 +47,7 @@ func (p *Previewer) Sample(ctx context.Context, path string, st fs.FileInfo, t r
 		}
 		return Sample{Lines: []string{"Left as it is: " + why + "."}, ExpectedBytesLow: size, ExpectedBytesHigh: size}
 	}
-	low, high := Saving(plan, info, size)
+	low, high := Saving(t, plan, info, size)
 	s := Sample{ExpectedBytesLow: size - high, ExpectedBytesHigh: size - low}
 	if high == 0 {
 		s.Lines = append(s.Lines, fmt.Sprintf("Probably left as it is: the new file is unlikely to be at least %d%% smaller.", plan.MinSavingPct))

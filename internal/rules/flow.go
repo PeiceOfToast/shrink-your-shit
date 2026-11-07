@@ -49,17 +49,22 @@ type SliderPosition struct {
 	MinSavingPct int     `json:"minSavingPct"`
 	MinSSIM      float64 `json:"-"` // the picture threshold
 	MinBPP       float64 `json:"-"` // eligible only above this many bits per pixel per frame
+	// SaveLowPct..SaveHighPct is the Preview's estimate of how much of a converted file's video is
+	// saved (DESIGN/FIRST-RUN.md: always a range). Anchored on the published reports in TIERS-PLAN.md
+	// (about 10-55% for real content at Balanced), not measured on real files yet (D8). The low end is
+	// never above MinSavingPct.
+	SaveLowPct, SaveHighPct int `json:"-"`
 }
 
 // Slider is the slider table (TIERS-PLAN.md 2.1). Every number is an untuned starting value (D8): it
 // changes after calibration on real files, which is why the UI reads it from the API. This is the one
 // place these numbers live.
 var Slider = []SliderPosition{
-	{1, "Smallest", 27, 20, 0.93, 0.05},
-	{2, "Smaller", 25, 15, 0.94, 0.065},
-	{3, "Balanced", 23, 10, 0.95, 0.08},
-	{4, "Better quality", 21, 8, 0.965, 0.10},
-	{5, "Best quality", 19, 5, 0.975, 0.12},
+	{1, "Smallest", 27, 20, 0.93, 0.05, 15, 60},
+	{2, "Smaller", 25, 15, 0.94, 0.065, 12, 57},
+	{3, "Balanced", 23, 10, 0.95, 0.08, 10, 55},
+	{4, "Better quality", 21, 8, 0.965, 0.10, 8, 40},
+	{5, "Best quality", 19, 5, 0.975, 0.12, 5, 25},
 }
 
 // SliderSources are the video codecs a slider flow converts (D5): H.264 and older formats.
@@ -86,6 +91,32 @@ func SliderTemplate(quality int) Template {
 func LegacyTemplate(r Rule, output string) Template {
 	return Template{Kind: KindLegacy, CompilerVersion: CompilerVersion, Params: Params{
 		FromCodec: r.FromCodec, MinBitrateKbps: r.MinBitrateKbps, CRF: r.CRF, Preset: r.Preset, Output: output}}
+}
+
+// NearMinBPP: a source within this factor of its position's MinBPP is the kind the minimum saving most
+// often keeps, so the Preview counts its saving from 0 at the low end.
+const NearMinBPP = 1.5
+
+// EstimatePosition is the slider position whose estimate band applies to a template: its own position,
+// or for a legacy flow the position with the nearest CRF (between two, the one that saves less).
+func (t Template) EstimatePosition() SliderPosition {
+	if p, ok := SliderAt(t.Params.Quality); ok && t.Kind == KindSlider {
+		return p
+	}
+	best := Slider[DefaultSliderPosition-1]
+	for _, p := range Slider {
+		if abs(p.CRF-t.Params.CRF) <= abs(best.CRF-t.Params.CRF) { // a tie goes to the smaller saving
+			best = p
+		}
+	}
+	return best
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }
 
 // SliderAt returns the slider position q (1..5).

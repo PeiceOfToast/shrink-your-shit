@@ -115,9 +115,9 @@ func TestPreviewCountsAndEstimates(t *testing.T) {
 	if r.SharedNoSaving != 1 {
 		t.Errorf("shared %d", r.SharedNoSaving)
 	}
-	// a.mkv and b.mp4 are 3 MB of video at 0.16 bits per pixel; Balanced (CRF 23) makes 0.03 to 0.075
-	// of it: 53% to 81% saved. The shared file (4 MB) frees nothing and is left out.
-	if r.EstimateBytesLow < 1_500_000 || r.EstimateBytesLow > 1_650_000 || r.EstimateBytesHigh < 2_400_000 || r.EstimateBytesHigh > 2_500_000 {
+	// a.mkv and b.mp4 are 3 MB of video at 0.16 bits per pixel; Balanced saves 10% to 55% of it. The
+	// shared file (4 MB) frees nothing and is left out.
+	if r.EstimateBytesLow != 300_000 || r.EstimateBytesHigh != 1_650_000 {
 		t.Errorf("estimate %d - %d", r.EstimateBytesLow, r.EstimateBytesHigh)
 	}
 	if r.EstimateBytesLow >= r.EstimateBytesHigh {
@@ -218,32 +218,47 @@ func snapshot(t *testing.T, dir string) string {
 }
 
 func TestSaving(t *testing.T) {
+	// 100 s of 1080p24: video at kbps, plus 1 MB of audio and container that is never counted
 	info := func(kbps int) media.Info {
-		return media.Info{DurationSec: 100, SizeBytes: int64(kbps) * 1000 / 8 * 100, Streams: []media.Stream{
+		return media.Info{DurationSec: 100, VideoCodec: "h264", BitrateKbps: kbps, Streams: []media.Stream{
 			{Type: "video", Codec: "h264", Width: 1920, Height: 1080, FrameRate: 24, BitrateKbps: kbps}}}
 	}
-	plan := func(crf, minPct int) rules.Plan {
-		return rules.Plan{Video: rules.VideoEncode{CRF: crf}, MinSavingPct: minPct}
+	size := func(kbps int) int64 { return int64(kbps)*1000/8*100 + 1_000_000 }
+	save := func(t rules.Template, kbps int) (int64, int64) {
+		i := info(kbps)
+		return Saving(t, t.Compile(i), i, size(kbps))
 	}
-	size := int64(100_000_000)
-	lo, hi := Saving(plan(23, 10), info(8000), size)
-	if lo <= 0 || hi <= lo || hi >= size {
-		t.Errorf("8 Mbps at 23: %d - %d", lo, hi)
+	video := int64(12000) * 1000 / 8 * 100 // 0.24 bits per pixel: above 1.5x every threshold
+	for _, c := range []struct{ q, lo, hi int }{{1, 15, 60}, {3, 10, 55}, {5, 5, 25}} {
+		lo, hi := save(rules.SliderTemplate(c.q), 12000)
+		if lo != video*int64(c.lo)/100 || hi != video*int64(c.hi)/100 {
+			t.Errorf("position %d: %d - %d, want %d%% - %d%% of the video", c.q, lo, hi, c.lo, c.hi)
+		}
 	}
-	// a higher CRF makes a smaller file
-	if lo2, hi2 := Saving(plan(27, 10), info(8000), size); lo2 <= lo || hi2 <= hi {
-		t.Errorf("CRF 27 %d - %d is not more than CRF 23 %d - %d", lo2, hi2, lo, hi)
+	// within 1.5x of Balanced's 0.08 threshold (0.10 bits per pixel): counts from 0
+	if lo, hi := save(rules.SliderTemplate(3), 5000); lo != 0 || hi != int64(5000)*1000/8*100*55/100 {
+		t.Errorf("near the threshold: %d - %d", lo, hi)
 	}
-	// a lean source would be kept by its minimum saving: nothing freed
-	if lo, hi := Saving(plan(19, 20), info(1500), size); lo != 0 || hi != 0 {
-		t.Errorf("lean source %d - %d", lo, hi)
+	// a skipped file saves nothing
+	if lo, _ := save(rules.SliderTemplate(5), 8000); lo != 0 { // 0.16: within 1.5x of Best's 0.12
+		t.Errorf("Best near its threshold: %d", lo)
 	}
-	// unknown bits per pixel: the wide fallback band
-	if lo, hi := Saving(plan(23, 0), media.Info{}, size); lo != 20_000_000 || hi != 60_000_000 {
-		t.Errorf("unknown %d - %d", lo, hi)
-	}
-	if lo, hi := Saving(rules.Plan{Skip: "x"}, info(8000), size); lo != 0 || hi != 0 {
+	if lo, hi := Saving(rules.SliderTemplate(3), rules.Plan{Skip: "x"}, info(8000), size(8000)); lo != 0 || hi != 0 {
 		t.Error("a skipped file saves nothing")
+	}
+	// a legacy flow uses the nearest position's band (CRF 26: Smaller) and its bitrate threshold
+	legacy := rules.LegacyTemplate(rules.Default(), "replace") // h264 from 4000 kbps, CRF 26
+	if lo, hi := save(legacy, 12000); lo != video*12/100 || hi != video*57/100 {
+		t.Errorf("legacy: %d - %d", lo, hi)
+	}
+	if lo, _ := save(legacy, 5000); lo != 0 {
+		t.Errorf("legacy near its 4000 kbps threshold counts from 0: %d", lo)
+	}
+	// every position's low end is at most its minimum saving, and the high end shrinks toward Best
+	for i, p := range rules.Slider {
+		if p.SaveLowPct > p.MinSavingPct || p.SaveLowPct >= p.SaveHighPct || i > 0 && p.SaveHighPct > rules.Slider[i-1].SaveHighPct {
+			t.Errorf("band %+v", p)
+		}
 	}
 }
 

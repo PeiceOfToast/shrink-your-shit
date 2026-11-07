@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"math"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -206,7 +205,7 @@ func (p *Previewer) compute(files []file, t rules.Template) Result {
 			results[i].plan = plan
 			results[i].shared = media.LinkCount(f.path, f.st) > 1
 			if !results[i].shared {
-				lo, hi := Saving(plan, info, f.st.Size())
+				lo, hi := Saving(t, plan, info, f.st.Size())
 				results[i].save = [2]int64{lo, hi}
 			}
 		}(i, f)
@@ -230,43 +229,33 @@ func (p *Previewer) compute(files []file, t rules.Template) Result {
 	return res
 }
 
-// The estimate (v1, TIERS-PLAN.md 2.1 and FIRST-RUN.md): from bits per pixel. The new video gets
-// between OutBPPLow and OutBPPHigh bits per pixel per frame at CRF 23, halving every 6 CRF up (x265's
-// rule of thumb), never more than the source has. Everything other than the video is copied, so it
-// saves nothing. The band is deliberately wide: these are untuned starting values (D8), to be
-// calibrated on real files.
-const (
-	OutBPPLow  = 0.03
-	OutBPPHigh = 0.075
-	// UnknownRatio is the band of new-to-old video size used when the source's bits per pixel are
-	// unknown (a legacy flow converts such files).
-	UnknownRatioLow, UnknownRatioHigh = 0.4, 0.8
-)
-
-// Saving is the range of bytes converting one file could free under its Plan. A file whose best case
-// does not reach the Plan's minimum saving is kept, so it frees nothing; one that may miss it counts
-// from zero.
-func Saving(plan rules.Plan, info media.Info, size int64) (low, high int64) {
+// Saving is the range of bytes converting one file could free under template t (v1, orch-lead's ruling
+// on 2026-11-07): the file's video bytes times its position's SaveLowPct..SaveHighPct (rules.Slider).
+// Audio, subtitles and the container are copied, so they save nothing. A file whose source is within
+// rules.NearMinBPP of its position's threshold counts from 0 at the low end (the minimum saving keeps
+// many of those), and one whose best case misses the minimum saving counts as kept (0). The low end is
+// the position's minimum saving, so it is not cut to 0 just for sitting at that line.
+func Saving(t rules.Template, plan rules.Plan, info media.Info, size int64) (low, high int64) {
 	if plan.Skip != "" || size <= 0 {
 		return 0, 0
 	}
+	pos := t.EstimatePosition()
 	kbps, bpp := rules.SourceVideo(info)
-	video := size
+	video := size // bitrate unknown (only a legacy flow converts such files): the whole file
 	if kbps > 0 && info.DurationSec > 0 {
 		video = min(size, int64(float64(kbps)*1000/8*info.DurationSec))
 	}
-	ratioLow, ratioHigh := UnknownRatioLow, UnknownRatioHigh // new video size / old, best and worst case
-	if bpp > 0 {
-		scale := math.Pow(2, float64(23-plan.Video.CRF)/6)
-		ratioLow, ratioHigh = math.Min(1, OutBPPLow*scale/bpp), math.Min(1, OutBPPHigh*scale/bpp)
-	}
-	high = int64(math.Round(float64(video) * (1 - ratioLow)))
-	low = int64(math.Round(float64(video) * (1 - ratioHigh)))
-	floor := int64(float64(size) * float64(plan.MinSavingPct) / 100)
+	low = video * int64(pos.SaveLowPct) / 100
+	high = video * int64(pos.SaveHighPct) / 100
+	floor := size * int64(plan.MinSavingPct) / 100
 	if high < floor || high <= 0 {
 		return 0, 0
 	}
-	if low < floor {
+	near := bpp > 0 && pos.MinBPP > 0 && bpp <= pos.MinBPP*rules.NearMinBPP
+	if t.Kind == rules.KindLegacy {
+		near = t.Params.MinBitrateKbps > 0 && kbps > 0 && float64(kbps) <= float64(t.Params.MinBitrateKbps)*rules.NearMinBPP
+	}
+	if near {
 		low = 0
 	}
 	return low, high

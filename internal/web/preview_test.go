@@ -48,7 +48,7 @@ func TestPreviewEndpoint(t *testing.T) {
 	for _, body := range []string{`{}`, `{"setting":{}}`, `{"setting":null,"sampleFile":null}`, `{"setting":{"kind":"slider","quality":5}}`} {
 		code, out, b := pv(body)
 		if code != 200 || out.Status != "ready" || out.Files != 2 || out.CanShrink != 2 || out.TotalBytes != 2_000_000 ||
-			out.EstimateBytesLow <= 0 || out.EstimateBytesHigh <= out.EstimateBytesLow || out.Sample != nil || !strings.Contains(b, `"skipped":{}`) {
+			out.EstimateBytesLow < 0 || out.EstimateBytesHigh <= out.EstimateBytesLow || out.Sample != nil || !strings.Contains(b, `"skipped":{}`) {
 			t.Errorf("%s: %d %s", body, code, b)
 		}
 	}

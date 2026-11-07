@@ -146,10 +146,15 @@ and compiles the setting's Plan for it, so the counts come from the scanner's ow
 `unreadable`). Files with more than one link stay in `canShrink`, are counted in `sharedNoSaving`
 and are left out of the range (until slice 12 skips them as `shared_file`).
 
-The range (v1, bits per pixel): the new video gets 0.03 to 0.075 bits per pixel per frame at CRF 23,
-halving every 6 CRF up, never more than the source; the rest of the file is copied and saves nothing;
-a file whose best case misses the Plan's minimum saving counts as kept (0), one that may miss it
-counts from 0 (`preview.Saving`). The numbers are untuned (D8). The result is kept in memory per
+The range (v1, orch-lead's ruling 2026-11-07): per converted file, its video bytes times its
+position's band in `rules.Slider` (`SaveLowPct`-`SaveHighPct`: Smallest 15-60%, Smaller 12-57%,
+Balanced 10-55%, Better quality 8-40%, Best quality 5-25%; a legacy flow uses the position with the
+nearest CRF). The bands follow the published reports in TIERS-PLAN.md and are not measured on real
+files yet (D8). Audio, subtitles and the container are copied, so they never count. A source within
+1.5x of its position's eligibility threshold (`rules.NearMinBPP`; a legacy flow: its bitrate) counts
+from 0 at the low end, and a file whose best case misses the minimum saving counts as kept (0)
+(`preview.Saving`). Content like film grain or noise can need more data in the new format than
+before; the range overshoots there, and a short sample encode is the planned fix. The result is kept in memory per
 library and setting with a signature of the listing: the same setting over the same files answers at
 once; a change starts a new computation, shown as `stale` with `status: computing` until it is ready.
 A request waits up to 2 s, then answers `computing` and the page asks again. Probes run 4 at a time.
