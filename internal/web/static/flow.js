@@ -5,7 +5,7 @@
   function $(id) { return document.getElementById(id); }
   function fail(e) { var b = $("err"); b.textContent = e && e.message || "Something went wrong. Nothing was changed."; b.hidden = false; }
   var HEAD = { start: "Start", check: "Check", video: "Video", audio: "Audio", subtitles: "Subtitles", filetype: "File type", finish: "Finish", skip: "Skip", resolution: "Resolution" };
-  var MADE = { slider: "the slider", selectors: "the simple choices", builder: "the builder" };
+  var MADE = { slider: "Made with the slider", selectors: "Made with the simple choices", builder: "Made with the builder", legacy: "Made from an earlier install" };
 
   // Steps run left to right; a step with branches is followed by a column of labelled rows.
   function drawSteps(steps, parent) {
@@ -41,7 +41,7 @@
     Promise.all([api.getFlow({ id: id }), api.listFlows(), api.listLibraries()]).then(function (r) {
       var f = r[0], meta = r[1].items.filter(function (x) { return x.id === id; })[0] || { usedBy: [], madeWith: "" }, libs = r[2].items;
       $("f-title").textContent = f.name; document.title = f.name + " - shrink-your-shit";
-      $("f-meta").textContent = (meta.usedBy.length ? "Used by " + meta.usedBy.length + (meta.usedBy.length === 1 ? " library: " : " libraries: ") + meta.usedBy.join(", ") : "Not used by any library") + " · Made with " + (MADE[meta.madeWith] || "the builder");
+      $("f-meta").textContent = (meta.usedBy.length ? "Used by " + meta.usedBy.length + (meta.usedBy.length === 1 ? " library: " : " libraries: ") + meta.usedBy.join(", ") : "Not used by any library") + " · " + (MADE[meta.madeWith] || "Made another way");
       var note = $("f-note");
       note.textContent = " This shows what happens to each video, from left to right. ";
       var lib = libs.filter(function (l) { return meta.usedBy.length === 1 && l.name === meta.usedBy[0]; })[0];
@@ -49,7 +49,7 @@
       drawSteps(f.steps, $("graph")); text(f.steps, $("f-text"));
       $("f-body").hidden = false;
       $("builder").hidden = false;
-      api.exportFlow({ id: id }).then(function () { $("export").hidden = false; }, function () {}); // Export shows only when the server can export
+      $("export").hidden = !api.flowIO();
       $("export").onclick = function () {
         api.exportFlow({ id: id }).then(function (j) {
           var u = URL.createObjectURL(new Blob([JSON.stringify(j, null, 2)], { type: "application/json" })), a = el("a"); a.href = u; a.download = f.name + ".json"; a.click(); URL.revokeObjectURL(u);
