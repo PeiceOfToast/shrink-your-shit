@@ -128,6 +128,24 @@ Settings can make a new token, which signs out every other browser. Scripts send
 `Authorization: Bearer <token>`. There is no HTTPS, so the token crosses the network in plain text:
 use it on a network you trust, never on the internet.
 
+## Checking the setup
+
+`shrink-your-shit doctor` checks the converter (ffmpeg, ffprobe, the HEVC encoder, the picture check),
+the data folder and every library folder, and says in plain words what to fix. It asks the running
+program, so the folder checks are made as the user the service runs as:
+
+| Where it runs | Command |
+|---|---|
+| Linux service | `sudo shrink-your-shit doctor` |
+| macOS | `shrink-your-shit doctor` |
+| Docker | `docker exec <container name> shrink-your-shit doctor` |
+| Windows | `shrink-your-shit doctor` |
+
+It exits with 1 if something needs fixing. The web page shows the same checks under Settings > System,
+and checks a folder as soon as you choose it. On Linux the service runs as the user `syp`: a folder it
+cannot write needs `sudo chown -R syp:syp /path/to/videos` (or `syp` in the folder's group with group
+write access).
+
 ## Is it safe for my files?
 
 Yes by design. The new file is written next to the original under a temporary

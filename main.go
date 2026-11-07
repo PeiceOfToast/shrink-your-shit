@@ -9,6 +9,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/doctor"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -38,6 +40,11 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "token" {
 		os.Exit(tokenCommand(os.Stdout, os.Stderr))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "doctor" {
+		os.Exit(doctorCommand(os.Stdout, os.Stderr))
+	}
+	logs := &doctor.LogTail{} // the last log lines, for the health report
+	log.SetOutput(io.MultiWriter(os.Stderr, logs))
 	var libs libFlag
 	flag.Var(&libs, "library", "folder to watch: added as a library if no library has it yet, never changed or removed (repeat for several; or env SYP_LIBRARIES, separated by : on Linux/macOS, ; on Windows). Libraries can also be added on the web page")
 	def := rules.Default()
@@ -86,13 +93,15 @@ func main() {
 		}
 		libs[i] = abs
 	}
+	// A missing converter does not stop the program: the web page and its health report still run
+	// and say what is wrong; only converting waits (see below).
 	ffmpegPath, err := resolveTool("ffmpeg", *ffmpeg)
 	if err != nil {
-		log.Fatal(err)
+		log.Print(err)
 	}
 	ffprobePath, err := resolveTool("ffprobe", *ffprobe)
 	if err != nil {
-		log.Fatal(err)
+		log.Print(err)
 	}
 	if err := os.MkdirAll(*data, 0o755); err != nil {
 		log.Fatal(err)
@@ -125,20 +134,31 @@ func main() {
 	defer stop()
 
 	x := media.OSExec{}
+	chk := &doctor.Checker{Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath}
+	converts := chk.Converter(ctx).Converts()
 	sc := &scanner.Scanner{Store: store, Exec: x, FFprobe: ffprobePath, Targets: scanTargets(store), MinAge: *settle}
-	go sc.Run(ctx, *every)
+	if converts {
+		go sc.Run(ctx, *every)
+	} else {
+		log.Print("The converter is not installed correctly (ffmpeg and ffprobe with libx265 and the ssim filter are needed), so nothing is scanned or converted. The web page's Settings > System says what is missing; fix it, then restart shrink-your-shit.")
+	}
 	w := &worker.Worker{ID: "builtin", Queue: store, Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath,
 		Template: store.TemplateFor, Poll: 3 * time.Second,
 		DecodeCheck: *decode, MinSSIM: *minSSIM}
 	workerDone := make(chan struct{})
-	go func() { w.Run(ctx); close(workerDone) }()
+	if converts {
+		go func() { w.Run(ctx); close(workerDone) }()
+	} else {
+		close(workerDone)
+	}
 
 	access, created, err := web.OpenAccess(*data, exposedToNetwork(*addr))
 	if err != nil {
 		log.Fatalf("access token: %v", err)
 	}
 	srv := &http.Server{Addr: *addr, Handler: web.Handler(store, access, web.Engine{
-		ScanNow: sc.ScanNow, NextScan: sc.NextScan, StopJob: w.StopJob})}
+		ScanNow: sc.ScanNow, NextScan: sc.NextScan, StopJob: w.StopJob,
+		Doctor: chk, DataDir: *data, Version: version, Logs: logs})}
 	go func() {
 		<-ctx.Done()
 		srv.Shutdown(context.Background())

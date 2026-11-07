@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/doctor"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
@@ -23,6 +24,11 @@ type Engine struct {
 	ScanNow  func()           // start a scan pass now
 	NextScan func() time.Time // when the next regular pass starts
 	StopJob  func(id int64)   // stop a running job (its library was removed)
+
+	Doctor  *doctor.Checker // the setup checks (nil: not available)
+	DataDir string          // the data folder, for the health report
+	Version string
+	Logs    *doctor.LogTail // the last log lines, for the health report
 }
 
 // libraryItem is a library as GET /api/libraries shows it (UI-API-CONTRACT.md "Libraries").

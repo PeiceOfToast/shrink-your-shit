@@ -91,6 +91,16 @@ func (w *Worker) freeSpace(dir string) (uint64, error) {
 	return diskFree(dir)
 }
 
+// SpaceNeeded is the free space converting a file of size bytes needs on its disk: its size plus a
+// tenth plus 64 MB (the new file is normally smaller, but not guaranteed to be). The doctor (slice
+// 20) uses the same rule for a whole folder, with its largest video.
+func SpaceNeeded(size int64) uint64 {
+	return uint64(size) + uint64(size)/10 + 64<<20
+}
+
+// DiskFree is the space this user may write on the volume holding dir.
+func DiskFree(dir string) (uint64, error) { return diskFree(dir) }
+
 // preflight refuses to start when the volume cannot hold the new file next to the original: about the
 // original's size plus a margin (the new file is normally smaller, but not guaranteed to be).
 func (w *Worker) preflight(sourcePath string, sourceSize int64) error {
@@ -99,7 +109,7 @@ func (w *Worker) preflight(sourcePath string, sourceSize int64) error {
 	if err != nil {
 		return kept("could not check the free disk space in %s (%v)", dir, err)
 	}
-	need := uint64(sourceSize) + uint64(sourceSize)/10 + 64<<20
+	need := SpaceNeeded(sourceSize)
 	if free < need {
 		return kept("not enough free disk space in %s: about %s is needed to convert this file safely, %s is free",
 			dir, rules.HumanBytes(int64(need)), rules.HumanBytes(int64(free)))
