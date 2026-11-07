@@ -1028,3 +1028,42 @@ func TestSharedDuringConversionIsRefusedAtTheSwap(t *testing.T) {
 		})
 	}
 }
+
+// An edit of the original while it converts that keeps its size and modification time, seen only in
+// what media.FileState reports (on Windows its change time; os.FileInfo carries none there), stops the
+// swap: whether it happens during the encode (the check before verifying) or just before the swap
+// (the check before each rename). The edit is simulated by moving the reported change time, as Windows
+// would (review 86970d8).
+func TestInFlightEditSeenOnlyInFileStateIsRefused(t *testing.T) {
+	for _, when := range []string{"encode", "before swap"} {
+		for _, mode := range []OutputMode{Replace, Beside} {
+			t.Run(when+"/"+string(mode), func(t *testing.T) {
+				s := newScenario(t)
+				edited := false
+				readSourceState = func(p string, fi os.FileInfo) (media.State, error) {
+					st, err := media.FileState(p, fi)
+					if edited && p == s.src {
+						st.Changed = st.Changed.Add(time.Second)
+					}
+					return st, err
+				}
+				t.Cleanup(func() { readSourceState = media.FileState; swapHook = nil })
+				if when == "encode" {
+					s.onEncode = func() { edited = true }
+				} else {
+					swapHook = func(at string) error {
+						if at == "before swap" {
+							edited = true
+						}
+						return nil
+					}
+				}
+				s.run(mode)
+				if j := s.job(); j.Status != jobs.Kept || !strings.Contains(j.Error, "changed while it was being converted") {
+					t.Errorf("%s %q", j.Status, j.Error)
+				}
+				s.assertOriginalSafe()
+			})
+		}
+	}
+}

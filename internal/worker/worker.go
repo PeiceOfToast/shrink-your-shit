@@ -382,6 +382,12 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 		return "", fmt.Errorf("source file: %w", serr)
 	}
+	// The file as the system keeps it (on Windows read through its handle, with its change time, which
+	// os.FileInfo does not carry there): compared again before the swap (review 86970d8).
+	beforeState, err := readSourceState(job.Path, before)
+	if err != nil {
+		return "", failed(cannotRead, err)
+	}
 	// The file guards again (slice 23; the scanner decided earlier, and the file may have gained another
 	// name since): a shared file is left alone. sourceUnchanged checks it again right before the swap.
 	if media.LinkCount(job.Path, before) > 1 {
@@ -486,7 +492,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 
 	// If the source changed while we encoded, the new file is stale: say so first (otherwise the
 	// checks would report a confusing mismatch), and check again right before replacing.
-	if err := sourceUnchanged(job.Path, before); err != nil {
+	if err := sourceUnchanged(job.Path, before, beforeState); err != nil {
 		return "", err
 	}
 	if err := stage.intact(); err != nil {
@@ -536,7 +542,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		return "", err
 	}
 	stillOK := func() error {
-		if err := sourceUnchanged(job.Path, before); err != nil {
+		if err := sourceUnchanged(job.Path, before, beforeState); err != nil {
 			return err
 		}
 		return stage.intact()
@@ -583,13 +589,21 @@ func statOpen(path string) (os.FileInfo, error) {
 	return f.Stat()
 }
 
+// readSourceState is media.FileState; tests change what it reports.
+var readSourceState = media.FileState
+
 // sourceUnchanged refuses the new file if the original is no longer the file that was read: a
 // different file now (another device or inode, or Windows file ID), or the same file with another
 // size, modification time or (where the system records one) change time. The change time catches
 // an edit that keeps the size and puts the modification time back, as some tag editors do.
-func sourceUnchanged(path string, before os.FileInfo) error {
+func sourceUnchanged(path string, before os.FileInfo, beforeState media.State) error {
 	now, err := os.Stat(path)
 	if err != nil || !os.SameFile(now, before) || now.Size() != before.Size() || !now.ModTime().Equal(before.ModTime()) {
+		return kept("the original file changed while it was being converted, so the new file is out of date")
+	}
+	// media.FileState too: on Windows it carries the change time, which the Stat above does not (an edit
+	// that keeps the size and puts the modification time back); unreadable now counts as changed
+	if st, err := readSourceState(path, now); err != nil || !st.Same(beforeState) {
 		return kept("the original file changed while it was being converted, so the new file is out of date")
 	}
 	if b, ok := media.ChangeTime(before); ok {
