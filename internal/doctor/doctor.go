@@ -57,6 +57,9 @@ type Checker struct {
 	FFmpeg, FFprobe string
 	// FreeSpace reports the writable bytes on the volume holding dir; nil = the real thing.
 	FreeSpace func(dir string) (uint64, error)
+	// KnownOriginals are the kept originals the database knows (jobs.Store.KnownOriginals); nil: the
+	// check for orphaned ones is skipped (no database at hand).
+	KnownOriginals func() (map[string]bool, error)
 
 	mu      sync.Mutex
 	tools   *Tools // the converter, without the hardware test
@@ -221,6 +224,13 @@ func (c *Checker) Folder(ctx context.Context, path string) (r FolderReport) {
 	}
 	// Messages here are shown as they are in first-run: plain words only (DESIGN/ACCEPTANCE.md COPY-1,
 	// FIRST-RUN.md "States and errors"). The health report's details may be technical.
+	if c.KnownOriginals != nil {
+		if known, err := c.KnownOriginals(); err == nil {
+			for _, o := range OrphanedOriginals(path, known) {
+				r.Notes = append(r.Notes, Issue{"orphaned_originals", o.Message()})
+			}
+		}
+	}
 	if hardlinked == 1 {
 		r.Notes = append(r.Notes, Issue{"hardlinks", "1 file is shared with another folder (for example by Radarr). We will leave it alone, because changing it would break the link."})
 	} else if hardlinked > 1 {

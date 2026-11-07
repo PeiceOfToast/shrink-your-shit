@@ -372,3 +372,59 @@ func TestFolderRefusesSystemFolders(t *testing.T) {
 		t.Errorf("%+v", r)
 	}
 }
+
+// Originals in .syp-trash that the database does not know (kept by an earlier setup) are a note per
+// folder with design's words, count and size; known ones are not; nothing is touched.
+func TestOrphanedOriginalsAreANote(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "movie.mkv"), []byte("video"), 0o644)
+	trash := filepath.Join(dir, ".syp-trash")
+	os.MkdirAll(trash, 0o755)
+	os.WriteFile(filepath.Join(trash, "old.1.mkv"), make([]byte, 3<<20), 0o644)
+	os.WriteFile(filepath.Join(trash, "old.2.mkv"), make([]byte, 1<<20), 0o644)
+	os.WriteFile(filepath.Join(trash, "known.3.mkv"), []byte("k"), 0o644)
+	sub := filepath.Join(dir, "Shows", ".syp-trash")
+	os.MkdirAll(sub, 0o755)
+	os.WriteFile(filepath.Join(sub, "ep.4.mkv"), make([]byte, 1<<20), 0o644)
+	real, _ := filepath.EvalSymlinks(dir)
+	c := checker(1 << 40)
+	c.KnownOriginals = func() (map[string]bool, error) {
+		return map[string]bool{filepath.Join(real, ".syp-trash", "known.3.mkv"): true}, nil
+	}
+	r := c.Folder(context.Background(), dir)
+	var got []string
+	for _, n := range r.Notes {
+		if n.Code == "orphaned_originals" {
+			got = append(got, n.Message)
+		}
+	}
+	want := []string{
+		"2 original files (4.0 MB) from an earlier setup are still in the hidden folder " + filepath.Join(real, ".syp-trash") + ". They are not listed under Kept originals and will not be deleted automatically. Move them back or delete them yourself; we won't touch them.",
+		"1 original file (1.0 MB) from an earlier setup is still in the hidden folder " + filepath.Join(real, "Shows", ".syp-trash") + ". It is not listed under Kept originals and will not be deleted automatically. Move it back or delete it yourself; we won't touch it.",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("notes:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if !r.OK {
+		t.Error("a note, not a blocker")
+	}
+	if _, err := os.Stat(filepath.Join(trash, "old.1.mkv")); err != nil {
+		t.Error("nothing may be touched")
+	}
+	// everything known: no note; no database at hand: no check
+	c.KnownOriginals = func() (map[string]bool, error) {
+		return map[string]bool{filepath.Join(real, ".syp-trash", "known.3.mkv"): true, filepath.Join(real, ".syp-trash", "old.1.mkv"): true,
+			filepath.Join(real, ".syp-trash", "old.2.mkv"): true, filepath.Join(real, "Shows", ".syp-trash", "ep.4.mkv"): true}, nil
+	}
+	for _, n := range c.Folder(context.Background(), dir).Notes {
+		if n.Code == "orphaned_originals" {
+			t.Errorf("all known: %s", n.Message)
+		}
+	}
+	c.KnownOriginals = nil
+	for _, n := range c.Folder(context.Background(), dir).Notes {
+		if n.Code == "orphaned_originals" {
+			t.Errorf("no database: %s", n.Message)
+		}
+	}
+}

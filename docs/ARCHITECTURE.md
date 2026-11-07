@@ -145,7 +145,10 @@ flows in plain words, raw numbers only in `detail`.
   removed, so the check is the service's own); it holds videos (counted with the scanner's rules); its
   disk has room to convert the largest one (`worker.SpaceNeeded`, the worker's own preflight rule);
   files shared with another folder are a note saying they will be left alone (link counts on Linux,
-  macOS and Windows); folders inside that cannot
+  macOS and Windows); originals in a `.syp-trash` folder that the database does not know (kept by an earlier setup whose
+  database was reset or lost: never purged, not under Kept originals) are a note per folder,
+  `orphaned_originals`, with count, size and path (`doctor.OrphanedOriginals`, which slice 28's
+  uninstall summary is to reuse); they are only reported, never deleted, renamed or moved; folders inside that cannot
   be read are counted in a note, and free space that cannot be read is a note, never a silent pass. A read-only folder's message gives the fix for the system: the `syp`
   service user's `chown` on Linux, the container's user on Docker, Get Info on macOS, Security on Windows.
 - `doctor` asks the running program for its health report (with the token, like `token`), so its
