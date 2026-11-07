@@ -73,8 +73,7 @@
   function draw(r) {
     var j = JSON.stringify([r, asking]); if (j === seen) return; seen = j;
     var a = document.activeElement, k = a && a.getAttribute && a.getAttribute("data-key");
-    // The one-time notice; its second sentence when the update changed existing Basic libraries (S4's basicFlowsChanged;
-    // design's words until piece B, REDESIGN D2).
+    // The one-time notice; its second sentence when the update changed existing Basic flows (S4's basicFlowsChanged; REDESIGN D2).
     $("update-note").hidden = !r.stoppedByUpdate; $("update-basic").hidden = !r.basicFlowsChanged;
     r.workers.forEach(function (w) { if (w.state !== "stopping") delete stoppedNow[w.id]; }); // stopped (or started again): forget the "now"
     var list = $("worker-list"); list.textContent = "";
