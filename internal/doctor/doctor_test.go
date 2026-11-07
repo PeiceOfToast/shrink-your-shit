@@ -78,7 +78,7 @@ func TestAGoodFolder(t *testing.T) {
 	if !r.OK || len(r.Blockers) != 0 || r.VideoCount != 2 || r.TotalBytes != 4000 {
 		t.Fatalf("%+v", r)
 	}
-	if strings.Join(codes(r.Notes), ",") != "no_hw_encoder" || !strings.Contains(r.Notes[0].Message, "That is fine") {
+	if strings.Join(codes(r.Notes), ",") != "no_hw_encoder" || r.Notes[0].Message != "Not found. That is fine." {
 		t.Errorf("notes %+v", r.Notes)
 	}
 	if left, _ := filepath.Glob(filepath.Join(dir, ".syp-write-check-*")); len(left) != 0 {
@@ -108,7 +108,7 @@ func TestReadOnlyFolderSaysHowToFixIt(t *testing.T) {
 	if runtime.GOOS == "linux" && !inContainer() && (!strings.Contains(msg, "sudo chown -R") || !strings.Contains(msg, dir)) {
 		t.Errorf("Linux needs the exact fix: %q", msg)
 	}
-	if !strings.Contains(msg, "read-only") || !strings.Contains(msg, "Check again") {
+	if !strings.HasPrefix(msg, "This folder is read-only. Make it writable, then press Check again. ") {
 		t.Errorf("%q", msg)
 	}
 }
@@ -155,8 +155,14 @@ func TestHardlinkedFilesAreANote(t *testing.T) {
 	if !r.OK || !strings.Contains(strings.Join(codes(r.Notes), ","), "hardlinks") {
 		t.Fatalf("%+v", r)
 	}
-	if n := r.Notes[0]; !strings.HasPrefix(n.Message, "2 files are hardlinked") {
+	want := "2 files are shared with another folder (for example by Radarr). This version still converts them, but that frees no space, because the other folder keeps its copy. Leaving them alone comes in a later update."
+	if n := r.Notes[0]; n.Message != want {
 		t.Errorf("%q", n.Message)
+	}
+	os.Remove(filepath.Join(dir, "copy.mkv"))
+	os.Link(filepath.Join(dir, "moviea.mkv"), filepath.Join(t.TempDir(), "elsewhere.mkv")) // shared with another folder
+	if n := checker(1<<40).Folder(context.Background(), dir).Notes[0]; !strings.HasPrefix(n.Message, "1 file is shared with another folder") || !strings.Contains(n.Message, "converts it,") || !strings.Contains(n.Message, "Leaving it alone") {
+		t.Errorf("singular: %q", n.Message)
 	}
 }
 
@@ -233,5 +239,28 @@ func TestLogTail(t *testing.T) {
 	var none *LogTail
 	if none.Lines() == nil {
 		t.Error("an empty tail is an empty list, not null")
+	}
+}
+
+// Every message first-run shows is in plain words (DESIGN/ACCEPTANCE.md COPY-1).
+func TestFolderMessagesUsePlainWords(t *testing.T) {
+	banned := []string{"node", "runner", "plugin", "formula", "preset", "transcode", "ffmpeg", "ffprobe", "encoder", "libx265", "ssim", "hardlink", "CRF"}
+	dirs := map[string]string{"good": videosIn(t, 1000), "empty": t.TempDir(), "missing": filepath.Join(t.TempDir(), "nope")}
+	links := videosIn(t, 1000)
+	os.Link(filepath.Join(links, "moviea.mkv"), filepath.Join(links, "b.mkv"))
+	dirs["links"] = links
+	broken := &Checker{Exec: fakeFFmpeg(false, false, nil, nil), FreeSpace: func(string) (uint64, error) { return 1, nil }}
+	for name, d := range dirs {
+		for _, c := range []*Checker{checker(1 << 40), checker(1), broken} {
+			r := c.Folder(context.Background(), d)
+			for _, i := range append(r.Blockers, r.Notes...) {
+				low := strings.ToLower(i.Message)
+				for _, w := range banned {
+					if strings.Contains(low, strings.ToLower(w)) {
+						t.Errorf("%s/%s: %q uses %q", name, i.Code, i.Message, w)
+					}
+				}
+			}
+		}
 	}
 }

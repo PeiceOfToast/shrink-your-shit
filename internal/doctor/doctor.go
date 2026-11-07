@@ -207,13 +207,15 @@ func (c *Checker) Folder(ctx context.Context, path string) (r FolderReport) {
 	if !tools.Converts() {
 		r.Blockers = append(r.Blockers, Issue{"no_converter", "The converter is not installed correctly."})
 	}
-	if hardlinked > 0 {
-		r.Notes = append(r.Notes, Issue{"hardlinks", fmt.Sprintf(
-			"%s hardlinked (the same file under more than one name). Converting one of them frees no space, because the other names keep the original.",
-			plural(hardlinked, "file is", "files are"))})
+	// Messages here are shown as they are in first-run: plain words only (DESIGN/ACCEPTANCE.md COPY-1,
+	// FIRST-RUN.md "States and errors"). The health report's details may be technical.
+	if hardlinked == 1 {
+		r.Notes = append(r.Notes, Issue{"hardlinks", "1 file is shared with another folder (for example by Radarr). This version still converts it, but that frees no space, because the other folder keeps its copy. Leaving it alone comes in a later update."})
+	} else if hardlinked > 1 {
+		r.Notes = append(r.Notes, Issue{"hardlinks", fmt.Sprintf("%d files are shared with another folder (for example by Radarr). This version still converts them, but that frees no space, because the other folder keeps its copy. Leaving them alone comes in a later update.", hardlinked)})
 	}
 	if len(tools.Hardware) == 0 {
-		r.Notes = append(r.Notes, Issue{"no_hw_encoder", "No graphics-card encoder found. That is fine: converting uses the processor."})
+		r.Notes = append(r.Notes, Issue{"no_hw_encoder", "Not found. That is fine."})
 	}
 	return r
 }
@@ -229,26 +231,27 @@ func writeProbe(dir string) error {
 	return os.Remove(name)
 }
 
-// ReadOnlyMessage says how to make a folder writable for the user the program runs as, for this
-// system: the Linux service runs as "syp", the container as a numeric user, macOS and Windows as the
-// person's own account.
+// ReadOnlyMessage is design's read-only copy (FIRST-RUN.md) followed by how to make the folder
+// writable for the user the program runs as, on this system: the Linux service runs as "syp", the
+// container as a numeric user, macOS and Windows as the person's own account.
 func ReadOnlyMessage(path string) string {
+	const lead = "This folder is read-only. Make it writable, then press Check again. "
 	name := "this user"
 	if u, err := user.Current(); err == nil {
 		name = u.Username
 	}
 	switch {
 	case runtime.GOOS == "windows":
-		return fmt.Sprintf("This folder is read-only for your account (%s). Right-click the folder, choose Properties > Security, give %s the Modify permission (and check the folder is not marked Read-only), then press Check again.", name, name)
+		return lead + fmt.Sprintf("Right-click the folder, choose Properties > Security, and give your account (%s) the Modify permission; also check the folder is not marked Read-only.", name)
 	case runtime.GOOS == "darwin":
-		return fmt.Sprintf("This folder is read-only for your account (%s). In Finder, select the folder, choose File > Get Info, and under Sharing & Permissions give %s Read & Write, then press Check again.", name, name)
+		return lead + fmt.Sprintf("In Finder, select the folder, choose File > Get Info, and under Sharing & Permissions give your account (%s) Read & Write.", name)
 	case inContainer():
 		ids := fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
-		return fmt.Sprintf("This folder is read-only inside the container, which runs as user %s. On the host, make the folder you mounted writable for that user, for example: sudo chown -R %s <the host folder>, then press Check again.", ids, ids)
+		return lead + fmt.Sprintf("shrink-your-shit runs inside its container as user %s. On the host, make the folder you mounted writable for that user, for example: sudo chown -R %s <the host folder>", ids, ids)
 	case name == "syp":
-		return fmt.Sprintf("This folder is read-only for shrink-your-shit, which runs as the user syp. Make it writable: sudo chown -R syp:syp %s (or add syp to the folder's group and give the group write access), then press Check again.", path)
+		return lead + fmt.Sprintf("shrink-your-shit runs as the user syp. On this server: sudo chown -R syp:syp %s (or add syp to the folder's group and give the group write access).", path)
 	default:
-		return fmt.Sprintf("This folder is read-only for shrink-your-shit, which runs as the user %s. Make it writable, for example: sudo chown -R %s %s, then press Check again.", name, name, path)
+		return lead + fmt.Sprintf("shrink-your-shit runs as the user %s. For example: sudo chown -R %s %s", name, name, path)
 	}
 }
 
