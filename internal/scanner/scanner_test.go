@@ -55,16 +55,16 @@ func TestQueuesMatchingFileOnce(t *testing.T) {
 	if n := settle(s); n != 1 {
 		t.Fatalf("queued %d", n)
 	}
-	if len(f.Calls) != 1 {
-		t.Errorf("only a.mkv should be probed, got %d calls", len(f.Calls))
+	if len(f.Recorded()) != 1 {
+		t.Errorf("only a.mkv should be probed, got %d calls", len(f.Recorded()))
 	}
 	l, _ := st.List(10)
 	if len(l) != 1 || l[0].Path != filepath.Join(lib, "a.mkv") || l[0].Status != jobs.Queued || l[0].DurationSec != 60 {
 		t.Errorf("%+v", l)
 	}
 	// Second scan: unchanged file is neither probed nor queued again.
-	if n := settle(s); n != 0 || len(f.Calls) != 1 {
-		t.Errorf("rescan queued %d, calls %d", n, len(f.Calls))
+	if n := settle(s); n != 0 || len(f.Recorded()) != 1 {
+		t.Errorf("rescan queued %d, calls %d", n, len(f.Recorded()))
 	}
 }
 
@@ -92,8 +92,8 @@ func TestChangedFileIsRescanned(t *testing.T) {
 func TestMinAgeSkipsFreshFiles(t *testing.T) {
 	s, _, _, f := setup(t, h264Big)
 	s.MinAge = time.Hour
-	if n := settle(s); n != 0 || len(f.Calls) != 0 {
-		t.Errorf("fresh file should be left alone: %d %d", n, len(f.Calls))
+	if n := settle(s); n != 0 || len(f.Recorded()) != 0 {
+		t.Errorf("fresh file should be left alone: %d %d", n, len(f.Recorded()))
 	}
 }
 
@@ -184,9 +184,9 @@ func TestScanFillsTheProbeCache(t *testing.T) {
 	if v, ok := st.GetProbe(p, fi.Size(), fi.ModTime().UnixNano()); !ok || !strings.Contains(v, `"videoCodec":"h264"`) {
 		t.Fatalf("%q %v", v, ok)
 	}
-	n := len(f.Calls)
-	if info, err := Probe(context.Background(), st, f, "ffprobe", p, fi); err != nil || info.VideoCodec != "h264" || len(f.Calls) != n {
-		t.Errorf("%+v %v: the cached probe is used (%d calls)", info, err, len(f.Calls)-n)
+	n := len(f.Recorded())
+	if info, err := Probe(context.Background(), st, f, "ffprobe", p, fi); err != nil || info.VideoCodec != "h264" || len(f.Recorded()) != n {
+		t.Errorf("%+v %v: the cached probe is used (%d calls)", info, err, len(f.Recorded())-n)
 	}
 }
 
@@ -196,7 +196,7 @@ func TestTrashIsNeverScanned(t *testing.T) {
 	os.MkdirAll(filepath.Join(lib, ".syp-trash"), 0o755)
 	os.WriteFile(filepath.Join(lib, ".syp-trash", "old.7.mkv"), []byte("kept original"), 0o644)
 	settle(s)
-	for _, c := range f.Calls {
+	for _, c := range f.Recorded() {
 		if strings.Contains(strings.Join(c, " "), ".syp-trash") {
 			t.Errorf("probed a kept original: %v", c)
 		}
@@ -243,8 +243,8 @@ func TestIgnoredPathsAreNotLookedAt(t *testing.T) {
 	if n := settle(s); n != 1 {
 		t.Errorf("queued %d, want only a.mkv", n)
 	}
-	if len(f.Calls) != 1 {
-		t.Errorf("probed %d files, want only a.mkv: %v", len(f.Calls), f.Calls)
+	if len(f.Recorded()) != 1 {
+		t.Errorf("probed %d files, want only a.mkv: %v", len(f.Recorded()), f.Recorded())
 	}
 	for _, p := range []string{"Extras/deep/x.mkv", "trailer.sample.mkv", "Shows/Extras/y.mkv"} {
 		if r, _ := st.GetFile(filepath.Join(lib, p)); r != nil {
@@ -278,8 +278,8 @@ func TestStillChangingWaitsForTwoLooks(t *testing.T) {
 		}
 	}
 	look(0, rules.SkipStillChanging) // first look
-	if len(f.Calls) != 0 {
-		t.Errorf("a file still changing must not be read: %v", f.Calls)
+	if len(f.Recorded()) != 0 {
+		t.Errorf("a file still changing must not be read: %v", f.Recorded())
 	}
 	clock = clock.Add(10 * time.Second)
 	look(0, rules.SkipStillChanging) // unchanged, but not MinAge since the first look
@@ -300,8 +300,8 @@ func TestSharedFileIsLeftAlone(t *testing.T) {
 	if err := os.Link(filepath.Join(lib, "a.mkv"), other); err != nil {
 		t.Skipf("no hardlinks here: %v", err)
 	}
-	if n := settle(s); n != 0 || len(f.Calls) != 0 {
-		t.Errorf("queued %d, probed %v", n, f.Calls)
+	if n := settle(s); n != 0 || len(f.Recorded()) != 0 {
+		t.Errorf("queued %d, probed %v", n, f.Recorded())
 	}
 	if r, _ := st.GetFile(filepath.Join(lib, "a.mkv")); r == nil || r.Reason != rules.SkipSharedFile {
 		t.Errorf("record %+v", r)
@@ -327,8 +327,8 @@ func TestLinksAreNeverConverted(t *testing.T) {
 	if n := settle(s); n != 1 {
 		t.Errorf("queued %d, want only a.mkv", n)
 	}
-	if len(f.Calls) != 1 {
-		t.Errorf("probed %d files, want only a.mkv: %v", len(f.Calls), f.Calls)
+	if len(f.Recorded()) != 1 {
+		t.Errorf("probed %d files, want only a.mkv: %v", len(f.Recorded()), f.Recorded())
 	}
 	if r, _ := st.GetFile(filepath.Join(lib, "out.mkv")); r == nil || r.Reason != rules.SkipSymlink {
 		t.Errorf("outside link: %+v", r)
