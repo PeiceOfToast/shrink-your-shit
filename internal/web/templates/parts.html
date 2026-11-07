@@ -64,7 +64,7 @@
 <ol id="log-sum" class="small"></ol>
 <pre id="log-text" class="mono small" style="max-height:40vh;overflow:auto;white-space:pre-wrap;border:1px solid var(--border);padding:8px" tabindex="0"></pre>
 <div class="row"><button class="btn" type="button" id="log-copy">Copy log</button><button class="btn" type="button" id="log-dl">Download</button><button class="btn" type="button" id="log-follow" aria-pressed="true" hidden>Stop following</button><button class="btn" type="button" id="log-close">Close</button></div>
-<p id="log-said" class="sr" role="status"></p></div></dialog>{{end}}
+<p id="log-said" class="small muted" role="status" aria-live="polite" style="margin:0"></p></div></dialog>{{end}}
 
 {{define "flows"}}<noscript><div class="notice info" role="note"><div><strong>Turn on scripts to see your flows</strong>The list needs scripts enabled.</div></div></noscript>
 <div class="page-head"><div><h1>Flows</h1><p class="muted">A flow says what your files become. Each library uses one flow.</p></div>
