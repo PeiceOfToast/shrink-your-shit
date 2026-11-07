@@ -68,6 +68,8 @@ type Checker struct {
 	hwAt    time.Time
 	// refreshing: ToolsNow started a background check that has not finished
 	refreshing bool
+	// hwRun is closed when the hardware test in flight ends (nil: none runs): one at a time
+	hwRun chan struct{}
 }
 
 const toolsTTL = 10 * time.Minute
@@ -80,32 +82,58 @@ const toolsTTL = 10 * time.Minute
 func (c *Checker) Tools(ctx context.Context) Tools {
 	t := c.Converter(ctx)
 	c.mu.Lock()
-	fresh := c.hw != nil && time.Since(c.hwAt) < toolsTTL
-	var hw [2][]string
-	if fresh {
-		hw = *c.hw
+	for {
+		if c.hw != nil && time.Since(c.hwAt) < toolsTTL { // fresh: shared
+			hw := *c.hw
+			c.mu.Unlock()
+			t.Hardware, t.HardwareListed = hw[0], hw[1]
+			return t
+		}
+		if run := c.hwRun; run != nil { // one test at a time (GPU session limits, review c66c66b): wait for it
+			c.mu.Unlock()
+			select {
+			case <-run:
+			case <-ctx.Done():
+				return t // no hardware result for this caller; the running test still stores its own
+			}
+			c.mu.Lock()
+			continue
+		}
+		run := make(chan struct{})
+		c.hwRun = run
+		c.mu.Unlock()
+		hw := c.hardwareTest(ctx, t)
+		c.mu.Lock()
+		if ctx.Err() == nil { // a test cut short by its caller is not a result: the next caller runs it again
+			c.hw, c.hwAt = &hw, time.Now()
+		}
+		c.hwRun = nil
+		close(run)
+		c.mu.Unlock()
+		t.Hardware, t.HardwareListed = hw[0], hw[1]
+		return t
 	}
-	c.mu.Unlock()
-	if !fresh {
-		if t.FFmpeg != "" {
-			if out, _ := c.Exec.Output(ctx, t.FFmpeg, "-hide_banner", "-encoders"); len(out) > 0 {
-				for _, enc := range []string{"hevc_nvenc", "hevc_qsv", "hevc_vaapi", "hevc_videotoolbox", "hevc_amf", "hevc_mf", "hevc_v4l2m2m"} {
-					if strings.Contains(string(out), " "+enc+" ") {
-						if c.encodes(ctx, enc) {
-							hw[0] = append(hw[0], enc)
-						} else {
-							hw[1] = append(hw[1], enc)
-						}
-					}
+}
+
+// hardwareTest finds the hardware HEVC encoders ffmpeg lists and tries each on one tiny frame (listed
+// is not the same as usable here): working ones, and listed ones that did not work. Run without the
+// lock, one at a time (Tools).
+func (c *Checker) hardwareTest(ctx context.Context, t Tools) (hw [2][]string) {
+	if t.FFmpeg == "" {
+		return hw
+	}
+	if out, _ := c.Exec.Output(ctx, t.FFmpeg, "-hide_banner", "-encoders"); len(out) > 0 {
+		for _, enc := range []string{"hevc_nvenc", "hevc_qsv", "hevc_vaapi", "hevc_videotoolbox", "hevc_amf", "hevc_mf", "hevc_v4l2m2m"} {
+			if strings.Contains(string(out), " "+enc+" ") {
+				if c.encodes(ctx, enc) {
+					hw[0] = append(hw[0], enc)
+				} else {
+					hw[1] = append(hw[1], enc)
 				}
 			}
 		}
-		c.mu.Lock()
-		c.hw, c.hwAt = &hw, time.Now()
-		c.mu.Unlock()
 	}
-	t.Hardware, t.HardwareListed = hw[0], hw[1]
-	return t
+	return hw
 }
 
 // ToolsNow is Tools without waiting: the last result, or ok false when none is known yet (or a check is
