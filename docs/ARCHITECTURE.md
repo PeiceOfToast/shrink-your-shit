@@ -19,7 +19,7 @@ library folders --scanner--> files table + jobs table (SQLite) <--worker (pulls 
 | `main.go`, `platform.go` | flags and env, finding ffmpeg/ffprobe, default data dir, starts the scanner, worker and web server, handles Ctrl+C/SIGTERM |
 | `internal/scanner` | every `-scan-every` (or at once on `ScanNow`), walks the folders of the **started** libraries (`Targets`, read from the database each pass), probes new or changed video files, asks each library's own rule, queues jobs tagged with the library id. Skips hidden files and folders (names starting with `.`), `@eaDir`, `$RECYCLE.BIN`, `System Volume Information`, files changed within `-settle`, and our own temp and output files (names whose part before the extension ends in `.syp-tmp` or `.hevc`, e.g. `a.hevc.mkv`) |
 | `internal/rules` | `Rule.Match(info)`: source codec and minimum video bitrate; returns a reason string shown in the UI. `flow.go`: a flow's `Template` (kind `slider`, `legacy`, later `selectors`/`custom`, with params and a compiler version) and `Template.Settings()`, the one mapping from a flow to what the scanner and worker use (rule, CRF, preset, output, minimum saving); the slider table (`Slider`, positions 1-5) lives here |
-| `internal/media` | wraps ffprobe and ffmpeg behind the `Exec` interface (`OSExec` is real, `FakeExec` is for tests); parses probe JSON into `Info` (container, duration, bitrate, plus a per-stream `Streams` list: codec, language, flags, video size/fps/bit depth/HDR and Dolby Vision markers, audio channels, subtitle text-vs-bitmap, attachments, chapter count; helpers `Video()`, `Audio()`, `IsHDR()`, `HasBitmapSubs()`...); builds the ffmpeg arguments (`HEVCArgs`); parses `-progress` output |
+| `internal/media` | wraps ffprobe and ffmpeg behind the `Exec` interface (`OSExec` is real, `FakeExec` is for tests); parses probe JSON into `Info` (container, duration, bitrate, plus a per-stream `Streams` list: codec, language, flags, video size/fps/bit depth/HDR and Dolby Vision markers, audio channels, subtitle text-vs-bitmap, attachments, chapter count; helpers `Video()`, `Audio()`, `IsHDR()`, `HasBitmapSubs()`...); parses `-progress` output |
 | `internal/jobs` | SQLite store (pure-Go `modernc.org/sqlite`, no cgo): `files` (what the scanner last saw), `jobs`, `libraries` and `flows` tables, and the job state machine. `libraries.go`: library and flow records (`AddLibrary`, `EnsureLibraries` for `-library`, `DeleteLibrary`, `SettingsFor(job)`, per-library `Counts`) |
 | `internal/worker` | `Worker` pulls jobs through the `Queue` interface and runs the transcode. The built-in worker is one instance; remote workers would implement `Queue` over HTTP |
 | `internal/web` | embedded static page (`go:embed`, plain HTML/JS, no build step) and a JSON API |
@@ -73,6 +73,19 @@ rule the scanner matches with and the CRF, preset, output mode and minimum savin
   done (DESIGN/FIRST-RUN.md, D13). This slice stores
   `parallelJobs`, `quietHours`, `lowPriority`, `scanSchedule`, `queueOrder` and `keepOriginalsDays`;
   later slices use them.
+
+## Plans
+
+A **Plan** (`internal/rules/plan.go`) is what to do with one file, compiled from its library's flow
+template and the file's probe: `Skip` (why not to convert it, the scanner's decision) or `Reason`,
+the video encode (`libx265`, CRF, preset, tag; a bitrate cap can be added for slice 25), the output
+mode, and the thresholds (minimum saving; an SSIM gate, 0 = `-min-ssim`). The scanner compiles a Plan
+per file to decide; the worker compiles it again from the probe it takes, runs `Plan.FFmpegArgs`,
+checks the result against `Plan.Expect` (slice 10's `Expect`, now in `internal/rules`) and stores
+the Plan and its settings fingerprint on the job (migration 4). Whether to convert stays the
+scanner's decision; the worker only refuses a flow that cannot say how. A legacy flow compiles to
+exactly the arguments and decisions of the program before Plans (`TestLegacyPlanIsExactlyTodaysBehaviour`
+over every probe in `internal/media/testdata`). The slider's full recipe is slice 16b.
 
 ## Job lifecycle
 
@@ -191,7 +204,7 @@ and sign-in address; it looks for the data folder in `SYP_DATA`, the Linux servi
 
 ## Where to add things
 
-- **A new rule or codec target:** `internal/rules` (matching) and `internal/media.HEVCArgs`
+- **A new rule or codec target:** `internal/rules`: the template's `Compile` (what to convert, how) and `Plan.FFmpegArgs`
   (the ffmpeg arguments). The worker currently always targets HEVC.
 - **A remote worker:** implement `worker.Queue` over HTTP and add endpoints in `internal/web`;
   keep `internal/jobs` as the single owner of state transitions.

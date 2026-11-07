@@ -4,6 +4,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -19,8 +20,8 @@ import (
 func TestJobUsesItsLibrarysFlow(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
-	w.Settings = func(j jobs.Job) (rules.Settings, error) {
-		return rules.Settings{Rule: rules.Rule{FromCodec: "h264", CRF: 21, Preset: "slow"}, Output: "beside"}, nil
+	w.Template = func(j jobs.Job) (rules.Template, error) {
+		return rules.LegacyTemplate(rules.Rule{FromCodec: "h264", CRF: 21, Preset: "slow"}, "beside"), nil
 	}
 	w.RunOne(context.Background())
 	if s.count("-crf 21 -preset slow") != 1 {
@@ -32,21 +33,24 @@ func TestJobUsesItsLibrarysFlow(t *testing.T) {
 	if b, _ := os.ReadFile(s.src); string(b) != "original-bytes" {
 		t.Error("beside keeps the original")
 	}
-	// minimum saving: "new" (3 bytes) against "original-bytes" (14) saves 79%, so 80% refuses it
+	// minimum saving: the slider at Smallest needs 20%; a 12-byte result for the 14-byte original
+	// saves 14%, so it is refused
 	s2 := newScenario(t)
+	s2.content = "0123456789ab"
 	w2 := s2.worker(Replace)
-	w2.Settings = func(j jobs.Job) (rules.Settings, error) {
-		return rules.Settings{Rule: rules.Default(), Output: "replace", MinSavingPct: 80}, nil
-	}
+	w2.Template = func(j jobs.Job) (rules.Template, error) { return rules.SliderTemplate(1), nil }
 	w2.RunOne(context.Background())
-	s2.assertKept("saves less than the required 80%")
+	s2.assertKept("saves less than the required 20%")
+	if s2.count("-crf 27 -preset medium") != 1 {
+		t.Errorf("Smallest encodes at crf 27, medium:\n%s", strings.Join(s2.calls, "\n"))
+	}
 }
 
 func TestJobOfARemovedLibraryFails(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
-	w.Settings = func(jobs.Job) (rules.Settings, error) {
-		return rules.Settings{}, errors.New("its library no longer exists")
+	w.Template = func(jobs.Job) (rules.Template, error) {
+		return rules.Template{}, errors.New("its library no longer exists")
 	}
 	w.RunOne(context.Background())
 	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "library no longer exists") {
@@ -90,4 +94,23 @@ func TestStopJobDropsTheRunningJob(t *testing.T) {
 		t.Error("the stopped job must be dropped, not requeued")
 	}
 	s.assertOriginalSafe()
+}
+
+// The job keeps the Plan it ran with, and its settings' fingerprint.
+func TestJobRecordsItsPlan(t *testing.T) {
+	s := newScenario(t)
+	w := s.worker(Replace)
+	w.Template = func(jobs.Job) (rules.Template, error) { return rules.SliderTemplate(4), nil }
+	w.RunOne(context.Background())
+	j := s.job()
+	var p rules.Plan
+	if err := json.Unmarshal([]byte(j.Plan), &p); err != nil {
+		t.Fatalf("plan %q: %v", j.Plan, err)
+	}
+	if p.Kind != rules.KindSlider || p.Video.CRF != 21 || p.MinSavingPct != 8 || j.PlanPrint != p.Fingerprint() {
+		t.Errorf("recorded plan %+v, fingerprint %q", p, j.PlanPrint)
+	}
+	if s.count("-crf 21 -preset medium") != 1 {
+		t.Errorf("the encode must run the recorded plan:\n%s", strings.Join(s.calls, "\n"))
+	}
 }

@@ -417,9 +417,9 @@ func (s *Store) Drop(id int64) error {
 	return err
 }
 
-// SettingsFor returns what the job's library's flow says to do. A job made before libraries were
-// records is matched to its library by folder.
-func (s *Store) SettingsFor(j Job) (rules.Settings, error) {
+// TemplateFor returns the template of the job's library's flow, which the worker compiles into the
+// job's Plan. A job made before libraries were records is matched to its library by folder.
+func (s *Store) TemplateFor(j Job) (rules.Template, error) {
 	var flowID int64
 	var err error
 	if j.LibraryID > 0 {
@@ -428,16 +428,16 @@ func (s *Store) SettingsFor(j Job) (rules.Settings, error) {
 		err = s.db.QueryRow(`SELECT flow_id FROM libraries WHERE path=?`, j.Library).Scan(&flowID)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
-		return rules.Settings{}, errors.New("its library no longer exists")
+		return rules.Template{}, errors.New("its library no longer exists")
 	}
 	if err != nil {
-		return rules.Settings{}, err
+		return rules.Template{}, err
 	}
 	f, err := s.GetFlow(flowID)
 	if err != nil {
-		return rules.Settings{}, err
+		return rules.Template{}, err
 	}
-	return f.Template.Settings()
+	return f.Template, nil
 }
 
 // LibraryCounts are a library's job figures for its card.

@@ -291,7 +291,7 @@ func fsDirs(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusBadRequest, "invalid_path", "Give a full path.")
 		return
 	}
-	p := filepath.Clean(raw) // removes "..": the answer is always about the folder actually listed
+	p := filepath.Clean(raw)                              // removes "..": the answer is always about the folder actually listed
 	if st, err := os.Stat(p); err == nil && !st.IsDir() { // Windows reads a file as "path not found"
 		apiError(w, http.StatusBadRequest, "not_a_folder", "That is not a folder the program can open.")
 		return

@@ -67,6 +67,12 @@ INSERT INTO app_meta(key, value) SELECT 'legacy_flows', '1'
   WHERE EXISTS (SELECT 1 FROM jobs) OR EXISTS (SELECT 1 FROM files);
 INSERT INTO app_meta(key, value) SELECT 'install',
   CASE WHEN EXISTS (SELECT 1 FROM jobs) OR EXISTS (SELECT 1 FROM files) THEN 'upgrade' ELSE 'fresh' END;`},
+
+	// Each job keeps the Plan it ran with (slice 16): what was intended, for the record and slice 17's
+	// audit log; plan_fingerprint identifies its conversion settings.
+	{4, "job plan snapshot", `
+ALTER TABLE jobs ADD COLUMN plan TEXT;
+ALTER TABLE jobs ADD COLUMN plan_fingerprint TEXT;`},
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.

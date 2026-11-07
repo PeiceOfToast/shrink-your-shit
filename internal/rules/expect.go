@@ -1,6 +1,6 @@
 // Copyright (C) shrink-your-shit contributors. Licensed under AGPL-3.0-or-later.
 
-package worker
+package rules
 
 import (
 	"fmt"
@@ -41,6 +41,8 @@ type Expect struct {
 	PacketsTol   float64
 	// MinSavings is the fraction of the original's size that must be saved: 0 means "just smaller".
 	MinSavings float64
+	// MinSSIM is the picture threshold the flow asks for; 0 = the program's -min-ssim.
+	MinSSIM float64
 }
 
 // DefaultExpect is the expectation for what the worker does today: every stream of the original is
@@ -192,7 +194,7 @@ func (e Expect) Compare(out media.Info, outPackets int64) []string {
 			problems = append(problems, "the new file has no readable duration")
 		} else if math.Abs(out.DurationSec-e.DurationSec) > e.DurationSec*tol {
 			problems = append(problems, fmt.Sprintf("the new file is %s long but the original is %s (more than %.0f%% apart)",
-				clock(out.DurationSec), clock(e.DurationSec), tol*100))
+				Clock(out.DurationSec), Clock(e.DurationSec), tol*100))
 		}
 	}
 	if e.VideoPackets > 0 && outPackets >= 0 {
@@ -253,14 +255,14 @@ func quoteLang(l string) string {
 	return "'" + l + "'"
 }
 
-// clock formats seconds as h:mm:ss.
-func clock(sec float64) string {
+// Clock formats seconds as h:mm:ss.
+func Clock(sec float64) string {
 	t := int(sec + 0.5)
 	return fmt.Sprintf("%d:%02d:%02d", t/3600, t%3600/60, t%60)
 }
 
-// humanBytes formats a size for messages (1.5 GB).
-func humanBytes(n int64) string {
+// HumanBytes formats a size for messages (1.5 GB).
+func HumanBytes(n int64) string {
 	const unit = 1024
 	if n < unit {
 		return fmt.Sprintf("%d B", n)

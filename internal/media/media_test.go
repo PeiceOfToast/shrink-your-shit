@@ -5,7 +5,6 @@ package media
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 )
 
@@ -44,18 +43,6 @@ func TestProbeErrors(t *testing.T) {
 	f := &FakeExec{Err: errors.New("boom")}
 	if _, err := Probe(context.Background(), f, "ffprobe", "x"); err == nil {
 		t.Error("want exec error")
-	}
-}
-
-func TestHEVCArgs(t *testing.T) {
-	a := strings.Join(HEVCArgs("in.mkv", "out.mkv", 26, "medium"), " ")
-	for _, want := range []string{"-i in.mkv", "-c:v:0 libx265", "-crf 26", "-preset medium", "-progress pipe:1"} {
-		if !strings.Contains(a, want) {
-			t.Errorf("args %q missing %q", a, want)
-		}
-	}
-	if !strings.HasSuffix(a, "out.mkv") {
-		t.Errorf("output must be last: %q", a)
 	}
 }
 

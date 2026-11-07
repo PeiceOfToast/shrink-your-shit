@@ -34,7 +34,9 @@ func setup(t *testing.T, probe string) (*Scanner, *jobs.Store, string, *media.Fa
 	if err != nil {
 		t.Fatal(err)
 	}
-	targets := func() ([]Target, error) { return []Target{{LibraryID: l.ID, Path: lib, Rule: rules.Default()}}, nil }
+	targets := func() ([]Target, error) {
+		return []Target{{LibraryID: l.ID, Path: lib, Template: rules.LegacyTemplate(rules.Default(), "replace")}}, nil
+	}
 	return &Scanner{Store: st, Exec: f, FFprobe: "ffprobe", Targets: targets}, st, lib, f
 }
 
@@ -163,7 +165,9 @@ func TestLinkedLibraryFolderIsScanned(t *testing.T) {
 	if err != nil || l.Path == link {
 		t.Fatalf("%+v %v: want the real folder stored", l, err)
 	}
-	sc.Targets = func() ([]Target, error) { return []Target{{LibraryID: l.ID, Path: l.Path, Rule: rules.Default()}}, nil }
+	sc.Targets = func() ([]Target, error) {
+		return []Target{{LibraryID: l.ID, Path: l.Path, Template: rules.LegacyTemplate(rules.Default(), "replace")}}, nil
+	}
 	if n := sc.ScanOnce(context.Background()); n != 1 {
 		t.Errorf("queued %d from a linked library folder, want 1", n)
 	}

@@ -128,7 +128,7 @@ func main() {
 	sc := &scanner.Scanner{Store: store, Exec: x, FFprobe: ffprobePath, Targets: scanTargets(store), MinAge: *settle}
 	go sc.Run(ctx, *every)
 	w := &worker.Worker{ID: "builtin", Queue: store, Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath,
-		Settings: store.SettingsFor, Poll: 3 * time.Second,
+		Template: store.TemplateFor, Poll: 3 * time.Second,
 		DecodeCheck: *decode, MinSSIM: *minSSIM}
 	workerDone := make(chan struct{})
 	go func() { w.Run(ctx); close(workerDone) }()
@@ -180,14 +180,11 @@ func scanTargets(store *jobs.Store) func() ([]scanner.Target, error) {
 				continue
 			}
 			f, err := store.GetFlow(l.FlowID)
-			if err == nil {
-				var set rules.Settings
-				if set, err = f.Template.Settings(); err == nil {
-					out = append(out, scanner.Target{LibraryID: l.ID, Path: l.Path, Rule: set.Rule})
-					continue
-				}
+			if err != nil {
+				log.Printf("scan: skipping library %q: %v", l.Name, err)
+				continue
 			}
-			log.Printf("scan: skipping library %q: %v", l.Name, err)
+			out = append(out, scanner.Target{LibraryID: l.ID, Path: l.Path, Template: f.Template})
 		}
 		return out, nil
 	}
