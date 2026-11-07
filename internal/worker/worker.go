@@ -140,7 +140,7 @@ func BesidePath(src string) string {
 // file next to the original; every check runs on that temp file; the rename is the very last step, and
 // any error or "no" before it removes the temp file and leaves the original exactly as it was.
 func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err error) {
-	before, serr := os.Stat(job.Path)
+	before, serr := statOpen(job.Path)
 	if serr != nil {
 		return "", fmt.Errorf("source file: %w", serr)
 	}
@@ -239,6 +239,19 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		return "", fmt.Errorf("move result into place: %w", err)
 	}
 	return final, nil
+}
+
+// statOpen is os.Stat through an open file, so the file's identity (device and inode, or the Windows
+// file ID) is read now. On Windows, os.Stat by path reads that ID only when os.SameFile first needs it,
+// from whatever the path names then: after the original was replaced, it would describe the new file
+// and the check below would wrongly find them the same.
+func statOpen(path string) (os.FileInfo, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return f.Stat()
 }
 
 // sourceUnchanged refuses the new file if the original is no longer the file that was read: a
