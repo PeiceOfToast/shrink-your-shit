@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
-	"reflect"
 	"strings"
 )
 
@@ -140,30 +139,16 @@ func insideLibrary(p string) bool {
 	return true
 }
 
-// Template is the flow these selectors make: the slider position itself when every choice is that
-// position's (addendum 6: kind is derived), else a selectors flow.
+// Template is the flow these selectors make: always a Standard (selectors) flow. Before S4 a Standard
+// save at a position's own values became that slider position, the same recipe; since S4 Basic is its
+// own recipe (stereo AAC, MKV, HEVC repackaged), so a Standard save never turns into Basic, which would
+// drop audio and rename files the person chose to keep (review 6e60704, P1).
 func (s Selectors) Template() Template {
 	if s.Ignore == nil {
 		s.Ignore = []string{}
 	}
-	if s.equal(DefaultSelectors(s.Quality)) {
-		return SliderTemplate(s.Quality)
-	}
 	c := s
 	return Template{Kind: KindSelectors, Selectors: &c, CompilerVersion: CompilerVersion}
-}
-
-func (s Selectors) equal(o Selectors) bool {
-	if len(s.Ignore) != len(o.Ignore) {
-		return false
-	}
-	for i := range s.Ignore {
-		if s.Ignore[i] != o.Ignore[i] {
-			return false
-		}
-	}
-	s.Ignore, o.Ignore = nil, nil
-	return reflect.DeepEqual(s, o)
 }
 
 // SelectorsView is how the Standard editor shows a flow: a slider position as its selectors, a selectors

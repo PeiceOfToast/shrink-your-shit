@@ -225,8 +225,8 @@ func TestSelectorsSaveAndReadBack(t *testing.T) {
 	if code, body := post(t, srv, "PUT", path, `{"quality":3,"speed":"normal","format":"hevc","resolution":"keep","maxBitrate":"none","audio":"keep_all","subtitles":"keep_all","fileType":"keep","afterConverting":"replace","ignore":[],"skipHdr":true,"skipSmall":true,"minSavingPct":10,"order":"newest","kind":"selectors"}`); code != 200 {
 		t.Fatalf("defaults: %d %s", code, body)
 	}
-	if v := get(); v["kind"] != "slider" || v["quality"] != 3.0 {
-		t.Errorf("Balanced through the selectors should be the slider: %v", v)
+	if v := get(); v["kind"] != "selectors" || v["quality"] != 3.0 || v["audio"] != "keep_all" || v["fileType"] != "keep" {
+		t.Errorf("a Standard save at the defaults stays Standard, not Basic (review 6e60704): %v", v)
 	}
 	// any other choice is a selectors setting, read back as saved; there is no minSavingPct (always standardize)
 	if code, body := post(t, srv, "PUT", path, `{"quality":2,"speed":"slower","resolution":"720","maxBitrate":"10","fileType":"mkv","afterConverting":"beside","ignore":["Extras","*.sample.mkv"],"skipSmall":false}`); code != 200 {
