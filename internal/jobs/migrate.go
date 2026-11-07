@@ -115,7 +115,11 @@ UPDATE files SET reason = CASE
   ELSE '' END
 WHERE decision = 'unreadable' OR decision LIKE 'skip:%';
 -- a skip whose text maps to no code is forgotten: the next scan looks at the file again and records it
-DELETE FROM files WHERE decision LIKE 'skip:%' AND reason = '';`},
+DELETE FROM files WHERE decision LIKE 'skip:%' AND reason = '';
+-- jobs done before this: their output's time, from the file record at that path when its size is the
+-- output's; otherwise it stays 0 (unknown), and such a job hides nothing from the Skipped list
+UPDATE jobs SET output_mtime = (SELECT f.mtime FROM files f WHERE f.path=jobs.output_path AND f.size=jobs.size_after)
+WHERE status='done' AND EXISTS (SELECT 1 FROM files f WHERE f.path=jobs.output_path AND f.size=jobs.size_after);`},
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.

@@ -92,6 +92,7 @@ func TestActivitySummaryQueueFailedSkipped(t *testing.T) {
 	// records files under that stored path, so the test's files are too
 	dir := l.Path
 	// done, original gone: 300 freed; done, original kept: 600 waiting
+	os.WriteFile(dir+"/gone.mkv", make([]byte, 200), 0o644) // the converted file, so its time is recorded
 	done(t, st, l.ID, dir+"/gone.mkv", dir+"/gone.mkv", 500, 200)
 	kept := done(t, st, l.ID, dir+"/kept.mkv", dir+"/kept.mkv", 1000, 400)
 	oid, _ := st.BeginSwap(jobs.Original{JobID: kept, LibraryID: l.ID, Path: dir + "/kept.mkv", Trash: "t", Staged: "s", Bytes: 1000, Hash: "h", NewBytes: 400})
@@ -115,7 +116,7 @@ func TestActivitySummaryQueueFailedSkipped(t *testing.T) {
 	st.PutFile(jobs.File{Path: "/elsewhere/x.mkv", Decision: "unreadable", Reason: rules.SkipUnreadable})
 	st.PutFile(jobs.File{Path: dir + "/queued.mkv", Decision: "queued: H.264"}) // not skipped
 	// a converted file, which the scanner then skips as already HEVC: done, not "skipped"
-	st.PutFile(jobs.File{Path: dir + "/gone.mkv", Size: 200, Decision: "skip: HEVC is already an efficient format", Reason: rules.SkipAlreadyHEVC})
+	skippedHEVC(st, dir+"/gone.mkv")
 
 	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/activity/summary"})
 	if body != `{"counts":{"failed":2,"skipped":3},"freedBytes":300,"paused":false,"waitingBytes":600,"waitingFiles":2,"workingFiles":1}`+"\n" {
@@ -198,8 +199,9 @@ func TestSkippedListsADifferentFileAtAConvertedPath(t *testing.T) {
 	srv, st, _, _ := libServer(t, false)
 	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
 	p := filepath.Join(l.Path, "a.mkv")
+	os.WriteFile(p, make([]byte, 400), 0o644)
 	done(t, st, l.ID, p, p, 1000, 400)
-	st.PutFile(jobs.File{Path: p, Size: 400, ModTime: 1, Decision: "skip: HEVC is already an efficient format", Reason: rules.SkipAlreadyHEVC})
+	skippedHEVC(st, p)
 	if _, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/activity/skipped"}); !strings.Contains(body, `"total":0`) {
 		t.Errorf("the converted file itself: %s", body)
 	}

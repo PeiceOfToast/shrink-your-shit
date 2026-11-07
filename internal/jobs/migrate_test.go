@@ -404,6 +404,11 @@ func TestMigration7BackfillsSkipReasons(t *testing.T) {
 	for p, d := range old {
 		s.db.Exec(`INSERT INTO files(path,size,mtime,codec,decision) VALUES(?,1,1,'',?)`, p, d)
 	}
+	// done jobs: one whose output has a file record of its size (its time is recovered), one without
+	s.db.Exec(`INSERT INTO files(path,size,mtime,codec,decision) VALUES('/m/out.mkv',400,777,'hevc','skip: HEVC is already an efficient format')`)
+	for _, p := range []string{"/m/out.mkv", "/m/nofile.mkv"} {
+		s.db.Exec(`INSERT INTO jobs(library,path,status,size_before,size_after,output_path,created,updated) VALUES('/m',?,'done',1000,400,?,'t','t')`, p, p)
+	}
 	s.Close()
 	s, err = Open(path)
 	if err != nil {
@@ -420,5 +425,18 @@ func TestMigration7BackfillsSkipReasons(t *testing.T) {
 	}
 	if f, _ := s.GetFile("/m/k.mkv"); f != nil {
 		t.Errorf("an unmapped skip is forgotten: %+v", f)
+	}
+	for p, want := range map[string]int64{"/m/out.mkv": 777, "/m/nofile.mkv": 0} {
+		var got int64
+		s.db.QueryRow(`SELECT output_mtime FROM jobs WHERE path=?`, p).Scan(&got)
+		if got != want {
+			t.Errorf("%s: output_mtime %d, want %d", p, got, want)
+		}
+	}
+	// the recovered one hides its output from Skipped; the unknown one hides nothing
+	var skipped int
+	s.db.QueryRow(`SELECT COUNT(*) FROM files WHERE reason<>'' AND NOT ` + convertedSQL).Scan(&skipped)
+	if skipped != 10 {
+		t.Errorf("%d skipped, want the 10 mapped ones (out.mkv is the conversion's own output)", skipped)
 	}
 }

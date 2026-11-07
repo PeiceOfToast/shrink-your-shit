@@ -118,10 +118,11 @@ FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id WHERE j.status IN (?,?) O
 // convertedSQL is true for a files row that is the output of a done conversion: the scanner skips it
 // afterwards (already the new format), but it is not "skipped" for the person, it is done.
 // It is that output only while it is the file the job wrote: the size and modification time recorded
-// when the job was done (jobs.output_mtime; 0 for jobs done before it was recorded: size only). A
-// different file put at that path later is listed.
+// when the job was done (jobs.output_mtime). 0 means unknown (not readable then, or not recoverable for
+// a job done before it was recorded): such a job hides nothing, so a skip shows rather than wrongly
+// hiding. A different file put at that path later is listed.
 const convertedSQL = `EXISTS (SELECT 1 FROM jobs WHERE jobs.status='done' AND jobs.output_path=files.path AND jobs.size_after=files.size
-  AND (jobs.output_mtime=0 OR jobs.output_mtime=files.mtime))`
+  AND jobs.output_mtime<>0 AND jobs.output_mtime=files.mtime)`
 
 // Skipped is a file the scanner decided not to convert, with the row id the Skipped list uses.
 type Skipped struct {
