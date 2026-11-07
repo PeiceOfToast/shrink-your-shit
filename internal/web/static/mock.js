@@ -350,8 +350,10 @@
     putLibraryFlow: function (p, b) {
       var i = find(libs, "id", p.id), nf = find(flows, "id", b.flowId);
       if (i < 0 || nf < 0) return gone();
-      flows.forEach(function (f) { f.usedBy = f.usedBy.filter(function (n) { return n !== libs[i].name; }); });
-      flows[nf].usedBy.push(libs[i].name); libs[i].flowId = b.flowId; saveLibs(); return ok();
+      // The library now follows the new flow's setting (piece B): copy it before the library joins.
+      var r = copy(recOf(flows[nf])); delete libs[i].sel; ["quality", "audio", "sel", "settingKind", "settingLabel"].forEach(function (k) { if (r[k] !== undefined) libs[i][k] = r[k]; });
+      flows.forEach(function (f) { if (f.id !== b.flowId && f.usedBy.indexOf(libs[i].name) >= 0 && f.usedBy.length === 1) f.rec = copy(recOf(f)); f.usedBy = f.usedBy.filter(function (n) { return n !== libs[i].name; }); });
+      flows[nf].usedBy.push(libs[i].name); libs[i].flowId = b.flowId; delete flows[nf].rec; saveLibs(); return ok();
     },
     // Answers "computing" first, then "ready", so the waiting state gets exercised.
     preview: function (p, b) {
