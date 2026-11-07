@@ -102,6 +102,8 @@ All the numbers are in one table, `rules.Slider`, untuned (D8).
 
 The library's **setting** (`internal/web/setting.go`) is its flow seen through the slider:
 `GET /api/settings/slider`, `GET/PUT /api/libraries/{id}/setting`, `POST .../setting/replace-custom`.
+Until the selectors are saved (slice 25), a PUT carrying any selector field is refused with 400
+`not_available` and nothing is written, so no choice is silently dropped.
 A legacy or custom flow is never overwritten (a new flow named after the library is made; the old one
 stays in Flows); a flow other libraries share needs `sharedFlowChoice` (`change_both` or `make_copy`,
 "<library> (own copy)"), else 409 `flow_shared` with `usedBy`. Every change forgets the affected
