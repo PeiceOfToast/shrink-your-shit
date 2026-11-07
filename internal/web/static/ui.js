@@ -8,7 +8,8 @@
   ui.REASONS = {
     already_efficient: "already efficient", would_not_shrink: "would not get smaller", already_hevc: "already in the new format",
     hdr_dv: "HDR or Dolby Vision", bitmap_subs: "picture subtitles that cannot be kept", shared_file: "shared with another folder",
-    symlink: "a link to a file outside this library", unreadable: "unreadable", // only links pointing outside (workshop, slice 23) cannot_keep_track: "a track that cannot be kept",
+    // symlink: only links pointing outside the library (workshop, slice 23).
+    symlink: "a link to a file outside this library", unreadable: "unreadable", cannot_keep_track: "a track that cannot be kept",
     user_stopped: "you stopped it", restored: "you restored the original",
     // Workshop slice 19 (contract: four more skipped reason codes); design's words, 2026-11-07.
     format_not_converted: "a format this version doesn't convert", no_video: "no video in the file",
