@@ -25,7 +25,6 @@ type Selectors struct {
 	AfterConverting string   `json:"afterConverting"` // replace | beside
 	Ignore          []string `json:"ignore"`          // folders, files or patterns in the library not looked at
 	SkipHDR         bool     `json:"skipHdr"`         // HDR and Dolby Vision files are left as they are
-	SkipSmall       bool     `json:"skipSmall"`       // files already small for their picture size are left as they are
 }
 
 // What this version can save and run (UI-API-CONTRACT.md addendum 13): the UI shows the rest disabled.
@@ -56,7 +55,7 @@ var (
 func DefaultSelectors(q int) Selectors {
 	return Selectors{Quality: q, Speed: "normal", Format: "hevc", Resolution: "keep", MaxBitrate: "none",
 		Audio: "keep_all", Subtitles: "keep_all", FileType: "keep", AfterConverting: "replace", Ignore: []string{},
-		SkipHDR: true, SkipSmall: true}
+		SkipHDR: true}
 }
 
 // SelectorError is a choice that cannot be saved: Code is invalid (not a value at all) or not_available

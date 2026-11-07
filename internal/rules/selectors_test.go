@@ -71,12 +71,12 @@ func TestSelectorsCompile(t *testing.T) {
 	if !strings.Contains(args, "-preset slow") || !strings.Contains(args, "-maxrate:v:0 10000k -bufsize:v:0 20000k") {
 		t.Errorf("args %s", args)
 	}
-	// skip small off: converted however little data it has
-	if p := sel(func(s *Selectors) { s.SkipSmall = false }).Compile(h264(1920, 1080, 300)); p.Skip != "" {
-		t.Errorf("skipSmall off: %q", p.Skip)
+	// always standardize: converted however little data it has, by the selectors and the slider alike
+	if p := sel(func(s *Selectors) {}).Compile(h264(1920, 1080, 300)); p.Skip != "" {
+		t.Errorf("selectors, little data: %q", p.Skip)
 	}
-	if p := SliderTemplate(3).Compile(h264(1920, 1080, 300)); p.SkipCode != SkipAlreadyEfficient {
-		t.Errorf("skipSmall on: %q", p.Skip)
+	if p := SliderTemplate(3).Compile(h264(1920, 1080, 300)); p.Skip != "" {
+		t.Errorf("slider, little data: %q", p.Skip)
 	}
 	// file type: the new file's, and what it cannot hold
 	beside := func(ft string) Template {

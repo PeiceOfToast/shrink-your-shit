@@ -114,18 +114,19 @@ func TestPreviewCountsAndEstimates(t *testing.T) {
 	p := &Previewer{Store: store(t), Exec: x, FFprobe: "ffprobe"}
 	dir := library(t)
 	r := p.Library(1, dir, rules.SliderTemplate(3), 10*time.Second)
-	if r.Status != "ready" || r.Files != 6 || r.TotalBytes != 7_900_000 || r.CanShrink != 2 {
+	if r.Status != "ready" || r.Files != 6 || r.TotalBytes != 7_900_000 || r.CanShrink != 3 { // lean.mkv too: always standardize
 		t.Fatalf("%+v", r)
 	}
 	// the shared file is skipped (slice 23's file guards), as the scanner skips it
-	if fmt.Sprint(r.Skipped) != "map[already_efficient:1 already_hevc:1 shared_file:1 unreadable:1]" {
+	if fmt.Sprint(r.Skipped) != "map[already_hevc:1 shared_file:1 unreadable:1]" {
 		t.Errorf("skipped %v", r.Skipped)
 	}
 	if r.SharedNoSaving != 0 {
 		t.Errorf("shared %d: always 0 since the file guards", r.SharedNoSaving)
 	}
-	// a.mkv and b.mp4 are 3 MB of video at 0.16 bits per pixel; Balanced saves 10% to 55% of it.
-	if r.EstimateBytesLow != 300_000 || r.EstimateBytesHigh != 1_650_000 {
+	// a.mkv and b.mp4 are 3 MB of video at 0.16 bits per pixel; Balanced saves 10% to 55% of it. lean.mkv
+	// (300 kB, near the old threshold) adds 0 to 55%: 165 000 at the high end.
+	if r.EstimateBytesLow != 300_000 || r.EstimateBytesHigh != 1_815_000 {
 		t.Errorf("estimate %d - %d", r.EstimateBytesLow, r.EstimateBytesHigh)
 	}
 	if r.EstimateBytesLow >= r.EstimateBytesHigh {
@@ -339,8 +340,8 @@ func TestStartReusesThePreviewsProbes(t *testing.T) {
 		return []scanner.Target{{LibraryID: l.ID, Path: dir, Template: rules.SliderTemplate(3)}}, nil
 	}}
 	sc.ScanOnce(context.Background()) // the first look (slice 23: decided on the second)
-	if n := sc.ScanOnce(context.Background()); n != 2 {
-		t.Errorf("queued %d, want the 2 the Preview said can be shrunk", n)
+	if n := sc.ScanOnce(context.Background()); n != 3 {
+		t.Errorf("queued %d, want the 3 the Preview said can be shrunk", n)
 	}
 	if extra := x.n() - before; extra != 1 { // only bad.mkv, whose probe failed and so was not kept
 		t.Errorf("the scan probed %d files again", extra)
@@ -379,7 +380,7 @@ func TestPreviewCountsRestoredFilesAsSkipped(t *testing.T) {
 	dir := library(t)
 	st.PutFile(jobs.File{Path: filepath.Join(dir, "a.mkv"), Decision: jobs.DecisionRestored})
 	r := (&Previewer{Store: st, Exec: &probes{}, FFprobe: "ffprobe"}).Library(1, dir, rules.SliderTemplate(3), 10*time.Second)
-	if r.Skipped["restored"] != 1 || r.CanShrink != 1 { // b.mp4 (the shared file is skipped too)
+	if r.Skipped["restored"] != 1 || r.CanShrink != 2 { // b.mp4 and lean.mkv (the shared file is skipped too)
 		t.Errorf("%+v", r)
 	}
 }
@@ -410,7 +411,7 @@ func TestSampleSaysWhichSubtitlesStayInside(t *testing.T) {
 	sample := func(name, subtitles string) string {
 		st, _ := os.Stat(filepath.Join(dir, name))
 		sel := rules.DefaultSelectors(3)
-		sel.Subtitles, sel.SkipSmall = subtitles, false
+		sel.Subtitles = subtitles
 		return strings.Join(p.Sample(context.Background(), dir, filepath.Join(dir, name), st, sel.Template()).Lines, "|")
 	}
 	stay := "Picture subtitles stay inside the file; only text subtitles are saved as .srt files."

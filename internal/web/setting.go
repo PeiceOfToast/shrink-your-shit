@@ -39,14 +39,14 @@ func settingView(f jobs.Flow) map[string]any {
 // selectorFields are the Standard selectors (UI-API-CONTRACT.md addendum 2): any of them in a PUT body
 // makes it a selectors save.
 var selectorFields = map[string]bool{"speed": true, "format": true, "resolution": true, "maxbitrate": true, "audio": true,
-	"subtitles": true, "filetype": true, "afterconverting": true, "ignore": true, "skiphdr": true, "skipsmall": true}
+	"subtitles": true, "filetype": true, "afterconverting": true, "ignore": true, "skiphdr": true}
 
 // readSelectors is a selectors body: what it leaves out is the quality's own value. A client's kind,
-// positions, available*, the removed order and the removed minSavingPct (always standardize; accepted
-// and ignored for one release, so the current page keeps working) are ignored.
+// positions, available*, the removed order and the removed minSavingPct and skipSmall (always
+// standardize; accepted and ignored for one release, so the current page keeps working) are ignored.
 // settingEcho are the fields a setting answer carries that a client may send back unchanged: ignored.
 var settingEcho = map[string]bool{"kind": true, "positions": true, "order": true, "availableformats": true, "availableaudio": true,
-	"availablesubtitles": true, "availablefiletypes": true, "warnings": true, "sharedflowchoice": true, "minsavingpct": true}
+	"availablesubtitles": true, "availablefiletypes": true, "warnings": true, "sharedflowchoice": true, "minsavingpct": true, "skipsmall": true}
 
 // readSelectors reads a selectors body (see below); langs are the person's languages, needed for
 // "Keep only my languages".
@@ -241,9 +241,6 @@ func flowSteps(t rules.Template) []map[string]any {
 		add("check", "Skip files already in an efficient format (HEVC, AV1, VP9) or not a video format this converts", "")
 		if s.SkipHDR {
 			add("check", "Skip HDR and Dolby Vision files", "")
-		}
-		if s.SkipSmall {
-			add("check", "Skip files that are already small for their picture size", fmt.Sprintf("needs more than %.3f bits per pixel per frame", pos.MinBPP))
 		}
 		size := "keeping its picture size and colour depth"
 		if s.Resolution != "keep" {

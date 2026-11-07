@@ -137,8 +137,9 @@ func TestSliderConvertsOnlyOlderFormats(t *testing.T) {
 	}
 }
 
-// Eligibility is bits per pixel per frame above the position's threshold (it replaces the fixed bitrate).
-func TestSliderSkipsFilesThatAreAlreadySmall(t *testing.T) {
+// Always standardize (USER-REVIEW 2026-11-07): a file is converted whatever its bits per pixel, also one
+// whose frame rate is unknown; there is no "already small" skip any more.
+func TestSliderConvertsSmallFilesToo(t *testing.T) {
 	px := 1920.0 * 1080 * 24
 	for _, pos := range Slider {
 		above := int(pos.MinBPP*px/1000) + 50
@@ -146,12 +147,11 @@ func TestSliderSkipsFilesThatAreAlreadySmall(t *testing.T) {
 		if p := SliderTemplate(pos.Position).Compile(probe("h264", 1920, 1080, 24, above)); p.Skip != "" {
 			t.Errorf("%s at %d kbps: %q", pos.Name, above, p.Skip)
 		}
-		p := SliderTemplate(pos.Position).Compile(probe("h264", 1920, 1080, 24, below))
-		if !strings.HasPrefix(p.Skip, "already efficient") || p.Video.Codec == "" {
-			t.Errorf("%s at %d kbps: skip %q (the Plan still says how it would convert)", pos.Name, below, p.Skip)
+		if p := SliderTemplate(pos.Position).Compile(probe("h264", 1920, 1080, 24, below)); p.Skip != "" || p.Video.Codec == "" {
+			t.Errorf("%s at %d kbps: skip %q", pos.Name, below, p.Skip)
 		}
 	}
-	if p := SliderTemplate(3).Compile(probe("h264", 1920, 1080, 0, 9000)); !strings.Contains(p.Skip, "unknown") {
+	if p := SliderTemplate(3).Compile(probe("h264", 1920, 1080, 0, 9000)); p.Skip != "" {
 		t.Errorf("no frame rate: %q", p.Skip)
 	}
 }
@@ -245,11 +245,12 @@ func TestPlanCarriesABitrateCap(t *testing.T) {
 	}
 }
 
-// A slider position's eligibility (bits per pixel) is part of what its snapshot records and fingerprints.
+// A Plan's eligibility is part of what its snapshot records and fingerprints (the slider has none now:
+// always standardize).
 func TestSliderEligibilityIsInTheFingerprint(t *testing.T) {
 	info := probe("h264", 1920, 1080, 24, 12000)
 	p := SliderTemplate(3).Compile(info)
-	if p.Eligibility.MinBitsPerPixel != 0.08 {
+	if p.Eligibility.MinBitsPerPixel != 0 {
 		t.Errorf("%+v", p.Eligibility)
 	}
 	v := Verification{MinSSIM: p.MinSSIM, DecodeCheck: "auto", FullDecodeMaxSec: 10800}

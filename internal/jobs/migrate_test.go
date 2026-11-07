@@ -386,6 +386,7 @@ func TestMigration7BackfillsSkipReasons(t *testing.T) {
 		`ALTER TABLE originals DROP COLUMN aside`, `ALTER TABLE jobs DROP COLUMN stop_requested`, `DROP TABLE sidecars`, // and migrations 8, 9 and 10
 		`ALTER TABLE originals DROP COLUMN new_path`,                                     // and 11
 		`ALTER TABLE jobs DROP COLUMN attempts`, `ALTER TABLE jobs DROP COLUMN retry_at`, // and 12
+		// (13 changes rows only)
 		`PRAGMA user_version=6`} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
@@ -420,15 +421,19 @@ func TestMigration7BackfillsSkipReasons(t *testing.T) {
 	}
 	defer s.Close()
 	want := map[string]string{"/m/a.mkv": "already_hevc", "/m/b.mkv": "already_hevc", "/m/c.mkv": "format_not_converted",
-		"/m/d.mkv": "already_efficient", "/m/e.mkv": "already_efficient", "/m/f.mkv": "format_not_converted",
-		"/m/g.mkv": "no_video", "/m/h.mkv": "unknown_bitrate", "/m/i.mkv": "cannot_keep_track", "/m/j.mkv": "unreadable", "/m/l.mkv": ""}
+		"/m/f.mkv": "format_not_converted",
+		"/m/g.mkv": "no_video", "/m/i.mkv": "cannot_keep_track", "/m/j.mkv": "unreadable", "/m/l.mkv": ""}
 	for p, r := range want {
 		if f, _ := s.GetFile(p); f == nil || f.Reason != r {
 			t.Errorf("%s: %+v, want reason %q", p, f, r)
 		}
 	}
-	if f, _ := s.GetFile("/m/k.mkv"); f != nil {
-		t.Errorf("an unmapped skip is forgotten: %+v", f)
+	// an unmapped skip is forgotten (7); so are the skips always standardize removed (13): already
+	// efficient (d, e) and unknown bitrate (h), so the next scan looks at those files again
+	for _, p := range []string{"/m/k.mkv", "/m/d.mkv", "/m/e.mkv", "/m/h.mkv"} {
+		if f, _ := s.GetFile(p); f != nil {
+			t.Errorf("%s should be forgotten: %+v", p, f)
+		}
 	}
 	for p, want := range map[string]int64{"/m/out.mkv": 777, "/m/nofile.mkv": 0} {
 		var got int64
@@ -440,7 +445,64 @@ func TestMigration7BackfillsSkipReasons(t *testing.T) {
 	// the recovered one hides its output from Skipped; the unknown one hides nothing
 	var skipped int
 	s.db.QueryRow(`SELECT COUNT(*) FROM files WHERE reason<>'' AND NOT ` + convertedSQL).Scan(&skipped)
-	if skipped != 10 {
-		t.Errorf("%d skipped, want the 10 mapped ones (out.mkv is the conversion's own output)", skipped)
+	if skipped != 7 {
+		t.Errorf("%d skipped, want the 7 mapped ones still skipped (out.mkv is the conversion's own output)", skipped)
+	}
+}
+
+// Migration 13 (always standardize) runs once: jobs kept only for saving too little are queued again
+// with their tries reset, other kept jobs stay; file decisions of the removed skips are forgotten, other
+// skips stay. A second start changes nothing more.
+func TestAlwaysStandardizeMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "syp.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept := map[string]string{
+		"/m/less.mkv":    "the new file (1.0 MB) saves less than the required 20% of the original (1.1 MB)",
+		"/m/bigger.mkv":  "the new file (2.0 MB) is not smaller than the original (1.1 MB)",
+		"/m/picture.mkv": "the picture of the new file is too different from the original (similarity 0.800 at 0:10, 0.95 is required)",
+	}
+	ids := map[string]int64{}
+	for p, why := range kept {
+		id, _ := s.Enqueue(Job{Path: p})
+		s.Claim("w")
+		s.Keep(id, why)
+		ids[p] = id
+	}
+	for p, reason := range map[string]string{"/m/small.mkv": "already_efficient", "/m/wns.mkv": "would_not_shrink",
+		"/m/unk.mkv": "unknown_bitrate", "/m/hevc.mkv": "already_hevc"} {
+		s.PutFile(File{Path: p, Decision: "skip: x", Reason: reason})
+	}
+	s.db.Exec(`PRAGMA user_version = 12`) // as an install from before always standardize left it
+	s.Close()
+
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for p, want := range map[string]Status{"/m/less.mkv": Queued, "/m/bigger.mkv": Queued, "/m/picture.mkv": Kept} {
+		j, _ := s.Get(ids[p])
+		if j.Status != want || (want == Queued && (j.Attempts != 0 || j.Error != "" || j.RetryAt != "")) {
+			t.Errorf("%s: %+v", p, j)
+		}
+	}
+	for p, want := range map[string]bool{"/m/small.mkv": false, "/m/wns.mkv": false, "/m/unk.mkv": false, "/m/hevc.mkv": true} {
+		if f, _ := s.GetFile(p); (f != nil) != want {
+			t.Errorf("%s: record %+v, want kept %v", p, f, want)
+		}
+	}
+	// a second start: the migration does not run again
+	s.Claim("w")
+	s.Keep(ids["/m/less.mkv"], kept["/m/less.mkv"])
+	s.Close()
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if j, _ := s.Get(ids["/m/less.mkv"]); j.Status != Kept {
+		t.Errorf("queued again on a second start: %+v", j)
 	}
 }

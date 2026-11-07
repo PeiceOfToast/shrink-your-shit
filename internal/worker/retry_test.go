@@ -279,7 +279,6 @@ func TestARetryClearsItsLeftoverSrtAfterTheSettingChanged(t *testing.T) {
 	}
 	swapHook, sidecarLstat = nil, os.Lstat
 	keepAll := rules.DefaultSelectors(3)
-	keepAll.SkipSmall = false
 	tmpl := keepAll.Template()
 	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
 	s.outSpec = goodOutput() // the new file keeps its subtitle inside now

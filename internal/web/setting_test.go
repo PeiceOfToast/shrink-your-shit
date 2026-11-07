@@ -234,16 +234,18 @@ func TestSelectorsSaveAndReadBack(t *testing.T) {
 	}
 	v := get()
 	for k, want := range map[string]any{"kind": "selectors", "quality": 2.0, "speed": "slower", "resolution": "720", "maxBitrate": "10",
-		"fileType": "mkv", "afterConverting": "beside", "skipSmall": false, "skipHdr": true} {
+		"fileType": "mkv", "afterConverting": "beside", "skipHdr": true} {
 		if v[k] != want {
 			t.Errorf("%s = %v, want %v", k, v[k], want)
 		}
 	}
-	if _, ok := v["minSavingPct"]; ok {
-		t.Errorf("minSavingPct is gone from the setting: %v", v["minSavingPct"])
+	for _, gone := range []string{"minSavingPct", "skipSmall"} {
+		if _, ok := v[gone]; ok {
+			t.Errorf("%s is gone from the setting: %v", gone, v[gone])
+		}
 	}
 	// the current page still sends it: accepted and ignored for one release, nothing else changes
-	if code, body := post(t, srv, "PUT", path, `{"quality":2,"speed":"slower","minSavingPct":95}`); code != 200 || strings.Contains(body, "minSavingPct") {
+	if code, body := post(t, srv, "PUT", path, `{"quality":2,"speed":"slower","minSavingPct":95,"skipSmall":true}`); code != 200 || strings.Contains(body, "minSavingPct") {
 		t.Errorf("minSavingPct must be accepted and ignored: %d %s", code, body)
 	}
 	if ig, _ := v["ignore"].([]any); len(ig) != 2 {

@@ -322,18 +322,16 @@ func (s Snapshot) Fingerprint() string {
 // compileSelectors is the recipe for one file from the Standard choices; a slider position is its
 // DefaultSelectors (TIERS-PLAN.md 2.1): HEVC at the quality's CRF (one lower up to 720p, one higher at
 // 2160p, by the new picture size), the Speed's preset, the source's bit depth and (unless capped)
-// resolution; every audio track and subtitle copied; the quality's SSIM gate and the minimum saving.
-// Only D5's source formats are converted; HDR and Dolby Vision are left alone unless SkipHDR is off,
-// and files already small for their picture size unless SkipSmall is off.
+// resolution; every audio track and subtitle copied; the quality's SSIM gate. Only D5's source formats
+// are converted; HDR and Dolby Vision are left alone unless SkipHDR is off. Every other file of those
+// formats is converted, however little data it has per pixel: always standardize (USER-REVIEW
+// 2026-11-07; there is no "already small" skip and no minimum saving any more).
 func compileSelectors(p Plan, s Selectors, info media.Info, langs []string) Plan {
 	pos, _ := SliderAt(s.Quality)
 	v := info.Video()
 	p.Output, p.MinSSIM = s.AfterConverting, pos.MinSSIM
 	if s.FileType != "keep" {
 		p.Container = s.FileType
-	}
-	if s.SkipSmall {
-		p.Eligibility = Eligibility{MinBitsPerPixel: pos.MinBPP}
 	}
 	if v == nil {
 		p.Skip, p.SkipCode = "it has no video", SkipNoVideo
@@ -383,21 +381,7 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string) Plan
 		p.Skip, p.SkipCode = why, SkipCannotKeepTrack
 		return p
 	}
-	kbps := videoKbps(info, v)
-	bpp := bitsPerPixel(kbps, v)
-	if !s.SkipSmall {
-		p.Reason = fmt.Sprintf("%s at %d kbps", name, kbps)
-		return p
-	}
-	if bpp <= 0 {
-		p.Skip, p.SkipCode = "its bitrate, picture size or frame rate is unknown, so its saving cannot be judged", SkipUnknownBitrate
-		return p
-	}
-	if bpp <= pos.MinBPP {
-		p.Skip, p.SkipCode = fmt.Sprintf("already efficient: %.3f bits per pixel, %s needs more than %.3f", bpp, pos.Name, pos.MinBPP), SkipAlreadyEfficient
-		return p
-	}
-	p.Reason = fmt.Sprintf("%s at %d kbps, %.3f bits per pixel (more than %.3f)", name, kbps, bpp, pos.MinBPP)
+	p.Reason = fmt.Sprintf("%s at %d kbps", name, videoKbps(info, v))
 	return p
 }
 

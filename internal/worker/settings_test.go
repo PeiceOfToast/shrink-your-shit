@@ -112,7 +112,7 @@ func TestJobRecordsItsPlan(t *testing.T) {
 		t.Fatalf("plan %q: %v", j.Plan, err)
 	}
 	p := snap.Plan
-	if p.Kind != rules.KindSlider || p.Video.CRF != 20 || p.MinSSIM != 0.965 || p.Eligibility.MinBitsPerPixel != 0.10 {
+	if p.Kind != rules.KindSlider || p.Video.CRF != 20 || p.MinSSIM != 0.965 {
 		t.Errorf("recorded plan %+v", p)
 	}
 	if len(snap.Expect.Streams) != 4 || snap.Verify.MinSSIM != 0.965 || snap.Verify.DecodeCheck != "auto" {

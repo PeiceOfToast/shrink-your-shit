@@ -96,7 +96,8 @@ A **slider** flow compiles TIERS-PLAN.md 2.1's recipe, which is the Standard sel
 position's values (`DefaultSelectors`, one compiler: `compileSelectors`): HEVC at the position's CRF
 (one lower up to 720p, one higher at 2160p), preset medium, the source's bit depth, resolution and
 container, every audio track and subtitle copied, the position's SSIM gate. It
-converts H.264, MPEG-2, MPEG-4, VC-1 and WMV (D5) above the position's bits per pixel per frame;
+converts H.264, MPEG-2, MPEG-4, VC-1 and WMV (D5) whatever their bits per pixel (always standardize:
+the "already small" skip is gone);
 HEVC, AV1 and VP9 are skipped as already efficient, and so is a file whose subtitles its container
 cannot hold. **HDR and Dolby Vision files are skipped (`hdr_dv`, D3) by every flow** since slice 25a,
 legacy ones included where the rule would have converted them: converting drops their HDR information,
@@ -117,9 +118,13 @@ A **selectors** flow (`internal/rules/selectors.go`, slice 25a) stores the Stand
   hold skips the file with a reason (`cannot_keep_track`).
 - Ignore is a list of folders, files or patterns inside the library that the scanner and the
   Preview do not look at.
-- Skip HDR (on by default; off converts HDR and the setting answers a warning), Skip small (off
-  converts whatever its bits per pixel). There is no minimum saving ("always standardize"): GET no
-  longer returns `minSavingPct`; a PUT that sends it is accepted and it is ignored (for one release).
+- Skip HDR (on by default; off converts HDR and the setting answers a warning). There is no minimum
+  saving and no Skip small ("always standardize", USER-REVIEW 2026-11-07): GET no longer returns
+  `minSavingPct` or `skipSmall`; a PUT that sends them is accepted and they are ignored (for one
+  release). Migration 13 queued again, once, the jobs kept only for saving too little (matched by their
+  two sentences: a kept job stores no reason code) and forgot the `already_efficient`,
+  `unknown_bitrate` and `would_not_shrink` file decisions, so the next scan queues those files. A legacy
+  flow (command-line flags) keeps its explicit `-min-bitrate`.
 - AV1 is 400 `not_available`, nothing written.
 - A selectors setting equal to a position is saved as the slider (kind derived, addendum 6).
 - **Audio and subtitles** (slice 25b, `internal/rules/audio.go`), as `Plan.Tracks` (one op per track
@@ -198,8 +203,8 @@ slice 25. It lists the folder like the scanner (same
 skipped folders and files), probes each video through the probe cache (`probes` table, migration 5:
 ffprobe's answer per path while size and modification time stay the same; the scanner fills it too)
 and compiles the setting's Plan for it, so the counts come from the scanner's own decision.
-`skipped` counts the Plan's `SkipCode` (`already_efficient`, `already_hevc`,
-`format_not_converted`, `no_video`, `unknown_bitrate`, `cannot_keep_track`, `setting_cannot_run`,
+`skipped` counts the Plan's `SkipCode` (`already_hevc`, `format_not_converted`, `no_video`,
+`cannot_keep_track`, `setting_cannot_run`, `already_efficient` for a legacy flow's `-min-bitrate` only,
 `unreadable`). Files with more than one link stay in `canShrink`, are counted in `sharedNoSaving`
 and are left out of the range (until slice 12 skips them as `shared_file`).
 
@@ -208,7 +213,8 @@ position's band in `rules.Slider` (`SaveLowPct`-`SaveHighPct`: Smallest 15-60%, 
 Balanced 10-55%, Better quality 8-40%, Best quality 5-25%; a legacy flow uses the position with the
 nearest CRF). The bands follow the published reports in TIERS-PLAN.md and are not measured on real
 files yet (D8). Audio, subtitles and the container are copied, so they never count. A source within
-1.5x of its position's eligibility threshold (`rules.NearMinBPP`; a legacy flow: its bitrate) counts
+1.5x of its position's old eligibility threshold (`rules.NearMinBPP`, kept for the estimate only; a
+legacy flow: its bitrate) counts
 from 0 at the low end (`preview.Saving`); there is no minimum saving, so such a file is converted all the
 same and counted. Content like film grain or noise can need more data in the new format than
 before; the range overshoots there, and a short sample encode is the planned fix. The result is kept in memory per

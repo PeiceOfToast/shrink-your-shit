@@ -63,7 +63,7 @@ func TestRealSelectors(t *testing.T) {
 	})
 	t.Run("never made bigger", func(t *testing.T) {
 		p := gen("small480.mkv", "854x480", 3000)
-		tmpl := sel(func(s *rules.Selectors) { s.Resolution = "720"; s.SkipSmall = false })
+		tmpl := sel(func(s *rules.Selectors) { s.Resolution = "720" })
 		if plan := tmpl.Compile(probe(t, p)); plan.Video.Height != 0 {
 			t.Errorf("a 480p file would be scaled to %d", plan.Video.Height)
 		}
@@ -139,7 +139,7 @@ func TestRealMaxBitrateCap(t *testing.T) {
 	info := probe(t, src)
 	encode := func(maxBitrate string) (avg, peak float64) {
 		s := rules.DefaultSelectors(5)
-		s.MaxBitrate, s.Speed, s.SkipSmall = maxBitrate, "faster", false
+		s.MaxBitrate, s.Speed = maxBitrate, "faster"
 		plan := s.Template().Compile(info)
 		if plan.Skip != "" {
 			t.Fatal(plan.Skip)
@@ -207,7 +207,7 @@ func TestRealReplaceWithNewFileType(t *testing.T) {
 		"-map", "0", "-map", "1", "-c:v", "libx264", "-b:v", "5000k", "-c:a", "aac", "-b:a", "96k", "-metadata:s:a:0", "language=eng", src)
 	before, _ := os.ReadFile(src)
 	sel := rules.DefaultSelectors(3)
-	sel.FileType, sel.SkipSmall = "mkv", false
+	sel.FileType = "mkv"
 	tmpl := sel.Template()
 	st, id := realJob(t, src, 5)
 	w := realWorker(st, media.OSExec{})
