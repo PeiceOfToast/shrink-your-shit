@@ -117,7 +117,7 @@ func (s Selectors) Validate() error {
 		return invalid("minSavingPct", s.MinSavingPct)
 	}
 	for _, p := range s.Ignore {
-		if strings.TrimSpace(p) == "" || filepath.IsAbs(p) || strings.HasPrefix(path.Clean(filepath.ToSlash(p)), "..") {
+		if !insideLibrary(p) {
 			return &SelectorError{"invalid", fmt.Sprintf("%q is not a folder, file or pattern inside the library. Nothing was changed.", p)}
 		}
 		if _, err := path.Match(filepath.ToSlash(p), ""); err != nil {
@@ -125,6 +125,25 @@ func (s Selectors) Validate() error {
 		}
 	}
 	return nil
+}
+
+// insideLibrary reports whether an Ignore entry is a path inside the library, the same on every OS
+// (a library moves between machines; filepath.IsAbs on Windows does not call /etc absolute): not empty,
+// no leading / or \, no drive letter (C: or C:\), no UNC path (\\host), and no ".." part, split on both
+// separators.
+func insideLibrary(p string) bool {
+	if strings.TrimSpace(p) == "" || strings.HasPrefix(p, "/") || strings.HasPrefix(p, `\`) {
+		return false
+	}
+	if len(p) >= 2 && p[1] == ':' && (p[0] >= 'a' && p[0] <= 'z' || p[0] >= 'A' && p[0] <= 'Z') {
+		return false
+	}
+	for _, part := range strings.FieldsFunc(p, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if part == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 // Template is the flow these selectors make: the slider position itself when every choice is that
@@ -180,9 +199,10 @@ func (t Template) Ignored(rel string) bool {
 	if t.Kind != KindSelectors || t.Selectors == nil {
 		return false
 	}
-	rel = filepath.ToSlash(rel)
+	slash := func(s string) string { return strings.ReplaceAll(filepath.ToSlash(s), `\`, "/") } // either separator, any OS
+	rel = slash(rel)
 	for _, e := range t.Selectors.Ignore {
-		e = strings.TrimSuffix(path.Clean(filepath.ToSlash(e)), "/")
+		e = strings.TrimSuffix(path.Clean(slash(e)), "/")
 		if rel == e || strings.HasPrefix(rel, e+"/") {
 			return true
 		}

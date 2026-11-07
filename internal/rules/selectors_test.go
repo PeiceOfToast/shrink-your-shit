@@ -137,6 +137,13 @@ func TestSelectorsValidate(t *testing.T) {
 		"unknown cap":             {func(s *Selectors) { s.MaxBitrate = "15" }, "invalid"},
 		"absolute ignore":         {func(s *Selectors) { s.Ignore = []string{"/etc"} }, "invalid"},
 		"ignore outside":          {func(s *Selectors) { s.Ignore = []string{"../x"} }, "invalid"},
+		"backslash root":          {func(s *Selectors) { s.Ignore = []string{`\foo`} }, "invalid"},
+		"drive letter":            {func(s *Selectors) { s.Ignore = []string{"C:"} }, "invalid"},
+		"drive path":              {func(s *Selectors) { s.Ignore = []string{`C:\Videos`} }, "invalid"},
+		"drive slash":             {func(s *Selectors) { s.Ignore = []string{"d:/x"} }, "invalid"},
+		"UNC path":                {func(s *Selectors) { s.Ignore = []string{`\\host\share`} }, "invalid"},
+		"dotdot inside":           {func(s *Selectors) { s.Ignore = []string{"a/../../x"} }, "invalid"},
+		"dotdot backslash":        {func(s *Selectors) { s.Ignore = []string{`a\..\x`} }, "invalid"},
 		"bad pattern":             {func(s *Selectors) { s.Ignore = []string{"[a"} }, "invalid"},
 		"quality":                 {func(s *Selectors) { s.Quality = 6 }, "invalid_quality"},
 	} {
@@ -150,14 +157,15 @@ func TestSelectorsValidate(t *testing.T) {
 	}
 	s := DefaultSelectors(3)
 	s.FileType, s.AfterConverting = "mp4", "beside"
+	s.Ignore = []string{"Extras", `Shows\Old`, "*.sample.mkv", "a..b", "..hidden"} // dots in a name are fine
 	if err := s.Validate(); err != nil {
-		t.Errorf("mp4 beside: %v", err)
+		t.Errorf("mp4 beside with fine ignore entries: %v", err)
 	}
 }
 
 func TestIgnored(t *testing.T) {
 	s := DefaultSelectors(3)
-	s.Ignore = []string{"Extras", "Shows/Old/", "*.sample.mkv", "Season ?? Specials"}
+	s.Ignore = []string{"Extras", "Shows/Old/", "*.sample.mkv", "Season ?? Specials", `Docs\Notes`}
 	tmpl := s.Template()
 	for rel, want := range map[string]bool{
 		"Extras":                    true,
@@ -165,6 +173,7 @@ func TestIgnored(t *testing.T) {
 		"Movie/Extras/b.mkv":        true, // a folder name anywhere
 		"Shows/Old/x/e1.mkv":        true,
 		"Shows/Older/e1.mkv":        false,
+		"Docs/Notes/a.mkv":          true,
 		"trailer.sample.mkv":        true,
 		"Movie/trailer.sample.mkv":  true,
 		"Show/Season 01 Specials/a": true,
