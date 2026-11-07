@@ -349,3 +349,17 @@ func TestRemovalGuardKeepsJobsWithoutALibrary(t *testing.T) {
 		t.Errorf("the unlinked job must be claimable: %+v %v", j, err)
 	}
 }
+
+// KnownOriginals are the .syp-trash files the journal points at, whatever their state.
+func TestKnownOriginals(t *testing.T) {
+	s := open(t)
+	id, _ := s.Enqueue(Job{Library: "/m", Path: "/m/a.mkv"})
+	s.Claim("w")
+	if _, err := s.BeginSwap(Original{JobID: id, Path: "/m/a.mkv", Trash: "/m/.syp-trash/a.1.mkv", Staged: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	known, err := s.KnownOriginals()
+	if err != nil || !known[filepath.Clean("/m/.syp-trash/a.1.mkv")] || len(known) != 1 {
+		t.Errorf("%v %v", known, err)
+	}
+}

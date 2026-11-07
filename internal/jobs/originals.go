@@ -5,6 +5,7 @@ package jobs
 import (
 	"database/sql"
 	"errors"
+	"path/filepath"
 	"time"
 )
 
@@ -219,4 +220,24 @@ func nullID(id int64) any {
 		return nil
 	}
 	return id
+}
+
+// KnownOriginals are the files in .syp-trash folders that the originals journal points at (any state),
+// so a file there that is not among them is an orphan: an original from an earlier setup whose database
+// is gone (doctor.OrphanedOriginals).
+func (s *Store) KnownOriginals() (map[string]bool, error) {
+	rows, err := s.db.Query(`SELECT trash FROM originals`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	known := map[string]bool{}
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		known[filepath.Clean(t)] = true
+	}
+	return known, rows.Err()
 }
