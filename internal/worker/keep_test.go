@@ -270,3 +270,75 @@ func TestRecoveryLeavesAStrangerAtTheName(t *testing.T) {
 		t.Error("the job must not be marked done")
 	}
 }
+
+// editUnsampled changes one byte that the sampled hash does not read (between the start and middle
+// samples) and gives the file another modification time; its size stays.
+func editUnsampled(t *testing.T, p string) {
+	t.Helper()
+	f, err := os.OpenFile(p, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteAt([]byte{'!'}, 1<<20+100); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	later := time.Now().Add(time.Hour)
+	os.Chtimes(p, later, later)
+}
+
+// big makes a scenario whose original and new file are larger than the three 1 MiB samples, so an
+// edit can fall between them.
+func big(t *testing.T) *scenario {
+	s := newScenario(t)
+	os.WriteFile(s.src, append([]byte("original-"), make([]byte, 6<<20)...), 0o644)
+	s.content = "new-" + string(make([]byte, 5<<20))
+	return s
+}
+
+func crashAt(t *testing.T, s *scenario, step string) {
+	t.Helper()
+	swapHook = func(at string) error {
+		if at == step {
+			return errCrash
+		}
+		return nil
+	}
+	defer func() { swapHook = nil }()
+	job, _ := s.store.Claim("t")
+	if _, err := s.keeping(7).process(context.Background(), job); !errors.Is(err, errCrash) {
+		t.Fatalf("must stop at %q: %v", step, err)
+	}
+}
+
+// The kept original edited in an unsampled part while the program was stopped (size the same, time
+// not): recovery does not take it for the original and moves nothing (review 9cb9617).
+func TestRecoveryChecksTheOriginalsTime(t *testing.T) {
+	s := big(t)
+	crashAt(t, s, "original moved")
+	editUnsampled(t, s.trash())
+	said := RecoverSwaps(s.store, s.store, 7, keepNow)
+	if len(said) != 1 || !strings.Contains(said[0], "Please check this file") {
+		t.Errorf("%q", said)
+	}
+	if _, err := os.Stat(s.src); err == nil {
+		t.Error("nothing may be put at the name")
+	}
+	if a, _ := s.store.Originals(jobs.SwapAttention); len(a) != 1 {
+		t.Errorf("%+v", a)
+	}
+}
+
+// The converted file at the name edited the same way: not taken for the checked new file.
+func TestRecoveryChecksTheNewFilesTime(t *testing.T) {
+	s := big(t)
+	crashAt(t, s, "new file in place")
+	editUnsampled(t, s.src)
+	said := RecoverSwaps(s.store, s.store, 7, keepNow)
+	if len(said) != 1 || !strings.Contains(said[0], "not the converted one") {
+		t.Errorf("%q", said)
+	}
+	if j := s.job(); j.Status == jobs.Done {
+		t.Error("the job must not be marked done")
+	}
+}

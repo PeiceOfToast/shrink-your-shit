@@ -212,20 +212,22 @@ func RecoverSwaps(j Journal, done Completer, keepDays int, now time.Time) []stri
 	}
 	var said []string
 	say := func(format string, a ...any) { said = append(said, fmt.Sprintf(format, a...)) }
+	// Size, modification time (a rename on the same disk keeps it) and the sampled hash: an edit in a
+	// part the samples miss still changes the time.
 	isOriginal := func(p string, o jobs.Original) bool {
 		st, err := os.Stat(p)
-		if err != nil || st.Size() != o.Bytes {
+		if err != nil || st.Size() != o.Bytes || st.ModTime().UnixNano() != o.ModTime {
 			return false
 		}
 		h, err := SampleHash(p)
 		return err == nil && h == o.Hash
 	}
 	exists := func(p string) bool { _, err := os.Lstat(p); return err == nil }
-	// isNew: the file at p is the checked new file the swap recorded (a regular file of its size and
-	// sampled hash), not something else put there while the program was stopped.
+	// isNew: the file at p is the checked new file the swap recorded (a regular file of its size,
+	// modification time and sampled hash), not something else put there while the program was stopped.
 	isNew := func(p string, o jobs.Original) bool {
 		st, err := os.Lstat(p)
-		if err != nil || !st.Mode().IsRegular() || st.Size() != o.NewBytes {
+		if err != nil || !st.Mode().IsRegular() || st.Size() != o.NewBytes || st.ModTime().UnixNano() != o.NewMTime {
 			return false
 		}
 		h, err := SampleHash(p)
