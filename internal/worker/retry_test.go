@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
 // Failures that may pass are tried again later (DD-2). The worker's clock is set hours back, so a
@@ -254,4 +255,40 @@ func TestAFailedStopCheckIsTriedAgain(t *testing.T) {
 	w.Queue = stopCheckFails{s.store}
 	w.RunOne(context.Background())
 	s.wantRetry(1, 5*time.Minute, "Converting did not finish")
+}
+
+// The setting changes between two tries (from "Save as separate .srt files" to keeping every subtitle
+// inside): the next try still removes the .srt the earlier one left, with its record, and finishes
+// (review 13fb51f).
+func TestARetryClearsItsLeftoverSrtAfterTheSettingChanged(t *testing.T) {
+	s, w, srt := srtScenario(t)
+	w.Now = func() time.Time { return retryPast }
+	swapHook = func(at string) error {
+		if at == "subtitles placed" {
+			os.WriteFile(s.src, []byte("original-bytes, still downloading"), 0o644)
+		}
+		return nil
+	}
+	sidecarLstat = func(string) (os.FileInfo, error) { return nil, &os.PathError{Op: "lstat", Err: syscall.EIO} }
+	t.Cleanup(func() { swapHook, sidecarLstat = nil, os.Lstat })
+	w.RunOne(context.Background())
+	if left, _ := s.store.Sidecars(); s.job().Status != jobs.Queued || len(left) != 1 || read(srt) == "" {
+		t.Fatalf("try 1 should leave its .srt on record: %s %+v", s.job().Status, left)
+	}
+	swapHook, sidecarLstat = nil, os.Lstat
+	keepAll := rules.DefaultSelectors(3)
+	keepAll.SkipSmall = false
+	tmpl := keepAll.Template()
+	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	s.outSpec = goodOutput() // the new file keeps its subtitle inside now
+	w.RunOne(context.Background())
+	if j := s.job(); j.Status != jobs.Done {
+		t.Fatalf("try 2: %s %q", j.Status, j.Error)
+	}
+	if !gone(srt) {
+		t.Errorf("the .srt of try 1 was left: %q", read(srt))
+	}
+	if left, _ := s.store.Sidecars(); len(left) != 0 {
+		t.Errorf("records left: %+v", left)
+	}
 }

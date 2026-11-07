@@ -383,6 +383,13 @@ func BesidePathAs(src, ext string) string {
 // file next to the original; every check runs on that temp file; the rename is the very last step, and
 // any error or "no" before it removes the temp file and leaves the original exactly as it was.
 func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err error) {
+	// An earlier try of this job may have left .srt files it could not remove (they are on record): they
+	// go first, on every try and whatever the setting is now, each only if it is still exactly ours, so a
+	// try never takes its own file for someone else's and none is left behind. One that still cannot be
+	// removed makes this try one to repeat later (DD-2, reviews 222be8f, 13fb51f).
+	if err := w.clearOwnSidecars(job.ID); err != nil {
+		return "", retryable(err, retryGeneral)
+	}
 	tmpl, err := w.templateFor(job)
 	if err != nil {
 		ferr := failed("This library's setting could not be read, so converting did not start. Your original was not touched. Open the library and save its setting again, then press Retry.", err)
@@ -491,14 +498,6 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 	} else if newName != job.Path && exists(newName) { // a renaming replace never replaces another file
 		return "", failed(rules.NameTaken(newName), fs.ErrExist)
-	}
-	// An earlier try of this job may have left .srt files it could not remove (they are on record): they
-	// go first, each only if it is still exactly ours, so this try does not take its own file for someone
-	// else's. One that still cannot be removed makes this try one to repeat later (DD-2, review 222be8f).
-	if len(plan.SubtitleFiles()) > 0 {
-		if err := w.clearOwnSidecars(job.ID); err != nil {
-			return "", retryable(err, retryGeneral)
-		}
 	}
 	// Subtitles saved as .srt files go beside the new file and never over another file: a name taken
 	// already stops the job before anything is converted (checked again when they are put in place).
