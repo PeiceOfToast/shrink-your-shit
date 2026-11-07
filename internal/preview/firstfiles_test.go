@@ -3,6 +3,8 @@
 package preview
 
 import (
+	"context"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"os"
 	"path/filepath"
 	"strings"
@@ -79,5 +81,37 @@ func TestWords(t *testing.T) {
 		if got := ResolutionWord(c.w, c.h); got != c.want {
 			t.Errorf("%dx%d: %s", c.w, c.h, got)
 		}
+	}
+}
+
+// A link leading outside the folder is neither listed nor probed: its target is never read (review
+// 34c56df). A shared file (more names than one) is listed and probed.
+func TestFirstFilesNeverFollowAnOutsideLink(t *testing.T) {
+	dir, outside := t.TempDir(), t.TempDir()
+	write(t, filepath.Join(outside, "elsewhere.mkv"), 1000)
+	if err := os.Symlink(filepath.Join(outside, "elsewhere.mkv"), filepath.Join(dir, "a-link.mkv")); err != nil {
+		t.Skip(err)
+	}
+	write(t, filepath.Join(dir, "b.mkv"), 1000)
+	if err := os.Link(filepath.Join(dir, "b.mkv"), filepath.Join(outside, "b-other-name.mkv")); err != nil {
+		t.Skip(err)
+	}
+	var probed []string
+	x := &media.FakeExec{Handler: func(name string, args []string) (string, string, error) {
+		probed = append(probed, args[len(args)-1])
+		b, err := (&probes{}).Output(context.Background(), name, args...)
+		return string(b), "", err
+	}}
+	r := waitFirst(t, &FirstLister{Exec: x, FFprobe: "ffprobe"}, dir, nil)
+	if len(r.Items) != 1 || r.Items[0].Name != "b.mkv" || r.Total != 1 {
+		t.Errorf("items %+v", r)
+	}
+	for _, p := range probed {
+		if strings.Contains(p, "link") || strings.Contains(p, "elsewhere") {
+			t.Errorf("probed through the link: %s", p)
+		}
+	}
+	if len(probed) != 1 {
+		t.Errorf("probed %v, want only b.mkv", probed)
 	}
 }

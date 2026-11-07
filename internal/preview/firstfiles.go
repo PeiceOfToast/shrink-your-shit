@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/scanner"
 )
 
@@ -130,7 +131,10 @@ func (f *FirstLister) run(r *firstRun, root string, ignored func(rel string) boo
 		if err != nil {
 			return nil
 		}
-		if _, ignore := scanner.Guard(root, p, st); ignore {
+		// the file guards: a link is never listed or probed (one inside is ignored, one leading outside is
+		// the symlink skip: probing it would read outside the folder, review 34c56df); only regular files
+		// are; a shared file is listed (it is read, never changed)
+		if code, ignore := scanner.Guard(root, p, st); ignore || code == rules.SkipSymlink || !st.Mode().IsRegular() {
 			return nil
 		}
 		r.add(root, p, st.Size())
