@@ -63,7 +63,7 @@ func TestPreviewEndpoint(t *testing.T) {
 	_, saved, _ := pv(`{}`)
 	_, best, _ := pv(`{"setting":{"quality":5}}`)
 	if best.EstimateBytesHigh >= saved.EstimateBytesHigh {
-		t.Errorf("Best quality (unsaved) must estimate less than the saved Smallest: %d >= %d", best.EstimateBytesHigh, saved.EstimateBytesHigh)
+		t.Errorf("Best quality (unsaved) must estimate less than the saved Smallest file: %d >= %d", best.EstimateBytesHigh, saved.EstimateBytesHigh)
 	}
 	if f, _ := st.GetFlow(l.FlowID); f.Template != rules.SliderTemplate(1) {
 		t.Error("previewing an unsaved setting must not save it")

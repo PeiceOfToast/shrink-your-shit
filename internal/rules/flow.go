@@ -60,7 +60,7 @@ type SliderPosition struct {
 // changes after calibration on real files, which is why the UI reads it from the API. This is the one
 // place these numbers live.
 var Slider = []SliderPosition{
-	{1, "Smallest", 27, 20, 0.93, 0.05, 15, 60},
+	{1, "Smallest file", 27, 20, 0.93, 0.05, 15, 60},
 	{2, "Smaller", 25, 15, 0.94, 0.065, 12, 57},
 	{3, "Balanced", 23, 10, 0.95, 0.08, 10, 55},
 	{4, "Better quality", 21, 8, 0.965, 0.10, 8, 40},

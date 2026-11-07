@@ -18,7 +18,7 @@ func TestSliderTable(t *testing.T) {
 	code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/settings/slider"})
 	var out struct{ Positions []map[string]any }
 	json.Unmarshal([]byte(body), &out)
-	if code != 200 || len(out.Positions) != 5 || out.Positions[2]["name"] != "Balanced" || out.Positions[2]["crf"] != 23.0 || out.Positions[2]["minSavingPct"] != 10.0 {
+	if code != 200 || len(out.Positions) != 5 || out.Positions[2]["name"] != "Balanced" || out.Positions[0]["name"] != "Smallest file" || out.Positions[2]["crf"] != 23.0 || out.Positions[2]["minSavingPct"] != 10.0 {
 		t.Fatalf("%d %s", code, body)
 	}
 	for k := range out.Positions[0] {
