@@ -431,3 +431,34 @@ func TestSettingsRegistry(t *testing.T) {
 		t.Errorf("NAV-7: %q in settings.json", m)
 	}
 }
+
+// Auth (workshop slice 11, UI half): the page never keeps the access token, strips ?token= from the address
+// before anything else, and every write api.js can send carries the JSON content type the CSRF check needs.
+func TestAuthClient(t *testing.T) {
+	read := func(name string) string {
+		b, err := fs.ReadFile(static, "static/"+name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	fs.WalkDir(static, "static", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || path.Ext(p) != ".js" || p == "static/mock.js" {
+			return nil
+		}
+		for i, line := range strings.Split(read(strings.TrimPrefix(p, "static/")), "\n") {
+			if strings.Contains(strings.ToLower(line), "token") && strings.Contains(line, "Storage") {
+				t.Errorf("%s:%d: the token must never go to browser storage: %s", p, i+1, strings.TrimSpace(line))
+			}
+		}
+		return nil
+	})
+	app := read("app.js")
+	strip, login := strings.Index(app, "history.replaceState"), strings.Index(app, "api.login({}, { token: t })")
+	if strip < 0 || login < 0 || strip > login {
+		t.Error("app.js must remove ?token= from the address before it signs in")
+	}
+	if !regexp.MustCompile(`if \(e\[0\] !== "GET"\) \{ opt\.headers\["Content-Type"\] = "application/json"; opt\.body = JSON\.stringify\(body \|\| \{\}\); \}`).MatchString(read("api.js")) {
+		t.Error("api.js: every write must send Content-Type: application/json with a JSON body")
+	}
+}

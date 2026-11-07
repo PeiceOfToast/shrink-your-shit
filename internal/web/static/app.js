@@ -6,14 +6,53 @@
   function text(el, s) { el.textContent = s; }
 
   // The installer's address carries ?token=...; swap it for the session cookie and
-  // drop it from the address. The token is never stored by the page.
+  // drop it from the address first. The token is never stored by the page.
   function signIn() {
     var u = new URL(location.href), t = u.searchParams.get("token");
     if (!t) return Promise.resolve();
     u.searchParams.delete("token");
     history.replaceState(null, "", u.pathname + u.search + u.hash);
-    return api.login({}, { token: t }).catch(function () {});
+    return api.login({}, { token: t }).catch(function (e) { screen(e && e.status === 401 ? "bad_token" : "offline"); return never; });
   }
+
+  // The sign-in screen (FIRST-RUN.md#sign-in), in place of the page and without the menu. The address stays,
+  // so signing in reloads the page the person asked for.
+  var never = new Promise(function () {}), shown = false;
+  function screen(code) {
+    if (shown) return; shown = true;
+    var main = $("main"), el = function (tag, txt, cls) { var n = doc.createElement(tag); if (txt) n.textContent = txt; if (cls) n.className = cls; return n; };
+    Array.prototype.forEach.call(main.children, function (c) { c.hidden = true; }); // left in place, hidden, so page scripts still find their parts
+    ["main-nav", "working"].forEach(function (id) { if ($(id)) $(id).hidden = true; });
+    var box = el("div", null, "stack"), f = el("form", null, "stack"), fld = el("div", null, "field"), row = el("div", null, "row"),
+      lb = el("label", "Access token"), inp = el("input"), show = el("button", "Show", "btn"), err = el("p", null, "hint"), go = el("button", "Sign in", "btn primary"), help = el("ul");
+    box.style.cssText = "max-width:32rem;margin:0 auto";
+    inp.id = "signin-token"; inp.type = "password"; inp.autocomplete = "current-password"; inp.spellcheck = false; inp.size = 30; lb.htmlFor = inp.id;
+    show.type = "button"; show.setAttribute("aria-controls", inp.id);
+    show.onclick = function () { var on = inp.type === "password"; inp.type = on ? "text" : "password"; show.textContent = on ? "Hide" : "Show"; };
+    err.id = "signin-err"; err.setAttribute("role", "alert"); err.style.color = "var(--bad)"; inp.setAttribute("aria-describedby", err.id);
+    function say(c) { err.textContent = !c ? "" : c === "empty" ? "Paste the access token first." : c === "bad_token" ? "That token doesn't match this server. Check you copied all of it." : "We couldn't reach the server. Check it is running, then try again."; }
+    say(code);
+    row.appendChild(inp); row.appendChild(show); fld.appendChild(lb); fld.appendChild(row); fld.appendChild(err);
+    f.appendChild(fld); f.appendChild(el("div", null, "row")).appendChild(go);
+    [["Linux", "sudo shrink-your-shit token", ""], ["Mac", "shrink-your-shit token", "in Terminal"], ["Windows", "shrink-your-shit token", "in Command Prompt or PowerShell"],
+     ["Docker", "docker exec <container name> shrink-your-shit token", "use your container's name"]].forEach(function (c) {
+      var li = el("li", c[0] + ": "), code = el("code", c[1]); code.style.userSelect = "all"; // one click selects the whole line to copy
+      li.appendChild(code); if (c[2]) li.appendChild(doc.createTextNode(" (" + c[2] + ")")); help.appendChild(li);
+    });
+    box.appendChild(el("h1", "Sign in")); box.appendChild(el("p", "Paste the access token for this shrink-your-shit server.")); box.appendChild(f);
+    box.appendChild(el("h2", "Where do I find it?"));
+    box.appendChild(el("p", "It was shown at the end of the install, as part of the web address (the part after ?token=)."));
+    box.appendChild(el("p", "Or see it again on the computer running shrink-your-shit. Run the line for that computer:")); box.appendChild(help);
+    box.appendChild(el("p", "It prints the token and a sign-in link you can open directly."));
+    main.insertBefore(box, main.firstChild); doc.title = "Sign in - shrink-your-shit"; inp.focus();
+    f.onsubmit = function (ev) {
+      ev.preventDefault();
+      var t = inp.value.trim(); if (!t) { say("empty"); inp.focus(); return; }
+      api.login({}, { token: t }).then(function () { inp.value = ""; location.reload(); },
+        function (e) { say(e && e.status === 401 ? "bad_token" : "offline"); inp.focus(); inp.select(); });
+    };
+  }
+  window.SYP.needSignIn = function () { screen(""); };
 
   function theme() {
     var btn = $("theme"), root = doc.documentElement, names = ["auto", "light", "dark"], cur = "auto";
@@ -74,14 +113,13 @@
   }
 
   window.SYP.menu = menu;
-  window.SYP.ready = signIn();
-  window.SYP.ready.then(function () {
-    theme();
-    if (api.mocked) $("mock-note").hidden = false;
-    working();
+  // Pages start once the session is known: a 401 here shows the sign-in screen and the page never starts.
+  theme();
+  window.SYP.ready = signIn().then(function () {
     return api.getSettings().then(function (s) {
-      update(s);
-      return firstRun(s).then(function () { return menu(s); });
-    });
-  }).catch(function () {});
+      if (api.mocked) $("mock-note").hidden = false;
+      working(); update(s);
+      firstRun(s).then(function () { return menu(s); }).catch(function () {});
+    }, function (e) { return e && e.status === 401 ? never : null; });
+  });
 })();

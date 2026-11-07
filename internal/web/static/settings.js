@@ -121,6 +121,11 @@
     };
     row.appendChild(inp); row.appendChild(show); row.appendChild(mk);
     box.appendChild(lb); box.appendChild(row); box.appendChild(hint); box.appendChild(msg);
+    if (s.authRequired) { // IA: the one place to sign out, only when the server asks for the token
+      var out = el("button", "btn", "Sign out of this browser"); out.type = "button"; out.style.marginTop = "8px";
+      out.onclick = function () { api.logout().then(function () { location.reload(); }, function (er) { msg.textContent = er.message; }); };
+      box.appendChild(out);
+    }
     return box;
   }
 
