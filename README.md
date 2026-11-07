@@ -160,17 +160,17 @@ Run `./shrink-your-shit -h` for all of them. The main ones:
 | `-crf` | `26` | quality: lower is better and bigger |
 | `-preset` | `medium` | x265 speed: `ultrafast` … `veryslow` |
 | `-output` | `replace` | `replace` or `beside` |
+| `-decode-check` | `auto` | play the new file through a decoder before replacing the original: `auto` (completely up to 3 hours long, else at 3 places) or `always` |
+| `-min-ssim` | `0.95` | how similar the new picture must be to the original (0.90-1.0); an untuned starting value |
+| `-scan-every` | `30s` | how often to look for new files |
+| `-settle` | `15s` | skip files changed this recently (still copying) |
+| `-addr` | `127.0.0.1:8484` | web UI address (env `SYP_ADDR`) |
 
 On a new install, libraries from `-library` wait for the first run on the web page, where you
 choose their setting and press Start. `-from-codec`, `-min-bitrate`, `-crf`, `-preset` and
 `-output` only matter for an install upgraded from a version before libraries: they are the
 settings its libraries keep converting with. Each library keeps its own settings (its flow) after
 that: changing these flags later does not change libraries that already exist.
-| `-decode-check` | `auto` | play the new file through a decoder before replacing the original: `auto` (completely up to 3 hours long, else at 3 places) or `always` |
-| `-min-ssim` | `0.95` | how similar the new picture must be to the original (0.90-1.0); an untuned starting value |
-| `-scan-every` | `30s` | how often to look for new files |
-| `-settle` | `15s` | skip files changed this recently (still copying) |
-| `-addr` | `127.0.0.1:8484` | web UI address (env `SYP_ADDR`) |
 
 ## For developers
 

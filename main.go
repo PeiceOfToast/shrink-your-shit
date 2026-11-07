@@ -43,7 +43,7 @@ func main() {
 	def := rules.Default()
 	data := flag.String("data", defaultDataDir(), "folder for the database (default: your user config folder; env SYP_DATA)")
 	addr := flag.String("addr", envOr("SYP_ADDR", "127.0.0.1:8484"), "web UI address; use 0.0.0.0:8484 to allow other machines, which then need the access token (see: shrink-your-shit token) (env SYP_ADDR)")
-	const forNew = " (for libraries -library adds; existing libraries keep their own settings)"
+	const forNew = " (only for an install upgraded from before libraries: the Legacy flows of the libraries -library adds there; a new install's libraries get their setting in first-run)"
 	from := flag.String("from-codec", def.FromCodec, "only convert files with this video codec"+forNew)
 	minKbps := flag.Int("min-bitrate", def.MinBitrateKbps, "only convert files above this video bitrate (kbps)"+forNew)
 	crf := flag.Int("crf", def.CRF, "HEVC quality (lower = better quality, bigger file)"+forNew)
