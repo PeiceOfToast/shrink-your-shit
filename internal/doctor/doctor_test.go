@@ -428,3 +428,25 @@ func TestOrphanedOriginalsAreANote(t *testing.T) {
 		}
 	}
 }
+
+// A known original recorded through a linked folder (as on macOS, where /var is /private/var) is the same
+// file the walk finds through the real folder: no note (review 8fd5cd5).
+func TestKnownOriginalThroughALinkIsNotOrphaned(t *testing.T) {
+	real := t.TempDir()
+	trash := filepath.Join(real, ".syp-trash")
+	os.MkdirAll(trash, 0o755)
+	os.WriteFile(filepath.Join(trash, "movie.1.mkv"), []byte("orig"), 0o644)
+	alias := filepath.Join(t.TempDir(), "lib-link")
+	if err := os.Symlink(real, alias); err != nil {
+		t.Skip(err)
+	}
+	c := checker(1 << 40)
+	c.KnownOriginals = func() (map[string]bool, error) {
+		return map[string]bool{filepath.Join(alias, ".syp-trash", "movie.1.mkv"): true}, nil // recorded via the link
+	}
+	for _, n := range c.Folder(context.Background(), real).Notes {
+		if n.Code == "orphaned_originals" {
+			t.Errorf("a known original was reported: %s", n.Message)
+		}
+	}
+}
