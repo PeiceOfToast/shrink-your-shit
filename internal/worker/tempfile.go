@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,8 +14,9 @@ import (
 
 // The new file is written into a private staging folder next to the original: created fresh with
 // os.MkdirTemp (unpredictable name, mode 0700), holding one file created exclusively at mode 0600.
-// No other user can reach or replace the file while it is written and checked, and the worker
-// remembers which file it created. The folder name starts with "." so the scanner skips it; the file
+// On Linux and macOS no other user can reach or replace the file while it is written and checked.
+// On Windows the mode is ignored and the folder inherits the media folder's access list (ACL), so
+// it is only as private as that folder. Either way the worker remembers which file it created. The folder name starts with "." so the scanner skips it; the file
 // keeps the original's extension so ffmpeg picks the right container. The original's permissions are
 // put on the file only after the checks, just before the rename, and the folder is removed on every
 // path.
@@ -57,17 +59,51 @@ func TempFiles(src string) ([]string, error) {
 	return out, nil
 }
 
-// removeLeftoverTemps removes what earlier runs left next to src. Any failure stops the job: carrying
-// on beside something we cannot account for is not safe. Removing a link removes the link, never
-// what it points to.
+// removeLeftoverTemps removes what earlier runs left next to src: a file under the old fixed temp
+// name, and staging folders that hold nothing but our one temp file (that file is removed, then the
+// empty folder). Anything else with a matching name, such as a folder holding other files, is left
+// alone and logged: it may not be ours. A removal that fails stops the job. Removing a link removes
+// the link, never what it points to.
 func removeLeftoverTemps(src string) error {
 	old, err := TempFiles(src)
 	if err != nil {
 		return fmt.Errorf("looking for old temp files: %w", err)
 	}
+	stagedName := "new" + filepath.Ext(src)
 	for _, p := range old {
-		if err := os.RemoveAll(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("cannot remove the old temp file %s: %w", p, err)
+		fi, err := os.Lstat(p)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("cannot check the old temp file %s: %w", p, err)
+		}
+		var remove []string
+		switch {
+		case !strings.HasPrefix(filepath.Base(p), ".") && !fi.IsDir(): // the old fixed temp file name
+			remove = []string{p}
+		case strings.HasPrefix(filepath.Base(p), ".") && fi.IsDir():
+			entries, err := os.ReadDir(p)
+			if err != nil {
+				return fmt.Errorf("cannot check the old temp folder %s: %w", p, err)
+			}
+			ours := len(entries) == 0 || (len(entries) == 1 && entries[0].Name() == stagedName && !entries[0].IsDir())
+			if !ours {
+				log.Printf("leaving %s alone: it holds files shrink-your-shit did not put there", p)
+				continue
+			}
+			for _, e := range entries {
+				remove = append(remove, filepath.Join(p, e.Name()))
+			}
+			remove = append(remove, p) // the folder last, once it is empty
+		default:
+			log.Printf("leaving %s alone: it is not a temp file or folder shrink-your-shit made", p)
+			continue
+		}
+		for _, r := range remove {
+			if err := os.Remove(r); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return fmt.Errorf("cannot remove the old temp file %s: %w", r, err)
+			}
 		}
 	}
 	return nil

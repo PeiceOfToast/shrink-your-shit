@@ -133,13 +133,16 @@ threshold while CRF 16 passes; a truncated source is never "done". Things to kno
 Collected from the reviews; none is fixed.
 
 - **Not defended: a hostile program running as the same user (slice 10 residue).** Slice 10 protects
-  originals from crashes, bad encodes and accidental interference; other users cannot reach the
-  private staging folder. A program running as the same user can still swap or rewrite the staged
+  originals from crashes, bad encodes and accidental interference; on Linux and macOS other users
+  cannot reach the private staging folder. A program running as the same user can still swap or rewrite the staged
   file after the checks, and it could delete or edit the originals directly anyway.
 - **Last check to rename (slice 12 file-guards owns this):** right before the rename the worker checks
   that the original is still the file it read and the staged file still the one it checked, but a
   plain rename cannot make that check and the move one step. A program that edits or replaces the
   original in the instant between them is not caught, and its file is overwritten.
+- **Staging folder on Windows is not private:** Windows ignores the 0700/0600 modes, so the staging
+  folder inherits the media folder's access list (ACL). Another user who may write in the media
+  folder can reach the new file while it is written and checked. On Linux and macOS it is private.
 - **No change time on Windows:** an edit to the original during a conversion that keeps its size and
   puts its modification time back is caught on Linux and macOS (change time) but not on Windows.
 - **Crash between rename and "done":** if the process dies after the new file replaced the

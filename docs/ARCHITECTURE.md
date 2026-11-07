@@ -40,12 +40,16 @@ the result and the original was deliberately left alone, with the reason in the 
    `Expect` (below). Then it runs ffmpeg into a temp file next to the original, same container as
    the input, inside a private staging folder (`worker/tempfile.go`): `.name.<random>.syp-tmp/`
    next to the original, created fresh at mode 0700 (the leading dot makes the scanner skip it), with
-   the file created exclusively at 0600. Other users cannot reach it while it is written and checked.
+   the file created exclusively at 0600. On Linux and macOS other users cannot reach it while it is
+   written and checked; on Windows the mode is ignored and the folder inherits the media folder's
+   access list (ACL), so it is only as private as that folder.
    The worker remembers the file's identity (device and inode, or Windows file ID): if that name later
    refers to anything else, the result is not used. The original's permissions are put on the file
    only after the checks, just before the rename, and the folder is removed on every path. Leftovers
-   from a crash (and the old fixed temp name `name.syp-tmp.<ext>`) are removed first; if one cannot
-   be removed, the job fails before ffmpeg starts. First video stream to HEVC; everything else copied except data streams.
+   from a crash are removed first: a file under the old fixed temp name `name.syp-tmp.<ext>`, and a
+   staging folder only if it holds nothing but our temp file (that file, then the empty folder;
+   never a recursive delete). Anything else with a matching name is left alone and logged. If a
+   removal fails, the job fails before ffmpeg starts. First video stream to HEVC; everything else copied except data streams.
 3. **Safety floor** (`worker/verify.go`; not removable by a flow, only the thresholds are tunable).
    The new file is compared with the `Expect`, never directly with the original. Cheap checks first:
    it exists and is not empty; it is readable; **stream parity** (same number of video, audio,

@@ -88,10 +88,14 @@ func TestLeftoverTempLinksAreRemovedNotFollowed(t *testing.T) {
 	s := newScenario(t)
 	victim := filepath.Join(t.TempDir(), "other.mkv")
 	os.WriteFile(victim, []byte("someone else's file"), 0o644)
-	for _, n := range []string{"movie.syp-tmp.mkv", ".movie.123.syp-tmp"} {
-		if err := os.Symlink(victim, filepath.Join(s.dir, n)); err != nil {
-			t.Fatal(err)
-		}
+	// a link under the old fixed temp name is removed; one under a staging-folder name is not a
+	// staging folder, so it is left alone; neither is followed
+	if err := os.Symlink(victim, filepath.Join(s.dir, "movie.syp-tmp.mkv")); err != nil {
+		t.Fatal(err)
+	}
+	stagingLink := filepath.Join(s.dir, ".movie.123.syp-tmp")
+	if err := os.Symlink(s.dir, stagingLink); err != nil {
+		t.Fatal(err)
 	}
 	s.run(Replace)
 	if j := s.job(); j.Status != jobs.Done {
@@ -100,8 +104,49 @@ func TestLeftoverTempLinksAreRemovedNotFollowed(t *testing.T) {
 	if b, _ := os.ReadFile(victim); string(b) != "someone else's file" {
 		t.Errorf("the link's target was written: %q", b)
 	}
-	if tempLeft(s.src) {
-		t.Error("a temp entry was left behind")
+	if _, err := os.Lstat(filepath.Join(s.dir, "movie.syp-tmp.mkv")); err == nil {
+		t.Error("the link under the old temp name was not removed")
+	}
+	if _, err := os.Lstat(stagingLink); err != nil {
+		t.Error("a link that is not a staging folder was removed")
+	}
+	if b, _ := os.ReadFile(s.src); string(b) != "new" {
+		t.Errorf("the library folder behind the link was touched: original is %q", b)
+	}
+}
+
+// Only a staging folder holding nothing but our temp file is removed. A folder with the same kind of
+// name but other contents may not be ours: it and everything in it stay, and the job still runs.
+func TestLeftoverCleanupRemovesOnlyRecognisedStagingFolders(t *testing.T) {
+	s := newScenario(t)
+	ours := filepath.Join(s.dir, ".movie.111.syp-tmp")
+	empty := filepath.Join(s.dir, ".movie.222.syp-tmp")
+	theirs := filepath.Join(s.dir, ".movie.333.syp-tmp")
+	nested := filepath.Join(s.dir, ".movie.444.syp-tmp")
+	for _, d := range []string{ours, empty, theirs, filepath.Join(nested, "new.mkv")} {
+		os.MkdirAll(d, 0o700)
+	}
+	os.WriteFile(filepath.Join(ours, "new.mkv"), []byte("half-written"), 0o600)
+	os.WriteFile(filepath.Join(theirs, "new.mkv"), []byte("x"), 0o600)
+	os.WriteFile(filepath.Join(theirs, "notes.txt"), []byte("keep me"), 0o644)
+	os.WriteFile(filepath.Join(nested, "new.mkv", "inner.txt"), []byte("keep me too"), 0o644)
+	s.run(Replace)
+	if j := s.job(); j.Status != jobs.Done {
+		t.Errorf("%s %q", j.Status, j.Error)
+	}
+	for _, gone := range []string{ours, empty} {
+		if _, err := os.Lstat(gone); err == nil {
+			t.Errorf("%s is ours and should have been removed", filepath.Base(gone))
+		}
+	}
+	for p, want := range map[string]string{
+		filepath.Join(theirs, "notes.txt"):            "keep me",
+		filepath.Join(theirs, "new.mkv"):              "x",
+		filepath.Join(nested, "new.mkv", "inner.txt"): "keep me too",
+	} {
+		if b, err := os.ReadFile(p); err != nil || string(b) != want {
+			t.Errorf("%s: %q %v, want it left alone", p, b, err)
+		}
 	}
 }
 
