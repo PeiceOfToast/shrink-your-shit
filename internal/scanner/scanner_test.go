@@ -4,6 +4,7 @@ package scanner
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -350,11 +351,20 @@ func TestStillChangingFollowsTheFileNotThePath(t *testing.T) {
 	// a fake clock and no sleeps: the result never depends on timing (it was flaky on Windows CI)
 	clock := time.Now()
 	s.Now, s.MinAge = func() time.Time { return clock }, time.Minute
+	a := filepath.Join(lib, "a.mkv")
+	var seen []string // what each look saw of a.mkv, printed if the test fails (which field moved?)
 	scan := func() int {
 		clock = clock.Add(2 * time.Minute) // each look well after the previous one
+		if st, err := os.Lstat(a); err == nil {
+			seen = append(seen, fmt.Sprintf("%+v", stateOf(a, st)))
+		}
 		return s.ScanOnce(context.Background())
 	}
-	a := filepath.Join(lib, "a.mkv")
+	defer func() {
+		if t.Failed() {
+			t.Logf("a.mkv as each look saw it:\n%s", strings.Join(seen, "\n"))
+		}
+	}()
 	old := clock.Add(-time.Hour)
 	os.Chtimes(a, old, old)
 	before, _ := os.Stat(a)
@@ -453,8 +463,11 @@ func TestOutsideLinkIsNeverOpened(t *testing.T) {
 		t.Skip(err)
 	}
 	var keyed []string
-	defer func(f func(string, os.FileInfo) (string, bool)) { fileKey = f }(fileKey)
-	fileKey = func(p string, fi os.FileInfo) (string, bool) { keyed = append(keyed, p); return "k:" + p, true }
+	defer func(f func(string, os.FileInfo) (string, int64, time.Time, bool)) { readFileState = f }(readFileState)
+	readFileState = func(p string, fi os.FileInfo) (string, int64, time.Time, bool) {
+		keyed = append(keyed, p)
+		return "k:" + p, fi.Size(), fi.ModTime(), true
+	}
 	settle(s)
 	for _, p := range keyed {
 		if p == link || p == outside {
@@ -463,5 +476,33 @@ func TestOutsideLinkIsNeverOpened(t *testing.T) {
 	}
 	if len(keyed) == 0 {
 		t.Error("the watch saw nothing (a.mkv should have been keyed)")
+	}
+}
+
+// An untouched file reads the same at every look: identity, size and times (if it did not, it would
+// look changed at every scan and never be converted). Where the directory listing's copy of size or
+// time differs from the file's, that is logged: the scanner reads the file itself.
+func TestUntouchedFileStateIsStable(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "a.mkv")
+	os.WriteFile(p, []byte("12345"), 0o644)
+	old := time.Now().Add(-time.Hour)
+	os.Chtimes(p, old, old)
+	var first fileState
+	for i := 0; i < 5; i++ {
+		st, err := os.Lstat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cur := stateOf(p, st)
+		if i == 0 {
+			first = cur
+		} else if !cur.same(first) {
+			t.Errorf("look %d differs:\n first %+v\n now   %+v", i, first, cur)
+		}
+		entries, _ := os.ReadDir(dir)
+		if fi, err := entries[0].Info(); err == nil && (fi.Size() != st.Size() || !fi.ModTime().Equal(st.ModTime())) {
+			t.Logf("the listing's copy differs from the file: listing %d %v, file %d %v", fi.Size(), fi.ModTime(), st.Size(), st.ModTime())
+		}
 	}
 }

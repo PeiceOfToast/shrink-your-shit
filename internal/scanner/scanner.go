@@ -112,7 +112,9 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 			if !IsVideo(path) {
 				return nil
 			}
-			info, err := d.Info() // Lstat: a link is seen as a link
+			// Lstat (a link is seen as a link), and from the file itself: on Windows a directory
+			// listing's size and time can lag behind the file's
+			info, err := os.Lstat(path)
 			if err != nil {
 				return nil
 			}
@@ -169,13 +171,13 @@ type fileState struct {
 	hasCtime     bool
 }
 
-// fileKey is media.FileKey; tests watch which files it opens.
-var fileKey = media.FileKey
+// readFileState is media.FileState; tests watch which files it opens.
+var readFileState = media.FileState
 
 func stateOf(path string, st os.FileInfo) fileState {
-	key, _ := fileKey(path, st)
+	key, size, mtime, _ := readFileState(path, st)
 	c, hasC := media.ChangeTime(st)
-	return fileState{key: key, size: st.Size(), mtime: st.ModTime(), ctime: c, hasCtime: hasC}
+	return fileState{key: key, size: size, mtime: mtime, ctime: c, hasCtime: hasC}
 }
 
 func (a fileState) same(b fileState) bool {
