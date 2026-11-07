@@ -99,8 +99,13 @@
     { id: "s11", library: "Movies", path: "/media/movies/Soundtrack.mkv", reason: "no_video", detail: "The file holds only audio.", libraryId: null },
     { id: "s12", library: "TV Shows", path: "/media/tv/Pilot (raw).ts", reason: "unknown_bitrate", detail: "The file does not say its bitrate, so we could not tell whether converting is safe.", libraryId: null },
     { id: "s13", library: "Movies", path: "/media/movies/Short (2003).avi", reason: "setting_cannot_run", detail: "MP4 is the chosen file type, and it cannot hold this file's audio.", libraryId: "1" },
+    // Workshop slice 23's temporary guard: the next scan looks again, so no Convert again and no Change rule.
+    { id: "s14", library: "TV Shows", path: "/media/tv/Season 4/E01.mkv", reason: "still_changing", detail: "The file was still being written when we looked.", libraryId: "2" },
+    { id: "s15", library: "Movies", path: "/media/movies/Extras/Trailer.mkv", reason: "symlink", detail: "This is a link to /mnt/archive/Trailer.mkv, which is outside this library.", libraryId: null },
+    // After workshop slice 23 (file guards) shared files are skipped, not converted (sharedNoSaving is 0).
+    { id: "s16", library: "Movies", path: "/media/movies/Night Train (2016).mp4", reason: "shared_file", detail: "Another folder uses this same file (for example Radarr). Changing it would break that.", libraryId: null }
   ];
-  for (var gi = 1; gi <= 68; gi++) skippedList.push({ id: "g" + gi, library: "TV Shows", path: "/media/tv/Season 2/E" + (gi < 10 ? "0" : "") + gi + ".mkv", reason: "already_efficient", detail: "Already small for its quality.", libraryId: "2" });
+  for (var gi = 1; gi <= 96; gi++) skippedList.push({ id: "g" + gi, library: "TV Shows", path: "/media/tv/Season 2/E" + (gi < 10 ? "0" : "") + gi + ".mkv", reason: "already_efficient", detail: "Already small for its quality.", libraryId: "2" });
   var failedList = [
     { jobId: "j9", library: "Movies", path: "/media/movies/Cut Short (2012).mkv", title: "The new file did not pass the check", detail: "The new file is 3 minutes shorter than the original, so it was thrown away. Try again; if it fails again, the original file may be damaged.", originalUntouched: true },
     { jobId: "j10", library: "TV Shows", path: "/media/tv/Season 1/E03.mkv", title: "Not enough space", detail: "Needs about 14 GB free, only 6 GB is free. Free some space, then press Retry.", originalUntouched: true }
@@ -127,10 +132,10 @@
              counts: { skipped: skippedList.length, failed: failedList.length } };
   }
   function previewResult() {
-    // About 10-20% of 1.1 TB, as first-run step 1 promises. files = canShrink + skipped (1284 = 1204 + 80; the Skipped list has 80 rows too, F4).
-    // Until workshop slice 12, shared files are converted (in canShrink, not skipped) and free nothing: sharedNoSaving (addendum 12).
-    return { stale: false, status: "ready", estimateBytesLow: 110 * GB, estimateBytesHigh: 220 * GB, files: 1284, totalBytes: 1100 * GB, canShrink: 1204, sharedNoSaving: 29,
-             skipped: { already_efficient: 71, hdr_dv: 5, format_not_converted: 1, no_video: 1, unknown_bitrate: 1, setting_cannot_run: 1 } };
+    // About 10-20% of 1.1 TB, as first-run step 1 promises. files = canShrink + skipped (1284 = 1173 + 111; the Skipped list has 111 rows too, F4).
+    // Since workshop slice 23 (file guards) shared files are skipped (skipped.shared_file) and sharedNoSaving is 0 (addendum 12).
+    return { stale: false, status: "ready", estimateBytesLow: 110 * GB, estimateBytesHigh: 220 * GB, files: 1284, totalBytes: 1100 * GB, canShrink: 1173, sharedNoSaving: 0,
+             skipped: { already_efficient: 71, hdr_dv: 5, format_not_converted: 1, no_video: 1, unknown_bitrate: 1, setting_cannot_run: 1, still_changing: 1, symlink: 1, shared_file: 29 } };
   }
   // Standard's defaults are the slider's: the same choices with that position's minimum saving (contract addendum 6).
   function isSliderPosition(b) {
@@ -209,7 +214,7 @@
       var said = { full: "Only 6 GB free on this disk. Free up space (about 15 GB is enough to start), then press Check again.",
         readonly: "This folder is read-only. Make it writable, then press Check again. shrink-your-shit runs as the user syp. On this server: sudo chown -R syp:syp " + path + " (or add syp to the folder's group and give the group write access)." };
       for (k in codes) if (path.indexOf(k) >= 0) bl.push({ code: codes[k], message: said[k] || "" });
-      var notes = bl.length ? [] : [{ code: "hardlinks", message: "212 files are shared with another folder (for example by Radarr). This version still converts them, but that frees no space, because the other folder keeps its copy. Leaving them alone comes in a later update." }, { code: "no_hw_encoder", message: "" }];
+      var notes = bl.length ? [] : [{ code: "hardlinks", message: "212 files are shared with another folder (for example by Radarr). We will leave them alone, because changing one would break the link." }, { code: "no_hw_encoder", message: "" }];
       if (!bl.length && path.indexOf("space_unknown") >= 0) notes.unshift({ code: "space_unknown", message: "We couldn't check how much space is free on this disk. Files here are only converted when there is room, so check that the disk is working." });
       if (!bl.length && path.indexOf("unreadable_folders") >= 0) notes.unshift({ code: "unreadable_folders", message: "3 folders inside could not be read. Files in them will not be converted." });
       return ok({ ok: !bl.length, blockers: bl, notes: notes, videoCount: 1284, totalBytes: 1100 * GB });

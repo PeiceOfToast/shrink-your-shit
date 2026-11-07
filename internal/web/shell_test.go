@@ -528,3 +528,45 @@ func TestCountsUseSingularForOne(t *testing.T) {
 		}
 	}
 }
+
+// Every skip reason in the contract, and every one the mock sends (but its one deliberately unknown code), has plain
+// words in ui.js; code after a // comment does not count. A comment placed mid-line once hid cannot_keep_track; node --check can't see that.
+func TestSkipReasonsHaveWords(t *testing.T) {
+	read := func(name string) string {
+		b, err := fs.ReadFile(static, "static/"+name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	var code strings.Builder
+	for _, line := range strings.Split(read("ui.js"), "\n") {
+		if i := strings.Index(line, "//"); i >= 0 {
+			line = line[:i]
+		}
+		code.WriteString(line + "\n")
+	}
+	// The contract's skip reason codes (UI-API-CONTRACT.md: skipped reasons, addenda and slice additions).
+	contract := []string{"already_efficient", "would_not_shrink", "already_hevc", "hdr_dv", "bitmap_subs", "shared_file", "symlink",
+		"unreadable", "cannot_keep_track", "user_stopped", "restored", "format_not_converted", "no_video", "unknown_bitrate",
+		"setting_cannot_run", "still_changing"}
+	for _, r := range contract {
+		if !regexp.MustCompile(`\b` + r + `: "`).MatchString(code.String()) {
+			t.Errorf("contract skip reason %q has no words in ui.js REASONS", r)
+		}
+	}
+	seen := map[string]bool{}
+	for _, m := range regexp.MustCompile(`reason: "(\w+)"`).FindAllStringSubmatch(read("mock.js"), -1) {
+		r := m[1]
+		if r == "some_future_code" || seen[r] {
+			continue
+		}
+		seen[r] = true
+		if !regexp.MustCompile(`\b` + r + `: "`).MatchString(code.String()) {
+			t.Errorf("skip reason %q (sent by mock.js) has no words in ui.js REASONS", r)
+		}
+	}
+	if len(seen) < 5 {
+		t.Errorf("found only %d reasons in mock.js; the pattern may be wrong", len(seen))
+	}
+}
