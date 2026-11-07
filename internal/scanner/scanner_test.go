@@ -294,7 +294,7 @@ func TestStillChangingWaitsForTwoLooks(t *testing.T) {
 	if r, _ := st.GetFile(a); r == nil || r.Reason != "" || !strings.HasPrefix(r.Decision, "queued: ") {
 		t.Errorf("queued file's record %+v", r)
 	}
-	if items, total, _ := st.SkippedFiles("", 10, 0); total != 0 {
+	if items, total, _ := st.SkippedFiles(nil, 10, 0); total != 0 {
 		t.Errorf("skipped list %d %+v", total, items)
 	}
 }
@@ -564,7 +564,7 @@ func TestQueuedFileIsNotStillChangingAfterASave(t *testing.T) {
 			t.Fatalf("scan %d: the waiting file is listed as still changing: %+v", i+1, r)
 		}
 	}
-	if items, total, _ := st.SkippedFiles("", 10, 0); total != 0 {
+	if items, total, _ := st.SkippedFiles(nil, 10, 0); total != 0 {
 		t.Errorf("skipped %d %+v", total, items)
 	}
 	if open, _ := st.HasOpenJob(a); !open {
