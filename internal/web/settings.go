@@ -17,8 +17,6 @@ import (
 // and checks them; using parallelJobs, quietHours, lowPriority, scanSchedule and queueOrder belongs to
 // later slices (24/35), keepOriginalsDays to slice 17.
 type Settings struct {
-	ControlLevel      string     `json:"controlLevel"` // basic|standard|advanced; changing it never touches flows
-	PerLibraryFlow    bool       `json:"perLibraryFlow"`
 	FirstRunDone      bool       `json:"firstRunDone"`
 	FirstRunStep      int        `json:"firstRunStep"` // 1..5
 	KeepOriginalsDays int        `json:"keepOriginalsDays"`
@@ -40,15 +38,8 @@ type QuietHours struct {
 
 const settingsKey = "settings"
 
-// The control level an install starts at (DESIGN/FIRST-RUN.md, D13): a fresh install starts at Basic;
-// an upgraded one at Standard, so its "<folder> - Legacy" flow keeps working unchanged.
-const (
-	FreshControlLevel   = "basic"
-	UpgradeControlLevel = "standard"
-)
-
 func defaultSettings() Settings {
-	return Settings{ControlLevel: FreshControlLevel, FirstRunStep: 1, KeepOriginalsDays: 7, ParallelJobs: 1,
+	return Settings{FirstRunStep: 1, KeepOriginalsDays: 7, ParallelJobs: 1,
 		LowPriority: true, ScanSchedule: "02:00", QueueOrder: "newest", Languages: []string{}}
 }
 
@@ -57,8 +48,6 @@ var hhmm = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
 // problem says what is wrong with s, as an error code and message ("" if nothing).
 func (s Settings) problem() (code, msg string) {
 	switch {
-	case !oneOf(s.ControlLevel, "basic", "standard", "advanced"):
-		return "invalid_setting", "controlLevel must be basic, standard or advanced."
 	case s.FirstRunStep < 1 || s.FirstRunStep > 5:
 		return "invalid_setting", "firstRunStep must be from 1 to 5."
 	case badLanguage(s.Languages) != "":
@@ -115,7 +104,7 @@ func (ss *settingsStore) load() (Settings, error) {
 			return Settings{}, err
 		}
 		if upgraded {
-			s.FirstRunDone, s.ControlLevel = true, UpgradeControlLevel
+			s.FirstRunDone = true
 		}
 		return s, ss.save(s)
 	}
@@ -127,8 +116,11 @@ func (ss *settingsStore) save(s Settings) error {
 	return ss.store.SetMeta(settingsKey, string(b))
 }
 
-// readOnlySettings are shown by GET and ignored in a PATCH (the page may send back what it got).
-var readOnlySettings = map[string]bool{"authRequired": true, "trashPath": true, "updateAvailable": true}
+// readOnlySettings are shown by GET and ignored in a PATCH (the page may send back what it got). The
+// control level is each flow's own since the control-level slice: controlLevel and perLibraryFlow are
+// no longer shown, and a PATCH that sends them is accepted and ignored for one release.
+var readOnlySettings = map[string]bool{"authRequired": true, "trashPath": true, "updateAvailable": true,
+	"controlLevel": true, "perLibraryFlow": true}
 
 func settingsRoutes(api *http.ServeMux, ss *settingsStore, access *Access) {
 	view := func(s Settings) map[string]any {

@@ -172,3 +172,67 @@ func outputOr(o string) string {
 	}
 	return o
 }
+
+// Level is a flow's control level (the control-level slice: each flow has its own): basic (a slider
+// flow), standard (selectors), earlier (an upgraded install's legacy flow) or advanced (the rest).
+func (t Template) Level() string {
+	switch t.Kind {
+	case KindSlider:
+		return "basic"
+	case KindSelectors:
+		return "standard"
+	case KindLegacy:
+		return "earlier"
+	}
+	return "advanced"
+}
+
+// audioShort are the audio choices' short words for a flow's tag.
+var audioShort = map[string]string{"keep_all": "Audio as it is", "my_languages": "My languages", "aac": "AAC",
+	"eac3": "E-AC-3", "opus": "Opus", "lossless_only": "Lossless audio to E-AC-3"}
+
+// Tag is the flow's tag in design's words (B4), built here so the page never builds it: "Basic ·
+// Smallest file"; "Standard · Balanced · same resolution · no bitrate limit · Audio as it is"; "Advanced
+// · Custom"; "Earlier install". Until S6 a Standard tag says today's bitrate cap in Mbps.
+func (t Template) Tag() string {
+	switch t.Level() {
+	case "basic":
+		_, name := t.Label()
+		return "Basic · " + name
+	case "standard":
+		s, _ := t.SelectorsView()
+		p, _ := SliderAt(s.Quality)
+		parts := []string{"Standard"}
+		if s.Format != "" && s.Format != "hevc" {
+			parts = append(parts, strings.ToUpper(s.Format))
+		}
+		parts = append(parts, p.Name)
+		if s.Resolution == "keep" {
+			parts = append(parts, "same resolution")
+		} else {
+			parts = append(parts, "at most "+s.Resolution+"p")
+		}
+		if s.MaxBitrate == "none" || s.MaxBitrate == "" {
+			parts = append(parts, "no bitrate limit")
+		} else {
+			parts = append(parts, "at most "+s.MaxBitrate+" Mbps")
+		}
+		if a := audioShort[s.Audio]; a != "" {
+			parts = append(parts, a)
+		}
+		return strings.Join(parts, " · ")
+	case "earlier":
+		return "Earlier install"
+	}
+	return "Advanced · Custom"
+}
+
+// FitsBasic reports whether a Standard flow's choices are what a Basic flow does, so "Switch to Basic"
+// changes nothing it converts: HEVC at the normal speed, the same resolution, no cap, every subtitle,
+// MKV, replace, nothing ignored, Dolby Vision left alone, and audio kept as it is or in my languages
+// (Basic's keep_all and my_languages; Basic's stereo AAC is not a Standard choice before S6).
+func (s Selectors) FitsBasic() bool {
+	return s.Format == "hevc" && s.Speed == "normal" && s.Resolution == "keep" && s.MaxBitrate == "none" &&
+		s.Subtitles == "keep_all" && s.FileType == "mkv" && s.AfterConverting == "replace" && len(s.Ignore) == 0 &&
+		!s.IncludeDolbyVision && (s.Audio == "keep_all" || s.Audio == "my_languages")
+}

@@ -58,6 +58,7 @@ type libraryItem struct {
 	Status      libraryStatus `json:"status"`
 	FailedFiles int           `json:"failedFiles"`
 	MadeWith    string        `json:"madeWith"`
+	Tag         string        `json:"tag"` // its flow's tag (control level per flow)
 }
 
 // libraryStatus is the card's status line: kind not_scanned|scanning|scanned|converting|waiting_for_worker.
@@ -101,7 +102,7 @@ func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		it.SettingKind, it.SettingLabel, it.MadeWith = rules.KindCustom, "Custom", "builder"
 		if f, err := store.GetFlow(l.FlowID); err == nil {
 			it.SettingKind, it.SettingLabel = f.Template.Label()
-			it.MadeWith = madeWith(f.Template.Kind)
+			it.MadeWith, it.Tag = madeWith(f.Template.Kind), f.Template.Tag()
 		}
 		it.FailedFiles = c.Failed
 		st := libraryStatus{Videos: l.LastScanVideos, NextScan: it.NextScan, Converting: c.Working, ToDo: c.Waiting}
@@ -179,9 +180,25 @@ func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 	})
 
 	api.HandleFunc("POST /api/libraries", func(w http.ResponseWriter, r *http.Request) {
-		var in struct{ Name, Path, StartFrom string }
+		var in struct {
+			Name, Path, StartFrom string
+			FlowID                json.RawMessage // an existing flow (control level per flow); a string or a number
+		}
 		if !readJSON(w, r, &in) {
 			return
+		}
+		var flowID int64
+		if len(in.FlowID) > 0 && string(in.FlowID) != "null" {
+			id, err := strconv.ParseInt(strings.Trim(string(in.FlowID), `"`), 10, 64)
+			if err != nil || id <= 0 {
+				apiError(w, http.StatusBadRequest, "invalid_flow", "flowId must be a flow's id.")
+				return
+			}
+			if _, err := store.GetFlow(id); err != nil {
+				apiError(w, http.StatusBadRequest, "invalid_flow", "There is no such flow.")
+				return
+			}
+			flowID = id
 		}
 		name := strings.TrimSpace(in.Name)
 		if name == "" {
@@ -200,7 +217,13 @@ func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		if !ok {
 			return
 		}
-		l, err := store.AddLibrary(name, path, rules.SliderTemplate(pos), false) // not started: nothing scanned or queued
+		var l jobs.Library
+		var err error
+		if flowID > 0 {
+			l, err = store.AddLibraryOnFlow(name, path, flowID, false)
+		} else {
+			l, err = store.AddLibrary(name, path, rules.SliderTemplate(pos), false) // not started: nothing scanned or queued
+		}
 		if err != nil {
 			storeErr(w, err)
 			return

@@ -20,6 +20,10 @@ type flowItem struct {
 	UsedBy    []string `json:"usedBy"`
 	MadeWith  string   `json:"madeWith"` // slider|selectors|builder, or legacy (made from program flags)
 	ChangedAt string   `json:"changedAt"`
+	// Kind is the flow's control level (basic|standard|advanced|earlier) and Tag design's B4 words for
+	// it, built here (the control-level slice).
+	Kind string `json:"kind"`
+	Tag  string `json:"tag"`
 }
 
 func madeWith(kind string) string {
@@ -35,7 +39,8 @@ func flowRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng En
 		if usedBy == nil {
 			usedBy = []string{}
 		}
-		return flowItem{ID: f.ID, Name: f.Name, UsedBy: usedBy, MadeWith: madeWith(f.Template.Kind), ChangedAt: f.Changed}
+		return flowItem{ID: f.ID, Name: f.Name, UsedBy: usedBy, MadeWith: madeWith(f.Template.Kind), ChangedAt: f.Changed,
+			Kind: f.Template.Level(), Tag: f.Template.Tag()}
 	}
 	flowID := func(w http.ResponseWriter, r *http.Request) (int64, bool) {
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
@@ -110,14 +115,36 @@ func flowRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng En
 			storeErr(w, err)
 			return
 		}
-		writeJSON(w, map[string]any{"id": strconv.FormatInt(f.ID, 10), "name": f.Name, "madeWith": madeWith(f.Template.Kind), "steps": flowSteps(f.Template)})
+		writeJSON(w, map[string]any{"id": strconv.FormatInt(f.ID, 10), "name": f.Name, "madeWith": madeWith(f.Template.Kind),
+			"kind": f.Template.Level(), "tag": f.Template.Tag(), "steps": flowSteps(f.Template)})
 	})
+	// New flow of a kind (control level per flow): basic is Balanced with stereo AAC, standard the
+	// selectors at Balanced; the name defaults to "Basic flow" / "Standard flow" (" 2"... on a clash). No
+	// kind: Basic, as before.
 	api.HandleFunc("POST /api/flows", func(w http.ResponseWriter, r *http.Request) {
-		name, ok := readName(w, r)
-		if !ok {
+		var in struct{ Name, Kind string }
+		if !readJSON(w, r, &in) {
 			return
 		}
-		f, err := store.AddFlow(name, rules.SliderTemplate(3)) // the default template: Balanced
+		t, base := rules.BasicTemplate(3, ""), "Basic flow"
+		switch in.Kind {
+		case "", "basic":
+		case "standard":
+			t, base = rules.DefaultSelectors(3).Template(), "Standard flow"
+		default:
+			apiError(w, http.StatusBadRequest, "invalid", "kind must be basic or standard. Nothing was changed.")
+			return
+		}
+		name := strings.TrimSpace(in.Name)
+		if name == "" {
+			n, err := store.FreeFlowName(base)
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+			name = n
+		}
+		f, err := store.AddFlow(name, t)
 		if err != nil {
 			storeErr(w, err)
 			return
@@ -169,7 +196,8 @@ func flowRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng En
 	api.HandleFunc("POST /api/flows/import", notYet)
 	api.HandleFunc("GET /api/flows/{id}/export", notYet)
 
-	// Choosing another flow for a library: only when Settings has "a flow per library" on.
+	// Choosing another flow for a library (each library picks a flow; the control-level slice dropped the
+	// "a flow per library" setting).
 	api.HandleFunc("PUT /api/libraries/{id}/flow", func(w http.ResponseWriter, r *http.Request) {
 		libID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 		if err != nil || libID <= 0 {
@@ -183,17 +211,6 @@ func flowRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng En
 		fid, err := strconv.ParseInt(strings.Trim(string(in.FlowID), `"`), 10, 64) // the page sends it as a string
 		if err != nil || fid <= 0 {
 			apiError(w, http.StatusBadRequest, "invalid_flow", "flowId must be a flow's id.")
-			return
-		}
-		ss.mu.Lock()
-		s, err := ss.load()
-		ss.mu.Unlock()
-		if err != nil {
-			serverError(w, err)
-			return
-		}
-		if !s.PerLibraryFlow {
-			apiError(w, http.StatusConflict, "per_library_flow_off", "Choosing a flow for a library needs \"A flow per library\" turned on in Settings. Nothing was changed.")
 			return
 		}
 		if _, err := store.GetLibrary(libID); err != nil {
