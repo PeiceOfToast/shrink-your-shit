@@ -35,6 +35,10 @@
       });
     });
   }
+  // Basic's audio as a Standard pair and back (S6): stereo_aac = Stereo AAC + only my languages; my_languages = As it
+  // is + only; keep_all = As it is without.
+  function toStd(a) { return a === "stereo_aac" ? ["stereo_aac", true] : a === "my_languages" ? ["as_is", true] : ["as_is", false]; }
+  function toBasic(a, only) { return a === "stereo_aac" ? "stereo_aac" : only ? "my_languages" : "keep_all"; }
   function and(list) { return list.length < 2 ? list.join("") : list.slice(0, -1).join(", ") + " and " + list[list.length - 1]; }
   function say(t) { $("said").textContent = t; }
 
@@ -54,19 +58,25 @@
         // A Basic choice Standard can't hold (Stereo AAC, until piece E adds it to the server's available audio) would
         // change quietly on Save, so the switch is off (still focusable) with design's line under it (REDESIGN B3).
         var a = el("a", null, "Switch to Standard"), why = el("span", "hint", "Switching to Standard comes in a later update for flows with Stereo AAC."); a.href = "#"; why.id = "f-switch-why"; why.style.display = "block";
-        var syncSwitch = function () { var off = !!editor && (s.availableAudio || []).indexOf(editor.get().audio) < 0; a.setAttribute("aria-disabled", off ? "true" : "false"); why.hidden = !off; if (off) a.setAttribute("aria-describedby", why.id); else a.removeAttribute("aria-describedby"); };
-        editor = S.editors.basic(host, s, langs, names, function () { say(""); syncSwitch(); }, f.name + ": smallest file to best quality");
+        var syncSwitch = function () { var off = !!editor && Array.isArray(s.availableAudio) && s.availableAudio.indexOf(toStd(editor.get().audio)[0]) < 0; a.setAttribute("aria-disabled", off ? "true" : "false"); why.hidden = !off; if (off) a.setAttribute("aria-describedby", why.id); else a.removeAttribute("aria-describedby"); };
+        editor = S.editors.basic(host, s, langs, names, function () { say(""); syncSwitch(); check(); }, f.name + ": smallest file to best quality");
         sw.appendChild(a); sw.appendChild(why); syncSwitch();
         a.onclick = function (e) { e.preventDefault(); if (a.getAttribute("aria-disabled") === "true") return; var v = editor.get();
-          build("standard", { quality: v.quality, speed: "normal", format: "hevc", resolution: "keep", maxBitrate: "none", audio: v.audio, subtitles: "keep_all", fileType: "mkv", afterConverting: "replace", skipHdr: true, fitsBasic: true, becomes: s.becomes, availableFileTypes: s.availableFileTypes, availableAudio: s.availableAudio, availableSubtitles: s.availableSubtitles });
+          var pair = toStd(v.audio);
+          build("standard", { quality: v.quality, speed: "normal", format: "hevc", resolution: "keep", maxBitrate: "none", audio: pair[0], onlyMyLanguages: pair[1], subtitles: "keep_all", fileType: "mkv", afterConverting: "replace",
+            includeDolbyVision: false, fitsBasic: true, becomes: s.becomes, availableFormats: s.availableFormats, availableFileTypes: s.availableFileTypes, availableAudio: s.availableAudio, availableSubtitles: s.availableSubtitles, bitrateLadder: s.bitrateLadder });
           say("Standard choices. They take effect when you press Save."); };
       } else {
-        editor = S.editors.selectors(host, function () { say(""); }, s);
+        editor = S.editors.selectors(host, function () { say(""); check(); }, Object.assign({}, s, { checkOutput: function (path) { return api.checkOutput({ id: id }, { path: path }); } }));
         if (s.fitsBasic) { var b = el("a", null, "Switch to Basic"); b.href = "#"; sw.appendChild(b);
-          b.onclick = function (e) { e.preventDefault(); var v = editor.get(); build("basic", { quality: v.quality, audio: v.audio, becomes: s.becomes || { video: "HEVC", resolution: "same", fileType: "MKV" } }); say("Basic slider. It takes effect when you press Save."); }; }
+          b.onclick = function (e) { e.preventDefault(); var v = editor.get(); build("basic", { quality: v.quality, audio: toBasic(v.audio, v.onlyMyLanguages), availableAudio: s.availableAudio, becomes: s.becomes || { video: "HEVC", resolution: "same", fileType: "MKV" } }); say("Basic slider. It takes effect when you press Save."); }; }
         else sw.textContent = "This flow uses choices the slider can't show.";
       }
     }
+    // Warnings while editing (REDESIGN E): a warnings-only check, debounced; no card, no numbers; a failed check shows
+    // nothing and never blocks Save.
+    var wt = null;
+    function check() { clearTimeout(wt); wt = setTimeout(function () { if (editor) api.flowWarnings({ id: id }, editor.get()).then(function (r) { warn.show(r.warnings); }, function () {}); }, 500); }
     function rename() {
       var box = $("f-renamebox"), form = el("form", "row"), lb = el("label", "sr", "New name for " + f.name), inp = el("input"), ok = el("button", "btn small primary", "Save"), no = el("button", "btn small", "Cancel");
       inp.id = "f-newname"; lb.htmlFor = inp.id; inp.value = f.name; inp.size = 26; no.type = "button";
