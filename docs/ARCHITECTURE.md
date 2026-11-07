@@ -35,11 +35,18 @@ rule the scanner matches with and the CRF, preset, output mode and minimum savin
 
 - A library added on the web page (`POST /api/libraries`) gets a slider flow at the chosen position
   and starts **not started**: nothing is scanned or queued until `POST /api/libraries/{id}/scan`.
-- `-library`/`SYP_LIBRARIES` add a started library with a `legacy` flow holding the program's flags,
-  only when no library has that folder. On the first start after upgrading a database that already
-  held work (migration 3 leaves a marker), those flows are named `<folder> - Legacy`; otherwise a
-  flow is named after its library, a clash adding " 2", " 3". A flow is never renamed automatically.
-  Jobs made before libraries existed are linked to their library by folder.
+- `-library`/`SYP_LIBRARIES` (and Docker's `/media`) add a library only when no library has that
+  folder. What it gets depends on the install, decided once by migration 3 (`app_meta` `install`):
+  - **fresh install** (a new database): the library is **not started** and gets a slider flow
+    (Balanced) named after it; first-run shows it pre-filled and nothing is converted before Start
+    (DESIGN/FIRST-RUN.md). The global `-crf`/`-preset`/... flags do not apply.
+  - **upgrade** (a database that already held work): the library is started with a `legacy` flow
+    holding the program's flags, so it converts as before; on the first start after the upgrade
+    those flows are named `<folder> - Legacy`. Settings start with first-run done and the Standard
+    control level (D13).
+  Otherwise a flow is named after its library, a clash adding " 2", " 3" (flow names are unique in
+  the database). A flow is never renamed automatically. Jobs made before libraries existed are
+  linked to the library whose folder holds them.
 - Deleting a library removes the record and its queued jobs, stops its running job (the worker
   drops it; the original is untouched) and keeps its flow and finished jobs.
 - Library folders are stored as their real folder (links resolved: the scanner does not follow a link

@@ -99,7 +99,7 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	// One connection only (above), so these settings stay in force for the whole process.
-	if _, err := db.Exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;`); err != nil {
+	if _, err := db.Exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;`); err != nil {
 		db.Close()
 		return nil, err
 	}

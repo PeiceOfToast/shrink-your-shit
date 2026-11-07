@@ -115,7 +115,11 @@ func main() {
 		log.Printf("NOT added as a library from -library/SYP_LIBRARIES: %s", why)
 	}
 	if n > 0 {
-		log.Printf("added %d librar%s from -library/SYP_LIBRARIES", n, map[bool]string{true: "y", false: "ies"}[n == 1])
+		how := "converting as before"
+		if up, _ := store.Upgraded(); !up {
+			how = "waiting for first run on the web page (nothing is converted before Start)"
+		}
+		log.Printf("added %d librar%s from -library/SYP_LIBRARIES, %s", n, map[bool]string{true: "y", false: "ies"}[n == 1], how)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM) // SIGTERM is a no-op on Windows; Ctrl+C works everywhere
 	defer stop()

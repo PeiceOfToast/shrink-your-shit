@@ -66,6 +66,9 @@ var Slider = []SliderPosition{
 	{5, "Best quality", 19, 5},
 }
 
+// DefaultSliderPosition is where a new library's slider starts: Balanced.
+const DefaultSliderPosition = 3
+
 // SliderPreset is the x265 preset every slider position uses.
 const SliderPreset = "medium"
 

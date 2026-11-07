@@ -126,8 +126,11 @@ func TestFreshDatabase(t *testing.T) {
 			t.Errorf("table %s missing", tbl)
 		}
 	}
-	if n := count(t, s.db, "app_meta"); n != 1 {
-		t.Errorf("app_meta rows %d, want 1", n)
+	if up, _ := s.Upgraded(); up {
+		t.Error("a new database is a fresh install, not an upgrade")
+	}
+	if _, legacy, _ := s.Meta("legacy_flows"); legacy {
+		t.Error("a new database has no Legacy flows to name")
 	}
 	s.Close()
 	if b := backups(path); len(b) != 0 {

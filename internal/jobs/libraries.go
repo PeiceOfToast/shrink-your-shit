@@ -189,13 +189,26 @@ func (s *Store) addLibrary(name, path, flowBase string, t rules.Template, starte
 	return s.GetLibrary(id)
 }
 
-// EnsureLibraries adds a started library for each folder in paths that no library has yet, each
-// with its own flow made from t (the program's flags). It never changes or removes a library. A
-// folder inside, or around, another library's folder is not added: skipped says why, for a log
-// line (their files would belong to two libraries). On the first start after an upgrade, the flows
-// are named "<folder> - Legacy". Jobs made before libraries were records are linked to the library
+// Upgraded reports whether this database held work before libraries existed (an upgrade), as
+// opposed to a fresh install. Decided once, by migration 3.
+func (s *Store) Upgraded() (bool, error) {
+	v, _, err := s.Meta("install")
+	return v == "upgrade", err
+}
+
+// EnsureLibraries adds a library for each folder in paths that no library has yet. It never changes
+// or removes a library. On an upgrade, each is started with its own flow made from legacy (the
+// program's flags), so it converts as before; on the first start after the upgrade those flows are
+// named "<folder> - Legacy". On a fresh install each is NOT started and gets a slider flow named after
+// it: first-run shows it and nothing is converted before Start (DESIGN/FIRST-RUN.md). A folder inside,
+// or around, another library's folder is not added: skipped says why, for a log line (their files
+// would belong to two libraries). Jobs made before libraries were records are linked to the library
 // whose folder holds them.
-func (s *Store) EnsureLibraries(paths []string, t rules.Template) (added int, skipped []string, err error) {
+func (s *Store) EnsureLibraries(paths []string, legacy rules.Template) (added int, skipped []string, err error) {
+	upgraded, err := s.Upgraded()
+	if err != nil {
+		return 0, nil, err
+	}
 	var marker int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM app_meta WHERE key='legacy_flows'`).Scan(&marker); err != nil {
 		return 0, nil, err
@@ -227,11 +240,14 @@ func (s *Store) EnsureLibraries(paths []string, t rules.Template) (added int, sk
 			continue
 		}
 		name := filepath.Base(p)
-		flowBase := name
-		if marker > 0 {
-			flowBase = name + " - Legacy"
+		flowBase, t, started := name, rules.SliderTemplate(rules.DefaultSliderPosition), false
+		if upgraded {
+			t, started = legacy, true
+			if marker > 0 {
+				flowBase = name + " - Legacy"
+			}
 		}
-		if _, err := s.addLibrary(name, p, flowBase, t, true); err != nil {
+		if _, err := s.addLibrary(name, p, flowBase, t, started); err != nil {
 			return added, skipped, err
 		}
 		added++
@@ -410,4 +426,20 @@ FROM jobs WHERE library_id IS NOT NULL GROUP BY library_id`, Running, Queued, Fa
 		out[id] = c
 	}
 	return out, rows.Err()
+}
+
+// Meta reads a value from app_meta ("" and false if it is not set).
+func (s *Store) Meta(key string) (string, bool, error) {
+	var v string
+	err := s.db.QueryRow(`SELECT value FROM app_meta WHERE key=?`, key).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return v, err == nil, err
+}
+
+// SetMeta stores a value in app_meta.
+func (s *Store) SetMeta(key, value string) error {
+	_, err := s.db.Exec(`INSERT INTO app_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)
+	return err
 }

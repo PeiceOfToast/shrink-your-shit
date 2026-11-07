@@ -130,6 +130,13 @@ func TestFreshInstallFlowNames(t *testing.T) {
 	if f0.Name != "lib" || f1.Name != "lib 2" {
 		t.Errorf("flow names %q %q: want after the library, a clash adding 2", f0.Name, f1.Name)
 	}
+	// fresh install: flag libraries wait for first-run, each with a Balanced slider flow (no Legacy)
+	for i, l := range libs {
+		f, _ := s.GetFlow(l.FlowID)
+		if l.Started || f.Template.Kind != rules.KindSlider || f.Template.Params.Quality != 3 {
+			t.Errorf("library %d: started=%v flow %+v; want not started, slider Balanced", i, l.Started, f.Template)
+		}
+	}
 	l, err := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), false)
 	if err != nil || l.Started {
 		t.Fatalf("%+v %v: a new library starts not started", l, err)
