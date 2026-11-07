@@ -85,7 +85,7 @@
         $("save").onclick = save;
         var langs = r[0].languages || [];
         fetch("/assets/languages.json").then(function (x) { return x.json(); }).then(null, function () { return []; }).then(function (l) {
-          var names = {}; l.forEach(function (x) { names[x[0]] = x[2] || x[1]; });
+          var names = {}; l.forEach(function (x) { names[x[0]] = x[1]; }); // the names Settings shows (design: "English and Deutsch")
           editor = ed.basic($("slider"), custom || more ? { becomes: setting.becomes } : setting, langs, names, null, lib.name + ": smallest file to best quality");
         });
       }

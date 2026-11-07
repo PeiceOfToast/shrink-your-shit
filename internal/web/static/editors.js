@@ -51,8 +51,9 @@
     if (list.length) { mine.appendChild(document.createTextNode("Your language: ")); mine.appendChild(el("strong", null, said)); mine.appendChild(document.createTextNode(". ")); }
     var to = el("a", null, list.length ? "Change it in Settings > General." : "Choose your language in Settings > General first."); to.href = "/settings/"; mine.appendChild(to);
     function audioWords() {
-      var who = said || "your language";
-      return { stereo_aac: "stereo AAC in " + who, my_languages: (said ? said + " audio" : "audio in your language") + " as it is", keep_all: "all audio as it is" }[sel.value];
+      // No language yet (design, 20:08Z): "... (not chosen yet)".
+      return { stereo_aac: said ? "stereo AAC in " + said : "stereo AAC in your language (not chosen yet)",
+        my_languages: said ? said + " audio as it is" : "audio in your language as it is (not chosen yet)", keep_all: "all audio as it is" }[sel.value];
     }
     function draw() {
       var b = s.becomes;
