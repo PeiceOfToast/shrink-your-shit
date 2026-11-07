@@ -59,7 +59,7 @@
           top.appendChild(el("strong", null, nameOf(j))); top.appendChild(el("span", "badge info", conv ? "Converting" : "Checking the new file")); c.appendChild(top);
           var pr = el("div", "progress"), bar = el("span"); pr.setAttribute("role", "progressbar"); pr.setAttribute("aria-valuemin", 0); pr.setAttribute("aria-valuemax", 100);
           pr.setAttribute("aria-valuenow", j.percent); pr.setAttribute("aria-label", (conv ? "Converting " : "Checking ") + nm); bar.style.width = j.percent + "%"; pr.appendChild(bar); c.appendChild(pr);
-          var line = el("p", "small muted", conv ? j.percent + "% · " + eta(j.etaSeconds) + " · " + ui.bytes(j.fromBytes) + " → expected about " + ui.bytes(j.expectedBytes)
+          var line = el("p", "small muted", conv ? j.percent + "% · " + eta(j.etaSeconds) + " · " + ui.bytes(j.fromBytes) + (j.expectedBytes != null ? " → expected about " + ui.bytes(j.expectedBytes) : "") // the engine doesn't always know the new size
             : "Playing the new file start to end before it replaces the original"); line.style.margin = "8px 0";
           c.appendChild(line);
           if (conv) { c.appendChild(btn("Stop this file", "stop-" + j.jobId, function () { act(api.stopJob({ id: j.jobId }), true); })); c.appendChild(el("span", "hint small", " It moves to Skipped, where you can convert it again.")); }
