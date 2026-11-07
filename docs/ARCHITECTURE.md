@@ -54,10 +54,13 @@ the result and the original was deliberately left alone, with the reason in the 
    the new file's video through ffmpeg's decoder with `-xerror`, completely up to 3 hours long, else
    three one-minute samples; any decode error fails), then the **picture comparison** (SSIM on three
    10-second samples at the start, middle and end; the worst must reach `-min-ssim`, default 0.95 and
-   at least 0.90, an untuned starting value). The new file is sought to the sample time plus the
-   difference between the two files' video start times (an encoder delays the first frame, and
-   without this a good file scored 0.93), and if a sample still scores low it is re-measured one frame
-   earlier and later, best counts. The source must not have changed during the encode: still the same
+   at least 0.90, an untuned starting value). Both files are read from 12 s before the sample
+   with their real timestamps kept, put on one timeline by subtracting each file's video start time
+   (an encoder delays the first frame, and without this a good file scored 0.93), and the same 10 s
+   are cut out of both by time, so frames are paired by time and never by where a seek happened to
+   land (in MPEG-TS, ffmpeg 7.1 starts an H.264 original at the next keyframe after a seek but the
+   HEVC result exactly at it). If a sample still scores low it is re-measured with the new file one
+   frame earlier and later, best counts. The source must not have changed during the encode: still the same
    file (identity), size and modification time, and on Linux and macOS the same change time (which
    catches an edit that keeps the size and puts the modification time back). That is checked before
    the expensive checks, so it is reported plainly, and again right before each rename attempt,

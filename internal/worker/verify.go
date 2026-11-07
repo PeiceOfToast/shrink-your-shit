@@ -215,21 +215,19 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 		return kept("this ffmpeg has no 'ssim' filter, which shrink-your-shit needs to check picture quality; install a complete ffmpeg build")
 	}
 	threshold := w.minSSIM()
-	// Where the same picture sits in each file differs by the encoder's start delay: seeking both to
-	// "S seconds" can land on different frames (measured: a good encode scored 0.93 instead of 0.985).
-	// So the new file is sought to S plus the difference of the two start times. If that still scores
-	// low, one frame earlier and later are tried too and the best counts: a genuinely bad encode stays
-	// low at every alignment, a merely misaligned good one jumps up.
+	// Both pictures are put on one timeline by their own video start time (the encoder can delay the
+	// first frame: measured, a good encode scored 0.93 instead of 0.985 without this). If that still
+	// scores low, the new file is tried one frame earlier and later too and the best counts: a
+	// genuinely bad encode stays low at every alignment, a merely misaligned good one jumps up.
 	sMain, oMain := src.Video(), out.Video()
-	delta := oMain.StartTime - sMain.StartTime
 	frame := 1.0 / 25
 	if sMain.FrameRate > 0 {
 		frame = 1 / sMain.FrameRate
 	}
 	for _, seg := range sampleSegments(src.DurationSec) {
 		best := -1.0
-		for _, shift := range []float64{delta, delta - frame, delta + frame} {
-			score, err := w.ssimSegment(ctx, srcPath, tmp, sv, ov, seg, shift)
+		for _, nudge := range []float64{0, -frame, frame} {
+			score, err := w.ssimSegment(ctx, srcPath, tmp, sv, ov, seg, sMain.StartTime, oMain.StartTime+nudge)
 			if err != nil {
 				return err
 			}
@@ -262,14 +260,30 @@ func sampleSegments(duration float64) []segment {
 	return []segment{{0, 10}, {duration/2 - 5, 10}, {duration - 15, 10}}
 }
 
-func (w *Worker) ssimSegment(ctx context.Context, srcPath, tmp string, sv, ov int, seg segment, outShift float64) (float64, error) {
-	args := []string{"-hide_banner", "-nostdin", "-v", "info", "-nostats",
-		"-ss", secs(seg.start), "-t", secs(seg.length), "-i", srcPath,
-		"-ss", secs(seg.start + outShift), "-t", secs(seg.length), "-i", tmp,
-		// Each picture starts at time zero before comparing: the encoder can delay the first frame
-		// (measured: 0.04s), which would otherwise pair every frame with its neighbour and score a
-		// perfectly good file at 0.89.
-		"-lavfi", fmt.Sprintf("[0:v:%d]setpts=PTS-STARTPTS[a];[1:v:%d]setpts=PTS-STARTPTS[b];[a][b]ssim", sv, ov),
+// seekMargin is how far before a sample both files are sought. Where a seek lands is not exact: in
+// MPEG-TS, ffmpeg 7.1 starts the H.264 original at the next keyframe after the seek point (up to ten
+// seconds later with x264's defaults) but the HEVC result exactly at it. So the comparison never
+// trusts where a seek landed: it decodes from a little earlier, keeps the real timestamps, and cuts
+// the same stretch out of both by time. A keyframe gap longer than the margin only shortens the
+// stretch that is compared; it cannot pair different pictures.
+const seekMargin = 12.0
+
+// ssimSegment compares seg (in seconds from the start of the video) of the original's video stream
+// sv and the new file's video stream ov. srcStart and outStart are the times at which each file's
+// video starts; subtracting them puts both on one timeline, where the ssim filter pairs frames by
+// time.
+func (w *Worker) ssimSegment(ctx context.Context, srcPath, tmp string, sv, ov int, seg segment, srcStart, outStart float64) (float64, error) {
+	from := max(seg.start-seekMargin, 0)
+	read := secs(seg.start + seg.length - from + 1)
+	cut := func(in, stream int, start float64, label string) string {
+		// a start time can be negative (MP4 edit lists), so it is not formatted with secs
+		return fmt.Sprintf("[%d:v:%d]setpts=PTS-(%s)/TB,trim=start=%s:duration=%s[%s]",
+			in, stream, strconv.FormatFloat(start, 'f', 6, 64), secs(seg.start), secs(seg.length), label)
+	}
+	args := []string{"-hide_banner", "-nostdin", "-v", "info", "-nostats", "-copyts",
+		"-noaccurate_seek", "-ss", secs(from), "-t", read, "-i", srcPath,
+		"-noaccurate_seek", "-ss", secs(from), "-t", read, "-i", tmp,
+		"-lavfi", cut(0, sv, srcStart, "a") + ";" + cut(1, ov, outStart, "b") + ";[a][b]ssim",
 		"-f", "null", "-"}
 	sctx, cancel := context.WithTimeout(ctx, sampleTimeout)
 	defer cancel()

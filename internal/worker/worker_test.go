@@ -10,7 +10,9 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -609,29 +611,29 @@ func TestSSIMComparesTheMainVideoNotCoverArt(t *testing.T) {
 	// (the default plan re-encodes the FIRST video stream, so this synthetic output has an h264 main
 	// video and is correctly refused; what matters here is which stream the comparison would use)
 	joined := strings.Join(s.calls, "\n")
-	if s.count("-lavfi") > 0 && !strings.Contains(joined, "[0:v:1]setpts=PTS-STARTPTS[a];[1:v:1]setpts=PTS-STARTPTS[b];[a][b]ssim") {
-		t.Errorf("the comparison must use the main video (v:1) of both files, aligned at time zero, calls:\n%s", joined)
+	if s.count("-lavfi") > 0 && (!strings.Contains(joined, "[0:v:1]setpts=") || !strings.Contains(joined, "[1:v:1]setpts=")) {
+		t.Errorf("the comparison must use the main video (v:1) of both files, calls:\n%s", joined)
 	}
 }
 
 // ---- picture comparison alignment ----
 
-// ssimAt returns a handler wrapper that scores 0.93 unless the output is sought exactly delta seconds
-// after the source (what a correct alignment of a delayed encoder does), then 0.99.
+var setptsRe = regexp.MustCompile(`setpts=PTS-\((-?[0-9.]+)\)/TB`)
+
+// ssimAligned wraps the handler: the comparison scores 0.93 unless the new file's timeline is shifted
+// exactly delta seconds against the source's (what a correct alignment of a delayed encoder does),
+// then 0.99.
 func ssimAligned(s *scenario, delta float64) {
 	inner := s.exec.Handler
 	s.exec.Handler = func(name string, args []string) (string, string, error) {
 		if name == "ffmpeg" && s.has(args, "-lavfi") {
 			s.calls = append(s.calls, name+" "+strings.Join(args, " "))
-			var seeks []float64
-			for i, a := range args {
-				if a == "-ss" {
-					var v float64
-					fmt.Sscanf(args[i+1], "%f", &v)
-					seeks = append(seeks, v)
-				}
+			var offs []float64
+			for _, m := range setptsRe.FindAllStringSubmatch(strings.Join(args, " "), -1) {
+				v, _ := strconv.ParseFloat(m[1], 64)
+				offs = append(offs, v)
 			}
-			if len(seeks) == 2 && math.Abs(seeks[1]-seeks[0]-delta) < 0.0005 {
+			if len(offs) == 2 && math.Abs(offs[1]-offs[0]-delta) < 0.0005 {
 				return "", "SSIM Y:1 U:1 V:1 All:0.990000 (20.0)", nil
 			}
 			return "", "SSIM Y:1 U:1 V:1 All:0.930000 (11.0)", nil
@@ -640,7 +642,7 @@ func ssimAligned(s *scenario, delta float64) {
 	}
 }
 
-func TestSSIMSeeksTheNewFileByTheEncodersStartDelay(t *testing.T) {
+func TestSSIMAlignsTheNewFileByTheEncodersStartDelay(t *testing.T) {
 	s := newScenario(t)
 	s.srcSpec.streams[0]["start_time"] = "0.023"
 	s.outSpec.streams[0]["start_time"] = "0.040" // the encoder delays the first frame by 17 ms more
@@ -651,8 +653,14 @@ func TestSSIMSeeksTheNewFileByTheEncodersStartDelay(t *testing.T) {
 		t.Fatalf("a good conversion must pass when aligned by the start-time difference: %+v", j)
 	}
 	joined := strings.Join(s.calls, "\n")
-	if !strings.Contains(joined, "-ss 50.017 -t 10.000 -i") {
-		t.Errorf("the new file should be sought to 50.017 (source 50 + 0.017):\n%s", joined)
+	for _, want := range []string{
+		"-noaccurate_seek -ss 38.000 -t 23.000 -i", // both read from 12 s before the middle sample
+		"[0:v:0]setpts=PTS-(0.023000)/TB,trim=start=50.000:duration=10.000[a]",
+		"[1:v:0]setpts=PTS-(0.040000)/TB,trim=start=50.000:duration=10.000[b]",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing %q in:\n%s", want, joined)
+		}
 	}
 }
 
