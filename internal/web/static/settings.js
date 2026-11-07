@@ -43,6 +43,10 @@
         if (e.key === "perLibraryFlow") { var pv = el("div"); pv.id = "pl-preview"; fs.appendChild(pv); c[1].onchange = function () { choosePerLibrary(c[1].checked); }; choosePerLibrary(c[1].checked); }
       } else if (e.type === "readout") {
         var p = el("p"); p.appendChild(el("strong", null, e.label + ": ")); p.appendChild(document.createTextNode(v || "")); fs.appendChild(p);
+      } else if (e.type === "select") {
+        var sel = el("select"); e.options.forEach(function (o) { var op = el("option", null, o.label); op.value = o.value; sel.appendChild(op); });
+        sel.value = v; if (sel.selectedIndex < 0) sel.selectedIndex = 0;
+        fs.appendChild(field(e, sel, e.hint)); ctl[e.key] = { get: function () { return sel.value; } };
       } else if (e.type === "token") {
         fs.appendChild(token(e, s));
       } else {

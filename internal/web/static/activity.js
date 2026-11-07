@@ -33,7 +33,7 @@
   function act(p, land) { return p.then(refresh).then(land ? after : null).catch(fail); }
 
   // ---- header
-  var paused = false;
+  var paused = false, FIRST = { newest: "newest files", oldest: "oldest files", largest: "largest files", smallest: "smallest files" }; // upNext order = queueOrder
   function header(s) {
     $("stats").hidden = false; paused = s.paused;
     $("st-freed").textContent = ui.bytes(s.freedBytes); $("st-wait").textContent = ui.bytes(s.waitingBytes);
@@ -66,7 +66,7 @@
           pane.appendChild(c);
         });
         pane.appendChild(el("h2", null, "Up next"));
-        var next = q.upNext.map(function (u) { return u.library + ": " + ui.num(u.count) + " files" + (u.count && u.order ? ", " + u.order.toLowerCase() : ""); });
+        var next = q.upNext.map(function (u) { return u.library + ": " + ui.num(u.count) + " files" + (u.count && u.order ? ", " + (FIRST[u.order] || u.order) + " first" : ""); });
         pane.appendChild(el("p", "muted", next.length ? next.join(". ") + "." : "Nothing is waiting."));
       });
     });
