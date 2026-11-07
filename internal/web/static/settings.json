@@ -1,13 +1,4 @@
 [
-  {"key": "controlLevel", "tab": "general", "group": "Control level", "type": "radio", "idPrefix": "lvl",
-   "intro": "How much control you have over each library. Changing this never deletes or resets anything.",
-   "options": [
-     {"value": "basic", "label": "Basic", "hint": "One slider per library."},
-     {"value": "standard", "label": "Standard", "hint": "Simple choices for resolution, audio, subtitles, file type and quality."},
-     {"value": "advanced", "label": "Advanced", "hint": "Visual builder. Adds one more menu item."}]},
-  {"key": "perLibraryFlow", "tab": "general", "group": "Per-library choices", "type": "checkbox", "id": "per-library",
-   "label": "Let me choose per library",
-   "hint": "Adds an extra choice to each library and one more menu item. The control level above always stays the same for every library."},
   {"key": "languages", "tab": "general", "group": "Your languages", "type": "languages", "label": "Add a language",
    "hint": "Audio and subtitles in these languages are kept when a library uses \"Keep only my languages\". Tracks with no language set are always kept."},
   {"key": "token", "tab": "general", "group": "Access", "type": "token", "label": "Access token",

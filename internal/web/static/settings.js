@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   var S = window.SYP, api = S.api, ui = S.ui, el = ui.el;
-  var host = document.getElementById("host"), tab = host.getAttribute("data-tab").toLowerCase(), RANK = { basic: 0, standard: 1, advanced: 2 };
+  var host = document.getElementById("host"), tab = host.getAttribute("data-tab").toLowerCase();
   function $(id) { return document.getElementById(id); }
   function get(o, path) { return path.split(".").reduce(function (a, k) { return a == null ? a : a[k]; }, o); }
   function put(o, path, v) { var p = path.split("."), last = p.pop(); p.forEach(function (k) { o = o[k] = o[k] || {}; }); o[last] = v; }
@@ -22,7 +22,7 @@
 
   // ---- the registry-driven tabs
   function form(reg, s) {
-    var f = el("form", "stack"), ctl = {}, fs = null, last = null, libs = [], say = el("span", "muted"), noteFor = {};
+    var f = el("form", "stack"), ctl = {}, fs = null, last = null, say = el("span", "muted"), noteFor = {};
     f.id = tab + "-form"; f.noValidate = true; say.id = "saved"; say.setAttribute("role", "status");
     reg.forEach(function (e) {
       if (e.type === "info") return;
@@ -34,13 +34,10 @@
           var row = el("div", "check"), r = el("input"), id = e.idPrefix + "-" + o.value, lb = el("label", null, o.label);
           r.type = "radio"; r.name = e.key; r.value = o.value; r.id = id; r.checked = v === o.value; lb.htmlFor = id; lb.firstChild.replaceWith(el("strong", null, o.label));
           lb.appendChild(document.createElement("br")); lb.appendChild(el("span", "muted", o.hint)); row.appendChild(r); row.appendChild(lb); fs.appendChild(row);
-          r.onchange = downgrade;
         });
-        var warn = el("div", "notice warn"); warn.id = "downgrade"; warn.setAttribute("role", "status"); warn.hidden = true; fs.appendChild(warn);
         ctl[e.key] = { get: function () { var c = f.querySelector('input[name="' + e.key + '"]:checked'); return c && c.value; } };
       } else if (e.type === "checkbox") {
         var c = check(e, e.id || "f-" + e.key.replace(/\./g, "-"), v); fs.appendChild(c[0]); ctl[e.key] = { get: function () { return c[1].checked; } };
-        if (e.key === "perLibraryFlow") { var pv = el("div"); pv.id = "pl-preview"; fs.appendChild(pv); c[1].onchange = function () { choosePerLibrary(c[1].checked); }; choosePerLibrary(c[1].checked); }
       } else if (e.type === "readout") {
         var p = el("p"); p.appendChild(el("strong", null, e.label + ": ")); p.appendChild(document.createTextNode(v || "")); fs.appendChild(p);
       } else if (e.type === "select") {
@@ -76,7 +73,7 @@
       if (qf && qt && !qf.get() !== !qt.get()) { say.textContent = "Set both a start and an end, or leave both empty."; (qf.get() ? qt : qf).el.focus(); return; }
       if (!n) { say.textContent = "Nothing was changed."; return; }
       api.patchSettings({}, patch).then(function (ns) {
-        s = ns; say.textContent = "Saved."; downgrade();
+        s = ns; say.textContent = "Saved.";
         for (var k in ctl) if (ctl[k].e && ctl[k].e.type === "secret") { ctl[k].el.value = ""; $(ctl[k].el.id + "-h").textContent = keyHint(ctl[k].e, ns); }
         return S.menu(ns);
       },
@@ -84,26 +81,6 @@
     };
     host.appendChild(f);
 
-    // Moving to a lower level: say what happens to libraries it cannot show. No action here.
-    function downgrade() {
-      var c = f.querySelector('input[name="controlLevel"]:checked'), w = $("downgrade"); if (!c || !w) return;
-      var lvl = c.value, hit = libs.filter(function (l) { return lvl === "basic" ? l.settingKind !== "slider" : lvl === "standard" && l.settingKind === "custom"; });
-      if (RANK[lvl] >= RANK[s.controlLevel] || !hit.length) { w.hidden = true; return; }
-      w.textContent = "";
-      var d = el("div"); d.appendChild(el("strong", null, "If you choose " + lvl.charAt(0).toUpperCase() + lvl.slice(1) + " now"));
-      d.appendChild(document.createTextNode(hit.length + " of your " + libs.length + (libs.length === 1 ? " library" : " libraries") + " (" + hit.map(function (l) { return "“" + l.name + "”"; }).join(", ") + ") " +
-        (hit.length === 1 ? "uses a setting" : "use settings") + (lvl === "basic" ? " too custom to show as a slider" : " too custom to show as choices") + ". " + (hit.length === 1 ? "It keeps" : "They keep") + " running exactly as before, and you can edit " + (hit.length === 1 ? "it" : "them") + " by switching back. Nothing is converted."));
-      w.appendChild(d); w.hidden = false;
-    }
-    if (ctl.controlLevel) api.listLibraries().then(function (r) { libs = r.items; downgrade(); }, function () {});
-
-    var loaded = false;
-    function choosePerLibrary(on) {
-      var run = function () { S.settingsFlow($("pl-preview"), on); };
-      if (!on) { if (loaded) run(); return; }
-      if (loaded) return run();
-      var sc = document.createElement("script"); sc.src = "/assets/settings-flow.js"; sc.onload = function () { loaded = true; run(); }; document.head.appendChild(sc);
-    }
   }
 
   // ---- "Your languages" (slice 25b): one global list, shown by name, saved as ISO 639-2 codes (languages.json),

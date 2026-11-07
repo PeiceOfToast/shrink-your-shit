@@ -125,8 +125,6 @@ func lazyScripts(kind string) []string {
 	switch kind {
 	case "library":
 		return []string{"flowpick.js"} // the Flow choice, only with "Let me choose per library"
-	case "settings":
-		return []string{"settings-flow.js"} // the preview under "Let me choose per library", only when it is on
 	}
 	return nil
 }

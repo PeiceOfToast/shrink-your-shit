@@ -45,8 +45,8 @@ func TestNavByControlLevel(t *testing.T) {
 		perLibrary bool
 		want       string
 	}{
-		{"basic", false, "Libraries,Activity,Workers,Settings"},
-		{"standard", false, "Libraries,Activity,Workers,Settings"},
+		{"basic", false, "Libraries,Activity,Flows,Workers,Settings"},
+		{"standard", false, "Libraries,Activity,Flows,Workers,Settings"},
 		{"advanced", false, "Libraries,Activity,Flows,Workers,Settings"},
 		{"basic", true, "Libraries,Activity,Flows,Workers,Settings"},
 		{"standard", true, "Libraries,Activity,Flows,Workers,Settings"},
@@ -173,33 +173,7 @@ func TestCopyBannedWords(t *testing.T) {
 	}
 }
 
-// NAV-7: at Basic and Standard the word "flow" is nowhere in the UI. Every page except the Flows page
-// (not in the menu at those levels) is checked as sent, and so is the text the scripts put on screen.
-func TestNoFlowWordOutsideFlows(t *testing.T) {
-	flow := regexp.MustCompile(`(?i)\bflows?\b`)
-	for _, p := range pages {
-		if p.Section == "flows" {
-			continue
-		}
-		b, _ := render(loadNav(), p)
-		if m := flow.FindString(string(b)); m != "" {
-			t.Errorf("NAV-7: %q on %s", m, p.Path)
-		}
-	}
-	// Scripts: only the Flows menu entry (nav.json) and code names may use it; no text a script shows.
-	for name, js := range allText(t) {
-		if path.Ext(name) != ".js" || name == "static/mock.js" || strings.Contains(name, "flow") { // flows.js, flow.js, flowpick.js: shown only on Flows pages or with per-library choices on
-			continue
-		}
-		if m := regexp.MustCompile(`"[^"\n]*"`).FindAllString(js, -1); m != nil {
-			for _, lit := range m {
-				if flow.MatchString(lit) && !strings.HasPrefix(lit, `"/api/`) && !strings.HasPrefix(lit, `"/assets/`) { // an address, not text on screen
-					t.Errorf("NAV-7: %s in %s", lit, name)
-				}
-			}
-		}
-	}
-}
+// NAV-7 (no "flow" outside the Flows pages) was retired with piece B: Flows is in the menu at every level.
 
 // PKG-1: nothing points off the machine.
 func TestNoExternalRequests(t *testing.T) {
@@ -395,7 +369,8 @@ func TestSettingsRegistry(t *testing.T) {
 	}
 	// GET /api/settings fields (UI-API-CONTRACT.md); "token" has its own endpoint.
 	// parallelJobs is each worker's "Files at once" on the Workers page now (redesign D5, workshop S2).
-	contract := []string{"controlLevel", "perLibraryFlow", "firstRunDone", "firstRunStep", "authRequired", "keepOriginalsDays", "trashPath",
+	// controlLevel and perLibraryFlow went with piece B (each flow has its own kind); the server ignores them for a release.
+	contract := []string{"firstRunDone", "firstRunStep", "authRequired", "keepOriginalsDays", "trashPath",
 		"queueOrder", "quietHours", "lowPriority", "scanSchedule", "integrations", "updateAvailable", "languages"}
 	known := map[string]bool{"token": true}
 	for _, k := range contract {
@@ -427,10 +402,6 @@ func TestSettingsRegistry(t *testing.T) {
 		if !homes[k] {
 			t.Errorf("NAV-2: contract setting %s has no home in the registry", k)
 		}
-	}
-	// NAV-7: nothing the registry says uses the word "flow".
-	if m := regexp.MustCompile(`(?i)\bflows?\b`).FindString(string(b)); m != "" {
-		t.Errorf("NAV-7: %q in settings.json", m)
 	}
 }
 

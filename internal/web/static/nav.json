@@ -1,7 +1,7 @@
 [
   {"id": "libraries", "label": "Libraries", "href": "/libraries/"},
   {"id": "activity",  "label": "Activity",  "href": "/activity/"},
-  {"id": "flows",     "label": "Flows",     "href": "/flows/", "showAt": ["advanced"], "showWithPerLibraryChoice": true},
+  {"id": "flows",     "label": "Flows",     "href": "/flows/"},
   {"id": "workers",   "label": "Workers",   "href": "/workers/"},
   {"id": "settings",  "label": "Settings",  "href": "/settings/"}
 ]
