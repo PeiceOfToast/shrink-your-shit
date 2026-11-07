@@ -35,8 +35,12 @@ type QuietHours struct {
 
 const settingsKey = "settings"
 
+// DefaultControlLevel is the control level every install starts at, upgrades included. FIRST-RUN.md
+// says Basic; decision D13 said Standard for upgrades: design is asked which holds (2026-11-07).
+const DefaultControlLevel = "basic"
+
 func defaultSettings() Settings {
-	return Settings{ControlLevel: "basic", FirstRunStep: 1, KeepOriginalsDays: 7, ParallelJobs: 1,
+	return Settings{ControlLevel: DefaultControlLevel, FirstRunStep: 1, KeepOriginalsDays: 7, ParallelJobs: 1,
 		LowPriority: true, ScanSchedule: "02:00", QueueOrder: "newest"}
 }
 
