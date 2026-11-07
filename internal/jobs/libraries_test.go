@@ -406,3 +406,35 @@ func TestSaveSliderForgetsTheFilesOfEveryLibraryAffected(t *testing.T) {
 		}
 	}
 }
+
+// A replace that changed the file type (25a-2) puts the new file at another name but is still a
+// replace: its saving counts as waiting while its original is kept and as freed once it is purged, in
+// the library's counts and in the activity summary alike; a beside result still counts in neither
+// (review e5047e5).
+func TestRenamedReplacesCountLikeReplaces(t *testing.T) {
+	s := open(t)
+	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
+	renamed := func(name string, before, after int64) int64 {
+		id, _ := s.Enqueue(Job{LibraryID: l.ID, Path: "/m/" + name + ".mp4", SizeBefore: before})
+		s.Claim("w")
+		o, _ := s.BeginSwap(Original{JobID: id, LibraryID: l.ID, Path: "/m/" + name + ".mp4", NewPath: "/m/" + name + ".mkv", Trash: "/m/.syp-trash/" + name + ".mp4", Staged: "s", Bytes: before, Hash: "h", NewBytes: after})
+		s.FinishSwap(o, time.Now().Add(time.Hour))
+		s.Complete(id, "/m/"+name+".mkv", after)
+		return o
+	}
+	renamed("kept", 1000, 400)             // 600 waiting
+	purged := renamed("purged", 1000, 300) // 700 freed
+	s.SetSwapState(purged, OriginalPurged)
+	b, _ := s.Enqueue(Job{LibraryID: l.ID, Path: "/m/beside.mkv", SizeBefore: 1000})
+	s.Claim("w")
+	s.Complete(b, "/m/beside.hevc.mkv", 400) // beside: neither
+
+	c, _ := s.Counts()
+	if c[l.ID].FreedBytes != 700 || c[l.ID].WaitingBytes != 600 {
+		t.Errorf("counts: freed %d waiting %d, want 700 and 600", c[l.ID].FreedBytes, c[l.ID].WaitingBytes)
+	}
+	a, err := s.ActivitySummary()
+	if err != nil || a.FreedBytes != 700 || a.WaitingBytes != 600 {
+		t.Errorf("summary: freed %d waiting %d, want 700 and 600 (%v)", a.FreedBytes, a.WaitingBytes, err)
+	}
+}

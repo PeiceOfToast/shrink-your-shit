@@ -137,13 +137,18 @@ func (s *Store) OriginalOfJob(jobID int64) (Original, error) {
 // CompleteKeptJobs marks done every job still "running" whose swap was finished (its original is kept,
 // the new file in place): the process stopped between the swap and recording the job. Without this
 // the job would be queued again and the new file converted a second time.
+//
+// A purged row counts too: a change of file type with originals kept 0 days deletes the kept original
+// right after the swap, so a stop just after that leaves the job running with its row purged (review
+// e5047e5); its new file is at new_path.
 func (s *Store) CompleteKeptJobs() (int64, error) {
+	const row = `FROM originals o WHERE o.job_id=jobs.id AND o.state IN (?,?) ORDER BY o.id DESC LIMIT 1`
 	r, err := s.db.Exec(`UPDATE jobs SET status=?, progress=100, updated=?,
-  output_path=(SELECT CASE o.new_path WHEN '' THEN o.path ELSE o.new_path END FROM originals o WHERE o.job_id=jobs.id AND o.state=? ORDER BY o.id DESC LIMIT 1),
-  size_after=(SELECT o.new_bytes FROM originals o WHERE o.job_id=jobs.id AND o.state=? ORDER BY o.id DESC LIMIT 1),
-  output_mtime=(SELECT o.new_mtime FROM originals o WHERE o.job_id=jobs.id AND o.state=? ORDER BY o.id DESC LIMIT 1)
-WHERE status=? AND EXISTS (SELECT 1 FROM originals o WHERE o.job_id=jobs.id AND o.state=?)`,
-		Done, s.stamp(), OriginalKept, OriginalKept, OriginalKept, Running, OriginalKept)
+  output_path=(SELECT CASE o.new_path WHEN '' THEN o.path ELSE o.new_path END `+row+`),
+  size_after=(SELECT o.new_bytes `+row+`),
+  output_mtime=(SELECT o.new_mtime `+row+`)
+WHERE status=? AND EXISTS (SELECT 1 FROM originals o WHERE o.job_id=jobs.id AND o.state IN (?,?))`,
+		Done, s.stamp(), OriginalKept, OriginalPurged, OriginalKept, OriginalPurged, OriginalKept, OriginalPurged, Running, OriginalKept, OriginalPurged)
 	if err != nil {
 		return 0, err
 	}
@@ -153,6 +158,11 @@ WHERE status=? AND EXISTS (SELECT 1 FROM originals o WHERE o.job_id=jobs.id AND 
 // DecisionRestored is a file record's decision once its original was put back (slice 18): the
 // scanner and the Preview skip it until "Convert again" clears it.
 const DecisionRestored = "restored"
+
+// replacedSQL is true for a jobs row that replaced its original: the new file at the original's name,
+// or a swap recorded for it (replace with another file type puts it at another name, 25a-2). Beside
+// conversions have neither.
+const replacedSQL = `(output_path=path OR EXISTS (SELECT 1 FROM originals o WHERE o.job_id=jobs.id))`
 
 // keptSQL is true for a jobs row whose original is kept (the state is the next argument).
 const keptSQL = `EXISTS (SELECT 1 FROM originals o WHERE o.job_id=jobs.id AND o.state=?)`

@@ -482,8 +482,8 @@ type LibraryCounts struct {
 func (s *Store) Counts() (map[int64]LibraryCounts, error) {
 	rows, err := s.db.Query(`SELECT library_id,
   SUM(status=?), SUM(status=?), SUM(status=?),
-  COALESCE(SUM(CASE WHEN status=? AND size_after>0 AND output_path=path AND NOT `+keptSQL+` THEN size_before-size_after END),0),
-  COALESCE(SUM(CASE WHEN status=? AND size_after>0 AND output_path=path AND `+keptSQL+` THEN size_before-size_after END),0)
+  COALESCE(SUM(CASE WHEN status=? AND size_after>0 AND `+replacedSQL+` AND NOT `+keptSQL+` THEN size_before-size_after END),0),
+  COALESCE(SUM(CASE WHEN status=? AND size_after>0 AND `+replacedSQL+` AND `+keptSQL+` THEN size_before-size_after END),0)
 FROM jobs WHERE library_id IS NOT NULL GROUP BY library_id`, Running, Queued, Failed, Done, OriginalKept, Done, OriginalKept)
 	if err != nil {
 		return nil, err

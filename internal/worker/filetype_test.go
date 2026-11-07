@@ -107,45 +107,50 @@ func TestReplaceWithNewTypeNameTakenDuringTheEncode(t *testing.T) {
 }
 
 // A crash at each step of the renaming swap: the next start leaves either the original at movie.mp4
-// (the job runs again) or the new file at movie.mkv with the original kept (the job done).
+// (the job runs again) or the new file at movie.mkv with the original kept (the job done). With 0 days
+// too: a stop after the kept original was deleted, before the job was recorded done, still ends done
+// with movie.mkv as its file (review e5047e5).
 func TestReplaceWithNewTypeCrashAtEveryStep(t *testing.T) {
-	for _, step := range []string{"journal written", "original moved", "new file in place", "done"} {
-		t.Run(step, func(t *testing.T) {
-			s, w, mkv := mp4ToMkv(t, 7)
-			swapHook = func(at string) error {
-				if at == step {
-					return errCrash
+	for _, days := range []int{7, 0} {
+		for _, step := range []string{"journal written", "original moved", "new file in place", "done"} {
+			t.Run(strconv.Itoa(days)+" days/"+step, func(t *testing.T) {
+				s, w, mkv := mp4ToMkv(t, days)
+				swapHook = func(at string) error {
+					if at == step {
+						return errCrash
+					}
+					return nil
 				}
-				return nil
-			}
-			defer func() { swapHook = nil }()
-			job, err := s.store.Claim("t")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := w.process(context.Background(), job); !errors.Is(err, errCrash) {
-				t.Fatalf("the swap must stop at %q: %v", step, err)
-			}
-			swapHook = nil
-			RecoverSwaps(s.store, s.store, 7, keepNow)
-			s.store.RequeueRunning()
-			j := s.job()
-			switch {
-			case read(s.src) == "original-bytes": // rolled back
-				if !gone(mkv) || !gone(s.mp4Trash()) || j.Status != jobs.Queued {
-					t.Errorf("rolled back, but mkv %q, kept %q, job %s", read(mkv), read(s.mp4Trash()), j.Status)
+				defer func() { swapHook = nil }()
+				job, err := s.store.Claim("t")
+				if err != nil {
+					t.Fatal(err)
 				}
-			case read(mkv) == "new": // finished
-				if !gone(s.src) || read(s.mp4Trash()) != "original-bytes" || j.Status != jobs.Done || j.OutputPath != mkv {
-					t.Errorf("finished, but mp4 %q, kept %q, job %+v", read(s.src), read(s.mp4Trash()), j)
+				if _, err := w.process(context.Background(), job); !errors.Is(err, errCrash) {
+					t.Fatalf("the swap must stop at %q: %v", step, err)
 				}
-			default:
-				t.Fatalf("mp4 %q, mkv %q, kept %q", read(s.src), read(mkv), read(s.mp4Trash()))
-			}
-			if m, _ := s.store.Originals(jobs.SwapMoving); len(m) != 0 {
-				t.Errorf("left moving: %+v", m)
-			}
-		})
+				swapHook = nil
+				RecoverSwaps(s.store, s.store, days, keepNow)
+				s.store.RequeueRunning()
+				j := s.job()
+				switch {
+				case read(s.src) == "original-bytes": // rolled back
+					if !gone(mkv) || !gone(s.mp4Trash()) || j.Status != jobs.Queued {
+						t.Errorf("rolled back, but mkv %q, kept %q, job %s", read(mkv), read(s.mp4Trash()), j.Status)
+					}
+				case read(mkv) == "new": // finished (with 0 days the kept original may be deleted already)
+					keptOK := read(s.mp4Trash()) == "original-bytes" || days == 0 && gone(s.mp4Trash())
+					if !gone(s.src) || !keptOK || j.Status != jobs.Done || j.OutputPath != mkv || j.SizeAfter != 3 {
+						t.Errorf("finished, but mp4 %q, kept %q, job %+v", read(s.src), read(s.mp4Trash()), j)
+					}
+				default:
+					t.Fatalf("mp4 %q, mkv %q, kept %q", read(s.src), read(mkv), read(s.mp4Trash()))
+				}
+				if m, _ := s.store.Originals(jobs.SwapMoving); len(m) != 0 {
+					t.Errorf("left moving: %+v", m)
+				}
+			})
+		}
 	}
 }
 
