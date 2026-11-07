@@ -108,7 +108,7 @@
           var ok = ft[acSel.value] || allTypes, some = ok.length < allTypes.length;
           Array.prototype.forEach.call(ftSel.options, function (o) { o.disabled = ok.indexOf(o.value) < 0; });
           ftNote.hidden = !some; ftSel.setAttribute("aria-describedby", ((some ? ftNote.id + " " : "") + ftHint).trim());
-          if (ftSel.options[ftSel.selectedIndex].disabled) { ftSel.value = "keep"; if (announce) { ftLive.textContent = ""; ftLive.textContent = "File type set back to Keep as is. " + ftNote.textContent; } changed(); }
+          if (ftSel.options[ftSel.selectedIndex].disabled) { ftSel.value = "keep"; if (announce) { ftLive.textContent = ""; ftLive.textContent = 'File type set back to Keep as is. To change the file type, choose "Put the new file next to the original" under After converting.'; } changed(); }
         };
         acSel.addEventListener("change", function () { syncFt(true); });
         syncFt(false);
