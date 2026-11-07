@@ -261,6 +261,8 @@
     // Answers "computing" first, then "ready", so the waiting state gets exercised.
     preview: function (p, b) {
       var li = find(libs, "id", p.id);
+      var bs = b.setting || {};
+      if (bs.speed && !(settings.languages || []).length && (bs.audio === "my_languages" || bs.subtitles === "my_languages")) return fail(400, "languages_needed", "Choose your languages first, in Settings > General.");
       if (b.sampleFile && li >= 0 && b.sampleFile.indexOf(libs[li].path + "/") !== 0) return fail(400, "outside_library", "That file is not inside this library. Nothing was changed.");
       if (slowPreview()) {
         var t = Date.now() - (slowAt[p.id] = slowAt[p.id] || Date.now());
