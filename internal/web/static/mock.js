@@ -158,12 +158,7 @@
     return { stale: false, status: "ready", estimateBytesLow: 110 * GB, estimateBytesHigh: 220 * GB, files: 1284, totalBytes: 1100 * GB, canShrink: 1174, sharedNoSaving: 0,
              skipped: { already_efficient: 71, hdr_dv: 5, format_not_converted: 1, no_video: 1, setting_cannot_run: 1, still_changing: 1, symlink: 1, shared_file: 29 } };
   }
-  // Standard's defaults are the slider's: the same choices (contract addendum 6; no minimum saving since S1).
-  function isSliderPosition(b) {
-    var d = { speed: "normal", format: "hevc", resolution: "keep", audio: "keep_all", subtitles: "keep_all", fileType: "keep", afterConverting: "replace", maxBitrate: "none", skipHdr: true }, k;
-    for (k in d) if (b[k] !== d[k]) return false;
-    return !(b.ignore || []).length && !!SLIDER[b.quality - 1];
-  }
+
   var ORDER = ["newest", "oldest", "largest", "smallest"], CAPS = ["none", "40", "20", "10", "6", "4"]; // contract addenda 10 and 9
   // Which choices this version can save, on every setting answer (addendum 13 and its correction). ?selectors= picks
   // the state (remembered for the tab): now (default: the server on dev since slice 25b, every audio and subtitle
@@ -310,7 +305,6 @@
       if (b.quality && !b.speed) delete libs[i].sel; // a slider save replaces Standard choices
       if (b.quality && !b.speed) libs[i].audio = b.audio || "stereo_aac"; // Basic's audio choice
       if (b.quality) { libs[i].quality = b.quality; libs[i].settingLabel = ["Smallest file", "Smaller", "Balanced", "Better quality", "Best quality"][b.quality - 1]; libs[i].settingKind = "slider"; saveLibs(); }
-      if (b.speed && isSliderPosition(b)) { delete libs[i].sel; libs[i].quality = b.quality; libs[i].settingKind = "slider"; saveLibs(); return ok(); }
       if (b.speed) { libs[i].sel = copy(b); libs[i].settingKind = "selectors"; libs[i].settingLabel = ["Smallest file", "Smaller", "Balanced", "Better quality", "Best quality"][(b.quality || 3) - 1]; saveLibs(); }
       return ok();
     },
