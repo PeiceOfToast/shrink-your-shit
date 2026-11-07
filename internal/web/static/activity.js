@@ -75,7 +75,7 @@
   // ---- Skipped
   var KIND = { user_stopped: "info", restored: "info", hdr_dv: "warn", shared_file: "warn", cannot_keep_track: "warn", bitmap_subs: "warn", symlink: "warn", unreadable: "warn" };
   // Reasons a library rule causes, with the lowest control level whose library page can change that rule.
-  var RULE = { already_efficient: 0, would_not_shrink: 0, hdr_dv: 1, cannot_keep_track: 1 }, RANK = { basic: 0, standard: 1, advanced: 2 }, level = null;
+  var RULE = { already_efficient: 0, would_not_shrink: 0, hdr_dv: 1, cannot_keep_track: 1, setting_cannot_run: 1 }, RANK = { basic: 0, standard: 1, advanced: 2 }, level = null;
   var reason = "", shown = 0, tb, more, count;
   T.skipped = function () {
     if (!$("reason")) {
@@ -100,7 +100,7 @@
         tb.body.textContent = "";
         r.items.forEach(function (i) {
           var why = el("div"), known = ui.REASONS[i.reason];
-          why.appendChild(el("span", "badge " + (KIND[i.reason] || "idle"), known ? cap(known) : "Other reason")); why.appendChild(document.createElement("br")); why.appendChild(document.createTextNode(i.detail || (known ? "" : i.reason)));
+          why.appendChild(el("span", "badge " + (KIND[i.reason] || "idle"), cap(known || ui.OTHER_REASON))); why.appendChild(document.createElement("br")); why.appendChild(document.createTextNode(i.detail || "")); // the engine's detail; never the raw code
           var a = null;
           if (i.reason === "user_stopped" || i.reason === "restored") a = btn("Convert again", "again-" + i.id, function () { act(api.convertAgain({ id: i.id }), true); });
           else if (i.libraryId && RULE[i.reason] != null && level >= RULE[i.reason]) { a = el("a", "btn small", "Change rule"); a.href = "/library/?id=" + encodeURIComponent(i.libraryId); }

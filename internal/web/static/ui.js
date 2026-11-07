@@ -9,9 +9,13 @@
     already_efficient: "already efficient", would_not_shrink: "would not get smaller", already_hevc: "already in the new format",
     hdr_dv: "HDR or Dolby Vision", bitmap_subs: "picture subtitles that cannot be kept", shared_file: "shared with another folder",
     symlink: "links to files elsewhere", unreadable: "unreadable", cannot_keep_track: "a track that cannot be kept",
-    user_stopped: "you stopped it", restored: "you restored the original"
+    user_stopped: "you stopped it", restored: "you restored the original",
+    // Workshop slice 19 (contract: four more skipped reason codes); design's words, 2026-11-07.
+    format_not_converted: "a format this version doesn't convert", no_video: "no video in the file",
+    unknown_bitrate: "not enough information to judge safely", setting_cannot_run: "the library's setting can't be used on it"
   };
-  ui.reason = function (code, detail) { return ui.REASONS[code] || detail || String(code).replace(/_/g, " "); };
+  ui.OTHER_REASON = "another reason"; // a code this version doesn't know: never show the raw code
+  ui.reason = function (code, detail) { return ui.REASONS[code] || detail || ui.OTHER_REASON; };
 
   // Sizes: MB below 1 GB, GB below 1 TB, one decimal. A range in one unit says it once; one that
   // crosses units says both ("800.0 MB - 1.2 GB").
