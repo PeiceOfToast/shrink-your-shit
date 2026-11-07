@@ -35,7 +35,8 @@
           list.appendChild(li);
         });
         if (!(r.blockers || []).length) { // OK lines only when every check passed: beside a blocker some never ran
-          list.appendChild(line("ok", "OK", "Enough free space."));
+          var spaceUnknown = (r.notes || []).some(function (n) { return n.code === "space_unknown"; });
+          if (!spaceUnknown) list.appendChild(line("ok", "OK", "Enough free space.")); // not an OK when it couldn't be read: the note says so
           list.appendChild(line("ok", "OK", "Video converter works."));
           list.appendChild(line("ok", "OK", "We can read and change files in this folder."));
           list.appendChild(line("ok", "OK", ui.num(r.videoCount) + " videos found (" + ui.bytes(r.totalBytes) + ")."));
