@@ -54,7 +54,7 @@
         editor = S.editors.basic(host, s, langs, names, function () { say(""); }, f.name + ": smallest file to best quality");
         var a = el("a", null, "Switch to Standard"); a.href = "#"; sw.appendChild(a);
         a.onclick = function (e) { e.preventDefault(); var v = editor.get();
-          build("standard", { quality: v.quality, speed: "normal", format: "hevc", resolution: "keep", maxBitrate: "none", audio: v.audio, subtitles: "keep_all", fileType: "mkv", afterConverting: "replace", skipHdr: true, availableFileTypes: s.availableFileTypes, availableAudio: s.availableAudio, availableSubtitles: s.availableSubtitles });
+          build("standard", { quality: v.quality, speed: "normal", format: "hevc", resolution: "keep", maxBitrate: "none", audio: v.audio, subtitles: "keep_all", fileType: "mkv", afterConverting: "replace", skipHdr: true, fitsBasic: true, becomes: s.becomes, availableFileTypes: s.availableFileTypes, availableAudio: s.availableAudio, availableSubtitles: s.availableSubtitles });
           say("Standard choices. They take effect when you press Save."); };
       } else {
         editor = S.editors.selectors(host, function () { say(""); }, s);
