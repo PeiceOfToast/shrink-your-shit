@@ -9,7 +9,7 @@ that runs ffmpeg, and a small web server. Everything runs in one process.
 ```
 library folders --scanner--> files table + jobs table (SQLite) <--worker (pulls jobs, runs ffmpeg)
                                       ^
-                                      +-- web server (status page, /api/status, retry)
+                                      +-- web server (pages, /api behind the token, /healthz)
 ```
 
 ## Packages
@@ -126,7 +126,18 @@ Flags (see `go run . -h`) with environment equivalents:
 | Output | `-output replace\|beside` | | `replace` |
 | Timing | `-scan-every`, `-settle` | | 30s, 15s |
 
-The web UI has **no authentication**; binding to anything but loopback logs a warning.
+**Access** (`internal/web/auth.go`): one shared token. Listening beyond loopback with none stored makes
+one (32 random bytes, URL-safe) in the data folder (`access-token`, mode 0600) and logs the sign-in
+address once. Whenever a token is stored, every `/api/*` request except `POST /api/login` and
+`/api/logout` needs it: a session cookie (`syp_session`, HttpOnly, SameSite=Strict, value an HMAC of
+the token, so making a new token ends every session) or `Authorization: Bearer <token>`; otherwise
+401 `{"error":{"code":"auth"}}`. On loopback with no token, `/api/*` is open. Every write
+(POST/PUT/PATCH/DELETE) must be `application/json` and, unless it carries a Bearer token, pass Go's
+`http.CrossOriginProtection` (Origin / Sec-Fetch-Site against Host), else 403 `csrf`; that also
+applies on loopback, where another website could otherwise send writes to 127.0.0.1. Pages, `/assets/`
+and `GET /healthz` (just `ok`, for health checks) are public. `shrink-your-shit token` prints the token
+and sign-in address; it looks for the data folder in `SYP_DATA`, the Linux service's settings file and
+`/var/lib/shrink-your-shit`, the Windows installer's folder, then the user's default.
 
 ## Where to add things
 

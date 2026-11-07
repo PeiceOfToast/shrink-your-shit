@@ -27,5 +27,5 @@ USER 1000:1000
 VOLUME ["/config"]
 EXPOSE 8484
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-  CMD wget -q -O /dev/null http://127.0.0.1:8484/api/status || exit 1
+  CMD wget -q -O /dev/null http://127.0.0.1:8484/healthz || exit 1
 ENTRYPOINT ["shrink-your-shit"]

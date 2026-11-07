@@ -16,6 +16,7 @@ marked **never verified** has not been seen working by anyone. Update this file 
 | 7a | Workflow + `scripts/build-release.sh` that build the 5 binaries and attach them to a GitHub Release on version tags (never run), `-version` flag | PR #7 |
 | 7b | `install.sh` at the repo root: one-line installer for Linux/macOS (replaces the old `deploy/install.sh`) | PR #8 |
 | 7c | Windows installer (`installer/windows`, Inno Setup), built and tested on a Windows runner in CI and attached to releases | this change |
+| 11 | Access token beyond loopback: sign-in cookie or Bearer, CSRF checks on writes, `token` command, `GET /healthz` for health checks, installer prints the sign-in address | this change |
 
 ## What has been verified, and how
 
@@ -163,8 +164,10 @@ only a folder holding nothing but our regular temp file is removed).
   against files still being copied. A file that probes fine while half-copied could be queued
   (the worker refuses to replace a file that changed during encoding).
 - **SQLite settings** (`WAL`, `busy_timeout`) are set once and rely on `MaxOpenConns(1)`.
-- **No authentication.** Anyone who can reach the web page can see file names and retry jobs.
-  Do not expose it to the internet.
+- **One shared access token, no HTTPS.** Beyond this computer the page needs the token, but it
+  crosses the network in plain text and there is one token for everyone (no users, no per-device
+  sign-out except making a new token). Do not expose it to the internet. Wrong tokens wait half a
+  second; there is no other rate limit.
 - **Software encoding only** (x265); no GPU/hardware encoding.
 - **One rule, one target:** H.264 at or above a bitrate to HEVC. No other codecs, no per-library rules,
   no flow builder.

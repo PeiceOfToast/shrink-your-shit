@@ -46,7 +46,7 @@ not running: the Windows and macOS tests ran for the first time in CI (see
 
 ```
 ./shrink-your-shit -library /path/to/COPY-of-videos -data ./data -scan-every 5s
-# web page: http://127.0.0.1:8484   (JSON: /api/status)
+# web page: http://127.0.0.1:8484   (JSON: /api/status; health: /healthz)
 ```
 
 The program **replaces originals by default**. Always develop against a copy (or pass
@@ -123,7 +123,7 @@ only CI has done that. To refresh the pinned ffmpeg, change the URL and SHA-256 
 |---|---|
 | `test` (ubuntu, windows, macos) | `go vet ./...` and `go test -count=1 ./...` on each OS |
 | `build` (5 targets) | `go build ./...` and `go vet ./...` with `CGO_ENABLED=0` for linux amd64/arm64, windows amd64, darwin arm64/amd64 |
-| `docker` | `docker build`, then starts the container and curls `/api/status` |
+| `docker` | `docker build`, then starts the container, waits for `/healthz`, checks `/api/status` is 401 without the token and answers with the token from `docker exec syp shrink-your-shit token` |
 | `windows-installer` | builds the Windows installer, then on the runner: silent install, real conversion, upgrade, uninstall |
 
 Go version comes from `go.mod`. Actions are pinned to major versions. Check a PR's status

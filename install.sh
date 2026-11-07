@@ -11,8 +11,8 @@
 #   curl -fsSL <url>/install.sh | sh -s -- --library /srv/videos --addr 0.0.0.0:8484
 #
 #   --library DIR     folder to watch (repeat for several). Default: an empty folder in the data dir.
-#   --addr ADDR       web address (default 127.0.0.1:8484, this computer only; there is no login yet,
-#                     so only use 0.0.0.0:8484 on a network you trust)
+#   --addr ADDR       web address (default 127.0.0.1:8484, this computer only; with 0.0.0.0:8484
+#                     other machines sign in with an access token, shown at the end)
 #   --version X.Y.Z   install that release instead of the newest
 #   --no-start        install but do not start
 #   --run             run in the foreground at the end (for containers / machines without a service manager)
@@ -39,7 +39,7 @@ usage() {
   cat <<'USAGE'
 Usage: install.sh [--library DIR]... [--addr ADDR] [--version X.Y.Z] [--no-start] [--run]
   --library DIR    folder to watch (repeat for several); default: an empty folder in the data dir
-  --addr ADDR      web address, default 127.0.0.1:8484 (this computer only; no login yet)
+  --addr ADDR      web address, default 127.0.0.1:8484 (this computer only); beyond it, an access token is needed
   --version X.Y.Z  install that release instead of the newest
   --no-start       install but do not start
   --run            run in the foreground at the end (containers / no service manager)
@@ -176,7 +176,7 @@ check_host() {
 health_check() {
   host=$(check_host "$PORT_ADDR")
   case $host in *:*) host="[$host]" ;; esac
-  url="http://$host:${PORT_ADDR##*:}/api/status"
+  url="http://$host:${PORT_ADDR##*:}/healthz"
   i=0
   while [ $i -lt 20 ]; do
     if have curl; then curl -fsS -o /dev/null "$url" 2>/dev/null && return 0
@@ -186,6 +186,14 @@ health_check() {
     i=$((i + 1)); sleep 1
   done
   return 1
+}
+
+# signin_url BASE: BASE with the access token, when the program listens beyond this computer
+# (it made the token on its first start); BASE unchanged on loopback.
+signin_url() {
+  case $PORT_ADDR in 127.*|localhost:*|\[::1\]:*) printf '%s' "$1"; return ;; esac
+  tok=$($SUDO "$BIN" token 2>/dev/null | sed -n 's/^Access token: //p')
+  if [ -n "$tok" ]; then printf '%s/?token=%s' "$1" "$tok"; else printf '%s' "$1"; fi
 }
 
 finish() { # finish URL_NOTE
@@ -285,8 +293,11 @@ UNIT
     fi
     host=127.0.0.1
     case $PORT_ADDR in 127.*|localhost:*) ;; *) host=$(hostname -I 2>/dev/null | cut -d' ' -f1); host=${host:-this-machine} ;; esac
-    finish "http://$host:$PORT"
-    case $PORT_ADDR in 127.*|localhost:*) say "It only listens on this computer. For other machines on your network: run this again with --addr 0.0.0.0:$PORT (there is no login yet, so only on a network you trust)." ;; esac
+    finish "$(signin_url "http://$host:$PORT")"
+    case $PORT_ADDR in
+      127.*|localhost:*) say "It only listens on this computer. For other machines on your network: run this again with --addr 0.0.0.0:$PORT (they then sign in with an access token)." ;;
+      *) say "That address carries the access token. To see it again: sudo shrink-your-shit token. There is no HTTPS: use it on a network you trust." ;;
+    esac
     exit 0
   fi
 
@@ -381,5 +392,5 @@ if health_check; then :; else
   rc=$?
   [ "$rc" = 2 ] || die "the service did not answer on port $PORT. See $LOG"
 fi
-finish "http://127.0.0.1:$PORT"
-case $PORT_ADDR in 127.*|localhost:*) ;; *) say "It is reachable from other machines and has no login yet: only use this on a network you trust." ;; esac
+finish "$(signin_url "http://127.0.0.1:$PORT")"
+case $PORT_ADDR in 127.*|localhost:*) ;; *) say "It is reachable from other machines, which sign in with the access token in that address. To see it again: shrink-your-shit token. There is no HTTPS: use it on a network you trust." ;; esac
