@@ -222,9 +222,9 @@ func (c *Checker) Folder(ctx context.Context, path string) (r FolderReport) {
 	// Messages here are shown as they are in first-run: plain words only (DESIGN/ACCEPTANCE.md COPY-1,
 	// FIRST-RUN.md "States and errors"). The health report's details may be technical.
 	if hardlinked == 1 {
-		r.Notes = append(r.Notes, Issue{"hardlinks", "1 file is shared with another folder (for example by Radarr). We will leave it alone, because changing it would break the link and free no space."})
+		r.Notes = append(r.Notes, Issue{"hardlinks", "1 file is shared with another folder (for example by Radarr). We will leave it alone, because changing it would break the link."})
 	} else if hardlinked > 1 {
-		r.Notes = append(r.Notes, Issue{"hardlinks", fmt.Sprintf("%d files are shared with another folder (for example by Radarr). We will leave them alone, because changing one would break the link and free no space.", hardlinked)})
+		r.Notes = append(r.Notes, Issue{"hardlinks", fmt.Sprintf("%d files are shared with another folder (for example by Radarr). We will leave them alone, because changing one would break the link.", hardlinked)})
 	}
 	if unreadable == 1 {
 		// A note, not a blocker: a disk's root often holds a folder only the system may open

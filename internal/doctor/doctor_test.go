@@ -152,7 +152,7 @@ func TestHardlinkedFilesAreANote(t *testing.T) {
 	if !r.OK || !strings.Contains(strings.Join(codes(r.Notes), ","), "hardlinks") {
 		t.Fatalf("%+v", r)
 	}
-	want := "2 files are shared with another folder (for example by Radarr). We will leave them alone, because changing one would break the link and free no space."
+	want := "2 files are shared with another folder (for example by Radarr). We will leave them alone, because changing one would break the link."
 	if n := r.Notes[0]; n.Message != want {
 		t.Errorf("%q", n.Message)
 	}

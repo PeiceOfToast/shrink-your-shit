@@ -12,7 +12,7 @@ import (
 
 // ErrSystemFolder: a library folder that holds the computer's own files, or every user's (slice 23,
 // SAF-4). Converting there could damage the system or other people's files, so it is never a library.
-var ErrSystemFolder = errors.New("We won't use this folder: it holds the computer's own files or a whole home folder. Pick the folder that holds your videos.")
+var ErrSystemFolder = errors.New("This is a system folder, a whole disk or a whole home folder, not a folder of videos. Nothing was changed. Pick the folder that holds your videos.")
 
 // SystemFolder reports whether p (an absolute path, as stored) is refused as a library: the root of the
 // disk, a home folder or the folder of all home folders, or a system folder or anything inside one.

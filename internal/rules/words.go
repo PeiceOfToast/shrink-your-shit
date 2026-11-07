@@ -16,5 +16,6 @@ var SkipWords = map[string]string{
 	"user_stopped":       "you stopped it",
 	SkipSharedFile:       "it is shared with another folder, so converting it would free no space",
 	SkipSymlink:          "it is a link to a file outside this library, which is left as it is",
-	SkipStillChanging:    "it was still changing, so it is looked at again on the next scan",
+	// design's words (13:22Z); shown as "This file changed … next scan."
+	SkipStillChanging: "this file changed since we last looked (it may still be downloading). We'll look at it again on the next scan",
 }

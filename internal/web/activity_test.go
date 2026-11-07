@@ -516,3 +516,11 @@ func TestDeleteLibraryLeavesNothingHalfDone(t *testing.T) {
 		t.Errorf("3: its waiting job is claimable again: %+v %v", j, err)
 	}
 }
+
+// still_changing's detail is design's sentence exactly (slice 23).
+func TestStillChangingDetail(t *testing.T) {
+	want := "This file changed since we last looked (it may still be downloading). We'll look at it again on the next scan."
+	if got := upperFirst(rules.SkipWords[rules.SkipStillChanging]) + "."; got != want {
+		t.Errorf("%q", got)
+	}
+}
