@@ -7,6 +7,8 @@ var SkipWords = map[string]string{
 	SkipAlreadyEfficient: "it is already stored efficiently, so converting it would save little",
 	SkipAlreadyHEVC:      "it already uses a modern, efficient format",
 	SkipAlreadyInFormat:  "it is already HEVC in MKV with the audio you chose",
+	SkipDV:               dvSkip,
+	SkipDVProfile5:       dv5Skip,
 	SkipOtherFormat:      "its format is not one this setting converts",
 	SkipNoVideo:          "it has no video",
 	SkipUnknownBitrate:   "we can't tell how much it would shrink",

@@ -100,10 +100,11 @@ program; point at it explicitly with `-ffmpeg` / `-ffprobe` or `SYP_FFMPEG` /
 - macOS/Windows file names are case-insensitive; `.MKV` and `.mkv` are both recognised.
   Hidden files and folders (names starting with `.`, such as macOS `._name.mp4` or
   `.Trash`) and the Synology `@eaDir` and Windows `$RECYCLE.BIN` folders are ignored.
-- **HDR and Dolby Vision videos are left as they are** (skipped as "HDR or Dolby Vision"), whatever the
-  setting, unless a Standard setting turns "Skip HDR" off. Converting them would drop their HDR
-  information and can make the picture look washed out. Before this version an existing library could
-  convert them; it no longer does.
+- **HDR10 and HLG videos stay HDR:** they are converted to 10-bit HEVC with their HDR information
+  kept, and a result that lost it is refused (the original stays). HDR10+ becomes HDR10.
+- **Dolby Vision videos are left as they are**, unless a Standard setting turns on "Include Dolby
+  Vision files": then they become HDR10 (the Dolby Vision layer is removed). Profile 5 is always left
+  as it is, because converting it would show wrong colours.
 - **Files shared with another folder** (a hardlink, as Radarr, Sonarr and torrent clients make) are left as
   they are: converting one would free no space, because the other folder keeps the old copy. **Links**
   are never followed: a link to a file outside the library is skipped, and a link to a file inside it is

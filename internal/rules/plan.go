@@ -28,6 +28,7 @@ type Plan struct {
 	Tracks          []TrackOp   `json:"tracks,omitempty"`        // audio and subtitle tracks dropped or converted (slice 25b); others copied
 	AllAudioKept    bool        `json:"allAudioKept,omitempty"`  // "my languages" matched no audio track, so all of it is kept
 	MainAudioUsed   bool        `json:"mainAudioUsed,omitempty"` // Basic's stereo AAC matched no track: the main one is kept (S4)
+	HDRNote         string      `json:"hdrNote,omitempty"`       // what an HDR conversion does not keep (S3): HDR10+ scene data, Dolby Vision
 	AudioOrder      []int       `json:"audioOrder,omitempty"`    // the original's audio stream indexes in order, when Tracks has any
 	SubtitleOrder   []int       `json:"subtitleOrder,omitempty"` // and its subtitle stream indexes
 	MinSSIM         float64     `json:"minSSIM,omitempty"`       // picture threshold; 0 = the program's -min-ssim
@@ -46,7 +47,8 @@ const (
 	SkipCannotKeepTrack  = "cannot_keep_track"  // a track (its subtitles) cannot stay in its container
 	SkipAlreadyInFormat  = "already_in_format"  // Basic (S4): HEVC in MKV with the chosen audio already
 	SkipSettingCannotRun = "setting_cannot_run" // the flow cannot run (missing values, a kind not built yet)
-	SkipHDR              = "hdr_dv"             // HDR or Dolby Vision: left as it is (D3), unless the flow says otherwise
+	SkipDV               = "dv"                 // Dolby Vision, left as it is by the flow's setting (S3; includeDolbyVision off)
+	SkipDVProfile5       = "dv_profile5"        // Dolby Vision without an HDR10/HLG base (profile 5, or unknown): always left as it is
 	// File guards (slice 23, SAF-4), decided from the file itself before any probe (scanner.Guard):
 	SkipSharedFile    = "shared_file"    // shared with another folder (more than one name): converting frees no space
 	SkipSymlink       = "symlink"        // a link to a file outside the library: never followed
@@ -76,6 +78,34 @@ type VideoEncode struct {
 	// Copy: the video is copied as it is, not encoded (S4: an HEVC file only repackaged as MKV). The
 	// picture comparison is then skipped: the stream is the same bytes.
 	Copy bool `json:"copy,omitempty"`
+	// HDR: an HDR10 or HLG source is encoded 10-bit with its HDR set from the probe (S3); nil = SDR.
+	HDR *HDR `json:"hdr,omitempty"`
+}
+
+// HDR is what an HDR10 or HLG video keeps through the encoder (RESEARCH/hdr-dv.md): the colour
+// description and, for HDR10 (PQ), the static metadata, all written explicitly rather than hoped to
+// pass through.
+type HDR struct {
+	Transfer      string `json:"transfer"`  // smpte2084 (PQ, HDR10) | arib-std-b67 (HLG)
+	Primaries     string `json:"primaries"` // bt2020
+	Matrix        string `json:"matrix"`    // bt2020nc
+	MasterDisplay string `json:"masterDisplay,omitempty"`
+	CLL           string `json:"cll,omitempty"`
+}
+
+// x265Params is libx265's -x265-params for h.
+func (h HDR) x265Params() string {
+	s := "colorprim=" + h.Primaries + ":transfer=" + h.Transfer + ":colormatrix=" + h.Matrix
+	if h.Transfer == "smpte2084" {
+		s += ":hdr10=1:hdr10-opt=1"
+		if h.MasterDisplay != "" {
+			s += ":master-display=" + h.MasterDisplay
+		}
+		if h.CLL != "" {
+			s += ":max-cll=" + h.CLL
+		}
+	}
+	return s
 }
 
 // Compile makes the Plan for one file. Skip says whether it should be converted (the scanner's
@@ -93,14 +123,6 @@ func (t Template) Compile(info media.Info) Plan {
 		}
 		r = Rule{FromCodec: pr.FromCodec, MinBitrateKbps: pr.MinBitrateKbps, CRF: pr.CRF, Preset: pr.Preset}
 		p.Output = outputOr(pr.Output)
-		// D3, on purpose since slice 25a: an HDR file the rule would convert is left as it is
-		// (converting drops its HDR information); everything else decides exactly as before.
-		if ok, _ := r.Match(info); ok && info.IsHDR() {
-			p.Eligibility = Eligibility{FromCodec: r.FromCodec, MinBitrateKbps: r.MinBitrateKbps}
-			p.Video = VideoEncode{Codec: "libx265", CRF: r.CRF, Preset: r.Preset, Tag: "hvc1"}
-			p.Skip, p.SkipCode = hdrSkip, SkipHDR
-			return p
-		}
 	case KindSlider:
 		pos, ok := SliderAt(t.Params.Quality)
 		if !ok {
@@ -138,6 +160,9 @@ func (t Template) Compile(info media.Info) Plan {
 			p.SkipCode = SkipAlreadyEfficient // below the rule's bitrate
 		}
 	}
+	// S3, for every flow: HDR10 kept, Dolby Vision left as it is. Also on a skipped Plan, which a job
+	// queued before its flow changed still runs: its encode keeps the HDR too.
+	p.applyHDR(info, false)
 	return p
 }
 
@@ -158,6 +183,11 @@ func (p Plan) FFmpegArgs(in, out string) []string {
 		return p.withSubtitleFiles(args, out)
 	}
 	args = append(args, "-c:"+v, p.Video.Codec, "-crf", strconv.Itoa(p.Video.CRF), "-preset", p.Video.Preset)
+	if h := p.Video.HDR; h != nil { // 10-bit main10 with the HDR written explicitly (S3)
+		args = append(args, "-pix_fmt:"+v, "yuv420p10le", "-profile:"+v, "main10",
+			"-color_primaries:"+v, h.Primaries, "-color_trc:"+v, h.Transfer, "-colorspace:"+v, h.Matrix,
+			"-x265-params:"+v, h.x265Params())
+	}
 	if p.Video.Height > 0 {
 		args = append(args, "-filter:"+v, "scale=-2:"+strconv.Itoa(p.Video.Height))
 	}
@@ -271,6 +301,16 @@ func (p Plan) Expect(src media.Info, packets int64) Expect {
 	}
 	if p.Container != "" {
 		e.Container = Containers[p.Container]
+	}
+	if v := src.Video(); v != nil && v.IsHDR() { // S3: the original's HDR must survive, or it is kept
+		h := HDRExpect{Transfer: v.ColorTransfer, Primaries: v.ColorPrimaries}
+		if h.Transfer == "" && v.HDR10Plus && !v.DolbyVision {
+			h.Transfer = "smpte2084"
+		}
+		if h.Transfer == "smpte2084" || p.Video.Copy { // static metadata is HDR10's (HLG has none to write)
+			h.MasteringDisplay, h.CLL = v.MasteringDisplay != "", v.CLL != ""
+		}
+		e.HDR = &h
 	}
 	e = p.expectTracks(e)
 	e.MinSSIM = p.MinSSIM
@@ -422,8 +462,7 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 		p.Skip, p.SkipCode = fmt.Sprintf("%s is not a format this setting converts", v.Codec), SkipOtherFormat
 		return p
 	}
-	if s.SkipHDR && info.IsHDR() {
-		p.Skip, p.SkipCode = hdrSkip, SkipHDR
+	if !p.applyHDR(info, s.IncludeDolbyVision) {
 		return p
 	}
 	p.Tracks, p.AllAudioKept, p.MainAudioUsed = planAudio(s.Audio, langs, info)
@@ -449,8 +488,70 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	return p
 }
 
-// hdrSkip is why an HDR or Dolby Vision file is left as it is (D3).
-const hdrSkip = "it is HDR or Dolby Vision, which is left as it is (converting would lose its HDR information)"
+// What S3 says about HDR (design's sentences; the notes go to the job's log and the Preview's sample).
+const (
+	dvSkip        = "it is Dolby Vision, left as it is by this flow's setting"
+	dv5Skip       = "it is Dolby Vision profile 5 (or a profile we can't read): converting it would show wrong colours"
+	HDR10PlusNote = "HDR10+ scene data isn't kept; the file is HDR10."
+	DVRemovedNote = "Dolby Vision removed, HDR10 kept."
+	DVRemovedHLG  = "Dolby Vision removed, HLG kept."
+)
+
+// applyHDR decides an HDR source (S3, the user's decision overturning D3): HDR10 and HLG are converted
+// to 10-bit HEVC with their colour description and static metadata set from the probe; HDR10+ becomes
+// HDR10 (its scene data is not kept). Dolby Vision is left as it is unless includeDV; even then only
+// profiles 7 and 8, whose base layer is HDR10 or HLG, are converted (the Dolby Vision layer is
+// dropped): profile 5, or a profile that can't be read, would show wrong colours and is always left
+// as it is. A copied video (S4's repackaging) keeps its HDR as it is. False when the file is skipped.
+func (p *Plan) applyHDR(info media.Info, includeDV bool) bool {
+	v := info.Video()
+	if v == nil || !v.IsHDR() {
+		return true
+	}
+	skip := func(why, code string) bool {
+		if p.Skip == "" { // a skip already decided (legacy: below its bitrate) keeps its reason
+			p.Skip, p.SkipCode = why, code
+		}
+		return false
+	}
+	tr := v.ColorTransfer
+	if v.DolbyVision {
+		switch {
+		case !includeDV:
+			return skip(dvSkip, SkipDV)
+		case v.DVProfile != 7 && v.DVProfile != 8, tr != "smpte2084" && tr != "arib-std-b67":
+			return skip(dv5Skip, SkipDVProfile5)
+		}
+	} else if tr != "smpte2084" && tr != "arib-std-b67" {
+		tr = "smpte2084" // HDR10+ without a transfer in the stream: HDR10+ is PQ
+	}
+	if p.Video.Copy {
+		return true
+	}
+	if p.Video.Codec != "libx265" { // a target other than HEVC (S6) has no HDR path yet
+		return skip("it is HDR, which this version keeps only when converting to HEVC", SkipSettingCannotRun)
+	}
+	h := &HDR{Transfer: tr, Primaries: v.ColorPrimaries, Matrix: v.ColorSpace}
+	if h.Primaries == "" {
+		h.Primaries = "bt2020"
+	}
+	if h.Matrix == "" {
+		h.Matrix = "bt2020nc"
+	}
+	if tr == "smpte2084" {
+		h.MasterDisplay, h.CLL = v.MasteringDisplay, v.CLL
+	}
+	p.Video.HDR = h
+	switch {
+	case v.DolbyVision && tr == "arib-std-b67":
+		p.HDRNote = DVRemovedHLG
+	case v.DolbyVision:
+		p.HDRNote = DVRemovedNote
+	case v.HDR10Plus:
+		p.HDRNote = HDR10PlusNote
+	}
+	return true
+}
 
 // ScaledWidth is the width ffmpeg's scale=-2:height gives a w x h picture: the same shape, rounded to
 // the nearest even number.

@@ -53,8 +53,9 @@ func probeSet(t *testing.T) map[string]media.Info {
 }
 
 // The legacy regression (D13): an upgraded install's flow converts exactly as before Plans, with the
-// same decisions, reasons and ffmpeg arguments, for every probe. One change on purpose (slice 25a, D3):
-// an HDR or Dolby Vision file the rule would convert is now skipped as hdr_dv.
+// same decisions, reasons and ffmpeg arguments, for every probe. One change on purpose (S3, overturning
+// D3): an HDR file the rule would convert keeps its HDR (10-bit, its metadata written out), and a Dolby
+// Vision one is left as it is (dv).
 func TestLegacyPlanIsExactlyTodaysBehaviour(t *testing.T) {
 	for _, r := range []Rule{Default(), {FromCodec: "h264", MinBitrateKbps: 3000, CRF: 24, Preset: "fast"}, {FromCodec: "mpeg2video", MinBitrateKbps: 0, CRF: 30, Preset: "ultrafast"}} {
 		for _, out := range []string{"replace", "beside"} {
@@ -62,9 +63,10 @@ func TestLegacyPlanIsExactlyTodaysBehaviour(t *testing.T) {
 			for name, info := range probeSet(t) {
 				p := tmpl.Compile(info)
 				ok, why := r.Match(info)
-				if ok && info.IsHDR() {
-					if p.SkipCode != SkipHDR {
-						t.Errorf("%s %+v: an HDR file the rule converts must be skipped as hdr_dv, got %q", name, r, p.Skip)
+				if info.IsHDR() { // its encode keeps the HDR even when the rule skips it (a job queued before still runs)
+					dv := info.HasDolbyVision()
+					if ok && ((dv && p.SkipCode != SkipDV) || (!dv && p.Skip != "")) || !ok && p.Skip != why || !dv && p.Video.HDR == nil {
+						t.Errorf("%s %+v: HDR10 is converted keeping its HDR, Dolby Vision left as it is; got %q %+v", name, r, p.Skip, p.Video.HDR)
 					}
 					continue
 				}
@@ -339,7 +341,7 @@ func TestSliderSubtitleCheckWithTheRealMP4Name(t *testing.T) {
 // of the fingerprint, so jobs recorded before it existed keep theirs.
 func TestEverySkipHasACode(t *testing.T) {
 	codes := map[string]bool{SkipAlreadyEfficient: true, SkipAlreadyHEVC: true, SkipOtherFormat: true, SkipNoVideo: true,
-		SkipUnknownBitrate: true, SkipCannotKeepTrack: true, SkipSettingCannotRun: true, SkipHDR: true, SkipAlreadyInFormat: true}
+		SkipUnknownBitrate: true, SkipCannotKeepTrack: true, SkipSettingCannotRun: true, SkipDV: true, SkipDVProfile5: true, SkipAlreadyInFormat: true}
 	tmpls := []Template{LegacyTemplate(Default(), "replace"), SliderTemplate(9), {Kind: KindCustom}}
 	for q := 1; q <= 5; q++ {
 		tmpls = append(tmpls, SliderTemplate(q))

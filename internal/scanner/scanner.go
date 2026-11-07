@@ -360,8 +360,8 @@ func Guard(root, path string, lst fs.FileInfo) (code string, ignore bool) {
 func Probe(ctx context.Context, store *jobs.Store, x media.Exec, ffprobe, path string, st os.FileInfo) (media.Info, error) {
 	size, mtime := st.Size(), st.ModTime().UnixNano()
 	var info media.Info
-	if b, ok := store.GetProbe(path, size, mtime); ok && json.Unmarshal([]byte(b), &info) == nil {
-		return info, nil
+	if b, ok := store.GetProbe(path, size, mtime); ok && json.Unmarshal([]byte(b), &info) == nil && info.Probe >= media.ProbeVersion {
+		return info, nil // (an older probe misses what this version reads, e.g. S3's HDR side data)
 	}
 	info, err := media.Probe(ctx, x, ffprobe, path)
 	if err != nil {

@@ -469,6 +469,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if plan.MainAudioUsed { // Basic's stereo AAC found no track in the person's languages (S4)
 		log.Printf("worker %s: job %d (%s): %s", w.ID, job.ID, job.Path, rules.NoAudioInMyLanguageMain)
 	}
+	if plan.HDRNote != "" { // what the HDR conversion does not keep (S3)
+		log.Printf("worker %s: job %d (%s): %s", w.ID, job.ID, job.Path, plan.HDRNote)
+	}
 	if plan.Video.Codec == "" {
 		return "", failed("This library's setting can't convert this file, so it was left as it is.", fmt.Errorf("its library's flow cannot convert it: %s", plan.Skip))
 	}

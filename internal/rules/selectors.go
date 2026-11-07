@@ -23,7 +23,9 @@ type Selectors struct {
 	FileType        string   `json:"fileType"`        // keep | mkv | mp4 (another than keep only when kept beside, 25a)
 	AfterConverting string   `json:"afterConverting"` // replace | beside
 	Ignore          []string `json:"ignore"`          // folders, files or patterns in the library not looked at
-	SkipHDR         bool     `json:"skipHdr"`         // HDR and Dolby Vision files are left as they are
+	// IncludeDolbyVision converts Dolby Vision profiles 7 and 8 as HDR10/HLG (S3; replaces skipHdr: HDR10
+	// is always converted and kept as HDR). Profile 5 is left as it is whatever this says.
+	IncludeDolbyVision bool `json:"includeDolbyVision"`
 }
 
 // What this version can save and run (UI-API-CONTRACT.md addendum 13): the UI shows the rest disabled.
@@ -53,8 +55,7 @@ var (
 // DefaultSelectors are slider position q's values as selectors.
 func DefaultSelectors(q int) Selectors {
 	return Selectors{Quality: q, Speed: "normal", Format: "hevc", Resolution: "keep", MaxBitrate: "none",
-		Audio: "keep_all", Subtitles: "keep_all", FileType: "keep", AfterConverting: "replace", Ignore: []string{},
-		SkipHDR: true}
+		Audio: "keep_all", Subtitles: "keep_all", FileType: "keep", AfterConverting: "replace", Ignore: []string{}}
 }
 
 // SelectorError is a choice that cannot be saved: Code is invalid (not a value at all) or not_available
@@ -216,9 +217,6 @@ func (t Template) Warnings() []string {
 	s, ok := t.SelectorsView()
 	if !ok {
 		return out
-	}
-	if !s.SkipHDR {
-		out = append(out, `HDR and Dolby Vision files will be converted without their HDR information, so they can look washed out. Turn "Skip HDR and Dolby Vision files" back on to leave them as they are.`)
 	}
 	if w := RenameWarning(s.AfterConverting, s.FileType); w != "" && t.Kind == KindSelectors { // 25a-2 (Basic's MKV: the update notice, S4)
 		out = append(out, w)

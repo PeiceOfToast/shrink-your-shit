@@ -115,15 +115,12 @@ func TestRealSelectors(t *testing.T) {
 			t.Errorf("%q %q", plan.SkipCode, plan.Skip)
 		}
 	})
-	t.Run("HDR is skipped unless Skip HDR is off", func(t *testing.T) {
+	t.Run("HDR10 is converted keeping its HDR (S3; TestRealHDR10 runs it)", func(t *testing.T) {
 		// x264's own VUI flags: ffmpeg's -color_trc does not reach an mkv stream from libx264
 		p := gen("hdr.mkv", "1280x720", 5000, "-pix_fmt", "yuv420p10le", "-x264-params", "colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc")
 		info := probe(t, p)
-		if plan := rules.SliderTemplate(3).Compile(info); plan.SkipCode != rules.SkipHDR {
-			t.Errorf("slider: %q", plan.Skip)
-		}
-		if plan := sel(func(s *rules.Selectors) { s.SkipHDR = false }).Compile(info); plan.Skip != "" {
-			t.Errorf("skipHdr off: %q", plan.Skip)
+		if plan := rules.SliderTemplate(3).Compile(info); plan.Skip != "" || plan.Video.HDR == nil || plan.Video.HDR.Transfer != "smpte2084" {
+			t.Errorf("slider: %q %+v", plan.Skip, plan.Video.HDR)
 		}
 	})
 }

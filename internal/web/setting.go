@@ -43,14 +43,15 @@ func settingView(f jobs.Flow) map[string]any {
 // selectorFields are the Standard selectors (UI-API-CONTRACT.md addendum 2): any of them in a PUT body
 // makes it a selectors save.
 var selectorFields = map[string]bool{"speed": true, "format": true, "resolution": true, "maxbitrate": true, "audio": true,
-	"subtitles": true, "filetype": true, "afterconverting": true, "ignore": true, "skiphdr": true}
+	"subtitles": true, "filetype": true, "afterconverting": true, "ignore": true, "includedolbyvision": true}
 
 // readSelectors is a selectors body: what it leaves out is the quality's own value. A client's kind,
-// positions, available*, the removed order and the removed minSavingPct and skipSmall (always
-// standardize; accepted and ignored for one release, so the current page keeps working) are ignored.
+// positions, available*, the removed order, the removed minSavingPct and skipSmall (always
+// standardize) and skipHdr (S3: replaced by includeDolbyVision) are ignored: accepted for one release, so
+// the current page keeps working.
 // settingEcho are the fields a setting answer carries that a client may send back unchanged: ignored.
 var settingEcho = map[string]bool{"kind": true, "positions": true, "order": true, "availableformats": true, "availableaudio": true,
-	"availablesubtitles": true, "availablefiletypes": true, "warnings": true, "sharedflowchoice": true, "minsavingpct": true, "skipsmall": true}
+	"availablesubtitles": true, "availablefiletypes": true, "warnings": true, "sharedflowchoice": true, "minsavingpct": true, "skipsmall": true, "skiphdr": true}
 
 // readSelectors reads a selectors body (see below); langs are the person's languages, needed for
 // "Keep only my languages".
@@ -247,8 +248,10 @@ func flowSteps(t rules.Template) []map[string]any {
 			add("check", "Leave out "+strings.Join(s.Ignore, ", "), "")
 		}
 		add("check", "Skip files already in an efficient format (HEVC, AV1, VP9) or not a video format this converts", "")
-		if s.SkipHDR {
-			add("check", "Skip HDR and Dolby Vision files", "")
+		if s.IncludeDolbyVision { // S3: HDR10 is always converted and kept as HDR
+			add("check", "Dolby Vision files become HDR10; profile 5 is left as it is (converting it would show wrong colours)", "")
+		} else {
+			add("check", "Leave Dolby Vision files as they are", "")
 		}
 		size := "keeping its picture size and colour depth"
 		if s.Resolution != "keep" {

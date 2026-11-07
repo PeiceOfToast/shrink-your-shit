@@ -413,6 +413,14 @@ func TestRejections(t *testing.T) {
 			s.outSpec.streams[0] = vid("hevc", 640, 360, "yuv420p")
 		}, "colour depth"},
 		{"video not hevc", func(s *scenario) { s.outSpec.streams[0] = vid("h264", 640, 360, "yuv420p") }, "format"},
+		{"HDR lost (S3)", func(s *scenario) {
+			s.srcSpec.streams[0] = hdrVid("h264", true)
+			s.outSpec.streams[0] = vid("hevc", 640, 360, "yuv420p10le")
+		}, "lost its HDR"},
+		{"HDR mastering display lost (S3)", func(s *scenario) {
+			s.srcSpec.streams[0] = hdrVid("h264", true)
+			s.outSpec.streams[0] = hdrVid("hevc", false)
+		}, "mastering display"},
 		{"audio language changed", func(s *scenario) { s.outSpec.streams[1] = aud("aac", "und", 2) }, "language"},
 		{"audio channels changed", func(s *scenario) { s.outSpec.streams[1] = aud("aac", "eng", 1) }, "channel"},
 		{"subtitle turned into another kind", func(s *scenario) { s.outSpec.streams[2] = sub("hdmv_pgs_subtitle", "eng", false) }, "kind"},
@@ -1141,4 +1149,17 @@ func TestBasicRepackagesHEVC(t *testing.T) {
 	if s.count("ssim") != 0 {
 		t.Error("the picture comparison ran on a copied video")
 	}
+}
+
+// hdrVid is an HDR10 (PQ, BT.2020, 10-bit) video stream, with its mastering display and light levels
+// when md (S3).
+func hdrVid(codec string, md bool) map[string]any {
+	v := vid(codec, 640, 360, "yuv420p10le")
+	v["color_transfer"], v["color_primaries"], v["color_space"] = "smpte2084", "bt2020", "bt2020nc"
+	if md {
+		v["side_data_list"] = []any{map[string]any{"side_data_type": "Mastering display metadata", "red_x": "34000/50000", "red_y": "16000/50000",
+			"green_x": "13250/50000", "green_y": "34500/50000", "blue_x": "7500/50000", "blue_y": "3000/50000",
+			"white_point_x": "15635/50000", "white_point_y": "16450/50000", "min_luminance": "50/10000", "max_luminance": "10000000/10000"}}
+	}
+	return v
 }
