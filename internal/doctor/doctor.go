@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/scanner"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
@@ -149,6 +150,9 @@ func (c *Checker) freeSpace(dir string) (uint64, error) {
 func (c *Checker) Folder(ctx context.Context, path string) (r FolderReport) {
 	r = FolderReport{Blockers: []Issue{}, Notes: []Issue{}}
 	defer func() { r.OK = len(r.Blockers) == 0 }() // r is the named result, so this reaches the caller
+	if real, err := jobs.RealPath(path); err == nil {
+		path = real // a folder chosen through a link is checked as the folder it points to, as it is stored
+	}
 	st, err := os.Stat(path)
 	if err == nil && !st.IsDir() {
 		err = fmt.Errorf("not a folder")
@@ -165,12 +169,15 @@ func (c *Checker) Folder(ctx context.Context, path string) (r FolderReport) {
 	}
 
 	var largest int64
-	hardlinked := 0
+	hardlinked, unreadable := 0, 0
 	filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		if err != nil {
+			if p != path && d != nil && d.IsDir() {
+				unreadable++ // a folder inside that cannot be opened: its files will not be scanned
+			}
 			return nil
 		}
 		if d.IsDir() {
@@ -184,12 +191,12 @@ func (c *Checker) Folder(ctx context.Context, path string) (r FolderReport) {
 		}
 		info, err := d.Info()
 		if err != nil {
-			return nil
+			return nil // gone since the folder was listed
 		}
 		r.VideoCount++
 		r.TotalBytes += info.Size()
 		largest = max(largest, info.Size())
-		if linkCount(info) > 1 {
+		if linkCount(p, info) > 1 {
 			hardlinked++
 		}
 		return nil
@@ -197,11 +204,12 @@ func (c *Checker) Folder(ctx context.Context, path string) (r FolderReport) {
 
 	if r.VideoCount == 0 {
 		r.Blockers = append(r.Blockers, Issue{"no_videos", "We found no videos here. Pick the folder that holds them."})
-	} else if free, err := c.freeSpace(path); err == nil {
-		if need := worker.SpaceNeeded(largest); free < need {
-			r.Blockers = append(r.Blockers, Issue{"low_space", fmt.Sprintf(
-				"Only %s free on this disk. Free up space (about %s is enough to start), then press Check again.", gb(free), gb(need))})
-		}
+	} else if free, err := c.freeSpace(path); err != nil {
+		// Not silent: converting needs to know the space, and stops a file when it cannot.
+		r.Notes = append(r.Notes, Issue{"space_unknown", "We couldn't check how much space is free on this disk. Files here are only converted when there is room, so check that the disk is working."})
+	} else if need := worker.SpaceNeeded(largest); free < need {
+		r.Blockers = append(r.Blockers, Issue{"low_space", fmt.Sprintf(
+			"Only %s free on this disk. Free up space (about %s is enough to start), then press Check again.", gb(free), gb(need))})
 	}
 	tools := c.Tools(ctx)
 	if !tools.Converts() {
@@ -213,6 +221,13 @@ func (c *Checker) Folder(ctx context.Context, path string) (r FolderReport) {
 		r.Notes = append(r.Notes, Issue{"hardlinks", "1 file is shared with another folder (for example by Radarr). This version still converts it, but that frees no space, because the other folder keeps its copy. Leaving it alone comes in a later update."})
 	} else if hardlinked > 1 {
 		r.Notes = append(r.Notes, Issue{"hardlinks", fmt.Sprintf("%d files are shared with another folder (for example by Radarr). This version still converts them, but that frees no space, because the other folder keeps its copy. Leaving them alone comes in a later update.", hardlinked)})
+	}
+	if unreadable == 1 {
+		// A note, not a blocker: a disk's root often holds a folder only the system may open
+		// (lost+found), and the rest of the library is still usable.
+		r.Notes = append(r.Notes, Issue{"unreadable_folders", "1 folder inside couldn't be read; files in it won't be converted."})
+	} else if unreadable > 1 {
+		r.Notes = append(r.Notes, Issue{"unreadable_folders", fmt.Sprintf("%d folders inside couldn't be read; files in them won't be converted.", unreadable)})
 	}
 	if len(tools.Hardware) == 0 {
 		r.Notes = append(r.Notes, Issue{"no_hw_encoder", "Not found. That is fine."})

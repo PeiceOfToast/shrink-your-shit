@@ -10,7 +10,7 @@ import (
 )
 
 // linkCount is how many names the file has (hardlinks).
-func linkCount(fi os.FileInfo) uint64 {
+func linkCount(_ string, fi os.FileInfo) uint64 {
 	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
 		return uint64(st.Nlink)
 	}

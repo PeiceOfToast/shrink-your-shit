@@ -144,9 +144,6 @@ func TestLowSpaceSaysHowMuch(t *testing.T) {
 }
 
 func TestHardlinkedFilesAreANote(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("hardlinks are not counted on Windows")
-	}
 	dir := videosIn(t, 1000)
 	if err := os.Link(filepath.Join(dir, "moviea.mkv"), filepath.Join(dir, "copy.mkv")); err != nil {
 		t.Fatal(err)
@@ -249,9 +246,19 @@ func TestFolderMessagesUsePlainWords(t *testing.T) {
 	links := videosIn(t, 1000)
 	os.Link(filepath.Join(links, "moviea.mkv"), filepath.Join(links, "b.mkv"))
 	dirs["links"] = links
+	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
+		locked := videosIn(t, 1000)
+		p := filepath.Join(locked, "private")
+		os.Mkdir(p, 0o755)
+		os.Chmod(p, 0)
+		t.Cleanup(func() { os.Chmod(p, 0o755) })
+		dirs["locked"] = locked
+	}
 	broken := &Checker{Exec: fakeFFmpeg(false, false, nil, nil), FreeSpace: func(string) (uint64, error) { return 1, nil }}
+	unknown := checker(0)
+	unknown.FreeSpace = func(string) (uint64, error) { return 0, errors.New("statfs failed") }
 	for name, d := range dirs {
-		for _, c := range []*Checker{checker(1 << 40), checker(1), broken} {
+		for _, c := range []*Checker{checker(1 << 40), checker(1), broken, unknown} {
 			r := c.Folder(context.Background(), d)
 			for _, i := range append(r.Blockers, r.Notes...) {
 				low := strings.ToLower(i.Message)
@@ -262,5 +269,54 @@ func TestFolderMessagesUsePlainWords(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// A folder chosen through a link is checked as the folder it points to (WalkDir does not follow a
+// link at the top), so its videos are found.
+func TestLinkedFolderIsChecked(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("making links needs extra rights on Windows")
+	}
+	real := videosIn(t, 1000, 2000)
+	link := filepath.Join(t.TempDir(), "videos")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	r := checker(1<<40).Folder(context.Background(), link)
+	if !r.OK || r.VideoCount != 2 || r.TotalBytes != 3000 {
+		t.Errorf("%+v", r)
+	}
+}
+
+// Not knowing the free space is said, not passed over.
+func TestUnknownFreeSpaceIsANote(t *testing.T) {
+	c := checker(0)
+	c.FreeSpace = func(string) (uint64, error) { return 0, errors.New("statfs failed") }
+	r := c.Folder(context.Background(), videosIn(t, 1000))
+	if !strings.Contains(strings.Join(codes(r.Notes), ","), "space_unknown") || !strings.Contains(r.Notes[0].Message, "couldn't check how much space is free") {
+		t.Errorf("%+v", r)
+	}
+}
+
+// Folders inside that cannot be read are counted and said; the rest still counts.
+func TestUnreadableFoldersInsideAreANote(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a folder this user cannot read (POSIX, not root)")
+	}
+	dir := videosIn(t, 1000)
+	for _, sub := range []string{"private", "lost+found"} {
+		p := filepath.Join(dir, sub)
+		os.Mkdir(p, 0o755)
+		os.WriteFile(filepath.Join(p, "hidden.mkv"), []byte("x"), 0o644)
+		os.Chmod(p, 0)
+		t.Cleanup(func() { os.Chmod(p, 0o755) })
+	}
+	r := checker(1<<40).Folder(context.Background(), dir)
+	if !r.OK || r.VideoCount != 1 {
+		t.Fatalf("%+v", r)
+	}
+	if n := r.Notes[0]; n.Code != "unreadable_folders" || n.Message != "2 folders inside couldn't be read; files in them won't be converted." {
+		t.Errorf("%+v", r.Notes)
 	}
 }
