@@ -74,11 +74,13 @@ func (s Stream) IsHDR() bool {
 	return s.ColorTransfer == "smpte2084" || s.ColorTransfer == "arib-std-b67" || s.DolbyVision || s.HDR10Plus
 }
 
+// textSubCodecs are the subtitle codecs ffmpeg can read as text (and so save as .srt). TTML is text
+// but has no ffmpeg decoder: it has no kind, so it is copied, never converted.
 var textSubCodecs = map[string]bool{
 	"subrip": true, "srt": true, "ass": true, "ssa": true, "mov_text": true, "webvtt": true,
 	"text": true, "subviewer": true, "subviewer1": true, "microdvd": true, "jacosub": true,
 	"sami": true, "realtext": true, "stl": true, "vplayer": true, "mpl2": true, "pjs": true,
-	"eia_608": true, "ttml": true,
+	"eia_608": true,
 }
 
 var bitmapSubCodecs = map[string]bool{

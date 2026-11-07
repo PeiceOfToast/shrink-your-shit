@@ -292,3 +292,19 @@ func TestLanguagesSetting(t *testing.T) {
 		t.Errorf("the flow is read with the person's languages: %q", f.Template.Languages)
 	}
 }
+
+// The flow step for "Save as separate .srt files" says, in design's words, that picture subtitles stay
+// inside, and that an existing file is never replaced.
+func TestSrtFlowStepSaysPicturesStayInside(t *testing.T) {
+	sel := rules.DefaultSelectors(3)
+	sel.Subtitles = "srt"
+	for _, s := range flowSteps(sel.Template()) {
+		if s["kind"] == "subtitles" {
+			if want := "Picture subtitles stay inside the file; only text subtitles are saved as .srt files; an existing file is never replaced"; s["detail"] != want {
+				t.Errorf("detail %q", s["detail"])
+			}
+			return
+		}
+	}
+	t.Error("no subtitles step")
+}

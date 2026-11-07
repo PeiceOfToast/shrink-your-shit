@@ -41,7 +41,14 @@ func (p *probes) Output(ctx context.Context, name string, args ...string) ([]byt
 	path := args[len(args)-1]
 	base := filepath.Base(path)
 	codec, kbps := "h264", 8000 // 1080p24 at 8 Mbps: 0.16 bits per pixel, worth converting at every position
+	subs := ""
 	switch {
+	case strings.HasPrefix(base, "subs"): // a text, a picture and a TTML subtitle
+		subs = `,{"index":3,"codec_type":"subtitle","codec_name":"subrip","tags":{"language":"eng"}},
+ {"index":4,"codec_type":"subtitle","codec_name":"hdmv_pgs_subtitle","tags":{"language":"ger"}},
+ {"index":5,"codec_type":"subtitle","codec_name":"ttml","tags":{"language":"fre"}}`
+	case strings.HasPrefix(base, "textsubs"): // a text subtitle only
+		subs = `,{"index":3,"codec_type":"subtitle","codec_name":"subrip","tags":{"language":"eng"}}`
 	case strings.HasPrefix(base, "hevc"):
 		codec = "hevc"
 	case strings.HasPrefix(base, "bad"):
@@ -53,8 +60,8 @@ func (p *probes) Output(ctx context.Context, name string, args ...string) ([]byt
 	dur := float64(st.Size()) * 8 / float64(kbps*1000)
 	return fmt.Appendf(nil, `{"streams":[
  {"index":0,"codec_type":"video","codec_name":%q,"width":1920,"height":1080,"avg_frame_rate":"24/1","r_frame_rate":"24/1","bit_rate":"%d"},
- {"index":1,"codec_type":"audio","codec_name":"aac"},{"index":2,"codec_type":"audio","codec_name":"ac3"}],
- "format":{"format_name":"matroska,webm","duration":"%f","size":"%d","bit_rate":"%d"}}`, codec, kbps*1000, dur, st.Size(), kbps*1000), nil
+ {"index":1,"codec_type":"audio","codec_name":"aac"},{"index":2,"codec_type":"audio","codec_name":"ac3"}%s],
+ "format":{"format_name":"matroska,webm","duration":"%f","size":"%d","bit_rate":"%d"}}`, codec, kbps*1000, subs, dur, st.Size(), kbps*1000), nil
 }
 
 func (p *probes) Stream(context.Context, func(string), string, ...string) (string, error) {
@@ -390,5 +397,30 @@ func TestSampleOfASharedFile(t *testing.T) {
 	}
 	if x.n() != 0 {
 		t.Errorf("the shared file was read (%d probes)", x.n())
+	}
+}
+
+// "Save as separate .srt files" says when subtitles stay inside (pictures, TTML), in design's words; not
+// when every subtitle is saved as a file, and not in other subtitle choices.
+func TestSampleSaysWhichSubtitlesStayInside(t *testing.T) {
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "subs.mkv"), 1_000_000)
+	write(t, filepath.Join(dir, "textsubs.mkv"), 1_000_000)
+	p := &Previewer{Store: store(t), Exec: &probes{}, FFprobe: "ffprobe"}
+	sample := func(name, subtitles string) string {
+		st, _ := os.Stat(filepath.Join(dir, name))
+		sel := rules.DefaultSelectors(3)
+		sel.Subtitles, sel.SkipSmall = subtitles, false
+		return strings.Join(p.Sample(context.Background(), dir, filepath.Join(dir, name), st, sel.Template()).Lines, "|")
+	}
+	stay := "Picture subtitles stay inside the file; only text subtitles are saved as .srt files."
+	if s := sample("subs.mkv", "srt"); !strings.Contains(s, "Subtitles: 2 subtitles kept, 1 saved as separate .srt files|"+stay) {
+		t.Errorf("srt with pictures: %q", s)
+	}
+	if s := sample("textsubs.mkv", "srt"); strings.Contains(s, stay) || !strings.Contains(s, "Subtitles: 1 saved as separate .srt files") {
+		t.Errorf("srt, text only: %q", s)
+	}
+	if s := sample("subs.mkv", "keep_all"); strings.Contains(s, stay) {
+		t.Errorf("keep_all: %q", s)
 	}
 }

@@ -80,6 +80,9 @@ func (p *Previewer) Sample(ctx context.Context, root, path string, st fs.FileInf
 		}
 		line := "Subtitles: " + strings.Join(parts, ", ")
 		s.Lines = append(s.Lines, line)
+		if t.Selectors != nil && t.Selectors.Subtitles == "srt" && n-dropped-files > 0 {
+			s.Lines = append(s.Lines, rules.SubtitlesStayInside)
+		}
 	}
 	if plan.MinSavingPct > 0 {
 		s.Lines = append(s.Lines, fmt.Sprintf("Kept as it is if the new file is not at least %d%% smaller", plan.MinSavingPct))
