@@ -27,3 +27,10 @@ func FileKey(_ string, fi os.FileInfo) (key string, ok bool) {
 	}
 	return "", false
 }
+
+// FileState is the file's identity (as FileKey; "" if the system does not say), size and modification
+// time, from its Lstat. No creation time: the change time (ChangeTime) tells a file made again apart.
+func FileState(path string, fi os.FileInfo) (State, error) {
+	key, _ := FileKey(path, fi)
+	return State{Key: key, Size: fi.Size(), MTime: fi.ModTime()}, nil
+}

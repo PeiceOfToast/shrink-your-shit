@@ -57,9 +57,9 @@
       // The library's setting answer says which Audio and Subtitles choices this version can save (addendum 13).
       st.editor = ed.selectors(host, change);
       api.getSetting({ id: st.lib.id }).then(function (s) {
-        if (!s.availableAudio && !s.availableSubtitles) return;
+        if (!s.availableAudio && !s.availableSubtitles && !s.availableFileTypes) return;
         // Rebuild with what the person has chosen so far, so nothing they picked meanwhile is lost.
-        var now = st.editor.get(); now.availableAudio = s.availableAudio; now.availableSubtitles = s.availableSubtitles;
+        var now = st.editor.get(); now.availableAudio = s.availableAudio; now.availableSubtitles = s.availableSubtitles; now.availableFileTypes = s.availableFileTypes;
         host.textContent = ""; st.editor = ed.selectors(host, change, now);
       }, function () {});
     } else if (st.level === "advanced") st.editor = ed.startFrom(host, change);
