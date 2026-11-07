@@ -238,7 +238,32 @@ tracks) should fill `Expect` differently and leave `verify` alone.
 
 Shutdown: on Ctrl+C/SIGTERM the running job is released back to `queued`, and `main` waits for
 the worker before closing the database. On startup, jobs left `running` by a crash are
-requeued.
+requeued, after any interrupted swap is ended (below).
+
+## Keeping originals (slice 17)
+
+In replace mode with `keepOriginalsDays` > 0 (default 7) the swap is (`internal/worker/keep.go`):
+1. make `.syp-trash` beside the file (cannot: the job is `kept`, nothing moved); record the
+   original's sampled hash (SHA-256 of its size and three 1 MiB samples: start, middle, end; cheap
+   on a 50 GB file, and what slice 18 checks a restore against);
+2. **journal**: an `originals` row (migration 6) with the paths, sizes, hash and state `moving` is
+   committed before anything is renamed;
+3. the original is renamed to `.syp-trash/<name>.<job id><ext>` (`.2`, `.3`... if taken; never
+   overwritten), only if it is still the file that was read;
+4. the checked new file is renamed to the original's name (if that fails, the original is renamed
+   back);
+5. the row becomes `kept` with `delete_on` = now + the setting; the job is done.
+
+`worker.RecoverSwaps` runs at startup before the requeue: for each row still `moving`, if the original
+(by size and hash) is at its name, nothing moved (rolled back, the job runs again); if it is in the
+trash and the new file at its name, the swap is finished and the job marked done; if it is in the
+trash and nothing at its name, it is put back. Anything else is left alone and marked
+`needs_attention`. Jobs still `running` whose row is `kept` are marked done, so a crash between the
+swap and the job record never converts the new file again. 0 days: one rename, as before.
+`GET /api/activity/done` says per job whether the original is `kept` (with `keptId`, `keptDaysLeft`)
+or `deleted`; `GET /api/activity/kept` lists the kept ones. `freedBytes` counts originals already
+gone, `waitingBytes` those still kept (contract F1). Restore and purge are slice 18 (restore answers
+501 `not_available`). `.syp-trash` is hidden, so the scanner, the Preview and the setup checks skip it.
 
 ## Database schema and migrations
 

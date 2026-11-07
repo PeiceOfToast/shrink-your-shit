@@ -79,6 +79,19 @@ ALTER TABLE jobs ADD COLUMN plan_fingerprint TEXT;`},
 	// goes. Separate from files, whose row means "the scanner has decided on this file".
 	{5, "probe cache", `
 CREATE TABLE probes (path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime INTEGER NOT NULL, info TEXT NOT NULL);`},
+
+	// Originals kept in .syp-trash, and the journal of the swap that put them there (slice 17): a row is
+	// committed before either rename, so a restart finishes or undoes any swap a crash interrupted.
+	{6, "kept originals and swap journal", `
+CREATE TABLE originals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id INTEGER NOT NULL, library_id INTEGER,
+  path TEXT NOT NULL, trash TEXT NOT NULL, staged TEXT NOT NULL,
+  original_bytes INTEGER NOT NULL, original_mtime INTEGER NOT NULL, original_hash TEXT NOT NULL,
+  new_bytes INTEGER NOT NULL,
+  state TEXT NOT NULL, started TEXT NOT NULL, kept_at TEXT, delete_on TEXT);
+CREATE INDEX originals_state ON originals(state);
+CREATE INDEX originals_job ON originals(job_id);`},
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.

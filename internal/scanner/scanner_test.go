@@ -188,3 +188,19 @@ func TestScanFillsTheProbeCache(t *testing.T) {
 		t.Errorf("%+v %v: the cached probe is used (%d calls)", info, err, len(f.Calls)-n)
 	}
 }
+
+// Kept originals (slice 17) are never scanned, so never converted again or counted.
+func TestTrashIsNeverScanned(t *testing.T) {
+	s, _, lib, f := setup(t, h264Big)
+	os.MkdirAll(filepath.Join(lib, ".syp-trash"), 0o755)
+	os.WriteFile(filepath.Join(lib, ".syp-trash", "old.7.mkv"), []byte("kept original"), 0o644)
+	s.ScanOnce(context.Background())
+	for _, c := range f.Calls {
+		if strings.Contains(strings.Join(c, " "), ".syp-trash") {
+			t.Errorf("probed a kept original: %v", c)
+		}
+	}
+	if !SkipDir(".syp-trash") {
+		t.Error("the trash folder must be skipped")
+	}
+}
