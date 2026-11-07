@@ -321,28 +321,45 @@ func TestUnreadableFoldersInsideAreANote(t *testing.T) {
 	}
 }
 
-// Every library note reaches the health report as a warning (only the hardware note is reported
-// once, as its own check).
+// Every library note reaches the health report as its own warning line, also beside a blocker (only
+// the hardware note is reported once, as its own check).
 func TestHealthCarriesLibraryNotes(t *testing.T) {
+	byID := func(checks []Check) map[string]Check {
+		m := map[string]Check{}
+		for _, ch := range checks {
+			m[ch.ID] = ch
+		}
+		return m
+	}
 	c := checker(0)
 	c.FreeSpace = func(string) (uint64, error) { return 0, errors.New("statfs failed") }
-	got := c.Health(context.Background(), t.TempDir(), []Library{{1, "Movies", videosIn(t, 1000)}})
-	for _, ch := range got {
-		if ch.ID == "library:1" && (ch.Status != "warn" || !strings.Contains(ch.Detail, "couldn't check how much space is free") || strings.Contains(ch.Detail, "Not found")) {
-			t.Errorf("%+v", ch)
-		}
+	got := byID(c.Health(context.Background(), t.TempDir(), []Library{{1, "Movies", videosIn(t, 1000)}}))
+	if got["library:1"].Status != "warn" || got["library:1:space_unknown"].Status != "warn" ||
+		!strings.Contains(got["library:1:space_unknown"].Detail, "couldn't check how much space is free") || got["library:1:no_hw_encoder"].ID != "" {
+		t.Errorf("%+v", got)
 	}
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 		return
 	}
+	// the reviewer's combination: low space (a blocker), a folder inside that cannot be read, a hardlink
 	dir := videosIn(t, 1000)
 	p := filepath.Join(dir, "private")
 	os.Mkdir(p, 0o755)
 	os.Chmod(p, 0)
 	t.Cleanup(func() { os.Chmod(p, 0o755) })
-	for _, ch := range checker(1<<40).Health(context.Background(), t.TempDir(), []Library{{1, "Movies", dir}}) {
-		if ch.ID == "library:1" && (ch.Status != "warn" || !strings.Contains(ch.Detail, "1 folder inside couldn't be read")) {
-			t.Errorf("%+v", ch)
-		}
+	os.Link(filepath.Join(dir, "moviea.mkv"), filepath.Join(dir, "linked.mkv"))
+	checks := checker(1).Health(context.Background(), t.TempDir(), []Library{{1, "Movies", dir}})
+	got = byID(checks)
+	if lib := got["library:1"]; lib.Status != "bad" || !strings.Contains(lib.Detail, "free on this disk") {
+		t.Errorf("the blocker: %+v", lib)
+	}
+	if n := got["library:1:unreadable_folders"]; n.Status != "warn" || n.Detail != "1 folder inside couldn't be read; files in it won't be converted." {
+		t.Errorf("the unreadable note: %+v", n)
+	}
+	if n := got["library:1:hardlinks"]; n.Status != "warn" || !strings.Contains(n.Detail, "shared with another folder") {
+		t.Errorf("the hardlinks note: %+v", n)
+	}
+	if !(Health{Checks: checks}).Bad() {
+		t.Error("the blocker makes the report bad")
 	}
 }

@@ -89,16 +89,20 @@ func (c *Checker) Health(ctx context.Context, dataDir string, libs []Library) []
 				said = append(said, b.Message)
 			}
 		}
-		if len(said) > 0 {
-			ch.Status, ch.Detail = "bad", l.Path+": "+strings.Join(said, " ")
-		} else {
-			for _, n := range r.Notes {
-				if n.Code != "no_hw_encoder" { // that one is the hardware check's, above
-					ch.Status, ch.Detail = "warn", strings.TrimSuffix(ch.Detail, ".")+". "+n.Message
-				}
+		// Every note is its own line, also beside a blocker: it still matters once the blocker is fixed.
+		var notes []Check
+		for _, n := range r.Notes {
+			if n.Code != "no_hw_encoder" { // that one is the hardware check's, above
+				notes = append(notes, Check{ID: fmt.Sprintf("library:%d:%s", l.ID, n.Code), Label: "Library: " + l.Name, Status: "warn", Detail: n.Message})
 			}
 		}
-		out = append(out, ch)
+		switch {
+		case len(said) > 0:
+			ch.Status, ch.Detail = "bad", l.Path+": "+strings.Join(said, " ")
+		case len(notes) > 0:
+			ch.Status = "warn"
+		}
+		out = append(append(out, ch), notes...)
 	}
 	return out
 }
