@@ -323,6 +323,9 @@ func needFFmpeg(t *testing.T) {
 	t.Helper()
 	for _, tool := range []string{"ffmpeg", "ffprobe"} {
 		if _, err := exec.LookPath(tool); err != nil {
+			if os.Getenv("SYP_REQUIRE_FFMPEG") == "1" { // CI's Linux job: these tests must run, never skip
+				t.Fatalf("SYP_REQUIRE_FFMPEG=1 but %s is not installed", tool)
+			}
 			t.Skipf("%s not installed", tool)
 		}
 	}

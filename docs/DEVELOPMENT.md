@@ -9,7 +9,7 @@ When this file and the code disagree, trust the code and fix this file.
 | Tool | Version | Why |
 |---|---|---|
 | Go | 1.26 or newer | `go.mod` says `go 1.26.0`; that is the minimum `modernc.org/sqlite` needs. Official `golang` Docker images do not auto-download toolchains, so the `Dockerfile` base (`golang:1.26-alpine`) must be kept in step with `go.mod`. |
-| ffmpeg + ffprobe | any recent (tested 6.1 and 8.0) with libx265 | the real encoder. **Unit tests do not need it** (they use a fake runner); only manual end-to-end runs do. |
+| ffmpeg + ffprobe | any recent (tested 6.1, 7.1 and 8.0) with libx265 | the real encoder. **Unit tests do not need it** (they use a fake runner). The real-ffmpeg tests (`TestReal*`) use it when it is on `PATH` and skip otherwise; `SYP_REQUIRE_FFMPEG=1` makes them fail instead of skipping (CI's Linux job sets it). |
 | Docker | optional (tested 29.1) | to build/run the container image |
 | shellcheck, actionlint | optional | lint `install.sh`, `scripts/build-release.sh` and the workflows in `.github/workflows/` |
 
@@ -121,7 +121,7 @@ only CI has done that. To refresh the pinned ffmpeg, change the URL and SHA-256 
 
 | Job | Checks |
 |---|---|
-| `test` (ubuntu, windows, macos) | `go vet ./...` and `go test -count=1 ./...` on each OS |
+| `test` (ubuntu, windows, macos) | `go vet ./...` and `go test -count=1 ./...` on each OS. **ubuntu** also installs Ubuntu's ffmpeg package (6.1 on `ubuntu-latest` = Ubuntu 24.04 when this was written; the job prints the exact version) and runs the tests with `SYP_REQUIRE_FFMPEG=1`, so the real-ffmpeg tests run; it lists every `TestReal*` result and fails if one skipped. They take about 2.5 minutes (measured on the Debian test guest: worker package 153 s). **windows and macos** have no ffmpeg, so they run the fake-runner tests only. |
 | `build` (5 targets) | `go build ./...` and `go vet ./...` with `CGO_ENABLED=0` for linux amd64/arm64, windows amd64, darwin arm64/amd64 |
 | `docker` | `docker build`, then starts the container and curls `/api/status` |
 | `windows-installer` | builds the Windows installer, then on the runner: silent install, real conversion, upgrade, uninstall |
