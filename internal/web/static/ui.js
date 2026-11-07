@@ -34,6 +34,17 @@
     return e;
   };
 
+  // The server's warnings about a setting (contract, slice 25a): one warn notice directly above the row holding
+  // the Save button, one sentence per line, announced when it appears. The UI never has its own copy of the text.
+  ui.warnings = function (saveBtn) {
+    var n = ui.el("div", "notice warn"), row = saveBtn.parentNode; n.setAttribute("aria-live", "polite"); n.hidden = true;
+    row.parentNode.insertBefore(n, row);
+    return { show: function (list) {
+      n.textContent = ""; (list || []).forEach(function (w) { n.appendChild(ui.el("p", null, w)).style.margin = "0"; });
+      n.hidden = !(list && list.length);
+    } };
+  };
+
   // Preview card body: host is the element (give it aria-live="polite"; the caller adds the heading).
   // start() asks for an estimate; mark() says it is out of date. Always a range, never one figure.
   // extra (optional): {sample: () => path of the sample file or null, onSample: (sample or null) => ...}.
@@ -88,7 +99,7 @@
       (function once() {
         g.SYP.api.preview({ id: libId }, { setting: getSetting(), sampleFile: extra.sample ? extra.sample() : null }).then(function (r) {
           if (my !== gen) return;
-          if (r.status === "ready") { show(r); if (extra.onSample) extra.onSample(r.sample || null); return; }
+          if (r.status === "ready") { show(r); if (extra.onSample) extra.onSample(r.sample || null); if (extra.onWarnings) extra.onWarnings(r.warnings); return; }
           if (r.status === "failed") return giveUp();
           var t = Date.now() - t0;
           waiting(w, r.progress, t >= 120000);

@@ -150,6 +150,9 @@
     var s = mode === "full" ? ["keep_all", "my_languages", "text_only", "srt"] : mode === "some" ? ["keep_all", "text_only"] : ["keep_all"];
     return { availableFormats: ["hevc"], availableAudio: a, availableSubtitles: s };
   }
+  // Workshop slice 25a's one warning (design's wording, UI-API-CONTRACT.md); only the mock holds a copy of it.
+  var HDR_WARNING = 'HDR and Dolby Vision files will be converted without their HDR information, so they can look washed out. Turn "Skip HDR and Dolby Vision files" back on to leave them as they are.';
+  function warningsFor(s) { return s && s.skipHdr === false ? [HDR_WARNING] : []; }
   function gone() { return fail(404, "not_found", "That item is gone. Nothing was changed. Reload the page."); }
   function removeFrom(arr, key, id) { var i = find(arr, key, id); return i < 0 ? null : arr.splice(i, 1)[0]; }
 
@@ -224,9 +227,9 @@
       var i = find(libs, "id", p.id);
       if (i < 0) return fail(404, "not_found", "That library is gone. Nothing was changed.");
       var av = avail();
-      if (libs[i].sel) return ok(Object.assign({ kind: "selectors" }, av, libs[i].sel));
-      if (libs[i].settingKind === "custom") return ok(Object.assign({ kind: "custom" }, av));
-      return ok(Object.assign({ kind: "slider", quality: libs[i].quality || (libs[i].settingLabel === "Smaller" ? 2 : 3), positions: SLIDER }, av));
+      if (libs[i].sel) return ok(Object.assign({ kind: "selectors", warnings: warningsFor(libs[i].sel) }, av, libs[i].sel));
+      if (libs[i].settingKind === "custom") return ok(Object.assign({ kind: "custom", warnings: [] }, av));
+      return ok(Object.assign({ kind: "slider", quality: libs[i].quality || (libs[i].settingLabel === "Smaller" ? 2 : 3), positions: SLIDER, warnings: [] }, av));
     },
     putSetting: function (p, b) {
       var i = find(libs, "id", p.id);
@@ -262,6 +265,7 @@
         delete slowAt[p.id];
       } else if ((pv = !pv)) return ok({ status: "computing", stale: false });
       var r = previewResult(), q = b.setting && b.setting.quality || 3;
+      r.warnings = warningsFor(b.setting); // for the setting as given, saved or not (contract, 25a update)
       if (b.sampleFile) r.sample = { lines: ["Video: converted to the smaller format (" + SLIDER[q - 1].name.toLowerCase() + " setting)", "Audio: 2 tracks kept", "Subtitles: 3 kept (all text)", "File type: MKV, unchanged", "Replaces the original; original kept for 7 days"],
         expectedBytesLow: ((b.sampleFile.length % 5) + 2.2 - 0.2 * q) * GB, expectedBytesHigh: ((b.sampleFile.length % 5) + 3.1 - 0.2 * q) * GB };
       return ok(r);
