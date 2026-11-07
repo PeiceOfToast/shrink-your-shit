@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -43,6 +44,9 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "doctor" {
 		os.Exit(doctorCommand(os.Stdout, os.Stderr))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "restore" {
+		os.Exit(restoreCommand(os.Args[2:], os.Stdout, os.Stderr))
 	}
 	logs := &doctor.LogTail{} // the last log lines, for the health report
 	log.SetOutput(io.MultiWriter(os.Stderr, logs))
@@ -107,6 +111,15 @@ func main() {
 	if err := os.MkdirAll(*data, 0o755); err != nil {
 		log.Fatal(err)
 	}
+	// One program per data folder: held for the service's whole life (a restore --force takes it too).
+	releaseLock, err := lockDataDir(*data)
+	if errors.Is(err, errDataLocked) {
+		log.Fatalf("Another shrink-your-shit is already using the data folder %s (a running service, or a restore --force). Stop it first.", *data)
+	}
+	if err != nil {
+		log.Fatalf("data folder %s: %v", *data, err)
+	}
+	defer releaseLock()
 	store, err := jobs.Open(filepath.Join(*data, "syp.db"))
 	if err != nil {
 		log.Fatal(err)
@@ -128,6 +141,13 @@ func main() {
 	if n, _ := store.RequeueRunning(); n > 0 {
 		log.Printf("requeued %d job(s) interrupted by the last shutdown", n)
 	}
+	// Kept originals whose days are up are deleted now and then every hour (slice 18).
+	purge := func() {
+		for _, said := range worker.Purge(store, keepDays(), time.Now()) {
+			log.Printf("purge: %s", said)
+		}
+	}
+	purge()
 
 	rule := rules.Rule{FromCodec: *from, MinBitrateKbps: *minKbps, CRF: *crf, Preset: *preset}
 	n, skipped, err := store.EnsureLibraries(libs, rules.LegacyTemplate(rule, *mode))
@@ -159,6 +179,19 @@ func main() {
 	w := &worker.Worker{ID: "builtin", Queue: store, Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath,
 		Template: store.TemplateFor, Poll: 3 * time.Second,
 		DecodeCheck: *decode, MinSSIM: *minSSIM, KeepDays: keepDays, Journal: store}
+	// Kept originals are purged every hour whether or not converting can run (review 172f049).
+	go func() {
+		t := time.NewTicker(time.Hour)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				purge()
+			}
+		}
+	}()
 	workerDone := make(chan struct{})
 	if converts {
 		go func() { w.Run(ctx); close(workerDone) }()

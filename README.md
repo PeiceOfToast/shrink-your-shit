@@ -161,6 +161,9 @@ with a Retry button.
   originals use disk space until they are deleted, so the space a conversion saves is only freed
   then. The move into `.syp-trash` is a rename on the same disk (no copy) and is recorded first, so
   a crash or power cut at any moment leaves either the original or the new file in place.
+  To get an original back: Activity > Kept originals, "Get original back", or in a terminal
+  `shrink-your-shit restore <path of the converted file>` (`--force` if you changed the converted
+  file since and still want the original; it works only while the service is stopped, and says so). The file is then left alone by later scans.
 - `beside`: keep the original and write `name.hevc.mkv` next to it.
 
 The first video stream becomes HEVC; audio, subtitles, attachments (fonts) and extra

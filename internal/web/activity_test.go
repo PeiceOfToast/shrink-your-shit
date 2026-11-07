@@ -13,6 +13,7 @@ import (
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
 
 // done makes a finished job: original size before, new size after, output at out.
@@ -79,8 +80,12 @@ func TestDoneAndKeptLists(t *testing.T) {
 		t.Errorf("%s", body)
 	}
 
+	// the recorded trash file does not exist here: refused, nothing moved
 	code, body := post(t, srv, "POST", fmt.Sprintf("/api/kept/%d/restore", oid), `{}`)
-	if code != 501 || !strings.Contains(body, "not_available") {
+	if code != 409 || !strings.Contains(body, "original_missing") || !strings.Contains(body, "Nothing was changed") {
+		t.Errorf("%d %s", code, body)
+	}
+	if code, body := post(t, srv, "POST", "/api/kept/999/restore", `{}`); code != 404 {
 		t.Errorf("%d %s", code, body)
 	}
 }
@@ -283,5 +288,48 @@ func TestSkippedAfterRollbackAndRetry(t *testing.T) {
 	skippedHEVC(st, p)
 	if _, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/activity/skipped"}); !strings.Contains(body, `"total":0`) {
 		t.Errorf("the retry's output: %s", body)
+	}
+}
+
+// Get original back through the API, for a library whose record was deleted since (its kept originals
+// stay restorable): the original is back, the file shows as restored in Done, and it is not kept any more.
+func TestRestoreThroughTheAPI(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	dir := t.TempDir()
+	l, _ := st.AddLibrary("Movies", dir, rules.SliderTemplate(3), true)
+	path := filepath.Join(dir, "a.mkv")
+	trash := filepath.Join(dir, ".syp-trash", "a.1.mkv")
+	os.MkdirAll(filepath.Dir(trash), 0o755)
+	os.WriteFile(trash, []byte("original-bytes"), 0o644)
+	os.WriteFile(path, []byte("new"), 0o644)
+	jid := done(t, st, l.ID, path, path, 14, 3)
+	h, _ := worker.SampleHash(trash)
+	nh, _ := worker.SampleHash(path)
+	ost, _ := os.Stat(trash)
+	nst, _ := os.Stat(path)
+	oid, _ := st.BeginSwap(jobs.Original{JobID: jid, LibraryID: l.ID, Path: path, Trash: trash, Staged: "s", Bytes: 14, ModTime: ost.ModTime().UnixNano(), Hash: h, NewBytes: 3, NewMTime: nst.ModTime().UnixNano(), NewHash: nh})
+	st.FinishSwap(oid, time.Now().Add(7*24*time.Hour))
+	if _, err := st.DeleteLibrary(l.ID); err != nil {
+		t.Fatal(err)
+	}
+	code, body := post(t, srv, "POST", fmt.Sprintf("/api/kept/%d/restore", oid), `{}`)
+	if code != 200 || !strings.Contains(body, `"identityConfirmed":true`) || !strings.Contains(body, "identity is confirmed") {
+		t.Fatalf("%d %s", code, body)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "original-bytes" {
+		t.Errorf("at the name: %q", b)
+	}
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/activity/done"})
+	if !strings.Contains(body, `"originalState":"restored"`) {
+		t.Errorf("%s", body)
+	}
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/activity/kept"})
+	if !strings.Contains(body, `"count":0`) {
+		t.Errorf("%s", body)
+	}
+	// listed under Skipped as restored (the page offers Convert again there), although a done job wrote it
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/activity/skipped?reason=restored"})
+	if !strings.Contains(body, `"total":1`) || !strings.Contains(body, "you put its original back") && !strings.Contains(body, "You put its original back") {
+		t.Errorf("skipped: %s", body)
 	}
 }

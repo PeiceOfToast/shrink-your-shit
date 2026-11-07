@@ -205,7 +205,7 @@ type Completer interface {
 //
 // Anything else is left untouched and reported: the row is marked needs_attention.
 // keepDays is how long a finished original is kept.
-func RecoverSwaps(j Journal, done Completer, keepDays int, now time.Time) []string {
+func RecoverSwaps(j Store, done Completer, keepDays int, now time.Time) []string {
 	rows, err := j.Originals(jobs.SwapMoving)
 	if err != nil {
 		return []string{"cannot read the swap journal: " + err.Error()}
@@ -267,6 +267,7 @@ func RecoverSwaps(j Journal, done Completer, keepDays int, now time.Time) []stri
 			say("%s: neither the original (expected at it or at %s) could be found as recorded; nothing was moved. Please check this file", o.Path, o.Trash)
 		}
 	}
+	recoverRestores(j, say)
 	// Swaps that were finished just before the stop, but whose job was not yet marked done.
 	if n, err := j.CompleteKeptJobs(); err != nil {
 		say("cannot finish the jobs of completed swaps: %v", err)

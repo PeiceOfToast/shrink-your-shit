@@ -262,8 +262,38 @@ trash and nothing at its name, it is put back. Anything else is left alone and m
 swap and the job record never converts the new file again. 0 days: one rename, as before.
 `GET /api/activity/done` says per job whether the original is `kept` (with `keptId`, `keptDaysLeft`)
 or `deleted`; `GET /api/activity/kept` lists the kept ones. `freedBytes` counts originals already
-gone, `waitingBytes` those still kept (contract F1). Restore and purge are slice 18 (restore answers
-501 `not_available`). `.syp-trash` is hidden, so the scanner, the Preview and the setup checks skip it.
+gone, `waitingBytes` those still kept (contract F1). `.syp-trash` is hidden, so the scanner, the Preview
+and the setup checks skip it.
+
+**Getting an original back (slice 18, `internal/worker/restore.go`):** `POST /api/kept/{keptId}/restore`
+(the page's "Get original back") or `shrink-your-shit restore [--force] <kept id | path>`, which asks the
+running service (`--force` only on the command line, on the database directly, holding the data folder's lock
+`<data>/syp.lock` for the whole restore; the service holds that lock for its whole life (flock on
+Linux and macOS, LockFileEx on Windows), so a forced restore never runs beside it and a second service
+on the same data folder refuses to start; the API never forces). The forced restore uses the installed
+service's data folder, found the same way as the token command (`installedDataDir`: SYP_DATA, the Linux
+settings file, the macOS LaunchAgent, the Windows launcher), or `--data <folder>` for a service started
+with its own `-data`; with neither, or with no database there, it refuses instead of guessing (a
+different folder's lock would not stop the service). Refused, with nothing moved, if the kept original is missing or not the recorded file
+(size + sampled hash), or if the converted file changed since it was made (size, modification time and
+sampled hash recorded at the swap, migration 7; `--force` on the command line only). Otherwise, on the
+same journal row: state `restoring` with a free name for the converted file allocated and recorded
+(migration 8; never a fixed name), the converted file checked again and renamed there, the original
+renamed back, the converted file deleted only if it is still the recorded one (a forced restore of an
+edited file keeps it there). Every rename refuses to replace a file (`renameNoReplace`: renameat2
+RENAME_NOREPLACE on Linux, MoveFileEx without replace on Windows, else link then unlink): a file that
+appears at the name meanwhile stops the restore with nothing deleted. Then the file record's decision set to `restored` (the
+scanner and the Preview skip it until "Convert again" clears it), state `restored`, and the empty
+`.syp-trash` removed. `RecoverSwaps` finishes a `restoring` row at startup: the original back finishes
+it, the converted file still in place means nothing moved (kept), an empty name puts the original
+back. The answer says "identity confirmed" when size, time and samples match: a sampled hash cannot
+prove every byte.
+
+**Purge:** at startup and every hour, kept originals whose `kept_at` + `keepOriginalsDays` (the setting
+now, so lowering it applies at the next purge; the lists show the same date) has passed are deleted,
+only if the file at the recorded trash path is still the kept original: size, modification time and
+sampled hash (otherwise it is left alone and the row marked `needs_attention`); the row becomes `purged`, its saving counts as freed, and an empty
+`.syp-trash` is removed. Nothing else in `.syp-trash` is ever deleted. Library records do not matter.
 
 ## Activity (slice 21b)
 

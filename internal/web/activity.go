@@ -13,6 +13,7 @@ import (
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
 
 // The Done and Kept originals lists (UI-API-CONTRACT.md "Activity", slice 17). Restore and purge are
@@ -28,14 +29,25 @@ func activityRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, no
 		}
 		return
 	}
-	// daysLeft is how many days until deleteOn, rounded up (0 once it is due).
-	daysLeft := func(deleteOn string) *int {
-		t, err := time.Parse(time.RFC3339, deleteOn)
-		if err != nil {
+	// deleteOn is when an original kept at keptAt is deleted under the setting now (the purge uses the
+	// setting now too, so lowering it shows at once); daysLeft rounds the time left up to whole days.
+	deleteOn := func(keptAt string, days int) (time.Time, bool) {
+		t, err := time.Parse(time.RFC3339, keptAt)
+		return t.Add(time.Duration(days) * 24 * time.Hour), err == nil
+	}
+	daysLeft := func(keptAt string, days int) *int {
+		t, ok := deleteOn(keptAt, days)
+		if !ok {
 			return nil
 		}
 		d := max(0, int(math.Ceil(t.Sub(now()).Hours()/24)))
 		return &d
+	}
+	keepDays := func() int {
+		if s, err := ss.load(); err == nil {
+			return s.KeepOriginalsDays
+		}
+		return 7
 	}
 
 	api.HandleFunc("GET /api/activity/done", func(w http.ResponseWriter, r *http.Request) {
@@ -46,12 +58,16 @@ func activityRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, no
 			return
 		}
 		out := []map[string]any{}
+		days := keepDays()
 		for _, d := range items {
 			// beside: the original was never touched, so it is still there ("kept", with no trash entry)
 			state, keptID, left := "deleted", any(nil), (*int)(nil)
-			if d.KeptID != 0 {
-				state, keptID, left = "kept", strconv.FormatInt(d.KeptID, 10), daysLeft(d.DeleteOn)
-			} else if d.Beside {
+			switch {
+			case d.State == jobs.OriginalKept:
+				state, keptID, left = "kept", strconv.FormatInt(d.KeptID, 10), daysLeft(d.KeptAt, days)
+			case d.State == jobs.OriginalRestored:
+				state = "restored" // the original is back; the converted file is gone
+			case d.Beside:
 				state = "kept"
 			}
 			out = append(out, map[string]any{"jobId": strconv.FormatInt(d.JobID, 10), "library": d.Library, "path": d.Path,
@@ -75,14 +91,47 @@ func activityRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, no
 		out := []map[string]any{}
 		for _, k := range items {
 			bytes += k.Bytes
+			on := ""
+			if t, ok := deleteOn(k.KeptAt, s.KeepOriginalsDays); ok {
+				on = t.UTC().Format(time.RFC3339)
+			}
 			out = append(out, map[string]any{"keptId": strconv.FormatInt(k.ID, 10), "library": k.Library, "path": k.Path,
-				"originalBytes": k.Bytes, "nowBytes": k.NewBytes, "deleteOn": k.DeleteOn})
+				"originalBytes": k.Bytes, "nowBytes": k.NewBytes, "deleteOn": on})
 		}
 		writeJSON(w, map[string]any{"keptBytes": bytes, "count": len(items), "days": s.KeepOriginalsDays, "items": out})
 	})
 
+	// Get original back (the one restore, after the page's confirm). Never forced: putting an original
+	// back over a converted file that was changed is the command line's restore --force only.
 	api.HandleFunc("POST /api/kept/{keptId}/restore", func(w http.ResponseWriter, r *http.Request) {
-		apiError(w, http.StatusNotImplemented, "not_available", "Restoring an original comes in the next update. It is kept until then.")
+		var in struct{}
+		if !readJSON(w, r, &in) {
+			return
+		}
+		id, err := strconv.ParseInt(r.PathValue("keptId"), 10, 64)
+		if err != nil {
+			apiError(w, http.StatusNotFound, "not_found", "There is no such kept original. Nothing was changed.")
+			return
+		}
+		o, err := worker.Restore(store, id, false)
+		var re *worker.RestoreError
+		switch {
+		case errors.As(err, &re) && re.Code == "not_found":
+			apiError(w, http.StatusNotFound, re.Code, re.Message)
+			return
+		case errors.As(err, &re):
+			apiError(w, http.StatusConflict, re.Code, re.Message)
+			return
+		case err != nil:
+			serverError(w, err)
+			return
+		}
+		confirmed := worker.IdentityConfirmed(o)
+		msg := "The original is back, and its identity is confirmed (same size, time and content samples as when it was kept). It will not be converted again."
+		if !confirmed {
+			msg = "The original is back, but its identity could not be confirmed (its size, time or content samples differ from when it was kept). It will not be converted again."
+		}
+		writeJSON(w, map[string]any{"ok": true, "path": o.Path, "identityConfirmed": confirmed, "message": msg})
 	})
 
 	// Home's figures (slice 21b): the only source of savings numbers (contract F1).

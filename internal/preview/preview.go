@@ -208,6 +208,10 @@ func (p *Previewer) compute(files []file, t rules.Template, done *atomic.Int64) 
 			// Each probe gets its own time limit; a computation is not tied to the request that started it.
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
+			if rec, _ := p.Store.GetFile(f.path); rec != nil && rec.Decision == jobs.DecisionRestored {
+				results[i].skipped = jobs.DecisionRestored // the scanner skips it too
+				return
+			}
 			info, err := scanner.Probe(ctx, p.Store, p.Exec, p.FFprobe, f.path, f.st)
 			if err != nil {
 				results[i].skipped = rules.SkipUnreadable
