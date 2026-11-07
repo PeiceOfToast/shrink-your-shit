@@ -121,7 +121,12 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 				return nil
 			} else if code != "" {
 				s.recordSkip(path, info, code)
-				s.observe(path, info, now()) // its first look counts from here if a guard later lets it go
+				// its first look counts from here if a guard later lets it go; never for a link, so the
+				// target outside the library is never opened (review aa9cd46). A link that becomes a
+				// real file gets a new identity, so a fresh first look anyway.
+				if code != rules.SkipSymlink {
+					s.observe(path, info, now())
+				}
 				return nil
 			}
 			if now().Sub(info.ModTime()) < s.MinAge {
@@ -164,8 +169,11 @@ type fileState struct {
 	hasCtime     bool
 }
 
+// fileKey is media.FileKey; tests watch which files it opens.
+var fileKey = media.FileKey
+
 func stateOf(path string, st os.FileInfo) fileState {
-	key, _ := media.FileKey(path, st)
+	key, _ := fileKey(path, st)
 	c, hasC := media.ChangeTime(st)
 	return fileState{key: key, size: st.Size(), mtime: st.ModTime(), ctime: c, hasCtime: hasC}
 }

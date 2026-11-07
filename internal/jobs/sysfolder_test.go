@@ -60,7 +60,7 @@ func TestSystemFolders(t *testing.T) {
 		{"windows", `C:\Users\ann`, `\\?\D:\Movies`, true}, // any device path, even to a fine folder
 		{"windows", `C:\Users\ann`, `D:\Movies`, false},
 	} {
-		if got := systemFolder(c.p, c.goos, c.home, "", ""); got != c.want {
+		if got := systemFolder(c.p, c.goos, c.home, "", "", "C:"); got != c.want {
 			t.Errorf("%s %q: %v, want %v", c.goos, c.p, got, c.want)
 		}
 	}
@@ -89,7 +89,7 @@ func TestStoreRefusesSystemFolders(t *testing.T) {
 
 // The real system folders of the system running the tests are refused through the exported check.
 func TestSystemFolderOnThisSystem(t *testing.T) {
-	for _, p := range []string{"/", SystemDriveRootForTest(), SystemDirForTest()} {
+	for _, p := range []string{SystemDriveRootForTest(), SystemDirForTest()} { // "/" follows the current drive on Windows
 		if !SystemFolder(p) {
 			t.Errorf("%s is not refused", p)
 		}
@@ -101,8 +101,27 @@ func TestSystemFolderOnThisSystem(t *testing.T) {
 
 func TestDevicePath(t *testing.T) {
 	for p, want := range map[string]bool{`\\?\C:\`: true, `\\.\C:\`: true, `//?/D:/x`: true, `\\nas\share`: false, `D:\`: false, `/home/x`: false} {
-		if DevicePath(p) != want {
+		if devicePath(p, "windows") != want {
 			t.Errorf("%q: want %v", p, want)
+		}
+	}
+	// elsewhere these are ordinary paths (review aa9cd46)
+	for _, p := range []string{"//?/media", "//./x"} {
+		if devicePath(p, "linux") || systemFolder(p, "linux", "/home/ann", "", "", "") {
+			t.Errorf("%q is an ordinary path on Linux", p)
+		}
+	}
+}
+
+// "/" on Windows is the root of the current drive, as filepath.Abs reads it: refused on the system
+// drive, allowed on a data drive (a CI runner works on D:; lead 14:20Z).
+func TestRootedPathFollowsTheCurrentDrive(t *testing.T) {
+	for _, c := range []struct {
+		p, cur string
+		want   bool
+	}{{"/", "C:", true}, {"/", "D:", false}, {`\`, "D:", false}, {"/Windows", "C:", true}, {"/Windows", "D:", false}, {`C:\`, "D:", true}} {
+		if got := systemFolder(c.p, "windows", `C:\Users\ann`, "C:", `C:\Windows`, c.cur); got != c.want {
+			t.Errorf("%q on current drive %s: %v, want %v", c.p, c.cur, got, c.want)
 		}
 	}
 }

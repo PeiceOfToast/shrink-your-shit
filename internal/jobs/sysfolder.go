@@ -18,19 +18,15 @@ var ErrSystemFolder = errors.New("This is a system folder, a whole disk or a who
 // SystemFolder reports whether p (an absolute path, as stored) is refused as a library: the root of the
 // disk, a home folder or the folder of all home folders, or a system folder or anything inside one.
 func SystemFolder(p string) bool {
-	// A relative path is made absolute; on Windows a path rooted without a drive ("/", "\x") is left as
-	// it is: systemFolder reads it on the system drive (filepath.Abs would use the current one).
-	if !(runtime.GOOS == "windows" && filepath.VolumeName(p) == "" && (strings.HasPrefix(p, "/") || strings.HasPrefix(p, `\`))) {
-		if abs, err := filepath.Abs(p); err == nil {
-			p = abs
-		}
-	}
 	home, _ := os.UserHomeDir()
-	return systemFolder(p, runtime.GOOS, home, os.Getenv("SystemDrive"), os.Getenv("SystemRoot"))
+	cwd, _ := os.Getwd()
+	return systemFolder(p, runtime.GOOS, home, os.Getenv("SystemDrive"), os.Getenv("SystemRoot"), filepath.VolumeName(cwd))
 }
 
 // systemFolder is SystemFolder for any system, so each one's list is tested everywhere.
-func systemFolder(p, goos, home, sysDrive, sysRoot string) bool {
+// curDrive is the current drive on Windows ("D:"): a path rooted without a drive ("/", "\x") is on it,
+// as filepath.Abs reads it (lead, 14:20Z: "/" follows the drive it resolves to).
+func systemFolder(p, goos, home, sysDrive, sysRoot, curDrive string) bool {
 	norm := func(s string) string {
 		if goos == "windows" {
 			s = strings.ReplaceAll(s, `\`, "/")
@@ -49,10 +45,14 @@ func systemFolder(p, goos, home, sysDrive, sysRoot string) bool {
 			sysDrive = "C:"
 		}
 		s := strings.ReplaceAll(p, `\`, "/")
-		if strings.HasPrefix(s, "/") && !strings.HasPrefix(s, "//") { // rooted, no drive: on the system drive
-			p, s = sysDrive+p, sysDrive+s
+		if strings.HasPrefix(s, "/") && !strings.HasPrefix(s, "//") { // rooted, no drive: on the current drive
+			d := curDrive
+			if d == "" {
+				d = sysDrive
+			}
+			p, s = d+p, d+s
 		}
-		if DevicePath(p) { // other names for any path, the system's too: never a library (review 75e86eb)
+		if devicePath(p, goos) { // other names for any path, the system's too: never a library (review 75e86eb)
 			return true
 		}
 		if strings.HasPrefix(s, "//") { // a UNC path: a bare \\host is refused; a share (\\nas\movies) is fine
@@ -114,7 +114,14 @@ func SystemDirForTest() string {
 // DevicePath reports whether p is in a Windows device namespace (\\?\..., \\.\...): other names for
 // ordinary paths, system folders included. A library folder is chosen by its ordinary full path, so
 // these are refused (invalid_path), not translated (lead, 14:06Z).
-func DevicePath(p string) bool {
+func DevicePath(p string) bool { return devicePath(p, runtime.GOOS) }
+
+// devicePath is DevicePath for any system: only Windows has these namespaces; "//?/media" is an
+// ordinary path elsewhere (review aa9cd46).
+func devicePath(p, goos string) bool {
+	if goos != "windows" {
+		return false
+	}
 	s := strings.ReplaceAll(strings.TrimSpace(p), `\`, "/")
 	return strings.HasPrefix(s, "//?/") || strings.HasPrefix(s, "//./")
 }

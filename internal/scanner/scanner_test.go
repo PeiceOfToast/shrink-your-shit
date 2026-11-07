@@ -421,3 +421,27 @@ func TestGuardResolvesTheLibraryRoot(t *testing.T) {
 		t.Errorf("a link inside a library reached through a linked folder: code %q ignore %v, want not listed", code, ignore)
 	}
 }
+
+// A link out of the library is never looked into: no identity is read through it, so on Windows (where
+// reading one opens the file) the target outside is never opened (review aa9cd46).
+func TestOutsideLinkIsNeverOpened(t *testing.T) {
+	s, _, lib, _ := setup(t, h264Big)
+	outside := filepath.Join(t.TempDir(), "elsewhere.mkv")
+	os.WriteFile(outside, []byte("x"), 0o644)
+	link := filepath.Join(lib, "out.mkv")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skip(err)
+	}
+	var keyed []string
+	defer func(f func(string, os.FileInfo) (string, bool)) { fileKey = f }(fileKey)
+	fileKey = func(p string, fi os.FileInfo) (string, bool) { keyed = append(keyed, p); return "k:" + p, true }
+	settle(s)
+	for _, p := range keyed {
+		if p == link || p == outside {
+			t.Errorf("an identity was read through the link: %s", p)
+		}
+	}
+	if len(keyed) == 0 {
+		t.Error("the watch saw nothing (a.mkv should have been keyed)")
+	}
+}
