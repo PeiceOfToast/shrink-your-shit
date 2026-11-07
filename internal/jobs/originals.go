@@ -22,6 +22,8 @@ type Original struct {
 	ModTime   int64  // the original's modification time (UnixNano)
 	Hash      string // the original's sampled hash (worker.SampleHash): slice 18 checks a restore with it
 	NewBytes  int64
+	NewMTime  int64  // the checked new file's modification time (it keeps it through the rename)
+	NewHash   string // its sampled hash: recovery requires it at the name before finishing a swap
 	State     string
 	Started   string
 	KeptAt    string // when the swap was done
@@ -38,8 +40,8 @@ const (
 
 // BeginSwap writes the journal row for a swap about to start (state moving) and returns its id.
 func (s *Store) BeginSwap(o Original) (int64, error) {
-	r, err := s.db.Exec(`INSERT INTO originals(job_id,library_id,path,trash,staged,original_bytes,original_mtime,original_hash,new_bytes,state,started)
-VALUES(?,?,?,?,?,?,?,?,?,?,?)`, o.JobID, nullID(o.LibraryID), o.Path, o.Trash, o.Staged, o.Bytes, o.ModTime, o.Hash, o.NewBytes, SwapMoving, s.stamp())
+	r, err := s.db.Exec(`INSERT INTO originals(job_id,library_id,path,trash,staged,original_bytes,original_mtime,original_hash,new_bytes,new_mtime,new_hash,state,started)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, o.JobID, nullID(o.LibraryID), o.Path, o.Trash, o.Staged, o.Bytes, o.ModTime, o.Hash, o.NewBytes, o.NewMTime, o.NewHash, SwapMoving, s.stamp())
 	if err != nil {
 		return 0, err
 	}
@@ -67,11 +69,11 @@ func (s *Store) setOriginal(id int64, set string, args ...any) error {
 	return nil
 }
 
-const originalCols = `id,job_id,COALESCE(library_id,0),path,trash,staged,original_bytes,original_mtime,original_hash,new_bytes,state,started,COALESCE(kept_at,''),COALESCE(delete_on,'')`
+const originalCols = `id,job_id,COALESCE(library_id,0),path,trash,staged,original_bytes,original_mtime,original_hash,new_bytes,new_mtime,new_hash,state,started,COALESCE(kept_at,''),COALESCE(delete_on,'')`
 
 func scanOriginal(r interface{ Scan(...any) error }) (Original, error) {
 	var o Original
-	err := r.Scan(&o.ID, &o.JobID, &o.LibraryID, &o.Path, &o.Trash, &o.Staged, &o.Bytes, &o.ModTime, &o.Hash, &o.NewBytes, &o.State, &o.Started, &o.KeptAt, &o.DeleteOn)
+	err := r.Scan(&o.ID, &o.JobID, &o.LibraryID, &o.Path, &o.Trash, &o.Staged, &o.Bytes, &o.ModTime, &o.Hash, &o.NewBytes, &o.NewMTime, &o.NewHash, &o.State, &o.Started, &o.KeptAt, &o.DeleteOn)
 	return o, err
 }
 
@@ -166,7 +168,7 @@ type KeptItem struct {
 
 // KeptItems lists the kept originals, the soonest to be deleted first.
 func (s *Store) KeptItems() ([]KeptItem, error) {
-	rows, err := s.db.Query(`SELECT o.id,o.job_id,COALESCE(o.library_id,0),o.path,o.trash,o.staged,o.original_bytes,o.original_mtime,o.original_hash,o.new_bytes,o.state,o.started,COALESCE(o.kept_at,''),COALESCE(o.delete_on,''),
+	rows, err := s.db.Query(`SELECT o.id,o.job_id,COALESCE(o.library_id,0),o.path,o.trash,o.staged,o.original_bytes,o.original_mtime,o.original_hash,o.new_bytes,o.new_mtime,o.new_hash,o.state,o.started,COALESCE(o.kept_at,''),COALESCE(o.delete_on,''),
   COALESCE(l.name, j.library, '')
 FROM originals o LEFT JOIN jobs j ON j.id=o.job_id LEFT JOIN libraries l ON l.id=o.library_id
 WHERE o.state=? ORDER BY o.delete_on, o.id`, OriginalKept)
@@ -178,7 +180,7 @@ WHERE o.state=? ORDER BY o.delete_on, o.id`, OriginalKept)
 	for rows.Next() {
 		var k KeptItem
 		o := &k.Original
-		if err := rows.Scan(&o.ID, &o.JobID, &o.LibraryID, &o.Path, &o.Trash, &o.Staged, &o.Bytes, &o.ModTime, &o.Hash, &o.NewBytes, &o.State, &o.Started, &o.KeptAt, &o.DeleteOn, &k.Library); err != nil {
+		if err := rows.Scan(&o.ID, &o.JobID, &o.LibraryID, &o.Path, &o.Trash, &o.Staged, &o.Bytes, &o.ModTime, &o.Hash, &o.NewBytes, &o.NewMTime, &o.NewHash, &o.State, &o.Started, &o.KeptAt, &o.DeleteOn, &k.Library); err != nil {
 			return nil, err
 		}
 		out = append(out, k)

@@ -87,7 +87,7 @@ func TestTrashNamesNeverCollide(t *testing.T) {
 	if read(s.trash()) != "someone else's" || read(second) != "original-bytes" || read(s.src) != "new" {
 		t.Errorf("trash %q, second %q, name %q", read(s.trash()), read(second), read(s.src))
 	}
-	if p := trashPath(filepath.Join(t.TempDir(), TrashDir), "movie.mkv", s.id); filepath.Base(p) != filepath.Base(s.trash()) {
+	if p, err := trashPath(filepath.Join(t.TempDir(), TrashDir), "movie.mkv", s.id); err != nil || filepath.Base(p) != filepath.Base(s.trash()) {
 		t.Errorf("another folder's trash starts fresh: %s", p)
 	}
 }
@@ -212,5 +212,61 @@ func TestSampleHash(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "small"), []byte("x"), 0o644)
 	if h, err := SampleHash(filepath.Join(dir, "small")); err != nil || len(h) != 64 {
 		t.Errorf("%s %v", h, err)
+	}
+}
+
+// A .syp-trash this user may not search (common with a Docker UID): the job is kept with a plain
+// reason, the original untouched, and the worker goes on (review f2b48c0: it used to loop forever).
+func TestUnsearchableTrashFolderKeepsTheJob(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a folder this user cannot search (POSIX, not root)")
+	}
+	s := newScenario(t)
+	trash := filepath.Join(s.dir, TrashDir)
+	os.Mkdir(trash, 0o755)
+	os.Chmod(trash, 0o600) // readable, not searchable
+	t.Cleanup(func() { os.Chmod(trash, 0o755) })
+	done := make(chan struct{})
+	go func() { s.keeping(7).RunOne(context.Background()); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the worker is stuck")
+	}
+	s.assertKept("couldn't use the folder that keeps originals")
+	s.assertOriginalSafe()
+}
+
+// After a crash with the original in the trash, a different file put at the name while the program
+// was stopped (a media manager's new download) is not taken for the converted file: nothing is moved,
+// the row needs attention, the job is not marked done (review f2b48c0).
+func TestRecoveryLeavesAStrangerAtTheName(t *testing.T) {
+	s := newScenario(t)
+	w := s.keeping(7)
+	swapHook = func(at string) error {
+		if at == "original moved" {
+			return errCrash
+		}
+		return nil
+	}
+	job, _ := s.store.Claim("t")
+	_, err := w.process(context.Background(), job)
+	swapHook = nil
+	if !errors.Is(err, errCrash) {
+		t.Fatal(err)
+	}
+	os.WriteFile(s.src, []byte("a new download"), 0o644)
+	said := RecoverSwaps(s.store, s.store, 7, keepNow)
+	if len(said) != 1 || !strings.Contains(said[0], "not the converted one") {
+		t.Errorf("%q", said)
+	}
+	if read(s.src) != "a new download" || read(s.trash()) != "original-bytes" {
+		t.Errorf("both must stay: %q, %q", read(s.src), read(s.trash()))
+	}
+	if a, _ := s.store.Originals(jobs.SwapAttention); len(a) != 1 {
+		t.Errorf("%+v", a)
+	}
+	if j := s.job(); j.Status == jobs.Done {
+		t.Error("the job must not be marked done")
 	}
 }

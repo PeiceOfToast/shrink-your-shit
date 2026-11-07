@@ -89,17 +89,24 @@ func SampleHash(path string) (string, error) {
 }
 
 // trashPath is a free name for the original of job id in dir's .syp-trash: "<name>.<job id><ext>",
-// with ".2", ".3"... added if that is taken (never overwrite a kept original).
-func trashPath(dir, base string, id int64) string {
+// with ".2", ".3"... added if that is taken (never overwrite a kept original). Only a name that exists
+// moves on to the next; any other answer (the folder cannot be searched, a disk error) is an error, so a
+// folder the program may not look into never makes it loop.
+func trashPath(dir, base string, id int64) (string, error) {
 	ext := filepath.Ext(base)
 	stem := strings.TrimSuffix(base, ext) + "." + strconv.FormatInt(id, 10)
 	p := filepath.Join(dir, stem+ext)
-	for n := 2; ; n++ {
-		if _, err := os.Lstat(p); errors.Is(err, fs.ErrNotExist) {
-			return p
+	for n := 2; n < 10000; n++ {
+		_, err := os.Lstat(p)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			return p, nil
+		case err != nil:
+			return "", err
 		}
 		p = filepath.Join(dir, stem+"."+strconv.Itoa(n)+ext)
 	}
+	return "", fmt.Errorf("too many kept originals named %s", stem)
 }
 
 // keepAndReplace moves the original of job into .syp-trash and the checked new file (stage) to its
@@ -114,12 +121,21 @@ func (w *Worker) keepAndReplace(ctx context.Context, job jobs.Job, stage *staged
 	if err != nil {
 		return fmt.Errorf("reading the original to record it: %w", err)
 	}
+	trash, err := trashPath(dir, filepath.Base(job.Path), job.ID)
+	if err != nil {
+		return kept("we couldn't use the folder that keeps originals (%s: %v), so the original was left as it is", dir, err)
+	}
 	nst, err := os.Stat(stage.path)
 	if err != nil {
 		return fmt.Errorf("the new file: %w", err)
 	}
-	o := jobs.Original{JobID: job.ID, LibraryID: job.LibraryID, Path: job.Path, Trash: trashPath(dir, filepath.Base(job.Path), job.ID),
-		Staged: stage.path, Bytes: before.Size(), ModTime: before.ModTime().UnixNano(), Hash: hash, NewBytes: nst.Size()}
+	newHash, err := SampleHash(stage.path)
+	if err != nil {
+		return fmt.Errorf("the new file: %w", err)
+	}
+	o := jobs.Original{JobID: job.ID, LibraryID: job.LibraryID, Path: job.Path, Trash: trash,
+		Staged: stage.path, Bytes: before.Size(), ModTime: before.ModTime().UnixNano(), Hash: hash, NewBytes: nst.Size(),
+		NewMTime: nst.ModTime().UnixNano(), NewHash: newHash}
 	id, err := w.Journal.BeginSwap(o)
 	if err != nil {
 		return fmt.Errorf("could not record the swap, so nothing was moved; the original is untouched (%v)", err)
@@ -205,11 +221,24 @@ func RecoverSwaps(j Journal, done Completer, keepDays int, now time.Time) []stri
 		return err == nil && h == o.Hash
 	}
 	exists := func(p string) bool { _, err := os.Lstat(p); return err == nil }
+	// isNew: the file at p is the checked new file the swap recorded (a regular file of its size and
+	// sampled hash), not something else put there while the program was stopped.
+	isNew := func(p string, o jobs.Original) bool {
+		st, err := os.Lstat(p)
+		if err != nil || !st.Mode().IsRegular() || st.Size() != o.NewBytes {
+			return false
+		}
+		h, err := SampleHash(p)
+		return err == nil && h == o.NewHash
+	}
 	for _, o := range rows {
 		switch {
 		case isOriginal(o.Path, o):
 			j.SetSwapState(o.ID, jobs.SwapRolledBack)
 			say("%s: the conversion was interrupted before anything was moved; it runs again", o.Path)
+		case isOriginal(o.Trash, o) && exists(o.Path) && !isNew(o.Path, o):
+			j.SetSwapState(o.ID, jobs.SwapAttention)
+			say("%s: a file that is not the converted one is at this name, and the original is kept in %s. Nothing was moved; please check which one you want", o.Path, o.Trash)
 		case isOriginal(o.Trash, o) && exists(o.Path):
 			if err := j.FinishSwap(o.ID, now.AddDate(0, 0, keepDays)); err != nil {
 				say("%s: %v", o.Path, err)

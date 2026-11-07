@@ -88,7 +88,7 @@ CREATE TABLE originals (
   job_id INTEGER NOT NULL, library_id INTEGER,
   path TEXT NOT NULL, trash TEXT NOT NULL, staged TEXT NOT NULL,
   original_bytes INTEGER NOT NULL, original_mtime INTEGER NOT NULL, original_hash TEXT NOT NULL,
-  new_bytes INTEGER NOT NULL,
+  new_bytes INTEGER NOT NULL, new_mtime INTEGER NOT NULL DEFAULT 0, new_hash TEXT NOT NULL DEFAULT '',
   state TEXT NOT NULL, started TEXT NOT NULL, kept_at TEXT, delete_on TEXT);
 CREATE INDEX originals_state ON originals(state);
 CREATE INDEX originals_job ON originals(job_id);`},
