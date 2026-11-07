@@ -59,10 +59,10 @@
   // is asked again each second. root names the folder in the caption; all (library page only) adds "See them all in
   // Activity". hn is the heading level. Returns {stop()}.
   // A video's length, the one format for the first-5 preview and Activity (design, REDESIGN A3): "45 s" under a minute
-  // (anything under a second is "1 s"), else "52 min" or "1 h 52 min".
+  // (anything under a second is "1 s"), else "52 min", "1 h 52 min" or "2 h".
   ui.length = function (sec) {
     var s = Math.round(sec); if (s < 60) return Math.max(1, s) + " s";
-    var m = Math.round(sec / 60), h = Math.floor(m / 60); return h ? h + " h " + (m % 60) + " min" : m + " min";
+    var m = Math.round(sec / 60), h = Math.floor(m / 60); return h ? h + " h" + (m % 60 ? " " + (m % 60) + " min" : "") : m + " min"; // "2 h", not "2 h 0 min"
   };
   ui.firstFive = function (host, root, load, hn, all) {
     var h = ui.el(hn || "h2", null, "Is this the right folder?"), lead = ui.el("p", "muted small"), wrap = ui.el("div", "table-wrap"),
