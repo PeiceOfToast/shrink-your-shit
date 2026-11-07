@@ -147,11 +147,10 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if err := removeLeftoverTemps(job.Path); err != nil {
 		return "", err
 	}
-	var tmp string
-	done := false
+	var stage *staged
 	defer func() {
-		if !done && tmp != "" {
-			os.Remove(tmp)
+		if stage != nil {
+			stage.remove() // after a successful move only the empty folder is left
 		}
 	}()
 
@@ -183,10 +182,11 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		exp.DurationSec = job.DurationSec
 	}
 
-	tmp, tmpID, err := newTemp(job.Path, before.Mode().Perm())
+	stage, err = newStaged(job.Path)
 	if err != nil {
 		return "", err
 	}
+	tmp := stage.path
 	args := media.HEVCArgs(job.Path, tmp, w.Rule.CRF, w.Rule.Preset)
 	encErr, terr := media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p float64) {
 		w.Queue.Progress(job.ID, p)
@@ -205,14 +205,18 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if err := sourceUnchanged(job.Path, before); err != nil {
 		return "", err
 	}
-	if err := tempIntact(tmp, tmpID); err != nil {
+	if err := stage.intact(); err != nil {
 		return "", err
 	}
 	if err := w.verify(ctx, src, exp, job.Path, tmp, before.Size()); err != nil {
 		return "", err
 	}
-	if err := readOnlyAgain(tmp, tmpID, before.Mode().Perm()); err != nil {
+	// The original's permissions, only now that the file has been checked.
+	if err := stage.intact(); err != nil {
 		return "", err
+	}
+	if err := os.Chmod(tmp, before.Mode().Perm()); err != nil {
+		return "", fmt.Errorf("temp file permissions: %w", err)
 	}
 	final = job.Path
 	if w.Mode == Beside {
@@ -226,7 +230,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		if err := sourceUnchanged(job.Path, before); err != nil {
 			return err
 		}
-		return tempIntact(tmp, tmpID)
+		return stage.intact()
 	}); err != nil {
 		var k *KeptError
 		if errors.As(err, &k) {
@@ -234,7 +238,6 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 		return "", fmt.Errorf("move result into place: %w", err)
 	}
-	done = true
 	return final, nil
 }
 

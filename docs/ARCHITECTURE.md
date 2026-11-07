@@ -38,12 +38,14 @@ the result and the original was deliberately left alone, with the reason in the 
 2. Worker claims the job, probes the source again (`media.Info` with every stream), checks there is
    free disk space for the new file, and counts the source's video frames. From these it builds an
    `Expect` (below). Then it runs ffmpeg into a temp file next to the original, same container as
-   the input. The temp file (`worker/tempfile.go`) has an unpredictable name
-   (`name.<random>.syp-tmp.<ext>`), is created exclusively and with the original's permissions, and
-   the worker remembers its identity (device and inode, or Windows file ID): if that name later
-   refers to anything else, the result is not used. Leftover temp files from a crash (and the old
-   fixed name `name.syp-tmp.<ext>`) are removed first; if one cannot be removed, the job fails
-   before ffmpeg starts. First video stream to HEVC; everything else copied except data streams.
+   the input, inside a private staging folder (`worker/tempfile.go`): `.name.<random>.syp-tmp/`
+   next to the original, created fresh at mode 0700 (the leading dot makes the scanner skip it), with
+   the file created exclusively at 0600. Other users cannot reach it while it is written and checked.
+   The worker remembers the file's identity (device and inode, or Windows file ID): if that name later
+   refers to anything else, the result is not used. The original's permissions are put on the file
+   only after the checks, just before the rename, and the folder is removed on every path. Leftovers
+   from a crash (and the old fixed temp name `name.syp-tmp.<ext>`) are removed first; if one cannot
+   be removed, the job fails before ffmpeg starts. First video stream to HEVC; everything else copied except data streams.
 3. **Safety floor** (`worker/verify.go`; not removable by a flow, only the thresholds are tunable).
    The new file is compared with the `Expect`, never directly with the original. Cheap checks first:
    it exists and is not empty; it is readable; **stream parity** (same number of video, audio,

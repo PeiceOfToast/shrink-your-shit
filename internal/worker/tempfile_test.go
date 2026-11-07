@@ -19,35 +19,64 @@ func tempLeft(src string) bool {
 	return len(l) > 0
 }
 
-func TestTempNamesAreUnpredictableAndFound(t *testing.T) {
+func TestStagingFoldersAreUnpredictableAndFound(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "My.Movie (2020).MKV")
-	a, _, err := newTemp(src, 0o644)
+	a, err := newStaged(src)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _, _ := newTemp(src, 0o644)
-	if a == b {
-		t.Fatalf("two temp files got the same name %q", a)
+	b, _ := newStaged(src)
+	if a.dir == b.dir {
+		t.Fatalf("two staging folders got the same name %q", a.dir)
 	}
-	for _, p := range []string{a, b} {
-		n := filepath.Base(p)
-		stem := strings.TrimSuffix(n, filepath.Ext(n))
-		if filepath.Ext(n) != ".MKV" || !strings.HasPrefix(n, "My.Movie (2020).") || !strings.HasSuffix(stem, ".syp-tmp") {
-			t.Errorf("%q must keep the extension and end in .syp-tmp before it (the scanner skips those)", n)
+	for _, st := range []*staged{a, b} {
+		if n := filepath.Base(st.dir); !strings.HasPrefix(n, ".") {
+			t.Errorf("%q must start with a dot (the scanner skips those)", n)
+		}
+		if filepath.Ext(st.path) != ".MKV" || filepath.Dir(st.path) != st.dir {
+			t.Errorf("%q must be inside the folder and keep the extension", st.path)
 		}
 	}
 	legacy := filepath.Join(dir, "My.Movie (2020).syp-tmp.MKV")
-	others := []string{"My.Movie (2020).part2.syp-tmp.MKV", "My.Movie (2020).hevc.MKV", "My.Movie (2020).1.syp-tmp.mkv", "Other.1.syp-tmp.MKV"}
+	others := []string{".My.Movie (2020).part2.syp-tmp", "My.Movie (2020).hevc.MKV", ".Other.1.syp-tmp", "My.Movie (2020).1.syp-tmp"}
 	for _, n := range append(others, filepath.Base(legacy)) {
 		os.WriteFile(filepath.Join(dir, n), nil, 0o644)
 	}
 	got, _ := TempFiles(src)
-	want := []string{a, b, legacy}
+	want := []string{a.dir, b.dir, legacy}
 	slices.Sort(got)
 	slices.Sort(want)
 	if !slices.Equal(got, want) {
-		t.Errorf("TempFiles = %q, want %q (ours and the old fixed name only)", got, want)
+		t.Errorf("TempFiles = %q, want %q (our folders and the old fixed name only)", got, want)
+	}
+}
+
+// While ffmpeg writes and the checks run, only this user can reach the new file.
+func TestStagingIsPrivateUntilTheMove(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no Unix permission bits")
+	}
+	s := newScenario(t)
+	os.Chmod(s.src, 0o664)
+	var dirMode, fileMode os.FileMode
+	s.afterChecks = func() {
+		l, _ := TempFiles(s.src)
+		if len(l) != 1 {
+			t.Fatalf("want one staging folder, have %q", l)
+		}
+		dirMode = mustStat(t, l[0]).Mode().Perm()
+		fileMode = mustStat(t, filepath.Join(l[0], "new.mkv")).Mode().Perm()
+	}
+	s.run(Replace)
+	if dirMode != 0o700 || fileMode != 0o600 {
+		t.Errorf("staging folder %v, file %v; want 0700 and 0600", dirMode, fileMode)
+	}
+	if st := mustStat(t, s.src); st.Mode().Perm() != 0o664 {
+		t.Errorf("the replaced file has %v, want the original's 0664", st.Mode().Perm())
+	}
+	if tempLeft(s.src) {
+		t.Error("the staging folder was left behind after a successful move")
 	}
 }
 
@@ -59,7 +88,7 @@ func TestLeftoverTempLinksAreRemovedNotFollowed(t *testing.T) {
 	s := newScenario(t)
 	victim := filepath.Join(t.TempDir(), "other.mkv")
 	os.WriteFile(victim, []byte("someone else's file"), 0o644)
-	for _, n := range []string{"movie.syp-tmp.mkv", "movie.123.syp-tmp.mkv"} {
+	for _, n := range []string{"movie.syp-tmp.mkv", ".movie.123.syp-tmp"} {
 		if err := os.Symlink(victim, filepath.Join(s.dir, n)); err != nil {
 			t.Fatal(err)
 		}
@@ -104,7 +133,8 @@ func TestUnremovableTempStopsBeforeEncoding(t *testing.T) {
 	}
 }
 
-// swapTemp puts a different file, holding body, where the temp file is.
+// swapTemp puts a different file, holding body, where the staged file is (the same user can still do
+// that; other users cannot reach the folder).
 func swapTemp(t *testing.T, s *scenario, body string) {
 	t.Helper()
 	l, _ := TempFiles(s.src)
@@ -113,7 +143,7 @@ func swapTemp(t *testing.T, s *scenario, body string) {
 	}
 	other := filepath.Join(s.dir, "swap.bin")
 	os.WriteFile(other, []byte(body), 0o644)
-	if err := os.Rename(other, l[0]); err != nil {
+	if err := os.Rename(other, filepath.Join(l[0], "new.mkv")); err != nil {
 		t.Fatal(err)
 	}
 }

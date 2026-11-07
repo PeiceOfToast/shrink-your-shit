@@ -752,10 +752,10 @@ func TestAHungCheckKeepsTheOriginalInsteadOfFreezingTheWorker(t *testing.T) {
 		want string
 	}{
 		{"probe of the new file", func(n string, a []string) bool {
-			return n == "ffprobe" && !strings.Contains(strings.Join(a, " "), "movie.mkv ") && strings.HasSuffix(a[len(a)-1], ".syp-tmp.mkv") && !strings.Contains(strings.Join(a, " "), "count_packets")
+			return n == "ffprobe" && !strings.Contains(strings.Join(a, " "), "movie.mkv ") && strings.Contains(a[len(a)-1], ".syp-tmp") && !strings.Contains(strings.Join(a, " "), "count_packets")
 		}, "reading the new file timed out"},
 		{"frame count of the new file", func(n string, a []string) bool {
-			return n == "ffprobe" && strings.Contains(strings.Join(a, " "), "count_packets") && strings.HasSuffix(a[len(a)-1], ".syp-tmp.mkv")
+			return n == "ffprobe" && strings.Contains(strings.Join(a, " "), "count_packets") && strings.Contains(a[len(a)-1], ".syp-tmp")
 		}, "counting the new file's video frames timed out"},
 		{"playback test", func(n string, a []string) bool {
 			return n == "ffmpeg" && strings.Contains(strings.Join(a, " "), "-xerror")
