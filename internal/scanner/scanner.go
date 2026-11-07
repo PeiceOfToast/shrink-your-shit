@@ -133,14 +133,14 @@ func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.Fil
 	rec := jobs.File{Path: path, Size: st.Size(), ModTime: st.ModTime().UnixNano()}
 	if err != nil {
 		log.Printf("probe %s: %v", path, err)
-		rec.Decision = "unreadable"
+		rec.Decision, rec.Reason = "unreadable", rules.SkipUnreadable
 		s.Store.PutFile(rec)
 		return false
 	}
 	rec.Codec = pi.VideoCodec
 	plan := t.Template.Compile(pi)
 	if plan.Skip != "" {
-		rec.Decision = "skip: " + plan.Skip
+		rec.Decision, rec.Reason = "skip: "+plan.Skip, plan.SkipCode
 		s.Store.PutFile(rec)
 		return false
 	}

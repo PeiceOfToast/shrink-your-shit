@@ -92,6 +92,13 @@ CREATE TABLE originals (
   state TEXT NOT NULL, started TEXT NOT NULL, kept_at TEXT, delete_on TEXT);
 CREATE INDEX originals_state ON originals(state);
 CREATE INDEX originals_job ON originals(job_id);`},
+
+	// Activity (slice 21b): when a job started (its time left is estimated from it), and a skipped
+	// file's reason as a code (files.decision keeps the sentence).
+	{7, "job start time and skip reason code", `
+ALTER TABLE jobs ADD COLUMN started TEXT;
+ALTER TABLE files ADD COLUMN reason TEXT NOT NULL DEFAULT '';
+CREATE INDEX files_reason ON files(reason);`},
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.

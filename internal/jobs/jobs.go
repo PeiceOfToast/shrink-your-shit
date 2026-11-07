@@ -77,6 +77,7 @@ type File struct {
 	ModTime  int64
 	Codec    string
 	Decision string
+	Reason   string // a skip's code (rules.Skip*, "unreadable", "restored"); "" when it is not skipped
 }
 
 // Store is the SQLite-backed store.
@@ -119,8 +120,8 @@ func (s *Store) stamp() string { return s.now().UTC().Format(time.RFC3339) }
 // GetFile returns the last seen record for path (nil if never seen).
 func (s *Store) GetFile(path string) (*File, error) {
 	var f File
-	err := s.db.QueryRow(`SELECT path,size,mtime,codec,decision FROM files WHERE path=?`, path).
-		Scan(&f.Path, &f.Size, &f.ModTime, &f.Codec, &f.Decision)
+	err := s.db.QueryRow(`SELECT path,size,mtime,COALESCE(codec,''),COALESCE(decision,''),reason FROM files WHERE path=?`, path).
+		Scan(&f.Path, &f.Size, &f.ModTime, &f.Codec, &f.Decision, &f.Reason)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -129,9 +130,9 @@ func (s *Store) GetFile(path string) (*File, error) {
 
 // PutFile records what was seen for a path.
 func (s *Store) PutFile(f File) error {
-	_, err := s.db.Exec(`INSERT INTO files(path,size,mtime,codec,decision) VALUES(?,?,?,?,?)
-ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,codec=excluded.codec,decision=excluded.decision`,
-		f.Path, f.Size, f.ModTime, f.Codec, f.Decision)
+	_, err := s.db.Exec(`INSERT INTO files(path,size,mtime,codec,decision,reason) VALUES(?,?,?,?,?,?)
+ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,codec=excluded.codec,decision=excluded.decision,reason=excluded.reason`,
+		f.Path, f.Size, f.ModTime, f.Codec, f.Decision, f.Reason)
 	return err
 }
 
@@ -239,7 +240,7 @@ func (s *Store) Claim(worker string) (Job, error) {
 	if err != nil {
 		return Job{}, err
 	}
-	if err := s.transition(id, Running, `, worker=?, progress=0, error=''`, worker); err != nil {
+	if err := s.transition(id, Running, `, worker=?, progress=0, error='', started=?`, worker, s.stamp()); err != nil {
 		return Job{}, err
 	}
 	return s.Get(id)

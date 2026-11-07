@@ -82,3 +82,106 @@ func TestDoneAndKeptLists(t *testing.T) {
 		t.Errorf("%d %s", code, body)
 	}
 }
+
+func TestActivitySummaryQueueFailedSkipped(t *testing.T) {
+	srv, st, _, fe := libServer(t, false)
+	dir := t.TempDir()
+	l, _ := st.AddLibrary("Movies", dir, rules.SliderTemplate(3), true)
+	// done, original gone: 300 freed; done, original kept: 600 waiting
+	done(t, st, l.ID, dir+"/gone.mkv", dir+"/gone.mkv", 500, 200)
+	kept := done(t, st, l.ID, dir+"/kept.mkv", dir+"/kept.mkv", 1000, 400)
+	oid, _ := st.BeginSwap(jobs.Original{JobID: kept, LibraryID: l.ID, Path: dir + "/kept.mkv", Trash: "t", Staged: "s", Bytes: 1000, Hash: "h", NewBytes: 400})
+	st.FinishSwap(oid, time.Now().Add(time.Hour))
+	// one failed, one kept by a check
+	f1, _ := st.Enqueue(jobs.Job{Library: dir, LibraryID: l.ID, Path: dir + "/broken.mkv"})
+	st.Claim("t")
+	st.Fail(f1, "ffmpeg stopped: invalid data")
+	f2, _ := st.Enqueue(jobs.Job{Library: dir, LibraryID: l.ID, Path: dir + "/short.mkv"})
+	st.Claim("t")
+	st.Keep(f2, "the new file is 3 minutes shorter than the original")
+	// one running at 50%, two waiting
+	run, _ := st.Enqueue(jobs.Job{Library: dir, LibraryID: l.ID, Path: dir + "/now.mkv", SizeBefore: 8000})
+	st.Claim("t")
+	st.Progress(run, 50)
+	st.Enqueue(jobs.Job{Library: dir, LibraryID: l.ID, Path: dir + "/next1.mkv"})
+	st.Enqueue(jobs.Job{Library: dir, LibraryID: l.ID, Path: dir + "/next2.mkv"})
+	// skipped files
+	st.PutFile(jobs.File{Path: dir + "/hevc.mkv", Decision: "skip: HEVC is already an efficient format", Reason: rules.SkipAlreadyHEVC})
+	st.PutFile(jobs.File{Path: dir + "/lean.mkv", Decision: "skip: already efficient: 0.02 bits per pixel", Reason: rules.SkipAlreadyEfficient})
+	st.PutFile(jobs.File{Path: "/elsewhere/x.mkv", Decision: "unreadable", Reason: rules.SkipUnreadable})
+	st.PutFile(jobs.File{Path: dir + "/queued.mkv", Decision: "queued: H.264"}) // not skipped
+
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/activity/summary"})
+	if body != `{"counts":{"failed":2,"skipped":3},"freedBytes":300,"paused":false,"waitingBytes":600,"waitingFiles":2,"workingFiles":1}`+"\n" {
+		t.Errorf("summary %s", body)
+	}
+
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/activity/queue"})
+	var q struct {
+		Working []map[string]any
+		UpNext  []map[string]any
+	}
+	json.Unmarshal([]byte(body), &q)
+	if len(q.Working) != 1 || q.Working[0]["phase"] != "converting" || q.Working[0]["percent"] != 50.0 || q.Working[0]["fromBytes"] != 8000.0 ||
+		q.Working[0]["library"] != "Movies" || q.Working[0]["etaSeconds"] == nil {
+		t.Errorf("working %s", body)
+	}
+	if len(q.UpNext) != 1 || q.UpNext[0]["count"] != 2.0 || q.UpNext[0]["order"] != "newest" {
+		t.Errorf("up next %s", body)
+	}
+
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/activity/failed"})
+	var f struct {
+		Items []map[string]any
+		Total int
+	}
+	json.Unmarshal([]byte(body), &f)
+	if f.Total != 2 || f.Items[0]["title"] != "A check said no, so the original was kept" || f.Items[0]["detail"] != "the new file is 3 minutes shorter than the original" ||
+		f.Items[1]["title"] != "Converting did not finish" || f.Items[1]["originalUntouched"] != true {
+		t.Errorf("failed %s", body)
+	}
+
+	var k struct {
+		Items []map[string]any
+		Total int
+	}
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/activity/skipped"})
+	json.Unmarshal([]byte(body), &k)
+	if k.Total != 3 || len(k.Items) != 3 {
+		t.Fatalf("skipped %s", body)
+	}
+	byPath := map[string]map[string]any{}
+	for _, i := range k.Items {
+		byPath[i["path"].(string)] = i
+	}
+	if h := byPath[dir+"/hevc.mkv"]; h["reason"] != "already_hevc" || h["detail"] != "It already uses a modern, efficient format." || h["library"] != "Movies" || h["libraryId"] != fmt.Sprint(l.ID) {
+		t.Errorf("hevc %v", h)
+	}
+	if x := byPath["/elsewhere/x.mkv"]; x["libraryId"] != nil || x["reason"] != "unreadable" {
+		t.Errorf("outside any library %v", x)
+	}
+	if strings.Contains(body, "bits per pixel") {
+		t.Error("details are in plain words")
+	}
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/activity/skipped?reason=already_efficient&limit=1"})
+	k.Items = nil
+	json.Unmarshal([]byte(body), &k)
+	if k.Total != 1 || len(k.Items) != 1 || k.Items[0]["path"] != dir+"/lean.mkv" {
+		t.Errorf("filtered %s", body)
+	}
+
+	id := byPath[dir+"/hevc.mkv"]["id"].(string)
+	scans := fe.scans
+	if code, b := post(t, srv, "POST", "/api/skipped/"+id+"/convert-again", `{}`); code != 200 || fe.scans != scans+1 {
+		t.Errorf("convert again: %d %s, scans %d", code, b, fe.scans-scans)
+	}
+	if f, _ := st.GetFile(dir + "/hevc.mkv"); f != nil {
+		t.Error("its decision is forgotten, so the next scan looks again")
+	}
+	if code, _ := post(t, srv, "POST", "/api/skipped/"+id+"/convert-again", `{}`); code != 404 {
+		t.Errorf("again: %d", code)
+	}
+	if code, b := post(t, srv, "POST", "/api/system/backup", `{}`); code != 501 || !strings.Contains(b, "Nothing was downloaded") {
+		t.Errorf("backup %d %s", code, b)
+	}
+}
