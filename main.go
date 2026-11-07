@@ -139,6 +139,9 @@ func main() {
 	for _, said := range worker.RecoverSwaps(store, store, keepDays(), time.Now()) {
 		log.Printf("recovery: %s", said)
 	}
+	for _, said := range worker.RecoverSidecars(store) {
+		log.Printf("recovery: %s", said)
+	}
 	if n, _ := store.RequeueRunning(); n > 0 {
 		log.Printf("requeued %d job(s) interrupted by the last shutdown", n)
 	}
@@ -200,7 +203,7 @@ func main() {
 			}
 			return &worker.Worker{ID: id, Queue: store, Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath,
 				Template: store.TemplateFor, Poll: 3 * time.Second,
-				DecodeCheck: *decode, MinSSIM: *minSSIM, KeepDays: keepDays, Journal: store,
+				DecodeCheck: *decode, MinSSIM: *minSSIM, KeepDays: keepDays, Journal: store, Sidecars: store,
 				Paused: store.Paused, StallAfter: *stallAfter}
 		},
 		Size: func() int {

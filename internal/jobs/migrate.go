@@ -131,6 +131,14 @@ ALTER TABLE originals ADD COLUMN aside TEXT NOT NULL DEFAULT '';`},
 	// last check before the swap even if the stop reached no running worker (claims skip such rows).
 	{9, "stop requested", `
 ALTER TABLE jobs ADD COLUMN stop_requested INTEGER NOT NULL DEFAULT 0;`},
+
+	// Slice 25b: subtitles saved as .srt files beside a new file, recorded before they are put there
+	// with what they are (size, time, sample hash) and what the new file is, so a crash between them and
+	// the swap leaves nothing of ours behind (worker.RecoverSidecars).
+	{10, "srt sidecars", `
+CREATE TABLE sidecars (id INTEGER PRIMARY KEY, job_id INTEGER NOT NULL, path TEXT NOT NULL,
+  bytes INTEGER NOT NULL, mtime INTEGER NOT NULL, hash TEXT NOT NULL,
+  video_path TEXT NOT NULL, video_bytes INTEGER NOT NULL, video_hash TEXT NOT NULL);`},
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.

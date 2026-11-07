@@ -275,9 +275,15 @@ func TestLanguagesSetting(t *testing.T) {
 	if got := st.Languages(); strings.Join(got, ",") != "eng,ger,fre" {
 		t.Errorf("store sees %v", got)
 	}
-	if code, body := post(t, srv, "PATCH", "/api/settings", `{"languages":["xx"]}`); code != 400 || errCode(body) != "invalid_setting" {
-		t.Errorf("bad code: %d %s", code, body)
+	for _, bad := range []string{"xx", "zzz"} { // not ISO 639 codes
+		if code, body := post(t, srv, "PATCH", "/api/settings", `{"languages":["`+bad+`"]}`); code != 400 || errCode(body) != "invalid_setting" {
+			t.Errorf("%s: %d %s", bad, code, body)
+		}
 	}
+	if code, body := post(t, srv, "PATCH", "/api/settings", `{"languages":["sq","fra"]}`); code != 200 || !strings.Contains(body, `"languages":["alb","fre"]`) {
+		t.Errorf("sq, fra: %d %s", code, body)
+	}
+	post(t, srv, "PATCH", "/api/settings", `{"languages":["en","deu","fre"]}`)
 	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
 	if code, body := post(t, srv, "PUT", fmt.Sprintf("/api/libraries/%d/setting", l.ID), `{"quality":3,"audio":"my_languages","subtitles":"keep_all"}`); code != 200 {
 		t.Errorf("my languages with languages set: %d %s", code, body)

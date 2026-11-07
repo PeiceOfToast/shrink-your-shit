@@ -129,14 +129,18 @@ A **selectors** flow (`internal/rules/selectors.go`, slice 25a) stores the Stand
     PCM), to E-AC-3. No downmix.
   - Subtitles `my_languages` follow the same language rule. `text_only` drops picture subtitles.
   - Subtitles `srt` save text subtitles beside the new file as `<new name>.<lang>[.forced][.n].srt`,
-    written by the same ffmpeg run into the staging folder. They are checked to exist and are put in
-    place with `renameNoReplace` before the swap, and removed again if the swap does not happen. A name
+    written by the same ffmpeg run into the staging folder. They are checked to exist, recorded first
+    (`sidecars`, migration 10: path, size, time and sample hash, and the new video's size and hash), put in
+    place with `renameNoReplace` before the swap, and removed again only while still exactly ours if the
+    swap does not happen. `RecoverSidecars` at start ends a crash in between: the new video in place
+    keeps them, otherwise our own files go. A name
     already taken fails the job before converting. Picture subtitles stay inside. A later restore of the
     original (slice 18) leaves the .srt files.
   - `Expect` lists exactly the tracks that remain (dropped ones absent, converted ones in their new
     codec), so verify refuses anything else. The new-type check looks at what remains.
-  - Languages are a program setting (`languages` on `/api/settings`, ISO 639-2, stored in one form:
-    `rules.CanonLang` maps 639-1 and 639-2/T codes). The store fills them into every flow it reads
+  - Languages are a program setting (`languages` on `/api/settings`, checked against the full ISO 639-2
+    list from the Library of Congress (`rules/iso639.go`), stored in one form: `rules.CanonLang` maps every
+    639-1 code and the 639-2/T forms, so `fra` and `fre` are one language). The store fills them into every flow it reads
     (`Template.Languages`, never stored in the flow). A selectors body with "my languages" and no
     languages gives 400 `languages_needed`, and any unknown field (e.g. `audioBitrate`) gives 400 `invalid`.
 

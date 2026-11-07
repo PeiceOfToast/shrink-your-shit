@@ -3,6 +3,7 @@
 package rules
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -113,9 +114,25 @@ func TestAudioMyLanguages(t *testing.T) {
 
 func TestCanonLang(t *testing.T) {
 	for in, want := range map[string]string{"eng": "eng", "EN": "eng", "deu": "ger", "ger": "ger", "de": "ger", "fra": "fre",
-		"und": "", "": "", "xx": "", "e1g": "", "zxx": "zxx"} {
+		"fre": "fre", "sq": "alb", "sqi": "alb", "und": "", "": "", "xx": "", "zzz": "", "e1g": "", "zxx": "zxx", "chi": "chi", "zho": "chi"} {
 		if got := CanonLang(in); got != want {
 			t.Errorf("%q: %q, want %q", in, got, want)
+		}
+	}
+	// every bibliographic/terminology pair is one language, both ways (review 25b-e336f8c)
+	for t2, b := range iso6392T2B {
+		if CanonLang(t2) != CanonLang(b) || CanonLang(b) == "" {
+			t.Errorf("%s and %s differ", t2, b)
+		}
+	}
+}
+
+// A file tagged "fre" is kept when the setting says "fra", and the other way round.
+func TestLanguageFormsMatch(t *testing.T) {
+	for _, c := range []struct{ tag, setting string }{{"fre", "fra"}, {"fra", "fre"}, {"ger", "de"}, {"deu", "ger"}, {"alb", "sq"}} {
+		p := compileAudio(t, "my_languages", c.setting, withAudio(media.Stream{Codec: "aac", Language: c.tag}, media.Stream{Codec: "aac", Language: "jpn"}))
+		if len(p.Tracks) != 1 || p.Tracks[0].Index != 2 {
+			t.Errorf("tag %s, setting %s: %+v", c.tag, c.setting, p.Tracks)
 		}
 	}
 }
@@ -183,15 +200,21 @@ func TestSubtitlesToSrt(t *testing.T) {
 	s := DefaultSelectors(3)
 	s.Subtitles = "srt"
 	p := s.Template().Compile(info)
+	// native paths on every OS (Windows CI): the staged files and the names beside the new file
+	m := filepath.Join(string(filepath.Separator)+"m", "Movie.hevc.mkv")
 	var names []string
 	for _, o := range p.SubtitleFiles() {
-		names = append(names, SrtName("/m/Movie.hevc.mkv", o.Extract))
+		names = append(names, filepath.Base(SrtName(m, o.Extract)))
+		if filepath.Dir(SrtName(m, o.Extract)) != filepath.Dir(m) {
+			t.Errorf("%s is not beside the new file", SrtName(m, o.Extract))
+		}
 	}
-	if strings.Join(names, " ") != "/m/Movie.hevc.eng.srt /m/Movie.hevc.eng.2.srt /m/Movie.hevc.fre.forced.srt /m/Movie.hevc.srt" {
+	if strings.Join(names, " ") != "Movie.hevc.eng.srt Movie.hevc.eng.2.srt Movie.hevc.fre.forced.srt Movie.hevc.srt" {
 		t.Errorf("names %v", names)
 	}
-	args := strings.Join(p.FFmpegArgs("/m/Movie.mkv", "/m/.Movie.1.syp-tmp/new.mkv"), " ")
-	if !strings.HasSuffix(args, "-map 0:4 -c:s srt /m/.Movie.1.syp-tmp/sub.3.srt") || !strings.Contains(args, "-map -0:1") || strings.Contains(args, "-map -0:5") {
+	staged := filepath.Join(string(filepath.Separator)+"m", ".Movie.1.syp-tmp", "new.mkv")
+	args := strings.Join(p.FFmpegArgs(filepath.Join(string(filepath.Separator)+"m", "Movie.mkv"), staged), " ")
+	if want := "-map 0:4 -c:s srt " + filepath.Join(filepath.Dir(staged), "sub.3.srt"); !strings.HasSuffix(args, want) || !strings.Contains(args, "-map -0:1") || strings.Contains(args, "-map -0:5") {
 		t.Errorf("args %s", args)
 	}
 	if n := len(p.Expect(info, 0).Streams); n != 2 { // video and the picture subtitle
