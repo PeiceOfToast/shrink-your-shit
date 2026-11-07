@@ -517,3 +517,16 @@ func TestTTMLSubtitlesHaveNoKind(t *testing.T) {
 		t.Errorf("kinds %s", got)
 	}
 }
+
+// A phone video's rotation is side data on its video stream; FFmpeg 7.1's ffprobe then answers the
+// packet count as "50," and such files were refused at the frame-count check.
+func TestRealCountPacketsOfARotatedVideo(t *testing.T) {
+	needFFmpeg(t)
+	dir := t.TempDir()
+	plain, rot := filepath.Join(dir, "plain.mp4"), filepath.Join(dir, "rot.mp4")
+	ffmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=2:size=640x360:rate=25", "-c:v", "libx264", plain)
+	ffmpeg(t, "-display_rotation", "90", "-i", plain, "-c", "copy", rot)
+	if n, err := CountVideoPackets(context.Background(), OSExec{}, "ffprobe", rot, 0); err != nil || n != 50 {
+		t.Errorf("rotated: %d %v", n, err)
+	}
+}

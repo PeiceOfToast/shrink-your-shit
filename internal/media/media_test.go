@@ -71,3 +71,17 @@ func TestTranscodeReportsProgress(t *testing.T) {
 		t.Errorf("got %v %v", got, err)
 	}
 }
+
+// FFmpeg 7.1's ffprobe prints "75," (an empty side-data field) for a stream with side data (HDR, a phone
+// video's rotation): such a file was refused as "counting the new file's video frames could not be done".
+func TestCountVideoPacketsWithSideData(t *testing.T) {
+	for out, want := range map[string]int64{"75,\n": 75, "75\n": 75, "75,,\n": 75, " 1800 \n": 1800} {
+		x := &FakeExec{Out: []byte(out)}
+		if n, err := CountVideoPackets(context.Background(), x, "ffprobe", "/x.mkv", 0); err != nil || n != want {
+			t.Errorf("%q: %d %v", out, n, err)
+		}
+	}
+	if _, err := CountVideoPackets(context.Background(), &FakeExec{Out: []byte(",75\n")}, "ffprobe", "/x.mkv", 0); err == nil {
+		t.Error("no count in the first field is an error")
+	}
+}
