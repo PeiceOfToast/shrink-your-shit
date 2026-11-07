@@ -314,3 +314,30 @@ func TestRealRecordingStartingMidStreamIsStillConverted(t *testing.T) {
 		t.Errorf("harmless start-of-stream messages were taken for damage: %q", j.Error)
 	}
 }
+
+// A constant-frame-rate AVI (dev-qa2's soak generator, smaller picture): a good conversion was
+// refused at the start sample (0.934, the rest 0.994). Asking ffmpeg to seek to 0 in an AVI jumps to
+// a later keyframe (8.4 s in the original, 1.4 s in the new file), so the start sample compared the
+// wrong stretches; reading from the start needs no seek at all. A .mov copy is checked the same way.
+func TestRealCFRAviAndMovPassTheStartSample(t *testing.T) {
+	needTools(t)
+	dir := t.TempDir()
+	avi := filepath.Join(dir, "a.avi")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=40:size=640x360:rate=30", "-f", "lavfi", "-i", "sine=duration=40:frequency=440",
+		"-c:v", "libx264", "-b:v", "8M", "-pix_fmt", "yuv420p", "-t", "40", "-c:a", "aac", "-b:a", "128k", avi)
+	mov := filepath.Join(dir, "b.mov")
+	runFFmpeg(t, "-i", avi, "-c", "copy", mov)
+	for _, f := range []string{avi, mov} {
+		t.Run(filepath.Ext(f), func(t *testing.T) {
+			st, id := realJob(t, f, 40)
+			w := realWorker(st, media.OSExec{})
+			w.Rule.CRF = 26 // the default quality, at the default picture threshold
+			if err := w.run(t); err != nil {
+				t.Fatal(err)
+			}
+			if j, _ := st.Get(id); j.Status != jobs.Done {
+				t.Fatalf("a good conversion of a CFR %s was refused: %s %q", filepath.Ext(f), j.Status, j.Error)
+			}
+		})
+	}
+}
