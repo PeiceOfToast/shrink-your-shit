@@ -4,6 +4,7 @@ package scanner
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -347,18 +348,35 @@ func TestLinksAreNeverConverted(t *testing.T) {
 // one that disappears for a pass and comes back (review f4c41fd).
 func TestStillChangingFollowsTheFileNotThePath(t *testing.T) {
 	s, _, lib, _ := setup(t, h264Big)
+	// a fake clock and no sleeps: the result never depends on timing (it was flaky on Windows CI)
+	clock := time.Now()
+	s.Now, s.MinAge = func() time.Time { return clock }, time.Minute
 	a := filepath.Join(lib, "a.mkv")
-	old := time.Now().Add(-time.Hour)
+	var seen []string // what each look saw of a.mkv, printed if the test fails (which field moved?)
+	scan := func() int {
+		clock = clock.Add(2 * time.Minute) // each look well after the previous one
+		if st, err := os.Lstat(a); err == nil {
+			seen = append(seen, fmt.Sprintf("%+v", stateOf(a, st)))
+		}
+		return s.ScanOnce(context.Background())
+	}
+	defer func() {
+		if t.Failed() {
+			t.Logf("a.mkv as each look saw it:\n%s", strings.Join(seen, "\n"))
+		}
+	}()
+	old := clock.Add(-time.Hour)
 	os.Chtimes(a, old, old)
-	s.ScanOnce(context.Background()) // first look
-	time.Sleep(20 * time.Millisecond)
+	scan()       // first look
 	os.Remove(a) // made again: same name, size and times, but another file
 	os.WriteFile(a, []byte("12345"), 0o644)
 	os.Chtimes(a, old, old)
-	if n := s.ScanOnce(context.Background()); n != 0 {
+	// NTFS can give the new file the old one's file index and (tunneling) creation time; its change time
+	// still moves, so it always waits again (review 3ea035c)
+	if n := scan(); n != 0 {
 		t.Errorf("a file made again was decided on its first look: queued %d", n)
 	}
-	if n := s.ScanOnce(context.Background()); n != 1 {
+	if n := scan(); n != 1 {
 		t.Errorf("unchanged since: queued %d, want 1", n)
 	}
 
@@ -366,11 +384,11 @@ func TestStillChangingFollowsTheFileNotThePath(t *testing.T) {
 	b := filepath.Join(lib, "b.mkv")
 	os.WriteFile(b, []byte("abcde"), 0o644)
 	os.Chtimes(b, old, old)
-	s.ScanOnce(context.Background()) // first look at b
+	scan() // first look at b
 	os.Rename(b, b+".away")
-	s.ScanOnce(context.Background()) // b not seen: its look goes
+	scan() // b not seen: its look goes
 	os.Rename(b+".away", b)
-	if n := s.ScanOnce(context.Background()); n != 0 {
+	if n := scan(); n != 0 {
 		t.Errorf("b came back and was decided at once: queued %d", n)
 	}
 }
@@ -433,8 +451,11 @@ func TestOutsideLinkIsNeverOpened(t *testing.T) {
 		t.Skip(err)
 	}
 	var keyed []string
-	defer func(f func(string, os.FileInfo) (string, bool)) { fileKey = f }(fileKey)
-	fileKey = func(p string, fi os.FileInfo) (string, bool) { keyed = append(keyed, p); return "k:" + p, true }
+	defer func(f func(string, os.FileInfo) (media.State, error)) { readFileState = f }(readFileState)
+	readFileState = func(p string, fi os.FileInfo) (media.State, error) {
+		keyed = append(keyed, p)
+		return media.State{Key: "k:" + p, Size: fi.Size(), MTime: fi.ModTime()}, nil
+	}
 	settle(s)
 	for _, p := range keyed {
 		if p == link || p == outside {
@@ -443,5 +464,70 @@ func TestOutsideLinkIsNeverOpened(t *testing.T) {
 	}
 	if len(keyed) == 0 {
 		t.Error("the watch saw nothing (a.mkv should have been keyed)")
+	}
+}
+
+// An untouched file reads the same at every look: identity, size and times (if it did not, it would
+// look changed at every scan and never be converted). Where the directory listing's copy of size or
+// time differs from the file's, that is logged: the scanner reads the file itself.
+func TestUntouchedFileStateIsStable(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "a.mkv")
+	os.WriteFile(p, []byte("12345"), 0o644)
+	old := time.Now().Add(-time.Hour)
+	os.Chtimes(p, old, old)
+	var first fileState
+	for i := 0; i < 5; i++ {
+		st, err := os.Lstat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cur := stateOf(p, st)
+		if i == 0 {
+			first = cur
+		} else if !cur.same(first) {
+			t.Errorf("look %d differs:\n first %+v\n now   %+v", i, first, cur)
+		}
+		entries, _ := os.ReadDir(dir)
+		if fi, err := entries[0].Info(); err == nil && (fi.Size() != st.Size() || !fi.ModTime().Equal(st.ModTime())) {
+			t.Logf("the listing's copy differs from the file: listing %d %v, file %d %v", fi.Size(), fi.ModTime(), st.Size(), st.ModTime())
+		}
+	}
+}
+
+// A file whose state cannot be read (FileState fails: on Windows, a download holding it locked) is never
+// taken as unchanged: its size and time come from the listing, and its identity is unknown, so it waits
+// while that lasts, even while the listing's size and time keep moving. Once it can be read, it waits
+// like any new file (review 9cf6a03).
+func TestUnreadableFileStateIsNeverReady(t *testing.T) {
+	s, _, lib, _ := setup(t, h264Big)
+	clock := time.Now()
+	s.Now, s.MinAge = func() time.Time { return clock }, time.Minute
+	a := filepath.Join(lib, "a.mkv")
+	old := clock.Add(-time.Hour)
+	os.Chtimes(a, old, old)
+	defer func(f func(string, os.FileInfo) (media.State, error)) { readFileState = f }(readFileState)
+	readFileState = func(p string, fi os.FileInfo) (media.State, error) {
+		return media.State{}, &os.PathError{Op: "open", Path: p, Err: os.ErrPermission}
+	}
+	scan := func() int { clock = clock.Add(2 * time.Minute); return s.ScanOnce(context.Background()) }
+	for i, grow := range []bool{false, true, false, true, false} {
+		if grow { // still being written: the listing shows it growing and its time moving
+			f, _ := os.OpenFile(a, os.O_APPEND|os.O_WRONLY, 0)
+			f.Write([]byte("more"))
+			f.Close()
+			old = old.Add(time.Second)
+			os.Chtimes(a, old, old)
+		}
+		if n := scan(); n != 0 {
+			t.Fatalf("look %d: a file that cannot be read was queued (%d)", i, n)
+		}
+	}
+	readFileState = media.FileState // it can be read again
+	if n := scan(); n != 0 {
+		t.Errorf("readable again: decided on its first readable look (%d)", n)
+	}
+	if n := scan(); n != 1 {
+		t.Errorf("readable and unchanged since: queued %d, want 1", n)
 	}
 }

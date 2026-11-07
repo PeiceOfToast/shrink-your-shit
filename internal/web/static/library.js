@@ -68,7 +68,7 @@
         $("custom").querySelector("strong").textContent = "This setting is too custom to show as choices";
         $("qh").textContent = "Choices for " + lib.name;
         // A custom setting shows the defaults, but still with the choices this version can save (addendum 13).
-        editor = ed.selectors($("selectors"), function () { prev.mark(); }, custom ? { availableAudio: setting.availableAudio, availableSubtitles: setting.availableSubtitles } : setting);
+        editor = ed.selectors($("selectors"), function () { prev.mark(); }, custom ? { availableAudio: setting.availableAudio, availableSubtitles: setting.availableSubtitles, availableFileTypes: setting.availableFileTypes } : setting);
         if (custom) $("save").textContent = "Use these choices instead";
         $("save").onclick = save; $("applies").textContent = "Applies to " + lib.name + " only."; $("applies").hidden = false;
         $("sample").hidden = false; $("sf").onchange = function () { prev.start(); };

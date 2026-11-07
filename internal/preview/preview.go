@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -104,7 +105,7 @@ func list(root string) ([]file, string, error) {
 		if !scanner.IsVideo(p) {
 			return nil
 		}
-		if st, err := d.Info(); err == nil { // Lstat, as the scanner: a link is seen as a link
+		if st, err := os.Lstat(p); err == nil { // as the scanner: a link is seen as a link, the file itself read
 			if _, ignore := scanner.Guard(root, p, st); !ignore {
 				out = append(out, file{p, st})
 			}
