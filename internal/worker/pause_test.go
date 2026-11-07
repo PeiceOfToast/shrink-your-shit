@@ -250,7 +250,7 @@ func TestRequestStopOnARunningJobOnlyMarksIt(t *testing.T) {
 	if got := s.job(); got.Status != jobs.Running {
 		t.Errorf("status %s", got.Status)
 	}
-	if req, _ := s.store.StopRequested(j.ID); req != jobs.StopByPerson {
+	if req, _ := s.store.StopRequested(j.ID); !req {
 		t.Error("the stop is not recorded")
 	}
 	s.store.Release(j.ID)
@@ -368,30 +368,7 @@ func TestPoolDownThenUpWhileBusy(t *testing.T) {
 	}
 }
 
-// Removing a library marks its jobs (jobs.StopLibraryRemoved): a running job that reaches its last check
-// before the swap with that mark is dropped, nothing replaced (retention 0).
-func TestLibraryRemovalBeforeTheSwapDropsTheJob(t *testing.T) {
-	s := newScenario(t)
-	w := s.worker(Replace)
-	l, _ := s.store.AddLibrary("Movies", s.dir, rules.SliderTemplate(3), true)
-	s.store.Drop(s.id) // the scenario's job again, now in that library
-	s.id, _ = s.store.Enqueue(jobs.Job{Library: s.dir, LibraryID: l.ID, Path: s.src, DurationSec: 100, SizeBefore: 14})
-	s.afterChecks = func() {
-		if _, running, err := s.store.MarkLibraryStop(l.ID); err != nil || len(running) != 1 {
-			t.Errorf("MarkLibraryStop: %v %v", running, err)
-		}
-	}
-	w.RunOne(context.Background())
-	if _, err := s.store.Get(s.id); err == nil {
-		t.Errorf("the job should be dropped: %+v", s.job())
-	}
-	if f, _ := s.store.GetFile(s.src); f != nil && f.Reason == jobs.UserStoppedReason {
-		t.Error("a library removal is not a stop by the person")
-	}
-	s.assertOriginalSafe()
-}
-
-// The same mark arriving once the swap has begun changes nothing: the swap finishes and the job is done
+// A library removal reaching a job inside its swap changes nothing: the swap finishes and the job is done
 // (DELETE waits for that before it answers).
 func TestLibraryRemovalInsideTheSwapFinishesIt(t *testing.T) {
 	s := newScenario(t)
@@ -401,8 +378,7 @@ func TestLibraryRemovalInsideTheSwapFinishesIt(t *testing.T) {
 	s.id, _ = s.store.Enqueue(jobs.Job{Library: s.dir, LibraryID: l.ID, Path: s.src, DurationSec: 100, SizeBefore: 14})
 	swapHook = func(at string) error {
 		if at == "before swap" {
-			s.store.MarkLibraryStop(l.ID)
-			w.StopJob(s.id)
+			w.RequeueJob(s.id)
 		}
 		return nil
 	}
@@ -414,26 +390,4 @@ func TestLibraryRemovalInsideTheSwapFinishesIt(t *testing.T) {
 	if read(s.src) != "new" || read(s.trash()) != "original-bytes" {
 		t.Errorf("at the name %q, kept %q", read(s.src), read(s.trash()))
 	}
-}
-
-// A library removal given up (409: the conversion did not end in time) leaves the job alone even when
-// its worker sees the stop only afterwards: back in the queue, not dropped (review c7551fc).
-func TestLibraryRemovalGivenUpRequeuesTheJob(t *testing.T) {
-	s := newScenario(t)
-	w := s.worker(Replace)
-	l, _ := s.store.AddLibrary("Movies", s.dir, rules.SliderTemplate(3), true)
-	s.store.Drop(s.id)
-	s.id, _ = s.store.Enqueue(jobs.Job{Library: s.dir, LibraryID: l.ID, Path: s.src, DurationSec: 100, SizeBefore: 14})
-	done := runHung(t, s, w) // a slow conversion, held past the wait
-	wasStarted, running, err := s.store.MarkLibraryStop(l.ID)
-	if err != nil || len(running) != 1 {
-		t.Fatal(running, err)
-	}
-	s.store.ClearLibraryStop(l.ID, wasStarted) // the 409: given up
-	w.StopJob(s.id)                            // ...and the stop reaches the worker only now
-	waitDone(t, done)
-	if j := s.job(); j.Status != jobs.Queued {
-		t.Errorf("status %s, want back in the queue", j.Status)
-	}
-	s.assertOriginalSafe()
 }

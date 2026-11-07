@@ -341,18 +341,14 @@ sampled hash (otherwise it is left alone and the row marked `needs_attention`); 
   409 `already_finished` if it was already being put in place and ended done, and 202
   `{"status":"stopping"}` if it has not ended within 30 s. A finished job: 409 `not_stoppable`. A marked job left by a stopped
   program ends as stopped at the next start.
-- **Removing a library** (`DELETE /api/libraries/{id}`), `Store.MarkLibraryStop` in one transaction:
-  - The library stops taking new jobs (`started` = 0, so a scan running meanwhile adds none).
-  - Its waiting and running jobs are marked (`stop_requested` = 2, "library removed": no claim takes them; a
-    running one is dropped at its last check before the swap, not recorded as stopped by the person),
-    and the running ones are stopped.
-  - `DeleteLibrary` then removes the record only when none of its jobs runs, checked and removed in one
-    transaction (else `ErrLibraryBusy`). The handler retries that for at most 5 s.
-  - A conversion already inside its swap finishes first, so the answer comes after it; with retention > 0
-    its original is kept and restorable.
-  - If none of that ends in time, nothing is removed: the marks are undone, `started` is restored, and the
-    answer is 409 `busy`. A worker that sees its stop only afterwards finds no mark and puts the job back in
-    the queue instead of dropping it.
+- **Removing a library** (`DELETE /api/libraries/{id}`): `Store.BeginRemove` marks it, in memory only,
+  as being removed: no job of it is claimed and it cannot be started. Nothing is written, so nothing needs
+  undoing or recovering after a crash. Its running jobs are put back in the queue the way a pause does
+  (`RequeueJob`: original untouched). `DeleteLibrary` removes the library and its waiting jobs in one
+  transaction, and only when none of its jobs runs (else `ErrLibraryBusy`); the handler retries for at
+  most 5 s. A conversion already inside its swap finishes first, so the answer comes after it; with
+  retention > 0 its original is kept and restorable. Any other outcome (timeout: 409 `busy`; a store
+  error) leaves everything as it was, and the in-memory mark is released on every exit path.
 - **Swap window:** once the new file has passed its checks the rest of the job runs with a context
   that cannot be cancelled, so a stop or pause arriving then lets the swap finish and the job ends
   done, never half swapped.

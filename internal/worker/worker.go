@@ -34,13 +34,10 @@ type Queue interface {
 	Fail(id int64, msg string) error
 	// Release puts a running job back in the queue (used on shutdown).
 	Release(id int64) error
-	// Drop deletes a job that was stopped because its library was removed.
-	Drop(id int64) error
 	// UserStopped turns a job the person stopped into a file skipped as user_stopped.
 	UserStopped(id int64) error
-	// StopRequested is why a stop was asked for a running job (jobs.StopByPerson, jobs.StopLibraryRemoved;
-	// 0: none), checked before the swap.
-	StopRequested(id int64) (int, error)
+	// StopRequested reports whether "Stop this file" was asked for a running job (checked before the swap).
+	StopRequested(id int64) (bool, error)
 	// Keep marks a job "kept original": a safety check refused the result (reason says why).
 	Keep(id int64, reason string) error
 	// RecordPlan stores the Plan a running job converts with (JSON) and its fingerprint.
@@ -104,20 +101,19 @@ type Worker struct {
 type stopKind int
 
 const (
-	stopNone    stopKind = iota
-	stopDrop             // its library was removed: the job record goes
-	stopPause            // Pause all: back to the queue
-	stopUser             // Stop this file: skipped, reason user_stopped
-	stopStall            // no progress for StallAfter: failed
-	stopRequeue          // stopped for a library removal that was given up: back in the queue
+	stopNone  stopKind = iota
+	stopPause          // Pause all, or its library being removed: back to the queue
+	stopUser           // Stop this file: skipped, reason user_stopped
+	stopStall          // no progress for StallAfter: failed
 )
 
 // DefaultStallAfter is how long an encode may go without progress before the watchdog stops it.
 const DefaultStallAfter = 10 * time.Minute
 
-// StopJob stops job id if this worker is running it: the original is left untouched, the temp files
-// removed, and the job record dropped (its library was removed). It does not wait.
-func (w *Worker) StopJob(id int64) { w.stop(id, stopDrop) }
+// RequeueJob stops job id if this worker is running it and puts it back in the queue, as a pause does:
+// the original is left untouched and the temp files removed (its library is being removed, which then
+// deletes the waiting job). One already inside its swap finishes. It does not wait.
+func (w *Worker) RequeueJob(id int64) { w.stop(id, stopPause) }
 
 // StopFile stops job id if this worker is running it ("Stop this file"): the original is untouched,
 // and the file is recorded as stopped by the person. It reports whether this worker was running it.
@@ -222,22 +218,9 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 	// A stop asked for on the job's record wins over a pause or a shutdown, so it never waits in the
 	// queue as a job no claim takes. Once the new file is in place (err == nil) the job is done.
 	if err != nil {
-		req, rerr := w.Queue.StopRequested(job.ID)
-		switch {
-		case rerr != nil:
-		case req == jobs.StopByPerson:
+		if req, rerr := w.Queue.StopRequested(job.ID); rerr == nil && req {
 			stopped = stopUser
-		case req == jobs.StopLibraryRemoved:
-			stopped = stopDrop
-		case stopped == stopDrop:
-			// StopJob came with a library removal that was then given up (409): the record says so,
-			// so the job is not dropped; it goes back in the queue (the original is untouched).
-			stopped = stopRequeue
 		}
-	}
-	if err != nil && stopped == stopDrop {
-		log.Printf("worker %s: job %d: its library is being removed; stopped, original untouched", w.ID, job.ID)
-		return true, w.Queue.Drop(job.ID)
 	}
 	if err != nil && stopped == stopUser {
 		log.Printf("worker %s: job %d: stopped by the person, original untouched", w.ID, job.ID)
@@ -249,15 +232,11 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 		case stopPause:
 			log.Printf("worker %s: job %d: paused, back in the queue", w.ID, job.ID)
 			return true, w.Queue.Release(job.ID)
-		case stopRequeue:
-			log.Printf("worker %s: job %d: its library was not removed after all; back in the queue", w.ID, job.ID)
-			return true, w.Queue.Release(job.ID)
 		case stopUser:
 			return true, w.Queue.UserStopped(job.ID)
 		case stopStall:
 			return true, w.Queue.Fail(job.ID, fmt.Sprintf("Stopped: no progress for %s. The original is untouched; press Retry to try again.", w.stallAfter()))
 		}
-		return true, w.Queue.Drop(job.ID)
 	}
 	if err != nil {
 		if ctx.Err() != nil {
@@ -325,8 +304,7 @@ func plainFailure(err error) string {
 	return "Converting did not finish. Your original was not touched. Press Retry; if it keeps failing, Settings > System shows what went wrong."
 }
 
-// errStopRequested: a stop was recorded on the job before its swap (by the person, or its library being
-// removed); nothing was replaced.
+// errStopRequested: "Stop this file" was recorded on the job before its swap; nothing was replaced.
 var errStopRequested = errors.New("stopped by the person before the new file was put in place")
 
 // testHook, if set, is called at named points of RunOne ("registered"), so tests can land a pause or a
@@ -509,7 +487,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	if req, err := w.Queue.StopRequested(job.ID); err != nil {
 		return "", fmt.Errorf("checking for a stop: %w", err)
-	} else if req != 0 {
+	} else if req {
 		return "", errStopRequested
 	}
 	ctx = context.WithoutCancel(ctx)

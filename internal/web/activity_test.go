@@ -410,9 +410,11 @@ func TestPauseResumeAndStop(t *testing.T) {
 	}
 }
 
-// DELETE /api/libraries/{id} never answers 200 while one of its conversions is inside its swap: it waits
-// for that to finish (the job ends done), or answers 409 and removes nothing (review 1f54465).
-func TestDeleteLibraryWaitsForASwapInProgress(t *testing.T) {
+// DELETE /api/libraries/{id}: either the library is gone with no job of it running on, or everything is
+// as it was (409). A conversion inside its swap finishes before the answer; an ordinary running one is put
+// back in the queue and goes with the library; no scan or start reopens it meanwhile (reviews 1f54465,
+// c7551fc, 5cdd27f).
+func TestDeleteLibraryLeavesNothingHalfDone(t *testing.T) {
 	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -420,48 +422,97 @@ func TestDeleteLibraryWaitsForASwapInProgress(t *testing.T) {
 	defer st.Close()
 	a, _, _ := OpenAccess(t.TempDir(), false)
 	a.FailDelay = 0
-	stopped := map[int64]bool{}
 	var mu sync.Mutex
-	srv := httptest.NewServer(Handler(st, a, Engine{StopJob: func(id int64) { mu.Lock(); stopped[id] = true; mu.Unlock() }}))
+	inSwap := map[int64]bool{} // its worker cannot be stopped any more
+	srv := httptest.NewServer(Handler(st, a, Engine{RequeueJob: func(id int64) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !inSwap[id] {
+			st.Release(id) // as the worker does: back in the queue, original untouched
+		}
+	}}))
 	defer srv.Close()
 	defer func(d time.Duration) { libraryStopWait = d }(libraryStopWait)
 	libraryStopWait = 2 * time.Second
+	del := func(id int64) (int, string) { return post(t, srv, "DELETE", fmt.Sprintf("/api/libraries/%d", id), "") }
+	gone := func(id int64, jobIDs ...int64) {
+		t.Helper()
+		if _, err := st.GetLibrary(id); err != jobs.ErrNotFound {
+			t.Errorf("library %d still there: %v", id, err)
+		}
+		for _, j := range jobIDs {
+			if got, err := st.Get(j); err == nil && got.Status != jobs.Done {
+				t.Errorf("job %d left behind: %+v", j, got)
+			}
+		}
+	}
 
-	// a conversion inside its swap: it ends done 300 ms after the delete arrives (the stop cannot cut it)
+	// 1. inside its swap: the answer comes after the job is done
 	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
 	j, _ := st.Enqueue(jobs.Job{Library: l.Path, LibraryID: l.ID, Path: l.Path + "/a.mkv"})
 	st.Claim("w")
+	mu.Lock()
+	inSwap[j] = true
+	mu.Unlock()
 	done := make(chan time.Time, 1)
 	go func() {
 		time.Sleep(300 * time.Millisecond)
+		// meanwhile a scan or Start cannot reopen it, and nothing of it is claimed
+		if err := st.StartLibrary(l.ID); err != jobs.ErrLibraryBusy {
+			t.Errorf("started during delete: %v", err)
+		}
+		if code, b := post(t, srv, "POST", fmt.Sprintf("/api/libraries/%d/scan", l.ID), "{}"); code != 409 || errCode(b) != "busy" {
+			t.Errorf("scan during delete: %d %s", code, b)
+		}
+		if late, err := st.Enqueue(jobs.Job{Library: l.Path, LibraryID: l.ID, Path: l.Path + "/b.mkv"}); err == nil {
+			if c, err := st.Claim("w2"); err == nil {
+				t.Errorf("job %d (enqueued %d) was claimed during delete", c.ID, late)
+			}
+		}
 		st.Complete(j, l.Path+"/a.mkv", 1)
 		done <- time.Now()
 	}()
-	code, b := post(t, srv, "DELETE", fmt.Sprintf("/api/libraries/%d", l.ID), "")
+	code, b := del(l.ID)
 	answered := time.Now()
-	finished := <-done
-	if code != 200 || answered.Before(finished) {
-		t.Errorf("delete answered %d %s before the swap finished (%v)", code, b, finished.Sub(answered))
+	if finished := <-done; code != 200 || answered.Before(finished) {
+		t.Errorf("1: %d %s, answered %v before the swap finished", code, b, finished.Sub(answered))
 	}
-	if !stopped[j] {
-		t.Error("the running job was not asked to stop")
+	gone(l.ID, j)
+	if j2, _ := st.List(100); len(j2) != 1 {
+		t.Errorf("1: jobs left: %+v", j2)
 	}
 
-	// one that does not end in time: 409, nothing removed, its mark undone
+	// 2. an ordinary running job: back in the queue, then removed with the library
 	l2, _ := st.AddLibrary("Shows", t.TempDir(), rules.SliderTemplate(3), true)
-	j2, _ := st.Enqueue(jobs.Job{Library: l2.Path, LibraryID: l2.ID, Path: l2.Path + "/b.mkv"})
-	q2, _ := st.Enqueue(jobs.Job{Library: l2.Path, LibraryID: l2.ID, Path: l2.Path + "/c.mkv"})
+	r2, _ := st.Enqueue(jobs.Job{Library: l2.Path, LibraryID: l2.ID, Path: l2.Path + "/c.mkv"})
 	st.Claim("w")
+	if code, b := del(l2.ID); code != 200 {
+		t.Errorf("2: %d %s", code, b)
+	}
+	gone(l2.ID, r2)
+
+	// 3. a swap that does not end in time: 409, the library intact and startable, its job still running
+	l3, _ := st.AddLibrary("Music videos", t.TempDir(), rules.SliderTemplate(3), true)
+	r3, _ := st.Enqueue(jobs.Job{Library: l3.Path, LibraryID: l3.ID, Path: l3.Path + "/d.mkv"})
+	q3, _ := st.Enqueue(jobs.Job{Library: l3.Path, LibraryID: l3.ID, Path: l3.Path + "/e.mkv"})
+	st.Claim("w")
+	mu.Lock()
+	inSwap[r3] = true
+	mu.Unlock()
 	libraryStopWait = 200 * time.Millisecond
-	if code, b := post(t, srv, "DELETE", fmt.Sprintf("/api/libraries/%d", l2.ID), ""); code != 409 || errCode(b) != "busy" {
-		t.Errorf("not ended in time: %d %s", code, b)
+	if code, b := del(l3.ID); code != 409 || errCode(b) != "busy" {
+		t.Errorf("3: %d %s", code, b)
 	}
-	if got, err := st.GetLibrary(l2.ID); err != nil || !got.Started {
-		t.Errorf("the library must stay, taking new jobs again: %+v %v", got, err)
+	if got, err := st.GetLibrary(l3.ID); err != nil || !got.Started {
+		t.Errorf("3: the library must stay as it was: %+v %v", got, err)
 	}
-	for _, id := range []int64{j2, q2} {
-		if req, _ := st.StopRequested(id); req != 0 {
-			t.Errorf("job %d is still marked", id)
-		}
+	if err := st.StartLibrary(l3.ID); err != nil {
+		t.Errorf("3: the removal must be over: %v", err)
+	}
+	if j, _ := st.Get(r3); j.Status != jobs.Running {
+		t.Errorf("3: the job is still finishing: %s", j.Status)
+	}
+	if j, err := st.Claim("w3"); err != nil || j.ID != q3 {
+		t.Errorf("3: its waiting job is claimable again: %+v %v", j, err)
 	}
 }

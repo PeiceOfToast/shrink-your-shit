@@ -267,38 +267,69 @@ func TestPausedAndUserStopped(t *testing.T) {
 	}
 }
 
-// While a library is being removed nothing new starts for it: a scan cannot add a job, a waiting one is
-// not claimed, and removal is refused while one runs; giving up restores it (review c7551fc).
-func TestLibraryRemovalBlocksNewWork(t *testing.T) {
+// While a library is being removed (BeginRemove) none of its jobs is claimed and it cannot be started;
+// it goes only in one transaction with no job of it running; a removal given up or failing leaves
+// everything as it was (review 5cdd27f).
+func TestLibraryRemoval(t *testing.T) {
 	s := open(t)
 	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
+	other, _ := s.AddLibrary("Shows", "/s", rules.SliderTemplate(3), true)
 	run, _ := s.Enqueue(Job{Library: "/m", LibraryID: l.ID, Path: "/m/1.mkv"})
 	s.Claim("w")
 	waiting, _ := s.Enqueue(Job{Library: "/m", LibraryID: l.ID, Path: "/m/2.mkv"})
-	wasStarted, running, err := s.MarkLibraryStop(l.ID)
-	if err != nil || !wasStarted || len(running) != 1 || running[0] != run {
-		t.Fatalf("%v %v %v", wasStarted, running, err)
+	theirs, _ := s.Enqueue(Job{Library: "/s", LibraryID: other.ID, Path: "/s/1.mkv"})
+
+	release, err := s.BeginRemove(l.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := s.Enqueue(Job{Library: "/m", LibraryID: l.ID, Path: "/m/3.mkv"}); err != ErrLibraryGone {
-		t.Errorf("a scan during removal added a job: %v", err)
+	if _, err := s.BeginRemove(l.ID); err != ErrLibraryBusy {
+		t.Errorf("a second removal at once: %v", err)
 	}
-	if j, err := s.Claim("w2"); err == nil {
-		t.Errorf("a waiting job was claimed during removal: %+v", j)
+	if err := s.StartLibrary(l.ID); err != ErrLibraryBusy {
+		t.Errorf("started during removal: %v", err)
+	}
+	if j, err := s.Claim("w2"); err != nil || j.ID != theirs {
+		t.Errorf("claim during removal must skip its jobs and take the other library's: %+v %v", j, err)
 	}
 	if err := s.DeleteLibrary(l.ID); err != ErrLibraryBusy {
 		t.Errorf("removed with a job running: %v", err)
 	}
 	// given up: everything as before
-	if err := s.ClearLibraryStop(l.ID, wasStarted); err != nil {
+	release()
+	release() // twice is harmless
+	if err := s.StartLibrary(l.ID); err != nil {
+		t.Errorf("start after: %v", err)
+	}
+	if j, err := s.Claim("w3"); err != nil || j.ID != waiting {
+		t.Errorf("its waiting job is claimable again: %+v %v", j, err)
+	}
+
+	// a store error inside the removal: nothing removed
+	s.Release(waiting)
+	s.Release(run)
+	release, _ = s.BeginRemove(l.ID)
+	s.db.Exec(`CREATE TRIGGER fail_delete BEFORE DELETE ON libraries BEGIN SELECT RAISE(ABORT, 'injected'); END`)
+	if err := s.DeleteLibrary(l.ID); err == nil || err == ErrLibraryBusy {
+		t.Errorf("injected error: %v", err)
+	}
+	if _, err := s.GetLibrary(l.ID); err != nil {
+		t.Errorf("the library must stay: %v", err)
+	}
+	for _, id := range []int64{run, waiting} {
+		if j, err := s.Get(id); err != nil || j.Status != Queued {
+			t.Errorf("job %d must stay waiting: %+v %v", id, j, err)
+		}
+	}
+	s.db.Exec(`DROP TRIGGER fail_delete`)
+	// and done: the library and its waiting jobs go together
+	if err := s.DeleteLibrary(l.ID); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.GetLibrary(l.ID); !got.Started {
-		t.Error("the library must take new jobs again")
-	}
-	if j, err := s.Claim("w2"); err != nil || j.ID != waiting {
-		t.Errorf("the waiting job must be claimable again: %+v %v", j, err)
-	}
-	if _, err := s.Enqueue(Job{Library: "/m", LibraryID: l.ID, Path: "/m/3.mkv"}); err != nil {
-		t.Errorf("scans add jobs again: %v", err)
+	release()
+	for _, id := range []int64{run, waiting} {
+		if _, err := s.Get(id); err == nil {
+			t.Errorf("job %d of the removed library is still there", id)
+		}
 	}
 }

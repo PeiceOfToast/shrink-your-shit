@@ -119,8 +119,8 @@ func (p *Pool) each(f func(*Worker)) {
 	}
 }
 
-// StopJob stops job id wherever it runs (its library was removed).
-func (p *Pool) StopJob(id int64) { p.each(func(w *Worker) { w.StopJob(id) }) }
+// RequeueJob stops job id wherever it runs and puts it back in the queue (its library is being removed).
+func (p *Pool) RequeueJob(id int64) { p.each(func(w *Worker) { w.RequeueJob(id) }) }
 
 // StopFile stops job id wherever it runs (Stop this file); it reports whether a worker was running it.
 func (p *Pool) StopFile(id int64) bool {

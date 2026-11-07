@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver, no cgo
@@ -86,6 +87,9 @@ type Store struct {
 	db   *sql.DB
 	path string
 	now  func() time.Time
+
+	removeMu sync.Mutex     // held by Claim and StartLibrary while they look at removing
+	removing map[int64]bool // libraries being removed (BeginRemove): process-local, never stored
 }
 
 // Open opens (creating if needed) the database at path and brings its schema up to date
@@ -240,10 +244,19 @@ func (s *Store) Claim(worker string) (Job, error) {
 	var id int64
 	// One statement, so a pause or a stop request set before it is always seen: no job is taken while
 	// paused, and none whose stop was requested.
+	// It takes no job of a library being removed (BeginRemove), under the same lock, so after BeginRemove
+	// returns no claim for that library can start.
+	s.removeMu.Lock()
+	skip, args := "", []any{Running, now, worker, now, Queued}
+	for lib := range s.removing {
+		skip += " AND library_id != ?"
+		args = append(args, lib)
+	}
 	err := s.db.QueryRow(`UPDATE jobs SET status=?, updated=?, worker=?, progress=0, error='', started=?
-WHERE id=(SELECT id FROM jobs WHERE status=? AND stop_requested=0 ORDER BY id LIMIT 1) AND status=?
+WHERE id=(SELECT id FROM jobs WHERE status=? AND stop_requested=0`+skip+` ORDER BY id LIMIT 1) AND status=?
 AND NOT EXISTS (SELECT 1 FROM app_meta WHERE key='paused' AND value='1') RETURNING id`,
-		Running, now, worker, now, Queued, Queued).Scan(&id)
+		append(args, Queued)...).Scan(&id)
+	s.removeMu.Unlock()
 	if errors.Is(err, sql.ErrNoRows) {
 		return Job{}, ErrNoJob
 	}
