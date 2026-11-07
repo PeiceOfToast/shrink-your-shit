@@ -1003,3 +1003,28 @@ func TestModificationTimeKept(t *testing.T) {
 		})
 	}
 }
+
+// Another name for the original appearing while it converts stops the swap (review f4c41fd): Linux and
+// macOS see it as a change (ctime), Windows, which has no ctime, by the link count checked in stillOK.
+func TestSharedDuringConversionIsRefusedAtTheSwap(t *testing.T) {
+	for _, mode := range []OutputMode{Replace, Beside} {
+		t.Run(string(mode), func(t *testing.T) {
+			s := newScenario(t)
+			other := filepath.Join(t.TempDir(), "seeding.mkv")
+			s.onEncode = func() {
+				if err := os.Link(s.src, other); err != nil {
+					t.Skip(err)
+				}
+			}
+			s.run(mode)
+			j := s.job()
+			if j.Status != jobs.Kept || !(strings.Contains(j.Error, "shared with another folder") || strings.Contains(j.Error, "changed while it was being converted")) {
+				t.Errorf("%s %q", j.Status, j.Error)
+			}
+			s.assertOriginalSafe()
+			if b, _ := os.ReadFile(other); string(b) != "original-bytes" {
+				t.Errorf("the other name changed: %q", b)
+			}
+		})
+	}
+}

@@ -201,7 +201,7 @@ func TestPreviewWritesNothing(t *testing.T) {
 	p := &Previewer{Store: store(t), Exec: &probes{}, FFprobe: "ffprobe"}
 	p.Library(1, dir, rules.SliderTemplate(1), 10*time.Second)
 	a, _ := os.Stat(filepath.Join(dir, "a.mkv"))
-	p.Sample(context.Background(), filepath.Join(dir, "a.mkv"), a, rules.SliderTemplate(5))
+	p.Sample(context.Background(), dir, filepath.Join(dir, "a.mkv"), a, rules.SliderTemplate(5))
 	if after := snapshot(t, dir); after != before {
 		t.Errorf("the library changed:\n%s\n%s", before, after)
 	}
@@ -271,7 +271,7 @@ func TestSampleInPlainWords(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return p.Sample(context.Background(), filepath.Join(dir, name), st, rules.SliderTemplate(q))
+		return p.Sample(context.Background(), dir, filepath.Join(dir, name), st, rules.SliderTemplate(q))
 	}
 	s := sample("a.mkv", 3)
 	if strings.Join(s.Lines, "|") != "Video: converted to the smaller format, same picture size and length|Audio: 2 tracks kept|Kept as it is if the new file is not at least 10% smaller" {
@@ -286,7 +286,7 @@ func TestSampleInPlainWords(t *testing.T) {
 	if s := sample("bad.mkv", 3); s.Lines[0] != "Left as it is: it can't be read." {
 		t.Errorf("%+v", s)
 	}
-	if s := sample("shared.mkv", 3); !strings.Contains(strings.Join(s.Lines, "|"), "frees no space") {
+	if s := sample("shared.mkv", 3); s.Lines[0] != "Left as it is: it is shared with another folder, so converting it would free no space." {
 		t.Errorf("%+v", s)
 	}
 	banned := []string{"crf", "preset", "x265", "hevc", "ffmpeg", "encoder", "transcode", "bits per pixel"}
@@ -374,5 +374,21 @@ func TestPreviewCountsRestoredFilesAsSkipped(t *testing.T) {
 	r := (&Previewer{Store: st, Exec: &probes{}, FFprobe: "ffprobe"}).Library(1, dir, rules.SliderTemplate(3), 10*time.Second)
 	if r.Skipped["restored"] != 1 || r.CanShrink != 1 { // b.mp4 (the shared file is skipped too)
 		t.Errorf("%+v", r)
+	}
+}
+
+// The sample says "left as it is" for a file the guards leave alone, without reading it (review f4c41fd).
+func TestSampleOfASharedFile(t *testing.T) {
+	x := &probes{}
+	p := &Previewer{Store: store(t), Exec: x, FFprobe: "ffprobe"}
+	dir := library(t) // its shared.mkv has a second name in another folder
+	path := filepath.Join(dir, "shared.mkv")
+	st, _ := os.Stat(path)
+	s := p.Sample(context.Background(), dir, path, st, rules.SliderTemplate(3))
+	if len(s.Lines) != 1 || s.Lines[0] != "Left as it is: it is shared with another folder, so converting it would free no space." || s.ExpectedBytesLow != st.Size() {
+		t.Errorf("%+v", s)
+	}
+	if x.n() != 0 {
+		t.Errorf("the shared file was read (%d probes)", x.n())
 	}
 }

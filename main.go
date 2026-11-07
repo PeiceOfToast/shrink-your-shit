@@ -268,6 +268,10 @@ func scanTargets(store *jobs.Store) func() ([]scanner.Target, error) {
 			if !l.Started {
 				continue
 			}
+			if jobs.SystemFolder(l.Path) { // made before slice 23's guard: never scanned
+				log.Printf("scan: skipping library %q: %v", l.Name, jobs.ErrSystemFolder)
+				continue
+			}
 			f, err := store.GetFlow(l.FlowID)
 			if err != nil {
 				log.Printf("scan: skipping library %q: %v", l.Name, err)

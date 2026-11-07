@@ -65,7 +65,7 @@ func previewRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			if !ok {
 				return
 			}
-			s := eng.Preview.Sample(r.Context(), path, st, t)
+			s := eng.Preview.Sample(r.Context(), root, path, st, t)
 			sample = &s
 		}
 		res := eng.Preview.Library(l.ID, root, t, previewWait)

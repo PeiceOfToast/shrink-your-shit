@@ -341,3 +341,54 @@ func TestLinksAreNeverConverted(t *testing.T) {
 		t.Errorf("jobs %+v", l)
 	}
 }
+
+// The first look is tied to the file itself, not just its path, size and times: a file deleted and made
+// again between two looks (same name, size and modification time) starts its wait again, and so does
+// one that disappears for a pass and comes back (review f4c41fd).
+func TestStillChangingFollowsTheFileNotThePath(t *testing.T) {
+	s, _, lib, _ := setup(t, h264Big)
+	a := filepath.Join(lib, "a.mkv")
+	old := time.Now().Add(-time.Hour)
+	os.Chtimes(a, old, old)
+	s.ScanOnce(context.Background()) // first look
+	time.Sleep(20 * time.Millisecond)
+	os.Remove(a) // made again: same name, size and times, but another file
+	os.WriteFile(a, []byte("12345"), 0o644)
+	os.Chtimes(a, old, old)
+	if n := s.ScanOnce(context.Background()); n != 0 {
+		t.Errorf("a file made again was decided on its first look: queued %d", n)
+	}
+	if n := s.ScanOnce(context.Background()); n != 1 {
+		t.Errorf("unchanged since: queued %d, want 1", n)
+	}
+
+	// gone for a pass, then back: its earlier look is forgotten
+	b := filepath.Join(lib, "b.mkv")
+	os.WriteFile(b, []byte("abcde"), 0o644)
+	os.Chtimes(b, old, old)
+	s.ScanOnce(context.Background()) // first look at b
+	os.Rename(b, b+".away")
+	s.ScanOnce(context.Background()) // b not seen: its look goes
+	os.Rename(b+".away", b)
+	if n := s.ScanOnce(context.Background()); n != 0 {
+		t.Errorf("b came back and was decided at once: queued %d", n)
+	}
+}
+
+// A guard is looked at again on every scan: a file that stops being shared (its other name removed) is
+// decided on the next scan, without waiting for it to change, as the Preview counts it (review f4c41fd).
+func TestGuardIsReevaluatedEveryScan(t *testing.T) {
+	s, st, lib, _ := setup(t, h264Big)
+	other := filepath.Join(t.TempDir(), "seeding.mkv")
+	if err := os.Link(filepath.Join(lib, "a.mkv"), other); err != nil {
+		t.Skipf("no hardlinks here: %v", err)
+	}
+	settle(s)
+	if r, _ := st.GetFile(filepath.Join(lib, "a.mkv")); r == nil || r.Reason != rules.SkipSharedFile {
+		t.Fatalf("record %+v", r)
+	}
+	os.Remove(other)
+	if n := s.ScanOnce(context.Background()); n != 1 {
+		t.Errorf("no longer shared: queued %d, want 1", n)
+	}
+}

@@ -304,6 +304,11 @@ func plainFailure(err error) string {
 	return "Converting did not finish. Your original was not touched. Press Retry; if it keeps failing, Settings > System shows what went wrong."
 }
 
+// errIsLink: the file is a link (or another reparse point), which is never followed (slice 23).
+var errIsLink = errors.New("the file is a link")
+
+func errorIs(err, target error) bool { return errors.Is(err, target) }
+
 // errStopRequested: "Stop this file" was recorded on the job before its swap; nothing was replaced.
 var errStopRequested = errors.New("stopped by the person before the new file was put in place")
 
@@ -360,7 +365,14 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if err != nil {
 		return "", failed("This library's setting could not be read, so converting did not start. Your original was not touched. Open the library and save its setting again, then press Retry.", err)
 	}
+	// A link is never followed: checked before opening, and the open itself does not follow one (slice 23).
+	if lst, err := os.Lstat(job.Path); err == nil && lst.Mode()&fs.ModeSymlink != 0 {
+		return "", kept("%s", rules.SkipWords[rules.SkipSymlink])
+	}
 	before, serr := statOpen(job.Path)
+	if errors.Is(serr, errIsLink) {
+		return "", kept("%s", rules.SkipWords[rules.SkipSymlink])
+	}
 	if serr != nil {
 		if errors.Is(serr, fs.ErrNotExist) {
 			return "", failed("The file is not there any more, so nothing was converted.", serr)
@@ -370,11 +382,8 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 		return "", fmt.Errorf("source file: %w", serr)
 	}
-	// The file guards again (slice 23; the scanner decided earlier, and the file may have become a link
-	// or gained another name since): a link is never converted, a shared file is left alone.
-	if lst, err := os.Lstat(job.Path); err == nil && lst.Mode()&fs.ModeSymlink != 0 {
-		return "", kept("%s", rules.SkipWords[rules.SkipSymlink])
-	}
+	// The file guards again (slice 23; the scanner decided earlier, and the file may have gained another
+	// name since): a shared file is left alone. sourceUnchanged checks it again right before the swap.
 	if media.LinkCount(job.Path, before) > 1 {
 		return "", kept("%s", rules.SkipWords[rules.SkipSharedFile])
 	}
@@ -566,7 +575,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 // from whatever the path names then: after the original was replaced, it would describe the new file
 // and the check below would wrongly find them the same.
 func statOpen(path string) (os.FileInfo, error) {
-	f, err := os.Open(path)
+	f, err := openNoFollow(path)
 	if err != nil {
 		return nil, err
 	}
@@ -583,10 +592,13 @@ func sourceUnchanged(path string, before os.FileInfo) error {
 	if err != nil || !os.SameFile(now, before) || now.Size() != before.Size() || !now.ModTime().Equal(before.ModTime()) {
 		return kept("the original file changed while it was being converted, so the new file is out of date")
 	}
-	if b, ok := changeTime(before); ok {
-		if n, ok := changeTime(now); !ok || !n.Equal(b) {
+	if b, ok := media.ChangeTime(before); ok {
+		if n, ok := media.ChangeTime(now); !ok || !n.Equal(b) {
 			return kept("the original file changed while it was being converted, so the new file is out of date")
 		}
+	}
+	if media.LinkCount(path, now) > 1 { // another name appeared while converting (Windows has no ctime to see it)
+		return kept("%s", rules.SkipWords[rules.SkipSharedFile])
 	}
 	return nil
 }

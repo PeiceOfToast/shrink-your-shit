@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 )
 
 func tempLeft(src string) bool {
@@ -226,7 +227,7 @@ func TestTempSwappedAfterTheChecksIsNotUsed(t *testing.T) {
 
 // Same size, modification time put back: only the change time shows the edit.
 func TestSourceEditKeepingSizeAndTimeIsKept(t *testing.T) {
-	if _, ok := changeTime(mustStat(t, t.TempDir())); !ok {
+	if _, ok := media.ChangeTime(mustStat(t, t.TempDir())); !ok {
 		t.Skip("this system reports no change time")
 	}
 	s := newScenario(t)

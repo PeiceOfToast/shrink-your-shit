@@ -65,7 +65,7 @@ type Scanner struct {
 	wake      chan struct{}
 	mu        sync.Mutex
 	nextScan  time.Time
-	firstLook map[string]time.Time // when each file was first seen as it is now (the two-look rule)
+	firstLook map[string]look // each file as first seen unchanged (the two-look rule)
 }
 
 // Target is one library to scan.
@@ -87,6 +87,7 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 		log.Printf("scan: cannot read the libraries: %v", err)
 		return 0
 	}
+	seen := map[string]bool{}
 	for _, t := range targets {
 		lib := t.Path
 		filepath.WalkDir(lib, func(path string, d fs.DirEntry, err error) error {
@@ -115,6 +116,7 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 			if err != nil {
 				return nil
 			}
+			seen[path] = true
 			if code, ignore := Guard(lib, path, info); ignore {
 				return nil
 			} else if code != "" {
@@ -130,6 +132,9 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 			return nil
 		})
 	}
+	if ctx.Err() == nil {
+		s.forgetUnseen(seen)
+	}
 	return queued
 }
 
@@ -141,34 +146,62 @@ func (s *Scanner) recordSkip(path string, st os.FileInfo, code string) {
 	s.Store.PutFile(jobs.File{Path: path, Size: st.Size(), ModTime: st.ModTime().UnixNano(), Decision: "skip: " + rules.SkipWords[code], Reason: code})
 }
 
-// markLook notes t as the time path was seen as it is now (its first look, or a change).
-func (s *Scanner) markLook(path string, t time.Time) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.firstLook == nil {
-		s.firstLook = map[string]time.Time{}
-	}
-	s.firstLook[path] = t
+// look is a file as it was first seen unchanged: when, and what it was (identity, size, times).
+type look struct {
+	at time.Time
+	fi os.FileInfo
 }
 
-// lookedAgo reports whether path has been seen unchanged since at least MinAge ago, noting now as its
-// first look if it was not seen yet (after a restart).
-func (s *Scanner) lookedAgo(path string, now func() time.Time) bool {
+// sameFile reports whether a and b are the same file in the same state: the same file (device and
+// inode, or the Windows file ID), size, modification time and, where the system has one, change time
+// (so a file deleted and made again with the same size and times is a different one).
+func sameFile(a, b os.FileInfo) bool {
+	if !os.SameFile(a, b) || a.Size() != b.Size() || !a.ModTime().Equal(b.ModTime()) {
+		return false
+	}
+	ca, okA := media.ChangeTime(a)
+	cb, okB := media.ChangeTime(b)
+	return okA == okB && ca.Equal(cb)
+}
+
+// observe notes path as seen now in state st, and reports whether this is its first look in that
+// state (a new file, a changed one, or one made again): then it is never decided in the same pass.
+func (s *Scanner) observe(path string, st os.FileInfo, now time.Time) (first bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.firstLook == nil {
-		s.firstLook = map[string]time.Time{}
+		s.firstLook = map[string]look{}
 	}
-	at, ok := s.firstLook[path]
-	if !ok {
-		s.firstLook[path] = now()
+	if l, ok := s.firstLook[path]; ok && sameFile(l.fi, st) {
 		return false
 	}
-	if now().Sub(at) < max(s.MinAge, time.Nanosecond) {
+	s.firstLook[path] = look{now, st}
+	return true
+}
+
+// ready reports whether path has been seen in state st since at least MinAge ago (then it is decided,
+// and its look forgotten).
+func (s *Scanner) ready(path string, st os.FileInfo, now time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	l, ok := s.firstLook[path]
+	if !ok || !sameFile(l.fi, st) || now.Sub(l.at) < max(s.MinAge, time.Nanosecond) {
 		return false
 	}
 	delete(s.firstLook, path)
 	return true
+}
+
+// forgetUnseen drops the looks of files not seen in a whole pass (deleted, moved, or no longer in a
+// library), so a file made again later at that path starts its wait afresh.
+func (s *Scanner) forgetUnseen(seen map[string]bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for p := range s.firstLook {
+		if !seen[p] {
+			delete(s.firstLook, p)
+		}
+	}
 }
 
 func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.FileInfo) bool {
@@ -185,19 +218,21 @@ func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.Fil
 		return false // its original was put back, or the person stopped it: not again until "Convert again"
 	}
 	same := prev != nil && prev.Size == st.Size() && prev.ModTime == st.ModTime().UnixNano()
-	if same && prev.Reason != rules.SkipStillChanging {
+	guarded := prev != nil && (prev.Reason == rules.SkipSharedFile || prev.Reason == rules.SkipSymlink)
+	if same && prev.Reason != rules.SkipStillChanging && !guarded {
 		return false // unchanged since it was decided
 	}
 	// A file is decided only when it has not changed since the previous look, at least MinAge earlier
 	// (a download in progress, an import being copied): the first look, or a change, records it as
 	// still changing, and the next scan decides. The look's time is kept in memory; after a restart the
 	// wait starts again.
-	if !same {
-		s.markLook(path, now())
-	}
-	if !same || !s.lookedAgo(path, now) {
-		s.recordSkip(path, st, rules.SkipStillChanging)
-		return false
+	// A guard that no longer applies (its other name was removed) to a file unchanged since: decided now,
+	// as the Preview does. Otherwise the two-look rule.
+	if !(same && guarded) {
+		if s.observe(path, st, now()) || !s.ready(path, st, now()) {
+			s.recordSkip(path, st, rules.SkipStillChanging)
+			return false
+		}
 	}
 	if open, _ := s.Store.HasOpenJob(path); open {
 		return false // already waiting or running; it will be re-checked after it finishes
