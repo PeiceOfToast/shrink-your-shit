@@ -18,9 +18,10 @@ import (
 // and checks the result against its Expect. A job keeps its Plan as a snapshot, so what was intended
 // can be read back later (slice 17's audit log).
 type Plan struct {
-	Skip            string      `json:"skip,omitempty"`   // why this file is not converted ("" = convert it)
-	Reason          string      `json:"reason,omitempty"` // why it is converted, shown on the job
-	Eligibility     Eligibility `json:"eligibility"`      // the rule that decided Skip (part of the fingerprint)
+	Skip            string      `json:"skip,omitempty"`     // why this file is not converted ("" = convert it)
+	SkipCode        string      `json:"skipCode,omitempty"` // Skip as a code the API can count (Skip* below)
+	Reason          string      `json:"reason,omitempty"`   // why it is converted, shown on the job
+	Eligibility     Eligibility `json:"eligibility"`        // the rule that decided Skip (part of the fingerprint)
 	Video           VideoEncode `json:"video"`
 	Output          string      `json:"output"`                 // replace | beside
 	MinSavingPct    int         `json:"minSavingPct,omitempty"` // the new file must be this much smaller (0: just smaller)
@@ -28,6 +29,19 @@ type Plan struct {
 	Kind            string      `json:"kind"`                   // the template kind it was compiled from
 	CompilerVersion int         `json:"compilerVersion"`
 }
+
+// Skip codes: why a file is not converted, as the Preview counts them (UI-API-CONTRACT.md, the open
+// "skipped" enum, shared with the Skipped list). The Plan's Skip says the same in a sentence for the job record.
+const (
+	SkipAlreadyEfficient = "already_efficient"    // enough data per pixel already, or below the legacy bitrate
+	SkipAlreadyHEVC      = "already_hevc"         // HEVC, AV1, VP9: never converted
+	SkipOtherFormat      = "format_not_converted" // a format this setting does not convert
+	SkipNoVideo          = "no_video"
+	SkipUnknownBitrate   = "unknown_bitrate"    // its saving cannot be judged
+	SkipCannotKeepTrack  = "cannot_keep_track"  // a track (its subtitles) cannot stay in its container
+	SkipSettingCannotRun = "setting_cannot_run" // the flow cannot run (missing values, a kind not built yet)
+	SkipUnreadable       = "unreadable"         // the file could not be read (the probe failed); set by callers
+)
 
 // Eligibility is the rule a Plan decides with: which source format, from which bitrate.
 type Eligibility struct {
@@ -58,7 +72,7 @@ func (t Template) Compile(info media.Info) Plan {
 	case KindLegacy:
 		pr := t.Params
 		if pr.FromCodec == "" || pr.CRF <= 0 || pr.Preset == "" {
-			p.Skip = fmt.Sprintf("its library's flow is missing values (%+v)", pr)
+			p.Skip, p.SkipCode = fmt.Sprintf("its library's flow is missing values (%+v)", pr), SkipSettingCannotRun
 			return p
 		}
 		r = Rule{FromCodec: pr.FromCodec, MinBitrateKbps: pr.MinBitrateKbps, CRF: pr.CRF, Preset: pr.Preset}
@@ -66,12 +80,12 @@ func (t Template) Compile(info media.Info) Plan {
 	case KindSlider:
 		pos, ok := SliderAt(t.Params.Quality)
 		if !ok {
-			p.Skip = fmt.Sprintf("slider position %d does not exist", t.Params.Quality)
+			p.Skip, p.SkipCode = fmt.Sprintf("slider position %d does not exist", t.Params.Quality), SkipSettingCannotRun
 			return p
 		}
 		return compileSlider(p, pos, info)
 	default:
-		p.Skip = fmt.Sprintf("flows of kind %q cannot run yet", t.Kind)
+		p.Skip, p.SkipCode = fmt.Sprintf("flows of kind %q cannot run yet", t.Kind), SkipSettingCannotRun
 		return p
 	}
 	// How it is converted is set first, so a Plan that skips the file still says what converting
@@ -82,6 +96,14 @@ func (t Template) Compile(info media.Info) Plan {
 		p.Reason = why
 	} else {
 		p.Skip = why
+		switch _, modern := alreadyEfficient[info.VideoCodec]; {
+		case info.VideoCodec != r.FromCodec && modern:
+			p.SkipCode = SkipAlreadyHEVC
+		case info.VideoCodec != r.FromCodec:
+			p.SkipCode = SkipOtherFormat
+		default:
+			p.SkipCode = SkipAlreadyEfficient // below the rule's bitrate
+		}
 	}
 	return p
 }
@@ -152,7 +174,7 @@ type Verification struct {
 // same answer. It leaves out what belongs to the one file (the reason text, its streams, its length).
 func (s Snapshot) Fingerprint() string {
 	p := s.Plan
-	p.Skip, p.Reason = "", ""
+	p.Skip, p.SkipCode, p.Reason = "", "", ""
 	b, _ := json.Marshal(struct {
 		Plan                                      Plan
 		Verify                                    Verification
@@ -171,7 +193,7 @@ func compileSlider(p Plan, pos SliderPosition, info media.Info) Plan {
 	p.Output, p.MinSavingPct, p.MinSSIM = "replace", pos.MinSavingPct, pos.MinSSIM
 	p.Eligibility = Eligibility{MinBitsPerPixel: pos.MinBPP}
 	if v == nil {
-		p.Skip = "it has no video"
+		p.Skip, p.SkipCode = "it has no video", SkipNoVideo
 		return p
 	}
 	crf := pos.CRF
@@ -183,12 +205,12 @@ func compileSlider(p Plan, pos SliderPosition, info media.Info) Plan {
 	}
 	p.Video = VideoEncode{Codec: "libx265", CRF: crf, Preset: SliderPreset, Tag: "hvc1", Index: info.MainVideoOrdinal()}
 	if name, ok := alreadyEfficient[v.Codec]; ok {
-		p.Skip = name + " is already an efficient format"
+		p.Skip, p.SkipCode = name+" is already an efficient format", SkipAlreadyHEVC
 		return p
 	}
 	name, ok := SliderSources[v.Codec]
 	if !ok {
-		p.Skip = fmt.Sprintf("%s is not a format the slider converts", v.Codec)
+		p.Skip, p.SkipCode = fmt.Sprintf("%s is not a format the slider converts", v.Codec), SkipOtherFormat
 		return p
 	}
 	if why := contentSkip(info); why != "" {
@@ -196,17 +218,17 @@ func compileSlider(p Plan, pos SliderPosition, info media.Info) Plan {
 		return p
 	}
 	if why := subtitlesNotKept(info); why != "" {
-		p.Skip = why
+		p.Skip, p.SkipCode = why, SkipCannotKeepTrack
 		return p
 	}
 	kbps := videoKbps(info, v)
 	bpp := bitsPerPixel(kbps, v)
 	if bpp <= 0 {
-		p.Skip = "its bitrate, picture size or frame rate is unknown, so its saving cannot be judged"
+		p.Skip, p.SkipCode = "its bitrate, picture size or frame rate is unknown, so its saving cannot be judged", SkipUnknownBitrate
 		return p
 	}
 	if bpp <= pos.MinBPP {
-		p.Skip = fmt.Sprintf("already efficient: %.3f bits per pixel, %s needs more than %.3f", bpp, pos.Name, pos.MinBPP)
+		p.Skip, p.SkipCode = fmt.Sprintf("already efficient: %.3f bits per pixel, %s needs more than %.3f", bpp, pos.Name, pos.MinBPP), SkipAlreadyEfficient
 		return p
 	}
 	p.Reason = fmt.Sprintf("%s at %d kbps, %.3f bits per pixel (more than %.3f)", name, kbps, bpp, pos.MinBPP)
@@ -228,6 +250,17 @@ func videoKbps(info media.Info, v *media.Stream) int {
 		return info.BitrateKbps
 	}
 	return 0
+}
+
+// SourceVideo is the main video's bitrate and bits per pixel per frame as the slider judges them (0 when
+// unknown). The Preview estimates from the same numbers.
+func SourceVideo(info media.Info) (kbps int, bpp float64) {
+	v := info.Video()
+	if v == nil {
+		return 0, 0
+	}
+	kbps = videoKbps(info, v)
+	return kbps, bitsPerPixel(kbps, v)
 }
 
 // bitsPerPixel is the video's bits per pixel per frame: how much data each pixel gets.

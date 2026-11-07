@@ -73,6 +73,12 @@ INSERT INTO app_meta(key, value) SELECT 'install',
 	{4, "job plan snapshot", `
 ALTER TABLE jobs ADD COLUMN plan TEXT;
 ALTER TABLE jobs ADD COLUMN plan_fingerprint TEXT;`},
+
+	// What ffprobe said about a file, while its size and modification time stay the same (slice 19):
+	// the Preview reads a library without probing every file again, and the scanner fills it as it
+	// goes. Separate from files, whose row means "the scanner has decided on this file".
+	{5, "probe cache", `
+CREATE TABLE probes (path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime INTEGER NOT NULL, info TEXT NOT NULL);`},
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.

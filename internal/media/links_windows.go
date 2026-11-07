@@ -1,16 +1,15 @@
 // Copyright (C) shrink-your-shit contributors. Licensed under AGPL-3.0-or-later.
 
-//go:build windows
-
-package doctor
+package media
 
 import (
 	"os"
 	"syscall"
 )
 
-// linkCount is how many names the file has (NTFS hardlinks), read through an open handle.
-func linkCount(path string, _ os.FileInfo) uint64 {
+// LinkCount is how many names the file has, from NumberOfLinks (os.FileInfo does not carry it on
+// Windows, so the file is opened for its attributes; it is not read).
+func LinkCount(path string, _ os.FileInfo) uint64 {
 	f, err := os.Open(path)
 	if err != nil {
 		return 1

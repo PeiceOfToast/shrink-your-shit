@@ -2,15 +2,16 @@
 
 //go:build unix
 
-package doctor
+package media
 
 import (
 	"os"
 	"syscall"
 )
 
-// linkCount is how many names the file has (hardlinks).
-func linkCount(_ string, fi os.FileInfo) uint64 {
+// LinkCount is how many names the file has (more than 1: it is shared with another folder by a
+// hardlink, so converting it frees no space).
+func LinkCount(_ string, fi os.FileInfo) uint64 {
 	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
 		return uint64(st.Nlink)
 	}

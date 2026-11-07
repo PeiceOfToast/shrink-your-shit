@@ -135,6 +135,20 @@ ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,codec=ex
 	return err
 }
 
+// GetProbe returns the stored probe (JSON) of path if it was taken at this size and modification time.
+func (s *Store) GetProbe(path string, size, mtime int64) (string, bool) {
+	var info string
+	err := s.db.QueryRow(`SELECT info FROM probes WHERE path=? AND size=? AND mtime=?`, path, size, mtime).Scan(&info)
+	return info, err == nil
+}
+
+// PutProbe stores what ffprobe said about path at this size and modification time.
+func (s *Store) PutProbe(path string, size, mtime int64, info string) error {
+	_, err := s.db.Exec(`INSERT INTO probes(path,size,mtime,info) VALUES(?,?,?,?)
+ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,info=excluded.info`, path, size, mtime, info)
+	return err
+}
+
 // Enqueue adds a queued job.
 func (s *Store) Enqueue(j Job) (int64, error) {
 	now := s.stamp()

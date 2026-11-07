@@ -2,9 +2,9 @@
 
 //go:build !unix && !windows
 
-package doctor
+package media
 
 import "os"
 
-// linkCount: not read on this system; 1.
-func linkCount(string, os.FileInfo) uint64 { return 1 }
+// LinkCount is 1 where the system does not say.
+func LinkCount(string, os.FileInfo) uint64 { return 1 }

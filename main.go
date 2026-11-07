@@ -22,6 +22,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/doctor"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/preview"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/scanner"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/web"
@@ -158,7 +159,8 @@ func main() {
 	}
 	srv := &http.Server{Addr: *addr, Handler: web.Handler(store, access, web.Engine{
 		ScanNow: sc.ScanNow, NextScan: sc.NextScan, StopJob: w.StopJob,
-		Doctor: chk, DataDir: *data, Version: version, Logs: logs})}
+		Doctor: chk, DataDir: *data, Version: version, Logs: logs,
+		Preview: &preview.Previewer{Store: store, Exec: media.OSExec{}, FFprobe: ffprobePath}})}
 	go func() {
 		<-ctx.Done()
 		srv.Shutdown(context.Background())

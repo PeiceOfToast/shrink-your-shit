@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -170,5 +171,20 @@ func TestLinkedLibraryFolderIsScanned(t *testing.T) {
 	}
 	if n := sc.ScanOnce(context.Background()); n != 1 {
 		t.Errorf("queued %d from a linked library folder, want 1", n)
+	}
+}
+
+// The scan keeps what ffprobe said, for the Preview; a changed file is probed again (above).
+func TestScanFillsTheProbeCache(t *testing.T) {
+	s, st, lib, f := setup(t, h264Big)
+	s.ScanOnce(context.Background())
+	p := filepath.Join(lib, "a.mkv")
+	fi, _ := os.Stat(p)
+	if v, ok := st.GetProbe(p, fi.Size(), fi.ModTime().UnixNano()); !ok || !strings.Contains(v, `"videoCodec":"h264"`) {
+		t.Fatalf("%q %v", v, ok)
+	}
+	n := len(f.Calls)
+	if info, err := Probe(context.Background(), st, f, "ffprobe", p, fi); err != nil || info.VideoCodec != "h264" || len(f.Calls) != n {
+		t.Errorf("%+v %v: the cached probe is used (%d calls)", info, err, len(f.Calls)-n)
 	}
 }

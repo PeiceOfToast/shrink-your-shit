@@ -16,14 +16,16 @@ import (
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/doctor"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/preview"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
 // Engine is what the API needs from the running scanner and worker. Nil functions do nothing.
 type Engine struct {
-	ScanNow  func()           // start a scan pass now
-	NextScan func() time.Time // when the next regular pass starts
-	StopJob  func(id int64)   // stop a running job (its library was removed)
+	ScanNow  func()             // start a scan pass now
+	NextScan func() time.Time   // when the next regular pass starts
+	StopJob  func(id int64)     // stop a running job (its library was removed)
+	Preview  *preview.Previewer // the dry run (slice 19)
 
 	Doctor  *doctor.Checker // the setup checks (nil: not available)
 	DataDir string          // the data folder, for the health report
