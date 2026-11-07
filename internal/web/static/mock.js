@@ -83,14 +83,13 @@
     { id: "s1", library: "TV Shows", path: "/media/tv/Show S01E01.mkv", reason: "already_efficient", detail: "Already small for its quality. Converting would save about 3%, less than the 10% minimum.", libraryId: "2" },
     { id: "s2", library: "Movies", path: "/media/movies/Dune Sands (2021).mkv", reason: "hdr_dv", detail: "Skipped to protect the picture.", libraryId: "1" },
     { id: "s3", library: "Movies", path: "/media/movies/Old Town (2008).mkv", reason: "already_hevc", detail: "Nothing to gain.", libraryId: null },
-    { id: "s4", library: "Movies", path: "/media/movies/Night Train (2016).mp4", reason: "shared_file", detail: "Another folder uses this same file (for example Radarr). Changing it would break that.", libraryId: null },
     { id: "s5", library: "Movies", path: "/media/movies/Home Reel.avi", reason: "cannot_keep_track", detail: "The MP4 file type cannot hold the subtitle track, so the file was skipped rather than lose it.", libraryId: "1" },
     { id: "s6", library: "Movies", path: "/media/movies/Cut Loose (2015).mkv", reason: "user_stopped", detail: "You pressed Stop this file while it was converting. Your original is untouched.", libraryId: "1" },
     { id: "s7", library: "Movies", path: "/media/movies/Ocean Floor (2017).mkv", reason: "restored", detail: "Left alone so it is not converted again by surprise.", libraryId: "1" },
     { id: "s8", library: "Movies", path: "/media/movies/Tenet (2020).mkv", reason: "some_future_code", detail: "A reason this version does not know by name.", libraryId: null },
     { id: "s9", library: "TV Shows", path: "/media/tv/Blue Hour.mkv", reason: "would_not_shrink", detail: "The new file was only 2% smaller, less than the 10% minimum, so the original was kept.", libraryId: "2" }
   ];
-  for (var gi = 1; gi <= 70; gi++) skippedList.push({ id: "g" + gi, library: "TV Shows", path: "/media/tv/Season 2/E" + (gi < 10 ? "0" : "") + gi + ".mkv", reason: "already_efficient", detail: "Already small for its quality.", libraryId: "2" });
+  for (var gi = 1; gi <= 68; gi++) skippedList.push({ id: "g" + gi, library: "TV Shows", path: "/media/tv/Season 2/E" + (gi < 10 ? "0" : "") + gi + ".mkv", reason: "already_efficient", detail: "Already small for its quality.", libraryId: "2" });
   var failedList = [
     { jobId: "j9", library: "Movies", path: "/media/movies/Cut Short (2012).mkv", title: "The new file did not pass the check", detail: "The new file is 3 minutes shorter than the original, so it was thrown away. Try again; if it fails again, the original file may be damaged.", originalUntouched: true },
     { jobId: "j10", library: "TV Shows", path: "/media/tv/Season 1/E03.mkv", title: "Not enough space", detail: "Needs about 14 GB free, only 6 GB is free. Free some space, then press Retry.", originalUntouched: true }
@@ -114,9 +113,10 @@
              counts: { skipped: skippedList.length, failed: failedList.length } };
   }
   function previewResult() {
-    // About 10-20% of 1.1 TB, as first-run step 1 promises; 79 skipped, the same as the Skipped list.
-    return { stale: false, status: "ready", estimateBytesLow: 110 * GB, estimateBytesHigh: 220 * GB, files: 1284, totalBytes: 1100 * GB, canShrink: 1205,
-             skipped: { already_efficient: 71, hdr_dv: 5, shared_file: 3 } };
+    // About 10-20% of 1.1 TB, as first-run step 1 promises. files = canShrink + skipped (1284 = 1208 + 76).
+    // Until workshop slice 12, shared files are converted (in canShrink, not skipped) and free nothing: sharedNoSaving (addendum 12).
+    return { stale: false, status: "ready", estimateBytesLow: 110 * GB, estimateBytesHigh: 220 * GB, files: 1284, totalBytes: 1100 * GB, canShrink: 1208, sharedNoSaving: 29,
+             skipped: { already_efficient: 71, hdr_dv: 5 } };
   }
   // Standard's defaults are the slider's: the same choices with that position's minimum saving (contract addendum 6).
   function isSliderPosition(b) {
@@ -174,7 +174,7 @@
     checkLibrary: function (p, b) {
       var path = b.path || "", codes = { missing: "unreadable", readonly: "read_only", full: "low_space", empty: "no_videos", nocodec: "no_converter" }, bl = [], k;
       for (k in codes) if (path.indexOf(k) >= 0) bl.push({ code: codes[k], message: k === "full" ? "Only 6 GB free on this disk. Free up space (about 15 GB is enough to start), then press Check again." : "Cannot use this folder." });
-      return ok({ ok: !bl.length, blockers: bl, notes: bl.length ? [] : [{ code: "hardlinks", message: "212 files are shared with another folder (for example by Radarr). We will leave them alone, because changing one would break the link." }, { code: "no_hw_encoder", message: "" }],
+      return ok({ ok: !bl.length, blockers: bl, notes: bl.length ? [] : [{ code: "hardlinks", message: "212 files are shared with another folder (for example by Radarr). This version still converts them, but that frees no space, because the other folder keeps its copy. Leaving them alone comes in a later update." }, { code: "no_hw_encoder", message: "" }],
                   videoCount: 1284, totalBytes: 1100 * GB });
     },
     browseDirs: function (p) { return ok({ path: p.path || "/media", parent: "/", dirs: ["movies", "tv", "home"] }); },
