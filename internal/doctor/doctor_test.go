@@ -320,3 +320,29 @@ func TestUnreadableFoldersInsideAreANote(t *testing.T) {
 		t.Errorf("%+v", r.Notes)
 	}
 }
+
+// Every library note reaches the health report as a warning (only the hardware note is reported
+// once, as its own check).
+func TestHealthCarriesLibraryNotes(t *testing.T) {
+	c := checker(0)
+	c.FreeSpace = func(string) (uint64, error) { return 0, errors.New("statfs failed") }
+	got := c.Health(context.Background(), t.TempDir(), []Library{{1, "Movies", videosIn(t, 1000)}})
+	for _, ch := range got {
+		if ch.ID == "library:1" && (ch.Status != "warn" || !strings.Contains(ch.Detail, "couldn't check how much space is free") || strings.Contains(ch.Detail, "Not found")) {
+			t.Errorf("%+v", ch)
+		}
+	}
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		return
+	}
+	dir := videosIn(t, 1000)
+	p := filepath.Join(dir, "private")
+	os.Mkdir(p, 0o755)
+	os.Chmod(p, 0)
+	t.Cleanup(func() { os.Chmod(p, 0o755) })
+	for _, ch := range checker(1<<40).Health(context.Background(), t.TempDir(), []Library{{1, "Movies", dir}}) {
+		if ch.ID == "library:1" && (ch.Status != "warn" || !strings.Contains(ch.Detail, "1 folder inside couldn't be read")) {
+			t.Errorf("%+v", ch)
+		}
+	}
+}

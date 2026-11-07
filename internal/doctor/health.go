@@ -93,8 +93,8 @@ func (c *Checker) Health(ctx context.Context, dataDir string, libs []Library) []
 			ch.Status, ch.Detail = "bad", l.Path+": "+strings.Join(said, " ")
 		} else {
 			for _, n := range r.Notes {
-				if n.Code == "hardlinks" {
-					ch.Status, ch.Detail = "warn", ch.Detail+". "+n.Message
+				if n.Code != "no_hw_encoder" { // that one is the hardware check's, above
+					ch.Status, ch.Detail = "warn", strings.TrimSuffix(ch.Detail, ".")+". "+n.Message
 				}
 			}
 		}
