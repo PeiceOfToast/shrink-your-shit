@@ -22,7 +22,7 @@ func TestStatusAndRetry(t *testing.T) {
 	id, _ := st.Enqueue(jobs.Job{Library: "/lib", Path: "/lib/a.mkv"})
 	st.Claim("w")
 	st.Fail(id, "bad")
-	srv := httptest.NewServer(Handler(st, []string{"/lib"}))
+	srv := httptest.NewServer(Handler(st, []string{"/lib"}, openAccess(t)))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/api/status")
@@ -37,14 +37,14 @@ func TestStatusAndRetry(t *testing.T) {
 	if len(out.Libraries) != 1 || len(out.Jobs) != 1 || out.Jobs[0].Status != jobs.Failed {
 		t.Fatalf("%+v", out)
 	}
-	resp, _ = http.Post(srv.URL+"/api/jobs/1/retry", "", nil)
+	resp, _ = http.Post(srv.URL+"/api/jobs/1/retry", "application/json", strings.NewReader("{}"))
 	if resp.StatusCode != 200 {
 		t.Errorf("retry: %d", resp.StatusCode)
 	}
 	if j, _ := st.Get(id); j.Status != jobs.Queued {
 		t.Errorf("%+v", j)
 	}
-	resp, _ = http.Post(srv.URL+"/api/jobs/1/retry", "", nil)
+	resp, _ = http.Post(srv.URL+"/api/jobs/1/retry", "application/json", strings.NewReader("{}"))
 	if resp.StatusCode != 409 {
 		t.Errorf("retrying a queued job should be 409, got %d", resp.StatusCode)
 	}

@@ -17,9 +17,18 @@ import (
 //go:embed static
 var static embed.FS
 
-// Handler returns the HTTP handler: pages, assets under /assets and JSON under /api.
-func Handler(store *jobs.Store, libraries []string) http.Handler {
+// Handler returns the HTTP handler: pages, assets under /assets and /healthz (all public), and JSON
+// under /api, guarded by access.
+func Handler(store *jobs.Store, libraries []string, access *Access) http.Handler {
 	mux := http.NewServeMux()
+	api := http.NewServeMux()
+	mux.Handle("/api/", access.guard(api))
+	access.routes(api)
+	// For health checks: answers without signing in and says nothing else.
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Write([]byte("ok\n"))
+	})
 	sub, _ := fs.Sub(static, "static")
 	files := http.StripPrefix("/assets/", http.FileServer(http.FS(sub)))
 	mux.HandleFunc("GET /assets/", gzipAssets(sub, func(w http.ResponseWriter, r *http.Request) {
@@ -36,7 +45,7 @@ func Handler(store *jobs.Store, libraries []string) http.Handler {
 	for _, p := range pages {
 		mux.HandleFunc("GET "+p.Path+"{$}", pageHandler(items, p))
 	}
-	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
+	api.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
 		list, err := store.List(200)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
@@ -44,7 +53,7 @@ func Handler(store *jobs.Store, libraries []string) http.Handler {
 		}
 		writeJSON(w, map[string]any{"libraries": libraries, "jobs": list})
 	})
-	mux.HandleFunc("POST /api/jobs/{id}/retry", func(w http.ResponseWriter, r *http.Request) {
+	api.HandleFunc("POST /api/jobs/{id}/retry", func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 		if err != nil {
 			http.Error(w, "bad id", 400)

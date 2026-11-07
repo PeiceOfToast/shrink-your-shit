@@ -27,7 +27,8 @@ Run the same line again later to upgrade; your settings are kept. It uses `sudo`
 and tells you when it does; on macOS it installs for your user only (no sudo).
 
 Point it at your videos, and (on a server you will open from another computer) let the
-network in. There is no login yet, so only do that on a network you trust:
+network in. Other machines then sign in with an access token; the installer ends by printing an
+address that already carries it (see [Signing in](#signing-in)):
 
 ```
 curl -fsSL https://raw.githubusercontent.com/PeiceOfToast/shrink-your-shit/main/install.sh | sh -s -- --library /path/to/videos --addr 0.0.0.0:8484
@@ -104,7 +105,27 @@ program; point at it explicitly with `-ffmpeg` / `-ffprobe` or `SYP_FFMPEG` /
 
 **Proxmox / Docker / a Linux server:** see [docs/proxmox.md](docs/proxmox.md). The web page
 only listens on this computer by default (`127.0.0.1`). `-addr 0.0.0.0:8484` (or `SYP_ADDR`)
-lets other machines in. There is no login yet, so only do that on a network you trust.
+lets other machines in; they sign in with the access token.
+
+## Signing in
+
+On this computer only (the default, `127.0.0.1`) there is nothing to sign in to. As soon as the
+program listens beyond this computer (`-addr 0.0.0.0:8484`, the container, a Proxmox LXC), it makes a
+random access token, keeps it in its data folder (file `access-token`, readable only by the user it
+runs as), and asks for it on every page that shows or changes anything. The installer ends by
+printing a sign-in address with the token in it; opening it signs that browser in. To see the token
+and address again:
+
+| Where it runs | Command |
+|---|---|
+| Linux service | `sudo shrink-your-shit token` |
+| macOS | `shrink-your-shit token` |
+| Docker | `docker exec <container name> shrink-your-shit token` |
+| Windows | `shrink-your-shit token` |
+
+Settings can make a new token, which signs out every other browser. Scripts send the token as
+`Authorization: Bearer <token>`. There is no HTTPS, so the token crosses the network in plain text:
+use it on a network you trust, never on the internet.
 
 ## Is it safe for my files?
 

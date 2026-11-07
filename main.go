@@ -35,11 +35,14 @@ func (l *libFlag) String() string     { return strings.Join(*l, ",") }
 func (l *libFlag) Set(v string) error { *l = append(*l, v); return nil }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "token" {
+		os.Exit(tokenCommand(os.Stdout, os.Stderr))
+	}
 	var libs libFlag
 	flag.Var(&libs, "library", "folder to watch (repeat for several; or env SYP_LIBRARIES, separated by : on Linux/macOS, ; on Windows)")
 	def := rules.Default()
 	data := flag.String("data", defaultDataDir(), "folder for the database (default: your user config folder; env SYP_DATA)")
-	addr := flag.String("addr", envOr("SYP_ADDR", "127.0.0.1:8484"), "web UI address; use 0.0.0.0:8484 to allow other machines (no login yet, see README) (env SYP_ADDR)")
+	addr := flag.String("addr", envOr("SYP_ADDR", "127.0.0.1:8484"), "web UI address; use 0.0.0.0:8484 to allow other machines, which then need the access token (see: shrink-your-shit token) (env SYP_ADDR)")
 	from := flag.String("from-codec", def.FromCodec, "only convert files with this video codec")
 	minKbps := flag.Int("min-bitrate", def.MinBitrateKbps, "only convert files above this video bitrate (kbps)")
 	crf := flag.Int("crf", def.CRF, "HEVC quality (lower = better quality, bigger file)")
@@ -119,13 +122,23 @@ func main() {
 	workerDone := make(chan struct{})
 	go func() { w.Run(ctx); close(workerDone) }()
 
-	srv := &http.Server{Addr: *addr, Handler: web.Handler(store, libs)}
+	access, created, err := web.OpenAccess(*data, exposedToNetwork(*addr))
+	if err != nil {
+		log.Fatalf("access token: %v", err)
+	}
+	srv := &http.Server{Addr: *addr, Handler: web.Handler(store, libs, access)}
 	go func() {
 		<-ctx.Done()
 		srv.Shutdown(context.Background())
 	}()
+	switch {
+	case created: // the only time the token is logged
+		log.Printf("A new access token was made. Sign in at %s (to see it again: shrink-your-shit token)", signInURL(*addr, access.Token()))
+	case access.Required():
+		log.Print("The web page needs the access token. To see it: shrink-your-shit token")
+	}
 	if exposedToNetwork(*addr) {
-		log.Print("WARNING: the web page is reachable from other machines and has no login yet. Only use this on a network you trust; never expose it to the internet.")
+		log.Print("The web page is reachable from other machines (with the access token). There is no HTTPS: use it on a network you trust, never on the internet.")
 	}
 	log.Printf("shrink-your-shit %s: watching %v; web UI at http://%s", version, []string(libs), *addr)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

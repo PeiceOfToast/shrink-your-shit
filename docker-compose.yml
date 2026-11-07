@@ -8,7 +8,7 @@ services:
     # image: ghcr.io/peiceoftoast/shrink-your-shit:latest
     # user: "1000:1000"    # must be able to read AND write the media folder; change to match its owner
     ports:
-      - "8484:8484"        # no login yet: never expose this port to the internet
+      - "8484:8484"        # needs the access token (docker exec <name> shrink-your-shit token); no HTTPS, so never expose it to the internet
     volumes:
       - syp-config:/config              # database (a named volume, so it is writable by the program)
       - /path/to/COPY-of-your-videos:/media

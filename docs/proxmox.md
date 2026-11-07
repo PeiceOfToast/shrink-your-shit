@@ -9,8 +9,10 @@
 - **It REPLACES your original video files** (the default `-output replace`). Start with a
   **copy** of some media, check the results, and only then point it at the real thing.
   `-output beside` keeps the original and writes `name.hevc.mkv` next to it.
-- **There is no login yet.** Anyone who can open the web page can see your file names and
-  retry jobs. Keep it on your home network. Never forward the port to the internet.
+- **Sign in with the access token.** The page asks for it from other machines; the installer prints
+  an address that carries it, and `sudo shrink-your-shit token` (or, for Docker,
+  `docker exec <container name> shrink-your-shit token`) shows it again. There is no HTTPS: keep it
+  on your home network and never forward the port to the internet.
 - Transcoding is CPU-heavy. Give the container a few cores; it runs at low priority (systemd
   route) but will still use what it's given. GPU/hardware encoding is not supported yet.
 
@@ -94,8 +96,8 @@ tried this. Route B is simpler for a Proxmox LXC.
    ```
    It installs ffmpeg, creates a `syp` user, installs the program to `/usr/local/bin`, starts a
    systemd service (also on boot) and prints the address. Run it again later to upgrade; your
-   settings are kept. `--addr 0.0.0.0:8484` lets other computers open the page; there is no
-   login yet, so only do that on a network you trust.
+   settings are kept. `--addr 0.0.0.0:8484` lets other computers open the page; they sign in
+   with the access token in the address the installer prints.
    > Needs a published release (none yet; see the README). Until then it stops with "could not
    > download".
 4. Settings are in `/etc/default/shrink-your-shit` (`SYP_LIBRARIES`, `SYP_ADDR`, `SYP_DATA`).

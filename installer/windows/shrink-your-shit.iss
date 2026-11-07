@@ -211,7 +211,7 @@ begin
   L[8] := 'env("PATH") = ' + VbsString(ExpandConstant('{app}\ffmpeg')) + ' & ";" & env("PATH")';
   L[9] := 'exe = ' + VbsString(ExpandConstant('{app}\shrink-your-shit.exe'));
   L[10] := 'logf = ' + VbsString(ExpandConstant('{app}\shrink-your-shit.log'));
-  L[11] := 'probeUrl = "http://127.0.0.1:' + Port + '/api/status"';
+  L[11] := 'probeUrl = "http://127.0.0.1:' + Port + '/healthz"';
   L[12] := 'wantWait = False : wantOpen = False';
   L[13] := 'If WScript.Arguments.Count > 0 Then';
   L[14] := '  If WScript.Arguments(0) = "wait" Then wantWait = True';
