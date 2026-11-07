@@ -1,10 +1,11 @@
 /* The one place the UI talks to the server. Every call in UI-API-CONTRACT.md is
    listed once here as name: [method, path]. Call it as SYP.api.name(params, body).
-   Mock or real is one switch: ?mock=1 / ?mock=0 in the address (remembered for the
-   tab), or DEFAULT_MOCK below. Flip DEFAULT_MOCK to false when the endpoints land. */
+   The real server is the default. The mock (mock.js, sample data) is a development tool: ?mock=1 turns
+   it on for the tab, ?mock=0 turns it off again, and the page shows "Showing sample data" while it is on.
+   A remembered choice only exists if someone opened ?mock=1 in that tab, so it is honoured as is. */
 (function (g) {
   "use strict";
-  var DEFAULT_MOCK = true;
+  var DEFAULT_MOCK = false;
   var E = {
     login: ["POST", "/api/login"], logout: ["POST", "/api/logout"],
     getSettings: ["GET", "/api/settings"], patchSettings: ["PATCH", "/api/settings"],
