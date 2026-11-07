@@ -5,8 +5,10 @@ package web
 import (
 	"database/sql"
 	"errors"
+	"io/fs"
 	"math"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -72,8 +74,12 @@ func activityRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, no
 			case d.Beside:
 				state = "kept"
 			}
-			out = append(out, map[string]any{"jobId": strconv.FormatInt(d.JobID, 10), "library": d.Library, "path": d.Path,
-				"beforeBytes": d.BeforeBytes, "afterBytes": d.AfterBytes, "originalState": state, "keptDaysLeft": left, "keptId": keptID})
+			item := map[string]any{"jobId": strconv.FormatInt(d.JobID, 10), "library": d.Library, "path": d.Path,
+				"beforeBytes": d.BeforeBytes, "afterBytes": d.AfterBytes, "originalState": state, "keptDaysLeft": left, "keptId": keptID}
+			if d.NewPath != "" { // replace with another file type: the converted file's name (25a-2)
+				item["newPath"] = d.NewPath
+			}
+			out = append(out, item)
 		}
 		writeJSON(w, map[string]any{"items": out, "total": total})
 	})
@@ -97,8 +103,12 @@ func activityRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, no
 			if t, ok := deleteOn(k.KeptAt, s.KeepOriginalsDays); ok {
 				on = t.UTC().Format(time.RFC3339)
 			}
-			out = append(out, map[string]any{"keptId": strconv.FormatInt(k.ID, 10), "library": k.Library, "path": k.Path,
-				"originalBytes": k.Bytes, "nowBytes": k.NewBytes, "deleteOn": on})
+			item := map[string]any{"keptId": strconv.FormatInt(k.ID, 10), "library": k.Library, "path": k.Path,
+				"originalBytes": k.Bytes, "nowBytes": k.NewBytes, "deleteOn": on}
+			if k.NewPath != "" { // the converted file has another name (25a-2)
+				item["newPath"] = k.NewPath
+			}
+			out = append(out, item)
 		}
 		writeJSON(w, map[string]any{"keptBytes": bytes, "count": len(items), "days": s.KeepOriginalsDays, "items": out})
 	})
@@ -239,6 +249,16 @@ func activityRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, no
 	api.HandleFunc("POST /api/skipped/{id}/convert-again", func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 		if err == nil {
+			// a file this program converted and renamed (replace with another file type, 25a-2) is not
+			// there to convert again: say where it went, change nothing
+			if p, perr := store.SkippedPath(id); perr == nil {
+				if _, serr := os.Lstat(p); errors.Is(serr, fs.ErrNotExist) {
+					if to, ok := store.RenamedTo(p); ok {
+						apiError(w, http.StatusConflict, "renamed", rules.RenamedAway(p, to))
+						return
+					}
+				}
+			}
 			_, err = store.ForgetSkipped(id)
 		}
 		switch {

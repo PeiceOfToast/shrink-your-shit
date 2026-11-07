@@ -16,7 +16,8 @@ type Original struct {
 	ID        int64
 	JobID     int64
 	LibraryID int64  // 0: the job had none
-	Path      string // where the original was; the new file is there once the swap is done
+	Path      string // where the original was (and goes back to); the new file is at Dest once the swap is done
+	NewPath   string // where the new file goes when it has another name (a changed file type, 25a-2); "": Path
 	Trash     string // where the original is kept
 	Staged    string // the checked new file, until it is moved to Path
 	Bytes     int64  // the original's size
@@ -30,6 +31,14 @@ type Original struct {
 	Started   string
 	KeptAt    string // when the swap was done
 	DeleteOn  string // when it may be purged (slice 18)
+}
+
+// Dest is where the converted file is (or goes): NewPath when the file type changed its name, else Path.
+func (o Original) Dest() string {
+	if o.NewPath != "" {
+		return o.NewPath
+	}
+	return o.Path
 }
 
 // Original states.
@@ -46,8 +55,8 @@ const (
 
 // BeginSwap writes the journal row for a swap about to start (state moving) and returns its id.
 func (s *Store) BeginSwap(o Original) (int64, error) {
-	r, err := s.db.Exec(`INSERT INTO originals(job_id,library_id,path,trash,staged,original_bytes,original_mtime,original_hash,new_bytes,new_mtime,new_hash,state,started)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, o.JobID, nullID(o.LibraryID), o.Path, o.Trash, o.Staged, o.Bytes, o.ModTime, o.Hash, o.NewBytes, o.NewMTime, o.NewHash, SwapMoving, s.stamp())
+	r, err := s.db.Exec(`INSERT INTO originals(job_id,library_id,path,trash,staged,original_bytes,original_mtime,original_hash,new_bytes,new_mtime,new_hash,state,started,new_path)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, o.JobID, nullID(o.LibraryID), o.Path, o.Trash, o.Staged, o.Bytes, o.ModTime, o.Hash, o.NewBytes, o.NewMTime, o.NewHash, SwapMoving, s.stamp(), o.NewPath)
 	if err != nil {
 		return 0, err
 	}
@@ -81,11 +90,11 @@ func (s *Store) setOriginal(id int64, set string, args ...any) error {
 	return nil
 }
 
-const originalCols = `id,job_id,COALESCE(library_id,0),path,trash,staged,original_bytes,original_mtime,original_hash,new_bytes,new_mtime,new_hash,state,started,COALESCE(kept_at,''),COALESCE(delete_on,''),aside`
+const originalCols = `id,job_id,COALESCE(library_id,0),path,trash,staged,original_bytes,original_mtime,original_hash,new_bytes,new_mtime,new_hash,state,started,COALESCE(kept_at,''),COALESCE(delete_on,''),aside,new_path`
 
 func scanOriginal(r interface{ Scan(...any) error }) (Original, error) {
 	var o Original
-	err := r.Scan(&o.ID, &o.JobID, &o.LibraryID, &o.Path, &o.Trash, &o.Staged, &o.Bytes, &o.ModTime, &o.Hash, &o.NewBytes, &o.NewMTime, &o.NewHash, &o.State, &o.Started, &o.KeptAt, &o.DeleteOn, &o.Aside)
+	err := r.Scan(&o.ID, &o.JobID, &o.LibraryID, &o.Path, &o.Trash, &o.Staged, &o.Bytes, &o.ModTime, &o.Hash, &o.NewBytes, &o.NewMTime, &o.NewHash, &o.State, &o.Started, &o.KeptAt, &o.DeleteOn, &o.Aside, &o.NewPath)
 	return o, err
 }
 
@@ -130,7 +139,7 @@ func (s *Store) OriginalOfJob(jobID int64) (Original, error) {
 // the job would be queued again and the new file converted a second time.
 func (s *Store) CompleteKeptJobs() (int64, error) {
 	r, err := s.db.Exec(`UPDATE jobs SET status=?, progress=100, updated=?,
-  output_path=(SELECT o.path FROM originals o WHERE o.job_id=jobs.id AND o.state=? ORDER BY o.id DESC LIMIT 1),
+  output_path=(SELECT CASE o.new_path WHEN '' THEN o.path ELSE o.new_path END FROM originals o WHERE o.job_id=jobs.id AND o.state=? ORDER BY o.id DESC LIMIT 1),
   size_after=(SELECT o.new_bytes FROM originals o WHERE o.job_id=jobs.id AND o.state=? ORDER BY o.id DESC LIMIT 1),
   output_mtime=(SELECT o.new_mtime FROM originals o WHERE o.job_id=jobs.id AND o.state=? ORDER BY o.id DESC LIMIT 1)
 WHERE status=? AND EXISTS (SELECT 1 FROM originals o WHERE o.job_id=jobs.id AND o.state=?)`,
@@ -156,6 +165,7 @@ type DoneItem struct {
 	BeforeBytes int64
 	AfterBytes  int64
 	Beside      bool   // the new file was written beside the original, which was never touched
+	NewPath     string // replace mode with a changed file type: the converted file's name ("" when the same)
 	KeptID      int64  // the latest originals row of the job (0: none: replaced at once, or before slice 17)
 	State       string // that row's state: kept, restored or purged ("" without one)
 	KeptAt      string
@@ -167,8 +177,10 @@ func (s *Store) DoneItems(limit, offset int) ([]DoneItem, int, error) {
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM jobs WHERE status=?`, Done).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := s.db.Query(`SELECT j.id, COALESCE(l.name, j.library), j.path, j.size_before, j.size_after, j.output_path<>j.path,
-  COALESCE(o.id,0), COALESCE(o.state,''), COALESCE(o.kept_at,'')
+	// beside: another output name and no swap (a replace that changed the file type has one, 25a-2)
+	rows, err := s.db.Query(`SELECT j.id, COALESCE(l.name, j.library), j.path, j.size_before, j.size_after,
+  j.output_path<>j.path AND NOT EXISTS (SELECT 1 FROM originals WHERE job_id=j.id),
+  COALESCE(o.id,0), COALESCE(o.state,''), COALESCE(o.kept_at,''), COALESCE(o.new_path,'')
 FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id
   LEFT JOIN originals o ON o.id=(SELECT MAX(id) FROM originals WHERE job_id=j.id AND state IN (?,?,?))
 WHERE j.status=? ORDER BY j.id DESC LIMIT ? OFFSET ?`, OriginalKept, OriginalRestored, OriginalPurged, Done, limit, offset)
@@ -179,7 +191,7 @@ WHERE j.status=? ORDER BY j.id DESC LIMIT ? OFFSET ?`, OriginalKept, OriginalRes
 	out := []DoneItem{}
 	for rows.Next() {
 		var d DoneItem
-		if err := rows.Scan(&d.JobID, &d.Library, &d.Path, &d.BeforeBytes, &d.AfterBytes, &d.Beside, &d.KeptID, &d.State, &d.KeptAt); err != nil {
+		if err := rows.Scan(&d.JobID, &d.Library, &d.Path, &d.BeforeBytes, &d.AfterBytes, &d.Beside, &d.KeptID, &d.State, &d.KeptAt, &d.NewPath); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, d)
@@ -195,7 +207,7 @@ type KeptItem struct {
 
 // KeptItems lists the kept originals, the soonest to be deleted first.
 func (s *Store) KeptItems() ([]KeptItem, error) {
-	rows, err := s.db.Query(`SELECT o.id,o.job_id,COALESCE(o.library_id,0),o.path,o.trash,o.staged,o.original_bytes,o.original_mtime,o.original_hash,o.new_bytes,o.new_mtime,o.new_hash,o.state,o.started,COALESCE(o.kept_at,''),COALESCE(o.delete_on,''),o.aside,
+	rows, err := s.db.Query(`SELECT o.id,o.job_id,COALESCE(o.library_id,0),o.path,o.trash,o.staged,o.original_bytes,o.original_mtime,o.original_hash,o.new_bytes,o.new_mtime,o.new_hash,o.state,o.started,COALESCE(o.kept_at,''),COALESCE(o.delete_on,''),o.aside,o.new_path,
   COALESCE(l.name, j.library, '')
 FROM originals o LEFT JOIN jobs j ON j.id=o.job_id LEFT JOIN libraries l ON l.id=o.library_id
 WHERE o.state=? ORDER BY o.delete_on, o.id`, OriginalKept)
@@ -207,7 +219,7 @@ WHERE o.state=? ORDER BY o.delete_on, o.id`, OriginalKept)
 	for rows.Next() {
 		var k KeptItem
 		o := &k.Original
-		if err := rows.Scan(&o.ID, &o.JobID, &o.LibraryID, &o.Path, &o.Trash, &o.Staged, &o.Bytes, &o.ModTime, &o.Hash, &o.NewBytes, &o.NewMTime, &o.NewHash, &o.State, &o.Started, &o.KeptAt, &o.DeleteOn, &o.Aside, &k.Library); err != nil {
+		if err := rows.Scan(&o.ID, &o.JobID, &o.LibraryID, &o.Path, &o.Trash, &o.Staged, &o.Bytes, &o.ModTime, &o.Hash, &o.NewBytes, &o.NewMTime, &o.NewHash, &o.State, &o.Started, &o.KeptAt, &o.DeleteOn, &o.Aside, &o.NewPath, &k.Library); err != nil {
 			return nil, err
 		}
 		out = append(out, k)

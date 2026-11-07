@@ -132,7 +132,6 @@ func TestSelectorsValidate(t *testing.T) {
 		"audio unknown":               {func(s *Selectors) { s.Audio = "mp3" }, "invalid"},
 		"subtitles unknown":           {func(s *Selectors) { s.Subtitles = "burn_in" }, "invalid"},
 		"av1 not yet":                 {func(s *Selectors) { s.Format = "av1" }, "not_available"},
-		"new type when replacing":     {func(s *Selectors) { s.FileType = "mkv" }, "not_available"},
 		"unknown speed":               {func(s *Selectors) { s.Speed = "ultrafast" }, "invalid"},
 		"unknown cap":                 {func(s *Selectors) { s.MaxBitrate = "15" }, "invalid"},
 		"absolute ignore":             {func(s *Selectors) { s.Ignore = []string{"/etc"} }, "invalid"},
@@ -212,5 +211,30 @@ func TestExpectChecksTheContainer(t *testing.T) {
 		if p := e.Compare(out, 0); len(p) == 0 || !strings.Contains(strings.Join(p, ";"), "the new file's type is AVI, not") {
 			t.Errorf("%s: a wrong type passed: %v", ft, p)
 		}
+	}
+}
+
+// Replace mode can change the file type (25a-2): it is saved, and its warning (design's words, with the
+// type's extensions) says the files are renamed. Keep, or beside, gives no such warning.
+func TestReplaceWithNewFileTypeWarnsOfRenaming(t *testing.T) {
+	for typ, want := range map[string]string{
+		"mkv": "Changing the file type renames each file (movie.mp4 becomes movie.mkv). Radarr, Sonarr, Plex or Jellyfin may lose track of the renamed files: after converting, rescan this library in those apps.",
+		"mp4": "Changing the file type renames each file (movie.mkv becomes movie.mp4). Radarr, Sonarr, Plex or Jellyfin may lose track of the renamed files: after converting, rescan this library in those apps.",
+	} {
+		s := DefaultSelectors(3)
+		s.FileType = typ
+		if err := s.Validate(); err != nil {
+			t.Fatalf("%s when replacing: %v", typ, err)
+		}
+		if w := s.Template().Warnings(); len(w) != 1 || w[0] != want {
+			t.Errorf("%s: warnings %q", typ, w)
+		}
+		s.AfterConverting = "beside"
+		if w := s.Template().Warnings(); len(w) != 0 {
+			t.Errorf("%s beside: warnings %q", typ, w)
+		}
+	}
+	if w := DefaultSelectors(3).Template().Warnings(); len(w) != 0 {
+		t.Errorf("keep: %q", w)
 	}
 }

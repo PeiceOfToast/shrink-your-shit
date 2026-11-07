@@ -457,23 +457,23 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 
 	ext := filepath.Ext(job.Path)
 	if plan.Container != "" {
-		if OutputMode(plan.Output) != Beside { // refused when saved (25a); a flow made otherwise stops here
-			return "", failed("This library's setting changes the file type while replacing the original, which this version can't do yet. Your original was not touched. Choose \"Put the new file next to the original\" or keep the file type, then press Retry.",
-				fmt.Errorf("container %s with output %s", plan.Container, plan.Output))
-		}
 		ext = "." + plan.Container
 	}
-	if OutputMode(plan.Output) == Beside { // the name is taken already: no point converting (checked again at the end)
-		if _, err := os.Lstat(BesidePathAs(job.Path, ext)); err == nil {
-			return "", failed(fmt.Sprintf("There is already a file named %s next to the original, so the new file was not made. Nothing was changed. Move or rename that file, then press Retry.", filepath.Base(BesidePathAs(job.Path, ext))), fs.ErrExist)
-		}
-	}
-	// Subtitles saved as .srt files go beside the new file and never over another file: a name taken
-	// already stops the job before anything is converted (checked again when they are put in place).
-	newName := job.Path
+	// Where the new file goes: beside the original, at its name, or, in replace mode with another file
+	// type, at its name with the new extension (25a-2).
+	newName := rules.ReplaceName(job.Path, ext)
 	if OutputMode(plan.Output) == Beside {
 		newName = BesidePathAs(job.Path, ext)
 	}
+	if OutputMode(plan.Output) == Beside { // the name is taken already: no point converting (checked again at the end)
+		if _, err := os.Lstat(newName); err == nil {
+			return "", failed(fmt.Sprintf("There is already a file named %s next to the original, so the new file was not made. Nothing was changed. Move or rename that file, then press Retry.", filepath.Base(newName)), fs.ErrExist)
+		}
+	} else if newName != job.Path && exists(newName) { // a renaming replace never replaces another file
+		return "", failed(rules.NameTaken(newName), fs.ErrExist)
+	}
+	// Subtitles saved as .srt files go beside the new file and never over another file: a name taken
+	// already stops the job before anything is converted (checked again when they are put in place).
 	for _, o := range plan.SubtitleFiles() {
 		if name := rules.SrtName(newName, o.Extract); exists(name) {
 			return "", failed(srtTaken(name), fs.ErrExist)
@@ -539,10 +539,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if err := keepOwner(tmp, before); err != nil {
 		log.Printf("worker %s: job %d: could not keep the owner: %v", w.ID, job.ID, err)
 	}
-	final = job.Path
-	if OutputMode(plan.Output) == Beside {
-		final = BesidePathAs(job.Path, ext)
-	}
+	final = newName
 	// Rename is atomic on one filesystem: the original is only replaced by a complete file. Right
 	// before each try, the original must still be the file we read and the temp file still the one
 	// we created and checked. A plain rename cannot make that last check and the move one step, so a
@@ -590,9 +587,14 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if w.KeepDays != nil {
 		days = w.KeepDays()
 	}
-	if final == job.Path && days > 0 && w.Journal != nil {
-		// The original is kept: moved into .syp-trash, journaled (keep.go).
-		if err := w.keepAndReplace(ctx, job, stage, before, days, stillOK); err != nil {
+	renaming := OutputMode(plan.Output) != Beside && final != job.Path
+	if renaming && w.Journal == nil {
+		return "", failed("This setting changes the file type, which needs the record of kept originals, and it is not available here. Your original was not touched.", errors.New("no journal"))
+	}
+	if (final == job.Path && days > 0 || renaming) && w.Journal != nil {
+		// The original is kept: moved into .syp-trash, journaled (keep.go). A change of name always is
+		// (also with 0 days: then it is deleted right after), so no step of it is ever unrecorded.
+		if err := w.keepAndReplace(ctx, job, stage, before, final, days, stillOK); err != nil {
 			removePlaced()
 			return "", err
 		}
@@ -866,21 +868,28 @@ func sourceUnchanged(path string, before os.FileInfo, beforeState media.State) e
 // at that name, one that was there before or one that appeared while converting (renameNoReplace, slice
 // 18). Then nothing is moved, and the job fails with a plain reason.
 func moveBeside(ctx context.Context, tmp, final string, stillOK func() error) error {
+	return moveNoClobber(ctx, tmp, final, stillOK, func(name string) string {
+		return fmt.Sprintf("There is already a file named %s next to the original, so the new file was not put there. Nothing was changed. Move or rename that file, then press Retry.", filepath.Base(name))
+	})
+}
+
+// moveNoClobber renames tmp to final only if nothing is at final (renameNoReplace); a name taken fails
+// the job with taken(final).
+func moveNoClobber(ctx context.Context, tmp, final string, stillOK func() error, taken func(string) string) error {
 	tries := 1
 	if runtime.GOOS == "windows" {
 		tries = 10
 	}
-	err := renameRetry(ctx, func(a, b string) error {
+	return renameRetry(ctx, func(a, b string) error {
 		if err := stillOK(); err != nil {
 			return err
 		}
 		if err := renameNoReplace(a, b); errors.Is(err, fs.ErrExist) {
-			return failed(fmt.Sprintf("There is already a file named %s next to the original, so the new file was not put there. Nothing was changed. Move or rename that file, then press Retry.", filepath.Base(b)), err)
+			return failed(taken(b), err)
 		} else {
 			return err
 		}
 	}, tmp, final, tries, time.Second)
-	return err
 }
 
 func moveIntoPlace(ctx context.Context, tmp, final string, stillOK func() error) error {

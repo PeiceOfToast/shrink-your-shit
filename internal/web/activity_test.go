@@ -524,3 +524,44 @@ func TestStillChangingDetail(t *testing.T) {
 		t.Errorf("%q", got)
 	}
 }
+
+// Replace mode with another file type (25a-2): the Done and Kept items say the converted file's new
+// name (newPath) and the Done item is not "beside"; Convert again on a record of the old name, which
+// is gone, is refused with design's sentence and changes nothing.
+func TestRenamedByANewFileType(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	dir := t.TempDir()
+	l, _ := st.AddLibrary("Movies", dir, rules.SliderTemplate(3), true)
+	oldName, newName := filepath.Join(dir, "old.mp4"), filepath.Join(dir, "old.mkv")
+	id := done(t, st, l.ID, oldName, newName, 1000, 400)
+	oid, _ := st.BeginSwap(jobs.Original{JobID: id, LibraryID: l.ID, Path: oldName, NewPath: newName, Trash: filepath.Join(dir, ".syp-trash", "old.1.mp4"), Staged: "s", Bytes: 1000, Hash: "h", NewBytes: 400})
+	st.FinishSwap(oid, time.Now().Add(7*24*time.Hour))
+
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/activity/done"})
+	var d struct{ Items []map[string]any }
+	json.Unmarshal([]byte(body), &d)
+	if len(d.Items) != 1 || d.Items[0]["newPath"] != newName || d.Items[0]["originalState"] != "kept" || d.Items[0]["keptId"] != fmt.Sprint(oid) {
+		t.Errorf("done %s", body)
+	}
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/activity/kept"})
+	var k struct{ Items []map[string]any }
+	json.Unmarshal([]byte(body), &k)
+	if len(k.Items) != 1 || k.Items[0]["newPath"] != newName || k.Items[0]["path"] != oldName {
+		t.Errorf("kept %s", body)
+	}
+
+	st.PutFile(jobs.File{Path: oldName, Size: 1000, Decision: "skip: x", Reason: rules.SkipUnreadable})
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/activity/skipped"})
+	var s struct{ Items []map[string]any }
+	json.Unmarshal([]byte(body), &s)
+	if len(s.Items) != 1 {
+		t.Fatalf("skipped %s", body)
+	}
+	code, b := post(t, srv, "POST", "/api/skipped/"+s.Items[0]["id"].(string)+"/convert-again", `{}`)
+	if code != 409 || errCode(b) != "renamed" || !strings.Contains(b, "old.mp4 no longer exists: it was converted and is now old.mkv. Nothing was changed.") {
+		t.Errorf("convert again: %d %s", code, b)
+	}
+	if f, _ := st.GetFile(oldName); f == nil {
+		t.Error("the record was forgotten although nothing was to change")
+	}
+}

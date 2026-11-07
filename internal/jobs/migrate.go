@@ -139,6 +139,9 @@ ALTER TABLE jobs ADD COLUMN stop_requested INTEGER NOT NULL DEFAULT 0;`},
 CREATE TABLE sidecars (id INTEGER PRIMARY KEY, job_id INTEGER NOT NULL, path TEXT NOT NULL,
   bytes INTEGER NOT NULL, mtime INTEGER NOT NULL, hash TEXT NOT NULL,
   video_path TEXT NOT NULL, video_bytes INTEGER NOT NULL, video_hash TEXT NOT NULL);`},
+	// 25a-2: a conversion in replace mode that changes the file type puts the new file at another name
+	// (movie.mp4 -> movie.mkv); new_path is that name, '' when it is the original's (every older row).
+	{11, "originals new_path", `ALTER TABLE originals ADD COLUMN new_path TEXT NOT NULL DEFAULT '';`},
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.

@@ -75,15 +75,15 @@ func Restore(st Store, id int64, force bool) (jobs.Original, error) {
 		return o, &RestoreError{"original_missing", fmt.Sprintf("The kept original (%s) is missing or is not the file that was kept, so it can't be put back safely. Nothing was changed; the converted file is still in place.", o.Trash)}
 	}
 	changed := &RestoreError{"converted_changed", "The converted file was changed since it was made, so putting the original back would lose those changes. Nothing was changed. To put it back anyway, run shrink-your-shit restore --force in a terminal."}
-	_, err = os.Lstat(o.Path)
+	_, err = os.Lstat(o.Dest()) // the converted file: at the original's name, or its new one (25a-2)
 	converted := err == nil
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return o, err
 	}
-	if converted && !force && !isConvertedFile(o.Path, o) {
+	if converted && !force && !isConvertedFile(o.Dest(), o) {
 		return o, changed
 	}
-	aside, err := trashPath(filepath.Dir(o.Trash), "converted-"+filepath.Base(o.Path), o.JobID)
+	aside, err := trashPath(filepath.Dir(o.Trash), "converted-"+filepath.Base(o.Dest()), o.JobID)
 	if err != nil {
 		return o, fmt.Errorf("could not find a place for the converted file in %s (%v); nothing was changed", filepath.Dir(o.Trash), err)
 	}
@@ -102,10 +102,10 @@ func Restore(st Store, id int64, force bool) (jobs.Original, error) {
 	}
 	if converted {
 		// Checked again right before it moves: an edit since the first check stops it here.
-		if !force && !isConvertedFile(o.Path, o) {
+		if !force && !isConvertedFile(o.Dest(), o) {
 			return backToKept(changed)
 		}
-		if err := renameNoReplace(o.Path, aside); err != nil {
+		if err := renameNoReplace(o.Dest(), aside); err != nil {
 			return backToKept(fmt.Errorf("could not move the converted file aside (%v); nothing was changed", err))
 		}
 		if err := hook("converted moved aside"); err != nil {
@@ -115,9 +115,9 @@ func Restore(st Store, id int64, force bool) (jobs.Original, error) {
 	if err := renameNoReplace(o.Trash, o.Path); err != nil {
 		occupied := errors.Is(err, fs.ErrExist)
 		if converted {
-			if rerr := renameNoReplace(aside, o.Path); rerr != nil {
+			if rerr := renameNoReplace(aside, o.Dest()); rerr != nil {
 				st.SetSwapState(id, jobs.SwapAttention)
-				return o, &RestoreError{"needs_attention", fmt.Sprintf("Another file appeared at %s while the original was being put back. Nothing was deleted: the converted file is in %s and the original in %s. Please choose which to keep.", o.Path, aside, o.Trash)}
+				return o, &RestoreError{"needs_attention", fmt.Sprintf("Another file appeared at %s while the original was being put back. Nothing was deleted: the converted file is in %s and the original in %s. Please choose which to keep.", o.Dest(), aside, o.Trash)}
 			}
 		}
 		if occupied {
@@ -197,13 +197,13 @@ func recoverRestores(st Store, say func(string, ...any)) {
 				continue
 			}
 			say("%s: finished putting the original back", o.Path)
-		case exists(o.Path) && isOriginal(o.Trash, o):
-			if exists(o.Aside) && sameFile(o.Aside, o.Path) && isConvertedFile(o.Path, o) {
+		case exists(o.Dest()) && isOriginal(o.Trash, o): // the converted file still where it was
+			if exists(o.Aside) && sameFile(o.Aside, o.Dest()) && isConvertedFile(o.Dest(), o) {
 				os.Remove(o.Aside) // the same file under a second name (link fallback stopped half way)
 			}
 			st.SetSwapState(o.ID, jobs.OriginalKept)
 			say("%s: the restore was interrupted before anything moved; the original is still kept", o.Path)
-		case !exists(o.Path) && isOriginal(o.Trash, o):
+		case !exists(o.Dest()) && !exists(o.Path) && isOriginal(o.Trash, o):
 			if err := renameNoReplace(o.Trash, o.Path); err != nil {
 				say("%s: could not put the original back: %v", o.Path, err)
 				continue
