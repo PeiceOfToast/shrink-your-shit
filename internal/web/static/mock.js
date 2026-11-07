@@ -98,6 +98,8 @@
     { id: "s10", library: "Movies", path: "/media/movies/Old Reel.rm", reason: "format_not_converted", detail: "RealVideo is not a format this version converts.", libraryId: null },
     { id: "s11", library: "Movies", path: "/media/movies/Soundtrack.mkv", reason: "no_video", detail: "The file holds only audio.", libraryId: null },
     { id: "s12", library: "TV Shows", path: "/media/tv/Pilot (raw).ts", reason: "unknown_bitrate", detail: "The file does not say its bitrate, so we could not tell whether converting is safe.", libraryId: null },
+    // Stopped, then converted later with "MKV": Convert again on the old name answers 409 renamed (25a-2).
+    { id: "s17", library: "Movies", path: "/media/movies/Night Train (2009).mp4", reason: "user_stopped", detail: "You pressed Stop this file while it was converting. Your original is untouched.", libraryId: "1" },
     { id: "s13", library: "Movies", path: "/media/movies/Short (2003).avi", reason: "setting_cannot_run", detail: "MP4 is the chosen file type, and it cannot hold this file's audio.", libraryId: "1" },
     // Workshop slice 23's temporary guard: the next scan looks again, so no Convert again and no Change rule.
     { id: "s14", library: "TV Shows", path: "/media/tv/Season 4/E01.mkv", reason: "still_changing", detail: "The file was still being written when we looked.", libraryId: "2" },
@@ -105,14 +107,14 @@
     // After workshop slice 23 (file guards) shared files are skipped, not converted (sharedNoSaving is 0).
     { id: "s16", library: "Movies", path: "/media/movies/Night Train (2016).mp4", reason: "shared_file", detail: "Another folder uses this same file (for example Radarr). Changing it would break that.", libraryId: null }
   ];
-  for (var gi = 1; gi <= 96; gi++) skippedList.push({ id: "g" + gi, library: "TV Shows", path: "/media/tv/Season 2/E" + (gi < 10 ? "0" : "") + gi + ".mkv", reason: "already_efficient", detail: "Already small for its quality.", libraryId: "2" });
+  for (var gi = 1; gi <= 95; gi++) skippedList.push({ id: "g" + gi, library: "TV Shows", path: "/media/tv/Season 2/E" + (gi < 10 ? "0" : "") + gi + ".mkv", reason: "already_efficient", detail: "Already small for its quality.", libraryId: "2" });
   var failedList = [
     { jobId: "j9", library: "Movies", path: "/media/movies/Cut Short (2012).mkv", title: "The new file did not pass the check", detail: "The new file is 3 minutes shorter than the original, so it was thrown away. Try again; if it fails again, the original file may be damaged.", originalUntouched: true },
     { jobId: "j10", library: "TV Shows", path: "/media/tv/Season 1/E03.mkv", title: "Not enough space", detail: "Needs about 14 GB free, only 6 GB is free. Free some space, then press Retry.", originalUntouched: true }
   ];
   var doneList = [
     { jobId: "j5", library: "Movies", path: "/media/movies/Ocean Floor (2017).mkv", beforeBytes: 6.4 * GB, afterBytes: 3.3 * GB, originalState: "kept", keptDaysLeft: 5, keptId: "k1" },
-    { jobId: "j6", library: "Movies", path: "/media/movies/Paper Moon (2010).mkv", beforeBytes: 4 * GB, afterBytes: 2.2 * GB, originalState: "kept", keptDaysLeft: 6, keptId: "k2" },
+    { jobId: "j6", library: "Movies", path: "/media/movies/Paper Moon (2010).mp4", newPath: "/media/movies/Paper Moon (2010).mkv", beforeBytes: 4 * GB, afterBytes: 2.2 * GB, originalState: "kept", keptDaysLeft: 6, keptId: "k2" },
     { jobId: "j7", library: "TV Shows", path: "/media/tv/Season 1/E01.mkv", beforeBytes: 3 * GB, afterBytes: 1.4 * GB, originalState: "deleted", keptDaysLeft: 0, keptId: null },
     // Converted with "Put the new file next to the original": kept, but not in the trash, so no keptId (contract, slice 18).
     { jobId: "j8", library: "Movies", path: "/media/movies/Long Walk (2012).mkv", beforeBytes: 5.1 * GB, afterBytes: 2.6 * GB, originalState: "kept", keptDaysLeft: 0, keptId: null },
@@ -120,7 +122,7 @@
   ];
   var keptList = [
     { keptId: "k1", library: "Movies", path: "/media/movies/Ocean Floor (2017).mkv", originalBytes: 6.4 * GB, nowBytes: 3.3 * GB, deleteOn: iso(-5 * 864e5) },
-    { keptId: "k2", library: "Movies", path: "/media/movies/Paper Moon (2010).mkv", originalBytes: 4 * GB, nowBytes: 2.2 * GB, deleteOn: iso(-6 * 864e5) }
+    { keptId: "k2", library: "Movies", path: "/media/movies/Paper Moon (2010).mp4", newPath: "/media/movies/Paper Moon (2010).mkv", originalBytes: 4 * GB, nowBytes: 2.2 * GB, deleteOn: iso(-6 * 864e5) }
   ];
 
   function summary() {
@@ -155,13 +157,20 @@
     var all = mode === "full" || mode === "now";
     var a = all ? ["keep_all", "my_languages", "aac", "eac3", "opus", "lossless_only"] : mode === "some" ? ["keep_all", "my_languages"] : ["keep_all"];
     var s = all ? ["keep_all", "my_languages", "text_only", "srt"] : mode === "some" ? ["keep_all", "text_only"] : ["keep_all"];
-    // File types by "After converting" (addendum 14): the type is kept when replacing; "full" lists every type.
-    var t = mode === "full" ? { replace: ["keep", "mkv", "mp4"], beside: ["keep", "mkv", "mp4"] } : { replace: ["keep"], beside: ["keep", "mkv", "mp4"] };
+    // File types by "After converting" (addendum 14): since 25a-2 every type in both modes.
+    var t = { replace: ["keep", "mkv", "mp4"], beside: ["keep", "mkv", "mp4"] };
     return { availableFormats: ["hevc"], availableAudio: a, availableSubtitles: s, availableFileTypes: t };
   }
-  // Workshop slice 25a's one warning (design's wording, UI-API-CONTRACT.md); only the mock holds a copy of it.
+  // The setting's warnings, in the server's order (rules.Template.Warnings; design's wording): HDR (slice 25a) and the
+  // rename when Replace changes the file type (25a-2, mkv and mp4 wordings). Only the mock holds a copy of them.
   var HDR_WARNING = 'HDR and Dolby Vision files will be converted without their HDR information, so they can look washed out. Turn "Skip HDR and Dolby Vision files" back on to leave them as they are.';
-  function warningsFor(s) { return s && s.skipHdr === false ? [HDR_WARNING] : []; }
+  function warningsFor(s) {
+    var w = []; if (!s) return w;
+    if (s.skipHdr === false) w.push(HDR_WARNING);
+    if (s.afterConverting === "replace" && (s.fileType === "mkv" || s.fileType === "mp4"))
+      w.push("Changing the file type renames each file (" + (s.fileType === "mkv" ? "movie.mp4 becomes movie.mkv" : "movie.mkv becomes movie.mp4") + "). Radarr, Sonarr, Plex or Jellyfin may lose track of the renamed files: after converting, rescan this library in those apps.");
+    return w;
+  }
   function gone() { return fail(404, "not_found", "That item is gone. Nothing was changed. Reload the page."); }
   function removeFrom(arr, key, id) { var i = find(arr, key, id); return i < 0 ? null : arr.splice(i, 1)[0]; }
 
@@ -310,7 +319,10 @@
       var r = skippedList.filter(function (x) { return !p.reason || x.reason === p.reason; }), off = +p.offset || 0, lim = +p.limit || 50;
       return ok({ items: r.slice(off, off + lim), total: r.length });
     },
-    convertAgain: function (p) { var r = removeFrom(skippedList, "id", p.id); saveAct(); return r ? ok() : gone(); },
+    convertAgain: function (p) {
+      if (p.id === "s17") return fail(409, "renamed", "Night Train (2009).mp4 no longer exists: it was converted and is now Night Train (2009).mkv. Nothing was changed.");
+      var r = removeFrom(skippedList, "id", p.id); saveAct(); return r ? ok() : gone();
+    },
     failed: function () { return ok(list(failedList)); },
     done: function () { return ok(list(doneList)); },
     kept: function () {

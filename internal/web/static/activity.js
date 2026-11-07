@@ -7,6 +7,13 @@
   function $(id) { return document.getElementById(id); }
   function base(p) { return p.split(/[\\/]/).pop(); }
   function nameOf(i) { return i.library + " / " + base(i.path); }
+  // A file renamed by a new file type (25a-2, newPath): the row's name, and the other name in a muted line under it
+  // ("was movie.mp4" on Done, "now movie.mkv" on Kept originals; design 18:25Z).
+  function named(i, name, other, word) {
+    var d = el("div", null, i.library + " / " + base(name));
+    if (other && base(other) !== base(name)) d.appendChild(el("div", "muted small", word + " " + base(other)));
+    return d;
+  }
   function fail(e) { var b = $("err"); b.textContent = e && e.message || "Something went wrong. Nothing was changed."; b.hidden = false; }
   function clear() { $("err").hidden = true; }
 
@@ -180,7 +187,7 @@
           // What happened to the original, from originalState (contract, slice 18); the column header says "Original".
           if (i.originalState === "kept" && i.keptId) { o.appendChild(document.createTextNode("Kept " + i.keptDaysLeft + (i.keptDaysLeft === 1 ? " more day" : " more days") + " · ")); var a = el("a", null, "Get original back"); a.href = "/activity/kept/?confirm=" + encodeURIComponent(i.keptId); o.appendChild(a); }
           else o.textContent = { kept: "Kept beside the new file", restored: "Back in place", deleted: "Deleted" }[i.originalState] || ""; // an unknown state: say nothing rather than guess
-          t.row([nameOf(i), ui.bytes(i.beforeBytes), ui.bytes(i.afterBytes), o]);
+          t.row([named(i, i.newPath || i.path, i.newPath && i.path, "was"), ui.bytes(i.beforeBytes), ui.bytes(i.afterBytes), o]);
         });
         pane.appendChild(t.wrap);
       });
@@ -194,7 +201,9 @@
     openFor = i.keptId; panel.textContent = "";
     var h = el("h3", null, "Get the original of “" + base(i.path) + "” back?"); h.tabIndex = -1; h.setAttribute("data-key", "panel-h"); panel.appendChild(h);
     // Restore deletes the smaller file: there is no switching back (design, mockups/restore.html).
-    var say = el("p", null, "The original (" + ui.bytes(i.originalBytes) + ") goes back in place and the smaller version is deleted. This file will not be converted again unless you press Convert again, under "), sk = el("a", null, "Activity > Skipped");
+    var to = i.newPath && base(i.newPath) !== base(i.path) ? base(i.newPath) : "";
+    var say = el("p", null, (to ? "The original (" + base(i.path) + ", " + ui.bytes(i.originalBytes) + ") goes back in place and the smaller version, " + to + ", is deleted."
+      : "The original (" + ui.bytes(i.originalBytes) + ") goes back in place and the smaller version is deleted.") + " This file will not be converted again unless you press Convert again, under "), sk = el("a", null, "Activity > Skipped");
     sk.href = "/activity/skipped/"; say.appendChild(sk); say.appendChild(document.createTextNode(".")); panel.appendChild(say);
     var row = el("div", "row");
     row.appendChild(btn("Get original back", "confirm", function () { act(api.restoreKept({ id: i.keptId }).then(function () { closePanel(); restoredNote = "Original of " + base(i.path) + " is back in place."; seen.kept = null; }), true); }, "btn primary"));
@@ -213,7 +222,7 @@
         var s = el("p"); s.appendChild(el("strong", null, ui.bytes(r.keptBytes))); s.appendChild(document.createTextNode(" of originals kept for " + ui.num(r.count) + (r.count === 1 ? " file." : " files."))); pane.appendChild(s);
         var t = table(["File", "Original", "Now", "Deleted on", ""]);
         r.items.forEach(function (i) {
-          t.row([nameOf(i), ui.bytes(i.originalBytes), ui.bytes(i.nowBytes), new Date(i.deleteOn).toLocaleDateString([], { month: "short", day: "numeric" }), btn("Get original back", "restore-" + i.keptId, function () { openPanel(i); })]);
+          t.row([named(i, i.path, i.newPath, "now"), ui.bytes(i.originalBytes), ui.bytes(i.nowBytes), new Date(i.deleteOn).toLocaleDateString([], { month: "short", day: "numeric" }), btn("Get original back", "restore-" + i.keptId, function () { openPanel(i); })]);
         });
         pane.appendChild(t.wrap); pane.appendChild(panel);
         if (confirmId) { var hit = r.items.filter(function (x) { return x.keptId === confirmId; })[0]; confirmId = null; if (hit) openPanel(hit); }
