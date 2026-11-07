@@ -4,10 +4,14 @@ package jobs
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
 func open(t *testing.T) *Store {
@@ -193,5 +197,155 @@ func TestSwapJournal(t *testing.T) {
 	}
 	if err := s.SetSwapState(999, SwapRolledBack); err != ErrNotFound {
 		t.Errorf("%v", err)
+	}
+}
+
+// Several workers claiming at once never take the same job, and none gets an error for another
+// having been faster (parallelJobs, slice 24).
+func TestClaimIsAtomic(t *testing.T) {
+	s := open(t)
+	for i := 0; i < 20; i++ {
+		s.Enqueue(Job{Library: "/m", Path: fmt.Sprintf("/m/%d.mkv", i)})
+	}
+	var mu sync.Mutex
+	got := map[int64]int{}
+	var wg sync.WaitGroup
+	for g := 0; g < 8; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				j, err := s.Claim("w")
+				if err != nil {
+					if !errors.Is(err, ErrNoJob) {
+						t.Errorf("a concurrent claim failed: %v", err) // the old two-step claim: "changed under us"
+					}
+					return
+				}
+				mu.Lock()
+				got[j.ID]++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if len(got) != 20 {
+		t.Errorf("%d jobs claimed, want 20", len(got))
+	}
+	for id, n := range got {
+		if n != 1 {
+			t.Errorf("job %d claimed %d times", id, n)
+		}
+	}
+}
+
+func TestPausedAndUserStopped(t *testing.T) {
+	s := open(t)
+	if s.Paused() {
+		t.Fatal("not paused at first")
+	}
+	s.SetPaused(true)
+	if !s.Paused() {
+		t.Error("paused")
+	}
+	s.SetPaused(false)
+	id, _ := s.Enqueue(Job{Library: "/m", Path: "/m/a.mkv"})
+	if err := s.UserStopped(id); err != nil {
+		t.Fatal(err)
+	}
+	if f, _ := s.GetFile("/m/a.mkv"); f == nil || f.Reason != UserStoppedReason {
+		t.Errorf("%+v", f)
+	}
+	if err := s.UserStopped(id); err != ErrNotFound {
+		t.Errorf("gone: %v", err)
+	}
+	done, _ := s.Enqueue(Job{Library: "/m", Path: "/m/b.mkv"})
+	s.Claim("w")
+	s.Complete(done, "/m/b.mkv", 1)
+	if err := s.UserStopped(done); err != ErrNotStoppable {
+		t.Errorf("done: %v", err)
+	}
+}
+
+// While a library is being removed (BeginRemove) none of its jobs is claimed and it cannot be started;
+// it goes only in one transaction with no job of it running; a removal given up or failing leaves
+// everything as it was (review 5cdd27f).
+func TestLibraryRemoval(t *testing.T) {
+	s := open(t)
+	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
+	other, _ := s.AddLibrary("Shows", "/s", rules.SliderTemplate(3), true)
+	run, _ := s.Enqueue(Job{Library: "/m", LibraryID: l.ID, Path: "/m/1.mkv"})
+	s.Claim("w")
+	waiting, _ := s.Enqueue(Job{Library: "/m", LibraryID: l.ID, Path: "/m/2.mkv"})
+	theirs, _ := s.Enqueue(Job{Library: "/s", LibraryID: other.ID, Path: "/s/1.mkv"})
+
+	release, err := s.BeginRemove(l.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.BeginRemove(l.ID); err != ErrLibraryBusy {
+		t.Errorf("a second removal at once: %v", err)
+	}
+	if err := s.StartLibrary(l.ID); err != ErrLibraryBusy {
+		t.Errorf("started during removal: %v", err)
+	}
+	if j, err := s.Claim("w2"); err != nil || j.ID != theirs {
+		t.Errorf("claim during removal must skip its jobs and take the other library's: %+v %v", j, err)
+	}
+	if err := s.DeleteLibrary(l.ID); err != ErrLibraryBusy {
+		t.Errorf("removed with a job running: %v", err)
+	}
+	// given up: everything as before
+	release()
+	release() // twice is harmless
+	if err := s.StartLibrary(l.ID); err != nil {
+		t.Errorf("start after: %v", err)
+	}
+	if j, err := s.Claim("w3"); err != nil || j.ID != waiting {
+		t.Errorf("its waiting job is claimable again: %+v %v", j, err)
+	}
+
+	// a store error inside the removal: nothing removed
+	s.Release(waiting)
+	s.Release(run)
+	release, _ = s.BeginRemove(l.ID)
+	s.db.Exec(`CREATE TRIGGER fail_delete BEFORE DELETE ON libraries BEGIN SELECT RAISE(ABORT, 'injected'); END`)
+	if err := s.DeleteLibrary(l.ID); err == nil || err == ErrLibraryBusy {
+		t.Errorf("injected error: %v", err)
+	}
+	if _, err := s.GetLibrary(l.ID); err != nil {
+		t.Errorf("the library must stay: %v", err)
+	}
+	for _, id := range []int64{run, waiting} {
+		if j, err := s.Get(id); err != nil || j.Status != Queued {
+			t.Errorf("job %d must stay waiting: %+v %v", id, j, err)
+		}
+	}
+	s.db.Exec(`DROP TRIGGER fail_delete`)
+	// and done: the library and its waiting jobs go together
+	if err := s.DeleteLibrary(l.ID); err != nil {
+		t.Fatal(err)
+	}
+	release()
+	for _, id := range []int64{run, waiting} {
+		if _, err := s.Get(id); err == nil {
+			t.Errorf("job %d of the removed library is still there", id)
+		}
+	}
+}
+
+// A job made before libraries were records (no library) is still claimed while some library is being
+// removed: the removal guard only holds back that library's jobs (review c41c9db).
+func TestRemovalGuardKeepsJobsWithoutALibrary(t *testing.T) {
+	s := open(t)
+	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
+	old, err := s.Enqueue(Job{Library: "/old", Path: "/old/a.mkv"}) // LibraryID 0: library_id NULL
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, _ := s.BeginRemove(l.ID)
+	defer release()
+	if j, err := s.Claim("w"); err != nil || j.ID != old {
+		t.Errorf("the unlinked job must be claimable: %+v %v", j, err)
 	}
 }

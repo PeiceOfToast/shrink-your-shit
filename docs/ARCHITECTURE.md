@@ -337,6 +337,44 @@ sampled hash (otherwise it is left alone and the row marked `needs_attention`); 
   the scanner, which looks at the file afresh (and may skip it again for the same reason).
 - `POST /api/system/backup` answers 501 `not_available` until slice 38.
 
+## Pause, stop and the stall watchdog (slice 24)
+
+- **Workers:** `worker.Pool` runs as many workers as the `parallelJobs` setting (1 by default, at most
+  8), reading it every 2 s: a new worker starts at once; one too many finishes its current file first.
+  Workers still finishing a file after the setting went down are taken back first when it goes up
+  again, so no more files convert at once than the setting (and 8) allows.
+  `Store.Claim` is one statement, so two workers never take the same job; it takes none while paused
+  and none whose stop was requested. A worker claims and registers the job as its current one under its
+  own lock, so a pause or a stop that looks for the job waits for that and finds it.
+- **Pause all** (`POST /api/queue/pause`): the `paused` flag in `app_meta` (survives a restart) makes
+  workers take no job, and every running conversion is stopped through the job's cancel path and put
+  back in the queue (original untouched, staging folder removed). A worker checks the flag again after
+  its claim, before converting starts. Scanning goes on. `POST
+  /api/queue/resume` clears it. `GET /api/activity/summary` `paused` is the flag.
+- **Stop this file** (`POST /api/jobs/{id}/stop`, `Store.RequestStop`, one transaction): a queued job
+  ends at once; a running one is only marked (`jobs.stop_requested`, migration 9) and its worker is
+  stopped the same way as a pause. The worker ends it, and it checks the mark again right before the
+  swap, so a stop that reached no worker still prevents the swap. Either way the job record goes and
+  the file is recorded as skipped with reason `user_stopped`, which the scanner honours (like
+  `restored`) until Convert again. The answer says what happened: 200 once it has ended as stopped,
+  409 `already_finished` if it was already being put in place and ended done, and 202
+  `{"status":"stopping"}` if it has not ended within 30 s. A finished job: 409 `not_stoppable`. A marked job left by a stopped
+  program ends as stopped at the next start.
+- **Removing a library** (`DELETE /api/libraries/{id}`): `Store.BeginRemove` marks it, in memory only,
+  as being removed: no job of it is claimed and it cannot be started. Nothing is written, so nothing needs
+  undoing or recovering after a crash. Its running jobs are put back in the queue the way a pause does
+  (`RequeueJob`: original untouched). `DeleteLibrary` removes the library and its waiting jobs in one
+  transaction, and only when none of its jobs runs (else `ErrLibraryBusy`); the handler retries for at
+  most 5 s. A conversion already inside its swap finishes first, so the answer comes after it; with
+  retention > 0 its original is kept and restorable. Any other outcome (timeout: 409 `busy`; a store
+  error) leaves everything as it was, and the in-memory mark is released on every exit path.
+- **Swap window:** once the new file has passed its checks the rest of the job runs with a context
+  that cannot be cancelled, so a stop or pause arriving then lets the swap finish and the job ends
+  done, never half swapped.
+- **Stall watchdog:** during the encode, a job whose progress has not moved for `-stall-after` (default
+  10 minutes) is stopped and fails: "Stopped: no progress for 10m0s. The original is untouched; press
+  Retry to try again." The checks after the encode keep their own time limits (slice 10).
+
 ## Database schema and migrations
 
 The schema version is SQLite's `PRAGMA user_version`. `internal/jobs/migrate.go` holds an ordered list

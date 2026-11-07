@@ -38,7 +38,7 @@ func libServer(t *testing.T, exposed bool) (*httptest.Server, *jobs.Store, *Acce
 	fe := &fakeEngine{}
 	next := time.Date(2026, 11, 7, 3, 0, 0, 0, time.UTC)
 	srv := httptest.NewServer(Handler(st, a, Engine{
-		ScanNow: func() { fe.scans++ }, NextScan: func() time.Time { return next }, StopJob: func(id int64) { fe.stopped = append(fe.stopped, id) },
+		ScanNow: func() { fe.scans++ }, NextScan: func() time.Time { return next }, RequeueJob: func(id int64) { fe.stopped = append(fe.stopped, id); st.Release(id) }, // as a worker puts it back
 		Preview: &preview.Previewer{Store: st, Exec: h264Probe, FFprobe: "ffprobe", Probes: 1}}))
 	t.Cleanup(srv.Close)
 	return srv, st, a, fe

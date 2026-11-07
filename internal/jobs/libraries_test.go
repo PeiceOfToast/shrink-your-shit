@@ -160,9 +160,15 @@ func TestDeleteLibraryKeepsFlowAndFinishedJobs(t *testing.T) {
 	s.Claim("w")
 	queued, _ := s.Enqueue(Job{Library: "/m", LibraryID: l.ID, Path: "/m/3.mkv"})
 	theirs, _ := s.Enqueue(Job{Library: "/s", LibraryID: other.ID, Path: "/s/1.mkv"})
-	got, err := s.DeleteLibrary(l.ID)
-	if err != nil || got != running {
-		t.Fatalf("running job %d %v, want %d", got, err, running)
+	if err := s.DeleteLibrary(l.ID); err != ErrLibraryBusy {
+		t.Fatalf("with a job running: %v, want ErrLibraryBusy", err)
+	}
+	if _, err := s.GetLibrary(l.ID); err != nil {
+		t.Fatalf("nothing may be removed while a job runs: %v", err)
+	}
+	s.Complete(running, "/m/2.mkv", 10) // its worker ends it (DELETE stops it first)
+	if err := s.DeleteLibrary(l.ID); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := s.Get(queued); err == nil {
 		t.Error("its queued job must be cancelled")
@@ -178,7 +184,7 @@ func TestDeleteLibraryKeepsFlowAndFinishedJobs(t *testing.T) {
 	if _, err := s.GetLibrary(l.ID); err != ErrNotFound {
 		t.Errorf("library still there: %v", err)
 	}
-	if _, err := s.DeleteLibrary(l.ID); err != ErrNotFound {
+	if err := s.DeleteLibrary(l.ID); err != ErrNotFound {
 		t.Errorf("second delete: %v", err)
 	}
 	if _, err := s.TemplateFor(Job{LibraryID: l.ID}); err == nil {

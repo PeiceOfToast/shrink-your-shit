@@ -13,4 +13,5 @@ var SkipWords = map[string]string{
 	SkipSettingCannotRun: "this setting can't convert files yet",
 	SkipUnreadable:       "it can't be read",
 	"restored":           "you put its original back, so it is left as it is",
+	"user_stopped":       "you stopped it",
 }

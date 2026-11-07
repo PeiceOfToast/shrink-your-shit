@@ -372,6 +372,11 @@ func (s *Store) UpdateLibrary(id int64, name, path *string) (Library, error) {
 
 // StartLibrary marks a library started: from now on it is scanned.
 func (s *Store) StartLibrary(id int64) error {
+	s.removeMu.Lock()
+	defer s.removeMu.Unlock()
+	if s.removing[id] {
+		return ErrLibraryBusy // being removed (BeginRemove)
+	}
 	r, err := s.db.Exec(`UPDATE libraries SET started=1 WHERE id=?`, id)
 	if err != nil {
 		return err
@@ -383,38 +388,32 @@ func (s *Store) StartLibrary(id int64) error {
 }
 
 // DeleteLibrary removes the library record and its queued jobs. Media files, its flow and its
-// finished jobs stay. It returns the library's running job, if any, which the caller must stop
-// (the worker then drops it; see Drop).
-func (s *Store) DeleteLibrary(id int64) (runningJob int64, err error) {
+// finished jobs stay. While one of its jobs runs it removes nothing and returns ErrLibraryBusy (checked
+// in the same transaction, so no claim falls between): see BeginRemove.
+func (s *Store) DeleteLibrary(id int64) error {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return 0, err
+		return err
 	}
 	defer tx.Rollback()
+	var busy int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM jobs WHERE library_id=? AND status=?`, id, Running).Scan(&busy); err != nil {
+		return err
+	}
+	if busy > 0 {
+		return ErrLibraryBusy
+	}
 	r, err := tx.Exec(`DELETE FROM libraries WHERE id=?`, id)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	if n, _ := r.RowsAffected(); n == 0 {
-		return 0, ErrNotFound
+		return ErrNotFound
 	}
 	if _, err := tx.Exec(`DELETE FROM jobs WHERE library_id=? AND status=?`, id, Queued); err != nil {
-		return 0, err
+		return err
 	}
-	err = tx.QueryRow(`SELECT id FROM jobs WHERE library_id=? AND status=? LIMIT 1`, id, Running).Scan(&runningJob)
-	if errors.Is(err, sql.ErrNoRows) {
-		err = nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	return runningJob, tx.Commit()
-}
-
-// Drop deletes a job record that was stopped because its library was removed.
-func (s *Store) Drop(id int64) error {
-	_, err := s.db.Exec(`DELETE FROM jobs WHERE id=?`, id)
-	return err
+	return tx.Commit()
 }
 
 // TemplateFor returns the template of the job's library's flow, which the worker compiles into the

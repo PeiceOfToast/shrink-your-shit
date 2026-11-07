@@ -22,10 +22,12 @@ import (
 
 // Engine is what the API needs from the running scanner and worker. Nil functions do nothing.
 type Engine struct {
-	ScanNow  func()             // start a scan pass now
-	NextScan func() time.Time   // when the next regular pass starts
-	StopJob  func(id int64)     // stop a running job (its library was removed)
-	Preview  *preview.Previewer // the dry run (slice 19)
+	ScanNow    func()              // start a scan pass now
+	NextScan   func() time.Time    // when the next regular pass starts
+	RequeueJob func(id int64)      // stop a running job and put it back in the queue (its library is being removed)
+	PauseNow   func()              // stop the running jobs and put them back in the queue (Pause all)
+	StopFile   func(id int64) bool // stop a running job the person stopped; false if no worker runs it
+	Preview    *preview.Previewer  // the dry run (slice 19)
 
 	Doctor  *doctor.Checker // the setup checks (nil: not available)
 	DataDir string          // the data folder, for the health report
@@ -52,6 +54,9 @@ type libraryItem struct {
 
 // startFrom maps POST /api/libraries "startFrom" to a slider position.
 var startFrom = map[string]int{"smallest": 1, "balanced": 3, "better": 4}
+
+// libraryStopWait is how long removing a library waits for its running conversions to end.
+var libraryStopWait = 5 * time.Second
 
 func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 	item := func(l jobs.Library, counts map[int64]jobs.LibraryCounts) libraryItem {
@@ -103,6 +108,8 @@ func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			apiError(w, http.StatusNotFound, "not_found", "There is no such library.")
 		case errors.Is(err, jobs.ErrPathTaken):
 			apiError(w, http.StatusConflict, "path_taken", "Another library already uses this folder.")
+		case errors.Is(err, jobs.ErrLibraryBusy):
+			apiError(w, http.StatusConflict, "busy", "This library is being removed. Nothing was changed.")
 		default:
 			serverError(w, err)
 		}
@@ -208,21 +215,54 @@ func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 
 	// DELETE removes the record only: no media file is touched, queued jobs are cancelled, a running
 	// one is stopped (original untouched, temp files removed), the flow stays in Flows, finished jobs
-	// stay in the activity lists.
+	// stay in the activity lists. A conversion already inside its swap (milliseconds, already checked)
+	// cannot be stopped without a half swap, so the jobs are marked and stopped first and the record
+	// goes only once none of them runs: a swap in progress finishes before the answer. If one has not
+	// ended within libraryStopWait, nothing is removed (409).
 	api.HandleFunc("DELETE /api/libraries/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id, ok := libID(w, r)
 		if !ok {
 			return
 		}
-		running, err := store.DeleteLibrary(id)
+		// While removing, no job of it is claimed and it cannot be started (BeginRemove, process-local:
+		// nothing to undo). Its running jobs are put back in the queue as a pause does, and DeleteLibrary
+		// removes the library with its waiting jobs only when none runs, in one transaction. Every other
+		// outcome leaves everything as it was: 409 busy or the error, the library intact, its job back in
+		// the queue (or still finishing its swap).
+		release, err := store.BeginRemove(id)
+		if errors.Is(err, jobs.ErrLibraryBusy) {
+			apiError(w, http.StatusConflict, "busy", "This library is already being removed. Nothing was changed.")
+			return
+		}
 		if err != nil {
 			storeErr(w, err)
 			return
 		}
-		if running > 0 && eng.StopJob != nil {
-			eng.StopJob(running)
+		defer release()
+		for deadline := time.Now().Add(libraryStopWait); ; time.Sleep(25 * time.Millisecond) {
+			running, err := store.RunningJobsOf(id)
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+			for _, j := range running {
+				if eng.RequeueJob != nil {
+					eng.RequeueJob(j)
+				}
+			}
+			err = store.DeleteLibrary(id)
+			switch {
+			case err == nil:
+				writeJSON(w, map[string]bool{"ok": true})
+				return
+			case !errors.Is(err, jobs.ErrLibraryBusy):
+				storeErr(w, err)
+				return
+			case time.Now().After(deadline):
+				apiError(w, http.StatusConflict, "busy", "A file in this library is just being finished; try again in a moment. Nothing was removed.")
+				return
+			}
 		}
-		writeJSON(w, map[string]bool{"ok": true})
 	})
 
 	api.HandleFunc("POST /api/libraries/{id}/scan", func(w http.ResponseWriter, r *http.Request) {

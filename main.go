@@ -65,6 +65,7 @@ func main() {
 	minSSIM := flag.Float64("min-ssim", worker.DefaultMinSSIM, "lowest picture similarity (0.90-1.0) between the original and the new file; a starting value that has not been tuned on real material")
 	every := flag.Duration("scan-every", 30*time.Second, "how often to look for new files")
 	settle := flag.Duration("settle", 15*time.Second, "ignore files modified more recently than this (still copying)")
+	stallAfter := flag.Duration("stall-after", worker.DefaultStallAfter, "stop a conversion whose progress has not moved for this long (it fails; the original is untouched)")
 	ffmpeg := flag.String("ffmpeg", os.Getenv("SYP_FFMPEG"), "path to ffmpeg (default: find it; env SYP_FFMPEG)")
 	ffprobe := flag.String("ffprobe", os.Getenv("SYP_FFPROBE"), "path to ffprobe (default: find it; env SYP_FFPROBE)")
 	showVersion := flag.Bool("version", false, "print the version and exit")
@@ -176,9 +177,6 @@ func main() {
 	} else {
 		log.Print("The converter is not installed correctly (ffmpeg and ffprobe with libx265 and the ssim filter are needed), so nothing is scanned or converted. The web page's Settings > System says what is missing; fix it, then restart shrink-your-shit.")
 	}
-	w := &worker.Worker{ID: "builtin", Queue: store, Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath,
-		Template: store.TemplateFor, Poll: 3 * time.Second,
-		DecodeCheck: *decode, MinSSIM: *minSSIM, KeepDays: keepDays, Journal: store}
 	// Kept originals are purged every hour whether or not converting can run (review 172f049).
 	go func() {
 		t := time.NewTicker(time.Hour)
@@ -192,9 +190,32 @@ func main() {
 			}
 		}
 	}()
+	// As many workers as Settings > Performance's parallelJobs (followed live); Pause all stops them
+	// taking work and survives a restart.
+	pool := &worker.Pool{
+		New: func(n int) *worker.Worker {
+			id := "builtin"
+			if n > 1 {
+				id = fmt.Sprintf("builtin-%d", n)
+			}
+			return &worker.Worker{ID: id, Queue: store, Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath,
+				Template: store.TemplateFor, Poll: 3 * time.Second,
+				DecodeCheck: *decode, MinSSIM: *minSSIM, KeepDays: keepDays, Journal: store,
+				Paused: store.Paused, StallAfter: *stallAfter}
+		},
+		Size: func() int {
+			if s, err := web.LoadSettings(store); err == nil {
+				return s.ParallelJobs
+			}
+			return 1
+		},
+	}
+	if store.Paused() {
+		log.Printf("converting is paused (Activity > Resume)")
+	}
 	workerDone := make(chan struct{})
 	if converts {
-		go func() { w.Run(ctx); close(workerDone) }()
+		go func() { pool.Run(ctx); close(workerDone) }()
 	} else {
 		close(workerDone)
 	}
@@ -204,7 +225,7 @@ func main() {
 		log.Fatalf("access token: %v", err)
 	}
 	srv := &http.Server{Addr: *addr, Handler: web.Handler(store, access, web.Engine{
-		ScanNow: sc.ScanNow, NextScan: sc.NextScan, StopJob: w.StopJob,
+		ScanNow: sc.ScanNow, NextScan: sc.NextScan, RequeueJob: pool.RequeueJob, PauseNow: pool.PauseNow, StopFile: pool.StopFile,
 		Doctor: chk, DataDir: *data, Version: version, Logs: logs,
 		Preview: &preview.Previewer{Store: store, Exec: media.OSExec{}, FFprobe: ffprobePath}})}
 	go func() {

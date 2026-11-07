@@ -5,6 +5,8 @@ package jobs
 import (
 	"database/sql"
 	"errors"
+	"os"
+	"sync"
 )
 
 // Activity's figures and lists (slice 21b, UI-API-CONTRACT.md "Activity"). They only read.
@@ -172,3 +174,177 @@ func (s *Store) ForgetSkipped(id int64) (string, error) {
 	_, err = s.db.Exec(`DELETE FROM files WHERE rowid=?`, id)
 	return path, err
 }
+
+// Pause all (slice 24): a flag that survives a restart; workers take no job while it is set.
+
+// Paused reports whether converting is paused.
+func (s *Store) Paused() bool {
+	v, _, _ := s.Meta("paused")
+	return v == "1"
+}
+
+// SetPaused sets or clears the pause.
+func (s *Store) SetPaused(on bool) error {
+	v := "0"
+	if on {
+		v = "1"
+	}
+	return s.SetMeta("paused", v)
+}
+
+// RequestStop is "Stop this file" from the page (DESIGN decision 7), in one transaction, so no claim
+// falls between the look and the change. A waiting job stops at once: UserStopped. A running job is only
+// marked (stop_requested; running is true): its worker ends it as stopped, or, if the new file was
+// already being put in place, finishes it. Its record is never removed while a worker may still finish.
+func (s *Store) RequestStop(id int64) (running bool, err error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var path, status string
+	err = tx.QueryRow(`SELECT path, status FROM jobs WHERE id=?`, id).Scan(&path, &status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrNotFound
+	}
+	if err != nil {
+		return false, err
+	}
+	switch Status(status) {
+	case Queued:
+		if err := putFile(tx, userStoppedFile(path)); err != nil {
+			return false, err
+		}
+		if _, err := tx.Exec(`DELETE FROM jobs WHERE id=?`, id); err != nil {
+			return false, err
+		}
+	case Running:
+		if _, err := tx.Exec(`UPDATE jobs SET stop_requested=? WHERE id=? AND stop_requested=0`, StopByPerson, id); err != nil {
+			return false, err
+		}
+		running = true
+	default:
+		return false, ErrNotStoppable
+	}
+	return running, tx.Commit()
+}
+
+// StopByPerson is jobs.stop_requested for "Stop this file": the job ends as skipped, user_stopped.
+const StopByPerson = 1
+
+// StopRequested reports whether "Stop this file" was asked for job id (false if it has no record).
+func (s *Store) StopRequested(id int64) (bool, error) {
+	var v int
+	err := s.db.QueryRow(`SELECT stop_requested FROM jobs WHERE id=?`, id).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return v != 0, err
+}
+
+// RunningJobsOf lists the running jobs of library id.
+func (s *Store) RunningJobsOf(id int64) ([]int64, error) {
+	rows, err := s.db.Query(`SELECT id FROM jobs WHERE library_id=? AND status=?`, id, Running)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var j int64
+		if err := rows.Scan(&j); err != nil {
+			return nil, err
+		}
+		ids = append(ids, j)
+	}
+	return ids, rows.Err()
+}
+
+// BeginRemove starts removing library id (DELETE /api/libraries): until release is called, no job of it
+// is claimed and it cannot be started. Nothing is written, so nothing needs undoing or recovering: a
+// failed or given-up removal just calls release. ErrLibraryBusy if a removal of it is under way already.
+func (s *Store) BeginRemove(id int64) (release func(), err error) {
+	if _, err := s.GetLibrary(id); err != nil {
+		return nil, err
+	}
+	s.removeMu.Lock()
+	defer s.removeMu.Unlock()
+	if s.removing[id] {
+		return nil, ErrLibraryBusy
+	}
+	if s.removing == nil {
+		s.removing = map[int64]bool{}
+	}
+	s.removing[id] = true
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.removeMu.Lock()
+			delete(s.removing, id)
+			s.removeMu.Unlock()
+		})
+	}, nil
+}
+
+// ErrLibraryBusy: a job of the library still runs, so it cannot be removed yet.
+var ErrLibraryBusy = errors.New("a file in this library is still being converted")
+
+// finishRequestedStops ends, as stopped, the jobs whose stop was requested but whose worker is gone (the
+// program stopped first): run at startup, before the queue runs.
+func (s *Store) finishRequestedStops() error {
+	rows, err := s.db.Query(`SELECT id FROM jobs WHERE stop_requested!=0 AND status IN (?,?)`, Queued, Running)
+	if err != nil {
+		return err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	for _, id := range ids {
+		if err := s.UserStopped(id); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+func userStoppedFile(path string) File {
+	f := File{Path: path, Decision: "skip: you stopped it", Reason: UserStoppedReason}
+	if st, err := os.Stat(path); err == nil {
+		f.Size, f.ModTime = st.Size(), st.ModTime().UnixNano()
+	}
+	return f
+}
+
+// UserStopped ends job id as stopped by the person, by its worker (or at startup): the job record goes,
+// and the file is recorded as skipped with reason user_stopped, which the scanner honours until Convert
+// again. Only a queued or running job can be stopped (ErrNotStoppable otherwise).
+func (s *Store) UserStopped(id int64) error {
+	j, err := s.Get(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if j.Status != Queued && j.Status != Running {
+		return ErrNotStoppable
+	}
+	if err := s.PutFile(userStoppedFile(j.Path)); err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`DELETE FROM jobs WHERE id=?`, id)
+	return err
+}
+
+// UserStoppedReason is the skip reason of a file the person stopped.
+const UserStoppedReason = "user_stopped"
+
+// ErrNotStoppable: the job is not queued or running.
+var ErrNotStoppable = errors.New("this file is not waiting or converting")

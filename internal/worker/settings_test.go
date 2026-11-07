@@ -64,7 +64,7 @@ func TestJobOfARemovedLibraryFails(t *testing.T) {
 
 // StopJob (its library was removed while converting): the original is untouched, nothing is left
 // behind, and the job record is dropped rather than requeued.
-func TestStopJobDropsTheRunningJob(t *testing.T) {
+func TestRequeueJobPutsTheRunningJobBack(t *testing.T) {
 	s := newScenario(t)
 	var encoding atomic.Bool
 	s.hang = func(name string, args []string) bool {
@@ -83,15 +83,15 @@ func TestStopJobDropsTheRunningJob(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	w.StopJob(s.id + 1) // another job: nothing happens
-	w.StopJob(s.id)
+	w.RequeueJob(s.id + 1) // another job: nothing happens
+	w.RequeueJob(s.id)
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("StopJob did not stop the job")
 	}
-	if _, err := s.store.Get(s.id); err == nil {
-		t.Error("the stopped job must be dropped, not requeued")
+	if j, err := s.store.Get(s.id); err != nil || j.Status != jobs.Queued {
+		t.Errorf("the stopped job goes back in the queue: %+v %v", j, err)
 	}
 	s.assertOriginalSafe()
 }

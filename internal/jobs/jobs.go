@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver, no cgo
@@ -86,6 +87,9 @@ type Store struct {
 	db   *sql.DB
 	path string
 	now  func() time.Time
+
+	removeMu sync.Mutex     // held by Claim and StartLibrary while they look at removing
+	removing map[int64]bool // libraries being removed (BeginRemove): process-local, never stored
 }
 
 // Open opens (creating if needed) the database at path and brings its schema up to date
@@ -130,8 +134,10 @@ func (s *Store) GetFile(path string) (*File, error) {
 }
 
 // PutFile records what was seen for a path.
-func (s *Store) PutFile(f File) error {
-	_, err := s.db.Exec(`INSERT INTO files(path,size,mtime,codec,decision,reason) VALUES(?,?,?,?,?,?)
+func (s *Store) PutFile(f File) error { return putFile(s.db, f) }
+
+func putFile(x execer, f File) error {
+	_, err := x.Exec(`INSERT INTO files(path,size,mtime,codec,decision,reason) VALUES(?,?,?,?,?,?)
 ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,codec=excluded.codec,decision=excluded.decision,reason=excluded.reason`,
 		f.Path, f.Size, f.ModTime, f.Codec, f.Decision, f.Reason)
 	return err
@@ -232,16 +238,29 @@ func (s *Store) transition(id int64, to Status, set string, args ...any) error {
 }
 
 // Claim hands the oldest queued job to worker and marks it running.
+// One statement, so several workers (parallelJobs) never take the same job.
 func (s *Store) Claim(worker string) (Job, error) {
+	now := s.stamp()
 	var id int64
-	err := s.db.QueryRow(`SELECT id FROM jobs WHERE status=? ORDER BY id LIMIT 1`, Queued).Scan(&id)
+	// One statement, so a pause or a stop request set before it is always seen: no job is taken while
+	// paused, and none whose stop was requested.
+	// It takes no job of a library being removed (BeginRemove), under the same lock, so after BeginRemove
+	// returns no claim for that library can start.
+	s.removeMu.Lock()
+	skip, args := "", []any{Running, now, worker, now, Queued}
+	for lib := range s.removing {
+		skip += " AND (library_id IS NULL OR library_id != ?)" // a job made before libraries belongs to none
+		args = append(args, lib)
+	}
+	err := s.db.QueryRow(`UPDATE jobs SET status=?, updated=?, worker=?, progress=0, error='', started=?
+WHERE id=(SELECT id FROM jobs WHERE status=? AND stop_requested=0`+skip+` ORDER BY id LIMIT 1) AND status=?
+AND NOT EXISTS (SELECT 1 FROM app_meta WHERE key='paused' AND value='1') RETURNING id`,
+		append(args, Queued)...).Scan(&id)
+	s.removeMu.Unlock()
 	if errors.Is(err, sql.ErrNoRows) {
 		return Job{}, ErrNoJob
 	}
 	if err != nil {
-		return Job{}, err
-	}
-	if err := s.transition(id, Running, `, worker=?, progress=0, error='', started=?`, worker, s.stamp()); err != nil {
 		return Job{}, err
 	}
 	return s.Get(id)
@@ -300,6 +319,9 @@ func (s *Store) Release(id int64) error {
 // RequeueRunning puts jobs left "running" by a crashed process back in the queue.
 // Call once at startup, before workers start.
 func (s *Store) RequeueRunning() (int64, error) {
+	if err := s.finishRequestedStops(); err != nil {
+		return 0, err
+	}
 	r, err := s.db.Exec(`UPDATE jobs SET status=?, progress=0, worker='', updated=? WHERE status=?`,
 		Queued, s.stamp(), Running)
 	if err != nil {
