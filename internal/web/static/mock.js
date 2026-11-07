@@ -82,7 +82,9 @@
   try { if (/[?&]preview=slow/.test(location.search)) sessionStorage.setItem("syp-mock-slowpv", "1"); if (/[?&]preview=0/.test(location.search)) sessionStorage.removeItem("syp-mock-slowpv"); } catch (e) {}
   function slowPreview() { try { return sessionStorage.getItem("syp-mock-slowpv") === "1"; } catch (e) { return false; } }
   var working = [{ jobId: "j1", library: "Movies", path: "/media/movies/The Long Road (2014).mkv", phase: "converting", percent: 62, etaSeconds: 840, fromBytes: 8.2 * GB, expectedBytes: 4.5 * GB },
-                 { jobId: "j2", library: "Movies", path: "/media/movies/Harbour Lights (2019).mkv", phase: "checking", percent: 100, etaSeconds: 0, fromBytes: 7 * GB, expectedBytes: 3 * GB }];
+                 { jobId: "j2", library: "Movies", path: "/media/movies/Harbour Lights (2019).mkv", phase: "checking", percent: 100, etaSeconds: 0, fromBytes: 7 * GB, expectedBytes: 3 * GB },
+                 // The engine doesn't always know the new file's size or the time left yet: null (as on a real server).
+                 { jobId: "j3", library: "TV Shows", path: "/media/tv/Season 3/E07.mkv", phase: "converting", percent: 0, etaSeconds: null, fromBytes: 2.4 * GB, expectedBytes: null }]; // just started: no time left known either
   var skippedList = [
     { id: "s1", library: "TV Shows", path: "/media/tv/Show S01E01.mkv", reason: "already_efficient", detail: "Already small for its quality. Converting would save about 3%, less than the 10% minimum.", libraryId: "2" },
     { id: "s2", library: "Movies", path: "/media/movies/Dune Sands (2021).mkv", reason: "hdr_dv", detail: "Skipped to protect the picture.", libraryId: "1" },
