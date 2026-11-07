@@ -105,15 +105,39 @@
     var fields = {}, v = values || {}, syncs = [], noLanguages = false, ladder = v.bitrateLadder || null, x = {};
     function changed() { if (onChange) onChange(); }
     function syncAll() { syncs.forEach(function (f) { f(); }); }
-    // Why a choice can't be picked now: not made on this computer (the server's list), or it doesn't fit another choice.
+    // A choice this version can't save (the server's lists) is disabled with its reason.
     function blocked(name, val) {
       var f = fields;
       if (name === "format" && Array.isArray(v.availableFormats) && v.availableFormats.indexOf(val) < 0) return " (not available on this computer)";
       if (name === "audio" && Array.isArray(v.availableAudio) && v.availableAudio.indexOf(val) < 0) return " (not available yet)";
-      if (name === "audio" && val === "stereo_opus" && f.fileType && f.fileType.value === "mp4") return " (MKV only)";
-      if (name === "fileType" && val === "webm" && f.format && f.audio && !((f.format.value === "av1" || f.format.value === "vp9") && f.audio.value === "stereo_opus")) return " (needs AV1 or VP9 and Opus)";
       if (name === "fileType" && v.availableFileTypes && f.afterConverting) { var ok = v.availableFileTypes[f.afterConverting.value]; if (ok && ok.indexOf(val) < 0) return " (not available yet)"; }
       return "";
+    }
+    // A choice that doesn't go with another one keeps its reason but stays selectable (design, "Choices that can't go
+    // together"): picking it moves the other field, with a note (resolve below).
+    function pairWhy(name, val) {
+      var f = fields;
+      if (name === "audio" && val === "stereo_opus" && f.fileType && f.fileType.value === "mp4") return " (MKV only)";
+      if (name === "fileType" && val === "webm" && f.format && f.audio && !((f.format.value === "av1" || f.format.value === "vp9") && f.audio.value === "stereo_opus")) return " (needs AV1 or VP9 and Opus)";
+      return "";
+    }
+    // The field the person just changed wins; the other moves to the nearest choice that works, with design's words
+    // in a note under it ("<Field> changed to <choice>: <reason>.") and one polite announcement.
+    var NAME = { audio: "Audio", fileType: "File type", format: "Video format" }, notes = {}, live = el("p", "sr");
+    live.setAttribute("role", "status");
+    function choiceText(name, val) { var g2 = GROUPS.reduce(function (a, gr) { return a.concat(gr[1]); }, []).filter(function (x) { return x[0] === name; })[0]; return (g2[2].filter(function (o) { return String(o[0]) === val; })[0] || [0, val])[1]; }
+    function move(name, val, reason, said) { fields[name].value = val; var t = NAME[name] + " changed to " + choiceText(name, val) + ": " + reason; notes[name].textContent = t; notes[name].hidden = false; said.push(t); }
+    function resolve(changed) {
+      var F = fields, said = [], fmt = F.format.value, au = F.audio.value, ft = F.fileType.value;
+      if (changed === "fileType" && ft === "mp4" && au === "stereo_opus") move("audio", "stereo_aac", "MP4 files can't hold Opus.", said);
+      if (changed === "fileType" && ft === "webm") {
+        if (fmt !== "av1" && fmt !== "vp9") move("format", blocked("format", "av1") ? "vp9" : "av1", "WebM files need AV1 or VP9 video.", said);
+        if (au !== "stereo_opus") move("audio", "stereo_opus", "WebM files need Opus audio.", said);
+      }
+      if (changed === "audio" && au === "stereo_opus" && ft === "mp4") move("fileType", "mkv", "MP4 files can't hold Opus.", said);
+      if (changed === "audio" && au !== "stereo_opus" && ft === "webm") move("fileType", "mkv", "WebM files need Opus audio.", said);
+      if (changed === "format" && (fmt === "hevc" || fmt === "h264") && ft === "webm") move("fileType", "mkv", "WebM files can only hold AV1 or VP9 video.", said);
+      if (said.length) { live.textContent = ""; live.textContent = said.join(" "); }
     }
     function label(name, o) { // Max bitrate carries its 1080p number for the chosen Video format (the server's ladder)
       if (name !== "maxBitrate" || o[0] === "none" || !ladder || !fields.format) return o[1];
@@ -122,8 +146,8 @@
     GROUPS.forEach(function (gr) {
       var fs = el("fieldset"); fs.appendChild(el("legend", null, gr[0]));
       gr[1].forEach(function (f) {
-        var id = uid(), box = el("div", "field"), lab = el("label", null, f[1]), sel = el("select"), hint = el("span", "hint"), lines = [];
-        lab.htmlFor = id; sel.id = id; hint.id = id + "h";
+        var id = uid(), box = el("div", "field"), lab = el("label", null, f[1]), sel = el("select"), hint = el("span", "hint"), lines = [], note = el("span", "hint");
+        lab.htmlFor = id; sel.id = id; hint.id = id + "h"; note.id = id + "m"; note.hidden = true; notes[f[0]] = note;
         f[2].forEach(function (o) { var op = el("option", null, o[1]); op.value = o[0]; sel.appendChild(op); });
         sel.value = v[f[0]] != null ? String(v[f[0]]) : f[2][f[3]][0];
         if (sel.selectedIndex < 0) sel.value = f[2][f[3]][0];
@@ -134,9 +158,9 @@
           var srt = el("span", "hint", SRT); srt.id = id + "s"; lines.push([srt, function (val) { return val === "srt"; }]);
         }
         if (f[0] === "audio") { var sur = el("span", "hint", SURROUND); sur.id = id + "r"; lines.push([sur, function (val) { return val === "eac3_surround" || val === "ac3_surround"; }]); }
-        lines.forEach(function (l) { box.appendChild(l[0]); }); box.appendChild(hint);
+        box.appendChild(note); lines.forEach(function (l) { box.appendChild(l[0]); }); box.appendChild(hint);
         syncs.push(function () {
-          Array.prototype.forEach.call(sel.options, function (op, k) { var why = blocked(f[0], op.value); op.disabled = !!why; op.textContent = label(f[0], f[2][k]) + why; });
+          Array.prototype.forEach.call(sel.options, function (op, k) { var why = blocked(f[0], op.value); op.disabled = !!why; op.textContent = label(f[0], f[2][k]) + (why || pairWhy(f[0], op.value)); });
           if (sel.options[sel.selectedIndex].disabled) { var first = Array.prototype.filter.call(sel.options, function (op) { return !op.disabled; })[0]; if (first) sel.value = first.value; }
           var ch = f[2].filter(function (o) { return String(o[0]) === sel.value; })[0], text = ch && ch[2] || f[4];
           if (f[0] === "maxBitrate" && sel.value !== "none" && ladder && (ladder[fields.format.value] || {})[sel.value]) {
@@ -144,10 +168,11 @@
             text = "Limits each file by its size: 4K " + r["2160"] + " · 1440p " + r["1440"] + " · 1080p " + r["1080"] + " · 720p " + r["720"] + " · SD " + r.sd + " Mbps. A file is never given more than it has now. Quality still sets the picture; the limit only affects busy scenes.";
           }
           hint.textContent = text || ""; hint.hidden = !text;
-          var ids = []; lines.forEach(function (l) { var on = l[1](sel.value); l[0].hidden = !on; if (on) ids.push(l[0].id); }); if (text) ids.push(hint.id);
+          var ids = note.hidden ? [] : [note.id]; lines.forEach(function (l) { var on = l[1](sel.value); l[0].hidden = !on; if (on) ids.push(l[0].id); }); if (text) ids.push(hint.id);
           if (ids.length) sel.setAttribute("aria-describedby", ids.join(" ")); else sel.removeAttribute("aria-describedby");
         });
-        sel.addEventListener("change", function () { syncAll(); changed(); });
+        // The person's own change clears this field's note, then may move another field (with its note).
+        sel.addEventListener("change", function () { note.hidden = true; note.textContent = ""; resolve(f[0]); syncAll(); changed(); });
         fs.appendChild(box);
         if (f[0] === "audio") { // "Only my languages" belongs to Audio (a declared yes/no box)
           var row = el("div", "check"), cb = el("input"), cid = uid(), lb = el("label", null, "Only my languages"), oh = el("span", "hint");
@@ -202,7 +227,7 @@
       t.appendChild(document.createTextNode(names.length ? "Only audio in your languages is kept: " + names.join(", ") + ". " : "Only audio in your languages is kept. "));
       var a = el("a", null, names.length ? "Change them in Settings > General." : "Choose them in Settings > General."); a.href = "/settings/"; t.appendChild(a);
     }
-    syncs.push(syncOnly); syncAll();
+    syncs.push(syncOnly); host.appendChild(live); syncAll();
     Promise.all([g.SYP.api.getSettings(), fetch("/assets/languages.json").then(function (r) { return r.json(); }).then(null, function () { return []; })]).then(function (r) {
       var codes = r[0].languages || [], map = {}; r[1].forEach(function (l) { map[l[0]] = l[1]; });
       noLanguages = !codes.length; names = codes.map(function (c) { return map[c] || c; }); syncAll();
