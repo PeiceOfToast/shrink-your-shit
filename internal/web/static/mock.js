@@ -18,7 +18,7 @@
   var settings = {
     controlLevel: "basic", perLibraryFlow: false, firstRunDone: true, firstRunStep: 1, authRequired: false,
     keepOriginalsDays: 7, trashPath: "Kept next to each file, in a folder called .syp-trash",
-    parallelJobs: 1, quietHours: { from: "", to: "" }, lowPriority: true, scanSchedule: "02:00",
+    queueOrder: "newest", parallelJobs: 1, quietHours: { from: "", to: "" }, lowPriority: true, scanSchedule: "02:00",
     integrations: { sonarr: { url: "", hasKey: false }, radarr: { url: "", hasKey: false }, plex: { url: "", hasKey: false }, jellyfin: { url: "", hasKey: false },
       notifications: { webhookUrl: "", onDone: false, onFailed: true, onNeedsAttention: true } },
     updateAvailable: /[?&]update=1/.test(location.search) ? { version: "1.2.0" } : null // ?update=1 shows the update notice
@@ -51,6 +51,8 @@
   function stepsFor(f) {
     var crf = { f1: 23, f2: 25, f3: 22, f4: 21 }[f.id] || 23, n = 3, chain = [];
     chain.push({ n: n++, kind: "video", label: "Convert to HEVC", detail: "CRF " + crf + " (lower = better quality)" });
+    var cap = libs.filter(function (l) { return l.flowId === f.id && l.sel && l.sel.maxBitrate && l.sel.maxBitrate !== "none"; }).map(function (l) { return +l.sel.maxBitrate; })[0];
+    if (cap) chain.push({ n: n++, kind: "video", label: "Limit to " + cap + " Mbps", detail: "maxrate " + cap + "M, bufsize " + 2 * cap + "M" });
     if (f.madeWith === "builder") chain.push({ n: n++, kind: "resolution", label: "At most 1080p" });
     chain.push({ n: n++, kind: "audio", label: "Keep all tracks" }, { n: n++, kind: "subtitles", label: "Keep text subtitles" }, { n: n++, kind: "filetype", label: "Keep as is" },
       { n: n++, kind: "finish", label: "Replace the original if the new file passes the checks" });
@@ -111,10 +113,11 @@
   }
   // Standard's defaults are the slider's: the same choices with that position's minimum saving (contract addendum 6).
   function isSliderPosition(b) {
-    var d = { speed: "normal", format: "hevc", resolution: "keep", audio: "keep_all", subtitles: "keep_all", fileType: "keep", afterConverting: "replace", order: "newest", skipHdr: true, skipSmall: true }, k;
+    var d = { speed: "normal", format: "hevc", resolution: "keep", audio: "keep_all", subtitles: "keep_all", fileType: "keep", afterConverting: "replace", maxBitrate: "none", skipHdr: true, skipSmall: true }, k;
     for (k in d) if (b[k] !== d[k]) return false;
     return !(b.ignore || []).length && SLIDER[b.quality - 1] && b.minSavingPct === SLIDER[b.quality - 1].minSavingPct;
   }
+  var ORDER = ["newest", "oldest", "largest", "smallest"], CAPS = ["none", "40", "20", "10", "6", "4"]; // contract addenda 10 and 9
   function gone() { return fail(404, "not_found", "That item is gone. Nothing was changed. Reload the page."); }
   function removeFrom(arr, key, id) { var i = find(arr, key, id); return i < 0 ? null : arr.splice(i, 1)[0]; }
 
@@ -134,6 +137,7 @@
       if (level && ["basic", "standard", "advanced"].indexOf(level) < 0) return fail(400, "bad_value", "Control level must be Basic, Standard or Advanced. Nothing was changed.");
       if (b.quietHours) { var qf = "from" in b.quietHours ? b.quietHours.from : settings.quietHours.from, qt = "to" in b.quietHours ? b.quietHours.to : settings.quietHours.to;
         if (!qf !== !qt) return fail(400, "bad_value", "Set both a start and an end, or leave both empty. Nothing was changed."); }
+      if (b.queueOrder != null && ORDER.indexOf(b.queueOrder) < 0) return fail(400, "invalid", "Do first must be newest, oldest, largest or smallest files. Nothing was changed.");
       if (b.keepOriginalsDays != null && !(b.keepOriginalsDays >= 0 && b.keepOriginalsDays <= 365)) return fail(400, "bad_value", "Keep originals for 0 to 365 days. Nothing was changed.");
       // Deep merge. A secret (apiKey, token) is never stored or returned: only that one is saved shows as hasKey.
       (function merge(dst, src) {
@@ -194,6 +198,7 @@
         var nf = { id: fid(), name: flowName(libs[i].name + " (own copy)"), usedBy: [libs[i].name], madeWith: b.speed ? "selectors" : "slider", changedAt: iso(0) };
         flows.push(nf); libs[i].flowId = nf.id; saveLibs();
       }
+      if (b.speed && b.maxBitrate != null && CAPS.indexOf(b.maxBitrate) < 0) return fail(400, "invalid", "Max bitrate must be one of the listed choices. Nothing was changed.");
       if (b.quality && !b.speed) delete libs[i].sel; // a slider save replaces Standard choices
       if (b.quality) { libs[i].quality = b.quality; libs[i].settingLabel = ["Smallest file", "Smaller", "Balanced", "Better quality", "Best quality"][b.quality - 1]; libs[i].settingKind = "slider"; saveLibs(); }
       if (b.speed && isSliderPosition(b)) { delete libs[i].sel; libs[i].quality = b.quality; libs[i].settingKind = "slider"; saveLibs(); return ok(); }
@@ -227,7 +232,7 @@
     resume: function () { paused = false; saveAct(); return ok(); },
     queue: function () {
       if (!paused && working[0] && working[0].percent < 99) working[0].percent++; // moves a little on every look
-      return ok({ working: paused ? [] : working, upNext: [{ library: "Movies", count: 590, order: "Newest first" }, { library: "TV Shows", count: 0, order: "" }] });
+      return ok({ working: paused ? [] : working, upNext: [{ library: "Movies", count: 590, order: settings.queueOrder }, { library: "TV Shows", count: 0, order: "" }] });
     },
     stopJob: function (p) {
       var j = removeFrom(working, "jobId", p.id); if (!j) return gone();

@@ -29,6 +29,10 @@
   {"key": "quietHours.to", "tab": "performance", "group": "Quiet hours", "type": "time", "label": "Quiet hours end"},
   {"key": "scanSchedule", "tab": "performance", "group": "Looking for new files", "type": "time",
    "label": "Look for new files every day at", "hint": "Each library also shows when its next look is."},
+  {"key": "queueOrder", "tab": "performance", "group": "Which files first", "type": "select", "label": "Do first",
+   "hint": "Which waiting files convert first, across all libraries.",
+   "options": [{"value": "newest", "label": "Newest files"}, {"value": "oldest", "label": "Oldest files"},
+               {"value": "largest", "label": "Largest files"}, {"value": "smallest", "label": "Smallest files"}]},
 
   {"key": "integrations.sonarr.url", "tab": "integrations", "group": "Sonarr", "type": "text", "label": "Address", "hint": "The address you open Sonarr at."},
   {"key": "integrations.sonarr.apiKey", "tab": "integrations", "group": "Sonarr", "type": "secret", "label": "API key", "hasKey": "integrations.sonarr.hasKey"},

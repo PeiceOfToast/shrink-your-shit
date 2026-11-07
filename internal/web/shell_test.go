@@ -394,13 +394,13 @@ func TestSettingsRegistry(t *testing.T) {
 	}
 	// GET /api/settings fields (UI-API-CONTRACT.md); "token" has its own endpoint.
 	contract := []string{"controlLevel", "perLibraryFlow", "firstRunDone", "firstRunStep", "authRequired", "keepOriginalsDays", "trashPath",
-		"parallelJobs", "quietHours", "lowPriority", "scanSchedule", "integrations", "updateAvailable"}
+		"parallelJobs", "queueOrder", "quietHours", "lowPriority", "scanSchedule", "integrations", "updateAvailable"}
 	known := map[string]bool{"token": true}
 	for _, k := range contract {
 		known[k] = true
 	}
 	tabs := map[string]bool{"general": true, "safety": true, "performance": true, "integrations": true, "system": true, "first-run": true}
-	types := map[string]bool{"radio": true, "checkbox": true, "number": true, "time": true, "text": true, "secret": true, "readout": true, "token": true, "info": true}
+	types := map[string]bool{"radio": true, "checkbox": true, "number": true, "time": true, "text": true, "secret": true, "readout": true, "token": true, "info": true, "select": true}
 	seen, homes := map[string]bool{}, map[string]bool{}
 	for _, e := range reg {
 		if seen[e.Key] {
@@ -415,7 +415,7 @@ func TestSettingsRegistry(t *testing.T) {
 		if !tabs[e.Tab] || !types[e.Type] {
 			t.Errorf("NAV-2: %s has an unknown tab %q or type %q", e.Key, e.Tab, e.Type)
 		}
-		if e.Type == "radio" && len(e.Options) == 0 {
+		if (e.Type == "radio" || e.Type == "select") && len(e.Options) == 0 {
 			t.Errorf("NAV-2: %s has no options", e.Key)
 		} else if e.Type != "info" && e.Type != "radio" && e.Label == "" {
 			t.Errorf("NAV-2: %s has no label", e.Key)
@@ -429,6 +429,28 @@ func TestSettingsRegistry(t *testing.T) {
 	// NAV-7: nothing the registry says uses the word "flow".
 	if m := regexp.MustCompile(`(?i)\bflows?\b`).FindString(string(b)); m != "" {
 		t.Errorf("NAV-7: %q in settings.json", m)
+	}
+}
+
+// TIER-UI-2: Standard shows exactly nine dropdowns. "Do first" is not one of them (it is the global
+// queueOrder setting) and Max bitrate comes right after Resolution (design, 2026-11-07).
+func TestStandardNineDropdowns(t *testing.T) {
+	b, err := fs.ReadFile(static, "static/editors.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(b)
+	start, end := strings.Index(src, "var GROUPS = ["), strings.Index(src, "function selectors(")
+	if start < 0 || end < start {
+		t.Fatal("GROUPS table not found in editors.js")
+	}
+	var fields []string
+	for _, m := range regexp.MustCompile(`(?m)^\s*\["(\w+)", "[^"]+", \[\[`).FindAllStringSubmatch(src[start:end], -1) {
+		fields = append(fields, m[1])
+	}
+	want := "quality speed format resolution maxBitrate audio subtitles fileType afterConverting"
+	if got := strings.Join(fields, " "); got != want {
+		t.Errorf("Standard dropdowns are %q, want %q", got, want)
 	}
 }
 
