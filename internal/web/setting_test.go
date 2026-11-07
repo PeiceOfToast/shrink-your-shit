@@ -177,3 +177,28 @@ func TestSettingEndpointsNeedSignIn(t *testing.T) {
 }
 
 var _ = jobs.ErrNotFound
+
+// Until slice 25 saves the selectors, a body with any of them is refused and nothing is written, so a
+// choice is never dropped while the page says "Saved".
+func TestSelectorFieldsAreRefusedUntilTheyCanBeSaved(t *testing.T) {
+	srv, st, _, fe := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	path := fmt.Sprintf("/api/libraries/%d/setting", l.ID)
+	for _, f := range []string{`"speed":"fast"`, `"format":"hevc"`, `"resolution":"720p"`, `"maxBitrate":10`, `"audio":"keep_all"`,
+		`"subtitles":"keep_all"`, `"fileType":"keep"`, `"afterConverting":"replace"`, `"ignore":[]`, `"skipHdr":true`,
+		`"skipSmall":true`, `"minSavingPct":10`} {
+		code, body := post(t, srv, "PUT", path, `{"quality":4,`+f+`}`)
+		if code != 400 || !strings.Contains(body, `"not_available"`) || !strings.Contains(body, "Nothing was changed") {
+			t.Errorf("%s: %d %s", f, code, body)
+		}
+	}
+	if f, _ := st.GetFlow(l.FlowID); f.Template != rules.SliderTemplate(3) || fe.scans != 0 {
+		t.Errorf("nothing may be written: %+v, %d scans", f.Template, fe.scans)
+	}
+	if code, body := post(t, srv, "PUT", path, `{"quality":4,"kind":"slider"}`); code != 200 {
+		t.Errorf("quality only still saves: %d %s", code, body)
+	}
+	if f, _ := st.GetFlow(l.FlowID); f.Template != rules.SliderTemplate(4) {
+		t.Errorf("%+v", f.Template)
+	}
+}

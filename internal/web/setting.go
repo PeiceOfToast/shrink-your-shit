@@ -3,6 +3,7 @@
 package web
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -28,6 +29,10 @@ func settingView(f jobs.Flow) map[string]any {
 	}
 	return map[string]any{"kind": "custom"}
 }
+
+// selectorFields are the Standard selectors (UI-API-CONTRACT.md addendum 2), saved from slice 25 on.
+var selectorFields = map[string]bool{"speed": true, "format": true, "resolution": true, "maxbitrate": true, "audio": true,
+	"subtitles": true, "filetype": true, "afterconverting": true, "ignore": true, "skiphdr": true, "skipsmall": true, "minsavingpct": true}
 
 func settingRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 	libID := func(w http.ResponseWriter, r *http.Request) (int64, bool) {
@@ -89,11 +94,23 @@ func settingRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		if !ok {
 			return
 		}
+		var body map[string]json.RawMessage
+		if !readJSON(w, r, &body) {
+			return
+		}
+		for k := range body {
+			if selectorFields[strings.ToLower(k)] {
+				// Until the selectors are saved (slice 25), dropping them would lose the person's choices.
+				apiError(w, http.StatusBadRequest, "not_available", "This version can only save Quality so far; the other choices come in an update. Nothing was changed.")
+				return
+			}
+		}
 		var in struct {
 			Quality          int
 			SharedFlowChoice string
 		}
-		if !readJSON(w, r, &in) {
+		if b, err := json.Marshal(body); err != nil || json.Unmarshal(b, &in) != nil {
+			apiError(w, http.StatusBadRequest, "invalid_json", "The request body is not valid JSON.")
 			return
 		}
 		if _, ok := rules.SliderAt(in.Quality); !ok {
