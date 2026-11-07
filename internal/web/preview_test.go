@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
@@ -123,6 +124,7 @@ func TestLibraryFilesEndpoint(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "Films", "Heat (1995).mkv"), []byte("xx"), 0o644)
 	os.WriteFile(filepath.Join(dir, "clip.mp4"), []byte("x"), 0o644)
 	l, _ := st.AddLibrary("Movies", dir, rules.SliderTemplate(3), false)
+	dir, _ = jobs.RealPath(dir) // the library is stored resolved (/private/var on macOS), and so are its files
 	_, body, _ := do(t, nil, srv, call{method: "GET", path: fmt.Sprintf("/api/libraries/%d/files?q=heat", l.ID)})
 	var out struct {
 		Items []struct {
@@ -140,5 +142,27 @@ func TestLibraryFilesEndpoint(t *testing.T) {
 	json.Unmarshal([]byte(body), &out)
 	if out.Total != 2 || len(out.Items) != 1 || out.Items[0].Name != "clip.mp4" { // sorted: "Films/..." < "clip.mp4"
 		t.Errorf("paged: %s", body)
+	}
+}
+
+// The macOS /var -> /private/var case on any system: the library was added through a link, so it is
+// stored resolved, and the page sends the sample through the link. Inside is inside; a text file is
+// not a video; a missing file is not found.
+func TestPreviewSampleThroughALinkedLibraryPath(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	real := t.TempDir()
+	os.WriteFile(filepath.Join(real, "a.mkv"), make([]byte, 1_000_000), 0o644)
+	os.WriteFile(filepath.Join(real, "notes.txt"), []byte("x"), 0o644)
+	link := filepath.Join(t.TempDir(), "media")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip("cannot make links here")
+	}
+	l, _ := st.AddLibrary("Movies", link, rules.SliderTemplate(3), false)
+	path := fmt.Sprintf("/api/libraries/%d/preview", l.ID)
+	for name, want := range map[string]int{"a.mkv": 200, "notes.txt": 400, "gone.mkv": 404} {
+		code, b := post(t, srv, "POST", path, fmt.Sprintf(`{"sampleFile":%q}`, filepath.Join(link, name)))
+		if code != want || strings.Contains(b, "outside_library") {
+			t.Errorf("%s: %d %s", name, code, b)
+		}
 	}
 }

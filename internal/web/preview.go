@@ -144,26 +144,33 @@ func previewTemplate(w http.ResponseWriter, store *jobs.Store, l jobs.Library, s
 	return rules.SliderTemplate(q), true
 }
 
-// sampleFile resolves the chosen sample and checks it is a video inside the library's folder.
+// sampleFile resolves the chosen sample and checks it is a video inside the library's folder. The
+// folder (root) is stored resolved (/var is /private/var on macOS, RUNNER~1 a long name on Windows),
+// so the file is resolved the same way before it is compared: a missing file through its folder.
 func sampleFile(w http.ResponseWriter, root, p string) (string, os.FileInfo, bool) {
-	inside := func(p string) bool {
-		rel, err := filepath.Rel(root, p)
-		return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-	}
 	outside := func() (string, os.FileInfo, bool) {
 		apiError(w, http.StatusBadRequest, "outside_library", "Pick a video inside this library's folder.")
 		return "", nil, false
 	}
-	if !filepath.IsAbs(p) || !inside(filepath.Clean(p)) { // as written (the files list gives real paths)
+	if !filepath.IsAbs(p) {
 		return outside()
 	}
 	real, err := jobs.RealPath(p)
-	if err != nil {
+	missing := err != nil
+	if missing {
+		dir, derr := jobs.RealPath(filepath.Dir(p))
+		if derr != nil {
+			dir = filepath.Clean(filepath.Dir(p))
+		}
+		real = filepath.Join(dir, filepath.Base(p))
+	}
+	rel, err := filepath.Rel(root, real)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return outside() // also a link inside that leads out of the folder
+	}
+	if missing {
 		apiError(w, http.StatusNotFound, "not_found", "That file is not there any more.")
 		return "", nil, false
-	}
-	if !inside(real) { // a link inside that leads out of the folder
-		return outside()
 	}
 	st, err := os.Stat(real)
 	if err != nil || !st.Mode().IsRegular() || !scanner.IsVideo(real) {
