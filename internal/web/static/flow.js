@@ -1,11 +1,12 @@
-/* One flow, read-only: the diagram and the numbered text version, always both. */
+/* One flow (redesign B3): the one place its settings are edited. Basic flows get the A1 editor, Standard flows the
+   selectors; Save stores the flow's own setting (PUT /api/flows/{id}/setting), which every library using it follows.
+   Advanced and earlier-install flows stay read-only: the diagram and its numbered text version. */
 (function () {
   "use strict";
   var S = window.SYP, api = S.api, ui = S.ui, el = ui.el;
   function $(id) { return document.getElementById(id); }
   function fail(e) { var b = $("err"); b.textContent = e && e.message || "Something went wrong. Nothing was changed."; b.hidden = false; }
   var HEAD = { start: "Start", check: "Check", video: "Video", audio: "Audio", subtitles: "Subtitles", filetype: "File type", finish: "Finish", skip: "Skip", resolution: "Resolution" };
-  var MADE = { slider: "Made with the slider", selectors: "Made with the simple choices", builder: "Made with the builder", legacy: "Made from an earlier install" };
 
   // Steps run left to right; a step with branches is followed by a column of labelled rows.
   function drawSteps(steps, parent) {
@@ -34,26 +35,63 @@
       });
     });
   }
+  function and(list) { return list.length < 2 ? list.join("") : list.slice(0, -1).join(", ") + " and " + list[list.length - 1]; }
+  function say(t) { $("said").textContent = t; }
 
   function init() {
-    var id = new URLSearchParams(location.search).get("id");
+    var id = new URLSearchParams(location.search).get("id"), f, editor = null, kind, warn, names = {}, langs = [];
     if (!id) { fail({ message: "No flow was chosen. Open one from the Flows page." }); return; }
-    Promise.all([api.getFlow({ id: id }), api.listFlows(), api.listLibraries()]).then(function (r) {
-      var f = r[0], meta = r[1].items.filter(function (x) { return x.id === id; })[0] || { usedBy: [], madeWith: "" }, libs = r[2].items;
+    function head() {
       $("f-title").textContent = f.name; document.title = f.name + " - shrink-your-shit";
-      $("f-meta").textContent = (meta.usedBy.length ? "Used by " + meta.usedBy.length + (meta.usedBy.length === 1 ? " library: " : " libraries: ") + meta.usedBy.join(", ") : "Not used by any library") + " · " + (MADE[meta.madeWith] || "Made another way");
-      var note = $("f-note");
-      note.textContent = " This shows what happens to each video, from left to right. ";
-      var lib = libs.filter(function (l) { return meta.usedBy.length === 1 && l.name === meta.usedBy[0]; })[0];
-      if (meta.madeWith !== "builder" && lib) { note.appendChild(document.createTextNode("Change the setting on the ")); var a = el("a", null, lib.name + " library"); a.href = "/library/?id=" + encodeURIComponent(lib.id); note.appendChild(a); note.appendChild(document.createTextNode(" and this flow updates.")); }
-      drawSteps(f.steps, $("graph")); text(f.steps, $("f-text"));
+      $("f-tag").textContent = f.tag || ""; $("f-tag").hidden = !f.tag;
+    }
+    // Switching kind takes effect on Save (B3): a Basic flow opens as Standard with the same values; a Standard flow can
+    // go back to Basic only when every choice fits the slider (fitsBasic from the server).
+    function build(k, s) {
+      kind = k; var host = $("f-editor"), sw = $("f-switch"); host.textContent = ""; sw.textContent = "";
+      $("f-qh").hidden = k !== "basic";
+      if (k === "basic") {
+        editor = S.editors.basic(host, s, langs, names, function () { say(""); }, f.name + ": smallest file to best quality");
+        var a = el("a", null, "Switch to Standard"); a.href = "#"; sw.appendChild(a);
+        a.onclick = function (e) { e.preventDefault(); var v = editor.get();
+          build("standard", { quality: v.quality, speed: "normal", format: "hevc", resolution: "keep", maxBitrate: "none", audio: v.audio, subtitles: "keep_all", fileType: "mkv", afterConverting: "replace", skipHdr: true, availableFileTypes: s.availableFileTypes, availableAudio: s.availableAudio, availableSubtitles: s.availableSubtitles });
+          say("Standard choices. They take effect when you press Save."); };
+      } else {
+        editor = S.editors.selectors(host, function () { say(""); }, s);
+        if (s.fitsBasic) { var b = el("a", null, "Switch to Basic"); b.href = "#"; sw.appendChild(b);
+          b.onclick = function (e) { e.preventDefault(); var v = editor.get(); build("basic", { quality: v.quality, audio: v.audio, becomes: s.becomes || { video: "HEVC", resolution: "same", fileType: "MKV" } }); say("Basic slider. It takes effect when you press Save."); }; }
+        else sw.textContent = "This flow uses choices the slider can't show.";
+      }
+    }
+    function rename() {
+      var box = $("f-renamebox"), form = el("form", "row"), lb = el("label", "sr", "New name for " + f.name), inp = el("input"), ok = el("button", "btn small primary", "Save"), no = el("button", "btn small", "Cancel");
+      inp.id = "f-newname"; lb.htmlFor = inp.id; inp.value = f.name; inp.size = 26; no.type = "button";
+      form.appendChild(lb); form.appendChild(inp); form.appendChild(ok); form.appendChild(no); box.textContent = ""; box.appendChild(form); inp.focus(); inp.select();
+      var close = function () { box.textContent = ""; $("f-rename").focus(); };
+      no.onclick = close; inp.onkeydown = function (e) { if (e.key === "Escape") { e.preventDefault(); close(); } };
+      form.onsubmit = function (e) { e.preventDefault(); var n = inp.value.trim(); if (!n) return;
+        api.renameFlow({ id: id }, { name: n }).then(function (nf) { f.name = nf.name; head(); close(); say("Renamed."); }, fail); };
+    }
+    Promise.all([api.getFlow({ id: id }), api.getFlowSetting({ id: id }), api.getSettings(), fetch("/assets/languages.json").then(function (x) { return x.json(); }).then(null, function () { return []; })]).then(function (r) {
+      f = r[0]; var s = r[1]; langs = r[2].languages || []; r[3].forEach(function (x) { names[x[0]] = x[1]; });
+      head(); $("f-rename").hidden = false; $("f-rename").onclick = function (e) { e.preventDefault(); rename(); };
       $("f-body").hidden = false;
-      $("builder").hidden = false;
       $("export").hidden = !api.flowIO();
       $("export").onclick = function () {
         api.exportFlow({ id: id }).then(function (j) {
           var u = URL.createObjectURL(new Blob([JSON.stringify(j, null, 2)], { type: "application/json" })), a = el("a"); a.href = u; a.download = f.name + ".json"; a.click(); URL.revokeObjectURL(u);
         }, fail);
+      };
+      if (f.kind === "advanced" || f.kind === "earlier") { $("f-readonly").hidden = false; drawSteps(f.steps || [], $("graph")); text(f.steps || [], $("f-text")); return; }
+      $("f-edit").hidden = false; warn = ui.warnings($("save")); warn.show(s.warnings);
+      if (f.usedBy.length) { $("f-used").textContent = "Saving changes this for " + and(f.usedBy) + "."; $("f-used").hidden = false; }
+      build(f.kind === "standard" ? "standard" : "basic", s);
+      $("save").onclick = function () {
+        if (!editor) return;
+        api.putFlowSetting({ id: id }, editor.get()).then(function (ns) {
+          $("err").hidden = true; warn.show(ns && ns.warnings); say("Saved.");
+          return api.getFlow({ id: id }).then(function (nf) { f = nf; head(); if (ns) build(nf.kind === "standard" ? "standard" : "basic", ns); });
+        }, function (e) { say(""); fail(e); });
       };
     }).catch(fail);
   }

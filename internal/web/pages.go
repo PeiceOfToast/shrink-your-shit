@@ -109,7 +109,7 @@ func scripts(kind string) []string {
 	case "flows":
 		return append(core, "ui.js", "flows.js")
 	case "flow":
-		return append(core, "ui.js", "flow.js")
+		return append(core, "ui.js", "editors.js", "flow.js")
 	case "activity":
 		return append(core, "ui.js", "activity.js")
 	case "settings":
