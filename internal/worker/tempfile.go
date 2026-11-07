@@ -102,7 +102,8 @@ func removeLeftoverTemps(src string) error {
 		}
 		for _, r := range remove {
 			if err := os.Remove(r); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return fmt.Errorf("cannot remove the old temp file %s: %w", r, err)
+				return failed(fmt.Sprintf("An old temp file next to this file (%s) could not be removed, so converting did not start. Your original was not touched. Delete it, or let shrink-your-shit write in this folder, then press Retry.", filepath.Base(r)),
+					fmt.Errorf("cannot remove the old temp file %s: %w", r, err))
 			}
 		}
 	}

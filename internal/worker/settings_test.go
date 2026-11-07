@@ -53,7 +53,7 @@ func TestJobOfARemovedLibraryFails(t *testing.T) {
 		return rules.Template{}, errors.New("its library no longer exists")
 	}
 	w.RunOne(context.Background())
-	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "library no longer exists") {
+	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "setting could not be read") {
 		t.Errorf("%s %q", j.Status, j.Error)
 	}
 	if s.count("libx265") != 0 {
@@ -135,7 +135,7 @@ func TestJobStopsIfItsPlanCannotBeRecorded(t *testing.T) {
 	w.Queue = failingRecord{s.store}
 	w.RunOne(context.Background())
 	j := s.job()
-	if j.Status != jobs.Failed || !strings.Contains(j.Error, "could not record what this conversion will do") || !strings.Contains(j.Error, "original is untouched") {
+	if j.Status != jobs.Failed || !strings.Contains(j.Error, "could not be recorded") || !strings.Contains(j.Error, "original was not touched") {
 		t.Errorf("%s %q", j.Status, j.Error)
 	}
 	if s.count("libx265") != 0 {
