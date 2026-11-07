@@ -44,6 +44,24 @@ CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status);`},
 	{2, "app_meta table", `
 CREATE TABLE app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 INSERT INTO app_meta(key, value) VALUES ('schema_created', datetime('now'));`},
+
+	// Libraries and flows as records (slice 15). Libraries given as flags are added at startup
+	// (EnsureLibraries), because their values come from the flags. A database that already holds
+	// work is an upgrade: the marker makes those first libraries' flows "<folder> - Legacy".
+	{3, "libraries and flows", `
+CREATE TABLE flows (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL, template TEXT NOT NULL, graph TEXT,
+  created TEXT NOT NULL, changed TEXT NOT NULL);
+CREATE TABLE libraries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL, path TEXT NOT NULL UNIQUE,
+  flow_id INTEGER NOT NULL REFERENCES flows(id),
+  started INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL);
+ALTER TABLE jobs ADD COLUMN library_id INTEGER;
+CREATE INDEX jobs_library ON jobs(library_id);
+INSERT INTO app_meta(key, value) SELECT 'legacy_flows', '1'
+  WHERE EXISTS (SELECT 1 FROM jobs) OR EXISTS (SELECT 1 FROM files);`},
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.

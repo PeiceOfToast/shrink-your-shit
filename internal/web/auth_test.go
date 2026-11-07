@@ -43,7 +43,7 @@ func server(t *testing.T, exposed bool) (*httptest.Server, *Access, *jobs.Store)
 		t.Fatal(err)
 	}
 	a.FailDelay = 0
-	srv := httptest.NewServer(Handler(st, []string{"/lib"}, a))
+	srv := httptest.NewServer(Handler(st, a, Engine{}))
 	t.Cleanup(srv.Close)
 	return srv, a, st
 }
@@ -233,7 +233,7 @@ func TestStoredTokenIsEnforcedOnLoopback(t *testing.T) {
 	if err != nil || created || a.Token() != "set-by-hand" {
 		t.Fatalf("%v %v %q", err, created, a.Token())
 	}
-	srv := httptest.NewServer(Handler(nil, nil, a))
+	srv := httptest.NewServer(Handler(nil, a, Engine{}))
 	defer srv.Close()
 	if code, _, _ := do(t, nil, srv, call{method: "GET", path: "/api/settings"}); code != 401 {
 		t.Errorf("loopback with a stored token: %d, want 401", code)

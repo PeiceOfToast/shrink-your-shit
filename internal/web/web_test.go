@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
 func TestStatusAndRetry(t *testing.T) {
@@ -19,10 +20,11 @@ func TestStatusAndRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
+	st.AddLibrary("lib", "/lib", rules.SliderTemplate(3), true)
 	id, _ := st.Enqueue(jobs.Job{Library: "/lib", Path: "/lib/a.mkv"})
 	st.Claim("w")
 	st.Fail(id, "bad")
-	srv := httptest.NewServer(Handler(st, []string{"/lib"}, openAccess(t)))
+	srv := httptest.NewServer(Handler(st, openAccess(t), Engine{}))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/api/status")

@@ -30,6 +30,8 @@ type Queue interface {
 	Fail(id int64, msg string) error
 	// Release puts a running job back in the queue (used on shutdown).
 	Release(id int64) error
+	// Drop deletes a job that was stopped because its library was removed.
+	Drop(id int64) error
 	// Keep marks a job "kept original": a safety check refused the result (reason says why).
 	Keep(id int64, reason string) error
 }
@@ -52,9 +54,11 @@ type Worker struct {
 	FFmpeg string
 	// FFprobe checks the result before it replaces anything.
 	FFprobe string
-	Rule    rules.Rule
-	Mode    OutputMode
-	Poll    time.Duration
+	// Settings returns what a job's library's flow says to do. Nil: Rule and Mode for every job.
+	Settings func(jobs.Job) (rules.Settings, error)
+	Rule     rules.Rule
+	Mode     OutputMode
+	Poll     time.Duration
 	// OnDone is called after a job succeeds with the final path (optional).
 	OnDone func(job jobs.Job, finalPath string)
 
@@ -69,6 +73,27 @@ type Worker struct {
 
 	mu         sync.Mutex
 	filterMemo map[string]bool
+	current    int64              // the running job's id (0: none)
+	cancelJob  context.CancelFunc // stops only the running job
+	stopped    bool               // StopJob was called for the running job
+}
+
+// StopJob stops job id if this worker is running it: the original is left untouched, the temp files
+// removed, and the job record dropped (its library was removed). It does not wait.
+func (w *Worker) StopJob(id int64) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.current == id && w.cancelJob != nil {
+		w.stopped = true
+		w.cancelJob()
+	}
+}
+
+func (w *Worker) settingsFor(job jobs.Job) (rules.Settings, error) {
+	if w.Settings == nil {
+		return rules.Settings{Rule: w.Rule, Output: string(w.Mode)}, nil
+	}
+	return w.Settings(job)
 }
 
 // Run processes jobs until ctx is cancelled.
@@ -96,7 +121,19 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	final, err := w.process(ctx, job)
+	jobCtx, cancel := context.WithCancel(ctx)
+	w.mu.Lock()
+	w.current, w.cancelJob, w.stopped = job.ID, cancel, false
+	w.mu.Unlock()
+	final, err := w.process(jobCtx, job)
+	cancel()
+	w.mu.Lock()
+	stopped := w.stopped
+	w.current, w.cancelJob, w.stopped = 0, nil, false
+	w.mu.Unlock()
+	if err != nil && stopped && ctx.Err() == nil {
+		return true, w.Queue.Drop(job.ID)
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			// Shutting down: not the file's fault, so run it again next start.
@@ -140,6 +177,10 @@ func BesidePath(src string) string {
 // file next to the original; every check runs on that temp file; the rename is the very last step, and
 // any error or "no" before it removes the temp file and leaves the original exactly as it was.
 func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err error) {
+	set, err := w.settingsFor(job)
+	if err != nil {
+		return "", fmt.Errorf("cannot read what to do with it: %w", err)
+	}
 	before, serr := statOpen(job.Path)
 	if serr != nil {
 		return "", fmt.Errorf("source file: %w", serr)
@@ -178,6 +219,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		packets = n
 	}
 	exp := DefaultExpect(src, packets)
+	exp.MinSavings = float64(set.MinSavingPct) / 100
 	if exp.DurationSec <= 0 {
 		exp.DurationSec = job.DurationSec
 	}
@@ -187,7 +229,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		return "", err
 	}
 	tmp := stage.path
-	args := media.HEVCArgs(job.Path, tmp, w.Rule.CRF, w.Rule.Preset)
+	args := media.HEVCArgs(job.Path, tmp, set.CRF, set.Preset)
 	encErr, terr := media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p float64) {
 		w.Queue.Progress(job.ID, p)
 	})
@@ -219,7 +261,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		return "", fmt.Errorf("temp file permissions: %w", err)
 	}
 	final = job.Path
-	if w.Mode == Beside {
+	if OutputMode(set.Output) == Beside {
 		final = BesidePath(job.Path)
 	}
 	// Rename is atomic on one filesystem: the original is only replaced by a complete file. Right

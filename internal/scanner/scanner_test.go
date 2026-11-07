@@ -29,7 +29,8 @@ func setup(t *testing.T, probe string) (*Scanner, *jobs.Store, string, *media.Fa
 	os.WriteFile(filepath.Join(lib, "notes.txt"), []byte("x"), 0o644)
 	os.WriteFile(filepath.Join(lib, "b.syp-tmp.mkv"), []byte("x"), 0o644)
 	f := &media.FakeExec{Out: []byte(probe)}
-	return &Scanner{Store: st, Exec: f, FFprobe: "ffprobe", Rule: rules.Default(), Libraries: []string{lib}}, st, lib, f
+	targets := func() ([]Target, error) { return []Target{{LibraryID: 1, Path: lib, Rule: rules.Default()}}, nil }
+	return &Scanner{Store: st, Exec: f, FFprobe: "ffprobe", Targets: targets}, st, lib, f
 }
 
 func TestIsVideo(t *testing.T) {

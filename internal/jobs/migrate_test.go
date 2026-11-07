@@ -210,8 +210,10 @@ func TestOpenTwiceIsIdempotent(t *testing.T) {
 		if v := version(t, s.db); v != latestVersion() {
 			t.Errorf("open %d: version %d", i, v)
 		}
-		if n := count(t, s.db, "app_meta"); n != 1 {
-			t.Errorf("open %d: app_meta rows %d (migration ran twice?)", i, n)
+		var n int
+		s.db.QueryRow(`SELECT COUNT(*) FROM app_meta WHERE key='schema_created'`).Scan(&n)
+		if n != 1 {
+			t.Errorf("open %d: %d schema_created rows (migration ran twice?)", i, n)
 		}
 		s.Close()
 	}

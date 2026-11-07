@@ -152,13 +152,17 @@ Run `./shrink-your-shit -h` for all of them. The main ones:
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `-library` | (required) | folder to watch (repeatable; or env `SYP_LIBRARIES`) |
+| `-library` | none | folder to watch, added as a library if no library has it yet (repeatable; or env `SYP_LIBRARIES`). Libraries can also be added on the web page; with neither, the program starts with none |
 | `-data` | user config folder | where the database lives |
 | `-from-codec` | `h264` | only convert this video codec |
 | `-min-bitrate` | `4000` | only convert files at or above this video bitrate (kbps) |
 | `-crf` | `26` | quality: lower is better and bigger |
 | `-preset` | `medium` | x265 speed: `ultrafast` … `veryslow` |
 | `-output` | `replace` | `replace` or `beside` |
+
+`-from-codec`, `-min-bitrate`, `-crf`, `-preset` and `-output` are the settings of libraries that
+`-library` adds. Each library keeps its own settings (its flow) after that: changing these flags
+later does not change libraries that already exist.
 | `-decode-check` | `auto` | play the new file through a decoder before replacing the original: `auto` (completely up to 3 hours long, else at 3 places) or `always` |
 | `-min-ssim` | `0.95` | how similar the new picture must be to the original (0.90-1.0); an untuned starting value |
 | `-scan-every` | `30s` | how often to look for new files |

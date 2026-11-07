@@ -17,12 +17,33 @@ library folders --scanner--> files table + jobs table (SQLite) <--worker (pulls 
 | Path | Job |
 |---|---|
 | `main.go`, `platform.go` | flags and env, finding ffmpeg/ffprobe, default data dir, starts the scanner, worker and web server, handles Ctrl+C/SIGTERM |
-| `internal/scanner` | walks library folders every `-scan-every`, probes new or changed video files, asks the rule, queues jobs. Skips hidden files and folders (names starting with `.`), `@eaDir`, `$RECYCLE.BIN`, `System Volume Information`, files changed within `-settle`, and our own temp and output files (names whose part before the extension ends in `.syp-tmp` or `.hevc`, e.g. `a.hevc.mkv`) |
-| `internal/rules` | `Rule.Match(info)`: source codec equals `-from-codec` and video bitrate at least `-min-bitrate`; returns a reason string shown in the UI. Only one rule exists today |
+| `internal/scanner` | every `-scan-every` (or at once on `ScanNow`), walks the folders of the **started** libraries (`Targets`, read from the database each pass), probes new or changed video files, asks each library's own rule, queues jobs tagged with the library id. Skips hidden files and folders (names starting with `.`), `@eaDir`, `$RECYCLE.BIN`, `System Volume Information`, files changed within `-settle`, and our own temp and output files (names whose part before the extension ends in `.syp-tmp` or `.hevc`, e.g. `a.hevc.mkv`) |
+| `internal/rules` | `Rule.Match(info)`: source codec and minimum video bitrate; returns a reason string shown in the UI. `flow.go`: a flow's `Template` (kind `slider`, `legacy`, later `selectors`/`custom`, with params and a compiler version) and `Template.Settings()`, the one mapping from a flow to what the scanner and worker use (rule, CRF, preset, output, minimum saving); the slider table (`Slider`, positions 1-5) lives here |
 | `internal/media` | wraps ffprobe and ffmpeg behind the `Exec` interface (`OSExec` is real, `FakeExec` is for tests); parses probe JSON into `Info` (container, duration, bitrate, plus a per-stream `Streams` list: codec, language, flags, video size/fps/bit depth/HDR and Dolby Vision markers, audio channels, subtitle text-vs-bitmap, attachments, chapter count; helpers `Video()`, `Audio()`, `IsHDR()`, `HasBitmapSubs()`...); builds the ffmpeg arguments (`HEVCArgs`); parses `-progress` output |
-| `internal/jobs` | SQLite store (pure-Go `modernc.org/sqlite`, no cgo): `files` (what the scanner last saw) and `jobs` tables, and the job state machine |
+| `internal/jobs` | SQLite store (pure-Go `modernc.org/sqlite`, no cgo): `files` (what the scanner last saw), `jobs`, `libraries` and `flows` tables, and the job state machine. `libraries.go`: library and flow records (`AddLibrary`, `EnsureLibraries` for `-library`, `DeleteLibrary`, `SettingsFor(job)`, per-library `Counts`) |
 | `internal/worker` | `Worker` pulls jobs through the `Queue` interface and runs the transcode. The built-in worker is one instance; remote workers would implement `Queue` over HTTP |
 | `internal/web` | embedded static page (`go:embed`, plain HTML/JS, no build step) and a JSON API |
+
+## Libraries and flows
+
+A **library** (`libraries` table: name, folder, flow, `started`) is a folder the program looks after.
+Every library has exactly one **flow** (`flows` table: name, `template` JSON, `graph` for the later
+flow engine), which says what to do with its files. Until the Plan compiler (slice 16) and the flow
+engine (slice 30), a flow's behaviour is its template: `rules.Template.Settings()` turns it into the
+rule the scanner matches with and the CRF, preset, output mode and minimum saving the worker uses
+(`Worker.Settings`, looked up per job by `Store.SettingsFor`).
+
+- A library added on the web page (`POST /api/libraries`) gets a slider flow at the chosen position
+  and starts **not started**: nothing is scanned or queued until `POST /api/libraries/{id}/scan`.
+- `-library`/`SYP_LIBRARIES` add a started library with a `legacy` flow holding the program's flags,
+  only when no library has that folder. On the first start after upgrading a database that already
+  held work (migration 3 leaves a marker), those flows are named `<folder> - Legacy`; otherwise a
+  flow is named after its library, a clash adding " 2", " 3". A flow is never renamed automatically.
+  Jobs made before libraries existed are linked to their library by folder.
+- Deleting a library removes the record and its queued jobs, stops its running job (the worker
+  drops it; the original is untouched) and keeps its flow and finished jobs.
+- Library folders may not be inside one another (their files would belong to two libraries).
+- `GET /api/fs/dirs?path=` lists folder names (never files or sizes) for choosing a library's folder.
 
 ## Job lifecycle
 
@@ -118,12 +139,12 @@ Flags (see `go run . -h`) with environment equivalents:
 
 | Setting | Flag | Env | Default |
 |---|---|---|---|
-| Folders to watch | `-library` (repeatable) | `SYP_LIBRARIES` (`:` separated; `;` on Windows) | none (required) |
+| Folders to watch | `-library` (repeatable): adds a started library with its own flow when no library has that folder; never changes or removes one | `SYP_LIBRARIES` (`:` separated; `;` on Windows) | none (libraries can be added on the web page) |
 | Database folder | `-data` | `SYP_DATA` | user config dir + `shrink-your-shit` |
 | Web address | `-addr` | `SYP_ADDR` | `127.0.0.1:8484` |
 | ffmpeg / ffprobe | `-ffmpeg` / `-ffprobe` | `SYP_FFMPEG` / `SYP_FFPROBE` | PATH, then next to the program |
-| Rule and quality | `-from-codec`, `-min-bitrate`, `-crf`, `-preset` | | `h264`, 4000, 26, `medium` |
-| Output | `-output replace\|beside` | | `replace` |
+| Rule and quality, for libraries `-library` adds | `-from-codec`, `-min-bitrate`, `-crf`, `-preset` | | `h264`, 4000, 26, `medium` |
+| Output, for libraries `-library` adds | `-output replace\|beside` | | `replace` |
 | Timing | `-scan-every`, `-settle` | | 30s, 15s |
 
 **Access** (`internal/web/auth.go`): one shared token. Listening beyond loopback with none stored makes
