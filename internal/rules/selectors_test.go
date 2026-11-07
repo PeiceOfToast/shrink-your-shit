@@ -129,23 +129,24 @@ func TestSelectorsValidate(t *testing.T) {
 		f    func(*Selectors)
 		code string
 	}{
-		"audio not yet":           {func(s *Selectors) { s.Audio = "aac" }, "not_available"},
-		"subtitles not yet":       {func(s *Selectors) { s.Subtitles = "srt" }, "not_available"},
-		"av1 not yet":             {func(s *Selectors) { s.Format = "av1" }, "not_available"},
-		"new type when replacing": {func(s *Selectors) { s.FileType = "mkv" }, "not_available"},
-		"unknown speed":           {func(s *Selectors) { s.Speed = "ultrafast" }, "invalid"},
-		"unknown cap":             {func(s *Selectors) { s.MaxBitrate = "15" }, "invalid"},
-		"absolute ignore":         {func(s *Selectors) { s.Ignore = []string{"/etc"} }, "invalid"},
-		"ignore outside":          {func(s *Selectors) { s.Ignore = []string{"../x"} }, "invalid"},
-		"backslash root":          {func(s *Selectors) { s.Ignore = []string{`\foo`} }, "invalid"},
-		"drive letter":            {func(s *Selectors) { s.Ignore = []string{"C:"} }, "invalid"},
-		"drive path":              {func(s *Selectors) { s.Ignore = []string{`C:\Videos`} }, "invalid"},
-		"drive slash":             {func(s *Selectors) { s.Ignore = []string{"d:/x"} }, "invalid"},
-		"UNC path":                {func(s *Selectors) { s.Ignore = []string{`\\host\share`} }, "invalid"},
-		"dotdot inside":           {func(s *Selectors) { s.Ignore = []string{"a/../../x"} }, "invalid"},
-		"dotdot backslash":        {func(s *Selectors) { s.Ignore = []string{`a\..\x`} }, "invalid"},
-		"bad pattern":             {func(s *Selectors) { s.Ignore = []string{"[a"} }, "invalid"},
-		"quality":                 {func(s *Selectors) { s.Quality = 6 }, "invalid_quality"},
+		"audio not yet":               {func(s *Selectors) { s.Audio = "aac" }, "not_available"},
+		"subtitles not yet":           {func(s *Selectors) { s.Subtitles = "srt" }, "not_available"},
+		"av1 not yet":                 {func(s *Selectors) { s.Format = "av1" }, "not_available"},
+		"new type when replacing":     {func(s *Selectors) { s.FileType = "mkv" }, "not_available"},
+		"unknown speed":               {func(s *Selectors) { s.Speed = "ultrafast" }, "invalid"},
+		"unknown cap":                 {func(s *Selectors) { s.MaxBitrate = "15" }, "invalid"},
+		"absolute ignore":             {func(s *Selectors) { s.Ignore = []string{"/etc"} }, "invalid"},
+		"ignore outside":              {func(s *Selectors) { s.Ignore = []string{"../x"} }, "invalid"},
+		"backslash root":              {func(s *Selectors) { s.Ignore = []string{`\foo`} }, "invalid"},
+		"drive letter":                {func(s *Selectors) { s.Ignore = []string{"C:"} }, "invalid"},
+		"drive path":                  {func(s *Selectors) { s.Ignore = []string{`C:\Videos`} }, "invalid"},
+		"drive slash":                 {func(s *Selectors) { s.Ignore = []string{"d:/x"} }, "invalid"},
+		"UNC path":                    {func(s *Selectors) { s.Ignore = []string{`\\host\share`} }, "invalid"},
+		"dotdot inside":               {func(s *Selectors) { s.Ignore = []string{"a/../../x"} }, "invalid"},
+		"dotdot backslash":            {func(s *Selectors) { s.Ignore = []string{`a\..\x`} }, "invalid"},
+		"bad pattern":                 {func(s *Selectors) { s.Ignore = []string{"[a"} }, "invalid"},
+		"mixed separator bad pattern": {func(s *Selectors) { s.Ignore = []string{`Docs\[`} }, "invalid"}, // canonicalised to Docs/[ before matching
+		"quality":                     {func(s *Selectors) { s.Quality = 6 }, "invalid_quality"},
 	} {
 		s := DefaultSelectors(3)
 		c.f(&s)
@@ -186,5 +187,30 @@ func TestIgnored(t *testing.T) {
 	}
 	if SliderTemplate(3).Ignored("Extras/a.mkv") {
 		t.Error("the slider ignores nothing")
+	}
+}
+
+// The new file's type is checked: the container the flow asked for, or the original's (review 3454c17).
+func TestExpectChecksTheContainer(t *testing.T) {
+	src := h264(1920, 1080, 8000)
+	sel := DefaultSelectors(3)
+	sel.AfterConverting = "beside"
+	for ft, want := range map[string]string{"mkv": "matroska,webm", "mp4": "mov,mp4,m4a,3gp,3g2,mj2", "keep": "matroska,webm"} {
+		sel.FileType = ft
+		e := sel.Template().Compile(src).Expect(src, 0)
+		if e.Container != want {
+			t.Errorf("%s: expects %q", ft, e.Container)
+		}
+		out := src
+		out.Streams = append([]media.Stream(nil), src.Streams...)
+		out.Streams[0].Codec = "hevc"
+		out.Container = want
+		if p := e.Compare(out, 0); len(p) != 0 {
+			t.Errorf("%s: the right type refused: %v", ft, p)
+		}
+		out.Container = "avi"
+		if p := e.Compare(out, 0); len(p) == 0 || !strings.Contains(strings.Join(p, ";"), "the new file's type is AVI, not") {
+			t.Errorf("%s: a wrong type passed: %v", ft, p)
+		}
 	}
 }

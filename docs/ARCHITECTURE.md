@@ -109,7 +109,7 @@ A **selectors** flow (`internal/rules/selectors.go`, slice 25a) stores the Stand
 - Resolution keep/1080/720/480 scales down only (`scale=-2:H`, CRF by the new height). `Expect` then
   wants that picture size, and the picture comparison scales the original to it.
 - maxBitrate is a VBV cap (maxrate = value, bufsize = 2x).
-- File type keep/mkv/mp4 applies with "Keep both" only (`name.hevc.mkv`; replacing with a new type
+- File type keep/mkv/mp4 applies with "Put the new file next to the original" (beside) only; an existing file at that name is never replaced (the job fails with a plain reason) (`name.hevc.mkv`; replacing with a new type
   is 25a-2). A track the new type cannot hold skips the file with a reason (`cannot_keep_track`).
 - Ignore is a list of folders, files or patterns inside the library that the scanner and the
   Preview do not look at.

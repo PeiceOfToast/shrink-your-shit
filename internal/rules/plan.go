@@ -181,6 +181,9 @@ func (p Plan) Expect(src media.Info, packets int64) Expect {
 			n++
 		}
 	}
+	if p.Container != "" {
+		e.Container = Containers[p.Container]
+	}
 	e.MinSavings = float64(p.MinSavingPct) / 100
 	e.MinSSIM = p.MinSSIM
 	return e

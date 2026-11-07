@@ -297,10 +297,15 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	ext := filepath.Ext(job.Path)
 	if plan.Container != "" {
 		if OutputMode(plan.Output) != Beside { // refused when saved (25a); a flow made otherwise stops here
-			return "", failed("This library's setting changes the file type while replacing the original, which this version can't do yet. Your original was not touched. Choose 'Keep both' or keep the file type, then press Retry.",
+			return "", failed("This library's setting changes the file type while replacing the original, which this version can't do yet. Your original was not touched. Choose \"Put the new file next to the original\" or keep the file type, then press Retry.",
 				fmt.Errorf("container %s with output %s", plan.Container, plan.Output))
 		}
 		ext = "." + plan.Container
+	}
+	if OutputMode(plan.Output) == Beside { // the name is taken already: no point converting (checked again at the end)
+		if _, err := os.Lstat(BesidePathAs(job.Path, ext)); err == nil {
+			return "", failed(fmt.Sprintf("There is already a file named %s next to the original, so the new file was not made. Nothing was changed. Move or rename that file, then press Retry.", filepath.Base(BesidePathAs(job.Path, ext))), fs.ErrExist)
+		}
 	}
 	stage, err = newStaged(job.Path, ext)
 	if err != nil {
@@ -370,7 +375,15 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 		return final, nil
 	}
-	if err := moveIntoPlace(ctx, tmp, final, stillOK); err != nil {
+	move := moveIntoPlace
+	if OutputMode(plan.Output) == Beside {
+		move = moveBeside // "Put the new file next to the original": never over another file
+	}
+	if err := move(ctx, tmp, final, stillOK); err != nil {
+		var f *FailedError
+		if errors.As(err, &f) {
+			return "", err
+		}
 		var k *KeptError
 		if errors.As(err, &k) {
 			return "", err
@@ -413,6 +426,27 @@ func sourceUnchanged(path string, before os.FileInfo) error {
 // moveIntoPlace renames tmp over final. On Windows the rename fails while
 // another program (a media player, a virus scanner) holds the target open, so
 // it is retried for a while there. Elsewhere one try is enough.
+// moveBeside is moveIntoPlace for the new file next to the original: it never replaces a file already
+// at that name, one that was there before or one that appeared while converting (renameNoReplace, slice
+// 18). Then nothing is moved, and the job fails with a plain reason.
+func moveBeside(ctx context.Context, tmp, final string, stillOK func() error) error {
+	tries := 1
+	if runtime.GOOS == "windows" {
+		tries = 10
+	}
+	err := renameRetry(ctx, func(a, b string) error {
+		if err := stillOK(); err != nil {
+			return err
+		}
+		if err := renameNoReplace(a, b); errors.Is(err, fs.ErrExist) {
+			return failed(fmt.Sprintf("There is already a file named %s next to the original, so the new file was not put there. Nothing was changed. Move or rename that file, then press Retry.", filepath.Base(b)), err)
+		} else {
+			return err
+		}
+	}, tmp, final, tries, time.Second)
+	return err
+}
+
 func moveIntoPlace(ctx context.Context, tmp, final string, stillOK func() error) error {
 	tries := 1
 	if runtime.GOOS == "windows" {
@@ -440,8 +474,9 @@ func renameRetry(ctx context.Context, rename func(a, b string) error, a, b strin
 			return nil
 		}
 		var k *KeptError
-		if errors.As(err, &k) {
-			return err // a refusal, not a locked file: trying again will not help
+		var f *FailedError
+		if errors.As(err, &k) || errors.As(err, &f) {
+			return err // a refusal (or the name is taken), not a locked file: trying again will not help
 		}
 	}
 	return err

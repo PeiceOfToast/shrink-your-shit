@@ -307,6 +307,42 @@ func TestBesideKeepsOriginal(t *testing.T) {
 	}
 }
 
+// "Put the new file next to the original" never replaces a file already at that name: one that was there
+// before, or one that appeared while converting. Its bytes stay, the original too, and the job fails
+// with a plain reason (review 3454c17).
+func TestBesideNeverOverwritesAFile(t *testing.T) {
+	for name, early := range map[string]bool{"there before": true, "appears while converting": false} {
+		t.Run(name, func(t *testing.T) {
+			s := newScenario(t)
+			other := BesidePath(s.src)
+			put := func() { os.WriteFile(other, []byte("someone else's file"), 0o644) }
+			if early {
+				put()
+			} else {
+				s.onEncode = put
+			}
+			s.run(Beside)
+			if b, _ := os.ReadFile(other); string(b) != "someone else's file" {
+				t.Errorf("the file at %s was replaced: %q", other, b)
+			}
+			j := s.job()
+			if j.Status != jobs.Failed || !strings.Contains(j.Error, "There is already a file named movie.hevc.mkv next to the original") {
+				t.Errorf("%s %q", j.Status, j.Error)
+			}
+			if n := s.count("libx265"); early && n != 0 {
+				t.Errorf("converted %d times although the name was taken", n)
+			}
+			assertPlain(t, j.Error)
+			if b, _ := os.ReadFile(s.src); string(b) != "original-bytes" {
+				t.Errorf("original changed: %q", b)
+			}
+			if tempLeft(s.src) {
+				t.Error("temp left")
+			}
+		})
+	}
+}
+
 func TestPermissionsKept(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows has no Unix permission bits")

@@ -111,7 +111,7 @@ func (s Selectors) Validate() error {
 	case !contains(AvailableFileTypes["beside"], s.FileType):
 		return invalid("fileType", s.FileType)
 	case !contains(types, s.FileType):
-		return notYet("Changing the file type needs 'Keep both' for now; replacing with a new file type comes in an update.")
+		return notYet(`Changing the file type needs "Put the new file next to the original" for now; replacing with a new file type comes in an update.`)
 	}
 	if s.MinSavingPct < 0 || s.MinSavingPct > 90 {
 		return invalid("minSavingPct", s.MinSavingPct)
@@ -120,7 +120,7 @@ func (s Selectors) Validate() error {
 		if !insideLibrary(p) {
 			return &SelectorError{"invalid", fmt.Sprintf("%q is not a folder, file or pattern inside the library. Nothing was changed.", p)}
 		}
-		if _, err := path.Match(filepath.ToSlash(p), ""); err != nil {
+		if _, err := path.Match(canonIgnore(p), ""); err != nil { // the very pattern Ignored matches
 			return &SelectorError{"invalid", fmt.Sprintf("%q is not a pattern this can read. Nothing was changed.", p)}
 		}
 	}
@@ -199,10 +199,9 @@ func (t Template) Ignored(rel string) bool {
 	if t.Kind != KindSelectors || t.Selectors == nil {
 		return false
 	}
-	slash := func(s string) string { return strings.ReplaceAll(filepath.ToSlash(s), `\`, "/") } // either separator, any OS
 	rel = slash(rel)
 	for _, e := range t.Selectors.Ignore {
-		e = strings.TrimSuffix(path.Clean(slash(e)), "/")
+		e = canonIgnore(e)
 		if rel == e || strings.HasPrefix(rel, e+"/") {
 			return true
 		}
@@ -222,6 +221,13 @@ func (t Template) Ignored(rel string) bool {
 	}
 	return false
 }
+
+// slash makes either separator "/", on any OS (an entry typed on Windows works on a Linux server).
+func slash(s string) string { return strings.ReplaceAll(filepath.ToSlash(s), `\`, "/") }
+
+// canonIgnore is an Ignore entry as it is matched: "/" separators, cleaned, no trailing "/". Validate
+// checks this same form, so an entry that would never match is refused when saved.
+func canonIgnore(e string) string { return strings.TrimSuffix(path.Clean(slash(e)), "/") }
 
 // Warnings are what the person should know about a flow's choices before it runs.
 func (t Template) Warnings() []string {
