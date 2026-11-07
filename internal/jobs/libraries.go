@@ -667,3 +667,136 @@ func nameErr(err error) error {
 	}
 	return err
 }
+
+// ErrFlowShared: the library's flow is used by other libraries too, and the caller did not say whether
+// to change it for all of them or to give this library its own copy.
+type ErrFlowShared struct{ UsedBy []string }
+
+func (e ErrFlowShared) Error() string { return "the flow is shared with other libraries" }
+
+// SaveSlider sets a library's slider position, in one transaction:
+//   - a legacy or custom flow is never overwritten: a new slider flow named after the library is made
+//     and assigned, and the old one stays in Flows;
+//   - a flow other libraries use too needs choice: "change_both" changes it for all of them,
+//     "make_copy" gives this library "<library> (own copy)"; no choice is ErrFlowShared;
+//   - otherwise the flow is changed.
+//
+// The files of every library whose setting changed are forgotten by the scanner's cache, so the next
+// scan looks at them again with the new setting.
+func (s *Store) SaveSlider(libraryID int64, quality int, choice string) (Library, error) {
+	t := rules.SliderTemplate(quality)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Library{}, err
+	}
+	defer tx.Rollback()
+	l, err := scanLibrary(tx.QueryRow(`SELECT `+libCols+` FROM libraries WHERE id=?`, libraryID))
+	if err != nil {
+		return Library{}, err
+	}
+	f, err := s.flowIn(tx, l.FlowID)
+	if err != nil {
+		return Library{}, err
+	}
+	users, err := s.usedBy(tx, l.FlowID)
+	if err != nil {
+		return Library{}, err
+	}
+	switch {
+	case f.Template.Kind != rules.KindSlider:
+		err = s.newFlowFor(tx, l, l.Name, t)
+	case len(users) > 1 && choice == "change_both":
+		err = s.setTemplate(tx, l.FlowID, t)
+	case len(users) > 1 && choice == "make_copy":
+		err = s.newFlowFor(tx, l, l.Name+" (own copy)", t)
+	case len(users) > 1:
+		return Library{}, ErrFlowShared{UsedBy: users}
+	default:
+		err = s.setTemplate(tx, l.FlowID, t)
+	}
+	if err != nil {
+		return Library{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Library{}, err
+	}
+	return s.GetLibrary(libraryID)
+}
+
+// ReplaceCustom gives a library a new slider flow at Balanced, named after it; its old flow stays in
+// Flows ("Use a slider setting instead").
+func (s *Store) ReplaceCustom(libraryID int64) (Library, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Library{}, err
+	}
+	defer tx.Rollback()
+	l, err := scanLibrary(tx.QueryRow(`SELECT `+libCols+` FROM libraries WHERE id=?`, libraryID))
+	if err != nil {
+		return Library{}, err
+	}
+	if err := s.newFlowFor(tx, l, l.Name, rules.SliderTemplate(rules.DefaultSliderPosition)); err != nil {
+		return Library{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Library{}, err
+	}
+	return s.GetLibrary(libraryID)
+}
+
+func (s *Store) flowIn(q execer, id int64) (Flow, error) {
+	var f Flow
+	var t string
+	err := q.QueryRow(`SELECT id,name,template,created,changed FROM flows WHERE id=?`, id).Scan(&f.ID, &f.Name, &t, &f.Created, &f.Changed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return f, ErrNotFound
+	}
+	if err != nil {
+		return f, err
+	}
+	return f, json.Unmarshal([]byte(t), &f.Template)
+}
+
+// newFlowFor makes a flow (named base, made unique) and gives it to library l.
+func (s *Store) newFlowFor(tx *sql.Tx, l Library, base string, t rules.Template) error {
+	name, err := uniqueFlowName(tx, base)
+	if err != nil {
+		return err
+	}
+	id, err := s.addFlow(tx, name, t)
+	if err != nil {
+		return nameErr(err)
+	}
+	if _, err := tx.Exec(`UPDATE libraries SET flow_id=? WHERE id=?`, id, l.ID); err != nil {
+		return err
+	}
+	return forgetFiles(tx, l.Path)
+}
+
+// setTemplate changes a flow's template and forgets the files of every library that uses it.
+func (s *Store) setTemplate(tx *sql.Tx, flowID int64, t rules.Template) error {
+	b, err := json.Marshal(t)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE flows SET template=?, changed=? WHERE id=?`, string(b), s.stamp(), flowID); err != nil {
+		return err
+	}
+	rows, err := tx.Query(`SELECT path FROM libraries WHERE flow_id=?`, flowID)
+	if err != nil {
+		return err
+	}
+	var paths []string
+	for rows.Next() {
+		var p string
+		rows.Scan(&p)
+		paths = append(paths, p)
+	}
+	rows.Close()
+	for _, p := range paths {
+		if err := forgetFiles(tx, p); err != nil {
+			return err
+		}
+	}
+	return nil
+}

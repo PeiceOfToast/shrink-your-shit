@@ -89,7 +89,24 @@ mode), plus a fingerprint of everything that can change eligibility, the encode 
 anything is written. Whether to convert stays the
 scanner's decision; the worker only refuses a flow that cannot say how. A legacy flow compiles to
 exactly the arguments and decisions of the program before Plans (`TestLegacyPlanIsExactlyTodaysBehaviour`
-over every probe in `internal/media/testdata`). The slider's full recipe is slice 16b.
+over every probe in `internal/media/testdata`).
+
+A **slider** flow compiles TIERS-PLAN.md 2.1's recipe (`compileSlider`): HEVC at the position's CRF
+(one lower up to 720p, one higher at 2160p), preset medium, the source's bit depth, resolution and
+container, every audio track and subtitle copied, the position's minimum saving and SSIM gate. It
+converts H.264, MPEG-2, MPEG-4, VC-1 and WMV (D5) above the position's bits per pixel per frame;
+HEVC, AV1 and VP9 are skipped as already efficient, and so is a file whose subtitles its container
+cannot hold. HDR/Dolby Vision skips are slices 13/14 (`contentSkip`, one place for every template).
+The main video is encoded even when cover art comes first (`VideoEncode.Index`; legacy keeps `v:0`).
+All the numbers are in one table, `rules.Slider`, untuned (D8).
+
+The library's **setting** (`internal/web/setting.go`) is its flow seen through the slider:
+`GET /api/settings/slider`, `GET/PUT /api/libraries/{id}/setting`, `POST .../setting/replace-custom`.
+A legacy or custom flow is never overwritten (a new flow named after the library is made; the old one
+stays in Flows); a flow other libraries share needs `sharedFlowChoice` (`change_both` or `make_copy`,
+"<library> (own copy)"), else 409 `flow_shared` with `usedBy`. Every change forgets the affected
+libraries' files and wakes the scanner. `GET /api/flows/{id}` describes slider and legacy flows in
+plain words, raw numbers only in `detail`.
 
 ## Job lifecycle
 

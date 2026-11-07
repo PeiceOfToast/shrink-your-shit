@@ -375,3 +375,28 @@ func TestMigration4AddsThePlanSnapshot(t *testing.T) {
 		t.Errorf("%+v", j)
 	}
 }
+
+// A shared flow changed for all: every library using it has its files looked at again.
+func TestSaveSliderForgetsTheFilesOfEveryLibraryAffected(t *testing.T) {
+	s := open(t)
+	root := realDir(t, filepath.Join(t.TempDir(), "media"))
+	a, _ := s.AddLibrary("A", filepath.Join(root, "a"), rules.SliderTemplate(3), true)
+	b, _ := s.AddLibrary("B", filepath.Join(root, "b"), rules.SliderTemplate(1), true)
+	c, _ := s.AddLibrary("C", filepath.Join(root, "c"), rules.SliderTemplate(1), true)
+	s.SetLibraryFlow(b.ID, a.FlowID)
+	files := map[string]bool{filepath.Join(a.Path, "x.mkv"): false, filepath.Join(b.Path, "y.mkv"): false, filepath.Join(c.Path, "z.mkv"): true}
+	for p := range files {
+		s.PutFile(File{Path: p, Size: 1})
+	}
+	if _, err := s.SaveSlider(a.ID, 5, ""); err == nil {
+		t.Fatal("a shared flow needs a choice")
+	}
+	if _, err := s.SaveSlider(a.ID, 5, "change_both"); err != nil {
+		t.Fatal(err)
+	}
+	for p, kept := range files {
+		if f, _ := s.GetFile(p); (f != nil) != kept {
+			t.Errorf("%s kept=%v, want %v", p, f != nil, kept)
+		}
+	}
+}

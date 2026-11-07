@@ -40,23 +40,36 @@ type Params struct {
 	Output         string `json:"output,omitempty"`
 }
 
-// SliderPosition is one position of the Basic slider.
+// SliderPosition is one position of the Basic slider: the recipe TIERS-PLAN.md 2.1 gives it. The API
+// shows position, name, crf and minSavingPct (UI-API-CONTRACT.md addendum 4); the rest is the engine's.
 type SliderPosition struct {
-	Position     int    `json:"position"`
-	Name         string `json:"name"`
-	CRF          int    `json:"crf"`
-	MinSavingPct int    `json:"minSavingPct"`
+	Position     int     `json:"position"`
+	Name         string  `json:"name"`
+	CRF          int     `json:"crf"` // at 1080p; one lower up to 720p, one higher at 2160p
+	MinSavingPct int     `json:"minSavingPct"`
+	MinSSIM      float64 `json:"-"` // the picture threshold
+	MinBPP       float64 `json:"-"` // eligible only above this many bits per pixel per frame
 }
 
-// Slider is the slider table (TIERS-PLAN.md 2.1, UI-API-CONTRACT.md addendum 4). Untuned starting
-// values: they change after calibration on real files, which is why the UI reads them from the API.
+// Slider is the slider table (TIERS-PLAN.md 2.1). Every number is an untuned starting value (D8): it
+// changes after calibration on real files, which is why the UI reads it from the API. This is the one
+// place these numbers live.
 var Slider = []SliderPosition{
-	{1, "Smallest", 27, 20},
-	{2, "Smaller", 25, 15},
-	{3, "Balanced", 23, 10},
-	{4, "Better quality", 21, 8},
-	{5, "Best quality", 19, 5},
+	{1, "Smallest", 27, 20, 0.93, 0.05},
+	{2, "Smaller", 25, 15, 0.94, 0.065},
+	{3, "Balanced", 23, 10, 0.95, 0.08},
+	{4, "Better quality", 21, 8, 0.965, 0.10},
+	{5, "Best quality", 19, 5, 0.975, 0.12},
 }
+
+// SliderSources are the video codecs a slider flow converts (D5): H.264 and older formats.
+var SliderSources = map[string]string{
+	"h264": "H.264", "mpeg2video": "MPEG-2", "mpeg4": "MPEG-4", "msmpeg4v3": "MPEG-4 (DivX 3)",
+	"vc1": "VC-1", "wmv1": "WMV", "wmv2": "WMV", "wmv3": "WMV",
+}
+
+// alreadyEfficient are the formats never converted: re-encoding them loses quality for little gain.
+var alreadyEfficient = map[string]string{"hevc": "HEVC", "av1": "AV1", "vp9": "VP9"}
 
 // DefaultSliderPosition is where a new library's slider starts: Balanced.
 const DefaultSliderPosition = 3
