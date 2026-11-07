@@ -376,9 +376,13 @@ func TestStillChangingFollowsTheFileNotThePath(t *testing.T) {
 }
 
 // A guard is looked at again on every scan: a file that stops being shared (its other name removed) is
-// decided on the next scan, without waiting for it to change, as the Preview counts it (review f4c41fd).
+// no longer skipped as shared (review f4c41fd), and it then waits like any new file: never read before
+// -settle has passed since it was first seen eligible (review 7ff706c).
 func TestGuardIsReevaluatedEveryScan(t *testing.T) {
 	s, st, lib, _ := setup(t, h264Big)
+	clock := time.Now()
+	s.Now, s.MinAge = func() time.Time { return clock }, time.Minute
+	os.Chtimes(filepath.Join(lib, "a.mkv"), clock.Add(-time.Hour), clock.Add(-time.Hour))
 	other := filepath.Join(t.TempDir(), "seeding.mkv")
 	if err := os.Link(filepath.Join(lib, "a.mkv"), other); err != nil {
 		t.Skipf("no hardlinks here: %v", err)
@@ -388,7 +392,15 @@ func TestGuardIsReevaluatedEveryScan(t *testing.T) {
 		t.Fatalf("record %+v", r)
 	}
 	os.Remove(other)
+	clock = clock.Add(10 * time.Second) // well within -settle
+	if n := s.ScanOnce(context.Background()); n != 0 {
+		t.Errorf("first scan after it stopped being shared: queued %d, want 0 (it waits)", n)
+	}
+	if r, _ := st.GetFile(filepath.Join(lib, "a.mkv")); r == nil || r.Reason != rules.SkipStillChanging {
+		t.Errorf("record %+v, want still_changing", r)
+	}
+	clock = clock.Add(2 * time.Minute)
 	if n := s.ScanOnce(context.Background()); n != 1 {
-		t.Errorf("no longer shared: queued %d, want 1", n)
+		t.Errorf("after -settle: queued %d, want 1", n)
 	}
 }

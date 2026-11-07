@@ -121,6 +121,7 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 				return nil
 			} else if code != "" {
 				s.recordSkip(path, info, code)
+				s.observe(path, info, now()) // its first look counts from here if a guard later lets it go
 				return nil
 			}
 			if now().Sub(info.ModTime()) < s.MinAge {
@@ -226,13 +227,12 @@ func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.Fil
 	// (a download in progress, an import being copied): the first look, or a change, records it as
 	// still changing, and the next scan decides. The look's time is kept in memory; after a restart the
 	// wait starts again.
-	// A guard that no longer applies (its other name was removed) to a file unchanged since: decided now,
-	// as the Preview does. Otherwise the two-look rule.
-	if !(same && guarded) {
-		if s.observe(path, st, now()) || !s.ready(path, st, now()) {
-			s.recordSkip(path, st, rules.SkipStillChanging)
-			return false
-		}
+	// The two-look rule, also for a file a guard no longer holds back (its other name was removed): its
+	// wait starts when it is first seen eligible, so -settle always passes before it is read (review
+	// 7ff706c).
+	if s.observe(path, st, now()) || !s.ready(path, st, now()) {
+		s.recordSkip(path, st, rules.SkipStillChanging)
+		return false
 	}
 	if open, _ := s.Store.HasOpenJob(path); open {
 		return false // already waiting or running; it will be re-checked after it finishes
