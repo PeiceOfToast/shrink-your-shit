@@ -74,6 +74,9 @@
     return Promise.reject(e);
   }
   var api = { mocked: mocked, names: Object.keys(E) };
+  // Import and Export stay hidden until the server has them (workshop slice 30; contract addendum 11). The page
+  // never asks the server to find out. Against the mock, ?flowio=1 shows them for development (mock.js keeps it).
+  api.flowIO = function () { try { return mocked && sessionStorage.getItem("syp-mock-flowio") === "1"; } catch (e) { return false; } };
   Object.keys(E).forEach(function (name) {
     api[name] = function (p, body) {
       return (mocked ? g.SYP.mock[name](p || {}, body || {}) : real(name, p, body)).then(null, function (e) { return guard(name, e); });

@@ -4,12 +4,11 @@
   var S = window.SYP, api = S.api, ui = S.ui, el = ui.el;
   function $(id) { return document.getElementById(id); }
   function fail(e) { var b = $("err"); b.textContent = e && e.message || "Something went wrong. Nothing was changed."; b.hidden = false; }
-  var MADE = { slider: "Slider", selectors: "Selectors", builder: "Flow builder" };
+  var MADE = { slider: "Slider", selectors: "Selectors", builder: "Flow builder", legacy: "Earlier install" }; // anything else: "Other" (addendum 11)
   function ago(iso) {
     var d = Math.floor((Date.now() - new Date(iso)) / 864e5);
     return d < 1 ? "Today" : d < 14 ? d + (d === 1 ? " day ago" : " days ago") : Math.floor(d / 7) + " weeks ago";
   }
-  var probed = false;
   function btn(txt, cls, fn) { var b = el("button", "btn small " + (cls || ""), txt); b.type = "button"; b.onclick = fn; return b; }
 
   function rename(f, cell) {
@@ -28,7 +27,7 @@
     var used = el("td");
     if (f.usedBy.length) { used.appendChild(document.createTextNode(f.usedBy.join(", "))); if (f.madeWith === "builder") { used.appendChild(document.createTextNode(" ")); used.appendChild(el("span", "badge warn", "too custom for a slider")); } }
     else used.appendChild(el("span", "muted", "No library"));
-    tr.appendChild(used); tr.appendChild(el("td", null, MADE[f.madeWith] || f.madeWith)); tr.appendChild(el("td", null, ago(f.changedAt)));
+    tr.appendChild(used); tr.appendChild(el("td", null, MADE[f.madeWith] || "Other")); tr.appendChild(el("td", null, ago(f.changedAt)));
     var act = el("td"), r = el("div", "row"), v = el("a", "btn small", "View"); v.href = a.href;
     r.appendChild(v); r.appendChild(btn("Rename", "", function () { rename(f, th); })); r.appendChild(btn("Duplicate", "", function () { api.duplicateFlow({ id: f.id }).then(function (n) { return load("f-" + n.id); }, fail); }));
     if (f.usedBy.length) { // a real control, disabled, with the reason beside it
@@ -42,8 +41,7 @@
   function load(key) {
     return api.listFlows().then(function (r) {
       var box = $("flow-list"); box.textContent = "";
-      // Import is shown only when the server can do it (the engine's flow file format arrives later): ask once, with an export.
-      if (!probed) { probed = true; if (r.items.length) api.exportFlow({ id: r.items[0].id }).then(function () { $("import").hidden = false; }, function () {}); }
+      $("import").hidden = !api.flowIO();
       if (!r.items.length) { var c = el("div", "card empty"); c.appendChild(el("p", null, "No flows yet. Press New flow to start one.")); box.appendChild(c); if (key === "top") { var h0 = document.querySelector("h1"); h0.tabIndex = -1; h0.focus(); } return; }
       var w = el("div", "table-wrap"), t = el("table"), cap = el("caption", "small muted"), hd = el("thead"), hr = el("tr"), tb = el("tbody");
       var unused = r.items.filter(function (f) { return !f.usedBy.length; });
