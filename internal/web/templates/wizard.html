@@ -25,12 +25,13 @@
 
 <section id="s4" aria-labelledby="t4" hidden><h1 id="t4" tabindex="-1">Set it up</h1>
 <p class="muted">Pick how aggressively to shrink <strong id="lib-name"></strong>. Nothing changes until you press Start.</p>
-<div class="grid-2"><div id="editor"></div>
-<div class="card"><h2 style="margin-top:0">Estimate for your files</h2><div id="preview" aria-live="polite"></div></div></div>
+<div id="editor"></div>
+<div class="card" hidden><h2 style="margin-top:0">Estimate for your files</h2><div id="preview" aria-live="polite"></div></div>
 <div class="row"><button class="btn" type="button" data-back>Back</button><button class="btn primary" type="button" id="go4">Continue</button></div></section>
 
 <section id="s5" aria-labelledby="t5" hidden><h1 id="t5" tabindex="-1">Ready to start</h1>
 <div class="notice ok"><div><strong>You are safe to start</strong>Your original files are kept for 7 days. Every new file is checked before it replaces the original. You can pause at any time.</div></div>
-<div class="row"><button class="btn primary" type="button" id="start">Start shrinking</button><button class="btn" type="button" id="notyet">Not yet, just save my library</button></div>
+<p>This starts the worker on this computer. You can stop it any time on the Workers page.</p>
+<div class="row"><button class="btn primary" type="button" id="start">Start converting</button><button class="btn" type="button" id="notyet">Not yet, just save my library</button></div>
 <p class="hint">"Not yet" saves the library. You can start it whenever you are ready.</p></section>
 </div>{{end}}
