@@ -52,6 +52,13 @@ func TestPreviewEndpoint(t *testing.T) {
 			t.Errorf("%s: %d %s", body, code, b)
 		}
 	}
+	// Standard's selectors left at Balanced's own values are Balanced (addendum 6)
+	std := `{"setting":{"quality":3,"speed":"normal","format":"hevc","resolution":"keep","audio":"keep_all","subtitles":"keep_all",
+		"fileType":"keep","afterConverting":"replace","order":"newest","maxBitrate":"none","ignore":[],"skipHdr":true,"skipSmall":true,"minSavingPct":10}}`
+	_, bal, _ := pv(`{"setting":{"quality":3}}`)
+	if code, out, b := pv(std); code != 200 || out.EstimateBytesHigh != bal.EstimateBytesHigh || out.CanShrink != 2 {
+		t.Errorf("selectors at Balanced: %d %s", code, b)
+	}
 	_, saved, _ := pv(`{}`)
 	_, best, _ := pv(`{"setting":{"quality":5}}`)
 	if best.EstimateBytesHigh >= saved.EstimateBytesHigh {
@@ -69,7 +76,9 @@ func TestPreviewEndpoint(t *testing.T) {
 
 	for body, want := range map[string]string{
 		`{"setting":{"quality":0}}`:                                       "400 invalid_setting",
-		`{"setting":{"quality":3,"speed":"fast"}}`:                        "400 invalid_setting",
+		`{"setting":{"quality":3,"speed":"faster"}}`:                      "400 not_available",
+		`{"setting":{"quality":3,"minSavingPct":20}}`:                     "400 not_available",
+		`{"setting":{"quality":3,"ignore":["Extras"]}}`:                   "400 not_available",
 		fmt.Sprintf(`{"sampleFile":%q}`, outside):                         "400 outside_library",
 		fmt.Sprintf(`{"sampleFile":%q}`, dir):                             "400 outside_library",
 		fmt.Sprintf(`{"sampleFile":%q}`, filepath.Join(dir, "../x.mkv")):  "400 outside_library",

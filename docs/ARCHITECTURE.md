@@ -137,7 +137,9 @@ report can say what is wrong, but it does not scan or convert until it is fixed 
 `POST /api/libraries/{id}/preview {setting, sampleFile}` (`internal/preview`, UI-API-CONTRACT.md
 "Preview", addenda 3, 5 and 12) says what a setting would do to a library before anything converts,
 also for a library that is not started. An empty `setting` is the saved one; otherwise
-`{"quality":1..5}` (the selectors come with slice 25). It lists the folder like the scanner (same
+`{"quality":1..5}`; Standard's selectors are accepted while they are at that position's own values
+(addendum 6: such a setting is the slider position), any other choice is 400 `not_available` until
+slice 25. It lists the folder like the scanner (same
 skipped folders and files), probes each video through the probe cache (`probes` table, migration 5:
 ffprobe's answer per path while size and modification time stay the same; the scanner fills it too)
 and compiles the setting's Plan for it, so the counts come from the scanner's own decision.

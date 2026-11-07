@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -112,19 +113,35 @@ func previewTemplate(w http.ResponseWriter, store *jobs.Store, l jobs.Library, s
 		return f.Template, true
 	}
 	var q int
-	if raw, ok := s["quality"]; ok && json.Unmarshal(raw, &q) == nil {
-		if _, ok := rules.SliderAt(q); ok {
-			for k := range s {
-				if k != "quality" && k != "kind" && k != "positions" {
-					apiError(w, http.StatusBadRequest, "invalid_setting", "Only slider settings can be previewed in this version.")
-					return rules.Template{}, false
-				}
-			}
-			return rules.SliderTemplate(q), true
-		}
+	if raw, ok := s["quality"]; !ok || json.Unmarshal(raw, &q) != nil {
+		apiError(w, http.StatusBadRequest, "invalid_setting", "setting.quality must be a slider position from 1 to 5.")
+		return rules.Template{}, false
 	}
-	apiError(w, http.StatusBadRequest, "invalid_setting", "setting.quality must be a slider position from 1 to 5.")
-	return rules.Template{}, false
+	pos, ok := rules.SliderAt(q)
+	if !ok {
+		apiError(w, http.StatusBadRequest, "invalid_setting", "setting.quality must be a slider position from 1 to 5.")
+		return rules.Template{}, false
+	}
+	// The Standard selectors (slice 25) can be previewed when they are left at that position's own
+	// values: such a setting is the slider position (UI-API-CONTRACT.md addendum 6). Any other choice
+	// cannot be estimated yet.
+	defaults := map[string]any{"speed": "normal", "format": "hevc", "resolution": "keep", "audio": "keep_all",
+		"subtitles": "keep_all", "filetype": "keep", "afterconverting": "replace", "maxbitrate": "none",
+		"skiphdr": true, "skipsmall": true, "minsavingpct": float64(pos.MinSavingPct), "ignore": []any{}}
+	for k, raw := range s {
+		switch k = strings.ToLower(k); k {
+		case "quality", "kind", "positions", "order", "availableformats": // order: which files go first, not how
+			continue
+		}
+		want, known := defaults[k]
+		var got any
+		if known && json.Unmarshal(raw, &got) == nil && reflect.DeepEqual(got, want) {
+			continue
+		}
+		apiError(w, http.StatusBadRequest, "not_available", "This version can only estimate Quality so far; the other choices come in an update.")
+		return rules.Template{}, false
+	}
+	return rules.SliderTemplate(q), true
 }
 
 // sampleFile resolves the chosen sample and checks it is a video inside the library's folder.
