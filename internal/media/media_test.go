@@ -79,7 +79,7 @@ func TestParseProgress(t *testing.T) {
 func TestTranscodeReportsProgress(t *testing.T) {
 	f := &FakeExec{Lines: []string{"out_time_us=30000000", "progress=continue", "out_time_us=60000000"}}
 	var got []float64
-	err := Transcode(context.Background(), f, "ffmpeg", []string{"-i", "x"}, 60, func(p float64) { got = append(got, p) })
+	_, err := Transcode(context.Background(), f, "ffmpeg", []string{"-i", "x"}, 60, func(p float64) { got = append(got, p) })
 	if err != nil || len(got) != 2 || got[1] != 100 {
 		t.Errorf("got %v %v", got, err)
 	}

@@ -19,8 +19,14 @@ import (
 type Exec interface {
 	// Output runs a program and returns its stdout.
 	Output(ctx context.Context, name string, args ...string) ([]byte, error)
-	// Stream runs a program and calls onLine for each stdout line.
-	Stream(ctx context.Context, onLine func(string), name string, args ...string) error
+	// Stream runs a program, calls onLine for each stdout line, and returns the first part of its
+	// stderr (ffmpeg reports decode errors there, even when it exits 0). err is non-nil if it
+	// exited non-zero or could not start.
+	Stream(ctx context.Context, onLine func(string), name string, args ...string) (stderr string, err error)
+	// Capture runs a program and returns its stdout and (the first part of) its stderr, which is
+	// where ffmpeg reports decode errors and filter results. err is non-nil if it exited non-zero;
+	// the output is returned either way.
+	Capture(ctx context.Context, name string, args ...string) (stdout, stderr []byte, err error)
 }
 
 // OSExec is the real Exec.
@@ -58,25 +64,61 @@ func (l *limitedBuffer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (OSExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) error {
+func (OSExec) Capture(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	var out limitedBuffer
+	errBuf := headBuffer{max: maxStderrBytes}
+	cmd.Stdout, cmd.Stderr = &out, &errBuf
+	err := cmd.Run()
+	if out.over {
+		return nil, errBuf.buf, fmt.Errorf("%s: output is larger than %d bytes", name, maxProbeBytes)
+	}
+	if err != nil {
+		err = fmt.Errorf("%s: %w", name, err)
+	}
+	return out.buf, errBuf.buf, err
+}
+
+// maxStderrBytes bounds what Capture keeps of a program's error output (a failing decode can print
+// an error for every frame; the first part is all anyone reads).
+const maxStderrBytes = 256 << 10
+
+// headBuffer keeps the first max bytes written and silently drops the rest (the program keeps running).
+type headBuffer struct {
+	buf []byte
+	max int
+}
+
+func (h *headBuffer) Write(p []byte) (int, error) {
+	if room := h.max - len(h.buf); room > 0 {
+		if len(p) < room {
+			room = len(p)
+		}
+		h.buf = append(h.buf, p[:room]...)
+	}
+	return len(p), nil
+}
+
+func (OSExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return err
+		return "", err
 	}
-	var stderr strings.Builder
-	cmd.Stderr = &tail{b: &stderr, max: 2000}
+	var last strings.Builder
+	head := headBuffer{max: maxStderrBytes}
+	cmd.Stderr = io.MultiWriter(&tail{b: &last, max: 2000}, &head)
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("%s: %w", name, err)
+		return "", fmt.Errorf("%s: %w", name, err)
 	}
 	sc := bufio.NewScanner(stdout)
 	for sc.Scan() {
 		onLine(sc.Text())
 	}
 	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(stderr.String()))
+		return string(head.buf), fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(last.String()))
 	}
-	return nil
+	return string(head.buf), nil
 }
 
 // tail keeps only the last max bytes written (ffmpeg's error is at the end).
@@ -122,6 +164,21 @@ func Probe(ctx context.Context, x Exec, ffprobe, path string) (Info, error) {
 // maxProbeBytes bounds how much ffprobe output is accepted (a file with thousands of chapters or
 // streams can produce a lot; a few MB is already far more than any real video needs).
 const maxProbeBytes = 8 << 20
+
+// CountVideoPackets counts the packets (one per frame for video) of the n-th video stream by reading
+// the file's container without decoding it. It is how a truncated or frame-dropping output is caught.
+func CountVideoPackets(ctx context.Context, x Exec, ffprobe, path string, n int) (int64, error) {
+	out, err := x.Output(ctx, ffprobe, "-v", "error", "-select_streams", fmt.Sprintf("v:%d", n),
+		"-count_packets", "-show_entries", "stream=nb_read_packets", "-of", "csv=p=0", path)
+	if err != nil {
+		return 0, err
+	}
+	c, perr := strconv.ParseInt(strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0]), 10, 64)
+	if perr != nil || c < 0 {
+		return 0, fmt.Errorf("could not read the frame count of %s", path)
+	}
+	return c, nil
+}
 
 // ParseProbe turns ffprobe JSON into Info. It errors if there is no video stream. Missing or odd
 // fields are tolerated (they stay zero); garbage input returns an error and never panics.
@@ -206,8 +263,9 @@ func ParseProgress(line string, durationSec float64) (float64, bool) {
 	return pct, true
 }
 
-// Transcode runs ffmpeg and reports progress percent through onProgress.
-func Transcode(ctx context.Context, x Exec, ffmpeg string, args []string, durationSec float64, onProgress func(float64)) error {
+// Transcode runs ffmpeg and reports progress percent through onProgress. It returns what ffmpeg
+// printed on stderr (at the error level the args ask for), which includes decode errors in the source.
+func Transcode(ctx context.Context, x Exec, ffmpeg string, args []string, durationSec float64, onProgress func(float64)) (string, error) {
 	return x.Stream(ctx, func(line string) {
 		if pct, ok := ParseProgress(line, durationSec); ok {
 			onProgress(pct)

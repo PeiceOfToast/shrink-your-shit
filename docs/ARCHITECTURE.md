@@ -26,23 +26,71 @@ library folders --scanner--> files table + jobs table (SQLite) <--worker (pulls 
 
 ## Job lifecycle
 
-States: `queued -> running -> done | failed`. Legal moves are in `internal/jobs/jobs.go`
-(`running -> queued` is allowed for shutdown, `failed -> queued` for retry).
-`Store.Claim` picks the oldest queued job; `MaxOpenConns(1)` keeps claims race-free.
+States: `queued -> running -> done | failed | kept`. Legal moves are in `internal/jobs/jobs.go`
+(`running -> queued` is allowed for shutdown, `failed -> queued` and `kept -> queued` for retry).
+`Store.Claim` picks the oldest queued job; `MaxOpenConns(1)` keeps claims race-free. `failed` means
+the work itself broke (ffmpeg crashed, the source vanished); `kept` means a safety check refused
+the result and the original was deliberately left alone, with the reason in the job's `error` field
+("Original kept: ..." in the UI).
 
 1. Scanner probes a file; if the rule matches it enqueues a job (never a second one while one
    is open for the same path). Unchanged files (same size and mtime) are not re-probed.
-2. Worker claims the job and runs ffmpeg into `name.syp-tmp.<ext>` next to the original, same
-   container as the input. First video stream to HEVC; everything else copied except data
-   streams.
-3. Safety checks before anything is replaced (`worker.process`/`verify`): ffmpeg succeeded; the
-   output is non-empty and probes as a readable video; its duration is within 2% of the
-   source; it is **smaller** than the original; the source file did not change while encoding.
+2. Worker claims the job, probes the source again (`media.Info` with every stream), checks there is
+   free disk space for the new file, and counts the source's video frames. From these it builds an
+   `Expect` (below). Then it runs ffmpeg into a temp file next to the original, same container as
+   the input, inside a private staging folder (`worker/tempfile.go`): `.name.<random>.syp-tmp/`
+   next to the original, created fresh at mode 0700 (the leading dot makes the scanner skip it), with
+   the file created exclusively at 0600. On Linux and macOS other users cannot reach it while it is
+   written and checked; on Windows the mode is ignored and the folder inherits the media folder's
+   access list (ACL), so it is only as private as that folder.
+   The worker remembers the file's identity (device and inode, or Windows file ID): if that name later
+   refers to anything else, the result is not used. The original's permissions are put on the file
+   only after the checks, just before the rename, and the folder is removed on every path. Leftovers
+   from a crash are removed first: a file under the old fixed temp name `name.syp-tmp.<ext>`, and a
+   staging folder only if it holds nothing but our temp file (that file, then the empty folder;
+   never a recursive delete). Anything else with a matching name is left alone and logged. If a
+   removal fails, the job fails before ffmpeg starts. First video stream to HEVC; everything else copied except data streams.
+3. **Safety floor** (`worker/verify.go`; not removable by a flow, only the thresholds are tunable).
+   The new file is compared with the `Expect`, never directly with the original. Cheap checks first:
+   it exists and is not empty; it is readable; **stream parity** (same number of video, audio,
+   subtitle and attachment streams, in order; same codec for copied streams, languages, channel
+   counts, subtitle kinds and forced flags, attachment names, picture size, colour depth; same
+   chapter count); duration within 2%; video frame count within 1%; **smaller** than the original
+   (or by `MinSavings`). Then the **playback test** (`-decode-check auto|always`; there is no "off":
+   the new file's video through ffmpeg's decoder with `-xerror`, completely up to 3 hours long, else
+   three one-minute samples; any decode error fails), then the **picture comparison** (SSIM on three
+   10-second samples at the start, middle and end; the worst must reach `-min-ssim`, default 0.95 and
+   at least 0.90, an untuned starting value). Both files are read from 12 s before the sample
+   with their real timestamps kept, put on one timeline by subtracting each file's video start time
+   (an encoder delays the first frame, and without this a good file scored 0.93), and the same 10 s
+   are cut out of both by time, so frames are paired by time and never by where a seek happened to
+   land (in MPEG-TS, ffmpeg 7.1 starts an H.264 original at the next keyframe after a seek but the
+   HEVC result exactly at it). If a sample still scores low it is re-measured with the new file one
+   frame earlier and later, best counts. The source must not have changed during the encode: still the same
+   file (identity), size and modification time, and on Linux and macOS the same change time (which
+   catches an edit that keeps the size and puts the modification time back). That is checked before
+   the expensive checks, so it is reported plainly, and again right before each rename attempt,
+   together with the temp file's identity.
+   **The original is checked too:** while converting, ffmpeg's error output is read, and decode errors
+   in the original (corrupt data, not the harmless messages a recording that starts mid-picture-group
+   prints) make the job `kept` with "the original file has errors; not converting it", so a damaged
+   file is never silently replaced by a clean-looking copy of the damage.
+   Every ffprobe/ffmpeg call in the checks has a time limit (1 minute for a probe, 10 minutes per
+   sample, 30 minutes to count frames, 10 minutes plus twice the file's length for a full playback,
+   at most 6 hours); a stuck call ends as `kept` with "timed out". These are guesses.
+   **Fail-safe:** a check that errors or cannot run (no `ssim` filter in this ffmpeg, free space
+   unreadable) is a refusal, never a pass.
 4. Replace: the temp file is renamed over the original (retried for ~10 s on Windows, where
    another program can hold the file open). With `-output beside` it becomes `name.hevc.<ext>`
    and the original stays.
-5. Any failure removes the temp file, leaves the original untouched and marks the job `failed`
-   (the UI offers Retry; failed jobs are never retried automatically).
+5. Any refusal or failure removes the temp file and leaves the original untouched: `kept` for a
+   refused result, `failed` for a crash (the UI offers Retry; neither is retried automatically).
+
+`Expect` (`worker/expect.go`) is "what the new file must look like": a list of stream expectations
+in output order, chapters, duration, frame count, minimum savings. `DefaultExpect(source)` builds it
+for what the worker does today (keep everything except data streams, first video stream becomes
+HEVC at the same size and depth). Later work that changes what the worker does (other codecs, dropped
+tracks) should fill `Expect` differently and leave `verify` alone.
 
 Shutdown: on Ctrl+C/SIGTERM the running job is released back to `queued`, and `main` waits for
 the worker before closing the database. On startup, jobs left `running` by a crash are

@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
@@ -29,6 +30,8 @@ type Queue interface {
 	Fail(id int64, msg string) error
 	// Release puts a running job back in the queue (used on shutdown).
 	Release(id int64) error
+	// Keep marks a job "kept original": a safety check refused the result (reason says why).
+	Keep(id int64, reason string) error
 }
 
 // OutputMode says what happens to the result.
@@ -54,6 +57,18 @@ type Worker struct {
 	Poll    time.Duration
 	// OnDone is called after a job succeeds with the final path (optional).
 	OnDone func(job jobs.Job, finalPath string)
+
+	// Safety checks (see verify.go). Zero values mean the defaults.
+	DecodeCheck string  // "auto" (default), "always" or "off"
+	MinSSIM     float64 // 0 = DefaultMinSSIM
+	// FullDecodeMaxSec: in "auto" mode, files up to this length are decoded completely, longer ones at
+	// three sampled places. 0 = 3 hours.
+	FullDecodeMaxSec float64
+	// FreeSpace reports the writable bytes on the volume holding dir; nil = the real thing.
+	FreeSpace func(dir string) (uint64, error)
+
+	mu         sync.Mutex
+	filterMemo map[string]bool
 }
 
 // Run processes jobs until ctx is cancelled.
@@ -87,6 +102,14 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 			// Shutting down: not the file's fault, so run it again next start.
 			return true, w.Queue.Release(job.ID)
 		}
+		var ke *KeptError
+		if errors.As(err, &ke) {
+			// A safety check said no: the original is untouched, the temp file is gone.
+			if kerr := w.Queue.Keep(job.ID, ke.Reason); kerr != nil {
+				return true, kerr
+			}
+			return true, err
+		}
 		if ferr := w.Queue.Fail(job.ID, err.Error()); ferr != nil {
 			return true, ferr
 		}
@@ -106,73 +129,144 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-// TempPath is where ffmpeg writes before the file is trusted. It keeps the
-// original extension so ffmpeg picks the right container.
-func TempPath(src string) string {
-	ext := filepath.Ext(src)
-	return strings.TrimSuffix(src, ext) + ".syp-tmp" + ext
-}
-
 // BesidePath is the output name in Beside mode.
 func BesidePath(src string) string {
 	ext := filepath.Ext(src)
 	return strings.TrimSuffix(src, ext) + ".hevc" + ext
 }
 
-func (w *Worker) process(ctx context.Context, job jobs.Job) (string, error) {
-	if _, err := os.Stat(job.Path); err != nil {
-		return "", fmt.Errorf("source file: %w", err)
+// process converts one file and replaces the original only if every safety check passes. The order is
+// the safety story: nothing is written until the pre-checks pass; the new file is only ever a temp
+// file next to the original; every check runs on that temp file; the rename is the very last step, and
+// any error or "no" before it removes the temp file and leaves the original exactly as it was.
+func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err error) {
+	before, serr := statOpen(job.Path)
+	if serr != nil {
+		return "", fmt.Errorf("source file: %w", serr)
 	}
-	before, _ := os.Stat(job.Path)
-	tmp := TempPath(job.Path)
-	os.Remove(tmp) // leftover from a crash
+	if err := removeLeftoverTemps(job.Path); err != nil {
+		return "", err
+	}
+	var stage *staged
+	defer func() {
+		if stage != nil {
+			stage.remove() // after a successful move only the empty folder is left
+		}
+	}()
+
+	// What the source looks like (and so what the new file must look like).
+	pctx, pcancel := context.WithTimeout(ctx, quickTimeout)
+	src, perr := media.Probe(pctx, w.Exec, w.FFprobe, job.Path)
+	pcancel()
+	if perr != nil {
+		if errors.Is(pctx.Err(), context.DeadlineExceeded) {
+			return "", checkFailed(pctx, "reading the original", perr)
+		}
+		return "", kept("the original cannot be read any more (%v)", perr)
+	}
+	if err := w.preflight(job.Path, before.Size()); err != nil {
+		return "", err
+	}
+	var packets int64
+	if ord := src.MainVideoOrdinal(); ord >= 0 {
+		cctx, ccancel := context.WithTimeout(ctx, countTimeout)
+		n, cerr := media.CountVideoPackets(cctx, w.Exec, w.FFprobe, job.Path, ord)
+		ccancel()
+		if cerr != nil {
+			return "", checkFailed(cctx, "counting the original's video frames", cerr)
+		}
+		packets = n
+	}
+	exp := DefaultExpect(src, packets)
+	if exp.DurationSec <= 0 {
+		exp.DurationSec = job.DurationSec
+	}
+
+	stage, err = newStaged(job.Path)
+	if err != nil {
+		return "", err
+	}
+	tmp := stage.path
 	args := media.HEVCArgs(job.Path, tmp, w.Rule.CRF, w.Rule.Preset)
-	err := media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p float64) {
+	encErr, terr := media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p float64) {
 		w.Queue.Progress(job.ID, p)
 	})
-	if err != nil {
-		os.Remove(tmp)
+	if terr != nil {
+		return "", terr
+	}
+	// Errors ffmpeg reported while reading the original mean it is damaged: converting it would bake
+	// the damage in and delete the only copy that might still be repaired or fetched again.
+	if damage := sourceDamage(encErr); damage != "" {
+		return "", kept("the original file has errors (%s); not converting it", damage)
+	}
+
+	// If the source changed while we encoded, the new file is stale: say so first (otherwise the
+	// checks would report a confusing mismatch), and check again right before replacing.
+	if err := sourceUnchanged(job.Path, before); err != nil {
 		return "", err
 	}
-	st, err := os.Stat(tmp)
-	if err != nil || st.Size() == 0 {
-		os.Remove(tmp)
-		return "", fmt.Errorf("ffmpeg produced no output")
-	}
-	// Sanity-check the result: same length as the source, and actually smaller.
-	if err := w.verify(ctx, job, tmp, before.Size()); err != nil {
-		os.Remove(tmp)
+	if err := stage.intact(); err != nil {
 		return "", err
 	}
-	// If the source changed while we encoded, our result is stale: don't clobber it.
-	if now, err := os.Stat(job.Path); err != nil || now.Size() != before.Size() || !now.ModTime().Equal(before.ModTime()) {
-		os.Remove(tmp)
-		return "", fmt.Errorf("source file changed while encoding; not replacing it")
+	if err := w.verify(ctx, src, exp, job.Path, tmp, before.Size()); err != nil {
+		return "", err
 	}
-	os.Chmod(tmp, before.Mode().Perm()) // keep the original's permissions
-	final := job.Path
+	// The original's permissions, only now that the file has been checked.
+	if err := stage.intact(); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(tmp, before.Mode().Perm()); err != nil {
+		return "", fmt.Errorf("temp file permissions: %w", err)
+	}
+	final = job.Path
 	if w.Mode == Beside {
 		final = BesidePath(job.Path)
 	}
-	// Rename is atomic on one filesystem: the original is only replaced by a complete file.
-	if err := moveIntoPlace(ctx, tmp, final); err != nil {
-		os.Remove(tmp)
+	// Rename is atomic on one filesystem: the original is only replaced by a complete file. Right
+	// before each try, the original must still be the file we read and the temp file still the one
+	// we created and checked. A plain rename cannot make that last check and the move one step, so a
+	// change in the instant between them is not caught (see docs/STATUS.md).
+	if err := moveIntoPlace(ctx, tmp, final, func() error {
+		if err := sourceUnchanged(job.Path, before); err != nil {
+			return err
+		}
+		return stage.intact()
+	}); err != nil {
+		var k *KeptError
+		if errors.As(err, &k) {
+			return "", err
+		}
 		return "", fmt.Errorf("move result into place: %w", err)
 	}
 	return final, nil
 }
 
-// verify refuses output that looks truncated or did not save space.
-func (w *Worker) verify(ctx context.Context, job jobs.Job, tmp string, origSize int64) error {
-	info, err := media.Probe(ctx, w.Exec, w.FFprobe, tmp)
+// statOpen is os.Stat through an open file, so the file's identity (device and inode, or the Windows
+// file ID) is read now. On Windows, os.Stat by path reads that ID only when os.SameFile first needs it,
+// from whatever the path names then: after the original was replaced, it would describe the new file
+// and the check below would wrongly find them the same.
+func statOpen(path string) (os.FileInfo, error) {
+	f, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("result is not a readable video: %w", err)
+		return nil, err
 	}
-	if job.DurationSec > 0 && (info.DurationSec < job.DurationSec*0.98 || info.DurationSec > job.DurationSec*1.02) {
-		return fmt.Errorf("result is %.0fs long, source is %.0fs; keeping the original", info.DurationSec, job.DurationSec)
+	defer f.Close()
+	return f.Stat()
+}
+
+// sourceUnchanged refuses the new file if the original is no longer the file that was read: a
+// different file now (another device or inode, or Windows file ID), or the same file with another
+// size, modification time or (where the system records one) change time. The change time catches
+// an edit that keeps the size and puts the modification time back, as some tag editors do.
+func sourceUnchanged(path string, before os.FileInfo) error {
+	now, err := os.Stat(path)
+	if err != nil || !os.SameFile(now, before) || now.Size() != before.Size() || !now.ModTime().Equal(before.ModTime()) {
+		return kept("the original file changed while it was being converted, so the new file is out of date")
 	}
-	if st, err := os.Stat(tmp); err == nil && st.Size() >= origSize {
-		return fmt.Errorf("result (%d bytes) is not smaller than the original (%d bytes); keeping the original", st.Size(), origSize)
+	if b, ok := changeTime(before); ok {
+		if n, ok := changeTime(now); !ok || !n.Equal(b) {
+			return kept("the original file changed while it was being converted, so the new file is out of date")
+		}
 	}
 	return nil
 }
@@ -180,12 +274,17 @@ func (w *Worker) verify(ctx context.Context, job jobs.Job, tmp string, origSize 
 // moveIntoPlace renames tmp over final. On Windows the rename fails while
 // another program (a media player, a virus scanner) holds the target open, so
 // it is retried for a while there. Elsewhere one try is enough.
-func moveIntoPlace(ctx context.Context, tmp, final string) error {
+func moveIntoPlace(ctx context.Context, tmp, final string, stillOK func() error) error {
 	tries := 1
 	if runtime.GOOS == "windows" {
 		tries = 10
 	}
-	return renameRetry(ctx, os.Rename, tmp, final, tries, time.Second)
+	return renameRetry(ctx, func(a, b string) error {
+		if err := stillOK(); err != nil {
+			return err
+		}
+		return os.Rename(a, b)
+	}, tmp, final, tries, time.Second)
 }
 
 func renameRetry(ctx context.Context, rename func(a, b string) error, a, b string, tries int, wait time.Duration) error {
@@ -200,6 +299,10 @@ func renameRetry(ctx context.Context, rename func(a, b string) error, a, b strin
 		}
 		if err = rename(a, b); err == nil {
 			return nil
+		}
+		var k *KeptError
+		if errors.As(err, &k) {
+			return err // a refusal, not a locked file: trying again will not help
 		}
 	}
 	return err

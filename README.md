@@ -109,7 +109,7 @@ lets other machines in. There is no login yet, so only do that on a network you 
 ## Is it safe for my files?
 
 Yes by design. The new file is written next to the original under a temporary
-name (`name.syp-tmp.mkv`). Only when ffmpeg finishes successfully is it moved into
+folder (like `.name.4185293.syp-tmp/`) that, on Linux and macOS, only you can open. Only when ffmpeg finishes successfully is it moved into
 place. If anything fails, the original is untouched and the job shows as *failed*
 with a Retry button.
 
@@ -120,8 +120,10 @@ with a Retry button.
 The first video stream becomes HEVC; audio, subtitles, attachments (fonts) and extra
 streams are copied unchanged. The new file keeps the original's container (`.mkv` stays
 `.mkv`). Data streams (e.g. timecode) are dropped. Before replacing anything the program
-checks that the result is readable, about the same length, and **smaller** than the original;
-otherwise the original is kept and the job fails.
+checks that the new file has the same streams (audio, subtitles, chapters...), the same length and frame count, plays
+without decode errors, looks like the original, and is **smaller**. If any check fails, or cannot run, the original
+is kept and the job shows "original kept" with the reason in plain words. It also needs free disk space about the
+size of the original.
 
 ## Settings
 
@@ -136,6 +138,8 @@ Run `./shrink-your-shit -h` for all of them. The main ones:
 | `-crf` | `26` | quality: lower is better and bigger |
 | `-preset` | `medium` | x265 speed: `ultrafast` … `veryslow` |
 | `-output` | `replace` | `replace` or `beside` |
+| `-decode-check` | `auto` | play the new file through a decoder before replacing the original: `auto` (completely up to 3 hours long, else at 3 places) or `always` |
+| `-min-ssim` | `0.95` | how similar the new picture must be to the original (0.90-1.0); an untuned starting value |
 | `-scan-every` | `30s` | how often to look for new files |
 | `-settle` | `15s` | skip files changed this recently (still copying) |
 | `-addr` | `127.0.0.1:8484` | web UI address (env `SYP_ADDR`) |

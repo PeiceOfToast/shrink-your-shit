@@ -99,10 +99,59 @@ restore the `.bak-v<N>` file if you must. An upgrade needs free disk space about
 database for its backup (a full disk blocks the upgrade, with a clear message); the time and space for a
 very large database were not measured.
 
+**Verify hardening (slice 10):** a converted file now replaces the original only after stream parity,
+duration/frame-count, a decode test and a picture (SSIM) comparison pass, with a free-disk-space check
+before starting; any refusal or check that cannot run leaves the original and marks the job "original
+kept" with a plain-words reason. Checked with real ffmpeg: a file with two audio tracks with languages, two
+subtitle tracks (one forced), a font attachment and chapters, in 8-bit and 10-bit, converts and passes; an
+encode that drops one audio track is refused; a very low quality encode (CRF 51) is refused at the default
+threshold while CRF 16 passes; a truncated source is never "done". Things to know:
+- **The 0.95 SSIM threshold is a starting value, not a tuned one.** Measured here on synthetic video only
+  (testsrc2 and mandelbrot at 1280x720, x265): CRF 26 medium scores about 0.985-0.995, CRF 30 about
+  0.977-0.989, CRF 36 about 0.957-0.979, CRF 51 about 0.86-0.93. Real film will differ; tune with real files.
+- Two bugs found only by running real files: the encoder delays the first frame (0.04 s), so the two files
+  must be aligned, first at time zero (a good encode scored 0.89), then, for samples later in the file, by
+  the difference of the start times plus a one-frame retry (a good 70-second mp4 scored 0.93 at 0:55 and
+  was refused). A test with 70-second files in mkv, mp4 and ts at the default threshold now covers it.
+- Sources that ffmpeg turns into a constant frame rate (avi, wmv) may legitimately change the frame count by
+  more than 1% and will be refused (safe direction).
+- A 10-bit source with an ffmpeg whose x265 is 8-bit only would lose depth and is refused, not converted.
+- There is no way to switch the playback test off (`-decode-check` is `auto` or `always`) and `-min-ssim`
+  cannot go below 0.90: the floor is not removable, only tunable.
+- A recording that starts in the middle of a group of pictures (broadcast TV captures) loses its
+  undecodable first seconds in the new file, so the length and frame-count checks refuse it (safe,
+  clear message, but it will not convert). A damaged original (decode errors during the conversion) is
+  refused as "the original file has errors"; which ffmpeg messages count as damage versus harmless is a
+  hand-made list (`damageRe`/`benignRe` in `worker/verify.go`) tested only on synthetic damage and one
+  mid-stream cut, not on a library of real recordings.
+- The time limits on the checks are guesses.
+- Not covered: HDR/Dolby Vision loss (a later slice skips those sources), real Windows/macOS runs of the new
+  checks, a very large file (the playback test of a 3-hour file was not timed).
+
 ## Known limitations and follow-ups
 
-Collected from the reviews; none is fixed.
+Collected from the reviews; everything listed below is still open. Review findings fixed in slice 10
+(verify hardening), so not listed: a link or file left at the fixed temp name could be written
+through (now a fresh private staging folder; leftovers are removed first and the job stops if that
+fails); a temp file swapped in under our name could be installed (now its identity is checked after
+the encode and before the rename); an edit to the original that kept its size and put its
+modification time back went unnoticed (now caught by file identity and, on Linux and macOS, change
+time); leftover cleanup could delete a folder, or a link, that someone else had named like ours (now
+only a folder holding nothing but our regular temp file is removed).
 
+- **Not defended: a hostile program running as the same user (slice 10 residue).** Slice 10 protects
+  originals from crashes, bad encodes and accidental interference; on Linux and macOS other users
+  cannot reach the private staging folder. A program running as the same user can still swap or rewrite the staged
+  file after the checks, and it could delete or edit the originals directly anyway.
+- **Last check to rename (slice 12 file-guards owns this):** right before the rename the worker checks
+  that the original is still the file it read and the staged file still the one it checked, but a
+  plain rename cannot make that check and the move one step. A program that edits or replaces the
+  original in the instant between them is not caught, and its file is overwritten.
+- **Staging folder on Windows is not private:** Windows ignores the 0700/0600 modes, so the staging
+  folder inherits the media folder's access list (ACL). Another user who may write in the media
+  folder can reach the new file while it is written and checked. On Linux and macOS it is private.
+- **No change time on Windows:** an edit to the original during a conversion that keeps its size and
+  puts its modification time back is caught on Linux and macOS (change time) but not on Windows.
 - **Crash between rename and "done":** if the process dies after the new file replaced the
   original but before the job is marked done, the next start requeues it and re-encodes the HEVC
   file. The "output must be smaller" check should make that fail safely, but this was reasoned

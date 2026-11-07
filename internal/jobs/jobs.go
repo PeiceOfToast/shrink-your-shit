@@ -22,13 +22,17 @@ const (
 	Running Status = "running"
 	Done    Status = "done"
 	Failed  Status = "failed"
+	// Kept means the conversion ran (or was about to) but the original was deliberately left alone
+	// because a safety check said no; the reason is in Job.Error. Not "done", not a crash.
+	Kept Status = "kept"
 )
 
 // allowed lists the legal transitions. Failed jobs may be retried (back to queued).
 var allowed = map[Status][]Status{
 	Queued:  {Running},
-	Running: {Done, Failed, Queued}, // Queued: worker went away, put it back
+	Running: {Done, Failed, Kept, Queued}, // Queued: worker went away, put it back
 	Failed:  {Queued},
+	Kept:    {Queued},
 	Done:    {},
 }
 
@@ -233,7 +237,12 @@ func (s *Store) Fail(id int64, msg string) error {
 	return s.transition(id, Failed, `, error=?`, msg)
 }
 
-// Retry puts a failed job back in the queue.
+// Keep marks a running job "kept original": a safety check refused the result, reason says why.
+func (s *Store) Keep(id int64, reason string) error {
+	return s.transition(id, Kept, `, error=?`, reason)
+}
+
+// Retry puts a failed or kept job back in the queue.
 func (s *Store) Retry(id int64) error {
 	return s.transition(id, Queued, `, progress=0, error='', worker=''`)
 }
