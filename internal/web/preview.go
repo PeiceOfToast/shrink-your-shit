@@ -71,8 +71,9 @@ func previewRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		res := eng.Preview.Library(l.ID, root, t, previewWait)
 		writeJSON(w, struct {
 			preview.Result
-			Sample *preview.Sample `json:"sample,omitempty"`
-		}{res, sample})
+			Sample   *preview.Sample `json:"sample,omitempty"`
+			Warnings []string        `json:"warnings"` // the previewed setting's, as GET .../setting gives the saved one's
+		}{res, sample, t.Warnings()})
 	})
 
 	api.HandleFunc("GET /api/libraries/{id}/files", func(w http.ResponseWriter, r *http.Request) {

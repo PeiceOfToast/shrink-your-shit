@@ -206,7 +206,7 @@ func (t Template) Ignored(rel string) bool {
 // Warnings are what the person should know about a flow's choices before it runs.
 func (t Template) Warnings() []string {
 	if s, ok := t.SelectorsView(); ok && !s.SkipHDR {
-		return []string{"HDR and Dolby Vision files will be converted without their HDR information, so they can look washed out. Keep 'Skip HDR' on to leave them as they are."}
+		return []string{`HDR and Dolby Vision files will be converted without their HDR information, so they can look washed out. Turn "Skip HDR and Dolby Vision files" back on to leave them as they are.`}
 	}
 	return []string{}
 }

@@ -75,6 +75,16 @@ func TestPreviewEndpoint(t *testing.T) {
 		t.Errorf("sample: %d %s", code, b)
 	}
 
+	// warnings for the previewed setting (unsaved too): always present, [] when none
+	for body, want := range map[string]int{`{"setting":{"quality":3,"skipHdr":false}}`: 1, `{"setting":{"quality":3,"skipHdr":true}}`: 0, `{}`: 0} {
+		code, b := post(t, srv, "POST", path, body)
+		var v struct{ Warnings []string }
+		json.Unmarshal([]byte(b), &v)
+		if code != 200 || !strings.Contains(b, `"warnings":[`) || len(v.Warnings) != want || (want == 1 && v.Warnings[0] != `HDR and Dolby Vision files will be converted without their HDR information, so they can look washed out. Turn "Skip HDR and Dolby Vision files" back on to leave them as they are.`) {
+			t.Errorf("%s: %d %s", body, code, b)
+		}
+	}
+
 	// the Standard selectors are previewed as they would run (slice 25a)
 	code, out, b = pv(fmt.Sprintf(`{"setting":{"quality":3,"resolution":"720","maxBitrate":"10","fileType":"mkv","afterConverting":"beside"},"sampleFile":%q}`, filepath.Join(dir, "a.mkv")))
 	if code != 200 || out.Sample == nil || out.Sample.Lines[0] != "Video: converted to the smaller format and made 720 lines high (from 1080), same length, at most 10 Mbps" ||
