@@ -21,6 +21,7 @@ marked **never verified** has not been seen working by anyone. Update this file 
 | 15b | Flow endpoints (list, create, rename, duplicate, delete, choose a library's flow) and global settings (`GET/PATCH /api/settings`, stored and checked, used by later slices) | this change |
 | 16a | Plans: each file's conversion compiled from its library's flow (scanner decides, worker runs and verifies against it, the job keeps it); legacy flows convert exactly as before | this change |
 | 16b | The slider's full recipe (CRF by resolution, bits-per-pixel eligibility, D5 formats, SSIM gate), the setting endpoints and plain-word flow steps | this change |
+| 19 | The Preview: for a library and a setting (saved or not), files, how many can be shrunk, how many skipped and why, a saving range from bits per pixel, files shared with another folder, and one sample file in plain words; reads only. Probe cache for the scanner and the Preview | this change |
 | 20 | Setup checks: folder check for first-run, the health report, `shrink-your-shit doctor`; the write check runs as the service user and says how to fix a read-only folder | this change |
 
 ## What has been verified, and how

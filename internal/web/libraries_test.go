@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/preview"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
@@ -36,10 +38,17 @@ func libServer(t *testing.T, exposed bool) (*httptest.Server, *jobs.Store, *Acce
 	fe := &fakeEngine{}
 	next := time.Date(2026, 11, 7, 3, 0, 0, 0, time.UTC)
 	srv := httptest.NewServer(Handler(st, a, Engine{
-		ScanNow: func() { fe.scans++ }, NextScan: func() time.Time { return next }, StopJob: func(id int64) { fe.stopped = append(fe.stopped, id) }}))
+		ScanNow: func() { fe.scans++ }, NextScan: func() time.Time { return next }, StopJob: func(id int64) { fe.stopped = append(fe.stopped, id) },
+		Preview: &preview.Previewer{Store: st, Exec: h264Probe, FFprobe: "ffprobe", Probes: 1}}))
 	t.Cleanup(srv.Close)
 	return srv, st, a, fe
 }
+
+// h264Probe says every file is 1080p24 H.264 at 8 Mbps with one audio track.
+var h264Probe = &media.FakeExec{Handler: func(name string, args []string) (string, string, error) {
+	return `{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","width":1920,"height":1080,"avg_frame_rate":"24/1","r_frame_rate":"24/1","bit_rate":"8000000"},
+ {"index":1,"codec_type":"audio","codec_name":"aac"}],"format":{"format_name":"matroska,webm","duration":"1.0","size":"1000000","bit_rate":"8000000"}}`, "", nil
+}}
 
 func post(t *testing.T, srv *httptest.Server, method, path, body string) (int, string) {
 	t.Helper()

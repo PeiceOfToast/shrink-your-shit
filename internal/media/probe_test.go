@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -476,6 +477,23 @@ func TestHeadlineFieldsUnchangedOnEveryFixture(t *testing.T) {
 		if got.Container != old.Container || got.VideoCodec != old.VideoCodec || got.BitrateKbps != old.BitrateKbps ||
 			got.DurationSec != old.DurationSec || got.SizeBytes != old.SizeBytes {
 			t.Errorf("%s: headline fields changed\n old %+v\n new %+v", f, old, got)
+		}
+	}
+}
+
+// The probe cache stores Info as JSON: every real probe reads back the same.
+func TestInfoSurvivesJSON(t *testing.T) {
+	files, _ := filepath.Glob(filepath.Join("testdata", "*", "*.json"))
+	for _, f := range files {
+		raw, _ := os.ReadFile(f)
+		info, err := ParseProbe(raw)
+		if err != nil {
+			continue
+		}
+		b, _ := json.Marshal(info)
+		var back Info
+		if err := json.Unmarshal(b, &back); err != nil || !reflect.DeepEqual(info, back) {
+			t.Errorf("%s: %v\n%+v\n%+v", f, err, info, back)
 		}
 	}
 }

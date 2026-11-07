@@ -146,3 +146,24 @@ func TestKeepAndRetry(t *testing.T) {
 		t.Errorf("%+v", j)
 	}
 }
+
+func TestProbeCache(t *testing.T) {
+	s := open(t)
+	if _, ok := s.GetProbe("/m/a.mkv", 10, 20); ok {
+		t.Fatal("empty cache")
+	}
+	s.PutProbe("/m/a.mkv", 10, 20, `{"videoCodec":"h264"}`)
+	if v, ok := s.GetProbe("/m/a.mkv", 10, 20); !ok || v != `{"videoCodec":"h264"}` {
+		t.Errorf("%q %v", v, ok)
+	}
+	if _, ok := s.GetProbe("/m/a.mkv", 11, 20); ok {
+		t.Error("a file of another size is probed again")
+	}
+	if _, ok := s.GetProbe("/m/a.mkv", 10, 21); ok {
+		t.Error("a changed file is probed again")
+	}
+	s.PutProbe("/m/a.mkv", 11, 21, `{}`)
+	if v, ok := s.GetProbe("/m/a.mkv", 11, 21); !ok || v != `{}` {
+		t.Errorf("replaced: %q %v", v, ok)
+	}
+}

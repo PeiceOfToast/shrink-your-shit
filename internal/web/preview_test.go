@@ -1,0 +1,131 @@
+// Copyright (C) shrink-your-shit contributors. Licensed under AGPL-3.0-or-later.
+
+package web
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+)
+
+type previewOut struct {
+	Status                              string
+	Files, CanShrink, SharedNoSaving    int
+	TotalBytes                          int64
+	EstimateBytesLow, EstimateBytesHigh int64
+	Skipped                             map[string]int
+	Sample                              *struct {
+		Lines                               []string
+		ExpectedBytesLow, ExpectedBytesHigh int64
+	}
+}
+
+func TestPreviewEndpoint(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	dir := t.TempDir()
+	for _, n := range []string{"a.mkv", "b.mkv"} {
+		os.WriteFile(filepath.Join(dir, n), make([]byte, 1_000_000), 0o644)
+	}
+	outside := filepath.Join(t.TempDir(), "x.mkv")
+	os.WriteFile(outside, []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("x"), 0o644)
+	// not started: the Preview is for before Start (SAF-UI-6)
+	l, _ := st.AddLibrary("Movies", dir, rules.SliderTemplate(1), false)
+	path := fmt.Sprintf("/api/libraries/%d/preview", l.ID)
+	pv := func(body string) (int, previewOut, string) {
+		code, b := post(t, srv, "POST", path, body)
+		var out previewOut
+		json.Unmarshal([]byte(b), &out)
+		return code, out, b
+	}
+
+	// the saved setting (empty or absent), and an unsaved one
+	for _, body := range []string{`{}`, `{"setting":{}}`, `{"setting":null,"sampleFile":null}`, `{"setting":{"kind":"slider","quality":5}}`} {
+		code, out, b := pv(body)
+		if code != 200 || out.Status != "ready" || out.Files != 2 || out.CanShrink != 2 || out.TotalBytes != 2_000_000 ||
+			out.EstimateBytesLow <= 0 || out.EstimateBytesHigh <= out.EstimateBytesLow || out.Sample != nil || !strings.Contains(b, `"skipped":{}`) {
+			t.Errorf("%s: %d %s", body, code, b)
+		}
+	}
+	_, saved, _ := pv(`{}`)
+	_, best, _ := pv(`{"setting":{"quality":5}}`)
+	if best.EstimateBytesHigh >= saved.EstimateBytesHigh {
+		t.Errorf("Best quality (unsaved) must estimate less than the saved Smallest: %d >= %d", best.EstimateBytesHigh, saved.EstimateBytesHigh)
+	}
+	if f, _ := st.GetFlow(l.FlowID); f.Template != rules.SliderTemplate(1) {
+		t.Error("previewing an unsaved setting must not save it")
+	}
+
+	code, out, b := pv(fmt.Sprintf(`{"setting":{"quality":3},"sampleFile":%q}`, filepath.Join(dir, "a.mkv")))
+	if code != 200 || out.Sample == nil || out.Sample.Lines[0] != "Video: converted to the smaller format, same picture size and length" ||
+		out.Sample.ExpectedBytesLow <= 0 || out.Sample.ExpectedBytesHigh >= 1_000_000 {
+		t.Errorf("sample: %d %s", code, b)
+	}
+
+	for body, want := range map[string]string{
+		`{"setting":{"quality":0}}`:                                       "400 invalid_setting",
+		`{"setting":{"quality":3,"speed":"fast"}}`:                        "400 invalid_setting",
+		fmt.Sprintf(`{"sampleFile":%q}`, outside):                         "400 outside_library",
+		fmt.Sprintf(`{"sampleFile":%q}`, dir):                             "400 outside_library",
+		fmt.Sprintf(`{"sampleFile":%q}`, filepath.Join(dir, "../x.mkv")):  "400 outside_library",
+		`{"sampleFile":"a.mkv"}`:                                          "400 outside_library",
+		fmt.Sprintf(`{"sampleFile":%q}`, filepath.Join(dir, "notes.txt")): "400 not_a_video",
+		fmt.Sprintf(`{"sampleFile":%q}`, filepath.Join(dir, "gone.mkv")):  "404 not_found",
+	} {
+		code, b := post(t, srv, "POST", path, body)
+		var e struct{ Error struct{ Code string } }
+		json.Unmarshal([]byte(b), &e)
+		if got := fmt.Sprintf("%d %s", code, e.Error.Code); got != want {
+			t.Errorf("%s: %s, want %s (%s)", body, got, want, b)
+		}
+	}
+	if code, _ := post(t, srv, "POST", "/api/libraries/999/preview", `{}`); code != 404 {
+		t.Errorf("unknown library: %d", code)
+	}
+	if j, _ := st.List(100); len(j) != 0 {
+		t.Errorf("a Preview makes no job: %+v", j)
+	}
+}
+
+// A sample reached through a link that points outside the library is outside it.
+func TestPreviewSampleThroughALinkOutside(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	dir, other := t.TempDir(), t.TempDir()
+	os.WriteFile(filepath.Join(other, "x.mkv"), []byte("x"), 0o644)
+	if err := os.Symlink(filepath.Join(other, "x.mkv"), filepath.Join(dir, "x.mkv")); err != nil {
+		t.Skip("cannot make links here")
+	}
+	l, _ := st.AddLibrary("Movies", dir, rules.SliderTemplate(3), false)
+	code, b := post(t, srv, "POST", fmt.Sprintf("/api/libraries/%d/preview", l.ID), fmt.Sprintf(`{"sampleFile":%q}`, filepath.Join(dir, "x.mkv")))
+	if code != 400 || !strings.Contains(b, "outside_library") {
+		t.Errorf("%d %s", code, b)
+	}
+}
+
+func TestLibraryFilesEndpoint(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "Films"), 0o755)
+	os.WriteFile(filepath.Join(dir, "Films", "Heat (1995).mkv"), []byte("xx"), 0o644)
+	os.WriteFile(filepath.Join(dir, "clip.mp4"), []byte("x"), 0o644)
+	l, _ := st.AddLibrary("Movies", dir, rules.SliderTemplate(3), false)
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: fmt.Sprintf("/api/libraries/%d/files?q=heat", l.ID)})
+	var out struct {
+		Files []struct {
+			Path, Name string
+			SizeBytes  int64
+		}
+	}
+	json.Unmarshal([]byte(body), &out)
+	if len(out.Files) != 1 || out.Files[0].Name != "Films/Heat (1995).mkv" || out.Files[0].SizeBytes != 2 || out.Files[0].Path != filepath.Join(dir, "Films", "Heat (1995).mkv") {
+		t.Errorf("%s", body)
+	}
+	if _, body, _ := do(t, nil, srv, call{method: "GET", path: fmt.Sprintf("/api/libraries/%d/files", l.ID)}); !strings.Contains(body, "clip.mp4") {
+		t.Errorf("%s", body)
+	}
+}

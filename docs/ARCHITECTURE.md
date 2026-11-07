@@ -22,6 +22,7 @@ library folders --scanner--> files table + jobs table (SQLite) <--worker (pulls 
 | `internal/media` | wraps ffprobe and ffmpeg behind the `Exec` interface (`OSExec` is real, `FakeExec` is for tests); parses probe JSON into `Info` (container, duration, bitrate, plus a per-stream `Streams` list: codec, language, flags, video size/fps/bit depth/HDR and Dolby Vision markers, audio channels, subtitle text-vs-bitmap, attachments, chapter count; helpers `Video()`, `Audio()`, `IsHDR()`, `HasBitmapSubs()`...); parses `-progress` output |
 | `internal/jobs` | SQLite store (pure-Go `modernc.org/sqlite`, no cgo): `files` (what the scanner last saw), `jobs`, `libraries` and `flows` tables, and the job state machine. `libraries.go`: library and flow records (`AddLibrary`, `EnsureLibraries` for `-library`, `DeleteLibrary`, `SettingsFor(job)`, per-library `Counts`) |
 | `internal/worker` | `Worker` pulls jobs through the `Queue` interface and runs the transcode. The built-in worker is one instance; remote workers would implement `Queue` over HTTP |
+| `internal/preview` | the Preview (dry run): for a library and a setting, counts, skip reasons and a saving range, plus one sample file in plain words; reads only |
 | `internal/web` | embedded static page (`go:embed`, plain HTML/JS, no build step) and a JSON API |
 
 ## Libraries and flows
@@ -130,6 +131,31 @@ plain words, raw numbers only in `detail`.
 
 If the converter is missing or incomplete, the program still starts so the web page and the health
 report can say what is wrong, but it does not scan or convert until it is fixed and restarted.
+
+## Preview (dry run)
+
+`POST /api/libraries/{id}/preview {setting, sampleFile}` (`internal/preview`, UI-API-CONTRACT.md
+"Preview", addenda 3, 5 and 12) says what a setting would do to a library before anything converts,
+also for a library that is not started. An empty `setting` is the saved one; otherwise
+`{"quality":1..5}` (the selectors come with slice 25). It lists the folder like the scanner (same
+skipped folders and files), probes each video through the probe cache (`probes` table, migration 5:
+ffprobe's answer per path while size and modification time stay the same; the scanner fills it too)
+and compiles the setting's Plan for it, so the counts come from the scanner's own decision.
+`skipped` counts the Plan's `SkipCode` (`already_efficient`, `hevc_or_newer`,
+`format_not_converted`, `no_video`, `unknown_bitrate`, `subtitles_not_kept`, `setting_cannot_run`,
+`unreadable`). Files with more than one link stay in `canShrink`, are counted in `sharedNoSaving`
+and are left out of the range (until slice 12 skips them as `shared_file`).
+
+The range (v1, bits per pixel): the new video gets 0.03 to 0.075 bits per pixel per frame at CRF 23,
+halving every 6 CRF up, never more than the source; the rest of the file is copied and saves nothing;
+a file whose best case misses the Plan's minimum saving counts as kept (0), one that may miss it
+counts from 0 (`preview.Saving`). The numbers are untuned (D8). The result is kept in memory per
+library and setting with a signature of the listing: the same setting over the same files answers at
+once; a change starts a new computation, shown as `stale` with `status: computing` until it is ready.
+A request waits up to 2 s, then answers `computing` and the page asks again. Probes run 4 at a time.
+`sampleFile` must be a video inside the library folder after links are resolved (400
+`outside_library` / `not_a_video`, 404 `not_found`); `sample.lines` are plain words.
+`GET /api/libraries/{id}/files?q=` lists up to 50 videos whose path inside the library contains `q`.
 
 ## Job lifecycle
 

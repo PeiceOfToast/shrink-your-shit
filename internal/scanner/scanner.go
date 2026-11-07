@@ -6,6 +6,7 @@ package scanner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"log"
@@ -128,7 +129,7 @@ func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.Fil
 	if open, _ := s.Store.HasOpenJob(path); open {
 		return false // already waiting or running; it will be re-checked after it finishes
 	}
-	pi, err := media.Probe(ctx, s.Exec, s.FFprobe, path)
+	pi, err := Probe(ctx, s.Store, s.Exec, s.FFprobe, path, st)
 	rec := jobs.File{Path: path, Size: st.Size(), ModTime: st.ModTime().UnixNano()}
 	if err != nil {
 		log.Printf("probe %s: %v", path, err)
@@ -153,6 +154,26 @@ func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.Fil
 	}
 	s.Store.PutFile(rec)
 	return true
+}
+
+// Probe is ffprobe's view of path, from the store's probe cache when the file has the same size and
+// modification time as when it was last probed. Only reads the file.
+func Probe(ctx context.Context, store *jobs.Store, x media.Exec, ffprobe, path string, st os.FileInfo) (media.Info, error) {
+	size, mtime := st.Size(), st.ModTime().UnixNano()
+	var info media.Info
+	if b, ok := store.GetProbe(path, size, mtime); ok && json.Unmarshal([]byte(b), &info) == nil {
+		return info, nil
+	}
+	info, err := media.Probe(ctx, x, ffprobe, path)
+	if err != nil {
+		return info, err
+	}
+	if b, err := json.Marshal(info); err == nil {
+		if err := store.PutProbe(path, size, mtime, string(b)); err != nil {
+			log.Printf("probe cache %s: %v", path, err) // the probe is still good; it is just taken again next time
+		}
+	}
+	return info, nil
 }
 
 // Run scans every interval until ctx is cancelled (polling works on WSL2 where file events don't),
