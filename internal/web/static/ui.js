@@ -58,7 +58,12 @@
   // bytes, state checking|ready|unreadable, codec, resolution, durationSec}], total, stillLooking}; while stillLooking it
   // is asked again each second. root names the folder in the caption; all (library page only) adds "See them all in
   // Activity". hn is the heading level. Returns {stop()}.
-  function length(sec) { var m = Math.round(sec / 60), h = Math.floor(m / 60); return h ? h + " h " + (m % 60) + " min" : m + " min"; }
+  // A video's length, the one format for the first-5 preview and Activity (design, REDESIGN A3): "45 s" under a minute
+  // (anything under a second is "1 s"), else "52 min" or "1 h 52 min".
+  ui.length = function (sec) {
+    var s = Math.round(sec); if (s < 60) return Math.max(1, s) + " s";
+    var m = Math.round(sec / 60), h = Math.floor(m / 60); return h ? h + " h " + (m % 60) + " min" : m + " min";
+  };
   ui.firstFive = function (host, root, load, hn, all) {
     var h = ui.el(hn || "h2", null, "Is this the right folder?"), lead = ui.el("p", "muted small"), wrap = ui.el("div", "table-wrap"),
       foot = ui.el("p", "small"), count = ui.el("span"), timer = null, done = false;
@@ -72,7 +77,7 @@
         var tr = ui.el("tr"), cell = function (x, cls) { tr.appendChild(ui.el("td", cls || null, x)); };
         cell(f.folder, "mono"); cell(f.name);
         if (f.state === "unreadable") { var td = ui.el("td", "muted", "can't read this file"); td.colSpan = 4; tr.appendChild(td); }
-        else { var wait = f.state === "checking"; cell(wait ? "checking..." : f.codec || ""); cell(wait ? "checking..." : f.resolution || ""); cell(ui.bytes(f.bytes)); cell(wait ? "checking..." : f.durationSec != null ? length(f.durationSec) : ""); }
+        else { var wait = f.state === "checking"; cell(wait ? "checking..." : f.codec || ""); cell(wait ? "checking..." : f.resolution || ""); cell(ui.bytes(f.bytes)); cell(wait ? "checking..." : f.durationSec != null ? ui.length(f.durationSec) : ""); }
         tb.appendChild(tr);
       });
       wrap.textContent = ""; wrap.hidden = !items.length; if (items.length) wrap.appendChild(t);
