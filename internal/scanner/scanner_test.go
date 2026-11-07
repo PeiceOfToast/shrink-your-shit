@@ -367,28 +367,17 @@ func TestStillChangingFollowsTheFileNotThePath(t *testing.T) {
 	}()
 	old := clock.Add(-time.Hour)
 	os.Chtimes(a, old, old)
-	before, _ := os.Lstat(a)
-	stateBefore := stateOf(a, before)
 	scan()       // first look
 	os.Remove(a) // made again: same name, size and times, but another file
 	os.WriteFile(a, []byte("12345"), 0o644)
 	os.Chtimes(a, old, old)
-	after, _ := os.Lstat(a)
-	if stateAfter := stateOf(a, after); stateAfter.same(stateBefore) {
-		// Only when nothing the system reports tells them apart: NTFS can reuse the file index, and its
-		// "tunneling" gives a file made again under a name within ~15 s the old one's creation time. A
-		// different identity, creation time or change time always means a fresh wait (review 9cf6a03).
-		t.Logf("this system cannot tell the recreated file from the old one (%+v); it counts as the same", stateAfter)
-		if n := scan(); n != 1 {
-			t.Errorf("indistinguishable from the first look: queued %d, want 1", n)
-		}
-	} else {
-		if n := scan(); n != 0 {
-			t.Errorf("a file made again was decided on its first look: queued %d", n)
-		}
-		if n := scan(); n != 1 {
-			t.Errorf("unchanged since: queued %d, want 1", n)
-		}
+	// NTFS can give the new file the old one's file index and (tunneling) creation time; its change time
+	// still moves, so it always waits again (review 3ea035c)
+	if n := scan(); n != 0 {
+		t.Errorf("a file made again was decided on its first look: queued %d", n)
+	}
+	if n := scan(); n != 1 {
+		t.Errorf("unchanged since: queued %d, want 1", n)
 	}
 
 	// gone for a pass, then back: its earlier look is forgotten

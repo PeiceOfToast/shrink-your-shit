@@ -161,7 +161,7 @@ type look struct {
 }
 
 // fileState is what tells one state of a file from another: media.State (identity, size, modification
-// time and, on Windows, creation time) and the change time (none on Windows). A file made again under
+// time and, on Windows, creation and change times) and, elsewhere, the change time from the Lstat. A file made again under
 // the same name with the same size and times is a different one. unknown: the file could not be read
 // (FileState failed), so size and time are the listing's and its identity is not known; such a state
 // is never the same as any other, so the file waits until it can be read twice alike (review 9cf6a03).
@@ -186,7 +186,7 @@ func stateOf(path string, st os.FileInfo) fileState {
 
 func (a fileState) same(b fileState) bool {
 	return !a.unknown && !b.unknown && a.Key == b.Key && a.Size == b.Size && a.MTime.Equal(b.MTime) &&
-		a.Born.Equal(b.Born) && a.hasCtime == b.hasCtime && a.ctime.Equal(b.ctime)
+		a.Born.Equal(b.Born) && a.Changed.Equal(b.Changed) && a.hasCtime == b.hasCtime && a.ctime.Equal(b.ctime)
 }
 
 // observe notes path as seen now in state st, and reports whether this is its first look in that
