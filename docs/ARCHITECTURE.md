@@ -221,7 +221,7 @@ the result and the original was deliberately left alone, with the reason in the 
    file is never silently replaced by a clean-looking copy of the damage.
    Every ffprobe/ffmpeg call in the checks has a time limit (1 minute for a probe, 10 minutes per
    sample, 30 minutes to count frames, 10 minutes plus twice the file's length for a full playback,
-   at most 6 hours); a stuck call ends as `kept` with "timed out". These are guesses.
+   at most 6 hours); a stuck call ends as `kept` with "took too long". These are guesses.
    **Fail-safe:** a check that errors or cannot run (no `ssim` filter in this ffmpeg, free space
    unreadable) is a refusal, never a pass.
 4. Replace: the temp file is renamed over the original (retried for ~10 s on Windows, where
@@ -229,6 +229,10 @@ the result and the original was deliberately left alone, with the reason in the 
    and the original stays.
 5. Any refusal or failure removes the temp file and leaves the original untouched: `kept` for a
    refused result, `failed` for a crash (the UI offers Retry; neither is retried automatically).
+   The job's detail, which the page shows, is plain words written where the failure happens
+   (`failed(plain, err)` and `kept(...)` in `internal/worker`; `plainFailure` covers a full disk, a
+   permission refusal and anything else). It names no paths, tools or raw errors (COPY-1), and the raw
+   error goes to the log, which Settings > System shows (`TestFailedDetailsArePlain`).
 
 `Expect` (`worker/expect.go`) is "what the new file must look like": a list of stream expectations
 in output order, chapters, duration, frame count, minimum savings. `DefaultExpect(source)` builds it

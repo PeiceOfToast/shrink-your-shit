@@ -10,12 +10,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
@@ -156,7 +158,10 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 			}
 			return true, err
 		}
-		if ferr := w.Queue.Fail(job.ID, err.Error()); ferr != nil {
+		// The person sees what happened in plain words; the technical error goes to the log
+		// (Settings > System shows its last lines).
+		log.Printf("worker %s: job %d (%s) failed: %v", w.ID, job.ID, job.Path, err)
+		if ferr := w.Queue.Fail(job.ID, plainFailure(err)); ferr != nil {
 			return true, ferr
 		}
 		return true, err
@@ -175,6 +180,37 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
+// FailedError is a failed conversion: Plain is what the person sees (COPY-1/COPY-2: what happened,
+// what was not touched, what to do), Err the technical cause, for the log.
+type FailedError struct {
+	Plain string
+	Err   error
+}
+
+func (e *FailedError) Error() string { return e.Plain + " (" + e.Err.Error() + ")" }
+func (e *FailedError) Unwrap() error { return e.Err }
+
+func failed(plain string, err error) error { return &FailedError{plain, err} }
+
+const cannotRead = "shrink-your-shit is not allowed to read this file, so nothing was converted. Let it read the file (Settings > System says how), then press Retry."
+
+const diskFull = "The disk is full, so converting stopped. Your original was not touched. Free some space, then press Retry."
+
+// plainFailure is the plain words for a failed conversion: a full disk and a folder it may not write
+// in are said as such; a FailedError says its own; anything else gets the general sentence.
+func plainFailure(err error) string {
+	var fe *FailedError
+	switch {
+	case errors.As(err, &fe): // a stage that says its own, more precisely
+		return fe.Plain
+	case errors.Is(err, syscall.ENOSPC):
+		return diskFull
+	case errors.Is(err, fs.ErrPermission):
+		return "shrink-your-shit is not allowed to write in this folder, so converting stopped. Your original was not touched. Let it write there (Settings > System says how), then press Retry."
+	}
+	return "Converting did not finish. Your original was not touched. Press Retry; if it keeps failing, Settings > System shows what went wrong."
+}
+
 // BesidePath is the output name in Beside mode.
 func BesidePath(src string) string {
 	ext := filepath.Ext(src)
@@ -188,10 +224,16 @@ func BesidePath(src string) string {
 func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err error) {
 	tmpl, err := w.templateFor(job)
 	if err != nil {
-		return "", fmt.Errorf("cannot read what to do with it: %w", err)
+		return "", failed("This library's setting could not be read, so converting did not start. Your original was not touched. Open the library and save its setting again, then press Retry.", err)
 	}
 	before, serr := statOpen(job.Path)
 	if serr != nil {
+		if errors.Is(serr, fs.ErrNotExist) {
+			return "", failed("The file is not there any more, so nothing was converted.", serr)
+		}
+		if errors.Is(serr, fs.ErrPermission) { // not a write: the generic permission words would point the wrong way
+			return "", failed(cannotRead, serr)
+		}
 		return "", fmt.Errorf("source file: %w", serr)
 	}
 	if err := removeLeftoverTemps(job.Path); err != nil {
@@ -212,7 +254,8 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		if errors.Is(pctx.Err(), context.DeadlineExceeded) {
 			return "", checkFailed(pctx, "reading the original", perr)
 		}
-		return "", kept("the original cannot be read any more (%v)", perr)
+		log.Printf("worker %s: %s: %v", w.ID, job.Path, perr)
+		return "", kept("the original can't be read any more, so it was left as it is")
 	}
 	if err := w.preflight(job.Path, before.Size()); err != nil {
 		return "", err
@@ -232,7 +275,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// only a flow that cannot say how to convert stops the job here.
 	plan := tmpl.Compile(src)
 	if plan.Video.Codec == "" {
-		return "", fmt.Errorf("its library's flow cannot convert it: %s", plan.Skip)
+		return "", failed("This library's setting can't convert this file, so it was left as it is.", fmt.Errorf("its library's flow cannot convert it: %s", plan.Skip))
 	}
 	exp := plan.Expect(src, packets)
 	if exp.DurationSec <= 0 {
@@ -246,7 +289,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		err = w.Queue.RecordPlan(job.ID, string(b), snap.Fingerprint())
 	}
 	if err != nil {
-		return "", fmt.Errorf("could not record what this conversion will do, so it did not start; the original is untouched (%v)", err)
+		return "", failed("What this conversion will do could not be recorded, so it did not start. Your original was not touched. Press Retry.", err)
 	}
 
 	stage, err = newStaged(job.Path)
@@ -259,12 +302,19 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		w.Queue.Progress(job.ID, p)
 	})
 	if terr != nil {
-		return "", terr
+		if errors.Is(terr, context.Canceled) || ctx.Err() != nil {
+			return "", terr // stopped or shutting down: RunOne decides, not a failure of the file
+		}
+		if errors.Is(terr, syscall.ENOSPC) || strings.Contains(encErr+terr.Error(), "No space left on device") {
+			return "", failed(diskFull, terr)
+		}
+		return "", failed("Converting stopped with an error. Your original was not touched. Press Retry; if it keeps failing, the file may be damaged.", fmt.Errorf("%w: %s", terr, firstLines(encErr, 3)))
 	}
 	// Errors ffmpeg reported while reading the original mean it is damaged: converting it would bake
 	// the damage in and delete the only copy that might still be repaired or fetched again.
 	if damage := sourceDamage(encErr); damage != "" {
-		return "", kept("the original file has errors (%s); not converting it", damage)
+		log.Printf("worker %s: %s: the original has errors: %s", w.ID, job.Path, damage)
+		return "", kept("the original file has errors, so it was not converted (converting would keep the damage)")
 	}
 
 	// If the source changed while we encoded, the new file is stale: say so first (otherwise the
@@ -315,7 +365,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		if errors.As(err, &k) {
 			return "", err
 		}
-		return "", fmt.Errorf("move result into place: %w", err)
+		return "", failed("The new file could not be put in place, so your original was kept as it was. Press Retry.", fmt.Errorf("move result into place: %w", err))
 	}
 	return final, nil
 }

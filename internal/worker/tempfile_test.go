@@ -176,7 +176,7 @@ func TestUnremovableTempStopsBeforeEncoding(t *testing.T) {
 	os.Chmod(s.dir, 0o555)
 	t.Cleanup(func() { os.Chmod(s.dir, 0o755) })
 	s.run(Replace)
-	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "cannot remove the old temp file") {
+	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "movie.syp-tmp.mkv") || strings.Contains(j.Error, s.dir) {
 		t.Errorf("want failed naming the temp file, got %s %q", j.Status, j.Error)
 	}
 	if n := s.count("libx265"); n != 0 {

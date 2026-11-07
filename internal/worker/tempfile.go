@@ -59,6 +59,9 @@ func TempFiles(src string) ([]string, error) {
 	return out, nil
 }
 
+// removeFile is os.Remove; tests make it fail on every OS (Windows ignores POSIX permission bits).
+var removeFile = os.Remove
+
 // removeLeftoverTemps removes what earlier runs left next to src: a file under the old fixed temp
 // name, and staging folders that hold nothing but our one temp file, a regular file (that file is
 // removed, then the empty folder). Anything else with a matching name, such as a folder holding other
@@ -101,8 +104,9 @@ func removeLeftoverTemps(src string) error {
 			continue
 		}
 		for _, r := range remove {
-			if err := os.Remove(r); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return fmt.Errorf("cannot remove the old temp file %s: %w", r, err)
+			if err := removeFile(r); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return failed(fmt.Sprintf("An old temp file next to this file (%s) could not be removed, so converting did not start. Your original was not touched. Delete it, or let shrink-your-shit write in this folder, then press Retry.", filepath.Base(r)),
+					fmt.Errorf("cannot remove the old temp file %s: %w", r, err))
 			}
 		}
 	}

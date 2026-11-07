@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -49,10 +50,11 @@ func fullDecodeTimeout(durationSec float64) time.Duration {
 // checkFailed turns an error from a check's ffmpeg/ffprobe call into the refusal reason, saying so
 // plainly when it was our time limit that ended it.
 func checkFailed(cctx context.Context, what string, err error) error {
+	log.Printf("check failed: %s: %v", what, err) // the technical detail, for the log and Settings > System
 	if errors.Is(cctx.Err(), context.DeadlineExceeded) {
-		return kept("%s timed out; the original is kept (ffmpeg may be stuck or the file very slow to read)", what)
+		return kept("%s took too long, so the original is kept. Press Retry later; a very slow disk or a damaged file can cause this", what)
 	}
-	return kept("%s failed (%v)", what, err)
+	return kept("%s could not be done, so the original is kept. Press Retry; if it keeps failing, the file may be damaged", what)
 }
 
 // KeptError means a safety check refused the new file (or could not run): the original is kept.
@@ -107,12 +109,13 @@ func (w *Worker) preflight(sourcePath string, sourceSize int64) error {
 	dir := filepath.Dir(sourcePath)
 	free, err := w.freeSpace(dir)
 	if err != nil {
-		return kept("could not check the free disk space in %s (%v)", dir, err)
+		log.Printf("free space of %s: %v", dir, err)
+		return kept("the free disk space could not be checked, so converting did not start. Press Retry")
 	}
 	need := SpaceNeeded(sourceSize)
 	if free < need {
-		return kept("not enough free disk space in %s: about %s is needed to convert this file safely, %s is free",
-			dir, rules.HumanBytes(int64(need)), rules.HumanBytes(int64(free)))
+		return kept("there is not enough free disk space next to this file: about %s is needed to convert it safely, %s is free",
+			rules.HumanBytes(int64(need)), rules.HumanBytes(int64(free)))
 	}
 	return nil
 }
@@ -124,7 +127,8 @@ func (w *Worker) preflight(sourcePath string, sourceSize int64) error {
 func (w *Worker) verify(ctx context.Context, src media.Info, exp rules.Expect, srcPath, tmp string, origSize int64) error {
 	st, err := os.Stat(tmp)
 	if err != nil {
-		return kept("the new file is missing (%v)", err)
+		log.Printf("new file %s: %v", tmp, err)
+		return kept("the new file is missing")
 	}
 	if st.Size() == 0 {
 		return kept("the new file is empty")
@@ -136,7 +140,8 @@ func (w *Worker) verify(ctx context.Context, src media.Info, exp rules.Expect, s
 		if errors.Is(pctx.Err(), context.DeadlineExceeded) {
 			return checkFailed(pctx, "reading the new file", err)
 		}
-		return kept("the new file cannot be read (%v)", err)
+		log.Printf("reading the new file %s: %v", tmp, err)
+		return kept("the new file cannot be read")
 	}
 	outPackets := int64(-1)
 	if exp.VideoPackets > 0 {
@@ -216,7 +221,8 @@ func (w *Worker) decodeRun(ctx context.Context, tmp string, videoOrd int, start,
 		if text == "" {
 			text = err.Error()
 		}
-		return kept("the new file does not play cleanly: %s", firstLines(text, 3))
+		log.Printf("playback test of %s: %s", tmp, firstLines(text, 3))
+		return kept("the new file does not play cleanly (it has errors when played back)")
 	}
 	return nil
 }
@@ -235,10 +241,11 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 	}
 	has, err := w.hasFilter(ctx, "ssim")
 	if err != nil {
-		return kept("could not ask ffmpeg whether it can compare picture quality (%v)", err)
+		log.Printf("picture comparison filter: %v", err)
+		return kept("it could not be checked whether picture quality can be compared. Press Retry; if it keeps failing, Settings > System says what is wrong")
 	}
 	if !has {
-		return kept("this ffmpeg has no 'ssim' filter, which shrink-your-shit needs to check picture quality; install a complete ffmpeg build")
+		return kept("the installed converter cannot compare picture quality, which is needed before a file is replaced. Settings > System says what to install")
 	}
 	threshold := w.minSSIM()
 	if planSSIM > 0 { // the flow's own threshold (a slider position's SSIM gate)

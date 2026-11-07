@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -251,6 +252,20 @@ func (s *scenario) assertKept(want string) {
 	s.assertOriginalSafe()
 }
 
+// assertPlain: a detail shown in the page says what happened in plain words (COPY-1): no file paths,
+// no tool names, no raw error text such as "exit status".
+func assertPlain(t *testing.T, detail string) {
+	t.Helper()
+	if detail == "" {
+		t.Error("no detail")
+	}
+	for _, bad := range []string{"/", "\\", "exit status", "ffmpeg", "ffprobe", "libx265", "x265", "encoder", "@ 0x", "%!", "<nil>", "syscall", "errno", "no such file"} {
+		if strings.Contains(strings.ToLower(detail), bad) {
+			t.Errorf("detail %q contains %q", detail, bad)
+		}
+	}
+}
+
 // ---- success ----
 
 func TestReplaceSuccess(t *testing.T) {
@@ -358,12 +373,12 @@ func TestRejections(t *testing.T) {
 		{"picture too different", func(s *scenario) {
 			s.ssimStderr = "[Parsed_ssim_0] SSIM Y:0.50 U:0.50 V:0.50 All:0.500000 (3.0)"
 		}, "too different"},
-		{"ssim filter missing", func(s *scenario) { s.hasSSIM = false }, "no 'ssim' filter"},
+		{"ssim filter missing", func(s *scenario) { s.hasSSIM = false }, "cannot compare picture quality"},
 		{"ssim gives no result", func(s *scenario) { s.ssimStderr = "nothing useful" }, "gave no result"},
 		{"ssim run fails", func(s *scenario) { s.ssimErr = errors.New("exit status 1") }, "picture comparison at"},
 		{"not enough disk space", func(s *scenario) { s.freeBytes = 1 << 20 }, "not enough free disk space"},
 		{"cannot check disk space", func(s *scenario) { s.freeErr = errors.New("no such device") }, "free disk space"},
-		{"source cannot be read", func(s *scenario) { s.srcProbeFails = true }, "cannot be read any more"},
+		{"source cannot be read", func(s *scenario) { s.srcProbeFails = true }, "can't be read any more"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -371,6 +386,7 @@ func TestRejections(t *testing.T) {
 			c.mutate(s)
 			s.run(Replace)
 			s.assertKept(c.reason)
+			assertPlain(t, s.job().Error)
 		})
 	}
 }
@@ -753,16 +769,16 @@ func TestAHungCheckKeepsTheOriginalInsteadOfFreezingTheWorker(t *testing.T) {
 	}{
 		{"probe of the new file", func(n string, a []string) bool {
 			return n == "ffprobe" && !strings.Contains(strings.Join(a, " "), "movie.mkv ") && strings.Contains(a[len(a)-1], ".syp-tmp") && !strings.Contains(strings.Join(a, " "), "count_packets")
-		}, "reading the new file timed out"},
+		}, "reading the new file took too long"},
 		{"frame count of the new file", func(n string, a []string) bool {
 			return n == "ffprobe" && strings.Contains(strings.Join(a, " "), "count_packets") && strings.Contains(a[len(a)-1], ".syp-tmp")
-		}, "counting the new file's video frames timed out"},
+		}, "counting the new file's video frames took too long"},
 		{"playback test", func(n string, a []string) bool {
 			return n == "ffmpeg" && strings.Contains(strings.Join(a, " "), "-xerror")
-		}, "playback test of the new file timed out"},
+		}, "playback test of the new file took too long"},
 		{"picture comparison", func(n string, a []string) bool {
 			return n == "ffmpeg" && strings.Contains(strings.Join(a, " "), "-lavfi")
-		}, "picture comparison at 0:00:00 timed out"},
+		}, "picture comparison at 0:00:00 took too long"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -819,5 +835,77 @@ func TestSSIMStartSampleDoesNotSeek(t *testing.T) {
 	}
 	if !strings.Contains(samples[1], "-ss 38.000") {
 		t.Errorf("the middle sample still seeks:\n%s", samples[1])
+	}
+}
+
+// Every way a conversion fails leaves a plain detail (COPY-1/COPY-2): the raw error goes to the log only.
+func TestFailedDetailsArePlain(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(s *scenario)
+		want   string
+	}{
+		{"converter crash", func(s *scenario) {
+			s.encodeErr = fmt.Errorf("ffmpeg: exit status 187: %s/x.mkv: Invalid data found", "/media")
+		}, "Converting stopped with an error"},
+		{"disk full while converting", func(s *scenario) {
+			s.encodeErr = fmt.Errorf("ffmpeg: exit status 1: av_interleaved_write_frame(): No space left on device")
+		}, "The disk is full"},
+		{"disk full, as an error", func(s *scenario) {
+			s.encodeErr = &os.PathError{Op: "write", Path: "/media/x.mkv", Err: syscall.ENOSPC}
+		}, "The disk is full"},
+		{"source gone", func(s *scenario) { os.Remove(s.src) }, "not there any more"},
+		{"source cannot be opened for reading", func(s *scenario) {
+			os.Chmod(s.src, 0)
+			s.t.Cleanup(func() { os.Chmod(s.src, 0o644) })
+		}, "not allowed to read this file"},
+		{"old temp file cannot be removed", func(s *scenario) { // through the hook: works on every OS
+			os.WriteFile(filepath.Join(s.dir, "movie.syp-tmp.mkv"), []byte("x"), 0o644)
+			removeFile = func(p string) error { return &os.PathError{Op: "remove", Path: p, Err: syscall.EACCES} }
+			s.t.Cleanup(func() { removeFile = os.Remove })
+		}, "old temp file"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// chmod 0 stops reading only on POSIX, for a user other than root; the words are checked
+			// on every OS below (cannotRead)
+			if c.name == "source cannot be opened for reading" && (runtime.GOOS == "windows" || os.Geteuid() == 0) {
+				t.Skip("needs POSIX permissions and a user other than root")
+			}
+			s := newScenario(t)
+			c.mutate(s)
+			s.run(Replace)
+			j := s.job()
+			if j.Status != jobs.Failed || !strings.Contains(j.Error, c.want) {
+				t.Errorf("%s %q, want failed with %q", j.Status, j.Error, c.want)
+			}
+			assertPlain(t, j.Error)
+		})
+	}
+	// errors that come from below a stage, by class
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{&os.PathError{Op: "open", Path: "/media/a.mkv", Err: syscall.EACCES}, "not allowed to write"},
+		{&os.PathError{Op: "write", Path: "/media/a.mkv", Err: syscall.ENOSPC}, "The disk is full"},
+		{errors.New("rename /a /b: exit status 1"), "Converting did not finish"},
+		{failed("Plain words.", &os.PathError{Op: "write", Path: "/x", Err: syscall.ENOSPC}), "Plain words."},
+		{failed(cannotRead, &os.PathError{Op: "open", Path: "/media/a.mkv", Err: syscall.EACCES}), "not allowed to read this file"},
+	} {
+		got := plainFailure(c.err)
+		if !strings.Contains(got, c.want) {
+			t.Errorf("plainFailure(%v) = %q, want %q", c.err, got, c.want)
+		}
+		assertPlain(t, got)
+	}
+	// a check that ran out of time
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	var ke *KeptError
+	if err := checkFailed(ctx, "the playback test of the new file", errors.New("signal: killed")); !errors.As(err, &ke) || !strings.Contains(err.Error(), "took too long") {
+		t.Errorf("timeout: %v", err)
+	} else {
+		assertPlain(t, ke.Reason)
 	}
 }
