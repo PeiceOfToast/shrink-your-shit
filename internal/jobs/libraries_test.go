@@ -302,15 +302,22 @@ func TestJobsOnlyForStartedLibraries(t *testing.T) {
 
 func TestChangingALibrarysFlowForgetsItsFiles(t *testing.T) {
 	s := open(t)
-	a, _ := s.AddLibrary("A", "/media/a", rules.SliderTemplate(3), true)
+	media := realDir(t, filepath.Join(t.TempDir(), "media")) // real OS paths: the scanner records these
+	a, _ := s.AddLibrary("A", filepath.Join(media, "a"), rules.SliderTemplate(3), true)
 	other, _ := s.AddFlow("Other", rules.SliderTemplate(1))
-	for _, p := range []string{"/media/a/x.mkv", "/media/a/sub/y.mkv", "/media/ab/z.mkv", "/media/b/w.mkv"} {
+	files := map[string]bool{ // path -> kept after the flow change
+		filepath.Join(media, "a", "x.mkv"):        false,
+		filepath.Join(media, "a", "sub", "y.mkv"): false,
+		filepath.Join(media, "ab", "z.mkv"):       true, // a sibling whose name starts the same
+		filepath.Join(media, "b", "w.mkv"):        true,
+	}
+	for p := range files {
 		s.PutFile(File{Path: p, Size: 1, Decision: "skip: rule"})
 	}
 	if _, err := s.SetLibraryFlow(a.ID, other.ID); err != nil {
 		t.Fatal(err)
 	}
-	for p, kept := range map[string]bool{"/media/a/x.mkv": false, "/media/a/sub/y.mkv": false, "/media/ab/z.mkv": true, "/media/b/w.mkv": true} {
+	for p, kept := range files {
 		if f, _ := s.GetFile(p); (f != nil) != kept {
 			t.Errorf("%s: kept=%v, want %v (only the library's own files are forgotten)", p, f != nil, kept)
 		}
