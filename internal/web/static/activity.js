@@ -11,12 +11,14 @@
   function fail(e) { var b = $("err"); b.textContent = e && e.message || "Something went wrong. Nothing was changed."; b.hidden = false; }
   function clear() { $("err").hidden = true; }
 
-  // Draw only when the data changed, and give focus back to the same control (data-key) afterwards.
+  // Draw only when the data changed, and give focus back to the same control (data-key) afterwards,
+  // or to the same heading (id), such as "Working now" after the last Stop, so a redraw does not drop it.
   function draw(key, data, fn) {
     var j = JSON.stringify(data); if (seen[key] === j) return; seen[key] = j;
-    var a = document.activeElement, k = a && a.getAttribute && a.getAttribute("data-key");
+    var a = document.activeElement, k = a && a.getAttribute && a.getAttribute("data-key"), id = !k && a && a.id && pane.contains(a) ? a.id : "";
     fn();
-    if (k) { var n = pane.querySelector('[data-key="' + k + '"]'); if (n) n.focus(); }
+    var n = k ? pane.querySelector('[data-key="' + k + '"]') : id ? $(id) : null;
+    if (n) n.focus();
   }
   function heading(t, id) { var h = el("h2", null, t); h.id = id; h.tabIndex = -1; h.style.marginTop = "0"; return h; }
   function after() { var h = pane.querySelector("h2"); if (h) h.focus(); } // a row went away: land on the heading
