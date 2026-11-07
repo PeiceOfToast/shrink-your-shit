@@ -106,7 +106,10 @@
   var doneList = [
     { jobId: "j5", library: "Movies", path: "/media/movies/Ocean Floor (2017).mkv", beforeBytes: 6.4 * GB, afterBytes: 3.3 * GB, originalState: "kept", keptDaysLeft: 5, keptId: "k1" },
     { jobId: "j6", library: "Movies", path: "/media/movies/Paper Moon (2010).mkv", beforeBytes: 4 * GB, afterBytes: 2.2 * GB, originalState: "kept", keptDaysLeft: 6, keptId: "k2" },
-    { jobId: "j7", library: "TV Shows", path: "/media/tv/Season 1/E01.mkv", beforeBytes: 3 * GB, afterBytes: 1.4 * GB, originalState: "deleted", keptDaysLeft: 0, keptId: null }
+    { jobId: "j7", library: "TV Shows", path: "/media/tv/Season 1/E01.mkv", beforeBytes: 3 * GB, afterBytes: 1.4 * GB, originalState: "deleted", keptDaysLeft: 0, keptId: null },
+    // Converted with "Put the new file next to the original": kept, but not in the trash, so no keptId (contract, slice 18).
+    { jobId: "j8", library: "Movies", path: "/media/movies/Long Walk (2012).mkv", beforeBytes: 5.1 * GB, afterBytes: 2.6 * GB, originalState: "kept", keptDaysLeft: 0, keptId: null },
+    { jobId: "j9", library: "Movies", path: "/media/movies/Cut Loose (2015).mkv", beforeBytes: 4.4 * GB, afterBytes: 2.1 * GB, originalState: "restored", keptDaysLeft: 0, keptId: null }
   ];
   var keptList = [
     { keptId: "k1", library: "Movies", path: "/media/movies/Ocean Floor (2017).mkv", originalBytes: 6.4 * GB, nowBytes: 3.3 * GB, deleteOn: iso(-5 * 864e5) },
@@ -278,7 +281,8 @@
     },
     restoreKept: function (p) {
       var k = removeFrom(keptList, "keptId", p.id); if (!k) return gone();
-      removeFrom(doneList, "keptId", p.id);
+      // The original goes back and the smaller file is deleted: the Done row stays and says so (contract, slice 18).
+      doneList.forEach(function (d) { if (d.keptId === p.id) { d.originalState = "restored"; d.keptId = null; d.keptDaysLeft = 0; } });
       skippedList.unshift({ id: "r" + p.id, library: k.library, path: k.path, reason: "restored", detail: "Left alone so it is not converted again by surprise.", libraryId: "1" });
       saveAct(); return ok();
     },

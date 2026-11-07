@@ -146,8 +146,9 @@
         var t = table(["File", "Before", "After", "Original"]);
         r.items.forEach(function (i) {
           var o = el("span");
-          if (i.keptId) { o.appendChild(document.createTextNode("Kept " + i.keptDaysLeft + (i.keptDaysLeft === 1 ? " more day" : " more days") + " · ")); var a = el("a", null, "Get original back"); a.href = "/activity/kept/?confirm=" + encodeURIComponent(i.keptId); o.appendChild(a); }
-          else o.textContent = "Original deleted";
+          // What happened to the original, from originalState (contract, slice 18); the column header says "Original".
+          if (i.originalState === "kept" && i.keptId) { o.appendChild(document.createTextNode("Kept " + i.keptDaysLeft + (i.keptDaysLeft === 1 ? " more day" : " more days") + " · ")); var a = el("a", null, "Get original back"); a.href = "/activity/kept/?confirm=" + encodeURIComponent(i.keptId); o.appendChild(a); }
+          else o.textContent = { kept: "Kept beside the new file", restored: "Back in place", deleted: "Deleted" }[i.originalState] || ""; // an unknown state: say nothing rather than guess
           t.row([nameOf(i), ui.bytes(i.beforeBytes), ui.bytes(i.afterBytes), o]);
         });
         pane.appendChild(t.wrap);
@@ -161,7 +162,9 @@
   function openPanel(i) {
     openFor = i.keptId; panel.textContent = "";
     var h = el("h3", null, "Get the original of “" + base(i.path) + "” back?"); h.tabIndex = -1; h.setAttribute("data-key", "panel-h"); panel.appendChild(h);
-    panel.appendChild(el("p", null, "The original (" + ui.bytes(i.originalBytes) + ") goes back in place. The smaller version is moved to the trash for a while, so you can switch back. This file will not be converted again unless you press Convert again, under Activity > Skipped."));
+    // Restore deletes the smaller file: there is no switching back (design, mockups/restore.html).
+    var say = el("p", null, "The original (" + ui.bytes(i.originalBytes) + ") goes back in place and the smaller version is deleted. This file will not be converted again unless you press Convert again, under "), sk = el("a", null, "Activity > Skipped");
+    sk.href = "/activity/skipped/"; say.appendChild(sk); say.appendChild(document.createTextNode(".")); panel.appendChild(say);
     var row = el("div", "row");
     row.appendChild(btn("Get original back", "confirm", function () { act(api.restoreKept({ id: i.keptId }).then(function () { closePanel(); restoredNote = "Original of " + base(i.path) + " is back in place."; seen.kept = null; }), true); }, "btn primary"));
     row.appendChild(btn("Cancel", "cancel", function () { closePanel(i.keptId); }, "btn")); panel.appendChild(row);
