@@ -496,3 +496,35 @@ func TestRootRedirectKeepsQuery(t *testing.T) {
 		}
 	}
 }
+
+// The real server is the default (milestone 4, ui-21): the mock is only a development tool behind ?mock=1.
+func TestRealServerByDefault(t *testing.T) {
+	b, err := fs.ReadFile(static, "static/api.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "var DEFAULT_MOCK = false;") {
+		t.Error("api.js must talk to the real server by default (DEFAULT_MOCK = false)")
+	}
+}
+
+// Counts read "1 video", "2 videos" (ui-22, #56): a number glued to a plural noun ("+ " videos"") says "1 videos"
+// for one. Every such count goes through ui.count(n, one, many). The mock's sample text is not checked.
+func TestCountsUseSingularForOne(t *testing.T) {
+	glued := regexp.MustCompile(`\+\s*" (videos|files|days)\b`)
+	files, err := fs.Glob(static, "static/*.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if strings.HasSuffix(f, "/mock.js") {
+			continue
+		}
+		b, _ := fs.ReadFile(static, f)
+		for i, line := range strings.Split(string(b), "\n") {
+			if glued.MatchString(line) && !strings.HasPrefix(strings.TrimSpace(line), "//") {
+				t.Errorf("%s:%d: a count glued to a plural noun; use ui.count(n, one, many): %s", f, i+1, strings.TrimSpace(line))
+			}
+		}
+	}
+}
