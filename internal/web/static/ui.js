@@ -9,14 +9,22 @@
     already_efficient: "already efficient", would_not_shrink: "would not get smaller", already_hevc: "already in the new format",
     hdr_dv: "HDR or Dolby Vision", bitmap_subs: "picture subtitles that cannot be kept", shared_file: "shared with another folder",
     symlink: "links to files elsewhere", unreadable: "unreadable", cannot_keep_track: "a track that cannot be kept",
-    user_stopped: "you stopped it", restored: "you restored the original"
+    user_stopped: "you stopped it", restored: "you restored the original",
+    // Workshop slice 19 (contract: four more skipped reason codes); design's words, 2026-11-07.
+    format_not_converted: "a format this version doesn't convert", no_video: "no video in the file",
+    unknown_bitrate: "not enough information to judge safely", setting_cannot_run: "the library's setting can't be used on it"
   };
-  ui.reason = function (code, detail) { return ui.REASONS[code] || detail || String(code).replace(/_/g, " "); };
+  ui.OTHER_REASON = "another reason"; // a code this version doesn't know: never show the raw code
+  ui.reason = function (code, detail) { return ui.REASONS[code] || detail || ui.OTHER_REASON; };
 
-  function one(n, u) { return (n / u).toFixed(1); }
-  ui.bytes = function (n) { return n >= 1e12 ? one(n, 1e12) + " TB" : one(n, 1e9) + " GB"; };
+  // Sizes: MB below 1 GB, GB below 1 TB, one decimal. A range in one unit says it once; one that
+  // crosses units says both ("800.0 MB - 1.2 GB").
+  function unit(n) { return n >= 1e12 ? [1e12, "TB"] : n >= 1e9 ? [1e9, "GB"] : [1e6, "MB"]; }
+  function num1(n, u) { return (n / u[0]).toFixed(1); }
+  ui.bytes = function (n) { var u = unit(n); return num1(n, u) + " " + u[1]; };
   ui.range = function (lo, hi) {
-    return hi >= 1e12 ? one(lo, 1e12) + " - " + one(hi, 1e12) + " TB" : one(lo, 1e9) + " - " + one(hi, 1e9) + " GB";
+    var a = unit(lo), b = unit(hi);
+    return a[1] === b[1] ? num1(lo, b) + " - " + num1(hi, b) + " " + b[1] : ui.bytes(lo) + " - " + ui.bytes(hi);
   };
   ui.num = function (n) { return Number(n).toLocaleString("en-US"); };
   ui.el = function (tag, cls, txt) {
@@ -31,7 +39,7 @@
   // extra (optional): {sample: () => path of the sample file or null, onSample: (sample or null) => ...}.
   ui.preview = function (host, libId, getSetting, extra) {
     extra = extra || {};
-    var timer, poll, tries, gen = 0;
+    var timer, poll, gen = 0;
     function say(rows) {
       host.textContent = "";
       rows.forEach(function (r) { host.appendChild(r); });
@@ -52,16 +60,39 @@
       if (skipped) ul.appendChild(ui.el("li", null, ui.num(skipped) + " will be skipped: " + parts.join(", ")));
       say([big, ul, ui.el("p", "hint", "This is a guess, not a promise. Real savings are measured on each file.")]);
     }
+    // Only a real failure says this (FIRST-RUN.md "States and errors").
     function giveUp() { say([note("We couldn't estimate this library. You can still start.")]); }
+    // While the server is still working: a progress bar, its text (not read out on every poll), a line
+    // for screen readers at most every 10%, and after two minutes a note that starting now is fine.
+    // Polling never gives up while the answer is "computing" (contract, workshop addition for slice 19).
+    function waiting(w, pr, late) {
+      if (!w.box) {
+        w.box = ui.el("div"); w.text = ui.el("p", "muted", "Working out an estimate..."); w.text.setAttribute("aria-hidden", "true");
+        w.bar = ui.el("div", "progress"); w.fill = ui.el("span"); w.bar.appendChild(w.fill); w.bar.hidden = true;
+        w.bar.setAttribute("role", "progressbar"); w.bar.setAttribute("aria-valuemin", 0); w.bar.setAttribute("aria-valuemax", 100);
+        w.bar.setAttribute("aria-label", "Estimate progress"); w.sr = ui.el("p", "sr", "Working out an estimate.");
+        w.late = ui.el("p", null, "This is taking a while. You can start now; the estimate will appear here when it's ready."); w.late.hidden = true;
+        w.box.appendChild(w.text); w.box.appendChild(w.bar); w.box.appendChild(w.sr); w.box.appendChild(w.late); say([w.box]); w.step = -1;
+      }
+      if (pr && pr.total > 0) {
+        var pct = Math.min(100, Math.floor(pr.done * 100 / pr.total));
+        w.text.textContent = "Checking " + ui.num(pr.done) + " of " + ui.num(pr.total) + " files...";
+        w.bar.hidden = false; w.bar.setAttribute("aria-valuenow", pct); w.fill.style.width = pct + "%";
+        if (Math.floor(pct / 10) !== w.step) { w.step = Math.floor(pct / 10); w.sr.textContent = "Checking files, " + w.step * 10 + "% done."; }
+      }
+      if (late) w.late.hidden = false;
+    }
     function ask() {
-      var my = ++gen; tries = 0;
+      var my = ++gen, t0 = Date.now(), w = {};
       say([note("Working out an estimate...")]);
       (function once() {
         g.SYP.api.preview({ id: libId }, { setting: getSetting(), sampleFile: extra.sample ? extra.sample() : null }).then(function (r) {
           if (my !== gen) return;
           if (r.status === "ready") { show(r); if (extra.onSample) extra.onSample(r.sample || null); return; }
-          if (r.status === "failed" || ++tries > 30) return giveUp();
-          poll = setTimeout(once, 2000);
+          if (r.status === "failed") return giveUp();
+          var t = Date.now() - t0;
+          waiting(w, r.progress, t >= 120000);
+          poll = setTimeout(once, t < 60000 ? 2000 : 5000); // every 2 s for the first minute, then every 5 s
         }, function () { if (my === gen) giveUp(); });
       })();
     }

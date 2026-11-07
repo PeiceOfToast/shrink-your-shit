@@ -76,7 +76,11 @@
   // An editor names a new flow once, after its library ("Movies"); it is never renamed. A clash adds " 2", " 3", ...
   function flowName(base) { var name = base, n = 1; while (flows.some(function (f) { return f.name === name; })) name = base + " " + (++n); return name; }
   function notAvailable() { return fail(501, "not_available", "This is not available yet. Nothing was changed."); }
-  var paused = false, pv = false;
+  var paused = false, pv = false, slowAt = {};
+  // ?preview=slow (remembered for the tab, ?preview=0 turns it off): the estimate takes 2.5 minutes, with progress,
+  // so the waiting states can be seen (the two-minute note, the progress bar).
+  try { if (/[?&]preview=slow/.test(location.search)) sessionStorage.setItem("syp-mock-slowpv", "1"); if (/[?&]preview=0/.test(location.search)) sessionStorage.removeItem("syp-mock-slowpv"); } catch (e) {}
+  function slowPreview() { try { return sessionStorage.getItem("syp-mock-slowpv") === "1"; } catch (e) { return false; } }
   var working = [{ jobId: "j1", library: "Movies", path: "/media/movies/The Long Road (2014).mkv", phase: "converting", percent: 62, etaSeconds: 840, fromBytes: 8.2 * GB, expectedBytes: 4.5 * GB },
                  { jobId: "j2", library: "Movies", path: "/media/movies/Harbour Lights (2019).mkv", phase: "checking", percent: 100, etaSeconds: 0, fromBytes: 7 * GB, expectedBytes: 3 * GB }];
   var skippedList = [
@@ -87,7 +91,12 @@
     { id: "s6", library: "Movies", path: "/media/movies/Cut Loose (2015).mkv", reason: "user_stopped", detail: "You pressed Stop this file while it was converting. Your original is untouched.", libraryId: "1" },
     { id: "s7", library: "Movies", path: "/media/movies/Ocean Floor (2017).mkv", reason: "restored", detail: "Left alone so it is not converted again by surprise.", libraryId: "1" },
     { id: "s8", library: "Movies", path: "/media/movies/Tenet (2020).mkv", reason: "some_future_code", detail: "A reason this version does not know by name.", libraryId: null },
-    { id: "s9", library: "TV Shows", path: "/media/tv/Blue Hour.mkv", reason: "would_not_shrink", detail: "The new file was only 2% smaller, less than the 10% minimum, so the original was kept.", libraryId: "2" }
+    { id: "s9", library: "TV Shows", path: "/media/tv/Blue Hour.mkv", reason: "would_not_shrink", detail: "The new file was only 2% smaller, less than the 10% minimum, so the original was kept.", libraryId: "2" },
+    // Workshop slice 19's four new reasons, one each (the Preview counts one of each too).
+    { id: "s10", library: "Movies", path: "/media/movies/Old Reel.rm", reason: "format_not_converted", detail: "RealVideo is not a format this version converts.", libraryId: null },
+    { id: "s11", library: "Movies", path: "/media/movies/Soundtrack.mkv", reason: "no_video", detail: "The file holds only audio.", libraryId: null },
+    { id: "s12", library: "TV Shows", path: "/media/tv/Pilot (raw).ts", reason: "unknown_bitrate", detail: "The file does not say its bitrate, so we could not tell whether converting is safe.", libraryId: null },
+    { id: "s13", library: "Movies", path: "/media/movies/Short (2003).avi", reason: "setting_cannot_run", detail: "MP4 is the chosen file type, and it cannot hold this file's audio.", libraryId: "1" },
   ];
   for (var gi = 1; gi <= 68; gi++) skippedList.push({ id: "g" + gi, library: "TV Shows", path: "/media/tv/Season 2/E" + (gi < 10 ? "0" : "") + gi + ".mkv", reason: "already_efficient", detail: "Already small for its quality.", libraryId: "2" });
   var failedList = [
@@ -113,10 +122,10 @@
              counts: { skipped: skippedList.length, failed: failedList.length } };
   }
   function previewResult() {
-    // About 10-20% of 1.1 TB, as first-run step 1 promises. files = canShrink + skipped (1284 = 1208 + 76).
+    // About 10-20% of 1.1 TB, as first-run step 1 promises. files = canShrink + skipped (1284 = 1204 + 80; the Skipped list has 80 rows too, F4).
     // Until workshop slice 12, shared files are converted (in canShrink, not skipped) and free nothing: sharedNoSaving (addendum 12).
-    return { stale: false, status: "ready", estimateBytesLow: 110 * GB, estimateBytesHigh: 220 * GB, files: 1284, totalBytes: 1100 * GB, canShrink: 1208, sharedNoSaving: 29,
-             skipped: { already_efficient: 71, hdr_dv: 5 } };
+    return { stale: false, status: "ready", estimateBytesLow: 110 * GB, estimateBytesHigh: 220 * GB, files: 1284, totalBytes: 1100 * GB, canShrink: 1204, sharedNoSaving: 29,
+             skipped: { already_efficient: 71, hdr_dv: 5, format_not_converted: 1, no_video: 1, unknown_bitrate: 1, setting_cannot_run: 1 } };
   }
   // Standard's defaults are the slider's: the same choices with that position's minimum saving (contract addendum 6).
   function isSliderPosition(b) {
@@ -230,8 +239,11 @@
     preview: function (p, b) {
       var li = find(libs, "id", p.id);
       if (b.sampleFile && li >= 0 && b.sampleFile.indexOf(libs[li].path + "/") !== 0) return fail(400, "outside_library", "That file is not inside this library. Nothing was changed.");
-      pv = !pv;
-      if (pv) return ok({ status: "computing", stale: false });
+      if (slowPreview()) {
+        var t = Date.now() - (slowAt[p.id] = slowAt[p.id] || Date.now());
+        if (t < 150000) return ok({ status: "computing", stale: false, progress: { done: Math.floor(1284 * t / 150000), total: 1284 } });
+        delete slowAt[p.id];
+      } else if ((pv = !pv)) return ok({ status: "computing", stale: false });
       var r = previewResult(), q = b.setting && b.setting.quality || 3;
       if (b.sampleFile) r.sample = { lines: ["Video: converted to the smaller format (" + SLIDER[q - 1].name.toLowerCase() + " setting)", "Audio: 2 tracks kept", "Subtitles: 3 kept (all text)", "File type: MKV, unchanged", "Replaces the original; original kept for 7 days"],
         expectedBytesLow: ((b.sampleFile.length % 5) + 2.2 - 0.2 * q) * GB, expectedBytesHigh: ((b.sampleFile.length % 5) + 3.1 - 0.2 * q) * GB };

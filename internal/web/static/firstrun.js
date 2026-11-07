@@ -38,6 +38,12 @@
     $("go3").setAttribute("aria-disabled", ok ? "false" : "true");
     $("why3").textContent = ok ? "This folder passes the checks. Press Continue." : "Continue turns on when the folder passes the checks."; // same height either way, so the button never moves
   }
+  // The library answer must carry its id: every later step uses it (a reply the page could not read once sent
+  // the Preview to /libraries/undefined). Reloading picks the library up from the list.
+  function keep(l) {
+    if (!l || !l.id) return Promise.reject({ message: "Your library was saved, but this page could not read the server's answer. Reload the page to carry on." });
+    st.lib = l;
+  }
   function nameOf(p) { var b = p.replace(/\/+$/, "").split(/[\\/]/).pop() || "Library"; return b.charAt(0).toUpperCase() + b.slice(1); }
 
   // Step 4: the editor for the chosen level plus the Preview card.
@@ -74,9 +80,9 @@
         if (!fp.passed()) { $("path").focus(); return; }
         next(3, function () {
           var body = { name: nameOf(st.path), path: st.path };
-          if (!st.lib) return api.addLibrary({}, { name: body.name, path: body.path, startFrom: "balanced" }).then(function (l) { st.lib = l; });
+          if (!st.lib) return api.addLibrary({}, { name: body.name, path: body.path, startFrom: "balanced" }).then(keep);
           // Coming back and choosing another folder changes this library; it never adds a second one.
-          if (st.lib.path !== st.path) return api.patchLibrary({ id: st.lib.id }, body).then(function (l) { st.lib = l; });
+          if (st.lib.path !== st.path) return api.patchLibrary({ id: st.lib.id }, body).then(keep);
         });
       });
     };
