@@ -39,13 +39,14 @@ func settingView(f jobs.Flow) map[string]any {
 // selectorFields are the Standard selectors (UI-API-CONTRACT.md addendum 2): any of them in a PUT body
 // makes it a selectors save.
 var selectorFields = map[string]bool{"speed": true, "format": true, "resolution": true, "maxbitrate": true, "audio": true,
-	"subtitles": true, "filetype": true, "afterconverting": true, "ignore": true, "skiphdr": true, "skipsmall": true, "minsavingpct": true}
+	"subtitles": true, "filetype": true, "afterconverting": true, "ignore": true, "skiphdr": true, "skipsmall": true}
 
-// readSelectors is a selectors body: what it leaves out is the quality's own value (so minSavingPct
-// follows Quality unless given). A client's kind, positions, available* and the removed order are ignored.
+// readSelectors is a selectors body: what it leaves out is the quality's own value. A client's kind,
+// positions, available*, the removed order and the removed minSavingPct (always standardize; accepted
+// and ignored for one release, so the current page keeps working) are ignored.
 // settingEcho are the fields a setting answer carries that a client may send back unchanged: ignored.
 var settingEcho = map[string]bool{"kind": true, "positions": true, "order": true, "availableformats": true, "availableaudio": true,
-	"availablesubtitles": true, "availablefiletypes": true, "warnings": true, "sharedflowchoice": true}
+	"availablesubtitles": true, "availablefiletypes": true, "warnings": true, "sharedflowchoice": true, "minsavingpct": true}
 
 // readSelectors reads a selectors body (see below); langs are the person's languages, needed for
 // "Keep only my languages".
@@ -280,15 +281,11 @@ func flowSteps(t rules.Template) []map[string]any {
 		} else {
 			add("filetype", "Make it an "+strings.ToUpper(s.FileType)+" file", "") // MKV and MP4 both start with a vowel sound
 		}
-		smaller := "smaller"
-		if s.MinSavingPct > 0 {
-			smaller = fmt.Sprintf("at least %d%% smaller", s.MinSavingPct)
-		}
 		if s.AfterConverting == "beside" {
-			add("finish", "Write the new file next to the original and keep the original, once it is checked and "+smaller,
+			add("finish", "Write the new file next to the original and keep the original, once it is checked",
 				fmt.Sprintf("picture similarity at least %.3f (SSIM)", pos.MinSSIM))
 		} else {
-			add("finish", "Replace the original once the new file is checked and "+smaller,
+			add("finish", "Replace the original once the new file is checked",
 				fmt.Sprintf("picture similarity at least %.3f (SSIM)", pos.MinSSIM))
 		}
 	case rules.KindLegacy:

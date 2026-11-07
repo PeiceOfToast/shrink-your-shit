@@ -160,13 +160,8 @@ func (w *Worker) verify(ctx context.Context, src media.Info, exp rules.Expect, s
 	if problems := exp.Compare(out, outPackets); len(problems) > 0 {
 		return kept("%s", strings.Join(problems, "; "))
 	}
-	if limit := float64(origSize) * (1 - exp.MinSavings); float64(st.Size()) >= limit {
-		if exp.MinSavings > 0 {
-			return kept("the new file (%s) saves less than the required %.0f%% of the original (%s)",
-				rules.HumanBytes(st.Size()), exp.MinSavings*100, rules.HumanBytes(origSize))
-		}
-		return kept("the new file (%s) is not smaller than the original (%s)", rules.HumanBytes(st.Size()), rules.HumanBytes(origSize))
-	}
+	// No size check: a checked conversion is kept even if it is not smaller ("always standardize",
+	// USER-REVIEW 2026-11-07). Its before and after sizes are recorded on the job and in the log.
 	if err := w.decodeCheck(ctx, out, tmp); err != nil {
 		return err
 	}

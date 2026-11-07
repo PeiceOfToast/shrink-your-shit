@@ -280,6 +280,8 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 	if err := w.Queue.Complete(job.ID, final, size); err != nil {
 		return true, err
 	}
+	// before and after, also when the new file is not smaller (it is kept: always standardize)
+	log.Printf("worker %s: job %d: done, %s: %s -> %s", w.ID, job.ID, final, rules.HumanBytes(job.SizeBefore), rules.HumanBytes(size))
 	if w.OnDone != nil {
 		w.OnDone(job, final)
 	}

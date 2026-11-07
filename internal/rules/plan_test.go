@@ -76,10 +76,10 @@ func TestLegacyPlanIsExactlyTodaysBehaviour(t *testing.T) {
 				if got != want {
 					t.Fatalf("%s: args\n got %s\nwant %s", name, got, want)
 				}
-				if p.Output != out || p.MinSavingPct != 0 || p.MinSSIM != 0 {
-					t.Errorf("%s: output %q, thresholds %d/%v: a legacy flow keeps the program's defaults", name, p.Output, p.MinSavingPct, p.MinSSIM)
+				if p.Output != out || p.MinSSIM != 0 {
+					t.Errorf("%s: output %q, threshold %v: a legacy flow keeps the program's defaults", name, p.Output, p.MinSSIM)
 				}
-				if e := p.Expect(info, 100); e.MinSavings != 0 || e.MinSSIM != 0 {
+				if e := p.Expect(info, 100); e.MinSSIM != 0 {
 					t.Errorf("%s: expect %+v", name, e)
 				}
 			}
@@ -97,12 +97,12 @@ func TestSliderPlanUsesTheTable(t *testing.T) {
 	info := probe("h264", 1920, 1080, 24, 10000) // 0.201 bits per pixel: every position converts it
 	for _, pos := range Slider {
 		p := SliderTemplate(pos.Position).Compile(info)
-		if p.Skip != "" || p.Video.CRF != pos.CRF || p.Video.Preset != "medium" || p.MinSavingPct != pos.MinSavingPct ||
+		if p.Skip != "" || p.Video.CRF != pos.CRF || p.Video.Preset != "medium" ||
 			p.MinSSIM != pos.MinSSIM || p.Output != "replace" || !strings.Contains(p.Reason, "H.264 at 10000 kbps") {
 			t.Errorf("position %d: %+v", pos.Position, p)
 		}
 		e := p.Expect(info, 0)
-		if e.MinSavings != float64(pos.MinSavingPct)/100 || e.MinSSIM != pos.MinSSIM {
+		if e.MinSSIM != pos.MinSSIM {
 			t.Errorf("position %d: expect %+v", pos.Position, e)
 		}
 	}

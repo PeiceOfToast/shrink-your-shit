@@ -138,9 +138,11 @@ func TestARetryAfterTheOriginalChangedSeesTheNewFile(t *testing.T) {
 func TestLastingFailuresAreNotTriedAgain(t *testing.T) {
 	cases := map[string]func(s *scenario){
 		"name taken (beside)": func(s *scenario) { os.WriteFile(BesidePath(s.src), []byte("theirs"), 0o644) },
-		"result not smaller":  func(s *scenario) { s.content = strings.Repeat("x", 100) },
-		"damaged original":    func(s *scenario) { s.encodeStderr = "[h264 @ 0x1] error while decoding MB 1 2" },
-		"converter error":     func(s *scenario) { s.encodeErr = errors.New("ffmpeg: exit status 187: Invalid data found") },
+		"picture too different": func(s *scenario) { // (a result not smaller is kept now: always standardize)
+			s.ssimStderr = "[Parsed_ssim_0] SSIM Y:0.50 U:0.50 V:0.50 All:0.500000 (3.0)"
+		},
+		"damaged original": func(s *scenario) { s.encodeStderr = "[h264 @ 0x1] error while decoding MB 1 2" },
+		"converter error":  func(s *scenario) { s.encodeErr = errors.New("ffmpeg: exit status 187: Invalid data found") },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

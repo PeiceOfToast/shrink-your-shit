@@ -262,9 +262,8 @@ func (p *Previewer) compute(root string, files []file, t rules.Template, done *a
 // Saving is the range of bytes converting one file could free under template t (v1, orch-lead's ruling
 // on 2026-11-07): the file's video bytes times its position's SaveLowPct..SaveHighPct (rules.Slider).
 // Audio, subtitles and the container are copied, so they save nothing. A file whose source is within
-// rules.NearMinBPP of its position's threshold counts from 0 at the low end (the minimum saving keeps
-// many of those), and one whose best case misses the minimum saving counts as kept (0). The low end is
-// the position's minimum saving, so it is not cut to 0 just for sitting at that line.
+// rules.NearMinBPP of its position's threshold counts from 0 at the low end (it may save little or
+// nothing). There is no minimum saving: such a file is converted all the same ("always standardize").
 func Saving(t rules.Template, plan rules.Plan, info media.Info, size int64) (low, high int64) {
 	if plan.Skip != "" || size <= 0 {
 		return 0, 0
@@ -277,8 +276,7 @@ func Saving(t rules.Template, plan rules.Plan, info media.Info, size int64) (low
 	}
 	low = video * int64(pos.SaveLowPct) / 100
 	high = video * int64(pos.SaveHighPct) / 100
-	floor := size * int64(plan.MinSavingPct) / 100
-	if high < floor || high <= 0 {
+	if high <= 0 {
 		return 0, 0
 	}
 	near := bpp > 0 && pos.MinBPP > 0 && bpp <= pos.MinBPP*rules.NearMinBPP

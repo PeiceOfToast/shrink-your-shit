@@ -26,7 +26,6 @@ type Selectors struct {
 	Ignore          []string `json:"ignore"`          // folders, files or patterns in the library not looked at
 	SkipHDR         bool     `json:"skipHdr"`         // HDR and Dolby Vision files are left as they are
 	SkipSmall       bool     `json:"skipSmall"`       // files already small for their picture size are left as they are
-	MinSavingPct    int      `json:"minSavingPct"`    // the new file must be at least this much smaller
 }
 
 // What this version can save and run (UI-API-CONTRACT.md addendum 13): the UI shows the rest disabled.
@@ -55,10 +54,9 @@ var (
 
 // DefaultSelectors are slider position q's values as selectors.
 func DefaultSelectors(q int) Selectors {
-	pos, _ := SliderAt(q)
 	return Selectors{Quality: q, Speed: "normal", Format: "hevc", Resolution: "keep", MaxBitrate: "none",
 		Audio: "keep_all", Subtitles: "keep_all", FileType: "keep", AfterConverting: "replace", Ignore: []string{},
-		SkipHDR: true, SkipSmall: true, MinSavingPct: pos.MinSavingPct}
+		SkipHDR: true, SkipSmall: true}
 }
 
 // SelectorError is a choice that cannot be saved: Code is invalid (not a value at all) or not_available
@@ -112,9 +110,6 @@ func (s Selectors) Validate() error {
 		return invalid("fileType", s.FileType)
 	case !contains(types, s.FileType):
 		return notYet(`Changing the file type needs "Put the new file next to the original" for now; replacing with a new file type comes in an update.`)
-	}
-	if s.MinSavingPct < 0 || s.MinSavingPct > 90 {
-		return invalid("minSavingPct", s.MinSavingPct)
 	}
 	for _, p := range s.Ignore {
 		if !insideLibrary(p) {

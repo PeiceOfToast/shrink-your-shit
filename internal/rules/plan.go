@@ -29,7 +29,6 @@ type Plan struct {
 	AllAudioKept    bool        `json:"allAudioKept,omitempty"`  // "my languages" matched no audio track, so all of it is kept
 	AudioOrder      []int       `json:"audioOrder,omitempty"`    // the original's audio stream indexes in order, when Tracks has any
 	SubtitleOrder   []int       `json:"subtitleOrder,omitempty"` // and its subtitle stream indexes
-	MinSavingPct    int         `json:"minSavingPct,omitempty"`  // the new file must be this much smaller (0: just smaller)
 	MinSSIM         float64     `json:"minSSIM,omitempty"`       // picture threshold; 0 = the program's -min-ssim
 	Kind            string      `json:"kind"`                    // the template kind it was compiled from
 	CompilerVersion int         `json:"compilerVersion"`
@@ -230,7 +229,6 @@ func (p Plan) Expect(src media.Info, packets int64) Expect {
 		e.Container = Containers[p.Container]
 	}
 	e = p.expectTracks(e)
-	e.MinSavings = float64(p.MinSavingPct) / 100
 	e.MinSSIM = p.MinSSIM
 	return e
 }
@@ -313,10 +311,10 @@ func (s Snapshot) Fingerprint() string {
 	p := s.Plan
 	p.Skip, p.SkipCode, p.Reason = "", "", ""
 	b, _ := json.Marshal(struct {
-		Plan                                      Plan
-		Verify                                    Verification
-		DurationTol, PacketsTol, MinSavings, SSIM float64
-	}{p, s.Verify, s.Expect.DurationTol, s.Expect.PacketsTol, s.Expect.MinSavings, s.Expect.MinSSIM})
+		Plan                          Plan
+		Verify                        Verification
+		DurationTol, PacketsTol, SSIM float64
+	}{p, s.Verify, s.Expect.DurationTol, s.Expect.PacketsTol, s.Expect.MinSSIM})
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:8])
 }
@@ -330,7 +328,7 @@ func (s Snapshot) Fingerprint() string {
 func compileSelectors(p Plan, s Selectors, info media.Info, langs []string) Plan {
 	pos, _ := SliderAt(s.Quality)
 	v := info.Video()
-	p.Output, p.MinSavingPct, p.MinSSIM = s.AfterConverting, s.MinSavingPct, pos.MinSSIM
+	p.Output, p.MinSSIM = s.AfterConverting, pos.MinSSIM
 	if s.FileType != "keep" {
 		p.Container = s.FileType
 	}

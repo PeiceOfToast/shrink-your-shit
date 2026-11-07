@@ -27,7 +27,7 @@ func TestSliderIsItsDefaultSelectors(t *testing.T) {
 		for _, info := range []media.Info{h264(1920, 1080, 8000), h264(1280, 720, 300), h264(3840, 2160, 40000)} {
 			a, b := SliderTemplate(q).Compile(info), Template{Kind: KindSelectors, Selectors: &s, CompilerVersion: 1}.Compile(info)
 			a.Kind, b.Kind = "", ""
-			if strings.Join(a.FFmpegArgs("i", "o"), " ") != strings.Join(b.FFmpegArgs("i", "o"), " ") || a.Skip != b.Skip || a.MinSavingPct != b.MinSavingPct {
+			if strings.Join(a.FFmpegArgs("i", "o"), " ") != strings.Join(b.FFmpegArgs("i", "o"), " ") || a.Skip != b.Skip {
 				t.Errorf("q%d %dx%d: slider %+v vs selectors %+v", q, info.Video().Width, info.Video().Height, a, b)
 			}
 		}

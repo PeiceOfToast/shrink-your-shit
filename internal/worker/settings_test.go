@@ -34,14 +34,16 @@ func TestJobUsesItsLibrarysFlow(t *testing.T) {
 	if b, _ := os.ReadFile(s.src); string(b) != "original-bytes" {
 		t.Error("beside keeps the original")
 	}
-	// minimum saving: the slider at Smallest needs 20%; a 12-byte result for the 14-byte original
-	// saves 14%, so it is refused
+	// no minimum saving (always standardize): even at Smallest, a 12-byte result for the 14-byte
+	// original (14% saved) is kept, with its sizes
 	s2 := newScenario(t)
 	s2.content = "0123456789ab"
 	w2 := s2.worker(Replace)
 	w2.Template = func(j jobs.Job) (rules.Template, error) { return rules.SliderTemplate(1), nil }
 	w2.RunOne(context.Background())
-	s2.assertKept("saves less than the required 20%")
+	if j := s2.job(); j.Status != jobs.Done || j.SizeAfter != 12 || j.SizeBefore != 14 {
+		t.Errorf("a small saving is kept: %s %d -> %d %q", j.Status, j.SizeBefore, j.SizeAfter, j.Error)
+	}
 	if s2.count("-crf 26 -preset medium") != 1 { // 27 at 1080p, one lower for this 360p source
 		t.Errorf("Smallest encodes a 360p file at crf 26, medium:\n%s", strings.Join(s2.calls, "\n"))
 	}
@@ -110,10 +112,10 @@ func TestJobRecordsItsPlan(t *testing.T) {
 		t.Fatalf("plan %q: %v", j.Plan, err)
 	}
 	p := snap.Plan
-	if p.Kind != rules.KindSlider || p.Video.CRF != 20 || p.MinSavingPct != 8 || p.MinSSIM != 0.965 || p.Eligibility.MinBitsPerPixel != 0.10 {
+	if p.Kind != rules.KindSlider || p.Video.CRF != 20 || p.MinSSIM != 0.965 || p.Eligibility.MinBitsPerPixel != 0.10 {
 		t.Errorf("recorded plan %+v", p)
 	}
-	if len(snap.Expect.Streams) != 4 || snap.Expect.MinSavings != 0.08 || snap.Verify.MinSSIM != 0.965 || snap.Verify.DecodeCheck != "auto" {
+	if len(snap.Expect.Streams) != 4 || snap.Verify.MinSSIM != 0.965 || snap.Verify.DecodeCheck != "auto" {
 		t.Errorf("recorded expect/verify %+v %+v", snap.Expect, snap.Verify)
 	}
 	if j.PlanPrint != snap.Fingerprint() {

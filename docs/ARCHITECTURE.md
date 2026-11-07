@@ -31,7 +31,7 @@ A **library** (`libraries` table: name, folder, flow, `started`) is a folder the
 Every library has exactly one **flow** (`flows` table: name, `template` JSON, `graph` for the later
 flow engine), which says what to do with its files. Until the Plan compiler (slice 16) and the flow
 engine (slice 30), a flow's behaviour is its template: `rules.Template.Settings()` turns it into the
-rule the scanner matches with and the CRF, preset, output mode and minimum saving the worker uses
+rule the scanner matches with and the CRF, preset and output mode the worker uses
 (`Worker.Settings`, looked up per job by `Store.SettingsFor`).
 
 - A library added on the web page (`POST /api/libraries`) gets a slider flow at the chosen position
@@ -80,7 +80,7 @@ rule the scanner matches with and the CRF, preset, output mode and minimum savin
 A **Plan** (`internal/rules/plan.go`) is what to do with one file, compiled from its library's flow
 template and the file's probe: `Skip` (why not to convert it, the scanner's decision) or `Reason`,
 the video encode (`libx265`, CRF, preset, tag; a VBV bitrate cap and a scale-down height from the
-selectors), the output mode and the new file's type (`Container`, beside mode only), and the thresholds (minimum saving; an SSIM gate, 0 = `-min-ssim`). The scanner compiles a Plan
+selectors), the output mode and the new file's type (`Container`, beside mode only), and the threshold (an SSIM gate, 0 = `-min-ssim`; there is no minimum saving: a checked conversion is always kept, even if not smaller, USER-REVIEW 2026-11-07). The scanner compiles a Plan
 per file to decide; the worker compiles it again from the probe it takes, runs `Plan.FFmpegArgs`,
 checks the result against `Plan.Expect` (slice 10's `Expect`, now in `internal/rules`) and stores a
 `Snapshot` on the job (migration 4): the Plan (with the eligibility rule that decided it), the
@@ -95,7 +95,7 @@ over every probe in `internal/media/testdata`).
 A **slider** flow compiles TIERS-PLAN.md 2.1's recipe, which is the Standard selectors at that
 position's values (`DefaultSelectors`, one compiler: `compileSelectors`): HEVC at the position's CRF
 (one lower up to 720p, one higher at 2160p), preset medium, the source's bit depth, resolution and
-container, every audio track and subtitle copied, the position's minimum saving and SSIM gate. It
+container, every audio track and subtitle copied, the position's SSIM gate. It
 converts H.264, MPEG-2, MPEG-4, VC-1 and WMV (D5) above the position's bits per pixel per frame;
 HEVC, AV1 and VP9 are skipped as already efficient, and so is a file whose subtitles its container
 cannot hold. **HDR and Dolby Vision files are skipped (`hdr_dv`, D3) by every flow** since slice 25a,
@@ -118,7 +118,8 @@ A **selectors** flow (`internal/rules/selectors.go`, slice 25a) stores the Stand
 - Ignore is a list of folders, files or patterns inside the library that the scanner and the
   Preview do not look at.
 - Skip HDR (on by default; off converts HDR and the setting answers a warning), Skip small (off
-  converts whatever its bits per pixel), and the minimum saving (follows Quality unless given).
+  converts whatever its bits per pixel). There is no minimum saving ("always standardize"): GET no
+  longer returns `minSavingPct`; a PUT that sends it is accepted and it is ignored (for one release).
 - AV1 is 400 `not_available`, nothing written.
 - A selectors setting equal to a position is saved as the slider (kind derived, addendum 6).
 - **Audio and subtitles** (slice 25b, `internal/rules/audio.go`), as `Plan.Tracks` (one op per track
@@ -208,8 +209,8 @@ Balanced 10-55%, Better quality 8-40%, Best quality 5-25%; a legacy flow uses th
 nearest CRF). The bands follow the published reports in TIERS-PLAN.md and are not measured on real
 files yet (D8). Audio, subtitles and the container are copied, so they never count. A source within
 1.5x of its position's eligibility threshold (`rules.NearMinBPP`; a legacy flow: its bitrate) counts
-from 0 at the low end, and a file whose best case misses the minimum saving counts as kept (0)
-(`preview.Saving`). Content like film grain or noise can need more data in the new format than
+from 0 at the low end (`preview.Saving`); there is no minimum saving, so such a file is converted all the
+same and counted. Content like film grain or noise can need more data in the new format than
 before; the range overshoots there, and a short sample encode is the planned fix. The result is kept in memory per
 library and setting with a signature of the listing: the same setting over the same files answers at
 once; a change starts a new computation, shown as `stale` with `status: computing` until it is ready.
@@ -251,8 +252,9 @@ the result and the original was deliberately left alone, with the reason in the 
    it exists and is not empty; it is readable; **stream parity** (same number of video, audio,
    subtitle and attachment streams, in order; same codec for copied streams, languages, channel
    counts, subtitle kinds and forced flags, attachment names, picture size, colour depth; same
-   chapter count); duration within 2%; video frame count within 1%; **smaller** than the original
-   (or by `MinSavings`). Then the **playback test** (`-decode-check auto|always`; there is no "off":
+   chapter count); duration within 2%; video frame count within 1%. There is **no size check**: a new file that
+   is not smaller is kept all the same ("always standardize"); its before and after sizes are on the
+   job and in the log. Then the **playback test** (`-decode-check auto|always`; there is no "off":
    the new file's video through ffmpeg's decoder with `-xerror`, completely up to 3 hours long, else
    three one-minute samples; any decode error fails), then the **picture comparison** (SSIM on three
    10-second samples at the start, middle and end; the worst must reach `-min-ssim`, default 0.95 and
@@ -287,7 +289,7 @@ the result and the original was deliberately left alone, with the reason in the 
    error goes to the log, which Settings > System shows (`TestFailedDetailsArePlain`).
 
 `Expect` (`worker/expect.go`) is "what the new file must look like": a list of stream expectations
-in output order, chapters, duration, frame count, minimum savings. `DefaultExpect(source)` builds it
+in output order, chapters, duration, frame count. `DefaultExpect(source)` builds it
 for what the worker does today (keep everything except data streams, first video stream becomes
 HEVC at the same size and depth). Later work that changes what the worker does (other codecs, dropped
 tracks) should fill `Expect` differently and leave `verify` alone.

@@ -264,7 +264,7 @@ func TestSaving(t *testing.T) {
 	}
 	// every position's low end is at most its minimum saving, and the high end shrinks toward Best
 	for i, p := range rules.Slider {
-		if p.SaveLowPct > p.MinSavingPct || p.SaveLowPct >= p.SaveHighPct || i > 0 && p.SaveHighPct > rules.Slider[i-1].SaveHighPct {
+		if p.SaveLowPct >= p.SaveHighPct || i > 0 && p.SaveHighPct > rules.Slider[i-1].SaveHighPct {
 			t.Errorf("band %+v", p)
 		}
 	}
@@ -281,7 +281,7 @@ func TestSampleInPlainWords(t *testing.T) {
 		return p.Sample(context.Background(), dir, filepath.Join(dir, name), st, rules.SliderTemplate(q))
 	}
 	s := sample("a.mkv", 3)
-	if strings.Join(s.Lines, "|") != "Video: converted to the smaller format, same picture size and length|Audio: 2 tracks kept|Kept as it is if the new file is not at least 10% smaller" {
+	if strings.Join(s.Lines, "|") != "Video: converted to the smaller format, same picture size and length|Audio: 2 tracks kept" {
 		t.Errorf("%q", s.Lines)
 	}
 	if s.ExpectedBytesLow <= 0 || s.ExpectedBytesLow >= s.ExpectedBytesHigh || s.ExpectedBytesHigh >= 1_000_000 {
