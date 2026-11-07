@@ -322,14 +322,25 @@ sampled hash (otherwise it is left alone and the row marked `needs_attention`); 
 
 - **Workers:** `worker.Pool` runs as many workers as the `parallelJobs` setting (1 by default, at most
   8), reading it every 2 s: a new worker starts at once; one too many finishes its current file first.
-  `Store.Claim` is one statement, so two workers never take the same job.
+  Workers still finishing a file after the setting went down are taken back first when it goes up
+  again, so no more files convert at once than the setting (and 8) allows.
+  `Store.Claim` is one statement, so two workers never take the same job; it takes none while paused
+  and none whose stop was requested. A worker claims and registers the job as its current one under its
+  own lock, so a pause or a stop that looks for the job waits for that and finds it.
 - **Pause all** (`POST /api/queue/pause`): the `paused` flag in `app_meta` (survives a restart) makes
   workers take no job, and every running conversion is stopped through the job's cancel path and put
-  back in the queue (original untouched, staging folder removed). Scanning goes on. `POST
+  back in the queue (original untouched, staging folder removed). A worker checks the flag again after
+  its claim, before converting starts. Scanning goes on. `POST
   /api/queue/resume` clears it. `GET /api/activity/summary` `paused` is the flag.
-- **Stop this file** (`POST /api/jobs/{id}/stop`): a running job is stopped the same way, a queued one
-  directly; the job record goes and the file is recorded as skipped with reason `user_stopped`, which
-  the scanner honours (like `restored`) until Convert again. A finished job: 409 `not_stoppable`.
+- **Stop this file** (`POST /api/jobs/{id}/stop`, `Store.RequestStop`, one transaction): a queued job
+  ends at once; a running one is only marked (`jobs.stop_requested`, migration 9) and its worker is
+  stopped the same way as a pause. The worker ends it, and it checks the mark again right before the
+  swap, so a stop that reached no worker still prevents the swap. Either way the job record goes and
+  the file is recorded as skipped with reason `user_stopped`, which the scanner honours (like
+  `restored`) until Convert again. The answer says what happened: 200 once it has ended as stopped,
+  409 `already_finished` if it was already being put in place and ended done, and 202 `stopping` if it
+  has not ended within 30 s. A finished job: 409 `not_stoppable`. A marked job left by a stopped
+  program ends as stopped at the next start.
 - **Swap window:** once the new file has passed its checks the rest of the job runs with a context
   that cannot be cancelled, so a stop or pause arriving then lets the swap finish and the job ends
   done, never half swapped.
