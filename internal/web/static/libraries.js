@@ -20,11 +20,23 @@
   function tag(l) {
     if (l.settingKind === "slider") return "Basic \u00b7 " + l.settingLabel;
     if (l.settingKind === "selectors") return "Standard \u00b7 " + l.settingLabel;
-    return "";
+    return { builder: "Advanced \u00b7 Custom", legacy: "Earlier install" }[l.madeWith] || ""; // B4, from slice A's madeWith
   }
   function at(t) { return new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
-  // Status in words, only from what the server gives today. Sizes and other numbers live in Activity (A2).
+  // Status in words from slice A's status (A2); sizes and other numbers live in Activity. Returns text or a fragment (for the link).
   function status(l) {
+    var s = l.status;
+    if (s) {
+      if (s.kind === "not_scanned") return "Not scanned yet" + (s.nextScan ? " \u00b7 next scan " + at(s.nextScan) : "");
+      if (s.kind === "scanning") return "Looking for videos...";
+      if (s.kind === "converting") return "Converting " + ui.count(s.converting, "file", "files");
+      if (s.kind === "waiting_for_worker") { // "a worker" links to Workers
+        var p = document.createDocumentFragment(), a = el("a", null, "a worker"); a.href = "/workers/";
+        p.appendChild(document.createTextNode("Waiting for ")); p.appendChild(a); p.appendChild(document.createTextNode(": " + ui.count(s.toDo, "video", "videos") + " to do")); return p;
+      }
+      if (s.kind === "scanned") return [s.videos != null ? ui.count(s.videos, "video", "videos") : "", s.lastScan ? "last scan " + at(s.lastScan) : "", s.nextScan ? "next " + at(s.nextScan) : ""].filter(Boolean).join(" \u00b7 ");
+    }
+    // An older answer without status: what the library item said before slice A.
     if (l.state === "not_started") return "Not scanned yet" + (l.nextScan ? " \u00b7 next scan " + at(l.nextScan) : "");
     if (l.state === "working") return "Converting " + ui.count(l.workingFiles, "file", "files");
     if (l.state === "paused") return "Paused";
@@ -41,9 +53,15 @@
       d.appendChild(el("strong", null, warn)); d.appendChild(document.createTextNode("It keeps working exactly as before."));
       n.appendChild(d); c.appendChild(n);
     }
-    var words = status(l); if (words) { var st = el("p", "lib-status", words); st.style.margin = "12px 0 0"; c.appendChild(st); }
-    // No buttons on the card (design, 19:59Z): Scan lives on the library page, which the name opens. A failed-files
-    // line comes when GET /api/libraries carries a per-library failed count (asked of workshop); until then nothing.
+    var words = status(l);
+    if (words) { var st = el("p", "lib-status"); if (typeof words === "string") st.textContent = words; else st.appendChild(words); st.style.margin = "12px 0 0"; c.appendChild(st); }
+    // Failed files (A2, 19:58Z): a second line in the warn style, only when there are any; "see why" opens Activity's
+    // Failed list (filtered to this library once Activity is the Files view, piece C).
+    if (l.failedFiles > 0) {
+      var fl = el("p", "small"), why = el("a", null, "see why"); fl.style.cssText = "margin:4px 0 0;color:var(--warn)";
+      fl.appendChild(document.createTextNode(ui.count(l.failedFiles, "file", "files") + " failed: ")); why.href = "/activity/failed/"; fl.appendChild(why); c.appendChild(fl);
+    }
+    // No buttons on the card (design, 19:59Z): Scan lives on the library page, which the name opens.
     return c;
   }
 
