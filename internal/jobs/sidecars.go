@@ -9,8 +9,8 @@ type Sidecar struct {
 	JobID      int64
 	Path       string
 	Bytes      int64
-	MTime      int64 // UnixNano
-	Hash       string
+	MTime      int64  // UnixNano
+	Hash       string // the full SHA-256 of the .srt (they are small)
 	VideoPath  string
 	VideoBytes int64
 	VideoHash  string
@@ -35,6 +35,12 @@ func (s *Store) AddSidecars(list []Sidecar) error {
 // DropSidecars forgets job jobID's records: its swap is done, or its files are gone again.
 func (s *Store) DropSidecars(jobID int64) error {
 	_, err := s.db.Exec(`DELETE FROM sidecars WHERE job_id=?`, jobID)
+	return err
+}
+
+// DropSidecar forgets one record: that file is gone, or it is not ours (any more).
+func (s *Store) DropSidecar(jobID int64, path string) error {
+	_, err := s.db.Exec(`DELETE FROM sidecars WHERE job_id=? AND path=?`, jobID, path)
 	return err
 }
 

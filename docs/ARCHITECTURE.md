@@ -130,7 +130,7 @@ A **selectors** flow (`internal/rules/selectors.go`, slice 25a) stores the Stand
   - Subtitles `my_languages` follow the same language rule. `text_only` drops picture subtitles.
   - Subtitles `srt` save text subtitles beside the new file as `<new name>.<lang>[.forced][.n].srt`,
     written by the same ffmpeg run into the staging folder. They are checked to exist, recorded first
-    (`sidecars`, migration 10: path, size, time and sample hash, and the new video's size and hash), put in
+    (`sidecars`, migration 10: path, size, time and full SHA-256, and the new video's size and sample hash), put in
     place with `renameNoReplace` before the swap, and removed again only while still exactly ours if the
     swap does not happen. `RecoverSidecars` at start ends a crash in between: the new video in place
     keeps them, otherwise our own files go. A name

@@ -113,6 +113,7 @@ type scenario struct {
 	calls    []string
 	exec     *media.FakeExec
 	moreSrcs map[string]bool // other originals in the queue (probed like src)
+	srtBytes int             // the size the fake encoder gives an extracted .srt (0: a few bytes)
 }
 
 func newScenario(t *testing.T) *scenario {
@@ -184,7 +185,11 @@ func (s *scenario) handle(name string, args []string) (string, string, error) {
 				case filepath.Base(a) == "new"+filepath.Ext(a) && strings.Contains(a, ".syp-tmp"):
 					os.WriteFile(a, []byte(s.content), 0o644)
 				case strings.HasSuffix(a, ".srt") && strings.Contains(a, ".syp-tmp"):
-					os.WriteFile(a, []byte("1\n00:00:00,000 --> 00:00:01,000\nsubtitle from "+filepath.Base(a)+"\n"), 0o644)
+					body := []byte("1\n00:00:00,000 --> 00:00:01,000\nsubtitle from " + filepath.Base(a) + "\n")
+					if s.srtBytes > 0 { // a big one, for checks that must read all of it
+						body = append(body, make([]byte, s.srtBytes-len(body))...)
+					}
+					os.WriteFile(a, body, 0o644)
 				}
 			}
 			return "out_time_us=50000000\n", s.encodeStderr, nil

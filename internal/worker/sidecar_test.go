@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -76,7 +77,7 @@ func TestSrtAfterASwapIsKept(t *testing.T) {
 	}
 	// the record as it was just before it would have been dropped
 	st, _ := os.Stat(srt)
-	h, _ := SampleHash(srt)
+	h, _ := fullHash(srt)
 	vst, _ := os.Stat(s.src)
 	vh, _ := SampleHash(s.src)
 	s.store.AddSidecars([]jobs.Sidecar{{JobID: s.id, Path: srt, Bytes: st.Size(), MTime: st.ModTime().UnixNano(), Hash: h,
@@ -104,4 +105,84 @@ func TestSrtCleanupKeepsAReplacedFile(t *testing.T) {
 		t.Errorf("a file that is not ours was removed or changed: %q", b)
 	}
 	s.assertOriginalSafe()
+}
+
+// Same size and modification time but different content is still someone else's file: compared by the
+// whole content, it stays (review 25b-1e31bdb).
+func TestSrtSameSizeAndTimeButOtherContentSurvives(t *testing.T) {
+	s, w, srt := srtScenario(t)
+	swapHook = func(at string) error {
+		if at == "subtitles placed" {
+			st, _ := os.Stat(srt)
+			b, _ := os.ReadFile(srt)
+			other := []byte(strings.Repeat("x", len(b))) // same length
+			os.WriteFile(srt, other, 0o644)
+			os.Chtimes(srt, st.ModTime(), st.ModTime()) // same time
+			return errCrash
+		}
+		return nil
+	}
+	w.RunOne(context.Background())
+	swapHook = nil
+	RecoverSidecars(s.store)
+	if b, _ := os.ReadFile(srt); !strings.HasPrefix(string(b), "xxx") {
+		t.Errorf("the other file was removed or changed: %q", b)
+	}
+}
+
+// A file of ours that cannot be removed keeps its record, and the next start tries again (review
+// 25b-1e31bdb).
+func TestSrtRemovalFailureKeepsTheRecord(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a folder the test cannot delete from (POSIX, not root)")
+	}
+	s, w, srt := srtScenario(t)
+	swapHook = func(at string) error {
+		if at == "subtitles placed" {
+			return errCrash
+		}
+		return nil
+	}
+	w.RunOne(context.Background())
+	swapHook = nil
+	os.Chmod(s.dir, 0o555) // removing from the folder fails
+	said := RecoverSidecars(s.store)
+	os.Chmod(s.dir, 0o755)
+	if left, _ := s.store.Sidecars(); len(left) != 1 || !strings.Contains(strings.Join(said, ";"), "could not remove") {
+		t.Fatalf("the record must stay after a failed removal: %+v %v", left, said)
+	}
+	if _, err := os.Stat(srt); err != nil {
+		t.Fatal("the file should still be there")
+	}
+	RecoverSidecars(s.store) // the next start
+	if _, err := os.Stat(srt); err == nil {
+		t.Error("the next recovery should remove it")
+	}
+	if left, _ := s.store.Sidecars(); len(left) != 0 {
+		t.Errorf("records left: %+v", left)
+	}
+}
+
+// A big .srt changed only between the parts a sampled hash reads (5 MiB, one byte at 1.5 MiB) is still
+// told apart: the whole content is compared (review 25b-1e31bdb).
+func TestSrtChangedOutsideTheSamplesSurvives(t *testing.T) {
+	s, w, srt := srtScenario(t)
+	s.srtBytes = 5 << 20
+	swapHook = func(at string) error {
+		if at == "subtitles placed" {
+			st, _ := os.Stat(srt)
+			b, _ := os.ReadFile(srt)
+			b[3<<19] ^= 0xff // 1.5 MiB: between the first and the middle sample
+			os.WriteFile(srt, b, 0o644)
+			os.Chtimes(srt, st.ModTime(), st.ModTime())
+			return errCrash
+		}
+		return nil
+	}
+	w.RunOne(context.Background())
+	swapHook = nil
+	RecoverSidecars(s.store)
+	if _, err := os.Stat(srt); err != nil {
+		t.Error("a file that is not exactly ours was removed")
+	}
 }

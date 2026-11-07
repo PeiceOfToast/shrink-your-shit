@@ -7,9 +7,12 @@ package worker
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"os"
@@ -615,6 +618,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 type SidecarJournal interface {
 	AddSidecars([]jobs.Sidecar) error
 	DropSidecars(jobID int64) error
+	DropSidecar(jobID int64, path string) error
 	Sidecars() ([]jobs.Sidecar, error)
 }
 
@@ -642,7 +646,7 @@ func (w *Worker) installSubtitles(plan rules.Plan, jobID int64, tmp, final strin
 		if err != nil {
 			return nil, err
 		}
-		h, err := SampleHash(staged)
+		h, err := fullHash(staged) // .srt files are small: their whole content identifies them
 		if err != nil {
 			return nil, err
 		}
@@ -669,16 +673,30 @@ func (w *Worker) installSubtitles(plan rules.Plan, jobID int64, tmp, final strin
 }
 
 // removeSidecars removes the .srt files we placed, each only if it is still exactly the one we wrote
-// (size, time and sample hash): one replaced meanwhile is someone else's and stays. Then their record goes.
+// (size, time and full SHA-256): one replaced meanwhile is someone else's and stays. A record goes once
+// its file is gone or not ours; one that could not be removed keeps its record, so the next start
+// tries again and a Retry knows the file is ours (review 25b-1e31bdb).
 func (w *Worker) removeSidecars(jobID int64, list []jobs.Sidecar) {
 	for _, c := range list {
-		if sidecarIsOurs(c) {
-			os.Remove(c.Path)
+		if err := removeIfOurs(c); err != nil {
+			log.Printf("worker %s: job %d: could not remove %s (it is kept on record and tried again): %v", w.ID, jobID, c.Path, err)
+			continue
+		}
+		if w.Sidecars != nil {
+			w.Sidecars.DropSidecar(jobID, c.Path)
 		}
 	}
-	if w.Sidecars != nil {
-		w.Sidecars.DropSidecars(jobID)
+}
+
+// removeIfOurs removes c's file if it is still exactly ours; nil when it is gone, not ours, or removed.
+func removeIfOurs(c jobs.Sidecar) error {
+	if !sidecarIsOurs(c) {
+		return nil
 	}
+	if err := os.Remove(c.Path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 func sidecarIsOurs(c jobs.Sidecar) bool {
@@ -686,8 +704,22 @@ func sidecarIsOurs(c jobs.Sidecar) bool {
 	if err != nil || !st.Mode().IsRegular() || st.Size() != c.Bytes || st.ModTime().UnixNano() != c.MTime {
 		return false
 	}
-	h, err := SampleHash(c.Path)
+	h, err := fullHash(c.Path)
 	return err == nil && h == c.Hash
+}
+
+// fullHash is the SHA-256 of the whole file.
+func fullHash(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // RecoverSidecars ends what a crash left between putting .srt files beside a new file and the swap (run
@@ -700,21 +732,24 @@ func RecoverSidecars(sj SidecarJournal) []string {
 		return []string{fmt.Sprintf("subtitle files: %v", err)}
 	}
 	var said []string
-	jobsSeen := map[int64]bool{}
 	for _, c := range list {
-		jobsSeen[c.JobID] = true
+		swapped := false
 		if st, err := os.Stat(c.VideoPath); err == nil && st.Size() == c.VideoBytes {
 			if h, err := SampleHash(c.VideoPath); err == nil && h == c.VideoHash {
-				continue // the swap happened: the subtitles belong to the new file
+				swapped = true // the swap happened: the subtitles belong to the new file
 			}
 		}
-		if sidecarIsOurs(c) {
-			os.Remove(c.Path)
-			said = append(said, fmt.Sprintf("job %d: removed %s (put there before a swap that did not happen)", c.JobID, c.Path))
+		if !swapped {
+			ours := sidecarIsOurs(c)
+			if err := removeIfOurs(c); err != nil {
+				said = append(said, fmt.Sprintf("job %d: could not remove %s, kept on record to try again: %v", c.JobID, c.Path, err))
+				continue // its record stays
+			}
+			if ours {
+				said = append(said, fmt.Sprintf("job %d: removed %s (put there before a swap that did not happen)", c.JobID, c.Path))
+			}
 		}
-	}
-	for id := range jobsSeen {
-		sj.DropSidecars(id)
+		sj.DropSidecar(c.JobID, c.Path)
 	}
 	return said
 }
