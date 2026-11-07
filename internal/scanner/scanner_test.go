@@ -347,30 +347,50 @@ func TestLinksAreNeverConverted(t *testing.T) {
 // one that disappears for a pass and comes back (review f4c41fd).
 func TestStillChangingFollowsTheFileNotThePath(t *testing.T) {
 	s, _, lib, _ := setup(t, h264Big)
+	// a fake clock and no sleeps: the result never depends on timing (it was flaky on Windows CI)
+	clock := time.Now()
+	s.Now, s.MinAge = func() time.Time { return clock }, time.Minute
+	scan := func() int {
+		clock = clock.Add(2 * time.Minute) // each look well after the previous one
+		return s.ScanOnce(context.Background())
+	}
 	a := filepath.Join(lib, "a.mkv")
-	old := time.Now().Add(-time.Hour)
+	old := clock.Add(-time.Hour)
 	os.Chtimes(a, old, old)
-	s.ScanOnce(context.Background()) // first look
-	time.Sleep(20 * time.Millisecond)
+	before, _ := os.Stat(a)
+	keyBefore, _ := media.FileKey(a, before)
+	scan()       // first look
 	os.Remove(a) // made again: same name, size and times, but another file
 	os.WriteFile(a, []byte("12345"), 0o644)
 	os.Chtimes(a, old, old)
-	if n := s.ScanOnce(context.Background()); n != 0 {
-		t.Errorf("a file made again was decided on its first look: queued %d", n)
-	}
-	if n := s.ScanOnce(context.Background()); n != 1 {
-		t.Errorf("unchanged since: queued %d, want 1", n)
+	after, _ := os.Stat(a)
+	keyAfter, _ := media.FileKey(a, after)
+	_, hasCtime := media.ChangeTime(after)
+	if keyBefore == keyAfter && !hasCtime {
+		// NTFS can give the new file the old one's ID, and Windows has no change time: the system cannot
+		// tell them apart, so the file counts as unchanged since the first look
+		t.Log("this system reused the file's ID and has no change time; the recreated file counts as the same")
+		if n := scan(); n != 1 {
+			t.Errorf("indistinguishable from the first look: queued %d, want 1", n)
+		}
+	} else {
+		if n := scan(); n != 0 {
+			t.Errorf("a file made again was decided on its first look: queued %d", n)
+		}
+		if n := scan(); n != 1 {
+			t.Errorf("unchanged since: queued %d, want 1", n)
+		}
 	}
 
 	// gone for a pass, then back: its earlier look is forgotten
 	b := filepath.Join(lib, "b.mkv")
 	os.WriteFile(b, []byte("abcde"), 0o644)
 	os.Chtimes(b, old, old)
-	s.ScanOnce(context.Background()) // first look at b
+	scan() // first look at b
 	os.Rename(b, b+".away")
-	s.ScanOnce(context.Background()) // b not seen: its look goes
+	scan() // b not seen: its look goes
 	os.Rename(b+".away", b)
-	if n := s.ScanOnce(context.Background()); n != 0 {
+	if n := scan(); n != 0 {
 		t.Errorf("b came back and was decided at once: queued %d", n)
 	}
 }

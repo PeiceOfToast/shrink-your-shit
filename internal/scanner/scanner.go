@@ -204,7 +204,9 @@ func (s *Scanner) ready(path string, st os.FileInfo, now time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	l, ok := s.firstLook[path]
-	if !ok || !l.state.same(stateOf(path, st)) || now.Sub(l.at) < max(s.MinAge, time.Nanosecond) {
+	// No floor beyond MinAge: a first look is never decided in its own pass (observe says it is first),
+	// so a coarse clock (Windows) cannot hold back a file that was seen unchanged twice.
+	if !ok || !l.state.same(stateOf(path, st)) || now.Sub(l.at) < s.MinAge {
 		return false
 	}
 	delete(s.firstLook, path)
