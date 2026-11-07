@@ -97,7 +97,9 @@
   ];
 
   function summary() {
-    var kept = 0; keptList.forEach(function (k) { kept += k.originalBytes; });
+    // Waiting to be freed = the space the kept originals will give back (original - new); the whole
+    // originals' size is only the Kept originals figure (keptBytes). Contract, workshop response to F1.
+    var kept = 0; keptList.forEach(function (k) { kept += k.originalBytes - k.nowBytes; });
     var freed = 0; libs.forEach(function (l) { freed += l.freedBytes; }); // the libraries' own numbers, added up
     return { freedBytes: freed, waitingBytes: kept, workingFiles: paused ? 0 : working.length, waitingFiles: 590, paused: paused,
              counts: { skipped: skippedList.length, failed: failedList.length } };
