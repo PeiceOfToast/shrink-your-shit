@@ -112,6 +112,11 @@ $lib = $libs.items | Select-Object -First 1
 if (-not $lib) { Fail 'no library was created from /LIBRARY' }
 if ($lib.started) { Fail 'a fresh install''s library must wait for first-run, but it is already started' }
 Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$Port/api/libraries/$($lib.id)/scan" -ContentType 'application/json' -Body '{}' -TimeoutSec 10 | Out-Null
+# Nothing converts until a worker is started (S2: a new install starts with its worker stopped); press
+# Start on Workers through the API.
+$w = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/workers" -TimeoutSec 5
+if ($w.workers[0].state -ne 'stopped') { Fail "a fresh install's worker must be stopped, but it is $($w.workers[0].state)" }
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$Port/api/workers/this/start" -ContentType 'application/json' -Body '{}' -TimeoutSec 10 | Out-Null
 WaitFor 'the job to finish' {
   $s = Status
   $job = $s.jobs | Where-Object { $_.path -like '*movie.mp4' } | Select-Object -First 1

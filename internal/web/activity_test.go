@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/doctor"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -701,6 +703,19 @@ func TestWorkersAPI(t *testing.T) {
 	}
 	if code, body := post(t, srv, "POST", "/api/workers/this/stop", `{"when":"later"}`); code != 400 || errCode(body) != "invalid" {
 		t.Errorf("bad when: %d %s", code, body)
+	}
+	// gpu: null when the hardware check could not run (no ffmpeg), {found:false, vendor:null} when it ran
+	// and found none (review e1cd926)
+	for _, c := range []struct {
+		ffmpeg, want string
+	}{{"", `"gpu":null`}, {"/usr/bin/ffmpeg", `"gpu":{"found":false,"vendor":null}`}} {
+		chk := &doctor.Checker{Exec: &media.FakeExec{Out: []byte("ffmpeg version 7.1")}, FFmpeg: c.ffmpeg, FFprobe: "/usr/bin/ffprobe"}
+		s2 := httptest.NewServer(Handler(st, a, Engine{Doctor: chk}))
+		_, body, _ := do(t, nil, s2, call{method: "GET", path: "/api/workers"})
+		s2.Close()
+		if !strings.Contains(body, c.want) {
+			t.Errorf("ffmpeg %q: %s", c.ffmpeg, body)
+		}
 	}
 	// the old Resume starts this worker and clears the notice too (one release, until ui-shop switches)
 	post(t, srv, "POST", "/api/workers/this/stop", `{}`)

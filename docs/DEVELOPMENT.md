@@ -47,9 +47,11 @@ not running: the Windows and macOS tests ran for the first time in CI (see
 ```
 ./shrink-your-shit -library /path/to/COPY-of-videos -data ./data -scan-every 5s
 # web page: http://127.0.0.1:8484   (JSON: /api/status; health: /healthz)
-# a new data folder is a fresh install: the library waits for first-run's Start. Press it on the
-# web page, or start it through the API:
+# a new data folder is a fresh install: the library waits for first-run's Start, and nothing converts
+# until a worker is started (every install, new or updated, starts with its worker stopped). Press
+# Start on the web page (first-run, or Workers), or through the API:
 curl -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8484/api/libraries/1/scan
+curl -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8484/api/workers/this/start
 ```
 
 The program **replaces originals by default**. Always develop against a copy (or pass
@@ -142,7 +144,9 @@ To install one:
    ```
    It takes the archive for this computer from that folder and checks it against `checksums.txt`, as
    it does with a release. Windows: run `shrink-your-shit-setup-dev-<commit>.exe`.
-4. To go back to the released version, run the installer again without `SYP_BASE_URL` (or the latest
+4. Nothing converts until you press **Start** on the Workers page: every install, new or updated,
+   starts with its worker stopped.
+5. To go back to the released version, run the installer again without `SYP_BASE_URL` (or the latest
    release's setup exe on Windows).
 
 ## Continuous integration

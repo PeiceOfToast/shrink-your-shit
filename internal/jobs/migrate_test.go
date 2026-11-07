@@ -509,18 +509,24 @@ func TestAlwaysStandardizeMigration(t *testing.T) {
 }
 
 // Migration 14 (S2): every install starts with its worker stopped; the one-time notice only for an
-// existing install whose worker was running. A brand-new database gets none; a paused one gets none.
+// existing install (a version from 1 to 13 before the update, whatever rows it has: migration 13 may
+// have just removed some, review e1cd926) whose worker was running. A brand-new database gets none; a
+// paused one gets none.
 // Starting (or Got it) clears it, and it stays cleared after a restart.
 func TestWorkersStartStoppedMigration(t *testing.T) {
 	fresh := open(t)
 	fresh.SetPaused(true) // open() starts it for tests; as migrated, before that:
-	if s, _ := Open(filepath.Join(t.TempDir(), "new.db")); !s.Paused() || s.StoppedByUpdate() || s.BasicChangedByUpdate() {
-		t.Errorf("a new install: paused %v, notice %v", s.Paused(), s.StoppedByUpdate())
+	newDB, err := Open(filepath.Join(t.TempDir(), "new.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { newDB.Close() }) // closed before TempDir is removed (Windows will not remove an open file)
+	if !newDB.Paused() || newDB.StoppedByUpdate() || newDB.BasicChangedByUpdate() {
+		t.Errorf("a new install: paused %v, notice %v", newDB.Paused(), newDB.StoppedByUpdate())
 	}
 	upgrade := func(paused string) *Store {
 		path := filepath.Join(t.TempDir(), "syp.db")
-		s, _ := Open(path)
-		s.Enqueue(Job{Path: "/m/a.mkv"}) // an install in use
+		s, _ := Open(path) // no libraries and no jobs: an existing install is told by its version, not its rows
 		s.SetMeta("paused", paused)
 		s.db.Exec(`DELETE FROM app_meta WHERE key='stopped_by_update'`)
 		s.db.Exec(`PRAGMA user_version = 13`) // as an install from before S2 left it

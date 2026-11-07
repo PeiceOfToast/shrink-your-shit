@@ -158,13 +158,14 @@ WHERE status='kept' AND (error LIKE 'the new file (%) saves less than the requir
   OR error LIKE 'the new file (%) is not smaller than the original (%)');
 DELETE FROM files WHERE reason IN ('already_efficient', 'would_not_shrink', 'unknown_bitrate');`},
 	// S2, no auto-start (USER-REVIEW 2026-11-07): every install starts with its worker stopped (the paused
-	// flag, which Claim honours). One that was running before gets a one-time notice (stopped_by_update),
-	// a brand-new one (no libraries, no jobs yet) does not. (The notice's Basic sentence is S4's: its
-	// migration sets basic_changed_by_update.)
+	// flag, which Claim honours). An existing install (this database had a version from 1 to 13 before
+	// this run: temp.migrate_from) whose worker was running gets a one-time notice (stopped_by_update); a
+	// new one does not. Not from its rows: migration 13 may have just removed some (review e1cd926).
+	// (The notice's Basic sentence is S4's: its migration sets basic_changed_by_update.)
 	{14, "workers start stopped", `
 INSERT INTO app_meta(key, value) SELECT 'stopped_by_update', '1'
 WHERE COALESCE((SELECT value FROM app_meta WHERE key='paused'), '0') <> '1'
-  AND (EXISTS (SELECT 1 FROM libraries) OR EXISTS (SELECT 1 FROM jobs));
+  AND (SELECT version FROM temp.migrate_from) BETWEEN 1 AND 13;
 INSERT INTO app_meta(key, value) VALUES ('paused', '1') ON CONFLICT(key) DO UPDATE SET value='1';`},
 }
 
@@ -232,10 +233,29 @@ func (s *Store) migrate() error {
 		return err
 	}
 	defer tx.Rollback() // no-op after a successful Commit
+	// The version this database had before this run, for steps that treat an existing install
+	// differently from a new one (14): a temporary table of this transaction's connection, dropped
+	// below. A version-0 database with tables (from before migrations) is an existing install too.
+	from := cur
+	if from == 0 && existing {
+		from = 1
+	}
+	if _, err := tx.Exec(`CREATE TEMP TABLE IF NOT EXISTS migrate_from (version INTEGER NOT NULL)`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM temp.migrate_from`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO temp.migrate_from(version) VALUES (?)`, from); err != nil {
+		return err
+	}
 	for _, m := range pending {
 		if _, err := tx.Exec(m.sql); err != nil {
 			return failedMigration(m, err, backup)
 		}
+	}
+	if _, err := tx.Exec(`DROP TABLE temp.migrate_from`); err != nil {
+		return err
 	}
 	// PRAGMA takes no bound parameters; the number is ours. It is part of the same transaction.
 	if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", latestVersion())); err != nil {

@@ -53,16 +53,19 @@ func workerRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng 
 		default:
 			state = "idle" // running, waiting for files
 		}
-		var gpu any // null when the checks are not available (detection did not run)
+		var gpu any // null when the hardware check did not run: no checks, or no ffmpeg to run it with
 		if eng.Doctor != nil {
 			cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-			found, vendor := doctor.GPU(eng.Doctor.Tools(cctx))
+			t := eng.Doctor.Tools(cctx)
 			cancel()
-			v := any(nil)
-			if vendor != "" {
-				v = vendor
+			if t.FFmpeg != "" {
+				found, vendor := doctor.GPU(t)
+				v := any(nil)
+				if vendor != "" {
+					v = vendor
+				}
+				gpu = map[string]any{"found": found, "vendor": v}
 			}
-			gpu = map[string]any{"found": found, "vendor": v}
 		}
 		// quiet_hours (with quietUntil) and unreachable are reserved: quiet hours is slice 35, other
 		// machines come later
