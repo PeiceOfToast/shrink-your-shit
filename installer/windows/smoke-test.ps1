@@ -123,11 +123,18 @@ WaitFor 'the job to finish' {
   if ($job -and $job.status -eq 'failed') { Fail "job failed: $($job.error)" }
   $job -and $job.status -eq 'done'
 } 300
-$codec = & (Join-Path $app 'ffmpeg\ffprobe.exe') -v error -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 $video
-$after = (Get-Item $video).Length
+# Basic saves MKV (S4): movie.mp4 becomes movie.mkv, and the original is kept in .syp-trash.
+$converted = Join-Path $Library 'movie.mkv'
+if (-not (Test-Path $converted)) { Fail "no movie.mkv after converting: $((Get-ChildItem $Library -Force | ForEach-Object Name) -join ', ')" }
+if (Test-Path $video) { Fail 'movie.mp4 is still in the library after it became movie.mkv' }
+$codec = & (Join-Path $app 'ffmpeg\ffprobe.exe') -v error -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 $converted
+$after = (Get-Item $converted).Length
 Write-Host "codec=$codec size $before -> $after"
 if ($codec.Trim() -ne 'hevc') { Fail "expected hevc, got $codec" }
 if ($after -ge $before) { Fail 'converted file is not smaller' }
+$keptOriginal = Get-ChildItem (Join-Path $Library '.syp-trash') -Filter 'movie*.mp4' -Force -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $keptOriginal) { Fail 'the original movie.mp4 is not kept in .syp-trash' }
+if ($keptOriginal.Length -ne $before) { Fail "the kept original is $($keptOriginal.Length) bytes, the original was $before" }
 
 Step 'upgrade (run the installer again, no flags) keeps the settings'
 RunSetup @()
