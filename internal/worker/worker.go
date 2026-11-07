@@ -192,6 +192,8 @@ func (e *FailedError) Unwrap() error { return e.Err }
 
 func failed(plain string, err error) error { return &FailedError{plain, err} }
 
+const cannotRead = "shrink-your-shit is not allowed to read this file, so nothing was converted. Let it read the file (Settings > System says how), then press Retry."
+
 const diskFull = "The disk is full, so converting stopped. Your original was not touched. Free some space, then press Retry."
 
 // plainFailure is the plain words for a failed conversion: a full disk and a folder it may not write
@@ -230,7 +232,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			return "", failed("The file is not there any more, so nothing was converted.", serr)
 		}
 		if errors.Is(serr, fs.ErrPermission) { // not a write: the generic permission words would point the wrong way
-			return "", failed("shrink-your-shit is not allowed to read this file, so nothing was converted. Let it read the file (Settings > System says how), then press Retry.", serr)
+			return "", failed(cannotRead, serr)
 		}
 		return "", fmt.Errorf("source file: %w", serr)
 	}

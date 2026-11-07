@@ -859,18 +859,18 @@ func TestFailedDetailsArePlain(t *testing.T) {
 			os.Chmod(s.src, 0)
 			s.t.Cleanup(func() { os.Chmod(s.src, 0o644) })
 		}, "not allowed to read this file"},
-		{"old temp file cannot be removed", func(s *scenario) {
-			victim := filepath.Join(s.t.TempDir(), "other.mkv")
-			os.WriteFile(victim, []byte("x"), 0o644)
-			os.Symlink(victim, filepath.Join(s.dir, "movie.syp-tmp.mkv"))
-			os.Chmod(s.dir, 0o555)
-			s.t.Cleanup(func() { os.Chmod(s.dir, 0o755) })
+		{"old temp file cannot be removed", func(s *scenario) { // through the hook: works on every OS
+			os.WriteFile(filepath.Join(s.dir, "movie.syp-tmp.mkv"), []byte("x"), 0o644)
+			removeFile = func(p string) error { return &os.PathError{Op: "remove", Path: p, Err: syscall.EACCES} }
+			s.t.Cleanup(func() { removeFile = os.Remove })
 		}, "old temp file"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if (c.name == "old temp file cannot be removed" || c.name == "source cannot be opened for reading") && os.Geteuid() == 0 {
-				t.Skip("root ignores file permissions")
+			// chmod 0 stops reading only on POSIX, for a user other than root; the words are checked
+			// on every OS below (cannotRead)
+			if c.name == "source cannot be opened for reading" && (runtime.GOOS == "windows" || os.Geteuid() == 0) {
+				t.Skip("needs POSIX permissions and a user other than root")
 			}
 			s := newScenario(t)
 			c.mutate(s)
@@ -891,6 +891,7 @@ func TestFailedDetailsArePlain(t *testing.T) {
 		{&os.PathError{Op: "write", Path: "/media/a.mkv", Err: syscall.ENOSPC}, "The disk is full"},
 		{errors.New("rename /a /b: exit status 1"), "Converting did not finish"},
 		{failed("Plain words.", &os.PathError{Op: "write", Path: "/x", Err: syscall.ENOSPC}), "Plain words."},
+		{failed(cannotRead, &os.PathError{Op: "open", Path: "/media/a.mkv", Err: syscall.EACCES}), "not allowed to read this file"},
 	} {
 		got := plainFailure(c.err)
 		if !strings.Contains(got, c.want) {
