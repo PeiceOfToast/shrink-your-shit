@@ -484,3 +484,15 @@ func TestAuthClient(t *testing.T) {
 		t.Error("api.js: every write must send Content-Type: application/json with a JSON body")
 	}
 }
+
+// AUTH-UI-1: the root redirect keeps the query, so the printed link http://host:8484/?token=... reaches the page.
+func TestRootRedirectKeepsQuery(t *testing.T) {
+	h := Handler(nil, nil, openAccess(t))
+	for in, want := range map[string]string{"/": "/libraries/", "/?token=abc&mock=0": "/libraries/?token=abc&mock=0"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", in, nil))
+		if rec.Code != http.StatusFound || rec.Header().Get("Location") != want {
+			t.Errorf("GET %s: %d to %q, want 302 to %q", in, rec.Code, rec.Header().Get("Location"), want)
+		}
+	}
+}
