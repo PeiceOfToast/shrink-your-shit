@@ -204,3 +204,15 @@ func TestTrashIsNeverScanned(t *testing.T) {
 		t.Error("the trash folder must be skipped")
 	}
 }
+
+// A skipped file's record carries the skip as a code, for the Skipped list (slice 21b).
+func TestSkipRecordsItsCode(t *testing.T) {
+	s, st, lib, _ := setup(t, hevcBig)
+	s.Targets = func() ([]Target, error) {
+		return []Target{{Path: lib, Template: rules.SliderTemplate(3)}}, nil
+	}
+	s.ScanOnce(context.Background())
+	if f, _ := st.GetFile(filepath.Join(lib, "a.mkv")); f == nil || f.Reason != rules.SkipAlreadyHEVC || !strings.HasPrefix(f.Decision, "skip: ") {
+		t.Errorf("%+v", f)
+	}
+}

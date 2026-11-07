@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver, no cgo
@@ -77,6 +78,7 @@ type File struct {
 	ModTime  int64
 	Codec    string
 	Decision string
+	Reason   string // a skip's code (rules.Skip*, "unreadable", "restored"); "" when it is not skipped
 }
 
 // Store is the SQLite-backed store.
@@ -119,8 +121,8 @@ func (s *Store) stamp() string { return s.now().UTC().Format(time.RFC3339) }
 // GetFile returns the last seen record for path (nil if never seen).
 func (s *Store) GetFile(path string) (*File, error) {
 	var f File
-	err := s.db.QueryRow(`SELECT path,size,mtime,codec,decision FROM files WHERE path=?`, path).
-		Scan(&f.Path, &f.Size, &f.ModTime, &f.Codec, &f.Decision)
+	err := s.db.QueryRow(`SELECT path,size,mtime,COALESCE(codec,''),COALESCE(decision,''),reason FROM files WHERE path=?`, path).
+		Scan(&f.Path, &f.Size, &f.ModTime, &f.Codec, &f.Decision, &f.Reason)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -129,9 +131,9 @@ func (s *Store) GetFile(path string) (*File, error) {
 
 // PutFile records what was seen for a path.
 func (s *Store) PutFile(f File) error {
-	_, err := s.db.Exec(`INSERT INTO files(path,size,mtime,codec,decision) VALUES(?,?,?,?,?)
-ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,codec=excluded.codec,decision=excluded.decision`,
-		f.Path, f.Size, f.ModTime, f.Codec, f.Decision)
+	_, err := s.db.Exec(`INSERT INTO files(path,size,mtime,codec,decision,reason) VALUES(?,?,?,?,?,?)
+ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,codec=excluded.codec,decision=excluded.decision,reason=excluded.reason`,
+		f.Path, f.Size, f.ModTime, f.Codec, f.Decision, f.Reason)
 	return err
 }
 
@@ -239,7 +241,7 @@ func (s *Store) Claim(worker string) (Job, error) {
 	if err != nil {
 		return Job{}, err
 	}
-	if err := s.transition(id, Running, `, worker=?, progress=0, error=''`, worker); err != nil {
+	if err := s.transition(id, Running, `, worker=?, progress=0, error='', started=?`, worker, s.stamp()); err != nil {
 		return Job{}, err
 	}
 	return s.Get(id)
@@ -266,7 +268,13 @@ func (s *Store) Progress(id int64, pct float64) error {
 
 // Complete marks a running job done.
 func (s *Store) Complete(id int64, outputPath string, sizeAfter int64) error {
-	return s.transition(id, Done, `, progress=100, output_path=?, size_after=?`, outputPath, sizeAfter)
+	// The output as it is now, so the file can later be recognised as this conversion's (Activity's
+	// Skipped list leaves it out only while it still is). 0 if it cannot be read.
+	var mtime int64
+	if st, err := os.Stat(outputPath); err == nil {
+		mtime = st.ModTime().UnixNano()
+	}
+	return s.transition(id, Done, `, progress=100, output_path=?, size_after=?, output_mtime=?`, outputPath, sizeAfter, mtime)
 }
 
 // Fail marks a running job failed.

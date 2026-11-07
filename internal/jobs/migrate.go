@@ -92,6 +92,34 @@ CREATE TABLE originals (
   state TEXT NOT NULL, started TEXT NOT NULL, kept_at TEXT, delete_on TEXT);
 CREATE INDEX originals_state ON originals(state);
 CREATE INDEX originals_job ON originals(job_id);`},
+
+	// Activity (slice 21b): when a job started (its time left is estimated from it), and a skipped
+	// file's reason as a code (files.decision keeps the sentence).
+	{7, "job start time and skip reason code", `
+ALTER TABLE jobs ADD COLUMN started TEXT;
+ALTER TABLE jobs ADD COLUMN output_mtime INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE files ADD COLUMN reason TEXT NOT NULL DEFAULT '';
+CREATE INDEX files_reason ON files(reason);
+CREATE INDEX jobs_output ON jobs(output_path, status);
+UPDATE files SET reason = CASE
+  WHEN decision = 'unreadable' THEN 'unreadable'
+  WHEN decision LIKE 'skip: % is already an efficient format' THEN 'already_hevc'
+  WHEN decision LIKE 'skip: codec is hevc,%' OR decision LIKE 'skip: codec is av1,%' OR decision LIKE 'skip: codec is vp9,%' THEN 'already_hevc'
+  WHEN decision LIKE 'skip: codec is %' THEN 'format_not_converted'
+  WHEN decision LIKE 'skip: % is not a format the slider converts' THEN 'format_not_converted'
+  WHEN decision LIKE 'skip: bitrate % is below %' THEN 'already_efficient'
+  WHEN decision LIKE 'skip: already efficient:%' THEN 'already_efficient'
+  WHEN decision = 'skip: it has no video' THEN 'no_video'
+  WHEN decision LIKE 'skip: its bitrate, picture size or frame rate is unknown%' THEN 'unknown_bitrate'
+  WHEN decision LIKE 'skip: its % subtitles cannot be kept in %' THEN 'cannot_keep_track'
+  ELSE '' END
+WHERE decision = 'unreadable' OR decision LIKE 'skip:%';
+-- a skip whose text maps to no code is forgotten: the next scan looks at the file again and records it
+DELETE FROM files WHERE decision LIKE 'skip:%' AND reason = '';
+-- jobs done before this: their output's time, from the file record at that path when its size is the
+-- output's; otherwise it stays 0 (unknown), and such a job hides nothing from the Skipped list
+UPDATE jobs SET output_mtime = (SELECT f.mtime FROM files f WHERE f.path=jobs.output_path AND f.size=jobs.size_after)
+WHERE status='done' AND EXISTS (SELECT 1 FROM files f WHERE f.path=jobs.output_path AND f.size=jobs.size_after);`},
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.

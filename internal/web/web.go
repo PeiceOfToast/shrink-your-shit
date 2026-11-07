@@ -33,7 +33,7 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	settingsRoutes(api, ss, access)
 	flowRoutes(api, store, ss, eng)
 	settingRoutes(api, store, eng)
-	activityRoutes(api, store, ss, time.Now)
+	activityRoutes(api, store, ss, time.Now, eng.ScanNow)
 	previewRoutes(api, store, eng)
 	// For health checks: answers without signing in and says nothing else.
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {

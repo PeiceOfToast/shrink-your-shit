@@ -20,18 +20,6 @@ type Sample struct {
 	ExpectedBytesHigh int64    `json:"expectedBytesHigh"`
 }
 
-// skipWords says each skip code in plain words, for the sample's first line.
-var skipWords = map[string]string{
-	rules.SkipAlreadyEfficient: "it is already stored efficiently, so converting it would save little",
-	rules.SkipAlreadyHEVC:      "it already uses a modern, efficient format",
-	rules.SkipOtherFormat:      "its format is not one this setting converts",
-	rules.SkipNoVideo:          "it has no video",
-	rules.SkipUnknownBitrate:   "we can't tell how much it would shrink",
-	rules.SkipCannotKeepTrack:  "its subtitles could not be kept in its file type",
-	rules.SkipSettingCannotRun: "this setting can't convert files yet",
-	rules.SkipUnreadable:       "it can't be read",
-}
-
 // Sample probes one file (read only) and says what the setting would do with it.
 func (p *Previewer) Sample(ctx context.Context, path string, st fs.FileInfo, t rules.Template) Sample {
 	size := st.Size()
@@ -41,7 +29,7 @@ func (p *Previewer) Sample(ctx context.Context, path string, st fs.FileInfo, t r
 		plan = t.Compile(info)
 	}
 	if plan.Skip != "" {
-		why := skipWords[plan.SkipCode]
+		why := rules.SkipWords[plan.SkipCode]
 		if why == "" {
 			why = "this setting does not convert it"
 		}

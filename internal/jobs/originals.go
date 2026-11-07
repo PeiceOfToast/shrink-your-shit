@@ -110,9 +110,10 @@ func (s *Store) OriginalOfJob(jobID int64) (Original, error) {
 func (s *Store) CompleteKeptJobs() (int64, error) {
 	r, err := s.db.Exec(`UPDATE jobs SET status=?, progress=100, updated=?,
   output_path=(SELECT o.path FROM originals o WHERE o.job_id=jobs.id AND o.state=? ORDER BY o.id DESC LIMIT 1),
-  size_after=(SELECT o.new_bytes FROM originals o WHERE o.job_id=jobs.id AND o.state=? ORDER BY o.id DESC LIMIT 1)
+  size_after=(SELECT o.new_bytes FROM originals o WHERE o.job_id=jobs.id AND o.state=? ORDER BY o.id DESC LIMIT 1),
+  output_mtime=(SELECT o.new_mtime FROM originals o WHERE o.job_id=jobs.id AND o.state=? ORDER BY o.id DESC LIMIT 1)
 WHERE status=? AND EXISTS (SELECT 1 FROM originals o WHERE o.job_id=jobs.id AND o.state=?)`,
-		Done, s.stamp(), OriginalKept, OriginalKept, Running, OriginalKept)
+		Done, s.stamp(), OriginalKept, OriginalKept, OriginalKept, Running, OriginalKept)
 	if err != nil {
 		return 0, err
 	}

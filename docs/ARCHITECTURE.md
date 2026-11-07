@@ -265,6 +265,25 @@ or `deleted`; `GET /api/activity/kept` lists the kept ones. `freedBytes` counts 
 gone, `waitingBytes` those still kept (contract F1). Restore and purge are slice 18 (restore answers
 501 `not_available`). `.syp-trash` is hidden, so the scanner, the Preview and the setup checks skip it.
 
+## Activity (slice 21b)
+
+`internal/web/activity.go`, read-only over the store (`internal/jobs/activity.go`), all lists
+`{items, total}` with `limit`/`offset` (default 50):
+- `GET /api/activity/summary`: `freedBytes` (original minus new over done jobs whose original is
+  gone) and `waitingBytes` (the same while it is kept in `.syp-trash`), running and queued counts, and
+  `counts` of skipped files and of failed or kept jobs. The only source of savings numbers (F1).
+- `GET /api/activity/queue`: running jobs with `percent` (the worker's progress), `phase` (`checking`
+  once the new file is written), `etaSeconds` from the time since the job started (`jobs.started`,
+  migration 7) and the share done, or null; `upNext` counts queued jobs per library with the
+  `queueOrder` setting.
+- `GET /api/activity/failed`: failed jobs and jobs a check kept (`kept`), with a plain title and the
+  reason; Retry is `POST /api/jobs/{id}/retry`.
+- `GET /api/activity/skipped?reason=`: file records the scanner skipped, with the reason as a code
+  (`files.reason`, migration 7: the Plan's `SkipCode`, `unreadable`, or slice 18's `restored`) and its
+  plain words (`rules.SkipWords`). `POST /api/skipped/{id}/convert-again` forgets the record and wakes
+  the scanner, which looks at the file afresh (and may skip it again for the same reason).
+- `POST /api/system/backup` answers 501 `not_available` until slice 38.
+
 ## Database schema and migrations
 
 The schema version is SQLite's `PRAGMA user_version`. `internal/jobs/migrate.go` holds an ordered list
