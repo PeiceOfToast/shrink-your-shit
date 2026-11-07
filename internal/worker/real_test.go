@@ -22,9 +22,19 @@ func needTools(t *testing.T) {
 	t.Helper()
 	for _, tool := range []string{"ffmpeg", "ffprobe"} {
 		if _, err := exec.LookPath(tool); err != nil {
-			t.Skipf("%s not installed", tool)
+			skipUnlessRequired(t, "%s not installed", tool)
 		}
 	}
+}
+
+// skipUnlessRequired skips a real-ffmpeg test, except where SYP_REQUIRE_FFMPEG=1 (CI's Linux job) says
+// these tests must run: there a skip would silently hide them, so it fails instead.
+func skipUnlessRequired(t *testing.T, format string, args ...any) {
+	t.Helper()
+	if os.Getenv("SYP_REQUIRE_FFMPEG") == "1" {
+		t.Fatalf("SYP_REQUIRE_FFMPEG=1 but this real-ffmpeg test cannot run: "+format, args...)
+	}
+	t.Skipf(format, args...)
 }
 
 func runFFmpeg(t *testing.T, args ...string) {
@@ -294,7 +304,7 @@ func TestRealRecordingStartingMidStreamIsStillConverted(t *testing.T) {
 	os.WriteFile(cut, data[188*400:], 0o644) // start on a packet boundary, but not at a keyframe
 	info, err := media.Probe(context.Background(), media.OSExec{}, "ffprobe", cut)
 	if err != nil {
-		t.Skipf("the cut file is not readable here: %v", err)
+		skipUnlessRequired(t, "the cut file is not readable here: %v", err)
 	}
 	st, id := realJob(t, cut, info.DurationSec)
 	realWorker(st, media.OSExec{}).run(t)

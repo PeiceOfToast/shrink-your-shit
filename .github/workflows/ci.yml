@@ -23,7 +23,30 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go vet ./...
-      - run: go test -count=1 ./...
+      # Linux: real ffmpeg, so the real-ffmpeg tests (verify, picture comparison, .ts) run instead of
+      # skipping. SYP_REQUIRE_FFMPEG=1 makes a skipped real test a failure, and the step also fails if
+      # the log shows one skipped, so a broken install cannot quietly turn them off.
+      - name: Install ffmpeg
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends ffmpeg
+          ffmpeg -version | head -n 1
+      - name: Test (with real ffmpeg)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          SYP_REQUIRE_FFMPEG: "1"
+        run: |
+          go test -count=1 -v ./... > test.log 2>&1 || { cat test.log; exit 1; }
+          grep -E '^(ok|FAIL)[[:space:]]' test.log
+          echo "Real-ffmpeg tests:"
+          grep -E '^[[:space:]]*--- (PASS|FAIL|SKIP): TestReal' test.log
+          if grep -qE '^[[:space:]]*--- SKIP: TestReal' test.log; then echo "a real-ffmpeg test was skipped"; exit 1; fi
+      # Windows and macOS: no ffmpeg on the runner, so the real tests skip there (fake runner only).
+      - name: Test
+        if: runner.os != 'Linux'
+        run: go test -count=1 ./...
 
   build:
     name: build (${{ matrix.goos }}/${{ matrix.goarch }})

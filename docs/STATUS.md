@@ -30,8 +30,10 @@ marked **never verified** has not been seen working by anyone. Update this file 
   runs (PR runs for slices 3 and 4, and pushes to `main`) every job succeeded: `go vet` and
   `go test` on **ubuntu, windows and macOS**, all five cross-compile builds, and the Docker
   job. A newer run on `main` was still queued when checked. This also shows `setup-go` can
-  fetch the Go version in `go.mod`. CI runs the unit tests only (fake ffmpeg), so it says
-  nothing about real encodes on Windows or macOS.
+  fetch the Go version in `go.mod`. On Linux, CI also runs the real-ffmpeg tests with
+  Ubuntu's ffmpeg package (see DEVELOPMENT.md; until the first such run is seen green, that is
+  unproven). On Windows and macOS CI runs the unit tests only (fake ffmpeg), so it says nothing
+  about real encodes there.
 - **`install.sh` in clean Debian 12 containers**, against a locally built release served with
   `SYP_BASE_URL=file://...`: ffmpeg installed from apt, checksum verified, a real file converted;
   in a container running systemd the service was created, enabled, restarted after a kill and
