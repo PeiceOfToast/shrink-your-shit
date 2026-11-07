@@ -171,8 +171,10 @@ func (s Selectors) equal(o Selectors) bool {
 func (t Template) SelectorsView() (Selectors, bool) {
 	switch t.Kind {
 	case KindSlider:
-		if _, ok := SliderAt(t.Params.Quality); ok {
-			return DefaultSelectors(t.Params.Quality), true
+		if _, ok := SliderAt(t.Params.Quality); ok { // Basic: its audio, always MKV (S4)
+			s := DefaultSelectors(t.Params.Quality)
+			s.Audio, s.FileType = BasicAudio(t.Params.Audio), "mkv"
+			return s, true
 		}
 	case KindSelectors:
 		if t.Selectors != nil {
@@ -233,7 +235,7 @@ func (t Template) Warnings() []string {
 	if !s.SkipHDR {
 		out = append(out, `HDR and Dolby Vision files will be converted without their HDR information, so they can look washed out. Turn "Skip HDR and Dolby Vision files" back on to leave them as they are.`)
 	}
-	if w := RenameWarning(s.AfterConverting, s.FileType); w != "" { // 25a-2
+	if w := RenameWarning(s.AfterConverting, s.FileType); w != "" && t.Kind == KindSelectors { // 25a-2 (Basic's MKV: the update notice, S4)
 		out = append(out, w)
 	}
 	return out

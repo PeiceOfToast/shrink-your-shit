@@ -13,12 +13,13 @@ import (
 // TrackOp is what happens to one audio or subtitle track of the original (slice 25b). Tracks without an
 // op are copied as they are.
 type TrackOp struct {
-	Index   int    `json:"index"`             // the stream's index in the original (ffprobe's)
-	Type    string `json:"type"`              // audio | subtitle
-	Drop    bool   `json:"drop,omitempty"`    // left out of the new file
-	Encoder string `json:"encoder,omitempty"` // converted with this ffmpeg encoder (aac, eac3, libopus)
-	Codec   string `json:"codec,omitempty"`   // the codec the new track has then, as ffprobe names it
-	Kbps    int    `json:"kbps,omitempty"`    // its bitrate
+	Index    int    `json:"index"`              // the stream's index in the original (ffprobe's)
+	Type     string `json:"type"`               // audio | subtitle
+	Drop     bool   `json:"drop,omitempty"`     // left out of the new file
+	Encoder  string `json:"encoder,omitempty"`  // converted with this ffmpeg encoder (aac, eac3, libopus)
+	Codec    string `json:"codec,omitempty"`    // the codec the new track has then, as ffprobe names it
+	Kbps     int    `json:"kbps,omitempty"`     // its bitrate
+	Channels int    `json:"channels,omitempty"` // downmixed to this many channels (S4's stereo AAC: 2); 0 = as it is
 	// Extract: a subtitle saved as a separate .srt file beside the new file (and left out of it); the
 	// name part between the new file's name and ".srt": "eng", "eng.forced", "" (no language), "eng.2".
 	Extract string `json:"extract,omitempty"`
@@ -67,12 +68,15 @@ const LanguagesNeeded = "Choose your languages first, in Settings > General."
 //     get smaller); a lossless track is always converted. A lossy track of unknown bitrate is copied:
 //     it could get bigger;
 //   - lossless_only: only lossless tracks converted, to E-AC-3.
-func planAudio(choice string, langs []string, info media.Info) (ops []TrackOp, allKept bool) {
+func planAudio(choice string, langs []string, info media.Info) (ops []TrackOp, allKept, mainUsed bool) {
 	audio := info.Audio()
 	switch choice {
+	case "stereo_aac": // Basic's default (S4): the kept tracks, each as stereo AAC
+		ops, mainUsed = planStereoAAC(langs, audio)
+		return ops, false, mainUsed
 	case "my_languages":
 		if len(langs) == 0 { // no languages chosen (any more): nothing is dropped
-			return nil, false
+			return nil, false, false
 		}
 		want := map[string]bool{}
 		for _, l := range langs {
@@ -88,9 +92,9 @@ func planAudio(choice string, langs []string, info media.Info) (ops []TrackOp, a
 			ops = append(ops, TrackOp{Index: a.Index, Type: "audio", Drop: true})
 		}
 		if kept == 0 && len(audio) > 0 {
-			return nil, true
+			return nil, true, false
 		}
-		return ops, false
+		return ops, false, false
 	case "aac", "eac3", "opus":
 		t := audioTargets[choice]
 		for _, a := range audio {
@@ -111,7 +115,70 @@ func planAudio(choice string, langs []string, info media.Info) (ops []TrackOp, a
 			}
 		}
 	}
-	return ops, false
+	return ops, false, false
+}
+
+// BasicAudio is a Basic flow's audio choice, its default for an empty one (S4).
+func BasicAudio(a string) string {
+	if a == "" {
+		return "stereo_aac"
+	}
+	return a
+}
+
+// AvailableBasicAudio are Basic's audio choices (S4, DESIGN/REDESIGN A1).
+var AvailableBasicAudio = []string{"stereo_aac", "my_languages", "keep_all"}
+
+// Basic's stereo AAC (S4, RESEARCH/audio.md): AAC-LC stereo at 160 kbps plays on every TV and phone.
+const (
+	stereoAACKbps = 160
+	// NoAudioInMyLanguageMain is said (in the job's log) when no track is in the person's languages:
+	// the main one is kept, as stereo AAC (design's words).
+	NoAudioInMyLanguageMain = "None of the audio is in your language, so the main audio track was used."
+)
+
+// planStereoAAC keeps the tracks in langs and those with no language (all of them when no language is
+// chosen, so none is dropped unasked), each as stereo AAC: one already AAC with at most 2 channels is
+// copied as it is (never re-encoded); every other becomes AAC, 2 channels, 160 kbps (a 5.1 track is
+// downmixed; stereo is never made into more). With no track in langs, the main one (default
+// disposition, else the first) is kept, and mainUsed says so.
+func planStereoAAC(langs []string, audio []media.Stream) (ops []TrackOp, mainUsed bool) {
+	keep := map[int]bool{}
+	if len(langs) == 0 {
+		for _, a := range audio {
+			keep[a.Index] = true
+		}
+	} else {
+		want := map[string]bool{}
+		for _, l := range langs {
+			want[CanonLang(l)] = true
+		}
+		for _, a := range audio {
+			if l := CanonLang(a.Language); l == "" || want[l] {
+				keep[a.Index] = true
+			}
+		}
+		if len(keep) == 0 && len(audio) > 0 {
+			main := audio[0]
+			for _, a := range audio {
+				if a.Default {
+					main = a
+					break
+				}
+			}
+			keep[main.Index], mainUsed = true, true
+		}
+	}
+	for _, a := range audio {
+		switch {
+		case !keep[a.Index]:
+			ops = append(ops, TrackOp{Index: a.Index, Type: "audio", Drop: true})
+		case a.Codec == "aac" && a.Channels > 0 && a.Channels <= 2: // already stereo AAC: copied
+		default:
+			ops = append(ops, TrackOp{Index: a.Index, Type: "audio", Encoder: "aac", Codec: "aac", Kbps: stereoAACKbps, Channels: 2})
+		}
+	}
+	return ops, mainUsed
 }
 
 // SplitLanguages is a template's Languages as a list.

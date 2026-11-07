@@ -167,6 +167,19 @@ func previewTemplate(w http.ResponseWriter, store *jobs.Store, l jobs.Library, s
 		}
 		return f.Template, true
 	}
+	if q, audio, basic := readBasic(s); basic { // a Basic setting (S4)
+		if _, ok := rules.SliderAt(q); !ok {
+			apiError(w, http.StatusBadRequest, "invalid_setting", "quality must be a slider position from 1 to 5.")
+			return rules.Template{}, false
+		}
+		if audio != "" && audio != "keep_all" && len(store.Languages()) == 0 {
+			apiError(w, http.StatusBadRequest, "languages_needed", rules.LanguagesNeeded)
+			return rules.Template{}, false
+		}
+		t := rules.BasicTemplate(q, audio)
+		t.Languages = strings.Join(store.Languages(), ",")
+		return t, true
+	}
 	sel, err := readSelectors(s, store.Languages())
 	var se *rules.SelectorError
 	if errors.As(err, &se) {

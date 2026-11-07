@@ -93,7 +93,7 @@ func TestSelectorsCompile(t *testing.T) {
 		{"mp4", media.Stream{Type: "subtitle", Codec: "subrip"}, "its subrip subtitles cannot be kept in MP4"},
 		{"mp4", media.Stream{Type: "audio", Codec: "truehd"}, "its truehd audio cannot be kept in MP4"},
 		{"mp4", media.Stream{Type: "attachment", Codec: "ttf"}, "its attached files (such as fonts) cannot be kept in MP4"},
-		{"mkv", media.Stream{Type: "subtitle", Codec: "mov_text"}, "its mov_text subtitles cannot be kept in MKV"},
+		{"mkv", media.Stream{Type: "subtitle", Codec: "mov_text"}, ""}, // converted to SRT text inside it (S4)
 		{"mp4", media.Stream{Type: "audio", Codec: "aac"}, ""},
 		{"mp4", media.Stream{Type: "subtitle", Codec: "mov_text"}, ""},
 		{"mkv", media.Stream{Type: "audio", Codec: "truehd"}, ""},

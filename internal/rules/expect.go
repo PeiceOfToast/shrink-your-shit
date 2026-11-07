@@ -20,10 +20,14 @@ type StreamExpect struct {
 	Channels int    // audio
 	SubKind  string // subtitle: text or bitmap
 	Forced   bool   // subtitle
-	Width    int    // video
-	Height   int    // video
-	BitDepth int    // video
-	Filename string // attachment
+	// Default (subtitle) is checked only when CheckDefault: a subtitle converted on the way (S4's mov_text
+	// to SRT) must keep it; other tracks are copied with their flags as they are.
+	Default      bool
+	CheckDefault bool
+	Width        int    // video
+	Height       int    // video
+	BitDepth     int    // video
+	Filename     string // attachment
 }
 
 // Expect is what the new file must look like before it may replace the original. verify compares the
@@ -40,6 +44,8 @@ type Expect struct {
 	// 0 = unknown, unchecked.
 	VideoPackets int64
 	PacketsTol   float64
+	// VideoCopied: the video is copied, not encoded (S4's repackaging); the picture comparison is skipped.
+	VideoCopied bool
 	// MinSSIM is the picture threshold the flow asks for; 0 = the program's -min-ssim.
 	MinSSIM float64
 	// Container is the file type the new file must be, as ffprobe names it ("matroska,webm"): the
@@ -77,7 +83,7 @@ func DefaultExpect(src media.Info, packets int64) Expect {
 		case "audio":
 			x.Channels = s.Channels
 		case "subtitle":
-			x.SubKind, x.Forced = s.SubKind, s.Forced
+			x.SubKind, x.Forced, x.Default = s.SubKind, s.Forced, s.Default
 		case "attachment":
 			x.Filename = s.Filename
 			x.Language = ""
@@ -246,6 +252,9 @@ func compareStream(w StreamExpect, g media.Stream, n int) []string {
 		}
 		if w.Forced != g.Forced {
 			differ("the 'forced' flag", fmt.Sprint(w.Forced), fmt.Sprint(g.Forced))
+		}
+		if w.CheckDefault && w.Default != g.Default {
+			differ("the 'default' flag", fmt.Sprint(w.Default), fmt.Sprint(g.Default))
 		}
 	case "attachment":
 		if w.Filename != "" && w.Filename != g.Filename {

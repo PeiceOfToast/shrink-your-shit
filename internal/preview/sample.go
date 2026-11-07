@@ -46,6 +46,9 @@ func (p *Previewer) Sample(ctx context.Context, root, path string, st fs.FileInf
 	low, high := Saving(t, plan, info, size)
 	s := Sample{ExpectedBytesLow: size - high, ExpectedBytesHigh: size - low}
 	video := "Video: converted to the smaller format, same picture size and length"
+	if plan.Video.Copy { // Basic's repackaging (S4)
+		video = "Video: kept as it is (already in the smaller format); the file is only repackaged as an MKV file"
+	}
 	if plan.Video.Height > 0 {
 		video = fmt.Sprintf("Video: converted to the smaller format and made %d lines high (from %d), same length", plan.Video.Height, info.Video().Height)
 	}

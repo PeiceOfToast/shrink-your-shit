@@ -350,3 +350,51 @@ func TestLegacyFlowStepsHaveNoSizeCondition(t *testing.T) {
 		}
 	}
 }
+
+// Basic's setting (S4): quality and audio (stereo_aac by default, my_languages, keep_all), saved as a
+// Basic flow; GET gives the audio and the fixed facts (becomes); audio other than keep_all needs the
+// person's languages (when sent); quality alone keeps the flow's audio; a Standard body stays Standard.
+func TestBasicSetting(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	path := fmt.Sprintf("/api/libraries/%d/setting", l.ID)
+	get := func() map[string]any {
+		_, body, _ := do(t, nil, srv, call{method: "GET", path: path})
+		var v map[string]any
+		json.Unmarshal([]byte(body), &v)
+		return v
+	}
+	if v := get(); v["kind"] != "slider" || v["audio"] != "stereo_aac" || v["fileType"] != "mkv" ||
+		fmt.Sprint(v["becomes"]) != "map[fileType:MKV resolution:same video:HEVC]" {
+		t.Errorf("new Basic: %v", v)
+	}
+	if code, body := post(t, srv, "PUT", path, `{"quality":2,"audio":"my_languages"}`); code != 400 || errCode(body) != "languages_needed" {
+		t.Errorf("no languages: %d %s", code, body)
+	}
+	if code, body := post(t, srv, "PUT", path, `{"quality":2,"audio":"keep_all"}`); code != 200 {
+		t.Fatalf("keep_all: %d %s", code, body)
+	}
+	if v := get(); v["kind"] != "slider" || v["quality"] != 2.0 || v["audio"] != "keep_all" {
+		t.Errorf("saved: %v", v)
+	}
+	if code, _ := post(t, srv, "PUT", path, `{"quality":4}`); code != 200 { // the slider alone: audio kept
+		t.Fatal(code)
+	}
+	if v := get(); v["quality"] != 4.0 || v["audio"] != "keep_all" {
+		t.Errorf("quality alone: %v", v)
+	}
+	post(t, srv, "PATCH", "/api/settings", `{"languages":["eng"]}`)
+	if code, body := post(t, srv, "PUT", path, `{"quality":4,"audio":"stereo_aac"}`); code != 200 {
+		t.Errorf("stereo with a language: %d %s", code, body)
+	}
+	if code, body := post(t, srv, "PUT", path, `{"quality":4,"audio":"surround"}`); code != 400 {
+		t.Errorf("unknown audio: %d %s", code, body)
+	}
+	// Standard's full body stays a Standard save
+	if code, body := post(t, srv, "PUT", path, `{"quality":3,"speed":"slower","audio":"aac"}`); code != 200 {
+		t.Fatalf("standard: %d %s", code, body)
+	}
+	if v := get(); v["kind"] != "selectors" || v["audio"] != "aac" || v["becomes"] != nil {
+		t.Errorf("standard read back: %v", v)
+	}
+}

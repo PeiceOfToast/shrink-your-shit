@@ -387,6 +387,25 @@ sampled hash (otherwise it is left alone and the row marked `needs_attention`); 
   the scanner, which looks at the file afresh (and may skip it again for the same reason).
 - `POST /api/system/backup` answers 501 `not_available` until slice 38.
 
+## Basic defaults (S4)
+
+A Basic flow is a slider template with `params.audio` (`stereo_aac`, the default when empty;
+`my_languages`; `keep_all`). It compiles as the position's selectors with that audio, the person's
+languages and MKV (always; replace only): HEVC, same resolution, MKV (`rules.BasicBecomes`, sent as
+`becomes` on its setting). `stereo_aac` keeps the tracks in the person's languages and those with no
+language (all of them when no language is chosen), each as AAC-LC stereo 160 kbps (`-ac:a:N 2`; a 5.1
+track is downmixed, stereo never made more); one already AAC with at most 2 channels is copied; with no
+track in the languages, the main one (default, else first) is kept and the job's log says so. An HEVC
+file is repackaged (`VideoEncode.Copy`: `-c copy`, no tag; `Expect.VideoCopied`: the picture comparison
+is skipped, the other checks run) unless nothing would change (MKV and the audio already as chosen):
+then `already_in_format`. AV1 and VP9 stay skipped as efficient. MP4 text subtitles (`mov_text`) become
+SRT text when the new file is MKV, Basic or Standard (`-c:s:N srt`; expected as `subrip` with the same
+language, forced and default flags). `GET/PUT .../setting`: a body whose only choice besides quality is
+a Basic `audio` value is a Basic save (`languages_needed` when audio is sent, not `keep_all`, and no
+language is set); quality alone keeps the flow's audio. Migration 16 (design's call, in one step): every
+existing Basic flow gets `audio: keep_all` (and MKV like every Basic flow), and an existing install with
+one gets `basic_changed_by_update` (`basicFlowsChanged`, the update notice's second sentence).
+
 ## Libraries: the card's status and the first 5 files (slice A)
 
 Each `GET /api/libraries` item has `status` `{kind, videos, foundSoFar, lastScan, nextScan, converting,

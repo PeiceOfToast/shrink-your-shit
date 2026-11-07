@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"os"
 	"path/filepath"
 	"strings"
@@ -387,6 +388,7 @@ func TestMigration7BackfillsSkipReasons(t *testing.T) {
 		`ALTER TABLE originals DROP COLUMN new_path`,                                     // and 11
 		`ALTER TABLE jobs DROP COLUMN attempts`, `ALTER TABLE jobs DROP COLUMN retry_at`, // and 12
 		`ALTER TABLE libraries DROP COLUMN last_scan`, `ALTER TABLE libraries DROP COLUMN last_scan_videos`, // and 15
+		// (16 changes rows only)
 		// (13 changes rows only)
 		`PRAGMA user_version=6`} {
 		if _, err := s.db.Exec(q); err != nil {
@@ -558,4 +560,32 @@ func TestWorkersStartStoppedMigration(t *testing.T) {
 func rewind15(s *Store) {
 	s.db.Exec(`ALTER TABLE libraries DROP COLUMN last_scan`)
 	s.db.Exec(`ALTER TABLE libraries DROP COLUMN last_scan_videos`)
+}
+
+// Migration 16 (S4, design's call): an existing Basic (slider) flow keeps every audio track
+// (audio keep_all) and the install gets the notice's Basic sentence; a new install neither.
+func TestExistingBasicFlowsMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "syp.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
+	s.db.Exec(`UPDATE flows SET template=json_remove(template, '$.params.audio')`) // as before S4
+	s.db.Exec(`DELETE FROM app_meta WHERE key='basic_changed_by_update'`)
+	s.db.Exec(`PRAGMA user_version = 15`)
+	s.Close()
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	f, _ := s.GetFlow(l.FlowID)
+	if f.Template.Kind != rules.KindSlider || f.Template.Params.Audio != "keep_all" || !s.BasicChangedByUpdate() {
+		t.Errorf("existing Basic flow: %+v, notice %v", f.Template, s.BasicChangedByUpdate())
+	}
+	fresh := open(t)
+	if fresh.BasicChangedByUpdate() {
+		t.Error("a new install got the Basic sentence")
+	}
 }
