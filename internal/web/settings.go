@@ -17,6 +17,11 @@ import (
 // and checks them; using parallelJobs, quietHours, lowPriority, scanSchedule and queueOrder belongs to
 // later slices (24/35), keepOriginalsDays to slice 17.
 type Settings struct {
+	// OldControlLevel and OldPerLibraryFlow are the retired global control level (each flow has its own
+	// now). Kept as stored for one release, so a rollback finds them, but never shown or used, and a
+	// PATCH cannot change them (review e9455d0).
+	OldControlLevel   string     `json:"controlLevel,omitempty"`
+	OldPerLibraryFlow *bool      `json:"perLibraryFlow,omitempty"`
 	FirstRunDone      bool       `json:"firstRunDone"`
 	FirstRunStep      int        `json:"firstRunStep"` // 1..5
 	KeepOriginalsDays int        `json:"keepOriginalsDays"`
@@ -128,6 +133,8 @@ func settingsRoutes(api *http.ServeMux, ss *settingsStore, access *Access) {
 		var m map[string]any
 		json.Unmarshal(b, &m)
 		m["authRequired"] = access.Required()
+		delete(m, "controlLevel") // retired: kept in storage for one release, never shown
+		delete(m, "perLibraryFlow")
 		m["trashPath"] = "Kept next to each file, in a folder called .syp-trash"
 		m["updateAvailable"] = nil
 		m["integrations"] = map[string]any{ // integrations come in a later slice; empty, so the page can show them

@@ -124,3 +124,20 @@ func TestSettingsAndFlowsNeedSignIn(t *testing.T) {
 		t.Errorf("signed in: %d %s", code, body)
 	}
 }
+
+// The retired controlLevel and perLibraryFlow stay in storage for one release (a rollback finds them),
+// through any settings save, but are never shown, and a PATCH cannot change them (review e9455d0).
+func TestRetiredSettingsAreKeptStored(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	st.SetMeta("settings", `{"controlLevel":"advanced","perLibraryFlow":true,"firstRunDone":true,"firstRunStep":5,"keepOriginalsDays":7,"parallelJobs":1,"lowPriority":true,"scanSchedule":"02:00","queueOrder":"newest","languages":[]}`)
+	if code, body := post(t, srv, "PATCH", "/api/settings", `{"quietHours":{"from":"22:00","to":"06:00"},"controlLevel":"basic","perLibraryFlow":false}`); code != 200 || strings.Contains(body, "controlLevel") || strings.Contains(body, "perLibraryFlow") {
+		t.Fatalf("patch: %d %s", code, body)
+	}
+	raw, _, _ := st.Meta("settings")
+	if !strings.Contains(raw, `"controlLevel":"advanced"`) || !strings.Contains(raw, `"perLibraryFlow":true`) || !strings.Contains(raw, `"22:00"`) {
+		t.Errorf("stored: %s", raw)
+	}
+	if _, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/settings"}); strings.Contains(body, "controlLevel") || strings.Contains(body, "perLibraryFlow") {
+		t.Errorf("GET shows them: %s", body)
+	}
+}
