@@ -118,6 +118,33 @@ exe, then runs `ISCC.exe`; Windows with Go and Inno Setup 6 only), `extract-ffmp
 only CI has done that. To refresh the pinned ffmpeg, change the URL and SHA-256 at the top of the
 `.iss` together (`sha256sum` the zip you downloaded).
 
+### Trying a dev build
+
+**These are untested dev builds**: whatever was on `dev` at that commit, not a release. Use them to try
+a change before it is released, not for a library you care about without the originals kept.
+
+Every push to `dev` runs `.github/workflows/dev-build.yml`. It builds the 5 platform archives and the
+Windows installer with the version `0.0.0-dev+<commit>` and keeps them for 14 days as one workflow
+artifact, `shrink-your-shit-dev-<commit>`: the archives, `shrink-your-shit-setup-dev-<commit>.exe` and
+`checksums.txt` (every file). It publishes nothing: no GitHub Release, no tag, no container image, and
+`install.sh` and the installer still download the latest release by default. `shrink-your-shit
+-version` and the installer's version say `0.0.0-dev+<commit>`. A maintainer can also run it by hand on
+any branch (Actions > Dev build > Run workflow).
+
+To install one:
+
+1. Open the run under Actions > Dev build (pick the commit), and download the artifact
+   `shrink-your-shit-dev-<commit>` at the bottom of the page. Downloading needs a GitHub login.
+2. Unzip it into a folder, for example `~/syp-dev`.
+3. Linux or macOS, with `install.sh` from the same commit (or `main`):
+   ```sh
+   SYP_BASE_URL=file://$HOME/syp-dev sh install.sh --library /path/to/videos
+   ```
+   It takes the archive for this computer from that folder and checks it against `checksums.txt`, as
+   it does with a release. Windows: run `shrink-your-shit-setup-dev-<commit>.exe`.
+4. To go back to the released version, run the installer again without `SYP_BASE_URL` (or the latest
+   release's setup exe on Windows).
+
 ## Continuous integration
 
 `.github/workflows/ci.yml`, triggered on pull requests and pushes to `main` and `dev`:
@@ -128,6 +155,9 @@ only CI has done that. To refresh the pinned ffmpeg, change the URL and SHA-256 
 | `build` (5 targets) | `go build ./...` and `go vet ./...` with `CGO_ENABLED=0` for linux amd64/arm64, windows amd64, darwin arm64/amd64 |
 | `docker` | `docker build`, then starts the container, waits for `/healthz`, checks `/api/status` is 401 without the token and answers with the token from `docker exec syp shrink-your-shit token` |
 | `windows-installer` | builds the Windows installer, then on the runner: silent install, real conversion, upgrade, uninstall |
+
+Pushes to `dev` also run `dev-build.yml` (above, "Trying a dev build"): it builds and keeps the dev
+artifacts, and tests nothing beyond the binary's `-version`; ci.yml does the testing.
 
 Go version comes from `go.mod`. Actions are pinned to major versions. Check a PR's status
 with `gh pr checks <number>`; what has been observed so far is in [STATUS.md](STATUS.md).

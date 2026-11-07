@@ -1,0 +1,108 @@
+name: Dev build
+
+# Every push to dev builds the program for every platform and the Windows installer, and keeps them as
+# ONE workflow artifact, shrink-your-shit-dev-<commit>, for 14 days: untested dev builds for trying a
+# change before a release. Nothing is published: no GitHub Release, no tag, no container image, and
+# install.sh and the installer still download the latest release by default. How to install one:
+# docs/DEVELOPMENT.md, "Trying a dev build". Run it by hand (workflow_dispatch) to build any branch.
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      sha7: ${{ steps.v.outputs.sha7 }}
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - id: v
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          sha7=$(printf '%s' "$SHA" | cut -c1-7)
+          echo "sha7=$sha7" >> "$GITHUB_OUTPUT"
+          echo "version=0.0.0-dev+$sha7" >> "$GITHUB_OUTPUT"
+
+  binaries:
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build archives
+        env:
+          VER: ${{ needs.version.outputs.version }}
+        run: sh scripts/build-release.sh "$VER"
+      - name: Check the linux/amd64 binary says it is this dev build
+        env:
+          VER: ${{ needs.version.outputs.version }}
+        run: |
+          tar -xzf dist/shrink-your-shit_linux_amd64.tar.gz -C "$RUNNER_TEMP"
+          got=$("$RUNNER_TEMP/shrink-your-shit_linux_amd64/shrink-your-shit" -version)
+          echo "$got"
+          [ "$got" = "shrink-your-shit $VER" ]
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dev-archives
+          path: dist/*.*
+          retention-days: 1
+
+  windows-installer:
+    needs: version
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install Inno Setup if the runner lacks it
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+      - name: Build the installer
+        env:
+          VER: ${{ needs.version.outputs.version }}
+        run: pwsh installer/windows/build.ps1 -Version $env:VER
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dev-installer
+          path: dist/shrink-your-shit-setup.exe
+          retention-days: 1
+
+  bundle:
+    needs: [version, binaries, windows-installer]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dev-*
+          path: dev
+          merge-multiple: true
+      - name: Name the installer after the build, and list every file's checksum
+        env:
+          SHA7: ${{ needs.version.outputs.sha7 }}
+        run: |
+          cd dev
+          mv shrink-your-shit-setup.exe "shrink-your-shit-setup-dev-$SHA7.exe"
+          rm -f checksums.txt
+          sha256sum -- * > checksums.txt
+          cat checksums.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shrink-your-shit-dev-${{ needs.version.outputs.sha7 }}
+          path: dev/*
+          retention-days: 14
