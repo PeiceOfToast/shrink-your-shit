@@ -97,10 +97,23 @@
     }, function () {});
   }
 
-  // First visit with nothing set up lands in the wizard.
+  // Until first-run is finished, every page opens it, with or without libraries (FIRST-RUN.md "Entry").
+  // Settings > System stays reachable, because a step 3 blocker links to its health report: there it
+  // has no menu, only "Back to setup". Returns false when the page is being left.
   function firstRun(s) {
-    if (s.firstRunDone || doc.body.getAttribute("data-section") !== "libraries") return Promise.resolve();
-    return api.listLibraries().then(function (l) { if (!l.total) location.replace("/welcome/"); });
+    if (s.firstRunDone || location.pathname === "/welcome/") return true;
+    if (location.pathname === "/settings/system/") { setupOnly(); return true; }
+    location.replace(welcome());
+    return false;
+  }
+  function welcome() { var m = /[?&](mock=[01])/.exec(location.search); return "/welcome/" + (m ? "?" + m[1] : ""); }
+  function setupOnly() {
+    var nav = $("main-nav"), tabs = doc.querySelector("nav.tabs"), p = doc.createElement("p"), a = doc.createElement("a");
+    if (nav) nav.parentNode.hidden = true;
+    if (tabs) tabs.hidden = true;
+    if ($("working")) $("working").remove();
+    doc.querySelector(".brand").href = a.href = welcome(); a.textContent = "Back to setup"; p.appendChild(a);
+    $("main").insertBefore(p, $("mock-note").nextSibling);
   }
 
   // A new version: one line on every page that links to Settings > System, which says how to update.
@@ -117,9 +130,10 @@
   theme();
   window.SYP.ready = signIn().then(function () {
     return api.getSettings().then(function (s) {
+      if (!firstRun(s)) return never; // on its way to first-run: this page never starts
       if (api.mocked) $("mock-note").hidden = false;
-      working(); update(s);
-      firstRun(s).then(function () { return menu(s); }).catch(function () {});
+      if (!s.firstRunDone) return; // Settings > System during setup: no menu, no notices
+      working(); update(s); menu(s).catch(function () {});
     }, function (e) { return e && e.status === 401 ? never : null; });
   });
 })();

@@ -35,6 +35,12 @@
   try { var sl = sessionStorage.getItem("syp-mock-libs"); if (sl) libs = JSON.parse(sl); } catch (e) {}
   // ?fresh=1 on the wizard starts over: no libraries, first-run not done.
   if (/[?&]fresh=1/.test(location.search)) { libs = []; settings.firstRunDone = false; settings.firstRunStep = 1; persist(); saveLibs(); }
+  // ?installed=1 (any page): a new install whose library came from install flags (Docker's /media, --library):
+  // one library not started yet, first-run not done. Every page should open first-run.
+  if (/[?&]installed=1/.test(location.search)) {
+    libs = [{ id: "1", name: "media", path: "/media", state: "not_started", started: false, workingFiles: 0, waitingFiles: 0, nextScan: iso(-6 * 3600e3), freedBytes: 0, flowId: "f1", settingLabel: "Balanced", settingKind: "slider" }];
+    settings.firstRunDone = false; settings.firstRunStep = 1; persist(); saveLibs();
+  }
   function saveLibs() { try { sessionStorage.setItem("syp-mock-libs", JSON.stringify(libs)); sessionStorage.setItem("syp-mock-flows", JSON.stringify(flows)); } catch (e) {} }
   var flows = [
     { id: "f1", name: "Movies", usedBy: ["Movies"], madeWith: "slider", changedAt: iso(9 * 864e5) },
