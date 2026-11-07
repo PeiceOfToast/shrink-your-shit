@@ -95,6 +95,12 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 			if err != nil {
 				return nil
 			}
+			if rel, err := filepath.Rel(lib, path); err == nil && rel != "." && t.Template.Ignored(rel) {
+				if d.IsDir() {
+					return fs.SkipDir // the flow's Ignore list: not looked at
+				}
+				return nil
+			}
 			if d.IsDir() {
 				if path != lib && SkipDir(d.Name()) {
 					return fs.SkipDir

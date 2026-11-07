@@ -5,6 +5,7 @@ package web
 import (
 	"encoding/json"
 	"fmt"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -178,27 +179,85 @@ func TestSettingEndpointsNeedSignIn(t *testing.T) {
 
 var _ = jobs.ErrNotFound
 
-// Until slice 25 saves the selectors, a body with any of them is refused and nothing is written, so a
-// choice is never dropped while the page says "Saved".
-func TestSelectorFieldsAreRefusedUntilTheyCanBeSaved(t *testing.T) {
+// The Standard selectors (slice 25a): saved and read back; at a slider position's values they are that
+// position (kind derived); choices this version cannot do yet are refused and nothing is written.
+func TestSelectorsSaveAndReadBack(t *testing.T) {
 	srv, st, _, fe := libServer(t, false)
 	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
 	path := fmt.Sprintf("/api/libraries/%d/setting", l.ID)
-	for _, f := range []string{`"speed":"fast"`, `"format":"hevc"`, `"resolution":"720p"`, `"maxBitrate":10`, `"audio":"keep_all"`,
-		`"subtitles":"keep_all"`, `"fileType":"keep"`, `"afterConverting":"replace"`, `"ignore":[]`, `"skipHdr":true`,
-		`"skipSmall":true`, `"minSavingPct":10`} {
+	get := func() map[string]any {
+		_, body, _ := do(t, nil, srv, call{method: "GET", path: path})
+		var v map[string]any
+		json.Unmarshal([]byte(body), &v)
+		return v
+	}
+	// every answer, whatever its kind, says what can be saved (addenda 13, 14)
+	for _, k := range []string{"availableFormats", "availableAudio", "availableSubtitles", "availableFileTypes"} {
+		if get()[k] == nil {
+			t.Errorf("slider kind: no %s", k)
+		}
+	}
+	for f, want := range map[string]string{
+		`"audio":"aac"`:                          "not_available",
+		`"subtitles":"srt"`:                      "not_available",
+		`"format":"av1"`:                         "not_available",
+		`"fileType":"mp4"`:                       "not_available", // replace mode
+		`"fileType":"mp4","afterConverting":"x"`: "invalid",
+		`"speed":"fast"`:                         "invalid",
+		`"resolution":"720p"`:                    "invalid",
+		`"maxBitrate":"15"`:                      "invalid",
+		`"maxBitrate":10`:                        "invalid",
+		`"minSavingPct":95`:                      "invalid",
+		`"ignore":["/etc"]`:                      "invalid",
+		`"ignore":["../up"]`:                     "invalid",
+		`"quality":9,"speed":"faster"`:           "invalid_quality",
+	} {
 		code, body := post(t, srv, "PUT", path, `{"quality":4,`+f+`}`)
-		if code != 400 || !strings.Contains(body, `"not_available"`) || !strings.Contains(body, "Nothing was changed") {
-			t.Errorf("%s: %d %s", f, code, body)
+		if code != 400 || errCode(body) != want || !strings.Contains(body, "Nothing was changed") {
+			t.Errorf("%s: %d %s, want 400 %s", f, code, body, want)
 		}
 	}
 	if f, _ := st.GetFlow(l.FlowID); f.Template != rules.SliderTemplate(3) || fe.scans != 0 {
 		t.Errorf("nothing may be written: %+v, %d scans", f.Template, fe.scans)
 	}
-	if code, body := post(t, srv, "PUT", path, `{"quality":4,"kind":"slider"}`); code != 200 {
-		t.Errorf("quality only still saves: %d %s", code, body)
+	// Standard left at Balanced's values reads back as the slider
+	if code, body := post(t, srv, "PUT", path, `{"quality":3,"speed":"normal","format":"hevc","resolution":"keep","maxBitrate":"none","audio":"keep_all","subtitles":"keep_all","fileType":"keep","afterConverting":"replace","ignore":[],"skipHdr":true,"skipSmall":true,"minSavingPct":10,"order":"newest","kind":"selectors"}`); code != 200 {
+		t.Fatalf("defaults: %d %s", code, body)
 	}
-	if f, _ := st.GetFlow(l.FlowID); f.Template != rules.SliderTemplate(4) {
-		t.Errorf("%+v", f.Template)
+	if v := get(); v["kind"] != "slider" || v["quality"] != 3.0 {
+		t.Errorf("Balanced through the selectors should be the slider: %v", v)
 	}
+	// any other choice is a selectors setting, read back as saved; minSavingPct follows Quality when left out
+	if code, body := post(t, srv, "PUT", path, `{"quality":2,"speed":"slower","resolution":"720","maxBitrate":"10","fileType":"mkv","afterConverting":"beside","ignore":["Extras","*.sample.mkv"],"skipSmall":false}`); code != 200 {
+		t.Fatalf("selectors: %d %s", code, body)
+	}
+	v := get()
+	for k, want := range map[string]any{"kind": "selectors", "quality": 2.0, "speed": "slower", "resolution": "720", "maxBitrate": "10",
+		"fileType": "mkv", "afterConverting": "beside", "skipSmall": false, "skipHdr": true, "minSavingPct": 15.0} {
+		if v[k] != want {
+			t.Errorf("%s = %v, want %v", k, v[k], want)
+		}
+	}
+	if ig, _ := v["ignore"].([]any); len(ig) != 2 {
+		t.Errorf("ignore %v", v["ignore"])
+	}
+	if libs := listLibraries(t, srv); libs[0]["settingKind"] != "selectors" || libs[0]["settingLabel"] != "Smaller" {
+		t.Errorf("library card: %v", libs[0])
+	}
+	// turning Skip HDR off says what that means
+	post(t, srv, "PUT", path, `{"quality":2,"skipHdr":false}`)
+	if w, _ := get()["warnings"].([]any); len(w) != 1 {
+		t.Errorf("warnings %v", get()["warnings"])
+	}
+	if code, body := post(t, srv, "PUT", path, `{"quality":4,"kind":"slider"}`); code != 200 || get()["kind"] != "slider" {
+		t.Errorf("quality only still saves the slider: %d %s", code, body)
+	}
+}
+
+func listLibraries(t *testing.T, srv *httptest.Server) []map[string]any {
+	t.Helper()
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/libraries"})
+	var v struct{ Items []map[string]any }
+	json.Unmarshal([]byte(body), &v)
+	return v.Items
 }

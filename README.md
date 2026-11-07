@@ -99,6 +99,10 @@ program; point at it explicitly with `-ffmpeg` / `-ffprobe` or `SYP_FFMPEG` /
 - macOS/Windows file names are case-insensitive; `.MKV` and `.mkv` are both recognised.
   Hidden files and folders (names starting with `.`, such as macOS `._name.mp4` or
   `.Trash`) and the Synology `@eaDir` and Windows `$RECYCLE.BIN` folders are ignored.
+- **HDR and Dolby Vision videos are left as they are** (skipped as "HDR or Dolby Vision"), whatever the
+  setting, unless a Standard setting turns "Skip HDR" off. Converting them would drop their HDR
+  information and can make the picture look washed out. Before this version an existing library could
+  convert them; it no longer does.
 - Files being copied in are skipped until they have not changed for `-settle`
   (15 seconds by default); on a slow network share raise it.
 - File permission bits are copied on Linux/macOS. Windows has no equivalent, so the

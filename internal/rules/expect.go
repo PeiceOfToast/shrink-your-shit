@@ -11,7 +11,8 @@ import (
 )
 
 // StreamExpect says what one stream of the new file must look like. A zero value is not checked,
-// except Language, which must match exactly (including "no language").
+// except Language, which must match exactly (including "no language"; "und", "undetermined", is the same
+// as none: MP4 writes it where MKV writes nothing).
 type StreamExpect struct {
 	Type     string // video, audio, subtitle, attachment
 	Codec    string
@@ -43,6 +44,9 @@ type Expect struct {
 	MinSavings float64
 	// MinSSIM is the picture threshold the flow asks for; 0 = the program's -min-ssim.
 	MinSSIM float64
+	// Container is the file type the new file must be, as ffprobe names it ("matroska,webm"): the
+	// original's, or the flow's new type; "" = unchecked (unknown).
+	Container string `json:",omitempty"`
 }
 
 // DefaultExpect is the expectation for what the worker does today: every stream of the original is
@@ -51,6 +55,7 @@ type Expect struct {
 // frame count, 0 if unknown.
 func DefaultExpect(src media.Info, packets int64) Expect {
 	e := Expect{
+		Container:    src.Container,
 		Chapters:     src.Chapters,
 		DurationSec:  src.DurationSec,
 		DurationTol:  0.02,
@@ -135,6 +140,10 @@ func describe(s StreamExpect, ordinal int) string {
 // (empty = it matches). outPackets is the new file's main video frame count, or -1 if not counted.
 func (e Expect) Compare(out media.Info, outPackets int64) []string {
 	var problems []string
+
+	if e.Container != "" && out.Container != e.Container {
+		problems = append(problems, fmt.Sprintf("the new file's type is %s, not %s as it should be", containerWords(out.Container), containerWords(e.Container)))
+	}
 
 	// Streams: counts per type first; positions only where the counts agree.
 	for _, t := range checkedTypes {
@@ -224,14 +233,14 @@ func compareStream(w StreamExpect, g media.Stream, n int) []string {
 			differ("the colour depth", fmt.Sprintf("%d-bit", w.BitDepth), fmt.Sprintf("%d-bit", g.BitDepth))
 		}
 	case "audio":
-		if !strings.EqualFold(w.Language, g.Language) {
+		if !sameLanguage(w.Language, g.Language) {
 			differ("the language", quoteLang(w.Language), quoteLang(g.Language))
 		}
 		if w.Channels > 0 && g.Channels != w.Channels {
 			differ("the channel count", fmt.Sprint(w.Channels), fmt.Sprint(g.Channels))
 		}
 	case "subtitle":
-		if !strings.EqualFold(w.Language, g.Language) {
+		if !sameLanguage(w.Language, g.Language) {
 			differ("the language", quoteLang(w.Language), quoteLang(g.Language))
 		}
 		if w.SubKind != "" && w.SubKind != g.SubKind {
@@ -273,4 +282,29 @@ func HumanBytes(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+func sameLanguage(a, b string) bool {
+	norm := func(s string) string {
+		if strings.EqualFold(s, "und") {
+			return ""
+		}
+		return strings.ToLower(s)
+	}
+	return norm(a) == norm(b)
+}
+
+// Containers are the file types a flow can make (fileType), as ffprobe names them.
+var Containers = map[string]string{"mkv": "matroska,webm", "mp4": "mov,mp4,m4a,3gp,3g2,mj2"}
+
+func containerWords(name string) string {
+	switch {
+	case name == "":
+		return "unknown"
+	case strings.HasPrefix(name, "matroska"):
+		return "MKV"
+	case strings.Contains(name, "mp4"):
+		return "MP4"
+	}
+	return strings.ToUpper(strings.SplitN(name, ",", 2)[0])
 }

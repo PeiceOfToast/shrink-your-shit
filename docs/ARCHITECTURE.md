@@ -79,8 +79,8 @@ rule the scanner matches with and the CRF, preset, output mode and minimum savin
 
 A **Plan** (`internal/rules/plan.go`) is what to do with one file, compiled from its library's flow
 template and the file's probe: `Skip` (why not to convert it, the scanner's decision) or `Reason`,
-the video encode (`libx265`, CRF, preset, tag; a bitrate cap can be added for slice 25), the output
-mode, and the thresholds (minimum saving; an SSIM gate, 0 = `-min-ssim`). The scanner compiles a Plan
+the video encode (`libx265`, CRF, preset, tag; a VBV bitrate cap and a scale-down height from the
+selectors), the output mode and the new file's type (`Container`, beside mode only), and the thresholds (minimum saving; an SSIM gate, 0 = `-min-ssim`). The scanner compiles a Plan
 per file to decide; the worker compiles it again from the probe it takes, runs `Plan.FFmpegArgs`,
 checks the result against `Plan.Expect` (slice 10's `Expect`, now in `internal/rules`) and stores a
 `Snapshot` on the job (migration 4): the Plan (with the eligibility rule that decided it), the
@@ -92,24 +92,43 @@ scanner's decision; the worker only refuses a flow that cannot say how. A legacy
 exactly the arguments and decisions of the program before Plans (`TestLegacyPlanIsExactlyTodaysBehaviour`
 over every probe in `internal/media/testdata`).
 
-A **slider** flow compiles TIERS-PLAN.md 2.1's recipe (`compileSlider`): HEVC at the position's CRF
+A **slider** flow compiles TIERS-PLAN.md 2.1's recipe, which is the Standard selectors at that
+position's values (`DefaultSelectors`, one compiler: `compileSelectors`): HEVC at the position's CRF
 (one lower up to 720p, one higher at 2160p), preset medium, the source's bit depth, resolution and
 container, every audio track and subtitle copied, the position's minimum saving and SSIM gate. It
 converts H.264, MPEG-2, MPEG-4, VC-1 and WMV (D5) above the position's bits per pixel per frame;
 HEVC, AV1 and VP9 are skipped as already efficient, and so is a file whose subtitles its container
-cannot hold. HDR/Dolby Vision skips are slices 13/14 (`contentSkip`, one place for every template).
-The main video is encoded even when cover art comes first (`VideoEncode.Index`; legacy keeps `v:0`).
-All the numbers are in one table, `rules.Slider`, untuned (D8).
+cannot hold. **HDR and Dolby Vision files are skipped (`hdr_dv`, D3) by every flow** since slice 25a,
+legacy ones included where the rule would have converted them: converting drops their HDR information,
+which can wash the picture out. The main video is encoded even when cover art comes first
+(`VideoEncode.Index`; legacy keeps `v:0`). All the numbers are in one table, `rules.Slider`, untuned (D8).
 
-The library's **setting** (`internal/web/setting.go`) is its flow seen through the slider:
+A **selectors** flow (`internal/rules/selectors.go`, slice 25a) stores the Standard choices
+(UI-API-CONTRACT.md addenda 2, 9, 13, 14) and compiles them with the same recipe:
+- Speed faster/normal/slower is x265 fast/medium/slow.
+- Resolution keep/1080/720/480 scales down only (`scale=-2:H`, CRF by the new height). `Expect` then
+  wants that picture size, and the picture comparison scales the original to it.
+- maxBitrate is a VBV cap (maxrate = value, bufsize = 2x).
+- File type keep/mkv/mp4 applies with "Put the new file next to the original" (beside) only; an existing file at that name is never replaced (the job fails with a plain reason) (`name.hevc.mkv`; replacing with a new type
+  is 25a-2). A track the new type cannot hold skips the file with a reason (`cannot_keep_track`).
+- Ignore is a list of folders, files or patterns inside the library that the scanner and the
+  Preview do not look at.
+- Skip HDR (on by default; off converts HDR and the setting answers a warning), Skip small (off
+  converts whatever its bits per pixel), and the minimum saving (follows Quality unless given).
+- Audio and Subtitles are `keep_all` only; the other values, AV1, and a new file type when replacing
+  are 400 `not_available`, nothing written.
+- A selectors setting equal to a position is saved as the slider (kind derived, addendum 6).
+
+The library's **setting** (`internal/web/setting.go`) is its flow seen through the editors:
 `GET /api/settings/slider`, `GET/PUT /api/libraries/{id}/setting`, `POST .../setting/replace-custom`.
-Until the selectors are saved (slice 25), a PUT carrying any selector field is refused with 400
-`not_available` and nothing is written, so no choice is silently dropped.
+GET carries the derived `kind`, the selector values for slider and selectors flows, and on every answer
+`availableFormats`, `availableAudio`, `availableSubtitles`, `availableFileTypes` (per afterConverting)
+and `warnings`. A PUT with only `quality` saves the slider; any selector field makes it a selectors save.
 A legacy or custom flow is never overwritten (a new flow named after the library is made; the old one
 stays in Flows); a flow other libraries share needs `sharedFlowChoice` (`change_both` or `make_copy`,
 "<library> (own copy)"), else 409 `flow_shared` with `usedBy`. Every change forgets the affected
-libraries' files and wakes the scanner. `GET /api/flows/{id}` describes slider and legacy flows in
-plain words, raw numbers only in `detail`.
+libraries' files and wakes the scanner. `GET /api/flows/{id}` describes slider, selectors and legacy
+flows in plain words, raw numbers only in `detail`.
 
 ## Setup checks (the doctor)
 

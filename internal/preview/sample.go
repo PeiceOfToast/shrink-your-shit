@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"strings"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -41,13 +42,27 @@ func (p *Previewer) Sample(ctx context.Context, path string, st fs.FileInfo, t r
 		s.Lines = append(s.Lines, fmt.Sprintf("Probably left as it is: the new file is unlikely to be at least %d%% smaller.", plan.MinSavingPct))
 		return s
 	}
-	s.Lines = append(s.Lines, "Video: converted to the smaller format, same picture size and length")
+	video := "Video: converted to the smaller format, same picture size and length"
+	if plan.Video.Height > 0 {
+		video = fmt.Sprintf("Video: converted to the smaller format and made %d lines high (from %d), same length", plan.Video.Height, info.Video().Height)
+	}
+	if plan.Video.MaxRateKbps > 0 {
+		video += fmt.Sprintf(", at most %d Mbps", plan.Video.MaxRateKbps/1000)
+	}
+	s.Lines = append(s.Lines, video)
 	s.Lines = append(s.Lines, "Audio: "+tracks(len(info.Audio()), "track"))
 	if n := len(info.Subtitles()); n > 0 {
 		s.Lines = append(s.Lines, "Subtitles: "+tracks(n, "subtitle"))
 	}
 	if plan.MinSavingPct > 0 {
 		s.Lines = append(s.Lines, fmt.Sprintf("Kept as it is if the new file is not at least %d%% smaller", plan.MinSavingPct))
+	}
+	if plan.Output == "beside" {
+		kind := "file"
+		if plan.Container != "" {
+			kind = strings.ToUpper(plan.Container) + " file"
+		}
+		s.Lines = append(s.Lines, "The new "+kind+" is written next to the original, which stays as it is")
 	}
 	if media.LinkCount(path, st) > 1 {
 		s.Lines = append(s.Lines, "Shared with another folder: converting it frees no space, because the other folder keeps its copy")

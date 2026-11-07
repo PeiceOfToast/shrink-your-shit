@@ -114,3 +114,15 @@ func TestHumanBytesAndClock(t *testing.T) {
 		t.Errorf("%s %s %s", Clock(0), Clock(3725), Clock(59.6))
 	}
 }
+
+// "und" (undetermined, as MP4 writes it) and no language are the same; a real language is not.
+func TestSameLanguage(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want bool
+	}{{"und", "", true}, {"", "UND", true}, {"eng", "ENG", true}, {"eng", "", false}, {"eng", "und", false}, {"fre", "eng", false}} {
+		if sameLanguage(c.a, c.b) != c.want {
+			t.Errorf("%q %q", c.a, c.b)
+		}
+	}
+}

@@ -72,7 +72,10 @@ func removeLeftoverTemps(src string) error {
 	if err != nil {
 		return fmt.Errorf("looking for old temp files: %w", err)
 	}
-	stagedName := "new" + filepath.Ext(src)
+	// our one temp file: new.<the original's type>, or new.mkv / new.mp4 when the flow changes the type
+	isStaged := func(name string) bool {
+		return name == "new"+filepath.Ext(src) || name == "new.mkv" || name == "new.mp4"
+	}
 	for _, p := range old {
 		fi, err := os.Lstat(p)
 		if errors.Is(err, fs.ErrNotExist) {
@@ -90,7 +93,7 @@ func removeLeftoverTemps(src string) error {
 			if err != nil {
 				return fmt.Errorf("cannot check the old temp folder %s: %w", p, err)
 			}
-			ours := len(entries) == 0 || (len(entries) == 1 && entries[0].Name() == stagedName && entries[0].Type().IsRegular())
+			ours := len(entries) == 0 || (len(entries) == 1 && isStaged(entries[0].Name()) && entries[0].Type().IsRegular())
 			if !ours {
 				log.Printf("leaving %s alone: it holds files shrink-your-shit did not put there", p)
 				continue
@@ -115,12 +118,12 @@ func removeLeftoverTemps(src string) error {
 
 // newStaged creates the staging folder and the empty file ffmpeg will write into. ffmpeg opens that
 // path and truncates it, which keeps the same file.
-func newStaged(src string) (*staged, error) {
+func newStaged(src, ext string) (*staged, error) {
 	dir, err := os.MkdirTemp(filepath.Dir(src), stagingPattern(src))
 	if err != nil {
 		return nil, fmt.Errorf("cannot create the temp folder next to the original: %w", err)
 	}
-	s := &staged{dir: dir, path: filepath.Join(dir, "new"+filepath.Ext(src))}
+	s := &staged{dir: dir, path: filepath.Join(dir, "new"+ext)}
 	f, err := os.OpenFile(s.path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	if err == nil {
 		s.id, err = f.Stat()
