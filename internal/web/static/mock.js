@@ -186,19 +186,20 @@
       w.push("Changing the file type renames each file (" + (s.fileType === "mkv" ? "movie.mp4 becomes movie.mkv" : "movie.mkv becomes movie.mp4") + "). Radarr, Sonarr, Plex or Jellyfin may lose track of the renamed files: after converting, rescan this library in those apps.");
     return w;
   }
-  // "Is this the right folder?" (redesign A3; fields as proposed for workshop): the first 5 videos A to Z and what each
-  // one is. A folder's first answer is still looking (120 found, two not read yet); the next is finished. Folder names:
-  // "few" (3 videos), "unreadable" (one can't be read).
+  // "Is this the right folder?" (redesign A3; workshop slice A, UI-API-CONTRACT.md 20:25Z): the first 5 videos A to Z.
+  // A folder's first answer is still looking (120 found, two being checked); the next is finished. Folder names: "few"
+  // (3 videos), "unreadable" (one can't be read).
   var fiveAsked = {};
   function firstFive(root) {
     root = root.replace(/\/+$/, ""); var looking = (fiveAsked[root] = (fiveAsked[root] || 0) + 1) === 1, few = /few/.test(root);
-    var all = [["12 Angry Men (1957)/12 Angry Men (1957).mkv", 8.1, "H.264", "1080p", 5760], ["2001 A Space Odyssey (1968)/2001 A Space Odyssey (1968).mkv", 54, "H.264", "4K", 8940],
-      ["Alien (1979)/Alien (1979).mp4", 6.4, "HEVC", "1080p", 7020], ["Amelie (2001).avi", 1.4, "MPEG-4", "480p", 7320], ["Arrival (2016)/Arrival (2016).mkv", 11, "H.264", "4K", 6960]].slice(0, few ? 3 : 5);
-    var items = all.map(function (f, i) { var read = !looking || i < 3;
-      return { path: root + "/" + f[0], bytes: f[1] * GB, codec: read ? f[2] : null, resolution: read ? f[3] : null, durationSeconds: read ? f[4] : null, unreadable: false }; });
-    if (/unreadable/.test(root)) { items[1].unreadable = true; items[1].codec = items[1].resolution = items[1].durationSeconds = null; }
+    var all = [["12 Angry Men (1957)", "12 Angry Men (1957).mkv", 8.1, "H.264", "1080p", 5760], ["2001 A Space Odyssey (1968)", "2001 A Space Odyssey (1968).mkv", 54, "H.264", "4K", 8940],
+      ["Alien (1979)", "Alien (1979).mp4", 6.4, "HEVC", "1080p", 7020], [".", "Amelie (2001).avi", 1.4, "MPEG-4", "480p", 7320], ["Arrival (2016)", "Arrival (2016).mkv", 11, "H.264", "4K", 6960]].slice(0, few ? 3 : 5);
+    var items = all.map(function (f, i) { var ready = !looking || i < 3;
+      return { path: root + "/" + (f[0] === "." ? "" : f[0] + "/") + f[1], folder: f[0], name: f[1], bytes: f[2] * GB, state: ready ? "ready" : "checking",
+        codec: ready ? f[3] : null, resolution: ready ? f[4] : null, durationSec: ready ? f[5] : null }; });
+    if (/unreadable/.test(root)) { items[1].state = "unreadable"; items[1].codec = items[1].resolution = items[1].durationSec = null; }
     var total = few ? 3 : 1284;
-    return { items: items, total: looking ? Math.min(120, total) : total, looking: looking };
+    return { items: items, total: looking ? Math.min(120, total) : total, stillLooking: looking };
   }
   function gone() { return fail(404, "not_found", "That item is gone. Nothing was changed. Reload the page."); }
   function removeFrom(arr, key, id) { var i = find(arr, key, id); return i < 0 ? null : arr.splice(i, 1)[0]; }
@@ -330,8 +331,12 @@
         expectedBytesLow: ((b.sampleFile.length % 5) + 2.2 - 0.2 * q) * GB, expectedBytesHigh: ((b.sampleFile.length % 5) + 3.1 - 0.2 * q) * GB };
       return ok(r);
     },
-    listFiles: function (p) { var i = find(libs, "id", p.id); return ok(firstFive(i < 0 ? "/media" : libs[i].path)); }, // also the Standard sample picker's list
-    folderFiles: function (p) { return ok(firstFive(p.path || "/media")); },
+    listFiles: function (p) {
+      var i = find(libs, "id", p.id), root = i < 0 ? "/media" : libs[i].path;
+      return ok(list([{ path: root + "/Alien (1979).mkv", bytes: 9 * GB }, { path: root + "/Heat (1995).mkv", bytes: 7 * GB }, { path: root + "/Show S02E04.mkv", bytes: 4.1 * GB }]));
+    },
+    firstFiles: function (p) { var i = find(libs, "id", p.id); return i < 0 ? fail(404, "not_found", "There is no such library.") : ok(firstFive(libs[i].path)); },
+    firstFilesFor: function (p, b) { return ok(firstFive(b.path || "/media")); },
     activitySummary: function () { return ok(summary()); },
     listWorkers: function () { return ok({ workers: [workerView()], stoppedByUpdate: stoppedByUpdate, basicFlowsChanged: stoppedByUpdate && /[?&]basicchanged=1/.test(location.search) }); }, // ?basicchanged=1: S4's flag
     startWorker: function (p) { if (p.id !== "this") return fail(404, "not_found", "There is no such worker. Nothing was changed."); worker.on = true; worker.stopping = false; stoppedByUpdate = false; saveWorkers(); return ok(workerView()); },

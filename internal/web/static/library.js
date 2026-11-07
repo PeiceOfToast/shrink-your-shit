@@ -107,7 +107,7 @@
       // "Is this the right folder?" replaces the Preview card (redesign A3). At Standard the Preview still runs, unseen,
       // only for the warnings above Save while editing, until workshop's warnings-only check exists (REDESIGN E).
       $("preview").hidden = true;
-      ui.firstFive($("first5-card"), lib.path, function () { return api.listFiles({ id: id, limit: 5 }); });
+      ui.firstFive($("first5-card"), lib.path, function () { return api.firstFiles({ id: id }); }, "h2", "/activity/");
     }).catch(fail);
   }
   S.ready.then(init);

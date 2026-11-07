@@ -42,7 +42,7 @@
           list.appendChild(line("ok", "OK", "We can read and change files in this folder."));
           list.appendChild(line("ok", "OK", ui.count(r.videoCount, "video", "videos") + " found (" + ui.bytes(r.totalBytes) + ")."));
           // Once the checks pass: "Is this the right folder?" (redesign A3). It never holds up Continue / Add.
-          five = ui.firstFive($("first5"), path, function () { return api.folderFiles({ path: path, limit: 5 }); });
+          five = ui.firstFive($("first5"), path, function () { return api.firstFilesFor({}, { path: path }); });
         }
         (r.notes || []).forEach(function (n) {
           list.appendChild(n.code === "no_hw_encoder" ? line("idle", "Not found", "No graphics card help found. That is fine; the processor will be used.")

@@ -54,35 +54,37 @@
   };
 
   // "Is this the right folder?" (redesign A3): the first 5 videos, A to Z, with what each one is. One component for Add a
-  // library, first-run step 3 and the library page. load() answers {items:[{path, bytes, codec, resolution,
-  // durationSeconds, unreadable}], total, looking} (contract A5, proposed); while looking it is asked again. root is the
-  // folder, for the Folder column and the caption; hn the heading level. Returns {stop()}.
+  // library, first-run step 3 and the library page. load() answers workshop slice A's shape: {items:[{path, folder, name,
+  // bytes, state checking|ready|unreadable, codec, resolution, durationSec}], total, stillLooking}; while stillLooking it
+  // is asked again each second. root names the folder in the caption; all (library page only) adds "See them all in
+  // Activity". hn is the heading level. Returns {stop()}.
   function length(sec) { var m = Math.round(sec / 60), h = Math.floor(m / 60); return h ? h + " h " + (m % 60) + " min" : m + " min"; }
-  ui.firstFive = function (host, root, load, hn) {
-    var h = ui.el(hn || "h2", null, "Is this the right folder?"), lead = ui.el("p", "muted small"), wrap = ui.el("div", "table-wrap"), count = ui.el("p", "small"), timer = null, done = false;
-    h.style.marginTop = "0"; count.setAttribute("aria-live", "polite");
-    host.textContent = ""; host.appendChild(h); host.appendChild(lead); host.appendChild(wrap); host.appendChild(count);
-    var base = root.replace(/[\\/]+$/, "");
-    function folder(p) { var d = p.slice(0, p.length - p.split(/[\\/]/).pop().length).replace(/[\\/]+$/, ""); return d.length > base.length && d.indexOf(base) === 0 ? d.slice(base.length + 1) : "."; }
+  ui.firstFive = function (host, root, load, hn, all) {
+    var h = ui.el(hn || "h2", null, "Is this the right folder?"), lead = ui.el("p", "muted small"), wrap = ui.el("div", "table-wrap"),
+      foot = ui.el("p", "small"), count = ui.el("span"), timer = null, done = false;
+    h.style.marginTop = "0"; count.setAttribute("aria-live", "polite"); foot.appendChild(count);
+    host.textContent = ""; host.appendChild(h); host.appendChild(lead); host.appendChild(wrap); host.appendChild(foot);
     function draw(r) {
       var items = (r.items || []).slice(0, 5), t = ui.el("table"), cap = ui.el("caption", "sr", "First 5 videos in " + root), hd = ui.el("tr"), tb = ui.el("tbody");
-      ["Folder", "File name", "Format", "Resolution", "Size", "Length"].forEach(function (c) { var th = ui.el("th", null, c); th.scope = "col"; hd.appendChild(th); });
+      ["Folder", "File name", "Codec", "Resolution", "Size", "Length"].forEach(function (c) { var th = ui.el("th", null, c); th.scope = "col"; hd.appendChild(th); });
       var th = ui.el("thead"); th.appendChild(hd); t.appendChild(cap); t.appendChild(th); t.appendChild(tb);
       items.forEach(function (f) {
         var tr = ui.el("tr"), cell = function (x, cls) { tr.appendChild(ui.el("td", cls || null, x)); };
-        cell(folder(f.path), "mono"); cell(f.path.split(/[\\/]/).pop());
-        if (f.unreadable) { var td = ui.el("td", "muted", "can't read this file"); td.colSpan = 4; tr.appendChild(td); }
-        else { var wait = "checking..."; cell(f.codec || wait); cell(f.resolution || wait); cell(ui.bytes(f.bytes)); cell(f.durationSeconds != null ? length(f.durationSeconds) : wait); }
+        cell(f.folder, "mono"); cell(f.name);
+        if (f.state === "unreadable") { var td = ui.el("td", "muted", "can't read this file"); td.colSpan = 4; tr.appendChild(td); }
+        else { var wait = f.state === "checking"; cell(wait ? "checking..." : f.codec || ""); cell(wait ? "checking..." : f.resolution || ""); cell(ui.bytes(f.bytes)); cell(wait ? "checking..." : f.durationSec != null ? length(f.durationSec) : ""); }
         tb.appendChild(tr);
       });
       wrap.textContent = ""; wrap.hidden = !items.length; if (items.length) wrap.appendChild(t);
-      if (r.looking) { lead.textContent = "Looking for videos... found " + ui.num(r.total) + " so far."; return; }
+      if (r.stillLooking) { lead.textContent = "Looking for videos... found " + ui.num(r.total) + " so far."; return; }
       // Finished: the count line is set once, so a screen reader hears it when the search ends, not for every file.
       lead.textContent = !r.total ? "We found no videos here. Pick the folder that holds them." : r.total < 5 ? "The " + ui.count(r.total, "video", "videos") + " we found:" : "The first 5 videos we found, A to Z:";
       count.textContent = r.total ? ui.count(r.total, "video", "videos") + " in this folder." : "";
+      // The library page also links to Activity; the link filters to this library once Activity can (piece C).
+      if (all && r.total && !foot.querySelector("a")) { var a = ui.el("a", null, "See them all in Activity"); a.href = all; foot.appendChild(document.createTextNode(" ")); foot.appendChild(a); }
     }
     (function ask() {
-      load().then(function (r) { if (done) return; draw(r); if (r.looking) timer = setTimeout(ask, 1000); },
+      load().then(function (r) { if (done) return; draw(r); if (r.stillLooking) timer = setTimeout(ask, 1000); },
         function (e) { if (!done) { lead.textContent = e && e.message || "We couldn't list this folder."; wrap.hidden = true; } });
     })();
     return { stop: function () { done = true; clearTimeout(timer); } };
