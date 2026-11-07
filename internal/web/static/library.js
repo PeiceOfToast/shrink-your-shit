@@ -65,7 +65,7 @@
       warn = ui.warnings($("save")); warn.show(setting.warnings); // the saved setting's warnings, at every level
       // At Standard the editor's Preview gives the warnings of the setting as edited, before it is saved.
       var extra = level === "standard" ? { sample: function () { return $("sf").value || null; }, onSample: showSample, onWarnings: function (w) { warn.show(w); } } : null;
-      prev = ui.preview($("pv"), id, get, extra);
+      if (level === "standard") prev = ui.preview($("pv"), id, get, extra); // only for the warnings now (see below)
       if (level === "standard") {
         custom = setting.kind === "custom";
         $("custom").hidden = !custom; $("desc").hidden = true; $("facts").hidden = true;
@@ -87,7 +87,7 @@
         var more = setting.kind === "selectors"; // saved with Standard choices: more than a slider can show
         $("custom").hidden = !(custom || more);
         if (more) $("custom").querySelector("strong").textContent = "This setting has more choices than a slider shows";
-        editor = slider = ed.slider($("slider"), setting.quality || 3, function () { facts(); prev.mark(); }, lib.name + ": smallest file to best quality");
+        editor = slider = ed.slider($("slider"), setting.quality || 3, function () { facts(); }, lib.name + ": smallest file to best quality");
         if (custom || more) $("save").textContent = "Use this slider setting";
         $("save").onclick = save;
         facts();
@@ -96,15 +96,18 @@
         api.scanLibrary({ id: id }).then(function () { say("Scan started. Progress shows in Activity."); return api.getLibrary({ id: id }); })
           .then(function (l) { lib = l; head(); }, fail);
       };
-      $("update").onclick = function () { prev.start(); };
+
       // Remove: the one place; a confirm first (native dialog).
       $("remove").onclick = function () { $("rm-q").textContent = "Remove " + lib.name + "?"; $("rm-dialog").returnValue = ""; $("rm-dialog").showModal(); };
       $("rm-dialog").addEventListener("close", function () {
         if ($("rm-dialog").returnValue !== "remove") { $("remove").focus(); return; }
         api.deleteLibrary({ id: id }).then(function () { location.href = "/libraries/"; }, fail);
       });
-      if (level !== "standard") prev.start();
-      if (location.hash === "#preview") $("preview").scrollIntoView();
+
+      // "Is this the right folder?" replaces the Preview card (redesign A3). At Standard the Preview still runs, unseen,
+      // only for the warnings above Save while editing, until workshop's warnings-only check exists (REDESIGN E).
+      $("preview").hidden = true;
+      ui.firstFive($("first5-card"), lib.path, function () { return api.listFiles({ id: id, limit: 5 }); });
     }).catch(fail);
   }
   S.ready.then(init);

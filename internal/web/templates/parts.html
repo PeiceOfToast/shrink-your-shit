@@ -2,7 +2,8 @@
 <span id="path-hint" class="hint">Type a path, or press Browse. This is a folder on the computer running shrink-your-shit.</span></div>
 <div class="card" id="browser" hidden></div>
 <h2 id="checks-h" hidden>Checking this folder</h2>
-<ul class="stack" id="checks" style="list-style:none;padding:0" aria-label="Folder checks" aria-live="polite"></ul>{{end}}
+<ul class="stack" id="checks" style="list-style:none;padding:0" aria-label="Folder checks" aria-live="polite"></ul>
+<div id="first5"></div>{{end}}
 
 {{define "libraries"}}<noscript><div class="notice info" role="note"><div><strong>Turn on scripts to see your libraries</strong>The list and Add a library need scripts enabled.</div></div></noscript>
 <div class="page-head"><div><h1>Libraries</h1><p class="muted">Each library is a folder of videos with its own shrink setting.</p></div><a class="btn" href="#add">Add library</a></div>
@@ -31,6 +32,7 @@
 <div class="check"><input id="sh2" type="radio" name="sh" value="make_copy"><label for="sh2" id="sh2l"></label></div></fieldset>
 <div class="row"><button class="btn primary" type="button" id="save">Save</button><button class="btn" type="button" id="scan">Scan now</button></div>
 <p class="hint" id="applies" hidden></p><p id="said" class="muted" role="status"></p></section>
+<section class="card" id="first5-card"></section>
 <section class="card" id="preview" aria-labelledby="ph2"><h2 id="ph2" style="margin-top:0">Preview</h2>
 <p class="muted">See what would happen, without changing any file.</p>
 <div id="sample" hidden><h3>What would happen to one file</h3>

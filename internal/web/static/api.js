@@ -20,7 +20,7 @@
     replaceCustom: ["POST", "/api/libraries/{id}/setting/replace-custom"],
     putLibraryFlow: ["PUT", "/api/libraries/{id}/flow"],
     preview: ["POST", "/api/libraries/{id}/preview"],
-    listFiles: ["GET", "/api/libraries/{id}/files"],
+    listFiles: ["GET", "/api/libraries/{id}/files"], folderFiles: ["GET", "/api/files"],
     // Workers (redesign D; workshop S2, UI-API-CONTRACT.md 20:25Z): list, start, stop {when}, Files at once, the update notice.
     listWorkers: ["GET", "/api/workers"], startWorker: ["POST", "/api/workers/{id}/start"], stopWorker: ["POST", "/api/workers/{id}/stop"],
     setWorker: ["PATCH", "/api/workers/{id}"], dismissWorkerNotice: ["POST", "/api/workers/notice/dismiss"],
