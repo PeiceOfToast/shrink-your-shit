@@ -149,7 +149,12 @@ func main() {
 	}
 	// Kept originals whose days are up are deleted now and then every hour (slice 18).
 	runLogs := &runlog.Logs{Dir: filepath.Join(*data, "logs")} // each job's run log (S5)
-	sweepLogs := func() {                                      // the run logs' limits: their job is gone, 30 days, 100 MiB in all
+	store.OnJobsRemoved = func(ids []int64) {                  // a job's log goes with it (review 43e6f66)
+		for _, id := range ids {
+			runLogs.Remove(id)
+		}
+	}
+	sweepLogs := func() { // the run logs' limits: their job is gone, 30 days, 100 MiB in all
 		ids, err := store.ForgetGoneJobSteps()
 		if err != nil {
 			log.Printf("run logs: %v", err)

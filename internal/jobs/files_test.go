@@ -89,3 +89,52 @@ func TestFileList(t *testing.T) {
 		t.Error("an unknown card")
 	}
 }
+
+// Review 43e6f66: the skipped card takes reason=a,b; its library filter works with Windows paths; the
+// processing card is in start order (not last progress).
+func TestFileListReviewFixes(t *testing.T) {
+	s := open(t)
+	lib, _ := s.AddLibrary("Media", `C:\Media`, rules.SliderTemplate(3), true)
+	s.db.Exec(`UPDATE libraries SET path=? WHERE id=?`, `C:\Media`, lib.ID) // as a Windows install stores it (this test runs on Linux)
+	s.PutFile(File{Path: `C:\Media\a.mkv`, Size: 1, Decision: "skip: x", Reason: "already_hevc"})
+	s.PutFile(File{Path: `C:\Media\b.mkv`, Size: 1, Decision: "skip: x", Reason: "no_video"})
+	s.PutFile(File{Path: `C:\Other\c.mkv`, Size: 1, Decision: "skip: x", Reason: "already_hevc"})
+	rows, total, counts, err := s.FileList(FileFilter{Show: CardSkipped, LibraryID: lib.ID, Reasons: []string{"already_hevc", "already_in_format"}, Limit: 50})
+	if err != nil || total != 1 || len(rows) != 1 || rows[0].Path != `C:\Media\a.mkv` || counts[CardSkipped] != 1 {
+		t.Errorf("windows + reasons: %v %d %v %v", rows, total, counts, err)
+	}
+	a, _ := s.Enqueue(Job{Library: `C:\Media`, LibraryID: lib.ID, Path: `C:\Media\x.mkv`})
+	b, _ := s.Enqueue(Job{Library: `C:\Media`, LibraryID: lib.ID, Path: `C:\Media\y.mkv`})
+	s.Claim("w")
+	s.Claim("w")
+	s.db.Exec(`UPDATE jobs SET started='2026-11-07T10:00:00Z' WHERE id=?`, a)
+	s.db.Exec(`UPDATE jobs SET started='2026-11-07T11:00:00Z' WHERE id=?`, b)
+	s.Progress(a, 50) // the earlier one reports progress last
+	rows, _, _, _ = s.FileList(FileFilter{Show: CardProcessing, Limit: 50})
+	if len(rows) != 2 || rows[0].JobID != a {
+		t.Errorf("processing order %v", rows)
+	}
+}
+
+// Every way a job is removed tells OnJobsRemoved (its run log goes) and drops its steps.
+func TestJobsRemovedHook(t *testing.T) {
+	s := open(t)
+	var gone []int64
+	s.OnJobsRemoved = func(ids []int64) { gone = append(gone, ids...) }
+	lib, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
+	stopped, _ := s.Enqueue(Job{Library: "/m", LibraryID: lib.ID, Path: "/m/a.mkv"})
+	s.AddStep(stopped, "found", true, "x")
+	s.RequestStop(stopped) // queued: removed at once
+	skipped, _ := s.Enqueue(Job{Library: "/m", LibraryID: lib.ID, Path: "/m/b.mkv"})
+	s.Skip(skipped, "x", "dv")
+	userStopped, _ := s.Enqueue(Job{Library: "/m", LibraryID: lib.ID, Path: "/m/c.mkv"})
+	s.UserStopped(userStopped)
+	withLib, _ := s.Enqueue(Job{Library: "/m", LibraryID: lib.ID, Path: "/m/d.mkv"})
+	s.DeleteLibrary(lib.ID)
+	if fmt.Sprint(gone) != fmt.Sprint([]int64{stopped, skipped, userStopped, withLib}) {
+		t.Errorf("told %v", gone)
+	}
+	if steps, _ := s.Steps(stopped); len(steps) != 0 {
+		t.Errorf("steps kept %v", steps)
+	}
+}

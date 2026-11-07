@@ -293,7 +293,13 @@ func (s *Store) RequestStop(id int64) (running bool, err error) {
 	default:
 		return false, ErrNotStoppable
 	}
-	return running, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	if !running { // the queued job is gone
+		s.jobsRemoved(id)
+	}
+	return running, nil
 }
 
 // StopByPerson is jobs.stop_requested for "Stop this file": the job ends as skipped, user_stopped.
@@ -406,8 +412,11 @@ func (s *Store) UserStopped(id int64) error {
 	if err := s.PutFile(userStoppedFile(j.Path)); err != nil {
 		return err
 	}
-	_, err = s.db.Exec(`DELETE FROM jobs WHERE id=?`, id)
-	return err
+	if _, err = s.db.Exec(`DELETE FROM jobs WHERE id=?`, id); err != nil {
+		return err
+	}
+	s.jobsRemoved(id)
+	return nil
 }
 
 // Skip ends a queued or running job as a skipped file, by its worker: the job record goes, and the file
@@ -430,8 +439,11 @@ func (s *Store) Skip(id int64, words, code string) error {
 	if err := s.PutFile(f); err != nil {
 		return err
 	}
-	_, err = s.db.Exec(`DELETE FROM jobs WHERE id=?`, id)
-	return err
+	if _, err = s.db.Exec(`DELETE FROM jobs WHERE id=?`, id); err != nil {
+		return err
+	}
+	s.jobsRemoved(id)
+	return nil
 }
 
 // UserStoppedReason is the skip reason of a file the person stopped.

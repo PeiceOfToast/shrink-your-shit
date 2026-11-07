@@ -25,6 +25,7 @@ type FileFilter struct {
 	Show          string
 	LibraryID     int64
 	Q             string
+	Reasons       []string // skipped: only these reasons (none: every reason)
 	Kept          bool
 	Limit, Offset int
 }
@@ -49,6 +50,7 @@ type FileRow struct {
 	OriginalState         string // OriginalKept, OriginalRestored, OriginalPurged, or ""
 	OriginalDeleteOn      string
 	OriginalKeptAt        string
+	OutputPath            string
 	OriginalAside, Beside bool // kept beside (the output is another file next to it)
 }
 
@@ -69,7 +71,7 @@ var jobWhere = map[string]string{
 
 var jobOrder = map[string]string{
 	CardUnprocessed: "(j.retry_at<>'') DESC, j.retry_at, j.id", // retrying first, then queue order
-	CardProcessing:  "j.updated, j.id",                         // by start
+	CardProcessing:  "COALESCE(j.started,''), j.id",            // by start (review 43e6f66: updated moves with progress)
 	CardProcessed:   "j.updated DESC, j.id DESC",               // newest first
 	CardFailed:      "j.updated DESC, j.id DESC",
 }
@@ -93,8 +95,15 @@ func (f FileFilter) jobFilters() (string, []any) {
 
 func (f FileFilter) skipFilters() (string, []any) {
 	where, args := `files.reason<>'' AND NOT `+convertedSQL, []any{}
-	if f.LibraryID > 0 {
-		where += ` AND EXISTS (SELECT 1 FROM libraries l WHERE l.id=? AND substr(files.path,1,length(l.path)+1)=l.path||'/')`
+	if len(f.Reasons) > 0 {
+		where += ` AND files.reason IN (?` + strings.Repeat(",?", len(f.Reasons)-1) + `)`
+		for _, r := range f.Reasons {
+			args = append(args, r)
+		}
+	}
+	if f.LibraryID > 0 { // inside the library's folder, whatever the separator (Windows: review 43e6f66)
+		where += ` AND EXISTS (SELECT 1 FROM libraries l WHERE l.id=? AND
+  substr(replace(files.path,'\','/'),1,length(rtrim(replace(l.path,'\','/'),'/'))+1)=rtrim(replace(l.path,'\','/'),'/')||'/')`
 		args = append(args, f.LibraryID)
 	}
 	if q := strings.TrimSpace(f.Q); q != "" {
@@ -157,7 +166,7 @@ func (s *Store) FileList(f FileFilter) (rows []FileRow, total int, counts map[st
 		}
 		r, err := s.db.Query(`SELECT j.id, COALESCE(j.library_id,0), COALESCE(l.name, j.library), j.path, COALESCE(o.new_path,''), j.status,
   COALESCE(j.error,''), j.attempts, COALESCE(j.retry_at,''), j.size_before, COALESCE(j.size_after,0), j.duration, j.updated,
-  COALESCE(fl.id,0), COALESCE(fl.name,''), COALESCE(o.id,0), COALESCE(o.state,''), COALESCE(o.delete_on,''), COALESCE(o.kept_at,''), COALESCE(o.aside,0),
+  COALESCE(fl.id,0), COALESCE(fl.name,''), COALESCE(o.id,0), COALESCE(o.state,''), COALESCE(o.delete_on,''), COALESCE(o.kept_at,''), j.output_path, COALESCE(o.aside,0),
   j.output_path<>'' AND j.output_path<>j.path AND o.id IS NULL `+jobFrom+` WHERE `+cond+` ORDER BY `+jobOrder[f.Show]+` LIMIT ? OFFSET ?`,
 			append(args, f.Limit, f.Offset)...)
 		if err != nil {
@@ -168,7 +177,7 @@ func (s *Store) FileList(f FileFilter) (rows []FileRow, total int, counts map[st
 			var row FileRow
 			if err := r.Scan(&row.JobID, &row.LibraryID, &row.Library, &row.Path, &row.NewPath, &row.Status, &row.Error, &row.Attempts,
 				&row.RetryAt, &row.SizeBefore, &row.SizeAfter, &row.DurationSec, &row.Updated, &row.FlowID, &row.FlowName,
-				&row.OriginalID, &row.OriginalState, &row.OriginalDeleteOn, &row.OriginalKeptAt, &row.OriginalAside, &row.Beside); err != nil {
+				&row.OriginalID, &row.OriginalState, &row.OriginalDeleteOn, &row.OriginalKeptAt, &row.OutputPath, &row.OriginalAside, &row.Beside); err != nil {
 				return nil, 0, nil, err
 			}
 			rows = append(rows, row)
@@ -176,4 +185,12 @@ func (s *Store) FileList(f FileFilter) (rows []FileRow, total int, counts map[st
 		return rows, total, counts, r.Err()
 	}
 	return nil, 0, nil, fmt.Errorf("show must be one of %s", strings.Join(Cards, ", "))
+}
+
+// KeptBeside reports whether done job id wrote its new file next to the original (Beside), which it kept.
+func (s *Store) KeptBeside(id int64) bool {
+	var n int
+	s.db.QueryRow(`SELECT COUNT(*) FROM jobs j WHERE j.id=? AND j.status='done' AND j.output_path<>'' AND j.output_path<>j.path
+  AND NOT EXISTS (SELECT 1 FROM originals WHERE job_id=j.id)`, id).Scan(&n)
+	return n > 0
 }

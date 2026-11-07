@@ -2,11 +2,10 @@
 
 // Package runlog keeps each job's full run log (S5, the Files view): one file per job in a folder,
 // <dir>/<job id>.log, appended as the job runs. Limits (stated in the S5 PR):
-//   - at most PerJob bytes per job: past it, the first Head bytes and the newest Room bytes less than
-//     the rest are kept (so the next cut is Room bytes away, not one line), with one line saying how
-//     much was left out;
-//   - Sweep removes the logs of jobs finished more than MaxAge ago, then the oldest logs until the
-//     folder holds at most Total bytes;
+//   - PerJob bytes per job: past it (by Slack, so a flood of lines is not rewritten line by line), the
+//     first Head bytes and the newest PerJob-Head are kept, with one line saying how much was left out;
+//   - a new log, and Sweep, keep the folder within Total, the oldest logs out first; Sweep also
+//     removes the logs of jobs finished more than MaxAge ago;
 //   - a job's log is removed with its job (Remove).
 package runlog
 
@@ -27,7 +26,7 @@ import (
 const (
 	PerJob = 1 << 20   // 1 MiB per job
 	Head   = 256 << 10 // kept from the start when a log is cut
-	Room   = 256 << 10 // a cut log has this much room before it is cut again
+	Slack  = 64 << 10  // a log is cut once it passes PerJob by this much (then it is PerJob again)
 	Total  = 100 << 20 // the whole folder (lead, 23:06Z: small boxes and LXCs)
 	MaxAge = 30 * 24 * time.Hour
 	// ReadMax is the most one Read returns; the page asks again from next.
@@ -66,8 +65,12 @@ func (l *Logs) Append(job int64, text string) error {
 	if werr != nil {
 		return werr
 	}
-	if serr == nil && st.Size() > PerJob {
+	if serr == nil && st.Size() > PerJob+Slack {
 		return cut(p, st.Size())
+	}
+	if serr == nil && st.Size() == int64(len(text)) { // a new log: keep the folder within Total now (review 43e6f66)
+		_, err := l.sweep(time.Now(), MaxAge, Total, p)
+		return err
 	}
 	return nil
 }
@@ -79,7 +82,7 @@ func cut(p string, size int64) error {
 		return err
 	}
 	head := b[:Head]
-	keep := PerJob - Head - Room // the newest bytes kept
+	keep := PerJob - Head // the newest bytes kept
 	left := (size - int64(Head) - int64(keep) + 1023) / 1024
 	if strings.HasPrefix(string(b[Head:]), cutMark) { // cut before: the note right after the head counts on
 		var before int64
@@ -154,6 +157,11 @@ func (l *Logs) Sweep(now time.Time, maxAge time.Duration, total int64) (int, err
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	return l.sweep(now, maxAge, total, "")
+}
+
+// sweep is Sweep with the lock held; keep is a log never removed (the one just made).
+func (l *Logs) sweep(now time.Time, maxAge time.Duration, total int64, keep string) (int, error) {
 	entries, err := os.ReadDir(l.Dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return 0, nil
@@ -182,6 +190,9 @@ func (l *Logs) Sweep(now time.Time, maxAge time.Duration, total int64) (int, err
 	for _, g := range logs {
 		if now.Sub(g.at) <= maxAge && sum <= total {
 			break // the rest are newer and fit
+		}
+		if g.path == keep {
+			continue
 		}
 		if err := os.Remove(g.path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return removed, err

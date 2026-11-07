@@ -98,3 +98,31 @@ func TestFilesView(t *testing.T) {
 }
 
 func itoa(n int64) string { b, _ := json.Marshal(n); return string(b) }
+
+// Review 43e6f66: a Beside job's processed row shows the new file's probe, not the original's; a job
+// from before S5 that was kept beside says so in its summary.
+func TestFilesViewBeside(t *testing.T) {
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	st.SetPaused(false)
+	a, _, _ := OpenAccess(t.TempDir(), false)
+	srv := httptest.NewServer(Handler(st, a, Engine{RunLogs: &runlog.Logs{Dir: t.TempDir()}}))
+	defer srv.Close()
+	lib, _ := st.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
+	id, _ := st.Enqueue(jobs.Job{Library: "/m", LibraryID: lib.ID, Path: "/m/Film.mkv", SizeBefore: 1000})
+	st.Claim("w")
+	st.Complete(id, "/m/Film.hevc.mkv", 400)
+	st.PutProbe("/m/Film.mkv", 1000, 1, `{"streams":[{"type":"video","codec":"h264","Width":1280,"Height":720}]}`)
+	st.PutProbe("/m/Film.hevc.mkv", 400, 1, `{"streams":[{"type":"video","codec":"hevc","Width":1920,"Height":1080}]}`)
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/activity/files?show=processed"})
+	if !strings.Contains(body, `"codec":"hevc"`) || !strings.Contains(body, `"resolution":"1920x1080"`) || !strings.Contains(body, `"originalState":"kept_beside"`) {
+		t.Errorf("beside row %s", body)
+	}
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/activity/files/" + itoa(id) + "/log"})
+	if !strings.Contains(body, `"step":"kept"`) || strings.Contains(body, `"step":"replaced"`) {
+		t.Errorf("summary %s", body)
+	}
+}

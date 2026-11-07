@@ -90,6 +90,9 @@ type Store struct {
 	path string
 	now  func() time.Time
 
+	// OnJobsRemoved is told the ids of jobs deleted (S5: their run logs go too); nil: nobody.
+	OnJobsRemoved func(ids []int64)
+
 	removeMu sync.Mutex     // held by Claim and StartLibrary while they look at removing
 	removing map[int64]bool // libraries being removed (BeginRemove): process-local, never stored
 }
@@ -401,4 +404,34 @@ func (s *Store) LatestProbe(path string) (string, bool) {
 	var info string
 	err := s.db.QueryRow(`SELECT info FROM probes WHERE path=? ORDER BY rowid DESC LIMIT 1`, path).Scan(&info)
 	return info, err == nil
+}
+
+// jobsRemoved is called after jobs were deleted (stopped, skipped by their worker, removed with their
+// library): their steps go, and OnJobsRemoved (the run logs, S5) is told.
+func (s *Store) jobsRemoved(ids ...int64) {
+	for _, id := range ids {
+		s.db.Exec(`DELETE FROM job_steps WHERE job_id=?`, id)
+	}
+	if s.OnJobsRemoved != nil && len(ids) > 0 {
+		s.OnJobsRemoved(ids)
+	}
+}
+
+func jobIDs(q interface {
+	Query(string, ...any) (*sql.Rows, error)
+}, query string, args ...any) ([]int64, error) {
+	rows, err := q.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

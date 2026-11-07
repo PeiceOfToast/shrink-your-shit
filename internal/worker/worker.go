@@ -52,6 +52,8 @@ type Queue interface {
 	Skip(id int64, words, code string) error
 	// AddStep adds a line to a job's step summary (S5): converted, verified, kept, replaced.
 	AddStep(id int64, step string, ok bool, words string) error
+	// PutProbe stores a file's probe (JSON) for its size and time: the new file's, for the Files view.
+	PutProbe(path string, size, mtime int64, info string) error
 }
 
 // OutputMode says what happens to the result.
@@ -67,11 +69,13 @@ const (
 // Worker pulls jobs from a Queue and runs ffmpeg.
 type Worker struct {
 	// Logs keeps each job's run log (S5); nil: none.
-	Logs   *runlog.Logs
-	ID     string
-	Queue  Queue
-	Exec   media.Exec
-	FFmpeg string
+	Logs *runlog.Logs
+	// verified is the probe of the new file the last check passed (S5: stored for its final path).
+	verified media.Info
+	ID       string
+	Queue    Queue
+	Exec     media.Exec
+	FFmpeg   string
 	// FFprobe checks the result before it replaces anything.
 	FFprobe string
 	// Template returns the template of a job's library's flow, compiled per file into the job's Plan.
@@ -291,6 +295,11 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 	var size int64
 	if st != nil {
 		size = st.Size()
+	}
+	if st != nil && w.verified.Video() != nil { // the new file's codec, size and length for the Files view (S5)
+		if b, err := json.Marshal(w.verified); err == nil {
+			w.Queue.PutProbe(final, st.Size(), st.ModTime().UnixNano(), string(b))
+		}
 	}
 	if err := w.Queue.Complete(job.ID, final, size); err != nil {
 		return true, err

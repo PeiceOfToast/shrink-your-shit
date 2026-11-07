@@ -50,7 +50,7 @@ func TestPerJobCap(t *testing.T) {
 	l.Append(7, "LAST LINE")
 	b, _ := os.ReadFile(filepath.Join(l.Dir, "7.log"))
 	s := string(b)
-	if len(b) > PerJob || !strings.HasPrefix(s, "FIRST LINE\n") || !strings.HasSuffix(s, "LAST LINE\n") || !strings.Contains(s, " KiB left out …\n") {
+	if len(b) > PerJob+Slack || !strings.HasPrefix(s, "FIRST LINE\n") || !strings.HasSuffix(s, "LAST LINE\n") || !strings.Contains(s, " KiB left out …\n") {
 		t.Fatalf("size %d, head %q, tail %q", len(b), s[:20], s[len(s)-20:])
 	}
 	if strings.Count(s, "left out") != 1 {
@@ -96,3 +96,43 @@ func TestSweepOldestFirst(t *testing.T) {
 }
 
 func filepathName(id int64) string { return strings.TrimPrefix((&Logs{}).path(id), "/") }
+
+// A cut keeps the contract's 1 MiB: the first 256 KiB and the newest 768 KiB (review 43e6f66).
+func TestCutKeepsHeadAndTail(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "1.log")
+	var b strings.Builder
+	b.WriteString(strings.Repeat("h", Head))
+	for b.Len() < 2*PerJob {
+		b.WriteString(strings.Repeat("t", 1023) + "\n")
+	}
+	os.WriteFile(p, []byte(b.String()), 0o644)
+	if err := cut(p, int64(b.Len())); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := os.ReadFile(p)
+	s := string(out)
+	i := strings.Index(s, cutMark)
+	if len(out) > PerJob || len(out) < PerJob-2048 || i != Head || len(s)-strings.Index(s[i+1:], "\n")-i-2 < 768<<10-2048 {
+		t.Errorf("size %d, note at %d", len(out), i)
+	}
+}
+
+// A new log keeps the folder within the total at once, the oldest out first, never itself.
+func TestNewLogKeepsTheTotal(t *testing.T) {
+	l := &Logs{Dir: t.TempDir()}
+	now := time.Now()
+	for i := int64(1); i <= 3; i++ {
+		os.WriteFile(filepath.Join(l.Dir, filepathName(i)), make([]byte, Total/3), 0o644)
+		at := now.Add(-time.Duration(4-i) * time.Hour)
+		os.Chtimes(filepath.Join(l.Dir, filepathName(i)), at, at)
+	}
+	l.Append(9, strings.Repeat("z", 100)) // the folder is now over Total
+	if _, err := os.Stat(filepath.Join(l.Dir, filepathName(1))); !os.IsNotExist(err) {
+		t.Error("the oldest log was not removed")
+	}
+	for _, i := range []int64{2, 3, 9} {
+		if _, err := os.Stat(filepath.Join(l.Dir, filepathName(i))); err != nil {
+			t.Errorf("log %d removed", i)
+		}
+	}
+}

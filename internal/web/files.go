@@ -24,6 +24,11 @@ func filesRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		q := r.URL.Query()
 		limit, offset := pageOf(r)
 		f := jobs.FileFilter{Show: q.Get("show"), Q: q.Get("q"), Kept: q.Get("kept") == "1", Limit: limit, Offset: offset}
+		for _, c := range strings.Split(q.Get("reason"), ",") { // skipped: reason=a,b (contract 22:30Z)
+			if c = strings.TrimSpace(c); c != "" {
+				f.Reasons = append(f.Reasons, c)
+			}
+		}
 		if f.Show == "" {
 			f.Show = jobs.CardUnprocessed
 		}
@@ -86,7 +91,11 @@ func filesRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			steps = append(steps, jobs.Step{Step: "found", At: j.Created, OK: true, Words: "Found in " + j.Library + "."})
 			switch j.Status {
 			case jobs.Done:
-				steps = append(steps, jobs.Step{Step: "replaced", At: j.Updated, OK: true, Words: "Converted."})
+				if store.KeptBeside(id) {
+					steps = append(steps, jobs.Step{Step: "kept", At: j.Updated, OK: true, Words: "The new file was written next to the original, which stays as it is."})
+				} else {
+					steps = append(steps, jobs.Step{Step: "replaced", At: j.Updated, OK: true, Words: "Converted."})
+				}
 			case jobs.Failed, jobs.Kept:
 				steps = append(steps, jobs.Step{Step: "converted", At: j.Updated, OK: false, Words: j.Error})
 			}
@@ -124,6 +133,9 @@ func fileItem(store *jobs.Store, libs []jobs.Library, row jobs.FileRow, card str
 	if row.NewPath != "" {
 		it["newPath"] = row.NewPath
 		probed = row.NewPath
+	}
+	if card == jobs.CardProcessed && row.OutputPath != "" { // the new file's codec and size (Beside: its own name)
+		probed = row.OutputPath
 	}
 	if card == jobs.CardProcessed && row.SizeAfter > 0 {
 		it["bytes"] = row.SizeAfter
