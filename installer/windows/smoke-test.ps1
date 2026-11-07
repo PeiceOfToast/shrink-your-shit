@@ -106,6 +106,12 @@ $video = Join-Path $Library 'movie.mp4'
 if ($LASTEXITCODE -ne 0) { Fail 'could not generate the test video' }
 $before = (Get-Item $video).Length
 (Get-Item $video).LastWriteTime = (Get-Date).AddMinutes(-2)
+# A fresh install's library waits for first-run's Start (DESIGN/FIRST-RUN.md); press it through the API.
+$libs = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/libraries" -TimeoutSec 5
+$lib = $libs.items | Select-Object -First 1
+if (-not $lib) { Fail 'no library was created from /LIBRARY' }
+if ($lib.started) { Fail 'a fresh install''s library must wait for first-run, but it is already started' }
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$Port/api/libraries/$($lib.id)/scan" -ContentType 'application/json' -Body '{}' -TimeoutSec 10 | Out-Null
 WaitFor 'the job to finish' {
   $s = Status
   $job = $s.jobs | Where-Object { $_.path -like '*movie.mp4' } | Select-Object -First 1

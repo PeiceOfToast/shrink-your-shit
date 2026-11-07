@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -29,7 +30,12 @@ func setup(t *testing.T, probe string) (*Scanner, *jobs.Store, string, *media.Fa
 	os.WriteFile(filepath.Join(lib, "notes.txt"), []byte("x"), 0o644)
 	os.WriteFile(filepath.Join(lib, "b.syp-tmp.mkv"), []byte("x"), 0o644)
 	f := &media.FakeExec{Out: []byte(probe)}
-	return &Scanner{Store: st, Exec: f, FFprobe: "ffprobe", Rule: rules.Default(), Libraries: []string{lib}}, st, lib, f
+	l, err := st.AddLibrary("lib", lib, rules.SliderTemplate(3), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets := func() ([]Target, error) { return []Target{{LibraryID: l.ID, Path: lib, Rule: rules.Default()}}, nil }
+	return &Scanner{Store: st, Exec: f, FFprobe: "ffprobe", Targets: targets}, st, lib, f
 }
 
 func TestIsVideo(t *testing.T) {
@@ -114,5 +120,51 @@ func TestSkipsHiddenFolders(t *testing.T) {
 	}
 	if len(got) != 2 || !got["a.mkv"] || !got["Movies/Action/t.mkv"] {
 		t.Errorf("queued %v", got)
+	}
+}
+
+// A library removed while a pass is probing its files gets no job: the pass started before the
+// removal, but the job is only added if the library still exists.
+func TestLibraryRemovedDuringScanGetsNoJob(t *testing.T) {
+	sc, st, _, f := setup(t, `{"format":{"duration":"10","bit_rate":"8000000"},"streams":[{"codec_type":"video","codec_name":"h264","bit_rate":"8000000"}]}`)
+	sc.Now = func() time.Time { return time.Now().Add(time.Hour) }
+	libs, _ := st.Libraries()
+	inner := f.Handler
+	f.Handler = func(name string, args []string) (string, string, error) {
+		st.DeleteLibrary(libs[0].ID) // the delete lands while the file is being probed
+		if inner != nil {
+			return inner(name, args)
+		}
+		return string(f.Out), "", nil
+	}
+	if n := sc.ScanOnce(context.Background()); n != 0 {
+		t.Errorf("queued %d", n)
+	}
+	if list, _ := st.List(10); len(list) != 0 {
+		t.Errorf("jobs after the library was removed: %+v", list)
+	}
+}
+
+// A library folder that is a link to a folder is stored as the real folder, and scanned.
+func TestLinkedLibraryFolderIsScanned(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("making links needs extra rights on Windows")
+	}
+	sc, st, lib, _ := setup(t, `{"format":{"duration":"10","bit_rate":"8000000"},"streams":[{"codec_type":"video","codec_name":"h264","bit_rate":"8000000"}]}`)
+	sc.Now = func() time.Time { return time.Now().Add(time.Hour) }
+	link := filepath.Join(t.TempDir(), "videos")
+	if err := os.Symlink(lib, link); err != nil {
+		t.Fatal(err)
+	}
+	libs, _ := st.Libraries()
+	st.DeleteLibrary(libs[0].ID)
+	real, _ := jobs.RealPath(link)
+	l, err := st.AddLibrary("linked", real, rules.SliderTemplate(3), true)
+	if err != nil || l.Path == link {
+		t.Fatalf("%+v %v: want the real folder stored", l, err)
+	}
+	sc.Targets = func() ([]Target, error) { return []Target{{LibraryID: l.ID, Path: l.Path, Rule: rules.Default()}}, nil }
+	if n := sc.ScanOnce(context.Background()); n != 1 {
+		t.Errorf("queued %d from a linked library folder, want 1", n)
 	}
 }

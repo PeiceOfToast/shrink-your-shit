@@ -79,8 +79,9 @@ compiler, and the same source builds for Linux, Windows and macOS (Intel and ARM
    go build -o shrink-your-shit .
    ./shrink-your-shit -library /path/to/your/videos
    ```
-3. Open http://127.0.0.1:8484 to watch the queue. Stop with Ctrl+C (works on every OS); a
-   job in progress is put back in the queue and starts over next time.
+3. Open http://127.0.0.1:8484. The first run shows your folder, lets you choose how much to
+   shrink, and starts it when you press Start; nothing is converted before that. Stop with Ctrl+C
+   (works on every OS); a job in progress is put back in the queue and starts over next time.
 
 Add `-library` more than once to watch several folders.
 
@@ -152,7 +153,7 @@ Run `./shrink-your-shit -h` for all of them. The main ones:
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `-library` | (required) | folder to watch (repeatable; or env `SYP_LIBRARIES`) |
+| `-library` | none | folder to watch, added as a library if no library has it yet (repeatable; or env `SYP_LIBRARIES`). Libraries can also be added on the web page; with neither, the program starts with none |
 | `-data` | user config folder | where the database lives |
 | `-from-codec` | `h264` | only convert this video codec |
 | `-min-bitrate` | `4000` | only convert files at or above this video bitrate (kbps) |
@@ -164,6 +165,12 @@ Run `./shrink-your-shit -h` for all of them. The main ones:
 | `-scan-every` | `30s` | how often to look for new files |
 | `-settle` | `15s` | skip files changed this recently (still copying) |
 | `-addr` | `127.0.0.1:8484` | web UI address (env `SYP_ADDR`) |
+
+On a new install, libraries from `-library` wait for the first run on the web page, where you
+choose their setting and press Start. `-from-codec`, `-min-bitrate`, `-crf`, `-preset` and
+`-output` only matter for an install upgraded from a version before libraries: they are the
+settings its libraries keep converting with. Each library keeps its own settings (its flow) after
+that: changing these flags later does not change libraries that already exist.
 
 ## For developers
 

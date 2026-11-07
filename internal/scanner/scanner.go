@@ -6,11 +6,13 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
@@ -50,14 +52,25 @@ func SkipDir(name string) bool {
 
 // Scanner finds work.
 type Scanner struct {
-	Store     *jobs.Store
-	Exec      media.Exec
-	FFprobe   string
-	Rule      rules.Rule
-	Libraries []string
+	Store   *jobs.Store
+	Exec    media.Exec
+	FFprobe string
+	// Targets lists what to scan on each pass: the started libraries, each with its flow's rule.
+	Targets func() ([]Target, error)
 	// MinAge skips files modified more recently than this (still being copied).
 	MinAge time.Duration
 	Now    func() time.Time
+
+	wake     chan struct{}
+	mu       sync.Mutex
+	nextScan time.Time
+}
+
+// Target is one library to scan.
+type Target struct {
+	LibraryID int64
+	Path      string
+	Rule      rules.Rule
 }
 
 // ScanOnce walks every library once and returns how many jobs it queued.
@@ -67,7 +80,13 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 	if s.Now != nil {
 		now = s.Now
 	}
-	for _, lib := range s.Libraries {
+	targets, err := s.Targets()
+	if err != nil {
+		log.Printf("scan: cannot read the libraries: %v", err)
+		return 0
+	}
+	for _, t := range targets {
+		lib := t.Path
 		filepath.WalkDir(lib, func(path string, d fs.DirEntry, err error) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -88,7 +107,7 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 			if err != nil || now().Sub(info.ModTime()) < s.MinAge {
 				return nil
 			}
-			if s.scanFile(ctx, lib, path, info) {
+			if s.scanFile(ctx, t, path, info) {
 				queued++
 			}
 			return nil
@@ -97,7 +116,7 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 	return queued
 }
 
-func (s *Scanner) scanFile(ctx context.Context, lib, path string, st os.FileInfo) bool {
+func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.FileInfo) bool {
 	prev, err := s.Store.GetFile(path)
 	if err != nil {
 		log.Printf("scan %s: %v", path, err)
@@ -118,31 +137,65 @@ func (s *Scanner) scanFile(ctx context.Context, lib, path string, st os.FileInfo
 		return false
 	}
 	rec.Codec = pi.VideoCodec
-	ok, why := s.Rule.Match(pi)
+	ok, why := t.Rule.Match(pi)
 	if !ok {
 		rec.Decision = "skip: " + why
 		s.Store.PutFile(rec)
 		return false
 	}
 	rec.Decision = "queued: " + why
-	if _, err := s.Store.Enqueue(jobs.Job{Library: lib, Path: path, Reason: why, DurationSec: pi.DurationSec, SizeBefore: st.Size()}); err != nil {
-		log.Printf("enqueue %s: %v", path, err)
+	if _, err := s.Store.Enqueue(jobs.Job{Library: t.Path, LibraryID: t.LibraryID, Path: path, Reason: why, DurationSec: pi.DurationSec, SizeBefore: st.Size()}); err != nil {
+		if !errors.Is(err, jobs.ErrLibraryGone) { // removed or stopped while this pass ran: nothing to do
+			log.Printf("enqueue %s: %v", path, err)
+		}
 		return false
 	}
 	s.Store.PutFile(rec)
 	return true
 }
 
-// Run scans every interval until ctx is cancelled (polling works on WSL2 where file events don't).
+// Run scans every interval until ctx is cancelled (polling works on WSL2 where file events don't),
+// and at once when ScanNow is called.
 func (s *Scanner) Run(ctx context.Context, every time.Duration) {
+	s.mu.Lock()
+	if s.wake == nil {
+		s.wake = make(chan struct{}, 1)
+	}
+	wake := s.wake
+	s.mu.Unlock()
 	for {
 		if n := s.ScanOnce(ctx); n > 0 {
 			log.Printf("scan: queued %d job(s)", n)
 		}
+		s.mu.Lock()
+		s.nextScan = time.Now().Add(every)
+		s.mu.Unlock()
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(every):
+		case <-wake:
 		}
 	}
+}
+
+// ScanNow asks Run for a pass now (it does not wait for it). A pass already running finishes first.
+func (s *Scanner) ScanNow() {
+	s.mu.Lock()
+	if s.wake == nil {
+		s.wake = make(chan struct{}, 1)
+	}
+	w := s.wake
+	s.mu.Unlock()
+	select {
+	case w <- struct{}{}:
+	default: // one is already waiting
+	}
+}
+
+// NextScan is when the next regular pass starts (zero before the first pass has finished).
+func (s *Scanner) NextScan() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.nextScan
 }

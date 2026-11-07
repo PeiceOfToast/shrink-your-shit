@@ -47,6 +47,9 @@ not running: the Windows and macOS tests ran for the first time in CI (see
 ```
 ./shrink-your-shit -library /path/to/COPY-of-videos -data ./data -scan-every 5s
 # web page: http://127.0.0.1:8484   (JSON: /api/status; health: /healthz)
+# a new data folder is a fresh install: the library waits for first-run's Start. Press it on the
+# web page, or start it through the API:
+curl -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8484/api/libraries/1/scan
 ```
 
 The program **replaces originals by default**. Always develop against a copy (or pass

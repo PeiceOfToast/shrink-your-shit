@@ -52,7 +52,8 @@ var ErrNoJob = errors.New("no queued job")
 // Job is one transcode of one file.
 type Job struct {
 	ID          int64   `json:"id"`
-	Library     string  `json:"library"`
+	Library     string  `json:"library"`   // the library's folder when the job was made (kept as text)
+	LibraryID   int64   `json:"libraryId"` // 0: made before libraries were records, and not matched since
 	Path        string  `json:"path"`
 	Status      Status  `json:"status"`
 	Progress    float64 `json:"progress"`
@@ -98,7 +99,7 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	// One connection only (above), so these settings stay in force for the whole process.
-	if _, err := db.Exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;`); err != nil {
+	if _, err := db.Exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;`); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -135,19 +136,33 @@ ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,codec=ex
 // Enqueue adds a queued job.
 func (s *Store) Enqueue(j Job) (int64, error) {
 	now := s.stamp()
-	r, err := s.db.Exec(`INSERT INTO jobs(library,path,status,reason,duration,size_before,created,updated)
+	if j.LibraryID == 0 {
+		r, err := s.db.Exec(`INSERT INTO jobs(library,path,status,reason,duration,size_before,created,updated)
 VALUES(?,?,?,?,?,?,?,?)`, j.Library, j.Path, Queued, j.Reason, j.DurationSec, j.SizeBefore, now, now)
+		if err != nil {
+			return 0, err
+		}
+		return r.LastInsertId()
+	}
+	// One statement: the job is added only if its library still exists and is started, so a library
+	// removed (or a scan that started before the removal) cannot leave a job behind.
+	r, err := s.db.Exec(`INSERT INTO jobs(library,library_id,path,status,reason,duration,size_before,created,updated)
+SELECT ?,?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM libraries WHERE id=? AND started=1)`,
+		j.Library, j.LibraryID, j.Path, Queued, j.Reason, j.DurationSec, j.SizeBefore, now, now, j.LibraryID)
 	if err != nil {
 		return 0, err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return 0, ErrLibraryGone
 	}
 	return r.LastInsertId()
 }
 
-const cols = `id,library,path,status,progress,reason,error,worker,duration,size_before,size_after,output_path,created,updated`
+const cols = `id,library,COALESCE(library_id,0),path,status,progress,reason,error,worker,duration,size_before,size_after,output_path,created,updated`
 
 func scan(r interface{ Scan(...any) error }) (Job, error) {
 	var j Job
-	err := r.Scan(&j.ID, &j.Library, &j.Path, &j.Status, &j.Progress, &j.Reason, &j.Error, &j.Worker,
+	err := r.Scan(&j.ID, &j.Library, &j.LibraryID, &j.Path, &j.Status, &j.Progress, &j.Reason, &j.Error, &j.Worker,
 		&j.DurationSec, &j.SizeBefore, &j.SizeAfter, &j.OutputPath, &j.Created, &j.Updated)
 	return j, err
 }

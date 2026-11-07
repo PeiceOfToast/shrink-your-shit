@@ -64,7 +64,7 @@ func newServer(t *testing.T) *httptest.Server {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	srv := httptest.NewServer(Handler(st, nil, openAccess(t)))
+	srv := httptest.NewServer(Handler(st, openAccess(t), Engine{}))
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -219,7 +219,7 @@ func TestNoExternalRequests(t *testing.T) {
 // away when the real endpoints land, so it is not counted. Every script a page names must be served, and
 // every script must be used by some page.
 func TestAssetSizes(t *testing.T) {
-	h := Handler(nil, nil, openAccess(t)) // /assets/ never touches the store
+	h := Handler(nil, openAccess(t), Engine{}) // /assets/ never touches the store
 	sent := func(name string) (raw, gz int) {
 		req := httptest.NewRequest("GET", "/assets/"+name, nil)
 		req.Header.Set("Accept-Encoding", "gzip")
@@ -264,7 +264,7 @@ func TestAssetSizes(t *testing.T) {
 
 // Assets go gzipped only to a browser that asks for it, and unzip to exactly the embedded file.
 func TestAssetsGzip(t *testing.T) {
-	h := Handler(nil, nil, openAccess(t))
+	h := Handler(nil, openAccess(t), Engine{})
 	want, _ := fs.ReadFile(static, "static/app.js")
 	for _, c := range []struct{ accept, enc string }{{"", ""}, {"identity", ""}, {"gzip;q=0", ""}, {"gzip, deflate, br", "gzip"}, {"br;q=1.0, gzip;q=0.8", "gzip"}} {
 		for _, method := range []string{"GET", "HEAD"} {
@@ -487,7 +487,7 @@ func TestAuthClient(t *testing.T) {
 
 // AUTH-UI-1: the root redirect keeps the query, so the printed link http://host:8484/?token=... reaches the page.
 func TestRootRedirectKeepsQuery(t *testing.T) {
-	h := Handler(nil, nil, openAccess(t))
+	h := Handler(nil, openAccess(t), Engine{})
 	for in, want := range map[string]string{"/": "/libraries/", "/?token=abc&mock=0": "/libraries/?token=abc&mock=0"} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest("GET", in, nil))

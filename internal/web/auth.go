@@ -156,6 +156,7 @@ func writes(method string) bool {
 func (a *Access) guard(next http.Handler) http.Handler {
 	sameSite := http.NewCrossOriginProtection()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-SYP-API", "1") // the API version (UI-API-CONTRACT.md), on every /api answer
 		b := bearer(r)
 		if writes(r.Method) {
 			mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))

@@ -17,6 +17,7 @@ marked **never verified** has not been seen working by anyone. Update this file 
 | 7b | `install.sh` at the repo root: one-line installer for Linux/macOS (replaces the old `deploy/install.sh`) | PR #8 |
 | 7c | Windows installer (`installer/windows`, Inno Setup), built and tested on a Windows runner in CI and attached to releases | this change |
 | 11 | Access token beyond loopback: sign-in cookie or Bearer, CSRF checks on writes, `token` command, `GET /healthz` for health checks, installer prints the sign-in address | this change |
+| 15a | Libraries and flows as records: add/rename/delete/start libraries on the web page, each with its own flow; `-library` adds missing ones; upgrade gives existing libraries a "<folder> - Legacy" flow with the old flag values | this change |
 
 ## What has been verified, and how
 
@@ -171,8 +172,9 @@ only a folder holding nothing but our regular temp file is removed).
   sign-out except making a new token). Do not expose it to the internet. Wrong tokens wait half a
   second; there is no other rate limit.
 - **Software encoding only** (x265); no GPU/hardware encoding.
-- **One rule, one target:** H.264 at or above a bitrate to HEVC. No other codecs, no per-library rules,
-  no flow builder.
+- **One target, simple flows:** H.264 at or above a bitrate to HEVC. Each library has its own flow,
+  but a flow is only a slider position or the legacy flag values for now; legacy flows show as
+  "Custom" in the web page until slices 16/25 can show them. No other codecs, no flow builder.
 - Failed jobs are not retried automatically (manual Retry button).
 - Subtitle/attachment copying relies on keeping the input's container; data streams are dropped.
 - `go test -race` has not been run (needs cgo).

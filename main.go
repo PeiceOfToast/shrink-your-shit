@@ -39,15 +39,16 @@ func main() {
 		os.Exit(tokenCommand(os.Stdout, os.Stderr))
 	}
 	var libs libFlag
-	flag.Var(&libs, "library", "folder to watch (repeat for several; or env SYP_LIBRARIES, separated by : on Linux/macOS, ; on Windows)")
+	flag.Var(&libs, "library", "folder to watch: added as a library if no library has it yet, never changed or removed (repeat for several; or env SYP_LIBRARIES, separated by : on Linux/macOS, ; on Windows). Libraries can also be added on the web page")
 	def := rules.Default()
 	data := flag.String("data", defaultDataDir(), "folder for the database (default: your user config folder; env SYP_DATA)")
 	addr := flag.String("addr", envOr("SYP_ADDR", "127.0.0.1:8484"), "web UI address; use 0.0.0.0:8484 to allow other machines, which then need the access token (see: shrink-your-shit token) (env SYP_ADDR)")
-	from := flag.String("from-codec", def.FromCodec, "only convert files with this video codec")
-	minKbps := flag.Int("min-bitrate", def.MinBitrateKbps, "only convert files above this video bitrate (kbps)")
-	crf := flag.Int("crf", def.CRF, "HEVC quality (lower = better quality, bigger file)")
-	preset := flag.String("preset", def.Preset, "x265 speed preset (ultrafast … veryslow)")
-	mode := flag.String("output", string(worker.Replace), "replace: swap in the new file once it is complete; beside: keep the original, write name.hevc.ext")
+	const forNew = " (only for an install upgraded from before libraries: the Legacy flows of the libraries -library adds there; a new install's libraries get their setting in first-run)"
+	from := flag.String("from-codec", def.FromCodec, "only convert files with this video codec"+forNew)
+	minKbps := flag.Int("min-bitrate", def.MinBitrateKbps, "only convert files above this video bitrate (kbps)"+forNew)
+	crf := flag.Int("crf", def.CRF, "HEVC quality (lower = better quality, bigger file)"+forNew)
+	preset := flag.String("preset", def.Preset, "x265 speed preset (ultrafast … veryslow)"+forNew)
+	mode := flag.String("output", string(worker.Replace), "replace: swap in the new file once it is complete; beside: keep the original, write name.hevc.ext"+forNew)
 	decode := flag.String("decode-check", "auto", "play the new file through a decoder before replacing the original: auto (completely if up to 3 hours long, otherwise at 3 places) or always")
 	minSSIM := flag.Float64("min-ssim", worker.DefaultMinSSIM, "lowest picture similarity (0.90-1.0) between the original and the new file; a starting value that has not been tuned on real material")
 	every := flag.Duration("scan-every", 30*time.Second, "how often to look for new files")
@@ -63,10 +64,6 @@ func main() {
 
 	if len(libs) == 0 {
 		libs = librariesFromEnv()
-	}
-	if len(libs) == 0 {
-		fmt.Fprintln(os.Stderr, "Tell me which folder to watch, e.g.:\n  shrink-your-shit -library /path/to/videos\n(or set SYP_LIBRARIES)")
-		os.Exit(2)
 	}
 	switch *decode {
 	case "auto", "always":
@@ -110,14 +107,28 @@ func main() {
 	}
 
 	rule := rules.Rule{FromCodec: *from, MinBitrateKbps: *minKbps, CRF: *crf, Preset: *preset}
+	n, skipped, err := store.EnsureLibraries(libs, rules.LegacyTemplate(rule, *mode))
+	if err != nil {
+		log.Fatalf("libraries: %v", err)
+	}
+	for _, why := range skipped { // not fatal: the libraries that are fine still run
+		log.Printf("NOT added as a library from -library/SYP_LIBRARIES: %s", why)
+	}
+	if n > 0 {
+		how := "converting as before"
+		if up, _ := store.Upgraded(); !up {
+			how = "waiting for first run on the web page (nothing is converted before Start)"
+		}
+		log.Printf("added %d librar%s from -library/SYP_LIBRARIES, %s", n, map[bool]string{true: "y", false: "ies"}[n == 1], how)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM) // SIGTERM is a no-op on Windows; Ctrl+C works everywhere
 	defer stop()
 
 	x := media.OSExec{}
-	sc := &scanner.Scanner{Store: store, Exec: x, FFprobe: ffprobePath, Rule: rule, Libraries: libs, MinAge: *settle}
+	sc := &scanner.Scanner{Store: store, Exec: x, FFprobe: ffprobePath, Targets: scanTargets(store), MinAge: *settle}
 	go sc.Run(ctx, *every)
-	w := &worker.Worker{ID: "builtin", Queue: store, Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath, Rule: rule,
-		Mode: worker.OutputMode(*mode), Poll: 3 * time.Second,
+	w := &worker.Worker{ID: "builtin", Queue: store, Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath,
+		Settings: store.SettingsFor, Poll: 3 * time.Second,
 		DecodeCheck: *decode, MinSSIM: *minSSIM}
 	workerDone := make(chan struct{})
 	go func() { w.Run(ctx); close(workerDone) }()
@@ -126,7 +137,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("access token: %v", err)
 	}
-	srv := &http.Server{Addr: *addr, Handler: web.Handler(store, libs, access)}
+	srv := &http.Server{Addr: *addr, Handler: web.Handler(store, access, web.Engine{
+		ScanNow: sc.ScanNow, NextScan: sc.NextScan, StopJob: w.StopJob})}
 	go func() {
 		<-ctx.Done()
 		srv.Shutdown(context.Background())
@@ -140,7 +152,11 @@ func main() {
 	if exposedToNetwork(*addr) {
 		log.Print("The web page is reachable from other machines (with the access token). There is no HTTPS: use it on a network you trust, never on the internet.")
 	}
-	log.Printf("shrink-your-shit %s: watching %v; web UI at http://%s", version, []string(libs), *addr)
+	if all, _ := store.Libraries(); len(all) == 0 {
+		log.Printf("shrink-your-shit %s: no libraries yet; add one on the web page at http://%s", version, *addr)
+	} else {
+		log.Printf("shrink-your-shit %s: %d librar%s; web UI at http://%s", version, len(all), map[bool]string{true: "y", false: "ies"}[len(all) == 1], *addr)
+	}
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		stop()
 		<-workerDone
@@ -148,4 +164,31 @@ func main() {
 		return // deferred store.Close runs after the worker has stopped
 	}
 	<-workerDone // let an interrupted job go back in the queue before closing the database
+}
+
+// scanTargets lists the started libraries for the scanner, each with its flow's rule. A library whose
+// flow cannot run (a kind a later slice adds) is left out, with a log line.
+func scanTargets(store *jobs.Store) func() ([]scanner.Target, error) {
+	return func() ([]scanner.Target, error) {
+		libs, err := store.Libraries()
+		if err != nil {
+			return nil, err
+		}
+		var out []scanner.Target
+		for _, l := range libs {
+			if !l.Started {
+				continue
+			}
+			f, err := store.GetFlow(l.FlowID)
+			if err == nil {
+				var set rules.Settings
+				if set, err = f.Template.Settings(); err == nil {
+					out = append(out, scanner.Target{LibraryID: l.ID, Path: l.Path, Rule: set.Rule})
+					continue
+				}
+			}
+			log.Printf("scan: skipping library %q: %v", l.Name, err)
+		}
+		return out, nil
+	}
 }
