@@ -216,3 +216,13 @@ func TestSkipRecordsItsCode(t *testing.T) {
 		t.Errorf("%+v", f)
 	}
 }
+
+// A file whose original was put back (slice 18) is not converted again, even when it changed since.
+func TestRestoredFileIsNotQueued(t *testing.T) {
+	s, st, lib, _ := setup(t, h264Big)
+	p := filepath.Join(lib, "a.mkv")
+	st.PutFile(jobs.File{Path: p, Size: 1, ModTime: 1, Decision: jobs.DecisionRestored})
+	if n := s.ScanOnce(context.Background()); n != 0 {
+		t.Errorf("queued %d", n)
+	}
+}

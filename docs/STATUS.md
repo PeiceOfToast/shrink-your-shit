@@ -23,6 +23,7 @@ marked **never verified** has not been seen working by anyone. Update this file 
 | 16b | The slider's full recipe (CRF by resolution, bits-per-pixel eligibility, D5 formats, SSIM gate), the setting endpoints and plain-word flow steps | this change |
 | 19 | The Preview: for a library and a setting (saved or not), files, how many can be shrunk, how many skipped and why, a saving range from bits per pixel, files shared with another folder, and one sample file in plain words; reads only. Probe cache for the scanner and the Preview | this change |
 | 21b | Activity backend: Home's freed/waiting figures, what is converting (percent, time left) and up next, the Failed and Skipped lists with plain reasons, Convert again | this change |
+| 18 | Get an original back (page, `restore` command; refused if the converted file was changed), the file then skipped as restored; kept originals deleted after their days | this change |
 | 17 | Originals kept in `.syp-trash` beside each file (default 7 days), the swap journaled and finished or undone at startup after a crash; Done and Kept originals lists; freed vs waiting space | this change |
 | 20 | Setup checks: folder check for first-run, the health report, `shrink-your-shit doctor`; the write check runs as the service user and says how to fix a read-only folder | this change |
 

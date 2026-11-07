@@ -36,6 +36,10 @@ const (
 	OriginalKept   = "kept"            // the original is in Trash, the new file at Path
 	SwapRolledBack = "rolled_back"     // a restart put the original back; the job runs again
 	SwapAttention  = "needs_attention" // neither file could be found where expected; nothing was moved
+	// Slice 18.
+	Restoring        = "restoring" // a restore's journal: the renames back may be partly done
+	OriginalRestored = "restored"  // the original is back at its name; the converted file is gone
+	OriginalPurged   = "purged"    // its days were up: the kept original was deleted
 )
 
 // BeginSwap writes the journal row for a swap about to start (state moving) and returns its id.
@@ -95,6 +99,15 @@ func (s *Store) Originals(state string) ([]Original, error) {
 	return out, rows.Err()
 }
 
+// OriginalByID returns one row (ErrNotFound if there is none).
+func (s *Store) OriginalByID(id int64) (Original, error) {
+	o, err := scanOriginal(s.db.QueryRow(`SELECT `+originalCols+` FROM originals WHERE id=?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return o, ErrNotFound
+	}
+	return o, err
+}
+
 // OriginalOfJob returns the kept original of a job (ErrNotFound if it has none).
 func (s *Store) OriginalOfJob(jobID int64) (Original, error) {
 	o, err := scanOriginal(s.db.QueryRow(`SELECT `+originalCols+` FROM originals WHERE job_id=? AND state=? ORDER BY id DESC LIMIT 1`, jobID, OriginalKept))
@@ -120,6 +133,10 @@ WHERE status=? AND EXISTS (SELECT 1 FROM originals o WHERE o.job_id=jobs.id AND 
 	return r.RowsAffected()
 }
 
+// DecisionRestored is a file record's decision once its original was put back (slice 18): the
+// scanner and the Preview skip it until "Convert again" clears it.
+const DecisionRestored = "restored"
+
 // keptSQL is true for a jobs row whose original is kept (the state is the next argument).
 const keptSQL = `EXISTS (SELECT 1 FROM originals o WHERE o.job_id=jobs.id AND o.state=?)`
 
@@ -130,9 +147,10 @@ type DoneItem struct {
 	Path        string
 	BeforeBytes int64
 	AfterBytes  int64
-	Beside      bool  // the new file was written beside the original, which was never touched
-	KeptID      int64 // 0: the original is not in .syp-trash
-	DeleteOn    string
+	Beside      bool   // the new file was written beside the original, which was never touched
+	KeptID      int64  // the latest originals row of the job (0: none: replaced at once, or before slice 17)
+	State       string // that row's state: kept, restored or purged ("" without one)
+	KeptAt      string
 }
 
 // DoneItems lists done jobs, newest first, with what happened to their original; and how many there are.
@@ -142,10 +160,10 @@ func (s *Store) DoneItems(limit, offset int) ([]DoneItem, int, error) {
 		return nil, 0, err
 	}
 	rows, err := s.db.Query(`SELECT j.id, COALESCE(l.name, j.library), j.path, j.size_before, j.size_after, j.output_path<>j.path,
-  COALESCE(o.id,0), COALESCE(o.delete_on,'')
+  COALESCE(o.id,0), COALESCE(o.state,''), COALESCE(o.kept_at,'')
 FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id
-  LEFT JOIN originals o ON o.id=(SELECT MAX(id) FROM originals WHERE job_id=j.id AND state=?)
-WHERE j.status=? ORDER BY j.id DESC LIMIT ? OFFSET ?`, OriginalKept, Done, limit, offset)
+  LEFT JOIN originals o ON o.id=(SELECT MAX(id) FROM originals WHERE job_id=j.id AND state IN (?,?,?))
+WHERE j.status=? ORDER BY j.id DESC LIMIT ? OFFSET ?`, OriginalKept, OriginalRestored, OriginalPurged, Done, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -153,7 +171,7 @@ WHERE j.status=? ORDER BY j.id DESC LIMIT ? OFFSET ?`, OriginalKept, Done, limit
 	out := []DoneItem{}
 	for rows.Next() {
 		var d DoneItem
-		if err := rows.Scan(&d.JobID, &d.Library, &d.Path, &d.BeforeBytes, &d.AfterBytes, &d.Beside, &d.KeptID, &d.DeleteOn); err != nil {
+		if err := rows.Scan(&d.JobID, &d.Library, &d.Path, &d.BeforeBytes, &d.AfterBytes, &d.Beside, &d.KeptID, &d.State, &d.KeptAt); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, d)

@@ -44,6 +44,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "doctor" {
 		os.Exit(doctorCommand(os.Stdout, os.Stderr))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "restore" {
+		os.Exit(restoreCommand(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	logs := &doctor.LogTail{} // the last log lines, for the health report
 	log.SetOutput(io.MultiWriter(os.Stderr, logs))
 	var libs libFlag
@@ -128,6 +131,13 @@ func main() {
 	if n, _ := store.RequeueRunning(); n > 0 {
 		log.Printf("requeued %d job(s) interrupted by the last shutdown", n)
 	}
+	// Kept originals whose days are up are deleted now and then every hour (slice 18).
+	purge := func() {
+		for _, said := range worker.Purge(store, keepDays(), time.Now()) {
+			log.Printf("purge: %s", said)
+		}
+	}
+	purge()
 
 	rule := rules.Rule{FromCodec: *from, MinBitrateKbps: *minKbps, CRF: *crf, Preset: *preset}
 	n, skipped, err := store.EnsureLibraries(libs, rules.LegacyTemplate(rule, *mode))
@@ -162,6 +172,18 @@ func main() {
 	workerDone := make(chan struct{})
 	if converts {
 		go func() { w.Run(ctx); close(workerDone) }()
+		go func() {
+			t := time.NewTicker(time.Hour)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					purge()
+				}
+			}
+		}()
 	} else {
 		close(workerDone)
 	}

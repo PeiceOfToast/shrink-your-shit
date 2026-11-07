@@ -24,14 +24,7 @@ import (
 // here and says so. Exit status 1 if any check is bad.
 func doctorCommand(out, errOut io.Writer) int {
 	env := envFile(linuxEnvFile)
-	addr := firstNonEmpty(installedAddr(env), "127.0.0.1:8484")
-	tok := ""
-	for _, dir := range tokenDirs(env) {
-		if t, err := web.ReadToken(dir); err == nil && t != "" {
-			tok = t
-			break
-		}
-	}
+	addr, tok := serviceAddr(env)
 	h, err := askService(addr, tok)
 	if err == nil {
 		fmt.Fprintf(out, "shrink-your-shit %s, as the running service sees it (%s):\n\n", h.Version, localURL(addr))
@@ -47,6 +40,17 @@ func doctorCommand(out, errOut io.Writer) int {
 	chk := &doctor.Checker{Exec: media.OSExec{}, FFmpeg: ffmpeg, FFprobe: ffprobe}
 	data := firstNonEmpty(os.Getenv("SYP_DATA"), env["SYP_DATA"], defaultDataDir())
 	return printHealth(out, doctor.Health{Checks: chk.Health(context.Background(), data, nil), Version: version})
+}
+
+// serviceAddr is where the installed program listens and its access token ("" if none is found).
+func serviceAddr(env map[string]string) (addr, tok string) {
+	addr = firstNonEmpty(os.Getenv("SYP_ADDR"), installedAddr(env), "127.0.0.1:8484")
+	for _, dir := range tokenDirs(env) {
+		if t, err := web.ReadToken(dir); err == nil && t != "" {
+			return addr, t
+		}
+	}
+	return addr, ""
 }
 
 // askService fetches the health report from the running program.

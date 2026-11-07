@@ -364,3 +364,14 @@ func TestPreviewSeesLinksMadeElsewhere(t *testing.T) {
 		t.Errorf("after removing it: %+v", r)
 	}
 }
+
+// A restored file (slice 18) is counted as skipped "restored", like the scanner skips it.
+func TestPreviewCountsRestoredFilesAsSkipped(t *testing.T) {
+	st := store(t)
+	dir := library(t)
+	st.PutFile(jobs.File{Path: filepath.Join(dir, "a.mkv"), Decision: jobs.DecisionRestored})
+	r := (&Previewer{Store: st, Exec: &probes{}, FFprobe: "ffprobe"}).Library(1, dir, rules.SliderTemplate(3), 10*time.Second)
+	if r.Skipped["restored"] != 1 || r.CanShrink != 2 {
+		t.Errorf("%+v", r)
+	}
+}
