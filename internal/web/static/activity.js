@@ -47,6 +47,14 @@
 
   // ---- Queue
   function eta(sec) { return sec < 60 ? "less than a minute left" : "about " + Math.round(sec / 60) + " min left"; }
+  // A converting file's line. The engine doesn't always know the time left or the new size (null at the start of
+  // a conversion): those parts are left out, never shown as a guess.
+  function working(j) {
+    var parts = [j.percent + "%"];
+    if (j.etaSeconds != null) parts.push(eta(j.etaSeconds));
+    parts.push(ui.bytes(j.fromBytes) + (j.expectedBytes != null ? " → expected about " + ui.bytes(j.expectedBytes) : ""));
+    return parts.join(" · ");
+  }
   T.queue = function () {
     return api.queue().then(function (q) {
       draw("queue", q, function () {
@@ -59,7 +67,7 @@
           top.appendChild(el("strong", null, nameOf(j))); top.appendChild(el("span", "badge info", conv ? "Converting" : "Checking the new file")); c.appendChild(top);
           var pr = el("div", "progress"), bar = el("span"); pr.setAttribute("role", "progressbar"); pr.setAttribute("aria-valuemin", 0); pr.setAttribute("aria-valuemax", 100);
           pr.setAttribute("aria-valuenow", j.percent); pr.setAttribute("aria-label", (conv ? "Converting " : "Checking ") + nm); bar.style.width = j.percent + "%"; pr.appendChild(bar); c.appendChild(pr);
-          var line = el("p", "small muted", conv ? j.percent + "% · " + eta(j.etaSeconds) + " · " + ui.bytes(j.fromBytes) + (j.expectedBytes != null ? " → expected about " + ui.bytes(j.expectedBytes) : "") // the engine doesn't always know the new size
+          var line = el("p", "small muted", conv ? working(j)
             : "Playing the new file start to end before it replaces the original"); line.style.margin = "8px 0";
           c.appendChild(line);
           if (conv) { c.appendChild(btn("Stop this file", "stop-" + j.jobId, function () { act(api.stopJob({ id: j.jobId }), true); })); c.appendChild(el("span", "hint small", " It moves to Skipped, where you can convert it again.")); }
