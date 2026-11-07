@@ -12,7 +12,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 )
@@ -273,5 +276,34 @@ func TestHealthzPagesAndAssetsArePublic(t *testing.T) {
 		if code, _, _ := do(t, nil, srv, call{method: "GET", path: p}); code != 200 {
 			t.Errorf("%s: %d, must load without signing in", p, code)
 		}
+	}
+}
+
+// Rotations racing each other must leave the token in use equal to the one stored for the next start.
+// The second rotation is started in the gap between the first one storing its token and using it.
+func TestConcurrentRotationsAgreeWithTheStoredToken(t *testing.T) {
+	a, _, err := OpenAccess(t.TempDir(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var second sync.WaitGroup
+	var started atomic.Bool
+	afterTokenStored = func() {
+		if started.Swap(true) {
+			return // the second rotation
+		}
+		second.Add(1)
+		done := make(chan struct{})
+		go func() { defer second.Done(); a.rotate(); close(done) }()
+		select { // without the lock, the second rotation finishes here; with it, it has to wait
+		case <-done:
+		case <-time.After(2 * time.Second):
+		}
+	}
+	t.Cleanup(func() { afterTokenStored = nil })
+	a.rotate()
+	second.Wait()
+	if stored, _ := ReadToken(a.dir); stored != a.Token() {
+		t.Fatalf("in use %q, stored %q", a.Token(), stored)
 	}
 }

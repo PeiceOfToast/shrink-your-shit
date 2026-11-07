@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/web"
@@ -34,8 +35,12 @@ func tokenCommand(out, errOut io.Writer) int {
 		if err != nil || tok == "" {
 			continue
 		}
-		addr := firstNonEmpty(os.Getenv("SYP_ADDR"), env["SYP_ADDR"], "127.0.0.1:8484")
-		fmt.Fprintf(out, "Access token: %s\nSign-in address: %s\n", tok, signInURL(addr, tok))
+		if addr := installedAddr(env); addr != "" {
+			fmt.Fprintf(out, "Access token: %s\nSign-in address: %s\n", tok, signInURL(addr, tok))
+		} else {
+			fmt.Fprintf(out, "Access token: %s\nSign-in address: http://<this computer's address>:8484/?token=%s\n"+
+				"(use the port you set with -addr or SYP_ADDR if it is not 8484)\n", tok, url.QueryEscape(tok))
+		}
 		return 0
 	}
 	if denied != nil {
@@ -44,6 +49,39 @@ func tokenCommand(out, errOut io.Writer) int {
 	}
 	fmt.Fprintln(errOut, "No access token is set. That means the web page only listens on this computer and needs no sign-in.")
 	return 1
+}
+
+// installedAddr is the address the program was set up to listen on: SYP_ADDR, else what an installer
+// stored (the Linux settings file, the macOS LaunchAgent, the Windows launcher); "" if none says.
+func installedAddr(env map[string]string) string {
+	if a := firstNonEmpty(os.Getenv("SYP_ADDR"), env["SYP_ADDR"]); a != "" {
+		return a
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		if a := matchIn(filepath.Join(home, "Library", "LaunchAgents", "dev.shrink-your-shit.plist"), plistAddr); a != "" {
+			return a
+		}
+	}
+	if la := os.Getenv("LOCALAPPDATA"); la != "" {
+		return matchIn(filepath.Join(la, "shrink-your-shit", "launch.vbs"), vbsAddr)
+	}
+	return ""
+}
+
+var (
+	plistAddr = regexp.MustCompile(`<key>SYP_ADDR</key><string>([^<]+)</string>`) // as install.sh writes it
+	vbsAddr   = regexp.MustCompile(`env\("SYP_ADDR"\) = "([^"]+)"`)               // as the Windows installer writes it
+)
+
+func matchIn(path string, re *regexp.Regexp) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	if m := re.FindSubmatch(b); m != nil {
+		return strings.TrimSpace(string(m[1]))
+	}
+	return ""
 }
 
 // tokenDirs lists where a data folder may be, most specific first: SYP_DATA, the Linux service's (from

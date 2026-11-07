@@ -32,6 +32,9 @@ const TokenFile = "access-token"
 
 const sessionCookie = "syp_session"
 
+// afterTokenStored runs (in tests only) between storing a new token and using it.
+var afterTokenStored func()
+
 // Access holds the token and checks requests against it.
 type Access struct {
 	dir   string
@@ -79,8 +82,11 @@ func (a *Access) Token() string {
 func (a *Access) Required() bool { return a.Token() != "" }
 
 // rotate makes a new token, stores it (owner-only file, replaced in one step) and starts using it,
-// which ends every existing session.
+// which ends every existing session. The lock covers storing and using, so the token in use is always
+// the one in the file, also when two rotations race.
 func (a *Access) rotate() (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
@@ -104,9 +110,10 @@ func (a *Access) rotate() (string, error) {
 		os.Remove(f.Name())
 		return "", err
 	}
-	a.mu.Lock()
+	if afterTokenStored != nil {
+		afterTokenStored()
+	}
 	a.token = tok
-	a.mu.Unlock()
 	return tok, nil
 }
 

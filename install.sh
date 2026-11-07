@@ -188,12 +188,17 @@ health_check() {
   return 1
 }
 
-# signin_url BASE: BASE with the access token, when the program listens beyond this computer
-# (it made the token on its first start); BASE unchanged on loopback.
+# signin_url BASE: on loopback, BASE. Beyond it, the sign-in address the program's `token` command
+# gives for the configured address (it made the token on its first start), with this machine's
+# network address for "all addresses"; BASE if that fails.
 signin_url() {
   case $PORT_ADDR in 127.*|localhost:*|\[::1\]:*) printf '%s' "$1"; return ;; esac
-  tok=$($SUDO "$BIN" token 2>/dev/null | sed -n 's/^Access token: //p')
-  if [ -n "$tok" ]; then printf '%s/?token=%s' "$1" "$tok"; else printf '%s' "$1"; fi
+  if [ -n "${TOKEN_DATA:-}" ]; then
+    u=$($SUDO env SYP_ADDR="$PORT_ADDR" SYP_DATA="$TOKEN_DATA" "$BIN" token 2>/dev/null | sed -n 's/^Sign-in address: //p')
+  else
+    u=$($SUDO env SYP_ADDR="$PORT_ADDR" "$BIN" token 2>/dev/null | sed -n 's/^Sign-in address: //p')
+  fi
+  printf '%s' "${u:-$1}"
 }
 
 finish() { # finish URL_NOTE
@@ -392,5 +397,6 @@ if health_check; then :; else
   rc=$?
   [ "$rc" = 2 ] || die "the service did not answer on port $PORT. See $LOG"
 fi
+TOKEN_DATA=$DATA_DIR
 finish "$(signin_url "http://127.0.0.1:$PORT")"
 case $PORT_ADDR in 127.*|localhost:*) ;; *) say "It is reachable from other machines, which sign in with the access token in that address. To see it again: shrink-your-shit token. There is no HTTPS: use it on a network you trust." ;; esac
