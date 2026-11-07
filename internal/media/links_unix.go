@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"syscall"
-	"time"
 )
 
 // LinkCount is how many names the file has (more than 1: it is shared with another folder by a
@@ -29,8 +28,9 @@ func FileKey(_ string, fi os.FileInfo) (key string, ok bool) {
 	return "", false
 }
 
-// FileState is the file's identity (as FileKey), size and modification time, from its Lstat.
-func FileState(path string, fi os.FileInfo) (key string, size int64, mtime time.Time, ok bool) {
-	key, ok = FileKey(path, fi)
-	return key, fi.Size(), fi.ModTime(), ok
+// FileState is the file's identity (as FileKey; "" if the system does not say), size and modification
+// time, from its Lstat. No creation time: the change time (ChangeTime) tells a file made again apart.
+func FileState(path string, fi os.FileInfo) (State, error) {
+	key, _ := FileKey(path, fi)
+	return State{Key: key, Size: fi.Size(), MTime: fi.ModTime()}, nil
 }

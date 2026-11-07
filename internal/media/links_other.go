@@ -16,6 +16,6 @@ func LinkCount(string, os.FileInfo) uint64 { return 1 }
 func FileKey(string, os.FileInfo) (string, bool) { return "", false }
 
 // FileState: no identity on this system; size and time from fi.
-func FileState(_ string, fi os.FileInfo) (string, int64, time.Time, bool) {
-	return "", fi.Size(), fi.ModTime(), false
+func FileState(_ string, fi os.FileInfo) (State, error) {
+	return State{Size: fi.Size(), MTime: fi.ModTime()}, nil
 }

@@ -160,28 +160,33 @@ type look struct {
 	state fileState
 }
 
-// fileState is what tells one state of a file from another: which file it is (device and inode, or the
-// Windows volume and file index; empty where the system does not say), its size, and its modification
-// and change times (no change time on Windows). A file made again under the same name with the same
-// size and times is a different one.
+// fileState is what tells one state of a file from another: media.State (identity, size, modification
+// time and, on Windows, creation time) and the change time (none on Windows). A file made again under
+// the same name with the same size and times is a different one. unknown: the file could not be read
+// (FileState failed), so size and time are the listing's and its identity is not known; such a state
+// is never the same as any other, so the file waits until it can be read twice alike (review 9cf6a03).
 type fileState struct {
-	key          string
-	size         int64
-	mtime, ctime time.Time
-	hasCtime     bool
+	media.State
+	ctime    time.Time
+	hasCtime bool
+	unknown  bool
 }
 
-// readFileState is media.FileState; tests watch which files it opens.
+// readFileState is media.FileState; tests watch which files it opens and make it fail.
 var readFileState = media.FileState
 
 func stateOf(path string, st os.FileInfo) fileState {
-	key, size, mtime, _ := readFileState(path, st)
 	c, hasC := media.ChangeTime(st)
-	return fileState{key: key, size: size, mtime: mtime, ctime: c, hasCtime: hasC}
+	ms, err := readFileState(path, st)
+	if err != nil {
+		return fileState{State: media.State{Size: st.Size(), MTime: st.ModTime()}, ctime: c, hasCtime: hasC, unknown: true}
+	}
+	return fileState{State: ms, ctime: c, hasCtime: hasC}
 }
 
 func (a fileState) same(b fileState) bool {
-	return a.key == b.key && a.size == b.size && a.mtime.Equal(b.mtime) && a.hasCtime == b.hasCtime && a.ctime.Equal(b.ctime)
+	return !a.unknown && !b.unknown && a.Key == b.Key && a.Size == b.Size && a.MTime.Equal(b.MTime) &&
+		a.Born.Equal(b.Born) && a.hasCtime == b.hasCtime && a.ctime.Equal(b.ctime)
 }
 
 // observe notes path as seen now in state st, and reports whether this is its first look in that

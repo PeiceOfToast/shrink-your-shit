@@ -367,19 +367,18 @@ func TestStillChangingFollowsTheFileNotThePath(t *testing.T) {
 	}()
 	old := clock.Add(-time.Hour)
 	os.Chtimes(a, old, old)
-	before, _ := os.Stat(a)
-	keyBefore, _ := media.FileKey(a, before)
+	before, _ := os.Lstat(a)
+	stateBefore := stateOf(a, before)
 	scan()       // first look
 	os.Remove(a) // made again: same name, size and times, but another file
 	os.WriteFile(a, []byte("12345"), 0o644)
 	os.Chtimes(a, old, old)
-	after, _ := os.Stat(a)
-	keyAfter, _ := media.FileKey(a, after)
-	_, hasCtime := media.ChangeTime(after)
-	if keyBefore == keyAfter && !hasCtime {
-		// NTFS can give the new file the old one's ID, and Windows has no change time: the system cannot
-		// tell them apart, so the file counts as unchanged since the first look
-		t.Log("this system reused the file's ID and has no change time; the recreated file counts as the same")
+	after, _ := os.Lstat(a)
+	if stateAfter := stateOf(a, after); stateAfter.same(stateBefore) {
+		// Only when nothing the system reports tells them apart: NTFS can reuse the file index, and its
+		// "tunneling" gives a file made again under a name within ~15 s the old one's creation time. A
+		// different identity, creation time or change time always means a fresh wait (review 9cf6a03).
+		t.Logf("this system cannot tell the recreated file from the old one (%+v); it counts as the same", stateAfter)
 		if n := scan(); n != 1 {
 			t.Errorf("indistinguishable from the first look: queued %d, want 1", n)
 		}
@@ -463,10 +462,10 @@ func TestOutsideLinkIsNeverOpened(t *testing.T) {
 		t.Skip(err)
 	}
 	var keyed []string
-	defer func(f func(string, os.FileInfo) (string, int64, time.Time, bool)) { readFileState = f }(readFileState)
-	readFileState = func(p string, fi os.FileInfo) (string, int64, time.Time, bool) {
+	defer func(f func(string, os.FileInfo) (media.State, error)) { readFileState = f }(readFileState)
+	readFileState = func(p string, fi os.FileInfo) (media.State, error) {
 		keyed = append(keyed, p)
-		return "k:" + p, fi.Size(), fi.ModTime(), true
+		return media.State{Key: "k:" + p, Size: fi.Size(), MTime: fi.ModTime()}, nil
 	}
 	settle(s)
 	for _, p := range keyed {
@@ -504,5 +503,42 @@ func TestUntouchedFileStateIsStable(t *testing.T) {
 		if fi, err := entries[0].Info(); err == nil && (fi.Size() != st.Size() || !fi.ModTime().Equal(st.ModTime())) {
 			t.Logf("the listing's copy differs from the file: listing %d %v, file %d %v", fi.Size(), fi.ModTime(), st.Size(), st.ModTime())
 		}
+	}
+}
+
+// A file whose state cannot be read (FileState fails: on Windows, a download holding it locked) is never
+// taken as unchanged: its size and time come from the listing, and its identity is unknown, so it waits
+// while that lasts, even while the listing's size and time keep moving. Once it can be read, it waits
+// like any new file (review 9cf6a03).
+func TestUnreadableFileStateIsNeverReady(t *testing.T) {
+	s, _, lib, _ := setup(t, h264Big)
+	clock := time.Now()
+	s.Now, s.MinAge = func() time.Time { return clock }, time.Minute
+	a := filepath.Join(lib, "a.mkv")
+	old := clock.Add(-time.Hour)
+	os.Chtimes(a, old, old)
+	defer func(f func(string, os.FileInfo) (media.State, error)) { readFileState = f }(readFileState)
+	readFileState = func(p string, fi os.FileInfo) (media.State, error) {
+		return media.State{}, &os.PathError{Op: "open", Path: p, Err: os.ErrPermission}
+	}
+	scan := func() int { clock = clock.Add(2 * time.Minute); return s.ScanOnce(context.Background()) }
+	for i, grow := range []bool{false, true, false, true, false} {
+		if grow { // still being written: the listing shows it growing and its time moving
+			f, _ := os.OpenFile(a, os.O_APPEND|os.O_WRONLY, 0)
+			f.Write([]byte("more"))
+			f.Close()
+			old = old.Add(time.Second)
+			os.Chtimes(a, old, old)
+		}
+		if n := scan(); n != 0 {
+			t.Fatalf("look %d: a file that cannot be read was queued (%d)", i, n)
+		}
+	}
+	readFileState = media.FileState // it can be read again
+	if n := scan(); n != 0 {
+		t.Errorf("readable again: decided on its first readable look (%d)", n)
+	}
+	if n := scan(); n != 1 {
+		t.Errorf("readable and unchanged since: queued %d, want 1", n)
 	}
 }

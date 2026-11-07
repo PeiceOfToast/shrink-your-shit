@@ -40,20 +40,25 @@ func FileKey(path string, _ os.FileInfo) (key string, ok bool) {
 	return fmt.Sprintf("%d:%d:%d", info.VolumeSerialNumber, info.FileIndexHigh, info.FileIndexLow), true
 }
 
-// FileState is the file itself as Windows keeps it: its identity (as FileKey), and its size and last
-// write time read through the file's handle, not from the directory listing, whose copy NTFS updates
-// lazily and which can lag behind (a file looking changed between two scans of it untouched).
-func FileState(path string, _ os.FileInfo) (key string, size int64, mtime time.Time, ok bool) {
+// FileState is the file itself as Windows keeps it, read through the file's handle, not from the
+// directory listing (whose copy NTFS updates lazily, so an untouched file could look changed between two
+// scans): its identity (as FileKey), size, last write time and creation time. A file made again under
+// the same name can get the old one's file index, but normally not its creation time. An error when the
+// file cannot be opened or asked (a download holding it locked, for one).
+func FileState(path string, _ os.FileInfo) (State, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return "", 0, time.Time{}, false
+		return State{}, err
 	}
 	defer f.Close()
 	var info syscall.ByHandleFileInformation
 	if err := syscall.GetFileInformationByHandle(syscall.Handle(f.Fd()), &info); err != nil {
-		return "", 0, time.Time{}, false
+		return State{}, err
 	}
-	key = fmt.Sprintf("%d:%d:%d", info.VolumeSerialNumber, info.FileIndexHigh, info.FileIndexLow)
-	size = int64(info.FileSizeHigh)<<32 | int64(info.FileSizeLow)
-	return key, size, time.Unix(0, info.LastWriteTime.Nanoseconds()), true
+	return State{
+		Key:   fmt.Sprintf("%d:%d:%d", info.VolumeSerialNumber, info.FileIndexHigh, info.FileIndexLow),
+		Size:  int64(info.FileSizeHigh)<<32 | int64(info.FileSizeLow),
+		MTime: time.Unix(0, info.LastWriteTime.Nanoseconds()),
+		Born:  time.Unix(0, info.CreationTime.Nanoseconds()),
+	}, nil
 }
