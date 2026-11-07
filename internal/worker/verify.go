@@ -280,11 +280,22 @@ func (w *Worker) ssimSegment(ctx context.Context, srcPath, tmp string, sv, ov in
 		return fmt.Sprintf("[%d:v:%d]setpts=PTS-(%s)/TB,trim=start=%s:duration=%s[%s]",
 			in, stream, strconv.FormatFloat(start, 'f', 6, 64), secs(seg.start), secs(seg.length), label)
 	}
-	args := []string{"-hide_banner", "-nostdin", "-v", "info", "-nostats", "-copyts",
-		"-noaccurate_seek", "-ss", secs(from), "-t", read, "-i", srcPath,
-		"-noaccurate_seek", "-ss", secs(from), "-t", read, "-i", tmp,
-		"-lavfi", cut(0, sv, srcStart, "a") + ";" + cut(1, ov, outStart, "b") + ";[a][b]ssim",
-		"-f", "null", "-"}
+	// Reading from the start needs no seek, and must not have one: in an AVI, "-ss 0" jumps to a
+	// later keyframe (measured: 8.4 s in the original, 1.4 s in the new file), so a good file's
+	// start sample scored 0.878-0.934 and was refused.
+	input := func(path string) []string {
+		a := []string{"-noaccurate_seek"}
+		if from > 0 {
+			a = append(a, "-ss", secs(from))
+		}
+		return append(a, "-t", read, "-i", path)
+	}
+	args := []string{"-hide_banner", "-nostdin", "-v", "info", "-nostats", "-copyts"}
+	args = append(args, input(srcPath)...)
+	args = append(args, input(tmp)...)
+	args = append(args,
+		"-lavfi", cut(0, sv, srcStart, "a")+";"+cut(1, ov, outStart, "b")+";[a][b]ssim",
+		"-f", "null", "-")
 	sctx, cancel := context.WithTimeout(ctx, sampleTimeout)
 	defer cancel()
 	_, stderr, err := w.Exec.Capture(sctx, w.FFmpeg, args...)
