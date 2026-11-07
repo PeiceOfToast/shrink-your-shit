@@ -370,3 +370,55 @@ func TestBackupFailureCleansUpPartialFile(t *testing.T) {
 		t.Error("a failed backup left a file behind")
 	}
 }
+
+// Migration 7 on an upgraded install: skips recorded before reason codes get their code from the
+// decision text; a skip whose text maps to none is forgotten so the next scan records it afresh
+// (review ce336a6: otherwise every existing skip stays out of the Skipped list).
+func TestMigration7BackfillsSkipReasons(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "syp.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// back to version 6: as an install from before 21b left it
+	for _, q := range []string{`DROP INDEX files_reason`, `DROP INDEX jobs_output`, `ALTER TABLE files DROP COLUMN reason`,
+		`ALTER TABLE jobs DROP COLUMN started`, `PRAGMA user_version=6`} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatal(q, err)
+		}
+	}
+	old := map[string]string{
+		"/m/a.mkv": "skip: HEVC is already an efficient format",
+		"/m/b.mkv": "skip: codec is hevc, rule wants h264",
+		"/m/c.mkv": "skip: codec is mpeg4, rule wants h264",
+		"/m/d.mkv": "skip: bitrate 3000 kbps is below 4000 kbps",
+		"/m/e.mkv": "skip: already efficient: 0.022 bits per pixel, Smallest needs more than 0.050",
+		"/m/f.mkv": "skip: vc1 is not a format the slider converts",
+		"/m/g.mkv": "skip: it has no video",
+		"/m/h.mkv": "skip: its bitrate, picture size or frame rate is unknown, so its saving cannot be judged",
+		"/m/i.mkv": "skip: its hdmv_pgs_subtitle subtitles cannot be kept in mov,mp4,m4a,3gp,3g2,mj2",
+		"/m/j.mkv": "unreadable",
+		"/m/k.mkv": "skip: something a later version will say",
+		"/m/l.mkv": "queued: H.264 at 9000 kbps",
+	}
+	for p, d := range old {
+		s.db.Exec(`INSERT INTO files(path,size,mtime,codec,decision) VALUES(?,1,1,'',?)`, p, d)
+	}
+	s.Close()
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	want := map[string]string{"/m/a.mkv": "already_hevc", "/m/b.mkv": "already_hevc", "/m/c.mkv": "format_not_converted",
+		"/m/d.mkv": "already_efficient", "/m/e.mkv": "already_efficient", "/m/f.mkv": "format_not_converted",
+		"/m/g.mkv": "no_video", "/m/h.mkv": "unknown_bitrate", "/m/i.mkv": "cannot_keep_track", "/m/j.mkv": "unreadable", "/m/l.mkv": ""}
+	for p, r := range want {
+		if f, _ := s.GetFile(p); f == nil || f.Reason != r {
+			t.Errorf("%s: %+v, want reason %q", p, f, r)
+		}
+	}
+	if f, _ := s.GetFile("/m/k.mkv"); f != nil {
+		t.Errorf("an unmapped skip is forgotten: %+v", f)
+	}
+}

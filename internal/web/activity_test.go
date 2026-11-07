@@ -5,6 +5,7 @@ package web
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -85,8 +86,10 @@ func TestDoneAndKeptLists(t *testing.T) {
 
 func TestActivitySummaryQueueFailedSkipped(t *testing.T) {
 	srv, st, _, fe := libServer(t, false)
-	dir := t.TempDir()
-	l, _ := st.AddLibrary("Movies", dir, rules.SliderTemplate(3), true)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	// the library is stored resolved (/private/var on macOS, long names on Windows), and the scanner
+	// records files under that stored path, so the test's files are too
+	dir := l.Path
 	// done, original gone: 300 freed; done, original kept: 600 waiting
 	done(t, st, l.ID, dir+"/gone.mkv", dir+"/gone.mkv", 500, 200)
 	kept := done(t, st, l.ID, dir+"/kept.mkv", dir+"/kept.mkv", 1000, 400)
@@ -111,7 +114,7 @@ func TestActivitySummaryQueueFailedSkipped(t *testing.T) {
 	st.PutFile(jobs.File{Path: "/elsewhere/x.mkv", Decision: "unreadable", Reason: rules.SkipUnreadable})
 	st.PutFile(jobs.File{Path: dir + "/queued.mkv", Decision: "queued: H.264"}) // not skipped
 	// a converted file, which the scanner then skips as already HEVC: done, not "skipped"
-	st.PutFile(jobs.File{Path: dir + "/gone.mkv", Decision: "skip: HEVC is already an efficient format", Reason: rules.SkipAlreadyHEVC})
+	st.PutFile(jobs.File{Path: dir + "/gone.mkv", Size: 200, Decision: "skip: HEVC is already an efficient format", Reason: rules.SkipAlreadyHEVC})
 
 	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/activity/summary"})
 	if body != `{"counts":{"failed":2,"skipped":3},"freedBytes":300,"paused":false,"waitingBytes":600,"waitingFiles":2,"workingFiles":1}`+"\n" {
@@ -185,5 +188,38 @@ func TestActivitySummaryQueueFailedSkipped(t *testing.T) {
 	}
 	if code, b := post(t, srv, "POST", "/api/system/backup", `{}`); code != 501 || !strings.Contains(b, "Nothing was downloaded") {
 		t.Errorf("backup %d %s", code, b)
+	}
+}
+
+// A converted file is "done", not "skipped", only while it is the file the job wrote: a different file
+// put at that path later and skipped is listed (review ce336a6).
+func TestSkippedListsADifferentFileAtAConvertedPath(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	p := filepath.Join(l.Path, "a.mkv")
+	done(t, st, l.ID, p, p, 1000, 400)
+	st.PutFile(jobs.File{Path: p, Size: 400, ModTime: 1, Decision: "skip: HEVC is already an efficient format", Reason: rules.SkipAlreadyHEVC})
+	if _, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/activity/skipped"}); !strings.Contains(body, `"total":0`) {
+		t.Errorf("the converted file itself: %s", body)
+	}
+	st.PutFile(jobs.File{Path: p, Size: 777, ModTime: 2, Decision: "skip: HEVC is already an efficient format", Reason: rules.SkipAlreadyHEVC})
+	if _, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/activity/skipped"}); !strings.Contains(body, `"total":1`) {
+		t.Errorf("a different file at that path: %s", body)
+	}
+}
+
+// Up next is per library, also when two libraries have the same name (review ce336a6).
+func TestUpNextIsPerLibraryNotPerName(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	a, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	b, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	st.Enqueue(jobs.Job{Library: a.Path, LibraryID: a.ID, Path: filepath.Join(a.Path, "1.mkv")})
+	st.Enqueue(jobs.Job{Library: b.Path, LibraryID: b.ID, Path: filepath.Join(b.Path, "2.mkv")})
+	st.Enqueue(jobs.Job{Library: b.Path, LibraryID: b.ID, Path: filepath.Join(b.Path, "3.mkv")})
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/activity/queue"})
+	var q struct{ UpNext []map[string]any }
+	json.Unmarshal([]byte(body), &q)
+	if len(q.UpNext) != 2 || q.UpNext[0]["count"] != 1.0 || q.UpNext[1]["count"] != 2.0 {
+		t.Errorf("%s", body)
 	}
 }

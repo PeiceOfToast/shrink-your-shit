@@ -71,8 +71,9 @@ type LibraryQueue struct {
 
 // UpNext counts the queued jobs per library, in queue order of their first job.
 func (s *Store) UpNext() ([]LibraryQueue, error) {
-	rows, err := s.db.Query(`SELECT COALESCE(l.name, j.library), COUNT(*) FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id
-WHERE j.status=? GROUP BY COALESCE(l.name, j.library) ORDER BY MIN(j.id)`, Queued)
+	// by library id (names need not be unique); jobs from before libraries by their folder
+	rows, err := s.db.Query(`SELECT COALESCE(MAX(l.name), j.library), COUNT(*) FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id
+WHERE j.status=? GROUP BY COALESCE(j.library_id, 0), CASE WHEN j.library_id IS NULL THEN j.library END ORDER BY MIN(j.id)`, Queued)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +117,10 @@ FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id WHERE j.status IN (?,?) O
 
 // convertedSQL is true for a files row that is the output of a done conversion: the scanner skips it
 // afterwards (already the new format), but it is not "skipped" for the person, it is done.
-const convertedSQL = `EXISTS (SELECT 1 FROM jobs WHERE jobs.status='done' AND jobs.output_path=files.path)`
+// It is that output only while it is the file the job wrote: its size, and its modification time when
+// the swap recorded one (slice 17); a different file put at that path later is listed.
+const convertedSQL = `EXISTS (SELECT 1 FROM jobs WHERE jobs.status='done' AND jobs.output_path=files.path AND jobs.size_after=files.size
+  AND NOT EXISTS (SELECT 1 FROM originals o WHERE o.job_id=jobs.id AND o.new_mtime<>0 AND o.new_mtime<>files.mtime))`
 
 // Skipped is a file the scanner decided not to convert, with the row id the Skipped list uses.
 type Skipped struct {

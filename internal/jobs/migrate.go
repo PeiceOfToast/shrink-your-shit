@@ -99,7 +99,22 @@ CREATE INDEX originals_job ON originals(job_id);`},
 ALTER TABLE jobs ADD COLUMN started TEXT;
 ALTER TABLE files ADD COLUMN reason TEXT NOT NULL DEFAULT '';
 CREATE INDEX files_reason ON files(reason);
-CREATE INDEX jobs_output ON jobs(output_path, status);`},
+CREATE INDEX jobs_output ON jobs(output_path, status);
+UPDATE files SET reason = CASE
+  WHEN decision = 'unreadable' THEN 'unreadable'
+  WHEN decision LIKE 'skip: % is already an efficient format' THEN 'already_hevc'
+  WHEN decision LIKE 'skip: codec is hevc,%' OR decision LIKE 'skip: codec is av1,%' OR decision LIKE 'skip: codec is vp9,%' THEN 'already_hevc'
+  WHEN decision LIKE 'skip: codec is %' THEN 'format_not_converted'
+  WHEN decision LIKE 'skip: % is not a format the slider converts' THEN 'format_not_converted'
+  WHEN decision LIKE 'skip: bitrate % is below %' THEN 'already_efficient'
+  WHEN decision LIKE 'skip: already efficient:%' THEN 'already_efficient'
+  WHEN decision = 'skip: it has no video' THEN 'no_video'
+  WHEN decision LIKE 'skip: its bitrate, picture size or frame rate is unknown%' THEN 'unknown_bitrate'
+  WHEN decision LIKE 'skip: its % subtitles cannot be kept in %' THEN 'cannot_keep_track'
+  ELSE '' END
+WHERE decision = 'unreadable' OR decision LIKE 'skip:%';
+-- a skip whose text maps to no code is forgotten: the next scan looks at the file again and records it
+DELETE FROM files WHERE decision LIKE 'skip:%' AND reason = '';`},
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.
