@@ -174,7 +174,11 @@
     // notes that pass with a warning: "space_unknown", "unreadable_folders" (contract, workshop slice 20).
     checkLibrary: function (p, b) {
       var path = b.path || "", codes = { missing: "unreadable", readonly: "read_only", full: "low_space", empty: "no_videos", nocodec: "no_converter" }, bl = [], k;
-      for (k in codes) if (path.indexOf(k) >= 0) bl.push({ code: codes[k], message: k === "full" ? "Only 6 GB free on this disk. Free up space (about 15 GB is enough to start), then press Check again." : "Cannot use this folder." });
+      // Messages as the server words them (read_only carries fix steps for the platform); the others send none here,
+      // so the page's own sentence for that code shows (its fallback).
+      var said = { full: "Only 6 GB free on this disk. Free up space (about 15 GB is enough to start), then press Check again.",
+        readonly: "This folder is read-only. Make it writable, then press Check again. shrink-your-shit runs as the user syp. On this server: sudo chown -R syp:syp " + path + " (or add syp to the folder's group and give the group write access)." };
+      for (k in codes) if (path.indexOf(k) >= 0) bl.push({ code: codes[k], message: said[k] || "" });
       var notes = bl.length ? [] : [{ code: "hardlinks", message: "212 files are shared with another folder (for example by Radarr). This version still converts them, but that frees no space, because the other folder keeps its copy. Leaving them alone comes in a later update." }, { code: "no_hw_encoder", message: "" }];
       if (!bl.length && path.indexOf("space_unknown") >= 0) notes.unshift({ code: "space_unknown", message: "We couldn't check how much space is free on this disk. Files here are only converted when there is room, so check that the disk is working." });
       if (!bl.length && path.indexOf("unreadable_folders") >= 0) notes.unshift({ code: "unreadable_folders", message: "3 folders inside could not be read. Files in them will not be converted." });

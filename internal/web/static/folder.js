@@ -28,7 +28,7 @@
         if ($("path").value.trim() !== path) return;
         list.textContent = "";
         (r.blockers || []).forEach(function (b) {
-          var li = line("bad", "Fix this", COPY[b.code] || b.message);
+          var li = line("bad", "Fix this", b.message || COPY[b.code] || "We can't use this folder."); // the server's words (they carry fix steps); ours only if it sends none
           if (b.code === "no_converter") { // the health report says what is missing; it stays open during first-run
             var a = ui.el("a", null, "See the health report"); a.href = "/settings/system/"; li.appendChild(document.createTextNode(" ")); li.appendChild(a);
           }
