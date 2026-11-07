@@ -60,13 +60,17 @@ rule the scanner matches with and the CRF, preset, output mode and minimum savin
 - Flows (`internal/web/flows.go`): list with who uses each (`usedBy`, `madeWith`), create (default
   template: slider Balanced), rename (the only way a flow is ever renamed), duplicate ("<name> (copy)"),
   delete (refused with `flow_in_use` while a library uses it). `PUT /api/libraries/{id}/flow` gives a
-  library another flow, only when the `perLibraryFlow` setting is on. Import/export answer 501 until
+  library another flow, only when the `perLibraryFlow` setting is on; it forgets the scanner's
+  records of that library's files and wakes the scanner, so files skipped under the old flow are
+  looked at again. Import/export answer 501 until
   slice 30; `GET /api/flows/{id}` has no steps until slice 16.
 - Global settings (`internal/web/settings.go`, stored as JSON in `app_meta` key `settings`):
   `GET/PATCH /api/settings`. A PATCH may hold any subset; the result is checked as a whole and saved
   only if all of it is valid. Read-only fields (`authRequired`, `trashPath`, `updateAvailable`) are
-  ignored in a PATCH; `integrations` is refused until its slice. When settings are first created,
-  `firstRunDone` is true if a library already exists (an upgrade, or `-library`). This slice stores
+  ignored in a PATCH; `integrations` is refused until its slice. When settings are first created they
+  follow the install kind (migration 3): a fresh install starts at Basic with first-run to do, even
+  with libraries from `-library` or Docker's `/media`; an upgrade starts at Standard with first-run
+  done (DESIGN/FIRST-RUN.md, D13). This slice stores
   `parallelJobs`, `quietHours`, `lowPriority`, `scanSchedule`, `queueOrder` and `keepOriginalsDays`;
   later slices use them.
 

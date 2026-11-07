@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -14,11 +15,14 @@ import (
 func TestFlows(t *testing.T) {
 	srv, st, _, _ := libServer(t, false)
 	movies, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), false)
-	st.EnsureLibraries([]string{t.TempDir()}, rules.LegacyTemplate(rules.Default(), "replace"))
+	st.AddLibrary("Old", t.TempDir(), rules.LegacyTemplate(rules.Default(), "replace"), true) // as an upgrade makes it
 
 	code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/flows"})
 	var list struct{ Items []flowItem }
 	json.Unmarshal([]byte(body), &list)
+	if !strings.Contains(body, `"total":2`) || !strings.Contains(body, `"id":"1"`) {
+		t.Errorf("want total and string ids (UI-API-CONTRACT.md): %s", body)
+	}
 	if code != 200 || len(list.Items) != 2 || list.Items[0].Name != "Movies" || !slices.Equal(list.Items[0].UsedBy, []string{"Movies"}) ||
 		list.Items[0].MadeWith != "slider" || list.Items[1].MadeWith != "legacy" || list.Items[0].ChangedAt == "" {
 		t.Fatalf("list: %d %s", code, body)
@@ -79,7 +83,7 @@ func TestFlows(t *testing.T) {
 }
 
 func TestChoosingALibrarysFlowNeedsPerLibraryFlows(t *testing.T) {
-	srv, st, _, _ := libServer(t, false)
+	srv, st, _, fe := libServer(t, false)
 	a, _ := st.AddLibrary("A", t.TempDir(), rules.SliderTemplate(3), false)
 	b, _ := st.AddLibrary("B", t.TempDir(), rules.SliderTemplate(1), false)
 	path := fmt.Sprintf("/api/libraries/%d/flow", a.ID)
@@ -93,6 +97,9 @@ func TestChoosingALibrarysFlowNeedsPerLibraryFlows(t *testing.T) {
 	}
 	if l, _ := st.GetLibrary(a.ID); l.FlowID != b.FlowID {
 		t.Errorf("library A uses flow %d, want %d", l.FlowID, b.FlowID)
+	}
+	if fe.scans != 1 {
+		t.Errorf("a new flow must wake the scanner so the library's files are looked at again (scans %d)", fe.scans)
 	}
 	if code, resp := post(t, srv, "PUT", path, `{"flowId":999}`); code != 404 || errCode(resp) != "not_found" {
 		t.Errorf("unknown flow: %d %s", code, resp)

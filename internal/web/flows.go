@@ -15,7 +15,7 @@ import (
 
 // flowItem is a flow as GET /api/flows shows it (UI-API-CONTRACT.md "Flows").
 type flowItem struct {
-	ID        int64    `json:"id"`
+	ID        int64    `json:"id,string"` // ids are opaque strings in the API
 	Name      string   `json:"name"`
 	UsedBy    []string `json:"usedBy"`
 	MadeWith  string   `json:"madeWith"` // slider|selectors|builder, or legacy (made from program flags)
@@ -30,7 +30,7 @@ func madeWith(kind string) string {
 	return "builder"
 }
 
-func flowRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore) {
+func flowRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng Engine) {
 	view := func(f jobs.Flow, usedBy []string) flowItem {
 		if usedBy == nil {
 			usedBy = []string{}
@@ -101,7 +101,7 @@ func flowRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore) {
 		for _, fu := range all {
 			items = append(items, view(fu.Flow, fu.UsedBy))
 		}
-		writeJSON(w, map[string]any{"items": items})
+		writeJSON(w, map[string]any{"items": items, "total": len(items)})
 	})
 	// The steps of a flow, as plain text, come with the Plan compiler (slice 16); until then none.
 	api.HandleFunc("GET /api/flows/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -114,7 +114,7 @@ func flowRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore) {
 			storeErr(w, err)
 			return
 		}
-		writeJSON(w, map[string]any{"id": f.ID, "name": f.Name, "madeWith": madeWith(f.Template.Kind), "steps": []any{}})
+		writeJSON(w, map[string]any{"id": strconv.FormatInt(f.ID, 10), "name": f.Name, "madeWith": madeWith(f.Template.Kind), "steps": []any{}})
 	})
 	api.HandleFunc("POST /api/flows", func(w http.ResponseWriter, r *http.Request) {
 		name, ok := readName(w, r)
@@ -207,6 +207,9 @@ func flowRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore) {
 		if _, err := store.SetLibraryFlow(libID, fid); err != nil {
 			storeErr(w, err)
 			return
+		}
+		if eng.ScanNow != nil {
+			eng.ScanNow() // its files are looked at again with the new flow
 		}
 		writeJSON(w, map[string]bool{"ok": true})
 	})

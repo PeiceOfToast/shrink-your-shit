@@ -33,20 +33,25 @@ func TestSettingsDefaultsAndFirstRun(t *testing.T) {
 	if code != 200 || m["trashPath"] == "" || m["integrations"] == nil || m["quietHours"] == nil {
 		t.Errorf("%d %s", code, body)
 	}
-	// with a library already there (upgrade, or -library), first-run counts as done
+	// a fresh install with a library from -library or Docker's /media still has first-run to do
 	srv2, st2, _, _ := libServer(t, false)
 	st2.EnsureLibraries([]string{t.TempDir()}, rules.LegacyTemplate(rules.Default(), "replace"))
 	_, body, _ = do(t, nil, srv2, call{method: "GET", path: "/api/settings"})
-	if settingsOf(t, body)["firstRunDone"] != true {
-		t.Errorf("libraries exist, so first-run is done: %s", body)
+	if m := settingsOf(t, body); m["firstRunDone"] != false || m["controlLevel"] != "basic" {
+		t.Errorf("fresh install with a flag library: %s", body)
 	}
-	// it is decided once: adding the first library during first-run does not finish it
+	// an upgrade: first-run done, Standard (D13), so its Legacy flow keeps working unchanged
 	srv3, st3, _, _ := libServer(t, false)
-	do(t, nil, srv3, call{method: "GET", path: "/api/settings"})
-	st3.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), false)
+	st3.SetMeta("install", "upgrade")
 	_, body, _ = do(t, nil, srv3, call{method: "GET", path: "/api/settings"})
-	if settingsOf(t, body)["firstRunDone"] != false {
-		t.Errorf("the wizard's own library must not end first-run: %s", body)
+	if m := settingsOf(t, body); m["firstRunDone"] != true || m["controlLevel"] != "standard" {
+		t.Errorf("upgrade: %s", body)
+	}
+	// decided once: later changes to the install do not reset the stored settings
+	st3.SetMeta("install", "fresh")
+	_, body, _ = do(t, nil, srv3, call{method: "GET", path: "/api/settings"})
+	if settingsOf(t, body)["controlLevel"] != "standard" {
+		t.Errorf("stored settings must stay: %s", body)
 	}
 }
 

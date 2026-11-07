@@ -35,12 +35,15 @@ type QuietHours struct {
 
 const settingsKey = "settings"
 
-// DefaultControlLevel is the control level every install starts at, upgrades included. FIRST-RUN.md
-// says Basic; decision D13 said Standard for upgrades: design is asked which holds (2026-11-07).
-const DefaultControlLevel = "basic"
+// The control level an install starts at (DESIGN/FIRST-RUN.md, D13): a fresh install starts at Basic;
+// an upgraded one at Standard, so its "<folder> - Legacy" flow keeps working unchanged.
+const (
+	FreshControlLevel   = "basic"
+	UpgradeControlLevel = "standard"
+)
 
 func defaultSettings() Settings {
-	return Settings{ControlLevel: DefaultControlLevel, FirstRunStep: 1, KeepOriginalsDays: 7, ParallelJobs: 1,
+	return Settings{ControlLevel: FreshControlLevel, FirstRunStep: 1, KeepOriginalsDays: 7, ParallelJobs: 1,
 		LowPriority: true, ScanSchedule: "02:00", QueueOrder: "newest"}
 }
 
@@ -78,8 +81,9 @@ func oneOf(v string, set ...string) bool {
 	return false
 }
 
-// settingsStore keeps the settings in app_meta. The first time (a new database, or one from before
-// settings existed), first-run counts as done if a library already exists: an upgrade, or -library.
+// settingsStore keeps the settings in app_meta. When they are first made: a fresh install has
+// first-run to do (even with libraries from -library or Docker's /media, which first-run shows); an
+// upgrade has it done and starts at Standard (DESIGN/FIRST-RUN.md).
 type settingsStore struct {
 	mu    sync.Mutex
 	store *jobs.Store
@@ -92,11 +96,13 @@ func (ss *settingsStore) load() (Settings, error) {
 	}
 	s := defaultSettings()
 	if !ok {
-		libs, err := ss.store.Libraries()
+		upgraded, err := ss.store.Upgraded()
 		if err != nil {
 			return Settings{}, err
 		}
-		s.FirstRunDone = len(libs) > 0
+		if upgraded {
+			s.FirstRunDone, s.ControlLevel = true, UpgradeControlLevel
+		}
 		return s, ss.save(s)
 	}
 	return s, json.Unmarshal([]byte(v), &s) // fields added later keep their defaults

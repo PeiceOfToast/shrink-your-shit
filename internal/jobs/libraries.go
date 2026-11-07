@@ -561,7 +561,7 @@ func (s *Store) AddFlow(name string, t rules.Template) (Flow, error) {
 	}
 	id, err := s.addFlow(s.db, name, t)
 	if err != nil {
-		return Flow{}, err
+		return Flow{}, nameErr(err)
 	}
 	return s.GetFlow(id)
 }
@@ -575,7 +575,7 @@ func (s *Store) RenameFlow(id int64, name string) (Flow, error) {
 		return Flow{}, err
 	}
 	if _, err := s.db.Exec(`UPDATE flows SET name=?, changed=? WHERE id=?`, name, s.stamp(), id); err != nil {
-		return Flow{}, err
+		return Flow{}, nameErr(err)
 	}
 	return s.GetFlow(id)
 }
@@ -592,7 +592,7 @@ func (s *Store) DuplicateFlow(id int64) (Flow, error) {
 	}
 	nid, err := s.addFlow(s.db, name, f.Template)
 	if err != nil {
-		return Flow{}, err
+		return Flow{}, nameErr(err)
 	}
 	return s.GetFlow(nid)
 }
@@ -621,17 +621,49 @@ func (s *Store) DeleteFlow(id int64) error {
 	return tx.Commit()
 }
 
-// SetLibraryFlow gives a library another existing flow.
+// SetLibraryFlow gives a library another existing flow, in one transaction (so a flow deleted at the
+// same moment cannot be left referenced). The library's files are forgotten by the scanner's cache,
+// so files skipped under the old flow are looked at again with the new one.
 func (s *Store) SetLibraryFlow(libraryID, flowID int64) (Library, error) {
-	if _, err := s.GetFlow(flowID); err != nil {
-		return Library{}, err
-	}
-	r, err := s.db.Exec(`UPDATE libraries SET flow_id=? WHERE id=?`, flowID, libraryID)
+	tx, err := s.db.Begin()
 	if err != nil {
 		return Library{}, err
 	}
-	if n, _ := r.RowsAffected(); n == 0 {
+	defer tx.Rollback()
+	var c int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM flows WHERE id=?`, flowID).Scan(&c); err != nil {
+		return Library{}, err
+	}
+	if c == 0 {
 		return Library{}, ErrNotFound
 	}
+	l, err := scanLibrary(tx.QueryRow(`SELECT `+libCols+` FROM libraries WHERE id=?`, libraryID))
+	if err != nil {
+		return Library{}, err
+	}
+	if _, err := tx.Exec(`UPDATE libraries SET flow_id=? WHERE id=?`, flowID, libraryID); err != nil {
+		return Library{}, err
+	}
+	if err := forgetFiles(tx, l.Path); err != nil {
+		return Library{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Library{}, err
+	}
 	return s.GetLibrary(libraryID)
+}
+
+// forgetFiles drops the scanner's records of the files under dir, so the next scan probes them again.
+func forgetFiles(q execer, dir string) error {
+	prefix := strings.TrimSuffix(dir, string(filepath.Separator)) + string(filepath.Separator)
+	_, err := q.Exec(`DELETE FROM files WHERE substr(path, 1, length(?)) = ?`, prefix, prefix)
+	return err
+}
+
+// nameErr turns the unique-name index's refusal into ErrNameTaken.
+func nameErr(err error) error {
+	if err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed: flows.name") {
+		return ErrNameTaken
+	}
+	return err
 }
