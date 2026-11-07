@@ -229,6 +229,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		if errors.Is(serr, fs.ErrNotExist) {
 			return "", failed("The file is not there any more, so nothing was converted.", serr)
 		}
+		if errors.Is(serr, fs.ErrPermission) { // not a write: the generic permission words would point the wrong way
+			return "", failed("shrink-your-shit is not allowed to read this file, so nothing was converted. Let it read the file (Settings > System says how), then press Retry.", serr)
+		}
 		return "", fmt.Errorf("source file: %w", serr)
 	}
 	if err := removeLeftoverTemps(job.Path); err != nil {

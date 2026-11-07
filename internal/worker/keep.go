@@ -115,7 +115,8 @@ func trashPath(dir, base string, id int64) (string, error) {
 func (w *Worker) keepAndReplace(ctx context.Context, job jobs.Job, stage *staged, before os.FileInfo, days int, stillOK func() error) error {
 	dir := filepath.Join(filepath.Dir(job.Path), TrashDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return kept("we couldn't make the folder that keeps originals (%s: %v), so the original was left as it is", dir, err)
+		log.Printf("folder for kept originals %s: %v", dir, err)
+		return kept("the folder that keeps originals couldn't be made here, so the original was left as it is. Check that shrink-your-shit may write in this folder")
 	}
 	hash, err := SampleHash(job.Path)
 	if err != nil {
@@ -123,7 +124,8 @@ func (w *Worker) keepAndReplace(ctx context.Context, job jobs.Job, stage *staged
 	}
 	trash, err := trashPath(dir, filepath.Base(job.Path), job.ID)
 	if err != nil {
-		return kept("we couldn't use the folder that keeps originals (%s: %v), so the original was left as it is", dir, err)
+		log.Printf("folder for kept originals %s: %v", dir, err)
+		return kept("the folder that keeps originals couldn't be used, so the original was left as it is. Check that shrink-your-shit may write in this folder")
 	}
 	nst, err := os.Stat(stage.path)
 	if err != nil {

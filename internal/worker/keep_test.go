@@ -97,7 +97,8 @@ func TestTrashFolderNotCreatable(t *testing.T) {
 	s := newScenario(t)
 	os.WriteFile(filepath.Join(s.dir, TrashDir), []byte("a file in the way"), 0o644)
 	s.keeping(7).RunOne(context.Background())
-	s.assertKept("couldn't make the folder that keeps originals")
+	s.assertKept("the folder that keeps originals couldn't be made")
+	assertPlain(t, s.job().Error)
 	s.assertOriginalSafe()
 }
 
@@ -233,7 +234,8 @@ func TestUnsearchableTrashFolderKeepsTheJob(t *testing.T) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("the worker is stuck")
 	}
-	s.assertKept("couldn't use the folder that keeps originals")
+	s.assertKept("the folder that keeps originals couldn't be used")
+	assertPlain(t, s.job().Error)
 	s.assertOriginalSafe()
 }
 

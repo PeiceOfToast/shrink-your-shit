@@ -855,6 +855,10 @@ func TestFailedDetailsArePlain(t *testing.T) {
 			s.encodeErr = &os.PathError{Op: "write", Path: "/media/x.mkv", Err: syscall.ENOSPC}
 		}, "The disk is full"},
 		{"source gone", func(s *scenario) { os.Remove(s.src) }, "not there any more"},
+		{"source cannot be opened for reading", func(s *scenario) {
+			os.Chmod(s.src, 0)
+			s.t.Cleanup(func() { os.Chmod(s.src, 0o644) })
+		}, "not allowed to read this file"},
 		{"old temp file cannot be removed", func(s *scenario) {
 			victim := filepath.Join(s.t.TempDir(), "other.mkv")
 			os.WriteFile(victim, []byte("x"), 0o644)
@@ -865,8 +869,8 @@ func TestFailedDetailsArePlain(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if c.name == "old temp file cannot be removed" && os.Geteuid() == 0 {
-				t.Skip("root can write in a read-only folder")
+			if (c.name == "old temp file cannot be removed" || c.name == "source cannot be opened for reading") && os.Geteuid() == 0 {
+				t.Skip("root ignores file permissions")
 			}
 			s := newScenario(t)
 			c.mutate(s)
