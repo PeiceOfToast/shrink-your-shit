@@ -24,6 +24,50 @@
     return { get: function () { return { quality: +r.value }; } };
   }
 
+  // The Basic editor (redesign A1): the slider, "Your files become", the Picture line, Audio with its hints and "Your
+  // language", and three fixed lines. s is the setting answer: quality, audio, and becomes (the flow's fixed facts from
+  // the server, contract A5: {video, resolution, fileType}); without becomes the box is not shown (no guessed facts).
+  // langs: the person's language codes; names: code -> name. get() gives {quality, audio}.
+  var PICTURE = ["The smallest files. Fine detail can soften, mostly in dark or busy scenes.", "Small files, with a small loss of fine detail.",
+    "Little visible change for most people. A good start.", "Keeps more detail. Files stay larger.", "Hard to tell from the original. Files stay largest."];
+  var AUDIO = [["stereo_aac", "Stereo AAC in my language", "Audio in your language becomes stereo AAC, which plays on every TV and phone. Surround sound becomes stereo."],
+    ["my_languages", "My language, as it is", "Only tracks in your language are kept, unchanged, surround included."],
+    ["keep_all", "Keep all audio", "Every audio track is kept, unchanged."]];
+  var FIXED = ["Every video not already in this format is converted, even if the new file isn't smaller, so your library ends up in one format. Activity shows the size before and after.",
+    "Each new file is checked against the original before it is kept. If the check fails, the original stays.",
+    "HDR stays HDR. Dolby Vision files are left as they are."];
+  function basic(host, s, langs, names, onChange, label) {
+    var sl = slider(host, s.quality, function () { draw(); if (onChange) onChange(); }, label), range = host.querySelector("input[type=range]");
+    var box = el("div", "become"), line = el("span"), pic = el("p"), pt = el("span"), f = el("div", "field"), lb = el("label", null, "Audio"),
+      sel = el("select"), hint = el("span", "hint"), mine = el("span", "hint"), ul = el("ul", "small muted");
+    box.id = uid(); box.setAttribute("aria-live", "polite"); box.appendChild(el("strong", null, "Your files become")); box.appendChild(line);
+    pic.id = uid(); pic.setAttribute("aria-live", "polite"); pic.appendChild(el("strong", null, "Picture:")); pic.appendChild(document.createTextNode(" ")); pic.appendChild(pt);
+    range.setAttribute("aria-describedby", (s.becomes ? box.id + " " : "") + pic.id);
+    sel.id = uid(); lb.htmlFor = sel.id; hint.id = uid(); mine.id = uid(); sel.setAttribute("aria-describedby", hint.id + " " + mine.id);
+    AUDIO.forEach(function (a) { var o = el("option", null, a[1]); o.value = a[0]; sel.appendChild(o); });
+    sel.value = AUDIO.some(function (a) { return a[0] === s.audio; }) ? s.audio : "stereo_aac";
+    // "English", "English and German", "English, German and French"
+    var list = langs.map(function (c) { return names[c] || c; }), said = list.length < 2 ? list.join("") : list.slice(0, -1).join(", ") + " and " + list[list.length - 1];
+    if (list.length) { mine.appendChild(document.createTextNode("Your language: ")); mine.appendChild(el("strong", null, said)); mine.appendChild(document.createTextNode(". ")); }
+    var to = el("a", null, list.length ? "Change it in Settings > General." : "Choose your language in Settings > General first."); to.href = "/settings/"; mine.appendChild(to);
+    function audioWords() {
+      var who = said || "your language";
+      return { stereo_aac: "stereo AAC in " + who, my_languages: (said ? said + " audio" : "audio in your language") + " as it is", keep_all: "all audio as it is" }[sel.value];
+    }
+    function draw() {
+      var b = s.becomes;
+      if (b) line.textContent = [b.video + " video", b.resolution === "same" ? "same resolution" : "at most " + b.resolution, b.fileType + " file", audioWords()].join(" \u00b7 ");
+      pt.textContent = PICTURE[sl.get().quality - 1];
+      hint.textContent = AUDIO.filter(function (a) { return a[0] === sel.value; })[0][2];
+    }
+    sel.addEventListener("change", function () { draw(); if (onChange) onChange(); });
+    f.appendChild(lb); f.appendChild(sel); f.appendChild(hint); f.appendChild(mine);
+    FIXED.forEach(function (t) { ul.appendChild(el("li", null, t)); });
+    if (s.becomes) host.appendChild(box);
+    host.appendChild(pic); host.appendChild(f); host.appendChild(ul); draw();
+    return { get: function () { return { quality: sl.get().quality, audio: sel.value }; } };
+  }
+
   // The nine dropdowns, in four groups, all at their defaults (the same as Balanced).
   // [field, label, [value, text] choices, default index, hint]. The values are what the setting call
   // carries; the table is written down in UI-API-CONTRACT.md.
@@ -147,5 +191,5 @@
     host.appendChild(fs);
     return { get: function () { return { quality: q }; } };
   }
-  g.SYP.editors = { slider: slider, selectors: selectors, startFrom: startFrom };
+  g.SYP.editors = { slider: slider, basic: basic, selectors: selectors, startFrom: startFrom };
 })(window);

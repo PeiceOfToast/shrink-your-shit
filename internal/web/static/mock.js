@@ -286,13 +286,15 @@
       var av = avail();
       if (libs[i].sel) return ok(Object.assign({ kind: "selectors", warnings: warningsFor(libs[i].sel) }, av, libs[i].sel));
       if (libs[i].settingKind === "custom") return ok(Object.assign({ kind: "custom", warnings: [] }, av));
-      return ok(Object.assign({ kind: "slider", quality: libs[i].quality || (libs[i].settingLabel === "Smaller" ? 2 : 3), positions: SLIDER, warnings: [] }, av));
+      // A Basic flow (redesign A1, contract A5 as proposed): its audio choice and its fixed facts.
+      return ok(Object.assign({ kind: "slider", quality: libs[i].quality || (libs[i].settingLabel === "Smaller" ? 2 : 3), positions: SLIDER, warnings: [],
+        audio: libs[i].audio || "stereo_aac", becomes: { video: "HEVC", resolution: "same", fileType: "MKV" } }, av));
     },
     putSetting: function (p, b) {
       var i = find(libs, "id", p.id);
       if (i < 0) return fail(404, "not_found", "That library is gone. Nothing was changed.");
       // "Keep only my languages" before any language is chosen (slice 25b): the server's words.
-      if (b.speed && !(settings.languages || []).length && (b.audio === "my_languages" || b.subtitles === "my_languages")) return fail(400, "languages_needed", "Choose your languages first, in Settings > General.");
+      if (!(settings.languages || []).length && (b.speed ? b.audio === "my_languages" || b.subtitles === "my_languages" : b.audio && b.audio !== "keep_all")) return fail(400, "languages_needed", "Choose your languages first, in Settings > General.");
       var f = flows[find(flows, "id", libs[i].flowId)];
       if (f && f.usedBy.length > 1 && !b.sharedFlowChoice) return fail(409, "flow_shared", "Another library uses this setting. Nothing was changed.", { usedBy: f.usedBy.slice() }); // every library on the flow, this one too, as the server sends it
       if (f && f.usedBy.length > 1 && b.sharedFlowChoice === "make_copy") {
@@ -302,6 +304,7 @@
       }
       if (b.speed && b.maxBitrate != null && CAPS.indexOf(b.maxBitrate) < 0) return fail(400, "invalid", "Max bitrate must be one of the listed choices. Nothing was changed.");
       if (b.quality && !b.speed) delete libs[i].sel; // a slider save replaces Standard choices
+      if (b.quality && !b.speed) libs[i].audio = b.audio || "stereo_aac"; // Basic's audio choice
       if (b.quality) { libs[i].quality = b.quality; libs[i].settingLabel = ["Smallest file", "Smaller", "Balanced", "Better quality", "Best quality"][b.quality - 1]; libs[i].settingKind = "slider"; saveLibs(); }
       if (b.speed && isSliderPosition(b)) { delete libs[i].sel; libs[i].quality = b.quality; libs[i].settingKind = "slider"; saveLibs(); return ok(); }
       if (b.speed) { libs[i].sel = copy(b); libs[i].settingKind = "selectors"; libs[i].settingLabel = ["Smallest file", "Smaller", "Balanced", "Better quality", "Best quality"][(b.quality || 3) - 1]; saveLibs(); }
