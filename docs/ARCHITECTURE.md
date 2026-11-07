@@ -159,7 +159,9 @@ from 0 at the low end, and a file whose best case misses the minimum saving coun
 before; the range overshoots there, and a short sample encode is the planned fix. The result is kept in memory per
 library and setting with a signature of the listing: the same setting over the same files answers at
 once; a change starts a new computation, shown as `stale` with `status: computing` until it is ready.
-A request waits up to 2 s, then answers `computing` and the page asks again. Probes run 4 at a time.
+A request waits up to 2 s, then answers `computing` with `progress {done, total}` and the page asks
+again. Probes run as many at a time as there are CPUs (at least 2), through the same cache as the
+scanner, so Start does not probe the files again.
 `sampleFile` must be a video inside the library folder after links are resolved (400
 `outside_library` / `not_a_video`, 404 `not_found`); `sample.lines` are plain words.
 `GET /api/libraries/{id}/files?q=` lists the videos whose path inside the library contains `q` (`{items:[{path,name,bytes}],total}`, `limit`/`offset`, default 50).

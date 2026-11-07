@@ -14,9 +14,11 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
@@ -38,6 +40,15 @@ type Result struct {
 	// them frees nothing, so the estimate leaves them out. Slice 12 moves them to skipped.shared_file.
 	SharedNoSaving int    `json:"sharedNoSaving"`
 	Status         string `json:"status"` // ready | computing | failed
+	// Progress, while computing: how many of the videos have been looked at, so a page can show it
+	// moving instead of giving up on a big library.
+	Progress *Progress `json:"progress,omitempty"`
+}
+
+// Progress is how far a computing Preview is.
+type Progress struct {
+	Done  int `json:"done"`
+	Total int `json:"total"`
 }
 
 // Previewer computes Previews and keeps the latest one per library and setting.
@@ -45,7 +56,7 @@ type Previewer struct {
 	Store   *jobs.Store
 	Exec    media.Exec
 	FFprobe string
-	// Probes is how many files are probed at once (default 4).
+	// Probes is how many files are probed at once (default: the number of CPUs, at least 2).
 	Probes int
 
 	mu    sync.Mutex
@@ -55,11 +66,16 @@ type Previewer struct {
 
 // run is one computation of a Preview over one listing of the folder.
 type run struct {
-	sig  string // the listing it was computed over
-	done chan struct{}
-	res  Result
-	prev *run // the last finished run for the same setting, shown as stale while this one computes
+	sig      string // the listing it was computed over
+	finished chan struct{}
+	res      Result
+	prev     *run // the last finished run for the same setting, shown as stale while this one computes
+
+	total int
+	done  atomic.Int64 // files looked at so far
 }
+
+func (r *run) progress() *Progress { return &Progress{Done: int(r.done.Load()), Total: r.total} }
 
 // file is a video in the library, as listed.
 type file struct {
@@ -126,47 +142,47 @@ func (p *Previewer) Library(libID int64, root string, t rules.Template, wait tim
 		var prev *run
 		if r != nil {
 			select {
-			case <-r.done:
+			case <-r.finished:
 				prev = r
 			default:
 				prev = r.prev
 			}
 		}
-		r = &run{sig: sig, done: make(chan struct{}), prev: prev}
+		r = &run{sig: sig, finished: make(chan struct{}), prev: prev, total: len(files)}
 		p.cache[key] = r
 		go func(r *run) {
-			r.res = p.compute(files, t)
-			close(r.done)
+			r.res = p.compute(files, t, &r.done)
+			close(r.finished)
 		}(r)
 	}
 	p.mu.Unlock()
 	timer := time.NewTimer(wait)
 	defer timer.Stop()
 	select {
-	case <-r.done:
+	case <-r.finished:
 		return r.res
 	case <-timer.C:
 	}
 	select { // finished just as the wait ran out
-	case <-r.done:
+	case <-r.finished:
 		return r.res
 	default:
 	}
 	if r.prev != nil {
 		old := r.prev.res
-		old.Stale, old.Status = true, "computing"
+		old.Stale, old.Status, old.Progress = true, "computing", r.progress()
 		return old
 	}
-	return Result{Status: "computing", Skipped: map[string]int{}}
+	return Result{Status: "computing", Skipped: map[string]int{}, Progress: r.progress()}
 }
 
 // compute probes every file (a few at a time) and adds up their Plans.
-func (p *Previewer) compute(files []file, t rules.Template) Result {
+func (p *Previewer) compute(files []file, t rules.Template, done *atomic.Int64) Result {
 	p.mu.Lock()
 	if p.slots == nil {
 		n := p.Probes
 		if n <= 0 {
-			n = 4
+			n = max(2, runtime.NumCPU()) // ffprobe is short and partly waits on the disk
 		}
 		p.slots = make(chan struct{}, n)
 	}
@@ -185,7 +201,7 @@ func (p *Previewer) compute(files []file, t rules.Template) Result {
 		wg.Add(1)
 		slots <- struct{}{} // shared by every computation, so several settings at once do not overload the disk
 		go func(i int, f file) {
-			defer func() { <-slots; wg.Done() }()
+			defer func() { done.Add(1); <-slots; wg.Done() }()
 			// Each probe gets its own time limit; a computation is not tied to the request that started it.
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()

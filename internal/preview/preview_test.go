@@ -16,6 +16,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/scanner"
 )
 
 // probes answers ffprobe by file name: the codec, bitrate and size it describes. It counts calls and is
@@ -161,15 +162,15 @@ func TestPreviewComputingAndStale(t *testing.T) {
 	x := &probes{gate: make(chan struct{})}
 	p := &Previewer{Store: store(t), Exec: x, FFprobe: "ffprobe"}
 	dir := library(t)
-	if r := p.Library(1, dir, rules.SliderTemplate(3), 50*time.Millisecond); r.Status != "computing" || r.Stale {
-		t.Fatalf("%+v", r)
+	if r := p.Library(1, dir, rules.SliderTemplate(3), 50*time.Millisecond); r.Status != "computing" || r.Stale || r.Progress == nil || *r.Progress != (Progress{0, 6}) {
+		t.Fatalf("%+v %+v", r, r.Progress)
 	}
 	close(x.gate)
 	var r Result
 	for i := 0; i < 100 && r.Status != "ready"; i++ {
 		r = p.Library(1, dir, rules.SliderTemplate(3), 100*time.Millisecond)
 	}
-	if r.Status != "ready" || r.Files != 6 {
+	if r.Status != "ready" || r.Files != 6 || r.Progress != nil {
 		t.Fatalf("%+v", r)
 	}
 	x.gate = make(chan struct{})
@@ -310,5 +311,30 @@ func TestFiles(t *testing.T) {
 	}
 	if some, _ := Files(dir, "SUB"); len(some) != 1 || some[0].Path != filepath.Join(dir, "sub", "b.mp4") || some[0].Bytes != 2_000_000 {
 		t.Errorf("%+v", some)
+	}
+}
+
+// Start does not probe the library again: the scanner finds the Preview's probes in the cache.
+func TestStartReusesThePreviewsProbes(t *testing.T) {
+	x := &probes{}
+	st := store(t)
+	dir := library(t)
+	p := &Previewer{Store: st, Exec: x, FFprobe: "ffprobe"}
+	if r := p.Library(1, dir, rules.SliderTemplate(3), 10*time.Second); r.Status != "ready" {
+		t.Fatalf("%+v", r)
+	}
+	before := x.n()
+	l, err := st.AddLibrary("Movies", dir, rules.SliderTemplate(3), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc := &scanner.Scanner{Store: st, Exec: x, FFprobe: "ffprobe", Targets: func() ([]scanner.Target, error) {
+		return []scanner.Target{{LibraryID: l.ID, Path: dir, Template: rules.SliderTemplate(3)}}, nil
+	}}
+	if n := sc.ScanOnce(context.Background()); n != 3 {
+		t.Errorf("queued %d, want the 3 the Preview said can be shrunk", n)
+	}
+	if extra := x.n() - before; extra != 1 { // only bad.mkv, whose probe failed and so was not kept
+		t.Errorf("the scan probed %d files again", extra)
 	}
 }
