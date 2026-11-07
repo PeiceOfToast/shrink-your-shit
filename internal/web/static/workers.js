@@ -73,7 +73,9 @@
   function draw(r) {
     var j = JSON.stringify([r, asking]); if (j === seen) return; seen = j;
     var a = document.activeElement, k = a && a.getAttribute && a.getAttribute("data-key");
-    $("update-note").hidden = !r.stoppedByUpdate; // its second sentence (S4) comes with piece B, which retires NAV-7
+    // The one-time notice; its second sentence when the update changed existing Basic libraries (S4's basicFlowsChanged;
+    // design's words until piece B, REDESIGN D2).
+    $("update-note").hidden = !r.stoppedByUpdate; $("update-basic").hidden = !r.basicFlowsChanged;
     r.workers.forEach(function (w) { if (w.state !== "stopping") delete stoppedNow[w.id]; }); // stopped (or started again): forget the "now"
     var list = $("worker-list"); list.textContent = "";
     r.workers.forEach(function (w) { list.appendChild(card(w)); });

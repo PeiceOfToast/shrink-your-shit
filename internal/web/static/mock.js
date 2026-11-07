@@ -312,7 +312,7 @@
       return ok(list([{ path: root + "/Alien (1979).mkv", bytes: 9 * GB }, { path: root + "/Heat (1995).mkv", bytes: 7 * GB }, { path: root + "/Show S02E04.mkv", bytes: 4.1 * GB }]));
     },
     activitySummary: function () { return ok(summary()); },
-    listWorkers: function () { return ok({ workers: [workerView()], stoppedByUpdate: stoppedByUpdate, basicFlowsChanged: false }); },
+    listWorkers: function () { return ok({ workers: [workerView()], stoppedByUpdate: stoppedByUpdate, basicFlowsChanged: stoppedByUpdate && /[?&]basicchanged=1/.test(location.search) }); }, // ?basicchanged=1: S4's flag
     startWorker: function (p) { if (p.id !== "this") return fail(404, "not_found", "There is no such worker. Nothing was changed."); worker.on = true; worker.stopping = false; stoppedByUpdate = false; saveWorkers(); return ok(workerView()); },
     stopWorker: function (p, b) {
       if (p.id !== "this") return fail(404, "not_found", "There is no such worker. Nothing was changed.");

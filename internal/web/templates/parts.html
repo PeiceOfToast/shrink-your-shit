@@ -94,7 +94,7 @@
 {{define "workers"}}<noscript><div class="notice info" role="note"><div><strong>Turn on scripts to see your workers</strong>Starting and stopping needs scripts enabled.</div></div></noscript>
 <div class="page-head"><div><h1>Workers</h1><p class="muted">A worker converts files. Nothing is converted unless a worker is running.</p></div><div class="row" id="all" hidden></div></div>
 <div class="notice bad" id="err" role="alert" hidden></div>
-<div class="notice info" id="update-note" hidden><div><strong>Converting is stopped after the update.</strong>Press Start to carry on.</div><button class="btn small" type="button" id="got-it">Got it</button></div>
+<div class="notice info" id="update-note" hidden><div><strong>Converting is stopped after the update.</strong>Press Start to carry on.<span id="update-basic" hidden> Libraries set to Basic now save MKV files, so .mp4 and .avi files get a new name; all audio tracks are kept. After converting, rescan those libraries in Radarr, Sonarr, Plex or Jellyfin.</span></div><button class="btn small" type="button" id="got-it">Got it</button></div>
 <div id="worker-list"></div>
 <p id="said" class="sr" role="status"></p>
 <p class="muted">Other computers can be added as workers in a later update.</p>{{end}}
