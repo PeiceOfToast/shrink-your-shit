@@ -284,7 +284,7 @@
       if (i < 0) return fail(409, "already_finished", "That file had already finished. Nothing was changed.");
       setTimeout(function () {
         var j = removeFrom(working, "jobId", p.id); if (!j) return;
-        skippedList.push({ id: "s" + p.id, library: j.library, path: j.path, reason: "user_stopped", detail: "You stopped it.", libraryId: "1" }); saveAct();
+        skippedList.unshift({ id: "s" + p.id, library: j.library, path: j.path, reason: "user_stopped", detail: "You stopped it.", libraryId: "1" }); saveAct(); // newest first, as a restored file
       }, 4000);
       return ok({ status: "stopping" });
     },
