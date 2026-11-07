@@ -704,17 +704,33 @@ func TestWorkersAPI(t *testing.T) {
 	if code, body := post(t, srv, "POST", "/api/workers/this/stop", `{"when":"later"}`); code != 400 || errCode(body) != "invalid" {
 		t.Errorf("bad when: %d %s", code, body)
 	}
-	// gpu: null when the hardware check could not run (no ffmpeg), {found:false, vendor:null} when it ran
-	// and found none (review e1cd926)
+	// gpu: null when the hardware check has not run (no ffmpeg, or not finished yet: never waited for),
+	// {found:false, vendor:null} once it ran and found none (reviews e1cd926; ui-shop's 1.5 s stop answer)
+	slow := &media.FakeExec{Handler: func(name string, args []string) (string, string, error) {
+		time.Sleep(300 * time.Millisecond) // every ffmpeg call of the checks is slow
+		return "ffmpeg version 7.1", "", nil
+	}}
 	for _, c := range []struct {
 		ffmpeg, want string
 	}{{"", `"gpu":null`}, {"/usr/bin/ffmpeg", `"gpu":{"found":false,"vendor":null}`}} {
-		chk := &doctor.Checker{Exec: &media.FakeExec{Out: []byte("ffmpeg version 7.1")}, FFmpeg: c.ffmpeg, FFprobe: "/usr/bin/ffprobe"}
+		chk := &doctor.Checker{Exec: slow, FFmpeg: c.ffmpeg, FFprobe: "/usr/bin/ffprobe"}
 		s2 := httptest.NewServer(Handler(st, a, Engine{Doctor: chk}))
-		_, body, _ := do(t, nil, s2, call{method: "GET", path: "/api/workers"})
+		start := time.Now()
+		code, body := post(t, s2, "POST", "/api/workers/this/stop", `{"when":"after_current"}`)
+		if took := time.Since(start); code != 200 || took > 200*time.Millisecond || !strings.Contains(body, `"gpu":null`) {
+			t.Errorf("ffmpeg %q: stop answered in %s: %d %s", c.ffmpeg, took, code, body)
+		}
+		var body2 string
+		for i := 0; i < 100; i++ { // the check finishes in the background
+			_, body2, _ = do(t, nil, s2, call{method: "GET", path: "/api/workers"})
+			if strings.Contains(body2, c.want) && (c.ffmpeg == "" || !strings.Contains(body2, `"gpu":null`)) {
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
 		s2.Close()
-		if !strings.Contains(body, c.want) {
-			t.Errorf("ffmpeg %q: %s", c.ffmpeg, body)
+		if !strings.Contains(body2, c.want) {
+			t.Errorf("ffmpeg %q: %s", c.ffmpeg, body2)
 		}
 	}
 	// the old Resume starts this worker and clears the notice too (one release, until ui-shop switches)

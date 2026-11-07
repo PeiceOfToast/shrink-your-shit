@@ -53,12 +53,11 @@ func workerRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng 
 		default:
 			state = "idle" // running, waiting for files
 		}
-		var gpu any // null when the hardware check did not run: no checks, or no ffmpeg to run it with
+		// gpu: null when the hardware check has not run (no checks, no ffmpeg, or not finished yet: never
+		// waited for here, so a Workers answer comes at once)
+		var gpu any
 		if eng.Doctor != nil {
-			cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-			t := eng.Doctor.Tools(cctx)
-			cancel()
-			if t.FFmpeg != "" {
+			if t, ok := eng.Doctor.ToolsNow(); ok && t.FFmpeg != "" {
 				found, vendor := doctor.GPU(t)
 				v := any(nil)
 				if vendor != "" {

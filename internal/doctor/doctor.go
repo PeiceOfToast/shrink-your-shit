@@ -66,6 +66,8 @@ type Checker struct {
 	toolsAt time.Time
 	hw      *[2][]string // working and listed-but-failing hardware encoders
 	hwAt    time.Time
+	// refreshing: ToolsNow started a background check that has not finished
+	refreshing bool
 }
 
 const toolsTTL = 10 * time.Minute
@@ -95,6 +97,36 @@ func (c *Checker) Tools(ctx context.Context) Tools {
 	}
 	t.Hardware, t.HardwareListed = c.hw[0], c.hw[1]
 	return t
+}
+
+// ToolsNow is Tools without waiting: the last result, or ok false when none is known yet (or a check is
+// running right now). A missing or stale result is refreshed in the background, one refresh at a time:
+// a page that only shows the graphics card never waits for the hardware test's encodes (S2, ui-shop's
+// 1.5 s stop answer).
+func (c *Checker) ToolsNow() (Tools, bool) {
+	if !c.mu.TryLock() {
+		return Tools{}, false // a check is running: its result is there on the next call
+	}
+	t, ok := Tools{}, c.tools != nil && c.hw != nil
+	stale := !ok || time.Since(c.hwAt) >= toolsTTL || time.Since(c.toolsAt) >= toolsTTL
+	if ok {
+		t = *c.tools
+		t.Hardware, t.HardwareListed = c.hw[0], c.hw[1]
+	}
+	start := stale && !c.refreshing
+	if start {
+		c.refreshing = true
+	}
+	c.mu.Unlock()
+	if start {
+		go func() {
+			c.Tools(context.Background())
+			c.mu.Lock()
+			c.refreshing = false
+			c.mu.Unlock()
+		}()
+	}
+	return t, ok
 }
 
 // Converter checks ffmpeg, ffprobe, libx265 and the SSIM filter, without the hardware test: quick
