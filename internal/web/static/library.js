@@ -10,7 +10,7 @@
   var table = []; // the engine's slider table (crf, minSavingPct per position), read from the server
 
   function say(t) { $("said").textContent = t; }
-  function fail(e) { var b = $("err"); b.firstChild.textContent = e && e.message || "Something went wrong. Nothing was changed."; b.hidden = false; }
+  function fail(e) { say(""); var b = $("err"); // an earlier "Saved." must not stand beside the error b.firstChild.textContent = e && e.message || "Something went wrong. Nothing was changed."; b.hidden = false; }
   function facts() {
     var v = slider.get().quality - 1, li = $("facts").children, row = table[v];
     $("desc").textContent = DESC[v];
