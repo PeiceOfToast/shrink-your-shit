@@ -189,3 +189,69 @@ func TestConverterKilledBySignalIsTriedAgain(t *testing.T) {
 		t.Error("an ordinary exit seen as killed")
 	}
 }
+
+// An .srt a failed try could not remove stays on record; the next try, in the same process (no
+// restart, so no RecoverSidecars), removes it first (it is still exactly ours) instead of taking it for
+// someone else's file. If it still cannot be removed, that try is repeated later, not failed as a
+// name taken (review 222be8f).
+func TestARetryClearsItsOwnLeftoverSrt(t *testing.T) {
+	for _, stillStuck := range []bool{false, true} {
+		t.Run(fmt.Sprint("still stuck ", stillStuck), func(t *testing.T) {
+			s, w, srt := srtScenario(t)
+			w.Now = func() time.Time { return retryPast }
+			swapHook = func(at string) error {
+				if at == "subtitles placed" { // the original changes just before the swap: this try ends
+					os.WriteFile(s.src, []byte("original-bytes, still downloading"), 0o644)
+				}
+				return nil
+			}
+			sidecarLstat = func(string) (os.FileInfo, error) { return nil, &os.PathError{Op: "lstat", Err: syscall.EIO} }
+			t.Cleanup(func() { swapHook, sidecarLstat = nil, os.Lstat })
+			w.RunOne(context.Background())
+			if j := s.job(); j.Status != jobs.Queued || j.Attempts != 1 {
+				t.Fatalf("try 1: %s %d %q", j.Status, j.Attempts, j.Error)
+			}
+			if left, _ := s.store.Sidecars(); len(left) != 1 || read(srt) == "" {
+				t.Fatalf("try 1 should leave its .srt on record: %+v", left)
+			}
+			swapHook = nil
+			if !stillStuck {
+				sidecarLstat = os.Lstat
+			}
+			w.RunOne(context.Background())
+			j := s.job()
+			if stillStuck {
+				if j.Status != jobs.Queued || j.Attempts != 2 || strings.Contains(j.Error, "is already there") {
+					t.Fatalf("try 2 must be repeated, not failed as a name taken: %s %d %q", j.Status, j.Attempts, j.Error)
+				}
+				return
+			}
+			if j.Status != jobs.Done {
+				t.Fatalf("try 2: %s %q", j.Status, j.Error)
+			}
+			if !strings.Contains(read(srt), "subtitle from sub.0.srt") {
+				t.Errorf("srt %q", read(srt))
+			}
+			if left, _ := s.store.Sidecars(); len(left) != 0 {
+				t.Errorf("records left: %+v", left)
+			}
+		})
+	}
+}
+
+// stopCheckFails is the store with StopRequested failing (the database busy).
+type stopCheckFails struct{ *jobs.Store }
+
+func (stopCheckFails) StopRequested(int64) (bool, error) {
+	return false, errors.New("database is locked")
+}
+
+// Reading whether a stop was asked fails just before the swap: nothing was replaced, so the try is
+// repeated later (review 222be8f).
+func TestAFailedStopCheckIsTriedAgain(t *testing.T) {
+	s := newScenario(t)
+	w := s.retrying()
+	w.Queue = stopCheckFails{s.store}
+	w.RunOne(context.Background())
+	s.wantRetry(1, 5*time.Minute, "Converting did not finish")
+}

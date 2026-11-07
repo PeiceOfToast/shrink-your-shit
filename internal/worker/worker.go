@@ -492,6 +492,14 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	} else if newName != job.Path && exists(newName) { // a renaming replace never replaces another file
 		return "", failed(rules.NameTaken(newName), fs.ErrExist)
 	}
+	// An earlier try of this job may have left .srt files it could not remove (they are on record): they
+	// go first, each only if it is still exactly ours, so this try does not take its own file for someone
+	// else's. One that still cannot be removed makes this try one to repeat later (DD-2, review 222be8f).
+	if len(plan.SubtitleFiles()) > 0 {
+		if err := w.clearOwnSidecars(job.ID); err != nil {
+			return "", retryable(err, retryGeneral)
+		}
+	}
 	// Subtitles saved as .srt files go beside the new file and never over another file: a name taken
 	// already stops the job before anything is converted (checked again when they are put in place).
 	for _, o := range plan.SubtitleFiles() {
@@ -576,7 +584,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		return "", err
 	}
 	if req, err := w.Queue.StopRequested(job.ID); err != nil {
-		return "", fmt.Errorf("checking for a stop: %w", err)
+		return "", retryable(fmt.Errorf("checking for a stop: %w", err), retryGeneral) // nothing replaced yet
 	} else if req {
 		return "", errStopRequested
 	}
@@ -733,6 +741,29 @@ func (w *Worker) removeSidecars(jobID int64, list []jobs.Sidecar) {
 			w.Sidecars.DropSidecar(jobID, c.Path)
 		}
 	}
+}
+
+// clearOwnSidecars removes the .srt files an earlier try of job left on record (RecoverSidecars' check,
+// for this job only): a record goes once its file is gone, not ours, or removed; an error if one of ours
+// is still there.
+func (w *Worker) clearOwnSidecars(jobID int64) error {
+	if w.Sidecars == nil {
+		return nil
+	}
+	list, err := w.Sidecars.Sidecars()
+	if err != nil {
+		return fmt.Errorf("subtitle files on record: %w", err)
+	}
+	for _, c := range list {
+		if c.JobID != jobID {
+			continue
+		}
+		if _, err := removeIfOurs(c); err != nil {
+			return fmt.Errorf("a subtitle file an earlier try left (%s) could not be removed: %w", c.Path, err)
+		}
+		w.Sidecars.DropSidecar(jobID, c.Path)
+	}
+	return nil
 }
 
 // removeIfOurs removes c's file if it is still exactly ours. removed says it was; nil error means the
