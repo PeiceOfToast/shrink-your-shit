@@ -59,7 +59,7 @@
     // Failed list (filtered to this library once Activity is the Files view, piece C).
     if (l.failedFiles > 0) {
       var fl = el("p", "small"), why = el("a", null, "see why"); fl.style.cssText = "margin:4px 0 0;color:var(--warn)";
-      fl.appendChild(document.createTextNode(ui.count(l.failedFiles, "file", "files") + " failed: ")); why.href = "/activity/failed/"; fl.appendChild(why); c.appendChild(fl);
+      fl.appendChild(document.createTextNode(ui.count(l.failedFiles, "file", "files") + " failed: ")); why.href = "/activity/failed/?library=" + encodeURIComponent(l.id); fl.appendChild(why); c.appendChild(fl);
     }
     // No buttons on the card (design, 19:59Z): Scan lives on the library page, which the name opens.
     return c;
