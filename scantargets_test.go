@@ -27,7 +27,7 @@ func TestScanTargetsLeaveOutSystemFolders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := raw.Exec(`UPDATE libraries SET path='/etc' WHERE id=?`, old.ID); err != nil {
+	if _, err := raw.Exec(`UPDATE libraries SET path=? WHERE id=?`, jobs.SystemDirForTest(), old.ID); err != nil {
 		t.Fatal(err)
 	}
 	raw.Close()

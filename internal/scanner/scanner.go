@@ -278,6 +278,11 @@ func Guard(root, path string, lst fs.FileInfo) (code string, ignore bool) {
 		if err != nil {
 			return "", true // a broken link: nothing to convert
 		}
+		// the root resolved too: on macOS /var is a link to /private/var, so a library reached through a
+		// linked folder would otherwise see every link inside it as leading outside
+		if r, err := filepath.EvalSymlinks(root); err == nil {
+			root = r
+		}
 		if rel, err := filepath.Rel(root, real); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return "", true
 		}

@@ -404,3 +404,20 @@ func TestGuardIsReevaluatedEveryScan(t *testing.T) {
 		t.Errorf("after -settle: queued %d, want 1", n)
 	}
 }
+
+// A library reached through a linked folder (on macOS every temp folder is: /var is a link to
+// /private/var) still sees a link to one of its own files as inside it (CI on #54, macOS).
+func TestGuardResolvesTheLibraryRoot(t *testing.T) {
+	real := t.TempDir()
+	os.WriteFile(filepath.Join(real, "a.mkv"), []byte("x"), 0o644)
+	root := filepath.Join(t.TempDir(), "linked")
+	if err := os.Symlink(real, root); err != nil {
+		t.Skip(err)
+	}
+	in := filepath.Join(root, "in.mkv")
+	os.Symlink(filepath.Join(real, "a.mkv"), in)
+	lst, _ := os.Lstat(in)
+	if code, ignore := Guard(root, in, lst); code != "" || !ignore {
+		t.Errorf("a link inside a library reached through a linked folder: code %q ignore %v, want not listed", code, ignore)
+	}
+}

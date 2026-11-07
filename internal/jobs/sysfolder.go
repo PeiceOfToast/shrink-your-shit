@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -17,6 +18,9 @@ var ErrSystemFolder = errors.New("This is a system folder, a whole disk or a who
 // SystemFolder reports whether p (an absolute path, as stored) is refused as a library: the root of the
 // disk, a home folder or the folder of all home folders, or a system folder or anything inside one.
 func SystemFolder(p string) bool {
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs // "/" on Windows is the current drive's root
+	}
 	home, _ := os.UserHomeDir()
 	return systemFolder(p, runtime.GOOS, home, os.Getenv("SystemDrive"), os.Getenv("SystemRoot"))
 }
@@ -35,6 +39,16 @@ func systemFolder(p, goos, home, sysDrive, sysRoot string) bool {
 			s += "/" // "C:" is the drive's root
 		}
 		return s
+	}
+	if goos == "windows" {
+		s := strings.ReplaceAll(p, `\`, "/")
+		if strings.HasPrefix(s, "//") { // a UNC path: \\host\share is a whole share
+			parts := strings.FieldsFunc(s, func(r rune) bool { return r == '/' })
+			return len(parts) <= 2
+		}
+		if len(s) >= 2 && s[1] == ':' && strings.Trim(s[2:], "/") == "" { // C: or C:\ — a whole drive, any drive
+			return true
+		}
 	}
 	p = norm(p)
 	if p == "" || p == "." {
@@ -71,4 +85,16 @@ func systemFolder(p, goos, home, sysDrive, sysRoot string) bool {
 		}
 	}
 	return false
+}
+
+// SystemDirForTest is a system folder on the running system (/etc, or %SystemRoot%), for tests in any
+// package to check the refusal with a real one.
+func SystemDirForTest() string {
+	if runtime.GOOS == "windows" {
+		if r := os.Getenv("SystemRoot"); r != "" {
+			return r
+		}
+		return `C:\Windows`
+	}
+	return "/etc"
 }

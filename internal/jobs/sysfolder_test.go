@@ -43,7 +43,11 @@ func TestSystemFolders(t *testing.T) {
 		{"windows", `C:\Users\ann`, `C:\Windows\System32`, true},
 		{"windows", `C:\Users\ann`, `C:\Program Files (x86)\x`, true},
 		{"windows", `C:\Users\ann`, `C:\ProgramData`, true},
-		{"windows", `C:\Users\ann`, `D:\`, false}, // a whole media drive is fine
+		{"windows", `C:\Users\ann`, `D:\`, true}, // any whole drive (lead 13:48Z)
+		{"windows", `C:\Users\ann`, `D:`, true},
+		{"windows", `C:\Users\ann`, `\\nas\media`, true}, // a whole share
+		{"windows", `C:\Users\ann`, `\\nas\media\Movies`, false},
+		{"windows", `C:\Users\ann`, `\\nas`, true},
 		{"windows", `C:\Users\ann`, `D:\Movies`, false},
 	} {
 		if got := systemFolder(c.p, c.goos, c.home, "", ""); got != c.want {
@@ -64,11 +68,23 @@ func TestStoreRefusesSystemFolders(t *testing.T) {
 	if _, err := s.UpdateLibrary(l.ID, nil, &root); !errors.Is(err, ErrSystemFolder) {
 		t.Errorf("move to /: %v", err)
 	}
-	if _, skipped, _ := s.EnsureLibraries([]string{"/etc"}, rules.SliderTemplate(3)); len(skipped) != 1 {
-		t.Errorf("-library /etc: %v", skipped)
+	if _, skipped, _ := s.EnsureLibraries([]string{SystemDirForTest()}, rules.SliderTemplate(3)); len(skipped) != 1 {
+		t.Errorf("-library %s: %v", SystemDirForTest(), skipped)
 	}
-	s.db.Exec(`UPDATE libraries SET path='/etc' WHERE id=?`, l.ID) // made before the guard existed
+	s.db.Exec(`UPDATE libraries SET path=? WHERE id=?`, SystemDirForTest(), l.ID) // made before the guard existed
 	if err := s.StartLibrary(l.ID); !errors.Is(err, ErrSystemFolder) {
 		t.Errorf("start at /etc: %v", err)
+	}
+}
+
+// The real system folders of the system running the tests are refused through the exported check.
+func TestSystemFolderOnThisSystem(t *testing.T) {
+	for _, p := range []string{"/", SystemDirForTest()} {
+		if !SystemFolder(p) {
+			t.Errorf("%s is not refused", p)
+		}
+	}
+	if SystemFolder(t.TempDir()) {
+		t.Error("a temp folder is refused")
 	}
 }
