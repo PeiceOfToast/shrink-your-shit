@@ -798,3 +798,26 @@ func TestShutdownDuringACheckReleasesTheJob(t *testing.T) {
 	}
 	s.assertOriginalSafe()
 }
+
+// Reading the start sample needs no seek: "-ss 0" made an AVI jump to a later keyframe and a good
+// conversion fail its start sample. Later samples still seek.
+func TestSSIMStartSampleDoesNotSeek(t *testing.T) {
+	s := newScenario(t)
+	s.srcSpec.duration, s.outSpec.duration = 110, 110
+	s.run(Replace)
+	var samples []string
+	for _, c := range s.calls {
+		if strings.Contains(c, "-lavfi") {
+			samples = append(samples, c)
+		}
+	}
+	if len(samples) < 2 {
+		t.Fatalf("want the start and middle samples compared, got %d calls:\n%s", len(samples), strings.Join(s.calls, "\n"))
+	}
+	if strings.Contains(samples[0], "-ss") {
+		t.Errorf("the start sample must read from the start without -ss:\n%s", samples[0])
+	}
+	if !strings.Contains(samples[1], "-ss 38.000") {
+		t.Errorf("the middle sample still seeks:\n%s", samples[1])
+	}
+}
