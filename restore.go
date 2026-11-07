@@ -33,10 +33,16 @@ func restoreCommand(args []string, out, errOut io.Writer) int {
 		return 2
 	}
 	env := envFile(linuxEnvFile)
+	addr, tok := serviceAddr(env)
 	if *force {
+		// Done on the database directly, so only while the service is stopped: two programs moving
+		// the same files and rows (its worker, its hourly purge) is not safe.
+		if serviceAnswers(addr) {
+			fmt.Fprintf(errOut, "shrink-your-shit is running (%s), so --force was not used. Stop the service first, then run this again; or use Get original back on the web page (it never forces). Nothing was changed.\n", localURL(addr))
+			return 1
+		}
 		return restoreForced(fs.Arg(0), env, out, errOut)
 	}
-	addr, tok := serviceAddr(env)
 	call := func(method, path string, body any, v any) (int, error) {
 		var r io.Reader
 		if body != nil {
@@ -140,4 +146,14 @@ func restoreForced(which string, env map[string]string, out, errOut io.Writer) i
 		fmt.Fprintln(out, "The original is back, but its identity could not be confirmed. It will not be converted again.")
 	}
 	return 0
+}
+
+// serviceAnswers reports whether the program answers at addr (its health page).
+func serviceAnswers(addr string) bool {
+	resp, err := (&http.Client{Timeout: 2 * time.Second}).Get(localURL(addr) + "/healthz")
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return true
 }

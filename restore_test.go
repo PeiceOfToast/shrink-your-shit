@@ -112,6 +112,15 @@ func TestRestoreForceIsCommandLineOnly(t *testing.T) {
 	if b, _ := os.ReadFile(path); string(b) != "edited by the person" {
 		t.Fatal("nothing may move without --force")
 	}
+	// --force while the service runs: refused, nothing moved
+	errOut.Reset()
+	if code := restoreCommand([]string{"--force", path}, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "Stop the service first") {
+		t.Errorf("--force with the service running: %d %q", code, errOut.String())
+	}
+	if b, _ := os.ReadFile(path); string(b) != "edited by the person" {
+		t.Fatal("nothing may move while the service runs")
+	}
+	srv.Close() // the service stopped
 	if code := restoreCommand([]string{"--force", path}, &out, &errOut); code != 0 || !strings.Contains(out.String(), "The original is back") {
 		t.Fatalf("--force: %d %q %q", code, out.String(), errOut.String())
 	}

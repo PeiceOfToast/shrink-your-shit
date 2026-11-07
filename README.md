@@ -163,7 +163,7 @@ with a Retry button.
   a crash or power cut at any moment leaves either the original or the new file in place.
   To get an original back: Activity > Kept originals, "Get original back", or in a terminal
   `shrink-your-shit restore <path of the converted file>` (`--force` if you changed the converted
-  file since and still want the original). The file is then left alone by later scans.
+  file since and still want the original; it works only while the service is stopped). The file is then left alone by later scans.
 - `beside`: keep the original and write `name.hevc.mkv` next to it.
 
 The first video stream becomes HEVC; audio, subtitles, attachments (fonts) and extra
