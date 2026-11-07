@@ -55,10 +55,13 @@ func (c *Checker) Health(ctx context.Context, dataDir string, libs []Library) []
 		"Not found. Install ffmpeg (Linux: sudo apt install ffmpeg; macOS: brew install ffmpeg; Windows: run the installer again), then restart shrink-your-shit.")
 	add("ffprobe", "File reader (ffprobe)", t.FFprobe != "", "Version "+t.FFprobeVersion+" at "+t.FFprobe,
 		"Not found. It comes with ffmpeg: install ffmpeg, then restart shrink-your-shit.")
-	add("x265", "HEVC encoder (libx265)", t.X265, "Available",
-		"This ffmpeg cannot make HEVC files (no libx265). Install a complete ffmpeg build, then restart shrink-your-shit.")
-	add("ssim", "Picture check (ssim)", t.SSIM, "Available",
-		"This ffmpeg has no 'ssim' filter, which the safety check needs. Install a complete ffmpeg build, then restart shrink-your-shit.")
+	noX265 := "This ffmpeg cannot make HEVC files (no libx265). Install a complete ffmpeg build, then restart shrink-your-shit."
+	noSSIM := "This ffmpeg has no 'ssim' filter, which the safety check needs. Install a complete ffmpeg build, then restart shrink-your-shit."
+	if t.FFmpeg == "" {
+		noX265, noSSIM = "Comes with ffmpeg, which is not found (above).", "Comes with ffmpeg, which is not found (above)."
+	}
+	add("x265", "HEVC encoder (libx265)", t.X265, "Available", noX265)
+	add("ssim", "Picture check (ssim)", t.SSIM, "Available", noSSIM)
 	hw := "Not found. That is fine: converting uses the processor."
 	if len(t.Hardware) > 0 {
 		hw = "Found " + strings.Join(t.Hardware, ", ") + ". Not used yet: converting uses the processor."
