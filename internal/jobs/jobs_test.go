@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func open(t *testing.T) *Store {
@@ -165,5 +166,32 @@ func TestProbeCache(t *testing.T) {
 	s.PutProbe("/m/a.mkv", 11, 21, `{}`)
 	if v, ok := s.GetProbe("/m/a.mkv", 11, 21); !ok || v != `{}` {
 		t.Errorf("replaced: %q %v", v, ok)
+	}
+}
+
+func TestSwapJournal(t *testing.T) {
+	s := open(t)
+	id, err := s.BeginSwap(Original{JobID: 7, LibraryID: 2, Path: "/m/a.mkv", Trash: "/m/.syp-trash/a.7.mkv", Staged: "/m/.a.syp-tmp/new.mkv", Bytes: 100, ModTime: 5, Hash: "h", NewBytes: 40})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m, _ := s.Originals(SwapMoving); len(m) != 1 || m[0].ID != id || m[0].Trash != "/m/.syp-trash/a.7.mkv" || m[0].LibraryID != 2 {
+		t.Fatalf("%+v", m)
+	}
+	if _, err := s.OriginalOfJob(7); err != ErrNotFound {
+		t.Error("a swap in progress is not a kept original yet")
+	}
+	del := time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC)
+	if err := s.FinishSwap(id, del); err != nil {
+		t.Fatal(err)
+	}
+	if o, err := s.OriginalOfJob(7); err != nil || o.State != OriginalKept || o.DeleteOn != "2026-11-14T00:00:00Z" || o.KeptAt == "" {
+		t.Errorf("%+v %v", o, err)
+	}
+	if m, _ := s.Originals(SwapMoving); len(m) != 0 {
+		t.Errorf("%+v", m)
+	}
+	if err := s.SetSwapState(999, SwapRolledBack); err != ErrNotFound {
+		t.Errorf("%v", err)
 	}
 }

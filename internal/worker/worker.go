@@ -74,6 +74,11 @@ type Worker struct {
 	FullDecodeMaxSec float64
 	// FreeSpace reports the writable bytes on the volume holding dir; nil = the real thing.
 	FreeSpace func(dir string) (uint64, error)
+	// KeepDays is how many days a replaced original is kept in .syp-trash (keep.go); 0 or nil: it is
+	// deleted by the rename, as before slice 17. Journal records those swaps (needed when keeping).
+	KeepDays func() int
+	Journal  Journal
+	Now      func() time.Time // nil: time.Now
 
 	mu         sync.Mutex
 	filterMemo map[string]bool
@@ -288,12 +293,24 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// before each try, the original must still be the file we read and the temp file still the one
 	// we created and checked. A plain rename cannot make that last check and the move one step, so a
 	// change in the instant between them is not caught (see docs/STATUS.md).
-	if err := moveIntoPlace(ctx, tmp, final, func() error {
+	stillOK := func() error {
 		if err := sourceUnchanged(job.Path, before); err != nil {
 			return err
 		}
 		return stage.intact()
-	}); err != nil {
+	}
+	days := 0
+	if w.KeepDays != nil {
+		days = w.KeepDays()
+	}
+	if final == job.Path && days > 0 && w.Journal != nil {
+		// The original is kept: moved into .syp-trash, journaled (keep.go).
+		if err := w.keepAndReplace(ctx, job, stage, before, days, stillOK); err != nil {
+			return "", err
+		}
+		return final, nil
+	}
+	if err := moveIntoPlace(ctx, tmp, final, stillOK); err != nil {
 		var k *KeptError
 		if errors.As(err, &k) {
 			return "", err

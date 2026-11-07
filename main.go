@@ -112,6 +112,19 @@ func main() {
 		log.Fatal(err)
 	}
 	defer store.Close()
+	// keepDays is how long replaced originals are kept in .syp-trash (Settings > Safety; 7 by default).
+	keepDays := func() int {
+		s, err := web.LoadSettings(store)
+		if err != nil {
+			log.Printf("settings: %v; originals are kept for 7 days", err)
+			return 7
+		}
+		return s.KeepOriginalsDays
+	}
+	// A swap a crash interrupted is finished or undone first, so its job is not converted twice.
+	for _, said := range worker.RecoverSwaps(store, store, keepDays(), time.Now()) {
+		log.Printf("recovery: %s", said)
+	}
 	if n, _ := store.RequeueRunning(); n > 0 {
 		log.Printf("requeued %d job(s) interrupted by the last shutdown", n)
 	}
@@ -145,7 +158,7 @@ func main() {
 	}
 	w := &worker.Worker{ID: "builtin", Queue: store, Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath,
 		Template: store.TemplateFor, Poll: 3 * time.Second,
-		DecodeCheck: *decode, MinSSIM: *minSSIM}
+		DecodeCheck: *decode, MinSSIM: *minSSIM, KeepDays: keepDays, Journal: store}
 	workerDone := make(chan struct{})
 	if converts {
 		go func() { w.Run(ctx); close(workerDone) }()

@@ -22,6 +22,7 @@ marked **never verified** has not been seen working by anyone. Update this file 
 | 16a | Plans: each file's conversion compiled from its library's flow (scanner decides, worker runs and verifies against it, the job keeps it); legacy flows convert exactly as before | this change |
 | 16b | The slider's full recipe (CRF by resolution, bits-per-pixel eligibility, D5 formats, SSIM gate), the setting endpoints and plain-word flow steps | this change |
 | 19 | The Preview: for a library and a setting (saved or not), files, how many can be shrunk, how many skipped and why, a saving range from bits per pixel, files shared with another folder, and one sample file in plain words; reads only. Probe cache for the scanner and the Preview | this change |
+| 17 | Originals kept in `.syp-trash` beside each file (default 7 days), the swap journaled and finished or undone at startup after a crash; Done and Kept originals lists; freed vs waiting space | this change |
 | 20 | Setup checks: folder check for first-run, the health report, `shrink-your-shit doctor`; the write check runs as the service user and says how to fix a read-only folder | this change |
 
 ## What has been verified, and how
@@ -161,10 +162,13 @@ only a folder holding nothing but our regular temp file is removed).
   folder can reach the new file while it is written and checked. On Linux and macOS it is private.
 - **No change time on Windows:** an edit to the original during a conversion that keeps its size and
   puts its modification time back is caught on Linux and macOS (change time) but not on Windows.
-- **Crash between rename and "done":** if the process dies after the new file replaced the
-  original but before the job is marked done, the next start requeues it and re-encodes the HEVC
-  file. The "output must be smaller" check should make that fail safely, but this was reasoned
-  about, not tested.
+- **Crash between rename and "done" (originals kept 0 days only):** with `keepOriginalsDays` 0 the
+  original is replaced by one rename as before; if the process dies after it but before the job is
+  marked done, the next start requeues the job and re-encodes the HEVC file. With originals kept
+  (the default, 7 days) the swap is journaled and a restart finishes or undoes it (slice 17), so this
+  cannot happen there.
+- **Windows: kept originals and locked files** are covered by unit tests only; moving an original
+  that a player holds open is retried like the replace, but not tried on a real Windows machine.
 - **Windows read-only originals:** a read-only original may make the replace-rename fail (a
   suspicion, never tried).
 - **Windows long paths (>260 chars) and UNC paths** are not specially handled.

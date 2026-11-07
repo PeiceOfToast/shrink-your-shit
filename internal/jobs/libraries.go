@@ -443,15 +443,19 @@ func (s *Store) TemplateFor(j Job) (rules.Template, error) {
 // LibraryCounts are a library's job figures for its card.
 type LibraryCounts struct {
 	Working, Waiting, Failed int
-	FreedBytes               int64
+	// FreedBytes: original minus new, summed over done jobs whose original is gone (replaced and not
+	// kept); WaitingBytes: the same over done jobs whose original is still kept in .syp-trash
+	// (UI-API-CONTRACT.md F1: freed + waiting = all saved).
+	FreedBytes, WaitingBytes int64
 }
 
 // Counts returns LibraryCounts by library id.
 func (s *Store) Counts() (map[int64]LibraryCounts, error) {
 	rows, err := s.db.Query(`SELECT library_id,
   SUM(status=?), SUM(status=?), SUM(status=?),
-  COALESCE(SUM(CASE WHEN status=? AND size_after>0 AND output_path=path THEN size_before-size_after END),0)
-FROM jobs WHERE library_id IS NOT NULL GROUP BY library_id`, Running, Queued, Failed, Done)
+  COALESCE(SUM(CASE WHEN status=? AND size_after>0 AND output_path=path AND NOT `+keptSQL+` THEN size_before-size_after END),0),
+  COALESCE(SUM(CASE WHEN status=? AND size_after>0 AND output_path=path AND `+keptSQL+` THEN size_before-size_after END),0)
+FROM jobs WHERE library_id IS NOT NULL GROUP BY library_id`, Running, Queued, Failed, Done, OriginalKept, Done, OriginalKept)
 	if err != nil {
 		return nil, err
 	}
@@ -460,7 +464,7 @@ FROM jobs WHERE library_id IS NOT NULL GROUP BY library_id`, Running, Queued, Fa
 	for rows.Next() {
 		var id int64
 		var c LibraryCounts
-		if err := rows.Scan(&id, &c.Working, &c.Waiting, &c.Failed, &c.FreedBytes); err != nil {
+		if err := rows.Scan(&id, &c.Working, &c.Waiting, &c.Failed, &c.FreedBytes, &c.WaitingBytes); err != nil {
 			return nil, err
 		}
 		out[id] = c

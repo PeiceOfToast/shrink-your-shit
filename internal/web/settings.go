@@ -89,6 +89,13 @@ type settingsStore struct {
 	store *jobs.Store
 }
 
+// LoadSettings reads the settings (and makes them, the first time), for the program outside the web
+// page: the worker reads keepOriginalsDays from it.
+func LoadSettings(store *jobs.Store) (Settings, error) {
+	ss := &settingsStore{store: store}
+	return ss.load()
+}
+
 func (ss *settingsStore) load() (Settings, error) {
 	v, ok, err := ss.store.Meta(settingsKey)
 	if err != nil {

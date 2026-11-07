@@ -154,7 +154,13 @@ place. If anything fails, the original is untouched and the job shows as *failed
 with a Retry button.
 
 `-output` decides what happens on success:
-- `replace` (default): the new HEVC file takes the original's name.
+- `replace` (default): the new HEVC file takes the original's name. The original is **kept for 7
+  days** in a hidden `.syp-trash` folder next to it (Settings > Safety, "Keep originals"; 0 days
+  deletes it at once, as versions before this one did). This is the default for new installs and
+  for upgrades alike: it changes nothing about what is converted or how, it only keeps more. Kept
+  originals use disk space until they are deleted, so the space a conversion saves is only freed
+  then. The move into `.syp-trash` is a rename on the same disk (no copy) and is recorded first, so
+  a crash or power cut at any moment leaves either the original or the new file in place.
 - `beside`: keep the original and write `name.hevc.mkv` next to it.
 
 The first video stream becomes HEVC; audio, subtitles, attachments (fonts) and extra

@@ -43,7 +43,8 @@ type libraryItem struct {
 	WorkingFiles int     `json:"workingFiles"`
 	WaitingFiles int     `json:"waitingFiles"`
 	NextScan     *string `json:"nextScan"`
-	FreedBytes   int64   `json:"freedBytes"`
+	FreedBytes   int64   `json:"freedBytes"`   // saved, originals deleted (F1)
+	WaitingBytes int64   `json:"waitingBytes"` // saved once the kept originals are deleted (F1)
 	FlowID       int64   `json:"flowId,string"`
 	SettingLabel string  `json:"settingLabel"`
 	SettingKind  string  `json:"settingKind"`
@@ -56,7 +57,7 @@ func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 	item := func(l jobs.Library, counts map[int64]jobs.LibraryCounts) libraryItem {
 		c := counts[l.ID]
 		it := libraryItem{ID: l.ID, Name: l.Name, Path: l.Path, Started: l.Started, FlowID: l.FlowID,
-			WorkingFiles: c.Working, WaitingFiles: c.Waiting, FreedBytes: c.FreedBytes}
+			WorkingFiles: c.Working, WaitingFiles: c.Waiting, FreedBytes: c.FreedBytes, WaitingBytes: c.WaitingBytes}
 		switch {
 		case !l.Started:
 			it.State = "not_started"
