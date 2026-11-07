@@ -123,9 +123,13 @@ func TestLeftoverCleanupRemovesOnlyRecognisedStagingFolders(t *testing.T) {
 	empty := filepath.Join(s.dir, ".movie.222.syp-tmp")
 	theirs := filepath.Join(s.dir, ".movie.333.syp-tmp")
 	nested := filepath.Join(s.dir, ".movie.444.syp-tmp")
-	for _, d := range []string{ours, empty, theirs, filepath.Join(nested, "new.mkv")} {
+	linked := filepath.Join(s.dir, ".movie.555.syp-tmp") // holds only a link named like our file
+	for _, d := range []string{ours, empty, theirs, linked, filepath.Join(nested, "new.mkv")} {
 		os.MkdirAll(d, 0o700)
 	}
+	target := filepath.Join(t.TempDir(), "target.mkv")
+	os.WriteFile(target, []byte("link target"), 0o644)
+	hasLinks := os.Symlink(target, filepath.Join(linked, "new.mkv")) == nil // Windows may refuse
 	os.WriteFile(filepath.Join(ours, "new.mkv"), []byte("half-written"), 0o600)
 	os.WriteFile(filepath.Join(theirs, "new.mkv"), []byte("x"), 0o600)
 	os.WriteFile(filepath.Join(theirs, "notes.txt"), []byte("keep me"), 0o644)
@@ -146,6 +150,14 @@ func TestLeftoverCleanupRemovesOnlyRecognisedStagingFolders(t *testing.T) {
 	} {
 		if b, err := os.ReadFile(p); err != nil || string(b) != want {
 			t.Errorf("%s: %q %v, want it left alone", p, b, err)
+		}
+	}
+	if hasLinks {
+		if fi, err := os.Lstat(filepath.Join(linked, "new.mkv")); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+			t.Errorf("a link named like our temp file is not ours and must be left alone: %v", err)
+		}
+		if b, _ := os.ReadFile(target); string(b) != "link target" {
+			t.Errorf("the link's target changed: %q", b)
 		}
 	}
 }

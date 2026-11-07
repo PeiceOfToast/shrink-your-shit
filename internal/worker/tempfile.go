@@ -60,9 +60,9 @@ func TempFiles(src string) ([]string, error) {
 }
 
 // removeLeftoverTemps removes what earlier runs left next to src: a file under the old fixed temp
-// name, and staging folders that hold nothing but our one temp file (that file is removed, then the
-// empty folder). Anything else with a matching name, such as a folder holding other files, is left
-// alone and logged: it may not be ours. A removal that fails stops the job. Removing a link removes
+// name, and staging folders that hold nothing but our one temp file, a regular file (that file is
+// removed, then the empty folder). Anything else with a matching name, such as a folder holding other
+// files or a link, is left alone and logged: it may not be ours. A removal that fails stops the job. Removing a link removes
 // the link, never what it points to.
 func removeLeftoverTemps(src string) error {
 	old, err := TempFiles(src)
@@ -87,7 +87,7 @@ func removeLeftoverTemps(src string) error {
 			if err != nil {
 				return fmt.Errorf("cannot check the old temp folder %s: %w", p, err)
 			}
-			ours := len(entries) == 0 || (len(entries) == 1 && entries[0].Name() == stagedName && !entries[0].IsDir())
+			ours := len(entries) == 0 || (len(entries) == 1 && entries[0].Name() == stagedName && entries[0].Type().IsRegular())
 			if !ours {
 				log.Printf("leaving %s alone: it holds files shrink-your-shit did not put there", p)
 				continue

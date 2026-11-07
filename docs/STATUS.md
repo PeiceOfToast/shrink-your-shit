@@ -130,7 +130,14 @@ threshold while CRF 16 passes; a truncated source is never "done". Things to kno
 
 ## Known limitations and follow-ups
 
-Collected from the reviews; none is fixed.
+Collected from the reviews; everything listed below is still open. Review findings fixed in slice 10
+(verify hardening), so not listed: a link or file left at the fixed temp name could be written
+through (now a fresh private staging folder; leftovers are removed first and the job stops if that
+fails); a temp file swapped in under our name could be installed (now its identity is checked after
+the encode and before the rename); an edit to the original that kept its size and put its
+modification time back went unnoticed (now caught by file identity and, on Linux and macOS, change
+time); leftover cleanup could delete a folder, or a link, that someone else had named like ours (now
+only a folder holding nothing but our regular temp file is removed).
 
 - **Not defended: a hostile program running as the same user (slice 10 residue).** Slice 10 protects
   originals from crashes, bad encodes and accidental interference; on Linux and macOS other users
