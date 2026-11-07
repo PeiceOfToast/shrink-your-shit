@@ -10,7 +10,8 @@
   var table = []; // the engine's slider table (crf, minSavingPct per position), read from the server
 
   function say(t) { $("said").textContent = t; }
-  function fail(e) { var b = $("err"); b.firstChild.textContent = e && e.message || "Something went wrong. Nothing was changed."; b.hidden = false; }
+  // An earlier "Saved." must not stand beside the error.
+  function fail(e) { say(""); var b = $("err"); b.firstChild.textContent = e && e.message || "Something went wrong. Nothing was changed."; b.hidden = false; }
   function facts() {
     var v = slider.get().quality - 1, li = $("facts").children, row = table[v];
     $("desc").textContent = DESC[v];
@@ -25,6 +26,7 @@
 
   // 409 flow_shared: ask once whether to change it for everyone or make a copy.
   function askShared(used) {
+    used = used.filter(function (n) { return n !== lib.name; }); // the server lists every library on the flow, this one too
     var n = used.length, box = $("share");
     $("share-q").textContent = "This setting is also used by " + used.join(", ");
     $("sh1l").textContent = n === 1 ? "Change it for both libraries" : "Change it for all " + (n + 1) + " libraries";
