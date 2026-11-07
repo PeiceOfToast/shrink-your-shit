@@ -53,8 +53,16 @@
     var get = function () { return st.editor.get(); };
     st.prev = ui.preview($("preview"), st.lib.id, get);
     var change = function () { st.prev.mark(); };
-    if (st.level === "standard") st.editor = ed.selectors(host, change);
-    else if (st.level === "advanced") st.editor = ed.startFrom(host, change);
+    if (st.level === "standard") {
+      // The library's setting answer says which Audio and Subtitles choices this version can save (addendum 13).
+      st.editor = ed.selectors(host, change);
+      api.getSetting({ id: st.lib.id }).then(function (s) {
+        if (!s.availableAudio && !s.availableSubtitles) return;
+        // Rebuild with what the person has chosen so far, so nothing they picked meanwhile is lost.
+        var now = st.editor.get(); now.availableAudio = s.availableAudio; now.availableSubtitles = s.availableSubtitles;
+        host.textContent = ""; st.editor = ed.selectors(host, change, now);
+      }, function () {});
+    } else if (st.level === "advanced") st.editor = ed.startFrom(host, change);
     else {
       var c = ui.el("div", "card"); c.appendChild(ui.el("h2", null, "Smaller file or better quality?")).style.marginTop = "0";
       host.appendChild(c);
