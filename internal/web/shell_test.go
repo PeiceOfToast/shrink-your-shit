@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
 func labels(items []navItem) string {
@@ -394,13 +395,13 @@ func TestSettingsRegistry(t *testing.T) {
 	}
 	// GET /api/settings fields (UI-API-CONTRACT.md); "token" has its own endpoint.
 	contract := []string{"controlLevel", "perLibraryFlow", "firstRunDone", "firstRunStep", "authRequired", "keepOriginalsDays", "trashPath",
-		"parallelJobs", "queueOrder", "quietHours", "lowPriority", "scanSchedule", "integrations", "updateAvailable"}
+		"parallelJobs", "queueOrder", "quietHours", "lowPriority", "scanSchedule", "integrations", "updateAvailable", "languages"}
 	known := map[string]bool{"token": true}
 	for _, k := range contract {
 		known[k] = true
 	}
 	tabs := map[string]bool{"general": true, "safety": true, "performance": true, "integrations": true, "system": true, "first-run": true}
-	types := map[string]bool{"radio": true, "checkbox": true, "number": true, "time": true, "text": true, "secret": true, "readout": true, "token": true, "info": true, "select": true}
+	types := map[string]bool{"radio": true, "checkbox": true, "number": true, "time": true, "text": true, "secret": true, "readout": true, "token": true, "info": true, "select": true, "languages": true}
 	seen, homes := map[string]bool{}, map[string]bool{}
 	for _, e := range reg {
 		if seen[e.Key] {
@@ -429,6 +430,34 @@ func TestSettingsRegistry(t *testing.T) {
 	// NAV-7: nothing the registry says uses the word "flow".
 	if m := regexp.MustCompile(`(?i)\bflows?\b`).FindString(string(b)); m != "" {
 		t.Errorf("NAV-7: %q in settings.json", m)
+	}
+}
+
+// "Your languages" (slice 25b) offers languages by name and saves their codes: every code in the list must be
+// one the server keeps as it is (ISO 639-2 bibliographic, rules.CanonLang), or a saved list would come back changed
+// and show as codes. Each entry is [code, name in the language itself, English name (if different)].
+func TestLanguageListCodes(t *testing.T) {
+	b, err := fs.ReadFile(static, "static/languages.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var list [][]string
+	if err := json.Unmarshal(b, &list); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, l := range list {
+		if len(l) < 2 || len(l) > 3 || l[1] == "" {
+			t.Errorf("%v: want [code, name] or [code, name, English name]", l)
+			continue
+		}
+		if got := rules.CanonLang(l[0]); got != l[0] {
+			t.Errorf("%s (%s): the server stores it as %q", l[0], l[1], got)
+		}
+		if seen[l[0]] {
+			t.Errorf("%s is listed twice", l[0])
+		}
+		seen[l[0]] = true
 	}
 }
 

@@ -112,7 +112,12 @@
           var t = Date.now() - t0;
           waiting(w, r.progress, t >= 120000);
           poll = setTimeout(once, t < 60000 ? 2000 : 5000); // every 2 s for the first minute, then every 5 s
-        }, function () { if (my === gen) giveUp(); });
+        }, function (e) {
+          if (my !== gen) return;
+          // The setting itself can't run yet (slice 25b: "Keep only my languages" with no languages chosen): the
+          // server says why, in words for the person; anything else is a real failure.
+          if (e && (e.code === "languages_needed" || e.code === "not_available") && e.message) say([note(e.message)]); else giveUp();
+        });
       })();
     }
     return {

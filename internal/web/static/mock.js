@@ -18,7 +18,7 @@
   var settings = {
     controlLevel: "basic", perLibraryFlow: false, firstRunDone: true, firstRunStep: 1, authRequired: false,
     keepOriginalsDays: 7, trashPath: "Kept next to each file, in a folder called .syp-trash",
-    queueOrder: "newest", parallelJobs: 1, quietHours: { from: "", to: "" }, lowPriority: true, scanSchedule: "02:00",
+    queueOrder: "newest", languages: [], parallelJobs: 1, quietHours: { from: "", to: "" }, lowPriority: true, scanSchedule: "02:00",
     integrations: { sonarr: { url: "", hasKey: false }, radarr: { url: "", hasKey: false }, plex: { url: "", hasKey: false }, jellyfin: { url: "", hasKey: false },
       notifications: { webhookUrl: "", onDone: false, onFailed: true, onNeedsAttention: true } },
     updateAvailable: /[?&]update=1/.test(location.search) ? { version: "1.2.0" } : null // ?update=1 shows the update notice
@@ -145,15 +145,17 @@
   }
   var ORDER = ["newest", "oldest", "largest", "smallest"], CAPS = ["none", "40", "20", "10", "6", "4"]; // contract addenda 10 and 9
   // Which choices this version can save, on every setting answer (addendum 13 and its correction). ?selectors= picks
-  // the state (remembered for the tab): keep (default: slice 25a, keep_all only), some (wider, not complete), full
-  // (slice 25b: everything), old (an older server: no lists at all).
-  try { var sm = /[?&]selectors=(keep|some|full|old)/.exec(location.search); if (sm) sessionStorage.setItem("syp-mock-avail", sm[1]); } catch (e) {}
+  // the state (remembered for the tab): now (default: the server on dev since slice 25b, every audio and subtitle
+  // choice, the file type kept when replacing), keep (slice 25a, keep_all only), some (wider, not complete), full
+  // (everything, file types too), old (an older server: no lists at all).
+  try { var sm = /[?&]selectors=(now|keep|some|full|old)/.exec(location.search); if (sm) sessionStorage.setItem("syp-mock-avail", sm[1]); } catch (e) {}
   function avail() {
-    var mode = "keep"; try { mode = sessionStorage.getItem("syp-mock-avail") || "keep"; } catch (e) {}
+    var mode = "now"; try { mode = sessionStorage.getItem("syp-mock-avail") || "now"; } catch (e) {}
     if (mode === "old") return {};
-    var a = mode === "full" ? ["keep_all", "my_languages", "aac", "lossless_only"] : mode === "some" ? ["keep_all", "my_languages"] : ["keep_all"];
-    var s = mode === "full" ? ["keep_all", "my_languages", "text_only", "srt"] : mode === "some" ? ["keep_all", "text_only"] : ["keep_all"];
-    // File types by "After converting" (addendum 14): 25a keeps the type when replacing; "full" lists every type.
+    var all = mode === "full" || mode === "now";
+    var a = all ? ["keep_all", "my_languages", "aac", "eac3", "opus", "lossless_only"] : mode === "some" ? ["keep_all", "my_languages"] : ["keep_all"];
+    var s = all ? ["keep_all", "my_languages", "text_only", "srt"] : mode === "some" ? ["keep_all", "text_only"] : ["keep_all"];
+    // File types by "After converting" (addendum 14): the type is kept when replacing; "full" lists every type.
     var t = mode === "full" ? { replace: ["keep", "mkv", "mp4"], beside: ["keep", "mkv", "mp4"] } : { replace: ["keep"], beside: ["keep", "mkv", "mp4"] };
     return { availableFormats: ["hevc"], availableAudio: a, availableSubtitles: s, availableFileTypes: t };
   }
@@ -186,7 +188,7 @@
         Object.keys(src).forEach(function (k) {
           if (k === "authRequired" || k === "trashPath" || k === "updateAvailable") return;
           if (k === "apiKey" || k === "token") { if (src[k]) dst.hasKey = true; return; }
-          if (src[k] && typeof src[k] === "object") merge(dst[k] = dst[k] || {}, src[k]); else dst[k] = src[k];
+          if (Array.isArray(src[k])) dst[k] = src[k].slice(); else if (src[k] && typeof src[k] === "object") merge(dst[k] = dst[k] || {}, src[k]); else dst[k] = src[k];
         });
       })(settings, b);
       persist(); return ok(settings);
@@ -241,6 +243,8 @@
     putSetting: function (p, b) {
       var i = find(libs, "id", p.id);
       if (i < 0) return fail(404, "not_found", "That library is gone. Nothing was changed.");
+      // "Keep only my languages" before any language is chosen (slice 25b): the server's words.
+      if (b.speed && !(settings.languages || []).length && (b.audio === "my_languages" || b.subtitles === "my_languages")) return fail(400, "languages_needed", "Choose your languages first, in Settings > General.");
       var f = flows[find(flows, "id", libs[i].flowId)];
       if (f && f.usedBy.length > 1 && !b.sharedFlowChoice) return fail(409, "flow_shared", "Another library uses this setting. Nothing was changed.", { usedBy: f.usedBy.slice() }); // every library on the flow, this one too, as the server sends it
       if (f && f.usedBy.length > 1 && b.sharedFlowChoice === "make_copy") {
@@ -265,6 +269,8 @@
     // Answers "computing" first, then "ready", so the waiting state gets exercised.
     preview: function (p, b) {
       var li = find(libs, "id", p.id);
+      var bs = b.setting || {};
+      if (bs.speed && !(settings.languages || []).length && (bs.audio === "my_languages" || bs.subtitles === "my_languages")) return fail(400, "languages_needed", "Choose your languages first, in Settings > General.");
       if (b.sampleFile && li >= 0 && b.sampleFile.indexOf(libs[li].path + "/") !== 0) return fail(400, "outside_library", "That file is not inside this library. Nothing was changed.");
       if (slowPreview()) {
         var t = Date.now() - (slowAt[p.id] = slowAt[p.id] || Date.now());
