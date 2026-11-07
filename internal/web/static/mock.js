@@ -436,6 +436,10 @@
       var lines = ["ffprobe: Input #0, matroska,webm", "  Stream #0:0: Video: h264 (High), yuv420p, 1920x1080, 23.98 fps", "  Stream #0:1(eng): Audio: ac3, 48000 Hz, 5.1(side)",
         "ffmpeg -i input.mkv -map 0 -c:v libx265 -crf 23 -c:a copy -c:s copy output.mkv", "frame= 1200 fps= 62 q=28.0 size= 102400kB time=00:00:50.05 bitrate=4800.0kbits/s speed=2.58x"];
       var text = from === 0 ? lines.join("\n") + "\n" : live ? "frame= " + (1200 + from * 3) + " fps= 61 q=28.0 time=00:0" + Math.min(9, 1 + (from % 9)) + ":00.00 bitrate=4790.0kbits/s\n" : "";
+      // S5's limits: Ocean Floor's finished log comes in three pages, already cut with the server's line; E01 is from
+      // before S5 (a summary, no text).
+      if (p.id === "done-j5") text = ["page 1: " + lines.join(" | ") + "\n", "… 512 KiB left out …\n", "page 3: the end of the log\n"][from] || "";
+      if (p.id === "done-j7") text = "";
       var steps = [{ step: "found", at: iso(-5 * 3600e3), ok: true, words: "Found in the library." }, { step: "checked", at: iso(-5 * 3600e3 + 60e3), ok: true, words: "H.264, 1080p: will be converted." }];
       if (!live && /^done-/.test(p.id)) steps.push({ step: "converted", at: iso(-4 * 3600e3), ok: true, words: "Converted to HEVC." }, { step: "verified", at: iso(-4 * 3600e3 + 30e3), ok: true, words: "Plays all the way through and looks like the original." }, { step: "replaced", at: iso(-4 * 3600e3 + 40e3), ok: true, words: "Replaced the original, which is kept for now." });
       if (/^fail-/.test(p.id)) steps.push({ step: "converted", at: iso(-3 * 3600e3), ok: false, words: "Converting did not finish." });

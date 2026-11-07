@@ -178,23 +178,35 @@
   }
 
   // ---- the Log panel: a plain summary, then the full log as recorded; it follows live on a Processing row.
-  var logFor = null, logFrom = 0, logTimer = null, following = true, logText = "";
+  // S5's limits (contract 23:07Z): a log comes in pages of up to 64 KiB, so a finished log is read page after page until
+  // a page brings nothing; Copy and Download wait for that. A long log arrives already cut, with the server's own
+  // "… N KiB left out …" line where it was cut. A job from before S5 has a summary and no text.
+  var logFor = null, logFrom = 0, logTimer = null, following = true, logText = "", logLoading = Promise.resolve();
+  function noFullLog(none) {
+    var pre = $("log-text"); if (none) { pre.textContent = "No full log for this file."; pre.classList.add("muted"); } else pre.classList.remove("muted");
+    ["log-copy", "log-dl"].forEach(function (k) { $(k).setAttribute("aria-disabled", none ? "true" : "false"); });
+  }
   var STEP = { found: "Found", checked: "Checked", converted: "Converted", verified: "Checked the result", kept: "Kept", replaced: "Replaced" };
   function pullLog() {
-    if (!logFor) return;
-    api.fileLog({ id: logFor.id, from: logFrom }).then(function (r) {
+    var f = logFor; if (!f) return Promise.resolve();
+    return api.fileLog({ id: f.id, from: logFrom }).then(function (r) {
+      if (logFor !== f) return; // the panel moved on to another file
       var ol = $("log-sum"); ol.textContent = "";
       (r.summary || []).forEach(function (s) { ol.appendChild(el("li", null, (STEP[s.step] || s.step) + " · " + at(s.at) + " · " + (s.ok ? "✓ " : "✗ ") + s.words)); });
-      if (r.text) { logText += r.text; var pre = $("log-text"); pre.textContent = logText; if (following) pre.scrollTop = pre.scrollHeight; }
+      if (r.text) { logText += r.text; var pre = $("log-text"); noFullLog(false); pre.textContent = logText; if (following) pre.scrollTop = pre.scrollHeight; }
       logFrom = r.next; $("log-follow").hidden = !r.live;
-      clearTimeout(logTimer); if (r.live && following) logTimer = setTimeout(pullLog, 2000);
+      clearTimeout(logTimer);
+      // A live log catches up at once while pages come full (64 KiB), then looks again every 2 s.
+      if (r.live) { if (r.text && r.text.length >= 60000) return pullLog(); if (following) logTimer = setTimeout(function () { logLoading = pullLog(); }, 2000); return; }
+      if (r.text) return pullLog(); // a finished log: the next page, until one brings nothing
+      if (!logText) noFullLog(true); // nothing at all: a job from before the full logs
     }, function (e) { $("log-text").textContent = e && e.message || "This log can't be read."; });
   }
   function openLog(f) {
     logFor = f; logFrom = 0; logText = ""; following = true;
     $("log-h").textContent = "Log: " + (f.newPath ? base(f.newPath) : f.name); $("log-sum").textContent = ""; $("log-text").textContent = "";
     $("log-follow").textContent = "Stop following"; $("log-follow").setAttribute("aria-pressed", "true");
-    $("log").showModal(); $("log-close").focus(); pullLog();
+    noFullLog(false); $("log").showModal(); $("log-close").focus(); logLoading = pullLog();
   }
 
   function init() {
@@ -205,9 +217,10 @@
     $("log-close").onclick = function () { $("log").close(); };
     // Escape closes it too. Focus returns to that row's Log button (found again: a poll may have redrawn the row).
     $("log").addEventListener("close", function () { clearTimeout(logTimer); var b = logFor && document.querySelector('[data-key="log-' + logFor.id + '"]'); logFor = null; if (b) b.focus(); });
-    $("log-follow").onclick = function () { following = !following; this.textContent = following ? "Stop following" : "Follow"; this.setAttribute("aria-pressed", following ? "true" : "false"); if (following) pullLog(); };
-    $("log-copy").onclick = function () { (navigator.clipboard ? navigator.clipboard.writeText(logText) : Promise.reject()).then(function () { $("log-said").textContent = "Log copied."; }, function () { $("log-said").textContent = "Copying isn't possible here. Select the text instead."; }); };
-    $("log-dl").onclick = function () { var u = URL.createObjectURL(new Blob([logText], { type: "text/plain" })), a = el("a"); a.href = u; a.download = (logFor ? base(logFor.name) : "file") + ".log"; a.click(); URL.revokeObjectURL(u); };
+    $("log-follow").onclick = function () { following = !following; this.textContent = following ? "Stop following" : "Follow"; this.setAttribute("aria-pressed", following ? "true" : "false"); if (following) logLoading = pullLog(); };
+    // Copy and Download take the whole log: they wait until every page is in.
+    $("log-copy").onclick = function () { if (this.getAttribute("aria-disabled") === "true") return; logLoading.then(function () { return navigator.clipboard ? navigator.clipboard.writeText(logText) : Promise.reject(); }).then(function () { $("log-said").textContent = "Log copied."; }, function () { $("log-said").textContent = "Copying isn't possible here. Select the text instead."; }); };
+    $("log-dl").onclick = function () { if (this.getAttribute("aria-disabled") === "true") return; var name = (logFor ? base(logFor.name) : "file") + ".log"; logLoading.then(function () { var u = URL.createObjectURL(new Blob([logText], { type: "text/plain" })), a = el("a"); a.href = u; a.download = name; a.click(); URL.revokeObjectURL(u); }); };
     Promise.all([api.listLibraries(), api.listFlows()]).then(function (r) {
       var byId = {}; flowOf = {}; r[1].items.forEach(function (f) { byId[f.id] = f; });
       r[0].items.forEach(function (l) { if (byId[l.flowId]) flowOf[l.id] = byId[l.flowId]; var o = el("option", null, l.name); o.value = l.id; $("lib").appendChild(o); });
