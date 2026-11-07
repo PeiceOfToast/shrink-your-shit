@@ -311,7 +311,7 @@ func TestRestoreThroughTheAPI(t *testing.T) {
 	nst, _ := os.Stat(path)
 	oid, _ := st.BeginSwap(jobs.Original{JobID: jid, LibraryID: l.ID, Path: path, Trash: trash, Staged: "s", Bytes: 14, ModTime: ost.ModTime().UnixNano(), Hash: h, NewBytes: 3, NewMTime: nst.ModTime().UnixNano(), NewHash: nh})
 	st.FinishSwap(oid, time.Now().Add(7*24*time.Hour))
-	if _, err := st.DeleteLibrary(l.ID); err != nil {
+	if err := st.DeleteLibrary(l.ID); err != nil {
 		t.Fatal(err)
 	}
 	code, body := post(t, srv, "POST", fmt.Sprintf("/api/kept/%d/restore", oid), `{}`)
@@ -456,8 +456,8 @@ func TestDeleteLibraryWaitsForASwapInProgress(t *testing.T) {
 	if code, b := post(t, srv, "DELETE", fmt.Sprintf("/api/libraries/%d", l2.ID), ""); code != 409 || errCode(b) != "busy" {
 		t.Errorf("not ended in time: %d %s", code, b)
 	}
-	if _, err := st.GetLibrary(l2.ID); err != nil {
-		t.Errorf("the library must stay: %v", err)
+	if got, err := st.GetLibrary(l2.ID); err != nil || !got.Started {
+		t.Errorf("the library must stay, taking new jobs again: %+v %v", got, err)
 	}
 	for _, id := range []int64{j2, q2} {
 		if req, _ := st.StopRequested(id); req != 0 {

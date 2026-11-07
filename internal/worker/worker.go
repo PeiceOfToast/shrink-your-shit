@@ -104,11 +104,12 @@ type Worker struct {
 type stopKind int
 
 const (
-	stopNone  stopKind = iota
-	stopDrop           // its library was removed: the job record goes
-	stopPause          // Pause all: back to the queue
-	stopUser           // Stop this file: skipped, reason user_stopped
-	stopStall          // no progress for StallAfter: failed
+	stopNone    stopKind = iota
+	stopDrop             // its library was removed: the job record goes
+	stopPause            // Pause all: back to the queue
+	stopUser             // Stop this file: skipped, reason user_stopped
+	stopStall            // no progress for StallAfter: failed
+	stopRequeue          // stopped for a library removal that was given up: back in the queue
 )
 
 // DefaultStallAfter is how long an encode may go without progress before the watchdog stops it.
@@ -221,13 +222,17 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 	// A stop asked for on the job's record wins over a pause or a shutdown, so it never waits in the
 	// queue as a job no claim takes. Once the new file is in place (err == nil) the job is done.
 	if err != nil {
-		if req, rerr := w.Queue.StopRequested(job.ID); rerr == nil {
-			switch req {
-			case jobs.StopByPerson:
-				stopped = stopUser
-			case jobs.StopLibraryRemoved:
-				stopped = stopDrop
-			}
+		req, rerr := w.Queue.StopRequested(job.ID)
+		switch {
+		case rerr != nil:
+		case req == jobs.StopByPerson:
+			stopped = stopUser
+		case req == jobs.StopLibraryRemoved:
+			stopped = stopDrop
+		case stopped == stopDrop:
+			// StopJob came with a library removal that was then given up (409): the record says so,
+			// so the job is not dropped; it goes back in the queue (the original is untouched).
+			stopped = stopRequeue
 		}
 	}
 	if err != nil && stopped == stopDrop {
@@ -243,6 +248,9 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 		switch stopped {
 		case stopPause:
 			log.Printf("worker %s: job %d: paused, back in the queue", w.ID, job.ID)
+			return true, w.Queue.Release(job.ID)
+		case stopRequeue:
+			log.Printf("worker %s: job %d: its library was not removed after all; back in the queue", w.ID, job.ID)
 			return true, w.Queue.Release(job.ID)
 		case stopUser:
 			return true, w.Queue.UserStopped(job.ID)

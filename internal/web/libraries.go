@@ -222,7 +222,9 @@ func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		if !ok {
 			return
 		}
-		running, err := store.MarkLibraryStop(id)
+		// From here no new job is added or claimed for it (MarkLibraryStop), so once DeleteLibrary finds
+		// none running (it checks and removes in one transaction) none can start.
+		wasStarted, running, err := store.MarkLibraryStop(id)
 		if err != nil {
 			storeErr(w, err)
 			return
@@ -233,16 +235,18 @@ func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			}
 		}
 		for deadline := time.Now().Add(libraryStopWait); ; time.Sleep(25 * time.Millisecond) {
-			n, err := store.LibraryRunning(id)
-			if err != nil {
-				serverError(w, err)
+			err := store.DeleteLibrary(id)
+			switch {
+			case err == nil:
+				writeJSON(w, map[string]bool{"ok": true})
 				return
-			}
-			if n == 0 {
-				break
-			}
-			if time.Now().After(deadline) {
-				if err := store.ClearLibraryStop(id); err != nil {
+			case !errors.Is(err, jobs.ErrLibraryBusy):
+				storeErr(w, err)
+				return
+			case time.Now().After(deadline):
+				// Undone: the marks go (a worker that already stopped puts its job back in the queue,
+				// see RunOne) and the library takes new jobs again if it did.
+				if err := store.ClearLibraryStop(id, wasStarted); err != nil {
 					serverError(w, err)
 					return
 				}
@@ -250,11 +254,6 @@ func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 				return
 			}
 		}
-		if _, err := store.DeleteLibrary(id); err != nil {
-			storeErr(w, err)
-			return
-		}
-		writeJSON(w, map[string]bool{"ok": true})
 	})
 
 	api.HandleFunc("POST /api/libraries/{id}/scan", func(w http.ResponseWriter, r *http.Request) {

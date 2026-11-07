@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
 func open(t *testing.T) *Store {
@@ -262,5 +264,41 @@ func TestPausedAndUserStopped(t *testing.T) {
 	s.Complete(done, "/m/b.mkv", 1)
 	if err := s.UserStopped(done); err != ErrNotStoppable {
 		t.Errorf("done: %v", err)
+	}
+}
+
+// While a library is being removed nothing new starts for it: a scan cannot add a job, a waiting one is
+// not claimed, and removal is refused while one runs; giving up restores it (review c7551fc).
+func TestLibraryRemovalBlocksNewWork(t *testing.T) {
+	s := open(t)
+	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
+	run, _ := s.Enqueue(Job{Library: "/m", LibraryID: l.ID, Path: "/m/1.mkv"})
+	s.Claim("w")
+	waiting, _ := s.Enqueue(Job{Library: "/m", LibraryID: l.ID, Path: "/m/2.mkv"})
+	wasStarted, running, err := s.MarkLibraryStop(l.ID)
+	if err != nil || !wasStarted || len(running) != 1 || running[0] != run {
+		t.Fatalf("%v %v %v", wasStarted, running, err)
+	}
+	if _, err := s.Enqueue(Job{Library: "/m", LibraryID: l.ID, Path: "/m/3.mkv"}); err != ErrLibraryGone {
+		t.Errorf("a scan during removal added a job: %v", err)
+	}
+	if j, err := s.Claim("w2"); err == nil {
+		t.Errorf("a waiting job was claimed during removal: %+v", j)
+	}
+	if err := s.DeleteLibrary(l.ID); err != ErrLibraryBusy {
+		t.Errorf("removed with a job running: %v", err)
+	}
+	// given up: everything as before
+	if err := s.ClearLibraryStop(l.ID, wasStarted); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetLibrary(l.ID); !got.Started {
+		t.Error("the library must take new jobs again")
+	}
+	if j, err := s.Claim("w2"); err != nil || j.ID != waiting {
+		t.Errorf("the waiting job must be claimable again: %+v %v", j, err)
+	}
+	if _, err := s.Enqueue(Job{Library: "/m", LibraryID: l.ID, Path: "/m/3.mkv"}); err != nil {
+		t.Errorf("scans add jobs again: %v", err)
 	}
 }

@@ -377,7 +377,7 @@ func TestLibraryRemovalBeforeTheSwapDropsTheJob(t *testing.T) {
 	s.store.Drop(s.id) // the scenario's job again, now in that library
 	s.id, _ = s.store.Enqueue(jobs.Job{Library: s.dir, LibraryID: l.ID, Path: s.src, DurationSec: 100, SizeBefore: 14})
 	s.afterChecks = func() {
-		if running, err := s.store.MarkLibraryStop(l.ID); err != nil || len(running) != 1 {
+		if _, running, err := s.store.MarkLibraryStop(l.ID); err != nil || len(running) != 1 {
 			t.Errorf("MarkLibraryStop: %v %v", running, err)
 		}
 	}
@@ -414,4 +414,26 @@ func TestLibraryRemovalInsideTheSwapFinishesIt(t *testing.T) {
 	if read(s.src) != "new" || read(s.trash()) != "original-bytes" {
 		t.Errorf("at the name %q, kept %q", read(s.src), read(s.trash()))
 	}
+}
+
+// A library removal given up (409: the conversion did not end in time) leaves the job alone even when
+// its worker sees the stop only afterwards: back in the queue, not dropped (review c7551fc).
+func TestLibraryRemovalGivenUpRequeuesTheJob(t *testing.T) {
+	s := newScenario(t)
+	w := s.worker(Replace)
+	l, _ := s.store.AddLibrary("Movies", s.dir, rules.SliderTemplate(3), true)
+	s.store.Drop(s.id)
+	s.id, _ = s.store.Enqueue(jobs.Job{Library: s.dir, LibraryID: l.ID, Path: s.src, DurationSec: 100, SizeBefore: 14})
+	done := runHung(t, s, w) // a slow conversion, held past the wait
+	wasStarted, running, err := s.store.MarkLibraryStop(l.ID)
+	if err != nil || len(running) != 1 {
+		t.Fatal(running, err)
+	}
+	s.store.ClearLibraryStop(l.ID, wasStarted) // the 409: given up
+	w.StopJob(s.id)                            // ...and the stop reaches the worker only now
+	waitDone(t, done)
+	if j := s.job(); j.Status != jobs.Queued {
+		t.Errorf("status %s, want back in the queue", j.Status)
+	}
+	s.assertOriginalSafe()
 }

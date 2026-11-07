@@ -66,6 +66,9 @@ func TestJobOfARemovedLibraryFails(t *testing.T) {
 // behind, and the job record is dropped rather than requeued.
 func TestStopJobDropsTheRunningJob(t *testing.T) {
 	s := newScenario(t)
+	lib, _ := s.store.AddLibrary("Movies", s.dir, rules.SliderTemplate(3), true)
+	s.store.Drop(s.id) // the scenario's job, in that library
+	s.id, _ = s.store.Enqueue(jobs.Job{Library: s.dir, LibraryID: lib.ID, Path: s.src, DurationSec: 100, SizeBefore: 14})
 	var encoding atomic.Bool
 	s.hang = func(name string, args []string) bool {
 		if name == "ffmpeg" && s.has(args, "libx265") {
@@ -84,6 +87,8 @@ func TestStopJobDropsTheRunningJob(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	w.StopJob(s.id + 1) // another job: nothing happens
+	// as DELETE /api/libraries does: the removal is recorded on the job first, then the worker stopped
+	s.store.MarkLibraryStop(lib.ID)
 	w.StopJob(s.id)
 	select {
 	case <-done:
