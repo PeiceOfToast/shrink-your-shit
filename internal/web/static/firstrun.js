@@ -73,8 +73,7 @@
         var now = st.editor.get(); now.availableAudio = s.availableAudio; now.availableSubtitles = s.availableSubtitles; now.availableFileTypes = s.availableFileTypes;
         host.textContent = ""; st.editor = ed.selectors(host, change, now);
       }, function () {});
-    } else if (st.level === "advanced") st.editor = ed.startFrom(host, change);
-    else {
+    } else {
       // Basic: the A1 editor (slider, Your files become, Picture, Audio, the fixed lines) and "Your language" (A4).
       var c = ui.el("div", "card"), box = ui.el("div"), f = ui.el("div", "field"), lb = ui.el("label", null, "Your language"), sel = ui.el("select"),
         hint = ui.el("span", "hint", "Audio in this language is kept. You can add more languages later in Settings.");
@@ -108,7 +107,8 @@
 
   function wire() {
     $("go1").onclick = function () { next(1); };
-    $("go2").onclick = function () { st.level = levelNow(); next(2, function () { return api.patchSettings({}, { controlLevel: st.level }); }); };
+    // Step 2 picks the kind of the first flow (piece B6); it saves no setting. Step 4 saves that flow.
+    $("go2").onclick = function () { st.level = levelNow(); next(2); };
     fp = S.folder({ onChange: function (ok, p) { st.path = p; setPassed(ok); }, onError: fail });
     $("go3").onclick = function () {
       // Wait for a check the field's change event (on blur) just started.
@@ -125,7 +125,8 @@
     $("go4").onclick = function () {
       if (!st.editor) return; // the Basic editor draws once the language list is in
       next(4, function () {
-        return Promise.resolve(st.lang && api.patchSettings({}, { languages: st.lang() })).then(function () { return api.putSetting({ id: st.lib.id }, st.editor.get()); });
+        // The library's own flow (named after it) gets the setting, by kind (UI-API-CONTRACT.md 20:40Z).
+        return Promise.resolve(st.lang && api.patchSettings({}, { languages: st.lang() })).then(function () { return api.putFlowSetting({ id: st.lib.flowId }, st.editor.get()); });
       });
     };
     $("start").onclick = function () { finish("/activity/", true); };
@@ -142,10 +143,14 @@
     api.getSettings().then(function (s) {
       if (s.firstRunDone && !fresh) { location.replace("/libraries/"); return; }
       if (fresh) history.replaceState(null, "", location.pathname);
-      st.level = s.controlLevel; st.maxStep = Math.min(Math.max(s.firstRunStep || 1, 1), 5);
-      var radio = document.querySelector('input[name="lvl"][value="' + s.controlLevel + '"]'); if (radio) radio.checked = true;
-      return api.listLibraries().then(function (l) {
+      st.maxStep = Math.min(Math.max(s.firstRunStep || 1, 1), 5);
+      return Promise.all([api.listLibraries(), api.listFlows()]).then(function (rr) {
+        var l = rr[0];
         if (l.items.length) { st.lib = l.items[l.items.length - 1]; st.path = st.lib.path; }
+        // Coming back: the kind is the library's flow's (step 2 saves nothing of its own).
+        var fl = st.lib && rr[1].items.filter(function (f) { return f.id === st.lib.flowId; })[0];
+        st.level = fl && fl.kind === "standard" ? "standard" : "basic";
+        var radio = document.querySelector('input[name="lvl"][value="' + st.level + '"]'); if (radio) radio.checked = true;
         if (st.maxStep >= 4 && !st.lib) st.maxStep = 3;
         wire(); $("wizard").hidden = false;
         if (st.lib) fp.set(st.path);

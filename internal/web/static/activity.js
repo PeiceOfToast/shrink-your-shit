@@ -110,14 +110,15 @@
   // ---- Skipped
   // Badge style per reason: info for what resolves itself or was the person's own doing, warn for a risk, idle otherwise.
   var KIND = { user_stopped: "info", restored: "info", still_changing: "info", hdr_dv: "warn", shared_file: "warn", cannot_keep_track: "warn", bitmap_subs: "warn", symlink: "idle", unreadable: "warn", dv: "info", dv_profile5: "idle", already_in_format: "idle" };
-  // Reasons a library rule causes, with the lowest control level whose library page can change that rule.
-  var RULE = { hdr_dv: 1, cannot_keep_track: 1, setting_cannot_run: 1, dv: 1 }, RANK = { basic: 0, standard: 1, advanced: 2 }, level = null;
+  // Reasons a flow's rule causes that a Standard flow can change (piece B: each flow has its own kind); "Change rule"
+  // opens that flow's page. flowOf maps a library id to its flow.
+  var RULE = { hdr_dv: 1, cannot_keep_track: 1, setting_cannot_run: 1, dv: 1 }, flowOf = null;
   var reason = "", shown = 0, tb, more, count;
   T.skipped = function () {
     if (!$("reason")) {
       pane.textContent = "";
       var h = heading("Skipped", "sh"); pane.appendChild(h); h.id = "sh";
-      pane.appendChild(el("p", "muted", "Nothing was changed on these files. To change a rule, open the library."));
+      pane.appendChild(el("p", "muted", "Nothing was changed on these files. To change a rule, open the library's flow."));
       var f = el("div", "field"), lb = el("label", null, "Show"), sel = el("select"); lb.htmlFor = "reason"; sel.id = "reason";
       sel.appendChild(el("option", null, "All reasons")).value = "";
       // One entry per label (already_hevc and already_in_format share one, design); a shared entry sends its codes in one
@@ -133,7 +134,9 @@
       pane.appendChild(el("div", null)).id = "empty-slot";
     }
     var want = Math.max(shown, 50);
-    if (level === null) return api.getSettings().then(function (s) { level = RANK[s.controlLevel] || 0; }, function () { level = 0; }).then(T.skipped); // unknown level: Basic's links only
+    if (flowOf === null) return Promise.all([api.listLibraries(), api.listFlows()]).then(function (r) {
+      var byId = {}; flowOf = {}; r[1].items.forEach(function (f) { byId[f.id] = f; }); r[0].items.forEach(function (l) { if (byId[l.flowId]) flowOf[l.id] = byId[l.flowId]; });
+    }, function () { flowOf = {}; }).then(T.skipped); // not known: no Change rule links
     return api.skipped({ reason: reason || null, limit: want, offset: 0 }).then(function (r) {
       shown = want;
       draw("skipped", r, function () {
@@ -143,7 +146,7 @@
           why.appendChild(el("span", "badge " + (KIND[i.reason] || "idle"), ui.badge(i.reason))); why.appendChild(document.createElement("br")); why.appendChild(document.createTextNode(i.detail || "")); // the engine's detail; never the raw code
           var a = null;
           if (i.reason === "user_stopped" || i.reason === "restored") a = btn("Convert again", "again-" + i.id, function () { act(api.convertAgain({ id: i.id }), true); });
-          else if (i.libraryId && RULE[i.reason] != null && level >= RULE[i.reason]) { a = el("a", "btn small", "Change rule"); a.href = "/library/?id=" + encodeURIComponent(i.libraryId); }
+          else if (i.libraryId && RULE[i.reason] != null && flowOf[i.libraryId] && flowOf[i.libraryId].kind === "standard") { a = el("a", "btn small", "Change rule"); a.href = "/flow/?id=" + encodeURIComponent(flowOf[i.libraryId].id); }
           tb.row([nameOf(i), why, a]);
         });
         tb.wrap.hidden = !r.items.length; more.hidden = r.items.length >= r.total;

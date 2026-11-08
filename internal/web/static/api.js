@@ -35,7 +35,9 @@
     listFlows: ["GET", "/api/flows"], createFlow: ["POST", "/api/flows"], renameFlow: ["PATCH", "/api/flows/{id}"],
     duplicateFlow: ["POST", "/api/flows/{id}/duplicate"], deleteFlow: ["DELETE", "/api/flows/{id}"],
     importFlow: ["POST", "/api/flows/import"], exportFlow: ["GET", "/api/flows/{id}/export"],
-    getFlow: ["GET", "/api/flows/{id}"]
+    getFlow: ["GET", "/api/flows/{id}"],
+    // A flow's own setting (piece B, UI-API-CONTRACT.md 20:40Z): the same bodies as a library's setting.
+    getFlowSetting: ["GET", "/api/flows/{id}/setting"], putFlowSetting: ["PUT", "/api/flows/{id}/setting"]
   };
 
   function pick() {

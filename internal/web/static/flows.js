@@ -1,14 +1,10 @@
-/* Flows page: the one list of every flow, with Rename, Duplicate, Delete, New flow and Import. */
+/* Flows page (redesign B2): every flow with its tag and the libraries using it; Rename, Duplicate, Delete; New flow asks
+   which kind (Basic or Standard) and opens the new flow's page. */
 (function () {
   "use strict";
   var S = window.SYP, api = S.api, ui = S.ui, el = ui.el;
   function $(id) { return document.getElementById(id); }
   function fail(e) { var b = $("err"); b.textContent = e && e.message || "Something went wrong. Nothing was changed."; b.hidden = false; }
-  var MADE = { slider: "Slider", selectors: "Selectors", builder: "Flow builder", legacy: "Earlier install" }; // anything else: "Other" (addendum 11)
-  function ago(iso) {
-    var d = Math.floor((Date.now() - new Date(iso)) / 864e5);
-    return d < 1 ? "Today" : d < 14 ? d + (d === 1 ? " day ago" : " days ago") : Math.floor(d / 7) + " weeks ago";
-  }
   function btn(txt, cls, fn) { var b = el("button", "btn small " + (cls || ""), txt); b.type = "button"; b.onclick = fn; return b; }
 
   function rename(f, cell) {
@@ -21,15 +17,19 @@
     cell.textContent = ""; cell.appendChild(form); inp.focus(); inp.select();
   }
 
-  function row(f, tb) {
+  function row(f, tb, libId) {
     var tr = el("tr"), th = el("th"), a = el("a", null, f.name);
     a.setAttribute("data-key", "f-" + f.id); th.scope = "row"; th.style.cssText = "background:none;color:inherit"; a.href = "/flow/?id=" + encodeURIComponent(f.id); th.appendChild(a); tr.appendChild(th);
+    var tag = el("td"); if (f.tag) tag.appendChild(el("span", "badge info", f.tag)); tr.appendChild(tag); // the server's B4 text
     var used = el("td");
-    if (f.usedBy.length) { used.appendChild(document.createTextNode(f.usedBy.join(", "))); if (f.madeWith === "builder") { used.appendChild(document.createTextNode(" ")); used.appendChild(el("span", "badge warn", "too custom for a slider")); } }
-    else used.appendChild(el("span", "muted", "No library"));
-    tr.appendChild(used); tr.appendChild(el("td", null, MADE[f.madeWith] || "Other")); tr.appendChild(el("td", null, ago(f.changedAt)));
-    var act = el("td"), r = el("div", "row"), v = el("a", "btn small", "View"); v.href = a.href;
-    r.appendChild(v); r.appendChild(btn("Rename", "", function () { rename(f, th); })); r.appendChild(btn("Duplicate", "", function () { api.duplicateFlow({ id: f.id }).then(function (n) { return load("f-" + n.id); }, fail); }));
+    if (f.usedBy.length) f.usedBy.forEach(function (n, k) {
+      if (k) used.appendChild(document.createTextNode(", "));
+      if (libId[n]) { var l = el("a", null, n); l.href = "/library/?id=" + encodeURIComponent(libId[n]); used.appendChild(l); } else used.appendChild(document.createTextNode(n));
+    });
+    else used.appendChild(el("span", "muted", "Not used"));
+    tr.appendChild(used);
+    var act = el("td"), r = el("div", "row");
+    r.appendChild(btn("Rename", "", function () { rename(f, th); })); r.appendChild(btn("Duplicate", "", function () { api.duplicateFlow({ id: f.id }).then(function (n) { return load("f-" + n.id); }, fail); }));
     if (f.usedBy.length) { // a real control, disabled, with the reason beside it
       var d = el("button", "btn small danger", "Delete"), why = el("span", "hint small", "In use by " + f.usedBy.join(", ")); d.type = "button"; d.setAttribute("aria-disabled", "true");
       why.id = "why-" + f.id; d.setAttribute("aria-describedby", why.id); r.appendChild(d); r.appendChild(why);
@@ -39,8 +39,9 @@
 
   // key: the control to focus once the list is redrawn ("top" = the page heading).
   function load(key) {
-    return api.listFlows().then(function (r) {
-      var box = $("flow-list"); box.textContent = "";
+    return Promise.all([api.listFlows(), api.listLibraries().then(null, function () { return { items: [] }; })]).then(function (rr) {
+      var r = rr[0], libId = {}, box = $("flow-list"); box.textContent = "";
+      rr[1].items.forEach(function (l) { libId[l.name] = l.id; });
       $("import").hidden = !api.flowIO();
       if (!r.items.length) { var c = el("div", "card empty"); c.appendChild(el("p", null, "No flows yet. Press New flow to start one.")); box.appendChild(c); if (key === "top") { var h0 = document.querySelector("h1"); h0.tabIndex = -1; h0.focus(); } return; }
       var w = el("div", "table-wrap"), t = el("table"), cap = el("caption", "small muted"), hd = el("thead"), hr = el("tr"), tb = el("tbody");
@@ -48,21 +49,22 @@
       cap.style.cssText = "text-align:left;padding-bottom:8px";
       cap.textContent = r.total + (r.total === 1 ? " flow." : " flows.") + (unused.length === 1 ? " “" + unused[0].name + "” is unused and can be deleted." : unused.length ? " " + unused.length + " are unused and can be deleted." : "");
       t.appendChild(cap);
-      ["Name", "Used by", "Made with", "Last changed", ""].forEach(function (c) { var th = el("th"); th.scope = "col"; if (c) th.textContent = c; else th.appendChild(el("span", "sr", "Actions")); hr.appendChild(th); });
+      ["Name", "Tag", "Used by", ""].forEach(function (c) { var th = el("th"); th.scope = "col"; if (c) th.textContent = c; else th.appendChild(el("span", "sr", "Actions")); hr.appendChild(th); });
       hd.appendChild(hr); t.appendChild(hd); t.appendChild(tb); w.appendChild(t); box.appendChild(w);
-      r.items.forEach(function (f) { row(f, tb); });
+      r.items.forEach(function (f) { row(f, tb, libId); });
       var t0 = key === "top" ? document.querySelector("h1") : typeof key === "string" && box.querySelector('[data-key="' + key + '"]');
       if (t0) { if (t0.tagName === "H1") t0.tabIndex = -1; t0.focus(); } // a link is focusable already; tabIndex -1 would take it out of the Tab order
     }, fail);
   }
 
   function init() {
-    $("newflow").onclick = function () { // each one gets a name of its own: New flow, New flow 2, ...
-      api.listFlows().then(function (r) {
-        var taken = r.items.map(function (f) { return f.name; }), n = 1, name = "New flow";
-        while (taken.indexOf(name) >= 0) name = "New flow " + (++n);
-        return api.createFlow({}, { name: name });
-      }).then(function (f) { location.href = "/flow/?id=" + encodeURIComponent(f.id); }, fail); };
+    // New flow (B3): one question, Basic or Standard; the server names it ("Basic flow", "Basic flow 2", ...).
+    $("newflow").onclick = function () { $("kind-dialog").returnValue = ""; $("kind-dialog").showModal(); };
+    $("kind-dialog").addEventListener("close", function () {
+      if ($("kind-dialog").returnValue !== "continue") { $("newflow").focus(); return; }
+      var kind = document.querySelector('input[name="kind"]:checked').value;
+      api.createFlow({}, { kind: kind }).then(function (f) { location.href = "/flow/?id=" + encodeURIComponent(f.id); }, fail);
+    });
     $("import").onclick = function () { $("importfile").click(); };
     $("importfile").onchange = function () {
       var f = this.files[0]; if (!f) return;

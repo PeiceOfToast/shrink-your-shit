@@ -99,7 +99,7 @@
     // Stopped, then converted later with "MKV": Convert again on the old name answers 409 renamed (25a-2).
     { id: "s17", library: "Movies", path: "/media/movies/Night Train (2009).mp4", reason: "user_stopped", detail: "You pressed Stop this file while it was converting. Your original is untouched.", libraryId: "1" },
     // S4/S3's new reasons (design's words in ui.js): one each.
-    { id: "s18", library: "Movies", path: "/media/movies/Night Sky (2019) DV.mkv", reason: "dv", detail: "This library leaves Dolby Vision files as they are.", libraryId: "1" },
+    { id: "s18", library: "Movies", path: "/media/movies/Night Sky (2019) DV.mkv", reason: "dv", detail: "This flow leaves Dolby Vision files as they are.", libraryId: "1" },
     { id: "s19", library: "Movies", path: "/media/movies/Streamed (2021) P5.mp4", reason: "dv_profile5", detail: "Dolby Vision profile 5 has no HDR10 layer to keep.", libraryId: "1" },
     { id: "s20", library: "TV Shows", path: "/media/tv/Season 4/E02.mkv", reason: "already_in_format", detail: "It is already HEVC in MKV with the audio you chose.", libraryId: "2" },
     { id: "s13", library: "Movies", path: "/media/movies/Short (2003).avi", reason: "setting_cannot_run", detail: "MP4 is the chosen file type, and it cannot hold this file's audio.", libraryId: "1" },
@@ -155,8 +155,40 @@
       : !on && l.waitingFiles ? { kind: "waiting_for_worker", toDo: l.waitingFiles } : { kind: "scanned" });
     var scanned = k.kind !== "not_scanned" && k.kind !== "scanning";
     x.status = Object.assign({ videos: scanned ? 1284 : null, foundSoFar: null, lastScan: scanned ? iso(-3 * 3600e3) : null, nextScan: l.nextScan, converting: 0, toDo: 0 }, k);
-    x.failedFiles = FAIL[l.id] || 0; x.madeWith = f ? f.madeWith : "slider"; return x;
+    x.failedFiles = FAIL[l.id] || 0; x.madeWith = f ? f.madeWith : "slider"; if (f) x.tag = tagOf(f); return x;
   }
+  // Flows per level (piece B, UI-API-CONTRACT.md 20:40Z). A flow's setting lives on the libraries that use it (the first
+  // one is read; a save is copied to all), or on the flow itself while no library uses it. kind and tag (B4) are built here
+  // the way the server builds them.
+  var QN = ["Smallest file", "Smaller", "Balanced", "Better quality", "Best quality"];
+  var AUDIO_SHORT = { stereo_aac: "Stereo AAC", my_languages: "My languages", keep_all: "Audio as it is", aac: "AAC", eac3: "E-AC-3", opus: "Opus", lossless_only: "Lossless audio to E-AC-3" }; // the server's words (rules.audioShort)
+  function recOf(f) { var i = find(libs, "flowId", f.id); return i >= 0 ? libs[i] : (f.rec = f.rec || { quality: 3, audio: "stereo_aac", settingKind: "slider", settingLabel: "Balanced" }); }
+  function kindOf(f) { var r = recOf(f); return f.madeWith === "builder" ? "advanced" : f.madeWith === "legacy" ? "earlier" : r.sel ? "standard" : "basic"; }
+  function tagOf(f) {
+    var k = kindOf(f), r = recOf(f), q = (r.sel ? r.sel.quality : r.quality) || 3;
+    if (k === "advanced") return "Advanced \u00b7 Custom"; if (k === "earlier") return "Earlier install";
+    if (k === "basic") return "Basic \u00b7 " + QN[q - 1];
+    var x = r.sel, parts = ["Standard"]; if (x.format && x.format !== "hevc") parts.push(x.format.toUpperCase());
+    parts.push(QN[q - 1], x.resolution === "keep" || !x.resolution ? "same resolution" : "at most " + x.resolution + "p",
+      !x.maxBitrate || x.maxBitrate === "none" ? "no bitrate limit" : x.maxBitrate + " Mbps", AUDIO_SHORT[x.audio] || x.audio);
+    return parts.join(" \u00b7 ");
+  }
+  function flowView(f) { var v = copy(f); delete v.rec; v.kind = kindOf(f); v.tag = tagOf(f); return v; }
+  // Standard choices that the Basic slider can show (B3 "Switch to Basic").
+  function fitsBasic(x) { return x.format === "hevc" && (x.resolution || "keep") === "keep" && x.fileType === "mkv" && (x.maxBitrate || "none") === "none" &&
+    ["stereo_aac", "my_languages", "keep_all"].indexOf(x.audio) >= 0 && x.subtitles === "keep_all" && x.afterConverting === "replace"; }
+  function settingOf(r) { // the setting answer, as GET .../setting gives it, for a library or a flow's record
+    var av = avail();
+    if (r.sel) return Object.assign({ kind: "selectors", warnings: warningsFor(r.sel), fitsBasic: fitsBasic(r.sel) }, av, r.sel);
+    if (r.settingKind === "custom") return Object.assign({ kind: "custom", warnings: [] }, av);
+    return Object.assign({ kind: "slider", quality: r.quality || (r.settingLabel === "Smaller" ? 2 : 3), positions: SLIDER, warnings: [],
+      audio: r.audio || "stereo_aac", becomes: { video: "HEVC", resolution: "same", fileType: "MKV" } }, av);
+  }
+  function applySetting(r, b) { // a PUT body onto a record: {quality, audio} = Basic, selector fields = Standard
+    if (b.speed) { r.sel = copy(b); r.settingKind = "selectors"; r.settingLabel = QN[(b.quality || 3) - 1]; return; }
+    delete r.sel; r.quality = b.quality || 3; r.audio = b.audio || "stereo_aac"; r.settingKind = "slider"; r.settingLabel = QN[r.quality - 1];
+  }
+
   function summary() {
     // Waiting to be freed = the space the kept originals will give back (original - new); the whole
     // originals' size is only the Kept originals figure (keptBytes). Contract, workshop response to F1.
@@ -251,9 +283,12 @@
                  { id: "disk", label: "Free space", status: "ok", detail: "1.4 TB free" }, { id: "db", label: "Library database", status: "ok", detail: "" }] });
     },
     backup: function () { return Promise.resolve({ blob: function () { return Promise.resolve(new Blob(["Sample backup from the stand-in server. A real backup holds your settings and the list of converted files."], { type: "text/plain" })); } }); },
-    listLibraries: function () { return ok(list(libs.map(withStatus))); },
+    listLibraries: function () { return ok(list(libs.map(withStatus))); }, // withStatus adds the flow's tag too
     addLibrary: function (p, b) {
       var l = { id: String(libs.length + 10), name: b.name || "New library", path: b.path || "", state: "not_started", started: false, workingFiles: 0, waitingFiles: 0, nextScan: iso(-6 * 3600e3), freedBytes: 0, settingLabel: "Balanced", settingKind: "slider" };
+      var fi = b.flowId ? find(flows, "id", b.flowId) : -1;
+      if (b.flowId && fi < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed.");
+      if (fi >= 0) { var r0 = copy(recOf(flows[fi])); ["quality", "audio", "sel", "settingKind", "settingLabel"].forEach(function (k) { if (r0[k] !== undefined) l[k] = r0[k]; }); flows[fi].usedBy.push(l.name); l.flowId = b.flowId; delete flows[fi].rec; libs.push(l); saveLibs(); return ok(withStatus(l)); }
       var f = { id: fid(), name: flowName(l.name), usedBy: [l.name], madeWith: "slider", changedAt: iso(0) }; flows.push(f); l.flowId = f.id;
       libs.push(l); saveLibs(); return ok(l);
     },
@@ -315,8 +350,10 @@
     putLibraryFlow: function (p, b) {
       var i = find(libs, "id", p.id), nf = find(flows, "id", b.flowId);
       if (i < 0 || nf < 0) return gone();
-      flows.forEach(function (f) { f.usedBy = f.usedBy.filter(function (n) { return n !== libs[i].name; }); });
-      flows[nf].usedBy.push(libs[i].name); libs[i].flowId = b.flowId; saveLibs(); return ok();
+      // The library now follows the new flow's setting (piece B): copy it before the library joins.
+      var r = copy(recOf(flows[nf])); delete libs[i].sel; ["quality", "audio", "sel", "settingKind", "settingLabel"].forEach(function (k) { if (r[k] !== undefined) libs[i][k] = r[k]; });
+      flows.forEach(function (f) { if (f.id !== b.flowId && f.usedBy.indexOf(libs[i].name) >= 0 && f.usedBy.length === 1) f.rec = copy(recOf(f)); f.usedBy = f.usedBy.filter(function (n) { return n !== libs[i].name; }); });
+      flows[nf].usedBy.push(libs[i].name); libs[i].flowId = b.flowId; delete flows[nf].rec; saveLibs(); return ok();
     },
     // Answers "computing" first, then "ready", so the waiting state gets exercised.
     preview: function (p, b) {
@@ -396,10 +433,24 @@
       skippedList.unshift({ id: "r" + p.id, library: k.library, path: k.path, reason: "restored", detail: "Left alone so it is not converted again by surprise.", libraryId: "1" });
       saveAct(); return ok();
     },
-    listFlows: function () { return ok(list(flows)); },
-    createFlow: function (p, b) { var f = { id: fid(), name: b.name || "New flow", usedBy: [], madeWith: "builder", changedAt: iso(0) }; flows.push(f); saveLibs(); return ok(f); },
-    renameFlow: function (p, b) { var i = find(flows, "id", p.id); if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed."); flows[i].name = b.name || flows[i].name; saveLibs(); return ok(flows[i]); },
-    duplicateFlow: function (p) { var i = find(flows, "id", p.id); if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed."); var f = copy(flows[i]); f.id = fid(); f.name += " (copy)"; f.usedBy = []; flows.push(f); saveLibs(); return ok(f); },
+    listFlows: function () { return ok(list(flows.map(flowView))); },
+    createFlow: function (p, b) {
+      var std = b.kind === "standard", f = { id: fid(), name: flowName(b.name || (std ? "Standard flow" : "Basic flow")), usedBy: [], madeWith: std ? "selectors" : "slider", changedAt: iso(0), rec: {} };
+      applySetting(f.rec, std ? { speed: "normal", format: "hevc", quality: 3, resolution: "keep", maxBitrate: "none", audio: "keep_all", subtitles: "keep_all", fileType: "mkv", afterConverting: "replace", ignore: [], skipHdr: true } : { quality: 3, audio: "stereo_aac" }); // Standard: the selectors' own defaults
+      flows.push(f); saveLibs(); return ok(flowView(f));
+    },
+    getFlowSetting: function (p) { var i = find(flows, "id", p.id); if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed.");
+      var f = flows[i]; return ok(f.madeWith === "builder" || f.madeWith === "legacy" ? Object.assign({ kind: "custom", warnings: [] }, avail()) : settingOf(recOf(f))); },
+    putFlowSetting: function (p, b) {
+      var i = find(flows, "id", p.id); if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed.");
+      var f = flows[i]; if (f.madeWith === "builder" || f.madeWith === "legacy") return fail(409, "flow_read_only", "This flow can't be changed here yet. Nothing was changed.");
+      if (!(settings.languages || []).length && (b.speed ? b.audio === "my_languages" || b.subtitles === "my_languages" : b.audio && b.audio !== "keep_all")) return fail(400, "languages_needed", "Choose your languages first, in Settings > General.");
+      var r = recOf(f); applySetting(r, b); f.madeWith = r.sel ? "selectors" : "slider"; f.changedAt = iso(0);
+      libs.forEach(function (l) { if (l.flowId === f.id && l !== r) ["quality", "audio", "settingKind", "settingLabel"].forEach(function (k) { l[k] = r[k]; }), r.sel ? (l.sel = copy(r.sel)) : delete l.sel; });
+      saveLibs(); return ok(settingOf(r));
+    },
+    renameFlow: function (p, b) { var i = find(flows, "id", p.id); if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed."); flows[i].name = b.name || flows[i].name; saveLibs(); return ok(flowView(flows[i])); },
+    duplicateFlow: function (p) { var i = find(flows, "id", p.id); if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed."); var f = copy(flows[i]); f.rec = copy(recOf(flows[i])); f.id = fid(); f.name = flowName(flows[i].name); f.usedBy = []; flows.push(f); saveLibs(); return ok(flowView(f)); },
     deleteFlow: function (p) {
       var i = find(flows, "id", p.id);
       if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed.");
@@ -415,7 +466,7 @@
     getFlow: function (p) {
       var i = find(flows, "id", p.id);
       if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed.");
-      return ok({ id: flows[i].id, name: flows[i].name, steps: stepsFor(flows[i]) });
+      var v = Object.assign(flowView(flows[i]), { steps: stepsFor(flows[i]) }); delete v.usedBy; delete v.changedAt; return ok(v); // the contract's fields only
     }
   };
   // ?auth=1: the mock requires a session, as the server does beyond loopback (?auth=0 turns it off; remembered

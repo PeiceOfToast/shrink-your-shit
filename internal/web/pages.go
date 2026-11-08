@@ -105,11 +105,11 @@ func scripts(kind string) []string {
 	case "libraries":
 		return append(core, "ui.js", "badge.js", "folder.js", "libraries.js")
 	case "library":
-		return append(core, "ui.js", "badge.js", "editors.js", "library.js")
+		return append(core, "ui.js", "badge.js", "library.js")
 	case "flows":
 		return append(core, "ui.js", "flows.js")
 	case "flow":
-		return append(core, "ui.js", "flow.js")
+		return append(core, "ui.js", "editors.js", "flow.js")
 	case "activity":
 		return append(core, "ui.js", "activity.js")
 	case "settings":
@@ -122,13 +122,7 @@ func scripts(kind string) []string {
 
 // lazyScripts are loaded by a page's own script, only when a setting calls for them.
 func lazyScripts(kind string) []string {
-	switch kind {
-	case "library":
-		return []string{"flowpick.js"} // the Flow choice, only with "Let me choose per library"
-	case "settings":
-		return []string{"settings-flow.js"} // the preview under "Let me choose per library", only when it is on
-	}
-	return nil
+	return nil // none since piece B (the per-library Flow choice and its Settings preview are gone)
 }
 
 type pageView struct {

@@ -6,22 +6,6 @@
   function nameOf(p) { var b = p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "Library"; return b.charAt(0).toUpperCase() + b.slice(1); }
   function fail(e) { var b = $("err"); b.textContent = e && e.message || "Something went wrong. Nothing was changed."; b.hidden = false; }
 
-  // What the card says when the setting does not fit the control level (the kind comes from the engine):
-  // custom needs Advanced to be edited; a Standard setting is more than the Basic slider can show.
-  function mismatch(kind, level) {
-    if (kind === "custom" && level === "basic") return "This setting is too custom to show as a slider";
-    if (kind === "custom" && level === "standard") return "This setting is too custom to show as choices";
-    if (kind === "selectors" && level === "basic") return "This setting has more choices than a slider shows";
-    return null;
-  }
-  // The flow tag (redesign A2/B4; flows themselves are piece B), from the library's own settingKind: a slider position
-  // is Basic, selectors are Standard. A custom flow gets no tag until the library item says whether it was made at
-  // Advanced or by an earlier install (workshop slice A adds madeWith); never a bare "Custom".
-  function tag(l) {
-    if (l.settingKind === "slider") return "Basic \u00b7 " + l.settingLabel;
-    if (l.settingKind === "selectors") return "Standard \u00b7 " + l.settingLabel;
-    return { builder: "Advanced \u00b7 Custom", legacy: "Earlier install" }[l.madeWith] || ""; // B4, from slice A's madeWith
-  }
   function at(t) { return new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
   // Status in words from slice A's status (A2); sizes and other numbers live in Activity. Returns text or a fragment (for the link).
   function status(l) {
@@ -43,20 +27,15 @@
     return l.nextScan ? "Next scan " + at(l.nextScan) : "";
   }
 
-  function card(l, level) {
+  // The flow tag is the server's text (B4), the same on the Flows page and the flow's page.
+  function card(l) {
     var c = el("div", "card"), top = el("div", "row between"), left = el("div"), h = el("h2"), a = el("a", null, l.name), href = "/library/?id=" + encodeURIComponent(l.id);
     h.style.margin = "0"; a.href = href; h.appendChild(a); left.appendChild(h); left.appendChild(el("span", "mono muted", l.path));
-    top.appendChild(left); var t = tag(l); if (t) top.appendChild(el("span", "badge info", t)); c.appendChild(top);
-    var warn = mismatch(l.settingKind, level);
-    if (warn) {
-      var n = el("div", "notice warn"), d = el("div"); n.style.margin = "12px 0 0";
-      d.appendChild(el("strong", null, warn)); d.appendChild(document.createTextNode("It keeps working exactly as before."));
-      n.appendChild(d); c.appendChild(n);
-    }
+    top.appendChild(left); if (l.tag) top.appendChild(el("span", "badge info", l.tag)); c.appendChild(top);
     var words = status(l);
     if (words) { var st = el("p", "lib-status"); if (typeof words === "string") st.textContent = words; else st.appendChild(words); st.style.margin = "12px 0 0"; c.appendChild(st); }
-    // Failed files (A2, 19:58Z): a second line in the warn style, only when there are any; "see why" opens Activity's
-    // Failed list (filtered to this library once Activity is the Files view, piece C).
+    // Failed files (A2, 19:58Z): a second line in the warn style, only when there are any; "see why" opens the Files
+    // view's Failed list for this library.
     if (l.failedFiles > 0) {
       var fl = el("p", "small"), why = el("a", null, "see why"); fl.style.cssText = "margin:4px 0 0;color:var(--warn)";
       fl.appendChild(document.createTextNode(ui.count(l.failedFiles, "file", "files") + " failed: ")); why.href = "/activity/failed/?library=" + encodeURIComponent(l.id); fl.appendChild(why); c.appendChild(fl);
@@ -66,9 +45,15 @@
   }
 
   function load() {
-    return Promise.all([api.listLibraries(), api.getSettings()]).then(function (r) {
+    return Promise.all([api.listLibraries(), api.listFlows()]).then(function (r) {
       var box = $("lib-list"); box.textContent = ""; $("empty").hidden = r[0].total > 0;
-      r[0].items.forEach(function (l) { box.appendChild(card(l, r[1].controlLevel)); });
+      r[0].items.forEach(function (l) { box.appendChild(card(l)); });
+      // Add a library: a Flow dropdown, the most-used flow first chosen (B5). With no flow at all (only right after an
+      // upgrade with none) it stays hidden and the server makes a Basic flow at Balanced, named after the library.
+      var sel = $("addflow"), was = sel.value; sel.textContent = ""; $("addflow-f").hidden = !r[1].items.length;
+      var top = r[1].items.slice().sort(function (a, b) { return b.usedBy.length - a.usedBy.length; })[0];
+      r[1].items.forEach(function (f) { var o = el("option", null, f.name + (f.tag ? " \u2014 " + f.tag : "")); o.value = f.id; sel.appendChild(o); });
+      if (top) sel.value = was && r[1].items.some(function (f) { return f.id === was; }) ? was : top.id;
     }, fail);
   }
 
@@ -81,7 +66,9 @@
       Promise.resolve(fp.pending()).then(function () {
         if (!fp.passed()) { $("path").focus(); return; }
         var path = fp.path();
-        return api.addLibrary({}, { name: nameOf(path), path: path, startFrom: "balanced" }).then(function (l) {
+        var body = { name: nameOf(path), path: path };
+        if (!$("addflow-f").hidden) body.flowId = $("addflow").value; else body.startFrom = "balanced";
+        return api.addLibrary({}, body).then(function (l) {
           fp.clear(); $("err").hidden = true;
           $("added").textContent = "Added " + l.name + ". Nothing is converted until you start it.";
           return load();
