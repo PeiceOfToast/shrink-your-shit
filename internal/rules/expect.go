@@ -51,6 +51,16 @@ type Expect struct {
 	// Container is the file type the new file must be, as ffprobe names it ("matroska,webm"): the
 	// original's, or the flow's new type; "" = unchecked (unknown).
 	Container string `json:",omitempty"`
+	// HDR is the HDR the new file's main video must carry (S3); nil = not checked (an SDR original).
+	HDR *HDRExpect `json:",omitempty"`
+}
+
+// HDRExpect is an HDR original's colour description and static metadata, as the new file must show
+// them (RESEARCH/hdr-dv.md: without them a TV shows washed-out or wrong colours). Empty and false
+// values are not checked (the original did not have them either).
+type HDRExpect struct {
+	Transfer, Primaries   string
+	MasteringDisplay, CLL bool
 }
 
 // DefaultExpect is the expectation for what the worker does today: every stream of the original is
@@ -198,6 +208,20 @@ func (e Expect) Compare(out media.Info, outPackets int64) []string {
 		}
 	}
 
+	if h, v := e.HDR, out.Video(); h != nil && v != nil {
+		if h.Transfer != "" && v.ColorTransfer != h.Transfer {
+			problems = append(problems, fmt.Sprintf("the new file lost its HDR: its colour transfer is %s, not %s", noneIfEmpty(v.ColorTransfer), h.Transfer))
+		}
+		if h.Primaries != "" && v.ColorPrimaries != h.Primaries {
+			problems = append(problems, fmt.Sprintf("the new file's colour primaries are %s, not %s as in the HDR original", noneIfEmpty(v.ColorPrimaries), h.Primaries))
+		}
+		if h.MasteringDisplay && v.MasteringDisplay == "" {
+			problems = append(problems, "the new file lost the HDR original's mastering display information")
+		}
+		if h.CLL && v.CLL == "" {
+			problems = append(problems, "the new file lost the HDR original's light levels (MaxCLL and MaxFALL)")
+		}
+	}
 	if out.Chapters != e.Chapters {
 		problems = append(problems, fmt.Sprintf("the original has %d chapters but the new file has %d", e.Chapters, out.Chapters))
 	}
@@ -314,4 +338,11 @@ func containerWords(name string) string {
 		return "MP4"
 	}
 	return strings.ToUpper(strings.SplitN(name, ",", 2)[0])
+}
+
+func noneIfEmpty(s string) string {
+	if s == "" {
+		return "not set"
+	}
+	return s
 }

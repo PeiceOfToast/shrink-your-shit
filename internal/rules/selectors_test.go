@@ -104,15 +104,15 @@ func TestSelectorsCompile(t *testing.T) {
 			t.Errorf("%s with %s %s: %q", c.ft, c.s.Type, c.s.Codec, p.Skip)
 		}
 	}
-	// HDR: skipped unless the flow says otherwise, with a warning then
+	// HDR10 is converted and kept as HDR at every flow (S3; hdr_test.go has the rest), with no warning
 	hdr := h264(1920, 1080, 8000)
 	hdr.Streams[0].ColorTransfer = "smpte2084"
-	if p := SliderTemplate(3).Compile(hdr); p.SkipCode != SkipHDR {
+	if p := SliderTemplate(3).Compile(hdr); p.Skip != "" || p.Video.HDR == nil {
 		t.Errorf("slider HDR: %q", p.Skip)
 	}
-	off := sel(func(s *Selectors) { s.SkipHDR = false })
-	if p := off.Compile(hdr); p.Skip != "" || len(off.Warnings()) != 1 {
-		t.Errorf("skipHdr off: %q %v", p.Skip, off.Warnings())
+	on := sel(func(s *Selectors) { s.IncludeDolbyVision = true })
+	if p := on.Compile(hdr); p.Skip != "" || len(on.Warnings()) != 0 {
+		t.Errorf("includeDolbyVision on: %q %v", p.Skip, on.Warnings())
 	}
 	if len(SliderTemplate(3).Warnings()) != 0 {
 		t.Error("the slider has no warning")

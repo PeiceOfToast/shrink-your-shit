@@ -234,12 +234,12 @@ func TestSelectorsSaveAndReadBack(t *testing.T) {
 	}
 	v := get()
 	for k, want := range map[string]any{"kind": "selectors", "quality": 2.0, "speed": "slower", "resolution": "720", "maxBitrate": "10",
-		"fileType": "mkv", "afterConverting": "beside", "skipHdr": true} {
+		"fileType": "mkv", "afterConverting": "beside", "includeDolbyVision": false} {
 		if v[k] != want {
 			t.Errorf("%s = %v, want %v", k, v[k], want)
 		}
 	}
-	for _, gone := range []string{"minSavingPct", "skipSmall"} {
+	for _, gone := range []string{"minSavingPct", "skipSmall", "skipHdr"} {
 		if _, ok := v[gone]; ok {
 			t.Errorf("%s is gone from the setting: %v", gone, v[gone])
 		}
@@ -254,10 +254,14 @@ func TestSelectorsSaveAndReadBack(t *testing.T) {
 	if libs := listLibraries(t, srv); libs[0]["settingKind"] != "selectors" || libs[0]["settingLabel"] != "Smaller" {
 		t.Errorf("library card: %v", libs[0])
 	}
-	// turning Skip HDR off says what that means
-	post(t, srv, "PUT", path, `{"quality":2,"skipHdr":false}`)
-	if w, _ := get()["warnings"].([]any); len(w) != 1 {
-		t.Errorf("warnings %v", get()["warnings"])
+	// S3: skipHdr from an old page is ignored; includeDolbyVision is saved; neither has a warning
+	post(t, srv, "PUT", path, `{"quality":2,"speed":"slower","skipHdr":false}`)
+	if v := get(); v["includeDolbyVision"] != false || len(v["warnings"].([]any)) != 0 {
+		t.Errorf("skipHdr false: %v %v", v["includeDolbyVision"], v["warnings"])
+	}
+	post(t, srv, "PUT", path, `{"quality":2,"includeDolbyVision":true}`)
+	if v := get(); v["includeDolbyVision"] != true || len(v["warnings"].([]any)) != 0 {
+		t.Errorf("includeDolbyVision: %v %v", v["includeDolbyVision"], v["warnings"])
 	}
 	if code, body := post(t, srv, "PUT", path, `{"quality":4,"kind":"slider"}`); code != 200 || get()["kind"] != "slider" {
 		t.Errorf("quality only still saves the slider: %d %s", code, body)

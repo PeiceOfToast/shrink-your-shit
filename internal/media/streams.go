@@ -3,6 +3,7 @@
 package media
 
 import (
+	"fmt"
 	"math"
 	"regexp"
 	"strconv"
@@ -50,10 +51,20 @@ type Stream struct {
 	// DolbyVision and HDR10Plus come from stream-level side data. HDR10+ is often carried per
 	// frame, which ffprobe's stream data may not show, so a false HDR10Plus is not proof of absence.
 	DolbyVision bool `json:"dolbyVision,omitempty"`
+	HDR10Plus   bool `json:"hdr10plus,omitempty"`
+	// DVProfile is the Dolby Vision profile from the DOVI configuration record (0: not known, e.g. a
+	// dvh1 tag or RPU data alone). Profile 5 has no HDR10 base and must never be re-encoded (S3).
+	DVProfile int `json:"dvProfile,omitempty"`
+	// DVCompat is the record's dv_bl_signal_compatibility_id, nil when not given: 0 means the base layer
+	// has no HDR10/SDR/HLG fallback (like profile 5), so re-encoding it would show wrong colours.
+	DVCompat *int `json:"dvCompat,omitempty"`
+	// MasteringDisplay is the HDR10 mastering display in x265's master-display form,
+	// G(x,y)B(x,y)R(x,y)WP(x,y)L(max,min); CLL is "MaxCLL,MaxFALL" (x265's max-cll). Empty when absent.
+	MasteringDisplay string `json:"masteringDisplay,omitempty"`
+	CLL              string `json:"cll,omitempty"`
 	// Rotation is the Display Matrix's rotation in degrees (a phone video: 90 or -90), 0 when none.
 	// ffmpeg turns the picture upright when it encodes, so the new file's size is swapped for ±90/270.
-	Rotation  int  `json:"rotation,omitempty"`
-	HDR10Plus bool `json:"hdr10plus,omitempty"`
+	Rotation int `json:"rotation,omitempty"`
 
 	// Audio
 	Channels      int    `json:"channels,omitempty"`
@@ -70,6 +81,81 @@ type Stream struct {
 	// Attachment (fonts, cover images in mkv)
 	Filename string `json:"filename,omitempty"`
 	MimeType string `json:"mimeType,omitempty"`
+}
+
+// addSideData reads the HDR side data in a stream's (or its first frame's) side_data_list: Dolby Vision
+// (configuration record or RPU), HDR10+, the mastering display and the content light level.
+func (s *Stream) addSideData(m map[string]any) {
+	list, _ := m["side_data_list"].([]any)
+	for _, e := range list {
+		sd, _ := e.(map[string]any)
+		t := strings.ToLower(str(sd, "side_data_type"))
+		switch {
+		case strings.Contains(t, "dovi") || strings.Contains(t, "dolby vision"):
+			s.DolbyVision = true
+			if p := int(num(sd, "dv_profile")); p > 0 {
+				s.DVProfile = p
+			}
+			if _, ok := sd["dv_bl_signal_compatibility_id"]; ok {
+				c := int(num(sd, "dv_bl_signal_compatibility_id"))
+				s.DVCompat = &c
+			}
+		case strings.Contains(t, "hdr10+") || strings.Contains(t, "2094-40"):
+			s.HDR10Plus = true
+		case strings.Contains(t, "mastering display"):
+			if md := masterDisplay(sd); md != "" {
+				s.MasteringDisplay = md
+			}
+		case strings.Contains(t, "display matrix"): // a phone video's rotation (#81)
+			s.Rotation = int(num(sd, "rotation"))
+		case strings.Contains(t, "content light level"):
+			s.CLL = fmt.Sprintf("%d,%d", int(num(sd, "max_content")), int(num(sd, "max_average")))
+		}
+	}
+}
+
+// masterDisplay is ffprobe's mastering display side data in x265's units: chromaticity in 1/50000,
+// luminance in 1/10000 cd/m². "" when a value is missing (an incomplete record is not written out).
+func masterDisplay(sd map[string]any) string {
+	var v [10]int64
+	for i, k := range []string{"green_x", "green_y", "blue_x", "blue_y", "red_x", "red_y", "white_point_x", "white_point_y", "max_luminance", "min_luminance"} {
+		f, ok := rational(sd[k])
+		if !ok {
+			return ""
+		}
+		unit := 50000.0
+		if i >= 8 {
+			unit = 10000
+		}
+		v[i] = int64(math.Round(f * unit))
+	}
+	if v[8] <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("G(%d,%d)B(%d,%d)R(%d,%d)WP(%d,%d)L(%d,%d)", v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9])
+}
+
+// rational reads ffprobe's "num/den" (or a plain number).
+func rational(x any) (float64, bool) {
+	switch v := x.(type) {
+	case float64:
+		return v, true
+	case string:
+		n, d, found := strings.Cut(strings.TrimSpace(v), "/")
+		a, err := strconv.ParseFloat(n, 64)
+		if err != nil {
+			return 0, false
+		}
+		if !found {
+			return a, true
+		}
+		b, err := strconv.ParseFloat(d, 64)
+		if err != nil || b == 0 {
+			return 0, false
+		}
+		return a / b, true
+	}
+	return 0, false
 }
 
 // IsHDR reports whether the video stream carries HDR: PQ (HDR10), HLG, Dolby Vision or HDR10+.
@@ -263,21 +349,11 @@ func parseStream(m map[string]any, position int) Stream {
 		s.ColorTransfer = str(m, "color_transfer")
 		s.ColorPrimaries = str(m, "color_primaries")
 		s.FieldOrder = str(m, "field_order")
-		if list, ok := m["side_data_list"].([]any); ok {
-			for _, e := range list {
-				sd, _ := e.(map[string]any)
-				t := strings.ToLower(str(sd, "side_data_type"))
-				if strings.Contains(t, "dovi") || strings.Contains(t, "dolby vision") {
-					s.DolbyVision = true
-				}
-				if strings.Contains(t, "hdr10+") || strings.Contains(t, "2094-40") {
-					s.HDR10Plus = true
-				}
-				if strings.Contains(t, "display matrix") {
-					s.Rotation = int(num(sd, "rotation"))
-				}
-			}
+		switch strings.ToLower(str(m, "codec_tag_string")) {
+		case "dvh1", "dvhe", "dav1": // Dolby Vision signalled by the MP4/MOV sample entry
+			s.DolbyVision = true
 		}
+		s.addSideData(m)
 	case "audio":
 		s.Channels = int(num(m, "channels"))
 		s.ChannelLayout = str(m, "channel_layout")

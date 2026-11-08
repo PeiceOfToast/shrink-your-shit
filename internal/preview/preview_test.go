@@ -143,7 +143,7 @@ func TestPreviewIsCached(t *testing.T) {
 	dir := library(t)
 	first := p.Library(1, dir, rules.SliderTemplate(3), 10*time.Second)
 	n := x.n()
-	if n != 5 {
+	if n != 6 { // 5 files, plus hevc.mkv's first frame (S3: HDR side data)
 		t.Fatalf("%d probes for 6 videos (the shared one is never read)", n)
 	}
 	if again := p.Library(1, dir, rules.SliderTemplate(3), 0); fmt.Sprint(again) != fmt.Sprint(first) {

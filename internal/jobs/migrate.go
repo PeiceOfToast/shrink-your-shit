@@ -185,6 +185,15 @@ DELETE FROM files WHERE reason = 'already_hevc';
 INSERT INTO app_meta(key, value) SELECT 'basic_changed_by_update', '1'
 WHERE (SELECT version FROM temp.migrate_from) BETWEEN 1 AND 15
   AND EXISTS (SELECT 1 FROM flows WHERE json_extract(template, '$.kind') = 'slider');`},
+	// S3, HDR10 kept (the user's decision, overturning D3): a Standard flow's skipHdr becomes
+	// includeDolbyVision. Skipping HDR (the default) means leaving Dolby Vision as it is; a flow that
+	// converted HDR and Dolby Vision includes Dolby Vision (profile 5 is protected whatever it says). Files
+	// skipped as hdr_dv are forgotten, so the next scan decides them again (HDR10 is now converted).
+	{17, "hdr10 kept", `
+UPDATE flows SET template = json_set(json_remove(template, '$.selectors.skipHdr'), '$.selectors.includeDolbyVision',
+  json(CASE WHEN json_extract(template, '$.selectors.skipHdr') = 0 THEN 'true' ELSE 'false' END))
+WHERE json_extract(template, '$.kind') = 'selectors' AND json_type(template, '$.selectors') = 'object';
+DELETE FROM files WHERE reason = 'hdr_dv';`},
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.

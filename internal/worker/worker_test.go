@@ -413,6 +413,14 @@ func TestRejections(t *testing.T) {
 			s.outSpec.streams[0] = vid("hevc", 640, 360, "yuv420p")
 		}, "colour depth"},
 		{"video not hevc", func(s *scenario) { s.outSpec.streams[0] = vid("h264", 640, 360, "yuv420p") }, "format"},
+		{"HDR lost (S3)", func(s *scenario) {
+			s.srcSpec.streams[0] = hdrVid("h264", true)
+			s.outSpec.streams[0] = vid("hevc", 640, 360, "yuv420p10le")
+		}, "lost its HDR"},
+		{"HDR mastering display lost (S3)", func(s *scenario) {
+			s.srcSpec.streams[0] = hdrVid("h264", true)
+			s.outSpec.streams[0] = hdrVid("hevc", false)
+		}, "mastering display"},
 		{"audio language changed", func(s *scenario) { s.outSpec.streams[1] = aud("aac", "und", 2) }, "language"},
 		{"audio channels changed", func(s *scenario) { s.outSpec.streams[1] = aud("aac", "eng", 1) }, "channel"},
 		{"subtitle turned into another kind", func(s *scenario) { s.outSpec.streams[2] = sub("hdmv_pgs_subtitle", "eng", false) }, "kind"},
@@ -1141,4 +1149,73 @@ func TestBasicRepackagesHEVC(t *testing.T) {
 	if s.count("ssim") != 0 {
 		t.Error("the picture comparison ran on a copied video")
 	}
+}
+
+// hdrVid is an HDR10 (PQ, BT.2020, 10-bit) video stream, with its mastering display and light levels
+// when md (S3).
+func hdrVid(codec string, md bool) map[string]any {
+	v := vid(codec, 640, 360, "yuv420p10le")
+	v["color_transfer"], v["color_primaries"], v["color_space"] = "smpte2084", "bt2020", "bt2020nc"
+	if md {
+		v["side_data_list"] = []any{map[string]any{"side_data_type": "Mastering display metadata", "red_x": "34000/50000", "red_y": "16000/50000",
+			"green_x": "13250/50000", "green_y": "34500/50000", "blue_x": "7500/50000", "blue_y": "3000/50000",
+			"white_point_x": "15635/50000", "white_point_y": "16450/50000", "min_luminance": "50/10000", "max_luminance": "10000000/10000"}}
+	}
+	return v
+}
+
+// A Dolby Vision job queued before migration 17 (or before its flow changed) is never encoded when the
+// flow now leaves it alone (review a09f6f5): it ends as a skipped file with that reason, not failed.
+func TestQueuedDolbyVisionIsSkippedNotEncoded(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		profile int
+		include bool
+		code    string
+		codec   string // the source's codec now
+		legacy  bool   // an earlier install's flow, whose rule skips the file (its bitrate is unknown)
+	}{
+		{"profile 5, Dolby Vision included", 5, true, rules.SkipDVProfile5, "h264", false},
+		{"profile 8, Dolby Vision left alone", 8, false, rules.SkipDV, "h264", false},
+		// review 7ab8f72: the Plan's own skip comes first (already HEVC; the legacy rule's), the job still must not encode
+		{"HEVC + Dolby Vision, Standard (already HEVC)", 8, false, rules.SkipDV, "hevc", false},
+		{"Dolby Vision, legacy flow skipping it for its bitrate", 8, false, rules.SkipDV, "h264", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s := newScenario(t)
+			v := hdrVid(c.codec, true)
+			v["side_data_list"] = append(v["side_data_list"].([]any), map[string]any{"side_data_type": "DOVI configuration record", "dv_profile": c.profile, "dv_bl_signal_compatibility_id": 1})
+			s.srcSpec.streams[0] = v
+			w := s.worker(Replace)
+			sel := rules.DefaultSelectors(3)
+			sel.Speed, sel.IncludeDolbyVision = "slower", c.include
+			tmpl := sel.Template()
+			if c.legacy {
+				tmpl = rules.LegacyTemplate(rules.Default(), "replace")
+			}
+			if plan := tmpl.Compile(must(media.ParseProbe([]byte(s.srcSpec.json())))); c.codec == "hevc" && plan.SkipCode != rules.SkipAlreadyHEVC || c.legacy && plan.SkipCode == c.code {
+				t.Fatalf("the case does not take the path it is about: %q", plan.SkipCode)
+			}
+			w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+			w.RunOne(context.Background())
+			if s.count("libx265") != 0 {
+				t.Fatalf("encoded:\n%s", strings.Join(s.calls, "\n"))
+			}
+			if _, err := s.store.Get(s.id); err == nil {
+				t.Errorf("the job is still there: %+v", s.job())
+			}
+			if f, _ := s.store.GetFile(s.src); f == nil || f.Reason != c.code || !strings.HasPrefix(f.Decision, "skip: ") {
+				t.Errorf("file record %+v, want %s", f, c.code)
+			}
+			s.t = t
+			s.assertOriginalSafe()
+		})
+	}
+}
+
+func must[T any](v T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return v
 }

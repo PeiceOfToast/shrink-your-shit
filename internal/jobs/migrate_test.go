@@ -598,3 +598,47 @@ func TestExistingBasicFlowsMigration(t *testing.T) {
 		t.Error("a new install got the Basic sentence")
 	}
 }
+
+// Migration 17 (S3): a Standard flow's skipHdr becomes includeDolbyVision (skipping HDR: Dolby Vision left
+// as it is; converting HDR: Dolby Vision included), and the files skipped as hdr_dv are decided again.
+func TestHDR10KeptMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "syp.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	skip, conv := rules.DefaultSelectors(3), rules.DefaultSelectors(3)
+	skip.Speed, conv.Speed = "slower", "slower" // not the slider's values, so they are saved as Standard flows
+	a, _ := s.AddLibrary("Skips HDR", "/a", skip.Template(), true)
+	b, _ := s.AddLibrary("Converts HDR", "/b", conv.Template(), true)
+	c, _ := s.AddLibrary("Basic", "/c", rules.SliderTemplate(3), true)
+	// as before S3: skipHdr true and false, and no includeDolbyVision
+	s.db.Exec(`UPDATE flows SET template=json_set(json_remove(template, '$.selectors.includeDolbyVision'), '$.selectors.skipHdr', json('true')) WHERE id=?`, a.FlowID)
+	s.db.Exec(`UPDATE flows SET template=json_set(json_remove(template, '$.selectors.includeDolbyVision'), '$.selectors.skipHdr', json('false')) WHERE id=?`, b.FlowID)
+	s.PutFile(File{Path: "/a/hdr.mkv", Size: 1, Decision: "skip: x", Reason: "hdr_dv"})
+	s.PutFile(File{Path: "/a/x.mkv", Size: 1, Decision: "skip: x", Reason: "no_video"})
+	s.db.Exec(`PRAGMA user_version = 16`)
+	s.Close()
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for id, want := range map[int64]bool{a.FlowID: false, b.FlowID: true} {
+		var raw string
+		s.db.QueryRow(`SELECT template FROM flows WHERE id=?`, id).Scan(&raw)
+		f, _ := s.GetFlow(id)
+		if f.Template.Selectors == nil || f.Template.Selectors.IncludeDolbyVision != want || strings.Contains(raw, "skipHdr") {
+			t.Errorf("flow %d: %s, want includeDolbyVision %v", id, raw, want)
+		}
+	}
+	if f, _ := s.GetFlow(c.FlowID); f.Template.Kind != rules.KindSlider || f.Template.Selectors != nil {
+		t.Errorf("Basic flow changed: %+v", f.Template)
+	}
+	if r, _ := s.GetFile("/a/hdr.mkv"); r != nil {
+		t.Errorf("an HDR file skipped before S3 is still decided: %+v", r)
+	}
+	if r, _ := s.GetFile("/a/x.mkv"); r == nil {
+		t.Error("another skip was forgotten too")
+	}
+}

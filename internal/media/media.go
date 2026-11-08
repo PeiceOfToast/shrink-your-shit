@@ -141,6 +141,8 @@ var _ io.Writer = (*tail)(nil)
 
 // Info is what we need to know about a video file.
 type Info struct {
+	// Probe is the ProbeVersion it was taken with: a cached probe from an older version is taken again.
+	Probe       int     `json:"probe,omitempty"`
 	Container   string  `json:"container"`
 	VideoCodec  string  `json:"videoCodec"`
 	BitrateKbps int     `json:"bitrateKbps"`
@@ -151,14 +153,50 @@ type Info struct {
 	Chapters int      `json:"chapters,omitempty"`
 }
 
-// Probe runs ffprobe on path.
+// ProbeVersion is what Probe reads; raise it when it reads more, so cached probes are taken again.
+// 2 (S3): the first frame's HDR side data, the Dolby Vision profile and tag, mastering display and CLL.
+// 3 (review 7ab8f72): the Dolby Vision compatibility id (DVCompat).
+// 4 (the S3/#81 merge): the Display Matrix rotation too (probes cached by an S3 build lack it).
+const ProbeVersion = 4
+
+// Probe runs ffprobe on path. For a video that may carry HDR or Dolby Vision (HEVC, AV1, or PQ/HLG) it
+// also reads the main video's first frame: in TS files and raw streams, the Dolby Vision RPU, the
+// mastering display and the light levels are only there.
 func Probe(ctx context.Context, x Exec, ffprobe, path string) (Info, error) {
 	out, err := x.Output(ctx, ffprobe, "-v", "error", "-print_format", "json",
 		"-show_format", "-show_streams", "-show_chapters", path)
 	if err != nil {
 		return Info{}, err
 	}
-	return ParseProbe(out)
+	info, err := ParseProbe(out)
+	if err != nil {
+		return info, err
+	}
+	if v := info.Video(); v != nil && (v.Codec == "hevc" || v.Codec == "av1" || v.ColorTransfer == "smpte2084" || v.ColorTransfer == "arib-std-b67") {
+		fr, err := x.Output(ctx, ffprobe, "-v", "error", "-print_format", "json", "-select_streams",
+			fmt.Sprintf("v:%d", info.MainVideoOrdinal()), "-read_intervals", "%+#1", "-show_frames", path)
+		if err != nil {
+			return Info{}, fmt.Errorf("reading the first frame: %w", err) // a missed Dolby Vision would convert to wrong colours
+		}
+		info.AddFirstFrame(fr)
+	}
+	return info, nil
+}
+
+// AddFirstFrame adds the HDR side data of the main video's first frame (ffprobe -show_frames JSON) to
+// its stream. Output without frames changes nothing.
+func (i *Info) AddFirstFrame(data []byte) {
+	var f struct {
+		Frames []map[string]any `json:"frames"`
+	}
+	if json.Unmarshal(data, &f) != nil || len(f.Frames) == 0 {
+		return
+	}
+	for k := range i.Streams {
+		if &i.Streams[k] == i.Video() {
+			i.Streams[k].addSideData(f.Frames[0])
+		}
+	}
 }
 
 // maxProbeBytes bounds how much ffprobe output is accepted (a file with thousands of chapters or
@@ -201,7 +239,7 @@ func ParseProbe(data []byte) (Info, error) {
 	if err := json.Unmarshal(data, &p); err != nil {
 		return Info{}, fmt.Errorf("parse ffprobe output: %w", err)
 	}
-	info := Info{Container: p.Format.FormatName, Chapters: len(p.Chapters)}
+	info := Info{Probe: ProbeVersion, Container: p.Format.FormatName, Chapters: len(p.Chapters)}
 	for i, raw := range p.Streams {
 		info.Streams = append(info.Streams, parseStream(raw, i))
 	}

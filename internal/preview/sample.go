@@ -56,6 +56,12 @@ func (p *Previewer) Sample(ctx context.Context, root, path string, st fs.FileInf
 		video += fmt.Sprintf(", at most %d Mbps", plan.Video.MaxRateKbps/1000)
 	}
 	s.Lines = append(s.Lines, video)
+	switch { // S3
+	case plan.HDRNote != "":
+		s.Lines = append(s.Lines, "HDR: "+plan.HDRNote)
+	case plan.Video.HDR != nil || (plan.Video.Copy && info.IsHDR()):
+		s.Lines = append(s.Lines, "HDR: stays HDR")
+	}
 	s.Lines = append(s.Lines, audioLine(plan, len(info.Audio())))
 	if n := len(info.Subtitles()); n > 0 {
 		dropped, files := 0, 0

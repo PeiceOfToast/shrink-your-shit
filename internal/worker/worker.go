@@ -47,6 +47,8 @@ type Queue interface {
 	RetryLater(id int64, at time.Time, reason string) error
 	// RecordPlan stores the Plan a running job converts with (JSON) and its fingerprint.
 	RecordPlan(id int64, plan, fingerprint string) error
+	// Skip ends a job as a skipped file with words and a reason code (S3: Dolby Vision left alone).
+	Skip(id int64, words, code string) error
 }
 
 // OutputMode says what happens to the result.
@@ -251,6 +253,11 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 			// Shutting down: not the file's fault, so run it again next start.
 			return true, w.Queue.Release(job.ID)
 		}
+		var se *SkippedError
+		if errors.As(err, &se) { // left alone by its flow (S3): Skipped, not failed, never retried
+			log.Printf("worker %s: job %d (%s): skipped: %s", w.ID, job.ID, job.Path, se.Words)
+			return true, w.Queue.Skip(job.ID, se.Words, se.Code)
+		}
 		// A failure that may pass, with a try left: back in the queue for later, from the start (DD-2).
 		if wait, ok := retryIn(err, job.Attempts); ok {
 			log.Printf("worker %s: job %d (%s): try %d of %d failed, trying again in %s: %v", w.ID, job.ID, job.Path, job.Attempts+1, maxTries, wait, err)
@@ -299,6 +306,12 @@ func (e *FailedError) Error() string { return e.Plain + " (" + e.Err.Error() + "
 func (e *FailedError) Unwrap() error { return e.Err }
 
 func failed(plain string, err error) error { return &FailedError{plain, err} }
+
+// SkippedError: the file is not converted because its flow leaves it alone (S3's Dolby Vision skips);
+// the job ends as a skipped file with these words and code.
+type SkippedError struct{ Words, Code string }
+
+func (e *SkippedError) Error() string { return "skipped: " + e.Words }
 
 const cannotRead = "shrink-your-shit is not allowed to read this file, so nothing was converted. Let it read the file (Settings > System says how), then press Retry."
 
@@ -468,6 +481,15 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	plan := tmpl.Compile(src)
 	if plan.MainAudioUsed { // Basic's stereo AAC found no track in the person's languages (S4)
 		log.Printf("worker %s: job %d (%s): %s", w.ID, job.ID, job.Path, rules.NoAudioInMyLanguageMain)
+	}
+	if plan.HDRNote != "" { // what the HDR conversion does not keep (S3)
+		log.Printf("worker %s: job %d (%s): %s", w.ID, job.ID, job.Path, plan.HDRNote)
+	}
+	// Dolby Vision the flow leaves alone is never encoded, whatever was decided when the job was queued
+	// (review a09f6f5: a job queued before migration 17 or a setting change). Only these skips: the
+	// others stay the scanner's decision, as before Plans.
+	if words, code := tmpl.DolbyVisionHold(src); code != "" { // from the probe, not the Plan's skip (review 7ab8f72)
+		return "", &SkippedError{Words: words, Code: code}
 	}
 	if plan.Video.Codec == "" {
 		return "", failed("This library's setting can't convert this file, so it was left as it is.", fmt.Errorf("its library's flow cannot convert it: %s", plan.Skip))

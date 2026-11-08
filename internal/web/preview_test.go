@@ -75,12 +75,13 @@ func TestPreviewEndpoint(t *testing.T) {
 		t.Errorf("sample: %d %s", code, b)
 	}
 
-	// warnings for the previewed setting (unsaved too): always present, [] when none
-	for body, want := range map[string]int{`{"setting":{"quality":3,"skipHdr":false}}`: 1, `{"setting":{"quality":3,"skipHdr":true}}`: 0, `{}`: 0} {
+	// warnings for the previewed setting (unsaved too): always present, [] when none. The HDR warning is
+	// retired (S3: HDR10 is always kept as HDR); an old page's skipHdr is ignored.
+	for body, want := range map[string]int{`{"setting":{"quality":3,"includeDolbyVision":true}}`: 0, `{"setting":{"quality":3,"skipHdr":false}}`: 0, `{}`: 0} {
 		code, b := post(t, srv, "POST", path, body)
 		var v struct{ Warnings []string }
 		json.Unmarshal([]byte(b), &v)
-		if code != 200 || !strings.Contains(b, `"warnings":[`) || len(v.Warnings) != want || (want == 1 && v.Warnings[0] != `HDR and Dolby Vision files will be converted without their HDR information, so they can look washed out. Turn "Skip HDR and Dolby Vision files" back on to leave them as they are.`) {
+		if code != 200 || !strings.Contains(b, `"warnings":[`) || len(v.Warnings) != want {
 			t.Errorf("%s: %d %s", body, code, b)
 		}
 	}

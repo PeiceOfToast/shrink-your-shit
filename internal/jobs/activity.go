@@ -410,6 +410,30 @@ func (s *Store) UserStopped(id int64) error {
 	return err
 }
 
+// Skip ends a queued or running job as a skipped file, by its worker: the job record goes, and the file
+// is recorded as skipped with words and reason code, so it shows in Skipped and the scanner leaves it
+// alone until it changes or "Convert again". S3: a Dolby Vision job queued before its flow (or the
+// update) said to leave it alone.
+func (s *Store) Skip(id int64, words, code string) error {
+	j, err := s.Get(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if j.Status != Queued && j.Status != Running {
+		return ErrNotStoppable
+	}
+	f := userStoppedFile(j.Path)
+	f.Decision, f.Reason = "skip: "+words, code
+	if err := s.PutFile(f); err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`DELETE FROM jobs WHERE id=?`, id)
+	return err
+}
+
 // UserStoppedReason is the skip reason of a file the person stopped.
 const UserStoppedReason = "user_stopped"
 

@@ -99,9 +99,13 @@ container, every audio track and subtitle copied, the position's SSIM gate. It
 converts H.264, MPEG-2, MPEG-4, VC-1 and WMV (D5) whatever their bits per pixel (always standardize:
 the "already small" skip is gone);
 HEVC, AV1 and VP9 are skipped as already efficient, and so is a file whose subtitles its container
-cannot hold. **HDR and Dolby Vision files are skipped (`hdr_dv`, D3) by every flow** since slice 25a,
-legacy ones included where the rule would have converted them: converting drops their HDR information,
-which can wash the picture out. The main video is encoded even when cover art comes first
+cannot hold. **HDR10 and HLG are converted and stay HDR** (S3, overturning D3, for every flow): 10-bit
+main10, with the colour description, mastering display and light levels written from the probe
+(`VideoEncode.HDR`), and the verify gate refuses a new file that lost any of them (`Expect.HDR`). HDR10+
+becomes HDR10 (a log note). Dolby Vision is skipped (`dv`) unless a Standard flow's `includeDolbyVision`
+is on; then profiles 7 and 8 become HDR10/HLG, and profile 5 or an unreadable profile is always skipped
+(`dv_profile5`: wrong colours). The probe reads the first frame of HEVC, AV1 and PQ/HLG video for the
+Dolby Vision RPU and HDR10 metadata (`media.ProbeVersion` 2; older cached probes are taken again). The main video is encoded even when cover art comes first
 (`VideoEncode.Index`; legacy keeps `v:0`). All the numbers are in one table, `rules.Slider`, untuned (D8).
 
 A **selectors** flow (`internal/rules/selectors.go`, slice 25a) stores the Standard choices
@@ -118,7 +122,8 @@ A **selectors** flow (`internal/rules/selectors.go`, slice 25a) stores the Stand
   hold skips the file with a reason (`cannot_keep_track`).
 - Ignore is a list of folders, files or patterns inside the library that the scanner and the
   Preview do not look at.
-- Skip HDR (on by default; off converts HDR and the setting answers a warning). There is no minimum
+- Include Dolby Vision (`includeDolbyVision`, off by default; S3 replaced Skip HDR, and a PUT's `skipHdr`
+  is ignored). There is no minimum
   saving and no Skip small ("always standardize", USER-REVIEW 2026-11-07): GET no longer returns
   `minSavingPct` or `skipSmall`; a PUT that sends them is accepted and they are ignored (for one
   release). Migration 13 queued again, once, the jobs kept only for saving too little (matched by their
