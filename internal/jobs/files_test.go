@@ -44,8 +44,8 @@ func TestFileList(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		add(movies, fmt.Sprintf("wait%d.mkv", i))
 	}
-	s.PutFile(File{Path: "/m/skip a.mkv", Size: 1, Decision: "skip: x", Reason: "no_video"})
-	s.PutFile(File{Path: "/s/skip b.mkv", Size: 1, Decision: "skip: x", Reason: "no_video"})
+	s.PutFile(File{Path: filepath.Join(movies.Path, "skip a.mkv"), Size: 1, Decision: "skip: x", Reason: "no_video"})
+	s.PutFile(File{Path: filepath.Join(shows.Path, "skip b.mkv"), Size: 1, Decision: "skip: x", Reason: "no_video"})
 
 	list := func(f FileFilter) ([]string, int, map[string]int) {
 		t.Helper()

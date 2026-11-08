@@ -27,15 +27,16 @@ func TestFilesView(t *testing.T) {
 	srv := httptest.NewServer(Handler(st, a, Engine{RunLogs: logs}))
 	defer srv.Close()
 	lib, _ := st.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
-	done, _ := st.Enqueue(jobs.Job{Library: "/m", LibraryID: lib.ID, Path: "/m/Film.mkv", SizeBefore: 1000})
+	m := lib.Path // the stored (absolute) folder: D:\m on Windows
+	done, _ := st.Enqueue(jobs.Job{Library: m, LibraryID: lib.ID, Path: filepath.Join(m, "Film.mkv"), SizeBefore: 1000})
 	st.Claim("w")
-	st.Complete(done, "/m/Film.mkv", 400)
-	failed, _ := st.Enqueue(jobs.Job{Library: "/m", LibraryID: lib.ID, Path: "/m/Bad.mkv"})
+	st.Complete(done, filepath.Join(m, "Film.mkv"), 400)
+	failed, _ := st.Enqueue(jobs.Job{Library: m, LibraryID: lib.ID, Path: filepath.Join(m, "Bad.mkv")})
 	st.Claim("w")
 	st.Fail(failed, "Converting stopped with an error.")
-	st.Enqueue(jobs.Job{Library: "/m", LibraryID: lib.ID, Path: "/m/Next.mkv"})
-	st.PutFile(jobs.File{Path: "/m/Old.mkv", Size: 5, Decision: "skip: x", Reason: rules.SkipAlreadyHEVC})
-	st.PutProbe("/m/Film.mkv", 400, 1, `{"durationSec":60,"streams":[{"type":"video","codec":"hevc","Width":1920,"Height":1080}]}`)
+	st.Enqueue(jobs.Job{Library: m, LibraryID: lib.ID, Path: filepath.Join(m, "Next.mkv")})
+	st.PutFile(jobs.File{Path: filepath.Join(m, "Old.mkv"), Size: 5, Decision: "skip: x", Reason: rules.SkipAlreadyHEVC})
+	st.PutProbe(filepath.Join(m, "Film.mkv"), 400, 1, `{"durationSec":60,"streams":[{"type":"video","codec":"hevc","Width":1920,"Height":1080}]}`)
 	st.AddStep(done, "found", true, "Found in /m.")
 	logs.Append(done, "12:00:00 started")
 
@@ -60,7 +61,7 @@ func TestFilesView(t *testing.T) {
 		t.Fatalf("processed %v", items)
 	}
 	p := items[0]
-	if p["name"] != "Film.mkv" || p["folder"] != "/m" || p["library"] != "Movies" || p["codec"] != "hevc" || p["resolution"] != "1920x1080" ||
+	if p["name"] != "Film.mkv" || p["folder"] != m || p["library"] != "Movies" || p["codec"] != "hevc" || p["resolution"] != "1920x1080" ||
 		p["durationSec"] != 60.0 || p["beforeBytes"] != 1000.0 || p["afterBytes"] != 400.0 || p["bytes"] != 400.0 || p["originalState"] == nil {
 		t.Errorf("processed item %v", p)
 	}
