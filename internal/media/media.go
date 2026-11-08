@@ -12,6 +12,7 @@ import (
 	"io"
 	"math"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -143,8 +144,10 @@ var _ io.Writer = (*tail)(nil)
 // Info is what we need to know about a video file.
 type Info struct {
 	// Probe is the ProbeVersion it was taken with: a cached probe from an older version is taken again.
-	Probe       int     `json:"probe,omitempty"`
-	Container   string  `json:"container"`
+	Probe     int    `json:"probe,omitempty"`
+	Container string `json:"container"`
+	// Ext is the file's extension, lower case (".webm"): ffprobe names WebM and MKV alike.
+	Ext         string  `json:"ext,omitempty"`
 	VideoCodec  string  `json:"videoCodec"`
 	BitrateKbps int     `json:"bitrateKbps"`
 	DurationSec float64 `json:"durationSec"`
@@ -170,6 +173,7 @@ func Probe(ctx context.Context, x Exec, ffprobe, path string) (Info, error) {
 		return Info{}, err
 	}
 	info, err := ParseProbe(out)
+	info.Ext = strings.ToLower(filepath.Ext(path))
 	if err != nil {
 		return info, err
 	}

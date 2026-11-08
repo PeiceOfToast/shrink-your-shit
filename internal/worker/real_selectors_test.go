@@ -18,6 +18,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/runlog"
 )
 
 // The Standard selectors on real files (slice 25a): each choice changes the real ffmpeg output as
@@ -444,5 +445,45 @@ func TestRealWebMWithSmallAAC(t *testing.T) {
 	out := probe(t, j.OutputPath)
 	if filepath.Ext(j.OutputPath) != ".webm" || out.Video().Codec != "vp9" || len(out.Audio()) != 1 || out.Audio()[0].Codec != "opus" {
 		t.Errorf("new file %s: %+v", j.OutputPath, out.Streams)
+	}
+}
+
+// Backlog after #93: a .webm is scanned, and "Keep the file type" makes it MKV when the new file has
+// audio WebM can't hold (here Stereo AAC from a 5.1 track, always converted), with the log's note.
+// The source is H.264 written as Matroska under a .webm name, so any ffmpeg with VP9 runs it: the rule
+// goes by the file's extension (ffprobe names WebM and MKV alike).
+func TestRealKeepWebMBecomesMKV(t *testing.T) {
+	needTools(t)
+	rules.SetAvailableFormats(media.Encoders(context.Background(), media.OSExec{}, "ffmpeg"))
+	defer rules.SetAvailableFormats(nil)
+	if !slices.Contains(rules.Available(), "vp9") {
+		t.Log("this ffmpeg has no VP9 encoder: not run here") // a skip would fail CI's real-test rule
+		return
+	}
+	dir := t.TempDir()
+	src := filepath.Join(dir, "clip.webm")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=3:size=640x360:rate=25", "-f", "lavfi", "-i", "sine=frequency=440:duration=3",
+		"-c:v", "libx264", "-b:v", "4000k", "-c:a", "ac3", "-ac", "6", "-f", "matroska", src)
+	s := rules.DefaultSelectors(3)
+	s.Format, s.Speed, s.FileType, s.Audio, s.OnlyMyLanguages = "vp9", "faster", "keep", "stereo_aac", false
+	s.AfterConverting = "beside" // the original stays: no record of kept originals needed for the new type
+	tmpl := s.Template()
+	st, id := realJob(t, src, 3)
+	st.SetPaused(false)
+	w := realWorker(st, media.OSExec{})
+	w.Logs = &runlog.Logs{Dir: t.TempDir()}
+	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.run(t)
+	j, _ := st.Get(id)
+	text, _, _ := w.Logs.Read(id, 0)
+	if j.Status != jobs.Done {
+		t.Fatalf("%s %q\n%s", j.Status, j.Error, text)
+	}
+	out := probe(t, j.OutputPath)
+	if filepath.Ext(j.OutputPath) != ".mkv" || out.Video().Codec != "vp9" || len(out.Audio()) != 1 || out.Audio()[0].Codec != "aac" {
+		t.Errorf("new file %s: %+v", j.OutputPath, out.Streams)
+	}
+	if !strings.Contains(text, "File type changed to MKV: WebM files can't hold AAC.") {
+		t.Errorf("log:\n%s", text)
 	}
 }

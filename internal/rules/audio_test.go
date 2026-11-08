@@ -320,3 +320,44 @@ func TestKeptTrackTheContainerCannotHold(t *testing.T) {
 		}
 	}
 }
+
+// Backlog after #93: "Keep the file type" for a .webm keeps WebM only when the new file fits it (VP9 or
+// AV1 video, Opus or Vorbis audio); otherwise it becomes MKV, and the log says why.
+func TestKeepWebM(t *testing.T) {
+	SetAvailableFormats(allEncoders)
+	defer SetAvailableFormats(nil)
+	opus := func(kbps int) media.Stream {
+		return media.Stream{Type: "audio", Codec: "opus", Channels: 2, BitrateKbps: kbps, Index: 1}
+	}
+	webm := func(codec string, a media.Stream) media.Info {
+		i := h264(1920, 1080, 8000, a)
+		i.Streams[0].Codec, i.VideoCodec, i.Ext = codec, codec, ".webm"
+		return i
+	}
+	for _, c := range []struct {
+		name, format, audio string
+		src                 media.Info
+		container, note     string
+	}{
+		{"vp9 to av1, opus kept", "av1", "stereo_opus", webm("vp9", opus(128)), "", ""},
+		{"vp9 to av1, audio as it is", "av1", "as_is", webm("vp9", opus(256)), "", ""},
+		{"vp9 to av1, big opus made AAC", "av1", "stereo_aac", webm("vp9", opus(256)), "mkv", "File type changed to MKV: WebM files can't hold AAC."},
+		{"vp9 to av1, small opus kept", "av1", "stereo_aac", webm("vp9", opus(96)), "", ""},
+		{"av1 to vp9, opus plus a stereo AAC track", "vp9", "stereo_aac_surround", webm("av1", media.Stream{Type: "audio", Codec: "opus", Channels: 6, Index: 1}), "mkv", "File type changed to MKV: WebM files can't hold AAC."},
+		{"vp9 to h264: a modern format, skipped", "h264", "stereo_aac", webm("vp9", opus(256)), "", ""},
+		{"an .mkv is not WebM", "av1", "stereo_aac", func() media.Info { i := webm("vp9", opus(256)); i.Ext = ".mkv"; return i }(), "", ""},
+	} {
+		s := DefaultSelectors(3)
+		s.Format, s.Audio, s.FileType, s.OnlyMyLanguages = c.format, c.audio, "keep", false
+		if err := s.Validate(); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		p := s.Template().Compile(c.src)
+		if c.format == "h264" && p.SkipCode != SkipModernFormat {
+			t.Errorf("%s: skip %q, want modern_format", c.name, p.SkipCode)
+		}
+		if p.Container != c.container || p.TypeNote != c.note || p.Skip != "" && p.SkipCode != SkipModernFormat {
+			t.Errorf("%s: container %q note %q skip %q", c.name, p.Container, p.TypeNote, p.Skip)
+		}
+	}
+}
