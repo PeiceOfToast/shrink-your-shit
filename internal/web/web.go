@@ -34,6 +34,7 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	flowRoutes(api, store, ss, eng)
 	settingRoutes(api, store, eng)
 	activityRoutes(api, store, ss, time.Now, eng)
+	filesRoutes(api, store, eng) // S5, the Files view
 	workerRoutes(api, store, ss, eng)
 	previewRoutes(api, store, eng)
 	// For health checks: answers without signing in and says nothing else.

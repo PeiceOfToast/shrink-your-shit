@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -287,12 +288,38 @@ func ParseProgress(line string, durationSec float64) (float64, bool) {
 	return pct, true
 }
 
-// Transcode runs ffmpeg and reports progress percent through onProgress. It returns what ffmpeg
-// printed on stderr (at the error level the args ask for), which includes decode errors in the source.
-func Transcode(ctx context.Context, x Exec, ffmpeg string, args []string, durationSec float64, onProgress func(float64)) (string, error) {
+// Progress is where a running ffmpeg is, from its -progress report (S5's Files view): the percent of
+// the source's length done, and the latest fps, bitrate and speed (0 when ffmpeg says N/A or has not
+// said yet). ETASeconds is the time left at that speed, -1 while unknown.
+type Progress struct {
+	Percent     float64
+	FPS         float64
+	BitrateKbps float64
+	Speed       float64
+	ETASeconds  float64
+}
+
+// Transcode runs ffmpeg and reports each progress point through onProgress (on every out_time_us line,
+// with the block's other values as last seen). It returns what ffmpeg printed on stderr (at the error
+// level the args ask for), which includes decode errors in the source.
+func Transcode(ctx context.Context, x Exec, ffmpeg string, args []string, durationSec float64, onProgress func(Progress)) (string, error) {
+	p := Progress{ETASeconds: -1}
 	return x.Stream(ctx, func(line string) {
+		k, v, _ := strings.Cut(line, "=")
+		switch k {
+		case "fps":
+			p.FPS, _ = strconv.ParseFloat(v, 64)
+		case "bitrate": // "4074.8kbits/s", or "N/A"
+			p.BitrateKbps, _ = strconv.ParseFloat(strings.TrimSuffix(v, "kbits/s"), 64)
+		case "speed": // "1.25x", or "N/A"
+			p.Speed, _ = strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(v, "x")), 64)
+		}
 		if pct, ok := ParseProgress(line, durationSec); ok {
-			onProgress(pct)
+			p.Percent, p.ETASeconds = pct, -1
+			if p.Speed > 0 {
+				p.ETASeconds = math.Max(0, durationSec*(1-pct/100)/p.Speed)
+			}
+			onProgress(p)
 		}
 	}, ffmpeg, args...)
 }

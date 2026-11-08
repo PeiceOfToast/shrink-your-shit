@@ -144,6 +144,7 @@ func (w *Worker) verify(ctx context.Context, src media.Info, exp rules.Expect, s
 		log.Printf("reading the new file %s: %v", tmp, err)
 		return kept("the new file cannot be read")
 	}
+	w.verified = out // the new file's probe, kept for the Files view once it is in place (S5)
 	outPackets := int64(-1)
 	if exp.VideoPackets > 0 {
 		ord := out.MainVideoOrdinal()

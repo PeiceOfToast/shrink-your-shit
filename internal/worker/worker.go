@@ -27,6 +27,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/runlog"
 )
 
 // Queue is everything a worker needs from the job store.
@@ -49,6 +50,10 @@ type Queue interface {
 	RecordPlan(id int64, plan, fingerprint string) error
 	// Skip ends a job as a skipped file with words and a reason code (S3: Dolby Vision left alone).
 	Skip(id int64, words, code string) error
+	// AddStep adds a line to a job's step summary (S5): converted, verified, kept, replaced.
+	AddStep(id int64, step string, ok bool, words string) error
+	// PutProbe stores a file's probe (JSON) for its size and time: the new file's, for the Files view.
+	PutProbe(path string, size, mtime int64, info string) error
 }
 
 // OutputMode says what happens to the result.
@@ -63,10 +68,14 @@ const (
 
 // Worker pulls jobs from a Queue and runs ffmpeg.
 type Worker struct {
-	ID     string
-	Queue  Queue
-	Exec   media.Exec
-	FFmpeg string
+	// Logs keeps each job's run log (S5); nil: none.
+	Logs *runlog.Logs
+	// verified is the probe of the new file the last check passed (S5: stored for its final path).
+	verified media.Info
+	ID       string
+	Queue    Queue
+	Exec     media.Exec
+	FFmpeg   string
 	// FFprobe checks the result before it replaces anything.
 	FFprobe string
 	// Template returns the template of a job's library's flow, compiled per file into the job's Plan.
@@ -203,7 +212,7 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 	jobCtx, cancel := context.WithCancel(ctx)
 	w.current, w.cancelJob, w.stopped = job.ID, cancel, stopNone
 	w.mu.Unlock()
-	log.Printf("worker %s: job %d: started", w.ID, job.ID)
+	w.jobf(job.ID, ": started")
 	if testHook != nil {
 		testHook("registered")
 	}
@@ -233,14 +242,14 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 		}
 	}
 	if err != nil && stopped == stopUser {
-		log.Printf("worker %s: job %d: stopped by the person, original untouched", w.ID, job.ID)
+		w.jobf(job.ID, ": stopped by the person, original untouched")
 		return true, w.Queue.UserStopped(job.ID)
 	}
 	// A stop that came after the new file was in place changes nothing: the job is done (below).
 	if err != nil && stopped != stopNone && ctx.Err() == nil {
 		switch stopped {
 		case stopPause:
-			log.Printf("worker %s: job %d: paused, back in the queue", w.ID, job.ID)
+			w.jobf(job.ID, ": paused, back in the queue")
 			return true, w.Queue.Release(job.ID)
 		case stopUser:
 			return true, w.Queue.UserStopped(job.ID)
@@ -255,17 +264,19 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 		}
 		var se *SkippedError
 		if errors.As(err, &se) { // left alone by its flow (S3): Skipped, not failed, never retried
-			log.Printf("worker %s: job %d (%s): skipped: %s", w.ID, job.ID, job.Path, se.Words)
+			w.jobf(job.ID, " (%s): skipped: %s", job.Path, se.Words)
 			return true, w.Queue.Skip(job.ID, se.Words, se.Code)
 		}
 		// A failure that may pass, with a try left: back in the queue for later, from the start (DD-2).
 		if wait, ok := retryIn(err, job.Attempts); ok {
-			log.Printf("worker %s: job %d (%s): try %d of %d failed, trying again in %s: %v", w.ID, job.ID, job.Path, job.Attempts+1, maxTries, wait, err)
+			w.jobf(job.ID, " (%s): try %d of %d failed, trying again in %s: %v", job.Path, job.Attempts+1, maxTries, wait, err)
 			return true, w.Queue.RetryLater(job.ID, w.now().Add(wait), plainReason(err))
 		}
 		var ke *KeptError
 		if errors.As(err, &ke) {
 			// A safety check said no: the original is untouched, the temp file is gone.
+			w.jobf(job.ID, ": a check said no, the original is kept: %s", ke.Reason)
+			w.Queue.AddStep(job.ID, "verified", false, ke.Reason)
 			if kerr := w.Queue.Keep(job.ID, ke.Reason); kerr != nil {
 				return true, kerr
 			}
@@ -273,7 +284,8 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 		}
 		// The person sees what happened in plain words; the technical error goes to the log
 		// (Settings > System shows its last lines).
-		log.Printf("worker %s: job %d (%s) failed: %v", w.ID, job.ID, job.Path, err)
+		w.jobf(job.ID, " (%s) failed: %v", job.Path, err)
+		w.Queue.AddStep(job.ID, "converted", false, plainFailure(err))
 		if ferr := w.Queue.Fail(job.ID, plainFailure(err)); ferr != nil {
 			return true, ferr
 		}
@@ -284,11 +296,22 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 	if st != nil {
 		size = st.Size()
 	}
+	if st != nil && w.verified.Video() != nil { // the new file's codec, size and length for the Files view (S5)
+		if b, err := json.Marshal(w.verified); err == nil {
+			w.Queue.PutProbe(final, st.Size(), st.ModTime().UnixNano(), string(b))
+		}
+	}
 	if err := w.Queue.Complete(job.ID, final, size); err != nil {
 		return true, err
 	}
 	// before and after, also when the new file is not smaller (it is kept: always standardize)
-	log.Printf("worker %s: job %d: done, %s: %s -> %s", w.ID, job.ID, final, rules.HumanBytes(job.SizeBefore), rules.HumanBytes(size))
+	w.jobf(job.ID, ": done, %s: %s -> %s", final, rules.HumanBytes(job.SizeBefore), rules.HumanBytes(size))
+	w.Queue.AddStep(job.ID, "verified", true, "Every check passed: the new file is complete, plays cleanly and looks like the original.")
+	if w.Mode == Beside {
+		w.Queue.AddStep(job.ID, "kept", true, "The new file was written next to the original, which stays as it is.")
+	} else {
+		w.Queue.AddStep(job.ID, "replaced", true, fmt.Sprintf("The new file is in place: %s to %s.", rules.HumanBytes(job.SizeBefore), rules.HumanBytes(size)))
+	}
 	if w.OnDone != nil {
 		w.OnDone(job, final)
 	}
@@ -306,6 +329,15 @@ func (e *FailedError) Error() string { return e.Plain + " (" + e.Err.Error() + "
 func (e *FailedError) Unwrap() error { return e.Err }
 
 func failed(plain string, err error) error { return &FailedError{plain, err} }
+
+// jobf logs a line about job id, to the program's log and to the job's own run log (S5).
+func (w *Worker) jobf(id int64, format string, a ...any) {
+	msg := fmt.Sprintf(format, a...)
+	log.Printf("worker %s: job %d%s", w.ID, id, msg)
+	if w.Logs != nil {
+		w.Logs.Append(id, w.now().UTC().Format("15:04:05")+" "+strings.TrimPrefix(strings.TrimPrefix(msg, ":"), " "))
+	}
+}
 
 // SkippedError: the file is not converted because its flow leaves it alone (S3's Dolby Vision skips);
 // the job ends as a skipped file with these words and code.
@@ -375,7 +407,7 @@ func (w *Worker) watchStall(id int64) func() {
 				return
 			case <-t.C:
 				if time.Since(time.Unix(0, w.progressAt.Load())) >= after {
-					log.Printf("worker %s: job %d: no progress for %s, stopping it", w.ID, id, after)
+					w.jobf(id, ": no progress for %s, stopping it", after)
 					w.stop(id, stopStall)
 					return
 				}
@@ -480,10 +512,10 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// only a flow that cannot say how to convert stops the job here.
 	plan := tmpl.Compile(src)
 	if plan.MainAudioUsed { // Basic's stereo AAC found no track in the person's languages (S4)
-		log.Printf("worker %s: job %d (%s): %s", w.ID, job.ID, job.Path, rules.NoAudioInMyLanguageMain)
+		w.jobf(job.ID, " (%s): %s", job.Path, rules.NoAudioInMyLanguageMain)
 	}
 	if plan.HDRNote != "" { // what the HDR conversion does not keep (S3)
-		log.Printf("worker %s: job %d (%s): %s", w.ID, job.ID, job.Path, plan.HDRNote)
+		w.jobf(job.ID, " (%s): %s", job.Path, plan.HDRNote)
 	}
 	// Dolby Vision the flow leaves alone is never encoded, whatever was decided when the job was queued
 	// (review a09f6f5: a job queued before migration 17 or a setting change). Only these skips: the
@@ -540,11 +572,25 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	tmp := stage.path
 	args := plan.FFmpegArgs(job.Path, tmp)
 	stopWatch := w.watchStall(job.ID)
-	encErr, terr := media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p float64) {
+	setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWords(plan),
+		Decoder: decoderWords(src), Progress: media.Progress{ETASeconds: -1}})
+	defer dropLive(job.ID)
+	var tenths progressLines
+	encErr, terr := media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
 		w.progressAt.Store(time.Now().UnixNano())
-		w.Queue.Progress(job.ID, p)
+		w.Queue.Progress(job.ID, p.Percent)
+		updateLive(job.ID, p)
+		if line := tenths.next(p); line != "" {
+			w.jobf(job.ID, ": %s", line)
+		}
 	})
 	stopWatch()
+	if s := strings.TrimSpace(encErr); s != "" && w.Logs != nil {
+		w.Logs.Append(job.ID, "ffmpeg said:\n"+s) // errors only (the encode runs at -v error)
+	}
+	if terr == nil {
+		w.Queue.AddStep(job.ID, "converted", true, "Converted: "+convertingTo(plan, src)+".")
+	}
 	if terr != nil {
 		if errors.Is(terr, context.Canceled) || ctx.Err() != nil {
 			return "", terr // stopped or shutting down: RunOne decides, not a failure of the file
@@ -592,10 +638,10 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// backups key on the time, and the file stays the user's. Set before the swap, so the identity the
 	// swap records is the one the file keeps.
 	if err := os.Chtimes(tmp, time.Now(), before.ModTime()); err != nil {
-		log.Printf("worker %s: job %d: could not keep the modification time: %v", w.ID, job.ID, err)
+		w.jobf(job.ID, ": could not keep the modification time: %v", err)
 	}
 	if err := keepOwner(tmp, before); err != nil {
-		log.Printf("worker %s: job %d: could not keep the owner: %v", w.ID, job.ID, err)
+		w.jobf(job.ID, ": could not keep the owner: %v", err)
 	}
 	final = newName
 	// Rename is atomic on one filesystem: the original is only replaced by a complete file. Right
@@ -733,7 +779,7 @@ func (w *Worker) installSubtitles(plan rules.Plan, jobID int64, tmp, final strin
 		if errors.Is(err, errPlacedSourceLeft) {
 			// linked into place, the staged name not removed (the link fallback): the file is ours and
 			// placed; the staging folder's cleanup removes the leftover name (review 25b-939e790)
-			log.Printf("worker %s: job %d: %s placed; %v", w.ID, jobID, c.Path, err)
+			w.jobf(jobID, ": %s placed; %v", c.Path, err)
 			err = nil
 		}
 		if err != nil {
@@ -760,7 +806,7 @@ func (w *Worker) installSubtitles(plan rules.Plan, jobID int64, tmp, final strin
 func (w *Worker) removeSidecars(jobID int64, list []jobs.Sidecar) {
 	for _, c := range list {
 		if _, err := removeIfOurs(c); err != nil {
-			log.Printf("worker %s: job %d: could not remove %s (it is kept on record and tried again): %v", w.ID, jobID, c.Path, err)
+			w.jobf(jobID, ": could not remove %s (it is kept on record and tried again): %v", c.Path, err)
 			continue
 		}
 		if w.Sidecars != nil {

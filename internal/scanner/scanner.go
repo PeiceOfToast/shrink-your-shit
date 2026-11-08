@@ -318,12 +318,15 @@ func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.Fil
 	}
 	why := plan.Reason
 	rec.Decision = "queued: " + why
-	if _, err := s.Store.Enqueue(jobs.Job{Library: t.Path, LibraryID: t.LibraryID, Path: path, Reason: why, DurationSec: pi.DurationSec, SizeBefore: st.Size()}); err != nil {
+	id, err := s.Store.Enqueue(jobs.Job{Library: t.Path, LibraryID: t.LibraryID, Path: path, Reason: why, DurationSec: pi.DurationSec, SizeBefore: st.Size()})
+	if err != nil {
 		if !errors.Is(err, jobs.ErrLibraryGone) { // removed or stopped while this pass ran: nothing to do
 			log.Printf("enqueue %s: %v", path, err)
 		}
 		return false
 	}
+	s.Store.AddStep(id, "found", true, "Found in "+t.Path+".") // the Files view's step summary (S5)
+	s.Store.AddStep(id, "checked", true, "To be converted: "+why+".")
 	s.Store.PutFile(rec)
 	return true
 }

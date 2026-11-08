@@ -23,16 +23,7 @@ import (
 // slice 18.
 func activityRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, now func() time.Time, eng Engine) {
 	scanNow := eng.ScanNow
-	page := func(r *http.Request) (limit, offset int) {
-		limit, offset = 50, 0
-		if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 {
-			limit = min(n, 500)
-		}
-		if n, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && n > 0 {
-			offset = n
-		}
-		return
-	}
+	page := pageOf
 	// deleteOn is when an original kept at keptAt is deleted under the setting now (the purge uses the
 	// setting now too, so lowering it shows at once); daysLeft rounds the time left up to whole days.
 	deleteOn := func(keptAt string, days int) (time.Time, bool) {

@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/preview"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/runlog"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/scanner"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/web"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
@@ -146,7 +148,31 @@ func main() {
 		log.Printf("requeued %d job(s) interrupted by the last shutdown", n)
 	}
 	// Kept originals whose days are up are deleted now and then every hour (slice 18).
+	runLogs := &runlog.Logs{Dir: filepath.Join(*data, "logs")} // each job's run log (S5)
+	store.OnJobsRemoved = func(ids []int64) {                  // a job's log goes with it (review 43e6f66)
+		for _, id := range ids {
+			runLogs.Remove(id)
+		}
+	}
+	sweepLogs := func() { // the run logs' limits: their job is gone, 30 days, 100 MiB in all
+		ids, err := store.ForgetGoneJobSteps()
+		if err != nil {
+			log.Printf("run logs: %v", err)
+			return
+		}
+		if entries, err := os.ReadDir(runLogs.Dir); err == nil {
+			for _, e := range entries {
+				if id, err := strconv.ParseInt(strings.TrimSuffix(e.Name(), ".log"), 10, 64); err == nil && !ids[id] {
+					runLogs.Remove(id)
+				}
+			}
+		}
+		if _, err := runLogs.Sweep(time.Now(), runlog.MaxAge, runlog.Total); err != nil {
+			log.Printf("run logs: %v", err)
+		}
+	}
 	purge := func() {
+		sweepLogs()
 		for _, said := range worker.Purge(store, keepDays(), time.Now()) {
 			log.Printf("purge: %s", said)
 		}
@@ -202,7 +228,7 @@ func main() {
 			if n > 1 {
 				id = fmt.Sprintf("builtin-%d", n)
 			}
-			return &worker.Worker{ID: id, Queue: store, Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath,
+			return &worker.Worker{ID: id, Logs: runLogs, Queue: store, Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath,
 				Template: store.TemplateFor, Poll: 3 * time.Second,
 				DecodeCheck: *decode, MinSSIM: *minSSIM, KeepDays: keepDays, Journal: store, Sidecars: store,
 				Paused: store.Paused, StallAfter: *stallAfter}
@@ -230,7 +256,7 @@ func main() {
 	}
 	srv := &http.Server{Addr: *addr, Handler: web.Handler(store, access, web.Engine{
 		ScanNow: sc.ScanNow, NextScan: sc.NextScan, Scanning: sc.Scanning, RequeueJob: pool.RequeueJob, PauseNow: pool.PauseNow, StopFile: pool.StopFile,
-		Doctor: chk, DataDir: *data, Version: version, Logs: logs,
+		RunLogs: runLogs, Doctor: chk, DataDir: *data, Version: version, Logs: logs,
 		Preview:    &preview.Previewer{Store: store, Exec: media.OSExec{}, FFprobe: ffprobePath},
 		FirstFiles: &preview.FirstLister{Exec: media.OSExec{}, FFprobe: ffprobePath}})}
 	go func() {

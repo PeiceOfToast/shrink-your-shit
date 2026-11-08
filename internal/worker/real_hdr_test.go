@@ -4,11 +4,13 @@ package worker
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/runlog"
 )
 
 // S3 with real ffmpeg: an HDR10 file converts with its HDR intact (ffprobe on the new file shows PQ,
@@ -80,4 +82,36 @@ func TestRealHDR10(t *testing.T) {
 			t.Errorf("SDR plan has HDR %+v", snap.Video.HDR)
 		}
 	})
+}
+
+// S5: a real job writes its step summary and its run log.
+func TestRealRunLogAndSteps(t *testing.T) {
+	needTools(t)
+	dir := t.TempDir()
+	src := filepath.Join(dir, "Movie.mkv")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=3:size=640x360:rate=25", "-c:v", "libx264", "-b:v", "3000k", src)
+	st, id := realJob(t, src, 3)
+	w := realWorker(st, media.OSExec{})
+	w.Logs = &runlog.Logs{Dir: t.TempDir()}
+	w.Template = func(jobs.Job) (rules.Template, error) { return rules.BasicTemplate(3, "keep_all"), nil }
+	w.KeepDays, w.Journal = func() int { return 7 }, st
+	w.run(t)
+	if j, _ := st.Get(id); j.Status != jobs.Done {
+		t.Fatalf("%s %q", j.Status, j.Error)
+	}
+	steps, _ := st.Steps(id)
+	var names []string
+	for _, s := range steps {
+		if !s.OK || s.Words == "" {
+			t.Errorf("step %+v", s)
+		}
+		names = append(names, s.Step)
+	}
+	if strings.Join(names, ",") != "converted,verified,replaced" {
+		t.Errorf("steps %v", names)
+	}
+	text, _, _ := w.Logs.Read(id, 0)
+	if !strings.Contains(text, "started") || !strings.Contains(text, "done") {
+		t.Errorf("run log %q", text)
+	}
 }

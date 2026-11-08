@@ -454,10 +454,18 @@ func (s *Store) DeleteLibrary(id int64) error {
 	if n, _ := r.RowsAffected(); n == 0 {
 		return ErrNotFound
 	}
+	gone, err := jobIDs(tx, `SELECT id FROM jobs WHERE library_id=? AND status=?`, id, Queued)
+	if err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`DELETE FROM jobs WHERE library_id=? AND status=?`, id, Queued); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.jobsRemoved(gone...)
+	return nil
 }
 
 // TemplateFor returns the template of the job's library's flow, which the worker compiles into the

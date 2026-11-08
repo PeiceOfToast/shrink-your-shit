@@ -22,6 +22,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/runlog"
 )
 
 // ---- a scripted fake ffmpeg/ffprobe ----
@@ -110,6 +111,7 @@ type scenario struct {
 	freeBytes              uint64
 	freeErr                error
 	onEncode               func() // runs while "encoding", e.g. to modify the source
+	progressOut            string // ffmpeg's -progress output for the encode ("": one point at 50%)
 	afterChecks            func() // runs at the picture comparison, the last check
 
 	calls    []string
@@ -197,6 +199,9 @@ func (s *scenario) handle(name string, args []string) (string, string, error) {
 					}
 					os.WriteFile(a, body, 0o644)
 				}
+			}
+			if s.progressOut != "" {
+				return s.progressOut, s.encodeStderr, nil
 			}
 			return "out_time_us=50000000\n", s.encodeStderr, nil
 		case s.has(args, "-filters"):
@@ -1218,4 +1223,52 @@ func must[T any](v T, err error) T {
 		panic(err)
 	}
 	return v
+}
+
+// Design 03:40Z (REDESIGN C Log panel): one run-log line per 10% of a conversion, 10% to 90%, with
+// etaSeconds's time in minutes; a jump past several marks writes only the highest.
+func TestProgressLines(t *testing.T) {
+	var lines progressLines
+	for _, c := range []struct {
+		pct, eta float64
+		want     string
+	}{
+		{5, 900, ""}, {12, 1320, "10% done · about 22 min left"}, {18, 1200, ""},
+		{45, 1300, "40% done · about 22 min left"}, // 20 and 30 jumped past: only 40
+		{52, 119, "50% done · about 1 min left"}, {61, -1, "60% done"},
+		{99.5, 0, "90% done · about 1 min left"}, {100, 0, ""},
+	} {
+		got := ""
+		if c.pct >= 0 {
+			got = lines.next(media.Progress{Percent: c.pct, ETASeconds: c.eta})
+		}
+		if got != c.want {
+			t.Errorf("%g%%, eta %g: %q, want %q", c.pct, c.eta, got, c.want)
+		}
+	}
+	if got := progressWords(40, 22*60+29); got != "40% done · about 22 min left" {
+		t.Errorf("rounding: %q", got)
+	}
+}
+
+func TestRunLogProgress(t *testing.T) {
+	s := newScenario(t)
+	var out strings.Builder
+	for _, sec := range []int{5, 15, 25, 55, 95} { // of the job's 100 s, at 1x
+		fmt.Fprintf(&out, "speed=1x\nout_time_us=%d\n", sec*1000000)
+	}
+	s.progressOut = out.String()
+	w := s.worker(Replace)
+	w.Logs = &runlog.Logs{Dir: t.TempDir()}
+	w.RunOne(context.Background())
+	text, _, _ := w.Logs.Read(s.id, 0)
+	var got []string
+	for _, l := range strings.Split(text, "\n") {
+		if i := strings.Index(l, "% done"); i > 0 {
+			got = append(got, l[strings.LastIndex(l[:i], " ")+1:])
+		}
+	}
+	if fmt.Sprint(got) != "[10% done · about 1 min left 20% done · about 1 min left 50% done · about 1 min left 90% done · about 1 min left]" {
+		t.Errorf("progress lines %q in:\n%s", got, text)
+	}
 }
