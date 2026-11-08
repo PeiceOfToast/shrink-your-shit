@@ -19,11 +19,11 @@ func TestSliderTable(t *testing.T) {
 	code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/settings/slider"})
 	var out struct{ Positions []map[string]any }
 	json.Unmarshal([]byte(body), &out)
-	if code != 200 || len(out.Positions) != 5 || out.Positions[2]["name"] != "Balanced" || out.Positions[0]["name"] != "Smallest file" || out.Positions[2]["crf"] != 23.0 || out.Positions[2]["minSavingPct"] != 10.0 {
+	if code != 200 || len(out.Positions) != 5 || out.Positions[2]["name"] != "Balanced" || out.Positions[0]["name"] != "Smallest file" || out.Positions[2]["crf"] != 23.0 {
 		t.Fatalf("%d %s", code, body)
 	}
 	for k := range out.Positions[0] {
-		if !slices.Contains([]string{"position", "name", "crf", "minSavingPct"}, k) {
+		if !slices.Contains([]string{"position", "name", "crf"}, k) { // no minSavingPct: always standardize
 			t.Errorf("the table shows only the contract's fields, not %q", k)
 		}
 	}
@@ -208,7 +208,6 @@ func TestSelectorsSaveAndReadBack(t *testing.T) {
 		`"resolution":"720p"`:                    "invalid",
 		`"maxBitrate":"15"`:                      "invalid",
 		`"maxBitrate":10`:                        "invalid",
-		`"minSavingPct":95`:                      "invalid",
 		`"ignore":["/etc"]`:                      "invalid",
 		`"ignore":["../up"]`:                     "invalid",
 		`"quality":9,"speed":"faster"`:           "invalid_quality",
@@ -229,16 +228,25 @@ func TestSelectorsSaveAndReadBack(t *testing.T) {
 	if v := get(); v["kind"] != "slider" || v["quality"] != 3.0 {
 		t.Errorf("Balanced through the selectors should be the slider: %v", v)
 	}
-	// any other choice is a selectors setting, read back as saved; minSavingPct follows Quality when left out
+	// any other choice is a selectors setting, read back as saved; there is no minSavingPct (always standardize)
 	if code, body := post(t, srv, "PUT", path, `{"quality":2,"speed":"slower","resolution":"720","maxBitrate":"10","fileType":"mkv","afterConverting":"beside","ignore":["Extras","*.sample.mkv"],"skipSmall":false}`); code != 200 {
 		t.Fatalf("selectors: %d %s", code, body)
 	}
 	v := get()
 	for k, want := range map[string]any{"kind": "selectors", "quality": 2.0, "speed": "slower", "resolution": "720", "maxBitrate": "10",
-		"fileType": "mkv", "afterConverting": "beside", "skipSmall": false, "skipHdr": true, "minSavingPct": 15.0} {
+		"fileType": "mkv", "afterConverting": "beside", "skipHdr": true} {
 		if v[k] != want {
 			t.Errorf("%s = %v, want %v", k, v[k], want)
 		}
+	}
+	for _, gone := range []string{"minSavingPct", "skipSmall"} {
+		if _, ok := v[gone]; ok {
+			t.Errorf("%s is gone from the setting: %v", gone, v[gone])
+		}
+	}
+	// the current page still sends it: accepted and ignored for one release, nothing else changes
+	if code, body := post(t, srv, "PUT", path, `{"quality":2,"speed":"slower","minSavingPct":95,"skipSmall":true}`); code != 200 || strings.Contains(body, "minSavingPct") {
+		t.Errorf("minSavingPct must be accepted and ignored: %d %s", code, body)
 	}
 	if ig, _ := v["ignore"].([]any); len(ig) != 2 {
 		t.Errorf("ignore %v", v["ignore"])
@@ -325,5 +333,20 @@ func TestReplaceWithNewFileTypeIsSavedWithAWarning(t *testing.T) {
 	code, body = post(t, srv, "POST", fmt.Sprintf("/api/libraries/%d/preview", l.ID), `{"setting":{"quality":3,"fileType":"mkv","afterConverting":"replace"}}`)
 	if code != 200 || !strings.Contains(body, want) {
 		t.Errorf("preview: %d %s", code, body)
+	}
+}
+
+// No flow's steps promise a smaller file any more (always standardize): a legacy flow, replacing or beside,
+// says the original is replaced once the new file is checked (review 4542610).
+func TestLegacyFlowStepsHaveNoSizeCondition(t *testing.T) {
+	for _, out := range []string{"replace", "beside"} {
+		for _, s := range flowSteps(rules.LegacyTemplate(rules.Default(), out)) {
+			if d := fmt.Sprint(s["label"], s["detail"]); strings.Contains(d, "smaller than") || strings.Contains(d, "and smaller") {
+				t.Errorf("%s: %q", out, d)
+			}
+			if s["kind"] == "finish" && out == "replace" && s["label"] != "Replace the original once the new file is checked" {
+				t.Errorf("replace finish: %q", s["label"])
+			}
+		}
 	}
 }

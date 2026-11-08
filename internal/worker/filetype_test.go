@@ -24,7 +24,7 @@ func mp4ToMkv(t *testing.T, days int) (*scenario, *Worker, string) {
 	s := newScenarioNamed(t, "movie.mp4")
 	s.srcSpec.format = "mov,mp4,m4a,3gp,3g2,mj2"
 	sel := rules.DefaultSelectors(3)
-	sel.FileType, sel.SkipSmall = "mkv", false
+	sel.FileType = "mkv"
 	tmpl := sel.Template()
 	w := s.keeping(days)
 	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
@@ -254,7 +254,7 @@ func TestRestoreAfterANewTypeCrashAtEveryStep(t *testing.T) {
 func TestSameTypeOtherCaseKeepsTheName(t *testing.T) {
 	s := newScenarioNamed(t, "movie.MKV")
 	sel := rules.DefaultSelectors(3)
-	sel.FileType, sel.SkipSmall = "mkv", false
+	sel.FileType = "mkv"
 	tmpl := sel.Template()
 	w := s.keeping(7)
 	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }

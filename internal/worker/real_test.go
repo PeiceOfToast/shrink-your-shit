@@ -396,9 +396,9 @@ func TestRealSliderBalanced(t *testing.T) {
 			t.Errorf("%q", s)
 		}
 	})
-	t.Run("a small file is skipped as already efficient", func(t *testing.T) {
+	t.Run("a small file is converted too (always standardize)", func(t *testing.T) {
 		p := gen("small.mkv", "1920x1080", "libx264", 300)
-		if s := balanced.Compile(probe(t, p)).Skip; !strings.HasPrefix(s, "already efficient") {
+		if s := balanced.Compile(probe(t, p)).Skip; s != "" {
 			t.Errorf("%q", s)
 		}
 	})

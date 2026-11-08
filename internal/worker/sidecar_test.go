@@ -23,7 +23,7 @@ func srtScenario(t *testing.T) (*scenario, *Worker, string) {
 	out.streams = append(out.streams[:2], out.streams[3]) // the new file has no subtitle inside
 	s.outSpec = out
 	sel := rules.DefaultSelectors(3)
-	sel.Subtitles, sel.SkipSmall = "srt", false
+	sel.Subtitles = "srt"
 	tmpl := sel.Template()
 	w := s.worker(Replace)
 	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }

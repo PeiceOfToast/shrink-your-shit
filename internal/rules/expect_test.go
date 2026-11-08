@@ -39,7 +39,7 @@ func TestDefaultExpectFromARealProbe(t *testing.T) {
 	if s := e.Streams[3]; s.Type != "subtitle" || s.Codec != "ass" || s.Language != "fre" || !s.Forced || s.SubKind != "text" {
 		t.Errorf("subtitles are copied unchanged: %+v", s)
 	}
-	if e.VideoPackets != 150 || e.DurationSec <= 0 || e.DurationTol != 0.02 || e.MinSavings != 0 {
+	if e.VideoPackets != 150 || e.DurationSec <= 0 || e.DurationTol != 0.02 {
 		t.Errorf("%+v", e)
 	}
 }

@@ -45,10 +45,6 @@ func (p *Previewer) Sample(ctx context.Context, root, path string, st fs.FileInf
 	}
 	low, high := Saving(t, plan, info, size)
 	s := Sample{ExpectedBytesLow: size - high, ExpectedBytesHigh: size - low}
-	if high == 0 {
-		s.Lines = append(s.Lines, fmt.Sprintf("Probably left as it is: the new file is unlikely to be at least %d%% smaller.", plan.MinSavingPct))
-		return s
-	}
 	video := "Video: converted to the smaller format, same picture size and length"
 	if plan.Video.Height > 0 {
 		video = fmt.Sprintf("Video: converted to the smaller format and made %d lines high (from %d), same length", plan.Video.Height, info.Video().Height)
@@ -83,9 +79,6 @@ func (p *Previewer) Sample(ctx context.Context, root, path string, st fs.FileInf
 		if t.Selectors != nil && t.Selectors.Subtitles == "srt" && n-dropped-files > 0 {
 			s.Lines = append(s.Lines, rules.SubtitlesStayInside)
 		}
-	}
-	if plan.MinSavingPct > 0 {
-		s.Lines = append(s.Lines, fmt.Sprintf("Kept as it is if the new file is not at least %d%% smaller", plan.MinSavingPct))
 	}
 	if plan.Output == "beside" {
 		kind := "file"

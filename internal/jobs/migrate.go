@@ -147,6 +147,16 @@ CREATE TABLE sidecars (id INTEGER PRIMARY KEY, job_id INTEGER NOT NULL, path TEX
 	{12, "job retries", `
 ALTER TABLE jobs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE jobs ADD COLUMN retry_at TEXT NOT NULL DEFAULT '';`},
+	// Always standardize (USER-REVIEW 2026-11-07): no minimum saving and no "already small" skip any more.
+	// Once (as a migration it never runs again): jobs a check kept only because the new file saved too
+	// little are queued again with their tries reset (no reason code is stored on a kept job, so its two
+	// exact sentences are matched); file decisions of the removed skips are forgotten, so the next scan
+	// looks at those files again and queues them.
+	{13, "always standardize", `
+UPDATE jobs SET status='queued', progress=0, worker='', error='', attempts=0, retry_at=''
+WHERE status='kept' AND (error LIKE 'the new file (%) saves less than the required %% of the original (%)'
+  OR error LIKE 'the new file (%) is not smaller than the original (%)');
+DELETE FROM files WHERE reason IN ('already_efficient', 'would_not_shrink', 'unknown_bitrate');`},
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.

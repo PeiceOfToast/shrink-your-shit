@@ -18,7 +18,7 @@ library folders --scanner--> files table + jobs table (SQLite) <--worker (pulls 
 |---|---|
 | `main.go`, `platform.go` | flags and env, finding ffmpeg/ffprobe, default data dir, starts the scanner, worker and web server, handles Ctrl+C/SIGTERM |
 | `internal/scanner` | every `-scan-every` (or at once on `ScanNow`), walks the folders of the **started** libraries (`Targets`, read from the database each pass), probes new or changed video files, asks each library's own rule, queues jobs tagged with the library id. Skips hidden files and folders (names starting with `.`), `@eaDir`, `$RECYCLE.BIN`, `System Volume Information`, files changed within `-settle`, and our own temp and output files (names whose part before the extension ends in `.syp-tmp` or `.hevc`, e.g. `a.hevc.mkv`). The **file guards** (slice 23, `scanner.Guard`, shared with the Preview) come before any probe: a link is never followed or converted (one leading outside the library is skipped as `symlink`, one inside is not looked at since its real file is converted under its own name); a file with more than one name is skipped as `shared_file`; and a file is decided only when unchanged since the previous look at least `-settle` earlier (`still_changing` in between). The first look is kept in memory with the file's identity (device and inode or the Windows file ID, size, modification and change time), so a file made again under the same name starts its wait afresh, and looks of files not seen in a whole pass are dropped. Guards are evaluated on every scan, and every file the scan sees is observed (guarded ones too), so a file that stops being shared is decided only once `-settle` has passed since it was first seen in that state. Library folders at a system folder are never scan targets. The worker checks again: it does not follow a link (Lstat, then an open with `O_NOFOLLOW`, or a reparse-point check on Windows), refuses a shared file at the start, and re-checks the link count right before the swap |
-| `internal/rules` | `Rule.Match(info)`: source codec and minimum video bitrate; returns a reason string shown in the UI. `flow.go`: a flow's `Template` (kind `slider`, `legacy`, later `selectors`/`custom`, with params and a compiler version) and `Template.Settings()`, the one mapping from a flow to what the scanner and worker use (rule, CRF, preset, output, minimum saving); the slider table (`Slider`, positions 1-5) lives here |
+| `internal/rules` | `Rule.Match(info)`: source codec and minimum video bitrate; returns a reason string shown in the UI. `flow.go`: a flow's `Template` (kind `slider`, `legacy`, later `selectors`/`custom`, with params and a compiler version) and `Template.Settings()`, the one mapping from a flow to what the scanner and worker use (rule, CRF, preset, output; there is no minimum saving); the slider table (`Slider`, positions 1-5) lives here |
 | `internal/media` | wraps ffprobe and ffmpeg behind the `Exec` interface (`OSExec` is real, `FakeExec` is for tests); parses probe JSON into `Info` (container, duration, bitrate, plus a per-stream `Streams` list: codec, language, flags, video size/fps/bit depth/HDR and Dolby Vision markers, audio channels, subtitle text-vs-bitmap, attachments, chapter count; helpers `Video()`, `Audio()`, `IsHDR()`, `HasBitmapSubs()`...); parses `-progress` output |
 | `internal/jobs` | SQLite store (pure-Go `modernc.org/sqlite`, no cgo): `files` (what the scanner last saw), `jobs`, `libraries` and `flows` tables, and the job state machine. `libraries.go`: library and flow records (`AddLibrary`, `EnsureLibraries` for `-library`, `DeleteLibrary`, `SettingsFor(job)`, per-library `Counts`) |
 | `internal/worker` | `Worker` pulls jobs through the `Queue` interface and runs the transcode. The built-in worker is one instance; remote workers would implement `Queue` over HTTP |
@@ -31,7 +31,7 @@ A **library** (`libraries` table: name, folder, flow, `started`) is a folder the
 Every library has exactly one **flow** (`flows` table: name, `template` JSON, `graph` for the later
 flow engine), which says what to do with its files. Until the Plan compiler (slice 16) and the flow
 engine (slice 30), a flow's behaviour is its template: `rules.Template.Settings()` turns it into the
-rule the scanner matches with and the CRF, preset, output mode and minimum saving the worker uses
+rule the scanner matches with and the CRF, preset and output mode the worker uses
 (`Worker.Settings`, looked up per job by `Store.SettingsFor`).
 
 - A library added on the web page (`POST /api/libraries`) gets a slider flow at the chosen position
@@ -80,7 +80,7 @@ rule the scanner matches with and the CRF, preset, output mode and minimum savin
 A **Plan** (`internal/rules/plan.go`) is what to do with one file, compiled from its library's flow
 template and the file's probe: `Skip` (why not to convert it, the scanner's decision) or `Reason`,
 the video encode (`libx265`, CRF, preset, tag; a VBV bitrate cap and a scale-down height from the
-selectors), the output mode and the new file's type (`Container`, beside mode only), and the thresholds (minimum saving; an SSIM gate, 0 = `-min-ssim`). The scanner compiles a Plan
+selectors), the output mode and the new file's type (`Container`, beside mode only), and the threshold (an SSIM gate, 0 = `-min-ssim`; there is no minimum saving: a checked conversion is always kept, even if not smaller, USER-REVIEW 2026-11-07). The scanner compiles a Plan
 per file to decide; the worker compiles it again from the probe it takes, runs `Plan.FFmpegArgs`,
 checks the result against `Plan.Expect` (slice 10's `Expect`, now in `internal/rules`) and stores a
 `Snapshot` on the job (migration 4): the Plan (with the eligibility rule that decided it), the
@@ -95,8 +95,9 @@ over every probe in `internal/media/testdata`).
 A **slider** flow compiles TIERS-PLAN.md 2.1's recipe, which is the Standard selectors at that
 position's values (`DefaultSelectors`, one compiler: `compileSelectors`): HEVC at the position's CRF
 (one lower up to 720p, one higher at 2160p), preset medium, the source's bit depth, resolution and
-container, every audio track and subtitle copied, the position's minimum saving and SSIM gate. It
-converts H.264, MPEG-2, MPEG-4, VC-1 and WMV (D5) above the position's bits per pixel per frame;
+container, every audio track and subtitle copied, the position's SSIM gate. It
+converts H.264, MPEG-2, MPEG-4, VC-1 and WMV (D5) whatever their bits per pixel (always standardize:
+the "already small" skip is gone);
 HEVC, AV1 and VP9 are skipped as already efficient, and so is a file whose subtitles its container
 cannot hold. **HDR and Dolby Vision files are skipped (`hdr_dv`, D3) by every flow** since slice 25a,
 legacy ones included where the rule would have converted them: converting drops their HDR information,
@@ -117,8 +118,13 @@ A **selectors** flow (`internal/rules/selectors.go`, slice 25a) stores the Stand
   hold skips the file with a reason (`cannot_keep_track`).
 - Ignore is a list of folders, files or patterns inside the library that the scanner and the
   Preview do not look at.
-- Skip HDR (on by default; off converts HDR and the setting answers a warning), Skip small (off
-  converts whatever its bits per pixel), and the minimum saving (follows Quality unless given).
+- Skip HDR (on by default; off converts HDR and the setting answers a warning). There is no minimum
+  saving and no Skip small ("always standardize", USER-REVIEW 2026-11-07): GET no longer returns
+  `minSavingPct` or `skipSmall`; a PUT that sends them is accepted and they are ignored (for one
+  release). Migration 13 queued again, once, the jobs kept only for saving too little (matched by their
+  two sentences: a kept job stores no reason code) and forgot the `already_efficient`,
+  `unknown_bitrate` and `would_not_shrink` file decisions, so the next scan queues those files. A legacy
+  flow (command-line flags) keeps its explicit `-min-bitrate`.
 - AV1 is 400 `not_available`, nothing written.
 - A selectors setting equal to a position is saved as the slider (kind derived, addendum 6).
 - **Audio and subtitles** (slice 25b, `internal/rules/audio.go`), as `Plan.Tracks` (one op per track
@@ -197,8 +203,8 @@ slice 25. It lists the folder like the scanner (same
 skipped folders and files), probes each video through the probe cache (`probes` table, migration 5:
 ffprobe's answer per path while size and modification time stay the same; the scanner fills it too)
 and compiles the setting's Plan for it, so the counts come from the scanner's own decision.
-`skipped` counts the Plan's `SkipCode` (`already_efficient`, `already_hevc`,
-`format_not_converted`, `no_video`, `unknown_bitrate`, `cannot_keep_track`, `setting_cannot_run`,
+`skipped` counts the Plan's `SkipCode` (`already_hevc`, `format_not_converted`, `no_video`,
+`cannot_keep_track`, `setting_cannot_run`, `already_efficient` for a legacy flow's `-min-bitrate` only,
 `unreadable`). Files with more than one link stay in `canShrink`, are counted in `sharedNoSaving`
 and are left out of the range (until slice 12 skips them as `shared_file`).
 
@@ -207,9 +213,10 @@ position's band in `rules.Slider` (`SaveLowPct`-`SaveHighPct`: Smallest 15-60%, 
 Balanced 10-55%, Better quality 8-40%, Best quality 5-25%; a legacy flow uses the position with the
 nearest CRF). The bands follow the published reports in TIERS-PLAN.md and are not measured on real
 files yet (D8). Audio, subtitles and the container are copied, so they never count. A source within
-1.5x of its position's eligibility threshold (`rules.NearMinBPP`; a legacy flow: its bitrate) counts
-from 0 at the low end, and a file whose best case misses the minimum saving counts as kept (0)
-(`preview.Saving`). Content like film grain or noise can need more data in the new format than
+1.5x of its position's old eligibility threshold (`rules.NearMinBPP`, kept for the estimate only; a
+legacy flow: its bitrate) counts
+from 0 at the low end (`preview.Saving`); there is no minimum saving, so such a file is converted all the
+same and counted. Content like film grain or noise can need more data in the new format than
 before; the range overshoots there, and a short sample encode is the planned fix. The result is kept in memory per
 library and setting with a signature of the listing: the same setting over the same files answers at
 once; a change starts a new computation, shown as `stale` with `status: computing` until it is ready.
@@ -251,8 +258,9 @@ the result and the original was deliberately left alone, with the reason in the 
    it exists and is not empty; it is readable; **stream parity** (same number of video, audio,
    subtitle and attachment streams, in order; same codec for copied streams, languages, channel
    counts, subtitle kinds and forced flags, attachment names, picture size, colour depth; same
-   chapter count); duration within 2%; video frame count within 1%; **smaller** than the original
-   (or by `MinSavings`). Then the **playback test** (`-decode-check auto|always`; there is no "off":
+   chapter count); duration within 2%; video frame count within 1%. There is **no size check**: a new file that
+   is not smaller is kept all the same ("always standardize"); its before and after sizes are on the
+   job and in the log. Then the **playback test** (`-decode-check auto|always`; there is no "off":
    the new file's video through ffmpeg's decoder with `-xerror`, completely up to 3 hours long, else
    three one-minute samples; any decode error fails), then the **picture comparison** (SSIM on three
    10-second samples at the start, middle and end; the worst must reach `-min-ssim`, default 0.95 and
@@ -287,7 +295,7 @@ the result and the original was deliberately left alone, with the reason in the 
    error goes to the log, which Settings > System shows (`TestFailedDetailsArePlain`).
 
 `Expect` (`worker/expect.go`) is "what the new file must look like": a list of stream expectations
-in output order, chapters, duration, frame count, minimum savings. `DefaultExpect(source)` builds it
+in output order, chapters, duration, frame count. `DefaultExpect(source)` builds it
 for what the worker does today (keep everything except data streams, first video stream becomes
 HEVC at the same size and depth). Later work that changes what the worker does (other codecs, dropped
 tracks) should fill `Expect` differently and leave `verify` alone.

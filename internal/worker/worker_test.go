@@ -421,7 +421,6 @@ func TestRejections(t *testing.T) {
 		{"chapters lost", func(s *scenario) { s.outSpec.chapters = 0 }, "chapters"},
 		{"zero-byte output", func(s *scenario) { s.content = "" }, "empty"},
 		{"new file unreadable", func(s *scenario) { s.outProbeRaw = "this is not json" }, "cannot be read"},
-		{"bigger than the original", func(s *scenario) { s.content = "this output is much longer than the original bytes" }, "not smaller"},
 		{"decode errors", func(s *scenario) {
 			s.decodeStderr = "[hevc @ 0x1] Invalid NAL unit size\nError while decoding stream #0:0"
 		}, "does not play cleanly"},
@@ -1100,4 +1099,23 @@ func oneTry(t *testing.T) {
 	old := maxTries
 	maxTries = 1
 	t.Cleanup(func() { maxTries = old })
+}
+
+// Always standardize (USER-REVIEW 2026-11-07): a checked new file that is bigger than the original is
+// kept all the same, done with both sizes recorded; the safety checks still refuse a bad one.
+func TestABiggerResultIsKept(t *testing.T) {
+	s := newScenario(t)
+	s.content = "this output is much longer than the original bytes"
+	s.run(Replace)
+	if j := s.job(); j.Status != jobs.Done || j.SizeBefore != 14 || j.SizeAfter != int64(len(s.content)) {
+		t.Fatalf("%s %d -> %d %q", j.Status, j.SizeBefore, j.SizeAfter, j.Error)
+	}
+	if read(s.src) != s.content {
+		t.Errorf("at the name: %q", read(s.src))
+	}
+	bad := newScenario(t)
+	bad.content = "this output is much longer than the original bytes"
+	bad.ssimStderr = "[Parsed_ssim_0] SSIM Y:0.50 U:0.50 V:0.50 All:0.500000 (3.0)"
+	bad.run(Replace)
+	bad.assertKept("too different")
 }

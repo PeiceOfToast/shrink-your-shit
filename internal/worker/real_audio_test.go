@@ -33,7 +33,7 @@ func TestRealAudioAndSubtitles(t *testing.T) {
 		b, _ := os.ReadFile(src)
 		os.WriteFile(p, b, 0o644)
 		s := rules.DefaultSelectors(3)
-		s.Audio, s.Subtitles, s.SkipSmall = audio, subs, false
+		s.Audio, s.Subtitles = audio, subs
 		tmpl := s.Template()
 		tmpl.Languages = langs
 		st, id := realJob(t, p, 5)
@@ -87,7 +87,7 @@ func TestRealSubtitlesAsSrtFiles(t *testing.T) {
 		"-map", "0", "-map", "1", "-map", "2", "-map", "3", "-c:v", "libx264", "-b:v", "5000k", "-c:a", "aac", "-b:a", "96k", "-c:s", "srt",
 		"-metadata:s:a:0", "language=eng", "-metadata:s:s:0", "language=eng", "-metadata:s:s:1", "language=fre", "-disposition:s:1", "forced", src)
 	s := rules.DefaultSelectors(3)
-	s.Subtitles, s.Audio, s.SkipSmall = "srt", "aac", false
+	s.Subtitles, s.Audio = "srt", "aac"
 	tmpl := s.Template()
 	run := func() jobs.Job {
 		st, id := realJob(t, src, 5)

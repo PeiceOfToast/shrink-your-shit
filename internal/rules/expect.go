@@ -40,8 +40,6 @@ type Expect struct {
 	// 0 = unknown, unchecked.
 	VideoPackets int64
 	PacketsTol   float64
-	// MinSavings is the fraction of the original's size that must be saved: 0 means "just smaller".
-	MinSavings float64
 	// MinSSIM is the picture threshold the flow asks for; 0 = the program's -min-ssim.
 	MinSSIM float64
 	// Container is the file type the new file must be, as ffprobe names it ("matroska,webm"): the

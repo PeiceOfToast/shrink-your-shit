@@ -45,18 +45,18 @@ type Params struct {
 }
 
 // SliderPosition is one position of the Basic slider: the recipe TIERS-PLAN.md 2.1 gives it. The API
-// shows position, name, crf and minSavingPct (UI-API-CONTRACT.md addendum 4); the rest is the engine's.
+// shows position, name and crf (UI-API-CONTRACT.md addendum 4); the rest is the engine's. There is no
+// minimum saving: a checked conversion is always kept, even if it is not smaller (USER-REVIEW
+// 2026-11-07, "always standardize").
 type SliderPosition struct {
-	Position     int     `json:"position"`
-	Name         string  `json:"name"`
-	CRF          int     `json:"crf"` // at 1080p; one lower up to 720p, one higher at 2160p
-	MinSavingPct int     `json:"minSavingPct"`
-	MinSSIM      float64 `json:"-"` // the picture threshold
-	MinBPP       float64 `json:"-"` // eligible only above this many bits per pixel per frame
+	Position int     `json:"position"`
+	Name     string  `json:"name"`
+	CRF      int     `json:"crf"` // at 1080p; one lower up to 720p, one higher at 2160p
+	MinSSIM  float64 `json:"-"`   // the picture threshold
+	MinBPP   float64 `json:"-"`   // eligible only above this many bits per pixel per frame
 	// SaveLowPct..SaveHighPct is the Preview's estimate of how much of a converted file's video is
 	// saved (DESIGN/FIRST-RUN.md: always a range). Anchored on the published reports in TIERS-PLAN.md
-	// (about 10-55% for real content at Balanced), not measured on real files yet (D8). The low end is
-	// never above MinSavingPct.
+	// (about 10-55% for real content at Balanced), not measured on real files yet (D8).
 	SaveLowPct, SaveHighPct int `json:"-"`
 }
 
@@ -64,11 +64,11 @@ type SliderPosition struct {
 // changes after calibration on real files, which is why the UI reads it from the API. This is the one
 // place these numbers live.
 var Slider = []SliderPosition{
-	{1, "Smallest file", 27, 20, 0.93, 0.05, 15, 60},
-	{2, "Smaller", 25, 15, 0.94, 0.065, 12, 57},
-	{3, "Balanced", 23, 10, 0.95, 0.08, 10, 55},
-	{4, "Better quality", 21, 8, 0.965, 0.10, 8, 40},
-	{5, "Best quality", 19, 5, 0.975, 0.12, 5, 25},
+	{1, "Smallest file", 27, 0.93, 0.05, 15, 60},
+	{2, "Smaller", 25, 0.94, 0.065, 12, 57},
+	{3, "Balanced", 23, 0.95, 0.08, 10, 55},
+	{4, "Better quality", 21, 0.965, 0.10, 8, 40},
+	{5, "Best quality", 19, 0.975, 0.12, 5, 25},
 }
 
 // SliderSources are the video codecs a slider flow converts (D5): H.264 and older formats.

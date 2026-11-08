@@ -237,7 +237,7 @@ func TestIgnoredPathsAreNotLookedAt(t *testing.T) {
 	os.MkdirAll(filepath.Join(lib, "Shows", "Extras"), 0o755)
 	os.WriteFile(filepath.Join(lib, "Shows", "Extras", "y.mkv"), []byte("1"), 0o644)
 	sel := rules.DefaultSelectors(3)
-	sel.SkipSmall, sel.Ignore = false, []string{"Extras", "*.sample.mkv"}
+	sel.Ignore = []string{"Extras", "*.sample.mkv"}
 	tmpl := sel.Template()
 	s.Targets = func() ([]Target, error) { return []Target{{LibraryID: 1, Path: lib, Template: tmpl}}, nil }
 	if n := settle(s); n != 1 {
