@@ -109,8 +109,19 @@ var mp4Audio = map[string]bool{"aac": true, "ac3": true, "eac3": true, "mp3": tr
 //   - as_is: every kept track copied.
 //
 // With no track in langs, the stereo choices keep the main track (mainUsed); the others keep every
-// track (allKept). In MP4 (mp4) a kept track it cannot hold (TrueHD, DTS, PCM) becomes E-AC-3.
-func planAudio(choice string, onlyMine bool, langs []string, info media.Info, mp4 bool) (ops []TrackOp, allKept, mainUsed, smallKept bool) {
+// track (allKept). A track the new file's container (mp4, webm; "" any other) cannot hold is never kept
+// as it is: it becomes the chosen stereo track, or else E-AC-3 in MP4 (TrueHD, DTS, PCM) and Opus in
+// WebM (QA 894cb18).
+func planAudio(choice string, onlyMine bool, langs []string, info media.Info, container string) (ops []TrackOp, allKept, mainUsed, smallKept bool) {
+	holds := func(codec string) bool {
+		switch container {
+		case "mp4":
+			return mp4Audio[codec]
+		case "webm":
+			return codec == "opus" || codec == "vorbis"
+		}
+		return true
+	}
 	audio := info.Audio()
 	stereo := choice == "stereo_aac" || choice == "stereo_opus" || choice == "stereo_aac_surround"
 	keep := map[int]bool{}
@@ -151,7 +162,7 @@ func planAudio(choice string, onlyMine bool, langs []string, info media.Info, mp
 		// Never bigger (25b, review 6cafc6f): a lossy stereo track at or below the target's bitrate, or of
 		// unknown bitrate, is copied. Surround is still made stereo: a downmix to 2 channels at 160 kbps
 		// is smaller than any lossy surround track.
-		if !a.Lossless() && a.Channels > 0 && a.Channels <= 2 && (a.BitrateKbps == 0 || a.BitrateKbps <= kbps) {
+		if !a.Lossless() && a.Channels > 0 && a.Channels <= 2 && (a.BitrateKbps == 0 || a.BitrateKbps <= kbps) && holds(a.Codec) {
 			smallKept = true
 			return TrackOp{}, false
 		}
@@ -186,9 +197,14 @@ func planAudio(choice string, onlyMine bool, langs []string, info media.Info, mp
 				}
 			}
 		}
-		if !has && mp4 && !mp4Audio[a.Codec] { // MP4 can't hold it: E-AC-3 (the log says so)
-			ch := min(max(a.Channels, 2), 6)
-			op, has = TrackOp{Index: a.Index, Type: "audio", Encoder: "eac3", Codec: "eac3", Kbps: AutoAudioKbps("eac3", ch), Channels: chIfFolded(a.Channels)}, true
+		if !has && !holds(a.Codec) { // the container can't hold it as it is
+			switch {
+			case container == "webm": // WebM's audio is Stereo Opus (Validate)
+				op, has = TrackOp{Index: a.Index, Type: "audio", Encoder: "libopus", Codec: "opus", Kbps: stereoOpusKbps, Channels: 2}, true
+			default: // MP4: E-AC-3 (the log says so)
+				ch := min(max(a.Channels, 2), 6)
+				op, has = TrackOp{Index: a.Index, Type: "audio", Encoder: "eac3", Codec: "eac3", Kbps: AutoAudioKbps("eac3", ch), Channels: chIfFolded(a.Channels)}, true
+			}
 		}
 		if has {
 			ops = append(ops, op)

@@ -410,3 +410,39 @@ func TestRealEachVideoFormat(t *testing.T) {
 		})
 	}
 }
+
+// QA 894cb18 (P2): VP9 + WebM + Stereo Opus on a file with a 128 kbps stereo AAC track (the size Stereo
+// Opus would otherwise keep as it is) ends done, its audio made Opus: WebM can't hold AAC.
+func TestRealWebMWithSmallAAC(t *testing.T) {
+	needTools(t)
+	rules.SetAvailableFormats(media.Encoders(context.Background(), media.OSExec{}, "ffmpeg"))
+	defer rules.SetAvailableFormats(nil)
+	if !slices.Contains(rules.Available(), "vp9") {
+		t.Log("this ffmpeg has no VP9 encoder: not run here") // a skip would fail CI's real-test rule
+		return
+	}
+	dir := t.TempDir()
+	src := filepath.Join(dir, "m.mkv")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=3:size=640x360:rate=25", "-f", "lavfi", "-i", "sine=frequency=440:duration=3",
+		"-c:v", "mpeg2video", "-b:v", "6000k", "-c:a", "aac", "-b:a", "128k", "-ac", "2", src)
+	s := rules.DefaultSelectors(3)
+	s.Format, s.Speed, s.FileType, s.Audio, s.OnlyMyLanguages = "vp9", "faster", "webm", "stereo_opus", false
+	s.AfterConverting = "beside" // the original stays: no record of kept originals needed for the new type
+	if err := s.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	tmpl := s.Template()
+	st, id := realJob(t, src, 3)
+	st.SetPaused(false)
+	w := realWorker(st, media.OSExec{})
+	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.run(t)
+	j, _ := st.Get(id)
+	if j.Status != jobs.Done {
+		t.Fatalf("%s %q", j.Status, j.Error)
+	}
+	out := probe(t, j.OutputPath)
+	if filepath.Ext(j.OutputPath) != ".webm" || out.Video().Codec != "vp9" || len(out.Audio()) != 1 || out.Audio()[0].Codec != "opus" {
+		t.Errorf("new file %s: %+v", j.OutputPath, out.Streams)
+	}
+}

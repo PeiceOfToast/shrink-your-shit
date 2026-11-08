@@ -573,8 +573,11 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 			p.TypeNote = "File type changed to MKV: MP4 files can't hold Opus."
 		}
 	}
-	mp4 := p.Container == "mp4" || (p.Container == "" && strings.Contains(info.Container, "mp4"))
-	p.Tracks, p.AllAudioKept, p.MainAudioUsed, p.SmallKept = planAudio(choice, onlyMine, langs, info, mp4)
+	container := p.Container // the new file's ("": the original's type; ffprobe can't tell WebM from MKV)
+	if container == "" && strings.Contains(info.Container, "mp4") {
+		container = "mp4"
+	}
+	p.Tracks, p.AllAudioKept, p.MainAudioUsed, p.SmallKept = planAudio(choice, onlyMine, langs, info, container)
 	for _, o := range p.Tracks { // a converted track folded from more than 5.1
 		for _, a := range info.Audio() {
 			if a.Index == o.Index && o.Channels == 6 && a.Channels > 6 {

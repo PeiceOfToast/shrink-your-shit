@@ -280,3 +280,43 @@ func TestSevenOneFold(t *testing.T) {
 		t.Error("5.1 is not folded")
 	}
 }
+
+// QA 894cb18 (P2): a track kept as it is must be one the new file's container can hold. WebM holds only
+// Opus or Vorbis, so a small stereo AAC track (kept elsewhere: "never bigger") is made Opus, and the log
+// does not say it was kept; MP4 can't hold Vorbis, so with Stereo AAC a small Vorbis track is made AAC.
+func TestKeptTrackTheContainerCannotHold(t *testing.T) {
+	SetAvailableFormats(allEncoders)
+	defer SetAvailableFormats(nil)
+	for _, c := range []struct {
+		name, format, fileType, audio string
+		track                         media.Stream
+		want                          string // the track's encoder, or "copy"
+	}{
+		{"webm, 128k stereo AAC", "vp9", "webm", "stereo_opus", media.Stream{Codec: "aac", Channels: 2, BitrateKbps: 128}, "libopus"},
+		{"webm, mono AAC of unknown bitrate", "av1", "webm", "stereo_opus", media.Stream{Codec: "aac", Channels: 1}, "libopus"},
+		{"webm, small stereo Vorbis", "vp9", "webm", "stereo_opus", media.Stream{Codec: "vorbis", Channels: 2, BitrateKbps: 96}, "copy"},
+		{"mkv, 128k stereo AAC", "vp9", "mkv", "stereo_opus", media.Stream{Codec: "aac", Channels: 2, BitrateKbps: 128}, "copy"},
+		{"mp4, small stereo Vorbis", "hevc", "mp4", "stereo_aac", media.Stream{Codec: "vorbis", Channels: 2, BitrateKbps: 96}, "aac"},
+		{"mp4, small stereo MP3", "hevc", "mp4", "stereo_aac", media.Stream{Codec: "mp3", Channels: 2, BitrateKbps: 96}, "copy"},
+	} {
+		s := DefaultSelectors(3)
+		s.Format, s.FileType, s.Audio, s.OnlyMyLanguages = c.format, c.fileType, c.audio, false
+		if err := s.Validate(); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		c.track.Type, c.track.Index = "audio", 1
+		p := s.Template().Compile(h264(1920, 1080, 8000, c.track))
+		got := "copy"
+		for _, o := range p.Tracks {
+			if o.Index == 1 && o.Type == "audio" && !o.Drop {
+				got = o.Encoder
+			}
+		}
+		if got != c.want || p.Skip != "" {
+			t.Errorf("%s: %s (skip %q), want %s", c.name, got, p.Skip, c.want)
+		}
+		if p.SmallKept != (got == "copy" && c.track.Codec != map[string]string{"stereo_opus": "opus", "stereo_aac": "aac"}[c.audio]) {
+			t.Errorf("%s: SmallKept %v with %s", c.name, p.SmallKept, got)
+		}
+	}
+}
