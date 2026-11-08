@@ -85,3 +85,17 @@ func TestCountVideoPacketsWithSideData(t *testing.T) {
 		t.Error("no count in the first field is an error")
 	}
 }
+
+// A phone video's Display Matrix (#81): its rotation is read; ±90/270 is a quarter turn.
+func TestDisplayMatrixRotation(t *testing.T) {
+	i, err := ParseProbe([]byte(`{"streams":[{"codec_type":"video","codec_name":"h264","width":640,"height":360,
+	 "side_data_list":[{"side_data_type":"Display Matrix","displaymatrix":"...","rotation":-90}]}],"format":{}}`))
+	if err != nil || i.Video().Rotation != -90 || !i.Video().Quarter() {
+		t.Fatalf("%+v %v", i.Video(), err)
+	}
+	for r, q := range map[int]bool{90: true, 270: true, -270: true, 180: false, 0: false} {
+		if (Stream{Rotation: r}).Quarter() != q {
+			t.Errorf("%d", r)
+		}
+	}
+}

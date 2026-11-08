@@ -403,3 +403,27 @@ func TestRealSliderBalanced(t *testing.T) {
 		}
 	})
 }
+
+// A phone video (#81, QA cdcbcb9): its Display Matrix turns it sideways; ffmpeg encodes the picture
+// upright, so the new file is 360x640 with no rotation left, plays upright, and passes the checks.
+func TestRealRotatedPhoneVideo(t *testing.T) {
+	needTools(t)
+	dir := t.TempDir()
+	base, src := filepath.Join(dir, "base.mp4"), filepath.Join(dir, "rot.mp4")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=4:size=640x360:rate=25", "-f", "lavfi", "-i", "sine=duration=4",
+		"-c:v", "libx264", "-b:v", "3000k", "-c:a", "aac", base)
+	runFFmpeg(t, "-display_rotation", "90", "-i", base, "-c", "copy", src)
+	if v := probe(t, src).Video(); v.Rotation == 0 || !v.Quarter() {
+		t.Fatalf("the test file has no rotation: %+v", v)
+	}
+	st, id := realJob(t, src, 4)
+	if err := realWorker(st, media.OSExec{}).run(t); err != nil {
+		t.Fatal(err)
+	}
+	if j, _ := st.Get(id); j.Status != jobs.Done {
+		t.Fatalf("%s %q", j.Status, j.Error)
+	}
+	if v := probe(t, src).Video(); v.Codec != "hevc" || v.Width != 360 || v.Height != 640 || v.Rotation != 0 {
+		t.Errorf("new file %+v: want 360x640 upright, no rotation left", v)
+	}
+}

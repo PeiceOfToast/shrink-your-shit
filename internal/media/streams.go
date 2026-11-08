@@ -50,7 +50,10 @@ type Stream struct {
 	// DolbyVision and HDR10Plus come from stream-level side data. HDR10+ is often carried per
 	// frame, which ffprobe's stream data may not show, so a false HDR10Plus is not proof of absence.
 	DolbyVision bool `json:"dolbyVision,omitempty"`
-	HDR10Plus   bool `json:"hdr10plus,omitempty"`
+	// Rotation is the Display Matrix's rotation in degrees (a phone video: 90 or -90), 0 when none.
+	// ffmpeg turns the picture upright when it encodes, so the new file's size is swapped for ±90/270.
+	Rotation  int  `json:"rotation,omitempty"`
+	HDR10Plus bool `json:"hdr10plus,omitempty"`
 
 	// Audio
 	Channels      int    `json:"channels,omitempty"`
@@ -270,6 +273,9 @@ func parseStream(m map[string]any, position int) Stream {
 				if strings.Contains(t, "hdr10+") || strings.Contains(t, "2094-40") {
 					s.HDR10Plus = true
 				}
+				if strings.Contains(t, "display matrix") {
+					s.Rotation = int(num(sd, "rotation"))
+				}
 			}
 		}
 	case "audio":
@@ -318,4 +324,11 @@ func (s Stream) Lossless() bool {
 		return true
 	}
 	return false
+}
+
+// Quarter is whether the stream's rotation turns it sideways (±90 or ±270 degrees): its picture is
+// then shown with width and height swapped.
+func (s Stream) Quarter() bool {
+	r := ((s.Rotation % 360) + 360) % 360
+	return r == 90 || r == 270
 }

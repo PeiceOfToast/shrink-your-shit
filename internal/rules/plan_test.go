@@ -3,6 +3,7 @@
 package rules
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -346,5 +347,18 @@ func TestEverySkipHasACode(t *testing.T) {
 	a, b := Snapshot{Plan: Plan{SkipCode: "x"}}, Snapshot{}
 	if a.Fingerprint() != b.Fingerprint() {
 		t.Error("the skip code is not a setting")
+	}
+}
+
+// #81: a ±90° Display Matrix swaps the new file's size (ffmpeg encodes it upright); 180° does not;
+// a downscale applies to the upright picture.
+func TestRotationSwapsTheExpectedSize(t *testing.T) {
+	for rot, want := range map[int]string{90: "360x640", -90: "360x640", 270: "360x640", 180: "640x360", 0: "640x360"} {
+		i := probe("h264", 640, 360, 25, 3000)
+		i.Streams[0].Rotation = rot
+		e := LegacyTemplate(Default(), "replace").Compile(i).Expect(i, 0)
+		if got := fmt.Sprintf("%dx%d", e.Streams[0].Width, e.Streams[0].Height); got != want {
+			t.Errorf("rotation %d: %s, want %s", rot, got, want)
+		}
 	}
 }
