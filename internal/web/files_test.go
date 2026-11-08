@@ -215,6 +215,13 @@ func TestCheckOutput(t *testing.T) {
 	if code, body := post(t, srv, "PUT", path+"/setting", `{"quality":3,"speed":"slower","afterConverting":"folder","outputDir":`+strconv.Quote(filepath.Join(lib.Path, "x"))+`}`); code != 400 || errCode(body) != "inside_library" {
 		t.Errorf("save inside: %d %s", code, body)
 	}
+	// ui-shop QA (qa-standard d): a system folder is refused, at the check and on Save, whoever the server runs as
+	if got := check(jobs.SystemDirForTest()); got != "system_folder" {
+		t.Errorf("a system folder: %q", got)
+	}
+	if code, body := post(t, srv, "PUT", path+"/setting", `{"quality":3,"speed":"slower","afterConverting":"folder","outputDir":`+strconv.Quote(jobs.SystemDirForTest())+`}`); code != 400 || errCode(body) != "system_folder" {
+		t.Errorf("save with a system folder: %d %s", code, body)
+	}
 	if code, body := post(t, srv, "PUT", path+"/setting", `{"quality":3,"speed":"slower","afterConverting":"folder"}`); code != 400 || errCode(body) != "output_dir_needed" {
 		t.Errorf("save without folder: %d %s", code, body)
 	}

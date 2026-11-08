@@ -239,7 +239,11 @@ func outputBlockers(store *jobs.Store, flowID int64, dir string, moreLibraries .
 		return out
 	}
 	dir = filepath.Clean(dir)
-	real := resolved(dir)  // links followed, so an alias can't hide a folder inside a library (review 6cafc6f)
+	real := resolved(dir)                                  // links followed, so an alias can't hide a folder inside a library (review 6cafc6f)
+	if jobs.SystemFolder(dir) || jobs.SystemFolder(real) { // whoever the server runs as (ui-shop QA: root could write /etc)
+		add("system_folder", "This is a system folder. Choose a folder for your videos.")
+		return out
+	}
 	paths := moreLibraries // a library being added to this flow or moved (checked before it is saved)
 	if libs, err := store.Libraries(); err == nil {
 		for _, l := range libs {
