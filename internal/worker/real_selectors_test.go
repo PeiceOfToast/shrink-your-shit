@@ -3,6 +3,7 @@
 package worker
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -238,4 +239,89 @@ func TestRealReplaceWithNewFileType(t *testing.T) {
 	if _, err := os.Stat(mkv); err == nil {
 		t.Error("Movie.mkv is still there after getting the original back")
 	}
+}
+
+// Basic's defaults on real files (S4): (1) stereo AAC in my language: a 5.1 English track becomes stereo
+// AAC, a French one is dropped; (2) an HEVC MP4 is repackaged as Movie.mkv with its video copied, not
+// encoded; (3) an MP4's mov_text subtitle becomes SRT text inside the MKV, the text kept.
+func TestRealBasicDefaults(t *testing.T) {
+	needTools(t)
+	basicRun := func(t *testing.T, src string, audio string) (*jobs.Store, int64) {
+		tmpl := rules.BasicTemplate(3, audio)
+		tmpl.Languages = "eng"
+		st, id := realJob(t, src, 5)
+		w := realWorker(st, media.OSExec{})
+		w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+		w.KeepDays, w.Journal = func() int { return 7 }, st // the .mp4 to .mkv rename is journaled (25a-2)
+		w.run(t)
+		return st, id
+	}
+	t.Run("stereo AAC in my language", func(t *testing.T) {
+		dir := t.TempDir()
+		src := filepath.Join(dir, "Movie.mkv")
+		runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=5:size=1280x720:rate=25",
+			"-f", "lavfi", "-i", "sine=duration=5:frequency=440", "-f", "lavfi", "-i", "sine=duration=5:frequency=660",
+			"-map", "0", "-map", "1", "-map", "2", "-c:v", "libx264", "-b:v", "5000k",
+			"-c:a:0", "eac3", "-ac:a:0", "6", "-c:a:1", "aac", "-ac:a:1", "2",
+			"-metadata:s:a:0", "language=eng", "-metadata:s:a:1", "language=fre", src)
+		st, id := basicRun(t, src, "")
+		if j, _ := st.Get(id); j.Status != jobs.Done {
+			t.Fatalf("%s %q", j.Status, j.Error)
+		}
+		a := probe(t, src).Audio()
+		if len(a) != 1 || a[0].Codec != "aac" || a[0].Channels != 2 || a[0].Language != "eng" {
+			t.Errorf("audio %+v", a)
+		}
+	})
+	t.Run("HEVC MP4 repackaged as MKV", func(t *testing.T) {
+		dir := t.TempDir()
+		src := filepath.Join(dir, "Movie.mp4")
+		runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=5:size=1280x720:rate=25", "-f", "lavfi", "-i", "sine=duration=5",
+			"-c:v", "libx265", "-preset", "ultrafast", "-tag:v", "hvc1", "-c:a", "aac", "-ac", "2", "-metadata:s:a:0", "language=eng", src)
+		before := probe(t, src)
+		st, id := basicRun(t, src, "")
+		mkv := filepath.Join(dir, "Movie.mkv")
+		if j, _ := st.Get(id); j.Status != jobs.Done || j.OutputPath != mkv {
+			t.Fatalf("%+v", j)
+		}
+		after := probe(t, mkv)
+		if after.Container != "matroska,webm" || after.Video().Codec != "hevc" || after.Video().Width != before.Video().Width {
+			t.Errorf("Movie.mkv: %s %+v", after.Container, after.Video())
+		}
+		if snap := plan(t, st, id); !snap.Video.Copy {
+			t.Error("the video was encoded, not copied")
+		}
+	})
+	t.Run("mov_text becomes SRT text in the MKV", func(t *testing.T) {
+		dir := t.TempDir()
+		os.WriteFile(filepath.Join(dir, "a.srt"), []byte("1\n00:00:00,000 --> 00:00:02,000\nhello there\n"), 0o644)
+		src := filepath.Join(dir, "Movie.mp4")
+		runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=5:size=1280x720:rate=25", "-f", "lavfi", "-i", "sine=duration=5",
+			"-i", filepath.Join(dir, "a.srt"), "-map", "0", "-map", "1", "-map", "2", "-c:v", "libx264", "-b:v", "5000k",
+			"-c:a", "aac", "-ac", "2", "-c:s", "mov_text", "-metadata:s:a:0", "language=eng", "-metadata:s:s:0", "language=eng", src)
+		st, id := basicRun(t, src, "")
+		mkv := filepath.Join(dir, "Movie.mkv")
+		if j, _ := st.Get(id); j.Status != jobs.Done {
+			t.Fatalf("%s %q", j.Status, j.Error)
+		}
+		subs := probe(t, mkv).Subtitles()
+		if len(subs) != 1 || subs[0].Codec != "subrip" || subs[0].Language != "eng" {
+			t.Fatalf("subtitles %+v", subs)
+		}
+		out, err := exec.Command("ffmpeg", "-v", "error", "-i", mkv, "-map", "0:s:0", "-f", "srt", "-").Output()
+		if err != nil || !strings.Contains(string(out), "hello there") {
+			t.Errorf("the text: %q %v", out, err)
+		}
+	})
+}
+
+// plan is the Plan job id ran with (its snapshot).
+func plan(t *testing.T, st *jobs.Store, id int64) rules.Plan {
+	t.Helper()
+	j, _ := st.Get(id)
+	var snap struct{ Plan rules.Plan }
+	if err := json.Unmarshal([]byte(j.Plan), &snap); err != nil {
+		t.Fatalf("plan %q: %v", j.Plan, err)
+	}
+	return snap.Plan
 }

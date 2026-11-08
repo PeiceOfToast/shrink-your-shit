@@ -265,7 +265,7 @@ func (p *Previewer) compute(root string, files []file, t rules.Template, done *a
 // rules.NearMinBPP of its position's threshold counts from 0 at the low end (it may save little or
 // nothing). There is no minimum saving: such a file is converted all the same ("always standardize").
 func Saving(t rules.Template, plan rules.Plan, info media.Info, size int64) (low, high int64) {
-	if plan.Skip != "" || size <= 0 {
+	if plan.Skip != "" || size <= 0 || plan.Video.Copy { // repackaged (S4): the video is copied, nothing saved there
 		return 0, 0
 	}
 	pos := t.EstimatePosition()

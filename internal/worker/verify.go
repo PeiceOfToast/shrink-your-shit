@@ -165,6 +165,9 @@ func (w *Worker) verify(ctx context.Context, src media.Info, exp rules.Expect, s
 	if err := w.decodeCheck(ctx, out, tmp); err != nil {
 		return err
 	}
+	if exp.VideoCopied { // repackaged (S4): the video is the same bytes, so there is no picture to compare
+		return nil
+	}
 	return w.ssimCheck(ctx, src, out, srcPath, tmp, exp.MinSSIM)
 }
 

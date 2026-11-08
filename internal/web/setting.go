@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -32,6 +33,9 @@ func settingView(f jobs.Flow) map[string]any {
 	if s, ok := f.Template.SelectorsView(); ok {
 		b, _ := json.Marshal(s)
 		json.Unmarshal(b, &v)
+	}
+	if f.Template.Kind == rules.KindSlider { // Basic (S4): its audio choice and fixed facts
+		v["becomes"] = rules.BasicBecomes
 	}
 	return v
 }
@@ -168,6 +172,26 @@ func settingRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 				return
 			}
 		}
+		if q, audio, basic := readBasic(body); basic { // a Basic save (S4): quality and maybe audio
+			if _, ok := rules.SliderAt(q); !ok {
+				apiError(w, http.StatusBadRequest, "invalid_quality", "quality must be a slider position from 1 to 5. Nothing was changed.")
+				return
+			}
+			if audio != "" && audio != "keep_all" && len(store.Languages()) == 0 {
+				apiError(w, http.StatusBadRequest, "languages_needed", rules.LanguagesNeeded)
+				return
+			}
+			if audio == "" { // not sent (the slider alone): the flow keeps its audio choice
+				if l, err := store.GetLibrary(id); err == nil {
+					if f, err := store.GetFlow(l.FlowID); err == nil && f.Template.Kind == rules.KindSlider {
+						audio = f.Template.Params.Audio
+					}
+				}
+			}
+			l, err := store.SaveTemplate(id, rules.BasicTemplate(q, audio), choice.SharedFlowChoice)
+			reply(w, l, err)
+			return
+		}
 		for k := range body {
 			if selectorFields[strings.ToLower(k)] { // the body's shape decides (addendum 7): a selectors save
 				s, err := readSelectors(body, store.Languages())
@@ -181,24 +205,8 @@ func settingRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 				return
 			}
 		}
-		var in struct {
-			Quality          int
-			SharedFlowChoice string
-		}
-		if b, err := json.Marshal(body); err != nil || json.Unmarshal(b, &in) != nil {
-			apiError(w, http.StatusBadRequest, "invalid_json", "The request body is not valid JSON.")
-			return
-		}
-		if _, ok := rules.SliderAt(in.Quality); !ok {
-			apiError(w, http.StatusBadRequest, "invalid_quality", "quality must be a slider position from 1 to 5. Nothing was changed.")
-			return
-		}
-		if c := in.SharedFlowChoice; c != "" && c != "change_both" && c != "make_copy" {
-			apiError(w, http.StatusBadRequest, "invalid_choice", "sharedFlowChoice must be change_both or make_copy. Nothing was changed.")
-			return
-		}
-		l, err := store.SaveSlider(id, in.Quality, in.SharedFlowChoice)
-		reply(w, l, err)
+		// neither Basic nor Standard: quality is not a number
+		apiError(w, http.StatusBadRequest, "invalid_json", "The request body is not valid JSON.")
 	})
 	api.HandleFunc("POST /api/libraries/{id}/setting/replace-custom", func(w http.ResponseWriter, r *http.Request) {
 		id, ok := libID(w, r)
@@ -253,7 +261,8 @@ func flowSteps(t rules.Template) []map[string]any {
 			add("video", "Limit to "+s.MaxBitrate+" Mbps", fmt.Sprintf("maxrate %dk, bufsize %dk", n*1000, 2*n*1000))
 		}
 		switch s.Audio {
-		case "my_languages":
+		case "stereo_aac": // Basic's default (S4)
+			add("audio", "Make the audio stereo AAC in your languages", "each kept track: 2 channels, 160 kbps; one already stereo AAC is kept as it is; with no track in your languages, the main one")
 			add("audio", "Keep only audio in my languages", "tracks with no language are kept; if none is in your languages, all are kept")
 		case "aac", "eac3", "opus":
 			add("audio", map[string]string{"aac": "Convert to AAC", "eac3": "Convert to E-AC-3", "opus": "Convert to Opus"}[s.Audio],
@@ -301,4 +310,25 @@ func flowSteps(t rules.Template) []map[string]any {
 		return []map[string]any{}
 	}
 	return steps
+}
+
+// readBasic reads a Basic (slider) save (S4): a body whose only choice besides quality is audio, with one
+// of Basic's values, or quality alone. audio is "" when it is not sent. A Standard body sends its other
+// choices too, so it is never read as Basic.
+func readBasic(body map[string]json.RawMessage) (quality int, audio string, ok bool) {
+	for k, v := range body {
+		switch lk := strings.ToLower(k); {
+		case lk == "quality":
+			if json.Unmarshal(v, &quality) != nil {
+				return 0, "", false
+			}
+		case lk == "audio":
+			if json.Unmarshal(v, &audio) != nil || !slices.Contains(rules.AvailableBasicAudio, audio) {
+				return 0, "", false
+			}
+		case selectorFields[lk], !settingEcho[lk] && lk != "sharedflowchoice":
+			return 0, "", false // a Standard choice, or no choice at all (refused as such elsewhere)
+		}
+	}
+	return quality, audio, true
 }

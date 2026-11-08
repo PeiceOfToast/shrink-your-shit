@@ -36,7 +36,10 @@ type Template struct {
 // Params are a template's values. A slider template uses Quality; a legacy one the rule fields
 // and Output.
 type Params struct {
-	Quality        int    `json:"quality,omitempty"`
+	Quality int `json:"quality,omitempty"`
+	// Audio is a slider (Basic) flow's audio choice (S4): stereo_aac (also when empty: the default),
+	// my_languages or keep_all (BasicAudio).
+	Audio          string `json:"audio,omitempty"`
 	FromCodec      string `json:"fromCodec,omitempty"`
 	MinBitrateKbps int    `json:"minBitrateKbps,omitempty"`
 	CRF            int    `json:"crf,omitempty"`
@@ -90,6 +93,17 @@ const SliderPreset = "medium"
 func SliderTemplate(quality int) Template {
 	return Template{Kind: KindSlider, Params: Params{Quality: quality}, CompilerVersion: CompilerVersion}
 }
+
+// BasicTemplate is a Basic flow (S4): slider position quality with an audio choice ("" = the default).
+func BasicTemplate(quality int, audio string) Template {
+	t := SliderTemplate(quality)
+	t.Params.Audio = audio
+	return t
+}
+
+// BasicBecomes are a Basic flow's fixed facts (S4, DESIGN/REDESIGN A5): the page's "Your files become"
+// line reads them, with its audio part from the choice.
+var BasicBecomes = map[string]string{"video": "HEVC", "resolution": "same", "fileType": "MKV"}
 
 // LegacyTemplate keeps a rule and output mode exactly as given.
 func LegacyTemplate(r Rule, output string) Template {

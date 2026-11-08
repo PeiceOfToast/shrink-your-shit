@@ -177,7 +177,7 @@ func (s *scenario) handle(name string, args []string) (string, string, error) {
 		return s.outSpec.json(), "", nil
 	case "ffmpeg":
 		switch {
-		case s.has(args, "libx265"):
+		case s.has(args, "libx265") || s.has(args, "-progress"): // the encode (or a repackaging, S4: -c copy only)
 			if s.onEncode != nil {
 				s.onEncode()
 			}
@@ -1119,4 +1119,26 @@ func TestABiggerResultIsKept(t *testing.T) {
 	bad.ssimStderr = "[Parsed_ssim_0] SSIM Y:0.50 U:0.50 V:0.50 All:0.500000 (3.0)"
 	bad.run(Replace)
 	bad.assertKept("too different")
+}
+
+// Basic repackages an HEVC file it would only change around the picture (S4): the video is copied (no
+// encode), the 5.1 track becomes stereo AAC, the picture comparison is not run (the same video bytes),
+// and the job is done.
+func TestBasicRepackagesHEVC(t *testing.T) {
+	s := newScenario(t)
+	s.srcSpec.streams = []map[string]any{vid("hevc", 640, 360, "yuv420p"), aud("eac3", "eng", 6), sub("subrip", "eng", false), att("font.ttf")}
+	s.outSpec.streams = []map[string]any{vid("hevc", 640, 360, "yuv420p"), aud("aac", "eng", 2), sub("subrip", "eng", false), att("font.ttf")}
+	w := s.worker(Replace)
+	tmpl := rules.BasicTemplate(3, "")
+	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.RunOne(context.Background())
+	if j := s.job(); j.Status != jobs.Done {
+		t.Fatalf("%s %q", j.Status, j.Error)
+	}
+	if s.count("libx265") != 0 || s.count("-ac:a:0 2") != 1 {
+		t.Errorf("not a repackaging:\n%s", strings.Join(s.calls, "\n"))
+	}
+	if s.count("ssim") != 0 {
+		t.Error("the picture comparison ran on a copied video")
+	}
 }

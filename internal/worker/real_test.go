@@ -391,10 +391,10 @@ func TestRealSliderBalanced(t *testing.T) {
 			t.Errorf("%+v", v)
 		}
 	})
-	t.Run("HEVC is skipped", func(t *testing.T) {
+	t.Run("HEVC in MKV with nothing to change is skipped (Basic, S4)", func(t *testing.T) {
 		p := gen("h.mkv", "1280x720", "libx265", 5000, "-x265-params", "log-level=error")
-		if s := balanced.Compile(probe(t, p)).Skip; s != "HEVC is already an efficient format" {
-			t.Errorf("%q", s)
+		if c := balanced.Compile(probe(t, p)).SkipCode; c != rules.SkipAlreadyInFormat {
+			t.Errorf("%q", c)
 		}
 	})
 	t.Run("a small file is converted too (always standardize)", func(t *testing.T) {

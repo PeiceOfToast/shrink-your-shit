@@ -466,6 +466,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// the result must look like. Whether to convert it was the scanner's decision (as before Plans);
 	// only a flow that cannot say how to convert stops the job here.
 	plan := tmpl.Compile(src)
+	if plan.MainAudioUsed { // Basic's stereo AAC found no track in the person's languages (S4)
+		log.Printf("worker %s: job %d (%s): %s", w.ID, job.ID, job.Path, rules.NoAudioInMyLanguageMain)
+	}
 	if plan.Video.Codec == "" {
 		return "", failed("This library's setting can't convert this file, so it was left as it is.", fmt.Errorf("its library's flow cannot convert it: %s", plan.Skip))
 	}

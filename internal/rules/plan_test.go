@@ -128,7 +128,7 @@ func TestSliderCRFFollowsTheResolution(t *testing.T) {
 
 func TestSliderConvertsOnlyOlderFormats(t *testing.T) {
 	for codec, wantSkip := range map[string]string{
-		"hevc": "HEVC is already an efficient format", "av1": "AV1 is already an efficient format",
+		"hevc": "it is already HEVC in MKV with the audio you chose", "av1": "AV1 is already an efficient format", // S4: Basic repackages HEVC, here nothing to change
 		"vp9": "VP9 is already an efficient format", "prores": "prores is not a format this setting converts",
 		"h264": "", "mpeg2video": "", "mpeg4": "", "vc1": "", "wmv3": "",
 	} {
@@ -184,18 +184,34 @@ func TestSliderEncodesTheMainVideoNotCoverArt(t *testing.T) {
 	}
 }
 
-func TestSliderSkipsSubtitlesTheContainerCannotHold(t *testing.T) {
-	info := probe("h264", 1920, 1080, 24, 12000, media.Stream{Type: "subtitle", Codec: "hdmv_pgs_subtitle"})
+// Basic saves MKV (S4), which holds picture subtitles; MP4's text subtitles (mov_text) become SRT text
+// inside it, with their language and flags (orch-lead 21:19Z). Standard does the same when its file type
+// is MKV, and leaves them alone when the file stays MP4.
+func TestMovTextBecomesSRTInMKV(t *testing.T) {
+	info := probe("h264", 1920, 1080, 24, 12000, media.Stream{Index: 2, Type: "subtitle", Codec: "hdmv_pgs_subtitle"})
+	info.Container = "mov,mp4,m4a,3gp,3g2,mj2"
 	if p := SliderTemplate(3).Compile(info); p.Skip != "" {
-		t.Errorf("mkv holds any subtitle: %q", p.Skip)
+		t.Errorf("Basic, picture subtitles from an mp4: %q", p.Skip)
 	}
-	info.Container = "mp4"
-	if p := SliderTemplate(3).Compile(info); !strings.Contains(p.Skip, "hdmv_pgs_subtitle subtitles cannot be kept in mp4") {
-		t.Errorf("mp4: %q", p.Skip)
+	info.Streams[1] = media.Stream{Index: 2, Type: "subtitle", Codec: "mov_text", Language: "eng", Forced: true, Default: true, SubKind: "text"}
+	for name, tmpl := range map[string]Template{"basic": SliderTemplate(3), "standard mkv": standard(func(s *Selectors) { s.FileType = "mkv" })} {
+		p := tmpl.Compile(info)
+		args := strings.Join(p.FFmpegArgs("a.mp4", "b.mkv"), " ")
+		if p.Skip != "" || !strings.Contains(args, "-c:s:0 srt") {
+			t.Errorf("%s: skip %q args %s", name, p.Skip, args)
+		}
+		var sub StreamExpect
+		for _, x := range p.Expect(info, 0).Streams {
+			if x.Type == "subtitle" {
+				sub = x
+			}
+		}
+		if sub.Codec != "subrip" || sub.Language != "eng" || !sub.Forced || !sub.Default || !sub.CheckDefault {
+			t.Errorf("%s: expected subtitle %+v", name, sub)
+		}
 	}
-	info.Streams[1].Codec = "mov_text"
-	if p := SliderTemplate(3).Compile(info); p.Skip != "" {
-		t.Errorf("mp4 with mov_text: %q", p.Skip)
+	if p := standard(func(s *Selectors) {}).Compile(info); strings.Contains(strings.Join(p.FFmpegArgs("a.mp4", "b.mp4"), " "), "srt") {
+		t.Error("Standard keeping the file type must not convert mov_text")
 	}
 }
 
@@ -300,25 +316,23 @@ func TestSliderUsesTheMainVideosBitrate(t *testing.T) {
 }
 
 // ffprobe names MP4/MOV by their alias list; the subtitle check must see through it.
+// ffprobe names MP4/MOV by their alias list; the subtitle check must see through it (a Standard flow
+// that keeps the file type: Basic saves MKV since S4).
 func TestSliderSubtitleCheckWithTheRealMP4Name(t *testing.T) {
 	info := fixture(t, "real/plain.json")
 	if !strings.Contains(info.Container, "mp4") || info.Container == "mp4" {
 		t.Fatalf("fixture's format_name is %q", info.Container)
 	}
+	keep := standard(func(s *Selectors) {})
 	pgs := info
 	pgs.Streams = append(append([]media.Stream{}, info.Streams...), media.Stream{Type: "subtitle", Codec: "hdmv_pgs_subtitle"})
-	if p := SliderTemplate(1).Compile(pgs); !strings.Contains(p.Skip, "hdmv_pgs_subtitle subtitles cannot be kept") {
+	if p := keep.Compile(pgs); !strings.Contains(p.Skip, "hdmv_pgs_subtitle subtitles cannot be kept") {
 		t.Errorf("PGS in %q: skip %q", info.Container, p.Skip)
 	}
 	movText := info
 	movText.Streams = append(append([]media.Stream{}, info.Streams...), media.Stream{Type: "subtitle", Codec: "mov_text"})
-	if p := SliderTemplate(1).Compile(movText); strings.Contains(p.Skip, "subtitles") {
+	if p := keep.Compile(movText); strings.Contains(p.Skip, "subtitles") {
 		t.Errorf("mov_text in %q: skip %q", info.Container, p.Skip)
-	}
-	mkv := pgs
-	mkv.Container = "matroska,webm"
-	if p := SliderTemplate(1).Compile(mkv); strings.Contains(p.Skip, "subtitles") {
-		t.Errorf("PGS in mkv: skip %q", p.Skip)
 	}
 }
 
@@ -326,7 +340,7 @@ func TestSliderSubtitleCheckWithTheRealMP4Name(t *testing.T) {
 // of the fingerprint, so jobs recorded before it existed keep theirs.
 func TestEverySkipHasACode(t *testing.T) {
 	codes := map[string]bool{SkipAlreadyEfficient: true, SkipAlreadyHEVC: true, SkipOtherFormat: true, SkipNoVideo: true,
-		SkipUnknownBitrate: true, SkipCannotKeepTrack: true, SkipSettingCannotRun: true, SkipHDR: true}
+		SkipUnknownBitrate: true, SkipCannotKeepTrack: true, SkipSettingCannotRun: true, SkipHDR: true, SkipAlreadyInFormat: true}
 	tmpls := []Template{LegacyTemplate(Default(), "replace"), SliderTemplate(9), {Kind: KindCustom}}
 	for q := 1; q <= 5; q++ {
 		tmpls = append(tmpls, SliderTemplate(q))
@@ -349,6 +363,14 @@ func TestEverySkipHasACode(t *testing.T) {
 	if a.Fingerprint() != b.Fingerprint() {
 		t.Error("the skip code is not a setting")
 	}
+}
+
+// standard is a Standard (selectors) flow at Balanced with f applied, as a selectors template even when it
+// equals a slider position (Template() would read that back as Basic).
+func standard(f func(*Selectors)) Template {
+	s := DefaultSelectors(3)
+	f(&s)
+	return Template{Kind: KindSelectors, Selectors: &s, CompilerVersion: CompilerVersion}
 }
 
 // #81: a ±90° Display Matrix swaps the new file's size (ffmpeg encodes it upright); 180° does not;

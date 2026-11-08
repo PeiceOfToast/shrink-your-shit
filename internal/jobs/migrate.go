@@ -171,6 +171,20 @@ INSERT INTO app_meta(key, value) VALUES ('paused', '1') ON CONFLICT(key) DO UPDA
 	{15, "library last scan", `
 ALTER TABLE libraries ADD COLUMN last_scan TEXT NOT NULL DEFAULT '';
 ALTER TABLE libraries ADD COLUMN last_scan_videos INTEGER NOT NULL DEFAULT 0;`},
+	// S4, Basic defaults: what an existing Basic (slider) flow does after the update. Design's call,
+	// which the manager may overrule, so it is all in this one step: such a flow keeps every audio track
+	// as it is (audio keep_all; a new Basic flow gets stereo AAC in the person's language) and now saves
+	// MKV like every Basic flow (.mp4 and .avi files get a new name), and an existing install with one
+	// gets the second sentence of the update notice (basic_changed_by_update, basicFlowsChanged). HEVC
+	// files skipped as already_hevc are forgotten, so the next scan decides them again: Basic now
+	// repackages those not yet in MKV (a Standard flow skips them again, as before).
+	{16, "existing basic flows", `
+UPDATE flows SET template = json_set(template, '$.params.audio', 'keep_all')
+WHERE json_extract(template, '$.kind') = 'slider';
+DELETE FROM files WHERE reason = 'already_hevc';
+INSERT INTO app_meta(key, value) SELECT 'basic_changed_by_update', '1'
+WHERE (SELECT version FROM temp.migrate_from) BETWEEN 1 AND 15
+  AND EXISTS (SELECT 1 FROM flows WHERE json_extract(template, '$.kind') = 'slider');`},
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.

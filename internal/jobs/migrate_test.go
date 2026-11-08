@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"os"
 	"path/filepath"
 	"strings"
@@ -387,6 +388,7 @@ func TestMigration7BackfillsSkipReasons(t *testing.T) {
 		`ALTER TABLE originals DROP COLUMN new_path`,                                     // and 11
 		`ALTER TABLE jobs DROP COLUMN attempts`, `ALTER TABLE jobs DROP COLUMN retry_at`, // and 12
 		`ALTER TABLE libraries DROP COLUMN last_scan`, `ALTER TABLE libraries DROP COLUMN last_scan_videos`, // and 15
+		// (16 changes rows only)
 		// (13 changes rows only)
 		`PRAGMA user_version=6`} {
 		if _, err := s.db.Exec(q); err != nil {
@@ -421,7 +423,7 @@ func TestMigration7BackfillsSkipReasons(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	want := map[string]string{"/m/a.mkv": "already_hevc", "/m/b.mkv": "already_hevc", "/m/c.mkv": "format_not_converted",
+	want := map[string]string{"/m/c.mkv": "format_not_converted",
 		"/m/f.mkv": "format_not_converted",
 		"/m/g.mkv": "no_video", "/m/i.mkv": "cannot_keep_track", "/m/j.mkv": "unreadable", "/m/l.mkv": ""}
 	for p, r := range want {
@@ -430,8 +432,9 @@ func TestMigration7BackfillsSkipReasons(t *testing.T) {
 		}
 	}
 	// an unmapped skip is forgotten (7); so are the skips always standardize removed (13): already
-	// efficient (d, e) and unknown bitrate (h), so the next scan looks at those files again
-	for _, p := range []string{"/m/k.mkv", "/m/d.mkv", "/m/e.mkv", "/m/h.mkv"} {
+	// efficient (d, e) and unknown bitrate (h), so the next scan looks at those files again; and S4's
+	// (16) already HEVC (a, b, mapped by 7), which Basic now repackages
+	for _, p := range []string{"/m/k.mkv", "/m/d.mkv", "/m/e.mkv", "/m/h.mkv", "/m/a.mkv", "/m/b.mkv"} {
 		if f, _ := s.GetFile(p); f != nil {
 			t.Errorf("%s should be forgotten: %+v", p, f)
 		}
@@ -446,8 +449,8 @@ func TestMigration7BackfillsSkipReasons(t *testing.T) {
 	// the recovered one hides its output from Skipped; the unknown one hides nothing
 	var skipped int
 	s.db.QueryRow(`SELECT COUNT(*) FROM files WHERE reason<>'' AND NOT ` + convertedSQL).Scan(&skipped)
-	if skipped != 7 {
-		t.Errorf("%d skipped, want the 7 mapped ones still skipped (out.mkv is the conversion's own output)", skipped)
+	if skipped != 5 {
+		t.Errorf("%d skipped, want the 5 mapped ones still skipped (out.mkv is the conversion's own output; a and b are forgotten by 16)", skipped)
 	}
 }
 
@@ -491,7 +494,7 @@ func TestAlwaysStandardizeMigration(t *testing.T) {
 			t.Errorf("%s: %+v", p, j)
 		}
 	}
-	for p, want := range map[string]bool{"/m/small.mkv": false, "/m/wns.mkv": false, "/m/unk.mkv": false, "/m/hevc.mkv": true} {
+	for p, want := range map[string]bool{"/m/small.mkv": false, "/m/wns.mkv": false, "/m/unk.mkv": false, "/m/hevc.mkv": false} { // hevc: forgotten by S4's 16
 		if f, _ := s.GetFile(p); (f != nil) != want {
 			t.Errorf("%s: record %+v, want kept %v", p, f, want)
 		}
@@ -558,4 +561,40 @@ func TestWorkersStartStoppedMigration(t *testing.T) {
 func rewind15(s *Store) {
 	s.db.Exec(`ALTER TABLE libraries DROP COLUMN last_scan`)
 	s.db.Exec(`ALTER TABLE libraries DROP COLUMN last_scan_videos`)
+}
+
+// Migration 16 (S4, design's call): an existing Basic (slider) flow keeps every audio track
+// (audio keep_all) and the install gets the notice's Basic sentence; a new install neither.
+func TestExistingBasicFlowsMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "syp.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
+	s.db.Exec(`UPDATE flows SET template=json_remove(template, '$.params.audio')`) // as before S4
+	s.db.Exec(`DELETE FROM app_meta WHERE key='basic_changed_by_update'`)
+	s.PutFile(File{Path: "/m/hevc.mp4", Size: 1, Decision: "skip: x", Reason: "already_hevc"})
+	s.PutFile(File{Path: "/m/av1.mkv", Size: 1, Decision: "skip: x", Reason: "already_efficient_x"})
+	s.db.Exec(`PRAGMA user_version = 15`)
+	s.Close()
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if r, _ := s.GetFile("/m/hevc.mp4"); r != nil {
+		t.Errorf("an HEVC file skipped before S4 is still decided: %+v", r) // Basic repackages it now
+	}
+	if r, _ := s.GetFile("/m/av1.mkv"); r == nil {
+		t.Error("another skip was forgotten too")
+	}
+	f, _ := s.GetFlow(l.FlowID)
+	if f.Template.Kind != rules.KindSlider || f.Template.Params.Audio != "keep_all" || !s.BasicChangedByUpdate() {
+		t.Errorf("existing Basic flow: %+v, notice %v", f.Template, s.BasicChangedByUpdate())
+	}
+	fresh := open(t)
+	if fresh.BasicChangedByUpdate() {
+		t.Error("a new install got the Basic sentence")
+	}
 }

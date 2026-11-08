@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
-	"reflect"
 	"strings"
 )
 
@@ -140,30 +139,16 @@ func insideLibrary(p string) bool {
 	return true
 }
 
-// Template is the flow these selectors make: the slider position itself when every choice is that
-// position's (addendum 6: kind is derived), else a selectors flow.
+// Template is the flow these selectors make: always a Standard (selectors) flow. Before S4 a Standard
+// save at a position's own values became that slider position, the same recipe; since S4 Basic is its
+// own recipe (stereo AAC, MKV, HEVC repackaged), so a Standard save never turns into Basic, which would
+// drop audio and rename files the person chose to keep (review 6e60704, P1).
 func (s Selectors) Template() Template {
 	if s.Ignore == nil {
 		s.Ignore = []string{}
 	}
-	if s.equal(DefaultSelectors(s.Quality)) {
-		return SliderTemplate(s.Quality)
-	}
 	c := s
 	return Template{Kind: KindSelectors, Selectors: &c, CompilerVersion: CompilerVersion}
-}
-
-func (s Selectors) equal(o Selectors) bool {
-	if len(s.Ignore) != len(o.Ignore) {
-		return false
-	}
-	for i := range s.Ignore {
-		if s.Ignore[i] != o.Ignore[i] {
-			return false
-		}
-	}
-	s.Ignore, o.Ignore = nil, nil
-	return reflect.DeepEqual(s, o)
 }
 
 // SelectorsView is how the Standard editor shows a flow: a slider position as its selectors, a selectors
@@ -171,8 +156,10 @@ func (s Selectors) equal(o Selectors) bool {
 func (t Template) SelectorsView() (Selectors, bool) {
 	switch t.Kind {
 	case KindSlider:
-		if _, ok := SliderAt(t.Params.Quality); ok {
-			return DefaultSelectors(t.Params.Quality), true
+		if _, ok := SliderAt(t.Params.Quality); ok { // Basic: its audio, always MKV (S4)
+			s := DefaultSelectors(t.Params.Quality)
+			s.Audio, s.FileType = BasicAudio(t.Params.Audio), "mkv"
+			return s, true
 		}
 	case KindSelectors:
 		if t.Selectors != nil {
@@ -233,7 +220,7 @@ func (t Template) Warnings() []string {
 	if !s.SkipHDR {
 		out = append(out, `HDR and Dolby Vision files will be converted without their HDR information, so they can look washed out. Turn "Skip HDR and Dolby Vision files" back on to leave them as they are.`)
 	}
-	if w := RenameWarning(s.AfterConverting, s.FileType); w != "" { // 25a-2
+	if w := RenameWarning(s.AfterConverting, s.FileType); w != "" && t.Kind == KindSelectors { // 25a-2 (Basic's MKV: the update notice, S4)
 		out = append(out, w)
 	}
 	return out

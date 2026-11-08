@@ -115,11 +115,11 @@ func TestPreviewCountsAndEstimates(t *testing.T) {
 	p := &Previewer{Store: store(t), Exec: x, FFprobe: "ffprobe"}
 	dir := library(t)
 	r := p.Library(1, dir, rules.SliderTemplate(3), 10*time.Second)
-	if r.Status != "ready" || r.Files != 6 || r.TotalBytes != 7_900_000 || r.CanShrink != 3 { // lean.mkv too: always standardize
+	if r.Status != "ready" || r.Files != 6 || r.TotalBytes != 7_900_000 || r.CanShrink != 4 { // lean.mkv too (always standardize), hevc.mkv repackaged (S4)
 		t.Fatalf("%+v", r)
 	}
 	// the shared file is skipped (slice 23's file guards), as the scanner skips it
-	if fmt.Sprint(r.Skipped) != "map[already_hevc:1 shared_file:1 unreadable:1]" {
+	if fmt.Sprint(r.Skipped) != "map[shared_file:1 unreadable:1]" {
 		t.Errorf("skipped %v", r.Skipped)
 	}
 	if r.SharedNoSaving != 0 {
@@ -283,13 +283,16 @@ func TestSampleInPlainWords(t *testing.T) {
 		return p.Sample(context.Background(), dir, filepath.Join(dir, name), st, rules.SliderTemplate(q))
 	}
 	s := sample("a.mkv", 3)
-	if strings.Join(s.Lines, "|") != "Video: converted to the smaller format, same picture size and length|Audio: 2 tracks kept" {
+	// Basic (S4): each track as stereo AAC (this fake probe gives no channel count, so the AAC one is
+	// converted too)
+	if strings.Join(s.Lines, "|") != "Video: converted to the smaller format, same picture size and length|Audio: 2 converted to AAC" {
 		t.Errorf("%q", s.Lines)
 	}
 	if s.ExpectedBytesLow <= 0 || s.ExpectedBytesLow >= s.ExpectedBytesHigh || s.ExpectedBytesHigh >= 1_000_000 {
 		t.Errorf("expected %d - %d", s.ExpectedBytesLow, s.ExpectedBytesHigh)
 	}
-	if s := sample("hevc.mkv", 3); s.Lines[0] != "Left as it is: it already uses a modern, efficient format." || s.ExpectedBytesLow != 500_000 {
+	// HEVC with audio to change: repackaged as MKV, the video kept, no saving counted (S4)
+	if s := sample("hevc.mkv", 3); s.Lines[0] != "Video: kept as it is (already in the smaller format); the file is only repackaged as an MKV file" || s.ExpectedBytesLow != 500_000 || s.ExpectedBytesHigh != 500_000 {
 		t.Errorf("%+v", s)
 	}
 	if s := sample("bad.mkv", 3); s.Lines[0] != "Left as it is: it can't be read." {
@@ -341,8 +344,8 @@ func TestStartReusesThePreviewsProbes(t *testing.T) {
 		return []scanner.Target{{LibraryID: l.ID, Path: dir, Template: rules.SliderTemplate(3)}}, nil
 	}}
 	sc.ScanOnce(context.Background()) // the first look (slice 23: decided on the second)
-	if n := sc.ScanOnce(context.Background()); n != 3 {
-		t.Errorf("queued %d, want the 3 the Preview said can be shrunk", n)
+	if n := sc.ScanOnce(context.Background()); n != 4 {
+		t.Errorf("queued %d, want the 4 the Preview said can be shrunk", n)
 	}
 	if extra := x.n() - before; extra != 1 { // only bad.mkv, whose probe failed and so was not kept
 		t.Errorf("the scan probed %d files again", extra)
@@ -381,7 +384,7 @@ func TestPreviewCountsRestoredFilesAsSkipped(t *testing.T) {
 	dir := library(t)
 	st.PutFile(jobs.File{Path: filepath.Join(dir, "a.mkv"), Decision: jobs.DecisionRestored})
 	r := (&Previewer{Store: st, Exec: &probes{}, FFprobe: "ffprobe"}).Library(1, dir, rules.SliderTemplate(3), 10*time.Second)
-	if r.Skipped["restored"] != 1 || r.CanShrink != 2 { // b.mp4 and lean.mkv (the shared file is skipped too)
+	if r.Skipped["restored"] != 1 || r.CanShrink != 3 { // b.mp4, lean.mkv and hevc.mkv (repackaged; the shared file is skipped too)
 		t.Errorf("%+v", r)
 	}
 }

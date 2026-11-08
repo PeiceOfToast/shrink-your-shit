@@ -27,6 +27,7 @@ type Plan struct {
 	Container       string      `json:"container,omitempty"`     // the new file's type (its extension, "mkv" or "mp4"); "" = the original's
 	Tracks          []TrackOp   `json:"tracks,omitempty"`        // audio and subtitle tracks dropped or converted (slice 25b); others copied
 	AllAudioKept    bool        `json:"allAudioKept,omitempty"`  // "my languages" matched no audio track, so all of it is kept
+	MainAudioUsed   bool        `json:"mainAudioUsed,omitempty"` // Basic's stereo AAC matched no track: the main one is kept (S4)
 	AudioOrder      []int       `json:"audioOrder,omitempty"`    // the original's audio stream indexes in order, when Tracks has any
 	SubtitleOrder   []int       `json:"subtitleOrder,omitempty"` // and its subtitle stream indexes
 	MinSSIM         float64     `json:"minSSIM,omitempty"`       // picture threshold; 0 = the program's -min-ssim
@@ -43,6 +44,7 @@ const (
 	SkipNoVideo          = "no_video"
 	SkipUnknownBitrate   = "unknown_bitrate"    // its saving cannot be judged
 	SkipCannotKeepTrack  = "cannot_keep_track"  // a track (its subtitles) cannot stay in its container
+	SkipAlreadyInFormat  = "already_in_format"  // Basic (S4): HEVC in MKV with the chosen audio already
 	SkipSettingCannotRun = "setting_cannot_run" // the flow cannot run (missing values, a kind not built yet)
 	SkipHDR              = "hdr_dv"             // HDR or Dolby Vision: left as it is (D3), unless the flow says otherwise
 	// File guards (slice 23, SAF-4), decided from the file itself before any probe (scanner.Guard):
@@ -71,6 +73,9 @@ type VideoEncode struct {
 	MaxRateKbps int `json:"maxRateKbps,omitempty"`
 	// Height scales the picture down to this height, keeping its shape (selectors' resolution); 0 = as it is.
 	Height int `json:"height,omitempty"`
+	// Copy: the video is copied as it is, not encoded (S4: an HEVC file only repackaged as MKV). The
+	// picture comparison is then skipped: the stream is the same bytes.
+	Copy bool `json:"copy,omitempty"`
 }
 
 // Compile makes the Plan for one file. Skip says whether it should be converted (the scanner's
@@ -102,13 +107,16 @@ func (t Template) Compile(info media.Info) Plan {
 			p.Skip, p.SkipCode = fmt.Sprintf("slider position %d does not exist", t.Params.Quality), SkipSettingCannotRun
 			return p
 		}
-		return compileSelectors(p, DefaultSelectors(pos.Position), info, nil)
+		// Basic (S4): the position's selectors, its audio choice, always MKV, replace only
+		s := DefaultSelectors(pos.Position)
+		s.Audio, s.FileType = BasicAudio(t.Params.Audio), "mkv"
+		return compileSelectors(p, s, info, SplitLanguages(t.Languages), true)
 	case KindSelectors:
 		if t.Selectors == nil || t.Selectors.Validate() != nil {
 			p.Skip, p.SkipCode = "its library's setting has a choice this version cannot run", SkipSettingCannotRun
 			return p
 		}
-		return compileSelectors(p, *t.Selectors, info, SplitLanguages(t.Languages))
+		return compileSelectors(p, *t.Selectors, info, SplitLanguages(t.Languages), false)
 	default:
 		p.Skip, p.SkipCode = fmt.Sprintf("flows of kind %q cannot run yet", t.Kind), SkipSettingCannotRun
 		return p
@@ -143,8 +151,13 @@ func (p Plan) FFmpegArgs(in, out string) []string {
 		"-i", in,
 		"-map", "0", "-map", "-0:d",
 		"-c", "copy",
-		"-c:" + v, p.Video.Codec, "-crf", strconv.Itoa(p.Video.CRF), "-preset", p.Video.Preset,
 	}
+	if p.Video.Copy { // repackaged: the video as it is (the global -c copy), audio as planned
+		args = append(args, p.trackArgs()...)
+		args = append(args, out)
+		return p.withSubtitleFiles(args, out)
+	}
+	args = append(args, "-c:"+v, p.Video.Codec, "-crf", strconv.Itoa(p.Video.CRF), "-preset", p.Video.Preset)
 	if p.Video.Height > 0 {
 		args = append(args, "-filter:"+v, "scale=-2:"+strconv.Itoa(p.Video.Height))
 	}
@@ -154,7 +167,12 @@ func (p Plan) FFmpegArgs(in, out string) []string {
 		args = append(args, "-maxrate:"+v, k, "-bufsize:"+v, strconv.Itoa(2*p.Video.MaxRateKbps)+"k")
 	}
 	args = append(args, "-tag:"+v, p.Video.Tag, out)
-	// extracted subtitles: one more output each, next to the new file (the worker installs them)
+	return p.withSubtitleFiles(args, out)
+}
+
+// withSubtitleFiles adds the extracted subtitles: one more output each, next to the new file (the
+// worker installs them).
+func (p Plan) withSubtitleFiles(args []string, out string) []string {
 	for k, o := range p.SubtitleFiles() {
 		args = append(args, "-map", "0:"+strconv.Itoa(o.Index), "-c:s", "srt", StagedSrt(out, k))
 	}
@@ -185,6 +203,22 @@ func (p Plan) trackArgs() []string {
 			if op.Index == idx && op.Encoder != "" {
 				a := "a:" + strconv.Itoa(k)
 				args = append(args, "-c:"+a, op.Encoder, "-b:"+a, strconv.Itoa(op.Kbps)+"k")
+				if op.Channels > 0 { // a downmix (S4's stereo AAC): never more channels than the track has
+					args = append(args, "-ac:"+a, strconv.Itoa(op.Channels))
+				}
+			}
+		}
+		k++
+	}
+	// the k-th subtitle kept (not dropped, not saved as a file) is s:k in the new file
+	k = 0
+	for _, idx := range p.SubtitleOrder {
+		if dropped[idx] {
+			continue
+		}
+		for _, op := range p.Tracks {
+			if op.Index == idx && op.Encoder != "" {
+				args = append(args, "-c:s:"+strconv.Itoa(k), op.Encoder)
 			}
 		}
 		k++
@@ -239,6 +273,16 @@ func (p Plan) Expect(src media.Info, packets int64) Expect {
 			n++
 		}
 	}
+	if p.Video.Copy { // repackaged: the video stays as it was (codec, size); no picture comparison
+		e.VideoCopied = true
+		vs, n := src.ByType("video"), 0
+		for k := range e.Streams {
+			if e.Streams[k].Type == "video" && n < len(vs) {
+				e.Streams[k].Codec = vs[n].Codec // each video stream as it was
+				n++
+			}
+		}
+	}
 	if p.Container != "" {
 		e.Container = Containers[p.Container]
 	}
@@ -270,6 +314,12 @@ func (p Plan) expectTracks(e Expect) Expect {
 				continue
 			case has && o.Codec != "":
 				s.Codec = o.Codec
+				if o.Channels > 0 {
+					s.Channels = o.Channels
+				}
+				if s.Type == "subtitle" { // converted text (mov_text to SRT): its default flag kept too
+					s.CheckDefault = true
+				}
 			}
 		}
 		out = append(out, s)
@@ -340,7 +390,11 @@ func (s Snapshot) Fingerprint() string {
 // are converted; HDR and Dolby Vision are left alone unless SkipHDR is off. Every other file of those
 // formats is converted, however little data it has per pixel: always standardize (USER-REVIEW
 // 2026-11-07; there is no "already small" skip and no minimum saving any more).
-func compileSelectors(p Plan, s Selectors, info media.Info, langs []string) Plan {
+//
+// basic (a Basic flow, S4): an HEVC file is not skipped but repackaged (the video copied, the audio as
+// chosen, MKV), and skipped as already_in_format only when nothing would change; AV1 and VP9 stay
+// skipped as already efficient.
+func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basic bool) Plan {
 	pos, _ := SliderAt(s.Quality)
 	v := info.Video()
 	p.Output, p.MinSSIM = s.AfterConverting, pos.MinSSIM
@@ -374,11 +428,16 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string) Plan
 	}
 	p.Video = VideoEncode{Codec: "libx265", CRF: crf, Preset: SpeedPresets[s.Speed], Tag: "hvc1",
 		Index: info.MainVideoOrdinal(), MaxRateKbps: maxBitrates[s.MaxBitrate] * 1000, Height: height}
-	if name, ok := alreadyEfficient[v.Codec]; ok {
-		p.Skip, p.SkipCode = name+" is already an efficient format", SkipAlreadyHEVC
+	remux := basic && v.Codec == "hevc"
+	name, ok := SliderSources[v.Codec]
+	switch {
+	case remux:
+		p.Video = VideoEncode{Codec: "copy", Index: info.MainVideoOrdinal(), Copy: true}
+		name, ok = "HEVC", true
+	case alreadyEfficient[v.Codec] != "":
+		p.Skip, p.SkipCode = alreadyEfficient[v.Codec]+" is already an efficient format", SkipAlreadyHEVC
 		return p
 	}
-	name, ok := SliderSources[v.Codec]
 	if !ok {
 		p.Skip, p.SkipCode = fmt.Sprintf("%s is not a format this setting converts", v.Codec), SkipOtherFormat
 		return p
@@ -387,8 +446,9 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string) Plan
 		p.Skip, p.SkipCode = hdrSkip, SkipHDR
 		return p
 	}
-	p.Tracks, p.AllAudioKept = planAudio(s.Audio, langs, info)
+	p.Tracks, p.AllAudioKept, p.MainAudioUsed = planAudio(s.Audio, langs, info)
 	p.Tracks = append(p.Tracks, planSubtitles(s.Subtitles, langs, info)...)
+	p.Tracks = append(p.Tracks, movTextToSRT(p.Tracks, p.Container, info)...)
 	if len(p.Tracks) > 0 {
 		for _, a := range info.Audio() {
 			p.AudioOrder = append(p.AudioOrder, a.Index)
@@ -399,6 +459,10 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string) Plan
 	}
 	if why := tracksNotKept(p.remaining(info), p.Container); why != "" {
 		p.Skip, p.SkipCode = why, SkipCannotKeepTrack
+		return p
+	}
+	if remux && info.Container == Containers["mkv"] && !p.changesTracks() {
+		p.Skip, p.SkipCode = "it is already HEVC in MKV with the audio you chose", SkipAlreadyInFormat
 		return p
 	}
 	p.Reason = fmt.Sprintf("%s at %d kbps", name, videoKbps(info, v))
@@ -496,4 +560,33 @@ func tracksNotKept(info media.Info, container string) string {
 		}
 	}
 	return ""
+}
+
+// movTextToSRT converts the MP4 text subtitles (mov_text) an MKV cannot hold as they are into SRT text
+// inside it (S4, orch-lead 21:19Z): the same text, language and flags, kept in the file. Only when the new
+// file is MKV, and only tracks no other op drops, saves as a file or converts.
+func movTextToSRT(ops []TrackOp, container string, info media.Info) (out []TrackOp) {
+	if container != "mkv" {
+		return nil
+	}
+	has := map[int]bool{}
+	for _, o := range ops {
+		has[o.Index] = true
+	}
+	for _, s := range info.Subtitles() {
+		if s.Codec == "mov_text" && !has[s.Index] {
+			out = append(out, TrackOp{Index: s.Index, Type: "subtitle", Encoder: "srt", Codec: "subrip"})
+		}
+	}
+	return out
+}
+
+// changesTracks reports whether the Plan drops or converts any audio or subtitle track.
+func (p Plan) changesTracks() bool {
+	for _, o := range p.Tracks {
+		if o.Drop || o.Encoder != "" || o.ToFile {
+			return true
+		}
+	}
+	return false
 }

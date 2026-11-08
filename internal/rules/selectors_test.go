@@ -14,15 +14,16 @@ func h264(w, h, kbps int, extra ...media.Stream) media.Info {
 	return media.Info{Container: "matroska,webm", VideoCodec: "h264", DurationSec: 60, Streams: append([]media.Stream{v}, extra...)}
 }
 
-// A slider position compiles exactly as the selectors at that position's values: one recipe.
+// Video: a slider position encodes exactly as the Standard selectors at that position's values. But a
+// Standard save at those values stays Standard (review 6e60704, P1): Basic's audio and MKV are its own.
 func TestSliderIsItsDefaultSelectors(t *testing.T) {
 	for q := 1; q <= 5; q++ {
 		s := DefaultSelectors(q)
 		if s.Validate() != nil {
 			t.Fatalf("defaults of %d invalid", q)
 		}
-		if got := s.Template(); got.Kind != KindSlider || got.Params.Quality != q {
-			t.Errorf("position %d at its own values: %+v, want the slider", q, got)
+		if got := s.Template(); got.Kind != KindSelectors || got.Selectors.Audio != "keep_all" || got.Selectors.FileType != "keep" {
+			t.Errorf("position %d at its own values: %+v, want a Standard flow", q, got)
 		}
 		for _, info := range []media.Info{h264(1920, 1080, 8000), h264(1280, 720, 300), h264(3840, 2160, 40000)} {
 			a, b := SliderTemplate(q).Compile(info), Template{Kind: KindSelectors, Selectors: &s, CompilerVersion: 1}.Compile(info)
@@ -93,7 +94,7 @@ func TestSelectorsCompile(t *testing.T) {
 		{"mp4", media.Stream{Type: "subtitle", Codec: "subrip"}, "its subrip subtitles cannot be kept in MP4"},
 		{"mp4", media.Stream{Type: "audio", Codec: "truehd"}, "its truehd audio cannot be kept in MP4"},
 		{"mp4", media.Stream{Type: "attachment", Codec: "ttf"}, "its attached files (such as fonts) cannot be kept in MP4"},
-		{"mkv", media.Stream{Type: "subtitle", Codec: "mov_text"}, "its mov_text subtitles cannot be kept in MKV"},
+		{"mkv", media.Stream{Type: "subtitle", Codec: "mov_text"}, ""}, // converted to SRT text inside it (S4)
 		{"mp4", media.Stream{Type: "audio", Codec: "aac"}, ""},
 		{"mp4", media.Stream{Type: "subtitle", Codec: "mov_text"}, ""},
 		{"mkv", media.Stream{Type: "audio", Codec: "truehd"}, ""},
@@ -236,5 +237,27 @@ func TestReplaceWithNewFileTypeWarnsOfRenaming(t *testing.T) {
 	}
 	if w := DefaultSelectors(3).Template().Warnings(); len(w) != 0 {
 		t.Errorf("keep: %q", w)
+	}
+}
+
+// Review 6e60704 (P1): a Standard flow at its default values keeps every audio track and the file type,
+// where Basic makes stereo AAC in the person's language and MKV.
+func TestDefaultStandardIsNotBasic(t *testing.T) {
+	mp4 := h264(1920, 1080, 8000, media.Stream{Type: "audio", Codec: "eac3", Channels: 6, Language: "eng"},
+		media.Stream{Type: "audio", Codec: "aac", Channels: 2, Language: "fre"})
+	mp4.Container = "mov,mp4,m4a,3gp,3g2,mj2"
+	for i := range mp4.Streams {
+		mp4.Streams[i].Index = i
+	}
+	std := DefaultSelectors(3).Template()
+	std.Languages = "eng"
+	p := std.Compile(mp4)
+	if p.Skip != "" || p.Container != "" || len(p.Tracks) != 0 {
+		t.Errorf("Standard defaults: container %q, tracks %+v", p.Container, p.Tracks)
+	}
+	b := BasicTemplate(3, "")
+	b.Languages = "eng"
+	if p := b.Compile(mp4); p.Container != "mkv" || len(p.Tracks) == 0 {
+		t.Errorf("Basic: container %q, tracks %+v", p.Container, p.Tracks)
 	}
 }

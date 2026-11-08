@@ -207,14 +207,15 @@ func TestTrashIsNeverScanned(t *testing.T) {
 	}
 }
 
-// A skipped file's record carries the skip as a code, for the Skipped list (slice 21b).
+// A skipped file's record carries the skip as a code, for the Skipped list (slice 21b). HEVC already in
+// MKV, with no audio to make stereo AAC: nothing would change (S4; HEVC in another form is repackaged).
 func TestSkipRecordsItsCode(t *testing.T) {
-	s, st, lib, _ := setup(t, hevcBig)
+	s, st, lib, _ := setup(t, `{"streams":[{"codec_type":"video","codec_name":"hevc","bit_rate":"8000000"}],"format":{"format_name":"matroska,webm","duration":"60","size":"5"}}`)
 	s.Targets = func() ([]Target, error) {
 		return []Target{{Path: lib, Template: rules.SliderTemplate(3)}}, nil
 	}
 	settle(s)
-	if f, _ := st.GetFile(filepath.Join(lib, "a.mkv")); f == nil || f.Reason != rules.SkipAlreadyHEVC || !strings.HasPrefix(f.Decision, "skip: ") {
+	if f, _ := st.GetFile(filepath.Join(lib, "a.mkv")); f == nil || f.Reason != rules.SkipAlreadyInFormat || !strings.HasPrefix(f.Decision, "skip: ") {
 		t.Errorf("%+v", f)
 	}
 }
