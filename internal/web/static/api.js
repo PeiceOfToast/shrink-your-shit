@@ -1,10 +1,11 @@
 /* The one place the UI talks to the server. Every call in UI-API-CONTRACT.md is
    listed once here as name: [method, path]. Call it as SYP.api.name(params, body).
-   Mock or real is one switch: ?mock=1 / ?mock=0 in the address (remembered for the
-   tab), or DEFAULT_MOCK below. Flip DEFAULT_MOCK to false when the endpoints land. */
+   The real server is the default. The mock (mock.js, sample data) is a development tool: ?mock=1 turns
+   it on for the tab, ?mock=0 turns it off again, and the page shows "Showing sample data" while it is on.
+   A remembered choice only exists if someone opened ?mock=1 in that tab, so it is honoured as is. */
 (function (g) {
   "use strict";
-  var DEFAULT_MOCK = true;
+  var DEFAULT_MOCK = false;
   var E = {
     login: ["POST", "/api/login"], logout: ["POST", "/api/logout"],
     getSettings: ["GET", "/api/settings"], patchSettings: ["PATCH", "/api/settings"],
@@ -20,6 +21,9 @@
     putLibraryFlow: ["PUT", "/api/libraries/{id}/flow"],
     preview: ["POST", "/api/libraries/{id}/preview"],
     listFiles: ["GET", "/api/libraries/{id}/files"],
+    // Workers (redesign D; workshop S2, UI-API-CONTRACT.md 20:25Z): list, start, stop {when}, Files at once, the update notice.
+    listWorkers: ["GET", "/api/workers"], startWorker: ["POST", "/api/workers/{id}/start"], stopWorker: ["POST", "/api/workers/{id}/stop"],
+    setWorker: ["PATCH", "/api/workers/{id}"], dismissWorkerNotice: ["POST", "/api/workers/notice/dismiss"],
     activitySummary: ["GET", "/api/activity/summary"], pause: ["POST", "/api/queue/pause"],
     resume: ["POST", "/api/queue/resume"], queue: ["GET", "/api/activity/queue"],
     stopJob: ["POST", "/api/jobs/{id}/stop"], retryJob: ["POST", "/api/jobs/{id}/retry"],

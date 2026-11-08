@@ -11,7 +11,7 @@
 <button class="btn small" type="button" id="theme" hidden>Theme: Auto</button></header>
 <main id="main" tabindex="-1">
 <div class="mock-note card" role="note" id="mock-note" hidden>Showing sample data. Nothing here is real yet.</div>
-{{if eq .Kind "wizard"}}{{template "wizard" .}}{{else if eq .Kind "libraries"}}{{template "libraries" .}}{{else if eq .Kind "library"}}{{template "library" .}}{{else if eq .Kind "activity"}}{{template "activity" .}}{{else if eq .Kind "flows"}}{{template "flows" .}}{{else if eq .Kind "flow"}}{{template "flow" .}}{{else if eq .Kind "settings"}}{{template "settings" .}}{{else}}<div class="page-head"><h1>{{.Heading}}</h1></div>
+{{if eq .Kind "wizard"}}{{template "wizard" .}}{{else if eq .Kind "libraries"}}{{template "libraries" .}}{{else if eq .Kind "library"}}{{template "library" .}}{{else if eq .Kind "activity"}}{{template "activity" .}}{{else if eq .Kind "flows"}}{{template "flows" .}}{{else if eq .Kind "flow"}}{{template "flow" .}}{{else if eq .Kind "settings"}}{{template "settings" .}}{{else if eq .Kind "workers"}}{{template "workers" .}}{{else}}<div class="page-head"><h1>{{.Heading}}</h1></div>
 {{template "tabs" .}}
 <div class="card empty"><p>{{.Empty}}</p></div>{{end}}
 </main>

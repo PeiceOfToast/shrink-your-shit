@@ -18,7 +18,7 @@
   var settings = {
     controlLevel: "basic", perLibraryFlow: false, firstRunDone: true, firstRunStep: 1, authRequired: false,
     keepOriginalsDays: 7, trashPath: "Kept next to each file, in a folder called .syp-trash",
-    queueOrder: "newest", parallelJobs: 1, quietHours: { from: "", to: "" }, lowPriority: true, scanSchedule: "02:00",
+    queueOrder: "newest", languages: [], parallelJobs: 1, quietHours: { from: "", to: "" }, lowPriority: true, scanSchedule: "02:00",
     integrations: { sonarr: { url: "", hasKey: false }, radarr: { url: "", hasKey: false }, plex: { url: "", hasKey: false }, jellyfin: { url: "", hasKey: false },
       notifications: { webhookUrl: "", onDone: false, onFailed: true, onNeedsAttention: true } },
     updateAvailable: /[?&]update=1/.test(location.search) ? { version: "1.2.0" } : null // ?update=1 shows the update notice
@@ -51,9 +51,9 @@
   ];
   try { var sf = sessionStorage.getItem("syp-mock-flows"); if (sf) flows = JSON.parse(sf); } catch (e) {}
   // The slider table is the engine's (untuned starting values): crf is x265's, lower = better quality.
-  var SLIDER = [{ position: 1, name: "Smallest", crf: 27, minSavingPct: 20 }, { position: 2, name: "Smaller", crf: 25, minSavingPct: 15 },
-    { position: 3, name: "Balanced", crf: 23, minSavingPct: 10 }, { position: 4, name: "Better quality", crf: 21, minSavingPct: 8 },
-    { position: 5, name: "Best quality", crf: 19, minSavingPct: 5 }];
+  var SLIDER = [{ position: 1, name: "Smallest", crf: 27 }, { position: 2, name: "Smaller", crf: 25 },
+    { position: 3, name: "Balanced", crf: 23 }, { position: 4, name: "Better quality", crf: 21 },
+    { position: 5, name: "Best quality", crf: 19 }]; // {position, name, crf} since workshop S1
   // Read-only steps for a flow. The raw CRF number appears only here, in a flow step's detail.
   function stepsFor(f) {
     var crf = { f1: 23, f2: 25, f3: 22, f4: 21 }[f.id] || 23, n = 3, chain = [];
@@ -64,7 +64,7 @@
     chain.push({ n: n++, kind: "audio", label: "Keep all tracks" }, { n: n++, kind: "subtitles", label: "Keep text subtitles" }, { n: n++, kind: "filetype", label: "Keep as is" },
       { n: n++, kind: "finish", label: "Replace the original if the new file passes the checks" });
     return [{ n: 1, kind: "start", label: "A video in the library folder" },
-      { n: 2, kind: "check", label: "Is it worth converting?", detail: "H.264 or older, not HDR or Dolby Vision, not already small",
+      { n: 2, kind: "check", label: "Is it worth converting?", detail: "H.264 or older, not HDR or Dolby Vision",
         branches: [{ label: "Yes", steps: chain }, { label: "No", steps: [{ n: n, kind: "skip", label: "Show the reason in Activity" }] }] }];
   }
   var nextFlow = 20; function fid() { return "f" + nextFlow++; } // ids never repeat, also across page loads
@@ -93,21 +93,26 @@
     { id: "s6", library: "Movies", path: "/media/movies/Cut Loose (2015).mkv", reason: "user_stopped", detail: "You pressed Stop this file while it was converting. Your original is untouched.", libraryId: "1" },
     { id: "s7", library: "Movies", path: "/media/movies/Ocean Floor (2017).mkv", reason: "restored", detail: "Left alone so it is not converted again by surprise.", libraryId: "1" },
     { id: "s8", library: "Movies", path: "/media/movies/Tenet (2020).mkv", reason: "some_future_code", detail: "A reason this version does not know by name.", libraryId: null },
-    { id: "s9", library: "TV Shows", path: "/media/tv/Blue Hour.mkv", reason: "would_not_shrink", detail: "The new file was only 2% smaller, less than the 10% minimum, so the original was kept.", libraryId: "2" },
     // Workshop slice 19's four new reasons, one each (the Preview counts one of each too).
     { id: "s10", library: "Movies", path: "/media/movies/Old Reel.rm", reason: "format_not_converted", detail: "RealVideo is not a format this version converts.", libraryId: null },
     { id: "s11", library: "Movies", path: "/media/movies/Soundtrack.mkv", reason: "no_video", detail: "The file holds only audio.", libraryId: null },
-    { id: "s12", library: "TV Shows", path: "/media/tv/Pilot (raw).ts", reason: "unknown_bitrate", detail: "The file does not say its bitrate, so we could not tell whether converting is safe.", libraryId: null },
+    // Stopped, then converted later with "MKV": Convert again on the old name answers 409 renamed (25a-2).
+    { id: "s17", library: "Movies", path: "/media/movies/Night Train (2009).mp4", reason: "user_stopped", detail: "You pressed Stop this file while it was converting. Your original is untouched.", libraryId: "1" },
     { id: "s13", library: "Movies", path: "/media/movies/Short (2003).avi", reason: "setting_cannot_run", detail: "MP4 is the chosen file type, and it cannot hold this file's audio.", libraryId: "1" },
+    // Workshop slice 23's temporary guard: the next scan looks again, so no Convert again and no Change rule.
+    { id: "s14", library: "TV Shows", path: "/media/tv/Season 4/E01.mkv", reason: "still_changing", detail: "The file was still being written when we looked.", libraryId: "2" },
+    { id: "s15", library: "Movies", path: "/media/movies/Extras/Trailer.mkv", reason: "symlink", detail: "This is a link to /mnt/archive/Trailer.mkv, which is outside this library.", libraryId: null },
+    // After workshop slice 23 (file guards) shared files are skipped, not converted (sharedNoSaving is 0).
+    { id: "s16", library: "Movies", path: "/media/movies/Night Train (2016).mp4", reason: "shared_file", detail: "Another folder uses this same file (for example Radarr). Changing it would break that.", libraryId: null }
   ];
-  for (var gi = 1; gi <= 68; gi++) skippedList.push({ id: "g" + gi, library: "TV Shows", path: "/media/tv/Season 2/E" + (gi < 10 ? "0" : "") + gi + ".mkv", reason: "already_efficient", detail: "Already small for its quality.", libraryId: "2" });
+  for (var gi = 1; gi <= 96; gi++) skippedList.push({ id: "g" + gi, library: "TV Shows", path: "/media/tv/Season 2/E" + (gi < 10 ? "0" : "") + gi + ".mkv", reason: "already_efficient", detail: "Already small for its quality.", libraryId: "2" });
   var failedList = [
     { jobId: "j9", library: "Movies", path: "/media/movies/Cut Short (2012).mkv", title: "The new file did not pass the check", detail: "The new file is 3 minutes shorter than the original, so it was thrown away. Try again; if it fails again, the original file may be damaged.", originalUntouched: true },
     { jobId: "j10", library: "TV Shows", path: "/media/tv/Season 1/E03.mkv", title: "Not enough space", detail: "Needs about 14 GB free, only 6 GB is free. Free some space, then press Retry.", originalUntouched: true }
   ];
   var doneList = [
     { jobId: "j5", library: "Movies", path: "/media/movies/Ocean Floor (2017).mkv", beforeBytes: 6.4 * GB, afterBytes: 3.3 * GB, originalState: "kept", keptDaysLeft: 5, keptId: "k1" },
-    { jobId: "j6", library: "Movies", path: "/media/movies/Paper Moon (2010).mkv", beforeBytes: 4 * GB, afterBytes: 2.2 * GB, originalState: "kept", keptDaysLeft: 6, keptId: "k2" },
+    { jobId: "j6", library: "Movies", path: "/media/movies/Paper Moon (2010).mp4", newPath: "/media/movies/Paper Moon (2010).mkv", beforeBytes: 4 * GB, afterBytes: 2.2 * GB, originalState: "kept", keptDaysLeft: 6, keptId: "k2" },
     { jobId: "j7", library: "TV Shows", path: "/media/tv/Season 1/E01.mkv", beforeBytes: 3 * GB, afterBytes: 1.4 * GB, originalState: "deleted", keptDaysLeft: 0, keptId: null },
     // Converted with "Put the new file next to the original": kept, but not in the trash, so no keptId (contract, slice 18).
     { jobId: "j8", library: "Movies", path: "/media/movies/Long Walk (2012).mkv", beforeBytes: 5.1 * GB, afterBytes: 2.6 * GB, originalState: "kept", keptDaysLeft: 0, keptId: null },
@@ -115,42 +120,71 @@
   ];
   var keptList = [
     { keptId: "k1", library: "Movies", path: "/media/movies/Ocean Floor (2017).mkv", originalBytes: 6.4 * GB, nowBytes: 3.3 * GB, deleteOn: iso(-5 * 864e5) },
-    { keptId: "k2", library: "Movies", path: "/media/movies/Paper Moon (2010).mkv", originalBytes: 4 * GB, nowBytes: 2.2 * GB, deleteOn: iso(-6 * 864e5) }
+    { keptId: "k2", library: "Movies", path: "/media/movies/Paper Moon (2010).mp4", newPath: "/media/movies/Paper Moon (2010).mkv", originalBytes: 4 * GB, nowBytes: 2.2 * GB, deleteOn: iso(-6 * 864e5) }
   ];
+
+  // Workers (redesign D; workshop S2, UI-API-CONTRACT.md 20:25Z): one, "This computer" (id "this"). It starts stopped,
+  // after an update that stopped it (the one-time notice). ?worker=running or ?worker=paused (quiet hours) starts it that
+  // way instead. gpu is {found, vendor}, or null when detection didn't run.
+  var worker = { id: "this", name: "This computer", host: "nas01", on: false, stopping: false, quiet: false, filesAtOnce: 1, gpu: { found: true, vendor: "NVIDIA" } }, stoppedByUpdate = true, stopAt = 0;
+  try { var sw = JSON.parse(sessionStorage.getItem("syp-mock-workers")); if (sw && sw.w.id === "this") { worker = sw.w; stoppedByUpdate = sw.u; stopAt = sw.t; } } catch (e) {}
+  var wm = /[?&]worker=(running|paused)/.exec(location.search);
+  if (wm) { worker.on = true; worker.quiet = wm[1] === "paused"; stoppedByUpdate = false; }
+  function saveWorkers() { try { sessionStorage.setItem("syp-mock-workers", JSON.stringify({ w: worker, u: stoppedByUpdate, t: stopAt })); } catch (e) {} }
+  function workerOn() { return worker.on || worker.stopping; }
+  function workerView() {
+    if (worker.stopping && Date.now() >= stopAt) { worker.stopping = false; saveWorkers(); } // the current files finished
+    var conv = (worker.on && !worker.quiet) || worker.stopping ? working.slice(0, worker.filesAtOnce).map(function (j) { return { jobId: j.jobId, path: j.path, percent: j.percent, etaSeconds: j.etaSeconds }; }) : [];
+    var state = worker.stopping ? "stopping" : !worker.on ? "stopped" : worker.quiet ? "quiet_hours" : conv.length ? "converting" : "idle";
+    return { id: worker.id, name: worker.name, host: worker.host, state: state, filesAtOnce: worker.filesAtOnce, converting: conv,
+      quietUntil: worker.quiet ? new Date(new Date().setHours(31, 0, 0, 0)).toISOString() : null, gpu: worker.gpu };
+  }
 
   function summary() {
     // Waiting to be freed = the space the kept originals will give back (original - new); the whole
     // originals' size is only the Kept originals figure (keptBytes). Contract, workshop response to F1.
     var kept = 0; keptList.forEach(function (k) { kept += k.originalBytes - k.nowBytes; });
     var freed = 0; libs.forEach(function (l) { freed += l.freedBytes; }); // the libraries' own numbers, added up
-    return { freedBytes: freed, waitingBytes: kept, workingFiles: paused ? 0 : working.length, waitingFiles: 590, paused: paused,
+    return { freedBytes: freed, waitingBytes: kept, workingFiles: paused || !workerOn() ? 0 : working.length, waitingFiles: 590, paused: paused, workersRunning: workerOn(),
              counts: { skipped: skippedList.length, failed: failedList.length } };
   }
   function previewResult() {
-    // About 10-20% of 1.1 TB, as first-run step 1 promises. files = canShrink + skipped (1284 = 1204 + 80; the Skipped list has 80 rows too, F4).
-    // Until workshop slice 12, shared files are converted (in canShrink, not skipped) and free nothing: sharedNoSaving (addendum 12).
-    return { stale: false, status: "ready", estimateBytesLow: 110 * GB, estimateBytesHigh: 220 * GB, files: 1284, totalBytes: 1100 * GB, canShrink: 1204, sharedNoSaving: 29,
-             skipped: { already_efficient: 71, hdr_dv: 5, format_not_converted: 1, no_video: 1, unknown_bitrate: 1, setting_cannot_run: 1 } };
+    // About 10-20% of 1.1 TB, as first-run step 1 promises. files = canShrink + skipped (1284 = 1174 + 110; the Skipped list has 110 rows too, F4).
+    // Since workshop slice 23 (file guards) shared files are skipped (skipped.shared_file) and sharedNoSaving is 0 (addendum 12).
+    return { stale: false, status: "ready", estimateBytesLow: 110 * GB, estimateBytesHigh: 220 * GB, files: 1284, totalBytes: 1100 * GB, canShrink: 1174, sharedNoSaving: 0,
+             skipped: { already_efficient: 71, hdr_dv: 5, format_not_converted: 1, no_video: 1, setting_cannot_run: 1, still_changing: 1, symlink: 1, shared_file: 29 } };
   }
-  // Standard's defaults are the slider's: the same choices with that position's minimum saving (contract addendum 6).
+  // Standard's defaults are the slider's: the same choices (contract addendum 6; no minimum saving since S1).
   function isSliderPosition(b) {
-    var d = { speed: "normal", format: "hevc", resolution: "keep", audio: "keep_all", subtitles: "keep_all", fileType: "keep", afterConverting: "replace", maxBitrate: "none", skipHdr: true, skipSmall: true }, k;
+    var d = { speed: "normal", format: "hevc", resolution: "keep", audio: "keep_all", subtitles: "keep_all", fileType: "keep", afterConverting: "replace", maxBitrate: "none", skipHdr: true }, k;
     for (k in d) if (b[k] !== d[k]) return false;
-    return !(b.ignore || []).length && SLIDER[b.quality - 1] && b.minSavingPct === SLIDER[b.quality - 1].minSavingPct;
+    return !(b.ignore || []).length && !!SLIDER[b.quality - 1];
   }
   var ORDER = ["newest", "oldest", "largest", "smallest"], CAPS = ["none", "40", "20", "10", "6", "4"]; // contract addenda 10 and 9
   // Which choices this version can save, on every setting answer (addendum 13 and its correction). ?selectors= picks
-  // the state (remembered for the tab): keep (default: slice 25a, keep_all only), some (wider, not complete), full
-  // (slice 25b: everything), old (an older server: no lists at all).
-  try { var sm = /[?&]selectors=(keep|some|full|old)/.exec(location.search); if (sm) sessionStorage.setItem("syp-mock-avail", sm[1]); } catch (e) {}
+  // the state (remembered for the tab): now (default: the server on dev since slice 25b, every audio and subtitle
+  // choice, the file type kept when replacing), keep (slice 25a, keep_all only), some (wider, not complete), full
+  // (everything, file types too), old (an older server: no lists at all).
+  try { var sm = /[?&]selectors=(now|keep|some|full|old)/.exec(location.search); if (sm) sessionStorage.setItem("syp-mock-avail", sm[1]); } catch (e) {}
   function avail() {
-    var mode = "keep"; try { mode = sessionStorage.getItem("syp-mock-avail") || "keep"; } catch (e) {}
+    var mode = "now"; try { mode = sessionStorage.getItem("syp-mock-avail") || "now"; } catch (e) {}
     if (mode === "old") return {};
-    var a = mode === "full" ? ["keep_all", "my_languages", "aac", "lossless_only"] : mode === "some" ? ["keep_all", "my_languages"] : ["keep_all"];
-    var s = mode === "full" ? ["keep_all", "my_languages", "text_only", "srt"] : mode === "some" ? ["keep_all", "text_only"] : ["keep_all"];
-    // File types by "After converting" (addendum 14): 25a keeps the type when replacing; "full" lists every type.
-    var t = mode === "full" ? { replace: ["keep", "mkv", "mp4"], beside: ["keep", "mkv", "mp4"] } : { replace: ["keep"], beside: ["keep", "mkv", "mp4"] };
+    var all = mode === "full" || mode === "now";
+    var a = all ? ["keep_all", "my_languages", "aac", "eac3", "opus", "lossless_only"] : mode === "some" ? ["keep_all", "my_languages"] : ["keep_all"];
+    var s = all ? ["keep_all", "my_languages", "text_only", "srt"] : mode === "some" ? ["keep_all", "text_only"] : ["keep_all"];
+    // File types by "After converting" (addendum 14): since 25a-2 every type in both modes.
+    var t = { replace: ["keep", "mkv", "mp4"], beside: ["keep", "mkv", "mp4"] };
     return { availableFormats: ["hevc"], availableAudio: a, availableSubtitles: s, availableFileTypes: t };
+  }
+  // The setting's warnings, in the server's order (rules.Template.Warnings; design's wording): HDR (slice 25a) and the
+  // rename when Replace changes the file type (25a-2, mkv and mp4 wordings). Only the mock holds a copy of them.
+  var HDR_WARNING = 'HDR and Dolby Vision files will be converted without their HDR information, so they can look washed out. Turn "Skip HDR and Dolby Vision files" back on to leave them as they are.';
+  function warningsFor(s) {
+    var w = []; if (!s) return w;
+    if (s.skipHdr === false) w.push(HDR_WARNING);
+    if (s.afterConverting === "replace" && (s.fileType === "mkv" || s.fileType === "mp4"))
+      w.push("Changing the file type renames each file (" + (s.fileType === "mkv" ? "movie.mp4 becomes movie.mkv" : "movie.mkv becomes movie.mp4") + "). Radarr, Sonarr, Plex or Jellyfin may lose track of the renamed files: after converting, rescan this library in those apps.");
+    return w;
   }
   function gone() { return fail(404, "not_found", "That item is gone. Nothing was changed. Reload the page."); }
   function removeFrom(arr, key, id) { var i = find(arr, key, id); return i < 0 ? null : arr.splice(i, 1)[0]; }
@@ -178,7 +212,7 @@
         Object.keys(src).forEach(function (k) {
           if (k === "authRequired" || k === "trashPath" || k === "updateAvailable") return;
           if (k === "apiKey" || k === "token") { if (src[k]) dst.hasKey = true; return; }
-          if (src[k] && typeof src[k] === "object") merge(dst[k] = dst[k] || {}, src[k]); else dst[k] = src[k];
+          if (Array.isArray(src[k])) dst[k] = src[k].slice(); else if (src[k] && typeof src[k] === "object") merge(dst[k] = dst[k] || {}, src[k]); else dst[k] = src[k];
         });
       })(settings, b);
       persist(); return ok(settings);
@@ -206,7 +240,7 @@
       var said = { full: "Only 6 GB free on this disk. Free up space (about 15 GB is enough to start), then press Check again.",
         readonly: "This folder is read-only. Make it writable, then press Check again. shrink-your-shit runs as the user syp. On this server: sudo chown -R syp:syp " + path + " (or add syp to the folder's group and give the group write access)." };
       for (k in codes) if (path.indexOf(k) >= 0) bl.push({ code: codes[k], message: said[k] || "" });
-      var notes = bl.length ? [] : [{ code: "hardlinks", message: "212 files are shared with another folder (for example by Radarr). This version still converts them, but that frees no space, because the other folder keeps its copy. Leaving them alone comes in a later update." }, { code: "no_hw_encoder", message: "" }];
+      var notes = bl.length ? [] : [{ code: "hardlinks", message: "212 files are shared with another folder (for example by Radarr). We will leave them alone, because changing one would break the link." }, { code: "no_hw_encoder", message: "" }];
       if (!bl.length && path.indexOf("space_unknown") >= 0) notes.unshift({ code: "space_unknown", message: "We couldn't check how much space is free on this disk. Files here are only converted when there is room, so check that the disk is working." });
       if (!bl.length && path.indexOf("unreadable_folders") >= 0) notes.unshift({ code: "unreadable_folders", message: "3 folders inside could not be read. Files in them will not be converted." });
       return ok({ ok: !bl.length, blockers: bl, notes: notes, videoCount: 1284, totalBytes: 1100 * GB });
@@ -226,13 +260,15 @@
       var i = find(libs, "id", p.id);
       if (i < 0) return fail(404, "not_found", "That library is gone. Nothing was changed.");
       var av = avail();
-      if (libs[i].sel) return ok(Object.assign({ kind: "selectors" }, av, libs[i].sel));
-      if (libs[i].settingKind === "custom") return ok(Object.assign({ kind: "custom" }, av));
-      return ok(Object.assign({ kind: "slider", quality: libs[i].quality || (libs[i].settingLabel === "Smaller" ? 2 : 3), positions: SLIDER }, av));
+      if (libs[i].sel) return ok(Object.assign({ kind: "selectors", warnings: warningsFor(libs[i].sel) }, av, libs[i].sel));
+      if (libs[i].settingKind === "custom") return ok(Object.assign({ kind: "custom", warnings: [] }, av));
+      return ok(Object.assign({ kind: "slider", quality: libs[i].quality || (libs[i].settingLabel === "Smaller" ? 2 : 3), positions: SLIDER, warnings: [] }, av));
     },
     putSetting: function (p, b) {
       var i = find(libs, "id", p.id);
       if (i < 0) return fail(404, "not_found", "That library is gone. Nothing was changed.");
+      // "Keep only my languages" before any language is chosen (slice 25b): the server's words.
+      if (b.speed && !(settings.languages || []).length && (b.audio === "my_languages" || b.subtitles === "my_languages")) return fail(400, "languages_needed", "Choose your languages first, in Settings > General.");
       var f = flows[find(flows, "id", libs[i].flowId)];
       if (f && f.usedBy.length > 1 && !b.sharedFlowChoice) return fail(409, "flow_shared", "Another library uses this setting. Nothing was changed.", { usedBy: f.usedBy.slice() }); // every library on the flow, this one too, as the server sends it
       if (f && f.usedBy.length > 1 && b.sharedFlowChoice === "make_copy") {
@@ -257,6 +293,8 @@
     // Answers "computing" first, then "ready", so the waiting state gets exercised.
     preview: function (p, b) {
       var li = find(libs, "id", p.id);
+      var bs = b.setting || {};
+      if (bs.speed && !(settings.languages || []).length && (bs.audio === "my_languages" || bs.subtitles === "my_languages")) return fail(400, "languages_needed", "Choose your languages first, in Settings > General.");
       if (b.sampleFile && li >= 0 && b.sampleFile.indexOf(libs[li].path + "/") !== 0) return fail(400, "outside_library", "That file is not inside this library. Nothing was changed.");
       if (slowPreview()) {
         var t = Date.now() - (slowAt[p.id] = slowAt[p.id] || Date.now());
@@ -264,6 +302,7 @@
         delete slowAt[p.id];
       } else if ((pv = !pv)) return ok({ status: "computing", stale: false });
       var r = previewResult(), q = b.setting && b.setting.quality || 3;
+      r.warnings = warningsFor(b.setting); // for the setting as given, saved or not (contract, 25a update)
       if (b.sampleFile) r.sample = { lines: ["Video: converted to the smaller format (" + SLIDER[q - 1].name.toLowerCase() + " setting)", "Audio: 2 tracks kept", "Subtitles: 3 kept (all text)", "File type: MKV, unchanged", "Replaces the original; original kept for 7 days"],
         expectedBytesLow: ((b.sampleFile.length % 5) + 2.2 - 0.2 * q) * GB, expectedBytesHigh: ((b.sampleFile.length % 5) + 3.1 - 0.2 * q) * GB };
       return ok(r);
@@ -273,6 +312,20 @@
       return ok(list([{ path: root + "/Alien (1979).mkv", bytes: 9 * GB }, { path: root + "/Heat (1995).mkv", bytes: 7 * GB }, { path: root + "/Show S02E04.mkv", bytes: 4.1 * GB }]));
     },
     activitySummary: function () { return ok(summary()); },
+    listWorkers: function () { return ok({ workers: [workerView()], stoppedByUpdate: stoppedByUpdate, basicFlowsChanged: stoppedByUpdate && /[?&]basicchanged=1/.test(location.search) }); }, // ?basicchanged=1: S4's flag
+    startWorker: function (p) { if (p.id !== "this") return fail(404, "not_found", "There is no such worker. Nothing was changed."); worker.on = true; worker.stopping = false; stoppedByUpdate = false; saveWorkers(); return ok(workerView()); },
+    stopWorker: function (p, b) {
+      if (p.id !== "this") return fail(404, "not_found", "There is no such worker. Nothing was changed.");
+      var when = b.when || "after_current"; if (when !== "after_current" && when !== "now") return fail(400, "invalid", "Stop after the current files or now. Nothing was changed.");
+      var busy = workerView().converting.length; worker.on = false;
+      if (when === "after_current" && busy) { worker.stopping = true; stopAt = Date.now() + 6000; } else worker.stopping = false; // nothing converting: stopped at once
+      saveWorkers(); return ok(workerView());
+    },
+    setWorker: function (p, b) {
+      if (!(b.filesAtOnce >= 1 && b.filesAtOnce <= 8 && b.filesAtOnce % 1 === 0)) return fail(400, "invalid_setting", "Enter a whole number from 1 to 8.");
+      worker.filesAtOnce = b.filesAtOnce; saveWorkers(); return ok(workerView());
+    },
+    dismissWorkerNotice: function () { stoppedByUpdate = false; saveWorkers(); return ok({ stoppedByUpdate: false }); },
     pause: function () { paused = true; saveAct(); return ok(); },
     resume: function () { paused = false; saveAct(); return ok(); },
     queue: function () {
@@ -295,7 +348,10 @@
       var r = skippedList.filter(function (x) { return !p.reason || x.reason === p.reason; }), off = +p.offset || 0, lim = +p.limit || 50;
       return ok({ items: r.slice(off, off + lim), total: r.length });
     },
-    convertAgain: function (p) { var r = removeFrom(skippedList, "id", p.id); saveAct(); return r ? ok() : gone(); },
+    convertAgain: function (p) {
+      if (p.id === "s17") return fail(409, "renamed", "Night Train (2009).mp4 no longer exists: it was converted and is now Night Train (2009).mkv. Nothing was changed.");
+      var r = removeFrom(skippedList, "id", p.id); saveAct(); return r ? ok() : gone();
+    },
     failed: function () { return ok(list(failedList)); },
     done: function () { return ok(list(doneList)); },
     kept: function () {

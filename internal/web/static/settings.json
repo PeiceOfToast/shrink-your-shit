@@ -8,6 +8,8 @@
   {"key": "perLibraryFlow", "tab": "general", "group": "Per-library choices", "type": "checkbox", "id": "per-library",
    "label": "Let me choose per library",
    "hint": "Adds an extra choice to each library and one more menu item. The control level above always stays the same for every library."},
+  {"key": "languages", "tab": "general", "group": "Your languages", "type": "languages", "label": "Add a language",
+   "hint": "Audio and subtitles in these languages are kept when a library uses \"Keep only my languages\". Tracks with no language set are always kept."},
   {"key": "token", "tab": "general", "group": "Access", "type": "token", "label": "Access token",
    "hint": "Needed to open shrink-your-shit from another device."},
   {"key": "authRequired", "tab": "general", "type": "info"},
@@ -19,9 +21,6 @@
    "error": "Enter a whole number of days, from 0 to 365."},
   {"key": "trashPath", "tab": "safety", "group": "Keeping originals", "type": "readout", "label": "Where originals are kept"},
 
-  {"key": "parallelJobs", "tab": "performance", "group": "Speed", "type": "number", "min": 1, "max": 8,
-   "label": "Files converting at the same time", "hint": "More is faster but uses more of the computer.",
-   "error": "Enter a whole number from 1 to 8."},
   {"key": "lowPriority", "tab": "performance", "group": "Speed", "type": "checkbox", "label": "Run at low priority",
    "hint": "Keeps the computer responsive while converting."},
   {"key": "quietHours.from", "tab": "performance", "group": "Quiet hours", "type": "time", "label": "Quiet hours start",

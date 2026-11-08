@@ -404,3 +404,77 @@ func TestRealSliderBalanced(t *testing.T) {
 		}
 	})
 }
+
+// A phone video (#81, QA cdcbcb9): its Display Matrix turns it sideways; ffmpeg encodes the picture
+// upright, so the new file is 360x640 with no rotation left, plays upright, and passes the checks.
+func TestRealRotatedPhoneVideo(t *testing.T) {
+	needTools(t)
+	dir := t.TempDir()
+	base, src := filepath.Join(dir, "base.mp4"), filepath.Join(dir, "rot.mp4")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=4:size=640x360:rate=25", "-f", "lavfi", "-i", "sine=duration=4",
+		"-c:v", "libx264", "-b:v", "3000k", "-c:a", "aac", base)
+	runFFmpeg(t, "-display_rotation", "90", "-i", base, "-c", "copy", src)
+	if v := probe(t, src).Video(); v.Rotation == 0 || !v.Quarter() {
+		t.Fatalf("the test file has no rotation: %+v", v)
+	}
+	st, id := realJob(t, src, 4)
+	if err := realWorker(st, media.OSExec{}).run(t); err != nil {
+		t.Fatal(err)
+	}
+	if j, _ := st.Get(id); j.Status != jobs.Done {
+		t.Fatalf("%s %q", j.Status, j.Error)
+	}
+	if v := probe(t, src).Video(); v.Codec != "hevc" || v.Width != 360 || v.Height != 640 || v.Rotation != 0 {
+		t.Errorf("new file %+v: want 360x640 upright, no rotation left", v)
+	}
+}
+
+// Review 44dbabe: a rotated phone video with "at most 480" ends 270x480 upright.
+func TestRealRotatedVideoCappedUpright(t *testing.T) {
+	needTools(t)
+	dir := t.TempDir()
+	base, src := filepath.Join(dir, "base.mp4"), filepath.Join(dir, "rot.mp4")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=3:size=640x360:rate=25", "-c:v", "libx264", "-b:v", "2000k", base)
+	runFFmpeg(t, "-display_rotation", "90", "-i", base, "-c", "copy", src)
+	s := rules.DefaultSelectors(3)
+	s.Resolution = "480"
+	tmpl := s.Template()
+	st, id := realJob(t, src, 3)
+	w := realWorker(st, media.OSExec{})
+	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	if err := w.run(t); err != nil {
+		t.Fatal(err)
+	}
+	if j, _ := st.Get(id); j.Status != jobs.Done {
+		t.Fatalf("%s %q", j.Status, j.Error)
+	}
+	if v := probe(t, src).Video(); v.Width != 270 || v.Height != 480 || v.Rotation != 0 {
+		t.Errorf("new file %+v: want 270x480 upright", v)
+	}
+}
+
+// A rotated HEVC phone video repackaged by Basic (S4 + #81): the copied stream keeps its size, and the
+// new MKV keeps the rotation, so it still plays upright.
+func TestRealRotatedHEVCRepackaged(t *testing.T) {
+	needTools(t)
+	dir := t.TempDir()
+	base, src := filepath.Join(dir, "base.mp4"), filepath.Join(dir, "rot.mp4")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=3:size=640x360:rate=25", "-f", "lavfi", "-i", "sine=duration=3",
+		"-c:v", "libx265", "-preset", "ultrafast", "-tag:v", "hvc1", "-x265-params", "log-level=error", "-c:a", "aac", "-ac", "2", base)
+	runFFmpeg(t, "-display_rotation", "90", "-i", base, "-c", "copy", src)
+	st, id := realJob(t, src, 3)
+	w := realWorker(st, media.OSExec{})
+	tmpl := rules.BasicTemplate(3, "keep_all")
+	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.KeepDays, w.Journal = func() int { return 7 }, st
+	if err := w.run(t); err != nil {
+		t.Fatal(err)
+	}
+	j, _ := st.Get(id)
+	if j.Status != jobs.Done {
+		t.Fatalf("%s %q", j.Status, j.Error)
+	}
+	if v := probe(t, j.OutputPath).Video(); v.Width != 640 || v.Height != 360 || !v.Quarter() {
+		t.Errorf("new file %+v: want the coded 640x360 with its rotation kept", v)
+	}
+}

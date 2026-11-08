@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"os"
+	"strings"
 	"sync"
 )
 
@@ -155,11 +156,16 @@ type Skipped struct {
 	File
 }
 
-// SkippedFiles lists the skipped files (reason = "" lists every reason), by path; and how many there are.
-func (s *Store) SkippedFiles(reason string, limit, offset int) ([]Skipped, int, error) {
+// SkippedFiles lists the skipped files with any of reasons (none: every reason), by path; and how many
+// there are in all, so a page of several reasons (design's "Already in this format": already_hevc and
+// already_in_format) pages as one list.
+func (s *Store) SkippedFiles(reasons []string, limit, offset int) ([]Skipped, int, error) {
 	where, args := `reason<>'' AND NOT `+convertedSQL, []any{}
-	if reason != "" {
-		where, args = `reason=? AND NOT `+convertedSQL, []any{reason}
+	if len(reasons) > 0 {
+		where = `reason IN (?` + strings.Repeat(",?", len(reasons)-1) + `) AND NOT ` + convertedSQL
+		for _, r := range reasons {
+			args = append(args, r)
+		}
 	}
 	var total int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM files WHERE `+where, args...).Scan(&total); err != nil {

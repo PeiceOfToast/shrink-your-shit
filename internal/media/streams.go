@@ -62,6 +62,9 @@ type Stream struct {
 	// G(x,y)B(x,y)R(x,y)WP(x,y)L(max,min); CLL is "MaxCLL,MaxFALL" (x265's max-cll). Empty when absent.
 	MasteringDisplay string `json:"masteringDisplay,omitempty"`
 	CLL              string `json:"cll,omitempty"`
+	// Rotation is the Display Matrix's rotation in degrees (a phone video: 90 or -90), 0 when none.
+	// ffmpeg turns the picture upright when it encodes, so the new file's size is swapped for ±90/270.
+	Rotation int `json:"rotation,omitempty"`
 
 	// Audio
 	Channels      int    `json:"channels,omitempty"`
@@ -103,6 +106,8 @@ func (s *Stream) addSideData(m map[string]any) {
 			if md := masterDisplay(sd); md != "" {
 				s.MasteringDisplay = md
 			}
+		case strings.Contains(t, "display matrix"): // a phone video's rotation (#81)
+			s.Rotation = int(num(sd, "rotation"))
 		case strings.Contains(t, "content light level"):
 			s.CLL = fmt.Sprintf("%d,%d", int(num(sd, "max_content")), int(num(sd, "max_average")))
 		}
@@ -395,4 +400,11 @@ func (s Stream) Lossless() bool {
 		return true
 	}
 	return false
+}
+
+// Quarter is whether the stream's rotation turns it sideways (±90 or ±270 degrees): its picture is
+// then shown with width and height swapped.
+func (s Stream) Quarter() bool {
+	r := ((s.Rotation % 360) + 360) % 360
+	return r == 90 || r == 270
 }

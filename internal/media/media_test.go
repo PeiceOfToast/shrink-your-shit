@@ -21,8 +21,8 @@ func TestProbe(t *testing.T) {
 	if info.VideoCodec != "h264" || info.BitrateKbps != 6500 || info.DurationSec != 120.5 || info.SizeBytes != 98000000 {
 		t.Errorf("unexpected info %+v", info)
 	}
-	if f.Calls[0][0] != "ffprobe" || f.Calls[0][len(f.Calls[0])-1] != "/x/a.mkv" {
-		t.Errorf("bad call %v", f.Calls[0])
+	if f.Recorded()[0][0] != "ffprobe" || f.Recorded()[0][len(f.Recorded()[0])-1] != "/x/a.mkv" {
+		t.Errorf("bad call %v", f.Recorded()[0])
 	}
 }
 
@@ -83,5 +83,19 @@ func TestCountVideoPacketsWithSideData(t *testing.T) {
 	}
 	if _, err := CountVideoPackets(context.Background(), &FakeExec{Out: []byte(",75\n")}, "ffprobe", "/x.mkv", 0); err == nil {
 		t.Error("no count in the first field is an error")
+	}
+}
+
+// A phone video's Display Matrix (#81): its rotation is read; ±90/270 is a quarter turn.
+func TestDisplayMatrixRotation(t *testing.T) {
+	i, err := ParseProbe([]byte(`{"streams":[{"codec_type":"video","codec_name":"h264","width":640,"height":360,
+	 "side_data_list":[{"side_data_type":"Display Matrix","displaymatrix":"...","rotation":-90}]}],"format":{}}`))
+	if err != nil || i.Video().Rotation != -90 || !i.Video().Quarter() {
+		t.Fatalf("%+v %v", i.Video(), err)
+	}
+	for r, q := range map[int]bool{90: true, 270: true, -270: true, 180: false, 0: false} {
+		if (Stream{Rotation: r}).Quarter() != q {
+			t.Errorf("%d", r)
+		}
 	}
 }

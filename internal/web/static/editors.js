@@ -35,7 +35,7 @@
       ["resolution", "Resolution", [["keep", "Keep as is"], ["1080", "At most 1080p"], ["720", "At most 720p"], ["480", "At most 480p"]], 0, "Videos are only ever made smaller, never stretched."],
       ["maxBitrate", "Max bitrate", [["none", "No limit"], ["40", "40 Mbps - 4K streaming"], ["20", "20 Mbps - 1080p, fast home network"], ["10", "10 Mbps - 1080p, most home networks"], ["6", "6 Mbps - 720p or slower Wi-Fi"], ["4", "4 Mbps - streaming away from home"]], 0, "Keeps files small enough to stream over slower connections. Quality still sets the picture; a low limit can soften very busy scenes."]]],
     ["Audio and subtitles", [
-      ["audio", "Audio", [["keep_all", "Keep all tracks"], ["my_languages", "Keep only my languages"], ["aac", "Convert to AAC"], ["lossless_only", "Convert lossless tracks only"]], 0, ""],
+      ["audio", "Audio", [["keep_all", "Keep all tracks"], ["my_languages", "Keep only my languages"], ["aac", "Convert to AAC"], ["eac3", "Convert to E-AC-3"], ["opus", "Convert to Opus"], ["lossless_only", "Convert lossless tracks only"]], 0, ""],
       ["subtitles", "Subtitles", [["keep_all", "Keep all"], ["my_languages", "Keep only my languages"], ["text_only", "Text subtitles only"], ["srt", "Save as separate .srt files"]], 0, "Subtitle pictures are never burned into the video."]]],
     ["New file", [
       ["fileType", "File type", [["keep", "Keep as is"], ["mkv", "MKV"], ["mp4", "MP4"]], 0, "If MP4 cannot hold a track, the file is skipped and the reason is shown. Nothing is dropped silently."],
@@ -47,9 +47,13 @@
   var AVAIL = { audio: "availableAudio", subtitles: "availableSubtitles" };
   var ONLY_KEEP = { audio: "For now every audio track is kept. The other choices come in a later update.",
     subtitles: "For now every subtitle is kept. The other choices come in a later update." };
+  // Lines that show under Audio or Subtitles only for some choices (slice 25b, design): "Keep only my languages"
+  // while no language is chosen yet (it links to where they are chosen, so the server's 400 languages_needed
+  // doesn't happen), and what "Save as separate .srt files" does with picture subtitles.
+  var NEEDS = "Keep only my languages needs your languages. Choose them in ", SRT = "Picture subtitles stay inside the file; only text subtitles are saved as .srt files.";
   // values (optional): a saved setting to show; anything missing stays at its default.
   function selectors(host, onChange, values) {
-    var fields = {}, rules = {}, v = values || {};
+    var fields = {}, rules = {}, v = values || {}, syncs = [], noLanguages = false;
     function changed() { if (onChange) onChange(); }
     GROUPS.forEach(function (gr) {
       var fs = el("fieldset"); fs.appendChild(el("legend", null, gr[0]));
@@ -68,8 +72,26 @@
           var only = avail.length === 1 && avail[0] === "keep_all", nt = el("span", "hint", only ? ONLY_KEEP[f[0]] : "Some choices come in a later update.");
           nt.id = id + "n"; box.appendChild(nt); said.push(nt.id);
         }
-        if (f[4]) { var h = el("span", "hint", f[4]); h.id = id + "h"; box.appendChild(h); said.push(h.id); }
-        if (said.length) sel.setAttribute("aria-describedby", said.join(" "));
+        var lines = [];
+        if (AVAIL[f[0]]) {
+          var need = el("span", "hint", NEEDS), go = el("a", null, "Settings > General"); go.href = "/settings/";
+          need.appendChild(go); need.appendChild(document.createTextNode(".")); need.id = id + "l";
+          lines.push([need, function (val) { return noLanguages && val === "my_languages"; }]);
+        }
+        if (f[0] === "subtitles") { var srt = el("span", "hint", SRT); srt.id = id + "s"; lines.push([srt, function (val) { return val === "srt"; }]); }
+        lines.forEach(function (l) { box.appendChild(l[0]); });
+        var hint = null;
+        if (f[4]) { hint = el("span", "hint", f[4]); hint.id = id + "h"; box.appendChild(hint); }
+        var sync = (function (sel, said, lines, hint) {
+          return function () {
+            var ids = said.slice();
+            lines.forEach(function (l) { var on = l[1](sel.value); l[0].hidden = !on; if (on) ids.push(l[0].id); });
+            if (hint) ids.push(hint.id);
+            if (ids.length) sel.setAttribute("aria-describedby", ids.join(" ")); else sel.removeAttribute("aria-describedby");
+          };
+        })(sel, said, lines, hint);
+        sync(); // the others keep this; File type's note (addendum 14) is added to it below
+        if (lines.length) { sel.addEventListener("change", sync); syncs.push(sync); }
         fs.appendChild(box);
       });
       if (gr[0] === "Which files") {
@@ -78,62 +100,35 @@
         var l = el("label", null, "Ignore paths containing"); l.htmlFor = igId;
         ig.appendChild(l); ig.appendChild(igIn); ig.appendChild(igH); fs.appendChild(ig); rules.ignore = igIn;
         igIn.addEventListener("change", changed);
-        [["skipHdr", "Skip HDR and Dolby Vision files", "Recommended. Converting them can damage the picture."], ["skipSmall", "Skip files that are already small", ""]].forEach(function (c) {
+        [["skipHdr", "Skip HDR and Dolby Vision files", "Recommended. Converting them can damage the picture."]].forEach(function (c) {
           var row = el("div", "check"), cb = el("input"), id = uid(), lb = el("label", null, c[1]);
           cb.type = "checkbox"; cb.id = id; cb.checked = v[c[0]] != null ? !!v[c[0]] : true; lb.htmlFor = id;
           if (c[2]) { lb.appendChild(document.createElement("br")); lb.appendChild(el("span", "hint", c[2])); }
           row.appendChild(cb); row.appendChild(lb); fs.appendChild(row); rules[c[0]] = cb; cb.addEventListener("change", changed);
         });
-        var ms = el("div", "field"), msId = uid(), msIn = el("input"), ml = el("label", null, "Keep the new file only if it is at least this much smaller (%)");
-        msIn.type = "number"; msIn.id = msId; msIn.min = 1; msIn.max = 90; msIn.value = v.minSavingPct != null ? v.minSavingPct : 10; msIn.style.width = "6rem"; ml.htmlFor = msId;
-        var msH = el("span", "hint"); msH.id = msId + "h"; msIn.setAttribute("aria-describedby", msH.id);
-        ms.appendChild(ml); ms.appendChild(msIn); ms.appendChild(msH); fs.appendChild(ms); rules.minSavingPct = msIn; rules.msHint = msH; msIn.addEventListener("change", changed);
-        msIn.addEventListener("input", function () { edited = true; follow(); });
       }
       host.appendChild(fs);
     });
-    // File type depends on "After converting" (contract addendum 14): types not listed for the chosen mode stay
-    // visible but disabled, with design's line. Switching to a mode that can't keep the chosen type sets it back to
-    // "Keep as is" and announces why; the mode itself is never blocked. No list, or every type in every mode: nothing.
+    // File type follows "After converting" (contract addendum 14; 25a-2 lists every type for both): a type not listed
+    // for the chosen mode is disabled, and a chosen one that is not falls back to "Keep as is", as Audio and Subtitles do.
     var ft = v.availableFileTypes, ftSel = fields.fileType, acSel = fields.afterConverting;
     if (ft && typeof ft === "object" && ftSel && acSel) {
-      var allTypes = Array.prototype.map.call(ftSel.options, function (o) { return o.value; });
-      var complete = Object.keys(ft).every(function (k) { return allTypes.every(function (t) { return (ft[k] || []).indexOf(t) >= 0; }); });
-      if (!complete) {
-        var ftNote = el("span", "hint", 'To change the file type, choose "Put the new file next to the original" under After converting. Changing the type while replacing the original comes in a later update.');
-        ftNote.id = ftSel.id + "n"; ftSel.parentNode.insertBefore(ftNote, ftSel.nextSibling);
-        var ftLive = el("p", "sr"); ftLive.setAttribute("role", "status"); ftLive.setAttribute("aria-live", "polite"); host.appendChild(ftLive);
-        var ftHint = ftSel.getAttribute("aria-describedby") || "";
-        var syncFt = function (announce) {
-          var ok = ft[acSel.value] || allTypes, some = ok.length < allTypes.length;
-          Array.prototype.forEach.call(ftSel.options, function (o) { o.disabled = ok.indexOf(o.value) < 0; });
-          ftNote.hidden = !some; ftSel.setAttribute("aria-describedby", ((some ? ftNote.id + " " : "") + ftHint).trim());
-          if (ftSel.options[ftSel.selectedIndex].disabled) { ftSel.value = "keep"; if (announce) { ftLive.textContent = ""; ftLive.textContent = 'File type set back to Keep as is. To change the file type, choose "Put the new file next to the original" under After converting.'; } changed(); }
-        };
-        acSel.addEventListener("change", function () { syncFt(true); });
-        syncFt(false);
-      }
+      var syncFt = function () {
+        var ok = ft[acSel.value];
+        Array.prototype.forEach.call(ftSel.options, function (o) { o.disabled = !!ok && ok.indexOf(o.value) < 0; });
+        if (ftSel.options[ftSel.selectedIndex].disabled) { ftSel.value = "keep"; changed(); }
+      };
+      acSel.addEventListener("change", syncFt);
+      syncFt();
     }
-    // Minimum saving follows Quality (the slider's value for that position) until the person types their own.
-    var table = null, edited = false;
-    function follow() {
-      var p = table && table[+fields.quality.value - 1]; if (!p) return;
-      if (!edited) rules.minSavingPct.value = p.minSavingPct;
-      rules.msHint.textContent = edited ? "Your own value. Quality's default is " + p.minSavingPct + "% for " + p.name + "."
-        : "Follows Quality (" + p.minSavingPct + "% for " + p.name + "). If you change it, it stays as you set it.";
-    }
-    fields.quality.addEventListener("change", follow);
-    g.SYP.api.getSliderTable().then(function (t) {
-      table = t.positions; var p = table[+fields.quality.value - 1];
-      if (v.minSavingPct != null && p && v.minSavingPct !== p.minSavingPct) edited = true; // a saved value of its own stays put
-      follow();
-    }, function () {});
+    // The person's languages are one global setting (Settings > General), not part of the library's setting.
+    g.SYP.api.getSettings().then(function (st) { noLanguages = !(st.languages || []).length; syncs.forEach(function (f) { f(); }); }, function () {});
     return {
       get: function () {
         var b = {}, k;
         for (k in fields) b[k] = k === "quality" ? +fields[k].value : fields[k].value;
         b.ignore = rules.ignore.value.split("\n").map(function (x) { return x.trim(); }).filter(Boolean);
-        b.skipHdr = rules.skipHdr.checked; b.skipSmall = rules.skipSmall.checked; b.minSavingPct = +rules.minSavingPct.value;
+        b.skipHdr = rules.skipHdr.checked; // no minimum saving and no "already small" since workshop S1 (always standardize)
         return b;
       }
     };
