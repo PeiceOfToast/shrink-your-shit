@@ -225,7 +225,16 @@
                  { id: "disk", label: "Free space", status: "ok", detail: "1.4 TB free" }, { id: "db", label: "Library database", status: "ok", detail: "" }] });
     },
     backup: function () { return Promise.resolve({ blob: function () { return Promise.resolve(new Blob(["Sample backup from the stand-in server. A real backup holds your settings and the list of converted files."], { type: "text/plain" })); } }); },
-    listLibraries: function () { return ok(list(libs)); },
+    // Slice A's library status, failed count and madeWith (UI-API-CONTRACT.md 20:25Z), varied per sample library.
+    listLibraries: function () {
+      var KIND = { "1": { kind: "converting", converting: 2 }, "2": { kind: "scanned" }, "4": { kind: "waiting_for_worker", toDo: 40 }, "3": { kind: "scanned" } }, FAIL = { "2": 1, "3": 3 };
+      return ok(list(libs.map(function (l) {
+        var x = copy(l), k = KIND[l.id] || (l.state === "not_started" ? { kind: "not_scanned" } : { kind: "scanning", foundSoFar: 120 }), f = flows[find(flows, "id", l.flowId)];
+        var scanned = k.kind !== "not_scanned" && k.kind !== "scanning";
+        x.status = Object.assign({ videos: scanned ? 1284 : null, foundSoFar: null, lastScan: scanned ? iso(-3 * 3600e3) : null, nextScan: l.nextScan, converting: 0, toDo: 0 }, k);
+        x.failedFiles = FAIL[l.id] || 0; x.madeWith = f ? f.madeWith : "slider"; return x;
+      })));
+    },
     addLibrary: function (p, b) {
       var l = { id: String(libs.length + 10), name: b.name || "New library", path: b.path || "", state: "not_started", started: false, workingFiles: 0, waitingFiles: 0, nextScan: iso(-6 * 3600e3), freedBytes: 0, settingLabel: "Balanced", settingKind: "slider" };
       var f = { id: fid(), name: flowName(l.name), usedBy: [l.name], madeWith: "slider", changedAt: iso(0) }; flows.push(f); l.flowId = f.id;
