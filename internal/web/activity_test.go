@@ -740,3 +740,40 @@ func TestWorkersAPI(t *testing.T) {
 		t.Errorf("resume: %d paused %v notice %v", code, st.Paused(), st.StoppedByUpdate())
 	}
 }
+
+// Several reasons as one list (contract 22:30Z): design's "Already in this format" asks for
+// already_hevc and already_in_format together; they page as one list by path, with one total.
+func TestSkippedTakesSeveralReasons(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	for p, reason := range map[string]string{"/m/a.mkv": "already_hevc", "/m/b.mkv": "already_in_format", "/m/c.mkv": "already_hevc",
+		"/m/d.mkv": "already_in_format", "/m/e.mkv": "already_hevc", "/m/f.mkv": "no_video"} {
+		st.PutFile(jobs.File{Path: p, Size: 1, ModTime: 1, Decision: "skip: x", Reason: reason})
+	}
+	list := func(q string) (paths []string, total int) {
+		t.Helper()
+		_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/activity/skipped?" + q})
+		var k struct {
+			Items []map[string]any
+			Total int
+		}
+		json.Unmarshal([]byte(body), &k)
+		for _, i := range k.Items {
+			paths = append(paths, filepath.Base(i["path"].(string)))
+		}
+		return paths, k.Total
+	}
+	for q, want := range map[string]string{
+		"reason=already_hevc,already_in_format&limit=3":             "[a.mkv b.mkv c.mkv] 5",
+		"reason=already_hevc,%20already_in_format&limit=3&offset=3": "[d.mkv e.mkv] 5", // across the page boundary
+		"reason=already_in_format":                                  "[b.mkv d.mkv] 2", // one reason, as before
+		"reason=already_hevc,nonsense":                              "[a.mkv c.mkv e.mkv] 3",
+		"reason=nonsense":                                           "[] 0", // unknown codes match nothing
+		"reason=,,":                                                 "[a.mkv b.mkv c.mkv d.mkv e.mkv f.mkv] 6",
+		"":                                                          "[a.mkv b.mkv c.mkv d.mkv e.mkv f.mkv] 6",
+	} {
+		paths, total := list(q)
+		if got := fmt.Sprint(paths, " ", total); got != want {
+			t.Errorf("%q: %s, want %s", q, got, want)
+		}
+	}
+}

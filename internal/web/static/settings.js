@@ -47,6 +47,8 @@
         var sel = el("select"); e.options.forEach(function (o) { var op = el("option", null, o.label); op.value = o.value; sel.appendChild(op); });
         sel.value = v; if (sel.selectedIndex < 0) sel.selectedIndex = 0;
         fs.appendChild(field(e, sel, e.hint)); ctl[e.key] = { get: function () { return sel.value; } };
+      } else if (e.type === "languages") {
+        ctl[e.key] = languages(e, v || [], fs);
       } else if (e.type === "token") {
         fs.appendChild(token(e, s));
       } else {
@@ -68,7 +70,7 @@
         if (c.e && c.e.type === "number" && (v == null || !c.el.checkValidity() || v !== Math.floor(v))) { say.textContent = c.e.error; c.el.focus(); return; }
         var old = get(s, k);
         if (c.e && c.e.type === "secret") { if (v) { put(patch, k, v); n++; } continue; }
-        if (v !== (old == null ? (typeof v === "string" ? "" : old) : old)) { put(patch, k, v); n++; }
+        if (Array.isArray(v) ? JSON.stringify(v) !== JSON.stringify(old || []) : v !== (old == null ? (typeof v === "string" ? "" : old) : old)) { put(patch, k, v); n++; }
       }
       var qf = ctl["quietHours.from"], qt = ctl["quietHours.to"];
       if (qf && qt && !qf.get() !== !qt.get()) { say.textContent = "Set both a start and an end, or leave both empty."; (qf.get() ? qt : qf).el.focus(); return; }
@@ -102,6 +104,42 @@
       if (loaded) return run();
       var sc = document.createElement("script"); sc.src = "/assets/settings-flow.js"; sc.onload = function () { loaded = true; run(); }; document.head.appendChild(sc);
     }
+  }
+
+  // ---- "Your languages" (slice 25b): one global list, shown by name, saved as ISO 639-2 codes (languages.json),
+  // added by typing a name (in the language itself or in English) and picking it. Saved with the form's Save.
+  function languages(e, codes, fs) {
+    var list = [], names = {}, box = el("div", "field"), ul = el("ul", "lang-list"), none = el("p", "muted", "None chosen yet."), row = el("div", "row"),
+      lb = el("label", null, e.label), inp = el("input"), add = el("button", "btn", "Add"), dl = el("datalist"), hint = el("span", "hint", e.hint), msg = el("p", "sr");
+    codes = codes.slice(); inp.id = "f-languages"; lb.htmlFor = inp.id; inp.size = 24; inp.autocomplete = "off"; dl.id = "lang-names"; inp.setAttribute("list", dl.id);
+    hint.id = "f-languages-h"; inp.setAttribute("aria-describedby", hint.id); add.type = "button"; msg.setAttribute("role", "status"); ul.setAttribute("aria-label", "Your languages");
+    function name(c) { return names[c] || c; }
+    function draw() {
+      ul.textContent = ""; none.hidden = codes.length > 0; ul.hidden = !codes.length;
+      codes.forEach(function (c) {
+        var li = el("li", null, name(c) + " "), x = el("button", "btn small", "Remove"); x.type = "button"; x.setAttribute("aria-label", "Remove " + name(c));
+        x.onclick = function () { codes = codes.filter(function (k) { return k !== c; }); draw(); msg.textContent = name(c) + " removed."; inp.focus(); };
+        li.appendChild(x); ul.appendChild(li);
+      });
+    }
+    function pick() {
+      var t = inp.value.trim().toLowerCase(); if (!t) return;
+      var hit = list.filter(function (l) { return l[1].toLowerCase() === t || (l[2] || "").toLowerCase() === t || l[0] === t; })[0];
+      if (!hit) { msg.textContent = ""; msg.textContent = "No language called " + inp.value.trim() + ". Pick one from the list."; return; }
+      if (codes.indexOf(hit[0]) < 0) codes.push(hit[0]);
+      inp.value = ""; draw(); msg.textContent = hit[1] + " added.";
+    }
+    add.onclick = pick;
+    inp.addEventListener("keydown", function (ev) { if (ev.key === "Enter") { ev.preventDefault(); pick(); } }); // Enter adds; it does not save the form
+    // Picking from the suggestions fills in a whole name: add it at once.
+    inp.addEventListener("input", function () { var t = inp.value.trim(); if (list.some(function (l) { return l[1] === t; })) pick(); });
+    fetch("/assets/languages.json").then(function (r) { return r.json(); }).then(function (l) {
+      list = l; l.forEach(function (x) { names[x[0]] = x[1]; var o = el("option"); o.value = x[1]; if (x[2]) o.label = x[2]; dl.appendChild(o); }); draw();
+    }, function () {});
+    row.appendChild(inp); row.appendChild(add);
+    box.appendChild(ul); box.appendChild(none); box.appendChild(lb); box.appendChild(row); box.appendChild(dl); box.appendChild(hint); box.appendChild(msg);
+    fs.appendChild(box); draw();
+    return { get: function () { return codes.slice(); } };
   }
 
   // ---- access token: shown only when asked for, never stored by the page

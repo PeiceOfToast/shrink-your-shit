@@ -8,12 +8,18 @@
   ui.REASONS = {
     already_efficient: "already efficient", would_not_shrink: "would not get smaller", already_hevc: "already in the new format",
     hdr_dv: "HDR or Dolby Vision", bitmap_subs: "picture subtitles that cannot be kept", shared_file: "shared with another folder",
-    symlink: "links to files elsewhere", unreadable: "unreadable", cannot_keep_track: "a track that cannot be kept",
+    // symlink: only links pointing outside the library (workshop, slice 23).
+    symlink: "a link to a file outside this library", unreadable: "unreadable", cannot_keep_track: "a track that cannot be kept",
     user_stopped: "you stopped it", restored: "you restored the original",
     // Workshop slice 19 (contract: four more skipped reason codes); design's words, 2026-11-07.
     format_not_converted: "a format this version doesn't convert", no_video: "no video in the file",
-    unknown_bitrate: "not enough information to judge safely", setting_cannot_run: "the library's setting can't be used on it"
+    unknown_bitrate: "not enough information to judge safely", setting_cannot_run: "the library's setting can't be used on it",
+    // Workshop slice 23 (file guards); design's words, 13:00Z.
+    still_changing: "still changing, we'll look again on the next scan"
   };
+  // A badge is the reason with a capital letter, unless design gave it a shorter name.
+  ui.BADGES = { still_changing: "Still changing", symlink: "Link to outside this library" };
+  ui.badge = function (code) { var t = ui.BADGES[code] || ui.REASONS[code] || ui.OTHER_REASON; return t.charAt(0).toUpperCase() + t.slice(1); };
   ui.OTHER_REASON = "another reason"; // a code this version doesn't know: never show the raw code
   ui.reason = function (code, detail) { return ui.REASONS[code] || detail || ui.OTHER_REASON; };
 
@@ -27,11 +33,24 @@
     return a[1] === b[1] ? num1(lo, b) + " - " + num1(hi, b) + " " + b[1] : ui.bytes(lo) + " - " + ui.bytes(hi);
   };
   ui.num = function (n) { return Number(n).toLocaleString("en-US"); };
+  // "1 video", "2 videos": a count with its noun in the right number.
+  ui.count = function (n, one, many) { return ui.num(n) + " " + (Number(n) === 1 ? one : many); };
   ui.el = function (tag, cls, txt) {
     var e = document.createElement(tag);
     if (cls) e.className = cls;
     if (txt != null) e.textContent = txt;
     return e;
+  };
+
+  // The server's warnings about a setting (contract, slice 25a): one warn notice directly above the row holding
+  // the Save button, one sentence per line, announced when it appears. The UI never has its own copy of the text.
+  ui.warnings = function (saveBtn) {
+    var n = ui.el("div", "notice warn"), row = saveBtn.parentNode; n.setAttribute("aria-live", "polite"); n.hidden = true;
+    row.parentNode.insertBefore(n, row);
+    return { show: function (list) {
+      n.textContent = ""; (list || []).forEach(function (w) { n.appendChild(ui.el("p", null, w)).style.margin = "0"; });
+      n.hidden = !(list && list.length);
+    } };
   };
 
   // Preview card body: host is the element (give it aria-live="polite"; the caller adds the heading).
@@ -52,7 +71,7 @@
       big.appendChild(document.createElement("br"));
       big.appendChild(ui.el("span", "stat-label", "possible saving, an estimate from file sizes"));
       var ul = ui.el("ul");
-      ul.appendChild(ui.el("li", null, ui.num(r.files) + " videos found (" + ui.bytes(r.totalBytes) + ")"));
+      ul.appendChild(ui.el("li", null, ui.count(r.files, "video", "videos") + " found (" + ui.bytes(r.totalBytes) + ")"));
       // Before slice 12 shared (hardlinked) files are converted but free nothing (contract addendum 12).
       var sh = r.sharedNoSaving || 0;
       ul.appendChild(ui.el("li", null, sh ? ui.num(r.canShrink) + " will be converted; " + ui.num(sh) + " of them " + (sh === 1 ? "is" : "are") + " shared with another folder and will free no space"
@@ -76,7 +95,7 @@
       }
       if (pr && pr.total > 0) {
         var pct = Math.min(100, Math.floor(pr.done * 100 / pr.total));
-        w.text.textContent = "Checking " + ui.num(pr.done) + " of " + ui.num(pr.total) + " files...";
+        w.text.textContent = "Checking " + ui.num(pr.done) + " of " + ui.count(pr.total, "file", "files") + "...";
         w.bar.hidden = false; w.bar.setAttribute("aria-valuenow", pct); w.fill.style.width = pct + "%";
         if (Math.floor(pct / 10) !== w.step) { w.step = Math.floor(pct / 10); w.sr.textContent = "Checking files, " + w.step * 10 + "% done."; }
       }
@@ -88,12 +107,17 @@
       (function once() {
         g.SYP.api.preview({ id: libId }, { setting: getSetting(), sampleFile: extra.sample ? extra.sample() : null }).then(function (r) {
           if (my !== gen) return;
-          if (r.status === "ready") { show(r); if (extra.onSample) extra.onSample(r.sample || null); return; }
+          if (r.status === "ready") { show(r); if (extra.onSample) extra.onSample(r.sample || null); if (extra.onWarnings) extra.onWarnings(r.warnings); return; }
           if (r.status === "failed") return giveUp();
           var t = Date.now() - t0;
           waiting(w, r.progress, t >= 120000);
           poll = setTimeout(once, t < 60000 ? 2000 : 5000); // every 2 s for the first minute, then every 5 s
-        }, function () { if (my === gen) giveUp(); });
+        }, function (e) {
+          if (my !== gen) return;
+          // The setting itself can't run yet (slice 25b: "Keep only my languages" with no languages chosen): the
+          // server says why, in words for the person; anything else is a real failure.
+          if (e && (e.code === "languages_needed" || e.code === "not_available") && e.message) say([note(e.message)]); else giveUp();
+        });
       })();
     }
     return {

@@ -7,6 +7,7 @@
   var DESC = ["Shrinks the most. Some files may lose a little detail. Best for space-starved drives.", "Smaller files, small quality trade-off.",
     "Shrinks most files with little visible change. A good start for most people.", "Keeps more detail. Only touches files with lots of room to shrink.",
     "Keeps nearly all detail. Only touches files with lots of room to shrink, so savings are small."];
+  var warn = null; // the warnings notice above Save
   var table = []; // the engine's slider table (crf, minSavingPct per position), read from the server
 
   function say(t) { $("said").textContent = t; }
@@ -37,7 +38,9 @@
     var body = editor.get(), choice = !$("share").hidden && document.querySelector('input[name="sh"]:checked').value;
     if (choice) body.sharedFlowChoice = choice;
     var first = custom ? api.replaceCustom({ id: id }).then(function () { custom = false; $("custom").hidden = true; }) : Promise.resolve();
-    first.then(function () { return api.putSetting({ id: id }, body); }).then(function () {
+    first.then(function () { return api.putSetting({ id: id }, body); }).then(function (r) {
+      // After saving, the saved setting's warnings: from the answer if it carries them, else asked for.
+      if (r && r.warnings) warn.show(r.warnings); else api.getSetting({ id: id }).then(function (s) { warn.show(s.warnings); }, function () {});
       $("share").hidden = true; say("Saved."); $("err").hidden = true;
     }, function (e) { if (e.code === "flow_shared") askShared(e.usedBy || []); else fail(e); });
   }
@@ -60,7 +63,9 @@
         sc.onload = function () { S.flowpick($("flowpick"), lib, say); }; document.head.appendChild(sc);
       }
       var get = function () { return editor ? editor.get() : setting; }; // the loaded setting until a level has its own editor
-      var extra = level === "standard" ? { sample: function () { return $("sf").value || null; }, onSample: showSample } : null;
+      warn = ui.warnings($("save")); warn.show(setting.warnings); // the saved setting's warnings, at every level
+      // At Standard the editor's Preview gives the warnings of the setting as edited, before it is saved.
+      var extra = level === "standard" ? { sample: function () { return $("sf").value || null; }, onSample: showSample, onWarnings: function (w) { warn.show(w); } } : null;
       prev = ui.preview($("pv"), id, get, extra);
       if (level === "standard") {
         custom = setting.kind === "custom";

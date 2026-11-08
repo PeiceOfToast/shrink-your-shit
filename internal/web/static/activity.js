@@ -5,9 +5,15 @@
   var S = window.SYP, api = S.api, ui = S.ui, el = ui.el;
   var pane = document.getElementById("pane"), tab = pane.getAttribute("data-tab"), seen = {}, T = {}, confirmId = null;
   function $(id) { return document.getElementById(id); }
-  function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
   function base(p) { return p.split(/[\\/]/).pop(); }
   function nameOf(i) { return i.library + " / " + base(i.path); }
+  // A file renamed by a new file type (25a-2, newPath): the row's name, and the other name in a muted line under it
+  // ("was movie.mp4" on Done, "now movie.mkv" on Kept originals; design 18:25Z).
+  function named(i, name, other, word) {
+    var d = el("div", null, i.library + " / " + base(name));
+    if (other && base(other) !== base(name)) d.appendChild(el("div", "muted small", word + " " + base(other)));
+    return d;
+  }
   function fail(e) { var b = $("err"); b.textContent = e && e.message || "Something went wrong. Nothing was changed."; b.hidden = false; }
   function clear() { $("err").hidden = true; }
 
@@ -96,7 +102,7 @@
           pane.appendChild(c);
         });
         pane.appendChild(el("h2", null, "Up next"));
-        var next = q.upNext.map(function (u) { return u.library + ": " + ui.num(u.count) + " files" + (u.count && u.order ? ", " + (FIRST[u.order] || u.order) + " first" : ""); });
+        var next = q.upNext.map(function (u) { return u.library + ": " + ui.count(u.count, "file", "files") + (u.count && u.order ? ", " + (FIRST[u.order] || u.order) + " first" : ""); });
         pane.appendChild(el("p", "muted", next.length ? next.join(". ") + "." : "Nothing is waiting."));
       });
       if (wasOnStop) { var nx = pane.querySelector('[data-key^="stop-"]:not([aria-disabled="true"])'); (nx || $("qh")).focus(); }
@@ -104,7 +110,8 @@
   };
 
   // ---- Skipped
-  var KIND = { user_stopped: "info", restored: "info", hdr_dv: "warn", shared_file: "warn", cannot_keep_track: "warn", bitmap_subs: "warn", symlink: "warn", unreadable: "warn" };
+  // Badge style per reason: info for what resolves itself or was the person's own doing, warn for a risk, idle otherwise.
+  var KIND = { user_stopped: "info", restored: "info", still_changing: "info", hdr_dv: "warn", shared_file: "warn", cannot_keep_track: "warn", bitmap_subs: "warn", symlink: "idle", unreadable: "warn" };
   // Reasons a library rule causes, with the lowest control level whose library page can change that rule.
   var RULE = { already_efficient: 0, would_not_shrink: 0, hdr_dv: 1, cannot_keep_track: 1, setting_cannot_run: 1 }, RANK = { basic: 0, standard: 1, advanced: 2 }, level = null;
   var reason = "", shown = 0, tb, more, count;
@@ -115,7 +122,7 @@
       pane.appendChild(el("p", "muted", "Nothing was changed on these files. To change a rule, open the library."));
       var f = el("div", "field"), lb = el("label", null, "Show"), sel = el("select"); lb.htmlFor = "reason"; sel.id = "reason";
       sel.appendChild(el("option", null, "All reasons")).value = "";
-      Object.keys(ui.REASONS).forEach(function (k) { sel.appendChild(el("option", null, cap(ui.REASONS[k]))).value = k; });
+      Object.keys(ui.REASONS).forEach(function (k) { sel.appendChild(el("option", null, ui.badge(k))).value = k; });
       sel.onchange = function () { reason = sel.value; shown = 0; seen.skipped = null; refresh(); };
       f.appendChild(lb); f.appendChild(sel); pane.appendChild(f);
       var t = table(["File", "Why it was skipped", ""]); tb = t; pane.appendChild(t.wrap);
@@ -130,8 +137,8 @@
       draw("skipped", r, function () {
         tb.body.textContent = "";
         r.items.forEach(function (i) {
-          var why = el("div"), known = ui.REASONS[i.reason];
-          why.appendChild(el("span", "badge " + (KIND[i.reason] || "idle"), cap(known || ui.OTHER_REASON))); why.appendChild(document.createElement("br")); why.appendChild(document.createTextNode(i.detail || "")); // the engine's detail; never the raw code
+          var why = el("div");
+          why.appendChild(el("span", "badge " + (KIND[i.reason] || "idle"), ui.badge(i.reason))); why.appendChild(document.createElement("br")); why.appendChild(document.createTextNode(i.detail || "")); // the engine's detail; never the raw code
           var a = null;
           if (i.reason === "user_stopped" || i.reason === "restored") a = btn("Convert again", "again-" + i.id, function () { act(api.convertAgain({ id: i.id }), true); });
           else if (i.libraryId && RULE[i.reason] != null && level >= RULE[i.reason]) { a = el("a", "btn small", "Change rule"); a.href = "/library/?id=" + encodeURIComponent(i.libraryId); }
@@ -180,7 +187,7 @@
           // What happened to the original, from originalState (contract, slice 18); the column header says "Original".
           if (i.originalState === "kept" && i.keptId) { o.appendChild(document.createTextNode("Kept " + i.keptDaysLeft + (i.keptDaysLeft === 1 ? " more day" : " more days") + " · ")); var a = el("a", null, "Get original back"); a.href = "/activity/kept/?confirm=" + encodeURIComponent(i.keptId); o.appendChild(a); }
           else o.textContent = { kept: "Kept beside the new file", restored: "Back in place", deleted: "Deleted" }[i.originalState] || ""; // an unknown state: say nothing rather than guess
-          t.row([nameOf(i), ui.bytes(i.beforeBytes), ui.bytes(i.afterBytes), o]);
+          t.row([named(i, i.newPath || i.path, i.newPath && i.path, "was"), ui.bytes(i.beforeBytes), ui.bytes(i.afterBytes), o]);
         });
         pane.appendChild(t.wrap);
       });
@@ -194,7 +201,9 @@
     openFor = i.keptId; panel.textContent = "";
     var h = el("h3", null, "Get the original of “" + base(i.path) + "” back?"); h.tabIndex = -1; h.setAttribute("data-key", "panel-h"); panel.appendChild(h);
     // Restore deletes the smaller file: there is no switching back (design, mockups/restore.html).
-    var say = el("p", null, "The original (" + ui.bytes(i.originalBytes) + ") goes back in place and the smaller version is deleted. This file will not be converted again unless you press Convert again, under "), sk = el("a", null, "Activity > Skipped");
+    var to = i.newPath && base(i.newPath) !== base(i.path) ? base(i.newPath) : "";
+    var say = el("p", null, (to ? "The original (" + base(i.path) + ", " + ui.bytes(i.originalBytes) + ") goes back in place and the smaller version, " + to + ", is deleted."
+      : "The original (" + ui.bytes(i.originalBytes) + ") goes back in place and the smaller version is deleted.") + " This file will not be converted again unless you press Convert again, under "), sk = el("a", null, "Activity > Skipped");
     sk.href = "/activity/skipped/"; say.appendChild(sk); say.appendChild(document.createTextNode(".")); panel.appendChild(say);
     var row = el("div", "row");
     row.appendChild(btn("Get original back", "confirm", function () { act(api.restoreKept({ id: i.keptId }).then(function () { closePanel(); restoredNote = "Original of " + base(i.path) + " is back in place."; seen.kept = null; }), true); }, "btn primary"));
@@ -206,14 +215,14 @@
     return api.kept().then(function (r) {
       draw("kept", r, function () {
         pane.textContent = ""; pane.appendChild(heading("Kept originals", "kh"));
-        var p = el("p", "muted"); p.appendChild(document.createTextNode("After a file is converted, the original is kept for " + r.days + " days in a folder called .syp-trash next to it, so you can get it back. Change this in "));
+        var p = el("p", "muted"); p.appendChild(document.createTextNode("After a file is converted, the original is kept for " + ui.count(r.days, "day", "days") + " in a folder called .syp-trash next to it, so you can get it back. Change this in "));
         var a = el("a", null, "Settings → Safety"); a.href = "/settings/safety/"; p.appendChild(a); p.appendChild(document.createTextNode(".")); pane.appendChild(p);
         pane.appendChild(el("p", "muted", restoredNote)).id = "restored"; $("restored").setAttribute("role", "status");
         if (!r.items.length) { pane.appendChild(empty("No kept originals yet. Originals appear here after the first file is converted.")); pane.appendChild(panel); return; }
         var s = el("p"); s.appendChild(el("strong", null, ui.bytes(r.keptBytes))); s.appendChild(document.createTextNode(" of originals kept for " + ui.num(r.count) + (r.count === 1 ? " file." : " files."))); pane.appendChild(s);
         var t = table(["File", "Original", "Now", "Deleted on", ""]);
         r.items.forEach(function (i) {
-          t.row([nameOf(i), ui.bytes(i.originalBytes), ui.bytes(i.nowBytes), new Date(i.deleteOn).toLocaleDateString([], { month: "short", day: "numeric" }), btn("Get original back", "restore-" + i.keptId, function () { openPanel(i); })]);
+          t.row([named(i, i.path, i.newPath, "now"), ui.bytes(i.originalBytes), ui.bytes(i.nowBytes), new Date(i.deleteOn).toLocaleDateString([], { month: "short", day: "numeric" }), btn("Get original back", "restore-" + i.keptId, function () { openPanel(i); })]);
         });
         pane.appendChild(t.wrap); pane.appendChild(panel);
         if (confirmId) { var hit = r.items.filter(function (x) { return x.keptId === confirmId; })[0]; confirmId = null; if (hit) openPanel(hit); }
