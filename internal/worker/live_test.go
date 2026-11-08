@@ -48,3 +48,29 @@ func TestEncoderWords(t *testing.T) {
 		}
 	}
 }
+
+// #97 QA (P3): the processing card's "converting to" ends in the new file's type: WebM and MP4 too,
+// including a .webm kept as its own type (ffprobe names it matroska).
+func TestConvertingToNamesTheFileType(t *testing.T) {
+	vp9 := rules.VideoEncode{Codec: "libvpx-vp9", Format: "vp9"}
+	mkv := media.Info{Container: "matroska,webm", Streams: []media.Stream{{Type: "video", Codec: "h264", BitDepth: 8}}}
+	webm, mp4 := mkv, mkv
+	webm.Ext = ".webm"
+	mp4.Container, mp4.Ext = "mov,mp4,m4a,3gp,3g2,mj2", ".mp4"
+	for _, c := range []struct {
+		container string
+		src       media.Info
+		want      string
+	}{
+		{"webm", mkv, "VP9 · 8-bit · WebM"},
+		{"mp4", mkv, "VP9 · 8-bit · MP4"},
+		{"mkv", webm, "VP9 · 8-bit · MKV"},
+		{"", webm, "VP9 · 8-bit · WebM"},
+		{"", mp4, "VP9 · 8-bit · MP4"},
+		{"", mkv, "VP9 · 8-bit · MKV"},
+	} {
+		if got := convertingTo(rules.Plan{Container: c.container, Video: vp9}, c.src); got != c.want {
+			t.Errorf("%q from %s%s: %q, want %q", c.container, c.src.Container, c.src.Ext, got, c.want)
+		}
+	}
+}
