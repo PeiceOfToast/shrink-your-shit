@@ -145,9 +145,9 @@ func TestRoughWarning(t *testing.T) {
 		want          string
 	}{
 		{"low", "hevc", []Shape{sdr1080}, ""}, // 3 Mbps is above 2
-		{"low", "hevc", []Shape{sdr1080, hdr4k60}, "Low may look blocky in dark or fast scenes for 4K HDR 60 fps files (8 Mbps). Choose Medium or No limit to avoid that."},
+		{"low", "hevc", []Shape{sdr1080, hdr4k60}, "Low may look blocky in dark or fast scenes for 4K HDR files at 50-60 fps (8 Mbps). Choose Medium or No limit to avoid that."},
 		{"low", "hevc", []Shape{{Row: "2160", HDR: true}}, ""}, // 6 x 1.25 = 7.5, below 8
-		{"low", "h264", []Shape{{Row: "1080", HighFPS: true}}, "Low may look blocky in dark or fast scenes for 1080p 60 fps files (5 Mbps). Choose Medium or No limit to avoid that."}, // 4 x 1.4 = 5.6
+		{"low", "h264", []Shape{{Row: "1080", HighFPS: true}}, "Low may look blocky in dark or fast scenes for 1080p files at 50-60 fps (5 Mbps). Choose Medium or No limit to avoid that."}, // 4 x 1.4 = 5.6
 		{"none", "hevc", []Shape{hdr4k60}, ""},
 		{"high", "hevc", []Shape{hdr4k60}, ""},
 	} {

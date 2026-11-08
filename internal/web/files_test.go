@@ -234,7 +234,7 @@ func TestRoughPictureWarning(t *testing.T) {
 		json.Unmarshal([]byte(b), &v)
 		return v.Warnings
 	}
-	if w := warn(`{"quality":3,"maxBitrate":"low","fileType":"keep"}`); len(w) != 1 || !strings.Contains(w[0], "4K HDR 60 fps files (8 Mbps)") {
+	if w := warn(`{"quality":3,"maxBitrate":"low","fileType":"keep"}`); len(w) != 1 || !strings.Contains(w[0], "Low may look blocky in dark or fast scenes for 4K HDR files at 50-60 fps (8 Mbps). Choose Medium or No limit to avoid that.") {
 		t.Errorf("low: %v", w)
 	}
 	if w := warn(`{"quality":3,"maxBitrate":"none","fileType":"keep"}`); len(w) != 0 {

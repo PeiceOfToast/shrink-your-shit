@@ -130,13 +130,14 @@ func RoughWarning(level, f string, shapes []Shape) string {
 	if by <= 0 {
 		return ""
 	}
-	what := rowWords[worst.Row]
+	// design's words (REDESIGN E, 03:44Z): "for <res> [HDR ]files[ at 50-60 fps] (<N> Mbps)"
+	what, fps := rowWords[worst.Row], ""
 	if worst.HDR {
 		what += " HDR"
 	}
 	if worst.HighFPS {
-		what += " 60 fps"
+		fps = " at 50-60 fps"
 	}
-	return fmt.Sprintf("%s may look blocky in dark or fast scenes for %s files (%g Mbps). Choose %s to avoid that.",
-		upperFirst(level), what, row[worst.Row], betterLevel[level])
+	return fmt.Sprintf("%s may look blocky in dark or fast scenes for %s files%s (%g Mbps). Choose %s to avoid that.",
+		upperFirst(level), what, fps, row[worst.Row], betterLevel[level])
 }
