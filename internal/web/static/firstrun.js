@@ -46,14 +46,24 @@
   }
   function nameOf(p) { var b = p.replace(/\/+$/, "").split(/[\\/]/).pop() || "Library"; return b.charAt(0).toUpperCase() + b.slice(1); }
 
-  // Step 4: the editor for the chosen level plus the Preview card.
+  // "Your language" (A4) pre-filled from the browser: its language's English name, matched in our list.
+  function browserLang(list) {
+    try {
+      var dn = new Intl.DisplayNames(["en"], { type: "language" }), langs = navigator.languages || [navigator.language];
+      for (var i = 0; i < langs.length; i++) { var n = dn.of(langs[i].split("-")[0]), hit = list.filter(function (x) { return (x[2] || x[1]) === n; })[0]; if (hit) return hit[0]; }
+    } catch (e) {}
+    return "";
+  }
+  // Step 4: the editor for the chosen level; no Preview card (redesign A4). At Standard the Preview still runs, unseen,
+  // only for the warnings above Continue, until workshop's warnings-only check exists (REDESIGN E).
   function buildStep4() {
     var host = $("editor"); host.textContent = ""; $("lib-name").textContent = st.lib ? st.lib.name : "";
     if (st.prev) st.prev.stop();
+    st.editor = null; st.lang = null;
     var get = function () { return st.editor.get(); };
     if (!st.warn) st.warn = ui.warnings($("go4")); st.warn.show([]);
-    st.prev = ui.preview($("preview"), st.lib.id, get, st.level === "standard" ? { onWarnings: st.warn.show } : null);
-    var change = function () { st.prev.mark(); };
+    st.prev = st.level === "standard" ? ui.preview($("preview"), st.lib.id, get, { onWarnings: st.warn.show }) : null;
+    var change = function () { if (st.prev) st.prev.mark(); };
     if (st.level === "standard") {
       // The library's setting answer says which Audio and Subtitles choices this version can save (addendum 13).
       st.editor = ed.selectors(host, change);
@@ -65,16 +75,33 @@
       }, function () {});
     } else if (st.level === "advanced") st.editor = ed.startFrom(host, change);
     else {
-      var c = ui.el("div", "card"); c.appendChild(ui.el("h2", null, "Smaller file or better quality?")).style.marginTop = "0";
-      host.appendChild(c);
-      st.editor = ed.slider(c, 3, change, st.lib.name + ": smallest file to best quality");
-      c.appendChild(ui.el("p", "muted small", "Balanced is a good start for most people. Your choice is saved for this library and can be changed any time."));
+      // Basic: the A1 editor (slider, Your files become, Picture, Audio, the fixed lines) and "Your language" (A4).
+      var c = ui.el("div", "card"), box = ui.el("div"), f = ui.el("div", "field"), lb = ui.el("label", null, "Your language"), sel = ui.el("select"),
+        hint = ui.el("span", "hint", "Audio in this language is kept. You can add more languages later in Settings.");
+      c.appendChild(ui.el("h2", null, "Smaller file or better quality?")).style.marginTop = "0";
+      sel.id = "f-lang"; lb.htmlFor = sel.id; hint.id = "f-lang-h"; sel.setAttribute("aria-describedby", hint.id);
+      f.appendChild(lb); f.appendChild(sel); f.appendChild(hint); c.appendChild(box); c.appendChild(f); host.appendChild(c);
+      Promise.all([api.getSetting({ id: st.lib.id }), api.getSettings(), fetch("/assets/languages.json").then(function (r) { return r.json(); })]).then(function (r) {
+        var s = r[0], have = r[1].languages || [], names = {};
+        r[2].forEach(function (x) { names[x[0]] = x[1]; var o = ui.el("option", null, x[1]); o.value = x[0]; sel.appendChild(o); });
+        sel.value = have[0] || browserLang(r[2]) || r[2][0][0];
+        var draw = function () {
+          var now = st.editor ? st.editor.get() : { quality: s.quality || 3, audio: s.audio };
+          box.textContent = ""; st.editor = ed.basic(box, { quality: now.quality, audio: now.audio, becomes: s.becomes }, [sel.value], names, null, st.lib.name + ": smallest file to best quality", true);
+        };
+        sel.onchange = draw; draw();
+        // Saved on Continue: the chosen language first, any others kept (the same list as Settings > General).
+        st.lang = function () { return [sel.value].concat(have.filter(function (c) { return c !== sel.value; })); };
+      }, fail);
     }
-    st.prev.start();
+    if (st.prev) st.prev.start();
   }
 
-  function finish(dest, scan) {
-    Promise.resolve(scan && api.scanLibrary({ id: st.lib.id }))
+  // Step 5 (A4): both buttons scan (reading only); Start converting also starts the worker on this computer (S2).
+  // Nothing changes on disk before that (SAF-UI-6).
+  function finish(dest, start) {
+    api.scanLibrary({ id: st.lib.id })
+      .then(function () { return start && api.listWorkers().then(function (r) { return api.startWorker({ id: r.workers[0].id }); }); })
       .then(function () { return api.patchSettings({}, { firstRunDone: true, firstRunStep: 5 }); })
       .then(function () { location.href = dest; }, fail);
   }
@@ -95,7 +122,12 @@
         });
       });
     };
-    $("go4").onclick = function () { next(4, function () { return api.putSetting({ id: st.lib.id }, st.editor.get()); }); };
+    $("go4").onclick = function () {
+      if (!st.editor) return; // the Basic editor draws once the language list is in
+      next(4, function () {
+        return Promise.resolve(st.lang && api.patchSettings({}, { languages: st.lang() })).then(function () { return api.putSetting({ id: st.lib.id }, st.editor.get()); });
+      });
+    };
     $("start").onclick = function () { finish("/activity/", true); };
     $("notyet").onclick = function () { finish("/library/?id=" + encodeURIComponent(st.lib.id), false); };
     steps.forEach(function (s, i) {

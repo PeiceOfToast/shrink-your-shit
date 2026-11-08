@@ -12,6 +12,9 @@
   function head() {
     $("lib-title").textContent = lib.name; $("lib-path").textContent = lib.path; document.title = lib.name + " - shrink-your-shit";
     $("lib-state").textContent = ""; $("lib-state").appendChild(ui.stateBadge(lib));
+    // Files waiting and no worker running (slice A status; redesign A4/D4): say so, with the way to start one.
+    var w = lib.status && lib.status.kind === "waiting_for_worker"; $("waiting").hidden = !w;
+    if (w) $("waiting-n").textContent = ui.count(lib.status.toDo, "video", "videos") + (lib.status.toDo === 1 ? " is" : " are") + " waiting";
     $("scan").textContent = lib.state === "not_started" ? "Start" : "Scan now";
   }
 

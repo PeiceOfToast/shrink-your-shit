@@ -27,7 +27,8 @@
   // The Basic editor (redesign A1): the slider, "Your files become", the Picture line, Audio with its hints and "Your
   // language", and three fixed lines. s is the setting answer: quality, audio, and becomes (the flow's fixed facts from
   // the server, contract A5: {video, resolution, fileType}); without becomes the box is not shown (no guessed facts).
-  // langs: the person's language codes; names: code -> name. get() gives {quality, audio}.
+  // langs: the person's language codes; names: code -> name. noLangLine: first-run asks "Your language" itself (A4), so
+  // the "Your language: ... Change it in Settings" line is left out. get() gives {quality, audio}.
   var PICTURE = ["The smallest files. Fine detail can soften, mostly in dark or busy scenes.", "Small files, with a small loss of fine detail.",
     "Little visible change for most people. A good start.", "Keeps more detail. Files stay larger.", "Hard to tell from the original. Files stay largest."];
   var AUDIO = [["stereo_aac", "Stereo AAC in my language", "Audio in your language becomes stereo AAC, which plays on every TV and phone. Surround sound becomes stereo."],
@@ -36,7 +37,7 @@
   var FIXED = ["Every video not already in this format is converted, even if the new file isn't smaller, so your library ends up in one format. Activity shows the size before and after.",
     "Each new file is checked against the original before it is kept. If the check fails, the original stays.",
     "HDR stays HDR. Dolby Vision files are left as they are."];
-  function basic(host, s, langs, names, onChange, label) {
+  function basic(host, s, langs, names, onChange, label, noLangLine) {
     var sl = slider(host, s.quality, function () { draw(); if (onChange) onChange(); }, label), range = host.querySelector("input[type=range]");
     var box = el("div", "become"), line = el("span"), pic = el("p"), pt = el("span"), f = el("div", "field"), lb = el("label", null, "Audio"),
       sel = el("select"), hint = el("span", "hint"), mine = el("span", "hint"), ul = el("ul", "small muted");
@@ -62,7 +63,7 @@
       hint.textContent = AUDIO.filter(function (a) { return a[0] === sel.value; })[0][2];
     }
     sel.addEventListener("change", function () { draw(); if (onChange) onChange(); });
-    f.appendChild(lb); f.appendChild(sel); f.appendChild(hint); f.appendChild(mine);
+    f.appendChild(lb); f.appendChild(sel); f.appendChild(hint); if (noLangLine) sel.setAttribute("aria-describedby", hint.id); else f.appendChild(mine);
     FIXED.forEach(function (t) { ul.appendChild(el("li", null, t)); });
     if (s.becomes) host.appendChild(box);
     host.appendChild(pic); host.appendChild(f); host.appendChild(ul); draw();
