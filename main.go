@@ -174,6 +174,7 @@ func main() {
 	x := media.OSExec{}
 	chk := &doctor.Checker{Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath, KnownOriginals: store.KnownOriginals}
 	converts := chk.Converter(ctx).Converts()
+	chk.ToolsNow() // the hardware check starts in the background, after the converter's: Workers has it soon after
 	sc := &scanner.Scanner{Store: store, Exec: x, FFprobe: ffprobePath, Targets: scanTargets(store), MinAge: *settle}
 	if converts {
 		go sc.Run(ctx, *every)

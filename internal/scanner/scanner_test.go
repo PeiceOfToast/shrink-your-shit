@@ -26,6 +26,7 @@ func setup(t *testing.T, probe string) (*Scanner, *jobs.Store, string, *media.Fa
 	if err != nil {
 		t.Fatal(err)
 	}
+	st.SetPaused(false) // the test's worker is started (S2: a new install starts stopped)
 	t.Cleanup(func() { st.Close() })
 	lib := t.TempDir()
 	os.WriteFile(filepath.Join(lib, "a.mkv"), []byte("12345"), 0o644)

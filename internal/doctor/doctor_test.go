@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 )
@@ -448,5 +450,106 @@ func TestKnownOriginalThroughALinkIsNotOrphaned(t *testing.T) {
 		if n.Code == "orphaned_originals" {
 			t.Errorf("a known original was reported: %s", n.Message)
 		}
+	}
+}
+
+// The Workers page's graphics card (S2): found when a hardware encoder works here, with its vendor when
+// the encoder names one.
+func TestGPU(t *testing.T) {
+	for _, c := range []struct {
+		hw     []string
+		found  bool
+		vendor string
+	}{{nil, false, ""}, {[]string{"hevc_nvenc"}, true, "NVIDIA"}, {[]string{"hevc_vaapi", "hevc_qsv"}, true, "Intel"},
+		{[]string{"hevc_amf"}, true, "AMD"}, {[]string{"hevc_vaapi"}, true, ""}} {
+		if f, v := GPU(Tools{Hardware: c.hw}); f != c.found || v != c.vendor {
+			t.Errorf("%v: %v %q", c.hw, f, v)
+		}
+	}
+}
+
+// The hardware test's encodes never hold up the converter check (startup, the health page) or a
+// Workers answer: a refresh running in the background with a slow encode leaves Converter and ToolsNow
+// answering at once (review 0605262).
+func TestHardwareTestDoesNotHoldUpTheConverterCheck(t *testing.T) {
+	x := &media.FakeExec{Handler: func(name string, args []string) (string, string, error) {
+		for i, a := range args {
+			if a == "-c:v" && i+1 < len(args) && args[i+1] == "hevc_nvenc" {
+				time.Sleep(time.Second) // the hardware test encode
+			}
+		}
+		return "ffmpeg version 7.1\n V..... libx265  x\n V..... hevc_nvenc  x\n", "", nil
+	}}
+	c := &Checker{Exec: x, FFmpeg: "/usr/bin/ffmpeg", FFprobe: "/usr/bin/ffprobe"}
+	c.Converter(context.Background()) // as startup does first
+	c.toolsAt = time.Time{}           // stale, so the next one checks again
+	c.ToolsNow()                      // the background refresh: its hardware encode takes a second
+	time.Sleep(50 * time.Millisecond) // let it reach the encode
+	start := time.Now()
+	c.Converter(context.Background())
+	c.ToolsNow()
+	if took := time.Since(start); took > 300*time.Millisecond {
+		t.Errorf("the converter check waited %s for the hardware test", took)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if tl, ok := c.ToolsNow(); ok && len(tl.Hardware) == 1 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Error("the background check never stored its result")
+}
+
+// One hardware test at a time (review c66c66b): a background refresh (ToolsNow) and several Tools calls
+// overlapping run it once, and every caller gets its result.
+func TestHardwareTestRunsOnceAtATime(t *testing.T) {
+	var mu sync.Mutex
+	encodes := 0
+	x := &media.FakeExec{Handler: func(name string, args []string) (string, string, error) {
+		for i, a := range args {
+			if a == "-c:v" && i+1 < len(args) && args[i+1] == "hevc_nvenc" {
+				mu.Lock()
+				encodes++
+				mu.Unlock()
+				time.Sleep(300 * time.Millisecond)
+			}
+		}
+		return "ffmpeg version 7.1\n V..... libx265  x\n V..... hevc_nvenc  x\n", "", nil
+	}}
+	c := &Checker{Exec: x, FFmpeg: "/usr/bin/ffmpeg", FFprobe: "/usr/bin/ffprobe"}
+	c.ToolsNow() // starts the background check
+	var wg sync.WaitGroup
+	got := make([]int, 3)
+	for i := range got {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			got[i] = len(c.Tools(context.Background()).Hardware)
+		}(i)
+	}
+	wg.Wait()
+	time.Sleep(50 * time.Millisecond) // the background one finishes too
+	mu.Lock()
+	defer mu.Unlock()
+	if encodes != 1 || got[0] != 1 || got[1] != 1 || got[2] != 1 {
+		t.Errorf("hardware test ran %d times; results %v", encodes, got)
+	}
+}
+
+// A hardware test cut short by its caller is not kept: it would say no GPU works for ten minutes.
+func TestCancelledHardwareTestIsNotKept(t *testing.T) {
+	x := &media.FakeExec{Handler: func(name string, args []string) (string, string, error) {
+		return "ffmpeg version 7.1\n V..... libx265  x\n V..... hevc_nvenc  x\n", "", nil
+	}}
+	c := &Checker{Exec: x, FFmpeg: "/usr/bin/ffmpeg", FFprobe: "/usr/bin/ffprobe"}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	c.Tools(ctx)
+	if c.hw != nil {
+		t.Fatalf("kept %v", *c.hw)
+	}
+	if got := c.Tools(context.Background()).Hardware; len(got) != 1 {
+		t.Errorf("hardware %v, want hevc_nvenc", got)
 	}
 }

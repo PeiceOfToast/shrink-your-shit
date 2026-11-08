@@ -154,7 +154,8 @@ func activityRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, no
 			return
 		}
 		writeJSON(w, map[string]any{"freedBytes": a.FreedBytes, "waitingBytes": a.WaitingBytes, "workingFiles": a.WorkingFiles,
-			"waitingFiles": a.WaitingFiles, "paused": store.Paused(), "counts": map[string]int{"skipped": a.Skipped, "failed": a.Failed}})
+			"waitingFiles": a.WaitingFiles, "paused": store.Paused(), "workersRunning": workersRunning(store),
+			"counts": map[string]int{"skipped": a.Skipped, "failed": a.Failed}})
 	})
 
 	// What is converting now, and what waits per library.
@@ -305,7 +306,7 @@ func activityRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, no
 		writeJSON(w, map[string]bool{"ok": true, "paused": true})
 	})
 	api.HandleFunc("POST /api/queue/resume", func(w http.ResponseWriter, r *http.Request) {
-		if err := store.SetPaused(false); err != nil {
+		if err := startWorker(store); err != nil { // Resume: this computer's worker started (S2)
 			serverError(w, err)
 			return
 		}
@@ -373,3 +374,6 @@ func upperFirst(s string) string {
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
 }
+
+// workersRunning reports whether any worker is started (S2): this computer's, unless stopped.
+func workersRunning(store *jobs.Store) bool { return !store.Paused() }

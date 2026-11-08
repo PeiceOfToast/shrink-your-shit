@@ -53,6 +53,7 @@ func realJob(t *testing.T, path string, dur float64) (*jobs.Store, int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	st.SetPaused(false) // the test's worker is started (S2: a new install starts stopped)
 	t.Cleanup(func() { st.Close() })
 	id, err := st.Enqueue(jobs.Job{Library: filepath.Dir(path), Path: path, DurationSec: dur})
 	if err != nil {

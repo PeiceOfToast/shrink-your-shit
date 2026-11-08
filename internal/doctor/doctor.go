@@ -66,35 +66,104 @@ type Checker struct {
 	toolsAt time.Time
 	hw      *[2][]string // working and listed-but-failing hardware encoders
 	hwAt    time.Time
+	// refreshing: ToolsNow started a background check that has not finished
+	refreshing bool
+	// hwRun is closed when the hardware test in flight ends (nil: none runs): one at a time
+	hwRun chan struct{}
 }
 
 const toolsTTL = 10 * time.Minute
 
 // Tools checks the converter, hardware encoders included (cached for ten minutes: the hardware test
 // encodes take a moment).
+//
+// The hardware test encodes run without the lock (it is taken only to read and store the result), so
+// Converter, ToolsNow and the startup check never wait for them (review 0605262).
 func (c *Checker) Tools(ctx context.Context) Tools {
 	t := c.Converter(ctx)
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.hw == nil || time.Since(c.hwAt) >= toolsTTL {
-		var hw [2][]string
-		if t.FFmpeg != "" {
-			if out, _ := c.Exec.Output(ctx, t.FFmpeg, "-hide_banner", "-encoders"); len(out) > 0 {
-				for _, enc := range []string{"hevc_nvenc", "hevc_qsv", "hevc_vaapi", "hevc_videotoolbox", "hevc_amf", "hevc_mf", "hevc_v4l2m2m"} {
-					if strings.Contains(string(out), " "+enc+" ") {
-						if c.encodes(ctx, enc) {
-							hw[0] = append(hw[0], enc)
-						} else {
-							hw[1] = append(hw[1], enc)
-						}
-					}
+	for {
+		if c.hw != nil && time.Since(c.hwAt) < toolsTTL { // fresh: shared
+			hw := *c.hw
+			c.mu.Unlock()
+			t.Hardware, t.HardwareListed = hw[0], hw[1]
+			return t
+		}
+		if run := c.hwRun; run != nil { // one test at a time (GPU session limits, review c66c66b): wait for it
+			c.mu.Unlock()
+			select {
+			case <-run:
+			case <-ctx.Done():
+				return t // no hardware result for this caller; the running test still stores its own
+			}
+			c.mu.Lock()
+			continue
+		}
+		run := make(chan struct{})
+		c.hwRun = run
+		c.mu.Unlock()
+		hw := c.hardwareTest(ctx, t)
+		c.mu.Lock()
+		if ctx.Err() == nil { // a test cut short by its caller is not a result: the next caller runs it again
+			c.hw, c.hwAt = &hw, time.Now()
+		}
+		c.hwRun = nil
+		close(run)
+		c.mu.Unlock()
+		t.Hardware, t.HardwareListed = hw[0], hw[1]
+		return t
+	}
+}
+
+// hardwareTest finds the hardware HEVC encoders ffmpeg lists and tries each on one tiny frame (listed
+// is not the same as usable here): working ones, and listed ones that did not work. Run without the
+// lock, one at a time (Tools).
+func (c *Checker) hardwareTest(ctx context.Context, t Tools) (hw [2][]string) {
+	if t.FFmpeg == "" {
+		return hw
+	}
+	if out, _ := c.Exec.Output(ctx, t.FFmpeg, "-hide_banner", "-encoders"); len(out) > 0 {
+		for _, enc := range []string{"hevc_nvenc", "hevc_qsv", "hevc_vaapi", "hevc_videotoolbox", "hevc_amf", "hevc_mf", "hevc_v4l2m2m"} {
+			if strings.Contains(string(out), " "+enc+" ") {
+				if c.encodes(ctx, enc) {
+					hw[0] = append(hw[0], enc)
+				} else {
+					hw[1] = append(hw[1], enc)
 				}
 			}
 		}
-		c.hw, c.hwAt = &hw, time.Now()
 	}
-	t.Hardware, t.HardwareListed = c.hw[0], c.hw[1]
-	return t
+	return hw
+}
+
+// ToolsNow is Tools without waiting: the last result, or ok false when none is known yet (or a check is
+// running right now). A missing or stale result is refreshed in the background, one refresh at a time:
+// a page that only shows the graphics card never waits for the hardware test's encodes (S2, ui-shop's
+// 1.5 s stop answer).
+func (c *Checker) ToolsNow() (Tools, bool) {
+	if !c.mu.TryLock() {
+		return Tools{}, false // a check is running: its result is there on the next call
+	}
+	t, ok := Tools{}, c.tools != nil && c.hw != nil
+	stale := !ok || time.Since(c.hwAt) >= toolsTTL || time.Since(c.toolsAt) >= toolsTTL
+	if ok {
+		t = *c.tools
+		t.Hardware, t.HardwareListed = c.hw[0], c.hw[1]
+	}
+	start := stale && !c.refreshing
+	if start {
+		c.refreshing = true
+	}
+	c.mu.Unlock()
+	if start {
+		go func() {
+			c.Tools(context.Background())
+			c.mu.Lock()
+			c.refreshing = false
+			c.mu.Unlock()
+		}()
+	}
+	return t, ok
 }
 
 // Converter checks ffmpeg, ffprobe, libx265 and the SSIM filter, without the hardware test: quick

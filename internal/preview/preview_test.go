@@ -79,6 +79,7 @@ func store(t *testing.T) *jobs.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
+	s.SetPaused(false) // the test's worker is started (S2: a new install starts stopped)
 	t.Cleanup(func() { s.Close() })
 	return s
 }
