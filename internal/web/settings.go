@@ -3,6 +3,7 @@
 package web
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,8 +19,9 @@ import (
 // later slices (24/35), keepOriginalsDays to slice 17.
 type Settings struct {
 	// OldControlLevel and OldPerLibraryFlow are the retired global control level (each flow has its own
-	// now). Kept as stored for one release, so a rollback finds them, but never shown or used, and a
-	// PATCH cannot change them (review e9455d0).
+	// now). For one release they are kept as stored (a rollback finds them) and GET shows them, since
+	// the page before the Flows tab still reads them (ui-shop 04:37Z); nothing in the engine uses them,
+	// and a PATCH cannot change them (review e9455d0).
 	OldControlLevel   string     `json:"controlLevel,omitempty"`
 	OldPerLibraryFlow *bool      `json:"perLibraryFlow,omitempty"`
 	FirstRunDone      bool       `json:"firstRunDone"`
@@ -44,7 +46,7 @@ type QuietHours struct {
 const settingsKey = "settings"
 
 func defaultSettings() Settings {
-	return Settings{FirstRunStep: 1, KeepOriginalsDays: 7, ParallelJobs: 1,
+	return Settings{OldControlLevel: "basic", FirstRunStep: 1, KeepOriginalsDays: 7, ParallelJobs: 1,
 		LowPriority: true, ScanSchedule: "02:00", QueueOrder: "newest", Languages: []string{}}
 }
 
@@ -108,8 +110,8 @@ func (ss *settingsStore) load() (Settings, error) {
 		if err != nil {
 			return Settings{}, err
 		}
-		if upgraded {
-			s.FirstRunDone = true
+		if upgraded { // an upgrade started at Standard before the control-level slice (D13)
+			s.FirstRunDone, s.OldControlLevel = true, "standard"
 		}
 		return s, ss.save(s)
 	}
@@ -123,7 +125,7 @@ func (ss *settingsStore) save(s Settings) error {
 
 // readOnlySettings are shown by GET and ignored in a PATCH (the page may send back what it got). The
 // control level is each flow's own since the control-level slice: controlLevel and perLibraryFlow are
-// no longer shown, and a PATCH that sends them is accepted and ignored for one release.
+// shown as stored for one release, and a PATCH that sends them is accepted and ignored.
 var readOnlySettings = map[string]bool{"authRequired": true, "trashPath": true, "updateAvailable": true,
 	"controlLevel": true, "perLibraryFlow": true}
 
@@ -133,8 +135,9 @@ func settingsRoutes(api *http.ServeMux, ss *settingsStore, access *Access) {
 		var m map[string]any
 		json.Unmarshal(b, &m)
 		m["authRequired"] = access.Required()
-		delete(m, "controlLevel") // retired: kept in storage for one release, never shown
-		delete(m, "perLibraryFlow")
+		// retired, shown as stored for one release (ui-shop 04:37Z: the page before the Flows tab reads
+		// them); "basic" and false when none is stored, as a fresh install had
+		m["controlLevel"], m["perLibraryFlow"] = cmp.Or(s.OldControlLevel, "basic"), s.OldPerLibraryFlow != nil && *s.OldPerLibraryFlow
 		m["trashPath"] = "Kept next to each file, in a folder called .syp-trash"
 		m["updateAvailable"] = nil
 		m["integrations"] = map[string]any{ // integrations come in a later slice; empty, so the page can show them
