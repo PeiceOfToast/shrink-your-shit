@@ -326,7 +326,7 @@ func sameLanguage(a, b string) bool {
 }
 
 // Containers are the file types a flow can make (fileType), as ffprobe names them.
-var Containers = map[string]string{"mkv": "matroska,webm", "mp4": "mov,mp4,m4a,3gp,3g2,mj2"}
+var Containers = map[string]string{"mkv": "matroska,webm", "webm": "matroska,webm", "mp4": "mov,mp4,m4a,3gp,3g2,mj2"}
 
 func containerWords(name string) string {
 	switch {

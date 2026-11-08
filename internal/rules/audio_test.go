@@ -361,3 +361,39 @@ func TestKeepWebM(t *testing.T) {
 		}
 	}
 }
+
+// Review 32a307d (#97 P2): a WebM made by a WebM flow is already in format on the next scan (it was
+// remuxed once more, and the first output kept as an original); MKV and WebM are told apart by the
+// file's extension, since ffprobe names both "matroska,webm".
+func TestWebMOutputIsAlreadyInFormat(t *testing.T) {
+	SetAvailableFormats(allEncoders)
+	defer SetAvailableFormats(nil)
+	file := func(ext string) media.Info {
+		i := h264(1920, 1080, 2000, media.Stream{Type: "audio", Codec: "opus", Channels: 2, BitrateKbps: 128, Index: 1})
+		i.Streams[0].Codec, i.VideoCodec, i.Ext = "vp9", "vp9", ext
+		return i
+	}
+	for _, c := range []struct {
+		name, fileType, ext string
+		skip                bool
+	}{
+		{"webm flow, .webm", "webm", ".webm", true},
+		{"webm flow, .mkv", "webm", ".mkv", false},
+		{"mkv flow, .webm", "mkv", ".webm", false},
+		{"mkv flow, .mkv", "mkv", ".mkv", true},
+		{"mkv flow, probe from before Ext", "mkv", "", true},
+	} {
+		s := DefaultSelectors(3)
+		s.Format, s.FileType, s.Audio, s.OnlyMyLanguages = "vp9", c.fileType, "stereo_opus", false
+		if err := s.Validate(); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		p := s.Template().Compile(file(c.ext))
+		if got := p.SkipCode == SkipAlreadyInFormat; got != c.skip {
+			t.Errorf("%s: skip %q, want already_in_format %v", c.name, p.Skip, c.skip)
+		}
+		if c.skip && c.ext == ".webm" && !strings.Contains(p.Skip, "in WebM") {
+			t.Errorf("%s: words %q", c.name, p.Skip)
+		}
+	}
+}

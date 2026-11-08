@@ -616,8 +616,12 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 		p.Skip, p.SkipCode = why, SkipCannotKeepTrack
 		return p
 	}
-	if remux && (p.Container == "" || info.Container == Containers[p.Container]) && !p.changesTracks() {
-		p.Skip, p.SkipCode = "it is already "+vf.Name+" in "+containerWords(info.Container)+" with the audio you chose", SkipAlreadyInFormat
+	if remux && (p.Container == "" || inContainer(info, p.Container)) && !p.changesTracks() {
+		words := containerWords(info.Container)
+		if info.Ext == ".webm" {
+			words = "WebM"
+		}
+		p.Skip, p.SkipCode = "it is already "+vf.Name+" in "+words+" with the audio you chose", SkipAlreadyInFormat
 		return p
 	}
 	p.Reason = fmt.Sprintf("%s at %d kbps", name, videoKbps(info, v))
@@ -885,4 +889,16 @@ func audioCodecWords(c string) string {
 		return "AC-3"
 	}
 	return strings.ToUpper(c)
+}
+
+// inContainer reports whether the file is already of type c (mkv, mp4, webm). ffprobe names MKV and WebM
+// alike, so the file's extension tells them apart (review 32a307d); a probe from before Ext counts as MKV.
+func inContainer(info media.Info, c string) bool {
+	switch c {
+	case "webm":
+		return info.Ext == ".webm"
+	case "mkv":
+		return info.Container == Containers["mkv"] && info.Ext != ".webm"
+	}
+	return info.Container == Containers[c]
 }
