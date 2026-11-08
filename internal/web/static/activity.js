@@ -18,7 +18,6 @@
   function fail(e) { var b = $("err"); b.textContent = e && e.message || "Something went wrong. Nothing was changed."; b.hidden = false; }
   function say(t) { $("said").textContent = ""; $("said").textContent = t; }
   function at(t) { return new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
-  function length(sec) { var m = Math.round(sec / 60), h = Math.floor(m / 60); return h ? h + " h " + (m % 60) + " min" : m + " min"; }
   function btn(txt, key, fn, cls) { var b = el("button", cls || "btn small", txt); b.type = "button"; b.setAttribute("data-key", key); b.onclick = fn; return b; }
 
   // ---- the address keeps the state (?show=processing&library=1&q=alien&kept=1)
@@ -138,7 +137,7 @@
       var hd = el("thead"); hd.appendChild(hr); t.appendChild(hd); t.appendChild(tb); w.appendChild(t); pane.appendChild(w);
       r.items.forEach(function (f) {
         var tr = el("tr");
-        [folderCell(f), nameCell(f), f.codec || "", f.resolution || "", ui.bytes(f.bytes), f.durationSec != null ? length(f.durationSec) : ""].concat(extra(f), [actions(f)]).forEach(function (c, i) {
+        [folderCell(f), nameCell(f), f.codec || "", f.resolution || "", ui.bytes(f.bytes), f.durationSec != null ? ui.length(f.durationSec) : ""].concat(extra(f), [actions(f)]).forEach(function (c, i) {
           var td = el("td"); td.setAttribute("data-label", cols[i]); // the label a narrow screen shows before each value
           if (typeof c === "string") td.textContent = c; else if (c) td.appendChild(c); tr.appendChild(td);
         });
