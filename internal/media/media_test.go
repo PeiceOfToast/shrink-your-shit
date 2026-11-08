@@ -121,3 +121,12 @@ func TestDisplayMatrixRotation(t *testing.T) {
 		}
 	}
 }
+
+// The encoders ffmpeg lists (S6: which video formats Standard offers).
+func TestEncoders(t *testing.T) {
+	out := "Encoders:\n V..... = Video\n ------\n V....D libx264              libx264 H.264 / AVC\n V....D libsvtav1            SVT-AV1\n A....D aac                  AAC (Advanced Audio Coding)\n"
+	got := Encoders(context.Background(), &FakeExec{Out: []byte(out)}, "ffmpeg")
+	if !got["libx264"] || !got["libsvtav1"] || !got["aac"] || got["="] || got["Video"] || len(got) != 3 {
+		t.Errorf("%v", got)
+	}
+}

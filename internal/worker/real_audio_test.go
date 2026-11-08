@@ -5,6 +5,7 @@ package worker
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -33,7 +34,7 @@ func TestRealAudioAndSubtitles(t *testing.T) {
 		b, _ := os.ReadFile(src)
 		os.WriteFile(p, b, 0o644)
 		s := rules.DefaultSelectors(3)
-		s.Audio, s.Subtitles = audio, subs
+		s.Audio, s.OnlyMyLanguages, s.Subtitles = audio, false, subs
 		tmpl := s.Template()
 		tmpl.Languages = langs
 		st, id := realJob(t, p, 5)
@@ -47,12 +48,21 @@ func TestRealAudioAndSubtitles(t *testing.T) {
 		}
 		return probe(t, p)
 	}
-	for _, c := range []struct{ to, codec string }{{"aac", "aac"}, {"eac3", "eac3"}, {"opus", "opus"}} {
-		t.Run(c.to, func(t *testing.T) {
-			info := run(t, c.to, "keep_all", "")
-			a := info.Audio()
-			if len(a) != 2 || a[0].Codec != c.codec || a[0].Channels != 6 || a[1].Codec != "ac3" {
-				t.Errorf("audio %+v", a)
+	// design E (S6): each choice on a 5.1 FLAC (eng) and a stereo AC-3 (jpn), every track kept
+	for _, c := range []struct{ audio, want string }{
+		{"stereo_aac", "aac2 aac2"},                // both become stereo AAC
+		{"stereo_opus", "opus2 opus2"},             //
+		{"eac3_surround", "eac36 ac32"},            // the lossless surround becomes E-AC-3; the stereo AC-3 is copied
+		{"stereo_aac_surround", "flac6 aac2 aac2"}, // the surround copied, the stereo AC-3 made AAC, a stereo AAC added from the FLAC
+	} {
+		t.Run(c.audio, func(t *testing.T) {
+			info := run(t, c.audio, "keep_all", "")
+			var got []string
+			for _, a := range info.Audio() {
+				got = append(got, a.Codec+strconv.Itoa(a.Channels))
+			}
+			if strings.Join(got, " ") != c.want {
+				t.Errorf("audio %v, want %s", got, c.want)
 			}
 			if len(info.Subtitles()) != 1 {
 				t.Errorf("subtitles %+v", info.Subtitles())

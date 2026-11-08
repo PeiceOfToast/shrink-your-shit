@@ -642,3 +642,49 @@ func TestHDR10KeptMigration(t *testing.T) {
 		t.Error("another skip was forgotten too")
 	}
 }
+
+// Migration 19 (S6): Standard flows' saved values in S6's terms; the notes line where the audio's result
+// changes; already_hevc decisions forgotten.
+func TestStandardReworkMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "syp.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type was struct{ audio, cap string }
+	old := map[string]was{"/a": {"keep_all", "none"}, "/b": {"my_languages", "10"}, "/c": {"aac", "4"}, "/d": {"lossless_only", "40"}, "/e": {"stereo_aac", "low"}}
+	ids := map[string]int64{}
+	for p, w := range old {
+		sel := rules.DefaultSelectors(3)
+		sel.Speed, sel.MaxBitrate = "slower", w.cap // /e is saved in S6's terms already
+		l, _ := s.AddLibrary(p, p, sel.Template(), true)
+		ids[p] = l.FlowID
+		if p != "/e" { // as saved before S6
+			s.db.Exec(`UPDATE flows SET template=json_set(json_remove(template, '$.selectors.onlyMyLanguages'), '$.selectors.audio', ?, '$.selectors.maxBitrate', ?) WHERE id=?`, w.audio, w.cap, l.FlowID)
+		}
+	}
+	s.PutFile(File{Path: "/a/x.mkv", Size: 1, Decision: "skip: x", Reason: "already_hevc"})
+	s.db.Exec(`PRAGMA user_version = 18`)
+	s.Close()
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for p, want := range map[string]string{
+		"/a": "as_is false none []",
+		"/b": "as_is true high []",
+		"/c": "stereo_aac false medium [Audio choices changed in this update: your flow now uses Stereo AAC.]",
+		"/d": "eac3_surround false high [Audio choices changed in this update: your flow now uses Surround E-AC-3.]",
+		"/e": "stereo_aac true low []", // already S6's: untouched
+	} {
+		f, _ := s.GetFlow(ids[p])
+		sel := f.Template.Selectors
+		if got := fmt.Sprint(sel.Audio, " ", sel.OnlyMyLanguages, " ", sel.MaxBitrate, " ", sel.Notes); got != want {
+			t.Errorf("%s: %s, want %s", p, got, want)
+		}
+	}
+	if r, _ := s.GetFile("/a/x.mkv"); r != nil {
+		t.Errorf("already_hevc kept: %+v", r)
+	}
+}

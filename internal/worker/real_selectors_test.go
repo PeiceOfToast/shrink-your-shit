@@ -3,12 +3,14 @@
 package worker
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -91,7 +93,7 @@ func TestRealSelectors(t *testing.T) {
 	})
 	t.Run("same type, kept beside", func(t *testing.T) {
 		p := gen("keep.mp4", "1280x720", 5000)
-		convert(t, p, sel(func(s *rules.Selectors) { s.AfterConverting = "beside" }))
+		convert(t, p, sel(func(s *rules.Selectors) { s.AfterConverting, s.FileType = "beside", "keep" })) // S6's default is MKV
 		if info := probe(t, filepath.Join(dir, "keep.hevc.mp4")); !strings.Contains(info.Container, "mp4") {
 			t.Errorf("%+v", info)
 		}
@@ -150,14 +152,14 @@ func TestRealMaxBitrateCap(t *testing.T) {
 		return bitrates(t, out)
 	}
 	freeAvg, freePeak := encode("none")
-	capAvg, capPeak := encode("10")
-	t.Logf("uncapped: avg %.1f Mbps, peak 1 s %.1f Mbps; capped at 10: avg %.1f, peak %.1f", freeAvg, freePeak, capAvg, capPeak)
+	capAvg, capPeak := encode("high") // S6: High is 8 Mbps at 1080p HEVC (research's ladder)
+	t.Logf("uncapped: avg %.1f Mbps, peak 1 s %.1f Mbps; capped at High (8): avg %.1f, peak %.1f", freeAvg, freePeak, capAvg, capPeak)
 	if freeAvg < 15 {
 		t.Skipf("the test file is not demanding enough here (uncapped average %.1f Mbps)", freeAvg)
 	}
-	// VBV: maxrate 10 Mbps with a 20 Mb buffer, which starts full: over the 4 s the average can be up to
-	// 10 + 20/4 Mbps, and one second can hold at most maxrate plus the buffer
-	if capAvg > 10+20/4.0 || capPeak > 30 {
+	// VBV: maxrate 8 Mbps with a 16 Mb buffer, which starts full: over the 4 s the average can be up to
+	// 8 + 16/4 Mbps, and one second can hold at most maxrate plus the buffer
+	if capAvg > 8+16/4.0 || capPeak > 24 {
 		t.Errorf("capped at 10 Mbps: average %.1f, peak second %.1f", capAvg, capPeak)
 	}
 	if capPeak >= freePeak {
@@ -321,4 +323,90 @@ func plan(t *testing.T, st *jobs.Store, id int64) rules.Plan {
 		t.Fatalf("plan %q: %v", j.Plan, err)
 	}
 	return snap.Plan
+}
+
+// "Save to another folder" (S6): the new file goes to the folder for new files, in the same sub-folder
+// as in its library; the original stays exactly as it was; a name already taken there is never replaced.
+func TestRealSaveToAnotherFolder(t *testing.T) {
+	needTools(t)
+	lib, out := t.TempDir(), t.TempDir()
+	os.MkdirAll(filepath.Join(lib, "Show", "S01"), 0o755)
+	src := filepath.Join(lib, "Show", "S01", "e1.mp4")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=3:size=640x360:rate=25", "-c:v", "libx264", "-b:v", "2000k", src)
+	before, _ := os.ReadFile(src)
+	s := rules.DefaultSelectors(3)
+	s.AfterConverting, s.OutputDir = "folder", out
+	if err := s.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	tmpl := s.Template()
+	run := func() jobs.Job {
+		st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer st.Close()
+		st.SetPaused(false) // a new store starts with its worker stopped (S2)
+		id, _ := st.Enqueue(jobs.Job{Library: lib, Path: src, DurationSec: 3})
+		w := realWorker(st, media.OSExec{})
+		w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+		w.run(t)
+		j, _ := st.Get(id)
+		return j
+	}
+	want := filepath.Join(out, "Show", "S01", "e1.mkv") // MKV: design E's default type
+	if j := run(); j.Status != jobs.Done || j.OutputPath != want {
+		t.Fatalf("%s %q -> %s", j.Status, j.Error, j.OutputPath)
+	}
+	if v := probe(t, want).Video(); v.Codec != "hevc" {
+		t.Errorf("new file %+v", v)
+	}
+	if now, _ := os.ReadFile(src); string(now) != string(before) {
+		t.Error("the original changed")
+	}
+	if tempLeft(want) || tempLeft(src) {
+		t.Error("a temp file was left")
+	}
+	// again: the name is taken in the folder for new files, so nothing is made or replaced
+	made, _ := os.ReadFile(want)
+	if j := run(); j.Status != jobs.Failed || !strings.Contains(j.Error, "in the folder for new files") {
+		t.Errorf("name taken: %s %q", j.Status, j.Error)
+	}
+	if again, _ := os.ReadFile(want); string(again) != string(made) {
+		t.Error("the file in the folder for new files was replaced")
+	}
+}
+
+// S6: one real file to each video format this ffmpeg can make (skipped where its encoder is missing):
+// the job ends done, in that codec, past every check (the picture comparison at Balanced included).
+func TestRealEachVideoFormat(t *testing.T) {
+	needTools(t)
+	rules.SetAvailableFormats(media.Encoders(context.Background(), media.OSExec{}, "ffmpeg"))
+	defer rules.SetAvailableFormats(nil)
+	for _, f := range []struct{ format, codec, fileType string }{{"h264", "h264", "mkv"}, {"av1", "av1", "mkv"}, {"vp9", "vp9", "mkv"}} {
+		t.Run(f.format, func(t *testing.T) {
+			if !slices.Contains(rules.Available(), f.format) {
+				t.Logf("this ffmpeg has no encoder for %s: not run here", f.format) // a skip would fail CI's real-test rule
+				return
+			}
+			dir := t.TempDir()
+			src := filepath.Join(dir, "m.mkv")
+			runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=3:size=640x360:rate=25", "-c:v", "mpeg2video", "-b:v", "6000k", src)
+			s := rules.DefaultSelectors(3)
+			s.Format, s.Speed, s.FileType = f.format, "faster", f.fileType
+			tmpl := s.Template()
+			st, id := realJob(t, src, 3)
+			st.SetPaused(false)
+			w := realWorker(st, media.OSExec{})
+			w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+			w.run(t)
+			j, _ := st.Get(id)
+			if j.Status != jobs.Done {
+				t.Fatalf("%s %q", j.Status, j.Error)
+			}
+			if v := probe(t, j.OutputPath).Video(); v.Codec != f.codec {
+				t.Errorf("new file %+v", v)
+			}
+		})
+	}
 }

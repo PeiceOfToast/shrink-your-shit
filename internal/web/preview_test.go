@@ -77,7 +77,7 @@ func TestPreviewEndpoint(t *testing.T) {
 
 	// warnings for the previewed setting (unsaved too): always present, [] when none. The HDR warning is
 	// retired (S3: HDR10 is always kept as HDR); an old page's skipHdr is ignored.
-	for body, want := range map[string]int{`{"setting":{"quality":3,"includeDolbyVision":true}}`: 0, `{"setting":{"quality":3,"skipHdr":false}}`: 0, `{}`: 0} {
+	for body, want := range map[string]int{`{"setting":{"quality":3,"fileType":"keep","includeDolbyVision":true}}`: 0, `{"setting":{"quality":3,"skipHdr":false}}`: 0, `{}`: 0} {
 		code, b := post(t, srv, "POST", path, body)
 		var v struct{ Warnings []string }
 		json.Unmarshal([]byte(b), &v)
@@ -88,7 +88,7 @@ func TestPreviewEndpoint(t *testing.T) {
 
 	// the Standard selectors are previewed as they would run (slice 25a)
 	code, out, b = pv(fmt.Sprintf(`{"setting":{"quality":3,"resolution":"720","maxBitrate":"10","fileType":"mkv","afterConverting":"beside"},"sampleFile":%q}`, filepath.Join(dir, "a.mkv")))
-	if code != 200 || out.Sample == nil || out.Sample.Lines[0] != "Video: converted to the smaller format and made 720 lines high (from 1080), same length, at most 10 Mbps" ||
+	if code != 200 || out.Sample == nil || out.Sample.Lines[0] != "Video: converted to the smaller format and made 720 lines high (from 1080), same length, at most 4 Mbps" ||
 		!strings.Contains(strings.Join(out.Sample.Lines, "|"), "The new MKV file is written next to the original") {
 		t.Errorf("selectors sample: %d %s", code, b)
 	}

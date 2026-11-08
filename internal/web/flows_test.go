@@ -120,8 +120,8 @@ func TestFlowsPerLevel(t *testing.T) {
 	for _, c := range [][2]string{
 		{`{"kind":"basic"}`, "Basic flow|basic|Basic · Balanced"},
 		{`{"kind":"basic"}`, "Basic flow 2|basic|Basic · Balanced"},
-		{`{"kind":"standard"}`, "Standard flow|standard|Standard · Balanced · same resolution · no bitrate limit · Audio as it is"},
-		{`{"kind":"standard","name":"Mine"}`, "Mine|standard|Standard · Balanced · same resolution · no bitrate limit · Audio as it is"},
+		{`{"kind":"standard"}`, "Standard flow|standard|Standard · Balanced · same resolution · no bitrate limit · Stereo AAC"},
+		{`{"kind":"standard","name":"Mine"}`, "Mine|standard|Standard · Balanced · same resolution · no bitrate limit · Stereo AAC"},
 	} {
 		code, body := post(t, srv, "POST", "/api/flows", c[0])
 		f = flowItem{}
@@ -146,8 +146,12 @@ func TestFlowsPerLevel(t *testing.T) {
 		json.Unmarshal([]byte(b), &v)
 		return v
 	}
-	if v := get(std); v["kind"] != "selectors" || v["fitsBasic"] != false { // keep file type: not Basic's MKV
+	if v := get(std); v["kind"] != "selectors" || v["fitsBasic"] != true { // S6's defaults are Basic's choices
 		t.Errorf("standard flow setting: %v", v)
+	}
+	post(t, srv, "PUT", "/api/flows/"+std+"/setting", `{"quality":3,"fileType":"keep"}`)
+	if v := get(std); v["fitsBasic"] != false {
+		t.Errorf("keep file type: fitsBasic %v", v["fitsBasic"])
 	}
 	post(t, srv, "PUT", "/api/flows/"+std+"/setting", `{"quality":3,"fileType":"mkv"}`)
 	if v := get(std); v["fitsBasic"] != true {

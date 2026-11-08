@@ -27,13 +27,18 @@ func sliderTable() map[string]any { return map[string]any{"positions": rules.Sli
 func settingView(f jobs.Flow) map[string]any {
 	kind, _ := f.Template.Label()
 	v := map[string]any{"kind": kind, "positions": rules.Slider,
-		"availableFormats": rules.AvailableFormats, "availableAudio": rules.AvailableAudio,
+		"availableFormats": rules.Available(), "availableAudio": rules.AvailableAudio,
 		"availableSubtitles": rules.AvailableSubtitles, "availableFileTypes": rules.AvailableFileTypes,
-		"warnings": f.Template.Warnings()}
+		"warnings": f.Template.Warnings()} // the rough-picture warning is added by the routes (flowWarnings)
 	if s, ok := f.Template.SelectorsView(); ok {
 		b, _ := json.Marshal(s)
 		json.Unmarshal(b, &v)
 	}
+	ladder := map[string]any{"vp9": rules.Ladder["hevc"]} // S6: Max bitrate's numbers (VP9 uses HEVC's)
+	for f, row := range rules.Ladder {
+		ladder[f] = row
+	}
+	v["bitrateLadder"] = ladder
 	if f.Template.Kind == rules.KindSlider { // Basic (S4): its audio choice and fixed facts
 		v["becomes"] = rules.BasicBecomes
 	}
@@ -46,7 +51,7 @@ func settingView(f jobs.Flow) map[string]any {
 // selectorFields are the Standard selectors (UI-API-CONTRACT.md addendum 2): any of them in a PUT body
 // makes it a selectors save.
 var selectorFields = map[string]bool{"speed": true, "format": true, "resolution": true, "maxbitrate": true, "audio": true,
-	"subtitles": true, "filetype": true, "afterconverting": true, "ignore": true, "includedolbyvision": true}
+	"subtitles": true, "filetype": true, "afterconverting": true, "ignore": true, "includedolbyvision": true, "outputdir": true, "onlymylanguages": true}
 
 // readSelectors is a selectors body: what it leaves out is the quality's own value. A client's kind,
 // positions, available*, the removed order, the removed minSavingPct and skipSmall (always
@@ -54,7 +59,7 @@ var selectorFields = map[string]bool{"speed": true, "format": true, "resolution"
 // the current page keeps working.
 // settingEcho are the fields a setting answer carries that a client may send back unchanged: ignored.
 var settingEcho = map[string]bool{"kind": true, "positions": true, "order": true, "availableformats": true, "availableaudio": true,
-	"availablesubtitles": true, "availablefiletypes": true, "warnings": true, "sharedflowchoice": true, "fitsbasic": true, "becomes": true, "minsavingpct": true, "skipsmall": true, "skiphdr": true}
+	"availablesubtitles": true, "availablefiletypes": true, "warnings": true, "sharedflowchoice": true, "fitsbasic": true, "becomes": true, "bitrateladder": true, "notes": true, "minsavingpct": true, "skipsmall": true, "skiphdr": true}
 
 // readSelectors reads a selectors body (see below); langs are the person's languages, needed for
 // "Keep only my languages".
@@ -63,7 +68,7 @@ func readSelectors(body map[string]json.RawMessage, langs []string) (rules.Selec
 	if err != nil {
 		return s, err
 	}
-	if (s.Audio == "my_languages" || s.Subtitles == "my_languages") && len(langs) == 0 {
+	if (s.Audio == "as_is" && s.OnlyMyLanguages || s.Subtitles == "my_languages") && len(langs) == 0 { // "my languages, as it is" needs them
 		return s, &rules.SelectorError{Code: "languages_needed", Message: rules.LanguagesNeeded}
 	}
 	return s, nil
@@ -94,6 +99,10 @@ func readSelectorsBody(body map[string]json.RawMessage) (rules.Selectors, error)
 	}
 	if s.Ignore == nil {
 		s.Ignore = []string{}
+	}
+	s.MaxBitrate = rules.OldBitrateLevel(s.MaxBitrate)   // a page from before S6 sends Mbps: its nearest level, for one release
+	if !slices.Contains(rules.AvailableAudio, s.Audio) { // and 25b's audio values: design E's map, for one release
+		s.Audio, s.OnlyMyLanguages, _ = rules.StandardAudio(s.Audio, s.OnlyMyLanguages)
 	}
 	return s, s.Validate()
 }
@@ -130,7 +139,7 @@ func settingRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			serverError(w, err)
 			return
 		}
-		writeJSON(w, settingView(f))
+		writeJSON(w, withWarnings(store, f))
 	}
 
 	api.HandleFunc("GET /api/settings/slider", func(w http.ResponseWriter, r *http.Request) {
@@ -151,7 +160,7 @@ func settingRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			serverError(w, err)
 			return
 		}
-		writeJSON(w, settingView(f))
+		writeJSON(w, withWarnings(store, f))
 	})
 	api.HandleFunc("PUT /api/libraries/{id}/setting", func(w http.ResponseWriter, r *http.Request) {
 		id, ok := libID(w, r)
@@ -180,6 +189,9 @@ func settingRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		if !ok {
 			return
 		}
+		if l, err := store.GetLibrary(id); err == nil && !outputUsable(w, store, l.FlowID, t) {
+			return
+		}
 		l, err := store.SaveTemplate(id, t, choice.SharedFlowChoice)
 		reply(w, l, err)
 	})
@@ -201,9 +213,37 @@ func settingRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		apiError(w, http.StatusNotFound, "not_found", "There is no such flow.")
 		return jobs.Flow{}, false
 	}
+	// The folder for new files (S6): may it be used? The same check runs when a flow is saved with it.
+	api.HandleFunc("POST /api/flows/{id}/check-output", func(w http.ResponseWriter, r *http.Request) {
+		f, ok := flowSetting(w, r)
+		if !ok {
+			return
+		}
+		var in struct{ Path string }
+		if !readJSON(w, r, &in) {
+			return
+		}
+		writeJSON(w, map[string]any{"blockers": outputBlockers(store, f.ID, strings.TrimSpace(in.Path)), "notes": []string{}})
+	})
+	// Warnings for a setting being edited (S6, contract 21:10Z item 7): no side effects, nothing saved.
+	api.HandleFunc("POST /api/flows/{id}/warnings", func(w http.ResponseWriter, r *http.Request) {
+		f, ok := flowSetting(w, r)
+		if !ok {
+			return
+		}
+		var body map[string]json.RawMessage
+		if !readJSON(w, r, &body) {
+			return
+		}
+		t, ok := settingTemplate(w, store, body, f.Template)
+		if !ok {
+			return
+		}
+		writeJSON(w, map[string]any{"warnings": flowWarnings(store, f.ID, t)})
+	})
 	api.HandleFunc("GET /api/flows/{id}/setting", func(w http.ResponseWriter, r *http.Request) {
 		if f, ok := flowSetting(w, r); ok {
-			writeJSON(w, settingView(f))
+			writeJSON(w, withWarnings(store, f))
 		}
 	})
 	api.HandleFunc("PUT /api/flows/{id}/setting", func(w http.ResponseWriter, r *http.Request) {
@@ -220,7 +260,7 @@ func settingRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			return
 		}
 		t, ok := settingTemplate(w, store, body, f.Template)
-		if !ok {
+		if !ok || !outputUsable(w, store, f.ID, t) {
 			return
 		}
 		f, err := store.SetFlowTemplate(f.ID, t)
@@ -231,7 +271,7 @@ func settingRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		if eng.ScanNow != nil {
 			eng.ScanNow() // its libraries' files are looked at again with the new setting
 		}
-		writeJSON(w, settingView(f))
+		writeJSON(w, withWarnings(store, f))
 	})
 	api.HandleFunc("POST /api/libraries/{id}/setting/replace-custom", func(w http.ResponseWriter, r *http.Request) {
 		id, ok := libID(w, r)
@@ -284,8 +324,11 @@ func flowSteps(t rules.Template) []map[string]any {
 		add("video", "Make the video smaller at "+pos.Name+", "+size,
 			fmt.Sprintf("HEVC, CRF %d at 1080p (lower = better quality); %d up to 720p, %d at 2160p; preset %s", pos.CRF, pos.CRF-1, pos.CRF+1, rules.SpeedPresets[s.Speed]))
 		if s.MaxBitrate != "none" {
-			n, _ := strconv.Atoi(s.MaxBitrate)
-			add("video", "Limit to "+s.MaxBitrate+" Mbps", fmt.Sprintf("maxrate %dk, bufsize %dk", n*1000, 2*n*1000))
+			f := s.Format
+			if rules.Ladder[f] == nil {
+				f = "hevc"
+			}
+			add("video", "Limit the bitrate: "+s.MaxBitrate, fmt.Sprintf("at most %g Mbps at 1080p (by the new file's size), never more than the file has", rules.Ladder[f][s.MaxBitrate]["1080"]))
 		}
 		switch s.Audio {
 		case "stereo_aac": // Basic's default (S4)
@@ -398,4 +441,37 @@ func readBasic(body map[string]json.RawMessage) (quality int, audio string, ok b
 		}
 	}
 	return quality, audio, true
+}
+
+// outputUsable refuses (400, the blocker's code) a save whose folder for new files can't be used.
+func outputUsable(w http.ResponseWriter, store *jobs.Store, flowID int64, t rules.Template) bool {
+	if t.Selectors == nil || t.Selectors.AfterConverting != "folder" {
+		return true
+	}
+	if b := outputBlockers(store, flowID, t.Selectors.OutputDir); len(b) > 0 {
+		apiError(w, http.StatusBadRequest, b[0]["code"], b[0]["message"]+" Nothing was changed.")
+		return false
+	}
+	return true
+}
+
+// flowWarnings are t's warnings for flow flowID: the template's (25a-2's rename) and design E's
+// rough-picture warning over the videos of the flow's libraries (S6).
+func flowWarnings(store *jobs.Store, flowID int64, t rules.Template) []string {
+	w := t.Warnings()
+	if s, ok := t.SelectorsView(); ok && t.Kind == rules.KindSelectors && s.MaxBitrate != "none" {
+		if shapes, err := store.FlowShapes(flowID); err == nil {
+			if r := rules.RoughWarning(s.MaxBitrate, s.Format, shapes); r != "" {
+				w = append(w, r)
+			}
+		}
+	}
+	return w
+}
+
+// withWarnings is settingView with the flow's full warnings.
+func withWarnings(store *jobs.Store, f jobs.Flow) map[string]any {
+	v := settingView(f)
+	v["warnings"] = flowWarnings(store, f.ID, f.Template)
+	return v
 }

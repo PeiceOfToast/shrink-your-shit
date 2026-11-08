@@ -104,11 +104,11 @@ func TestBasicHEVC(t *testing.T) {
 	}
 	av1 := hevc("matroska,webm", stereoEng)
 	av1.Streams[0].Codec, av1.VideoCodec = "av1", "av1"
-	if p := basic("", "eng").Compile(av1); p.SkipCode != SkipAlreadyHEVC {
+	if p := basic("", "eng").Compile(av1); p.SkipCode != SkipModernFormat { // S6: modern_format
 		t.Errorf("av1: %q", p.SkipCode)
 	}
-	// Standard is unchanged: HEVC is skipped there
-	if p := standard(func(s *Selectors) {}).Compile(mp4); p.SkipCode != SkipAlreadyHEVC {
+	// Standard (S6): HEVC already in its file type with the audio as chosen has nothing to do
+	if p := standard(func(s *Selectors) { s.FileType = "keep"; s.Audio, s.OnlyMyLanguages = "as_is", false }).Compile(mp4); p.SkipCode != SkipAlreadyInFormat {
 		t.Errorf("standard hevc: %q", p.SkipCode)
 	}
 }

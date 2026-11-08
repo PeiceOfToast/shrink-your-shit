@@ -1183,7 +1183,7 @@ func TestQueuedDolbyVisionIsSkippedNotEncoded(t *testing.T) {
 		{"profile 5, Dolby Vision included", 5, true, rules.SkipDVProfile5, "h264", false},
 		{"profile 8, Dolby Vision left alone", 8, false, rules.SkipDV, "h264", false},
 		// review 7ab8f72: the Plan's own skip comes first (already HEVC; the legacy rule's), the job still must not encode
-		{"HEVC + Dolby Vision, Standard (already HEVC)", 8, false, rules.SkipDV, "hevc", false},
+		{"AV1 + Dolby Vision, Standard (the plan says modern_format: S6)", 8, false, rules.SkipDV, "av1", false},
 		{"Dolby Vision, legacy flow skipping it for its bitrate", 8, false, rules.SkipDV, "h264", true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -1198,7 +1198,7 @@ func TestQueuedDolbyVisionIsSkippedNotEncoded(t *testing.T) {
 			if c.legacy {
 				tmpl = rules.LegacyTemplate(rules.Default(), "replace")
 			}
-			if plan := tmpl.Compile(must(media.ParseProbe([]byte(s.srcSpec.json())))); c.codec == "hevc" && plan.SkipCode != rules.SkipAlreadyHEVC || c.legacy && plan.SkipCode == c.code {
+			if plan := tmpl.Compile(must(media.ParseProbe([]byte(s.srcSpec.json())))); c.codec == "av1" && plan.SkipCode != rules.SkipModernFormat || c.legacy && plan.SkipCode == c.code {
 				t.Fatalf("the case does not take the path it is about: %q", plan.SkipCode)
 			}
 			w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }

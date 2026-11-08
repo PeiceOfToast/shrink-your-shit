@@ -130,8 +130,8 @@ func TestSliderCRFFollowsTheResolution(t *testing.T) {
 
 func TestSliderConvertsOnlyOlderFormats(t *testing.T) {
 	for codec, wantSkip := range map[string]string{
-		"hevc": "it is already HEVC in MKV with the audio you chose", "av1": "AV1 is already an efficient format", // S4: Basic repackages HEVC, here nothing to change
-		"vp9": "VP9 is already an efficient format", "prores": "prores is not a format this setting converts",
+		"hevc": "it is already HEVC in MKV with the audio you chose", "av1": SkipWords[SkipModernFormat], // S4: Basic repackages HEVC, here nothing to change; S6: modern_format
+		"vp9": SkipWords[SkipModernFormat], "prores": "prores is not a format this setting converts",
 		"h264": "", "mpeg2video": "", "mpeg4": "", "vc1": "", "wmv3": "",
 	} {
 		if p := SliderTemplate(3).Compile(probe(codec, 1920, 1080, 25, 20000)); p.Skip != wantSkip {
@@ -212,7 +212,7 @@ func TestMovTextBecomesSRTInMKV(t *testing.T) {
 			t.Errorf("%s: expected subtitle %+v", name, sub)
 		}
 	}
-	if p := standard(func(s *Selectors) {}).Compile(info); strings.Contains(strings.Join(p.FFmpegArgs("a.mp4", "b.mp4"), " "), "srt") {
+	if p := standard(func(s *Selectors) { s.FileType = "keep" }).Compile(info); strings.Contains(strings.Join(p.FFmpegArgs("a.mp4", "b.mp4"), " "), "srt") {
 		t.Error("Standard keeping the file type must not convert mov_text")
 	}
 }
@@ -325,7 +325,7 @@ func TestSliderSubtitleCheckWithTheRealMP4Name(t *testing.T) {
 	if !strings.Contains(info.Container, "mp4") || info.Container == "mp4" {
 		t.Fatalf("fixture's format_name is %q", info.Container)
 	}
-	keep := standard(func(s *Selectors) {})
+	keep := standard(func(s *Selectors) { s.FileType = "keep" }) // S6's default is MKV
 	pgs := info
 	pgs.Streams = append(append([]media.Stream{}, info.Streams...), media.Stream{Type: "subtitle", Codec: "hdmv_pgs_subtitle"})
 	if p := keep.Compile(pgs); !strings.Contains(p.Skip, "hdmv_pgs_subtitle subtitles cannot be kept") {

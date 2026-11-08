@@ -4,7 +4,9 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -208,6 +210,8 @@ func fileItem(store *jobs.Store, libs []jobs.Library, row jobs.FileRow, card str
 			it["originalState"] = "restored"
 		case row.OriginalState == jobs.OriginalPurged:
 			it["originalState"] = "deleted"
+		case row.Beside && filepath.Dir(row.OutputPath) != filepath.Dir(row.Path): // S6: saved to another folder
+			it["originalState"], it["outputDir"] = "left_in_place", filepath.Dir(row.OutputPath)
 		case row.Beside:
 			it["originalState"] = "kept_beside"
 		default:
@@ -222,4 +226,50 @@ func fileItem(store *jobs.Store, libs []jobs.Library, row jobs.FileRow, card str
 	}
 	it["id"] = jobID
 	return it
+}
+
+// outputBlockers says why dir can't be a flow's folder for new files (S6, "Save to another folder";
+// contract 21:10Z item 5): not_writable, low_space (under 10 GB free), inside_library (inside a library
+// of this flow, so new files would be converted again; or a library inside it). Empty: it can be used.
+func outputBlockers(store *jobs.Store, flowID int64, dir string) []map[string]string {
+	out := []map[string]string{}
+	add := func(code, msg string) { out = append(out, map[string]string{"code": code, "message": msg}) }
+	if !filepath.IsAbs(dir) {
+		add("not_writable", "Enter the folder's full path.")
+		return out
+	}
+	dir = filepath.Clean(dir)
+	if libs, err := store.Libraries(); err == nil {
+		for _, l := range libs {
+			if l.FlowID != flowID {
+				continue
+			}
+			lp := filepath.Clean(l.Path)
+			if inside(dir, lp) || inside(lp, dir) {
+				add("inside_library", "This folder is inside the library, so new files would be converted again. Pick a folder outside "+lp+".")
+				break
+			}
+		}
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		add("not_writable", "This folder can't be written to. Pick another one, or let shrink-your-shit write there.")
+		return out
+	}
+	if f, err := os.CreateTemp(dir, ".syp-check-*"); err != nil {
+		add("not_writable", "This folder can't be written to. Pick another one, or let shrink-your-shit write there.")
+		return out
+	} else {
+		f.Close()
+		os.Remove(f.Name())
+	}
+	if free, err := worker.DiskFree(dir); err == nil && free < 10<<30 {
+		add("low_space", fmt.Sprintf("This folder's disk has only %s free. New files need room: pick a folder on a disk with more space.", rules.HumanBytes(int64(free))))
+	}
+	return out
+}
+
+// inside reports whether path is dir itself or inside it.
+func inside(path, dir string) bool {
+	rel, err := filepath.Rel(dir, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

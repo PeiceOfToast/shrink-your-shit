@@ -22,7 +22,7 @@ func TestSliderIsItsDefaultSelectors(t *testing.T) {
 		if s.Validate() != nil {
 			t.Fatalf("defaults of %d invalid", q)
 		}
-		if got := s.Template(); got.Kind != KindSelectors || got.Selectors.Audio != "keep_all" || got.Selectors.FileType != "keep" {
+		if got := s.Template(); got.Kind != KindSelectors || got.Selectors.Audio != "stereo_aac" || !got.Selectors.OnlyMyLanguages || got.Selectors.FileType != "mkv" { // design E's defaults (S6)
 			t.Errorf("position %d at its own values: %+v, want a Standard flow", q, got)
 		}
 		for _, info := range []media.Info{h264(1920, 1080, 8000), h264(1280, 720, 300), h264(3840, 2160, 40000)} {
@@ -34,7 +34,7 @@ func TestSliderIsItsDefaultSelectors(t *testing.T) {
 		}
 	}
 	s := DefaultSelectors(3)
-	s.MaxBitrate = "10"
+	s.MaxBitrate = "high"
 	if k, label := s.Template().Label(); k != KindSelectors || label != "Balanced" {
 		t.Errorf("label %s %s", k, label)
 	}
@@ -67,9 +67,9 @@ func TestSelectorsCompile(t *testing.T) {
 		t.Errorf("2.4:1: %d", w)
 	}
 	// speed and the cap
-	p = sel(func(s *Selectors) { s.Speed = "slower"; s.MaxBitrate = "10" }).Compile(h264(1920, 1080, 30000))
+	p = sel(func(s *Selectors) { s.Speed = "slower"; s.MaxBitrate = "high" }).Compile(h264(1920, 1080, 30000))
 	args := strings.Join(p.FFmpegArgs("i", "o"), " ")
-	if !strings.Contains(args, "-preset slow") || !strings.Contains(args, "-maxrate:v:0 10000k -bufsize:v:0 20000k") {
+	if !strings.Contains(args, "-preset slow") || !strings.Contains(args, "-maxrate:v:0 8000k -bufsize:v:0 16000k") { // High, 1080p HEVC (S6 ladder)
 		t.Errorf("args %s", args)
 	}
 	// always standardize: converted however little data it has, by the selectors and the slider alike
@@ -92,7 +92,7 @@ func TestSelectorsCompile(t *testing.T) {
 		want string
 	}{
 		{"mp4", media.Stream{Type: "subtitle", Codec: "subrip"}, "its subrip subtitles cannot be kept in MP4"},
-		{"mp4", media.Stream{Type: "audio", Codec: "truehd"}, "its truehd audio cannot be kept in MP4"},
+		{"mp4", media.Stream{Type: "audio", Codec: "truehd"}, ""}, // S6: made E-AC-3 in MP4 (design E)
 		{"mp4", media.Stream{Type: "attachment", Codec: "ttf"}, "its attached files (such as fonts) cannot be kept in MP4"},
 		{"mkv", media.Stream{Type: "subtitle", Codec: "mov_text"}, ""}, // converted to SRT text inside it (S4)
 		{"mp4", media.Stream{Type: "audio", Codec: "aac"}, ""},
@@ -110,7 +110,7 @@ func TestSelectorsCompile(t *testing.T) {
 	if p := SliderTemplate(3).Compile(hdr); p.Skip != "" || p.Video.HDR == nil {
 		t.Errorf("slider HDR: %q", p.Skip)
 	}
-	on := sel(func(s *Selectors) { s.IncludeDolbyVision = true })
+	on := sel(func(s *Selectors) { s.IncludeDolbyVision = true; s.FileType = "keep" }) // (MKV, S6's default, warns of renaming)
 	if p := on.Compile(hdr); p.Skip != "" || len(on.Warnings()) != 0 {
 		t.Errorf("includeDolbyVision on: %q %v", p.Skip, on.Warnings())
 	}
@@ -235,7 +235,9 @@ func TestReplaceWithNewFileTypeWarnsOfRenaming(t *testing.T) {
 			t.Errorf("%s beside: warnings %q", typ, w)
 		}
 	}
-	if w := DefaultSelectors(3).Template().Warnings(); len(w) != 0 {
+	keep := DefaultSelectors(3)
+	keep.FileType = "keep" // S6's default is MKV, which renames MP4 files (and says so)
+	if w := keep.Template().Warnings(); len(w) != 0 {
 		t.Errorf("keep: %q", w)
 	}
 }
@@ -252,8 +254,15 @@ func TestDefaultStandardIsNotBasic(t *testing.T) {
 	std := DefaultSelectors(3).Template()
 	std.Languages = "eng"
 	p := std.Compile(mp4)
-	if p.Skip != "" || p.Container != "" || len(p.Tracks) != 0 {
-		t.Errorf("Standard defaults: container %q, tracks %+v", p.Container, p.Tracks)
+	if std.Kind != KindSelectors || p.Skip != "" || p.Container != "mkv" || len(p.Tracks) != 2 { // S6: design E's defaults, still a Standard flow
+		t.Errorf("Standard defaults: %s, container %q, tracks %+v", std.Kind, p.Container, p.Tracks)
+	}
+	keep := DefaultSelectors(3)
+	keep.Audio, keep.OnlyMyLanguages, keep.FileType = "as_is", false, "keep" // what an upgraded keep_all flow becomes
+	kt := keep.Template()
+	kt.Languages = "eng"
+	if p := kt.Compile(mp4); p.Container != "" || len(p.Tracks) != 0 {
+		t.Errorf("as it is, keep type: container %q, tracks %+v", p.Container, p.Tracks)
 	}
 	b := BasicTemplate(3, "")
 	b.Languages = "eng"
@@ -265,14 +274,14 @@ func TestDefaultStandardIsNotBasic(t *testing.T) {
 // Control level per flow: each kind's level and tag (design B4), and when a Standard flow fits Basic.
 func TestLevelTagAndFitsBasic(t *testing.T) {
 	capped := DefaultSelectors(1)
-	capped.Resolution, capped.MaxBitrate, capped.Audio = "1080", "10", "my_languages"
+	capped.Resolution, capped.MaxBitrate, capped.Audio = "1080", "medium", "my_languages"
 	for _, c := range []struct {
 		t          Template
 		level, tag string
 	}{
 		{SliderTemplate(1), "basic", "Basic · Smallest file"},
-		{DefaultSelectors(3).Template(), "standard", "Standard · Balanced · same resolution · no bitrate limit · Audio as it is"},
-		{capped.Template(), "standard", "Standard · Smallest file · at most 1080p · at most 10 Mbps · My languages"},
+		{DefaultSelectors(3).Template(), "standard", "Standard · Balanced · same resolution · no bitrate limit · Stereo AAC"},
+		{capped.Template(), "standard", "Standard · Smallest file · at most 1080p · Medium bitrate · As it is"},
 		{LegacyTemplate(Default(), "replace"), "earlier", "Earlier install"},
 		{Template{Kind: KindCustom}, "advanced", "Advanced · Custom"},
 	} {
@@ -287,7 +296,7 @@ func TestLevelTagAndFitsBasic(t *testing.T) {
 	}
 	for name, f := range map[string]func(*Selectors){
 		"slower": func(s *Selectors) { s.Speed = "slower" }, "720": func(s *Selectors) { s.Resolution = "720" },
-		"cap": func(s *Selectors) { s.MaxBitrate = "10" }, "subs": func(s *Selectors) { s.Subtitles = "srt" },
+		"cap": func(s *Selectors) { s.MaxBitrate = "high" }, "subs": func(s *Selectors) { s.Subtitles = "srt" },
 		"keep type": func(s *Selectors) { s.FileType = "keep" }, "beside": func(s *Selectors) { s.AfterConverting = "beside" },
 		"ignore": func(s *Selectors) { s.Ignore = []string{"Extras"} }, "dv": func(s *Selectors) { s.IncludeDolbyVision = true },
 		"aac": func(s *Selectors) { s.Audio = "aac" },
