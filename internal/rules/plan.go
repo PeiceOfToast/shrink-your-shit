@@ -355,13 +355,19 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string) Plan
 		p.Skip, p.SkipCode = "it has no video", SkipNoVideo
 		return p
 	}
+	// The upright picture decides: a phone video's ±90° Display Matrix is encoded upright by ffmpeg,
+	// and the scale filter then works on the upright picture (review 44dbabe).
+	uw, uh := v.Width, v.Height
+	if v.Quarter() {
+		uw, uh = v.Height, v.Width
+	}
 	height := 0
-	if limit := resolutions[s.Resolution]; limit > 0 && v.Height > limit {
+	if limit := resolutions[s.Resolution]; limit > 0 && uh > limit {
 		height = limit // only ever smaller
 	}
-	w, h := v.Width, v.Height
+	w, h := uw, uh
 	if height > 0 {
-		w, h = ScaledWidth(v.Width, v.Height, height), height
+		w, h = ScaledWidth(uw, uh, height), height
 	}
 	crf := pos.CRF
 	switch {

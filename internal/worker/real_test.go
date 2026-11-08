@@ -427,3 +427,27 @@ func TestRealRotatedPhoneVideo(t *testing.T) {
 		t.Errorf("new file %+v: want 360x640 upright, no rotation left", v)
 	}
 }
+
+// Review 44dbabe: a rotated phone video with "at most 480" ends 270x480 upright.
+func TestRealRotatedVideoCappedUpright(t *testing.T) {
+	needTools(t)
+	dir := t.TempDir()
+	base, src := filepath.Join(dir, "base.mp4"), filepath.Join(dir, "rot.mp4")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=3:size=640x360:rate=25", "-c:v", "libx264", "-b:v", "2000k", base)
+	runFFmpeg(t, "-display_rotation", "90", "-i", base, "-c", "copy", src)
+	s := rules.DefaultSelectors(3)
+	s.Resolution = "480"
+	tmpl := s.Template()
+	st, id := realJob(t, src, 3)
+	w := realWorker(st, media.OSExec{})
+	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	if err := w.run(t); err != nil {
+		t.Fatal(err)
+	}
+	if j, _ := st.Get(id); j.Status != jobs.Done {
+		t.Fatalf("%s %q", j.Status, j.Error)
+	}
+	if v := probe(t, src).Video(); v.Width != 270 || v.Height != 480 || v.Rotation != 0 {
+		t.Errorf("new file %+v: want 270x480 upright", v)
+	}
+}

@@ -362,3 +362,24 @@ func TestRotationSwapsTheExpectedSize(t *testing.T) {
 		}
 	}
 }
+
+// Review 44dbabe: the upright picture decides the resolution cap. A 640x360 file turned 90° is 360x640
+// upright, so "at most 480" scales it to 270x480 (and the check expects that).
+func TestRotatedFileIsCappedUpright(t *testing.T) {
+	src := h264(640, 360, 3000)
+	src.Streams[0].Rotation = 90
+	s := DefaultSelectors(3)
+	s.Resolution = "480"
+	p := s.Template().Compile(src)
+	e := p.Expect(src, 0)
+	if p.Video.Height != 480 || e.Streams[0].Width != 270 || e.Streams[0].Height != 480 {
+		t.Errorf("height %d, expected %dx%d", p.Video.Height, e.Streams[0].Width, e.Streams[0].Height)
+	}
+	if !strings.Contains(strings.Join(p.FFmpegArgs("i", "o"), " "), "scale=-2:480") {
+		t.Errorf("args %v", p.FFmpegArgs("i", "o"))
+	}
+	plain := h264(640, 360, 3000) // not turned: 360 lines, under the cap
+	if p := s.Template().Compile(plain); p.Video.Height != 0 {
+		t.Errorf("unturned: height %d", p.Video.Height)
+	}
+}
