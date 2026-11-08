@@ -166,10 +166,7 @@ func fileItem(store *jobs.Store, libs []jobs.Library, row jobs.FileRow, card str
 	case jobs.CardSkipped:
 		it["id"] = "skip-" + strconv.FormatInt(row.SkipID, 10)
 		it["skippedId"] = strconv.FormatInt(row.SkipID, 10)
-		detail := rules.SkipWords[row.Reason]
-		if detail == "" {
-			detail = strings.TrimPrefix(row.Decision, "skip: ")
-		}
+		detail := skipDetail(row.Reason, row.Decision)
 		it["reason"], it["detail"] = row.Reason, upperFirst(detail)+"."
 		return it
 	case jobs.CardUnprocessed:
@@ -314,4 +311,15 @@ func folderRefused(w http.ResponseWriter, store *jobs.Store, flowID int64, libPa
 		}
 	}
 	return false
+}
+
+// skipDetail is a skipped file's reason in words: the fixed words for its code, except already_in_format,
+// whose plan says the format, file type and audio it is already in (row 06:28Z); the stored decision
+// for a code with no fixed words.
+func skipDetail(reason, decision string) string {
+	own := strings.TrimPrefix(decision, "skip: ")
+	if w := rules.SkipWords[reason]; w != "" && (reason != rules.SkipAlreadyInFormat || own == decision || own == "") {
+		return w
+	}
+	return own
 }

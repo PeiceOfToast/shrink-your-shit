@@ -243,10 +243,7 @@ func activityRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, no
 					lib, libID = l.Name, strconv.FormatInt(l.ID, 10)
 				}
 			}
-			detail := rules.SkipWords[k.Reason]
-			if detail == "" {
-				detail = strings.TrimPrefix(k.Decision, "skip: ")
-			}
+			detail := skipDetail(k.Reason, k.Decision)
 			out = append(out, map[string]any{"id": strconv.FormatInt(k.ID, 10), "library": lib, "path": k.Path,
 				"reason": k.Reason, "detail": upperFirst(detail) + ".", "libraryId": libID})
 		}

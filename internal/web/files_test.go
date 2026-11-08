@@ -304,3 +304,17 @@ func TestFolderOutputStaysOutsideLibraries(t *testing.T) {
 		t.Errorf("Movies is elsewhere too: %d %s", code, b)
 	}
 }
+
+// Row 06:28Z: the Skipped detail for already_in_format is the plan's own sentence (its format, file
+// type and audio), in both lists, not a fixed "HEVC in MKV".
+func TestAlreadyInFormatDetailIsThePlans(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	st.PutFile(jobs.File{Path: filepath.Join(lib.Path, "a.webm"), Size: 5, Decision: "skip: it is already VP9 in WebM with the audio you chose", Reason: rules.SkipAlreadyInFormat})
+	for _, path := range []string{"/api/activity/files?show=skipped", "/api/activity/skipped"} {
+		_, body, _ := do(t, nil, srv, call{method: "GET", path: path})
+		if !strings.Contains(body, `"It is already VP9 in WebM with the audio you chose."`) {
+			t.Errorf("%s: %s", path, body)
+		}
+	}
+}
