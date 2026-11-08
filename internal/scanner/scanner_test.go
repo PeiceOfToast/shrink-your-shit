@@ -540,6 +540,23 @@ func TestUnreadableFileStateIsNeverReady(t *testing.T) {
 	}
 }
 
+// A finished walk records when and how many videos it found, for the library card (slice A).
+func TestScanRecordsTheLibrarysLastScan(t *testing.T) {
+	s, st, _, _ := setup(t, h264Big)
+	libs, _ := st.Libraries()
+	if libs[0].LastScan != "" {
+		t.Fatalf("before any scan: %+v", libs[0])
+	}
+	s.ScanOnce(context.Background())
+	libs, _ = st.Libraries()
+	if libs[0].LastScan == "" || libs[0].LastScanVideos != 1 { // a.mkv (the temp file b.syp-tmp.mkv is not counted)
+		t.Errorf("after a scan: %+v", libs[0])
+	}
+	if len(s.Scanning()) != 0 {
+		t.Errorf("still scanning: %v", s.Scanning())
+	}
+}
+
 // ui-shop's S4 run: a file is queued, then the library's setting is saved (its file decisions are
 // forgotten; the job stays). The next scans must not list the waiting file as still_changing: it is
 // decided already, and the skipped list would show it next to To do for as long as the job waits.

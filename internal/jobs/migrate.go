@@ -167,6 +167,10 @@ INSERT INTO app_meta(key, value) SELECT 'stopped_by_update', '1'
 WHERE COALESCE((SELECT value FROM app_meta WHERE key='paused'), '0') <> '1'
   AND (SELECT version FROM temp.migrate_from) BETWEEN 1 AND 13;
 INSERT INTO app_meta(key, value) VALUES ('paused', '1') ON CONFLICT(key) DO UPDATE SET value='1';`},
+	// Slice A: the library card says when the last scan finished and how many videos it found.
+	{15, "library last scan", `
+ALTER TABLE libraries ADD COLUMN last_scan TEXT NOT NULL DEFAULT '';
+ALTER TABLE libraries ADD COLUMN last_scan_videos INTEGER NOT NULL DEFAULT 0;`},
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.

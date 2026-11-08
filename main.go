@@ -229,9 +229,10 @@ func main() {
 		log.Fatalf("access token: %v", err)
 	}
 	srv := &http.Server{Addr: *addr, Handler: web.Handler(store, access, web.Engine{
-		ScanNow: sc.ScanNow, NextScan: sc.NextScan, RequeueJob: pool.RequeueJob, PauseNow: pool.PauseNow, StopFile: pool.StopFile,
+		ScanNow: sc.ScanNow, NextScan: sc.NextScan, Scanning: sc.Scanning, RequeueJob: pool.RequeueJob, PauseNow: pool.PauseNow, StopFile: pool.StopFile,
 		Doctor: chk, DataDir: *data, Version: version, Logs: logs,
-		Preview: &preview.Previewer{Store: store, Exec: media.OSExec{}, FFprobe: ffprobePath}})}
+		Preview:    &preview.Previewer{Store: store, Exec: media.OSExec{}, FFprobe: ffprobePath},
+		FirstFiles: &preview.FirstLister{Exec: media.OSExec{}, FFprobe: ffprobePath}})}
 	go func() {
 		<-ctx.Done()
 		srv.Shutdown(context.Background())

@@ -66,6 +66,31 @@ type Scanner struct {
 	mu        sync.Mutex
 	nextScan  time.Time
 	firstLook map[string]look // each file as first seen unchanged (the two-look rule)
+	scanning  map[int64]int   // library id -> videos found so far, while its walk runs (slice A)
+}
+
+// Scanning is the libraries being walked now, with the videos found so far in each.
+func (s *Scanner) Scanning() map[int64]int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[int64]int, len(s.scanning))
+	for id, n := range s.scanning {
+		out[id] = n
+	}
+	return out
+}
+
+func (s *Scanner) setScanning(id int64, n int, done bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.scanning == nil {
+		s.scanning = map[int64]int{}
+	}
+	if done {
+		delete(s.scanning, id)
+	} else {
+		s.scanning[id] = n
+	}
 }
 
 // Target is one library to scan.
@@ -90,6 +115,8 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 	seen := map[string]bool{}
 	for _, t := range targets {
 		lib := t.Path
+		videos := 0
+		s.setScanning(t.LibraryID, 0, false)
 		filepath.WalkDir(lib, func(path string, d fs.DirEntry, err error) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -119,6 +146,8 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 				return nil
 			}
 			seen[path] = true
+			videos++
+			s.setScanning(t.LibraryID, videos, false)
 			if code, ignore := Guard(lib, path, info); ignore {
 				return nil
 			} else if code != "" {
@@ -139,6 +168,12 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 			}
 			return nil
 		})
+		s.setScanning(t.LibraryID, 0, true)
+		if ctx.Err() == nil && t.LibraryID > 0 { // a whole walk: the card's count and time
+			if err := s.Store.SetLibraryScanned(t.LibraryID, videos); err != nil {
+				log.Printf("scan: %s: %v", lib, err)
+			}
+		}
 	}
 	if ctx.Err() == nil {
 		s.forgetUnseen(seen)

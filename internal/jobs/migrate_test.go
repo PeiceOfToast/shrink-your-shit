@@ -386,6 +386,7 @@ func TestMigration7BackfillsSkipReasons(t *testing.T) {
 		`ALTER TABLE originals DROP COLUMN aside`, `ALTER TABLE jobs DROP COLUMN stop_requested`, `DROP TABLE sidecars`, // and migrations 8, 9 and 10
 		`ALTER TABLE originals DROP COLUMN new_path`,                                     // and 11
 		`ALTER TABLE jobs DROP COLUMN attempts`, `ALTER TABLE jobs DROP COLUMN retry_at`, // and 12
+		`ALTER TABLE libraries DROP COLUMN last_scan`, `ALTER TABLE libraries DROP COLUMN last_scan_videos`, // and 15
 		// (13 changes rows only)
 		`PRAGMA user_version=6`} {
 		if _, err := s.db.Exec(q); err != nil {
@@ -476,6 +477,7 @@ func TestAlwaysStandardizeMigration(t *testing.T) {
 		"/m/unk.mkv": "unknown_bitrate", "/m/hevc.mkv": "already_hevc"} {
 		s.PutFile(File{Path: p, Decision: "skip: x", Reason: reason})
 	}
+	rewind15(s)                           // migration 15's columns go, so it can run again
 	s.db.Exec(`PRAGMA user_version = 12`) // as an install from before always standardize left it
 	s.Close()
 
@@ -529,6 +531,7 @@ func TestWorkersStartStoppedMigration(t *testing.T) {
 		s, _ := Open(path) // no libraries and no jobs: an existing install is told by its version, not its rows
 		s.SetMeta("paused", paused)
 		s.db.Exec(`DELETE FROM app_meta WHERE key='stopped_by_update'`)
+		rewind15(s)                           // migration 15's columns go, so it can run again
 		s.db.Exec(`PRAGMA user_version = 13`) // as an install from before S2 left it
 		s.Close()
 		s, err := Open(path)
@@ -549,4 +552,10 @@ func TestWorkersStartStoppedMigration(t *testing.T) {
 	if err := s.ClearStoppedByUpdate(); err != nil || s.StoppedByUpdate() || s.BasicChangedByUpdate() {
 		t.Errorf("cleared: %v %v %v", err, s.StoppedByUpdate(), s.BasicChangedByUpdate())
 	}
+}
+
+// rewind15 takes away what migration 15 added, for tests that set user_version below it.
+func rewind15(s *Store) {
+	s.db.Exec(`ALTER TABLE libraries DROP COLUMN last_scan`)
+	s.db.Exec(`ALTER TABLE libraries DROP COLUMN last_scan_videos`)
 }

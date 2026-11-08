@@ -387,6 +387,22 @@ sampled hash (otherwise it is left alone and the row marked `needs_attention`); 
   the scanner, which looks at the file afresh (and may skip it again for the same reason).
 - `POST /api/system/backup` answers 501 `not_available` until slice 38.
 
+## Libraries: the card's status and the first 5 files (slice A)
+
+Each `GET /api/libraries` item has `status` `{kind, videos, foundSoFar, lastScan, nextScan, converting,
+toDo}`, the first of `converting` (its jobs running), `waiting_for_worker` (jobs queued, worker stopped),
+`scanning` (the scanner is walking it: `Scanner.Scanning`, videos found so far), `scanned` (the last
+finished walk: `libraries.last_scan`/`last_scan_videos`, migration 15, set by the scanner) and
+`not_scanned`; `failedFiles` (failed and kept jobs) and `madeWith` (as `GET /api/flows`). The old size
+fields stay one release, unused by the new card. "Is this the right folder?": `GET
+/api/libraries/{id}/first-files` and `POST /api/libraries/first-files {path}` (refused only for a system
+folder or one that cannot be opened, as the folder check says) answer `{items: [{path, folder, name,
+bytes, state checking|ready|unreadable, codec, resolution, durationSec}], total, stillLooking}`:
+`preview.FirstLister` walks the folder in the background with the scanner's rules (and a library's Ignore
+list), keeps the first 5 by path, probes them, and keeps the answer 10 minutes per folder and Ignore list;
+the page calls again until `stillLooking` is false. Codec and resolution are in people's words
+(`CodecWord`, `ResolutionWord`).
+
 ## Workers: nothing converts until one is started (S2, `internal/web/workers.go`)
 
 USER-REVIEW 2026-11-07: "i dont want it to just start before the user wants". Today there is one worker,
