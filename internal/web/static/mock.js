@@ -161,7 +161,7 @@
   // one is read; a save is copied to all), or on the flow itself while no library uses it. kind and tag (B4) are built here
   // the way the server builds them.
   var QN = ["Smallest file", "Smaller", "Balanced", "Better quality", "Best quality"];
-  var AUDIO_SHORT = { stereo_aac: "Stereo AAC", my_languages: "My language", keep_all: "All audio", aac: "AAC", eac3: "E-AC-3", opus: "Opus", lossless_only: "Lossless to AAC" };
+  var AUDIO_SHORT = { stereo_aac: "Stereo AAC", my_languages: "My languages", keep_all: "Audio as it is", aac: "AAC", eac3: "E-AC-3", opus: "Opus", lossless_only: "Lossless audio to E-AC-3" }; // the server's words (rules.audioShort)
   function recOf(f) { var i = find(libs, "flowId", f.id); return i >= 0 ? libs[i] : (f.rec = f.rec || { quality: 3, audio: "stereo_aac", settingKind: "slider", settingLabel: "Balanced" }); }
   function kindOf(f) { var r = recOf(f); return f.madeWith === "builder" ? "advanced" : f.madeWith === "legacy" ? "earlier" : r.sel ? "standard" : "basic"; }
   function tagOf(f) {
