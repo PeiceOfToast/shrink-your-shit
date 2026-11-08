@@ -75,7 +75,6 @@
       api.patchSettings({}, patch).then(function (ns) {
         s = ns; say.textContent = "Saved.";
         for (var k in ctl) if (ctl[k].e && ctl[k].e.type === "secret") { ctl[k].el.value = ""; $(ctl[k].el.id + "-h").textContent = keyHint(ctl[k].e, ns); }
-        return S.menu(ns);
       },
         function (er) { say.textContent = er.message; });
     };

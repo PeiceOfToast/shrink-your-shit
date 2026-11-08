@@ -40,22 +40,11 @@ func TestNavByControlLevel(t *testing.T) {
 			seen[k] = true
 		}
 	}
-	cases := []struct {
-		level      string
-		perLibrary bool
-		want       string
-	}{
-		{"basic", false, "Libraries,Activity,Flows,Workers,Settings"},
-		{"standard", false, "Libraries,Activity,Flows,Workers,Settings"},
-		{"advanced", false, "Libraries,Activity,Flows,Workers,Settings"},
-		{"basic", true, "Libraries,Activity,Flows,Workers,Settings"},
-		{"standard", true, "Libraries,Activity,Flows,Workers,Settings"},
+	// NAV-4: one menu for everyone since piece B (each flow has its own kind); nav.json has no conditions.
+	if got := labels(items); got != "Libraries,Activity,Flows,Workers,Settings" {
+		t.Errorf("NAV-4: menu = %s, want Libraries,Activity,Flows,Workers,Settings", got)
 	}
-	for _, c := range cases {
-		if got := labels(navFor(items, c.level, c.perLibrary)); got != c.want {
-			t.Errorf("NAV-4 level=%s perLibrary=%v: menu = %s, want %s", c.level, c.perLibrary, got, c.want)
-		}
-	}
+
 }
 
 func newServer(t *testing.T) *httptest.Server {
