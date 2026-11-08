@@ -127,7 +127,7 @@
     $("main").insertBefore(n, $("mock-note").nextSibling);
   }
 
-  window.SYP.menu = menu;
+  window.SYP.menu = menu; window.SYP.working = working; // the Workers page redraws the top bar when a worker starts or stops
   // Pages start once the session is known: a 401 here shows the sign-in screen and the page never starts.
   theme();
   window.SYP.ready = signIn().then(function () {

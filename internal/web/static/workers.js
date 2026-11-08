@@ -87,7 +87,10 @@
     }
     var n = k ? document.querySelector('[data-key="' + k + '"]') : null; if (n) n.focus();
   }
-  function refresh() { return api.listWorkers().then(function (r) { last = r; draw(r); }, fail); }
+  // When a worker starts or stops (a button, or a stop that finishes on its own), the top bar's "Workers stopped" is
+  // read again, so it never contradicts this page.
+  function states(r) { return r.workers.map(function (w) { return w.id + ":" + w.state; }).join(); }
+  function refresh() { return api.listWorkers().then(function (r) { var moved = last && states(last) !== states(r); last = r; draw(r); if (moved && S.working) S.working(); }, fail); }
   // Poll every 3 s; while a worker is stopping, every 0.5 s, so "Stopping..." goes as soon as the server says stopped
   // (a Stop now answers "stopping" and is stopped about 0.2 s later; QA saw the badge linger for the 3 s poll).
   var timer = null;
