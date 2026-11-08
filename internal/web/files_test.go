@@ -35,7 +35,7 @@ func TestFilesView(t *testing.T) {
 	failed, _ := st.Enqueue(jobs.Job{Library: m, LibraryID: lib.ID, Path: filepath.Join(m, "Bad.mkv")})
 	st.Claim("w")
 	st.Fail(failed, "Converting stopped with an error.")
-	st.Enqueue(jobs.Job{Library: m, LibraryID: lib.ID, Path: filepath.Join(m, "Next.mkv")})
+	st.Enqueue(jobs.Job{Library: m, LibraryID: lib.ID, Path: filepath.Join(m, "Season 1", "Next.mkv")})
 	st.PutFile(jobs.File{Path: filepath.Join(m, "Old.mkv"), Size: 5, Decision: "skip: x", Reason: rules.SkipAlreadyHEVC})
 	st.PutProbe(filepath.Join(m, "Film.mkv"), 400, 1, `{"durationSec":60,"streams":[{"type":"video","codec":"hevc","Width":1920,"Height":1080}]}`)
 	st.AddStep(done, "found", true, "Found in /m.")
@@ -62,7 +62,7 @@ func TestFilesView(t *testing.T) {
 		t.Fatalf("processed %v", items)
 	}
 	p := items[0]
-	if p["name"] != "Film.mkv" || p["folder"] != m || p["library"] != "Movies" || p["codec"] != "hevc" || p["resolution"] != "1920x1080" ||
+	if p["name"] != "Film.mkv" || p["folder"] != "." || p["library"] != "Movies" || p["codec"] != "HEVC" || p["resolution"] != "1080p" ||
 		p["durationSec"] != 60.0 || p["beforeBytes"] != 1000.0 || p["afterBytes"] != 400.0 || p["bytes"] != 400.0 || p["originalState"] == nil {
 		t.Errorf("processed item %v", p)
 	}
@@ -72,7 +72,7 @@ func TestFilesView(t *testing.T) {
 	if _, items := get("show=failed"); len(items) != 1 || items[0]["title"] != "Converting did not finish" || items[0]["attempts"] != 1.0 {
 		t.Errorf("failed %v", items)
 	}
-	if _, items := get("show=unprocessed"); len(items) != 1 || items[0]["status"] != "waiting" || items[0]["codec"] != nil {
+	if _, items := get("show=unprocessed"); len(items) != 1 || items[0]["status"] != "waiting" || items[0]["codec"] != nil || items[0]["folder"] != "Season 1" {
 		t.Errorf("unprocessed (never probed: null) %v", items)
 	}
 	if _, items := get("show=skipped"); len(items) != 1 || items[0]["reason"] != rules.SkipAlreadyHEVC || items[0]["libraryId"] == nil || !strings.HasPrefix(items[0]["id"].(string), "skip-") {
@@ -120,7 +120,7 @@ func TestFilesViewBeside(t *testing.T) {
 	st.PutProbe("/m/Film.mkv", 1000, 1, `{"streams":[{"type":"video","codec":"h264","Width":1280,"Height":720}]}`)
 	st.PutProbe("/m/Film.hevc.mkv", 400, 1, `{"streams":[{"type":"video","codec":"hevc","Width":1920,"Height":1080}]}`)
 	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/activity/files?show=processed"})
-	if !strings.Contains(body, `"codec":"hevc"`) || !strings.Contains(body, `"resolution":"1920x1080"`) || !strings.Contains(body, `"originalState":"kept_beside"`) {
+	if !strings.Contains(body, `"codec":"HEVC"`) || !strings.Contains(body, `"resolution":"1080p"`) || !strings.Contains(body, `"originalState":"kept_beside"`) {
 		t.Errorf("beside row %s", body)
 	}
 	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/activity/files/" + itoa(id) + "/log"})

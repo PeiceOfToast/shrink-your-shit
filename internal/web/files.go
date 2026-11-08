@@ -4,7 +4,6 @@ package web
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/preview"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
@@ -120,14 +120,19 @@ func pageOf(r *http.Request) (limit, offset int) {
 func fileItem(store *jobs.Store, libs []jobs.Library, row jobs.FileRow, card string, keepDays int) map[string]any {
 	it := map[string]any{"path": row.Path, "folder": filepath.Dir(row.Path), "name": filepath.Base(row.Path),
 		"libraryId": nil, "library": row.Library, "codec": nil, "resolution": nil, "bytes": row.SizeBefore, "durationSec": nil}
+	for _, l := range libs { // its library (a skipped file: the one whose folder holds it)
+		rel, err := filepath.Rel(l.Path, row.Path)
+		if row.LibraryID > 0 && l.ID != row.LibraryID || err != nil || strings.HasPrefix(rel, "..") {
+			continue
+		}
+		it["folder"] = filepath.ToSlash(filepath.Dir(rel)) // slice A's words: inside the library, "." for the top
+		if row.LibraryID == 0 {
+			it["library"] = l.Name
+		}
+		it["libraryId"] = strconv.FormatInt(l.ID, 10)
+	}
 	if row.LibraryID > 0 {
 		it["libraryId"] = strconv.FormatInt(row.LibraryID, 10)
-	} else {
-		for _, l := range libs { // a skipped file: the library whose folder holds it
-			if rel, err := filepath.Rel(l.Path, row.Path); err == nil && !strings.HasPrefix(rel, "..") {
-				it["library"], it["libraryId"] = l.Name, strconv.FormatInt(l.ID, 10)
-			}
-		}
 	}
 	probed := row.Path
 	if row.NewPath != "" {
@@ -144,9 +149,9 @@ func fileItem(store *jobs.Store, libs []jobs.Library, row jobs.FileRow, card str
 		var info media.Info
 		if json.Unmarshal([]byte(raw), &info) == nil {
 			if v := info.Video(); v != nil {
-				it["codec"] = v.Codec
+				it["codec"] = preview.CodecWord(v.Codec) // slice A's words: "H.264"
 				if v.Width > 0 && v.Height > 0 {
-					it["resolution"] = fmt.Sprintf("%dx%d", v.Width, v.Height)
+					it["resolution"] = preview.ResolutionWord(v.Width, v.Height) // "720p"
 				}
 			}
 			if info.DurationSec > 0 {
