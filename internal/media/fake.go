@@ -5,6 +5,7 @@ package media
 import (
 	"context"
 	"strings"
+	"sync"
 )
 
 // FakeExec records calls and returns canned output; for tests in any package, so ffmpeg is never needed.
@@ -21,6 +22,21 @@ type FakeExec struct {
 	// Block, if set and it returns true for a call, makes that call wait until its context ends and
 	// return the context's error: a stuck ffmpeg.
 	Block func(name string, args []string) bool
+
+	mu sync.Mutex // guards Calls: two workers in one test can share a FakeExec
+}
+
+func (f *FakeExec) record(name string, args []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Calls = append(f.Calls, append([]string{name}, args...))
+}
+
+// Recorded is a copy of the calls so far, safe to read while other goroutines still call the fake.
+func (f *FakeExec) Recorded() [][]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([][]string(nil), f.Calls...)
 }
 
 func (f *FakeExec) blocked(ctx context.Context, name string, args []string) error {
@@ -32,7 +48,7 @@ func (f *FakeExec) blocked(ctx context.Context, name string, args []string) erro
 }
 
 func (f *FakeExec) Capture(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
-	f.Calls = append(f.Calls, append([]string{name}, args...))
+	f.record(name, args)
 	if err := f.blocked(ctx, name, args); err != nil {
 		return nil, nil, err
 	}
@@ -44,7 +60,7 @@ func (f *FakeExec) Capture(ctx context.Context, name string, args ...string) ([]
 }
 
 func (f *FakeExec) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
-	f.Calls = append(f.Calls, append([]string{name}, args...))
+	f.record(name, args)
 	if err := f.blocked(ctx, name, args); err != nil {
 		return nil, err
 	}
@@ -56,7 +72,7 @@ func (f *FakeExec) Output(ctx context.Context, name string, args ...string) ([]b
 }
 
 func (f *FakeExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
-	f.Calls = append(f.Calls, append([]string{name}, args...))
+	f.record(name, args)
 	if err := f.blocked(ctx, name, args); err != nil {
 		return "", err
 	}

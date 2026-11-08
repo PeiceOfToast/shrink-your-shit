@@ -73,6 +73,21 @@ jobs:
         if: runner.os != 'Linux'
         run: go test -count=1 ./...
 
+  # The race detector needs cgo (a C compiler), which the dev machines lack; ubuntu runners have gcc.
+  # Packages that run goroutines, at unit level: no ffmpeg here, so the real-ffmpeg tests skip.
+  race:
+    name: race (ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test -race -count=1 -timeout 15m ./internal/worker ./internal/doctor ./internal/jobs ./internal/web ./internal/scanner
+
   build:
     name: build (${{ matrix.goos }}/${{ matrix.goarch }})
     runs-on: ubuntu-latest

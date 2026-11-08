@@ -51,7 +51,8 @@
     var host = $("editor"); host.textContent = ""; $("lib-name").textContent = st.lib ? st.lib.name : "";
     if (st.prev) st.prev.stop();
     var get = function () { return st.editor.get(); };
-    st.prev = ui.preview($("preview"), st.lib.id, get);
+    if (!st.warn) st.warn = ui.warnings($("go4")); st.warn.show([]);
+    st.prev = ui.preview($("preview"), st.lib.id, get, st.level === "standard" ? { onWarnings: st.warn.show } : null);
     var change = function () { st.prev.mark(); };
     if (st.level === "standard") {
       // The library's setting answer says which Audio and Subtitles choices this version can save (addendum 13).
