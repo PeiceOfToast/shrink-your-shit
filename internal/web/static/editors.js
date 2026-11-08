@@ -99,7 +99,7 @@
     ["New file", [
       ["fileType", "File type", [["mkv", "MKV", "Holds every kind of track; the usual choice for Plex and Jellyfin."],
         ["mp4", "MP4", "Best for phones, browsers and Apple TV. Picture subtitles and some surround formats can't go in: picture subtitles are skipped with a reason, and that surround is converted to E-AC-3."],
-        ["webm", "WebM", "For web browsers. Only with AV1 or VP9 video and Opus audio."], ["keep", "Keep as is", "Each file keeps its current type."]], 0, ""],
+        ["webm", "WebM", "For web browsers. Only with AV1 or VP9 video and Opus audio."], ["keep", "Keep as is", "Each file keeps its current type. A file whose type can't hold the chosen video or audio becomes MKV."]], 0, ""],
       ["afterConverting", "After converting", [["replace", "Replace the original", "The original is kept for 7 days (Settings > Safety), then deleted."], ["beside", "Put the new file next to the original", "Both stay. Nothing is deleted."],
         ["folder", "Save to another folder", "The original stays where it is. New files go to the folder below, in the same sub-folders."]], 0, ""]]],
     ["Which files", []] // which files go first is one global setting: Settings > Performance, "Do first"
