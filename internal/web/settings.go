@@ -19,9 +19,9 @@ import (
 // later slices (24/35), keepOriginalsDays to slice 17.
 type Settings struct {
 	// OldControlLevel and OldPerLibraryFlow are the retired global control level (each flow has its own
-	// now). For one release they are kept as stored (a rollback finds them) and GET shows them, since
-	// the page before the Flows tab still reads them (ui-shop 04:37Z); nothing in the engine uses them,
-	// and a PATCH cannot change them (review e9455d0).
+	// now). For one release the page before the Flows tab still reads and sets them (ui-shop 04:37Z),
+	// so GET shows them and a PATCH stores them; nothing in the engine uses them (a flow's kind is its
+	// own), and a rollback finds them.
 	OldControlLevel   string     `json:"controlLevel,omitempty"`
 	OldPerLibraryFlow *bool      `json:"perLibraryFlow,omitempty"`
 	FirstRunDone      bool       `json:"firstRunDone"`
@@ -55,6 +55,8 @@ var hhmm = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
 // problem says what is wrong with s, as an error code and message ("" if nothing).
 func (s Settings) problem() (code, msg string) {
 	switch {
+	case s.OldControlLevel != "" && !oneOf(s.OldControlLevel, "basic", "standard", "advanced"):
+		return "invalid_setting", "controlLevel must be basic, standard or advanced."
 	case s.FirstRunStep < 1 || s.FirstRunStep > 5:
 		return "invalid_setting", "firstRunStep must be from 1 to 5."
 	case badLanguage(s.Languages) != "":
@@ -123,11 +125,8 @@ func (ss *settingsStore) save(s Settings) error {
 	return ss.store.SetMeta(settingsKey, string(b))
 }
 
-// readOnlySettings are shown by GET and ignored in a PATCH (the page may send back what it got). The
-// control level is each flow's own since the control-level slice: controlLevel and perLibraryFlow are
-// shown as stored for one release, and a PATCH that sends them is accepted and ignored.
-var readOnlySettings = map[string]bool{"authRequired": true, "trashPath": true, "updateAvailable": true,
-	"controlLevel": true, "perLibraryFlow": true}
+// readOnlySettings are shown by GET and ignored in a PATCH (the page may send back what it got).
+var readOnlySettings = map[string]bool{"authRequired": true, "trashPath": true, "updateAvailable": true}
 
 func settingsRoutes(api *http.ServeMux, ss *settingsStore, access *Access) {
 	view := func(s Settings) map[string]any {
@@ -177,6 +176,8 @@ func settingsRoutes(api *http.ServeMux, ss *settingsStore, access *Access) {
 			switch {
 			case readOnlySettings[k]:
 				continue
+			case k == "controlLevel" || k == "perLibraryFlow": // retired, stored for one release (lead 04:39Z); may be missing when none is stored
+				m[k] = v
 			case k == "integrations":
 				apiError(w, http.StatusBadRequest, "not_available", "Integrations can't be set up yet; they come in a later version. Nothing was changed.")
 				return

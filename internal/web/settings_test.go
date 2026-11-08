@@ -4,6 +4,7 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -63,12 +64,12 @@ func TestPatchSettings(t *testing.T) {
 	code, body := post(t, srv, "PATCH", "/api/settings", `{"controlLevel":"advanced","firstRunStep":3,"quietHours":{"from":"22:00","to":"06:30"},"queueOrder":"largest","trashPath":"ignored","authRequired":true}`)
 	m := settingsOf(t, body)
 	q, _ := m["quietHours"].(map[string]any)
-	if code != 200 || m["controlLevel"] != "basic" || m["firstRunStep"] != 3.0 || q["from"] != "22:00" || q["to"] != "06:30" ||
+	if code != 200 || m["controlLevel"] != "advanced" || m["firstRunStep"] != 3.0 || q["from"] != "22:00" || q["to"] != "06:30" ||
 		m["queueOrder"] != "largest" || m["authRequired"] != false || strings.Contains(body, "ignored") {
 		t.Fatalf("%d %s", code, body)
 	}
 	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/settings"})
-	if m := settingsOf(t, body); m["firstRunStep"] != 3.0 || m["controlLevel"] != "basic" { // controlLevel: accepted, ignored
+	if m := settingsOf(t, body); m["firstRunStep"] != 3.0 || m["controlLevel"] != "advanced" { // stored for one release (lead 04:39Z)
 		t.Errorf("stored: %s", body)
 	}
 	for _, c := range []struct{ patch, code string }{
@@ -124,12 +125,12 @@ func TestSettingsAndFlowsNeedSignIn(t *testing.T) {
 }
 
 // The retired controlLevel and perLibraryFlow stay in storage for one release (a rollback finds them),
-// through any settings save, and GET shows them as stored (ui-shop 04:37Z: the page before the Flows tab
-// reads them), but a PATCH cannot change them (review e9455d0).
+// through a save of other settings, and GET shows them as stored (ui-shop 04:37Z: the page before the
+// Flows tab reads them).
 func TestRetiredSettingsAreKeptStored(t *testing.T) {
 	srv, st, _, _ := libServer(t, false)
 	st.SetMeta("settings", `{"controlLevel":"advanced","perLibraryFlow":true,"firstRunDone":true,"firstRunStep":5,"keepOriginalsDays":7,"parallelJobs":1,"lowPriority":true,"scanSchedule":"02:00","queueOrder":"newest","languages":[]}`)
-	if code, body := post(t, srv, "PATCH", "/api/settings", `{"quietHours":{"from":"22:00","to":"06:00"},"controlLevel":"basic","perLibraryFlow":false}`); code != 200 || !strings.Contains(body, `"controlLevel":"advanced"`) || !strings.Contains(body, `"perLibraryFlow":true`) {
+	if code, body := post(t, srv, "PATCH", "/api/settings", `{"quietHours":{"from":"22:00","to":"06:00"}}`); code != 200 || !strings.Contains(body, `"controlLevel":"advanced"`) || !strings.Contains(body, `"perLibraryFlow":true`) {
 		t.Fatalf("patch: %d %s", code, body)
 	}
 	raw, _, _ := st.Meta("settings")
@@ -149,5 +150,41 @@ func TestRetiredSettingsWhenNoneStored(t *testing.T) {
 	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/settings"})
 	if m := settingsOf(t, body); m["controlLevel"] != "basic" || m["perLibraryFlow"] != false {
 		t.Errorf("%s", body)
+	}
+}
+
+// For one release a PATCH stores the retired controlLevel and perLibraryFlow, so the page before the
+// Flows tab works (lead 04:39Z); a flow's kind is its own, whatever they say.
+func TestPatchStoresRetiredSettings(t *testing.T) {
+	srv, _, _, _ := libServer(t, false)
+	kinds := func() string {
+		t.Helper()
+		_, b, _ := do(t, nil, srv, call{method: "GET", path: "/api/flows"})
+		var v struct{ Items []struct{ Name, Kind string } }
+		json.Unmarshal([]byte(b), &v)
+		return fmt.Sprint(v.Items)
+	}
+	post(t, srv, "POST", "/api/libraries", fmt.Sprintf(`{"name":"Before","path":%q}`, t.TempDir()))
+	before := kinds()
+	code, body := post(t, srv, "PATCH", "/api/settings", `{"controlLevel":"advanced","perLibraryFlow":true}`)
+	if m := settingsOf(t, body); code != 200 || m["controlLevel"] != "advanced" || m["perLibraryFlow"] != true {
+		t.Fatalf("patch: %d %s", code, body)
+	}
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/settings"})
+	if m := settingsOf(t, body); m["controlLevel"] != "advanced" || m["perLibraryFlow"] != true {
+		t.Errorf("GET: %s", body)
+	}
+	if after := kinds(); after != before {
+		t.Errorf("flow kinds changed: %s, before %s", after, before)
+	}
+	post(t, srv, "POST", "/api/libraries", fmt.Sprintf(`{"name":"After","path":%q}`, t.TempDir()))
+	if before != "[{Before basic}]" {
+		t.Fatalf("flows before: %s", before)
+	}
+	if got := kinds(); got != "[{Before basic} {After basic}]" { // "advanced" made no Advanced flow
+		t.Errorf("flows after: %s", got)
+	}
+	if code, body := post(t, srv, "PATCH", "/api/settings", `{"controlLevel":"expert"}`); code != 400 || errCode(body) != "invalid_setting" {
+		t.Errorf("bad level: %d %s", code, body)
 	}
 }
