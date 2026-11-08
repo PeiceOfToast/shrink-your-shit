@@ -32,6 +32,7 @@ type Plan struct {
 	HDRNote         string      `json:"hdrNote,omitempty"`       // what an HDR conversion does not keep (S3): HDR10+ scene data, Dolby Vision
 	AudioFolded     bool        `json:"audioFolded,omitempty"`   // a 7.1 track became 5.1 E-AC-3/AC-3: the job log says FoldedNote (design, 01:52Z)
 	SmallKept       bool        `json:"smallKept,omitempty"`     // a small stereo track kept as it is: the job log says SmallKeptNote (design, 02:26Z)
+	TypeNote        string      `json:"typeNote,omitempty"`      // "keep" turned this file into MKV: said once in the job log (review 4ac9c0d)
 	AudioOrder      []int       `json:"audioOrder,omitempty"`    // the original's audio stream indexes in order, when Tracks has any
 	SubtitleOrder   []int       `json:"subtitleOrder,omitempty"` // and its subtitle stream indexes
 	MinSSIM         float64     `json:"minSSIM,omitempty"`       // picture threshold; 0 = the program's -min-ssim
@@ -563,6 +564,14 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	// video or Opus audio): that file becomes MKV (review 6cafc6f; the rename warning covers it).
 	if p.Container == "" && strings.Contains(info.Container, "mp4") && (target == "vp9" || s.Audio == "stereo_opus") {
 		p.Container = "mkv"
+		switch { // 25b's wording ("File type changed to MKV: MP4 files can't hold Opus.")
+		case target == "vp9" && s.Audio == "stereo_opus":
+			p.TypeNote = "File type changed to MKV: MP4 files can't hold VP9 video or Opus."
+		case target == "vp9":
+			p.TypeNote = "File type changed to MKV: MP4 files can't hold VP9 video."
+		default:
+			p.TypeNote = "File type changed to MKV: MP4 files can't hold Opus."
+		}
 	}
 	mp4 := p.Container == "mp4" || (p.Container == "" && strings.Contains(info.Container, "mp4"))
 	p.Tracks, p.AllAudioKept, p.MainAudioUsed, p.SmallKept = planAudio(choice, onlyMine, langs, info, mp4)
@@ -814,8 +823,25 @@ func sourceVideoKbps(info media.Info, v *media.Stream) int {
 		if a.BitrateKbps > 0 {
 			kbps -= a.BitrateKbps
 		} else {
-			kbps -= 640
+			kbps -= audioEstimateKbps(a)
 		}
 	}
 	return max(kbps, 0)
+}
+
+// audioEstimateKbps is a generous guess at an audio track's bitrate when the probe has none, so the
+// video's estimate stays low (the cap is never above the source video, review 4ac9c0d): lossless 640
+// kbps a channel (5.1 about 3.8 Mbps, 7.1 about 5.1), DTS 1536, other lossy 96 a channel up to 640.
+func audioEstimateKbps(a media.Stream) int {
+	ch := a.Channels
+	if ch <= 0 {
+		ch = 2
+	}
+	switch {
+	case a.Lossless():
+		return 640 * ch
+	case a.Codec == "dts":
+		return 1536
+	}
+	return min(96*ch, 640)
 }

@@ -235,6 +235,9 @@ func (t Template) Warnings() []string {
 	if w := RenameWarning(s.AfterConverting, s.FileType); w != "" && t.Kind == KindSelectors { // 25a-2 (Basic's MKV: the update notice, S4)
 		out = append(out, w)
 	}
+	if t.Kind == KindSelectors && s.FileType == "keep" && (s.Format == "vp9" || s.Audio == "stereo_opus") {
+		out = append(out, KeepVP9OpusWarning) // design (a), 02:30Z: such an MP4 becomes MKV
+	}
 	return out
 }
 
@@ -259,3 +262,7 @@ func (s Selectors) Upgraded() Selectors {
 	}
 	return s
 }
+
+// KeepVP9OpusWarning is design's warning (02:30Z) for "Keep as is" with VP9 or Opus: an MP4 can't hold
+// them, so such a file becomes MKV (the job log says so for each file).
+const KeepVP9OpusWarning = "With VP9 or Opus, .mp4 files become .mkv files, so they get a new name. After converting, rescan this library in Radarr, Sonarr, Plex or Jellyfin."

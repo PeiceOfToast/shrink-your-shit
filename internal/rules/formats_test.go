@@ -3,6 +3,7 @@
 package rules
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -179,19 +180,59 @@ func TestReviewFixesS6(t *testing.T) {
 		s := DefaultSelectors(3)
 		s.FileType = "keep"
 		f(&s)
-		if p := s.Template().Compile(mp4); p.Container != "mkv" || p.Skip != "" {
-			t.Errorf("keep + %s in MP4: container %q skip %q", name, p.Container, p.Skip)
+		if p := s.Template().Compile(mp4); p.Container != "mkv" || p.Skip != "" || !strings.HasPrefix(p.TypeNote, "File type changed to MKV: MP4 files can't hold ") {
+			t.Errorf("keep + %s in MP4: container %q skip %q note %q", name, p.Container, p.Skip, p.TypeNote)
 		}
 	}
-	// 10000 kbps in all, a 1536 kbps track and one of unknown bitrate (640): the video is about 7824
+	// 10000 kbps in all, a 1536 kbps track and a 5.1 AC-3 of unknown bitrate (576): the video about 7888
 	i := h264(1920, 1080, 0, media.Stream{Type: "audio", Codec: "dts", Channels: 6, BitrateKbps: 1536}, media.Stream{Type: "audio", Codec: "ac3", Channels: 6})
 	i.BitrateKbps = 10000
-	if got := sourceVideoKbps(i, i.Video()); got != 10000-1536-640 {
+	if got := sourceVideoKbps(i, i.Video()); got != 10000-1536-576 {
 		t.Errorf("video estimate %d", got)
 	}
 	dts := DefaultSelectors(3)
 	dts.Audio, dts.FileType = "eac3_surround", "keep"
 	if p := dts.Template().Compile(h264(1920, 1080, 8000, media.Stream{Type: "audio", Codec: "dts", Channels: 6, Index: 1})); len(p.Tracks) != 0 {
 		t.Errorf("unknown-bitrate DTS converted: %+v", p.Tracks)
+	}
+}
+
+// Review 4ac9c0d: a lossless 7.1 track of unknown bitrate is not counted as 640 kbps: a 12 Mbps file
+// with 7.1 TrueHD has about 6.9 Mbps of video at most, so a High cap (8 Mbps at 1080p) is held to that.
+func TestLossless71Ceiling(t *testing.T) {
+	i := h264(1920, 1080, 0, media.Stream{Type: "audio", Codec: "truehd", Channels: 8, Index: 1})
+	i.BitrateKbps = 12000
+	if got := sourceVideoKbps(i, i.Video()); got != 12000-640*8 {
+		t.Fatalf("estimate %d", got)
+	}
+	s := DefaultSelectors(3)
+	s.MaxBitrate, s.FileType = "high", "keep"
+	if p := s.Template().Compile(i); p.Video.MaxRateKbps != 12000-640*8 {
+		t.Errorf("cap %d, want the video's estimate %d (never above the source video)", p.Video.MaxRateKbps, 12000-640*8)
+	}
+}
+
+// Design (a), 02:30Z: "Keep as is" with VP9 or Opus warns that .mp4 files become .mkv (Save not blocked).
+func TestKeepVP9OpusWarning(t *testing.T) {
+	SetAvailableFormats(allEncoders)
+	defer SetAvailableFormats(nil)
+	for name, c := range map[string]struct {
+		f    func(*Selectors)
+		want bool
+	}{
+		"vp9 keep":  {func(s *Selectors) { s.Format, s.FileType = "vp9", "keep" }, true},
+		"opus keep": {func(s *Selectors) { s.Audio, s.FileType = "stereo_opus", "keep" }, true},
+		"vp9 mkv":   {func(s *Selectors) { s.Format, s.FileType = "vp9", "mkv" }, false},
+		"hevc keep": {func(s *Selectors) { s.FileType = "keep" }, false},
+	} {
+		s := DefaultSelectors(3)
+		c.f(&s)
+		if s.Validate() != nil {
+			t.Fatalf("%s: %v", name, s.Validate())
+		}
+		got := slices.Contains(s.Template().Warnings(), KeepVP9OpusWarning)
+		if got != c.want {
+			t.Errorf("%s: warning %v, want %v", name, got, c.want)
+		}
 	}
 }
