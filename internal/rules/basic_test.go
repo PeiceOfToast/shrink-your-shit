@@ -43,7 +43,7 @@ func TestBasicStereoAAC(t *testing.T) {
 		media.Stream{Index: 3, Type: "audio", Codec: "ac3", Channels: 6, Language: "fre"},
 		media.Stream{Index: 4, Type: "audio", Codec: "mp3", Channels: 2})
 	p := basic("", "eng").Compile(info)
-	if got := ops(p); got != "1 aac 160k 2ch, drop 3, 4 aac 160k 2ch" || p.MainAudioUsed {
+	if got := ops(p); got != "1 aac 160k 2ch, drop 3" || p.MainAudioUsed { // 4: stereo MP3 of unknown bitrate, copied: never bigger (review 6cafc6f)
 		t.Errorf("eng: %s (main %v)", got, p.MainAudioUsed)
 	}
 	if args := strings.Join(p.FFmpegArgs("i", "o"), " "); !strings.Contains(args, "-c:a:0 aac -b:a:0 160k -ac:a:0 2") || !strings.Contains(args, "-map -0:3") {

@@ -14,3 +14,12 @@ func diskFree(dir string) (uint64, error) {
 	}
 	return uint64(st.Bavail) * uint64(st.Bsize), nil
 }
+
+// diskSize is the size of the disk dir is on (S6: the 5% rule for a folder for new files).
+func diskSize(dir string) (uint64, error) {
+	var st unix.Statfs_t
+	if err := unix.Statfs(dir, &st); err != nil {
+		return 0, err
+	}
+	return uint64(st.Blocks) * uint64(st.Bsize), nil
+}

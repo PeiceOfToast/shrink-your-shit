@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"os"
 	"path/filepath"
@@ -686,5 +687,34 @@ func TestStandardReworkMigration(t *testing.T) {
 	}
 	if r, _ := s.GetFile("/a/x.mkv"); r != nil {
 		t.Errorf("already_hevc kept: %+v", r)
+	}
+}
+
+// Review 6cafc6f (P1): a 25b flow with Opus in MP4 (valid then) moves to MKV, with design's sentence,
+// so it still runs.
+func TestStandardReworkOpusMP4(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "syp.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sel := rules.DefaultSelectors(3)
+	sel.Speed = "slower"
+	l, _ := s.AddLibrary("M", "/m", sel.Template(), true)
+	s.db.Exec(`UPDATE flows SET template=json_set(json_remove(template, '$.selectors.onlyMyLanguages'), '$.selectors.audio', 'opus', '$.selectors.fileType', 'mp4', '$.selectors.afterConverting', 'beside') WHERE id=?`, l.FlowID)
+	s.db.Exec(`PRAGMA user_version = 18`)
+	s.Close()
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	f, _ := s.GetFlow(l.FlowID)
+	sel2 := f.Template.Selectors
+	if sel2.Audio != "stereo_opus" || sel2.FileType != "mkv" || len(sel2.Notes) != 2 || sel2.Notes[1] != "File type changed to MKV: MP4 files can't hold Opus." || sel2.Validate() != nil {
+		t.Errorf("%+v %v", sel2, sel2.Validate())
+	}
+	if p := f.Template.Compile(media.Info{Container: "mov,mp4,m4a,3gp,3g2,mj2", Streams: []media.Stream{{Type: "video", Codec: "h264", Width: 640, Height: 360}}}); p.SkipCode == rules.SkipSettingCannotRun {
+		t.Errorf("the migrated flow can't run: %q", p.Skip)
 	}
 }

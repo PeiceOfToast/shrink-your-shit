@@ -231,7 +231,7 @@ func fileItem(store *jobs.Store, libs []jobs.Library, row jobs.FileRow, card str
 // outputBlockers says why dir can't be a flow's folder for new files (S6, "Save to another folder";
 // contract 21:10Z item 5): not_writable, low_space (under 10 GB free), inside_library (inside a library
 // of this flow, so new files would be converted again; or a library inside it). Empty: it can be used.
-func outputBlockers(store *jobs.Store, flowID int64, dir string) []map[string]string {
+func outputBlockers(store *jobs.Store, flowID int64, dir string, moreLibraries ...string) []map[string]string {
 	out := []map[string]string{}
 	add := func(code, msg string) { out = append(out, map[string]string{"code": code, "message": msg}) }
 	if !filepath.IsAbs(dir) {
@@ -239,16 +239,20 @@ func outputBlockers(store *jobs.Store, flowID int64, dir string) []map[string]st
 		return out
 	}
 	dir = filepath.Clean(dir)
+	real := resolved(dir)  // links followed, so an alias can't hide a folder inside a library (review 6cafc6f)
+	paths := moreLibraries // a library being added to this flow or moved (checked before it is saved)
 	if libs, err := store.Libraries(); err == nil {
 		for _, l := range libs {
-			if l.FlowID != flowID {
-				continue
+			if l.FlowID == flowID {
+				paths = append(paths, l.Path)
 			}
-			lp := filepath.Clean(l.Path)
-			if inside(dir, lp) || inside(lp, dir) {
-				add("inside_library", "This folder is inside the library, so new files would be converted again. Pick a folder outside "+lp+".")
-				break
-			}
+		}
+	}
+	for _, lp := range paths {
+		lr := resolved(filepath.Clean(lp))
+		if inside(real, lr) || inside(lr, real) {
+			add("inside_library", "This folder is inside the library, so new files would be converted again. Pick a folder outside "+lp+".")
+			break
 		}
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -262,7 +266,9 @@ func outputBlockers(store *jobs.Store, flowID int64, dir string) []map[string]st
 		f.Close()
 		os.Remove(f.Name())
 	}
-	if free, err := worker.DiskFree(dir); err == nil && free < 10<<30 {
+	free, ferr := worker.DiskFree(dir)
+	size, serr := worker.DiskSize(dir)
+	if ferr == nil && (free < 10<<30 || serr == nil && size > 0 && free < size/20) { // under 10 GB or 5% free
 		add("low_space", fmt.Sprintf("This folder's disk has only %s free. New files need room: pick a folder on a disk with more space.", rules.HumanBytes(int64(free))))
 	}
 	return out
@@ -272,4 +278,36 @@ func outputBlockers(store *jobs.Store, flowID int64, dir string) []map[string]st
 func inside(path, dir string) bool {
 	rel, err := filepath.Rel(dir, path)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// resolved is path with its links followed, as far as it exists (a folder for new files may not exist
+// yet: its existing parent is resolved and the rest added back).
+func resolved(path string) string {
+	rest := ""
+	for p := path; ; p = filepath.Dir(p) {
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return filepath.Join(r, rest)
+		}
+		if filepath.Dir(p) == p {
+			return path
+		}
+		rest = filepath.Join(filepath.Base(p), rest)
+	}
+}
+
+// folderRefused answers 400 when library path libPath would use (or move under) flow flowID whose new
+// files go to another folder inside or around it: checked when a library joins a flow or moves, not
+// only when the flow is saved (review 6cafc6f).
+func folderRefused(w http.ResponseWriter, store *jobs.Store, flowID int64, libPath string) bool {
+	f, err := store.GetFlow(flowID)
+	if err != nil || f.Template.Selectors == nil || f.Template.Selectors.AfterConverting != "folder" {
+		return false
+	}
+	for _, b := range outputBlockers(store, flowID, f.Template.Selectors.OutputDir, libPath) {
+		if b["code"] == "inside_library" {
+			apiError(w, http.StatusBadRequest, "inside_library", "This flow saves new files to "+f.Template.Selectors.OutputDir+", which is inside this library (or holds it), so new files would be converted again. Choose another flow, or change the flow's folder. Nothing was changed.")
+			return true
+		}
+	}
+	return false
 }

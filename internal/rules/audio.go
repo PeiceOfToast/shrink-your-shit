@@ -141,6 +141,12 @@ func planAudio(choice string, onlyMine bool, langs []string, info media.Info, mp
 		if a.Codec == codec && a.Channels > 0 && a.Channels <= 2 {
 			return TrackOp{}, false // already stereo in that codec: copied
 		}
+		// Never bigger (25b, review 6cafc6f): a lossy stereo track at or below the target's bitrate, or of
+		// unknown bitrate, is copied. Surround is still made stereo: a downmix to 2 channels at 160 kbps
+		// is smaller than any lossy surround track.
+		if !a.Lossless() && a.Channels > 0 && a.Channels <= 2 && (a.BitrateKbps == 0 || a.BitrateKbps <= kbps) {
+			return TrackOp{}, false
+		}
 		return TrackOp{Index: a.Index, Type: "audio", Encoder: encoder, Codec: codec, Kbps: kbps, Channels: 2}, true
 	}
 	var added []TrackOp
@@ -167,7 +173,7 @@ func planAudio(choice string, onlyMine bool, langs []string, info media.Info, mp
 			if a.Channels >= 3 && (a.Lossless() || a.Codec == "dts") && a.Codec != "ac3" && a.Codec != "eac3" {
 				ch := min(a.Channels, 6)
 				kbps := AutoAudioKbps(t, ch)
-				if a.Lossless() || a.BitrateKbps == 0 || a.BitrateKbps > kbps { // never bigger, except lossless
+				if a.Lossless() || a.BitrateKbps > kbps { // never bigger, except lossless; unknown lossy (DTS) is copied
 					op, has = TrackOp{Index: a.Index, Type: "audio", Encoder: t, Codec: t, Kbps: kbps, Channels: chIfFolded(a.Channels)}, true
 				}
 			}

@@ -254,5 +254,8 @@ func (s Selectors) Upgraded() Selectors {
 	if !contains(AvailableAudio, s.Audio) {
 		s.Audio, s.OnlyMyLanguages, _ = StandardAudio(s.Audio, s.OnlyMyLanguages)
 	}
+	if s.Audio == "stereo_opus" && s.FileType == "mp4" { // 25b's opus in MP4 was valid; S6's Opus needs MKV (review 6cafc6f)
+		s.FileType = "mkv"
+	}
 	return s
 }

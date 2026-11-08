@@ -155,3 +155,43 @@ func TestRoughWarning(t *testing.T) {
 		}
 	}
 }
+
+// Review 6cafc6f (P2s): an included Dolby Vision 7/8 file is encoded (HDR10), never copied; "keep the
+// file type" makes an MP4 MKV when it can't hold VP9 or Opus; the bitrate ceiling uses the video's own
+// bitrate (the file's less its audio); unknown-bitrate DTS is copied, not converted.
+func TestReviewFixesS6(t *testing.T) {
+	SetAvailableFormats(allEncoders)
+	defer SetAvailableFormats(nil)
+	dv := h264(1920, 1080, 8000)
+	dv.Streams[0].Codec, dv.VideoCodec = "hevc", "hevc"
+	dv.Streams[0].DolbyVision, dv.Streams[0].DVProfile, dv.Streams[0].ColorTransfer = true, 8, "smpte2084"
+	inc := DefaultSelectors(3)
+	inc.IncludeDolbyVision = true
+	if p := inc.Template().Compile(dv); p.Video.Copy || p.Video.HDR == nil || p.HDRNote != DVRemovedNote {
+		t.Errorf("included DV: copy %v hdr %v note %q skip %q", p.Video.Copy, p.Video.HDR, p.HDRNote, p.Skip)
+	}
+	mp4 := h264(1280, 720, 4000, media.Stream{Type: "audio", Codec: "aac", Channels: 2, Index: 1})
+	mp4.Container = "mov,mp4,m4a,3gp,3g2,mj2"
+	for name, f := range map[string]func(*Selectors){
+		"vp9":  func(s *Selectors) { s.Format = "vp9" },
+		"opus": func(s *Selectors) { s.Audio = "stereo_opus" },
+	} {
+		s := DefaultSelectors(3)
+		s.FileType = "keep"
+		f(&s)
+		if p := s.Template().Compile(mp4); p.Container != "mkv" || p.Skip != "" {
+			t.Errorf("keep + %s in MP4: container %q skip %q", name, p.Container, p.Skip)
+		}
+	}
+	// 10000 kbps in all, a 1536 kbps track and one of unknown bitrate (640): the video is about 7824
+	i := h264(1920, 1080, 0, media.Stream{Type: "audio", Codec: "dts", Channels: 6, BitrateKbps: 1536}, media.Stream{Type: "audio", Codec: "ac3", Channels: 6})
+	i.BitrateKbps = 10000
+	if got := sourceVideoKbps(i, i.Video()); got != 10000-1536-640 {
+		t.Errorf("video estimate %d", got)
+	}
+	dts := DefaultSelectors(3)
+	dts.Audio, dts.FileType = "eac3_surround", "keep"
+	if p := dts.Template().Compile(h264(1920, 1080, 8000, media.Stream{Type: "audio", Codec: "dts", Channels: 6, Index: 1})); len(p.Tracks) != 0 {
+		t.Errorf("unknown-bitrate DTS converted: %+v", p.Tracks)
+	}
+}

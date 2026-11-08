@@ -523,7 +523,7 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	}
 	vf := VideoFormats[target]
 	p.Video = VideoEncode{Codec: vf.Encoder, CRF: crf + vf.CRFOffset, Preset: vf.Presets[s.Speed], Tag: vf.Tag,
-		Index: info.MainVideoOrdinal(), MaxRateKbps: CapKbps(s.MaxBitrate, target, w, h, v, videoKbps(info, v)), Height: height}
+		Index: info.MainVideoOrdinal(), MaxRateKbps: CapKbps(s.MaxBitrate, target, w, h, v, sourceVideoKbps(info, v)), Height: height}
 	if target != "hevc" {
 		p.Video.Format = target
 		p.Video.Extra = append(append([]string(nil), vf.Extra[""]...), vf.Extra[s.Speed]...)
@@ -533,7 +533,8 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	// are already as chosen (already_in_format). AV1 and VP9 are not made into HEVC or H.264: converting
 	// them loses quality and usually grows the file (modern_format). Every other modern source is
 	// converted to the format the person chose.
-	remux := v.Codec == target && height == 0 && p.Video.MaxRateKbps == 0
+	// (Dolby Vision included is never copied: profiles 7/8 must become HDR10, review 6cafc6f.)
+	remux := v.Codec == target && height == 0 && p.Video.MaxRateKbps == 0 && !(v.DolbyVision && s.IncludeDolbyVision)
 	name, ok := SliderSources[v.Codec]
 	switch modern := alreadyEfficient[v.Codec]; {
 	case remux:
@@ -556,6 +557,11 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 		return p
 	}
 	choice, onlyMine, _ := StandardAudio(s.Audio, s.OnlyMyLanguages) // Basic's my_languages/keep_all, and values from before S6
+	// "Keep the file type" for a file whose own type can't hold what this flow makes (an MP4 with VP9
+	// video or Opus audio): that file becomes MKV (review 6cafc6f; the rename warning covers it).
+	if p.Container == "" && strings.Contains(info.Container, "mp4") && (target == "vp9" || s.Audio == "stereo_opus") {
+		p.Container = "mkv"
+	}
 	mp4 := p.Container == "mp4" || (p.Container == "" && strings.Contains(info.Container, "mp4"))
 	p.Tracks, p.AllAudioKept, p.MainAudioUsed = planAudio(choice, onlyMine, langs, info, mp4)
 	p.Tracks = append(p.Tracks, planSubtitles(s.Subtitles, langs, info)...)
@@ -785,4 +791,22 @@ func dvHold(v *media.Stream, includeDV bool) (words, code string) {
 func (t Template) DolbyVisionHold(info media.Info) (words, code string) {
 	include := t.Kind == KindSelectors && t.Selectors != nil && t.Selectors.IncludeDolbyVision
 	return dvHold(info.Video(), include)
+}
+
+// sourceVideoKbps is the source video's own bitrate for the "never above the file's own" ceiling: the
+// stream's, or the whole file's less its audio (each audio track of unknown bitrate counted at 640
+// kbps, so the estimate stays low); 0 when it can't be told (no ceiling) (review 6cafc6f).
+func sourceVideoKbps(info media.Info, v *media.Stream) int {
+	if v.BitrateKbps > 0 {
+		return v.BitrateKbps
+	}
+	kbps := info.BitrateKbps
+	for _, a := range info.Audio() {
+		if a.BitrateKbps > 0 {
+			kbps -= a.BitrateKbps
+		} else {
+			kbps -= 640
+		}
+	}
+	return max(kbps, 0)
 }

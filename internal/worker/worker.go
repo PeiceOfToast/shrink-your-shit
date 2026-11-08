@@ -528,6 +528,17 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if words, code := tmpl.DolbyVisionHold(src); code != "" { // from the probe, not the Plan's skip (review 7ab8f72)
 		return "", &SkippedError{Words: words, Code: code}
 	}
+	// Any skip of the Plan made now (the flow changed since the job was queued: an HDR file with a
+	// non-HEVC target, a choice that can't run...) ends the job as a skipped file with that reason,
+	// never an encode (review 6cafc6f: the second such case after Dolby Vision). The scanner's rules
+	// for what is queued are unchanged.
+	if plan.Skip != "" {
+		code := plan.SkipCode
+		if code == "" {
+			code = rules.SkipSettingCannotRun
+		}
+		return "", &SkippedError{Words: plan.Skip, Code: code}
+	}
 	if plan.Video.Codec == "" {
 		return "", failed("This library's setting can't convert this file, so it was left as it is.", fmt.Errorf("its library's flow cannot convert it: %s", plan.Skip))
 	}
@@ -560,6 +571,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		newName = FolderPath(plan.OutputDir, job.Library, job.Path, ext)
 		if err := os.MkdirAll(filepath.Dir(newName), 0o755); err != nil {
 			return "", failed("The folder for new files can't be written to, so nothing was converted. Your original was not touched. Check the flow's folder, then press Retry.", err)
+		}
+		if err := w.preflight(newName, before.Size()); err != nil { // its own disk: the new file is made there (review 6cafc6f)
+			return "", err
 		}
 	}
 	if keepsOriginal(plan) { // the name is taken already: no point converting (checked again at the end)

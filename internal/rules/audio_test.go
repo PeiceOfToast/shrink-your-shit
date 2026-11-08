@@ -56,10 +56,10 @@ func TestDesignEAudio(t *testing.T) {
 		return strings.Join(out, " ")
 	}
 	for choice, want := range map[string]string{
-		"stereo_aac":          "1:aac2 2:aac2 4:aac2 5:aac2", // 3 is stereo AAC: copied
-		"stereo_opus":         "1:opus2 2:opus2 3:opus2 4:opus2 5:opus2",
-		"stereo_aac_surround": "4:aac2 1:add aac2 2:add aac2 5:add aac2", // surround copied, a stereo AAC added from each; 3 copied
-		"eac3_surround":       "1:eac30 5:eac36",                         // lossless and DTS surround (7.1 folded to 5.1); AC-3 and stereo copied
+		"stereo_aac":          "1:aac2 2:aac2 5:aac2",             // 3 is stereo AAC, 4 a 128 kbps MP3 (smaller than 160): copied
+		"stereo_opus":         "1:opus2 2:opus2 5:opus2",          // 3 (unknown bitrate) and 4 (128 kbps) would not get smaller
+		"stereo_aac_surround": "1:add aac2 2:add aac2 5:add aac2", // surround copied, a stereo AAC added from each; 3 and 4 copied
+		"eac3_surround":       "1:eac30 5:eac36",                  // lossless and DTS surround (7.1 folded to 5.1); AC-3 and stereo copied
 		"ac3_surround":        "1:ac30 5:ac36",
 		"as_is":               "",
 	} {

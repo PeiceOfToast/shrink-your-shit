@@ -265,3 +265,34 @@ func TestFlowNotesUntilSaved(t *testing.T) {
 		t.Errorf("after a save: %s", b)
 	}
 }
+
+// Review 6cafc6f: a link can't hide a folder inside a library, and the folder is checked again when a
+// library joins a folder flow (chosen, added on it) or moves.
+func TestFolderOutputStaysOutsideLibraries(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), false)
+	alias := filepath.Join(t.TempDir(), "alias")
+	os.Symlink(lib.Path, alias)
+	path := "/api/flows/" + itoa(lib.FlowID)
+	if _, b := post(t, srv, "POST", path+"/check-output", `{"path":`+strconv.Quote(filepath.Join(alias, "new"))+`}`); !strings.Contains(b, "inside_library") {
+		t.Errorf("a link into the library: %s", b)
+	}
+	// a folder flow with no library yet, then libraries that would hold its folder
+	out := t.TempDir()
+	sel := rules.DefaultSelectors(3)
+	sel.Speed, sel.AfterConverting, sel.OutputDir = "slower", "folder", filepath.Join(out, "converted")
+	flow, _ := st.AddFlow("Elsewhere", sel.Template())
+	other, _ := st.AddLibrary("Other", t.TempDir(), rules.SliderTemplate(3), false)
+	if code, b := post(t, srv, "PUT", "/api/libraries/"+itoa(other.ID)+"/flow", `{"flowId":"`+itoa(flow.ID)+`"}`); code != 200 {
+		t.Fatalf("a library elsewhere: %d %s", code, b)
+	}
+	if code, b := post(t, srv, "PATCH", "/api/libraries/"+itoa(other.ID), `{"path":`+strconv.Quote(out)+`}`); code != 400 || errCode(b) != "inside_library" {
+		t.Errorf("moved around the folder: %d %s", code, b)
+	}
+	if code, b := post(t, srv, "POST", "/api/libraries", `{"name":"Outer","path":`+strconv.Quote(out)+`,"flowId":"`+itoa(flow.ID)+`"}`); code != 400 || errCode(b) != "inside_library" {
+		t.Errorf("added on the flow: %d %s", code, b)
+	}
+	if code, b := post(t, srv, "PUT", "/api/libraries/"+itoa(lib.ID)+"/flow", `{"flowId":"`+itoa(flow.ID)+`"}`); code != 200 {
+		t.Errorf("Movies is elsewhere too: %d %s", code, b)
+	}
+}

@@ -66,6 +66,7 @@ func realJob(t *testing.T, path string, dur float64) (*jobs.Store, int64) {
 func realWorker(st *jobs.Store, x media.Exec) *Worker {
 	r := rules.Default()
 	r.Preset, r.CRF = "ultrafast", 28
+	r.MinBitrateKbps = 0 // the scanner decided: these files are queued (the worker honours a Plan's skip, review 6cafc6f)
 	return &Worker{ID: "real", Queue: st, Exec: x, FFmpeg: "ffmpeg", FFprobe: "ffprobe", Rule: r, Mode: Replace}
 }
 

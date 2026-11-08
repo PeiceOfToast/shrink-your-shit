@@ -223,6 +223,10 @@ UPDATE flows SET template = json_set(template,
     ELSE json_extract(template, '$.selectors.audio') END)
 WHERE json_extract(template, '$.kind') = 'selectors' AND json_type(template, '$.selectors') = 'object'
   AND json_extract(template, '$.selectors.audio') IN ('keep_all', 'my_languages', 'aac', 'opus', 'eac3', 'lossless_only');
+UPDATE flows SET template = json_insert(json_set(template, '$.selectors.fileType', 'mkv'), '$.selectors.notes[#]',
+  'File type changed to MKV: MP4 files can''t hold Opus.')
+WHERE json_extract(template, '$.kind') = 'selectors' AND json_extract(template, '$.selectors.audio') = 'stereo_opus'
+  AND json_extract(template, '$.selectors.fileType') = 'mp4';
 DELETE FROM files WHERE reason = 'already_hevc';`},
 }
 
