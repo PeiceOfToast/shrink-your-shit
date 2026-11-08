@@ -13,7 +13,7 @@
     user_stopped: "you stopped it", restored: "you restored the original",
     // Workshop slice 19 (contract: four more skipped reason codes); design's words, 2026-11-07.
     format_not_converted: "a format this version doesn't convert", no_video: "no video in the file",
-    setting_cannot_run: "the library's setting can't be used on it",
+    setting_cannot_run: "the flow's setting can't be used on it",
     // Workshop slice 23 (file guards); design's words, 13:00Z.
     still_changing: "still changing, we'll look again on the next scan",
     // Workshop S4/S3 (contract 21:10Z, item 8); design's words (REDESIGN E); dv says library where design says flow, until piece B (NAV-7). S4 sends already_in_format.
