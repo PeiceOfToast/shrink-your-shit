@@ -76,7 +76,9 @@
     // Warnings while editing (REDESIGN E): a warnings-only check, debounced; no card, no numbers; a failed check shows
     // nothing and never blocks Save.
     var wt = null;
-    function check() { clearTimeout(wt); wt = setTimeout(function () { if (editor) api.flowWarnings({ id: id }, editor.get()).then(function (r) { warn.show(r.warnings); }, function () {}); }, 500); }
+    // The warnings-only call (S6) while editing; "Another folder" without its folder yet is not a setting the server takes.
+    function check() { clearTimeout(wt); wt = setTimeout(function () { if (!editor) return; var b = editor.get(); if (b.afterConverting === "folder" && !b.outputDir) return;
+      api.flowWarnings({ id: id }, b).then(function (r) { warn.show(r.warnings); }, function () {}); }, 500); }
     function rename() {
       var box = $("f-renamebox"), form = el("form", "row"), lb = el("label", "sr", "New name for " + f.name), inp = el("input"), ok = el("button", "btn small primary", "Save"), no = el("button", "btn small", "Cancel");
       inp.id = "f-newname"; lb.htmlFor = inp.id; inp.value = f.name; inp.size = 26; no.type = "button";
