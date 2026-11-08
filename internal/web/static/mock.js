@@ -44,7 +44,8 @@
   function saveLibs() { try { sessionStorage.setItem("syp-mock-libs", JSON.stringify(libs)); sessionStorage.setItem("syp-mock-flows", JSON.stringify(flows)); } catch (e) {} }
   var flows = [
     { id: "f1", name: "Movies", usedBy: ["Movies"], madeWith: "slider", changedAt: iso(9 * 864e5) },
-    { id: "f2", name: "TV Shows", usedBy: ["TV Shows", "Anime"], madeWith: "slider", changedAt: iso(20 * 864e5) },
+    { id: "f2", name: "TV Shows", usedBy: ["TV Shows", "Anime"], madeWith: "slider", changedAt: iso(20 * 864e5),
+      notes: ["Your audio choice 'Surround as it is' is now 'Keep all audio', which keeps the same tracks."] }, // S6 migrated its audio: notes until its next save
     { id: "f3", name: "Home videos 2", usedBy: ["Home videos"], madeWith: "builder", changedAt: iso(3 * 864e5) },
     { id: "f4", name: "Home videos", usedBy: [], madeWith: "slider", changedAt: iso(60 * 864e5) },
     { id: "f5", name: "Old settings", usedBy: [], madeWith: "legacy", changedAt: iso(120 * 864e5) } // carried over by an upgrade (addendum 11)
@@ -98,10 +99,11 @@
     { id: "s11", library: "Movies", path: "/media/movies/Soundtrack.mkv", reason: "no_video", detail: "The file holds only audio.", libraryId: null },
     // Stopped, then converted later with "MKV": Convert again on the old name answers 409 renamed (25a-2).
     { id: "s17", library: "Movies", path: "/media/movies/Night Train (2009).mp4", reason: "user_stopped", detail: "You pressed Stop this file while it was converting. Your original is untouched.", libraryId: "1" },
-    // S4/S3's new reasons (design's words in ui.js): one each.
+    // S3/S4's new reasons (design's words in ui.js): one each.
     { id: "s18", library: "Movies", path: "/media/movies/Night Sky (2019) DV.mkv", reason: "dv", detail: "This flow leaves Dolby Vision files as they are.", libraryId: "1" },
     { id: "s19", library: "Movies", path: "/media/movies/Streamed (2021) P5.mp4", reason: "dv_profile5", detail: "Dolby Vision profile 5 has no HDR10 layer to keep.", libraryId: "1" },
     { id: "s20", library: "TV Shows", path: "/media/tv/Season 4/E02.mkv", reason: "already_in_format", detail: "It is already HEVC in MKV with the audio you chose.", libraryId: "2" },
+    { id: "s21", library: "Movies", path: "/media/movies/Glass River (2022).mkv", reason: "modern_format", codec: "AV1", detail: "It is already AV1, which is as small as HEVC, so it was left as it is.", libraryId: "1" }, // S6; the engine's sentence
     { id: "s13", library: "Movies", path: "/media/movies/Short (2003).avi", reason: "setting_cannot_run", detail: "MP4 is the chosen file type, and it cannot hold this file's audio.", libraryId: "1" },
     // Workshop slice 23's temporary guard: the next scan looks again, so no Convert again and no Change rule.
     { id: "s14", library: "TV Shows", path: "/media/tv/Season 4/E01.mkv", reason: "still_changing", detail: "The file was still being written when we looked.", libraryId: "2" },
@@ -163,7 +165,7 @@
   // one is read; a save is copied to all), or on the flow itself while no library uses it. kind and tag (B4) are built here
   // the way the server builds them.
   var QN = ["Smallest file", "Smaller", "Balanced", "Better quality", "Best quality"];
-  var AUDIO_SHORT = { stereo_aac: "Stereo AAC", my_languages: "My languages", keep_all: "Audio as it is", aac: "AAC", eac3: "E-AC-3", opus: "Opus", lossless_only: "Lossless audio to E-AC-3" }; // the server's words (rules.audioShort)
+  var AUDIO_SHORT = { stereo_aac: "Stereo AAC", stereo_aac_surround: "Stereo AAC, plus surround as it is", eac3_surround: "Surround E-AC-3", ac3_surround: "Surround AC-3", stereo_opus: "Stereo Opus", as_is: "As it is" }; // the server's words (S6 rules.AudioWords)
   function recOf(f) { var i = find(libs, "flowId", f.id); return i >= 0 ? libs[i] : (f.rec = f.rec || { quality: 3, audio: "stereo_aac", settingKind: "slider", settingLabel: "Balanced" }); }
   function kindOf(f) { var r = recOf(f); return f.madeWith === "builder" ? "advanced" : f.madeWith === "legacy" ? "earlier" : r.sel ? "standard" : "basic"; }
   function tagOf(f) {
@@ -172,13 +174,14 @@
     if (k === "basic") return "Basic \u00b7 " + QN[q - 1];
     var x = r.sel, parts = ["Standard"]; if (x.format && x.format !== "hevc") parts.push(x.format.toUpperCase());
     parts.push(QN[q - 1], x.resolution === "keep" || !x.resolution ? "same resolution" : "at most " + x.resolution + "p",
-      !x.maxBitrate || x.maxBitrate === "none" ? "no bitrate limit" : x.maxBitrate + " Mbps", AUDIO_SHORT[x.audio] || x.audio);
+      !x.maxBitrate || x.maxBitrate === "none" ? "no bitrate limit" : ({ high: "High", medium: "Medium", low: "Low" }[x.maxBitrate] || x.maxBitrate) + " bitrate", AUDIO_SHORT[x.audio] || x.audio);
     return parts.join(" \u00b7 ");
   }
   function flowView(f) { var v = copy(f); delete v.rec; v.kind = kindOf(f); v.tag = tagOf(f); return v; }
   // Standard choices that the Basic slider can show (B3 "Switch to Basic").
+  // S6: stereo_aac + only my languages, or as_is (with or without), are the three Basic audio choices.
   function fitsBasic(x) { return x.format === "hevc" && (x.resolution || "keep") === "keep" && x.fileType === "mkv" && (x.maxBitrate || "none") === "none" &&
-    ["stereo_aac", "my_languages", "keep_all"].indexOf(x.audio) >= 0 && x.subtitles === "keep_all" && x.afterConverting === "replace"; }
+    ((x.audio === "stereo_aac" && x.onlyMyLanguages !== false) || x.audio === "as_is") && x.subtitles === "keep_all" && x.afterConverting === "replace"; }
   function settingOf(r) { // the setting answer, as GET .../setting gives it, for a library or a flow's record
     var av = avail();
     if (r.sel) return Object.assign({ kind: "selectors", warnings: warningsFor(r.sel), fitsBasic: fitsBasic(r.sel) }, av, r.sel);
@@ -201,7 +204,7 @@
   function fileOf(o, extra) {
     var lid = o.libraryId || (libs[find(libs, "name", o.library)] || {}).id || null, li = find(libs, "id", lid), root = li >= 0 ? libs[li].path : "", d = o.path.slice(0, o.path.length - nameOf2(o.path).length).replace(/\/+$/, "");
     return Object.assign({ libraryId: lid, library: o.library, path: o.path, folder: root && d.indexOf(root) === 0 && d.length > root.length ? d.slice(root.length + 1) : ".", name: nameOf2(o.path),
-      bytes: o.bytes || o.beforeBytes || o.fromBytes || 3 * GB, newPath: o.newPath || undefined }, probe(o.path), extra);
+      bytes: o.bytes || o.beforeBytes || o.fromBytes || 3 * GB, newPath: o.newPath || undefined }, probe(o.path), o.codec ? { codec: o.codec } : null, extra);
   }
   var RETRYING = [{ jobId: "j31", library: "Movies", path: "/media/movies/Busy Night (2011).mkv", retryAt: iso(-12 * 60e3), attempts: 1, detail: "The file was in use by another program." },
     { jobId: "j32", library: "TV Shows", path: "/media/tv/Season 3/E07.mkv", retryAt: iso(-31 * 60e3), attempts: 2, detail: "There was not enough free space." }];
@@ -241,29 +244,37 @@
              skipped: { already_efficient: 71, hdr_dv: 5, format_not_converted: 1, no_video: 1, setting_cannot_run: 1, still_changing: 1, symlink: 1, shared_file: 29 } };
   }
 
-  var ORDER = ["newest", "oldest", "largest", "smallest"], CAPS = ["none", "40", "20", "10", "6", "4"]; // contract addenda 10 and 9
+  var ORDER = ["newest", "oldest", "largest", "smallest"], CAPS = ["none", "high", "medium", "low"]; // S6 levels
   // Which choices this version can save, on every setting answer (addendum 13 and its correction). ?selectors= picks
   // the state (remembered for the tab): now (default: the server on dev since slice 25b, every audio and subtitle
   // choice, the file type kept when replacing), keep (slice 25a, keep_all only), some (wider, not complete), full
   // (everything, file types too), old (an older server: no lists at all).
   try { var sm = /[?&]selectors=(now|keep|some|full|old)/.exec(location.search); if (sm) sessionStorage.setItem("syp-mock-avail", sm[1]); } catch (e) {}
+  // What this version can save (workshop S6, UI-API-CONTRACT.md 21:10Z): VP9 isn't made on this computer; the
+  // bitrate ladder (Mbps by format, level and resolution) is research's. ?selectors=old: an older server (no lists).
+  var LADDER = { hevc: { high: [20, 12, 8, 4, 2], medium: [12, 8, 5, 2.5, 1.2], low: [8, 5, 3, 1.5, 0.8] }, h264: { high: [35, 20, 12, 6, 3], medium: [20, 12, 8, 4, 2], low: [12, 8, 5, 2.5, 1.2] },
+    av1: { high: [14, 8, 5.5, 2.8, 1.4], medium: [8, 5.5, 3.5, 1.8, 0.9], low: [5.5, 3.5, 2, 1, 0.6] }, vp9: { high: [16, 10, 6.5, 3.2, 1.6], medium: [10, 6.5, 4, 2, 1], low: [6.5, 4, 2.5, 1.2, 0.7] } };
+  function ladder() { var o = {}; Object.keys(LADDER).forEach(function (c) { o[c] = {}; Object.keys(LADDER[c]).forEach(function (l) { var r = LADDER[c][l]; o[c][l] = { "2160": r[0], "1440": r[1], "1080": r[2], "720": r[3], sd: r[4] }; }); }); return o; }
   function avail() {
     var mode = "now"; try { mode = sessionStorage.getItem("syp-mock-avail") || "now"; } catch (e) {}
     if (mode === "old") return {};
-    var all = mode === "full" || mode === "now";
-    var a = all ? ["keep_all", "my_languages", "aac", "eac3", "opus", "lossless_only"] : mode === "some" ? ["keep_all", "my_languages"] : ["keep_all"];
-    var s = all ? ["keep_all", "my_languages", "text_only", "srt"] : mode === "some" ? ["keep_all", "text_only"] : ["keep_all"];
-    // File types by "After converting" (addendum 14): since 25a-2 every type in both modes.
-    var t = { replace: ["keep", "mkv", "mp4"], beside: ["keep", "mkv", "mp4"] };
-    return { availableFormats: ["hevc"], availableAudio: a, availableSubtitles: s, availableFileTypes: t };
+    var types = ["mkv", "mp4", "webm", "keep"];
+    return { availableFormats: ["hevc", "h264", "av1"], availableAudio: ["stereo_aac", "stereo_aac_surround", "eac3_surround", "ac3_surround", "stereo_opus", "as_is"],
+      availableSubtitles: ["keep_all", "my_languages", "text_only", "srt"], availableFileTypes: { replace: types, beside: types, folder: types }, bitrateLadder: ladder() };
   }
-  // The setting's warnings, in the server's order (rules.Template.Warnings; design's wording): the rename when Replace
-  // changes the file type (25a-2, mkv and mp4 wordings). The HDR warning retired with S3 (HDR10 keeps its HDR). Only the
-  // mock holds a copy of them.
+  // The setting's warnings (design's wording; S6 retires the HDR one): the 25a-2 rename when Replace changes the file
+  // type, and the rough-picture warning for a Low limit. Only the mock holds a copy of them.
   function warningsFor(s) {
     var w = []; if (!s) return w;
-    if (s.afterConverting === "replace" && (s.fileType === "mkv" || s.fileType === "mp4"))
-      w.push("Changing the file type renames each file (" + (s.fileType === "mkv" ? "movie.mp4 becomes movie.mkv" : "movie.mkv becomes movie.mp4") + "). Radarr, Sonarr, Plex or Jellyfin may lose track of the renamed files: after converting, rescan this library in those apps.");
+    // The server's rough-picture warning (03:46Z): only where Low's cap is below the rough line (HDR and 50-60 fps raise the
+    // line); normal SDR files get none. The mock has no files, so it says the case Low falls below: 4K HDR at 50-60 fps.
+    if (s.maxBitrate === "low") w.push("Low may look blocky in dark or fast scenes for 4K HDR files at 50-60 fps (" + (LADDER[s.format || "hevc"] || LADDER.hevc).low[0] + " Mbps). Choose Medium or No limit to avoid that.");
+    if (s.afterConverting === "replace" && s.fileType && s.fileType !== "keep")
+      w.push("Changing the file type renames each file (" + (s.fileType === "mp4" ? "movie.mkv becomes movie.mp4" : "movie.mp4 becomes movie." + s.fileType) + "). Radarr, Sonarr, Plex or Jellyfin may lose track of the renamed files: after converting, rescan this library in those apps.");
+    // S6 (server text from workshop's warnings check): Keep as is with VP9 or Opus turns .mp4 files into .mkv files. Only
+    // with Replace: beside the original or in another folder, nothing is renamed (lead, 02:33Z).
+    if (s.fileType === "keep" && (s.afterConverting || "replace") === "replace" && (s.format === "vp9" || s.audio === "stereo_opus"))
+      w.push("With VP9 or Opus, .mp4 files become .mkv files, so they get a new name. After converting, rescan this library in Radarr, Sonarr, Plex or Jellyfin.");
     return w;
   }
   // "Is this the right folder?" (redesign A3; workshop slice A, UI-API-CONTRACT.md 20:25Z): the first 5 videos A to Z.
@@ -362,7 +373,7 @@
       if (libs[i].settingKind === "custom") return ok(Object.assign({ kind: "custom", warnings: [] }, av));
       // A Basic flow (redesign A1, contract A5 as proposed): its audio choice and its fixed facts.
       return ok(Object.assign({ kind: "slider", quality: libs[i].quality || (libs[i].settingLabel === "Smaller" ? 2 : 3), positions: SLIDER, warnings: [],
-        audio: libs[i].audio || "stereo_aac", becomes: { video: "HEVC", resolution: "same", fileType: "MKV" } }, av));
+        audio: libs[i].audio || "stereo_aac", becomes: { video: "HEVC", resolution: "same", fileType: "MKV" } }, av, (flows[find(flows, "id", libs[i].flowId)] || {}).notes ? { notes: flows[find(flows, "id", libs[i].flowId)].notes } : {}));
     },
     putSetting: function (p, b) {
       var i = find(libs, "id", p.id);
@@ -502,18 +513,27 @@
     listFlows: function () { return ok(list(flows.map(flowView))); },
     createFlow: function (p, b) {
       var std = b.kind === "standard", f = { id: fid(), name: flowName(b.name || (std ? "Standard flow" : "Basic flow")), usedBy: [], madeWith: std ? "selectors" : "slider", changedAt: iso(0), rec: {} };
-      applySetting(f.rec, std ? { speed: "normal", format: "hevc", quality: 3, resolution: "keep", maxBitrate: "none", audio: "keep_all", subtitles: "keep_all", fileType: "mkv", afterConverting: "replace", ignore: [], skipHdr: true } : { quality: 3, audio: "stereo_aac" }); // Standard: the selectors' own defaults
+      applySetting(f.rec, std ? { speed: "normal", format: "hevc", quality: 3, resolution: "keep", maxBitrate: "none", audio: "stereo_aac", onlyMyLanguages: true, subtitles: "keep_all", fileType: "mkv", afterConverting: "replace", ignore: [], includeDolbyVision: false } : { quality: 3, audio: "stereo_aac" }); // Standard: S6 defaults
       flows.push(f); saveLibs(); return ok(flowView(f));
     },
+    flowWarnings: function (p, b) { return ok({ warnings: warningsFor(b) }); }, // no side effects
+    checkOutput: function (p, b) { // "Save to another folder": checked like a library folder (S6)
+      var path = (b.path || "").replace(/\/+$/, ""), mine = libs.filter(function (l) { return l.flowId === p.id; }), hit = mine.filter(function (l) { return path === l.path || path.indexOf(l.path + "/") === 0; })[0];
+      if (hit) return ok({ blockers: [{ code: "inside_library", message: "This folder is inside the library, so new files would be converted again. Pick a folder outside " + hit.path + "." }], notes: [] });
+      if (/readonly/.test(path)) return ok({ blockers: [{ code: "not_writable", message: "We can't save files in this folder. Pick a folder shrink-your-shit can write to." }], notes: [] });
+      return ok({ blockers: [], notes: [] });
+    },
     getFlowSetting: function (p) { var i = find(flows, "id", p.id); if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed.");
-      var f = flows[i]; return ok(f.madeWith === "builder" || f.madeWith === "legacy" ? Object.assign({ kind: "custom", warnings: [] }, avail()) : settingOf(recOf(f))); },
+      var f = flows[i]; return ok(f.madeWith === "builder" || f.madeWith === "legacy" ? Object.assign({ kind: "custom", warnings: [] }, avail()) : Object.assign(settingOf(recOf(f)), f.notes ? { notes: f.notes } : {})); },
     putFlowSetting: function (p, b) {
       var i = find(flows, "id", p.id); if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed.");
       var f = flows[i]; if (f.madeWith === "builder" || f.madeWith === "legacy") return fail(409, "flow_read_only", "This flow can't be changed here yet. Nothing was changed.");
       if (!(settings.languages || []).length && (b.speed ? b.audio === "my_languages" || b.subtitles === "my_languages" : b.audio && b.audio !== "keep_all")) return fail(400, "languages_needed", "Choose your languages first, in Settings > General.");
+      if (b.speed && ((b.audio === "stereo_opus" && b.fileType === "mp4") || (b.fileType === "webm" && !((b.format === "av1" || b.format === "vp9") && b.audio === "stereo_opus")))) return fail(400, "invalid", "That file type can't hold those choices. Nothing was changed.");
+      if (b.speed && b.afterConverting === "folder" && !b.outputDir) return fail(400, "invalid", "Choose the folder for new files. Nothing was changed.");
       var r = recOf(f); applySetting(r, b); f.madeWith = r.sel ? "selectors" : "slider"; f.changedAt = iso(0);
       libs.forEach(function (l) { if (l.flowId === f.id && l !== r) ["quality", "audio", "settingKind", "settingLabel"].forEach(function (k) { l[k] = r[k]; }), r.sel ? (l.sel = copy(r.sel)) : delete l.sel; });
-      saveLibs(); return ok(settingOf(r));
+      delete f.notes; saveLibs(); return ok(settingOf(r));
     },
     renameFlow: function (p, b) { var i = find(flows, "id", p.id); if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed."); flows[i].name = b.name || flows[i].name; saveLibs(); return ok(flowView(flows[i])); },
     duplicateFlow: function (p) { var i = find(flows, "id", p.id); if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed."); var f = copy(flows[i]); f.rec = copy(recOf(flows[i])); f.id = fid(); f.name = flowName(flows[i].name); f.usedBy = []; flows.push(f); saveLibs(); return ok(flowView(f)); },

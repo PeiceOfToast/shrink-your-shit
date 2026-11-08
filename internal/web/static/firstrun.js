@@ -62,15 +62,16 @@
     st.editor = null; st.lang = null;
     var get = function () { return st.editor.get(); };
     if (!st.warn) st.warn = ui.warnings($("go4")); st.warn.show([]);
-    st.prev = st.level === "standard" ? ui.preview($("preview"), st.lib.id, get, { onWarnings: st.warn.show }) : null;
-    var change = function () { if (st.prev) st.prev.mark(); };
+    // Warnings while editing (REDESIGN E): the warnings-only check of the library's flow, debounced; never blocks Continue.
+    st.prev = null; var wt = null;
+    var change = function () { clearTimeout(wt); wt = setTimeout(function () { if (st.editor) api.flowWarnings({ id: st.lib.flowId }, st.editor.get()).then(function (r) { st.warn.show(r.warnings); }, function () {}); }, 500); };
     if (st.level === "standard") {
       // The library's setting answer says which Audio and Subtitles choices this version can save (addendum 13).
       st.editor = ed.selectors(host, change);
       api.getSetting({ id: st.lib.id }).then(function (s) {
-        if (!s.availableAudio && !s.availableSubtitles && !s.availableFileTypes) return;
-        // Rebuild with what the person has chosen so far, so nothing they picked meanwhile is lost.
-        var now = st.editor.get(); now.availableAudio = s.availableAudio; now.availableSubtitles = s.availableSubtitles; now.availableFileTypes = s.availableFileTypes;
+        // Rebuild with what the person has chosen so far and the server's lists (formats, audio, file types, the ladder).
+        var now = st.editor.get(); ["availableFormats", "availableAudio", "availableSubtitles", "availableFileTypes", "bitrateLadder"].forEach(function (k) { now[k] = s[k]; });
+        now.checkOutput = function (path) { return api.checkOutput({ id: st.lib.flowId }, { path: path }); };
         host.textContent = ""; st.editor = ed.selectors(host, change, now);
       }, function () {});
     } else {

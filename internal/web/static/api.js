@@ -39,7 +39,9 @@
     importFlow: ["POST", "/api/flows/import"], exportFlow: ["GET", "/api/flows/{id}/export"],
     getFlow: ["GET", "/api/flows/{id}"],
     // A flow's own setting (piece B, UI-API-CONTRACT.md 20:40Z): the same bodies as a library's setting.
-    getFlowSetting: ["GET", "/api/flows/{id}/setting"], putFlowSetting: ["PUT", "/api/flows/{id}/setting"]
+    getFlowSetting: ["GET", "/api/flows/{id}/setting"], putFlowSetting: ["PUT", "/api/flows/{id}/setting"],
+    // Standard (piece E; workshop S6, UI-API-CONTRACT.md 21:10Z): warnings while editing, and the "another folder" check.
+    flowWarnings: ["POST", "/api/flows/{id}/warnings"], checkOutput: ["POST", "/api/flows/{id}/check-output"]
   };
 
   function pick() {

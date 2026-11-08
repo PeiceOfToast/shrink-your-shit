@@ -16,9 +16,11 @@
     setting_cannot_run: "the flow's setting can't be used on it",
     // Workshop slice 23 (file guards); design's words, 13:00Z.
     still_changing: "still changing, we'll look again on the next scan",
-    // Workshop S4/S3 (contract 21:10Z, item 8); design's words (REDESIGN E); dv says library where design says flow, until piece B (NAV-7). S4 sends already_in_format.
+    // Workshop S3/S4 (contract 21:10Z, item 8); design's words (REDESIGN E).
     dv: "Dolby Vision (left alone by this flow's setting)", dv_profile5: "Dolby Vision profile 5: converting it would show wrong colours",
-    already_in_format: "already in this format"
+    already_in_format: "already in this format",
+    // Workshop S6 (contract 23:32Z): AV1 or VP9 left as it is; shown apart from "already in this format".
+    modern_format: "already a modern format"
   };
   // A badge is the reason with a capital letter, unless design gave it a shorter name.
   ui.BADGES = { still_changing: "Still changing", symlink: "Link to outside this library" };
