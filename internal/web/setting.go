@@ -37,6 +37,9 @@ func settingView(f jobs.Flow) map[string]any {
 	if f.Template.Kind == rules.KindSlider { // Basic (S4): its audio choice and fixed facts
 		v["becomes"] = rules.BasicBecomes
 	}
+	if f.Template.Kind == rules.KindSelectors && f.Template.Selectors != nil { // "Switch to Basic" (control level per flow)
+		v["fitsBasic"] = f.Template.Selectors.FitsBasic()
+	}
 	return v
 }
 
@@ -51,7 +54,7 @@ var selectorFields = map[string]bool{"speed": true, "format": true, "resolution"
 // the current page keeps working.
 // settingEcho are the fields a setting answer carries that a client may send back unchanged: ignored.
 var settingEcho = map[string]bool{"kind": true, "positions": true, "order": true, "availableformats": true, "availableaudio": true,
-	"availablesubtitles": true, "availablefiletypes": true, "warnings": true, "sharedflowchoice": true, "minsavingpct": true, "skipsmall": true, "skiphdr": true}
+	"availablesubtitles": true, "availablefiletypes": true, "warnings": true, "sharedflowchoice": true, "fitsbasic": true, "becomes": true, "minsavingpct": true, "skipsmall": true, "skiphdr": true}
 
 // readSelectors reads a selectors body (see below); langs are the person's languages, needed for
 // "Keep only my languages".
@@ -167,47 +170,68 @@ func settingRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			apiError(w, http.StatusBadRequest, "invalid_choice", "sharedFlowChoice must be change_both or make_copy. Nothing was changed.")
 			return
 		}
-		for k := range body { // a field no setting has (audioBitrate, a typo) is refused whatever the shape
-			if lk := strings.ToLower(k); !selectorFields[lk] && lk != "quality" && !settingEcho[lk] {
-				apiError(w, http.StatusBadRequest, "invalid", "There is no choice called "+k+". Nothing was changed.")
-				return
+		var cur rules.Template // a Basic save without audio keeps the flow's own (S4)
+		if l, err := store.GetLibrary(id); err == nil {
+			if f, err := store.GetFlow(l.FlowID); err == nil {
+				cur = f.Template
 			}
 		}
-		if q, audio, basic := readBasic(body); basic { // a Basic save (S4): quality and maybe audio
-			if _, ok := rules.SliderAt(q); !ok {
-				apiError(w, http.StatusBadRequest, "invalid_quality", "quality must be a slider position from 1 to 5. Nothing was changed.")
-				return
-			}
-			if audio != "" && audio != "keep_all" && len(store.Languages()) == 0 {
-				apiError(w, http.StatusBadRequest, "languages_needed", rules.LanguagesNeeded)
-				return
-			}
-			if audio == "" { // not sent (the slider alone): the flow keeps its audio choice
-				if l, err := store.GetLibrary(id); err == nil {
-					if f, err := store.GetFlow(l.FlowID); err == nil && f.Template.Kind == rules.KindSlider {
-						audio = f.Template.Params.Audio
-					}
-				}
-			}
-			l, err := store.SaveTemplate(id, rules.BasicTemplate(q, audio), choice.SharedFlowChoice)
-			reply(w, l, err)
+		t, ok := settingTemplate(w, store, body, cur)
+		if !ok {
 			return
 		}
-		for k := range body {
-			if selectorFields[strings.ToLower(k)] { // the body's shape decides (addendum 7): a selectors save
-				s, err := readSelectors(body, store.Languages())
-				var se *rules.SelectorError
-				if errors.As(err, &se) {
-					apiError(w, http.StatusBadRequest, se.Code, se.Message)
-					return
-				}
-				l, err := store.SaveTemplate(id, s.Template(), choice.SharedFlowChoice)
-				reply(w, l, err)
-				return
+		l, err := store.SaveTemplate(id, t, choice.SharedFlowChoice)
+		reply(w, l, err)
+	})
+	// A flow's own setting (the control-level slice: the flow page edits it): the same bodies and answers
+	// as a library's. A PUT changes the flow for every library that uses it, and its kind follows the
+	// body (that is how "Switch to Standard/Basic" takes effect). Advanced and earlier flows are read-only.
+	flowSetting := func(w http.ResponseWriter, r *http.Request) (jobs.Flow, bool) {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err == nil && id > 0 {
+			f, err := store.GetFlow(id)
+			if err == nil {
+				return f, true
+			}
+			if !errors.Is(err, jobs.ErrNotFound) {
+				serverError(w, err)
+				return jobs.Flow{}, false
 			}
 		}
-		// neither Basic nor Standard: quality is not a number
-		apiError(w, http.StatusBadRequest, "invalid_json", "The request body is not valid JSON.")
+		apiError(w, http.StatusNotFound, "not_found", "There is no such flow.")
+		return jobs.Flow{}, false
+	}
+	api.HandleFunc("GET /api/flows/{id}/setting", func(w http.ResponseWriter, r *http.Request) {
+		if f, ok := flowSetting(w, r); ok {
+			writeJSON(w, settingView(f))
+		}
+	})
+	api.HandleFunc("PUT /api/flows/{id}/setting", func(w http.ResponseWriter, r *http.Request) {
+		f, ok := flowSetting(w, r)
+		if !ok {
+			return
+		}
+		var body map[string]json.RawMessage
+		if !readJSON(w, r, &body) {
+			return
+		}
+		if lv := f.Template.Level(); lv != "basic" && lv != "standard" {
+			apiError(w, http.StatusConflict, "flow_read_only", "This flow can't be changed here: it was made by an earlier install or in a way these editors can't show. Nothing was changed.")
+			return
+		}
+		t, ok := settingTemplate(w, store, body, f.Template)
+		if !ok {
+			return
+		}
+		f, err := store.SetFlowTemplate(f.ID, t)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		if eng.ScanNow != nil {
+			eng.ScanNow() // its libraries' files are looked at again with the new setting
+		}
+		writeJSON(w, settingView(f))
 	})
 	api.HandleFunc("POST /api/libraries/{id}/setting/replace-custom", func(w http.ResponseWriter, r *http.Request) {
 		id, ok := libID(w, r)
@@ -313,6 +337,46 @@ func flowSteps(t rules.Template) []map[string]any {
 		return []map[string]any{}
 	}
 	return steps
+}
+
+// settingTemplate reads a setting body into the template it saves (or writes the error and says false):
+// quality, and maybe audio, is a Basic save (S4); any selector field a Standard one (addendum 7). cur is
+// the flow's template now: a Basic save without audio keeps its audio.
+func settingTemplate(w http.ResponseWriter, store *jobs.Store, body map[string]json.RawMessage, cur rules.Template) (rules.Template, bool) {
+	for k := range body { // a field no setting has (audioBitrate, a typo) is refused whatever the shape
+		if lk := strings.ToLower(k); !selectorFields[lk] && lk != "quality" && !settingEcho[lk] {
+			apiError(w, http.StatusBadRequest, "invalid", "There is no choice called "+k+". Nothing was changed.")
+			return rules.Template{}, false
+		}
+	}
+	if q, audio, basic := readBasic(body); basic {
+		if _, ok := rules.SliderAt(q); !ok {
+			apiError(w, http.StatusBadRequest, "invalid_quality", "quality must be a slider position from 1 to 5. Nothing was changed.")
+			return rules.Template{}, false
+		}
+		if audio != "" && audio != "keep_all" && len(store.Languages()) == 0 {
+			apiError(w, http.StatusBadRequest, "languages_needed", rules.LanguagesNeeded)
+			return rules.Template{}, false
+		}
+		if audio == "" && cur.Kind == rules.KindSlider { // not sent (the slider alone): the flow keeps its audio
+			audio = cur.Params.Audio
+		}
+		return rules.BasicTemplate(q, audio), true
+	}
+	for k := range body {
+		if selectorFields[strings.ToLower(k)] {
+			s, err := readSelectors(body, store.Languages())
+			var se *rules.SelectorError
+			if errors.As(err, &se) {
+				apiError(w, http.StatusBadRequest, se.Code, se.Message)
+				return rules.Template{}, false
+			}
+			return s.Template(), true
+		}
+	}
+	// neither Basic nor Standard: quality is not a number
+	apiError(w, http.StatusBadRequest, "invalid_json", "The request body is not valid JSON.")
+	return rules.Template{}, false
 }
 
 // readBasic reads a Basic (slider) save (S4): a body whose only choice besides quality is audio, with one

@@ -23,7 +23,7 @@ func TestSettingsDefaultsAndFirstRun(t *testing.T) {
 	srv, _, _, _ := libServer(t, false)
 	code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/settings"})
 	m := settingsOf(t, body)
-	want := map[string]any{"controlLevel": "basic", "perLibraryFlow": false, "firstRunDone": false, "firstRunStep": 1.0,
+	want := map[string]any{"firstRunDone": false, "firstRunStep": 1.0,
 		"keepOriginalsDays": 7.0, "parallelJobs": 1.0, "lowPriority": true, "scanSchedule": "02:00", "queueOrder": "newest", "authRequired": false}
 	for k, v := range want {
 		if m[k] != v {
@@ -33,24 +33,29 @@ func TestSettingsDefaultsAndFirstRun(t *testing.T) {
 	if code != 200 || m["trashPath"] == "" || m["integrations"] == nil || m["quietHours"] == nil {
 		t.Errorf("%d %s", code, body)
 	}
+	for _, gone := range []string{"controlLevel", "perLibraryFlow"} { // each flow has its own control level
+		if _, ok := m[gone]; ok {
+			t.Errorf("%s is gone from the settings: %s", gone, body)
+		}
+	}
 	// a fresh install with a library from -library or Docker's /media still has first-run to do
 	srv2, st2, _, _ := libServer(t, false)
 	st2.EnsureLibraries([]string{t.TempDir()}, rules.LegacyTemplate(rules.Default(), "replace"))
 	_, body, _ = do(t, nil, srv2, call{method: "GET", path: "/api/settings"})
-	if m := settingsOf(t, body); m["firstRunDone"] != false || m["controlLevel"] != "basic" {
+	if m := settingsOf(t, body); m["firstRunDone"] != false {
 		t.Errorf("fresh install with a flag library: %s", body)
 	}
-	// an upgrade: first-run done, Standard (D13), so its Legacy flow keeps working unchanged
+	// an upgrade: first-run done
 	srv3, st3, _, _ := libServer(t, false)
 	st3.SetMeta("install", "upgrade")
 	_, body, _ = do(t, nil, srv3, call{method: "GET", path: "/api/settings"})
-	if m := settingsOf(t, body); m["firstRunDone"] != true || m["controlLevel"] != "standard" {
+	if m := settingsOf(t, body); m["firstRunDone"] != true {
 		t.Errorf("upgrade: %s", body)
 	}
 	// decided once: later changes to the install do not reset the stored settings
 	st3.SetMeta("install", "fresh")
 	_, body, _ = do(t, nil, srv3, call{method: "GET", path: "/api/settings"})
-	if settingsOf(t, body)["controlLevel"] != "standard" {
+	if settingsOf(t, body)["firstRunDone"] != true {
 		t.Errorf("stored settings must stay: %s", body)
 	}
 }
@@ -60,16 +65,15 @@ func TestPatchSettings(t *testing.T) {
 	code, body := post(t, srv, "PATCH", "/api/settings", `{"controlLevel":"advanced","firstRunStep":3,"quietHours":{"from":"22:00","to":"06:30"},"queueOrder":"largest","trashPath":"ignored","authRequired":true}`)
 	m := settingsOf(t, body)
 	q, _ := m["quietHours"].(map[string]any)
-	if code != 200 || m["controlLevel"] != "advanced" || m["firstRunStep"] != 3.0 || q["from"] != "22:00" || q["to"] != "06:30" ||
+	if code != 200 || m["controlLevel"] != nil || m["firstRunStep"] != 3.0 || q["from"] != "22:00" || q["to"] != "06:30" ||
 		m["queueOrder"] != "largest" || m["authRequired"] != false || strings.Contains(body, "ignored") {
 		t.Fatalf("%d %s", code, body)
 	}
 	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/settings"})
-	if settingsOf(t, body)["controlLevel"] != "advanced" {
-		t.Error("not stored")
+	if m := settingsOf(t, body); m["firstRunStep"] != 3.0 || m["controlLevel"] != nil { // controlLevel: accepted, ignored
+		t.Errorf("stored: %s", body)
 	}
 	for _, c := range []struct{ patch, code string }{
-		{`{"controlLevel":"expert"}`, "invalid_setting"},
 		{`{"firstRunStep":0}`, "invalid_setting"},
 		{`{"firstRunStep":6}`, "invalid_setting"},
 		{`{"keepOriginalsDays":366}`, "invalid_setting"},
@@ -90,7 +94,7 @@ func TestPatchSettings(t *testing.T) {
 		}
 	}
 	// a refused patch changes nothing, and a partial quietHours keeps the other end
-	post(t, srv, "PATCH", "/api/settings", `{"parallelJobs":2,"controlLevel":"nope"}`)
+	post(t, srv, "PATCH", "/api/settings", `{"parallelJobs":2,"queueOrder":"nope"}`)
 	post(t, srv, "PATCH", "/api/settings", `{"quietHours":{"to":"07:00"}}`)
 	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/settings"})
 	m = settingsOf(t, body)
@@ -118,5 +122,22 @@ func TestSettingsAndFlowsNeedSignIn(t *testing.T) {
 	}
 	if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/settings", bearer: a.Token()}); code != 200 || !strings.Contains(body, `"authRequired":true`) {
 		t.Errorf("signed in: %d %s", code, body)
+	}
+}
+
+// The retired controlLevel and perLibraryFlow stay in storage for one release (a rollback finds them),
+// through any settings save, but are never shown, and a PATCH cannot change them (review e9455d0).
+func TestRetiredSettingsAreKeptStored(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	st.SetMeta("settings", `{"controlLevel":"advanced","perLibraryFlow":true,"firstRunDone":true,"firstRunStep":5,"keepOriginalsDays":7,"parallelJobs":1,"lowPriority":true,"scanSchedule":"02:00","queueOrder":"newest","languages":[]}`)
+	if code, body := post(t, srv, "PATCH", "/api/settings", `{"quietHours":{"from":"22:00","to":"06:00"},"controlLevel":"basic","perLibraryFlow":false}`); code != 200 || strings.Contains(body, "controlLevel") || strings.Contains(body, "perLibraryFlow") {
+		t.Fatalf("patch: %d %s", code, body)
+	}
+	raw, _, _ := st.Meta("settings")
+	if !strings.Contains(raw, `"controlLevel":"advanced"`) || !strings.Contains(raw, `"perLibraryFlow":true`) || !strings.Contains(raw, `"22:00"`) {
+		t.Errorf("stored: %s", raw)
+	}
+	if _, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/settings"}); strings.Contains(body, "controlLevel") || strings.Contains(body, "perLibraryFlow") {
+		t.Errorf("GET shows them: %s", body)
 	}
 }

@@ -261,3 +261,44 @@ func TestDefaultStandardIsNotBasic(t *testing.T) {
 		t.Errorf("Basic: container %q, tracks %+v", p.Container, p.Tracks)
 	}
 }
+
+// Control level per flow: each kind's level and tag (design B4), and when a Standard flow fits Basic.
+func TestLevelTagAndFitsBasic(t *testing.T) {
+	capped := DefaultSelectors(1)
+	capped.Resolution, capped.MaxBitrate, capped.Audio = "1080", "10", "my_languages"
+	for _, c := range []struct {
+		t          Template
+		level, tag string
+	}{
+		{SliderTemplate(1), "basic", "Basic · Smallest file"},
+		{DefaultSelectors(3).Template(), "standard", "Standard · Balanced · same resolution · no bitrate limit · Audio as it is"},
+		{capped.Template(), "standard", "Standard · Smallest file · at most 1080p · at most 10 Mbps · My languages"},
+		{LegacyTemplate(Default(), "replace"), "earlier", "Earlier install"},
+		{Template{Kind: KindCustom}, "advanced", "Advanced · Custom"},
+	} {
+		if c.t.Level() != c.level || c.t.Tag() != c.tag {
+			t.Errorf("%s: %s %q, want %s %q", c.t.Kind, c.t.Level(), c.t.Tag(), c.level, c.tag)
+		}
+	}
+	fits := DefaultSelectors(3)
+	fits.FileType = "mkv"
+	if !fits.FitsBasic() {
+		t.Fatal("Basic's own choices")
+	}
+	for name, f := range map[string]func(*Selectors){
+		"slower": func(s *Selectors) { s.Speed = "slower" }, "720": func(s *Selectors) { s.Resolution = "720" },
+		"cap": func(s *Selectors) { s.MaxBitrate = "10" }, "subs": func(s *Selectors) { s.Subtitles = "srt" },
+		"keep type": func(s *Selectors) { s.FileType = "keep" }, "beside": func(s *Selectors) { s.AfterConverting = "beside" },
+		"ignore": func(s *Selectors) { s.Ignore = []string{"Extras"} }, "dv": func(s *Selectors) { s.IncludeDolbyVision = true },
+		"aac": func(s *Selectors) { s.Audio = "aac" },
+	} {
+		s := fits
+		f(&s)
+		if s.FitsBasic() {
+			t.Errorf("%s still fits Basic", name)
+		}
+	}
+	if s := fits; func() bool { s.Audio = "my_languages"; return !s.FitsBasic() }() {
+		t.Error("my_languages is Basic's too")
+	}
+}

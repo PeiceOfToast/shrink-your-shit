@@ -213,10 +213,19 @@ func (s *Store) pathTaken(q execer, path string, except int64) error {
 // AddLibrary adds a library with its own new flow made from t. The flow is named after the library
 // (a clash adds " 2", " 3"...), once; it is never renamed automatically afterwards.
 func (s *Store) AddLibrary(name, path string, t rules.Template, started bool) (Library, error) {
-	return s.addLibrary(name, path, name, t, started)
+	return s.addLibrary(name, path, name, t, 0, started)
 }
 
-func (s *Store) addLibrary(name, path, flowBase string, t rules.Template, started bool) (Library, error) {
+// AddLibraryOnFlow adds a library that uses the existing flow flowID (ErrNotFound if there is none).
+func (s *Store) AddLibraryOnFlow(name, path string, flowID int64, started bool) (Library, error) {
+	if _, err := s.GetFlow(flowID); err != nil {
+		return Library{}, err
+	}
+	return s.addLibrary(name, path, "", rules.Template{}, flowID, started)
+}
+
+// addLibrary adds a library on flowID, or (0) on a new flow made from t and named after flowBase.
+func (s *Store) addLibrary(name, path, flowBase string, t rules.Template, flowID int64, started bool) (Library, error) {
 	path = canonical(path)
 	if SystemFolder(path) {
 		return Library{}, ErrSystemFolder
@@ -229,13 +238,14 @@ func (s *Store) addLibrary(name, path, flowBase string, t rules.Template, starte
 	if err := s.pathTaken(tx, path, 0); err != nil {
 		return Library{}, err
 	}
-	flowName, err := uniqueFlowName(tx, flowBase)
-	if err != nil {
-		return Library{}, err
-	}
-	flowID, err := s.addFlow(tx, flowName, t)
-	if err != nil {
-		return Library{}, err
+	if flowID == 0 {
+		flowName, err := uniqueFlowName(tx, flowBase)
+		if err != nil {
+			return Library{}, err
+		}
+		if flowID, err = s.addFlow(tx, flowName, t); err != nil {
+			return Library{}, err
+		}
 	}
 	r, err := tx.Exec(`INSERT INTO libraries(name,path,flow_id,started,created) VALUES(?,?,?,?,?)`,
 		name, path, flowID, started, s.stamp())
@@ -312,7 +322,7 @@ func (s *Store) EnsureLibraries(paths []string, legacy rules.Template) (added in
 				flowBase = name + " - Legacy"
 			}
 		}
-		if _, err := s.addLibrary(name, p, flowBase, t, started); err != nil {
+		if _, err := s.addLibrary(name, p, flowBase, t, 0, started); err != nil {
 			return added, skipped, err
 		}
 		added++
@@ -609,6 +619,29 @@ func (s *Store) AddFlow(name string, t rules.Template) (Flow, error) {
 	}
 	return s.GetFlow(id)
 }
+
+// SetFlowTemplate saves t as flow id's template (the flow page's editor): every library that uses it
+// changes, and their files are looked at again.
+func (s *Store) SetFlowTemplate(id int64, t rules.Template) (Flow, error) {
+	if _, err := s.GetFlow(id); err != nil {
+		return Flow{}, err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Flow{}, err
+	}
+	defer tx.Rollback()
+	if err := s.setTemplate(tx, id, t); err != nil {
+		return Flow{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Flow{}, err
+	}
+	return s.GetFlow(id)
+}
+
+// FreeFlowName is base, or "base 2", "base 3"...: the first that no flow is called.
+func (s *Store) FreeFlowName(base string) (string, error) { return uniqueFlowName(s.db, base) }
 
 // RenameFlow renames a flow. Nothing renames a flow but this.
 func (s *Store) RenameFlow(id int64, name string) (Flow, error) {

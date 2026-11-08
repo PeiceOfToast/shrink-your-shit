@@ -43,8 +43,7 @@ rule the scanner matches with and the CRF, preset and output mode the worker use
     (DESIGN/FIRST-RUN.md). The global `-crf`/`-preset`/... flags do not apply.
   - **upgrade** (a database that already held work): the library is started with a `legacy` flow
     holding the program's flags, so it converts as before; on the first start after the upgrade
-    those flows are named `<folder> - Legacy`. Settings start with first-run done and the Standard
-    control level (D13).
+    those flows are named `<folder> - Legacy`. Settings start with first-run done.
   Otherwise a flow is named after its library, a clash adding " 2", " 3" (flow names are unique in
   the database). A flow is never renamed automatically. Jobs made before libraries existed are
   linked to the library whose folder holds them.
@@ -58,10 +57,18 @@ rule the scanner matches with and the CRF, preset and output mode the worker use
 - `freedBytes` counts only conversions that replaced their original (`beside` frees nothing).
 - Every `/api` answer carries `X-SYP-API: 1`; ids in the API are strings.
 - `GET /api/fs/dirs?path=` lists folder names (never files or sizes) for choosing a library's folder.
-- Flows (`internal/web/flows.go`): list with who uses each (`usedBy`, `madeWith`), create (default
-  template: slider Balanced), rename (the only way a flow is ever renamed), duplicate ("<name> (copy)"),
-  delete (refused with `flow_in_use` while a library uses it). `PUT /api/libraries/{id}/flow` gives a
-  library another flow, only when the `perLibraryFlow` setting is on; it forgets the scanner's
+- Flows (`internal/web/flows.go`): **the control level belongs to each flow** (the manager's decision
+  of 2026-11-07, replacing the 2026-11-06 "global only" rule): each flow's `kind` is basic (slider),
+  standard (selectors), advanced (custom) or earlier (legacy), derived from its template, with a `tag`
+  in design's words (`Template.Level`, `Template.Tag`). List with who uses each (`usedBy`, `madeWith`,
+  `kind`, `tag`), create by kind (`{kind: basic|standard, name?}`; "Basic flow"/"Standard flow" with
+  " 2"... by default), rename (the only way a flow is ever renamed), duplicate ("<name> (copy)"),
+  delete (refused with `flow_in_use` while a library uses it). `GET/PUT /api/flows/{id}/setting` is
+  the library setting's handler keyed by flow (`settingTemplate`): a PUT changes the flow for every
+  library on it, its kind follows the body, and advanced/earlier flows answer 409 `flow_read_only`; a
+  Standard flow's GET says `fitsBasic`. `POST /api/libraries` takes `flowId`. The settings no longer
+  have `controlLevel` or `perLibraryFlow` (a PATCH that sends them is ignored for one release).
+  `PUT /api/libraries/{id}/flow` gives a library another flow; it forgets the scanner's
   records of that library's files and wakes the scanner, so files skipped under the old flow are
   looked at again. Import/export answer 501 until
   slice 30; `GET /api/flows/{id}` has no steps until slice 16.
