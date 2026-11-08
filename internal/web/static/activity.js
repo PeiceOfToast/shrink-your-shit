@@ -88,8 +88,8 @@
     if (s === "unprocessed") return [f.status === "retrying" ? "Trying again at " + at(f.retryAt) + " (tried " + ui.count(f.attempts, "time", "times") + " so far). The original is untouched." : "Waiting"];
     if (s === "processing") {
       var pr = el("div", "progress"), bar = el("span"); pr.setAttribute("role", "progressbar"); pr.setAttribute("aria-valuemin", 0); pr.setAttribute("aria-valuemax", 100);
-      pr.setAttribute("aria-valuenow", f.percent); pr.setAttribute("aria-label", f.name); bar.style.width = f.percent + "%"; pr.appendChild(bar);
-      var c = el("div"); c.appendChild(pr); c.appendChild(el("span", "small", f.percent + "%"));
+      pr.setAttribute("aria-valuenow", Math.round(f.percent)); pr.setAttribute("aria-label", f.name); bar.style.width = f.percent + "%"; pr.appendChild(bar);
+      var c = el("div"); c.appendChild(pr); c.appendChild(el("span", "small", Math.round(f.percent) + "%"));
       return [c, f.etaSeconds != null ? Math.max(1, Math.round(f.etaSeconds / 60)) + " min left" : ""];
     }
     if (s === "processed") {

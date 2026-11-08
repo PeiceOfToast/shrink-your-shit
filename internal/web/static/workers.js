@@ -33,7 +33,7 @@
     top.appendChild(left); top.appendChild(el("span", "badge " + st[0], st[1])); c.appendChild(top);
     if (n) {
       var ul = el("ul", "small");
-      w.converting.forEach(function (f) { var li = el("li"), a = el("a", null, f.path.split(/[\\/]/).pop()); a.href = "/activity/?show=processing"; li.appendChild(a); li.appendChild(document.createTextNode(" " + f.percent + "%")); ul.appendChild(li); });
+      w.converting.forEach(function (f) { var li = el("li"), a = el("a", null, f.path.split(/[\\/]/).pop()); a.href = "/activity/?show=processing"; li.appendChild(a); li.appendChild(document.createTextNode(" " + Math.round(f.percent) + "%")); ul.appendChild(li); });
       c.appendChild(ul);
     }
     if (w.state === "quiet_hours") { var q = el("p", "small"), qa = el("a", null, "Quiet hours are set in Settings > Performance."); qa.href = "/settings/performance/"; q.appendChild(qa); c.appendChild(q); }
