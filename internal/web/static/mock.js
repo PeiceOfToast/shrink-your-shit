@@ -269,8 +269,9 @@
     if (s.maxBitrate === "low") w.push("Low may look blocky in dark or fast scenes for 4K HDR files (" + (LADDER[s.format || "hevc"] || LADDER.hevc).low[0] + " Mbps). Choose Medium or No limit to avoid that.");
     if (s.afterConverting === "replace" && s.fileType && s.fileType !== "keep")
       w.push("Changing the file type renames each file (" + (s.fileType === "mp4" ? "movie.mkv becomes movie.mp4" : "movie.mp4 becomes movie." + s.fileType) + "). Radarr, Sonarr, Plex or Jellyfin may lose track of the renamed files: after converting, rescan this library in those apps.");
-    // S6 (server text from workshop's warnings check): Keep as is with VP9 or Opus turns .mp4 files into .mkv files.
-    if (s.fileType === "keep" && (s.format === "vp9" || s.audio === "stereo_opus"))
+    // S6 (server text from workshop's warnings check): Keep as is with VP9 or Opus turns .mp4 files into .mkv files. Only
+    // with Replace: beside the original or in another folder, nothing is renamed (lead, 02:33Z).
+    if (s.fileType === "keep" && (s.afterConverting || "replace") === "replace" && (s.format === "vp9" || s.audio === "stereo_opus"))
       w.push("With VP9 or Opus, .mp4 files become .mkv files, so they get a new name. After converting, rescan this library in Radarr, Sonarr, Plex or Jellyfin.");
     return w;
   }
