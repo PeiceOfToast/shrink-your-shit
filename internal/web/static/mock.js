@@ -98,6 +98,10 @@
     { id: "s11", library: "Movies", path: "/media/movies/Soundtrack.mkv", reason: "no_video", detail: "The file holds only audio.", libraryId: null },
     // Stopped, then converted later with "MKV": Convert again on the old name answers 409 renamed (25a-2).
     { id: "s17", library: "Movies", path: "/media/movies/Night Train (2009).mp4", reason: "user_stopped", detail: "You pressed Stop this file while it was converting. Your original is untouched.", libraryId: "1" },
+    // S4/S3's new reasons (design's words in ui.js): one each.
+    { id: "s18", library: "Movies", path: "/media/movies/Night Sky (2019) DV.mkv", reason: "dv", detail: "This library leaves Dolby Vision files as they are.", libraryId: "1" },
+    { id: "s19", library: "Movies", path: "/media/movies/Streamed (2021) P5.mp4", reason: "dv_profile5", detail: "Dolby Vision profile 5 has no HDR10 layer to keep.", libraryId: "1" },
+    { id: "s20", library: "TV Shows", path: "/media/tv/Season 4/E02.mkv", reason: "already_in_format", detail: "It is already HEVC in MKV with the audio you chose.", libraryId: "2" },
     { id: "s13", library: "Movies", path: "/media/movies/Short (2003).avi", reason: "setting_cannot_run", detail: "MP4 is the chosen file type, and it cannot hold this file's audio.", libraryId: "1" },
     // Workshop slice 23's temporary guard: the next scan looks again, so no Convert again and no Change rule.
     { id: "s14", library: "TV Shows", path: "/media/tv/Season 4/E01.mkv", reason: "still_changing", detail: "The file was still being written when we looked.", libraryId: "2" },
@@ -105,7 +109,7 @@
     // After workshop slice 23 (file guards) shared files are skipped, not converted (sharedNoSaving is 0).
     { id: "s16", library: "Movies", path: "/media/movies/Night Train (2016).mp4", reason: "shared_file", detail: "Another folder uses this same file (for example Radarr). Changing it would break that.", libraryId: null }
   ];
-  for (var gi = 1; gi <= 96; gi++) skippedList.push({ id: "g" + gi, library: "TV Shows", path: "/media/tv/Season 2/E" + (gi < 10 ? "0" : "") + gi + ".mkv", reason: "already_efficient", detail: "Already small for its quality.", libraryId: "2" });
+  for (var gi = 1; gi <= 93; gi++) skippedList.push({ id: "g" + gi, library: "TV Shows", path: "/media/tv/Season 2/E" + (gi < 10 ? "0" : "") + gi + ".mkv", reason: "already_efficient", detail: "Already small for its quality.", libraryId: "2" });
   var failedList = [
     { jobId: "j9", library: "Movies", path: "/media/movies/Cut Short (2012).mkv", title: "The new file did not pass the check", detail: "The new file is 3 minutes shorter than the original, so it was thrown away. Try again; if it fails again, the original file may be damaged.", originalUntouched: true },
     { jobId: "j10", library: "TV Shows", path: "/media/tv/Season 1/E03.mkv", title: "Not enough space", detail: "Needs about 14 GB free, only 6 GB is free. Free some space, then press Retry.", originalUntouched: true }
@@ -154,12 +158,7 @@
     return { stale: false, status: "ready", estimateBytesLow: 110 * GB, estimateBytesHigh: 220 * GB, files: 1284, totalBytes: 1100 * GB, canShrink: 1174, sharedNoSaving: 0,
              skipped: { already_efficient: 71, hdr_dv: 5, format_not_converted: 1, no_video: 1, setting_cannot_run: 1, still_changing: 1, symlink: 1, shared_file: 29 } };
   }
-  // Standard's defaults are the slider's: the same choices (contract addendum 6; no minimum saving since S1).
-  function isSliderPosition(b) {
-    var d = { speed: "normal", format: "hevc", resolution: "keep", audio: "keep_all", subtitles: "keep_all", fileType: "keep", afterConverting: "replace", maxBitrate: "none", skipHdr: true }, k;
-    for (k in d) if (b[k] !== d[k]) return false;
-    return !(b.ignore || []).length && !!SLIDER[b.quality - 1];
-  }
+
   var ORDER = ["newest", "oldest", "largest", "smallest"], CAPS = ["none", "40", "20", "10", "6", "4"]; // contract addenda 10 and 9
   // Which choices this version can save, on every setting answer (addendum 13 and its correction). ?selectors= picks
   // the state (remembered for the tab): now (default: the server on dev since slice 25b, every audio and subtitle
@@ -286,13 +285,15 @@
       var av = avail();
       if (libs[i].sel) return ok(Object.assign({ kind: "selectors", warnings: warningsFor(libs[i].sel) }, av, libs[i].sel));
       if (libs[i].settingKind === "custom") return ok(Object.assign({ kind: "custom", warnings: [] }, av));
-      return ok(Object.assign({ kind: "slider", quality: libs[i].quality || (libs[i].settingLabel === "Smaller" ? 2 : 3), positions: SLIDER, warnings: [] }, av));
+      // A Basic flow (redesign A1, contract A5 as proposed): its audio choice and its fixed facts.
+      return ok(Object.assign({ kind: "slider", quality: libs[i].quality || (libs[i].settingLabel === "Smaller" ? 2 : 3), positions: SLIDER, warnings: [],
+        audio: libs[i].audio || "stereo_aac", becomes: { video: "HEVC", resolution: "same", fileType: "MKV" } }, av));
     },
     putSetting: function (p, b) {
       var i = find(libs, "id", p.id);
       if (i < 0) return fail(404, "not_found", "That library is gone. Nothing was changed.");
       // "Keep only my languages" before any language is chosen (slice 25b): the server's words.
-      if (b.speed && !(settings.languages || []).length && (b.audio === "my_languages" || b.subtitles === "my_languages")) return fail(400, "languages_needed", "Choose your languages first, in Settings > General.");
+      if (!(settings.languages || []).length && (b.speed ? b.audio === "my_languages" || b.subtitles === "my_languages" : b.audio && b.audio !== "keep_all")) return fail(400, "languages_needed", "Choose your languages first, in Settings > General.");
       var f = flows[find(flows, "id", libs[i].flowId)];
       if (f && f.usedBy.length > 1 && !b.sharedFlowChoice) return fail(409, "flow_shared", "Another library uses this setting. Nothing was changed.", { usedBy: f.usedBy.slice() }); // every library on the flow, this one too, as the server sends it
       if (f && f.usedBy.length > 1 && b.sharedFlowChoice === "make_copy") {
@@ -302,8 +303,8 @@
       }
       if (b.speed && b.maxBitrate != null && CAPS.indexOf(b.maxBitrate) < 0) return fail(400, "invalid", "Max bitrate must be one of the listed choices. Nothing was changed.");
       if (b.quality && !b.speed) delete libs[i].sel; // a slider save replaces Standard choices
+      if (b.quality && !b.speed) libs[i].audio = b.audio || "stereo_aac"; // Basic's audio choice
       if (b.quality) { libs[i].quality = b.quality; libs[i].settingLabel = ["Smallest file", "Smaller", "Balanced", "Better quality", "Best quality"][b.quality - 1]; libs[i].settingKind = "slider"; saveLibs(); }
-      if (b.speed && isSliderPosition(b)) { delete libs[i].sel; libs[i].quality = b.quality; libs[i].settingKind = "slider"; saveLibs(); return ok(); }
       if (b.speed) { libs[i].sel = copy(b); libs[i].settingKind = "selectors"; libs[i].settingLabel = ["Smallest file", "Smaller", "Balanced", "Better quality", "Best quality"][(b.quality || 3) - 1]; saveLibs(); }
       return ok();
     },
@@ -371,7 +372,8 @@
     },
     retryJob: function (p) { var r = removeFrom(failedList, "jobId", p.id); saveAct(); return r ? ok() : gone(); },
     skipped: function (p) {
-      var r = skippedList.filter(function (x) { return !p.reason || x.reason === p.reason; }), off = +p.offset || 0, lim = +p.limit || 50;
+      var want = p.reason ? String(p.reason).split(",") : null; // reason=a,b: any of them (contract 22:30Z)
+      var r = skippedList.filter(function (x) { return !want || want.indexOf(x.reason) >= 0; }), off = +p.offset || 0, lim = +p.limit || 50;
       return ok({ items: r.slice(off, off + lim), total: r.length });
     },
     convertAgain: function (p) {

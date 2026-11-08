@@ -1,23 +1,14 @@
-/* Library page: the Basic slider with Save and Scan now, and the Preview card. */
+/* Library page: the Basic editor or the Standard choices, with Save and Scan now; the Preview card (not at Basic). */
 (function () {
   "use strict";
   var S = window.SYP, api = S.api, ui = S.ui, ed = S.editors;
   function $(id) { return document.getElementById(id); }
-  var id = new URLSearchParams(location.search).get("id"), lib, slider, editor, prev, custom = false;
-  var DESC = ["Shrinks the most. Some files may lose a little detail. Best for space-starved drives.", "Smaller files, small quality trade-off.",
-    "Shrinks most files with little visible change. A good start for most people.", "Keeps more detail. Only touches files with lots of room to shrink.",
-    "Keeps nearly all detail. Only touches files with lots of room to shrink, so savings are small."];
+  var id = new URLSearchParams(location.search).get("id"), lib, editor, prev, custom = false;
   var warn = null; // the warnings notice above Save
 
   function say(t) { $("said").textContent = t; }
   // An earlier "Saved." must not stand beside the error.
   function fail(e) { say(""); var b = $("err"); b.firstChild.textContent = e && e.message || "Something went wrong. Nothing was changed."; b.hidden = false; }
-  function facts() {
-    var v = slider.get().quality - 1, li = $("facts").children;
-    $("desc").textContent = DESC[v];
-    li[0].textContent = "Video: converted to a smaller format";
-    li[2].textContent = "Skipped: HDR and Dolby Vision files"; // S1: no "already small" and no minimum saving
-  }
   function head() {
     $("lib-title").textContent = lib.name; $("lib-path").textContent = lib.path; document.title = lib.name + " - shrink-your-shit";
     $("lib-state").textContent = ""; $("lib-state").appendChild(ui.stateBadge(lib));
@@ -34,6 +25,7 @@
     box.hidden = false; $("applies").hidden = true; $("sh1").focus();
   }
   function save() {
+    if (!editor) return; // the Basic editor draws once the language names are in
     var body = editor.get(), choice = !$("share").hidden && document.querySelector('input[name="sh"]:checked').value;
     if (choice) body.sharedFlowChoice = choice;
     var first = custom ? api.replaceCustom({ id: id }).then(function () { custom = false; $("custom").hidden = true; }) : Promise.resolve();
@@ -68,7 +60,7 @@
       if (level === "standard") prev = ui.preview($("pv"), id, get, extra); // only for the warnings now (see below)
       if (level === "standard") {
         custom = setting.kind === "custom";
-        $("custom").hidden = !custom; $("desc").hidden = true; $("facts").hidden = true;
+        $("custom").hidden = !custom;
         $("custom").querySelector("strong").textContent = "This setting is too custom to show as choices";
         $("qh").textContent = "Choices for " + lib.name;
         // A custom setting shows the defaults, but still with the choices this version can save (addendum 13).
@@ -81,16 +73,21 @@
           prev.start();
         }, function (e) { fail(e); prev.start(); });
       } else if (level !== "basic") {
-        $("later").hidden = false; $("save").hidden = true; $("desc").hidden = true; $("facts").hidden = true;
+        $("later").hidden = false; $("save").hidden = true;
       } else {
         custom = setting.kind === "custom";
         var more = setting.kind === "selectors"; // saved with Standard choices: more than a slider can show
         $("custom").hidden = !(custom || more);
         if (more) $("custom").querySelector("strong").textContent = "This setting has more choices than a slider shows";
-        editor = slider = ed.slider($("slider"), setting.quality || 3, function () { facts(); }, lib.name + ": smallest file to best quality");
+        // The Basic editor (redesign A1) replaces the old description and facts list; language names come from the
+        // same list Settings uses. A custom or Standard setting opens at Balanced with the default audio.
         if (custom || more) $("save").textContent = "Use this slider setting";
         $("save").onclick = save;
-        facts();
+        var langs = r[0].languages || [];
+        fetch("/assets/languages.json").then(function (x) { return x.json(); }).then(null, function () { return []; }).then(function (l) {
+          var names = {}; l.forEach(function (x) { names[x[0]] = x[1]; }); // the names Settings shows (design: "English and Deutsch")
+          editor = ed.basic($("slider"), custom || more ? { becomes: setting.becomes } : setting, langs, names, null, lib.name + ": smallest file to best quality");
+        });
       }
       $("scan").onclick = function () {
         api.scanLibrary({ id: id }).then(function () { say("Scan started. Progress shows in Activity."); return api.getLibrary({ id: id }); })

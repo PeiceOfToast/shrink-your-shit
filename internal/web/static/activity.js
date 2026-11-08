@@ -109,9 +109,9 @@
 
   // ---- Skipped
   // Badge style per reason: info for what resolves itself or was the person's own doing, warn for a risk, idle otherwise.
-  var KIND = { user_stopped: "info", restored: "info", still_changing: "info", hdr_dv: "warn", shared_file: "warn", cannot_keep_track: "warn", bitmap_subs: "warn", symlink: "idle", unreadable: "warn" };
+  var KIND = { user_stopped: "info", restored: "info", still_changing: "info", hdr_dv: "warn", shared_file: "warn", cannot_keep_track: "warn", bitmap_subs: "warn", symlink: "idle", unreadable: "warn", dv: "info", dv_profile5: "idle", already_in_format: "idle" };
   // Reasons a library rule causes, with the lowest control level whose library page can change that rule.
-  var RULE = { hdr_dv: 1, cannot_keep_track: 1, setting_cannot_run: 1 }, RANK = { basic: 0, standard: 1, advanced: 2 }, level = null;
+  var RULE = { hdr_dv: 1, cannot_keep_track: 1, setting_cannot_run: 1, dv: 1 }, RANK = { basic: 0, standard: 1, advanced: 2 }, level = null;
   var reason = "", shown = 0, tb, more, count;
   T.skipped = function () {
     if (!$("reason")) {
@@ -120,7 +120,11 @@
       pane.appendChild(el("p", "muted", "Nothing was changed on these files. To change a rule, open the library."));
       var f = el("div", "field"), lb = el("label", null, "Show"), sel = el("select"); lb.htmlFor = "reason"; sel.id = "reason";
       sel.appendChild(el("option", null, "All reasons")).value = "";
-      Object.keys(ui.REASONS).forEach(function (k) { sel.appendChild(el("option", null, ui.badge(k))).value = k; });
+      // One entry per label (already_hevc and already_in_format share one, design); a shared entry sends its codes in one
+      // request, reason=a,b, which the server pages as one list (UI-API-CONTRACT.md 22:30Z).
+      var byLabel = {}, order = [];
+      Object.keys(ui.REASONS).forEach(function (k) { var t = ui.badge(k); if (!byLabel[t]) { byLabel[t] = []; order.push(t); } byLabel[t].push(k); });
+      order.forEach(function (t) { sel.appendChild(el("option", null, t)).value = byLabel[t].join(","); });
       sel.onchange = function () { reason = sel.value; shown = 0; seen.skipped = null; refresh(); };
       f.appendChild(lb); f.appendChild(sel); pane.appendChild(f);
       var t = table(["File", "Why it was skipped", ""]); tb = t; pane.appendChild(t.wrap);

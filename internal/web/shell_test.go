@@ -581,7 +581,7 @@ func TestSkipReasonsHaveWords(t *testing.T) {
 	// legacy flow's -min-bitrate.
 	contract := []string{"already_efficient", "already_hevc", "hdr_dv", "bitmap_subs", "shared_file", "symlink",
 		"unreadable", "cannot_keep_track", "user_stopped", "restored", "format_not_converted", "no_video",
-		"setting_cannot_run", "still_changing"}
+		"setting_cannot_run", "still_changing", "dv", "dv_profile5", "already_in_format"}
 	for _, r := range contract {
 		if !regexp.MustCompile(`\b` + r + `: "`).MatchString(code.String()) {
 			t.Errorf("contract skip reason %q has no words in ui.js REASONS", r)
