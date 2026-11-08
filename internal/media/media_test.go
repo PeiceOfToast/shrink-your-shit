@@ -71,3 +71,31 @@ func TestTranscodeReportsProgress(t *testing.T) {
 		t.Errorf("got %v %v", got, err)
 	}
 }
+
+// FFmpeg 7.1's ffprobe prints "75," (an empty side-data field) for a stream with side data (HDR, a phone
+// video's rotation): such a file was refused as "counting the new file's video frames could not be done".
+func TestCountVideoPacketsWithSideData(t *testing.T) {
+	for out, want := range map[string]int64{"75,\n": 75, "75\n": 75, "75,,\n": 75, " 1800 \n": 1800} {
+		x := &FakeExec{Out: []byte(out)}
+		if n, err := CountVideoPackets(context.Background(), x, "ffprobe", "/x.mkv", 0); err != nil || n != want {
+			t.Errorf("%q: %d %v", out, n, err)
+		}
+	}
+	if _, err := CountVideoPackets(context.Background(), &FakeExec{Out: []byte(",75\n")}, "ffprobe", "/x.mkv", 0); err == nil {
+		t.Error("no count in the first field is an error")
+	}
+}
+
+// A phone video's Display Matrix (#81): its rotation is read; ±90/270 is a quarter turn.
+func TestDisplayMatrixRotation(t *testing.T) {
+	i, err := ParseProbe([]byte(`{"streams":[{"codec_type":"video","codec_name":"h264","width":640,"height":360,
+	 "side_data_list":[{"side_data_type":"Display Matrix","displaymatrix":"...","rotation":-90}]}],"format":{}}`))
+	if err != nil || i.Video().Rotation != -90 || !i.Video().Quarter() {
+		t.Fatalf("%+v %v", i.Video(), err)
+	}
+	for r, q := range map[int]bool{90: true, 270: true, -270: true, 180: false, 0: false} {
+		if (Stream{Rotation: r}).Quarter() != q {
+			t.Errorf("%d", r)
+		}
+	}
+}

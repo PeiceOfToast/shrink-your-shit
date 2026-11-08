@@ -173,7 +173,9 @@ func CountVideoPackets(ctx context.Context, x Exec, ffprobe, path string, n int)
 	if err != nil {
 		return 0, err
 	}
-	c, perr := strconv.ParseInt(strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0]), 10, 64)
+	// The first field of the first line: ffprobe 7.1 prints "75," for a stream with side data (HDR, S3).
+	first, _, _ := strings.Cut(strings.SplitN(string(out), "\n", 2)[0], ",")
+	c, perr := strconv.ParseInt(strings.TrimSpace(first), 10, 64)
 	if perr != nil || c < 0 {
 		return 0, fmt.Errorf("could not read the frame count of %s", path)
 	}

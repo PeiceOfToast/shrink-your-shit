@@ -3,6 +3,7 @@
 package rules
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -347,5 +348,39 @@ func TestEverySkipHasACode(t *testing.T) {
 	a, b := Snapshot{Plan: Plan{SkipCode: "x"}}, Snapshot{}
 	if a.Fingerprint() != b.Fingerprint() {
 		t.Error("the skip code is not a setting")
+	}
+}
+
+// #81: a ±90° Display Matrix swaps the new file's size (ffmpeg encodes it upright); 180° does not;
+// a downscale applies to the upright picture.
+func TestRotationSwapsTheExpectedSize(t *testing.T) {
+	for rot, want := range map[int]string{90: "360x640", -90: "360x640", 270: "360x640", 180: "640x360", 0: "640x360"} {
+		i := probe("h264", 640, 360, 25, 3000)
+		i.Streams[0].Rotation = rot
+		e := LegacyTemplate(Default(), "replace").Compile(i).Expect(i, 0)
+		if got := fmt.Sprintf("%dx%d", e.Streams[0].Width, e.Streams[0].Height); got != want {
+			t.Errorf("rotation %d: %s, want %s", rot, got, want)
+		}
+	}
+}
+
+// Review 44dbabe: the upright picture decides the resolution cap. A 640x360 file turned 90° is 360x640
+// upright, so "at most 480" scales it to 270x480 (and the check expects that).
+func TestRotatedFileIsCappedUpright(t *testing.T) {
+	src := h264(640, 360, 3000)
+	src.Streams[0].Rotation = 90
+	s := DefaultSelectors(3)
+	s.Resolution = "480"
+	p := s.Template().Compile(src)
+	e := p.Expect(src, 0)
+	if p.Video.Height != 480 || e.Streams[0].Width != 270 || e.Streams[0].Height != 480 {
+		t.Errorf("height %d, expected %dx%d", p.Video.Height, e.Streams[0].Width, e.Streams[0].Height)
+	}
+	if !strings.Contains(strings.Join(p.FFmpegArgs("i", "o"), " "), "scale=-2:480") {
+		t.Errorf("args %v", p.FFmpegArgs("i", "o"))
+	}
+	plain := h264(640, 360, 3000) // not turned: 360 lines, under the cap
+	if p := s.Template().Compile(plain); p.Video.Height != 0 {
+		t.Errorf("unturned: height %d", p.Video.Height)
 	}
 }
