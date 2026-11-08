@@ -48,12 +48,23 @@
 {{define "activity"}}<noscript><div class="notice info" role="note"><div><strong>Turn on scripts to see live activity</strong>This page updates as files are converted, which needs scripts enabled.</div></div></noscript>
 <div class="page-head"><h1>Activity</h1></div>
 <div class="notice bad" id="err" role="alert" hidden></div>
-<div class="grid-3" id="stats" style="margin-bottom:16px" hidden>
-<div class="card"><div class="stat" id="st-freed"></div><div class="stat-label">Space freed (originals already deleted)</div></div>
-<div class="card"><div class="stat" id="st-wait"></div><div class="stat-label">Waiting to be freed when kept originals expire</div></div>
-<div class="card"><div class="stat" id="st-work"></div><div class="stat-label" id="st-work-l"></div></div></div>
-{{template "tabs" .}}
-<div id="pane" data-tab="{{.Tab}}"><div class="card empty"><p>{{.Empty}}</p></div></div>{{end}}
+<div id="stats" hidden><div class="grid-2">
+<div class="card"><div class="stat" id="st-freed"></div><div class="stat-label">Space freed</div></div>
+<div class="card"><div class="stat" id="st-wait"></div><div class="stat-label">Waiting to be freed</div></div></div>
+<p class="small muted">Files that got bigger count against these numbers.</p></div>
+<div class="row" id="cards" role="group" aria-label="Show files" style="flex-wrap:wrap"></div>
+<div class="row" style="flex-wrap:wrap;align-items:flex-end;margin-top:12px">
+<div class="field"><label for="lib">Library</label><select id="lib"><option value="">All libraries</option></select></div>
+<div class="field"><label for="q">Search</label><input id="q" type="search" size="24" autocomplete="off" spellcheck="false"></div>
+<div id="chip"></div></div>
+<div id="pane" data-tab="{{.Tab}}"><div class="card empty"><p>{{.Empty}}</p></div></div>
+<p id="said" class="sr" role="status" aria-live="polite"></p>
+<dialog id="log" aria-labelledby="log-h" style="max-width:56rem;width:calc(100% - 32px)"><div class="stack">
+<h2 id="log-h" style="margin-top:0"></h2>
+<ol id="log-sum" class="small"></ol>
+<pre id="log-text" class="mono small" style="max-height:40vh;overflow:auto;white-space:pre-wrap;border:1px solid var(--border);padding:8px" tabindex="0"></pre>
+<div class="row"><button class="btn" type="button" id="log-copy">Copy log</button><button class="btn" type="button" id="log-dl">Download</button><button class="btn" type="button" id="log-follow" aria-pressed="true" hidden>Stop following</button><button class="btn" type="button" id="log-close">Close</button></div>
+<p id="log-said" class="small muted" role="status" aria-live="polite" style="margin:0"></p></div></dialog>{{end}}
 
 {{define "flows"}}<noscript><div class="notice info" role="note"><div><strong>Turn on scripts to see your flows</strong>The list needs scripts enabled.</div></div></noscript>
 <div class="page-head"><div><h1>Flows</h1><p class="muted">A flow says what your files become. Each library uses one flow.</p></div>

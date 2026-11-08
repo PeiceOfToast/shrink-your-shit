@@ -128,3 +128,8 @@ fieldset{min-width:0}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .table-wrap{position:relative} /* keeps the screen-reader-only header text inside the scrolling box */
 .lang-list{list-style:none;padding:0;margin:0 0 8px;display:flex;flex-wrap:wrap;gap:8px}.lang-list li{display:flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:6px;padding:2px 2px 2px 10px}
+/* Activity's Files table on narrow screens (redesign C3): each row becomes a stacked card, label then value; Log last. */
+@media (max-width:40rem){.files thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.files tr{display:block;border:1px solid var(--border);border-radius:var(--r);margin:0 0 var(--s3);padding:var(--s2)}
+.files td{display:flex;gap:var(--s3);border:0;padding:2px 0}.files td[data-label]::before{content:attr(data-label);font-weight:600;min-width:7rem;flex:none}
+.files td[data-label=""]::before{content:none}}
