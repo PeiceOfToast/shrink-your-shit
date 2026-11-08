@@ -93,18 +93,25 @@ func convertingTo(plan rules.Plan, src media.Info) string {
 	if v := src.Video(); plan.Video.HDR != nil || (v != nil && v.BitDepth > 8) {
 		depth = "10-bit"
 	}
-	return "HEVC · " + depth + " · " + strings.ToUpper(kind)
+	name := "HEVC" // a Plan from before S6 has no Format
+	if f, ok := rules.VideoFormats[plan.Video.Format]; ok {
+		name = f.Name
+	}
+	return name + " · " + depth + " · " + strings.ToUpper(kind)
 }
 
 func encoderWords(plan rules.Plan) string {
-	switch {
-	case plan.Video.Copy:
+	if plan.Video.Copy {
 		return "copied, not encoded"
-	case plan.Video.Codec == "libx265":
-		return "x265 (processor)"
+	}
+	if w, ok := encoderNames[plan.Video.Codec]; ok {
+		return w + " (processor)"
 	}
 	return plan.Video.Codec
 }
+
+// encoderNames are ffmpeg's software encoders as people name them (S5 proposal).
+var encoderNames = map[string]string{"libx265": "x265", "libx264": "x264", "libsvtav1": "SVT-AV1", "libvpx-vp9": "VP9"}
 
 func decoderWords(src media.Info) string {
 	if v := src.Video(); v != nil {
