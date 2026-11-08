@@ -220,10 +220,14 @@ func TestKeepVP9OpusWarning(t *testing.T) {
 		f    func(*Selectors)
 		want bool
 	}{
-		"vp9 keep":  {func(s *Selectors) { s.Format, s.FileType = "vp9", "keep" }, true},
-		"opus keep": {func(s *Selectors) { s.Audio, s.FileType = "stereo_opus", "keep" }, true},
-		"vp9 mkv":   {func(s *Selectors) { s.Format, s.FileType = "vp9", "mkv" }, false},
-		"hevc keep": {func(s *Selectors) { s.FileType = "keep" }, false},
+		"vp9 keep":         {func(s *Selectors) { s.Format, s.FileType = "vp9", "keep" }, true},
+		"opus keep":        {func(s *Selectors) { s.Audio, s.FileType = "stereo_opus", "keep" }, true},
+		"vp9 mkv":          {func(s *Selectors) { s.Format, s.FileType = "vp9", "mkv" }, false},
+		"hevc keep":        {func(s *Selectors) { s.FileType = "keep" }, false},
+		"vp9 keep, beside": {func(s *Selectors) { s.Format, s.FileType, s.AfterConverting = "vp9", "keep", "beside" }, false},
+		"opus keep, folder": {func(s *Selectors) {
+			s.Audio, s.FileType, s.AfterConverting, s.OutputDir = "stereo_opus", "keep", "folder", "/out"
+		}, false},
 	} {
 		s := DefaultSelectors(3)
 		c.f(&s)

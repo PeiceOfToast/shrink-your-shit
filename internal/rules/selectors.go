@@ -235,8 +235,10 @@ func (t Template) Warnings() []string {
 	if w := RenameWarning(s.AfterConverting, s.FileType); w != "" && t.Kind == KindSelectors { // 25a-2 (Basic's MKV: the update notice, S4)
 		out = append(out, w)
 	}
-	if t.Kind == KindSelectors && s.FileType == "keep" && (s.Format == "vp9" || s.Audio == "stereo_opus") {
-		out = append(out, KeepVP9OpusWarning) // design (a), 02:30Z: such an MP4 becomes MKV
+	// design (a), 02:30Z: such an MP4 becomes MKV. Only when the original is replaced: beside or in
+	// another folder the .mp4 stays, so nothing gets a new name (ui-shop, 02:35Z).
+	if t.Kind == KindSelectors && s.AfterConverting == "replace" && s.FileType == "keep" && (s.Format == "vp9" || s.Audio == "stereo_opus") {
+		out = append(out, KeepVP9OpusWarning)
 	}
 	return out
 }
