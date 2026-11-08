@@ -3,6 +3,8 @@
 package worker
 
 import (
+	"math"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -109,4 +111,31 @@ func decoderWords(src media.Info) string {
 		return codecName(v.Codec) + " (processor)"
 	}
 	return ""
+}
+
+// progressLines writes the run log's progress lines (design, REDESIGN C Log panel, 03:40Z): one at each
+// 10% of the conversion, 10% to 90% (the "converted" step says when it is done), at most one per
+// progress point, so a jump past several marks writes only the highest.
+type progressLines struct{ done int } // the last tenth written
+
+func (l *progressLines) next(p media.Progress) string {
+	t := min(int(p.Percent)/10, 9)
+	if t <= l.done {
+		return ""
+	}
+	l.done = t
+	return progressWords(t*10, p.ETASeconds)
+}
+
+// progressWords: "40% done · about 22 min left", with etaSeconds's time in minutes ("about 1 min left"
+// under 2 min); only "40% done" while the time left is unknown (negative).
+func progressWords(pct int, etaSeconds float64) string {
+	s := strconv.Itoa(pct) + "% done"
+	switch {
+	case etaSeconds < 0:
+		return s
+	case etaSeconds < 120:
+		return s + " · about 1 min left"
+	}
+	return s + " · about " + strconv.Itoa(int(math.Round(etaSeconds/60))) + " min left"
 }

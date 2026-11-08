@@ -575,10 +575,14 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWords(plan),
 		Decoder: decoderWords(src), Progress: media.Progress{ETASeconds: -1}})
 	defer dropLive(job.ID)
+	var tenths progressLines
 	encErr, terr := media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
 		w.progressAt.Store(time.Now().UnixNano())
 		w.Queue.Progress(job.ID, p.Percent)
 		updateLive(job.ID, p)
+		if line := tenths.next(p); line != "" {
+			w.jobf(job.ID, ": %s", line)
+		}
 	})
 	stopWatch()
 	if s := strings.TrimSpace(encErr); s != "" && w.Logs != nil {
