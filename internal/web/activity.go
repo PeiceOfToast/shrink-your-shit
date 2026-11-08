@@ -225,10 +225,16 @@ func activityRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, no
 		writeJSON(w, map[string]any{"items": out, "total": total})
 	})
 
-	// Files the scanner left alone, with why (?reason= one code).
+	// Files the scanner left alone, with why (?reason= one code, or several: a,b; contract 22:30Z).
 	api.HandleFunc("GET /api/activity/skipped", func(w http.ResponseWriter, r *http.Request) {
 		limit, offset := page(r)
-		items, total, err := store.SkippedFiles(r.URL.Query().Get("reason"), limit, offset)
+		var reasons []string
+		for _, c := range strings.Split(r.URL.Query().Get("reason"), ",") {
+			if c = strings.TrimSpace(c); c != "" {
+				reasons = append(reasons, c)
+			}
+		}
+		items, total, err := store.SkippedFiles(reasons, limit, offset)
 		if err != nil {
 			serverError(w, err)
 			return

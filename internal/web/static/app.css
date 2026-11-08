@@ -126,3 +126,4 @@ fieldset{min-width:0}
 @media (max-width:40rem){#checks{min-height:18rem}}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .table-wrap{position:relative} /* keeps the screen-reader-only header text inside the scrolling box */
+.lang-list{list-style:none;padding:0;margin:0 0 8px;display:flex;flex-wrap:wrap;gap:8px}.lang-list li{display:flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:6px;padding:2px 2px 2px 10px}

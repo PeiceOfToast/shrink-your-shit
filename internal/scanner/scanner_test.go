@@ -56,16 +56,16 @@ func TestQueuesMatchingFileOnce(t *testing.T) {
 	if n := settle(s); n != 1 {
 		t.Fatalf("queued %d", n)
 	}
-	if len(f.Calls) != 1 {
-		t.Errorf("only a.mkv should be probed, got %d calls", len(f.Calls))
+	if len(f.Recorded()) != 1 {
+		t.Errorf("only a.mkv should be probed, got %d calls", len(f.Recorded()))
 	}
 	l, _ := st.List(10)
 	if len(l) != 1 || l[0].Path != filepath.Join(lib, "a.mkv") || l[0].Status != jobs.Queued || l[0].DurationSec != 60 {
 		t.Errorf("%+v", l)
 	}
 	// Second scan: unchanged file is neither probed nor queued again.
-	if n := settle(s); n != 0 || len(f.Calls) != 1 {
-		t.Errorf("rescan queued %d, calls %d", n, len(f.Calls))
+	if n := settle(s); n != 0 || len(f.Recorded()) != 1 {
+		t.Errorf("rescan queued %d, calls %d", n, len(f.Recorded()))
 	}
 }
 
@@ -93,8 +93,8 @@ func TestChangedFileIsRescanned(t *testing.T) {
 func TestMinAgeSkipsFreshFiles(t *testing.T) {
 	s, _, _, f := setup(t, h264Big)
 	s.MinAge = time.Hour
-	if n := settle(s); n != 0 || len(f.Calls) != 0 {
-		t.Errorf("fresh file should be left alone: %d %d", n, len(f.Calls))
+	if n := settle(s); n != 0 || len(f.Recorded()) != 0 {
+		t.Errorf("fresh file should be left alone: %d %d", n, len(f.Recorded()))
 	}
 }
 
@@ -185,9 +185,9 @@ func TestScanFillsTheProbeCache(t *testing.T) {
 	if v, ok := st.GetProbe(p, fi.Size(), fi.ModTime().UnixNano()); !ok || !strings.Contains(v, `"videoCodec":"h264"`) {
 		t.Fatalf("%q %v", v, ok)
 	}
-	n := len(f.Calls)
-	if info, err := Probe(context.Background(), st, f, "ffprobe", p, fi); err != nil || info.VideoCodec != "h264" || len(f.Calls) != n {
-		t.Errorf("%+v %v: the cached probe is used (%d calls)", info, err, len(f.Calls)-n)
+	n := len(f.Recorded())
+	if info, err := Probe(context.Background(), st, f, "ffprobe", p, fi); err != nil || info.VideoCodec != "h264" || len(f.Recorded()) != n {
+		t.Errorf("%+v %v: the cached probe is used (%d calls)", info, err, len(f.Recorded())-n)
 	}
 }
 
@@ -197,7 +197,7 @@ func TestTrashIsNeverScanned(t *testing.T) {
 	os.MkdirAll(filepath.Join(lib, ".syp-trash"), 0o755)
 	os.WriteFile(filepath.Join(lib, ".syp-trash", "old.7.mkv"), []byte("kept original"), 0o644)
 	settle(s)
-	for _, c := range f.Calls {
+	for _, c := range f.Recorded() {
 		if strings.Contains(strings.Join(c, " "), ".syp-trash") {
 			t.Errorf("probed a kept original: %v", c)
 		}
@@ -244,8 +244,8 @@ func TestIgnoredPathsAreNotLookedAt(t *testing.T) {
 	if n := settle(s); n != 1 {
 		t.Errorf("queued %d, want only a.mkv", n)
 	}
-	if len(f.Calls) != 1 {
-		t.Errorf("probed %d files, want only a.mkv: %v", len(f.Calls), f.Calls)
+	if len(f.Recorded()) != 1 {
+		t.Errorf("probed %d files, want only a.mkv: %v", len(f.Recorded()), f.Recorded())
 	}
 	for _, p := range []string{"Extras/deep/x.mkv", "trailer.sample.mkv", "Shows/Extras/y.mkv"} {
 		if r, _ := st.GetFile(filepath.Join(lib, p)); r != nil {
@@ -279,8 +279,8 @@ func TestStillChangingWaitsForTwoLooks(t *testing.T) {
 		}
 	}
 	look(0, rules.SkipStillChanging) // first look
-	if len(f.Calls) != 0 {
-		t.Errorf("a file still changing must not be read: %v", f.Calls)
+	if len(f.Recorded()) != 0 {
+		t.Errorf("a file still changing must not be read: %v", f.Recorded())
 	}
 	clock = clock.Add(10 * time.Second)
 	look(0, rules.SkipStillChanging) // unchanged, but not MinAge since the first look
@@ -291,6 +291,13 @@ func TestStillChangingWaitsForTwoLooks(t *testing.T) {
 	look(0, rules.SkipStillChanging)
 	clock = clock.Add(2 * time.Minute)
 	look(1, "") // unchanged for MinAge: decided (queued)
+	// and no longer listed as skipped (ui-shop's S4 run saw a queued file still listed as still_changing)
+	if r, _ := st.GetFile(a); r == nil || r.Reason != "" || !strings.HasPrefix(r.Decision, "queued: ") {
+		t.Errorf("queued file's record %+v", r)
+	}
+	if items, total, _ := st.SkippedFiles(nil, 10, 0); total != 0 {
+		t.Errorf("skipped list %d %+v", total, items)
+	}
 }
 
 // A file with another name elsewhere (a hardlink: a seeding torrent, a media manager's copy) is left
@@ -301,8 +308,8 @@ func TestSharedFileIsLeftAlone(t *testing.T) {
 	if err := os.Link(filepath.Join(lib, "a.mkv"), other); err != nil {
 		t.Skipf("no hardlinks here: %v", err)
 	}
-	if n := settle(s); n != 0 || len(f.Calls) != 0 {
-		t.Errorf("queued %d, probed %v", n, f.Calls)
+	if n := settle(s); n != 0 || len(f.Recorded()) != 0 {
+		t.Errorf("queued %d, probed %v", n, f.Recorded())
 	}
 	if r, _ := st.GetFile(filepath.Join(lib, "a.mkv")); r == nil || r.Reason != rules.SkipSharedFile {
 		t.Errorf("record %+v", r)
@@ -328,8 +335,8 @@ func TestLinksAreNeverConverted(t *testing.T) {
 	if n := settle(s); n != 1 {
 		t.Errorf("queued %d, want only a.mkv", n)
 	}
-	if len(f.Calls) != 1 {
-		t.Errorf("probed %d files, want only a.mkv: %v", len(f.Calls), f.Calls)
+	if len(f.Recorded()) != 1 {
+		t.Errorf("probed %d files, want only a.mkv: %v", len(f.Recorded()), f.Recorded())
 	}
 	if r, _ := st.GetFile(filepath.Join(lib, "out.mkv")); r == nil || r.Reason != rules.SkipSymlink {
 		t.Errorf("outside link: %+v", r)
@@ -547,5 +554,38 @@ func TestScanRecordsTheLibrarysLastScan(t *testing.T) {
 	}
 	if len(s.Scanning()) != 0 {
 		t.Errorf("still scanning: %v", s.Scanning())
+	}
+}
+
+// ui-shop's S4 run: a file is queued, then the library's setting is saved (its file decisions are
+// forgotten; the job stays). The next scans must not list the waiting file as still_changing: it is
+// decided already, and the skipped list would show it next to To do for as long as the job waits.
+func TestQueuedFileIsNotStillChangingAfterASave(t *testing.T) {
+	s, st, lib, _ := setup(t, h264Big)
+	clock := time.Now()
+	s.Now, s.MinAge = func() time.Time { return clock }, time.Minute
+	a := filepath.Join(lib, "a.mkv")
+	os.Chtimes(a, clock.Add(-time.Hour), clock.Add(-time.Hour))
+	s.ScanOnce(context.Background())
+	clock = clock.Add(2 * time.Minute)
+	if n := s.ScanOnce(context.Background()); n != 1 {
+		t.Fatalf("queued %d", n)
+	}
+	libs, _ := st.Libraries()
+	if _, err := st.SaveSlider(libs[0].ID, 2, ""); err != nil { // forgets the library's file decisions
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		clock = clock.Add(2 * time.Minute)
+		s.ScanOnce(context.Background())
+		if r, _ := st.GetFile(a); r != nil && r.Reason == rules.SkipStillChanging {
+			t.Fatalf("scan %d: the waiting file is listed as still changing: %+v", i+1, r)
+		}
+	}
+	if items, total, _ := st.SkippedFiles(nil, 10, 0); total != 0 {
+		t.Errorf("skipped %d %+v", total, items)
+	}
+	if open, _ := st.HasOpenJob(a); !open {
+		t.Error("its job is still waiting")
 	}
 }

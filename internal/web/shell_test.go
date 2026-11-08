@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
 func labels(items []navItem) string {
@@ -394,13 +395,13 @@ func TestSettingsRegistry(t *testing.T) {
 	}
 	// GET /api/settings fields (UI-API-CONTRACT.md); "token" has its own endpoint.
 	contract := []string{"controlLevel", "perLibraryFlow", "firstRunDone", "firstRunStep", "authRequired", "keepOriginalsDays", "trashPath",
-		"parallelJobs", "queueOrder", "quietHours", "lowPriority", "scanSchedule", "integrations", "updateAvailable"}
+		"parallelJobs", "queueOrder", "quietHours", "lowPriority", "scanSchedule", "integrations", "updateAvailable", "languages"}
 	known := map[string]bool{"token": true}
 	for _, k := range contract {
 		known[k] = true
 	}
 	tabs := map[string]bool{"general": true, "safety": true, "performance": true, "integrations": true, "system": true, "first-run": true}
-	types := map[string]bool{"radio": true, "checkbox": true, "number": true, "time": true, "text": true, "secret": true, "readout": true, "token": true, "info": true, "select": true}
+	types := map[string]bool{"radio": true, "checkbox": true, "number": true, "time": true, "text": true, "secret": true, "readout": true, "token": true, "info": true, "select": true, "languages": true}
 	seen, homes := map[string]bool{}, map[string]bool{}
 	for _, e := range reg {
 		if seen[e.Key] {
@@ -429,6 +430,34 @@ func TestSettingsRegistry(t *testing.T) {
 	// NAV-7: nothing the registry says uses the word "flow".
 	if m := regexp.MustCompile(`(?i)\bflows?\b`).FindString(string(b)); m != "" {
 		t.Errorf("NAV-7: %q in settings.json", m)
+	}
+}
+
+// "Your languages" (slice 25b) offers languages by name and saves their codes: every code in the list must be
+// one the server keeps as it is (ISO 639-2 bibliographic, rules.CanonLang), or a saved list would come back changed
+// and show as codes. Each entry is [code, name in the language itself, English name (if different)].
+func TestLanguageListCodes(t *testing.T) {
+	b, err := fs.ReadFile(static, "static/languages.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var list [][]string
+	if err := json.Unmarshal(b, &list); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, l := range list {
+		if len(l) < 2 || len(l) > 3 || l[1] == "" {
+			t.Errorf("%v: want [code, name] or [code, name, English name]", l)
+			continue
+		}
+		if got := rules.CanonLang(l[0]); got != l[0] {
+			t.Errorf("%s (%s): the server stores it as %q", l[0], l[1], got)
+		}
+		if seen[l[0]] {
+			t.Errorf("%s is listed twice", l[0])
+		}
+		seen[l[0]] = true
 	}
 }
 
@@ -493,6 +522,96 @@ func TestRootRedirectKeepsQuery(t *testing.T) {
 		h.ServeHTTP(rec, httptest.NewRequest("GET", in, nil))
 		if rec.Code != http.StatusFound || rec.Header().Get("Location") != want {
 			t.Errorf("GET %s: %d to %q, want 302 to %q", in, rec.Code, rec.Header().Get("Location"), want)
+		}
+	}
+}
+
+// The real server is the default (milestone 4, ui-21): the mock is only a development tool behind ?mock=1.
+func TestRealServerByDefault(t *testing.T) {
+	b, err := fs.ReadFile(static, "static/api.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "var DEFAULT_MOCK = false;") {
+		t.Error("api.js must talk to the real server by default (DEFAULT_MOCK = false)")
+	}
+}
+
+// Counts read "1 video", "2 videos" (ui-22, #56): a number glued to a plural noun ("+ " videos"") says "1 videos"
+// for one. Every such count goes through ui.count(n, one, many). The mock's sample text is not checked.
+func TestCountsUseSingularForOne(t *testing.T) {
+	glued := regexp.MustCompile(`\+\s*" (videos|files|days)\b`)
+	files, err := fs.Glob(static, "static/*.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if strings.HasSuffix(f, "/mock.js") {
+			continue
+		}
+		b, _ := fs.ReadFile(static, f)
+		for i, line := range strings.Split(string(b), "\n") {
+			if glued.MatchString(line) && !strings.HasPrefix(strings.TrimSpace(line), "//") {
+				t.Errorf("%s:%d: a count glued to a plural noun; use ui.count(n, one, many): %s", f, i+1, strings.TrimSpace(line))
+			}
+		}
+	}
+}
+
+// Every skip reason in the contract, and every one the mock sends (but its one deliberately unknown code), has plain
+// words in ui.js; code after a // comment does not count. A comment placed mid-line once hid cannot_keep_track; node --check can't see that.
+func TestSkipReasonsHaveWords(t *testing.T) {
+	read := func(name string) string {
+		b, err := fs.ReadFile(static, "static/"+name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	var code strings.Builder
+	for _, line := range strings.Split(read("ui.js"), "\n") {
+		if i := strings.Index(line, "//"); i >= 0 {
+			line = line[:i]
+		}
+		code.WriteString(line + "\n")
+	}
+	// The contract's skip reason codes (UI-API-CONTRACT.md: skipped reasons, addenda and slice additions).
+	// would_not_shrink and unknown_bitrate no longer occur (workshop S1, always standardize); already_efficient stays for a
+	// legacy flow's -min-bitrate.
+	contract := []string{"already_efficient", "already_hevc", "hdr_dv", "bitmap_subs", "shared_file", "symlink",
+		"unreadable", "cannot_keep_track", "user_stopped", "restored", "format_not_converted", "no_video",
+		"setting_cannot_run", "still_changing"}
+	for _, r := range contract {
+		if !regexp.MustCompile(`\b` + r + `: "`).MatchString(code.String()) {
+			t.Errorf("contract skip reason %q has no words in ui.js REASONS", r)
+		}
+	}
+	seen := map[string]bool{}
+	for _, m := range regexp.MustCompile(`reason: "(\w+)"`).FindAllStringSubmatch(read("mock.js"), -1) {
+		r := m[1]
+		if r == "some_future_code" || seen[r] {
+			continue
+		}
+		seen[r] = true
+		if !regexp.MustCompile(`\b` + r + `: "`).MatchString(code.String()) {
+			t.Errorf("skip reason %q (sent by mock.js) has no words in ui.js REASONS", r)
+		}
+	}
+	if len(seen) < 5 {
+		t.Errorf("found only %d reasons in mock.js; the pattern may be wrong", len(seen))
+	}
+}
+
+// The library cards carry no sizes, savings or estimates (redesign A2, RD-A2; the user's review): real numbers live in
+// Activity. A merge that brings an old libraries.js back would fail here.
+func TestLibraryCardsHaveNoEstimates(t *testing.T) {
+	b, err := fs.ReadFile(static, "static/libraries.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"ui.bytes(", "freedBytes", "waitingBytes", "Space freed", "saving", "Change setting", "\"Preview\"", "estimate"} {
+		if strings.Contains(string(b), bad) {
+			t.Errorf("libraries.js contains %q: the cards show no sizes, savings, estimates or Preview/Change setting buttons", bad)
 		}
 	}
 }
