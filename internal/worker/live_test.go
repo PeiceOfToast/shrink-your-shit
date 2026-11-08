@@ -30,3 +30,21 @@ func TestConvertingToNamesTheFormat(t *testing.T) {
 		}
 	}
 }
+
+// S5 proposal, from #99's check: the encoder line names the encoder in words, not ffmpeg's name.
+func TestEncoderWords(t *testing.T) {
+	for _, c := range []struct {
+		video rules.VideoEncode
+		want  string
+	}{
+		{rules.VideoEncode{Codec: "libx265"}, "x265 (processor)"},
+		{rules.VideoEncode{Codec: "libx264"}, "x264 (processor)"},
+		{rules.VideoEncode{Codec: "libsvtav1"}, "SVT-AV1 (processor)"},
+		{rules.VideoEncode{Codec: "libvpx-vp9"}, "VP9 (processor)"},
+		{rules.VideoEncode{Copy: true}, "copied, not encoded"},
+	} {
+		if got := encoderWords(rules.Plan{Video: c.video}); got != c.want {
+			t.Errorf("%s: %q, want %q", c.video.Codec, got, c.want)
+		}
+	}
+}
