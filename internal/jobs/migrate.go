@@ -142,6 +142,11 @@ CREATE TABLE sidecars (id INTEGER PRIMARY KEY, job_id INTEGER NOT NULL, path TEX
 	// 25a-2: a conversion in replace mode that changes the file type puts the new file at another name
 	// (movie.mp4 -> movie.mkv); new_path is that name, '' when it is the original's (every older row).
 	{11, "originals new_path", `ALTER TABLE originals ADD COLUMN new_path TEXT NOT NULL DEFAULT '';`},
+	// DD-2: a failure that may pass (a slow disk, a full one, a busy file) is tried again later.
+	// attempts: tries finished; retry_at: not taken before then ('' = now). Kept across restarts.
+	{12, "job retries", `
+ALTER TABLE jobs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE jobs ADD COLUMN retry_at TEXT NOT NULL DEFAULT '';`},
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.

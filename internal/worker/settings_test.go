@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -50,7 +51,7 @@ func TestJobOfARemovedLibraryFails(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
 	w.Template = func(jobs.Job) (rules.Template, error) {
-		return rules.Template{}, errors.New("its library no longer exists")
+		return rules.Template{}, fmt.Errorf("its library no longer exists: %w", jobs.ErrLibraryGone) // as the store says it
 	}
 	w.RunOne(context.Background())
 	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "setting could not be read") {
@@ -130,6 +131,7 @@ func (failingRecord) RecordPlan(int64, string, string) error { return errors.New
 
 // If the job's Plan cannot be recorded, nothing is converted: the job fails before any file is written.
 func TestJobStopsIfItsPlanCannotBeRecorded(t *testing.T) {
+	oneTry(t) // the outcome of one try (failures that may pass are tried again: DD-2)
 	s := newScenario(t)
 	w := s.worker(Replace)
 	w.Queue = failingRecord{s.store}

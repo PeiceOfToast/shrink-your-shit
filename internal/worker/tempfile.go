@@ -124,8 +124,12 @@ func removeLeftoverTemps(src string) error {
 		}
 		for _, r := range remove {
 			if err := removeFile(r); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return failed(fmt.Sprintf("An old temp file next to this file (%s) could not be removed, so converting did not start. Your original was not touched. Delete it, or let shrink-your-shit write in this folder, then press Retry.", filepath.Base(r)),
+				ferr := failed(fmt.Sprintf("An old temp file next to this file (%s) could not be removed, so converting did not start. Your original was not touched. Delete it, or let shrink-your-shit write in this folder, then press Retry.", filepath.Base(r)),
 					fmt.Errorf("cannot remove the old temp file %s: %w", r, err))
+				if errors.Is(err, fs.ErrPermission) { // the person must let it write there
+					return ferr
+				}
+				return retryable(ferr, retryGeneral) // busy (a player or scanner holds it)
 			}
 		}
 	}

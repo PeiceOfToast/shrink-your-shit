@@ -363,3 +363,41 @@ func TestKnownOriginals(t *testing.T) {
 		t.Errorf("%v %v", known, err)
 	}
 }
+
+// A job waiting to be tried again (DD-2) is not claimed before its time, then it is; its tries count
+// across retries and the final failure; Retry by the person starts fresh. The wait is in the database,
+// so a restart keeps it.
+func TestRetryLaterWaitsItsTime(t *testing.T) {
+	s := open(t)
+	now := time.Date(2026, 11, 7, 20, 0, 0, 0, time.UTC)
+	s.now = func() time.Time { return now }
+	id, _ := s.Enqueue(Job{Path: "/m/a.mkv"})
+	s.Claim("w")
+	if err := s.RetryLater(id, now.Add(5*time.Minute), "The disk is full."); err != nil {
+		t.Fatal(err)
+	}
+	if j, _ := s.Get(id); j.Status != Queued || j.Attempts != 1 || j.RetryAt != "2026-11-07T20:05:00Z" || j.Error != "The disk is full." {
+		t.Fatalf("%+v", j)
+	}
+	if r, _ := s.Retrying(); len(r) != 1 || r[0].ID != id {
+		t.Errorf("retrying %+v", r)
+	}
+	if _, err := s.Claim("w"); !errors.Is(err, ErrNoJob) {
+		t.Fatalf("claimed before its time: %v", err)
+	}
+	now = now.Add(5 * time.Minute)
+	if j, err := s.Claim("w"); err != nil || j.ID != id || j.Attempts != 1 {
+		t.Fatalf("not claimed when due: %+v %v", j, err)
+	}
+	s.Fail(id, "The disk is full.")
+	if j, _ := s.Get(id); j.Attempts != 2 || j.RetryAt != "" {
+		t.Errorf("after the final failure: %+v", j)
+	}
+	s.Retry(id)
+	if j, _ := s.Get(id); j.Status != Queued || j.Attempts != 0 || j.RetryAt != "" || j.Error != "" {
+		t.Errorf("after Retry: %+v", j)
+	}
+	if r, _ := s.Retrying(); len(r) != 0 {
+		t.Errorf("still listed as retrying: %+v", r)
+	}
+}

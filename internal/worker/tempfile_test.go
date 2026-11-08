@@ -227,6 +227,7 @@ func TestTempSwappedAfterTheChecksIsNotUsed(t *testing.T) {
 
 // Same size, modification time put back: only the change time shows the edit.
 func TestSourceEditKeepingSizeAndTimeIsKept(t *testing.T) {
+	oneTry(t) // the outcome of one try (failures that may pass are tried again: DD-2)
 	if _, ok := media.ChangeTime(mustStat(t, t.TempDir())); !ok {
 		t.Skip("this system reports no change time")
 	}
@@ -248,6 +249,7 @@ func TestSourceEditKeepingSizeAndTimeIsKept(t *testing.T) {
 
 // Another file of the same size and modification time put in the original's place.
 func TestSourceReplacedKeepingSizeAndTimeIsKept(t *testing.T) {
+	oneTry(t) // the outcome of one try (failures that may pass are tried again: DD-2)
 	s := newScenario(t)
 	s.onEncode = func() {
 		st := mustStat(t, s.src)

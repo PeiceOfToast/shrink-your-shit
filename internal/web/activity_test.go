@@ -566,6 +566,44 @@ func TestRenamedByANewFileType(t *testing.T) {
 	}
 }
 
+// DD-2: a job waiting to be tried again is listed under "retrying" on the queue (so it does not look
+// stuck), still counted in upNext; a failed item says how many tries it had (attempts; 1 for one).
+func TestRetryingAndAttempts(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	id, _ := st.Enqueue(jobs.Job{LibraryID: l.ID, Path: "/m/a.mkv"})
+	st.Claim("w")
+	at := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	st.RetryLater(id, at, "The disk is full, so converting stopped.")
+
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/activity/queue"})
+	var q struct {
+		UpNext   []map[string]any
+		Retrying []map[string]any
+	}
+	json.Unmarshal([]byte(body), &q)
+	if len(q.Retrying) != 1 || q.Retrying[0]["jobId"] != fmt.Sprint(id) || q.Retrying[0]["retryAt"] != at.Format(time.RFC3339) ||
+		q.Retrying[0]["attempts"] != 1.0 || q.Retrying[0]["detail"] != "The disk is full, so converting stopped." || q.Retrying[0]["library"] != "Movies" {
+		t.Errorf("retrying: %s", body)
+	}
+	if len(q.UpNext) != 1 || q.UpNext[0]["count"] != 1.0 {
+		t.Errorf("upNext: %s", body)
+	}
+
+	once, _ := st.Enqueue(jobs.Job{LibraryID: l.ID, Path: "/m/b.mkv"})
+	st.Claim("w") // takes b (a waits an hour)
+	st.Fail(once, "Converting stopped with an error.")
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/activity/failed"})
+	var f struct{ Items []map[string]any }
+	json.Unmarshal([]byte(body), &f)
+	if len(f.Items) != 1 || f.Items[0]["attempts"] != 1.0 {
+		t.Errorf("failed: %s", body)
+	}
+	if _, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/activity/queue"}); !strings.Contains(body, `"retrying":[{`) {
+		t.Errorf("a still waits: %s", body)
+	}
+}
+
 // Several reasons as one list (contract 22:30Z): design's "Already in this format" asks for
 // already_hevc and already_in_format together; they page as one list by path, with one total.
 func TestSkippedTakesSeveralReasons(t *testing.T) {

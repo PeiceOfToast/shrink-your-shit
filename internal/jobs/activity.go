@@ -55,7 +55,7 @@ FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id WHERE j.status=? ORDER BY
 		var w Working
 		j := &w.Job
 		if err := rows.Scan(&j.ID, &j.Library, &j.LibraryID, &j.Path, &j.Status, &j.Progress, &j.Reason, &j.Error, &j.Worker,
-			&j.DurationSec, &j.SizeBefore, &j.SizeAfter, &j.OutputPath, &j.Plan, &j.PlanPrint, &j.Created, &j.Updated, &w.LibraryName, &w.Started); err != nil {
+			&j.DurationSec, &j.SizeBefore, &j.SizeAfter, &j.OutputPath, &j.Plan, &j.PlanPrint, &j.Created, &j.Updated, &j.Attempts, &j.RetryAt, &w.LibraryName, &w.Started); err != nil {
 			return nil, err
 		}
 		out = append(out, w)
@@ -64,7 +64,7 @@ FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id WHERE j.status=? ORDER BY
 }
 
 // prefixedCols is cols for the jobs table under the alias j.
-const prefixedCols = `j.id,j.library,COALESCE(j.library_id,0),j.path,j.status,j.progress,j.reason,j.error,j.worker,j.duration,j.size_before,j.size_after,j.output_path,COALESCE(j.plan,''),COALESCE(j.plan_fingerprint,''),j.created,j.updated`
+const prefixedCols = `j.id,j.library,COALESCE(j.library_id,0),j.path,j.status,j.progress,j.reason,j.error,j.worker,j.duration,j.size_before,j.size_after,j.output_path,COALESCE(j.plan,''),COALESCE(j.plan_fingerprint,''),j.created,j.updated,j.attempts,j.retry_at`
 
 // LibraryQueue is how many files of a library wait.
 type LibraryQueue struct {
@@ -92,6 +92,28 @@ WHERE j.status=? GROUP BY COALESCE(j.library_id, 0), CASE WHEN j.library_id IS N
 	return out, rows.Err()
 }
 
+// Retrying lists queued jobs waiting to be tried again after a failure that may pass (DD-2), the
+// soonest first, with their library's name.
+func (s *Store) Retrying() ([]Working, error) {
+	rows, err := s.db.Query(`SELECT `+prefixedCols+`, COALESCE(l.name, j.library), ''
+FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id WHERE j.status=? AND j.retry_at<>'' ORDER BY j.retry_at, j.id`, Queued)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Working{}
+	for rows.Next() {
+		var w Working
+		j := &w.Job
+		if err := rows.Scan(&j.ID, &j.Library, &j.LibraryID, &j.Path, &j.Status, &j.Progress, &j.Reason, &j.Error, &j.Worker,
+			&j.DurationSec, &j.SizeBefore, &j.SizeAfter, &j.OutputPath, &j.Plan, &j.PlanPrint, &j.Created, &j.Updated, &j.Attempts, &j.RetryAt, &w.LibraryName, &w.Started); err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
 // FailedJobs lists failed jobs and jobs whose original was kept by a check (status kept), newest
 // first, with their library's name; and how many there are.
 func (s *Store) FailedJobs(limit, offset int) ([]Working, int, error) {
@@ -110,7 +132,7 @@ FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id WHERE j.status IN (?,?) O
 		var w Working
 		j := &w.Job
 		if err := rows.Scan(&j.ID, &j.Library, &j.LibraryID, &j.Path, &j.Status, &j.Progress, &j.Reason, &j.Error, &j.Worker,
-			&j.DurationSec, &j.SizeBefore, &j.SizeAfter, &j.OutputPath, &j.Plan, &j.PlanPrint, &j.Created, &j.Updated, &w.LibraryName, &w.Started); err != nil {
+			&j.DurationSec, &j.SizeBefore, &j.SizeAfter, &j.OutputPath, &j.Plan, &j.PlanPrint, &j.Created, &j.Updated, &j.Attempts, &j.RetryAt, &w.LibraryName, &w.Started); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, w)

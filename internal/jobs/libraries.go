@@ -457,7 +457,7 @@ func (s *Store) TemplateFor(j Job) (rules.Template, error) {
 		err = s.db.QueryRow(`SELECT flow_id FROM libraries WHERE path=?`, j.Library).Scan(&flowID)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
-		return rules.Template{}, errors.New("its library no longer exists")
+		return rules.Template{}, fmt.Errorf("its library no longer exists: %w", ErrLibraryGone)
 	}
 	if err != nil {
 		return rules.Template{}, err

@@ -384,7 +384,8 @@ func TestMigration7BackfillsSkipReasons(t *testing.T) {
 	for _, q := range []string{`DROP INDEX files_reason`, `DROP INDEX jobs_output`, `ALTER TABLE files DROP COLUMN reason`,
 		`ALTER TABLE jobs DROP COLUMN started`, `ALTER TABLE jobs DROP COLUMN output_mtime`,
 		`ALTER TABLE originals DROP COLUMN aside`, `ALTER TABLE jobs DROP COLUMN stop_requested`, `DROP TABLE sidecars`, // and migrations 8, 9 and 10
-		`ALTER TABLE originals DROP COLUMN new_path`, // and 11
+		`ALTER TABLE originals DROP COLUMN new_path`,                                     // and 11
+		`ALTER TABLE jobs DROP COLUMN attempts`, `ALTER TABLE jobs DROP COLUMN retry_at`, // and 12
 		`PRAGMA user_version=6`} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)

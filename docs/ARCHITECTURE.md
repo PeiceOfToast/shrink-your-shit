@@ -417,6 +417,25 @@ sampled hash (otherwise it is left alone and the row marked `needs_attention`); 
   10 minutes) is stopped and fails: "Stopped: no progress for 10m0s. The original is untouched; press
   Retry to try again." The checks after the encode keep their own time limits (slice 10).
 
+## Failures that may pass (DD-2, `internal/worker/retry.go`)
+
+Some failures pass on their own: a check that timed out or crashed, a full disk (while converting, or
+too little free space to start), free space that could not be checked, ffmpeg stopped by the system (a
+signal: out of memory), the original changing while it converts (still downloading), the new file or a
+subtitle file not movable (busy, locked), an old temp file that is busy (not a permission error), the
+database busy. Those sites wrap their usual `FailedError`/`KeptError` in `retryable(err, kind)`; the
+plain words stay. `RunOne` puts such a job back in the queue (`RetryLater`: `attempts`+1, `retry_at`,
+the reason kept on it) while it has tries left: 3 tries in all, waits of 5 then 30 minutes, or 30
+minutes then 2 hours for disk space. `Claim` takes no job before its `retry_at` (migration 12), so the
+wait survives a restart. Each try starts from the beginning: the original is read again, nothing of
+the last try is reused, and the original is never touched. The last try ends Failed or Kept as before,
+with `attempts` recorded. Everything else ends at once (name collisions, refused results, damaged or
+unreadable or missing originals, a library gone). The stall watchdog, "Stop this file", pause and
+shutdown are never retried. The person's Retry, and Convert again (a new job), start with no tries
+counted. `GET /api/activity/failed` items carry `attempts`; `GET /api/activity/queue` lists the
+waiting jobs in `retrying` (`jobId`, `library`, `path`, `retryAt`, `attempts`, `detail`), and they
+still count in `upNext`.
+
 ## Database schema and migrations
 
 The schema version is SQLite's `PRAGMA user_version`. `internal/jobs/migrate.go` holds an ordered list
