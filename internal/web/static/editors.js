@@ -31,7 +31,7 @@
   // the "Your language: ... Change it in Settings" line is left out. get() gives {quality, audio}.
   var PICTURE = ["The smallest files. Fine detail can soften, mostly in dark or busy scenes.", "Small files, with a small loss of fine detail.",
     "Little visible change for most people. A good start.", "Keeps more detail. Files stay larger.", "Hard to tell from the original. Files stay largest."];
-  var AUDIO = [["stereo_aac", "Stereo AAC in my language", "Audio in your language becomes stereo AAC, which plays on every TV and phone. Surround sound becomes stereo."],
+  var AUDIO = [["stereo_aac", "Stereo AAC in my language", "Audio in your language becomes stereo AAC, which plays on every TV and phone. Surround sound becomes stereo. Small stereo tracks that already play everywhere are kept as they are."],
     ["my_languages", "My language, as it is", "Only tracks in your language are kept, unchanged, surround included."],
     ["keep_all", "Keep all audio", "Every audio track is kept, unchanged."]];
   var FIXED = ["Every video not already in this format is converted, even if the new file isn't smaller, so your library ends up in one format. Activity shows the size before and after.",
