@@ -438,7 +438,7 @@ func TestRealRotatedVideoCappedUpright(t *testing.T) {
 	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=3:size=640x360:rate=25", "-c:v", "libx264", "-b:v", "2000k", base)
 	runFFmpeg(t, "-display_rotation", "90", "-i", base, "-c", "copy", src)
 	s := rules.DefaultSelectors(3)
-	s.Resolution = "480"
+	s.Resolution, s.FileType = "480", "keep" // keep: S6's MKV default would rename rot.mp4
 	tmpl := s.Template()
 	st, id := realJob(t, src, 3)
 	w := realWorker(st, media.OSExec{})
