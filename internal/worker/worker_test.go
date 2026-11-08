@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -115,6 +116,7 @@ type scenario struct {
 	progressOut            string // ffmpeg's -progress output for the encode ("": one point at 50%)
 	afterChecks            func() // runs at the picture comparison, the last check
 
+	mu       sync.Mutex // calls and afterChecks: a pool's workers share the scenario (race CI, 06:22Z)
 	calls    []string
 	exec     *media.FakeExec
 	moreSrcs map[string]bool // other originals in the queue (probed like src)
@@ -157,7 +159,9 @@ func (s *scenario) has(args []string, want string) bool {
 }
 
 func (s *scenario) handle(name string, args []string) (string, string, error) {
+	s.mu.Lock()
 	s.calls = append(s.calls, name+" "+strings.Join(args, " "))
+	s.mu.Unlock()
 	last := args[len(args)-1]
 	switch name {
 	case "ffprobe":
@@ -213,9 +217,12 @@ func (s *scenario) handle(name string, args []string) (string, string, error) {
 		case s.has(args, "-xerror"):
 			return "", s.decodeStderr, s.decodeErr
 		case s.has(args, "-lavfi"):
-			if s.afterChecks != nil {
-				s.afterChecks()
-				s.afterChecks = nil
+			s.mu.Lock()
+			after := s.afterChecks
+			s.afterChecks = nil
+			s.mu.Unlock()
+			if after != nil {
+				after()
 			}
 			return "", s.ssimStderr, s.ssimErr
 		}
@@ -242,6 +249,8 @@ func (s *scenario) job() jobs.Job {
 }
 
 func (s *scenario) count(substr string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	n := 0
 	for _, c := range s.calls {
 		if strings.Contains(c, substr) {
