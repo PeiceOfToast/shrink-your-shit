@@ -8,6 +8,8 @@
   {"key": "perLibraryFlow", "tab": "general", "group": "Per-library choices", "type": "checkbox", "id": "per-library",
    "label": "Let me choose per library",
    "hint": "Adds an extra choice to each library and one more menu item. The control level above always stays the same for every library."},
+  {"key": "languages", "tab": "general", "group": "Your languages", "type": "languages", "label": "Add a language",
+   "hint": "Audio and subtitles in these languages are kept when a library uses \"Keep only my languages\". Tracks with no language set are always kept."},
   {"key": "token", "tab": "general", "group": "Access", "type": "token", "label": "Access token",
    "hint": "Needed to open shrink-your-shit from another device."},
   {"key": "authRequired", "tab": "general", "type": "info"},

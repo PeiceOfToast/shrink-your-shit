@@ -7,16 +7,16 @@
   var DESC = ["Shrinks the most. Some files may lose a little detail. Best for space-starved drives.", "Smaller files, small quality trade-off.",
     "Shrinks most files with little visible change. A good start for most people.", "Keeps more detail. Only touches files with lots of room to shrink.",
     "Keeps nearly all detail. Only touches files with lots of room to shrink, so savings are small."];
-  var table = []; // the engine's slider table (crf, minSavingPct per position), read from the server
+  var warn = null; // the warnings notice above Save
 
   function say(t) { $("said").textContent = t; }
   // An earlier "Saved." must not stand beside the error.
   function fail(e) { say(""); var b = $("err"); b.firstChild.textContent = e && e.message || "Something went wrong. Nothing was changed."; b.hidden = false; }
   function facts() {
-    var v = slider.get().quality - 1, li = $("facts").children, row = table[v];
+    var v = slider.get().quality - 1, li = $("facts").children;
     $("desc").textContent = DESC[v];
     li[0].textContent = "Video: converted to a smaller format";
-    li[2].textContent = "Skipped: HDR and Dolby Vision files, files that are already small" + (row ? ", files that would shrink by less than " + row.minSavingPct + "%" : "");
+    li[2].textContent = "Skipped: HDR and Dolby Vision files"; // S1: no "already small" and no minimum saving
   }
   function head() {
     $("lib-title").textContent = lib.name; $("lib-path").textContent = lib.path; document.title = lib.name + " - shrink-your-shit";
@@ -37,7 +37,9 @@
     var body = editor.get(), choice = !$("share").hidden && document.querySelector('input[name="sh"]:checked').value;
     if (choice) body.sharedFlowChoice = choice;
     var first = custom ? api.replaceCustom({ id: id }).then(function () { custom = false; $("custom").hidden = true; }) : Promise.resolve();
-    first.then(function () { return api.putSetting({ id: id }, body); }).then(function () {
+    first.then(function () { return api.putSetting({ id: id }, body); }).then(function (r) {
+      // After saving, the saved setting's warnings: from the answer if it carries them, else asked for.
+      if (r && r.warnings) warn.show(r.warnings); else api.getSetting({ id: id }).then(function (s) { warn.show(s.warnings); }, function () {});
       $("share").hidden = true; say("Saved."); $("err").hidden = true;
     }, function (e) { if (e.code === "flow_shared") askShared(e.usedBy || []); else fail(e); });
   }
@@ -60,7 +62,9 @@
         sc.onload = function () { S.flowpick($("flowpick"), lib, say); }; document.head.appendChild(sc);
       }
       var get = function () { return editor ? editor.get() : setting; }; // the loaded setting until a level has its own editor
-      var extra = level === "standard" ? { sample: function () { return $("sf").value || null; }, onSample: showSample } : null;
+      warn = ui.warnings($("save")); warn.show(setting.warnings); // the saved setting's warnings, at every level
+      // At Standard the editor's Preview gives the warnings of the setting as edited, before it is saved.
+      var extra = level === "standard" ? { sample: function () { return $("sf").value || null; }, onSample: showSample, onWarnings: function (w) { warn.show(w); } } : null;
       prev = ui.preview($("pv"), id, get, extra);
       if (level === "standard") {
         custom = setting.kind === "custom";
@@ -86,8 +90,7 @@
         editor = slider = ed.slider($("slider"), setting.quality || 3, function () { facts(); prev.mark(); }, lib.name + ": smallest file to best quality");
         if (custom || more) $("save").textContent = "Use this slider setting";
         $("save").onclick = save;
-        // The slider's table comes from the server (echoed in the setting, or on its own for a custom setting).
-        Promise.resolve(setting.positions ? setting : api.getSliderTable()).then(function (t) { table = t.positions; facts(); }, facts);
+        facts();
       }
       $("scan").onclick = function () {
         api.scanLibrary({ id: id }).then(function () { say("Scan started. Progress shows in Activity."); return api.getLibrary({ id: id }); })

@@ -247,6 +247,20 @@ func (p Plan) Expect(src media.Info, packets int64) Expect {
 			n++
 		}
 	}
+	// A phone video's Display Matrix: ffmpeg encodes the picture upright, so a ±90° file's new picture
+	// has width and height swapped (before any scaling, which applies to the upright picture).
+	if vs := src.ByType("video"); p.Video.Index < len(vs) && vs[p.Video.Index].Quarter() {
+		n := 0
+		for k := range e.Streams {
+			if e.Streams[k].Type != "video" {
+				continue
+			}
+			if n == p.Video.Index {
+				e.Streams[k].Width, e.Streams[k].Height = e.Streams[k].Height, e.Streams[k].Width
+			}
+			n++
+		}
+	}
 	if p.Video.Height > 0 { // scaled down: the encoded stream's picture size is the new one
 		n := 0
 		for k := range e.Streams {
@@ -391,13 +405,19 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 		p.Skip, p.SkipCode = "it has no video", SkipNoVideo
 		return p
 	}
+	// The upright picture decides: a phone video's ±90° Display Matrix is encoded upright by ffmpeg,
+	// and the scale filter then works on the upright picture (review 44dbabe).
+	uw, uh := v.Width, v.Height
+	if v.Quarter() {
+		uw, uh = v.Height, v.Width
+	}
 	height := 0
-	if limit := resolutions[s.Resolution]; limit > 0 && v.Height > limit {
+	if limit := resolutions[s.Resolution]; limit > 0 && uh > limit {
 		height = limit // only ever smaller
 	}
-	w, h := v.Width, v.Height
+	w, h := uw, uh
 	if height > 0 {
-		w, h = ScaledWidth(v.Width, v.Height, height), height
+		w, h = ScaledWidth(uw, uh, height), height
 	}
 	crf := pos.CRF
 	switch {
