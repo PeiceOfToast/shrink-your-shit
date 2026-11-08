@@ -494,8 +494,9 @@ func TestAlwaysStandardizeMigration(t *testing.T) {
 		}
 	}
 	// a second start: the migration does not run again
-	s.Claim("w")
-	s.Keep(ids["/m/less.mkv"], kept["/m/less.mkv"])
+	// (set back to kept directly: claiming "the next job" would pick whichever was queued first, and the
+	// jobs above are queued in map order)
+	s.db.Exec(`UPDATE jobs SET status='kept', error=? WHERE id=?`, kept["/m/less.mkv"], ids["/m/less.mkv"])
 	s.Close()
 	s, err = Open(path)
 	if err != nil {
