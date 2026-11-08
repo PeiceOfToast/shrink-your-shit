@@ -16,10 +16,11 @@
   }
 
   g.SYP.folder = function (opt) {
-    var passed = false, pending = null;
+    var passed = false, pending = null, five = null;
     function set(ok) { passed = ok; if (opt.onChange) opt.onChange(ok, $("path").value.trim()); }
     function check() {
       var path = $("path").value.trim(), list = $("checks"); set(false);
+      if (five) five.stop(); five = null; $("first5").textContent = "";
       list.textContent = "";
       if (!path) return Promise.resolve();
       $("checks-h").hidden = $("check").hidden = false; // shown once the first check has started
@@ -40,6 +41,8 @@
           list.appendChild(line("ok", "OK", "Video converter works."));
           list.appendChild(line("ok", "OK", "We can read and change files in this folder."));
           list.appendChild(line("ok", "OK", ui.count(r.videoCount, "video", "videos") + " found (" + ui.bytes(r.totalBytes) + ")."));
+          // Once the checks pass: "Is this the right folder?" (redesign A3). It never holds up Continue / Add.
+          five = ui.firstFive($("first5"), path, function () { return api.firstFilesFor({}, { path: path }); });
         }
         (r.notes || []).forEach(function (n) {
           list.appendChild(n.code === "no_hw_encoder" ? line("idle", "Not found", "No graphics card help found. That is fine; the processor will be used.")
@@ -71,7 +74,7 @@
     return {
       check: function () { pending = check(); return pending; }, pending: function () { return pending; }, passed: function () { return passed; }, path: function () { return $("path").value.trim(); },
       set: function (p) { $("path").value = p; },
-      clear: function () { $("path").value = ""; $("checks").textContent = ""; $("checks-h").hidden = $("check").hidden = true; $("browser").hidden = true; set(false); }
+      clear: function () { if (five) five.stop(); five = null; $("first5").textContent = ""; $("path").value = ""; $("checks").textContent = ""; $("checks-h").hidden = $("check").hidden = true; $("browser").hidden = true; set(false); }
     };
   };
 })(window);
