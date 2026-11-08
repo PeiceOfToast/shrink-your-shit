@@ -258,3 +258,25 @@ func TestUnknownKindSubtitleIsCopied(t *testing.T) {
 		}
 	}
 }
+
+// Design 01:52Z: an AC-3/E-AC-3 surround track is copied (a 7.1 E-AC-3 stays 7.1); a 7.1 lossless or
+// DTS track becomes 5.1 E-AC-3, and the job's log says so once (also under MP4's lossless rule).
+func TestSevenOneFold(t *testing.T) {
+	compile := func(audio, fileType string, a media.Stream) Plan {
+		s := DefaultSelectors(3)
+		s.Audio, s.FileType, s.AfterConverting = audio, fileType, "beside"
+		return s.Template().Compile(withAudio(a))
+	}
+	if p := compile("eac3_surround", "keep", media.Stream{Codec: "dts", Channels: 8, BitrateKbps: 1536}); !p.AudioFolded || len(p.Tracks) != 1 || p.Tracks[0].Channels != 6 {
+		t.Errorf("7.1 DTS: folded %v %+v", p.AudioFolded, p.Tracks)
+	}
+	if p := compile("eac3_surround", "keep", media.Stream{Codec: "eac3", Channels: 8, BitrateKbps: 1024}); p.AudioFolded || len(p.Tracks) != 0 {
+		t.Errorf("7.1 E-AC-3 must be copied as it is: folded %v %+v", p.AudioFolded, p.Tracks)
+	}
+	if p := compile("as_is", "mp4", media.Stream{Codec: "truehd", Channels: 8}); !p.AudioFolded || len(p.Tracks) != 1 || p.Tracks[0].Codec != "eac3" {
+		t.Errorf("MP4 7.1 TrueHD: folded %v %+v", p.AudioFolded, p.Tracks)
+	}
+	if p := compile("eac3_surround", "keep", media.Stream{Codec: "truehd", Channels: 6}); p.AudioFolded {
+		t.Error("5.1 is not folded")
+	}
+}

@@ -87,6 +87,13 @@ func StandardAudio(a string, only bool) (choice string, onlyMine bool, changed b
 var AudioWords = map[string]string{"stereo_aac": "Stereo AAC", "stereo_aac_surround": "Stereo AAC, plus surround as it is",
 	"eac3_surround": "Surround E-AC-3", "ac3_surround": "Surround AC-3", "stereo_opus": "Stereo Opus", "as_is": "As it is"}
 
+// FoldedNote is said (once, in the job's log) when a 7.1 track became 5.1 E-AC-3 or AC-3 (design, 01:52Z).
+const FoldedNote = "7.1 sound became 5.1 (E-AC-3 and AC-3 hold up to 5.1)."
+
+// SmallKeptNote is said (once, in the job's log) when a small stereo track is kept as it is instead of
+// made stereo AAC/Opus: converting would not make it smaller (design, 02:26Z, REDESIGN A1).
+const SmallKeptNote = "Small stereo track kept as it is: converting would not make it smaller."
+
 // mp4Audio are the audio codecs an MP4 file can hold; any other kept track is made E-AC-3 there.
 var mp4Audio = map[string]bool{"aac": true, "ac3": true, "eac3": true, "mp3": true, "alac": true, "opus": true, "flac": true}
 
@@ -103,7 +110,7 @@ var mp4Audio = map[string]bool{"aac": true, "ac3": true, "eac3": true, "mp3": tr
 //
 // With no track in langs, the stereo choices keep the main track (mainUsed); the others keep every
 // track (allKept). In MP4 (mp4) a kept track it cannot hold (TrueHD, DTS, PCM) becomes E-AC-3.
-func planAudio(choice string, onlyMine bool, langs []string, info media.Info, mp4 bool) (ops []TrackOp, allKept, mainUsed bool) {
+func planAudio(choice string, onlyMine bool, langs []string, info media.Info, mp4 bool) (ops []TrackOp, allKept, mainUsed, smallKept bool) {
 	audio := info.Audio()
 	stereo := choice == "stereo_aac" || choice == "stereo_opus" || choice == "stereo_aac_surround"
 	keep := map[int]bool{}
@@ -145,6 +152,7 @@ func planAudio(choice string, onlyMine bool, langs []string, info media.Info, mp
 		// unknown bitrate, is copied. Surround is still made stereo: a downmix to 2 channels at 160 kbps
 		// is smaller than any lossy surround track.
 		if !a.Lossless() && a.Channels > 0 && a.Channels <= 2 && (a.BitrateKbps == 0 || a.BitrateKbps <= kbps) {
+			smallKept = true
 			return TrackOp{}, false
 		}
 		return TrackOp{Index: a.Index, Type: "audio", Encoder: encoder, Codec: codec, Kbps: kbps, Channels: 2}, true
@@ -186,7 +194,7 @@ func planAudio(choice string, onlyMine bool, langs []string, info media.Info, mp
 			ops = append(ops, op)
 		}
 	}
-	return append(ops, added...), allKept, mainUsed
+	return append(ops, added...), allKept, mainUsed, smallKept
 }
 
 // chIfFolded is the channels to ask for: 6 when a track has more than 5.1 (folded), else as it is.

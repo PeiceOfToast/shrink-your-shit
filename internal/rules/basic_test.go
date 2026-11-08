@@ -122,3 +122,25 @@ func TestBasicFacts(t *testing.T) {
 		t.Errorf("view %+v", s)
 	}
 }
+
+// Design 02:26Z: Basic keeps a small stereo MP3/AC-3 as it is (never bigger) and says so; the converted
+// file then counts as already in format on the next scan, so it is never picked up again (no loop).
+func TestSmallStereoKeptIsAlreadyInFormatNextScan(t *testing.T) {
+	mp3 := media.Stream{Index: 1, Type: "audio", Codec: "mp3", Channels: 2, BitrateKbps: 96, Language: "eng"}
+	src := h264(1920, 1080, 8000, mp3)
+	p := basic("", "eng").Compile(src)
+	if p.Skip != "" || len(p.Tracks) != 0 || !p.SmallKept {
+		t.Fatalf("first: skip %q tracks %+v small %v", p.Skip, p.Tracks, p.SmallKept)
+	}
+	out := h264(1920, 1080, 4000, mp3) // what the conversion made: HEVC in MKV, the MP3 as it was
+	out.Streams[0].Codec, out.VideoCodec = "hevc", "hevc"
+	if p := basic("", "eng").Compile(out); p.SkipCode != SkipAlreadyInFormat {
+		t.Errorf("next scan: %q %q (it would be converted again)", p.SkipCode, p.Skip)
+	}
+	ac3 := media.Stream{Index: 1, Type: "audio", Codec: "ac3", Channels: 2, Language: "eng"} // unknown bitrate: kept too
+	out2 := h264(1920, 1080, 4000, ac3)
+	out2.Streams[0].Codec, out2.VideoCodec = "hevc", "hevc"
+	if p := basic("", "eng").Compile(out2); p.SkipCode != SkipAlreadyInFormat {
+		t.Errorf("AC-3 stereo next scan: %q", p.SkipCode)
+	}
+}

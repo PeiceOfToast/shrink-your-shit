@@ -30,6 +30,8 @@ type Plan struct {
 	AllAudioKept    bool        `json:"allAudioKept,omitempty"`  // "my languages" matched no audio track, so all of it is kept
 	MainAudioUsed   bool        `json:"mainAudioUsed,omitempty"` // Basic's stereo AAC matched no track: the main one is kept (S4)
 	HDRNote         string      `json:"hdrNote,omitempty"`       // what an HDR conversion does not keep (S3): HDR10+ scene data, Dolby Vision
+	AudioFolded     bool        `json:"audioFolded,omitempty"`   // a 7.1 track became 5.1 E-AC-3/AC-3: the job log says FoldedNote (design, 01:52Z)
+	SmallKept       bool        `json:"smallKept,omitempty"`     // a small stereo track kept as it is: the job log says SmallKeptNote (design, 02:26Z)
 	AudioOrder      []int       `json:"audioOrder,omitempty"`    // the original's audio stream indexes in order, when Tracks has any
 	SubtitleOrder   []int       `json:"subtitleOrder,omitempty"` // and its subtitle stream indexes
 	MinSSIM         float64     `json:"minSSIM,omitempty"`       // picture threshold; 0 = the program's -min-ssim
@@ -563,7 +565,14 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 		p.Container = "mkv"
 	}
 	mp4 := p.Container == "mp4" || (p.Container == "" && strings.Contains(info.Container, "mp4"))
-	p.Tracks, p.AllAudioKept, p.MainAudioUsed = planAudio(choice, onlyMine, langs, info, mp4)
+	p.Tracks, p.AllAudioKept, p.MainAudioUsed, p.SmallKept = planAudio(choice, onlyMine, langs, info, mp4)
+	for _, o := range p.Tracks { // a converted track folded from more than 5.1
+		for _, a := range info.Audio() {
+			if a.Index == o.Index && o.Channels == 6 && a.Channels > 6 {
+				p.AudioFolded = true
+			}
+		}
+	}
 	p.Tracks = append(p.Tracks, planSubtitles(s.Subtitles, langs, info)...)
 	p.Tracks = append(p.Tracks, movTextToSRT(p.Tracks, p.Container, info)...)
 	if len(p.Tracks) > 0 {

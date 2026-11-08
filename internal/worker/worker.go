@@ -519,6 +519,12 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if plan.MainAudioUsed { // Basic's stereo AAC found no track in the person's languages (S4)
 		w.jobf(job.ID, " (%s): %s", job.Path, rules.NoAudioInMyLanguageMain)
 	}
+	if plan.SmallKept { // design, 02:26Z: once per file
+		w.jobf(job.ID, " (%s): %s", job.Path, rules.SmallKeptNote)
+	}
+	if plan.AudioFolded { // design, 01:52Z: once per file
+		w.jobf(job.ID, " (%s): %s", job.Path, rules.FoldedNote)
+	}
 	if plan.HDRNote != "" { // what the HDR conversion does not keep (S3)
 		w.jobf(job.ID, " (%s): %s", job.Path, plan.HDRNote)
 	}
