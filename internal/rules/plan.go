@@ -578,6 +578,23 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 		container = "mp4"
 	}
 	p.Tracks, p.AllAudioKept, p.MainAudioUsed, p.SmallKept = planAudio(choice, onlyMine, langs, info, container)
+	// "Keep the file type" for a .webm whose new file WebM can't hold (video other than VP9 or AV1, audio
+	// other than Opus or Vorbis): MKV, which holds both (backlog after #93).
+	if p.Container == "" && info.Ext == ".webm" {
+		var cant []string
+		if target != "vp9" && target != "av1" {
+			cant = append(cant, vf.Name+" video")
+		}
+		for _, o := range p.Tracks {
+			if o.Type == "audio" && !o.Drop && o.Codec != "" && o.Codec != "opus" && o.Codec != "vorbis" {
+				cant = append(cant, audioCodecWords(o.Codec))
+				break
+			}
+		}
+		if len(cant) > 0 {
+			p.Container, p.TypeNote = "mkv", "File type changed to MKV: WebM files can't hold "+strings.Join(cant, " or ")+"."
+		}
+	}
 	for _, o := range p.Tracks { // a converted track folded from more than 5.1
 		for _, a := range info.Audio() {
 			if a.Index == o.Index && o.Channels == 6 && a.Channels > 6 {
@@ -599,8 +616,12 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 		p.Skip, p.SkipCode = why, SkipCannotKeepTrack
 		return p
 	}
-	if remux && (p.Container == "" || info.Container == Containers[p.Container]) && !p.changesTracks() {
-		p.Skip, p.SkipCode = "it is already "+vf.Name+" in "+containerWords(info.Container)+" with the audio you chose", SkipAlreadyInFormat
+	if remux && (p.Container == "" || inContainer(info, p.Container)) && !p.changesTracks() {
+		words := containerWords(info.Container)
+		if info.Ext == ".webm" {
+			words = "WebM"
+		}
+		p.Skip, p.SkipCode = "it is already "+vf.Name+" in "+words+" with the audio you chose", SkipAlreadyInFormat
 		return p
 	}
 	p.Reason = fmt.Sprintf("%s at %d kbps", name, videoKbps(info, v))
@@ -855,4 +876,29 @@ func audioEstimateKbps(a media.Stream) int {
 		return 1024
 	}
 	return min(160*ch, 640)
+}
+
+// audioCodecWords is an audio codec as the log names it.
+func audioCodecWords(c string) string {
+	switch c {
+	case "aac":
+		return "AAC"
+	case "eac3":
+		return "E-AC-3"
+	case "ac3":
+		return "AC-3"
+	}
+	return strings.ToUpper(c)
+}
+
+// inContainer reports whether the file is already of type c (mkv, mp4, webm). ffprobe names MKV and WebM
+// alike, so the file's extension tells them apart (review 32a307d); a probe from before Ext counts as MKV.
+func inContainer(info media.Info, c string) bool {
+	switch c {
+	case "webm":
+		return info.Ext == ".webm"
+	case "mkv":
+		return info.Container == Containers["mkv"] && info.Ext != ".webm"
+	}
+	return info.Container == Containers[c]
 }

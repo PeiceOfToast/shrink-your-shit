@@ -21,7 +21,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
-var videoExt = map[string]bool{".mkv": true, ".mp4": true, ".m4v": true, ".avi": true, ".mov": true, ".ts": true, ".wmv": true}
+var videoExt = map[string]bool{".mkv": true, ".mp4": true, ".m4v": true, ".avi": true, ".mov": true, ".ts": true, ".wmv": true, ".webm": true}
 
 // IsVideo reports whether the path looks like a video we handle.
 // Our own temp and output files are ignored.
