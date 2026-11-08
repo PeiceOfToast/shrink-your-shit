@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -125,5 +126,51 @@ func TestFilesViewBeside(t *testing.T) {
 	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/activity/files/" + itoa(id) + "/log"})
 	if !strings.Contains(body, `"step":"kept"`) || strings.Contains(body, `"step":"replaced"`) {
 		t.Errorf("summary %s", body)
+	}
+}
+
+// Live QA 03:03Z: a Replace job's processed row (an originals row, whose aside column is TEXT) and a
+// Beside one list together; scanning aside as a bool made every Replace row a 500.
+func TestFilesViewReplaceAndBeside(t *testing.T) {
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	st.SetPaused(false)
+	a, _, _ := OpenAccess(t.TempDir(), false)
+	srv := httptest.NewServer(Handler(st, a, Engine{RunLogs: &runlog.Logs{Dir: t.TempDir()}}))
+	defer srv.Close()
+	lib, _ := st.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
+	m := lib.Path
+	replaced, _ := st.Enqueue(jobs.Job{Library: m, LibraryID: lib.ID, Path: filepath.Join(m, "Replaced.mkv"), SizeBefore: 1000})
+	st.Claim("w")
+	o, err := st.BeginSwap(jobs.Original{JobID: replaced, LibraryID: lib.ID, Path: filepath.Join(m, "Replaced.mkv"),
+		Trash: filepath.Join(m, ".syp-trash", "Replaced.mkv"), NewPath: filepath.Join(m, "Replaced.mkv")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishSwap(o, time.Now().Add(72*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	st.Complete(replaced, filepath.Join(m, "Replaced.mkv"), 400)
+	beside, _ := st.Enqueue(jobs.Job{Library: m, LibraryID: lib.ID, Path: filepath.Join(m, "Beside.mkv"), SizeBefore: 1000})
+	st.Claim("w")
+	st.Complete(beside, filepath.Join(m, "Beside.hevc.mkv"), 400)
+
+	code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/activity/files?show=processed"})
+	if code != 200 {
+		t.Fatalf("processed: %d %s", code, body)
+	}
+	var v struct{ Items []map[string]any }
+	if err := json.Unmarshal([]byte(body), &v); err != nil || len(v.Items) != 2 {
+		t.Fatalf("processed items: %v %s", err, body)
+	}
+	states := map[any]any{}
+	for _, it := range v.Items {
+		states[it["name"]] = it["originalState"]
+	}
+	if states["Replaced.mkv"] != jobs.OriginalKept || states["Beside.mkv"] != "kept_beside" {
+		t.Errorf("original states %v", states)
 	}
 }

@@ -51,7 +51,7 @@ type FileRow struct {
 	OriginalDeleteOn      string
 	OriginalKeptAt        string
 	OutputPath            string
-	OriginalAside, Beside bool // kept beside (the output is another file next to it)
+	Beside                bool // kept beside (the output is another file next to it)
 }
 
 // nameOf is SQL for the lower-case file name of a path column (no basename function in SQLite: the
@@ -166,7 +166,7 @@ func (s *Store) FileList(f FileFilter) (rows []FileRow, total int, counts map[st
 		}
 		r, err := s.db.Query(`SELECT j.id, COALESCE(j.library_id,0), COALESCE(l.name, j.library), j.path, COALESCE(o.new_path,''), j.status,
   COALESCE(j.error,''), j.attempts, COALESCE(j.retry_at,''), j.size_before, COALESCE(j.size_after,0), j.duration, j.updated,
-  COALESCE(fl.id,0), COALESCE(fl.name,''), COALESCE(o.id,0), COALESCE(o.state,''), COALESCE(o.delete_on,''), COALESCE(o.kept_at,''), j.output_path, COALESCE(o.aside,0),
+  COALESCE(fl.id,0), COALESCE(fl.name,''), COALESCE(o.id,0), COALESCE(o.state,''), COALESCE(o.delete_on,''), COALESCE(o.kept_at,''), j.output_path,
   j.output_path<>'' AND j.output_path<>j.path AND o.id IS NULL `+jobFrom+` WHERE `+cond+` ORDER BY `+jobOrder[f.Show]+` LIMIT ? OFFSET ?`,
 			append(args, f.Limit, f.Offset)...)
 		if err != nil {
@@ -177,7 +177,7 @@ func (s *Store) FileList(f FileFilter) (rows []FileRow, total int, counts map[st
 			var row FileRow
 			if err := r.Scan(&row.JobID, &row.LibraryID, &row.Library, &row.Path, &row.NewPath, &row.Status, &row.Error, &row.Attempts,
 				&row.RetryAt, &row.SizeBefore, &row.SizeAfter, &row.DurationSec, &row.Updated, &row.FlowID, &row.FlowName,
-				&row.OriginalID, &row.OriginalState, &row.OriginalDeleteOn, &row.OriginalKeptAt, &row.OutputPath, &row.OriginalAside, &row.Beside); err != nil {
+				&row.OriginalID, &row.OriginalState, &row.OriginalDeleteOn, &row.OriginalKeptAt, &row.OutputPath, &row.Beside); err != nil {
 				return nil, 0, nil, err
 			}
 			rows = append(rows, row)
