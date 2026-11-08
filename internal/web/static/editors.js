@@ -100,17 +100,12 @@
         var l = el("label", null, "Ignore paths containing"); l.htmlFor = igId;
         ig.appendChild(l); ig.appendChild(igIn); ig.appendChild(igH); fs.appendChild(ig); rules.ignore = igIn;
         igIn.addEventListener("change", changed);
-        [["skipHdr", "Skip HDR and Dolby Vision files", "Recommended. Converting them can damage the picture."], ["skipSmall", "Skip files that are already small", ""]].forEach(function (c) {
+        [["skipHdr", "Skip HDR and Dolby Vision files", "Recommended. Converting them can damage the picture."]].forEach(function (c) {
           var row = el("div", "check"), cb = el("input"), id = uid(), lb = el("label", null, c[1]);
           cb.type = "checkbox"; cb.id = id; cb.checked = v[c[0]] != null ? !!v[c[0]] : true; lb.htmlFor = id;
           if (c[2]) { lb.appendChild(document.createElement("br")); lb.appendChild(el("span", "hint", c[2])); }
           row.appendChild(cb); row.appendChild(lb); fs.appendChild(row); rules[c[0]] = cb; cb.addEventListener("change", changed);
         });
-        var ms = el("div", "field"), msId = uid(), msIn = el("input"), ml = el("label", null, "Keep the new file only if it is at least this much smaller (%)");
-        msIn.type = "number"; msIn.id = msId; msIn.min = 1; msIn.max = 90; msIn.value = v.minSavingPct != null ? v.minSavingPct : 10; msIn.style.width = "6rem"; ml.htmlFor = msId;
-        var msH = el("span", "hint"); msH.id = msId + "h"; msIn.setAttribute("aria-describedby", msH.id);
-        ms.appendChild(ml); ms.appendChild(msIn); ms.appendChild(msH); fs.appendChild(ms); rules.minSavingPct = msIn; rules.msHint = msH; msIn.addEventListener("change", changed);
-        msIn.addEventListener("input", function () { edited = true; follow(); });
       }
       host.appendChild(fs);
     });
@@ -126,28 +121,14 @@
       acSel.addEventListener("change", syncFt);
       syncFt();
     }
-    // Minimum saving follows Quality (the slider's value for that position) until the person types their own.
-    var table = null, edited = false;
-    function follow() {
-      var p = table && table[+fields.quality.value - 1]; if (!p) return;
-      if (!edited) rules.minSavingPct.value = p.minSavingPct;
-      rules.msHint.textContent = edited ? "Your own value. Quality's default is " + p.minSavingPct + "% for " + p.name + "."
-        : "Follows Quality (" + p.minSavingPct + "% for " + p.name + "). If you change it, it stays as you set it.";
-    }
-    fields.quality.addEventListener("change", follow);
     // The person's languages are one global setting (Settings > General), not part of the library's setting.
     g.SYP.api.getSettings().then(function (st) { noLanguages = !(st.languages || []).length; syncs.forEach(function (f) { f(); }); }, function () {});
-    g.SYP.api.getSliderTable().then(function (t) {
-      table = t.positions; var p = table[+fields.quality.value - 1];
-      if (v.minSavingPct != null && p && v.minSavingPct !== p.minSavingPct) edited = true; // a saved value of its own stays put
-      follow();
-    }, function () {});
     return {
       get: function () {
         var b = {}, k;
         for (k in fields) b[k] = k === "quality" ? +fields[k].value : fields[k].value;
         b.ignore = rules.ignore.value.split("\n").map(function (x) { return x.trim(); }).filter(Boolean);
-        b.skipHdr = rules.skipHdr.checked; b.skipSmall = rules.skipSmall.checked; b.minSavingPct = +rules.minSavingPct.value;
+        b.skipHdr = rules.skipHdr.checked; // no minimum saving and no "already small" since workshop S1 (always standardize)
         return b;
       }
     };

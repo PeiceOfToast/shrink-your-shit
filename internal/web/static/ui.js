@@ -6,14 +6,14 @@
   ui.QUALITY = ["Smallest file", "Smaller", "Balanced", "Better quality", "Best quality"];
   // Skipped reasons are an open list: anything not named here is shown from its own text.
   ui.REASONS = {
-    already_efficient: "already efficient", would_not_shrink: "would not get smaller", already_hevc: "already in the new format",
+    already_efficient: "already efficient", already_hevc: "already in the new format",
     hdr_dv: "HDR or Dolby Vision", bitmap_subs: "picture subtitles that cannot be kept", shared_file: "shared with another folder",
     // symlink: only links pointing outside the library (workshop, slice 23).
     symlink: "a link to a file outside this library", unreadable: "unreadable", cannot_keep_track: "a track that cannot be kept",
     user_stopped: "you stopped it", restored: "you restored the original",
     // Workshop slice 19 (contract: four more skipped reason codes); design's words, 2026-11-07.
     format_not_converted: "a format this version doesn't convert", no_video: "no video in the file",
-    unknown_bitrate: "not enough information to judge safely", setting_cannot_run: "the library's setting can't be used on it",
+    setting_cannot_run: "the library's setting can't be used on it",
     // Workshop slice 23 (file guards); design's words, 13:00Z.
     still_changing: "still changing, we'll look again on the next scan"
   };

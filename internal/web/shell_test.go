@@ -576,8 +576,10 @@ func TestSkipReasonsHaveWords(t *testing.T) {
 		code.WriteString(line + "\n")
 	}
 	// The contract's skip reason codes (UI-API-CONTRACT.md: skipped reasons, addenda and slice additions).
-	contract := []string{"already_efficient", "would_not_shrink", "already_hevc", "hdr_dv", "bitmap_subs", "shared_file", "symlink",
-		"unreadable", "cannot_keep_track", "user_stopped", "restored", "format_not_converted", "no_video", "unknown_bitrate",
+	// would_not_shrink and unknown_bitrate no longer occur (workshop S1, always standardize); already_efficient stays for a
+	// legacy flow's -min-bitrate.
+	contract := []string{"already_efficient", "already_hevc", "hdr_dv", "bitmap_subs", "shared_file", "symlink",
+		"unreadable", "cannot_keep_track", "user_stopped", "restored", "format_not_converted", "no_video",
 		"setting_cannot_run", "still_changing"}
 	for _, r := range contract {
 		if !regexp.MustCompile(`\b` + r + `: "`).MatchString(code.String()) {
