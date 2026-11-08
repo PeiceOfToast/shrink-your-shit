@@ -214,6 +214,7 @@ func TestLossless71Ceiling(t *testing.T) {
 
 // Design (a), 02:30Z: "Keep as is" with VP9 or Opus warns that .mp4 files become .mkv (Save not blocked).
 func TestKeepVP9OpusWarning(t *testing.T) {
+	out := t.TempDir() // a full path on every OS (/out is not one on Windows)
 	SetAvailableFormats(allEncoders)
 	defer SetAvailableFormats(nil)
 	for name, c := range map[string]struct {
@@ -226,7 +227,7 @@ func TestKeepVP9OpusWarning(t *testing.T) {
 		"hevc keep":        {func(s *Selectors) { s.FileType = "keep" }, false},
 		"vp9 keep, beside": {func(s *Selectors) { s.Format, s.FileType, s.AfterConverting = "vp9", "keep", "beside" }, false},
 		"opus keep, folder": {func(s *Selectors) {
-			s.Audio, s.FileType, s.AfterConverting, s.OutputDir = "stereo_opus", "keep", "folder", "/out"
+			s.Audio, s.FileType, s.AfterConverting, s.OutputDir = "stereo_opus", "keep", "folder", out
 		}, false},
 	} {
 		s := DefaultSelectors(3)

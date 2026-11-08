@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -205,7 +206,7 @@ func TestCheckOutput(t *testing.T) {
 	}
 	ro := filepath.Join(t.TempDir(), "ro")
 	os.MkdirAll(ro, 0o555)
-	if os.Getuid() != 0 { // root writes anywhere
+	if os.Getuid() != 0 && runtime.GOOS != "windows" { // root writes anywhere; Windows ignores a folder's read-only mode
 		if got := check(ro); !strings.Contains(got, "not_writable") {
 			t.Errorf("read-only: %s", got)
 		}
