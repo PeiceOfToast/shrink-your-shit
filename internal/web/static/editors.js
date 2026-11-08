@@ -146,12 +146,11 @@
         var l = el("label", null, "Ignore paths containing"); l.htmlFor = igId;
         ig.appendChild(l); ig.appendChild(igIn); ig.appendChild(igH); fs.appendChild(ig); rules.ignore = igIn;
         igIn.addEventListener("change", changed);
-        [["skipHdr", "Skip HDR and Dolby Vision files", "Recommended. Converting them can damage the picture."]].forEach(function (c) {
-          var row = el("div", "check"), cb = el("input"), id = uid(), lb = el("label", null, c[1]);
-          cb.type = "checkbox"; cb.id = id; cb.checked = v[c[0]] != null ? !!v[c[0]] : true; lb.htmlFor = id;
-          if (c[2]) { lb.appendChild(document.createElement("br")); lb.appendChild(el("span", "hint", c[2])); }
-          row.appendChild(cb); row.appendChild(lb); fs.appendChild(row); rules[c[0]] = cb; cb.addEventListener("change", changed);
-        });
+        // Workshop S3: HDR10 is always converted with its HDR kept; only Dolby Vision is a choice (design, REDESIGN E).
+        var dv = el("div", "check"), dcb = el("input"), did = uid(), dlb = el("label", null, "Include Dolby Vision files"), dh = el("span", "hint", "Off: Dolby Vision files are left as they are. On: they become HDR10 and the Dolby Vision layer is removed. Some Dolby Vision files (profile 5) are always left alone, because converting them would show wrong colours.");
+        dcb.type = "checkbox"; dcb.id = did; dcb.checked = !!v.includeDolbyVision; dlb.htmlFor = did; dh.id = did + "h"; dcb.setAttribute("aria-describedby", dh.id);
+        dlb.appendChild(document.createElement("br")); dlb.appendChild(dh); dv.appendChild(dcb); dv.appendChild(dlb); fs.appendChild(dv); rules.dv = dcb;
+        dcb.addEventListener("change", changed);
       }
       host.appendChild(fs);
     });
@@ -174,7 +173,7 @@
         var b = {}, k;
         for (k in fields) b[k] = k === "quality" ? +fields[k].value : fields[k].value;
         b.ignore = rules.ignore.value.split("\n").map(function (x) { return x.trim(); }).filter(Boolean);
-        b.skipHdr = rules.skipHdr.checked; // no minimum saving and no "already small" since workshop S1 (always standardize)
+        b.includeDolbyVision = rules.dv.checked; // S3: skipHdr is gone (HDR10 always keeps its HDR); S1: no minimum saving
         return b;
       }
     };

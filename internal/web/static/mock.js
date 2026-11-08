@@ -188,12 +188,11 @@
     var t = { replace: ["keep", "mkv", "mp4"], beside: ["keep", "mkv", "mp4"] };
     return { availableFormats: ["hevc"], availableAudio: a, availableSubtitles: s, availableFileTypes: t };
   }
-  // The setting's warnings, in the server's order (rules.Template.Warnings; design's wording): HDR (slice 25a) and the
-  // rename when Replace changes the file type (25a-2, mkv and mp4 wordings). Only the mock holds a copy of them.
-  var HDR_WARNING = 'HDR and Dolby Vision files will be converted without their HDR information, so they can look washed out. Turn "Skip HDR and Dolby Vision files" back on to leave them as they are.';
+  // The setting's warnings, in the server's order (rules.Template.Warnings; design's wording): the rename when Replace
+  // changes the file type (25a-2, mkv and mp4 wordings). The HDR warning retired with S3 (HDR10 keeps its HDR). Only the
+  // mock holds a copy of them.
   function warningsFor(s) {
     var w = []; if (!s) return w;
-    if (s.skipHdr === false) w.push(HDR_WARNING);
     if (s.afterConverting === "replace" && (s.fileType === "mkv" || s.fileType === "mp4"))
       w.push("Changing the file type renames each file (" + (s.fileType === "mkv" ? "movie.mp4 becomes movie.mkv" : "movie.mkv becomes movie.mp4") + "). Radarr, Sonarr, Plex or Jellyfin may lose track of the renamed files: after converting, rescan this library in those apps.");
     return w;
