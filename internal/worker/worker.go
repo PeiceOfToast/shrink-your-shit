@@ -64,6 +64,9 @@ const (
 	Replace OutputMode = "replace"
 	// Beside keeps the original and writes name.hevc.ext next to it.
 	Beside OutputMode = "beside"
+	// Folder (S6) keeps the original where it is and writes the new file to another folder, in the same
+	// sub-folders as in its library, under the same name (its new type's extension).
+	Folder OutputMode = "folder"
 )
 
 // Worker pulls jobs from a Queue and runs ffmpeg.
@@ -307,7 +310,9 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 	// before and after, also when the new file is not smaller (it is kept: always standardize)
 	w.jobf(job.ID, ": done, %s: %s -> %s", final, rules.HumanBytes(job.SizeBefore), rules.HumanBytes(size))
 	w.Queue.AddStep(job.ID, "verified", true, "Every check passed: the new file is complete, plays cleanly and looks like the original.")
-	if w.Mode == Beside {
+	if filepath.Dir(final) != filepath.Dir(job.Path) { // "Save to another folder" (S6)
+		w.Queue.AddStep(job.ID, "kept", true, "The new file was written to "+filepath.Dir(final)+"; the original stays where it is.")
+	} else if w.Mode == Beside {
 		w.Queue.AddStep(job.ID, "kept", true, "The new file was written next to the original, which stays as it is.")
 	} else {
 		w.Queue.AddStep(job.ID, "replaced", true, fmt.Sprintf("The new file is in place: %s to %s.", rules.HumanBytes(job.SizeBefore), rules.HumanBytes(size)))
@@ -511,20 +516,42 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// the result must look like. Whether to convert it was the scanner's decision (as before Plans);
 	// only a flow that cannot say how to convert stops the job here.
 	plan := tmpl.Compile(src)
-	if plan.MainAudioUsed { // Basic's stereo AAC found no track in the person's languages (S4)
-		w.jobf(job.ID, " (%s): %s", job.Path, rules.NoAudioInMyLanguageMain)
-	}
-	if plan.HDRNote != "" { // what the HDR conversion does not keep (S3)
-		w.jobf(job.ID, " (%s): %s", job.Path, plan.HDRNote)
-	}
 	// Dolby Vision the flow leaves alone is never encoded, whatever was decided when the job was queued
 	// (review a09f6f5: a job queued before migration 17 or a setting change). Only these skips: the
 	// others stay the scanner's decision, as before Plans.
 	if words, code := tmpl.DolbyVisionHold(src); code != "" { // from the probe, not the Plan's skip (review 7ab8f72)
 		return "", &SkippedError{Words: words, Code: code}
 	}
+	// Any skip of the Plan made now (the flow changed since the job was queued: an HDR file with a
+	// non-HEVC target, a choice that can't run...) ends the job as a skipped file with that reason,
+	// never an encode (review 6cafc6f: the second such case after Dolby Vision). The scanner's rules
+	// for what is queued are unchanged.
+	if plan.Skip != "" {
+		code := plan.SkipCode
+		if code == "" {
+			code = rules.SkipSettingCannotRun
+		}
+		return "", &SkippedError{Words: plan.Skip, Code: code}
+	}
 	if plan.Video.Codec == "" {
 		return "", failed("This library's setting can't convert this file, so it was left as it is.", fmt.Errorf("its library's flow cannot convert it: %s", plan.Skip))
+	}
+	// What the conversion will do, logged only now that it runs (review 48f07eb: a skipped Plan
+	// converts nothing, so its notes would be untrue).
+	if plan.MainAudioUsed { // Basic's stereo AAC found no track in the person's languages (S4)
+		w.jobf(job.ID, " (%s): %s", job.Path, rules.NoAudioInMyLanguageMain)
+	}
+	if plan.TypeNote != "" { // "keep" made this MP4 an MKV (review 4ac9c0d)
+		w.jobf(job.ID, " (%s): %s", job.Path, plan.TypeNote)
+	}
+	if plan.SmallKept { // design, 02:26Z: once per file
+		w.jobf(job.ID, " (%s): %s", job.Path, rules.SmallKeptNote)
+	}
+	if plan.AudioFolded { // design, 01:52Z: once per file
+		w.jobf(job.ID, " (%s): %s", job.Path, rules.FoldedNote)
+	}
+	if plan.HDRNote != "" { // what the HDR conversion does not keep (S3)
+		w.jobf(job.ID, " (%s): %s", job.Path, plan.HDRNote)
 	}
 	exp := plan.Expect(src, packets)
 	if exp.DurationSec <= 0 {
@@ -548,12 +575,25 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// Where the new file goes: beside the original, at its name, or, in replace mode with another file
 	// type, at its name with the new extension (25a-2).
 	newName := rules.ReplaceName(job.Path, ext)
-	if OutputMode(plan.Output) == Beside {
+	switch OutputMode(plan.Output) {
+	case Beside:
 		newName = BesidePathAs(job.Path, ext)
+	case Folder:
+		newName = FolderPath(plan.OutputDir, job.Library, job.Path, ext)
+		if err := os.MkdirAll(filepath.Dir(newName), 0o755); err != nil {
+			return "", failed("The folder for new files can't be written to, so nothing was converted. Your original was not touched. Check the flow's folder, then press Retry.", err)
+		}
+		if err := w.preflight(newName, before.Size()); err != nil { // its own disk: the new file is made there (review 6cafc6f)
+			return "", err
+		}
 	}
-	if OutputMode(plan.Output) == Beside { // the name is taken already: no point converting (checked again at the end)
+	if keepsOriginal(plan) { // the name is taken already: no point converting (checked again at the end)
 		if _, err := os.Lstat(newName); err == nil {
-			return "", failed(fmt.Sprintf("There is already a file named %s next to the original, so the new file was not made. Nothing was changed. Move or rename that file, then press Retry.", filepath.Base(newName)), fs.ErrExist)
+			where := "next to the original"
+			if OutputMode(plan.Output) == Folder {
+				where = "in the folder for new files"
+			}
+			return "", failed(fmt.Sprintf("There is already a file named %s %s, so the new file was not made. Nothing was changed. Move or rename that file, then press Retry.", filepath.Base(newName), where), fs.ErrExist)
 		}
 	} else if newName != job.Path && exists(newName) { // a renaming replace never replaces another file
 		return "", failed(rules.NameTaken(newName), fs.ErrExist)
@@ -565,7 +605,11 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			return "", failed(srtTaken(name), fs.ErrExist)
 		}
 	}
-	stage, err = newStaged(job.Path, ext)
+	stageNear := job.Path
+	if OutputMode(plan.Output) == Folder {
+		stageNear = newName // staged in the folder for new files: the last step is a rename on its disk
+	}
+	stage, err = newStaged(stageNear, ext)
 	if err != nil {
 		return "", err
 	}
@@ -691,7 +735,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if w.KeepDays != nil {
 		days = w.KeepDays()
 	}
-	renaming := OutputMode(plan.Output) != Beside && final != job.Path
+	renaming := !keepsOriginal(plan) && final != job.Path
 	if renaming && w.Journal == nil {
 		return "", failed("This setting changes the file type, which needs the record of kept originals, and it is not available here. Your original was not touched.", errors.New("no journal"))
 	}
@@ -706,8 +750,8 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		return final, nil
 	}
 	move := moveIntoPlace
-	if OutputMode(plan.Output) == Beside {
-		move = moveBeside // "Put the new file next to the original": never over another file
+	if keepsOriginal(plan) {
+		move = moveBeside // beside or in another folder: never over another file
 	}
 	if err := move(ctx, tmp, final, stillOK); err != nil {
 		removePlaced()
@@ -1052,4 +1096,19 @@ func renameRetry(ctx context.Context, rename func(a, b string) error, a, b strin
 		}
 	}
 	return err
+}
+
+// keepsOriginal is whether the plan leaves the original where it is (beside, or another folder, S6).
+func keepsOriginal(plan rules.Plan) bool {
+	return OutputMode(plan.Output) == Beside || OutputMode(plan.Output) == Folder
+}
+
+// FolderPath is where "Save to another folder" (S6) puts the new file of src (in library lib): the same
+// sub-folders under dir, the same name with ext.
+func FolderPath(dir, lib, src, ext string) string {
+	name := strings.TrimSuffix(filepath.Base(src), filepath.Ext(src)) + ext
+	if rel, err := filepath.Rel(lib, filepath.Dir(src)); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return filepath.Join(dir, rel, name)
+	}
+	return filepath.Join(dir, name)
 }

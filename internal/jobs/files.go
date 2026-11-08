@@ -3,7 +3,10 @@
 package jobs
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"strings"
 )
 
@@ -193,4 +196,35 @@ func (s *Store) KeptBeside(id int64) bool {
 	s.db.QueryRow(`SELECT COUNT(*) FROM jobs j WHERE j.id=? AND j.status='done' AND j.output_path<>'' AND j.output_path<>j.path
   AND NOT EXISTS (SELECT 1 FROM originals WHERE job_id=j.id)`, id).Scan(&n)
 	return n > 0
+}
+
+// FlowShapes are the distinct video shapes (ladder row, HDR, 50-60 fps) of the probed files in the
+// libraries using flow flowID: what the rough-picture warning looks at (S6). At most 20,000 probes read.
+func (s *Store) FlowShapes(flowID int64) ([]rules.Shape, error) {
+	rows, err := s.db.Query(`SELECT p.info FROM probes p JOIN libraries l ON l.flow_id=?
+  AND substr(replace(p.path,'\','/'),1,length(rtrim(replace(l.path,'\','/'),'/'))+1)=rtrim(replace(l.path,'\','/'),'/')||'/'
+  ORDER BY p.rowid DESC LIMIT 20000`, flowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	seen := map[rules.Shape]bool{}
+	var out []rules.Shape
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		var info media.Info
+		if json.Unmarshal([]byte(raw), &info) != nil {
+			continue
+		}
+		if v := info.Video(); v != nil && v.Height > 0 {
+			if sh := rules.ShapeOf(v); !seen[sh] {
+				seen[sh] = true
+				out = append(out, sh)
+			}
+		}
+	}
+	return out, rows.Err()
 }

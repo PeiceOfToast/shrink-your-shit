@@ -24,6 +24,10 @@ type TrackOp struct {
 	// name part between the new file's name and ".srt": "eng", "eng.forced", "" (no language), "eng.2".
 	Extract string `json:"extract,omitempty"`
 	ToFile  bool   `json:"toFile,omitempty"` // it is saved as an .srt file (Extract may be "")
+	// Add: a new track made from this one (S6's "Stereo AAC, plus surround"), placed after the kept
+	// audio tracks; the original track is kept as it is.
+	Add      bool   `json:"add,omitempty"`
+	Language string `json:"language,omitempty"` // an added track's language (its source's)
 }
 
 // audioTargets are the codecs the audio choices convert to: ffmpeg encoder, codec name, kbps per channel.
@@ -34,6 +38,7 @@ var audioTargets = map[string]struct {
 	"aac":  {"aac", "aac", 64},
 	"opus": {"libopus", "opus", 48},
 	"eac3": {"eac3", "eac3", 96},
+	"ac3":  {"ac3", "ac3", 96},
 }
 
 // maxAudioKbps caps the automatic bitrate of one converted track.
@@ -59,63 +64,161 @@ const SubtitlesStayInside = "Picture subtitles stay inside the file; only text s
 // LanguagesNeeded is the 400 for "my languages" before any language is chosen (design's words).
 const LanguagesNeeded = "Choose your languages first, in Settings > General."
 
-// planAudio decides each audio track of info under choice (Selectors.Audio) and the person's languages:
-//   - keep_all: every track copied (no ops);
-//   - my_languages: tracks in langs, and tracks with no language (we cannot tell), are kept; the rest
-//     dropped. If none would be left, every track is kept (allKept true);
-//   - aac / eac3 / opus: every track converted to that codec at the automatic bitrate, except one
-//     already in that codec, or one whose bitrate is known to be at or below the target (it would not
-//     get smaller); a lossless track is always converted. A lossy track of unknown bitrate is copied:
-//     it could get bigger;
-//   - lossless_only: only lossless tracks converted, to E-AC-3.
-func planAudio(choice string, langs []string, info media.Info) (ops []TrackOp, allKept, mainUsed bool) {
-	audio := info.Audio()
-	switch choice {
-	case "stereo_aac": // Basic's default (S4): the kept tracks, each as stereo AAC
-		ops, mainUsed = planStereoAAC(langs, audio)
-		return ops, false, mainUsed
+// StandardAudio is a saved audio value in S6's terms: the choice and "Only my languages". Values from
+// before S6 (25b's, and Basic's my_languages and keep_all) map as design's E says; changed reports a
+// value that was moved, so its flow says so once (notes).
+func StandardAudio(a string, only bool) (choice string, onlyMine bool, changed bool) {
+	switch a {
+	case "keep_all":
+		return "as_is", false, false
 	case "my_languages":
-		if len(langs) == 0 { // no languages chosen (any more): nothing is dropped
-			return nil, false, false
+		return "as_is", true, false
+	case "aac":
+		return "stereo_aac", false, true // it converted every track: none is dropped now either
+	case "opus":
+		return "stereo_opus", false, true
+	case "eac3", "lossless_only":
+		return "eac3_surround", false, true
+	}
+	return a, only, false
+}
+
+// AudioWords are the choices' names, for the notes and the flow's tag.
+var AudioWords = map[string]string{"stereo_aac": "Stereo AAC", "stereo_aac_surround": "Stereo AAC, plus surround as it is",
+	"eac3_surround": "Surround E-AC-3", "ac3_surround": "Surround AC-3", "stereo_opus": "Stereo Opus", "as_is": "As it is"}
+
+// FoldedNote is said (once, in the job's log) when a 7.1 track became 5.1 E-AC-3 or AC-3 (design, 01:52Z).
+const FoldedNote = "7.1 sound became 5.1 (E-AC-3 and AC-3 hold up to 5.1)."
+
+// SmallKeptNote is said (once, in the job's log) when a small stereo track is kept as it is instead of
+// made stereo AAC/Opus: converting would not make it smaller (design, 02:26Z, REDESIGN A1).
+const SmallKeptNote = "Small stereo track kept as it is: converting would not make it smaller."
+
+// mp4Audio are the audio codecs an MP4 file can hold; any other kept track is made E-AC-3 there.
+var mp4Audio = map[string]bool{"aac": true, "ac3": true, "eac3": true, "mp3": true, "alac": true, "opus": true, "flac": true}
+
+// planAudio decides each audio track of info (design E, S6): which tracks are kept (onlyMine: those in
+// langs and those with no language), then what each choice does to a kept track:
+//   - stereo_aac / stereo_opus: 2-channel AAC (160 kbps, S4's rule) / Opus (128 kbps); a track already
+//     that codec with at most 2 channels is copied;
+//   - stereo_aac_surround: a track with 3 or more channels is copied, and a stereo AAC made from it is
+//     added next to it; the others as stereo_aac;
+//   - eac3_surround / ac3_surround: a lossless or DTS track with 3 or more channels becomes E-AC-3 /
+//     AC-3 (at most 5.1: ffmpeg's encoders make no more); AC-3/E-AC-3 surround and tracks of 2
+//     channels or fewer are copied; a lossy track is never converted when it would not get smaller;
+//   - as_is: every kept track copied.
+//
+// With no track in langs, the stereo choices keep the main track (mainUsed); the others keep every
+// track (allKept). A track the new file's container (mp4, webm; "" any other) cannot hold is never kept
+// as it is: it becomes the chosen stereo track, or else E-AC-3 in MP4 (TrueHD, DTS, PCM) and Opus in
+// WebM (QA 894cb18).
+func planAudio(choice string, onlyMine bool, langs []string, info media.Info, container string) (ops []TrackOp, allKept, mainUsed, smallKept bool) {
+	holds := func(codec string) bool {
+		switch container {
+		case "mp4":
+			return mp4Audio[codec]
+		case "webm":
+			return codec == "opus" || codec == "vorbis"
 		}
+		return true
+	}
+	audio := info.Audio()
+	stereo := choice == "stereo_aac" || choice == "stereo_opus" || choice == "stereo_aac_surround"
+	keep := map[int]bool{}
+	for _, a := range audio {
+		keep[a.Index] = true
+	}
+	if onlyMine && len(langs) > 0 && len(audio) > 0 {
 		want := map[string]bool{}
 		for _, l := range langs {
 			want[CanonLang(l)] = true
 		}
-		kept := 0
+		mine := map[int]bool{}
 		for _, a := range audio {
-			l := CanonLang(a.Language)
-			if l == "" || want[l] {
-				kept++
-				continue
-			}
-			ops = append(ops, TrackOp{Index: a.Index, Type: "audio", Drop: true})
-		}
-		if kept == 0 && len(audio) > 0 {
-			return nil, true, false
-		}
-		return ops, false, false
-	case "aac", "eac3", "opus":
-		t := audioTargets[choice]
-		for _, a := range audio {
-			kbps := AutoAudioKbps(choice, a.Channels)
-			switch {
-			case a.Codec == t.codec:
-			case a.Lossless():
-				ops = append(ops, TrackOp{Index: a.Index, Type: "audio", Encoder: t.encoder, Codec: t.codec, Kbps: kbps})
-			case a.BitrateKbps > kbps:
-				ops = append(ops, TrackOp{Index: a.Index, Type: "audio", Encoder: t.encoder, Codec: t.codec, Kbps: kbps})
+			if l := CanonLang(a.Language); l == "" || want[l] {
+				mine[a.Index] = true
 			}
 		}
-	case "lossless_only":
-		t := audioTargets["eac3"]
-		for _, a := range audio {
-			if a.Lossless() {
-				ops = append(ops, TrackOp{Index: a.Index, Type: "audio", Encoder: t.encoder, Codec: t.codec, Kbps: AutoAudioKbps("eac3", a.Channels)})
+		switch {
+		case len(mine) > 0:
+			keep = mine
+		case stereo: // the main track (default disposition, else the first)
+			main := audio[0]
+			for _, a := range audio {
+				if a.Default {
+					main = a
+					break
+				}
 			}
+			keep, mainUsed = map[int]bool{main.Index: true}, true
+		default:
+			allKept = true
 		}
 	}
-	return ops, false, false
+	stereoOp := func(a media.Stream, codec, encoder string, kbps int) (TrackOp, bool) {
+		if a.Codec == codec && a.Channels > 0 && a.Channels <= 2 {
+			return TrackOp{}, false // already stereo in that codec: copied
+		}
+		// Never bigger (25b, review 6cafc6f): a lossy stereo track at or below the target's bitrate, or of
+		// unknown bitrate, is copied. Surround is still made stereo: a downmix to 2 channels at 160 kbps
+		// is smaller than any lossy surround track.
+		if !a.Lossless() && a.Channels > 0 && a.Channels <= 2 && (a.BitrateKbps == 0 || a.BitrateKbps <= kbps) && holds(a.Codec) {
+			smallKept = true
+			return TrackOp{}, false
+		}
+		return TrackOp{Index: a.Index, Type: "audio", Encoder: encoder, Codec: codec, Kbps: kbps, Channels: 2}, true
+	}
+	var added []TrackOp
+	for _, a := range audio {
+		if !keep[a.Index] {
+			ops = append(ops, TrackOp{Index: a.Index, Type: "audio", Drop: true})
+			continue
+		}
+		var op TrackOp
+		var has bool
+		switch choice {
+		case "stereo_aac":
+			op, has = stereoOp(a, "aac", "aac", stereoAACKbps)
+		case "stereo_opus":
+			op, has = stereoOp(a, "opus", "libopus", stereoOpusKbps)
+		case "stereo_aac_surround":
+			if a.Channels >= 3 {
+				added = append(added, TrackOp{Index: a.Index, Type: "audio", Encoder: "aac", Codec: "aac", Kbps: stereoAACKbps, Channels: 2, Add: true, Language: a.Language})
+			} else {
+				op, has = stereoOp(a, "aac", "aac", stereoAACKbps)
+			}
+		case "eac3_surround", "ac3_surround":
+			t := strings.TrimSuffix(choice, "_surround")
+			if a.Channels >= 3 && (a.Lossless() || a.Codec == "dts") && a.Codec != "ac3" && a.Codec != "eac3" {
+				ch := min(a.Channels, 6)
+				kbps := AutoAudioKbps(t, ch)
+				if a.Lossless() || a.BitrateKbps > kbps { // never bigger, except lossless; unknown lossy (DTS) is copied
+					op, has = TrackOp{Index: a.Index, Type: "audio", Encoder: t, Codec: t, Kbps: kbps, Channels: chIfFolded(a.Channels)}, true
+				}
+			}
+		}
+		if !has && !holds(a.Codec) { // the container can't hold it as it is
+			switch {
+			case container == "webm": // WebM's audio is Stereo Opus (Validate)
+				op, has = TrackOp{Index: a.Index, Type: "audio", Encoder: "libopus", Codec: "opus", Kbps: stereoOpusKbps, Channels: 2}, true
+			default: // MP4: E-AC-3 (the log says so)
+				ch := min(max(a.Channels, 2), 6)
+				op, has = TrackOp{Index: a.Index, Type: "audio", Encoder: "eac3", Codec: "eac3", Kbps: AutoAudioKbps("eac3", ch), Channels: chIfFolded(a.Channels)}, true
+			}
+		}
+		if has {
+			ops = append(ops, op)
+		}
+	}
+	return append(ops, added...), allKept, mainUsed, smallKept
+}
+
+// chIfFolded is the channels to ask for: 6 when a track has more than 5.1 (folded), else as it is.
+func chIfFolded(n int) int {
+	if n > 6 {
+		return 6
+	}
+	return 0
 }
 
 // BasicAudio is a Basic flow's audio choice, its default for an empty one (S4).
@@ -131,7 +234,8 @@ var AvailableBasicAudio = []string{"stereo_aac", "my_languages", "keep_all"}
 
 // Basic's stereo AAC (S4, RESEARCH/audio.md): AAC-LC stereo at 160 kbps plays on every TV and phone.
 const (
-	stereoAACKbps = 160
+	stereoAACKbps  = 160
+	stereoOpusKbps = 128
 	// NoAudioInMyLanguageMain is said (in the job's log) when no track is in the person's languages:
 	// the main one is kept, as stereo AAC (design's words).
 	NoAudioInMyLanguageMain = "None of the audio is in your language, so the main audio track was used."

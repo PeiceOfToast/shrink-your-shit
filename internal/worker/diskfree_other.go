@@ -10,3 +10,7 @@ import "errors"
 func diskFree(dir string) (uint64, error) {
 	return 0, errors.New("free disk space cannot be checked on this operating system")
 }
+
+func diskSize(dir string) (uint64, error) {
+	return 0, errors.New("disk size cannot be checked on this operating system")
+}

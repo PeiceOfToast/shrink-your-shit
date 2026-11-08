@@ -187,10 +187,6 @@ func (t Template) Level() string {
 	return "advanced"
 }
 
-// audioShort are the audio choices' short words for a flow's tag.
-var audioShort = map[string]string{"keep_all": "Audio as it is", "my_languages": "My languages", "aac": "AAC",
-	"eac3": "E-AC-3", "opus": "Opus", "lossless_only": "Lossless audio to E-AC-3"}
-
 // Tag is the flow's tag in design's words (B4), built here so the page never builds it: "Basic ·
 // Smallest file"; "Standard · Balanced · same resolution · no bitrate limit · Audio as it is"; "Advanced
 // · Custom"; "Earlier install". Until S6 a Standard tag says today's bitrate cap in Mbps.
@@ -215,10 +211,10 @@ func (t Template) Tag() string {
 		if s.MaxBitrate == "none" || s.MaxBitrate == "" {
 			parts = append(parts, "no bitrate limit")
 		} else {
-			parts = append(parts, "at most "+s.MaxBitrate+" Mbps")
+			parts = append(parts, upperFirst(s.MaxBitrate)+" bitrate")
 		}
-		if a := audioShort[s.Audio]; a != "" {
-			parts = append(parts, a)
+		if a, _, _ := StandardAudio(s.Audio, s.OnlyMyLanguages); AudioWords[a] != "" {
+			parts = append(parts, AudioWords[a])
 		}
 		return strings.Join(parts, " · ")
 	case "earlier":
@@ -227,12 +223,20 @@ func (t Template) Tag() string {
 	return "Advanced · Custom"
 }
 
-// FitsBasic reports whether a Standard flow's choices are what a Basic flow does, so "Switch to Basic"
-// changes nothing it converts: HEVC at the normal speed, the same resolution, no cap, every subtitle,
-// MKV, replace, nothing ignored, Dolby Vision left alone, and audio kept as it is or in my languages
-// (Basic's keep_all and my_languages; Basic's stereo AAC is not a Standard choice before S6).
+// FitsBasic reports whether a Standard flow's choices are what a Basic flow does (contract 21:10Z, item
+// 3), so "Switch to Basic" changes nothing it converts: HEVC at the normal speed, the same resolution, no
+// cap, every subtitle, MKV, replace, nothing ignored, Dolby Vision left alone, and Stereo AAC in my
+// languages, or As it is in my languages (Basic's my_languages) or for every track (Basic's keep_all).
 func (s Selectors) FitsBasic() bool {
+	a, only, _ := StandardAudio(s.Audio, s.OnlyMyLanguages)
 	return s.Format == "hevc" && s.Speed == "normal" && s.Resolution == "keep" && s.MaxBitrate == "none" &&
 		s.Subtitles == "keep_all" && s.FileType == "mkv" && s.AfterConverting == "replace" && len(s.Ignore) == 0 &&
-		!s.IncludeDolbyVision && (s.Audio == "keep_all" || s.Audio == "my_languages")
+		!s.IncludeDolbyVision && (a == "stereo_aac" && only || a == "as_is")
+}
+
+func upperFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }

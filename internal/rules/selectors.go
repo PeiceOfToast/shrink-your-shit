@@ -13,49 +13,53 @@ import (
 // API's names. A slider position is the selectors at DefaultSelectors(position): one compiler serves both,
 // so a setting left at a position's values behaves exactly like the slider and is saved as it.
 type Selectors struct {
-	Quality         int      `json:"quality"`
-	Speed           string   `json:"speed"`           // faster | normal | slower
-	Format          string   `json:"format"`          // hevc (AvailableFormats)
-	Resolution      string   `json:"resolution"`      // keep | 1080 | 720 | 480: the largest picture height; never upscaled
-	MaxBitrate      string   `json:"maxBitrate"`      // none | 40 | 20 | 10 | 6 | 4 (Mbps): a peak cap beside the quality
-	Audio           string   `json:"audio"`           // AvailableAudio
-	Subtitles       string   `json:"subtitles"`       // AvailableSubtitles
-	FileType        string   `json:"fileType"`        // keep | mkv | mp4 (another than keep only when kept beside, 25a)
-	AfterConverting string   `json:"afterConverting"` // replace | beside
-	Ignore          []string `json:"ignore"`          // folders, files or patterns in the library not looked at
+	Quality    int    `json:"quality"`
+	Speed      string `json:"speed"`      // faster | normal | slower
+	Format     string `json:"format"`     // hevc (AvailableFormats)
+	Resolution string `json:"resolution"` // keep | 1080 | 720 | 480: the largest picture height; never upscaled
+	MaxBitrate string `json:"maxBitrate"` // none | high | medium | low (S6: Ladder): a peak cap beside the quality
+	Audio      string `json:"audio"`      // AvailableAudio (S6: design E's six choices)
+	// OnlyMyLanguages keeps only the audio in the person's languages, and tracks with none (S6; on by default).
+	OnlyMyLanguages bool     `json:"onlyMyLanguages"`
+	Subtitles       string   `json:"subtitles"`           // AvailableSubtitles
+	FileType        string   `json:"fileType"`            // mkv | mp4 | webm | keep (AvailableFileTypes)
+	AfterConverting string   `json:"afterConverting"`     // replace | beside | folder (S6: with OutputDir)
+	OutputDir       string   `json:"outputDir,omitempty"` // folder: where the new files go (design E)
+	Ignore          []string `json:"ignore"`              // folders, files or patterns in the library not looked at
 	// IncludeDolbyVision converts Dolby Vision profiles 7 and 8 as HDR10/HLG (S3; replaces skipHdr: HDR10
 	// is always converted and kept as HDR). Profile 5 is left as it is whatever this says.
 	IncludeDolbyVision bool `json:"includeDolbyVision"`
+	// Notes are sentences about this flow shown once (S6: "Audio choices changed in this update…", from
+	// migration 19); a save makes a new template without them (contract 23:33Z).
+	Notes []string `json:"notes,omitempty"`
 }
 
 // What this version can save and run (UI-API-CONTRACT.md addendum 13): the UI shows the rest disabled.
 var (
 	AvailableFormats   = []string{"hevc"}
-	AvailableAudio     = []string{"keep_all", "my_languages", "aac", "eac3", "opus", "lossless_only"}
+	AvailableAudio     = []string{"stereo_aac", "stereo_aac_surround", "eac3_surround", "ac3_surround", "stereo_opus", "as_is"}
 	AvailableSubtitles = []string{"keep_all", "my_languages", "text_only", "srt"}
 )
 
 // AvailableFileTypes are the file types each "after converting" choice can save (25a beside; 25a-2
 // replace, where a new type renames the file: movie.mp4 becomes movie.mkv).
-var AvailableFileTypes = map[string][]string{"replace": {"keep", "mkv", "mp4"}, "beside": {"keep", "mkv", "mp4"}}
+var AvailableFileTypes = map[string][]string{"replace": {"mkv", "mp4", "webm", "keep"}, "beside": {"mkv", "mp4", "webm", "keep"},
+	"folder": {"mkv", "mp4", "webm", "keep"}}
 
 // SpeedPresets maps the Speed choice to the x265 preset (normal is the slider's).
 var SpeedPresets = map[string]string{"faster": "fast", "normal": SliderPreset, "slower": "slow"}
 
-// maxBitrates are the cap choices in Mbps ("none": no cap).
-var maxBitrates = map[string]int{"none": 0, "40": 40, "20": 20, "10": 10, "6": 6, "4": 4}
-
 var (
 	resolutions = map[string]int{"keep": 0, "1080": 1080, "720": 720, "480": 480}
-	allAudio    = []string{"keep_all", "my_languages", "aac", "eac3", "opus", "lossless_only"}
+	allAudio    = []string{"stereo_aac", "stereo_aac_surround", "eac3_surround", "ac3_surround", "stereo_opus", "as_is"}
 	allSubs     = []string{"keep_all", "my_languages", "text_only", "srt"}
-	allFormats  = []string{"hevc", "av1"}
+	allFormats  = []string{"hevc", "h264", "av1", "vp9"}
 )
 
 // DefaultSelectors are slider position q's values as selectors.
 func DefaultSelectors(q int) Selectors {
 	return Selectors{Quality: q, Speed: "normal", Format: "hevc", Resolution: "keep", MaxBitrate: "none",
-		Audio: "keep_all", Subtitles: "keep_all", FileType: "keep", AfterConverting: "replace", Ignore: []string{}}
+		Audio: "stereo_aac", OnlyMyLanguages: true, Subtitles: "keep_all", FileType: "mkv", AfterConverting: "replace", Ignore: []string{}} // design E's defaults (S6)
 }
 
 // SelectorError is a choice that cannot be saved: Code is invalid (not a value at all) or not_available
@@ -79,20 +83,18 @@ func (s Selectors) Validate() error {
 	switch {
 	case !contains(allFormats, s.Format):
 		return invalid("format", s.Format)
-	case !contains(AvailableFormats, s.Format):
+	case !contains(Available(), s.Format):
 		return notYet("This version can only convert to HEVC.")
 	}
 	if _, ok := resolutions[s.Resolution]; !ok {
 		return invalid("resolution", s.Resolution)
 	}
-	if _, ok := maxBitrates[s.MaxBitrate]; !ok {
+	if !contains(BitrateLevels, s.MaxBitrate) {
 		return invalid("maxBitrate", s.MaxBitrate)
 	}
 	switch {
 	case !contains(allAudio, s.Audio):
 		return invalid("audio", s.Audio)
-	case !contains(AvailableAudio, s.Audio):
-		return notYet("This version can only keep every audio track as it is; the other audio choices come in an update.")
 	}
 	switch {
 	case !contains(allSubs, s.Subtitles):
@@ -109,6 +111,18 @@ func (s Selectors) Validate() error {
 		return invalid("fileType", s.FileType)
 	case !contains(types, s.FileType):
 		return notYet(`Changing the file type needs "Put the new file next to the original" for now; replacing with a new file type comes in an update.`)
+	}
+	switch {
+	case s.AfterConverting == "folder" && (strings.TrimSpace(s.OutputDir) == "" || !filepath.IsAbs(s.OutputDir)):
+		return &SelectorError{"output_dir_needed", "Choose the folder for new files (a full path). Nothing was changed."}
+	}
+	switch { // choices that can't go together (design E, 21:22Z; the page moves the other field first)
+	case s.Audio == "stereo_opus" && s.FileType == "mp4":
+		return &SelectorError{"invalid", "MP4 files can't hold Opus audio: choose MKV, or another audio choice. Nothing was changed."}
+	case s.FileType == "webm" && (s.Format != "av1" && s.Format != "vp9" || s.Audio != "stereo_opus"):
+		return &SelectorError{"invalid", "WebM files need AV1 or VP9 video and Stereo Opus audio. Nothing was changed."}
+	case s.Format == "vp9" && s.FileType == "mp4":
+		return &SelectorError{"invalid", "MP4 files can't hold VP9 video here: choose MKV or WebM. Nothing was changed."}
 	}
 	for _, p := range s.Ignore {
 		if !insideLibrary(p) {
@@ -164,7 +178,7 @@ func (t Template) SelectorsView() (Selectors, bool) {
 		}
 	case KindSelectors:
 		if t.Selectors != nil {
-			s := *t.Selectors
+			s := t.Selectors.Upgraded() // shown in S6's terms
 			if s.Ignore == nil {
 				s.Ignore = []string{}
 			}
@@ -221,6 +235,11 @@ func (t Template) Warnings() []string {
 	if w := RenameWarning(s.AfterConverting, s.FileType); w != "" && t.Kind == KindSelectors { // 25a-2 (Basic's MKV: the update notice, S4)
 		out = append(out, w)
 	}
+	// design (a), 02:30Z: such an MP4 becomes MKV. Only when the original is replaced: beside or in
+	// another folder the .mp4 stays, so nothing gets a new name (ui-shop, 02:35Z).
+	if t.Kind == KindSelectors && s.AfterConverting == "replace" && s.FileType == "keep" && (s.Format == "vp9" || s.Audio == "stereo_opus") {
+		out = append(out, KeepVP9OpusWarning)
+	}
 	return out
 }
 
@@ -232,3 +251,20 @@ func contains(list []string, v string) bool {
 	}
 	return false
 }
+
+// Upgraded is s with the values saved before S6 in S6's terms (migration 19 saves the same): a cap in
+// Mbps becomes its level; 25b's audio choices become design E's (and "Only my languages").
+func (s Selectors) Upgraded() Selectors {
+	s.MaxBitrate = OldBitrateLevel(s.MaxBitrate)
+	if !contains(AvailableAudio, s.Audio) {
+		s.Audio, s.OnlyMyLanguages, _ = StandardAudio(s.Audio, s.OnlyMyLanguages)
+	}
+	if s.Audio == "stereo_opus" && s.FileType == "mp4" { // 25b's opus in MP4 was valid; S6's Opus needs MKV (review 6cafc6f)
+		s.FileType = "mkv"
+	}
+	return s
+}
+
+// KeepVP9OpusWarning is design's warning (02:30Z) for "Keep as is" with VP9 or Opus: an MP4 can't hold
+// them, so such a file becomes MKV (the job log says so for each file).
+const KeepVP9OpusWarning = "With VP9 or Opus, .mp4 files become .mkv files, so they get a new name. After converting, rescan this library in Radarr, Sonarr, Plex or Jellyfin."

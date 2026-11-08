@@ -217,6 +217,9 @@ func flowRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng En
 			apiError(w, http.StatusNotFound, "not_found", "There is no such library.")
 			return
 		}
+		if l, err := store.GetLibrary(libID); err == nil && folderRefused(w, store, fid, l.Path) {
+			return
+		}
 		if _, err := store.SetLibraryFlow(libID, fid); err != nil {
 			storeErr(w, err)
 			return

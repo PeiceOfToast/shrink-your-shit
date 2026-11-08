@@ -3,6 +3,7 @@
 package rules
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -22,7 +23,8 @@ func withAudio(tracks ...media.Stream) media.Info {
 func compileAudio(t *testing.T, audio string, langs string, info media.Info) Plan {
 	t.Helper()
 	s := DefaultSelectors(3)
-	s.Audio = audio
+	s.Audio, s.OnlyMyLanguages, _ = StandardAudio(audio, true) // 25b's values in S6's terms
+	s.FileType = "keep"
 	if err := s.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -31,61 +33,69 @@ func compileAudio(t *testing.T, audio string, langs string, info media.Info) Pla
 	return tmpl.Compile(info)
 }
 
-// Converting never re-encodes a track already in the target codec, never makes one bigger, always
-// converts a lossless one, and copies a lossy one whose bitrate is unknown (lead, 13:44Z).
-func TestAudioConvertsOnlyToSmaller(t *testing.T) {
-	info := withAudio(
-		media.Stream{Codec: "aac", Channels: 2, BitrateKbps: 320},        // 1: already AAC: copied, even if big
-		media.Stream{Codec: "ac3", Channels: 2, BitrateKbps: 96},         // 2: below the 128k target: copied
-		media.Stream{Codec: "ac3", Channels: 6, BitrateKbps: 640},        // 3: above 384k: converted
-		media.Stream{Codec: "truehd", Channels: 8},                       // 4: lossless: converted (512k)
-		media.Stream{Codec: "dts", Channels: 6},                          // 5: lossy, bitrate unknown: copied
-		media.Stream{Codec: "dts", Channels: 6, Profile: "DTS-HD MA"},    // 6: lossless: converted
-		media.Stream{Codec: "pcm_s24le", Channels: 2, BitrateKbps: 2304}, // 7: lossless: converted
-	)
-	p := compileAudio(t, "aac", "", info)
-	got := map[int]TrackOp{}
-	for _, op := range p.Tracks {
-		got[op.Index] = op
+// Design E's audio choices (S6), on one track set: 5.1 TrueHD (eng), 5.1 AC-3 (eng), stereo AAC (eng),
+// stereo MP3 (eng, 128 kbps), 7.1 DTS (eng).
+func TestDesignEAudio(t *testing.T) {
+	set := withAudio(media.Stream{Codec: "truehd", Channels: 6, Language: "eng"}, media.Stream{Codec: "ac3", Channels: 6, BitrateKbps: 448, Language: "eng"},
+		media.Stream{Codec: "aac", Channels: 2, Language: "eng"}, media.Stream{Codec: "mp3", Channels: 2, BitrateKbps: 128, Language: "eng"},
+		media.Stream{Codec: "dts", Channels: 8, BitrateKbps: 1536, Language: "eng"})
+	describe := func(p Plan) string {
+		var out []string
+		for _, o := range p.Tracks {
+			w := fmt.Sprintf("%d:", o.Index)
+			switch {
+			case o.Drop:
+				w += "drop"
+			case o.Add:
+				w += "add " + o.Codec + fmt.Sprint(o.Channels)
+			default:
+				w += o.Codec + fmt.Sprint(o.Channels)
+			}
+			out = append(out, w)
+		}
+		return strings.Join(out, " ")
 	}
-	for idx, want := range map[int]int{3: 384, 4: 512, 6: 384, 7: 128} {
-		if op, ok := got[idx]; !ok || op.Encoder != "aac" || op.Kbps != want {
-			t.Errorf("track %d: %+v, want aac at %dk", idx, op, want)
+	for choice, want := range map[string]string{
+		"stereo_aac":          "1:aac2 2:aac2 5:aac2",             // 3 is stereo AAC, 4 a 128 kbps MP3 (smaller than 160): copied
+		"stereo_opus":         "1:opus2 2:opus2 5:opus2",          // 3 (unknown bitrate) and 4 (128 kbps) would not get smaller
+		"stereo_aac_surround": "1:add aac2 2:add aac2 5:add aac2", // surround copied, a stereo AAC added from each; 3 and 4 copied
+		"eac3_surround":       "1:eac30 5:eac36",                  // lossless and DTS surround (7.1 folded to 5.1); AC-3 and stereo copied
+		"ac3_surround":        "1:ac30 5:ac36",
+		"as_is":               "",
+	} {
+		s := DefaultSelectors(3)
+		s.Audio, s.FileType = choice, "keep"
+		if choice == "stereo_opus" {
+			s.FileType = "mkv"
+		}
+		p := s.Template().Compile(set)
+		if got := describe(p); got != want {
+			t.Errorf("%s: %q, want %q", choice, got, want)
 		}
 	}
-	for _, idx := range []int{1, 2, 5} {
-		if op, ok := got[idx]; ok {
-			t.Errorf("track %d must be copied: %+v", idx, op)
+	// the added stereo track is mapped again after the kept audio, and expected there
+	s := DefaultSelectors(3)
+	s.Audio, s.FileType = "stereo_aac_surround", "keep"
+	p := s.Template().Compile(withAudio(media.Stream{Codec: "ac3", Channels: 6, Language: "fre"}))
+	if args := strings.Join(p.FFmpegArgs("i", "o"), " "); !strings.Contains(args, "-map 0:1 -c:a:1 aac -b:a:1 160k -ac:a:1 2") {
+		t.Errorf("args %s", args)
+	}
+	if e := p.Expect(withAudio(media.Stream{Codec: "ac3", Channels: 6, Language: "fre"}), 0); len(e.Streams) != 3 || e.Streams[2].Codec != "aac" || e.Streams[2].Channels != 2 || e.Streams[2].Language != "fre" {
+		t.Errorf("expect %+v", e.Streams)
+	}
+	// MP4 can't hold TrueHD: it becomes E-AC-3 even with "As it is"
+	s = DefaultSelectors(3)
+	s.Audio, s.FileType, s.AfterConverting = "as_is", "mp4", "beside"
+	if p := s.Template().Compile(withAudio(media.Stream{Codec: "truehd", Channels: 6})); describe(p) != "1:eac30" {
+		t.Errorf("mp4 truehd: %q", describe(p))
+	}
+	// the 25b values in S6's terms (design E's migration map)
+	for old, want := range map[string]string{"keep_all": "as_is false", "my_languages": "as_is true", "aac": "stereo_aac false", "opus": "stereo_opus false",
+		"eac3": "eac3_surround false", "lossless_only": "eac3_surround false", "stereo_aac": "stereo_aac true"} {
+		a, only, _ := StandardAudio(old, true)
+		if got := fmt.Sprint(a, " ", only); got != want {
+			t.Errorf("%s: %s, want %s", old, got, want)
 		}
-	}
-	args := strings.Join(p.FFmpegArgs("i", "o"), " ")
-	// a:k counts the new file's audio tracks: tracks 3, 4, 6, 7 are a:2, a:3, a:5, a:6
-	for _, want := range []string{"-c:a:2 aac -b:a:2 384k", "-c:a:3 aac -b:a:3 512k", "-c:a:5 aac -b:a:5 384k", "-c:a:6 aac -b:a:6 128k"} {
-		if !strings.Contains(args, want) {
-			t.Errorf("args lack %q: %s", want, args)
-		}
-	}
-	e := p.Expect(info, 0)
-	var codecs []string
-	for _, s := range e.Streams {
-		if s.Type == "audio" {
-			codecs = append(codecs, s.Codec)
-		}
-	}
-	if strings.Join(codecs, ",") != "aac,ac3,aac,aac,dts,aac,aac" {
-		t.Errorf("expected audio %v", codecs)
-	}
-	// Opus and E-AC-3 per channel, capped at 640k
-	if p := compileAudio(t, "opus", "", withAudio(media.Stream{Codec: "flac", Channels: 6})); len(p.Tracks) != 1 || p.Tracks[0].Encoder != "libopus" || p.Tracks[0].Kbps != 288 {
-		t.Errorf("opus %+v", p.Tracks)
-	}
-	if p := compileAudio(t, "eac3", "", withAudio(media.Stream{Codec: "truehd", Channels: 8})); len(p.Tracks) != 1 || p.Tracks[0].Kbps != 640 {
-		t.Errorf("eac3 cap %+v", p.Tracks)
-	}
-	// lossless only: only the lossless track, to E-AC-3
-	p = compileAudio(t, "lossless_only", "", withAudio(media.Stream{Codec: "ac3", Channels: 6, BitrateKbps: 640}, media.Stream{Codec: "truehd", Channels: 6}))
-	if len(p.Tracks) != 1 || p.Tracks[0].Index != 2 || p.Tracks[0].Encoder != "eac3" || p.Tracks[0].Kbps != 576 {
-		t.Errorf("lossless_only %+v", p.Tracks)
 	}
 }
 
@@ -182,7 +192,7 @@ func TestSubtitlePlans(t *testing.T) {
 	// a TrueHD track converted to E-AC-3 no longer stops an MP4 file
 	th := withAudio(media.Stream{Codec: "truehd", Channels: 6})
 	a := DefaultSelectors(3)
-	a.Audio, a.FileType, a.AfterConverting = "eac3", "mp4", "beside"
+	a.Audio, a.FileType, a.AfterConverting = "eac3_surround", "mp4", "beside"
 	if p := a.Template().Compile(th); p.Skip != "" {
 		t.Errorf("truehd to eac3 in mp4: %q", p.Skip)
 	}
@@ -245,6 +255,68 @@ func TestUnknownKindSubtitleIsCopied(t *testing.T) {
 		}
 		if choice == "srt" && n != 1 || choice == "text_only" && n != 2 {
 			t.Errorf("%s: %d subtitles expected in the new file", choice, n)
+		}
+	}
+}
+
+// Design 01:52Z: an AC-3/E-AC-3 surround track is copied (a 7.1 E-AC-3 stays 7.1); a 7.1 lossless or
+// DTS track becomes 5.1 E-AC-3, and the job's log says so once (also under MP4's lossless rule).
+func TestSevenOneFold(t *testing.T) {
+	compile := func(audio, fileType string, a media.Stream) Plan {
+		s := DefaultSelectors(3)
+		s.Audio, s.FileType, s.AfterConverting = audio, fileType, "beside"
+		return s.Template().Compile(withAudio(a))
+	}
+	if p := compile("eac3_surround", "keep", media.Stream{Codec: "dts", Channels: 8, BitrateKbps: 1536}); !p.AudioFolded || len(p.Tracks) != 1 || p.Tracks[0].Channels != 6 {
+		t.Errorf("7.1 DTS: folded %v %+v", p.AudioFolded, p.Tracks)
+	}
+	if p := compile("eac3_surround", "keep", media.Stream{Codec: "eac3", Channels: 8, BitrateKbps: 1024}); p.AudioFolded || len(p.Tracks) != 0 {
+		t.Errorf("7.1 E-AC-3 must be copied as it is: folded %v %+v", p.AudioFolded, p.Tracks)
+	}
+	if p := compile("as_is", "mp4", media.Stream{Codec: "truehd", Channels: 8}); !p.AudioFolded || len(p.Tracks) != 1 || p.Tracks[0].Codec != "eac3" {
+		t.Errorf("MP4 7.1 TrueHD: folded %v %+v", p.AudioFolded, p.Tracks)
+	}
+	if p := compile("eac3_surround", "keep", media.Stream{Codec: "truehd", Channels: 6}); p.AudioFolded {
+		t.Error("5.1 is not folded")
+	}
+}
+
+// QA 894cb18 (P2): a track kept as it is must be one the new file's container can hold. WebM holds only
+// Opus or Vorbis, so a small stereo AAC track (kept elsewhere: "never bigger") is made Opus, and the log
+// does not say it was kept; MP4 can't hold Vorbis, so with Stereo AAC a small Vorbis track is made AAC.
+func TestKeptTrackTheContainerCannotHold(t *testing.T) {
+	SetAvailableFormats(allEncoders)
+	defer SetAvailableFormats(nil)
+	for _, c := range []struct {
+		name, format, fileType, audio string
+		track                         media.Stream
+		want                          string // the track's encoder, or "copy"
+	}{
+		{"webm, 128k stereo AAC", "vp9", "webm", "stereo_opus", media.Stream{Codec: "aac", Channels: 2, BitrateKbps: 128}, "libopus"},
+		{"webm, mono AAC of unknown bitrate", "av1", "webm", "stereo_opus", media.Stream{Codec: "aac", Channels: 1}, "libopus"},
+		{"webm, small stereo Vorbis", "vp9", "webm", "stereo_opus", media.Stream{Codec: "vorbis", Channels: 2, BitrateKbps: 96}, "copy"},
+		{"mkv, 128k stereo AAC", "vp9", "mkv", "stereo_opus", media.Stream{Codec: "aac", Channels: 2, BitrateKbps: 128}, "copy"},
+		{"mp4, small stereo Vorbis", "hevc", "mp4", "stereo_aac", media.Stream{Codec: "vorbis", Channels: 2, BitrateKbps: 96}, "aac"},
+		{"mp4, small stereo MP3", "hevc", "mp4", "stereo_aac", media.Stream{Codec: "mp3", Channels: 2, BitrateKbps: 96}, "copy"},
+	} {
+		s := DefaultSelectors(3)
+		s.Format, s.FileType, s.Audio, s.OnlyMyLanguages = c.format, c.fileType, c.audio, false
+		if err := s.Validate(); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		c.track.Type, c.track.Index = "audio", 1
+		p := s.Template().Compile(h264(1920, 1080, 8000, c.track))
+		got := "copy"
+		for _, o := range p.Tracks {
+			if o.Index == 1 && o.Type == "audio" && !o.Drop {
+				got = o.Encoder
+			}
+		}
+		if got != c.want || p.Skip != "" {
+			t.Errorf("%s: %s (skip %q), want %s", c.name, got, p.Skip, c.want)
+		}
+		if p.SmallKept != (got == "copy" && c.track.Codec != map[string]string{"stereo_opus": "opus", "stereo_aac": "aac"}[c.audio]) {
+			t.Errorf("%s: SmallKept %v with %s", c.name, p.SmallKept, got)
 		}
 	}
 }

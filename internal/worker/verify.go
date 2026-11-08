@@ -104,6 +104,9 @@ func SpaceNeeded(size int64) uint64 {
 // DiskFree is the space this user may write on the volume holding dir.
 func DiskFree(dir string) (uint64, error) { return diskFree(dir) }
 
+// DiskSize is the size of the disk dir is on.
+func DiskSize(dir string) (uint64, error) { return diskSize(dir) }
+
 // preflight refuses to start when the volume cannot hold the new file next to the original: about the
 // original's size plus a margin (the new file is normally smaller, but not guaranteed to be).
 func (w *Worker) preflight(sourcePath string, sourceSize int64) error {

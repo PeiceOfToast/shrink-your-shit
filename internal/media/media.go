@@ -323,3 +323,15 @@ func Transcode(ctx context.Context, x Exec, ffmpeg string, args []string, durati
 		}
 	}, ffmpeg, args...)
 }
+
+// Encoders is the set of encoders ffmpeg lists (ffmpeg -encoders), e.g. libx264; empty if it can't say.
+func Encoders(ctx context.Context, x Exec, ffmpeg string) map[string]bool {
+	out, _ := x.Output(ctx, ffmpeg, "-hide_banner", "-encoders")
+	set := map[string]bool{}
+	for _, line := range strings.Split(string(out), "\n") {
+		if f := strings.Fields(line); len(f) >= 2 && len(f[0]) == 6 && (f[0][0] == 'V' || f[0][0] == 'A' || f[0][0] == 'S') && f[1] != "=" { // not the legend
+			set[f[1]] = true
+		}
+	}
+	return set
+}

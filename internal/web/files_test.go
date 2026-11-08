@@ -5,7 +5,10 @@ package web
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -172,5 +175,125 @@ func TestFilesViewReplaceAndBeside(t *testing.T) {
 	}
 	if states["Replaced.mkv"] != jobs.OriginalKept || states["Beside.mkv"] != "kept_beside" {
 		t.Errorf("original states %v", states)
+	}
+}
+
+// The folder for new files (S6): check-output says what blocks a folder, and a save with one is refused.
+func TestCheckOutput(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), false)
+	path := "/api/flows/" + itoa(lib.FlowID)
+	check := func(dir string) string {
+		t.Helper()
+		_, body := post(t, srv, "POST", path+"/check-output", `{"path":`+strconv.Quote(dir)+`}`)
+		var v struct{ Blockers []map[string]string }
+		json.Unmarshal([]byte(body), &v)
+		var codes []string
+		for _, b := range v.Blockers {
+			codes = append(codes, b["code"])
+		}
+		return strings.Join(codes, ",")
+	}
+	free := t.TempDir()
+	if got := check(free); got != "" && got != "low_space" { // a small test disk may be low on space
+		t.Errorf("a free folder: %s", got)
+	}
+	if got := check(filepath.Join(lib.Path, "converted")); !strings.Contains(got, "inside_library") {
+		t.Errorf("inside the library: %s", got)
+	}
+	if got := check("relative/dir"); got != "not_writable" {
+		t.Errorf("relative: %s", got)
+	}
+	ro := filepath.Join(t.TempDir(), "ro")
+	os.MkdirAll(ro, 0o555)
+	if os.Getuid() != 0 && runtime.GOOS != "windows" { // root writes anywhere; Windows ignores a folder's read-only mode
+		if got := check(ro); !strings.Contains(got, "not_writable") {
+			t.Errorf("read-only: %s", got)
+		}
+	}
+	// a save with a blocked folder is refused with its code; a missing folder too
+	if code, body := post(t, srv, "PUT", path+"/setting", `{"quality":3,"speed":"slower","afterConverting":"folder","outputDir":`+strconv.Quote(filepath.Join(lib.Path, "x"))+`}`); code != 400 || errCode(body) != "inside_library" {
+		t.Errorf("save inside: %d %s", code, body)
+	}
+	if code, body := post(t, srv, "PUT", path+"/setting", `{"quality":3,"speed":"slower","afterConverting":"folder"}`); code != 400 || errCode(body) != "output_dir_needed" {
+		t.Errorf("save without folder: %d %s", code, body)
+	}
+}
+
+// The rough-picture warning (S6): POST /api/flows/{id}/warnings for a setting being edited, and the same
+// on the setting's GET, from the videos of the flow's libraries.
+func TestRoughPictureWarning(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), false)
+	st.PutProbe(filepath.Join(lib.Path, "uhd.mkv"), 1, 1, `{"streams":[{"type":"video","codec":"hevc","Width":3840,"Height":2160,"bitDepth":10,"frameRate":60,"colorTransfer":"smpte2084"}]}`)
+	path := "/api/flows/" + itoa(lib.FlowID)
+	warn := func(body string) []string {
+		t.Helper()
+		_, b := post(t, srv, "POST", path+"/warnings", body)
+		var v struct{ Warnings []string }
+		json.Unmarshal([]byte(b), &v)
+		return v.Warnings
+	}
+	if w := warn(`{"quality":3,"maxBitrate":"low","fileType":"keep"}`); len(w) != 1 || !strings.Contains(w[0], "Low may look blocky in dark or fast scenes for 4K HDR files at 50-60 fps (8 Mbps). Choose Medium or No limit to avoid that.") {
+		t.Errorf("low: %v", w)
+	}
+	if w := warn(`{"quality":3,"maxBitrate":"none","fileType":"keep"}`); len(w) != 0 {
+		t.Errorf("no limit: %v", w)
+	}
+	if f, _ := st.GetFlow(lib.FlowID); f.Template.Kind != rules.KindSlider {
+		t.Error("the warnings check saved something")
+	}
+	post(t, srv, "PUT", path+"/setting", `{"quality":3,"maxBitrate":"low","fileType":"keep"}`)
+	_, b, _ := do(t, nil, srv, call{method: "GET", path: path + "/setting"})
+	if !strings.Contains(b, "may look blocky") {
+		t.Errorf("GET warnings: %s", b)
+	}
+}
+
+// A migrated flow's notes (S6, contract 23:33Z) are on the setting's GET until the next save.
+func TestFlowNotesUntilSaved(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), false)
+	sel := rules.DefaultSelectors(3)
+	sel.Speed, sel.Notes = "slower", []string{"Audio choices changed in this update: your flow now uses Stereo AAC."}
+	st.SetFlowTemplate(lib.FlowID, sel.Template())
+	path := "/api/flows/" + itoa(lib.FlowID) + "/setting"
+	if _, b, _ := do(t, nil, srv, call{method: "GET", path: path}); !strings.Contains(b, `"notes":["Audio choices changed`) {
+		t.Errorf("GET: %s", b)
+	}
+	post(t, srv, "PUT", path, `{"quality":3,"speed":"slower","notes":["sent back by the page"]}`)
+	if _, b, _ := do(t, nil, srv, call{method: "GET", path: path}); strings.Contains(b, `"notes"`) {
+		t.Errorf("after a save: %s", b)
+	}
+}
+
+// Review 6cafc6f: a link can't hide a folder inside a library, and the folder is checked again when a
+// library joins a folder flow (chosen, added on it) or moves.
+func TestFolderOutputStaysOutsideLibraries(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), false)
+	alias := filepath.Join(t.TempDir(), "alias")
+	os.Symlink(lib.Path, alias)
+	path := "/api/flows/" + itoa(lib.FlowID)
+	if _, b := post(t, srv, "POST", path+"/check-output", `{"path":`+strconv.Quote(filepath.Join(alias, "new"))+`}`); !strings.Contains(b, "inside_library") {
+		t.Errorf("a link into the library: %s", b)
+	}
+	// a folder flow with no library yet, then libraries that would hold its folder
+	out := t.TempDir()
+	sel := rules.DefaultSelectors(3)
+	sel.Speed, sel.AfterConverting, sel.OutputDir = "slower", "folder", filepath.Join(out, "converted")
+	flow, _ := st.AddFlow("Elsewhere", sel.Template())
+	other, _ := st.AddLibrary("Other", t.TempDir(), rules.SliderTemplate(3), false)
+	if code, b := post(t, srv, "PUT", "/api/libraries/"+itoa(other.ID)+"/flow", `{"flowId":"`+itoa(flow.ID)+`"}`); code != 200 {
+		t.Fatalf("a library elsewhere: %d %s", code, b)
+	}
+	if code, b := post(t, srv, "PATCH", "/api/libraries/"+itoa(other.ID), `{"path":`+strconv.Quote(out)+`}`); code != 400 || errCode(b) != "inside_library" {
+		t.Errorf("moved around the folder: %d %s", code, b)
+	}
+	if code, b := post(t, srv, "POST", "/api/libraries", `{"name":"Outer","path":`+strconv.Quote(out)+`,"flowId":"`+itoa(flow.ID)+`"}`); code != 400 || errCode(b) != "inside_library" {
+		t.Errorf("added on the flow: %d %s", code, b)
+	}
+	if code, b := post(t, srv, "PUT", "/api/libraries/"+itoa(lib.ID)+"/flow", `{"flowId":"`+itoa(flow.ID)+`"}`); code != 200 {
+		t.Errorf("Movies is elsewhere too: %d %s", code, b)
 	}
 }

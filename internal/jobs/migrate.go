@@ -200,6 +200,34 @@ DELETE FROM files WHERE reason = 'hdr_dv';`},
 	{18, "job steps", `
 CREATE TABLE IF NOT EXISTS job_steps (job_id INTEGER NOT NULL, step TEXT NOT NULL, at TEXT NOT NULL, ok INTEGER NOT NULL, words TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS job_steps_job ON job_steps(job_id);`},
+	// S6, Standard rework: a Standard flow's saved values in S6's terms (rules.Selectors.Upgraded reads
+	// unmigrated ones the same way, so nothing depends on this having run): Mbps caps become levels;
+	// 25b's audio choices become design E's, with "Only my languages"; a flow whose audio result changes
+	// (aac, opus, eac3, lossless_only) gets the notes line once. HEVC files skipped as already_hevc are
+	// forgotten: Standard decides them again (repackaged, or already_in_format) (lead, 23:32Z).
+	{19, "standard rework", `
+UPDATE flows SET template = json_set(template, '$.selectors.maxBitrate',
+  CASE json_extract(template, '$.selectors.maxBitrate') WHEN '40' THEN 'high' WHEN '20' THEN 'high' WHEN '10' THEN 'high'
+    WHEN '6' THEN 'medium' WHEN '4' THEN 'medium' ELSE json_extract(template, '$.selectors.maxBitrate') END)
+WHERE json_extract(template, '$.kind') = 'selectors' AND json_type(template, '$.selectors') = 'object';
+UPDATE flows SET template = json_set(template,
+  '$.selectors.onlyMyLanguages', json(CASE json_extract(template, '$.selectors.audio') WHEN 'my_languages' THEN 'true' ELSE 'false' END),
+  '$.selectors.notes', json(CASE json_extract(template, '$.selectors.audio')
+    WHEN 'aac' THEN '["Audio choices changed in this update: your flow now uses Stereo AAC."]'
+    WHEN 'opus' THEN '["Audio choices changed in this update: your flow now uses Stereo Opus."]'
+    WHEN 'eac3' THEN '["Audio choices changed in this update: your flow now uses Surround E-AC-3."]'
+    WHEN 'lossless_only' THEN '["Audio choices changed in this update: your flow now uses Surround E-AC-3."]'
+    ELSE '[]' END),
+  '$.selectors.audio', CASE json_extract(template, '$.selectors.audio') WHEN 'keep_all' THEN 'as_is' WHEN 'my_languages' THEN 'as_is'
+    WHEN 'aac' THEN 'stereo_aac' WHEN 'opus' THEN 'stereo_opus' WHEN 'eac3' THEN 'eac3_surround' WHEN 'lossless_only' THEN 'eac3_surround'
+    ELSE json_extract(template, '$.selectors.audio') END)
+WHERE json_extract(template, '$.kind') = 'selectors' AND json_type(template, '$.selectors') = 'object'
+  AND json_extract(template, '$.selectors.audio') IN ('keep_all', 'my_languages', 'aac', 'opus', 'eac3', 'lossless_only');
+UPDATE flows SET template = json_insert(json_set(template, '$.selectors.fileType', 'mkv'), '$.selectors.notes[#]',
+  'File type changed to MKV: MP4 files can''t hold Opus.')
+WHERE json_extract(template, '$.kind') = 'selectors' AND json_extract(template, '$.selectors.audio') = 'stereo_opus'
+  AND json_extract(template, '$.selectors.fileType') = 'mp4';
+DELETE FROM files WHERE reason = 'already_hevc';`},
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.

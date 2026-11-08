@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"os"
 	"path/filepath"
@@ -640,5 +641,80 @@ func TestHDR10KeptMigration(t *testing.T) {
 	}
 	if r, _ := s.GetFile("/a/x.mkv"); r == nil {
 		t.Error("another skip was forgotten too")
+	}
+}
+
+// Migration 19 (S6): Standard flows' saved values in S6's terms; the notes line where the audio's result
+// changes; already_hevc decisions forgotten.
+func TestStandardReworkMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "syp.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type was struct{ audio, cap string }
+	old := map[string]was{"/a": {"keep_all", "none"}, "/b": {"my_languages", "10"}, "/c": {"aac", "4"}, "/d": {"lossless_only", "40"}, "/e": {"stereo_aac", "low"}}
+	ids := map[string]int64{}
+	for p, w := range old {
+		sel := rules.DefaultSelectors(3)
+		sel.Speed, sel.MaxBitrate = "slower", w.cap // /e is saved in S6's terms already
+		l, _ := s.AddLibrary(p, p, sel.Template(), true)
+		ids[p] = l.FlowID
+		if p != "/e" { // as saved before S6
+			s.db.Exec(`UPDATE flows SET template=json_set(json_remove(template, '$.selectors.onlyMyLanguages'), '$.selectors.audio', ?, '$.selectors.maxBitrate', ?) WHERE id=?`, w.audio, w.cap, l.FlowID)
+		}
+	}
+	s.PutFile(File{Path: "/a/x.mkv", Size: 1, Decision: "skip: x", Reason: "already_hevc"})
+	s.db.Exec(`PRAGMA user_version = 18`)
+	s.Close()
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for p, want := range map[string]string{
+		"/a": "as_is false none []",
+		"/b": "as_is true high []",
+		"/c": "stereo_aac false medium [Audio choices changed in this update: your flow now uses Stereo AAC.]",
+		"/d": "eac3_surround false high [Audio choices changed in this update: your flow now uses Surround E-AC-3.]",
+		"/e": "stereo_aac true low []", // already S6's: untouched
+	} {
+		f, _ := s.GetFlow(ids[p])
+		sel := f.Template.Selectors
+		if got := fmt.Sprint(sel.Audio, " ", sel.OnlyMyLanguages, " ", sel.MaxBitrate, " ", sel.Notes); got != want {
+			t.Errorf("%s: %s, want %s", p, got, want)
+		}
+	}
+	if r, _ := s.GetFile("/a/x.mkv"); r != nil {
+		t.Errorf("already_hevc kept: %+v", r)
+	}
+}
+
+// Review 6cafc6f (P1): a 25b flow with Opus in MP4 (valid then) moves to MKV, with design's sentence,
+// so it still runs.
+func TestStandardReworkOpusMP4(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "syp.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sel := rules.DefaultSelectors(3)
+	sel.Speed = "slower"
+	l, _ := s.AddLibrary("M", "/m", sel.Template(), true)
+	s.db.Exec(`UPDATE flows SET template=json_set(json_remove(template, '$.selectors.onlyMyLanguages'), '$.selectors.audio', 'opus', '$.selectors.fileType', 'mp4', '$.selectors.afterConverting', 'beside') WHERE id=?`, l.FlowID)
+	s.db.Exec(`PRAGMA user_version = 18`)
+	s.Close()
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	f, _ := s.GetFlow(l.FlowID)
+	sel2 := f.Template.Selectors
+	if sel2.Audio != "stereo_opus" || sel2.FileType != "mkv" || len(sel2.Notes) != 2 || sel2.Notes[1] != "File type changed to MKV: MP4 files can't hold Opus." || sel2.Validate() != nil {
+		t.Errorf("%+v %v", sel2, sel2.Validate())
+	}
+	if p := f.Template.Compile(media.Info{Container: "mov,mp4,m4a,3gp,3g2,mj2", Streams: []media.Stream{{Type: "video", Codec: "h264", Width: 640, Height: 360}}}); p.SkipCode == rules.SkipSettingCannotRun {
+		t.Errorf("the migrated flow can't run: %q", p.Skip)
 	}
 }

@@ -225,7 +225,7 @@ func TestSelectorsSaveAndReadBack(t *testing.T) {
 	if code, body := post(t, srv, "PUT", path, `{"quality":3,"speed":"normal","format":"hevc","resolution":"keep","maxBitrate":"none","audio":"keep_all","subtitles":"keep_all","fileType":"keep","afterConverting":"replace","ignore":[],"skipHdr":true,"skipSmall":true,"minSavingPct":10,"order":"newest","kind":"selectors"}`); code != 200 {
 		t.Fatalf("defaults: %d %s", code, body)
 	}
-	if v := get(); v["kind"] != "selectors" || v["quality"] != 3.0 || v["audio"] != "keep_all" || v["fileType"] != "keep" {
+	if v := get(); v["kind"] != "selectors" || v["quality"] != 3.0 || v["audio"] != "as_is" || v["onlyMyLanguages"] != false || v["fileType"] != "keep" { // S6: an old page's keep_all is As it is, every track
 		t.Errorf("a Standard save at the defaults stays Standard, not Basic (review 6e60704): %v", v)
 	}
 	// any other choice is a selectors setting, read back as saved; there is no minSavingPct (always standardize)
@@ -233,7 +233,7 @@ func TestSelectorsSaveAndReadBack(t *testing.T) {
 		t.Fatalf("selectors: %d %s", code, body)
 	}
 	v := get()
-	for k, want := range map[string]any{"kind": "selectors", "quality": 2.0, "speed": "slower", "resolution": "720", "maxBitrate": "10",
+	for k, want := range map[string]any{"kind": "selectors", "quality": 2.0, "speed": "slower", "resolution": "720", "maxBitrate": "high",
 		"fileType": "mkv", "afterConverting": "beside", "includeDolbyVision": false} {
 		if v[k] != want {
 			t.Errorf("%s = %v, want %v", k, v[k], want)
@@ -255,11 +255,11 @@ func TestSelectorsSaveAndReadBack(t *testing.T) {
 		t.Errorf("library card: %v", libs[0])
 	}
 	// S3: skipHdr from an old page is ignored; includeDolbyVision is saved; neither has a warning
-	post(t, srv, "PUT", path, `{"quality":2,"speed":"slower","skipHdr":false}`)
+	post(t, srv, "PUT", path, `{"quality":2,"speed":"slower","fileType":"keep","skipHdr":false}`) // keep: S6's MKV default warns of renaming
 	if v := get(); v["includeDolbyVision"] != false || len(v["warnings"].([]any)) != 0 {
 		t.Errorf("skipHdr false: %v %v", v["includeDolbyVision"], v["warnings"])
 	}
-	post(t, srv, "PUT", path, `{"quality":2,"includeDolbyVision":true}`)
+	post(t, srv, "PUT", path, `{"quality":2,"fileType":"keep","includeDolbyVision":true}`)
 	if v := get(); v["includeDolbyVision"] != true || len(v["warnings"].([]any)) != 0 {
 		t.Errorf("includeDolbyVision: %v %v", v["includeDolbyVision"], v["warnings"])
 	}
@@ -398,7 +398,7 @@ func TestBasicSetting(t *testing.T) {
 	if code, body := post(t, srv, "PUT", path, `{"quality":3,"speed":"slower","audio":"aac"}`); code != 200 {
 		t.Fatalf("standard: %d %s", code, body)
 	}
-	if v := get(); v["kind"] != "selectors" || v["audio"] != "aac" || v["becomes"] != nil {
+	if v := get(); v["kind"] != "selectors" || v["audio"] != "stereo_aac" || v["onlyMyLanguages"] != false || v["becomes"] != nil { // S6: an old page's aac is Stereo AAC
 		t.Errorf("standard read back: %v", v)
 	}
 }

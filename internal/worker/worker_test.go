@@ -69,7 +69,8 @@ func (s spec) json() string {
 	b, _ := json.Marshal(map[string]any{
 		"streams":  s.streams,
 		"chapters": chapters,
-		"format":   map[string]any{"format_name": cmp.Or(s.format, "matroska,webm"), "duration": fmt.Sprint(s.duration), "size": "14"},
+		// 8 Mbps, as a file the scanner queued under the default rule has (the worker honours a Plan's skip: review 6cafc6f)
+		"format": map[string]any{"format_name": cmp.Or(s.format, "matroska,webm"), "duration": fmt.Sprint(s.duration), "size": "14", "bit_rate": "8000000"},
 	})
 	return string(b)
 }
@@ -1183,7 +1184,7 @@ func TestQueuedDolbyVisionIsSkippedNotEncoded(t *testing.T) {
 		{"profile 5, Dolby Vision included", 5, true, rules.SkipDVProfile5, "h264", false},
 		{"profile 8, Dolby Vision left alone", 8, false, rules.SkipDV, "h264", false},
 		// review 7ab8f72: the Plan's own skip comes first (already HEVC; the legacy rule's), the job still must not encode
-		{"HEVC + Dolby Vision, Standard (already HEVC)", 8, false, rules.SkipDV, "hevc", false},
+		{"AV1 + Dolby Vision, Standard (the plan says modern_format: S6)", 8, false, rules.SkipDV, "av1", false},
 		{"Dolby Vision, legacy flow skipping it for its bitrate", 8, false, rules.SkipDV, "h264", true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -1195,10 +1196,10 @@ func TestQueuedDolbyVisionIsSkippedNotEncoded(t *testing.T) {
 			sel := rules.DefaultSelectors(3)
 			sel.Speed, sel.IncludeDolbyVision = "slower", c.include
 			tmpl := sel.Template()
-			if c.legacy {
-				tmpl = rules.LegacyTemplate(rules.Default(), "replace")
+			if c.legacy { // a rule whose minimum is far above the file's 8 Mbps: it skips the file
+				tmpl = rules.LegacyTemplate(rules.Rule{FromCodec: "h264", MinBitrateKbps: 100000, CRF: 28, Preset: "medium"}, "replace")
 			}
-			if plan := tmpl.Compile(must(media.ParseProbe([]byte(s.srcSpec.json())))); c.codec == "hevc" && plan.SkipCode != rules.SkipAlreadyHEVC || c.legacy && plan.SkipCode == c.code {
+			if plan := tmpl.Compile(must(media.ParseProbe([]byte(s.srcSpec.json())))); c.codec == "av1" && plan.SkipCode != rules.SkipModernFormat || c.legacy && plan.SkipCode == c.code {
 				t.Fatalf("the case does not take the path it is about: %q", plan.SkipCode)
 			}
 			w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
@@ -1270,5 +1271,58 @@ func TestRunLogProgress(t *testing.T) {
 	}
 	if fmt.Sprint(got) != "[10% done · about 1 min left 20% done · about 1 min left 50% done · about 1 min left 90% done · about 1 min left]" {
 		t.Errorf("progress lines %q in:\n%s", got, text)
+	}
+}
+
+// Review 6cafc6f (P1): a queued HDR file whose flow now makes H.264 (which has no HDR path) ends as a
+// skipped file with the Plan's reason: no libx264 runs, the original is untouched.
+func TestQueuedHDRToH264IsSkipped(t *testing.T) {
+	rules.SetAvailableFormats(map[string]bool{"libx264": true})
+	defer rules.SetAvailableFormats(nil)
+	s := newScenario(t)
+	s.srcSpec.streams[0] = hdrVid("mpeg2video", true) // an HDR source H.264 would really be encoded from
+	w := s.worker(Replace)
+	sel := rules.DefaultSelectors(3)
+	sel.Format = "h264"
+	tmpl := sel.Template()
+	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.RunOne(context.Background())
+	if s.count("libx264") != 0 {
+		t.Fatalf("encoded:\n%s", strings.Join(s.calls, "\n"))
+	}
+	if _, err := s.store.Get(s.id); err == nil {
+		t.Errorf("the job is still there: %+v", s.job())
+	}
+	if f, _ := s.store.GetFile(s.src); f == nil || f.Reason != rules.SkipSettingCannotRun {
+		t.Errorf("file record %+v", f)
+	}
+	s.assertOriginalSafe()
+}
+
+// Review 48f07eb: a Plan that is skipped logs no action note (here "7.1 sound became 5.1" from MP4's
+// TrueHD rule), since nothing is converted: an MP4 can't hold the PGS subtitle.
+func TestSkippedPlanLogsNoActionNotes(t *testing.T) {
+	s := newScenario(t)
+	s.srcSpec.streams[1] = aud("truehd", "eng", 8)
+	s.srcSpec.streams[2] = sub("hdmv_pgs_subtitle", "eng", false)
+	w := s.worker(Replace)
+	w.Logs = &runlog.Logs{Dir: t.TempDir()}
+	sel := rules.DefaultSelectors(3)
+	sel.Audio, sel.FileType = "as_is", "mp4"
+	tmpl := sel.Template()
+	if p := tmpl.Compile(must(media.ParseProbe([]byte(s.srcSpec.json())))); !p.AudioFolded || p.Skip == "" {
+		t.Fatalf("the case does not take the path it is about: folded %v, skip %q", p.AudioFolded, p.Skip)
+	}
+	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.RunOne(context.Background())
+	if s.count("libx265") != 0 {
+		t.Fatalf("encoded:\n%s", strings.Join(s.calls, "\n"))
+	}
+	text, _, _ := w.Logs.Read(s.id, 0)
+	if strings.Contains(text, rules.FoldedNote) {
+		t.Errorf("a skipped file's log claims a conversion:\n%s", text)
+	}
+	if f, _ := s.store.GetFile(s.src); f == nil || !strings.HasPrefix(f.Decision, "skip: ") {
+		t.Errorf("file record %+v", f)
 	}
 }

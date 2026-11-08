@@ -199,7 +199,11 @@ func main() {
 
 	x := media.OSExec{}
 	chk := &doctor.Checker{Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath, KnownOriginals: store.KnownOriginals}
-	converts := chk.Converter(ctx).Converts()
+	tools := chk.Converter(ctx)
+	converts := tools.Converts()
+	if tools.FFmpeg != "" { // the video formats Standard can offer (S6): the encoders this ffmpeg has
+		rules.SetAvailableFormats(media.Encoders(ctx, x, tools.FFmpeg))
+	}
 	chk.ToolsNow() // the hardware check starts in the background, after the converter's: Workers has it soon after
 	sc := &scanner.Scanner{Store: store, Exec: x, FFprobe: ffprobePath, Targets: scanTargets(store), MinAge: *settle}
 	if converts {
