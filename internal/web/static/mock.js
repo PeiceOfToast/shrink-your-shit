@@ -266,7 +266,9 @@
   // type, and the rough-picture warning for a Low limit. Only the mock holds a copy of them.
   function warningsFor(s) {
     var w = []; if (!s) return w;
-    if (s.maxBitrate === "low") w.push("Low may look blocky in dark or fast scenes for 4K HDR files (" + (LADDER[s.format || "hevc"] || LADDER.hevc).low[0] + " Mbps). Choose Medium or No limit to avoid that.");
+    // The server's rough-picture warning (03:46Z): only where Low's cap is below the rough line (HDR and 50-60 fps raise the
+    // line); normal SDR files get none. The mock has no files, so it says the case Low falls below: 4K HDR at 50-60 fps.
+    if (s.maxBitrate === "low") w.push("Low may look blocky in dark or fast scenes for 4K HDR files at 50-60 fps (" + (LADDER[s.format || "hevc"] || LADDER.hevc).low[0] + " Mbps). Choose Medium or No limit to avoid that.");
     if (s.afterConverting === "replace" && s.fileType && s.fileType !== "keep")
       w.push("Changing the file type renames each file (" + (s.fileType === "mp4" ? "movie.mkv becomes movie.mp4" : "movie.mp4 becomes movie." + s.fileType) + "). Radarr, Sonarr, Plex or Jellyfin may lose track of the renamed files: after converting, rescan this library in those apps.");
     // S6 (server text from workshop's warnings check): Keep as is with VP9 or Opus turns .mp4 files into .mkv files. Only
