@@ -76,8 +76,10 @@
       form.onsubmit = function (e) { e.preventDefault(); var n = inp.value.trim(); if (!n) return;
         api.renameFlow({ id: id }, { name: n }).then(function (nf) { f.name = nf.name; head(); close(); say("Renamed."); }, fail); };
     }
-    Promise.all([api.getFlow({ id: id }), api.getFlowSetting({ id: id }), api.getSettings(), fetch("/assets/languages.json").then(function (x) { return x.json(); }).then(null, function () { return []; })]).then(function (r) {
-      f = r[0]; var s = r[1]; langs = r[2].languages || []; r[3].forEach(function (x) { names[x[0]] = x[1]; });
+    // GET /api/flows/{id} has no usedBy (contract: id, name, steps, kind, tag); the list has it.
+    Promise.all([api.getFlow({ id: id }), api.getFlowSetting({ id: id }), api.getSettings(), fetch("/assets/languages.json").then(function (x) { return x.json(); }).then(null, function () { return []; }),
+      api.listFlows().then(function (l) { return l.items.filter(function (x) { return x.id === id; })[0] || {}; }, function () { return {}; })]).then(function (r) {
+      f = r[0]; var s = r[1], used = r[4].usedBy || []; langs = r[2].languages || []; r[3].forEach(function (x) { names[x[0]] = x[1]; });
       head(); $("f-rename").hidden = false; $("f-rename").onclick = function (e) { e.preventDefault(); rename(); };
       $("f-body").hidden = false;
       $("export").hidden = !api.flowIO();
@@ -88,7 +90,7 @@
       };
       if (f.kind === "advanced" || f.kind === "earlier") { $("f-readonly").hidden = false; drawSteps(f.steps || [], $("graph")); text(f.steps || [], $("f-text")); return; }
       $("f-edit").hidden = false; warn = ui.warnings($("save")); warn.show(s.warnings);
-      if (f.usedBy.length) { $("f-used").textContent = "Saving changes this for " + and(f.usedBy) + "."; $("f-used").hidden = false; }
+      if (used.length) { $("f-used").textContent = "Saving changes this for " + and(used) + "."; $("f-used").hidden = false; }
       build(f.kind === "standard" ? "standard" : "basic", s);
       $("save").onclick = function () {
         if (!editor) return;

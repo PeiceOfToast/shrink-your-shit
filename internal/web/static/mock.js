@@ -466,7 +466,7 @@
     getFlow: function (p) {
       var i = find(flows, "id", p.id);
       if (i < 0) return fail(404, "not_found", "That flow is gone. Nothing was changed.");
-      return ok(Object.assign(flowView(flows[i]), { steps: stepsFor(flows[i]) }));
+      var v = Object.assign(flowView(flows[i]), { steps: stepsFor(flows[i]) }); delete v.usedBy; delete v.changedAt; return ok(v); // the contract's fields only
     }
   };
   // ?auth=1: the mock requires a session, as the server does beyond loopback (?auth=0 turns it off; remembered
