@@ -9,7 +9,6 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
-	"slices"
 )
 
 //go:embed templates
@@ -18,29 +17,9 @@ var templates embed.FS
 // navItem is one menu entry. static/nav.json is the single list of them; the
 // browser reads the same file to add the entries that depend on settings.
 type navItem struct {
-	ID                       string   `json:"id"`
-	Label                    string   `json:"label"`
-	Href                     string   `json:"href"`
-	ShowAt                   []string `json:"showAt"`                   // control levels that show it; empty = always
-	ShowWithPerLibraryChoice bool     `json:"showWithPerLibraryChoice"` // also shown when "Let me choose per library" is on
-}
-
-func (n navItem) visible(level string, perLibrary bool) bool {
-	if len(n.ShowAt) == 0 {
-		return true
-	}
-	return slices.Contains(n.ShowAt, level) || (n.ShowWithPerLibraryChoice && perLibrary)
-}
-
-// navFor lists the menu items shown at a control level.
-func navFor(items []navItem, level string, perLibrary bool) []navItem {
-	var out []navItem
-	for _, n := range items {
-		if n.visible(level, perLibrary) {
-			out = append(out, n)
-		}
-	}
-	return out
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Href  string `json:"href"`
 }
 
 func loadNav() []navItem {
@@ -142,7 +121,7 @@ func render(items []navItem, p page) ([]byte, error) {
 	if p.Kind == "wizard" { // the top bar has no menu during first-run
 		v.Title, v.Heading = "Set up", "Set up"
 	} else {
-		v.Nav = navFor(items, "basic", false)
+		v.Nav = items
 	}
 	// Settings has a tab row. Activity is one Files view (redesign C): its old addresses stay, each opening its card.
 	if p.Tab != "" && p.Section == "settings" {

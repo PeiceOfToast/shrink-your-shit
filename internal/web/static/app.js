@@ -71,23 +71,6 @@
     apply();
   }
 
-  // The server sends the Basic menu. Entries that depend on settings are added here (nav.json says when).
-  function menu(s) {
-    var ul = $("main-nav"), section = doc.body.getAttribute("data-section");
-    if (!ul) return Promise.resolve(); // the wizard has no menu
-    return fetch("/assets/nav.json").then(function (r) { return r.json(); }).then(function (items) {
-      ul.textContent = "";
-      items.forEach(function (n) {
-        var show = !n.showAt || n.showAt.indexOf(s.controlLevel) >= 0 || (n.showWithPerLibraryChoice && s.perLibraryFlow);
-        if (!show) return;
-        var li = doc.createElement("li"), a = doc.createElement("a");
-        a.setAttribute("data-id", n.id); a.href = n.href; a.textContent = n.label;
-        if (n.id === section) a.setAttribute("aria-current", "page");
-        li.appendChild(a); ul.appendChild(li);
-      });
-    });
-  }
-
   function working() {
     if (!$("working")) return;
     api.activitySummary().then(function (s) {
@@ -127,7 +110,7 @@
     $("main").insertBefore(n, $("mock-note").nextSibling);
   }
 
-  window.SYP.menu = menu; window.SYP.working = working; // the Workers page redraws the top bar when a worker starts or stops
+  window.SYP.working = working; // the Workers page redraws the top bar when a worker starts or stops
   // Pages start once the session is known: a 401 here shows the sign-in screen and the page never starts.
   theme();
   window.SYP.ready = signIn().then(function () {
@@ -135,7 +118,7 @@
       if (!firstRun(s)) return never; // on its way to first-run: this page never starts
       if (api.mocked) $("mock-note").hidden = false;
       if (!s.firstRunDone) return; // Settings > System during setup: no menu, no notices
-      working(); update(s); menu(s).catch(function () {});
+      working(); update(s);
     }, function (e) { return e && e.status === 401 ? never : null; });
   });
 })();
