@@ -402,3 +402,27 @@ func TestBasicSetting(t *testing.T) {
 		t.Errorf("standard read back: %v", v)
 	}
 }
+
+// ui-shop QA (qa-standard e): the video step names the flow's format and the CRF it really encodes at.
+func TestFlowStepsNameTheFormat(t *testing.T) {
+	rules.SetAvailableFormats(map[string]bool{"libx265": true, "libx264": true, "libsvtav1": true, "libvpx-vp9": true})
+	defer rules.SetAvailableFormats(nil)
+	for format, want := range map[string]string{
+		"hevc": "HEVC, CRF 23 at 1080p (lower = better quality); 22 up to 720p, 24 at 2160p; preset medium",
+		"h264": "H.264, CRF 18 at 1080p (lower = better quality); 17 up to 720p, 19 at 2160p; preset medium",
+		"av1":  "AV1, CRF 32 at 1080p (lower = better quality); 31 up to 720p, 33 at 2160p; preset 6",
+		"vp9":  "VP9, CRF 33 at 1080p (lower = better quality); 32 up to 720p, 34 at 2160p",
+	} {
+		sel := rules.DefaultSelectors(3)
+		sel.Format = format
+		got := ""
+		for _, s := range flowSteps(sel.Template()) {
+			if s["kind"] == "video" {
+				got, _ = s["detail"].(string)
+			}
+		}
+		if got != want {
+			t.Errorf("%s: %q, want %q", format, got, want)
+		}
+	}
+}

@@ -321,8 +321,16 @@ func flowSteps(t rules.Template) []map[string]any {
 		if s.Resolution != "keep" {
 			size = "at most " + s.Resolution + " lines high (never made bigger), keeping its shape and colour depth"
 		}
-		add("video", "Make the video smaller at "+pos.Name+", "+size,
-			fmt.Sprintf("HEVC, CRF %d at 1080p (lower = better quality); %d up to 720p, %d at 2160p; preset %s", pos.CRF, pos.CRF-1, pos.CRF+1, rules.SpeedPresets[s.Speed]))
+		vf, ok := rules.VideoFormats[s.Format] // the format made and the CRF it really encodes at (ui-shop QA)
+		if !ok {
+			vf = rules.VideoFormats["hevc"]
+		}
+		crf := pos.CRF + vf.CRFOffset
+		detail := fmt.Sprintf("%s, CRF %d at 1080p (lower = better quality); %d up to 720p, %d at 2160p", vf.Name, crf, crf-1, crf+1)
+		if preset := vf.Presets[s.Speed]; preset != "" { // VP9 has no preset (its speed is -cpu-used)
+			detail += "; preset " + preset
+		}
+		add("video", "Make the video smaller at "+pos.Name+", "+size, detail)
 		if s.MaxBitrate != "none" {
 			f := s.Format
 			if rules.Ladder[f] == nil {

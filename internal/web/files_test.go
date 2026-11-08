@@ -215,6 +215,13 @@ func TestCheckOutput(t *testing.T) {
 	if code, body := post(t, srv, "PUT", path+"/setting", `{"quality":3,"speed":"slower","afterConverting":"folder","outputDir":`+strconv.Quote(filepath.Join(lib.Path, "x"))+`}`); code != 400 || errCode(body) != "inside_library" {
 		t.Errorf("save inside: %d %s", code, body)
 	}
+	// ui-shop QA (qa-standard d): a system folder is refused, at the check and on Save, whoever the server runs as
+	if got := check(jobs.SystemDirForTest()); got != "system_folder" {
+		t.Errorf("a system folder: %q", got)
+	}
+	if code, body := post(t, srv, "PUT", path+"/setting", `{"quality":3,"speed":"slower","afterConverting":"folder","outputDir":`+strconv.Quote(jobs.SystemDirForTest())+`}`); code != 400 || errCode(body) != "system_folder" {
+		t.Errorf("save with a system folder: %d %s", code, body)
+	}
 	if code, body := post(t, srv, "PUT", path+"/setting", `{"quality":3,"speed":"slower","afterConverting":"folder"}`); code != 400 || errCode(body) != "output_dir_needed" {
 		t.Errorf("save without folder: %d %s", code, body)
 	}
@@ -295,5 +302,19 @@ func TestFolderOutputStaysOutsideLibraries(t *testing.T) {
 	}
 	if code, b := post(t, srv, "PUT", "/api/libraries/"+itoa(lib.ID)+"/flow", `{"flowId":"`+itoa(flow.ID)+`"}`); code != 200 {
 		t.Errorf("Movies is elsewhere too: %d %s", code, b)
+	}
+}
+
+// Row 06:28Z: the Skipped detail for already_in_format is the plan's own sentence (its format, file
+// type and audio), in both lists, not a fixed "HEVC in MKV".
+func TestAlreadyInFormatDetailIsThePlans(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	st.PutFile(jobs.File{Path: filepath.Join(lib.Path, "a.webm"), Size: 5, Decision: "skip: it is already VP9 in WebM with the audio you chose", Reason: rules.SkipAlreadyInFormat})
+	for _, path := range []string{"/api/activity/files?show=skipped", "/api/activity/skipped"} {
+		_, body, _ := do(t, nil, srv, call{method: "GET", path: path})
+		if !strings.Contains(body, `"It is already VP9 in WebM with the audio you chose."`) {
+			t.Errorf("%s: %s", path, body)
+		}
 	}
 }
