@@ -85,9 +85,17 @@ func convertingTo(plan rules.Plan, src media.Info) string {
 		if kind == "mov" {
 			kind = "mp4"
 		}
+		if src.Ext == ".webm" { // ffprobe names WebM matroska (#97 QA)
+			kind = "webm"
+		}
+	}
+	if kind == "webm" {
+		kind = "WebM"
+	} else {
+		kind = strings.ToUpper(kind)
 	}
 	if plan.Video.Copy {
-		return "repackaged as " + strings.ToUpper(kind)
+		return "repackaged as " + kind
 	}
 	depth := "8-bit"
 	if v := src.Video(); plan.Video.HDR != nil || (v != nil && v.BitDepth > 8) {
@@ -97,7 +105,7 @@ func convertingTo(plan rules.Plan, src media.Info) string {
 	if f, ok := rules.VideoFormats[plan.Video.Format]; ok {
 		name = f.Name
 	}
-	return name + " · " + depth + " · " + strings.ToUpper(kind)
+	return name + " · " + depth + " · " + kind
 }
 
 func encoderWords(plan rules.Plan) string {
