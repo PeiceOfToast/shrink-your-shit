@@ -1298,3 +1298,31 @@ func TestQueuedHDRToH264IsSkipped(t *testing.T) {
 	}
 	s.assertOriginalSafe()
 }
+
+// Review 48f07eb: a Plan that is skipped logs no action note (here "7.1 sound became 5.1" from MP4's
+// TrueHD rule), since nothing is converted: an MP4 can't hold the PGS subtitle.
+func TestSkippedPlanLogsNoActionNotes(t *testing.T) {
+	s := newScenario(t)
+	s.srcSpec.streams[1] = aud("truehd", "eng", 8)
+	s.srcSpec.streams[2] = sub("hdmv_pgs_subtitle", "eng", false)
+	w := s.worker(Replace)
+	w.Logs = &runlog.Logs{Dir: t.TempDir()}
+	sel := rules.DefaultSelectors(3)
+	sel.Audio, sel.FileType = "as_is", "mp4"
+	tmpl := sel.Template()
+	if p := tmpl.Compile(must(media.ParseProbe([]byte(s.srcSpec.json())))); !p.AudioFolded || p.Skip == "" {
+		t.Fatalf("the case does not take the path it is about: folded %v, skip %q", p.AudioFolded, p.Skip)
+	}
+	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.RunOne(context.Background())
+	if s.count("libx265") != 0 {
+		t.Fatalf("encoded:\n%s", strings.Join(s.calls, "\n"))
+	}
+	text, _, _ := w.Logs.Read(s.id, 0)
+	if strings.Contains(text, rules.FoldedNote) {
+		t.Errorf("a skipped file's log claims a conversion:\n%s", text)
+	}
+	if f, _ := s.store.GetFile(s.src); f == nil || !strings.HasPrefix(f.Decision, "skip: ") {
+		t.Errorf("file record %+v", f)
+	}
+}

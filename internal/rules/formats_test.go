@@ -184,10 +184,10 @@ func TestReviewFixesS6(t *testing.T) {
 			t.Errorf("keep + %s in MP4: container %q skip %q note %q", name, p.Container, p.Skip, p.TypeNote)
 		}
 	}
-	// 10000 kbps in all, a 1536 kbps track and a 5.1 AC-3 of unknown bitrate (576): the video about 7888
+	// 10000 kbps in all, a 1536 kbps track and a 5.1 AC-3 of unknown bitrate (640, its maximum): the video at most 7824
 	i := h264(1920, 1080, 0, media.Stream{Type: "audio", Codec: "dts", Channels: 6, BitrateKbps: 1536}, media.Stream{Type: "audio", Codec: "ac3", Channels: 6})
 	i.BitrateKbps = 10000
-	if got := sourceVideoKbps(i, i.Video()); got != 10000-1536-576 {
+	if got := sourceVideoKbps(i, i.Video()); got != 10000-1536-640 {
 		t.Errorf("video estimate %d", got)
 	}
 	dts := DefaultSelectors(3)
@@ -238,6 +238,25 @@ func TestKeepVP9OpusWarning(t *testing.T) {
 		got := slices.Contains(s.Template().Warnings(), KeepVP9OpusWarning)
 		if got != c.want {
 			t.Errorf("%s: warning %v, want %v", name, got, c.want)
+		}
+	}
+}
+
+// Review 48f07eb: an audio track of unknown bitrate counts at its codec's real maximum (or more), so the
+// video's estimate, and the cap, is never above the real video rate.
+func TestAudioEstimateIsAnUpperBound(t *testing.T) {
+	for _, c := range []struct {
+		codec string
+		ch    int
+		real  int // the most such a track really carries
+	}{
+		{"ac3", 6, 640}, {"ac3", 2, 640},
+		{"eac3", 6, 1024}, {"eac3", 8, 1536},
+		{"mp3", 2, 320}, {"aac", 2, 320}, {"aac", 6, 640},
+		{"dts", 6, 1509},
+	} {
+		if got := audioEstimateKbps(media.Stream{Type: "audio", Codec: c.codec, Channels: c.ch}); got < c.real {
+			t.Errorf("%s %d channels: estimate %d, below the %d such a track can carry", c.codec, c.ch, got, c.real)
 		}
 	}
 }

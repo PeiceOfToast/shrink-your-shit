@@ -829,9 +829,11 @@ func sourceVideoKbps(info media.Info, v *media.Stream) int {
 	return max(kbps, 0)
 }
 
-// audioEstimateKbps is a generous guess at an audio track's bitrate when the probe has none, so the
-// video's estimate stays low (the cap is never above the source video, review 4ac9c0d): lossless 640
-// kbps a channel (5.1 about 3.8 Mbps, 7.1 about 5.1), DTS 1536, other lossy 96 a channel up to 640.
+// audioEstimateKbps is an upper bound on an audio track's bitrate when the probe has none, so the
+// video's estimate (the file's bitrate less its audio) is never above the real video rate and the cap
+// stays at or below it (review 4ac9c0d, 48f07eb). Too high only lowers the cap. Lossless 640 kbps a
+// channel (5.1 about 3.8 Mbps, 7.1 about 5.1), DTS 1536, AC-3 640 (its maximum), E-AC-3 1024 up to
+// 5.1 and 1536 for 7.1, other lossy 160 a channel up to 640 (stereo 320: MP3's maximum, AAC's usual).
 func audioEstimateKbps(a media.Stream) int {
 	ch := a.Channels
 	if ch <= 0 {
@@ -842,6 +844,12 @@ func audioEstimateKbps(a media.Stream) int {
 		return 640 * ch
 	case a.Codec == "dts":
 		return 1536
+	case a.Codec == "ac3":
+		return 640
+	case a.Codec == "eac3" && ch > 6:
+		return 1536
+	case a.Codec == "eac3":
+		return 1024
 	}
-	return min(96*ch, 640)
+	return min(160*ch, 640)
 }

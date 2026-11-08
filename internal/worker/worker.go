@@ -516,21 +516,6 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// the result must look like. Whether to convert it was the scanner's decision (as before Plans);
 	// only a flow that cannot say how to convert stops the job here.
 	plan := tmpl.Compile(src)
-	if plan.MainAudioUsed { // Basic's stereo AAC found no track in the person's languages (S4)
-		w.jobf(job.ID, " (%s): %s", job.Path, rules.NoAudioInMyLanguageMain)
-	}
-	if plan.TypeNote != "" { // "keep" made this MP4 an MKV (review 4ac9c0d)
-		w.jobf(job.ID, " (%s): %s", job.Path, plan.TypeNote)
-	}
-	if plan.SmallKept { // design, 02:26Z: once per file
-		w.jobf(job.ID, " (%s): %s", job.Path, rules.SmallKeptNote)
-	}
-	if plan.AudioFolded { // design, 01:52Z: once per file
-		w.jobf(job.ID, " (%s): %s", job.Path, rules.FoldedNote)
-	}
-	if plan.HDRNote != "" { // what the HDR conversion does not keep (S3)
-		w.jobf(job.ID, " (%s): %s", job.Path, plan.HDRNote)
-	}
 	// Dolby Vision the flow leaves alone is never encoded, whatever was decided when the job was queued
 	// (review a09f6f5: a job queued before migration 17 or a setting change). Only these skips: the
 	// others stay the scanner's decision, as before Plans.
@@ -550,6 +535,23 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	if plan.Video.Codec == "" {
 		return "", failed("This library's setting can't convert this file, so it was left as it is.", fmt.Errorf("its library's flow cannot convert it: %s", plan.Skip))
+	}
+	// What the conversion will do, logged only now that it runs (review 48f07eb: a skipped Plan
+	// converts nothing, so its notes would be untrue).
+	if plan.MainAudioUsed { // Basic's stereo AAC found no track in the person's languages (S4)
+		w.jobf(job.ID, " (%s): %s", job.Path, rules.NoAudioInMyLanguageMain)
+	}
+	if plan.TypeNote != "" { // "keep" made this MP4 an MKV (review 4ac9c0d)
+		w.jobf(job.ID, " (%s): %s", job.Path, plan.TypeNote)
+	}
+	if plan.SmallKept { // design, 02:26Z: once per file
+		w.jobf(job.ID, " (%s): %s", job.Path, rules.SmallKeptNote)
+	}
+	if plan.AudioFolded { // design, 01:52Z: once per file
+		w.jobf(job.ID, " (%s): %s", job.Path, rules.FoldedNote)
+	}
+	if plan.HDRNote != "" { // what the HDR conversion does not keep (S3)
+		w.jobf(job.ID, " (%s): %s", job.Path, plan.HDRNote)
 	}
 	exp := plan.Expect(src, packets)
 	if exp.DurationSec <= 0 {
