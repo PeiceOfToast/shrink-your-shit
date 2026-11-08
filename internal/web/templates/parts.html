@@ -57,7 +57,7 @@
 {{define "tabs"}}{{with .Tabs}}<nav aria-label="{{$.Heading}} sections" class="tabs">{{range .}}<a href="{{.Href}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}</nav>{{end}}{{end}}
 
 {{define "activity"}}<noscript><div class="notice info" role="note"><div><strong>Turn on scripts to see live activity</strong>This page updates as files are converted, which needs scripts enabled.</div></div></noscript>
-<div class="page-head"><h1>Activity</h1><div class="row"><button class="btn" type="button" id="pause" hidden>Pause all</button></div></div>
+<div class="page-head"><h1>Activity</h1></div>
 <div class="notice bad" id="err" role="alert" hidden></div>
 <div class="grid-3" id="stats" style="margin-bottom:16px" hidden>
 <div class="card"><div class="stat" id="st-freed"></div><div class="stat-label">Space freed (originals already deleted)</div></div>
@@ -90,3 +90,11 @@
 <ol id="f-text"></ol>
 <div class="card"><h3>Always checked, cannot be removed</h3><p class="small" style="margin:0">After converting, the new file must play all the way through, look like the original (the picture is compared), and hold what this flow asked for. If any check fails, the original stays and Activity shows why. A file is kept even when it isn't smaller; Activity shows the size before and after. When the original is replaced, it's kept for the time set in <a href="/settings/safety/">Settings &rarr; Safety</a>.</p></div>
 </div>{{end}}
+
+{{define "workers"}}<noscript><div class="notice info" role="note"><div><strong>Turn on scripts to see your workers</strong>Starting and stopping needs scripts enabled.</div></div></noscript>
+<div class="page-head"><div><h1>Workers</h1><p class="muted">A worker converts files. Nothing is converted unless a worker is running.</p></div><div class="row" id="all" hidden></div></div>
+<div class="notice bad" id="err" role="alert" hidden></div>
+<div class="notice info" id="update-note" hidden><div><strong>Converting is stopped after the update.</strong>Press Start to carry on.<span id="update-basic" hidden> Libraries set to Basic now save MKV files, so .mp4 and .avi files get a new name; all audio tracks are kept. After converting, rescan those libraries in Radarr, Sonarr, Plex or Jellyfin.</span></div><button class="btn small" type="button" id="got-it">Got it</button></div>
+<div id="worker-list"></div>
+<p id="said" class="sr" role="status"></p>
+<p class="muted">Other computers can be added as workers in a later update.</p>{{end}}

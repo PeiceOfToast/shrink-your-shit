@@ -123,12 +123,29 @@
     { keptId: "k2", library: "Movies", path: "/media/movies/Paper Moon (2010).mp4", newPath: "/media/movies/Paper Moon (2010).mkv", originalBytes: 4 * GB, nowBytes: 2.2 * GB, deleteOn: iso(-6 * 864e5) }
   ];
 
+  // Workers (redesign D; workshop S2, UI-API-CONTRACT.md 20:25Z): one, "This computer" (id "this"). It starts stopped,
+  // after an update that stopped it (the one-time notice). ?worker=running or ?worker=paused (quiet hours) starts it that
+  // way instead. gpu is {found, vendor}, or null when detection didn't run.
+  var worker = { id: "this", name: "This computer", host: "nas01", on: false, stopping: false, quiet: false, filesAtOnce: 1, gpu: { found: true, vendor: "NVIDIA" } }, stoppedByUpdate = true, stopAt = 0;
+  try { var sw = JSON.parse(sessionStorage.getItem("syp-mock-workers")); if (sw && sw.w.id === "this") { worker = sw.w; stoppedByUpdate = sw.u; stopAt = sw.t; } } catch (e) {}
+  var wm = /[?&]worker=(running|paused)/.exec(location.search);
+  if (wm) { worker.on = true; worker.quiet = wm[1] === "paused"; stoppedByUpdate = false; }
+  function saveWorkers() { try { sessionStorage.setItem("syp-mock-workers", JSON.stringify({ w: worker, u: stoppedByUpdate, t: stopAt })); } catch (e) {} }
+  function workerOn() { return worker.on || worker.stopping; }
+  function workerView() {
+    if (worker.stopping && Date.now() >= stopAt) { worker.stopping = false; saveWorkers(); } // the current files finished
+    var conv = (worker.on && !worker.quiet) || worker.stopping ? working.slice(0, worker.filesAtOnce).map(function (j) { return { jobId: j.jobId, path: j.path, percent: j.percent, etaSeconds: j.etaSeconds }; }) : [];
+    var state = worker.stopping ? "stopping" : !worker.on ? "stopped" : worker.quiet ? "quiet_hours" : conv.length ? "converting" : "idle";
+    return { id: worker.id, name: worker.name, host: worker.host, state: state, filesAtOnce: worker.filesAtOnce, converting: conv,
+      quietUntil: worker.quiet ? new Date(new Date().setHours(31, 0, 0, 0)).toISOString() : null, gpu: worker.gpu };
+  }
+
   function summary() {
     // Waiting to be freed = the space the kept originals will give back (original - new); the whole
     // originals' size is only the Kept originals figure (keptBytes). Contract, workshop response to F1.
     var kept = 0; keptList.forEach(function (k) { kept += k.originalBytes - k.nowBytes; });
     var freed = 0; libs.forEach(function (l) { freed += l.freedBytes; }); // the libraries' own numbers, added up
-    return { freedBytes: freed, waitingBytes: kept, workingFiles: paused ? 0 : working.length, waitingFiles: 590, paused: paused,
+    return { freedBytes: freed, waitingBytes: kept, workingFiles: paused || !workerOn() ? 0 : working.length, waitingFiles: 590, paused: paused, workersRunning: workerOn(),
              counts: { skipped: skippedList.length, failed: failedList.length } };
   }
   function previewResult() {
@@ -295,6 +312,20 @@
       return ok(list([{ path: root + "/Alien (1979).mkv", bytes: 9 * GB }, { path: root + "/Heat (1995).mkv", bytes: 7 * GB }, { path: root + "/Show S02E04.mkv", bytes: 4.1 * GB }]));
     },
     activitySummary: function () { return ok(summary()); },
+    listWorkers: function () { return ok({ workers: [workerView()], stoppedByUpdate: stoppedByUpdate, basicFlowsChanged: stoppedByUpdate && /[?&]basicchanged=1/.test(location.search) }); }, // ?basicchanged=1: S4's flag
+    startWorker: function (p) { if (p.id !== "this") return fail(404, "not_found", "There is no such worker. Nothing was changed."); worker.on = true; worker.stopping = false; stoppedByUpdate = false; saveWorkers(); return ok(workerView()); },
+    stopWorker: function (p, b) {
+      if (p.id !== "this") return fail(404, "not_found", "There is no such worker. Nothing was changed.");
+      var when = b.when || "after_current"; if (when !== "after_current" && when !== "now") return fail(400, "invalid", "Stop after the current files or now. Nothing was changed.");
+      var busy = workerView().converting.length; worker.on = false;
+      if (when === "after_current" && busy) { worker.stopping = true; stopAt = Date.now() + 6000; } else worker.stopping = false; // nothing converting: stopped at once
+      saveWorkers(); return ok(workerView());
+    },
+    setWorker: function (p, b) {
+      if (!(b.filesAtOnce >= 1 && b.filesAtOnce <= 8 && b.filesAtOnce % 1 === 0)) return fail(400, "invalid_setting", "Enter a whole number from 1 to 8.");
+      worker.filesAtOnce = b.filesAtOnce; saveWorkers(); return ok(workerView());
+    },
+    dismissWorkerNotice: function () { stoppedByUpdate = false; saveWorkers(); return ok({ stoppedByUpdate: false }); },
     pause: function () { paused = true; saveAct(); return ok(); },
     resume: function () { paused = false; saveAct(); return ok(); },
     queue: function () {

@@ -1,4 +1,4 @@
-/* Activity: the header (savings, Pause/Resume), the tab counts and the five tabs. Polls every
+/* Activity: the header (savings; Start/Stop is on the Workers page), the tab counts and the five tabs. Polls every
    few seconds; a refresh only redraws what changed and puts focus back where it was. */
 (function () {
   "use strict";
@@ -47,7 +47,6 @@
     $("st-freed").textContent = ui.bytes(s.freedBytes); $("st-wait").textContent = ui.bytes(s.waitingBytes);
     $("st-work").textContent = s.paused ? "Paused" : s.workingFiles + (s.workingFiles === 1 ? " file" : " files");
     $("st-work-l").textContent = (s.paused ? "Nothing new starts" : "Working now") + " · " + ui.num(s.waitingFiles) + " waiting";
-    var p = $("pause"); p.hidden = false; p.textContent = s.paused ? "Resume" : "Pause all";
     [["/activity/skipped/", "Skipped", s.counts.skipped], ["/activity/failed/", "Failed", s.counts.failed]].forEach(function (t) {
       var a = document.querySelector('.tabs a[href="' + t[0] + '"]'); if (a) a.textContent = t[1] + " (" + ui.num(t[2]) + ")";
     });
@@ -87,8 +86,7 @@
       draw("queue", q, function () {
         pane.textContent = "";
         pane.appendChild(heading("Working now", "qh"));
-        if (paused) { var n = el("div", "notice info"), d = el("div"); d.appendChild(el("strong", null, "Paused")); d.appendChild(document.createTextNode("Nothing new starts until you press Resume.")); n.appendChild(d); pane.appendChild(n); }
-        else if (!q.working.length) pane.appendChild(empty("Nothing is being converted right now. Files waiting for their turn will be listed here."));
+        if (!q.working.length) pane.appendChild(empty("Nothing is being converted right now. Files waiting for their turn will be listed here."));
         q.working.forEach(function (j) {
           var c = el("div", "card"), top = el("div", "row between"), nm = base(j.path), conv = j.phase === "converting";
           top.appendChild(el("strong", null, nameOf(j))); top.appendChild(el("span", "badge info", conv ? "Converting" : "Checking the new file")); c.appendChild(top);
@@ -236,7 +234,6 @@
 
   function init() {
     confirmId = new URLSearchParams(location.search).get("confirm");
-    $("pause").onclick = function () { act(paused ? api.resume() : api.pause()); };
     refresh().then(function () {
       var busy = false;
       setInterval(function () { // one refresh at a time; a failed poll leaves the last good data on screen
