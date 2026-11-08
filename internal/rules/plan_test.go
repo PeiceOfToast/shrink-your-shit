@@ -406,3 +406,18 @@ func TestRotatedFileIsCappedUpright(t *testing.T) {
 		t.Errorf("unturned: height %d", p.Video.Height)
 	}
 }
+
+// A rotated HEVC phone video repackaged by Basic (S4): the copied stream keeps its coded size and its
+// Display Matrix, so the check expects the size unswapped (the S3/#81 merge).
+func TestRotatedHEVCRepackagedKeepsItsSize(t *testing.T) {
+	src := h264(640, 360, 3000)
+	src.Streams[0].Codec, src.VideoCodec, src.Container = "hevc", "hevc", "mov,mp4,m4a,3gp,3g2,mj2"
+	src.Streams[0].Rotation = 90
+	p := SliderTemplate(3).Compile(src)
+	if !p.Video.Copy {
+		t.Fatalf("not a repackaging: %q %+v", p.Skip, p.Video)
+	}
+	if e := p.Expect(src, 0); e.Streams[0].Width != 640 || e.Streams[0].Height != 360 {
+		t.Errorf("expected %dx%d, want the coded 640x360", e.Streams[0].Width, e.Streams[0].Height)
+	}
+}

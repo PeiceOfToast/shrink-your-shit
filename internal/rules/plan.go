@@ -249,7 +249,8 @@ func (p Plan) Expect(src media.Info, packets int64) Expect {
 	}
 	// A phone video's Display Matrix: ffmpeg encodes the picture upright, so a ±90° file's new picture
 	// has width and height swapped (before any scaling, which applies to the upright picture).
-	if vs := src.ByType("video"); p.Video.Index < len(vs) && vs[p.Video.Index].Quarter() {
+	// (Not when the video is copied: it keeps its coded size and its Display Matrix.)
+	if vs := src.ByType("video"); !p.Video.Copy && p.Video.Index < len(vs) && vs[p.Video.Index].Quarter() {
 		n := 0
 		for k := range e.Streams {
 			if e.Streams[k].Type != "video" {
