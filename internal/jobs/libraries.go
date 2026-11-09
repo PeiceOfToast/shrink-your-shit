@@ -256,6 +256,9 @@ func (s *Store) addLibrary(name, path, flowBase string, t rules.Template, flowID
 	if err := tx.Commit(); err != nil {
 		return Library{}, err
 	}
+	// first run's step-1 library (name, folder) waits in the settings until a library exists: any way
+	// one is made clears it (design, 02:41Z)
+	s.db.Exec(`UPDATE app_meta SET value = json_set(value, '$.firstRunLibrary', json('null')) WHERE key = 'settings' AND json_valid(value)`)
 	return s.GetLibrary(id)
 }
 
