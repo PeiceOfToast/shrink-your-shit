@@ -1,0 +1,109 @@
+/* Shrink Your Shit v2 design tokens (DESIGN/v2, 2026-11-09).
+   Source: UI-SPEC-2026-11-09.md section 3 (the user's palette), unchanged where it passes WCAG 2.2 AA.
+   Added tokens (marked ADDED) fix contrast gaps found when checking the palette; see THEMES.md.
+   Components use only these variables. ui-shop: copy this file as the single source; don't add per-component colours. */
+
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0D1117;            /* page background */
+  --sidebar: #111827;
+  --surface: #172131;       /* cards, tables, inspectors */
+  --raised: #213047;        /* raised / selected surface */
+  --text: #E8EEF6;
+  --text-2: #98A8BC;        /* secondary text */
+  --border: #2D3A4A;        /* dividers only (decorative, 1.4:1) */
+  --border-strong: #6E7F96; /* ADDED: input, checkbox and button outlines, 3:1 or more on surface (WCAG 1.4.11) */
+  --accent: #6C8CFF;
+  --accent-2: #AE8BFA;
+  --on-accent: #0D1117;     /* ADDED: text on accent buttons. White on #6C8CFF is 3.07:1 (fails); this is 6.2:1 */
+  --accent-text: #7C99FF;   /* ADDED: accent-coloured text on --raised (#6C8CFF is 4.33:1 there; this is 4.98:1) */
+  --success: #37BF88;
+  --warning: #F0AF4D;
+  --error: #F06C76;
+  --success-text: var(--success);  /* status words; light theme darkens these */
+  --warning-text: var(--warning);
+  --error-text: var(--error);
+  --focus: var(--accent);   /* 2 px ring plus 2 px offset; 6.2:1 on the page */
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #F5F7FB;
+  --sidebar: #E9EEF5;
+  --surface: #FFFFFF;
+  --raised: #EAF1FC;
+  --text: #172033;
+  --text-2: #5A687B;
+  --border: #D8E0EB;
+  --border-strong: #7D8BA0;   /* ADDED: 3.46:1 on white */
+  --accent: #365FE2;
+  --accent-2: #7454C8;
+  --on-accent: #FFFFFF;       /* 5.4:1 */
+  --accent-text: var(--accent);
+  --success: #16835A;         /* fills, icons, bars */
+  --warning: #A9650D;
+  --error: #B72F43;
+  --success-text: #13704D;    /* ADDED: #16835A is 4.07-4.42:1 on bg/sidebar/raised; this is 5.2:1 or more */
+  --warning-text: #8A5208;    /* ADDED: #A9650D is 3.96-4.3:1 on bg/sidebar/raised; this is 5.5:1 or more */
+  --error-text: var(--error);
+  --focus: var(--accent);
+}
+
+/* System mode: no data-theme attribute set; follow the OS. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+    --bg: #F5F7FB; --sidebar: #E9EEF5; --surface: #FFFFFF; --raised: #EAF1FC;
+    --text: #172033; --text-2: #5A687B; --border: #D8E0EB; --border-strong: #7D8BA0;
+    --accent: #365FE2; --accent-2: #7454C8; --on-accent: #FFFFFF; --accent-text: #365FE2;
+    --success: #16835A; --warning: #A9650D; --error: #B72F43;
+    --success-text: #13704D; --warning-text: #8A5208; --error-text: #B72F43; --focus: var(--accent);
+  }
+}
+
+/* Accent presets (spec 3: Blue/Violet is the default). Set data-accent on <html>. */
+:root[data-accent="teal"]  { --accent: #3CC8C0; --accent-text: #3CC8C0; --on-accent: #0D1117; }
+:root[data-accent="amber"] { --accent: #F0AF4D; --accent-text: #F0AF4D; --on-accent: #0D1117; }
+:root[data-accent="mono"]  { --accent: #C9D3E0; --accent-text: #C9D3E0; --on-accent: #0D1117; }
+:root[data-theme="light"][data-accent="teal"]  { --accent: #0B726D; --accent-text: #0B726D; --on-accent: #FFFFFF; }
+:root[data-theme="light"][data-accent="amber"] { --accent: #9A5B0A; --accent-text: #9A5B0A; --on-accent: #FFFFFF; }
+:root[data-theme="light"][data-accent="mono"]  { --accent: #3A4558; --accent-text: #3A4558; --on-accent: #FFFFFF; }
+/* System mode on a light OS: the light accent values (review finding 1: without this the dark accents won, 1.5-2.1:1 on white). */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme])[data-accent="teal"]  { --accent: #0B726D; --accent-text: #0B726D; --on-accent: #FFFFFF; --focus: #0B726D; }
+  :root:not([data-theme])[data-accent="amber"] { --accent: #9A5B0A; --accent-text: #9A5B0A; --on-accent: #FFFFFF; --focus: #9A5B0A; }
+  :root:not([data-theme])[data-accent="mono"]  { --accent: #3A4558; --accent-text: #3A4558; --on-accent: #FFFFFF; --focus: #3A4558; }
+}
+
+/* Shape, type and spacing */
+:root {
+  --radius: 10px;           /* cards (spec: 8-12 px) */
+  --radius-sm: 6px;         /* inputs, buttons, chips */
+  --shadow: 0 1px 2px rgb(0 0 0 / .25);  /* cards: one subtle shadow, no more */
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;  /* offline: no web fonts */
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-scale: 1;          /* Settings > Appearance: 0.9 / 1 / 1.15 / 1.3 */
+  --fs: calc(14px * var(--font-scale));
+  --fs-sm: calc(12.5px * var(--font-scale));
+  --fs-lg: calc(18px * var(--font-scale));
+  --fs-xl: calc(24px * var(--font-scale));
+  /* Density: Comfortable (default) / Compact */
+  --row-h: 40px; --pad: 16px; --gap: 12px;
+  /* Shell sizes (spec 2) */
+  --nav-w: 236px; --nav-w-collapsed: 64px; --topbar-h: 56px;
+  --inspector-w: 360px;     /* 340-400, resizable */
+  --console-h: 220px;       /* 180-280, resizable */
+  --palette-w: 272px;       /* 250-300, resizable */
+  --motion: 150ms;
+}
+:root[data-density="compact"] { --row-h: 32px; --pad: 10px; --gap: 8px; }
+@media (prefers-reduced-motion: reduce) { :root { --motion: 0ms; } }
+:root[data-motion="reduced"] { --motion: 0ms; }
+
+/* Node category stripes (graph editor, spec 5.4). Subdued; never the only signal (each node also has an icon and a type label). */
+:root {
+  --cat-input: #6C8CFF; --cat-inspect: #5FB4D9; --cat-condition: #AE8BFA; --cat-video: #E58F5B;
+  --cat-audio: #4FBF9F; --cat-subtitle: #C9A54A; --cat-files: #8A9BB0; --cat-logic: #C77DBA;
+  --cat-integration: #6FA0C9; --cat-output: #37BF88;
+}
