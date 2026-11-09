@@ -215,3 +215,17 @@ func TestRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The Convert step's summary names each slider position once (ui-shop: "Better quality quality").
+func TestQualityWords(t *testing.T) {
+	want := []string{"Smallest file", "Smaller", "Balanced quality", "Better quality", "Best quality"}
+	for i, p := range rules.Slider {
+		if got := qualityWords(p.Name); got != want[i] {
+			t.Errorf("%d %q: %q, want %q", p.Position, p.Name, got, want[i])
+		}
+		n := Node{Type: TypeConvert, Enabled: true, Config: map[string]any{"quality": p.Position}}
+		if s := summary(n); strings.Count(strings.ToLower(s), "quality") > 1 || !strings.Contains(s, want[i]) {
+			t.Errorf("summary %q", s)
+		}
+	}
+}
