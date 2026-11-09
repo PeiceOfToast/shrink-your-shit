@@ -2,7 +2,7 @@
 // screens offer, really applied to that state. Every screen using it shows the Prototype banner. ?mock=fresh shows a
 // new install (no libraries yet) for review. When a contract endpoint lands, its function here becomes the fetch.
 import { useSyncExternalStore } from "react";
-import type { ActivityEvent, ID, Job, JobState, Library, Settings, Summary, Worker } from "../types/v2";
+import type { ActivityEvent, ID, Job, JobState, Library, Settings, Summary, Trash, Worker } from "../types/v2";
 
 const now = Date.now(), ago = (min: number) => new Date(now - min * 60e3).toISOString();
 const GB = 1e9;
@@ -48,6 +48,7 @@ interface State {
   last24h: Summary["last24h"];
   activity: ActivityEvent[];
   workflows: number;
+  trash: Trash; // GET /trash (not on dev yet: mocked like the rest of the page)
 }
 
 function running(): State {
@@ -73,6 +74,7 @@ function running(): State {
       { id: "a1", at: ago(22), type: "worker.left", text: "Laptop stopped answering", refs: { workerId: "laptop" } },
     ],
     workflows: 2,
+    trash: { bytes: 120 * GB, files: 14, nextDeleteAt: ago(-60 * 24), lastDeleteAt: ago(-60 * 24 * 7) },
   };
 }
 function fresh(): State {
@@ -80,7 +82,7 @@ function fresh(): State {
     settings: { firstRunDone: false, firstRunStep: 1, intakePaused: false, catalogueEnabled: false },
     libraries: [library("l1", "Movies", "/media/movies", 0, 0, 1284)],
     workers: [worker("this", "This computer", "paused", [0, 2], [0, 0], 5, [])], // workers start stopped (rebuild decision)
-    jobs: [], waiting: 0, last24h: { completed: 0, failed: 0, skipped: 0, successRate: null }, activity: [], workflows: 0,
+    jobs: [], waiting: 0, last24h: { completed: 0, failed: 0, skipped: 0, successRate: null }, activity: [], workflows: 0, trash: { bytes: 0, files: 0, nextDeleteAt: null, lastDeleteAt: null },
   };
 }
 
