@@ -70,31 +70,41 @@ var encodeSegment = []string{TypeSkips, TypeConvert, TypeAudio, TypeSubtitles, T
 
 // Definitions is the registry: built-in video nodes (plugins add theirs in Phase 4).
 func Definitions() []StepDefinition {
-	quality := enumOf(func() ([]any, []string) {
-		var v []any
-		var l []string
-		for _, p := range rules.Slider {
-			v, l = append(v, p.Position), append(l, p.Name)
-		}
-		return v, l
-	})
-	formats := enumOf(func() ([]any, []string) {
-		var v []any
-		var l []string
-		for _, f := range []string{"hevc", "h264", "av1", "vp9"} {
-			v, l = append(v, f), append(l, rules.VideoFormats[f].Name)
-		}
-		return v, l
-	})
+	// The words are design's (DESIGN/v2/mockups/workflow-stack.html, SCREENS V3, and the old editor's,
+	// carried over): labels, a hint per choice (x-enumHints), and what this computer can do (x-available).
+	picture := []string{"The smallest files. Fine detail can soften, mostly in dark or busy scenes.", "Small files, with a small loss of fine detail.",
+		"Little visible change for most people. A good start.", "Keeps more detail. Files stay larger.", "Hard to tell from the original. Files stay largest."}
+	var qv []any
+	var ql []string
+	for _, p := range rules.Slider {
+		qv, ql = append(qv, p.Position), append(ql, p.Name)
+	}
+	quality := hinted(enum(qv, ql), picture)
+	formats := hinted(enum([]any{"hevc", "h264", "av1", "vp9"}, []string{"HEVC (H.265)", "H.264", "AV1", "VP9"}), []string{
+		"Small files that play on most TVs and phones made since 2016.", "Plays on everything, even old devices. Files are about twice the size of HEVC.",
+		"The smallest files, but slow to make and only for newer TVs and devices.", "Small files for web browsers and Android. Few TVs play it."})
 	formats["x-available"] = rules.Available() // the encoders this ffmpeg has
-	audio := enumOf(func() ([]any, []string) {
-		var v []any
-		var l []string
-		for _, a := range rules.AvailableAudio {
-			v, l = append(v, a), append(l, rules.AudioWords[a])
+	audioValues := []string{"stereo_aac", "stereo_aac_surround", "eac3_surround", "ac3_surround", "stereo_opus", "as_is"}
+	audioEncoder := map[string]string{"stereo_aac": "aac", "stereo_aac_surround": "aac", "eac3_surround": "eac3", "ac3_surround": "ac3", "stereo_opus": "libopus"}
+	var audioAvailable []string
+	for _, a := range audioValues {
+		if e := audioEncoder[a]; e == "" || rules.HasEncoder(e) {
+			audioAvailable = append(audioAvailable, a)
 		}
-		return v, l
-	})
+	}
+	audio := hinted(enum(anys(audioValues), []string{"Stereo AAC", "Stereo AAC, plus surround as it is", "Surround E-AC-3", "Surround AC-3", "Stereo Opus", "As it is"}), []string{
+		"Plays on every TV and phone. Surround sound becomes stereo.", "Adds a stereo track for phones and TVs, and keeps the original surround track for sound systems.",
+		"The best surround sound for modern TVs and sound bars.", "Surround sound that plays on almost every TV and sound bar; older than E-AC-3.",
+		"The smallest audio, for MKV files. Doesn't play on Apple TV or most TVs.", "Tracks are copied unchanged."})
+	audio["x-available"] = audioAvailable
+	subtitles := hinted(enum(anys(rules.AvailableSubtitles), []string{"Keep all", "Keep only my languages", "Keep only text subtitles", "Save as separate .srt files"}), []string{
+		"Every subtitle track is kept as it is.", "Only subtitles in your languages are kept.",
+		"Picture subtitles are left out. Text subtitles are kept.", "Text subtitles are also saved next to the new file as .srt files."})
+	subtitles["description"] = "Subtitle pictures are never burned into the video."
+	subtitles["x-available"] = []string{"keep_all", "my_languages", "text_only"}
+	if rules.HasEncoder("srt") {
+		subtitles["x-available"] = rules.AvailableSubtitles
+	}
 	builtin := map[string]string{"kind": "builtin"}
 	def := func(d StepDefinition) StepDefinition {
 		d.TypeVersion, d.FileTypes, d.Source = 1, []string{"video"}, builtin
@@ -110,24 +120,27 @@ func Definitions() []StepDefinition {
 		def(StepDefinition{Type: TypeInput, Category: "input", Name: "Library files", Icon: "folder", TypeLabel: "Input",
 			Description: "Every video in the libraries that use this workflow.", Outputs: []Port{success}, AlwaysOn: true,
 			ConfigSchema: object(map[string]any{"ignore": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
-				"default": []any{}, "description": "Folders, files or patterns in the library that are not looked at."}}, nil),
+				"default": []any{}, "title": "Exclude patterns", "description": "Folders, files or patterns in the library that are left out."}}, nil),
 			SideEffects: "none"}),
 		def(StepDefinition{Type: TypeSkips, Category: "filter", Name: "Leave some files alone", Icon: "filter", TypeLabel: "Filter",
 			Description: "Skips Dolby Vision files, files already in this format, and AV1 or VP9 videos.",
 			Inputs:      []Port{in}, Outputs: []Port{success, skipped}, AlwaysOn: true, RunsWith: encodeSegment, SideEffects: "none",
 			ConfigSchema: object(map[string]any{"includeDolbyVision": map[string]any{"type": "boolean", "default": false,
-				"title": "Include Dolby Vision files"}}, nil)}),
+				"title": "Include Dolby Vision files", "description": "Off: Dolby Vision files are left as they are. On: they become HDR10 and the Dolby Vision layer is removed. Some Dolby Vision files (profile 5) are always left alone, because converting them would show wrong colours."}}, nil)}),
 		def(StepDefinition{Type: TypeConvert, Category: "video", Name: "Convert video", Icon: "video", TypeLabel: "Video",
 			Description: "Makes the video smaller at the quality you choose.", Inputs: []Port{in},
 			Outputs: []Port{success, skipped, errPort}, AlwaysOn: true, RunsWith: encodeSegment, SideEffects: "writes_staging",
 			Requires: []string{}, RequiresByConfig: map[string]map[string][]string{"format": {"hevc": {"encoder:libx265"},
 				"h264": {"encoder:libx264"}, "av1": {"encoder:libsvtav1"}, "vp9": {"encoder:libvpx-vp9"}}},
 			ConfigSchema: object(map[string]any{
-				"quality":    withDefault(quality, 3, "Quality", "slider"),
-				"format":     withDefault(formats, "hevc", "Video format", "segmented"),
-				"resolution": withDefault(enum([]any{"keep", "1080", "720", "480"}, []string{"Same as the original", "At most 1080p", "At most 720p", "At most 480p"}), "keep", "Resolution", ""),
-				"maxBitrate": withDefault(enum([]any{"none", "high", "medium", "low"}, []string{"No limit", "High", "Medium", "Low"}), "none", "Max bitrate", ""),
-				"speed":      withDefault(enum([]any{"faster", "normal", "slower"}, []string{"Faster", "Normal", "Slower (smaller files)"}), "normal", "Speed", ""),
+				"quality": withDefault(quality, 3, "Quality", "slider"),
+				"format":  withDefault(formats, "hevc", "Video format", "segmented"),
+				"resolution": described(withDefault(enum([]any{"keep", "1080", "720", "480"}, []string{"Keep as is", "At most 1080p", "At most 720p", "At most 480p"}), "keep", "Resolution", ""),
+					"Videos are only ever made smaller, never stretched."),
+				"maxBitrate": bitrate(described(withDefault(enum([]any{"none", "high", "medium", "low"}, []string{"No limit", "High", "Medium", "Low"}), "none", "Max bitrate", ""),
+					"Limits each file by its size. A file is never given more than it has now. Quality still sets the picture; the limit only affects busy scenes.")),
+				"speed": described(withDefault(enum([]any{"faster", "normal", "slower"}, []string{"Faster, larger files", "Normal", "Slower, smaller files"}), "normal", "Speed", ""),
+					"Slower takes about twice as long."),
 			}, []string{"quality", "format", "resolution", "maxBitrate", "speed"})}),
 		def(StepDefinition{Type: TypeAudio, Category: "audio", Name: "Audio", Icon: "audio", TypeLabel: "Audio",
 			Description: "Which sound tracks the new file has.", Inputs: []Port{in}, Outputs: []Port{success}, RunsWith: encodeSegment,
@@ -138,12 +151,16 @@ func Definitions() []StepDefinition {
 		def(StepDefinition{Type: TypeSubtitles, Category: "subtitles", Name: "Subtitles", Icon: "subtitles", TypeLabel: "Subtitles",
 			Description: "Which subtitles the new file keeps.", Inputs: []Port{in}, Outputs: []Port{success}, RunsWith: encodeSegment,
 			SideEffects: "none", ConfigSchema: object(map[string]any{
-				"subtitles": withDefault(enum(anys(rules.AvailableSubtitles), []string{"Keep all", "Only my languages", "Text only", "As SRT files"}), "keep_all", "Subtitles", ""),
+				"subtitles": withDefault(subtitles, "keep_all", "Subtitles", ""),
 			}, []string{"subtitles"})}),
 		def(StepDefinition{Type: TypeContainer, Category: "container", Name: "File type", Icon: "file", TypeLabel: "Container",
 			Description: "The new file's type.", Inputs: []Port{in}, Outputs: []Port{success}, RunsWith: encodeSegment, SideEffects: "none",
 			ConfigSchema: object(map[string]any{
-				"fileType": withDefault(enum([]any{"mkv", "mp4", "webm", "keep"}, []string{"MKV", "MP4", "WebM", "Keep as is"}), "mkv", "File type", "segmented"),
+				"fileType": withDefault(hinted(enum([]any{"mkv", "mp4", "webm", "keep"}, []string{"MKV", "MP4", "WebM", "Keep as is"}), []string{
+					"Holds every kind of track; the usual choice for Plex and Jellyfin.",
+					"Best for phones, browsers and Apple TV. Picture subtitles and some surround formats can't go in: picture subtitles are skipped with a reason, and that surround is converted to E-AC-3.",
+					"For web browsers. Only with AV1 or VP9 video and Opus audio.",
+					"Each file keeps its current type. A file whose type can't hold the chosen video or audio becomes MKV."}), "mkv", "File type", "segmented"),
 			}, []string{"fileType"})}),
 		def(StepDefinition{Type: TypeVerify, Category: "verify", Name: "Check the result", Icon: "check", TypeLabel: "Check",
 			Description: "The new file must play through, look like the original and hold what you chose. If not, the original stays.",
@@ -152,16 +169,39 @@ func Definitions() []StepDefinition {
 			Description: "Where the new file goes, and what happens to the original.", Inputs: []Port{in},
 			Outputs: []Port{success, errPort}, AlwaysOn: true, SideEffects: "commits",
 			ConfigSchema: object(map[string]any{
-				"policy": withDefault(enum([]any{"separate_folder", "replace", "beside"},
-					[]string{"Save to a separate folder", "Replace the original", "Put the new file next to the original"}), "separate_folder", "Save the result", ""),
-				"folderMode": withDefault(enum([]any{"next_to_library", "one_folder"}, []string{"Next to each library", "One folder for all"}), "next_to_library", "Where", ""),
-				"folder":     map[string]any{"type": "string", "title": "Folder", "x-ui": map[string]any{"widget": "folder"}},
+				"policy": withDefault(hinted(enum([]any{"separate_folder", "replace", "beside"},
+					[]string{"Save to a separate folder", "Replace the original", "Put the new file next to the original"}), []string{
+					"New files go to the folder below, in the same sub-folders. Your originals aren't changed, so no space is freed until you remove them yourself.",
+					"The original is kept for 7 days (Settings > Safety), then deleted. This frees space. You can get an original back from its job.",
+					"Both stay. Nothing is deleted."}), "separate_folder", "Save the result", ""),
+				"folderMode": withDefault(hinted(enum([]any{"next_to_library", "one_folder"}, []string{"Next to each library", "One folder for all"}), []string{
+					"Each library gets a folder beside it. On the same disk, and it works when one workflow serves several libraries.", ""}), "next_to_library", "Where", ""),
+				"folder": map[string]any{"type": "string", "title": "Folder", "description": "New files go to this folder, in the same sub-folders.",
+					"x-placeholder": "/media/movies (shrunk)", "x-ui": map[string]any{"widget": "folder"}},
 			}, []string{"policy"})}),
 		def(StepDefinition{Type: TypeLegacy, Category: "video", Name: "Earlier install's settings", Icon: "history", TypeLabel: "Video",
 			Description: "The settings this workflow had before workflows existed. They run exactly as before; to change them, start from the Shrink videos steps.",
 			Inputs:      []Port{in}, Outputs: []Port{success, skipped, errPort}, AlwaysOn: true, SideEffects: "commits", Deprecated: true, ReadOnly: true,
 			ConfigSchema: object(nil, nil)}), // its config (the template) is kept as it is: no form
 	}
+}
+
+// hinted adds a hint per choice (shown when it is chosen), beside x-enumLabels.
+func hinted(s map[string]any, hints []string) map[string]any {
+	s["x-enumHints"] = hints
+	return s
+}
+
+func described(s map[string]any, d string) map[string]any {
+	s["description"] = d
+	return s
+}
+
+// bitrate adds research's ladder (format → level → row → Mbps), so the page shows "Medium · 5 Mbps at
+// 1080p" for the chosen format and the new file's height.
+func bitrate(s map[string]any) map[string]any {
+	s["x-bitrateLadder"] = rules.Ladder
+	return s
 }
 
 // Definition returns the registry entry for a node type.
