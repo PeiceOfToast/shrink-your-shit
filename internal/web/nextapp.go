@@ -50,9 +50,10 @@ func nextApp(files fs.FS) http.HandlerFunc {
 	}
 	zipped := gzipAssets("/next/", files, inner)
 	return func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/next/assets/") {
+		name := strings.TrimPrefix(r.URL.Path, "/next/")
+		if st, err := fs.Stat(files, name); strings.HasPrefix(name, "assets/") && err == nil && !st.IsDir() {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable") // Vite names them by content
-		} else {
+		} else { // the app page, a 404 or a folder: checked again each time (review 31668a2)
 			w.Header().Set("Cache-Control", "no-cache")
 		}
 		zipped(w, r) // a missing file (an app route) and /next/ itself reach inner

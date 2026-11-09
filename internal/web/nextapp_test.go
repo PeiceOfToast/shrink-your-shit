@@ -58,7 +58,9 @@ func TestNextApp(t *testing.T) {
 		{"/next/workflows/12/graph", `<div id="app">`, "no-cache", 200}, // an app route survives a reload
 		{"/next/assets/app-1a2b.js", "console.log", "immutable", 200},
 		{"/next/favicon.svg", "<svg/>", "no-cache", 200},
-		{"/next/assets/app-old.js", "", "", 404}, // a stale script is a 404, not HTML
+		{"/next/assets/app-old.js", "", "no-cache", 404},     // a stale script is a 404, not HTML, and never cached (review 31668a2)
+		{"/next/assets/", `<div id="app">`, "no-cache", 200}, // the folder: the app, never cached for a year
+		{"/next/assets/sub/route", `<div id="app">`, "no-cache", 200},
 		{"/next/missing.css", "", "", 404},
 		{"/api/v2/nothing", `{"error"`, "", 404}, // the API is not the app's fallback
 	} {
