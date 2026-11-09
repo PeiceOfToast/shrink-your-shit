@@ -393,6 +393,10 @@ func TestPauseResumeAndStop(t *testing.T) {
 	if j, err := st.Get(r); err != nil || j.Status != jobs.Running {
 		t.Errorf("a running job's record must stay until its worker ends it: %+v %v", j, err)
 	}
+	// Only "slow" needs the short wait above. The end states below answer as soon as the worker ends the
+	// job, so a long deadline costs nothing, and a slow runner's write (Windows CI) can't turn them into
+	// "stopping" (flake: activity_test.go:398, runs 42454682163 and 42547029235).
+	stopWait = 15 * time.Second
 	running[r] = "stop" // the worker ends it as stopped: the answer is "stopped"
 	if code, b := post(t, srv, "POST", fmt.Sprintf("/api/jobs/%d/stop", r), `{}`); code != 200 {
 		t.Errorf("stop running %d %s", code, b)
