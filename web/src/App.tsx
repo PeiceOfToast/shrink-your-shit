@@ -1,14 +1,22 @@
-// Step 1 of ui-v2 (NEXT-ui-v2.md): only the scaffold. Nothing here pretends to work (spec 14/16, "no fake functionality").
+import { useEffect } from "react";
+import sprite from "./icons.svg?raw";
+import { itemFor } from "./nav";
+import { AppearanceSettings, Coming, NotFound } from "./pages";
+import { usePath } from "./router";
+import { Shell } from "./Shell";
+
 export function App() {
+  const path = usePath();
+  const item = itemFor(path);
+  const settings = path === "/settings" || path === "/settings/appearance"; // Appearance is the only Settings tab so far
+  const title = settings ? "Settings" : item ? item.label : "Page not found";
+  useEffect(() => { document.title = title + " · Shrink Your Shit (new interface)"; }, [title]);
   return (
-    <main style={{ fontFamily: "system-ui, sans-serif", maxWidth: "40rem", margin: "3rem auto", padding: "0 1rem" }}>
-      <p role="note" style={{ border: "1px solid currentColor", padding: "0.5rem 0.75rem" }}>
-        <strong>Prototype.</strong> This is the start of the new interface. Nothing on this page works yet.
-      </p>
-      <h1>shrink-your-shit</h1>
-      <p>
-        The current interface is still at <a href="/">the main page</a>.
-      </p>
-    </main>
+    <>
+      <div dangerouslySetInnerHTML={{ __html: sprite }} />
+      <Shell title={title} proto={!settings && !!item}>
+        {settings ? <AppearanceSettings /> : item ? <Coming item={item} /> : <NotFound />}
+      </Shell>
+    </>
   );
 }

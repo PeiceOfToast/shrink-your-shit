@@ -5,5 +5,6 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   base: "/next/",
   plugins: [react()],
-  build: { outDir: "../internal/web/next/dist", emptyOutDir: true },
+  // license: the bundled packages' license notices ship with the app (React is MIT), at /next/licenses.md.
+  build: { outDir: "../internal/web/next/dist", emptyOutDir: true, license: { fileName: "licenses.md" } },
 });
