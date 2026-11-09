@@ -302,6 +302,17 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			writeErrorWith(w, http.StatusBadRequest, "has_errors", issues[0].Message+" Nothing was changed.", map[string]any{"issues": issues})
 			return
 		}
+		if slices.Contains(stepTypes(d.Doc), workflow.TypeLegacy) { // its settings are the server's: only ones published before
+			known, err := store.KnownTemplate(id, t)
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+			if !known {
+				apiError(w, http.StatusBadRequest, "invalid_config", "The earlier install's settings can't be changed here. To change them, start from the Shrink videos steps. Nothing was changed.")
+				return
+			}
+		}
 		if !outputUsable(w, store, id, t) { // the same folder checks as the old Save (#103: system_folder, inside_library, ...)
 			return
 		}

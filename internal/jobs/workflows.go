@@ -418,3 +418,15 @@ FROM jobs j JOIN libraries l ON l.id=j.library_id WHERE l.flow_id=?`, since, sin
 	r.LastAt = last.String
 	return r, err
 }
+
+// KnownTemplate reports whether t is a template this workflow has published (its flow's now, or an
+// earlier revision's). A read-only step's template is the server's, not the page's: only one of these
+// may be published (review acace8e, P2: a draft could otherwise send any values to the encoder).
+func (s *Store) KnownTemplate(flowID int64, t rules.Template) (bool, error) {
+	if f, err := s.GetFlow(flowID); err == nil && templateHash(f.Template) == templateHash(t) {
+		return true, nil
+	}
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM workflow_revisions WHERE workflow_id=? AND status='published' AND template_hash=?`, flowID, templateHash(t)).Scan(&n)
+	return n > 0, err
+}

@@ -5,6 +5,7 @@ package web
 import (
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -271,5 +272,64 @@ func readAll(t *testing.T, res *http.Response) string {
 		if err != nil {
 			return b.String()
 		}
+	}
+}
+
+// Review acace8e (P2): a read-only step's template is the server's. A draft that changes it (any
+// values: they'd reach the encoder) is refused at publish; the same settings, or an earlier revision's,
+// still publish.
+func TestV2LegacyTemplateIsTheServers(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Old", t.TempDir(), rules.LegacyTemplate(rules.Default(), "replace"), false)
+	flow := strconv.FormatInt(lib.FlowID, 10)
+	publish := func(edit func(tm map[string]any)) (int, string) {
+		t.Helper()
+		_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/workflows/" + flow + "/draft"})
+		d := decode[v2Rev](t, body) // its etag; the settings start from the published revision each time (a refused publish leaves its draft)
+		pub, _, err := st.LatestRevision(lib.FlowID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(pub.Doc)
+		d.Workflow = workflow.Doc{}
+		json.Unmarshal(raw, &d.Workflow)
+		if d.Workflow.Nodes[1].Type != workflow.TypeLegacy {
+			t.Fatalf("not the legacy step: %+v", d.Workflow.Nodes)
+		}
+		tm := d.Workflow.Nodes[1].Config["template"].(map[string]any)
+		edit(tm)
+		put, _ := json.Marshal(map[string]any{"workflow": d.Workflow, "layout": d.Layout})
+		req, _ := http.NewRequest("PUT", srv.URL+"/api/v2/workflows/"+flow+"/draft", strings.NewReader(string(put)))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("If-Match", d.Etag)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		saved := decode[v2Rev](t, readAll(t, res))
+		code, body, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/workflows/" + flow + "/publish", ctype: "application/json", body: `{"etag":"` + saved.Etag + `"}`})
+		return code, body
+	}
+	params := func(tm map[string]any) map[string]any { return tm["params"].(map[string]any) }
+	for name, edit := range map[string]func(map[string]any){
+		"selectors format bogus": func(tm map[string]any) {
+			tm["kind"], tm["selectors"] = "selectors", map[string]any{"quality": 3, "format": "bogus", "speed": "normal"}
+		},
+		"selectors quality 99": func(tm map[string]any) {
+			tm["kind"], tm["selectors"] = "selectors", map[string]any{"quality": 99, "format": "hevc", "speed": "normal"}
+		},
+		"legacy crf -5":         func(tm map[string]any) { params(tm)["crf"] = -5 },
+		"legacy preset ../../x": func(tm map[string]any) { params(tm)["preset"] = "../../x" },
+	} {
+		if code, body := publish(edit); code != 400 || errCode(body) != "invalid_config" {
+			t.Errorf("%s: %d %s", name, code, body)
+		}
+	}
+	before, _ := st.GetFlow(lib.FlowID)
+	if code, body := publish(func(map[string]any) {}); code != 200 { // unchanged: publishes
+		t.Errorf("unchanged: %d %s", code, body)
+	}
+	if after, _ := st.GetFlow(lib.FlowID); !reflect.DeepEqual(after.Template, before.Template) {
+		t.Errorf("the engine's template changed: %+v", after.Template)
 	}
 }
