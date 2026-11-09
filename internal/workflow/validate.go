@@ -140,6 +140,9 @@ func Validate(d Doc) Result {
 // a key the schema doesn't know is kept and warned about (research: never drop it silently).
 func checkConfig(n Node, def StepDefinition) []Issue {
 	var out []Issue
+	if def.ReadOnly { // kept as it is: nothing to check against a form
+		return nil
+	}
 	props, _ := def.ConfigSchema["properties"].(map[string]any)
 	keys := make([]string, 0, len(n.Config))
 	for k := range n.Config {

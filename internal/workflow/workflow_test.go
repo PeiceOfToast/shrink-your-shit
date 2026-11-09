@@ -229,3 +229,27 @@ func TestQualityWords(t *testing.T) {
 		}
 	}
 }
+
+// Every node type a migration can make has a step definition (lead 02:26Z): the 8 preset steps, and the
+// read-only node for an earlier install's (legacy or custom) flow.
+func TestMigratedNodesHaveDefinitions(t *testing.T) {
+	custom := rules.LegacyTemplate(rules.Default(), "replace")
+	custom.Kind = rules.KindCustom
+	for _, tm := range []rules.Template{rules.SliderTemplate(1), rules.SliderTemplate(5), rules.LegacyTemplate(rules.Default(), "replace"), custom,
+		{Kind: rules.KindSelectors, Selectors: ptr(rules.DefaultSelectors(3)), CompilerVersion: rules.CompilerVersion}} {
+		for _, n := range FromTemplate(tm, nil).Nodes {
+			d, ok := Definition(n.Type)
+			if !ok {
+				t.Errorf("%s: %s has no step definition", tm.Kind, n.Type)
+			}
+			if n.Type == TypeLegacy && (!d.ReadOnly || len(d.ConfigSchema["properties"].(map[string]any)) != 0) {
+				t.Errorf("legacy definition %+v", d)
+			}
+		}
+	}
+	for _, d := range Definitions() {
+		if d.ReadOnly != (d.Type == TypeLegacy) {
+			t.Errorf("%s: readOnly %v", d.Type, d.ReadOnly)
+		}
+	}
+}

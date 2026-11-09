@@ -45,6 +45,9 @@ type StepDefinition struct {
 	SideEffects      string                         `json:"sideEffects"`
 	Source           map[string]string              `json:"source"`
 	Deprecated       bool                           `json:"deprecated,omitempty"`
+	// ReadOnly: made only by migration (an earlier install's settings): not offered in the palette, and
+	// the UI shows it as a card "kept as it is", with no form (lead 02:26Z).
+	ReadOnly bool `json:"readOnly"`
 }
 
 // Port is a named input or output.
@@ -156,8 +159,8 @@ func Definitions() []StepDefinition {
 			}, []string{"policy"})}),
 		def(StepDefinition{Type: TypeLegacy, Category: "video", Name: "Earlier install's settings", Icon: "history", TypeLabel: "Video",
 			Description: "The settings this workflow had before workflows existed. They run exactly as before; to change them, start from the Shrink videos steps.",
-			Inputs:      []Port{in}, Outputs: []Port{success, skipped, errPort}, AlwaysOn: true, SideEffects: "commits", Deprecated: true,
-			ConfigSchema: object(map[string]any{"template": map[string]any{"type": "object", "readOnly": true}}, []string{"template"})}),
+			Inputs:      []Port{in}, Outputs: []Port{success, skipped, errPort}, AlwaysOn: true, SideEffects: "commits", Deprecated: true, ReadOnly: true,
+			ConfigSchema: object(nil, nil)}), // its config (the template) is kept as it is: no form
 	}
 }
 
