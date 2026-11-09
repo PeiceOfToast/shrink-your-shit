@@ -3,6 +3,7 @@
 // new install (no libraries yet) for review. When a contract endpoint lands, its function here becomes the fetch.
 import { useSyncExternalStore } from "react";
 import type { ActivityEvent, ID, Job, JobState, Library, PublishPreview, Settings, Summary, Template, Trash, Worker, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
+import type { FirstFiles, FolderReport, Issue, LibraryItem } from "../types/v1";
 import { branchedDoc, legacyDoc, presetDoc, preview, revision, summary as stepSummary } from "./steps";
 
 const now = Date.now(), ago = (min: number) => new Date(now - min * 60e3).toISOString();
@@ -263,73 +264,116 @@ export function publish(id: ID, etag: string): { version?: number; error?: strin
   return { version };
 }
 
-// Libraries (V5). POST /libraries/check {path} -> {blockers, notes} with v1's codes. The first 5 files of a folder that
-// isn't a library yet: contract v2 has only GET /libraries/{id}/first-files (v1 had POST /api/libraries/first-files
-// {path}); asked of workshop. Free space isn't in the check's answer, so it isn't shown.
-export interface FolderCheck { blockers: { code: string; message: string }[]; notes: string[] }
+// Libraries (V5), on v1's routes until /api/v2/libraries comes (contract v2, "Libraries: what exists now"). The state
+// keeps the v2 Library (the Dashboard reads it); these functions answer in v1's shapes and with v1's error codes.
+// There is no pause or resume for a library in v1: a new library isn't started until POST /api/libraries/{id}/scan.
+type Answer<T> = T | { error: Issue };
 const trim = (p: string) => p.trim().replace(/(.)\/+$/, "$1");
-export function checkFolder(path: string, exceptId?: ID): FolderCheck {
-  const p = trim(path), no = (code: string, message: string) => ({ blockers: [{ code, message }], notes: [] });
-  if (!p.startsWith("/")) return no("invalid", "Give the folder's full path, starting with /.");
-  if (p === "/" || /^\/(etc|usr|bin|boot|dev|proc|sys|var)(\/|$)/.test(p)) return no("system_folder", "That's a system folder. Choose the folder that holds your videos.");
-  if (/missing|nope/.test(p)) return no("not_found", "This folder doesn't exist, or the worker can't see it.");
-  if (/locked/.test(p)) return no("not_readable", "Can't read " + p + " as the worker 'This computer' (user syp). Check the folder's permissions.");
-  const other = state.libraries.find((l) => l.id !== exceptId && l.paths.some((x) => p === x || p.startsWith(x + "/") || x.startsWith(p + "/")));
-  if (other) return no("inside_library", "This folder overlaps the library " + other.name + ". A folder can be in one library only.");
-  return { blockers: [], notes: /readonly/.test(p) ? ["The folder can be read but not written, so the result can't be saved next to the originals."] : [] };
+const systemPath = (p: string) => p === "/" || /^\/(etc|usr|bin|boot|dev|proc|sys|var)(\/|$)/.test(p);
+const SYSTEM = "That is a system folder. Choose the folder that holds your videos.";
+const UNREADABLE = "We can't open this folder. Check the path, and that shrink-your-shit is allowed to read it.";
+const free: Record<ID, number | null> = { l1: 1.9e12, l2: 1.9e12, l3: 410 * GB }; // freeBytes (workshop 5053a73)
+export function libraryItem(l: Library): LibraryItem {
+  const c = l.counts, scanning = l.scan.state === "scanning", started = l.enabled;
+  return {
+    id: l.id, name: l.name, path: l.paths[0], state: !started ? "not_started" : c.running ? "working" : c.failed ? "needs_attention" : "idle", started,
+    workingFiles: c.running, waitingFiles: c.waiting, nextScan: started ? l.scan.nextScanAt : null, freedBytes: l.bytes.freed, waitingBytes: l.bytes.waitingToFree,
+    flowId: l.workflowId, settingLabel: l.workflowName, settingKind: "workflow", madeWith: "workflow", tag: "", failedFiles: c.failed,
+    status: { kind: c.running ? "converting" : scanning ? "scanning" : l.scan.lastScanAt ? "scanned" : "not_scanned", videos: c.files, foundSoFar: scanning ? l.scan.progress ?? 0 : null,
+      lastScan: l.scan.lastScanAt, nextScan: started ? l.scan.nextScanAt : null, converting: c.running, toDo: c.waiting },
+    freeBytes: l.id in free ? free[l.id] : 1.2e12,
+  };
 }
-export interface FirstFile { path: string; bytes: number; codec: string; resolution: string; dolbyVision: boolean }
-const SAMPLE: [string, number, string, string, boolean][] = [
-  ["Dune Part Two (2024)/Dune.Part.Two.2024.2160p.REMUX.mkv", 58.2, "H.264", "2160p", false], ["Arrival (2016)/Arrival.2016.1080p.BluRay.mkv", 11.4, "H.264", "1080p", false],
-  ["Oppenheimer (2023)/Oppenheimer.2023.1080p.BluRay.mkv", 14.9, "H.264", "1080p", false], ["Blade Runner 2049 (2017)/Blade.Runner.2049.2017.2160p.DV.mkv", 41, "HEVC", "2160p", true],
-  ["Alien (1979)/Alien.1979.1080p.mkv", 9.8, "H.264", "1080p", false]];
-// The first 5 video files found in a folder; nothing is converted by looking. /empty finds none.
-export function firstFiles(path: string): FirstFile[] {
+// POST /api/libraries/check {path}. /readonly, /empty, /full and /locked show v1's other answers.
+export function checkFolder(path: string): Answer<FolderReport> {
+  const p = trim(path), r: FolderReport = { ok: false, blockers: [], notes: [], videoCount: 0, totalBytes: 0 };
+  if (!p.startsWith("/")) return { error: { code: "invalid_path", message: "Choose a folder by its full path." } };
+  if (systemPath(p)) r.blockers.push({ code: "system_folder", message: SYSTEM });
+  else if (/missing|locked/.test(p)) r.blockers.push({ code: "unreadable", message: UNREADABLE });
+  else if (/readonly/.test(p)) r.blockers.push({ code: "read_only", message: "This folder can be read but not written, so converted files can't be saved here." });
+  else if (/empty/.test(p)) r.blockers.push({ code: "no_videos", message: "We found no videos here. Pick the folder that holds them." });
+  else if (/full/.test(p)) r.blockers.push({ code: "low_space", message: "Only 2 GB is free on this disk. Free some space, or choose another disk." });
+  else (r.videoCount = 1284), (r.totalBytes = 9.4e12), /tv/.test(p) && r.notes.push({ code: "hardlinks", message: "3 files are shared with another folder (for example by Radarr). We will leave them alone, because changing one would break the link." });
+  r.ok = !r.blockers.length;
+  return r;
+}
+const SAMPLE: [string, string, number, string, string][] = [
+  ["Dune Part Two (2024)", "Dune.Part.Two.2024.2160p.REMUX.mkv", 58.2, "H.264", "2160p"], ["Arrival (2016)", "Arrival.2016.1080p.BluRay.mkv", 11.4, "H.264", "1080p"],
+  ["Oppenheimer (2023)", "Oppenheimer.2023.1080p.BluRay.mkv", 14.9, "H.264", "1080p"], ["Blade Runner 2049 (2017)", "Blade.Runner.2049.2017.2160p.DV.mkv", 41, "HEVC", "2160p"],
+  ["Alien (1979)", "Alien.1979.1080p.mkv", 9.8, "H.264", "1080p"]];
+// POST /api/libraries/first-files {path} (and GET /api/libraries/{id}/first-files): the first 5 videos; nothing is converted.
+export function firstFiles(path: string): Answer<FirstFiles> {
   const p = trim(path);
-  return /empty/.test(p) ? [] : SAMPLE.map(([f, gb, codec, resolution, dolbyVision]) => ({ path: p + "/" + f, bytes: gb * GB, codec, resolution, dolbyVision }));
+  if (!p.startsWith("/")) return { error: { code: "invalid_path", message: "Choose a folder by its full path." } };
+  if (systemPath(p)) return { error: { code: "system_folder", message: SYSTEM } };
+  if (/missing|locked/.test(p)) return { error: { code: "unreadable", message: UNREADABLE } };
+  if (/empty/.test(p)) return { items: [], total: 0, stillLooking: false };
+  return { items: SAMPLE.map(([folder, name, gb, codec, resolution]) => ({ path: p + "/" + folder + "/" + name, folder, name, bytes: gb * GB, state: "ready", codec, resolution, durationSec: 7000 })), total: 1284, stillLooking: false };
 }
-const notPublished = (id: ID) => { const w = state.wf.find((x) => x.id === id); return !w ? "That workflow no longer exists." : w.publishedRevisionId == null ? "Publish this workflow before a library can use it." : null; };
+// What POST and PATCH check about a folder (libraryPath), and the workflow (storeErr, folderRefused).
+function pathError(path: string, except?: ID): Issue | null {
+  const p = trim(path);
+  if (!p.startsWith("/")) return { code: "invalid_path", message: "Choose a folder by its full path." };
+  if (systemPath(p)) return { code: "system_folder", message: SYSTEM };
+  if (/missing|locked/.test(p)) return { code: "not_a_folder", message: "That folder does not exist, or the program cannot see it." };
+  for (const l of state.libraries.filter((x) => x.id !== except)) {
+    const x = l.paths[0];
+    if (x === p) return { code: "path_taken", message: "Another library already uses this folder: " + l.name + "." };
+    if (p.startsWith(x + "/") || x.startsWith(p + "/")) return { code: "path_overlaps", message: "This folder is inside, or contains, the folder of library " + l.name + ". Choose a folder that doesn't overlap." };
+  }
+  return null;
+}
+function workflowError(id: ID): Issue | null {
+  const w = state.wf.find((x) => x.id === id);
+  if (!w) return { code: "invalid_flow", message: "There is no such flow." };
+  if (w.publishedRevisionId == null) return { code: "workflow_not_published", message: "This workflow hasn't been published yet, so nothing can use it. Publish it first. Nothing was changed." };
+  return null;
+}
 const linkWorkflows = (s: State) => { s.wf = s.wf.map((w) => ({ ...w, libraries: s.libraries.filter((l) => l.workflowId === w.id).map((l) => ({ id: l.id, name: l.name })) })); };
-function scanSoon(id: ID, found: number) {
+// POST /api/libraries {name, path, flowId}: 201 with the library, not started (nothing scanned or queued).
+export function addLibrary(name: string, path: string, flowId: ID): Answer<LibraryItem> {
+  if (!name.trim()) return { error: { code: "invalid_name", message: "Give the library a name." } };
+  const e = pathError(path) ?? workflowError(flowId);
+  if (e) return { error: e };
+  const l = library("l" + Date.now().toString(36), name.trim(), trim(path), 0, 0, 0);
+  l.workflowId = flowId; l.workflowName = state.wf.find((w) => w.id === flowId)!.name; l.enabled = false;
+  l.counts = { files: 0, waiting: 0, running: 0, completed: 0, skipped: 0, failed: 0 };
+  l.scan = { ...l.scan, lastScanAt: null, nextScanAt: null };
+  change((s) => { s.libraries = [...s.libraries, l]; linkWorkflows(s); log("library.scanned", "Added the library " + l.name, { libraryId: l.id }); });
+  return libraryItem(l);
+}
+// PATCH /api/libraries/{id} {name?, path?}: a new path gets the same checks as adding one.
+export function patchLibrary(id: ID, patch: { name?: string; path?: string }): Answer<LibraryItem> {
+  const l = state.libraries.find((x) => x.id === id);
+  if (!l) return { error: { code: "not_found", message: "There is no such library." } };
+  if (patch.name !== undefined && !patch.name.trim()) return { error: { code: "invalid_name", message: "Give the library a name." } };
+  const e = patch.path !== undefined ? pathError(patch.path, id) : null;
+  if (e) return { error: e };
+  change((s) => {
+    const x = s.libraries.find((y) => y.id === id)!;
+    if (patch.name !== undefined) x.name = patch.name.trim();
+    if (patch.path !== undefined) x.paths = [trim(patch.path)];
+    linkWorkflows(s);
+  });
+  return libraryItem(state.libraries.find((x) => x.id === id)!);
+}
+// PUT /api/libraries/{id}/flow {flowId}
+export function setLibraryWorkflow(id: ID, flowId: ID): Answer<LibraryItem> {
+  const e = workflowError(flowId);
+  if (e) return { error: e };
+  change((s) => { const x = s.libraries.find((y) => y.id === id); if (x) (x.workflowId = flowId), (x.workflowName = s.wf.find((w) => w.id === flowId)!.name); linkWorkflows(s); });
+  return libraryItem(state.libraries.find((x) => x.id === id)!);
+}
+// POST /api/libraries/{id}/scan: starts the library if it wasn't, and looks for files now.
+export function scanLibrary(id: ID) {
+  change((s) => { const l = s.libraries.find((x) => x.id === id); if (l) (l.enabled = true), (l.status = "scanning"), (l.scan = { ...l.scan, state: "scanning", progress: 0 }); });
   setTimeout(() => change((s) => {
     const l = s.libraries.find((x) => x.id === id);
     if (!l || l.scan.state !== "scanning") return;
-    l.scan = { ...l.scan, state: "idle", progress: null, lastScanAt: new Date().toISOString() };
-    l.status = l.enabled ? "ok" : "disabled";
-    if (found) l.counts = { ...l.counts, files: l.counts.files + found, waiting: l.counts.waiting + found };
-    log("library.scanned", "Scanned " + l.name + ": " + (found ? found.toLocaleString("en-US") + " new files" : "no new files"), { libraryId: id });
+    const found = l.counts.files ? 0 : 1284;
+    l.scan = { ...l.scan, state: "idle", progress: null, lastScanAt: new Date().toISOString(), nextScanAt: new Date(Date.now() + 6 * 36e5).toISOString() };
+    l.status = "ok";
+    if (found) l.counts = { ...l.counts, files: found, waiting: found };
+    log("library.scanned", "Scanned " + l.name + ": " + (found ? found.toLocaleString("en-US") + " videos found" : "no new files"), { libraryId: id });
   }), 1500);
-}
-// POST /libraries {name, paths, workflowId}: 409 workflow_not_published for a never-published workflow (V1 87faa4b).
-export function addLibrary(name: string, path: string, workflowId: ID): { library?: Library; error?: string } {
-  const blocked = checkFolder(path).blockers[0]?.message ?? notPublished(workflowId);
-  if (!name.trim()) return { error: "Give the library a name." };
-  if (blocked) return { error: blocked };
-  const l = library("l" + Date.now().toString(36), name.trim(), trim(path), 0, 0, 0);
-  l.workflowId = workflowId; l.workflowName = state.wf.find((w) => w.id === workflowId)!.name;
-  l.counts = { files: 0, waiting: 0, running: 0, completed: 0, skipped: 0, failed: 0 };
-  l.scan = { ...l.scan, state: "scanning", progress: null, lastScanAt: null }; l.status = "scanning";
-  change((s) => { s.libraries = [...s.libraries, l]; linkWorkflows(s); log("library.scanned", "Added the library " + l.name, { libraryId: l.id }); });
-  scanSoon(l.id, 1284);
-  return { library: l };
-}
-// PATCH /libraries/{id} {name?, enabled?, workflowId?}
-export function setLibrary(id: ID, patch: { name?: string; enabled?: boolean; workflowId?: ID }): string | null {
-  if (patch.name !== undefined && !patch.name.trim()) return "Give the library a name.";
-  const blocked = patch.workflowId !== undefined && patch.workflowId !== state.libraries.find((l) => l.id === id)?.workflowId ? notPublished(patch.workflowId) : null;
-  if (blocked) return blocked;
-  change((s) => {
-    const l = s.libraries.find((x) => x.id === id);
-    if (!l) return;
-    if (patch.name !== undefined) l.name = patch.name.trim();
-    if (patch.workflowId !== undefined) (l.workflowId = patch.workflowId), (l.workflowName = s.wf.find((w) => w.id === patch.workflowId)!.name);
-    if (patch.enabled !== undefined) (l.enabled = patch.enabled), l.scan.state !== "scanning" && (l.status = patch.enabled ? "ok" : "disabled");
-    linkWorkflows(s);
-  });
-  return null;
-}
-// POST /libraries/{id}/scan
-export function scanLibrary(id: ID) {
-  change((s) => { const l = s.libraries.find((x) => x.id === id); if (l) (l.scan = { ...l.scan, state: "scanning" }), (l.status = "scanning"); });
-  scanSoon(id, 0);
 }
