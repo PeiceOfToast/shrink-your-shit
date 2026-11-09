@@ -117,10 +117,10 @@ export function Workflows() {
                     <td>{w.tags.map((t) => <span className="tag" key={t}>{t}</span>)}</td>
                     <td>{w.libraries.length ? w.libraries.map((l) => l.name).join(", ") : <span className="muted">None</span>}</td>
                     <td className="num">{w.activeJobs}</td>
-                    <td className="nowrap">{w.version == null ? "Not published" : "v" + w.version + (w.draftDiffers ? " · draft changes" : "")}</td>
+                    <td className="nowrap">{w.version == null ? "Draft · not published yet" : "v" + w.version + (w.draftDiffers ? " · draft changes" : "")}</td>
                     <td>{problems ? <span className={"st " + (w.validation.errors ? "bad" : "warn")}><Icon id="i-alert" /><span>{plural(problems, "problem", "problems")}</span></span>
                       : <span className="st ok"><Icon id="i-check-c" /><span>OK</span></span>}</td>
-                    <td>{w.status === "draft" ? <span className="muted">Draft<span className="sub">Publish it to turn it on</span></span>
+                    <td>{w.status === "draft" ? <span className="muted" aria-label="Not published yet">-</span>
                       : <input type="checkbox" role="switch" className="switch" aria-label={"Enabled: " + w.name} checked={w.status === "enabled"} onChange={(e) => setWorkflow(w.id, { status: e.target.checked ? "enabled" : "disabled" })} />}</td>
                     <td><RowMenu w={w} onSaid={setSaid} /></td>
                   </tr>);
