@@ -147,8 +147,8 @@ func Definitions() []StepDefinition {
 			SideEffects: "none", ConfigSchema: object(map[string]any{
 				"audio": withDefault(audio, "stereo_aac", "Audio", ""),
 				"onlyMyLanguages": map[string]any{"type": "boolean", "default": true, "title": "Only my languages",
-					// design's sentence, made true to planAudio: with none matching, a stereo choice keeps the main track only
-					"description": "Keeps only tracks in your languages (Settings > General). Tracks with no language set are always kept. If none match, the main track is kept with the stereo choices, and all tracks with the others."},
+					// design's words (02:38Z), true to planAudio: with none matching, a stereo choice keeps the main track only
+					"description": "Keeps only tracks in your languages (Settings > General). Tracks with no language set are always kept. If none match, a stereo choice keeps the main track; the other choices keep all tracks."},
 			}, []string{"audio", "onlyMyLanguages"})}),
 		def(StepDefinition{Type: TypeSubtitles, Category: "subtitles", Name: "Subtitles", Icon: "subtitles", TypeLabel: "Subtitles",
 			Description: "Which subtitles the new file keeps.", Inputs: []Port{in}, Outputs: []Port{success}, RunsWith: encodeSegment,
@@ -204,7 +204,11 @@ func described(s map[string]any, d string) map[string]any {
 // bitrate adds research's ladder (format → level → row → Mbps), so the page shows "Medium · 5 Mbps at
 // 1080p" for the chosen format and the new file's height.
 func bitrate(s map[string]any) map[string]any {
-	s["x-bitrateLadder"] = rules.Ladder
+	ladder := map[string]any{"vp9": rules.Ladder["hevc"]} // VP9 uses HEVC's numbers, as S6's setting does (review 8760065)
+	for f, row := range rules.Ladder {
+		ladder[f] = row
+	}
+	s["x-bitrateLadder"] = ladder
 	return s
 }
 

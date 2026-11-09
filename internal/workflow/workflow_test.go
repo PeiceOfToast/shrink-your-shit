@@ -282,7 +282,7 @@ func TestRegistryWords(t *testing.T) {
 	}
 	cv, _ := Definition(TypeConvert)
 	props := cv.ConfigSchema["properties"].(map[string]any)
-	if props["format"].(map[string]any)["x-enumLabels"].([]string)[0] != "HEVC (H.265)" || props["maxBitrate"].(map[string]any)["x-bitrateLadder"] == nil ||
+	if props["format"].(map[string]any)["x-enumLabels"].([]string)[0] != "HEVC (H.265)" || props["maxBitrate"].(map[string]any)["x-bitrateLadder"].(map[string]any)["vp9"] == nil ||
 		props["speed"].(map[string]any)["x-enumLabels"].([]string)[2] != "Slower, smaller files" {
 		t.Errorf("convert words %v", props)
 	}
