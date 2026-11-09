@@ -88,8 +88,45 @@ jobs:
           go-version-file: go.mod
       - run: go test -race -count=1 -timeout 15m ./internal/worker ./internal/doctor ./internal/jobs ./internal/web ./internal/scanner
 
+  # The new UI (web/, served at /next/): typecheck and build it once; the build matrix embeds this output (artifact),
+  # and the test job runs without it, so the no-Node placeholder path stays tested too.
+  web:
+    name: web (typecheck, build, embed check)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: install
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+      - name: typecheck
+        working-directory: web
+        run: npm run typecheck
+      - name: build (into internal/web/next/dist)
+        working-directory: web
+        run: npm run build
+      - name: the build is the real app, not the "not built" page (workshop's release check)
+        env:
+          SYP_REQUIRE_WEBUI: "1"
+        run: go test -count=1 ./internal/web/next
+      - uses: actions/upload-artifact@v4
+        with:
+          name: next-dist
+          path: internal/web/next/dist/
+          include-hidden-files: true
+          if-no-files-found: error
+
   build:
     name: build (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: web
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -110,6 +147,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - uses: actions/download-artifact@v4 # every platform build embeds the new UI
+        with:
+          name: next-dist
+          path: internal/web/next/dist/
+      - run: test -f internal/web/next/dist/index.html
       - run: go build ./...
       - run: go vet ./...
 
@@ -128,6 +170,8 @@ jobs:
           [ -n "$up" ] || { docker logs syp; exit 1; }
           # listening beyond loopback: /api needs the token that `shrink-your-shit token` shows
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8484/api/status)" = 401
+          # the image carries the built new UI (a 200 page that loads its script), not the 503 "not built" page
+          curl -fsS http://127.0.0.1:8484/next/ | grep -q 'src="/next/assets/'
           tok=$(docker exec syp shrink-your-shit token | sed -n 's/^Access token: //p')
           test -n "$tok"
           curl -fsS -H "Authorization: Bearer $tok" http://127.0.0.1:8484/api/status
