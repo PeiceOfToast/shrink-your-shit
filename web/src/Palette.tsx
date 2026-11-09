@@ -34,7 +34,14 @@ export function Palette({ onClose }: { onClose: () => void }) {
   const input = useRef<HTMLInputElement>(null);
   const query = q.trim().toLowerCase();
   const results = useMemo(() => ALL.filter((r) => !query || r.label.toLowerCase().includes(query)), [query]);
-  useEffect(() => input.current?.focus(), []);
+  // Focus goes back where it was when the palette closes (review P3).
+  useEffect(() => {
+    const from = document.activeElement as HTMLElement | null;
+    input.current?.focus();
+    return () => {
+      if (from?.isConnected) from.focus();
+    };
+  }, []);
   useEffect(() => setOn(0), [query]);
   const open = (r: Result | undefined) => {
     if (!r) return;
@@ -46,6 +53,7 @@ export function Palette({ onClose }: { onClose: () => void }) {
     else if (e.key === "ArrowUp") (e.preventDefault(), setOn((i) => Math.max(i - 1, 0)));
     else if (e.key === "Enter") (e.preventDefault(), open(results[on]));
     else if (e.key === "Escape") (e.preventDefault(), onClose());
+    else if (e.key === "Tab") e.preventDefault(); // a modal dialog: the search box is its only stop (results are arrow keys)
   };
   let group = "";
   return (

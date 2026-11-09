@@ -22,7 +22,7 @@ function ThemeMenu() {
     return () => (document.removeEventListener("mousedown", outside), document.removeEventListener("keydown", esc));
   }, []);
   return (
-    <details className="menu" ref={ref}>
+    <details className="menu" ref={ref} onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node) && close()}>
       <summary className="btn icon" aria-label="Theme" title="Theme"><Icon id="i-drop" /></summary>
       <div className="pop" role="menu">
         <div className="hd">Theme</div>
@@ -62,7 +62,9 @@ export function Shell({ title, proto, children }: { title: string; proto: boolea
   }, []);
   const toggleRail = () => (keepRail(!collapsed), setCollapsed(!collapsed));
   return (
-    <div className={"app" + (collapsed ? " rail-collapsed" : "") + (navOpen ? " nav-open" : "")}>
+    // On a narrow screen the open menu's scrim is shell.css's .app.nav-open::after, so a tap on it is a click on .app
+    // itself (review P2): that closes the menu. Escape closes it too.
+    <div className={"app" + (collapsed ? " rail-collapsed" : "") + (navOpen ? " nav-open" : "")} onClick={(e) => navOpen && e.target === e.currentTarget && setNavOpen(false)}>
       <nav className="rail" aria-label="Main">
         <Link className="brand" to="/"><span className="logo"><Icon id="i-layers" /></span><span className="t">Shrink Your Shit</span></Link>
         <div className="nav">
@@ -81,7 +83,7 @@ export function Shell({ title, proto, children }: { title: string; proto: boolea
           </button>
         </div>
       </nav>
-      <div className="main" onClick={() => navOpen && setNavOpen(false)}>
+      <div className="main">
         <header className="topbar">
           <button className="btn icon ghost menubtn" type="button" aria-label="Open menu" aria-expanded={navOpen} onClick={(e) => (e.stopPropagation(), setNavOpen(!navOpen))}><Icon id="i-menu" /></button>
           <div className="crumb" aria-label="Breadcrumb"><span className="cur">{title}</span></div>
