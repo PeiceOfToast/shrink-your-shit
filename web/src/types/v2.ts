@@ -148,3 +148,102 @@ export interface Workflow { // GET /workflows (contract: Workflows, revisions an
 }
 export interface Template { id: ID; name: string; fileType: FileType; description: string; steps: string[]; changesOriginals: boolean } // GET /templates
 
+// Workflows, revisions and the graph (contract v2): the draft the Stack view edits.
+export interface WorkflowRevision {
+  id: ID;
+  workflowId: ID;
+  number: number | null; // null for the draft
+  status: "draft" | "published";
+  workflow: WorkflowDoc;
+  layout: Layout;
+  logicHash: string;
+  stackable: boolean;
+  stepSummaries: Record<ID, string>;
+  validation: ValidationIssue[];
+  etag: string;
+  createdAt: Time; publishedAt: Time | null;
+}
+export interface WorkflowDoc {
+  schemaVersion: 1;
+  nodes: Node[];
+  edges: Edge[];
+  variables: Variable[];
+  subflows?: Record<ID, { name: string; nodes: Node[]; edges: Edge[] }>;
+}
+export interface Node {
+  id: ID;
+  type: string;
+  typeVersion: number;
+  name?: string;
+  config: Record<string, unknown>;
+  enabled: boolean;
+  onError?: ErrorPolicy;
+}
+export type ErrorPolicy =
+  | { action: "skip" } | { action: "stop" }
+  | { action: "retry"; max: number; backoffSeconds: number; then: "skip" | "stop" }
+  | { action: "fallback"; to: ID };
+export interface Edge { id: ID; from: ID; fromPort: string; to: ID; toPort: string; label?: string }
+export interface Layout {
+  nodes: Record<ID, { x: number; y: number; collapsed?: boolean }>;
+  groups: { id: ID; label: string; nodeIds: ID[]; collapsed: boolean }[];
+  comments: { id: ID; text: string; x: number; y: number }[];
+  viewport?: { x: number; y: number; zoom: number };
+}
+export interface Variable {
+  name: string;
+  type: "string" | "number" | "bool" | "enum" | "path" | "secret";
+  value?: unknown;
+  hasValue?: boolean;
+  options?: string[];
+  description?: string;
+  templateParam?: boolean;
+}
+export interface ValidationIssue {
+  code: "no_trigger" | "multiple_triggers" | "unreachable_node" | "cycle_without_loop" | "unhandled_error"
+    | "unknown_node_type" | "unknown_type_version" | "missing_config" | "invalid_config" | "unknown_config_key"
+    | "missing_variable" | "capability_unavailable" | "capability_unknown" | "unsafe_output_path"
+    | "dangling_edge" | "unknown_port" | "port_type_mismatch"
+    | "not_runnable_yet" | "unknown_schema_version" | "duplicate_id"; // the last three: added in V1 (Built in V1)
+  severity: "error" | "warning";
+  message: string;
+  nodeId?: ID; edgeId?: ID; port?: string; configPath?: string;
+}
+// GET /workflows/{id}/publish-preview (V1 also returns validation).
+export interface PublishPreview {
+  nextNumber: number;
+  changes: { nodeId: ID; kind: "added" | "removed" | "changed"; summary: string }[];
+  libraries: { id: ID; name: string }[];
+  changesOriginals: boolean;
+  validation?: ValidationIssue[];
+}
+
+// Node registry (GET /step-definitions). configSchema is a JSON Schema subset; V1 writes enum + "x-enumLabels",
+// "title", "default" and "x-ui": {widget: "slider" | "segmented" | "folder"}; formats add "x-available".
+export type JSONSchema = Record<string, unknown>;
+export interface Port {
+  name: "in" | "success" | "error" | "skipped" | "match" | "else" | string;
+  label: string;
+  kind: "file" | "control";
+  outcome: "success" | "error" | "skipped" | "branch";
+}
+export interface StepDefinition {
+  type: string;
+  typeVersion: number;
+  category: "input" | "filter" | "video" | "audio" | "subtitles" | "container" | "verify" | "output" | "flow";
+  fileTypes: FileType[];
+  name: string;
+  description: string;
+  icon: string;
+  typeLabel: string;
+  inputs: Port[];
+  outputs: Port[];
+  configSchema: JSONSchema;
+  alwaysOn: boolean;
+  requires: Capability["key"][];
+  requiresByConfig?: Record<string, Record<string, string[]>>;
+  runsWith?: string[];
+  sideEffects: "none" | "writes_staging" | "commits";
+  source: { kind: "builtin" } | { kind: "plugin"; pluginId: ID; pluginVersion: string };
+  deprecated?: boolean;
+}

@@ -2,7 +2,8 @@
 // screens offer, really applied to that state. Every screen using it shows the Prototype banner. ?mock=fresh shows a
 // new install (no libraries yet) for review. When a contract endpoint lands, its function here becomes the fetch.
 import { useSyncExternalStore } from "react";
-import type { ActivityEvent, ID, Job, JobState, Library, Settings, Summary, Template, Trash, Worker, Workflow } from "../types/v2";
+import type { ActivityEvent, ID, Job, JobState, Library, PublishPreview, Settings, Summary, Template, Trash, Worker, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
+import { branchedDoc, presetDoc, preview, revision, summary as stepSummary } from "./steps";
 
 const now = Date.now(), ago = (min: number) => new Date(now - min * 60e3).toISOString();
 const GB = 1e9;
@@ -199,7 +200,7 @@ export function duplicateWorkflow(id: ID) {
     s.wf.push({ ...w, id: "wd" + ++made, name: w.name + " (copy)", favourite: false, libraries: [], activeJobs: 0, status: "enabled", version: 1, publishedRevisionId: "wd" + made + "r1", draftDiffers: false, lastRun: { at: null, completed: 0, failed: 0, skipped: 0 } });
   });
 }
-export const setWorkflow = (id: ID, patch: Partial<Pick<Workflow, "status" | "favourite">>) =>
+export const setWorkflow = (id: ID, patch: Partial<Pick<Workflow, "status" | "favourite" | "name">>) =>
   change((s) => { s.wf = s.wf.map((w) => (w.id === id ? { ...w, ...patch } : w)); });
 // DELETE answers 409 in_use while libraries use it; the page doesn't offer it then.
 export function deleteWorkflow(id: ID): string | null {
@@ -208,4 +209,55 @@ export function deleteWorkflow(id: ID): string | null {
   if (w.libraries.length) return "Used by " + w.libraries.map((l) => l.name).join(", ") + ". Nothing was changed.";
   change((s) => { s.wf = s.wf.filter((x) => x.id !== id); });
   return null;
+}
+
+// Drafts (GET/PUT /workflows/{id}/draft, publish-preview, publish). A draft is made from the published revision on first
+// read; one per workflow. The mock's published documents: the preset, or a branched one for "Home videos - my rules".
+const drafts: Record<ID, { draft: WorkflowRevision; published: WorkflowDoc | null }> = {};
+function slot(id: ID) {
+  const w = state.wf.find((x) => x.id === id);
+  if (!w) return null;
+  if (!drafts[id]) {
+    const published = w.version == null ? null : id === "w2" ? branchedDoc() : presetDoc();
+    drafts[id] = { published, draft: revision(id, structuredClone(published ?? presetDoc()), null) };
+  }
+  return { w, d: drafts[id] };
+}
+export function getDraft(id: ID): WorkflowRevision | null {
+  return slot(id)?.d.draft ?? null;
+}
+// PUT draft with If-Match: a stale etag is refused (409 stale_draft).
+export function saveDraft(id: ID, doc: WorkflowDoc, etag: string): { draft?: WorkflowRevision; error?: string } {
+  const x = slot(id);
+  if (!x) return { error: "That workflow is gone." };
+  if (x.d.draft.etag !== etag) return { error: "This draft was changed somewhere else. Reload to see it. Nothing was saved." };
+  const draft = revision(id, structuredClone(doc), null);
+  x.d.draft = draft;
+  const errors = draft.validation.filter((v) => v.severity === "error").length;
+  const commit = doc.nodes.find((n) => n.type === "output.commit");
+  change((s) => {
+    s.wf = s.wf.map((w) => w.id !== id ? w : { ...w, changedAt: new Date().toISOString(), draftDiffers: JSON.stringify(doc) !== JSON.stringify(x.d.published),
+      validation: { errors, warnings: draft.validation.length - errors }, changesOriginals: commit?.config.policy === "replace",
+      summaryTag: doc.nodes.filter((n) => n.type === "video.convert" || n.type === "container.output").map(stepSummary).join(" · ") });
+  });
+  return { draft };
+}
+export function publishPreview(id: ID): PublishPreview | null {
+  const x = slot(id);
+  return x && preview(x.d.draft.workflow, x.d.published, (x.w.version ?? 0) + 1, x.w.libraries);
+}
+// POST publish {etag}: 400 has_errors while the draft has errors. Running jobs keep the revision they started with.
+export function publish(id: ID, etag: string): { version?: number; error?: string } {
+  const x = slot(id);
+  if (!x) return { error: "That workflow is gone." };
+  if (x.d.draft.etag !== etag) return { error: "Save the draft first." };
+  if (x.d.draft.validation.some((v) => v.severity === "error")) return { error: "Fix the problems first. Nothing was published." };
+  const version = (x.w.version ?? 0) + 1;
+  x.d.published = structuredClone(x.d.draft.workflow);
+  x.d.draft = revision(id, structuredClone(x.d.published), null);
+  change((s) => {
+    s.wf = s.wf.map((w) => w.id !== id ? w : { ...w, version, publishedRevisionId: id + "r" + version, draftDiffers: false, status: w.status === "draft" ? "enabled" : w.status });
+    log("workflow.published", x.w.name + " v" + version + " published", { workflowId: id });
+  });
+  return { version };
 }

@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { plural } from "../format";
 import { TEMPLATES, createWorkflow, deleteWorkflow, duplicateWorkflow, setWorkflow, useMock } from "../mock";
-import { navigate, useSearch } from "../router";
+import { Link, navigate, useSearch } from "../router";
 import type { Workflow } from "../types/v2";
 
 function RowMenu({ w, onSaid }: { w: Workflow; onSaid: (s: string) => void }) {
@@ -82,7 +82,7 @@ export function Workflows() {
     <div className="stack">
       <div className="pagehead"><div><h1>Workflows</h1><p className="sub">What happens to each file. A library uses one workflow.</p></div><span className="sp" />
         {!wizard && <button className="btn primary" type="button" onClick={() => (setWizard(true), setSaid(""))}><Icon id="i-plus" />New workflow</button>}</div>
-      {wizard && <Wizard onClose={() => setWizard(false)} onMade={(w) => (setWizard(false), tab !== "workflows" && setTab("workflows"), setSaid("Draft created: " + w.name + ". Its steps open in the Stack view, which comes in the next step of the new interface."))} />}
+      {wizard && <Wizard onClose={() => setWizard(false)} onMade={(w) => navigate("/workflows/" + w.id)} />}
       <div className="tabs" role="tablist">
         <button role="tab" type="button" aria-selected={tab === "workflows"} onClick={() => tab !== "workflows" && setTab("workflows")}>Workflows</button>
         <button role="tab" type="button" aria-selected={tab === "templates"} onClick={() => tab !== "templates" && setTab("templates")}>Templates <span className="n">{TEMPLATES.length}</span></button>
@@ -112,7 +112,7 @@ export function Workflows() {
                     <td><span className="row nw">
                       <button className="btn sm icon ghost" type="button" aria-pressed={w.favourite} aria-label={"Favourite: " + w.name} onClick={() => setWorkflow(w.id, { favourite: !w.favourite })}
                         style={w.favourite ? { color: "var(--warning-text)" } : undefined}><Icon id="i-star" /></button>
-                      <span><strong>{w.name}</strong><span className="sub">{w.description}</span></span></span></td>
+                      <span><Link to={"/workflows/" + w.id}><strong>{w.name}</strong></Link><span className="sub">{w.description}</span></span></span></td>
                     <td>Video</td>
                     <td>{w.tags.map((t) => <span className="tag" key={t}>{t}</span>)}</td>
                     <td>{w.libraries.length ? w.libraries.map((l) => l.name).join(", ") : <span className="muted">None</span>}</td>
