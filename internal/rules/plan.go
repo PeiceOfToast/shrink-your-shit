@@ -401,8 +401,8 @@ func (p Plan) expectTracks(e Expect) Expect {
 				if o.Channels > 0 {
 					s.Channels = o.Channels
 				}
-				if s.Type == "subtitle" { // converted text (mov_text to SRT): its default flag kept too
-					s.CheckDefault = true
+				if s.Type == "subtitle" && o.Codec != "mov_text" { // converted text (mov_text to SRT): its default flag kept too;
+					s.CheckDefault = true // MP4 has no default flag of its own (every track reads as default), so not for mov_text
 				}
 			}
 		}
@@ -604,6 +604,7 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	}
 	p.Tracks = append(p.Tracks, planSubtitles(s.Subtitles, langs, info)...)
 	p.Tracks = append(p.Tracks, movTextToSRT(p.Tracks, p.Container, info)...)
+	p.Tracks = append(p.Tracks, textToMovText(p.Tracks, p.Container, info)...)
 	if len(p.Tracks) > 0 {
 		for _, a := range info.Audio() {
 			p.AudioOrder = append(p.AudioOrder, a.Index)
@@ -777,6 +778,27 @@ func tracksNotKept(info media.Info, container string) string {
 		}
 	}
 	return ""
+}
+
+// textToMovText converts the text subtitles an MP4 cannot hold as they are (SRT, ASS, WebVTT) into its
+// own (mov_text) when the new file is MP4, instead of the whole file being left alone (02:41Z; ASS loses
+// its styling). Picture subtitles still can't go in, so a file with them is still skipped with the reason.
+// Only tracks no other op drops, saves as a file or converts.
+func textToMovText(ops []TrackOp, container string, info media.Info) (out []TrackOp) {
+	if container != "mp4" {
+		return nil
+	}
+	has := map[int]bool{}
+	for _, o := range ops {
+		has[o.Index] = true
+	}
+	text := map[string]bool{"subrip": true, "ass": true, "ssa": true, "webvtt": true, "text": true}
+	for _, s := range info.Subtitles() {
+		if text[s.Codec] && !has[s.Index] {
+			out = append(out, TrackOp{Index: s.Index, Type: "subtitle", Encoder: "mov_text", Codec: "mov_text"})
+		}
+	}
+	return out
 }
 
 // movTextToSRT converts the MP4 text subtitles (mov_text) an MKV cannot hold as they are into SRT text

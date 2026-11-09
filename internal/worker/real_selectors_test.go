@@ -487,3 +487,32 @@ func TestRealKeepWebMBecomesMKV(t *testing.T) {
 		t.Errorf("log:\n%s", text)
 	}
 }
+
+// MP4 output (02:41Z): an MKV with SRT subtitles becomes an MP4 whose subtitles are MP4's own
+// (mov_text), instead of the file being left alone. The SRT sample is made here; no media is committed.
+func TestRealMP4KeepsTextSubtitles(t *testing.T) {
+	needTools(t)
+	dir := t.TempDir()
+	srt := filepath.Join(dir, "s.srt")
+	os.WriteFile(srt, []byte("1\n00:00:00,500 --> 00:00:02,000\nHello there\n"), 0o644)
+	src := filepath.Join(dir, "m.mkv")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=3:size=640x360:rate=25", "-i", srt,
+		"-map", "0", "-map", "1", "-c:v", "mpeg2video", "-b:v", "6000k", "-c:s", "srt", "-metadata:s:s:0", "language=eng", src)
+	s := rules.DefaultSelectors(3)
+	s.Speed, s.FileType, s.AfterConverting = "faster", "mp4", "beside" // beside: the original stays, no record of kept originals needed
+	tmpl := s.Template()
+	st, id := realJob(t, src, 3)
+	st.SetPaused(false)
+	w := realWorker(st, media.OSExec{})
+	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.run(t)
+	j, _ := st.Get(id)
+	if j.Status != jobs.Done {
+		t.Fatalf("%s %q", j.Status, j.Error)
+	}
+	out := probe(t, j.OutputPath)
+	subs := out.Subtitles()
+	if filepath.Ext(j.OutputPath) != ".mp4" || len(subs) != 1 || subs[0].Codec != "mov_text" || subs[0].Language != "eng" {
+		t.Errorf("new file %s: %+v", j.OutputPath, out.Streams)
+	}
+}
