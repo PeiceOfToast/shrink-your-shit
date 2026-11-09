@@ -27,6 +27,22 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		}
 		writeJSON(w, map[string]any{"items": defs, "total": len(defs)})
 	})
+	api.HandleFunc("GET /api/v2/trash", func(w http.ResponseWriter, r *http.Request) {
+		t, err := store.TrashNow()
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		writeJSON(w, t)
+	})
+	// v1's settings, unchanged (first-run progress among them): the same handlers answer both paths
+	settingsV1 := func(w http.ResponseWriter, r *http.Request) {
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = "/api/settings"
+		api.ServeHTTP(w, r2)
+	}
+	api.HandleFunc("GET /api/v2/settings", settingsV1)
+	api.HandleFunc("PATCH /api/v2/settings", settingsV1)
 	api.HandleFunc("GET /api/v2/templates", func(w http.ResponseWriter, r *http.Request) {
 		items := []map[string]any{{"id": "shrink_videos", "name": "Shrink videos", "fileType": "video",
 			"description": "Converts videos to a smaller format, keeping the picture and the sound you choose.",

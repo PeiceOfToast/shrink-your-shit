@@ -418,3 +418,26 @@ FROM jobs j JOIN libraries l ON l.id=j.library_id WHERE l.flow_id=?`, since, sin
 	r.LastAt = last.String
 	return r, err
 }
+
+// Trash is what .syp-trash holds now: originals kept after a replace, freed when their days are up.
+type Trash struct {
+	Bytes        int64   `json:"bytes"`
+	Files        int     `json:"files"`
+	NextDeleteAt *string `json:"nextDeleteAt"`
+	LastDeleteAt *string `json:"lastDeleteAt"`
+}
+
+// TrashNow sums the kept originals and when they go (contract v2, Trash).
+func (s *Store) TrashNow() (Trash, error) {
+	var t Trash
+	var first, last sql.NullString
+	err := s.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(original_bytes),0), MIN(delete_on), MAX(delete_on) FROM originals WHERE state=?`, OriginalKept).
+		Scan(&t.Files, &t.Bytes, &first, &last)
+	if first.Valid && first.String != "" {
+		t.NextDeleteAt = &first.String
+	}
+	if last.Valid && last.String != "" {
+		t.LastDeleteAt = &last.String
+	}
+	return t, err
+}

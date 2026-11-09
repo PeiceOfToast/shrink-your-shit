@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -271,5 +272,35 @@ func readAll(t *testing.T, res *http.Response) string {
 		if err != nil {
 			return b.String()
 		}
+	}
+}
+
+// Contract v2 (ui-shop's Dashboard, 01:30Z): what .syp-trash holds and when it is freed; v1's settings,
+// first-run progress among them, under /api/v2.
+func TestV2TrashAndSettings(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	if _, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/trash"}); body != `{"bytes":0,"files":0,"nextDeleteAt":null,"lastDeleteAt":null}`+"\n" {
+		t.Errorf("empty trash: %s", body)
+	}
+	for i, days := range []int{3, 7} {
+		job, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: lib.Path + "/f" + strconv.Itoa(i) + ".mkv", SizeBefore: 1000})
+		o, err := st.BeginSwap(jobs.Original{JobID: job, LibraryID: lib.ID, Path: lib.Path + "/f.mkv", Bytes: int64(1000 * (i + 1))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.FinishSwap(o, time.Date(2026, 11, 9+days, 0, 0, 0, 0, time.UTC))
+	}
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/trash"})
+	if body != `{"bytes":3000,"files":2,"nextDeleteAt":"2026-11-12T00:00:00Z","lastDeleteAt":"2026-11-16T00:00:00Z"}`+"\n" {
+		t.Errorf("trash: %s", body)
+	}
+	if code, body, _ := do(t, nil, srv, call{method: "PATCH", path: "/api/v2/settings", ctype: "application/json", body: `{"firstRunStep":3}`}); code != 200 || !strings.Contains(body, `"firstRunStep":3`) {
+		t.Errorf("patch: %d %s", code, body)
+	}
+	_, v1, _ := do(t, nil, srv, call{method: "GET", path: "/api/settings"})
+	_, v2, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/settings"})
+	if v1 != v2 || !strings.Contains(v2, `"firstRunDone"`) || !strings.Contains(v2, `"firstRunStep":3`) {
+		t.Errorf("v2 settings differ from v1's:\n%s\n%s", v1, v2)
 	}
 }
