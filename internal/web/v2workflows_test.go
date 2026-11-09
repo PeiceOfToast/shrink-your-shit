@@ -283,17 +283,38 @@ func TestV2TrashAndSettings(t *testing.T) {
 	if _, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/trash"}); body != `{"bytes":0,"files":0,"nextDeleteAt":null,"lastDeleteAt":null}`+"\n" {
 		t.Errorf("empty trash: %s", body)
 	}
-	for i, days := range []int{3, 7} {
+	for i := range 2 { // their stored delete_on is far off: the dates follow the setting now, as Purge does (review d3d44e2)
 		job, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: lib.Path + "/f" + strconv.Itoa(i) + ".mkv", SizeBefore: 1000})
 		o, err := st.BeginSwap(jobs.Original{JobID: job, LibraryID: lib.ID, Path: lib.Path + "/f.mkv", Bytes: int64(1000 * (i + 1))})
 		if err != nil {
 			t.Fatal(err)
 		}
-		st.FinishSwap(o, time.Date(2026, 11, 9+days, 0, 0, 0, 0, time.UTC))
+		st.FinishSwap(o, time.Now().Add(400*24*time.Hour))
 	}
-	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/trash"})
-	if body != `{"bytes":3000,"files":2,"nextDeleteAt":"2026-11-12T00:00:00Z","lastDeleteAt":"2026-11-16T00:00:00Z"}`+"\n" {
-		t.Errorf("trash: %s", body)
+	trash := func(days int) jobs.Trash {
+		t.Helper()
+		if code, body, _ := do(t, nil, srv, call{method: "PATCH", path: "/api/v2/settings", ctype: "application/json", body: `{"keepOriginalsDays":` + strconv.Itoa(days) + `}`}); code != 200 {
+			t.Fatalf("setting %d: %d %s", days, code, body)
+		}
+		_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/trash"})
+		return decode[jobs.Trash](t, body)
+	}
+	near := func(at *string, want time.Duration) bool {
+		if at == nil {
+			return false
+		}
+		got, err := time.Parse(time.RFC3339, *at)
+		d := time.Until(got) - want
+		return err == nil && d > -2*time.Minute && d < 2*time.Minute
+	}
+	if tr := trash(7); tr.Bytes != 3000 || tr.Files != 2 || !near(tr.NextDeleteAt, 7*24*time.Hour) || !near(tr.LastDeleteAt, 7*24*time.Hour) {
+		t.Errorf("7 days: %+v %s %s", tr, deref(tr.NextDeleteAt), deref(tr.LastDeleteAt))
+	}
+	if tr := trash(1); !near(tr.NextDeleteAt, 24*time.Hour) {
+		t.Errorf("1 day: %s", deref(tr.NextDeleteAt))
+	}
+	if tr := trash(0); !near(tr.NextDeleteAt, 0) { // 0 days: due at once (the swap deletes them)
+		t.Errorf("0 days: %s", deref(tr.NextDeleteAt))
 	}
 	if code, body, _ := do(t, nil, srv, call{method: "PATCH", path: "/api/v2/settings", ctype: "application/json", body: `{"firstRunStep":3}`}); code != 200 || !strings.Contains(body, `"firstRunStep":3`) {
 		t.Errorf("patch: %d %s", code, body)
@@ -303,4 +324,11 @@ func TestV2TrashAndSettings(t *testing.T) {
 	if v1 != v2 || !strings.Contains(v2, `"firstRunDone"`) || !strings.Contains(v2, `"firstRunStep":3`) {
 		t.Errorf("v2 settings differ from v1's:\n%s\n%s", v1, v2)
 	}
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return "<nil>"
+	}
+	return *s
 }

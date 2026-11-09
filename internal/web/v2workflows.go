@@ -28,7 +28,12 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		writeJSON(w, map[string]any{"items": defs, "total": len(defs)})
 	})
 	api.HandleFunc("GET /api/v2/trash", func(w http.ResponseWriter, r *http.Request) {
-		t, err := store.TrashNow()
+		set, err := LoadSettings(store)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		t, err := store.TrashNow(set.KeepOriginalsDays) // the setting now, as Purge reads it
 		if err != nil {
 			serverError(w, err)
 			return
