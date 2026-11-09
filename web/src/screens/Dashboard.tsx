@@ -3,7 +3,7 @@
 // dates), the GPU count on the Workers card, per-worker encoders. Not here yet: Edit dashboard, View (the job drawer, V6).
 import { Icon } from "../Icon";
 import { bytes, clock, clockS, count, elapsed, plural } from "../format";
-import { retry, scanAll, startAll, stopAll, summary, useMock } from "../mock";
+import { retry, scanAll, startAll, stopAll, summary, updatedAt, useMock } from "../mock";
 import { Link } from "../router";
 import type { ActivityEvent, Summary } from "../types/v2";
 
@@ -39,8 +39,9 @@ function Setup({ steps, onDone }: { steps: [string, boolean, string?][]; onDone:
 }
 
 export function Dashboard() {
-  const s = useMock(), sum = summary(s), updated = new Date();
-  const online = sum.workers.filter((w) => w.status !== "offline" && w.status !== "stalled").length;
+  const s = useMock(), sum = summary(s), updated = updatedAt;
+  // Online: connected and taking or finishing work. A stopped (paused) worker is not counted.
+  const online = sum.workers.filter((w) => w.status === "online" || w.status === "busy" || w.status === "draining").length;
   const running = sum.activity.workersRunning > 0;
   const fresh = !s.settings.firstRunDone;
   // First run's four steps (IA.md); progress from settings.firstRunStep plus what exists. Test one file waits for the
