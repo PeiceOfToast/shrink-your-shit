@@ -62,9 +62,9 @@ export interface Worker {
   slots: { cpu: { used: number; total: number }; gpu: { used: number; total: number } };
   live: { cpuPercent: number | null; memUsedBytes: number | null; memTotalBytes: number | null;
     gpu: { index: number; utilPercent: number | null; vramUsedBytes: number | null }[] };
-  gpus: { index: number; vendor: "nvidia" | "intel" | "amd" | "apple" | "other"; model: string; vramBytes: number | null }[];
+  gpus: { index: number; vendor: "nvidia" | "intel" | "amd" | "apple" | "other"; model: string; vramBytes: number | null }[]; // CAN'T YET until V4 (empty)
   ffmpeg: { path: string; version: string } | null;
-  capabilities: Capability[];
+  capabilities: Capability[]; // CAN'T YET until V4 (empty)
   currentJobIds: ID[];
   tags: string[]; pool: string | null;
   schedule: { from: string; to: string } | null;
@@ -120,7 +120,7 @@ export interface ActivityEvent { // GET /activity
   refs: { jobId?: ID; workerId?: ID; workflowId?: ID; libraryId?: ID };
 }
 
-// v1's settings, re-exposed at /api/v2/settings (contract: Settings). First run's progress is in them.
+// GET /api/v2/settings: v1's settings (contract: Settings), including first run's firstRunDone/firstRunStep.
 export interface Settings { firstRunDone: boolean; firstRunStep: number; intakePaused: boolean; catalogueEnabled: boolean }
 
 // GET /api/v2/trash (contract update 01:33Z; workshop branch v2-trash-settings): originals replaced and kept in the
@@ -147,3 +147,4 @@ export interface Workflow { // GET /workflows (contract: Workflows, revisions an
   createdAt: Time; changedAt: Time;
 }
 export interface Template { id: ID; name: string; fileType: FileType; description: string; steps: string[]; changesOriginals: boolean } // GET /templates
+
