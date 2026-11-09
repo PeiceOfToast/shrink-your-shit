@@ -51,7 +51,7 @@ export function Dashboard() {
   // engine's test run (SCREENS: first run has three steps until then).
   const steps: [string, boolean, string?][] = [
     ["Add a library", s.libraries.length > 0, s.libraries[0]?.name],
-    ["Create a workflow", s.workflows > 0],
+    ["Create a workflow", s.wf.length > 0],
     ["Check your worker", s.settings.firstRunStep > 3],
   ];
   const libName = (id: string) => s.libraries.find((l) => l.id === id)?.name ?? id;
