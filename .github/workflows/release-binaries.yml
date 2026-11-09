@@ -23,6 +23,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v4 # the new UI (web/) is built and embedded; Node LTS, not the runner's default
+        with:
+          node-version-file: web/.nvmrc
       - name: Test before releasing
         run: go vet ./... && go test -count=1 ./...
       - name: Build archives
@@ -47,6 +50,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v4 # the new UI (web/) is built and embedded; Node LTS, not the runner's default
+        with:
+          node-version-file: web/.nvmrc
       - name: Install Inno Setup if the runner lacks it
         run: |
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
