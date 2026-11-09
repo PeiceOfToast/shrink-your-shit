@@ -3,3 +3,7 @@ shrink-your-shit
 *.db-*
 /data/
 /dist/
+
+# the new SPA build (ui-shop: web/ -> internal/web/next/dist); only .keep is committed
+/internal/web/next/dist/*
+!/internal/web/next/dist/.keep
