@@ -21,13 +21,14 @@ var assetTypes = map[string]string{
 	".json": "application/json",
 }
 
-// gzipAssets wraps the /assets/ handler: it sets the Content-Type, and a browser that accepts gzip gets
-// each embedded file compressed (once, on first use, then kept); anything else goes to next as before.
-func gzipAssets(files fs.FS, next http.HandlerFunc) http.HandlerFunc {
+// gzipAssets wraps a handler of embedded files under prefix ("/assets/", "/next/"): it sets the
+// Content-Type, and a browser that accepts gzip gets each file compressed (once, on first use, then
+// kept); anything else goes to next as before.
+func gzipAssets(prefix string, files fs.FS, next http.HandlerFunc) http.HandlerFunc {
 	var cache sync.Map // file name -> gzip bytes
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Vary", "Accept-Encoding")
-		name := strings.TrimPrefix(r.URL.Path, "/assets/")
+		name := strings.TrimPrefix(r.URL.Path, prefix)
 		if t, ok := assetTypes[path.Ext(name)]; ok {
 			w.Header().Set("Content-Type", t) // both the file server and ServeContent keep a type already set
 		}

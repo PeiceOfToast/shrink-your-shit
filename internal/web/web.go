@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/web/next"
 )
 
 //go:embed static
@@ -44,13 +45,16 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	})
 	sub, _ := fs.Sub(static, "static")
 	files := http.StripPrefix("/assets/", http.FileServer(http.FS(sub)))
-	mux.HandleFunc("GET /assets/", gzipAssets(sub, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /assets/", gzipAssets("/assets/", sub, func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/") { // no directory listing
 			http.NotFound(w, r)
 			return
 		}
 		files.ServeHTTP(w, r)
 	}))
+	// The new single-page app (UI rebuild), public like these pages; its data comes from /api.
+	mux.HandleFunc("GET /next/", nextApp(next.Files()))
+	mux.Handle("GET /next", http.RedirectHandler("/next/", http.StatusMovedPermanently))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		to := "/libraries/"
 		if r.URL.RawQuery != "" { // keep ?token=: the printed sign-in link points at the root
