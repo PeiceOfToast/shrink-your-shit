@@ -562,7 +562,7 @@ type FlowUse struct {
 
 // Flows lists every flow, oldest first, with who uses it.
 func (s *Store) Flows() ([]FlowUse, error) {
-	rows, err := s.db.Query(`SELECT id FROM flows ORDER BY id`)
+	rows, err := s.db.Query(`SELECT id FROM flows WHERE status <> 'draft' ORDER BY id`) // a workflow never published isn't the old pages' to use
 	if err != nil {
 		return nil, err
 	}
