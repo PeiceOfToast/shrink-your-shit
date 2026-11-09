@@ -170,6 +170,9 @@ func main() {
 		if _, err := runLogs.Sweep(time.Now(), runlog.MaxAge, runlog.Total); err != nil {
 			log.Printf("run logs: %v", err)
 		}
+		if _, err := store.PruneJobEvents(time.Now().Add(-runlog.MaxAge)); err != nil { // jobs' history: the logs' 30 days
+			log.Printf("job history: %v", err)
+		}
 	}
 	purge := func() {
 		sweepLogs()

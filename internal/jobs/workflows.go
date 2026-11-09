@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
@@ -490,6 +491,28 @@ func (s *Store) SetPriority(id int64, p int) error {
 	}
 	if n, _ := r.RowsAffected(); n == 0 {
 		return ErrNotStoppable // not waiting: nothing to reorder
+	}
+	return nil
+}
+
+// PruneJobEvents forgets history entries older than before (the run logs' 30 days, review 66806b3).
+func (s *Store) PruneJobEvents(before time.Time) (int64, error) {
+	r, err := s.db.Exec(`DELETE FROM job_events WHERE at < ?`, before.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	return r.RowsAffected()
+}
+
+// RetryNow lets a job waiting to retry go at once (bulk retry of a retry_wait job, review 66806b3);
+// ErrNotStoppable if it isn't waiting to retry.
+func (s *Store) RetryNow(id int64) error {
+	r, err := s.db.Exec(`UPDATE jobs SET retry_at='' WHERE id=? AND status=? AND retry_at<>''`, id, Queued)
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return ErrNotStoppable
 	}
 	return nil
 }

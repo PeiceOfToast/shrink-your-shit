@@ -91,6 +91,16 @@ func TestV2Jobs(t *testing.T) {
 	if code != 200 || !strings.Contains(body, `"ok":true`) {
 		t.Errorf("retry %d %s", code, body)
 	}
+	// a retry wait goes now; a plain waiting job is already waiting (review 66806b3)
+	code, body = post(t, srv, "POST", "/api/v2/jobs/actions", `{"action":"retry","ids":`+ids(retry)+`}`)
+	if j, _ := st.Get(retry); code != 200 || !strings.Contains(body, `"ok":true`) || j.RetryAt != "" {
+		t.Errorf("retry a retry wait: %d %s %q", code, body, j.RetryAt)
+	}
+	st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "plain.mkv")})
+	plain, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "plain2.mkv")})
+	if code, body := post(t, srv, "POST", "/api/v2/jobs/actions", `{"action":"retry","ids":`+ids(plain)+`}`); code != 200 || !strings.Contains(body, `"already_waiting"`) {
+		t.Errorf("retry a waiting job: %d %s", code, body)
+	}
 	code, body = post(t, srv, "POST", "/api/v2/jobs/actions", `{"action":"cancel","ids":`+ids(retry, 999)+`}`)
 	if code != 200 || strings.Count(body, `"ok":true`) != 1 || !strings.Contains(body, `"ok":false`) {
 		t.Errorf("cancel %d %s", code, body)

@@ -156,6 +156,10 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 				if err := store.SetPriority(id, *in.Priority); err != nil {
 					res["ok"], res["code"], res["message"] = false, "not_waiting", "Only a waiting job can be moved in the queue."
 				}
+			case v1 == "retry" && isQueued(store, id): // waiting already (review 66806b3): a retry wait goes now
+				if err := store.RetryNow(id); err != nil {
+					res["ok"], res["code"], res["message"] = false, "already_waiting", "This job is already waiting in the queue."
+				}
 			default: // v1's own handler, with all its checks: cancel never deletes anything
 				rec := httptest.NewRecorder()
 				req := httptest.NewRequest("POST", "/api/jobs/"+sid+"/"+v1, strings.NewReader("{}")).WithContext(r.Context())
@@ -308,4 +312,9 @@ func reasonOf(e jobs.JobEvent) any {
 		return nil
 	}
 	return map[string]string{"code": e.Reason}
+}
+
+func isQueued(store *jobs.Store, id int64) bool {
+	j, err := store.Get(id)
+	return err == nil && j.Status == jobs.Queued
 }

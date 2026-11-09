@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -149,5 +150,75 @@ func TestJobHistory(t *testing.T) {
 	rev, ok, err := s.RevisionAt(l.FlowID, time.Now().UTC().Add(time.Minute).Format(time.RFC3339))
 	if err != nil || !ok || *rev.Number != 1 {
 		t.Errorf("revision %+v %v %v", rev, ok, err)
+	}
+}
+
+// Review 66806b3: every way a job's row goes ends its history (a queued job stopped by hand, one
+// removed with its library); history is pruned after the run logs' 30 days; a retry wait can go now;
+// Claim's order has its index.
+func TestJobHistoryEnds(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "syp.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
+	last := func(id int64) JobEvent {
+		t.Helper()
+		ev, _ := s.JobEvents(id)
+		if len(ev) == 0 {
+			t.Fatalf("job %d has no history", id)
+		}
+		return ev[len(ev)-1]
+	}
+	stopped, _ := s.Enqueue(Job{Library: l.Path, LibraryID: l.ID, Path: filepath.Join(l.Path, "a.mkv")})
+	if _, err := s.RequestStop(stopped); err != nil {
+		t.Fatal(err)
+	}
+	if e := last(stopped); e.To != "cancelled" || e.Reason != "user_stopped" {
+		t.Errorf("stopped while waiting: %+v", e)
+	}
+	if ev, _ := s.JobEvents(stopped); len(ev) != 2 {
+		t.Errorf("one end, not two: %+v", ev)
+	}
+	other, _ := s.AddLibrary("Shows", "/s", rules.SliderTemplate(3), true)
+	gone, _ := s.Enqueue(Job{Library: other.Path, LibraryID: other.ID, Path: filepath.Join(other.Path, "b.mkv")})
+	if err := s.DeleteLibrary(other.ID); err != nil {
+		t.Fatal(err)
+	}
+	if e := last(gone); e.To != "cancelled" || e.Reason != "removed" {
+		t.Errorf("removed with its library: %+v", e)
+	}
+	// retry now
+	r, _ := s.Enqueue(Job{Library: l.Path, LibraryID: l.ID, Path: filepath.Join(l.Path, "r.mkv")})
+	s.SetPaused(false)
+	s.Claim("w")
+	s.RetryLater(r, time.Now().Add(time.Hour), "busy")
+	if err := s.RetryNow(r); err != nil {
+		t.Fatal(err)
+	}
+	if j, _ := s.Get(r); j.RetryAt != "" {
+		t.Errorf("still waiting to retry: %q", j.RetryAt)
+	}
+	if err := s.RetryNow(r); err == nil {
+		t.Error("a job not waiting to retry can't retry now")
+	}
+	// pruned after 30 days
+	s.db.Exec(`UPDATE job_events SET at='2000-01-01T00:00:00Z' WHERE job_id=?`, stopped)
+	if n, err := s.PruneJobEvents(time.Now().Add(-30 * 24 * time.Hour)); err != nil || n != 2 {
+		t.Errorf("pruned %d %v", n, err)
+	}
+	// Claim's query uses its index
+	var plan string
+	rows, _ := s.db.Query(`EXPLAIN QUERY PLAN SELECT id FROM jobs WHERE status='queued' AND stop_requested=0 ORDER BY priority DESC, id LIMIT 1`)
+	for rows.Next() {
+		var a, b, c int
+		var d string
+		rows.Scan(&a, &b, &c, &d)
+		plan += d + "; "
+	}
+	rows.Close()
+	if !strings.Contains(plan, "jobs_claim") {
+		t.Errorf("plan %s", plan)
 	}
 }

@@ -282,6 +282,9 @@ func (s *Store) RequestStop(id int64) (running bool, err error) {
 		if err := putFile(tx, userStoppedFile(path)); err != nil {
 			return false, err
 		}
+		if _, err := tx.Exec(`INSERT INTO job_events(job_id, at, from_status, to_status, reason) VALUES (?,?,?,?,?)`, id, s.stamp(), status, "cancelled", "user_stopped"); err != nil {
+			return false, err // review 66806b3: the reason, before the row goes
+		}
 		if _, err := tx.Exec(`DELETE FROM jobs WHERE id=?`, id); err != nil {
 			return false, err
 		}
