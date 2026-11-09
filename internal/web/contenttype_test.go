@@ -57,12 +57,15 @@ func TestEveryAPIAnswerIsLabelledJSON(t *testing.T) {
 			}
 		}
 	}
-	// Success paths that need a real body, among them the 201s (status set before the body).
+	// Success paths that need a real body, among them the 201s (status set before the body). The flow
+	// to duplicate is made here: the sweep above may have deleted flow 1 (v2's DELETE runs after the
+	// library's).
 	dir2 := t.TempDir()
+	kept, _ := st.AddLibrary("Kept", t.TempDir(), rules.SliderTemplate(3), false)
 	for _, c := range []call{
 		{method: "POST", path: "/api/libraries", body: `{"name":"Shows","path":` + strconv.Quote(dir2) + `}`},
 		{method: "POST", path: "/api/flows", body: `{"name":"Mine"}`},
-		{method: "POST", path: "/api/flows/1/duplicate", body: `{}`},
+		{method: "POST", path: "/api/flows/" + strconv.FormatInt(kept.FlowID, 10) + "/duplicate", body: `{}`},
 	} {
 		c.ctype = "application/json"
 		code, got, h := do(t, nil, srv, c)

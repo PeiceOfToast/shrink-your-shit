@@ -355,3 +355,39 @@ func (s *Store) SetWorkflowMeta(flowID int64, description, status *string, favou
 }
 
 func ptrTo[T any](v T) *T { return &v }
+
+// WorkflowIDs are every workflow's id, never-published ones too, oldest first.
+func (s *Store) WorkflowIDs() ([]int64, error) {
+	rows, err := s.db.Query(`SELECT id FROM flows ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		rows.Scan(&id)
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// WorkflowRuns are a workflow's jobs, over the libraries that use it: those waiting or running now,
+// and those done or failed since since (skipped files keep no job before V2), with the newest end.
+type WorkflowRuns struct {
+	Active, Completed, Failed int
+	LastAt                    string
+}
+
+func (s *Store) WorkflowRunsSince(flowID int64, since string) (WorkflowRuns, error) {
+	var r WorkflowRuns
+	var last sql.NullString
+	err := s.db.QueryRow(`SELECT
+  COALESCE(SUM(j.status IN ('queued','running')),0),
+  COALESCE(SUM(j.status='done' AND j.updated>=?),0),
+  COALESCE(SUM(j.status IN ('failed','kept') AND j.updated>=?),0),
+  MAX(CASE WHEN j.status IN ('done','failed','kept') THEN j.updated END)
+FROM jobs j JOIN libraries l ON l.id=j.library_id WHERE l.flow_id=?`, since, since, flowID).Scan(&r.Active, &r.Completed, &r.Failed, &last)
+	r.LastAt = last.String
+	return r, err
+}
