@@ -412,6 +412,7 @@ func (s *Store) UserStopped(id int64) error {
 	if err := s.PutFile(userStoppedFile(j.Path)); err != nil {
 		return err
 	}
+	s.endEvent(j, "cancelled", "user_stopped") // V2: the row goes, its history stays
 	if _, err = s.db.Exec(`DELETE FROM jobs WHERE id=?`, id); err != nil {
 		return err
 	}
@@ -439,6 +440,7 @@ func (s *Store) Skip(id int64, words, code string) error {
 	if err := s.PutFile(f); err != nil {
 		return err
 	}
+	s.endEvent(j, "skipped", code) // V2: the row goes, its history stays
 	if _, err = s.db.Exec(`DELETE FROM jobs WHERE id=?`, id); err != nil {
 		return err
 	}
@@ -451,3 +453,9 @@ const UserStoppedReason = "user_stopped"
 
 // ErrNotStoppable: the job is not queued or running.
 var ErrNotStoppable = errors.New("this file is not waiting or converting")
+
+// endEvent writes a job's last history entry when it ends by being deleted (skipped, stopped): the
+// triggers of migration 21 see only status changes.
+func (s *Store) endEvent(j Job, to, reason string) {
+	s.db.Exec(`INSERT INTO job_events(job_id, at, from_status, to_status, reason, worker) VALUES (?,?,?,?,?,?)`, j.ID, s.stamp(), string(j.Status), to, reason, j.Worker)
+}

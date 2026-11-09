@@ -4,8 +4,10 @@ package jobs
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
@@ -98,5 +100,54 @@ func TestWorkflowRevisions(t *testing.T) {
 	s.db.QueryRow(`SELECT COUNT(*) FROM workflow_revisions WHERE workflow_id=?`, w.ID).Scan(&n)
 	if n != 0 {
 		t.Errorf("%d revisions left", n)
+	}
+}
+
+// Migration 21 (V2): a job's history is written whatever path it takes, and stays after its row goes.
+func TestJobHistory(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "syp.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.SetPaused(false)
+	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
+	to := func(id int64) []string {
+		t.Helper()
+		ev, err := s.JobEvents(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, e := range ev {
+			out = append(out, e.To)
+		}
+		return out
+	}
+	a, _ := s.Enqueue(Job{Library: l.Path, LibraryID: l.ID, Path: filepath.Join(l.Path, "a.mkv")})
+	s.Claim("w1")
+	s.RetryLater(a, time.Now().Add(-time.Second), "busy")
+	s.Claim("w1")
+	s.Complete(a, filepath.Join(l.Path, "a.mkv"), 1)
+	if got := to(a); fmt.Sprint(got) != "[queued running queued running done]" {
+		t.Errorf("a: %v", got)
+	}
+	b, _ := s.Enqueue(Job{Library: l.Path, LibraryID: l.ID, Path: filepath.Join(l.Path, "b.mkv")})
+	s.Skip(b, "it is already HEVC", rules.SkipAlreadyInFormat)
+	c, _ := s.Enqueue(Job{Library: l.Path, LibraryID: l.ID, Path: filepath.Join(l.Path, "c.mkv")})
+	s.UserStopped(c)
+	if got := to(b); fmt.Sprint(got) != "[queued skipped]" {
+		t.Errorf("b: %v", got)
+	}
+	if ev, _ := s.JobEvents(c); len(ev) != 2 || ev[1].To != "cancelled" || ev[1].Reason != "user_stopped" {
+		t.Errorf("c: %+v", ev)
+	}
+	if _, err := s.Get(b); err == nil {
+		t.Error("a skipped job's row is still there (v1 behaviour kept)")
+	}
+	// the revision a job ran: the one published when it was queued
+	rev, ok, err := s.RevisionAt(l.FlowID, time.Now().UTC().Add(time.Minute).Format(time.RFC3339))
+	if err != nil || !ok || *rev.Number != 1 {
+		t.Errorf("revision %+v %v %v", rev, ok, err)
 	}
 }

@@ -244,6 +244,21 @@ CREATE TABLE workflow_revisions (
   created TEXT NOT NULL, published TEXT);
 CREATE UNIQUE INDEX workflow_revisions_number ON workflow_revisions(workflow_id, number) WHERE number IS NOT NULL;
 CREATE UNIQUE INDEX workflow_revisions_draft ON workflow_revisions(workflow_id) WHERE status = 'draft';`},
+	// V2 (UI rebuild): every job's history (spec 7), written by triggers so no path can skip it: its
+	// creation and each change of status, with the worker and the error at that moment; a skip or a
+	// stop (which delete the job row) is written by Skip and UserStopped. priority: the bulk action's.
+	{21, "job history", `
+ALTER TABLE jobs ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE job_events (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT, job_id INTEGER NOT NULL, at TEXT NOT NULL,
+  from_status TEXT, to_status TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', worker TEXT NOT NULL DEFAULT '');
+CREATE INDEX job_events_job ON job_events(job_id);
+CREATE TRIGGER job_events_insert AFTER INSERT ON jobs BEGIN
+  INSERT INTO job_events(job_id, at, from_status, to_status) VALUES (new.id, new.created, NULL, new.status);
+END;
+CREATE TRIGGER job_events_status AFTER UPDATE OF status ON jobs WHEN old.status <> new.status BEGIN
+  INSERT INTO job_events(job_id, at, from_status, to_status, reason, worker) VALUES (new.id, new.updated, old.status, new.status, new.error, new.worker);
+END;`},
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.

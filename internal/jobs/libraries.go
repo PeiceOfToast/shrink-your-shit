@@ -648,6 +648,9 @@ func (s *Store) SetFlowTemplate(id int64, t rules.Template) (Flow, error) {
 	if err := tx.Commit(); err != nil {
 		return Flow{}, err
 	}
+	if _, err := s.EnsureRevision(id); err != nil { // V2: its revision exists before any job queued under it
+		return Flow{}, err
+	}
 	return s.GetFlow(id)
 }
 

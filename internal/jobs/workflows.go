@@ -430,3 +430,54 @@ func (s *Store) KnownTemplate(flowID int64, t rules.Template) (bool, error) {
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM workflow_revisions WHERE workflow_id=? AND status='published' AND template_hash=?`, flowID, templateHash(t)).Scan(&n)
 	return n > 0, err
 }
+
+// JobEvent is one entry of a job's history (migration 21): its v1 statuses, plus skipped and cancelled.
+type JobEvent struct {
+	Seq    int64   `json:"seq"`
+	At     string  `json:"at"`
+	From   *string `json:"from"`
+	To     string  `json:"to"`
+	Reason string  `json:"reason,omitempty"`
+	Worker string  `json:"worker,omitempty"`
+}
+
+// JobEvents is job id's history, oldest first; it stays after the job's row is gone.
+func (s *Store) JobEvents(id int64) ([]JobEvent, error) {
+	rows, err := s.db.Query(`SELECT seq, at, from_status, to_status, reason, worker FROM job_events WHERE job_id=? ORDER BY seq`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []JobEvent{}
+	for rows.Next() {
+		var e JobEvent
+		var from sql.NullString
+		if err := rows.Scan(&e.Seq, &e.At, &from, &e.To, &e.Reason, &e.Worker); err != nil {
+			return nil, err
+		}
+		if from.Valid {
+			e.From = &from.String
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// RevisionAt is the workflow's revision that was published at time at (what a job queued then ran):
+// the newest published at or before it; ok is false if none was.
+func (s *Store) RevisionAt(flowID int64, at string) (Revision, bool, error) {
+	v, err := scanRevision(s.db.QueryRow(`SELECT `+revCols+` FROM workflow_revisions WHERE workflow_id=? AND status='published' AND published<=? ORDER BY number DESC LIMIT 1`, flowID, at))
+	if !errors.Is(err, sql.ErrNoRows) {
+		return v, err == nil, err
+	}
+	// none yet then: a flow made after the store opened gets revision 1 when first read, after its first
+	// jobs; that first revision is what they ran (the template hasn't changed, or it would have a newer one)
+	if _, err := s.EnsureRevision(flowID); err != nil {
+		return v, false, err
+	}
+	v, err = scanRevision(s.db.QueryRow(`SELECT `+revCols+` FROM workflow_revisions WHERE workflow_id=? AND status='published' ORDER BY number LIMIT 1`, flowID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return v, false, nil
+	}
+	return v, err == nil, err
+}
