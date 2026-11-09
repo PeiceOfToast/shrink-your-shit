@@ -19,7 +19,7 @@ import (
 // v2Workflows are V1's /api/v2 routes (UI-API-CONTRACT-v2.md): the node registry, templates, and
 // workflows with their drafts, validation, publishing and history. A published workflow runs through
 // the engine as its flow always has: publishing writes the template the engine reads.
-func v2Workflows(api *http.ServeMux, store *jobs.Store) {
+func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 	api.HandleFunc("GET /api/v2/step-definitions", func(w http.ResponseWriter, r *http.Request) {
 		defs := workflow.Definitions()
 		if ft := r.URL.Query().Get("fileType"); ft != "" {
@@ -49,6 +49,8 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store) {
 			writeErrorWith(w, http.StatusConflict, "in_use",
 				"Libraries use this workflow ("+strings.Join(inUse.UsedBy, ", ")+"), so it can't be deleted. Nothing was changed.",
 				map[string]any{"usedBy": inUse.UsedBy})
+		case errors.Is(err, jobs.ErrNotPublished): // review acace8e: never a library on a placeholder
+			apiError(w, http.StatusConflict, "workflow_not_published", "This workflow hasn't been published yet, so nothing can use it. Publish it first. Nothing was changed.")
 		case errors.Is(err, jobs.ErrNotFound):
 			apiError(w, http.StatusNotFound, "not_found", "There is no such workflow.")
 		case errors.Is(err, jobs.ErrNameTaken):
@@ -307,6 +309,9 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store) {
 		if err != nil {
 			storeErr(w, err)
 			return
+		}
+		if eng.ScanNow != nil {
+			eng.ScanNow() // its libraries' files are looked at again, as after the old Save (review acace8e)
 		}
 		writeJSON(w, revisionView(v))
 	})

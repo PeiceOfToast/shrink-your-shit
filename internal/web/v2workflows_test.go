@@ -210,3 +210,66 @@ func TestV2NeedsSignIn(t *testing.T) {
 		t.Errorf("signed out: %d", code)
 	}
 }
+
+// Review acace8e: a never-published workflow has only a placeholder to run, so no library may use it
+// and it can't be copied; publishing looks at the libraries' files again; an oversized body says so.
+func TestV2ReviewFixes(t *testing.T) {
+	srv, st, _, fe := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), false)
+	draft, err := st.AddWorkflow("Unpublished", workflow.Preset())
+	if err != nil {
+		t.Fatal(err)
+	}
+	did := strconv.FormatInt(draft.ID, 10)
+	for name, c := range map[string]call{
+		"library's flow (v1)": {method: "PUT", path: "/api/libraries/" + strconv.FormatInt(lib.ID, 10) + "/flow", body: `{"flowId":"` + did + `"}`},
+		"new library (v1)":    {method: "POST", path: "/api/libraries", body: `{"name":"Shows","path":` + strconv.Quote(t.TempDir()) + `,"flowId":"` + did + `"}`},
+		"duplicate (v1)":      {method: "POST", path: "/api/flows/" + did + "/duplicate", body: `{}`},
+		"duplicate (v2)":      {method: "POST", path: "/api/v2/workflows/" + did + "/duplicate", body: `{}`},
+	} {
+		c.ctype = "application/json"
+		if code, body, _ := do(t, nil, srv, c); code != http.StatusConflict || errCode(body) != "workflow_not_published" {
+			t.Errorf("%s: %d %s", name, code, body)
+		}
+	}
+	if l, _ := st.GetLibrary(lib.ID); l.FlowID != lib.FlowID {
+		t.Errorf("the library moved to the placeholder: %d", l.FlowID)
+	}
+	// publish looks at the files again, as the old Save does
+	flow := strconv.FormatInt(lib.FlowID, 10)
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/workflows/" + flow + "/draft"})
+	d := decode[v2Rev](t, body)
+	d.Workflow.Nodes[2].Config["quality"] = 4
+	put, _ := json.Marshal(map[string]any{"workflow": d.Workflow, "layout": d.Layout})
+	req, _ := http.NewRequest("PUT", srv.URL+"/api/v2/workflows/"+flow+"/draft", strings.NewReader(string(put)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("If-Match", d.Etag)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := decode[v2Rev](t, readAll(t, res))
+	before := fe.scans
+	if code, body, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/workflows/" + flow + "/publish", ctype: "application/json", body: `{"etag":"` + saved.Etag + `"}`}); code != 200 || fe.scans != before+1 {
+		t.Errorf("publish: %d scans %d→%d %s", code, before, fe.scans, body)
+	}
+	// a body over 64 KiB
+	big := `{"name":"` + strings.Repeat("x", 70<<10) + `"}`
+	if code, body, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/workflows", ctype: "application/json", body: big}); code != http.StatusRequestEntityTooLarge || errCode(body) != "too_large" {
+		t.Errorf("too large: %d %s", code, body)
+	}
+}
+
+func readAll(t *testing.T, res *http.Response) string {
+	t.Helper()
+	defer res.Body.Close()
+	var b strings.Builder
+	buf := make([]byte, 4096)
+	for {
+		n, err := res.Body.Read(buf)
+		b.Write(buf[:n])
+		if err != nil {
+			return b.String()
+		}
+	}
+}

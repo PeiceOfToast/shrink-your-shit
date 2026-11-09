@@ -218,6 +218,9 @@ func (s *Store) AddLibrary(name, path string, t rules.Template, started bool) (L
 
 // AddLibraryOnFlow adds a library that uses the existing flow flowID (ErrNotFound if there is none).
 func (s *Store) AddLibraryOnFlow(name, path string, flowID int64, started bool) (Library, error) {
+	if err := s.published(s.db, flowID); err != nil {
+		return Library{}, err
+	}
 	if _, err := s.GetFlow(flowID); err != nil {
 		return Library{}, err
 	}
@@ -671,6 +674,9 @@ func (s *Store) DuplicateFlow(id int64) (Flow, error) {
 	if err != nil {
 		return Flow{}, err
 	}
+	if err := s.published(s.db, id); err != nil {
+		return Flow{}, err
+	}
 	name, err := uniqueFlowName(s.db, f.Name+" (copy)")
 	if err != nil {
 		return Flow{}, err
@@ -721,6 +727,9 @@ func (s *Store) SetLibraryFlow(libraryID, flowID int64) (Library, error) {
 	}
 	if c == 0 {
 		return Library{}, ErrNotFound
+	}
+	if err := s.published(tx, flowID); err != nil { // in the same transaction: never a library on a placeholder
+		return Library{}, err
 	}
 	l, err := scanLibrary(tx.QueryRow(`SELECT `+libCols+` FROM libraries WHERE id=?`, libraryID))
 	if err != nil {

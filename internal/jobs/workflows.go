@@ -40,6 +40,25 @@ type WorkflowMeta struct {
 	Tags        []string `json:"tags"`
 }
 
+// ErrNotPublished: the workflow was never published, so it has nothing to run (its flow's template is
+// a placeholder): no library may use it, and it can't be copied as a flow (review acace8e).
+var ErrNotPublished = errors.New("workflow not published")
+
+// published is nil when flow id has been published (or is a flow from before workflows).
+func (s *Store) published(q interface {
+	QueryRow(string, ...any) *sql.Row
+}, id int64) error {
+	var status string
+	err := q.QueryRow(`SELECT status FROM flows WHERE id=?`, id).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err == nil && status == "draft" {
+		return ErrNotPublished
+	}
+	return err
+}
+
 // ErrStaleDraft: the draft changed since the etag the caller had.
 var ErrStaleDraft = errors.New("stale draft")
 
@@ -237,6 +256,14 @@ func (s *Store) Publish(flowID int64, etag string, t rules.Template) (Revision, 
 		return Revision{}, err
 	}
 	defer tx.Rollback()
+	// the etag again inside the transaction (review acace8e): a save between the read above and here
+	// is never published under the old etag
+	if d, err = scanRevision(tx.QueryRow(`SELECT `+revCols+` FROM workflow_revisions WHERE workflow_id=? AND status='draft' AND etag=?`, flowID, etag)); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Revision{}, ErrStaleDraft
+		}
+		return Revision{}, err
+	}
 	if _, err := s.insertPublished(tx, flowID, d.Doc, d.Layout, templateHash(t)); err != nil {
 		return Revision{}, err
 	}
