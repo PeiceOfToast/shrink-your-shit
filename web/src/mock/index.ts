@@ -86,8 +86,10 @@ function fresh(): State {
 
 let state: State = new URLSearchParams(location.search).get("mock") === "fresh" ? fresh() : running();
 let version = 0;
+// When the data last changed (the real app: when the summary or a live event last arrived). The Dashboard's "Updated".
+export let updatedAt = new Date();
 const listeners = new Set<() => void>();
-const change = (f: (s: State) => void) => { f(state); state = { ...state }; version++; listeners.forEach((l) => l()); };
+const change = (f: (s: State) => void) => { f(state); state = { ...state }; version++; updatedAt = new Date(); listeners.forEach((l) => l()); };
 const log = (type: ActivityEvent["type"], text: string, refs: ActivityEvent["refs"] = {}) =>
   state.activity.unshift({ id: "a" + Date.now() + Math.random(), at: new Date().toISOString(), type, text, refs });
 
@@ -108,7 +110,8 @@ export function summary(s: State): Summary {
     badges: { failed24h: s.last24h.failed, workersOffline: s.workers.filter((w) => w.status === "offline" || w.status === "stalled").length, pluginUpdates: 0 },
     activity: { converting: active.length, waiting: counts.queued + counts.retry_wait, workersRunning },
     jobCounts: counts,
-    last24h: s.last24h,
+    // The rate follows the 24 h counts, so a retried failure changes it (completed of completed + failed; skips aren't failures).
+    last24h: { ...s.last24h, successRate: s.last24h.completed + s.last24h.failed ? s.last24h.completed / (s.last24h.completed + s.last24h.failed) : null },
     bytes: {
       freed: s.libraries.reduce((a, l) => a + l.bytes.freed, 0), waitingToFree: s.libraries.reduce((a, l) => a + l.bytes.waitingToFree, 0), freedLast7d: 0,
       perLibrary: s.libraries.map((l) => ({ libraryId: l.id, freed: l.bytes.freed, waitingToFree: l.bytes.waitingToFree })),
