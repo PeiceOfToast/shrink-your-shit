@@ -59,6 +59,11 @@ jobs:
         env:
           VER: ${{ github.ref_type == 'tag' && github.ref_name || format('0.0.0-dev.{0}', github.run_number) }}
         run: pwsh installer/windows/build.ps1 -Version ($env:VER -replace '^v', '')
+      - name: Check the installer has the new UI, not the placeholder
+        # after the build: build.ps1 builds web\ into internal\web\next\dist, which the test embeds
+        env:
+          SYP_REQUIRE_WEBUI: "1"
+        run: go test -count=1 -run TestReleaseHasTheApp ./internal/web/next
       - name: Silent install, real conversion, upgrade, uninstall
         run: pwsh installer/windows/smoke-test.ps1 -Setup dist/shrink-your-shit-setup.exe
       - name: Keep the installer's logs when something went wrong
