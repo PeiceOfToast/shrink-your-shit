@@ -1,14 +1,15 @@
 // V3b Stack view (spec 5.7; DESIGN/v2 SCREENS V3, mockups/workflow-stack.html and -readonly.html), on the typed mock
 // of V1 (mock/steps.ts mirrors V1's registry, summaries and validation). Not here: drag to reorder and "+ Add step"
 // (V1 runs the preset's chain in its order), Test run (V5), History, Export, Open graph (V4).
-import { useEffect, useRef, useState } from "react";
+import { Component, useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { getDraft, publish, publishPreview, saveDraft, setWorkflow, useMock } from "../mock";
 import { order, stackable, stepDef, summary, validate } from "../mock/steps";
 import { onLeave } from "../router";
 import type { JSONSchema, Node, PublishPreview, ValidationIssue, WorkflowDoc } from "../types/v2";
 
-const ICON: Record<string, string> = { folder: "i-folder", filter: "i-shield", video: "i-video", audio: "i-audio", subtitle: "i-subtitle", file: "i-file", checks: "i-checks", save: "i-save", cond: "i-cond" };
+// The server's icon keys (registry) -> design's sprite.
+const ICON: Record<string, string> = { folder: "i-folder", filter: "i-shield", video: "i-video", audio: "i-audio", subtitles: "i-subtitle", file: "i-file", check: "i-checks", save: "i-save", cond: "i-cond", history: "i-history" };
 // Design's words around the forms (SCREENS V3; the old Basic/Standard editor's lines).
 const PICTURE = ["The smallest files. Fine detail can soften, mostly in dark or busy scenes.", "Small files, with a small loss of fine detail.",
   "Little visible change for most people. A good start.", "Keeps more detail. Files stay larger.", "Hard to tell from the original. Files stay largest."];
@@ -25,7 +26,8 @@ const widget = (s: JSONSchema) => ((s["x-ui"] as { widget?: string } | undefined
 
 // One option from the step's configSchema, as a native labelled control (design review rule 1).
 function Field({ id, name, s, value, set }: { id: string; name: string; s: JSONSchema; value: unknown; set: (v: unknown) => void }) {
-  const title = (s.title as string) ?? name, fid = id + "-" + name;
+  // The schema's title; without one (V1's "ignore" has none), the key in plain form.
+  const title = (s.title as string) ?? name.charAt(0).toUpperCase() + name.slice(1).replace(/([A-Z])/g, " $1").toLowerCase(), fid = id + "-" + name;
   if (widget(s) === "slider") {
     const opts = labels(s), i = Math.max(0, opts.findIndex((o) => o[0] === value));
     return (
@@ -48,14 +50,15 @@ function Field({ id, name, s, value, set }: { id: string; name: string; s: JSONS
   if (s.enum)
     return <div className="field"><label htmlFor={fid}>{title}</label><select id={fid} className="input" value={String(value)} onChange={(e) => set(labels(s).find((o) => String(o[0]) === e.target.value)?.[0])}>
       {labels(s).map(([v, l]) => <option key={String(v)} value={String(v)}>{l}</option>)}</select>{typeof s.description === "string" && <span className="hint">{s.description}</span>}</div>;
+  const hint = typeof s.description === "string" ? <span className="hint" id={fid + "-h"}>{s.description}{s.type === "array" ? " One per line." : ""}</span> : null;
   if (s.type === "array")
-    return <div className="field"><label htmlFor={fid}>Leave out</label><textarea id={fid} className="input" rows={2} value={((value as string[]) ?? []).join("\n")}
-      onChange={(e) => set(e.target.value.split("\n").map((x) => x.trim()).filter(Boolean))} aria-describedby={fid + "-h"} /><span className="hint" id={fid + "-h"}>{String(s.description ?? "")} One per line.</span></div>;
-  return <div className="field"><label htmlFor={fid}>{title}</label><input id={fid} className="input" value={String(value ?? "")} onChange={(e) => set(e.target.value)} placeholder="/media/shrunk" /></div>;
+    return <div className="field"><label htmlFor={fid}>{title}</label><textarea id={fid} className="input" rows={2} value={((value as string[]) ?? []).join("\n")}
+      onChange={(e) => set(e.target.value.split("\n").map((x) => x.trim()).filter(Boolean))} aria-describedby={hint ? fid + "-h" : undefined} />{hint}</div>;
+  return <div className="field"><label htmlFor={fid}>{title}</label><input id={fid} className="input" value={String(value ?? "")} onChange={(e) => set(e.target.value)} aria-describedby={hint ? fid + "-h" : undefined} />{hint}</div>;
 }
 
 function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown) => void; issues: ValidationIssue[] }) {
-  const def = stepDef(n.type)!, props = (def.configSchema.properties ?? {}) as Props, c = n.config;
+  const def = stepDef(n.type)!, props = Object.fromEntries(Object.entries((def.configSchema.properties ?? {}) as Props).filter(([, s]) => !s.readOnly)) as Props, c = n.config;
   const keys = Object.keys(props).filter((k) => !(MORE[n.type] ?? []).includes(k)), more = (MORE[n.type] ?? []).filter((k) => props[k]);
   const field = (k: string) => <Field key={k} id={n.id} name={k} s={props[k]} value={c[k] ?? props[k].default} set={(v) => set(k, v)} />;
   const problem = (path: string) => issues.filter((i) => i.nodeId === n.id && i.configPath === path).map((i) => <span key={i.code} className="hint" style={{ color: "var(--error-text)" }}>{i.message}</span>);
@@ -88,7 +91,17 @@ function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown) => 
 }
 
 function Step({ n, i, open, toggle, update, issues }: { n: Node; i: number; open: boolean; toggle: () => void; update: (n: Node) => void; issues: ValidationIssue[] }) {
-  const def = stepDef(n.type)!, mine = issues.filter((x) => x.nodeId === n.id), hasOptions = Object.keys((def.configSchema.properties ?? {}) as Props).length > 0;
+  const def = stepDef(n.type), mine = issues.filter((x) => x.nodeId === n.id);
+  // A read-only step (an earlier install's settings) or one this page doesn't know (a newer server, a plugin not
+  // installed): shown with its type, its settings kept as they are, never edited (review P2).
+  if (!def || def.readOnly) return (
+    <section className="card step" aria-labelledby={n.id + "-name"}><div className="row nw" style={{ padding: "10px var(--pad)" }}><span className="stepn">{i + 1}</span>
+      <span style={{ color: "var(--accent-text)" }}><Icon id={(def && ICON[def.icon]) || "i-box"} /></span>
+      <div className="sp" style={{ minWidth: 0 }}><strong id={n.id + "-name"}>{n.name ?? def?.name ?? "Unknown step"}</strong>
+        <div className="muted">{(def && summary(n)) || "Type " + n.type}</div>
+        <div className="sm muted">Its settings are kept as they are. {def ? def.description : "This version of the page doesn't know this step, so it only shows it."}</div></div>
+      <span className="muted sm">Read-only</span></div></section>);
+  const hasOptions = Object.values((def.configSchema.properties ?? {}) as Props).some((s) => !s.readOnly);
   return (
     <section className="card step" aria-labelledby={n.id + "-name"}>
       <div className="row nw" style={{ padding: "10px var(--pad)" }}>
@@ -106,7 +119,7 @@ function Step({ n, i, open, toggle, update, issues }: { n: Node; i: number; open
 
 // A workflow with branches: the steps in order with the branches named, nothing editable (spec 5.7; SCREENS V3).
 function ReadOnly({ doc }: { doc: WorkflowDoc }) {
-  const name = (id: string) => { const n = doc.nodes.find((x) => x.id === id)!; return (n.name ?? stepDef(n.type)?.name) + " (" + summary(n) + ")"; };
+  const name = (id: string) => { const n = doc.nodes.find((x) => x.id === id); return n ? (n.name ?? stepDef(n.type)?.name ?? n.type) + " (" + summary(n) + ")" : id; };
   return (
     <div className="stack">
       <div className="note"><Icon id="i-info" /><div>This workflow has conditions that the list can't show. The graph, where you can see and change them, comes in a later step of the new interface.</div></div>
@@ -120,7 +133,20 @@ function ReadOnly({ doc }: { doc: WorkflowDoc }) {
     </div>);
 }
 
+// Anything this page can't draw (an unexpected document) shows a plain message, not a blank page (review P2).
+class Guard extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() {
+    return this.state.failed ? <div className="note bad"><Icon id="i-alert" /><div>This workflow can't be shown here yet. Nothing was changed.</div></div> : this.props.children;
+  }
+}
+
 export function WorkflowStack({ id }: { id: string }) {
+  return <Guard><StackPage id={id} /></Guard>;
+}
+
+function StackPage({ id }: { id: string }) {
   const s = useMock(), w = s.wf.find((x) => x.id === id);
   const first = useRef(getDraft(id));
   const [etag, setEtag] = useState(first.current?.etag ?? "");
@@ -138,6 +164,12 @@ export function WorkflowStack({ id }: { id: string }) {
     });
     return () => onLeave(null);
   }, [id]);
+  useEffect(() => { // closing or reloading the tab with unsaved changes: the browser's own question (review P3)
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
   if (!w || !doc) return <div className="card"><div className="bd">There is no such workflow. It may have been deleted.</div></div>;
   const edit = (d: WorkflowDoc) => (setHist({ docs: [...hist.docs.slice(0, hist.at + 1), d], at: hist.at + 1 }), setChecked(null), setPanel(null), setSaid(""));
   const update = (n: Node) => edit({ ...doc, nodes: doc.nodes.map((x) => (x.id === n.id ? n : x)) });

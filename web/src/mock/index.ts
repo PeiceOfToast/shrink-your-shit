@@ -3,7 +3,7 @@
 // new install (no libraries yet) for review. When a contract endpoint lands, its function here becomes the fetch.
 import { useSyncExternalStore } from "react";
 import type { ActivityEvent, ID, Job, JobState, Library, PublishPreview, Settings, Summary, Template, Trash, Worker, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
-import { branchedDoc, presetDoc, preview, revision, summary as stepSummary } from "./steps";
+import { branchedDoc, legacyDoc, presetDoc, preview, revision, summary as stepSummary } from "./steps";
 
 const now = Date.now(), ago = (min: number) => new Date(now - min * 60e3).toISOString();
 const GB = 1e9;
@@ -93,6 +93,7 @@ function running(): State {
       workflow("w2", "Home videos - my rules", "Replaces originals, keeps all audio, extra checks", { tags: ["home"], version: 2, validation: { errors: 0, warnings: 2 },
         libraries: [{ id: "l3", name: "Home videos" }], changesOriginals: true, summaryTag: "HEVC · Better quality · All audio · MKV · Replaces originals" }),
       workflow("w3", "Audio and subtitles only", "Leaves the picture alone", { status: "disabled", summaryTag: "Audio and subtitles · MKV" }),
+      workflow("w4", "Old settings", "Carried over from an earlier install", { summaryTag: "Settings from an earlier install" }),
     ],
     trash: { bytes: 120 * GB, files: 14, nextDeleteAt: ago(-60 * 24), lastDeleteAt: ago(-60 * 24 * 7) },
   };
@@ -218,7 +219,7 @@ function slot(id: ID) {
   const w = state.wf.find((x) => x.id === id);
   if (!w) return null;
   if (!drafts[id]) {
-    const published = w.version == null ? null : id === "w2" ? branchedDoc() : presetDoc();
+    const published = w.version == null ? null : id === "w2" ? branchedDoc() : id === "w4" ? legacyDoc() : presetDoc();
     drafts[id] = { published, draft: revision(id, structuredClone(published ?? presetDoc()), null) };
   }
   return { w, d: drafts[id] };

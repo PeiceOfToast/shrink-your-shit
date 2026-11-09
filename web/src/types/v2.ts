@@ -246,4 +246,5 @@ export interface StepDefinition {
   sideEffects: "none" | "writes_staging" | "commits";
   source: { kind: "builtin" } | { kind: "plugin"; pluginId: ID; pluginVersion: string };
   deprecated?: boolean;
+  readOnly?: boolean; // migration-only types (video.legacy_settings): kept as they are, never edited (workshop #109)
 }

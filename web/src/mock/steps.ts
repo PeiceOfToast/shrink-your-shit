@@ -42,13 +42,13 @@ export const STEP_DEFS: StepDefinition[] = [
   def({ type: "audio.tracks", category: "audio", name: "Audio", icon: "audio", typeLabel: "Audio", description: "Which sound tracks the new file has.",
     outputs: [success], alwaysOn: false, runsWith: SEGMENT, sideEffects: "none",
     configSchema: obj({ audio: wd(en(AUDIO.map((a) => a[0]), AUDIO.map((a) => a[1])), "stereo_aac", "Audio"), onlyMyLanguages: { type: "boolean", default: true, title: "Only my languages" } }, ["audio", "onlyMyLanguages"]) }),
-  def({ type: "subtitles.tracks", category: "subtitles", name: "Subtitles", icon: "subtitle", typeLabel: "Subtitles", description: "Which subtitles the new file keeps.",
+  def({ type: "subtitles.tracks", category: "subtitles", name: "Subtitles", icon: "subtitles", typeLabel: "Subtitles", description: "Which subtitles the new file keeps.",
     outputs: [success], alwaysOn: false, runsWith: SEGMENT, sideEffects: "none",
     configSchema: obj({ subtitles: wd(en(Object.keys(SUBS), Object.values(SUBS)), "keep_all", "Subtitles") }, ["subtitles"]) }),
   def({ type: "container.output", category: "container", name: "File type", icon: "file", typeLabel: "Container", description: "The new file's type.",
     outputs: [success], alwaysOn: false, runsWith: SEGMENT, sideEffects: "none",
     configSchema: obj({ fileType: wd(en(Object.keys(TYPES), Object.values(TYPES)), "mkv", "File type", "segmented") }, ["fileType"]) }),
-  def({ type: "verify.output", category: "verify", name: "Check the result", icon: "checks", typeLabel: "Check",
+  def({ type: "verify.output", category: "verify", name: "Check the result", icon: "check", typeLabel: "Check",
     description: "The new file must play through, look like the original and hold what you chose. If not, the original stays.", outputs: [success, errPort], alwaysOn: true, sideEffects: "none" }),
   def({ type: "output.commit", category: "output", name: "Save the result", icon: "save", typeLabel: "Output", description: "Where the new file goes, and what happens to the original.",
     outputs: [success, errPort], alwaysOn: true, sideEffects: "commits",
@@ -57,6 +57,10 @@ export const STEP_DEFS: StepDefinition[] = [
       folderMode: wd(en(["next_to_library", "one_folder"], ["Next to each library", "One folder for all"]), "next_to_library", "Where"),
       folder: { type: "string", title: "Folder", "x-ui": { widget: "folder" } },
     }, ["policy"]) }),
+  // An earlier install's flow, migrated as one read-only step (V1: video.legacy_settings, deprecated).
+  def({ type: "video.legacy_settings", category: "video", name: "Earlier install's settings", icon: "history", typeLabel: "Video",
+    description: "The settings this workflow had before workflows existed. They run exactly as before; to change them, start from the Shrink videos steps.",
+    outputs: [success, skipped, errPort], alwaysOn: true, sideEffects: "commits", deprecated: true, readOnly: true }), // empty configSchema, as #109 lists it
   def({ type: "filter.video", category: "filter", name: "Only some videos", icon: "cond", typeLabel: "Condition", description: "Sends matching videos one way and the rest another.",
     outputs: [{ name: "match", label: "Matches", kind: "file", outcome: "branch" }, { name: "else", label: "Doesn't match", kind: "file", outcome: "branch" }], alwaysOn: false, sideEffects: "none" }),
 ];
@@ -86,6 +90,7 @@ export function summary(n: Node): string {
       return str(c, "folderMode", "next_to_library") === "one_folder" ? "Save to " + str(c, "folder", "a folder") + " · originals untouched" : "Save next to each library · originals untouched";
     }
     case "filter.video": return "Videos over 10 Mbps go one way, the rest another";
+    case "video.legacy_settings": return "Settings from an earlier install, run exactly as before";
   }
   return "";
 }
@@ -109,6 +114,11 @@ export function branchedDoc(): WorkflowDoc {
   d.nodes.push({ id: "n6", type: "output.commit", typeVersion: 1, enabled: true, name: "Keep as it is", config: { policy: "beside" } });
   d.edges.push({ id: "e10", from: "n2", fromPort: "match", to: "n3", toPort: "in", label: "Over 10 Mbps" }, { id: "e11", from: "n2", fromPort: "else", to: "n6", toPort: "in", label: "The rest" });
   return d;
+}
+
+// An earlier install's flow after the upgrade: input.library > video.legacy_settings (V1, Built in V1).
+export function legacyDoc(): WorkflowDoc {
+  return chain(["input.library", "video.legacy_settings"], { "video.legacy_settings": { template: { quality: 2, audio: "keep_all" } } });
 }
 
 // The order the stack shows: the chain of success edges from the input (contract "Stack ⇄ graph").
