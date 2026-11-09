@@ -41,9 +41,8 @@ function Choice<T extends string | number>({ legend, name, value, options, onPic
       <legend className="lab">{legend}</legend>
       <div className="row">
         {options.map(([v, label, swatch]) => (
-          <label key={String(v)} className={"radio" + (v === value ? " sel" : "")}>
-            <input className="sr" type="radio" name={name} checked={v === value} onChange={() => onPick(v)} />
-            <i aria-hidden="true" />
+          <label key={String(v)} className="radio">
+            <input type="radio" name={name} checked={v === value} onChange={() => onPick(v)} />
             {swatch && <span className="swatch" style={{ background: swatch }} aria-hidden="true" />}
             <span>{label}</span>
           </label>

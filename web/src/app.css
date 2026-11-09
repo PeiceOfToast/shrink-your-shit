@@ -1,4 +1,3 @@
 /* What shell.css (design's mockup CSS) doesn't cover in the app. Colours only from tokens.css. */
 fieldset.choice { border: 0; margin: 0; padding: 0; min-width: 0; }
 .radio { cursor: pointer; }
-.radio:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
