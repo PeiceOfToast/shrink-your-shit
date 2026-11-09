@@ -50,6 +50,7 @@ func files() []media.Info {
 func TestMigrationKeepsBehaviour(t *testing.T) {
 	rules.SetAvailableFormats(map[string]bool{"libx265": true, "libx264": true, "libsvtav1": true, "libvpx-vp9": true})
 	defer rules.SetAvailableFormats(nil)
+	out := t.TempDir() // a full path on every OS (/out is not one on Windows)
 	var templates []rules.Template
 	for q := 1; q <= 5; q++ {
 		templates = append(templates, rules.SliderTemplate(q))
@@ -63,7 +64,7 @@ func TestMigrationKeepsBehaviour(t *testing.T) {
 		func(s *rules.Selectors) { s.Audio, s.OnlyMyLanguages, s.FileType = "eac3_surround", false, "mp4" },
 		func(s *rules.Selectors) { s.Format, s.Audio, s.FileType = "vp9", "stereo_opus", "webm" },
 		func(s *rules.Selectors) {
-			s.AfterConverting, s.OutputDir, s.IncludeDolbyVision = "folder", "/out", true
+			s.AfterConverting, s.OutputDir, s.IncludeDolbyVision = "folder", out, true
 		},
 		func(s *rules.Selectors) {
 			s.AfterConverting, s.Ignore, s.Subtitles = "beside", []string{"Extras"}, "keep_all"
@@ -132,11 +133,12 @@ func TestPresetDefaults(t *testing.T) {
 	if r.StepSummaries[d.Nodes[2].ID] != "HEVC · Balanced quality · same resolution" || !strings.Contains(r.StepSummaries[d.Nodes[3].ID], "in your languages") {
 		t.Errorf("summaries %v", r.StepSummaries)
 	}
-	d.Nodes[7].Config = map[string]any{"policy": "separate_folder", "folderMode": "one_folder", "folder": "/media/shrunk"}
+	shrunk := t.TempDir() // a full path on every OS
+	d.Nodes[7].Config = map[string]any{"policy": "separate_folder", "folderMode": "one_folder", "folder": shrunk}
 	if r := Validate(d); r.Errors() {
 		t.Errorf("one folder: %+v", r.Issues)
 	}
-	if tm, _ := ToTemplate(d, rules.Template{}); tm.Selectors == nil || tm.Selectors.AfterConverting != "folder" || tm.Selectors.OutputDir != "/media/shrunk" {
+	if tm, _ := ToTemplate(d, rules.Template{}); tm.Selectors == nil || tm.Selectors.AfterConverting != "folder" || tm.Selectors.OutputDir != shrunk {
 		t.Errorf("template %+v", tm.Selectors)
 	}
 }
