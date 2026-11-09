@@ -3,6 +3,7 @@ import sprite from "./icons.svg?raw";
 import { itemFor } from "./nav";
 import { AppearanceSettings, Coming, NotFound } from "./pages";
 import { Dashboard } from "./screens/Dashboard";
+import { Libraries, LibraryPage } from "./screens/Libraries";
 import { Workflows } from "./screens/Workflows";
 import { WorkflowStack } from "./screens/WorkflowStack";
 import { usePath } from "./router";
@@ -21,7 +22,7 @@ export function App() {
     <>
       <div dangerouslySetInnerHTML={{ __html: sprite }} />
       <Shell title={title} proto={!settings && !!item}>
-        {settings ? <AppearanceSettings /> : path === "/" ? <Dashboard /> : path === "/workflows" ? <Workflows /> : /^\/workflows\/[^/]+$/.test(path) ? <WorkflowStack key={path} id={path.split("/")[2]} /> : item ? <Coming item={item} /> : <NotFound />}
+        {settings ? <AppearanceSettings /> : path === "/" ? <Dashboard /> : path === "/libraries" ? <Libraries /> : /^\/libraries\/[^/]+$/.test(path) ? <LibraryPage key={path} id={path.split("/")[2]} />: path === "/workflows" ? <Workflows /> : /^\/workflows\/[^/]+$/.test(path) ? <WorkflowStack key={path} id={path.split("/")[2]} /> : item ? <Coming item={item} /> : <NotFound />}
       </Shell>
     </>
   );

@@ -69,7 +69,7 @@ function running(): State {
   const step = (index: number, name: string) => ({ nodeId: "n" + index, name, index, count: 5 });
   return {
     settings: { firstRunDone: true, firstRunStep: 4, intakePaused: false, catalogueEnabled: false },
-    libraries: [library("l1", "Movies", "/media/movies", 8.1 * GB, 780 * GB, 1600), library("l2", "TV Shows", "/media/tv", 0, 410 * GB, 900), library("l3", "Home videos", "/media/home", 28.3 * GB, 10 * GB, 300)],
+    libraries: [library("l1", "Movies", "/media/movies", 8.1 * GB, 780 * GB, 1600), library("l2", "TV Shows", "/media/tv", 0, 410 * GB, 900), { ...library("l3", "Home videos", "/media/home", 28.3 * GB, 10 * GB, 300), workflowId: "w2", workflowName: "Home videos - my rules" }],
     workers: [worker("this", "This computer", "busy", [1, 2], [0, 1], 120, ["j-48213"]), worker("nas", "NAS box", "busy", [1, 1], [0, 0], 300, ["j-48214"]), worker("laptop", "Laptop", "offline", [0, 1], [0, 0], 22, [])],
     jobs: [
       job("j-48213", "Dune.Part.Two.2024.2160p.REMUX.mkv", MOVIES, "running", { subState: "converting", worker: { id: "this", name: "This computer" }, currentStep: step(3, "Convert video"), startedAt: ago(12),
@@ -261,4 +261,75 @@ export function publish(id: ID, etag: string): { version?: number; error?: strin
     log("workflow.published", x.w.name + " v" + version + " published", { workflowId: id });
   });
   return { version };
+}
+
+// Libraries (V5). POST /libraries/check {path} -> {blockers, notes} with v1's codes. The first 5 files of a folder that
+// isn't a library yet: contract v2 has only GET /libraries/{id}/first-files (v1 had POST /api/libraries/first-files
+// {path}); asked of workshop. Free space isn't in the check's answer, so it isn't shown.
+export interface FolderCheck { blockers: { code: string; message: string }[]; notes: string[] }
+const trim = (p: string) => p.trim().replace(/(.)\/+$/, "$1");
+export function checkFolder(path: string, exceptId?: ID): FolderCheck {
+  const p = trim(path), no = (code: string, message: string) => ({ blockers: [{ code, message }], notes: [] });
+  if (!p.startsWith("/")) return no("invalid", "Give the folder's full path, starting with /.");
+  if (p === "/" || /^\/(etc|usr|bin|boot|dev|proc|sys|var)(\/|$)/.test(p)) return no("system_folder", "That's a system folder. Choose the folder that holds your videos.");
+  if (/missing|nope/.test(p)) return no("not_found", "This folder doesn't exist, or the worker can't see it.");
+  if (/locked/.test(p)) return no("not_readable", "Can't read " + p + " as the worker 'This computer' (user syp). Check the folder's permissions.");
+  const other = state.libraries.find((l) => l.id !== exceptId && l.paths.some((x) => p === x || p.startsWith(x + "/") || x.startsWith(p + "/")));
+  if (other) return no("inside_library", "This folder overlaps the library " + other.name + ". A folder can be in one library only.");
+  return { blockers: [], notes: /readonly/.test(p) ? ["The folder can be read but not written, so the result can't be saved next to the originals."] : [] };
+}
+export interface FirstFile { path: string; bytes: number; codec: string; resolution: string; dolbyVision: boolean }
+const SAMPLE: [string, number, string, string, boolean][] = [
+  ["Dune Part Two (2024)/Dune.Part.Two.2024.2160p.REMUX.mkv", 58.2, "H.264", "2160p", false], ["Arrival (2016)/Arrival.2016.1080p.BluRay.mkv", 11.4, "H.264", "1080p", false],
+  ["Oppenheimer (2023)/Oppenheimer.2023.1080p.BluRay.mkv", 14.9, "H.264", "1080p", false], ["Blade Runner 2049 (2017)/Blade.Runner.2049.2017.2160p.DV.mkv", 41, "HEVC", "2160p", true],
+  ["Alien (1979)/Alien.1979.1080p.mkv", 9.8, "H.264", "1080p", false]];
+// The first 5 video files found in a folder; nothing is converted by looking. /empty finds none.
+export function firstFiles(path: string): FirstFile[] {
+  const p = trim(path);
+  return /empty/.test(p) ? [] : SAMPLE.map(([f, gb, codec, resolution, dolbyVision]) => ({ path: p + "/" + f, bytes: gb * GB, codec, resolution, dolbyVision }));
+}
+const notPublished = (id: ID) => { const w = state.wf.find((x) => x.id === id); return !w ? "That workflow no longer exists." : w.publishedRevisionId == null ? "Publish this workflow before a library can use it." : null; };
+const linkWorkflows = (s: State) => { s.wf = s.wf.map((w) => ({ ...w, libraries: s.libraries.filter((l) => l.workflowId === w.id).map((l) => ({ id: l.id, name: l.name })) })); };
+function scanSoon(id: ID, found: number) {
+  setTimeout(() => change((s) => {
+    const l = s.libraries.find((x) => x.id === id);
+    if (!l || l.scan.state !== "scanning") return;
+    l.scan = { ...l.scan, state: "idle", progress: null, lastScanAt: new Date().toISOString() };
+    l.status = l.enabled ? "ok" : "disabled";
+    if (found) l.counts = { ...l.counts, files: l.counts.files + found, waiting: l.counts.waiting + found };
+    log("library.scanned", "Scanned " + l.name + ": " + (found ? found.toLocaleString("en-US") + " new files" : "no new files"), { libraryId: id });
+  }), 1500);
+}
+// POST /libraries {name, paths, workflowId}: 409 workflow_not_published for a never-published workflow (V1 87faa4b).
+export function addLibrary(name: string, path: string, workflowId: ID): { library?: Library; error?: string } {
+  const blocked = checkFolder(path).blockers[0]?.message ?? notPublished(workflowId);
+  if (!name.trim()) return { error: "Give the library a name." };
+  if (blocked) return { error: blocked };
+  const l = library("l" + Date.now().toString(36), name.trim(), trim(path), 0, 0, 0);
+  l.workflowId = workflowId; l.workflowName = state.wf.find((w) => w.id === workflowId)!.name;
+  l.counts = { files: 0, waiting: 0, running: 0, completed: 0, skipped: 0, failed: 0 };
+  l.scan = { ...l.scan, state: "scanning", progress: null, lastScanAt: null }; l.status = "scanning";
+  change((s) => { s.libraries = [...s.libraries, l]; linkWorkflows(s); log("library.scanned", "Added the library " + l.name, { libraryId: l.id }); });
+  scanSoon(l.id, 1284);
+  return { library: l };
+}
+// PATCH /libraries/{id} {name?, enabled?, workflowId?}
+export function setLibrary(id: ID, patch: { name?: string; enabled?: boolean; workflowId?: ID }): string | null {
+  if (patch.name !== undefined && !patch.name.trim()) return "Give the library a name.";
+  const blocked = patch.workflowId !== undefined && patch.workflowId !== state.libraries.find((l) => l.id === id)?.workflowId ? notPublished(patch.workflowId) : null;
+  if (blocked) return blocked;
+  change((s) => {
+    const l = s.libraries.find((x) => x.id === id);
+    if (!l) return;
+    if (patch.name !== undefined) l.name = patch.name.trim();
+    if (patch.workflowId !== undefined) (l.workflowId = patch.workflowId), (l.workflowName = s.wf.find((w) => w.id === patch.workflowId)!.name);
+    if (patch.enabled !== undefined) (l.enabled = patch.enabled), l.scan.state !== "scanning" && (l.status = patch.enabled ? "ok" : "disabled");
+    linkWorkflows(s);
+  });
+  return null;
+}
+// POST /libraries/{id}/scan
+export function scanLibrary(id: ID) {
+  change((s) => { const l = s.libraries.find((x) => x.id === id); if (l) (l.scan = { ...l.scan, state: "scanning" }), (l.status = "scanning"); });
+  scanSoon(id, 0);
 }
