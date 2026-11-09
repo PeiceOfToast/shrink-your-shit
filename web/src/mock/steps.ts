@@ -76,7 +76,7 @@ export function summary(n: Node): string {
     case "filter.video_skips": return c.includeDolbyVision === true ? "Skips files already in this format and AV1 or VP9 videos; Dolby Vision files become HDR10" : "Skips Dolby Vision files, files already in this format, and AV1 or VP9 videos";
     case "video.convert": {
       const r = str(c, "resolution", "keep"), b = str(c, "maxBitrate", "none");
-      return [FORMATS[str(c, "format", "hevc")] ?? "HEVC", QUALITY[(Number(c.quality) || 3) - 1] + " quality", r === "keep" ? "same resolution" : "at most " + r + "p",
+      return [FORMATS[str(c, "format", "hevc")] ?? "HEVC", (Number(c.quality) === 3 ? "Balanced quality" : QUALITY[(Number(c.quality) || 3) - 1]), r === "keep" ? "same resolution" : "at most " + r + "p",
         ...(b !== "none" ? [b[0].toUpperCase() + b.slice(1) + " bitrate limit"] : [])].join(" · ");
     }
     case "audio.tracks": return (AUDIO.find((a) => a[0] === str(c, "audio", "stereo_aac"))?.[1] ?? "") + (c.onlyMyLanguages === false ? "" : ", in your languages");
