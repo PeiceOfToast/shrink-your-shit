@@ -481,3 +481,15 @@ func (s *Store) RevisionAt(flowID int64, at string) (Revision, bool, error) {
 	}
 	return v, err == nil, err
 }
+
+// SetPriority sets a queued job's priority (higher is taken first by Claim).
+func (s *Store) SetPriority(id int64, p int) error {
+	r, err := s.db.Exec(`UPDATE jobs SET priority=? WHERE id=? AND status=?`, p, id, Queued)
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return ErrNotStoppable // not waiting: nothing to reorder
+	}
+	return nil
+}

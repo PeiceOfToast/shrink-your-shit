@@ -1,0 +1,311 @@
+// Copyright (C) shrink-your-shit contributors. Licensed under AGPL-3.0-or-later.
+
+package web
+
+import (
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
+)
+
+// v2Tabs are the Queue page's tabs and the S5 cards they read (one tab at a time).
+var v2Tabs = map[string]string{"waiting": jobs.CardUnprocessed, "running": jobs.CardProcessing, "completed": jobs.CardProcessed,
+	"skipped": jobs.CardSkipped, "failed": jobs.CardFailed}
+
+// v2Jobs are V2's /api/v2 job routes (UI-API-CONTRACT-v2.md, Jobs): the queue by tab with spec 7's
+// states, a job's detail with its steps and history, and bulk actions. They read S5's Files list and
+// the job records; nothing about how jobs run changed.
+func v2Jobs(api *http.ServeMux, store *jobs.Store) {
+	keepDays := func() int {
+		if s, err := LoadSettings(store); err == nil {
+			return s.KeepOriginalsDays
+		}
+		return 7
+	}
+	api.HandleFunc("GET /api/v2/jobs", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		tab := q.Get("tab")
+		if tab == "" {
+			tab = "waiting"
+		}
+		card, ok := v2Tabs[tab]
+		if !ok {
+			apiError(w, http.StatusBadRequest, "invalid", "tab is waiting, running, completed, skipped or failed.")
+			return
+		}
+		limit, offset := pageOf(r)
+		f := jobs.FileFilter{Show: card, Q: q.Get("q"), Limit: limit, Offset: offset}
+		if lib := q.Get("libraryId"); lib != "" {
+			id, err := strconv.ParseInt(lib, 10, 64)
+			if err != nil || id <= 0 {
+				apiError(w, http.StatusBadRequest, "invalid", "libraryId must be a library's id.")
+				return
+			}
+			f.LibraryID = id
+		}
+		rows, total, counts, err := store.FileList(f)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		libs, err := store.Libraries()
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		days := keepDays()
+		items := []map[string]any{}
+		for _, row := range rows {
+			items = append(items, v2JobItem(store, fileItem(store, libs, row, card, days), row, card))
+		}
+		tabCounts := map[string]int{}
+		for t, c := range v2Tabs {
+			tabCounts[t] = counts[c]
+		}
+		writeJSON(w, map[string]any{"items": items, "total": total, "counts": tabCounts})
+	})
+
+	api.HandleFunc("GET /api/v2/jobs/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil || id <= 0 {
+			apiError(w, http.StatusNotFound, "not_found", "There is no such job.")
+			return
+		}
+		events, err := store.JobEvents(id)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		j, err := store.Get(id)
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, jobs.ErrNotFound) {
+			if len(events) == 0 {
+				apiError(w, http.StatusNotFound, "not_found", "There is no such job.")
+				return
+			}
+			// its row went when it was skipped or stopped (as before V2); its history stays
+			last := events[len(events)-1]
+			writeJSON(w, map[string]any{"id": strconv.FormatInt(id, 10), "state": v2State(last.To, nil, nil), "reason": reasonOf(last),
+				"events": v2Events(events), "steps": []any{}, "removed": true})
+			return
+		}
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		steps, err := store.Steps(id)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		d := map[string]any{"id": strconv.FormatInt(id, 10), "state": v2State(string(j.Status), steps, livePercent(id)),
+			"file": map[string]any{"path": j.Path, "bytes": j.SizeBefore}, "attempts": j.Attempts,
+			"retryAt": nilIfEmpty(j.RetryAt), "error": nilIfEmpty(j.Error), "worker": nilIfEmpty(j.Worker),
+			"createdAt": j.Created, "updatedAt": j.Updated, "steps": steps, "events": v2Events(events), "removed": false}
+		if j.Status == jobs.Queued && j.RetryAt != "" {
+			d["state"] = "retry_wait"
+		}
+		meta := map[string]any{"before": nil, "after": nil}
+		if raw, ok := store.LatestProbe(j.Path); ok {
+			meta["before"] = json.RawMessage(raw)
+		}
+		if j.OutputPath != "" {
+			if raw, ok := store.LatestProbe(j.OutputPath); ok {
+				meta["after"] = json.RawMessage(raw)
+			}
+		}
+		d["metadata"] = meta
+		if lib, err := store.GetLibrary(j.LibraryID); err == nil {
+			d["library"] = map[string]any{"id": strconv.FormatInt(lib.ID, 10), "name": lib.Name}
+			if rev, ok, err := store.RevisionAt(lib.FlowID, j.Created); err == nil && ok {
+				d["workflow"] = map[string]any{"id": strconv.FormatInt(lib.FlowID, 10), "revisionId": strconv.FormatInt(rev.ID, 10), "version": rev.Number}
+			}
+		}
+		writeJSON(w, d)
+	})
+
+	api.HandleFunc("POST /api/v2/jobs/actions", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Action   string
+			IDs      []string
+			Priority *int
+		}
+		if !readJSON(w, r, &in) {
+			return
+		}
+		v1 := map[string]string{"retry": "retry", "requeue": "retry", "cancel": "stop"}[in.Action]
+		if v1 == "" && in.Action != "reprioritize" || in.Action == "reprioritize" && in.Priority == nil || len(in.IDs) == 0 || len(in.IDs) > 500 {
+			apiError(w, http.StatusBadRequest, "invalid", "action is retry, requeue, cancel or reprioritize (with priority), for 1 to 500 ids. Nothing was changed.")
+			return
+		}
+		results := []map[string]any{}
+		for _, sid := range in.IDs {
+			res := map[string]any{"id": sid, "ok": true}
+			id, err := strconv.ParseInt(sid, 10, 64)
+			switch {
+			case err != nil || id <= 0:
+				res["ok"], res["code"], res["message"] = false, "not_found", "There is no such job."
+			case in.Action == "reprioritize":
+				if err := store.SetPriority(id, *in.Priority); err != nil {
+					res["ok"], res["code"], res["message"] = false, "not_waiting", "Only a waiting job can be moved in the queue."
+				}
+			default: // v1's own handler, with all its checks: cancel never deletes anything
+				rec := httptest.NewRecorder()
+				req := httptest.NewRequest("POST", "/api/jobs/"+sid+"/"+v1, strings.NewReader("{}")).WithContext(r.Context())
+				req.Header.Set("Content-Type", "application/json")
+				for _, c := range r.Cookies() {
+					req.AddCookie(c)
+				}
+				api.ServeHTTP(rec, req)
+				if rec.Code >= 300 {
+					var e struct {
+						Error struct{ Code, Message string }
+					}
+					json.Unmarshal(rec.Body.Bytes(), &e)
+					res["ok"], res["code"], res["message"] = false, e.Error.Code, e.Error.Message
+				}
+			}
+			results = append(results, res)
+		}
+		writeJSON(w, map[string]any{"results": results})
+	})
+}
+
+// v2JobItem is a Files item in the contract's Job terms: its state (spec 7), sub-state and progress.
+func v2JobItem(store *jobs.Store, it map[string]any, row jobs.FileRow, card string) map[string]any {
+	it["origin"] = "job"
+	switch card {
+	case jobs.CardUnprocessed:
+		it["state"], it["subState"] = "queued", "waiting"
+		if row.RetryAt != "" {
+			it["state"], it["subState"] = "retry_wait", "retrying"
+		} else if store.Paused() {
+			it["subState"] = "processing_paused"
+		}
+	case jobs.CardProcessing:
+		steps, _ := store.Steps(row.JobID)
+		pct := livePercent(row.JobID)
+		it["state"] = v2State(string(jobs.Running), steps, pct)
+		it["subState"] = map[string]string{"preparing": "probing", "running": "converting", "validating": "checking", "committing": "saving"}[it["state"].(string)]
+		it["progress"] = v2Progress(it["state"].(string), row.JobID, pct)
+	case jobs.CardProcessed:
+		it["state"], it["subState"] = "completed", nil
+	case jobs.CardFailed:
+		it["state"], it["subState"] = "failed", nil
+	case jobs.CardSkipped:
+		it["origin"], it["state"], it["subState"] = "scan", "skipped", nil
+		if it["reason"] == "user_stopped" {
+			it["state"] = "cancelled"
+		}
+	}
+	return it
+}
+
+// v2State is spec 7's state for a job's status: a running one by the last step it reached.
+func v2State(status string, steps []jobs.Step, percent *float64) string {
+	switch status {
+	case string(jobs.Queued):
+		return "queued"
+	case string(jobs.Done):
+		return "completed"
+	case string(jobs.Failed), string(jobs.Kept):
+		return "failed"
+	case "skipped", "cancelled":
+		return status
+	case string(jobs.Running):
+		last := ""
+		for _, s := range steps {
+			last = s.Step
+		}
+		switch {
+		case last == "verified":
+			return "committing"
+		case last == "converted":
+			return "validating"
+		case percent != nil:
+			return "running"
+		}
+		return "preparing"
+	}
+	return status
+}
+
+func livePercent(id int64) *float64 {
+	if l, ok := worker.Live(id); ok {
+		p := l.Progress.Percent
+		return &p
+	}
+	return nil
+}
+
+// v2Progress is truthful progress (spec 7): the step's own percent, and the whole job's from the
+// steps done (probing 0-5, converting 5-85, checking 90, saving 97), never ffmpeg's as the job's.
+func v2Progress(state string, id int64, pct *float64) map[string]any {
+	p := map[string]any{"stage": map[string]string{"preparing": "Looking at the file", "running": "Converting video",
+		"validating": "Checking the result", "committing": "Saving the result"}[state], "percent": nil, "workflowPercent": 0,
+		"elapsedS": nil, "speed": nil, "etaS": nil, "fps": nil, "bitrateKbps": nil}
+	switch state {
+	case "preparing":
+		p["workflowPercent"] = 2
+	case "validating":
+		p["workflowPercent"] = 90
+	case "committing":
+		p["workflowPercent"] = 97
+	}
+	if l, ok := worker.Live(id); ok {
+		pr := l.Progress
+		p["elapsedS"] = int(time.Since(l.Started).Seconds())
+		if state == "running" && pct != nil {
+			p["percent"], p["workflowPercent"] = *pct, 5+int(*pct*0.8)
+		}
+		if pr.Speed > 0 {
+			p["speed"] = pr.Speed
+		}
+		if pr.ETASeconds >= 0 {
+			p["etaS"] = int(pr.ETASeconds + 0.5)
+		}
+		if pr.FPS > 0 {
+			p["fps"] = pr.FPS
+		}
+		if pr.BitrateKbps > 0 {
+			p["bitrateKbps"] = int(pr.BitrateKbps + 0.5)
+		}
+	}
+	return p
+}
+
+func v2Events(evs []jobs.JobEvent) []map[string]any {
+	out := []map[string]any{}
+	for _, e := range evs {
+		var from any
+		if e.From != nil {
+			from = eventState(*e.From)
+		}
+		out = append(out, map[string]any{"seq": e.Seq, "at": e.At, "from": from, "to": eventState(e.To),
+			"reason": nilIfEmpty(e.Reason), "workerId": nilIfEmpty(e.Worker)})
+	}
+	return out
+}
+
+// eventState is a history entry's state: a status change records "running" as such (the finer running
+// states come from the steps, which the history doesn't hold).
+func eventState(status string) string {
+	if status == string(jobs.Running) {
+		return "running"
+	}
+	return v2State(status, nil, nil)
+}
+
+func reasonOf(e jobs.JobEvent) any {
+	if e.Reason == "" {
+		return nil
+	}
+	return map[string]string{"code": e.Reason}
+}
