@@ -1,6 +1,6 @@
 // V2 Dashboard (spec 4; DESIGN/v2 SCREENS V2, mockups/dashboard.html and dashboard-empty.html), on the typed mock.
-// Hidden until the contract has their data: Throughput (job_events), "Will be freed ... by <date>" (trash bytes and
-// dates), the GPU count on the Workers card, per-worker encoders. Not here yet: Edit dashboard, View (the job drawer, V6).
+// "Will be freed" comes from Trash (GET /api/v2/trash, mocked until it is on dev). Hidden until the contract has their
+// data: Throughput (job_events), the GPU count on the Workers card, per-worker encoders. Not here yet: Edit dashboard, View (the job drawer, V6).
 import { Icon } from "../Icon";
 import { bytes, clock, clockS, count, elapsed, plural } from "../format";
 import { retry, scanAll, startAll, stopAll, summary, updatedAt, useMock } from "../mock";
@@ -8,6 +8,9 @@ import { Link } from "../router";
 import type { ActivityEvent, Summary } from "../types/v2";
 
 type W = Summary["workers"][number];
+// The short step label (design + review 02:18Z): "Converting · step 3 of 5".
+const STEP_WORD: Record<string, string> = { probing: "Reading the file", converting: "Converting", checking: "Checking", saving: "Saving" };
+const day = (t: string) => new Date(t).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 const STATUS: Record<W["status"], [string, string, string]> = { // words, .st class, icon
   busy: ["Running", "run", "i-play"], online: ["Ready", "ok", "i-check-c"], draining: ["Stopping", "warn", "i-pause"],
   paused: ["Stopped", "wait", "i-stop"], offline: ["Offline", "bad", "i-wifi-off"], stalled: ["Not responding", "bad", "i-alert"],
@@ -83,7 +86,8 @@ export function Dashboard() {
           </Link>
           <div className="card kpi">
             <span className="l">Space saved</span><span className="v">{bytes(sum.bytes.freed)}</span>
-            {sum.bytes.waitingToFree > 0 && <span className="sub">Could free: {bytes(sum.bytes.waitingToFree)} if you remove the originals</span>}
+            {s.trash.bytes > 0 && <span className="sub">Will be freed: {bytes(s.trash.bytes)}{s.trash.lastDeleteAt && " by " + day(s.trash.lastDeleteAt)}</span>}
+            {sum.bytes.waitingToFree > 0 && <><span className="sub">Could free: {bytes(sum.bytes.waitingToFree)} if you remove the originals</span><span className="sub">Updated when the library is scanned.</span></>}
           </div>
           <div className="card kpi"><span className="l">Success rate (24 h)</span><span className="v">{sum.last24h.successRate == null ? "-" : (sum.last24h.successRate * 100).toFixed(1) + "%"}</span></div>
           <div className="card kpi"><span className="l">Workers</span><span className="v">{online} of {sum.workers.length}</span><span className="sub">online</span></div>
@@ -98,8 +102,8 @@ export function Dashboard() {
               <thead><tr><th>File</th><th>Current step</th><th>Progress</th><th className="num">Speed</th><th className="num">Elapsed</th></tr></thead>
               <tbody>{sum.activeJobs.map((j) => (
                 <tr key={j.id}>
-                  <td><span className="mono tnc" title={j.file.path}>{j.file.name}</span><span className="sub">{j.library?.name} · {j.worker?.name}</span></td>
-                  <td>{j.progress?.stage}{j.currentStep && " · step " + j.currentStep.index + " of " + j.currentStep.count}</td>
+                  <td><span className="mono tnc" title={j.file.path}>{j.file.name}</span><span className="sub">{[j.library?.name, j.workflow.name, j.worker?.name].filter(Boolean).join(" · ")}</span></td>
+                  <td>{(j.subState && STEP_WORD[j.subState]) || j.progress?.stage}{j.currentStep && " · step " + j.currentStep.index + " of " + j.currentStep.count}</td>
                   <td>{j.progress?.percent != null
                     ? <div className="prog"><div className="bar" role="progressbar" aria-valuenow={j.progress.percent} aria-valuemin={0} aria-valuemax={100} aria-label={"This step " + j.progress.percent + "%"}><i style={{ width: j.progress.percent + "%" }} /></div><span className="sm muted">{j.progress.percent}%</span></div>
                     : <span className="muted sm">-</span>}</td>
@@ -148,7 +152,7 @@ export function Dashboard() {
                 return (
                   <div key={l.libraryId}>
                     <div className="row nw"><strong className="sp">{libName(l.libraryId)}</strong><span className="sm">{l.freed ? bytes(l.freed) + " freed" : "Nothing freed yet"}</span></div>
-                    {l.waitingToFree > 0 && <div className="sm muted">Could free {bytes(l.waitingToFree)} if you remove the originals</div>}
+                    {l.waitingToFree > 0 && <div className="sm muted">Could free {bytes(l.waitingToFree)} if you remove the originals · Updated when the library is scanned.</div>}
                     <div className="bar ok" style={{ marginTop: 4 }} role="img" aria-label={all ? Math.round((100 * l.freed) / all) + "% of what this library could free" : "Nothing to free yet"}><i style={{ width: all ? (100 * l.freed) / all + "%" : "0%" }} /></div>
                   </div>);
               })}

@@ -122,3 +122,7 @@ export interface ActivityEvent { // GET /activity
 
 // v1's settings, re-exposed at /api/v2/settings (contract: Settings). First run's progress is in them.
 export interface Settings { firstRunDone: boolean; firstRunStep: number; intakePaused: boolean; catalogueEnabled: boolean }
+
+// GET /api/v2/trash (contract update 01:33Z; workshop branch v2-trash-settings): originals replaced and kept in the
+// trash until their date. Later embedded as Summary.bytes.trash.
+export interface Trash { bytes: number; files: number; nextDeleteAt: Time | null; lastDeleteAt: Time | null }
