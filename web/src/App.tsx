@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import sprite from "./icons.svg?raw";
 import { itemFor } from "./nav";
 import { AppearanceSettings, Coming, NotFound } from "./pages";
+import { Dashboard } from "./screens/Dashboard";
 import { usePath } from "./router";
 import { Shell } from "./Shell";
 
@@ -18,7 +19,7 @@ export function App() {
     <>
       <div dangerouslySetInnerHTML={{ __html: sprite }} />
       <Shell title={title} proto={!settings && !!item}>
-        {settings ? <AppearanceSettings /> : item ? <Coming item={item} /> : <NotFound />}
+        {settings ? <AppearanceSettings /> : path === "/" ? <Dashboard /> : item ? <Coming item={item} /> : <NotFound />}
       </Shell>
     </>
   );
