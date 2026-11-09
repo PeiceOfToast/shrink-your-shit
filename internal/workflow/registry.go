@@ -81,7 +81,7 @@ func Definitions() []StepDefinition {
 	}
 	quality := hinted(enum(qv, ql), picture)
 	formats := hinted(enum([]any{"hevc", "h264", "av1", "vp9"}, []string{"HEVC (H.265)", "H.264", "AV1", "VP9"}), []string{
-		"Small files that play on most TVs and phones made since 2016.", "Plays on everything, even old devices. Files are about twice the size of HEVC.",
+		"Small files that play on most TVs and phones made since 2016.", "Plays on everything, even old devices. Files are much larger than HEVC.",
 		"The smallest files, but slow to make and only for newer TVs and devices.", "Small files for web browsers and Android. Few TVs play it."})
 	formats["x-available"] = rules.Available() // the encoders this ffmpeg has
 	audioValues := []string{"stereo_aac", "stereo_aac_surround", "eac3_surround", "ac3_surround", "stereo_opus", "as_is"}
@@ -99,7 +99,7 @@ func Definitions() []StepDefinition {
 	audio["x-available"] = audioAvailable
 	subtitles := hinted(enum(anys(rules.AvailableSubtitles), []string{"Keep all", "Keep only my languages", "Keep only text subtitles", "Save as separate .srt files"}), []string{
 		"Every subtitle track is kept as it is.", "Keeps subtitles in your languages (Settings > General) and those with no language set; the others are left out, even if none match.",
-		"Picture subtitles are left out. Text subtitles are kept.", "Text subtitles are also saved next to the new file as .srt files."})
+		"Picture subtitles are left out. Text subtitles are kept.", "Text subtitles are saved next to the new file as .srt files instead of inside it; picture subtitles stay inside the file."})
 	subtitles["description"] = "Subtitle pictures are never burned into the video."
 	subtitles["x-available"] = []string{"keep_all", "my_languages", "text_only"}
 	if rules.HasEncoder("srt") {
@@ -138,7 +138,7 @@ func Definitions() []StepDefinition {
 				"resolution": described(withDefault(enum([]any{"keep", "1080", "720", "480"}, []string{"Keep as is", "At most 1080p", "At most 720p", "At most 480p"}), "keep", "Resolution", ""),
 					"Videos are only ever made smaller, never stretched."),
 				"maxBitrate": bitrate(described(withDefault(enum([]any{"none", "high", "medium", "low"}, []string{"No limit", "High", "Medium", "Low"}), "none", "Max bitrate", ""),
-					"Limits each file by its size. A file is never given more than it has now. Quality still sets the picture; the limit only affects busy scenes.")),
+					"Caps how much data each second of video may use. A file never gets more than it has now. Quality still sets the picture; the cap only matters in busy scenes.")),
 				"speed": described(withDefault(enum([]any{"faster", "normal", "slower"}, []string{"Faster, larger files", "Normal", "Slower, smaller files"}), "normal", "Speed", ""),
 					"Slower takes about twice as long."),
 			}, []string{"quality", "format", "resolution", "maxBitrate", "speed"})}),
@@ -160,7 +160,7 @@ func Definitions() []StepDefinition {
 			ConfigSchema: object(map[string]any{
 				"fileType": withDefault(hinted(enum([]any{"mkv", "mp4", "webm", "keep"}, []string{"MKV", "MP4", "WebM", "Keep as is"}), []string{
 					"Holds every kind of track; the usual choice for Plex and Jellyfin.",
-					"Best for phones, browsers and Apple TV. Picture subtitles and some surround formats can't go in: picture subtitles are skipped with a reason, and that surround is converted to E-AC-3.",
+					"Best for phones, browsers and Apple TV. Files with subtitles MP4 can't hold (most kinds, text ones like SRT too) are left alone, with the reason in Jobs, unless the Subtitles step leaves them out; surround formats MP4 can't hold become E-AC-3.",
 					"For web browsers. Only with AV1 or VP9 video and Opus audio.",
 					"Each file keeps its current type. A file whose type can't hold the chosen video or audio becomes MKV."}), "mkv", "File type", "segmented"),
 			}, []string{"fileType"})}),
