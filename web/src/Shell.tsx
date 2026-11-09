@@ -22,7 +22,9 @@ function ThemeMenu() {
     return () => (document.removeEventListener("mousedown", outside), document.removeEventListener("keydown", esc));
   }, []);
   return (
-    <details className="menu" ref={ref} onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node) && close()}>
+    // Tabbing out closes it. Only a real element outside counts: Safari and Firefox on macOS don't focus a clicked
+    // button, so a click inside can blur with relatedTarget null, and closing then would lose the click.
+    <details className="menu" ref={ref} onBlur={(e) => e.relatedTarget instanceof Node && !e.currentTarget.contains(e.relatedTarget) && close()}>
       <summary className="btn icon" aria-label="Theme" title="Theme"><Icon id="i-drop" /></summary>
       <div className="pop" role="menu">
         <div className="hd">Theme</div>
