@@ -126,3 +126,24 @@ export interface Settings { firstRunDone: boolean; firstRunStep: number; intakeP
 // GET /api/v2/trash (contract update 01:33Z; workshop branch v2-trash-settings): originals replaced and kept in the
 // trash until their date. Later embedded as Summary.bytes.trash.
 export interface Trash { bytes: number; files: number; nextDeleteAt: Time | null; lastDeleteAt: Time | null }
+export interface Workflow { // GET /workflows (contract: Workflows, revisions and the graph)
+  id: ID;
+  name: string;
+  description: string;
+  fileType: FileType;
+  status: "draft" | "enabled" | "disabled";
+  favourite: boolean;
+  tags: string[];
+  presetId: "shrink_videos" | null;
+  summaryTag: string;
+  publishedRevisionId: ID | null;
+  version: number | null;
+  draftDiffers: boolean;
+  validation: { errors: number; warnings: number };
+  libraries: { id: ID; name: string }[];
+  activeJobs: number;
+  lastRun: { at: Time | null; completed: number; failed: number; skipped: number };
+  changesOriginals: boolean;
+  createdAt: Time; changedAt: Time;
+}
+export interface Template { id: ID; name: string; fileType: FileType; description: string; steps: string[]; changesOriginals: boolean } // GET /templates

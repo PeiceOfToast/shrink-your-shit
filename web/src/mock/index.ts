@@ -2,7 +2,7 @@
 // screens offer, really applied to that state. Every screen using it shows the Prototype banner. ?mock=fresh shows a
 // new install (no libraries yet) for review. When a contract endpoint lands, its function here becomes the fetch.
 import { useSyncExternalStore } from "react";
-import type { ActivityEvent, ID, Job, JobState, Library, Settings, Summary, Trash, Worker } from "../types/v2";
+import type { ActivityEvent, ID, Job, JobState, Library, Settings, Summary, Template, Trash, Worker, Workflow } from "../types/v2";
 
 const now = Date.now(), ago = (min: number) => new Date(now - min * 60e3).toISOString();
 const GB = 1e9;
@@ -37,6 +37,23 @@ function job(id: ID, name: string, lib: [ID, string], state: JobState, extra: Pa
     createdAt: ago(300), startedAt: null, endedAt: null, durationSec: null, ...extra,
   };
 }
+function workflow(id: ID, name: string, description: string, extra: Partial<Workflow>): Workflow {
+  return {
+    id, name, description, fileType: "video", status: "enabled", favourite: false, tags: [], presetId: null,
+    summaryTag: "HEVC · Balanced · MKV", publishedRevisionId: id + "r1", version: 1, draftDiffers: false,
+    validation: { errors: 0, warnings: 0 }, libraries: [], activeJobs: 0, lastRun: { at: null, completed: 0, failed: 0, skipped: 0 },
+    changesOriginals: false, createdAt: ago(60 * 24 * 30), changedAt: ago(60 * 24 * 2), ...extra,
+  };
+}
+// GET /templates (Start Simple: shrink_videos)
+export const TEMPLATES: Template[] = [
+  { id: "shrink_videos", name: "Shrink videos", fileType: "video", description: "Converts to HEVC and keeps your languages", changesOriginals: false,
+    steps: ["Leave some files alone", "Convert video", "Audio", "Subtitles", "File type", "Check the result", "Save the result"] },
+  { id: "shrink_and_replace", name: "Shrink and replace", fileType: "video", description: "The same, then replaces the original (kept 7 days)", changesOriginals: true,
+    steps: ["Leave some files alone", "Convert video", "Audio", "Subtitles", "File type", "Check the result", "Save the result: Replace the original"] },
+  { id: "tidy_audio_subtitles", name: "Tidy audio and subtitles", fileType: "video", description: "Leaves the picture alone", changesOriginals: false,
+    steps: ["Audio", "Subtitles", "File type", "Check the result", "Save the result"] },
+];
 const MOVIES: [ID, string] = ["l1", "Movies"], TV: [ID, string] = ["l2", "TV Shows"], HOME: [ID, string] = ["l3", "Home videos"];
 
 interface State {
@@ -47,7 +64,7 @@ interface State {
   waiting: number;
   last24h: Summary["last24h"];
   activity: ActivityEvent[];
-  workflows: number;
+  wf: Workflow[];
   trash: Trash; // GET /trash (not on dev yet: mocked like the rest of the page)
 }
 
@@ -73,7 +90,13 @@ function running(): State {
       { id: "a2", at: ago(6), type: "job.skipped", text: "Blade.Runner.2049.2017.2160p.DV.mkv skipped: Dolby Vision (profile 5)", refs: { jobId: "j-48211" } },
       { id: "a1", at: ago(22), type: "worker.left", text: "Laptop stopped answering", refs: { workerId: "laptop" } },
     ],
-    workflows: 2,
+    wf: [
+      workflow("w1", "Shrink videos", "Converts videos to HEVC, keeps your languages", { favourite: true, tags: ["default"], presetId: "shrink_videos", version: 4, draftDiffers: true,
+        summaryTag: "HEVC · Balanced · same resolution · Stereo AAC · MKV", libraries: [{ id: "l1", name: "Movies" }, { id: "l2", name: "TV Shows" }], activeJobs: 2, lastRun: { at: ago(1), completed: 131, failed: 2, skipped: 9 } }),
+      workflow("w2", "Home videos - my rules", "Replaces originals, keeps all audio, extra checks", { tags: ["home"], version: 2, validation: { errors: 0, warnings: 2 },
+        libraries: [{ id: "l3", name: "Home videos" }], changesOriginals: true, summaryTag: "HEVC · Better quality · All audio · MKV · Replaces originals" }),
+      workflow("w3", "Audio and subtitles only", "Leaves the picture alone", { status: "disabled", summaryTag: "Audio and subtitles · MKV" }),
+    ],
     trash: { bytes: 120 * GB, files: 14, nextDeleteAt: ago(-60 * 24), lastDeleteAt: ago(-60 * 24 * 7) },
   };
 }
@@ -82,7 +105,7 @@ function fresh(): State {
     settings: { firstRunDone: false, firstRunStep: 1, intakePaused: false, catalogueEnabled: false },
     libraries: [library("l1", "Movies", "/media/movies", 0, 0, 1284)],
     workers: [worker("this", "This computer", "paused", [0, 2], [0, 0], 5, [])], // workers start stopped (rebuild decision)
-    jobs: [], waiting: 0, last24h: { completed: 0, failed: 0, skipped: 0, successRate: null }, activity: [], workflows: 0, trash: { bytes: 0, files: 0, nextDeleteAt: null, lastDeleteAt: null },
+    jobs: [], waiting: 0, last24h: { completed: 0, failed: 0, skipped: 0, successRate: null }, activity: [], wf: [], trash: { bytes: 0, files: 0, nextDeleteAt: null, lastDeleteAt: null },
   };
 }
 
@@ -159,4 +182,36 @@ export function retry(id: ID) {
     s.last24h = { ...s.last24h, failed: Math.max(0, s.last24h.failed - 1) };
     log("setting.changed", j.file.name + " is back in the queue", { jobId: id });
   });
+}
+
+// Workflows (V3). POST /workflows creates the workflow and its draft (status "draft", never published).
+let made = 0;
+export function createWorkflow(name: string, description: string, templateId: string | null): Workflow {
+  const t = TEMPLATES.find((x) => x.id === templateId);
+  const w = workflow("wn" + ++made, name, description, {
+    status: "draft", version: null, publishedRevisionId: null, presetId: templateId === "shrink_videos" ? "shrink_videos" : null,
+    summaryTag: t ? "HEVC · Balanced · MKV" : "Empty", changesOriginals: !!t?.changesOriginals, createdAt: new Date().toISOString(), changedAt: new Date().toISOString(),
+    validation: t ? { errors: 0, warnings: 0 } : { errors: 1, warnings: 0 }, // an empty canvas has no trigger yet
+  });
+  change((s) => s.wf.push(w));
+  return w;
+}
+export function duplicateWorkflow(id: ID) {
+  change((s) => {
+    const w = s.wf.find((x) => x.id === id);
+    if (!w) return;
+    const names = new Set(s.wf.map((x) => x.name));
+    let n = 2; while (names.has(w.name + " " + n)) n++; // like the old flows: " 2", " 3" on a clash
+    s.wf.push({ ...w, id: "wd" + ++made, name: w.name + " " + n, favourite: false, libraries: [], activeJobs: 0, status: "draft", version: null, publishedRevisionId: null, draftDiffers: false, lastRun: { at: null, completed: 0, failed: 0, skipped: 0 } });
+  });
+}
+export const setWorkflow = (id: ID, patch: Partial<Pick<Workflow, "status" | "favourite">>) =>
+  change((s) => { s.wf = s.wf.map((w) => (w.id === id ? { ...w, ...patch } : w)); });
+// DELETE answers 409 in_use while libraries use it; the page doesn't offer it then.
+export function deleteWorkflow(id: ID): string | null {
+  const w = state.wf.find((x) => x.id === id);
+  if (!w) return "That workflow is gone.";
+  if (w.libraries.length) return "Used by " + w.libraries.map((l) => l.name).join(", ") + ". Nothing was changed.";
+  change((s) => { s.wf = s.wf.filter((x) => x.id !== id); });
+  return null;
 }
