@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -423,5 +424,28 @@ func TestFirstFilesRoutes(t *testing.T) {
 	empty := t.TempDir() // no videos: listed as nothing (200); the folder check says "no videos"
 	if code, r := poll("POST", "/api/libraries/first-files", fmt.Sprintf(`{"path":%q}`, empty)); code != 200 || r["total"] != 0.0 {
 		t.Errorf("empty: %d %v", code, r)
+	}
+}
+
+// ui-shop's Libraries page (contract v2): a library carries its disk's free space; null when its
+// folder can't be read.
+func TestLibraryFreeSpace(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	ok, _ := st.AddLibrary("Here", t.TempDir(), rules.SliderTemplate(3), false)
+	gone, _ := st.AddLibrary("Gone", filepath.Join(t.TempDir(), "missing"), rules.SliderTemplate(3), false)
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/libraries"})
+	var v struct{ Items []map[string]any }
+	if err := json.Unmarshal([]byte(body), &v); err != nil {
+		t.Fatal(err)
+	}
+	free := map[string]any{}
+	for _, it := range v.Items {
+		free[it["id"].(string)] = it["freeBytes"]
+	}
+	if n, _ := free[strconv.FormatInt(ok.ID, 10)].(float64); n <= 0 {
+		t.Errorf("free space %v", free)
+	}
+	if free[strconv.FormatInt(gone.ID, 10)] != nil {
+		t.Errorf("a missing folder's free space %v", free)
 	}
 }
