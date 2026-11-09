@@ -1,10 +1,11 @@
 // V3 Workflows list, Templates tab and the New workflow wizard (spec 5.1, 5.2; DESIGN/v2 SCREENS V3,
 // mockups/workflows.html), on the typed mock. Not here yet: the Stack view (Open, V3b), Export, Test run, History,
 // Import, the Cards view. Archive isn't in the contract.
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { plural } from "../format";
 import { TEMPLATES, createWorkflow, deleteWorkflow, duplicateWorkflow, setWorkflow, useMock } from "../mock";
+import { navigate, useSearch } from "../router";
 import type { Workflow } from "../types/v2";
 
 function RowMenu({ w, onSaid }: { w: Workflow; onSaid: (s: string) => void }) {
@@ -12,8 +13,10 @@ function RowMenu({ w, onSaid }: { w: Workflow; onSaid: (s: string) => void }) {
   const close = () => ref.current?.removeAttribute("open");
   useEffect(() => {
     const outside = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && close();
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && ref.current?.open && (close(), ref.current.querySelector("summary")?.focus());
     document.addEventListener("mousedown", outside);
-    return () => document.removeEventListener("mousedown", outside);
+    document.addEventListener("keydown", esc);
+    return () => (document.removeEventListener("mousedown", outside), document.removeEventListener("keydown", esc));
   }, []);
   const used = w.libraries.map((l) => l.name).join(", ");
   return (
@@ -32,24 +35,13 @@ function RowMenu({ w, onSaid }: { w: Workflow; onSaid: (s: string) => void }) {
 }
 
 function Wizard({ onClose, onMade }: { onClose: () => void; onMade: (w: Workflow) => void }) {
-  const [name, setName] = useState(""), [desc, setDesc] = useState(""), [how, setHow] = useState<"simple" | "visual" | "template">("simple");
-  const [tpl, setTpl] = useState(TEMPLATES[1].id), [err, setErr] = useState("");
+  const [name, setName] = useState(""), [desc, setDesc] = useState(""), [err, setErr] = useState("");
   const first = useRef<HTMLInputElement>(null);
   useEffect(() => first.current?.focus(), []);
   const create = () => {
     if (!name.trim()) return (setErr("Give the workflow a name."), first.current?.focus());
-    onMade(createWorkflow(name.trim(), desc.trim(), how === "simple" ? "shrink_videos" : how === "template" ? tpl : null));
+    onMade(createWorkflow(name.trim(), desc.trim()));
   };
-  const card = (value: typeof how, label: string, hint: string, extra?: ReactNode) => (
-    <div className="radio">
-      <input type="radio" id={"how-" + value} name="how" checked={how === value} onChange={() => setHow(value)} />
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <label htmlFor={"how-" + value}>{label}</label>
-        <div className="hint" style={{ fontSize: "var(--fs)" }}>{hint}</div>
-        {how === value && extra}
-      </div>
-    </div>
-  );
   return (
     <section className="card" aria-labelledby="new-h">
       <div className="hd"><h2 id="new-h">New workflow</h2></div>
@@ -62,23 +54,16 @@ function Wizard({ onClose, onMade }: { onClose: () => void; onMade: (w: Workflow
         </div>
         <div className="field"><label htmlFor="wf-desc">Description <span className="muted" style={{ fontWeight: 400 }}>(optional)</span></label>
           <input id="wf-desc" className="input" placeholder="What this workflow is for" value={desc} onChange={(e) => setDesc(e.target.value)} /></div>
+        {/* How to start: the engine has the Start Simple preset only; Visual workflow (an empty canvas) and other
+            templates come when the server has them, never as disabled choices (spec 5.2; review P3). */}
         <fieldset className="stack choice" style={{ border: 0, padding: 0, margin: 0 }}>
           <legend className="lab">How to start</legend>
-          {card("simple", "Start Simple", "A list of steps with plain choices. Good for most libraries.",
-            <div className="stack" style={{ marginTop: 10 }}><span className="hint">Starting point</span>
-              <div className="radio"><input type="radio" id="preset-shrink" name="preset" checked readOnly /><div style={{ minWidth: 0, flex: 1 }}>
-                <label htmlFor="preset-shrink">Shrink videos</label>
-                {/* design review rule 4: "same resolution", and that originals stay */}
-                <div className="hint" style={{ fontSize: "var(--fs)" }}>HEVC, same resolution, stereo audio in your languages, MKV. Saves new files in a separate folder. Your originals stay where they are; no space is freed until you remove them.</div>
-                <span className="tag">default</span></div></div></div>)}
-          {card("visual", "Visual workflow", "An empty canvas. Connect steps and add conditions.")}
-          {card("template", "From template", "Pick one below.",
-            <div className="tscroll" style={{ marginTop: 10 }}><table className="tbl"><caption className="sr">Templates</caption>
-              <thead><tr><th><span className="sr">Choose</span></th><th>Template</th><th>What it does</th><th>Steps it uses</th><th>Changes originals</th></tr></thead>
-              <tbody>{TEMPLATES.map((t) => (
-                <tr key={t.id}><td><input type="radio" name="tpl" id={"tpl-" + t.id} checked={tpl === t.id} onChange={() => setTpl(t.id)} /></td>
-                  <td><label htmlFor={"tpl-" + t.id}><strong>{t.name}</strong></label></td><td>{t.description}</td><td className="sm">{t.steps.join(", ")}</td><td>{t.changesOriginals ? "Yes" : "No"}</td></tr>))}</tbody>
-            </table></div>)}
+          <div className="radio"><input type="radio" id="how-simple" name="how" checked readOnly />
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <label htmlFor="how-simple">Start Simple: Shrink videos</label>
+              {/* design review rule 4: "same resolution", and that originals stay */}
+              <div className="hint" style={{ fontSize: "var(--fs)" }}>A list of steps with plain choices. HEVC, same resolution, stereo audio in your languages, MKV. Saves new files in a separate folder. Your originals stay where they are; no space is freed until you remove them.</div>
+            </div></div>
         </fieldset>
         <div className="row"><button className="btn primary" type="button" onClick={create}>Create draft</button><button className="btn ghost" type="button" onClick={onClose}>Cancel</button></div>
       </div>
@@ -88,7 +73,8 @@ function Wizard({ onClose, onMade }: { onClose: () => void; onMade: (w: Workflow
 
 export function Workflows() {
   const s = useMock();
-  const [tab, setTab] = useState(new URLSearchParams(location.search).get("tab") === "templates" ? "templates" : "workflows");
+  const tab = new URLSearchParams(useSearch()).get("tab") === "templates" ? "templates" : "workflows"; // in the URL: Back and reload keep it
+  const setTab = (t: string) => navigate("/workflows" + (t === "templates" ? "?tab=templates" : ""));
   const [q, setQ] = useState(""), [tag, setTag] = useState(""), [fav, setFav] = useState(false), [wizard, setWizard] = useState(false), [said, setSaid] = useState("");
   const tags = [...new Set(s.wf.flatMap((w) => w.tags))].sort();
   const rows = s.wf.filter((w) => (!q || (w.name + " " + w.description).toLowerCase().includes(q.toLowerCase())) && (!tag || w.tags.includes(tag)) && (!fav || w.favourite));
@@ -96,10 +82,10 @@ export function Workflows() {
     <div className="stack">
       <div className="pagehead"><div><h1>Workflows</h1><p className="sub">What happens to each file. A library uses one workflow.</p></div><span className="sp" />
         {!wizard && <button className="btn primary" type="button" onClick={() => (setWizard(true), setSaid(""))}><Icon id="i-plus" />New workflow</button>}</div>
-      {wizard && <Wizard onClose={() => setWizard(false)} onMade={(w) => (setWizard(false), setTab("workflows"), setSaid("Draft created: " + w.name + ". Its steps open in the Stack view, which comes in the next step of the new interface."))} />}
+      {wizard && <Wizard onClose={() => setWizard(false)} onMade={(w) => (setWizard(false), tab !== "workflows" && setTab("workflows"), setSaid("Draft created: " + w.name + ". Its steps open in the Stack view, which comes in the next step of the new interface."))} />}
       <div className="tabs" role="tablist">
-        <button role="tab" type="button" aria-selected={tab === "workflows"} onClick={() => setTab("workflows")}>Workflows</button>
-        <button role="tab" type="button" aria-selected={tab === "templates"} onClick={() => setTab("templates")}>Templates <span className="n">{TEMPLATES.length}</span></button>
+        <button role="tab" type="button" aria-selected={tab === "workflows"} onClick={() => tab !== "workflows" && setTab("workflows")}>Workflows</button>
+        <button role="tab" type="button" aria-selected={tab === "templates"} onClick={() => tab !== "templates" && setTab("templates")}>Templates <span className="n">{TEMPLATES.length}</span></button>
       </div>
       <p className="muted" role="status">{said}</p>
       {tab === "templates" ? (
@@ -134,7 +120,7 @@ export function Workflows() {
                     <td className="nowrap">{w.version == null ? "Not published" : "v" + w.version + (w.draftDiffers ? " · draft changes" : "")}</td>
                     <td>{problems ? <span className={"st " + (w.validation.errors ? "bad" : "warn")}><Icon id="i-alert" /><span>{plural(problems, "problem", "problems")}</span></span>
                       : <span className="st ok"><Icon id="i-check-c" /><span>OK</span></span>}</td>
-                    <td>{w.status === "draft" ? <span className="muted">Draft</span>
+                    <td>{w.status === "draft" ? <span className="muted">Draft<span className="sub">Publish it to turn it on</span></span>
                       : <input type="checkbox" role="switch" className="switch" aria-label={"Enabled: " + w.name} checked={w.status === "enabled"} onChange={(e) => setWorkflow(w.id, { status: e.target.checked ? "enabled" : "disabled" })} />}</td>
                     <td><RowMenu w={w} onSaid={setSaid} /></td>
                   </tr>);
