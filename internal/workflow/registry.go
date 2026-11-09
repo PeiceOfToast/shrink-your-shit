@@ -98,7 +98,7 @@ func Definitions() []StepDefinition {
 		"The smallest audio, for MKV files. Doesn't play on Apple TV or most TVs.", "Tracks are copied unchanged."})
 	audio["x-available"] = audioAvailable
 	subtitles := hinted(enum(anys(rules.AvailableSubtitles), []string{"Keep all", "Keep only my languages", "Keep only text subtitles", "Save as separate .srt files"}), []string{
-		"Every subtitle track is kept as it is.", "Only subtitles in your languages are kept.",
+		"Every subtitle track is kept as it is.", "Keeps subtitles in your languages (Settings > General) and those with no language set; the others are left out, even if none match.",
 		"Picture subtitles are left out. Text subtitles are kept.", "Text subtitles are also saved next to the new file as .srt files."})
 	subtitles["description"] = "Subtitle pictures are never burned into the video."
 	subtitles["x-available"] = []string{"keep_all", "my_languages", "text_only"}
@@ -145,8 +145,10 @@ func Definitions() []StepDefinition {
 		def(StepDefinition{Type: TypeAudio, Category: "audio", Name: "Audio", Icon: "audio", TypeLabel: "Audio",
 			Description: "Which sound tracks the new file has.", Inputs: []Port{in}, Outputs: []Port{success}, RunsWith: encodeSegment,
 			SideEffects: "none", ConfigSchema: object(map[string]any{
-				"audio":           withDefault(audio, "stereo_aac", "Audio", ""),
-				"onlyMyLanguages": map[string]any{"type": "boolean", "default": true, "title": "Only my languages"},
+				"audio": withDefault(audio, "stereo_aac", "Audio", ""),
+				"onlyMyLanguages": map[string]any{"type": "boolean", "default": true, "title": "Only my languages",
+					// design's sentence, made true to planAudio: with none matching, a stereo choice keeps the main track only
+					"description": "Keeps only tracks in your languages (Settings > General). Tracks with no language set are always kept. If none match, the main track is kept with the stereo choices, and all tracks with the others."},
 			}, []string{"audio", "onlyMyLanguages"})}),
 		def(StepDefinition{Type: TypeSubtitles, Category: "subtitles", Name: "Subtitles", Icon: "subtitles", TypeLabel: "Subtitles",
 			Description: "Which subtitles the new file keeps.", Inputs: []Port{in}, Outputs: []Port{success}, RunsWith: encodeSegment,
@@ -174,8 +176,10 @@ func Definitions() []StepDefinition {
 					"New files go to the folder below, in the same sub-folders. Your originals aren't changed, so no space is freed until you remove them yourself.",
 					"The original is kept for 7 days (Settings > Safety), then deleted. This frees space. You can get an original back from its job.",
 					"Both stay. Nothing is deleted."}), "separate_folder", "Save the result", ""),
-				"folderMode": withDefault(hinted(enum([]any{"next_to_library", "one_folder"}, []string{"Next to each library", "One folder for all"}), []string{
-					"Each library gets a folder beside it. On the same disk, and it works when one workflow serves several libraries.", ""}), "next_to_library", "Where", ""),
+				"folderMode": described(withDefault(hinted(enum([]any{"next_to_library", "one_folder"}, []string{"Next to each library", "One folder for all"}), []string{
+					"Each library gets a folder beside it, e.g. /media/movies (shrunk). Same disk, and it works when one workflow serves several libraries.",
+					"Every converted file goes into the folder below, in the same sub-folders as in its library."}), "next_to_library", "Where new files go", ""),
+					"Pick a folder next to each library, or one folder for all of them. Your originals stay where they are."),
 				"folder": map[string]any{"type": "string", "title": "Folder", "description": "New files go to this folder, in the same sub-folders.",
 					"x-placeholder": "/media/movies (shrunk)", "x-ui": map[string]any{"widget": "folder"}},
 			}, []string{"policy"})}),
