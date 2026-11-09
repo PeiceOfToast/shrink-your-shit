@@ -160,7 +160,7 @@ func Definitions() []StepDefinition {
 			ConfigSchema: object(map[string]any{
 				"fileType": withDefault(hinted(enum([]any{"mkv", "mp4", "webm", "keep"}, []string{"MKV", "MP4", "WebM", "Keep as is"}), []string{
 					"Holds every kind of track; the usual choice for Plex and Jellyfin.",
-					"Best for phones, browsers and Apple TV. MP4 can't hold most kinds of subtitles, so files with them are left alone (the reason is in Jobs) unless the Subtitles step leaves those out. Surround formats MP4 can't hold become E-AC-3.",
+					"Best for phones, browsers and Apple TV. Files with picture subtitles are left alone (the reason is in Jobs) unless the Subtitles step leaves those out. Surround formats MP4 can't hold become E-AC-3.",
 					"For web browsers. Only with AV1 or VP9 video and Opus audio.",
 					"Each file keeps its current type. A file whose type can't hold the chosen video or audio becomes MKV."}), "mkv", "File type", "segmented"),
 			}, []string{"fileType"})}),
