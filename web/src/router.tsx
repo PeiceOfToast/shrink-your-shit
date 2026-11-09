@@ -25,6 +25,11 @@ export function navigate(to: string) {
   notify();
 }
 
+// The query of the current address ("?tab=templates"), so a page can keep a tab in the URL.
+export function useSearch(): string {
+  return useSyncExternalStore((f) => (listeners.add(f), () => listeners.delete(f)), () => location.search);
+}
+
 // The path inside the app ("/", "/jobs", "/settings/appearance").
 export function usePath(): string {
   return useSyncExternalStore((f) => (listeners.add(f), () => listeners.delete(f)), path);

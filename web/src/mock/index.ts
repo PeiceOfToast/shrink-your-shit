@@ -45,14 +45,10 @@ function workflow(id: ID, name: string, description: string, extra: Partial<Work
     changesOriginals: false, createdAt: ago(60 * 24 * 30), changedAt: ago(60 * 24 * 2), ...extra,
   };
 }
-// GET /templates (Start Simple: shrink_videos)
+// GET /templates: the V1 server has only the Start Simple preset; more come with the engine (review P3).
 export const TEMPLATES: Template[] = [
   { id: "shrink_videos", name: "Shrink videos", fileType: "video", description: "Converts to HEVC and keeps your languages", changesOriginals: false,
     steps: ["Leave some files alone", "Convert video", "Audio", "Subtitles", "File type", "Check the result", "Save the result"] },
-  { id: "shrink_and_replace", name: "Shrink and replace", fileType: "video", description: "The same, then replaces the original (kept 7 days)", changesOriginals: true,
-    steps: ["Leave some files alone", "Convert video", "Audio", "Subtitles", "File type", "Check the result", "Save the result: Replace the original"] },
-  { id: "tidy_audio_subtitles", name: "Tidy audio and subtitles", fileType: "video", description: "Leaves the picture alone", changesOriginals: false,
-    steps: ["Audio", "Subtitles", "File type", "Check the result", "Save the result"] },
 ];
 const MOVIES: [ID, string] = ["l1", "Movies"], TV: [ID, string] = ["l2", "TV Shows"], HOME: [ID, string] = ["l3", "Home videos"];
 
@@ -186,12 +182,11 @@ export function retry(id: ID) {
 
 // Workflows (V3). POST /workflows creates the workflow and its draft (status "draft", never published).
 let made = 0;
-export function createWorkflow(name: string, description: string, templateId: string | null): Workflow {
-  const t = TEMPLATES.find((x) => x.id === templateId);
+// The V1 server always starts from the Shrink videos preset (templateId other than shrink_videos: 400).
+export function createWorkflow(name: string, description: string): Workflow {
   const w = workflow("wn" + ++made, name, description, {
-    status: "draft", version: null, publishedRevisionId: null, presetId: templateId === "shrink_videos" ? "shrink_videos" : null,
-    summaryTag: t ? "HEVC · Balanced · MKV" : "Empty", changesOriginals: !!t?.changesOriginals, createdAt: new Date().toISOString(), changedAt: new Date().toISOString(),
-    validation: t ? { errors: 0, warnings: 0 } : { errors: 1, warnings: 0 }, // an empty canvas has no trigger yet
+    status: "draft", version: null, publishedRevisionId: null, presetId: "shrink_videos",
+    summaryTag: "HEVC · Balanced · MKV", createdAt: new Date().toISOString(), changedAt: new Date().toISOString(),
   });
   change((s) => s.wf.push(w));
   return w;
@@ -200,9 +195,8 @@ export function duplicateWorkflow(id: ID) {
   change((s) => {
     const w = s.wf.find((x) => x.id === id);
     if (!w) return;
-    const names = new Set(s.wf.map((x) => x.name));
-    let n = 2; while (names.has(w.name + " " + n)) n++; // like the old flows: " 2", " 3" on a clash
-    s.wf.push({ ...w, id: "wd" + ++made, name: w.name + " " + n, favourite: false, libraries: [], activeJobs: 0, status: "draft", version: null, publishedRevisionId: null, draftDiffers: false, lastRun: { at: null, completed: 0, failed: 0, skipped: 0 } });
+    // As the V1 server does: "X (copy)", enabled, version 1 (review P3).
+    s.wf.push({ ...w, id: "wd" + ++made, name: w.name + " (copy)", favourite: false, libraries: [], activeJobs: 0, status: "enabled", version: 1, publishedRevisionId: "wd" + made + "r1", draftDiffers: false, lastRun: { at: null, completed: 0, failed: 0, skipped: 0 } });
   });
 }
 export const setWorkflow = (id: ID, patch: Partial<Pick<Workflow, "status" | "favourite">>) =>
