@@ -361,3 +361,22 @@ func TestV2DraftWorkflowFields(t *testing.T) {
 		t.Errorf("replace draft %s", body)
 	}
 }
+
+// Review ae3a28f: one flow that can't be read is left out of the list (logged), so the Workflows page
+// still lists the others; asked for itself, it's a clear error.
+func TestV2ListSurvivesABadFlow(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	good, _ := st.AddLibrary("Good", t.TempDir(), rules.SliderTemplate(3), false)
+	bad, _ := st.AddLibrary("Bad", t.TempDir(), rules.SliderTemplate(3), false)
+	if err := st.CorruptFlowForTest(bad.FlowID); err != nil {
+		t.Fatal(err)
+	}
+	code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/workflows"})
+	l := decode[v2List](t, body)
+	if code != 200 || l.Total != 1 || l.Items[0]["id"] != strconv.FormatInt(good.FlowID, 10) {
+		t.Errorf("list %d %s", code, body)
+	}
+	if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/workflows/" + strconv.FormatInt(bad.FlowID, 10)}); code < 400 || !strings.Contains(body, `"message"`) {
+		t.Errorf("the bad one: %d %s", code, body)
+	}
+}

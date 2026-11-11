@@ -4,6 +4,7 @@ package web
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"reflect"
 	"slices"
@@ -86,9 +87,9 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		}
 		for _, id := range ids {
 			v, err := workflowViewWith(store, id, libs)
-			if err != nil {
-				serverError(w, err)
-				return
+			if err != nil { // one that can't be read is left out, so the others still list (review ae3a28f)
+				log.Printf("workflow %d left out of the list: %v", id, err)
+				continue
 			}
 			if keepWorkflow(v, q) {
 				items = append(items, v)

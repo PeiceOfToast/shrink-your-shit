@@ -431,3 +431,10 @@ func (s *Store) KnownTemplate(flowID int64, t rules.Template) (bool, error) {
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM workflow_revisions WHERE workflow_id=? AND status='published' AND template_hash=?`, flowID, templateHash(t)).Scan(&n)
 	return n > 0, err
 }
+
+// CorruptFlowForTest makes a flow's template unreadable, as TestOpenSurvivesABadFlow does (for other
+// packages' tests).
+func (s *Store) CorruptFlowForTest(id int64) error {
+	_, err := s.db.Exec(`UPDATE flows SET template='not json' WHERE id=?`, id)
+	return err
+}
