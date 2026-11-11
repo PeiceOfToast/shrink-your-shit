@@ -15,7 +15,7 @@ export function SampleData() {
   );
 }
 
-export function PageHead({ icon, title, help, crumbs, children }: { icon?: string; title: ReactNode; help?: string; crumbs?: [string, string][]; children?: ReactNode }) {
+export function PageHead({ icon, title, help, crumbs, after, children }: { icon?: string; title: ReactNode; help?: string; crumbs?: [string, string][]; after?: ReactNode; children?: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -25,6 +25,7 @@ export function PageHead({ icon, title, help, crumbs, children }: { icon?: strin
         <h1>{title}</h1>
         <SampleData />
         {help && <button className="btn icon ghost help" type="button" title={help} aria-expanded={open} aria-label="About this page" onClick={() => setOpen(!open)}><Icon id="i-info" /></button>}
+        {after}
         <span className="sp" />
         {children}
       </div>

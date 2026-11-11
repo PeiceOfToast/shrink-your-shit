@@ -2,7 +2,7 @@
 // (#109: step definitions, the draft, validate, publish), or the mock with ?mock=1 (mock/steps.ts mirrors V1). The step
 // words and problems come from the server's validate, asked again shortly after each change. Not here: drag to reorder and "+ Add step"
 // (V1 runs the preset's chain in its order), Test run (V5), History, Export, Open graph (V4).
-import { SampleData } from "../PageHead";
+import { PageHead } from "../PageHead";
 import { Component, createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
@@ -95,31 +95,36 @@ function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown) => 
     </div>);
 }
 
+// One row of the step list (clean pass W1): number, icon, name and summary, the switch or "Always on", the chevron.
+// Its options open under the row; on phones as a full-screen sheet with a back button (M5).
 function Step({ n, i, open, toggle, update, issues }: { n: Node; i: number; open: boolean; toggle: () => void; update: (n: Node) => void; issues: ValidationIssue[] }) {
   const { stepDef, summary } = useReg(), def = stepDef(n.type), mine = issues.filter((x) => x.nodeId === n.id);
+  const back = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (open && matchMedia("(max-width:640px)").matches) back.current?.focus(); }, [open]);
   // A read-only step (an earlier install's settings) or one this page doesn't know (a newer server, a plugin not
   // installed): shown with its type, its settings kept as they are, never edited (review P2).
   if (!def || def.readOnly) return (
-    <section className="card step" aria-labelledby={n.id + "-name"}><div className="row nw" style={{ padding: "10px var(--pad)" }}><span className="stepn">{i + 1}</span>
-      <span style={{ color: "var(--accent-text)" }}><Icon id={(def && ICON[def.icon]) || "i-box"} /></span>
-      <div className="sp" style={{ minWidth: 0 }}><strong id={n.id + "-name"}>{n.name ?? def?.name ?? "Unknown step"}</strong>
-        <div className="muted">{(def && summary(n)) || "Type " + n.type}</div>
+    <li className="srow ro" aria-labelledby={n.id + "-name"}><div className="sline"><span className="stepn">{i + 1}</span>
+      <span className="sic"><Icon id={(def && ICON[def.icon]) || "i-box"} /></span>
+      <div className="sp"><span className="snm" id={n.id + "-name"}>{n.name ?? def?.name ?? "Unknown step"}</span> <span className="ssum">{(def && summary(n)) || "Type " + n.type}</span>
         <div className="sm muted">Its settings are kept as they are. {def ? def.description : "This version of the page doesn't know this step, so it only shows it."}</div></div>
-      <span className="muted sm">Read-only</span></div></section>);
+      <span className="muted sm">Read-only</span></div></li>);
   const hasOptions = Object.values((def.configSchema.properties ?? {}) as Props).some((s) => !s.readOnly);
   return (
-    <section className="card step" aria-labelledby={n.id + "-name"}>
-      <div className="row nw" style={{ padding: "10px var(--pad)" }}>
-        <span className="stepn">{i + 1}</span><span style={{ color: "var(--accent-text)" }}><Icon id={ICON[def.icon] ?? "i-box"} /></span>
-        <div className="sp" style={{ minWidth: 0 }}><strong id={n.id + "-name"}>{n.name ?? def.name}</strong><div className="muted">{summary(n)}</div>
-          {mine.length > 0 && <span className="st bad"><Icon id="i-alert" /><span>{mine.length === 1 ? "1 problem" : mine.length + " problems"}</span></span>}</div>
-        {def.alwaysOn ? <span className="muted sm">Always on</span>
+    <li className={"srow" + (open ? " open" : "")} aria-labelledby={n.id + "-name"}>
+      <div className="sline">
+        <span className="stepn">{i + 1}</span><span className="sic"><Icon id={ICON[def.icon] ?? "i-box"} /></span>
+        <div className="sp"><span className="snm" id={n.id + "-name"}>{n.name ?? def.name}</span> <span className="ssum">{summary(n)}</span>
+          {mine.length > 0 && <span className="pill bad"><Icon id="i-alert" />{mine.length === 1 ? "1 problem" : mine.length + " problems"}</span>}</div>
+        {def.alwaysOn ? <span className="muted sm nowrap">Always on</span>
           : <input type="checkbox" role="switch" className="switch" aria-label={(def.name) + " on"} checked={n.enabled} onChange={(e) => update({ ...n, enabled: e.target.checked })} />}
-        {hasOptions && <button className="btn sm icon ghost" type="button" aria-expanded={open} aria-controls={n.id + "-opts"} aria-label={"Options for " + def.name} onClick={toggle}><Icon id={open ? "i-chev-d" : "i-chev-r"} /></button>}
+        {hasOptions ? <button className="btn icon ghost" type="button" aria-expanded={open} aria-controls={n.id + "-opts"} aria-label={"Options for " + def.name} onClick={toggle}><Icon id={open ? "i-chev-d" : "i-chev-r"} /></button>
+          : <span className="chev-sp" />}
       </div>
-      {open && hasOptions && <div className="bd" id={n.id + "-opts"} style={{ borderTop: "1px solid var(--border)" }}>
+      {open && hasOptions && <div className="sopts" id={n.id + "-opts"} role="group" aria-label={"Options for " + def.name} onKeyDown={(e) => e.key === "Escape" && toggle()}>
+        <div className="sheethd phone"><button ref={back} className="btn icon ghost" type="button" aria-label="Back to the steps" onClick={toggle}><Icon id="i-chev-l" /></button><strong>{def.name}</strong></div>
         <Options n={n} issues={issues} set={(k, v) => update({ ...n, config: { ...n.config, [k]: v } })} /></div>}
-    </section>);
+    </li>);
 }
 
 // A workflow with branches: the steps in order with the branches named, nothing editable (spec 5.7; SCREENS V3).
@@ -214,31 +219,35 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
   };
   const rename = async (v: string) => { if (await act(patchWorkflow(id, { name: v }), setSaid)) reloadMeta(); setRenaming(false); };
   const issues = checked || !dirty ? live.issues : [];
+  const tools = <>
+    <button className="btn sm icon ghost" type="button" title="Undo" aria-label="Undo" disabled={hist.at === 0} onClick={() => setHist({ ...hist, at: hist.at - 1 })}><Icon id="i-undo" /></button>
+    <button className="btn sm icon ghost" type="button" title="Redo" aria-label="Redo" disabled={hist.at === hist.docs.length - 1} onClick={() => setHist({ ...hist, at: hist.at + 1 })}><Icon id="i-redo" /></button>
+    <button className="btn sm ghost" type="button" onClick={async () => { if (await ask(doc)) setChecked(true); }}><Icon id="i-checks" />Check</button>
+    <button className="btn sm" type="button" disabled={!dirty} onClick={save}><Icon id="i-save" />Save draft</button>
+  </>;
   const canStack = live.stackable;
   return (
     <Reg.Provider value={{ defs, words: live.stepSummaries }}>
     <div className="stack">
-      <section className="card"><div className="bd stack">
-        <div className="row">
-          {renaming ? <form className="row" onSubmit={(e) => { e.preventDefault(); const v = (e.currentTarget.elements.namedItem("nm") as HTMLInputElement).value.trim(); if (v) rename(v); else setRenaming(false); }}>
+      {/* the workflow's header row (clean pass W2) */}
+      <PageHead icon="i-workflow" crumbs={[["Workflows", "/workflows"]]}
+        title={renaming ? <form className="row" onSubmit={(e) => { e.preventDefault(); const v = (e.currentTarget.elements.namedItem("nm") as HTMLInputElement).value.trim(); if (v) rename(v); else setRenaming(false); }}>
             <label className="sr" htmlFor="wf-rename">Name</label><input id="wf-rename" name="nm" className="input" defaultValue={w.name} autoFocus style={{ width: "auto" }} />
-            <button className="btn sm" type="submit">Rename</button><button className="btn sm ghost" type="button" onClick={() => setRenaming(false)}>Cancel</button></form>
-            : <><h1 style={{ fontSize: "var(--fs-lg)" }}>{w.name}</h1><SampleData /><button className="btn sm ghost" type="button" onClick={() => setRenaming(true)} aria-label={"Rename " + w.name}>Rename</button></>}
+            <button className="btn sm" type="submit">Rename</button><button className="btn sm ghost" type="button" onClick={() => setRenaming(false)}>Cancel</button></form> : w.name}
+        after={<>
+          {!renaming && <button className="btn sm ghost" type="button" onClick={() => setRenaming(true)} aria-label={"Rename " + w.name}>Rename</button>}
           <span className="pill">{w.version == null || w.draftDiffers || dirty ? "Draft" : "Published"}</span>
-          <span className="muted">{w.version == null ? "Not published yet" : "v" + w.version + " published" + (w.draftDiffers || dirty ? " · v" + (w.version + 1) + " draft" : "")}</span>
-        </div>
-        {canStack && <div className="row">
-          <button className="btn sm" type="button" disabled={hist.at === 0} onClick={() => setHist({ ...hist, at: hist.at - 1 })}><Icon id="i-undo" />Undo</button>
-          <button className="btn sm" type="button" disabled={hist.at === hist.docs.length - 1} onClick={() => setHist({ ...hist, at: hist.at + 1 })}><Icon id="i-redo" />Redo</button>
-          <button className="btn sm" type="button" onClick={async () => { if (await ask(doc)) setChecked(true); }}><Icon id="i-checks" />Check</button>
-          <span className="sp" />
-          <button className="btn sm" type="button" disabled={!dirty} onClick={save}><Icon id="i-save" />Save draft</button>
+          <span className="muted sm">{w.version == null ? "Not published yet" : "v" + w.version + " published" + (w.draftDiffers || dirty ? " · v" + (w.version + 1) + " draft" : "")}</span>
+        </>}>
+        {canStack && <>
+          <span className="desk">{tools}</span>
+          <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{tools}</div></details>
           <button className="btn sm primary" type="button" onClick={openPublish}>Publish</button>
-        </div>}
-        {canStack && (checked || !dirty) && (issues.length === 0 ? <span className="st ok"><Icon id="i-check-c" /><span>Check: no problems</span></span>
-          : <span className="st bad"><Icon id="i-alert" /><span>Check: {issues.length === 1 ? "1 problem" : issues.length + " problems"}. Publish waits until it's fixed.</span></span>)}
-        <span className="muted" role="status">{said}</span>
-      </div></section>
+        </>}
+      </PageHead>
+      {canStack && (checked || !dirty) && (issues.length === 0 ? <p className="st ok checkline"><Icon id="i-check-c" /><span>Check: no problems</span></p>
+        : <p className="st bad checkline"><Icon id="i-alert" /><span>Check: {issues.length === 1 ? "1 problem" : issues.length + " problems"}. Publish waits until {issues.length === 1 ? "it's" : "they're"} fixed. <button className="linkbtn" type="button" onClick={() => setOpen(issues[0].nodeId ?? null)}>Show</button></span></p>)}
+      <p className="muted" role="status">{said}</p>
 
       {panel && (
         <section className="card" aria-labelledby="pub-h"><div className="hd"><h2 id="pub-h">Publish v{panel.nextNumber}</h2></div><div className="bd stack">
@@ -254,8 +263,8 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
             <button className="btn ghost" type="button" onClick={() => setPanel(null)}>Cancel</button></div>
         </div></section>)}
 
-      {canStack ? <div className="stack">{order(doc).map((n, i) => (
-        <Step key={n.id} n={n} i={i} open={open === n.id} toggle={() => setOpen(open === n.id ? null : n.id)} update={update} issues={issues} />))}</div>
+      {canStack ? <ol className="steps">{order(doc).map((n, i) => (
+        <Step key={n.id} n={n} i={i} open={open === n.id} toggle={() => setOpen(open === n.id ? null : n.id)} update={update} issues={issues} />))}</ol>
         : <ReadOnly doc={doc} />}
     </div>
     </Reg.Provider>);
