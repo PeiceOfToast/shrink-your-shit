@@ -109,3 +109,29 @@ func TestV2Jobs(t *testing.T) {
 		t.Errorf("unknown action %d", code)
 	}
 }
+
+// Lead 22:23Z: a job that waited across a publish shows the revision it ran with (the one published
+// when it started), not the one at queue time. Steps a second apart: times are kept to the second.
+func TestV2JobRevisionIsWhenItStarted(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	st.SetPaused(false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	if _, err := st.EnsureRevision(lib.FlowID); err != nil { // version 1, before the job
+		t.Fatal(err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "a.mkv"), SizeBefore: 1000})
+	time.Sleep(1100 * time.Millisecond)
+	if _, err := st.SetFlowTemplate(lib.FlowID, rules.SliderTemplate(4)); err != nil { // version 2 while it waits
+		t.Fatal(err)
+	}
+	path := "/api/v2/jobs/" + strconv.FormatInt(id, 10)
+	if _, body, _ := do(t, nil, srv, call{method: "GET", path: path}); !strings.Contains(body, `"version":1`) {
+		t.Errorf("waiting: %s", body)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	st.Claim("w")
+	if _, body, _ := do(t, nil, srv, call{method: "GET", path: path}); !strings.Contains(body, `"version":2`) {
+		t.Errorf("started after version 2: %s", body)
+	}
+}

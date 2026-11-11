@@ -124,7 +124,13 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 		d["metadata"] = meta
 		if lib, err := store.GetLibrary(j.LibraryID); err == nil {
 			d["library"] = map[string]any{"id": strconv.FormatInt(lib.ID, 10), "name": lib.Name}
-			if rev, ok, err := store.RevisionAt(lib.FlowID, j.Created); err == nil && ok {
+			at := j.Created // the revision it ran with: published when it last started (lead 22:23Z); one not started: when queued
+			for _, e := range events {
+				if e.To == string(jobs.Running) {
+					at = e.At
+				}
+			}
+			if rev, ok, err := store.RevisionAt(lib.FlowID, at); err == nil && ok {
 				d["workflow"] = map[string]any{"id": strconv.FormatInt(lib.FlowID, 10), "revisionId": strconv.FormatInt(rev.ID, 10), "version": rev.Number}
 			}
 		}
