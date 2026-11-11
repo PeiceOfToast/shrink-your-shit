@@ -154,6 +154,8 @@ func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 	}
 	storeErr := func(w http.ResponseWriter, err error) {
 		switch {
+		case errors.Is(err, jobs.ErrNotPublished): // review acace8e: never a library on a placeholder
+			apiError(w, http.StatusConflict, "workflow_not_published", "This workflow hasn't been published yet, so nothing can use it. Publish it first. Nothing was changed.")
 		case errors.Is(err, jobs.ErrNotFound):
 			apiError(w, http.StatusNotFound, "not_found", "There is no such library.")
 		case errors.Is(err, jobs.ErrPathTaken):
@@ -463,6 +465,11 @@ func fsDirs(w http.ResponseWriter, r *http.Request) {
 func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
 	if err := dec.Decode(v); err != nil {
+		var big *http.MaxBytesError
+		if errors.As(err, &big) { // review acace8e: its own answer, not "not valid JSON"
+			apiError(w, http.StatusRequestEntityTooLarge, "too_large", "The request is too large (at most 64 KiB). Nothing was changed.")
+			return false
+		}
 		apiError(w, http.StatusBadRequest, "invalid_json", "The request body is not valid JSON.")
 		return false
 	}

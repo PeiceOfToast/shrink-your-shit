@@ -391,6 +391,8 @@ func TestMigration7BackfillsSkipReasons(t *testing.T) {
 		`ALTER TABLE libraries DROP COLUMN last_scan`, `ALTER TABLE libraries DROP COLUMN last_scan_videos`, // and 15
 		// (16 changes rows only)
 		// (13 changes rows only)
+		`ALTER TABLE flows DROP COLUMN description`, `ALTER TABLE flows DROP COLUMN status`, `ALTER TABLE flows DROP COLUMN favourite`,
+		`ALTER TABLE flows DROP COLUMN tags`, `DROP TABLE workflow_revisions`, // and 20
 		`PRAGMA user_version=6`} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
@@ -482,6 +484,7 @@ func TestAlwaysStandardizeMigration(t *testing.T) {
 		s.PutFile(File{Path: p, Decision: "skip: x", Reason: reason})
 	}
 	rewind15(s)                           // migration 15's columns go, so it can run again
+	rewind20(s)                           // migration 20's columns and table go, so it can run again
 	s.db.Exec(`PRAGMA user_version = 12`) // as an install from before always standardize left it
 	s.Close()
 
@@ -536,6 +539,7 @@ func TestWorkersStartStoppedMigration(t *testing.T) {
 		s.SetMeta("paused", paused)
 		s.db.Exec(`DELETE FROM app_meta WHERE key='stopped_by_update'`)
 		rewind15(s)                           // migration 15's columns go, so it can run again
+		rewind20(s)                           // migration 20's columns and table go, so it can run again
 		s.db.Exec(`PRAGMA user_version = 13`) // as an install from before S2 left it
 		s.Close()
 		s, err := Open(path)
@@ -558,6 +562,14 @@ func TestWorkersStartStoppedMigration(t *testing.T) {
 	}
 }
 
+// rewind20 takes away what migration 20 added, for tests that set user_version below it.
+func rewind20(s *Store) {
+	for _, q := range []string{`ALTER TABLE flows DROP COLUMN description`, `ALTER TABLE flows DROP COLUMN status`,
+		`ALTER TABLE flows DROP COLUMN favourite`, `ALTER TABLE flows DROP COLUMN tags`, `DROP TABLE workflow_revisions`} {
+		s.db.Exec(q)
+	}
+}
+
 // rewind15 takes away what migration 15 added, for tests that set user_version below it.
 func rewind15(s *Store) {
 	s.db.Exec(`ALTER TABLE libraries DROP COLUMN last_scan`)
@@ -577,6 +589,7 @@ func TestExistingBasicFlowsMigration(t *testing.T) {
 	s.db.Exec(`DELETE FROM app_meta WHERE key='basic_changed_by_update'`)
 	s.PutFile(File{Path: "/m/hevc.mp4", Size: 1, Decision: "skip: x", Reason: "already_hevc"})
 	s.PutFile(File{Path: "/m/av1.mkv", Size: 1, Decision: "skip: x", Reason: "already_efficient_x"})
+	rewind20(s) // migration 20's columns and table go, so it can run again
 	s.db.Exec(`PRAGMA user_version = 15`)
 	s.Close()
 	s, err = Open(path)
@@ -618,6 +631,7 @@ func TestHDR10KeptMigration(t *testing.T) {
 	s.db.Exec(`UPDATE flows SET template=json_set(json_remove(template, '$.selectors.includeDolbyVision'), '$.selectors.skipHdr', json('false')) WHERE id=?`, b.FlowID)
 	s.PutFile(File{Path: "/a/hdr.mkv", Size: 1, Decision: "skip: x", Reason: "hdr_dv"})
 	s.PutFile(File{Path: "/a/x.mkv", Size: 1, Decision: "skip: x", Reason: "no_video"})
+	rewind20(s) // migration 20's columns and table go, so it can run again
 	s.db.Exec(`PRAGMA user_version = 16`)
 	s.Close()
 	s, err = Open(path)
@@ -665,6 +679,7 @@ func TestStandardReworkMigration(t *testing.T) {
 		}
 	}
 	s.PutFile(File{Path: "/a/x.mkv", Size: 1, Decision: "skip: x", Reason: "already_hevc"})
+	rewind20(s) // migration 20's columns and table go, so it can run again
 	s.db.Exec(`PRAGMA user_version = 18`)
 	s.Close()
 	s, err = Open(path)
@@ -702,6 +717,7 @@ func TestStandardReworkOpusMP4(t *testing.T) {
 	sel.Speed = "slower"
 	l, _ := s.AddLibrary("M", "/m", sel.Template(), true)
 	s.db.Exec(`UPDATE flows SET template=json_set(json_remove(template, '$.selectors.onlyMyLanguages'), '$.selectors.audio', 'opus', '$.selectors.fileType', 'mp4', '$.selectors.afterConverting', 'beside') WHERE id=?`, l.FlowID)
+	rewind20(s) // migration 20's columns and table go, so it can run again
 	s.db.Exec(`PRAGMA user_version = 18`)
 	s.Close()
 	s, err = Open(path)
