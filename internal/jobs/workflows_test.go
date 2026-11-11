@@ -100,3 +100,25 @@ func TestWorkflowRevisions(t *testing.T) {
 		t.Errorf("%d revisions left", n)
 	}
 }
+
+// Review 109: a flow that can't be read doesn't stop the store opening (the app starting); the others
+// still get their revision.
+func TestOpenSurvivesABadFlow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "syp.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	good, _ := s.AddLibrary("Good", "/g", rules.SliderTemplate(3), true)
+	bad, _ := s.AddLibrary("Bad", "/b", rules.SliderTemplate(3), true)
+	s.db.Exec(`DELETE FROM workflow_revisions`)
+	s.db.Exec(`UPDATE flows SET template='not json' WHERE id=?`, bad.FlowID)
+	s.Close()
+	if s, err = Open(path); err != nil {
+		t.Fatalf("one bad flow stopped Open: %v", err)
+	}
+	defer s.Close()
+	if _, ok, _ := s.LatestRevision(good.FlowID); !ok {
+		t.Error("the good flow got no revision")
+	}
+}
