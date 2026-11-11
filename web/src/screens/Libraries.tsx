@@ -1,13 +1,16 @@
-// V5 Libraries (SCREENS V5, mockups/libraries.html and library.html), on the mock of v1's library routes, which the page
-// uses until /api/v2/libraries comes (contract v2, "Libraries: what exists now"). The library page has its General tab
-// only; Discovery, Filters, Output and Statistics come later, so no tabs are shown yet. Not shown, because v1 has no
-// data or route for them: description and tags (CAN'T YET), schedule, priority, pause and resume, other file types.
+// V5 Libraries (SCREENS V5, mockups/libraries.html and library.html) on v1's library routes (there is no
+// /api/v2/libraries yet; contract v2 "Libraries: what exists now"), or the mock with ?mock=1. The library page has its
+// General tab only; Discovery, Filters, Output and Statistics come later, so no tabs are shown yet. Not shown, because
+// v1 has no data or route for them: description and tags (CAN'T YET), schedule, priority, pause and resume, other file
+// types.
 import { useEffect, useState } from "react";
 import { Icon } from "../Icon";
-import { addLibrary, checkFolder, firstFiles, libraryItem, patchLibrary, scanLibrary, setLibraryWorkflow, useMock } from "../mock";
+import { SignedOut, failed, type Answer } from "../api";
+import { addLibrary, checkFolder, firstFiles, listLibraries, listWorkflows, patchLibrary, scanLibrary, setLibraryWorkflow, type WorkflowChoice } from "../libraryApi";
 import { Link, navigate } from "../router";
 import { bytes, clock, count, plural } from "../format";
-import type { LibraryItem } from "../types/v1";
+import { useData } from "../useData";
+import type { FirstFiles, FolderReport, LibraryItem } from "../types/v1";
 
 function lastScan(t: string | null): string {
   if (!t) return "Not yet";
@@ -16,6 +19,11 @@ function lastScan(t: string | null): string {
 }
 const folder = (p: string) => p.trim().replace(/(.)\/+$/, "$1"); // "/media/kids/" is "/media/kids"
 const names = (n: string[]) => (n.length > 1 ? n.slice(0, -1).join(", ") + " and " + n.at(-1) : n[0]);
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// An action's errors: signed out goes to sign-in (api.ts), anything else is shown.
+async function act<T>(f: () => Promise<Answer<T>>, onError: (m: string) => void): Promise<T | null> {
+  try { const r = await f(); if (failed(r)) { onError(r.error.message); return null; } return r; } catch (e) { if (e instanceof SignedOut) return null; throw e; }
+}
 function Status({ l }: { l: LibraryItem }) {
   const k = l.status.kind;
   if (k === "scanning") return <span className="st run"><Icon id="i-refresh" /><span>Scanning{l.status.foundSoFar ? " · " + count(l.status.foundSoFar) + " found" : ""}</span></span>;
@@ -24,29 +32,36 @@ function Status({ l }: { l: LibraryItem }) {
   if (k === "waiting_for_worker") return <span className="st wait"><Icon id="i-pause" /><span>Waiting for a worker</span></span>;
   return <span className="st ok"><Icon id="i-check-c" /><span>Watching</span></span>;
 }
+const Problem = ({ m }: { m?: string }) => (m ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{m}</span></p> : null);
 
 export function Libraries() {
-  const s = useMock();
-  const items = s.libraries.map(libraryItem), wfName = (id: string) => s.wf.find((w) => w.id === id)?.name ?? "";
+  const libs = useData(listLibraries, [], 3000), wfs = useData(listWorkflows, [], 10000);
+  const items = libs.data ?? [], wfName = (id: string) => wfs.data?.find((w) => w.id === id)?.name ?? "";
   const [sel, setSel] = useState<string[]>([]), [said, setSaid] = useState("");
   const picked = items.filter((l) => sel.includes(l.id));
-  const access = () => {
-    const bad = picked.map((l) => [l.name, checkFolder(l.path)] as const).map(([n, r]) => [n, "error" in r ? r.error.message : r.blockers[0]?.message] as const).filter(([, m]) => m);
-    setSaid(bad.length ? bad.map(([n, m]) => n + ": " + m).join(" ") : picked.length === 1 ? "The folder of " + picked[0].name + " is fine." : "All " + picked.length + " folders are fine.");
+  const scan = async () => {
+    for (const l of picked) await act(() => scanLibrary(l.id), (m) => setSaid(l.name + ": " + m));
+    setSaid((s) => s || "Scanning " + plural(picked.length, "library", "libraries") + "."); libs.reload();
+  };
+  const access = async () => {
+    const bad: string[] = [];
+    for (const l of picked) { const r = await act(() => checkFolder(l.path), (m) => bad.push(l.name + ": " + m)); if (r && r.blockers[0]) bad.push(l.name + ": " + r.blockers[0].message); }
+    setSaid(bad.length ? bad.join(" ") : picked.length === 1 ? "The folder of " + picked[0].name + " is fine." : "All " + picked.length + " folders are fine.");
   };
   return (
     <div className="stack">
       <div className="pagehead"><div><h1>Libraries</h1><p className="sub">The folders that are watched for videos.</p></div><span className="sp" />
         <Link className="btn primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link></div>
+      <Problem m={libs.error?.message} />
       <section className="card">
         {sel.length > 0 && (
           <div className="tools" role="group" aria-label="Selected libraries">
             <strong>{sel.length} selected</strong>
-            <button className="btn sm" type="button" onClick={() => (picked.forEach((l) => scanLibrary(l.id)), setSaid("Scanning " + plural(picked.length, "library", "libraries") + "."))}><Icon id="i-refresh" />Scan now</button>
+            <button className="btn sm" type="button" onClick={() => (setSaid(""), scan())}><Icon id="i-refresh" />Scan now</button>
             <button className="btn sm" type="button" onClick={access}><Icon id="i-shield" />Check folder access</button>
           </div>)}
         <p className="muted" role="status" style={said ? { padding: "0 16px" } : undefined}>{said}</p>
-        {items.length === 0 ? <div className="empty">No libraries yet. <Link to="/libraries/new">Add one</Link> to start.</div> : (
+        {!libs.loaded ? <div className="empty">Loading...</div> : items.length === 0 ? <div className="empty">No libraries yet. <Link to="/libraries/new">Add one</Link> to start.</div> : (
           <div className="tscroll"><table className="tbl">
             <thead><tr>
               <th><input type="checkbox" aria-label="Select all libraries" checked={sel.length === items.length} onChange={(e) => setSel(e.target.checked ? items.map((l) => l.id) : [])} /></th>
@@ -58,7 +73,7 @@ export function Libraries() {
                 <td><Link to={"/libraries/" + l.id}><strong>{l.name}</strong></Link></td>
                 <td className="mono sm">{l.path}</td>
                 <td>Video</td>
-                <td><Link to={"/workflows/" + l.flowId}>{wfName(l.flowId)}</Link></td>
+                <td><Link to={"/workflows/" + l.flowId}>{wfName(l.flowId) || l.settingLabel}</Link></td>
                 <td className="num">{count(l.status.videos)}</td>
                 <td className="num">{count(l.status.toDo)}</td>
                 <td className="nowrap">{lastScan(l.status.lastScan)}</td>
@@ -74,23 +89,47 @@ export function Libraries() {
 // /libraries/new and /libraries/:id. The same General form: a new library is POSTed, an existing one PATCHed (name,
 // folder) and its workflow PUT.
 export function LibraryPage({ id }: { id: string }) {
-  const s = useMock();
-  const l = id === "new" ? null : s.libraries.find((x) => x.id === id);
+  const libs = useData(listLibraries, [], 3000), wfs = useData(listWorkflows, [], 10000);
+  const l = id === "new" ? null : libs.data?.find((x) => x.id === id);
+  if (id !== "new" && !libs.loaded) return <div className="empty">Loading...</div>;
   if (id !== "new" && !l) return (
     <div className="stack"><div className="pagehead"><div><h1>Library not found</h1></div></div>
+      <Problem m={libs.error?.message} />
       <div className="card"><div className="bd"><p>There is no library with this address. <Link to="/libraries">See all libraries</Link>.</p></div></div></div>);
-  return <Form key={id} l={l ? libraryItem(l) : null} />;
+  return <Form key={id} l={l ?? null} workflows={wfs.data} reload={libs.reload} />;
 }
 
-// The folder field with its check, and the first 5 files of a folder that passes. Also first run's step 1.
+// The folder field with its check, and the first 5 files of a folder that passes. Also first run's step 1. The check
+// and the first 5 are requests, so they wait until typing stops; the first 5 come in as they're found (stillLooking).
 export function useFolder(start: string) {
   const [path, setPath] = useState(start), [checked, setChecked] = useState(folder(start));
-  useEffect(() => { const t = setTimeout(() => setChecked(folder(path)), 500); return () => clearTimeout(t); }, [path]); // the real check is a request: not on every key
-  const report = checked ? checkFolder(checked) : null;
-  const ok = !!report && !("error" in report) && report.ok;
-  const first = ok ? firstFiles(checked) : null;
+  const [report, setReport] = useState<Answer<FolderReport> | null>(null), [first, setFirst] = useState<Answer<FirstFiles> | null>(null);
+  useEffect(() => { const t = setTimeout(() => setChecked(folder(path)), 500); return () => clearTimeout(t); }, [path]);
+  useEffect(() => {
+    let live = true;
+    setReport(null); setFirst(null);
+    if (checked) (async () => {
+      try {
+        const r = await checkFolder(checked);
+        if (!live) return;
+        setReport(r);
+        if (failed(r) || !r.ok) return;
+        for (let i = 0; i < 60; i++) { // about a minute: a huge folder still shows what was found by then
+          const f = await firstFiles(checked);
+          if (!live) return;
+          setFirst(f);
+          if (failed(f) || !f.stillLooking) return;
+          await sleep(1000);
+        }
+      } catch (e) { if (!(e instanceof SignedOut)) throw e; }
+    })();
+    return () => { live = false; };
+  }, [checked]);
+  const ok = !!report && !failed(report) && report.ok;
   return { path, setPath, checked, report, ok, first, now: () => setChecked(folder(path)) };
 }
+// no_hw_encoder is about this computer's graphics card, not the folder: it isn't shown here (review 75a84d3, 1).
+const FOLDER_NOTE = (code: string) => code !== "no_hw_encoder";
 export function FolderField({ f, free }: { f: ReturnType<typeof useFolder>; free?: number | null }) {
   const r = f.report;
   return (
@@ -98,11 +137,12 @@ export function FolderField({ f, free }: { f: ReturnType<typeof useFolder>; free
       <input id="lib-path" className="input mono" value={f.path} aria-describedby="lib-path-check" placeholder="/media/movies"
         onChange={(e) => f.setPath(e.target.value)} onBlur={f.now} />
       <div id="lib-path-check" className="stack" style={{ gap: 4 }}>
-        {!r ? <span className="hint">The folder is checked as you type.</span>
-          : "error" in r ? <span className="st bad" role="alert"><Icon id="i-alert" /><span>{r.error.message}</span></span>
+        {!f.checked ? <span className="hint">The folder is checked as you type.</span>
+          : !r ? <span className="hint">Checking the folder...</span>
+          : failed(r) ? <span className="st bad" role="alert"><Icon id="i-alert" /><span>{r.error.message}</span></span>
           : r.blockers.length ? r.blockers.map((b) => <span key={b.code} className="st bad" role="alert"><Icon id="i-alert" /><span>{b.message}</span></span>)
           : <span className="st ok"><Icon id="i-check-c" /><span>{plural(r.videoCount, "video", "videos")}, {bytes(r.totalBytes)}{free != null ? " · " + bytes(free) + " free" : ""}</span></span>}
-        {r && !("error" in r) && r.notes.map((n) => <span key={n.code} className="st warn"><Icon id="i-alert" /><span>{n.message}</span></span>)}
+        {r && !failed(r) && r.notes.filter((n) => FOLDER_NOTE(n.code)).map((n) => <span key={n.code} className="st warn"><Icon id="i-alert" /><span>{n.message}</span></span>)}
       </div></div>
   );
 }
@@ -111,12 +151,13 @@ export function FirstFive({ f }: { f: ReturnType<typeof useFolder> }) {
   return (
     <section className="card" aria-labelledby="first-h">
       <div className="hd"><h2 id="first-h">Is this the right folder?</h2></div>
-      <div className="bd stack">
-        {!r ? <p className="muted">Give a folder that passes the check, and its first 5 videos show here.</p>
-          : "error" in r ? <p className="st bad"><Icon id="i-alert" /><span>{r.error.message}</span></p>
+      <div className="bd stack" aria-live="polite">
+        {!f.ok ? <p className="muted">Give a folder that passes the check, and its first 5 videos show here.</p>
+          : !r ? <p className="muted">Looking for videos in <span className="mono">{f.checked}</span>...</p>
+          : failed(r) ? <p className="st bad"><Icon id="i-alert" /><span>{r.error.message}</span></p>
           : <>
             <p className="muted">The first 5 files found in <span className="mono">{f.checked}</span>. Nothing is converted by looking.</p>
-            {r.items.length === 0 ? <p>No video files found in this folder.</p> : (
+            {r.items.length === 0 ? <p>{r.stillLooking ? "Still looking..." : "No video files found in this folder."}</p> : (
               <div className="tscroll"><table className="tbl">
                 <thead><tr><th>File</th><th>Video</th><th className="num">Size</th></tr></thead>
                 <tbody>{r.items.map((x) => (
@@ -124,62 +165,56 @@ export function FirstFive({ f }: { f: ReturnType<typeof useFolder> }) {
                     <td className="nowrap">{x.state === "unreadable" ? "Can't be read" : [x.codec, x.resolution].filter(Boolean).join(" · ") || "Checking..."}</td><td className="num">{bytes(x.bytes)}</td></tr>))}
                 </tbody>
               </table></div>)}
+            {r.items.length > 0 && r.stillLooking && <p className="muted sm">Still looking...</p>}
           </>}
       </div>
     </section>
   );
 }
 
-// The Workflow select: never-published workflows are listed but can't be chosen (V1 87faa4b: 409 workflow_not_published).
-export function WorkflowField({ value, onChange, except }: { value: string; onChange: (id: string) => void; except?: string }) {
-  const s = useMock();
-  const published = s.wf.filter((w) => w.publishedRevisionId != null);
-  const others = s.libraries.filter((x) => x.workflowId === value && x.id !== except).map((x) => x.name);
+// The Workflow select. A workflow that can't be used yet (on the mock: never published, 87faa4b) is listed but disabled.
+export function WorkflowField({ value, onChange, workflows, self }: { value: string; onChange: (id: string) => void; workflows?: WorkflowChoice[]; self?: string }) {
+  if (!workflows) return <div className="field"><span className="lab">Workflow</span><span className="muted">Loading...</span></div>;
+  const others = (workflows.find((w) => w.id === value)?.usedBy ?? []).filter((n) => n !== self);
   return (
     <div className="field"><label htmlFor="lib-wf">Workflow</label>
-      {s.wf.length === 0 ? <span>No workflows yet. <Link to="/workflows">Make one in Workflows</Link>, then come back.</span> : <>
+      {workflows.length === 0 ? <span>No workflows yet. <Link to="/workflows">Make one in Workflows</Link>, then come back.</span> : <>
         <div className="row" style={{ gap: 8 }}>
           <select id="lib-wf" className="input" value={value} onChange={(e) => onChange(e.target.value)} aria-describedby="lib-wf-hint" style={{ flex: 1 }}>
             {!value && <option value="">Choose a workflow</option>}
-            {s.wf.map((w) => <option key={w.id} value={w.id} disabled={w.publishedRevisionId == null}>{w.name}{w.publishedRevisionId == null ? " (not published yet)" : ""}</option>)}
+            {workflows.map((w) => <option key={w.id} value={w.id} disabled={!w.usable}>{w.name}{w.usable ? "" : " (not published yet)"}</option>)}
           </select>
           {value && <Link to={"/workflows/" + value}>Edit this workflow</Link>}
         </div>
-        <span id="lib-wf-hint" className="hint">{published.length === 0 ? "Publish a workflow before a library can use it." : others.length ? "Used by " + names(others) + "." : "No other library uses it."}</span>
+        <span id="lib-wf-hint" className="hint">{!workflows.some((w) => w.usable) ? "Publish a workflow before a library can use it." : others.length ? "Used by " + names(others) + "." : "No other library uses it."}</span>
       </>}
     </div>
   );
 }
 
-function Form({ l }: { l: LibraryItem | null }) {
-  const s = useMock();
+function Form({ l, workflows, reload }: { l: LibraryItem | null; workflows?: WorkflowChoice[]; reload: () => void }) {
   const f = useFolder(l?.path ?? "");
-  const [name, setName] = useState(l?.name ?? ""), [wf, setWf] = useState(l?.flowId ?? s.wf.find((w) => w.publishedRevisionId != null)?.id ?? "");
-  const [error, setError] = useState(""), [said, setSaid] = useState("");
+  const [name, setName] = useState(l?.name ?? ""), [wf, setWf] = useState(l?.flowId ?? "");
+  const [error, setError] = useState(""), [said, setSaid] = useState(""), [busy, setBusy] = useState(false);
+  const pick = wf || (!l && workflows?.find((w) => w.usable)?.id) || ""; // a new library starts on the first usable one
   const moved = !!l && f.checked !== l.path;
-  const changed = !l || name !== l.name || moved || wf !== l.flowId;
-  const save = () => {
-    setSaid(""); setError("");
-    if (!l) {
-      const r = addLibrary(name, f.checked, wf);
-      return "error" in r ? setError(r.error.message) : navigate("/libraries/" + r.id);
-    }
-    if (name !== l.name || moved) {
-      const r = patchLibrary(l.id, { ...(name !== l.name && { name }), ...(moved && { path: f.checked }) });
-      if ("error" in r) return setError(r.error.message);
-    }
-    if (wf !== l.flowId) {
-      const r = setLibraryWorkflow(l.id, wf);
-      if ("error" in r) return setError(r.error.message);
-    }
-    setSaid("Saved.");
+  const changed = !l || name !== l.name || moved || pick !== l.flowId;
+  const save = async () => {
+    setSaid(""); setError(""); setBusy(true);
+    try {
+      if (!l) { const r = await act(() => addLibrary(name, f.checked, pick), setError); if (r) navigate("/libraries/" + r.id); return; }
+      if (name !== l.name || moved) { if (!(await act(() => patchLibrary(l.id, { ...(name !== l.name && { name }), ...(moved && { path: f.checked }) }), setError))) return; }
+      if (pick !== l.flowId) { if (!(await act(() => setLibraryWorkflow(l.id, pick), setError))) return; }
+      setSaid("Saved."); reload();
+    } finally { setBusy(false); }
   };
+  const scan = async () => { if (l && (await act(() => scanLibrary(l.id), setError))) reload(); };
   return (
     <div className="stack">
       <div className="pagehead">
         <div><h1>{l ? l.name : "Add library"}</h1>{l ? <p className="sub"><Status l={l} /> <span className="mono sm">{l.path}</span></p> : <p className="sub">A folder to watch for videos, and the workflow its files go through.</p>}</div>
         <span className="sp" />
-        {l && <button className="btn" type="button" disabled={l.status.kind === "scanning"} onClick={() => scanLibrary(l.id)}><Icon id="i-refresh" />{l.status.kind === "scanning" ? "Scanning..." : "Scan now"}</button>}
+        {l && <button className="btn" type="button" disabled={l.status.kind === "scanning"} onClick={scan}><Icon id="i-refresh" />{l.status.kind === "scanning" ? "Scanning..." : "Scan now"}</button>}
       </div>
       {l && !l.started && <p className="muted" role="note">This library isn't started yet: nothing is looked for or converted until you press Scan now.</p>}
       <div className="grid cols2">
@@ -190,11 +225,11 @@ function Form({ l }: { l: LibraryItem | null }) {
               <input id="lib-name" className="input" required value={name} onChange={(e) => setName(e.target.value)} placeholder="Movies" /></div>
             <FolderField f={f} free={l && !moved ? l.freeBytes : undefined} />
             <div className="field"><span className="lab">File type</span><span>Video</span></div>
-            <WorkflowField value={wf} onChange={setWf} except={l?.id} />
-            {error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{error}</span></p>}
+            <WorkflowField value={pick} onChange={setWf} workflows={workflows} self={l?.name} />
+            <Problem m={error} />
             <p className="muted" role="status">{said}</p>
             <div className="row" style={{ gap: 8 }}>
-              <button className="btn primary" type="submit" disabled={!changed || !name.trim() || !wf || ((!l || moved) && !f.ok)}>{l ? "Save" : "Add library"}</button>
+              <button className="btn primary" type="submit" disabled={busy || !changed || !name.trim() || !pick || ((!l || moved) && !f.ok)}>{l ? "Save" : "Add library"}</button>
               <Link className="btn" to="/libraries">Cancel</Link>
             </div>
           </form>

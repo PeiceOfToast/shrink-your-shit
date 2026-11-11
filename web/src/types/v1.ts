@@ -28,3 +28,7 @@ export interface LibraryItem { // GET /api/libraries -> {items, total}; GET/POST
 export interface FolderReport { ok: boolean; blockers: Issue[]; notes: Issue[]; videoCount: number; totalBytes: number } // POST /api/libraries/check {path}
 export interface FirstFile { path: string; folder: string; name: string; bytes: number; state: "checking" | "ready" | "unreadable"; codec: string | null; resolution: string | null; durationSec: number | null }
 export interface FirstFiles { items: FirstFile[]; total: number; stillLooking: boolean } // POST /api/libraries/first-files {path}, GET /api/libraries/{id}/first-files
+export interface FlowItem { id: ID; name: string; usedBy: string[]; madeWith: string; changedAt: Time; kind: string; tag: string } // GET /api/flows -> {items, total}
+export interface WorkerV1 { id: ID; name: string; host: string; state: string; filesAtOnce: number; gpu: { found: boolean; vendor: string | null }; converting: unknown[]; quietUntil: Time | null } // GET /api/workers -> {workers}
+// GET/PATCH /api/settings: the fields first run uses (the server sends more).
+export interface FirstRunSettings { firstRunDone: boolean; firstRunStep: number; firstRunLibrary: { name: string; path: string } | null }

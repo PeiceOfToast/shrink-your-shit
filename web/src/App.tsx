@@ -1,4 +1,7 @@
 import { useEffect } from "react";
+import { MOCK, SignedOut, failed } from "./api";
+import { getSettings } from "./libraryApi";
+import { SignIn } from "./screens/SignIn";
 import sprite from "./icons.svg?raw";
 import { itemFor } from "./nav";
 import { AppearanceSettings, Coming, NotFound } from "./pages";
@@ -7,7 +10,7 @@ import { Libraries, LibraryPage } from "./screens/Libraries";
 import { Start } from "./screens/Start";
 import { Workflows } from "./screens/Workflows";
 import { WorkflowStack } from "./screens/WorkflowStack";
-import { usePath } from "./router";
+import { navigate, usePath } from "./router";
 import { Shell } from "./Shell";
 
 export function App() {
@@ -17,14 +20,22 @@ export function App() {
   // Other pages' deeper paths (/workflows/42/graph) are their future routes; Settings' sub-pages are known, so any
   // other /settings/... is not found.
   const item = path.startsWith("/settings/") && !settings ? undefined : itemFor(path);
-  const start = path === "/start"; // first run: not in the menu (IA.md)
-  const title = settings ? "Settings" : start ? "Set up" : item ? item.label : "Page not found";
+  const start = path === "/start", signin = path === "/signin"; // not in the menu (IA.md)
+  // Screens on the real server (no Prototype banner): Libraries and first run. The rest stay on the mock for now.
+  const real = !MOCK && (start || signin || path === "/libraries" || path.startsWith("/libraries/"));
+  const title = settings ? "Settings" : start ? "Set up" : signin ? "Sign in" : item ? item.label : "Page not found";
   useEffect(() => { document.title = title + " · Shrink Your Shit (new interface)"; }, [title]);
+  // A server whose first run isn't done opens on it (IA.md: shown until done). Upgrades from v1 have it done.
+  useEffect(() => {
+    if (MOCK || path !== "/") return;
+    getSettings().then((r) => { if (!failed(r) && !r.firstRunDone && location.pathname.replace(/\/+$/, "") === "/next") navigate("/start"); })
+      .catch((e) => { if (!(e instanceof SignedOut)) throw e; });
+  }, [path]);
   return (
     <>
       <div dangerouslySetInnerHTML={{ __html: sprite }} />
-      <Shell title={title} proto={start || (!settings && !!item)}>
-        {settings ? <AppearanceSettings /> : path === "/" ? <Dashboard /> : start ? <Start /> : path === "/libraries" ? <Libraries /> : /^\/libraries\/[^/]+$/.test(path) ? <LibraryPage key={path} id={path.split("/")[2]} />: path === "/workflows" ? <Workflows /> : /^\/workflows\/[^/]+$/.test(path) ? <WorkflowStack key={path} id={path.split("/")[2]} /> : item ? <Coming item={item} /> : <NotFound />}
+      <Shell title={title} proto={!real && (start || (!settings && !!item))}>
+        {settings ? <AppearanceSettings /> : path === "/" ? <Dashboard /> : start ? <Start /> : signin ? <SignIn /> : path === "/libraries" ? <Libraries /> : /^\/libraries\/[^/]+$/.test(path) ? <LibraryPage key={path} id={path.split("/")[2]} />: path === "/workflows" ? <Workflows /> : /^\/workflows\/[^/]+$/.test(path) ? <WorkflowStack key={path} id={path.split("/")[2]} /> : item ? <Coming item={item} /> : <NotFound />}
       </Shell>
     </>
   );

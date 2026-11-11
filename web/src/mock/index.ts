@@ -102,15 +102,14 @@ function running(): State {
 }
 function fresh(): State {
   return {
-    // ?mock=fresh-old: a server without firstRunLibrary (before workshop's change), so first run falls back to sessionStorage.
-    settings: { firstRunDone: false, firstRunStep: 1, intakePaused: false, catalogueEnabled: false, ...(mockMode === "fresh-old" ? {} : { firstRunLibrary: null }) },
+    settings: { firstRunDone: false, firstRunStep: 1, intakePaused: false, catalogueEnabled: false, firstRunLibrary: null },
     libraries: [],
     workers: [worker("this", "This computer", "paused", [0, 2], [0, 0], 5, [])], // workers start stopped (rebuild decision)
     jobs: [], waiting: 0, last24h: { completed: 0, failed: 0, skipped: 0, successRate: null }, activity: [], wf: [], trash: { bytes: 0, files: 0, nextDeleteAt: null, lastDeleteAt: null },
   };
 }
 
-let state: State = mockMode?.startsWith("fresh") ? fresh() : running();
+let state: State = mockMode === "fresh" ? fresh() : running();
 let version = 0;
 // When the data last changed (the real app: when the summary or a live event last arrived). The Dashboard's "Updated".
 export let updatedAt = new Date();
@@ -119,6 +118,7 @@ const change = (f: (s: State) => void) => { f(state); state = { ...state }; vers
 const log = (type: ActivityEvent["type"], text: string, refs: ActivityEvent["refs"] = {}) =>
   state.activity.unshift({ id: "a" + Date.now() + Math.random(), at: new Date().toISOString(), type, text, refs });
 
+export const mockState = () => state; // the same, outside a component (libraryApi.ts)
 export function useMock(): State {
   useSyncExternalStore((f) => (listeners.add(f), () => listeners.delete(f)), () => version);
   return state;
@@ -349,7 +349,7 @@ export function addLibrary(name: string, path: string, flowId: ID): Answer<Libra
   l.workflowId = flowId; l.workflowName = state.wf.find((w) => w.id === flowId)!.name; l.enabled = false;
   l.counts = { files: 0, waiting: 0, running: 0, completed: 0, skipped: 0, failed: 0 };
   l.scan = { ...l.scan, lastScanAt: null, nextScanAt: null };
-  change((s) => { s.libraries = [...s.libraries, l]; linkWorkflows(s); if (s.settings.firstRunLibrary !== undefined) s.settings = { ...s.settings, firstRunLibrary: null }; log("library.scanned", "Added the library " + l.name, { libraryId: l.id }); });
+  change((s) => { s.libraries = [...s.libraries, l]; linkWorkflows(s); s.settings = { ...s.settings, firstRunLibrary: null }; log("library.scanned", "Added the library " + l.name, { libraryId: l.id }); });
   return libraryItem(l);
 }
 // PATCH /api/libraries/{id} {name?, path?}: a new path gets the same checks as adding one.
