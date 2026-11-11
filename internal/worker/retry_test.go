@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -37,7 +38,23 @@ func (s *scenario) wantRetry(attempts int, wait time.Duration, reason string) {
 	if j.Status != jobs.Queued || j.Attempts != attempts || j.RetryAt != retryPast.Add(wait).UTC().Format(time.RFC3339) || !strings.Contains(j.Error, reason) {
 		s.t.Fatalf("want queued for a retry (try %d, +%s, %q): %s attempts %d at %q %q", attempts, wait, reason, j.Status, j.Attempts, j.RetryAt, j.Error)
 	}
+	// its history entry: a known code, never the sentence, which is the message (cap-778a2f0)
+	ev, _ := s.store.JobEvents(j.ID)
+	if last := ev[len(ev)-1]; !slices.Contains(jobs.JobReasonCodes, last.Reason) || last.Message != j.Error {
+		s.t.Errorf("history: code %q message %q (the job's words %q)", last.Reason, last.Message, j.Error)
+	}
 	s.assertOriginalSafe()
+}
+
+// The low-space retry says so in its code (the case ui-shop caught).
+func TestLowSpaceRetryHasItsCode(t *testing.T) {
+	s := newScenario(t)
+	s.freeBytes = 1 << 20
+	s.retrying().RunOne(context.Background())
+	s.wantRetry(1, 30*time.Minute, "not enough free disk space")
+	if ev, _ := s.store.JobEvents(s.job().ID); ev[len(ev)-1].Reason != jobs.ReasonLowDiskSpace {
+		t.Errorf("code %q", ev[len(ev)-1].Reason)
+	}
 }
 
 func TestFailuresThatMayPassAreTriedAgain(t *testing.T) {

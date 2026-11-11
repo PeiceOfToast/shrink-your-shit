@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
@@ -59,11 +60,13 @@ func checkFailed(cctx context.Context, what string, err error) error {
 }
 
 // KeptError means a safety check refused the new file (or could not run): the original is kept.
-type KeptError struct{ Reason string }
+type KeptError struct{ Code, Reason string } // Code: one of jobs.JobReasonCodes
 
 func (e *KeptError) Error() string { return "kept original: " + e.Reason }
 
-func kept(format string, a ...any) error { return &KeptError{Reason: fmt.Sprintf(format, a...)} }
+func kept(format string, a ...any) error {
+	return &KeptError{Code: jobs.ReasonKeptOriginal, Reason: fmt.Sprintf(format, a...)}
+}
 
 // verification is the judging settings in force for a result checked against exp.
 func (w *Worker) verification(exp rules.Expect) rules.Verification {
@@ -118,8 +121,10 @@ func (w *Worker) preflight(sourcePath string, sourceSize int64) error {
 	}
 	need := SpaceNeeded(sourceSize)
 	if free < need {
-		return retryable(kept("there is not enough free disk space next to this file: about %s is needed to convert it safely, %s is free",
-			rules.HumanBytes(int64(need)), rules.HumanBytes(int64(free))), retrySpace)
+		ke := kept("there is not enough free disk space next to this file: about %s is needed to convert it safely, %s is free",
+			rules.HumanBytes(int64(need)), rules.HumanBytes(int64(free))).(*KeptError)
+		ke.Code = jobs.ReasonLowDiskSpace
+		return retryable(ke, retrySpace)
 	}
 	return nil
 }

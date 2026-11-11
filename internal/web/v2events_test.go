@@ -7,6 +7,7 @@ import (
 	"context"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -173,7 +174,7 @@ func TestV2SummaryAndPauses(t *testing.T) {
 	st.Complete(done, filepath.Join(lib.Path, "a.mkv"), 400)
 	bad, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "b.mkv"), SizeBefore: 1000})
 	st.Claim("w")
-	st.Fail(bad, "Converting did not finish")
+	st.Fail(bad, "convert_failed", "Converting did not finish")
 	st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "c.mkv"), SizeBefore: 1000})
 	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/summary"})
 	for _, want := range []string{`"completed":1`, `"failed":1`, `"successRate":0.5`, `"waiting":1`, `"failed24h":1`,
@@ -198,5 +199,24 @@ func TestV2SummaryAndPauses(t *testing.T) {
 	}
 	if _, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/summary"}); !strings.Contains(body, `"processingPaused":true`) || !strings.Contains(body, `"intakePaused":true`) {
 		t.Errorf("paused summary %s", body)
+	}
+}
+
+// A failure's reason is {code, message}: the code a fixed one, the sentence beside it (cap-778a2f0).
+func TestV2ReasonIsCodeAndMessage(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	st.SetPaused(false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "a.mkv")})
+	st.Claim("w")
+	c := stream(t, srv.URL, "")
+	nextMessage(t, c) // hello
+	st.RetryLater(id, time.Now().Add(time.Hour), jobs.ReasonLowDiskSpace, "there is not enough free disk space next to this file")
+	if m := nextMessage(t, c); !strings.Contains(m.data, `"reason":{"code":"low_disk_space","message":"there is not enough free disk space next to this file"}`) {
+		t.Errorf("stream %+v", m)
+	}
+	code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10)})
+	if code != 200 || !strings.Contains(body, `"reason":{"code":"low_disk_space","message":"there is not enough free disk space next to this file"}`) {
+		t.Errorf("job %d %s", code, body)
 	}
 }

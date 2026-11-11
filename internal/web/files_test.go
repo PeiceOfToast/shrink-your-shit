@@ -37,7 +37,7 @@ func TestFilesView(t *testing.T) {
 	st.Complete(done, filepath.Join(m, "Film.mkv"), 400)
 	failed, _ := st.Enqueue(jobs.Job{Library: m, LibraryID: lib.ID, Path: filepath.Join(m, "Bad.mkv")})
 	st.Claim("w")
-	st.Fail(failed, "Converting stopped with an error.")
+	st.Fail(failed, "convert_failed", "Converting stopped with an error.")
 	st.Enqueue(jobs.Job{Library: m, LibraryID: lib.ID, Path: filepath.Join(m, "Season 1", "Next.mkv")})
 	st.PutFile(jobs.File{Path: filepath.Join(m, "Old.mkv"), Size: 5, Decision: "skip: x", Reason: rules.SkipAlreadyHEVC})
 	st.PutProbe(filepath.Join(m, "Film.mkv"), 400, 1, `{"durationSec":60,"streams":[{"type":"video","codec":"hevc","Width":1920,"Height":1080}]}`)

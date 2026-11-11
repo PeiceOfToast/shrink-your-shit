@@ -122,7 +122,9 @@ func eventMessage(e jobs.Event) (string, map[string]any) {
 	m := map[string]any{"type": "job.state", "jobId": strconv.FormatInt(e.JobID, 10), "at": e.At, "from": from, "to": eventState(e.To),
 		"reason": nil, "workerId": nilIfEmpty(e.Worker)}
 	if e.Reason != "" {
-		m["reason"] = map[string]string{"code": e.Reason}
+		var d struct{ Message string }
+		json.Unmarshal([]byte(e.Data), &d)
+		m["reason"] = map[string]string{"code": e.Reason, "message": d.Message}
 	}
 	return "job.state", m
 }

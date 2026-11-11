@@ -306,7 +306,7 @@ func (s *Store) RequestStop(id int64) (running bool, err error) {
 		if err := putFile(tx, userStoppedFile(path)); err != nil {
 			return false, err
 		}
-		if _, err := tx.Exec(`INSERT INTO events(kind, job_id, at, from_status, to_status, reason) VALUES ('job',?,?,?,?,?)`, id, s.stamp(), status, "cancelled", "user_stopped"); err != nil {
+		if _, err := tx.Exec(`INSERT INTO events(kind, job_id, at, from_status, to_status, reason, data) VALUES ('job',?,?,?,?,?,json_object('message',?))`, id, s.stamp(), status, "cancelled", UserStoppedReason, userStoppedWords); err != nil {
 			return false, err // review 66806b3: the reason, before the row goes
 		}
 		if _, err := tx.Exec(`DELETE FROM jobs WHERE id=?`, id); err != nil {
@@ -439,7 +439,7 @@ func (s *Store) UserStopped(id int64) error {
 	if err := s.PutFile(userStoppedFile(j.Path)); err != nil {
 		return err
 	}
-	s.endEvent(j, "cancelled", "user_stopped") // V2: the row goes, its history stays
+	s.endEvent(j, "cancelled", UserStoppedReason, userStoppedWords) // V2: the row goes, its history stays
 	if _, err = s.db.Exec(`DELETE FROM jobs WHERE id=?`, id); err != nil {
 		return err
 	}
@@ -467,7 +467,7 @@ func (s *Store) Skip(id int64, words, code string) error {
 	if err := s.PutFile(f); err != nil {
 		return err
 	}
-	s.endEvent(j, "skipped", code) // V2: the row goes, its history stays
+	s.endEvent(j, "skipped", code, upperFirst(words)+".") // V2: the row goes, its history stays
 	if _, err = s.db.Exec(`DELETE FROM jobs WHERE id=?`, id); err != nil {
 		return err
 	}
@@ -483,6 +483,35 @@ var ErrNotStoppable = errors.New("this file is not waiting or converting")
 
 // endEvent writes a job's last history entry when it ends by being deleted (skipped, stopped): the
 // triggers of migration 21 see only status changes.
-func (s *Store) endEvent(j Job, to, reason string) {
-	s.db.Exec(`INSERT INTO events(kind, job_id, at, from_status, to_status, reason, worker) VALUES ('job',?,?,?,?,?,?)`, j.ID, s.stamp(), string(j.Status), to, reason, j.Worker)
+func (s *Store) endEvent(j Job, to, reason, message string) {
+	s.db.Exec(`INSERT INTO events(kind, job_id, at, from_status, to_status, reason, worker, data) VALUES ('job',?,?,?,?,?,?,json_object('message',?))`,
+		j.ID, s.stamp(), string(j.Status), to, reason, j.Worker, message)
 }
+
+// upperFirst is s with its first letter capitalised (skip words are written to follow "skip: ").
+func upperFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+const userStoppedWords = "You stopped this file. It is left as it is until you press Convert again."
+
+// Reason codes (V3, the contract's list): a job's reason is always one of these, with its sentence
+// beside it. The scan's skip codes (rules.Skip*) come from the file decision; these come from the job.
+const (
+	ReasonConvertFailed = "convert_failed" // the conversion did not finish (the general case)
+	ReasonDiskFull      = "disk_full"      // the disk filled up while converting
+	ReasonCannotRead    = "cannot_read"    // not allowed to read the file
+	ReasonCannotWrite   = "cannot_write"   // not allowed to write in its folder
+	ReasonStalled       = "stalled"        // the converter stopped reporting progress
+	ReasonLowDiskSpace  = "low_disk_space" // not enough free space next to the file to convert it safely
+	ReasonKeptOriginal  = "kept_original"  // a safety check refused the result; the original stays
+	ReasonRetryLater    = "retry_later"    // a failure that may pass, from before codes were kept (migration 23)
+	ReasonRemoved       = "removed"        // the job was removed (its library went, or a clean-up)
+)
+
+// JobReasonCodes are the codes a job's own reason can have (besides the skip codes and user_stopped).
+var JobReasonCodes = []string{ReasonConvertFailed, ReasonDiskFull, ReasonCannotRead, ReasonCannotWrite, ReasonStalled,
+	ReasonLowDiskSpace, ReasonKeptOriginal, ReasonRetryLater, ReasonRemoved, UserStoppedReason}

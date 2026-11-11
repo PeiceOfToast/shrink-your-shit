@@ -112,6 +112,10 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 		if j.Status == jobs.Queued && j.RetryAt != "" {
 			d["state"] = "retry_wait"
 		}
+		d["reason"] = nil // a failure, a kept original or a retry: its code and words, from the change that set them
+		if n := len(events); j.Error != "" && n > 0 {
+			d["reason"] = reasonOf(events[n-1])
+		}
 		meta := map[string]any{"before": nil, "after": nil}
 		if raw, ok := store.LatestProbe(j.Path); ok {
 			meta["before"] = json.RawMessage(raw)
@@ -324,7 +328,7 @@ func reasonOf(e jobs.JobEvent) any {
 	if e.Reason == "" {
 		return nil
 	}
-	return map[string]string{"code": e.Reason}
+	return map[string]string{"code": e.Reason, "message": e.Message}
 }
 
 func isQueued(store *jobs.Store, id int64) bool {

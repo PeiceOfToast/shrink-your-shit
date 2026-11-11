@@ -127,7 +127,7 @@ func TestJobHistory(t *testing.T) {
 	}
 	a, _ := s.Enqueue(Job{Library: l.Path, LibraryID: l.ID, Path: filepath.Join(l.Path, "a.mkv")})
 	s.Claim("w1")
-	s.RetryLater(a, time.Now().Add(-time.Second), "busy")
+	s.RetryLater(a, time.Now().Add(-time.Second), "convert_failed", "busy")
 	s.Claim("w1")
 	s.Complete(a, filepath.Join(l.Path, "a.mkv"), 1)
 	if got := to(a); fmt.Sprint(got) != "[queued running queued running done]" {
@@ -193,7 +193,7 @@ func TestJobHistoryEnds(t *testing.T) {
 	r, _ := s.Enqueue(Job{Library: l.Path, LibraryID: l.ID, Path: filepath.Join(l.Path, "r.mkv")})
 	s.SetPaused(false)
 	s.Claim("w")
-	s.RetryLater(r, time.Now().Add(time.Hour), "busy")
+	s.RetryLater(r, time.Now().Add(time.Hour), "convert_failed", "busy")
 	if err := s.RetryNow(r); err != nil {
 		t.Fatal(err)
 	}
@@ -240,6 +240,7 @@ func TestEventsMigrationKeepsSeq(t *testing.T) {
 		`CREATE TRIGGER job_events_status AFTER UPDATE OF status ON jobs BEGIN SELECT 1; END`,
 		`CREATE TRIGGER job_events_removed AFTER DELETE ON jobs BEGIN SELECT 1; END`,
 		`INSERT INTO job_events(seq, job_id, at, to_status) VALUES (41, 7, '2026-11-01T00:00:00Z', 'queued'), (42, 7, '2026-11-01T00:00:01Z', 'running')`,
+		`ALTER TABLE jobs DROP COLUMN error_code`, // migration 23 runs again
 		`PRAGMA user_version=21`} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
@@ -276,5 +277,59 @@ func TestOpenSurvivesABadFlow(t *testing.T) {
 	defer s.Close()
 	if _, ok, _ := s.LatestRevision(good.FlowID); !ok {
 		t.Error("the good flow got no revision")
+	}
+}
+
+// Migration 23: history from before reason codes (the sentence as the code) gets a code from where the
+// job went, the sentence as its message; a failed job's code is set; new changes record both.
+func TestReasonCodesMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "syp.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
+	s.SetPaused(false)
+	id, _ := s.Enqueue(Job{Library: l.Path, LibraryID: l.ID, Path: filepath.Join(l.Path, "a.mkv")})
+	if _, err := s.Claim("w"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Fail(id, ReasonConvertFailed, "Converting did not finish."); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{ // back to version 22: the sentence was the code
+		`UPDATE events SET reason='Converting did not finish.', data=NULL WHERE kind='job' AND to_status='failed'`,
+		`INSERT INTO events(kind, job_id, at, from_status, to_status, reason) VALUES ('job', 99, '2026-11-01T00:00:00Z', 'running', 'cancelled', 'user_stopped')`,
+		`DROP TRIGGER events_job_status`, `DROP TRIGGER events_job_removed`,
+		`CREATE TRIGGER events_job_status AFTER UPDATE OF status ON jobs BEGIN SELECT 1; END`,
+		`CREATE TRIGGER events_job_removed AFTER DELETE ON jobs BEGIN SELECT 1; END`,
+		`ALTER TABLE jobs DROP COLUMN error_code`, `PRAGMA user_version=22`} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatal(q, err)
+		}
+	}
+	s.Close()
+	if s, err = Open(path); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ev, _ := s.JobEvents(id)
+	if last := ev[len(ev)-1]; last.Reason != ReasonConvertFailed || last.Message != "Converting did not finish." {
+		t.Errorf("old failure %+v", last)
+	}
+	if ev, _ := s.JobEvents(99); len(ev) != 1 || ev[0].Reason != UserStoppedReason || ev[0].Message == "" {
+		t.Errorf("old stop %+v", ev)
+	}
+	var code string
+	s.db.QueryRow(`SELECT error_code FROM jobs WHERE id=?`, id).Scan(&code)
+	if code != ReasonConvertFailed {
+		t.Errorf("the failed job's code %q", code)
+	}
+	s.Retry(id)
+	s.Claim("w")
+	s.RetryLater(id, time.Now(), ReasonLowDiskSpace, "there is not enough free disk space next to this file")
+	ev, _ = s.JobEvents(id)
+	if last := ev[len(ev)-1]; last.Reason != ReasonLowDiskSpace || last.Message != "there is not enough free disk space next to this file" {
+		t.Errorf("new retry %+v", last)
 	}
 }

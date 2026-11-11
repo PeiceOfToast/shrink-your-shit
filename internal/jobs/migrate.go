@@ -291,6 +291,32 @@ WHEN NOT EXISTS (SELECT 1 FROM events WHERE kind = 'job' AND job_id = old.id AND
   INSERT INTO events(kind, job_id, at, from_status, to_status, reason, worker)
   VALUES ('job', old.id, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), old.status, 'cancelled', 'removed', old.worker);
 END;`},
+	// V3 (ui-shop, cap-778a2f0): a job's reason is {code, message}. The code was the sentence itself for
+	// failures, kept originals and retries (jobs.error); it now has its own column, and the history keeps
+	// both: reason the code, data the sentence. Older history: the sentence moves to data, and the code
+	// comes from where the job went (ReasonCodes lists them all).
+	{23, "reason codes", `
+ALTER TABLE jobs ADD COLUMN error_code TEXT NOT NULL DEFAULT '';
+UPDATE jobs SET error_code = CASE status WHEN 'failed' THEN 'convert_failed' WHEN 'kept' THEN 'kept_original' ELSE 'retry_later' END
+  WHERE error <> '';
+UPDATE events SET data = json_object('message', reason),
+  reason = CASE to_status WHEN 'failed' THEN 'convert_failed' WHEN 'kept' THEN 'kept_original' ELSE 'retry_later' END
+  WHERE kind = 'job' AND reason <> '' AND (reason GLOB '*[^a-z0-9_]*');
+DROP TRIGGER events_job_status;
+CREATE TRIGGER events_job_status AFTER UPDATE OF status ON jobs WHEN old.status <> new.status BEGIN
+  INSERT INTO events(kind, job_id, at, from_status, to_status, reason, worker, data) VALUES ('job', new.id, new.updated, old.status, new.status,
+    new.error_code, new.worker, CASE WHEN new.error <> '' THEN json_object('message', new.error) END);
+END;
+DROP TRIGGER events_job_removed;
+CREATE TRIGGER events_job_removed AFTER DELETE ON jobs
+WHEN NOT EXISTS (SELECT 1 FROM events WHERE kind = 'job' AND job_id = old.id AND to_status IN ('skipped', 'cancelled')) BEGIN
+  INSERT INTO events(kind, job_id, at, from_status, to_status, reason, worker, data)
+  VALUES ('job', old.id, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), old.status, 'cancelled', 'removed', old.worker,
+    json_object('message', 'This job was removed from the list.'));
+END;
+UPDATE events SET data = json_object('message', 'This job was removed from the list.') WHERE kind = 'job' AND reason = 'removed' AND data IS NULL;
+UPDATE events SET data = json_object('message', 'You stopped this file. It is left as it is until you press Convert again.')
+  WHERE kind = 'job' AND reason = 'user_stopped' AND data IS NULL;`},
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.

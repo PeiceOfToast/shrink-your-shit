@@ -34,13 +34,13 @@ func TestFileList(t *testing.T) {
 	run(done)
 	s.Complete(done, "/m/Done One.mkv", 10)
 	run(failed)
-	s.Fail(failed, "broke")
+	s.Fail(failed, "convert_failed", "broke")
 	run(kept)
-	s.Keep(kept, "a check said no")
+	s.Keep(kept, "kept_original", "a check said no")
 	run(running)
 	retry := add(movies, "retry.mkv")
 	run(retry)
-	s.RetryLater(retry, time.Now().Add(time.Hour), "busy")
+	s.RetryLater(retry, time.Now().Add(time.Hour), "convert_failed", "busy")
 	for i := 0; i < 3; i++ {
 		add(movies, fmt.Sprintf("wait%d.mkv", i))
 	}
