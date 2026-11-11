@@ -108,16 +108,9 @@ func TestRealSelectors(t *testing.T) {
 			t.Errorf("got %q", rd)
 		}
 	})
-	t.Run("subtitles MP4 cannot hold: skipped with a reason", func(t *testing.T) {
-		os.WriteFile(filepath.Join(dir, "s.srt"), []byte("1\n00:00:00,000 --> 00:00:01,000\nhi\n"), 0o644)
-		p := filepath.Join(dir, "subs.mkv")
-		runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=2:size=1280x720:rate=25", "-i", filepath.Join(dir, "s.srt"),
-			"-map", "0", "-map", "1", "-c:v", "libx264", "-b:v", "5000k", "-c:s", "srt", p)
-		plan := sel(func(s *rules.Selectors) { s.FileType = "mp4"; s.AfterConverting = "beside" }).Compile(probe(t, p))
-		if plan.SkipCode != rules.SkipCannotKeepTrack || plan.Skip != "its subrip subtitles cannot be kept in MP4" {
-			t.Errorf("%q %q", plan.SkipCode, plan.Skip)
-		}
-	})
+	// "subtitles MP4 cannot hold" was SRT; SRT now becomes mov_text (TestRealMP4KeepsTextSubtitles). The
+	// skip that's left is for picture subtitles (PGS, DVB), which ffmpeg can't make from text, so the rules
+	// test TestMP4TextSubtitles covers it with a probed PGS track.
 	t.Run("HDR10 is converted keeping its HDR (S3; TestRealHDR10 runs it)", func(t *testing.T) {
 		// x264's own VUI flags: ffmpeg's -color_trc does not reach an mkv stream from libx264
 		p := gen("hdr.mkv", "1280x720", 5000, "-pix_fmt", "yuv420p10le", "-x264-params", "colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc")
