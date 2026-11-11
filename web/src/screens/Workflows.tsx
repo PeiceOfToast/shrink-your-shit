@@ -117,7 +117,7 @@ export function Workflows() {
               return (
                 <tr key={w.id}>
                   <td className="idc"><span className="row nw">
-                    <button className="btn sm icon ghost over" type="button" aria-pressed={w.favourite} aria-label={"Favourite: " + w.name} onClick={() => setWorkflow(w.id, { favourite: !w.favourite })}
+                    <button className="btn sm icon ghost over star" type="button" aria-pressed={w.favourite} aria-label={"Favourite: " + w.name} onClick={() => setWorkflow(w.id, { favourite: !w.favourite })}
                       style={w.favourite ? { color: "var(--warning-text)" } : undefined}><Icon id="i-star" /></button>
                     <span><Link className="ttl" to={"/workflows/" + w.id}>{w.name}</Link><span className="sub">{w.description}</span>
                       <span className="sub phone">{used} · {version}</span></span></span></td>
