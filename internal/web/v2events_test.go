@@ -109,6 +109,25 @@ func TestV2EventStream(t *testing.T) {
 	}
 }
 
+// Hello and resync carry the newest seq as their id: a browser that drops right after hello and
+// reconnects with that Last-Event-ID gets what happened meanwhile (ui-shop, cap-778a2f0).
+func TestV2EventStreamHelloHasID(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	hello := nextMessage(t, stream(t, srv.URL, ""))
+	if hello.event != "hello" || hello.id == "" || !strings.Contains(hello.data, `"seq":`+hello.id) {
+		t.Fatalf("hello %+v", hello)
+	}
+	st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "a.mkv")}) // while it was away
+	if m := nextMessage(t, stream(t, srv.URL, hello.id)); m.event != "job.state" || !strings.Contains(m.data, `"to":"queued"`) {
+		t.Errorf("reconnect after hello: %+v", m)
+	}
+	resync := nextMessage(t, stream(t, srv.URL, "999999"))
+	if resync.event != "resync" || resync.id == "" || !strings.Contains(resync.data, `"seq":`+resync.id) {
+		t.Errorf("resync %+v", resync)
+	}
+}
+
 // The stream is behind the same sign-in as the rest of /api.
 func TestV2EventStreamNeedsSignIn(t *testing.T) {
 	srv, _, _, _ := libServer(t, true)

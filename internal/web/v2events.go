@@ -54,12 +54,12 @@ func v2EventStream(api *http.ServeMux, store *jobs.Store) {
 		switch {
 		case from == "" || err != nil || last < 0:
 			last = newest
-			send(w, 0, "hello", map[string]any{"seq": newest})
+			send(w, newest, "hello", map[string]any{"seq": newest})
 		case last > newest || (last < newest && (last+1 < oldest || newest-last > eventReplayMax)):
 			// the gap is gone (pruned) or too long, or the id is ahead of the newest (the database was
 			// restored or replaced; waiting for it would be silence): the page reloads its data
 			last = newest
-			send(w, 0, "resync", map[string]any{"seq": newest})
+			send(w, newest, "resync", map[string]any{"seq": newest})
 		}
 		flusher.Flush()
 
@@ -81,7 +81,7 @@ func v2EventStream(api *http.ServeMux, store *jobs.Store) {
 					data := map[string]any{"type": "job.progress", "jobId": strconv.FormatInt(id, 10), "state": state, "progress": v2Progress(state, id, pct)}
 					b, _ := json.Marshal(data)
 					if now[id] = string(b); sent[id] != now[id] {
-						send(w, 0, "job.progress", data)
+						send(w, -1, "job.progress", data)
 					}
 				}
 				sent = now
@@ -127,10 +127,12 @@ func eventMessage(e jobs.Event) (string, map[string]any) {
 	return "job.state", m
 }
 
-// send writes one SSE message (id 0: none, for hello and resync).
+// send writes one SSE message; id -1: none (job.progress, not replayed). Hello and resync carry the
+// newest seq (0 for none yet), so a browser that drops right after them reconnects with Last-Event-ID
+// and misses nothing.
 func send(w http.ResponseWriter, id int64, event string, data any) {
 	b, _ := json.Marshal(data)
-	if id > 0 {
+	if id >= 0 {
 		fmt.Fprintf(w, "id: %d\n", id)
 	}
 	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b)
