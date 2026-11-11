@@ -4,6 +4,7 @@ package web
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"reflect"
 	"slices"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
 )
 
@@ -99,11 +101,16 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		}
 		q := r.URL.Query()
 		items := []map[string]any{}
+		libs, err := store.Libraries()
+		if err != nil {
+			serverError(w, err)
+			return
+		}
 		for _, id := range ids {
-			v, err := workflowView(store, id)
-			if err != nil {
-				serverError(w, err)
-				return
+			v, err := workflowViewWith(store, id, libs)
+			if err != nil { // one that can't be read is left out, so the others still list (review ae3a28f)
+				log.Printf("workflow %d left out of the list: %v", id, err)
+				continue
 			}
 			if keepWorkflow(v, q) {
 				items = append(items, v)
@@ -323,6 +330,17 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			writeErrorWith(w, http.StatusBadRequest, "has_errors", issues[0].Message+" Nothing was changed.", map[string]any{"issues": issues})
 			return
 		}
+		if slices.Contains(stepTypes(d.Doc), workflow.TypeLegacy) { // its settings are the server's: only ones published before
+			known, err := store.KnownTemplate(id, t)
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+			if !known {
+				apiError(w, http.StatusBadRequest, "invalid_config", "The earlier install's settings can't be changed here. To change them, start from the Shrink videos steps. Nothing was changed.")
+				return
+			}
+		}
 		if !outputUsable(w, store, id, t) { // the same folder checks as the old Save (#103: system_folder, inside_library, ...)
 			return
 		}
@@ -403,6 +421,12 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 
 // workflowView is a workflow as the contract's Workflow.
 func workflowView(store *jobs.Store, id int64) (map[string]any, error) {
+	return workflowViewWith(store, id, nil)
+}
+
+// workflowViewWith is workflowView with the libraries already read (nil: read them), so a list reads
+// them once (review 109).
+func workflowViewWith(store *jobs.Store, id int64, libs []jobs.Library) (map[string]any, error) {
 	latest, err := store.EnsureRevision(id)
 	if err != nil {
 		return nil, err
@@ -419,9 +443,10 @@ func workflowView(store *jobs.Store, id int64) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	libs, err := store.Libraries()
-	if err != nil {
-		return nil, err
+	if libs == nil {
+		if libs, err = store.Libraries(); err != nil {
+			return nil, err
+		}
 	}
 	used := []map[string]string{}
 	for _, l := range libs {
@@ -456,9 +481,16 @@ func workflowView(store *jobs.Store, id int64) (map[string]any, error) {
 		if types := stepTypes(latest.Doc); slices.Equal(types, workflow.PresetOrder) {
 			v["presetId"] = "shrink_videos" // still the preset's steps (lead, Q3: detached once edited away)
 		}
-	} else {
+	} else { // never published: the same fields, from its draft (review 109)
 		v["draftDiffers"] = true
+		v["changesOriginals"] = commitPolicy(draft.Doc) == "replace"
+		if slices.Equal(stepTypes(draft.Doc), workflow.PresetOrder) {
+			v["presetId"] = "shrink_videos"
+		}
 		v["summaryTag"] = ""
+		if t, issues := workflow.ToTemplate(draft.Doc, rules.Template{}); len(issues) == 0 {
+			v["summaryTag"] = t.Tag()
+		}
 	}
 	return v, nil
 }

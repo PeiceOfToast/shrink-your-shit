@@ -140,6 +140,9 @@ func Validate(d Doc) Result {
 // a key the schema doesn't know is kept and warned about (research: never drop it silently).
 func checkConfig(n Node, def StepDefinition) []Issue {
 	var out []Issue
+	if def.ReadOnly { // kept as it is: nothing to check against a form
+		return nil
+	}
 	props, _ := def.ConfigSchema["properties"].(map[string]any)
 	keys := make([]string, 0, len(n.Config))
 	for k := range n.Config {
@@ -235,7 +238,7 @@ func summary(n Node) string {
 		}
 		quality := ""
 		if p, ok := rules.SliderAt(intOf(c, "quality", 3)); ok {
-			quality = p.Name + " quality"
+			quality = qualityWords(p.Name)
 		}
 		size := "same resolution"
 		if r := strOf(c, "resolution", "keep"); r != "keep" {
@@ -273,4 +276,15 @@ func summary(n Node) string {
 		return "Settings from an earlier install, run exactly as before"
 	}
 	return ""
+}
+
+// qualityWords is a slider position in the step summary: "Balanced quality" (design SCREENS V3), but a
+// name that already says quality or size stands as it is ("Better quality", not "Better quality
+// quality"; "Smaller", which is about the file, not "Smaller quality").
+func qualityWords(name string) string {
+	n := strings.ToLower(name)
+	if strings.Contains(n, "quality") || strings.Contains(n, "small") {
+		return name
+	}
+	return name + " quality"
 }

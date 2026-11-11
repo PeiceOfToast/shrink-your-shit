@@ -5,6 +5,7 @@ package web
 import (
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -331,4 +332,110 @@ func deref(s *string) string {
 		return "<nil>"
 	}
 	return *s
+}
+
+// Review acace8e (P2): a read-only step's template is the server's. A draft that changes it (any
+// values: they'd reach the encoder) is refused at publish; the same settings, or an earlier revision's,
+// still publish.
+func TestV2LegacyTemplateIsTheServers(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Old", t.TempDir(), rules.LegacyTemplate(rules.Default(), "replace"), false)
+	flow := strconv.FormatInt(lib.FlowID, 10)
+	publish := func(edit func(tm map[string]any)) (int, string) {
+		t.Helper()
+		_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/workflows/" + flow + "/draft"})
+		d := decode[v2Rev](t, body) // its etag; the settings start from the published revision each time (a refused publish leaves its draft)
+		pub, _, err := st.LatestRevision(lib.FlowID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(pub.Doc)
+		d.Workflow = workflow.Doc{}
+		json.Unmarshal(raw, &d.Workflow)
+		if d.Workflow.Nodes[1].Type != workflow.TypeLegacy {
+			t.Fatalf("not the legacy step: %+v", d.Workflow.Nodes)
+		}
+		tm := d.Workflow.Nodes[1].Config["template"].(map[string]any)
+		edit(tm)
+		put, _ := json.Marshal(map[string]any{"workflow": d.Workflow, "layout": d.Layout})
+		req, _ := http.NewRequest("PUT", srv.URL+"/api/v2/workflows/"+flow+"/draft", strings.NewReader(string(put)))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("If-Match", d.Etag)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		saved := decode[v2Rev](t, readAll(t, res))
+		code, body, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/workflows/" + flow + "/publish", ctype: "application/json", body: `{"etag":"` + saved.Etag + `"}`})
+		return code, body
+	}
+	params := func(tm map[string]any) map[string]any { return tm["params"].(map[string]any) }
+	for name, edit := range map[string]func(map[string]any){
+		"selectors format bogus": func(tm map[string]any) {
+			tm["kind"], tm["selectors"] = "selectors", map[string]any{"quality": 3, "format": "bogus", "speed": "normal"}
+		},
+		"selectors quality 99": func(tm map[string]any) {
+			tm["kind"], tm["selectors"] = "selectors", map[string]any{"quality": 99, "format": "hevc", "speed": "normal"}
+		},
+		"legacy crf -5":         func(tm map[string]any) { params(tm)["crf"] = -5 },
+		"legacy preset ../../x": func(tm map[string]any) { params(tm)["preset"] = "../../x" },
+	} {
+		if code, body := publish(edit); code != 400 || errCode(body) != "invalid_config" {
+			t.Errorf("%s: %d %s", name, code, body)
+		}
+	}
+	before, _ := st.GetFlow(lib.FlowID)
+	if code, body := publish(func(map[string]any) {}); code != 200 { // unchanged: publishes
+		t.Errorf("unchanged: %d %s", code, body)
+	}
+	if after, _ := st.GetFlow(lib.FlowID); !reflect.DeepEqual(after.Template, before.Template) {
+		t.Errorf("the engine's template changed: %+v", after.Template)
+	}
+}
+
+// Review 109: a never-published workflow's preset, tag and changesOriginals come from its draft.
+func TestV2DraftWorkflowFields(t *testing.T) {
+	srv, _, _, _ := libServer(t, false)
+	_, body := post(t, srv, "POST", "/api/v2/workflows", `{"name":"Fresh"}`)
+	w := decode[map[string]any](t, body)
+	if w["presetId"] != "shrink_videos" || w["changesOriginals"] != false || w["summaryTag"] != "" { // next to each library: not runnable yet, so no tag
+		t.Errorf("fresh draft %s", body)
+	}
+	id := w["id"].(string)
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/v2/workflows/" + id + "/draft"})
+	d := decode[v2Rev](t, body)
+	d.Workflow.Nodes[7].Config = map[string]any{"policy": "replace"}
+	put, _ := json.Marshal(map[string]any{"workflow": d.Workflow, "layout": d.Layout})
+	req, _ := http.NewRequest("PUT", srv.URL+"/api/v2/workflows/"+id+"/draft", strings.NewReader(string(put)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("If-Match", d.Etag)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/v2/workflows/" + id})
+	w = decode[map[string]any](t, body)
+	if w["changesOriginals"] != true || w["summaryTag"] == "" {
+		t.Errorf("replace draft %s", body)
+	}
+}
+
+// Review ae3a28f: one flow that can't be read is left out of the list (logged), so the Workflows page
+// still lists the others; asked for itself, it's a clear error.
+func TestV2ListSurvivesABadFlow(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	good, _ := st.AddLibrary("Good", t.TempDir(), rules.SliderTemplate(3), false)
+	bad, _ := st.AddLibrary("Bad", t.TempDir(), rules.SliderTemplate(3), false)
+	if err := st.CorruptFlowForTest(bad.FlowID); err != nil {
+		t.Fatal(err)
+	}
+	code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/workflows"})
+	l := decode[v2List](t, body)
+	if code != 200 || l.Total != 1 || l.Items[0]["id"] != strconv.FormatInt(good.FlowID, 10) {
+		t.Errorf("list %d %s", code, body)
+	}
+	if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/workflows/" + strconv.FormatInt(bad.FlowID, 10)}); code < 400 || !strings.Contains(body, `"message"`) {
+		t.Errorf("the bad one: %d %s", code, body)
+	}
 }

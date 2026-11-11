@@ -550,6 +550,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if plan.AudioFolded { // design, 01:52Z: once per file
 		w.jobf(job.ID, " (%s): %s", job.Path, rules.FoldedNote)
 	}
+	if plan.StyledSubsPlain { // design, 02:49Z: once per file
+		w.jobf(job.ID, " (%s): %s", job.Path, rules.StyledSubsNote)
+	}
 	if plan.HDRNote != "" { // what the HDR conversion does not keep (S3)
 		w.jobf(job.ID, " (%s): %s", job.Path, plan.HDRNote)
 	}
