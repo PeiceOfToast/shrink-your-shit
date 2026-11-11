@@ -124,10 +124,17 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 		d["metadata"] = meta
 		if lib, err := store.GetLibrary(j.LibraryID); err == nil {
 			d["library"] = map[string]any{"id": strconv.FormatInt(lib.ID, 10), "name": lib.Name}
-			at := j.Created // the revision it ran with: published when it last started (lead 22:23Z); one not started: when queued
+			// the revision it runs with: a waiting job (never started, or back to retry) runs the newest published
+			// at its next start; one that started ran the one published then (lead 22:23Z, 22:41Z)
+			var at string
 			for _, e := range events {
 				if e.To == string(jobs.Running) {
 					at = e.At
+				}
+			}
+			if j.Status == jobs.Queued {
+				if _, err := store.EnsureRevision(lib.FlowID); err == nil { // an old Save's template counts too
+					at = time.Now().UTC().Format(time.RFC3339)
 				}
 			}
 			if rev, ok, err := store.RevisionAt(lib.FlowID, at); err == nil && ok {

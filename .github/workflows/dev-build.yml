@@ -42,6 +42,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v4 # the new UI (web/) is built and embedded
+        with:
+          node-version-file: web/.nvmrc
       - name: Build archives
         env:
           VER: ${{ needs.version.outputs.version }}
@@ -69,6 +72,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v4 # the new UI (web\) is built and embedded
+        with:
+          node-version-file: web/.nvmrc
       - name: Install Inno Setup if the runner lacks it
         run: |
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }

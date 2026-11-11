@@ -1,5 +1,5 @@
 # Build the Windows installer: dist\shrink-your-shit-setup.exe
-# Needs: Go, Inno Setup 6 (ISCC.exe). Run on Windows:  pwsh installer\windows\build.ps1 -Version 0.1.0
+# Needs: Go, Node LTS with npm (web\.nvmrc; the new UI), Inno Setup 6 (ISCC.exe). Run on Windows:  pwsh installer\windows\build.ps1 -Version 0.1.0
 param([string]$Version = '0.0.0-dev')
 $ErrorActionPreference = 'Stop'
 $root = Resolve-Path (Join-Path $PSScriptRoot '..\..')
@@ -8,6 +8,12 @@ New-Item -ItemType Directory -Force -Path $out | Out-Null
 
 Push-Location $root
 try {
+  # The new UI (web\, served at /next/) is built into internal\web\next\dist and embedded.
+  Push-Location (Join-Path $root 'web')
+  try {
+    npm ci --no-audit --no-fund; if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
+    npm run build; if ($LASTEXITCODE -ne 0) { throw 'npm run build failed' }
+  } finally { Pop-Location }
   $env:CGO_ENABLED = '0'
   go build -trimpath -ldflags "-s -w -X main.version=$Version" -o (Join-Path $out 'shrink-your-shit.exe') .
   if ($LASTEXITCODE -ne 0) { throw 'go build failed' }

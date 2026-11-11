@@ -126,12 +126,17 @@ func TestV2JobRevisionIsWhenItStarted(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := "/api/v2/jobs/" + strconv.FormatInt(id, 10)
-	if _, body, _ := do(t, nil, srv, call{method: "GET", path: path}); !strings.Contains(body, `"version":1`) {
-		t.Errorf("waiting: %s", body)
+	if _, body, _ := do(t, nil, srv, call{method: "GET", path: path}); !strings.Contains(body, `"version":2`) {
+		t.Errorf("waiting: it runs the newest published when it starts: %s", body) // lead 22:41Z
 	}
 	time.Sleep(1100 * time.Millisecond)
 	st.Claim("w")
 	if _, body, _ := do(t, nil, srv, call{method: "GET", path: path}); !strings.Contains(body, `"version":2`) {
 		t.Errorf("started after version 2: %s", body)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	st.SetFlowTemplate(lib.FlowID, rules.SliderTemplate(5)) // version 3 while it runs: it ran with 2
+	if _, body, _ := do(t, nil, srv, call{method: "GET", path: path}); !strings.Contains(body, `"version":2`) {
+		t.Errorf("running, version 3 published since: %s", body)
 	}
 }

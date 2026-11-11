@@ -76,14 +76,29 @@ func TestNextApp(t *testing.T) {
 }
 
 // Without a build (the placeholder: only dist/.keep), /next/ says so plainly and points at the current
-// interface, which still works; the app's routes are the same page.
+// interface, which still works; the app's routes are the same page. A test filesystem, so this holds
+// whether or not web/ was built here (ui-shop's step-1 proof).
 func TestNextAppNotBuilt(t *testing.T) {
-	srv, _, _, _ := libServer(t, false) // the real Handler, with the placeholder embedded
+	srv := httptest.NewServer(nextApp(fstest.MapFS{".keep": {}}))
+	defer srv.Close()
 	for _, p := range []string{"/next/", "/next/queue"} {
-		code, body, _ := do(t, nil, srv, call{method: "GET", path: p})
-		if code != http.StatusServiceUnavailable || !strings.Contains(body, "The new interface isn't in this copy") {
-			t.Errorf("%s: %d %s", p, code, body)
+		res, err := http.Get(srv.URL + p)
+		if err != nil {
+			t.Fatal(err)
 		}
+		b, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusServiceUnavailable || !strings.Contains(string(b), "The new interface isn't in this copy") {
+			t.Errorf("%s: %d %s", p, res.StatusCode, b)
+		}
+	}
+}
+
+// The real handler mounts /next/ (built or not: 200 or 503) and sends /next to it.
+func TestNextMounted(t *testing.T) {
+	srv, _, _, _ := libServer(t, false)
+	if code, _, _ := do(t, nil, srv, call{method: "GET", path: "/next/"}); code != http.StatusOK && code != http.StatusServiceUnavailable {
+		t.Errorf("/next/: %d", code)
 	}
 	res, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Get(srv.URL + "/next")
 	if err != nil {
