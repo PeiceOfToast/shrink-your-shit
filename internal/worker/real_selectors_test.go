@@ -516,3 +516,49 @@ func TestRealMP4KeepsTextSubtitles(t *testing.T) {
 		t.Errorf("new file %s: %+v", j.OutputPath, out.Streams)
 	}
 }
+
+// dropSubtitleExec runs real ffmpeg but makes the encode lose the second subtitle track.
+type dropSubtitleExec struct{ media.OSExec }
+
+func (d dropSubtitleExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
+	for i, a := range args {
+		if a == "-map" && i+1 < len(args) && args[i+1] == "-0:d" {
+			args = append(append(append([]string{}, args[:i+2]...), "-map", "-0:s:1"), args[i+2:]...)
+			break
+		}
+	}
+	return d.OSExec.Stream(ctx, onLine, name, args...)
+}
+
+// #117: MP4's mov_text skips only the default-flag comparison; a subtitle track lost on the way is still
+// refused (count, codec and language are checked) and the original stays.
+func TestRealMP4LostSubtitleIsRefused(t *testing.T) {
+	needTools(t)
+	dir := t.TempDir()
+	en, fr := filepath.Join(dir, "en.srt"), filepath.Join(dir, "fr.srt")
+	os.WriteFile(en, []byte("1\n00:00:00,500 --> 00:00:02,000\nHello\n"), 0o644)
+	os.WriteFile(fr, []byte("1\n00:00:00,500 --> 00:00:02,000\nBonjour\n"), 0o644)
+	src := filepath.Join(dir, "m.mkv")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=3:size=640x360:rate=25", "-i", en, "-i", fr,
+		"-map", "0", "-map", "1", "-map", "2", "-c:v", "mpeg2video", "-b:v", "6000k", "-c:s", "srt",
+		"-metadata:s:s:0", "language=eng", "-metadata:s:s:1", "language=fre", src)
+	orig, _ := os.ReadFile(src)
+	s := rules.DefaultSelectors(3)
+	s.Speed, s.FileType, s.AfterConverting, s.Subtitles = "faster", "mp4", "beside", "keep_all"
+	tmpl := s.Template()
+	st, id := realJob(t, src, 3)
+	st.SetPaused(false)
+	w := realWorker(st, dropSubtitleExec{})
+	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.run(t)
+	j, _ := st.Get(id)
+	if j.Status != jobs.Kept || !strings.Contains(j.Error, "subtitle") {
+		t.Fatalf("a lost subtitle must be refused: %s %q", j.Status, j.Error)
+	}
+	if now, _ := os.ReadFile(src); string(now) != string(orig) {
+		t.Error("the original changed")
+	}
+	if tempLeft(src) {
+		t.Error("temp file left")
+	}
+}
