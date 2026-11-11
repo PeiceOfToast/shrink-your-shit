@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -447,5 +448,41 @@ func TestLibraryFreeSpace(t *testing.T) {
 	}
 	if free[strconv.FormatInt(gone.ID, 10)] != nil {
 		t.Errorf("a missing folder's free space %v", free)
+	}
+}
+
+// Review 5053a73: a hung mount's free space can't stall the library list: a read past the time limit
+// shows null, a path whose read is still stuck starts no other, and an answer that comes late is used.
+func TestFreeSpaceTimeLimit(t *testing.T) {
+	defer func(f func(string) (uint64, error), d time.Duration) { diskFree, freeTimeout = f, d }(diskFree, freeTimeout)
+	freeTimeout = 50 * time.Millisecond
+	release := make(chan struct{})
+	var calls atomic.Int32
+	diskFree = func(string) (uint64, error) {
+		calls.Add(1)
+		<-release // a hung NFS mount
+		return 12345, nil
+	}
+	path := t.TempDir()
+	start := time.Now()
+	if b := freeBytes(path); b != nil || time.Since(start) > time.Second {
+		t.Fatalf("hung: %v after %v", b, time.Since(start))
+	}
+	if b := freeBytes(path); b != nil || calls.Load() != 1 {
+		t.Errorf("a second read while the first is stuck: %v, %d calls", b, calls.Load())
+	}
+	close(release)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if b := freeBytes(path); b != nil && *b == 12345 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the late answer was never used")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if calls.Load() != 1 {
+		t.Errorf("%d reads, want 1 (cached)", calls.Load())
 	}
 }

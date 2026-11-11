@@ -19,7 +19,6 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/preview"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/runlog"
-	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
 
 // Engine is what the API needs from the running scanner and worker. Nil functions do nothing.
@@ -89,9 +88,7 @@ func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		c := counts[l.ID]
 		it := libraryItem{ID: l.ID, Name: l.Name, Path: l.Path, Started: l.Started, FlowID: l.FlowID,
 			WorkingFiles: c.Working, WaitingFiles: c.Waiting, FreedBytes: c.FreedBytes, WaitingBytes: c.WaitingBytes}
-		if free, err := worker.DiskFree(l.Path); err == nil {
-			it.FreeBytes = &free
-		}
+		it.FreeBytes = freeBytes(l.Path) // time-limited: a hung network mount can't stall the list
 		switch {
 		case !l.Started:
 			it.State = "not_started"
