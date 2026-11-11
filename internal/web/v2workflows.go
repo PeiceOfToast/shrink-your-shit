@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
 )
 
@@ -78,8 +79,13 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		}
 		q := r.URL.Query()
 		items := []map[string]any{}
+		libs, err := store.Libraries()
+		if err != nil {
+			serverError(w, err)
+			return
+		}
 		for _, id := range ids {
-			v, err := workflowView(store, id)
+			v, err := workflowViewWith(store, id, libs)
 			if err != nil {
 				serverError(w, err)
 				return
@@ -393,6 +399,12 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 
 // workflowView is a workflow as the contract's Workflow.
 func workflowView(store *jobs.Store, id int64) (map[string]any, error) {
+	return workflowViewWith(store, id, nil)
+}
+
+// workflowViewWith is workflowView with the libraries already read (nil: read them), so a list reads
+// them once (review 109).
+func workflowViewWith(store *jobs.Store, id int64, libs []jobs.Library) (map[string]any, error) {
 	latest, err := store.EnsureRevision(id)
 	if err != nil {
 		return nil, err
@@ -409,9 +421,10 @@ func workflowView(store *jobs.Store, id int64) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	libs, err := store.Libraries()
-	if err != nil {
-		return nil, err
+	if libs == nil {
+		if libs, err = store.Libraries(); err != nil {
+			return nil, err
+		}
 	}
 	used := []map[string]string{}
 	for _, l := range libs {
@@ -446,9 +459,16 @@ func workflowView(store *jobs.Store, id int64) (map[string]any, error) {
 		if types := stepTypes(latest.Doc); slices.Equal(types, workflow.PresetOrder) {
 			v["presetId"] = "shrink_videos" // still the preset's steps (lead, Q3: detached once edited away)
 		}
-	} else {
+	} else { // never published: the same fields, from its draft (review 109)
 		v["draftDiffers"] = true
+		v["changesOriginals"] = commitPolicy(draft.Doc) == "replace"
+		if slices.Equal(stepTypes(draft.Doc), workflow.PresetOrder) {
+			v["presetId"] = "shrink_videos"
+		}
 		v["summaryTag"] = ""
+		if t, issues := workflow.ToTemplate(draft.Doc, rules.Template{}); len(issues) == 0 {
+			v["summaryTag"] = t.Tag()
+		}
 	}
 	return v, nil
 }
