@@ -3,7 +3,7 @@
 import { call, MOCK, failed, type Answer } from "./api";
 import * as mock from "./mock";
 import type { FirstFiles, FirstRunSettings, FolderReport, LibraryItem, WorkerV1 } from "./types/v1";
-import type { Workflow } from "./types/v2";
+import type { Trash, Workflow } from "./types/v2";
 import * as wf from "./workflowApi";
 
 // A workflow a library can use: a never-published one can't be chosen (87faa4b), on the server and the mock.
@@ -38,11 +38,11 @@ export async function scanLibrary(id: string): Promise<Answer<unknown>> {
 
 export async function getSettings(): Promise<Answer<FirstRunSettings>> {
   if (MOCK) { const s = mock.mockState().settings; return { firstRunDone: s.firstRunDone, firstRunStep: s.firstRunStep, firstRunLibrary: s.firstRunLibrary ?? null }; }
-  return call("GET", "/api/settings");
+  return call("GET", "/api/v2/settings"); // #111: v1's settings at the v2 path
 }
 export async function patchSettings(p: Partial<FirstRunSettings>): Promise<Answer<unknown>> {
   if (MOCK) return (mock.setSettings(p), {});
-  return call("PATCH", "/api/settings", p);
+  return call("PATCH", "/api/v2/settings", p);
 }
 
 export async function listWorkers(): Promise<Answer<WorkerV1[]>> {
@@ -77,4 +77,9 @@ export async function startSimpleWorkflow(name: string, out: string, again?: str
   if (problem) return { error: { code: problem.code, message: problem.message } };
   const p = await wf.publish(id, s.etag);
   return failed(p) ? p : { id };
+}
+
+// GET /api/v2/trash (#111): originals kept after being replaced, until their date. The Dashboard's "+120 GB by 18 Nov".
+export async function getTrash(): Promise<Answer<Trash>> {
+  return MOCK ? mock.mockState().trash : call("GET", "/api/v2/trash");
 }

@@ -18,19 +18,16 @@ function useReg() { const r = useContext(Reg); return { stepDef: (t: string) => 
 
 // The server's icon keys (registry) -> design's sprite.
 const ICON: Record<string, string> = { folder: "i-folder", filter: "i-shield", video: "i-video", audio: "i-audio", subtitles: "i-subtitle", file: "i-file", check: "i-checks", save: "i-save", cond: "i-cond", history: "i-history" };
-// Design's words around the forms (SCREENS V3; the old Basic/Standard editor's lines).
-const PICTURE = ["The smallest files. Fine detail can soften, mostly in dark or busy scenes.", "Small files, with a small loss of fine detail.",
-  "Little visible change for most people. A good start.", "Keeps more detail. Files stay larger.", "Hard to tell from the original. Files stay largest."];
-const POLICY_HINT: Record<string, string> = {
-  separate_folder: "New files go to the folder below, in the same sub-folders. Your originals aren't changed, so no space is freed until you remove them yourself.",
-  replace: "The original is kept for 7 days (Settings > Safety), then deleted. This frees space. You can get an original back from its job.",
-  beside: "Both stay. Nothing is deleted.",
-};
+// The words around each option come from the server's step definitions (#114: title, description, x-enumHints for
+// each choice, x-placeholder); the page adds none of its own.
 const MORE: Record<string, string[]> = { "video.convert": ["format", "resolution", "maxBitrate", "speed"] };
 
 type Props = Record<string, JSONSchema>;
 const labels = (s: JSONSchema) => ((s.enum as unknown[]) ?? []).map((v, i) => [v, ((s["x-enumLabels"] as string[]) ?? [])[i] ?? String(v)] as [unknown, string]);
 const widget = (s: JSONSchema) => ((s["x-ui"] as { widget?: string } | undefined)?.widget ?? "");
+// The hint for the chosen value (x-enumHints follows enum's order).
+const hintFor = (s: JSONSchema, v: unknown) => { const e = (s.enum as unknown[]) ?? [], h = (s["x-enumHints"] as string[]) ?? []; return h[e.indexOf(v)] ?? ""; };
+const Hint = ({ text }: { text: string }) => (text ? <span className="hint" aria-live="polite">{text}</span> : null);
 
 // One option from the step's configSchema, as a native labelled control (design review rule 1).
 function Field({ id, name, s, value, set }: { id: string; name: string; s: JSONSchema; value: unknown; set: (v: unknown) => void }) {
@@ -43,6 +40,7 @@ function Field({ id, name, s, value, set }: { id: string; name: string; s: JSONS
         <input id={fid} type="range" min={0} max={opts.length - 1} step={1} value={i} aria-valuetext={`${i + 1} of ${opts.length}, ${opts[i][1]}`} onChange={(e) => set(opts[Number(e.target.value)][0])} />
         <div className="row sm muted" style={{ justifyContent: "space-between", flexWrap: "nowrap", gap: 2 }} aria-hidden="true">
           {opts.map((o, k) => (k === i ? <strong key={k} style={{ color: "var(--text)" }}>{o[1]}</strong> : <span key={k}>{o[1]}</span>))}</div>
+        <Hint text={hintFor(s, value)} />
       </div>);
   }
   if (s.type === "boolean")
@@ -53,16 +51,16 @@ function Field({ id, name, s, value, set }: { id: string; name: string; s: JSONS
       <fieldset className="field choice"><legend className="lab">{title}</legend><div className="row">
         {labels(s).map(([v, l]) => (
           <label key={String(v)} className="radio"><input type="radio" name={fid} checked={value === v} disabled={!!avail && !avail.includes(v)} onChange={() => set(v)} /><span>{l}</span></label>))}
-      </div></fieldset>);
+      </div><Hint text={hintFor(s, value)} />{typeof s.description === "string" && <span className="hint">{s.description}</span>}</fieldset>);
   }
   if (s.enum)
     return <div className="field"><label htmlFor={fid}>{title}</label><select id={fid} className="input" value={String(value)} onChange={(e) => set(labels(s).find((o) => String(o[0]) === e.target.value)?.[0])}>
-      {labels(s).map(([v, l]) => <option key={String(v)} value={String(v)}>{l}</option>)}</select>{typeof s.description === "string" && <span className="hint">{s.description}</span>}</div>;
+      {labels(s).map(([v, l]) => <option key={String(v)} value={String(v)}>{l}</option>)}</select><Hint text={hintFor(s, value)} />{typeof s.description === "string" && <span className="hint">{s.description}</span>}</div>;
   const hint = typeof s.description === "string" ? <span className="hint" id={fid + "-h"}>{s.description}{s.type === "array" ? " One per line." : ""}</span> : null;
   if (s.type === "array")
     return <div className="field"><label htmlFor={fid}>{title}</label><textarea id={fid} className="input" rows={2} value={((value as string[]) ?? []).join("\n")}
       onChange={(e) => set(e.target.value.split("\n").map((x) => x.trim()).filter(Boolean))} aria-describedby={hint ? fid + "-h" : undefined} />{hint}</div>;
-  return <div className="field"><label htmlFor={fid}>{title}</label><input id={fid} className="input" value={String(value ?? "")} onChange={(e) => set(e.target.value)} aria-describedby={hint ? fid + "-h" : undefined} />{hint}</div>;
+  return <div className="field"><label htmlFor={fid}>{title}</label><input id={fid} className="input" value={String(value ?? "")} placeholder={(s["x-placeholder"] as string) ?? undefined} onChange={(e) => set(e.target.value)} aria-describedby={hint ? fid + "-h" : undefined} />{hint}</div>;
 }
 
 function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown) => void; issues: ValidationIssue[] }) {
@@ -77,14 +75,14 @@ function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown) => 
         <fieldset className="field choice stack"><legend className="lab">Save the result</legend>
           {labels(props.policy).map(([v, l]) => (
             <label key={String(v)} className="radio" style={{ alignItems: "flex-start" }}><input type="radio" name={n.id + "-policy"} checked={policy === v} onChange={() => set("policy", v)} />
-              <span><strong>{l}</strong><span className="hint" style={{ display: "block" }}>{POLICY_HINT[String(v)]}</span>
+              <span><strong>{l}</strong><span className="hint" style={{ display: "block" }}>{hintFor(props.policy, v)}</span>
                 {v === "replace" && policy === "replace" && <span className="st warn" style={{ display: "flex", marginTop: 4 }}><Icon id="i-alert" /><span>Your original files will be replaced.</span></span>}</span>
             </label>))}
         </fieldset>
         {policy === "separate_folder" && (
-          <fieldset className="field choice"><legend className="lab">Where</legend><div className="row">
+          <fieldset className="field choice"><legend className="lab">{(props.folderMode.title as string) ?? "Where"}</legend><div className="row">
             {labels(props.folderMode).map(([v, l]) => <label key={String(v)} className="radio"><input type="radio" name={n.id + "-mode"} checked={mode === v} onChange={() => set("folderMode", v)} /><span>{l}</span></label>)}
-          </div>{mode === "next_to_library" && <span className="hint">Each library's new files go to a folder beside it, for example /media/movies → /media/movies (shrunk).</span>}{problem("/folderMode")}</fieldset>)}
+          </div><Hint text={hintFor(props.folderMode, mode)} />{problem("/folderMode")}</fieldset>)}
         {policy === "separate_folder" && mode === "one_folder" && <>{field("folder")}{problem("/folder")}</>}
       </div>);
   }
@@ -92,7 +90,6 @@ function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown) => 
     <div className="stack">
       {keys.map(field)}
       {n.type === "video.convert" && <>
-        <div className="note"><Icon id="i-film" /><div><strong>Picture</strong><br />{PICTURE[(Number(c.quality) || 3) - 1]}</div></div>
         <p className="hint">Every video not already in this format is converted, even if the new file isn't smaller, so your library ends up in one format. Jobs shows the size before and after.</p></>}
       {more.length > 0 && <details><summary className="btn sm" style={{ display: "inline-flex" }}>More options</summary><div className="grid cols2" style={{ marginTop: 12 }}>{more.map(field)}</div></details>}
     </div>);

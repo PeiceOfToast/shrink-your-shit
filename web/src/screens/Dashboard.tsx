@@ -1,5 +1,5 @@
 // V2 Dashboard (spec 4; DESIGN/v2 SCREENS V2, mockups/dashboard.html and dashboard-empty.html), on the typed mock.
-// "Will be freed" comes from Trash (GET /api/v2/trash, mocked until it is on dev). Hidden until the contract has their
+// "Will be freed" comes from the real GET /api/v2/trash (#111) even on the server; the rest of the page is still mock. Hidden until the contract has their
 // data: Throughput (job_events), the GPU count on the Workers card, per-worker encoders. Not here yet: Edit dashboard, View (the job drawer, V6).
 import { Fragment, useState, type ReactNode } from "react";
 import { PageHead } from "../PageHead";
@@ -7,6 +7,8 @@ import { Icon } from "../Icon";
 import { bytes, clock, count, elapsed, plural } from "../format";
 import { retry, scanAll, startAll, stopAll, summary, updatedAt, useMock } from "../mock";
 import { Link } from "../router";
+import { getTrash } from "../libraryApi";
+import { useData } from "../useData";
 import type { ActivityEvent, Summary } from "../types/v2";
 
 type W = Summary["workers"][number];
@@ -72,7 +74,9 @@ export function Dashboard() {
       : <button className="btn sm" type="button" onClick={startAll}><Icon id="i-play" />Start all</button>}
     {s.libraries.length > 0 && <button className="btn sm ghost" type="button" onClick={scanAll} disabled={scanning}><Icon id="i-refresh" />{scanning ? "Scanning..." : "Scan all libraries"}</button>}
   </>;
-  const saved = sum.bytes, could = saved.waitingToFree, soon = s.trash.bytes;
+  // Will be freed: the real /api/v2/trash (#111) on the server, the mock's with ?mock=1; hidden at 0.
+  const trash = useData(getTrash, [], 60000).data ?? { bytes: 0, files: 0, nextDeleteAt: null, lastDeleteAt: null };
+  const saved = sum.bytes, could = saved.waitingToFree, soon = trash.bytes;
   return (
     <div className="stack">
       <PageHead icon="i-dashboard" title="Dashboard">
@@ -97,13 +101,13 @@ export function Dashboard() {
           <div className="card kpi wide">
             <span className="l">Space saved <button className="btn icon ghost help" type="button" aria-label="About space saved" aria-expanded={why} onClick={() => setWhy(!why)}><Icon id="i-info" /></button></span>
             <span className="v">{bytes(saved.freed)}</span>
-            <span className="sub">{[soon > 0 && "+" + bytes(soon) + (s.trash.lastDeleteAt ? " by " + day(s.trash.lastDeleteAt) : ""), could > 0 && "could free " + bytes(could)].filter(Boolean).join(" · ") || "Nothing waiting"}</span>
+            <span className="sub">{[soon > 0 && "+" + bytes(soon) + (trash.lastDeleteAt ? " by " + day(trash.lastDeleteAt) : ""), could > 0 && "could free " + bytes(could)].filter(Boolean).join(" · ") || "Nothing waiting"}</span>
           </div>
           <div className="card kpi"><span className="l">Success (24 h)</span><span className="v">{sum.last24h.successRate == null ? "-" : (sum.last24h.successRate * 100).toFixed(1) + "%"}</span></div>
           <div className="card kpi"><span className="l">Workers</span><span className="v">{online} of {sum.workers.length}</span><span className="sub">online</span></div>
         </div>
         {why && <p className="muted sm kpiwhy">
-          {bytes(saved.freed)} is space already freed.{soon > 0 && " " + bytes(soon) + " more will be freed when the kept originals are removed" + (s.trash.lastDeleteAt ? " by " + day(s.trash.lastDeleteAt) : "") + "."}
+          {bytes(saved.freed)} is space already freed.{soon > 0 && " " + bytes(soon) + " more will be freed when the kept originals are removed" + (trash.lastDeleteAt ? " by " + day(trash.lastDeleteAt) : "") + "."}
           {could > 0 && " Could free " + bytes(could) + " counts originals still in place; nothing removes them automatically."} Updated when the library is scanned.</p>}
       </>}
 

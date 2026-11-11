@@ -1,5 +1,6 @@
 // The Stack view's server side, mocked from V1 as built (origin/v2-workflows internal/workflow: registry.go for the
 // step definitions and their configSchema, validate.go for the step summaries and the not_runnable_yet rule).
+import REGISTRY from "./registry-4df3345.json";
 import type { Edge, JSONSchema, Node, Port, PublishPreview, StepDefinition, ValidationIssue, WorkflowDoc, WorkflowRevision } from "../types/v2";
 
 const inPort: Port = { name: "in", label: "In", kind: "file", outcome: "success" };
@@ -64,6 +65,9 @@ export const STEP_DEFS: StepDefinition[] = [
   def({ type: "filter.video", category: "filter", name: "Only some videos", icon: "cond", typeLabel: "Condition", description: "Sends matching videos one way and the rest another.",
     outputs: [{ name: "match", label: "Matches", kind: "file", outcome: "branch" }, { name: "else", label: "Doesn't match", kind: "file", outcome: "branch" }], alwaysOn: false, sideEffects: "none" }),
 ];
+// The server's own words (#114: titles, descriptions, option hints, placeholders), as a 4df3345 server sends them, so the
+// mock shows what the real page shows.
+for (const d of STEP_DEFS) { const r = (REGISTRY as unknown as Record<string, Pick<StepDefinition, "name" | "description" | "configSchema">>)[d.type]; if (r) Object.assign(d, r); }
 export const stepDef = (type: string) => STEP_DEFS.find((d) => d.type === type);
 
 const str = (c: Record<string, unknown>, k: string, d: string) => (typeof c[k] === "string" ? (c[k] as string) : d);
