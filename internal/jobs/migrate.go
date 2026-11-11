@@ -266,6 +266,31 @@ WHEN NOT EXISTS (SELECT 1 FROM job_events WHERE job_id = old.id AND to_status IN
   VALUES (old.id, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), old.status, 'cancelled', 'removed', old.worker);
 END;
 CREATE INDEX jobs_claim ON jobs(status, priority DESC, id);`},
+	// V3a (live updates): one sequence for everything the event stream sends. job_events becomes events,
+	// with a kind ("job" now; workflow, pause and activity events next) and job_id only for job events;
+	// rows keep their seq, so ids already handed out stay valid, and the triggers write here.
+	{22, "events", `
+CREATE TABLE events (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL DEFAULT 'job', job_id INTEGER, at TEXT NOT NULL,
+  from_status TEXT, to_status TEXT, reason TEXT NOT NULL DEFAULT '', worker TEXT NOT NULL DEFAULT '', data TEXT);
+INSERT INTO events(seq, kind, job_id, at, from_status, to_status, reason, worker)
+  SELECT seq, 'job', job_id, at, from_status, to_status, reason, worker FROM job_events;
+DROP TRIGGER job_events_insert;
+DROP TRIGGER job_events_status;
+DROP TRIGGER job_events_removed;
+DROP TABLE job_events;
+CREATE INDEX events_job ON events(job_id);
+CREATE TRIGGER events_job_insert AFTER INSERT ON jobs BEGIN
+  INSERT INTO events(kind, job_id, at, from_status, to_status) VALUES ('job', new.id, new.created, NULL, new.status);
+END;
+CREATE TRIGGER events_job_status AFTER UPDATE OF status ON jobs WHEN old.status <> new.status BEGIN
+  INSERT INTO events(kind, job_id, at, from_status, to_status, reason, worker) VALUES ('job', new.id, new.updated, old.status, new.status, new.error, new.worker);
+END;
+CREATE TRIGGER events_job_removed AFTER DELETE ON jobs
+WHEN NOT EXISTS (SELECT 1 FROM events WHERE kind = 'job' AND job_id = old.id AND to_status IN ('skipped', 'cancelled')) BEGIN
+  INSERT INTO events(kind, job_id, at, from_status, to_status, reason, worker)
+  VALUES ('job', old.id, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), old.status, 'cancelled', 'removed', old.worker);
+END;`},
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.

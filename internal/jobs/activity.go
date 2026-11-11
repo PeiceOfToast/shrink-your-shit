@@ -282,7 +282,7 @@ func (s *Store) RequestStop(id int64) (running bool, err error) {
 		if err := putFile(tx, userStoppedFile(path)); err != nil {
 			return false, err
 		}
-		if _, err := tx.Exec(`INSERT INTO job_events(job_id, at, from_status, to_status, reason) VALUES (?,?,?,?,?)`, id, s.stamp(), status, "cancelled", "user_stopped"); err != nil {
+		if _, err := tx.Exec(`INSERT INTO events(kind, job_id, at, from_status, to_status, reason) VALUES ('job',?,?,?,?,?)`, id, s.stamp(), status, "cancelled", "user_stopped"); err != nil {
 			return false, err // review 66806b3: the reason, before the row goes
 		}
 		if _, err := tx.Exec(`DELETE FROM jobs WHERE id=?`, id); err != nil {
@@ -460,5 +460,5 @@ var ErrNotStoppable = errors.New("this file is not waiting or converting")
 // endEvent writes a job's last history entry when it ends by being deleted (skipped, stopped): the
 // triggers of migration 21 see only status changes.
 func (s *Store) endEvent(j Job, to, reason string) {
-	s.db.Exec(`INSERT INTO job_events(job_id, at, from_status, to_status, reason, worker) VALUES (?,?,?,?,?,?)`, j.ID, s.stamp(), string(j.Status), to, reason, j.Worker)
+	s.db.Exec(`INSERT INTO events(kind, job_id, at, from_status, to_status, reason, worker) VALUES ('job',?,?,?,?,?,?)`, j.ID, s.stamp(), string(j.Status), to, reason, j.Worker)
 }

@@ -204,7 +204,7 @@ func TestJobHistoryEnds(t *testing.T) {
 		t.Error("a job not waiting to retry can't retry now")
 	}
 	// pruned after 30 days
-	s.db.Exec(`UPDATE job_events SET at='2000-01-01T00:00:00Z' WHERE job_id=?`, stopped)
+	s.db.Exec(`UPDATE events SET at='2000-01-01T00:00:00Z' WHERE kind='job' AND job_id=?`, stopped)
 	if n, err := s.PruneJobEvents(time.Now().Add(-30 * 24 * time.Hour)); err != nil || n != 2 {
 		t.Errorf("pruned %d %v", n, err)
 	}
@@ -220,5 +220,41 @@ func TestJobHistoryEnds(t *testing.T) {
 	rows.Close()
 	if !strings.Contains(plan, "jobs_claim") {
 		t.Errorf("plan %s", plan)
+	}
+}
+
+// Migration 22 (V3a): job_events becomes events; the history keeps its seq (ids already sent stay
+// valid) and new entries continue after it.
+func TestEventsMigrationKeepsSeq(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "syp.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
+	for _, q := range []string{ // back to version 21's shape, with history at seq 41 and 42
+		`DROP TRIGGER events_job_insert`, `DROP TRIGGER events_job_status`, `DROP TRIGGER events_job_removed`, `DROP TABLE events`,
+		`CREATE TABLE job_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, job_id INTEGER NOT NULL, at TEXT NOT NULL,
+		  from_status TEXT, to_status TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', worker TEXT NOT NULL DEFAULT '')`,
+		`CREATE TRIGGER job_events_insert AFTER INSERT ON jobs BEGIN SELECT 1; END`,
+		`CREATE TRIGGER job_events_status AFTER UPDATE OF status ON jobs BEGIN SELECT 1; END`,
+		`CREATE TRIGGER job_events_removed AFTER DELETE ON jobs BEGIN SELECT 1; END`,
+		`INSERT INTO job_events(seq, job_id, at, to_status) VALUES (41, 7, '2026-11-01T00:00:00Z', 'queued'), (42, 7, '2026-11-01T00:00:01Z', 'running')`,
+		`PRAGMA user_version=21`} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatal(q, err)
+		}
+	}
+	s.Close()
+	if s, err = Open(path); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if ev, _ := s.JobEvents(7); len(ev) != 2 || ev[0].Seq != 41 || ev[1].Seq != 42 || ev[1].To != "running" {
+		t.Errorf("old history %+v", ev)
+	}
+	id, _ := s.Enqueue(Job{Library: l.Path, LibraryID: l.ID, Path: filepath.Join(l.Path, "a.mkv")})
+	if ev, _ := s.JobEvents(id); len(ev) != 1 || ev[0].Seq <= 42 {
+		t.Errorf("new entries continue the seq: %+v", ev)
 	}
 }

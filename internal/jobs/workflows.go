@@ -444,7 +444,7 @@ type JobEvent struct {
 
 // JobEvents is job id's history, oldest first; it stays after the job's row is gone.
 func (s *Store) JobEvents(id int64) ([]JobEvent, error) {
-	rows, err := s.db.Query(`SELECT seq, at, from_status, to_status, reason, worker FROM job_events WHERE job_id=? ORDER BY seq`, id)
+	rows, err := s.db.Query(`SELECT seq, at, from_status, to_status, reason, worker FROM events WHERE kind='job' AND job_id=? ORDER BY seq`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -497,7 +497,7 @@ func (s *Store) SetPriority(id int64, p int) error {
 
 // PruneJobEvents forgets history entries older than before (the run logs' 30 days, review 66806b3).
 func (s *Store) PruneJobEvents(before time.Time) (int64, error) {
-	r, err := s.db.Exec(`DELETE FROM job_events WHERE at < ?`, before.UTC().Format(time.RFC3339))
+	r, err := s.db.Exec(`DELETE FROM events WHERE at < ?`, before.UTC().Format(time.RFC3339))
 	if err != nil {
 		return 0, err
 	}
