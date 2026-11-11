@@ -1335,3 +1335,23 @@ func TestSkippedPlanLogsNoActionNotes(t *testing.T) {
 		t.Errorf("file record %+v", f)
 	}
 }
+
+// Design (02:49Z): an ASS subtitle made plain mov_text for MP4 says so once in the job log.
+func TestStyledSubtitlesNote(t *testing.T) {
+	s := newScenario(t)
+	s.srcSpec.streams = s.srcSpec.streams[:3] // no font attachment: MP4 can't hold one (that file is skipped)
+	s.outSpec.streams = s.outSpec.streams[:3]
+	s.srcSpec.streams[2] = sub("ass", "eng", false)
+	s.outSpec.streams[2] = sub("mov_text", "eng", false)
+	w := s.worker(Replace)
+	w.Logs = &runlog.Logs{Dir: t.TempDir()}
+	sel := rules.DefaultSelectors(3)
+	sel.FileType, sel.AfterConverting = "mp4", "beside"
+	tmpl := sel.Template()
+	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.RunOne(context.Background())
+	text, _, _ := w.Logs.Read(s.id, 0)
+	if strings.Count(text, rules.StyledSubsNote) != 1 {
+		t.Errorf("the note %d times in:\n%s", strings.Count(text, rules.StyledSubsNote), text)
+	}
+}

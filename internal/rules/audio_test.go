@@ -421,5 +421,8 @@ func TestMP4TextSubtitles(t *testing.T) {
 		if !c.skip && !slices.ContainsFunc(p.Tracks, func(o TrackOp) bool { return o.Index == 1 && o.Encoder == "mov_text" }) {
 			t.Errorf("%s: not made mov_text: %+v", c.codec, p.Tracks)
 		}
+		if p.StyledSubsPlain != (c.codec == "ass") { // design 02:49Z: said once when styling is lost
+			t.Errorf("%s: styledSubsPlain %v", c.codec, p.StyledSubsPlain)
+		}
 	}
 }

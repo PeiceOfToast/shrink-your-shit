@@ -18,26 +18,28 @@ import (
 // and checks the result against its Expect. A job keeps its Plan as a snapshot, so what was intended
 // can be read back later (slice 17's audit log).
 type Plan struct {
-	Skip            string      `json:"skip,omitempty"`     // why this file is not converted ("" = convert it)
-	SkipCode        string      `json:"skipCode,omitempty"` // Skip as a code the API can count (Skip* below)
-	Reason          string      `json:"reason,omitempty"`   // why it is converted, shown on the job
-	Eligibility     Eligibility `json:"eligibility"`        // the rule that decided Skip (part of the fingerprint)
-	Video           VideoEncode `json:"video"`
-	Output          string      `json:"output"`                  // replace | beside
-	OutputDir       string      `json:"outputDir,omitempty"`     // "folder" (S6): the new files go here, in the library\'s sub-folders
-	Container       string      `json:"container,omitempty"`     // the new file's type (its extension, "mkv" or "mp4"); "" = the original's
-	Tracks          []TrackOp   `json:"tracks,omitempty"`        // audio and subtitle tracks dropped or converted (slice 25b); others copied
-	AllAudioKept    bool        `json:"allAudioKept,omitempty"`  // "my languages" matched no audio track, so all of it is kept
-	MainAudioUsed   bool        `json:"mainAudioUsed,omitempty"` // Basic's stereo AAC matched no track: the main one is kept (S4)
-	HDRNote         string      `json:"hdrNote,omitempty"`       // what an HDR conversion does not keep (S3): HDR10+ scene data, Dolby Vision
-	AudioFolded     bool        `json:"audioFolded,omitempty"`   // a 7.1 track became 5.1 E-AC-3/AC-3: the job log says FoldedNote (design, 01:52Z)
-	SmallKept       bool        `json:"smallKept,omitempty"`     // a small stereo track kept as it is: the job log says SmallKeptNote (design, 02:26Z)
-	TypeNote        string      `json:"typeNote,omitempty"`      // "keep" turned this file into MKV: said once in the job log (review 4ac9c0d)
-	AudioOrder      []int       `json:"audioOrder,omitempty"`    // the original's audio stream indexes in order, when Tracks has any
-	SubtitleOrder   []int       `json:"subtitleOrder,omitempty"` // and its subtitle stream indexes
-	MinSSIM         float64     `json:"minSSIM,omitempty"`       // picture threshold; 0 = the program's -min-ssim
-	Kind            string      `json:"kind"`                    // the template kind it was compiled from
-	CompilerVersion int         `json:"compilerVersion"`
+	Skip          string      `json:"skip,omitempty"`     // why this file is not converted ("" = convert it)
+	SkipCode      string      `json:"skipCode,omitempty"` // Skip as a code the API can count (Skip* below)
+	Reason        string      `json:"reason,omitempty"`   // why it is converted, shown on the job
+	Eligibility   Eligibility `json:"eligibility"`        // the rule that decided Skip (part of the fingerprint)
+	Video         VideoEncode `json:"video"`
+	Output        string      `json:"output"`                  // replace | beside
+	OutputDir     string      `json:"outputDir,omitempty"`     // "folder" (S6): the new files go here, in the library\'s sub-folders
+	Container     string      `json:"container,omitempty"`     // the new file's type (its extension, "mkv" or "mp4"); "" = the original's
+	Tracks        []TrackOp   `json:"tracks,omitempty"`        // audio and subtitle tracks dropped or converted (slice 25b); others copied
+	AllAudioKept  bool        `json:"allAudioKept,omitempty"`  // "my languages" matched no audio track, so all of it is kept
+	MainAudioUsed bool        `json:"mainAudioUsed,omitempty"` // Basic's stereo AAC matched no track: the main one is kept (S4)
+	HDRNote       string      `json:"hdrNote,omitempty"`       // what an HDR conversion does not keep (S3): HDR10+ scene data, Dolby Vision
+	AudioFolded   bool        `json:"audioFolded,omitempty"`   // a 7.1 track became 5.1 E-AC-3/AC-3: the job log says FoldedNote (design, 01:52Z)
+	SmallKept     bool        `json:"smallKept,omitempty"`     // a small stereo track kept as it is: the job log says SmallKeptNote (design, 02:26Z)
+	TypeNote      string      `json:"typeNote,omitempty"`      // "keep" turned this file into MKV: said once in the job log (review 4ac9c0d)
+	// StyledSubsPlain: an ASS/SSA subtitle became plain mov_text for MP4: said once in the job log (design, 02:49Z)
+	StyledSubsPlain bool    `json:"styledSubsPlain,omitempty"`
+	AudioOrder      []int   `json:"audioOrder,omitempty"`    // the original's audio stream indexes in order, when Tracks has any
+	SubtitleOrder   []int   `json:"subtitleOrder,omitempty"` // and its subtitle stream indexes
+	MinSSIM         float64 `json:"minSSIM,omitempty"`       // picture threshold; 0 = the program's -min-ssim
+	Kind            string  `json:"kind"`                    // the template kind it was compiled from
+	CompilerVersion int     `json:"compilerVersion"`
 }
 
 // Skip codes: why a file is not converted, as the Preview counts them (UI-API-CONTRACT.md, the open
@@ -604,7 +606,15 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	}
 	p.Tracks = append(p.Tracks, planSubtitles(s.Subtitles, langs, info)...)
 	p.Tracks = append(p.Tracks, movTextToSRT(p.Tracks, p.Container, info)...)
-	p.Tracks = append(p.Tracks, textToMovText(p.Tracks, p.Container, info)...)
+	movText := textToMovText(p.Tracks, p.Container, info)
+	p.Tracks = append(p.Tracks, movText...)
+	for _, o := range movText {
+		for _, st := range info.Subtitles() {
+			if st.Index == o.Index && (st.Codec == "ass" || st.Codec == "ssa") {
+				p.StyledSubsPlain = true
+			}
+		}
+	}
 	if len(p.Tracks) > 0 {
 		for _, a := range info.Audio() {
 			p.AudioOrder = append(p.AudioOrder, a.Index)
