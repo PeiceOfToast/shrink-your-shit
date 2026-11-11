@@ -84,8 +84,7 @@ export function Workflows() {
   const rows = s.wf.filter((w) => (!q || (w.name + " " + w.description).toLowerCase().includes(q.toLowerCase())) && (!tag || w.tags.includes(tag)) && (!fav || w.favourite));
   return (
     <div className="stack">
-      <PageHead icon="i-workflow" title="Workflows" help="What happens to each file. A library uses one workflow.">
-        {!wizard && <button className="btn primary" type="button" onClick={() => (setWizard(true), setSaid(""))}><Icon id="i-plus" />New workflow</button>}</PageHead>
+      <PageHead icon="i-workflow" title="Workflows" help="What happens to each file. A library uses one workflow." />
       {wizard && <Wizard onClose={() => setWizard(false)} onMade={(w) => navigate("/workflows/" + w.id)} />}
       <div className="tabs" role="tablist">
         <button role="tab" type="button" aria-selected={tab === "workflows"} onClick={() => tab !== "workflows" && setTab("workflows")}>Workflows</button>
@@ -93,45 +92,48 @@ export function Workflows() {
       </div>
       <p className="muted" role="status">{said}</p>
       {tab === "templates" ? (
-        <section className="card"><div className="tscroll"><table className="tbl">
-          <thead><tr><th>Template</th><th>File type</th><th>What it does</th><th>Steps it uses</th><th>Changes originals</th></tr></thead>
-          <tbody>{TEMPLATES.map((t) => <tr key={t.id}><td><strong>{t.name}</strong></td><td>Video</td><td>{t.description}</td><td className="sm">{t.steps.join(", ")}</td><td>{t.changesOriginals ? "Yes" : "No"}</td></tr>)}</tbody>
-        </table></div></section>
-      ) : (
-        <section className="card">
-          <div className="tools">
-            <div className="field" style={{ flex: 1, minWidth: 180 }}><input className="input" type="search" placeholder="Search workflows" aria-label="Search workflows" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-            <select className="input" aria-label="Tag" value={tag} onChange={(e) => setTag(e.target.value)} style={{ width: "auto" }}>
-              <option value="">Tag: any</option>{tags.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-            <button className="chip" type="button" aria-pressed={fav} onClick={() => setFav(!fav)}><Icon id="i-star" />Favourites</button>
-          </div>
-          {rows.length === 0 ? <div className="empty">{s.wf.length ? "No workflow matches." : "No workflows yet. Make one with New workflow."}</div> : (
-            <div className="tscroll"><table className="tbl">
-              <thead><tr><th>Name</th><th>File type</th><th>Tags</th><th>Libraries</th><th className="num">Active jobs</th><th>Version</th><th>Check</th><th>Enabled</th><th><span className="sr">Menu</span></th></tr></thead>
-              <tbody>{rows.map((w) => {
-                const problems = w.validation.errors + w.validation.warnings;
-                return (
-                  <tr key={w.id}>
-                    <td><span className="row nw">
-                      <button className="btn sm icon ghost" type="button" aria-pressed={w.favourite} aria-label={"Favourite: " + w.name} onClick={() => setWorkflow(w.id, { favourite: !w.favourite })}
-                        style={w.favourite ? { color: "var(--warning-text)" } : undefined}><Icon id="i-star" /></button>
-                      <span><Link to={"/workflows/" + w.id}><strong>{w.name}</strong></Link><span className="sub">{w.description}</span></span></span></td>
-                    <td>Video</td>
-                    <td>{w.tags.map((t) => <span className="tag" key={t}>{t}</span>)}</td>
-                    <td>{w.libraries.length ? w.libraries.map((l) => l.name).join(", ") : <span className="muted">None</span>}</td>
-                    <td className="num">{w.activeJobs}</td>
-                    <td className="nowrap">{w.version == null ? "Draft · not published yet" : "v" + w.version + (w.draftDiffers ? " · draft changes" : "")}</td>
-                    <td>{problems ? <span className={"pill " + (w.validation.errors ? "bad" : "warn")}><Icon id="i-alert" />{plural(problems, "problem", "problems")}</span>
-                      : <span className="pill"><Icon id="i-check-c" />OK</span>}</td>
-                    <td>{w.status === "draft" ? <span className="muted" aria-label="Not published yet">-</span>
-                      : <input type="checkbox" role="switch" className="switch" aria-label={"Enabled: " + w.name} checked={w.status === "enabled"} onChange={(e) => setWorkflow(w.id, { status: e.target.checked ? "enabled" : "disabled" })} />}</td>
-                    <td><RowMenu w={w} onSaid={setSaid} /></td>
-                  </tr>);
-              })}</tbody>
-            </table></div>)}
-        </section>
-      )}
+        <div className="list"><table className="tbl">
+          <thead><tr><th>Template</th><th data-p="3">What it does</th><th data-p="4">Steps it uses</th><th className="stc">Changes originals</th></tr></thead>
+          <tbody>{TEMPLATES.map((t) => <tr key={t.id}><td className="idc"><span className="ttl">{t.name}</span><span className="sub phone">{t.description}</span></td>
+            <td data-p="3">{t.description}</td><td className="sm" data-p="4">{t.steps.join(", ")}</td><td className="stc"><span className="pill">{t.changesOriginals ? "Changes originals" : "Originals stay"}</span></td></tr>)}</tbody>
+        </table></div>
+      ) : (<>
+        {/* one toolbar (clean pass T4): New workflow first, filters, search on the right */}
+        <div className="ltools" role="toolbar" aria-label="Workflows">
+          {!wizard && <button className="btn sm primary" type="button" onClick={() => (setWizard(true), setSaid(""))}><Icon id="i-plus" />New workflow</button>}
+          <select className="input sm" aria-label="Tag" value={tag} onChange={(e) => setTag(e.target.value)}>
+            <option value="">Tag: any</option>{tags.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <button className="btn sm ghost" type="button" aria-pressed={fav} onClick={() => setFav(!fav)}><Icon id="i-star" />Favourites</button>
+          <input className="input find" type="search" placeholder="Search workflows" aria-label="Search workflows" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        {rows.length === 0 ? <div className="empty">{s.wf.length ? "No workflow matches." : "No workflows yet. Make one with New workflow."}</div> : (
+          <div className="list"><table className="tbl">
+            <thead><tr><th>Name</th><th data-p="2">Libraries</th><th data-p="3">Version</th><th className="num" data-p="4">Active jobs</th><th data-p="5">Tags</th><th className="stc">Check</th><th className="actc">Enabled</th><th className="actc"><span className="sr">Menu</span></th></tr></thead>
+            <tbody>{rows.map((w) => {
+              const problems = w.validation.errors + w.validation.warnings;
+              const used = w.libraries.length ? w.libraries.map((l) => l.name).join(", ") : "No library";
+              const version = w.version == null ? "Draft · not published yet" : "v" + w.version + (w.draftDiffers ? " · draft changes" : "");
+              return (
+                <tr key={w.id}>
+                  <td className="idc"><span className="row nw">
+                    <button className="btn sm icon ghost over" type="button" aria-pressed={w.favourite} aria-label={"Favourite: " + w.name} onClick={() => setWorkflow(w.id, { favourite: !w.favourite })}
+                      style={w.favourite ? { color: "var(--warning-text)" } : undefined}><Icon id="i-star" /></button>
+                    <span><Link className="ttl" to={"/workflows/" + w.id}>{w.name}</Link><span className="sub">{w.description}</span>
+                      <span className="sub phone">{used} · {version}</span></span></span></td>
+                  <td data-p="2">{w.libraries.length ? used : <span className="muted">None</span>}</td>
+                  <td className="nowrap" data-p="3">{version}</td>
+                  <td className="num" data-p="4">{w.activeJobs}</td>
+                  <td data-p="5"><span className="chips">{w.tags.map((t) => <span className="mchip" key={t}>{t}</span>)}</span></td>
+                  <td className="stc">{problems ? <span className={"pill " + (w.validation.errors ? "bad" : "warn")}><Icon id="i-alert" />{plural(problems, "problem", "problems")}</span>
+                    : <span className="pill"><Icon id="i-check-c" />OK</span>}</td>
+                  <td className="actc">{w.status === "draft" ? <span className="muted" aria-label="Not published yet">-</span>
+                    : <input type="checkbox" role="switch" className="switch over" aria-label={"Enabled: " + w.name} checked={w.status === "enabled"} onChange={(e) => setWorkflow(w.id, { status: e.target.checked ? "enabled" : "disabled" })} />}</td>
+                  <td className="actc"><RowMenu w={w} onSaid={setSaid} /></td>
+                </tr>);
+            })}</tbody>
+          </table></div>)}
+      </>)}
     </div>
   );
 }

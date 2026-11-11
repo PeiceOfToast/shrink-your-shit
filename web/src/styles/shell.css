@@ -336,3 +336,43 @@ input[type=checkbox]:not(.switch),input[type=radio]{accent-color:var(--accent);w
 input[type=range]{width:100%;accent-color:var(--accent);height:28px;margin:0}
 label.chk{cursor:pointer}
 .tbl input[type=checkbox]{vertical-align:middle}
+
+/* clean pass step 2 (DESIGN-DIRECTION-clean.md T1-T5, M3): lists straight on the page, one toolbar, two-line rows,
+   metadata chips; columns drop by priority (data-p) as the page narrows; on phones the rows stack. */
+.list{border-top:1px solid var(--border);border-bottom:1px solid var(--border);min-width:0}
+.list .tbl th{background:var(--bg)}
+.list .tbl tbody tr:hover td{background:var(--raised)}
+.list .tbl tr.sel td{background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.tbl a{color:var(--text);font-weight:500}
+.tbl a.ttl,.tbl .ttl{font-weight:var(--fw-strong);color:var(--text)}
+.tbl td .sub{overflow-wrap:anywhere}
+.ltools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-height:36px}
+.ltools .btn.sm{min-height:32px}
+.ltools .input.sm{width:auto;min-height:32px;padding-top:0;padding-bottom:0;font-size:var(--fs-sm)}
+.ltools .find{margin-left:auto;width:240px;max-width:100%;min-height:32px;font-size:var(--fs-sm)}
+.ltools .desk{display:contents}
+.ltools .pop .btn{width:100%;justify-content:flex-start}
+.chips{display:inline-flex;gap:4px;flex-wrap:wrap}
+.mchip{display:inline-flex;align-items:center;height:var(--chip-h);padding:0 6px;border-radius:4px;background:var(--raised);color:var(--text-2);font-size:calc(11.5px*var(--font-scale));white-space:nowrap}
+.phone,.tbl .sub.phone{display:none}
+@media (max-width:1100px){.tbl [data-p="6"],.tbl [data-p="7"]{display:none}}
+@media (max-width:900px){.tbl [data-p="4"],.tbl [data-p="5"]{display:none}}
+@media (max-width:640px){
+  .phone{display:revert}.tbl .sub.phone{display:block}
+  .ltools .desk{display:none}
+  .ltools .find{width:100%;margin-left:0;order:9}
+  .list .tbl,.list .tbl tbody{display:block}
+  .list .tbl thead{display:none}
+  .list .tbl tr{display:flex;align-items:center;gap:8px;min-height:60px;padding:8px 24px 8px 0;border-bottom:1px solid var(--border);position:relative}
+  .list .tbl tr:last-child{border-bottom:0}
+  .list .tbl tr::after{content:"\203A";position:absolute;right:6px;top:50%;transform:translateY(-50%);color:var(--text-2);font-size:20px;line-height:1}
+  .list .tbl td{display:none;height:auto;padding:0;border:0;background:none!important}
+  .list .tbl td.idc{display:block;flex:1;min-width:0}
+  .list .tbl td.stc,.list .tbl td.actc{display:block;flex:none}
+  .list.selecting .tbl td.selc{display:block;flex:none}
+  .list .tbl td.idc .sub:not(.phone){display:none}   /* phone rows: the title and one muted line */
+  .list .tbl .ttl::before{content:"";position:absolute;inset:0}   /* the whole row opens it */
+  .list .tbl td.selc,.list .tbl td.actc,.list .tbl .over{position:relative;z-index:1}
+  .list .tbl td.selc input{width:22px;height:22px}
+}
+.pagehead .btn.help{width:24px;min-height:24px;height:24px}.pagehead .btn.help .ic{width:16px;height:16px}

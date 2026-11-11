@@ -38,10 +38,12 @@ const Problem = ({ m }: { m?: string }) => (m ? <p className="st bad" role="aler
 
 export function Libraries() {
   const libs = useData(listLibraries, [], 3000), wfs = useData(listWorkflows, [], 10000);
-  const items = libs.data ?? [], wfName = (id: string) => wfs.data?.find((w) => w.id === id)?.name ?? "";
-  const [sel, setSel] = useState<string[]>([]), [said, setSaid] = useState("");
-  const picked = items.filter((l) => sel.includes(l.id));
+  const wfName = (id: string) => wfs.data?.find((w) => w.id === id)?.name ?? "";
+  const [sel, setSel] = useState<string[]>([]), [said, setSaid] = useState(""), [q, setQ] = useState(""), [selecting, setSelecting] = useState(false);
+  const all = libs.data ?? [], items = all.filter((l) => !q || (l.name + " " + l.path).toLowerCase().includes(q.toLowerCase()));
+  const picked = all.filter((l) => sel.includes(l.id)), none = picked.length === 0;
   const scan = async () => {
+    setSaid("");
     for (const l of picked) await act(() => scanLibrary(l.id), (m) => setSaid(l.name + ": " + m));
     setSaid((s) => s || "Scanning " + plural(picked.length, "library", "libraries") + "."); libs.reload();
   };
@@ -50,40 +52,46 @@ export function Libraries() {
     for (const l of picked) { const r = await act(() => checkFolder(l.path), (m) => bad.push(l.name + ": " + m)); if (r && r.blockers[0]) bad.push(l.name + ": " + r.blockers[0].message); }
     setSaid(bad.length ? bad.join(" ") : picked.length === 1 ? "The folder of " + picked[0].name + " is fine." : "All " + picked.length + " folders are fine.");
   };
+  const needSel = none ? "Select libraries first" : undefined;
+  const actions = <>
+    <button className="btn sm ghost" type="button" disabled={none} title={needSel} onClick={scan}><Icon id="i-refresh" />Scan now</button>
+    <button className="btn sm ghost" type="button" disabled={none} title={needSel} onClick={access}><Icon id="i-shield" />Check folder access</button>
+  </>;
   return (
     <div className="stack">
-      <PageHead icon="i-library" title="Libraries" help="The folders that are watched for videos.">
-        <Link className="btn primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link></PageHead>
+      <PageHead icon="i-library" title="Libraries" help="The folders that are watched for videos." />
       <Problem m={libs.error?.message} />
-      <section className="card">
-        {sel.length > 0 && (
-          <div className="tools" role="group" aria-label="Selected libraries">
-            <strong>{sel.length} selected</strong>
-            <button className="btn sm" type="button" onClick={() => (setSaid(""), scan())}><Icon id="i-refresh" />Scan now</button>
-            <button className="btn sm" type="button" onClick={access}><Icon id="i-shield" />Check folder access</button>
-          </div>)}
-        <p className="muted" role="status" style={said ? { padding: "0 16px" } : undefined}>{said}</p>
-        {!libs.loaded ? <div className="empty">Loading...</div> : items.length === 0 ? <div className="empty">No libraries yet. <Link to="/libraries/new">Add one</Link> to start.</div> : (
-          <div className="tscroll"><table className="tbl">
-            <thead><tr>
-              <th><input type="checkbox" aria-label="Select all libraries" checked={sel.length === items.length} onChange={(e) => setSel(e.target.checked ? items.map((l) => l.id) : [])} /></th>
-              <th>Name</th><th>Path</th><th>File type</th><th>Workflow</th><th className="num">Files</th><th className="num">Waiting</th><th>Last scan</th><th>Status</th>
-            </tr></thead>
-            <tbody>{items.map((l) => (
-              <tr key={l.id}>
-                <td><input type="checkbox" aria-label={"Select " + l.name} checked={sel.includes(l.id)} onChange={(e) => setSel(e.target.checked ? [...sel, l.id] : sel.filter((x) => x !== l.id))} /></td>
-                <td><Link to={"/libraries/" + l.id}><strong>{l.name}</strong></Link></td>
-                <td className="mono sm">{l.path}</td>
-                <td>Video</td>
-                <td><Link to={"/workflows/" + l.flowId}>{wfName(l.flowId) || l.settingLabel}</Link></td>
-                <td className="num">{count(l.status.videos)}</td>
-                <td className="num">{count(l.status.toDo)}</td>
-                <td className="nowrap">{lastScan(l.status.lastScan)}</td>
-                <td className="nowrap"><Status l={l} /></td>
-              </tr>))}
-            </tbody>
-          </table></div>)}
-      </section>
+      {/* one toolbar (clean pass T4): Add first, selection actions, filter on the right; on phones Add, Select and "..." */}
+      <div className="ltools" role="toolbar" aria-label="Libraries">
+        <Link className="btn sm primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link>
+        <span className="desk">{actions}</span>
+        <button className="btn sm ghost phone" type="button" aria-pressed={selecting} onClick={() => (setSelecting(!selecting), setSel([]))}>{selecting ? "Done" : "Select"}</button>
+        <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions}</div></details>
+        {sel.length > 0 && <span className="muted sm">{sel.length} selected</span>}
+        <input className="input find" type="search" placeholder="Filter libraries" aria-label="Filter libraries" value={q} onChange={(e) => setQ(e.target.value)} />
+      </div>
+      <p className="muted" role="status">{said}</p>
+      {!libs.loaded ? <div className="empty">Loading...</div> : all.length === 0 ? <div className="empty">No libraries yet. <Link to="/libraries/new">Add one</Link> to start.</div>
+        : items.length === 0 ? <div className="empty">No library matches.</div> : (
+        <div className={"list" + (selecting ? " selecting" : "")}><table className="tbl">
+          <thead><tr>
+            <th className="selc"><input type="checkbox" aria-label="Select all libraries" checked={sel.length === all.length} onChange={(e) => setSel(e.target.checked ? all.map((l) => l.id) : [])} /></th>
+            <th>Name</th><th data-p="2">Workflow</th><th className="num" data-p="3">Waiting</th><th data-p="4">Last scan</th><th className="num" data-p="6">Files</th><th className="stc">Status</th>
+          </tr></thead>
+          <tbody>{items.map((l) => (
+            <tr key={l.id} className={sel.includes(l.id) ? "sel" : undefined}>
+              <td className="selc"><input type="checkbox" aria-label={"Select " + l.name} checked={sel.includes(l.id)} onChange={(e) => setSel(e.target.checked ? [...sel, l.id] : sel.filter((x) => x !== l.id))} /></td>
+              <td className="idc"><Link className="ttl" to={"/libraries/" + l.id}>{l.name}</Link>
+                <span className="sub mono">{l.path}</span>
+                <span className="sub phone">{[wfName(l.flowId) || l.settingLabel, count(l.status.toDo) + " waiting", l.status.lastScan ? "scanned " + lastScan(l.status.lastScan) : "not scanned yet"].join(" · ")}</span></td>
+              <td data-p="2"><Link to={"/workflows/" + l.flowId}>{wfName(l.flowId) || l.settingLabel}</Link></td>
+              <td className="num" data-p="3">{count(l.status.toDo)}</td>
+              <td className="nowrap" data-p="4">{lastScan(l.status.lastScan)}</td>
+              <td className="num" data-p="6">{count(l.status.videos)}</td>
+              <td className="stc"><Status l={l} /></td>
+            </tr>))}
+          </tbody>
+        </table></div>)}
     </div>
   );
 }
@@ -164,7 +172,7 @@ export function FirstFive({ f }: { f: ReturnType<typeof useFolder> }) {
                 <thead><tr><th>File</th><th>Video</th><th className="num">Size</th></tr></thead>
                 <tbody>{r.items.map((x) => (
                   <tr key={x.path}><td className="mono sm">{x.folder === "." ? x.name : x.folder + "/" + x.name}</td>
-                    <td className="nowrap">{x.state === "unreadable" ? "Can't be read" : [x.codec, x.resolution].filter(Boolean).join(" · ") || "Checking..."}</td><td className="num">{bytes(x.bytes)}</td></tr>))}
+                    <td className="nowrap">{x.state === "unreadable" ? "Can't be read" : x.codec || x.resolution ? <span className="chips">{[x.codec, x.resolution].filter(Boolean).map((c) => <span className="mchip" key={c}>{c}</span>)}</span> : "Checking..."}</td><td className="num">{bytes(x.bytes)}</td></tr>))}
                 </tbody>
               </table></div>)}
             {r.items.length > 0 && r.stillLooking && <p className="muted sm">Still looking...</p>}
