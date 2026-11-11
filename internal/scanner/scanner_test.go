@@ -607,3 +607,19 @@ func TestQueuedFileIsNotStillChangingAfterASave(t *testing.T) {
 		t.Error("its job is still waiting")
 	}
 }
+
+// V3c: with intake paused a scan queues nothing new, and the first scan after it resumes queues the file.
+func TestIntakePause(t *testing.T) {
+	s, st, _, _ := setup(t, h264Big)
+	st.SetIntakePaused(true)
+	if n := settle(s); n != 0 {
+		t.Fatalf("queued %d while intake was paused", n)
+	}
+	if l, _ := st.List(10); len(l) != 0 {
+		t.Fatalf("jobs while paused: %+v", l)
+	}
+	st.SetIntakePaused(false)
+	if n := settle(s); n != 1 {
+		t.Errorf("queued %d after resuming", n)
+	}
+}

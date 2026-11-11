@@ -139,3 +139,41 @@ func TestV2EventStreamProgress(t *testing.T) {
 		break
 	}
 }
+
+// V3c: the summary in one call; the two pauses, each an event in the live stream.
+func TestV2SummaryAndPauses(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	st.SetPaused(false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	done, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "a.mkv"), SizeBefore: 1000})
+	st.Claim("w")
+	st.Complete(done, filepath.Join(lib.Path, "a.mkv"), 400)
+	bad, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "b.mkv"), SizeBefore: 1000})
+	st.Claim("w")
+	st.Fail(bad, "Converting did not finish")
+	st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "c.mkv"), SizeBefore: 1000})
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/summary"})
+	for _, want := range []string{`"completed":1`, `"failed":1`, `"successRate":0.5`, `"waiting":1`, `"failed24h":1`,
+		`"savedBytes":600`, `"processingPaused":false`, `"intakePaused":false`, `"recentFailures":[{`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("summary lacks %s: %s", want, body)
+		}
+	}
+	c := stream(t, srv.URL, "")
+	nextMessage(t, c) // hello
+	if code, b := post(t, srv, "POST", "/api/v2/intake/pause", `{}`); code != 200 || !st.IntakePaused() {
+		t.Fatalf("intake pause %d %s", code, b)
+	}
+	if code, b := post(t, srv, "POST", "/api/v2/processing/pause", `{}`); code != 200 || !st.Paused() {
+		t.Fatalf("processing pause %d %s", code, b)
+	}
+	for _, want := range []string{"intake.paused", "processing.paused"} {
+		m := nextMessage(t, c)
+		if m.event != want || m.id == "" || !strings.Contains(m.data, want) {
+			t.Errorf("want %s: %+v", want, m)
+		}
+	}
+	if _, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/summary"}); !strings.Contains(body, `"processingPaused":true`) || !strings.Contains(body, `"intakePaused":true`) {
+		t.Errorf("paused summary %s", body)
+	}
+}

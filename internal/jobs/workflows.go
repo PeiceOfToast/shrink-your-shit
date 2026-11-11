@@ -559,3 +559,57 @@ func (s *Store) EventBounds() (oldest, newest int64, err error) {
 	err = s.db.QueryRow(`SELECT COALESCE(MIN(seq),0), COALESCE(MAX(seq),0) FROM events`).Scan(&oldest, &newest)
 	return oldest, newest, err
 }
+
+// RecordEvent writes a non-job event (kind, its facts as data) to the live stream's sequence (V3c).
+func (s *Store) RecordEvent(kind string, data map[string]any) error {
+	b, _ := json.Marshal(data)
+	_, err := s.db.Exec(`INSERT INTO events(kind, at, data) VALUES (?,?,?)`, kind, s.stamp(), string(b))
+	return err
+}
+
+// JobEndsSince counts job history entries since at by the state they went to (done, failed, kept,
+// skipped, cancelled, ...): the summary's last 24 hours (V3c).
+func (s *Store) JobEndsSince(at string) (map[string]int, error) {
+	rows, err := s.db.Query(`SELECT COALESCE(to_status,''), COUNT(*) FROM events WHERE kind='job' AND at >= ? GROUP BY to_status`, at)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var k string
+		var n int
+		if err := rows.Scan(&k, &n); err != nil {
+			return nil, err
+		}
+		out[k] = n
+	}
+	return out, rows.Err()
+}
+
+// HourOfWork is one hour of the summary's throughput: jobs done, and what they saved (measured sizes).
+type HourOfWork struct {
+	HourStart  string `json:"hourStart"`
+	Completed  int    `json:"completed"`
+	SavedBytes int64  `json:"savedBytes"`
+}
+
+// Throughput are the hours since at with jobs done, oldest first (V3c).
+func (s *Store) Throughput(at string) ([]HourOfWork, error) {
+	rows, err := s.db.Query(`SELECT substr(e.at,1,13) || ':00:00Z', COUNT(*), COALESCE(SUM(MAX(j.size_before - COALESCE(j.size_after,0), 0)),0)
+FROM events e LEFT JOIN jobs j ON j.id = e.job_id
+WHERE e.kind='job' AND e.to_status='done' AND e.at >= ? GROUP BY substr(e.at,1,13) ORDER BY 1`, at)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []HourOfWork{}
+	for rows.Next() {
+		var h HourOfWork
+		if err := rows.Scan(&h.HourStart, &h.Completed, &h.SavedBytes); err != nil {
+			return nil, err
+		}
+		out = append(out, h)
+	}
+	return out, rows.Err()
+}

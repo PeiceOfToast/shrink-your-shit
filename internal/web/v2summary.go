@@ -1,0 +1,124 @@
+// Copyright (C) shrink-your-shit contributors. Licensed under AGPL-3.0-or-later.
+
+package web
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"time"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+)
+
+// V3c (UI-API-CONTRACT-v2.md, Shell and dashboard): the dashboard's summary in one call, and the two
+// pauses spec 7 keeps apart: processing (workers take nothing new; v1's queue pause) and intake (scans
+// queue nothing new). Both pauses write their event to the live stream's sequence.
+func v2Summary(api *http.ServeMux, store *jobs.Store) {
+	api.HandleFunc("GET /api/v2/summary", func(w http.ResponseWriter, r *http.Request) {
+		_, seq, err := store.EventBounds() // first, so events after it reach a stream started from it
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		a, err := store.ActivitySummary()
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		day := time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339)
+		ends, err := store.JobEndsSince(day)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		hours, err := store.Throughput(day)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		libs, err := store.Libraries()
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		days := 7
+		if s, err := LoadSettings(store); err == nil {
+			days = s.KeepOriginalsDays
+		}
+		list := func(card string, limit int) ([]map[string]any, map[string]int, error) {
+			rows, _, counts, err := store.FileList(jobs.FileFilter{Show: card, Limit: limit})
+			if err != nil {
+				return nil, nil, err
+			}
+			items := []map[string]any{}
+			for _, row := range rows {
+				items = append(items, v2JobItem(store, fileItem(store, libs, row, card, days), row, card))
+			}
+			return items, counts, nil
+		}
+		active, counts, err := list(jobs.CardProcessing, 50)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		failures, _, err := list(jobs.CardFailed, 5)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		failed := ends["failed"] + ends["kept"]
+		done := ends["done"]
+		var rate any // completed / (completed + failed) in the last 24 h; null when there were none
+		if done+failed > 0 {
+			rate = float64(done) / float64(done+failed)
+		}
+		jobCounts := map[string]int{}
+		for t, c := range v2Tabs {
+			jobCounts[t] = counts[c]
+		}
+		writeJSON(w, map[string]any{
+			"seq":       seq,
+			"badges":    map[string]any{"failed24h": failed, "workersOffline": nil, "pluginUpdates": 0}, // workersOffline: V4
+			"activity":  map[string]any{"converting": a.WorkingFiles, "waiting": a.WaitingFiles, "workersRunning": workersRunning(store)},
+			"jobCounts": jobCounts,
+			"last24h":   map[string]any{"completed": done, "failed": failed, "skipped": ends["skipped"], "successRate": rate},
+			"bytes": map[string]any{"freed": a.FreedBytes, "waitingToFree": a.WaitingBytes,
+				"freedLast7d": nil, "perLibrary": nil}, // CAN'T YET: freed bytes aren't dated or split per library yet
+			"workers":          nil, // CAN'T YET: V4's worker registry
+			"activeJobs":       active,
+			"recentFailures":   failures,
+			"throughput":       hours,
+			"processingPaused": store.Paused(),
+			"intakePaused":     store.IntakePaused(),
+		})
+	})
+	// processing: v1's own pause handler (everything it does stays), under v2's name
+	v1 := func(path string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			rec := httptest.NewRecorder()
+			req := r.Clone(r.Context())
+			req.URL.Path = path
+			api.ServeHTTP(rec, req)
+			for k, v := range rec.Header() {
+				w.Header()[k] = v
+			}
+			w.WriteHeader(rec.Code)
+			w.Write(rec.Body.Bytes())
+		}
+	}
+	api.HandleFunc("POST /api/v2/processing/pause", v1("/api/queue/pause"))
+	api.HandleFunc("POST /api/v2/processing/resume", v1("/api/queue/resume"))
+	api.HandleFunc("POST /api/v2/intake/{verb}", func(w http.ResponseWriter, r *http.Request) {
+		verb := r.PathValue("verb")
+		if verb != "pause" && verb != "resume" {
+			apiError(w, http.StatusNotFound, "not_found", "There is no such action.")
+			return
+		}
+		if err := store.SetIntakePaused(verb == "pause"); err != nil {
+			serverError(w, err)
+			return
+		}
+		writeJSON(w, map[string]bool{"intakePaused": strings.HasPrefix(verb, "pause")})
+	})
+}

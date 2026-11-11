@@ -232,11 +232,35 @@ func (s *Store) Paused() bool {
 
 // SetPaused sets or clears the pause.
 func (s *Store) SetPaused(on bool) error {
-	v := "0"
+	return s.setPause("paused", "processing", on)
+}
+
+// IntakePaused reports whether scans queue nothing new (V3c; spec 7: apart from processing's pause).
+func (s *Store) IntakePaused() bool {
+	v, _, _ := s.Meta("intake_paused")
+	return v == "1"
+}
+
+// SetIntakePaused pauses or resumes intake: while paused, scans queue no new files (they're looked at
+// again once it resumes).
+func (s *Store) SetIntakePaused(on bool) error {
+	return s.setPause("intake_paused", "intake", on)
+}
+
+// setPause sets a pause and, when it changes, writes its event for the live stream (V3c):
+// processing.paused / processing.resumed, intake.paused / intake.resumed.
+func (s *Store) setPause(key, what string, on bool) error {
+	v, word := "0", what+".resumed"
 	if on {
-		v = "1"
+		v, word = "1", what+".paused"
 	}
-	return s.SetMeta("paused", v)
+	if old, _, _ := s.Meta(key); old == v {
+		return nil
+	}
+	if err := s.SetMeta(key, v); err != nil {
+		return err
+	}
+	return s.RecordEvent(word, map[string]any{"type": word})
 }
 
 // StoppedByUpdate reports whether the one-time notice "Converting is stopped after the update" is due
