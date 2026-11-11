@@ -5,6 +5,7 @@ package rules
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -183,10 +184,10 @@ func TestSubtitlePlans(t *testing.T) {
 	if !strings.Contains(strings.Join(p.FFmpegArgs("i", "o"), " "), "-map -0:2") {
 		t.Error("the picture subtitle is not unmapped")
 	}
-	// mp4 cannot hold PGS: text only takes it out, so only subrip (also not for mp4) is the reason now
+	// mp4 cannot hold PGS: text only takes it out, and the subrip becomes mov_text (02:41Z): it runs now
 	mp4 := DefaultSelectors(3)
 	mp4.Subtitles, mp4.FileType, mp4.AfterConverting = "text_only", "mp4", "beside"
-	if p := mp4.Template().Compile(info); !strings.Contains(p.Skip, "subrip") {
+	if p := mp4.Template().Compile(info); p.Skip != "" {
 		t.Errorf("mp4 with text only: %q", p.Skip)
 	}
 	// a TrueHD track converted to E-AC-3 no longer stops an MP4 file
@@ -394,6 +395,34 @@ func TestWebMOutputIsAlreadyInFormat(t *testing.T) {
 		}
 		if c.skip && c.ext == ".webm" && !strings.Contains(p.Skip, "in WebM") {
 			t.Errorf("%s: words %q", c.name, p.Skip)
+		}
+	}
+}
+
+// MP4 output (02:41Z): text subtitles (SRT, ASS, WebVTT) become MP4's own (mov_text) instead of the
+// whole file being left alone; picture subtitles (PGS) still can't go in, so that file is still skipped.
+func TestMP4TextSubtitles(t *testing.T) {
+	SetAvailableFormats(allEncoders)
+	defer SetAvailableFormats(nil)
+	s := DefaultSelectors(3)
+	s.FileType, s.AfterConverting = "mp4", "beside"
+	if err := s.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		codec, kind string
+		skip        bool
+	}{{"subrip", "text", false}, {"ass", "text", false}, {"webvtt", "text", false}, {"hdmv_pgs_subtitle", "bitmap", true}} {
+		p := s.Template().Compile(h264(1920, 1080, 8000, media.Stream{Type: "subtitle", Codec: c.codec, SubKind: c.kind, Index: 1, Language: "eng"}))
+		if (p.SkipCode == SkipCannotKeepTrack) != c.skip {
+			t.Errorf("%s: skip %q", c.codec, p.Skip)
+			continue
+		}
+		if !c.skip && !slices.ContainsFunc(p.Tracks, func(o TrackOp) bool { return o.Index == 1 && o.Encoder == "mov_text" }) {
+			t.Errorf("%s: not made mov_text: %+v", c.codec, p.Tracks)
+		}
+		if p.StyledSubsPlain != (c.codec == "ass") { // design 02:49Z: said once when styling is lost
+			t.Errorf("%s: styledSubsPlain %v", c.codec, p.StyledSubsPlain)
 		}
 	}
 }

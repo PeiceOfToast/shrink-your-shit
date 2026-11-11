@@ -333,3 +333,50 @@ func TestV2LegacyTemplateIsTheServers(t *testing.T) {
 		t.Errorf("the engine's template changed: %+v", after.Template)
 	}
 }
+
+// Review 109: a never-published workflow's preset, tag and changesOriginals come from its draft.
+func TestV2DraftWorkflowFields(t *testing.T) {
+	srv, _, _, _ := libServer(t, false)
+	_, body := post(t, srv, "POST", "/api/v2/workflows", `{"name":"Fresh"}`)
+	w := decode[map[string]any](t, body)
+	if w["presetId"] != "shrink_videos" || w["changesOriginals"] != false || w["summaryTag"] != "" { // next to each library: not runnable yet, so no tag
+		t.Errorf("fresh draft %s", body)
+	}
+	id := w["id"].(string)
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/v2/workflows/" + id + "/draft"})
+	d := decode[v2Rev](t, body)
+	d.Workflow.Nodes[7].Config = map[string]any{"policy": "replace"}
+	put, _ := json.Marshal(map[string]any{"workflow": d.Workflow, "layout": d.Layout})
+	req, _ := http.NewRequest("PUT", srv.URL+"/api/v2/workflows/"+id+"/draft", strings.NewReader(string(put)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("If-Match", d.Etag)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/v2/workflows/" + id})
+	w = decode[map[string]any](t, body)
+	if w["changesOriginals"] != true || w["summaryTag"] == "" {
+		t.Errorf("replace draft %s", body)
+	}
+}
+
+// Review ae3a28f: one flow that can't be read is left out of the list (logged), so the Workflows page
+// still lists the others; asked for itself, it's a clear error.
+func TestV2ListSurvivesABadFlow(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	good, _ := st.AddLibrary("Good", t.TempDir(), rules.SliderTemplate(3), false)
+	bad, _ := st.AddLibrary("Bad", t.TempDir(), rules.SliderTemplate(3), false)
+	if err := st.CorruptFlowForTest(bad.FlowID); err != nil {
+		t.Fatal(err)
+	}
+	code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/workflows"})
+	l := decode[v2List](t, body)
+	if code != 200 || l.Total != 1 || l.Items[0]["id"] != strconv.FormatInt(good.FlowID, 10) {
+		t.Errorf("list %d %s", code, body)
+	}
+	if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/workflows/" + strconv.FormatInt(bad.FlowID, 10)}); code < 400 || !strings.Contains(body, `"message"`) {
+		t.Errorf("the bad one: %d %s", code, body)
+	}
+}

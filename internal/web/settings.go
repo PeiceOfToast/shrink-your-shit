@@ -22,16 +22,19 @@ type Settings struct {
 	// now). For one release the page before the Flows tab still reads and sets them (ui-shop 04:37Z),
 	// so GET shows them and a PATCH stores them; nothing in the engine uses them (a flow's kind is its
 	// own), and a rollback finds them.
-	OldControlLevel   string     `json:"controlLevel,omitempty"`
-	OldPerLibraryFlow *bool      `json:"perLibraryFlow,omitempty"`
-	FirstRunDone      bool       `json:"firstRunDone"`
-	FirstRunStep      int        `json:"firstRunStep"` // 1..5
-	KeepOriginalsDays int        `json:"keepOriginalsDays"`
-	ParallelJobs      int        `json:"parallelJobs"`
-	QuietHours        QuietHours `json:"quietHours"`
-	LowPriority       bool       `json:"lowPriority"`
-	ScanSchedule      string     `json:"scanSchedule"` // "HH:MM", or "" for none
-	QueueOrder        string     `json:"queueOrder"`   // newest|oldest|largest|smallest
+	OldControlLevel   string `json:"controlLevel,omitempty"`
+	OldPerLibraryFlow *bool  `json:"perLibraryFlow,omitempty"`
+	FirstRunDone      bool   `json:"firstRunDone"`
+	FirstRunStep      int    `json:"firstRunStep"` // 1..5
+	// FirstRunLibrary is first run's step 1 (name and folder, kept until a library exists; the folder
+	// needn't exist yet); null when there is none (design, 02:41Z).
+	FirstRunLibrary   *FirstRunLibrary `json:"firstRunLibrary"`
+	KeepOriginalsDays int              `json:"keepOriginalsDays"`
+	ParallelJobs      int              `json:"parallelJobs"`
+	QuietHours        QuietHours       `json:"quietHours"`
+	LowPriority       bool             `json:"lowPriority"`
+	ScanSchedule      string           `json:"scanSchedule"` // "HH:MM", or "" for none
+	QueueOrder        string           `json:"queueOrder"`   // newest|oldest|largest|smallest
 	// Languages are the person's languages for "Keep only my languages" (slice 25b): ISO 639-2 codes,
 	// stored in one form (rules.CanonLang); two-letter codes and the 639-2/T forms are accepted.
 	Languages []string `json:"languages"`
@@ -41,6 +44,12 @@ type Settings struct {
 type QuietHours struct {
 	From string `json:"from"`
 	To   string `json:"to"`
+}
+
+// FirstRunLibrary is the library first run's step 1 is making.
+type FirstRunLibrary struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
 }
 
 const settingsKey = "settings"

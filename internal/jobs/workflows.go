@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
@@ -173,9 +174,9 @@ func (s *Store) EnsureRevisions() error {
 		ids = append(ids, id)
 	}
 	rows.Close()
-	for _, id := range ids {
+	for _, id := range ids { // one flow that can't be read doesn't stop the app starting (review 109): it's logged
 		if _, err := s.EnsureRevision(id); err != nil {
-			return err
+			log.Printf("workflow %d: its revision 1 could not be written (its flow stays as it is): %v", id, err)
 		}
 	}
 	return nil
@@ -429,4 +430,11 @@ func (s *Store) KnownTemplate(flowID int64, t rules.Template) (bool, error) {
 	var n int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM workflow_revisions WHERE workflow_id=? AND status='published' AND template_hash=?`, flowID, templateHash(t)).Scan(&n)
 	return n > 0, err
+}
+
+// CorruptFlowForTest makes a flow's template unreadable, as TestOpenSurvivesABadFlow does (for other
+// packages' tests).
+func (s *Store) CorruptFlowForTest(id int64) error {
+	_, err := s.db.Exec(`UPDATE flows SET template='not json' WHERE id=?`, id)
+	return err
 }
