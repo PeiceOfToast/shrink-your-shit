@@ -508,7 +508,8 @@ func TestHardwareTestRunsOnceAtATime(t *testing.T) {
 	encodes := 0
 	x := &media.FakeExec{Handler: func(name string, args []string) (string, string, error) {
 		for i, a := range args {
-			if a == "-c:v" && i+1 < len(args) && args[i+1] == "hevc_nvenc" {
+			// one run is the 8-bit test (then a 10-bit one, which isn't counted): count runs, not encodes
+			if a == "-c:v" && i+1 < len(args) && args[i+1] == "hevc_nvenc" && !strings.Contains(strings.Join(args, " "), "main10") {
 				mu.Lock()
 				encodes++
 				mu.Unlock()
@@ -551,5 +552,54 @@ func TestCancelledHardwareTestIsNotKept(t *testing.T) {
 	}
 	if got := c.Tools(context.Background()).Hardware; len(got) != 1 {
 		t.Errorf("hardware %v, want hevc_nvenc", got)
+	}
+}
+
+// Research 1.2: each family's test encode. VAAPI opens its device and uploads the frames (the plain
+// command fails on a working VAAPI box); QSV opens its own; 10-bit asks for Main10 from p010.
+func TestHardwareEncodeArgs(t *testing.T) {
+	for _, c := range []struct {
+		enc     string
+		tenBit  bool
+		want    []string
+		notWant string
+	}{
+		{"hevc_vaapi", false, []string{"-init_hw_device vaapi=va:/dev/dri/renderD129", "-filter_hw_device va", "-vf format=nv12,hwupload", "-c:v hevc_vaapi"}, "main10"},
+		{"hevc_vaapi", true, []string{"-vf format=p010,hwupload", "-profile:v main10"}, "nv12"},
+		{"hevc_qsv", false, []string{"-init_hw_device qsv=qsv:hw", "-c:v hevc_qsv"}, "hwupload"},
+		{"hevc_qsv", true, []string{"-pix_fmt p010le", "-profile:v main10"}, "hwupload"},
+		{"hevc_nvenc", false, []string{"-c:v hevc_nvenc"}, "init_hw_device"},
+		{"hevc_nvenc", true, []string{"-pix_fmt p010le", "-c:v hevc_nvenc -profile:v main10"}, "init_hw_device"},
+	} {
+		got := strings.Join(encodeArgs(c.enc, c.tenBit, "/dev/dri/renderD129"), " ")
+		for _, w := range c.want {
+			if !strings.Contains(got, w) {
+				t.Errorf("%s 10-bit=%v: %q lacks %q", c.enc, c.tenBit, got, w)
+			}
+		}
+		if strings.Contains(got, c.notWant) {
+			t.Errorf("%s 10-bit=%v: %q has %q", c.enc, c.tenBit, got, c.notWant)
+		}
+	}
+}
+
+// A hardware encoder that encodes 8-bit but not Main10 is usable, and not listed as 10-bit capable.
+func TestHardware10(t *testing.T) {
+	x := &media.FakeExec{Handler: func(name string, args []string) (string, string, error) {
+		all := strings.Join(args, " ")
+		switch {
+		case strings.Contains(all, "-encoders"):
+			return "ffmpeg version 7.1\n V..... libx265  x\n V..... hevc_vaapi  x\n V..... hevc_nvenc  x\n", "", nil
+		case strings.Contains(all, "hevc_vaapi") && strings.Contains(all, "main10"):
+			return "", "", errors.New("Main10 not supported")
+		case strings.Contains(all, "hevc_vaapi"), strings.Contains(all, "hevc_nvenc"):
+			return "", "", nil
+		}
+		return "ffmpeg version 7.1\n", "", nil
+	}}
+	c := &Checker{Exec: x, FFmpeg: "/usr/bin/ffmpeg", FFprobe: "/usr/bin/ffprobe"}
+	tools := c.Tools(context.Background())
+	if strings.Join(tools.Hardware, ",") != "hevc_nvenc,hevc_vaapi" || strings.Join(tools.Hardware10, ",") != "hevc_nvenc" {
+		t.Errorf("hardware %v, 10-bit %v", tools.Hardware, tools.Hardware10)
 	}
 }
