@@ -32,6 +32,9 @@ func TestEveryAPIAnswerIsLabelledJSON(t *testing.T) {
 		src, _ := os.ReadFile(f)
 		for _, m := range route.FindAllStringSubmatch(string(src), -1) {
 			method, pattern := m[1], m[2]
+			if pattern == "/api/v2/events" {
+				continue // a stream (text/event-stream) that doesn't end: TestV2EventStream covers it
+			}
 			if pattern == "/api/logout" || pattern == "/api/settings/token/rotate" {
 				continue // would end the test's session or change its token; answered by writeJSON like the rest
 			}
