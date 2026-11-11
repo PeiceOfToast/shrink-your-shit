@@ -19,6 +19,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/preview"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/runlog"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
 
 // Engine is what the API needs from the running scanner and worker. Nil functions do nothing.
@@ -61,6 +62,9 @@ type libraryItem struct {
 	FailedFiles int           `json:"failedFiles"`
 	MadeWith    string        `json:"madeWith"`
 	Tag         string        `json:"tag"` // its flow's tag (control level per flow)
+	// FreeBytes is the free space on the library's disk now (null when it can't be read: the folder is
+	// missing or not reachable); ui-shop's Libraries page, contract v2.
+	FreeBytes *uint64 `json:"freeBytes"`
 }
 
 // libraryStatus is the card's status line: kind not_scanned|scanning|scanned|converting|waiting_for_worker.
@@ -85,6 +89,9 @@ func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		c := counts[l.ID]
 		it := libraryItem{ID: l.ID, Name: l.Name, Path: l.Path, Started: l.Started, FlowID: l.FlowID,
 			WorkingFiles: c.Working, WaitingFiles: c.Waiting, FreedBytes: c.FreedBytes, WaitingBytes: c.WaitingBytes}
+		if free, err := worker.DiskFree(l.Path); err == nil {
+			it.FreeBytes = &free
+		}
 		switch {
 		case !l.Started:
 			it.State = "not_started"

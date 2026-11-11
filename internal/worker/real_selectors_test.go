@@ -108,16 +108,9 @@ func TestRealSelectors(t *testing.T) {
 			t.Errorf("got %q", rd)
 		}
 	})
-	t.Run("subtitles MP4 cannot hold: skipped with a reason", func(t *testing.T) {
-		os.WriteFile(filepath.Join(dir, "s.srt"), []byte("1\n00:00:00,000 --> 00:00:01,000\nhi\n"), 0o644)
-		p := filepath.Join(dir, "subs.mkv")
-		runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=2:size=1280x720:rate=25", "-i", filepath.Join(dir, "s.srt"),
-			"-map", "0", "-map", "1", "-c:v", "libx264", "-b:v", "5000k", "-c:s", "srt", p)
-		plan := sel(func(s *rules.Selectors) { s.FileType = "mp4"; s.AfterConverting = "beside" }).Compile(probe(t, p))
-		if plan.SkipCode != rules.SkipCannotKeepTrack || plan.Skip != "its subrip subtitles cannot be kept in MP4" {
-			t.Errorf("%q %q", plan.SkipCode, plan.Skip)
-		}
-	})
+	// "subtitles MP4 cannot hold" was SRT; SRT now becomes mov_text (TestRealMP4KeepsTextSubtitles). The
+	// skip that's left is for picture subtitles (PGS, DVB), which ffmpeg can't make from text, so the rules
+	// test TestMP4TextSubtitles covers it with a probed PGS track.
 	t.Run("HDR10 is converted keeping its HDR (S3; TestRealHDR10 runs it)", func(t *testing.T) {
 		// x264's own VUI flags: ffmpeg's -color_trc does not reach an mkv stream from libx264
 		p := gen("hdr.mkv", "1280x720", 5000, "-pix_fmt", "yuv420p10le", "-x264-params", "colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc")
@@ -485,5 +478,80 @@ func TestRealKeepWebMBecomesMKV(t *testing.T) {
 	}
 	if !strings.Contains(text, "File type changed to MKV: WebM files can't hold AAC.") {
 		t.Errorf("log:\n%s", text)
+	}
+}
+
+// MP4 output (02:41Z): an MKV with SRT subtitles becomes an MP4 whose subtitles are MP4's own
+// (mov_text), instead of the file being left alone. The SRT sample is made here; no media is committed.
+func TestRealMP4KeepsTextSubtitles(t *testing.T) {
+	needTools(t)
+	dir := t.TempDir()
+	srt := filepath.Join(dir, "s.srt")
+	os.WriteFile(srt, []byte("1\n00:00:00,500 --> 00:00:02,000\nHello there\n"), 0o644)
+	src := filepath.Join(dir, "m.mkv")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=3:size=640x360:rate=25", "-i", srt,
+		"-map", "0", "-map", "1", "-c:v", "mpeg2video", "-b:v", "6000k", "-c:s", "srt", "-metadata:s:s:0", "language=eng", src)
+	s := rules.DefaultSelectors(3)
+	s.Speed, s.FileType, s.AfterConverting = "faster", "mp4", "beside" // beside: the original stays, no record of kept originals needed
+	tmpl := s.Template()
+	st, id := realJob(t, src, 3)
+	st.SetPaused(false)
+	w := realWorker(st, media.OSExec{})
+	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.run(t)
+	j, _ := st.Get(id)
+	if j.Status != jobs.Done {
+		t.Fatalf("%s %q", j.Status, j.Error)
+	}
+	out := probe(t, j.OutputPath)
+	subs := out.Subtitles()
+	if filepath.Ext(j.OutputPath) != ".mp4" || len(subs) != 1 || subs[0].Codec != "mov_text" || subs[0].Language != "eng" {
+		t.Errorf("new file %s: %+v", j.OutputPath, out.Streams)
+	}
+}
+
+// dropSubtitleExec runs real ffmpeg but makes the encode lose the second subtitle track.
+type dropSubtitleExec struct{ media.OSExec }
+
+func (d dropSubtitleExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
+	for i, a := range args {
+		if a == "-map" && i+1 < len(args) && args[i+1] == "-0:d" {
+			args = append(append(append([]string{}, args[:i+2]...), "-map", "-0:s:1"), args[i+2:]...)
+			break
+		}
+	}
+	return d.OSExec.Stream(ctx, onLine, name, args...)
+}
+
+// #117: MP4's mov_text skips only the default-flag comparison; a subtitle track lost on the way is still
+// refused (count, codec and language are checked) and the original stays.
+func TestRealMP4LostSubtitleIsRefused(t *testing.T) {
+	needTools(t)
+	dir := t.TempDir()
+	en, fr := filepath.Join(dir, "en.srt"), filepath.Join(dir, "fr.srt")
+	os.WriteFile(en, []byte("1\n00:00:00,500 --> 00:00:02,000\nHello\n"), 0o644)
+	os.WriteFile(fr, []byte("1\n00:00:00,500 --> 00:00:02,000\nBonjour\n"), 0o644)
+	src := filepath.Join(dir, "m.mkv")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=3:size=640x360:rate=25", "-i", en, "-i", fr,
+		"-map", "0", "-map", "1", "-map", "2", "-c:v", "mpeg2video", "-b:v", "6000k", "-c:s", "srt",
+		"-metadata:s:s:0", "language=eng", "-metadata:s:s:1", "language=fre", src)
+	orig, _ := os.ReadFile(src)
+	s := rules.DefaultSelectors(3)
+	s.Speed, s.FileType, s.AfterConverting, s.Subtitles = "faster", "mp4", "beside", "keep_all"
+	tmpl := s.Template()
+	st, id := realJob(t, src, 3)
+	st.SetPaused(false)
+	w := realWorker(st, dropSubtitleExec{})
+	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.run(t)
+	j, _ := st.Get(id)
+	if j.Status != jobs.Kept || !strings.Contains(j.Error, "subtitle") {
+		t.Fatalf("a lost subtitle must be refused: %s %q", j.Status, j.Error)
+	}
+	if now, _ := os.ReadFile(src); string(now) != string(orig) {
+		t.Error("the original changed")
+	}
+	if tempLeft(src) {
+		t.Error("temp file left")
 	}
 }
