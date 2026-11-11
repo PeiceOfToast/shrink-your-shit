@@ -4,6 +4,7 @@ import { itemFor } from "./nav";
 import { AppearanceSettings, Coming, NotFound } from "./pages";
 import { Dashboard } from "./screens/Dashboard";
 import { Libraries, LibraryPage } from "./screens/Libraries";
+import { Start } from "./screens/Start";
 import { Workflows } from "./screens/Workflows";
 import { WorkflowStack } from "./screens/WorkflowStack";
 import { usePath } from "./router";
@@ -16,13 +17,14 @@ export function App() {
   // Other pages' deeper paths (/workflows/42/graph) are their future routes; Settings' sub-pages are known, so any
   // other /settings/... is not found.
   const item = path.startsWith("/settings/") && !settings ? undefined : itemFor(path);
-  const title = settings ? "Settings" : item ? item.label : "Page not found";
+  const start = path === "/start"; // first run: not in the menu (IA.md)
+  const title = settings ? "Settings" : start ? "Set up" : item ? item.label : "Page not found";
   useEffect(() => { document.title = title + " · Shrink Your Shit (new interface)"; }, [title]);
   return (
     <>
       <div dangerouslySetInnerHTML={{ __html: sprite }} />
-      <Shell title={title} proto={!settings && !!item}>
-        {settings ? <AppearanceSettings /> : path === "/" ? <Dashboard /> : path === "/libraries" ? <Libraries /> : /^\/libraries\/[^/]+$/.test(path) ? <LibraryPage key={path} id={path.split("/")[2]} />: path === "/workflows" ? <Workflows /> : /^\/workflows\/[^/]+$/.test(path) ? <WorkflowStack key={path} id={path.split("/")[2]} /> : item ? <Coming item={item} /> : <NotFound />}
+      <Shell title={title} proto={start || (!settings && !!item)}>
+        {settings ? <AppearanceSettings /> : path === "/" ? <Dashboard /> : start ? <Start /> : path === "/libraries" ? <Libraries /> : /^\/libraries\/[^/]+$/.test(path) ? <LibraryPage key={path} id={path.split("/")[2]} />: path === "/workflows" ? <Workflows /> : /^\/workflows\/[^/]+$/.test(path) ? <WorkflowStack key={path} id={path.split("/")[2]} /> : item ? <Coming item={item} /> : <NotFound />}
       </Shell>
     </>
   );

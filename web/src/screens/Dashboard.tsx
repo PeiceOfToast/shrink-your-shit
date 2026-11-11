@@ -35,7 +35,7 @@ function Setup({ steps, onDone }: { steps: [string, boolean, string?][]; onDone:
             <li key={name}>{done ? <St cls="ok" icon="i-check-c">{name}</St> : name}{note && <> <span className="muted">{note}</span></>}</li>
           ))}
         </ol>
-        <p className="muted sm">The setup pages come in a later step of the new interface; until then, use <a href="/">the current interface</a>.</p>
+        <div className="row"><Link className="btn primary" to="/start">Continue setup</Link></div>
       </div>
     </section>
   );
@@ -70,9 +70,9 @@ export function Dashboard() {
         {running
           ? <button className="btn" type="button" onClick={stopAll}><Icon id="i-stop" />Stop all</button>
           : <button className="btn" type="button" onClick={startAll}><Icon id="i-play" />Start all</button>}
-        <button className="btn" type="button" onClick={scanAll} disabled={s.libraries.some((l) => l.scan.state === "scanning")}>
+        {s.libraries.length > 0 && <button className="btn" type="button" onClick={scanAll} disabled={s.libraries.some((l) => l.scan.state === "scanning")}>
           <Icon id="i-refresh" />{s.libraries.some((l) => l.scan.state === "scanning") ? "Scanning..." : "Scan all libraries"}
-        </button>
+        </button>}
       </div></section>
 
       {!fresh && (

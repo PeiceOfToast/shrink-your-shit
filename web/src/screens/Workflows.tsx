@@ -8,6 +8,9 @@ import { TEMPLATES, createWorkflow, deleteWorkflow, duplicateWorkflow, setWorkfl
 import { Link, navigate, useSearch } from "../router";
 import type { Workflow } from "../types/v2";
 
+// design review rule 4: "same resolution", and that originals stay. Also first run's step 2.
+export const START_SIMPLE = "A list of steps with plain choices. HEVC, same resolution, stereo audio in your languages, MKV. Saves new files in a separate folder. Your originals stay where they are; no space is freed until you remove them.";
+
 function RowMenu({ w, onSaid }: { w: Workflow; onSaid: (s: string) => void }) {
   const ref = useRef<HTMLDetailsElement>(null);
   const close = () => ref.current?.removeAttribute("open");
@@ -62,7 +65,7 @@ function Wizard({ onClose, onMade }: { onClose: () => void; onMade: (w: Workflow
             <div style={{ minWidth: 0, flex: 1 }}>
               <label htmlFor="how-simple">Start Simple: Shrink videos</label>
               {/* design review rule 4: "same resolution", and that originals stay */}
-              <div className="hint" style={{ fontSize: "var(--fs)" }}>A list of steps with plain choices. HEVC, same resolution, stereo audio in your languages, MKV. Saves new files in a separate folder. Your originals stay where they are; no space is freed until you remove them.</div>
+              <div className="hint" style={{ fontSize: "var(--fs)" }}>{START_SIMPLE}</div>
             </div></div>
         </fieldset>
         <div className="row"><button className="btn primary" type="button" onClick={create}>Create draft</button><button className="btn ghost" type="button" onClick={onClose}>Cancel</button></div>

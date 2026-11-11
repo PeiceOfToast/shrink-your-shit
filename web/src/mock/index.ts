@@ -8,6 +8,7 @@ import { branchedDoc, legacyDoc, presetDoc, preview, revision, summary as stepSu
 
 const now = Date.now(), ago = (min: number) => new Date(now - min * 60e3).toISOString();
 const GB = 1e9;
+const mockMode = new URLSearchParams(location.search).get("mock");
 
 function library(id: ID, name: string, path: string, freed: number, waitingToFree: number, files: number): Library {
   return {
@@ -69,7 +70,7 @@ interface State {
 function running(): State {
   const step = (index: number, name: string) => ({ nodeId: "n" + index, name, index, count: 5 });
   return {
-    settings: { firstRunDone: true, firstRunStep: 4, intakePaused: false, catalogueEnabled: false },
+    settings: { firstRunDone: true, firstRunStep: 4, intakePaused: false, catalogueEnabled: false, firstRunLibrary: null },
     libraries: [library("l1", "Movies", "/media/movies", 8.1 * GB, 780 * GB, 1600), library("l2", "TV Shows", "/media/tv", 0, 410 * GB, 900), { ...library("l3", "Home videos", "/media/home", 28.3 * GB, 10 * GB, 300), workflowId: "w2", workflowName: "Home videos - my rules" }],
     workers: [worker("this", "This computer", "busy", [1, 2], [0, 1], 120, ["j-48213"]), worker("nas", "NAS box", "busy", [1, 1], [0, 0], 300, ["j-48214"]), worker("laptop", "Laptop", "offline", [0, 1], [0, 0], 22, [])],
     jobs: [
@@ -101,14 +102,15 @@ function running(): State {
 }
 function fresh(): State {
   return {
-    settings: { firstRunDone: false, firstRunStep: 1, intakePaused: false, catalogueEnabled: false },
-    libraries: [library("l1", "Movies", "/media/movies", 0, 0, 1284)],
+    // ?mock=fresh-old: a server without firstRunLibrary (before workshop's change), so first run falls back to sessionStorage.
+    settings: { firstRunDone: false, firstRunStep: 1, intakePaused: false, catalogueEnabled: false, ...(mockMode === "fresh-old" ? {} : { firstRunLibrary: null }) },
+    libraries: [],
     workers: [worker("this", "This computer", "paused", [0, 2], [0, 0], 5, [])], // workers start stopped (rebuild decision)
     jobs: [], waiting: 0, last24h: { completed: 0, failed: 0, skipped: 0, successRate: null }, activity: [], wf: [], trash: { bytes: 0, files: 0, nextDeleteAt: null, lastDeleteAt: null },
   };
 }
 
-let state: State = new URLSearchParams(location.search).get("mock") === "fresh" ? fresh() : running();
+let state: State = mockMode?.startsWith("fresh") ? fresh() : running();
 let version = 0;
 // When the data last changed (the real app: when the summary or a live event last arrived). The Dashboard's "Updated".
 export let updatedAt = new Date();
@@ -329,17 +331,25 @@ function workflowError(id: ID): Issue | null {
   if (w.publishedRevisionId == null) return { code: "workflow_not_published", message: "This workflow hasn't been published yet, so nothing can use it. Publish it first. Nothing was changed." };
   return null;
 }
+// folderRefused: a workflow that saves new files inside the library's folder (or one holding it) would convert them again.
+function outputInside(flowId: ID, path: string): Issue | null {
+  const out = drafts[flowId]?.published?.nodes.find((n) => n.type === "output.commit")?.config.folder, p = trim(path);
+  if (typeof out !== "string" || !out) return null;
+  const o = trim(out);
+  return o === p || o.startsWith(p + "/") || p.startsWith(o + "/")
+    ? { code: "inside_library", message: "This flow saves new files to " + o + ", which is inside this library (or holds it), so new files would be converted again. Choose another flow, or change the flow's folder. Nothing was changed." } : null;
+}
 const linkWorkflows = (s: State) => { s.wf = s.wf.map((w) => ({ ...w, libraries: s.libraries.filter((l) => l.workflowId === w.id).map((l) => ({ id: l.id, name: l.name })) })); };
 // POST /api/libraries {name, path, flowId}: 201 with the library, not started (nothing scanned or queued).
 export function addLibrary(name: string, path: string, flowId: ID): Answer<LibraryItem> {
   if (!name.trim()) return { error: { code: "invalid_name", message: "Give the library a name." } };
-  const e = pathError(path) ?? workflowError(flowId);
+  const e = pathError(path) ?? workflowError(flowId) ?? outputInside(flowId, path);
   if (e) return { error: e };
   const l = library("l" + Date.now().toString(36), name.trim(), trim(path), 0, 0, 0);
   l.workflowId = flowId; l.workflowName = state.wf.find((w) => w.id === flowId)!.name; l.enabled = false;
   l.counts = { files: 0, waiting: 0, running: 0, completed: 0, skipped: 0, failed: 0 };
   l.scan = { ...l.scan, lastScanAt: null, nextScanAt: null };
-  change((s) => { s.libraries = [...s.libraries, l]; linkWorkflows(s); log("library.scanned", "Added the library " + l.name, { libraryId: l.id }); });
+  change((s) => { s.libraries = [...s.libraries, l]; linkWorkflows(s); if (s.settings.firstRunLibrary !== undefined) s.settings = { ...s.settings, firstRunLibrary: null }; log("library.scanned", "Added the library " + l.name, { libraryId: l.id }); });
   return libraryItem(l);
 }
 // PATCH /api/libraries/{id} {name?, path?}: a new path gets the same checks as adding one.
@@ -377,3 +387,5 @@ export function scanLibrary(id: ID) {
     log("library.scanned", "Scanned " + l.name + ": " + (found ? found.toLocaleString("en-US") + " videos found" : "no new files"), { libraryId: id });
   }), 1500);
 }
+// PATCH /settings
+export const setSettings = (patch: Partial<Settings>) => change((s) => { s.settings = { ...s.settings, ...patch }; });
