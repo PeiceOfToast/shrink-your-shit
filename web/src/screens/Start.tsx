@@ -4,6 +4,7 @@
 // Step 1 can't make its library yet (a library needs a workflow, which step 2 makes), so its name and folder wait in
 // settings.firstRunLibrary (#116); making the library clears it. Step 2 makes the workflow and then the library; first
 // run never says "Publish" (design 02:41Z). Finishing scans the library, as v1's first run does.
+import { PageHead } from "../PageHead";
 import { useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
@@ -31,12 +32,12 @@ export function Start() {
   const refresh = () => (st.reload(), libs.reload(), wfs.reload());
   const step = editing || (!lib && !kept) ? 1 : !lib ? 2 : 3, done = step - 1;
   if (s.firstRunDone) return (
-    <div className="stack"><div className="pagehead"><div><h1>Set up Shrink Your Shit</h1></div></div>
+    <div className="stack"><PageHead title="Set up Shrink Your Shit" />
       <div className="card"><div className="bd"><p>Setup is done. <Link to="/">Go to the Dashboard</Link>.</p></div></div></div>);
   return (
     <div className="stack" style={{ maxWidth: 880 }}>
-      <div className="pagehead"><div><h1>Set up Shrink Your Shit</h1><p className="sub">Three short steps. Each is saved as you go. Nothing converts until you start a worker.</p></div>
-        <span className="sp" /><span className="muted">{done} of 3 done</span></div>
+      <PageHead title="Set up Shrink Your Shit"><span className="muted">{done} of 3 done</span></PageHead>
+      <p className="muted">Three short steps. Each is saved as you go. Nothing converts until you start a worker.</p>
       <div className="bar" role="progressbar" aria-label="Setup" aria-valuemin={0} aria-valuemax={3} aria-valuenow={done}><i style={{ width: (100 * done) / 3 + "%" }} /></div>
       {error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{error}</span></p>}
       {step > 1 && <Done n={1} what="Library" text={lib ? lib.name + " · " + lib.path : kept!.name + " · " + kept!.path}

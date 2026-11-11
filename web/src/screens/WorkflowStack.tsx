@@ -1,6 +1,7 @@
 // V3b Stack view (spec 5.7; DESIGN/v2 SCREENS V3, mockups/workflow-stack.html and -readonly.html), on the typed mock
 // of V1 (mock/steps.ts mirrors V1's registry, summaries and validation). Not here: drag to reorder and "+ Add step"
 // (V1 runs the preset's chain in its order), Test run (V5), History, Export, Open graph (V4).
+import { SampleData } from "../PageHead";
 import { Component, useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { getDraft, publish, publishPreview, saveDraft, setWorkflow, useMock } from "../mock";
@@ -188,8 +189,8 @@ function StackPage({ id }: { id: string }) {
           {renaming ? <form className="row" onSubmit={(e) => { e.preventDefault(); const v = (e.currentTarget.elements.namedItem("nm") as HTMLInputElement).value.trim(); if (v) setWorkflow(id, { name: v }); setRenaming(false); }}>
             <label className="sr" htmlFor="wf-rename">Name</label><input id="wf-rename" name="nm" className="input" defaultValue={w.name} autoFocus style={{ width: "auto" }} />
             <button className="btn sm" type="submit">Rename</button><button className="btn sm ghost" type="button" onClick={() => setRenaming(false)}>Cancel</button></form>
-            : <><h1 style={{ fontSize: "var(--fs-lg)" }}>{w.name}</h1><button className="btn sm ghost" type="button" onClick={() => setRenaming(true)} aria-label={"Rename " + w.name}>Rename</button></>}
-          <span className="tag">{w.version == null || w.draftDiffers || dirty ? "Draft" : "Published"}</span>
+            : <><h1 style={{ fontSize: "var(--fs-lg)" }}>{w.name}</h1><SampleData /><button className="btn sm ghost" type="button" onClick={() => setRenaming(true)} aria-label={"Rename " + w.name}>Rename</button></>}
+          <span className="pill">{w.version == null || w.draftDiffers || dirty ? "Draft" : "Published"}</span>
           <span className="muted">{w.version == null ? "Not published yet" : "v" + w.version + " published" + (w.draftDiffers || dirty ? " · v" + (w.version + 1) + " draft" : "")}</span>
         </div>
         {canStack && <div className="row">

@@ -3,6 +3,7 @@
 // General tab only; Discovery, Filters, Output and Statistics come later, so no tabs are shown yet. Not shown, because
 // v1 has no data or route for them: description and tags (CAN'T YET), schedule, priority, pause and resume, other file
 // types.
+import { PageHead } from "../PageHead";
 import { useEffect, useState } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
@@ -24,13 +25,14 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function act<T>(f: () => Promise<Answer<T>>, onError: (m: string) => void): Promise<T | null> {
   try { const r = await f(); if (failed(r)) { onError(r.error.message); return null; } return r; } catch (e) { if (e instanceof SignedOut) return null; throw e; }
 }
+// One status pill per row (S1): accent only while something is happening; normal states are neutral.
 function Status({ l }: { l: LibraryItem }) {
   const k = l.status.kind;
-  if (k === "scanning") return <span className="st run"><Icon id="i-refresh" /><span>Scanning{l.status.foundSoFar ? " · " + count(l.status.foundSoFar) + " found" : ""}</span></span>;
-  if (!l.started) return <span className="st wait"><Icon id="i-pause" /><span>Not started</span></span>;
-  if (k === "converting") return <span className="st run"><Icon id="i-play" /><span>Converting {count(l.status.converting)}</span></span>;
-  if (k === "waiting_for_worker") return <span className="st wait"><Icon id="i-pause" /><span>Waiting for a worker</span></span>;
-  return <span className="st ok"><Icon id="i-check-c" /><span>Watching</span></span>;
+  if (k === "scanning") return <span className="pill run"><Icon id="i-refresh" />Scanning{l.status.foundSoFar ? " · " + count(l.status.foundSoFar) + " found" : ""}</span>;
+  if (!l.started) return <span className="pill"><Icon id="i-pause" />Not started</span>;
+  if (k === "converting") return <span className="pill run"><Icon id="i-play" />Converting {count(l.status.converting)}</span>;
+  if (k === "waiting_for_worker") return <span className="pill"><Icon id="i-pause" />Waiting for a worker</span>;
+  return <span className="pill"><Icon id="i-check-c" />Watching</span>;
 }
 const Problem = ({ m }: { m?: string }) => (m ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{m}</span></p> : null);
 
@@ -50,8 +52,8 @@ export function Libraries() {
   };
   return (
     <div className="stack">
-      <div className="pagehead"><div><h1>Libraries</h1><p className="sub">The folders that are watched for videos.</p></div><span className="sp" />
-        <Link className="btn primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link></div>
+      <PageHead icon="i-library" title="Libraries" help="The folders that are watched for videos.">
+        <Link className="btn primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link></PageHead>
       <Problem m={libs.error?.message} />
       <section className="card">
         {sel.length > 0 && (
@@ -93,7 +95,7 @@ export function LibraryPage({ id }: { id: string }) {
   const l = id === "new" ? null : libs.data?.find((x) => x.id === id);
   if (id !== "new" && !libs.loaded) return <div className="empty">Loading...</div>;
   if (id !== "new" && !l) return (
-    <div className="stack"><div className="pagehead"><div><h1>Library not found</h1></div></div>
+    <div className="stack"><PageHead icon="i-library" crumbs={[["Libraries", "/libraries"]]} title="Library not found" />
       <Problem m={libs.error?.message} />
       <div className="card"><div className="bd"><p>There is no library with this address. <Link to="/libraries">See all libraries</Link>.</p></div></div></div>);
   return <Form key={id} l={l ?? null} workflows={wfs.data} reload={libs.reload} />;
@@ -211,11 +213,10 @@ function Form({ l, workflows, reload }: { l: LibraryItem | null; workflows?: Wor
   const scan = async () => { if (l && (await act(() => scanLibrary(l.id), setError))) reload(); };
   return (
     <div className="stack">
-      <div className="pagehead">
-        <div><h1>{l ? l.name : "Add library"}</h1>{l ? <p className="sub"><Status l={l} /> <span className="mono sm">{l.path}</span></p> : <p className="sub">A folder to watch for videos, and the workflow its files go through.</p>}</div>
-        <span className="sp" />
+      <PageHead icon="i-library" crumbs={[["Libraries", "/libraries"]]} title={l ? l.name : "Add library"} help={l ? undefined : "A folder to watch for videos, and the workflow its files go through."}>
+        {l && <Status l={l} />}
         {l && <button className="btn" type="button" disabled={l.status.kind === "scanning"} onClick={scan}><Icon id="i-refresh" />{l.status.kind === "scanning" ? "Scanning..." : "Scan now"}</button>}
-      </div>
+      </PageHead>
       {l && !l.started && <p className="muted" role="note">This library isn't started yet: nothing is looked for or converted until you press Scan now.</p>}
       <div className="grid cols2">
         <section className="card" aria-labelledby="gen-h">

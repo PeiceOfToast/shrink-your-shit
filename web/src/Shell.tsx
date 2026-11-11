@@ -1,5 +1,6 @@
 // The shell (spec 2; DESIGN/v2 IA.md and mockups/shell.html): the grouped rail, the top bar and the page.
 // Not here yet, until their data exists: nav badges, the activity link, the "New" menu and the connection-lost bar.
+import { SampleDataPage } from "./PageHead";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { NAV, itemFor } from "./nav";
@@ -95,12 +96,8 @@ export function Shell({ title, proto, children }: { title: string; proto: boolea
           </button>
           <ThemeMenu />
         </header>
-        {proto && (
-          <div className="proto" role="note">
-            <Icon id="i-alert" /><span><strong>Prototype</strong> · this page shows sample data or is not built yet. Nothing you do here changes your files.</span>
-          </div>
-        )}
-        <main className="content" id="main">{children}</main>
+        {/* the prototype bar became the Sample data pill in each page's header (DESIGN-DIRECTION-clean.md P2) */}
+        <main className="content" id="main"><SampleDataPage.Provider value={proto}>{children}</SampleDataPage.Provider></main>
       </div>
       {palette && <Palette onClose={() => setPalette(false)} />}
     </div>

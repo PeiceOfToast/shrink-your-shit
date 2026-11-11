@@ -1,6 +1,7 @@
 // V2 Dashboard (spec 4; DESIGN/v2 SCREENS V2, mockups/dashboard.html and dashboard-empty.html), on the typed mock.
 // "Will be freed" comes from Trash (GET /api/v2/trash, mocked until it is on dev). Hidden until the contract has their
 // data: Throughput (job_events), the GPU count on the Workers card, per-worker encoders. Not here yet: Edit dashboard, View (the job drawer, V6).
+import { PageHead } from "../PageHead";
 import { Icon } from "../Icon";
 import { bytes, clock, clockS, count, elapsed, plural } from "../format";
 import { retry, scanAll, startAll, stopAll, summary, updatedAt, useMock } from "../mock";
@@ -57,7 +58,7 @@ export function Dashboard() {
   const libName = (id: string) => s.libraries.find((l) => l.id === id)?.name ?? id;
   return (
     <div className="stack">
-      <div className="pagehead"><div><h1>Dashboard</h1></div></div>
+      <PageHead icon="i-dashboard" title="Dashboard" />
       {fresh && <Setup steps={steps} onDone={steps.filter((x) => x[1]).length} />}
 
       <section className="card"><div className="bd row">

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { PageHead } from "./PageHead";
 import type { NavItem } from "./nav";
 import { ACCENTS, DEFAULTS, DENSITIES, MOTIONS, TEXT_SIZES, THEMES, keep, preview, useAppearance, type Appearance } from "./prefs";
 import { Link, onLeave } from "./router";
@@ -16,7 +17,7 @@ const WHAT: Record<string, string> = {
 export function Coming({ item }: { item: NavItem }) {
   return (
     <div className="stack">
-      <div className="pagehead"><div><h1>{item.label}</h1><p className="sub">{WHAT[item.to]}</p></div></div>
+      <PageHead icon={item.icon} title={item.label} help={WHAT[item.to]} />
       <div className="card"><div className="bd">
         <p>This page comes in a later step of the new interface. Until then, use <a href="/">the current interface</a>.</p>
       </div></div>
@@ -27,7 +28,7 @@ export function Coming({ item }: { item: NavItem }) {
 export function NotFound() {
   return (
     <div className="stack">
-      <div className="pagehead"><div><h1>Page not found</h1></div></div>
+      <PageHead title="Page not found" />
       <div className="card"><div className="bd"><p>There is no page at this address. <Link to="/">Go to the Dashboard</Link>.</p></div></div>
     </div>
   );
@@ -75,7 +76,7 @@ export function AppearanceSettings() {
   const set = <K extends keyof Appearance>(k: K) => (v: Appearance[K]) => (setSaid(""), setDraft((d) => ({ ...d, [k]: v })));
   return (
     <div className="stack">
-      <div className="pagehead"><div><h1>Settings</h1></div></div>
+      <PageHead icon="i-settings" title="Settings" />
       <nav className="tabs" aria-label="Settings sections"><Link to="/settings/appearance" aria-current="page">Appearance</Link></nav>
       <div className="card">
         <div className="hd"><h2>Appearance</h2></div>

@@ -1,6 +1,7 @@
 // V3 Workflows list, Templates tab and the New workflow wizard (spec 5.1, 5.2; DESIGN/v2 SCREENS V3,
 // mockups/workflows.html), on the typed mock. Not here yet: the Stack view (Open, V3b), Export, Test run, History,
 // Import, the Cards view. Archive isn't in the contract.
+import { PageHead } from "../PageHead";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { plural } from "../format";
@@ -83,8 +84,8 @@ export function Workflows() {
   const rows = s.wf.filter((w) => (!q || (w.name + " " + w.description).toLowerCase().includes(q.toLowerCase())) && (!tag || w.tags.includes(tag)) && (!fav || w.favourite));
   return (
     <div className="stack">
-      <div className="pagehead"><div><h1>Workflows</h1><p className="sub">What happens to each file. A library uses one workflow.</p></div><span className="sp" />
-        {!wizard && <button className="btn primary" type="button" onClick={() => (setWizard(true), setSaid(""))}><Icon id="i-plus" />New workflow</button>}</div>
+      <PageHead icon="i-workflow" title="Workflows" help="What happens to each file. A library uses one workflow.">
+        {!wizard && <button className="btn primary" type="button" onClick={() => (setWizard(true), setSaid(""))}><Icon id="i-plus" />New workflow</button>}</PageHead>
       {wizard && <Wizard onClose={() => setWizard(false)} onMade={(w) => navigate("/workflows/" + w.id)} />}
       <div className="tabs" role="tablist">
         <button role="tab" type="button" aria-selected={tab === "workflows"} onClick={() => tab !== "workflows" && setTab("workflows")}>Workflows</button>
@@ -121,8 +122,8 @@ export function Workflows() {
                     <td>{w.libraries.length ? w.libraries.map((l) => l.name).join(", ") : <span className="muted">None</span>}</td>
                     <td className="num">{w.activeJobs}</td>
                     <td className="nowrap">{w.version == null ? "Draft · not published yet" : "v" + w.version + (w.draftDiffers ? " · draft changes" : "")}</td>
-                    <td>{problems ? <span className={"st " + (w.validation.errors ? "bad" : "warn")}><Icon id="i-alert" /><span>{plural(problems, "problem", "problems")}</span></span>
-                      : <span className="st ok"><Icon id="i-check-c" /><span>OK</span></span>}</td>
+                    <td>{problems ? <span className={"pill " + (w.validation.errors ? "bad" : "warn")}><Icon id="i-alert" />{plural(problems, "problem", "problems")}</span>
+                      : <span className="pill"><Icon id="i-check-c" />OK</span>}</td>
                     <td>{w.status === "draft" ? <span className="muted" aria-label="Not published yet">-</span>
                       : <input type="checkbox" role="switch" className="switch" aria-label={"Enabled: " + w.name} checked={w.status === "enabled"} onChange={(e) => setWorkflow(w.id, { status: e.target.checked ? "enabled" : "disabled" })} />}</td>
                     <td><RowMenu w={w} onSaid={setSaid} /></td>
