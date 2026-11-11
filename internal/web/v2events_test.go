@@ -103,6 +103,10 @@ func TestV2EventStream(t *testing.T) {
 	if m := nextMessage(t, stream(t, srv.URL, created.id)); m.event != "resync" {
 		t.Errorf("pruned gap %+v", m)
 	}
+	// an id above the newest (the database was restored from a backup, or replaced): resync, not silence
+	if m := nextMessage(t, stream(t, srv.URL, "999999")); m.event != "resync" {
+		t.Errorf("id ahead of the newest %+v", m)
+	}
 }
 
 // The stream is behind the same sign-in as the rest of /api.

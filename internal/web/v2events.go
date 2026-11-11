@@ -55,8 +55,10 @@ func v2EventStream(api *http.ServeMux, store *jobs.Store) {
 		case from == "" || err != nil || last < 0:
 			last = newest
 			send(w, 0, "hello", map[string]any{"seq": newest})
-		case last < newest && (last+1 < oldest || newest-last > eventReplayMax):
-			last = newest // the gap is gone (pruned) or too long: the page reloads its data
+		case last > newest || (last < newest && (last+1 < oldest || newest-last > eventReplayMax)):
+			// the gap is gone (pruned) or too long, or the id is ahead of the newest (the database was
+			// restored or replaced; waiting for it would be silence): the page reloads its data
+			last = newest
 			send(w, 0, "resync", map[string]any{"seq": newest})
 		}
 		flusher.Flush()
