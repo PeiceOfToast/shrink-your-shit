@@ -253,3 +253,48 @@ func TestMigratedNodesHaveDefinitions(t *testing.T) {
 		}
 	}
 }
+
+// Registry words pass (ui-shop's 9 + design's): every enum has a label and a hint per choice where
+// design has them; titles and availability are there; the Off words name what is kept.
+func TestRegistryWords(t *testing.T) {
+	d, _ := Definition(TypeInput)
+	if p := d.ConfigSchema["properties"].(map[string]any)["ignore"].(map[string]any); p["title"] != "Exclude patterns" {
+		t.Errorf("ignore %v", p)
+	}
+	for _, typ := range []string{TypeConvert, TypeAudio, TypeSubtitles, TypeContainer, TypeCommit} {
+		d, _ := Definition(typ)
+		for name, raw := range d.ConfigSchema["properties"].(map[string]any) {
+			p := raw.(map[string]any)
+			if p["title"] == nil {
+				t.Errorf("%s.%s has no title", typ, name)
+			}
+			e, ok := p["enum"].([]any)
+			if !ok {
+				continue
+			}
+			if l, _ := p["x-enumLabels"].([]string); len(l) != len(e) {
+				t.Errorf("%s.%s: %d labels for %d choices", typ, name, len(l), len(e))
+			}
+			if h, ok := p["x-enumHints"].([]string); ok && len(h) != len(e) {
+				t.Errorf("%s.%s: %d hints for %d choices", typ, name, len(h), len(e))
+			}
+		}
+	}
+	cv, _ := Definition(TypeConvert)
+	props := cv.ConfigSchema["properties"].(map[string]any)
+	if props["format"].(map[string]any)["x-enumLabels"].([]string)[0] != "HEVC (H.265)" || props["maxBitrate"].(map[string]any)["x-bitrateLadder"].(map[string]any)["vp9"] == nil ||
+		props["speed"].(map[string]any)["x-enumLabels"].([]string)[2] != "Slower, smaller files" {
+		t.Errorf("convert words %v", props)
+	}
+	rules.SetAvailableFormats(map[string]bool{"libx265": true, "aac": true, "eac3": true, "ac3": true})
+	defer rules.SetAvailableFormats(nil)
+	au, _ := Definition(TypeAudio)
+	if av := au.ConfigSchema["properties"].(map[string]any)["audio"].(map[string]any)["x-available"].([]string); slices.Contains(av, "stereo_opus") || !slices.Contains(av, "as_is") {
+		t.Errorf("audio available without libopus: %v", av)
+	}
+	for typ, want := range map[string]string{TypeAudio: "tracks", TypeSubtitles: "subtitles", TypeContainer: "type"} {
+		if s := summary(Node{Type: typ, Enabled: false}); !strings.Contains(s, want) {
+			t.Errorf("%s off: %q", typ, s)
+		}
+	}
+}

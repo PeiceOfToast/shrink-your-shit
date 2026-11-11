@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
@@ -418,6 +419,54 @@ func (s *Store) WorkflowRunsSince(flowID int64, since string) (WorkflowRuns, err
 FROM jobs j JOIN libraries l ON l.id=j.library_id WHERE l.flow_id=?`, since, since, flowID).Scan(&r.Active, &r.Completed, &r.Failed, &last)
 	r.LastAt = last.String
 	return r, err
+}
+
+// Trash is what .syp-trash holds now: originals kept after a replace, freed when their days are up.
+type Trash struct {
+	Bytes        int64   `json:"bytes"`
+	Files        int     `json:"files"`
+	NextDeleteAt *string `json:"nextDeleteAt"`
+	LastDeleteAt *string `json:"lastDeleteAt"`
+}
+
+// KeptUntil is when a kept original is due to be deleted: when it was kept plus days, the setting now
+// (a lower setting applies at once; 0 days: due at once, as the swap deletes it). Purge, the kept
+// days left and the trash dates all read it, so they can't disagree (review d3d44e2).
+func KeptUntil(keptAt string, days int) (time.Time, bool) {
+	t, err := time.Parse(time.RFC3339, keptAt)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t.Add(time.Duration(days) * 24 * time.Hour), true
+}
+
+// TrashNow sums the kept originals and when they go, with days the keep-originals setting now.
+func (s *Store) TrashNow(days int) (Trash, error) {
+	rows, err := s.Originals(OriginalKept)
+	if err != nil {
+		return Trash{}, err
+	}
+	var t Trash
+	var first, last time.Time
+	for _, o := range rows {
+		t.Files++
+		t.Bytes += o.Bytes
+		due, ok := KeptUntil(o.KeptAt, days)
+		if !ok {
+			continue
+		}
+		if first.IsZero() || due.Before(first) {
+			first = due
+		}
+		if due.After(last) {
+			last = due
+		}
+	}
+	if !first.IsZero() {
+		f, l := first.UTC().Format(time.RFC3339), last.UTC().Format(time.RFC3339)
+		t.NextDeleteAt, t.LastDeleteAt = &f, &l
+	}
+	return t, nil
 }
 
 // KnownTemplate reports whether t is a template this workflow has published (its flow's now, or an
