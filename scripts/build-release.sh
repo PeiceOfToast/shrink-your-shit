@@ -1,7 +1,7 @@
 #!/bin/sh
 # Build the release files into ./dist: one archive per platform plus checksums.txt.
 # Usage: sh scripts/build-release.sh <version>      (e.g. 0.1.0; a leading "v" is removed)
-# Needs: go, tar, zip (or python3), sha256sum (or shasum). Used by .github/workflows/release-binaries.yml;
+# Needs: go, Node LTS with npm (web/.nvmrc; the new UI), tar, zip (or python3), sha256sum (or shasum). Used by .github/workflows/release-binaries.yml;
 # run it yourself to see exactly what a release would contain.
 set -eu
 
@@ -13,6 +13,9 @@ rm -rf "$dist"
 mkdir -p "$dist"
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
+
+# The new UI (web/, served at /next/) is built once into internal/web/next/dist and embedded in every binary.
+(cd "$root/web" && npm ci --no-audit --no-fund && npm run build)
 
 for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
   os=${target%/*}

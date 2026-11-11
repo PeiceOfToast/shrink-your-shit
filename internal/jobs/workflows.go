@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log"
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -174,9 +175,9 @@ func (s *Store) EnsureRevisions() error {
 		ids = append(ids, id)
 	}
 	rows.Close()
-	for _, id := range ids {
+	for _, id := range ids { // one flow that can't be read doesn't stop the app starting (review 109): it's logged
 		if _, err := s.EnsureRevision(id); err != nil {
-			return err
+			log.Printf("workflow %d: its revision 1 could not be written (its flow stays as it is): %v", id, err)
 		}
 	}
 	return nil

@@ -7,3 +7,4 @@ shrink-your-shit
 # the new SPA build (ui-shop: web/ -> internal/web/next/dist); only .keep is committed
 /internal/web/next/dist/*
 !/internal/web/next/dist/.keep
+/web/node_modules/
