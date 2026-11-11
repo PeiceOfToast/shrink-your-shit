@@ -228,6 +228,22 @@ UPDATE flows SET template = json_insert(json_set(template, '$.selectors.fileType
 WHERE json_extract(template, '$.kind') = 'selectors' AND json_extract(template, '$.selectors.audio') = 'stereo_opus'
   AND json_extract(template, '$.selectors.fileType') = 'mp4';
 DELETE FROM files WHERE reason = 'already_hevc';`},
+	// V1 (UI rebuild): a flow becomes a workflow with revisions (one draft, every published one kept).
+	// Each flow's revision 1 is written from its template when the store opens (EnsureRevisions), since
+	// the workflow is made in Go; a flow saved by the old pages gets a new revision the same way.
+	{20, "workflow revisions", `
+ALTER TABLE flows ADD COLUMN description TEXT NOT NULL DEFAULT '';
+ALTER TABLE flows ADD COLUMN status TEXT NOT NULL DEFAULT 'enabled';
+ALTER TABLE flows ADD COLUMN favourite INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE flows ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';
+CREATE TABLE workflow_revisions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  workflow_id INTEGER NOT NULL REFERENCES flows(id) ON DELETE CASCADE,
+  number INTEGER, status TEXT NOT NULL, doc TEXT NOT NULL, layout TEXT NOT NULL DEFAULT '{}',
+  logic_hash TEXT NOT NULL, template_hash TEXT NOT NULL DEFAULT '', etag TEXT NOT NULL,
+  created TEXT NOT NULL, published TEXT);
+CREATE UNIQUE INDEX workflow_revisions_number ON workflow_revisions(workflow_id, number) WHERE number IS NOT NULL;
+CREATE UNIQUE INDEX workflow_revisions_draft ON workflow_revisions(workflow_id) WHERE status = 'draft';`},
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.

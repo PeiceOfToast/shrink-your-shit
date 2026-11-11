@@ -57,6 +57,8 @@ func flowRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng En
 			writeErrorWith(w, http.StatusConflict, "flow_in_use",
 				"Libraries use this flow ("+strings.Join(inUse.UsedBy, ", ")+"), so it can't be deleted. Nothing was changed.",
 				map[string]any{"usedBy": inUse.UsedBy})
+		case errors.Is(err, jobs.ErrNotPublished): // review acace8e: never a library on a placeholder
+			apiError(w, http.StatusConflict, "workflow_not_published", "This workflow hasn't been published yet, so nothing can use it. Publish it first. Nothing was changed.")
 		case errors.Is(err, jobs.ErrNotFound):
 			apiError(w, http.StatusNotFound, "not_found", "There is no such flow.")
 		case errors.Is(err, jobs.ErrNameTaken):
