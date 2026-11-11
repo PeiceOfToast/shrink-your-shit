@@ -220,8 +220,16 @@ func hasPort(ports []Port, name string) bool {
 // summary is a node's line in plain words (design: server-rendered, like the old "Your files become").
 func summary(n Node) string {
 	c := n.Config
-	if !n.Enabled {
-		return "Off: the original's are kept"
+	if !n.Enabled { // ui-shop's words per step (registry words pass)
+		switch n.Type {
+		case TypeAudio:
+			return "Off: the original's tracks are kept"
+		case TypeSubtitles:
+			return "Off: the original's subtitles are kept"
+		case TypeContainer:
+			return "Off: keeps the original's type"
+		}
+		return "Off"
 	}
 	switch n.Type {
 	case TypeInput:

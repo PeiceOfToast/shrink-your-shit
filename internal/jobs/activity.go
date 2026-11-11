@@ -140,6 +140,18 @@ FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id WHERE j.status IN (?,?) O
 	return out, total, rows.Err()
 }
 
+// IsOwnOutput reports whether the file at path, with this size and modification time, is the file a
+// done conversion wrote. The scanner never converts it again: with a new file type, a folder for the new
+// files or a bitrate or size cap, it is not "already in this format", and each pass converted it again,
+// a generation worse each time (dev-qa, #109 QA). Kept in the jobs table, so it holds after a restart;
+// a different file put at that path later (another size or time) is looked at as usual.
+func (s *Store) IsOwnOutput(path string, size, mtime int64) (bool, error) {
+	var yes bool
+	err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM jobs WHERE output_path=? AND status='done' AND size_after=? AND output_mtime=? AND output_mtime<>0)`,
+		path, size, mtime).Scan(&yes)
+	return yes, err
+}
+
 // convertedSQL is true for a files row that is the output of a done conversion: the scanner skips it
 // afterwards (already the new format), but it is not "skipped" for the person, it is done.
 // It is that output only while it is the file the job wrote: the size and modification time recorded

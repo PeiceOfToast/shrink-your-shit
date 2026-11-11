@@ -200,8 +200,8 @@ func fileItem(store *jobs.Store, libs []jobs.Library, row jobs.FileRow, card str
 		switch {
 		case row.OriginalState == jobs.OriginalKept:
 			it["originalState"], it["keptId"] = "kept", strconv.FormatInt(row.OriginalID, 10)
-			if t, err := time.Parse(time.RFC3339, row.OriginalKeptAt); err == nil {
-				it["keptDaysLeft"] = max(0, int(time.Until(t.Add(time.Duration(keepDays)*24*time.Hour)).Hours()/24+0.999))
+			if due, ok := jobs.KeptUntil(row.OriginalKeptAt, keepDays); ok {
+				it["keptDaysLeft"] = max(0, int(time.Until(due).Hours()/24+0.999))
 			}
 		case row.OriginalState == jobs.OriginalRestored:
 			it["originalState"] = "restored"

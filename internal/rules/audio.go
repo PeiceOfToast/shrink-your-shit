@@ -94,6 +94,9 @@ const FoldedNote = "7.1 sound became 5.1 (E-AC-3 and AC-3 hold up to 5.1)."
 // made stereo AAC/Opus: converting would not make it smaller (design, 02:26Z, REDESIGN A1).
 const SmallKeptNote = "Small stereo track kept as it is: converting would not make it smaller."
 
+// StyledSubsNote is the job log's line when an ASS/SSA subtitle became plain text for MP4 (design, 02:49Z).
+const StyledSubsNote = "Styled subtitles (ASS) became plain text: MP4 can't keep their styling."
+
 // mp4Audio are the audio codecs an MP4 file can hold; any other kept track is made E-AC-3 there.
 var mp4Audio = map[string]bool{"aac": true, "ac3": true, "eac3": true, "mp3": true, "alac": true, "opus": true, "flac": true}
 
