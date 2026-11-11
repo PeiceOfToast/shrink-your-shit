@@ -232,8 +232,8 @@ func Purge(st Store, days int, now time.Time) []string {
 	var said []string
 	purged := 0
 	for _, o := range rows {
-		kept, err := time.Parse(time.RFC3339, o.KeptAt)
-		if err != nil || now.Before(kept.Add(time.Duration(days)*24*time.Hour)) {
+		due, ok := jobs.KeptUntil(o.KeptAt, days)
+		if !ok || now.Before(due) {
 			continue
 		}
 		fi, err := os.Lstat(o.Trash)
