@@ -416,3 +416,7 @@ label.chk{cursor:pointer}
 @media (min-width:1101px){.kpis{grid-template-columns:repeat(4,minmax(0,1fr)) minmax(0,1.9fr) repeat(2,minmax(0,1fr))}}
 .kpi .sub{white-space:normal;overflow:visible;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .plist .ttl,.plist .sub,.plist .sp{overflow-wrap:anywhere}
+/* step 3 review (design): tiles top-aligned; file names wrap only at . _ - and stop at 2 lines with "..." */
+.kpis>.kpi{justify-content:flex-start}
+.clamp2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:normal;word-break:normal}
+.plist .ttl,.plist .sp{overflow-wrap:normal}

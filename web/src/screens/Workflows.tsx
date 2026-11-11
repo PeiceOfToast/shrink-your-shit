@@ -1,18 +1,25 @@
 // V3 Workflows list, Templates tab and the New workflow wizard (spec 5.1, 5.2; DESIGN/v2 SCREENS V3,
-// mockups/workflows.html), on the typed mock. Not here yet: the Stack view (Open, V3b), Export, Test run, History,
+// mockups/workflows.html), on the real /api/v2 (#109) or the mock with ?mock=1. Not here yet: the Stack view (Open, V3b), Export, Test run, History,
 // Import, the Cards view. Archive isn't in the contract.
 import { PageHead } from "../PageHead";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { plural } from "../format";
-import { TEMPLATES, createWorkflow, deleteWorkflow, duplicateWorkflow, setWorkflow, useMock } from "../mock";
+import { SignedOut, failed, type Answer } from "../api";
+import { useData } from "../useData";
+import { createWorkflow, deleteWorkflow, duplicateWorkflow, listTemplates, listWorkflows, patchWorkflow } from "../workflowApi";
 import { Link, navigate, useSearch } from "../router";
 import type { Workflow } from "../types/v2";
 
 // design review rule 4: "same resolution", and that originals stay. Also first run's step 2.
 export const START_SIMPLE = "A list of steps with plain choices. HEVC, same resolution, stereo audio in your languages, MKV. Saves new files in a separate folder. Your originals stay where they are; no space is freed until you remove them.";
 
-function RowMenu({ w, onSaid }: { w: Workflow; onSaid: (s: string) => void }) {
+// An action's answer: its error message goes to `say`; signed out goes to sign-in (api.ts).
+async function act<T>(p: Promise<Answer<T>>, say: (m: string) => void): Promise<T | null> {
+  try { const r = await p; if (failed(r)) return (say(r.error.message), null); return r; } catch (e) { if (e instanceof SignedOut) return null; throw e; }
+}
+
+function RowMenu({ w, onSaid, reload }: { w: Workflow; onSaid: (s: string) => void; reload: () => void }) {
   const ref = useRef<HTMLDetailsElement>(null);
   const close = () => ref.current?.removeAttribute("open");
   useEffect(() => {
@@ -27,9 +34,9 @@ function RowMenu({ w, onSaid }: { w: Workflow; onSaid: (s: string) => void }) {
     <details className="menu" ref={ref} onBlur={(e) => e.relatedTarget instanceof Node && !e.currentTarget.contains(e.relatedTarget) && close()}>
       <summary className="btn sm icon ghost" aria-label={"More for " + w.name}><Icon id="i-more" /></summary>
       <div className="pop" role="menu">
-        <button type="button" className="it" role="menuitem" onClick={() => (duplicateWorkflow(w.id), close(), onSaid(w.name + " duplicated."))}><Icon id="i-copy" />Duplicate</button>
+        <button type="button" className="it" role="menuitem" onClick={async () => { close(); if (await act(duplicateWorkflow(w.id), onSaid)) (onSaid(w.name + " duplicated."), reload()); }}><Icon id="i-copy" />Duplicate</button>
         <button type="button" className="it" role="menuitem" disabled={!!used} aria-describedby={used ? "used-" + w.id : undefined}
-          onClick={() => { close(); if (window.confirm("Delete the workflow " + w.name + "? This can't be undone.")) onSaid(deleteWorkflow(w.id) ?? w.name + " deleted."); }}>
+          onClick={async () => { close(); if (window.confirm("Delete the workflow " + w.name + "? This can't be undone.") && (await act(deleteWorkflow(w.id), onSaid))) (onSaid(w.name + " deleted."), reload()); }}>
           <Icon id="i-trash" />Delete
         </button>
         {used && <div className="hint" id={"used-" + w.id} style={{ padding: "0 10px 6px" }}>Used by {used}</div>}
@@ -42,9 +49,12 @@ function Wizard({ onClose, onMade }: { onClose: () => void; onMade: (w: Workflow
   const [name, setName] = useState(""), [desc, setDesc] = useState(""), [err, setErr] = useState("");
   const first = useRef<HTMLInputElement>(null);
   useEffect(() => first.current?.focus(), []);
-  const create = () => {
+  const [busy, setBusy] = useState(false);
+  const create = async () => {
     if (!name.trim()) return (setErr("Give the workflow a name."), first.current?.focus());
-    onMade(createWorkflow(name.trim(), desc.trim()));
+    setBusy(true);
+    const w = await act(createWorkflow(name.trim(), desc.trim()), setErr).finally(() => setBusy(false));
+    if (w) onMade(w);
   };
   return (
     <section className="card" aria-labelledby="new-h">
@@ -69,32 +79,33 @@ function Wizard({ onClose, onMade }: { onClose: () => void; onMade: (w: Workflow
               <div className="hint" style={{ fontSize: "var(--fs)" }}>{START_SIMPLE}</div>
             </div></div>
         </fieldset>
-        <div className="row"><button className="btn primary" type="button" onClick={create}>Create draft</button><button className="btn ghost" type="button" onClick={onClose}>Cancel</button></div>
+        <div className="row"><button className="btn primary" type="button" disabled={busy} onClick={create}>Create draft</button><button className="btn ghost" type="button" onClick={onClose}>Cancel</button></div>
       </div>
     </section>
   );
 }
 
 export function Workflows() {
-  const s = useMock();
+  const wfs = useData(listWorkflows, [], 10000), tpl = useData(listTemplates, []);
+  const all = wfs.data ?? [], templates = tpl.data ?? [];
   const tab = new URLSearchParams(useSearch()).get("tab") === "templates" ? "templates" : "workflows"; // in the URL: Back and reload keep it
   const setTab = (t: string) => navigate("/workflows" + (t === "templates" ? "?tab=templates" : ""));
   const [q, setQ] = useState(""), [tag, setTag] = useState(""), [fav, setFav] = useState(false), [wizard, setWizard] = useState(false), [said, setSaid] = useState("");
-  const tags = [...new Set(s.wf.flatMap((w) => w.tags))].sort();
-  const rows = s.wf.filter((w) => (!q || (w.name + " " + w.description).toLowerCase().includes(q.toLowerCase())) && (!tag || w.tags.includes(tag)) && (!fav || w.favourite));
+  const tags = [...new Set(all.flatMap((w) => w.tags))].sort();
+  const rows = all.filter((w) => (!q || (w.name + " " + w.description).toLowerCase().includes(q.toLowerCase())) && (!tag || w.tags.includes(tag)) && (!fav || w.favourite));
   return (
     <div className="stack">
       <PageHead icon="i-workflow" title="Workflows" help="What happens to each file. A library uses one workflow." />
       {wizard && <Wizard onClose={() => setWizard(false)} onMade={(w) => navigate("/workflows/" + w.id)} />}
       <div className="tabs" role="tablist">
         <button role="tab" type="button" aria-selected={tab === "workflows"} onClick={() => tab !== "workflows" && setTab("workflows")}>Workflows</button>
-        <button role="tab" type="button" aria-selected={tab === "templates"} onClick={() => tab !== "templates" && setTab("templates")}>Templates <span className="n">{TEMPLATES.length}</span></button>
+        <button role="tab" type="button" aria-selected={tab === "templates"} onClick={() => tab !== "templates" && setTab("templates")}>Templates <span className="n">{templates.length}</span></button>
       </div>
       <p className="muted" role="status">{said}</p>
       {tab === "templates" ? (
         <div className="list"><table className="tbl">
           <thead><tr><th>Template</th><th data-p="3">What it does</th><th data-p="4">Steps it uses</th><th className="stc">Changes originals</th></tr></thead>
-          <tbody>{TEMPLATES.map((t) => <tr key={t.id}><td className="idc"><span className="ttl">{t.name}</span><span className="sub phone">{t.description}</span></td>
+          <tbody>{templates.map((t) => <tr key={t.id}><td className="idc"><span className="ttl">{t.name}</span><span className="sub phone">{t.description}</span></td>
             <td data-p="3">{t.description}</td><td className="sm" data-p="4">{t.steps.join(", ")}</td><td className="stc"><span className="pill">{t.changesOriginals ? "Changes originals" : "Originals stay"}</span></td></tr>)}</tbody>
         </table></div>
       ) : (<>
@@ -107,7 +118,8 @@ export function Workflows() {
           <button className="btn sm ghost" type="button" aria-pressed={fav} onClick={() => setFav(!fav)}><Icon id="i-star" />Favourites</button>
           <input className="input find" type="search" placeholder="Search workflows" aria-label="Search workflows" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
-        {rows.length === 0 ? <div className="empty">{s.wf.length ? "No workflow matches." : "No workflows yet. Make one with New workflow."}</div> : (
+        {wfs.error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{wfs.error.message}</span></p>}
+        {!wfs.loaded ? <div className="empty">Loading...</div> : rows.length === 0 ? <div className="empty">{all.length ? "No workflow matches." : "No workflows yet. Make one with New workflow."}</div> : (
           <div className="list"><table className="tbl">
             <thead><tr><th>Name</th><th data-p="2">Libraries</th><th data-p="3">Version</th><th className="num" data-p="4">Active jobs</th><th data-p="5">Tags</th><th className="stc">Check</th><th className="actc">Enabled</th><th className="actc"><span className="sr">Menu</span></th></tr></thead>
             <tbody>{rows.map((w) => {
@@ -117,7 +129,7 @@ export function Workflows() {
               return (
                 <tr key={w.id}>
                   <td className="idc"><span className="row nw">
-                    <button className="btn sm icon ghost over star" type="button" aria-pressed={w.favourite} aria-label={"Favourite: " + w.name} onClick={() => setWorkflow(w.id, { favourite: !w.favourite })}
+                    <button className="btn sm icon ghost over star" type="button" aria-pressed={w.favourite} aria-label={"Favourite: " + w.name} onClick={async () => { if (await act(patchWorkflow(w.id, { favourite: !w.favourite }), setSaid)) wfs.reload(); }}
                       style={w.favourite ? { color: "var(--warning-text)" } : undefined}><Icon id="i-star" /></button>
                     <span><Link className="ttl" to={"/workflows/" + w.id}>{w.name}</Link><span className="sub">{w.description}</span>
                       <span className="sub phone">{used} · {version}</span></span></span></td>
@@ -128,8 +140,8 @@ export function Workflows() {
                   <td className="stc">{problems ? <span className={"pill " + (w.validation.errors ? "bad" : "warn")}><Icon id="i-alert" />{plural(problems, "problem", "problems")}</span>
                     : <span className="pill"><Icon id="i-check-c" />OK</span>}</td>
                   <td className="actc">{w.status === "draft" ? <span className="muted" aria-label="Not published yet">-</span>
-                    : <input type="checkbox" role="switch" className="switch over" aria-label={"Enabled: " + w.name} checked={w.status === "enabled"} onChange={(e) => setWorkflow(w.id, { status: e.target.checked ? "enabled" : "disabled" })} />}</td>
-                  <td className="actc"><RowMenu w={w} onSaid={setSaid} /></td>
+                    : <input type="checkbox" role="switch" className="switch over" aria-label={"Enabled: " + w.name} checked={w.status === "enabled"} onChange={async (e) => { if (await act(patchWorkflow(w.id, { status: e.target.checked ? "enabled" : "disabled" }), setSaid)) wfs.reload(); }} />}</td>
+                  <td className="actc"><RowMenu w={w} onSaid={setSaid} reload={wfs.reload} /></td>
                 </tr>);
             })}</tbody>
           </table></div>)}

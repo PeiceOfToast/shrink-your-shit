@@ -21,8 +21,8 @@ export function App() {
   // other /settings/... is not found.
   const item = path.startsWith("/settings/") && !settings ? undefined : itemFor(path);
   const start = path === "/start", signin = path === "/signin"; // not in the menu (IA.md)
-  // Screens on the real server (no Prototype banner): Libraries and first run. The rest stay on the mock for now.
-  const real = !MOCK && (start || signin || path === "/libraries" || path.startsWith("/libraries/"));
+  // Screens on the real server (no Sample data pill): Libraries, first run, Workflows and the step list. The rest stay on the mock.
+  const real = !MOCK && (start || signin || path === "/libraries" || path.startsWith("/libraries/") || path === "/workflows" || /^\/workflows\/[^/]+$/.test(path));
   const title = settings ? "Settings" : start ? "Set up" : signin ? "Sign in" : item ? item.label : "Page not found";
   useEffect(() => { document.title = title + " · Shrink Your Shit (new interface)"; }, [title]);
   // A server whose first run isn't done opens on it (IA.md: shown until done). Upgrades from v1 have it done.

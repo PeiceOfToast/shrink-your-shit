@@ -1,7 +1,7 @@
 // V2 Dashboard (spec 4; DESIGN/v2 SCREENS V2, mockups/dashboard.html and dashboard-empty.html), on the typed mock.
 // "Will be freed" comes from Trash (GET /api/v2/trash, mocked until it is on dev). Hidden until the contract has their
 // data: Throughput (job_events), the GPU count on the Workers card, per-worker encoders. Not here yet: Edit dashboard, View (the job drawer, V6).
-import { useState, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { PageHead } from "../PageHead";
 import { Icon } from "../Icon";
 import { bytes, clock, count, elapsed, plural } from "../format";
@@ -21,6 +21,12 @@ const EVENT_ICON: Record<ActivityEvent["type"], string> = {
   "job.completed": "i-check-c", "job.skipped": "i-skip", "job.failed": "i-x-c", "worker.joined": "i-worker", "worker.left": "i-wifi-off",
   "setting.changed": "i-settings", "workflow.published": "i-workflow", "library.scanned": "i-refresh",
 };
+
+// A file name may wrap after ".", "_" or "-" (never mid-word), at most 2 lines, then "..."; the whole name in title.
+function Name({ text, className = "" }: { text: string; className?: string }) {
+  const parts = text.split(/(?<=[._-])/);
+  return <span className={"clamp2 " + className} title={text}>{parts.map((p, i) => <Fragment key={i}>{p}{i < parts.length - 1 && <wbr />}</Fragment>)}</span>;
+}
 
 function St({ cls, icon, children }: { cls: string; icon: string; children: string }) {
   return <span className={"st " + cls}><Icon id={icon} /><span>{children}</span></span>;
@@ -107,7 +113,7 @@ export function Dashboard() {
           {sum.activeJobs.length === 0 ? <div className="empty">{running ? "Nothing is converting right now." : "Converted files appear here once a worker is running."}</div> : (
             <ul className="plist">{sum.activeJobs.map((j) => (
               <li key={j.id}>
-                <div className="sp"><span className="ttl" title={j.file.path}>{j.file.name}</span><span className="sub">{[j.library?.name, j.workflow.name, j.worker?.name].filter(Boolean).join(" · ")}</span></div>
+                <div className="sp"><Name className="ttl" text={j.file.name} /><span className="sub">{[j.library?.name, j.workflow.name, j.worker?.name].filter(Boolean).join(" · ")}</span></div>
                 <div className="prog">
                   {j.progress?.percent != null
                     ? <div className="row nw"><div className="bar" role="progressbar" aria-valuenow={j.progress.percent} aria-valuemin={0} aria-valuemax={100} aria-label={"This step " + j.progress.percent + "%"}><i style={{ width: j.progress.percent + "%" }} /></div><span className="sm">{j.progress.percent}%</span></div>
@@ -137,7 +143,7 @@ export function Dashboard() {
           {sum.recentFailures.length === 0 ? <div className="empty">Nothing has failed.</div> : (
             <ul className="plist">{sum.recentFailures.map((j) => (
               <li key={j.id}>
-                <div className="sp"><span className="ttl" title={j.file.path}>{j.file.name}</span>
+                <div className="sp"><Name className="ttl" text={j.file.name} />
                   <span className="sub">{j.reason?.message}</span>
                   <span className="sub">{[j.library?.name, j.endedAt && clock(j.endedAt), j.currentStep?.name].filter(Boolean).join(" · ")}</span></div>
                 <button className="btn sm ghost" type="button" onClick={() => retry(j.id)} aria-label={"Retry " + j.file.name}><Icon id="i-refresh" />Retry</button>
@@ -161,7 +167,7 @@ export function Dashboard() {
         <Panel title="Recent activity" all="/jobs" wide={!fresh}>
           {s.activity.length === 0 ? <div className="empty">Things that happen are listed here.</div> : (
             <ul className="plist">{s.activity.slice(0, 8).map((e) => (
-              <li key={e.id}><Icon id={EVENT_ICON[e.type]} /><span className="sp">{e.text}</span><span className="muted sm nowrap">{clock(e.at)}</span></li>
+              <li key={e.id}><Icon id={EVENT_ICON[e.type]} /><Name className="sp" text={e.text} /><span className="muted sm nowrap">{clock(e.at)}</span></li>
             ))}</ul>)}
         </Panel>
       </div>

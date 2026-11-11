@@ -1,13 +1,20 @@
-// V3b Stack view (spec 5.7; DESIGN/v2 SCREENS V3, mockups/workflow-stack.html and -readonly.html), on the typed mock
-// of V1 (mock/steps.ts mirrors V1's registry, summaries and validation). Not here: drag to reorder and "+ Add step"
+// V3b Stack view (spec 5.7; DESIGN/v2 SCREENS V3, mockups/workflow-stack.html and -readonly.html) on the real /api/v2
+// (#109: step definitions, the draft, validate, publish), or the mock with ?mock=1 (mock/steps.ts mirrors V1). The step
+// words and problems come from the server's validate, asked again shortly after each change. Not here: drag to reorder and "+ Add step"
 // (V1 runs the preset's chain in its order), Test run (V5), History, Export, Open graph (V4).
 import { SampleData } from "../PageHead";
-import { Component, useEffect, useRef, useState, type ReactNode } from "react";
+import { Component, createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
-import { getDraft, publish, publishPreview, saveDraft, setWorkflow, useMock } from "../mock";
-import { order, stackable, stepDef, summary, validate } from "../mock/steps";
+import { SignedOut, failed, type Answer } from "../api";
+import { order } from "../mock/steps"; // the steps in running order: a property of the document, not data
+import { useData } from "../useData";
+import { getDraft, getWorkflow, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked } from "../workflowApi";
 import { onLeave } from "../router";
-import type { JSONSchema, Node, PublishPreview, ValidationIssue, WorkflowDoc } from "../types/v2";
+import type { JSONSchema, Node, PublishPreview, StepDefinition, ValidationIssue, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
+
+// The step definitions and the server's words for each step of the document being edited.
+const Reg = createContext<{ defs: StepDefinition[]; words: Record<string, string> }>({ defs: [], words: {} });
+function useReg() { const r = useContext(Reg); return { stepDef: (t: string) => r.defs.find((d) => d.type === t), summary: (n: Node) => r.words[n.id] ?? "" }; }
 
 // The server's icon keys (registry) -> design's sprite.
 const ICON: Record<string, string> = { folder: "i-folder", filter: "i-shield", video: "i-video", audio: "i-audio", subtitles: "i-subtitle", file: "i-file", check: "i-checks", save: "i-save", cond: "i-cond", history: "i-history" };
@@ -59,7 +66,7 @@ function Field({ id, name, s, value, set }: { id: string; name: string; s: JSONS
 }
 
 function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown) => void; issues: ValidationIssue[] }) {
-  const def = stepDef(n.type)!, props = Object.fromEntries(Object.entries((def.configSchema.properties ?? {}) as Props).filter(([, s]) => !s.readOnly)) as Props, c = n.config;
+  const { stepDef } = useReg(), def = stepDef(n.type)!, props = Object.fromEntries(Object.entries((def.configSchema.properties ?? {}) as Props).filter(([, s]) => !s.readOnly)) as Props, c = n.config;
   const keys = Object.keys(props).filter((k) => !(MORE[n.type] ?? []).includes(k)), more = (MORE[n.type] ?? []).filter((k) => props[k]);
   const field = (k: string) => <Field key={k} id={n.id} name={k} s={props[k]} value={c[k] ?? props[k].default} set={(v) => set(k, v)} />;
   const problem = (path: string) => issues.filter((i) => i.nodeId === n.id && i.configPath === path).map((i) => <span key={i.code} className="hint" style={{ color: "var(--error-text)" }}>{i.message}</span>);
@@ -92,7 +99,7 @@ function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown) => 
 }
 
 function Step({ n, i, open, toggle, update, issues }: { n: Node; i: number; open: boolean; toggle: () => void; update: (n: Node) => void; issues: ValidationIssue[] }) {
-  const def = stepDef(n.type), mine = issues.filter((x) => x.nodeId === n.id);
+  const { stepDef, summary } = useReg(), def = stepDef(n.type), mine = issues.filter((x) => x.nodeId === n.id);
   // A read-only step (an earlier install's settings) or one this page doesn't know (a newer server, a plugin not
   // installed): shown with its type, its settings kept as they are, never edited (review P2).
   if (!def || def.readOnly) return (
@@ -120,6 +127,7 @@ function Step({ n, i, open, toggle, update, issues }: { n: Node; i: number; open
 
 // A workflow with branches: the steps in order with the branches named, nothing editable (spec 5.7; SCREENS V3).
 function ReadOnly({ doc }: { doc: WorkflowDoc }) {
+  const { stepDef, summary } = useReg();
   const name = (id: string) => { const n = doc.nodes.find((x) => x.id === id); return n ? (n.name ?? stepDef(n.type)?.name ?? n.type) + " (" + summary(n) + ")" : id; };
   return (
     <div className="stack">
@@ -147,46 +155,75 @@ export function WorkflowStack({ id }: { id: string }) {
   return <Guard><StackPage id={id} /></Guard>;
 }
 
+async function act<T>(p: Promise<Answer<T>>, say: (m: string) => void): Promise<T | null> {
+  try { const r = await p; if (failed(r)) return (say(r.error.message), null); return r; } catch (e) { if (e instanceof SignedOut) return null; throw e; }
+}
+
 function StackPage({ id }: { id: string }) {
-  const s = useMock(), w = s.wf.find((x) => x.id === id);
-  const first = useRef(getDraft(id));
-  const [etag, setEtag] = useState(first.current?.etag ?? "");
-  const [hist, setHist] = useState<{ docs: WorkflowDoc[]; at: number }>({ docs: first.current ? [first.current.workflow] : [], at: 0 });
-  const [saved, setSaved] = useState(first.current?.workflow);
-  const [open, setOpen] = useState<string | null>(null), [said, setSaid] = useState(""), [checked, setChecked] = useState<ValidationIssue[] | null>(null);
+  const meta = useData(() => getWorkflow(id), [id]), defs = useData(stepDefinitions, []), draft = useData(() => getDraft(id), [id]);
+  const problem = meta.error ?? defs.error ?? draft.error;
+  if (meta.error?.code === "not_found" || (meta.loaded && !meta.data)) return <div className="card"><div className="bd">There is no such workflow. It may have been deleted.</div></div>;
+  if (!meta.data || !defs.data || !draft.data) return <div className="empty">{problem?.message ?? "Loading..."}</div>;
+  return <Editor id={id} w={meta.data} defs={defs.data} first={draft.data} reloadMeta={meta.reload} />;
+}
+
+function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; defs: StepDefinition[]; first: WorkflowRevision; reloadMeta: () => void }) {
+  const [etag, setEtag] = useState(first.etag), layout = first.layout;
+  const [hist, setHist] = useState<{ docs: WorkflowDoc[]; at: number }>({ docs: [first.workflow], at: 0 });
+  const [saved, setSaved] = useState(first.workflow);
+  const [live, setLive] = useState<Checked>({ issues: first.validation, stackable: first.stackable, stepSummaries: first.stepSummaries });
+  const [open, setOpen] = useState<string | null>(null), [said, setSaid] = useState(""), [checked, setChecked] = useState(false);
   const [panel, setPanel] = useState<PublishPreview | null>(null), [renaming, setRenaming] = useState(false);
   const doc = hist.docs[hist.at], dirty = doc !== saved;
+  // The server's words and problems for the document as it is now (nothing saved): asked 300 ms after a change.
+  const ask = async (d: WorkflowDoc) => { const r = await act(validateDoc(id, d), setSaid); if (r) setLive(r); return r; };
+  const seen = useRef(first.workflow);
+  useEffect(() => {
+    if (doc === seen.current) return;
+    seen.current = doc;
+    const t = setTimeout(() => ask(doc), 300);
+    return () => clearTimeout(t);
+  }, [doc]); // eslint-disable-line react-hooks/exhaustive-deps
   // Leaving with unsaved changes asks, as Appearance does: the router can't stop a move, so it offers to save first.
   const now = useRef({ dirty, doc, etag }); now.current = { dirty, doc, etag };
   useEffect(() => {
     onLeave(() => {
       const { dirty, doc, etag } = now.current;
-      if (dirty && doc && window.confirm("Save your changes to this draft before leaving?\n\nOK saves them. Cancel leaves them unsaved.")) saveDraft(id, doc, etag);
+      if (dirty && doc && window.confirm("Save your changes to this draft before leaving?\n\nOK saves them. Cancel leaves them unsaved.")) void saveDraft(id, doc, layout, etag).catch(() => {});
     });
     return () => onLeave(null);
-  }, [id]);
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { // closing or reloading the tab with unsaved changes: the browser's own question (review P3)
     if (!dirty) return;
     const warn = (e: BeforeUnloadEvent) => e.preventDefault();
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
-  if (!w || !doc) return <div className="card"><div className="bd">There is no such workflow. It may have been deleted.</div></div>;
-  const edit = (d: WorkflowDoc) => (setHist({ docs: [...hist.docs.slice(0, hist.at + 1), d], at: hist.at + 1 }), setChecked(null), setPanel(null), setSaid(""));
+  const edit = (d: WorkflowDoc) => (setHist({ docs: [...hist.docs.slice(0, hist.at + 1), d], at: hist.at + 1 }), setChecked(false), setPanel(null), setSaid(""));
   const update = (n: Node) => edit({ ...doc, nodes: doc.nodes.map((x) => (x.id === n.id ? n : x)) });
-  const save = () => {
-    const r = saveDraft(id, doc, etag);
-    if (r.error || !r.draft) return (setSaid(r.error ?? ""), null);
-    setEtag(r.draft.etag); setSaved(doc); setSaid("Draft saved."); return r.draft;
+  const save = async () => {
+    const r = await act(saveDraft(id, doc, layout, etag), setSaid);
+    if (!r) return null;
+    setEtag(r.etag); setSaved(doc); setLive({ issues: r.validation, stackable: r.stackable, stepSummaries: r.stepSummaries }); setSaid("Draft saved."); reloadMeta();
+    return r;
   };
-  const openPublish = () => { const r = dirty ? save() : true; if (r) setPanel(publishPreview(id)); };
-  const issues = checked ?? (dirty ? [] : validate(doc));
-  const canStack = stackable(doc);
+  const openPublish = async () => { if (dirty && !(await save())) return; const p = await act(publishPreview(id), setSaid); if (p) setPanel(p); };
+  const doPublish = async () => {
+    const r = await act(publish(id, etag), setSaid);
+    if (!r) return;
+    const d = await act(getDraft(id), setSaid);
+    if (d) setEtag(d.etag);
+    setSaved(doc); setPanel(null); setSaid("Published v" + r.number + "."); reloadMeta();
+  };
+  const rename = async (v: string) => { if (await act(patchWorkflow(id, { name: v }), setSaid)) reloadMeta(); setRenaming(false); };
+  const issues = checked || !dirty ? live.issues : [];
+  const canStack = live.stackable;
   return (
+    <Reg.Provider value={{ defs, words: live.stepSummaries }}>
     <div className="stack">
       <section className="card"><div className="bd stack">
         <div className="row">
-          {renaming ? <form className="row" onSubmit={(e) => { e.preventDefault(); const v = (e.currentTarget.elements.namedItem("nm") as HTMLInputElement).value.trim(); if (v) setWorkflow(id, { name: v }); setRenaming(false); }}>
+          {renaming ? <form className="row" onSubmit={(e) => { e.preventDefault(); const v = (e.currentTarget.elements.namedItem("nm") as HTMLInputElement).value.trim(); if (v) rename(v); else setRenaming(false); }}>
             <label className="sr" htmlFor="wf-rename">Name</label><input id="wf-rename" name="nm" className="input" defaultValue={w.name} autoFocus style={{ width: "auto" }} />
             <button className="btn sm" type="submit">Rename</button><button className="btn sm ghost" type="button" onClick={() => setRenaming(false)}>Cancel</button></form>
             : <><h1 style={{ fontSize: "var(--fs-lg)" }}>{w.name}</h1><SampleData /><button className="btn sm ghost" type="button" onClick={() => setRenaming(true)} aria-label={"Rename " + w.name}>Rename</button></>}
@@ -196,7 +233,7 @@ function StackPage({ id }: { id: string }) {
         {canStack && <div className="row">
           <button className="btn sm" type="button" disabled={hist.at === 0} onClick={() => setHist({ ...hist, at: hist.at - 1 })}><Icon id="i-undo" />Undo</button>
           <button className="btn sm" type="button" disabled={hist.at === hist.docs.length - 1} onClick={() => setHist({ ...hist, at: hist.at + 1 })}><Icon id="i-redo" />Redo</button>
-          <button className="btn sm" type="button" onClick={() => setChecked(validate(doc))}><Icon id="i-checks" />Check</button>
+          <button className="btn sm" type="button" onClick={async () => { if (await ask(doc)) setChecked(true); }}><Icon id="i-checks" />Check</button>
           <span className="sp" />
           <button className="btn sm" type="button" disabled={!dirty} onClick={save}><Icon id="i-save" />Save draft</button>
           <button className="btn sm primary" type="button" onClick={openPublish}>Publish</button>
@@ -216,13 +253,13 @@ function StackPage({ id }: { id: string }) {
           {panel.changesOriginals && <span className="st warn"><Icon id="i-alert" /><span>This version replaces original files.</span></span>}
           {(panel.validation ?? []).filter((v) => v.severity === "error").map((v) => <span key={v.code + v.configPath} className="st bad"><Icon id="i-alert" /><span>{v.message}</span></span>)}
           <div className="row">
-            <button className="btn primary" type="button" disabled={(panel.validation ?? []).some((v) => v.severity === "error")}
-              onClick={() => { const r = publish(id, etag); if (r.error) setSaid(r.error); else { const d = getDraft(id)!; setEtag(d.etag); setSaved(doc); setPanel(null); setSaid("Published v" + r.version + "."); } }}>Publish v{panel.nextNumber}</button>
+            <button className="btn primary" type="button" disabled={(panel.validation ?? []).some((v) => v.severity === "error")} onClick={doPublish}>Publish v{panel.nextNumber}</button>
             <button className="btn ghost" type="button" onClick={() => setPanel(null)}>Cancel</button></div>
         </div></section>)}
 
       {canStack ? <div className="stack">{order(doc).map((n, i) => (
         <Step key={n.id} n={n} i={i} open={open === n.id} toggle={() => setOpen(open === n.id ? null : n.id)} update={update} issues={issues} />))}</div>
         : <ReadOnly doc={doc} />}
-    </div>);
+    </div>
+    </Reg.Provider>);
 }

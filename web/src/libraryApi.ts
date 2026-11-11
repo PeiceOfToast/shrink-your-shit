@@ -2,10 +2,11 @@
 // ?mock=1. Each function answers in v1's shapes either way.
 import { call, MOCK, failed, type Answer } from "./api";
 import * as mock from "./mock";
-import type { FirstFiles, FirstRunSettings, FlowItem, FolderReport, LibraryItem, WorkerV1 } from "./types/v1";
+import type { FirstFiles, FirstRunSettings, FolderReport, LibraryItem, WorkerV1 } from "./types/v1";
+import type { Workflow } from "./types/v2";
+import * as wf from "./workflowApi";
 
-// A workflow a library can use. On the real server today these are v1 flows (all usable); on the mock, V1 workflows,
-// where a never-published one can't be chosen (87faa4b).
+// A workflow a library can use: a never-published one can't be chosen (87faa4b), on the server and the mock.
 export interface WorkflowChoice { id: string; name: string; usable: boolean; usedBy: string[] }
 
 const M = <T,>(v: T) => Promise.resolve(v);
@@ -18,8 +19,9 @@ export async function listLibraries(): Promise<Answer<LibraryItem[]>> {
 }
 export async function listWorkflows(): Promise<Answer<WorkflowChoice[]>> {
   if (MOCK) { const s = mock.mockState(); return s.wf.map((w) => ({ id: w.id, name: w.name, usable: w.publishedRevisionId != null, usedBy: s.libraries.filter((l) => l.workflowId === w.id).map((l) => l.name) })); }
-  const r = await call<{ items: FlowItem[] }>("GET", "/api/flows");
-  return failed(r) ? r : r.items.map((f) => ({ id: f.id, name: f.name, usable: true, usedBy: f.usedBy }));
+  // /api/v2/workflows (#109): a workflow's id is the library's flowId; a never-published one can't be used (409).
+  const r = await call<{ items: Workflow[] }>("GET", "/api/v2/workflows");
+  return failed(r) ? r : r.items.map((w) => ({ id: w.id, name: w.name, usable: w.publishedRevisionId != null, usedBy: w.libraries.map((l) => l.name) }));
 }
 export const checkFolder = (path: string): Promise<Answer<FolderReport>> => (MOCK ? M(mock.checkFolder(path)) : call("POST", "/api/libraries/check", { path }));
 export const firstFiles = (path: string): Promise<Answer<FirstFiles>> => (MOCK ? M(mock.firstFiles(path)) : call("POST", "/api/libraries/first-files", { path }));
@@ -54,43 +56,25 @@ export async function startWorker(id: string): Promise<Answer<unknown>> {
   return call("POST", "/api/workers/" + enc(id) + "/start");
 }
 
-// First run's step 2: a Start Simple workflow that saves new files to `out` (output-first). On the real server today
-// that is a v1 Standard flow (only Standard can save to another folder) with afterConverting "folder"; a flow of that
-// name no library uses yet (from before a reload) is used again. `again` is the one an earlier try on this page made: a
-// retry after a refused library renames and re-sets it, never makes a second one (review 228de8e P2). On the mock: a
-// V1 workflow from the preset, published.
-const SELECTORS = ["quality", "speed", "format", "resolution", "maxBitrate", "audio", "onlyMyLanguages", "subtitles", "fileType", "ignore", "includeDolbyVision"];
+// First run's step 2: a Start Simple workflow that saves new files to `out` (output-first), published, so a library can
+// use it: POST /api/v2/workflows from the template, its draft's Save step set to one folder, PUT with If-Match, publish.
+// `again` is the one an earlier try on this page made: a retry renames and re-sets it, never makes a second one
+// (review 228de8e P2); after a reload, a never-used one of the same name is used again.
 export async function startSimpleWorkflow(name: string, out: string, again?: string): Promise<Answer<{ id: string }>> {
-  if (MOCK) {
-    const s = mock.mockState();
-    const before = s.wf.find((x) => x.id === again);
-    if (before && before.name !== name) mock.setWorkflow(before.id, { name });
-    const w = before ?? s.wf.find((x) => x.presetId === "shrink_videos" && x.publishedRevisionId == null && x.name === name) ?? mock.createWorkflow(name, "");
-    const d = mock.getDraft(w.id)!, doc = structuredClone(d.workflow);
-    const commit = doc.nodes.find((n) => n.type === "output.commit")!;
-    commit.config = { ...commit.config, policy: "separate_folder", folderMode: "one_folder", folder: out };
-    const r = mock.saveDraft(w.id, doc, d.etag);
-    if (r.error) return { error: { code: "draft", message: r.error } };
-    const problem = r.draft!.validation.find((v) => v.severity === "error");
-    if (problem) return { error: { code: problem.code, message: problem.message } };
-    if (mock.publish(w.id, r.draft!.etag).error) return { error: { code: "changed", message: "Something changed while saving. Try again." } };
-    return { id: w.id };
-  }
-  const flows = await call<{ items: FlowItem[] }>("GET", "/api/flows");
-  if (failed(flows)) return flows;
-  let id = flows.items.some((f) => f.id === again) ? again : flows.items.find((f) => f.name === name && f.usedBy.length === 0)?.id;
-  if (id && flows.items.find((f) => f.id === id)!.name !== name) {
-    const r = await call("PATCH", "/api/flows/" + enc(id), { name });
-    if (failed(r)) return r;
-  }
-  if (!id) {
-    const f = await call<FlowItem>("POST", "/api/flows", { name, kind: "standard" });
-    if (failed(f)) return f;
-    id = f.id;
-  }
-  const cur = await call<Record<string, unknown>>("GET", "/api/flows/" + enc(id) + "/setting");
-  if (failed(cur)) return cur;
-  const body: Record<string, unknown> = Object.fromEntries(SELECTORS.filter((k) => k in cur).map((k) => [k, cur[k]]));
-  const put = await call("PUT", "/api/flows/" + enc(id) + "/setting", { ...body, afterConverting: "folder", outputDir: out });
-  return failed(put) ? put : { id };
+  const list = await wf.listWorkflows();
+  if (failed(list)) return list;
+  const before = list.find((w) => w.id === again) ?? list.find((w) => w.name === name && w.libraries.length === 0 && w.presetId === "shrink_videos");
+  let id = before?.id;
+  if (before && before.name !== name) { const r = await wf.patchWorkflow(before.id, { name }); if (failed(r)) return r; }
+  if (!id) { const c = await wf.createWorkflow(name); if (failed(c)) return c; id = c.id; }
+  const d = await wf.getDraft(id);
+  if (failed(d)) return d;
+  const doc = structuredClone(d.workflow), commit = doc.nodes.find((n) => n.type === "output.commit");
+  if (commit) commit.config = { ...commit.config, policy: "separate_folder", folderMode: "one_folder", folder: out };
+  const s = await wf.saveDraft(id, doc, d.layout, d.etag);
+  if (failed(s)) return s;
+  const problem = s.validation.find((v) => v.severity === "error");
+  if (problem) return { error: { code: problem.code, message: problem.message } };
+  const p = await wf.publish(id, s.etag);
+  return failed(p) ? p : { id };
 }
