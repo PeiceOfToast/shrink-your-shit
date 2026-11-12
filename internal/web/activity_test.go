@@ -79,9 +79,10 @@ func TestDoneAndKeptLists(t *testing.T) {
 		t.Errorf("%s", body)
 	}
 
-	// F1: freed = originals gone (500-300); waiting = originals kept (1000-400); beside saves nothing
+	// F1: freed = originals gone (500-300); waiting = originals kept (1000-400) and, since V5c (design
+	// call 3), the beside one's original still there (another 600)
 	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/libraries"})
-	if !strings.Contains(body, `"freedBytes":200`) || !strings.Contains(body, `"waitingBytes":600`) {
+	if !strings.Contains(body, `"freedBytes":200`) || !strings.Contains(body, `"waitingBytes":1200`) {
 		t.Errorf("%s", body)
 	}
 

@@ -667,3 +667,43 @@ func TestOldDoneJobsOwnTheirOutputs(t *testing.T) {
 		t.Error("after the first look, another time still counts as ours")
 	}
 }
+
+// V5c: a converted file's original left where it was is marked gone once a whole pass doesn't find it
+// and it really isn't there; one the walk didn't see but that is there (an unreadable folder) is not,
+// and a library not walked in the pass (scanTargets leaves paused ones out) is left alone.
+func TestOriginalsLeftInPlaceAreMarkedGone(t *testing.T) {
+	s, st, lib, _ := setup(t, hevcBig)
+	libs, _ := st.Libraries()
+	paused, _ := st.AddLibrary("Paused", t.TempDir(), rules.SliderTemplate(3), true)
+	done := func(l jobs.Library, name string) (int64, string) {
+		p := filepath.Join(l.Path, name)
+		os.WriteFile(p, []byte("original"), 0o644)
+		id, err := st.Enqueue(jobs.Job{Library: l.Path, LibraryID: l.ID, Path: p, SizeBefore: 1000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.Claim("w")
+		st.Complete(id, p[:len(p)-4]+".hevc.mkv", 400) // beside: the original stays
+		return id, p
+	}
+	kept, _ := done(libs[0], "kept.mkv")
+	gone, gonePath := done(libs[0], "gone.mkv")
+	_, pausedPath := done(paused, "p.mkv")
+	hidden := filepath.Join(t.TempDir(), "hidden.mkv") // unseen by the walk, but there
+	os.WriteFile(hidden, []byte("original"), 0o644)
+	h, _ := st.Enqueue(jobs.Job{Library: libs[0].Path, LibraryID: libs[0].ID, Path: hidden, SizeBefore: 1000})
+	st.Claim("w")
+	st.Complete(h, hidden+".hevc.mkv", 400)
+	st.StopLibrary(paused.ID)
+	os.Remove(gonePath)
+	os.Remove(pausedPath)
+	s.ScanOnce(context.Background())
+	c, _ := st.Counts()
+	if c[libs[0].ID].FreedBytes != 600 || c[libs[0].ID].WaitingBytes != 1200 {
+		t.Errorf("walked library: freed %d waiting %d, want 600 and 1200 (gone %d, kept %d)", c[libs[0].ID].FreedBytes, c[libs[0].ID].WaitingBytes, gone, kept)
+	}
+	if c[paused.ID].FreedBytes != 0 || c[paused.ID].WaitingBytes != 600 {
+		t.Errorf("paused library: freed %d waiting %d, want 0 and 600", c[paused.ID].FreedBytes, c[paused.ID].WaitingBytes)
+	}
+	_ = lib
+}

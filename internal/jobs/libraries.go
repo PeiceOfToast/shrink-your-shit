@@ -522,9 +522,8 @@ func (s *Store) SetLibraryScanned(id int64, videos int) error {
 func (s *Store) Counts() (map[int64]LibraryCounts, error) {
 	rows, err := s.db.Query(`SELECT library_id,
   SUM(status=?), SUM(status=?), SUM(status IN (?,?)),
-  COALESCE(SUM(CASE WHEN status=? AND size_after>0 AND `+replacedSQL+` AND NOT `+keptSQL+` THEN size_before-size_after END),0),
-  COALESCE(SUM(CASE WHEN status=? AND size_after>0 AND `+replacedSQL+` AND `+keptSQL+` THEN size_before-size_after END),0)
-FROM jobs WHERE library_id IS NOT NULL GROUP BY library_id`, Running, Queued, Failed, Kept, Done, OriginalKept, Done, OriginalKept)
+  COALESCE(SUM(`+freedSQL+`),0), COALESCE(SUM(`+waitingSQL+`),0)
+FROM jobs WHERE library_id IS NOT NULL GROUP BY library_id`, Running, Queued, Failed, Kept)
 	if err != nil {
 		return nil, err
 	}

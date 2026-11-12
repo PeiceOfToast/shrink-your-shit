@@ -113,6 +113,7 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 		return 0
 	}
 	seen := map[string]bool{}
+	var walked []int64 // libraries walked whole in this pass
 	for _, t := range targets {
 		lib := t.Path
 		videos := 0
@@ -173,10 +174,12 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 			if err := s.Store.SetLibraryScanned(t.LibraryID, videos); err != nil {
 				log.Printf("scan: %s: %v", lib, err)
 			}
+			walked = append(walked, t.LibraryID)
 		}
 	}
 	if ctx.Err() == nil {
 		s.forgetUnseen(seen)
+		s.markOriginalsGone(walked, seen)
 	}
 	return queued
 }
@@ -435,4 +438,26 @@ func (s *Scanner) NextScan() time.Time {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.nextScan
+}
+
+// markOriginalsGone records the originals left where they were (beside, or with a folder for new files)
+// that this pass no longer found, so their saving counts as freed (V5c, design call 3). Only in the
+// libraries walked whole (a paused one isn't), and only when the file is really not there: a folder
+// that couldn't be read hides its files from a walk without deleting them.
+func (s *Scanner) markOriginalsGone(walked []int64, seen map[string]bool) {
+	left, err := s.Store.LeftOriginals(walked)
+	if err != nil {
+		log.Printf("scan: originals left in place: %v", err)
+		return
+	}
+	for _, o := range left {
+		if seen[o.Path] {
+			continue
+		}
+		if _, err := os.Lstat(o.Path); errors.Is(err, fs.ErrNotExist) {
+			if err := s.Store.SetOriginalGone(o.JobID); err != nil {
+				log.Printf("scan: %s: %v", o.Path, err)
+			}
+		}
+	}
 }
