@@ -207,9 +207,12 @@ func TestKeptWithItsFolderGoneIsNotMarked(t *testing.T) {
 	s, o := keptOne(t)
 	kept, _ := time.Parse(time.RFC3339, o.KeptAt)
 	os.RemoveAll(filepath.Dir(s.trash()))
-	Purge(s.store, 7, kept.Add(24*time.Hour))
+	said := Purge(s.store, 7, kept.Add(24*time.Hour))
 	if r, _ := s.store.OriginalByID(o.ID); r.State != jobs.OriginalKept {
 		t.Errorf("row %s", r.State)
+	}
+	if len(said) != 1 || !strings.Contains(said[0], "isn't there (disk not mounted?); left as kept") {
+		t.Errorf("said %q", said)
 	}
 }
 

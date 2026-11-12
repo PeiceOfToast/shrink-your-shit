@@ -247,6 +247,8 @@ func Purge(st Store, days int, now time.Time) []string {
 				} else {
 					said = append(said, fmt.Sprintf("%s: its kept original %s was removed outside Shrink Your Shit", o.Path, o.Trash))
 				}
+			} else {
+				said = append(said, fmt.Sprintf("%s: its .syp-trash folder isn't there (disk not mounted?); left as kept", o.Path))
 			}
 			continue
 		}
