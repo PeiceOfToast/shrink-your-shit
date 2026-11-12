@@ -385,6 +385,19 @@ ALTER TABLE workers ADD COLUMN last_seen TEXT NOT NULL DEFAULT '';
 ALTER TABLE workers ADD COLUMN capabilities TEXT NOT NULL DEFAULT '{}';
 CREATE TABLE worker_pairings (code_hash TEXT PRIMARY KEY, expires TEXT NOT NULL, used_at TEXT NOT NULL DEFAULT '');
 CREATE INDEX workers_token ON workers(token_hash);`},
+	// User review 11-12 item 2 (orch-lead 14:22Z): each worker is on or off by its own flag; turning
+	// all of them on or off is the processing switch. Today's pause carries over to every worker.
+	{36, "worker on and off", `
+ALTER TABLE workers ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;
+INSERT OR IGNORE INTO workers(id, name) VALUES ('local', 'This computer');
+UPDATE workers SET enabled = CASE WHEN COALESCE((SELECT value FROM app_meta WHERE key='paused'), '0') = '1' THEN 0 ELSE 1 END;
+DELETE FROM app_meta WHERE key='paused';`},
+	// V7c (shared folders): a remote worker's path mappings, each with its last real test. A pending
+	// test has a deadline (60 s): one the worker doesn't answer by then, also across a restart, fails.
+	{37, "worker path mappings", `
+CREATE TABLE worker_paths (worker_id TEXT NOT NULL, server TEXT NOT NULL, worker TEXT NOT NULL, mode TEXT NOT NULL,
+  test TEXT NOT NULL DEFAULT '', tested_at TEXT NOT NULL DEFAULT '', detail TEXT NOT NULL DEFAULT '', pending_until TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (worker_id, server));`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone
