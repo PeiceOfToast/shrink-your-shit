@@ -185,6 +185,9 @@ func settingRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 				cur = f.Template
 			}
 		}
+		if refusedHere(w, cur) {
+			return
+		}
 		t, ok := settingTemplate(w, store, body, cur)
 		if !ok {
 			return
@@ -252,6 +255,9 @@ func settingRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		}
 		var body map[string]json.RawMessage
 		if !readJSON(w, r, &body) {
+			return
+		}
+		if refusedHere(w, f.Template) {
 			return
 		}
 		if lv := f.Template.Level(); lv != "basic" && lv != "standard" {
@@ -518,5 +524,41 @@ func flowWarnings(store *jobs.Store, flowID int64, t rules.Template) []string {
 func withWarnings(store *jobs.Store, f jobs.Flow) map[string]any {
 	v := settingView(f)
 	v["warnings"] = flowWarnings(store, f.ID, f.Template)
+	// whether the old page's editors can save it (ui-shop 11:59Z): if not, it shows it read-only with a
+	// link to the new UI, rather than failing on Save
+	v["editableHere"], v["reason"] = true, nil
+	if code, msg := notEditableHere(f.Template); code != "" {
+		v["editableHere"], v["reason"] = false, map[string]string{"code": code, "message": msg}
+	}
 	return v
+}
+
+// Why the old page's editors can't save a workflow; "" when they can.
+const (
+	nextToLibraryHere = "This workflow saves new files next to each library, which this page can't show. Edit it in the new UI."
+	branchesHere      = "This workflow has checks and paths this page can't show. Edit it in the new UI."
+	readOnlyHere      = "This flow can't be changed here: it was made by an earlier install or in a way these editors can't show."
+)
+
+// refusedHere answers 409 when the old page may not save over flow template t as it is stored now (a
+// shape only the new UI shows): whatever the body says, so a stale old page never overwrites it
+// (review ac8fde4 P2). The words are the GET's reason, with "Nothing was changed."
+func refusedHere(w http.ResponseWriter, t rules.Template) bool {
+	if code, msg := notEditableHere(t); code == "edit_in_new_ui" {
+		apiError(w, http.StatusConflict, code, msg+" Nothing was changed.")
+		return true
+	}
+	return false
+}
+
+func notEditableHere(t rules.Template) (code, message string) {
+	switch {
+	case t.Kind == rules.KindBranches:
+		return "edit_in_new_ui", branchesHere
+	case t.Selectors != nil && t.Selectors.AfterConverting == "folder" && t.Selectors.FolderMode == rules.NextToLibrary:
+		return "edit_in_new_ui", nextToLibraryHere
+	case t.Level() != "basic" && t.Level() != "standard":
+		return "flow_read_only", readOnlyHere
+	}
+	return "", ""
 }
