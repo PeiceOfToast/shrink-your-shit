@@ -196,7 +196,9 @@ function DashboardView({ v, trash, acts }: { v: View; trash?: { bytes: number; l
             <span className="l">Space saved <button className="btn icon ghost help" type="button" aria-label="About space saved" aria-expanded={why} onClick={() => setWhy(!why)}><Icon id="i-info" /></button></span>
             <span className="v">{bytes(v.freed)}</span>
             {/* design D1 (clean pass: one short line; the full words are under "?"): freed space is the big figure; never added */}
-            <span className="sub">{[soon > 0 && bytes(soon) + " more" + by, v.could > 0 && "could free " + bytes(v.could)].filter(Boolean).join(" · ") || "Nothing waiting"}</span>
+            {/* design (SCREENS V2, 10:54Z): each fact whole, on one line when they fit; when not, the " · " becomes a line break */}
+            {soon > 0 || v.could > 0 ? <span className="sub facts"><span className="in">{soon > 0 && <span>{bytes(soon) + " more" + by}</span>}{v.could > 0 && <span>{"Could free " + bytes(v.could)}</span>}</span></span>
+              : <span className="sub">Nothing waiting</span>}
           </div>
           <div className="card kpi"><span className="l">Success (24 h)</span><span className="v">{v.success == null ? "-" : (v.success * 100).toFixed(1) + "%"}</span></div>
           {v.online != null && <div className="card kpi"><span className="l">Workers</span><span className="v">{v.online}</span><span className="sub">online</span></div>}

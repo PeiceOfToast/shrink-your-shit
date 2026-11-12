@@ -364,9 +364,14 @@ WHEN NOT EXISTS (SELECT 1 FROM events WHERE kind = 'job' AND job_id = old.id AND
   VALUES ('job', old.id, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), old.status, 'cancelled', 'removed', old.worker,
     json_object('message', 'This job was removed from the list.', 'path', old.path, 'attempts', old.attempts));
 END;`},
+	// review 89d22b3: a job by its file (Stranded, HasOpenJob, the scanner's look at every file each
+	// pass) is found by index, not by reading every job.
+	{33, "jobs by path", `
+CREATE INDEX IF NOT EXISTS jobs_path ON jobs(path);`},
 	// Convert again (design 11:45Z): a done job run again from its original kept in .syp-trash names
 	// that original's record here (0: from the original in place); cleared when it is done again.
-	{33, "convert again", `
+	// 34, not 33: 33 is the jobs-by-path index, merged first (orch-lead 13:44Z).
+	{34, "convert again", `
 ALTER TABLE jobs ADD COLUMN again_from INTEGER NOT NULL DEFAULT 0;`},
 }
 

@@ -181,7 +181,8 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
   const [hist, setHist] = useState<{ docs: WorkflowDoc[]; at: number }>({ docs: [first.workflow], at: 0 });
   const [saved, setSaved] = useState(first.workflow);
   const [live, setLive] = useState<Checked>({ issues: first.validation, stackable: first.stackable, stepSummaries: first.stepSummaries });
-  const [open, setOpen] = useState<string | null>(null), [said, setSaid] = useState(""), [checked, setChecked] = useState(false);
+  // ?step=<node id>: that step starts open (the library's Output tab links here)
+  const [open, setOpen] = useState<string | null>(() => new URLSearchParams(location.search).get("step")), [said, setSaid] = useState(""), [checked, setChecked] = useState(false);
   const [panel, setPanel] = useState<PublishPreview | null>(null), [renaming, setRenaming] = useState(false);
   const doc = hist.docs[hist.at], dirty = doc !== saved;
   const all = useData(listLibraries, []), libs = (all.data ?? []).filter((l) => l.flowId === id).map((l) => l.path);

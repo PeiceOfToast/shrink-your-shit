@@ -287,8 +287,8 @@ func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.Fil
 	}
 	same := prev != nil && prev.Size == st.Size() && prev.ModTime == st.ModTime().UnixNano()
 	guarded := prev != nil && (prev.Reason == rules.SkipSharedFile || prev.Reason == rules.SkipSymlink)
-	if same && prev.Reason != rules.SkipStillChanging && !guarded {
-		return false // unchanged since it was decided
+	if same && prev.Reason != rules.SkipStillChanging && !guarded && !s.Store.Stranded(*prev) {
+		return false // unchanged since it was decided (unless its queued job is gone: ui-shop, #159 QA)
 	}
 	// A file is decided only when it has not changed since the previous look, at least MinAge earlier
 	// (a download in progress, an import being copied): the first look, or a change, records it as
@@ -333,7 +333,7 @@ func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.Fil
 		return false
 	}
 	why := plan.Reason
-	rec.Decision = "queued: " + why
+	rec.Decision = jobs.DecisionQueued + why
 	id, err := s.Store.Enqueue(jobs.Job{Library: t.Path, LibraryID: t.LibraryID, Path: path, Reason: why, DurationSec: pi.DurationSec, SizeBefore: st.Size()})
 	if err != nil {
 		if !errors.Is(err, jobs.ErrLibraryGone) { // removed or stopped while this pass ran: nothing to do
