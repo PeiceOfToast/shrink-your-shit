@@ -243,7 +243,7 @@ func (p Plan) FFmpegArgs(in, out string) []string {
 		args = append(args, "-filter:"+v, "scale=-2:"+strconv.Itoa(p.Video.Height))
 	}
 	args = append(args, p.trackArgs()...)
-	if p.Video.MaxRateKbps > 0 {
+	if p.Video.MaxRateKbps > 0 && !vp9Capped(p.Video) { // VP9's cap is its -b:v (extraArgs)
 		k := strconv.Itoa(p.Video.MaxRateKbps) + "k"
 		args = append(args, "-maxrate:"+v, k, "-bufsize:"+v, strconv.Itoa(2*p.Video.MaxRateKbps)+"k")
 	}
@@ -973,8 +973,25 @@ func inContainer(info media.Info, c string) bool {
 	return info.Container == Containers[c]
 }
 
-// extraArgs are the encoder's own arguments; with a VBR target, without VP9's "-b:v 0" (constant quality).
+// vp9Capped: VP9 in quality mode with a level. libvpx refuses -maxrate with -b:v 0 ("Rate control
+// parameters set without a bitrate": every file failed); its constrained quality is -crf with -b:v as
+// the cap (review a772397).
+func vp9Capped(e VideoEncode) bool {
+	return e.Codec == "libvpx-vp9" && e.TargetKbps == 0 && e.MaxRateKbps > 0
+}
+
+// extraArgs are the encoder's own arguments; with a VBR target, without VP9's "-b:v 0" (constant
+// quality); VP9 capped, with the cap as its -b:v (constrained quality).
 func extraArgs(e VideoEncode) []string {
+	if vp9Capped(e) {
+		out := append([]string(nil), e.Extra...)
+		for i := 0; i+1 < len(out); i++ {
+			if out[i] == "-b:v" {
+				out[i+1] = strconv.Itoa(e.MaxRateKbps) + "k"
+			}
+		}
+		return out
+	}
 	if e.TargetKbps == 0 {
 		return e.Extra
 	}

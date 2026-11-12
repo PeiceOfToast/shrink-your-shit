@@ -113,3 +113,40 @@ func TestRealVBREveryFormatOffered(t *testing.T) {
 		})
 	}
 }
+
+// Review a772397 (pre-existing on dev): VP9 quality mode with each level, and none, really encodes
+// (constrained quality: -crf with -b:v as the cap; libvpx refused -maxrate with -b:v 0).
+func TestRealVP9QualityWithEachLevel(t *testing.T) {
+	needTools(t)
+	encoders := media.Encoders(context.Background(), media.OSExec{}, "ffmpeg")
+	if !encoders["libvpx-vp9"] {
+		t.Skip("this ffmpeg has no libvpx-vp9")
+	}
+	rules.SetAvailableFormats(encoders)
+	defer rules.SetAvailableFormats(nil)
+	src := filepath.Join(t.TempDir(), "clip.mkv")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=25:duration=2",
+		"-c:v", "libx264", "-preset", "ultrafast", "-b:v", "8M", "-pix_fmt", "yuv420p", src)
+	for _, level := range []string{"low", "medium", "high", "none"} {
+		t.Run(level, func(t *testing.T) {
+			in := filepath.Join(t.TempDir(), "clip.mkv")
+			b, _ := os.ReadFile(src)
+			os.WriteFile(in, b, 0o644)
+			sel := rules.DefaultSelectors(3)
+			sel.Format, sel.FileType, sel.Audio, sel.OnlyMyLanguages, sel.MaxBitrate = "vp9", "webm", "stereo_opus", false, level
+			tmpl := sel.Template()
+			st, id := realJob(t, in, 2)
+			w := realWorker(st, media.OSExec{})
+			w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+			w.KeepDays, w.Journal = func() int { return 7 }, st
+			if err := w.run(t); err != nil {
+				t.Fatal(err)
+			}
+			if j, _ := st.Get(id); j.Status != jobs.Done {
+				t.Fatalf("%s %q", j.Status, j.Error)
+			} else if v := probe(t, j.OutputPath).Video(); v == nil || v.Codec != "vp9" {
+				t.Errorf("made %+v", v)
+			}
+		})
+	}
+}
