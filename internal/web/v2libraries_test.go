@@ -94,7 +94,9 @@ func TestV2Libraries(t *testing.T) {
 	}
 	_, body = send("GET", path, "")
 	l := decode[v2Library](t, body)
-	if l.Output.Policy != "separate_folder" || l.Output.Folder == nil || *l.Output.Folder != dir+" (shrunk)" || l.Output.Problem != nil {
+	// beside the library's folder as the server keeps it (links resolved: macOS /var is /private/var,
+	// Windows' short names are long), not the test's raw temp path (CI 01:47Z)
+	if l.Output.Policy != "separate_folder" || l.Output.Folder == nil || len(l.Paths) != 1 || *l.Output.Folder != l.Paths[0]+" (shrunk)" || l.Output.Problem != nil {
 		t.Errorf("default folder %s", body)
 	}
 	own := t.TempDir()
