@@ -4,6 +4,7 @@ package workflow
 
 import (
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 
@@ -136,14 +137,30 @@ func Validate(d Doc) Result {
 	return r
 }
 
-// checkConfig checks n's config against its definition's schema: enum values, types, required keys;
-// a key the schema doesn't know is kept and warned about (research: never drop it silently).
+// checkConfig checks n's config against its definition's schema, the one the registry serves: types
+// (integer, number, string, boolean, array, object), enum values, minimum and maximum, maxLength, an
+// array's items, and required keys without a default (ui-shop 12:32Z: a minimum of 0 wasn't enforced).
+// Each problem names the step and the setting. A key the schema doesn't know is kept and warned about
+// (research: never drop it silently).
 func checkConfig(n Node, def StepDefinition) []Issue {
 	var out []Issue
 	if def.ReadOnly { // kept as it is: nothing to check against a form
 		return nil
 	}
+	step := nodeName(n)
+	bad := func(k, msg string) {
+		out = append(out, Issue{Code: "invalid_config", Severity: "error", NodeID: n.ID, ConfigPath: "/" + k, Field: k,
+			Message: fmt.Sprintf("In '%s', %s", step, msg)})
+	}
 	props, _ := def.ConfigSchema["properties"].(map[string]any)
+	if req, ok := def.ConfigSchema["required"].([]string); ok {
+		for _, k := range req {
+			p, _ := props[k].(map[string]any)
+			if _, has := n.Config[k]; !has && p != nil && p["default"] == nil {
+				bad(k, fmt.Sprintf("“%s” needs a value.", titleOf(p, k)))
+			}
+		}
+	}
 	keys := make([]string, 0, len(n.Config))
 	for k := range n.Config {
 		keys = append(keys, k)
@@ -153,18 +170,64 @@ func checkConfig(n Node, def StepDefinition) []Issue {
 		v := n.Config[k]
 		p, ok := props[k].(map[string]any)
 		if !ok {
-			out = append(out, Issue{Code: "unknown_config_key", Severity: "warning", NodeID: n.ID, ConfigPath: "/" + k, Message: fmt.Sprintf("%q is not a setting of this step; it is kept but not used.", k)})
+			out = append(out, Issue{Code: "unknown_config_key", Severity: "warning", NodeID: n.ID, ConfigPath: "/" + k, Field: k,
+				Message: fmt.Sprintf("In '%s', %q is not a setting of this step; it is kept but not used.", step, k)})
 			continue
 		}
-		if enum, ok := p["enum"].([]any); ok && !slices.ContainsFunc(enum, func(e any) bool { return sameValue(e, v) }) {
-			out = append(out, Issue{Code: "invalid_config", Severity: "error", NodeID: n.ID, ConfigPath: "/" + k, Message: fmt.Sprintf("%v is not a choice for %s.", v, titleOf(p, k))})
-			continue
-		}
-		if t, _ := p["type"].(string); t != "" && !typeMatches(t, v) {
-			out = append(out, Issue{Code: "invalid_config", Severity: "error", NodeID: n.ID, ConfigPath: "/" + k, Message: fmt.Sprintf("%s has the wrong kind of value.", titleOf(p, k))})
+		if msg := valueProblem(p, v, titleOf(p, k)); msg != "" {
+			bad(k, msg)
 		}
 	}
 	return out
+}
+
+// valueProblem says what is wrong with v for schema p (title names the setting), "" when nothing is.
+func valueProblem(p map[string]any, v any, title string) string {
+	if enum, ok := p["enum"].([]any); ok {
+		if !slices.ContainsFunc(enum, func(e any) bool { return sameValue(e, v) }) {
+			return fmt.Sprintf("%v is not a choice for “%s”.", v, title)
+		}
+		return ""
+	}
+	if t, _ := p["type"].(string); t != "" && !typeMatches(t, v) {
+		return fmt.Sprintf("“%s” has the wrong kind of value (%s).", title, kindWords(t))
+	}
+	if x, ok := num(v); ok {
+		if min, ok := num(p["minimum"]); ok && x < min {
+			return fmt.Sprintf("“%s” can't be less than %v.", title, p["minimum"])
+		}
+		if max, ok := num(p["maximum"]); ok && x > max {
+			return fmt.Sprintf("“%s” can't be more than %v.", title, p["maximum"])
+		}
+	}
+	if str, ok := v.(string); ok {
+		if max, ok := num(p["maxLength"]); ok && float64(len([]rune(str))) > max {
+			return fmt.Sprintf("“%s” can be at most %v characters.", title, p["maxLength"])
+		}
+	}
+	if items, ok := p["items"].(map[string]any); ok {
+		var list []any
+		switch a := v.(type) {
+		case []any:
+			list = a
+		case []string:
+			for _, e := range a {
+				list = append(list, e)
+			}
+		}
+		for _, e := range list {
+			if msg := valueProblem(items, e, title); msg != "" {
+				return msg
+			}
+		}
+	}
+	return ""
+}
+
+// kindWords is a schema type in plain words.
+func kindWords(t string) string {
+	return map[string]string{"integer": "a whole number", "number": "a number", "string": "text", "boolean": "yes or no",
+		"array": "a list", "object": "a group of settings"}[t]
 }
 
 func sameValue(a, b any) bool {
@@ -179,6 +242,8 @@ func num(v any) (float64, bool) {
 	switch x := v.(type) {
 	case int:
 		return float64(x), true
+	case int64:
+		return float64(x), true
 	case float64:
 		return x, true
 	}
@@ -192,6 +257,12 @@ func typeMatches(t string, v any) bool {
 		return ok
 	case "string":
 		_, ok := v.(string)
+		return ok
+	case "integer":
+		x, ok := num(v)
+		return ok && x == math.Trunc(x)
+	case "number":
+		_, ok := num(v)
 		return ok
 	case "array":
 		switch v.(type) {
