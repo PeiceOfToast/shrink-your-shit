@@ -10,6 +10,7 @@ import { order } from "../mock/steps"; // the steps in running order: a property
 import { useData } from "../useData";
 import { getDraft, getWorkflow, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked } from "../workflowApi";
 import { Link, onLeave } from "../router";
+import { Browse } from "../FolderPicker";
 import { listLibraries, shrunk } from "../libraryApi";
 import type { JSONSchema, Node, PublishPreview, StepDefinition, ValidationIssue, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
 
@@ -90,7 +91,7 @@ function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown) => 
           </div><Hint text={hintFor(props.folderMode, mode)} />{problem("/folderMode")}
           {mode === "next_to_library" && libs.length > 0 && <ul className="mono sm" style={{ listStyle: "none", margin: "6px 0 0", padding: 0 }} aria-label="Where each library's new files go">
             {libs.map((p) => <li key={p} style={{ overflowWrap: "anywhere" }}>{p} → {shrunk(p)}</li>)}</ul>}</fieldset>)}
-        {policy === "separate_folder" && mode === "one_folder" && <>{field("folder")}{problem("/folder")}</>}
+        {policy === "separate_folder" && mode === "one_folder" && <>{field("folder")}<div className="row"><Browse value={String(c.folder ?? "")} onPick={(p) => set("folder", p)} /></div>{problem("/folder")}</>}
       </div>);
   }
   return (

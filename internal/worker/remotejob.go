@@ -48,6 +48,35 @@ type RemoteJob struct {
 	result  chan RemoteResult
 	ended   chan struct{}
 	endErr  error
+	// the remote encode, for the stall stop (row 17:40Z, orch-lead 19:13Z): judged only between the
+	// worker's "converting" (with its position) and its next stage, and only for a worker that sends one
+	judging bool
+	pos     float64   // the furthest position (out_time, µs) it reported
+	movedAt time.Time // when that position last moved on (or the encode started)
+}
+
+// Converting records the remote worker's encode at position pos (out_time, µs): the first report starts
+// the stall clock, and only a position further on moves it.
+func (r *RemoteJob) Converting(pos float64, now time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.judging || pos > r.pos {
+		r.judging, r.pos, r.movedAt = true, pos, now
+	}
+}
+
+// EncodeEnded is the worker's next stage (its checks, the upload): its time no longer counts as a stall.
+func (r *RemoteJob) EncodeEnded() {
+	r.mu.Lock()
+	r.judging = false
+	r.mu.Unlock()
+}
+
+// stillFor is how long the encode's position hasn't moved; false while it isn't being judged.
+func (r *RemoteJob) stillFor(now time.Time) (time.Duration, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return now.Sub(r.movedAt), r.judging
 }
 
 // NewRemoteJob is the join for lease.

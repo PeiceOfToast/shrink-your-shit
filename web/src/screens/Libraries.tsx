@@ -6,8 +6,10 @@ import { Empty, PageHead } from "../PageHead";
 import { useEffect, useState } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
-import { addLibrary, checkFolder, firstFiles, getLibraryV2, getSettings, listLibraries, listLibrariesV2, listWorkflows, patchLibrary, patchLibraryV2, scanLibrary, setLibraryWorkflow, type WorkflowChoice } from "../libraryApi";
+import { addLibrary, checkFolder, firstFiles, getLibraryV2, getSettings, listLibraries, listLibrariesV2, listWorkflows, patchLibrary, patchLibraryV2, removeLibrary, scanLibrary, setLibraryWorkflow, type WorkflowChoice } from "../libraryApi";
+import { listJobs } from "../jobsApi";
 import { Link, navigate, useSearch } from "../router";
+import { Browse } from "../FolderPicker";
 import { onLive } from "../live";
 import { getPublishedDoc, listWorkflows as listWorkflowDocs } from "../workflowApi";
 import { bytes, clock, count, duration, plural } from "../format";
@@ -61,12 +63,16 @@ export async function pauseResume(ls: Library[], enabled: boolean, say: (m: stri
 }
 const Problem = ({ m }: { m?: string }) => (m ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{m}</span></p> : null);
 
+// the line the Libraries list shows once after a library was removed (G1: "Movies removed. Nothing in ... was changed.")
+const flash = { said: "" };
+
 export function Libraries() {
   const libs = useData(listLibrariesV2, [], 3000);
   // user item 3 (design 7.1): each row shows its workflow's summary in full ("Standard · Balanced · ..."), from the workflows list
   const docs = useData(listWorkflowDocs, [], 10000), tag = (l: Library) => { const t = docs.data?.find((w) => w.id === l.workflowId)?.summaryTag ?? ""; return t.trim() === l.workflowName.trim() ? "" : t; }; // review 628ebc3 P2: a workflow named by its summary (the default) shows it once
   useEffect(() => onLive((t) => { if (t === "library.changed") libs.reload(); }), []); // eslint-disable-line react-hooks/exhaustive-deps -- #150: at once
-  const [sel, setSel] = useState<string[]>([]), [said, setSaid] = useState(""), [q, setQ] = useState(""), [selecting, setSelecting] = useState(false);
+  const [sel, setSel] = useState<string[]>([]), [said, setSaid] = useState(flash.said), [q, setQ] = useState(""), [selecting, setSelecting] = useState(false);
+  useEffect(() => { flash.said = ""; }, []);
   const all = libs.data ?? [], items = all.filter((l) => !q || (l.name + " " + l.paths.join(" ")).toLowerCase().includes(q.toLowerCase()));
   const picked = all.filter((l) => sel.includes(l.id)), none = picked.length === 0;
   const scan = async () => {
@@ -183,8 +189,9 @@ export function FolderField({ f, free }: { f: ReturnType<typeof useFolder>; free
   const r = f.report;
   return (
     <div className="field"><label htmlFor="lib-path">Folder</label>
-      <input id="lib-path" className="input mono" value={f.path} aria-describedby="lib-path-check" placeholder="/media/movies"
+      <div className="folderrow"><input id="lib-path" className="input mono" value={f.path} aria-describedby="lib-path-check" placeholder="/media/movies"
         onChange={(e) => f.setPath(e.target.value)} onBlur={f.now} />
+        <Browse value={f.path} onPick={(p) => f.setPath(p)} /></div>
       <div id="lib-path-check" className="stack" style={{ gap: 4 }}>
         {!f.checked ? <span className="hint">The folder is checked as you type.</span>
           : !r ? <span className="hint">Checking the folder...</span>
@@ -306,8 +313,49 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
           </form>
         </section>
         <FirstFive f={f} />
+        {l && v && <RemoveSection l={l} v={v} />}
       </div>}
     </div>
+  );
+}
+
+// Remove a library (one-UI gap G1; design SCREENS, 19:08Z): at the bottom of the General tab. The question says only
+// what applies (waiting files, the file being converted, converted files); Keep it has the focus and Escape. After:
+// the Libraries list, with the line saying nothing in the folder changed. A 409 (busy) keeps the question, in its words.
+function RemoveSection({ l, v }: { l: LibraryItem; v: Library }) {
+  const [ask, setAsk] = useState(false), [err, setErr] = useState(""), [busy, setBusy] = useState(false);
+  const running = useData(() => (ask ? listJobs("running", "") : Promise.resolve(null)), [ask]);
+  const conv = (running.data?.items ?? []).filter((j) => j.libraryId === l.id);
+  const go = async () => {
+    setErr(""); setBusy(true);
+    try {
+      const r = await removeLibrary(l.id);
+      if (failed(r)) return setErr(r.error.message);
+      flash.said = l.name + " removed. Nothing in " + l.path + " was changed.";
+      navigate("/libraries");
+    } catch (e) { if (!(e instanceof SignedOut)) throw e; } finally { setBusy(false); }
+  };
+  return (
+    <section className="card w2" aria-labelledby="rm-h">
+      <div className="hd"><h2 id="rm-h">Remove this library</h2></div>
+      <div className="bd stack">
+        <p className="muted">Stops watching this folder. Nothing in it is changed or deleted.</p>
+        <div className="row"><button className="btn danger" type="button" aria-expanded={ask} onClick={() => (setErr(""), setAsk(!ask))}>Remove library...</button></div>
+        {ask && <div role="alertdialog" aria-labelledby="rm-q" aria-describedby="rm-d" className="stack" onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), setAsk(false))}
+          style={{ padding: 12, border: "1px solid var(--border-strong)", borderRadius: "var(--radius)", background: "var(--raised)" }}>
+          <strong id="rm-q">Remove {l.name}?</strong>
+          <div id="rm-d"><p style={{ margin: "0 0 6px" }}>Shrink Your Shit stops watching {l.path}. Nothing in the folder is changed or deleted.</p>
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              {v.counts.waiting > 0 && <li>{v.counts.waiting === 1 ? "1 waiting file is" : count(v.counts.waiting) + " waiting files are"} taken off the queue.</li>}
+              {conv.map((j) => <li key={j.id}>{j.name} is being converted: it is stopped, and its original isn't touched.</li>)}
+              {v.counts.completed > 0 && <li>Converted files stay as they are. Kept originals can still be got back from Jobs until their date.</li>}
+            </ul></div>
+          {err && <p className="st bad" role="alert" style={{ whiteSpace: "normal" }}><Icon id="i-alert" /><span>{err}</span></p>}
+          <div className="row"><button className="btn danger" type="button" disabled={busy} onClick={go}>{err ? "Try again" : "Remove library"}</button>
+            <button className="btn primary" type="button" autoFocus onClick={() => setAsk(false)}>Keep it</button></div>
+        </div>}
+      </div>
+    </section>
   );
 }
 
@@ -359,7 +407,8 @@ function Output({ v, reload }: { v: Library; reload: () => void }) {
           <p className="muted" role="status">{said}</p></>}
         {o.policy === "separate_folder" && !oneFolder && pub.loaded && <form className="stack" onSubmit={(e) => (e.preventDefault(), save(dir.trim() || null))}>
           <div className="field"><label htmlFor="lib-over">Use a different folder for this library</label>
-            <input id="lib-over" className="input mono" value={dir} placeholder={v.paths[0] + " (shrunk)"} onChange={(e) => setDir(e.target.value)} aria-describedby="lib-over-h" />
+            <div className="folderrow"><input id="lib-over" className="input mono" value={dir} placeholder={v.paths[0] + " (shrunk)"} onChange={(e) => setDir(e.target.value)} aria-describedby="lib-over-h" />
+              <Browse value={dir} start={v.paths[0] ? v.paths[0].replace(/[\\/][^\\/]*[\\/]?$/, "") || "/" : ""} onPick={setDir} /></div>
             <span className="hint" id="lib-over-h">This is the one place to override the folder for {v.name} only.</span></div>
           {error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{error}</span></p>}
           <p className="muted" role="status">{said}</p>

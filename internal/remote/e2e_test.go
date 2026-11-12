@@ -135,7 +135,7 @@ func TestRemoteWorkerVanishesMidUpload(t *testing.T) {
 	if err != nil || lease == nil {
 		t.Fatalf("lease %v %v", lease, err)
 	}
-	if _, _, err := c.plan(ctx, lease); err != nil {
+	if _, err := c.plan(ctx, lease); err != nil {
 		t.Fatal(err)
 	}
 	half := filepath.Join(t.TempDir(), "half")
