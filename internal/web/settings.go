@@ -135,9 +135,9 @@ func (ss *settingsStore) save(s Settings) error {
 }
 
 // readOnlySettings are shown by GET and ignored in a PATCH (the page may send back what it got).
-var readOnlySettings = map[string]bool{"authRequired": true, "trashPath": true, "updateAvailable": true}
+var readOnlySettings = map[string]bool{"scanEvery": true, "scanEverySource": true, "authRequired": true, "trashPath": true, "updateAvailable": true}
 
-func settingsRoutes(api *http.ServeMux, ss *settingsStore, access *Access) {
+func settingsRoutes(api *http.ServeMux, ss *settingsStore, access *Access, eng Engine) {
 	view := func(s Settings) map[string]any {
 		b, _ := json.Marshal(s)
 		var m map[string]any
@@ -148,6 +148,9 @@ func settingsRoutes(api *http.ServeMux, ss *settingsStore, access *Access) {
 		m["controlLevel"], m["perLibraryFlow"] = cmp.Or(s.OldControlLevel, "basic"), s.OldPerLibraryFlow != nil && *s.OldPerLibraryFlow
 		m["trashPath"] = "Kept next to each file, in a folder called .syp-trash"
 		m["updateAvailable"] = nil
+		// how often libraries are looked at, in seconds: the value the scanner runs with now (ui-shop
+		// 01:41Z). It is the -scan-every flag; once it can be changed here, a saved value wins (design).
+		m["scanEvery"], m["scanEverySource"] = int(eng.ScanEvery.Seconds()), "flag"
 		m["integrations"] = map[string]any{ // integrations come in a later slice; empty, so the page can show them
 			"sonarr": map[string]any{"url": "", "hasKey": false}, "radarr": map[string]any{"url": "", "hasKey": false},
 			"plex": map[string]any{"url": "", "hasKey": false}, "jellyfin": map[string]any{"url": "", "hasKey": false},

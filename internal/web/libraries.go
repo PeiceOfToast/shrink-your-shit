@@ -25,6 +25,7 @@ import (
 type Engine struct {
 	ScanNow    func()               // start a scan pass now
 	NextScan   func() time.Time     // when the next regular pass starts
+	ScanEvery  time.Duration        // how often a pass starts (the -scan-every flag)
 	RequeueJob func(id int64)       // stop a running job and put it back in the queue (its library is being removed)
 	PauseNow   func()               // stop the running jobs and put them back in the queue (Pause all)
 	Scanning   func() map[int64]int // libraries being scanned now, with the videos found so far (slice A)

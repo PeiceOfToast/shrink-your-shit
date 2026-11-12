@@ -3,8 +3,13 @@
 package web
 
 import (
+	"net/http/httptest"
+	"path/filepath"
+	"time"
+
 	"encoding/json"
 	"fmt"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"strings"
 	"testing"
 
@@ -218,5 +223,29 @@ func TestFirstRunLibrary(t *testing.T) {
 	st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), false)
 	if get()["firstRunLibrary"] != nil {
 		t.Error("making a library didn't clear it")
+	}
+}
+
+// ui-shop 01:41Z: the settings say how often libraries are looked at (seconds), the value the scanner
+// runs with now: the -scan-every flag (scanEverySource "flag"; a saved value comes with the PATCH part).
+// A PATCH of it is accepted and changes nothing, like the other read-only fields (until the PATCH part).
+func TestSettingsScanEvery(t *testing.T) {
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	a, _, _ := OpenAccess(t.TempDir(), false)
+	srv := httptest.NewServer(Handler(st, a, Engine{ScanEvery: 45 * time.Second}))
+	defer srv.Close()
+	for _, path := range []string{"/api/settings", "/api/v2/settings"} {
+		_, body, _ := do(t, nil, srv, call{method: "GET", path: path})
+		if !strings.Contains(body, `"scanEvery":45`) || !strings.Contains(body, `"scanEverySource":"flag"`) {
+			t.Errorf("%s: %s", path, body)
+		}
+	}
+	if code, b, _ := do(t, nil, srv, call{method: "PATCH", path: "/api/settings", body: `{"scanEvery":5,"scanEverySource":"saved"}`, ctype: "application/json"}); code != 200 ||
+		!strings.Contains(b, `"scanEvery":45`) || !strings.Contains(b, `"scanEverySource":"flag"`) {
+		t.Errorf("PATCH: %d %s", code, b)
 	}
 }
