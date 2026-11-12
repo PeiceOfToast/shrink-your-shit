@@ -169,6 +169,7 @@ func TestV2SummaryFreedBytes(t *testing.T) {
 	st.SetOriginalGone(id) // a scan found the original gone
 	want(`{"couldFree":0,"freed":600,"libraryId":"` + movies + `","waitingToFree":0}`)
 	want(`"couldFree":0,"freed":600,"freedLast7d":600`)
+}
 
 // A library's discovery shows the interval the scanner runs with: a saved Settings value wins over the
 // flag (#136).
