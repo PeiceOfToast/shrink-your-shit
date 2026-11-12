@@ -102,8 +102,8 @@ func chain(nodes []Node, prev *Doc) []Edge {
 // Basic flow. A Doc this version can't run gives an issue instead (it can still be saved as a draft).
 func ToTemplate(d Doc, current rules.Template) (rules.Template, []Issue) {
 	order, ok := straightChain(d)
-	if !ok {
-		return rules.Template{}, []Issue{notRunnable("This workflow has branches or steps in an order that can't run yet. Branches come in a later update; you can save it as a draft.", "")}
+	if !ok { // V6a: a workflow with checks
+		return branchTemplate(d)
 	}
 	types := make([]string, len(order))
 	for i, n := range order {

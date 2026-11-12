@@ -7,6 +7,7 @@ package jobs
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -363,6 +364,10 @@ type Step struct {
 	At    string `json:"at"`
 	OK    bool   `json:"ok"`
 	Words string `json:"words"`
+	// NodeID and Port: the workflow node it was, and for a check ("branch") the port the file left by
+	// (V6a; "" for the others).
+	NodeID string `json:"nodeId,omitempty"`
+	Port   string `json:"port,omitempty"`
 }
 
 // AddStep adds a step to job id's summary.
@@ -373,7 +378,7 @@ func (s *Store) AddStep(id int64, step string, ok bool, words string) error {
 
 // Steps is job id's step summary, in the order the steps happened.
 func (s *Store) Steps(id int64) ([]Step, error) {
-	rows, err := s.db.Query(`SELECT step,at,ok,words FROM job_steps WHERE job_id=? ORDER BY rowid`, id)
+	rows, err := s.db.Query(`SELECT step,at,ok,words,node_id,port FROM job_steps WHERE job_id=? ORDER BY rowid`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -381,7 +386,7 @@ func (s *Store) Steps(id int64) ([]Step, error) {
 	out := []Step{}
 	for rows.Next() {
 		var st Step
-		if err := rows.Scan(&st.Step, &st.At, &st.OK, &st.Words); err != nil {
+		if err := rows.Scan(&st.Step, &st.At, &st.OK, &st.Words, &st.NodeID, &st.Port); err != nil {
 			return nil, err
 		}
 		out = append(out, st)
@@ -458,4 +463,29 @@ const libraryOnSQL = `(jobs.library_id IS NULL OR jobs.library_id IN (SELECT id 
 // the same condition (review-5d8b1f9).
 func libraryOn(alias string) string {
 	return `(` + alias + `.library_id IS NULL OR ` + alias + `.library_id IN (SELECT id FROM libraries WHERE started=1))`
+}
+
+// AddDecision records a check's answer on job id's timeline (V6a): the step "branch", the check's node,
+// the port the file left by, and design's words ("Is it 4K? → Yes (resolution is 2160p)").
+func (s *Store) AddDecision(id int64, nodeID, port, words string) error {
+	_, err := s.db.Exec(`INSERT INTO job_steps(job_id,step,at,ok,words,node_id,port) VALUES(?,?,?,?,?,?,?)`, id, "branch", s.stamp(), true, words, nodeID, port)
+	return err
+}
+
+// SetRoute records job id's path through its workflow (node ids).
+func (s *Store) SetRoute(id int64, path []string) error {
+	b, _ := json.Marshal(path)
+	_, err := s.db.Exec(`UPDATE jobs SET route=? WHERE id=?`, string(b), id)
+	return err
+}
+
+// Route is job id's path through its workflow (nil: a straight workflow, or none recorded).
+func (s *Store) Route(id int64) ([]string, error) {
+	var raw string
+	if err := s.db.QueryRow(`SELECT route FROM jobs WHERE id=?`, id).Scan(&raw); err != nil || raw == "" {
+		return nil, err
+	}
+	var path []string
+	err := json.Unmarshal([]byte(raw), &path)
+	return path, err
 }
