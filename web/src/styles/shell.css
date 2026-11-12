@@ -632,3 +632,39 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .ginspect .ginform .input,.ginspect .ginform select{width:100%;max-width:100%;min-width:0} /* review 13f1c75 P3: no cut-off selects in the narrow panel */
 @media (pointer:coarse){.gfold>summary{min-height:44px;display:flex;align-items:center}.gpi{min-height:44px}}
 .fieldbad>.field .input,.fieldbad>.field select,.fieldbad>fieldset{border-color:var(--error);box-shadow:0 0 0 1px var(--error)} /* #165: a setting with a value it cannot use */
+/* user item 5 (design 7.3): the Dashboard as an overview: a headline band, flat sections, two small day charts */
+.ov .headline{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,2fr);gap:24px;align-items:end;padding:8px 0 16px;border-bottom:1px solid var(--border)}
+.ov .big{font-size:44px;line-height:1.05;font-weight:var(--fw-strong);letter-spacing:-.02em;margin-bottom:8px}
+.ov .big small{font-size:var(--fs-lg);font-weight:400;color:var(--text-2);letter-spacing:0;margin-left:6px}
+.ov .stats{display:flex;gap:32px;flex-wrap:wrap}
+.ov .stats div{display:flex;flex-direction:column;gap:2px}
+.ov .stats b{font-size:var(--fs-xl);font-weight:var(--fw-strong)}
+.ov .stats span{color:var(--text-2);font-size:var(--fs-sm)}
+.ov .stats a{color:var(--text);text-decoration:none}.ov .stats a.bad b{color:var(--error-text)}
+.ov .sec>h2{font-size:var(--fs-lg);font-weight:var(--fw-strong);margin:0 0 10px;display:flex;align-items:baseline;gap:12px}
+.ov .sec>h2 .more{margin-left:auto;font-size:var(--fs);font-weight:400;color:var(--text-2)}
+.ov .sec+.sec{margin-top:20px}
+.ov .num{text-align:right;font-variant-numeric:tabular-nums}
+.ov .ovt th.num{text-align:right}
+.ov .ovt .prog{flex-direction:row;align-items:center;gap:8px;min-width:160px}.ov .ovt .prog .bar{flex:1 1 120px}
+.ov .fname{display:block;overflow-wrap:anywhere}
+.ov .analytics{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:32px}
+.ov .chart2{margin:0}.ov .chart2 h3.ch{font-size:var(--fs);font-weight:var(--fw-strong);margin:12px 0 4px;display:flex;gap:8px;align-items:baseline}
+.ov .daychart{width:100%;height:auto;display:block}
+.ov .kv dd{text-align:right;font-weight:var(--fw-strong)}
+.ov .outcome{display:flex;gap:2px;height:10px;border-radius:5px;overflow:hidden;margin:8px 0 4px}.ov .outcome i{display:block}
+@media (max-width:900px){
+  .ov .headline{grid-template-columns:minmax(0,1fr);gap:8px}.ov .big{font-size:36px}.ov .stats{gap:20px}
+  .ov .analytics{grid-template-columns:minmax(0,1fr)}
+  .ov .ovt,.ov .ovt tbody{display:block}.ov .ovt thead{display:none}
+  .ov .ovt tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:10px 0;border-bottom:1px solid var(--border)}
+  .ov .ovt td{display:block;border:0;height:auto;padding:0;text-align:left}
+  .ov .ovt td.full,.ov .ovt td.nm{grid-column:1/-1}
+  .ov .ovt td[data-l]::before{content:attr(data-l) ": ";color:var(--text-2);font-size:var(--fs-sm)}
+  .ov .ovt td[data-l]:empty{display:none}
+}
+/* overview at phone widths (m7, overview-mock): the day table scrolls in its own box; links and the failed count are 44 px targets on touch */
+.ov .daytbl{overflow-x:auto;max-width:100%}
+@media (pointer:coarse){.ov .sec>h2 .more,.ov .stats a,.ov a.fname,.ov td.nm a,.ov details>summary{display:inline-flex;align-items:center;min-height:44px}}
+.ov .kv{grid-template-columns:auto minmax(0,1fr)} /* the 30-day totals keep label and figure on one line on phones */
+@media (max-width:640px){.ov .stats{gap:12px 20px}.ov .stats div{min-width:calc(50% - 10px)}} /* review a7d25ec P3: the four headline figures sit two by two on a phone */
