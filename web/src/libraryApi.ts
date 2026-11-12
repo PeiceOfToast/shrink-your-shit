@@ -41,11 +41,11 @@ export async function scanLibrary(id: string): Promise<Answer<unknown>> {
 }
 
 export async function getSettings(): Promise<Answer<FirstRunSettings>> {
-  if (MOCK) { const s = mock.mockState().settings; return { firstRunDone: s.firstRunDone, firstRunStep: s.firstRunStep, firstRunLibrary: s.firstRunLibrary ?? null }; }
+  if (MOCK) { const s = mock.mockState().settings; return { firstRunDone: s.firstRunDone, firstRunStep: s.firstRunStep, firstRunLibrary: s.firstRunLibrary ?? null, scanEvery: s.scanEvery, scanEverySource: s.scanEverySource, scanEveryMin: 15, scanEveryMax: 86400 }; }
   return call("GET", "/api/v2/settings"); // #111: v1's settings at the v2 path
 }
 export async function patchSettings(p: Partial<FirstRunSettings>): Promise<Answer<unknown>> {
-  if (MOCK) return (mock.setSettings(p), {});
+  if (MOCK) return mock.setSettings(p);
   return call("PATCH", "/api/v2/settings", p);
 }
 
