@@ -12,7 +12,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -178,9 +177,7 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 			if err := s.Store.SetLibraryScanned(t.LibraryID, videos); err != nil {
 				log.Printf("scan: %s: %v", lib, err)
 			}
-			if s.canJudgeOriginals(t, videos) {
-				walked = append(walked, t.LibraryID)
-			}
+			walked = append(walked, t.LibraryID)
 		}
 	}
 	if ctx.Err() == nil {
@@ -490,10 +487,10 @@ func (s *Scanner) markOriginalsGone(walked []int64, sizes map[string]int64) {
 	for _, o := range left {
 		dir := filepath.Dir(o.Path)
 		if size, seen := sizes[o.Path]; seen {
-			if o.Disk == "" { // a job done before the disk was recorded: it is surely there now
-				if d, ok := originalDisk(dir); ok {
-					s.Store.SetOriginalDisk(o.JobID, d)
-				}
+			// it is surely there now: its folder's disk is the one to compare with later (also when the id
+			// changed: a reboot, NFS or USB; review-ae6749e delta (B))
+			if d, ok := originalDisk(dir); ok && d != o.Disk {
+				s.Store.SetOriginalDisk(o.JobID, d)
 			}
 			if size != o.Size {
 				if err := s.Store.SetOriginalChanged(o.JobID); err != nil {
@@ -524,35 +521,6 @@ func (s *Scanner) markOriginalsGone(walked []int64, sizes map[string]int64) {
 			}
 		}
 	}
-}
-
-// canJudgeOriginals reports whether this pass of library t (which found videos) may mark its originals
-// left in place gone (review-ae6749e P1): not when it found no video at all while the library has such
-// originals (an unmounted disk leaves an empty, readable mount point), and not when the library's folder
-// is on another disk than before (unmounted, or remounted elsewhere). The disk is remembered (app_meta)
-// from passes that found videos, so a library really moved to another disk is judged again a pass later.
-func (s *Scanner) canJudgeOriginals(t Target, videos int) bool {
-	disk, ok := rootDisk(t.Path)
-	if !ok {
-		return false
-	}
-	if videos == 0 {
-		if left, err := s.Store.LeftOriginals([]int64{t.LibraryID}); err != nil || len(left) > 0 {
-			log.Printf("scan: %s: no videos found (is its disk unmounted?): no original is counted as removed", t.Path)
-			return false
-		}
-		return true // nothing to judge anyway
-	}
-	key := "library-disk:" + strconv.FormatInt(t.LibraryID, 10)
-	prev, _, _ := s.Store.Meta(key)
-	if prev != disk {
-		s.Store.SetMeta(key, disk)
-		if prev != "" {
-			log.Printf("scan: %s is on another disk than before (remounted?): no original is counted as removed this pass", t.Path)
-			return false
-		}
-	}
-	return true
 }
 
 // originalDisk is the disk a folder is on (jobs.DiskOf); tests replace it to fake a mount.

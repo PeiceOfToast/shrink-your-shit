@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -745,9 +744,10 @@ func TestSetEveryRetimesTheNextScan(t *testing.T) {
 	}
 }
 
-// Review ae6749e P1: an unmounted library disk (an empty, readable mount point) never makes its
-// originals count as freed, however many passes; neither does a pass that sees the library on another
-// disk than before. A real deletion among other files still counts.
+// Review ae6749e (P1 and its delta): an unmounted library disk (an empty mount point, on the parent's
+// disk) never makes its originals count as freed, however many passes; deleting all of a library's
+// originals does count, on the next pass (convert all, then clean up); and an original whose disk id
+// changed while it was there (a reboot, NFS, USB) still counts once deleted.
 func TestUnmountedDiskMarksNothingGone(t *testing.T) {
 	s, st, _, _ := setup(t, hevcBig)
 	libs, _ := st.Libraries()
@@ -759,35 +759,34 @@ func TestUnmountedDiskMarksNothingGone(t *testing.T) {
 		os.WriteFile(p, make([]byte, 1000), 0o644)
 		id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: p, SizeBefore: 1000})
 		st.Claim("w")
-		st.Complete(id, p[:len(p)-4]+".hevc.mkv", 400) // beside: the original stays
+		st.Complete(id, p[:len(p)-4]+".hevc.mkv", 400) // beside: the original stays; its disk is recorded
 		return p
 	}
 	a, b := done("a.mkv"), done("b.mkv")
-	could := func() int64 { c, _ := st.Counts(); return c[lib.ID].CouldFreeBytes }
-	s.ScanOnce(context.Background()) // the disk is remembered
-	// "unmounted": the folder is there, empty
-	entries, _ := os.ReadDir(lib.Path)
-	for _, e := range entries {
-		os.RemoveAll(filepath.Join(lib.Path, e.Name()))
-	}
+	counts := func() (int64, int64) { c, _ := st.Counts(); return c[lib.ID].FreedBytes, c[lib.ID].CouldFreeBytes }
+	real := originalDisk
+	defer func() { originalDisk = real }()
+	// unmounted: the folder is empty, and on the parent's disk
+	originalDisk = func(p string) (string, bool) { return "parent-disk", true }
+	os.Remove(a)
+	os.Remove(b)
 	for i := 0; i < 3; i++ {
 		s.ScanOnce(context.Background())
 	}
-	if c, _ := st.Counts(); c[lib.ID].FreedBytes != 0 || could() != 1200 {
-		t.Fatalf("an empty library marked originals gone: freed %d could %d", c[lib.ID].FreedBytes, could())
+	if freed, could := counts(); freed != 0 || could != 1200 {
+		t.Fatalf("an unmounted library: freed %d could %d, want 0 and 1200", freed, could)
 	}
-	// "remounted": the files are back; then a pass that sees the folder on another disk marks nothing
+	// mounted again, with another disk id (a reboot): seen there, the id is refreshed
+	originalDisk = func(p string) (string, bool) { return "disk-2", true }
 	os.WriteFile(a, make([]byte, 1000), 0o644)
 	os.WriteFile(b, make([]byte, 1000), 0o644)
-	st.SetMeta("library-disk:"+strconv.FormatInt(lib.ID, 10), "another-disk")
-	os.Remove(a) // really deleted, but this pass can't tell
 	s.ScanOnce(context.Background())
-	if could() != 1200 {
-		t.Errorf("a pass on another disk marked something: could %d", could())
-	}
-	s.ScanOnce(context.Background()) // the next pass: the same disk as the last, the deletion counts
-	if c, _ := st.Counts(); c[lib.ID].FreedBytes != 600 || could() != 600 {
-		t.Errorf("a real deletion: freed %d could %d", c[lib.ID].FreedBytes, could())
+	// all of the library's originals deleted: they count, on the next pass
+	os.Remove(a)
+	os.Remove(b)
+	s.ScanOnce(context.Background())
+	if freed, could := counts(); freed != 1200 || could != 0 {
+		t.Errorf("all originals deleted: freed %d could %d, want 1200 and 0", freed, could)
 	}
 }
 

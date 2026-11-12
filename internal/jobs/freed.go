@@ -79,9 +79,9 @@ func (s *Store) SetOriginalChanged(id int64) error {
 // DiskOf is the disk folder p is on (false: it can't be read), as Complete records it for an original.
 func DiskOf(p string) (string, bool) { return diskOf(p) }
 
-// SetOriginalDisk records the disk job id's original's folder is on (for a job done before Complete
-// recorded it; set when a scan sees the original there).
+// SetOriginalDisk records the disk job id's original's folder is on now, seen there by a scan (a job
+// done before Complete recorded it, or a disk whose id changed).
 func (s *Store) SetOriginalDisk(id int64, disk string) error {
-	_, err := s.db.Exec(`UPDATE jobs SET original_disk=? WHERE id=? AND original_disk=''`, disk, id)
+	_, err := s.db.Exec(`UPDATE jobs SET original_disk=? WHERE id=?`, disk, id)
 	return err
 }
