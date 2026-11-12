@@ -76,11 +76,12 @@ export function Libraries() {
   };
   const needSel = none ? "Select libraries first" : undefined;
   const pr = async (enabled: boolean) => { setSaid(""); await pauseResume(picked.filter((l) => l.enabled !== enabled && !notStarted(l)), enabled, setSaid); setSel([]); libs.reload(); };
+  // design (SCREENS V5): only the action that applies; both only when the selection mixes paused and watching libraries
   const canPause = picked.some((l) => l.enabled), canResume = picked.some(paused);
   const actions = <>
     <button className="btn sm ghost" type="button" disabled={none} title={needSel} onClick={scan}><Icon id="i-refresh" />Scan now</button>
-    <button className="btn sm ghost" type="button" disabled={!canPause} title={needSel} onClick={() => pr(false)}><Icon id="i-pause" />Pause</button>
-    <button className="btn sm ghost" type="button" disabled={!canResume} title={needSel} onClick={() => pr(true)}><Icon id="i-play" />Resume</button>
+    {canPause && <button className="btn sm ghost" type="button" onClick={() => pr(false)}><Icon id="i-pause" />Pause</button>}
+    {canResume && <button className="btn sm ghost" type="button" onClick={() => pr(true)}><Icon id="i-play" />Resume</button>}
     <button className="btn sm ghost" type="button" disabled={none} title={needSel} onClick={access}><Icon id="i-shield" />Check folder access</button>
   </>;
   return (
@@ -268,7 +269,7 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
       </PageHead>
       {note && <p className="muted" role="status">{note}</p>}
       {v && notStarted(v) && <p className="muted" role="note">This library isn't started yet: nothing is looked for or converted until you press Scan now.</p>}
-      {v && paused(v) && <p className="muted" role="note">Paused: {plural(v.counts.waiting, "file waits", "files wait")} in the queue but isn't converted, and scans add nothing new until you press Resume.</p>}
+      {v && paused(v) && <p className="muted" role="note">While paused, its files wait in the queue and aren't converted. Scans add no new files. Files already converting finish.</p>}
       {l && <nav className="tabs" aria-label="Library sections">
         {[["general", "General"], ["discovery", "Discovery"], ["output", "Output"]].map(([k, t]) =>
           <Link key={k} to={"/libraries/" + l.id + (k === "general" ? "" : "?tab=" + k)} aria-current={tab === k ? "page" : undefined}>{t}</Link>)}
