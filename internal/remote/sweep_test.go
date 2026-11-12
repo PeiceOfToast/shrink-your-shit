@@ -16,8 +16,8 @@ func TestLeftoverLeaseFoldersGoAtStart(t *testing.T) {
 	os.MkdirAll(filepath.Join(lease, "sub"), 0o700)
 	os.WriteFile(filepath.Join(lease, "source.mkv"), make([]byte, 1024), 0o600)
 	keep := map[string]bool{}
-	for _, name := range []string{"0123456789ABCDEF01234567", "0123456789abcdef0123456", "notes", "0123456789abcdef0123456g"} {
-		os.Mkdir(filepath.Join(work, name), 0o700) // upper case, too short, someone's folder, not hex
+	for _, name := range []string{"ABCDEF0123456789ABCDEF01", "0123456789abcdef0123456", "notes", "0123456789abcdef0123456g"} {
+		os.Mkdir(filepath.Join(work, name), 0o700) // upper case (not a case variant of another name here: Windows and macOS ignore case), too short, someone's folder, not hex
 		keep[name] = true
 	}
 	os.WriteFile(filepath.Join(work, "fedcba9876543210fedcba98"), []byte("a file"), 0o600) // a lease-like name, but a file
