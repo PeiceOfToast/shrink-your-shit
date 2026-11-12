@@ -416,7 +416,7 @@ func settingTemplate(w http.ResponseWriter, store *jobs.Store, body map[string]j
 	for k := range body {
 		if selectorFields[strings.ToLower(k)] {
 			if keepsNextToLibrary(body, cur) {
-				apiError(w, http.StatusConflict, "edit_in_new_ui", "This workflow saves new files next to each library, which this page can't show. Edit it in the new UI. Nothing was changed.")
+				apiError(w, http.StatusConflict, "edit_in_new_ui", nextToLibraryHere)
 				return rules.Template{}, false
 			}
 			s, err := readSelectors(body, store.Languages())
@@ -542,5 +542,30 @@ func flowWarnings(store *jobs.Store, flowID int64, t rules.Template) []string {
 func withWarnings(store *jobs.Store, f jobs.Flow) map[string]any {
 	v := settingView(f)
 	v["warnings"] = flowWarnings(store, f.ID, f.Template)
+	// whether the old page's editors can save it (ui-shop 11:59Z): if not, it shows it read-only with a
+	// link to the new UI, rather than failing on Save
+	v["editableHere"], v["reason"] = true, nil
+	if code, msg := notEditableHere(f.Template); code != "" {
+		v["editableHere"], v["reason"] = false, map[string]string{"code": code, "message": msg}
+	}
 	return v
+}
+
+// Why the old page's editors can't save a workflow; "" when they can.
+const (
+	nextToLibraryHere = "This workflow saves new files next to each library, which this page can't show. Edit it in the new UI. Nothing was changed."
+	branchesHere      = "This workflow has checks and paths this page can't show. Edit it in the new UI."
+	readOnlyHere      = "This flow can't be changed here: it was made by an earlier install or in a way these editors can't show."
+)
+
+func notEditableHere(t rules.Template) (code, message string) {
+	switch {
+	case t.Kind == rules.KindBranches:
+		return "edit_in_new_ui", branchesHere
+	case t.Selectors != nil && t.Selectors.AfterConverting == "folder" && t.Selectors.FolderMode == rules.NextToLibrary:
+		return "edit_in_new_ui", strings.TrimSuffix(nextToLibraryHere, " Nothing was changed.")
+	case t.Level() != "basic" && t.Level() != "standard":
+		return "flow_read_only", readOnlyHere
+	}
+	return "", ""
 }

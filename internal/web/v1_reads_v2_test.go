@@ -3,6 +3,7 @@
 package web
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
@@ -35,6 +36,35 @@ func TestV1ReadsV2Folders(t *testing.T) {
 	}
 	if _, body, _ := do(t, nil, srv, call{method: "GET", path: libPath + "/setting"}); !strings.Contains(body, `"folderMode":"next_to_library"`) {
 		t.Errorf("the setting hides its folder mode: %s", body)
+	}
+	// up front: the old page shows it read-only with a link, rather than failing on Save
+	editable := func(p string) (bool, string) {
+		t.Helper()
+		_, body, _ := do(t, nil, srv, call{method: "GET", path: p})
+		var v struct {
+			EditableHere *bool
+			Reason       *struct{ Code, Message string }
+		}
+		json.Unmarshal([]byte(body), &v)
+		if v.EditableHere == nil {
+			t.Fatalf("%s: no editableHere: %s", p, body)
+		}
+		code := ""
+		if v.Reason != nil {
+			code = v.Reason.Code
+			if !strings.Contains(v.Reason.Message, "Edit it in the new UI") && code == "edit_in_new_ui" {
+				t.Errorf("%s: words %q", p, v.Reason.Message)
+			}
+		}
+		return *v.EditableHere, code
+	}
+	branches := rules.Template{Kind: rules.KindBranches, Branches: &[]rules.Branch{{End: "Left alone."}}}
+	two, _ := st.AddFlow("Paths", branches)
+	for p, want := range map[string]string{libPath + "/setting": "edit_in_new_ui", "/api/flows/" + strconv.FormatInt(next.ID, 10) + "/setting": "edit_in_new_ui",
+		"/api/flows/" + strconv.FormatInt(two.ID, 10) + "/setting": "edit_in_new_ui", "/api/flows/" + strconv.FormatInt(one.ID, 10) + "/setting": ""} {
+		if ok, code := editable(p); ok != (want == "") || code != want {
+			t.Errorf("%s: editableHere %v %q, want %q", p, ok, code, want)
+		}
 	}
 	// the old Standard editor's save: every choice, the folder for new files empty
 	old := `{"quality":3,"speed":"slower","format":"hevc","resolution":"keep","maxBitrate":"none","audio":"stereo_aac","onlyMyLanguages":false,"subtitles":"keep_all","fileType":"mkv","afterConverting":"folder","outputDir":"","ignore":[],"includeDolbyVision":false}`
