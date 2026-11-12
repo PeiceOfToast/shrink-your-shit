@@ -70,8 +70,10 @@ export function Jobs() {
     if (a === "cancel" && !window.confirm("Cancel " + plural(picked.length, "file", "files") + "? The files stay as they are. Nothing is deleted.")) return;
     const r = await act(jobAction(a, picked.map((j) => j.id), a === "reprioritize" ? Number(prio) : undefined), setSaid);
     if (!r) return;
-    const bad = r.results.filter((x) => !x.ok);
-    setSaid(plural(r.results.length - bad.length, "file", "files") + " changed." + (bad.length ? " Not changed: " + bad.map((x) => (items.find((j) => j.id === x.id)?.name ?? x.id) + ": " + x.message).join(" ") : ""));
+    const bad = r.results.filter((x) => !x.ok), n = r.results.length - bad.length;
+    // design (SCREENS V6): say where the files went, not just that they changed
+    const where = a === "reprioritize" ? (Number(prio) > 0 ? " moved to the front of the queue." : Number(prio) < 0 ? " moved to the back of the queue." : " put back in their normal place in the queue.") : " changed.";
+    setSaid(plural(n, "file", "files") + where + (bad.length ? " Not changed: " + bad.map((x) => (items.find((j) => j.id === x.id)?.name ?? x.id) + ": " + x.message).join(" ") : ""));
     setSel([]); page.reload();
   };
   const actions = <>
@@ -109,6 +111,7 @@ export function Jobs() {
               <td className="selc"><label className="hit"><input type="checkbox" aria-label={"Select " + j.name} checked={sel.includes(j.id)} onChange={(e) => setSel(e.target.checked ? [...sel, j.id] : sel.filter((x) => x !== j.id))} /></label></td>
               <td className="idc"><a className="ttl" href={"/next/jobs?tab=" + tab + "&job=" + encodeURIComponent(j.id)} data-job={j.id} title={j.path}
                 onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); go(tab, j.id); } }}>{j.name}</a>
+                {j.priority != null && j.priority !== 0 && <span className="mchip prio">{j.priority > 0 ? "First" : "Last"}</span>}
                 <span className="sub">{[j.library, j.folder !== "." && j.folder, [j.codec, j.resolution].filter(Boolean).join(" ")].filter(Boolean).join(" · ")}</span>
                 <span className="sub phone">{j.progress ? Math.round(j.progress.percent ?? j.progress.workflowPercent) + "% · " + j.progress.stage : j.state === "completed" ? saved(j.beforeBytes, j.afterBytes) : reasonText(j) || j.library}</span></td>
               <td className="stc"><Pill j={j} /></td>

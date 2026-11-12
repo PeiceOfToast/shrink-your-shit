@@ -509,3 +509,4 @@ label.chk{cursor:pointer}
 .jobs .prog{min-width:160px}
 @media (max-width:640px){.drawer{width:100vw;border-left:0}}
 .menu .pop{max-width:calc(100vw - 16px)}   /* never wider than the screen; Shell keeps it on the screen */
+.mchip.prio{margin-left:6px;vertical-align:middle}
