@@ -31,6 +31,8 @@ type Library struct {
 	// OverrideFolder is its own folder for new files with "Next to each library" ("": the default
 	// beside it; V5a).
 	OverrideFolder string `json:"overrideFolder"`
+	// Priority goes to its new and waiting jobs: higher is taken first (V5b; 0 by default).
+	Priority int `json:"priority"`
 }
 
 // Flow is one flow record. Its behaviour is its template until the graph engine (slice 30).
@@ -104,11 +106,11 @@ func Within(p, dir string) bool {
 	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
-const libCols = `id,name,path,flow_id,started,created,last_scan,last_scan_videos,override_folder`
+const libCols = `id,name,path,flow_id,started,created,last_scan,last_scan_videos,override_folder,priority`
 
 func scanLibrary(r interface{ Scan(...any) error }) (Library, error) {
 	var l Library
-	err := r.Scan(&l.ID, &l.Name, &l.Path, &l.FlowID, &l.Started, &l.Created, &l.LastScan, &l.LastScanVideos, &l.OverrideFolder)
+	err := r.Scan(&l.ID, &l.Name, &l.Path, &l.FlowID, &l.Started, &l.Created, &l.LastScan, &l.LastScanVideos, &l.OverrideFolder, &l.Priority)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
 	}
@@ -508,6 +510,7 @@ type LibraryCounts struct {
 	// kept); WaitingBytes: the same over done jobs whose original is still kept in .syp-trash
 	// (UI-API-CONTRACT.md F1: freed + waiting = all saved).
 	FreedBytes, WaitingBytes int64
+	CouldFreeBytes           int64 // originals left where they were (output-first), still there (V5c)
 }
 
 // SetLibraryScanned records a finished scan of library id: when, and how many videos it found.
@@ -520,9 +523,8 @@ func (s *Store) SetLibraryScanned(id int64, videos int) error {
 func (s *Store) Counts() (map[int64]LibraryCounts, error) {
 	rows, err := s.db.Query(`SELECT library_id,
   SUM(status=?), SUM(status=?), SUM(status IN (?,?)),
-  COALESCE(SUM(CASE WHEN status=? AND size_after>0 AND `+replacedSQL+` AND NOT `+keptSQL+` THEN size_before-size_after END),0),
-  COALESCE(SUM(CASE WHEN status=? AND size_after>0 AND `+replacedSQL+` AND `+keptSQL+` THEN size_before-size_after END),0)
-FROM jobs WHERE library_id IS NOT NULL GROUP BY library_id`, Running, Queued, Failed, Kept, Done, OriginalKept, Done, OriginalKept)
+  COALESCE(SUM(`+freedSQL+`),0), COALESCE(SUM(`+waitingSQL+`),0), COALESCE(SUM(`+couldFreeSQL+`),0)
+FROM jobs WHERE library_id IS NOT NULL GROUP BY library_id`, Running, Queued, Failed, Kept)
 	if err != nil {
 		return nil, err
 	}
@@ -531,7 +533,7 @@ FROM jobs WHERE library_id IS NOT NULL GROUP BY library_id`, Running, Queued, Fa
 	for rows.Next() {
 		var id int64
 		var c LibraryCounts
-		if err := rows.Scan(&id, &c.Working, &c.Waiting, &c.Failed, &c.FreedBytes, &c.WaitingBytes); err != nil {
+		if err := rows.Scan(&id, &c.Working, &c.Waiting, &c.Failed, &c.FreedBytes, &c.WaitingBytes, &c.CouldFreeBytes); err != nil {
 			return nil, err
 		}
 		out[id] = c
@@ -908,4 +910,38 @@ func (s *Store) setTemplate(tx *sql.Tx, flowID int64, t rules.Template) error {
 		}
 	}
 	return nil
+}
+
+// StopLibrary pauses library id (V5b): nothing new is scanned or queued, and its waiting jobs are not
+// taken; a running one finishes. StartLibrary resumes it (also the old pages' Start).
+func (s *Store) StopLibrary(id int64) error {
+	r, err := s.db.Exec(`UPDATE libraries SET started=0 WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetLibraryPriority sets library id's priority, for its new jobs and its waiting ones (lead 01:04Z).
+func (s *Store) SetLibraryPriority(id int64, p int) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	r, err := tx.Exec(`UPDATE libraries SET priority=? WHERE id=?`, p, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	// not a job the person put first or last (design 03:22Z): its own place wins
+	if _, err := tx.Exec(`UPDATE jobs SET priority=? WHERE library_id=? AND status=? AND priority BETWEEN ? AND ?`, p, id, Queued, -MaxLibraryPriority, MaxLibraryPriority); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

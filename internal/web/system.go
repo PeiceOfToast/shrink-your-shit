@@ -15,7 +15,13 @@ import (
 // and the health report Settings > System shows. Both use the doctor package, as the `doctor` command does.
 func systemRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 	api.HandleFunc("POST /api/libraries/check", func(w http.ResponseWriter, r *http.Request) {
-		var in struct{ Path, OutputFolder string } // outputFolder: where the workflow will save new files, if elsewhere
+		var in struct {
+			Path, OutputFolder string // outputFolder: where the workflow will save new files, if elsewhere
+			// NextToLibrary: the workflow saves next to each library (first run's default): is there a
+			// usable folder beside this one? Name is the library's, for the words.
+			NextToLibrary bool
+			Name          string
+		}
 		if !readJSON(w, r, &in) {
 			return
 		}
@@ -31,6 +37,15 @@ func systemRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		rep := eng.Doctor.Folder(r.Context(), filepath.Clean(p))
 		if b := outputInsideBlocker(strings.TrimSpace(in.OutputFolder), filepath.Clean(p)); b != nil {
 			rep.OK, rep.Blockers = false, append(rep.Blockers, *b)
+		}
+		if in.NextToLibrary { // before the library exists (first run)
+			name := strings.TrimSpace(in.Name)
+			if name == "" {
+				name = filepath.Base(filepath.Clean(p))
+			}
+			if _, problem := jobs.NextToLibrary(name, filepath.Clean(p)); problem != nil {
+				rep.OK, rep.Blockers = false, append(rep.Blockers, doctor.Issue{Code: problem.Code, Message: problem.Message, Folder: problem.Folder, Reason: problem.Reason})
+			}
 		}
 		writeJSON(w, rep)
 	})

@@ -291,8 +291,12 @@ export function libraryItem(l: Library): LibraryItem {
   };
 }
 // POST /api/libraries/check {path}. /readonly, /empty, /full and /locked show v1's other answers.
-export function checkFolder(path: string): Answer<FolderReport> {
+export function checkFolder(path: string, outputFolder?: string): Answer<FolderReport> {
   const p = trim(path), r: FolderReport = { ok: false, blockers: [], notes: [], videoCount: 0, totalBytes: 0 };
+  // #128: with outputFolder, a workflow saving new files inside this folder (or holding it) is refused, in the add's words
+  const o = outputFolder ? trim(outputFolder) : "";
+  if (o.startsWith("/") && (o === p || o.startsWith(p + "/") || p.startsWith(o + "/")))
+    r.blockers.push({ code: "inside_library", message: "This flow saves new files to " + o + ", which is inside this library (or holds it), so new files would be converted again. Choose another flow, or change the flow's folder. Nothing was changed." });
   if (!p.startsWith("/")) return { error: { code: "invalid_path", message: "Choose a folder by its full path." } };
   if (systemPath(p)) r.blockers.push({ code: "system_folder", message: SYSTEM });
   else if (/missing|locked/.test(p)) r.blockers.push({ code: "unreadable", message: UNREADABLE });

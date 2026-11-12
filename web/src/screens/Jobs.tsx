@@ -11,7 +11,7 @@ import { onLive } from "../live";
 import { Empty, PageHead } from "../PageHead";
 import { navigate, useSearch } from "../router";
 import { useData } from "../useData";
-import type { JobAction, JobDetail, JobItem, JobProgressEvent, JobState, Probe, Tab } from "../types/jobs";
+import type { JobAction, JobDetail, JobItem, JobProgressEvent, JobState, Probe, Tab, Pin } from "../types/jobs";
 
 const TABS: [Tab, string][] = [["waiting", "Waiting"], ["running", "Running"], ["completed", "Done"], ["skipped", "Skipped"], ["failed", "Failed"]];
 // Spec states in words (SCREENS V6); a cancelled file lists under Skipped and reads "Cancelled".
@@ -43,36 +43,49 @@ function Detail({ j }: { j: JobItem }) {
   return <span className="sm muted clamp2" title={reasonText(j)}>{reasonText(j)}</span>;
 }
 
+const RUNS: JobState[] = ["preparing", "running", "validating", "committing"]; // live progress only for a running row
+
 export function Jobs() {
   const search = new URLSearchParams(useSearch());
   const tab = (TABS.find(([t]) => t === search.get("tab"))?.[0] ?? "waiting") as Tab, open = search.get("job");
-  const [q, setQ] = useState(""), [selecting, setSelecting] = useState(false), [sel, setSel] = useState<string[]>([]), [said, setSaid] = useState(""), [prio, setPrio] = useState("10");
+  const [q, setQ] = useState(""), [selecting, setSelecting] = useState(false), [sel, setSel] = useState<string[]>([]), [said, setSaid] = useState(""), [prio, setPrio] = useState<Pin | "none">("first");
   // each answer remembers its tab and search, so a tab switch never shows the last tab's rows while it loads
   const page = useData(() => listJobs(tab, q).then((r) => (failed(r) ? r : { ...r, for: tab + "|" + q })), [tab, q], 15000);
   const [live, setLive] = useState<Record<string, JobProgressEvent["progress"]>>({});
   const reload = useRef(page.reload); reload.current = page.reload;
-  // live: a state change reloads the list (and counts) shortly after; progress updates its row in place
+  const shown = useRef<{ tab: Tab; rows: Map<string, JobState> }>({ tab, rows: new Map() });
+  // live: a state change reloads the list (and counts) shortly after; progress updates its row in place. The list can
+  // be older than the stream (dev-qa V6 b: a job that started between loading the list and the stream opening): so the
+  // stream's hello reloads it, and progress for a job the list doesn't show as converting (still Waiting there, or
+  // missing from Running) reloads it too, at most every 3 s.
   useEffect(() => {
-    let t: ReturnType<typeof setTimeout> | undefined;
+    let t: ReturnType<typeof setTimeout> | undefined, lastHeal = 0;
+    const soon = () => { clearTimeout(t); t = setTimeout(() => reload.current(), 400); };
     return onLive((type, data) => {
-      if (type === "job.progress") { const e = data as JobProgressEvent; setLive((m) => ({ ...m, [e.jobId]: e.progress })); return; }
+      if (type === "job.progress") {
+        const e = data as JobProgressEvent, sh = shown.current, st = sh.rows.get(e.jobId);
+        setLive((m) => ({ ...m, [e.jobId]: e.progress }));
+        const stale = st ? !RUNS.includes(st) : sh.tab === "running";
+        if (stale && Date.now() - lastHeal > 3000) { lastHeal = Date.now(); soon(); }
+        return;
+      }
       if (type === "job.state") { const id = (data as { jobId?: string })?.jobId; if (id) setLive((m) => { const n = { ...m }; delete n[id]; return n; }); }
-      if (type === "job.state" || type === "resync") { clearTimeout(t); t = setTimeout(() => reload.current(), 400); }
+      if (type === "job.state" || type === "resync" || type === "hello") soon();
     });
   }, []);
   useEffect(() => setSel([]), [tab]);
   const go = (t: Tab, job?: string | null) => navigate("/jobs?tab=" + t + (job ? "&job=" + encodeURIComponent(job) : ""));
   const current = page.data?.for === tab + "|" + q ? page.data : undefined;
-  const RUNS: JobState[] = ["preparing", "running", "validating", "committing"]; // live progress only for a running row
   const items = (current?.items ?? []).map((j) => (live[j.id] && RUNS.includes(j.state) ? { ...j, progress: live[j.id] } : j)), counts = page.data?.counts;
+  shown.current = { tab, rows: new Map((current?.items ?? []).map((j) => [j.jobId ?? j.id, j.state])) };
   const picked = items.filter((j) => sel.includes(j.id)), none = !picked.length;
   const run = async (a: JobAction) => {
     if (a === "cancel" && !window.confirm("Cancel " + plural(picked.length, "file", "files") + "? The files stay as they are. Nothing is deleted.")) return;
-    const r = await act(jobAction(a, picked.map((j) => j.id), a === "reprioritize" ? Number(prio) : undefined), setSaid);
+    const r = await act(jobAction(a, picked.map((j) => j.id), a === "reprioritize" ? prio : undefined), setSaid);
     if (!r) return;
     const bad = r.results.filter((x) => !x.ok), n = r.results.length - bad.length;
     // design (SCREENS V6): say where the files went, not just that they changed
-    const where = a === "reprioritize" ? (Number(prio) > 0 ? " moved to the front of the queue." : Number(prio) < 0 ? " moved to the back of the queue." : " put back in their normal place in the queue.") : " changed.";
+    const where = a === "reprioritize" ? (prio === "first" ? " moved to the front of the queue." : prio === "last" ? " moved to the back of the queue." : " put back in their normal place in the queue.") : " changed.";
     setSaid(plural(n, "file", "files") + where + (bad.length ? " Not changed: " + bad.map((x) => (items.find((j) => j.id === x.id)?.name ?? x.id) + ": " + x.message).join(" ") : ""));
     setSel([]); page.reload();
   };
@@ -81,7 +94,7 @@ export function Jobs() {
     <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("requeue")}><Icon id="i-arrow-r" />Put back in queue</button>
     <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("cancel")}><Icon id="i-stop" />Cancel</button>
     {tab === "waiting" && <span className="row nw" style={{ gap: 4 }}>
-      <select className="input sm" aria-label="Priority" value={prio} onChange={(e) => setPrio(e.target.value)}><option value="10">First</option><option value="0">Normal</option><option value="-10">Last</option></select>
+      <select className="input sm" aria-label="Priority" value={prio} onChange={(e) => setPrio(e.target.value as Pin | "none")}><option value="first">First</option><option value="none">Normal</option><option value="last">Last</option></select>
       <button className="btn sm ghost" type="button" disabled={none} onClick={() => run("reprioritize")}>Change priority</button></span>}
   </>;
   return (
@@ -113,7 +126,7 @@ export function Jobs() {
               {tab === "waiting" && <td className="posc" title={j.position != null ? "Place " + j.position + " in the queue" : "Not taken now"}>{j.position ?? "–"}</td>}
               <td className="idc"><a className="ttl" href={"/next/jobs?tab=" + tab + "&job=" + encodeURIComponent(j.id)} data-job={j.id} title={j.path}
                 onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); go(tab, j.id); } }}>{j.name}</a>
-                {j.priority != null && j.priority !== 0 && <span className="mchip prio">{j.priority > 0 ? "First" : "Last"}</span>}
+                {j.pin && <span className="mchip prio">{j.pin === "first" ? "First" : "Last"}</span>}
                 <span className="sub">{[j.library, j.folder !== "." && j.folder, [j.codec, j.resolution].filter(Boolean).join(" ")].filter(Boolean).join(" · ")}</span>
                 <span className="sub phone">{j.progress ? Math.round(j.progress.percent ?? j.progress.workflowPercent) + "% · " + j.progress.stage : j.state === "completed" ? saved(j.beforeBytes, j.afterBytes) : reasonText(j) || j.library}</span></td>
               <td className="stc"><Pill j={j} /></td>
@@ -162,9 +175,9 @@ function JobLog({ id, name }: { id: string; name: string }) {
 const fmtV = (p: Probe | null | undefined) => {
   if (!p) return null;
   const v = p.streams?.find((s) => s.type === "video"), a = p.streams?.filter((s) => s.type === "audio") ?? [];
-  return { video: [p.videoCodec?.toUpperCase().replace("H264", "H.264"), v?.Height ? v.Height + "p" : ""].filter(Boolean).join(" · "),
+  return { video: [p.videoCodec?.toUpperCase().replace("H264", "H.264"), v?.Height ? v.Height + "p" : ""].filter(Boolean).join(" · ") || "-",
     audio: a.map((x) => x.codec.toUpperCase() + (x.channelLayout ? " " + x.channelLayout : "")).join(", ") || "None",
-    bitrate: p.bitrateKbps ? count(p.bitrateKbps) + " kbps" : "", size: p.sizeBytes ? bytes(p.sizeBytes) : "" };
+    bitrate: p.bitrateKbps ? count(p.bitrateKbps) + " kbps" : "-", size: p.sizeBytes ? bytes(p.sizeBytes) : "-" };
 };
 
 // The job drawer (?job=<id>): right side, 520 px; a full-screen sheet on phones. Esc closes; focus returns to the row.
@@ -221,11 +234,12 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           </section>}
           {scan && <section><h3>Timeline</h3><p className="muted">This file was left out when its library was scanned, so it has no job and no steps.</p></section>}
           {!scan && <JobLog id={id} name={name} />}
-          {before && <section><h3>Result</h3><table className="tbl kvt"><thead><tr><th /><th>Before</th><th>After</th></tr></thead><tbody>
-            <tr><th>Video</th><td>{before.video}</td><td>{after?.video ?? "-"}</td></tr>
-            <tr><th>Audio</th><td>{before.audio}</td><td>{after?.audio ?? "-"}</td></tr>
-            <tr><th>Bitrate</th><td>{before.bitrate}</td><td>{after?.bitrate ?? "-"}</td></tr>
-            <tr><th>Size</th><td>{before.size}</td><td>{after?.size ?? "-"}</td></tr></tbody></table></section>}
+          {/* #148: before is the original; null for an older job that replaced a file of the same name: said so, never blank */}
+          {(before || after) && <section><h3>Result</h3><table className="tbl kvt"><thead><tr><th /><th>Before</th><th>After</th></tr></thead><tbody>
+            <tr><th>Video</th>{before ? <td>{before.video}</td> : <td rowSpan={4} className="muted">Not recorded for this job</td>}<td>{after?.video ?? "-"}</td></tr>
+            <tr><th>Audio</th>{before && <td>{before.audio}</td>}<td>{after?.audio ?? "-"}</td></tr>
+            <tr><th>Bitrate</th>{before && <td>{before.bitrate}</td>}<td>{after?.bitrate ?? "-"}</td></tr>
+            <tr><th>Size</th>{before && <td>{before.size}</td>}<td>{after?.size ?? "-"}</td></tr></tbody></table></section>}
         </div>
       </aside>
     </div>
