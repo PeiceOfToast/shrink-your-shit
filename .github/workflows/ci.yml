@@ -20,19 +20,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
       - name: gofmt
         run: |
           unformatted=$(gofmt -l .)
           if [ -n "$unformatted" ]; then echo "Not gofmt-formatted (run gofmt -w on them):"; echo "$unformatted"; exit 1; fi
-      - name: UI JavaScript syntax
-        if: ${{ !cancelled() }} # runs even when gofmt failed, so one run reports both
-        run: |
-          status=0
-          for f in $(find internal/web/static -name '*.js'); do node --check "$f" || { echo "syntax error in $f"; status=1; }; done
-          exit $status
 
   test:
     name: test (${{ matrix.os }})
@@ -88,7 +79,7 @@ jobs:
           go-version-file: go.mod
       - run: go test -race -count=1 -timeout 15m ./internal/worker ./internal/doctor ./internal/jobs ./internal/web ./internal/scanner
 
-  # The new UI (web/, served at /next/): typecheck and build it once; the build matrix embeds this output (artifact),
+  # The UI (web/, served at /): typecheck and build it once; the build matrix embeds this output (artifact),
   # and the test job runs without it, so the no-Node placeholder path stays tested too.
   web:
     name: web (typecheck, build, embed check)
@@ -170,8 +161,15 @@ jobs:
           [ -n "$up" ] || { docker logs syp; exit 1; }
           # listening beyond loopback: /api needs the token that `shrink-your-shit token` shows
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8484/api/status)" = 401
-          # the image carries the built new UI (a 200 page that loads its script), not the 503 "not built" page
-          curl -fsS http://127.0.0.1:8484/next/ | grep -q 'src="/next/assets/'
+          # the image carries the built UI at / (a 200 page that loads its script), not the 503 "not built" page
+          curl -fsS http://127.0.0.1:8484/ | grep -q 'src="/assets/'
+          # old bookmarks answer one 301 to an app page that is a 200
+          for pair in "/next/|/" "/next/jobs|/jobs" "/libraries/|/libraries" "/activity/?show=failed|/jobs?tab=failed" "/settings/system/|/settings/about"; do
+            from=${pair%%|*}; to=${pair#*|}
+            got=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "http://127.0.0.1:8484$from")
+            test "$got" = "301 http://127.0.0.1:8484$to" || { echo "$from: $got, want 301 to $to"; exit 1; }
+            test "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8484$to")" = 200 || { echo "$to is not a 200"; exit 1; }
+          done
           tok=$(docker exec syp shrink-your-shit token | sed -n 's/^Access token: //p')
           test -n "$tok"
           curl -fsS -H "Authorization: Bearer $tok" http://127.0.0.1:8484/api/status
