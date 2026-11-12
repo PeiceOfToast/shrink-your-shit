@@ -264,7 +264,7 @@ func (s *Store) Claim(worker string) (Job, error) {
 	// A job waiting to be tried again (DD-2) is not taken before its time.
 	args = append(args, now)
 	err := s.db.QueryRow(`UPDATE jobs SET status=?, updated=?, worker=?, progress=0, error='', started=?
-WHERE id=(SELECT id FROM jobs WHERE status=? AND stop_requested=0`+skip+` AND (retry_at='' OR retry_at<=?) ORDER BY id LIMIT 1) AND status=?
+WHERE id=(SELECT id FROM jobs WHERE status=? AND stop_requested=0`+skip+` AND (retry_at='' OR retry_at<=?) ORDER BY priority DESC, id LIMIT 1) AND status=?
 AND NOT EXISTS (SELECT 1 FROM app_meta WHERE key='paused' AND value='1') RETURNING id`,
 		append(args, Queued)...).Scan(&id)
 	s.removeMu.Unlock()

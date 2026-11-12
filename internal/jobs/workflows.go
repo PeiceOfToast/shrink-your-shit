@@ -481,6 +481,91 @@ func (s *Store) KnownTemplate(flowID int64, t rules.Template) (bool, error) {
 	return n > 0, err
 }
 
+// JobEvent is one entry of a job's history (migration 21): its v1 statuses, plus skipped and cancelled.
+type JobEvent struct {
+	Seq    int64   `json:"seq"`
+	At     string  `json:"at"`
+	From   *string `json:"from"`
+	To     string  `json:"to"`
+	Reason string  `json:"reason,omitempty"`
+	Worker string  `json:"worker,omitempty"`
+}
+
+// JobEvents is job id's history, oldest first; it stays after the job's row is gone.
+func (s *Store) JobEvents(id int64) ([]JobEvent, error) {
+	rows, err := s.db.Query(`SELECT seq, at, from_status, to_status, reason, worker FROM job_events WHERE job_id=? ORDER BY seq`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []JobEvent{}
+	for rows.Next() {
+		var e JobEvent
+		var from sql.NullString
+		if err := rows.Scan(&e.Seq, &e.At, &from, &e.To, &e.Reason, &e.Worker); err != nil {
+			return nil, err
+		}
+		if from.Valid {
+			e.From = &from.String
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// RevisionAt is the workflow's revision that was published at time at (what a job queued then ran):
+// the newest published at or before it; ok is false if none was.
+func (s *Store) RevisionAt(flowID int64, at string) (Revision, bool, error) {
+	v, err := scanRevision(s.db.QueryRow(`SELECT `+revCols+` FROM workflow_revisions WHERE workflow_id=? AND status='published' AND published<=? ORDER BY number DESC LIMIT 1`, flowID, at))
+	if !errors.Is(err, sql.ErrNoRows) {
+		return v, err == nil, err
+	}
+	// none yet then: a flow made after the store opened gets revision 1 when first read, after its first
+	// jobs; that first revision is what they ran (the template hasn't changed, or it would have a newer one)
+	if _, err := s.EnsureRevision(flowID); err != nil {
+		return v, false, err
+	}
+	v, err = scanRevision(s.db.QueryRow(`SELECT `+revCols+` FROM workflow_revisions WHERE workflow_id=? AND status='published' ORDER BY number LIMIT 1`, flowID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return v, false, nil
+	}
+	return v, err == nil, err
+}
+
+// SetPriority sets a queued job's priority (higher is taken first by Claim).
+func (s *Store) SetPriority(id int64, p int) error {
+	r, err := s.db.Exec(`UPDATE jobs SET priority=? WHERE id=? AND status=?`, p, id, Queued)
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return ErrNotStoppable // not waiting: nothing to reorder
+	}
+	return nil
+}
+
+// PruneJobEvents forgets history entries older than before (the run logs' 30 days, review 66806b3).
+func (s *Store) PruneJobEvents(before time.Time) (int64, error) {
+	r, err := s.db.Exec(`DELETE FROM job_events WHERE at < ?`, before.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	return r.RowsAffected()
+}
+
+// RetryNow lets a job waiting to retry go at once (bulk retry of a retry_wait job, review 66806b3);
+// ErrNotStoppable if it isn't waiting to retry.
+func (s *Store) RetryNow(id int64) error {
+	r, err := s.db.Exec(`UPDATE jobs SET retry_at='' WHERE id=? AND status=? AND retry_at<>''`, id, Queued)
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return ErrNotStoppable
+	}
+	return nil
+}
+
 // CorruptFlowForTest makes a flow's template unreadable, as TestOpenSurvivesABadFlow does (for other
 // packages' tests).
 func (s *Store) CorruptFlowForTest(id int64) error {
