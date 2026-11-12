@@ -99,3 +99,31 @@ func TestStoppedJobKeepsItsJob(t *testing.T) {
 		}
 	}
 }
+
+// ui-shop 10:54Z: a removed job's detail names its file (not "Job 8"), however it went: with its
+// library, stopped by the person, or skipped by its worker.
+func TestRemovedJobKeepsItsFile(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	other, _ := st.AddLibrary("TV", t.TempDir(), rules.SliderTemplate(3), true)
+	withLib, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "a.mkv")})
+	stopped, _ := st.Enqueue(jobs.Job{Library: other.Path, LibraryID: other.ID, Path: filepath.Join(other.Path, "b.mkv")})
+	st.RequestStop(stopped)
+	skipped, _ := st.Enqueue(jobs.Job{Library: other.Path, LibraryID: other.ID, Path: filepath.Join(other.Path, "c.mkv")})
+	st.Claim("w")
+	st.Skip(skipped, "x", rules.SkipLeftByWorkflow)
+	if code, b, _ := do(t, nil, srv, call{method: "DELETE", path: "/api/v2/libraries/" + strconv.FormatInt(lib.ID, 10), ctype: "application/json"}); code >= 300 {
+		t.Fatalf("delete %d %s", code, b)
+	}
+	for id, path := range map[int64]string{withLib: filepath.Join(lib.Path, "a.mkv"), stopped: filepath.Join(other.Path, "b.mkv"), skipped: filepath.Join(other.Path, "c.mkv")} {
+		_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10)})
+		var d struct {
+			Removed bool
+			File    *struct{ Path, Name, Folder string }
+		}
+		json.Unmarshal([]byte(body), &d)
+		if !d.Removed || d.File == nil || d.File.Path != path || d.File.Name != filepath.Base(path) || d.File.Folder != filepath.Dir(path) {
+			t.Errorf("job %d: %s", id, body)
+		}
+	}
+}

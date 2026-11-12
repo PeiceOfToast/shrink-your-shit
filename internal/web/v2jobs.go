@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -129,8 +130,14 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 				serverError(w, err)
 				return
 			}
-			writeJSON(w, map[string]any{"id": strconv.FormatInt(id, 10), "state": v2State(last.To, nil, nil), "reason": reasonOf(last),
-				"events": v2Events(events), "steps": steps, "attempts": last.Attempts, "removed": true})
+			d := map[string]any{"id": strconv.FormatInt(id, 10), "state": v2State(last.To, nil, nil), "reason": reasonOf(last),
+				"events": v2Events(events), "steps": steps, "attempts": last.Attempts, "removed": true, "file": nil}
+			for _, e := range events { // its file as recorded when it went (ui-shop 10:54Z: not "Job 8")
+				if e.Path != "" {
+					d["file"] = map[string]any{"path": e.Path, "name": filepath.Base(e.Path), "folder": filepath.Dir(e.Path)}
+				}
+			}
+			writeJSON(w, d)
 			return
 		}
 		if err != nil {
