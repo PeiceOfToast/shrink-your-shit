@@ -37,6 +37,7 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	previewRoutes(api, store, eng)
 	wv := newWorkerView(store, ss, eng)
 	v2Summary(api, store, wv)             // V3c: /api/v2/summary, processing and intake pauses
+	v2Overview(api, store, wv)            // user review 11-12 item 5: /api/v2/overview
 	v2EventStream(api, store, wv)         // V3a: /api/v2/events (live updates)
 	v2Workers(api, wv)                    // V4a: /api/v2/workers
 	v2Libraries(api, store, eng)          // V5b: /api/v2/libraries

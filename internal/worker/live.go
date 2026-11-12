@@ -45,6 +45,17 @@ func updateLive(id int64, p media.Progress) {
 	}
 }
 
+// ReportLive puts a remote worker's report of job id's encode into its Live entry (percent and
+// position; the report has no speed or fps): every reader of Live then shows it.
+func ReportLive(id int64, percent, outTimeUS float64) {
+	live.Lock()
+	defer live.Unlock()
+	if j, ok := live.jobs[id]; ok {
+		j.Progress.Percent, j.Progress.OutTimeUS = percent, outTimeUS
+		live.jobs[id] = j
+	}
+}
+
 func dropLive(id int64) {
 	live.Lock()
 	defer live.Unlock()
