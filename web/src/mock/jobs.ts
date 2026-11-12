@@ -47,7 +47,8 @@ export function mockJob(id: string): JobDetail | null {
   const old = id === "41002"; // finished before the update: no history
   const reason = j.reason ?? null;
   return {
-    id, state: j.state, removed: false, reason, attempts: j.attempts ?? 0, retryAt: j.retryAt ?? null, error: null, worker: j.worker ?? null,
+    // removed: as the server, a job-backed skip's own row is gone (removed: true)
+    id, state: j.state, removed: j.origin === "scan", reason, attempts: j.attempts ?? 0, retryAt: j.retryAt ?? null, error: null, worker: j.worker ?? null,
     file: { path: j.path, bytes: j.beforeBytes ?? j.bytes }, createdAt: at(300), updatedAt: at(5),
     library: { id: j.libraryId, name: j.library }, workflow: { id: "w1", revisionId: "w1r4", version: 4 },
     events: old ? [] : [{ seq: 1, at: at(300), from: null, to: "queued", reason: null, workerId: null },

@@ -3,6 +3,7 @@
 package web
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"io"
@@ -241,5 +242,146 @@ func TestPairingTriesAreLimited(t *testing.T) {
 	}
 	if rec := pairFrom("192.168.1.21", good2); rec.Code != 200 {
 		t.Errorf("another address: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// User review 11-12 item 2 (orch-lead 14:22Z): each worker on and off by itself; the switch for all
+// sets them all; the Dashboard's processingPaused is "every worker off"; stopping a remote worker ends
+// its lease.
+func TestEachWorkerOnAndOff(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	code, _, _ := st.NewPairing(time.Now())
+	rw, _, err := st.Pair(code, "Desktop", "1", 1, "", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	post := func(path string) (int, string) {
+		c, b, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/workers/" + path, body: `{}`, ctype: "application/json"})
+		return c, b
+	}
+	summaryPaused := func() bool {
+		_, b, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/summary"})
+		return strings.Contains(b, `"processingPaused":true`)
+	}
+	if c, b := post("local/stop"); c != 200 || !strings.Contains(b, `"enabled":false`) || st.WorkerEnabled(jobs.LocalWorker) || !st.WorkerEnabled(rw.ID) {
+		t.Errorf("local stop: %d %s", c, b)
+	}
+	if summaryPaused() {
+		t.Error("a worker is on: the switch for all reads on")
+	}
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "a.mkv")})
+	if j, err := st.Claim(rw.ID); err != nil || j.ID != id {
+		t.Fatalf("claim %v", err)
+	}
+	if c, b := post(rw.ID + "/drain"); c != 200 || !strings.Contains(b, `"status":"draining"`) || st.WorkerEnabled(rw.ID) {
+		t.Errorf("remote drain: %d %s", c, b)
+	}
+	if !summaryPaused() {
+		t.Error("every worker off: paused")
+	}
+	if c, b := post(rw.ID + "/stop"); c != 200 || !strings.Contains(b, `"currentJobIds":[]`) {
+		t.Errorf("remote stop: %d %s", c, b)
+	}
+	if j, _ := st.Get(id); j.Status != jobs.Queued {
+		t.Errorf("its job: %s", j.Status)
+	}
+	if c, b := post(rw.ID + "/start"); c != 200 || !st.WorkerEnabled(rw.ID) || st.WorkerEnabled(jobs.LocalWorker) {
+		t.Errorf("remote start starts only it: %d %s", c, b)
+	}
+	if c, b := post("all/start"); c != 200 || !st.WorkerEnabled(jobs.LocalWorker) || !st.WorkerEnabled(rw.ID) || strings.Count(b, `"enabled":true`) != 2 {
+		t.Errorf("all on: %d %s", c, b)
+	}
+	if c, _ := post("w-nobody/stop"); c != 404 {
+		t.Errorf("no such worker: %d", c)
+	}
+}
+
+// V7d: a worker on another version is told what to do (Q7: no self-update); one on this version isn't.
+func TestRemoteWorkerUpdateWords(t *testing.T) {
+	_, st, _, _ := libServer(t, false)
+	v := newWorkerView(st, &settingsStore{store: st}, Engine{Version: "1.5.0"})
+	for ver, want := range map[string]string{"1.4.0": "This worker runs 1.4.0; the server runs 1.5.0. Install 1.5.0 on that computer, then start the worker again.", "1.5.0": ""} {
+		code, _, _ := st.NewPairing(time.Now())
+		rw, _, err := st.Pair(code, "W "+ver, ver, 1, "", time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		item, err := v.remote(rw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := ""
+		if u, ok := item["update"].(map[string]any); ok {
+			got = u["words"].(string)
+		}
+		if got != want {
+			t.Errorf("%s: %q", ver, got)
+		}
+	}
+}
+
+// #174 QA e (orch-lead 16:12Z): a worker says why it takes no work; only known codes, at most 200
+// characters without control characters; worker.updated when the reason starts, ends or changes code,
+// not when only its figures change.
+func TestWorkerHoldingBack(t *testing.T) {
+	if holdingBack(&struct{ Code, Message string }{"mining", "x"}) != nil {
+		t.Error("an unknown code is dropped")
+	}
+	if h := holdingBack(&struct{ Code, Message string }{"low_disk", "Not taking work:\x1b[31m 1 GB\n free" + strings.Repeat("x", 300)}); h == nil ||
+		strings.ContainsAny(h["message"], "\x1b\n") || len([]rune(h["message"])) != 200 {
+		t.Errorf("sanitized: %q", h)
+	}
+	srv, st, _, _ := libServer(t, false)
+	code, _, _ := st.NewPairing(time.Now())
+	c, b := workerCall(t, srv, "pair", "", `{"code":"`+code+`"}`, WorkerAPILevel)
+	var w struct{ WorkerID, Token string }
+	json.Unmarshal([]byte(b), &w)
+	if c != 200 {
+		t.Fatalf("pair %d %s", c, b)
+	}
+	beat := func(hold string) {
+		t.Helper()
+		if c, b := workerCall(t, srv, "heartbeat", w.Token, `{"freeSlots":1,"holdingBack":`+hold+`}`, WorkerAPILevel); c != 200 {
+			t.Fatalf("heartbeat %d %s", c, b)
+		}
+	}
+	v := newWorkerView(st, &settingsStore{store: st}, Engine{})
+	v.checkStatuses(context.Background(), true) // the first check only takes note
+	events := func() int {
+		var n int
+		_, last, _ := st.EventBounds()
+		evs, _ := st.EventsAfter(0, int(last)+1)
+		for _, e := range evs {
+			if e.Kind == "worker.updated" {
+				n++
+			}
+		}
+		return n
+	}
+	beat(`{"code":"low_disk","message":"Not taking work: 1.0 GB free"}`)
+	v.checkStatuses(context.Background(), true)
+	if _, b, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/workers/" + w.WorkerID}); !strings.Contains(b, `"holdingBack":{"code":"low_disk","message":"Not taking work: 1.0 GB free"}`) {
+		t.Errorf("shown: %s", b)
+	}
+	if n := events(); n != 1 {
+		t.Errorf("it started holding back: %d events", n)
+	}
+	beat(`{"code":"low_disk","message":"Not taking work: 0.9 GB free"}`) // only the figure moved
+	v.checkStatuses(context.Background(), true)
+	if n := events(); n != 1 {
+		t.Errorf("only its figure changed: %d events", n)
+	}
+	beat(`null`)
+	v.checkStatuses(context.Background(), true)
+	if _, b, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/workers/" + w.WorkerID}); !strings.Contains(b, `"holdingBack":null`) {
+		t.Errorf("cleared: %s", b)
+	}
+	if n := events(); n != 2 {
+		t.Errorf("it takes work again: %d events", n)
+	}
+	beat(`{"code":"mining","message":"x"}`)
+	if _, b, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/workers/" + w.WorkerID}); !strings.Contains(b, `"holdingBack":null`) {
+		t.Errorf("an unknown code: %s", b)
 	}
 }
