@@ -173,3 +173,87 @@ func TestOverviewAndSummaryListEveryWorker(t *testing.T) {
 		t.Errorf("summary workers %+v running %d", s.Workers, s.Activity.WorkersRunning)
 	}
 }
+
+// A paired remote converting: the local worker lists only its own job in currentJobIds (a remote's
+// job, run here once more, is that worker's) and its slots are 1 of 1, not 2 of 1 (#175, after the
+// overview branch had merged an older dev).
+func TestLocalWorkerListsOnlyItsOwnJobs(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	code, _, _ := st.NewPairing(time.Now())
+	rw, _, err := st.Pair(code, "Desktop", "1", WorkerAPILevel, "", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	here, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "here.mkv"), SizeBefore: 1000})
+	there, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "there.mkv"), SizeBefore: 1000})
+	st.Claim("builtin")
+	st.Claim(rw.ID)
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/workers"})
+	var w struct {
+		Items []v2Worker
+	}
+	json.Unmarshal([]byte(body), &w)
+	if len(w.Items) != 2 {
+		t.Fatalf("workers %s", body)
+	}
+	local := w.Items[0]
+	if len(local.CurrentJobIDs) != 1 || local.CurrentJobIDs[0] != strconv.FormatInt(here, 10) {
+		t.Errorf("currentJobIds %v (want job %d)", local.CurrentJobIDs, here)
+	}
+	if local.Slots.CPU.Used != 1 || local.Slots.CPU.Total != 1 {
+		t.Errorf("slots %+v", local.Slots)
+	}
+	if len(w.Items[1].CurrentJobIDs) != 1 || w.Items[1].CurrentJobIDs[0] != strconv.FormatInt(there, 10) {
+		t.Errorf("the remote's job is not on its own row: %v", w.Items[1].CurrentJobIDs)
+	}
+}
+
+// A remote job's percent is what its worker reported (the lease's stored progress): the overview has
+// no live view of a remote encode. A local job without one shows no percent.
+func TestRemoteJobsPercentIsTheReportedOne(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	code, _, _ := st.NewPairing(time.Now())
+	rw, _, err := st.Pair(code, "Desktop", "1", WorkerAPILevel, "", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	here, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "here.mkv"), SizeBefore: 1000})
+	there, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "there.mkv"), SizeBefore: 1000})
+	st.Claim("builtin")
+	st.Claim(rw.ID)
+	st.Progress(there, 40)
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/overview"})
+	var o struct {
+		Workers []struct {
+			ID, Kind string
+			Jobs     []struct {
+				JobID   string
+				Percent *float64
+			}
+		}
+		ActiveJobs []struct {
+			JobID   string
+			Percent *float64
+		}
+	}
+	json.Unmarshal([]byte(body), &o)
+	pct := map[string]*float64{}
+	for _, w := range o.Workers {
+		for _, j := range w.Jobs {
+			pct[w.Kind+"/"+j.JobID] = j.Percent
+		}
+	}
+	if p := pct["remote/"+strconv.FormatInt(there, 10)]; p == nil || *p != 40 {
+		t.Errorf("the remote job's percent: %v (%s)", p, body)
+	}
+	if p := pct["local/"+strconv.FormatInt(here, 10)]; p != nil {
+		t.Errorf("a local job without a live view has a percent: %v", *p)
+	}
+	for _, a := range o.ActiveJobs {
+		if a.JobID == strconv.FormatInt(there, 10) && (a.Percent == nil || *a.Percent != 40) {
+			t.Errorf("active jobs: the remote job's percent %v", a.Percent)
+		}
+	}
+}
