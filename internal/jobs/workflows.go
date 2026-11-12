@@ -493,7 +493,7 @@ type JobEvent struct {
 
 // JobEvents is job id's history, oldest first; it stays after the job's row is gone.
 func (s *Store) JobEvents(id int64) ([]JobEvent, error) {
-	rows, err := s.db.Query(`SELECT seq, at, from_status, to_status, reason, worker FROM job_events WHERE job_id=? ORDER BY seq`, id)
+	rows, err := s.db.Query(`SELECT seq, at, from_status, to_status, reason, worker FROM events WHERE kind='job' AND job_id=? ORDER BY seq`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -546,7 +546,7 @@ func (s *Store) SetPriority(id int64, p int) error {
 
 // PruneJobEvents forgets history entries older than before (the run logs' 30 days, review 66806b3).
 func (s *Store) PruneJobEvents(before time.Time) (int64, error) {
-	r, err := s.db.Exec(`DELETE FROM job_events WHERE at < ?`, before.UTC().Format(time.RFC3339))
+	r, err := s.db.Exec(`DELETE FROM events WHERE at < ?`, before.UTC().Format(time.RFC3339))
 	if err != nil {
 		return 0, err
 	}
@@ -564,6 +564,49 @@ func (s *Store) RetryNow(id int64) error {
 		return ErrNotStoppable
 	}
 	return nil
+}
+
+// Event is one entry of the live stream's sequence (migration 22): a job's state change now; other
+// kinds (workflow published, pauses, activity) carry their facts in Data.
+type Event struct {
+	Seq    int64
+	Kind   string
+	JobID  int64
+	At     string
+	From   *string
+	To     string
+	Reason string
+	Worker string
+	Data   string
+}
+
+// EventsAfter are the events after seq, oldest first, at most limit.
+func (s *Store) EventsAfter(seq int64, limit int) ([]Event, error) {
+	rows, err := s.db.Query(`SELECT seq, kind, COALESCE(job_id,0), at, from_status, COALESCE(to_status,''), reason, worker, COALESCE(data,'')
+FROM events WHERE seq > ? ORDER BY seq LIMIT ?`, seq, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Event
+	for rows.Next() {
+		var e Event
+		var from sql.NullString
+		if err := rows.Scan(&e.Seq, &e.Kind, &e.JobID, &e.At, &from, &e.To, &e.Reason, &e.Worker, &e.Data); err != nil {
+			return nil, err
+		}
+		if from.Valid {
+			e.From = &from.String
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// EventBounds are the oldest and newest seq kept (0, 0 when there are none).
+func (s *Store) EventBounds() (oldest, newest int64, err error) {
+	err = s.db.QueryRow(`SELECT COALESCE(MIN(seq),0), COALESCE(MAX(seq),0) FROM events`).Scan(&oldest, &newest)
+	return oldest, newest, err
 }
 
 // CorruptFlowForTest makes a flow's template unreadable, as TestOpenSurvivesABadFlow does (for other

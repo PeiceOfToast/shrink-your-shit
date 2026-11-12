@@ -393,7 +393,7 @@ func TestMigration7BackfillsSkipReasons(t *testing.T) {
 		// (13 changes rows only)
 		`ALTER TABLE flows DROP COLUMN description`, `ALTER TABLE flows DROP COLUMN status`, `ALTER TABLE flows DROP COLUMN favourite`,
 		`ALTER TABLE flows DROP COLUMN tags`, `DROP TABLE workflow_revisions`, // and 20
-		`DROP TRIGGER job_events_insert`, `DROP TRIGGER job_events_status`, `DROP TRIGGER job_events_removed`, `DROP INDEX jobs_claim`, `DROP TABLE job_events`, `ALTER TABLE jobs DROP COLUMN priority`, // and 21
+		`DROP TRIGGER events_job_insert`, `DROP TRIGGER events_job_status`, `DROP TRIGGER events_job_removed`, `DROP INDEX jobs_claim`, `DROP TABLE events`, `ALTER TABLE jobs DROP COLUMN priority`, // and 21
 		`PRAGMA user_version=6`} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
@@ -563,11 +563,11 @@ func TestWorkersStartStoppedMigration(t *testing.T) {
 	}
 }
 
-// rewind20 takes away what migrations 20 and 21 added, for tests that set user_version below it.
+// rewind20 takes away what migrations 20, 21 and 22 added, for tests that set user_version below it.
 func rewind20(s *Store) {
 	for _, q := range []string{`ALTER TABLE flows DROP COLUMN description`, `ALTER TABLE flows DROP COLUMN status`,
 		`ALTER TABLE flows DROP COLUMN favourite`, `ALTER TABLE flows DROP COLUMN tags`, `DROP TABLE workflow_revisions`,
-		`DROP TRIGGER job_events_insert`, `DROP TRIGGER job_events_status`, `DROP TRIGGER job_events_removed`, `DROP INDEX jobs_claim`, `DROP TABLE job_events`, `ALTER TABLE jobs DROP COLUMN priority`} { // and 21
+		`DROP TRIGGER events_job_insert`, `DROP TRIGGER events_job_status`, `DROP TRIGGER events_job_removed`, `DROP INDEX jobs_claim`, `DROP TABLE events`, `ALTER TABLE jobs DROP COLUMN priority`} { // and 21
 		s.db.Exec(q)
 	}
 }
