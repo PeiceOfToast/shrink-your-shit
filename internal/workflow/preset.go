@@ -102,8 +102,8 @@ func chain(nodes []Node, prev *Doc) []Edge {
 // Basic flow. A Doc this version can't run gives an issue instead (it can still be saved as a draft).
 func ToTemplate(d Doc, current rules.Template) (rules.Template, []Issue) {
 	order, ok := straightChain(d)
-	if !ok {
-		return rules.Template{}, []Issue{notRunnable("This workflow has branches or steps in an order that can't run yet. Branches come in a later update; you can save it as a draft.", "")}
+	if !ok || hasOnError(d) { // V6a: a workflow with checks; V6b: or a step's own choice for when it doesn't work
+		return branchTemplate(d)
 	}
 	types := make([]string, len(order))
 	for i, n := range order {
@@ -118,7 +118,7 @@ func ToTemplate(d Doc, current rules.Template) (rules.Template, []Issue) {
 		return t, nil
 	}
 	if !slices.Equal(types, PresetOrder) {
-		return rules.Template{}, []Issue{notRunnable("This version can run the Shrink videos steps in their order. Other steps and orders come in a later update; you can save it as a draft.", "")}
+		return rules.Template{}, []Issue{chainIssue(order)}
 	}
 	s, issues := selectorsOf(order)
 	if len(issues) > 0 {
@@ -257,6 +257,31 @@ func straightChain(d Doc) ([]Node, bool) {
 	return order, true
 }
 
+// chainIssue says what keeps order, the steps of a path that converts, from running: the first Shrink
+// videos step it lacks, a step this version can't run there, or the order (V6 review: name the step).
+func chainIssue(order []Node) Issue {
+	const draft = " You can save the workflow as a draft meanwhile."
+	have := map[string]bool{}
+	for _, n := range order {
+		have[n.Type] = true
+	}
+	for _, t := range PresetOrder {
+		if !have[t] {
+			name := t
+			if d, ok := Definition(t); ok {
+				name = d.Name
+			}
+			return notRunnable("This path converts without '"+name+"'. A path that converts runs every Shrink videos step, in order: add it."+draft, "")
+		}
+	}
+	for _, n := range order {
+		if !slices.Contains(PresetOrder, n.Type) {
+			return notRunnable("'"+nodeName(n)+"' can't run among the steps that convert yet. Remove it from this path."+draft, n.ID)
+		}
+	}
+	return notRunnable("The steps that convert run in the Shrink videos order. Put this path's steps in that order."+draft, "")
+}
+
 func notRunnable(msg, nodeID string) Issue {
 	return Issue{Code: "not_runnable_yet", Severity: "error", Message: msg, NodeID: nodeID}
 }
@@ -293,3 +318,13 @@ func orEmpty(s []string) []string {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// hasOnError reports whether a step of d has its own choice for when it doesn't work (V6b).
+func hasOnError(d Doc) bool {
+	for _, n := range d.Nodes {
+		if n.OnError != nil {
+			return true
+		}
+	}
+	return false
+}

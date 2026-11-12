@@ -48,6 +48,9 @@ function Detail({ j }: { j: JobItem }) {
 }
 
 const RUNS: JobState[] = ["preparing", "running", "validating", "committing"]; // live progress only for a running row
+// The drawer opens by job: a skipped row with a job behind it (#149: a workflow's skip after it failed, or one the user
+// stopped) opens that job (steps, tries, log); a file a scan left out has no job and opens its row ("skip-N").
+const key = (j: JobItem) => j.jobId ?? j.id;
 
 export function Jobs() {
   const search = new URLSearchParams(useSearch());
@@ -74,7 +77,7 @@ export function Jobs() {
         return;
       }
       if (type === "job.state") { const id = (data as { jobId?: string })?.jobId; if (id) setLive((m) => { const n = { ...m }; delete n[id]; return n; }); }
-      if (type === "job.state" || type === "resync" || type === "hello") soon();
+      if (type === "job.state" || type === "resync" || type === "hello" || type === "library.changed") soon(); // #150: a paused library shows at once
     });
   }, []);
   useEffect(() => setSel([]), [tab]);
@@ -128,8 +131,8 @@ export function Jobs() {
             <tr key={j.id} className={sel.includes(j.id) ? "sel" : undefined}>
               <td className="selc"><label className="hit"><input type="checkbox" aria-label={"Select " + j.name} checked={sel.includes(j.id)} onChange={(e) => setSel(e.target.checked ? [...sel, j.id] : sel.filter((x) => x !== j.id))} /></label></td>
               {tab === "waiting" && <td className="posc" title={j.position != null ? "Place " + j.position + " in the queue" : "Not taken now"}>{j.position ?? "–"}</td>}
-              <td className="idc"><a className="ttl" href={"/next/jobs?tab=" + tab + "&job=" + encodeURIComponent(j.id)} data-job={j.id} title={j.path}
-                onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); go(tab, j.id); } }}>{j.name}</a>
+              <td className="idc"><a className="ttl" href={"/next/jobs?tab=" + tab + "&job=" + encodeURIComponent(key(j))} data-job={key(j)} title={j.path}
+                onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); go(tab, key(j)); } }}>{j.name}</a>
                 {j.pin && <span className="mchip prio">{j.pin === "first" ? "First" : "Last"}</span>}
                 <span className="sub">{[j.library, j.folder !== "." && j.folder, [j.codec, j.resolution].filter(Boolean).join(" ")].filter(Boolean).join(" · ")}</span>
                 <span className="sub phone">{j.progress ? Math.round(j.progress.percent ?? j.progress.workflowPercent) + "% · " + j.progress.stage : j.state === "completed" ? saved(j.beforeBytes, j.afterBytes) : reasonText(j) || j.library}</span></td>
@@ -140,7 +143,7 @@ export function Jobs() {
             </tr>))}
           </tbody>
         </table></div>)}
-      {open && <Drawer id={open} row={items.find((j) => j.id === open)} onClose={() => go(tab)} onChanged={page.reload} />}
+      {open && <Drawer id={open} row={items.find((j) => key(j) === open)} onClose={() => go(tab)} onChanged={page.reload} />}
     </div>
   );
 }
@@ -155,7 +158,7 @@ const fmtV = (p: Probe | null | undefined) => {
 
 // The job drawer (?job=<id>): right side, 520 px; a full-screen sheet on phones. Esc closes; focus returns to the row.
 function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; onClose: () => void; onChanged: () => void }) {
-  const scan = id.startsWith("skip-"); // a file a scan left out: no job behind it, only its row
+  const scan = id.startsWith("skip-"); // a file a scan left out: no job behind it, only its row (key() opens a job when there is one)
   const d = useData(() => (scan ? Promise.resolve(null as unknown as JobDetail) : getJob(id)), [id]);
   const [said, setSaid] = useState(""), box = useRef<HTMLElement>(null);
   useEffect(() => onLive((type, data) => { if (type === "job.state" && (data as { jobId?: string })?.jobId === id) d.reload(); }), [id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -169,7 +172,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   const active = state && ["queued", "retry_wait", "preparing", "running", "validating", "committing"].includes(state);
   const run = async (a: JobAction) => {
     if (a === "cancel" && !window.confirm((state === "queued" || state === "retry_wait" ? "Cancel this file?" : "Stop converting this file?") + " The file stays as it is. Nothing is deleted.")) return;
-    const r = await act(jobAction(a, [id]), setSaid);
+    const r = await act(jobAction(a, [row?.id ?? id]), setSaid); // the row's own id: the server's actions take it (skip-N included)
     if (r) { const x = r.results[0]; setSaid(x?.ok ? "Done." : x?.message ?? ""); d.reload(); onChanged(); }
   };
   const before = fmtV(j?.metadata?.before), after = fmtV(j?.metadata?.after);
@@ -179,7 +182,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
       <aside className="drawer jobd" ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="jd-h">
         <div className="hd">
           <button className="btn icon ghost" type="button" aria-label="Close" onClick={onClose}><Icon id="i-chev-l" /></button>
-          <div className="sp"><h2 id="jd-h" className="clamp2" title={name}>{name}</h2>{state && <Pill j={{ state, retryAt: j?.retryAt ?? row?.retryAt }} />}</div>
+          <div className="sp"><h2 id="jd-h" className="clamp2" title={name}>{name}</h2>{state && <Pill j={{ state, retryAt: j?.retryAt ?? row?.retryAt, subState: row?.subState }} />}</div>
         </div>
         <div className="bd">
           <div className="row">

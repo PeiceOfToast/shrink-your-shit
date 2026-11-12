@@ -20,6 +20,8 @@ const (
 	TypeVerify    = "verify.output"
 	TypeCommit    = "output.commit"
 	TypeLegacy    = "video.legacy_settings"
+	TypeCheck     = "filter.video" // V6a: "Check the file", a branch
+	TypeEnd       = "flow.end"     // V6a: "Leave the file alone", an end with the person's words
 )
 
 // PresetOrder is the Shrink videos preset's chain (design SCREENS V3, steps 1-8).
@@ -63,6 +65,8 @@ var (
 	success = Port{Name: "success", Label: "Next", Kind: "file", Outcome: "success"}
 	skipped = Port{Name: "skipped", Label: "Left as it is", Kind: "control", Outcome: "skipped"}
 	errPort = Port{Name: "error", Label: "Didn't work", Kind: "control", Outcome: "error"}
+	yesPort = Port{Name: "match", Label: "Yes", Kind: "file", Outcome: "branch"} // V6a: a check's answers
+	noPort  = Port{Name: "else", Label: "No", Kind: "file", Outcome: "branch"}
 )
 
 // encodeSegment are the node types that run as one ffmpeg process (proposal, "Honest constraint").
@@ -187,6 +191,26 @@ func Definitions() []StepDefinition {
 			Description: "The settings this workflow had before workflows existed. They run exactly as before; to change them, start from the Shrink videos steps.",
 			Inputs:      []Port{in}, Outputs: []Port{success, skipped, errPort}, AlwaysOn: true, SideEffects: "commits", Deprecated: true, ReadOnly: true,
 			ConfigSchema: object(nil, nil)}), // its config (the template) is kept as it is: no form
+		// V6a: branches. Each output port has its own words (ui-shop 02:05Z): the UI never makes them up.
+		def(StepDefinition{Type: TypeCheck, Category: "filter", Name: "Check the file", Icon: "branch", TypeLabel: "Check",
+			Description: "Sends each file one of two ways, by what it is. Every condition you set must hold for Yes.",
+			Inputs:      []Port{in}, Outputs: []Port{yesPort, noPort}, SideEffects: "none",
+			ConfigSchema: object(map[string]any{
+				"codec": described(map[string]any{"type": "array", "title": "Video format is one of", "items": enum([]any{"hevc", "h264", "av1", "vp9", "mpeg4", "mpeg2video", "vc1", "wmv3"},
+					[]string{"HEVC", "H.264", "AV1", "VP9", "MPEG-4", "MPEG-2", "VC-1", "WMV"})}, "Leave empty for any."),
+				"minBitrateKbps": described(map[string]any{"type": "integer", "minimum": 0, "title": "Bitrate is at least (kbps)"}, "0 for any."),
+				"resolution":     withDefault(enum([]any{0, 720, 1080, 2160}, []string{"Any", "At least 720p", "At least 1080p", "4K (2160p)"}), 0, "Resolution", ""),
+				"hdr":            withDefault(enum([]any{"", "yes", "no"}, []string{"Either", "HDR", "Not HDR"}), "", "HDR", "segmented"),
+				"dolbyVision":    withDefault(enum([]any{"", "yes", "no"}, []string{"Either", "Dolby Vision", "Not Dolby Vision"}), "", "Dolby Vision", "segmented"),
+				"fps":            described(map[string]any{"type": "number", "minimum": 0, "title": "Frame rate is at least (fps)"}, "0 for any."),
+				"size":           described(map[string]any{"type": "integer", "minimum": 0, "title": "File is at least (MB)"}, "0 for any."),
+				"container": described(map[string]any{"type": "array", "title": "File type is one of", "items": enum([]any{"mkv", "mp4", "avi", "mov", "webm", "ts", "m2ts", "wmv", "flv", "mpg"},
+					[]string{"MKV", "MP4", "AVI", "MOV", "WebM", "TS", "M2TS", "WMV", "FLV", "MPG"})}, "Leave empty for any."),
+			}, nil)}),
+		def(StepDefinition{Type: TypeEnd, Category: "flow", Name: "Leave the file alone", Icon: "stop", TypeLabel: "End",
+			Description: "The file is left as it is, and the reason below shows in its history.",
+			Inputs:      []Port{in}, Outputs: []Port{}, SideEffects: "none",
+			ConfigSchema: object(map[string]any{"reason": withDefault(map[string]any{"type": "string", "maxLength": 200}, "Left alone by this workflow.", "Reason shown", "")}, nil)}),
 	}
 }
 

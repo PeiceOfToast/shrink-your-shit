@@ -116,7 +116,8 @@ func TestFileListReviewFixes(t *testing.T) {
 	}
 }
 
-// Every way a job is removed tells OnJobsRemoved (its run log goes) and drops its steps.
+// Every way a job is removed tells OnJobsRemoved (its run log goes) and drops its steps, but a skip by
+// its worker: its steps and log stay while its file's record names it (V6 review), then go.
 func TestJobsRemovedHook(t *testing.T) {
 	s := open(t)
 	var gone []int64
@@ -126,15 +127,29 @@ func TestJobsRemovedHook(t *testing.T) {
 	s.AddStep(stopped, "found", true, "x")
 	s.RequestStop(stopped) // queued: removed at once
 	skipped, _ := s.Enqueue(Job{Library: "/m", LibraryID: lib.ID, Path: "/m/b.mkv"})
+	s.AddStep(skipped, "found", true, "x")
 	s.Skip(skipped, "x", "dv")
 	userStopped, _ := s.Enqueue(Job{Library: "/m", LibraryID: lib.ID, Path: "/m/c.mkv"})
 	s.UserStopped(userStopped)
 	withLib, _ := s.Enqueue(Job{Library: "/m", LibraryID: lib.ID, Path: "/m/d.mkv"})
 	s.DeleteLibrary(lib.ID)
-	if fmt.Sprint(gone) != fmt.Sprint([]int64{stopped, skipped, userStopped, withLib}) {
+	if fmt.Sprint(gone) != fmt.Sprint([]int64{stopped, userStopped, withLib}) {
 		t.Errorf("told %v", gone)
 	}
 	if steps, _ := s.Steps(stopped); len(steps) != 0 {
 		t.Errorf("steps kept %v", steps)
+	}
+	if ids, err := s.ForgetGoneJobSteps(); err != nil || !ids[skipped] || ids[stopped] {
+		t.Errorf("the skipped job's log is kept: %v %v", ids, err)
+	}
+	if steps, _ := s.Steps(skipped); len(steps) != 1 {
+		t.Errorf("the skipped job's steps %v", steps)
+	}
+	s.PutFile(File{Path: "/m/b.mkv", Decision: "skip: dv", Reason: "dv"}) // a later scan's own decision
+	if ids, _ := s.ForgetGoneJobSteps(); ids[skipped] {
+		t.Errorf("still kept after a scan: %v", ids)
+	}
+	if steps, _ := s.Steps(skipped); len(steps) != 0 {
+		t.Errorf("steps after a scan %v", steps)
 	}
 }

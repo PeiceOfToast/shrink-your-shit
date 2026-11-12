@@ -203,20 +203,26 @@ func OutputFolders(store *jobs.Store) []string {
 	var out []string
 	for _, l := range libs {
 		f, err := store.GetFlow(l.FlowID)
-		if err != nil || f.Template.Selectors == nil || f.Template.Selectors.AfterConverting != "folder" {
+		if err != nil {
 			continue
 		}
-		dir := f.Template.Selectors.OutputDir
-		if f.Template.Selectors.FolderMode == rules.NextToLibrary {
-			if d, problem, err := store.OutputFolder(l.ID, l.Path); err == nil && problem == nil {
-				dir = d
-			} else {
+		for _, part := range f.Template.Parts() { // each path of a workflow with checks (V6a)
+			s := part.Selectors
+			if s == nil || s.AfterConverting != "folder" {
 				continue
 			}
-		}
-		if dir != "" && !seen[dir] {
-			seen[dir] = true
-			out = append(out, dir)
+			dir := s.OutputDir
+			if s.FolderMode == rules.NextToLibrary {
+				d, problem, err := store.OutputFolder(l.ID, l.Path)
+				if err != nil || problem != nil {
+					continue
+				}
+				dir = d
+			}
+			if dir != "" && !seen[dir] {
+				seen[dir] = true
+				out = append(out, dir)
+			}
 		}
 	}
 	return out

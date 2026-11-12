@@ -38,7 +38,8 @@ type FileFilter struct {
 	Limit, Offset int
 }
 
-// FileRow is one file of the list. A job card's rows have JobID; a skipped row has SkipID.
+// FileRow is one file of the list. A job card's rows have JobID; a skipped row has SkipID, and JobID
+// when its worker skipped it (Store.Skip).
 type FileRow struct {
 	JobID, SkipID         int64
 	LibraryID             int64
@@ -152,7 +153,7 @@ func (s *Store) FileList(f FileFilter) (rows []FileRow, total int, counts map[st
 	switch {
 	case f.Show == CardSkipped:
 		total = skipped
-		r, err := s.db.Query(`SELECT files.rowid, files.path, files.size, COALESCE(files.decision,''), files.reason FROM files WHERE `+sw+` ORDER BY files.path LIMIT ? OFFSET ?`,
+		r, err := s.db.Query(`SELECT files.rowid, files.path, files.size, COALESCE(files.decision,''), files.reason, files.job_id FROM files WHERE `+sw+` ORDER BY files.path LIMIT ? OFFSET ?`,
 			append(sa, f.Limit, f.Offset)...)
 		if err != nil {
 			return nil, 0, nil, err
@@ -160,7 +161,7 @@ func (s *Store) FileList(f FileFilter) (rows []FileRow, total int, counts map[st
 		defer r.Close()
 		for r.Next() {
 			var row FileRow
-			if err := r.Scan(&row.SkipID, &row.Path, &row.SizeBefore, &row.Decision, &row.Reason); err != nil {
+			if err := r.Scan(&row.SkipID, &row.Path, &row.SizeBefore, &row.Decision, &row.Reason, &row.JobID); err != nil {
 				return nil, 0, nil, err
 			}
 			rows = append(rows, row)
