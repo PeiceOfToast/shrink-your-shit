@@ -117,6 +117,7 @@ type Issue struct {
 	EdgeID     string `json:"edgeId,omitempty"`
 	Port       string `json:"port,omitempty"`
 	ConfigPath string `json:"configPath,omitempty"`
+	Field      string `json:"field,omitempty"` // the setting a config problem is about (its key)
 }
 
 // LogicHash identifies a Doc's logic: equal Docs (whatever their layout) hash alike.
