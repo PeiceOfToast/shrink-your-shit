@@ -67,6 +67,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
   const [hist, setHist] = useState<{ at: number; list: { doc: WorkflowDoc; layout: Layout }[] }>(() => ({ at: 0, list: [{ doc: first.workflow, layout: { ...first.layout, nodes: place(first, defs) } }] }));
   const cur = hist.list[hist.at], doc = cur.doc, layout = cur.layout;
   const [saved, setSaved] = useState(cur), [etag, setEtag] = useState(first.etag), [checked, setChecked] = useState<Checked>({ issues: first.validation, stackable: first.stackable, stepSummaries: first.stepSummaries });
+  const [dims, setDims] = useState<Record<string, { width: number; height: number }>>({});
   const [sel, setSel] = useState<string | null>(null), [selEdge, setSelEdge] = useState<string | null>(null), [said, setSaid] = useState(""), [panel, setPanel] = useState<PublishPreview | null>(null), [ver, setVer] = useState(published);
   const dirty = cur !== saved;
   const push = (next: { doc?: WorkflowDoc; layout?: Layout }) => { setHist((h) => ({ at: h.at + 1, list: [...h.list.slice(0, h.at + 1), { doc: next.doc ?? h.list[h.at].doc, layout: next.layout ?? h.list[h.at].layout }] })); setPanel(null); setSaid(""); };
@@ -79,9 +80,22 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
   }, [doc]); // eslint-disable-line react-hooks/exhaustive-deps
   const now = useRef({ dirty, doc, layout, etag }); now.current = { dirty, doc, layout, etag };
   useEffect(() => { // leaving with unsaved changes offers to save (as the step list does)
-    onLeave(() => { const n = now.current; if (n.dirty && window.confirm("Save your changes to this draft before leaving?\n\nOK saves them. Cancel leaves them unsaved.")) void saveDraft(id, n.doc, n.layout, n.etag).catch(() => {}); });
+    // review f03fcad: Cancel keeps the user here with the draft; OK saves it and leaves
+    onLeave(() => { const n = now.current; if (!n.dirty) return; if (!window.confirm("You have unsaved changes in this draft.\n\nOK saves them and leaves. Cancel stays on this page.")) return false; void saveDraft(id, n.doc, n.layout, n.etag).catch(() => {}); });
     return () => onLeave(null);
   }, [id]);
+  useEffect(() => { // review f03fcad P3: Ctrl+Z undo, Ctrl+Shift+Z or Ctrl+Y redo (not while typing in a field)
+    if (!edit) return;
+    const key = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || (e.target as HTMLElement)?.closest?.("input, textarea, select, [contenteditable]")) return;
+      const k = e.key.toLowerCase(), redo = (k === "z" && e.shiftKey) || k === "y";
+      if (k !== "z" && k !== "y") return;
+      e.preventDefault();
+      setHist((h) => (redo ? (h.at < h.list.length - 1 ? { ...h, at: h.at + 1 } : h) : h.at > 0 ? { ...h, at: h.at - 1 } : h));
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [edit]);
   useEffect(() => { if (!dirty) return; const warn = (e: BeforeUnloadEvent) => e.preventDefault(); window.addEventListener("beforeunload", warn); return () => window.removeEventListener("beforeunload", warn); }, [dirty]);
 
   const { nodes, edges } = useMemo(() => {
@@ -89,7 +103,9 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
     // review bf13684 P2: every step and connection has a name in words for a screen reader
     const nodes: GNodeT[] = doc.nodes.map((n) => {
       const mine = issues.filter((i) => i.nodeId === n.id), summary = checked.stepSummaries?.[n.id] ?? "";
+      const def = defs.find((x) => x.type === n.type);
       return { id: n.id, type: "step", position: layout.nodes[n.id] ?? { x: 0, y: 0 }, draggable: edit, connectable: edit, deletable: false, selected: n.id === sel,
+        initialWidth: W, initialHeight: H(def?.outputs?.length ?? 1), measured: dims[n.id], // review f03fcad: the minimap only draws nodes with a size
         ariaLabel: [title(n) + (n.enabled ? "" : " (off)"), summary, ...mine.map((i) => (i.severity === "error" ? "Problem: " : "Warning: ") + i.message)].filter(Boolean).join(". "),
         data: { node: n, def: defs.find((x) => x.type === n.type), summary, issues: mine, edit } };
     });
@@ -101,7 +117,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
         className: port?.outcome === "error" ? "gedge bad" : "gedge", focusable: true, deletable: edit, selected: e.id === selEdge };
     });
     return { nodes, edges };
-  }, [doc, layout, defs, checked, edit, sel, selEdge]);
+  }, [doc, layout, defs, checked, edit, sel, selEdge, dims]);
 
   // a port holds one connection (the server's port_used_twice): connecting it again replaces the old one
   const connect = (c: Connection) => {
@@ -114,6 +130,8 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
   const onNodesChange = (ch: NodeChange<GNodeT>[]) => {
     // a click, or Enter / Space on a focused step (React Flow selects it), opens its panel (review bf13684 P2)
     for (const c of ch) if (c.type === "select") { if (c.selected) (setSel(c.id), setSelEdge(null)); else setSel((s) => (s === c.id ? null : s)); }
+    const sized = ch.filter((c) => c.type === "dimensions" && c.dimensions) as { id: string; dimensions: { width: number; height: number } }[];
+    if (sized.length) setDims((d) => ({ ...d, ...Object.fromEntries(sized.map((c) => [c.id, c.dimensions])) }));
     const moved = ch.filter((c): c is NodeChange<GNodeT> & { type: "position" } => c.type === "position" && !!(c as { position?: unknown }).position && (c as { dragging?: boolean }).dragging === false);
     if (moved.length) push({ layout: { ...layout, nodes: { ...layout.nodes, ...Object.fromEntries(moved.map((c) => [c.id, { x: Math.round(c.position!.x), y: Math.round(c.position!.y) }])) } } });
     else for (const c of ch) if (c.type === "position" && c.position) setDrag((d) => ({ ...d, [c.id]: c.position! }));
@@ -125,8 +143,13 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
   const leaveAlone = (nodeId: string, port: string) => {
     if (!endDef) return;
     const at = layout.nodes[nodeId] ?? { x: 0, y: 0 }, n: Node = { id: newId(), type: "flow.end", typeVersion: endDef.typeVersion, config: {}, enabled: true };
+    // review f03fcad P3: the new step goes to the first free spot to the right of the port's step, never on top of another
+    const size = (id: string) => dims[id] ?? { width: W, height: H(defs.find((x) => x.type === doc.nodes.find((m) => m.id === id)?.type)?.outputs?.length ?? 1) };
+    const clash = (x: number, y: number) => doc.nodes.some((m) => { const p = layout.nodes[m.id], z = size(m.id); return p && x < p.x + z.width + 20 && x + W + 20 > p.x && y < p.y + z.height + 20 && y + H(0) + 20 > p.y; });
+    let spot = { x: at.x + W + 80, y: at.y + 60 };
+    for (let k = 0; k < 40 && clash(spot.x, spot.y); k++) spot = { x: spot.x, y: spot.y + 90 };
     push({ doc: { ...doc, nodes: [...doc.nodes, n], edges: [...doc.edges, { id: newId(), from: nodeId, fromPort: port, to: n.id, toPort: endDef.inputs?.[0]?.name ?? "in" }] },
-      layout: { ...layout, nodes: { ...layout.nodes, [n.id]: { x: at.x + W + 80, y: at.y + 60 } } } });
+      layout: { ...layout, nodes: { ...layout.nodes, [n.id]: spot } } });
     setSaid("Added 'Leave the file alone' on that port. Save the draft to keep it.");
   };
   const save = async () => {
@@ -192,7 +215,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
             <h3 className="h3">Problems{issues.length ? " (" + issues.length + ")" : ""}</h3>
             {!issues.length ? <p className="st ok"><Icon id="i-check-c" /><span>No problems.</span></p> : <ul className="gprobs">{issues.map((i, k) => (
               <li key={k} className={"st " + (i.severity === "error" ? "bad" : "warn")}><Icon id="i-alert" /><span>
-                {i.nodeId ? <button className="linkbtn" type="button" onClick={() => (setSel(i.nodeId!), setSelEdge(null))}>{i.message}</button> : i.message}
+                {i.nodeId ? <button className="linkbtn" type="button" onClick={() => (setSel(i.nodeId!), setSelEdge(null))}><strong>{nameOf(i.nodeId)}:</strong> {i.message}</button> : i.message}
                 {edit && i.code === "unconnected_port" && i.nodeId && i.port && endDef && <> <button className="btn sm" type="button" onClick={() => leaveAlone(i.nodeId!, i.port!)}>Leave the file alone here</button></>}</span></li>))}</ul>}
             {errors.length > 0 && <p className="sm muted">Publish waits until the problems are fixed.</p>}
           </div>
