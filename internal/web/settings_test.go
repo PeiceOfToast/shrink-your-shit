@@ -3,8 +3,13 @@
 package web
 
 import (
+	"net/http/httptest"
+	"path/filepath"
+	"time"
+
 	"encoding/json"
 	"fmt"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"strings"
 	"testing"
 
@@ -218,5 +223,60 @@ func TestFirstRunLibrary(t *testing.T) {
 	st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), false)
 	if get()["firstRunLibrary"] != nil {
 		t.Error("making a library didn't clear it")
+	}
+}
+
+// ui-shop 01:41Z, design 01:41Z: the settings say how often libraries are looked at (seconds): the
+// -scan-every flag until someone changes it here (scanEverySource "flag"), then the saved value
+// ("saved"), applied at once and kept across a restart. At least the settle time, at most a day.
+func TestSettingsScanEvery(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "t.db")
+	var applied []time.Duration
+	server := func() (*httptest.Server, *jobs.Store) {
+		st, err := jobs.Open(db)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a, _, _ := OpenAccess(filepath.Join(filepath.Dir(db), "access"), false)
+		srv := httptest.NewServer(Handler(st, a, Engine{ScanEvery: 45 * time.Second, Settle: 15 * time.Second,
+			SetScanEvery: func(d time.Duration) { applied = append(applied, d) }}))
+		return srv, st
+	}
+	srv, st := server()
+	for _, path := range []string{"/api/settings", "/api/v2/settings"} {
+		_, body, _ := do(t, nil, srv, call{method: "GET", path: path})
+		if !strings.Contains(body, `"scanEvery":45`) || !strings.Contains(body, `"scanEverySource":"flag"`) {
+			t.Errorf("%s: %s", path, body)
+		}
+	}
+	patch := func(body string) (int, string) {
+		t.Helper()
+		code, b, _ := do(t, nil, srv, call{method: "PATCH", path: "/api/settings", body: body, ctype: "application/json"})
+		return code, b
+	}
+	if code, b := patch(`{"scanEvery":45}`); code != 200 || !strings.Contains(b, `"scanEverySource":"flag"`) || len(applied) != 0 {
+		t.Errorf("the flag's value sent back: %d %s %v", code, b, applied)
+	}
+	for _, bad := range []string{`{"scanEvery":14}`, `{"scanEvery":86401}`, `{"scanEvery":"often"}`, `{"scanEvery":0}`} {
+		if code, b := patch(bad); code != 400 || errCode(b) != "invalid_setting" {
+			t.Errorf("%s: %d %s", bad, code, b)
+		}
+	}
+	if code, b := patch(`{"scanEvery":120,"scanEverySource":"flag"}`); code != 200 || !strings.Contains(b, `"scanEvery":120`) || !strings.Contains(b, `"scanEverySource":"saved"`) {
+		t.Fatalf("saved: %d %s", code, b)
+	}
+	if len(applied) != 1 || applied[0] != 2*time.Minute {
+		t.Errorf("applied at once: %v", applied)
+	}
+	srv.Close()
+	st.Close()
+	srv, st = server() // a restart: the saved value stays, and wins over the flag
+	defer srv.Close()
+	defer st.Close()
+	if _, b, _ := do(t, nil, srv, call{method: "GET", path: "/api/settings"}); !strings.Contains(b, `"scanEvery":120`) || !strings.Contains(b, `"scanEverySource":"saved"`) {
+		t.Errorf("after a restart: %s", b)
+	}
+	if s, _ := LoadSettings(st); s.ScanEvery != 120 { // main gives it to the scanner at start
+		t.Errorf("stored %d", s.ScanEvery)
 	}
 }
