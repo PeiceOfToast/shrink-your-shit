@@ -37,11 +37,11 @@ function Languages({ start, saved }: { start: string[]; saved: () => void }) {
   const [codes, setCodes] = useState(start), [list, setList] = useState<[string, string, string?][]>([]), [typed, setTyped] = useState(""), [said, setSaid] = useState(""), [bad, setBad] = useState(false);
   useEffect(() => { fetch("/assets/languages.json").then((r) => r.json()).then(setList, () => {}); }, []);
   const name = (c: string) => list.find((l) => l[0] === c)?.[1] ?? c;
-  const add = () => {
-    const t = typed.trim().toLowerCase(); if (!t) return;
+  const add = (raw = typed) => {
+    const t = raw.trim().toLowerCase(); if (!t) return;
     const hit = list.find((l) => l[1].toLowerCase() === t || (l[2] ?? "").toLowerCase() === t || l[0] === t);
-    if (!hit) return (setBad(true), setSaid("No language called " + typed.trim() + ". Pick one from the list."));
-    if (!codes.includes(hit[0])) setCodes([...codes, hit[0]]);
+    if (!hit) return (setBad(true), setSaid("No language called " + raw.trim() + ". Pick one from the list."));
+    setCodes((cs) => (cs.includes(hit[0]) ? cs : [...cs, hit[0]]));
     setTyped(""); setBad(false); setSaid(hit[1] + " added. Press Save to keep it.");
   };
   const save = async () => { setBad(false); if (await act(patchSettings({ languages: codes }), (m) => (setBad(true), setSaid(m)))) (setSaid("Saved."), saved()); };
@@ -55,8 +55,12 @@ function Languages({ start, saved }: { start: string[]; saved: () => void }) {
         <div className="field"><label htmlFor="lang-add">Add a language</label>
           <div className="row" style={{ gap: 8 }}>
             <input id="lang-add" className="input" list="lang-names" autoComplete="off" value={typed} aria-describedby="lang-h2"
-              onChange={(e) => setTyped(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), add())} style={{ flex: 1, minWidth: 0 }} />
-            <button className="btn" type="button" onClick={add}>Add</button></div>
+              onChange={(e) => {
+                // a pick from the suggestions adds at once, as the old page did; typed text waits for Add or Enter
+                const it = (e.nativeEvent as InputEvent).inputType, v = e.target.value; setTyped(v);
+                if ((it === undefined || it === "insertReplacementText") && list.some((l) => l[1] === v)) add(v);
+              }} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), add())} style={{ flex: 1, minWidth: 0 }} />
+            <button className="btn" type="button" onClick={() => add()}>Add</button></div>
           <datalist id="lang-names">{list.map((l) => <option key={l[0]} value={l[1]} label={l[2]} />)}</datalist>
           <span className="hint" id="lang-h2">Audio and subtitles in these languages are kept when a library uses "Keep only my languages". Tracks with no language set are always kept.</span></div>
         <p className={bad ? "st bad" : "muted"} role="status">{said}</p>
