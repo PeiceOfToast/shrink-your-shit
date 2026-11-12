@@ -12,6 +12,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -177,7 +178,9 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 			if err := s.Store.SetLibraryScanned(t.LibraryID, videos); err != nil {
 				log.Printf("scan: %s: %v", lib, err)
 			}
-			walked = append(walked, t.LibraryID)
+			if s.canJudgeOriginals(t, videos) {
+				walked = append(walked, t.LibraryID)
+			}
 		}
 	}
 	if ctx.Err() == nil {
@@ -499,4 +502,33 @@ func (s *Scanner) markOriginalsGone(walked []int64, sizes map[string]int64) {
 			}
 		}
 	}
+}
+
+// canJudgeOriginals reports whether this pass of library t (which found videos) may mark its originals
+// left in place gone (review-ae6749e P1): not when it found no video at all while the library has such
+// originals (an unmounted disk leaves an empty, readable mount point), and not when the library's folder
+// is on another disk than before (unmounted, or remounted elsewhere). The disk is remembered (app_meta)
+// from passes that found videos, so a library really moved to another disk is judged again a pass later.
+func (s *Scanner) canJudgeOriginals(t Target, videos int) bool {
+	disk, ok := rootDisk(t.Path)
+	if !ok {
+		return false
+	}
+	if videos == 0 {
+		if left, err := s.Store.LeftOriginals([]int64{t.LibraryID}); err != nil || len(left) > 0 {
+			log.Printf("scan: %s: no videos found (is its disk unmounted?): no original is counted as removed", t.Path)
+			return false
+		}
+		return true // nothing to judge anyway
+	}
+	key := "library-disk:" + strconv.FormatInt(t.LibraryID, 10)
+	prev, _, _ := s.Store.Meta(key)
+	if prev != disk {
+		s.Store.SetMeta(key, disk)
+		if prev != "" {
+			log.Printf("scan: %s is on another disk than before (remounted?): no original is counted as removed this pass", t.Path)
+			return false
+		}
+	}
+	return true
 }
