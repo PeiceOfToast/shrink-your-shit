@@ -368,7 +368,8 @@ label.chk{cursor:pointer}
   .list .tbl tr::after{content:"\203A";position:absolute;right:6px;top:50%;transform:translateY(-50%);color:var(--text-2);font-size:20px;line-height:1}
   .list .tbl td{display:none;height:auto;padding:0;border:0;background:none!important}
   .list .tbl td.idc{display:block;flex:1;min-width:0}
-  .list .tbl td.stc,.list .tbl td.actc{display:block;flex:none}
+  .list .tbl td.stc,.list .tbl td.actc,.list .tbl td.posc{display:block;flex:none}
+  .list .tbl td.posc{min-width:20px}
   .list.selecting .tbl td.selc{display:block;flex:none}
   .list .tbl td.idc .sub:not(.phone){display:none}   /* phone rows: the title and one muted line */
   .list .tbl .ttl::before{content:"";position:absolute;inset:0}   /* the whole row opens it */
@@ -492,4 +493,22 @@ label.chk{cursor:pointer}
   .hit input[type=checkbox]:not(.switch){width:20px;height:20px}
   .hit input.switch{width:38px;height:22px;border-radius:11px}.hit input.switch::after{width:14px;height:14px}.hit input.switch:checked::after{left:19px}
 }
+
+/* V6 Jobs: the drawer over the page (a full-screen sheet on phones), its timeline and before/after table */
+.drawer-wrap{position:fixed;inset:0;z-index:64;background:rgb(0 0 0/.35)}
+.drawer.jobd{outline:none}
+.drawer.jobd>.hd{align-items:center}
+.drawer.jobd>.hd h2{font-size:var(--fs-lg)}
+.drawer.jobd>.hd .sp{display:flex;flex-direction:column;gap:4px;min-width:0}
+.drawer.jobd section>h3{font-size:var(--fs);color:var(--text-2);font-weight:var(--fw-strong)}
+.tline{list-style:none;margin:0;padding:0}
+.tline li{display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--border)}
+.tline li:last-child{border-bottom:0}
+.tline li .ic{color:var(--success-text);flex:none;margin-top:2px}.tline li.bad .ic{color:var(--error-text)}
+.tbl.kvt th,.tbl.kvt td{padding:6px 8px;height:auto}
+.tbl.kvt tbody th{color:var(--text-2);font-weight:500;text-align:left}
+.jobs .prog{min-width:160px}
+.tbl .posc{width:44px;text-align:right;color:var(--text-2);font-variant-numeric:tabular-nums;white-space:nowrap}
+@media (max-width:640px){.drawer{width:100vw;border-left:0}}
 .menu .pop{max-width:calc(100vw - 16px)}   /* never wider than the screen; Shell keeps it on the screen */
+.mchip.prio{margin-left:6px;vertical-align:middle}
