@@ -42,6 +42,7 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	v2Summary(api, store, wv)             // V3c: /api/v2/summary, processing and intake pauses
 	v2EventStream(api, store, wv)         // V3a: /api/v2/events (live updates)
 	v2Workers(api, wv)                    // V4a: /api/v2/workers
+	v2Libraries(api, store, eng)          // V5b: /api/v2/libraries
 	v2Jobs(api, store)                    // V2: /api/v2/jobs
 	v2JobStreams(api, store, eng.RunLogs) // V3d: /api/v2/activity, per-job streams
 	v2Workflows(api, store, eng)          // UI rebuild, V1: /api/v2 workflows (UI-API-CONTRACT-v2.md)

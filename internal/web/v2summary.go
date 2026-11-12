@@ -85,7 +85,7 @@ func v2Summary(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 		writeJSON(w, map[string]any{
 			"seq":       seq,
 			"badges":    map[string]any{"failed24h": failed, "workersOffline": 0, "pluginUpdates": 0}, // the local worker is never offline
-			"activity":  map[string]any{"converting": a.WorkingFiles, "waiting": a.WaitingFiles, "workersRunning": workersRunning(store)},
+			"activity":  map[string]any{"converting": a.WorkingFiles, "waiting": a.WaitingFiles, "workersRunning": runningWorkers(store)},
 			"jobCounts": jobCounts,
 			"last24h":   map[string]any{"completed": done, "failed": failed, "skipped": ends["skipped"], "successRate": rate},
 			"bytes": map[string]any{"freed": a.FreedBytes, "waitingToFree": a.WaitingBytes,
@@ -126,4 +126,13 @@ func v2Summary(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 		}
 		writeJSON(w, map[string]bool{"intakePaused": strings.HasPrefix(verb, "pause")})
 	})
+}
+
+// runningWorkers is how many workers are started (contract: a number): the local one, or none (V5b,
+// ui-shop 01:31Z; remote workers come in V7).
+func runningWorkers(store *jobs.Store) int {
+	if store.Paused() {
+		return 0
+	}
+	return 1
 }
