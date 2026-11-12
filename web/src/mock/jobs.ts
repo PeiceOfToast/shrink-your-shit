@@ -74,7 +74,7 @@ export function mockAction(action: JobAction, ids: string[], priority?: number):
       items = items.map((x) => (x === j ? { ...x, id: x.id.replace("skip-", "9"), origin: "job", state: "queued", subState: "waiting", detail: null, reason: null } : x)); return { id, ok: true };
     }
     if (j.state !== "queued") return { id, ok: false, code: "not_waiting", message: "Only a waiting job can be moved in the queue." };
-    void priority; return { id, ok: true };
+    items = items.map((x) => (x === j ? { ...x, priority: priority ?? 0 } : x)); return { id, ok: true };
   });
   return { results };
 }

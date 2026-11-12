@@ -516,3 +516,4 @@ label.chk{cursor:pointer}
 .wcard.dim .bd,.wcard.dim h2 a{color:var(--text-2)}
 .wcard dd a{display:block}
 @media (pointer:coarse){.wcard dd a{display:flex;align-items:center;min-height:44px}}
+.mchip.prio{margin-left:6px;vertical-align:middle}
