@@ -375,7 +375,8 @@ CREATE INDEX IF NOT EXISTS jobs_path ON jobs(path);`},
 ALTER TABLE jobs ADD COLUMN again_from INTEGER NOT NULL DEFAULT 0;`},
 	// V7b (remote workers, slices/v2-engine/v7-plan.md): a worker on another computer, paired with a
 	// one-time code, answers with its own token (only its hash is kept); local is the built-in one.
-	{34, "remote workers", `
+	// 35, not 34: 33 (jobs by path) and 34 (Convert again) merge first (orch-lead 13:44Z).
+	{35, "remote workers", `
 ALTER TABLE workers ADD COLUMN kind TEXT NOT NULL DEFAULT 'local';
 ALTER TABLE workers ADD COLUMN token_hash TEXT NOT NULL DEFAULT '';
 ALTER TABLE workers ADD COLUMN version TEXT NOT NULL DEFAULT '';
