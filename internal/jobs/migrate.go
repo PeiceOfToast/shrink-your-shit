@@ -333,7 +333,8 @@ ALTER TABLE libraries ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;`},
 	// it was, is gone (its saving counts as freed from then), or that it changed (it counts nowhere).
 	{27, "original gone", `
 ALTER TABLE jobs ADD COLUMN original_gone_at TEXT NOT NULL DEFAULT '';
-ALTER TABLE jobs ADD COLUMN original_changed INTEGER NOT NULL DEFAULT 0;`},
+ALTER TABLE jobs ADD COLUMN original_changed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE jobs ADD COLUMN original_disk TEXT NOT NULL DEFAULT '';`},
 	// V6a (branches): a job's path through its workflow (node ids, JSON), and on each step the node it
 	// was and the port the file left by (a check's answer).
 	{28, "job path", `

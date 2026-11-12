@@ -837,3 +837,51 @@ func TestUnmountedDiskMarksNothingGone(t *testing.T) {
 		t.Errorf("a real deletion: freed %d could %d", c[lib.ID].FreedBytes, could())
 	}
 }
+
+// Review ae6749e P2 (a): a sub-folder of the library on its own disk (common on a NAS) that is unmounted
+// never makes its originals count as removed, though the library's root still has videos; a real
+// deletion in a mounted sub-folder still counts, and so does a sub-folder deleted with its files.
+func TestNestedMountMarksNothingGone(t *testing.T) {
+	s, st, _, _ := setup(t, hevcBig)
+	libs, _ := st.Libraries()
+	lib := libs[0]
+	tmpl := rules.LegacyTemplate(rules.Default(), "replace")
+	s.Targets = func() ([]Target, error) { return []Target{{LibraryID: lib.ID, Path: lib.Path, Template: tmpl}}, nil }
+	done := func(rel string) string {
+		p := filepath.Join(lib.Path, rel)
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		os.WriteFile(p, make([]byte, 1000), 0o644)
+		id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: p, SizeBefore: 1000})
+		st.Claim("w")
+		st.Complete(id, p[:len(p)-4]+".hevc.mkv", 400) // beside; its folder's disk is recorded now
+		return p
+	}
+	done("root.mkv")
+	nested := done(filepath.Join("nas", "n.mkv"))
+	mounted := done(filepath.Join("local", "m.mkv"))
+	season := done(filepath.Join("season", "s.mkv"))
+	counts := func() (int64, int64) { c, _ := st.Counts(); return c[lib.ID].FreedBytes, c[lib.ID].CouldFreeBytes }
+	// "unmount" nas: its folder is empty and now on another disk
+	real := originalDisk
+	defer func() { originalDisk = real }()
+	originalDisk = func(p string) (string, bool) {
+		if strings.Contains(p, string(filepath.Separator)+"nas") {
+			return "another-disk", true
+		}
+		return real(p)
+	}
+	os.Remove(nested)
+	for i := 0; i < 3; i++ {
+		s.ScanOnce(context.Background())
+	}
+	if freed, could := counts(); freed != 0 || could != 2400 {
+		t.Fatalf("an unmounted sub-folder: freed %d could %d, want 0 and 2400", freed, could)
+	}
+	os.Remove(mounted)                              // a real deletion in a mounted sub-folder
+	os.RemoveAll(filepath.Join(lib.Path, "season")) // a whole season deleted
+	s.ScanOnce(context.Background())
+	if freed, could := counts(); freed != 1200 || could != 1200 {
+		t.Errorf("real deletions: freed %d could %d, want 1200 (m, s) and 1200 (root, nas)", freed, could)
+	}
+	_ = season
+}

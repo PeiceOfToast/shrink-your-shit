@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -307,7 +308,14 @@ func (s *Store) Complete(id int64, outputPath string, sizeAfter int64) error {
 	if st, err := os.Stat(outputPath); err == nil {
 		mtime = st.ModTime().UnixNano()
 	}
-	return s.transition(id, Done, `, progress=100, output_path=?, size_after=?, output_mtime=?`, outputPath, sizeAfter, mtime)
+	// the disk the original's folder is on now, while it surely is there: an original left in place is
+	// only ever counted as removed while its folder is still on that disk (a nested mount unmounted shows
+	// an empty folder on another disk: review-ae6749e P2)
+	disk := ""
+	if j, err := s.Get(id); err == nil {
+		disk, _ = diskOf(filepath.Dir(j.Path))
+	}
+	return s.transition(id, Done, `, progress=100, output_path=?, size_after=?, output_mtime=?, original_disk=?`, outputPath, sizeAfter, mtime, disk)
 }
 
 // Fail marks a running job failed: code is one of ReasonCodes, msg the plain words.
