@@ -203,8 +203,8 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   const active = state && ["queued", "retry_wait", "preparing", "running", "validating", "committing"].includes(state);
   const run = async (a: JobAction) => {
     if (a === "cancel" && !window.confirm((state === "queued" || state === "retry_wait" ? "Cancel this file?" : "Stop converting this file?") + " The file stays as it is. Nothing is deleted.")) return;
-    const r = await act(jobAction(a, [row?.id ?? id]), setSaid); // the row's own id: the server's actions take it (skip-N included)
-    if (r) { const x = r.results[0]; setSaid(x?.ok ? "Done." : x?.message ?? ""); d.reload(); onChanged(); }
+    const r = await act(jobAction(a, [row?.id ?? id]), setSaid); // the row's id: a job id, or skip-N for a file a scan left out (jobsApi)
+    if (r) { const x = r.results[0]; setSaid(x?.ok ? (a === "requeue" && (row?.id ?? id).startsWith("skip-") ? "It will be looked at again on the next scan." : "Done.") : x?.message ?? ""); d.reload(); onChanged(); }
   };
   const before = fmtV(j?.metadata?.before), after = fmtV(j?.metadata?.after);
   const reason = j?.reason?.message ?? (row ? reasonText(row) : "");
