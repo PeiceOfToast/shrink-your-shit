@@ -107,11 +107,12 @@ function MockDashboard() {
 
 // The real server: /api/v2/summary (again every 15 s, and shortly after a job changes state), progress live.
 function RealDashboard() {
-  const sum = useData(getSummary, [], 15000), set = useData(getSettings, []), libs = useData(listLibraries, [], 30000), trash = useData(getTrash, [], 60000).data;
+  const sum = useData(getSummary, [], 15000), set = useData(getSettings, []), libs = useData(listLibraries, [], 30000), tr = useData(getTrash, [], 60000), trash = tr.data;
   const feed = useData(() => getActivity(8), [], 60000), [liveFeed, setLiveFeed] = useState<ActivityEvent[]>([]);
   const [live, setLive] = useState<Record<string, JobProgressEvent["progress"]>>({}), [said, setSaid] = useState("");
   const [beat, setBeat] = useState<Record<string, { status: W["status"]; slots: W["slots"]; at: string }>>({});
-  const reload = useRef(sum.reload); reload.current = sum.reload;
+  // a job's change reloads the summary and the trash (a replaced original goes into it)
+  const reload = useRef(() => {}); reload.current = () => (sum.reload(), tr.reload());
   useEffect(() => {
     let t: ReturnType<typeof setTimeout> | undefined;
     return onLive((type, data) => {
@@ -136,7 +137,9 @@ function RealDashboard() {
   const v: View = {
     running: ws ? going > 0 : s.activity.workersRunning && !s.processingPaused, workersRunning: ws ? going : null, offline: s.badges.workersOffline,
     waiting: s.activity.waiting, converting: s.activity.converting, done24: s.last24h.completed, failed24: s.last24h.failed, success: s.last24h.successRate,
-    freed: s.bytes.freed, could: s.bytes.waitingToFree, online: ws ? going + " of " + ws.length : null,
+    // 'could free' is V5c's couldFree (originals left in place), not waitingToFree: waitingToFree is the originals kept
+    // in .syp-trash, which the trash line ("+N by <date>") already shows. Until couldFree lands, nothing reads "could free".
+    freed: s.bytes.freed, could: 0, online: ws ? going + " of " + ws.length : null,
     active: s.activeJobs.map(row), failures: s.recentFailures.map(row),
     workers: ws?.map((w) => {
       const [words, cls, icon] = STATUS[w.status], gone = w.status === "offline" || w.status === "stalled";
