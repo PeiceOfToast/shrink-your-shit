@@ -132,6 +132,20 @@ export function IntegrationsSettings() {
     </div>);
 }
 
+// Backup (SCREENS V9): the server answers backups with 501 not_available for now, so this tab only says so (design's
+// words); no button that can't work.
+export function BackupSettings() {
+  return (
+    <div className="stack">
+      <PageHead icon="i-settings" title="Settings" />
+      <SettingsTabs at="backup" />
+      <section className="card"><div className="bd stack">
+        <p><strong>This backs up settings, not your videos.</strong></p>
+        <p className="muted">Exporting your settings and workflows, and importing them with a preview of what changes, come in a later version.</p>
+      </div></section>
+    </div>);
+}
+
 // About (SCREENS V9: version, health report, licences): the old Settings > System's health checks and log lines.
 const BADGE: Record<string, [string, string]> = { ok: ["ok", "OK"], warn: ["warn", "Heads up"], bad: ["bad", "Fix this"] };
 export function AboutSettings() {
