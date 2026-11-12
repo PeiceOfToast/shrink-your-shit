@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -788,5 +789,51 @@ func TestSetEveryRetimesTheNextScan(t *testing.T) {
 	}
 	if next := time.Until(s.NextScan()); next > time.Second {
 		t.Errorf("next in %s after SetEvery(50ms)", next)
+	}
+}
+
+// Review ae6749e P1: an unmounted library disk (an empty, readable mount point) never makes its
+// originals count as freed, however many passes; neither does a pass that sees the library on another
+// disk than before. A real deletion among other files still counts.
+func TestUnmountedDiskMarksNothingGone(t *testing.T) {
+	s, st, _, _ := setup(t, hevcBig)
+	libs, _ := st.Libraries()
+	lib := libs[0]
+	tmpl := rules.LegacyTemplate(rules.Default(), "replace")
+	s.Targets = func() ([]Target, error) { return []Target{{LibraryID: lib.ID, Path: lib.Path, Template: tmpl}}, nil }
+	done := func(name string) string {
+		p := filepath.Join(lib.Path, name)
+		os.WriteFile(p, make([]byte, 1000), 0o644)
+		id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: p, SizeBefore: 1000})
+		st.Claim("w")
+		st.Complete(id, p[:len(p)-4]+".hevc.mkv", 400) // beside: the original stays
+		return p
+	}
+	a, b := done("a.mkv"), done("b.mkv")
+	could := func() int64 { c, _ := st.Counts(); return c[lib.ID].CouldFreeBytes }
+	s.ScanOnce(context.Background()) // the disk is remembered
+	// "unmounted": the folder is there, empty
+	entries, _ := os.ReadDir(lib.Path)
+	for _, e := range entries {
+		os.RemoveAll(filepath.Join(lib.Path, e.Name()))
+	}
+	for i := 0; i < 3; i++ {
+		s.ScanOnce(context.Background())
+	}
+	if c, _ := st.Counts(); c[lib.ID].FreedBytes != 0 || could() != 1200 {
+		t.Fatalf("an empty library marked originals gone: freed %d could %d", c[lib.ID].FreedBytes, could())
+	}
+	// "remounted": the files are back; then a pass that sees the folder on another disk marks nothing
+	os.WriteFile(a, make([]byte, 1000), 0o644)
+	os.WriteFile(b, make([]byte, 1000), 0o644)
+	st.SetMeta("library-disk:"+strconv.FormatInt(lib.ID, 10), "another-disk")
+	os.Remove(a) // really deleted, but this pass can't tell
+	s.ScanOnce(context.Background())
+	if could() != 1200 {
+		t.Errorf("a pass on another disk marked something: could %d", could())
+	}
+	s.ScanOnce(context.Background()) // the next pass: the same disk as the last, the deletion counts
+	if c, _ := st.Counts(); c[lib.ID].FreedBytes != 600 || could() != 600 {
+		t.Errorf("a real deletion: freed %d could %d", c[lib.ID].FreedBytes, could())
 	}
 }
