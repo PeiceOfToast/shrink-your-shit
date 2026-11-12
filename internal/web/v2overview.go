@@ -75,17 +75,32 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 			}
 			active = append(active, act)
 		}
-		local, err := wv.local(r.Context())
+		all, err := wv.all(r.Context()) // the same list as GET /workers, each with only its own jobs (#177 review)
 		if err != nil {
 			serverError(w, err)
 			return
 		}
-		localJobs := []map[string]any{}
-		for _, ws := range byWorker { // this program's pool runs under its own names ("builtin", ...)
-			localJobs = append(localJobs, ws...)
+		paired := map[string]bool{}
+		for _, it := range all {
+			if it["kind"] == "remote" {
+				paired[it["id"].(string)] = true
+			}
 		}
-		workers := []map[string]any{{"id": local["id"], "name": local["name"], "kind": local["kind"], "status": local["status"],
-			"slots": local["slots"], "jobs": localJobs, "cpuPercent": nil, "gpuPercent": nil}}
+		workers := []map[string]any{}
+		for _, it := range all {
+			own := []map[string]any{}
+			if it["kind"] == "remote" {
+				own = append(own, byWorker[it["id"].(string)]...)
+			} else {
+				for id, ws := range byWorker { // this program's pool runs under its own names ("builtin", ...)
+					if !paired[id] {
+						own = append(own, ws...)
+					}
+				}
+			}
+			workers = append(workers, map[string]any{"id": it["id"], "name": it["name"], "kind": it["kind"], "status": it["status"],
+				"slots": it["slots"], "jobs": own, "cpuPercent": nil, "gpuPercent": nil})
+		}
 		libs, err := store.Libraries()
 		if err != nil {
 			serverError(w, err)

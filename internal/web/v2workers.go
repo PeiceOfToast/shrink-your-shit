@@ -127,6 +127,40 @@ const remoteOfflineAfter = 30 * time.Second
 
 // remote is a paired worker on another computer in the contract's shape (V7b1): what it reported, its
 // running jobs, and offline once it stops calling.
+// all is every worker as GET /api/v2/workers lists them: this computer's pool, then each paired worker.
+// The summary and the overview list the same, so the three never disagree (orch-lead 18:43Z, 18:49Z).
+func (v *workerView) all(ctx context.Context) ([]map[string]any, error) {
+	wk, err := v.local(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items := []map[string]any{wk}
+	remotes, err := v.store.RemoteWorkers()
+	if err != nil {
+		return nil, err
+	}
+	for _, rw := range remotes {
+		one, err := v.remote(rw)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, one)
+	}
+	return items, nil
+}
+
+// running is how many of the workers take work now: online, busy or draining (not paused or offline).
+func running(items []map[string]any) int {
+	n := 0
+	for _, it := range items {
+		switch it["status"] {
+		case "online", "busy", "draining":
+			n++
+		}
+	}
+	return n
+}
+
 func (v *workerView) remote(rw jobs.RemoteWorker) (map[string]any, error) {
 	working, err := v.store.WorkingJobs()
 	if err != nil {
@@ -243,24 +277,10 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 		writeJSON(w, wk)
 	}
 	list := func(w http.ResponseWriter, r *http.Request) {
-		wk, err := v.local(r.Context())
+		items, err := v.all(r.Context())
 		if err != nil {
 			serverError(w, err)
 			return
-		}
-		items := []any{wk}
-		remotes, err := v.store.RemoteWorkers()
-		if err != nil {
-			serverError(w, err)
-			return
-		}
-		for _, rw := range remotes {
-			one, err := v.remote(rw)
-			if err != nil {
-				serverError(w, err)
-				return
-			}
-			items = append(items, one)
 		}
 		writeJSON(w, map[string]any{"items": items, "total": len(items)})
 	}

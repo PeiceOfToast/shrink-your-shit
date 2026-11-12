@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -124,5 +125,51 @@ func TestV2OverviewNetAndNested(t *testing.T) {
 	}
 	if o.TimeZone != "Europe/Berlin" {
 		t.Errorf("time zone %q", o.TimeZone)
+	}
+}
+
+// #177 review (orch-lead 18:49Z): with a paired worker converting, the overview lists every worker of
+// GET /workers, each with only its own jobs; the summary lists the same workers and counts both running.
+func TestOverviewAndSummaryListEveryWorker(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	code, _, _ := st.NewPairing(time.Now())
+	rw, _, err := st.Pair(code, "Desktop", "1", WorkerAPILevel, "", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	here, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "here.mkv"), SizeBefore: 1000})
+	there, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "there.mkv"), SizeBefore: 1000})
+	if j, _ := st.Claim("builtin"); j.ID != here {
+		t.Fatalf("local claimed %d", j.ID)
+	}
+	if j, _ := st.Claim(rw.ID); j.ID != there {
+		t.Fatalf("remote claimed %d", j.ID)
+	}
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/overview"})
+	var o struct {
+		Workers []struct {
+			ID, Kind string
+			Jobs     []struct{ Name string }
+		}
+	}
+	json.Unmarshal([]byte(body), &o)
+	jobsOf := map[string][]string{}
+	for _, w := range o.Workers {
+		for _, j := range w.Jobs {
+			jobsOf[w.Kind+":"+w.ID] = append(jobsOf[w.Kind+":"+w.ID], j.Name)
+		}
+	}
+	if len(o.Workers) != 2 || strings.Join(jobsOf["local:"+jobs.LocalWorker], ",") != "here.mkv" || strings.Join(jobsOf["remote:"+rw.ID], ",") != "there.mkv" {
+		t.Errorf("overview workers %v: %s", jobsOf, body)
+	}
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/v2/summary"})
+	var s struct {
+		Workers  []struct{ ID string }
+		Activity struct{ WorkersRunning int }
+	}
+	json.Unmarshal([]byte(body), &s)
+	if len(s.Workers) != 2 || s.Workers[1].ID != rw.ID || s.Activity.WorkersRunning != 2 {
+		t.Errorf("summary workers %+v running %d", s.Workers, s.Activity.WorkersRunning)
 	}
 }
