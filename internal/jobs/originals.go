@@ -74,6 +74,14 @@ func (s *Store) SetRestoring(id int64, aside string) error {
 	return s.setOriginal(id, `state=?, aside=?`, Restoring, aside)
 }
 
+// SetKeptGone marks kept row id purged because its file was found removed outside the app at: its
+// delete day is the day it was found, so the trash and freed totals and Convert again read that.
+func (s *Store) SetKeptGone(id int64, at time.Time) error {
+	_, err := s.db.Exec(`UPDATE originals SET state=?, delete_on=? WHERE id=? AND state=?`,
+		OriginalPurged, at.UTC().Format(time.RFC3339), id, OriginalKept)
+	return err
+}
+
 // SetSwapState records how a restart ended an unfinished swap (rolled_back or needs_attention).
 func (s *Store) SetSwapState(id int64, state string) error {
 	return s.setOriginal(id, `state=?`, state)
