@@ -392,6 +392,12 @@ ALTER TABLE workers ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;
 INSERT OR IGNORE INTO workers(id, name) VALUES ('local', 'This computer');
 UPDATE workers SET enabled = CASE WHEN COALESCE((SELECT value FROM app_meta WHERE key='paused'), '0') = '1' THEN 0 ELSE 1 END;
 DELETE FROM app_meta WHERE key='paused';`},
+	// V7c (shared folders): a remote worker's path mappings, each with its last real test. A pending
+	// test has a deadline (60 s): one the worker doesn't answer by then, also across a restart, fails.
+	{37, "worker path mappings", `
+CREATE TABLE worker_paths (worker_id TEXT NOT NULL, server TEXT NOT NULL, worker TEXT NOT NULL, mode TEXT NOT NULL,
+  test TEXT NOT NULL DEFAULT '', tested_at TEXT NOT NULL DEFAULT '', detail TEXT NOT NULL DEFAULT '', pending_until TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (worker_id, server));`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone

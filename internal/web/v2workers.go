@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/doctor"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/pathmap"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/sysload"
 )
 
@@ -193,6 +195,13 @@ func (v *workerView) remoteWith(rw jobs.RemoteWorker, working []jobs.Working) (m
 		caps = c
 	}
 	since := v.remoteStatusSince(rw.ID, status, seen)
+	tests.expire(v.store, func(id string) bool { return id == rw.ID && status != "offline" })
+	mappings := []any{}
+	if ms, err := v.store.PathMappings(rw.ID); err == nil {
+		for _, m := range ms {
+			mappings = append(mappings, mappingView(m))
+		}
+	}
 	var load sysload.Load
 	if l, ok := workerLoads.Load(rw.ID); ok && status != "offline" {
 		load = l.(sysload.Load)
@@ -208,7 +217,7 @@ func (v *workerView) remoteWith(rw jobs.RemoteWorker, working []jobs.Working) (m
 		"slots": map[string]any{"cpu": map[string]any{"total": 1, "used": len(ids)}, "gpu": nil},
 		"live":  liveLoad(load),
 		"gpus":  []any{}, "ffmpeg": nil, "capabilities": caps, "currentJobIds": ids,
-		"tags": []string{}, "pool": nil, "schedule": nil, "pathMappings": []any{},
+		"tags": []string{}, "pool": nil, "schedule": nil, "pathMappings": mappings,
 	}, nil
 }
 
@@ -352,6 +361,30 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 		writeJSON(w, map[string]any{"code": code, "expiresAt": expires.Format(time.RFC3339),
 			"command": "shrink-your-shit worker --server " + server + " --pair " + code, "plainHTTP": r.TLS == nil})
 	})
+	// V7c: a real test of a shared folder (202; the result comes as worker.updated, at most 60 s later)
+	api.HandleFunc("POST /api/v2/workers/{id}/paths/test", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Server string }
+		if !readJSON(w, r, &in) {
+			return
+		}
+		rw, ok := v.remoteByID(r.PathValue("id"))
+		if !ok {
+			apiError(w, http.StatusNotFound, "not_found", "There is no such worker on another computer.")
+			return
+		}
+		if item, err := v.remote(rw); err == nil && item["status"] == "offline" {
+			apiError(w, http.StatusConflict, "worker_offline", "This worker is offline, so its shared folder can't be tested now. Start it, then test again.")
+			return
+		}
+		switch err := tests.start(v.store, rw.ID, filepath.Clean(in.Server)); {
+		case errors.Is(err, errMappingUnknown):
+			apiError(w, http.StatusNotFound, "not_found", "This worker has no shared folder for "+in.Server+".")
+		case err != nil:
+			apiError(w, http.StatusConflict, "test_failed", "The test file couldn't be written in "+in.Server+" on this server: "+err.Error())
+		default:
+			writeJSONStatus(w, http.StatusAccepted, map[string]any{"status": "pending"})
+		}
+	})
 	// Remove worker: its token stops working; its running jobs go back to the queue
 	api.HandleFunc("DELETE /api/v2/workers/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if r.PathValue("id") == jobs.LocalWorker {
@@ -381,8 +414,42 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 				From string `json:"from"`
 				To   string `json:"to"`
 			} `json:"schedule"`
+			PathMappings *[]struct{ Server, Worker, Mode string } `json:"pathMappings"` // V7c: remote workers only
 		}
 		if !found(w, r) || !readJSON(w, r, &in) {
+			return
+		}
+		if rw, remote := v.remoteByID(r.PathValue("id")); remote {
+			if in.PathMappings == nil {
+				apiError(w, http.StatusBadRequest, "not_available", "For a worker on another computer, only its shared folders (pathMappings) can be set here. Nothing was changed.")
+				return
+			}
+			list := []jobs.PathMapping{}
+			seen := map[string]bool{}
+			for _, m := range *in.PathMappings {
+				sv := filepath.Clean(strings.TrimSpace(m.Server))
+				wp := strings.TrimSpace(m.Worker)
+				if !filepath.IsAbs(sv) || wp == "" || (m.Mode != "read" && m.Mode != "read_write") || seen[sv] {
+					apiError(w, http.StatusBadRequest, "invalid_setting", "Each shared folder needs a full path on this server, its path on the worker, and read or read_write (each server folder once). Nothing was changed.")
+					return
+				}
+				seen[sv] = true
+				list = append(list, jobs.PathMapping{Server: sv, Worker: pathmap.CleanWorker(wp), Mode: m.Mode})
+			}
+			if err := v.store.SetPathMappings(rw.ID, list); err != nil {
+				serverError(w, err)
+				return
+			}
+			one, err := v.remote(rw)
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+			writeJSON(w, one)
+			return
+		}
+		if in.PathMappings != nil {
+			apiError(w, http.StatusBadRequest, "not_available", "This computer reads its own folders: shared folders are for workers on other computers. Nothing was changed.")
 			return
 		}
 		cfg, err := v.store.WorkerConfigOf(jobs.LocalWorker)
