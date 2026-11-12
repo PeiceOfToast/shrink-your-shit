@@ -74,3 +74,20 @@ func TestVBR(t *testing.T) {
 		t.Errorf("Mbps %s %s", Mbps(3000), Mbps(2500))
 	}
 }
+
+// Review a772397: VP9 quality mode with a level is libvpx's constrained quality (-crf with -b:v as the
+// cap, no -maxrate: libvpx refused that with -b:v 0); without a level it stays constant quality.
+func TestVP9QualityWithALevel(t *testing.T) {
+	SetAvailableFormats(map[string]bool{"libx265": true, "libvpx-vp9": true})
+	defer SetAvailableFormats(nil)
+	s := DefaultSelectors(3)
+	s.Format, s.FileType, s.Audio, s.MaxBitrate = "vp9", "webm", "stereo_opus", "medium"
+	args := strings.Join(s.Template().Compile(h264(1280, 720, 8000)).FFmpegArgs("in.mkv", "out.webm"), " ")
+	if !strings.Contains(args, "-crf") || !strings.Contains(args, "-b:v 2500k") || strings.Contains(args, "-maxrate") || strings.Contains(args, "-b:v 0") {
+		t.Errorf("capped: %s", args)
+	}
+	s.MaxBitrate = "none"
+	if args := strings.Join(s.Template().Compile(h264(1280, 720, 8000)).FFmpegArgs("in.mkv", "out.webm"), " "); !strings.Contains(args, "-b:v 0") || strings.Contains(args, "-maxrate") {
+		t.Errorf("no level: %s", args)
+	}
+}
