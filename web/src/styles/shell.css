@@ -384,7 +384,7 @@ label.chk{cursor:pointer}
 /* clean pass step 3 (DESIGN-DIRECTION-clean.md D1-D3): even KPI tiles, status in the header, panels as flat lists */
 .pagehead .desk{display:contents}
 .kpis{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:var(--gap)}
-.kpis>.kpi{flex:none;min-height:84px;padding:10px 12px;display:flex;flex-direction:column;justify-content:center;min-width:0}
+.kpis>.kpi{flex:none;min-height:84px;padding:10px;display:flex;flex-direction:column;justify-content:center;min-width:0}
 .kpi .l{display:flex;align-items:center;gap:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .kpi .v{font-size:calc(22px*var(--font-scale));font-weight:var(--fw-strong)}
 .kpi .sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -414,7 +414,7 @@ label.chk{cursor:pointer}
 }
 /* step 3 after screenshots: the Space saved tile is wider on desktop; sub-lines wrap (two lines at most) instead of
    being cut mid-word; long file names in panels wrap (M7) */
-@media (min-width:1101px){.kpis{grid-template-columns:repeat(4,minmax(0,1fr)) minmax(0,1.9fr) repeat(2,minmax(0,1fr))}}
+@media (min-width:1101px){.kpis{grid-template-columns:repeat(4,minmax(0,1fr)) minmax(0,2.1fr) repeat(2,minmax(0,1fr))}}
 .kpi .sub{white-space:normal;overflow:visible;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .plist .ttl,.plist .sub,.plist .sp{overflow-wrap:anywhere}
 /* step 3 review (design): tiles top-aligned; file names wrap only at . _ - and stop at 2 lines with "..." */
