@@ -10,11 +10,12 @@ import { bytes, clock, count, elapsed, plural } from "../format";
 import { retry, scanAll, startAll, stopAll, summary, updatedAt, useMock } from "../mock";
 import { Link } from "../router";
 import { getSettings, getTrash, listLibraries } from "../libraryApi";
-import { getActivity, getSummary, scanAllLibraries, startAllWorkers, stopAllWorkers, type RealSummary } from "../dashApi";
+import { getActivity, getSummary, scanAllLibraries, type RealSummary } from "../dashApi";
+import { allWorkers, listWorkers } from "../workersApi";
 import { jobAction } from "../jobsApi";
 import { onLive } from "../live";
 import { useData } from "../useData";
-import { StopAll } from "./Workers";
+import { WorkersSwitch } from "./Workers";
 import type { ActivityEvent, Summary } from "../types/v2";
 import type { JobItem, JobProgressEvent } from "../types/jobs";
 
@@ -35,7 +36,8 @@ const EVENT_ICON: Record<ActivityEvent["type"], string> = {
 interface Row { id: string; name: string; sub: string; percent: number | null; line: string; reason?: string; meta?: string }
 interface View {
   running: boolean; workersRunning: number | null; offline: number | null;
-  busy: boolean;                  // a worker is converting now (live): Stop all asks first
+  busy: boolean;                  // a worker is converting now (live): turning "Workers on" off asks first
+  on: number; total: number; finishing: number; // the "Workers on" switch: workers on (converting, ready or finishing) of all (user item 2)
   waiting: number; converting: number; done24: number; failed24: number; success: number | null; freed: number; could: number;
   soon: number;                   // "N more by <date>": waitingToFree (V5c, net: original minus new). Never the trash's gross bytes
   online: string | null;          // the Workers tile: "2 of 3"
@@ -45,7 +47,7 @@ interface View {
   activity: { id: string; icon: string; text: string; at: string }[] | null;
   fresh: boolean; steps: [string, boolean, string?][]; libraries: number; scanning: boolean; updated: Date;
 }
-interface Acts { start: () => void; stop: (now: boolean) => void; scan: () => void; retry: (id: string) => void }
+interface Acts { workers: (a: "start" | "stop" | "drain") => void; scan: () => void; retry: (id: string) => void }
 
 // A file name may wrap after ".", "_" or "-" (never mid-word), at most 2 lines, then "..."; the whole name in title.
 function Name({ text, className = "" }: { text: string; className?: string }) {
@@ -89,6 +91,7 @@ function MockDashboard() {
   const libName = (id: string) => s.libraries.find((l) => l.id === id)?.name ?? id;
   const v: View = {
     running: sum.activity.workersRunning > 0, workersRunning: sum.activity.workersRunning, offline: sum.badges.workersOffline, busy: s.workers.some((w) => w.currentJobIds.length > 0),
+    on: s.workers.filter((w) => w.status === "online" || w.status === "busy").length, total: s.workers.length, finishing: s.workers.filter((w) => w.status === "draining").length,
     waiting: sum.activity.waiting, converting: sum.activity.converting, done24: sum.last24h.completed, failed24: sum.last24h.failed,
     success: sum.last24h.successRate, freed: sum.bytes.freed, soon: s.trash.bytes, could: sum.bytes.waitingToFree, // the sample's figures: its trash stands for the net "more", its waitingToFree for "could free"
     online: sum.workers.filter((w) => w.status === "online" || w.status === "busy" || w.status === "draining").length + " of " + sum.workers.length,
@@ -105,7 +108,7 @@ function MockDashboard() {
     steps: [["Add a library", s.libraries.length > 0, s.libraries[0]?.name], ["Create a workflow", s.wf.length > 0], ["Check your worker", s.settings.firstRunStep > 3]],
     libraries: s.libraries.length, scanning: s.libraries.some((l) => l.scan.state === "scanning"), updated: updatedAt,
   };
-  return <DashboardView v={v} trash={trash} acts={{ start: startAll, stop: stopAll, scan: scanAll, retry }} />;
+  return <DashboardView v={v} trash={trash} acts={{ workers: (a) => (a === "start" ? startAll() : stopAll(a === "stop")), scan: scanAll, retry }} />;
 }
 
 // The real server: /api/v2/summary (again every 15 s, and shortly after a job changes state), progress live.
@@ -114,18 +117,21 @@ function RealDashboard() {
   const feed = useData(() => getActivity(8), [], 60000), [liveFeed, setLiveFeed] = useState<ActivityEvent[]>([]);
   const [live, setLive] = useState<Record<string, JobProgressEvent["progress"]>>({}), [said, setSaid] = useState("");
   const [beat, setBeat] = useState<Record<string, { status: W["status"]; slots: W["slots"]; at: string }>>({});
+  // review 61dc891 P2-2: the workers come from GET /api/v2/workers (the Workers page's source: remote ones too), not the
+  // summary's list, which has this computer only
+  const wl = useData(listWorkers, [], 15000);
   // a job's change reloads the summary and the trash (a replaced original goes into it)
-  const reload = useRef(() => {}); reload.current = () => (sum.reload(), tr.reload());
+  const reload = useRef(() => {}); reload.current = () => (sum.reload(), tr.reload(), wl.reload());
   useEffect(() => {
     let t: ReturnType<typeof setTimeout> | undefined;
     return onLive((type, data) => {
       if (type === "job.progress") { const e = data as JobProgressEvent; setLive((m) => ({ ...m, [e.jobId]: e.progress })); return; }
       if (type === "worker.heartbeat") { const h = data as { workerId: string; status: W["status"]; slots: W["slots"]; at: string }; setBeat((m) => ({ ...m, [h.workerId]: h })); return; }
       if (type === "activity") { const a = (data as { event?: ActivityEvent })?.event; if (a) setLiveFeed((f) => [a, ...f.filter((x) => x.id !== a.id)]); return; }
-      if (type === "job.state" || type === "resync" || type.startsWith("processing.")) { clearTimeout(t); t = setTimeout(() => (reload.current(), setLive({}), setBeat({})), 400); }
+      if (type === "job.state" || type === "resync" || type.startsWith("processing.") || type === "worker.updated") { clearTimeout(t); t = setTimeout(() => (reload.current(), setLive({}), setBeat({})), 400); }
     });
   }, []);
-  const act = async (p: Promise<Answer<unknown>>) => { try { const r = await p; if (failed(r)) setSaid(r.error.message); else setSaid(""); } catch (e) { if (!(e instanceof SignedOut)) throw e; } sum.reload(); libs.reload(); };
+  const act = async (p: Promise<Answer<unknown>>) => { try { const r = await p; if (failed(r)) setSaid(r.error.message); else setSaid(""); } catch (e) { if (!(e instanceof SignedOut)) throw e; } sum.reload(); libs.reload(); wl.reload(); };
   if (!sum.data) return <div className="stack"><PageHead icon="i-dashboard" title="Dashboard" /><div className="empty">{sum.error?.message ?? "Loading..."}</div></div>;
   const s: RealSummary = sum.data, st = set.data, nlib = libs.data?.length ?? 0;
   const row = (j: JobItem): Row => {
@@ -135,11 +141,12 @@ function RealDashboard() {
       reason: typeof j.reason === "object" && j.reason ? j.reason.message : j.detail ?? undefined, meta: [j.library, j.finishedAt && clock(j.finishedAt)].filter(Boolean).join(" · ") };
   };
   // the workers as the summary has them, with the latest heartbeat's status and slots
-  const ws = s.workers?.map((w) => (beat[w.id] ? { ...w, status: beat[w.id].status, slots: beat[w.id].slots, lastHeartbeatAt: beat[w.id].at } : w)) ?? null;
+  const ws = (wl.data ?? s.workers)?.map((w) => (beat[w.id] ? { ...w, status: beat[w.id].status, slots: beat[w.id].slots, lastHeartbeatAt: beat[w.id].at } : w)) ?? null;
   const going = ws?.filter((w) => w.status === "busy" || w.status === "online" || w.status === "draining").length ?? 0;
   const v: View = {
     running: ws ? going > 0 : s.activity.workersRunning && !s.processingPaused, workersRunning: ws ? going : null, offline: s.badges.workersOffline,
     busy: ws ? ws.some((w) => w.status === "busy" || w.currentJobIds.length > 0) : s.activity.converting > 0, // the heartbeat's status is live; the counts lag
+    on: ws?.filter((w) => w.status === "busy" || w.status === "online").length ?? 0, total: ws?.length ?? 0, finishing: ws?.filter((w) => w.status === "draining").length ?? 0,
     waiting: s.activity.waiting, converting: s.activity.converting, done24: s.last24h.completed, failed24: s.last24h.failed, success: s.last24h.successRate,
     // V5c: "Could free" is couldFree (originals left in place); waitingToFree is the trash, the "Will be freed" line
     freed: s.bytes.freed, could: s.bytes.couldFree ?? 0, soon: s.bytes.waitingToFree, online: ws ? going + " of " + ws.length : null,
@@ -156,7 +163,7 @@ function RealDashboard() {
     libraries: nlib, scanning: !!libs.data?.some((l) => l.status.kind === "scanning"), updated: new Date(),
   };
   return <>
-    <DashboardView v={v} trash={trash} acts={{ start: () => act(startAllWorkers()), stop: (now) => act(stopAllWorkers(now)), scan: () => act(scanAllLibraries()), retry: (id) => act(jobAction("retry", [id])) }} />
+    <DashboardView v={v} trash={trash} acts={{ workers: (a) => act(allWorkers(a)), scan: () => act(scanAllLibraries()), retry: (id) => act(jobAction("retry", [id])) }} />
     {said && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{said}</span></p>}
   </>;
 }
@@ -164,22 +171,18 @@ function RealDashboard() {
 function DashboardView({ v, trash, acts }: { v: View; trash?: { bytes: number; lastDeleteAt: string | null }; acts: Acts }) {
   const [why, setWhy] = useState(false);
   // D2: the status and the page's actions sit in the header row; on phones the actions go under "...".
-  const actions = (inline?: boolean) => <>
-    {v.running
-      ? <StopAll busy={v.busy} onStop={acts.stop} inline={inline} />
-      : <button className="btn sm" type="button" onClick={acts.start}><Icon id="i-play" />Start all</button>}
+  const actions = () => <>
     {v.libraries > 0 && <button className="btn sm ghost" type="button" onClick={acts.scan} disabled={v.scanning}><Icon id="i-refresh" />{v.scanning ? "Scanning..." : "Scan all libraries"}</button>}
   </>;
   const soon = v.soon, by = trash?.lastDeleteAt ? " by " + day(trash.lastDeleteAt) : ""; // the trash gives only the date (design 05:34Z)
   return (
     <div className="stack">
       <PageHead icon="i-dashboard" title="Dashboard">
-        {v.running
-          ? <span className="pill run"><Icon id="i-play" />{v.workersRunning != null ? "Running · " + plural(v.workersRunning, "worker", "workers") : "Running"}</span>
-          : <span className="pill" title="Nothing converts until you start a worker."><Icon id="i-stop" />Stopped</span>}
+        {/* user item 2 (design 7.2): one switch for every worker replaces the Running/Stopped pill and Start all / Stop all */}
+        <WorkersSwitch n={v.on} m={v.total} busy={v.busy} finishing={v.finishing} onSet={acts.workers} />
         {v.offline != null && v.offline > 0 && <span className="pill bad"><Icon id="i-wifi-off" />{plural(v.offline, "worker offline", "workers offline")}</span>}
-        <span className="desk">{actions()}</span>
-        <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions(true)}</div></details>
+        {v.libraries > 0 && <><span className="desk">{actions()}</span>
+          <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions()}</div></details></>}
       </PageHead>
       {!v.running && !v.fresh && <p className="muted sm" style={{ marginTop: -8 }}>Nothing converts until you start a worker.</p>}
       {v.fresh && <Setup steps={v.steps} onDone={v.steps.filter((x) => x[1]).length} />}

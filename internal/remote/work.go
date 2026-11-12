@@ -96,8 +96,42 @@ func leaseGone(err error) bool {
 	return errors.As(err, &ae) && ae.Code == "lease_gone"
 }
 
+// sweepLeases removes the lease folders an earlier run of this worker left in work (CT 221: one killed
+// with kill -9 left ~180 MB). It runs before Work takes a lease, when this worker holds none (it takes
+// one at a time, and removes each lease's folder when it ends). Only folders named like a lease id (24
+// hex digits) go, never a link or anything else in work.
+func sweepLeases(work string) {
+	entries, err := os.ReadDir(work)
+	if err != nil {
+		return // no folder yet: nothing left over
+	}
+	for _, e := range entries {
+		if !e.IsDir() || !isLeaseID(e.Name()) { // a symlink is not a dir entry here
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(work, e.Name())); err != nil {
+			log.Printf("couldn't remove a leftover lease folder %s: %v", e.Name(), err)
+		} else {
+			log.Printf("removed a leftover lease folder %s (from an earlier run)", e.Name())
+		}
+	}
+}
+
+func isLeaseID(name string) bool {
+	if len(name) != 24 {
+		return false
+	}
+	for _, r := range name {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 // Work leases and converts jobs until ctx ends, one at a time (the heartbeats run beside it, in Run).
 func (c *Client) Work(ctx context.Context, cv Converter) {
+	sweepLeases(cv.Work)
 	for ctx.Err() == nil {
 		did, err := c.workOne(ctx, cv)
 		var ae *APIError
@@ -133,9 +167,11 @@ func (c *Client) workOne(ctx context.Context, cv Converter) (did bool, err error
 	if err := os.MkdirAll(cv.Work, 0o700); err != nil {
 		return false, err
 	}
-	if cv.free() < cv.MinFree { // no room: no lease (the Workers page shows it idle)
+	if free := cv.free(); free < cv.MinFree { // no room: no lease, and it says why (#174 QA e)
+		c.holding(fmt.Sprintf("Not taking work: %s free on %s, below the %s it keeps free (--min-free-gb).", gb(free), cv.Work, gb(cv.MinFree)))
 		return false, nil
 	}
+	c.holding("")
 	l, err := c.Lease(ctx)
 	if err != nil || l == nil {
 		return false, err
@@ -150,13 +186,23 @@ func (c *Client) workOne(ctx context.Context, cv Converter) (did bool, err error
 		return true, c.call(ctx, "leases/"+l.ID+"/release", map[string]any{}, nil)
 	}
 	log.Printf("job %s: %s", l.Job.ID, l.Job.Name)
-	snap, subs, err := c.plan(ctx, l)
+	pl, err := c.plan(ctx, l)
 	if err != nil {
 		return true, err
 	}
+	snap, subs := pl.Snapshot, pl.Subtitles
 	src := filepath.Join(dir, "source"+filepath.Ext(l.Job.Name))
-	if err := c.download(ctx, l, src); err != nil {
-		return true, err
+	if pl.SourceOnWorker != "" { // V7c: read it through the shared folder, not downloaded
+		if _, err := os.Stat(pl.SourceOnWorker); err == nil {
+			src = pl.SourceOnWorker
+		} else {
+			c.note(ctx, l, "Reading the original through the shared folder didn't work, so it was downloaded instead: "+err.Error())
+		}
+	}
+	if src != pl.SourceOnWorker {
+		if err := c.download(ctx, l, src); err != nil {
+			return true, err
+		}
 	}
 	ext := filepath.Ext(l.Job.Name)
 	if snap.Plan.Container != "" {
@@ -177,9 +223,17 @@ func (c *Client) workOne(ctx context.Context, cv Converter) (did bool, err error
 		}
 		return true, c.report(ctx, l, map[string]any{"ok": false, "message": "the checks didn't finish: " + err.Error(), "stderr": stderr})
 	}
-	sum, size, err := c.upload(ctx, l, out, "video", 0)
-	if err != nil {
-		return true, err
+	var sum string
+	var size int64
+	if pl.StageOnWorker != "" { // V7c: write it into the run's staged file through the shared folder
+		if sum, size, err = copyInto(out, pl.StageOnWorker); err != nil {
+			c.note(ctx, l, "Writing the new file through the shared folder didn't work, so it was uploaded instead: "+err.Error())
+		}
+	}
+	if pl.StageOnWorker == "" || err != nil {
+		if sum, size, err = c.upload(ctx, l, out, "video", 0); err != nil {
+			return true, err
+		}
 	}
 	subSums := map[string]string{}
 	for k := 0; k < subs; k++ {
@@ -193,35 +247,69 @@ func (c *Client) workOne(ctx context.Context, cv Converter) (did bool, err error
 	return true, c.report(ctx, l, map[string]any{"ok": true, "sha256": sum, "bytes": size, "subs": subSums, "stderr": stderr})
 }
 
+// Plan is a leased job's plan, as the server made it.
+type Plan struct {
+	Snapshot                      rules.Snapshot
+	Subtitles                     int
+	SourceOnWorker, StageOnWorker string // V7c: through a shared folder; "" = transfer
+}
+
 // plan waits for the server to make the job's plan (asking renews the lease).
-func (c *Client) plan(ctx context.Context, l *Lease) (rules.Snapshot, int, error) {
+func (c *Client) plan(ctx context.Context, l *Lease) (Plan, error) {
 	for {
 		res, err := c.request(ctx, http.MethodGet, "leases/"+l.ID+"/plan", nil, nil)
 		if err != nil {
-			return rules.Snapshot{}, 0, err
+			return Plan{}, err
 		}
 		switch res.StatusCode {
 		case http.StatusOK:
-			var out struct {
-				Snapshot  rules.Snapshot
-				Subtitles int
-			}
+			var out Plan
 			err := json.NewDecoder(res.Body).Decode(&out)
 			res.Body.Close()
-			return out.Snapshot, out.Subtitles, err
+			return out, err
 		case http.StatusAccepted:
 			res.Body.Close()
 		default:
 			err := apiErr(res)
 			res.Body.Close()
-			return rules.Snapshot{}, 0, err
+			return Plan{}, err
 		}
 		select {
 		case <-ctx.Done():
-			return rules.Snapshot{}, 0, ctx.Err()
+			return Plan{}, ctx.Err()
 		case <-time.After(PlanPoll):
 		}
 	}
+}
+
+// note adds a line to the job's run log on the server.
+func (c *Client) note(ctx context.Context, l *Lease, text string) {
+	log.Printf("job %s: %s", l.Job.ID, text)
+	c.call(ctx, "leases/"+l.ID+"/note", map[string]any{"text": text}, nil)
+}
+
+// copyInto writes the file at from into the existing file at to (the run's staged file, through a
+// shared folder: never a new file, so the server's identity check holds), and returns its SHA-256 and
+// size.
+func copyInto(from, to string) (string, int64, error) {
+	in, err := os.Open(from)
+	if err != nil {
+		return "", 0, err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(to, os.O_WRONLY|os.O_TRUNC, 0) // no O_CREATE: only the staged file the run made
+	if err != nil {
+		return "", 0, err
+	}
+	h := sha256.New()
+	n, err := io.Copy(io.MultiWriter(out, h), in)
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return "", 0, err
+	}
+	return hex.EncodeToString(h.Sum(nil)), n, nil
 }
 
 // download fetches the original into to, going on from what is there after an interruption.
@@ -273,14 +361,27 @@ func (c *Client) download(ctx context.Context, l *Lease, to string) error {
 func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules.Snapshot, src, out string) (string, error) {
 	cctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	// the server judges the encode for its stall stop between "converting" (sent at the start, then with the
+	// position every ProgressEvery) and "checking" (sent when the encode ends): the checks and the upload
+	// that follow report nothing, so they must not count (orch-lead 19:13Z)
+	report := func(body map[string]any) error {
+		return c.call(cctx, "leases/"+l.ID+"/progress", body, nil)
+	}
+	if e := report(map[string]any{"stage": "converting", "outTimeUs": 0}); leaseGone(e) {
+		return "", e
+	}
 	var last time.Time
 	var gone error
 	stderr, err := media.Transcode(cctx, cv.Exec, cv.FFmpeg, snap.Plan.FFmpegArgs(src, out), l.Job.DurationSec, func(p media.Progress) {
-		if time.Since(last) < 5*time.Second {
+		if time.Since(last) < ProgressEvery {
 			return
 		}
 		last = time.Now()
-		if e := c.call(cctx, "leases/"+l.ID+"/progress", map[string]any{"percent": p.Percent, "stage": "converting"}, nil); leaseGone(e) {
+		body := map[string]any{"stage": "converting", "outTimeUs": p.OutTimeUS}
+		if l.Job.DurationSec > 0 {
+			body["percent"] = p.Percent // a length we don't know has no percent
+		}
+		if e := report(body); leaseGone(e) {
 			gone = e
 			cancel() // the job went back to the queue: stop converting it
 		}
@@ -288,8 +389,12 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 	if gone != nil {
 		return stderr, gone
 	}
+	report(map[string]any{"stage": "checking"}) // the encode ended (also when it failed): no longer judged
 	return stderr, err
 }
+
+// ProgressEvery is how often a converting worker reports where its encode is.
+var ProgressEvery = 5 * time.Second
 
 // upload sends the file at name as part (index), going on from what the server has; it returns the
 // file's SHA-256 and size.
@@ -362,3 +467,6 @@ func (c *Client) report(ctx context.Context, l *Lease, body map[string]any) erro
 	}
 	return nil
 }
+
+// gb is a size in GB, to one decimal.
+func gb(n uint64) string { return strconv.FormatFloat(float64(n)/(1<<30), 'f', 1, 64) + " GB" }

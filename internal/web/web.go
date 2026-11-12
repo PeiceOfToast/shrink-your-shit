@@ -5,11 +5,10 @@ package web
 
 import (
 	"database/sql"
-	"embed"
 	"encoding/json"
 	"errors"
-	"io/fs"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -17,9 +16,6 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/web/next"
 )
-
-//go:embed static
-var static embed.FS
 
 // Handler returns the HTTP handler: pages, assets under /assets and /healthz (all public), and JSON
 // under /api, guarded by access.
@@ -41,10 +37,12 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	previewRoutes(api, store, eng)
 	wv := newWorkerView(store, ss, eng)
 	v2Summary(api, store, wv)             // V3c: /api/v2/summary, processing and intake pauses
+	v2Overview(api, store, wv)            // user review 11-12 item 5: /api/v2/overview
 	v2EventStream(api, store, wv)         // V3a: /api/v2/events (live updates)
 	v2Workers(api, wv)                    // V4a: /api/v2/workers
 	v2Libraries(api, store, eng)          // V5b: /api/v2/libraries
 	v2Jobs(api, store)                    // V2: /api/v2/jobs
+	v2Ladder(api)                         // user review 11-12 item 1: /api/v2/bitrate-ladder
 	v2JobStreams(api, store, eng.RunLogs) // V3d: /api/v2/activity, per-job streams
 	v2Workflows(api, store, eng)          // UI rebuild, V1: /api/v2 workflows (UI-API-CONTRACT-v2.md)
 	// For health checks: answers without signing in and says nothing else.
@@ -52,29 +50,26 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Write([]byte("ok\n"))
 	})
-	sub, _ := fs.Sub(static, "static")
-	files := http.StripPrefix("/assets/", http.FileServer(http.FS(sub)))
-	mux.HandleFunc("GET /assets/", gzipAssets("/assets/", sub, func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/") { // no directory listing
-			http.NotFound(w, r)
-			return
+	// One UI (user decision 2026-11-12, manager row qitem-20261112190001): the single-page app is the whole interface,
+	// at /. Method-less "/" so the more specific /api/, /api/worker/v1/ and /healthz keep answering for themselves: the
+	// app never answers an API path. The old pages and their assets are gone (git history keeps them).
+	// the old interface's pages move to their place in the app (ui-shop's URL map) inside this handler, by exact path:
+	// a router pattern for /libraries/ would make the router send /libraries to /libraries/ (a redirect loop)
+	mux.Handle("/", oldPagesOr(appHandler(next.Files())))
+	// the preview's address: /next/<path> moves to /<path> (bookmarks keep working), with its query. The target is
+	// always this site: /next/%2Fevil.example would be "//evil.example" (another site to a browser), so the rest is
+	// cleaned to one leading "/", and a backslash or control character (browsers read "/\x" as "//x") goes to "/"
+	mux.HandleFunc("GET /next/", func(w http.ResponseWriter, r *http.Request) {
+		rest := strings.TrimPrefix(r.URL.Path, "/next/")
+		to := path.Clean("/" + rest)
+		if strings.IndexFunc(rest, func(c rune) bool { return c == '\\' || c < ' ' || c == 0x7f }) >= 0 {
+			to = "/"
 		}
-		files.ServeHTTP(w, r)
-	}))
-	// The new single-page app (UI rebuild), public like these pages; its data comes from /api.
-	mux.HandleFunc("GET /next/", nextApp(next.Files()))
-	mux.Handle("GET /next", http.RedirectHandler("/next/", http.StatusMovedPermanently))
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		to := "/libraries/"
-		if r.URL.RawQuery != "" { // keep ?token=: the printed sign-in link points at the root
-			to += "?" + r.URL.RawQuery
-		}
-		http.Redirect(w, r, to, http.StatusFound)
+		http.Redirect(w, r, withQuery(to, r), http.StatusMovedPermanently)
 	})
-	items := loadNav()
-	for _, p := range pages {
-		mux.HandleFunc("GET "+p.Path+"{$}", pageHandler(items, p))
-	}
+	mux.HandleFunc("GET /next", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, withQuery("/", r), http.StatusMovedPermanently)
+	})
 	api.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
 		list, err := store.List(200)
 		if err != nil {

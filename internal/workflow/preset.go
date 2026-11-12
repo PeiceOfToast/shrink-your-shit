@@ -36,7 +36,7 @@ func FromTemplate(t rules.Template, prev *Doc) Doc {
 		nodes = []Node{
 			node(TypeInput, map[string]any{"ignore": orEmpty(s.Ignore)}),
 			node(TypeSkips, map[string]any{"includeDolbyVision": s.IncludeDolbyVision}),
-			node(TypeConvert, map[string]any{"quality": s.Quality, "format": s.Format, "resolution": s.Resolution, "maxBitrate": s.MaxBitrate, "speed": s.Speed}),
+			node(TypeConvert, convertConfig(s)),
 			node(TypeAudio, map[string]any{"audio": s.Audio, "onlyMyLanguages": s.OnlyMyLanguages}),
 			node(TypeSubtitles, map[string]any{"subtitles": s.Subtitles}),
 			node(TypeContainer, map[string]any{"fileType": s.FileType}),
@@ -159,6 +159,9 @@ func selectorsOf(order []Node) (rules.Selectors, []Issue) {
 	s.Quality = intOf(cv, "quality", s.Quality)
 	s.Format, s.Resolution = strOf(cv, "format", s.Format), strOf(cv, "resolution", s.Resolution)
 	s.MaxBitrate, s.Speed = strOf(cv, "maxBitrate", s.MaxBitrate), strOf(cv, "speed", s.Speed)
+	if strOf(cv, "rateControl", "quality") == "vbr" { // quality: as before (the same template, item 1)
+		s.RateControl, s.VBRMaxKbps = "vbr", intOf(cv, "vbrMaxKbps", 0)
+	}
 	if a := by[TypeAudio]; a.Enabled {
 		s.Audio, s.OnlyMyLanguages = strOf(a.Config, "audio", s.Audio), boolOf(a.Config, "onlyMyLanguages", s.OnlyMyLanguages)
 	} else {
@@ -192,7 +195,11 @@ func selectorsOf(order []Node) (rules.Selectors, []Issue) {
 	}
 	if err := s.Validate(); err != nil {
 		msg := strings.TrimSuffix(err.Error(), " Nothing was changed.")
-		return s, []Issue{{Code: "invalid_config", Severity: "error", NodeID: by[nodeForMessage(msg)].ID, Message: msg}}
+		i := Issue{Code: "invalid_config", Severity: "error", NodeID: by[nodeForMessage(msg)].ID, Message: msg}
+		if f := fieldForMessage(msg); f != "" {
+			i.ConfigPath, i.Field = "/"+f, f
+		}
+		return s, []Issue{i}
 	}
 	return s, nil
 }
@@ -327,4 +334,24 @@ func hasOnError(d Doc) bool {
 		}
 	}
 	return false
+}
+
+// convertConfig is the Convert video step's config for s; VBR's keys only when it is chosen (item 1).
+func convertConfig(s rules.Selectors) map[string]any {
+	c := map[string]any{"quality": s.Quality, "format": s.Format, "resolution": s.Resolution, "maxBitrate": s.MaxBitrate, "speed": s.Speed}
+	if s.RateControl == "vbr" {
+		c["rateControl"], c["vbrMaxKbps"] = "vbr", s.VBRMaxKbps
+	}
+	return c
+}
+
+// fieldForMessage is the Convert video setting a VBR message is about (user review 11-12 item 1).
+func fieldForMessage(msg string) string {
+	switch {
+	case strings.HasPrefix(msg, "Must be at least"), strings.Contains(msg, "peak limit"):
+		return "vbrMaxKbps"
+	case strings.HasPrefix(msg, "VBR aims at"):
+		return "maxBitrate"
+	}
+	return ""
 }

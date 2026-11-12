@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -64,13 +65,14 @@ func uploadName(p worker.RemotePlan, part string, index int) (string, bool) {
 }
 
 func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.ResponseWriter, *http.Request, bool) (jobs.RemoteWorker, bool),
-	leaseOf func(http.ResponseWriter, *http.Request) (jobs.RemoteWorker, jobs.Job, string, bool), runs *remoteRuns) {
+	leaseOf func(http.ResponseWriter, *http.Request) (jobs.RemoteWorker, jobs.Job, string, bool), runs *remoteRuns, eng Engine) {
 	// run is the server's run of the request's lease (the lease held, and renewed: the worker is there)
 	run := func(w http.ResponseWriter, r *http.Request) (*worker.RemoteJob, jobs.Job, bool) {
-		_, j, lease, ok := leaseOf(w, r)
+		wk, j, lease, ok := leaseOf(w, r)
 		if !ok {
 			return nil, j, false
 		}
+		r.Header.Set("X-SYP-Worker-Id", wk.ID) // for the handlers below (not from the worker: overwritten here)
 		rj := runs.get(lease)
 		if rj == nil {
 			apiError(w, http.StatusConflict, "lease_gone", "This job was given back to the queue (its lease ended). Ask for new work.")
@@ -94,8 +96,12 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 			serverError(w, err)
 			return
 		}
+		wk := r.Header.Get("X-SYP-Worker-Id") // set by run (below)
 		writeJSON(w, map[string]any{"snapshot": p.Snapshot, "source": map[string]any{"name": filepath.Base(p.Source), "bytes": st.Size()},
-			"subtitles": len(p.Snapshot.Plan.SubtitleFiles())})
+			"subtitles": len(p.Snapshot.Plan.SubtitleFiles()),
+			// V7c: through a shared folder that passed its test: read the original there, write the checked
+			// file into the run's staged file there (the same checks either way); "" = transfer
+			"sourceOnWorker": usableMapping(store, wk, p.Source, false), "stageOnWorker": usableMapping(store, wk, p.Stage, true)})
 	})
 	mux.HandleFunc("GET /api/worker/v1/leases/{lease}/source", func(w http.ResponseWriter, r *http.Request) {
 		rj, _, ok := run(w, r)
@@ -186,7 +192,26 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 			serverError(w, err)
 			return
 		}
-		n, cerr := io.Copy(f, r.Body)
+		// the room kept for it on the destination disk (a local run's preflight: worker.SpaceNeeded), so a
+		// paired worker can't fill the disk before /report's checksum (review d1fe673); a subtitle 16 MB
+		limit := int64(16 << 20)
+		if p == "video" {
+			if st, err := os.Stat(pl.Source); err == nil {
+				limit = int64(worker.SpaceNeeded(st.Size()))
+			}
+		}
+		if have >= limit {
+			f.Close()
+			tooLarge(w, rj, name, limit)
+			return
+		}
+		n, cerr := io.Copy(f, http.MaxBytesReader(w, r.Body, limit-have))
+		var big *http.MaxBytesError
+		if errors.As(cerr, &big) {
+			f.Close()
+			tooLarge(w, rj, name, limit)
+			return
+		}
 		if err := f.Close(); cerr == nil {
 			cerr = err
 		}
@@ -196,6 +221,26 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 			return
 		}
 		writeJSON(w, map[string]any{"bytes": have + n})
+	})
+	// V7c: a line for the job's run log (a shared folder that didn't work, so the bytes were transferred)
+	mux.HandleFunc("POST /api/worker/v1/leases/{lease}/note", func(w http.ResponseWriter, r *http.Request) {
+		_, j, ok := run(w, r)
+		if !ok {
+			return
+		}
+		var in struct{ Text string }
+		if !readJSON(w, r, &in) {
+			return
+		}
+		text := cleanWorkerText(in.Text, NoteMaxChars) // review 15b1898: one line, no control characters, capped
+		if text == "" {
+			apiError(w, http.StatusBadRequest, "invalid", "A note needs some text.")
+			return
+		}
+		if eng.RunLogs != nil {
+			eng.RunLogs.Append(j.ID, "Worker: "+text) // prefixed: a worker's note can't pass for the server's line
+		}
+		writeJSON(w, map[string]any{"ok": true})
 	})
 	mux.HandleFunc("POST /api/worker/v1/leases/{lease}/report", func(w http.ResponseWriter, r *http.Request) {
 		rj, j, ok := run(w, r)
@@ -269,4 +314,22 @@ func sameUpload(name string, size int64, sum string) error {
 		return errors.New("its checksum differs")
 	}
 	return nil
+}
+
+// tooLarge refuses an upload past the room kept for it: 413, the staged part emptied, and the job ends
+// as a local run out of room does (tried again later, the low-disk-space reason: orch-lead 15:08Z).
+func tooLarge(w http.ResponseWriter, rj *worker.RemoteJob, name string, limit int64) {
+	os.Truncate(name, 0)
+	rj.Deliver(worker.RemoteResult{Err: fmt.Errorf("the upload is larger than the room kept for it on the destination disk (%d bytes): %w", limit, syscall.ENOSPC)})
+	apiError(w, http.StatusRequestEntityTooLarge, "too_large", fmt.Sprintf("This file is larger than the room kept for it on the destination disk (%s), so it wasn't taken. The job is tried again later.", humanSize(limit)))
+}
+
+func humanSize(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.0f MB", float64(n)/(1<<20))
+	}
+	return fmt.Sprintf("%d bytes", n)
 }

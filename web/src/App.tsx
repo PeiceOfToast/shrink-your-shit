@@ -30,11 +30,11 @@ export function App() {
   // Screens on the real server (no Sample data pill): Dashboard, Libraries, first run, Workflows, the step list, Jobs.
   const real = !MOCK && (start || signin || path === "/libraries" || path.startsWith("/libraries/") || path === "/workflows" || /^\/workflows\/[^/]+(\/graph)?$/.test(path) || path === "/jobs" || path === "/" || path === "/workers" || /^\/workers\/[^/]+$/.test(path));
   const title = settings ? "Settings" : start ? "Set up" : signin ? "Sign in" : item ? item.label : "Page not found";
-  useEffect(() => { document.title = title + " · Shrink Your Shit (new interface)"; }, [title]);
+  useEffect(() => { document.title = title + " · Shrink Your Shit"; }, [title]);
   // A server whose first run isn't done opens on it (IA.md: shown until done). Upgrades from v1 have it done.
   useEffect(() => {
     if (MOCK || path !== "/") return;
-    getSettings().then((r) => { if (!failed(r) && !r.firstRunDone && location.pathname.replace(/\/+$/, "") === "/next") navigate("/start"); })
+    getSettings().then((r) => { if (!failed(r) && !r.firstRunDone && (location.pathname === "/" || location.pathname === "")) navigate("/start"); })
       .catch((e) => { if (!(e instanceof SignedOut)) throw e; });
   }, [path]);
   return (

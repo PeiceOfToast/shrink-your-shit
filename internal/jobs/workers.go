@@ -55,3 +55,30 @@ ON CONFLICT(id) DO UPDATE SET name=excluded.name, tags=excluded.tags, pool=exclu
 		c.ID, c.Name, string(tags), c.Pool, c.GPUSlots)
 	return err
 }
+
+// workerRecord is the record whose on/off flag worker id follows: a paired remote worker's own, else the
+// local one (this program's pool: "builtin", "builtin-2", and tests' names).
+const workerRecordSQL = `COALESCE((SELECT id FROM workers WHERE id=? AND kind='remote'), 'local')`
+
+// WorkerEnabled reports whether worker id is on (user review 11-12 item 2).
+func (s *Store) WorkerEnabled(id string) bool {
+	var on bool
+	if err := s.db.QueryRow(`SELECT enabled FROM workers WHERE id=`+workerRecordSQL, id).Scan(&on); err != nil {
+		return true
+	}
+	return on
+}
+
+// SetWorkerEnabled turns worker id on or off: off, it takes no new job (its running ones finish, or the
+// caller stops them). ErrNotFound: no such worker.
+func (s *Store) SetWorkerEnabled(id string, on bool) error {
+	was := s.Paused()
+	r, err := s.db.Exec(`UPDATE workers SET enabled=? WHERE id=?`, on, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return s.pausedChanged(was)
+}

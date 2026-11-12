@@ -8,9 +8,10 @@ on:
 permissions:
   contents: read
 
+# Linux jobs run on ubuntu-latest (the distro ffmpeg); the real ffmpeg 8 job stays on ubuntu-24.04 with its pinned static build.
 jobs:
-  # Code the tests do not look at: the web page's JavaScript (a syntax error there passes go vet and go
-  # test, and shows the user a blank page) and Go formatting.
+  # Code the tests do not look at: Go formatting. (The name keeps "UI JavaScript" in case it is a required
+  # check; the UI is TypeScript in web/, typechecked when its build runs.)
   lint:
     name: lint (gofmt, UI JavaScript)
     runs-on: ubuntu-latest
@@ -20,19 +21,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
       - name: gofmt
         run: |
           unformatted=$(gofmt -l .)
           if [ -n "$unformatted" ]; then echo "Not gofmt-formatted (run gofmt -w on them):"; echo "$unformatted"; exit 1; fi
-      - name: UI JavaScript syntax
-        if: ${{ !cancelled() }} # runs even when gofmt failed, so one run reports both
-        run: |
-          status=0
-          for f in $(find internal/web/static -name '*.js'); do node --check "$f" || { echo "syntax error in $f"; status=1; }; done
-          exit $status
 
   test:
     name: test (${{ matrix.os }})
@@ -73,6 +65,34 @@ jobs:
         if: runner.os != 'Linux'
         run: go test -count=1 ./...
 
+  # The real-ffmpeg tests again on ffmpeg 8: ubuntu-latest is moving to it (8.0.1) while the test job above
+  # has the distribution's ffmpeg, so a break with a new ffmpeg shows here. A pinned static build (BtbN,
+  # n8.0.1, checked by hash), so the version does not drift with the runner image.
+  ffmpeg8:
+    name: real ffmpeg 8
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SYP_REQUIRE_FFMPEG: "1"
+      FFMPEG8_TAR: ffmpeg-n8.0.1-17-g27a297f186-linux64-gpl-8.0.tar.xz
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install ffmpeg 8
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/ff.tar.xz" "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2025-11-30-12-53/$FFMPEG8_TAR"
+          echo "cab6b5dd9cede8a8db8891e28f2fec2ddfd6401785328d139cbcfd23af9f691e  $RUNNER_TEMP/ff.tar.xz" | sha256sum -c -
+          tar -xf "$RUNNER_TEMP/ff.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/${FFMPEG8_TAR%.tar.xz}/bin" >> "$GITHUB_PATH"
+      - name: Test (real ffmpeg 8)
+        run: |
+          ffmpeg -version | head -n 1
+          go test -count=1 -v -run TestReal ./... > test.log 2>&1 || { cat test.log; exit 1; }
+          grep -E '^[[:space:]]*--- (PASS|FAIL|SKIP): TestReal' test.log
+          if grep -qE '^[[:space:]]*--- SKIP: TestReal' test.log; then echo "a real-ffmpeg test was skipped"; exit 1; fi
+
   # The race detector needs cgo (a C compiler), which the dev machines lack; ubuntu runners have gcc.
   # Packages that run goroutines, at unit level: no ffmpeg here, so the real-ffmpeg tests skip.
   race:
@@ -88,7 +108,7 @@ jobs:
           go-version-file: go.mod
       - run: go test -race -count=1 -timeout 15m ./internal/worker ./internal/doctor ./internal/jobs ./internal/web ./internal/scanner
 
-  # The new UI (web/, served at /next/): typecheck and build it once; the build matrix embeds this output (artifact),
+  # The UI (web/, served at /): typecheck and build it once; the build matrix embeds this output (artifact),
   # and the test job runs without it, so the no-Node placeholder path stays tested too.
   web:
     name: web (typecheck, build, embed check)
@@ -170,8 +190,15 @@ jobs:
           [ -n "$up" ] || { docker logs syp; exit 1; }
           # listening beyond loopback: /api needs the token that `shrink-your-shit token` shows
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8484/api/status)" = 401
-          # the image carries the built new UI (a 200 page that loads its script), not the 503 "not built" page
-          curl -fsS http://127.0.0.1:8484/next/ | grep -q 'src="/next/assets/'
+          # the image carries the built UI at / (a 200 page that loads its script), not the 503 "not built" page
+          curl -fsS http://127.0.0.1:8484/ | grep -q 'src="/assets/'
+          # old bookmarks answer one 301 to an app page that is a 200
+          for pair in "/next/|/" "/next/jobs|/jobs" "/libraries/|/libraries" "/activity/?show=failed|/jobs?tab=failed" "/settings/system/|/settings/about"; do
+            from=${pair%%|*}; to=${pair#*|}
+            got=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "http://127.0.0.1:8484$from")
+            test "$got" = "301 http://127.0.0.1:8484$to" || { echo "$from: $got, want 301 to $to"; exit 1; }
+            test "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8484$to")" = 200 || { echo "$to is not a 200"; exit 1; }
+          done
           tok=$(docker exec syp shrink-your-shit token | sed -n 's/^Access token: //p')
           test -n "$tok"
           curl -fsS -H "Authorization: Bearer $tok" http://127.0.0.1:8484/api/status

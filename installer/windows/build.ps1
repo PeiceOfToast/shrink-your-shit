@@ -8,7 +8,7 @@ New-Item -ItemType Directory -Force -Path $out | Out-Null
 
 Push-Location $root
 try {
-  # The new UI (web\, served at /next/) is built into internal\web\next\dist and embedded.
+  # The web UI (web\, served at /) is built into internal\web\next\dist and embedded.
   Push-Location (Join-Path $root 'web')
   try {
     npm ci --no-audit --no-fund; if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }

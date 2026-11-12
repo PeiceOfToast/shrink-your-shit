@@ -87,6 +87,10 @@ type VideoEncode struct {
 	Tag    string `json:"tag"`
 	// MaxRateKbps caps the bitrate (VBV), for the Standard selectors' maxBitrate (slice 25); 0 = none.
 	MaxRateKbps int `json:"maxRateKbps,omitempty"`
+	// TargetKbps: a VBR encode's average (user review 11-12 item 1), in place of the CRF; 0 = quality.
+	TargetKbps int `json:"targetKbps,omitempty"`
+	// PeakLimitKbps: the person's own VBR limit, as set (MaxRateKbps may be lower: the source's).
+	PeakLimitKbps int `json:"peakLimitKbps,omitempty"`
 	// Height scales the picture down to this height, keeping its shape (selectors' resolution); 0 = as it is.
 	Height int `json:"height,omitempty"`
 	// Copy: the video is copied as it is, not encoded (S4: an HEVC file only repackaged as MKV). The
@@ -221,11 +225,15 @@ func (p Plan) FFmpegArgs(in, out string) []string {
 		args = append(args, out)
 		return p.withSubtitleFiles(args, out)
 	}
-	args = append(args, "-c:"+v, p.Video.Codec, "-crf", strconv.Itoa(p.Video.CRF))
+	if p.Video.TargetKbps > 0 { // VBR: an average to aim at, in place of the quality
+		args = append(args, "-c:"+v, p.Video.Codec, "-b:"+v, strconv.Itoa(p.Video.TargetKbps)+"k")
+	} else {
+		args = append(args, "-c:"+v, p.Video.Codec, "-crf", strconv.Itoa(p.Video.CRF))
+	}
 	if p.Video.Preset != "" {
 		args = append(args, "-preset", p.Video.Preset)
 	}
-	args = append(args, p.Video.Extra...)
+	args = append(args, extraArgs(p.Video)...)
 	if h := p.Video.HDR; h != nil { // 10-bit main10 with the HDR written explicitly (S3)
 		args = append(args, "-pix_fmt:"+v, "yuv420p10le", "-profile:"+v, "main10",
 			"-color_primaries:"+v, h.Primaries, "-color_trc:"+v, h.Transfer, "-colorspace:"+v, h.Matrix,
@@ -235,7 +243,7 @@ func (p Plan) FFmpegArgs(in, out string) []string {
 		args = append(args, "-filter:"+v, "scale=-2:"+strconv.Itoa(p.Video.Height))
 	}
 	args = append(args, p.trackArgs()...)
-	if p.Video.MaxRateKbps > 0 {
+	if p.Video.MaxRateKbps > 0 && !vp9Capped(p.Video) { // VP9's cap is its -b:v (extraArgs)
 		k := strconv.Itoa(p.Video.MaxRateKbps) + "k"
 		args = append(args, "-maxrate:"+v, k, "-bufsize:"+v, strconv.Itoa(2*p.Video.MaxRateKbps)+"k")
 	}
@@ -555,6 +563,10 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	vf := VideoFormats[target]
 	p.Video = VideoEncode{Codec: vf.Encoder, CRF: crf + vf.CRFOffset, Preset: vf.Presets[s.Speed], Tag: vf.Tag,
 		Index: info.MainVideoOrdinal(), MaxRateKbps: CapKbps(s.MaxBitrate, target, w, h, v, sourceVideoKbps(info, v)), Height: height}
+	if s.RateControl == "vbr" {
+		p.Video.TargetKbps, p.Video.MaxRateKbps = VBRKbps(s.MaxBitrate, target, w, h, v, sourceVideoKbps(info, v), s.VBRMaxKbps)
+		p.Video.PeakLimitKbps = s.VBRMaxKbps
+	}
 	if target != "hevc" {
 		p.Video.Format = target
 		p.Video.Extra = append(append([]string(nil), vf.Extra[""]...), vf.Extra[s.Speed]...)
@@ -959,4 +971,37 @@ func inContainer(info media.Info, c string) bool {
 		return info.Container == Containers["mkv"] && info.Ext != ".webm"
 	}
 	return info.Container == Containers[c]
+}
+
+// vp9Capped: VP9 in quality mode with a level. libvpx refuses -maxrate with -b:v 0 ("Rate control
+// parameters set without a bitrate": every file failed); its constrained quality is -crf with -b:v as
+// the cap (review a772397).
+func vp9Capped(e VideoEncode) bool {
+	return e.Codec == "libvpx-vp9" && e.TargetKbps == 0 && e.MaxRateKbps > 0
+}
+
+// extraArgs are the encoder's own arguments; with a VBR target, without VP9's "-b:v 0" (constant
+// quality); VP9 capped, with the cap as its -b:v (constrained quality).
+func extraArgs(e VideoEncode) []string {
+	if vp9Capped(e) {
+		out := append([]string(nil), e.Extra...)
+		for i := 0; i+1 < len(out); i++ {
+			if out[i] == "-b:v" {
+				out[i+1] = strconv.Itoa(e.MaxRateKbps) + "k"
+			}
+		}
+		return out
+	}
+	if e.TargetKbps == 0 {
+		return e.Extra
+	}
+	var out []string
+	for i := 0; i < len(e.Extra); i++ {
+		if e.Extra[i] == "-b:v" && i+1 < len(e.Extra) {
+			i++
+			continue
+		}
+		out = append(out, e.Extra[i])
+	}
+	return out
 }

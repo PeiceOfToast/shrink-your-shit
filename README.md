@@ -153,7 +153,7 @@ program, so the folder checks are made as the user the service runs as:
 | Docker | `docker exec <container name> shrink-your-shit doctor` |
 | Windows | `shrink-your-shit doctor` |
 
-It exits with 1 if something needs fixing. The web page shows the same checks under Settings > System,
+It exits with 1 if something needs fixing. The web page shows the same checks under Settings > About,
 and checks a folder as soon as you choose it. On Linux the service runs as the user `syp`: a folder it
 cannot write needs `sudo chown -R syp:syp /path/to/videos` (or `syp` in the folder's group with group
 write access).

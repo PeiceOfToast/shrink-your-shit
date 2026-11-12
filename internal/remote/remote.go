@@ -8,6 +8,8 @@ package remote
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,7 +18,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/sysload"
 )
 
 // APILevel is the worker API level this worker speaks (the server's web.WorkerAPILevel).
@@ -59,6 +64,33 @@ func (s State) Save(dir string) error {
 type Client struct {
 	Server, Token, Version string
 	HTTP                   *http.Client
+	meter                  sysload.Meter // this computer's load, sent with each heartbeat (V7d)
+
+	holdMu   sync.Mutex
+	holdBack string // why it takes no work now ("" takes work), sent with each heartbeat (#174 QA e)
+}
+
+// holding sets why this worker takes no work ("" when it does again), saying so in its log once per
+// change.
+func (c *Client) holding(why string) {
+	c.holdMu.Lock()
+	defer c.holdMu.Unlock()
+	if why == c.holdBack {
+		return
+	}
+	switch {
+	case why != "":
+		log.Print(why)
+	default:
+		log.Print("Taking work again: there is room in its work folder.")
+	}
+	c.holdBack = why
+}
+
+func (c *Client) holdingBack() string {
+	c.holdMu.Lock()
+	defer c.holdMu.Unlock()
+	return c.holdBack
 }
 
 // APIError is a refusal from the server: its code and words.
@@ -116,7 +148,20 @@ func (c *Client) Pair(ctx context.Context, code, name string) (State, error) {
 
 // Heartbeat says this worker is there, with its free slots.
 func (c *Client) Heartbeat(ctx context.Context, free int) error {
-	return c.call(ctx, "heartbeat", map[string]any{"freeSlots": free}, nil)
+	l := c.meter.Sample()
+	var out struct{ PathTests []PathTest }
+	var hold any
+	if why := c.holdingBack(); why != "" {
+		hold = map[string]string{"code": "low_disk", "message": why}
+	}
+	if err := c.call(ctx, "heartbeat", map[string]any{"freeSlots": free, "cpuPercent": l.CPUPercent, "memUsedBytes": l.MemUsedBytes,
+		"memTotalBytes": l.MemTotalBytes, "holdingBack": hold}, &out); err != nil {
+		return err
+	}
+	for _, t := range out.PathTests { // V7c: its shared folders' tests ride the heartbeat's answer
+		c.runPathTest(ctx, t)
+	}
+	return nil
 }
 
 // Run sends heartbeats until ctx ends. It stops early, with the server's words, when the server says
@@ -146,5 +191,35 @@ func (c *Client) Run(ctx context.Context) error {
 			return nil
 		case <-t.C:
 		}
+	}
+}
+
+// PathTest is a shared folder's real test (V7c): read the server's probe at Read through the mapping;
+// for read_write also write WriteContent at Write. Nothing else is ever written.
+type PathTest struct {
+	ID, Read     string
+	Write        *string
+	WriteContent *string
+}
+
+func (c *Client) runPathTest(ctx context.Context, t PathTest) {
+	res := map[string]any{}
+	b, err := os.ReadFile(t.Read)
+	switch {
+	case err != nil:
+		res["problem"] = "This worker can't open " + t.Read + ": " + err.Error()
+	default:
+		h := sha256.Sum256(b)
+		res["sha256"] = hex.EncodeToString(h[:])
+		if t.Write != nil && t.WriteContent != nil {
+			if err := os.WriteFile(*t.Write, []byte(*t.WriteContent), 0o644); err != nil {
+				res["problem"] = "This worker can't write in " + filepath.Dir(*t.Write) + ": " + err.Error()
+			} else {
+				res["wrote"] = true
+			}
+		}
+	}
+	if err := c.call(ctx, "paths/"+t.ID+"/result", res, nil); err != nil {
+		log.Printf("path test %s: %v", t.ID, err)
 	}
 }

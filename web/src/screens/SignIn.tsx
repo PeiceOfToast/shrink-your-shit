@@ -15,7 +15,8 @@ export function SignIn() {
     setError(""); setBusy(true);
     const r = await call("POST", "/api/login", { token: token.trim() }).finally(() => setBusy(false));
     if (failed(r)) return setError(r.error.message);
-    navigate(next.startsWith("/") && !next.startsWith("/signin") ? next : "/");
+    // only a path on this site: browsers read "//host", "/\\host" and "/<tab>/host" as another site
+    navigate(/^\/(?![\/\\])/.test(next) && !/[\x00-\x1f\\]/.test(next) && !next.startsWith("/signin") ? next : "/");
   };
   return (
     <div className="stack" style={{ maxWidth: 520 }}>
