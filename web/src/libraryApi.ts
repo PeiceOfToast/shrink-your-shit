@@ -54,7 +54,7 @@ export async function scanLibrary(id: string): Promise<Answer<unknown>> {
 }
 
 export async function getSettings(): Promise<Answer<FirstRunSettings>> {
-  if (MOCK) { const s = mock.mockState().settings; return { firstRunDone: s.firstRunDone, firstRunStep: s.firstRunStep, firstRunLibrary: s.firstRunLibrary ?? null, scanEvery: s.scanEvery, scanEverySource: s.scanEverySource, scanEveryMin: 15, scanEveryMax: 86400 }; }
+  if (MOCK) { const s = mock.mockState().settings; return { firstRunDone: s.firstRunDone, firstRunStep: s.firstRunStep, firstRunLibrary: s.firstRunLibrary ?? null, scanEvery: s.scanEvery, scanEverySource: s.scanEverySource, scanEveryMin: 15, scanEveryMax: 86400, languages: s.languages ?? ["eng"], keepOriginalsDays: s.keepOriginalsDays ?? 7, trashPath: "Kept next to each file, in a folder called .syp-trash", authRequired: true }; }
   return call("GET", "/api/v2/settings"); // #111: v1's settings at the v2 path
 }
 export async function patchSettings(p: Partial<FirstRunSettings>): Promise<Answer<unknown>> {
@@ -110,6 +110,16 @@ export async function startSimpleWorkflow(name: string, out: string | null, agai
 }
 
 // GET /api/v2/trash (#111): originals kept after being replaced, until their date. The Dashboard's "+120 GB by 18 Nov".
+// Settings > General: the access token, shown only when asked for (never stored by the page), a new one, and signing out.
+export const getToken = (): Promise<Answer<{ token: string }>> => (MOCK ? M({ token: "sample-token-not-real" }) : call("GET", "/api/settings/token"));
+export const rotateToken = (): Promise<Answer<{ token: string }>> => (MOCK ? M({ token: "sample-token-" + Date.now().toString(36) }) : call("POST", "/api/settings/token/rotate"));
+export const signOut = (): Promise<Answer<unknown>> => (MOCK ? M({}) : call("POST", "/api/logout"));
+
+// Settings > About: GET /api/system/health (the old Settings > System): checks, version, the last log lines.
+export interface Health { checks: { id: string; label: string; status: "ok" | "warn" | "bad"; detail: string }[]; version: string; logsTail: string[] }
+export const getHealth = (): Promise<Answer<Health>> => (MOCK ? M({ version: "2.0.0 (sample)", logsTail: ["12:00:01 scanned 3 libraries: no new files"],
+  checks: [{ id: "ffmpeg", label: "FFmpeg is installed", status: "ok", detail: "" }, { id: "disk", label: "Space on /media", status: "warn", detail: "120 GB free" }] }) : call("GET", "/api/system/health"));
+
 export async function getTrash(): Promise<Answer<Trash>> {
   return MOCK ? mock.mockState().trash : call("GET", "/api/v2/trash");
 }
