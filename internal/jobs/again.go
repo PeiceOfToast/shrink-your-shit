@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -16,10 +17,15 @@ import (
 // from it (our earlier output is replaced only after the new one passes, as any own output is).
 
 // AgainCheck says whether a job can be converted again, and if not, why: Code and Message, and
-// DeletedAt (RFC 3339) when its kept original was deleted.
+// DeletedAt (RFC 3339) when its kept original was deleted. For a done job it also says what its run
+// did, so the drawer can word the button (orch-lead 17:12Z): Policy (replace, separate_folder or
+// beside), KeptUntil (replace: when the kept original leaves the trash) and OutputPath (the earlier new
+// file Convert again replaces; "" for replace, where it is the file's own name).
 type AgainCheck struct {
 	Possible                 bool
 	Code, Message, DeletedAt string
+	Policy, KeptUntil        string
+	OutputPath               string
 	originalID               int64 // the kept original it runs from (0: the original in place)
 }
 
@@ -32,6 +38,35 @@ const (
 
 // ConvertAgainCheck says whether done job id can be converted again (ErrNotFound: no such job).
 func (s *Store) ConvertAgainCheck(id int64) (AgainCheck, error) {
+	c, err := s.convertAgainCheck(id)
+	if err != nil || c.Code == AgainNotDone {
+		return c, err
+	}
+	j, err := s.Get(id)
+	if err != nil {
+		return AgainCheck{}, err
+	}
+	// what the run did, from its own record (the workflow may have changed since): a kept original, or
+	// a new file at the original's own name, is a replace; a new file in the same folder is beside
+	var state, deleteOn string
+	err = s.db.QueryRow(`SELECT state, COALESCE(delete_on, '') FROM originals WHERE job_id=? ORDER BY id DESC LIMIT 1`, id).Scan(&state, &deleteOn)
+	switch {
+	case err == nil || j.OutputPath == j.Path:
+		c.Policy = "replace"
+		if state == OriginalKept {
+			c.KeptUntil = deleteOn
+		}
+	case !errors.Is(err, sql.ErrNoRows):
+		return AgainCheck{}, err
+	case filepath.Dir(j.OutputPath) == filepath.Dir(j.Path):
+		c.Policy, c.OutputPath = "beside", j.OutputPath
+	default:
+		c.Policy, c.OutputPath = "separate_folder", j.OutputPath
+	}
+	return c, nil
+}
+
+func (s *Store) convertAgainCheck(id int64) (AgainCheck, error) {
 	j, err := s.Get(id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AgainCheck{}, ErrNotFound
