@@ -49,6 +49,20 @@ type Tools struct {
 	// Hardware10 are the working ones that also encoded a 10-bit (Main10, p010) frame: what HDR needs
 	// on hardware (research 1.2; used from V4).
 	Hardware10 []string
+	// Software are the software video encoders (one per format: libx265, libx264, libsvtav1,
+	// libvpx-vp9) that encoded a test frame; SoftwareListed the listed ones that did not (V4a: a worker's
+	// capabilities come from real test encodes, never from a list).
+	Software, SoftwareListed []string
+	TestedAt                 time.Time // when the encoders were tested (zero: not yet)
+}
+
+// softwareEncoders are the formats' software encoders, tested like the hardware ones.
+var softwareEncoders = []string{"libx265", "libx264", "libsvtav1", "libvpx-vp9"}
+
+// withEncoders is t with the encoder test's result hw, made at at.
+func (t Tools) withEncoders(hw [5][]string, at time.Time) Tools {
+	t.Hardware, t.HardwareListed, t.Hardware10, t.Software, t.SoftwareListed, t.TestedAt = hw[0], hw[1], hw[2], hw[3], hw[4], at
+	return t
 }
 
 // Converts reports whether conversions can run: ffmpeg, ffprobe, libx265 and the SSIM filter.
@@ -67,7 +81,7 @@ type Checker struct {
 	mu      sync.Mutex
 	tools   *Tools // the converter, without the hardware test
 	toolsAt time.Time
-	hw      *[3][]string // working, listed-but-failing, and 10-bit-capable hardware encoders
+	hw      *[5][]string // hardware: working, listed-but-failing, 10-bit; software: working, failing
 	hwAt    time.Time
 	// refreshing: ToolsNow started a background check that has not finished
 	refreshing bool
@@ -87,10 +101,9 @@ func (c *Checker) Tools(ctx context.Context) Tools {
 	c.mu.Lock()
 	for {
 		if c.hw != nil && time.Since(c.hwAt) < toolsTTL { // fresh: shared
-			hw := *c.hw
+			hw, at := *c.hw, c.hwAt
 			c.mu.Unlock()
-			t.Hardware, t.HardwareListed, t.Hardware10 = hw[0], hw[1], hw[2]
-			return t
+			return t.withEncoders(hw, at)
 		}
 		if run := c.hwRun; run != nil { // one test at a time (GPU session limits, review c66c66b): wait for it
 			c.mu.Unlock()
@@ -113,15 +126,14 @@ func (c *Checker) Tools(ctx context.Context) Tools {
 		c.hwRun = nil
 		close(run)
 		c.mu.Unlock()
-		t.Hardware, t.HardwareListed, t.Hardware10 = hw[0], hw[1], hw[2]
-		return t
+		return t.withEncoders(hw, time.Now())
 	}
 }
 
 // hardwareTest finds the hardware HEVC encoders ffmpeg lists and tries each on one tiny frame (listed
 // is not the same as usable here): working ones, and listed ones that did not work. Run without the
 // lock, one at a time (Tools).
-func (c *Checker) hardwareTest(ctx context.Context, t Tools) (hw [3][]string) {
+func (c *Checker) hardwareTest(ctx context.Context, t Tools) (hw [5][]string) {
 	if t.FFmpeg == "" {
 		return hw
 	}
@@ -138,8 +150,28 @@ func (c *Checker) hardwareTest(ctx context.Context, t Tools) (hw [3][]string) {
 				}
 			}
 		}
+		for _, enc := range softwareEncoders { // V4a: the software ones too, the same way
+			if strings.Contains(string(out), " "+enc+" ") {
+				if c.encodes(ctx, enc, false) {
+					hw[3] = append(hw[3], enc)
+				} else {
+					hw[4] = append(hw[4], enc)
+				}
+			}
+		}
 	}
 	return hw
+}
+
+// Retest runs the encoder test again now (POST /api/v2/workers/{id}/capabilities/test), or waits for
+// the one already running, and returns the result.
+func (c *Checker) Retest(ctx context.Context) Tools {
+	c.mu.Lock()
+	if c.hwRun == nil {
+		c.hw = nil
+	}
+	c.mu.Unlock()
+	return c.Tools(ctx)
 }
 
 // ToolsNow is Tools without waiting: the last result, or ok false when none is known yet (or a check is
@@ -153,8 +185,7 @@ func (c *Checker) ToolsNow() (Tools, bool) {
 	t, ok := Tools{}, c.tools != nil && c.hw != nil
 	stale := !ok || time.Since(c.hwAt) >= toolsTTL || time.Since(c.toolsAt) >= toolsTTL
 	if ok {
-		t = *c.tools
-		t.Hardware, t.HardwareListed, t.Hardware10 = c.hw[0], c.hw[1], c.hw[2]
+		t = c.tools.withEncoders(*c.hw, c.hwAt)
 	}
 	start := stale && !c.refreshing
 	if start {
