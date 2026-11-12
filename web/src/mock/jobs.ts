@@ -66,7 +66,7 @@ export function mockAction(action: JobAction, ids: string[], pin?: "first" | "la
     if (!j) return { id, ok: false, code: "not_found", message: "There is no such job." };
     if (action === "cancel") {
       if (!["queued", "retry_wait", "preparing", "running", "validating", "committing"].includes(j.state)) return { id, ok: false, code: "not_active", message: "Only a waiting or running file can be stopped." };
-      items = items.map((x) => (x === j ? { ...x, id: "skip-" + x.id, jobId: x.id, origin: "scan", state: "cancelled", reason: { code: "user_stopped", message: "You stopped this file. It is left as it is until you press Convert again." }, detail: "You stopped it.", progress: undefined } : x));
+      items = items.map((x) => (x === j ? { ...x, id: "skip-" + x.id, jobId: undefined, origin: "scan", state: "cancelled", reason: { code: "user_stopped", message: "You stopped this file. It is left as it is until you press Convert again." }, detail: "You stopped it.", progress: undefined } : x));
       return { id, ok: true };
     }
     if (action === "retry") {
