@@ -113,7 +113,8 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 		return 0
 	}
 	seen := map[string]bool{}
-	var walked []int64 // libraries walked whole in this pass
+	sizes := map[string]int64{} // each seen file's size: an original left in place that changed (V5c)
+	var walked []int64          // libraries walked whole in this pass
 	for _, t := range targets {
 		lib := t.Path
 		videos := 0
@@ -146,7 +147,7 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 			if err != nil {
 				return nil
 			}
-			seen[path] = true
+			seen[path], sizes[path] = true, info.Size()
 			videos++
 			s.setScanning(t.LibraryID, videos, false)
 			if code, ignore := Guard(lib, path, info); ignore {
@@ -179,7 +180,7 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 	}
 	if ctx.Err() == nil {
 		s.forgetUnseen(seen)
-		s.markOriginalsGone(walked, seen)
+		s.markOriginalsGone(walked, sizes)
 	}
 	return queued
 }
@@ -441,17 +442,23 @@ func (s *Scanner) NextScan() time.Time {
 }
 
 // markOriginalsGone records the originals left where they were (beside, or with a folder for new files)
-// that this pass no longer found, so their saving counts as freed (V5c, design call 3). Only in the
-// libraries walked whole (a paused one isn't), and only when the file is really not there: a folder
-// that couldn't be read hides its files from a walk without deleting them.
-func (s *Scanner) markOriginalsGone(walked []int64, seen map[string]bool) {
+// that this pass no longer found, so their saving counts as freed, and those that changed (another
+// size: it is a new file, converted on its own), whose saving no longer counts (V5c, design call 3).
+// Only in the libraries walked whole (a paused one isn't), and gone only when the file is really not
+// there: a folder that couldn't be read hides its files from a walk without deleting them.
+func (s *Scanner) markOriginalsGone(walked []int64, sizes map[string]int64) {
 	left, err := s.Store.LeftOriginals(walked)
 	if err != nil {
 		log.Printf("scan: originals left in place: %v", err)
 		return
 	}
 	for _, o := range left {
-		if seen[o.Path] {
+		if size, seen := sizes[o.Path]; seen {
+			if size != o.Size {
+				if err := s.Store.SetOriginalChanged(o.JobID); err != nil {
+					log.Printf("scan: %s: %v", o.Path, err)
+				}
+			}
 			continue
 		}
 		if _, err := os.Lstat(o.Path); errors.Is(err, fs.ErrNotExist) {

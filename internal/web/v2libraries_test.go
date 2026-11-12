@@ -162,10 +162,11 @@ func TestV2SummaryFreedBytes(t *testing.T) {
 		}
 	}
 	movies, tv := strconv.FormatInt(lib.ID, 10), strconv.FormatInt(other.ID, 10)
-	want(`{"freed":0,"libraryId":"` + movies + `","waitingToFree":600}`)
-	want(`{"freed":0,"libraryId":"` + tv + `","waitingToFree":0}`)
-	want(`"freedLast7d":0`)
+	// left where it was: could free, not waiting (design 01:55Z)
+	want(`{"couldFree":600,"freed":0,"libraryId":"` + movies + `","waitingToFree":0}`)
+	want(`{"couldFree":0,"freed":0,"libraryId":"` + tv + `","waitingToFree":0}`)
+	want(`"couldFree":600,"freed":0,"freedLast7d":0`)
 	st.SetOriginalGone(id) // a scan found the original gone
-	want(`{"freed":600,"libraryId":"` + movies + `","waitingToFree":0}`)
-	want(`"freedLast7d":600`)
+	want(`{"couldFree":0,"freed":600,"libraryId":"` + movies + `","waitingToFree":0}`)
+	want(`"couldFree":0,"freed":600,"freedLast7d":600`)
 }

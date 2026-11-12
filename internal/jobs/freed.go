@@ -2,21 +2,25 @@
 
 package jobs
 
-// Freed and waiting bytes (UI-API-CONTRACT F1; V5c, design call 3). A conversion's saving (original minus
-// new) counts as waiting while the original is still on the disk, and as freed once it is gone:
-//   - replaced: freed at once, or when its kept copy (.syp-trash) is deleted;
-//   - left where it was (beside, or in a folder for new files, output-first): freed once a scan finds the
-//     original gone (original_gone_at).
+// Saved bytes (UI-API-CONTRACT F1; V5c, design call 3 and 01:55Z). A conversion's saving (original minus
+// new) is one of:
+//   - freed: the original is gone (replaced and nothing kept, its kept copy deleted, or, left where it
+//     was, found gone by a scan);
+//   - waiting to free: a replaced original kept in .syp-trash, which goes on its own on its day;
+//   - could free: an original left where it was (beside, or with a folder for new files), which never
+//     goes by itself: the person can remove it. Once a scan finds it gone, it is freed; if it changed
+//     instead (another size), it is a new file and the old saving counts nowhere.
 
 // leftSQL is true for a done job (of table jobs) that left its original where it was.
 const leftSQL = `(output_path<>'' AND output_path<>path AND NOT EXISTS (SELECT 1 FROM originals o WHERE o.job_id=jobs.id))`
 
 const keptNowSQL = `EXISTS (SELECT 1 FROM originals o WHERE o.job_id=jobs.id AND o.state='kept')`
 
-// freedSQL and waitingSQL are a jobs row's freed and waiting bytes (NULL: none).
+// freedSQL, waitingSQL and couldFreeSQL are a jobs row's freed, waiting and could-free bytes (NULL: none).
 const (
-	freedSQL   = `CASE WHEN status='done' AND size_after>0 AND ((` + replacedSQL + ` AND NOT ` + keptNowSQL + `) OR (` + leftSQL + ` AND original_gone_at<>'')) THEN size_before-size_after END`
-	waitingSQL = `CASE WHEN status='done' AND size_after>0 AND ((` + replacedSQL + ` AND ` + keptNowSQL + `) OR (` + leftSQL + ` AND original_gone_at='')) THEN size_before-size_after END`
+	freedSQL     = `CASE WHEN status='done' AND size_after>0 AND ((` + replacedSQL + ` AND NOT ` + keptNowSQL + `) OR (` + leftSQL + ` AND original_gone_at<>'' AND original_changed=0)) THEN size_before-size_after END`
+	waitingSQL   = `CASE WHEN status='done' AND size_after>0 AND ` + replacedSQL + ` AND ` + keptNowSQL + ` THEN size_before-size_after END`
+	couldFreeSQL = `CASE WHEN status='done' AND size_after>0 AND ` + leftSQL + ` AND original_gone_at='' AND original_changed=0 THEN size_before-size_after END`
 	// freedAtSQL is when a freed saving was freed: the original found gone, its kept copy's delete day,
 	// or the conversion's end (replaced with nothing kept).
 	freedAtSQL = `CASE WHEN ` + leftSQL + ` THEN original_gone_at
@@ -34,19 +38,20 @@ func (s *Store) FreedSince(at string) (int64, error) {
 type LeftOriginal struct {
 	JobID int64
 	Path  string
+	Size  int64 // the original's size when it was converted
 }
 
 // LeftOriginals are those of the given libraries' done jobs.
 func (s *Store) LeftOriginals(libraryIDs []int64) ([]LeftOriginal, error) {
 	var out []LeftOriginal
 	for _, id := range libraryIDs {
-		rows, err := s.db.Query(`SELECT id, path FROM jobs WHERE library_id=? AND status='done' AND original_gone_at='' AND `+leftSQL, id)
+		rows, err := s.db.Query(`SELECT id, path, size_before FROM jobs WHERE library_id=? AND status='done' AND original_gone_at='' AND original_changed=0 AND `+leftSQL, id)
 		if err != nil {
 			return nil, err
 		}
 		for rows.Next() {
 			var o LeftOriginal
-			if err := rows.Scan(&o.JobID, &o.Path); err != nil {
+			if err := rows.Scan(&o.JobID, &o.Path, &o.Size); err != nil {
 				rows.Close()
 				return nil, err
 			}
@@ -60,5 +65,12 @@ func (s *Store) LeftOriginals(libraryIDs []int64) ([]LeftOriginal, error) {
 // SetOriginalGone records that job id's original, left where it was, is gone (now).
 func (s *Store) SetOriginalGone(id int64) error {
 	_, err := s.db.Exec(`UPDATE jobs SET original_gone_at=? WHERE id=? AND original_gone_at=''`, s.stamp(), id)
+	return err
+}
+
+// SetOriginalChanged records that job id's original, left where it was, changed (another size): its
+// saving counts nowhere any more (design call 3); the new file is converted on its own.
+func (s *Store) SetOriginalChanged(id int64) error {
+	_, err := s.db.Exec(`UPDATE jobs SET original_changed=1 WHERE id=? AND original_gone_at=''`, id)
 	return err
 }
