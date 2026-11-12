@@ -5,6 +5,7 @@ package jobs
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -157,5 +158,29 @@ func TestJobsRemovedHook(t *testing.T) {
 	}
 	if steps, _ := s.Steps(skipped); len(steps) != 0 {
 		t.Errorf("steps after a scan %v", steps)
+	}
+}
+
+// Review ab99630 P2-2: a library's totals read its files' records by a range of the primary key, not
+// every record per library.
+func TestLibraryTotalsUseThePathIndex(t *testing.T) {
+	s := open(t)
+	var plan string
+	rows, err := s.db.Query(`EXPLAIN QUERY PLAN SELECT COALESCE(SUM(size),0) FROM files WHERE path >= ? AND path < ?`, "/m/", "/m0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var a, b, c int
+		var d string
+		rows.Scan(&a, &b, &c, &d)
+		plan += d + "; "
+	}
+	rows.Close()
+	if !strings.Contains(plan, "USING") || strings.Contains(plan, "SCAN files") {
+		t.Errorf("plan %s", plan)
+	}
+	if lo, hi := pathRange(filepath.FromSlash("/m/")); lo != filepath.FromSlash("/m/") || hi != filepath.FromSlash("/m")+string(rune(filepath.Separator+1)) {
+		t.Errorf("range %q %q", lo, hi)
 	}
 }

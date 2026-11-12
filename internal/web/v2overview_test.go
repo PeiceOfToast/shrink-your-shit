@@ -4,7 +4,9 @@ package web
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -44,10 +46,10 @@ func TestV2Overview(t *testing.T) {
 			Day                        string
 			Recorded                   bool
 			Completed, Skipped, Failed int
-			SavedBytes                 int64
+			FreedBytes                 int64
 		}
 		TimeZone string
-		Averages struct{ SavingPercent *float64 }
+		Averages struct{ FileShrinkPercent *float64 }
 	}
 	if err := json.Unmarshal([]byte(body), &o); err != nil {
 		t.Fatal(err)
@@ -74,10 +76,53 @@ func TestV2Overview(t *testing.T) {
 		t.Fatalf("days %d", len(o.Daily))
 	}
 	today, before := o.Daily[29], o.Daily[28]
-	if !today.Recorded || today.Completed != 1 || today.SavedBytes != 600 || before.Recorded || before.Completed != 0 {
+	if !today.Recorded || today.Completed != 1 || today.FreedBytes != 600 || before.Recorded || before.Completed != 0 {
 		t.Errorf("today %+v, the day before %+v", today, before)
 	}
-	if o.TimeZone == "" || o.Averages.SavingPercent == nil || *o.Averages.SavingPercent != 60 {
-		t.Errorf("time zone %q, averages %v", o.TimeZone, o.Averages.SavingPercent)
+	if o.TimeZone == "" || o.Averages.FileShrinkPercent == nil || *o.Averages.FileShrinkPercent != 60 {
+		t.Errorf("time zone %q, averages %v", o.TimeZone, o.Averages.FileShrinkPercent)
+	}
+}
+
+// Review ab99630: the day's freed bytes are NET (a kept original, an original left in place: not freed);
+// a library inside another counts its files once (the inner one's); the time zone is its IANA name.
+func TestV2OverviewNetAndNested(t *testing.T) {
+	t.Setenv("TZ", "Europe/Berlin")
+	srv, st, _, _ := libServer(t, false)
+	outer, _ := st.AddLibrary("All", t.TempDir(), rules.SliderTemplate(3), true)
+	innerDir := filepath.Join(outer.Path, "kids")
+	os.Mkdir(innerDir, 0o755)
+	inner, err := st.AddLibrary("Kids", innerDir, rules.SliderTemplate(3), true)
+	if err != nil {
+		t.Skipf("a library inside another isn't allowed here: %v", err)
+	}
+	st.PutFile(jobs.File{Path: filepath.Join(outer.Path, "a.mkv"), Size: 1000, Decision: "queued: x"})
+	st.PutFile(jobs.File{Path: filepath.Join(innerDir, "b.mkv"), Size: 500, Decision: "queued: x"})
+	// an original left in place (a folder for new files): could free, not freed
+	id, _ := st.Enqueue(jobs.Job{Library: outer.Path, LibraryID: outer.ID, Path: filepath.Join(outer.Path, "a.mkv"), SizeBefore: 1000})
+	st.Claim("w")
+	st.Complete(id, filepath.Join(outer.Path+" (shrunk)", "a.mkv"), 400)
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/overview"})
+	var o struct {
+		Libraries []struct {
+			ID          string
+			BytesBefore int64
+		}
+		Daily    []struct{ FreedBytes int64 }
+		TimeZone string
+	}
+	json.Unmarshal([]byte(body), &o)
+	byID := map[string]int64{}
+	for _, l := range o.Libraries {
+		byID[l.ID] = l.BytesBefore
+	}
+	if byID[strconv.FormatInt(outer.ID, 10)] != 1000 || byID[strconv.FormatInt(inner.ID, 10)] != 500 {
+		t.Errorf("nested counted once: %s", body)
+	}
+	if o.Daily[29].FreedBytes != 0 {
+		t.Errorf("nothing was freed today: %+v", o.Daily[29])
+	}
+	if o.TimeZone != "Europe/Berlin" {
+		t.Errorf("time zone %q", o.TimeZone)
 	}
 }

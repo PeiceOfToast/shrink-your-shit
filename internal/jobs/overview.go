@@ -20,16 +20,24 @@ type LibraryTotals struct {
 	VideosRecorded int
 }
 
-// LibraryTotalsOf is library l's totals.
+// LibraryTotalsOf is library l's totals: its files' records by a path range, which the files' primary
+// key serves (review ab99630 P2-2: substr() read every record per library).
 func (s *Store) LibraryTotalsOf(l Library) (LibraryTotals, error) {
 	var t LibraryTotals
-	prefix := strings.TrimSuffix(l.Path, string(filepath.Separator)) + string(filepath.Separator)
+	lo, hi := pathRange(l.Path)
 	if err := s.db.QueryRow(`SELECT COALESCE(SUM(size),0), COUNT(*), COALESCE(SUM(CASE WHEN decision LIKE 'skip:%' THEN 1 ELSE 0 END),0)
-FROM files WHERE substr(path, 1, length(?)) = ?`, prefix, prefix).Scan(&t.BytesBefore, &t.VideosRecorded, &t.Skipped); err != nil {
+FROM files WHERE path >= ? AND path < ?`, lo, hi).Scan(&t.BytesBefore, &t.VideosRecorded, &t.Skipped); err != nil {
 		return t, err
 	}
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM jobs WHERE library_id=? AND status=?`, l.ID, Done).Scan(&t.Done)
 	return t, err
+}
+
+// pathRange is [lo, hi) holding every path inside dir: dir + separator up to dir + the next character.
+func pathRange(dir string) (string, string) {
+	sep := string(filepath.Separator)
+	root := strings.TrimSuffix(dir, sep)
+	return root + sep, root + string(rune(sep[0]+1))
 }
 
 // Day is one day's totals in the overview (server-local days).
@@ -37,11 +45,11 @@ type Day struct {
 	Day                        string `json:"day"` // 2026-11-12
 	Recorded                   bool   `json:"recorded"`
 	Completed, Skipped, Failed int
-	SavedBytes                 int64
+	FreedBytes                 int64 // NET, freed that day (review ab99630 P2-1)
 }
 
 // Days are the last n days' totals, oldest first: conversions finished, files skipped (also stopped),
-// failed (also kept by a check), and the bytes saved by the conversions finished that day. A day
+// failed (also kept by a check), and the bytes freed that day (NET, dated as freedLast7d). A day
 // before the first recorded history is Recorded false (zeroes, not estimates).
 func (s *Store) Days(n int, now time.Time) ([]Day, error) {
 	var first string
@@ -73,8 +81,9 @@ WHERE kind='job' AND to_status IN ('done','skipped','cancelled','failed','kept')
 		}
 	}
 	rows.Close()
-	rows, err = s.db.Query(`SELECT date(e.at, 'localtime') AS d, COALESCE(SUM(MAX(j.size_before - j.size_after, 0)),0) FROM events e JOIN jobs j ON j.id=e.job_id
-WHERE e.kind='job' AND e.to_status='done' AND j.status='done' AND j.size_before>0 AND date(e.at, 'localtime') >= ? GROUP BY d`, from)
+	// what was freed that day, NET and dated as the summary's freedLast7d (review ab99630 P2-1)
+	rows, err = s.db.Query(`SELECT date(`+freedAtSQL+`, 'localtime') AS d, SUM(`+freedSQL+`) FROM jobs
+WHERE `+freedSQL+` IS NOT NULL AND date(`+freedAtSQL+`, 'localtime') >= ? GROUP BY d`, from)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +97,7 @@ WHERE e.kind='job' AND e.to_status='done' AND j.status='done' AND j.size_before>
 		if by[d] == nil {
 			by[d] = &Day{Day: d}
 		}
-		by[d].SavedBytes = b
+		by[d].FreedBytes = b
 	}
 	rows.Close()
 	out := make([]Day, 0, n)
