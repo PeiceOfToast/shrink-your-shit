@@ -209,3 +209,24 @@ func TestPausedLibraryJobsHaveNoPosition(t *testing.T) {
 		t.Errorf("%s", body)
 	}
 }
+
+// User review 11-12 item 2 (ui-shop 14:01Z): every worker at once, answered with the workers list.
+func TestV2AllWorkersSwitch(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	act := func(action string) (int, string) {
+		code, body, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/workers/all/" + action, body: `{}`, ctype: "application/json"})
+		return code, body
+	}
+	if code, body := act("drain"); code != 200 || !st.Paused() || !strings.Contains(body, `"items":[`) || !strings.Contains(body, `"total":1`) {
+		t.Errorf("drain %d %s", code, body)
+	}
+	if code, body := act("start"); code != 200 || st.Paused() || !strings.Contains(body, `"status":"online"`) {
+		t.Errorf("start %d %s", code, body)
+	}
+	if code, body := act("stop"); code != 200 || !st.Paused() || !strings.Contains(body, `"status":"paused"`) {
+		t.Errorf("stop %d %s", code, body)
+	}
+	if code, body := act("explode"); code != 404 {
+		t.Errorf("unknown %d %s", code, body)
+	}
+}
