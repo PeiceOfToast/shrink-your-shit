@@ -115,6 +115,8 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 		return 0
 	}
 	seen := map[string]bool{}
+	sizes := map[string]int64{} // each seen file's size: an original left in place that changed (V5c)
+	var walked []int64          // libraries walked whole in this pass
 	for _, t := range targets {
 		lib := t.Path
 		videos := 0
@@ -147,7 +149,7 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 			if err != nil {
 				return nil
 			}
-			seen[path] = true
+			seen[path], sizes[path] = true, info.Size()
 			videos++
 			s.setScanning(t.LibraryID, videos, false)
 			if code, ignore := Guard(lib, path, info); ignore {
@@ -175,10 +177,12 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 			if err := s.Store.SetLibraryScanned(t.LibraryID, videos); err != nil {
 				log.Printf("scan: %s: %v", lib, err)
 			}
+			walked = append(walked, t.LibraryID)
 		}
 	}
 	if ctx.Err() == nil {
 		s.forgetUnseen(seen)
+		s.markOriginalsGone(walked, sizes)
 	}
 	return queued
 }
@@ -468,3 +472,56 @@ func (s *Scanner) NextScan() time.Time {
 	defer s.mu.Unlock()
 	return s.nextScan
 }
+
+// markOriginalsGone records the originals left where they were (beside, or with a folder for new files)
+// that this pass no longer found, so their saving counts as freed, and those that changed (another
+// size: it is a new file, converted on its own), whose saving no longer counts (V5c, design call 3).
+// Only in the libraries walked whole (a paused one isn't), and gone only when the file is really not
+// there: a folder that couldn't be read hides its files from a walk without deleting them.
+func (s *Scanner) markOriginalsGone(walked []int64, sizes map[string]int64) {
+	left, err := s.Store.LeftOriginals(walked)
+	if err != nil {
+		log.Printf("scan: originals left in place: %v", err)
+		return
+	}
+	for _, o := range left {
+		dir := filepath.Dir(o.Path)
+		if size, seen := sizes[o.Path]; seen {
+			// it is surely there now: its folder's disk is the one to compare with later (also when the id
+			// changed: a reboot, NFS or USB; review-ae6749e delta (B))
+			if d, ok := originalDisk(dir); ok && d != o.Disk {
+				s.Store.SetOriginalDisk(o.JobID, d)
+			}
+			if size != o.Size {
+				if err := s.Store.SetOriginalChanged(o.JobID); err != nil {
+					log.Printf("scan: %s: %v", o.Path, err)
+				}
+			}
+			continue
+		}
+		// not seen: removed only if its folder is on the disk it was on (a nested mount unmounted leaves
+		// an empty folder on another disk: review-ae6749e P2). A folder deleted with it: its nearest
+		// folder that is still there must be on that disk. No disk known: it can't be told, so it waits.
+		if o.Disk == "" {
+			continue
+		}
+		at := dir
+		for {
+			if _, err := os.Stat(at); err == nil || filepath.Dir(at) == at {
+				break
+			}
+			at = filepath.Dir(at)
+		}
+		if d, ok := originalDisk(at); !ok || d != o.Disk {
+			continue
+		}
+		if _, err := os.Lstat(o.Path); errors.Is(err, fs.ErrNotExist) {
+			if err := s.Store.SetOriginalGone(o.JobID); err != nil {
+				log.Printf("scan: %s: %v", o.Path, err)
+			}
+		}
+	}
+}
+
+// originalDisk is the disk a folder is on (jobs.DiskOf); tests replace it to fake a mount.
+var originalDisk = jobs.DiskOf

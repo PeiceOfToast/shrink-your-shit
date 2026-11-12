@@ -147,6 +147,31 @@ func TestV2SummaryWorkersRunningIsACount(t *testing.T) {
 	}
 }
 
+// V5c (ui-shop 01:31Z): the summary's bytes per library, and freed in the last 7 days, dated by when a
+// left-in-place original was found gone.
+func TestV2SummaryFreedBytes(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	other, _ := st.AddLibrary("TV", t.TempDir(), rules.SliderTemplate(3), true)
+	id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "a.mkv"), SizeBefore: 1000})
+	st.Claim("w")
+	st.Complete(id, filepath.Join(lib.Path+" (shrunk)", "a.mkv"), 400) // output-first: the original stays
+	want := func(s string) {
+		t.Helper()
+		if _, b, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/summary"}); !strings.Contains(b, s) {
+			t.Errorf("want %s in %s", s, b)
+		}
+	}
+	movies, tv := strconv.FormatInt(lib.ID, 10), strconv.FormatInt(other.ID, 10)
+	// left where it was: could free, not waiting (design 01:55Z)
+	want(`{"couldFree":600,"freed":0,"libraryId":"` + movies + `","waitingToFree":0}`)
+	want(`{"couldFree":0,"freed":0,"libraryId":"` + tv + `","waitingToFree":0}`)
+	want(`"couldFree":600,"freed":0,"freedLast7d":0`)
+	st.SetOriginalGone(id) // a scan found the original gone
+	want(`{"couldFree":0,"freed":600,"libraryId":"` + movies + `","waitingToFree":0}`)
+	want(`"couldFree":0,"freed":600,"freedLast7d":600`)
+}
+
 // A library's discovery shows the interval the scanner runs with: a saved Settings value wins over the
 // flag (#136).
 func TestV2LibraryScanEveryFollowsSettings(t *testing.T) {
