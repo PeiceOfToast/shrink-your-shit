@@ -4,6 +4,7 @@ package jobs
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -41,6 +42,26 @@ func TestUpgradeFrom34AddsRemoteWorkers(t *testing.T) {
 }
 
 // rewind35 takes away what migration 35 (remote workers) added.
-var rewind35 = []string{`DROP TABLE worker_pairings`, `ALTER TABLE workers DROP COLUMN kind`, `ALTER TABLE workers DROP COLUMN token_hash`,
+var rewind35 = []string{`DROP INDEX workers_token`, `DROP TABLE worker_pairings`, `ALTER TABLE workers DROP COLUMN kind`, `ALTER TABLE workers DROP COLUMN token_hash`,
 	`ALTER TABLE workers DROP COLUMN version`, `ALTER TABLE workers DROP COLUMN api_level`, `ALTER TABLE workers DROP COLUMN last_seen`,
 	`ALTER TABLE workers DROP COLUMN capabilities`}
+
+// review 95756cc: every worker call finds its worker by its token's hash, by index.
+func TestWorkerByTokenUsesItsIndex(t *testing.T) {
+	s := open(t)
+	var plan string
+	rows, err := s.db.Query(`EXPLAIN QUERY PLAN SELECT id FROM workers WHERE kind='remote' AND token_hash=?`, "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var a, b, c int
+		var d string
+		rows.Scan(&a, &b, &c, &d)
+		plan += d + "; "
+	}
+	rows.Close()
+	if !strings.Contains(plan, "workers_token") {
+		t.Errorf("plan %s", plan)
+	}
+}
