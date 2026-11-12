@@ -38,20 +38,21 @@ func (s *Store) FreedSince(at string) (int64, error) {
 type LeftOriginal struct {
 	JobID int64
 	Path  string
-	Size  int64 // the original's size when it was converted
+	Size  int64  // the original's size when it was converted
+	Disk  string // the disk its folder was on then ("": not known: a job done before it was recorded)
 }
 
 // LeftOriginals are those of the given libraries' done jobs.
 func (s *Store) LeftOriginals(libraryIDs []int64) ([]LeftOriginal, error) {
 	var out []LeftOriginal
 	for _, id := range libraryIDs {
-		rows, err := s.db.Query(`SELECT id, path, size_before FROM jobs WHERE library_id=? AND status='done' AND original_gone_at='' AND original_changed=0 AND `+leftSQL, id)
+		rows, err := s.db.Query(`SELECT id, path, size_before, original_disk FROM jobs WHERE library_id=? AND status='done' AND original_gone_at='' AND original_changed=0 AND `+leftSQL, id)
 		if err != nil {
 			return nil, err
 		}
 		for rows.Next() {
 			var o LeftOriginal
-			if err := rows.Scan(&o.JobID, &o.Path, &o.Size); err != nil {
+			if err := rows.Scan(&o.JobID, &o.Path, &o.Size, &o.Disk); err != nil {
 				rows.Close()
 				return nil, err
 			}
@@ -72,5 +73,15 @@ func (s *Store) SetOriginalGone(id int64) error {
 // saving counts nowhere any more (design call 3); the new file is converted on its own.
 func (s *Store) SetOriginalChanged(id int64) error {
 	_, err := s.db.Exec(`UPDATE jobs SET original_changed=1 WHERE id=? AND original_gone_at=''`, id)
+	return err
+}
+
+// DiskOf is the disk folder p is on (false: it can't be read), as Complete records it for an original.
+func DiskOf(p string) (string, bool) { return diskOf(p) }
+
+// SetOriginalDisk records the disk job id's original's folder is on (for a job done before Complete
+// recorded it; set when a scan sees the original there).
+func (s *Store) SetOriginalDisk(id int64, disk string) error {
+	_, err := s.db.Exec(`UPDATE jobs SET original_disk=? WHERE id=? AND original_disk=''`, disk, id)
 	return err
 }
