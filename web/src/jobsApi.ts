@@ -52,3 +52,9 @@ export async function restoreKept(id: string): Promise<Answer<{ ok: boolean; pat
   if (MOCK) return { error: { code: "not_available", message: "The sample install keeps no originals." } };
   return call("POST", "/api/kept/" + encodeURIComponent(id) + "/restore", {});
 }
+// #163: POST /api/v2/jobs/{id}/convert-again runs a Done job again from its ORIGINAL with its workflow's current version;
+// 409 not_done / original_gone / original_busy carry the server's sentence. The sample install has no originals to use.
+export async function convertDoneAgain(id: string): Promise<Answer<{ ok: boolean; jobId: string }>> {
+  if (MOCK) return { error: { code: "not_available", message: "The sample install can't convert a file again." } };
+  return call("POST", "/api/v2/jobs/" + encodeURIComponent(id) + "/convert-again", {});
+}
