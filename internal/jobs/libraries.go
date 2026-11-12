@@ -476,6 +476,12 @@ func (s *Store) DeleteLibrary(id int64) error {
 	if _, err := tx.Exec(`DELETE FROM jobs WHERE library_id=? AND status=?`, id, Queued); err != nil {
 		return err
 	}
+	// their files' "queued" records go too, so a library added again on the folder decides them afresh
+	// (ui-shop, #159 QA); every other decision (skipped, stopped, restored) stays
+	if _, err := tx.Exec(`DELETE FROM files WHERE substr(decision, 1, length(?)) = ? AND NOT EXISTS (SELECT 1 FROM jobs WHERE jobs.path=files.path)`,
+		DecisionQueued, DecisionQueued); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
