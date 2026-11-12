@@ -36,6 +36,7 @@ type OSExec struct{}
 
 func (OSExec) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	dieWithParent(cmd)
 	var out limitedBuffer
 	var stderr tail
 	var errText strings.Builder
@@ -68,6 +69,7 @@ func (l *limitedBuffer) Write(p []byte) (int, error) {
 
 func (OSExec) Capture(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	dieWithParent(cmd)
 	var out limitedBuffer
 	errBuf := headBuffer{max: maxStderrBytes}
 	cmd.Stdout, cmd.Stderr = &out, &errBuf
@@ -103,6 +105,7 @@ func (h *headBuffer) Write(p []byte) (int, error) {
 
 func (OSExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	dieWithParent(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", err

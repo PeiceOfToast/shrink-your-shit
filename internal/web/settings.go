@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"regexp"
 	"sync"
+	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -38,6 +39,9 @@ type Settings struct {
 	// Languages are the person's languages for "Keep only my languages" (slice 25b): ISO 639-2 codes,
 	// stored in one form (rules.CanonLang); two-letter codes and the 639-2/T forms are accepted.
 	Languages []string `json:"languages"`
+	// ScanEvery is how often libraries are looked at, in seconds, once someone has changed it here (0:
+	// not changed: the -scan-every flag is used; design 01:41Z, a saved value wins).
+	ScanEvery int `json:"scanEvery"`
 }
 
 // QuietHours: both "HH:MM", or both "".
@@ -135,9 +139,9 @@ func (ss *settingsStore) save(s Settings) error {
 }
 
 // readOnlySettings are shown by GET and ignored in a PATCH (the page may send back what it got).
-var readOnlySettings = map[string]bool{"authRequired": true, "trashPath": true, "updateAvailable": true}
+var readOnlySettings = map[string]bool{"scanEverySource": true, "authRequired": true, "trashPath": true, "updateAvailable": true}
 
-func settingsRoutes(api *http.ServeMux, ss *settingsStore, access *Access) {
+func settingsRoutes(api *http.ServeMux, ss *settingsStore, access *Access, eng Engine) {
 	view := func(s Settings) map[string]any {
 		b, _ := json.Marshal(s)
 		var m map[string]any
@@ -148,6 +152,12 @@ func settingsRoutes(api *http.ServeMux, ss *settingsStore, access *Access) {
 		m["controlLevel"], m["perLibraryFlow"] = cmp.Or(s.OldControlLevel, "basic"), s.OldPerLibraryFlow != nil && *s.OldPerLibraryFlow
 		m["trashPath"] = "Kept next to each file, in a folder called .syp-trash"
 		m["updateAvailable"] = nil
+		// how often libraries are looked at, in seconds: the value the scanner runs with now (ui-shop
+		// 01:41Z). It is the -scan-every flag; once it can be changed here, a saved value wins (design).
+		m["scanEvery"], m["scanEverySource"] = int(eng.ScanEvery.Seconds()), "flag"
+		if s.ScanEvery > 0 {
+			m["scanEvery"], m["scanEverySource"] = s.ScanEvery, "saved"
+		}
 		m["integrations"] = map[string]any{ // integrations come in a later slice; empty, so the page can show them
 			"sonarr": map[string]any{"url": "", "hasKey": false}, "radarr": map[string]any{"url": "", "hasKey": false},
 			"plex": map[string]any{"url": "", "hasKey": false}, "jellyfin": map[string]any{"url": "", "hasKey": false},
@@ -187,6 +197,20 @@ func settingsRoutes(api *http.ServeMux, ss *settingsStore, access *Access) {
 				continue
 			case k == "controlLevel" || k == "perLibraryFlow": // retired, stored for one release (lead 04:39Z); may be missing when none is stored
 				m[k] = v
+			case k == "scanEvery": // at least the settle time (a new file is decided on its second look, at least that apart), at most a day
+				var n int
+				if json.Unmarshal(v, &n) != nil {
+					apiError(w, http.StatusBadRequest, "invalid_setting", "scanEvery is a whole number of seconds. Nothing was changed.")
+					return
+				}
+				if s.ScanEvery == 0 && n == int(eng.ScanEvery.Seconds()) {
+					continue // the flag's value sent back as it came: not a change, it stays the flag's
+				}
+				if low := max(int(eng.Settle.Seconds()), 1); n < low || n > 86400 {
+					apiError(w, http.StatusBadRequest, "invalid_setting", fmt.Sprintf("Look for new files every %d seconds to 24 hours (86400 seconds): a new file is converted once it has stayed the same for %d seconds. Nothing was changed.", low, low))
+					return
+				}
+				m[k] = v
 			case k == "integrations":
 				apiError(w, http.StatusBadRequest, "not_available", "Integrations can't be set up yet; they come in a later version. Nothing was changed.")
 				return
@@ -225,6 +249,9 @@ func settingsRoutes(api *http.ServeMux, ss *settingsStore, access *Access) {
 		if err := ss.save(next); err != nil {
 			serverError(w, err)
 			return
+		}
+		if next.ScanEvery > 0 && next.ScanEvery != s.ScanEvery && eng.SetScanEvery != nil { // applied now, no restart
+			eng.SetScanEvery(time.Duration(next.ScanEvery) * time.Second)
 		}
 		writeJSON(w, view(next))
 	})
