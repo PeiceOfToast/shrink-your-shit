@@ -1,4 +1,4 @@
-// First run (/next/start; DESIGN/v2 IA.md "First run", mockups/start*.html) on the real server's /api/settings,
+// First run (/start; DESIGN/v2 IA.md "First run", mockups/start*.html) on the real server's /api/settings,
 // /api/libraries, /api/flows and /api/workers (or the mock with ?mock=1). Three steps: Test one file waits for the
 // engine's test run (SCREENS "Contract gaps"), so its Start the worker / Not yet end step 3.
 // Step 1 can't make its library yet (a library needs a workflow, which step 2 makes), so its name and folder wait in

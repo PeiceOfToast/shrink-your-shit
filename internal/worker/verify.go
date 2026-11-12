@@ -51,7 +51,7 @@ func fullDecodeTimeout(durationSec float64) time.Duration {
 // checkFailed turns an error from a check's ffmpeg/ffprobe call into the refusal reason, saying so
 // plainly when it was our time limit that ended it.
 func checkFailed(cctx context.Context, what string, err error) error {
-	log.Printf("check failed: %s: %v", what, err) // the technical detail, for the log and Settings > System
+	log.Printf("check failed: %s: %v", what, err) // the technical detail, for the log and Settings > About
 	// both may pass (a slow or busy disk, a crash of the tool): tried again later (DD-2)
 	if errors.Is(cctx.Err(), context.DeadlineExceeded) {
 		return retryable(kept("%s took too long, so the original is kept. Press Retry later; a very slow disk or a damaged file can cause this", what), retryGeneral)
@@ -258,10 +258,10 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 	has, err := w.hasFilter(ctx, "ssim")
 	if err != nil {
 		log.Printf("picture comparison filter: %v", err)
-		return kept("it could not be checked whether picture quality can be compared. Press Retry; if it keeps failing, Settings > System says what is wrong")
+		return kept("it could not be checked whether picture quality can be compared. Press Retry; if it keeps failing, Settings > About says what is wrong")
 	}
 	if !has {
-		return kept("the installed converter cannot compare picture quality, which is needed before a file is replaced. Settings > System says what to install")
+		return kept("the installed converter cannot compare picture quality, which is needed before a file is replaced. Settings > About says what to install")
 	}
 	threshold := w.minSSIM()
 	if planSSIM > 0 { // the flow's own threshold (a slider position's SSIM gate)

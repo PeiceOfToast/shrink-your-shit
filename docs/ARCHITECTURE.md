@@ -180,7 +180,7 @@ flows in plain words, raw numbers only in `detail`.
 
 `internal/doctor` is the one set of checks behind three places (FEATURE-PLAN FR-3):
 `POST /api/libraries/check {path}` (first-run checks a folder as soon as it is chosen),
-`GET /api/system/health` (Settings > System) and `shrink-your-shit doctor`.
+`GET /api/system/health` (Settings > About) and `shrink-your-shit doctor`.
 
 - **Converter:** ffmpeg and ffprobe found (with versions), libx265, the `ssim` filter (verify needs
   it). Hardware HEVC encoders are only a note, and only those that encode a test frame here count:
@@ -304,7 +304,7 @@ the result and the original was deliberately left alone, with the reason in the 
    The job's detail, which the page shows, is plain words written where the failure happens
    (`failed(plain, err)` and `kept(...)` in `internal/worker`; `plainFailure` covers a full disk, a
    permission refusal and anything else). It names no paths, tools or raw errors (COPY-1), and the raw
-   error goes to the log, which Settings > System shows (`TestFailedDetailsArePlain`).
+   error goes to the log, which Settings > About shows (`TestFailedDetailsArePlain`).
 
 `Expect` (`worker/expect.go`) is "what the new file must look like": a list of stream expectations
 in output order, chapters, duration, frame count. `DefaultExpect(source)` builds it

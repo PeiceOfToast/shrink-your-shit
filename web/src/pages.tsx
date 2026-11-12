@@ -18,7 +18,7 @@ export function Coming({ item }: { item: NavItem }) {
   return (
     <div className="stack">
       <PageHead icon={item.icon} title={item.label} help={WHAT[item.to]} />
-      <Empty icon={item.icon} text={item.label + " comes in a later step. Until then, use the current interface."}><a className="btn" href="/">Open the current interface</a></Empty>
+      <Empty icon={item.icon} text={item.label + " comes in a later step."}><Link className="btn" to="/">Go to the Dashboard</Link></Empty>
     </div>
   );
 }

@@ -1,8 +1,8 @@
-// The app's own routes under /next/ with real URLs: Back/Forward and reloads work (the Go server sends index.html for
-// any /next/ path). A page with unsaved changes can ask before the app leaves it.
+// The app's own routes with real URLs at / (one UI): Back/Forward and reloads work (the Go server sends index.html for
+// any app path). A page with unsaved changes can ask before the app leaves it.
 import { useSyncExternalStore, type AnchorHTMLAttributes, type MouseEvent } from "react";
 
-export const BASE = "/next";
+export const BASE = ""; // the app is the whole interface, at / (was /next before one UI)
 const listeners = new Set<() => void>();
 let beforeLeave: (() => void) | null = null;
 

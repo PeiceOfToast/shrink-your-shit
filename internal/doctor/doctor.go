@@ -1,7 +1,7 @@
 // Copyright (C) shrink-your-shit contributors. Licensed under AGPL-3.0-or-later.
 
 // Package doctor runs the setup checks (FEATURE-PLAN FR-3): one set of checks, used by first-run's
-// folder check (POST /api/libraries/check), Settings > System (GET /api/system/health) and the
+// folder check (POST /api/libraries/check), Settings > About (GET /api/system/health) and the
 // `shrink-your-shit doctor` command. Every message says in plain words what is wrong and what to do.
 package doctor
 
