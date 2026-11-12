@@ -217,6 +217,8 @@ func v2JobItem(store *jobs.Store, it map[string]any, row jobs.FileRow, card stri
 		it["state"], it["subState"] = "queued", "waiting"
 		if row.RetryAt != "" {
 			it["state"], it["subState"] = "retry_wait", "retrying"
+		} else if l, err := store.GetLibrary(row.LibraryID); err == nil && !l.Started {
+			it["subState"] = "library_disabled" // its library is paused (V5b; design: "Library paused")
 		} else if store.Paused() {
 			it["subState"] = "processing_paused"
 		}
