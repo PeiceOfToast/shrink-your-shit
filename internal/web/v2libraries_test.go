@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -164,12 +165,37 @@ func TestV2SummaryFreedBytes(t *testing.T) {
 	}
 	movies, tv := strconv.FormatInt(lib.ID, 10), strconv.FormatInt(other.ID, 10)
 	// left where it was: could free, not waiting (design 01:55Z)
-	want(`{"couldFree":600,"freed":0,"libraryId":"` + movies + `","waitingToFree":0}`)
-	want(`{"couldFree":0,"freed":0,"libraryId":"` + tv + `","waitingToFree":0}`)
-	want(`"couldFree":600,"freed":0,"freedLast7d":0`)
+	want(`{"couldFree":600,"freed":0,"grew":0,"libraryId":"` + movies + `","waitingToFree":0}`)
+	want(`{"couldFree":0,"freed":0,"grew":0,"libraryId":"` + tv + `","waitingToFree":0}`)
+	want(`"couldFree":600,"freed":0,"freedLast7d":0,"grew":0`)
 	st.SetOriginalGone(id) // a scan found the original gone
-	want(`{"couldFree":0,"freed":600,"libraryId":"` + movies + `","waitingToFree":0}`)
-	want(`"couldFree":0,"freed":600,"freedLast7d":600`)
+	want(`{"couldFree":0,"freed":600,"grew":0,"libraryId":"` + movies + `","waitingToFree":0}`)
+	want(`"couldFree":0,"freed":600,"freedLast7d":600,"grew":0`)
+}
+
+// orch-lead 18:15Z (ui-shop review): a new file bigger than its original (kept by design) saves nothing
+// rather than a negative amount, and its growth shows as grew; seen waitingToFree -463,050 after a
+// Convert again at higher quality. One file shrank by 600, one grew by 300, both originals kept.
+func TestV2SpaceBucketsNeverNegative(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	for i, after := range []int64{400, 1300} {
+		p := filepath.Join(lib.Path, strconv.Itoa(i)+".mkv")
+		id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: p, SizeBefore: 1000})
+		st.Claim("w")
+		row, _ := st.BeginSwap(jobs.Original{JobID: id, Path: p, Trash: filepath.Join(lib.Path, ".syp-trash", strconv.Itoa(i)+".mkv")})
+		st.FinishSwap(row, time.Now().Add(7*24*time.Hour))
+		st.Complete(id, p, after)
+	}
+	movies := strconv.FormatInt(lib.ID, 10)
+	_, b, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/summary"})
+	if !strings.Contains(b, `{"couldFree":0,"freed":0,"grew":300,"libraryId":"`+movies+`","waitingToFree":600}`) ||
+		!strings.Contains(b, `"couldFree":0,"freed":0,"freedLast7d":0,"grew":300,`) || !strings.Contains(b, `"waitingToFree":600`) {
+		t.Errorf("summary: %s", b)
+	}
+	if _, b, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/libraries/" + movies}); !strings.Contains(b, `"bytes":{"couldFree":0,"freed":0,"grew":300,"waitingToFree":600}`) {
+		t.Errorf("library: %s", b)
+	}
 }
 
 // A library's discovery shows the interval the scanner runs with: a saved Settings value wins over the

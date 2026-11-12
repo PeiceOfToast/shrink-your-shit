@@ -533,6 +533,7 @@ type LibraryCounts struct {
 	// (UI-API-CONTRACT.md F1: freed + waiting = all saved).
 	FreedBytes, WaitingBytes int64
 	CouldFreeBytes           int64 // originals left where they were (output-first), still there (V5c)
+	GrewBytes                int64 // new files bigger than their originals: the growth (never in the above)
 }
 
 // SetLibraryScanned records a finished scan of library id: when, and how many videos it found.
@@ -545,7 +546,7 @@ func (s *Store) SetLibraryScanned(id int64, videos int) error {
 func (s *Store) Counts() (map[int64]LibraryCounts, error) {
 	rows, err := s.db.Query(`SELECT library_id,
   SUM(status=?), SUM(status=?), SUM(status IN (?,?)),
-  COALESCE(SUM(`+freedSQL+`),0), COALESCE(SUM(`+waitingSQL+`),0), COALESCE(SUM(`+couldFreeSQL+`),0)
+  COALESCE(SUM(`+freedSQL+`),0), COALESCE(SUM(`+waitingSQL+`),0), COALESCE(SUM(`+couldFreeSQL+`),0), COALESCE(SUM(`+grewSQL+`),0)
 FROM jobs WHERE library_id IS NOT NULL GROUP BY library_id`, Running, Queued, Failed, Kept)
 	if err != nil {
 		return nil, err
@@ -555,7 +556,7 @@ FROM jobs WHERE library_id IS NOT NULL GROUP BY library_id`, Running, Queued, Fa
 	for rows.Next() {
 		var id int64
 		var c LibraryCounts
-		if err := rows.Scan(&id, &c.Working, &c.Waiting, &c.Failed, &c.FreedBytes, &c.WaitingBytes, &c.CouldFreeBytes); err != nil {
+		if err := rows.Scan(&id, &c.Working, &c.Waiting, &c.Failed, &c.FreedBytes, &c.WaitingBytes, &c.CouldFreeBytes, &c.GrewBytes); err != nil {
 			return nil, err
 		}
 		out[id] = c

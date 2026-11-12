@@ -17,6 +17,7 @@ import (
 type Summary struct {
 	FreedBytes, WaitingBytes   int64
 	CouldFreeBytes             int64
+	GrewBytes                  int64 // new files bigger than their originals: the growth (never in the above)
 	WorkingFiles, WaitingFiles int
 	Skipped, Failed            int
 }
@@ -24,9 +25,9 @@ type Summary struct {
 // ActivitySummary adds up every library (and jobs from before libraries).
 func (s *Store) ActivitySummary() (Summary, error) {
 	var a Summary
-	err := s.db.QueryRow(`SELECT COALESCE(SUM(`+freedSQL+`),0), COALESCE(SUM(`+waitingSQL+`),0), COALESCE(SUM(`+couldFreeSQL+`),0),
+	err := s.db.QueryRow(`SELECT COALESCE(SUM(`+freedSQL+`),0), COALESCE(SUM(`+waitingSQL+`),0), COALESCE(SUM(`+couldFreeSQL+`),0), COALESCE(SUM(`+grewSQL+`),0),
   COALESCE(SUM(status=?),0), COALESCE(SUM(status=?),0), COALESCE(SUM(status IN (?,?)),0)
-FROM jobs`, Running, Queued, Failed, Kept).Scan(&a.FreedBytes, &a.WaitingBytes, &a.CouldFreeBytes, &a.WorkingFiles, &a.WaitingFiles, &a.Failed)
+FROM jobs`, Running, Queued, Failed, Kept).Scan(&a.FreedBytes, &a.WaitingBytes, &a.CouldFreeBytes, &a.GrewBytes, &a.WorkingFiles, &a.WaitingFiles, &a.Failed)
 	if err != nil {
 		return a, err
 	}
