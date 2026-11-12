@@ -332,6 +332,9 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine) http.
 		if in.Percent > 0 {
 			store.Progress(j.ID, in.Percent)
 		}
+		if in.Stage == "converting" && in.OutTimeUs != nil {
+			worker.ReportLive(j.ID, in.Percent, *in.OutTimeUs) // what the overview, Jobs and the events show
+		}
 		if rj := runs.get(lease); rj != nil { // the stall stop (orch-lead 19:13Z): only "converting" with a position counts
 			switch {
 			case in.Stage == "converting" && in.OutTimeUs != nil:

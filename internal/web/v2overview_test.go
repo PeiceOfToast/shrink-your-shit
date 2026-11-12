@@ -4,6 +4,7 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
 
 // User review 11-12 item 5: the overview's numbers, the same as the summary's and the Libraries page's;
@@ -209,51 +211,61 @@ func TestLocalWorkerListsOnlyItsOwnJobs(t *testing.T) {
 	}
 }
 
-// A remote job's percent is what its worker reported (the lease's stored progress): the overview has
-// no live view of a remote encode. A local job without one shows no percent.
-func TestRemoteJobsPercentIsTheReportedOne(t *testing.T) {
-	srv, st, _, _ := libServer(t, false)
-	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+// A remote job's progress is what its worker reported: its report goes into the Live entry the run
+// set up (0% at its start), so the overview, the Jobs page and the events stream all show it, and it rises.
+func TestRemoteJobsProgressIsTheReportedOne(t *testing.T) {
+	srv, st, a, _ := libServer(t, true)
+	person := a.Token()
 	code, _, _ := st.NewPairing(time.Now())
-	rw, _, err := st.Pair(code, "Desktop", "1", WorkerAPILevel, "", time.Now())
+	rw, token, err := st.Pair(code, "Desktop", "1", WorkerAPILevel, "", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	here, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "here.mkv"), SizeBefore: 1000})
-	there, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "there.mkv"), SizeBefore: 1000})
-	st.Claim("builtin")
-	st.Claim(rw.ID)
-	st.Progress(there, 40)
-	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/overview"})
-	var o struct {
-		Workers []struct {
-			ID, Kind string
-			Jobs     []struct {
-				JobID   string
-				Percent *float64
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "there.mkv"), SizeBefore: 1000})
+	c, b := workerCall(t, srv, "lease", token, `{"slots":1}`, WorkerAPILevel)
+	var l struct{ Lease struct{ ID string } }
+	json.Unmarshal([]byte(b), &l)
+	if c != 200 || l.Lease.ID == "" {
+		t.Fatalf("lease %d %s", c, b)
+	}
+	worker.SetLiveForTest(id, worker.LiveJob{Worker: rw.ID}) // what a run puts there when it starts: 0%
+	defer worker.DropLiveForTest(id)
+	for _, pct := range []float64{40, 55} {
+		body := fmt.Sprintf(`{"stage":"converting","outTimeUs":%v,"percent":%v}`, pct*1e4, pct)
+		if c, b := workerCall(t, srv, "leases/"+l.Lease.ID+"/progress", token, body, WorkerAPILevel); c != 200 {
+			t.Fatalf("progress %d %s", c, b)
+		}
+		if live, ok := worker.Live(id); !ok || live.Progress.Percent != pct {
+			t.Errorf("Live %v %v, want %v", ok, live.Progress.Percent, pct)
+		}
+		if p := livePercent(id); p == nil || *p != pct { // the events stream's job.progress
+			t.Errorf("job.progress percent %v, want %v", p, pct)
+		}
+		_, ob, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/overview", bearer: person})
+		var o struct {
+			Workers []struct {
+				Kind string
+				Jobs []struct {
+					JobID   string
+					Percent *float64
+				}
 			}
 		}
-		ActiveJobs []struct {
-			JobID   string
-			Percent *float64
+		json.Unmarshal([]byte(ob), &o)
+		found := false
+		for _, w := range o.Workers {
+			for _, j := range w.Jobs {
+				if j.JobID == strconv.FormatInt(id, 10) {
+					found = true
+					if j.Percent == nil || *j.Percent != pct {
+						t.Errorf("overview percent %v, want %v: %s", j.Percent, pct, ob)
+					}
+				}
+			}
 		}
-	}
-	json.Unmarshal([]byte(body), &o)
-	pct := map[string]*float64{}
-	for _, w := range o.Workers {
-		for _, j := range w.Jobs {
-			pct[w.Kind+"/"+j.JobID] = j.Percent
-		}
-	}
-	if p := pct["remote/"+strconv.FormatInt(there, 10)]; p == nil || *p != 40 {
-		t.Errorf("the remote job's percent: %v (%s)", p, body)
-	}
-	if p := pct["local/"+strconv.FormatInt(here, 10)]; p != nil {
-		t.Errorf("a local job without a live view has a percent: %v", *p)
-	}
-	for _, a := range o.ActiveJobs {
-		if a.JobID == strconv.FormatInt(there, 10) && (a.Percent == nil || *a.Percent != 40) {
-			t.Errorf("active jobs: the remote job's percent %v", a.Percent)
+		if !found {
+			t.Errorf("the remote job is not on the overview: %s", ob)
 		}
 	}
 }

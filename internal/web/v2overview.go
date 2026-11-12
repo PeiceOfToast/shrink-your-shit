@@ -45,15 +45,9 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 			serverError(w, err)
 			return
 		}
-		paired := map[string]bool{}
-		if rs, err := store.RemoteWorkers(); err == nil {
-			for _, rw := range rs {
-				paired[rw.ID] = true
-			}
-		}
-		live := func(w jobs.Working) map[string]any {
-			j := map[string]any{"jobId": strconv.FormatInt(w.ID, 10), "percent": nil, "fps": nil, "speed": nil, "etaS": nil}
-			if l, ok := worker.Live(w.ID); ok {
+		live := func(id int64) map[string]any {
+			j := map[string]any{"jobId": strconv.FormatInt(id, 10), "percent": nil, "fps": nil, "speed": nil, "etaS": nil}
+			if l, ok := worker.Live(id); ok {
 				p := l.Progress
 				j["percent"] = p.Percent
 				if p.FPS > 0 {
@@ -65,16 +59,13 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 				if p.ETASeconds >= 0 {
 					j["etaS"] = int(p.ETASeconds + 0.5)
 				}
-			} else if paired[w.Worker] && w.Progress > 0 {
-				// a remote worker's job has no live view here; the percent its reports stored is what it showed
-				j["percent"] = w.Progress
 			}
 			return j
 		}
 		active := []map[string]any{}
 		byWorker := map[string][]map[string]any{}
 		for _, j := range working {
-			l := live(j)
+			l := live(j.ID)
 			l["name"] = filepath.Base(j.Path)
 			byWorker[j.Worker] = append(byWorker[j.Worker], l)
 			act := map[string]any{"jobId": l["jobId"], "name": l["name"], "percent": l["percent"], "etaS": l["etaS"], "expectedSavingBytes": nil,
@@ -88,6 +79,12 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 		if err != nil {
 			serverError(w, err)
 			return
+		}
+		paired := map[string]bool{}
+		for _, it := range all {
+			if it["kind"] == "remote" {
+				paired[it["id"].(string)] = true
+			}
 		}
 		workers := []map[string]any{}
 		for _, it := range all {
