@@ -304,9 +304,9 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 			w.Queue.PutProbe(final, st.Size(), st.ModTime().UnixNano(), string(b))
 		}
 	}
-	if err := w.Queue.Complete(job.ID, final, size); err != nil {
-		return true, err
-	}
+	// The log line and the steps first, then done: a job's record is complete by the time its state says
+	// done, so a stream that ends on done never misses them (review-7484a34). The new file is in place
+	// already, so they are true even if recording done fails.
 	// before and after, also when the new file is not smaller (it is kept: always standardize)
 	w.jobf(job.ID, ": done, %s: %s -> %s", final, rules.HumanBytes(job.SizeBefore), rules.HumanBytes(size))
 	w.Queue.AddStep(job.ID, "verified", true, "Every check passed: the new file is complete, plays cleanly and looks like the original.")
@@ -316,6 +316,9 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 		w.Queue.AddStep(job.ID, "kept", true, "The new file was written next to the original, which stays as it is.")
 	} else {
 		w.Queue.AddStep(job.ID, "replaced", true, fmt.Sprintf("The new file is in place: %s to %s.", rules.HumanBytes(job.SizeBefore), rules.HumanBytes(size)))
+	}
+	if err := w.Queue.Complete(job.ID, final, size); err != nil {
+		return true, err
 	}
 	if w.OnDone != nil {
 		w.OnDone(job, final)
