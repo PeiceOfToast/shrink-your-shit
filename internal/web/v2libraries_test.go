@@ -145,3 +145,17 @@ func TestV2SummaryWorkersRunningIsACount(t *testing.T) {
 		t.Errorf("stopped: %s", b)
 	}
 }
+
+// A library's discovery shows the interval the scanner runs with: a saved Settings value wins over the
+// flag (#136).
+func TestV2LibraryScanEveryFollowsSettings(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	if code, b, _ := do(t, nil, srv, call{method: "PATCH", path: "/api/settings", body: `{"scanEvery":120}`, ctype: "application/json"}); code != 200 {
+		t.Fatalf("%d %s", code, b)
+	}
+	if _, b, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/libraries/" + strconv.FormatInt(lib.ID, 10)}); !strings.Contains(b, `"scanEverySeconds":120`) ||
+		!strings.Contains(b, `"scheduleLabel":"Every 2 minutes"`) {
+		t.Errorf("%s", b)
+	}
+}
