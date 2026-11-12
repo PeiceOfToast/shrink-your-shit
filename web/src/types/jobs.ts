@@ -39,6 +39,8 @@ export interface JobDetail {
   file?: { path: string; bytes: number }; attempts?: number; retryAt?: Time | null; error?: string | null; worker?: string | null;
   createdAt?: Time; updatedAt?: Time; library?: { id: ID; name: string }; workflow?: { id: ID; revisionId: ID; version: number };
   metadata?: { before: Probe | null; after: Probe | null };
+  // #163: a Done job converts again from its original, when the server says it can; else why not (its own words)
+  convertAgain?: { possible: boolean; reason: { code: string; message: string; deletedAt: Time | null } | null };
 }
 export interface Probe { container?: string; videoCodec?: string; bitrateKbps?: number; durationSec?: number; sizeBytes?: number;
   streams?: { index: number; type: string; codec: string; Width?: number; Height?: number; channels?: number; channelLayout?: string; language?: string }[] }

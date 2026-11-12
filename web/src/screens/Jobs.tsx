@@ -6,7 +6,8 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, count, elapsed, plural } from "../format";
-import { findSkip, getJob, jobAction, listJobs, listKept, restoreKept } from "../jobsApi";
+import { convertDoneAgain, findSkip, getJob, jobAction, listJobs, listKept, restoreKept } from "../jobsApi";
+import { getWorkflow } from "../workflowApi";
 import { onLive } from "../live";
 import { Empty, PageHead } from "../PageHead";
 import { navigate, useSearch } from "../router";
@@ -233,6 +234,16 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
     if (r) { setSaid(r.message); kl.reload(); d.reload(); onChanged(); }
   };
   const keptLine = kept && <>Replaced · kept until {new Date(kept.deleteOn).toLocaleDateString(undefined, { day: "numeric", month: "short" })} · <button ref={backBtn} className="linkbtn" type="button" aria-expanded={back} onClick={() => setBack(!back)}>Get original back</button></>;
+  // #163: a Done job converts again when the server says so (never decided here); the confirm names the workflow's
+  // CURRENT version, which is what runs. Design's two variants (replace vs output-first, the keep days) need the job's
+  // policy from the server: until then one sentence that holds for both.
+  const [again, setAgain] = useState(false), ca = j?.convertAgain, done = state === "completed";
+  const wf = useData(() => (done && ca?.possible && j?.workflow ? getWorkflow(j.workflow.id) : Promise.resolve(null)), [id, done, !!ca?.possible]);
+  const runAgain = async () => {
+    setAgain(false);
+    const r = await act(convertDoneAgain(id), setSaid);
+    if (r) { setSaid("Queued again. It converts from the original; the earlier new file stays until the new one passes its check."); d.reload(); onChanged(); }
+  };
   const before = fmtV(j?.metadata?.before), after = fmtV(j?.metadata?.after);
   const reason = j?.reason?.message ?? (row ? reasonText(row) : "");
   return (
@@ -247,10 +258,14 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
             {(state === "failed" || state === "retry_wait") && <button className="btn sm" type="button" onClick={() => run("retry")}><Icon id="i-refresh" />{state === "retry_wait" ? "Try now" : "Retry"}</button>}
             {active && <button className="btn sm" type="button" onClick={() => run("cancel")}><Icon id="i-stop" />{state === "queued" || state === "retry_wait" ? "Cancel" : "Stop"}</button>}
             {/* a skipped file whose job is gone (a workflow's skip: the server says removed) can still be converted again (review f1aaf30) */}
-            {/* dev-qa (qa-v6-v7a C): a Done job can't go back to the queue (the server refuses done -> queued), so no Convert again there */}
+            {done && ca?.possible && <button className="btn sm" type="button" aria-expanded={again} onClick={() => setAgain(!again)}><Icon id="i-arrow-r" />Convert again</button>}
             {(state === "skipped" || state === "cancelled") && (!j?.removed || !!own?.id.startsWith("skip-")) && <button className="btn sm" type="button" onClick={() => run("requeue")}><Icon id="i-arrow-r" />Convert again</button>}
             <span className="sp" /><button className="btn sm ghost" type="button" title="Copy the job ID" onClick={() => navigator.clipboard?.writeText(id).then(() => setSaid("Job ID " + id + " copied."), () => setSaid("Job ID: " + id))}><Icon id="i-copy" />ID {id}</button>
           </div>
+          {done && ca && !ca.possible && ca.reason && <p className="muted sm">{ca.reason.message}</p>}
+          {again && <div role="alertdialog" aria-label="Convert again?" style={{ padding: 12, border: "1px solid var(--border-strong)", borderRadius: "var(--radius)", background: "var(--raised)" }} onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), setAgain(false))}>
+            <p style={{ margin: "0 0 8px" }}>Convert {name} again{wf.data && !failed(wf.data) ? " with " + wf.data.name + (wf.data.version ? " v" + wf.data.version : "") : ""}? It starts from the original, never from the new file. The earlier new file is replaced once the new one passes its check.</p>
+            <div className="row"><button className="btn sm primary" type="button" autoFocus onClick={runAgain}>Convert again</button><button className="btn sm ghost" type="button" onClick={() => setAgain(false)}>Cancel</button></div></div>}
           <p className="muted" role="status">{said}</p>
           {d.error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{d.error.message}</span></p>}
           {/* review db7b1f1 P3: "removed" is the server's flag, not a person's word. Only a job removed with its library
