@@ -28,6 +28,9 @@ import (
 type Issue struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	// Folder and Reason: for no_default_folder, the parent folder and why (jobs.FolderProblem).
+	Folder string `json:"folder,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // FolderReport is POST /api/libraries/check's answer (UI-API-CONTRACT.md line 21).
@@ -298,7 +301,7 @@ func (c *Checker) Folder(ctx context.Context, path string) (r FolderReport) {
 		path = real // a folder chosen through a link is checked as the folder it points to, as it is stored
 	}
 	if jobs.SystemFolder(path) { // never a library (slice 23): nothing else to check
-		r.Blockers = append(r.Blockers, Issue{"system_folder", jobs.ErrSystemFolder.Error()})
+		r.Blockers = append(r.Blockers, Issue{Code: "system_folder", Message: jobs.ErrSystemFolder.Error()})
 		return r
 	}
 	st, err := os.Stat(path)
@@ -309,11 +312,11 @@ func (c *Checker) Folder(ctx context.Context, path string) (r FolderReport) {
 		_, err = os.ReadDir(path)
 	}
 	if err != nil {
-		r.Blockers = append(r.Blockers, Issue{"unreadable", "We can't open this folder. Check the path, and that shrink-your-shit is allowed to read it."})
+		r.Blockers = append(r.Blockers, Issue{Code: "unreadable", Message: "We can't open this folder. Check the path, and that shrink-your-shit is allowed to read it."})
 		return r
 	}
 	if err := writeProbe(path); err != nil {
-		r.Blockers = append(r.Blockers, Issue{"read_only", ReadOnlyMessage(path)})
+		r.Blockers = append(r.Blockers, Issue{Code: "read_only", Message: ReadOnlyMessage(path)})
 	}
 
 	var largest int64
@@ -351,41 +354,41 @@ func (c *Checker) Folder(ctx context.Context, path string) (r FolderReport) {
 	})
 
 	if r.VideoCount == 0 {
-		r.Blockers = append(r.Blockers, Issue{"no_videos", "We found no videos here. Pick the folder that holds them."})
+		r.Blockers = append(r.Blockers, Issue{Code: "no_videos", Message: "We found no videos here. Pick the folder that holds them."})
 	} else if free, err := c.freeSpace(path); err != nil {
 		// Not silent: converting needs to know the space, and stops a file when it cannot.
-		r.Notes = append(r.Notes, Issue{"space_unknown", "We couldn't check how much space is free on this disk. Files here are only converted when there is room, so check that the disk is working."})
+		r.Notes = append(r.Notes, Issue{Code: "space_unknown", Message: "We couldn't check how much space is free on this disk. Files here are only converted when there is room, so check that the disk is working."})
 	} else if need := worker.SpaceNeeded(largest); free < need {
-		r.Blockers = append(r.Blockers, Issue{"low_space", fmt.Sprintf(
+		r.Blockers = append(r.Blockers, Issue{Code: "low_space", Message: fmt.Sprintf(
 			"Only %s free on this disk. Free up space (about %s is enough to start), then press Check again.", gb(free), gb(need))})
 	}
 	tools := c.Tools(ctx)
 	if !tools.Converts() {
-		r.Blockers = append(r.Blockers, Issue{"no_converter", "The converter is not installed correctly."})
+		r.Blockers = append(r.Blockers, Issue{Code: "no_converter", Message: "The converter is not installed correctly."})
 	}
 	// Messages here are shown as they are in first-run: plain words only (DESIGN/ACCEPTANCE.md COPY-1,
 	// FIRST-RUN.md "States and errors"). The health report's details may be technical.
 	if c.KnownOriginals != nil {
 		if known, err := c.KnownOriginals(); err == nil {
 			for _, o := range OrphanedOriginals(path, known) {
-				r.Notes = append(r.Notes, Issue{"orphaned_originals", o.Message()})
+				r.Notes = append(r.Notes, Issue{Code: "orphaned_originals", Message: o.Message()})
 			}
 		}
 	}
 	if hardlinked == 1 {
-		r.Notes = append(r.Notes, Issue{"hardlinks", "1 file is shared with another folder (for example by Radarr). We will leave it alone, because changing it would break the link."})
+		r.Notes = append(r.Notes, Issue{Code: "hardlinks", Message: "1 file is shared with another folder (for example by Radarr). We will leave it alone, because changing it would break the link."})
 	} else if hardlinked > 1 {
-		r.Notes = append(r.Notes, Issue{"hardlinks", fmt.Sprintf("%d files are shared with another folder (for example by Radarr). We will leave them alone, because changing one would break the link.", hardlinked)})
+		r.Notes = append(r.Notes, Issue{Code: "hardlinks", Message: fmt.Sprintf("%d files are shared with another folder (for example by Radarr). We will leave them alone, because changing one would break the link.", hardlinked)})
 	}
 	if unreadable == 1 {
 		// A note, not a blocker: a disk's root often holds a folder only the system may open
 		// (lost+found), and the rest of the library is still usable.
-		r.Notes = append(r.Notes, Issue{"unreadable_folders", "1 folder inside couldn't be read; files in it won't be converted."})
+		r.Notes = append(r.Notes, Issue{Code: "unreadable_folders", Message: "1 folder inside couldn't be read; files in it won't be converted."})
 	} else if unreadable > 1 {
-		r.Notes = append(r.Notes, Issue{"unreadable_folders", fmt.Sprintf("%d folders inside couldn't be read; files in them won't be converted.", unreadable)})
+		r.Notes = append(r.Notes, Issue{Code: "unreadable_folders", Message: fmt.Sprintf("%d folders inside couldn't be read; files in them won't be converted.", unreadable)})
 	}
 	if len(tools.Hardware) == 0 {
-		r.Notes = append(r.Notes, Issue{"no_hw_encoder", "Not found. That is fine."})
+		r.Notes = append(r.Notes, Issue{Code: "no_hw_encoder", Message: "Not found. That is fine."})
 	}
 	return r
 }
