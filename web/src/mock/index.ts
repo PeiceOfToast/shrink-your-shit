@@ -158,7 +158,11 @@ export function startAll() {
   }));
   change(() => log("setting.changed", "All workers started"));
 }
-export function stopAll() {
+export function stopAll(now = true) {
+  if (!now) { // Stop after these files: a busy worker finishes them (drain), an idle one stops
+    for (const w of state.workers) if (w.status === "online" || w.status === "busy") workerAction(w.id, w.currentJobIds.length ? "drain" : "stop");
+    return;
+  }
   change((s) => {
     for (const j of s.jobs) if (j.state === "running") (j.state = "queued", (j.subState = "processing_paused"), (j.worker = null), (j.progress = null), (j.currentStep = null));
     s.jobs = s.jobs.filter((j) => j.state !== "queued"); // back in the queue
@@ -398,3 +402,15 @@ export function scanLibrary(id: ID) {
 }
 // PATCH /settings
 export const setSettings = (patch: Partial<Settings>) => change((s) => { s.settings = { ...s.settings, ...patch }; });
+
+// V7 Workers on the mock: one worker's start / stop / drain, and PATCH {name, slots, tags}.
+export function workerAction(id: ID, action: "start" | "stop" | "drain"): string | null {
+  const w = state.workers.find((x) => x.id === id);
+  if (!w) return "There is no such worker.";
+  if (w.status === "offline" || w.status === "stalled") return "This worker isn't connected.";
+  change((s) => { const x = s.workers.find((y) => y.id === id)!; x.status = action === "start" ? (x.currentJobIds.length ? "busy" : "online") : action === "drain" && x.currentJobIds.length ? "draining" : "paused"; x.statusSince = new Date().toISOString(); if (action === "stop") (x.currentJobIds = []), (x.slots.cpu.used = 0); });
+  return null;
+}
+export function patchWorker(id: ID, p: { name?: string; slots?: { cpu?: number }; tags?: string[] }) {
+  change((s) => { const x = s.workers.find((y) => y.id === id); if (!x) return; if (p.name) x.name = p.name; if (p.slots?.cpu) x.slots.cpu.total = p.slots.cpu; if (p.tags) x.tags = p.tags; });
+}

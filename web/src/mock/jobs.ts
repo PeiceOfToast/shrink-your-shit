@@ -12,8 +12,8 @@ const base = (id: string, name: string, folder: string, lib: readonly [string, s
 const prog = (pct: number, fps: number, el: number, eta: number) => ({ stage: "Converting video", percent: pct, workflowPercent: Math.round(5 + pct * 0.8), elapsedS: el, speed: 0.9, etaS: eta, fps, bitrateKbps: 8300 });
 
 let items: JobItem[] = [
-  base("48213", "Dune.Part.Two.2024.2160p.REMUX.mkv", "Dune Part Two (2024)", MOV, "running", { subState: "converting", worker: "builtin", progress: prog(62, 41, 728, 450), convertingTo: "HEVC · 10-bit · MKV", bytes: 58 * GB, resolution: "2160p" }),
-  base("48214", "The.Bear.S03E04.1080p.WEB-DL.mkv", "Season 3", TV, "validating", { subState: "checking", worker: "nas", progress: { ...prog(100, 9, 222, 0), stage: "Checking the result", percent: null, workflowPercent: 90 }, bytes: 2.1 * GB }),
+  base("j-48213", "Dune.Part.Two.2024.2160p.REMUX.mkv", "Dune Part Two (2024)", MOV, "running", { subState: "converting", worker: "builtin", progress: prog(62, 41, 728, 450), convertingTo: "HEVC · 10-bit · MKV", bytes: 58 * GB, resolution: "2160p" }),
+  base("j-48214", "The.Bear.S03E04.1080p.WEB-DL.mkv", "Season 3", TV, "validating", { subState: "checking", worker: "nas", progress: { ...prog(100, 9, 222, 0), stage: "Checking the result", percent: null, workflowPercent: 90 }, bytes: 2.1 * GB }),
   base("48220", "Oppenheimer.2023.1080p.BluRay.mkv", "Oppenheimer (2023)", MOV, "queued", { subState: "waiting", attempts: 0, retryAt: null, status: "waiting", detail: null, bytes: 14.9 * GB }),
   base("48221", "Heat.1995.1080p.mkv", "Heat (1995)", MOV, "queued", { subState: "waiting", attempts: 0, retryAt: null, status: "waiting", detail: null, bytes: 12.1 * GB }),
   base("48222", "Wedding.2019.mp4", ".", HOME, "retry_wait", { subState: "retrying", attempts: 1, retryAt: new Date(now + 25 * 60e3).toISOString(), status: "retrying", reason: { code: "low_disk_space", message: "there is not enough free disk space next to this file: about 65.2 MB is needed to convert it safely, 592.0 KB is free" },

@@ -1,0 +1,36 @@
+// V7 Workers on the real /api/v2/workers (#132), or the mock's workers with ?mock=1 (the same Worker shape).
+import { call, failed, MOCK, type Answer } from "./api";
+import * as mock from "./mock";
+import type { Worker } from "./types/v2";
+
+const base = (id: string) => "/api/v2/workers/" + encodeURIComponent(id);
+export async function listWorkers(): Promise<Answer<Worker[]>> {
+  if (MOCK) return mock.mockState().workers;
+  const r = await call<{ items: Worker[] }>("GET", "/api/v2/workers");
+  return failed(r) ? r : r.items;
+}
+export async function getWorker(id: string): Promise<Answer<Worker>> {
+  if (MOCK) return mock.mockState().workers.find((w) => w.id === id) ?? { error: { code: "not_found", message: "There is no such worker." } };
+  return call("GET", base(id));
+}
+// POST /workers/{id}/start|stop|drain: drain finishes what it is converting, then stops.
+export async function workerAction(id: string, action: "start" | "stop" | "drain"): Promise<Answer<unknown>> {
+  if (MOCK) { const e = mock.workerAction(id, action); return e ? { error: { code: "invalid", message: e } } : {}; }
+  return call("POST", base(id) + "/" + action);
+}
+export async function patchWorker(id: string, p: { name?: string; slots?: { cpu?: number }; tags?: string[] }): Promise<Answer<Worker>> {
+  if (MOCK) { mock.patchWorker(id, p); return mock.mockState().workers.find((w) => w.id === id)!; }
+  return call("PATCH", base(id), p);
+}
+// POST /workers/{id}/capabilities/test: a short real conversion with each encoder; answers the worker.
+export async function testCapabilities(id: string): Promise<Answer<Worker>> {
+  if (MOCK) return mock.mockState().workers.find((w) => w.id === id)!;
+  return call("POST", base(id) + "/capabilities/test");
+}
+// v1's GET /api/workers says whether an update stopped the workers (the notice "Converting is stopped after the update").
+export async function stoppedByUpdate(): Promise<Answer<boolean>> {
+  if (MOCK) return false;
+  const r = await call<{ stoppedByUpdate: boolean }>("GET", "/api/workers");
+  return failed(r) ? r : r.stoppedByUpdate;
+}
+export const dismissUpdateNotice = (): Promise<Answer<unknown>> => (MOCK ? Promise.resolve({}) : call("POST", "/api/workers/notice/dismiss"));
