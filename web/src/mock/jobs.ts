@@ -60,8 +60,18 @@ export function mockJob(id: string): JobDetail | null {
       after: j.state === "completed" ? { container: "matroska,webm", videoCodec: "hevc", bitrateKbps: 5300, durationSec: 7200, sizeBytes: j.afterBytes, streams: [{ index: 0, type: "video", codec: "hevc", Width: 1920, Height: 1080 }, { index: 1, type: "audio", codec: "aac", channels: 2, channelLayout: "stereo" }] } : null },
   };
 }
+// POST /api/skipped/{id}/convert-again (v1): forget the decision; the next scan looks at the file again (here: it goes
+// back to Waiting after a moment, as a scan would queue it).
+export function mockConvertAgain(skippedId: string): { ok: boolean } | { error: { code: string; message: string } } {
+  const j = items.find((x) => x.id === "skip-" + skippedId);
+  if (!j) return { error: { code: "not_found", message: "That file is not in the skipped list any more. Nothing was changed." } };
+  items = items.filter((x) => x !== j);
+  setTimeout(() => { items = [...items, { ...j, id: "9" + skippedId, jobId: "9" + skippedId, origin: "job", state: "queued", subState: "waiting", detail: null, reason: null }]; }, 1500);
+  return { ok: true };
+}
 export function mockAction(action: JobAction, ids: string[], pin?: "first" | "last" | "none"): { results: ActionResult[] } {
   const results = ids.map((id): ActionResult => {
+    if (id.startsWith("skip-")) return { id, ok: false, code: "not_found", message: "There is no such job." }; // as the server: job ids only
     const j = items.find((x) => x.id === id);
     if (!j) return { id, ok: false, code: "not_found", message: "There is no such job." };
     if (action === "cancel") {
