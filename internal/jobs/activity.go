@@ -145,11 +145,26 @@ FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id WHERE j.status IN (?,?) O
 // files or a bitrate or size cap, it is not "already in this format", and each pass converted it again,
 // a generation worse each time (dev-qa, #109 QA). Kept in the jobs table, so it holds after a restart;
 // a different file put at that path later (another size or time) is looked at as usual.
+//
+// A job done without its output's time (0: before migration 7 recorded it, which filled it in only from
+// a file record of that size, never for a replace at the same name; or the output not readable then)
+// owns the file there of the size it wrote, and that time is recorded now, at its first look: an
+// upgrading install doesn't convert its old outputs once more (review fd13e2e). Done here rather than in
+// a start-up pass, which would stat every old output, and hang on (or miss) a library that is offline.
 func (s *Store) IsOwnOutput(path string, size, mtime int64) (bool, error) {
 	var yes bool
 	err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM jobs WHERE output_path=? AND status='done' AND size_after=? AND output_mtime=? AND output_mtime<>0)`,
 		path, size, mtime).Scan(&yes)
-	return yes, err
+	if err != nil || yes {
+		return yes, err
+	}
+	r, err := s.db.Exec(`UPDATE jobs SET output_mtime=? WHERE id=(SELECT id FROM jobs WHERE output_path=? AND status='done' AND size_after=? AND output_mtime=0
+  ORDER BY id DESC LIMIT 1)`, mtime, path, size)
+	if err != nil {
+		return false, err
+	}
+	n, _ := r.RowsAffected()
+	return n == 1, nil
 }
 
 // convertedSQL is true for a files row that is the output of a done conversion: the scanner skips it
@@ -244,11 +259,35 @@ func (s *Store) Paused() bool {
 
 // SetPaused sets or clears the pause.
 func (s *Store) SetPaused(on bool) error {
-	v := "0"
+	return s.setPause("paused", "processing", on)
+}
+
+// IntakePaused reports whether scans queue nothing new (V3c; spec 7: apart from processing's pause).
+func (s *Store) IntakePaused() bool {
+	v, _, _ := s.Meta("intake_paused")
+	return v == "1"
+}
+
+// SetIntakePaused pauses or resumes intake: while paused, scans queue no new files (they're looked at
+// again once it resumes).
+func (s *Store) SetIntakePaused(on bool) error {
+	return s.setPause("intake_paused", "intake", on)
+}
+
+// setPause sets a pause and, when it changes, writes its event for the live stream (V3c):
+// processing.paused / processing.resumed, intake.paused / intake.resumed.
+func (s *Store) setPause(key, what string, on bool) error {
+	v, word := "0", what+".resumed"
 	if on {
-		v = "1"
+		v, word = "1", what+".paused"
 	}
-	return s.SetMeta("paused", v)
+	if old, _, _ := s.Meta(key); old == v {
+		return nil
+	}
+	if err := s.SetMeta(key, v); err != nil {
+		return err
+	}
+	return s.RecordEvent(word, map[string]any{"type": word})
 }
 
 // StoppedByUpdate reports whether the one-time notice "Converting is stopped after the update" is due
@@ -293,6 +332,9 @@ func (s *Store) RequestStop(id int64) (running bool, err error) {
 	case Queued:
 		if err := putFile(tx, userStoppedFile(path)); err != nil {
 			return false, err
+		}
+		if _, err := tx.Exec(`INSERT INTO events(kind, job_id, at, from_status, to_status, reason, data) VALUES ('job',?,?,?,?,?,json_object('message',?))`, id, s.stamp(), status, "cancelled", UserStoppedReason, userStoppedWords); err != nil {
+			return false, err // review 66806b3: the reason, before the row goes
 		}
 		if _, err := tx.Exec(`DELETE FROM jobs WHERE id=?`, id); err != nil {
 			return false, err
@@ -424,6 +466,7 @@ func (s *Store) UserStopped(id int64) error {
 	if err := s.PutFile(userStoppedFile(j.Path)); err != nil {
 		return err
 	}
+	s.endEvent(j, "cancelled", UserStoppedReason, userStoppedWords) // V2: the row goes, its history stays
 	if _, err = s.db.Exec(`DELETE FROM jobs WHERE id=?`, id); err != nil {
 		return err
 	}
@@ -451,6 +494,7 @@ func (s *Store) Skip(id int64, words, code string) error {
 	if err := s.PutFile(f); err != nil {
 		return err
 	}
+	s.endEvent(j, "skipped", code, upperFirst(words)+".") // V2: the row goes, its history stays
 	if _, err = s.db.Exec(`DELETE FROM jobs WHERE id=?`, id); err != nil {
 		return err
 	}
@@ -463,3 +507,38 @@ const UserStoppedReason = "user_stopped"
 
 // ErrNotStoppable: the job is not queued or running.
 var ErrNotStoppable = errors.New("this file is not waiting or converting")
+
+// endEvent writes a job's last history entry when it ends by being deleted (skipped, stopped): the
+// triggers of migration 21 see only status changes.
+func (s *Store) endEvent(j Job, to, reason, message string) {
+	s.db.Exec(`INSERT INTO events(kind, job_id, at, from_status, to_status, reason, worker, data) VALUES ('job',?,?,?,?,?,?,json_object('message',?))`,
+		j.ID, s.stamp(), string(j.Status), to, reason, j.Worker, message)
+}
+
+// upperFirst is s with its first letter capitalised (skip words are written to follow "skip: ").
+func upperFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+const userStoppedWords = "You stopped this file. It is left as it is until you press Convert again."
+
+// Reason codes (V3, the contract's list): a job's reason is always one of these, with its sentence
+// beside it. The scan's skip codes (rules.Skip*) come from the file decision; these come from the job.
+const (
+	ReasonConvertFailed = "convert_failed" // the conversion did not finish (the general case)
+	ReasonDiskFull      = "disk_full"      // the disk filled up while converting
+	ReasonCannotRead    = "cannot_read"    // not allowed to read the file
+	ReasonCannotWrite   = "cannot_write"   // not allowed to write in its folder
+	ReasonStalled       = "stalled"        // the converter stopped reporting progress
+	ReasonLowDiskSpace  = "low_disk_space" // not enough free space next to the file to convert it safely
+	ReasonKeptOriginal  = "kept_original"  // a safety check refused the result; the original stays
+	ReasonRetryLater    = "retry_later"    // a failure that may pass, from before codes were kept (migration 23)
+	ReasonRemoved       = "removed"        // the job was removed (its library went, or a clean-up)
+)
+
+// JobReasonCodes are the codes a job's own reason can have (besides the skip codes and user_stopped).
+var JobReasonCodes = []string{ReasonConvertFailed, ReasonDiskFull, ReasonCannotRead, ReasonCannotWrite, ReasonStalled,
+	ReasonLowDiskSpace, ReasonKeptOriginal, ReasonRetryLater, ReasonRemoved, UserStoppedReason}

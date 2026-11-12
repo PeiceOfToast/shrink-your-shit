@@ -38,6 +38,9 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	filesRoutes(api, store, eng) // S5, the Files view
 	workerRoutes(api, store, ss, eng)
 	previewRoutes(api, store, eng)
+	v2Summary(api, store)        // V3c: /api/v2/summary, processing and intake pauses
+	v2EventStream(api, store)    // V3a: /api/v2/events (live updates)
+	v2Jobs(api, store)           // V2: /api/v2/jobs
 	v2Workflows(api, store, eng) // UI rebuild, V1: /api/v2 workflows (UI-API-CONTRACT-v2.md)
 	// For health checks: answers without signing in and says nothing else.
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {

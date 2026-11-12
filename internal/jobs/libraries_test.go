@@ -202,7 +202,7 @@ func TestCounts(t *testing.T) {
 	}
 	f, _ := s.Enqueue(Job{LibraryID: l.ID, Path: "f"})
 	s.Claim("w")
-	s.Fail(f, "x")
+	s.Fail(f, "convert_failed", "x")
 	s.Enqueue(Job{LibraryID: l.ID, Path: "q1"})
 	s.Enqueue(Job{LibraryID: l.ID, Path: "q2"})
 	s.Claim("w")

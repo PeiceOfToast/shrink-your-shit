@@ -24,7 +24,7 @@ func TestStatusAndRetry(t *testing.T) {
 	st.AddLibrary("lib", "/videos", rules.SliderTemplate(3), true)
 	id, _ := st.Enqueue(jobs.Job{Library: "/videos", Path: "/videos/a.mkv"})
 	st.Claim("w")
-	st.Fail(id, "bad")
+	st.Fail(id, "convert_failed", "bad")
 	srv := httptest.NewServer(Handler(st, openAccess(t), Engine{}))
 	defer srv.Close()
 

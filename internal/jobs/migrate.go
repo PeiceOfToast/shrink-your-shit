@@ -244,6 +244,92 @@ CREATE TABLE workflow_revisions (
   created TEXT NOT NULL, published TEXT);
 CREATE UNIQUE INDEX workflow_revisions_number ON workflow_revisions(workflow_id, number) WHERE number IS NOT NULL;
 CREATE UNIQUE INDEX workflow_revisions_draft ON workflow_revisions(workflow_id) WHERE status = 'draft';`},
+	// V2 (UI rebuild): every job's history (spec 7), written by triggers so no path can skip it: its
+	// creation, each change of status (with the worker and the error at that moment), and its removal
+	// (cancelled, "removed", unless Skip or a stop already wrote why). priority: the bulk action's, with
+	// Claim's index.
+	{21, "job history", `
+ALTER TABLE jobs ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE job_events (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT, job_id INTEGER NOT NULL, at TEXT NOT NULL,
+  from_status TEXT, to_status TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', worker TEXT NOT NULL DEFAULT '');
+CREATE INDEX job_events_job ON job_events(job_id);
+CREATE TRIGGER job_events_insert AFTER INSERT ON jobs BEGIN
+  INSERT INTO job_events(job_id, at, from_status, to_status) VALUES (new.id, new.created, NULL, new.status);
+END;
+CREATE TRIGGER job_events_status AFTER UPDATE OF status ON jobs WHEN old.status <> new.status BEGIN
+  INSERT INTO job_events(job_id, at, from_status, to_status, reason, worker) VALUES (new.id, new.updated, old.status, new.status, new.error, new.worker);
+END;
+CREATE TRIGGER job_events_removed AFTER DELETE ON jobs
+WHEN NOT EXISTS (SELECT 1 FROM job_events WHERE job_id = old.id AND to_status IN ('skipped', 'cancelled')) BEGIN
+  INSERT INTO job_events(job_id, at, from_status, to_status, reason, worker)
+  VALUES (old.id, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), old.status, 'cancelled', 'removed', old.worker);
+END;
+CREATE INDEX jobs_claim ON jobs(status, priority DESC, id);`},
+	// V3a (live updates): one sequence for everything the event stream sends. job_events becomes events,
+	// with a kind ("job" now; workflow, pause and activity events next) and job_id only for job events;
+	// rows keep their seq, so ids already handed out stay valid, and the triggers write here.
+	{22, "events", `
+CREATE TABLE events (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL DEFAULT 'job', job_id INTEGER, at TEXT NOT NULL,
+  from_status TEXT, to_status TEXT, reason TEXT NOT NULL DEFAULT '', worker TEXT NOT NULL DEFAULT '', data TEXT);
+INSERT INTO events(seq, kind, job_id, at, from_status, to_status, reason, worker)
+  SELECT seq, 'job', job_id, at, from_status, to_status, reason, worker FROM job_events;
+DROP TRIGGER job_events_insert;
+DROP TRIGGER job_events_status;
+DROP TRIGGER job_events_removed;
+DROP TABLE job_events;
+CREATE INDEX events_job ON events(job_id);
+CREATE TRIGGER events_job_insert AFTER INSERT ON jobs BEGIN
+  INSERT INTO events(kind, job_id, at, from_status, to_status) VALUES ('job', new.id, new.created, NULL, new.status);
+END;
+CREATE TRIGGER events_job_status AFTER UPDATE OF status ON jobs WHEN old.status <> new.status BEGIN
+  INSERT INTO events(kind, job_id, at, from_status, to_status, reason, worker) VALUES ('job', new.id, new.updated, old.status, new.status, new.error, new.worker);
+END;
+CREATE TRIGGER events_job_removed AFTER DELETE ON jobs
+WHEN NOT EXISTS (SELECT 1 FROM events WHERE kind = 'job' AND job_id = old.id AND to_status IN ('skipped', 'cancelled')) BEGIN
+  INSERT INTO events(kind, job_id, at, from_status, to_status, reason, worker)
+  VALUES ('job', old.id, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), old.status, 'cancelled', 'removed', old.worker);
+END;`},
+	// V3 (ui-shop, cap-778a2f0): a job's reason is {code, message}. The code was the sentence itself for
+	// failures, kept originals and retries (jobs.error); it now has its own column, and the history keeps
+	// both: reason the code, data the sentence. Older history: the sentence moves to data, and the code
+	// comes from where the job went (ReasonCodes lists them all).
+	{23, "reason codes", `
+ALTER TABLE jobs ADD COLUMN error_code TEXT NOT NULL DEFAULT '';
+UPDATE jobs SET error_code = ` + legacyReasonCode("error", "status") + `
+  WHERE error <> '';
+UPDATE events SET data = json_object('message', reason),
+  reason = ` + legacyReasonCode("reason", "to_status") + `
+  WHERE kind = 'job' AND reason <> '' AND (reason GLOB '*[^a-z0-9_]*');
+DROP TRIGGER events_job_status;
+CREATE TRIGGER events_job_status AFTER UPDATE OF status ON jobs WHEN old.status <> new.status BEGIN
+  INSERT INTO events(kind, job_id, at, from_status, to_status, reason, worker, data) VALUES ('job', new.id, new.updated, old.status, new.status,
+    new.error_code, new.worker, CASE WHEN new.error <> '' THEN json_object('message', new.error) END);
+END;
+DROP TRIGGER events_job_removed;
+CREATE TRIGGER events_job_removed AFTER DELETE ON jobs
+WHEN NOT EXISTS (SELECT 1 FROM events WHERE kind = 'job' AND job_id = old.id AND to_status IN ('skipped', 'cancelled')) BEGIN
+  INSERT INTO events(kind, job_id, at, from_status, to_status, reason, worker, data)
+  VALUES ('job', old.id, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), old.status, 'cancelled', 'removed', old.worker,
+    json_object('message', 'This job was removed from the list.'));
+END;
+UPDATE events SET data = json_object('message', 'This job was removed from the list.') WHERE kind = 'job' AND reason = 'removed' AND data IS NULL;
+UPDATE events SET data = json_object('message', 'You stopped this file. It is left as it is until you press Convert again.')
+  WHERE kind = 'job' AND reason = 'user_stopped' AND data IS NULL;`},
+}
+
+// legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone
+// (column text), the job having gone to status (column state): the worker's own sentences say which
+// case it was; any other gets the code of where the job went (review abe2b0e).
+func legacyReasonCode(text, state string) string {
+	return `CASE
+    WHEN ` + text + ` LIKE 'there is not enough free disk space next to this file%' THEN 'low_disk_space'
+    WHEN ` + text + ` LIKE 'The disk is full%' THEN 'disk_full'
+    WHEN ` + text + ` LIKE 'shrink-your-shit is not allowed to read this file%' THEN 'cannot_read'
+    WHEN ` + text + ` LIKE 'shrink-your-shit is not allowed to write in this folder%' THEN 'cannot_write'
+    WHEN ` + text + ` LIKE 'Stopped: no progress for %' THEN 'stalled'
+    WHEN ` + state + ` = 'failed' THEN 'convert_failed' WHEN ` + state + ` = 'kept' THEN 'kept_original' ELSE 'retry_later' END`
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.

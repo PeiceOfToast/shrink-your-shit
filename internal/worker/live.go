@@ -154,3 +154,20 @@ func progressWords(pct int, etaSeconds float64) string {
 	}
 	return s + " · about " + strconv.Itoa(int(math.Round(etaSeconds/60))) + " min left"
 }
+
+// LiveIDs are the jobs some worker in this program is converting now (the live stream's progress, V3b).
+func LiveIDs() []int64 {
+	live.Lock()
+	defer live.Unlock()
+	ids := make([]int64, 0, len(live.jobs))
+	for id := range live.jobs {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// SetLiveForTest puts a running encode in the registry (tests of what reads it).
+func SetLiveForTest(id int64, j LiveJob) { setLive(id, j) }
+
+// DropLiveForTest takes it out again.
+func DropLiveForTest(id int64) { dropLive(id) }

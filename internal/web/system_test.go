@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -62,6 +63,40 @@ func TestLibraryCheck(t *testing.T) {
 	}
 	if code, body = post(t, srv, "POST", "/api/libraries/check", `{"path":"relative"}`); code != 400 || errCode(body) != "invalid_path" {
 		t.Errorf("relative: %d %s", code, body)
+	}
+}
+
+// A folder for new files inside the library is refused by the check too, with the add's own code and
+// words, so first run says it before it publishes the workflow (ui-shop 23:37Z).
+func TestLibraryCheckRefusesAnOutputFolderInside(t *testing.T) {
+	srv, st, _ := doctorServer(t, false)
+	lib := t.TempDir()
+	os.WriteFile(filepath.Join(lib, "a.mkv"), make([]byte, 2048), 0o644)
+	out := filepath.Join(lib, "converted")
+	check := func(folder string) doctor.FolderReport {
+		code, body := post(t, srv, "POST", "/api/libraries/check", fmt.Sprintf(`{"path":%q,"outputFolder":%q}`, lib, folder))
+		var r doctor.FolderReport
+		if json.Unmarshal([]byte(body), &r); code != 200 {
+			t.Fatalf("%d %s", code, body)
+		}
+		return r
+	}
+	r := check(out)
+	if r.OK || len(r.Blockers) != 1 || r.Blockers[0].Code != "inside_library" {
+		t.Fatalf("inside: %+v", r)
+	}
+	sel := rules.DefaultSelectors(3)
+	sel.Speed, sel.AfterConverting, sel.OutputDir = "slower", "folder", out
+	flow, _ := st.AddFlow("Inside", sel.Template())
+	_, body := post(t, srv, "POST", "/api/libraries", `{"name":"Movies","path":`+strconv.Quote(lib)+`,"flowId":"`+itoa(flow.ID)+`"}`)
+	if errCode(body) != "inside_library" || !strings.Contains(body, strconv.Quote(r.Blockers[0].Message)) {
+		t.Errorf("the add's refusal %s, the check's %q", body, r.Blockers[0].Message)
+	}
+	if r := check(t.TempDir()); !r.OK || len(r.Blockers) != 0 { // elsewhere: fine
+		t.Errorf("outside: %+v", r)
+	}
+	if r := check(""); !r.OK { // none given: the folder check alone
+		t.Errorf("none: %+v", r)
 	}
 }
 

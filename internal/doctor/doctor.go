@@ -46,6 +46,9 @@ type Tools struct {
 	X265, SSIM                    bool     // the HEVC encoder, the picture comparison filter
 	Hardware                      []string // hardware HEVC encoders that encoded a test frame
 	HardwareListed                []string // listed by ffmpeg but did not work here
+	// Hardware10 are the working ones that also encoded a 10-bit (Main10, p010) frame: what HDR needs
+	// on hardware (research 1.2; used from V4).
+	Hardware10 []string
 }
 
 // Converts reports whether conversions can run: ffmpeg, ffprobe, libx265 and the SSIM filter.
@@ -64,7 +67,7 @@ type Checker struct {
 	mu      sync.Mutex
 	tools   *Tools // the converter, without the hardware test
 	toolsAt time.Time
-	hw      *[2][]string // working and listed-but-failing hardware encoders
+	hw      *[3][]string // working, listed-but-failing, and 10-bit-capable hardware encoders
 	hwAt    time.Time
 	// refreshing: ToolsNow started a background check that has not finished
 	refreshing bool
@@ -86,7 +89,7 @@ func (c *Checker) Tools(ctx context.Context) Tools {
 		if c.hw != nil && time.Since(c.hwAt) < toolsTTL { // fresh: shared
 			hw := *c.hw
 			c.mu.Unlock()
-			t.Hardware, t.HardwareListed = hw[0], hw[1]
+			t.Hardware, t.HardwareListed, t.Hardware10 = hw[0], hw[1], hw[2]
 			return t
 		}
 		if run := c.hwRun; run != nil { // one test at a time (GPU session limits, review c66c66b): wait for it
@@ -110,7 +113,7 @@ func (c *Checker) Tools(ctx context.Context) Tools {
 		c.hwRun = nil
 		close(run)
 		c.mu.Unlock()
-		t.Hardware, t.HardwareListed = hw[0], hw[1]
+		t.Hardware, t.HardwareListed, t.Hardware10 = hw[0], hw[1], hw[2]
 		return t
 	}
 }
@@ -118,15 +121,18 @@ func (c *Checker) Tools(ctx context.Context) Tools {
 // hardwareTest finds the hardware HEVC encoders ffmpeg lists and tries each on one tiny frame (listed
 // is not the same as usable here): working ones, and listed ones that did not work. Run without the
 // lock, one at a time (Tools).
-func (c *Checker) hardwareTest(ctx context.Context, t Tools) (hw [2][]string) {
+func (c *Checker) hardwareTest(ctx context.Context, t Tools) (hw [3][]string) {
 	if t.FFmpeg == "" {
 		return hw
 	}
 	if out, _ := c.Exec.Output(ctx, t.FFmpeg, "-hide_banner", "-encoders"); len(out) > 0 {
 		for _, enc := range []string{"hevc_nvenc", "hevc_qsv", "hevc_vaapi", "hevc_videotoolbox", "hevc_amf", "hevc_mf", "hevc_v4l2m2m"} {
 			if strings.Contains(string(out), " "+enc+" ") {
-				if c.encodes(ctx, enc) {
+				if c.encodes(ctx, enc, false) {
 					hw[0] = append(hw[0], enc)
+					if c.encodes(ctx, enc, true) {
+						hw[2] = append(hw[2], enc)
+					}
 				} else {
 					hw[1] = append(hw[1], enc)
 				}
@@ -148,7 +154,7 @@ func (c *Checker) ToolsNow() (Tools, bool) {
 	stale := !ok || time.Since(c.hwAt) >= toolsTTL || time.Since(c.toolsAt) >= toolsTTL
 	if ok {
 		t = *c.tools
-		t.Hardware, t.HardwareListed = c.hw[0], c.hw[1]
+		t.Hardware, t.HardwareListed, t.Hardware10 = c.hw[0], c.hw[1], c.hw[2]
 	}
 	start := stale && !c.refreshing
 	if start {
@@ -200,13 +206,48 @@ func (c *Checker) Converter(ctx context.Context) Tools {
 	return t
 }
 
-// encodes tries one tiny frame with a hardware encoder: listed in ffmpeg is not the same as usable here.
-func (c *Checker) encodes(ctx context.Context, enc string) bool {
+// encodes tries one tiny frame with a hardware encoder (10-bit: Main10 from p010): listed in ffmpeg is
+// not the same as usable here.
+func (c *Checker) encodes(ctx context.Context, enc string, tenBit bool) bool {
 	tctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	_, err := c.Exec.Output(tctx, c.FFmpeg, "-hide_banner", "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=256x256:d=0.1",
-		"-frames:v", "1", "-c:v", enc, "-f", "null", "-")
+	_, err := c.Exec.Output(tctx, c.FFmpeg, encodeArgs(enc, tenBit, vaapiDevice())...)
 	return err == nil
+}
+
+// encodeArgs is the test encode for enc's family (research 1.2): VAAPI must open its device and upload
+// the frames (format=nv12,hwupload; the plain command fails on a working VAAPI box), QSV opens its own;
+// the others take software frames as they are. 10-bit asks for Main10 from p010 frames.
+func encodeArgs(enc string, tenBit bool, device string) []string {
+	args := []string{"-hide_banner", "-v", "error"}
+	switch {
+	case strings.HasSuffix(enc, "_vaapi"):
+		args = append(args, "-init_hw_device", "vaapi=va:"+device, "-filter_hw_device", "va")
+	case strings.HasSuffix(enc, "_qsv"):
+		args = append(args, "-init_hw_device", "qsv=qsv:hw")
+	}
+	args = append(args, "-f", "lavfi", "-i", "color=c=black:s=256x256:d=0.1", "-frames:v", "1")
+	switch {
+	case strings.HasSuffix(enc, "_vaapi") && tenBit:
+		args = append(args, "-vf", "format=p010,hwupload")
+	case strings.HasSuffix(enc, "_vaapi"):
+		args = append(args, "-vf", "format=nv12,hwupload")
+	case tenBit:
+		args = append(args, "-pix_fmt", "p010le")
+	}
+	args = append(args, "-c:v", enc)
+	if tenBit {
+		args = append(args, "-profile:v", "main10")
+	}
+	return append(args, "-f", "null", "-")
+}
+
+// vaapiDevice is the first DRM render node (/dev/dri/renderD128 on most machines).
+func vaapiDevice() string {
+	if m, _ := filepath.Glob("/dev/dri/renderD*"); len(m) > 0 {
+		return m[0]
+	}
+	return "/dev/dri/renderD128"
 }
 
 func (c *Checker) freeSpace(dir string) (uint64, error) {

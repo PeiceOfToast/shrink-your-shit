@@ -182,7 +182,7 @@ func TestCSRF(t *testing.T) {
 	do(t, c, srv, call{method: "POST", path: "/api/login", body: `{"token":"` + a.Token() + `"}`, ctype: "application/json"})
 	id, _ := st.Enqueue(jobs.Job{Library: "/lib", Path: "/lib/a.mkv"})
 	st.Claim("w")
-	st.Fail(id, "bad")
+	st.Fail(id, "convert_failed", "bad")
 	retry := "/api/jobs/1/retry"
 	for name, k := range map[string]call{
 		"another site's Origin": {method: "POST", path: retry, body: "{}", ctype: "application/json", origin: "http://evil.example"},
@@ -204,7 +204,7 @@ func TestCSRF(t *testing.T) {
 		t.Errorf("same-origin write: %d %s", code, body)
 	}
 	st.Claim("w")
-	st.Fail(id, "bad")
+	st.Fail(id, "convert_failed", "bad")
 	if code, body, _ := do(t, nil, srv, call{method: "POST", path: retry, body: "{}", ctype: "application/json; charset=utf-8", bearer: a.Token(), origin: "http://evil.example"}); code != 200 {
 		t.Errorf("bearer is exempt from the Origin check: %d %s", code, body)
 	}

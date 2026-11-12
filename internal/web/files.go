@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/doctor"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/preview"
@@ -250,8 +251,7 @@ func outputBlockers(store *jobs.Store, flowID int64, dir string, moreLibraries .
 		}
 	}
 	for _, lp := range paths {
-		lr := resolved(filepath.Clean(lp))
-		if inside(real, lr) || inside(lr, real) {
+		if outputInside(dir, lp) {
 			add("inside_library", "This folder is inside the library, so new files would be converted again. Pick a folder outside "+lp+".")
 			break
 		}
@@ -304,13 +304,28 @@ func folderRefused(w http.ResponseWriter, store *jobs.Store, flowID int64, libPa
 	if err != nil || f.Template.Selectors == nil || f.Template.Selectors.AfterConverting != "folder" {
 		return false
 	}
-	for _, b := range outputBlockers(store, flowID, f.Template.Selectors.OutputDir, libPath) {
-		if b["code"] == "inside_library" {
-			apiError(w, http.StatusBadRequest, "inside_library", "This flow saves new files to "+f.Template.Selectors.OutputDir+", which is inside this library (or holds it), so new files would be converted again. Choose another flow, or change the flow's folder. Nothing was changed.")
-			return true
-		}
+	if b := outputInsideBlocker(f.Template.Selectors.OutputDir, libPath); b != nil {
+		apiError(w, http.StatusBadRequest, b.Code, b.Message)
+		return true
 	}
 	return false
+}
+
+// outputInside reports whether new files saved to dir would land inside library folder lib, or around
+// it (links followed, so an alias can't hide it, review 6cafc6f): they would be converted again.
+func outputInside(dir, lib string) bool {
+	real, lr := resolved(filepath.Clean(dir)), resolved(filepath.Clean(lib))
+	return inside(real, lr) || inside(lr, real)
+}
+
+// outputInsideBlocker is the refusal of a library at lib whose flow saves new files to dir inside or
+// around it (nil if not): adding or moving the library answers it, and so does POST /api/libraries/check
+// with that folder, so first run can say it before the workflow is published (ui-shop 23:37Z).
+func outputInsideBlocker(dir, lib string) *doctor.Issue {
+	if !filepath.IsAbs(dir) || !outputInside(dir, lib) {
+		return nil
+	}
+	return &doctor.Issue{Code: "inside_library", Message: "This flow saves new files to " + dir + ", which is inside this library (or holds it), so new files would be converted again. Choose another flow, or change the flow's folder. Nothing was changed."}
 }
 
 // skipDetail is a skipped file's reason in words: the fixed words for its code, except already_in_format,

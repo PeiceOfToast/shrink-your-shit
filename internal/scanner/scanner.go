@@ -323,6 +323,9 @@ func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.Fil
 		s.Store.PutFile(rec)
 		return false
 	}
+	if s.Store.IntakePaused() { // V3c: nothing new is queued; not recorded, so it's looked at again on resume
+		return false
+	}
 	why := plan.Reason
 	rec.Decision = "queued: " + why
 	id, err := s.Store.Enqueue(jobs.Job{Library: t.Path, LibraryID: t.LibraryID, Path: path, Reason: why, DurationSec: pi.DurationSec, SizeBefore: st.Size()})
