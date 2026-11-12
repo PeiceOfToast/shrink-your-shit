@@ -216,13 +216,13 @@ func TestPairingTriesAreLimited(t *testing.T) {
 		return rec
 	}
 	// the wait holds no lock: a good code from another address answers at once meanwhile
-	PairFailDelay = 300 * time.Millisecond
+	PairFailDelay = time.Second // well above the bound below, also on a busy machine
 	good, _, _ := st.NewPairing(time.Now())
 	slow := make(chan int)
 	go func() { slow <- pairFrom("192.168.1.66", "WRONG-CODE").Code }()
 	time.Sleep(20 * time.Millisecond)
 	start := time.Now()
-	if rec := pairFrom("192.168.1.20", good); rec.Code != 200 || time.Since(start) > 150*time.Millisecond {
+	if rec := pairFrom("192.168.1.20", good); rec.Code != 200 || time.Since(start) > 600*time.Millisecond {
 		t.Errorf("good code while another waits: %d after %s", rec.Code, time.Since(start))
 	}
 	if c := <-slow; c != 403 {
