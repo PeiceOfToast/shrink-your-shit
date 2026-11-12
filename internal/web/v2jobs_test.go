@@ -3,6 +3,7 @@
 package web
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -153,5 +154,71 @@ func TestV2JobRevisionIsWhenItStarted(t *testing.T) {
 	st.SetFlowTemplate(lib.FlowID, rules.SliderTemplate(5)) // version 3 while it runs: it ran with 2
 	if _, body, _ := do(t, nil, srv, call{method: "GET", path: path}); !strings.Contains(body, `"version":2`) {
 		t.Errorf("running, version 3 published since: %s", body)
+	}
+}
+
+// The Waiting tab in the order workers take files (sort=queue): each job's position is its place in
+// Claim's order over the whole queue (also in a filtered list); one waiting to retry has none and comes
+// last. The positions are what Claim then actually takes.
+func TestV2JobsQueueOrder(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	movies, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	tv, _ := st.AddLibrary("TV", t.TempDir(), rules.SliderTemplate(3), true)
+	add := func(l jobs.Library, name string) int64 {
+		id, _ := st.Enqueue(jobs.Job{Library: l.Path, LibraryID: l.ID, Path: filepath.Join(l.Path, name)})
+		return id
+	}
+	retry := add(movies, "retry.mkv")
+	st.Claim("w")
+	st.RetryLater(retry, time.Now().Add(time.Hour), jobs.ReasonLowDiskSpace, "not enough free disk space")
+	a, b, c := add(movies, "a.mkv"), add(tv, "b.mkv"), add(movies, "c.mkv")
+	st.SetPriority(c, 5) // moved to the top
+
+	type item struct {
+		Name     string
+		Position *int
+	}
+	list := func(query string) []item {
+		t.Helper()
+		code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs?tab=waiting&sort=queue" + query})
+		if code != 200 {
+			t.Fatalf("%d %s", code, body)
+		}
+		var l struct{ Items []item }
+		json.Unmarshal([]byte(body), &l)
+		return l.Items
+	}
+	str := func(items []item) string {
+		var out []string
+		for _, it := range items {
+			p := "null"
+			if it.Position != nil {
+				p = strconv.Itoa(*it.Position)
+			}
+			out = append(out, it.Name+":"+p)
+		}
+		return strings.Join(out, " ")
+	}
+	if got := str(list("")); got != "c.mkv:1 a.mkv:2 b.mkv:3 retry.mkv:null" {
+		t.Errorf("queue order %q", got)
+	}
+	if got := str(list("&libraryId=" + strconv.FormatInt(tv.ID, 10))); got != "b.mkv:3" { // its place in the whole queue
+		t.Errorf("filtered %q", got)
+	}
+	if got := str(list("&limit=1&offset=1")); got != "a.mkv:2" {
+		t.Errorf("second page %q", got)
+	}
+	for _, want := range []int64{c, a, b} { // what Claim takes, one by one
+		if j, err := st.Claim("w"); err != nil || j.ID != want {
+			t.Fatalf("claimed %d %v, want %d", j.ID, err, want)
+		}
+	}
+	if _, err := st.Claim("w"); err == nil {
+		t.Error("the job waiting to retry was taken")
+	}
+	for _, bad := range []string{"/api/v2/jobs?tab=failed&sort=queue", "/api/v2/jobs?tab=waiting&sort=size"} {
+		if code, _, _ := do(t, nil, srv, call{method: "GET", path: bad}); code != 400 {
+			t.Errorf("%s: %d", bad, code)
+		}
 	}
 }

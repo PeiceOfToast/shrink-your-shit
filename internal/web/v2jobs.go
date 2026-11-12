@@ -43,6 +43,18 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 		}
 		limit, offset := pageOf(r)
 		f := jobs.FileFilter{Show: card, Q: q.Get("q"), Limit: limit, Offset: offset}
+		switch q.Get("sort") { // queue: the Waiting tab in the order workers take files (design SCREENS V6)
+		case "":
+		case "queue":
+			if tab != "waiting" {
+				apiError(w, http.StatusBadRequest, "invalid", "sort=queue is for the waiting tab.")
+				return
+			}
+			f.QueueOrder = true
+		default:
+			apiError(w, http.StatusBadRequest, "invalid", "sort is queue, or left out.")
+			return
+		}
 		if lib := q.Get("libraryId"); lib != "" {
 			id, err := strconv.ParseInt(lib, 10, 64)
 			if err != nil || id <= 0 {
@@ -62,9 +74,27 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 			return
 		}
 		days := keepDays()
+		var positions map[int64]int
+		if tab == "waiting" { // each waiting job's place in the queue (1: taken next), over all of it; null when not taken now
+			ids := []int64{}
+			for _, row := range rows {
+				ids = append(ids, row.JobID)
+			}
+			if positions, err = store.QueuePositions(ids); err != nil {
+				serverError(w, err)
+				return
+			}
+		}
 		items := []map[string]any{}
 		for _, row := range rows {
-			items = append(items, v2JobItem(store, fileItem(store, libs, row, card, days), row, card))
+			it := v2JobItem(store, fileItem(store, libs, row, card, days), row, card)
+			if tab == "waiting" {
+				it["position"] = nil
+				if p, ok := positions[row.JobID]; ok {
+					it["position"] = p
+				}
+			}
+			items = append(items, it)
 		}
 		tabCounts := map[string]int{}
 		for t, c := range v2Tabs {
