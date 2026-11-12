@@ -43,6 +43,8 @@ function Detail({ j }: { j: JobItem }) {
   return <span className="sm muted clamp2" title={reasonText(j)}>{reasonText(j)}</span>;
 }
 
+const RUNS: JobState[] = ["preparing", "running", "validating", "committing"]; // live progress only for a running row
+
 export function Jobs() {
   const search = new URLSearchParams(useSearch());
   const tab = (TABS.find(([t]) => t === search.get("tab"))?.[0] ?? "waiting") as Tab, open = search.get("job");
@@ -51,20 +53,31 @@ export function Jobs() {
   const page = useData(() => listJobs(tab, q).then((r) => (failed(r) ? r : { ...r, for: tab + "|" + q })), [tab, q], 15000);
   const [live, setLive] = useState<Record<string, JobProgressEvent["progress"]>>({});
   const reload = useRef(page.reload); reload.current = page.reload;
-  // live: a state change reloads the list (and counts) shortly after; progress updates its row in place
+  const shown = useRef<{ tab: Tab; rows: Map<string, JobState> }>({ tab, rows: new Map() });
+  // live: a state change reloads the list (and counts) shortly after; progress updates its row in place. The list can
+  // be older than the stream (dev-qa V6 b: a job that started between loading the list and the stream opening): so the
+  // stream's hello reloads it, and progress for a job the list doesn't show as converting (still Waiting there, or
+  // missing from Running) reloads it too, at most every 3 s.
   useEffect(() => {
-    let t: ReturnType<typeof setTimeout> | undefined;
+    let t: ReturnType<typeof setTimeout> | undefined, lastHeal = 0;
+    const soon = () => { clearTimeout(t); t = setTimeout(() => reload.current(), 400); };
     return onLive((type, data) => {
-      if (type === "job.progress") { const e = data as JobProgressEvent; setLive((m) => ({ ...m, [e.jobId]: e.progress })); return; }
+      if (type === "job.progress") {
+        const e = data as JobProgressEvent, sh = shown.current, st = sh.rows.get(e.jobId);
+        setLive((m) => ({ ...m, [e.jobId]: e.progress }));
+        const stale = st ? !RUNS.includes(st) : sh.tab === "running";
+        if (stale && Date.now() - lastHeal > 3000) { lastHeal = Date.now(); soon(); }
+        return;
+      }
       if (type === "job.state") { const id = (data as { jobId?: string })?.jobId; if (id) setLive((m) => { const n = { ...m }; delete n[id]; return n; }); }
-      if (type === "job.state" || type === "resync") { clearTimeout(t); t = setTimeout(() => reload.current(), 400); }
+      if (type === "job.state" || type === "resync" || type === "hello") soon();
     });
   }, []);
   useEffect(() => setSel([]), [tab]);
   const go = (t: Tab, job?: string | null) => navigate("/jobs?tab=" + t + (job ? "&job=" + encodeURIComponent(job) : ""));
   const current = page.data?.for === tab + "|" + q ? page.data : undefined;
-  const RUNS: JobState[] = ["preparing", "running", "validating", "committing"]; // live progress only for a running row
   const items = (current?.items ?? []).map((j) => (live[j.id] && RUNS.includes(j.state) ? { ...j, progress: live[j.id] } : j)), counts = page.data?.counts;
+  shown.current = { tab, rows: new Map((current?.items ?? []).map((j) => [j.jobId ?? j.id, j.state])) };
   const picked = items.filter((j) => sel.includes(j.id)), none = !picked.length;
   const run = async (a: JobAction) => {
     if (a === "cancel" && !window.confirm("Cancel " + plural(picked.length, "file", "files") + "? The files stay as they are. Nothing is deleted.")) return;
