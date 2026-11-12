@@ -15,7 +15,7 @@ import (
 // and the health report Settings > System shows. Both use the doctor package, as the `doctor` command does.
 func systemRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 	api.HandleFunc("POST /api/libraries/check", func(w http.ResponseWriter, r *http.Request) {
-		var in struct{ Path string }
+		var in struct{ Path, OutputFolder string } // outputFolder: where the workflow will save new files, if elsewhere
 		if !readJSON(w, r, &in) {
 			return
 		}
@@ -28,7 +28,11 @@ func systemRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			apiError(w, http.StatusServiceUnavailable, "not_available", "The checks are not available.")
 			return
 		}
-		writeJSON(w, eng.Doctor.Folder(r.Context(), filepath.Clean(p)))
+		rep := eng.Doctor.Folder(r.Context(), filepath.Clean(p))
+		if b := outputInsideBlocker(strings.TrimSpace(in.OutputFolder), filepath.Clean(p)); b != nil {
+			rep.OK, rep.Blockers = false, append(rep.Blockers, *b)
+		}
+		writeJSON(w, rep)
 	})
 	api.HandleFunc("GET /api/system/health", func(w http.ResponseWriter, r *http.Request) {
 		if eng.Doctor == nil {
