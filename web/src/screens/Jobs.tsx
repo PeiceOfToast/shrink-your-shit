@@ -1,10 +1,10 @@
 // V6 Jobs (SCREENS V6; DESIGN/v2 mockups/jobs.html, jobs-drawer.html, jobs-drawer-done.html) on the real /api/v2/jobs
 // (#113) with live updates from /api/v2/events (#118/#120/#122), or the sample jobs with ?mock=1. The server lists one
 // tab at a time (Waiting, Running, Done, Skipped, Failed); All and Paused tabs and the codec/step/worker filters come
-// when it has them. Not here yet: the log (per-job stream, V3d), output path and Get original back (v2 has neither).
+// when it has them. Not here yet: output path and Get original back (v2 has neither).
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
-import { SignedOut, failed, type Answer } from "../api";
+import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, count, elapsed, plural } from "../format";
 import { getJob, jobAction, listJobs } from "../jobsApi";
 import { onLive } from "../live";
@@ -148,6 +148,37 @@ export function Jobs() {
   );
 }
 
+// The job's log (SCREENS V6: streaming, searchable, Download): GET /api/v2/jobs/{id}/log/stream (#131). Each piece
+// comes as job.log {text, next} with next as its id, so the browser's own reconnect resumes where it stopped; "end"
+// comes once the job is over and the whole log has been sent.
+function JobLog({ id, name }: { id: string; name: string }) {
+  const [text, setText] = useState(""), [done, setDone] = useState(false), [gone, setGone] = useState(false), [q, setQ] = useState(""), [follow, setFollow] = useState(true);
+  const box = useRef<HTMLPreElement>(null);
+  useEffect(() => {
+    setText(""); setDone(false); setGone(false);
+    if (MOCK) { setText("01:12:03 started on This computer\n01:12:04 Converting video: HEVC, Balanced quality\n01:13:10 10% done · about 9 min left\n01:14:22 25% done · about 7 min left\n"); setDone(true); return; }
+    const es = new EventSource("/api/v2/jobs/" + encodeURIComponent(id) + "/log/stream?from=0");
+    es.addEventListener("job.log", (e) => { const d = JSON.parse((e as MessageEvent).data) as { text: string }; setText((t) => t + d.text); });
+    es.addEventListener("end", () => { setDone(true); es.close(); });
+    es.onerror = () => { if (es.readyState === EventSource.CLOSED) setGone(true); }; // a refused stream (404); a dropped one reconnects by itself
+    return () => es.close();
+  }, [id]);
+  useEffect(() => { if (follow && box.current) box.current.scrollTop = box.current.scrollHeight; }, [text, follow]);
+  const shown = q ? text.split("\n").filter((l) => l.toLowerCase().includes(q.toLowerCase())).join("\n") : text;
+  const download = () => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" })); a.download = name.replace(/\.[^.]+$/, "") + ".log"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); };
+  return (
+    <section><h3>Log</h3>
+      <div className="row" style={{ gap: 6, marginBottom: 6 }}>
+        <input className="input sm" type="search" placeholder="Search the log" aria-label="Search the log" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
+        {!done && <button className="btn sm ghost" type="button" aria-pressed={follow} onClick={() => setFollow(!follow)}>{follow ? "Stop following" : "Follow"}</button>}
+        <button className="btn sm ghost" type="button" disabled={!text} onClick={download}><Icon id="i-download" />{q ? "Download the whole log" : "Download"}</button>
+      </div>
+      <pre className="joblog" ref={box} tabIndex={0} aria-label="Log" aria-live="off">{shown || (text ? "No line matches." : done ? "The log is empty." : gone ? "The log can't be shown." : "Waiting for the log...")}</pre>
+      <p className="sm muted">{done ? "The log is complete." : gone ? "The server didn't send it. Close and open this file again to retry." : "Live: new lines appear as they are written."}</p>
+    </section>
+  );
+}
+
 const fmtV = (p: Probe | null | undefined) => {
   if (!p) return null;
   const v = p.streams?.find((s) => s.type === "video"), a = p.streams?.filter((s) => s.type === "audio") ?? [];
@@ -213,6 +244,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {/* review db7b1f1 P2: the scan sentence only for a file a scan left out; a cancelled file whose job the server
               doesn't send yet claims nothing about scans or steps */}
           {scan && <section><h3>Timeline</h3><p className="muted">{state === "cancelled" ? "Cancelled." : "This file was left out when its library was scanned, so it has no job and no steps."}</p></section>}
+          {!scan && <JobLog id={id} name={name} />}
           {/* #148: before is the original; null for an older job that replaced a file of the same name: said so, never blank */}
           {(before || after) && <section><h3>Result</h3><table className="tbl kvt"><thead><tr><th /><th>Before</th><th>After</th></tr></thead><tbody>
             <tr><th>Video</th>{before ? <td>{before.video}</td> : <td rowSpan={4} className="muted">Not recorded for this job</td>}<td>{after?.video ?? "-"}</td></tr>

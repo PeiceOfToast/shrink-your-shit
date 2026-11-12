@@ -519,3 +519,4 @@ label.chk{cursor:pointer}
 .wcard dd a{display:block}
 @media (pointer:coarse){.wcard dd a{display:flex;align-items:center;min-height:44px}}
 .mchip.prio{margin-left:6px;vertical-align:middle}
+.joblog{max-height:320px;overflow:auto;margin:0;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font:var(--fs-sm)/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
