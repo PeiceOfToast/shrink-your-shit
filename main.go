@@ -217,6 +217,22 @@ func main() {
 			sc.SetEvery(time.Duration(s.ScanEvery) * time.Second)
 		}
 		go sc.Run(ctx, *every)
+		go func() { // V7a: a job whose worker stopped answering (its lease ran out) goes back to the queue
+			t := time.NewTicker(15 * time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					if n, err := store.RequeueExpiredLeases(5 * time.Minute); err != nil {
+						log.Printf("leases: %v", err)
+					} else if n > 0 {
+						log.Printf("leases: %d job(s) back in the queue: their worker stopped answering", n)
+					}
+				}
+			}
+		}()
 	} else {
 		log.Print("The converter is not installed correctly (ffmpeg and ffprobe with libx265 and the ssim filter are needed), so nothing is scanned or converted. The web page's Settings > System says what is missing; fix it, then restart shrink-your-shit.")
 	}

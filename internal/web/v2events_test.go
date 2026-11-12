@@ -233,3 +233,33 @@ func TestV2ReasonIsCodeAndMessage(t *testing.T) {
 		}
 	}
 }
+
+// ui-shop 06:24Z: a library's change is an event with an id (a paused library's rows show "Library
+// paused" at once, not on the next refresh); a reconnect replays it; a removed library says so.
+func TestV2LibraryChangedEvent(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	libID := strconv.FormatInt(lib.ID, 10)
+	c := stream(t, srv.URL, "")
+	hello := nextMessage(t, c)
+	if code, b, _ := do(t, nil, srv, call{method: "PATCH", path: "/api/v2/libraries/" + libID, body: `{"enabled":false}`, ctype: "application/json"}); code != 200 {
+		t.Fatalf("pause %d %s", code, b)
+	}
+	m := nextMessage(t, c)
+	if m.event != "library.changed" || m.id == "" || m.data != `{"libraryId":"`+libID+`","type":"library.changed"}` {
+		t.Fatalf("paused %+v", m)
+	}
+	if r := nextMessage(t, stream(t, srv.URL, hello.id)); r != m { // replayed from the database
+		t.Errorf("replay %+v, want %+v", r, m)
+	}
+	st.SetLibraryPriority(lib.ID, 5) // every change, by any route: here the store's own
+	if m := nextMessage(t, c); m.event != "library.changed" {
+		t.Errorf("priority %+v", m)
+	}
+	if code, b, _ := do(t, nil, srv, call{method: "DELETE", path: "/api/v2/libraries/" + libID, ctype: "application/json"}); code >= 300 {
+		t.Fatalf("delete %d %s", code, b)
+	}
+	if m := nextMessage(t, c); m.event != "library.changed" || !strings.Contains(m.data, `"removed":true`) {
+		t.Errorf("removed %+v", m)
+	}
+}

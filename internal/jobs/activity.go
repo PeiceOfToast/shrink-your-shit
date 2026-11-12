@@ -320,7 +320,8 @@ func (s *Store) RequestStop(id int64) (running bool, err error) {
 	}
 	defer tx.Rollback()
 	var path, status string
-	err = tx.QueryRow(`SELECT path, status FROM jobs WHERE id=?`, id).Scan(&path, &status)
+	var attempts int
+	err = tx.QueryRow(`SELECT path, status, attempts FROM jobs WHERE id=?`, id).Scan(&path, &status, &attempts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, ErrNotFound
 	}
@@ -329,10 +330,10 @@ func (s *Store) RequestStop(id int64) (running bool, err error) {
 	}
 	switch Status(status) {
 	case Queued:
-		if err := putFile(tx, userStoppedFile(path)); err != nil {
+		if err := putFile(tx, userStoppedFile(path, id)); err != nil {
 			return false, err
 		}
-		if _, err := tx.Exec(`INSERT INTO events(kind, job_id, at, from_status, to_status, reason, data) VALUES ('job',?,?,?,?,?,json_object('message',?))`, id, s.stamp(), status, "cancelled", UserStoppedReason, userStoppedWords); err != nil {
+		if _, err := tx.Exec(`INSERT INTO events(kind, job_id, at, from_status, to_status, reason, data) VALUES ('job',?,?,?,?,?,json_object('message',?,'path',?,'attempts',?))`, id, s.stamp(), status, "cancelled", UserStoppedReason, userStoppedWords, path, attempts); err != nil {
 			return false, err // review 66806b3: the reason, before the row goes
 		}
 		if _, err := tx.Exec(`DELETE FROM jobs WHERE id=?`, id); err != nil {
@@ -349,9 +350,7 @@ func (s *Store) RequestStop(id int64) (running bool, err error) {
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
-	if !running { // the queued job is gone
-		s.jobsRemoved(id)
-	}
+	// a stopped waiting job's steps and log stay while its file's record names it, as UserStopped's
 	return running, nil
 }
 
@@ -440,8 +439,10 @@ func (s *Store) finishRequestedStops() error {
 	return rows.Err()
 }
 
-func userStoppedFile(path string) File {
-	f := File{Path: path, Decision: "skip: you stopped it", Reason: UserStoppedReason}
+// userStoppedFile is the Skipped record of job id's file: it names the job, whose steps, tries and run
+// log stay while it does (ui-shop 07:07Z: only a scan's own skip has no job).
+func userStoppedFile(path string, id int64) File {
+	f := File{Path: path, Decision: "skip: you stopped it", Reason: UserStoppedReason, JobID: id}
 	if st, err := os.Stat(path); err == nil {
 		f.Size, f.ModTime = st.Size(), st.ModTime().UnixNano()
 	}
@@ -462,15 +463,14 @@ func (s *Store) UserStopped(id int64) error {
 	if j.Status != Queued && j.Status != Running {
 		return ErrNotStoppable
 	}
-	if err := s.PutFile(userStoppedFile(j.Path)); err != nil {
+	if err := s.PutFile(userStoppedFile(j.Path, id)); err != nil {
 		return err
 	}
 	s.endEvent(j, "cancelled", UserStoppedReason, userStoppedWords) // V2: the row goes, its history stays
 	if _, err = s.db.Exec(`DELETE FROM jobs WHERE id=?`, id); err != nil {
 		return err
 	}
-	s.jobsRemoved(id)
-	return nil
+	return nil // its steps and log stay while its file's record names it (userStoppedFile)
 }
 
 // Skip ends a queued or running job as a skipped file, by its worker: the job record goes, and the file
@@ -488,16 +488,19 @@ func (s *Store) Skip(id int64, words, code string) error {
 	if j.Status != Queued && j.Status != Running {
 		return ErrNotStoppable
 	}
-	f := userStoppedFile(j.Path)
+	words = strings.TrimRight(strings.TrimSpace(words), ".") // a workflow's own reason may end with one: shown with one added
+	f := userStoppedFile(j.Path, id)
 	f.Decision, f.Reason = "skip: "+words, code
 	if err := s.PutFile(f); err != nil {
 		return err
 	}
+	j.Attempts++                                          // the try that ended here
 	s.endEvent(j, "skipped", code, upperFirst(words)+".") // V2: the row goes, its history stays
 	if _, err = s.db.Exec(`DELETE FROM jobs WHERE id=?`, id); err != nil {
 		return err
 	}
-	s.jobsRemoved(id)
+	// its steps and run log stay while its file's record names it (V6 review: a skip after three tries
+	// showed no tries): the Skipped list's row opens them (ForgetGoneJobSteps keeps them)
 	return nil
 }
 
@@ -510,8 +513,8 @@ var ErrNotStoppable = errors.New("this file is not waiting or converting")
 // endEvent writes a job's last history entry when it ends by being deleted (skipped, stopped): the
 // triggers of migration 21 see only status changes.
 func (s *Store) endEvent(j Job, to, reason, message string) {
-	s.db.Exec(`INSERT INTO events(kind, job_id, at, from_status, to_status, reason, worker, data) VALUES ('job',?,?,?,?,?,?,json_object('message',?,'path',?))`,
-		j.ID, s.stamp(), string(j.Status), to, reason, j.Worker, message, j.Path) // the path: the row goes (the feed names the file)
+	s.db.Exec(`INSERT INTO events(kind, job_id, at, from_status, to_status, reason, worker, data) VALUES ('job',?,?,?,?,?,?,json_object('message',?,'path',?,'attempts',?))`,
+		j.ID, s.stamp(), string(j.Status), to, reason, j.Worker, message, j.Path, j.Attempts) // the path: the row goes (the feed names the file)
 }
 
 // upperFirst is s with its first letter capitalised (skip words are written to follow "skip: ").
@@ -536,8 +539,9 @@ const (
 	ReasonKeptOriginal  = "kept_original"  // a safety check refused the result; the original stays
 	ReasonRetryLater    = "retry_later"    // a failure that may pass, from before codes were kept (migration 23)
 	ReasonRemoved       = "removed"        // the job was removed (its library went, or a clean-up)
+	ReasonWorkerLost    = "worker_lost"    // its worker stopped answering (its lease ran out, V7a)
 )
 
 // JobReasonCodes are the codes a job's own reason can have (besides the skip codes and user_stopped).
 var JobReasonCodes = []string{ReasonConvertFailed, ReasonDiskFull, ReasonCannotRead, ReasonCannotWrite, ReasonStalled,
-	ReasonLowDiskSpace, ReasonKeptOriginal, ReasonRetryLater, ReasonRemoved, UserStoppedReason}
+	ReasonLowDiskSpace, ReasonKeptOriginal, ReasonRetryLater, ReasonRemoved, UserStoppedReason, ReasonWorkerLost}

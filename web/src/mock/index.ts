@@ -158,7 +158,11 @@ export function startAll() {
   }));
   change(() => log("setting.changed", "All workers started"));
 }
-export function stopAll() {
+export function stopAll(now = true) {
+  if (!now) { // Stop after these files: a busy worker finishes them (drain), an idle one stops
+    for (const w of state.workers) if (w.status === "online" || w.status === "busy") workerAction(w.id, w.currentJobIds.length ? "drain" : "stop");
+    return;
+  }
   change((s) => {
     for (const j of s.jobs) if (j.state === "running") (j.state = "queued", (j.subState = "processing_paused"), (j.worker = null), (j.progress = null), (j.currentStep = null));
     s.jobs = s.jobs.filter((j) => j.state !== "queued"); // back in the queue
@@ -287,8 +291,10 @@ export function libraryItem(l: Library): LibraryItem {
   };
 }
 // POST /api/libraries/check {path}. /readonly, /empty, /full and /locked show v1's other answers.
-export function checkFolder(path: string, outputFolder?: string): Answer<FolderReport> {
+export function checkFolder(path: string, outputFolder?: string, nextToLibrary = false): Answer<FolderReport> {
   const p = trim(path), r: FolderReport = { ok: false, blockers: [], notes: [], videoCount: 0, totalBytes: 0 };
+  if (nextToLibrary && p.startsWith("/") && (p.replace(/\/[^/]*$/, "") || "/") === "/") // #144, as jobs.NextToLibrary: a folder right under / has none beside it
+    r.blockers.push({ code: "no_default_folder", folder: "/", reason: "container_root", message: "No folder for new files for " + p.slice(1) + " yet: / is the container's own disk. Pick a folder in the library's Output tab, or choose One folder for all." });
   // #128: with outputFolder, a workflow saving new files inside this folder (or holding it) is refused, in the add's words
   const o = outputFolder ? trim(outputFolder) : "";
   if (o.startsWith("/") && (o === p || o.startsWith(p + "/") || p.startsWith(o + "/")))
@@ -336,8 +342,11 @@ function workflowError(id: ID): Issue | null {
   return null;
 }
 // folderRefused: a workflow that saves new files inside the library's folder (or one holding it) would convert them again.
-function outputInside(flowId: ID, path: string): Issue | null {
-  const out = drafts[flowId]?.published?.nodes.find((n) => n.type === "output.commit")?.config.folder, p = trim(path);
+function outputInside(flowId: ID, path: string, name = ""): Issue | null {
+  const c = drafts[flowId]?.published?.nodes.find((n) => n.type === "output.commit")?.config, out = c?.folder, p = trim(path);
+  const parent = p.replace(/\/[^/]*$/, "") || "/";
+  if (c && (c.policy ?? "separate_folder") === "separate_folder" && (c.folderMode ?? "next_to_library") === "next_to_library" && parent === "/") // V5a jobs.NextToLibrary
+    return { code: "no_default_folder", message: "No folder for new files for " + name + " yet: / is the container's own disk. Pick a folder in the library's Output tab, or choose One folder for all. Nothing was changed." };
   if (typeof out !== "string" || !out) return null;
   const o = trim(out);
   return o === p || o.startsWith(p + "/") || p.startsWith(o + "/")
@@ -347,7 +356,7 @@ const linkWorkflows = (s: State) => { s.wf = s.wf.map((w) => ({ ...w, libraries:
 // POST /api/libraries {name, path, flowId}: 201 with the library, not started (nothing scanned or queued).
 export function addLibrary(name: string, path: string, flowId: ID): Answer<LibraryItem> {
   if (!name.trim()) return { error: { code: "invalid_name", message: "Give the library a name." } };
-  const e = pathError(path) ?? workflowError(flowId) ?? outputInside(flowId, path);
+  const e = pathError(path) ?? workflowError(flowId) ?? outputInside(flowId, path, name.trim());
   if (e) return { error: e };
   const l = library("l" + Date.now().toString(36), name.trim(), trim(path), 0, 0, 0);
   l.workflowId = flowId; l.workflowName = state.wf.find((w) => w.id === flowId)!.name; l.enabled = false;
@@ -417,4 +426,16 @@ export function setSettings(patch: Partial<Settings>): Answer<object> {
     return { error: { code: "invalid_setting", message: "Look for new files every 15 seconds to 24 hours (86400 seconds): a new file is converted once it has stayed the same for 15 seconds. Nothing was changed." } };
   change((s) => { s.settings = { ...s.settings, ...patch, ...(patch.scanEvery !== undefined && { scanEverySource: "saved" as const }) }; });
   return {};
+}
+
+// V7 Workers on the mock: one worker's start / stop / drain, and PATCH {name, slots, tags}.
+export function workerAction(id: ID, action: "start" | "stop" | "drain"): string | null {
+  const w = state.workers.find((x) => x.id === id);
+  if (!w) return "There is no such worker.";
+  if (w.status === "offline" || w.status === "stalled") return "This worker isn't connected.";
+  change((s) => { const x = s.workers.find((y) => y.id === id)!; x.status = action === "start" ? (x.currentJobIds.length ? "busy" : "online") : action === "drain" && x.currentJobIds.length ? "draining" : "paused"; x.statusSince = new Date().toISOString(); if (action === "stop") (x.currentJobIds = []), (x.slots.cpu.used = 0); });
+  return null;
+}
+export function patchWorker(id: ID, p: { name?: string; slots?: { cpu?: number }; tags?: string[] }) {
+  change((s) => { const x = s.workers.find((y) => y.id === id); if (!x) return; if (p.name) x.name = p.name; if (p.slots?.cpu) x.slots.cpu.total = p.slots.cpu; if (p.tags) x.tags = p.tags; });
 }

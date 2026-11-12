@@ -6,7 +6,10 @@ import type { Issue } from "./types/v1";
 
 export const MOCK = /^(1|fresh)$/.test(new URLSearchParams(location.search).get("mock") ?? "");
 export type Answer<T> = T | { error: Issue };
-export const failed = <T,>(r: Answer<T>): r is { error: Issue } => typeof r === "object" && r !== null && "error" in r;
+// An error answer is {error: {code, message}}. A real answer may carry its own "error" field (a job's detail has
+// error: null or a sentence), so only an object there counts.
+export const failed = <T,>(r: Answer<T>): r is { error: Issue } =>
+  typeof r === "object" && r !== null && "error" in r && typeof (r as { error: unknown }).error === "object" && (r as { error: unknown }).error !== null;
 
 export class SignedOut extends Error {}
 const OFFLINE: Issue = { code: "offline", message: "Can't reach the server. Check that it is running, then try again." };

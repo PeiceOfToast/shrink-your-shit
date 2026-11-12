@@ -49,6 +49,15 @@ type Queue interface {
 	// OutputFolder is a library's folder for new files with "Next to each library" (V5a), or why it has
 	// none.
 	OutputFolder(libraryID int64, libPath string) (string, *jobs.FolderProblem, error)
+	// LeaseOf, RenewLease and HoldsLease: a running job's lease (V7a).
+	LeaseOf(id int64) (string, error)
+	RenewLease(id int64, lease string) (bool, error)
+	HoldsLease(id int64, lease string) (bool, error)
+	// FallbackOf is the path a job falls back to (a rules.Branch, JSON; "" none) (V6b).
+	FallbackOf(id int64) (string, error)
+	// FallBack puts a job back in the queue along another path; AddFailureStep records a failure (V6b).
+	FallBack(id int64, branch string, path []string, nodeID, words string) error
+	AddFailureStep(id int64, nodeID, words string) error
 	// IsOwnOutput reports whether the file at path (this size and time) is one a done job wrote.
 	IsOwnOutput(path string, size, mtime int64) (bool, error)
 	// RecordPlan stores the Plan a running job converts with (JSON) and its fingerprint.
@@ -80,10 +89,14 @@ type Worker struct {
 	Logs *runlog.Logs
 	// verified is the probe of the new file the last check passed (S5: stored for its final path).
 	verified media.Info
-	ID       string
-	Queue    Queue
-	Exec     media.Exec
-	FFmpeg   string
+	// failures: the running job's path's choices for when it doesn't work (V6b; under mu)
+	failures *rules.Failures
+	// lease: the running job's lease (V7a; under mu)
+	lease  string
+	ID     string
+	Queue  Queue
+	Exec   media.Exec
+	FFmpeg string
 	// FFprobe checks the result before it replaces anything.
 	FFprobe string
 	// Template returns the template of a job's library's flow, compiled per file into the job's Plan.
@@ -219,7 +232,13 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 	}
 	jobCtx, cancel := context.WithCancel(ctx)
 	w.current, w.cancelJob, w.stopped = job.ID, cancel, stopNone
+	w.failures = nil // this job's own, once its plan is made (V6b)
+	w.lease, _ = w.Queue.LeaseOf(job.ID)
+	lease := w.lease
 	w.mu.Unlock()
+	renewDone := make(chan struct{})
+	defer close(renewDone)
+	go w.renewLease(job.ID, lease, renewDone) // V7a: kept while it works, the probe and the checks too
 	w.jobf(job.ID, ": started")
 	if testHook != nil {
 		testHook("registered")
@@ -275,8 +294,21 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 			w.jobf(job.ID, " (%s): skipped: %s", job.Path, se.Words)
 			return true, w.Queue.Skip(job.ID, se.Words, se.Code)
 		}
+		// V6b: the path's own choice for when its conversion doesn't work comes first.
+		w.mu.Lock()
+		fs := w.failures
+		w.mu.Unlock()
+		var kept *KeptError
+		noRetry := false
+		if f := fs.For(errors.As(err, &kept)); f != nil {
+			done, rerr := w.applyFailure(job, err, f)
+			if done {
+				return true, rerr
+			}
+			noRetry = true // stop, or the last try: it fails or is kept as before, without another
+		}
 		// A failure that may pass, with a try left: back in the queue for later, from the start (DD-2).
-		if wait, ok := retryIn(err, job.Attempts); ok {
+		if wait, ok := retryIn(err, job.Attempts); ok && !noRetry {
 			w.jobf(job.ID, " (%s): try %d of %d failed, trying again in %s: %v", job.Path, job.Attempts+1, maxTries, wait, err)
 			return true, w.Queue.RetryLater(job.ID, w.now().Add(wait), reasonCode(err), plainReason(err))
 		}
@@ -309,9 +341,9 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 			w.Queue.PutProbe(final, st.Size(), st.ModTime().UnixNano(), string(b))
 		}
 	}
-	if err := w.Queue.Complete(job.ID, final, size); err != nil {
-		return true, err
-	}
+	// The log line and the steps first, then done: a job's record is complete by the time its state says
+	// done, so a stream that ends on done never misses them (review-7484a34). The new file is in place
+	// already, so they are true even if recording done fails.
 	// before and after, also when the new file is not smaller (it is kept: always standardize)
 	w.jobf(job.ID, ": done, %s: %s -> %s", final, rules.HumanBytes(job.SizeBefore), rules.HumanBytes(size))
 	w.Queue.AddStep(job.ID, "verified", true, "Every check passed: the new file is complete, plays cleanly and looks like the original.")
@@ -321,6 +353,9 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 		w.Queue.AddStep(job.ID, "kept", true, "The new file was written next to the original, which stays as it is.")
 	} else {
 		w.Queue.AddStep(job.ID, "replaced", true, fmt.Sprintf("The new file is in place: %s to %s.", rules.HumanBytes(job.SizeBefore), rules.HumanBytes(size)))
+	}
+	if err := w.Queue.Complete(job.ID, final, size); err != nil {
+		return true, err
 	}
 	if w.OnDone != nil {
 		w.OnDone(job, final)
@@ -543,6 +578,15 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// the result must look like. Whether to convert it was the scanner's decision (as before Plans);
 	// only a flow that cannot say how to convert stops the job here.
 	plan := tmpl.Compile(src)
+	if fb, err := w.Queue.FallbackOf(job.ID); err == nil && fb != "" { // V6b: it falls back to another path
+		var b rules.Branch
+		if json.Unmarshal([]byte(fb), &b) == nil {
+			plan = rules.CompileBranch(b, src, tmpl.Languages)
+		}
+	}
+	w.mu.Lock()
+	w.failures = plan.OnFailure // what this path does when it doesn't work (RunOne reads it)
+	w.mu.Unlock()
 	// Dolby Vision the flow leaves alone is never encoded, whatever was decided when the job was queued
 	// (review a09f6f5: a job queued before migration 17 or a setting change). Only these skips: the
 	// others stay the scanner's decision, as before Plans.
@@ -756,6 +800,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	stillOK := func() error {
 		if err := sourceUnchanged(job.Path, before, beforeState); err != nil {
+			return err
+		}
+		if err := w.stillHolds(job.ID); err != nil { // V7a: a worker that lost its lease never puts a file in place
 			return err
 		}
 		return stage.intact()
@@ -1188,4 +1235,83 @@ func FolderPath(dir, lib, src, ext string) string {
 		return filepath.Join(dir, rel, name)
 	}
 	return filepath.Join(dir, name)
+}
+
+// applyFailure does what the path chose for when its step (f) doesn't work (V6b): try again later, leave
+// the file alone, or go to another path from the original. false: stop (the job fails or is kept as it
+// would have, but without a retry).
+func (w *Worker) applyFailure(job jobs.Job, err error, f *rules.Failure) (bool, error) {
+	plain := plainReason(err)
+	act := f.Action
+	if act == "retry" {
+		if job.Attempts+1 < f.Max {
+			wait := time.Duration(f.BackoffSeconds) * time.Second
+			w.jobf(job.ID, " (%s): %s didn't work, try %d of %d, again in %s: %v", job.Path, f.Name, job.Attempts+1, f.Max, wait, err)
+			return true, w.Queue.RetryLater(job.ID, w.now().Add(wait), reasonCode(err), plain)
+		}
+		act = f.Then // the last try
+	}
+	switch act {
+	case "skip":
+		w.Queue.AddFailureStep(job.ID, f.NodeID, f.Name+" didn't work: "+plain)
+		w.jobf(job.ID, " (%s): %s didn't work, the file is left as it is: %v", job.Path, f.Name, err)
+		return true, w.Queue.Skip(job.ID, f.SkipWords, rules.SkipLeftByWorkflow)
+	case "fallback":
+		if f.Fallback == nil {
+			return false, nil
+		}
+		if f.Fallback.Then == nil { // the other path is "Leave the file alone"
+			w.Queue.AddFailureStep(job.ID, f.NodeID, f.Name+" didn't work: "+plain)
+			return true, w.Queue.Skip(job.ID, f.Fallback.End, rules.SkipLeftByWorkflow)
+		}
+		b, _ := json.Marshal(f.Fallback)
+		w.jobf(job.ID, " (%s): %s didn't work, trying the other path from the original: %v", job.Path, f.Name, err)
+		return true, w.Queue.FallBack(job.ID, string(b), f.Fallback.Path, f.NodeID, f.Name+" didn't work: "+plain+" Trying the other path.")
+	}
+	return false, nil // stop
+}
+
+// LeaseRenewEvery is how often a worker renews its running job's lease (well inside jobs.LeaseFor).
+var LeaseRenewEvery = 10 * time.Second
+
+// renewLease renews job id's lease until done is closed (V7a).
+func (w *Worker) renewLease(id int64, lease string, done <-chan struct{}) {
+	if lease == "" {
+		return
+	}
+	t := time.NewTicker(LeaseRenewEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-t.C:
+			if held, err := w.Queue.RenewLease(id, lease); err == nil && !held {
+				w.jobf(id, ": this worker no longer holds the job (it was given back to the queue)")
+				return
+			}
+		}
+	}
+}
+
+// errLeaseLost: the job was taken back from this worker; nothing is put in place.
+var errLeaseLost = errors.New("the job's lease was lost")
+
+// stillHolds fails when this worker no longer holds job id's lease: it was put back in the queue (the
+// worker had stopped answering), so the worker must not put anything in place.
+func (w *Worker) stillHolds(id int64) error {
+	w.mu.Lock()
+	lease := w.lease
+	w.mu.Unlock()
+	if lease == "" {
+		return nil
+	}
+	held, err := w.Queue.HoldsLease(id, lease)
+	if err != nil {
+		return err
+	}
+	if !held {
+		return failed("This file was given back to the queue while this worker was busy, so nothing was put in place. The original was not touched.", errLeaseLost)
+	}
+	return nil
 }
