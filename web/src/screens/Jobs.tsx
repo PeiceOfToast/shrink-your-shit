@@ -93,12 +93,17 @@ export function Jobs() {
     const bad = r.results.filter((x) => !x.ok), n = r.results.length - bad.length;
     // design (SCREENS V6): say where the files went, not just that they changed
     const where = a === "reprioritize" ? (prio === "first" ? " moved to the front of the queue." : prio === "last" ? " moved to the back of the queue." : " put back in their normal place in the queue.") : " changed.";
-    setSaid(plural(n, "file", "files") + where + (bad.length ? " Not changed: " + bad.map((x) => (items.find((j) => j.id === x.id)?.name ?? x.id) + ": " + x.message).join(" ") : ""));
+    // review f1aaf30 P3: Put back in queue says what the drawer says. A skipped file (skip-N, with or without a job behind
+    // it) goes through convert-again (jobsApi): the next scan looks at it; a job goes back in the queue at once.
+    const okIds = r.results.filter((x) => x.ok).map((x) => x.id), skipsOk = okIds.filter((i) => i.startsWith("skip-")).length, jobsOk = okIds.length - skipsOk;
+    const said = a !== "requeue" ? plural(n, "file", "files") + where
+      : [skipsOk && plural(skipsOk, "file", "files") + " will be looked at again on the next scan.", jobsOk && plural(jobsOk, "file", "files") + " put back in the queue."].filter(Boolean).join(" ") || "0 files changed.";
+    setSaid(said + (bad.length ? " Not changed: " + bad.map((x) => (items.find((j) => j.id === x.id)?.name ?? x.id) + ": " + x.message).join(" ") : ""));
     setSel([]); page.reload();
   };
   const actions = <>
     <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("retry")}><Icon id="i-refresh" />Retry</button>
-    <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("requeue")}><Icon id="i-arrow-r" />Put back in queue</button>
+    {(tab === "skipped" || tab === "failed") && <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("requeue")}><Icon id="i-arrow-r" />Put back in queue</button>} {/* only where the server takes it: skips (convert-again) and failed jobs */}
     <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("cancel")}><Icon id="i-stop" />Cancel</button>
     {tab === "waiting" && <span className="row nw" style={{ gap: 4 }}>
       <select className="input sm" aria-label="Priority" value={prio} onChange={(e) => setPrio(e.target.value as Pin | "none")}><option value="first">First</option><option value="none">Normal</option><option value="last">Last</option></select>
@@ -219,7 +224,9 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           <div className="row">
             {(state === "failed" || state === "retry_wait") && <button className="btn sm" type="button" onClick={() => run("retry")}><Icon id="i-refresh" />{state === "retry_wait" ? "Try now" : "Retry"}</button>}
             {active && <button className="btn sm" type="button" onClick={() => run("cancel")}><Icon id="i-stop" />{state === "queued" || state === "retry_wait" ? "Cancel" : "Stop"}</button>}
-            {(state === "skipped" || state === "cancelled" || state === "completed") && !j?.removed && <button className="btn sm" type="button" onClick={() => run("requeue")}><Icon id="i-arrow-r" />Convert again</button>}
+            {/* a skipped file whose job is gone (a workflow's skip: the server says removed) can still be converted again (review f1aaf30) */}
+            {/* dev-qa (qa-v6-v7a C): a Done job can't go back to the queue (the server refuses done -> queued), so no Convert again there */}
+            {(state === "skipped" || state === "cancelled") && (!j?.removed || !!row?.id.startsWith("skip-")) && <button className="btn sm" type="button" onClick={() => run("requeue")}><Icon id="i-arrow-r" />Convert again</button>}
             <span className="sp" /><button className="btn sm ghost" type="button" title="Copy the job ID" onClick={() => navigator.clipboard?.writeText(id).then(() => setSaid("Job ID " + id + " copied."), () => setSaid("Job ID: " + id))}><Icon id="i-copy" />ID {id}</button>
           </div>
           <p className="muted" role="status">{said}</p>
@@ -229,7 +236,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {j?.removed && j.reason?.code === "removed" ? <div className="note"><Icon id="i-info" /><div>Its library was removed, so this file won't be converted.</div></div>
             : reason && <section><h3>Why</h3><p>{reason}</p></section>}
           <section><h3>File</h3><dl className="kv">
-            <dt>Source</dt><dd className="mono sm">{row?.path ?? j?.file?.path ?? "-"}</dd>
+            {(row?.path ?? j?.file?.path) && <><dt>Source</dt><dd className="mono sm">{row?.path ?? j?.file?.path}</dd></>} {/* review 54ff228: no '-' when the server doesn't keep the path (a removed library's job) */}
             {(j?.library || row) && <><dt>Library</dt><dd>{j?.library?.name ?? row?.library}</dd></>}
             {row?.state === "completed" && <><dt>Size</dt><dd>{saved(row.beforeBytes, row.afterBytes)}</dd>
               <dt>Original</dt><dd>{row.originalState === "kept" ? "Kept " + plural(row.keptDaysLeft ?? 0, "more day", "more days") + ", then deleted" : row.originalState === "removed" ? "Deleted after the keep period" : "Left in place"}</dd></>}
