@@ -84,6 +84,9 @@ func (s *Store) SetKeptGone(id int64, at time.Time) error {
 
 // SetSwapState records how a restart ended an unfinished swap (rolled_back or needs_attention).
 func (s *Store) SetSwapState(id int64, state string) error {
+	if state == OriginalPurged { // when it really went (#163 QA: a lowered setting deletes before the date it was due)
+		return s.setOriginal(id, `state=?, delete_on=?`, state, time.Now().UTC().Format(time.RFC3339))
+	}
 	return s.setOriginal(id, `state=?`, state)
 }
 

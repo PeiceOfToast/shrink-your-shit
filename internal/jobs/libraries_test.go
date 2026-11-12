@@ -443,11 +443,12 @@ func TestRenamedReplacesCountLikeReplaces(t *testing.T) {
 	check(700, 600, 600)
 	s.SetOriginalGone(b) // a scan found the original gone: freed from now
 	check(1300, 600, 0)
-	// dated: the beside one now, the purged one on its copy's delete day (an hour ahead here)
+	// dated: the beside one now, the purged one when its copy really went (#163 QA: a purge records its
+	// time, not the day it was due, an hour ahead here)
 	if n, _ := s.FreedSince(time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)); n != 1300 {
 		t.Errorf("freed since a minute ago %d, want 1300", n)
 	}
-	if n, _ := s.FreedSince(time.Now().Add(30 * time.Minute).UTC().Format(time.RFC3339)); n != 700 {
-		t.Errorf("freed from half an hour ahead %d, want the purged one's 700", n)
+	if n, _ := s.FreedSince(time.Now().Add(30 * time.Minute).UTC().Format(time.RFC3339)); n != 0 {
+		t.Errorf("freed from half an hour ahead %d, want none (both went now)", n)
 	}
 }

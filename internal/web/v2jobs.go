@@ -207,7 +207,7 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 			}
 		}
 		d["metadata"] = meta
-		d["convertAgain"] = convertAgainOf(store, id)
+		d["convertAgain"] = convertAgainOf(store, id, keepDays())
 		if lib, err := store.GetLibrary(j.LibraryID); err == nil {
 			d["library"] = map[string]any{"id": strconv.FormatInt(lib.ID, 10), "name": lib.Name}
 			// the revision it runs with: a waiting job (never started, or back to retry) runs the newest published
@@ -457,13 +457,15 @@ func isQueued(store *jobs.Store, id int64) bool {
 
 // convertAgainOf is a job detail's convertAgain: whether Convert again can run, and if not, why (the
 // drawer's muted line, e.g. "Can't convert again: the original was deleted on 12 November 2026.").
-func convertAgainOf(store *jobs.Store, id int64) map[string]any {
-	c, err := store.ConvertAgainCheck(id)
+func convertAgainOf(store *jobs.Store, id int64, keepDays int) map[string]any {
+	c, err := store.ConvertAgainCheck(id, keepDays)
 	if err != nil {
-		return map[string]any{"possible": false, "reason": nil}
+		return map[string]any{"possible": false, "reason": nil, "policy": nil, "keptUntil": nil, "outputPath": nil}
 	}
-	if c.Possible {
-		return map[string]any{"possible": true, "reason": nil}
+	a := map[string]any{"possible": c.Possible, "reason": nil, // what the run did, so the drawer can word the button
+		"policy": nilIfEmpty(c.Policy), "keptUntil": nilIfEmpty(c.KeptUntil), "outputPath": nilIfEmpty(c.OutputPath)}
+	if !c.Possible {
+		a["reason"] = map[string]any{"code": c.Code, "message": c.Message, "deletedAt": nilIfEmpty(c.DeletedAt)}
 	}
-	return map[string]any{"possible": false, "reason": map[string]any{"code": c.Code, "message": c.Message, "deletedAt": nilIfEmpty(c.DeletedAt)}}
+	return a
 }

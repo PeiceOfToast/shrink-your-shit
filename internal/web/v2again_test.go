@@ -20,11 +20,9 @@ func TestV2ConvertAgain(t *testing.T) {
 	srv, st, _, _ := libServer(t, false)
 	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
 	type again struct {
-		Possible bool
-		Reason   *struct {
-			Code, Message string
-			DeletedAt     *string
-		}
+		Possible                      bool
+		Policy, KeptUntil, OutputPath *string
+		Reason                        *againReason
 	}
 	detail := func(id int64) again {
 		t.Helper()
@@ -41,12 +39,14 @@ func TestV2ConvertAgain(t *testing.T) {
 	src := filepath.Join(lib.Path, "a.mkv")
 	os.WriteFile(src, []byte("original"), 0o644)
 	id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: src})
-	if a := detail(id); a.Possible || a.Reason == nil || a.Reason.Code != jobs.AgainNotDone {
+	if a := detail(id); a.Possible || a.Reason == nil || a.Reason.Code != jobs.AgainNotDone || a.Policy != nil || a.OutputPath != nil {
 		t.Errorf("waiting: %+v", a)
 	}
 	st.Claim("w")
-	st.Complete(id, filepath.Join(lib.Path+" (shrunk)", "a.mkv"), 4)
-	if a := detail(id); !a.Possible || a.Reason != nil {
+	out := filepath.Join(lib.Path+" (shrunk)", "a.mkv")
+	st.Complete(id, out, 4)
+	// orch-lead 17:12Z: what the run did, for the button's words; a folder for new files names that file
+	if a := detail(id); !a.Possible || a.Reason != nil || str(a.Policy) != "separate_folder" || str(a.OutputPath) != out || a.KeptUntil != nil {
 		t.Errorf("done: %+v", a)
 	}
 	if code, body := post(id); code != 200 {
@@ -70,12 +70,52 @@ func TestV2ConvertAgain(t *testing.T) {
 	deleteOn := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
 	st.FinishSwap(row, deleteOn)
 	st.Complete(other, b, 3)
+	// replaced, its original kept: until when (the purge's date: kept plus the setting now, not the date
+	// recorded when it was kept), and no other file (the new one has the file's own name)
+	kept, _ := st.OriginalByID(row)
+	purgeDay, _ := jobs.KeptUntil(kept.KeptAt, 7)
+	if a := detail(other); str(a.Policy) != "replace" || str(a.KeptUntil) != purgeDay.UTC().Format(time.RFC3339) || a.OutputPath != nil {
+		t.Errorf("kept: %+v", a)
+	}
 	st.SetSwapState(row, jobs.OriginalPurged)
 	a := detail(other)
-	if a.Possible || a.Reason == nil || a.Reason.Code != jobs.AgainOriginalGone || a.Reason.DeletedAt == nil || *a.Reason.DeletedAt != deleteOn.Format(time.RFC3339) {
+	at, _ := time.Parse(time.RFC3339, againDeletedAt(a.Reason))
+	if a.Possible || a.Reason == nil || a.Reason.Code != jobs.AgainOriginalGone || time.Since(at) > time.Minute || // when it really went (#163 QA)
+		str(a.Policy) != "replace" || a.KeptUntil != nil || a.OutputPath != nil {
 		t.Errorf("purged: %+v", a)
 	}
 	if code, body := post(other); code != 409 || errCode(body) != jobs.AgainOriginalGone {
 		t.Errorf("purged post: %d %s", code, body)
 	}
+	// beside: the new file next to its original
+	c := filepath.Join(lib.Path, "c.mkv")
+	os.WriteFile(c, []byte("original"), 0o644)
+	third, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: c})
+	if j, _ := st.Claim("w"); j.ID != third {
+		t.Fatalf("claimed %d", j.ID)
+	}
+	next := filepath.Join(lib.Path, "c.shrunk.mkv")
+	st.Complete(third, next, 3)
+	if a := detail(third); !a.Possible || str(a.Policy) != "beside" || str(a.OutputPath) != next || a.KeptUntil != nil {
+		t.Errorf("beside: %+v", a)
+	}
+}
+
+func str(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+type againReason struct {
+	Code, Message string
+	DeletedAt     *string
+}
+
+func againDeletedAt(r *againReason) string {
+	if r == nil || r.DeletedAt == nil {
+		return ""
+	}
+	return *r.DeletedAt
 }

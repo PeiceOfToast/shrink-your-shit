@@ -184,8 +184,7 @@ func TestPurgeBoundaryAndOnlyKnownFiles(t *testing.T) {
 // found, so the trash totals stop counting it and Convert again says it was deleted.
 func TestKeptRemovedOutsideIsPurgedWhenFound(t *testing.T) {
 	s, o := keptOne(t)
-	kept, _ := time.Parse(time.RFC3339, o.KeptAt)
-	found := kept.Add(24 * time.Hour)
+	found := time.Now() // when the pass finds it: a purge dated later reads as not recorded (#163 QA)
 	os.Remove(s.trash())
 	if said := Purge(s.store, 7, found); len(said) != 1 || !strings.Contains(said[0], "removed outside Shrink Your Shit") {
 		t.Fatalf("said %q", said)
@@ -197,7 +196,7 @@ func TestKeptRemovedOutsideIsPurgedWhenFound(t *testing.T) {
 	if tr, _ := s.store.TrashNow(7); tr.Files != 0 {
 		t.Errorf("trash still counts %d files", tr.Files)
 	}
-	if c, _ := s.store.ConvertAgainCheck(o.JobID); c.DeletedAt != r.DeleteOn {
+	if c, _ := s.store.ConvertAgainCheck(o.JobID, 7); c.DeletedAt != r.DeleteOn {
 		t.Errorf("convert again: %+v", c)
 	}
 }

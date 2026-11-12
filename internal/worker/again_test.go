@@ -75,9 +75,13 @@ func TestConvertAgainFromTheKeptOriginal(t *testing.T) {
 	s.store.SetSwapState(first.ID, jobs.OriginalPurged)
 	os.Remove(s.trash())
 	var ae jobs.AgainError
-	if err := s.store.ConvertAgain(s.id); !errors.As(err, &ae) || ae.Code != jobs.AgainOriginalGone || ae.DeletedAt != o.DeleteOn ||
+	at, _ := time.Parse(time.RFC3339, ae.DeletedAt)
+	if err := s.store.ConvertAgain(s.id); !errors.As(err, &ae) || ae.Code != jobs.AgainOriginalGone ||
 		!strings.Contains(ae.Message, "the original was deleted on ") {
 		t.Errorf("purged: %v", err)
+	}
+	if at, _ = time.Parse(time.RFC3339, ae.DeletedAt); time.Since(at) > time.Minute {
+		t.Errorf("deletedAt %q: when it was purged", ae.DeletedAt)
 	}
 }
 
