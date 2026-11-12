@@ -619,7 +619,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	// The job keeps what it is about to do and how the result will be judged. If that cannot be
 	// recorded, it does not start: nothing has been written yet.
-	snap := rules.Snapshot{Plan: plan, Expect: exp, Verify: w.verification(exp)}
+	snap := rules.Snapshot{Plan: plan, Expect: exp, Verify: w.verification(exp), Source: &src}
 	b, err := json.Marshal(snap)
 	if err == nil {
 		err = w.Queue.RecordPlan(job.ID, string(b), snap.Fingerprint())

@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -542,6 +543,50 @@ func (s *Store) RevisionAt(flowID int64, at string) (Revision, bool, error) {
 }
 
 // SetPriority sets a queued job's priority (higher is taken first by Claim).
+// First and Last (design 03:22Z, SCREENS V6): a job the person put first or last keeps that place over
+// any library priority. It is kept in the job's priority itself, outside the range a library's priority
+// can take (-1000..1000): Claim and the queue's positions order by priority then age, one order, with no
+// other column or index; a library's change leaves pinned jobs alone (SetLibraryPriority).
+const (
+	PinFirstPriority   = 1_000_000
+	PinLastPriority    = -1_000_000
+	MaxLibraryPriority = 1000
+)
+
+// PinOf is "first", "last" or "" for a job's priority.
+func PinOf(priority int) string {
+	switch {
+	case priority >= PinFirstPriority:
+		return "first"
+	case priority <= PinLastPriority:
+		return "last"
+	}
+	return ""
+}
+
+// SetPin puts waiting job id first, last, or back in its library's order ("").
+func (s *Store) SetPin(id int64, pin string) error {
+	var r sql.Result
+	var err error
+	switch pin {
+	case "first":
+		r, err = s.db.Exec(`UPDATE jobs SET priority=? WHERE id=? AND status=?`, PinFirstPriority, id, Queued)
+	case "last":
+		r, err = s.db.Exec(`UPDATE jobs SET priority=? WHERE id=? AND status=?`, PinLastPriority, id, Queued)
+	case "":
+		r, err = s.db.Exec(`UPDATE jobs SET priority=COALESCE((SELECT priority FROM libraries WHERE id=jobs.library_id),0) WHERE id=? AND status=?`, id, Queued)
+	default:
+		return fmt.Errorf("pin %q: first, last or none", pin)
+	}
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return ErrNotStoppable // not waiting: nothing to reorder
+	}
+	return nil
+}
+
 func (s *Store) SetPriority(id int64, p int) error {
 	r, err := s.db.Exec(`UPDATE jobs SET priority=? WHERE id=? AND status=?`, p, id, Queued)
 	if err != nil {

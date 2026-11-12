@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -128,5 +129,43 @@ func TestSetupChecksNeedSignIn(t *testing.T) {
 	}
 	if code, _, _ := do(t, nil, srv, call{method: "GET", path: "/api/system/health", bearer: a.Token()}); code != 200 {
 		t.Errorf("with the token: %d", code)
+	}
+}
+
+// IA.md First run: before the library exists, the check says whether a folder "next to it" can be used,
+// and if not, why as a code and which folder, besides the sentence; so do the refusals and the library.
+func TestNoDefaultFolderFields(t *testing.T) {
+	srv, st, _ := doctorServer(t, false)
+	root := string(filepath.Separator)
+	if runtime.GOOS == "windows" {
+		root = filepath.VolumeName(t.TempDir()) + `\`
+	}
+	lib := filepath.Join(root, "syp-ndf-test")
+	_, body := post(t, srv, "POST", "/api/libraries/check", fmt.Sprintf(`{"path":%q,"nextToLibrary":true,"name":"Top"}`, lib))
+	var r doctor.FolderReport
+	json.Unmarshal([]byte(body), &r)
+	var found *doctor.Issue
+	for i := range r.Blockers {
+		if r.Blockers[i].Code == "no_default_folder" {
+			found = &r.Blockers[i]
+		}
+	}
+	if found == nil || found.Folder != root || found.Reason != "container_root" || !strings.HasPrefix(found.Message, "No folder for new files for Top yet: ") {
+		t.Errorf("check: %s", body)
+	}
+	ok := filepath.Join(t.TempDir(), "movies") // a usable one: no such blocker
+	os.Mkdir(ok, 0o755)
+	_, body = post(t, srv, "POST", "/api/libraries/check", fmt.Sprintf(`{"path":%q,"nextToLibrary":true}`, ok))
+	if strings.Contains(body, "no_default_folder") {
+		t.Errorf("usable: %s", body)
+	}
+	// the refusal when such a library joins a "Next to each library" workflow
+	sel := rules.DefaultSelectors(3)
+	sel.AfterConverting, sel.FolderMode = "folder", rules.NextToLibrary
+	flow, _ := st.AddFlow("Next to", sel.Template())
+	l, _ := st.AddLibrary("Top", lib, rules.SliderTemplate(3), false)
+	code, body := post(t, srv, "PUT", "/api/libraries/"+strconv.FormatInt(l.ID, 10)+"/flow", `{"flowId":"`+strconv.FormatInt(flow.ID, 10)+`"}`)
+	if code != 400 || !strings.Contains(body, `"reason":"container_root"`) || !strings.Contains(body, `"folder":`+strconv.Quote(root)) {
+		t.Errorf("refusal %d %s", code, body)
 	}
 }
