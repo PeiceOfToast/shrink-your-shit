@@ -17,3 +17,14 @@ func dieWithParent(cmd *exec.Cmd) {
 	}
 	cmd.SysProcAttr.Pdeathsig = syscall.SIGKILL
 }
+
+// killGroup starts cmd in its own process group and, when its context ends, kills the whole group:
+// a wrapper's children (QA's stall wrapper, a script around ffmpeg) go with it instead of holding the
+// run's output open (QA finding B).
+func killGroup(cmd *exec.Cmd) {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.Setpgid = true
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+}
