@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { PageHead } from "./PageHead";
+import { Empty, PageHead } from "./PageHead";
 import type { NavItem } from "./nav";
 import { ACCENTS, DEFAULTS, DENSITIES, MOTIONS, TEXT_SIZES, THEMES, keep, preview, useAppearance, type Appearance } from "./prefs";
 import { Link, onLeave } from "./router";
@@ -18,9 +18,7 @@ export function Coming({ item }: { item: NavItem }) {
   return (
     <div className="stack">
       <PageHead icon={item.icon} title={item.label} help={WHAT[item.to]} />
-      <div className="card"><div className="bd">
-        <p>This page comes in a later step of the new interface. Until then, use <a href="/">the current interface</a>.</p>
-      </div></div>
+      <Empty icon={item.icon} text={item.label + " comes in a later step. Until then, use the current interface."}><a className="btn" href="/">Open the current interface</a></Empty>
     </div>
   );
 }
@@ -29,7 +27,7 @@ export function NotFound() {
   return (
     <div className="stack">
       <PageHead title="Page not found" />
-      <div className="card"><div className="bd"><p>There is no page at this address. <Link to="/">Go to the Dashboard</Link>.</p></div></div>
+      <Empty icon="i-alert" text="There is no page at this address."><Link className="btn" to="/">Go to the Dashboard</Link></Empty>
     </div>
   );
 }

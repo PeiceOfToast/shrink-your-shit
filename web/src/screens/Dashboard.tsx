@@ -148,7 +148,7 @@ export function Dashboard() {
             <ul className="plist">{sum.recentFailures.map((j) => (
               <li key={j.id}>
                 <div className="sp"><Name className="ttl" text={j.file.name} />
-                  <span className="sub">{j.reason?.message}</span>
+                  <span className="sub" title={j.reason?.message}>{j.reason?.message}</span>
                   <span className="sub">{[j.library?.name, j.endedAt && clock(j.endedAt), j.currentStep?.name].filter(Boolean).join(" · ")}</span></div>
                 <button className="btn sm ghost" type="button" onClick={() => retry(j.id)} aria-label={"Retry " + j.file.name}><Icon id="i-refresh" />Retry</button>
               </li>))}</ul>)}

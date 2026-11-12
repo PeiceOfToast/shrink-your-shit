@@ -1,7 +1,7 @@
 // V3 Workflows list, Templates tab and the New workflow wizard (spec 5.1, 5.2; DESIGN/v2 SCREENS V3,
 // mockups/workflows.html), on the real /api/v2 (#109) or the mock with ?mock=1. Not here yet: the Stack view (Open, V3b), Export, Test run, History,
 // Import, the Cards view. Archive isn't in the contract.
-import { PageHead } from "../PageHead";
+import { Empty, PageHead } from "../PageHead";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { plural } from "../format";
@@ -119,7 +119,8 @@ export function Workflows() {
           <input className="input find" type="search" placeholder="Search workflows" aria-label="Search workflows" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         {wfs.error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{wfs.error.message}</span></p>}
-        {!wfs.loaded ? <div className="empty">Loading...</div> : rows.length === 0 ? <div className="empty">{all.length ? "No workflow matches." : "No workflows yet. Make one with New workflow."}</div> : (
+        {!wfs.loaded ? <div className="empty">Loading...</div> : rows.length === 0 ? (all.length ? <div className="empty">No workflow matches.</div>
+          : <Empty icon="i-workflow" text="No workflows yet. A workflow says what happens to each file.">{!wizard && <button className="btn primary" type="button" onClick={() => (setWizard(true), setSaid(""))}><Icon id="i-plus" />New workflow</button>}</Empty>) : (
           <div className="list"><table className="tbl">
             <thead><tr><th>Name</th><th data-p="2">Libraries</th><th data-p="3">Version</th><th className="num" data-p="4">Active jobs</th><th data-p="5">Tags</th><th className="stc">Check</th><th className="actc">Enabled</th><th className="actc"><span className="sr">Menu</span></th></tr></thead>
             <tbody>{rows.map((w) => {
@@ -131,7 +132,7 @@ export function Workflows() {
                   <td className="idc"><span className="row nw">
                     <button className="btn sm icon ghost over star" type="button" aria-pressed={w.favourite} aria-label={"Favourite: " + w.name} onClick={async () => { if (await act(patchWorkflow(w.id, { favourite: !w.favourite }), setSaid)) wfs.reload(); }}
                       style={w.favourite ? { color: "var(--warning-text)" } : undefined}><Icon id="i-star" /></button>
-                    <span><Link className="ttl" to={"/workflows/" + w.id}>{w.name}</Link><span className="sub">{w.description}</span>
+                    <span><Link className="ttl" to={"/workflows/" + w.id}>{w.name}</Link><span className="sub" title={w.description}>{w.description}</span>
                       <span className="sub phone">{used} · {version}</span></span></span></td>
                   <td data-p="2">{w.libraries.length ? used : <span className="muted">None</span>}</td>
                   <td className="nowrap" data-p="3">{version}</td>

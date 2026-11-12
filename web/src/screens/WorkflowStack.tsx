@@ -37,9 +37,12 @@ function Field({ id, name, s, value, set }: { id: string; name: string; s: JSONS
     const opts = labels(s), i = Math.max(0, opts.findIndex((o) => o[0] === value));
     return (
       <div className="field"><label htmlFor={fid}>{title}</label>
+        <strong className="slnow phone" aria-hidden="true">{opts[i][1]}</strong>
         <input id={fid} type="range" min={0} max={opts.length - 1} step={1} value={i} aria-valuetext={`${i + 1} of ${opts.length}, ${opts[i][1]}`} onChange={(e) => set(opts[Number(e.target.value)][0])} />
-        <div className="row sm muted" style={{ justifyContent: "space-between", flexWrap: "nowrap", gap: 2 }} aria-hidden="true">
+        <div className="row sm muted hide-sm" style={{ justifyContent: "space-between", flexWrap: "nowrap", gap: 2 }} aria-hidden="true">
           {opts.map((o, k) => (k === i ? <strong key={k} style={{ color: "var(--text)" }}>{o[1]}</strong> : <span key={k}>{o[1]}</span>))}</div>
+        {/* phones (design, step 4): the chosen name above, only the two ends under the slider */}
+        <div className="row sm muted phone slends" aria-hidden="true"><span>{opts[0][1]}</span><span>{opts[opts.length - 1][1]}</span></div>
         <Hint text={hintFor(s, value)} />
       </div>);
   }
@@ -114,8 +117,8 @@ function Step({ n, i, open, toggle, update, issues }: { n: Node; i: number; open
     <li className={"srow" + (open ? " open" : "")} aria-labelledby={n.id + "-name"}>
       <div className="sline">
         <span className="stepn">{i + 1}</span><span className="sic"><Icon id={ICON[def.icon] ?? "i-box"} /></span>
-        <div className="sp"><span className="snm" id={n.id + "-name"}>{n.name ?? def.name}</span> <span className="ssum">{summary(n)}</span>
-          {mine.length > 0 && <span className="pill bad"><Icon id="i-alert" />{mine.length === 1 ? "1 problem" : mine.length + " problems"}</span>}</div>
+        <div className="sp" title={(n.name ?? def.name) + ": " + summary(n)}><span className="snm" id={n.id + "-name"}>{n.name ?? def.name}</span> <span className="ssum">{summary(n)}</span></div>
+        {mine.length > 0 && <span className="pill bad"><Icon id="i-alert" />{mine.length === 1 ? "1 problem" : mine.length + " problems"}</span>}
         {def.alwaysOn ? <span className="muted sm nowrap">Always on</span>
           : <input type="checkbox" role="switch" className="switch" aria-label={(def.name) + " on"} checked={n.enabled} onChange={(e) => update({ ...n, enabled: e.target.checked })} />}
         {hasOptions ? <button className="btn icon ghost" type="button" aria-expanded={open} aria-controls={n.id + "-opts"} aria-label={"Options for " + def.name} onClick={toggle}><Icon id={open ? "i-chev-d" : "i-chev-r"} /></button>

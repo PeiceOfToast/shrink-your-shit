@@ -33,3 +33,8 @@ export function PageHead({ icon, title, help, crumbs, after, children }: { icon?
     </>
   );
 }
+
+// One empty state (clean pass E1): a centred 40 px icon, one sentence, one action.
+export function Empty({ icon, text, children }: { icon: string; text: ReactNode; children?: ReactNode }) {
+  return <div className="empty1"><Icon id={icon} /><p>{text}</p>{children}</div>;
+}

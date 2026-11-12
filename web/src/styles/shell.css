@@ -429,7 +429,7 @@ label.chk{cursor:pointer}
 .sline .sp{min-width:0}
 .snm{font-weight:var(--fw-strong)}
 .ssum{color:var(--text-2)}
-.sline .pill{margin-left:8px;vertical-align:middle}
+.sline>.pill{flex:none}
 .sic{color:var(--text-2);display:inline-flex}
 .srow.open>.sline{background:var(--raised)}
 .sopts{padding:var(--pad);background:var(--raised);border-top:1px solid var(--border)}
@@ -444,3 +444,42 @@ label.chk{cursor:pointer}
   .sopts .btn.icon{min-width:44px;min-height:44px}
 }
 .checkline,.checkline span{white-space:normal}
+
+/* clean pass step 5 (E1, M6, M7) */
+.empty1{display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center;padding:48px 16px;color:var(--text-2)}
+.empty1>.ic{width:40px;height:40px;color:var(--text-2)}
+.empty1 p{margin:0;max-width:420px}
+.slnow{font-size:var(--fs);font-weight:var(--fw-strong)}
+.slends{justify-content:space-between;flex-wrap:nowrap}
+@media (max-width:640px){
+  .row.phone.slends{display:flex}
+  .palette-wrap{padding-top:0;align-items:stretch}
+  .palette{width:100vw;height:100dvh;border:0;border-radius:0;display:flex;flex-direction:column}
+  .palette .res{max-height:none;flex:1}
+}
+/* touch (M7): targets at least 44 px; checkboxes and switches 24 px or more */
+@media (pointer:coarse){
+  .btn,.btn.sm,summary.btn,.input,select.input,.ltools .btn.sm,.ltools .input.sm,.ltools .find{min-height:44px}
+  .btn.icon,.btn.sm.icon,.pagehead .btn.help,.kpi .btn.help{min-width:44px;width:44px;min-height:44px;height:44px}
+  .nav a,.tabs [role=tab],.tabs a,.palette .r,.pop .it,.pop .btn{min-height:44px}
+  .search{min-height:44px;min-width:44px}
+  input[type=checkbox]:not(.switch),input[type=radio]{width:24px;height:24px}
+  input.switch{width:46px;height:28px;border-radius:14px}
+  input.switch::after{width:20px;height:20px;top:3px;left:3px}
+  input.switch:checked::after{left:21px}
+}
+/* M7 findings: links that are targets get 44 px on touch; phone rows stop at 3 lines (the full text as a tooltip) */
+@media (pointer:coarse){
+  .brand{min-height:44px}
+  .pagehead .crumbl,.kpi a.sub,.linkbtn{display:inline-flex;align-items:center;min-height:44px}
+}
+@media (max-width:640px){
+  .list .tbl .ttl{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .list .tbl .sub.phone,.plist .sub{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+  .plist .ttl.clamp2{-webkit-line-clamp:1}
+  .plist .prog>.sm{display:none}
+  .sline>.sp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+}
+.plist .ttl.clamp2{display:-webkit-box}   /* .plist .ttl's display:block had switched the clamp off */
+@media (min-width:641px){.list .tbl td.idc>.sub:not(.phone),.list .tbl td.idc .row .sub:not(.phone){display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}}
+@media (pointer:coarse){.linkbtn{min-width:44px;justify-content:center}}

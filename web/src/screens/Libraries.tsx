@@ -3,7 +3,7 @@
 // General tab only; Discovery, Filters, Output and Statistics come later, so no tabs are shown yet. Not shown, because
 // v1 has no data or route for them: description and tags (CAN'T YET), schedule, priority, pause and resume, other file
 // types.
-import { PageHead } from "../PageHead";
+import { Empty, PageHead } from "../PageHead";
 import { useEffect, useState } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
@@ -71,7 +71,7 @@ export function Libraries() {
         <input className="input find" type="search" placeholder="Filter libraries" aria-label="Filter libraries" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       <p className="muted" role="status">{said}</p>
-      {!libs.loaded ? <div className="empty">Loading...</div> : all.length === 0 ? <div className="empty">No libraries yet. <Link to="/libraries/new">Add one</Link> to start.</div>
+      {!libs.loaded ? <div className="empty">Loading...</div> : all.length === 0 ? <Empty icon="i-library" text="No libraries yet. A library is a folder that is watched for videos."><Link className="btn primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link></Empty>
         : items.length === 0 ? <div className="empty">No library matches.</div> : (
         <div className={"list" + (selecting ? " selecting" : "")}><table className="tbl">
           <thead><tr>
@@ -194,7 +194,7 @@ export function WorkflowField({ value, onChange, workflows, self }: { value: str
             {!value && <option value="">Choose a workflow</option>}
             {workflows.map((w) => <option key={w.id} value={w.id} disabled={!w.usable}>{w.name}{w.usable ? "" : " (not published yet)"}</option>)}
           </select>
-          {value && <Link to={"/workflows/" + value}>Edit this workflow</Link>}
+          {value && <Link className="btn sm ghost" to={"/workflows/" + value}>Edit this workflow</Link>}
         </div>
         <span id="lib-wf-hint" className="hint">{!workflows.some((w) => w.usable) ? "Publish a workflow before a library can use it." : others.length ? "Used by " + names(others) + "." : "No other library uses it."}</span>
       </>}
