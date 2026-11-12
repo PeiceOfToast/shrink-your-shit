@@ -298,7 +298,8 @@ func folderRefused(w http.ResponseWriter, store *jobs.Store, flowID int64, lib j
 	if f, err := store.GetFlow(flowID); err == nil {
 		dir, problem := libraryFolder(f.Template, lib)
 		if problem != nil {
-			return refuse(problem.Code, problem.Message+" Nothing was changed.")
+			writeErrorWith(w, http.StatusBadRequest, problem.Code, problem.Message+" Nothing was changed.", map[string]any{"folder": problem.Folder, "reason": problem.Reason})
+			return true
 		}
 		if b := outputInsideBlocker(dir, lib.Path); b != nil {
 			return refuse(b.Code, b.Message)
