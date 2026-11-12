@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -229,5 +230,67 @@ func TestSharedFolderTestsEnd(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	if code, b := send(t, srv, "POST", wpath+"/paths/test", `{"server":`+jsonString(lib)+`}`); code != 409 || !strings.Contains(b, "worker_offline") {
 		t.Errorf("offline: %d %s", code, b)
+	}
+}
+
+// Review 15b1898: a worker's note is one line in the run log, marked as the worker's, with no control
+// characters and a length cap; nothing usable is refused.
+func TestWorkerNoteCantForgeLogLines(t *testing.T) {
+	needFFmpeg(t)
+	srv, st, lib, logs := sharesServer(t)
+	src := filepath.Join(lib, "Movie.mkv")
+	if out, err := exec.Command("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=duration=1:size=160x90:rate=25",
+		"-c:v", "libx264", "-pix_fmt", "yuv420p", src).CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	code, _, _ := st.NewPairing(time.Now())
+	c := &Client{Server: srv.URL, Version: "test"}
+	state, err := c.Pair(context.Background(), code, "Desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Token = state.Token
+	ctx := context.Background()
+	if err := c.call(ctx, "heartbeat", map[string]any{"freeSlots": 1}, nil); err != nil {
+		t.Fatal(err)
+	}
+	l, _ := st.AddLibrary("Movies", lib, rules.SliderTemplate(3), true)
+	id, _ := st.Enqueue(jobs.Job{Library: lib, LibraryID: l.ID, Path: src, DurationSec: 1, SizeBefore: 1000})
+	var out struct{ Lease *struct{ ID string } }
+	if err := c.call(ctx, "lease", map[string]any{"slots": 1}, &out); err != nil || out.Lease == nil {
+		t.Fatalf("lease %+v %v", out, err)
+	}
+	note := func(text string) error {
+		return c.call(ctx, "leases/"+out.Lease.ID+"/note", map[string]any{"text": text}, nil)
+	}
+	// the reviewer's payload: a forged line, an ANSI escape and a NUL byte
+	if err := note("ok\nFAKE admin: deleted the original\n\x1b[31mRED\x00nul\r‮evil x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := note(strings.Repeat("é", 1000)); err != nil {
+		t.Fatal(err)
+	}
+	var e *APIError
+	if err := note(" \n\x1b\x00​ "); !errors.As(err, &e) || e.Status != 400 {
+		t.Errorf("nothing usable: %v", err)
+	}
+	text, _, _ := logs.Read(id, 0)
+	var notes []string
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, "Worker: ") {
+			notes = append(notes, line)
+		}
+		if strings.Contains(line, "FAKE") && !strings.Contains(line, "Worker: ") {
+			t.Errorf("a forged line: %q", line)
+		}
+	}
+	if len(notes) != 2 || !strings.Contains(notes[0], "Worker: okFAKE admin: deleted the original[31mREDnulevilx") {
+		t.Fatalf("notes %q\nlog:\n%s", notes, text)
+	}
+	if strings.ContainsAny(text, "\x1b\x00\r‮ ") {
+		t.Errorf("control characters in the log: %q", text)
+	}
+	if got := len([]rune(notes[1][strings.Index(notes[1], "Worker: ")+len("Worker: "):])); got != web.NoteMaxChars {
+		t.Errorf("capped at %d, got %d", web.NoteMaxChars, got)
 	}
 }

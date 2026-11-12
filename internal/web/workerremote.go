@@ -212,8 +212,13 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 		if !readJSON(w, r, &in) {
 			return
 		}
-		if eng.RunLogs != nil && in.Text != "" {
-			eng.RunLogs.Append(j.ID, "worker: "+strings.TrimSpace(in.Text))
+		text := cleanWorkerText(in.Text, NoteMaxChars) // review 15b1898: one line, no control characters, capped
+		if text == "" {
+			apiError(w, http.StatusBadRequest, "invalid", "A note needs some text.")
+			return
+		}
+		if eng.RunLogs != nil {
+			eng.RunLogs.Append(j.ID, "Worker: "+text) // prefixed: a worker's note can't pass for the server's line
 		}
 		writeJSON(w, map[string]any{"ok": true})
 	})

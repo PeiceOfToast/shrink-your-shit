@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/sysload"
@@ -371,3 +372,23 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine) http.
 
 // workerLoads are the remote workers' last reported loads (sysload.Load), by worker id (V7d).
 var workerLoads sync.Map
+
+// NoteMaxChars caps a worker's run-log note.
+const NoteMaxChars = 300
+
+// cleanWorkerText makes a remote worker's words safe to store and show (review 15b1898): every control
+// character (C0 with CR, LF, ESC and NUL; DEL; C1), format character (bidi overrides, zero-width) and line
+// or paragraph separator is dropped, so it stays one line that can't forge another or drive a terminal;
+// then it is trimmed and cut to at most max characters. Empty means nothing usable was sent.
+func cleanWorkerText(s string, max int) string {
+	s = strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp) || r == unicode.ReplacementChar {
+			return -1
+		}
+		return r
+	}, s))
+	if r := []rune(s); len(r) > max {
+		s = strings.TrimSpace(string(r[:max]))
+	}
+	return s
+}
