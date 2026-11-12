@@ -624,6 +624,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		if err := os.MkdirAll(filepath.Dir(newName), 0o755); err != nil {
 			return "", failed("The folder for new files can't be written to, so nothing was converted. Your original was not touched. Check the flow's folder, then press Retry.", err)
 		}
+		if err := removeLeftoverTemps(newName); err != nil { // an earlier run's, staged there (review-697332b P2)
+			return "", err
+		}
 		if err := w.preflight(newName, before.Size()); err != nil { // its own disk: the new file is made there (review 6cafc6f)
 			return "", err
 		}
