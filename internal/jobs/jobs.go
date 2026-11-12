@@ -444,4 +444,10 @@ func jobIDs(q interface {
 
 // libraryOnSQL is true for a job (of table jobs) whose library is started, or that has none: a paused
 // library's jobs stay waiting and are not taken (V5b).
-const libraryOnSQL = `(library_id IS NULL OR library_id IN (SELECT id FROM libraries WHERE started=1))`
+const libraryOnSQL = `(jobs.library_id IS NULL OR jobs.library_id IN (SELECT id FROM libraries WHERE started=1))`
+
+// libraryOn is libraryOnSQL for the jobs row named alias: Claim, the queue's order and its positions use
+// the same condition (review-5d8b1f9).
+func libraryOn(alias string) string {
+	return `(` + alias + `.library_id IS NULL OR ` + alias + `.library_id IN (SELECT id FROM libraries WHERE started=1))`
+}
