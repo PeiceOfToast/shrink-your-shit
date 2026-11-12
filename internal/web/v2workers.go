@@ -200,14 +200,15 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 		}
 		writeJSON(w, wk)
 	}
-	api.HandleFunc("GET /api/v2/workers", func(w http.ResponseWriter, r *http.Request) {
+	list := func(w http.ResponseWriter, r *http.Request) {
 		wk, err := v.local(r.Context())
 		if err != nil {
 			serverError(w, err)
 			return
 		}
 		writeJSON(w, map[string]any{"items": []any{wk}, "total": 1})
-	})
+	}
+	api.HandleFunc("GET /api/v2/workers", list)
 	api.HandleFunc("GET /api/v2/workers/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if found(w, r) {
 			one(w, r)
@@ -318,13 +319,11 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 		}
 		one(w, r)
 	})
-	api.HandleFunc("POST /api/v2/workers/{id}/{action}", func(w http.ResponseWriter, r *http.Request) {
-		var in struct{}
-		if !found(w, r) || !readJSON(w, r, &in) {
-			return
-		}
+	// act starts, stops or drains: today every worker together (the processing switch); false when
+	// action is none of these (the answer is written)
+	act := func(w http.ResponseWriter, action string) bool {
 		var err error
-		switch r.PathValue("action") {
+		switch action {
 		case "start":
 			err = startWorker(v.store)
 		case "drain": // takes nothing new, finishes its files, then is paused (v1's "Stop after these files")
@@ -342,10 +341,26 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 			}
 		default:
 			apiError(w, http.StatusNotFound, "not_found", "A worker can be started, stopped or drained.")
-			return
+			return false
 		}
 		if err != nil {
 			serverError(w, err)
+			return false
+		}
+		return true
+	}
+	// every worker at once (user review 11-12 item 2; ui-shop 14:01Z: the Dashboard's switch), answered
+	// with the workers list
+	api.HandleFunc("POST /api/v2/workers/all/{action}", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{}
+		if !readJSON(w, r, &in) || !act(w, r.PathValue("action")) {
+			return
+		}
+		list(w, r)
+	})
+	api.HandleFunc("POST /api/v2/workers/{id}/{action}", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{}
+		if !found(w, r) || !readJSON(w, r, &in) || !act(w, r.PathValue("action")) {
 			return
 		}
 		one(w, r)
