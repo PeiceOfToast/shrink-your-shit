@@ -8,6 +8,8 @@ import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
 import { addLibrary, checkFolder, firstFiles, getLibraryV2, getSettings, listLibraries, listLibrariesV2, listWorkflows, patchLibrary, patchLibraryV2, scanLibrary, setLibraryWorkflow, type WorkflowChoice } from "../libraryApi";
 import { Link, navigate, useSearch } from "../router";
+import { onLive } from "../live";
+import { getPublishedDoc } from "../workflowApi";
 import { bytes, clock, count, duration, plural } from "../format";
 import { useData } from "../useData";
 import type { FirstFiles, FolderReport, LibraryItem } from "../types/v1";
@@ -61,6 +63,7 @@ const Problem = ({ m }: { m?: string }) => (m ? <p className="st bad" role="aler
 
 export function Libraries() {
   const libs = useData(listLibrariesV2, [], 3000);
+  useEffect(() => onLive((t) => { if (t === "library.changed") libs.reload(); }), []); // eslint-disable-line react-hooks/exhaustive-deps -- #150: at once
   const [sel, setSel] = useState<string[]>([]), [said, setSaid] = useState(""), [q, setQ] = useState(""), [selecting, setSelecting] = useState(false);
   const all = libs.data ?? [], items = all.filter((l) => !q || (l.name + " " + l.paths.join(" ")).toLowerCase().includes(q.toLowerCase()));
   const picked = all.filter((l) => sel.includes(l.id)), none = picked.length === 0;
@@ -132,6 +135,7 @@ export function Libraries() {
 export function LibraryPage({ id }: { id: string }) {
   const libs = useData(listLibraries, [], 3000), wfs = useData(listWorkflows, [], 10000);
   const v2 = useData(() => (id === "new" ? Promise.resolve(null) : getLibraryV2(id)), [id], 3000);
+  useEffect(() => onLive((t, d) => { if (t === "library.changed" && (d as { libraryId?: string })?.libraryId === id) (v2.reload(), libs.reload()); }), [id]); // eslint-disable-line react-hooks/exhaustive-deps
   const l = id === "new" ? null : libs.data?.find((x) => x.id === id);
   if (id !== "new" && !libs.loaded) return <div className="empty">Loading...</div>;
   if (id !== "new" && !l) return (
@@ -326,12 +330,16 @@ const POLICY: Record<string, string> = {
 };
 function Output({ v, reload }: { v: Library; reload: () => void }) {
   const o = v.output, [dir, setDir] = useState(o.overrideFolder ?? ""), [said, setSaid] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false);
+  // design (SCREENS V5, "Own folder with a One-folder-for-all workflow"): the library's own folder only applies with Next
+  // to each library; the published workflow's Save step says which (its id links to that step)
+  const pub = useData(() => getPublishedDoc(v.workflowId), [v.workflowId]);
+  const commit = pub.data?.nodes.find((n) => n.type === "output.commit"), oneFolder = commit?.config.folderMode === "one_folder";
+  const stepLink = "/workflows/" + v.workflowId + (commit ? "?step=" + encodeURIComponent(commit.id) : "");
   const save = async (to: string | null) => {
     setSaid(""); setError(""); setBusy(true);
     try { if (await act(() => patchLibraryV2(v.id, { overrideFolder: to }), setError)) { setSaid(to ? "Saved. New files for " + v.name + " go to " + to + "." : "Saved. " + v.name + " uses the workflow's folder again."); if (!to) setDir(""); reload(); } }
     finally { setBusy(false); }
   };
-  const unused = o.overrideFolder && o.folder !== o.overrideFolder; // the workflow saves every library's files to one folder
   return (
     <section className="card" aria-labelledby="out-h">
       <div className="hd"><h2 id="out-h">Where results go</h2></div>
@@ -340,10 +348,16 @@ function Output({ v, reload }: { v: Library; reload: () => void }) {
         {o.folder && <p>New files go to <span className="mono" style={{ overflowWrap: "anywhere" }}>{o.folder}</span>.</p>}
         {o.problem && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{o.problem.message}</span></p>}
         <div className="row"><Link className="btn sm" to={"/workflows/" + v.workflowId}>Edit in workflow</Link></div>
-        {o.policy === "separate_folder" && <form className="stack" onSubmit={(e) => (e.preventDefault(), save(dir.trim() || null))}>
+        {o.policy === "separate_folder" && oneFolder && <>
+          <p>This workflow puts every library's new files in one folder. To give this library its own folder, change the workflow's <Link to={stepLink}>Output step</Link> to Next to each library.</p>
+          {o.overrideFolder && <div className="row" style={{ gap: 8, alignItems: "center" }}><p className="muted sp" style={{ margin: 0 }}>Its own folder <span className="mono" style={{ overflowWrap: "anywhere" }}>{o.overrideFolder}</span> is saved but not used with this workflow.</p>
+            <button className="btn sm" type="button" disabled={busy} onClick={() => save(null)}>Remove</button></div>}
+          {error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{error}</span></p>}
+          <p className="muted" role="status">{said}</p></>}
+        {o.policy === "separate_folder" && !oneFolder && pub.loaded && <form className="stack" onSubmit={(e) => (e.preventDefault(), save(dir.trim() || null))}>
           <div className="field"><label htmlFor="lib-over">Use a different folder for this library</label>
             <input id="lib-over" className="input mono" value={dir} placeholder={v.paths[0] + " (shrunk)"} onChange={(e) => setDir(e.target.value)} aria-describedby="lib-over-h" />
-            <span className="hint" id="lib-over-h">This is the one place to override the folder for {v.name} only.{unused ? " The workflow saves every library's files to one folder, so this folder is used only with Next to each library." : ""}</span></div>
+            <span className="hint" id="lib-over-h">This is the one place to override the folder for {v.name} only.</span></div>
           {error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{error}</span></p>}
           <p className="muted" role="status">{said}</p>
           <div className="row" style={{ gap: 8 }}>
