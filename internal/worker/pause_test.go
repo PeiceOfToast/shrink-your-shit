@@ -445,4 +445,24 @@ func TestStallStopCountsOnlyAPositionFurtherOn(t *testing.T) {
 	if j := s.job(); j.Status != jobs.Done {
 		t.Errorf("moving on slowly: %s %q", j.Status, j.Error)
 	}
+
+	// a length we don't know (orch-lead 17:43Z): the position still counts, so one moving on finishes
+	// and one stuck is stopped
+	for _, c := range []struct {
+		step int64
+		want jobs.Status
+	}{{1000, jobs.Done}, {0, jobs.Failed}} {
+		scenarioDuration = 0
+		s = newScenario(t)
+		scenarioDuration = 100
+		w = s.worker(Replace)
+		w.StallAfter = 200 * time.Millisecond
+		w.Exec = positionExec{FakeExec: s.exec, step: c.step, steps: 60}
+		done := make(chan struct{})
+		go func() { w.RunOne(context.Background()); close(done) }()
+		waitDone(t, done)
+		if j := s.job(); j.Status != c.want || j.DurationSec != 0 {
+			t.Errorf("no length, step %d: %s %q (duration %v)", c.step, j.Status, j.Error, j.DurationSec)
+		}
+	}
 }

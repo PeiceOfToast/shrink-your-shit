@@ -344,7 +344,8 @@ type Progress struct {
 }
 
 // Transcode runs ffmpeg and reports each progress point through onProgress (on every out_time_us line,
-// with the block's other values as last seen). It returns what ffmpeg printed on stderr (at the error
+// with the block's other values as last seen; with durationSec 0, a length we don't know, the position
+// only, so a stall can still be told from a slow encode). It returns what ffmpeg printed on stderr (at the error
 // level the args ask for), which includes decode errors in the source.
 func Transcode(ctx context.Context, x Exec, ffmpeg string, args []string, durationSec float64, onProgress func(Progress)) (string, error) {
 	p := Progress{ETASeconds: -1}
@@ -359,9 +360,16 @@ func Transcode(ctx context.Context, x Exec, ffmpeg string, args []string, durati
 		case "speed": // "1.25x", or "N/A"
 			p.Speed, _ = strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(v, "x")), 64)
 		}
+		if k != "out_time_us" {
+			return
+		}
+		us, err := strconv.ParseFloat(v, 64)
+		if err != nil || us < 0 { // "N/A" before the first frame
+			return
+		}
+		p.OutTimeUS = us
 		if pct, ok := ParseProgress(line, durationSec); ok {
 			p.Percent, p.ETASeconds = pct, -1
-			p.OutTimeUS, _ = strconv.ParseFloat(strings.TrimPrefix(line, "out_time_us="), 64)
 			if p.Speed > 0 {
 				etas = append(etas, math.Max(0, durationSec*(1-pct/100)/p.Speed))
 				if len(etas) > 5 {
@@ -373,8 +381,8 @@ func Transcode(ctx context.Context, x Exec, ffmpeg string, args []string, durati
 				}
 				p.ETASeconds = sum / float64(len(etas))
 			}
-			onProgress(p)
 		}
+		onProgress(p) // a length we don't know: the position only (Percent 0, ETASeconds -1)
 	}, ffmpeg, args...)
 }
 

@@ -732,6 +732,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			at = p.OutTimeUS
 			w.progressAt.Store(time.Now().UnixNano())
 		}
+		if job.DurationSec <= 0 {
+			return // no length: no percent to show
+		}
 		w.Queue.Progress(job.ID, p.Percent)
 		updateLive(job.ID, p)
 		if line := tenths.next(p); line != "" {
