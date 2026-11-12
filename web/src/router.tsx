@@ -4,23 +4,26 @@ import { useSyncExternalStore, type AnchorHTMLAttributes, type MouseEvent } from
 
 export const BASE = ""; // the app is the whole interface, at / (was /next before one UI)
 const listeners = new Set<() => void>();
-let beforeLeave: (() => void) | null = null;
+// returns false to stay on the page (the move is cancelled; Back/Forward puts the address back)
+let beforeLeave: (() => void | boolean) | null = null, here = location.pathname + location.search;
 
 const path = () => location.pathname.slice(BASE.length) || "/";
 const notify = () => listeners.forEach((f) => f());
 window.addEventListener("popstate", () => {
-  beforeLeave?.();
+  if (beforeLeave?.() === false) { history.pushState(null, "", here); return; }
+  here = location.pathname + location.search;
   notify();
 });
 
 // The page shown now registers what to do before it is left (e.g. Appearance asks "Keep these colours?").
-export function onLeave(f: (() => void) | null) {
+export function onLeave(f: (() => void | boolean) | null) {
   beforeLeave = f;
 }
 
 export function navigate(to: string) {
-  beforeLeave?.();
+  if (beforeLeave?.() === false) return;
   history.pushState(null, "", BASE + to);
+  here = location.pathname + location.search;
   window.scrollTo(0, 0);
   notify();
 }
