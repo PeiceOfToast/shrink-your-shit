@@ -71,7 +71,8 @@ jobs:
       # Windows and macOS: no ffmpeg on the runner, so the real tests skip there (fake runner only).
       - name: Test
         if: runner.os != 'Linux'
-        run: go test -count=1 ./...
+        shell: bash
+        run: go test -count=1 -timeout 8m -v ./... > test.log 2>&1; s=$?; cat test.log; exit $s  # TEMPORARY trace branch: delete after
 
   # The race detector needs cgo (a C compiler), which the dev machines lack; ubuntu runners have gcc.
   # Packages that run goroutines, at unit level: no ffmpeg here, so the real-ffmpeg tests skip.
