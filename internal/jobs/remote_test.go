@@ -41,8 +41,8 @@ func TestUpgradeFrom34AddsRemoteWorkers(t *testing.T) {
 	}
 }
 
-// rewind35 takes away what migration 35 (remote workers) added.
-var rewind35 = []string{`DROP INDEX workers_token`, `DROP TABLE worker_pairings`, `ALTER TABLE workers DROP COLUMN kind`, `ALTER TABLE workers DROP COLUMN token_hash`,
+// rewind35 takes away what migrations 35 (remote workers) and 36 (workers on and off) added.
+var rewind35 = []string{`ALTER TABLE workers DROP COLUMN enabled`, `DROP INDEX workers_token`, `DROP TABLE worker_pairings`, `ALTER TABLE workers DROP COLUMN kind`, `ALTER TABLE workers DROP COLUMN token_hash`,
 	`ALTER TABLE workers DROP COLUMN version`, `ALTER TABLE workers DROP COLUMN api_level`, `ALTER TABLE workers DROP COLUMN last_seen`,
 	`ALTER TABLE workers DROP COLUMN capabilities`}
 
@@ -63,5 +63,73 @@ func TestWorkerByTokenUsesItsIndex(t *testing.T) {
 	rows.Close()
 	if !strings.Contains(plan, "workers_token") {
 		t.Errorf("plan %s", plan)
+	}
+}
+
+// User review 11-12 item 2 (orch-lead 14:22Z): each worker's own flag is its only on/off state; the
+// switch for all sets every flag; today's pause carries over. A paired worker arrives on only if another
+// worker is on: pairing never starts processing by itself (orch-lead 17:58Z).
+func TestWorkersOnAndOff(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "t.db")
+	s, err := Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.Paused() || s.WorkerEnabled(LocalWorker) { // a new install starts stopped (S2), carried to the local worker
+		t.Fatalf("new install: paused %v, local on %v", s.Paused(), s.WorkerEnabled(LocalWorker))
+	}
+	pauseEvents := func() (n int) {
+		s.db.QueryRow(`SELECT COUNT(*) FROM events WHERE kind IN ('processing.paused','processing.resumed')`).Scan(&n)
+		return n
+	}
+	code, _, _ := s.NewPairing(time.Now())
+	rw, _, err := s.Pair(code, "Desktop", "1", 1, "", time.Now())
+	if err != nil || s.WorkerEnabled(rw.ID) || !s.Paused() || pauseEvents() != 0 {
+		t.Fatalf("paired while every worker is off: on %v, paused %v, events %d, %v", s.WorkerEnabled(rw.ID), s.Paused(), pauseEvents(), err)
+	}
+	if err := s.SetWorkerEnabled(rw.ID, true); err != nil || s.Paused() || pauseEvents() != 1 {
+		t.Errorf("started by the person: paused %v, events %d, %v", s.Paused(), pauseEvents(), err)
+	}
+	code, _, _ = s.NewPairing(time.Now())
+	if rw2, _, err := s.Pair(code, "Laptop", "1", 1, "", time.Now()); err != nil || !s.WorkerEnabled(rw2.ID) || pauseEvents() != 1 {
+		t.Errorf("paired while one is on: on %v, events %d, %v", s.WorkerEnabled(rw2.ID), pauseEvents(), err)
+	}
+	s.Enqueue(Job{Library: "/m", Path: "/m/a.mkv"})
+	if _, err := s.Claim("builtin"); err != ErrNoJob {
+		t.Errorf("the local worker is off, yet claimed: %v", err)
+	}
+	if j, err := s.Claim(rw.ID); err != nil || j.Worker != rw.ID {
+		t.Errorf("the remote worker is on: %+v %v", j, err)
+	}
+	if err := s.SetPaused(true); err != nil || !s.Paused() || s.WorkerEnabled(rw.ID) || s.WorkerEnabled(LocalWorker) {
+		t.Errorf("all off: %v", err)
+	}
+	if err := s.SetPaused(false); err != nil || s.Paused() || !s.WorkerEnabled(rw.ID) || !s.WorkerEnabled(LocalWorker) {
+		t.Errorf("all on: %v", err)
+	}
+	s.SetWorkerEnabled(LocalWorker, false)
+	if s.WorkerEnabled("builtin-2") || !s.WorkerEnabled(rw.ID) {
+		t.Error("the pool follows the local worker's flag, a remote worker its own")
+	}
+	if err := s.SetWorkerEnabled("w-none", false); err != ErrNotFound {
+		t.Errorf("no such worker: %v", err)
+	}
+	if n := pauseEvents(); n != 3 { // resumed (started), paused (all off), resumed (all on): not for the local one alone
+		t.Errorf("pause events %d", n)
+	}
+	s.Close()
+	// an install paused before this version: every worker off
+	s, _ = Open(p)
+	s.SetPaused(true)
+	for _, q := range append([]string{`INSERT INTO app_meta(key, value) VALUES ('paused', '1')`, `UPDATE workers SET enabled=1`}, `ALTER TABLE workers DROP COLUMN enabled`, `PRAGMA user_version=35`) {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatal(q, err)
+		}
+	}
+	s.Close()
+	s, _ = Open(p)
+	defer s.Close()
+	if !s.Paused() || s.WorkerEnabled(rw.ID) || s.WorkerEnabled(LocalWorker) {
+		t.Error("the pause wasn't carried to every worker")
 	}
 }

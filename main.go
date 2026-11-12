@@ -264,7 +264,7 @@ func main() {
 			return &worker.Worker{ID: id, Logs: runLogs, Queue: store, Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath,
 				Template: store.TemplateFor, Poll: 3 * time.Second,
 				DecodeCheck: *decode, MinSSIM: *minSSIM, KeepDays: keepDays, Journal: store, Sidecars: store,
-				Paused: store.Paused, StallAfter: *stallAfter}
+				Paused: func() bool { return !store.WorkerEnabled(jobs.LocalWorker) }, StallAfter: *stallAfter} // this computer's own switch
 		},
 		Size: func() int {
 			if s, err := web.LoadSettings(store); err == nil {

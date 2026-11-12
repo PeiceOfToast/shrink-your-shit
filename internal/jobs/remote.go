@@ -62,6 +62,7 @@ func normalCode(c string) string {
 
 // Pair exchanges a pairing code for a new remote worker and its token (shown once, to the worker).
 func (s *Store) Pair(code, name, version string, apiLevel int, capabilities string, now time.Time) (RemoteWorker, string, error) {
+	was := s.Paused() // pairing never turns processing on by itself (orch-lead 17:58Z): see the insert
 	tx, err := s.db.Begin()
 	if err != nil {
 		return RemoteWorker{}, "", err
@@ -84,11 +85,17 @@ func (s *Store) Pair(code, name, version string, apiLevel int, capabilities stri
 	w := RemoteWorker{ID: "w-" + strings.ToLower(randomText(6)), Name: name, Version: version, APILevel: apiLevel,
 		LastSeen: now.UTC().Format(time.RFC3339), Capabilities: capabilities}
 	token := randomText(32)
-	if _, err := tx.Exec(`INSERT INTO workers(id, name, kind, token_hash, version, api_level, last_seen, capabilities) VALUES (?,?,?,?,?,?,?,?)`,
+	// a new worker is on only if another worker is on (or there is none): with every worker off it
+	// arrives off, so nothing converts until the person starts it (ui-shop via orch-lead 17:58Z)
+	if _, err := tx.Exec(`INSERT INTO workers(id, name, kind, token_hash, version, api_level, last_seen, capabilities, enabled)
+VALUES (?,?,?,?,?,?,?,?, EXISTS(SELECT 1 FROM workers WHERE enabled=1) OR NOT EXISTS(SELECT 1 FROM workers))`,
 		w.ID, w.Name, "remote", hashOf(token), w.Version, w.APILevel, w.LastSeen, w.Capabilities); err != nil {
 		return RemoteWorker{}, "", err
 	}
-	return w, token, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return RemoteWorker{}, "", err
+	}
+	return w, token, s.pausedChanged(was)
 }
 
 // WorkerByToken is the remote worker whose token this is (ErrNotFound: none, or it was removed).
@@ -132,6 +139,8 @@ func (s *Store) RemoteWorkers() ([]RemoteWorker, error) {
 // RemoveWorker removes remote worker id: its token stops working at once, and the jobs it was running
 // go back to the queue (their leases end with them).
 func (s *Store) RemoveWorker(id string) error {
+	was := s.Paused()
+	defer s.pausedChanged(was)
 	r, err := s.db.Exec(`DELETE FROM workers WHERE id=? AND kind='remote'`, id)
 	if err != nil {
 		return err
