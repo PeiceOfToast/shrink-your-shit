@@ -160,30 +160,7 @@ func SweepStaging(dirs []string) []string {
 			if !stagingDirName.MatchString(d.Name()) {
 				return nil
 			}
-			entries, err := os.ReadDir(p)
-			if err != nil {
-				return fs.SkipDir
-			}
-			news := 0
-			for _, e := range entries {
-				switch {
-				case !e.Type().IsRegular():
-					log.Printf("leaving %s alone: it holds files shrink-your-shit did not put there", p)
-					return fs.SkipDir
-				case stagedNew.MatchString(e.Name()):
-					news++
-				case !stagedSrt.MatchString(e.Name()):
-					log.Printf("leaving %s alone: it holds files shrink-your-shit did not put there", p)
-					return fs.SkipDir
-				}
-			}
-			if news > 1 {
-				return fs.SkipDir
-			}
-			for _, e := range entries {
-				os.Remove(filepath.Join(p, e.Name()))
-			}
-			if err := os.Remove(p); err == nil {
+			if sweepOne(p) {
 				said = append(said, "removed an unfinished conversion's temp folder: "+p)
 			}
 			return fs.SkipDir
@@ -260,3 +237,73 @@ func (s *staged) intact() error {
 
 // remove deletes the staging folder and whatever is left in it.
 func (s *staged) remove() { os.RemoveAll(s.dir) }
+
+// sweepOne removes the staging folder p if it holds nothing but our temp file and extracted subtitles
+// (else it is left alone, and logged); true when it was removed.
+func sweepOne(p string) bool {
+	entries, err := os.ReadDir(p)
+	if err != nil {
+		return false
+	}
+	news := 0
+	for _, e := range entries {
+		switch {
+		case !e.Type().IsRegular():
+			log.Printf("leaving %s alone: it holds files shrink-your-shit did not put there", p)
+			return false
+		case stagedNew.MatchString(e.Name()):
+			news++
+		case !stagedSrt.MatchString(e.Name()):
+			log.Printf("leaving %s alone: it holds files shrink-your-shit did not put there", p)
+			return false
+		}
+	}
+	if news > 1 {
+		return false
+	}
+	for _, e := range entries {
+		os.Remove(filepath.Join(p, e.Name()))
+	}
+	return os.Remove(p) == nil
+}
+
+// SweepNextTo removes the staging folders a killed conversion left next to the files of paths (the
+// jobs' files: a replace stages beside its original, in the library), each folder read once (#163 QA:
+// a conversion killed mid-encode kept its folder after the restart, until its own job ran again). Only
+// a folder named for one of those files ("." + its name + "." + digits + ".syp-tmp") and holding only
+// ours. Run at start, before any worker.
+func SweepNextTo(paths []string) []string {
+	byDir := map[string]map[string]bool{}
+	for _, p := range paths {
+		dir := filepath.Dir(p)
+		if byDir[dir] == nil {
+			byDir[dir] = map[string]bool{}
+		}
+		byDir[dir][strings.TrimSuffix(stagingPattern(p), "*.syp-tmp")] = true // "." + stem + "."
+	}
+	var said []string
+	for dir, prefixes := range byDir {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if !e.IsDir() || !stagingDirName.MatchString(e.Name()) {
+				continue
+			}
+			for prefix := range prefixes {
+				rest, ok := strings.CutPrefix(e.Name(), prefix) // "<digits>.syp-tmp": this file's, not "a.b.mkv"'s for "a.mkv"
+				if !ok || !digits.MatchString(strings.TrimSuffix(rest, ".syp-tmp")) {
+					continue
+				}
+				if p := filepath.Join(dir, e.Name()); sweepOne(p) {
+					said = append(said, "removed an unfinished conversion's temp folder: "+p)
+				}
+				break
+			}
+		}
+	}
+	return said
+}
+
+var digits = regexp.MustCompile(`^[0-9]+$`)

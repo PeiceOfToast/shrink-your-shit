@@ -144,6 +144,11 @@ func main() {
 	for _, said := range worker.SweepStaging(worker.OutputFolders(store)) { // before any worker starts
 		log.Printf("recovery: %s", said)
 	}
+	if paths, err := store.JobPaths(); err == nil { // and next to each job's file, where a replace stages (#163 QA)
+		for _, said := range worker.SweepNextTo(paths) {
+			log.Printf("recovery: %s", said)
+		}
+	}
 	for _, said := range worker.RecoverSidecars(store) {
 		log.Printf("recovery: %s", said)
 	}

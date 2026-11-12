@@ -63,9 +63,15 @@ func (s *Store) ConvertAgainCheck(id int64) (AgainCheck, error) {
 		}
 		return AgainCheck{Possible: true, originalID: o.ID}, nil
 	case OriginalPurged:
-		gone.DeletedAt = o.DeleteOn
+		// since #163 QA, a purge records when it happened; one purged before that, earlier than it was due
+		// (the setting was lowered), shows its due date only, and says so
 		if t, err := time.Parse(time.RFC3339, o.DeleteOn); err == nil {
-			gone.Message = "Can't convert again: the original was deleted on " + t.Local().Format("2 January 2006") + "."
+			if t.After(time.Now()) {
+				gone.Message = "Can't convert again: the original was deleted (it was due to be deleted on " + t.Local().Format("2 January 2006") + ")."
+			} else {
+				gone.DeletedAt = o.DeleteOn
+				gone.Message = "Can't convert again: the original was deleted on " + t.Local().Format("2 January 2006") + "."
+			}
 		}
 		return gone, nil
 	case OriginalRestored: // the original is back at its name: it runs from there

@@ -4,7 +4,9 @@ package jobs
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 // orch-lead 13:44Z: Convert again's migration is 34, after the jobs-by-path index (33), which may already
@@ -40,5 +42,27 @@ func TestUpgradeFrom33AddsAgainFrom(t *testing.T) {
 	}
 	if j, err := s.Get(id); err != nil || j.Path != "/m/a.mkv" {
 		t.Errorf("%+v %v", j, err)
+	}
+}
+
+// #163 QA: an original purged before its due date (the setting was lowered) is "deleted on" the day it
+// went; one purged so before this fix, with only its due date on record, says that date for what it is.
+func TestOriginalGoneWords(t *testing.T) {
+	s := open(t)
+	id, _ := s.Enqueue(Job{Library: "/m", Path: "/m/a.mkv"})
+	s.Claim("w")
+	row, _ := s.BeginSwap(Original{JobID: id, Path: "/m/a.mkv", Trash: "/m/.syp-trash/a.1.mkv"})
+	due := time.Now().Add(7 * 24 * time.Hour)
+	s.FinishSwap(row, due)
+	s.Complete(id, "/m/a.mkv", 1)
+	s.db.Exec(`UPDATE originals SET state=? WHERE id=?`, OriginalPurged, row) // an old purge: the due date stays
+	c, _ := s.ConvertAgainCheck(id)
+	if c.Possible || c.DeletedAt != "" || !strings.Contains(c.Message, "the original was deleted (it was due to be deleted on "+due.Local().Format("2 January 2006")+")") {
+		t.Errorf("old: %+v", c)
+	}
+	s.SetSwapState(row, OriginalPurged) // a purge now records when
+	c, _ = s.ConvertAgainCheck(id)
+	if c.DeletedAt == "" || !strings.Contains(c.Message, "the original was deleted on "+time.Now().Local().Format("2 January 2006")+".") {
+		t.Errorf("now: %+v", c)
 	}
 }

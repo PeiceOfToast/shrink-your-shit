@@ -21,10 +21,7 @@ func TestV2ConvertAgain(t *testing.T) {
 	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
 	type again struct {
 		Possible bool
-		Reason   *struct {
-			Code, Message string
-			DeletedAt     *string
-		}
+		Reason   *againReason
 	}
 	detail := func(id int64) again {
 		t.Helper()
@@ -72,10 +69,23 @@ func TestV2ConvertAgain(t *testing.T) {
 	st.Complete(other, b, 3)
 	st.SetSwapState(row, jobs.OriginalPurged)
 	a := detail(other)
-	if a.Possible || a.Reason == nil || a.Reason.Code != jobs.AgainOriginalGone || a.Reason.DeletedAt == nil || *a.Reason.DeletedAt != deleteOn.Format(time.RFC3339) {
+	at, _ := time.Parse(time.RFC3339, againDeletedAt(a.Reason))
+	if a.Possible || a.Reason == nil || a.Reason.Code != jobs.AgainOriginalGone || time.Since(at) > time.Minute { // when it really went (#163 QA)
 		t.Errorf("purged: %+v", a)
 	}
 	if code, body := post(other); code != 409 || errCode(body) != jobs.AgainOriginalGone {
 		t.Errorf("purged post: %d %s", code, body)
 	}
+}
+
+type againReason struct {
+	Code, Message string
+	DeletedAt     *string
+}
+
+func againDeletedAt(r *againReason) string {
+	if r == nil || r.DeletedAt == nil {
+		return ""
+	}
+	return *r.DeletedAt
 }
