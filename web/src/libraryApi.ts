@@ -23,7 +23,8 @@ export async function listWorkflows(): Promise<Answer<WorkflowChoice[]>> {
   const r = await call<{ items: Workflow[] }>("GET", "/api/v2/workflows");
   return failed(r) ? r : r.items.map((w) => ({ id: w.id, name: w.name, usable: w.publishedRevisionId != null, usedBy: w.libraries.map((l) => l.name) }));
 }
-export const checkFolder = (path: string): Promise<Answer<FolderReport>> => (MOCK ? M(mock.checkFolder(path)) : call("POST", "/api/libraries/check", { path }));
+export const checkFolder = (path: string, outputFolder?: string): Promise<Answer<FolderReport>> =>
+  MOCK ? M(mock.checkFolder(path, outputFolder)) : call("POST", "/api/libraries/check", { path, ...(outputFolder && { outputFolder }) }); // outputFolder: #128
 export const firstFiles = (path: string): Promise<Answer<FirstFiles>> => (MOCK ? M(mock.firstFiles(path)) : call("POST", "/api/libraries/first-files", { path }));
 export const addLibrary = (name: string, path: string, flowId: string): Promise<Answer<LibraryItem>> =>
   MOCK ? M(mock.addLibrary(name, path, flowId)) : call("POST", "/api/libraries", { name, path, flowId });
@@ -60,7 +61,14 @@ export async function startWorker(id: string): Promise<Answer<unknown>> {
 // use it: POST /api/v2/workflows from the template, its draft's Save step set to one folder, PUT with If-Match, publish.
 // `again` is the one an earlier try on this page made: a retry renames and re-sets it, never makes a second one
 // (review 228de8e P2); after a reload, a never-used one of the same name is used again.
-export async function startSimpleWorkflow(name: string, out: string, again?: string): Promise<Answer<{ id: string }>> {
+export async function startSimpleWorkflow(name: string, out: string, again?: string, libraryPath?: string): Promise<Answer<{ id: string }>> {
+  // #128: check the library's folder with this output folder first, so a refused folder never makes or publishes a version
+  if (libraryPath) {
+    const c = await checkFolder(libraryPath, out);
+    if (failed(c)) return c;
+    const b = c.blockers.find((x) => x.code === "inside_library") ?? c.blockers[0];
+    if (b) return { error: b };
+  }
   const list = await wf.listWorkflows();
   if (failed(list)) return list;
   const before = list.find((w) => w.id === again) ?? list.find((w) => w.name === name && w.libraries.length === 0 && w.presetId === "shrink_videos");
