@@ -41,3 +41,11 @@ export async function stoppedByUpdate(): Promise<Answer<boolean>> {
   return failed(r) ? r : r.stoppedByUpdate;
 }
 export const dismissUpdateNotice = (): Promise<Answer<unknown>> => (MOCK ? Promise.resolve({}) : call("POST", "/api/workers/notice/dismiss"));
+
+// V7b (#170): Add a worker asks for a one-time pairing code (15 minutes, one use) with the command to run on the other
+// computer; plainHTTP: the page isn't on https (fine on the LAN, refused off it). The sample install can't pair.
+export interface Pairing { code: string; expiresAt: string; command: string; plainHTTP: boolean }
+export async function newPairing(): Promise<Answer<Pairing>> {
+  if (MOCK) return { error: { code: "not_available", message: "The sample install can't pair a worker." } };
+  return call("POST", "/api/v2/workers/pairings", {});
+}

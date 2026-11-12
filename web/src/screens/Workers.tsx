@@ -11,7 +11,7 @@ import { onLive } from "../live";
 import { Empty, PageHead } from "../PageHead";
 import { Link, navigate, useSearch } from "../router";
 import { useData } from "../useData";
-import { allWorkers, dismissUpdateNotice, getWorker, listWorkers, patchWorker, stoppedByUpdate, testCapabilities, workerAction } from "../workersApi";
+import { allWorkers, newPairing, type Pairing, dismissUpdateNotice, getWorker, listWorkers, patchWorker, stoppedByUpdate, testCapabilities, workerAction } from "../workersApi";
 import type { Capability, Worker } from "../types/v2";
 
 const going = (w: Worker) => w.status === "busy" || w.status === "online";
@@ -101,6 +101,39 @@ export function WorkersSwitch({ n, m, busy, finishing = 0, onSet }: { n: number;
   </>;
 }
 
+// Add a worker (user item 2; V7b): a one-time pairing code and the one-line command for the other computer, with Copy,
+// the time it still works, the plain-http warning, and the new worker named when it connects (the list is watched while
+// the panel is open). A second click closes the panel; an expired code offers a new one.
+function AddWorker({ workers, reload }: { workers: Worker[]; reload: () => void }) {
+  const [open, setOpen] = useState(false), [p, setP] = useState<Pairing | null>(null), [came, setCame] = useState<Worker | null>(null), [err, setErr] = useState(""), [now, setNow] = useState(Date.now()), [said, setSaid] = useState("");
+  const known = useRef<string[]>([]), cmd = useRef<HTMLTextAreaElement>(null), group = useId();
+  const make = async () => { setErr(""); setSaid(""); setCame(null); known.current = workers.map((w) => w.id); const r = await act(newPairing(), setErr); if (r) setP(r); };
+  useEffect(() => { if (!open) return; const t = setInterval(() => (setNow(Date.now()), reload()), 3000); return () => clearInterval(t); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  const joined = p ? workers.find((w) => !known.current.includes(w.id)) : undefined;
+  // design 17:57Z: the panel stays open on the confirmation (closing on its own risks missing it)
+  useEffect(() => { if (joined) { setCame(joined); setP(null); } }, [joined?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const left = p ? Math.ceil((new Date(p.expiresAt).getTime() - now) / 60000) : 0, gone = !!p && left <= 0;
+  // plain http has no clipboard API (not a secure context): select the text and copy it the old way
+  const copy = () => { const t = cmd.current; if (!t) return; t.select(); const ok = navigator.clipboard ? (navigator.clipboard.writeText(t.value), true) : document.execCommand("copy"); setSaid(ok ? "Command copied." : "Select the command and copy it."); };
+  return <>
+    <span className="addw"><button className="btn sm" type="button" aria-expanded={open} aria-controls={group} onClick={() => { if (open) return setOpen(false); setOpen(true); if (came || !p || gone) make(); }}><Icon id="i-plus" />Add a worker</button>
+      {said && <span className="muted sm" role="status">{said}</span>}</span>
+    {open && <div className="swask addpanel" id={group} role="region" aria-label="Add a worker">
+      {came ? <>
+        <p role="status"><Icon id="i-check-c" /> Connected: <strong>{came.name}</strong>.</p>
+        <div className="row"><Link className="btn sm primary" to={"/workers/" + encodeURIComponent(came.id)}>Open {came.name}</Link><button className="btn sm ghost" type="button" onClick={() => (setOpen(false), setCame(null))}>Done</button></div></>
+      : err ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{err}</span></p> : !p ? <p className="muted">Making a pairing code...</p> : gone ? <>
+        <p>This code has expired.</p><div className="row"><button className="btn sm primary" type="button" onClick={make}>Make a new code</button></div></> : <>
+        <label className="lab" htmlFor={group + "-cmd"}>Run this on the other computer:</label>
+        <textarea id={group + "-cmd"} ref={cmd} className="input mono" readOnly rows={2} value={p.command} onFocus={(e) => e.currentTarget.select()} />
+        <div className="row"><button className="btn sm primary" type="button" onClick={copy}><Icon id="i-copy" />Copy</button>
+          <span className="muted sm">Pairing code <strong className="mono">{p.code}</strong> · works for {left <= 1 ? "less than a minute" : left + " more minutes"}, once.</span></div>
+        {p.plainHTTP && <p className="muted sm"><Icon id="i-info" /> This page uses plain http: fine on your own network. A worker outside it needs https://.</p>}
+        <p className="muted sm" aria-live="polite">Waiting for the worker to connect...</p></>}
+    </div>}
+  </>;
+}
+
 function StartStop({ w, onDone }: { w: Worker; onDone: (m: string) => void }) {
   const [asking, setAsking] = useState(false);
   if (w.status === "offline" || w.status === "stalled") return <span className="muted sm">Waiting for it to connect</span>; // design: no Start on an offline worker
@@ -136,8 +169,8 @@ export function Workers() {
     <div className="stack">
       <PageHead icon="i-worker" title="Workers" help="The computers that convert your files. Nothing converts until a worker is started.">
         {list.length > 0 && <WorkersSwitch n={n} m={list.length} busy={busyAny} finishing={fin} onSet={set} />}
-        {/* user item 2: the button is there before remote workers (V7b) can be paired; until then it says so */}
-        <span className="addw"><button className="btn sm" type="button" disabled aria-describedby="addw-note"><Icon id="i-plus" />Add a worker</button><span id="addw-note" className="muted sm">Coming with remote workers</span></span>
+        {/* user item 2: Add a worker pairs another computer (V7b) */}
+        <AddWorker workers={ws.data ?? []} reload={ws.reload} />
       </PageHead>
       {upd.data === true && <div className="note"><Icon id="i-info" /><div className="sp">Converting is stopped after the update. Press Start to carry on.</div>
         <button className="btn sm ghost" type="button" onClick={async () => { await act(dismissUpdateNotice(), setSaid); upd.reload(); }}>Dismiss</button></div>}
