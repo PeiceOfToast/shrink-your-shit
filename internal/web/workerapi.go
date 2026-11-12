@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
@@ -96,6 +97,69 @@ func (t Transport) Allowed(r *http.Request) bool {
 	return r.TLS != nil || private(peer)
 }
 
+// Pairing tries (orch-lead 13:41Z): a failed pair waits PairFailDelay, as a wrong token does, and an
+// address with PairMaxFails failures within PairWindow gets 429 until the window has passed, so guessing
+// a 40-bit code stays impractical. The wait holds no lock: other requests go on meanwhile.
+var (
+	PairFailDelay = 500 * time.Millisecond
+	PairMaxFails  = 10
+	PairWindow    = 15 * time.Minute
+)
+
+type pairLimiter struct {
+	mu    sync.Mutex
+	fails map[netip.Addr][]time.Time
+}
+
+// recent drops failures older than the window and returns those left.
+func (l *pairLimiter) recent(a netip.Addr, now time.Time) []time.Time {
+	kept := l.fails[a][:0]
+	for _, at := range l.fails[a] {
+		if now.Sub(at) < PairWindow {
+			kept = append(kept, at)
+		}
+	}
+	if len(kept) == 0 {
+		delete(l.fails, a)
+		return nil
+	}
+	l.fails[a] = kept
+	return kept
+}
+
+// locked reports whether a has failed too often, and until when.
+func (l *pairLimiter) locked(a netip.Addr, now time.Time) (bool, time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	f := l.recent(a, now)
+	if len(f) >= PairMaxFails {
+		return true, f[0].Add(PairWindow)
+	}
+	return false, time.Time{}
+}
+
+func (l *pairLimiter) fail(a netip.Addr, now time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.fails == nil {
+		l.fails = map[netip.Addr][]time.Time{}
+	}
+	l.fails[a] = append(l.recent(a, now), now)
+}
+
+// Client is the address a request comes from: the direct peer, or what a trusted proxy says.
+func (t Transport) Client(r *http.Request) netip.Addr {
+	peer, _ := peerAddr(r)
+	for _, p := range t.TrustedProxies {
+		if p.Contains(peer) {
+			if a, err := netip.ParseAddr(strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0])); err == nil {
+				return a.Unmap()
+			}
+		}
+	}
+	return peer
+}
+
 const httpsWords = "Use https:// for a worker outside your network (this server's own HTTPS, or a proxy listed in its trusted proxies)."
 
 // workerVersion reads the worker header: its version and API level.
@@ -112,6 +176,7 @@ func workerVersion(r *http.Request) (string, int) {
 func workerAPI(store *jobs.Store, t Transport, version string) http.Handler {
 	mux := http.NewServeMux()
 	now := time.Now
+	limiter := &pairLimiter{}
 	// gate: the transport, the version, and (but for pairing) the worker's token
 	gate := func(w http.ResponseWriter, r *http.Request, pairing bool) (jobs.RemoteWorker, bool) {
 		w.Header().Set("X-SYP-API", "1")
@@ -143,6 +208,12 @@ func workerAPI(store *jobs.Store, t Transport, version string) http.Handler {
 		if _, ok := gate(w, r, true); !ok {
 			return
 		}
+		client := t.Client(r)
+		if locked, until := limiter.locked(client, now()); locked {
+			w.Header().Set("Retry-After", strconv.Itoa(int(time.Until(until).Seconds())+1))
+			apiError(w, http.StatusTooManyRequests, "too_many_tries", "Too many wrong pairing codes from this address. Wait 15 minutes, then make a new code on the Workers page.")
+			return
+		}
 		var in struct {
 			Code, Name   string
 			Capabilities json.RawMessage
@@ -154,6 +225,8 @@ func workerAPI(store *jobs.Store, t Transport, version string) http.Handler {
 		caps := string(in.Capabilities)
 		wk, token, err := store.Pair(in.Code, in.Name, v, level, caps, now())
 		if errors.Is(err, jobs.ErrPairingInvalid) {
+			limiter.fail(client, now())
+			time.Sleep(PairFailDelay) // no lock held: other requests go on
 			apiError(w, http.StatusForbidden, "pairing_invalid", "This pairing code isn't valid (it works once, for 15 minutes). Make a new one on the Workers page.")
 			return
 		}

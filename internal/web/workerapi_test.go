@@ -194,3 +194,52 @@ func TestWorkerAPIRefusesPlainHTTPFromOutside(t *testing.T) {
 		}
 	}
 }
+
+// orch-lead 13:41Z: wrong pairing codes wait, and an address that sends PairMaxFails of them within the
+// window gets 429; another address still pairs, and the wait holds up no one else.
+func TestPairingTriesAreLimited(t *testing.T) {
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	delay := PairFailDelay
+	defer func() { PairFailDelay = delay }()
+	h := workerAPI(st, Transport{}, "test")
+	pairFrom := func(peer, code string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", "/api/worker/v1/pair", strings.NewReader(`{"code":"`+code+`"}`))
+		r.RemoteAddr = peer + ":4000"
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set(workerHeader, "test; api=1")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, r)
+		return rec
+	}
+	// the wait holds no lock: a good code from another address answers at once meanwhile
+	PairFailDelay = 300 * time.Millisecond
+	good, _, _ := st.NewPairing(time.Now())
+	slow := make(chan int)
+	go func() { slow <- pairFrom("192.168.1.66", "WRONG-CODE").Code }()
+	time.Sleep(20 * time.Millisecond)
+	start := time.Now()
+	if rec := pairFrom("192.168.1.20", good); rec.Code != 200 || time.Since(start) > 150*time.Millisecond {
+		t.Errorf("good code while another waits: %d after %s", rec.Code, time.Since(start))
+	}
+	if c := <-slow; c != 403 {
+		t.Errorf("wrong code: %d", c)
+	}
+	// PairMaxFails wrong codes from one address: then 429, even with a good code
+	PairFailDelay = 0
+	for i := 1; i < PairMaxFails; i++ { // one failure was above
+		if rec := pairFrom("192.168.1.66", "WRONG-CODE"); rec.Code != 403 {
+			t.Fatalf("try %d: %d", i, rec.Code)
+		}
+	}
+	good2, _, _ := st.NewPairing(time.Now())
+	if rec := pairFrom("192.168.1.66", good2); rec.Code != 429 || errCode(rec.Body.String()) != "too_many_tries" || rec.Header().Get("Retry-After") == "" {
+		t.Errorf("after %d failures: %d %s", PairMaxFails, rec.Code, rec.Body.String())
+	}
+	if rec := pairFrom("192.168.1.21", good2); rec.Code != 200 {
+		t.Errorf("another address: %d %s", rec.Code, rec.Body.String())
+	}
+}
