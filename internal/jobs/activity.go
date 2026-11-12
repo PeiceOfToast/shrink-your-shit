@@ -511,8 +511,8 @@ var ErrNotStoppable = errors.New("this file is not waiting or converting")
 // endEvent writes a job's last history entry when it ends by being deleted (skipped, stopped): the
 // triggers of migration 21 see only status changes.
 func (s *Store) endEvent(j Job, to, reason, message string) {
-	s.db.Exec(`INSERT INTO events(kind, job_id, at, from_status, to_status, reason, worker, data) VALUES ('job',?,?,?,?,?,?,json_object('message',?))`,
-		j.ID, s.stamp(), string(j.Status), to, reason, j.Worker, message)
+	s.db.Exec(`INSERT INTO events(kind, job_id, at, from_status, to_status, reason, worker, data) VALUES ('job',?,?,?,?,?,?,json_object('message',?,'path',?))`,
+		j.ID, s.stamp(), string(j.Status), to, reason, j.Worker, message, j.Path) // the path: the row goes (the feed names the file)
 }
 
 // upperFirst is s with its first letter capitalised (skip words are written to follow "skip: ").

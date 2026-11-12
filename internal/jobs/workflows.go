@@ -266,7 +266,14 @@ func (s *Store) Publish(flowID int64, etag string, t rules.Template) (Revision, 
 		}
 		return Revision{}, err
 	}
-	if _, err := s.insertPublished(tx, flowID, d.Doc, d.Layout, templateHash(t)); err != nil {
+	rid, err := s.insertPublished(tx, flowID, d.Doc, d.Layout, templateHash(t))
+	if err != nil {
+		return Revision{}, err
+	}
+	// the live stream's workflow.published and the activity feed's entry (V3d), in the same transaction
+	if _, err := tx.Exec(`INSERT INTO events(kind, at, data) VALUES ('workflow.published', ?, json_object('type','workflow.published',
+  'workflowId',CAST(? AS TEXT),'revisionId',CAST(? AS TEXT),'version',(SELECT number FROM workflow_revisions WHERE id=?),'name',(SELECT name FROM flows WHERE id=?)))`,
+		s.stamp(), flowID, rid, rid, flowID); err != nil {
 		return Revision{}, err
 	}
 	if _, err := tx.Exec(`DELETE FROM workflow_revisions WHERE workflow_id=? AND status='draft'`, flowID); err != nil {

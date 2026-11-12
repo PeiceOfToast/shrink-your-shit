@@ -22,12 +22,13 @@ import (
 var (
 	eventPoll      = 250 * time.Millisecond
 	eventKeepalive = 15 * time.Second
-	eventProgress  = time.Second // job.progress at most this often per job (contract), only when it changed
+	eventProgress  = time.Second     // job.progress at most this often per job (contract), only when it changed
+	eventHeartbeat = 5 * time.Second // worker.heartbeat (V4a)
 )
 
 const eventReplayMax = 10000 // a longer gap: resync instead of replaying it
 
-func v2EventStream(api *http.ServeMux, store *jobs.Store) {
+func v2EventStream(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 	api.HandleFunc("GET /api/v2/events", func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
 		if !ok {
@@ -39,12 +40,7 @@ func v2EventStream(api *http.ServeMux, store *jobs.Store) {
 			serverError(w, err)
 			return
 		}
-		h := w.Header()
-		h.Set("Content-Type", "text/event-stream")
-		h.Set("Cache-Control", "no-cache")
-		h.Set("X-Accel-Buffering", "no") // a proxy must not hold the stream back
-		http.NewResponseController(w).SetWriteDeadline(time.Time{})
-		w.WriteHeader(http.StatusOK)
+		startStream(w)
 
 		from := r.Header.Get("Last-Event-ID")
 		if from == "" {
@@ -64,9 +60,11 @@ func v2EventStream(api *http.ServeMux, store *jobs.Store) {
 		flusher.Flush()
 
 		poll, keep, prog := time.NewTicker(eventPoll), time.NewTicker(eventKeepalive), time.NewTicker(eventProgress)
+		beat := time.NewTicker(eventHeartbeat)
 		defer poll.Stop()
 		defer keep.Stop()
 		defer prog.Stop()
+		defer beat.Stop()
 		sent := map[int64]string{} // what each running job's last progress message said
 		for {
 			select {
@@ -89,12 +87,23 @@ func v2EventStream(api *http.ServeMux, store *jobs.Store) {
 			case <-keep.C:
 				fmt.Fprint(w, ": keepalive\n\n")
 				flusher.Flush()
+			case <-beat.C: // V4a: the worker is there, with its slots (no id: not replayed)
+				if wk, err := wv.local(r.Context()); err == nil {
+					send(w, -1, "worker.heartbeat", map[string]any{"type": "worker.heartbeat", "workerId": wk["id"], "at": wk["lastHeartbeatAt"],
+						"status": wk["status"], "slots": wk["slots"], "live": wk["live"]})
+					flusher.Flush()
+				}
 			case <-poll.C:
 				evs, err := store.EventsAfter(last, 500)
 				if err != nil {
 					return // the page reconnects and replays from its last id
 				}
 				for _, e := range evs {
+					// V3d: an activity feed entry first, with no id of its own: a page that drops between
+					// the two gets both again from the previous id (the entry's own id tells it apart)
+					if a, ok := store.ActivityOf(e); ok {
+						send(w, -1, "activity", map[string]any{"type": "activity", "event": a})
+					}
 					typ, data := eventMessage(e)
 					send(w, e.Seq, typ, data)
 					last = e.Seq
@@ -127,6 +136,16 @@ func eventMessage(e jobs.Event) (string, map[string]any) {
 		m["reason"] = map[string]string{"code": e.Reason, "message": d.Message}
 	}
 	return "job.state", m
+}
+
+// startStream sends a stream's headers: never cached or held back by a proxy, and no write deadline.
+func startStream(w http.ResponseWriter) {
+	h := w.Header()
+	h.Set("Content-Type", "text/event-stream")
+	h.Set("Cache-Control", "no-cache")
+	h.Set("X-Accel-Buffering", "no") // a proxy must not hold the stream back
+	http.NewResponseController(w).SetWriteDeadline(time.Time{})
+	w.WriteHeader(http.StatusOK)
 }
 
 // send writes one SSE message; id -1: none (job.progress, not replayed). Hello and resync carry the
