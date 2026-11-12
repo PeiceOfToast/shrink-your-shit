@@ -702,7 +702,9 @@ func TestOriginalsLeftInPlaceAreMarkedGone(t *testing.T) {
 	// walk the library as the server does: at its stored path (links resolved, as the jobs' paths are),
 	// not setup's raw temp path, which differs on macOS (/var is /private/var) and Windows (CI 02:09Z)
 	tmpl := rules.LegacyTemplate(rules.Default(), "replace")
-	s.Targets = func() ([]Target, error) { return []Target{{LibraryID: libs[0].ID, Path: libs[0].Path, Template: tmpl}}, nil }
+	s.Targets = func() ([]Target, error) {
+		return []Target{{LibraryID: libs[0].ID, Path: libs[0].Path, Template: tmpl}}, nil
+	}
 	s.ScanOnce(context.Background())
 	c, _ := st.Counts()
 	if c[libs[0].ID].FreedBytes != 600 || c[libs[0].ID].CouldFreeBytes != 1200 {
