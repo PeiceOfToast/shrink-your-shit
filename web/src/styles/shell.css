@@ -483,3 +483,12 @@ label.chk{cursor:pointer}
 .plist .ttl.clamp2{display:-webkit-box}   /* .plist .ttl's display:block had switched the clamp off */
 @media (min-width:641px){.list .tbl td.idc>.sub:not(.phone),.list .tbl td.idc .row .sub:not(.phone){display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}}
 @media (pointer:coarse){.linkbtn{min-width:44px;justify-content:center}}
+/* controls with no visible label (row checkboxes, the Enabled switch, the favourite star) get a 44 px hit area on
+   touch, with no visual change (design, 00:02Z) */
+.hit{display:inline-flex;align-items:center;position:relative;cursor:pointer}
+@media (pointer:coarse){
+  .hit::before,.tbl .btn.star::before{content:"";position:absolute;left:50%;top:50%;width:44px;height:44px;transform:translate(-50%,-50%)}
+  .tbl .btn.star{position:relative;width:32px;min-width:32px;height:32px;min-height:32px}
+  .hit input[type=checkbox]:not(.switch){width:20px;height:20px}
+  .hit input.switch{width:38px;height:22px;border-radius:11px}.hit input.switch::after{width:14px;height:14px}.hit input.switch:checked::after{left:19px}
+}

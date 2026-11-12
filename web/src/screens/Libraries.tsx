@@ -75,12 +75,12 @@ export function Libraries() {
         : items.length === 0 ? <div className="empty">No library matches.</div> : (
         <div className={"list" + (selecting ? " selecting" : "")}><table className="tbl">
           <thead><tr>
-            <th className="selc"><input type="checkbox" aria-label="Select all libraries" checked={sel.length === all.length} onChange={(e) => setSel(e.target.checked ? all.map((l) => l.id) : [])} /></th>
+            <th className="selc"><label className="hit"><input type="checkbox" aria-label="Select all libraries" checked={sel.length === all.length} onChange={(e) => setSel(e.target.checked ? all.map((l) => l.id) : [])} /></label></th>
             <th>Name</th><th data-p="2">Workflow</th><th className="num" data-p="3">Waiting</th><th data-p="4">Last scan</th><th className="num" data-p="6">Files</th><th className="stc">Status</th>
           </tr></thead>
           <tbody>{items.map((l) => (
             <tr key={l.id} className={sel.includes(l.id) ? "sel" : undefined}>
-              <td className="selc"><input type="checkbox" aria-label={"Select " + l.name} checked={sel.includes(l.id)} onChange={(e) => setSel(e.target.checked ? [...sel, l.id] : sel.filter((x) => x !== l.id))} /></td>
+              <td className="selc"><label className="hit"><input type="checkbox" aria-label={"Select " + l.name} checked={sel.includes(l.id)} onChange={(e) => setSel(e.target.checked ? [...sel, l.id] : sel.filter((x) => x !== l.id))} /></label></td>
               <td className="idc"><Link className="ttl" to={"/libraries/" + l.id}>{l.name}</Link>
                 <span className="sub mono">{l.path}</span>
                 <span className="sub phone">{[wfName(l.flowId) || l.settingLabel, count(l.status.toDo) + " waiting", l.status.lastScan ? "scanned " + lastScan(l.status.lastScan) : "not scanned yet"].join(" · ")}</span></td>

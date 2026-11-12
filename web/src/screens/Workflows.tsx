@@ -141,7 +141,7 @@ export function Workflows() {
                   <td className="stc">{problems ? <span className={"pill " + (w.validation.errors ? "bad" : "warn")}><Icon id="i-alert" />{plural(problems, "problem", "problems")}</span>
                     : <span className="pill"><Icon id="i-check-c" />OK</span>}</td>
                   <td className="actc">{w.status === "draft" ? <span className="muted" aria-label="Not published yet">-</span>
-                    : <input type="checkbox" role="switch" className="switch over" aria-label={"Enabled: " + w.name} checked={w.status === "enabled"} onChange={async (e) => { if (await act(patchWorkflow(w.id, { status: e.target.checked ? "enabled" : "disabled" }), setSaid)) wfs.reload(); }} />}</td>
+                    : <label className="hit over"><input type="checkbox" role="switch" className="switch" aria-label={"Enabled: " + w.name} checked={w.status === "enabled"} onChange={async (e) => { if (await act(patchWorkflow(w.id, { status: e.target.checked ? "enabled" : "disabled" }), setSaid)) wfs.reload(); }} /></label>}</td>
                   <td className="actc"><RowMenu w={w} onSaid={setSaid} reload={wfs.reload} /></td>
                 </tr>);
             })}</tbody>

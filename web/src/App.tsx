@@ -21,6 +21,7 @@ export function App() {
   // other /settings/... is not found.
   const item = path.startsWith("/settings/") && !settings ? undefined : itemFor(path);
   const start = path === "/start", signin = path === "/signin"; // not in the menu (IA.md)
+  // Sample data pill: built screens on the mock only; a page not built yet says so in its empty state (design, 00:02Z).
   // Screens on the real server (no Sample data pill): Libraries, first run, Workflows and the step list. The rest stay on the mock.
   const real = !MOCK && (start || signin || path === "/libraries" || path.startsWith("/libraries/") || path === "/workflows" || /^\/workflows\/[^/]+$/.test(path));
   const title = settings ? "Settings" : start ? "Set up" : signin ? "Sign in" : item ? item.label : "Page not found";
@@ -34,7 +35,7 @@ export function App() {
   return (
     <>
       <div dangerouslySetInnerHTML={{ __html: sprite }} />
-      <Shell title={title} proto={!real && (start || (!settings && !!item))}>
+      <Shell title={title} proto={!real && (start || path === "/" || path === "/libraries" || path.startsWith("/libraries/") || path === "/workflows" || /^\/workflows\/[^/]+$/.test(path))}>
         {settings ? <AppearanceSettings /> : path === "/" ? <Dashboard /> : start ? <Start /> : signin ? <SignIn /> : path === "/libraries" ? <Libraries /> : /^\/libraries\/[^/]+$/.test(path) ? <LibraryPage key={path} id={path.split("/")[2]} />: path === "/workflows" ? <Workflows /> : /^\/workflows\/[^/]+$/.test(path) ? <WorkflowStack key={path} id={path.split("/")[2]} /> : item ? <Coming item={item} /> : <NotFound />}
       </Shell>
     </>
