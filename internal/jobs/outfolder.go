@@ -101,5 +101,6 @@ func (s *Store) SetOverrideFolder(id int64, dir string) error {
 	if n, _ := r.RowsAffected(); n == 0 {
 		return ErrNotFound
 	}
+	s.libraryChanged(id, false)
 	return nil
 }

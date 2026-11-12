@@ -134,6 +134,10 @@ func jobStream(w http.ResponseWriter, r *http.Request, store *jobs.Store, logs *
 				flusher.Flush()
 			}
 		case <-poll.C:
+			// whether the job has ended, asked BEFORE its changes are read: then the change that ended it
+			// is already stored and sent below, before end (asked after, a job ending in between got end
+			// without its last change: review-6f2b3a6, under load)
+			ended := jobEnded(store, id)
 			if all {
 				evs, err := store.JobEvents(id)
 				if err != nil {
@@ -146,6 +150,9 @@ func jobStream(w http.ResponseWriter, r *http.Request, store *jobs.Store, logs *
 						send(w, e.Seq, typ, data)
 						last = e.Seq
 					}
+				}
+				if jobEventsRead != nil {
+					jobEventsRead()
 				}
 				steps, _ := store.Steps(id)
 				for _, st := range steps[min(stepsSent, len(steps)):] {
@@ -166,7 +173,7 @@ func jobStream(w http.ResponseWriter, r *http.Request, store *jobs.Store, logs *
 				logAt = next
 			}
 			flusher.Flush()
-			if jobEnded(store, id) {
+			if ended {
 				if text, _, _ := logs.Read(id, logAt); text == "" { // nothing written since
 					send(w, -1, "end", map[string]any{"type": "end", "jobId": jobID})
 					flusher.Flush()
@@ -176,6 +183,10 @@ func jobStream(w http.ResponseWriter, r *http.Request, store *jobs.Store, logs *
 		}
 	}
 }
+
+// jobEventsRead, if set, runs right after a job stream's poll has read the job's changes (tests: a job
+// that ends there must still get its last change before end).
+var jobEventsRead func()
 
 // jobEnded reports whether job id is no longer waiting or converting (its row gone: skipped or removed).
 func jobEnded(store *jobs.Store, id int64) bool {

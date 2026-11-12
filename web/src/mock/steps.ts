@@ -1,5 +1,5 @@
 // The Stack view's server side, mocked from V1 as built (origin/v2-workflows internal/workflow: registry.go for the
-// step definitions and their configSchema, validate.go for the step summaries and the not_runnable_yet rule).
+// step definitions and their configSchema, validate.go for the step summaries; "Next to each library" runs since V5a #133).
 import REGISTRY from "./registry-4df3345.json";
 import type { Edge, JSONSchema, Node, Port, PublishPreview, StepDefinition, ValidationIssue, WorkflowDoc, WorkflowRevision } from "../types/v2";
 
@@ -143,10 +143,8 @@ export function validate(d: WorkflowDoc): ValidationIssue[] {
   for (const n of d.nodes.filter((x) => x.type === "output.commit")) {
     const c = n.config, policy = str(c, "policy", "separate_folder");
     if (policy !== "separate_folder") continue;
-    if (str(c, "folderMode", "next_to_library") === "next_to_library")
-      issues.push({ code: "not_runnable_yet", severity: "error", nodeId: n.id, configPath: "/folderMode",
-        message: "Next to each library can't run yet. For now, choose One folder for all, Replace the original, or Put the new file next to the original." });
-    else if (!str(c, "folder", "").trim()) issues.push({ code: "missing_config", severity: "error", nodeId: n.id, configPath: "/folder", message: "Choose the folder for new files." });
+    if (str(c, "folderMode", "next_to_library") === "next_to_library") continue; // each library's folder is checked when it joins
+    if (!str(c, "folder", "").trim()) issues.push({ code: "missing_config", severity: "error", nodeId: n.id, configPath: "/folder", message: "Choose the folder for new files." });
     else if (!str(c, "folder", "").startsWith("/")) issues.push({ code: "invalid_config", severity: "error", nodeId: n.id, configPath: "/folder", message: "Give the folder's full path, starting with /." });
   }
   return issues;

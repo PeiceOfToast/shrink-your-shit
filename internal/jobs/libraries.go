@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -267,6 +268,7 @@ func (s *Store) addLibrary(name, path, flowBase string, t rules.Template, flowID
 	// first run's step-1 library (name, folder) waits in the settings until a library exists: any way
 	// one is made clears it (design, 02:41Z)
 	s.db.Exec(`UPDATE app_meta SET value = json_set(value, '$.firstRunLibrary', json('null')) WHERE key = 'settings' AND json_valid(value)`)
+	s.libraryChanged(id, false)
 	return s.GetLibrary(id)
 }
 
@@ -418,6 +420,7 @@ func (s *Store) UpdateLibrary(id int64, name, path *string) (Library, error) {
 	if err := tx.Commit(); err != nil {
 		return Library{}, err
 	}
+	s.libraryChanged(id, false)
 	return s.GetLibrary(id)
 }
 
@@ -439,6 +442,7 @@ func (s *Store) StartLibrary(id int64) error {
 	if n, _ := r.RowsAffected(); n == 0 {
 		return ErrNotFound
 	}
+	s.libraryChanged(id, false)
 	return nil
 }
 
@@ -476,7 +480,19 @@ func (s *Store) DeleteLibrary(id int64) error {
 		return err
 	}
 	s.jobsRemoved(gone...)
+	s.libraryChanged(id, true)
 	return nil
+}
+
+// libraryChanged writes library.changed for the live stream (/api/v2/events, with its seq id, so a
+// page that reconnects gets it again): a library was added, paused or resumed, or its name, folder,
+// priority, folder for new files or workflow changed; removed: it was deleted (ui-shop 06:24Z).
+func (s *Store) libraryChanged(id int64, removed bool) {
+	d := map[string]any{"type": "library.changed", "libraryId": strconv.FormatInt(id, 10)}
+	if removed {
+		d["removed"] = true
+	}
+	s.RecordEvent("library.changed", d)
 }
 
 // TemplateFor returns the template of the job's library's flow, which the worker compiles into the
@@ -755,6 +771,7 @@ func (s *Store) SetLibraryFlow(libraryID, flowID int64) (Library, error) {
 	if err := tx.Commit(); err != nil {
 		return Library{}, err
 	}
+	s.libraryChanged(libraryID, false)
 	return s.GetLibrary(libraryID)
 }
 
@@ -831,6 +848,7 @@ func (s *Store) SaveTemplate(libraryID int64, t rules.Template, choice string) (
 	if err := tx.Commit(); err != nil {
 		return Library{}, err
 	}
+	s.libraryChanged(libraryID, false)
 	return s.GetLibrary(libraryID)
 }
 
@@ -852,6 +870,7 @@ func (s *Store) ReplaceCustom(libraryID int64) (Library, error) {
 	if err := tx.Commit(); err != nil {
 		return Library{}, err
 	}
+	s.libraryChanged(libraryID, false)
 	return s.GetLibrary(libraryID)
 }
 
@@ -922,6 +941,7 @@ func (s *Store) StopLibrary(id int64) error {
 	if n, _ := r.RowsAffected(); n == 0 {
 		return ErrNotFound
 	}
+	s.libraryChanged(id, false)
 	return nil
 }
 
@@ -943,5 +963,9 @@ func (s *Store) SetLibraryPriority(id int64, p int) error {
 	if _, err := tx.Exec(`UPDATE jobs SET priority=? WHERE library_id=? AND status=? AND priority BETWEEN ? AND ?`, p, id, Queued, -MaxLibraryPriority, MaxLibraryPriority); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.libraryChanged(id, false)
+	return nil
 }

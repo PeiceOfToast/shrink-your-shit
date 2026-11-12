@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -239,4 +240,23 @@ func TestV2JobEventStream(t *testing.T) {
 	if j, _ := st.Get(other); j.Status != jobs.Running {
 		t.Errorf("the other job should be running (the check above relies on it): %s", j.Status)
 	}
+}
+
+// Review 6f2b3a6 (a race seen under load): a job that ends just after a poll has read its changes still
+// gets its last change on the stream before end.
+func TestJobStreamSendsTheLastChangeBeforeEnd(t *testing.T) {
+	srv, st, _, lib := streamServer(t)
+	id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "a.mkv")})
+	st.Claim("w")
+	var once sync.Once
+	jobEventsRead = func() { // the job fails right after this poll read its changes
+		once.Do(func() { st.Fail(id, jobs.ReasonConvertFailed, "Converting did not finish.") })
+	}
+	defer func() { jobEventsRead = nil }()
+	c := streamAt(t, srv.URL, "/api/v2/jobs/"+strconv.FormatInt(id, 10)+"/events", "")
+	until(t, c, "hello")
+	if m := until(t, c, "job.state"); !strings.Contains(m.data, `"to":"failed"`) {
+		t.Errorf("last change %+v", m)
+	}
+	until(t, c, "end")
 }

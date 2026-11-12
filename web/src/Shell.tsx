@@ -1,6 +1,8 @@
 // The shell (spec 2; DESIGN/v2 IA.md and mockups/shell.html): the grouped rail, the top bar and the page.
 // Not here yet, until their data exists: nav badges, the activity link, the "New" menu and the connection-lost bar.
 import { SampleDataPage } from "./PageHead";
+import { useLiveStatus } from "./live";
+import { clock } from "./format";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { NAV, itemFor } from "./nav";
@@ -113,10 +115,18 @@ export function Shell({ title, proto, children }: { title: string; proto: boolea
           </button>
           <ThemeMenu />
         </header>
+        <ConnBar />
         {/* the prototype bar became the Sample data pill in each page's header (DESIGN-DIRECTION-clean.md P2) */}
         <main className="content" id="main"><SampleDataPage.Provider value={proto}>{children}</SampleDataPage.Provider></main>
       </div>
       {palette && <Palette onClose={() => setPalette(false)} />}
     </div>
   );
+}
+
+// The connection-lost bar (spec 12): shown while the live stream (Jobs) has been down for 3 s; it goes when it is back.
+function ConnBar() {
+  const { lost, lastAt } = useLiveStatus();
+  if (!lost) return null;
+  return <div className="connbar" role="status" style={{ display: "flex" }}><Icon id="i-wifi-off" /><span>Lost connection to the server. Trying again...{lastAt && " (last update " + clock(lastAt) + ")"}</span></div>;
 }

@@ -3,7 +3,7 @@
 // preview/firstfiles.go send them.
 import type { ID, Time } from "./v2";
 
-export interface Issue { code: string; message: string } // also an error answer's body
+export interface Issue { code: string; message: string; folder?: string; reason?: string } // also an error answer's body; folder + reason: no_default_folder (#144)
 export interface LibraryItem { // GET /api/libraries -> {items, total}; GET/POST/PATCH answer one
   id: ID;
   name: string;
