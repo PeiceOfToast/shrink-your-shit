@@ -23,6 +23,7 @@ type Store interface {
 	Journal
 	OriginalByID(id int64) (jobs.Original, error)
 	SetRestoring(id int64, aside string) error
+	SetKeptGone(id int64, at time.Time) error
 	PutFile(f jobs.File) error
 }
 
@@ -233,13 +234,26 @@ func Purge(st Store, days int, now time.Time) []string {
 	purged := 0
 	for _, o := range rows {
 		due, ok := jobs.KeptUntil(o.KeptAt, days)
-		if !ok || now.Before(due) {
+		if !ok {
 			continue
 		}
 		fi, err := os.Lstat(o.Trash)
+		// Gone while its .syp-trash folder is still there (an unmounted disk takes the folder with the file,
+		// so that is not a removal): removed outside the app, and its days end now.
+		if errors.Is(err, fs.ErrNotExist) {
+			if _, serr := os.Stat(filepath.Dir(o.Trash)); serr == nil {
+				if err := st.SetKeptGone(o.ID, now); err != nil {
+					said = append(said, fmt.Sprintf("%s: %v", o.Path, err))
+				} else {
+					said = append(said, fmt.Sprintf("%s: its kept original %s was removed outside Shrink Your Shit", o.Path, o.Trash))
+				}
+			}
+			continue
+		}
+		if now.Before(due) {
+			continue
+		}
 		switch {
-		case errors.Is(err, fs.ErrNotExist):
-			said = append(said, fmt.Sprintf("%s: its kept original was already gone", o.Path))
 		case err != nil || !fi.Mode().IsRegular() || !isOriginal(o.Trash, o):
 			// size, time and sampled hash: anything else at that name is not ours to delete
 			st.SetSwapState(o.ID, jobs.SwapAttention)

@@ -180,6 +180,39 @@ func TestPurgeBoundaryAndOnlyKnownFiles(t *testing.T) {
 	}
 }
 
+// A kept original removed outside the app is purged at the next pass, its delete day the day it was
+// found, so the trash totals stop counting it and Convert again says it was deleted.
+func TestKeptRemovedOutsideIsPurgedWhenFound(t *testing.T) {
+	s, o := keptOne(t)
+	kept, _ := time.Parse(time.RFC3339, o.KeptAt)
+	found := kept.Add(24 * time.Hour)
+	os.Remove(s.trash())
+	if said := Purge(s.store, 7, found); len(said) != 1 || !strings.Contains(said[0], "removed outside Shrink Your Shit") {
+		t.Fatalf("said %q", said)
+	}
+	r, _ := s.store.OriginalByID(o.ID)
+	if r.State != jobs.OriginalPurged || r.DeleteOn != found.UTC().Format(time.RFC3339) {
+		t.Errorf("row %s, delete on %s", r.State, r.DeleteOn)
+	}
+	if tr, _ := s.store.TrashNow(7); tr.Files != 0 {
+		t.Errorf("trash still counts %d files", tr.Files)
+	}
+	if c, _ := s.store.ConvertAgainCheck(o.JobID); c.DeletedAt != r.DeleteOn {
+		t.Errorf("convert again: %+v", c)
+	}
+}
+
+// A missing .syp-trash folder (an unmounted disk takes it with the file) is not a removal: nothing is marked.
+func TestKeptWithItsFolderGoneIsNotMarked(t *testing.T) {
+	s, o := keptOne(t)
+	kept, _ := time.Parse(time.RFC3339, o.KeptAt)
+	os.RemoveAll(filepath.Dir(s.trash()))
+	Purge(s.store, 7, kept.Add(24*time.Hour))
+	if r, _ := s.store.OriginalByID(o.ID); r.State != jobs.OriginalKept {
+		t.Errorf("row %s", r.State)
+	}
+}
+
 // Lowering keepOriginalsDays applies at the next purge (the age is counted from when it was kept, with
 // the setting as it is now).
 func TestPurgeUsesTheSettingNow(t *testing.T) {
