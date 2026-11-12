@@ -75,12 +75,26 @@ func (v *workerView) local(ctx context.Context) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	remote := map[string]bool{}
+	if rs, err := v.store.RemoteWorkers(); err == nil {
+		for _, rw := range rs {
+			remote[rw.ID] = true
+		}
+	}
+	mine := working[:0] // this computer's own (a remote worker's job, run here, is that worker's)
+	for _, j := range working {
+		if !remote[j.Worker] {
+			mine = append(mine, j)
+		}
+	}
+	working = mine
 	ids := []string{}
 	for _, j := range working {
 		ids = append(ids, strconv.FormatInt(j.ID, 10))
 	}
+	enabled := v.store.WorkerEnabled(jobs.LocalWorker)
 	status := "online"
-	switch paused := v.store.Paused(); {
+	switch paused := !enabled; {
 	case paused && len(working) > 0:
 		status = "draining" // the running files finish, nothing new is taken
 	case paused:
@@ -111,7 +125,7 @@ func (v *workerView) local(ctx context.Context) (map[string]any, error) {
 		schedule = map[string]string{"from": s.QuietHours.From, "to": s.QuietHours.To}
 	}
 	return map[string]any{
-		"id": jobs.LocalWorker, "name": cfg.Name, "kind": "local", "host": v.host, "os": runtime.GOOS, "arch": runtime.GOARCH,
+		"id": jobs.LocalWorker, "name": cfg.Name, "kind": "local", "enabled": enabled, "host": v.host, "os": runtime.GOOS, "arch": runtime.GOARCH,
 		"appVersion": v.eng.Version, "status": status, "statusSince": since.UTC().Format(time.RFC3339),
 		"lastHeartbeatAt": time.Now().UTC().Format(time.RFC3339), // in this program: answering is its heartbeat
 		"slots":           v.slots(cfg, s, len(working), t),
@@ -139,21 +153,24 @@ func (v *workerView) remote(rw jobs.RemoteWorker) (map[string]any, error) {
 		}
 	}
 	seen, _ := time.Parse(time.RFC3339, rw.LastSeen)
+	enabled := v.store.WorkerEnabled(rw.ID)
 	status := "online"
 	switch {
 	case seen.IsZero() || time.Since(seen) > remoteOfflineAfter:
 		status = "offline"
+	case !enabled && len(ids) > 0:
+		status = "draining"
+	case !enabled:
+		status = "paused"
 	case len(ids) > 0:
 		status = "busy"
-	case v.store.Paused():
-		status = "paused"
 	}
 	var caps any = []any{}
 	if c := json.RawMessage(rw.Capabilities); json.Valid(c) && string(c) != "{}" {
 		caps = c
 	}
 	return map[string]any{
-		"id": rw.ID, "name": rw.Name, "kind": "remote", "host": nil, "os": nil, "arch": nil,
+		"id": rw.ID, "name": rw.Name, "kind": "remote", "enabled": enabled, "host": nil, "os": nil, "arch": nil,
 		"appVersion": rw.Version, "status": status, "statusSince": nil, "lastHeartbeatAt": nilIfEmpty(rw.LastSeen),
 		"slots": map[string]any{"cpu": map[string]any{"total": 1, "used": len(ids)}, "gpu": nil},
 		"live":  map[string]any{"cpuPercent": nil, "memUsedBytes": nil, "memTotalBytes": nil, "gpu": []any{}},
@@ -228,7 +245,7 @@ func capabilities(t doctor.Tools, ok bool) []map[string]any {
 
 func v2Workers(api *http.ServeMux, v *workerView) {
 	found := func(w http.ResponseWriter, r *http.Request) bool {
-		if r.PathValue("id") != jobs.LocalWorker {
+		if _, remote := v.remoteByID(r.PathValue("id")); !remote && r.PathValue("id") != jobs.LocalWorker {
 			apiError(w, http.StatusNotFound, "not_found", "There is no such worker. Nothing was changed.")
 			return false
 		}
@@ -417,33 +434,51 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 		}
 		one(w, r)
 	})
-	// act starts, stops or drains: today every worker together (the processing switch); false when
-	// action is none of these (the answer is written)
-	act := func(w http.ResponseWriter, action string) bool {
+	// act starts, stops or drains one worker (local, or a remote one's id), or every worker ("all"): each
+	// worker's own flag is its only on/off state (user review 11-12 item 2, orch-lead 14:22Z). false when
+	// action is none of these (the answer is written).
+	act := func(w http.ResponseWriter, target, action string) bool {
 		var err error
-		switch action {
-		case "start":
-			err = startWorker(v.store)
-		case "drain": // takes nothing new, finishes its files, then is paused (v1's "Stop after these files")
-			err = v.store.SetPaused(true)
-		case "stop": // the running files go back to the queue, originals untouched (v1's "Stop now")
-			if err = v.store.SetPaused(true); err == nil && v.eng.PauseNow != nil {
-				v.eng.PauseNow()
-				// the workers put their files back a moment later: answer once they have (at most 2 s), so
-				// the answer says paused, not draining (review a118b1b)
-				for end := time.Now().Add(2 * time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
-					if working, werr := v.store.WorkingJobs(); werr != nil || len(working) == 0 {
-						break
-					}
-				}
-			}
-		default:
+		on := action == "start"
+		switch {
+		case action != "start" && action != "stop" && action != "drain":
 			apiError(w, http.StatusNotFound, "not_found", "A worker can be started, stopped or drained.")
 			return false
+		case target == "all" && on:
+			err = startWorker(v.store) // every worker on (and the after-update notice ends)
+		case target == "all":
+			err = v.store.SetPaused(true) // every worker off: drain lets their files finish
+		case on:
+			if err = v.store.SetWorkerEnabled(target, true); err == nil && target == jobs.LocalWorker {
+				err = v.store.ClearStoppedByUpdate()
+			}
+		default:
+			err = v.store.SetWorkerEnabled(target, false)
 		}
 		if err != nil {
 			serverError(w, err)
 			return false
+		}
+		if action == "stop" { // the running files go back to the queue, originals untouched (v1's "Stop now")
+			if (target == "all" || target == jobs.LocalWorker) && v.eng.PauseNow != nil {
+				v.eng.PauseNow()
+			}
+			remotes, _ := v.store.RemoteWorkers()
+			working, _ := v.store.WorkingJobs()
+			for _, j := range working {
+				for _, rw := range remotes { // a remote worker's leases end: it is told on its next call
+					if j.Worker == rw.ID && (target == "all" || target == rw.ID) {
+						v.store.Release(j.ID)
+					}
+				}
+			}
+			// the local workers put their files back a moment later: answer once they have (at most 2 s),
+			// so the answer says paused, not draining (review a118b1b)
+			for end := time.Now().Add(2 * time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
+				if working, werr := v.store.WorkingJobs(); werr != nil || len(working) == 0 {
+					break
+				}
+			}
 		}
 		return true
 	}
@@ -451,14 +486,24 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 	// with the workers list
 	api.HandleFunc("POST /api/v2/workers/all/{action}", func(w http.ResponseWriter, r *http.Request) {
 		var in struct{}
-		if !readJSON(w, r, &in) || !act(w, r.PathValue("action")) {
+		if !readJSON(w, r, &in) || !act(w, "all", r.PathValue("action")) {
 			return
 		}
 		list(w, r)
 	})
+	// one worker, answered with that worker
 	api.HandleFunc("POST /api/v2/workers/{id}/{action}", func(w http.ResponseWriter, r *http.Request) {
 		var in struct{}
-		if !found(w, r) || !readJSON(w, r, &in) || !act(w, r.PathValue("action")) {
+		if !found(w, r) || !readJSON(w, r, &in) || !act(w, r.PathValue("id"), r.PathValue("action")) {
+			return
+		}
+		if rw, ok := v.remoteByID(r.PathValue("id")); ok {
+			one, err := v.remote(rw)
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+			writeJSON(w, one)
 			return
 		}
 		one(w, r)

@@ -216,13 +216,13 @@ func TestPairingTriesAreLimited(t *testing.T) {
 		return rec
 	}
 	// the wait holds no lock: a good code from another address answers at once meanwhile
-	PairFailDelay = 300 * time.Millisecond
+	PairFailDelay = time.Second // well above the bound below, also on a busy machine
 	good, _, _ := st.NewPairing(time.Now())
 	slow := make(chan int)
 	go func() { slow <- pairFrom("192.168.1.66", "WRONG-CODE").Code }()
 	time.Sleep(20 * time.Millisecond)
 	start := time.Now()
-	if rec := pairFrom("192.168.1.20", good); rec.Code != 200 || time.Since(start) > 150*time.Millisecond {
+	if rec := pairFrom("192.168.1.20", good); rec.Code != 200 || time.Since(start) > 600*time.Millisecond {
 		t.Errorf("good code while another waits: %d after %s", rec.Code, time.Since(start))
 	}
 	if c := <-slow; c != 403 {
@@ -241,5 +241,57 @@ func TestPairingTriesAreLimited(t *testing.T) {
 	}
 	if rec := pairFrom("192.168.1.21", good2); rec.Code != 200 {
 		t.Errorf("another address: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// User review 11-12 item 2 (orch-lead 14:22Z): each worker on and off by itself; the switch for all
+// sets them all; the Dashboard's processingPaused is "every worker off"; stopping a remote worker ends
+// its lease.
+func TestEachWorkerOnAndOff(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	code, _, _ := st.NewPairing(time.Now())
+	rw, _, err := st.Pair(code, "Desktop", "1", 1, "", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	post := func(path string) (int, string) {
+		c, b, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/workers/" + path, body: `{}`, ctype: "application/json"})
+		return c, b
+	}
+	summaryPaused := func() bool {
+		_, b, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/summary"})
+		return strings.Contains(b, `"processingPaused":true`)
+	}
+	if c, b := post("local/stop"); c != 200 || !strings.Contains(b, `"enabled":false`) || st.WorkerEnabled(jobs.LocalWorker) || !st.WorkerEnabled(rw.ID) {
+		t.Errorf("local stop: %d %s", c, b)
+	}
+	if summaryPaused() {
+		t.Error("a worker is on: the switch for all reads on")
+	}
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "a.mkv")})
+	if j, err := st.Claim(rw.ID); err != nil || j.ID != id {
+		t.Fatalf("claim %v", err)
+	}
+	if c, b := post(rw.ID + "/drain"); c != 200 || !strings.Contains(b, `"status":"draining"`) || st.WorkerEnabled(rw.ID) {
+		t.Errorf("remote drain: %d %s", c, b)
+	}
+	if !summaryPaused() {
+		t.Error("every worker off: paused")
+	}
+	if c, b := post(rw.ID + "/stop"); c != 200 || !strings.Contains(b, `"currentJobIds":[]`) {
+		t.Errorf("remote stop: %d %s", c, b)
+	}
+	if j, _ := st.Get(id); j.Status != jobs.Queued {
+		t.Errorf("its job: %s", j.Status)
+	}
+	if c, b := post(rw.ID + "/start"); c != 200 || !st.WorkerEnabled(rw.ID) || st.WorkerEnabled(jobs.LocalWorker) {
+		t.Errorf("remote start starts only it: %d %s", c, b)
+	}
+	if c, b := post("all/start"); c != 200 || !st.WorkerEnabled(jobs.LocalWorker) || !st.WorkerEnabled(rw.ID) || strings.Count(b, `"enabled":true`) != 2 {
+		t.Errorf("all on: %d %s", c, b)
+	}
+	if c, _ := post("w-nobody/stop"); c != 404 {
+		t.Errorf("no such worker: %d", c)
 	}
 }

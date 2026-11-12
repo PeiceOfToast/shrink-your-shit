@@ -62,6 +62,7 @@ func normalCode(c string) string {
 
 // Pair exchanges a pairing code for a new remote worker and its token (shown once, to the worker).
 func (s *Store) Pair(code, name, version string, apiLevel int, capabilities string, now time.Time) (RemoteWorker, string, error) {
+	was := s.Paused() // a paired worker starts on: with every other off, that is a resume (item 2)
 	tx, err := s.db.Begin()
 	if err != nil {
 		return RemoteWorker{}, "", err
@@ -88,7 +89,10 @@ func (s *Store) Pair(code, name, version string, apiLevel int, capabilities stri
 		w.ID, w.Name, "remote", hashOf(token), w.Version, w.APILevel, w.LastSeen, w.Capabilities); err != nil {
 		return RemoteWorker{}, "", err
 	}
-	return w, token, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return RemoteWorker{}, "", err
+	}
+	return w, token, s.pausedChanged(was)
 }
 
 // WorkerByToken is the remote worker whose token this is (ErrNotFound: none, or it was removed).
@@ -132,6 +136,8 @@ func (s *Store) RemoteWorkers() ([]RemoteWorker, error) {
 // RemoveWorker removes remote worker id: its token stops working at once, and the jobs it was running
 // go back to the queue (their leases end with them).
 func (s *Store) RemoveWorker(id string) error {
+	was := s.Paused()
+	defer s.pausedChanged(was)
 	r, err := s.db.Exec(`DELETE FROM workers WHERE id=? AND kind='remote'`, id)
 	if err != nil {
 		return err
