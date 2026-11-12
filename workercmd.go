@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/remote"
 )
 
@@ -28,6 +29,10 @@ func workerCommand(args []string, out, errOut io.Writer) int {
 	pair := fl.String("pair", "", "the pairing code from the server's Workers page (first run only)")
 	name := fl.String("name", "", "this worker's name on the Workers page (default: this computer's name)")
 	data := fl.String("data", filepath.Join(defaultDataDir(), "worker"), "folder for this worker's token (env SYP_WORKER_DATA)")
+	work := fl.String("work", "", "folder for the originals it downloads and the new files it makes (default: <data>/work)")
+	ffmpeg := fl.String("ffmpeg", os.Getenv("SYP_FFMPEG"), "path to ffmpeg (default: find it)")
+	ffprobe := fl.String("ffprobe", os.Getenv("SYP_FFPROBE"), "path to ffprobe (default: find it)")
+	minFree := fl.Int64("min-free-gb", 2, "free space (GB) this worker keeps in its work folder: below it, it takes no job")
 	if err := fl.Parse(args); err != nil {
 		return 2
 	}
@@ -66,8 +71,19 @@ func workerCommand(args []string, out, errOut io.Writer) int {
 	if *server != "" {
 		st.Server = *server
 	}
-	fmt.Fprintln(out, "Converting on this computer comes with the next update; until then it stays connected. Stop it with Ctrl+C.")
+	if *work == "" {
+		*work = filepath.Join(*data, "work")
+	}
+	ff, fp, err := findTools(*ffmpeg, *ffprobe)
+	if err != nil {
+		fmt.Fprintf(errOut, "This worker needs ffmpeg and ffprobe: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(out, "Working for %s as %q. Stop it with Ctrl+C.\n", st.Server, st.Name)
 	c := &remote.Client{Server: st.Server, Token: st.Token, Version: version}
+	wctx, wcancel := context.WithCancel(ctx)
+	defer wcancel()
+	go c.Work(wctx, remote.Converter{Exec: media.OSExec{}, FFmpeg: ff, FFprobe: fp, Work: *work, MinFree: uint64(*minFree) << 30})
 	if err := c.Run(ctx); err != nil {
 		fmt.Fprintf(errOut, "The server refused this worker: %v\n", err)
 		return 1
@@ -83,4 +99,14 @@ func flagSet(fl *flag.FlagSet, name string) bool {
 		}
 	})
 	return set
+}
+
+// findTools finds ffmpeg and ffprobe as the server does (a flag, the environment, PATH, beside this program).
+func findTools(ffmpeg, ffprobe string) (string, string, error) {
+	ff, err := resolveTool("ffmpeg", ffmpeg)
+	if err != nil {
+		return "", "", err
+	}
+	fp, err := resolveTool("ffprobe", ffprobe)
+	return ff, fp, err
 }

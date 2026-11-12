@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
 
 // The remote workers' API (V7b1, slices/v2-engine/v7-plan.md "V7b design"), under /api/worker/v1/.
@@ -173,8 +174,9 @@ func workerVersion(r *http.Request) (string, int) {
 }
 
 // workerAPI is the /api/worker/v1/ handler.
-func workerAPI(store *jobs.Store, t Transport, version string) http.Handler {
+func workerAPI(store *jobs.Store, t Transport, version string, eng Engine) http.Handler {
 	mux := http.NewServeMux()
+	runs := &remoteRuns{byLease: map[string]*worker.RemoteJob{}}
 	now := time.Now
 	limiter := &pairLimiter{}
 	// gate: the transport, the version, and (but for pairing) the worker's token
@@ -188,7 +190,7 @@ func workerAPI(store *jobs.Store, t Transport, version string) http.Handler {
 			writeErrorWith(w, http.StatusUpgradeRequired, "update_worker", "Update this worker to "+version+".", map[string]any{"version": version})
 			return jobs.RemoteWorker{}, false
 		}
-		if mt := r.Header.Get("Content-Type"); r.Method != http.MethodGet && !strings.HasPrefix(mt, "application/json") {
+		if mt := r.Header.Get("Content-Type"); r.Method == http.MethodPost && !strings.HasPrefix(mt, "application/json") {
 			apiError(w, http.StatusUnsupportedMediaType, "invalid_json", "Send JSON (Content-Type: application/json).")
 			return jobs.RemoteWorker{}, false
 		}
@@ -272,6 +274,14 @@ func workerAPI(store *jobs.Store, t Transport, version string) http.Handler {
 		}
 		lease, _ := store.LeaseOf(j.ID)
 		_, expires, _ := store.LeaseHeld(lease, wk.ID)
+		if eng.RunRemote != nil { // V7b2: the server runs the job; its plan is ready at leases/{lease}/plan
+			rj := worker.NewRemoteJob(lease)
+			runs.add(rj)
+			go func() {
+				eng.RunRemote(j, wk.ID, rj)
+				runs.remove(rj.Lease)
+			}()
+		}
 		writeJSON(w, map[string]any{"lease": map[string]any{"id": lease, "expiresAt": expires,
 			"job": map[string]any{"id": strconv.FormatInt(j.ID, 10), "name": filepath.Base(j.Path), "bytes": j.SizeBefore, "durationSec": j.DurationSec}}})
 	})
@@ -325,6 +335,7 @@ func workerAPI(store *jobs.Store, t Transport, version string) http.Handler {
 		}
 		writeJSON(w, map[string]any{"ok": true})
 	})
+	remoteRoutes(mux, store, gate, leaseOf, runs)
 	mux.HandleFunc("/api/worker/v1/", func(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusNotFound, "not_found", "There is no such worker call.")
 	})

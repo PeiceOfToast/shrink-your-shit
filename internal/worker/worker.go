@@ -89,6 +89,8 @@ type Worker struct {
 	Logs *runlog.Logs
 	// verified is the probe of the new file the last check passed (S5: stored for its final path).
 	verified media.Info
+	// remote is the job a worker on another computer converts, run here (V7b2); nil for a local one.
+	remote *RemoteJob
 	// failures: the running job's path's choices for when it doesn't work (V6b; under mu)
 	failures *rules.Failures
 	// lease: the running job's lease (V7a; under mu)
@@ -236,9 +238,18 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 	w.lease, _ = w.Queue.LeaseOf(job.ID)
 	lease := w.lease
 	w.mu.Unlock()
-	renewDone := make(chan struct{})
-	defer close(renewDone)
-	go w.renewLease(job.ID, lease, renewDone) // V7a: kept while it works, the probe and the checks too
+	return w.runClaimed(ctx, job, jobCtx, cancel, lease, true)
+}
+
+// runClaimed runs job, claimed for this worker (current, cancelJob and lease set), and records its
+// outcome. renew: this worker renews its lease (a local job; a remote worker renews its own, V7b2).
+func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Context, cancel context.CancelFunc, lease string, renew bool) (bool, error) {
+	var err error
+	if renew {
+		renewDone := make(chan struct{})
+		defer close(renewDone)
+		go w.renewLease(job.ID, lease, renewDone) // V7a: kept while it works, the probe and the checks too
+	}
 	w.jobf(job.ID, ": started")
 	if testHook != nil {
 		testHook("registered")
@@ -261,6 +272,12 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 		w.current, w.cancelJob, w.stopped = 0, nil, stopNone
 		w.mu.Unlock()
 	}()
+	// The job was given back to the queue (its lease ended: V7a, V7b2): another worker has it now, so
+	// there is nothing to record here.
+	if errors.Is(err, errLeaseLost) {
+		w.jobf(job.ID, ": given back to the queue (this worker no longer holds it)")
+		return true, nil
+	}
 	// A stop asked for on the job's record wins over a pause or a shutdown, so it never waits in the
 	// queue as a job no claim takes. Once the new file is in place (err == nil) the job is done.
 	if err != nil {
@@ -719,20 +736,30 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	tmp := stage.path
 	args := plan.FFmpegArgs(srcPath, tmp)
-	stopWatch := w.watchStall(job.ID)
 	setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWords(plan),
 		Decoder: decoderWords(src), Progress: media.Progress{ETASeconds: -1}})
 	defer dropLive(job.ID)
-	var tenths progressLines
-	encErr, terr := media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
-		w.progressAt.Store(time.Now().UnixNano())
-		w.Queue.Progress(job.ID, p.Percent)
-		updateLive(job.ID, p)
-		if line := tenths.next(p); line != "" {
-			w.jobf(job.ID, ": %s", line)
+	var encErr string
+	var terr error
+	if w.remote != nil { // V7b2: a worker on another computer converts and checks; its file comes up here
+		encErr, terr = w.remote.convert(ctx, w, job, snap, srcPath, tmp)
+		var k *KeptError
+		if errors.As(terr, &k) || errors.Is(terr, errLeaseLost) {
+			return "", terr
 		}
-	})
-	stopWatch()
+	} else {
+		stopWatch := w.watchStall(job.ID)
+		var tenths progressLines
+		encErr, terr = media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
+			w.progressAt.Store(time.Now().UnixNano())
+			w.Queue.Progress(job.ID, p.Percent)
+			updateLive(job.ID, p)
+			if line := tenths.next(p); line != "" {
+				w.jobf(job.ID, ": %s", line)
+			}
+		})
+		stopWatch()
+	}
 	if s := strings.TrimSpace(encErr); s != "" && w.Logs != nil {
 		w.Logs.Append(job.ID, "ffmpeg said:\n"+s) // errors only (the encode runs at -v error)
 	}

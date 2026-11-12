@@ -293,7 +293,14 @@ func main() {
 	}
 	srv := &http.Server{Addr: *addr, Handler: web.Handler(store, access, web.Engine{
 		Transport: web.Transport{TrustedProxies: proxies},
-		ScanNow:   sc.ScanNow, NextScan: sc.NextScan, ScanEvery: *every, Settle: *settle, SetScanEvery: sc.SetEvery, Scanning: sc.Scanning, RequeueJob: pool.RequeueJob, PauseNow: pool.PauseNow, StopFile: pool.StopFile,
+		RunRemote: func(job jobs.Job, workerID string, rj *worker.RemoteJob) { // V7b2: a remote worker's job, run here
+			w := pool.New(1)
+			w.ID, w.Paused = workerID, nil // a pause stops new leases; a leased job goes on
+			if err := w.RunRemote(ctx, job, rj); err != nil {
+				log.Printf("worker %s: %v", workerID, err)
+			}
+		},
+		ScanNow: sc.ScanNow, NextScan: sc.NextScan, ScanEvery: *every, Settle: *settle, SetScanEvery: sc.SetEvery, Scanning: sc.Scanning, RequeueJob: pool.RequeueJob, PauseNow: pool.PauseNow, StopFile: pool.StopFile,
 		RunLogs: runLogs, Doctor: chk, DataDir: *data, Version: version, Logs: logs,
 		Preview:    &preview.Previewer{Store: store, Exec: media.OSExec{}, FFprobe: ffprobePath},
 		FirstFiles: &preview.FirstLister{Exec: media.OSExec{}, FFprobe: ffprobePath}})}
