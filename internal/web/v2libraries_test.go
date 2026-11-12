@@ -256,3 +256,36 @@ func TestV2AllWorkersSwitch(t *testing.T) {
 		t.Errorf("unknown %d %s", code, body)
 	}
 }
+
+// orch-lead 18:29Z (ui-shop review d10d17e): republishing a workflow queues every file again; each file
+// then counts once, by its newest conversion, not once per done job (seen couldFree 6,956,700 against a
+// real 5,233,993).
+func TestV2SpaceCountsEachFileOnce(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	convert := func(name string, before, after int64) {
+		t.Helper()
+		p := filepath.Join(lib.Path, name)
+		id, err := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: p, SizeBefore: before})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if j, _ := st.Claim("w"); j.ID != id {
+			t.Fatalf("claimed %d, want %d", j.ID, id)
+		}
+		st.Complete(id, filepath.Join(lib.Path+" (shrunk)", name), after) // next to the library: the original stays
+	}
+	convert("a.mkv", 1000, 400)
+	convert("b.mkv", 2000, 900)
+	convert("a.mkv", 1000, 500)  // the workflow republished: both files again
+	convert("b.mkv", 2000, 2100) // this one came out bigger
+	movies := strconv.FormatInt(lib.ID, 10)
+	_, b, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/summary"})
+	if !strings.Contains(b, `{"couldFree":500,"freed":0,"grew":100,"libraryId":"`+movies+`","waitingToFree":0}`) ||
+		!strings.Contains(b, `"couldFree":500,"freed":0,"freedLast7d":0,"grew":100,`) {
+		t.Errorf("summary: %s", b)
+	}
+	if _, b, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/libraries/" + movies}); !strings.Contains(b, `"bytes":{"couldFree":500,"freed":0,"grew":100,"waitingToFree":0}`) {
+		t.Errorf("library: %s", b)
+	}
+}
