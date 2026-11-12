@@ -395,6 +395,7 @@ func TestMigration7BackfillsSkipReasons(t *testing.T) {
 		`ALTER TABLE flows DROP COLUMN tags`, `DROP TABLE workflow_revisions`, // and 20
 		`DROP TRIGGER events_job_insert`, `DROP TRIGGER events_job_status`, `DROP TRIGGER events_job_removed`, `DROP INDEX jobs_claim`, `DROP TABLE events`, `ALTER TABLE jobs DROP COLUMN priority`, // and 21
 		`ALTER TABLE jobs DROP COLUMN error_code`, // and 23
+		`DROP TABLE workers`,                      // and 24
 		`PRAGMA user_version=6`} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
@@ -569,7 +570,8 @@ func rewind20(s *Store) {
 	for _, q := range []string{`ALTER TABLE flows DROP COLUMN description`, `ALTER TABLE flows DROP COLUMN status`,
 		`ALTER TABLE flows DROP COLUMN favourite`, `ALTER TABLE flows DROP COLUMN tags`, `DROP TABLE workflow_revisions`,
 		`DROP TRIGGER events_job_insert`, `DROP TRIGGER events_job_status`, `DROP TRIGGER events_job_removed`, `DROP INDEX jobs_claim`, `DROP TABLE events`, `ALTER TABLE jobs DROP COLUMN priority`, // and 21
-		`ALTER TABLE jobs DROP COLUMN error_code`} { // and 23
+		`ALTER TABLE jobs DROP COLUMN error_code`, // and 23
+		`DROP TABLE workers`} {                    // and 24
 		s.db.Exec(q)
 	}
 }
