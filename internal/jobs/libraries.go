@@ -28,6 +28,9 @@ type Library struct {
 	// videos it found then (slice A's card).
 	LastScan       string `json:"lastScan"`
 	LastScanVideos int    `json:"lastScanVideos"`
+	// OverrideFolder is its own folder for new files with "Next to each library" ("": the default
+	// beside it; V5a).
+	OverrideFolder string `json:"overrideFolder"`
 }
 
 // Flow is one flow record. Its behaviour is its template until the graph engine (slice 30).
@@ -101,11 +104,11 @@ func Within(p, dir string) bool {
 	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
-const libCols = `id,name,path,flow_id,started,created,last_scan,last_scan_videos`
+const libCols = `id,name,path,flow_id,started,created,last_scan,last_scan_videos,override_folder`
 
 func scanLibrary(r interface{ Scan(...any) error }) (Library, error) {
 	var l Library
-	err := r.Scan(&l.ID, &l.Name, &l.Path, &l.FlowID, &l.Started, &l.Created, &l.LastScan, &l.LastScanVideos)
+	err := r.Scan(&l.ID, &l.Name, &l.Path, &l.FlowID, &l.Started, &l.Created, &l.LastScan, &l.LastScanVideos, &l.OverrideFolder)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
 	}

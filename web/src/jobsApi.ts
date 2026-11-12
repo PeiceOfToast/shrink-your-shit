@@ -5,7 +5,8 @@ import type { ActionResult, JobAction, JobDetail, JobsPage, Tab } from "./types/
 
 export async function listJobs(tab: Tab, q: string): Promise<Answer<JobsPage>> {
   if (MOCK) return mockJobs(tab, q);
-  return call("GET", "/api/v2/jobs?tab=" + tab + "&limit=200" + (q ? "&q=" + encodeURIComponent(q) : ""));
+  // #134: the Waiting tab in the order the worker takes files, each with its position; the page never reorders it
+  return call("GET", "/api/v2/jobs?tab=" + tab + (tab === "waiting" ? "&sort=queue" : "") + "&limit=200" + (q ? "&q=" + encodeURIComponent(q) : ""));
 }
 export async function getJob(id: string): Promise<Answer<JobDetail>> {
   if (MOCK) return mockJob(id) ?? { error: { code: "not_found", message: "There is no such job." } };

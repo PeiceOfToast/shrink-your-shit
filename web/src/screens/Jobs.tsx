@@ -104,11 +104,13 @@ export function Jobs() {
         <div className={"list" + (selecting ? " selecting" : "")}><table className="tbl jobs">
           <thead><tr>
             <th className="selc"><label className="hit"><input type="checkbox" aria-label="Select all" checked={sel.length === items.length} onChange={(e) => setSel(e.target.checked ? items.map((j) => j.id) : [])} /></label></th>
+            {tab === "waiting" && <th className="posc" title="Place in the queue: 1 is converted next">#</th>}
             <th>File</th><th className="stc">Status</th><th data-p="2">Details</th><th data-p="3">Worker</th><th data-p="4">{tab === "completed" ? "Finished" : "Size"}</th>
           </tr></thead>
           <tbody>{items.map((j) => (
             <tr key={j.id} className={sel.includes(j.id) ? "sel" : undefined}>
               <td className="selc"><label className="hit"><input type="checkbox" aria-label={"Select " + j.name} checked={sel.includes(j.id)} onChange={(e) => setSel(e.target.checked ? [...sel, j.id] : sel.filter((x) => x !== j.id))} /></label></td>
+              {tab === "waiting" && <td className="posc" title={j.position != null ? "Place " + j.position + " in the queue" : "Not taken now"}>{j.position ?? "–"}</td>}
               <td className="idc"><a className="ttl" href={"/next/jobs?tab=" + tab + "&job=" + encodeURIComponent(j.id)} data-job={j.id} title={j.path}
                 onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); go(tab, j.id); } }}>{j.name}</a>
                 {j.priority != null && j.priority !== 0 && <span className="mchip prio">{j.priority > 0 ? "First" : "Last"}</span>}

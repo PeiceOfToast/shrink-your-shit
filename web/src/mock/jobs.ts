@@ -28,7 +28,11 @@ const TAB: Record<Tab, JobState[]> = { waiting: ["queued", "retry_wait"], runnin
 const tabOf = (s: JobState) => (Object.keys(TAB) as Tab[]).find((t) => TAB[t].includes(s))!;
 export function mockJobs(tab: Tab, q: string): JobsPage {
   const counts = Object.fromEntries((Object.keys(TAB) as Tab[]).map((t) => [t, items.filter((j) => tabOf(j.state) === t).length])) as Record<Tab, number>;
-  const rows = items.filter((j) => tabOf(j.state) === tab && (!q || j.name.toLowerCase().includes(q.toLowerCase())));
+  let rows = items.filter((j) => tabOf(j.state) === tab && (!q || j.name.toLowerCase().includes(q.toLowerCase())));
+  if (tab === "waiting") { // as the server with sort=queue (#134): taken-now files by priority, then age; a retry waiting for its time has no place
+    const now = rows.filter((j) => j.state === "queued").sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+    rows = [...now.map((j, i) => ({ ...j, position: i + 1 })), ...rows.filter((j) => j.state !== "queued").map((j) => ({ ...j, position: null }))];
+  }
   return { items: rows, total: rows.length, counts };
 }
 // A removed job (its library was removed) and one from before the update, for the drawer's two special cases.
