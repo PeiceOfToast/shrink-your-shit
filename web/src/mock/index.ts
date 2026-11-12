@@ -388,6 +388,25 @@ export function setLibraryWorkflow(id: ID, flowId: ID): Answer<LibraryItem> {
   return libraryItem(state.libraries.find((x) => x.id === id)!);
 }
 // POST /api/libraries/{id}/scan: starts the library if it wasn't, and looks for files now.
+// GET/PATCH /api/v2/libraries/{id} (V5b): enabled (Pause/Resume), priority, overrideFolder.
+export function getLibrary(id: ID): Answer<Library> {
+  const l = state.libraries.find((x) => x.id === id);
+  return l ? structuredClone(l) : { error: { code: "not_found", message: "There is no such library." } };
+}
+export function patchLibraryV2(id: ID, p: { enabled?: boolean; priority?: number; overrideFolder?: string | null }): Answer<Library> {
+  const l = state.libraries.find((x) => x.id === id);
+  if (!l) return { error: { code: "not_found", message: "There is no such library." } };
+  if (p.priority !== undefined && (!Number.isInteger(p.priority) || p.priority < -1000 || p.priority > 1000)) return { error: { code: "invalid_setting", message: "priority is a whole number from -1000 to 1000. Nothing was changed." } };
+  const dir = typeof p.overrideFolder === "string" ? trim(p.overrideFolder) : "";
+  if (dir && !dir.startsWith("/")) return { error: { code: "invalid_setting", message: "Enter the folder's full path. Nothing was changed." } };
+  change((s) => {
+    const x = s.libraries.find((y) => y.id === id)!;
+    if (p.enabled !== undefined) { x.enabled = p.enabled; x.status = p.enabled ? "ok" : "disabled"; }
+    if (p.priority !== undefined) x.priority = p.priority;
+    if (p.overrideFolder !== undefined) x.output = { ...x.output, overrideFolder: dir || null, folder: x.output.policy === "separate_folder" ? dir || x.paths[0] + " (shrunk)" : x.output.folder };
+  });
+  return getLibrary(id);
+}
 export function scanLibrary(id: ID) {
   change((s) => { const l = s.libraries.find((x) => x.id === id); if (l) (l.enabled = true), (l.status = "scanning"), (l.scan = { ...l.scan, state: "scanning", progress: 0 }); });
   setTimeout(() => change((s) => {

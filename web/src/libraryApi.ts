@@ -1,9 +1,9 @@
-// Libraries and first run: v1's routes on the real server (there is no /api/v2/libraries yet), or the mock module with
-// ?mock=1. Each function answers in v1's shapes either way.
+// Libraries and first run: v1's routes on the real server, and /api/v2/libraries (V5b #135) for the contract's library
+// (Pause/Resume, priority, the folder for new files), or the mock module with ?mock=1.
 import { call, MOCK, failed, type Answer } from "./api";
 import * as mock from "./mock";
 import type { FirstFiles, FirstRunSettings, FolderReport, LibraryItem, WorkerV1 } from "./types/v1";
-import type { Trash, Workflow } from "./types/v2";
+import type { Library, Trash, Workflow } from "./types/v2";
 import * as wf from "./workflowApi";
 
 // A workflow a library can use: a never-published one can't be chosen (87faa4b), on the server and the mock.
@@ -17,6 +17,19 @@ export async function listLibraries(): Promise<Answer<LibraryItem[]>> {
   const r = await call<{ items: LibraryItem[] }>("GET", "/api/libraries");
   return failed(r) ? r : r.items;
 }
+// V5b (#135): the contract's Library. enabled is Pause/Resume (the same flag as "started"); priority 10/0/-10 is
+// High/Normal/Low; overrideFolder null goes back to the workflow's folder.
+export type LibraryPatch = { enabled?: boolean; priority?: number; overrideFolder?: string | null };
+export async function listLibrariesV2(): Promise<Answer<Library[]>> {
+  if (MOCK) return structuredClone(mock.mockState().libraries);
+  const r = await call<{ items: Library[] }>("GET", "/api/v2/libraries");
+  return failed(r) ? r : r.items;
+}
+export const getLibraryV2 = (id: string): Promise<Answer<Library>> =>
+  MOCK ? M(mock.getLibrary(id)) : call("GET", "/api/v2/libraries/" + enc(id));
+export const patchLibraryV2 = (id: string, patch: LibraryPatch): Promise<Answer<Library>> =>
+  MOCK ? M(mock.patchLibraryV2(id, patch)) : call("PATCH", "/api/v2/libraries/" + enc(id), patch);
+
 export async function listWorkflows(): Promise<Answer<WorkflowChoice[]>> {
   if (MOCK) { const s = mock.mockState(); return s.wf.map((w) => ({ id: w.id, name: w.name, usable: w.publishedRevisionId != null, usedBy: s.libraries.filter((l) => l.workflowId === w.id).map((l) => l.name) })); }
   // /api/v2/workflows (#109): a workflow's id is the library's flowId; a never-published one can't be used (409).
