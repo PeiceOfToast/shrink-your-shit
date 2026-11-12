@@ -7,6 +7,7 @@ import { itemFor } from "./nav";
 import { AppearanceSettings, Coming, NotFound } from "./pages";
 import { Dashboard } from "./screens/Dashboard";
 import { Libraries, LibraryPage } from "./screens/Libraries";
+import { ProcessingSettings } from "./screens/Processing";
 import { Start } from "./screens/Start";
 import { Workflows } from "./screens/Workflows";
 import { WorkflowStack } from "./screens/WorkflowStack";
@@ -16,7 +17,7 @@ import { Shell } from "./Shell";
 export function App() {
   const raw = usePath();
   const path = raw.length > 1 ? raw.replace(/\/+$/, "") : raw; // "/settings/" is "/settings"
-  const settings = path === "/settings" || path === "/settings/appearance"; // Appearance is the only Settings tab so far
+  const settings = path === "/settings" || path === "/settings/appearance" || path === "/settings/processing"; // the tabs built so far
   // Other pages' deeper paths (/workflows/42/graph) are their future routes; Settings' sub-pages are known, so any
   // other /settings/... is not found.
   const item = path.startsWith("/settings/") && !settings ? undefined : itemFor(path);
@@ -36,7 +37,7 @@ export function App() {
     <>
       <div dangerouslySetInnerHTML={{ __html: sprite }} />
       <Shell title={title} proto={!real && (start || path === "/" || path === "/libraries" || path.startsWith("/libraries/") || path === "/workflows" || /^\/workflows\/[^/]+$/.test(path))}>
-        {settings ? <AppearanceSettings /> : path === "/" ? <Dashboard /> : start ? <Start /> : signin ? <SignIn /> : path === "/libraries" ? <Libraries /> : /^\/libraries\/[^/]+$/.test(path) ? <LibraryPage key={path} id={path.split("/")[2]} />: path === "/workflows" ? <Workflows /> : /^\/workflows\/[^/]+$/.test(path) ? <WorkflowStack key={path} id={path.split("/")[2]} /> : item ? <Coming item={item} /> : <NotFound />}
+        {settings ? (path === "/settings/processing" ? <ProcessingSettings /> : <AppearanceSettings />) : path === "/" ? <Dashboard /> : start ? <Start /> : signin ? <SignIn /> : path === "/libraries" ? <Libraries /> : /^\/libraries\/[^/]+$/.test(path) ? <LibraryPage key={path} id={path.split("/")[2]} />: path === "/workflows" ? <Workflows /> : /^\/workflows\/[^/]+$/.test(path) ? <WorkflowStack key={path} id={path.split("/")[2]} /> : item ? <Coming item={item} /> : <NotFound />}
       </Shell>
     </>
   );

@@ -122,7 +122,8 @@ export interface ActivityEvent { // GET /activity
 
 // GET /api/v2/settings: v1's settings (contract: Settings), including first run's firstRunDone/firstRunStep.
 // firstRunLibrary (#116): first run's step 1 folder, kept until a library is created (then null; PATCH null clears it).
-export interface Settings { firstRunDone: boolean; firstRunStep: number; intakePaused: boolean; catalogueEnabled: boolean; firstRunLibrary: { name: string; path: string } | null }
+export interface Settings { firstRunDone: boolean; firstRunStep: number; intakePaused: boolean; catalogueEnabled: boolean; firstRunLibrary: { name: string; path: string } | null;
+  scanEvery?: number; scanEverySource?: "flag" | "saved" } // #136: seconds; "flag" until someone changes it here
 
 // GET /api/v2/trash (contract update 01:33Z; workshop branch v2-trash-settings): originals replaced and kept in the
 // trash until their date. Later embedded as Summary.bytes.trash.

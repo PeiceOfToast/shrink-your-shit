@@ -1,15 +1,15 @@
 // V5 Libraries (SCREENS V5, mockups/libraries.html and library.html) on v1's library routes (there is no
 // /api/v2/libraries yet; contract v2 "Libraries: what exists now"), or the mock with ?mock=1. The library page has its
-// General tab only; Discovery, Filters, Output and Statistics come later, so no tabs are shown yet. Not shown, because
+// General tab, and a Discovery card with its one setting (#136); Filters, Output and Statistics come later, so no tabs yet. Not shown, because
 // v1 has no data or route for them: description and tags (CAN'T YET), schedule, priority, pause and resume, other file
 // types.
 import { Empty, PageHead } from "../PageHead";
 import { useEffect, useState } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
-import { addLibrary, checkFolder, firstFiles, listLibraries, listWorkflows, patchLibrary, scanLibrary, setLibraryWorkflow, type WorkflowChoice } from "../libraryApi";
+import { addLibrary, checkFolder, firstFiles, getSettings, listLibraries, listWorkflows, patchLibrary, scanLibrary, setLibraryWorkflow, type WorkflowChoice } from "../libraryApi";
 import { Link, navigate } from "../router";
-import { bytes, clock, count, plural } from "../format";
+import { bytes, clock, count, duration, plural } from "../format";
 import { useData } from "../useData";
 import type { FirstFiles, FolderReport, LibraryItem } from "../types/v1";
 
@@ -243,8 +243,21 @@ function Form({ l, workflows, reload }: { l: LibraryItem | null; workflows?: Wor
             </div>
           </form>
         </section>
+        {l && <Discovery />}
         <FirstFive f={f} />
       </div>
     </div>
   );
+}
+
+// Discovery (SCREENS V5): how often libraries are looked at is one setting for all of them (#136); the line shows its
+// live value and links to where it is changed. No line when the server doesn't say (never a made-up number).
+function Discovery() {
+  const st = useData(getSettings, [], 30000), n = st.data?.scanEvery;
+  if (!n) return null;
+  return (
+    <section className="card" aria-labelledby="disc-h">
+      <div className="hd"><h2 id="disc-h">Discovery</h2></div>
+      <div className="bd"><p>Libraries are checked for new files every {duration(n)}. <Link to="/settings/processing">Change it in Settings &gt; Processing.</Link></p></div>
+    </section>);
 }
