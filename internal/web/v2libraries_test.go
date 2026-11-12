@@ -3,6 +3,7 @@
 package web
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -157,5 +158,29 @@ func TestV2LibraryScanEveryFollowsSettings(t *testing.T) {
 	if _, b, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/libraries/" + strconv.FormatInt(lib.ID, 10)}); !strings.Contains(b, `"scanEverySeconds":120`) ||
 		!strings.Contains(b, `"scheduleLabel":"Every 2 minutes"`) {
 		t.Errorf("%s", b)
+	}
+}
+
+// Review 5d8b1f9 P2: a paused library's waiting jobs have no place in the queue (position null, listed
+// after the ready ones), as Claim doesn't take them; the ready jobs start at 1.
+func TestPausedLibraryJobsHaveNoPosition(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	movies, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	tv, _ := st.AddLibrary("TV", t.TempDir(), rules.SliderTemplate(3), true)
+	st.Enqueue(jobs.Job{Library: movies.Path, LibraryID: movies.ID, Path: filepath.Join(movies.Path, "m.mkv")}) // older: first otherwise
+	st.Enqueue(jobs.Job{Library: tv.Path, LibraryID: tv.ID, Path: filepath.Join(tv.Path, "t.mkv")})
+	st.StopLibrary(movies.ID)
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs?tab=waiting&sort=queue"})
+	var l struct {
+		Items []struct {
+			Name     string
+			Position *int
+			SubState string
+		}
+	}
+	json.Unmarshal([]byte(body), &l)
+	if len(l.Items) != 2 || l.Items[0].Name != "t.mkv" || l.Items[0].Position == nil || *l.Items[0].Position != 1 ||
+		l.Items[1].Name != "m.mkv" || l.Items[1].Position != nil || l.Items[1].SubState != "library_disabled" {
+		t.Errorf("%s", body)
 	}
 }
