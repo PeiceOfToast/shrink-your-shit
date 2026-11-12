@@ -141,6 +141,9 @@ func main() {
 	for _, said := range worker.RecoverSwaps(store, store, keepDays(), time.Now()) {
 		log.Printf("recovery: %s", said)
 	}
+	for _, said := range worker.SweepStaging(worker.OutputFolders(store)) { // before any worker starts
+		log.Printf("recovery: %s", said)
+	}
 	for _, said := range worker.RecoverSidecars(store) {
 		log.Printf("recovery: %s", said)
 	}
