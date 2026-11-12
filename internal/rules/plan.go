@@ -137,7 +137,7 @@ func (t Template) Compile(info media.Info) Plan {
 		case !ok:
 			p = Plan{Kind: KindBranches, Skip: "no path of its workflow fits it", SkipCode: SkipSettingCannotRun}
 		case b.Then == nil:
-			p = Plan{Kind: KindBranches, Skip: lowerFirst(b.End), SkipCode: SkipLeftByWorkflow}
+			p = Plan{Kind: KindBranches, Skip: skipWords(b.End), SkipCode: SkipLeftByWorkflow}
 		default:
 			then := *b.Then
 			then.Languages = t.Languages

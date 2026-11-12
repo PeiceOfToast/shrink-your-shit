@@ -86,6 +86,7 @@ type File struct {
 	Codec    string
 	Decision string
 	Reason   string // a skip's code (rules.Skip*, "unreadable", "restored"); "" when it is not skipped
+	JobID    int64  // the job its worker skipped (Store.Skip); 0: a scan's decision, which forgets it
 }
 
 // Store is the SQLite-backed store.
@@ -150,9 +151,9 @@ func (s *Store) GetFile(path string) (*File, error) {
 func (s *Store) PutFile(f File) error { return putFile(s.db, f) }
 
 func putFile(x execer, f File) error {
-	_, err := x.Exec(`INSERT INTO files(path,size,mtime,codec,decision,reason) VALUES(?,?,?,?,?,?)
-ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,codec=excluded.codec,decision=excluded.decision,reason=excluded.reason`,
-		f.Path, f.Size, f.ModTime, f.Codec, f.Decision, f.Reason)
+	_, err := x.Exec(`INSERT INTO files(path,size,mtime,codec,decision,reason,job_id) VALUES(?,?,?,?,?,?,?)
+ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,codec=excluded.codec,decision=excluded.decision,reason=excluded.reason,job_id=excluded.job_id`,
+		f.Path, f.Size, f.ModTime, f.Codec, f.Decision, f.Reason, f.JobID)
 	return err
 }
 
@@ -399,13 +400,13 @@ func (s *Store) Steps(id int64) ([]Step, error) {
 }
 
 // ForgetGoneJobSteps removes the steps of jobs that no longer exist (stopped, removed with their
-// library, skipped by their worker), and returns the ids of the jobs that still exist, so their logs
-// are kept and the others removed.
+// library), and returns the ids of the jobs that still exist, so their logs are kept and the others
+// removed. A job its worker skipped keeps both while its file's record names it (Store.Skip).
 func (s *Store) ForgetGoneJobSteps() (map[int64]bool, error) {
-	if _, err := s.db.Exec(`DELETE FROM job_steps WHERE job_id NOT IN (SELECT id FROM jobs)`); err != nil {
+	if _, err := s.db.Exec(`DELETE FROM job_steps WHERE job_id NOT IN (SELECT id FROM jobs UNION SELECT job_id FROM files)`); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(`SELECT id FROM jobs`)
+	rows, err := s.db.Query(`SELECT id FROM jobs UNION SELECT job_id FROM files WHERE job_id<>0`)
 	if err != nil {
 		return nil, err
 	}

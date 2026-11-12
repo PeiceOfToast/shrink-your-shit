@@ -152,6 +152,10 @@ func codecWords(c string) string {
 }
 
 // lowerFirst is s with its first letter in lower case (skip words follow "skip: ").
+// skipWords are a "Leave the file alone" reason as skip words, which follow "skip: ": without the
+// reason's own full stop, as every place that shows them adds one (V6 review: "left alone..").
+func skipWords(s string) string { return lowerFirst(strings.TrimRight(strings.TrimSpace(s), ".")) }
+
 func lowerFirst(s string) string {
 	if s == "" {
 		return s
@@ -211,7 +215,7 @@ func (f *Failures) For(check bool) *Failure {
 func CompileBranch(b Branch, info media.Info, languages string) Plan {
 	var p Plan
 	if b.Then == nil {
-		p = Plan{Kind: KindBranches, Skip: lowerFirst(b.End), SkipCode: SkipLeftByWorkflow}
+		p = Plan{Kind: KindBranches, Skip: skipWords(b.End), SkipCode: SkipLeftByWorkflow}
 	} else {
 		then := *b.Then
 		then.Languages = languages

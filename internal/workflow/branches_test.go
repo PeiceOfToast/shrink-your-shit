@@ -72,7 +72,7 @@ func TestBranchesRoute(t *testing.T) {
 		if hd.Decisions[0].Words != "Is it 4K? → No (resolution is 1080p)" || hd.Decisions[0].Port != "else" {
 			t.Errorf("%s, 1080p: %+v", c.name, hd.Decisions)
 		}
-		if c.name == "left alone" && (hd.SkipCode != rules.SkipLeftByWorkflow || hd.Skip != "not 4K: left for later.") {
+		if c.name == "left alone" && (hd.SkipCode != rules.SkipLeftByWorkflow || hd.Skip != "not 4K: left for later") {
 			t.Errorf("left alone: %q %q", hd.SkipCode, hd.Skip)
 		}
 		if c.name == "a conversion" && hd.Video.CRF != rules.SliderTemplate(2).Compile(video(1920, 1080)).Video.CRF {
@@ -121,6 +121,12 @@ func TestBranchesValidation(t *testing.T) {
 	no = append(no[:2], append([]Node{inner}, no[2:]...)...)
 	d, _ = branchDoc(no)
 	if i := issue(d, "branch_in_conversion"); i.NodeID != inner.ID {
+		t.Errorf("%+v", i)
+	}
+	no = segment(rules.SliderTemplate(2))[1:] // a path without "Leave some files alone": the review's case names it
+	skips, _ := Definition(TypeSkips)
+	d, _ = branchDoc(no)
+	if i := issue(d, "not_runnable_yet"); !strings.HasPrefix(i.Message, "This path converts without '"+skips.Name+"'.") {
 		t.Errorf("%+v", i)
 	}
 }

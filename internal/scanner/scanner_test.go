@@ -758,7 +758,7 @@ func TestBranchesAtScan(t *testing.T) {
 	os.Chtimes(hd, past, past)
 	s.ScanOnce(context.Background())
 	s.ScanOnce(context.Background())
-	if rec, _ := st.GetFile(filepath.Join(libs[0].Path, "hd.mkv")); rec == nil || rec.Reason != rules.SkipLeftByWorkflow || rec.Decision != "skip: not 4K: left for later." {
+	if rec, _ := st.GetFile(filepath.Join(libs[0].Path, "hd.mkv")); rec == nil || rec.Reason != rules.SkipLeftByWorkflow || rec.Decision != "skip: not 4K: left for later" {
 		t.Errorf("left alone: %+v", rec)
 	}
 }

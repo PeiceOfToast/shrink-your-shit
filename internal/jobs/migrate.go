@@ -350,6 +350,10 @@ ALTER TABLE jobs ADD COLUMN fallback TEXT NOT NULL DEFAULT '';`},
 	{30, "job leases", `
 ALTER TABLE jobs ADD COLUMN lease_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE jobs ADD COLUMN lease_expires TEXT NOT NULL DEFAULT '';`},
+	// V6 review: a file its worker left alone (a workflow's skip, after tries) names that job, whose steps
+	// and run log stay while it does, so the Skipped list can show what happened (Store.Skip).
+	{31, "skipped file job", `
+ALTER TABLE files ADD COLUMN job_id INTEGER NOT NULL DEFAULT 0;`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone
