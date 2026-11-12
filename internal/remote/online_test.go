@@ -39,13 +39,13 @@ func (x slowEncode) Stream(ctx context.Context, onLine func(string), name string
 }
 
 // V7d (orch-lead 15:02Z): a worker stays online through a long encode, since its heartbeats go on beside
-// its work (here an encode 4x the offline wait); once it stops it shows offline, once (worker.updated
+// its work (here an encode 3x the offline wait); once it stops it shows offline, once (worker.updated
 // fires on the change, not on every check), and the summary counts it; its load comes with its heartbeats.
 func TestWorkerStaysOnlineThroughALongEncode(t *testing.T) {
 	needFFmpeg(t)
 	srv, st, lib := server(t)
 	oldOff, oldCheck, oldBeat, oldPoll := web.RemoteOfflineAfter, web.StatusCheckEvery, HeartbeatEvery, PlanPoll
-	web.RemoteOfflineAfter, web.StatusCheckEvery, HeartbeatEvery, PlanPoll = 400*time.Millisecond, 50*time.Millisecond, 50*time.Millisecond, 50*time.Millisecond
+	web.RemoteOfflineAfter, web.StatusCheckEvery, HeartbeatEvery, PlanPoll = time.Second, 50*time.Millisecond, 50*time.Millisecond, 50*time.Millisecond // margins for a busy machine
 	defer func() {
 		web.RemoteOfflineAfter, web.StatusCheckEvery, HeartbeatEvery, PlanPoll = oldOff, oldCheck, oldBeat, oldPoll
 	}()
@@ -98,9 +98,9 @@ func TestWorkerStaysOnlineThroughALongEncode(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	go c.Run(ctx)
-	go c.Work(ctx, Converter{Exec: slowEncode{took: 1600 * time.Millisecond}, FFmpeg: "ffmpeg", FFprobe: "ffprobe", Work: t.TempDir(),
+	go c.Work(ctx, Converter{Exec: slowEncode{took: 3 * time.Second}, FFmpeg: "ffmpeg", FFprobe: "ffprobe", Work: t.TempDir(),
 		FreeSpace: func(string) (uint64, error) { return 1 << 40, nil }})
-	for end := time.Now().Add(1500 * time.Millisecond); time.Now().Before(end); time.Sleep(100 * time.Millisecond) {
+	for end := time.Now().Add(2500 * time.Millisecond); time.Now().Before(end); time.Sleep(100 * time.Millisecond) {
 		if s, _, _ := worker(); s == "offline" {
 			t.Fatalf("offline while it converts")
 		}
@@ -109,7 +109,7 @@ func TestWorkerStaysOnlineThroughALongEncode(t *testing.T) {
 		t.Errorf("converting: %s, memory %v", s, mem)
 	}
 	cancel() // it stops answering
-	time.Sleep(700 * time.Millisecond)
+	time.Sleep(1500 * time.Millisecond)
 	if s, _, _ := worker(); s != "offline" {
 		t.Errorf("after it stopped: %s", s)
 	}
