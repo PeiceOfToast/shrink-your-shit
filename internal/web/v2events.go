@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
 
 // Live updates (V3a; UI-API-CONTRACT-v2.md, Live updates): GET /api/v2/events streams the events
@@ -21,6 +22,7 @@ import (
 var (
 	eventPoll      = 250 * time.Millisecond
 	eventKeepalive = 15 * time.Second
+	eventProgress  = time.Second // job.progress at most this often per job (contract), only when it changed
 )
 
 const eventReplayMax = 10000 // a longer gap: resync instead of replaying it
@@ -59,13 +61,29 @@ func v2EventStream(api *http.ServeMux, store *jobs.Store) {
 		}
 		flusher.Flush()
 
-		poll, keep := time.NewTicker(eventPoll), time.NewTicker(eventKeepalive)
+		poll, keep, prog := time.NewTicker(eventPoll), time.NewTicker(eventKeepalive), time.NewTicker(eventProgress)
 		defer poll.Stop()
 		defer keep.Stop()
+		defer prog.Stop()
+		sent := map[int64]string{} // what each running job's last progress message said
 		for {
 			select {
 			case <-r.Context().Done():
 				return
+			case <-prog.C: // V3b: running jobs' progress, no id (not replayed: the page's data has it)
+				now := map[int64]string{}
+				for _, id := range worker.LiveIDs() {
+					steps, _ := store.Steps(id)
+					pct := livePercent(id)
+					state := v2State(string(jobs.Running), steps, pct)
+					data := map[string]any{"type": "job.progress", "jobId": strconv.FormatInt(id, 10), "state": state, "progress": v2Progress(state, id, pct)}
+					b, _ := json.Marshal(data)
+					if now[id] = string(b); sent[id] != now[id] {
+						send(w, 0, "job.progress", data)
+					}
+				}
+				sent = now
+				flusher.Flush()
 			case <-keep.C:
 				fmt.Fprint(w, ": keepalive\n\n")
 				flusher.Flush()

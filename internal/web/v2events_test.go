@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
 
 // sseMessage is one Server-Sent Events message.
@@ -108,5 +110,32 @@ func TestV2EventStreamNeedsSignIn(t *testing.T) {
 	srv, _, _, _ := libServer(t, true)
 	if code, _, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/events"}); code != http.StatusUnauthorized {
 		t.Errorf("signed out: %d", code)
+	}
+}
+
+// V3b: a running job's progress comes as job.progress (no id: never replayed), with the step's own
+// percent and the whole job's, and only for jobs a worker is converting.
+func TestV2EventStreamProgress(t *testing.T) {
+	defer func(d time.Duration) { eventProgress = d }(eventProgress)
+	eventProgress = 50 * time.Millisecond
+	srv, st, _, _ := libServer(t, false)
+	st.SetPaused(false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "a.mkv")})
+	st.Claim("w")
+	worker.SetLiveForTest(id, worker.LiveJob{Worker: "w", Started: time.Now(), Progress: media.Progress{Percent: 42, ETASeconds: 60, Speed: 1.5}})
+	defer worker.DropLiveForTest(id)
+	c := stream(t, srv.URL, "")
+	nextMessage(t, c) // hello
+	for {
+		m := nextMessage(t, c)
+		if m.event != "job.progress" {
+			continue
+		}
+		if m.id != "" || !strings.Contains(m.data, `"state":"running"`) || !strings.Contains(m.data, `"percent":42`) ||
+			!strings.Contains(m.data, `"workflowPercent":38`) || !strings.Contains(m.data, `"etaS":60`) {
+			t.Errorf("progress %+v", m)
+		}
+		break
 	}
 }
