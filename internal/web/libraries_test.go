@@ -12,7 +12,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -423,5 +425,64 @@ func TestFirstFilesRoutes(t *testing.T) {
 	empty := t.TempDir() // no videos: listed as nothing (200); the folder check says "no videos"
 	if code, r := poll("POST", "/api/libraries/first-files", fmt.Sprintf(`{"path":%q}`, empty)); code != 200 || r["total"] != 0.0 {
 		t.Errorf("empty: %d %v", code, r)
+	}
+}
+
+// ui-shop's Libraries page (contract v2): a library carries its disk's free space; null when its
+// folder can't be read.
+func TestLibraryFreeSpace(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	ok, _ := st.AddLibrary("Here", t.TempDir(), rules.SliderTemplate(3), false)
+	gone, _ := st.AddLibrary("Gone", filepath.Join(t.TempDir(), "missing"), rules.SliderTemplate(3), false)
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/libraries"})
+	var v struct{ Items []map[string]any }
+	if err := json.Unmarshal([]byte(body), &v); err != nil {
+		t.Fatal(err)
+	}
+	free := map[string]any{}
+	for _, it := range v.Items {
+		free[it["id"].(string)] = it["freeBytes"]
+	}
+	if n, _ := free[strconv.FormatInt(ok.ID, 10)].(float64); n <= 0 {
+		t.Errorf("free space %v", free)
+	}
+	if free[strconv.FormatInt(gone.ID, 10)] != nil {
+		t.Errorf("a missing folder's free space %v", free)
+	}
+}
+
+// Review 5053a73: a hung mount's free space can't stall the library list: a read past the time limit
+// shows null, a path whose read is still stuck starts no other, and an answer that comes late is used.
+func TestFreeSpaceTimeLimit(t *testing.T) {
+	defer func(f func(string) (uint64, error), d time.Duration) { diskFree, freeTimeout = f, d }(diskFree, freeTimeout)
+	freeTimeout = 50 * time.Millisecond
+	release := make(chan struct{})
+	var calls atomic.Int32
+	diskFree = func(string) (uint64, error) {
+		calls.Add(1)
+		<-release // a hung NFS mount
+		return 12345, nil
+	}
+	path := t.TempDir()
+	start := time.Now()
+	if b := freeBytes(path); b != nil || time.Since(start) > time.Second {
+		t.Fatalf("hung: %v after %v", b, time.Since(start))
+	}
+	if b := freeBytes(path); b != nil || calls.Load() != 1 {
+		t.Errorf("a second read while the first is stuck: %v, %d calls", b, calls.Load())
+	}
+	close(release)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if b := freeBytes(path); b != nil && *b == 12345 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the late answer was never used")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if calls.Load() != 1 {
+		t.Errorf("%d reads, want 1 (cached)", calls.Load())
 	}
 }

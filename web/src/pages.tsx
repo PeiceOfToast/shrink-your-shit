@@ -61,7 +61,14 @@ export function AppearanceSettings() {
   const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
   const now = useRef({ draft, saved, dirty });
   now.current = { draft, saved, dirty };
-  useEffect(() => { if (!now.current.dirty) setDraft(saved); }, [saved]); // the top bar's Theme menu changed it
+  // Saved changed from outside (the top bar's Theme menu): take the fields that changed into the draft and keep the
+  // user's own unsaved edits, so Save never undoes a choice made elsewhere (shell QA F2).
+  const before = useRef(saved);
+  useEffect(() => {
+    const was = before.current;
+    before.current = saved;
+    setDraft((d) => ({ ...d, ...Object.fromEntries((Object.keys(saved) as (keyof Appearance)[]).filter((k) => saved[k] !== was[k]).map((k) => [k, saved[k]])) }));
+  }, [saved]);
   useEffect(() => preview(draft), [draft]);
   useEffect(() => {
     onLeave(() => {

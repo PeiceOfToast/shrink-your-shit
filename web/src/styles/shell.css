@@ -58,7 +58,7 @@ code,.mono{font-family:var(--mono);font-size:.92em}
 .pop .hd{font-size:var(--fs-sm);color:var(--text-2);padding:6px 10px 2px}
 .pop hr{border:0;border-top:1px solid var(--border);margin:6px 0}
 .swatch{width:16px;height:16px;border-radius:50%;border:1px solid var(--border-strong);flex:none}
-.menubtn{display:none}
+.btn.menubtn{display:none}
 .proto{display:flex;align-items:center;gap:8px;padding:7px var(--pad);font-size:var(--fs-sm);background:color-mix(in srgb,var(--warning) 14%,var(--bg));border-bottom:1px solid color-mix(in srgb,var(--warning) 45%,var(--bg))}
 .proto .ic{color:var(--warning-text)}
 .connbar{display:none;align-items:center;gap:8px;padding:8px var(--pad);background:color-mix(in srgb,var(--error) 14%,var(--bg));border-bottom:1px solid color-mix(in srgb,var(--error) 45%,var(--bg))}
@@ -194,7 +194,7 @@ table.tbl{width:100%;border-collapse:collapse}
   .app.rail-collapsed .lbl,.app.rail-collapsed .grp,.app.rail-collapsed .brand span.t{display:revert}
   .app.rail-collapsed .nav a{justify-content:flex-start;padding:0 12px}
   .app.rail-collapsed .badge{position:static;margin-left:auto;min-width:20px;height:20px;font-size:12px;padding:0 6px}
-  .menubtn{display:inline-flex}
+  .btn.menubtn{display:inline-flex}
   .search{flex:none;width:36px;padding:0;justify-content:center}.search .txt,.search .k{display:none}
   .cols2{grid-template-columns:minmax(0,1fr)}.w2{grid-column:auto}
   .rail .foot{display:none}
