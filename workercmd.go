@@ -74,6 +74,12 @@ func workerCommand(args []string, out, errOut io.Writer) int {
 	if *work == "" {
 		*work = filepath.Join(*data, "work")
 	}
+	release, err := takeWorkFolder(*work)
+	if err != nil {
+		fmt.Fprintln(errOut, err)
+		return 1
+	}
+	defer release()
 	ff, fp, err := findTools(*ffmpeg, *ffprobe)
 	if err != nil {
 		fmt.Fprintf(errOut, "This worker needs ffmpeg and ffprobe: %v\n", err)
@@ -89,6 +95,19 @@ func workerCommand(args []string, out, errOut io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// takeWorkFolder locks a worker's --work folder for this process: a second worker on the same folder
+// would sweep the first one's lease folders and share its staging. The lock goes with the process.
+func takeWorkFolder(work string) (func(), error) {
+	release, err := lockDataDir(work)
+	if errors.Is(err, errDataLocked) {
+		return nil, fmt.Errorf("Another worker is already using %s. Give each worker its own --work folder.", work)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("The work folder %s can't be used: %v", work, err)
+	}
+	return release, nil
 }
 
 func flagSet(fl *flag.FlagSet, name string) bool {
