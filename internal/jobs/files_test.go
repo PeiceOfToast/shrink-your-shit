@@ -5,6 +5,7 @@ package jobs
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -157,5 +158,28 @@ func TestJobsRemovedHook(t *testing.T) {
 	}
 	if steps, _ := s.Steps(skipped); len(steps) != 0 {
 		t.Errorf("steps after a scan %v", steps)
+	}
+}
+
+// review 89d22b3: the scanner asks, for every unchanged file each pass, whether a job of it exists:
+// those lookups use the jobs_path index, never a scan of every job.
+func TestJobsByPathUseTheirIndex(t *testing.T) {
+	s := open(t)
+	for _, q := range []string{`SELECT COUNT(*) FROM jobs WHERE path=?`, `SELECT COUNT(*) FROM jobs WHERE path=? AND status IN (?,?)`} {
+		var plan string
+		rows, err := s.db.Query(`EXPLAIN QUERY PLAN `+q, "/m/a.mkv", "queued", "running")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			var a, b, c int
+			var d string
+			rows.Scan(&a, &b, &c, &d)
+			plan += d + "; "
+		}
+		rows.Close()
+		if !strings.Contains(plan, "jobs_path") {
+			t.Errorf("%s: plan %s", q, plan)
+		}
 	}
 }

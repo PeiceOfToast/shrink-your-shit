@@ -19,6 +19,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/preview"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/runlog"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
 
 // Engine is what the API needs from the running scanner and worker. Nil functions do nothing.
@@ -40,6 +41,11 @@ type Engine struct {
 	DataDir string          // the data folder, for the health report
 	Version string
 	Logs    *doctor.LogTail // the last log lines, for the health report
+
+	Transport Transport // which connections remote workers may use (V7b1: -trusted-proxies)
+	// RunRemote runs a job a remote worker leased, on this server, until it ends (V7b2); nil: remote
+	// workers can lease but nothing runs (tests of the API alone).
+	RunRemote func(job jobs.Job, workerID string, rj *worker.RemoteJob)
 }
 
 // libraryItem is a library as GET /api/libraries shows it (UI-API-CONTRACT.md "Libraries").

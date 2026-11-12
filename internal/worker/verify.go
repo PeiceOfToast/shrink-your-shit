@@ -180,6 +180,9 @@ func (w *Worker) verify(ctx context.Context, src media.Info, exp rules.Expect, s
 	if exp.VideoCopied { // repackaged (S4): the video is the same bytes, so there is no picture to compare
 		return nil
 	}
+	if w.remote != nil { // the remote worker compared the pictures itself, against its copy (Q4 a)
+		return nil
+	}
 	return w.ssimCheck(ctx, src, out, srcPath, tmp, exp.MinSSIM)
 }
 
@@ -205,6 +208,11 @@ func (w *Worker) decodeCheck(ctx context.Context, out media.Info, tmp string) er
 	return nil
 }
 
+// opusParserRe is the one message ffmpeg 8's demuxer prints for the last Opus packet of a good file, even
+// when only the video is played (ffmpeg 8.0.1: any Opus audio in MKV/WebM, ours or not; the file plays
+// to the end and the exit status is 0). It says nothing about the video that is being checked.
+var opusParserRe = regexp.MustCompile(`(?m)^\[opus @ [0-9a-fx]+\] Error parsing Opus packet header\.\s*$`)
+
 func (w *Worker) decodeRun(ctx context.Context, tmp string, videoOrd int, start, length, playSec float64) error {
 	args := []string{"-v", "error", "-xerror", "-nostdin"}
 	if length > 0 {
@@ -224,7 +232,7 @@ func (w *Worker) decodeRun(ctx context.Context, tmp string, videoOrd int, start,
 	dctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	_, stderr, err := w.Exec.Capture(dctx, w.FFmpeg, args...)
-	text := strings.TrimSpace(string(stderr))
+	text := strings.TrimSpace(opusParserRe.ReplaceAllString(string(stderr), ""))
 	if errors.Is(dctx.Err(), context.DeadlineExceeded) {
 		return checkFailed(dctx, "the playback test of the new file", err)
 	}

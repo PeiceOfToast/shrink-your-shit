@@ -13,6 +13,7 @@ import { Link, navigate } from "../router";
 import { useData } from "../useData";
 import type { FirstRunSettings } from "../types/v1";
 import { FirstFive, FolderField, suggestName, useFolder } from "./Libraries";
+import { Browse } from "../FolderPicker";
 import { START_SIMPLE } from "./Workflows";
 
 type Kept = NonNullable<FirstRunSettings["firstRunLibrary"]>;
@@ -141,7 +142,8 @@ function StepWorkflow({ kept, onDone }: { kept: Kept; onDone: () => void }) {
               <div className="hint">{ONE_HINT}</div></div></div>
           {one && noNext && <p className="st warn" role="note"><Icon id="i-alert" /><span>{nextLine(kept.path, noNext)}</span></p>}
           {one && <div className="field"><label htmlFor="s2-out">Folder for new files</label>
-            <input id="s2-out" ref={outRef} className="input mono" value={out} placeholder="/media/shrunk" onChange={(e) => setOut(e.target.value)} aria-describedby="s2-out-hint" />
+            <div className="folderrow"><input id="s2-out" ref={outRef} className="input mono" value={out} placeholder="/media/shrunk" onChange={(e) => setOut(e.target.value)} aria-describedby="s2-out-hint" />
+              <Browse value={out} start={kept.path.replace(/[\\/][^\\/]*[\\/]?$/, "") || "/"} onPick={setOut} /></div>
             <span id="s2-out-hint" className="hint">A folder outside {kept.path}.</span></div>}
           <span className="hint">Your originals stay where they are. You can change this and every other choice later.</span>
         </fieldset>
