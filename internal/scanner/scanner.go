@@ -494,12 +494,34 @@ func (s *Scanner) markOriginalsGone(walked []int64, sizes map[string]int64) {
 		return
 	}
 	for _, o := range left {
+		dir := filepath.Dir(o.Path)
 		if size, seen := sizes[o.Path]; seen {
+			if o.Disk == "" { // a job done before the disk was recorded: it is surely there now
+				if d, ok := originalDisk(dir); ok {
+					s.Store.SetOriginalDisk(o.JobID, d)
+				}
+			}
 			if size != o.Size {
 				if err := s.Store.SetOriginalChanged(o.JobID); err != nil {
 					log.Printf("scan: %s: %v", o.Path, err)
 				}
 			}
+			continue
+		}
+		// not seen: removed only if its folder is on the disk it was on (a nested mount unmounted leaves
+		// an empty folder on another disk: review-ae6749e P2). A folder deleted with it: its nearest
+		// folder that is still there must be on that disk. No disk known: it can't be told, so it waits.
+		if o.Disk == "" {
+			continue
+		}
+		at := dir
+		for {
+			if _, err := os.Stat(at); err == nil || filepath.Dir(at) == at {
+				break
+			}
+			at = filepath.Dir(at)
+		}
+		if d, ok := originalDisk(at); !ok || d != o.Disk {
 			continue
 		}
 		if _, err := os.Lstat(o.Path); errors.Is(err, fs.ErrNotExist) {
@@ -538,3 +560,6 @@ func (s *Scanner) canJudgeOriginals(t Target, videos int) bool {
 	}
 	return true
 }
+
+// originalDisk is the disk a folder is on (jobs.DiskOf); tests replace it to fake a mount.
+var originalDisk = jobs.DiskOf
