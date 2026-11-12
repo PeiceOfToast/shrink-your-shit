@@ -3,7 +3,9 @@
 package jobs
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -25,11 +27,14 @@ var Cards = []string{CardUnprocessed, CardProcessing, CardProcessed, CardSkipped
 // FileFilter says which files to list: a card, and optionally a library, a name to look for (in the
 // file's name, or its new name after a rename) and, on processed, only those whose original is kept.
 type FileFilter struct {
-	Show          string
-	LibraryID     int64
-	Q             string
-	Reasons       []string // skipped: only these reasons (none: every reason)
-	Kept          bool
+	Show      string
+	LibraryID int64
+	Q         string
+	Reasons   []string // skipped: only these reasons (none: every reason)
+	Kept      bool
+	// QueueOrder: waiting jobs in the order workers take them (Claim's: priority, then age), ready ones
+	// first, then those waiting to retry (soonest first) or being stopped.
+	QueueOrder    bool
 	Limit, Offset int
 }
 
@@ -42,6 +47,7 @@ type FileRow struct {
 	Status                Status
 	Error                 string
 	ErrorCode             string // Error's code (migration 23: jobs.error_code)
+	Priority              int    // the job's place-in-queue priority (higher first)
 	Attempts              int
 	RetryAt               string
 	SizeBefore, SizeAfter int64
@@ -168,18 +174,22 @@ func (s *Store) FileList(f FileFilter) (rows []FileRow, total int, counts map[st
 			args = append(append([]any{}, ja...), OriginalKept)
 			total = kept
 		}
+		order, orderArgs := jobOrder[f.Show], []any{}
+		if f.QueueOrder && f.Show == CardUnprocessed {
+			order, orderArgs = `CASE WHEN `+notReadySQL+` THEN 1 ELSE 0 END, CASE WHEN `+notReadySQL+` THEN j.retry_at END, j.priority DESC, j.id`, []any{s.stamp(), s.stamp()}
+		}
 		r, err := s.db.Query(`SELECT j.id, COALESCE(j.library_id,0), COALESCE(l.name, j.library), j.path, COALESCE(o.new_path,''), j.status,
-  COALESCE(j.error,''), COALESCE(j.error_code,''), j.attempts, COALESCE(j.retry_at,''), j.size_before, COALESCE(j.size_after,0), j.duration, j.updated,
+  COALESCE(j.error,''), COALESCE(j.error_code,''), j.priority, j.attempts, COALESCE(j.retry_at,''), j.size_before, COALESCE(j.size_after,0), j.duration, j.updated,
   COALESCE(fl.id,0), COALESCE(fl.name,''), COALESCE(o.id,0), COALESCE(o.state,''), COALESCE(o.delete_on,''), COALESCE(o.kept_at,''), j.output_path,
-  j.output_path<>'' AND j.output_path<>j.path AND o.id IS NULL `+jobFrom+` WHERE `+cond+` ORDER BY `+jobOrder[f.Show]+` LIMIT ? OFFSET ?`,
-			append(args, f.Limit, f.Offset)...)
+  j.output_path<>'' AND j.output_path<>j.path AND o.id IS NULL `+jobFrom+` WHERE `+cond+` ORDER BY `+order+` LIMIT ? OFFSET ?`,
+			append(append(args, orderArgs...), f.Limit, f.Offset)...)
 		if err != nil {
 			return nil, 0, nil, err
 		}
 		defer r.Close()
 		for r.Next() {
 			var row FileRow
-			if err := r.Scan(&row.JobID, &row.LibraryID, &row.Library, &row.Path, &row.NewPath, &row.Status, &row.Error, &row.ErrorCode, &row.Attempts,
+			if err := r.Scan(&row.JobID, &row.LibraryID, &row.Library, &row.Path, &row.NewPath, &row.Status, &row.Error, &row.ErrorCode, &row.Priority, &row.Attempts,
 				&row.RetryAt, &row.SizeBefore, &row.SizeAfter, &row.DurationSec, &row.Updated, &row.FlowID, &row.FlowName,
 				&row.OriginalID, &row.OriginalState, &row.OriginalDeleteOn, &row.OriginalKeptAt, &row.OutputPath, &row.Beside); err != nil {
 				return nil, 0, nil, err
@@ -228,4 +238,30 @@ func (s *Store) FlowShapes(flowID int64) ([]rules.Shape, error) {
 		}
 	}
 	return out, rows.Err()
+}
+
+// notReadySQL is true for a waiting job (alias j) Claim would not take now (one placeholder: now):
+// waiting to retry, being stopped, or in a paused library (the same condition as Claim's).
+var notReadySQL = `(j.stop_requested=1 OR (j.retry_at<>'' AND j.retry_at>?) OR NOT ` + libraryOn("j") + `)` // also a paused library's job (V5b)
+
+// QueuePositions are the given waiting jobs' places in the queue (1: taken next), counted over every
+// job Claim would take, in its order (priority, then age); a job Claim wouldn't take now (waiting to
+// retry, being stopped, or not waiting) has none.
+func (s *Store) QueuePositions(ids []int64) (map[int64]int, error) {
+	out := map[int64]int{}
+	now := s.stamp()
+	for _, id := range ids {
+		var pos sql.NullInt64
+		err := s.db.QueryRow(`SELECT (SELECT COUNT(*) FROM jobs k WHERE k.status=? AND k.stop_requested=0 AND (k.retry_at='' OR k.retry_at<=?) AND `+libraryOn("k")+`
+  AND (k.priority>j.priority OR k.priority=j.priority AND k.id<j.id)) + 1
+FROM jobs j WHERE j.id=? AND j.status=? AND NOT `+notReadySQL, Queued, now, id, Queued, now).Scan(&pos)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out[id] = int(pos.Int64)
+	}
+	return out, nil
 }
