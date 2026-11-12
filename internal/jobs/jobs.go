@@ -328,7 +328,7 @@ func (s *Store) Keep(id int64, code, reason string) error {
 
 // Retry puts a failed or kept job back in the queue: a fresh start (no tries counted, no wait).
 func (s *Store) Retry(id int64) error {
-	return s.transition(id, Queued, `, progress=0, error='', error_code='', worker='', attempts=0, retry_at=''`)
+	return s.transition(id, Queued, `, progress=0, error='', error_code='', worker='', attempts=0, retry_at='', fallback=''`) // a fresh start: the first path again (V6b)
 }
 
 // Release puts a running job back in the queue (the worker was told to stop).
@@ -480,4 +480,28 @@ func (s *Store) Route(id int64) ([]string, error) {
 	var path []string
 	err := json.Unmarshal([]byte(raw), &path)
 	return path, err
+}
+
+// FallBack puts running job id back in the queue to be converted again from its original along another
+// path of its workflow (V6b): branch (a rules.Branch, JSON) is that path, now its route; the try counts.
+// The failure is on its timeline as words (a "failure" step on node nodeID).
+func (s *Store) FallBack(id int64, branch string, path []string, nodeID, words string) error {
+	route, _ := json.Marshal(path)
+	if _, err := s.db.Exec(`INSERT INTO job_steps(job_id,step,at,ok,words,node_id,port) VALUES(?,?,?,?,?,?,?)`, id, "failure", s.stamp(), false, words, nodeID, "error"); err != nil {
+		return err
+	}
+	return s.transition(id, Queued, `, progress=0, worker='', error='', error_code='', attempts=attempts+1, retry_at='', fallback=?, route=?`, branch, string(route))
+}
+
+// FallbackOf is the path job id falls back to (” = none).
+func (s *Store) FallbackOf(id int64) (string, error) {
+	var b string
+	err := s.db.QueryRow(`SELECT fallback FROM jobs WHERE id=?`, id).Scan(&b)
+	return b, err
+}
+
+// AddFailureStep records on job id's timeline that node nodeID didn't work, and what happens (V6b).
+func (s *Store) AddFailureStep(id int64, nodeID, words string) error {
+	_, err := s.db.Exec(`INSERT INTO job_steps(job_id,step,at,ok,words,node_id,port) VALUES(?,?,?,?,?,?,?)`, id, "failure", s.stamp(), false, words, nodeID, "error")
+	return err
 }

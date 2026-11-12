@@ -49,6 +49,11 @@ type Queue interface {
 	// OutputFolder is a library's folder for new files with "Next to each library" (V5a), or why it has
 	// none.
 	OutputFolder(libraryID int64, libPath string) (string, *jobs.FolderProblem, error)
+	// FallbackOf is the path a job falls back to (a rules.Branch, JSON; "" none) (V6b).
+	FallbackOf(id int64) (string, error)
+	// FallBack puts a job back in the queue along another path; AddFailureStep records a failure (V6b).
+	FallBack(id int64, branch string, path []string, nodeID, words string) error
+	AddFailureStep(id int64, nodeID, words string) error
 	// IsOwnOutput reports whether the file at path (this size and time) is one a done job wrote.
 	IsOwnOutput(path string, size, mtime int64) (bool, error)
 	// RecordPlan stores the Plan a running job converts with (JSON) and its fingerprint.
@@ -80,6 +85,8 @@ type Worker struct {
 	Logs *runlog.Logs
 	// verified is the probe of the new file the last check passed (S5: stored for its final path).
 	verified media.Info
+	// failures: the running job's path's choices for when it doesn't work (V6b; under mu)
+	failures *rules.Failures
 	ID       string
 	Queue    Queue
 	Exec     media.Exec
@@ -219,6 +226,7 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 	}
 	jobCtx, cancel := context.WithCancel(ctx)
 	w.current, w.cancelJob, w.stopped = job.ID, cancel, stopNone
+	w.failures = nil // this job's own, once its plan is made (V6b)
 	w.mu.Unlock()
 	w.jobf(job.ID, ": started")
 	if testHook != nil {
@@ -275,8 +283,21 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 			w.jobf(job.ID, " (%s): skipped: %s", job.Path, se.Words)
 			return true, w.Queue.Skip(job.ID, se.Words, se.Code)
 		}
+		// V6b: the path's own choice for when its conversion doesn't work comes first.
+		w.mu.Lock()
+		fs := w.failures
+		w.mu.Unlock()
+		var kept *KeptError
+		noRetry := false
+		if f := fs.For(errors.As(err, &kept)); f != nil {
+			done, rerr := w.applyFailure(job, err, f)
+			if done {
+				return true, rerr
+			}
+			noRetry = true // stop, or the last try: it fails or is kept as before, without another
+		}
 		// A failure that may pass, with a try left: back in the queue for later, from the start (DD-2).
-		if wait, ok := retryIn(err, job.Attempts); ok {
+		if wait, ok := retryIn(err, job.Attempts); ok && !noRetry {
 			w.jobf(job.ID, " (%s): try %d of %d failed, trying again in %s: %v", job.Path, job.Attempts+1, maxTries, wait, err)
 			return true, w.Queue.RetryLater(job.ID, w.now().Add(wait), reasonCode(err), plainReason(err))
 		}
@@ -543,6 +564,15 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// the result must look like. Whether to convert it was the scanner's decision (as before Plans);
 	// only a flow that cannot say how to convert stops the job here.
 	plan := tmpl.Compile(src)
+	if fb, err := w.Queue.FallbackOf(job.ID); err == nil && fb != "" { // V6b: it falls back to another path
+		var b rules.Branch
+		if json.Unmarshal([]byte(fb), &b) == nil {
+			plan = rules.CompileBranch(b, src, tmpl.Languages)
+		}
+	}
+	w.mu.Lock()
+	w.failures = plan.OnFailure // what this path does when it doesn't work (RunOne reads it)
+	w.mu.Unlock()
 	// Dolby Vision the flow leaves alone is never encoded, whatever was decided when the job was queued
 	// (review a09f6f5: a job queued before migration 17 or a setting change). Only these skips: the
 	// others stay the scanner's decision, as before Plans.
@@ -1188,4 +1218,38 @@ func FolderPath(dir, lib, src, ext string) string {
 		return filepath.Join(dir, rel, name)
 	}
 	return filepath.Join(dir, name)
+}
+
+// applyFailure does what the path chose for when its step (f) doesn't work (V6b): try again later, leave
+// the file alone, or go to another path from the original. false: stop (the job fails or is kept as it
+// would have, but without a retry).
+func (w *Worker) applyFailure(job jobs.Job, err error, f *rules.Failure) (bool, error) {
+	plain := plainReason(err)
+	act := f.Action
+	if act == "retry" {
+		if job.Attempts+1 < f.Max {
+			wait := time.Duration(f.BackoffSeconds) * time.Second
+			w.jobf(job.ID, " (%s): %s didn't work, try %d of %d, again in %s: %v", job.Path, f.Name, job.Attempts+1, f.Max, wait, err)
+			return true, w.Queue.RetryLater(job.ID, w.now().Add(wait), reasonCode(err), plain)
+		}
+		act = f.Then // the last try
+	}
+	switch act {
+	case "skip":
+		w.Queue.AddFailureStep(job.ID, f.NodeID, f.Name+" didn't work: "+plain)
+		w.jobf(job.ID, " (%s): %s didn't work, the file is left as it is: %v", job.Path, f.Name, err)
+		return true, w.Queue.Skip(job.ID, f.SkipWords, rules.SkipLeftByWorkflow)
+	case "fallback":
+		if f.Fallback == nil {
+			return false, nil
+		}
+		if f.Fallback.Then == nil { // the other path is "Leave the file alone"
+			w.Queue.AddFailureStep(job.ID, f.NodeID, f.Name+" didn't work: "+plain)
+			return true, w.Queue.Skip(job.ID, f.Fallback.End, rules.SkipLeftByWorkflow)
+		}
+		b, _ := json.Marshal(f.Fallback)
+		w.jobf(job.ID, " (%s): %s didn't work, trying the other path from the original: %v", job.Path, f.Name, err)
+		return true, w.Queue.FallBack(job.ID, string(b), f.Fallback.Path, f.NodeID, f.Name+" didn't work: "+plain+" Trying the other path.")
+	}
+	return false, nil // stop
 }

@@ -27,17 +27,19 @@ type Plan struct {
 	OutputDir   string      `json:"outputDir,omitempty"` // "folder" (S6): the new files go here, in the library\'s sub-folders
 	// Path and Decisions: a workflow with checks (V6a): the node ids the file went along, and each
 	// check's answer in words. Empty for a straight workflow (its Plans and fingerprints are unchanged).
-	Path          []string   `json:"path,omitempty"`
-	Decisions     []Decision `json:"decisions,omitempty"`
-	FolderMode    string     `json:"folderMode,omitempty"`    // "next_to_library" (V5a): the library's own folder instead of OutputDir
-	Container     string     `json:"container,omitempty"`     // the new file's type (its extension, "mkv" or "mp4"); "" = the original's
-	Tracks        []TrackOp  `json:"tracks,omitempty"`        // audio and subtitle tracks dropped or converted (slice 25b); others copied
-	AllAudioKept  bool       `json:"allAudioKept,omitempty"`  // "my languages" matched no audio track, so all of it is kept
-	MainAudioUsed bool       `json:"mainAudioUsed,omitempty"` // Basic's stereo AAC matched no track: the main one is kept (S4)
-	HDRNote       string     `json:"hdrNote,omitempty"`       // what an HDR conversion does not keep (S3): HDR10+ scene data, Dolby Vision
-	AudioFolded   bool       `json:"audioFolded,omitempty"`   // a 7.1 track became 5.1 E-AC-3/AC-3: the job log says FoldedNote (design, 01:52Z)
-	SmallKept     bool       `json:"smallKept,omitempty"`     // a small stereo track kept as it is: the job log says SmallKeptNote (design, 02:26Z)
-	TypeNote      string     `json:"typeNote,omitempty"`      // "keep" turned this file into MKV: said once in the job log (review 4ac9c0d)
+	Path      []string   `json:"path,omitempty"`
+	Decisions []Decision `json:"decisions,omitempty"`
+	// OnFailure: a workflow path's failure policies (V6b); nil for a straight workflow.
+	OnFailure     *Failures `json:"onFailure,omitempty"`
+	FolderMode    string    `json:"folderMode,omitempty"`    // "next_to_library" (V5a): the library's own folder instead of OutputDir
+	Container     string    `json:"container,omitempty"`     // the new file's type (its extension, "mkv" or "mp4"); "" = the original's
+	Tracks        []TrackOp `json:"tracks,omitempty"`        // audio and subtitle tracks dropped or converted (slice 25b); others copied
+	AllAudioKept  bool      `json:"allAudioKept,omitempty"`  // "my languages" matched no audio track, so all of it is kept
+	MainAudioUsed bool      `json:"mainAudioUsed,omitempty"` // Basic's stereo AAC matched no track: the main one is kept (S4)
+	HDRNote       string    `json:"hdrNote,omitempty"`       // what an HDR conversion does not keep (S3): HDR10+ scene data, Dolby Vision
+	AudioFolded   bool      `json:"audioFolded,omitempty"`   // a 7.1 track became 5.1 E-AC-3/AC-3: the job log says FoldedNote (design, 01:52Z)
+	SmallKept     bool      `json:"smallKept,omitempty"`     // a small stereo track kept as it is: the job log says SmallKeptNote (design, 02:26Z)
+	TypeNote      string    `json:"typeNote,omitempty"`      // "keep" turned this file into MKV: said once in the job log (review 4ac9c0d)
 	// StyledSubsPlain: an ASS/SSA subtitle became plain mov_text for MP4: said once in the job log (design, 02:49Z)
 	StyledSubsPlain bool    `json:"styledSubsPlain,omitempty"`
 	AudioOrder      []int   `json:"audioOrder,omitempty"`    // the original's audio stream indexes in order, when Tracks has any
@@ -141,7 +143,7 @@ func (t Template) Compile(info media.Info) Plan {
 			then.Languages = t.Languages
 			p = then.Compile(info)
 		}
-		p.Path, p.Decisions = b.Path, ds
+		p.Path, p.Decisions, p.OnFailure = b.Path, ds, b.OnFailure
 		return p
 	}
 	p := Plan{Kind: t.Kind, CompilerVersion: t.CompilerVersion}

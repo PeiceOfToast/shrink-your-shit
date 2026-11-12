@@ -4,6 +4,7 @@ package workflow
 
 import (
 	"encoding/json"
+	"strconv"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
@@ -42,6 +43,83 @@ func branchTemplate(d Doc) (rules.Template, []Issue) {
 		return rules.Template{}, issues
 	}
 	var branches []rules.Branch
+	// segment is the path that starts converting at n (after path): one straight run to "Save the
+	// result", with what it does when it doesn't work (V6b). nil: an issue was added.
+	var segment func(n Node, path []string, fallbacks map[string]bool) *rules.Branch
+	segment = func(n Node, path []string, fallbacks map[string]bool) *rules.Branch {
+		if fallbacks[n.ID] {
+			issues = append(issues, Issue{Code: "fallback_loop", Severity: "error", NodeID: n.ID,
+				Message: "Falling back from '" + nodeName(n) + "' leads back to it. Let the last other path stop or leave the file alone."})
+			return nil
+		}
+		chain := []Node{n}
+		for cur := n; ; {
+			for _, port := range []string{"skipped", "error"} {
+				if out[[2]string{cur.ID, port}] != "" && !(port == "error" && (cur.Type == TypeConvert || cur.Type == TypeVerify)) {
+					issues = append(issues, Issue{Code: "not_runnable_yet", Severity: "error", NodeID: cur.ID, Port: port,
+						Message: "Steps after '" + portLabel(cur, port) + "' come in a later update. For now, remove that link."})
+				}
+			}
+			next := out[[2]string{cur.ID, "success"}]
+			if next == "" {
+				break
+			}
+			nn := byID[next]
+			if nn.Type == TypeCheck || nn.Type == TypeEnd || nn.Type == TypeInput {
+				issues = append(issues, Issue{Code: "branch_in_conversion", Severity: "error", NodeID: nn.ID,
+					Message: "'" + nodeName(nn) + "' sits among the steps that run as one conversion. Put checks before the steps that convert."})
+				return nil
+			}
+			chain, cur = append(chain, nn), nn
+		}
+		if chain[len(chain)-1].Type != TypeCommit {
+			last := chain[len(chain)-1]
+			issues = append(issues, Issue{Code: "path_without_save", Severity: "error", NodeID: last.ID, Port: "success",
+				Message: "This path never saves the result. End it with 'Save the result', or leave the file alone there."})
+			return nil
+		}
+		// the conversion as a straight workflow; the steps' own choices for failures are the path's
+		// (failureOf below), not the straight compile's (it would come back here for ever)
+		in := byID[start]
+		in.OnError = nil
+		plain := []Node{in}
+		for _, c := range chain {
+			c.OnError = nil
+			plain = append(plain, c)
+		}
+		seg := Doc{SchemaVersion: d.SchemaVersion, Nodes: plain, Variables: d.Variables}
+		seg.Edges = chainEdges(seg.Nodes)
+		t, is := ToTemplate(seg, rules.Template{})
+		if len(is) > 0 {
+			issues = append(issues, is...)
+			return nil
+		}
+		ids := []string{}
+		for _, c := range chain {
+			ids = append(ids, c.ID)
+		}
+		b := &rules.Branch{Then: &t, Path: append(clone(path), ids...)}
+		var fs rules.Failures
+		for _, c := range chain { // what the run does when it doesn't work (V6b)
+			if c.Type != TypeConvert && c.Type != TypeVerify {
+				continue
+			}
+			f := failureOf(c, out, byID, &issues, func(target Node) *rules.Branch {
+				seen := clone(fallbacks)
+				seen[n.ID] = true
+				return segment(target, path, seen)
+			})
+			if c.Type == TypeConvert {
+				fs.Convert = f
+			} else {
+				fs.Check = f
+			}
+		}
+		if fs.Convert != nil || fs.Check != nil {
+			b.OnFailure = &fs
+		}
+		return b
+	}
 	var walk func(id string, checks []rules.BranchCheck, path []string, onPath map[string]bool)
 	walk = func(id string, checks []rules.BranchCheck, path []string, onPath map[string]bool) {
 		n, ok := byID[id]
@@ -86,44 +164,10 @@ func branchTemplate(d Doc) (rules.Template, []Issue) {
 			seen[id] = true
 			walk(next, checks, append(clone(path), n.ID), seen)
 		default: // the steps that convert, then check and save: one straight run
-			chain := []Node{n}
-			for cur := n; ; {
-				for _, port := range []string{"skipped", "error"} { // failure ports come in V6b
-					if out[[2]string{cur.ID, port}] != "" {
-						issues = append(issues, Issue{Code: "not_runnable_yet", Severity: "error", NodeID: cur.ID, Port: port,
-							Message: "Steps after '" + portLabel(cur, port) + "' come in a later update. For now, remove that link."})
-					}
-				}
-				next := out[[2]string{cur.ID, "success"}]
-				if next == "" {
-					break
-				}
-				nn := byID[next]
-				if nn.Type == TypeCheck || nn.Type == TypeEnd || nn.Type == TypeInput {
-					issues = append(issues, Issue{Code: "branch_in_conversion", Severity: "error", NodeID: nn.ID,
-						Message: "'" + nodeName(nn) + "' sits among the steps that run as one conversion. Put checks before the steps that convert."})
-					return
-				}
-				chain, cur = append(chain, nn), nn
+			if b := segment(n, path, map[string]bool{}); b != nil {
+				b.Checks = checks
+				branches = append(branches, *b)
 			}
-			if chain[len(chain)-1].Type != TypeCommit {
-				last := chain[len(chain)-1]
-				issues = append(issues, Issue{Code: "path_without_save", Severity: "error", NodeID: last.ID, Port: "success",
-					Message: "This path never saves the result. End it with 'Save the result', or leave the file alone there."})
-				return
-			}
-			seg := Doc{SchemaVersion: d.SchemaVersion, Nodes: append([]Node{byID[start]}, chain...), Variables: d.Variables}
-			seg.Edges = chainEdges(seg.Nodes)
-			t, is := ToTemplate(seg, rules.Template{})
-			if len(is) > 0 {
-				issues = append(issues, is...)
-				return
-			}
-			ids := []string{}
-			for _, c := range chain {
-				ids = append(ids, c.ID)
-			}
-			branches = append(branches, rules.Branch{Checks: checks, Then: &t, Path: append(clone(path), ids...)})
 		}
 	}
 	walk(start, nil, nil, map[string]bool{})
@@ -170,4 +214,78 @@ func clone[T any](s T) T {
 	var out T
 	json.Unmarshal(b, &out)
 	return out
+}
+
+// failureOf is node c's failure policy (V6b): its error port's link (another path to convert with, or
+// "Leave the file alone"), or its onError; nil: none (today's behaviour).
+func failureOf(c Node, out map[[2]string]string, byID map[string]Node, issues *[]Issue, fallback func(Node) *rules.Branch) *rules.Failure {
+	add := func(code, msg string) {
+		*issues = append(*issues, Issue{Code: code, Severity: "error", NodeID: c.ID, Port: "error", Message: msg})
+	}
+	f := &rules.Failure{NodeID: c.ID, Name: nodeName(c)}
+	target := out[[2]string{c.ID, "error"}]
+	if target == "" && c.OnError != nil && c.OnError.Action == "fallback" {
+		target = c.OnError.To
+	}
+	if target != "" {
+		if c.OnError != nil && c.OnError.Action != "fallback" {
+			add("error_policy_conflict", "'"+f.Name+"' has both a link from "+portLabel(c, "error")+" and its own choice for when it doesn't work. Keep one.")
+			return nil
+		}
+		t, ok := byID[target]
+		switch {
+		case !ok:
+			add("invalid_config", "'"+f.Name+"' falls back to a step that isn't in this workflow.")
+			return nil
+		case t.Type == TypeEnd:
+			f.Action, f.SkipWords = "skip", "Left alone by this workflow."
+			if r, _ := t.Config["reason"].(string); r != "" {
+				f.SkipWords = r
+			}
+			return f
+		case t.Type == TypeCheck || t.Type == TypeInput:
+			add("fallback_must_convert", "When '"+f.Name+"' doesn't work, the file can go to other steps that convert, or be left alone; not to a check.")
+			return nil
+		}
+		f.Action, f.Fallback = "fallback", fallback(t)
+		if f.Fallback == nil {
+			return nil
+		}
+		return f
+	}
+	if c.OnError == nil {
+		return nil
+	}
+	e := c.OnError
+	switch e.Action {
+	case "skip", "stop":
+		f.Action = e.Action
+		if e.Action == "skip" {
+			f.SkipWords = f.Name + " didn't work, so the file was left as it is."
+		}
+	case "retry":
+		f.Action, f.Max, f.BackoffSeconds, f.Then = "retry", e.Max, e.BackoffSeconds, e.Then
+		if f.Max == 0 {
+			f.Max = 3
+		}
+		if f.Then == "" {
+			f.Then = "stop"
+		}
+		switch {
+		case f.Max < 1 || f.Max > 10:
+			add("invalid_config", "Try '"+f.Name+"' 1 to 10 times.")
+			return nil
+		case f.BackoffSeconds < 0 || f.BackoffSeconds > 86400:
+			add("invalid_config", "Wait between tries from 0 seconds to a day.")
+			return nil
+		case f.Then != "skip" && f.Then != "stop":
+			add("invalid_config", "After the last try, stop or leave the file alone.")
+			return nil
+		}
+		f.SkipWords = f.Name + " didn't work after " + strconv.Itoa(f.Max) + " tries, so the file was left as it is."
+	default:
+		add("invalid_config", "Choose what happens when '"+f.Name+"' doesn't work: try again, leave the file alone, stop, or another path.")
+		return nil
+	}
+	return f
 }
