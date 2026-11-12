@@ -10,11 +10,13 @@ import { order } from "../mock/steps"; // the steps in running order: a property
 import { useData } from "../useData";
 import { getDraft, getWorkflow, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked } from "../workflowApi";
 import { onLeave } from "../router";
+import { listLibraries, shrunk } from "../libraryApi";
 import type { JSONSchema, Node, PublishPreview, StepDefinition, ValidationIssue, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
 
 // The step definitions and the server's words for each step of the document being edited.
-const Reg = createContext<{ defs: StepDefinition[]; words: Record<string, string> }>({ defs: [], words: {} });
-function useReg() { const r = useContext(Reg); return { stepDef: (t: string) => r.defs.find((d) => d.type === t), summary: (n: Node) => r.words[n.id] ?? "" }; }
+// libs: the folders of the libraries that use this workflow, for "Next to each library" (V5a).
+const Reg = createContext<{ defs: StepDefinition[]; words: Record<string, string>; libs: string[] }>({ defs: [], words: {}, libs: [] });
+function useReg() { const r = useContext(Reg); return { stepDef: (t: string) => r.defs.find((d) => d.type === t), summary: (n: Node) => r.words[n.id] ?? "", libs: r.libs }; }
 
 // The server's icon keys (registry) -> design's sprite.
 const ICON: Record<string, string> = { folder: "i-folder", filter: "i-shield", video: "i-video", audio: "i-audio", subtitles: "i-subtitle", file: "i-file", check: "i-checks", save: "i-save", cond: "i-cond", history: "i-history" };
@@ -67,7 +69,7 @@ function Field({ id, name, s, value, set }: { id: string; name: string; s: JSONS
 }
 
 function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown) => void; issues: ValidationIssue[] }) {
-  const { stepDef } = useReg(), def = stepDef(n.type)!, props = Object.fromEntries(Object.entries((def.configSchema.properties ?? {}) as Props).filter(([, s]) => !s.readOnly)) as Props, c = n.config;
+  const { stepDef, libs } = useReg(), def = stepDef(n.type)!, props = Object.fromEntries(Object.entries((def.configSchema.properties ?? {}) as Props).filter(([, s]) => !s.readOnly)) as Props, c = n.config;
   const keys = Object.keys(props).filter((k) => !(MORE[n.type] ?? []).includes(k)), more = (MORE[n.type] ?? []).filter((k) => props[k]);
   const field = (k: string) => <Field key={k} id={n.id} name={k} s={props[k]} value={c[k] ?? props[k].default} set={(v) => set(k, v)} />;
   const problem = (path: string) => issues.filter((i) => i.nodeId === n.id && i.configPath === path).map((i) => <span key={i.code} className="hint" style={{ color: "var(--error-text)" }}>{i.message}</span>);
@@ -85,7 +87,9 @@ function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown) => 
         {policy === "separate_folder" && (
           <fieldset className="field choice"><legend className="lab">{(props.folderMode.title as string) ?? "Where"}</legend><div className="row">
             {labels(props.folderMode).map(([v, l]) => <label key={String(v)} className="radio"><input type="radio" name={n.id + "-mode"} checked={mode === v} onChange={() => set("folderMode", v)} /><span>{l}</span></label>)}
-          </div><Hint text={hintFor(props.folderMode, mode)} />{problem("/folderMode")}</fieldset>)}
+          </div><Hint text={hintFor(props.folderMode, mode)} />{problem("/folderMode")}
+          {mode === "next_to_library" && libs.length > 0 && <ul className="mono sm" style={{ listStyle: "none", margin: "6px 0 0", padding: 0 }} aria-label="Where each library's new files go">
+            {libs.map((p) => <li key={p} style={{ overflowWrap: "anywhere" }}>{p} → {shrunk(p)}</li>)}</ul>}</fieldset>)}
         {policy === "separate_folder" && mode === "one_folder" && <>{field("folder")}{problem("/folder")}</>}
       </div>);
   }
@@ -180,6 +184,7 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
   const [open, setOpen] = useState<string | null>(null), [said, setSaid] = useState(""), [checked, setChecked] = useState(false);
   const [panel, setPanel] = useState<PublishPreview | null>(null), [renaming, setRenaming] = useState(false);
   const doc = hist.docs[hist.at], dirty = doc !== saved;
+  const all = useData(listLibraries, []), libs = (all.data ?? []).filter((l) => l.flowId === id).map((l) => l.path);
   // The server's words and problems for the document as it is now (nothing saved): asked 300 ms after a change.
   const ask = async (d: WorkflowDoc) => { const r = await act(validateDoc(id, d), setSaid); if (r) setLive(r); return r; };
   const seen = useRef(first.workflow);
@@ -230,7 +235,7 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
   </>;
   const canStack = live.stackable;
   return (
-    <Reg.Provider value={{ defs, words: live.stepSummaries }}>
+    <Reg.Provider value={{ defs, words: live.stepSummaries, libs }}>
     <div className="stack">
       {/* the workflow's header row (clean pass W2) */}
       <PageHead icon="i-workflow" crumbs={[["Workflows", "/workflows"]]}

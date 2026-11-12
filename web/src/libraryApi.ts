@@ -57,14 +57,19 @@ export async function startWorker(id: string): Promise<Answer<unknown>> {
   return call("POST", "/api/workers/" + enc(id) + "/start");
 }
 
-// First run's step 2: a Start Simple workflow that saves new files to `out` (output-first), published, so a library can
-// use it: POST /api/v2/workflows from the template, its draft's Save step set to one folder, PUT with If-Match, publish.
+// The server's folder beside a library with "Next to each library" (V5a, jobs.NextToLibrary): "<library folder> (shrunk)".
+export const shrunk = (path: string) => path.replace(/\/+$/, "") + " (shrunk)";
+
+// First run's step 2: a Start Simple workflow that saves new files in a separate folder (output-first), published, so a
+// library can use it: POST /api/v2/workflows from the template, its draft's Save step set, PUT with If-Match, publish.
+// `out` null is "Next to each library" (V5a #133: each library's new files go to "<its folder> (shrunk)"); a path is
+// "One folder for all".
 // `again` is the one an earlier try on this page made: a retry renames and re-sets it, never makes a second one
 // (review 228de8e P2); after a reload, a never-used one of the same name is used again.
-export async function startSimpleWorkflow(name: string, out: string, again?: string, libraryPath?: string): Promise<Answer<{ id: string }>> {
+export async function startSimpleWorkflow(name: string, out: string | null, again?: string, libraryPath?: string): Promise<Answer<{ id: string }>> {
   // #128: check the library's folder with this output folder first, so a refused folder never makes or publishes a version
   if (libraryPath) {
-    const c = await checkFolder(libraryPath, out);
+    const c = await checkFolder(libraryPath, out ?? undefined); // a folder beside the library is never inside it
     if (failed(c)) return c;
     const b = c.blockers.find((x) => x.code === "inside_library") ?? c.blockers[0];
     if (b) return { error: b };
@@ -78,7 +83,8 @@ export async function startSimpleWorkflow(name: string, out: string, again?: str
   const d = await wf.getDraft(id);
   if (failed(d)) return d;
   const doc = structuredClone(d.workflow), commit = doc.nodes.find((n) => n.type === "output.commit");
-  if (commit) commit.config = { ...commit.config, policy: "separate_folder", folderMode: "one_folder", folder: out };
+  if (commit) commit.config = out === null ? { ...commit.config, policy: "separate_folder", folderMode: "next_to_library", folder: undefined }
+    : { ...commit.config, policy: "separate_folder", folderMode: "one_folder", folder: out };
   const s = await wf.saveDraft(id, doc, d.layout, d.etag);
   if (failed(s)) return s;
   const problem = s.validation.find((v) => v.severity === "error");

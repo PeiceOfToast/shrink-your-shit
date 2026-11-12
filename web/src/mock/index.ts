@@ -336,8 +336,11 @@ function workflowError(id: ID): Issue | null {
   return null;
 }
 // folderRefused: a workflow that saves new files inside the library's folder (or one holding it) would convert them again.
-function outputInside(flowId: ID, path: string): Issue | null {
-  const out = drafts[flowId]?.published?.nodes.find((n) => n.type === "output.commit")?.config.folder, p = trim(path);
+function outputInside(flowId: ID, path: string, name = ""): Issue | null {
+  const c = drafts[flowId]?.published?.nodes.find((n) => n.type === "output.commit")?.config, out = c?.folder, p = trim(path);
+  const parent = p.replace(/\/[^/]*$/, "") || "/";
+  if (c && (c.policy ?? "separate_folder") === "separate_folder" && (c.folderMode ?? "next_to_library") === "next_to_library" && parent === "/") // V5a jobs.NextToLibrary
+    return { code: "no_default_folder", message: "No folder for new files for " + name + " yet: / is the container's own disk. Pick a folder in the library's Output tab, or choose One folder for all. Nothing was changed." };
   if (typeof out !== "string" || !out) return null;
   const o = trim(out);
   return o === p || o.startsWith(p + "/") || p.startsWith(o + "/")
@@ -347,7 +350,7 @@ const linkWorkflows = (s: State) => { s.wf = s.wf.map((w) => ({ ...w, libraries:
 // POST /api/libraries {name, path, flowId}: 201 with the library, not started (nothing scanned or queued).
 export function addLibrary(name: string, path: string, flowId: ID): Answer<LibraryItem> {
   if (!name.trim()) return { error: { code: "invalid_name", message: "Give the library a name." } };
-  const e = pathError(path) ?? workflowError(flowId) ?? outputInside(flowId, path);
+  const e = pathError(path) ?? workflowError(flowId) ?? outputInside(flowId, path, name.trim());
   if (e) return { error: e };
   const l = library("l" + Date.now().toString(36), name.trim(), trim(path), 0, 0, 0);
   l.workflowId = flowId; l.workflowName = state.wf.find((w) => w.id === flowId)!.name; l.enabled = false;

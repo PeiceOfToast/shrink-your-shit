@@ -8,7 +8,7 @@ import { PageHead } from "../PageHead";
 import { useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
-import { addLibrary, getSettings, listLibraries, listWorkers, listWorkflows, patchSettings, scanLibrary, startSimpleWorkflow, startWorker } from "../libraryApi";
+import { addLibrary, getSettings, listLibraries, listWorkers, listWorkflows, patchSettings, scanLibrary, shrunk, startSimpleWorkflow, startWorker } from "../libraryApi";
 import { Link, navigate } from "../router";
 import { useData } from "../useData";
 import type { FirstRunSettings } from "../types/v1";
@@ -75,15 +75,20 @@ function StepLibrary({ kept, onDone, taken }: { kept: Kept | null; onDone: (v: K
   );
 }
 
+// Design's registry words for "Where new files go" (SCREENS V3, Save the result).
+const NEXT_HINT = "Each library gets a folder beside it, e.g. /media/movies (shrunk). Same disk, and it works when one workflow serves several libraries.";
+const ONE_HINT = "Every converted file goes into the folder below, in the same sub-folders as in its library.";
+
 function StepWorkflow({ kept, onDone }: { kept: Kept; onDone: () => void }) {
-  const [name, setName] = useState("Shrink videos"), [out, setOut] = useState(kept.path + " (shrunk)"), [error, setError] = useState(""), [busy, setBusy] = useState(false);
+  const [name, setName] = useState("Shrink videos"), [one, setOne] = useState(false), [out, setOut] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false);
   const [made, setMade] = useState<string>(); // the workflow an earlier try made: a retry reuses it
   const save = async () => {
     setError("");
     if (!name.trim()) return setError("Give the workflow a name.");
+    if (one && !out.trim()) return setError("Choose the folder for new files, or pick Next to each library.");
     setBusy(true);
     try {
-      const w = await ok(startSimpleWorkflow(name.trim(), out.trim(), made, kept.path), setError);
+      const w = await ok(startSimpleWorkflow(name.trim(), one ? out.trim() : null, made, kept.path), setError);
       if (!w) return;
       setMade(w.id);
       if (await ok(addLibrary(kept.name, kept.path, w.id), setError)) onDone();
@@ -101,9 +106,20 @@ function StepWorkflow({ kept, onDone }: { kept: Kept; onDone: () => void }) {
             <div style={{ minWidth: 0, flex: 1 }}><label htmlFor="s2-simple">Start Simple: Shrink videos</label>
               <div className="hint" style={{ fontSize: "var(--fs)" }}>{START_SIMPLE}</div></div></div>
         </fieldset>
-        <div className="field"><label htmlFor="s2-out">Where new files go</label>
-          <input id="s2-out" className="input mono" value={out} onChange={(e) => setOut(e.target.value)} aria-describedby="s2-out-hint" />
-          <span id="s2-out-hint" className="hint">A folder outside {kept.path}. You can change this and every other choice later.</span></div>
+        <fieldset className="stack choice" style={{ border: 0, padding: 0, margin: 0 }}>
+          <legend className="lab">Where new files go</legend>
+          <div className="radio"><input type="radio" id="s2-next" name="where" checked={!one} onChange={() => setOne(false)} />
+            <div style={{ minWidth: 0, flex: 1 }}><label htmlFor="s2-next">Next to each library</label>
+              <div className="hint">{NEXT_HINT}</div>
+              {!one && <div className="mono sm" style={{ overflowWrap: "anywhere" }}>{kept.path} → {shrunk(kept.path)}</div>}</div></div>
+          <div className="radio"><input type="radio" id="s2-one" name="where" checked={one} onChange={() => setOne(true)} />
+            <div style={{ minWidth: 0, flex: 1 }}><label htmlFor="s2-one">One folder for all</label>
+              <div className="hint">{ONE_HINT}</div></div></div>
+          {one && <div className="field"><label htmlFor="s2-out">Folder for new files</label>
+            <input id="s2-out" className="input mono" value={out} placeholder="/media/shrunk" onChange={(e) => setOut(e.target.value)} aria-describedby="s2-out-hint" />
+            <span id="s2-out-hint" className="hint">A folder outside {kept.path}.</span></div>}
+          <span className="hint">Your originals stay where they are. You can change this and every other choice later.</span>
+        </fieldset>
         {error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{error}</span></p>}
         <div className="row"><button className="btn primary" type="submit" disabled={busy}>{busy ? "Saving..." : "Save and use it"}</button></div>
       </form>
