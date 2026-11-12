@@ -11,7 +11,7 @@ import { onLive } from "../live";
 import { Empty, PageHead } from "../PageHead";
 import { navigate, useSearch } from "../router";
 import { useData } from "../useData";
-import type { JobAction, JobDetail, JobItem, JobProgressEvent, JobState, Probe, Tab } from "../types/jobs";
+import type { JobAction, JobDetail, JobItem, JobProgressEvent, JobState, Probe, Tab, Pin } from "../types/jobs";
 
 const TABS: [Tab, string][] = [["waiting", "Waiting"], ["running", "Running"], ["completed", "Done"], ["skipped", "Skipped"], ["failed", "Failed"]];
 // Spec states in words (SCREENS V6); a cancelled file lists under Skipped and reads "Cancelled".
@@ -46,7 +46,7 @@ function Detail({ j }: { j: JobItem }) {
 export function Jobs() {
   const search = new URLSearchParams(useSearch());
   const tab = (TABS.find(([t]) => t === search.get("tab"))?.[0] ?? "waiting") as Tab, open = search.get("job");
-  const [q, setQ] = useState(""), [selecting, setSelecting] = useState(false), [sel, setSel] = useState<string[]>([]), [said, setSaid] = useState(""), [prio, setPrio] = useState("10");
+  const [q, setQ] = useState(""), [selecting, setSelecting] = useState(false), [sel, setSel] = useState<string[]>([]), [said, setSaid] = useState(""), [prio, setPrio] = useState<Pin | "none">("first");
   // each answer remembers its tab and search, so a tab switch never shows the last tab's rows while it loads
   const page = useData(() => listJobs(tab, q).then((r) => (failed(r) ? r : { ...r, for: tab + "|" + q })), [tab, q], 15000);
   const [live, setLive] = useState<Record<string, JobProgressEvent["progress"]>>({});
@@ -68,11 +68,11 @@ export function Jobs() {
   const picked = items.filter((j) => sel.includes(j.id)), none = !picked.length;
   const run = async (a: JobAction) => {
     if (a === "cancel" && !window.confirm("Cancel " + plural(picked.length, "file", "files") + "? The files stay as they are. Nothing is deleted.")) return;
-    const r = await act(jobAction(a, picked.map((j) => j.id), a === "reprioritize" ? Number(prio) : undefined), setSaid);
+    const r = await act(jobAction(a, picked.map((j) => j.id), a === "reprioritize" ? prio : undefined), setSaid);
     if (!r) return;
     const bad = r.results.filter((x) => !x.ok), n = r.results.length - bad.length;
     // design (SCREENS V6): say where the files went, not just that they changed
-    const where = a === "reprioritize" ? (Number(prio) > 0 ? " moved to the front of the queue." : Number(prio) < 0 ? " moved to the back of the queue." : " put back in their normal place in the queue.") : " changed.";
+    const where = a === "reprioritize" ? (prio === "first" ? " moved to the front of the queue." : prio === "last" ? " moved to the back of the queue." : " put back in their normal place in the queue.") : " changed.";
     setSaid(plural(n, "file", "files") + where + (bad.length ? " Not changed: " + bad.map((x) => (items.find((j) => j.id === x.id)?.name ?? x.id) + ": " + x.message).join(" ") : ""));
     setSel([]); page.reload();
   };
@@ -81,7 +81,7 @@ export function Jobs() {
     <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("requeue")}><Icon id="i-arrow-r" />Put back in queue</button>
     <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("cancel")}><Icon id="i-stop" />Cancel</button>
     {tab === "waiting" && <span className="row nw" style={{ gap: 4 }}>
-      <select className="input sm" aria-label="Priority" value={prio} onChange={(e) => setPrio(e.target.value)}><option value="10">First</option><option value="0">Normal</option><option value="-10">Last</option></select>
+      <select className="input sm" aria-label="Priority" value={prio} onChange={(e) => setPrio(e.target.value as Pin | "none")}><option value="first">First</option><option value="none">Normal</option><option value="last">Last</option></select>
       <button className="btn sm ghost" type="button" disabled={none} onClick={() => run("reprioritize")}>Change priority</button></span>}
   </>;
   return (
@@ -113,7 +113,7 @@ export function Jobs() {
               {tab === "waiting" && <td className="posc" title={j.position != null ? "Place " + j.position + " in the queue" : "Not taken now"}>{j.position ?? "–"}</td>}
               <td className="idc"><a className="ttl" href={"/next/jobs?tab=" + tab + "&job=" + encodeURIComponent(j.id)} data-job={j.id} title={j.path}
                 onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); go(tab, j.id); } }}>{j.name}</a>
-                {j.priority != null && j.priority !== 0 && <span className="mchip prio">{j.priority > 0 ? "First" : "Last"}</span>}
+                {j.pin && <span className="mchip prio">{j.pin === "first" ? "First" : "Last"}</span>}
                 <span className="sub">{[j.library, j.folder !== "." && j.folder, [j.codec, j.resolution].filter(Boolean).join(" ")].filter(Boolean).join(" · ")}</span>
                 <span className="sub phone">{j.progress ? Math.round(j.progress.percent ?? j.progress.workflowPercent) + "% · " + j.progress.stage : j.state === "completed" ? saved(j.beforeBytes, j.afterBytes) : reasonText(j) || j.library}</span></td>
               <td className="stc"><Pill j={j} /></td>

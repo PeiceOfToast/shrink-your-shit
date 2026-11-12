@@ -19,7 +19,8 @@ export interface JobItem {
   bytes: number; codec: string | null; resolution: string | null; durationSec: number | null;
   // waiting / retrying / skipped
   attempts?: number; retryAt?: Time | null; status?: string; detail?: string | null;
-  priority?: number | null; // #134: on every job row (null for a scan skip); > 0 First, < 0 Last
+  priority?: number | null; // #143: the job's place among the unpinned (null for a scan skip)
+  pin?: Pin | null;          // #143: a single file put first or last (Jobs' Change priority); wins over library priority
   position?: number | null; // #134, Waiting tab: place in the queue (1: taken next); null when it isn't taken now
   reason?: Reason | null; skippedId?: ID; // #130: {code, message} on every row (code for icon/colour; show the message)
   // running
@@ -42,8 +43,9 @@ export interface JobDetail {
 export interface Probe { container?: string; videoCodec?: string; bitrateKbps?: number; durationSec?: number; sizeBytes?: number;
   streams?: { index: number; type: string; codec: string; Width?: number; Height?: number; channels?: number; channelLayout?: string; language?: string }[] }
 
-// POST /api/v2/jobs/actions {action, ids, priority?} -> {results: [{id, ok, code?, message?}]}
+// POST /api/v2/jobs/actions {action, ids, pin?} -> {results: [{id, ok, code?, message?}]}
 export type JobAction = "retry" | "requeue" | "cancel" | "reprioritize";
+export type Pin = "first" | "last"; // POST actions {action: reprioritize, pin: first | last | none}
 export interface ActionResult { id: ID; ok: boolean; code?: string; message?: string }
 
 // GET /api/v2/events (SSE): hello/resync {seq} (with id since #122), job.state, job.progress, processing.*.

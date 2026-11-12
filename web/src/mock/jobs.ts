@@ -30,7 +30,8 @@ export function mockJobs(tab: Tab, q: string): JobsPage {
   const counts = Object.fromEntries((Object.keys(TAB) as Tab[]).map((t) => [t, items.filter((j) => tabOf(j.state) === t).length])) as Record<Tab, number>;
   let rows = items.filter((j) => tabOf(j.state) === tab && (!q || j.name.toLowerCase().includes(q.toLowerCase())));
   if (tab === "waiting") { // as the server with sort=queue (#134): taken-now files by priority, then age; a retry waiting for its time has no place
-    const now = rows.filter((j) => j.state === "queued").sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+    const rank = (j: JobItem) => (j.pin === "first" ? 2 : j.pin === "last" ? 0 : 1); // #143: pinned first, then by priority, pinned last at the end
+    const now = rows.filter((j) => j.state === "queued").sort((a, b) => rank(b) - rank(a) || (b.priority ?? 0) - (a.priority ?? 0));
     rows = [...now.map((j, i) => ({ ...j, position: i + 1 })), ...rows.filter((j) => j.state !== "queued").map((j) => ({ ...j, position: null }))];
   }
   return { items: rows, total: rows.length, counts };
@@ -58,7 +59,7 @@ export function mockJob(id: string): JobDetail | null {
       after: j.state === "completed" ? { container: "matroska,webm", videoCodec: "hevc", bitrateKbps: 5300, durationSec: 7200, sizeBytes: j.afterBytes, streams: [{ index: 0, type: "video", codec: "hevc", Width: 1920, Height: 1080 }, { index: 1, type: "audio", codec: "aac", channels: 2, channelLayout: "stereo" }] } : null },
   };
 }
-export function mockAction(action: JobAction, ids: string[], priority?: number): { results: ActionResult[] } {
+export function mockAction(action: JobAction, ids: string[], pin?: "first" | "last" | "none"): { results: ActionResult[] } {
   const results = ids.map((id): ActionResult => {
     const j = items.find((x) => x.id === id);
     if (!j) return { id, ok: false, code: "not_found", message: "There is no such job." };
@@ -78,7 +79,7 @@ export function mockAction(action: JobAction, ids: string[], priority?: number):
       items = items.map((x) => (x === j ? { ...x, id: x.id.replace("skip-", "9"), origin: "job", state: "queued", subState: "waiting", detail: null, reason: null } : x)); return { id, ok: true };
     }
     if (j.state !== "queued") return { id, ok: false, code: "not_waiting", message: "Only a waiting job can be moved in the queue." };
-    items = items.map((x) => (x === j ? { ...x, priority: priority ?? 0 } : x)); return { id, ok: true };
+    items = items.map((x) => (x === j ? { ...x, pin: pin === "none" ? null : pin } : x)); return { id, ok: true };
   });
   return { results };
 }
