@@ -101,3 +101,19 @@ func TestV1ReadsV2Folders(t *testing.T) {
 		t.Errorf("one folder: %d %s", code, body)
 	}
 }
+
+// User review 11-12 item 1: the old editor can't show VBR, so a VBR workflow is read-only there.
+func TestV1VBRIsReadOnly(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	s := rules.DefaultSelectors(3)
+	s.MaxBitrate, s.RateControl, s.VBRMaxKbps = "medium", "vbr", 6000
+	f, _ := st.AddFlow("VBR", s.Template())
+	path := "/api/flows/" + strconv.FormatInt(f.ID, 10) + "/setting"
+	if _, body, _ := do(t, nil, srv, call{method: "GET", path: path}); !strings.Contains(body, `"editableHere":false`) || !strings.Contains(body, "uses VBR") {
+		t.Errorf("%s", body)
+	}
+	body := `{"quality":3,"speed":"normal","format":"hevc","resolution":"keep","maxBitrate":"medium","audio":"stereo_aac","onlyMyLanguages":true,"subtitles":"keep_all","fileType":"mkv","afterConverting":"replace","ignore":[],"includeDolbyVision":false}`
+	if code, b, _ := do(t, nil, srv, call{method: "PUT", path: path, body: body, ctype: "application/json"}); code != 409 || errCode(b) != "edit_in_new_ui" {
+		t.Errorf("save: %d %s", code, b)
+	}
+}
