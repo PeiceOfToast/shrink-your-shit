@@ -114,7 +114,13 @@ function AddWorker({ workers, reload }: { workers: Worker[]; reload: () => void 
   useEffect(() => { if (joined) { setCame(joined); setP(null); } }, [joined?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const left = p ? Math.ceil((new Date(p.expiresAt).getTime() - now) / 60000) : 0, gone = !!p && left <= 0;
   // plain http has no clipboard API (not a secure context): select the text and copy it the old way
-  const copy = () => { const t = cmd.current; if (!t) return; t.select(); const ok = navigator.clipboard ? (navigator.clipboard.writeText(t.value), true) : document.execCommand("copy"); setSaid(ok ? "Command copied." : "Select the command and copy it."); };
+  // the clipboard API can be missing (plain http) or refused (permission): then the selected text is copied the old way
+  const copy = async () => {
+    const t = cmd.current; if (!t) return; t.select(); let ok = false;
+    try { if (navigator.clipboard) { await navigator.clipboard.writeText(t.value); ok = true; } } catch { /* refused: fall back */ }
+    if (!ok) { t.select(); ok = document.execCommand("copy"); }
+    setSaid(ok ? "Command copied." : "Select the command and copy it.");
+  };
   return <>
     <span className="addw"><button className="btn sm" type="button" aria-expanded={open} aria-controls={group} onClick={() => { if (open) return setOpen(false); setOpen(true); if (came || !p || gone) make(); }}><Icon id="i-plus" />Add a worker</button>
       {said && <span className="muted sm" role="status">{said}</span>}</span>
