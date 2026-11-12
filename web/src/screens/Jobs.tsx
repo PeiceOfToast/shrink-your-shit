@@ -19,9 +19,13 @@ const WORD: Record<JobState, string> = { queued: "Waiting", preparing: "Preparin
   completed: "Done", skipped: "Skipped", failed: "Failed", cancelled: "Cancelled", retry_wait: "Retry" };
 const PILL: Partial<Record<JobState, string>> = { preparing: "run", running: "run", validating: "run", committing: "run", completed: "ok", failed: "bad", retry_wait: "warn" };
 const ICON: Partial<Record<JobState, string>> = { completed: "i-check-c", failed: "i-x-c", skipped: "i-skip", cancelled: "i-stop", retry_wait: "i-clock", queued: "i-clock" };
-const words = (j: { state: JobState; retryAt?: string | null }) => (j.state === "retry_wait" && j.retryAt ? "Retry at " + clock(j.retryAt) : WORD[j.state]);
-function Pill({ j }: { j: { state: JobState; retryAt?: string | null } }) {
-  return <span className={"pill " + (PILL[j.state] ?? "")}><Icon id={ICON[j.state] ?? "i-play"} />{words(j)}</span>;
+// V5b: a waiting file whose library is paused (subState library_disabled) reads "Library paused" (design SCREENS V5);
+// it has no place in the queue, so its '#' is '–'.
+type PillJob = { state: JobState; retryAt?: string | null; subState?: string | null };
+const libPaused = (j: PillJob) => j.state === "queued" && j.subState === "library_disabled";
+const words = (j: PillJob) => (libPaused(j) ? "Library paused" : j.state === "retry_wait" && j.retryAt ? "Retry at " + clock(j.retryAt) : WORD[j.state]);
+function Pill({ j }: { j: PillJob }) {
+  return <span className={"pill " + (libPaused(j) ? "warn" : PILL[j.state] ?? "")}><Icon id={libPaused(j) ? "i-pause" : ICON[j.state] ?? "i-play"} />{words(j)}</span>;
 }
 const reasonText = (j: JobItem) => j.reason?.message ?? j.detail ?? ""; // #130: every row's reason is {code, message}
 const saved = (b?: number, a?: number) => {
