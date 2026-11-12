@@ -51,3 +51,51 @@ func TestSkippedByWorkerKeepsItsJob(t *testing.T) {
 		t.Errorf("%s", body)
 	}
 }
+
+// ui-shop 07:07Z: jobId is null only for a scan's own skip. A job the person stopped, waiting or
+// running, is listed under Skipped (cancelled) with its jobId, and its detail keeps its steps.
+func TestStoppedJobKeepsItsJob(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	waiting, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "a.mkv")})
+	st.AddStep(waiting, "found", true, "Found.")
+	if _, err := st.RequestStop(waiting); err != nil {
+		t.Fatal(err)
+	}
+	running, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "b.mkv")})
+	st.Claim("w")
+	st.AddStep(running, "found", true, "Found.")
+	st.RequestStop(running)
+	if err := st.UserStopped(running); err != nil { // its worker ends it
+		t.Fatal(err)
+	}
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs?tab=skipped"})
+	var l struct {
+		Items []struct {
+			Name, State string
+			JobID       *string
+		}
+	}
+	json.Unmarshal([]byte(body), &l)
+	want := map[string]int64{"a.mkv": waiting, "b.mkv": running}
+	if len(l.Items) != 2 {
+		t.Fatalf("%s", body)
+	}
+	for _, it := range l.Items {
+		if it.State != "cancelled" || it.JobID == nil || *it.JobID != strconv.FormatInt(want[it.Name], 10) {
+			t.Errorf("%+v in %s", it, body)
+		}
+	}
+	for _, id := range []int64{waiting, running} {
+		_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10)})
+		var d struct {
+			Removed bool
+			State   string
+			Steps   []struct{ Step string }
+		}
+		json.Unmarshal([]byte(body), &d)
+		if !d.Removed || d.State != "cancelled" || len(d.Steps) != 1 {
+			t.Errorf("job %d: %s", id, body)
+		}
+	}
+}
