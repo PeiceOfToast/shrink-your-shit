@@ -185,6 +185,9 @@ func settingRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 				cur = f.Template
 			}
 		}
+		if refusedHere(w, cur) {
+			return
+		}
 		t, ok := settingTemplate(w, store, body, cur)
 		if !ok {
 			return
@@ -252,6 +255,9 @@ func settingRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		}
 		var body map[string]json.RawMessage
 		if !readJSON(w, r, &body) {
+			return
+		}
+		if refusedHere(w, f.Template) {
 			return
 		}
 		if lv := f.Template.Level(); lv != "basic" && lv != "standard" {
@@ -415,10 +421,6 @@ func settingTemplate(w http.ResponseWriter, store *jobs.Store, body map[string]j
 	}
 	for k := range body {
 		if selectorFields[strings.ToLower(k)] {
-			if keepsNextToLibrary(body, cur) {
-				apiError(w, http.StatusConflict, "edit_in_new_ui", nextToLibraryHere)
-				return rules.Template{}, false
-			}
 			s, err := readSelectors(body, store.Languages())
 			var se *rules.SelectorError
 			if errors.As(err, &se) {
@@ -431,26 +433,6 @@ func settingTemplate(w http.ResponseWriter, store *jobs.Store, body map[string]j
 	// neither Basic nor Standard: quality is not a number
 	apiError(w, http.StatusBadRequest, "invalid_json", "The request body is not valid JSON.")
 	return rules.Template{}, false
-}
-
-// keepsNextToLibrary reports whether a Standard save from the old page (v1) would quietly lose cur's
-// "next to each library" (V5a, set through v2): v1 has no folderMode, so its editor sends "folder" with an
-// empty folder (or no choice for after converting at all). Choosing another place on purpose (replace,
-// beside, a folder) is a change it can make (ui-shop 11:59Z).
-func keepsNextToLibrary(body map[string]json.RawMessage, cur rules.Template) bool {
-	if cur.Selectors == nil || cur.Selectors.AfterConverting != "folder" || cur.Selectors.FolderMode != rules.NextToLibrary {
-		return false
-	}
-	var after, dir string
-	for k, v := range body {
-		switch strings.ToLower(k) {
-		case "afterconverting":
-			json.Unmarshal(v, &after)
-		case "outputdir":
-			json.Unmarshal(v, &dir)
-		}
-	}
-	return (after == "" || after == "folder") && strings.TrimSpace(dir) == ""
 }
 
 // readBasic reads a Basic (slider) save (S4): a body whose only choice besides quality is audio, with one
@@ -553,17 +535,28 @@ func withWarnings(store *jobs.Store, f jobs.Flow) map[string]any {
 
 // Why the old page's editors can't save a workflow; "" when they can.
 const (
-	nextToLibraryHere = "This workflow saves new files next to each library, which this page can't show. Edit it in the new UI. Nothing was changed."
+	nextToLibraryHere = "This workflow saves new files next to each library, which this page can't show. Edit it in the new UI."
 	branchesHere      = "This workflow has checks and paths this page can't show. Edit it in the new UI."
 	readOnlyHere      = "This flow can't be changed here: it was made by an earlier install or in a way these editors can't show."
 )
+
+// refusedHere answers 409 when the old page may not save over flow template t as it is stored now (a
+// shape only the new UI shows): whatever the body says, so a stale old page never overwrites it
+// (review ac8fde4 P2). The words are the GET's reason, with "Nothing was changed."
+func refusedHere(w http.ResponseWriter, t rules.Template) bool {
+	if code, msg := notEditableHere(t); code == "edit_in_new_ui" {
+		apiError(w, http.StatusConflict, code, msg+" Nothing was changed.")
+		return true
+	}
+	return false
+}
 
 func notEditableHere(t rules.Template) (code, message string) {
 	switch {
 	case t.Kind == rules.KindBranches:
 		return "edit_in_new_ui", branchesHere
 	case t.Selectors != nil && t.Selectors.AfterConverting == "folder" && t.Selectors.FolderMode == rules.NextToLibrary:
-		return "edit_in_new_ui", strings.TrimSuffix(nextToLibraryHere, " Nothing was changed.")
+		return "edit_in_new_ui", nextToLibraryHere
 	case t.Level() != "basic" && t.Level() != "standard":
 		return "flow_read_only", readOnlyHere
 	}
