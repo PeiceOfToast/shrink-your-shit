@@ -453,6 +453,9 @@ type Snapshot struct {
 	Plan   Plan         `json:"plan"`
 	Expect Expect       `json:"expect"`
 	Verify Verification `json:"verify"`
+	// Source is the original as probed when the job was planned: the job's "before", which a replace
+	// would otherwise lose (the original's name then holds the new file). Not part of the fingerprint.
+	Source *media.Info `json:"source,omitempty"`
 }
 
 // Verification are the program-wide settings that judge a result (the flags -min-ssim, -decode-check).

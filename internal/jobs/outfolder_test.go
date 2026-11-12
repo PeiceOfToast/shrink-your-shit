@@ -23,20 +23,20 @@ func TestNextToLibrary(t *testing.T) {
 	sameDisk = func(a, b string) bool { return false } // the library is a mount point
 	_, p := NextToLibrary("Movies", lib)
 	sameDisk = old
-	if want := "No folder for new files for Movies yet: " + parent + " is on a different disk. Pick a folder in the library's Output tab, or choose One folder for all."; p == nil || p.Code != NoDefaultFolder || p.Message != want {
+	if want := "No folder for new files for Movies yet: " + parent + " is on a different disk. Pick a folder in the library's Output tab, or choose One folder for all."; p == nil || p.Code != NoDefaultFolder || p.Message != want || p.Folder != parent || p.Reason != ReasonDifferentDisk {
 		t.Errorf("another disk: %+v", p)
 	}
 	root := string(filepath.Separator)
 	if runtime.GOOS == "windows" {
 		root = filepath.VolumeName(parent) + `\`
 	}
-	if _, p := NextToLibrary("Media", filepath.Join(root, "media")); p == nil || p.Message != "No folder for new files for Media yet: "+root+" is the container's own disk. Pick a folder in the library's Output tab, or choose One folder for all." {
+	if _, p := NextToLibrary("Media", filepath.Join(root, "media")); p == nil || p.Message != "No folder for new files for Media yet: "+root+" is the container's own disk. Pick a folder in the library's Output tab, or choose One folder for all." || p.Folder != root || p.Reason != ReasonContainerRoot {
 		t.Errorf("container root: %+v", p)
 	}
 	if runtime.GOOS != "windows" && os.Getuid() != 0 { // read-only folders can't be tested as root, or on Windows by mode
 		os.Chmod(parent, 0o555)
 		defer os.Chmod(parent, 0o755)
-		if _, p := NextToLibrary("Movies", lib); p == nil || p.Message != "No folder for new files for Movies yet: "+parent+" can't be written to. Pick a folder in the library's Output tab, or choose One folder for all." {
+		if _, p := NextToLibrary("Movies", lib); p == nil || p.Message != "No folder for new files for Movies yet: "+parent+" can't be written to. Pick a folder in the library's Output tab, or choose One folder for all." || p.Folder != parent || p.Reason != ReasonNotWritable {
 			t.Errorf("read-only parent: %+v", p)
 		}
 		os.Chmod(parent, 0o755)

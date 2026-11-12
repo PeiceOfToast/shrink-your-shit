@@ -4,6 +4,7 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -227,5 +228,73 @@ func TestV2JobsQueueOrder(t *testing.T) {
 		if code, _, _ := do(t, nil, srv, call{method: "GET", path: bad}); code != 400 {
 			t.Errorf("%s: %d", bad, code)
 		}
+	}
+}
+
+// Design 03:22Z: a job the person put First or Last keeps that place over any library priority; the
+// queue's positions are what Claim takes; "none" puts it back in its library's order.
+func TestV2JobsPinsOverLibraryPriority(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	a, _ := st.AddLibrary("A", t.TempDir(), rules.SliderTemplate(3), true)
+	b, _ := st.AddLibrary("B", t.TempDir(), rules.SliderTemplate(3), true)
+	add := func(l jobs.Library, name string) int64 {
+		id, _ := st.Enqueue(jobs.Job{Library: l.Path, LibraryID: l.ID, Path: filepath.Join(l.Path, name)})
+		return id
+	}
+	a1, a2, b1 := add(a, "a1.mkv"), add(a, "a2.mkv"), add(b, "b1.mkv")
+	act := func(body string) (int, string) {
+		code, out, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/jobs/actions", body: body, ctype: "application/json"})
+		return code, out
+	}
+	if code, out := act(`{"action":"reprioritize","ids":["` + strconv.FormatInt(a2, 10) + `"],"pin":"first"}`); code != 200 || strings.Contains(out, `"ok":false`) {
+		t.Fatalf("first %d %s", code, out)
+	}
+	act(`{"action":"reprioritize","ids":["` + strconv.FormatInt(a1, 10) + `"],"pin":"last"}`)
+	for _, lp := range []struct {
+		id int64
+		p  string
+	}{{a.ID, "50"}, {b.ID, "20"}} { // the pinned jobs' own library changes too: their pins stay
+		if code, out, _ := do(t, nil, srv, call{method: "PATCH", path: "/api/v2/libraries/" + strconv.FormatInt(lp.id, 10), body: `{"priority":` + lp.p + `}`, ctype: "application/json"}); code != 200 {
+			t.Fatalf("library priority %d %s", code, out)
+		}
+	}
+	type item struct {
+		Name     string
+		Position *int
+		Pin      *string
+		Priority *int
+	}
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs?tab=waiting&sort=queue"})
+	var l struct{ Items []item }
+	json.Unmarshal([]byte(body), &l)
+	var got []string
+	for _, it := range l.Items {
+		pin := "-"
+		if it.Pin != nil {
+			pin = *it.Pin
+		}
+		got = append(got, fmt.Sprintf("%s:%d:%s:%d", it.Name, *it.Position, pin, *it.Priority))
+	}
+	if strings.Join(got, " ") != "a2.mkv:1:first:50 b1.mkv:2:-:20 a1.mkv:3:last:50" {
+		t.Errorf("queue %q", got)
+	}
+	for _, want := range []int64{a2, b1, a1} { // what Claim takes
+		if j, err := st.Claim("w"); err != nil || j.ID != want {
+			t.Fatalf("claimed %d %v, want %d", j.ID, err, want)
+		}
+	}
+	// back in its library's order
+	c := add(a, "c.mkv")
+	act(`{"action":"reprioritize","ids":["` + strconv.FormatInt(c, 10) + `"],"pin":"first"}`)
+	act(`{"action":"reprioritize","ids":["` + strconv.FormatInt(c, 10) + `"],"pin":"none"}`)
+	if _, body := act(`{"action":"reprioritize","ids":["` + strconv.FormatInt(c, 10) + `"],"pin":"sideways"}`); !strings.Contains(body, "invalid") {
+		t.Errorf("a bad pin: %s", body)
+	}
+	if code, _ := act(`{"action":"reprioritize","ids":["` + strconv.FormatInt(c, 10) + `"],"priority":5000}`); code != 400 {
+		t.Errorf("a priority in the pins' range: %d", code)
+	}
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs?tab=waiting&sort=queue"})
+	if !strings.Contains(body, `"pin":null`) {
+		t.Errorf("unpinned %s", body)
 	}
 }

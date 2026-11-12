@@ -668,6 +668,54 @@ func TestOldDoneJobsOwnTheirOutputs(t *testing.T) {
 	}
 }
 
+// V5c: a converted file's original left where it was is marked gone once a whole pass doesn't find it
+// and it really isn't there; one the walk didn't see but that is there (an unreadable folder) is not,
+// and a library not walked in the pass (scanTargets leaves paused ones out) is left alone.
+func TestOriginalsLeftInPlaceAreMarkedGone(t *testing.T) {
+	s, st, lib, _ := setup(t, hevcBig)
+	libs, _ := st.Libraries()
+	paused, _ := st.AddLibrary("Paused", t.TempDir(), rules.SliderTemplate(3), true)
+	done := func(l jobs.Library, name string) (int64, string) {
+		p := filepath.Join(l.Path, name)
+		os.WriteFile(p, make([]byte, 1000), 0o644) // the size the job records
+		id, err := st.Enqueue(jobs.Job{Library: l.Path, LibraryID: l.ID, Path: p, SizeBefore: 1000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.Claim("w")
+		st.Complete(id, p[:len(p)-4]+".hevc.mkv", 400) // beside: the original stays
+		return id, p
+	}
+	kept, _ := done(libs[0], "kept.mkv")
+	gone, gonePath := done(libs[0], "gone.mkv")
+	_, changedPath := done(libs[0], "changed.mkv")
+	_, pausedPath := done(paused, "p.mkv")
+	hidden := filepath.Join(t.TempDir(), "hidden.mkv") // unseen by the walk, but there
+	os.WriteFile(hidden, make([]byte, 1000), 0o644)
+	h, _ := st.Enqueue(jobs.Job{Library: libs[0].Path, LibraryID: libs[0].ID, Path: hidden, SizeBefore: 1000})
+	st.Claim("w")
+	st.Complete(h, hidden+".hevc.mkv", 400)
+	st.StopLibrary(paused.ID)
+	os.Remove(gonePath)
+	os.WriteFile(changedPath, []byte("another file now"), 0o644) // changed, not gone: its saving counts nowhere
+	os.Remove(pausedPath)
+	// walk the library as the server does: at its stored path (links resolved, as the jobs' paths are),
+	// not setup's raw temp path, which differs on macOS (/var is /private/var) and Windows (CI 02:09Z)
+	tmpl := rules.LegacyTemplate(rules.Default(), "replace")
+	s.Targets = func() ([]Target, error) {
+		return []Target{{LibraryID: libs[0].ID, Path: libs[0].Path, Template: tmpl}}, nil
+	}
+	s.ScanOnce(context.Background())
+	c, _ := st.Counts()
+	if c[libs[0].ID].FreedBytes != 600 || c[libs[0].ID].CouldFreeBytes != 1200 {
+		t.Errorf("walked library: freed %d could free %d, want 600 and 1200 (gone %d, kept %d)", c[libs[0].ID].FreedBytes, c[libs[0].ID].CouldFreeBytes, gone, kept)
+	}
+	if c[paused.ID].FreedBytes != 0 || c[paused.ID].CouldFreeBytes != 600 {
+		t.Errorf("paused library: freed %d could free %d, want 0 and 600", c[paused.ID].FreedBytes, c[paused.ID].CouldFreeBytes)
+	}
+	_ = lib
+}
+
 // Settings' scanEvery, applied without a restart: the next pass is due that long after the last one.
 func TestSetEveryRetimesTheNextScan(t *testing.T) {
 	s, _, _, _ := setup(t, hevcBig)
@@ -694,4 +742,98 @@ func TestSetEveryRetimesTheNextScan(t *testing.T) {
 	if next := time.Until(s.NextScan()); next > time.Second {
 		t.Errorf("next in %s after SetEvery(50ms)", next)
 	}
+}
+
+// Review ae6749e (P1 and its delta): an unmounted library disk (an empty mount point, on the parent's
+// disk) never makes its originals count as freed, however many passes; deleting all of a library's
+// originals does count, on the next pass (convert all, then clean up); and an original whose disk id
+// changed while it was there (a reboot, NFS, USB) still counts once deleted.
+func TestUnmountedDiskMarksNothingGone(t *testing.T) {
+	s, st, _, _ := setup(t, hevcBig)
+	libs, _ := st.Libraries()
+	lib := libs[0]
+	tmpl := rules.LegacyTemplate(rules.Default(), "replace")
+	s.Targets = func() ([]Target, error) { return []Target{{LibraryID: lib.ID, Path: lib.Path, Template: tmpl}}, nil }
+	done := func(name string) string {
+		p := filepath.Join(lib.Path, name)
+		os.WriteFile(p, make([]byte, 1000), 0o644)
+		id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: p, SizeBefore: 1000})
+		st.Claim("w")
+		st.Complete(id, p[:len(p)-4]+".hevc.mkv", 400) // beside: the original stays; its disk is recorded
+		return p
+	}
+	a, b := done("a.mkv"), done("b.mkv")
+	counts := func() (int64, int64) { c, _ := st.Counts(); return c[lib.ID].FreedBytes, c[lib.ID].CouldFreeBytes }
+	real := originalDisk
+	defer func() { originalDisk = real }()
+	// unmounted: the folder is empty, and on the parent's disk
+	originalDisk = func(p string) (string, bool) { return "parent-disk", true }
+	os.Remove(a)
+	os.Remove(b)
+	for i := 0; i < 3; i++ {
+		s.ScanOnce(context.Background())
+	}
+	if freed, could := counts(); freed != 0 || could != 1200 {
+		t.Fatalf("an unmounted library: freed %d could %d, want 0 and 1200", freed, could)
+	}
+	// mounted again, with another disk id (a reboot): seen there, the id is refreshed
+	originalDisk = func(p string) (string, bool) { return "disk-2", true }
+	os.WriteFile(a, make([]byte, 1000), 0o644)
+	os.WriteFile(b, make([]byte, 1000), 0o644)
+	s.ScanOnce(context.Background())
+	// all of the library's originals deleted: they count, on the next pass
+	os.Remove(a)
+	os.Remove(b)
+	s.ScanOnce(context.Background())
+	if freed, could := counts(); freed != 1200 || could != 0 {
+		t.Errorf("all originals deleted: freed %d could %d, want 1200 and 0", freed, could)
+	}
+}
+
+// Review ae6749e P2 (a): a sub-folder of the library on its own disk (common on a NAS) that is unmounted
+// never makes its originals count as removed, though the library's root still has videos; a real
+// deletion in a mounted sub-folder still counts, and so does a sub-folder deleted with its files.
+func TestNestedMountMarksNothingGone(t *testing.T) {
+	s, st, _, _ := setup(t, hevcBig)
+	libs, _ := st.Libraries()
+	lib := libs[0]
+	tmpl := rules.LegacyTemplate(rules.Default(), "replace")
+	s.Targets = func() ([]Target, error) { return []Target{{LibraryID: lib.ID, Path: lib.Path, Template: tmpl}}, nil }
+	done := func(rel string) string {
+		p := filepath.Join(lib.Path, rel)
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		os.WriteFile(p, make([]byte, 1000), 0o644)
+		id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: p, SizeBefore: 1000})
+		st.Claim("w")
+		st.Complete(id, p[:len(p)-4]+".hevc.mkv", 400) // beside; its folder's disk is recorded now
+		return p
+	}
+	done("root.mkv")
+	nested := done(filepath.Join("nas", "n.mkv"))
+	mounted := done(filepath.Join("local", "m.mkv"))
+	season := done(filepath.Join("season", "s.mkv"))
+	counts := func() (int64, int64) { c, _ := st.Counts(); return c[lib.ID].FreedBytes, c[lib.ID].CouldFreeBytes }
+	// "unmount" nas: its folder is empty and now on another disk
+	real := originalDisk
+	defer func() { originalDisk = real }()
+	originalDisk = func(p string) (string, bool) {
+		if strings.Contains(p, string(filepath.Separator)+"nas") {
+			return "another-disk", true
+		}
+		return real(p)
+	}
+	os.Remove(nested)
+	for i := 0; i < 3; i++ {
+		s.ScanOnce(context.Background())
+	}
+	if freed, could := counts(); freed != 0 || could != 2400 {
+		t.Fatalf("an unmounted sub-folder: freed %d could %d, want 0 and 2400", freed, could)
+	}
+	os.Remove(mounted)                              // a real deletion in a mounted sub-folder
+	os.RemoveAll(filepath.Join(lib.Path, "season")) // a whole season deleted
+	s.ScanOnce(context.Background())
+	if freed, could := counts(); freed != 1200 || could != 1200 {
+		t.Errorf("real deletions: freed %d could %d, want 1200 (m, s) and 1200 (root, nas)", freed, could)
+	}
+	_ = season
 }
