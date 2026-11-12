@@ -67,7 +67,8 @@ func TestWorkerByTokenUsesItsIndex(t *testing.T) {
 }
 
 // User review 11-12 item 2 (orch-lead 14:22Z): each worker's own flag is its only on/off state; the
-// switch for all sets every flag; today's pause carries over; a paired worker starts on.
+// switch for all sets every flag; today's pause carries over. A paired worker arrives on only if another
+// worker is on: pairing never starts processing by itself (orch-lead 17:58Z).
 func TestWorkersOnAndOff(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "t.db")
 	s, err := Open(p)
@@ -77,13 +78,21 @@ func TestWorkersOnAndOff(t *testing.T) {
 	if !s.Paused() || s.WorkerEnabled(LocalWorker) { // a new install starts stopped (S2), carried to the local worker
 		t.Fatalf("new install: paused %v, local on %v", s.Paused(), s.WorkerEnabled(LocalWorker))
 	}
+	pauseEvents := func() (n int) {
+		s.db.QueryRow(`SELECT COUNT(*) FROM events WHERE kind IN ('processing.paused','processing.resumed')`).Scan(&n)
+		return n
+	}
 	code, _, _ := s.NewPairing(time.Now())
 	rw, _, err := s.Pair(code, "Desktop", "1", 1, "", time.Now())
-	if err != nil || !s.WorkerEnabled(rw.ID) {
-		t.Fatalf("a paired worker starts on: %v %v", s.WorkerEnabled(rw.ID), err)
+	if err != nil || s.WorkerEnabled(rw.ID) || !s.Paused() || pauseEvents() != 0 {
+		t.Fatalf("paired while every worker is off: on %v, paused %v, events %d, %v", s.WorkerEnabled(rw.ID), s.Paused(), pauseEvents(), err)
 	}
-	if s.Paused() {
-		t.Error("one worker on: not paused")
+	if err := s.SetWorkerEnabled(rw.ID, true); err != nil || s.Paused() || pauseEvents() != 1 {
+		t.Errorf("started by the person: paused %v, events %d, %v", s.Paused(), pauseEvents(), err)
+	}
+	code, _, _ = s.NewPairing(time.Now())
+	if rw2, _, err := s.Pair(code, "Laptop", "1", 1, "", time.Now()); err != nil || !s.WorkerEnabled(rw2.ID) || pauseEvents() != 1 {
+		t.Errorf("paired while one is on: on %v, events %d, %v", s.WorkerEnabled(rw2.ID), pauseEvents(), err)
 	}
 	s.Enqueue(Job{Library: "/m", Path: "/m/a.mkv"})
 	if _, err := s.Claim("builtin"); err != ErrNoJob {
@@ -105,10 +114,8 @@ func TestWorkersOnAndOff(t *testing.T) {
 	if err := s.SetWorkerEnabled("w-none", false); err != ErrNotFound {
 		t.Errorf("no such worker: %v", err)
 	}
-	var events int
-	s.db.QueryRow(`SELECT COUNT(*) FROM events WHERE kind IN ('processing.paused','processing.resumed')`).Scan(&events)
-	if events != 3 { // resumed (paired), paused (all off), resumed (all on): not for the local one alone
-		t.Errorf("pause events %d", events)
+	if n := pauseEvents(); n != 3 { // resumed (started), paused (all off), resumed (all on): not for the local one alone
+		t.Errorf("pause events %d", n)
 	}
 	s.Close()
 	// an install paused before this version: every worker off
