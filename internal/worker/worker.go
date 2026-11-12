@@ -49,6 +49,10 @@ type Queue interface {
 	// OutputFolder is a library's folder for new files with "Next to each library" (V5a), or why it has
 	// none.
 	OutputFolder(libraryID int64, libPath string) (string, *jobs.FolderProblem, error)
+	// LeaseOf, RenewLease and HoldsLease: a running job's lease (V7a).
+	LeaseOf(id int64) (string, error)
+	RenewLease(id int64, lease string) (bool, error)
+	HoldsLease(id int64, lease string) (bool, error)
 	// FallbackOf is the path a job falls back to (a rules.Branch, JSON; "" none) (V6b).
 	FallbackOf(id int64) (string, error)
 	// FallBack puts a job back in the queue along another path; AddFailureStep records a failure (V6b).
@@ -87,10 +91,12 @@ type Worker struct {
 	verified media.Info
 	// failures: the running job's path's choices for when it doesn't work (V6b; under mu)
 	failures *rules.Failures
-	ID       string
-	Queue    Queue
-	Exec     media.Exec
-	FFmpeg   string
+	// lease: the running job's lease (V7a; under mu)
+	lease  string
+	ID     string
+	Queue  Queue
+	Exec   media.Exec
+	FFmpeg string
 	// FFprobe checks the result before it replaces anything.
 	FFprobe string
 	// Template returns the template of a job's library's flow, compiled per file into the job's Plan.
@@ -227,7 +233,12 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 	jobCtx, cancel := context.WithCancel(ctx)
 	w.current, w.cancelJob, w.stopped = job.ID, cancel, stopNone
 	w.failures = nil // this job's own, once its plan is made (V6b)
+	w.lease, _ = w.Queue.LeaseOf(job.ID)
+	lease := w.lease
 	w.mu.Unlock()
+	renewDone := make(chan struct{})
+	defer close(renewDone)
+	go w.renewLease(job.ID, lease, renewDone) // V7a: kept while it works, the probe and the checks too
 	w.jobf(job.ID, ": started")
 	if testHook != nil {
 		testHook("registered")
@@ -788,6 +799,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		if err := sourceUnchanged(job.Path, before, beforeState); err != nil {
 			return err
 		}
+		if err := w.stillHolds(job.ID); err != nil { // V7a: a worker that lost its lease never puts a file in place
+			return err
+		}
 		return stage.intact()
 	}
 	placed, err := w.installSubtitles(plan, job.ID, tmp, final)
@@ -1252,4 +1266,49 @@ func (w *Worker) applyFailure(job jobs.Job, err error, f *rules.Failure) (bool, 
 		return true, w.Queue.FallBack(job.ID, string(b), f.Fallback.Path, f.NodeID, f.Name+" didn't work: "+plain+" Trying the other path.")
 	}
 	return false, nil // stop
+}
+
+// LeaseRenewEvery is how often a worker renews its running job's lease (well inside jobs.LeaseFor).
+var LeaseRenewEvery = 10 * time.Second
+
+// renewLease renews job id's lease until done is closed (V7a).
+func (w *Worker) renewLease(id int64, lease string, done <-chan struct{}) {
+	if lease == "" {
+		return
+	}
+	t := time.NewTicker(LeaseRenewEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-t.C:
+			if held, err := w.Queue.RenewLease(id, lease); err == nil && !held {
+				w.jobf(id, ": this worker no longer holds the job (it was given back to the queue)")
+				return
+			}
+		}
+	}
+}
+
+// errLeaseLost: the job was taken back from this worker; nothing is put in place.
+var errLeaseLost = errors.New("the job's lease was lost")
+
+// stillHolds fails when this worker no longer holds job id's lease: it was put back in the queue (the
+// worker had stopped answering), so the worker must not put anything in place.
+func (w *Worker) stillHolds(id int64) error {
+	w.mu.Lock()
+	lease := w.lease
+	w.mu.Unlock()
+	if lease == "" {
+		return nil
+	}
+	held, err := w.Queue.HoldsLease(id, lease)
+	if err != nil {
+		return err
+	}
+	if !held {
+		return failed("This file was given back to the queue while this worker was busy, so nothing was put in place. The original was not touched.", errLeaseLost)
+	}
+	return nil
 }

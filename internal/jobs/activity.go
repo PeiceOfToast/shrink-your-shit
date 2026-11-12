@@ -536,8 +536,9 @@ const (
 	ReasonKeptOriginal  = "kept_original"  // a safety check refused the result; the original stays
 	ReasonRetryLater    = "retry_later"    // a failure that may pass, from before codes were kept (migration 23)
 	ReasonRemoved       = "removed"        // the job was removed (its library went, or a clean-up)
+	ReasonWorkerLost    = "worker_lost"    // its worker stopped answering (its lease ran out, V7a)
 )
 
 // JobReasonCodes are the codes a job's own reason can have (besides the skip codes and user_stopped).
 var JobReasonCodes = []string{ReasonConvertFailed, ReasonDiskFull, ReasonCannotRead, ReasonCannotWrite, ReasonStalled,
-	ReasonLowDiskSpace, ReasonKeptOriginal, ReasonRetryLater, ReasonRemoved, UserStoppedReason}
+	ReasonLowDiskSpace, ReasonKeptOriginal, ReasonRetryLater, ReasonRemoved, UserStoppedReason, ReasonWorkerLost}
