@@ -50,7 +50,9 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	// One UI (user decision 2026-11-12, manager row qitem-20261112190001): the single-page app is the whole interface,
 	// at /. Method-less "/" so the more specific /api/, /api/worker/v1/ and /healthz keep answering for themselves: the
 	// app never answers an API path. The old pages and their assets are gone (git history keeps them).
-	mux.Handle("/", appHandler(next.Files()))
+	// the old interface's pages move to their place in the app (ui-shop's URL map) inside this handler, by exact path:
+	// a router pattern for /libraries/ would make the router send /libraries to /libraries/ (a redirect loop)
+	mux.Handle("/", oldPagesOr(appHandler(next.Files())))
 	// the preview's address: /next/<path> moves to /<path> (bookmarks keep working), with its query
 	mux.HandleFunc("GET /next/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, withQuery("/"+strings.TrimPrefix(r.URL.Path, "/next/"), r), http.StatusMovedPermanently)
@@ -58,12 +60,6 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	mux.HandleFunc("GET /next", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, withQuery("/", r), http.StatusMovedPermanently)
 	})
-	// the old interface's pages move to their place in the app (ui-shop's old -> new URL map)
-	for old, to := range oldPages {
-		mux.HandleFunc("GET "+old+"{$}", func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, withQuery(to(r), r), http.StatusMovedPermanently)
-		})
-	}
 	api.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
 		list, err := store.List(200)
 		if err != nil {

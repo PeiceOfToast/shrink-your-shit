@@ -83,6 +83,18 @@ const notBuiltPage = `<!doctype html>
 </body></html>
 `
 
+// oldPagesOr answers an old page's exact address (with its trailing slash) with 301 to its place in the app, and
+// everything else with the app. (Router patterns for them would loop: see web.go.)
+func oldPagesOr(app http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if to, ok := oldPages[r.URL.Path]; ok && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+			http.Redirect(w, r, withQuery(to(r), r), http.StatusMovedPermanently)
+			return
+		}
+		app(w, r)
+	}
+}
+
 // withQuery keeps a request's query (the sign-in link's ?token=, a tab) on a redirect.
 func withQuery(to string, r *http.Request) string {
 	if r.URL.RawQuery == "" {

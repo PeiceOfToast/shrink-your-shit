@@ -108,9 +108,16 @@ func TestAppNotBuilt(t *testing.T) {
 func TestAppMounted(t *testing.T) {
 	srv, _, _, _ := libServer(t, false)
 	noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	for _, p := range []string{"/", "/?token=abc", "/jobs?tab=failed", "/workflows/12/graph"} {
-		if code, _, _ := do(t, nil, srv, call{method: "GET", path: p}); code != http.StatusOK && code != http.StatusServiceUnavailable {
-			t.Errorf("%s: %d, want the app", p, code)
+	// the app's own pages that share a name with an old page are the app, never a redirect (lead 19:11Z: a loop on
+	// /libraries, /workers, /settings when the old pages were router patterns)
+	for _, p := range []string{"/", "/?token=abc", "/jobs?tab=failed", "/workflows/12/graph", "/libraries", "/workers", "/settings", "/workflows", "/libraries/3", "/settings/about"} {
+		res, err := noFollow.Get(srv.URL + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusServiceUnavailable {
+			t.Errorf("%s: %d %q, want the app (no redirect)", p, res.StatusCode, res.Header.Get("Location"))
 		}
 	}
 	for from, to := range map[string]string{
