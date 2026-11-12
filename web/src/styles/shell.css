@@ -508,3 +508,4 @@ label.chk{cursor:pointer}
 .tbl.kvt tbody th{color:var(--text-2);font-weight:500;text-align:left}
 .jobs .prog{min-width:160px}
 @media (max-width:640px){.drawer{width:100vw;border-left:0}}
+.menu .pop{max-width:calc(100vw - 16px)}   /* never wider than the screen; Shell keeps it on the screen */

@@ -51,6 +51,23 @@ function ThemeMenu() {
 }
 
 export function Shell({ title, proto, children }: { title: string; proto: boolean; children: ReactNode }) {
+  // A menu's popup opens from its button's right edge; near the left edge of a phone that pushes it off the screen
+  // (review 308da3f P1). When any menu opens, keep its popup on the screen: from the left if it would start off it.
+  useEffect(() => {
+    const fit = (e: Event) => {
+      const d = e.target as HTMLDetailsElement;
+      if (!(d instanceof HTMLDetailsElement) || !d.open || !d.classList.contains("menu")) return;
+      const pop = d.querySelector<HTMLElement>(":scope > .pop");
+      if (!pop) return;
+      pop.style.left = pop.style.right = "";
+      const r = pop.getBoundingClientRect();
+      if (r.left < 8) { pop.style.right = "auto"; pop.style.left = "0"; }
+      const r2 = pop.getBoundingClientRect();
+      if (r2.right > innerWidth - 8) pop.style.left = Math.round(innerWidth - 8 - r2.right) + "px";
+    };
+    document.addEventListener("toggle", fit, true);
+    return () => document.removeEventListener("toggle", fit, true);
+  }, []);
   const [collapsed, setCollapsed] = useState(railCollapsed);
   const [navOpen, setNavOpen] = useState(false);
   const [palette, setPalette] = useState(false);
