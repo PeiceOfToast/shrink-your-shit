@@ -4,6 +4,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"runtime"
@@ -216,8 +217,8 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 		var in struct {
 			Name  *string `json:"name"`
 			Slots *struct {
-				CPU *int `json:"cpu"`
-				GPU *int `json:"gpu"`
+				CPU json.RawMessage `json:"cpu"` // read below: a non-number is invalid_setting, not invalid_json (review a118b1b)
+				GPU json.RawMessage `json:"gpu"`
 			} `json:"slots"`
 			Tags     *[]string `json:"tags"`
 			Pool     *string   `json:"pool"`
@@ -240,6 +241,24 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 			return
 		}
 		bad := func(msg string) { apiError(w, http.StatusBadRequest, "invalid_setting", msg+" Nothing was changed.") }
+		var cpu, gpu *int
+		if in.Slots != nil {
+			for _, f := range []struct {
+				raw  json.RawMessage
+				to   **int
+				what string
+			}{{in.Slots.CPU, &cpu, "Processor slots are a whole number from 1 to 8."}, {in.Slots.GPU, &gpu, "Graphics slots are a whole number from 0 to 8."}} {
+				if len(f.raw) == 0 || string(f.raw) == "null" {
+					continue
+				}
+				var n int
+				if json.Unmarshal(f.raw, &n) != nil {
+					bad(f.what)
+					return
+				}
+				*f.to = &n
+			}
+		}
 		if in.Name != nil {
 			name := strings.TrimSpace(*in.Name)
 			if name == "" || len([]rune(name)) > 60 {
@@ -248,12 +267,12 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 			}
 			cfg.Name = name
 		}
-		if in.Slots != nil && in.Slots.GPU != nil {
-			if n := *in.Slots.GPU; n < 0 || n > 8 {
+		if gpu != nil {
+			if n := *gpu; n < 0 || n > 8 {
 				bad("Graphics slots are a whole number from 0 to 8.")
 				return
 			}
-			cfg.GPUSlots = in.Slots.GPU
+			cfg.GPUSlots = gpu
 		}
 		if in.Tags != nil {
 			tags := []string{}
@@ -275,8 +294,8 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 			}
 		}
 		saveSettings := false
-		if in.Slots != nil && in.Slots.CPU != nil {
-			s.ParallelJobs, saveSettings = *in.Slots.CPU, true // the pool follows it live
+		if cpu != nil {
+			s.ParallelJobs, saveSettings = *cpu, true // the pool follows it live
 		}
 		if in.Schedule != nil { // quiet hours (v1's); {"from":"","to":""} clears them
 			s.QuietHours.From, s.QuietHours.To, saveSettings = in.Schedule.From, in.Schedule.To, true
@@ -313,6 +332,13 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 		case "stop": // the running files go back to the queue, originals untouched (v1's "Stop now")
 			if err = v.store.SetPaused(true); err == nil && v.eng.PauseNow != nil {
 				v.eng.PauseNow()
+				// the workers put their files back a moment later: answer once they have (at most 2 s), so
+				// the answer says paused, not draining (review a118b1b)
+				for end := time.Now().Add(2 * time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
+					if working, werr := v.store.WorkingJobs(); werr != nil || len(working) == 0 {
+						break
+					}
+				}
 			}
 		default:
 			apiError(w, http.StatusNotFound, "not_found", "A worker can be started, stopped or drained.")
