@@ -3,7 +3,7 @@
 // the mock with ?mock=1. The library page has the General, Discovery and Output tabs; Filters and Statistics come later.
 // Not shown (CAN'T YET): description and tags, per-library scan settings, other file types.
 import { Empty, PageHead } from "../PageHead";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
 import { addLibrary, checkFolder, firstFiles, getLibraryV2, getSettings, listLibraries, listLibrariesV2, listWorkflows, patchLibrary, patchLibraryV2, removeLibrary, scanLibrary, setLibraryWorkflow, type WorkflowChoice } from "../libraryApi";
@@ -323,7 +323,8 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
 // what applies (waiting files, the file being converted, converted files); Keep it has the focus and Escape. After:
 // the Libraries list, with the line saying nothing in the folder changed. A 409 (busy) keeps the question, in its words.
 function RemoveSection({ l, v }: { l: LibraryItem; v: Library }) {
-  const [ask, setAsk] = useState(false), [err, setErr] = useState(""), [busy, setBusy] = useState(false);
+  const [ask, setAsk] = useState(false), [err, setErr] = useState(""), [busy, setBusy] = useState(false), opener = useRef<HTMLButtonElement>(null);
+  const back = () => (setAsk(false), opener.current?.focus()); // Escape and Keep it: the focus goes back to the button that opened the question (review d2e81ef P3)
   const running = useData(() => (ask ? listJobs("running", "") : Promise.resolve(null)), [ask]);
   const conv = (running.data?.items ?? []).filter((j) => j.libraryId === l.id);
   const go = async () => {
@@ -340,8 +341,8 @@ function RemoveSection({ l, v }: { l: LibraryItem; v: Library }) {
       <div className="hd"><h2 id="rm-h">Remove this library</h2></div>
       <div className="bd stack">
         <p className="muted">Stops watching this folder. Nothing in it is changed or deleted.</p>
-        <div className="row"><button className="btn danger" type="button" aria-expanded={ask} onClick={() => (setErr(""), setAsk(!ask))}>Remove library...</button></div>
-        {ask && <div role="alertdialog" aria-labelledby="rm-q" aria-describedby="rm-d" className="stack" onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), setAsk(false))}
+        <div className="row"><button ref={opener} className="btn danger" type="button" aria-expanded={ask} onClick={() => (setErr(""), setAsk(!ask))}>Remove library...</button></div>
+        {ask && <div role="alertdialog" aria-labelledby="rm-q" aria-describedby="rm-d" className="stack" onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), back())}
           style={{ padding: 12, border: "1px solid var(--border-strong)", borderRadius: "var(--radius)", background: "var(--raised)" }}>
           <strong id="rm-q">Remove {l.name}?</strong>
           <div id="rm-d"><p style={{ margin: "0 0 6px" }}>Shrink Your Shit stops watching {l.path}. Nothing in the folder is changed or deleted.</p>
@@ -352,7 +353,7 @@ function RemoveSection({ l, v }: { l: LibraryItem; v: Library }) {
             </ul></div>
           {err && <p className="st bad" role="alert" style={{ whiteSpace: "normal" }}><Icon id="i-alert" /><span>{err}</span></p>}
           <div className="row"><button className="btn danger" type="button" disabled={busy} onClick={go}>{err ? "Try again" : "Remove library"}</button>
-            <button className="btn primary" type="button" autoFocus onClick={() => setAsk(false)}>Keep it</button></div>
+            <button className="btn primary" type="button" autoFocus onClick={back}>Keep it</button></div>
         </div>}
       </div>
     </section>
