@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -53,9 +54,16 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	// the old interface's pages move to their place in the app (ui-shop's URL map) inside this handler, by exact path:
 	// a router pattern for /libraries/ would make the router send /libraries to /libraries/ (a redirect loop)
 	mux.Handle("/", oldPagesOr(appHandler(next.Files())))
-	// the preview's address: /next/<path> moves to /<path> (bookmarks keep working), with its query
+	// the preview's address: /next/<path> moves to /<path> (bookmarks keep working), with its query. The target is
+	// always this site: /next/%2Fevil.example would be "//evil.example" (another site to a browser), so the rest is
+	// cleaned to one leading "/", and a backslash or control character (browsers read "/\x" as "//x") goes to "/"
 	mux.HandleFunc("GET /next/", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, withQuery("/"+strings.TrimPrefix(r.URL.Path, "/next/"), r), http.StatusMovedPermanently)
+		rest := strings.TrimPrefix(r.URL.Path, "/next/")
+		to := path.Clean("/" + rest)
+		if strings.IndexFunc(rest, func(c rune) bool { return c == '\\' || c < ' ' || c == 0x7f }) >= 0 {
+			to = "/"
+		}
+		http.Redirect(w, r, withQuery(to, r), http.StatusMovedPermanently)
 	})
 	mux.HandleFunc("GET /next", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, withQuery("/", r), http.StatusMovedPermanently)

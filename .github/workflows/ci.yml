@@ -9,8 +9,8 @@ permissions:
   contents: read
 
 jobs:
-  # Code the tests do not look at: the web page's JavaScript (a syntax error there passes go vet and go
-  # test, and shows the user a blank page) and Go formatting.
+  # Code the tests do not look at: Go formatting. (The name keeps "UI JavaScript" in case it is a required
+  # check; the UI is TypeScript in web/, typechecked when its build runs.)
   lint:
     name: lint (gofmt, UI JavaScript)
     runs-on: ubuntu-latest

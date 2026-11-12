@@ -122,6 +122,8 @@ func TestAppMounted(t *testing.T) {
 	}
 	for from, to := range map[string]string{
 		"/next": "/", "/next/": "/", "/next/jobs?tab=failed&job=7": "/jobs?tab=failed&job=7", "/next/signin?token=abc": "/signin?token=abc",
+		// never another site (review 0026b8d P2): %2F and %5C decode to "/" and "\\"
+		"/next/%2Fevil.example/x": "/evil.example/x", "/next/%2F%2Fevil.example": "/evil.example", "/next/%5Cevil.example/x": "/", "/next/%5C%5Cevil.example": "/", "/next/%09/evil.example": "/",
 		"/libraries/": "/libraries", "/settings/": "/settings/general", "/activity/": "/jobs", "/activity/?show=processing": "/jobs?tab=running", "/library/?id=3": "/libraries/3", "/library/?id=3&x=1": "/libraries/3?x=1", "/library/": "/libraries",
 		"/activity/failed/": "/jobs?tab=failed", "/flow/?id=12": "/workflows/12", "/settings/performance/?a=b": "/settings/processing?a=b",
 	} {
