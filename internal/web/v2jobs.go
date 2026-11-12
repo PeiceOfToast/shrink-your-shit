@@ -202,6 +202,16 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 // v2JobItem is a Files item in the contract's Job terms: its state (spec 7), sub-state and progress.
 func v2JobItem(store *jobs.Store, it map[string]any, row jobs.FileRow, card string) map[string]any {
 	it["origin"] = "job"
+	// reason: {code, message} | null, as every v2 reason (v1's item keeps the skip code as a string):
+	// a skip's code and words, or a failure's, kept original's or retry's (ui-shop 23:27Z)
+	switch {
+	case card == jobs.CardSkipped:
+		it["reason"] = map[string]string{"code": row.Reason, "message": it["detail"].(string)}
+	case row.ErrorCode != "" && (card == jobs.CardFailed || card == jobs.CardUnprocessed && row.RetryAt != ""):
+		it["reason"] = map[string]string{"code": row.ErrorCode, "message": row.Error}
+	default:
+		it["reason"] = nil
+	}
 	switch card {
 	case jobs.CardUnprocessed:
 		it["state"], it["subState"] = "queued", "waiting"
@@ -222,7 +232,7 @@ func v2JobItem(store *jobs.Store, it map[string]any, row jobs.FileRow, card stri
 		it["state"], it["subState"] = "failed", nil
 	case jobs.CardSkipped:
 		it["origin"], it["state"], it["subState"] = "scan", "skipped", nil
-		if it["reason"] == "user_stopped" {
+		if row.Reason == jobs.UserStoppedReason {
 			it["state"] = "cancelled"
 		}
 	}
