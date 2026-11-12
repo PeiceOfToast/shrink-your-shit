@@ -224,8 +224,10 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           </div>
           <p className="muted" role="status">{said}</p>
           {d.error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{d.error.message}</span></p>}
-          {j?.removed && <div className="note"><Icon id="i-info" /><div>This job was removed{j.reason ? ": " + j.reason.message : "."} It isn't waiting and won't run.</div></div>}
-          {reason && !j?.removed && <section><h3>Why</h3><p>{reason}</p></section>}
+          {/* review db7b1f1 P3: "removed" is the server's flag, not a person's word. Only a job removed with its library
+              gets a note; a job that ended as a skip shows its reason under Why like any other. */}
+          {j?.removed && j.reason?.code === "removed" ? <div className="note"><Icon id="i-info" /><div>Its library was removed, so this file isn't waiting and won't run.</div></div>
+            : reason && <section><h3>Why</h3><p>{reason}</p></section>}
           <section><h3>File</h3><dl className="kv">
             <dt>Source</dt><dd className="mono sm">{row?.path ?? j?.file?.path ?? "-"}</dd>
             {(j?.library || row) && <><dt>Library</dt><dd>{j?.library?.name ?? row?.library}</dd></>}
@@ -239,7 +241,9 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
               {j.events.length > 0 && <p className="sm muted">History: {j.events.map((e) => WORD[e.to] + " " + clock(e.at)).join(" → ")}</p>}
             </>}
           </section>}
-          {scan && <section><h3>Timeline</h3><p className="muted">This file was left out when its library was scanned, so it has no job and no steps.</p></section>}
+          {/* review db7b1f1 P2: the scan sentence only for a file a scan left out; a cancelled file whose job the server
+              doesn't send yet claims nothing about scans or steps */}
+          {scan && <section><h3>Timeline</h3><p className="muted">{state === "cancelled" ? "Cancelled." : "This file was left out when its library was scanned, so it has no job and no steps."}</p></section>}
           {!scan && <JobLog id={id} name={name} />}
           {/* #148: before is the original; null for an older job that replaced a file of the same name: said so, never blank */}
           {(before || after) && <section><h3>Result</h3><table className="tbl kvt"><thead><tr><th /><th>Before</th><th>After</th></tr></thead><tbody>
