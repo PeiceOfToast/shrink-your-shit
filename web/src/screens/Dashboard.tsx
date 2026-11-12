@@ -91,7 +91,7 @@ function MockDashboard() {
   const libName = (id: string) => s.libraries.find((l) => l.id === id)?.name ?? id;
   const v: View = {
     running: sum.activity.workersRunning > 0, workersRunning: sum.activity.workersRunning, offline: sum.badges.workersOffline, busy: s.workers.some((w) => w.currentJobIds.length > 0),
-    on: s.workers.filter((w) => w.status === "online" || w.status === "busy" || w.status === "draining").length, total: s.workers.length, finishing: s.workers.filter((w) => w.status === "draining").length,
+    on: s.workers.filter((w) => w.status === "online" || w.status === "busy").length, total: s.workers.length, finishing: s.workers.filter((w) => w.status === "draining").length,
     waiting: sum.activity.waiting, converting: sum.activity.converting, done24: sum.last24h.completed, failed24: sum.last24h.failed,
     success: sum.last24h.successRate, freed: sum.bytes.freed, soon: s.trash.bytes, could: sum.bytes.waitingToFree, // the sample's figures: its trash stands for the net "more", its waitingToFree for "could free"
     online: sum.workers.filter((w) => w.status === "online" || w.status === "busy" || w.status === "draining").length + " of " + sum.workers.length,
@@ -143,7 +143,7 @@ function RealDashboard() {
   const v: View = {
     running: ws ? going > 0 : s.activity.workersRunning && !s.processingPaused, workersRunning: ws ? going : null, offline: s.badges.workersOffline,
     busy: ws ? ws.some((w) => w.status === "busy" || w.currentJobIds.length > 0) : s.activity.converting > 0, // the heartbeat's status is live; the counts lag
-    on: ws?.filter((w) => w.status === "busy" || w.status === "online" || w.status === "draining").length ?? 0, total: ws?.length ?? 0, finishing: ws?.filter((w) => w.status === "draining").length ?? 0,
+    on: ws?.filter((w) => w.status === "busy" || w.status === "online").length ?? 0, total: ws?.length ?? 0, finishing: ws?.filter((w) => w.status === "draining").length ?? 0,
     waiting: s.activity.waiting, converting: s.activity.converting, done24: s.last24h.completed, failed24: s.last24h.failed, success: s.last24h.successRate,
     // V5c: "Could free" is couldFree (originals left in place); waitingToFree is the trash, the "Will be freed" line
     freed: s.bytes.freed, could: s.bytes.couldFree ?? 0, soon: s.bytes.waitingToFree, online: ws ? going + " of " + ws.length : null,

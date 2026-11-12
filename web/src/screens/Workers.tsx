@@ -74,7 +74,8 @@ function StopAsk({ w, onDone, onCancel }: { w: Worker; onDone: (m: string) => vo
 }
 
 // "Workers on" (user review 11-12 item 2, design 7.2): one switch for every worker, in the Dashboard's and the Workers
-// page's header. On while any worker is on (converting or ready), with how many: "Workers on · 1 of 3". ON starts every
+// page's header. On while any worker is on (converting or ready; a finishing worker is off), with how many: "Workers on ·
+// 1 of 3", or "Workers off · 1 finishing its file". ON (also while one finishes) starts every
 // worker that is off, with no question; OFF asks today's question once when a worker is converting (Stop after these
 // files = drain, or Stop now), else stops at once. The question takes its own row under the header.
 export function WorkersSwitch({ n, m, busy, finishing = 0, onSet }: { n: number; m: number; busy: boolean; finishing?: number; onSet: (a: "start" | "stop" | "drain") => void }) {
@@ -87,7 +88,8 @@ export function WorkersSwitch({ n, m, busy, finishing = 0, onSet }: { n: number;
   return <>
     <label className="sw"><input ref={sw} type="checkbox" role="switch" className="switch" checked={on} disabled={!m} aria-describedby={group + "-n"}
       onChange={() => (on ? (busy ? setAsking(!asking) : onSet("stop")) : onSet("start"))} />
-      <span><b>Workers on</b><span className="muted" id={group + "-n"}> · {n} of {m}{finishing > 0 ? " · " + finishing + " finishing" : ""}</span></span></label>
+      <span><b>{on ? "Workers on" : "Workers off"}</b><span className="muted" id={group + "-n"}>{on ? " · " + n + " of " + m + (finishing > 0 ? " · " + finishing + " finishing" : "")
+        : finishing > 0 ? " · " + finishing + (finishing === 1 ? " finishing its file" : " finishing their files") : " · 0 of " + m}</span></span></label>
     {asking && <div ref={box} className="swask" role="alertdialog" aria-label="Stop all workers?" aria-describedby={group + "-q"} onKeyDown={(e) => e.key === "Escape" && (e.preventDefault(), close())}>
       <fieldset className="stack choice" style={{ border: 0, padding: 0, margin: 0 }}>
         <legend className="lab" id={group + "-q"}>Stop all workers?</legend>
@@ -123,7 +125,8 @@ export function Workers() {
   const list = (ws.data ?? []).map(live);
   const done = (m: string) => (setSaid(m), ws.reload());
   // the "Workers on" switch: one call for every worker (#171)
-  const n = list.filter((w) => going(w) || w.status === "draining").length, fin = list.filter((w) => w.status === "draining").length; // review 32a8138 P3: finishing counts as on
+  // lead 16:57Z (design 7.2): a finishing worker shows OFF; the label says it's finishing; ON again starts every worker that isn't on
+  const n = list.filter(going).length, fin = list.filter((w) => w.status === "draining").length;
   const busyAny = list.some((w) => (going(w) || w.status === "draining") && w.currentJobIds.length > 0); // a finishing file is asked about too
   const set = async (a: "start" | "stop" | "drain") => {
     if (await act(allWorkers(a), setSaid)) setSaid(a === "start" ? "Workers started." : a === "stop" ? "Workers stopped." : "Workers finish their files, then stop.");
