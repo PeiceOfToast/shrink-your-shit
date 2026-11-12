@@ -330,8 +330,8 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 	var last time.Time
 	var gone error
 	stderr, err := media.Transcode(cctx, cv.Exec, cv.FFmpeg, snap.Plan.FFmpegArgs(src, out), l.Job.DurationSec, func(p media.Progress) {
-		if time.Since(last) < 5*time.Second {
-			return
+		if l.Job.DurationSec <= 0 || time.Since(last) < 5*time.Second {
+			return // no length: no percent to report, as before Transcode reported the position alone (#187)
 		}
 		last = time.Now()
 		if e := c.call(cctx, "leases/"+l.ID+"/progress", map[string]any{"percent": p.Percent, "stage": "converting"}, nil); leaseGone(e) {

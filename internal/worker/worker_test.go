@@ -123,6 +123,9 @@ type scenario struct {
 	srtBytes int             // the size the fake encoder gives an extracted .srt (0: a few bytes)
 }
 
+// scenarioDuration is the length a new scenario's job has on record (a test may set 0: unknown).
+var scenarioDuration = 100.0
+
 func newScenario(t *testing.T) *scenario { t.Helper(); return newScenarioNamed(t, "movie.mkv") }
 
 // newScenarioNamed is newScenario with the original named name (in the scenario's folder).
@@ -137,7 +140,7 @@ func newScenarioNamed(t *testing.T, name string) *scenario {
 	dir := t.TempDir()
 	src := filepath.Join(dir, name)
 	os.WriteFile(src, []byte("original-bytes"), 0o644)
-	id, _ := st.Enqueue(jobs.Job{Library: dir, Path: src, DurationSec: 100, SizeBefore: 14})
+	id, _ := st.Enqueue(jobs.Job{Library: dir, Path: src, DurationSec: scenarioDuration, SizeBefore: 14})
 	s := &scenario{
 		t: t, store: st, dir: dir, src: src, id: id,
 		srcSpec: sourceSpec(), outSpec: goodOutput(),

@@ -750,8 +750,17 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	} else {
 		stopWatch := w.watchStall(job.ID)
 		var tenths progressLines
+		at := -1.0 // the furthest position ffmpeg has reached
 		encErr, terr = media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
-			w.progressAt.Store(time.Now().UnixNano())
+			// only a position further on is progress: a stuck ffmpeg can keep reporting the same one (a
+			// damaged file, 21 min on a test run, never stopped), which mustn't hold off the stall stop
+			if p.OutTimeUS > at {
+				at = p.OutTimeUS
+				w.progressAt.Store(time.Now().UnixNano())
+			}
+			if job.DurationSec <= 0 {
+				return // no length: no percent to show
+			}
 			w.Queue.Progress(job.ID, p.Percent)
 			updateLive(job.ID, p)
 			if line := tenths.next(p); line != "" {
