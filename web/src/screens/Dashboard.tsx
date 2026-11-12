@@ -37,7 +37,7 @@ interface View {
   running: boolean; workersRunning: number | null; offline: number | null;
   busy: boolean;                  // a worker is converting now (live): Stop all asks first
   waiting: number; converting: number; done24: number; failed24: number; success: number | null; freed: number; could: number;
-  soon: number | null;            // "Will be freed": summary.bytes.waitingToFree (V5c); null: the trash's total
+  soon: number;                   // "N more by <date>": waitingToFree (V5c, net: original minus new). Never the trash's gross bytes
   online: string | null;          // the Workers tile: "2 of 3"
   active: Row[]; failures: Row[];
   workers: { id: string; name: string; sub: string; words: string; cls: string; icon: string; gone: boolean }[] | null;
@@ -90,7 +90,7 @@ function MockDashboard() {
   const v: View = {
     running: sum.activity.workersRunning > 0, workersRunning: sum.activity.workersRunning, offline: sum.badges.workersOffline, busy: s.workers.some((w) => w.currentJobIds.length > 0),
     waiting: sum.activity.waiting, converting: sum.activity.converting, done24: sum.last24h.completed, failed24: sum.last24h.failed,
-    success: sum.last24h.successRate, freed: sum.bytes.freed, soon: null, could: sum.bytes.waitingToFree, // the sample's "could free" (originals left in place); its trash is the "Will be freed" line
+    success: sum.last24h.successRate, freed: sum.bytes.freed, soon: s.trash.bytes, could: sum.bytes.waitingToFree, // the sample's figures: its trash stands for the net "more", its waitingToFree for "could free"
     online: sum.workers.filter((w) => w.status === "online" || w.status === "busy" || w.status === "draining").length + " of " + sum.workers.length,
     active: sum.activeJobs.map((j) => ({ id: j.id, name: j.file.name, sub: [j.library?.name, j.workflow.name, j.worker?.name].filter(Boolean).join(" · "), percent: j.progress?.percent ?? null,
       line: [((j.subState && STEP_WORD[j.subState]) || j.progress?.stage) + (j.currentStep ? " · step " + j.currentStep.index + " of " + j.currentStep.count : ""), j.progress?.fps != null && j.progress.fps + " fps", j.progress && elapsed(j.progress.elapsedS)].filter(Boolean).join(" · ") })),
@@ -170,7 +170,7 @@ function DashboardView({ v, trash, acts }: { v: View; trash?: { bytes: number; l
       : <button className="btn sm" type="button" onClick={acts.start}><Icon id="i-play" />Start all</button>}
     {v.libraries > 0 && <button className="btn sm ghost" type="button" onClick={acts.scan} disabled={v.scanning}><Icon id="i-refresh" />{v.scanning ? "Scanning..." : "Scan all libraries"}</button>}
   </>;
-  const soon = v.soon ?? trash?.bytes ?? 0; // the server's waitingToFree (net, as each library's) when it has one; the trash gives the date
+  const soon = v.soon, by = trash?.lastDeleteAt ? " by " + day(trash.lastDeleteAt) : ""; // the trash gives only the date (design 05:34Z)
   return (
     <div className="stack">
       <PageHead icon="i-dashboard" title="Dashboard">
@@ -196,13 +196,13 @@ function DashboardView({ v, trash, acts }: { v: View; trash?: { bytes: number; l
             <span className="l">Space saved <button className="btn icon ghost help" type="button" aria-label="About space saved" aria-expanded={why} onClick={() => setWhy(!why)}><Icon id="i-info" /></button></span>
             <span className="v">{bytes(v.freed)}</span>
             {/* design D1 (clean pass: one short line; the full words are under "?"): freed space is the big figure; never added */}
-            <span className="sub">{[soon > 0 && "+" + bytes(soon) + (trash?.lastDeleteAt ? " by " + day(trash.lastDeleteAt) : ""), v.could > 0 && "could free " + bytes(v.could)].filter(Boolean).join(" · ") || "Nothing waiting"}</span>
+            <span className="sub">{[soon > 0 && bytes(soon) + " more" + by, v.could > 0 && "could free " + bytes(v.could)].filter(Boolean).join(" · ") || "Nothing waiting"}</span>
           </div>
           <div className="card kpi"><span className="l">Success (24 h)</span><span className="v">{v.success == null ? "-" : (v.success * 100).toFixed(1) + "%"}</span></div>
           {v.online != null && <div className="card kpi"><span className="l">Workers</span><span className="v">{v.online}</span><span className="sub">online</span></div>}
         </div>
         {why && <p className="muted sm kpiwhy">
-          {bytes(v.freed)} is space already freed.{soon > 0 && " Will be freed: " + bytes(soon) + (trash?.lastDeleteAt ? " by " + day(trash.lastDeleteAt) : "") + ", when the kept originals are removed."}
+          {bytes(v.freed)} is space already freed.{soon > 0 && " Replaced originals are kept in the trash" + (trash?.lastDeleteAt ? " until " + day(trash.lastDeleteAt) : "") + ". When they're deleted, Space saved goes up by " + bytes(soon) + "."}
           {v.could > 0 && " Could free: " + bytes(v.could) + " if you remove the originals; nothing removes them automatically."} Updated when the library is scanned.</p>}
       </>}
 
@@ -247,7 +247,7 @@ function DashboardView({ v, trash, acts }: { v: View; trash?: { bytes: number; l
               const all = l.freed + l.could;
               return (
                 <li key={l.id} className="col">
-                  <div className="row nw"><span className="ttl sp">{l.name}</span><span className="sm">{l.freed ? bytes(l.freed) + " freed" : "Nothing freed yet"}{l.waiting > 0 && <span className="muted"> · {bytes(l.waiting)} will be freed</span>}{l.could > 0 && <span className="muted"> · could free {bytes(l.could)}</span>}</span></div>
+                  <div className="row nw"><span className="ttl sp">{l.name}</span><span className="sm">{l.freed ? bytes(l.freed) + " freed" : "Nothing freed yet"}{l.waiting > 0 && <span className="muted"> · {bytes(l.waiting) + " more" + by}</span>}{l.could > 0 && <span className="muted"> · could free {bytes(l.could)}</span>}</span></div>
                   <div className="bar thin ok" role="img" aria-label={all ? Math.round((100 * l.freed) / all) + "% of what this library could free" : "Nothing to free yet"}><i style={{ width: all ? (100 * l.freed) / all + "%" : "0%" }} /></div>
                 </li>);
             })}</ul>
