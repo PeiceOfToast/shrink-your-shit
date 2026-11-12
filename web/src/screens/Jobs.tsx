@@ -144,9 +144,9 @@ export function Jobs() {
 const fmtV = (p: Probe | null | undefined) => {
   if (!p) return null;
   const v = p.streams?.find((s) => s.type === "video"), a = p.streams?.filter((s) => s.type === "audio") ?? [];
-  return { video: [p.videoCodec?.toUpperCase().replace("H264", "H.264"), v?.Height ? v.Height + "p" : ""].filter(Boolean).join(" · "),
+  return { video: [p.videoCodec?.toUpperCase().replace("H264", "H.264"), v?.Height ? v.Height + "p" : ""].filter(Boolean).join(" · ") || "-",
     audio: a.map((x) => x.codec.toUpperCase() + (x.channelLayout ? " " + x.channelLayout : "")).join(", ") || "None",
-    bitrate: p.bitrateKbps ? count(p.bitrateKbps) + " kbps" : "", size: p.sizeBytes ? bytes(p.sizeBytes) : "" };
+    bitrate: p.bitrateKbps ? count(p.bitrateKbps) + " kbps" : "-", size: p.sizeBytes ? bytes(p.sizeBytes) : "-" };
 };
 
 // The job drawer (?job=<id>): right side, 520 px; a full-screen sheet on phones. Esc closes; focus returns to the row.
@@ -202,11 +202,12 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
             </>}
           </section>}
           {scan && <section><h3>Timeline</h3><p className="muted">This file was left out when its library was scanned, so it has no job and no steps.</p></section>}
-          {before && <section><h3>Result</h3><table className="tbl kvt"><thead><tr><th /><th>Before</th><th>After</th></tr></thead><tbody>
-            <tr><th>Video</th><td>{before.video}</td><td>{after?.video ?? "-"}</td></tr>
-            <tr><th>Audio</th><td>{before.audio}</td><td>{after?.audio ?? "-"}</td></tr>
-            <tr><th>Bitrate</th><td>{before.bitrate}</td><td>{after?.bitrate ?? "-"}</td></tr>
-            <tr><th>Size</th><td>{before.size}</td><td>{after?.size ?? "-"}</td></tr></tbody></table></section>}
+          {/* #148: before is the original; null for an older job that replaced a file of the same name: said so, never blank */}
+          {(before || after) && <section><h3>Result</h3><table className="tbl kvt"><thead><tr><th /><th>Before</th><th>After</th></tr></thead><tbody>
+            <tr><th>Video</th>{before ? <td>{before.video}</td> : <td rowSpan={4} className="muted">Not recorded for this job</td>}<td>{after?.video ?? "-"}</td></tr>
+            <tr><th>Audio</th>{before && <td>{before.audio}</td>}<td>{after?.audio ?? "-"}</td></tr>
+            <tr><th>Bitrate</th>{before && <td>{before.bitrate}</td>}<td>{after?.bitrate ?? "-"}</td></tr>
+            <tr><th>Size</th>{before && <td>{before.size}</td>}<td>{after?.size ?? "-"}</td></tr></tbody></table></section>}
         </div>
       </aside>
     </div>
