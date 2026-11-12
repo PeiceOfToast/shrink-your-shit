@@ -481,9 +481,10 @@ label.chk{cursor:pointer}
   .list .tbl .ttl{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 }
 @media (max-width:640px){
-  /* clean pass 2 (7.4, user item 3): a list row's second line wraps in full, never cut (a library's long workflow at
-     360 px takes 4 lines); the Dashboard's short lists keep 3 */
-  .list .tbl .sub.phone{display:block;white-space:normal;overflow-wrap:anywhere}
+  /* clean pass 2 (7.4, user item 3): a list row's second line wraps to up to 4 lines, so a library's long workflow
+     summary shows in full even at 360 px; a longer job reason stops there (the row opens its drawer with all of it).
+     The Dashboard's short lists keep 3 */
+  .list .tbl .sub.phone{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;overflow-wrap:anywhere}
   .plist .sub{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;overflow-wrap:anywhere}
   .plist .ttl.clamp2{-webkit-line-clamp:1}
   .plist .prog>.sm{display:none}
