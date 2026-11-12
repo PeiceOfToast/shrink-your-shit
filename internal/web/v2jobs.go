@@ -43,6 +43,18 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 		}
 		limit, offset := pageOf(r)
 		f := jobs.FileFilter{Show: card, Q: q.Get("q"), Limit: limit, Offset: offset}
+		switch q.Get("sort") { // queue: the Waiting tab in the order workers take files (design SCREENS V6)
+		case "":
+		case "queue":
+			if tab != "waiting" {
+				apiError(w, http.StatusBadRequest, "invalid", "sort=queue is for the waiting tab.")
+				return
+			}
+			f.QueueOrder = true
+		default:
+			apiError(w, http.StatusBadRequest, "invalid", "sort is queue, or left out.")
+			return
+		}
 		if lib := q.Get("libraryId"); lib != "" {
 			id, err := strconv.ParseInt(lib, 10, 64)
 			if err != nil || id <= 0 {
@@ -62,9 +74,27 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 			return
 		}
 		days := keepDays()
+		var positions map[int64]int
+		if tab == "waiting" { // each waiting job's place in the queue (1: taken next), over all of it; null when not taken now
+			ids := []int64{}
+			for _, row := range rows {
+				ids = append(ids, row.JobID)
+			}
+			if positions, err = store.QueuePositions(ids); err != nil {
+				serverError(w, err)
+				return
+			}
+		}
 		items := []map[string]any{}
 		for _, row := range rows {
-			items = append(items, v2JobItem(store, fileItem(store, libs, row, card, days), row, card))
+			it := v2JobItem(store, fileItem(store, libs, row, card, days), row, card)
+			if tab == "waiting" {
+				it["position"] = nil
+				if p, ok := positions[row.JobID]; ok {
+					it["position"] = p
+				}
+			}
+			items = append(items, it)
 		}
 		tabCounts := map[string]int{}
 		for t, c := range v2Tabs {
@@ -202,6 +232,7 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 // v2JobItem is a Files item in the contract's Job terms: its state (spec 7), sub-state and progress.
 func v2JobItem(store *jobs.Store, it map[string]any, row jobs.FileRow, card string) map[string]any {
 	it["origin"] = "job"
+	it["priority"] = row.Priority // ui-shop's First/Last chip reads it from the row
 	// reason: {code, message} | null, as every v2 reason (v1's item keeps the skip code as a string):
 	// a skip's code and words, or a failure's, kept original's or retry's (ui-shop 23:27Z)
 	switch {
@@ -231,7 +262,7 @@ func v2JobItem(store *jobs.Store, it map[string]any, row jobs.FileRow, card stri
 	case jobs.CardFailed:
 		it["state"], it["subState"] = "failed", nil
 	case jobs.CardSkipped:
-		it["origin"], it["state"], it["subState"] = "scan", "skipped", nil
+		it["origin"], it["state"], it["subState"], it["priority"] = "scan", "skipped", nil, nil // no job: no priority
 		if row.Reason == jobs.UserStoppedReason {
 			it["state"] = "cancelled"
 		}
