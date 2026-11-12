@@ -14,9 +14,14 @@ import (
 // V3c (UI-API-CONTRACT-v2.md, Shell and dashboard): the dashboard's summary in one call, and the two
 // pauses spec 7 keeps apart: processing (workers take nothing new; v1's queue pause) and intake (scans
 // queue nothing new). Both pauses write their event to the live stream's sequence.
-func v2Summary(api *http.ServeMux, store *jobs.Store) {
+func v2Summary(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 	api.HandleFunc("GET /api/v2/summary", func(w http.ResponseWriter, r *http.Request) {
 		_, seq, err := store.EventBounds() // first, so events after it reach a stream started from it
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		local, err := wv.local(r.Context()) // V4a: the one worker there is today
 		if err != nil {
 			serverError(w, err)
 			return
@@ -79,13 +84,13 @@ func v2Summary(api *http.ServeMux, store *jobs.Store) {
 		}
 		writeJSON(w, map[string]any{
 			"seq":       seq,
-			"badges":    map[string]any{"failed24h": failed, "workersOffline": nil, "pluginUpdates": 0}, // workersOffline: V4
+			"badges":    map[string]any{"failed24h": failed, "workersOffline": 0, "pluginUpdates": 0}, // the local worker is never offline
 			"activity":  map[string]any{"converting": a.WorkingFiles, "waiting": a.WaitingFiles, "workersRunning": workersRunning(store)},
 			"jobCounts": jobCounts,
 			"last24h":   map[string]any{"completed": done, "failed": failed, "skipped": ends["skipped"], "successRate": rate},
 			"bytes": map[string]any{"freed": a.FreedBytes, "waitingToFree": a.WaitingBytes,
 				"freedLast7d": nil, "perLibrary": nil}, // CAN'T YET: freed bytes aren't dated or split per library yet
-			"workers":          nil, // CAN'T YET: V4's worker registry
+			"workers":          []any{local},
 			"activeJobs":       active,
 			"recentFailures":   failures,
 			"throughput":       hours,

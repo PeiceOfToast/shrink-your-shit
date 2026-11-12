@@ -22,12 +22,13 @@ import (
 var (
 	eventPoll      = 250 * time.Millisecond
 	eventKeepalive = 15 * time.Second
-	eventProgress  = time.Second // job.progress at most this often per job (contract), only when it changed
+	eventProgress  = time.Second     // job.progress at most this often per job (contract), only when it changed
+	eventHeartbeat = 5 * time.Second // worker.heartbeat (V4a)
 )
 
 const eventReplayMax = 10000 // a longer gap: resync instead of replaying it
 
-func v2EventStream(api *http.ServeMux, store *jobs.Store) {
+func v2EventStream(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 	api.HandleFunc("GET /api/v2/events", func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
 		if !ok {
@@ -64,9 +65,11 @@ func v2EventStream(api *http.ServeMux, store *jobs.Store) {
 		flusher.Flush()
 
 		poll, keep, prog := time.NewTicker(eventPoll), time.NewTicker(eventKeepalive), time.NewTicker(eventProgress)
+		beat := time.NewTicker(eventHeartbeat)
 		defer poll.Stop()
 		defer keep.Stop()
 		defer prog.Stop()
+		defer beat.Stop()
 		sent := map[int64]string{} // what each running job's last progress message said
 		for {
 			select {
@@ -89,6 +92,12 @@ func v2EventStream(api *http.ServeMux, store *jobs.Store) {
 			case <-keep.C:
 				fmt.Fprint(w, ": keepalive\n\n")
 				flusher.Flush()
+			case <-beat.C: // V4a: the worker is there, with its slots (no id: not replayed)
+				if wk, err := wv.local(r.Context()); err == nil {
+					send(w, -1, "worker.heartbeat", map[string]any{"type": "worker.heartbeat", "workerId": wk["id"], "at": wk["lastHeartbeatAt"],
+						"status": wk["status"], "slots": wk["slots"], "live": wk["live"]})
+					flusher.Flush()
+				}
 			case <-poll.C:
 				evs, err := store.EventsAfter(last, 500)
 				if err != nil {

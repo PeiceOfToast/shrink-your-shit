@@ -317,6 +317,11 @@ END;
 UPDATE events SET data = json_object('message', 'This job was removed from the list.') WHERE kind = 'job' AND reason = 'removed' AND data IS NULL;
 UPDATE events SET data = json_object('message', 'You stopped this file. It is left as it is until you press Convert again.')
   WHERE kind = 'job' AND reason = 'user_stopped' AND data IS NULL;`},
+	// V4a (workers): what the person sets on a worker. The local one is "local"; remote ones come in V7.
+	// Its processor slots are Settings' parallelJobs; gpu_slots NULL: the default (1 with a working
+	// hardware encoder, else 0).
+	{24, "workers", `
+CREATE TABLE workers (id TEXT PRIMARY KEY, name TEXT NOT NULL, tags TEXT NOT NULL DEFAULT '[]', pool TEXT, gpu_slots INTEGER);`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone
