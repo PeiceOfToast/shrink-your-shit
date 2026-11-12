@@ -121,10 +121,16 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 				apiError(w, http.StatusNotFound, "not_found", "There is no such job.")
 				return
 			}
-			// its row went when it was skipped or stopped (as before V2); its history stays
+			// its row went when it was skipped or stopped (as before V2); its history stays, and a job its
+			// worker skipped keeps its steps (and log) and tries too, while its file's record names it (V6 review)
 			last := events[len(events)-1]
+			steps, err := store.Steps(id)
+			if err != nil {
+				serverError(w, err)
+				return
+			}
 			writeJSON(w, map[string]any{"id": strconv.FormatInt(id, 10), "state": v2State(last.To, nil, nil), "reason": reasonOf(last),
-				"events": v2Events(events), "steps": []any{}, "removed": true})
+				"events": v2Events(events), "steps": steps, "attempts": last.Attempts, "removed": true})
 			return
 		}
 		if err != nil {
@@ -139,7 +145,11 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 		d := map[string]any{"id": strconv.FormatInt(id, 10), "state": v2State(string(j.Status), steps, livePercent(id)),
 			"file": map[string]any{"path": j.Path, "bytes": j.SizeBefore}, "attempts": j.Attempts,
 			"retryAt": nilIfEmpty(j.RetryAt), "error": nilIfEmpty(j.Error), "worker": nilIfEmpty(j.Worker),
-			"createdAt": j.Created, "updatedAt": j.Updated, "steps": steps, "events": v2Events(events), "removed": false}
+			"createdAt": j.Created, "updatedAt": j.Updated, "steps": steps, "events": v2Events(events), "removed": false,
+			"path": []string{}}
+		if route, err := store.Route(id); err == nil && route != nil { // V6a: the nodes the file went along
+			d["path"] = route
+		}
 		if j.Status == jobs.Queued && j.RetryAt != "" {
 			d["state"] = "retry_wait"
 		}
@@ -294,6 +304,10 @@ func v2JobItem(store *jobs.Store, it map[string]any, row jobs.FileRow, card stri
 		it["state"], it["subState"] = "failed", nil
 	case jobs.CardSkipped:
 		it["origin"], it["state"], it["subState"], it["priority"], it["pin"] = "scan", "skipped", nil, nil, nil // no job: no priority
+		it["jobId"] = nil                                                                                       // the job its worker skipped (a workflow's skip after it failed): GET /jobs/{id} shows its steps, tries and log
+		if row.JobID != 0 {
+			it["jobId"] = strconv.FormatInt(row.JobID, 10)
+		}
 		if row.Reason == jobs.UserStoppedReason {
 			it["state"] = "cancelled"
 		}
