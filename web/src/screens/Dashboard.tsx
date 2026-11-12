@@ -11,7 +11,7 @@ import { retry, scanAll, startAll, stopAll, summary, updatedAt, useMock } from "
 import { Link } from "../router";
 import { getSettings, getTrash, listLibraries } from "../libraryApi";
 import { getActivity, getSummary, scanAllLibraries, type RealSummary } from "../dashApi";
-import { allWorkers } from "../workersApi";
+import { allWorkers, listWorkers } from "../workersApi";
 import { jobAction } from "../jobsApi";
 import { onLive } from "../live";
 import { useData } from "../useData";
@@ -117,18 +117,21 @@ function RealDashboard() {
   const feed = useData(() => getActivity(8), [], 60000), [liveFeed, setLiveFeed] = useState<ActivityEvent[]>([]);
   const [live, setLive] = useState<Record<string, JobProgressEvent["progress"]>>({}), [said, setSaid] = useState("");
   const [beat, setBeat] = useState<Record<string, { status: W["status"]; slots: W["slots"]; at: string }>>({});
+  // review 61dc891 P2-2: the workers come from GET /api/v2/workers (the Workers page's source: remote ones too), not the
+  // summary's list, which has this computer only
+  const wl = useData(listWorkers, [], 15000);
   // a job's change reloads the summary and the trash (a replaced original goes into it)
-  const reload = useRef(() => {}); reload.current = () => (sum.reload(), tr.reload());
+  const reload = useRef(() => {}); reload.current = () => (sum.reload(), tr.reload(), wl.reload());
   useEffect(() => {
     let t: ReturnType<typeof setTimeout> | undefined;
     return onLive((type, data) => {
       if (type === "job.progress") { const e = data as JobProgressEvent; setLive((m) => ({ ...m, [e.jobId]: e.progress })); return; }
       if (type === "worker.heartbeat") { const h = data as { workerId: string; status: W["status"]; slots: W["slots"]; at: string }; setBeat((m) => ({ ...m, [h.workerId]: h })); return; }
       if (type === "activity") { const a = (data as { event?: ActivityEvent })?.event; if (a) setLiveFeed((f) => [a, ...f.filter((x) => x.id !== a.id)]); return; }
-      if (type === "job.state" || type === "resync" || type.startsWith("processing.")) { clearTimeout(t); t = setTimeout(() => (reload.current(), setLive({}), setBeat({})), 400); }
+      if (type === "job.state" || type === "resync" || type.startsWith("processing.") || type === "worker.updated") { clearTimeout(t); t = setTimeout(() => (reload.current(), setLive({}), setBeat({})), 400); }
     });
   }, []);
-  const act = async (p: Promise<Answer<unknown>>) => { try { const r = await p; if (failed(r)) setSaid(r.error.message); else setSaid(""); } catch (e) { if (!(e instanceof SignedOut)) throw e; } sum.reload(); libs.reload(); };
+  const act = async (p: Promise<Answer<unknown>>) => { try { const r = await p; if (failed(r)) setSaid(r.error.message); else setSaid(""); } catch (e) { if (!(e instanceof SignedOut)) throw e; } sum.reload(); libs.reload(); wl.reload(); };
   if (!sum.data) return <div className="stack"><PageHead icon="i-dashboard" title="Dashboard" /><div className="empty">{sum.error?.message ?? "Loading..."}</div></div>;
   const s: RealSummary = sum.data, st = set.data, nlib = libs.data?.length ?? 0;
   const row = (j: JobItem): Row => {
@@ -138,7 +141,7 @@ function RealDashboard() {
       reason: typeof j.reason === "object" && j.reason ? j.reason.message : j.detail ?? undefined, meta: [j.library, j.finishedAt && clock(j.finishedAt)].filter(Boolean).join(" · ") };
   };
   // the workers as the summary has them, with the latest heartbeat's status and slots
-  const ws = s.workers?.map((w) => (beat[w.id] ? { ...w, status: beat[w.id].status, slots: beat[w.id].slots, lastHeartbeatAt: beat[w.id].at } : w)) ?? null;
+  const ws = (wl.data ?? s.workers)?.map((w) => (beat[w.id] ? { ...w, status: beat[w.id].status, slots: beat[w.id].slots, lastHeartbeatAt: beat[w.id].at } : w)) ?? null;
   const going = ws?.filter((w) => w.status === "busy" || w.status === "online" || w.status === "draining").length ?? 0;
   const v: View = {
     running: ws ? going > 0 : s.activity.workersRunning && !s.processingPaused, workersRunning: ws ? going : null, offline: s.badges.workersOffline,

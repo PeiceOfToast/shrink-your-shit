@@ -14,6 +14,8 @@ import { useData } from "../useData";
 import { allWorkers, newPairing, type Pairing, dismissUpdateNotice, getWorker, listWorkers, patchWorker, stoppedByUpdate, testCapabilities, workerAction } from "../workersApi";
 import type { Capability, Worker } from "../types/v2";
 
+// review 61dc891 P2-1: only what the server reports (a remote worker may send no OS or host): no guess, no stray dot
+const OS: Record<string, string> = { linux: "Linux", darwin: "macOS", windows: "Windows" };
 const going = (w: Worker) => w.status === "busy" || w.status === "online";
 // Status in words (SCREENS V7; design: no 'slots').
 function words(w: Worker): [string, string, string] {
@@ -112,7 +114,10 @@ function AddWorker({ workers, reload }: { workers: Worker[]; reload: () => void 
   const joined = p ? workers.find((w) => !known.current.includes(w.id)) : undefined;
   // design 17:57Z: the panel stays open on the confirmation (closing on its own risks missing it)
   useEffect(() => { if (joined) { setCame(joined); setP(null); } }, [joined?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-  const left = p ? Math.ceil((new Date(p.expiresAt).getTime() - now) / 60000) : 0, gone = !!p && left <= 0;
+  // review 61dc891 P3: the minutes come from the server's expiry at render (the 3 s tick re-renders), never a stale clock
+  const left = p ? Math.ceil((new Date(p.expiresAt).getTime() - Math.max(now, Date.now())) / 60000) : 0, gone = !!p && left <= 0;
+  const local = !!p && /--server https?:\/\/(127\.|localhost|\[::1\])/.test(p.command); // a command only this computer can use
+  useEffect(() => { if (said !== "Command copied.") return; const t = setTimeout(() => setSaid(""), 4000); return () => clearTimeout(t); }, [said]);
   // plain http has no clipboard API (not a secure context): select the text and copy it the old way
   // the clipboard API can be missing (plain http) or refused (permission): then the selected text is copied the old way
   const copy = async () => {
@@ -134,6 +139,7 @@ function AddWorker({ workers, reload }: { workers: Worker[]; reload: () => void 
         <textarea id={group + "-cmd"} ref={cmd} className="input mono" readOnly rows={2} value={p.command} onFocus={(e) => e.currentTarget.select()} />
         <div className="row"><button className="btn sm primary" type="button" onClick={copy}><Icon id="i-copy" />Copy</button>
           <span className="muted sm">Pairing code <strong className="mono">{p.code}</strong> · works for {left <= 1 ? "less than a minute" : left + " more minutes"}, once.</span></div>
+        {local && <p className="muted sm"><Icon id="i-alert" /> This address only works on this computer. To pair another computer, open this page by its network address (for example http://192.168.1.10:8484) and make a new code.</p>}
         {p.plainHTTP && <p className="muted sm"><Icon id="i-info" /> This page uses plain http: fine on your own network. A worker outside it needs https://.</p>}
         <p className="muted sm" aria-live="polite">Waiting for the worker to connect...</p></>}
     </div>}
@@ -191,7 +197,7 @@ export function Workers() {
             return (
               <tr key={w.id} className={gone ? "dim" : undefined}>
                 <td className="nm"><Link className="ttl" to={"/workers/" + encodeURIComponent(w.id)}>{w.name}</Link>
-                  <span className="sub">{[w.host, w.os === "linux" ? "Linux" : w.os === "darwin" ? "macOS" : "Windows"].join(" · ")}</span>
+                  <span className="sub">{[w.host, OS[w.os ?? ""]].filter(Boolean).join(" · ")}</span>
                   {w.tags.length > 0 && <span className="chips" aria-label="Tags">{w.tags.map((x) => <span className="mchip" key={x}>{x}</span>)}</span>}</td>
                 <td className="now"><span className="nowl"><span className={"pill " + cls}><Icon id={icon} />{t}</span>
                   {w.currentJobIds.map((id) => <Link key={id} className="mono sm" to={"/jobs?tab=running&job=" + encodeURIComponent(id)}>{names[id] ?? "Job " + id}</Link>)}</span></td>
