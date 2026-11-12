@@ -177,6 +177,7 @@ func TestV2JobsQueueOrder(t *testing.T) {
 	type item struct {
 		Name     string
 		Position *int
+		Priority *int
 	}
 	list := func(query string) []item {
 		t.Helper()
@@ -199,8 +200,14 @@ func TestV2JobsQueueOrder(t *testing.T) {
 		}
 		return strings.Join(out, " ")
 	}
-	if got := str(list("")); got != "c.mkv:1 a.mkv:2 b.mkv:3 retry.mkv:null" {
+	all := list("")
+	if got := str(all); got != "c.mkv:1 a.mkv:2 b.mkv:3 retry.mkv:null" {
 		t.Errorf("queue order %q", got)
+	}
+	for _, it := range all { // each row has its priority (ui-shop's First/Last chip)
+		if want := map[string]int{"c.mkv": 5}[it.Name]; it.Priority == nil || *it.Priority != want {
+			t.Errorf("%s: priority %v, want %d", it.Name, it.Priority, want)
+		}
 	}
 	if got := str(list("&libraryId=" + strconv.FormatInt(tv.ID, 10))); got != "b.mkv:3" { // its place in the whole queue
 		t.Errorf("filtered %q", got)

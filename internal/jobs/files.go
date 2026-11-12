@@ -47,6 +47,7 @@ type FileRow struct {
 	Status                Status
 	Error                 string
 	ErrorCode             string // Error's code (migration 23: jobs.error_code)
+	Priority              int    // the job's place-in-queue priority (higher first)
 	Attempts              int
 	RetryAt               string
 	SizeBefore, SizeAfter int64
@@ -178,7 +179,7 @@ func (s *Store) FileList(f FileFilter) (rows []FileRow, total int, counts map[st
 			order, orderArgs = `CASE WHEN `+notReadySQL+` THEN 1 ELSE 0 END, CASE WHEN `+notReadySQL+` THEN j.retry_at END, j.priority DESC, j.id`, []any{s.stamp(), s.stamp()}
 		}
 		r, err := s.db.Query(`SELECT j.id, COALESCE(j.library_id,0), COALESCE(l.name, j.library), j.path, COALESCE(o.new_path,''), j.status,
-  COALESCE(j.error,''), COALESCE(j.error_code,''), j.attempts, COALESCE(j.retry_at,''), j.size_before, COALESCE(j.size_after,0), j.duration, j.updated,
+  COALESCE(j.error,''), COALESCE(j.error_code,''), j.priority, j.attempts, COALESCE(j.retry_at,''), j.size_before, COALESCE(j.size_after,0), j.duration, j.updated,
   COALESCE(fl.id,0), COALESCE(fl.name,''), COALESCE(o.id,0), COALESCE(o.state,''), COALESCE(o.delete_on,''), COALESCE(o.kept_at,''), j.output_path,
   j.output_path<>'' AND j.output_path<>j.path AND o.id IS NULL `+jobFrom+` WHERE `+cond+` ORDER BY `+order+` LIMIT ? OFFSET ?`,
 			append(append(args, orderArgs...), f.Limit, f.Offset)...)
@@ -188,7 +189,7 @@ func (s *Store) FileList(f FileFilter) (rows []FileRow, total int, counts map[st
 		defer r.Close()
 		for r.Next() {
 			var row FileRow
-			if err := r.Scan(&row.JobID, &row.LibraryID, &row.Library, &row.Path, &row.NewPath, &row.Status, &row.Error, &row.ErrorCode, &row.Attempts,
+			if err := r.Scan(&row.JobID, &row.LibraryID, &row.Library, &row.Path, &row.NewPath, &row.Status, &row.Error, &row.ErrorCode, &row.Priority, &row.Attempts,
 				&row.RetryAt, &row.SizeBefore, &row.SizeAfter, &row.DurationSec, &row.Updated, &row.FlowID, &row.FlowName,
 				&row.OriginalID, &row.OriginalState, &row.OriginalDeleteOn, &row.OriginalKeptAt, &row.OutputPath, &row.Beside); err != nil {
 				return nil, 0, nil, err
