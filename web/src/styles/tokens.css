@@ -76,20 +76,22 @@
   :root:not([data-theme])[data-accent="mono"]  { --accent: #3A4558; --accent-text: #3A4558; --on-accent: #FFFFFF; --focus: #3A4558; }
 }
 
-/* Shape, type and spacing */
+/* Shape, type and spacing (clean pass, DESIGN-DIRECTION-clean.md section 3, 2026-11-11) */
 :root {
-  --radius: 10px;           /* cards (spec: 8-12 px) */
+  --radius: 8px;            /* cards (spec: 8-12 px; clean pass: 8) */
   --radius-sm: 6px;         /* inputs, buttons, chips */
-  --shadow: 0 1px 2px rgb(0 0 0 / .25);  /* cards: one subtle shadow, no more */
+  --shadow: none;           /* clean pass: flat, borders only */
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;  /* offline: no web fonts */
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --font-scale: 1;          /* Settings > Appearance: 0.9 / 1 / 1.15 / 1.3 */
-  --fs: calc(14px * var(--font-scale));
-  --fs-sm: calc(12.5px * var(--font-scale));
-  --fs-lg: calc(18px * var(--font-scale));
-  --fs-xl: calc(24px * var(--font-scale));
+  --fs: calc(13.5px * var(--font-scale));
+  --fs-sm: calc(12px * var(--font-scale));
+  --fs-lg: calc(16px * var(--font-scale));
+  --fs-xl: calc(20px * var(--font-scale));   /* page titles */
+  --fw-strong: 600;         /* the one bold weight (no 700) */
+  --chip-h: 20px;           /* metadata chips and status pills */
   /* Density: Comfortable (default) / Compact */
-  --row-h: 40px; --pad: 16px; --gap: 12px;
+  --row-h: 44px; --pad: 16px; --gap: 12px; --page-pad: 20px;  /* 44: two-line rows */
   /* Shell sizes (spec 2) */
   --nav-w: 236px; --nav-w-collapsed: 64px; --topbar-h: 56px;
   --inspector-w: 360px;     /* 340-400, resizable */
@@ -97,7 +99,7 @@
   --palette-w: 272px;       /* 250-300, resizable */
   --motion: 150ms;
 }
-:root[data-density="compact"] { --row-h: 32px; --pad: 10px; --gap: 8px; }
+:root[data-density="compact"] { --row-h: 36px; --pad: 12px; --gap: 8px; }
 @media (prefers-reduced-motion: reduce) { :root { --motion: 0ms; } }
 :root[data-motion="reduced"] { --motion: 0ms; }
 
