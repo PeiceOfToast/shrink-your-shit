@@ -37,7 +37,7 @@ interface Row { id: string; name: string; sub: string; percent: number | null; l
 interface View {
   running: boolean; workersRunning: number | null; offline: number | null;
   busy: boolean;                  // a worker is converting now (live): turning "Workers on" off asks first
-  on: number; total: number;      // the "Workers on" switch: workers on (converting or ready) of all (user item 2)
+  on: number; total: number; finishing: number; // the "Workers on" switch: workers on (converting, ready or finishing) of all (user item 2)
   waiting: number; converting: number; done24: number; failed24: number; success: number | null; freed: number; could: number;
   soon: number;                   // "N more by <date>": waitingToFree (V5c, net: original minus new). Never the trash's gross bytes
   online: string | null;          // the Workers tile: "2 of 3"
@@ -91,7 +91,7 @@ function MockDashboard() {
   const libName = (id: string) => s.libraries.find((l) => l.id === id)?.name ?? id;
   const v: View = {
     running: sum.activity.workersRunning > 0, workersRunning: sum.activity.workersRunning, offline: sum.badges.workersOffline, busy: s.workers.some((w) => w.currentJobIds.length > 0),
-    on: s.workers.filter((w) => w.status === "online" || w.status === "busy").length, total: s.workers.length,
+    on: s.workers.filter((w) => w.status === "online" || w.status === "busy" || w.status === "draining").length, total: s.workers.length, finishing: s.workers.filter((w) => w.status === "draining").length,
     waiting: sum.activity.waiting, converting: sum.activity.converting, done24: sum.last24h.completed, failed24: sum.last24h.failed,
     success: sum.last24h.successRate, freed: sum.bytes.freed, soon: s.trash.bytes, could: sum.bytes.waitingToFree, // the sample's figures: its trash stands for the net "more", its waitingToFree for "could free"
     online: sum.workers.filter((w) => w.status === "online" || w.status === "busy" || w.status === "draining").length + " of " + sum.workers.length,
@@ -143,7 +143,7 @@ function RealDashboard() {
   const v: View = {
     running: ws ? going > 0 : s.activity.workersRunning && !s.processingPaused, workersRunning: ws ? going : null, offline: s.badges.workersOffline,
     busy: ws ? ws.some((w) => w.status === "busy" || w.currentJobIds.length > 0) : s.activity.converting > 0, // the heartbeat's status is live; the counts lag
-    on: ws?.filter((w) => w.status === "busy" || w.status === "online").length ?? 0, total: ws?.length ?? 0,
+    on: ws?.filter((w) => w.status === "busy" || w.status === "online" || w.status === "draining").length ?? 0, total: ws?.length ?? 0, finishing: ws?.filter((w) => w.status === "draining").length ?? 0,
     waiting: s.activity.waiting, converting: s.activity.converting, done24: s.last24h.completed, failed24: s.last24h.failed, success: s.last24h.successRate,
     // V5c: "Could free" is couldFree (originals left in place); waitingToFree is the trash, the "Will be freed" line
     freed: s.bytes.freed, could: s.bytes.couldFree ?? 0, soon: s.bytes.waitingToFree, online: ws ? going + " of " + ws.length : null,
@@ -176,7 +176,7 @@ function DashboardView({ v, trash, acts }: { v: View; trash?: { bytes: number; l
     <div className="stack">
       <PageHead icon="i-dashboard" title="Dashboard">
         {/* user item 2 (design 7.2): one switch for every worker replaces the Running/Stopped pill and Start all / Stop all */}
-        <WorkersSwitch n={v.on} m={v.total} busy={v.busy} onSet={acts.workers} />
+        <WorkersSwitch n={v.on} m={v.total} busy={v.busy} finishing={v.finishing} onSet={acts.workers} />
         {v.offline != null && v.offline > 0 && <span className="pill bad"><Icon id="i-wifi-off" />{plural(v.offline, "worker offline", "workers offline")}</span>}
         {v.libraries > 0 && <><span className="desk">{actions()}</span>
           <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions()}</div></details></>}
