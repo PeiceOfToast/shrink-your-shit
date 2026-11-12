@@ -70,8 +70,11 @@ func TestV2ConvertAgain(t *testing.T) {
 	deleteOn := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
 	st.FinishSwap(row, deleteOn)
 	st.Complete(other, b, 3)
-	// replaced, its original kept: until when, and no other file (the new one has the file's own name)
-	if a := detail(other); str(a.Policy) != "replace" || str(a.KeptUntil) != deleteOn.Format(time.RFC3339) || a.OutputPath != nil {
+	// replaced, its original kept: until when (the purge's date: kept plus the setting now, not the date
+	// recorded when it was kept), and no other file (the new one has the file's own name)
+	kept, _ := st.OriginalByID(row)
+	purgeDay, _ := jobs.KeptUntil(kept.KeptAt, 7)
+	if a := detail(other); str(a.Policy) != "replace" || str(a.KeptUntil) != purgeDay.UTC().Format(time.RFC3339) || a.OutputPath != nil {
 		t.Errorf("kept: %+v", a)
 	}
 	st.SetSwapState(row, jobs.OriginalPurged)

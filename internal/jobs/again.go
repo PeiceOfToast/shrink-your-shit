@@ -36,8 +36,9 @@ const (
 	AgainBusy         = "original_busy" // its original is being moved, or needs the person's attention
 )
 
-// ConvertAgainCheck says whether done job id can be converted again (ErrNotFound: no such job).
-func (s *Store) ConvertAgainCheck(id int64) (AgainCheck, error) {
+// ConvertAgainCheck says whether done job id can be converted again (ErrNotFound: no such job). keepDays
+// is the keep-originals setting now: KeptUntil is the date the purge deletes the kept original on.
+func (s *Store) ConvertAgainCheck(id int64, keepDays int) (AgainCheck, error) {
 	c, err := s.convertAgainCheck(id)
 	if err != nil || c.Code == AgainNotDone {
 		return c, err
@@ -48,13 +49,13 @@ func (s *Store) ConvertAgainCheck(id int64) (AgainCheck, error) {
 	}
 	// what the run did, from its own record (the workflow may have changed since): a kept original, or
 	// a new file at the original's own name, is a replace; a new file in the same folder is beside
-	var state, deleteOn string
-	err = s.db.QueryRow(`SELECT state, COALESCE(delete_on, '') FROM originals WHERE job_id=? ORDER BY id DESC LIMIT 1`, id).Scan(&state, &deleteOn)
+	var state, keptAt string
+	err = s.db.QueryRow(`SELECT state, COALESCE(kept_at, '') FROM originals WHERE job_id=? ORDER BY id DESC LIMIT 1`, id).Scan(&state, &keptAt)
 	switch {
 	case err == nil || j.OutputPath == j.Path:
 		c.Policy = "replace"
-		if state == OriginalKept {
-			c.KeptUntil = deleteOn
+		if due, ok := KeptUntil(keptAt, keepDays); ok && state == OriginalKept {
+			c.KeptUntil = due.UTC().Format(time.RFC3339)
 		}
 	case !errors.Is(err, sql.ErrNoRows):
 		return AgainCheck{}, err
@@ -126,7 +127,7 @@ func (e AgainError) Error() string { return e.Message }
 // ConvertAgain puts done job id back in the queue as a fresh start, to run from its original (an
 // AgainError if it can't; ErrNotFound if there is no such job).
 func (s *Store) ConvertAgain(id int64) error {
-	c, err := s.ConvertAgainCheck(id)
+	c, err := s.convertAgainCheck(id) // only Possible and the original are needed here
 	if err != nil {
 		return err
 	}
