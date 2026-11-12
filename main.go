@@ -141,6 +141,9 @@ func main() {
 	for _, said := range worker.RecoverSwaps(store, store, keepDays(), time.Now()) {
 		log.Printf("recovery: %s", said)
 	}
+	for _, said := range worker.SweepStaging(worker.OutputFolders(store)) { // before any worker starts
+		log.Printf("recovery: %s", said)
+	}
 	for _, said := range worker.RecoverSidecars(store) {
 		log.Printf("recovery: %s", said)
 	}
@@ -210,6 +213,9 @@ func main() {
 	chk.ToolsNow() // the hardware check starts in the background, after the converter's: Workers has it soon after
 	sc := &scanner.Scanner{Store: store, Exec: x, FFprobe: ffprobePath, Targets: scanTargets(store), MinAge: *settle}
 	if converts {
+		if s, err := web.LoadSettings(store); err == nil && s.ScanEvery > 0 { // a saved interval wins over the flag (design 01:41Z)
+			sc.SetEvery(time.Duration(s.ScanEvery) * time.Second)
+		}
 		go sc.Run(ctx, *every)
 	} else {
 		log.Print("The converter is not installed correctly (ffmpeg and ffprobe with libx265 and the ssim filter are needed), so nothing is scanned or converted. The web page's Settings > System says what is missing; fix it, then restart shrink-your-shit.")
@@ -262,7 +268,7 @@ func main() {
 		log.Fatalf("access token: %v", err)
 	}
 	srv := &http.Server{Addr: *addr, Handler: web.Handler(store, access, web.Engine{
-		ScanNow: sc.ScanNow, NextScan: sc.NextScan, Scanning: sc.Scanning, RequeueJob: pool.RequeueJob, PauseNow: pool.PauseNow, StopFile: pool.StopFile,
+		ScanNow: sc.ScanNow, NextScan: sc.NextScan, ScanEvery: *every, Settle: *settle, SetScanEvery: sc.SetEvery, Scanning: sc.Scanning, RequeueJob: pool.RequeueJob, PauseNow: pool.PauseNow, StopFile: pool.StopFile,
 		RunLogs: runLogs, Doctor: chk, DataDir: *data, Version: version, Logs: logs,
 		Preview:    &preview.Previewer{Store: store, Exec: media.OSExec{}, FFprobe: ffprobePath},
 		FirstFiles: &preview.FirstLister{Exec: media.OSExec{}, FFprobe: ffprobePath}})}

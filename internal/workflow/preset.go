@@ -67,6 +67,9 @@ func Preset() Doc {
 func commitConfig(s rules.Selectors) map[string]any {
 	switch s.AfterConverting {
 	case "folder":
+		if s.FolderMode == rules.NextToLibrary {
+			return map[string]any{"policy": "separate_folder", "folderMode": rules.NextToLibrary}
+		}
 		return map[string]any{"policy": "separate_folder", "folderMode": "one_folder", "folder": s.OutputDir}
 	case "beside":
 		return map[string]any{"policy": "beside"}
@@ -178,11 +181,12 @@ func selectorsOf(order []Node) (rules.Selectors, []Issue) {
 	case "beside":
 		s.AfterConverting = "beside"
 	case "separate_folder":
-		if strOf(commit.Config, "folderMode", "next_to_library") == "next_to_library" {
-			return s, []Issue{{Code: "not_runnable_yet", Severity: "error", NodeID: commit.ID, ConfigPath: "/folderMode",
-				Message: `"Next to each library" comes in a later update. For now choose "One folder for all", "Replace the original" or "Put the new file next to the original".`}}
+		s.AfterConverting = "folder"
+		if strOf(commit.Config, "folderMode", rules.NextToLibrary) == rules.NextToLibrary { // V5a: runs now
+			s.FolderMode = rules.NextToLibrary
+		} else {
+			s.OutputDir = strOf(commit.Config, "folder", "")
 		}
-		s.AfterConverting, s.OutputDir = "folder", strOf(commit.Config, "folder", "")
 	default:
 		return s, []Issue{{Code: "invalid_config", Severity: "error", NodeID: commit.ID, ConfigPath: "/policy", Message: "Choose how to save the result."}}
 	}

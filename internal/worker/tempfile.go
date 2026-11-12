@@ -11,6 +11,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
 // The new file is written into a private staging folder next to the original: created fresh with
@@ -134,6 +137,89 @@ func removeLeftoverTemps(src string) error {
 		}
 	}
 	return nil
+}
+
+// stagingDirName is a staging folder's name: "." + the file's name + "." + digits + ".syp-tmp".
+var stagingDirName = regexp.MustCompile(`^\..+\.[0-9]+\.syp-tmp$`)
+
+// stagedNew is our temp file's name in a staging folder: "new." and the new file's type.
+var stagedNew = regexp.MustCompile(`^new\.[A-Za-z0-9]+$`)
+
+// SweepStaging removes our staging folders that a server killed mid-convert left anywhere under the
+// folders for new files, dirs (review-697332b P2: the per-file clean-up only looks next to an original,
+// and a file whose job never runs again would keep its folder for ever). Only ours: a folder named
+// exactly like ours that holds nothing but our temp file and extracted subtitles. Run at start, before any
+// worker: then every staging folder is a leftover. It says what it removed.
+func SweepStaging(dirs []string) []string {
+	var said []string
+	for _, root := range dirs {
+		filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || !d.IsDir() || p == root {
+				return nil
+			}
+			if !stagingDirName.MatchString(d.Name()) {
+				return nil
+			}
+			entries, err := os.ReadDir(p)
+			if err != nil {
+				return fs.SkipDir
+			}
+			news := 0
+			for _, e := range entries {
+				switch {
+				case !e.Type().IsRegular():
+					log.Printf("leaving %s alone: it holds files shrink-your-shit did not put there", p)
+					return fs.SkipDir
+				case stagedNew.MatchString(e.Name()):
+					news++
+				case !stagedSrt.MatchString(e.Name()):
+					log.Printf("leaving %s alone: it holds files shrink-your-shit did not put there", p)
+					return fs.SkipDir
+				}
+			}
+			if news > 1 {
+				return fs.SkipDir
+			}
+			for _, e := range entries {
+				os.Remove(filepath.Join(p, e.Name()))
+			}
+			if err := os.Remove(p); err == nil {
+				said = append(said, "removed an unfinished conversion's temp folder: "+p)
+			}
+			return fs.SkipDir
+		})
+	}
+	return said
+}
+
+// OutputFolders are the folders for new files of every library whose workflow saves them in another
+// folder (one folder for all, or next to each library): where SweepStaging looks.
+func OutputFolders(store *jobs.Store) []string {
+	libs, err := store.Libraries()
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, l := range libs {
+		f, err := store.GetFlow(l.FlowID)
+		if err != nil || f.Template.Selectors == nil || f.Template.Selectors.AfterConverting != "folder" {
+			continue
+		}
+		dir := f.Template.Selectors.OutputDir
+		if f.Template.Selectors.FolderMode == rules.NextToLibrary {
+			if d, problem, err := store.OutputFolder(l.ID, l.Path); err == nil && problem == nil {
+				dir = d
+			} else {
+				continue
+			}
+		}
+		if dir != "" && !seen[dir] {
+			seen[dir] = true
+			out = append(out, dir)
+		}
+	}
+	return out
 }
 
 // newStaged creates the staging folder and the empty file ffmpeg will write into. ffmpeg opens that
