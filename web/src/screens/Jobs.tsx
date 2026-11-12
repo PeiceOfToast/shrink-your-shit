@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, count, elapsed, plural } from "../format";
-import { getJob, jobAction, listJobs } from "../jobsApi";
+import { findSkip, getJob, jobAction, listJobs } from "../jobsApi";
 import { onLive } from "../live";
 import { Empty, PageHead } from "../PageHead";
 import { navigate, useSearch } from "../router";
@@ -204,12 +204,22 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
     document.addEventListener("keydown", esc);
     return () => { document.removeEventListener("keydown", esc); (document.querySelector('[data-job="' + CSS.escape(id) + '"]') as HTMLElement | null)?.focus(); };
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
-  const j = d.data, state = (j?.state ?? row?.state) as JobState | undefined, name = row?.name ?? j?.file?.path.split("/").pop() ?? "Job " + id;
+  // review c610d24 P3: the actions follow the job's own state, not the tab it was opened from. A skipped job opened
+  // without its row (another tab in the URL) finds its row in the Skipped list: Convert again needs its skip-N id.
+  const ended = d.data && (d.data.state === "skipped" || d.data.state === "cancelled");
+  // review a8f85e0 P3: the list holds the first 200 skips only; a job beyond them is looked for page by page (findSkip)
+  const skips = useData(async () => {
+    if (row || !ended) return null;
+    const first = await listJobs("skipped", "");
+    return failed(first) || first.items.some((x) => x.jobId === id) ? first : findSkip(id);
+  }, [id, !!row, !!ended]);
+  const own = row ?? skips.data?.items.find((x) => x.jobId === id);
+  const j = d.data, state = (j?.state ?? own?.state) as JobState | undefined, name = own?.name ?? j?.file?.path.split("/").pop() ?? "Job " + id;
   const active = state && ["queued", "retry_wait", "preparing", "running", "validating", "committing"].includes(state);
   const run = async (a: JobAction) => {
     if (a === "cancel" && !window.confirm((state === "queued" || state === "retry_wait" ? "Cancel this file?" : "Stop converting this file?") + " The file stays as it is. Nothing is deleted.")) return;
-    const r = await act(jobAction(a, [row?.id ?? id]), setSaid); // the row's id: a job id, or skip-N for a file a scan left out (jobsApi)
-    if (r) { const x = r.results[0]; setSaid(x?.ok ? (a === "requeue" && (row?.id ?? id).startsWith("skip-") ? "It will be looked at again on the next scan." : "Done.") : x?.message ?? ""); d.reload(); onChanged(); }
+    const r = await act(jobAction(a, [own?.id ?? id]), setSaid); // the row's id: a job id, or skip-N for a file a scan left out (jobsApi)
+    if (r) { const x = r.results[0]; setSaid(x?.ok ? (a === "requeue" && (own?.id ?? id).startsWith("skip-") ? "It will be looked at again on the next scan." : "Done.") : x?.message ?? ""); d.reload(); onChanged(); }
   };
   const before = fmtV(j?.metadata?.before), after = fmtV(j?.metadata?.after);
   const reason = j?.reason?.message ?? (row ? reasonText(row) : "");
@@ -218,7 +228,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
       <aside className="drawer jobd" ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="jd-h">
         <div className="hd">
           <button className="btn icon ghost" type="button" aria-label="Close" onClick={onClose}><Icon id="i-chev-l" /></button>
-          <div className="sp"><h2 id="jd-h" className="clamp2" title={name}>{name}</h2>{state && <Pill j={{ state, retryAt: j?.retryAt ?? row?.retryAt, subState: row?.subState }} />}</div>
+          <div className="sp"><h2 id="jd-h" className="clamp2" title={name}>{name}</h2>{state && <Pill j={{ state, retryAt: j?.retryAt ?? own?.retryAt, subState: own?.subState }} />}</div>
         </div>
         <div className="bd">
           <div className="row">
@@ -226,7 +236,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
             {active && <button className="btn sm" type="button" onClick={() => run("cancel")}><Icon id="i-stop" />{state === "queued" || state === "retry_wait" ? "Cancel" : "Stop"}</button>}
             {/* a skipped file whose job is gone (a workflow's skip: the server says removed) can still be converted again (review f1aaf30) */}
             {/* dev-qa (qa-v6-v7a C): a Done job can't go back to the queue (the server refuses done -> queued), so no Convert again there */}
-            {(state === "skipped" || state === "cancelled") && (!j?.removed || !!row?.id.startsWith("skip-")) && <button className="btn sm" type="button" onClick={() => run("requeue")}><Icon id="i-arrow-r" />Convert again</button>}
+            {(state === "skipped" || state === "cancelled") && (!j?.removed || !!own?.id.startsWith("skip-")) && <button className="btn sm" type="button" onClick={() => run("requeue")}><Icon id="i-arrow-r" />Convert again</button>}
             <span className="sp" /><button className="btn sm ghost" type="button" title="Copy the job ID" onClick={() => navigator.clipboard?.writeText(id).then(() => setSaid("Job ID " + id + " copied."), () => setSaid("Job ID: " + id))}><Icon id="i-copy" />ID {id}</button>
           </div>
           <p className="muted" role="status">{said}</p>
@@ -236,12 +246,12 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {j?.removed && j.reason?.code === "removed" ? <div className="note"><Icon id="i-info" /><div>Its library was removed, so this file won't be converted.</div></div>
             : reason && <section><h3>Why</h3><p>{reason}</p></section>}
           <section><h3>File</h3><dl className="kv">
-            {(row?.path ?? j?.file?.path) && <><dt>Source</dt><dd className="mono sm">{row?.path ?? j?.file?.path}</dd></>} {/* review 54ff228: no '-' when the server doesn't keep the path (a removed library's job) */}
-            {(j?.library || row) && <><dt>Library</dt><dd>{j?.library?.name ?? row?.library}</dd></>}
-            {row?.state === "completed" && <><dt>Size</dt><dd>{saved(row.beforeBytes, row.afterBytes)}</dd>
-              <dt>Original</dt><dd>{row.originalState === "kept" ? "Kept " + plural(row.keptDaysLeft ?? 0, "more day", "more days") + ", then deleted" : row.originalState === "removed" ? "Deleted after the keep period" : "Left in place"}</dd></>}
+            {(own?.path ?? j?.file?.path) && <><dt>Source</dt><dd className="mono sm">{own?.path ?? j?.file?.path}</dd></>} {/* review 54ff228: no '-' when the server doesn't keep the path (a removed library's job) */}
+            {(j?.library || own) && <><dt>Library</dt><dd>{j?.library?.name ?? own?.library}</dd></>}
+            {own?.state === "completed" && <><dt>Size</dt><dd>{saved(own.beforeBytes, own.afterBytes)}</dd>
+              <dt>Original</dt><dd>{own.originalState === "kept" ? "Kept " + plural(own.keptDaysLeft ?? 0, "more day", "more days") + ", then deleted" : own.originalState === "removed" ? "Deleted after the keep period" : "Left in place"}</dd></>}
           </dl></section>
-          {j?.workflow && <section><h3>Workflow</h3><p>{row?.flow?.name ?? "Its library's workflow"} · v{j.workflow.version}</p></section>}
+          {j?.workflow && <section><h3>Workflow</h3><p>{own?.flow?.name ?? "Its library's workflow"} · v{j.workflow.version}</p></section>}
           {!scan && <section><h3>Timeline</h3>
             {!j ? <p className="muted">Loading...</p> : !j.steps.length && !j.events.length ? <p className="muted">No step history for jobs from before the update.</p> : <>
               {j.steps.length > 0 && <ol className="tline">{j.steps.map((s, i) => <li key={i} className={s.ok ? "" : "bad"}><Icon id={s.ok ? "i-check-c" : "i-x-c"} /><span className="sp">{s.words}</span><span className="muted sm nowrap">{clock(s.at)}</span></li>)}</ol>}

@@ -8,6 +8,15 @@ export async function listJobs(tab: Tab, q: string): Promise<Answer<JobsPage>> {
   // #134: the Waiting tab in the order the worker takes files, each with its position; the page never reorders it
   return call("GET", "/api/v2/jobs?tab=" + tab + (tab === "waiting" ? "&sort=queue" : "") + "&limit=200" + (q ? "&q=" + encodeURIComponent(q) : ""));
 }
+// review a8f85e0 P3: a skipped or stopped job's row in the Skipped tab when it isn't in the first page. Its own row went
+// when it was skipped or stopped, so its detail has no file name to search by: page through the tab, 500 at a time
+export async function findSkip(jobId: string): Promise<Answer<JobsPage>> {
+  if (MOCK) return listJobs("skipped", "");
+  for (let at = 0; ; at += 500) {
+    const r = await call<JobsPage>("GET", "/api/v2/jobs?tab=skipped&limit=500&offset=" + at);
+    if (failed(r) || r.items.some((x) => x.jobId === jobId) || !r.items.length || at + r.items.length >= r.total) return r;
+  }
+}
 export async function getJob(id: string): Promise<Answer<JobDetail>> {
   if (MOCK) return mockJob(id) ?? { error: { code: "not_found", message: "There is no such job." } };
   return call("GET", "/api/v2/jobs/" + encodeURIComponent(id));
