@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, count, elapsed, plural } from "../format";
-import { getJob, jobAction, listJobs } from "../jobsApi";
+import { findSkip, getJob, jobAction, listJobs } from "../jobsApi";
 import { onLive } from "../live";
 import { Empty, PageHead } from "../PageHead";
 import { navigate, useSearch } from "../router";
@@ -207,7 +207,12 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   // review c610d24 P3: the actions follow the job's own state, not the tab it was opened from. A skipped job opened
   // without its row (another tab in the URL) finds its row in the Skipped list: Convert again needs its skip-N id.
   const ended = d.data && (d.data.state === "skipped" || d.data.state === "cancelled");
-  const skips = useData(() => (row || !ended ? Promise.resolve(null) : listJobs("skipped", "")), [id, !!row, !!ended]);
+  // review a8f85e0 P3: the list holds the first 200 skips only; a job beyond them is looked for page by page (findSkip)
+  const skips = useData(async () => {
+    if (row || !ended) return null;
+    const first = await listJobs("skipped", "");
+    return failed(first) || first.items.some((x) => x.jobId === id) ? first : findSkip(id);
+  }, [id, !!row, !!ended]);
   const own = row ?? skips.data?.items.find((x) => x.jobId === id);
   const j = d.data, state = (j?.state ?? own?.state) as JobState | undefined, name = own?.name ?? j?.file?.path.split("/").pop() ?? "Job " + id;
   const active = state && ["queued", "retry_wait", "preparing", "running", "validating", "committing"].includes(state);
