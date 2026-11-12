@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, count, elapsed, plural } from "../format";
-import { findSkip, getJob, jobAction, listJobs } from "../jobsApi";
+import { findSkip, getJob, jobAction, listJobs, listKept, restoreKept } from "../jobsApi";
 import { onLive } from "../live";
 import { Empty, PageHead } from "../PageHead";
 import { navigate, useSearch } from "../router";
@@ -221,6 +221,17 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
     const r = await act(jobAction(a, [own?.id ?? id]), setSaid); // the row's id: a job id, or skip-N for a file a scan left out (jobsApi)
     if (r) { const x = r.results[0]; setSaid(x?.ok ? (a === "requeue" && (own?.id ?? id).startsWith("skip-") ? "It will be looked at again on the next scan." : "Done.") : x?.message ?? ""); d.reload(); onChanged(); }
   };
+  // G2 (one UI, design SCREENS Jobs drawer): a Done job whose original was replaced and kept in the trash offers
+  // "Get original back", found in the kept list by its id (the row) or the original's path (a drawer opened by link)
+  const [back, setBack] = useState(false), isDone = state === "completed";
+  const kl = useData(() => (isDone ? listKept() : Promise.resolve(null)), [id, isDone]);
+  const src = own?.path ?? j?.file?.path, kept = kl.data?.items.find((k) => (own?.keptId ? k.keptId === own.keptId : k.path === src));
+  const getBack = async () => {
+    setBack(false);
+    const r = await act(restoreKept(kept!.keptId), setSaid);
+    if (r) { setSaid(r.message); kl.reload(); d.reload(); onChanged(); }
+  };
+  const keptLine = kept && <>Replaced · kept until {new Date(kept.deleteOn).toLocaleDateString(undefined, { day: "numeric", month: "short" })} · <button className="linkbtn" type="button" aria-expanded={back} onClick={() => setBack(!back)}>Get original back</button></>;
   const before = fmtV(j?.metadata?.before), after = fmtV(j?.metadata?.after);
   const reason = j?.reason?.message ?? (row ? reasonText(row) : "");
   return (
@@ -249,8 +260,13 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
             {(own?.path ?? j?.file?.path) && <><dt>Source</dt><dd className="mono sm">{own?.path ?? j?.file?.path}</dd></>} {/* review 54ff228: no '-' when the server doesn't keep the path (a removed library's job) */}
             {(j?.library || own) && <><dt>Library</dt><dd>{j?.library?.name ?? own?.library}</dd></>}
             {own?.state === "completed" && <><dt>Size</dt><dd>{saved(own.beforeBytes, own.afterBytes)}</dd>
-              <dt>Original</dt><dd>{own.originalState === "kept" ? "Kept " + plural(own.keptDaysLeft ?? 0, "more day", "more days") + ", then deleted" : own.originalState === "removed" ? "Deleted after the keep period" : "Left in place"}</dd></>}
+              <dt>Original</dt><dd>{kept ? keptLine : own.originalState === "kept" ? "Kept " + plural(own.keptDaysLeft ?? 0, "more day", "more days") + ", then deleted" : own.originalState === "removed" ? "Deleted after the keep period" : "Left in place"}</dd></>}
+            {!own && kept && <><dt>Original</dt><dd>{keptLine}</dd></>}
           </dl></section>
+          {back && kept && <div role="alertdialog" aria-label="Get the original back?" style={{ padding: 12, border: "1px solid var(--border-strong)", borderRadius: "var(--radius)", background: "var(--raised)" }}
+            onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), setBack(false))}>
+            <p style={{ margin: "0 0 8px" }}><strong>Get the original of “{name}” back?</strong> The original ({bytes(kept.originalBytes)}) goes back in place and the smaller version{kept.newPath && kept.newPath.split(/[\\/]/).pop() !== name ? ", " + kept.newPath.split(/[\\/]/).pop() + "," : ""} is deleted. This file won't be converted again unless you press Convert again.</p>
+            <div className="row"><button className="btn sm primary" type="button" autoFocus onClick={getBack}>Get original back</button><button className="btn sm ghost" type="button" onClick={() => setBack(false)}>Cancel</button></div></div>}
           {j?.workflow && <section><h3>Workflow</h3><p>{own?.flow?.name ?? "Its library's workflow"} · v{j.workflow.version}</p></section>}
           {!scan && <section><h3>Timeline</h3>
             {!j ? <p className="muted">Loading...</p> : !j.steps.length && !j.events.length ? <p className="muted">No step history for jobs from before the update.</p> : <>

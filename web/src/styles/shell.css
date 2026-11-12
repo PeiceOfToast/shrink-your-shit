@@ -583,3 +583,23 @@ body{font-variant-numeric:tabular-nums} /* [taste: tabular numerals in anything 
   .pagehead>.sp{flex-basis:100%;height:0} /* header actions wrap onto their own row under the title */
 }
 p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; .st stays one line in pills and table cells */
+/* user item 2 (design 7.2): the "Workers on" switch, its question on its own row, Add a worker, flat worker rows */
+.sw{display:inline-flex;align-items:center;gap:10px;min-height:44px;cursor:pointer}
+.sw b{font-weight:var(--fw-strong)}
+.swask{flex-basis:100%;max-width:420px;padding:12px;border:1px solid var(--border-strong);border-radius:var(--radius);background:var(--raised)}
+.addw{display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap}
+.tbl.wk td .nowl{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
+.tbl.wk td .nowl .mono{overflow-wrap:anywhere}
+.tbl.wk tr.dim td,.tbl.wk tr.dim a{color:var(--text-2)}
+@media (max-width:900px){
+  .tbl.wk,.tbl.wk tbody{display:block}
+  .tbl.wk thead{display:none}
+  .tbl.wk tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:10px 0;border-bottom:1px solid var(--border)}
+  .tbl.wk td{display:block;grid-column:1/-1;border:0;height:auto;padding:0}
+  .tbl.wk td.nm{grid-column:1;grid-row:1}
+  .tbl.wk td.act{grid-column:2;grid-row:1}
+  .tbl.wk td[data-l]::before{content:attr(data-l) ": ";color:var(--text-2);font-size:var(--fs-sm)}
+  .tbl.wk .num{text-align:left}
+}
+@media (pointer:coarse){.tbl.wk .nowl a{display:inline-flex;align-items:center;min-height:44px}} /* a converting file in a worker row is a 44 px target on touch, as it was in the cards (M7) */
+.addpanel{display:flex;flex-direction:column;gap:8px;max-width:640px}.addpanel textarea{width:100%;resize:none;overflow-wrap:anywhere}

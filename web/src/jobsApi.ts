@@ -39,3 +39,16 @@ export async function jobAction(action: JobAction, ids: string[], pin?: Pin | "n
   }
   return { results };
 }
+
+// G2 (one UI): a replaced original kept in .syp-trash can be got back. GET /api/activity/kept lists them (keptId, the
+// original's path and size, the new file's name when it differs, the delete date); POST /api/kept/{id}/restore puts it
+// back and deletes the smaller version, answering in its own words. The sample install keeps nothing.
+export interface Kept { keptId: string; path: string; originalBytes: number; nowBytes: number; deleteOn: string; newPath?: string }
+export async function listKept(): Promise<Answer<{ items: Kept[]; days: number }>> {
+  if (MOCK) return { items: [], days: 7 };
+  return call("GET", "/api/activity/kept");
+}
+export async function restoreKept(id: string): Promise<Answer<{ ok: boolean; path: string; identityConfirmed: boolean; message: string }>> {
+  if (MOCK) return { error: { code: "not_available", message: "The sample install keeps no originals." } };
+  return call("POST", "/api/kept/" + encodeURIComponent(id) + "/restore", {});
+}
