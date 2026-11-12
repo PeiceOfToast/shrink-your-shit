@@ -12,12 +12,10 @@ import { addLibrary, getSettings, listLibraries, listWorkers, listWorkflows, pat
 import { Link, navigate } from "../router";
 import { useData } from "../useData";
 import type { FirstRunSettings } from "../types/v1";
-import { FirstFive, FolderField, useFolder } from "./Libraries";
+import { FirstFive, FolderField, suggestName, useFolder } from "./Libraries";
 import { START_SIMPLE } from "./Workflows";
 
 type Kept = NonNullable<FirstRunSettings["firstRunLibrary"]>;
-const base = (p: string) => p.replace(/\/+$/, "").split("/").pop() ?? "";
-const title = (s: string) => s.replace(/[._-]+/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 // Runs one request; its error message goes to `onError`. False when it failed (or the user is signed out).
 async function ok<T>(p: Promise<Answer<T>>, onError: (m: string) => void): Promise<T | false> {
   try { const r = await p; if (failed(r)) return (onError(r.error.message), false); return r; } catch (e) { if (e instanceof SignedOut) return false; throw e; }
@@ -43,7 +41,7 @@ export function Start() {
       {step > 1 && <Done n={1} what="Library" text={lib ? lib.name + " · " + lib.path : kept!.name + " · " + kept!.path}
         change={lib ? <Link to={"/libraries/" + lib.id}>Change</Link> : <button className="btn sm ghost" type="button" onClick={() => setEditing(true)}>Change</button>} />}
       {step > 2 && <Done n={2} what="Workflow" text={(wfName ?? "") + " (Start Simple)"} change={lib && <Link to={"/workflows/" + lib.flowId}>Change</Link>} />}
-      {step === 1 && <StepLibrary kept={kept} onDone={async (v) => { setError(""); if (await ok(patchSettings({ firstRunLibrary: v, firstRunStep: 2 }), setError)) (setEditing(false), refresh()); }} />}
+      {step === 1 && <StepLibrary taken={(libs.data ?? []).map((x) => x.name)} kept={kept} onDone={async (v) => { setError(""); if (await ok(patchSettings({ firstRunLibrary: v, firstRunStep: 2 }), setError)) (setEditing(false), refresh()); }} />}
       {step === 2 && <StepWorkflow kept={kept!} onDone={async () => { await ok(patchSettings({ firstRunStep: 3 }), setError); refresh(); }} />}
       {step < 2 && <Later n={2} name="Create a workflow" />}
       {step === 3 ? <StepWorker libraryId={lib!.id} /> : <Later n={3} name="Your worker" />}
@@ -58,10 +56,10 @@ function Later({ n, name }: { n: number; name: string }) {
   return <section className="card" aria-disabled="true"><div className="hd"><h2 className="muted">{n} · {name}</h2></div></section>;
 }
 
-function StepLibrary({ kept, onDone }: { kept: Kept | null; onDone: (v: Kept) => void }) {
+function StepLibrary({ kept, onDone, taken }: { kept: Kept | null; onDone: (v: Kept) => void; taken: string[] }) {
   const f = useFolder(kept?.path ?? "");
   const [name, setName] = useState(kept?.name ?? ""), [typed, setTyped] = useState(!!kept);
-  const shown = typed ? name : title(base(f.checked));
+  const shown = typed ? name : suggestName(f.checked, taken);
   return (
     <section className="card" aria-labelledby="s1-h">
       <div className="hd"><h2 id="s1-h">1 · Add a library</h2></div>
@@ -85,7 +83,7 @@ function StepWorkflow({ kept, onDone }: { kept: Kept; onDone: () => void }) {
     if (!name.trim()) return setError("Give the workflow a name.");
     setBusy(true);
     try {
-      const w = await ok(startSimpleWorkflow(name.trim(), out.trim(), made), setError);
+      const w = await ok(startSimpleWorkflow(name.trim(), out.trim(), made, kept.path), setError);
       if (!w) return;
       setMade(w.id);
       if (await ok(addLibrary(kept.name, kept.path, w.id), setError)) onDone();
