@@ -1,7 +1,7 @@
 # shrink-your-shit container image: static Go binary + ffmpeg, runs as a normal user.
 # The Go build always runs natively on the build machine and cross-compiles for the target
 # platform (TARGETOS/TARGETARCH are set by buildx), so multi-arch builds need no emulation here.
-# The new UI (web/, served at /next/) is built once on the build machine (Node LTS, as web/.nvmrc); its files are the
+# The UI (web/, served at /) is built once on the build machine (Node LTS, as web/.nvmrc); its files are the
 # same for every platform. Vite writes them to /internal/web/next/dist (outDir ../internal/web/next/dist).
 FROM --platform=$BUILDPLATFORM node:24-alpine AS web
 WORKDIR /web

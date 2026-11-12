@@ -255,13 +255,33 @@ func (s *Store) ForgetSkipped(id int64) (string, error) {
 
 // Paused reports whether converting is paused.
 func (s *Store) Paused() bool {
-	v, _, _ := s.Meta("paused")
-	return v == "1"
+	var on int
+	s.db.QueryRow(`SELECT COUNT(*) FROM workers WHERE enabled=1`).Scan(&on)
+	return on == 0
 }
 
-// SetPaused sets or clears the pause.
+// SetPaused turns every worker off (on true) or on: the processing switch (user review 11-12 item 2:
+// each worker's own flag is the only on/off state; the switch for all sets them all).
 func (s *Store) SetPaused(on bool) error {
-	return s.setPause("paused", "processing", on)
+	was := s.Paused()
+	if _, err := s.db.Exec(`UPDATE workers SET enabled=?`, !on); err != nil {
+		return err
+	}
+	return s.pausedChanged(was)
+}
+
+// pausedChanged writes processing.paused / processing.resumed for the live stream (V3c) when turning
+// workers on or off changed whether any is on.
+func (s *Store) pausedChanged(was bool) error {
+	now := s.Paused()
+	if now == was {
+		return nil
+	}
+	word := "processing.resumed"
+	if now {
+		word = "processing.paused"
+	}
+	return s.RecordEvent(word, map[string]any{"type": word})
 }
 
 // IntakePaused reports whether scans queue nothing new (V3c; spec 7: apart from processing's pause).

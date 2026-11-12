@@ -13,8 +13,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/sysload"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
 
@@ -243,11 +245,23 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine) http.
 		if !ok {
 			return
 		}
-		var in struct{ FreeSlots int }
+		var in struct {
+			FreeSlots int
+			sysload.Load
+			HoldingBack *struct{ Code, Message string } // why it takes no work now (#174 QA e)
+		}
 		if !readJSON(w, r, &in) {
 			return
 		}
-		writeJSON(w, map[string]any{"workerId": wk.ID, "paused": store.Paused()})
+		in.Load.CPUPercent = sysload.Clamp(in.Load.CPUPercent) // a worker's word: within 0..100
+		workerLoads.Store(wk.ID, in.Load)                      // V7d: the Workers page's live figures
+		if h := holdingBack(in.HoldingBack); h != nil {
+			workerHolds.Store(wk.ID, h)
+		} else {
+			workerHolds.Delete(wk.ID)
+		}
+		tests.expire(store, func(string) bool { return true })
+		writeJSON(w, map[string]any{"workerId": wk.ID, "paused": store.Paused(), "pathTests": tests.pending(wk.ID)}) // V7c
 	})
 	// a lease: at most one job (the plan comes with V7b2); none: {lease: null}
 	mux.HandleFunc("POST /api/worker/v1/lease", func(w http.ResponseWriter, r *http.Request) {
@@ -304,8 +318,9 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine) http.
 			return
 		}
 		var in struct {
-			Percent float64
-			Stage   string
+			Percent   float64
+			Stage     string
+			OutTimeUs *float64 // where its encode is: a worker that sends it is judged for the stall stop
 		}
 		if !readJSON(w, r, &in) {
 			return
@@ -316,6 +331,17 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine) http.
 		}
 		if in.Percent > 0 {
 			store.Progress(j.ID, in.Percent)
+		}
+		if in.Stage == "converting" && in.OutTimeUs != nil {
+			worker.ReportLive(j.ID, in.Percent, *in.OutTimeUs) // what the overview, Jobs and the events show
+		}
+		if rj := runs.get(lease); rj != nil { // the stall stop (orch-lead 19:13Z): only "converting" with a position counts
+			switch {
+			case in.Stage == "converting" && in.OutTimeUs != nil:
+				rj.Converting(*in.OutTimeUs, time.Now())
+			case in.Stage != "converting":
+				rj.EncodeEnded()
+			}
 		}
 		_, expires, _ := store.LeaseHeld(lease, j.Worker)
 		writeJSON(w, map[string]any{"ok": true, "expiresAt": expires})
@@ -335,9 +361,72 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine) http.
 		}
 		writeJSON(w, map[string]any{"ok": true})
 	})
-	remoteRoutes(mux, store, gate, leaseOf, runs)
+	remoteRoutes(mux, store, gate, leaseOf, runs, eng)
+	// V7c: a worker's answer to a path test
+	mux.HandleFunc("POST /api/worker/v1/paths/{test}/result", func(w http.ResponseWriter, r *http.Request) {
+		wk, ok := gate(w, r, false)
+		if !ok {
+			return
+		}
+		var in struct {
+			SHA256  string
+			Wrote   bool
+			Problem string
+		}
+		if !readJSON(w, r, &in) {
+			return
+		}
+		if !tests.answer(store, wk.ID, r.PathValue("test"), in.SHA256, in.Wrote, in.Problem) {
+			apiError(w, http.StatusConflict, "test_gone", "This test has ended already.")
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
+	})
 	mux.HandleFunc("/api/worker/v1/", func(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusNotFound, "not_found", "There is no such worker call.")
 	})
 	return mux
+}
+
+// workerLoads are the remote workers' last reported loads (sysload.Load), by worker id (V7d).
+var workerLoads sync.Map
+
+// workerHolds are why remote workers take no work now ({code, message}), by worker id (#174 QA e).
+var workerHolds sync.Map
+
+// holdingKnown are the reasons a worker may give for taking no work.
+var holdingKnown = map[string]bool{"low_disk": true}
+
+// holdingBack is a worker's reason as the Workers page may show it (orch-lead 16:12Z): a known code
+// only (else nil), its words at most 200 characters, without control characters; the page shows it as
+// text.
+func holdingBack(h *struct{ Code, Message string }) map[string]string {
+	if h == nil || !holdingKnown[h.Code] {
+		return nil
+	}
+	msg := cleanWorkerText(h.Message, 200)
+	if msg == "" {
+		return nil
+	}
+	return map[string]string{"code": h.Code, "message": msg}
+}
+
+// NoteMaxChars caps a worker's run-log note.
+const NoteMaxChars = 300
+
+// cleanWorkerText makes a remote worker's words safe to store and show (review 15b1898): every control
+// character (C0 with CR, LF, ESC and NUL; DEL; C1), format character (bidi overrides, zero-width) and line
+// or paragraph separator is dropped, so it stays one line that can't forge another or drive a terminal;
+// then it is trimmed and cut to at most max characters. Empty means nothing usable was sent.
+func cleanWorkerText(s string, max int) string {
+	s = strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp) || r == unicode.ReplacementChar {
+			return -1
+		}
+		return r
+	}, s))
+	if r := []rune(s); len(r) > max {
+		s = strings.TrimSpace(string(r[:max]))
+	}
+	return s
 }

@@ -123,3 +123,10 @@ export const getHealth = (): Promise<Answer<Health>> => (MOCK ? M({ version: "2.
 export async function getTrash(): Promise<Answer<Trash>> {
   return MOCK ? mock.mockState().trash : call("GET", "/api/v2/trash");
 }
+
+// G1 (one UI): remove a library: DELETE /api/libraries/{id}. The server stops watching the folder, takes its waiting
+// files off the queue and stops the one converting; nothing on disk changes. 409 busy comes in its own words.
+export async function removeLibrary(id: string): Promise<Answer<unknown>> {
+  if (MOCK) return { error: { code: "not_available", message: "The sample install can't remove a library." } };
+  return call("DELETE", "/api/libraries/" + enc(id));
+}

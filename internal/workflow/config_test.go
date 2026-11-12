@@ -65,3 +65,55 @@ func TestConfigRequiredWithoutDefault(t *testing.T) {
 		t.Errorf("%+v", got)
 	}
 }
+
+// User review 11-12 item 1: VBR goes through a workflow (the Convert video step) and back; quality stays
+// exactly today's template.
+func TestVBRThroughAWorkflow(t *testing.T) {
+	s := rules.DefaultSelectors(3)
+	s.Ignore = []string{}
+	s.Resolution, s.MaxBitrate, s.RateControl, s.VBRMaxKbps = "720", "medium", "vbr", 3000
+	d := FromTemplate(s.Template(), nil)
+	tm, issues := ToTemplate(d, rules.Template{})
+	if len(issues) > 0 {
+		t.Fatalf("%+v", issues)
+	}
+	got, ok := tm.SelectorsView()
+	if !ok || got.RateControl != "vbr" || got.VBRMaxKbps != 3000 {
+		t.Errorf("%+v", got)
+	}
+	q := rules.DefaultSelectors(3)
+	q.Ignore = []string{}
+	qt, _ := ToTemplate(FromTemplate(q.Template(), nil), rules.Template{})
+	if qv, _ := qt.SelectorsView(); qv.RateControl != "" || qv.VBRMaxKbps != 0 {
+		t.Errorf("quality: %+v", qv)
+	}
+	for _, n := range FromTemplate(q.Template(), nil).Nodes {
+		if _, has := n.Config["rateControl"]; has {
+			t.Error("a quality workflow's Convert video step has no VBR keys")
+		}
+	}
+}
+
+// Design (SCREENS V3 step 3): a peak limit below the level's figure is invalid_config on the Convert
+// video step's vbrMaxKbps, in the design's words.
+func TestVBRLimitBelowTheLevel(t *testing.T) {
+	s := rules.DefaultSelectors(3)
+	s.Ignore = []string{}
+	s.Resolution, s.MaxBitrate, s.RateControl, s.VBRMaxKbps = "720", "medium", "vbr", 3000
+	d := FromTemplate(s.Template(), nil)
+	var convert string
+	for i, n := range d.Nodes {
+		if n.Type == TypeConvert {
+			d.Nodes[i].Config["vbrMaxKbps"] = 2000
+			convert = n.ID
+		}
+	}
+	_, issues := ToTemplate(d, rules.Template{})
+	if len(issues) != 1 || issues[0].Code != "invalid_config" || issues[0].NodeID != convert || issues[0].Field != "vbrMaxKbps" ||
+		issues[0].Message != "Must be at least 2.5 Mbps, the Medium figure for 720p." {
+		t.Errorf("%+v", issues)
+	}
+	if def, _ := Definition(TypeConvert); def.ConfigSchema["properties"].(map[string]any)["vbrMaxKbps"].(map[string]any)["title"] != "Peak limit (kbps)" {
+		t.Error("the field is the Peak limit")
+	}
+}

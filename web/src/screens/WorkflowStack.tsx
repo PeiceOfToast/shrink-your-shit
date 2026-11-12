@@ -10,16 +10,17 @@ import { order } from "../mock/steps"; // the steps in running order: a property
 import { useData } from "../useData";
 import { getDraft, getWorkflow, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked } from "../workflowApi";
 import { Link, onLeave } from "../router";
+import { Browse } from "../FolderPicker";
 import { listLibraries, shrunk } from "../libraryApi";
 import type { JSONSchema, Node, PublishPreview, StepDefinition, ValidationIssue, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
 
 // The step definitions and the server's words for each step of the document being edited.
 // libs: the folders of the libraries that use this workflow, for "Next to each library" (V5a).
-const Reg = createContext<{ defs: StepDefinition[]; words: Record<string, string>; libs: string[] }>({ defs: [], words: {}, libs: [] });
+export const Reg = createContext<{ defs: StepDefinition[]; words: Record<string, string>; libs: string[] }>({ defs: [], words: {}, libs: [] });
 function useReg() { const r = useContext(Reg); return { stepDef: (t: string) => r.defs.find((d) => d.type === t), summary: (n: Node) => r.words[n.id] ?? "", libs: r.libs }; }
 
 // The server's icon keys (registry) -> design's sprite.
-export const ICON: Record<string, string> = { folder: "i-folder", filter: "i-shield", video: "i-video", audio: "i-audio", subtitles: "i-subtitle", file: "i-file", check: "i-checks", save: "i-save", cond: "i-cond", history: "i-history" };
+export const ICON: Record<string, string> = { folder: "i-folder", filter: "i-shield", video: "i-video", audio: "i-audio", subtitles: "i-subtitle", file: "i-file", check: "i-checks", save: "i-save", cond: "i-cond", history: "i-history", branch: "i-branch", stop: "i-stop" }; // branch, stop: V6a check + end
 // The words around each option come from the server's step definitions (#114: title, description, x-enumHints for
 // each choice, x-placeholder); the page adds none of its own.
 const MORE: Record<string, string[]> = { "video.convert": ["format", "resolution", "maxBitrate", "speed"] };
@@ -61,17 +62,39 @@ function Field({ id, name, s, value, set }: { id: string; name: string; s: JSONS
   if (s.enum)
     return <div className="field"><label htmlFor={fid}>{title}</label><select id={fid} className="input" value={String(value)} onChange={(e) => set(labels(s).find((o) => String(o[0]) === e.target.value)?.[0])}>
       {labels(s).map(([v, l]) => <option key={String(v)} value={String(v)}>{l}</option>)}</select><Hint text={hintFor(s, value)} />{typeof s.description === "string" && <span className="hint">{s.description}</span>}</div>;
+  // a list of choices (V6a check: "Video format is one of"): a checkbox per choice
+  const items = s.items as JSONSchema | undefined;
+  if (s.type === "array" && items?.enum) {
+    const known = labels(items).map((o) => o[0]), on = ((value as unknown[]) ?? []).filter((x) => known.includes(x)); // a change drops values it doesn't know (#165: so a bad item can be fixed)
+    return (
+      <fieldset className="field choice"><legend className="lab">{title}</legend><div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+        {labels(items).map(([v, l]) => <label key={String(v)} className="row nw"><input type="checkbox" checked={on.includes(v)} onChange={(e) => set(e.target.checked ? [...on, v] : on.filter((x) => x !== v))} /><span>{l}</span></label>)}
+      </div>{typeof s.description === "string" && <span className="hint">{s.description}</span>}</fieldset>);
+  }
   const hint = typeof s.description === "string" ? <span className="hint" id={fid + "-h"}>{s.description}{s.type === "array" ? " One per line." : ""}</span> : null;
+  if (s.type === "integer" || s.type === "number") // a number, saved as a number (empty: not set)
+    return <div className="field"><label htmlFor={fid}>{title}</label><input id={fid} className="input" type="number" inputMode="decimal" min={s.minimum as number | undefined} step={s.type === "integer" ? 1 : "any"}
+      value={value == null ? "" : String(value)} onChange={(e) => { if (e.target.value === "") return set(undefined); const n = s.type === "integer" ? Math.trunc(Number(e.target.value)) : Number(e.target.value), lo = s.minimum as number | undefined; set(lo != null && n < lo ? lo : n); }} aria-describedby={hint ? fid + "-h" : undefined} />{hint}</div>;
   if (s.type === "array")
     return <div className="field"><label htmlFor={fid}>{title}</label><textarea id={fid} className="input" rows={2} value={((value as string[]) ?? []).join("\n")}
       onChange={(e) => set(e.target.value.split("\n").map((x) => x.trim()).filter(Boolean))} aria-describedby={hint ? fid + "-h" : undefined} />{hint}</div>;
   return <div className="field"><label htmlFor={fid}>{title}</label><input id={fid} className="input" value={String(value ?? "")} placeholder={(s["x-placeholder"] as string) ?? undefined} onChange={(e) => set(e.target.value)} aria-describedby={hint ? fid + "-h" : undefined} />{hint}</div>;
 }
 
-function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown) => void; issues: ValidationIssue[] }) {
+export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown) => void; issues: ValidationIssue[] }) {
   const { stepDef, libs } = useReg(), def = stepDef(n.type)!, props = Object.fromEntries(Object.entries((def.configSchema.properties ?? {}) as Props).filter(([, s]) => !s.readOnly)) as Props, c = n.config;
   const keys = Object.keys(props).filter((k) => !(MORE[n.type] ?? []).includes(k)), more = (MORE[n.type] ?? []).filter((k) => props[k]);
-  const field = (k: string) => <Field key={k} id={n.id} name={k} s={props[k]} value={c[k] ?? props[k].default} set={(v) => set(k, v)} />;
+  // #165: a setting's own problems (invalid_config, keyed on the step + field) show at that field, which is marked
+  const bad = (k: string) => issues.filter((i) => i.nodeId === n.id && (i.field === k || i.configPath === "/" + k) && i.code !== "unconnected_port");
+  const field = (k: string) => { const b = bad(k); return (
+    <div key={k} className={b.length ? "fieldbad" : undefined} data-field={k} aria-invalid={b.length ? true : undefined}>
+      <Field id={n.id} name={k} s={props[k]} value={c[k] ?? props[k].default} set={(v) => set(k, v)} />
+      {b.map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
+    </div>); };
+  // a problem in a field under 'More options' opens it by itself (review c0189fa P3), also when the problems list picks
+  // this step; it isn't closed again when the last one is fixed, so the field doesn't vanish while it's being edited
+  const moreRef = useRef<HTMLDetailsElement>(null), moreBad = more.some((k) => bad(k).length > 0);
+  useEffect(() => { if (moreBad && moreRef.current) moreRef.current.open = true; }, [moreBad, n.id]);
   const problem = (path: string) => issues.filter((i) => i.nodeId === n.id && i.configPath === path).map((i) => <span key={i.code} className="hint" style={{ color: "var(--error-text)" }}>{i.message}</span>);
   if (n.type === "output.commit") {
     const policy = (c.policy as string) ?? "separate_folder", mode = (c.folderMode as string) ?? "next_to_library";
@@ -90,7 +113,7 @@ function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown) => 
           </div><Hint text={hintFor(props.folderMode, mode)} />{problem("/folderMode")}
           {mode === "next_to_library" && libs.length > 0 && <ul className="mono sm" style={{ listStyle: "none", margin: "6px 0 0", padding: 0 }} aria-label="Where each library's new files go">
             {libs.map((p) => <li key={p} style={{ overflowWrap: "anywhere" }}>{p} → {shrunk(p)}</li>)}</ul>}</fieldset>)}
-        {policy === "separate_folder" && mode === "one_folder" && <>{field("folder")}{problem("/folder")}</>}
+        {policy === "separate_folder" && mode === "one_folder" && <>{field("folder")}<div className="row"><Browse value={String(c.folder ?? "")} onPick={(p) => set("folder", p)} /></div>{problem("/folder")}</>}
       </div>);
   }
   return (
@@ -98,7 +121,7 @@ function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown) => 
       {keys.map(field)}
       {n.type === "video.convert" && <>
         <p className="hint">Every video not already in this format is converted, even if the new file isn't smaller, so your library ends up in one format. Jobs shows the size before and after.</p></>}
-      {more.length > 0 && <details><summary className="btn sm" style={{ display: "inline-flex" }}>More options</summary><div className="grid cols2" style={{ marginTop: 12 }}>{more.map(field)}</div></details>}
+      {more.length > 0 && <details ref={moreRef}><summary className="btn sm" style={{ display: "inline-flex" }}>More options</summary><div className="grid cols2" style={{ marginTop: 12 }}>{more.map(field)}</div></details>}
     </div>);
 }
 

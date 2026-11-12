@@ -51,7 +51,7 @@ func fullDecodeTimeout(durationSec float64) time.Duration {
 // checkFailed turns an error from a check's ffmpeg/ffprobe call into the refusal reason, saying so
 // plainly when it was our time limit that ended it.
 func checkFailed(cctx context.Context, what string, err error) error {
-	log.Printf("check failed: %s: %v", what, err) // the technical detail, for the log and Settings > System
+	log.Printf("check failed: %s: %v", what, err) // the technical detail, for the log and Settings > About
 	// both may pass (a slow or busy disk, a crash of the tool): tried again later (DD-2)
 	if errors.Is(cctx.Err(), context.DeadlineExceeded) {
 		return retryable(kept("%s took too long, so the original is kept. Press Retry later; a very slow disk or a damaged file can cause this", what), retryGeneral)
@@ -63,6 +63,9 @@ func checkFailed(cctx context.Context, what string, err error) error {
 type KeptError struct{ Code, Reason string } // Code: one of jobs.JobReasonCodes
 
 func (e *KeptError) Error() string { return "kept original: " + e.Reason }
+
+// pictureTooDifferent begins the picture check's refusal.
+const pictureTooDifferent = "the picture of the new file is too different from the original"
 
 func kept(format string, a ...any) error {
 	return &KeptError{Code: jobs.ReasonKeptOriginal, Reason: fmt.Sprintf(format, a...)}
@@ -205,6 +208,11 @@ func (w *Worker) decodeCheck(ctx context.Context, out media.Info, tmp string) er
 	return nil
 }
 
+// opusParserRe is the one message ffmpeg 8's demuxer prints for the last Opus packet of a good file, even
+// when only the video is played (ffmpeg 8.0.1: any Opus audio in MKV/WebM, ours or not; the file plays
+// to the end and the exit status is 0). It says nothing about the video that is being checked.
+var opusParserRe = regexp.MustCompile(`(?m)^\[opus @ [0-9a-fx]+\] Error parsing Opus packet header\.\s*$`)
+
 func (w *Worker) decodeRun(ctx context.Context, tmp string, videoOrd int, start, length, playSec float64) error {
 	args := []string{"-v", "error", "-xerror", "-nostdin"}
 	if length > 0 {
@@ -224,7 +232,7 @@ func (w *Worker) decodeRun(ctx context.Context, tmp string, videoOrd int, start,
 	dctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	_, stderr, err := w.Exec.Capture(dctx, w.FFmpeg, args...)
-	text := strings.TrimSpace(string(stderr))
+	text := strings.TrimSpace(opusParserRe.ReplaceAllString(string(stderr), ""))
 	if errors.Is(dctx.Err(), context.DeadlineExceeded) {
 		return checkFailed(dctx, "the playback test of the new file", err)
 	}
@@ -253,10 +261,10 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 	has, err := w.hasFilter(ctx, "ssim")
 	if err != nil {
 		log.Printf("picture comparison filter: %v", err)
-		return kept("it could not be checked whether picture quality can be compared. Press Retry; if it keeps failing, Settings > System says what is wrong")
+		return kept("it could not be checked whether picture quality can be compared. Press Retry; if it keeps failing, Settings > About says what is wrong")
 	}
 	if !has {
-		return kept("the installed converter cannot compare picture quality, which is needed before a file is replaced. Settings > System says what to install")
+		return kept("the installed converter cannot compare picture quality, which is needed before a file is replaced. Settings > About says what to install")
 	}
 	threshold := w.minSSIM()
 	if planSSIM > 0 { // the flow's own threshold (a slider position's SSIM gate)
@@ -286,7 +294,7 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 			}
 		}
 		if best < threshold { // one place that is too different is enough
-			return kept("the picture of the new file is too different from the original (similarity %.3f at %s, %.2f is required)",
+			return kept(pictureTooDifferent+" (similarity %.3f at %s, %.2f is required)",
 				best, rules.Clock(seg.start), threshold)
 		}
 	}

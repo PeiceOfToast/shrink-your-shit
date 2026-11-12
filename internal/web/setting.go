@@ -537,6 +537,7 @@ func withWarnings(store *jobs.Store, f jobs.Flow) map[string]any {
 const (
 	nextToLibraryHere = "This workflow saves new files next to each library, which this page can't show. Edit it in the new UI."
 	branchesHere      = "This workflow has checks and paths this page can't show. Edit it in the new UI."
+	vbrHere           = "This workflow uses VBR, which this page can't show. Edit it in the new UI."
 	readOnlyHere      = "This flow can't be changed here: it was made by an earlier install or in a way these editors can't show."
 )
 
@@ -557,6 +558,8 @@ func notEditableHere(t rules.Template) (code, message string) {
 		return "edit_in_new_ui", branchesHere
 	case t.Selectors != nil && t.Selectors.AfterConverting == "folder" && t.Selectors.FolderMode == rules.NextToLibrary:
 		return "edit_in_new_ui", nextToLibraryHere
+	case t.Selectors != nil && t.Selectors.RateControl == "vbr": // user review 11-12 item 1: v1 has no VBR fields
+		return "edit_in_new_ui", vbrHere
 	case t.Level() != "basic" && t.Level() != "standard":
 		return "flow_read_only", readOnlyHere
 	}

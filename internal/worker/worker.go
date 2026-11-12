@@ -340,7 +340,7 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 			return true, err
 		}
 		// The person sees what happened in plain words; the technical error goes to the log
-		// (Settings > System shows its last lines).
+		// (Settings > About shows its last lines).
 		w.jobf(job.ID, " (%s) failed: %v", job.Path, err)
 		w.Queue.AddStep(job.ID, "converted", false, plainFailure(err))
 		if ferr := w.Queue.Fail(job.ID, reasonCode(err), plainFailure(err)); ferr != nil {
@@ -407,7 +407,7 @@ type SkippedError struct{ Words, Code string }
 
 func (e *SkippedError) Error() string { return "skipped: " + e.Words }
 
-const cannotRead = "shrink-your-shit is not allowed to read this file, so nothing was converted. Let it read the file (Settings > System says how), then press Retry."
+const cannotRead = "shrink-your-shit is not allowed to read this file, so nothing was converted. Let it read the file (Settings > About says how), then press Retry."
 
 const diskFull = "The disk is full, so converting stopped. Your original was not touched. Free some space, then press Retry."
 
@@ -421,9 +421,9 @@ func plainFailure(err error) string {
 	case errors.Is(err, syscall.ENOSPC):
 		return diskFull
 	case errors.Is(err, fs.ErrPermission):
-		return "shrink-your-shit is not allowed to write in this folder, so converting stopped. Your original was not touched. Let it write there (Settings > System says how), then press Retry."
+		return "shrink-your-shit is not allowed to write in this folder, so converting stopped. Your original was not touched. Let it write there (Settings > About says how), then press Retry."
 	}
-	return "Converting did not finish. Your original was not touched. Press Retry; if it keeps failing, Settings > System shows what went wrong."
+	return "Converting did not finish. Your original was not touched. Press Retry; if it keeps failing, Settings > About shows what went wrong."
 }
 
 // reasonCode is the code of a failed or refused conversion (one of jobs.JobReasonCodes), beside its
@@ -492,6 +492,31 @@ func (w *Worker) watchStall(id int64) func() {
 			case <-t.C:
 				if time.Since(time.Unix(0, w.progressAt.Load())) >= after {
 					w.jobf(id, ": no progress for %s, stopping it", after)
+					w.stop(id, stopStall)
+					return
+				}
+			}
+		}
+	}()
+	return func() { close(done) }
+}
+
+// watchRemoteStall is watchStall for a remote worker's encode: the worker reports its position, and the
+// job is stopped (stopStall, the same words and retry rules) when it hasn't moved on for stallAfter
+// while the worker says it is converting.
+func (w *Worker) watchRemoteStall(id int64, rj *RemoteJob) func() {
+	after := w.stallAfter()
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(max(after/20, 10*time.Millisecond))
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case now := <-t.C:
+				if still, judging := rj.stillFor(now); judging && still >= after {
+					w.jobf(id, ": the remote encode made no progress for %s, stopping it", after)
 					w.stop(id, stopStall)
 					return
 				}
@@ -742,7 +767,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	var encErr string
 	var terr error
 	if w.remote != nil { // V7b2: a worker on another computer converts and checks; its file comes up here
+		stopWatch := w.watchRemoteStall(job.ID, w.remote)
 		encErr, terr = w.remote.convert(ctx, w, job, snap, srcPath, tmp)
+		stopWatch()
 		var k *KeptError
 		if errors.As(terr, &k) || errors.Is(terr, errLeaseLost) {
 			return "", terr
@@ -750,8 +777,17 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	} else {
 		stopWatch := w.watchStall(job.ID)
 		var tenths progressLines
+		at := -1.0 // the furthest position ffmpeg has reached
 		encErr, terr = media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
-			w.progressAt.Store(time.Now().UnixNano())
+			// only a position further on is progress: a stuck ffmpeg can keep reporting the same one (a
+			// damaged file, 21 min on a test run, never stopped), which mustn't hold off the stall stop
+			if p.OutTimeUS > at {
+				at = p.OutTimeUS
+				w.progressAt.Store(time.Now().UnixNano())
+			}
+			if job.DurationSec <= 0 {
+				return // no length: no percent to show
+			}
 			w.Queue.Progress(job.ID, p.Percent)
 			updateLive(job.ID, p)
 			if line := tenths.next(p); line != "" {
@@ -795,6 +831,12 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		return "", err
 	}
 	if err := w.verify(ctx, src, exp, srcPath, tmp, before.Size()); err != nil {
+		var k *KeptError
+		if errors.As(err, &k) && plan.Video.PeakLimitKbps > 0 && strings.HasPrefix(k.Reason, pictureTooDifferent) {
+			// design (SCREENS V3 step 3): VBR's own words; the measured similarity goes to the run log
+			w.jobf(job.ID, ": %s", k.Reason)
+			k.Reason = "Kept the original: under a " + rules.Mbps(plan.Video.PeakLimitKbps) + " Mbps peak limit the picture would suffer."
+		}
 		return "", err
 	}
 	for k := range plan.SubtitleFiles() { // each subtitle that was to be saved as a file was saved

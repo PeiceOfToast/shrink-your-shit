@@ -14,7 +14,7 @@ mkdir -p "$dist"
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 
-# The new UI (web/, served at /next/) is built once into internal/web/next/dist and embedded in every binary.
+# The UI (web/, served at /) is built once into internal/web/next/dist and embedded in every binary.
 (cd "$root/web" && npm ci --no-audit --no-fund && npm run build)
 
 for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do

@@ -238,7 +238,7 @@ func main() {
 			}
 		}()
 	} else {
-		log.Print("The converter is not installed correctly (ffmpeg and ffprobe with libx265 and the ssim filter are needed), so nothing is scanned or converted. The web page's Settings > System says what is missing; fix it, then restart shrink-your-shit.")
+		log.Print("The converter is not installed correctly (ffmpeg and ffprobe with libx265 and the ssim filter are needed), so nothing is scanned or converted. The web page's Settings > About says what is missing; fix it, then restart shrink-your-shit.")
 	}
 	// Kept originals are purged every hour whether or not converting can run (review 172f049).
 	go func() {
@@ -264,7 +264,7 @@ func main() {
 			return &worker.Worker{ID: id, Logs: runLogs, Queue: store, Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath,
 				Template: store.TemplateFor, Poll: 3 * time.Second,
 				DecodeCheck: *decode, MinSSIM: *minSSIM, KeepDays: keepDays, Journal: store, Sidecars: store,
-				Paused: store.Paused, StallAfter: *stallAfter}
+				Paused: func() bool { return !store.WorkerEnabled(jobs.LocalWorker) }, StallAfter: *stallAfter} // this computer's own switch
 		},
 		Size: func() int {
 			if s, err := web.LoadSettings(store); err == nil {
