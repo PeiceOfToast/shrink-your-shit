@@ -91,6 +91,10 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
       <Field id={n.id} name={k} s={props[k]} value={c[k] ?? props[k].default} set={(v) => set(k, v)} />
       {b.map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
     </div>); };
+  // a problem in a field under 'More options' opens it by itself (review c0189fa P3), also when the problems list picks
+  // this step; it isn't closed again when the last one is fixed, so the field doesn't vanish while it's being edited
+  const moreRef = useRef<HTMLDetailsElement>(null), moreBad = more.some((k) => bad(k).length > 0);
+  useEffect(() => { if (moreBad && moreRef.current) moreRef.current.open = true; }, [moreBad, n.id]);
   const problem = (path: string) => issues.filter((i) => i.nodeId === n.id && i.configPath === path).map((i) => <span key={i.code} className="hint" style={{ color: "var(--error-text)" }}>{i.message}</span>);
   if (n.type === "output.commit") {
     const policy = (c.policy as string) ?? "separate_folder", mode = (c.folderMode as string) ?? "next_to_library";
@@ -117,7 +121,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
       {keys.map(field)}
       {n.type === "video.convert" && <>
         <p className="hint">Every video not already in this format is converted, even if the new file isn't smaller, so your library ends up in one format. Jobs shows the size before and after.</p></>}
-      {more.length > 0 && <details><summary className="btn sm" style={{ display: "inline-flex" }}>More options</summary><div className="grid cols2" style={{ marginTop: 12 }}>{more.map(field)}</div></details>}
+      {more.length > 0 && <details ref={moreRef}><summary className="btn sm" style={{ display: "inline-flex" }}>More options</summary><div className="grid cols2" style={{ marginTop: 12 }}>{more.map(field)}</div></details>}
     </div>);
 }
 
