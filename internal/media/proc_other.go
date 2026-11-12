@@ -9,3 +9,7 @@ import "os/exec"
 // dieWithParent does nothing here: only Linux can tie a child's life to its parent's. A converter left
 // running after the server died is cleaned up at the next start (the staging sweep).
 func dieWithParent(cmd *exec.Cmd) {}
+
+// killGroup does nothing here: a stopped program is killed alone (exec's default), and StopWaitDelay
+// still ends the run if something it started holds its output.
+func killGroup(cmd *exec.Cmd) {}
