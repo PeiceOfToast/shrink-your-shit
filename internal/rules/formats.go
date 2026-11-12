@@ -44,7 +44,18 @@ func SetAvailableFormats(encoders map[string]bool) {
 	}
 	availableMu.Lock()
 	AvailableFormats = out
+	availableEncoders = encoders
 	availableMu.Unlock()
+}
+
+// availableEncoders are this ffmpeg's encoders (nil until read: then every one counts as there).
+var availableEncoders map[string]bool
+
+// HasEncoder reports whether this ffmpeg has encoder name (true before the encoders were read).
+func HasEncoder(name string) bool {
+	availableMu.RLock()
+	defer availableMu.RUnlock()
+	return availableEncoders == nil || availableEncoders[name]
 }
 
 // Available is the formats this computer can make now.

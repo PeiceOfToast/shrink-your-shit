@@ -188,3 +188,35 @@ func TestPatchStoresRetiredSettings(t *testing.T) {
 		t.Errorf("bad level: %d %s", code, body)
 	}
 }
+
+// First run's step 1 (design, 02:41Z): the library's name and folder wait in the settings (the folder
+// needn't exist), null clears them, a wrong type is refused, and making any library clears them.
+func TestFirstRunLibrary(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	get := func() map[string]any {
+		t.Helper()
+		_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/settings"})
+		return settingsOf(t, body)
+	}
+	if v, ok := get()["firstRunLibrary"]; !ok || v != nil {
+		t.Errorf("new install: %v %v", v, ok)
+	}
+	if code, body := post(t, srv, "PATCH", "/api/settings", `{"firstRunLibrary":{"name":"Movies","path":"/media/not-there-yet"}}`); code != 200 {
+		t.Fatalf("patch %d %s", code, body)
+	}
+	if v, _ := get()["firstRunLibrary"].(map[string]any); v["name"] != "Movies" || v["path"] != "/media/not-there-yet" {
+		t.Errorf("stored %v", v)
+	}
+	if code, _ := post(t, srv, "PATCH", "/api/settings", `{"firstRunLibrary":{"name":5}}`); code != 400 {
+		t.Errorf("wrong type: %d", code)
+	}
+	post(t, srv, "PATCH", "/api/settings", `{"firstRunLibrary":null}`)
+	if get()["firstRunLibrary"] != nil {
+		t.Error("null didn't clear it")
+	}
+	post(t, srv, "PATCH", "/api/settings", `{"firstRunLibrary":{"name":"Movies","path":"/m"}}`)
+	st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), false)
+	if get()["firstRunLibrary"] != nil {
+		t.Error("making a library didn't clear it")
+	}
+}
