@@ -287,8 +287,10 @@ export function libraryItem(l: Library): LibraryItem {
   };
 }
 // POST /api/libraries/check {path}. /readonly, /empty, /full and /locked show v1's other answers.
-export function checkFolder(path: string, outputFolder?: string): Answer<FolderReport> {
+export function checkFolder(path: string, outputFolder?: string, nextToLibrary = false): Answer<FolderReport> {
   const p = trim(path), r: FolderReport = { ok: false, blockers: [], notes: [], videoCount: 0, totalBytes: 0 };
+  if (nextToLibrary && p.startsWith("/") && (p.replace(/\/[^/]*$/, "") || "/") === "/") // #144, as jobs.NextToLibrary: a folder right under / has none beside it
+    r.blockers.push({ code: "no_default_folder", folder: "/", reason: "container_root", message: "No folder for new files for " + p.slice(1) + " yet: / is the container's own disk. Pick a folder in the library's Output tab, or choose One folder for all." });
   // #128: with outputFolder, a workflow saving new files inside this folder (or holding it) is refused, in the add's words
   const o = outputFolder ? trim(outputFolder) : "";
   if (o.startsWith("/") && (o === p || o.startsWith(p + "/") || p.startsWith(o + "/")))

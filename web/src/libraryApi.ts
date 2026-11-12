@@ -23,8 +23,11 @@ export async function listWorkflows(): Promise<Answer<WorkflowChoice[]>> {
   const r = await call<{ items: Workflow[] }>("GET", "/api/v2/workflows");
   return failed(r) ? r : r.items.map((w) => ({ id: w.id, name: w.name, usable: w.publishedRevisionId != null, usedBy: w.libraries.map((l) => l.name) }));
 }
-export const checkFolder = (path: string, outputFolder?: string): Promise<Answer<FolderReport>> =>
-  MOCK ? M(mock.checkFolder(path, outputFolder)) : call("POST", "/api/libraries/check", { path, ...(outputFolder && { outputFolder }) }); // outputFolder: #128
+// outputFolder: #128. next (#144): is there a usable folder beside it for "Next to each library", before the library
+// exists? If not, a no_default_folder blocker with folder (the parent) and reason (not_writable | different_disk |
+// container_root).
+export const checkFolder = (path: string, outputFolder?: string, next?: { name: string }): Promise<Answer<FolderReport>> =>
+  MOCK ? M(mock.checkFolder(path, outputFolder, !!next)) : call("POST", "/api/libraries/check", { path, ...(outputFolder && { outputFolder }), ...(next && { nextToLibrary: true, name: next.name }) });
 export const firstFiles = (path: string): Promise<Answer<FirstFiles>> => (MOCK ? M(mock.firstFiles(path)) : call("POST", "/api/libraries/first-files", { path }));
 export const addLibrary = (name: string, path: string, flowId: string): Promise<Answer<LibraryItem>> =>
   MOCK ? M(mock.addLibrary(name, path, flowId)) : call("POST", "/api/libraries", { name, path, flowId });

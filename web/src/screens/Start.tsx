@@ -8,7 +8,7 @@ import { PageHead } from "../PageHead";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
-import { addLibrary, getSettings, listLibraries, listWorkers, listWorkflows, patchSettings, scanLibrary, shrunk, startSimpleWorkflow, startWorker } from "../libraryApi";
+import { addLibrary, checkFolder, getSettings, listLibraries, listWorkers, listWorkflows, patchSettings, scanLibrary, shrunk, startSimpleWorkflow, startWorker } from "../libraryApi";
 import { Link, navigate } from "../router";
 import { useData } from "../useData";
 import type { FirstRunSettings } from "../types/v1";
@@ -79,10 +79,26 @@ function StepLibrary({ kept, onDone, taken }: { kept: Kept | null; onDone: (v: K
 const NEXT_HINT = "Each library gets a folder beside it, e.g. /media/movies (shrunk). Same disk, and it works when one workflow serves several libraries.";
 const ONE_HINT = "Every converted file goes into the folder below, in the same sub-folders as in its library.";
 
+// Design's line (IA.md First run, #144) when a library has no usable folder beside it; the reason's words by its code.
+const REASON: Record<string, string> = { not_writable: "can't be written to", different_disk: "is on a different disk", container_root: "is the container's own disk" };
+const nextLine = (path: string, p: { folder?: string; reason?: string; message: string }) =>
+  p.folder && p.reason && REASON[p.reason] ? "New files can't go next to " + path + ": " + p.folder + " " + REASON[p.reason] + ". Pick a folder for them below." : p.message;
+
 function StepWorkflow({ kept, onDone }: { kept: Kept; onDone: () => void }) {
   const [name, setName] = useState("Shrink videos"), [one, setOne] = useState(false), [out, setOut] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false);
   const [made, setMade] = useState<string>();
   const [focusOut, setFocusOut] = useState(0), outRef = useRef<HTMLInputElement>(null);
+  // #144: ask first whether the library's folder can have one beside it; if not, One folder for all is preselected
+  // with its field open, and design's line says why (from folder + reason, never from the server's sentence)
+  const [noNext, setNoNext] = useState<{ folder?: string; reason?: string; message: string } | null>(null);
+  useEffect(() => {
+    let live = true;
+    checkFolder(kept.path, undefined, { name: kept.name }).then((r) => {
+      const b = !live || failed(r) ? undefined : r.blockers.find((x) => x.code === "no_default_folder");
+      if (b) { setNoNext(b); setOne(true); }
+    }).catch((e) => { if (!(e instanceof SignedOut)) throw e; });
+    return () => { live = false; };
+  }, [kept.path, kept.name]);
   useEffect(() => { if (focusOut && !busy) outRef.current?.focus(); }, [focusOut, busy]); // after the field is drawn and the button is back // the workflow an earlier try made: a retry reuses it
   const save = async () => {
     setError("");
@@ -97,7 +113,7 @@ function StepWorkflow({ kept, onDone }: { kept: Kept; onDone: () => void }) {
       // server's sentence as it is (design's own line waits for workshop's folder + reason fields, after V5b)
       const added = await ok(addLibrary(kept.name, kept.path, w.id), (m, code) => {
         setError(m);
-        if (code === "no_default_folder") { setOne(true); setFocusOut((n) => n + 1); }
+        if (code === "no_default_folder") { setOne(true); setFocusOut((n) => n + 1); } // the check before didn't catch it
       });
       if (added) onDone();
     } finally { setBusy(false); }
@@ -123,6 +139,7 @@ function StepWorkflow({ kept, onDone }: { kept: Kept; onDone: () => void }) {
           <div className="radio"><input type="radio" id="s2-one" name="where" checked={one} onChange={() => setOne(true)} />
             <div style={{ minWidth: 0, flex: 1 }}><label htmlFor="s2-one">One folder for all</label>
               <div className="hint">{ONE_HINT}</div></div></div>
+          {one && noNext && <p className="st warn" role="note"><Icon id="i-alert" /><span>{nextLine(kept.path, noNext)}</span></p>}
           {one && <div className="field"><label htmlFor="s2-out">Folder for new files</label>
             <input id="s2-out" ref={outRef} className="input mono" value={out} placeholder="/media/shrunk" onChange={(e) => setOut(e.target.value)} aria-describedby="s2-out-hint" />
             <span id="s2-out-hint" className="hint">A folder outside {kept.path}.</span></div>}
