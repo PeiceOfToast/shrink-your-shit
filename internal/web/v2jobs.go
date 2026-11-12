@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -104,6 +105,31 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 		writeJSON(w, map[string]any{"items": items, "total": total, "counts": tabCounts})
 	})
 
+	// Convert again (design 11:45Z): a done job runs again from its original with its workflow as it is now.
+	api.HandleFunc("POST /api/v2/jobs/{id}/convert-again", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{}
+		if !readJSON(w, r, &in) {
+			return
+		}
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil || id <= 0 {
+			apiError(w, http.StatusNotFound, "not_found", "There is no such job.")
+			return
+		}
+		err = store.ConvertAgain(id)
+		var ae jobs.AgainError
+		switch {
+		case errors.Is(err, jobs.ErrNotFound):
+			apiError(w, http.StatusNotFound, "not_found", "There is no such job.")
+		case errors.As(err, &ae):
+			writeErrorWith(w, http.StatusConflict, ae.Code, ae.Message, map[string]any{"deletedAt": nilIfEmpty(ae.DeletedAt)})
+		case err != nil:
+			serverError(w, err)
+		default:
+			writeJSON(w, map[string]any{"ok": true, "jobId": strconv.FormatInt(id, 10)})
+		}
+	})
+
 	api.HandleFunc("GET /api/v2/jobs/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 		if err != nil || id <= 0 {
@@ -129,8 +155,14 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 				serverError(w, err)
 				return
 			}
-			writeJSON(w, map[string]any{"id": strconv.FormatInt(id, 10), "state": v2State(last.To, nil, nil), "reason": reasonOf(last),
-				"events": v2Events(events), "steps": steps, "attempts": last.Attempts, "removed": true})
+			d := map[string]any{"id": strconv.FormatInt(id, 10), "state": v2State(last.To, nil, nil), "reason": reasonOf(last),
+				"events": v2Events(events), "steps": steps, "attempts": last.Attempts, "removed": true, "file": nil}
+			for _, e := range events { // its file as recorded when it went (ui-shop 10:54Z: not "Job 8")
+				if e.Path != "" {
+					d["file"] = map[string]any{"path": e.Path, "name": filepath.Base(e.Path), "folder": filepath.Dir(e.Path)}
+				}
+			}
+			writeJSON(w, d)
 			return
 		}
 		if err != nil {
@@ -175,6 +207,7 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 			}
 		}
 		d["metadata"] = meta
+		d["convertAgain"] = convertAgainOf(store, id)
 		if lib, err := store.GetLibrary(j.LibraryID); err == nil {
 			d["library"] = map[string]any{"id": strconv.FormatInt(lib.ID, 10), "name": lib.Name}
 			// the revision it runs with: a waiting job (never started, or back to retry) runs the newest published
@@ -420,4 +453,17 @@ func reasonOf(e jobs.JobEvent) any {
 func isQueued(store *jobs.Store, id int64) bool {
 	j, err := store.Get(id)
 	return err == nil && j.Status == jobs.Queued
+}
+
+// convertAgainOf is a job detail's convertAgain: whether Convert again can run, and if not, why (the
+// drawer's muted line, e.g. "Can't convert again: the original was deleted on 12 November 2026.").
+func convertAgainOf(store *jobs.Store, id int64) map[string]any {
+	c, err := store.ConvertAgainCheck(id)
+	if err != nil {
+		return map[string]any{"possible": false, "reason": nil}
+	}
+	if c.Possible {
+		return map[string]any{"possible": true, "reason": nil}
+	}
+	return map[string]any{"possible": false, "reason": map[string]any{"code": c.Code, "message": c.Message, "deletedAt": nilIfEmpty(c.DeletedAt)}}
 }

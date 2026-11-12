@@ -1,0 +1,81 @@
+// Copyright (C) shrink-your-shit contributors. Licensed under AGPL-3.0-or-later.
+
+package web
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strconv"
+	"testing"
+	"time"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+)
+
+// Convert again (design 11:45Z): a done job's detail says whether it can run again; POST queues it;
+// a kept original that was deleted refuses it with the date.
+func TestV2ConvertAgain(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	type again struct {
+		Possible bool
+		Reason   *struct {
+			Code, Message string
+			DeletedAt     *string
+		}
+	}
+	detail := func(id int64) again {
+		t.Helper()
+		_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10)})
+		var d struct{ ConvertAgain again }
+		json.Unmarshal([]byte(body), &d)
+		return d.ConvertAgain
+	}
+	post := func(id int64) (int, string) {
+		code, body, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10) + "/convert-again", body: `{}`, ctype: "application/json"})
+		return code, body
+	}
+	// the original stayed where it was (output-first)
+	src := filepath.Join(lib.Path, "a.mkv")
+	os.WriteFile(src, []byte("original"), 0o644)
+	id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: src})
+	if a := detail(id); a.Possible || a.Reason == nil || a.Reason.Code != jobs.AgainNotDone {
+		t.Errorf("waiting: %+v", a)
+	}
+	st.Claim("w")
+	st.Complete(id, filepath.Join(lib.Path+" (shrunk)", "a.mkv"), 4)
+	if a := detail(id); !a.Possible || a.Reason != nil {
+		t.Errorf("done: %+v", a)
+	}
+	if code, body := post(id); code != 200 {
+		t.Fatalf("convert again %d %s", code, body)
+	}
+	if j, _ := st.Get(id); j.Status != jobs.Queued || st.AgainFrom(id) != 0 {
+		t.Errorf("queued from the original in place: %s %d", j.Status, st.AgainFrom(id))
+	}
+	if code, body := post(id); code != 409 || errCode(body) != jobs.AgainNotDone {
+		t.Errorf("not done: %d %s", code, body)
+	}
+	// replaced, and its kept original deleted since
+	b := filepath.Join(lib.Path, "b.mkv")
+	os.WriteFile(b, []byte("new"), 0o644)
+	other, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: b})
+	st.Claim("w") // the first one, queued again
+	if j, _ := st.Claim("w"); j.ID != other {
+		t.Fatalf("claimed %d", j.ID)
+	}
+	row, _ := st.BeginSwap(jobs.Original{JobID: other, Path: b, Trash: filepath.Join(lib.Path, ".syp-trash", "b.2.mkv")})
+	deleteOn := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	st.FinishSwap(row, deleteOn)
+	st.Complete(other, b, 3)
+	st.SetSwapState(row, jobs.OriginalPurged)
+	a := detail(other)
+	if a.Possible || a.Reason == nil || a.Reason.Code != jobs.AgainOriginalGone || a.Reason.DeletedAt == nil || *a.Reason.DeletedAt != deleteOn.Format(time.RFC3339) {
+		t.Errorf("purged: %+v", a)
+	}
+	if code, body := post(other); code != 409 || errCode(body) != jobs.AgainOriginalGone {
+		t.Errorf("purged post: %d %s", code, body)
+	}
+}

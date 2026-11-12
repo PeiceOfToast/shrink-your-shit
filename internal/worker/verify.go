@@ -177,6 +177,9 @@ func (w *Worker) verify(ctx context.Context, src media.Info, exp rules.Expect, s
 	if exp.VideoCopied { // repackaged (S4): the video is the same bytes, so there is no picture to compare
 		return nil
 	}
+	if w.remote != nil { // the remote worker compared the pictures itself, against its copy (Q4 a)
+		return nil
+	}
 	return w.ssimCheck(ctx, src, out, srcPath, tmp, exp.MinSSIM)
 }
 

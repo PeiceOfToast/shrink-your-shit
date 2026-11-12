@@ -91,7 +91,7 @@ export function Shell({ title, proto, children }: { title: string; proto: boolea
         <Link className="brand" to="/"><span className="logo"><Icon id="i-layers" /></span><span className="t">Shrink Your Shit</span></Link>
         <div className="nav">
           {NAV.map(([group, items]) => [
-            <div className="grp" key={group}>{group}</div>,
+            <div className="grp" key={group} aria-hidden="true" />, // clean pass 2 (7.1): groups by a 14 px gap, no eyebrow label
             ...items.map((n) => (
               <Link key={n.to} to={n.to} title={n.label} aria-current={current === n ? "page" : undefined}>
                 <Icon id={n.icon} /><span className="lbl">{n.label}</span>

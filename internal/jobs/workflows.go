@@ -501,11 +501,14 @@ type JobEvent struct {
 	Worker  string `json:"worker,omitempty"`
 	// Attempts are the tries a job had made when it ended by being deleted (skipped, stopped); 0 otherwise.
 	Attempts int `json:"-"`
+	// Path is the job's file, recorded when it ended by being deleted; "" otherwise (or before migration 32
+	// for a job removed with its library).
+	Path string `json:"-"`
 }
 
 // JobEvents is job id's history, oldest first; it stays after the job's row is gone.
 func (s *Store) JobEvents(id int64) ([]JobEvent, error) {
-	rows, err := s.db.Query(`SELECT seq, at, from_status, to_status, reason, COALESCE(json_extract(data,'$.message'),''), worker, COALESCE(json_extract(data,'$.attempts'),0) FROM events WHERE kind='job' AND job_id=? ORDER BY seq`, id)
+	rows, err := s.db.Query(`SELECT seq, at, from_status, to_status, reason, COALESCE(json_extract(data,'$.message'),''), worker, COALESCE(json_extract(data,'$.attempts'),0), COALESCE(json_extract(data,'$.path'),'') FROM events WHERE kind='job' AND job_id=? ORDER BY seq`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -514,7 +517,7 @@ func (s *Store) JobEvents(id int64) ([]JobEvent, error) {
 	for rows.Next() {
 		var e JobEvent
 		var from sql.NullString
-		if err := rows.Scan(&e.Seq, &e.At, &from, &e.To, &e.Reason, &e.Message, &e.Worker, &e.Attempts); err != nil {
+		if err := rows.Scan(&e.Seq, &e.At, &from, &e.To, &e.Reason, &e.Message, &e.Worker, &e.Attempts, &e.Path); err != nil {
 			return nil, err
 		}
 		if from.Valid {

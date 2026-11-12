@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -292,6 +293,23 @@ func (s *Store) HasOpenJob(path string) (bool, error) {
 	return n > 0, err
 }
 
+// Stranded reports whether path's file record says it was queued while no job of it exists at all (its
+// queued job was removed with its library, before removals cleared that): it is decided again (ui-shop,
+// #159 QA). A job that ended (done, failed, kept) still exists, so its file is never queued twice.
+func (s *Store) Stranded(f File) bool {
+	if !strings.HasPrefix(f.Decision, DecisionQueued) {
+		return false
+	}
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM jobs WHERE path=?`, f.Path).Scan(&n); err != nil {
+		return false
+	}
+	return n == 0
+}
+
+// DecisionQueued begins the file record's decision of a file the scanner queued.
+const DecisionQueued = "queued: "
+
 // RecordPlan stores the Plan a running job converts with (JSON) and its fingerprint.
 func (s *Store) RecordPlan(id int64, plan, fingerprint string) error {
 	_, err := s.db.Exec(`UPDATE jobs SET plan=?, plan_fingerprint=?, updated=? WHERE id=?`, plan, fingerprint, s.stamp(), id)
@@ -320,7 +338,7 @@ func (s *Store) Complete(id int64, outputPath string, sizeAfter int64) error {
 	if j, err := s.Get(id); err == nil {
 		disk, _ = diskOf(filepath.Dir(j.Path))
 	}
-	return s.transition(id, Done, `, progress=100, output_path=?, size_after=?, output_mtime=?, original_disk=?`, outputPath, sizeAfter, mtime, disk)
+	return s.transition(id, Done, `, progress=100, output_path=?, size_after=?, output_mtime=?, original_disk=?, again_from=0`, outputPath, sizeAfter, mtime, disk)
 }
 
 // Fail marks a running job failed: code is one of ReasonCodes, msg the plain words.

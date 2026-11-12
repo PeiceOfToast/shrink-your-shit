@@ -884,3 +884,66 @@ func TestNestedMountMarksNothingGone(t *testing.T) {
 	}
 	_ = season
 }
+
+// ui-shop (#159 QA): a file whose queued job went with its library is decided again when a library is
+// added on the folder again, exactly once; a record left like that by an older version heals at the
+// next scan; a file deliberately skipped, or whose job ended, is never queued again.
+func TestStrandedQueuedFileIsDecidedAgain(t *testing.T) {
+	s, st, lib, _ := setup(t, h264Big)
+	a := filepath.Join(lib, "a.mkv")
+	if n := settle(s); n != 1 {
+		t.Fatalf("queued %d", n)
+	}
+	libs, _ := st.Libraries()
+	if err := st.DeleteLibrary(libs[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if f, _ := st.GetFile(a); f != nil {
+		t.Errorf("its queued record stayed: %+v", f)
+	}
+	again, err := st.AddLibrary("lib again", lib, rules.SliderTemplate(3), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Targets = func() ([]Target, error) {
+		return []Target{{LibraryID: again.ID, Path: lib, Template: rules.LegacyTemplate(rules.Default(), "replace")}}, nil
+	}
+	if n := settle(s); n != 1 {
+		t.Fatalf("after re-adding the library: queued %d", n)
+	}
+	if n := settle(s); n != 0 {
+		t.Errorf("queued again: %d", n)
+	}
+	// an older version's leftover: a "queued" record and no job at all
+	l, _ := st.List(10)
+	st.RequestStop(l[0].ID) // the waiting job goes; the record an older version left is put in its place
+	st.PutFile(jobs.File{Path: a, Size: 5, ModTime: modTime(t, a), Decision: "queued: an older version's"})
+	if n := settle(s); n != 1 {
+		t.Errorf("stranded record: queued %d", n)
+	}
+	// a job that ended keeps its file decided: done, its original left in place
+	j, _ := st.Claim("w")
+	st.Complete(j.ID, filepath.Join(lib+" (shrunk)", "a.mkv"), 1)
+	if n := settle(s); n != 0 {
+		t.Errorf("a done job's file queued again: %d", n)
+	}
+}
+
+// A deliberately skipped file with no job is not "stranded": it stays skipped.
+func TestSkippedFileIsNotStranded(t *testing.T) {
+	s, st, lib, _ := setup(t, h264Big)
+	a := filepath.Join(lib, "a.mkv")
+	st.PutFile(jobs.File{Path: a, Size: 5, ModTime: modTime(t, a), Decision: "skip: left alone", Reason: rules.SkipAlreadyInFormat})
+	if n := settle(s); n != 0 {
+		t.Errorf("queued %d", n)
+	}
+}
+
+func modTime(t *testing.T, p string) int64 {
+	t.Helper()
+	st, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st.ModTime().UnixNano()
+}

@@ -231,6 +231,9 @@ function slot(id: ID) {
   }
   return { w, d: drafts[id] };
 }
+export function getPublished(id: ID): WorkflowDoc | null { // the published document (GET /workflows/{id}/revisions/{rev})
+  return slot(id)?.d.published ?? null;
+}
 export function getDraft(id: ID): WorkflowRevision | null {
   return slot(id)?.d.draft ?? null;
 }
