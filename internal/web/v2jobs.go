@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
 
@@ -151,8 +152,16 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 			d["reason"] = reasonOf(events[n-1])
 		}
 		meta := map[string]any{"before": nil, "after": nil}
-		if raw, ok := store.LatestProbe(j.Path); ok {
-			meta["before"] = json.RawMessage(raw)
+		var snap rules.Snapshot
+		if json.Unmarshal([]byte(j.Plan), &snap) == nil && snap.Source != nil {
+			meta["before"] = snap.Source // the original as probed when the job was planned
+		} else if j.OutputPath == "" || j.OutputPath != j.Path {
+			// a job planned before that was recorded: its original's probe is still the one at its
+			// name only when the new file went elsewhere; after a replace at the same name it would be
+			// the new file's, so before stays null (dev-review 04:27Z)
+			if raw, ok := store.LatestProbe(j.Path); ok {
+				meta["before"] = json.RawMessage(raw)
+			}
 		}
 		if j.OutputPath != "" {
 			if raw, ok := store.LatestProbe(j.OutputPath); ok {
@@ -187,13 +196,19 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 			Action   string
 			IDs      []string
 			Priority *int
+			Pin      *string // reprioritize: "first" | "last" | "none" (design 03:22Z: wins over library priority)
 		}
 		if !readJSON(w, r, &in) {
 			return
 		}
 		v1 := map[string]string{"retry": "retry", "requeue": "retry", "cancel": "stop"}[in.Action]
-		if v1 == "" && in.Action != "reprioritize" || in.Action == "reprioritize" && in.Priority == nil || len(in.IDs) == 0 || len(in.IDs) > 500 {
-			apiError(w, http.StatusBadRequest, "invalid", "action is retry, requeue, cancel or reprioritize (with priority), for 1 to 500 ids. Nothing was changed.")
+		if v1 == "" && in.Action != "reprioritize" || in.Action == "reprioritize" && (in.Priority == nil) == (in.Pin == nil) || len(in.IDs) == 0 || len(in.IDs) > 500 {
+			apiError(w, http.StatusBadRequest, "invalid", "action is retry, requeue, cancel or reprioritize (with priority or pin), for 1 to 500 ids. Nothing was changed.")
+			return
+		}
+		if in.Pin != nil && *in.Pin != "first" && *in.Pin != "last" && *in.Pin != "none" ||
+			in.Priority != nil && (*in.Priority < -jobs.MaxLibraryPriority || *in.Priority > jobs.MaxLibraryPriority) {
+			apiError(w, http.StatusBadRequest, "invalid", "pin is first, last or none; priority is a whole number from -1000 to 1000. Nothing was changed.")
 			return
 		}
 		results := []map[string]any{}
@@ -204,7 +219,13 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 			case err != nil || id <= 0:
 				res["ok"], res["code"], res["message"] = false, "not_found", "There is no such job."
 			case in.Action == "reprioritize":
-				if err := store.SetPriority(id, *in.Priority); err != nil {
+				var err error
+				if in.Pin != nil {
+					err = store.SetPin(id, strings.TrimPrefix(*in.Pin, "none"))
+				} else {
+					err = store.SetPriority(id, *in.Priority)
+				}
+				if err != nil {
 					res["ok"], res["code"], res["message"] = false, "not_waiting", "Only a waiting job can be moved in the queue."
 				}
 			case v1 == "retry" && isQueued(store, id): // waiting already (review 66806b3): a retry wait goes now
@@ -236,7 +257,15 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 // v2JobItem is a Files item in the contract's Job terms: its state (spec 7), sub-state and progress.
 func v2JobItem(store *jobs.Store, it map[string]any, row jobs.FileRow, card string) map[string]any {
 	it["origin"] = "job"
-	it["priority"] = row.Priority // ui-shop's First/Last chip reads it from the row
+	// ui-shop's First/Last chip reads pin from the row; priority is the job's place among the unpinned (its
+	// library's, for a pinned one), never the reserved numbers that keep a pin
+	it["priority"], it["pin"] = row.Priority, nil
+	if pin := jobs.PinOf(row.Priority); pin != "" {
+		it["pin"], it["priority"] = pin, 0
+		if l, err := store.GetLibrary(row.LibraryID); err == nil {
+			it["priority"] = l.Priority
+		}
+	}
 	// reason: {code, message} | null, as every v2 reason (v1's item keeps the skip code as a string):
 	// a skip's code and words, or a failure's, kept original's or retry's (ui-shop 23:27Z)
 	switch {
@@ -268,7 +297,7 @@ func v2JobItem(store *jobs.Store, it map[string]any, row jobs.FileRow, card stri
 	case jobs.CardFailed:
 		it["state"], it["subState"] = "failed", nil
 	case jobs.CardSkipped:
-		it["origin"], it["state"], it["subState"], it["priority"] = "scan", "skipped", nil, nil // no job: no priority
+		it["origin"], it["state"], it["subState"], it["priority"], it["pin"] = "scan", "skipped", nil, nil, nil // no job: no priority
 		if row.Reason == jobs.UserStoppedReason {
 			it["state"] = "cancelled"
 		}

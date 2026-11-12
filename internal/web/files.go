@@ -299,7 +299,8 @@ func folderRefused(w http.ResponseWriter, store *jobs.Store, flowID int64, lib j
 		for _, part := range f.Template.Parts() { // each path of a workflow with checks saves its own way (V6a)
 			dir, problem := libraryFolder(part, lib)
 			if problem != nil {
-				return refuse(problem.Code, problem.Message+" Nothing was changed.")
+				writeErrorWith(w, http.StatusBadRequest, problem.Code, problem.Message+" Nothing was changed.", map[string]any{"folder": problem.Folder, "reason": problem.Reason})
+				return true
 			}
 			if b := outputInsideBlocker(dir, lib.Path); b != nil {
 				return refuse(b.Code, b.Message)

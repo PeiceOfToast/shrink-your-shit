@@ -21,7 +21,18 @@ const NoDefaultFolder = "no_default_folder"
 type FolderProblem struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	// Folder and Reason: the parent folder that can't hold it and why, as a code (not_writable |
+	// different_disk | container_root), so first run can say it in its own line (IA.md First run).
+	Folder string `json:"folder"`
+	Reason string `json:"reason"`
 }
+
+// Why a library has no default folder for new files (FolderProblem.Reason).
+const (
+	ReasonNotWritable   = "not_writable"
+	ReasonDifferentDisk = "different_disk"
+	ReasonContainerRoot = "container_root"
+)
 
 // sameDisk reports whether a and b are on the same disk (filesystem); tests replace it.
 var sameDisk = sameDiskOS
@@ -36,18 +47,18 @@ func NextToLibrary(name, lib string) (string, *FolderProblem) {
 	if st, err := os.Stat(dir); err == nil && st.IsDir() {
 		at = dir
 	}
-	reason := ""
+	reason, code := "", ""
 	switch {
 	case parent == lib || parent == filepath.Dir(parent): // the library is a disk's root, or its parent is
-		reason = "is the container's own disk"
+		reason, code = "is the container's own disk", ReasonContainerRoot
 	case !sameDisk(lib, at):
-		reason = "is on a different disk"
+		reason, code = "is on a different disk", ReasonDifferentDisk
 	case !writable(at):
-		reason = "can't be written to"
+		reason, code = "can't be written to", ReasonNotWritable
 	}
 	if reason != "" {
-		return "", &FolderProblem{NoDefaultFolder, "No folder for new files for " + name + " yet: " + parent + " " + reason +
-			". Pick a folder in the library's Output tab, or choose One folder for all."}
+		return "", &FolderProblem{Code: NoDefaultFolder, Message: "No folder for new files for " + name + " yet: " + parent + " " + reason +
+			". Pick a folder in the library's Output tab, or choose One folder for all.", Folder: parent, Reason: code}
 	}
 	return dir, nil
 }
