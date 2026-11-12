@@ -6,7 +6,10 @@
 package jobs
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -258,14 +261,15 @@ func (s *Store) Claim(worker string) (Job, error) {
 	// It takes no job of a library being removed (BeginRemove), under the same lock, so after BeginRemove
 	// returns no claim for that library can start.
 	s.removeMu.Lock()
-	skip, args := "", []any{Running, now, worker, now, Queued}
+	lease := NewLeaseID()
+	skip, args := "", []any{Running, now, worker, now, lease, s.leaseUntil(), Queued}
 	for lib := range s.removing {
 		skip += " AND (library_id IS NULL OR library_id != ?)" // a job made before libraries belongs to none
 		args = append(args, lib)
 	}
 	// A job waiting to be tried again (DD-2) is not taken before its time.
 	args = append(args, now)
-	err := s.db.QueryRow(`UPDATE jobs SET status=?, updated=?, worker=?, progress=0, error='', error_code='', started=?
+	err := s.db.QueryRow(`UPDATE jobs SET status=?, updated=?, worker=?, progress=0, error='', error_code='', started=?, lease_id=?, lease_expires=?
 WHERE id=(SELECT id FROM jobs WHERE status=? AND stop_requested=0`+skip+` AND (retry_at='' OR retry_at<=?) AND `+libraryOnSQL+`
   ORDER BY priority DESC, id LIMIT 1) AND status=?
 AND NOT EXISTS (SELECT 1 FROM app_meta WHERE key='paused' AND value='1') RETURNING id`,
@@ -295,7 +299,8 @@ func (s *Store) RecordPlan(id int64, plan, fingerprint string) error {
 
 // Progress records percent done for a running job.
 func (s *Store) Progress(id int64, pct float64) error {
-	_, err := s.db.Exec(`UPDATE jobs SET progress=?, updated=? WHERE id=? AND status=?`, pct, s.stamp(), id, Running)
+	// progress renews the job's lease too (V7a): a worker that reports is alive
+	_, err := s.db.Exec(`UPDATE jobs SET progress=?, updated=?, lease_expires=? WHERE id=? AND status=?`, pct, s.stamp(), s.leaseUntil(), id, Running)
 	return err
 }
 
@@ -335,7 +340,7 @@ func (s *Store) Keep(id int64, code, reason string) error {
 
 // Retry puts a failed or kept job back in the queue: a fresh start (no tries counted, no wait).
 func (s *Store) Retry(id int64) error {
-	return s.transition(id, Queued, `, progress=0, error='', error_code='', worker='', attempts=0, retry_at=''`)
+	return s.transition(id, Queued, `, progress=0, error='', error_code='', worker='', attempts=0, retry_at='', fallback=''`) // a fresh start: the first path again (V6b)
 }
 
 // Release puts a running job back in the queue (the worker was told to stop).
@@ -363,6 +368,10 @@ type Step struct {
 	At    string `json:"at"`
 	OK    bool   `json:"ok"`
 	Words string `json:"words"`
+	// NodeID and Port: the workflow node it was, and for a check ("branch") the port the file left by
+	// (V6a; "" for the others).
+	NodeID string `json:"nodeId,omitempty"`
+	Port   string `json:"port,omitempty"`
 }
 
 // AddStep adds a step to job id's summary.
@@ -373,7 +382,7 @@ func (s *Store) AddStep(id int64, step string, ok bool, words string) error {
 
 // Steps is job id's step summary, in the order the steps happened.
 func (s *Store) Steps(id int64) ([]Step, error) {
-	rows, err := s.db.Query(`SELECT step,at,ok,words FROM job_steps WHERE job_id=? ORDER BY rowid`, id)
+	rows, err := s.db.Query(`SELECT step,at,ok,words,node_id,port FROM job_steps WHERE job_id=? ORDER BY rowid`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -381,7 +390,7 @@ func (s *Store) Steps(id int64) ([]Step, error) {
 	out := []Step{}
 	for rows.Next() {
 		var st Step
-		if err := rows.Scan(&st.Step, &st.At, &st.OK, &st.Words); err != nil {
+		if err := rows.Scan(&st.Step, &st.At, &st.OK, &st.Words, &st.NodeID, &st.Port); err != nil {
 			return nil, err
 		}
 		out = append(out, st)
@@ -458,4 +467,138 @@ const libraryOnSQL = `(jobs.library_id IS NULL OR jobs.library_id IN (SELECT id 
 // the same condition (review-5d8b1f9).
 func libraryOn(alias string) string {
 	return `(` + alias + `.library_id IS NULL OR ` + alias + `.library_id IN (SELECT id FROM libraries WHERE started=1))`
+}
+
+// AddDecision records a check's answer on job id's timeline (V6a): the step "branch", the check's node,
+// the port the file left by, and design's words ("Is it 4K? → Yes (resolution is 2160p)").
+func (s *Store) AddDecision(id int64, nodeID, port, words string) error {
+	_, err := s.db.Exec(`INSERT INTO job_steps(job_id,step,at,ok,words,node_id,port) VALUES(?,?,?,?,?,?,?)`, id, "branch", s.stamp(), true, words, nodeID, port)
+	return err
+}
+
+// SetRoute records job id's path through its workflow (node ids).
+func (s *Store) SetRoute(id int64, path []string) error {
+	b, _ := json.Marshal(path)
+	_, err := s.db.Exec(`UPDATE jobs SET route=? WHERE id=?`, string(b), id)
+	return err
+}
+
+// Route is job id's path through its workflow (nil: a straight workflow, or none recorded).
+func (s *Store) Route(id int64) ([]string, error) {
+	var raw string
+	if err := s.db.QueryRow(`SELECT route FROM jobs WHERE id=?`, id).Scan(&raw); err != nil || raw == "" {
+		return nil, err
+	}
+	var path []string
+	err := json.Unmarshal([]byte(raw), &path)
+	return path, err
+}
+
+// FallBack puts running job id back in the queue to be converted again from its original along another
+// path of its workflow (V6b): branch (a rules.Branch, JSON) is that path, now its route; the try counts.
+// The failure is on its timeline as words (a "failure" step on node nodeID).
+func (s *Store) FallBack(id int64, branch string, path []string, nodeID, words string) error {
+	route, _ := json.Marshal(path)
+	if _, err := s.db.Exec(`INSERT INTO job_steps(job_id,step,at,ok,words,node_id,port) VALUES(?,?,?,?,?,?,?)`, id, "failure", s.stamp(), false, words, nodeID, "error"); err != nil {
+		return err
+	}
+	return s.transition(id, Queued, `, progress=0, worker='', error='', error_code='', attempts=attempts+1, retry_at='', fallback=?, route=?`, branch, string(route))
+}
+
+// FallbackOf is the path job id falls back to (” = none).
+func (s *Store) FallbackOf(id int64) (string, error) {
+	var b string
+	err := s.db.QueryRow(`SELECT fallback FROM jobs WHERE id=?`, id).Scan(&b)
+	return b, err
+}
+
+// AddFailureStep records on job id's timeline that node nodeID didn't work, and what happens (V6b).
+func (s *Store) AddFailureStep(id int64, nodeID, words string) error {
+	_, err := s.db.Exec(`INSERT INTO job_steps(job_id,step,at,ok,words,node_id,port) VALUES(?,?,?,?,?,?,?)`, id, "failure", s.stamp(), false, words, nodeID, "error")
+	return err
+}
+
+// Leases (V7a; slices/v2-engine/v7-plan.md): a running job is held by its worker's lease, renewed while
+// it works (RenewLease, and each progress report). A job whose lease runs out (its worker stopped
+// answering) goes back to the queue. A worker checks it still holds its lease right before it puts a
+// file in place, so one that lost it never commits.
+
+// leaseTime is a lease's time: fixed width (milliseconds, UTC), so times compare as text in SQL
+// (RFC3339Nano drops trailing zeros and would not).
+const leaseTime = "2006-01-02T15:04:05.000Z"
+
+// LeaseFor is how long a lease lasts without being renewed.
+var LeaseFor = 60 * time.Second
+
+func (s *Store) leaseUntil() string { return s.now().Add(LeaseFor).UTC().Format(leaseTime) }
+
+// NewLeaseID is a fresh lease id.
+func NewLeaseID() string {
+	b := make([]byte, 12)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// LeaseOf is running job id's lease ("" if none).
+func (s *Store) LeaseOf(id int64) (string, error) {
+	var l string
+	err := s.db.QueryRow(`SELECT lease_id FROM jobs WHERE id=?`, id).Scan(&l)
+	return l, err
+}
+
+// RenewLease extends lease on job id; false: the job isn't running on that lease any more.
+func (s *Store) RenewLease(id int64, lease string) (bool, error) {
+	r, err := s.db.Exec(`UPDATE jobs SET lease_expires=? WHERE id=? AND status=? AND lease_id=?`, s.leaseUntil(), id, Running, lease)
+	if err != nil {
+		return false, err
+	}
+	n, _ := r.RowsAffected()
+	return n == 1, nil
+}
+
+// HoldsLease reports whether job id is still running on lease (and the lease hasn't run out).
+func (s *Store) HoldsLease(id int64, lease string) (bool, error) {
+	var ok bool
+	err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM jobs WHERE id=? AND status=? AND lease_id=? AND lease_expires>=?)`,
+		id, Running, lease, s.now().UTC().Format(leaseTime)).Scan(&ok)
+	return ok, err
+}
+
+// RequeueExpiredLeases puts running jobs whose lease ran out back in the queue, to be tried again after
+// wait (a try counted; the timeline says why). It returns how many.
+func (s *Store) RequeueExpiredLeases(wait time.Duration) (int, error) {
+	now := s.now().UTC()
+	rows, err := s.db.Query(`SELECT id, worker FROM jobs WHERE status=? AND lease_expires<>'' AND lease_expires<?`, Running, now.Format(leaseTime))
+	if err != nil {
+		return 0, err
+	}
+	type lost struct {
+		id     int64
+		worker string
+	}
+	var expired []lost
+	for rows.Next() {
+		var l lost
+		if err := rows.Scan(&l.id, &l.worker); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		expired = append(expired, l)
+	}
+	rows.Close()
+	n := 0
+	for _, l := range expired {
+		words := "Its worker (" + l.worker + ") stopped answering, so it goes back in the queue. The original was not touched."
+		r, err := s.db.Exec(`UPDATE jobs SET status=?, updated=?, progress=0, worker='', error=?, error_code=?, attempts=attempts+1, retry_at=?,
+  lease_id='', lease_expires='' WHERE id=? AND status=? AND lease_expires<>'' AND lease_expires<?`,
+			Queued, s.stamp(), words, ReasonWorkerLost, now.Add(wait).Format(time.RFC3339), l.id, Running, now.Format(leaseTime))
+		if err != nil {
+			return n, err
+		}
+		if k, _ := r.RowsAffected(); k == 1 {
+			s.AddStep(l.id, "lease", false, words)
+			n++
+		}
+	}
+	return n, nil
 }

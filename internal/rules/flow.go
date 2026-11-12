@@ -16,6 +16,7 @@ const (
 	KindSelectors = "selectors" // the Standard selectors (slice 25)
 	KindLegacy    = "legacy"    // the values given as program flags (-crf, -preset, ...), as before libraries had flows
 	KindCustom    = "custom"    // a flow no editor can show (builder, import; slice 30)
+	KindBranches  = "branches"  // a workflow with checks (V6a): Branches, each ending in a straight Template
 )
 
 // CompilerVersion is the version of the template-to-settings mapping below. A flow records the
@@ -28,6 +29,9 @@ type Template struct {
 	Params          Params     `json:"params"`
 	Selectors       *Selectors `json:"selectors,omitempty"` // a selectors flow's choices (selectors.go)
 	CompilerVersion int        `json:"compilerVersion"`
+	// Branches are a workflow with checks' paths (V6a, branch.go); none for a straight workflow.
+	// A pointer, so Templates stay comparable with == (a straight one has none).
+	Branches *[]Branch `json:"branches,omitempty"`
 	// Languages are the person's languages (Settings > General, ISO 639-2 codes, comma-separated) for
 	// "Keep only my languages": a program-wide setting, filled in when the flow is read, never stored in it.
 	Languages string `json:"-"`

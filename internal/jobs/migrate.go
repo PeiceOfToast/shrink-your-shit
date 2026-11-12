@@ -335,6 +335,21 @@ ALTER TABLE libraries ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;`},
 ALTER TABLE jobs ADD COLUMN original_gone_at TEXT NOT NULL DEFAULT '';
 ALTER TABLE jobs ADD COLUMN original_changed INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE jobs ADD COLUMN original_disk TEXT NOT NULL DEFAULT '';`},
+	// V6a (branches): a job's path through its workflow (node ids, JSON), and on each step the node it
+	// was and the port the file left by (a check's answer).
+	{28, "job path", `
+ALTER TABLE jobs ADD COLUMN route TEXT NOT NULL DEFAULT '';
+ALTER TABLE job_steps ADD COLUMN node_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE job_steps ADD COLUMN port TEXT NOT NULL DEFAULT '';`},
+	// V6b (failure ports): the path a job falls back to (a rules.Branch, JSON; '' = none): its next run
+	// converts the original with that path's settings.
+	{29, "job fallback", `
+ALTER TABLE jobs ADD COLUMN fallback TEXT NOT NULL DEFAULT '';`},
+	// V7a (leases): a running job is held by its worker's lease, renewed while it works; one that runs out
+	// goes back to the queue (Store.RequeueExpiredLeases).
+	{30, "job leases", `
+ALTER TABLE jobs ADD COLUMN lease_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE jobs ADD COLUMN lease_expires TEXT NOT NULL DEFAULT '';`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone
