@@ -127,11 +127,11 @@ export function Overview() {
               <td className="nm"><Link to={"/libraries/" + l.id}><b>{l.name}</b></Link></td>
               <td className="num" data-l="Before">{bytes(l.bytesBefore)}</td>
               <td className="num" data-l="Now">{bytes(l.bytesNow)}</td>
-              <td className="num" data-l="Saved">{l.saved > 0 ? <><b>{bytes(l.saved)}</b>{l.savedPercent != null && " · " + pctTxt(l.savedPercent)}</> : "nothing yet"}{l.saved === 0 && l.couldFree > 0 && <span className="sub">could free {bytes(l.couldFree)} by removing the originals</span>}</td>
+              <td className="num" data-l="Saved">{l.saved > 0 ? <><b>{bytes(l.saved)}</b>{l.savedPercent != null && " · " + pctTxt(l.savedPercent)}</> : "nothing yet"}{l.waitingToFree > 0 && <span className="sub">{bytes(l.waitingToFree)} more{h.nextFreeAt ? " by " + dayName(h.nextFreeAt.slice(0, 10)) : ""}</span>}{l.saved === 0 && l.couldFree > 0 && <span className="sub">could free {bytes(l.couldFree)} by removing the originals</span>}</td>
               <td className="num full" data-l="Done · Waiting · Skipped · Failed">{[l.counts.done, l.counts.waiting, l.counts.skipped, l.counts.failed].map(count).join(" · ")}</td>
               <td>{l.state === "paused" ? <span className="pill warn">Paused</span> : <span className="pill">Watching</span>}</td>
             </tr>)}</tbody></table>
-          <p className="muted sm">Saved counts only space already freed (size before minus size now).{h.waitingToFree > 0 && " " + bytes(h.waitingToFree) + " more is freed when kept originals leave the trash."} Sizes are updated when a library is scanned.</p></>}
+          <p className="muted sm">Saved is space already freed. A replaced original waits in the trash until its date: it no longer counts in Size now, but it isn't freed yet, which is the 'more by' figure. Sizes are updated when a library is scanned.</p></>}
       </section>
 
       <section className="sec" aria-labelledby="ov-a"><h2 id="ov-a">Last 30 days</h2>
