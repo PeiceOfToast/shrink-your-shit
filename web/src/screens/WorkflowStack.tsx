@@ -8,7 +8,7 @@ import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
 import { order } from "../mock/steps"; // the steps in running order: a property of the document, not data
 import { useData } from "../useData";
-import { getDraft, getWorkflow, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked } from "../workflowApi";
+import { getDraft, getLadder, getWorkflow, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
 import { Link, onLeave } from "../router";
 import { Browse } from "../FolderPicker";
 import { listLibraries, shrunk } from "../libraryApi";
@@ -78,17 +78,39 @@ function Field({ id, name, s, value, set }: { id: string; name: string; s: JSONS
   if (s.type === "array")
     return <div className="field"><label htmlFor={fid}>{title}</label><textarea id={fid} className="input" rows={2} value={((value as string[]) ?? []).join("\n")}
       onChange={(e) => set(e.target.value.split("\n").map((x) => x.trim()).filter(Boolean))} aria-describedby={hint ? fid + "-h" : undefined} />{hint}</div>;
-  return <div className="field"><label htmlFor={fid}>{title}</label><input id={fid} className="input" value={String(value ?? "")} placeholder={(s["x-placeholder"] as string) ?? undefined} onChange={(e) => set(e.target.value)} aria-describedby={hint ? fid + "-h" : undefined} />{hint}</div>;
+  return <div className="field"><label htmlFor={fid}>{title}</label><input id={fid} className="input" value={String(value ?? "")} placeholder={(s["x-placeholder"] as string) ?? undefined} onChange={(e) => set(s.type === "integer" || s.type === "number" ? (e.target.value === "" ? e.target.value : Number(e.target.value)) : e.target.value)} aria-describedby={hint ? fid + "-h" : undefined} />{hint}</div>;
+}
+
+// User review 11-12 item 1: the Convert step's bitrate choices with the engine's own numbers (GET /api/v2/bitrate-ladder).
+// A fixed resolution shows that row's Mbps on each level; "Keep as is" names the chosen level's figure per row (the new
+// file's own height picks it). VBR is offered only for the formats the ladder lists, has no "No limit", and its peak
+// limit says the level's figure it must reach. null: the field isn't shown.
+const mbps = (l: Ladder, n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 1 }) + " " + l.unit;
+function convertField(k: string, s: JSONSchema, c: Record<string, unknown>, l: Ladder | undefined): JSONSchema | null {
+  const fmt = String(c.format ?? "hevc"), vbr = c.rateControl === "vbr", row = l?.resolutionRow[String(c.resolution ?? "keep")];
+  const byRow = l ? l.formats[fmt] ?? l.formats.hevc : undefined, level = String(c.maxBitrate ?? "none") as "low" | "medium" | "high" | "none";
+  if (k === "rateControl") return !l || vbr || l.vbrFormats.includes(fmt) ? s : null; // a VBR choice stays visible so it can be undone
+  if (k === "vbrMaxKbps") {
+    if (!vbr) return null;
+    const at = l && byRow && level !== "none" ? (row ? mbps(l, byRow[row][level]) + " (" + level + " for " + l.rows.find((x) => x.row === row)?.label + ")" : "the " + level + " figure for the new file's height") : "";
+    return at ? { ...s, description: (s.description as string) + " VBR aims at " + at + "; the limit must be at least that." } : s;
+  }
+  if (k !== "maxBitrate") return s;
+  const e = ((s.enum as unknown[]) ?? []).filter((v) => !(vbr && v === "none")), ls = labels(s);
+  const named = e.map((v) => { const t = ls.find((x) => x[0] === v)?.[1] ?? String(v); return v === "none" || !l || !byRow || !row ? t : t + " · " + mbps(l, byRow[row][v as "low"]); });
+  const perRow = l && byRow && !row && level !== "none" ? " " + level.charAt(0).toUpperCase() + level.slice(1) + " by the new file's height: " + l.rows.map((r) => r.label + " " + mbps(l, byRow[r.row][level])).join(", ") + "." : "";
+  return { ...s, enum: e, "x-enumLabels": named, description: (s.description as string) + perRow };
 }
 
 export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown) => void; issues: ValidationIssue[] }) {
   const { stepDef, libs } = useReg(), def = stepDef(n.type)!, props = Object.fromEntries(Object.entries((def.configSchema.properties ?? {}) as Props).filter(([, s]) => !s.readOnly)) as Props, c = n.config;
-  const keys = Object.keys(props).filter((k) => !(MORE[n.type] ?? []).includes(k)), more = (MORE[n.type] ?? []).filter((k) => props[k]);
+  const lad = useData(getLadder, []).data, conv = (k: string) => (n.type === "video.convert" ? convertField(k, props[k], c, lad) : props[k]);
+  const keys = Object.keys(props).filter((k) => !(MORE[n.type] ?? []).includes(k)), more = (MORE[n.type] ?? []).filter((k) => props[k] && conv(k));
   // #165: a setting's own problems (invalid_config, keyed on the step + field) show at that field, which is marked
   const bad = (k: string) => issues.filter((i) => i.nodeId === n.id && (i.field === k || i.configPath === "/" + k) && i.code !== "unconnected_port");
-  const field = (k: string) => { const b = bad(k); return (
+  const field = (k: string) => { const b = bad(k), sk = conv(k); if (!sk) return null; return (
     <div key={k} className={b.length ? "fieldbad" : undefined} data-field={k} aria-invalid={b.length ? true : undefined}>
-      <Field id={n.id} name={k} s={props[k]} value={c[k] ?? props[k].default} set={(v) => set(k, v)} />
+      <Field id={n.id} name={k} s={sk} value={c[k] ?? sk.default} set={(v) => set(k, v)} />
       {b.map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
     </div>); };
   // a problem in a field under 'More options' opens it by itself (review c0189fa P3), also when the problems list picks

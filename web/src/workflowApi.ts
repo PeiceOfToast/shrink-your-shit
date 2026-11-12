@@ -77,3 +77,17 @@ export async function publish(id: string, etag: string): Promise<Answer<{ number
   const r = await call<WorkflowRevision>("POST", base(id) + "/publish", { etag });
   return failed(r) ? r : { number: r.number ?? 0 };
 }
+
+// User review 11-12 item 1 (#176): the engine's own bitrate ladder, so the page shows real Mbps and never hard-codes them.
+// rows: 2160 ... sd; formats[format][row] = {low, medium, high, rough}; resolutionRow maps the Standard choice (480 -> sd);
+// vbrFormats: the formats VBR with a peak limit is offered for. The sample install has none (no numbers are made up).
+export interface Ladder {
+  unit: string; rows: { row: string; label: string }[];
+  formats: Record<string, Record<string, { low: number; medium: number; high: number; rough: number }>>;
+  resolutionRow: Record<string, string>; vbrFormats: string[];
+}
+let ladder: Promise<Answer<Ladder>> | null = null; // one fetch per page load: the ladder is fixed for a server's life
+export function getLadder(): Promise<Answer<Ladder>> {
+  if (MOCK) return Promise.resolve({ error: { code: "not_available", message: "The sample install has no bitrate ladder." } });
+  return (ladder ??= call<Ladder>("GET", "/api/v2/bitrate-ladder").then((r) => (failed(r) && (ladder = null), r)));
+}
