@@ -425,20 +425,20 @@ func (x positionExec) Stream(ctx context.Context, onLine func(string), name stri
 func TestStallStopCountsOnlyAPositionFurtherOn(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
-	w.StallAfter = 200 * time.Millisecond
+	w.StallAfter = 500 * time.Millisecond
 	w.Exec = positionExec{FakeExec: s.exec}
 	done := make(chan struct{})
 	go func() { w.RunOne(context.Background()); close(done) }()
 	waitDone(t, done)
-	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "no progress for 200ms") {
+	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "no progress for 500ms") {
 		t.Errorf("one position: %s %q", j.Status, j.Error)
 	}
 	s.assertOriginalSafe()
 
 	s = newScenario(t)
 	w = s.worker(Replace)
-	w.StallAfter = 200 * time.Millisecond
-	w.Exec = positionExec{FakeExec: s.exec, step: 1000, steps: 60} // ~600 ms, 1 ms of the film a step
+	w.StallAfter = 500 * time.Millisecond
+	w.Exec = positionExec{FakeExec: s.exec, step: 1000, steps: 150} // ~1.5 s, 1 ms of the film a step
 	if _, err := w.RunOne(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -456,8 +456,8 @@ func TestStallStopCountsOnlyAPositionFurtherOn(t *testing.T) {
 		s = newScenario(t)
 		scenarioDuration = 100
 		w = s.worker(Replace)
-		w.StallAfter = 200 * time.Millisecond
-		w.Exec = positionExec{FakeExec: s.exec, step: c.step, steps: 60}
+		w.StallAfter = 500 * time.Millisecond
+		w.Exec = positionExec{FakeExec: s.exec, step: c.step, steps: 150}
 		done := make(chan struct{})
 		go func() { w.RunOne(context.Background()); close(done) }()
 		waitDone(t, done)
