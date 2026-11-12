@@ -108,7 +108,11 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 		d := map[string]any{"id": strconv.FormatInt(id, 10), "state": v2State(string(j.Status), steps, livePercent(id)),
 			"file": map[string]any{"path": j.Path, "bytes": j.SizeBefore}, "attempts": j.Attempts,
 			"retryAt": nilIfEmpty(j.RetryAt), "error": nilIfEmpty(j.Error), "worker": nilIfEmpty(j.Worker),
-			"createdAt": j.Created, "updatedAt": j.Updated, "steps": steps, "events": v2Events(events), "removed": false}
+			"createdAt": j.Created, "updatedAt": j.Updated, "steps": steps, "events": v2Events(events), "removed": false,
+			"path": []string{}}
+		if route, err := store.Route(id); err == nil && route != nil { // V6a: the nodes the file went along
+			d["path"] = route
+		}
 		if j.Status == jobs.Queued && j.RetryAt != "" {
 			d["state"] = "retry_wait"
 		}

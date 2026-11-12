@@ -454,6 +454,14 @@ func readBasic(body map[string]json.RawMessage) (quality int, audio string, ok b
 // used. "Next to each library" (V5a): each library of the flow needs its folder (design's
 // no_default_folder words otherwise), never inside any library; it is made when the first file is.
 func outputUsable(w http.ResponseWriter, store *jobs.Store, flowID int64, t rules.Template) bool {
+	if t.Branches != nil { // V6a: each path's own Save step
+		for _, part := range t.Parts() {
+			if !outputUsable(w, store, flowID, part) {
+				return false
+			}
+		}
+		return true
+	}
 	if t.Selectors == nil || t.Selectors.AfterConverting != "folder" {
 		return true
 	}

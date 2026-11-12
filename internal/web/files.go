@@ -296,16 +296,18 @@ func resolved(path string) string {
 func folderRefused(w http.ResponseWriter, store *jobs.Store, flowID int64, lib jobs.Library) bool {
 	refuse := func(code, msg string) bool { apiError(w, http.StatusBadRequest, code, msg); return true }
 	if f, err := store.GetFlow(flowID); err == nil {
-		dir, problem := libraryFolder(f.Template, lib)
-		if problem != nil {
-			return refuse(problem.Code, problem.Message+" Nothing was changed.")
-		}
-		if b := outputInsideBlocker(dir, lib.Path); b != nil {
-			return refuse(b.Code, b.Message)
-		}
-		for _, lp := range otherLibraries(store, lib.ID) {
-			if dir != "" && outputInside(dir, lp) {
-				return refuse("inside_library", "This flow saves this library's new files to "+dir+", which is inside the library at "+lp+" (or holds it), so new files would be converted again. Choose another folder. Nothing was changed.")
+		for _, part := range f.Template.Parts() { // each path of a workflow with checks saves its own way (V6a)
+			dir, problem := libraryFolder(part, lib)
+			if problem != nil {
+				return refuse(problem.Code, problem.Message+" Nothing was changed.")
+			}
+			if b := outputInsideBlocker(dir, lib.Path); b != nil {
+				return refuse(b.Code, b.Message)
+			}
+			for _, lp := range otherLibraries(store, lib.ID) {
+				if dir != "" && outputInside(dir, lp) {
+					return refuse("inside_library", "This flow saves this library's new files to "+dir+", which is inside the library at "+lp+" (or holds it), so new files would be converted again. Choose another folder. Nothing was changed.")
+				}
 			}
 		}
 	}
@@ -318,8 +320,10 @@ func folderRefused(w http.ResponseWriter, store *jobs.Store, flowID int64, lib j
 		if err != nil {
 			continue
 		}
-		if dir, _ := libraryFolder(f.Template, m); dir != "" && outputInside(dir, lib.Path) {
-			return refuse("inside_library", lib.Path+" holds "+dir+", where "+m.Name+"'s new files go, so they would be converted again. Choose another folder. Nothing was changed.")
+		for _, part := range f.Template.Parts() {
+			if dir, _ := libraryFolder(part, m); dir != "" && outputInside(dir, lib.Path) {
+				return refuse("inside_library", lib.Path+" holds "+dir+", where "+m.Name+"'s new files go, so they would be converted again. Choose another folder. Nothing was changed.")
+			}
 		}
 	}
 	return false

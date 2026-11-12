@@ -340,6 +340,12 @@ func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.Fil
 		return false
 	}
 	s.Store.AddStep(id, "found", true, "Found in "+t.Path+".") // the Files view's step summary (S5)
+	for _, d := range plan.Decisions { // a workflow with checks (V6a): each answer, on the job's timeline
+		s.Store.AddDecision(id, d.NodeID, d.Port, d.Words)
+	}
+	if len(plan.Path) > 0 {
+		s.Store.SetRoute(id, plan.Path)
+	}
 	s.Store.AddStep(id, "checked", true, "To be converted: "+why+".")
 	s.Store.PutFile(rec)
 	return true

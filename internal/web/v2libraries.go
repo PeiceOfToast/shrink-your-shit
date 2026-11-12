@@ -39,14 +39,24 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		var folder, problem any
 		if ferr == nil {
 			name = f.Name
-			switch s := f.Template.Selectors; {
+			tm := f.Template // a workflow with checks (V6a): a path that saves to a folder, if one does, else the first
+			if parts := f.Template.Parts(); len(parts) > 0 {
+				tm = parts[0]
+				for _, p := range parts {
+					if p.Selectors != nil && p.Selectors.AfterConverting == "folder" {
+						tm = p
+						break
+					}
+				}
+			}
+			switch s := tm.Selectors; {
 			case s == nil || s.AfterConverting == "replace" || s.AfterConverting == "":
 				policy = "replace"
 			case s.AfterConverting == "beside":
 				policy = "beside"
 			default:
 				policy = "separate_folder"
-				dir, p := libraryFolder(f.Template, l)
+				dir, p := libraryFolder(tm, l)
 				if p != nil {
 					problem = p
 				} else {
