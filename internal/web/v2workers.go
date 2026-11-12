@@ -5,6 +5,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"runtime"
@@ -120,6 +121,47 @@ func (v *workerView) local(ctx context.Context) (map[string]any, error) {
 	}, nil
 }
 
+// remoteOfflineAfter: a remote worker that hasn't called for this long shows offline (it heartbeats
+// every 10 s).
+const remoteOfflineAfter = 30 * time.Second
+
+// remote is a paired worker on another computer in the contract's shape (V7b1): what it reported, its
+// running jobs, and offline once it stops calling.
+func (v *workerView) remote(rw jobs.RemoteWorker) (map[string]any, error) {
+	working, err := v.store.WorkingJobs()
+	if err != nil {
+		return nil, err
+	}
+	ids := []string{}
+	for _, j := range working {
+		if j.Worker == rw.ID {
+			ids = append(ids, strconv.FormatInt(j.ID, 10))
+		}
+	}
+	seen, _ := time.Parse(time.RFC3339, rw.LastSeen)
+	status := "online"
+	switch {
+	case seen.IsZero() || time.Since(seen) > remoteOfflineAfter:
+		status = "offline"
+	case len(ids) > 0:
+		status = "busy"
+	case v.store.Paused():
+		status = "paused"
+	}
+	var caps any = []any{}
+	if c := json.RawMessage(rw.Capabilities); json.Valid(c) && string(c) != "{}" {
+		caps = c
+	}
+	return map[string]any{
+		"id": rw.ID, "name": rw.Name, "kind": "remote", "host": nil, "os": nil, "arch": nil,
+		"appVersion": rw.Version, "status": status, "statusSince": nil, "lastHeartbeatAt": nilIfEmpty(rw.LastSeen),
+		"slots": map[string]any{"cpu": map[string]any{"total": 1, "used": len(ids)}, "gpu": nil},
+		"live":  map[string]any{"cpuPercent": nil, "memUsedBytes": nil, "memTotalBytes": nil, "gpu": []any{}},
+		"gpus":  []any{}, "ffmpeg": nil, "capabilities": caps, "currentJobIds": ids,
+		"tags": []string{}, "pool": nil, "schedule": nil, "pathMappings": []any{},
+	}, nil
+}
+
 // gpuVendor is the contract's vendor word for doctor.GPU's.
 func gpuVendor(v string) string {
 	switch v {
@@ -206,13 +248,69 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 			serverError(w, err)
 			return
 		}
-		writeJSON(w, map[string]any{"items": []any{wk}, "total": 1})
+		items := []any{wk}
+		remotes, err := v.store.RemoteWorkers()
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		for _, rw := range remotes {
+			one, err := v.remote(rw)
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+			items = append(items, one)
+		}
+		writeJSON(w, map[string]any{"items": items, "total": len(items)})
 	}
 	api.HandleFunc("GET /api/v2/workers", list)
 	api.HandleFunc("GET /api/v2/workers/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if rw, ok := v.remoteByID(r.PathValue("id")); ok {
+			one, err := v.remote(rw)
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+			writeJSON(w, one)
+			return
+		}
 		if found(w, r) {
 			one(w, r)
 		}
+	})
+	// V7b1: Add a worker makes a one-time pairing code, with the command to run on the other computer
+	api.HandleFunc("POST /api/v2/workers/pairings", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{}
+		if !readJSON(w, r, &in) {
+			return
+		}
+		code, expires, err := v.store.NewPairing(time.Now())
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		server := "http://" + r.Host
+		if r.TLS != nil {
+			server = "https://" + r.Host
+		}
+		writeJSON(w, map[string]any{"code": code, "expiresAt": expires.Format(time.RFC3339),
+			"command": "shrink-your-shit worker --server " + server + " --pair " + code, "plainHTTP": r.TLS == nil})
+	})
+	// Remove worker: its token stops working; its running jobs go back to the queue
+	api.HandleFunc("DELETE /api/v2/workers/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if r.PathValue("id") == jobs.LocalWorker {
+			apiError(w, http.StatusConflict, "local_worker", "This computer's worker can't be removed; stop it instead. Nothing was changed.")
+			return
+		}
+		if err := v.store.RemoveWorker(r.PathValue("id")); errors.Is(err, jobs.ErrNotFound) {
+			apiError(w, http.StatusNotFound, "not_found", "There is no such worker. Nothing was changed.")
+			return
+		} else if err != nil {
+			serverError(w, err)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
 	})
 	api.HandleFunc("PATCH /api/v2/workers/{id}", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -377,4 +475,18 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 		v.eng.Doctor.Retest(r.Context()) // a test frame per encoder, one test at a time
 		one(w, r)
 	})
+}
+
+// remoteByID is the paired worker with this id.
+func (v *workerView) remoteByID(id string) (jobs.RemoteWorker, bool) {
+	all, err := v.store.RemoteWorkers()
+	if err != nil {
+		return jobs.RemoteWorker{}, false
+	}
+	for _, rw := range all {
+		if rw.ID == id {
+			return rw, true
+		}
+	}
+	return jobs.RemoteWorker{}, false
 }

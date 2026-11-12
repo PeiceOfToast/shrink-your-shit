@@ -47,6 +47,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "doctor" {
 		os.Exit(doctorCommand(os.Stdout, os.Stderr))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "worker" { // V7b: a worker for a server on another computer
+		os.Exit(workerCommand(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "restore" {
 		os.Exit(restoreCommand(os.Args[2:], os.Stdout, os.Stderr))
 	}
@@ -71,6 +74,7 @@ func main() {
 	ffmpeg := flag.String("ffmpeg", os.Getenv("SYP_FFMPEG"), "path to ffmpeg (default: find it; env SYP_FFMPEG)")
 	ffprobe := flag.String("ffprobe", os.Getenv("SYP_FFPROBE"), "path to ffprobe (default: find it; env SYP_FFPROBE)")
 	showVersion := flag.Bool("version", false, "print the version and exit")
+	trustedProxies := flag.String("trusted-proxies", os.Getenv("SYP_TRUSTED_PROXIES"), "addresses or ranges (comma-separated) of reverse proxies whose X-Forwarded-Proto/For are believed, for remote workers outside your network (env SYP_TRUSTED_PROXIES)")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println("shrink-your-shit", version)
@@ -283,8 +287,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("access token: %v", err)
 	}
+	proxies, err := web.ParseTrustedProxies(*trustedProxies)
+	if err != nil {
+		log.Fatalf("-trusted-proxies: %v", err)
+	}
 	srv := &http.Server{Addr: *addr, Handler: web.Handler(store, access, web.Engine{
-		ScanNow: sc.ScanNow, NextScan: sc.NextScan, ScanEvery: *every, Settle: *settle, SetScanEvery: sc.SetEvery, Scanning: sc.Scanning, RequeueJob: pool.RequeueJob, PauseNow: pool.PauseNow, StopFile: pool.StopFile,
+		Transport: web.Transport{TrustedProxies: proxies},
+		ScanNow:   sc.ScanNow, NextScan: sc.NextScan, ScanEvery: *every, Settle: *settle, SetScanEvery: sc.SetEvery, Scanning: sc.Scanning, RequeueJob: pool.RequeueJob, PauseNow: pool.PauseNow, StopFile: pool.StopFile,
 		RunLogs: runLogs, Doctor: chk, DataDir: *data, Version: version, Logs: logs,
 		Preview:    &preview.Previewer{Store: store, Exec: media.OSExec{}, FFprobe: ffprobePath},
 		FirstFiles: &preview.FirstLister{Exec: media.OSExec{}, FFprobe: ffprobePath}})}

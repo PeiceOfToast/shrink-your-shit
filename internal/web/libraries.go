@@ -40,6 +40,8 @@ type Engine struct {
 	DataDir string          // the data folder, for the health report
 	Version string
 	Logs    *doctor.LogTail // the last log lines, for the health report
+
+	Transport Transport // which connections remote workers may use (V7b1: -trusted-proxies)
 }
 
 // libraryItem is a library as GET /api/libraries shows it (UI-API-CONTRACT.md "Libraries").
