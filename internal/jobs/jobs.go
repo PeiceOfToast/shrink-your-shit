@@ -179,8 +179,9 @@ VALUES(?,?,?,?,?,?,?,?)`, j.Library, j.Path, Queued, j.Reason, j.DurationSec, j.
 	}
 	// One statement: the job is added only if its library still exists and is started, so a library
 	// removed (or a scan that started before the removal) cannot leave a job behind.
-	r, err := s.db.Exec(`INSERT INTO jobs(library,library_id,path,status,reason,duration,size_before,created,updated)
-SELECT ?,?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM libraries WHERE id=? AND started=1)`,
+	// V5b: it takes its library's priority.
+	r, err := s.db.Exec(`INSERT INTO jobs(library,library_id,path,status,reason,duration,size_before,created,updated,priority)
+SELECT ?,?,?,?,?,?,?,?,?,priority FROM libraries WHERE id=? AND started=1`,
 		j.Library, j.LibraryID, j.Path, Queued, j.Reason, j.DurationSec, j.SizeBefore, now, now, j.LibraryID)
 	if err != nil {
 		return 0, err
@@ -264,7 +265,8 @@ func (s *Store) Claim(worker string) (Job, error) {
 	// A job waiting to be tried again (DD-2) is not taken before its time.
 	args = append(args, now)
 	err := s.db.QueryRow(`UPDATE jobs SET status=?, updated=?, worker=?, progress=0, error='', error_code='', started=?
-WHERE id=(SELECT id FROM jobs WHERE status=? AND stop_requested=0`+skip+` AND (retry_at='' OR retry_at<=?) ORDER BY priority DESC, id LIMIT 1) AND status=?
+WHERE id=(SELECT id FROM jobs WHERE status=? AND stop_requested=0`+skip+` AND (retry_at='' OR retry_at<=?) AND `+libraryOnSQL+`
+  ORDER BY priority DESC, id LIMIT 1) AND status=?
 AND NOT EXISTS (SELECT 1 FROM app_meta WHERE key='paused' AND value='1') RETURNING id`,
 		append(args, Queued)...).Scan(&id)
 	s.removeMu.Unlock()
@@ -438,4 +440,14 @@ func jobIDs(q interface {
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+// libraryOnSQL is true for a job (of table jobs) whose library is started, or that has none: a paused
+// library's jobs stay waiting and are not taken (V5b).
+const libraryOnSQL = `(jobs.library_id IS NULL OR jobs.library_id IN (SELECT id FROM libraries WHERE started=1))`
+
+// libraryOn is libraryOnSQL for the jobs row named alias: Claim, the queue's order and its positions use
+// the same condition (review-5d8b1f9).
+func libraryOn(alias string) string {
+	return `(` + alias + `.library_id IS NULL OR ` + alias + `.library_id IN (SELECT id FROM libraries WHERE started=1))`
 }
