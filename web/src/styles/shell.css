@@ -492,3 +492,4 @@ label.chk{cursor:pointer}
   .hit input[type=checkbox]:not(.switch){width:20px;height:20px}
   .hit input.switch{width:38px;height:22px;border-radius:11px}.hit input.switch::after{width:14px;height:14px}.hit input.switch:checked::after{left:19px}
 }
+.menu .pop{max-width:calc(100vw - 16px)}   /* never wider than the screen; Shell keeps it on the screen */
