@@ -94,6 +94,7 @@ func v2EventStream(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 					flusher.Flush()
 				}
 			case <-poll.C:
+				wv.checkStatuses(r.Context(), false) // V7d: worker.updated when a worker's status changed
 				evs, err := store.EventsAfter(last, 500)
 				if err != nil {
 					return // the page reconnects and replays from its last id

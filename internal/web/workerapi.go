@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/sysload"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
 
@@ -243,10 +244,14 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine) http.
 		if !ok {
 			return
 		}
-		var in struct{ FreeSlots int }
+		var in struct {
+			FreeSlots int
+			sysload.Load
+		}
 		if !readJSON(w, r, &in) {
 			return
 		}
+		workerLoads.Store(wk.ID, in.Load) // V7d: the Workers page's live figures
 		writeJSON(w, map[string]any{"workerId": wk.ID, "paused": store.Paused()})
 	})
 	// a lease: at most one job (the plan comes with V7b2); none: {lease: null}
@@ -341,3 +346,6 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine) http.
 	})
 	return mux
 }
+
+// workerLoads are the remote workers' last reported loads (sysload.Load), by worker id (V7d).
+var workerLoads sync.Map

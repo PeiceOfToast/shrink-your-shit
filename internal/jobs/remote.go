@@ -83,7 +83,7 @@ func (s *Store) Pair(code, name, version string, apiLevel int, capabilities stri
 		capabilities = "{}"
 	}
 	w := RemoteWorker{ID: "w-" + strings.ToLower(randomText(6)), Name: name, Version: version, APILevel: apiLevel,
-		LastSeen: now.UTC().Format(time.RFC3339), Capabilities: capabilities}
+		LastSeen: now.UTC().Format(time.RFC3339Nano), Capabilities: capabilities}
 	token := randomText(32)
 	if _, err := tx.Exec(`INSERT INTO workers(id, name, kind, token_hash, version, api_level, last_seen, capabilities) VALUES (?,?,?,?,?,?,?,?)`,
 		w.ID, w.Name, "remote", hashOf(token), w.Version, w.APILevel, w.LastSeen, w.Capabilities); err != nil {
@@ -111,7 +111,7 @@ func (s *Store) WorkerByToken(token string) (RemoteWorker, error) {
 
 // SeenWorker records that remote worker id called now, with its version.
 func (s *Store) SeenWorker(id, version string, apiLevel int, now time.Time) error {
-	_, err := s.db.Exec(`UPDATE workers SET last_seen=?, version=?, api_level=? WHERE id=? AND kind='remote'`, now.UTC().Format(time.RFC3339), version, apiLevel, id)
+	_, err := s.db.Exec(`UPDATE workers SET last_seen=?, version=?, api_level=? WHERE id=? AND kind='remote'`, now.UTC().Format(time.RFC3339Nano), version, apiLevel, id)
 	return err
 }
 
