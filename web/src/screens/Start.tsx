@@ -5,7 +5,7 @@
 // settings.firstRunLibrary (#116); making the library clears it. Step 2 makes the workflow and then the library; first
 // run never says "Publish" (design 02:41Z). Finishing scans the library, as v1's first run does.
 import { PageHead } from "../PageHead";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
 import { addLibrary, getSettings, listLibraries, listWorkers, listWorkflows, patchSettings, scanLibrary, shrunk, startSimpleWorkflow, startWorker } from "../libraryApi";
@@ -17,8 +17,8 @@ import { START_SIMPLE } from "./Workflows";
 
 type Kept = NonNullable<FirstRunSettings["firstRunLibrary"]>;
 // Runs one request; its error message goes to `onError`. False when it failed (or the user is signed out).
-async function ok<T>(p: Promise<Answer<T>>, onError: (m: string) => void): Promise<T | false> {
-  try { const r = await p; if (failed(r)) return (onError(r.error.message), false); return r; } catch (e) { if (e instanceof SignedOut) return false; throw e; }
+async function ok<T>(p: Promise<Answer<T>>, onError: (m: string, code: string) => void): Promise<T | false> {
+  try { const r = await p; if (failed(r)) return (onError(r.error.message, r.error.code), false); return r; } catch (e) { if (e instanceof SignedOut) return false; throw e; }
 }
 
 export function Start() {
@@ -81,7 +81,9 @@ const ONE_HINT = "Every converted file goes into the folder below, in the same s
 
 function StepWorkflow({ kept, onDone }: { kept: Kept; onDone: () => void }) {
   const [name, setName] = useState("Shrink videos"), [one, setOne] = useState(false), [out, setOut] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false);
-  const [made, setMade] = useState<string>(); // the workflow an earlier try made: a retry reuses it
+  const [made, setMade] = useState<string>();
+  const [focusOut, setFocusOut] = useState(0), outRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (focusOut && !busy) outRef.current?.focus(); }, [focusOut, busy]); // after the field is drawn and the button is back // the workflow an earlier try made: a retry reuses it
   const save = async () => {
     setError("");
     if (!name.trim()) return setError("Give the workflow a name.");
@@ -91,7 +93,13 @@ function StepWorkflow({ kept, onDone }: { kept: Kept; onDone: () => void }) {
       const w = await ok(startSimpleWorkflow(name.trim(), one ? out.trim() : null, made, kept.path), setError);
       if (!w) return;
       setMade(w.id);
-      if (await ok(addLibrary(kept.name, kept.path, w.id), setError)) onDone();
+      // V5a: no usable folder beside this library (no_default_folder) -> One folder for all, its field open, and the
+      // server's sentence as it is (design's own line waits for workshop's folder + reason fields, after V5b)
+      const added = await ok(addLibrary(kept.name, kept.path, w.id), (m, code) => {
+        setError(m);
+        if (code === "no_default_folder") { setOne(true); setFocusOut((n) => n + 1); }
+      });
+      if (added) onDone();
     } finally { setBusy(false); }
   };
   return (
@@ -116,7 +124,7 @@ function StepWorkflow({ kept, onDone }: { kept: Kept; onDone: () => void }) {
             <div style={{ minWidth: 0, flex: 1 }}><label htmlFor="s2-one">One folder for all</label>
               <div className="hint">{ONE_HINT}</div></div></div>
           {one && <div className="field"><label htmlFor="s2-out">Folder for new files</label>
-            <input id="s2-out" className="input mono" value={out} placeholder="/media/shrunk" onChange={(e) => setOut(e.target.value)} aria-describedby="s2-out-hint" />
+            <input id="s2-out" ref={outRef} className="input mono" value={out} placeholder="/media/shrunk" onChange={(e) => setOut(e.target.value)} aria-describedby="s2-out-hint" />
             <span id="s2-out-hint" className="hint">A folder outside {kept.path}.</span></div>}
           <span className="hint">Your originals stay where they are. You can change this and every other choice later.</span>
         </fieldset>
