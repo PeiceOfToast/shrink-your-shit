@@ -11,9 +11,11 @@ import { onLive } from "../live";
 import { Empty, PageHead } from "../PageHead";
 import { Link, navigate, useSearch } from "../router";
 import { useData } from "../useData";
-import { dismissUpdateNotice, getWorker, listWorkers, patchWorker, stoppedByUpdate, testCapabilities, workerAction } from "../workersApi";
+import { allWorkers, newPairing, type Pairing, dismissUpdateNotice, getWorker, listWorkers, patchWorker, stoppedByUpdate, testCapabilities, workerAction } from "../workersApi";
 import type { Capability, Worker } from "../types/v2";
 
+// review 61dc891 P2-1: only what the server reports (a remote worker may send no OS or host): no guess, no stray dot
+const OS: Record<string, string> = { linux: "Linux", darwin: "macOS", windows: "Windows" };
 const going = (w: Worker) => w.status === "busy" || w.status === "online";
 // Status in words (SCREENS V7; design: no 'slots').
 function words(w: Worker): [string, string, string] {
@@ -73,27 +75,75 @@ function StopAsk({ w, onDone, onCancel }: { w: Worker; onDone: (m: string) => vo
   );
 }
 
-// Stop all (header of Workers and the Dashboard): when any worker is converting, the same question as Stop on one
-// worker (review ab98ef3), in a popover; otherwise it stops at once. onStop(now): now false = finish these files.
-// inline (inside the phone "..." menu): the question opens in place, never a popover inside a popover.
-export function StopAll({ busy, onStop, inline }: { busy: boolean; onStop: (now: boolean) => void; inline?: boolean }) {
-  const [now, setNow] = useState(false), [asking, setAsking] = useState(false), ref = useRef<HTMLDetailsElement>(null), group = useId(); // the Dashboard draws its actions twice (desk, phone menu): one radio group each
-  if (!busy) return <button className="btn sm" type="button" onClick={() => onStop(true)}><Icon id="i-stop" />Stop all</button>;
-  const close = () => (ref.current?.removeAttribute("open"), setAsking(false));
-  const ask = (
-        <fieldset className="stack choice" style={{ border: 0, padding: 0, margin: 0 }}>
-          <legend className="lab">Stop all workers?</legend>
-          <label className="radio"><input type="radio" name={group} checked={!now} onChange={() => setNow(false)} /><span><strong>Stop after these files</strong><span className="hint" style={{ display: "block" }}>Each worker finishes what it is converting, then stops.</span></span></label>
-          <label className="radio"><input type="radio" name={group} checked={now} onChange={() => setNow(true)} /><span><strong>Stop now</strong><span className="hint" style={{ display: "block" }}>The files being converted go back to the queue. Your originals aren't touched.</span></span></label>
-          <div className="row"><button className="btn sm primary" type="button" onClick={() => { close(); onStop(now); }}>Stop</button>
-            <button className="btn sm ghost" type="button" onClick={close}>Cancel</button></div>
-        </fieldset>);
-  if (inline) return asking ? <div role="group" aria-label="Stop all workers?" style={{ padding: 8, maxWidth: "calc(100vw - 48px)" }}>{ask}</div>
-    : <button className="btn sm" type="button" onClick={() => setAsking(true)}><Icon id="i-stop" />Stop all</button>;
-  return (
-    <details className="menu" ref={ref}><summary className="btn sm"><Icon id="i-stop" />Stop all</summary>
-      <div className="pop" role="dialog" aria-label="Stop all workers?" style={{ width: 320, maxWidth: "calc(100vw - 16px)", padding: 12 }}>{ask}</div>
-    </details>);
+// "Workers on" (user review 11-12 item 2, design 7.2): one switch for every worker, in the Dashboard's and the Workers
+// page's header. On while any worker is on (converting or ready; a finishing worker is off), with how many: "Workers on ·
+// 1 of 3", or "Workers off · 1 finishing its file". ON (also while one finishes) starts every
+// worker that is off, with no question; OFF asks today's question once when a worker is converting (Stop after these
+// files = drain, or Stop now), else stops at once. The question takes its own row under the header.
+export function WorkersSwitch({ n, m, busy, finishing = 0, onSet }: { n: number; m: number; busy: boolean; finishing?: number; onSet: (a: "start" | "stop" | "drain") => void }) {
+  const [asking, setAsking] = useState(false), [now, setNow] = useState(false), group = useId(), on = n > 0;
+  const sw = useRef<HTMLInputElement>(null), box = useRef<HTMLDivElement>(null);
+  // review 32a8138 P3: the question is a labelled alertdialog; focus goes into it and back to the switch; Escape is Cancel
+  const close = () => { setAsking(false); setTimeout(() => sw.current?.focus(), 0); };
+  useEffect(() => { if (asking) box.current?.querySelector<HTMLInputElement>("input:checked")?.focus(); }, [asking]);
+  useEffect(() => { if (asking && !busy) close(); }, [busy]); // eslint-disable-line react-hooks/exhaustive-deps -- the files finished by themselves: nothing to ask
+  return <>
+    <label className="sw"><input ref={sw} type="checkbox" role="switch" className="switch" checked={on} disabled={!m} aria-describedby={group + "-n"}
+      onChange={() => (on ? (busy ? setAsking(!asking) : onSet("stop")) : onSet("start"))} />
+      <span><b>{on ? "Workers on" : "Workers off"}</b><span className="muted" id={group + "-n"}>{on ? " · " + n + " of " + m + (finishing > 0 ? " · " + finishing + " finishing" : "")
+        : finishing > 0 ? " · " + finishing + (finishing === 1 ? " finishing its file" : " finishing their files") : " · 0 of " + m}</span></span></label>
+    {asking && <div ref={box} className="swask" role="alertdialog" aria-label="Stop all workers?" aria-describedby={group + "-q"} onKeyDown={(e) => e.key === "Escape" && (e.preventDefault(), close())}>
+      <fieldset className="stack choice" style={{ border: 0, padding: 0, margin: 0 }}>
+        <legend className="lab" id={group + "-q"}>Stop all workers?</legend>
+        <label className="radio"><input type="radio" name={group} checked={!now} onChange={() => setNow(false)} /><span><strong>Stop after these files</strong><span className="hint" style={{ display: "block" }}>Each worker finishes what it is converting, then stops.</span></span></label>
+        <label className="radio"><input type="radio" name={group} checked={now} onChange={() => setNow(true)} /><span><strong>Stop now</strong><span className="hint" style={{ display: "block" }}>The files being converted go back to the queue. Your originals aren't touched.</span></span></label>
+        <div className="row"><button className="btn sm primary" type="button" onClick={() => { close(); onSet(now ? "stop" : "drain"); }}>Stop</button>
+          <button className="btn sm ghost" type="button" onClick={close}>Cancel</button></div>
+      </fieldset></div>}
+  </>;
+}
+
+// Add a worker (user item 2; V7b): a one-time pairing code and the one-line command for the other computer, with Copy,
+// the time it still works, the plain-http warning, and the new worker named when it connects (the list is watched while
+// the panel is open). A second click closes the panel; an expired code offers a new one.
+function AddWorker({ workers, reload }: { workers: Worker[]; reload: () => void }) {
+  const [open, setOpen] = useState(false), [p, setP] = useState<Pairing | null>(null), [came, setCame] = useState<Worker | null>(null), [err, setErr] = useState(""), [now, setNow] = useState(Date.now()), [said, setSaid] = useState("");
+  const known = useRef<string[]>([]), cmd = useRef<HTMLTextAreaElement>(null), group = useId();
+  const make = async () => { setErr(""); setSaid(""); setCame(null); known.current = workers.map((w) => w.id); const r = await act(newPairing(), setErr); if (r) setP(r); };
+  useEffect(() => { if (!open) return; const t = setInterval(() => (setNow(Date.now()), reload()), 3000); return () => clearInterval(t); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  const joined = p ? workers.find((w) => !known.current.includes(w.id)) : undefined;
+  // design 17:57Z: the panel stays open on the confirmation (closing on its own risks missing it)
+  useEffect(() => { if (joined) { setCame(joined); setP(null); } }, [joined?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // review 61dc891 P3: the minutes come from the server's expiry at render (the 3 s tick re-renders), never a stale clock
+  const left = p ? Math.ceil((new Date(p.expiresAt).getTime() - Math.max(now, Date.now())) / 60000) : 0, gone = !!p && left <= 0;
+  const local = !!p && /--server https?:\/\/(127\.|localhost|\[::1\])/.test(p.command); // a command only this computer can use
+  useEffect(() => { if (said !== "Command copied.") return; const t = setTimeout(() => setSaid(""), 4000); return () => clearTimeout(t); }, [said]);
+  // plain http has no clipboard API (not a secure context): select the text and copy it the old way
+  // the clipboard API can be missing (plain http) or refused (permission): then the selected text is copied the old way
+  const copy = async () => {
+    const t = cmd.current; if (!t) return; t.select(); let ok = false;
+    try { if (navigator.clipboard) { await navigator.clipboard.writeText(t.value); ok = true; } } catch { /* refused: fall back */ }
+    if (!ok) { t.select(); ok = document.execCommand("copy"); }
+    setSaid(ok ? "Command copied." : "Select the command and copy it.");
+  };
+  return <>
+    <span className="addw"><button className="btn sm" type="button" aria-expanded={open} aria-controls={group} onClick={() => { if (open) return setOpen(false); setOpen(true); if (came || !p || gone) make(); }}><Icon id="i-plus" />Add a worker</button>
+      {said && <span className="muted sm" role="status">{said}</span>}</span>
+    {open && <div className="swask addpanel" id={group} role="region" aria-label="Add a worker">
+      {came ? <>
+        <p role="status"><Icon id="i-check-c" /> Connected: <strong>{came.name}</strong>.</p>
+        <div className="row"><Link className="btn sm primary" to={"/workers/" + encodeURIComponent(came.id)}>Open {came.name}</Link><button className="btn sm ghost" type="button" onClick={() => (setOpen(false), setCame(null))}>Done</button></div></>
+      : err ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{err}</span></p> : !p ? <p className="muted">Making a pairing code...</p> : gone ? <>
+        <p>This code has expired.</p><div className="row"><button className="btn sm primary" type="button" onClick={make}>Make a new code</button></div></> : <>
+        <label className="lab" htmlFor={group + "-cmd"}>Run this on the other computer:</label>
+        <textarea id={group + "-cmd"} ref={cmd} className="input mono" readOnly rows={2} value={p.command} onFocus={(e) => e.currentTarget.select()} />
+        <div className="row"><button className="btn sm primary" type="button" onClick={copy}><Icon id="i-copy" />Copy</button>
+          <span className="muted sm">Pairing code <strong className="mono">{p.code}</strong> · works for {left <= 1 ? "less than a minute" : left + " more minutes"}, once.</span></div>
+        {local && <p className="muted sm"><Icon id="i-alert" /> This address only works on this computer. To pair another computer, open this page by its network address (for example http://192.168.1.10:8484) and make a new code.</p>}
+        {p.plainHTTP && <p className="muted sm"><Icon id="i-info" /> This page uses plain http: fine on your own network. A worker outside it needs https://.</p>}
+        <p className="muted sm" aria-live="polite">Waiting for the worker to connect...</p></>}
+    </div>}
+  </>;
 }
 
 function StartStop({ w, onDone }: { w: Worker; onDone: (m: string) => void }) {
@@ -117,44 +167,46 @@ export function Workers() {
   const live = useLiveWorkers(() => (ws.reload(), jobs.reload()));
   const [said, setSaid] = useState("");
   const names = Object.fromEntries((jobs.data && !failed(jobs.data) ? jobs.data.items : []).map((j) => [j.id, j.name]));
-  const list = (ws.data ?? []).map(live), anyGoing = list.some(going);
+  const list = (ws.data ?? []).map(live);
   const done = (m: string) => (setSaid(m), ws.reload());
-  // every worker is tried; the line names the ones that failed instead of saying they all changed (review ab98ef3 P3)
-  const all = async (a: "start" | "stop" | "drain-busy") => {
-    const bad: string[] = [];
-    for (const w of list) {
-      const v = a === "start" ? (w.status === "paused" ? "start" : null) : going(w) ? (a === "drain-busy" && w.currentJobIds.length ? "drain" : "stop") : null;
-      if (v) await act(workerAction(w.id, v), (m) => bad.push(w.name + ": " + m));
-    }
-    setSaid(bad.length ? "Not changed: " + bad.join(" ") : a === "start" ? "Workers started." : a === "stop" ? "Workers stopped." : "Workers finish their files, then stop.");
+  // the "Workers on" switch: one call for every worker (#171)
+  // lead 16:57Z (design 7.2): a finishing worker shows OFF; the label says it's finishing; ON again starts every worker that isn't on
+  const n = list.filter(going).length, fin = list.filter((w) => w.status === "draining").length;
+  const busyAny = list.some((w) => (going(w) || w.status === "draining") && w.currentJobIds.length > 0); // a finishing file is asked about too
+  const set = async (a: "start" | "stop" | "drain") => {
+    if (await act(allWorkers(a), setSaid)) setSaid(a === "start" ? "Workers started." : a === "stop" ? "Workers stopped." : "Workers finish their files, then stop.");
     ws.reload();
   };
   return (
     <div className="stack">
       <PageHead icon="i-worker" title="Workers" help="The computers that convert your files. Nothing converts until a worker is started.">
-        {list.length > 0 && (anyGoing ? <StopAll busy={list.some((w) => going(w) && w.currentJobIds.length > 0)} onStop={(now) => all(now ? "stop" : "drain-busy")} />
-          : <button className="btn sm" type="button" onClick={() => all("start")}><Icon id="i-play" />Start all</button>)}
+        {list.length > 0 && <WorkersSwitch n={n} m={list.length} busy={busyAny} finishing={fin} onSet={set} />}
+        {/* user item 2: Add a worker pairs another computer (V7b) */}
+        <AddWorker workers={ws.data ?? []} reload={ws.reload} />
       </PageHead>
       {upd.data === true && <div className="note"><Icon id="i-info" /><div className="sp">Converting is stopped after the update. Press Start to carry on.</div>
         <button className="btn sm ghost" type="button" onClick={async () => { await act(dismissUpdateNotice(), setSaid); upd.reload(); }}>Dismiss</button></div>}
       <p className="muted" role="status">{said}</p>
       {ws.error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{ws.error.message}</span></p>}
       {!ws.loaded ? <div className="empty">Loading...</div> : !list.length ? <Empty icon="i-worker" text="No workers yet." /> : (
-        <div className="wgrid">{list.map((w) => {
-          const [t, cls, icon] = words(w), gone = w.status === "offline" || w.status === "stalled";
-          return (
-            <section key={w.id} className={"card wcard" + (gone ? " dim" : "")} aria-labelledby={"w-" + w.id}>
-              <div className="hd"><h2 id={"w-" + w.id}><Link to={"/workers/" + encodeURIComponent(w.id)}>{w.name}</Link></h2><span className="sp" /><span className={"pill " + cls}><Icon id={icon} />{t}</span></div>
-              <div className="bd stack">
-                <p className="sm muted">{[w.host, w.os === "linux" ? "Linux" : w.os === "darwin" ? "macOS" : "Windows", w.arch, w.appVersion !== "dev" ? "v" + w.appVersion : "dev build", "Last heartbeat " + ago(w.lastHeartbeatAt)].join(" · ")}</p>
-                {gone ? <p className="sm muted">No live figures while it is offline.</p> : <Live w={w} />}
-                <dl className="kv"><dt>Encoders</dt><dd>{encoders(w)}</dd>
-                  <dt>Now</dt><dd>{w.currentJobIds.length ? w.currentJobIds.map((id) => <Link key={id} className="clamp2" to={"/jobs?tab=running&job=" + encodeURIComponent(id)}>{names[id] ?? "Job " + id}</Link>) : "Nothing"}</dd>
-                  {w.tags.length > 0 && <><dt>Tags</dt><dd><span className="chips">{w.tags.map((x) => <span className="mchip" key={x}>{x}</span>)}</span></dd></>}</dl>
-                <div className="row"><StartStop w={w} onDone={done} /><span className="sp" /><Link className="btn sm ghost" to={"/workers/" + encodeURIComponent(w.id)}>Open</Link></div>
-              </div>
-            </section>);
-        })}</div>)}
+        // design 7.2: flat rows (name and host, now, slots, encoders, last heard); on phones the name and its action
+        // lead, then each figure on its own labelled line
+        <table className="tbl wk"><thead><tr><th>Worker</th><th>Now</th><th className="num">Slots</th><th>Encoders</th><th className="num">Last heard</th><th><span className="sr">Start or stop</span></th></tr></thead>
+          <tbody>{list.map((w) => {
+            const [t, cls, icon] = words(w), gone = w.status === "offline" || w.status === "stalled";
+            return (
+              <tr key={w.id} className={gone ? "dim" : undefined}>
+                <td className="nm"><Link className="ttl" to={"/workers/" + encodeURIComponent(w.id)}>{w.name}</Link>
+                  <span className="sub">{[w.host, OS[w.os ?? ""]].filter(Boolean).join(" · ")}</span>
+                  {w.tags.length > 0 && <span className="chips" aria-label="Tags">{w.tags.map((x) => <span className="mchip" key={x}>{x}</span>)}</span>}</td>
+                <td className="now"><span className="nowl"><span className={"pill " + cls}><Icon id={icon} />{t}</span>
+                  {w.currentJobIds.map((id) => <Link key={id} className="mono sm" to={"/jobs?tab=running&job=" + encodeURIComponent(id)}>{names[id] ?? "Job " + id}</Link>)}</span></td>
+                <td className="num" data-l="Slots">{w.slots.cpu.used} of {w.slots.cpu.total}</td>
+                <td data-l="Encoders">{encoders(w)}</td>
+                <td className="num" data-l="Last heard">{ago(w.lastHeartbeatAt)}</td>
+                <td className="act"><StartStop w={w} onDone={done} /></td>
+              </tr>);
+          })}</tbody></table>)}
     </div>
   );
 }
