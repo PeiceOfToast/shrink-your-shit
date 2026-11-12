@@ -76,6 +76,34 @@ jobs:
         if: runner.os != 'Linux'
         run: go test -count=1 ./...
 
+  # The real-ffmpeg tests again on ffmpeg 8: ubuntu-latest is moving to it (8.0.1) while the test job above
+  # has the distribution's ffmpeg, so a break with a new ffmpeg shows here. A pinned static build (BtbN,
+  # n8.0.1, checked by hash), so the version does not drift with the runner image.
+  ffmpeg8:
+    name: real ffmpeg 8
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SYP_REQUIRE_FFMPEG: "1"
+      FFMPEG8_TAR: ffmpeg-n8.0.1-17-g27a297f186-linux64-gpl-8.0.tar.xz
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install ffmpeg 8
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/ff.tar.xz" "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2025-11-30-12-53/$FFMPEG8_TAR"
+          echo "cab6b5dd9cede8a8db8891e28f2fec2ddfd6401785328d139cbcfd23af9f691e  $RUNNER_TEMP/ff.tar.xz" | sha256sum -c -
+          tar -xf "$RUNNER_TEMP/ff.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/${FFMPEG8_TAR%.tar.xz}/bin" >> "$GITHUB_PATH"
+      - name: Test (real ffmpeg 8)
+        run: |
+          ffmpeg -version | head -n 1
+          go test -count=1 -v -run TestReal ./... > test.log 2>&1 || { cat test.log; exit 1; }
+          grep -E '^[[:space:]]*--- (PASS|FAIL|SKIP): TestReal' test.log
+          if grep -qE '^[[:space:]]*--- SKIP: TestReal' test.log; then echo "a real-ffmpeg test was skipped"; exit 1; fi
+
   # The race detector needs cgo (a C compiler), which the dev machines lack; ubuntu runners have gcc.
   # Packages that run goroutines, at unit level: no ffmpeg here, so the real-ffmpeg tests skip.
   race:
