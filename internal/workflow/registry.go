@@ -202,7 +202,7 @@ func Definitions() []StepDefinition {
 				"resolution":     withDefault(enum([]any{0, 720, 1080, 2160}, []string{"Any", "At least 720p", "At least 1080p", "4K (2160p)"}), 0, "Resolution", ""),
 				"hdr":            withDefault(enum([]any{"", "yes", "no"}, []string{"Either", "HDR", "Not HDR"}), "", "HDR", "segmented"),
 				"dolbyVision":    withDefault(enum([]any{"", "yes", "no"}, []string{"Either", "Dolby Vision", "Not Dolby Vision"}), "", "Dolby Vision", "segmented"),
-				"fps":            described(map[string]any{"type": "number", "minimum": 0, "title": "Frame rate is at least (fps)"}, "0 for any."),
+				"fps":            described(map[string]any{"type": "number", "minimum": 0, "maximum": 1000, "title": "Frame rate is at least (fps)"}, "0 for any."),
 				"size":           described(map[string]any{"type": "integer", "minimum": 0, "title": "File is at least (MB)"}, "0 for any."),
 				"container": described(map[string]any{"type": "array", "title": "File type is one of", "items": enum([]any{"mkv", "mp4", "avi", "mov", "webm", "ts", "m2ts", "wmv", "flv", "mpg"},
 					[]string{"MKV", "MP4", "AVI", "MOV", "WebM", "TS", "M2TS", "WMV", "FLV", "MPG"})}, "Leave empty for any."),
