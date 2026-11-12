@@ -37,10 +37,11 @@ interface View {
   running: boolean; workersRunning: number | null; offline: number | null;
   busy: boolean;                  // a worker is converting now (live): Stop all asks first
   waiting: number; converting: number; done24: number; failed24: number; success: number | null; freed: number; could: number;
+  soon: number | null;            // "Will be freed": summary.bytes.waitingToFree (V5c); null: the trash's total
   online: string | null;          // the Workers tile: "2 of 3"
   active: Row[]; failures: Row[];
   workers: { id: string; name: string; sub: string; words: string; cls: string; icon: string; gone: boolean }[] | null;
-  perLibrary: { id: string; name: string; freed: number; could: number }[] | null;
+  perLibrary: { id: string; name: string; freed: number; waiting: number; could: number }[] | null;
   activity: { id: string; icon: string; text: string; at: string }[] | null;
   fresh: boolean; steps: [string, boolean, string?][]; libraries: number; scanning: boolean; updated: Date;
 }
@@ -89,7 +90,7 @@ function MockDashboard() {
   const v: View = {
     running: sum.activity.workersRunning > 0, workersRunning: sum.activity.workersRunning, offline: sum.badges.workersOffline, busy: s.workers.some((w) => w.currentJobIds.length > 0),
     waiting: sum.activity.waiting, converting: sum.activity.converting, done24: sum.last24h.completed, failed24: sum.last24h.failed,
-    success: sum.last24h.successRate, freed: sum.bytes.freed, could: sum.bytes.waitingToFree,
+    success: sum.last24h.successRate, freed: sum.bytes.freed, soon: null, could: sum.bytes.waitingToFree, // the sample's "could free" (originals left in place); its trash is the "Will be freed" line
     online: sum.workers.filter((w) => w.status === "online" || w.status === "busy" || w.status === "draining").length + " of " + sum.workers.length,
     active: sum.activeJobs.map((j) => ({ id: j.id, name: j.file.name, sub: [j.library?.name, j.workflow.name, j.worker?.name].filter(Boolean).join(" · "), percent: j.progress?.percent ?? null,
       line: [((j.subState && STEP_WORD[j.subState]) || j.progress?.stage) + (j.currentStep ? " · step " + j.currentStep.index + " of " + j.currentStep.count : ""), j.progress?.fps != null && j.progress.fps + " fps", j.progress && elapsed(j.progress.elapsedS)].filter(Boolean).join(" · ") })),
@@ -98,7 +99,7 @@ function MockDashboard() {
       const [words, cls, icon] = STATUS[w.status], full = s.workers.find((x) => x.id === w.id), gone = w.status === "offline" || w.status === "stalled";
       return { id: w.id, name: w.name, sub: gone ? "Last heard from " + clock(full?.lastHeartbeatAt ?? full?.statusSince ?? "") : w.slots.cpu.used + " of " + w.slots.cpu.total + " busy", words: gone ? words + " since " + clock(full?.statusSince ?? "") : words, cls, icon, gone };
     }),
-    perLibrary: sum.bytes.perLibrary.map((l) => ({ id: l.libraryId, name: libName(l.libraryId), freed: l.freed, could: l.waitingToFree })),
+    perLibrary: sum.bytes.perLibrary.map((l) => ({ id: l.libraryId, name: libName(l.libraryId), freed: l.freed, waiting: 0, could: l.waitingToFree })), // the sample's per-library figures are originals left in place
     activity: s.activity.slice(0, 8).map((e) => ({ id: e.id, icon: EVENT_ICON[e.type], text: e.text, at: e.at })),
     fresh: !s.settings.firstRunDone,
     steps: [["Add a library", s.libraries.length > 0, s.libraries[0]?.name], ["Create a workflow", s.wf.length > 0], ["Check your worker", s.settings.firstRunStep > 3]],
@@ -140,15 +141,14 @@ function RealDashboard() {
     running: ws ? going > 0 : s.activity.workersRunning && !s.processingPaused, workersRunning: ws ? going : null, offline: s.badges.workersOffline,
     busy: ws ? ws.some((w) => w.status === "busy" || w.currentJobIds.length > 0) : s.activity.converting > 0, // the heartbeat's status is live; the counts lag
     waiting: s.activity.waiting, converting: s.activity.converting, done24: s.last24h.completed, failed24: s.last24h.failed, success: s.last24h.successRate,
-    // 'could free' is V5c's couldFree (originals left in place), not waitingToFree: waitingToFree is the originals kept
-    // in .syp-trash, which the trash line ("+N by <date>") already shows. Until couldFree lands, nothing reads "could free".
-    freed: s.bytes.freed, could: 0, online: ws ? going + " of " + ws.length : null,
+    // V5c: "Could free" is couldFree (originals left in place); waitingToFree is the trash, the "Will be freed" line
+    freed: s.bytes.freed, could: s.bytes.couldFree ?? 0, soon: s.bytes.waitingToFree, online: ws ? going + " of " + ws.length : null,
     active: s.activeJobs.map(row), failures: s.recentFailures.map(row),
     workers: ws?.map((w) => {
       const [words, cls, icon] = STATUS[w.status], gone = w.status === "offline" || w.status === "stalled";
       return { id: w.id, name: w.name, sub: gone ? "Last heard from " + clock(w.lastHeartbeatAt ?? w.statusSince) : w.slots.cpu.used + " of " + w.slots.cpu.total + " busy", words: gone ? words + " since " + clock(w.statusSince) : words, cls, icon, gone };
     }) ?? null,
-    perLibrary: s.bytes.perLibrary && libs.data ? s.bytes.perLibrary.map((l) => ({ id: l.libraryId, name: libs.data!.find((x) => x.id === l.libraryId)?.name ?? l.libraryId, freed: l.freed, could: l.waitingToFree })) : null,
+    perLibrary: s.bytes.perLibrary && libs.data ? s.bytes.perLibrary.map((l) => ({ id: l.libraryId, name: libs.data!.find((x) => x.id === l.libraryId)?.name ?? l.libraryId, freed: l.freed, waiting: l.waitingToFree, could: l.couldFree ?? 0 })) : null,
     // the feed (newest first) with the entries that came live since it was loaded on top
     activity: feed.data ? [...liveFeed, ...feed.data.filter((a) => !liveFeed.some((x) => x.id === a.id))].slice(0, 8).map((e) => ({ id: e.id, icon: EVENT_ICON[e.type] ?? "i-info", text: e.text, at: e.at })) : null,
     fresh: st ? !st.firstRunDone : false,
@@ -170,7 +170,7 @@ function DashboardView({ v, trash, acts }: { v: View; trash?: { bytes: number; l
       : <button className="btn sm" type="button" onClick={acts.start}><Icon id="i-play" />Start all</button>}
     {v.libraries > 0 && <button className="btn sm ghost" type="button" onClick={acts.scan} disabled={v.scanning}><Icon id="i-refresh" />{v.scanning ? "Scanning..." : "Scan all libraries"}</button>}
   </>;
-  const soon = trash?.bytes ?? 0;
+  const soon = v.soon ?? trash?.bytes ?? 0; // the server's waitingToFree (net, as each library's) when it has one; the trash gives the date
   return (
     <div className="stack">
       <PageHead icon="i-dashboard" title="Dashboard">
@@ -195,14 +195,15 @@ function DashboardView({ v, trash, acts }: { v: View; trash?: { bytes: number; l
           <div className="card kpi wide">
             <span className="l">Space saved <button className="btn icon ghost help" type="button" aria-label="About space saved" aria-expanded={why} onClick={() => setWhy(!why)}><Icon id="i-info" /></button></span>
             <span className="v">{bytes(v.freed)}</span>
+            {/* design D1 (clean pass: one short line; the full words are under "?"): freed space is the big figure; never added */}
             <span className="sub">{[soon > 0 && "+" + bytes(soon) + (trash?.lastDeleteAt ? " by " + day(trash.lastDeleteAt) : ""), v.could > 0 && "could free " + bytes(v.could)].filter(Boolean).join(" · ") || "Nothing waiting"}</span>
           </div>
           <div className="card kpi"><span className="l">Success (24 h)</span><span className="v">{v.success == null ? "-" : (v.success * 100).toFixed(1) + "%"}</span></div>
           {v.online != null && <div className="card kpi"><span className="l">Workers</span><span className="v">{v.online}</span><span className="sub">online</span></div>}
         </div>
         {why && <p className="muted sm kpiwhy">
-          {bytes(v.freed)} is space already freed.{soon > 0 && " " + bytes(soon) + " more will be freed when the kept originals are removed" + (trash?.lastDeleteAt ? " by " + day(trash.lastDeleteAt) : "") + "."}
-          {v.could > 0 && " Could free " + bytes(v.could) + " counts originals still in place; nothing removes them automatically."} Updated when the library is scanned.</p>}
+          {bytes(v.freed)} is space already freed.{soon > 0 && " Will be freed: " + bytes(soon) + (trash?.lastDeleteAt ? " by " + day(trash.lastDeleteAt) : "") + ", when the kept originals are removed."}
+          {v.could > 0 && " Could free: " + bytes(v.could) + " if you remove the originals; nothing removes them automatically."} Updated when the library is scanned.</p>}
       </>}
 
       {/* D3: panels are a title row and a flat list */}
@@ -246,7 +247,7 @@ function DashboardView({ v, trash, acts }: { v: View; trash?: { bytes: number; l
               const all = l.freed + l.could;
               return (
                 <li key={l.id} className="col">
-                  <div className="row nw"><span className="ttl sp">{l.name}</span><span className="sm">{l.freed ? bytes(l.freed) + " freed" : "Nothing freed yet"}{l.could > 0 && <span className="muted"> · could free {bytes(l.could)}</span>}</span></div>
+                  <div className="row nw"><span className="ttl sp">{l.name}</span><span className="sm">{l.freed ? bytes(l.freed) + " freed" : "Nothing freed yet"}{l.waiting > 0 && <span className="muted"> · {bytes(l.waiting)} will be freed</span>}{l.could > 0 && <span className="muted"> · could free {bytes(l.could)}</span>}</span></div>
                   <div className="bar thin ok" role="img" aria-label={all ? Math.round((100 * l.freed) / all) + "% of what this library could free" : "Nothing to free yet"}><i style={{ width: all ? (100 * l.freed) / all + "%" : "0%" }} /></div>
                 </li>);
             })}</ul>
