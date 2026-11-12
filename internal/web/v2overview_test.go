@@ -29,11 +29,11 @@ func TestV2Overview(t *testing.T) {
 	a, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: p("a.mkv"), SizeBefore: 1000})
 	st.Claim("w")
 	st.Complete(a, p("a.mkv"), 400) // replaced, nothing kept: 600 freed
-	st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: p("c.mkv"), SizeBefore: 300})
+	c, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: p("c.mkv"), SizeBefore: 300})
 	st.Claim("w")
 	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/overview"})
 	var o struct {
-		Headline struct{ Freed, FilesConverted, FilesWaiting int64 }
+		Headline struct{ Freed, FilesConverted, FilesWaiting, Grew int64 }
 		Trash    struct{ Bytes int64 }
 		Workers  []struct{ Jobs []struct{ Name string } }
 		Active   []struct {
@@ -41,9 +41,9 @@ func TestV2Overview(t *testing.T) {
 			Library *struct{ Name string }
 		}
 		Libraries []struct {
-			BytesBefore, BytesNow, Saved int64
-			SavedPercent                 float64
-			Counts                       map[string]int
+			BytesBefore, BytesNow, Saved, Grew int64
+			SavedPercent                       float64
+			Counts                             map[string]int
 		}
 		Daily []struct {
 			Day                        string
@@ -84,6 +84,15 @@ func TestV2Overview(t *testing.T) {
 	}
 	if o.TimeZone == "" || o.Averages.FileShrinkPercent == nil || *o.Averages.FileShrinkPercent != 60 {
 		t.Errorf("time zone %q, averages %v", o.TimeZone, o.Averages.FileShrinkPercent)
+	}
+	// c.mkv 300 -> 400: kept as it is, saves nothing, and its 100 bytes of growth show as grew (headline and library)
+	st.Complete(c, p("c.mkv"), 400)
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/v2/overview"})
+	if err := json.Unmarshal([]byte(body), &o); err != nil {
+		t.Fatal(err)
+	}
+	if o.Headline.Grew != 100 || o.Headline.Freed != 600 || len(o.Libraries) != 1 || o.Libraries[0].Grew != 100 || o.Libraries[0].Saved != 600 {
+		t.Errorf("grew: headline %+v, library %+v: %s", o.Headline, o.Libraries, body)
 	}
 }
 
