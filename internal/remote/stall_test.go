@@ -179,14 +179,16 @@ func (x slowThenReal) Stream(ctx context.Context, onLine func(string), name stri
 func TestRemoteEncodeOfUnknownLengthKeepsItsLease(t *testing.T) {
 	needFFmpeg(t)
 	oldLease, oldPoll, oldEvery := jobs.LeaseFor, PlanPoll, ProgressEvery
-	jobs.LeaseFor, PlanPoll, ProgressEvery = 400*time.Millisecond, 50*time.Millisecond, 20*time.Millisecond
+	// ffmpeg prints its position about every 0.5 s (its -progress cadence): the lease must outlast that and the
+	// real encode's start, or a slow run loses it between two reports (ffmpeg 8 CI, 2026-11-12)
+	jobs.LeaseFor, PlanPoll, ProgressEvery = 1500*time.Millisecond, 50*time.Millisecond, 20*time.Millisecond
 	defer func() { jobs.LeaseFor, PlanPoll, ProgressEvery = oldLease, oldPoll, oldEvery }()
 	srv, st, lib := stallServer(t, 5*time.Second)
 	id := remoteJobLen(t, st, lib, 0)
 	c := pairClient(t, srv, st)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go c.Work(ctx, Converter{Exec: slowThenReal{for_: 1500 * time.Millisecond}, FFmpeg: "ffmpeg", FFprobe: "ffprobe", Work: t.TempDir(),
+	go c.Work(ctx, Converter{Exec: slowThenReal{for_: 3 * time.Second}, FFmpeg: "ffmpeg", FFprobe: "ffprobe", Work: t.TempDir(),
 		FreeSpace: func(string) (uint64, error) { return 1 << 40, nil }})
 	var j jobs.Job
 	for end := time.Now().Add(30 * time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
