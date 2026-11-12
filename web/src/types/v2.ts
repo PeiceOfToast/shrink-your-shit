@@ -84,12 +84,12 @@ export interface Library {
   counts: { files: number; waiting: number; running: number; completed: number; skipped: number; failed: number };
   bytes: { freed: number; waitingToFree: number };
   output: {
-    policy: CommitPolicy;
+    policy: CommitPolicy | null; // null: its workflow can't be read
     folder: string | null;
     overrideFolder: string | null;
-    problem: { code: "no_default_folder" | "system_folder" | "inside_library" | "not_writable" | "low_space"; message: string } | null;
+    problem: { code: string; message: string } | null; // no_default_folder, inside_library...: show the message
   };
-  discovery: { subfolders: boolean; settleSeconds: number; followLinks: boolean; include: string[]; exclude: string[] };
+  discovery: { subfolders: boolean; settleSeconds: number; followLinks: boolean; include: string[]; exclude: string[]; scanEverySeconds?: number }; // V5b: the effective interval
   status: "ok" | "scanning" | "path_missing" | "not_readable" | "disabled";
 }
 
