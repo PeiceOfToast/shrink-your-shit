@@ -8,12 +8,15 @@ on:
 permissions:
   contents: read
 
+# Linux jobs are pinned to ubuntu-24.04, not ubuntu-latest: GitHub moved ubuntu-latest to an image with
+# ffmpeg 8.0.1, where 3 real-ffmpeg tests fail (a product bug being fixed separately). Move back to
+# ubuntu-latest once ffmpeg 8 passes and CI has a job on it.
 jobs:
   # Code the tests do not look at: the web page's JavaScript (a syntax error there passes go vet and go
   # test, and shows the user a blank page) and Go formatting.
   lint:
     name: lint (gofmt, UI JavaScript)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -41,7 +44,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-24.04, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -76,8 +79,8 @@ jobs:
   # The race detector needs cgo (a C compiler), which the dev machines lack; ubuntu runners have gcc.
   # Packages that run goroutines, at unit level: no ffmpeg here, so the real-ffmpeg tests skip.
   race:
-    name: race (ubuntu-latest)
-    runs-on: ubuntu-latest
+    name: race (ubuntu-24.04)
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       CGO_ENABLED: "1"
@@ -92,7 +95,7 @@ jobs:
   # and the test job runs without it, so the no-Node placeholder path stays tested too.
   web:
     name: web (typecheck, build, embed check)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -127,7 +130,7 @@ jobs:
   build:
     name: build (${{ matrix.goos }}/${{ matrix.goarch }})
     needs: web
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       CGO_ENABLED: "0"
@@ -157,7 +160,7 @@ jobs:
 
   docker:
     name: docker image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
