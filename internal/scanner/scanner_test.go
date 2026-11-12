@@ -716,6 +716,53 @@ func TestOriginalsLeftInPlaceAreMarkedGone(t *testing.T) {
 	_ = lib
 }
 
+// V6a: a workflow with checks. The scanner queues a file down the path its answers lead to, with each
+// answer on the job's timeline (node, port, design's words) and its path; a path to "Leave the file
+// alone" records the skip with the person's words.
+func TestBranchesAtScan(t *testing.T) {
+	probe := `{"streams":[{"codec_type":"video","codec_name":"h264","width":3840,"height":2160,"bit_rate":"30000000"}],"format":{"duration":"60","size":"5"}}`
+	s, st, lib, f := setup(t, probe)
+	slider := rules.SliderTemplate(3)
+	check := rules.VideoCheck{Name: "Is it 4K?", Resolution: 2160}
+	tm := rules.Template{Kind: rules.KindBranches, Branches: &[]rules.Branch{
+		{Checks: []rules.BranchCheck{{NodeID: "c1", Port: "match", Check: check}}, Then: &slider, Path: []string{"in", "c1", "convert", "save"}},
+		{Checks: []rules.BranchCheck{{NodeID: "c1", Port: "else", Check: check}}, End: "Not 4K: left for later.", Path: []string{"in", "c1", "end"}},
+	}}
+	libs, _ := st.Libraries()
+	s.Targets = func() ([]Target, error) {
+		return []Target{{LibraryID: libs[0].ID, Path: libs[0].Path, Template: tm}}, nil
+	}
+	s.ScanOnce(context.Background())
+	if n := s.ScanOnce(context.Background()); n != 1 {
+		t.Fatalf("queued %d", n)
+	}
+	js, _ := st.List(10)
+	steps, _ := st.Steps(js[0].ID)
+	var branch *jobs.Step
+	for i := range steps {
+		if steps[i].Step == "branch" {
+			branch = &steps[i]
+		}
+	}
+	if branch == nil || branch.NodeID != "c1" || branch.Port != "match" || branch.Words != "Is it 4K? → Yes (resolution is 2160p)" {
+		t.Errorf("timeline %+v", steps)
+	}
+	if route, _ := st.Route(js[0].ID); strings.Join(route, ",") != "in,c1,convert,save" {
+		t.Errorf("path %v", route)
+	}
+	// a 1080p file: left alone, in the person's words
+	f.Out = []byte(`{"streams":[{"codec_type":"video","codec_name":"h264","width":1920,"height":1080,"bit_rate":"8000000"}],"format":{"duration":"60","size":"5"}}`)
+	hd := filepath.Join(lib, "hd.mkv")
+	os.WriteFile(hd, []byte("hd"), 0o644)
+	past := time.Now().Add(-time.Hour)
+	os.Chtimes(hd, past, past)
+	s.ScanOnce(context.Background())
+	s.ScanOnce(context.Background())
+	if rec, _ := st.GetFile(filepath.Join(libs[0].Path, "hd.mkv")); rec == nil || rec.Reason != rules.SkipLeftByWorkflow || rec.Decision != "skip: not 4K: left for later" {
+		t.Errorf("left alone: %+v", rec)
+	}
+}
+
 // Settings' scanEvery, applied without a restart: the next pass is due that long after the last one.
 func TestSetEveryRetimesTheNextScan(t *testing.T) {
 	s, _, _, _ := setup(t, hevcBig)

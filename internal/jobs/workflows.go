@@ -499,11 +499,13 @@ type JobEvent struct {
 	// Message is the reason's sentence (migration 23), "" when there is no reason.
 	Message string `json:"message,omitempty"`
 	Worker  string `json:"worker,omitempty"`
+	// Attempts are the tries a job had made when it ended by being deleted (skipped, stopped); 0 otherwise.
+	Attempts int `json:"-"`
 }
 
 // JobEvents is job id's history, oldest first; it stays after the job's row is gone.
 func (s *Store) JobEvents(id int64) ([]JobEvent, error) {
-	rows, err := s.db.Query(`SELECT seq, at, from_status, to_status, reason, COALESCE(json_extract(data,'$.message'),''), worker FROM events WHERE kind='job' AND job_id=? ORDER BY seq`, id)
+	rows, err := s.db.Query(`SELECT seq, at, from_status, to_status, reason, COALESCE(json_extract(data,'$.message'),''), worker, COALESCE(json_extract(data,'$.attempts'),0) FROM events WHERE kind='job' AND job_id=? ORDER BY seq`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -512,7 +514,7 @@ func (s *Store) JobEvents(id int64) ([]JobEvent, error) {
 	for rows.Next() {
 		var e JobEvent
 		var from sql.NullString
-		if err := rows.Scan(&e.Seq, &e.At, &from, &e.To, &e.Reason, &e.Message, &e.Worker); err != nil {
+		if err := rows.Scan(&e.Seq, &e.At, &from, &e.To, &e.Reason, &e.Message, &e.Worker, &e.Attempts); err != nil {
 			return nil, err
 		}
 		if from.Valid {
