@@ -215,15 +215,14 @@ func settingRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 	}
 	// The folder for new files (S6): may it be used? The same check runs when a flow is saved with it.
 	api.HandleFunc("POST /api/flows/{id}/check-output", func(w http.ResponseWriter, r *http.Request) {
-		f, ok := flowSetting(w, r)
-		if !ok {
+		if _, ok := flowSetting(w, r); !ok {
 			return
 		}
 		var in struct{ Path string }
 		if !readJSON(w, r, &in) {
 			return
 		}
-		writeJSON(w, map[string]any{"blockers": outputBlockers(store, f.ID, strings.TrimSpace(in.Path)), "notes": []string{}})
+		writeJSON(w, map[string]any{"blockers": outputBlockers(store, 0, strings.TrimSpace(in.Path)), "notes": []string{}})
 	})
 	// Warnings for a setting being edited (S6, contract 21:10Z item 7): no side effects, nothing saved.
 	api.HandleFunc("POST /api/flows/{id}/warnings", func(w http.ResponseWriter, r *http.Request) {
@@ -451,14 +450,44 @@ func readBasic(body map[string]json.RawMessage) (quality int, audio string, ok b
 	return quality, audio, true
 }
 
-// outputUsable refuses (400, the blocker's code) a save whose folder for new files can't be used.
+// outputUsable refuses (400, the blocker's code) a save or publish whose folder for new files can't be
+// used. "Next to each library" (V5a): each library of the flow needs its folder (design's
+// no_default_folder words otherwise), never inside any library; it is made when the first file is.
 func outputUsable(w http.ResponseWriter, store *jobs.Store, flowID int64, t rules.Template) bool {
 	if t.Selectors == nil || t.Selectors.AfterConverting != "folder" {
 		return true
 	}
-	if b := outputBlockers(store, flowID, t.Selectors.OutputDir); len(b) > 0 {
-		apiError(w, http.StatusBadRequest, b[0]["code"], b[0]["message"]+" Nothing was changed.")
+	if t.Selectors.FolderMode != rules.NextToLibrary {
+		if b := outputBlockers(store, 0, t.Selectors.OutputDir); len(b) > 0 {
+			apiError(w, http.StatusBadRequest, b[0]["code"], b[0]["message"]+" Nothing was changed.")
+			return false
+		}
+		return true
+	}
+	libs, err := store.Libraries()
+	if err != nil {
+		serverError(w, err)
 		return false
+	}
+	for _, l := range libs {
+		if l.FlowID != flowID {
+			continue
+		}
+		dir, problem := libraryFolder(t, l)
+		if problem != nil {
+			apiError(w, http.StatusBadRequest, problem.Code, problem.Message+" Nothing was changed.")
+			return false
+		}
+		if jobs.SystemFolder(dir) || jobs.SystemFolder(resolved(dir)) {
+			apiError(w, http.StatusBadRequest, "system_folder", "New files for "+l.Name+" would go to "+dir+", a system folder. Pick a folder in the library's Output tab. Nothing was changed.")
+			return false
+		}
+		for _, lp := range otherLibraries(store, l.ID) {
+			if outputInside(dir, lp) {
+				apiError(w, http.StatusBadRequest, "inside_library", "New files for "+l.Name+" would go to "+dir+", which is inside the library at "+lp+" (or holds it), so they would be converted again. Pick a folder in the library's Output tab. Nothing was changed.")
+				return false
+			}
+		}
 	}
 	return true
 }

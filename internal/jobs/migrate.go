@@ -322,6 +322,10 @@ UPDATE events SET data = json_object('message', 'You stopped this file. It is le
 	// hardware encoder, else 0).
 	{24, "workers", `
 CREATE TABLE workers (id TEXT PRIMARY KEY, name TEXT NOT NULL, tags TEXT NOT NULL DEFAULT '[]', pool TEXT, gpu_slots INTEGER);`},
+	// V5a (output-first): a library's own folder for new files with "Next to each library" ('' = the
+	// default beside it). 25, not 24: V4a's workers table is 24.
+	{25, "library output folder", `
+ALTER TABLE libraries ADD COLUMN override_folder TEXT NOT NULL DEFAULT '';`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone

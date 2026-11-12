@@ -25,6 +25,7 @@ type Plan struct {
 	Video         VideoEncode `json:"video"`
 	Output        string      `json:"output"`                  // replace | beside
 	OutputDir     string      `json:"outputDir,omitempty"`     // "folder" (S6): the new files go here, in the library\'s sub-folders
+	FolderMode    string      `json:"folderMode,omitempty"`    // "next_to_library" (V5a): the library's own folder instead of OutputDir
 	Container     string      `json:"container,omitempty"`     // the new file's type (its extension, "mkv" or "mp4"); "" = the original's
 	Tracks        []TrackOp   `json:"tracks,omitempty"`        // audio and subtitle tracks dropped or converted (slice 25b); others copied
 	AllAudioKept  bool        `json:"allAudioKept,omitempty"`  // "my languages" matched no audio track, so all of it is kept
@@ -492,7 +493,7 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	v := info.Video()
 	p.Output, p.MinSSIM = s.AfterConverting, pos.MinSSIM
 	if s.AfterConverting == "folder" {
-		p.OutputDir = s.OutputDir
+		p.OutputDir, p.FolderMode = s.OutputDir, s.FolderMode
 	}
 	if s.FileType != "keep" {
 		p.Container = s.FileType
