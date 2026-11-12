@@ -6,6 +6,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
@@ -390,5 +393,56 @@ func TestLibraryRemovalInsideTheSwapFinishesIt(t *testing.T) {
 	}
 	if read(s.src) != "new" || read(s.trash()) != "original-bytes" {
 		t.Errorf("at the name %q, kept %q", read(s.src), read(s.trash()))
+	}
+}
+
+// positionExec makes the encode report its position every 10 ms until it ends: step 0 is an ffmpeg
+// stuck on one position (it runs until stopped); step > 0 moves on each time and ends after steps.
+type positionExec struct {
+	*media.FakeExec
+	step, steps int64
+}
+
+func (x positionExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
+	if name != "ffmpeg" || !slices.Contains(args, "libx265") {
+		return x.FakeExec.Stream(ctx, onLine, name, args...)
+	}
+	for i := int64(0); x.step == 0 || i < x.steps; i++ {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+		onLine("frame=" + strconv.FormatInt(i, 10)) // the rest of a progress block
+		onLine("out_time_us=" + strconv.FormatInt(5_000_000+i*x.step, 10))
+		onLine("progress=continue")
+	}
+	return x.FakeExec.Stream(ctx, onLine, name, args...) // then the new file, as the fake makes it
+}
+
+// Row 17:40Z: an ffmpeg that keeps reporting the same position is stuck, and the stall stop ends it;
+// one that moves on slowly, for longer than StallAfter in all, is not stopped.
+func TestStallStopCountsOnlyAPositionFurtherOn(t *testing.T) {
+	s := newScenario(t)
+	w := s.worker(Replace)
+	w.StallAfter = 200 * time.Millisecond
+	w.Exec = positionExec{FakeExec: s.exec}
+	done := make(chan struct{})
+	go func() { w.RunOne(context.Background()); close(done) }()
+	waitDone(t, done)
+	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "no progress for 200ms") {
+		t.Errorf("one position: %s %q", j.Status, j.Error)
+	}
+	s.assertOriginalSafe()
+
+	s = newScenario(t)
+	w = s.worker(Replace)
+	w.StallAfter = 200 * time.Millisecond
+	w.Exec = positionExec{FakeExec: s.exec, step: 1000, steps: 60} // ~600 ms, 1 ms of the film a step
+	if _, err := w.RunOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if j := s.job(); j.Status != jobs.Done {
+		t.Errorf("moving on slowly: %s %q", j.Status, j.Error)
 	}
 }

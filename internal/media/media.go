@@ -335,6 +335,7 @@ func ParseProgress(line string, durationSec float64) (float64, bool) {
 // the source's length done, and the latest fps, bitrate and speed (0 when ffmpeg says N/A or has not
 // said yet). ETASeconds is the time left at that speed, -1 while unknown.
 type Progress struct {
+	OutTimeUS   float64 // where ffmpeg is in the source (out_time_us): it moving is what progress means
 	Percent     float64
 	FPS         float64
 	BitrateKbps float64
@@ -360,6 +361,7 @@ func Transcode(ctx context.Context, x Exec, ffmpeg string, args []string, durati
 		}
 		if pct, ok := ParseProgress(line, durationSec); ok {
 			p.Percent, p.ETASeconds = pct, -1
+			p.OutTimeUS, _ = strconv.ParseFloat(strings.TrimPrefix(line, "out_time_us="), 64)
 			if p.Speed > 0 {
 				etas = append(etas, math.Max(0, durationSec*(1-pct/100)/p.Speed))
 				if len(etas) > 5 {
