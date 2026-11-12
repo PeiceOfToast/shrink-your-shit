@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -191,7 +192,26 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 			serverError(w, err)
 			return
 		}
-		n, cerr := io.Copy(f, r.Body)
+		// the room kept for it on the destination disk (a local run's preflight: worker.SpaceNeeded), so a
+		// paired worker can't fill the disk before /report's checksum (review d1fe673); a subtitle 16 MB
+		limit := int64(16 << 20)
+		if p == "video" {
+			if st, err := os.Stat(pl.Source); err == nil {
+				limit = int64(worker.SpaceNeeded(st.Size()))
+			}
+		}
+		if have >= limit {
+			f.Close()
+			tooLarge(w, rj, name, limit)
+			return
+		}
+		n, cerr := io.Copy(f, http.MaxBytesReader(w, r.Body, limit-have))
+		var big *http.MaxBytesError
+		if errors.As(cerr, &big) {
+			f.Close()
+			tooLarge(w, rj, name, limit)
+			return
+		}
 		if err := f.Close(); cerr == nil {
 			cerr = err
 		}
@@ -294,4 +314,22 @@ func sameUpload(name string, size int64, sum string) error {
 		return errors.New("its checksum differs")
 	}
 	return nil
+}
+
+// tooLarge refuses an upload past the room kept for it: 413, the staged part emptied, and the job ends
+// as a local run out of room does (tried again later, the low-disk-space reason: orch-lead 15:08Z).
+func tooLarge(w http.ResponseWriter, rj *worker.RemoteJob, name string, limit int64) {
+	os.Truncate(name, 0)
+	rj.Deliver(worker.RemoteResult{Err: fmt.Errorf("the upload is larger than the room kept for it on the destination disk (%d bytes): %w", limit, syscall.ENOSPC)})
+	apiError(w, http.StatusRequestEntityTooLarge, "too_large", fmt.Sprintf("This file is larger than the room kept for it on the destination disk (%s), so it wasn't taken. The job is tried again later.", humanSize(limit)))
+}
+
+func humanSize(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.0f MB", float64(n)/(1<<20))
+	}
+	return fmt.Sprintf("%d bytes", n)
 }
