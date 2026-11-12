@@ -241,8 +241,8 @@ func (s *Store) FlowShapes(flowID int64) ([]rules.Shape, error) {
 }
 
 // notReadySQL is true for a waiting job (alias j) Claim would not take now (one placeholder: now):
-// waiting to retry, or being stopped.
-const notReadySQL = `(j.stop_requested=1 OR (j.retry_at<>'' AND j.retry_at>?))`
+// waiting to retry, being stopped, or in a paused library (the same condition as Claim's).
+var notReadySQL = `(j.stop_requested=1 OR (j.retry_at<>'' AND j.retry_at>?) OR NOT ` + libraryOn("j") + `)` // also a paused library's job (V5b)
 
 // QueuePositions are the given waiting jobs' places in the queue (1: taken next), counted over every
 // job Claim would take, in its order (priority, then age); a job Claim wouldn't take now (waiting to
@@ -252,7 +252,7 @@ func (s *Store) QueuePositions(ids []int64) (map[int64]int, error) {
 	now := s.stamp()
 	for _, id := range ids {
 		var pos sql.NullInt64
-		err := s.db.QueryRow(`SELECT (SELECT COUNT(*) FROM jobs k WHERE k.status=? AND k.stop_requested=0 AND (k.retry_at='' OR k.retry_at<=?)
+		err := s.db.QueryRow(`SELECT (SELECT COUNT(*) FROM jobs k WHERE k.status=? AND k.stop_requested=0 AND (k.retry_at='' OR k.retry_at<=?) AND `+libraryOn("k")+`
   AND (k.priority>j.priority OR k.priority=j.priority AND k.id<j.id)) + 1
 FROM jobs j WHERE j.id=? AND j.status=? AND NOT `+notReadySQL, Queued, now, id, Queued, now).Scan(&pos)
 		if errors.Is(err, sql.ErrNoRows) {

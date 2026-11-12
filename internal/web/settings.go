@@ -139,7 +139,7 @@ func (ss *settingsStore) save(s Settings) error {
 }
 
 // readOnlySettings are shown by GET and ignored in a PATCH (the page may send back what it got).
-var readOnlySettings = map[string]bool{"scanEverySource": true, "authRequired": true, "trashPath": true, "updateAvailable": true}
+var readOnlySettings = map[string]bool{"scanEverySource": true, "scanEveryMin": true, "scanEveryMax": true, "authRequired": true, "trashPath": true, "updateAvailable": true}
 
 func settingsRoutes(api *http.ServeMux, ss *settingsStore, access *Access, eng Engine) {
 	view := func(s Settings) map[string]any {
@@ -155,6 +155,7 @@ func settingsRoutes(api *http.ServeMux, ss *settingsStore, access *Access, eng E
 		// how often libraries are looked at, in seconds: the value the scanner runs with now (ui-shop
 		// 01:41Z). It is the -scan-every flag; once it can be changed here, a saved value wins (design).
 		m["scanEvery"], m["scanEverySource"] = int(eng.ScanEvery.Seconds()), "flag"
+		m["scanEveryMin"], m["scanEveryMax"] = scanEveryBounds(eng) // what PATCH accepts (ui-shop 04:11Z)
 		if s.ScanEvery > 0 {
 			m["scanEvery"], m["scanEverySource"] = s.ScanEvery, "saved"
 		}
@@ -206,7 +207,7 @@ func settingsRoutes(api *http.ServeMux, ss *settingsStore, access *Access, eng E
 				if s.ScanEvery == 0 && n == int(eng.ScanEvery.Seconds()) {
 					continue // the flag's value sent back as it came: not a change, it stays the flag's
 				}
-				if low := max(int(eng.Settle.Seconds()), 1); n < low || n > 86400 {
+				if low, high := scanEveryBounds(eng); n < low || n > high {
 					apiError(w, http.StatusBadRequest, "invalid_setting", fmt.Sprintf("Look for new files every %d seconds to 24 hours (86400 seconds): a new file is converted once it has stayed the same for %d seconds. Nothing was changed.", low, low))
 					return
 				}
@@ -277,4 +278,11 @@ func canonLanguages(langs []string) []string {
 		}
 	}
 	return out
+}
+
+// scanEveryBounds are the seconds scanEvery may take: at least the settle time (a new file is decided on
+// its second look, at least that apart), at most a day. PATCH checks them, and GET shows them, so the
+// page offers only choices that are accepted.
+func scanEveryBounds(eng Engine) (low, high int) {
+	return max(int(eng.Settle.Seconds()), 1), 86400
 }

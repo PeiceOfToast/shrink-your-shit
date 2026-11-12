@@ -6,6 +6,7 @@ package jobs
 
 import (
 	"os"
+	"strconv"
 	"syscall"
 )
 
@@ -19,4 +20,17 @@ func sameDiskOS(a, b string) bool {
 	da, ok1 := sa.Sys().(*syscall.Stat_t)
 	db, ok2 := sb.Sys().(*syscall.Stat_t)
 	return ok1 && ok2 && da.Dev == db.Dev
+}
+
+// diskOf is the id of the disk (filesystem) folder p is on (false: it can't be read).
+func diskOf(p string) (string, bool) {
+	st, err := os.Stat(p)
+	if err != nil {
+		return "", false
+	}
+	d, ok := st.Sys().(*syscall.Stat_t)
+	if !ok {
+		return "", false
+	}
+	return strconv.FormatUint(uint64(d.Dev), 10), true
 }

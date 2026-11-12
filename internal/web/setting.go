@@ -475,7 +475,7 @@ func outputUsable(w http.ResponseWriter, store *jobs.Store, flowID int64, t rule
 		}
 		dir, problem := libraryFolder(t, l)
 		if problem != nil {
-			apiError(w, http.StatusBadRequest, problem.Code, problem.Message+" Nothing was changed.")
+			writeErrorWith(w, http.StatusBadRequest, problem.Code, problem.Message+" Nothing was changed.", map[string]any{"folder": problem.Folder, "reason": problem.Reason})
 			return false
 		}
 		if jobs.SystemFolder(dir) || jobs.SystemFolder(resolved(dir)) {

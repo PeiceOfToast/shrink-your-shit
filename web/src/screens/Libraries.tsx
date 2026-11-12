@@ -19,6 +19,15 @@ function lastScan(t: string | null): string {
   return day(d) === day(new Date()) ? clock(d) + " today" : day(d) === day(y) ? "Yesterday " + clock(d) : d.toLocaleDateString([], { day: "numeric", month: "short" }) + " " + clock(d);
 }
 const folder = (p: string) => p.trim().replace(/(.)\/+$/, "$1"); // "/media/kids/" is "/media/kids"
+// A new library's name (design): the folder's last name with a capital first letter; one taken already gets " 2", " 3"...
+export function suggestName(path: string, taken: string[]): string {
+  const last = folder(path).split("/").pop() ?? "", base = last.charAt(0).toUpperCase() + last.slice(1);
+  if (!base) return "";
+  const used = new Set(taken.map((t) => t.toLowerCase()));
+  let n = 1, name = base;
+  while (used.has(name.toLowerCase())) name = base + " " + ++n;
+  return name;
+}
 const names = (n: string[]) => (n.length > 1 ? n.slice(0, -1).join(", ") + " and " + n.at(-1) : n[0]);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // An action's errors: signed out goes to sign-in (api.ts), anything else is shown.
@@ -106,7 +115,7 @@ export function LibraryPage({ id }: { id: string }) {
     <div className="stack"><PageHead icon="i-library" crumbs={[["Libraries", "/libraries"]]} title="Library not found" />
       <Problem m={libs.error?.message} />
       <div className="card"><div className="bd"><p>There is no library with this address. <Link to="/libraries">See all libraries</Link>.</p></div></div></div>);
-  return <Form key={id} l={l ?? null} workflows={wfs.data} reload={libs.reload} />;
+  return <Form key={id} l={l ?? null} workflows={wfs.data} reload={libs.reload} taken={(libs.data ?? []).map((x) => x.name)} />;
 }
 
 // The folder field with its check, and the first 5 files of a folder that passes. Also first run's step 1. The check
@@ -202,9 +211,12 @@ export function WorkflowField({ value, onChange, workflows, self }: { value: str
   );
 }
 
-function Form({ l, workflows, reload }: { l: LibraryItem | null; workflows?: WorkflowChoice[]; reload: () => void }) {
+function Form({ l, workflows, reload, taken }: { l: LibraryItem | null; workflows?: WorkflowChoice[]; reload: () => void; taken: string[] }) {
   const f = useFolder(l?.path ?? "");
-  const [name, setName] = useState(l?.name ?? ""), [wf, setWf] = useState(l?.flowId ?? "");
+  // a new library's name follows the folder until it is edited (design)
+  const [typed, setTyped] = useState(!!l), [typedName, setName] = useState(l?.name ?? "");
+  const name = typed ? typedName : suggestName(f.checked, taken);
+  const [wf, setWf] = useState(l?.flowId ?? "");
   const [error, setError] = useState(""), [said, setSaid] = useState(""), [busy, setBusy] = useState(false);
   const pick = wf || (!l && workflows?.find((w) => w.usable)?.id) || ""; // a new library starts on the first usable one
   const moved = !!l && f.checked !== l.path;
@@ -231,7 +243,7 @@ function Form({ l, workflows, reload }: { l: LibraryItem | null; workflows?: Wor
           <div className="hd"><h2 id="gen-h">Library</h2></div>
           <form className="bd stack" onSubmit={(e) => (e.preventDefault(), save())}>
             <div className="field"><label htmlFor="lib-name">Name</label>
-              <input id="lib-name" className="input" required value={name} onChange={(e) => setName(e.target.value)} placeholder="Movies" /></div>
+              <input id="lib-name" className="input" required value={name} onChange={(e) => (setName(e.target.value), setTyped(true))} placeholder="Movies" /></div>
             <FolderField f={f} free={l && !moved ? l.freeBytes : undefined} />
             <div className="field"><span className="lab">File type</span><span>Video</span></div>
             <WorkflowField value={pick} onChange={setWf} workflows={workflows} self={l?.name} />
