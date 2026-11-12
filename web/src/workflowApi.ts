@@ -43,6 +43,15 @@ export async function deleteWorkflow(id: string): Promise<Answer<unknown>> {
   if (MOCK) { const e = mock.deleteWorkflow(id); return e ? no("in_use", e) : {}; }
   return call("DELETE", base(id));
 }
+// The published document (what libraries run): GET /workflows/{id}, then /revisions/{publishedRevisionId}. null: never published.
+export async function getPublishedDoc(id: string): Promise<Answer<WorkflowDoc | null>> {
+  if (MOCK) return mock.getPublished(id);
+  const w = await getWorkflow(id);
+  if (failed(w)) return w;
+  if (!w.publishedRevisionId) return null;
+  const r = await call<WorkflowRevision>("GET", base(id) + "/revisions/" + enc(w.publishedRevisionId));
+  return failed(r) ? r : r.workflow;
+}
 export async function getDraft(id: string): Promise<Answer<WorkflowRevision>> {
   if (MOCK) return mock.getDraft(id) ?? no("not_found", "There is no such workflow.");
   return call("GET", base(id) + "/draft");

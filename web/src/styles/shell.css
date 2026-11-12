@@ -557,3 +557,9 @@ label.chk{cursor:pointer}
   .graphpage .pagehead h1{white-space:nowrap}
 }
 .gcanvas .react-flow__node:focus-visible .gnode{outline:2px solid var(--accent);outline-offset:2px}
+/* facts that wrap whole (design 10:54Z): each one unbroken; the "·" sits before every fact and the row is shifted left
+   and clipped, so a fact that starts a new line loses its dot */
+.kpi .sub.facts{display:block;overflow:hidden;-webkit-line-clamp:unset}
+.kpi .sub.facts>.in{display:flex;flex-wrap:wrap;margin-left:-1.2em}
+.kpi .sub.facts>.in>span{white-space:nowrap}
+.kpi .sub.facts>.in>span::before{content:"·";display:inline-block;width:1.2em;text-align:center}
