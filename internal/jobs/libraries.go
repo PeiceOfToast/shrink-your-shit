@@ -939,7 +939,8 @@ func (s *Store) SetLibraryPriority(id int64, p int) error {
 	if n, _ := r.RowsAffected(); n == 0 {
 		return ErrNotFound
 	}
-	if _, err := tx.Exec(`UPDATE jobs SET priority=? WHERE library_id=? AND status=?`, p, id, Queued); err != nil {
+	// not a job the person put first or last (design 03:22Z): its own place wins
+	if _, err := tx.Exec(`UPDATE jobs SET priority=? WHERE library_id=? AND status=? AND priority BETWEEN ? AND ?`, p, id, Queued, -MaxLibraryPriority, MaxLibraryPriority); err != nil {
 		return err
 	}
 	return tx.Commit()
