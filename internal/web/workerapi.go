@@ -251,7 +251,8 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine) http.
 		if !readJSON(w, r, &in) {
 			return
 		}
-		workerLoads.Store(wk.ID, in.Load) // V7d: the Workers page's live figures
+		in.Load.CPUPercent = sysload.Clamp(in.Load.CPUPercent) // a worker's word: within 0..100
+		workerLoads.Store(wk.ID, in.Load)                      // V7d: the Workers page's live figures
 		writeJSON(w, map[string]any{"workerId": wk.ID, "paused": store.Paused()})
 	})
 	// a lease: at most one job (the plan comes with V7b2); none: {lease: null}

@@ -3,6 +3,7 @@
 package sysload
 
 import (
+	"math"
 	"runtime"
 	"testing"
 	"time"
@@ -25,5 +26,23 @@ func TestMeter(t *testing.T) {
 	next := m.Sample()
 	if next.CPUPercent == nil || *next.CPUPercent < 0 || *next.CPUPercent > 100 {
 		t.Errorf("next cpu %v", next.CPUPercent)
+	}
+}
+
+// Review da46389: a processor figure stays within 0..100; NaN or an infinity is not measured.
+func TestClamp(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	for in, want := range map[float64]float64{-3: 0, 42.5: 42.5, 140: 100} {
+		if got := Clamp(f(in)); got == nil || *got != want {
+			t.Errorf("Clamp(%v) = %v", in, got)
+		}
+	}
+	for _, in := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		if Clamp(f(in)) != nil {
+			t.Errorf("Clamp(%v) should be nil", in)
+		}
+	}
+	if Clamp(nil) != nil {
+		t.Error("nil stays nil")
 	}
 }

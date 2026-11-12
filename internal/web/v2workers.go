@@ -164,6 +164,11 @@ func (v *workerView) remote(rw jobs.RemoteWorker) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	return v.remoteWith(rw, working)
+}
+
+// remoteWith is remote with the running jobs read once for a whole list (review da46389).
+func (v *workerView) remoteWith(rw jobs.RemoteWorker, working []jobs.Working) (map[string]any, error) {
 	ids := []string{}
 	for _, j := range working {
 		if j.Worker == rw.ID {
@@ -299,8 +304,13 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 			serverError(w, err)
 			return
 		}
+		working, err := v.store.WorkingJobs()
+		if err != nil {
+			serverError(w, err)
+			return
+		}
 		for _, rw := range remotes {
-			one, err := v.remote(rw)
+			one, err := v.remoteWith(rw, working)
 			if err != nil {
 				serverError(w, err)
 				return
@@ -608,8 +618,12 @@ func (v *workerView) checkStatuses(ctx context.Context, now bool) {
 	if err != nil {
 		return
 	}
+	working, err := v.store.WorkingJobs()
+	if err != nil {
+		return
+	}
 	for _, rw := range remotes {
-		if r, err := v.remote(rw); err == nil {
+		if r, err := v.remoteWith(rw, working); err == nil {
 			cur[rw.ID] = r["status"].(string)
 		}
 	}
