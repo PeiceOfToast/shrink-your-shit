@@ -4,7 +4,7 @@
 // by dagre (left to right). Selecting a node shows what it is. Editing, the inspector form, palette, connect/delete and
 // undo/redo come in steps 2-3; Test run stays hidden until its endpoint lands. Phones: view, pan, zoom, inspect (M5).
 import "@xyflow/react/dist/style.css";
-import { Background, Handle, MiniMap, Position, ReactFlow, ReactFlowProvider, useReactFlow, useViewport, type Edge as RFEdge, type Node as RFNode, type NodeProps } from "@xyflow/react";
+import { Background, Handle, MiniMap, Position, ReactFlow, ReactFlowProvider, useReactFlow, useViewport, type Edge as RFEdge, type Node as RFNode, type NodeChange, type NodeProps } from "@xyflow/react";
 import dagre from "@dagrejs/dagre";
 import { Fragment, useMemo, useState } from "react";
 import { Icon } from "../Icon";
@@ -64,15 +64,25 @@ function Canvas({ id, name, published, doc, defs }: { id: string; name: string; 
   const [sel, setSel] = useState<string | null>(null);
   const { nodes, edges } = useMemo(() => {
     const pos = place(doc, defs), issues = doc.validation ?? [];
-    const nodes: GNodeT[] = doc.workflow.nodes.map((n) => ({ id: n.id, type: "step", position: pos[n.id] ?? { x: 0, y: 0 }, draggable: false, connectable: false,
-      data: { node: n, def: defs.find((x) => x.type === n.type), summary: doc.stepSummaries?.[n.id] ?? "", issues: issues.filter((i) => i.nodeId === n.id) } }));
+    const title = (n?: Node) => (n ? n.name ?? defs.find((x) => x.type === n.type)?.name ?? n.type : "");
+    // review bf13684 P2: every step and connection has a name in words for a screen reader
+    const nodes: GNodeT[] = doc.workflow.nodes.map((n) => {
+      const mine = issues.filter((i) => i.nodeId === n.id), summary = doc.stepSummaries?.[n.id] ?? "";
+      return { id: n.id, type: "step", position: pos[n.id] ?? { x: 0, y: 0 }, draggable: false, connectable: false, selected: n.id === sel,
+        ariaLabel: [title(n) + (n.enabled ? "" : " (off)"), summary, ...mine.map((i) => (i.severity === "error" ? "Problem: " : "Warning: ") + i.message)].filter(Boolean).join(". "),
+        data: { node: n, def: defs.find((x) => x.type === n.type), summary, issues: mine } };
+    });
     const edges: RFEdge[] = doc.workflow.edges.map((e) => {
       const from = doc.workflow.nodes.find((n) => n.id === e.from), outs = defs.find((x) => x.type === from?.type)?.outputs ?? [], port = outs.find((p) => p.name === e.fromPort);
-      return { id: e.id, source: e.from, sourceHandle: e.fromPort, target: e.to, targetHandle: e.toPort, label: outs.length > 1 ? port?.label ?? e.fromPort : undefined,
+      const label = outs.length > 1 ? port?.label ?? e.fromPort : undefined;
+      return { id: e.id, source: e.from, sourceHandle: e.fromPort, target: e.to, targetHandle: e.toPort, label,
+        ariaLabel: "From " + title(from) + " to " + title(doc.workflow.nodes.find((n) => n.id === e.to)) + (label ? ", " + label : ""),
         className: port?.outcome === "error" ? "gedge bad" : "gedge", focusable: true };
     });
     return { nodes, edges };
-  }, [doc, defs]);
+  }, [doc, defs, sel]);
+  // a click, or Enter / Space on a focused step (React Flow selects it), opens its panel (review bf13684 P2)
+  const onNodesChange = (ch: NodeChange<GNodeT>[]) => { for (const c of ch) if (c.type === "select") { if (c.selected) setSel(c.id); else setSel((s) => (s === c.id ? null : s)); } };
   const issues = doc.validation ?? [], errors = issues.filter((i) => i.severity === "error").length;
   const picked = doc.workflow.nodes.find((n) => n.id === sel), pickedDef = picked && defs.find((x) => x.type === picked.type);
   return (
@@ -85,9 +95,9 @@ function Canvas({ id, name, published, doc, defs }: { id: string; name: string; 
       <div className="graphwrap">
         <div className="gcanvas" aria-label={"The steps of " + name + " as a graph"}>
           <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} fitView minZoom={0.2} maxZoom={2} nodesDraggable={false} nodesConnectable={false}
-            onNodeClick={(_, n) => setSel(n.id)} onPaneClick={() => setSel(null)} onlyRenderVisibleElements={false}>
+            onNodesChange={onNodesChange} onNodeClick={(_, n) => setSel(n.id)} onPaneClick={() => setSel(null)} onlyRenderVisibleElements={false}>
             <Background gap={20} />
-            <MiniMap pannable zoomable ariaLabel="Overview of the graph" />
+            <MiniMap pannable zoomable ariaLabel="Overview of the graph" nodeColor="var(--border-strong)" nodeStrokeColor="var(--text-2)" nodeBorderRadius={4} />
             <Zoom />
           </ReactFlow>
         </div>

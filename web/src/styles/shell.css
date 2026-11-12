@@ -549,3 +549,11 @@ label.chk{cursor:pointer}
 .ginspect{align-self:start}
 @media (max-width:900px){.graphwrap{grid-template-columns:1fr}.gcanvas{height:60vh}}
 @media (pointer:coarse){.gzoom .btn{min-width:44px;min-height:44px}}
+/* review bf13684 P3: no minimap on phones (it covered half the canvas); the heading on one line */
+@media (max-width:767px){
+  .gcanvas .react-flow__minimap{display:none}
+  .graphpage .pagehead .crumbl:first-of-type,.graphpage .pagehead .crumbl:first-of-type+.slash{display:none}
+  .graphpage .pagehead .crumbl{max-width:40vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .graphpage .pagehead h1{white-space:nowrap}
+}
+.gcanvas .react-flow__node:focus-visible .gnode{outline:2px solid var(--accent);outline-offset:2px}
