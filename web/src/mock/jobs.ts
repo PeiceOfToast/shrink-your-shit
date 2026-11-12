@@ -16,12 +16,12 @@ let items: JobItem[] = [
   base("48214", "The.Bear.S03E04.1080p.WEB-DL.mkv", "Season 3", TV, "validating", { subState: "checking", worker: "nas", progress: { ...prog(100, 9, 222, 0), stage: "Checking the result", percent: null, workflowPercent: 90 }, bytes: 2.1 * GB }),
   base("48220", "Oppenheimer.2023.1080p.BluRay.mkv", "Oppenheimer (2023)", MOV, "queued", { subState: "waiting", attempts: 0, retryAt: null, status: "waiting", detail: null, bytes: 14.9 * GB }),
   base("48221", "Heat.1995.1080p.mkv", "Heat (1995)", MOV, "queued", { subState: "waiting", attempts: 0, retryAt: null, status: "waiting", detail: null, bytes: 12.1 * GB }),
-  base("48222", "Wedding.2019.mp4", ".", HOME, "retry_wait", { subState: "retrying", attempts: 1, retryAt: new Date(now + 25 * 60e3).toISOString(), status: "retrying",
+  base("48222", "Wedding.2019.mp4", ".", HOME, "retry_wait", { subState: "retrying", attempts: 1, retryAt: new Date(now + 25 * 60e3).toISOString(), status: "retrying", reason: { code: "low_disk_space", message: "there is not enough free disk space next to this file: about 65.2 MB is needed to convert it safely, 592.0 KB is free" },
     detail: "there is not enough free disk space next to this file: about 65.2 MB is needed to convert it safely, 592.0 KB is free", bytes: 1.1 * GB }),
   base("48160", "Arrival.2016.1080p.BluRay.mkv", "Arrival (2016)", MOV, "completed", { beforeBytes: 11.4 * GB, afterBytes: 5.9 * GB, bytes: 5.9 * GB, codec: "HEVC", finishedAt: at(40), flow: { id: "w1", name: "Shrink videos" }, originalState: "kept", keptDaysLeft: 7, keptId: "9" }),
   base("41002", "Alien.1979.1080p.mkv", "Alien (1979)", MOV, "completed", { beforeBytes: 9.8 * GB, afterBytes: 4.4 * GB, bytes: 4.4 * GB, codec: "HEVC", finishedAt: at(60 * 24 * 9), flow: { id: "w1", name: "Shrink videos" }, originalState: "removed" }),
-  base("skip-1", "Blade.Runner.2049.2017.2160p.DV.mkv", "Blade Runner 2049 (2017)", MOV, "skipped", { reason: "dolby_vision", detail: "It has Dolby Vision (profile 5), which can't be kept when it is converted.", skippedId: "1", codec: "HEVC", resolution: "2160p" }),
-  base("skip-2", "Severance.S02E07.1080p.WEB-DL.mkv", "Season 2", TV, "cancelled", { reason: "user_stopped", detail: "You stopped it.", skippedId: "2" }),
+  base("skip-1", "Blade.Runner.2049.2017.2160p.DV.mkv", "Blade Runner 2049 (2017)", MOV, "skipped", { reason: { code: "dolby_vision", message: "It has Dolby Vision (profile 5), which can't be kept when it is converted." }, detail: "It has Dolby Vision (profile 5), which can't be kept when it is converted.", skippedId: "1", codec: "HEVC", resolution: "2160p" }),
+  base("skip-2", "Severance.S02E07.1080p.WEB-DL.mkv", "Season 2", TV, "cancelled", { reason: { code: "user_stopped", message: "You stopped this file. It is left as it is until you press Convert again." }, detail: "You stopped it.", skippedId: "2" }),
   base("48190", "Wedding.Raw.2018.mov", ".", HOME, "failed", { detail: "The new file is 4 s shorter than the original. The original is kept.", reason: { code: "convert_failed", message: "The new file is 4 s shorter than the original. The original is kept." } }),
 ];
 const TAB: Record<Tab, JobState[]> = { waiting: ["queued", "retry_wait"], running: ["preparing", "running", "validating", "committing"], completed: ["completed"], skipped: ["skipped", "cancelled"], failed: ["failed"] };
@@ -39,7 +39,7 @@ export function mockJob(id: string): JobDetail | null {
   const j = items.find((x) => x.id === id);
   if (!j || j.origin === "scan") return null;
   const old = id === "41002"; // finished before the update: no history
-  const reason = typeof j.reason === "object" && j.reason ? j.reason : j.detail && j.state === "retry_wait" ? { code: "low_disk_space", message: j.detail } : null;
+  const reason = j.reason ?? null;
   return {
     id, state: j.state, removed: false, reason, attempts: j.attempts ?? 0, retryAt: j.retryAt ?? null, error: null, worker: j.worker ?? null,
     file: { path: j.path, bytes: j.beforeBytes ?? j.bytes }, createdAt: at(300), updatedAt: at(5),
@@ -60,7 +60,7 @@ export function mockAction(action: JobAction, ids: string[], priority?: number):
     if (!j) return { id, ok: false, code: "not_found", message: "There is no such job." };
     if (action === "cancel") {
       if (!["queued", "retry_wait", "preparing", "running", "validating", "committing"].includes(j.state)) return { id, ok: false, code: "not_active", message: "Only a waiting or running file can be stopped." };
-      items = items.map((x) => (x === j ? { ...x, id: "skip-" + x.id, origin: "scan", state: "cancelled", reason: "user_stopped", detail: "You stopped it.", progress: undefined } : x));
+      items = items.map((x) => (x === j ? { ...x, id: "skip-" + x.id, origin: "scan", state: "cancelled", reason: { code: "user_stopped", message: "You stopped this file. It is left as it is until you press Convert again." }, detail: "You stopped it.", progress: undefined } : x));
       return { id, ok: true };
     }
     if (action === "retry") {

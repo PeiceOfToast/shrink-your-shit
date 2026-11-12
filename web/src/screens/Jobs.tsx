@@ -23,7 +23,7 @@ const words = (j: { state: JobState; retryAt?: string | null }) => (j.state === 
 function Pill({ j }: { j: { state: JobState; retryAt?: string | null } }) {
   return <span className={"pill " + (PILL[j.state] ?? "")}><Icon id={ICON[j.state] ?? "i-play"} />{words(j)}</span>;
 }
-const reasonText = (j: JobItem) => (typeof j.reason === "object" && j.reason ? j.reason.message : j.detail ?? "");
+const reasonText = (j: JobItem) => j.reason?.message ?? j.detail ?? ""; // #130: every row's reason is {code, message}
 const saved = (b?: number, a?: number) => {
   if (!b || a == null) return "";
   const pct = Math.round((100 * (b - a)) / b);
