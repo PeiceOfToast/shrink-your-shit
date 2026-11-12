@@ -308,6 +308,7 @@ type Progress struct {
 // level the args ask for), which includes decode errors in the source.
 func Transcode(ctx context.Context, x Exec, ffmpeg string, args []string, durationSec float64, onProgress func(Progress)) (string, error) {
 	p := Progress{ETASeconds: -1}
+	var etas []float64 // the last 5 raw times left: the raw one jumps with every change of speed (research 3.4)
 	return x.Stream(ctx, func(line string) {
 		k, v, _ := strings.Cut(line, "=")
 		switch k {
@@ -321,7 +322,15 @@ func Transcode(ctx context.Context, x Exec, ffmpeg string, args []string, durati
 		if pct, ok := ParseProgress(line, durationSec); ok {
 			p.Percent, p.ETASeconds = pct, -1
 			if p.Speed > 0 {
-				p.ETASeconds = math.Max(0, durationSec*(1-pct/100)/p.Speed)
+				etas = append(etas, math.Max(0, durationSec*(1-pct/100)/p.Speed))
+				if len(etas) > 5 {
+					etas = etas[1:]
+				}
+				var sum float64
+				for _, e := range etas {
+					sum += e
+				}
+				p.ETASeconds = sum / float64(len(etas))
 			}
 			onProgress(p)
 		}

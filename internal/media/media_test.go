@@ -5,6 +5,8 @@ package media
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math"
 	"testing"
 )
 
@@ -128,5 +130,39 @@ func TestEncoders(t *testing.T) {
 	got := Encoders(context.Background(), &FakeExec{Out: []byte(out)}, "ffmpeg")
 	if !got["libx264"] || !got["libsvtav1"] || !got["aac"] || got["="] || got["Video"] || len(got) != 3 {
 		t.Errorf("%v", got)
+	}
+}
+
+// Research 3.4: the time left is smoothed over the last 5 points (the raw one jumps on the first GOP and
+// with each change of speed), so the card's "about N min left" doesn't swing.
+func TestTranscodeSmoothsTimeLeft(t *testing.T) {
+	var lines []string
+	speeds := []string{"4x", "0.5x", "4x", "0.5x", "4x", "0.5x", "4x", "0.5x"} // a speed that swings
+	for i, sp := range speeds {
+		lines = append(lines, "speed="+sp, fmt.Sprintf("out_time_us=%d", (i+1)*10_000_000))
+	}
+	f := &FakeExec{Lines: lines}
+	var raw, got []float64
+	_, err := Transcode(context.Background(), f, "ffmpeg", nil, 1000, func(p Progress) { got = append(got, p.ETASeconds) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range speeds {
+		sp := []float64{4, 0.5}[i%2]
+		raw = append(raw, (1000-float64(i+1)*10)/sp)
+	}
+	for i := range got {
+		lo := max(0, i-4)
+		var sum float64
+		for _, r := range raw[lo : i+1] {
+			sum += r
+		}
+		if want := sum / float64(i+1-lo); math.Abs(got[i]-want) > 0.01 {
+			t.Errorf("point %d: %.1f, want the 5-point average %.1f (raw %.1f)", i, got[i], want, raw[i])
+		}
+	}
+	// the swing between two points is far smaller than the raw one
+	if math.Abs(got[7]-got[6]) > math.Abs(raw[7]-raw[6])/3 {
+		t.Errorf("still jumps: %.0f -> %.0f (raw %.0f -> %.0f)", got[6], got[7], raw[6], raw[7])
 	}
 }
