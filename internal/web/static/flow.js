@@ -100,7 +100,19 @@
           var u = URL.createObjectURL(new Blob([JSON.stringify(j, null, 2)], { type: "application/json" })), a = el("a"); a.href = u; a.download = f.name + ".json"; a.click(); URL.revokeObjectURL(u);
         }, fail);
       };
-      if (f.kind === "advanced" || f.kind === "earlier") { $("f-readonly").hidden = false; drawSteps(f.steps || [], $("graph")); text(f.steps || [], $("f-text")); return; }
+      // The server says whether this page can save the flow (editableHere + reason): a flow made in the new UI ("next to
+      // each library", checks and paths) or one these editors can't show is shown read-only with the server's words,
+      // never an editor whose Save would be refused; for edit_in_new_ui, a link to it in the new UI.
+      var ro = s.editableHere === false ? s.reason : (f.kind === "advanced" || f.kind === "earlier") ? { code: "flow_read_only" } : null;
+      if (ro) {
+        $("f-readonly").hidden = false; drawSteps(f.steps || [], $("graph")); text(f.steps || [], $("f-text"));
+        var note = $("f-readonly").querySelector(".notice > div");
+        if (note && ro.message) {
+          note.textContent = ""; note.appendChild(el("strong", null, "Read-only")); note.appendChild(document.createTextNode(ro.message));
+          if (ro.code === "edit_in_new_ui") { var a = el("a", null, "Open it in the new UI"); a.href = "/next/workflows/" + encodeURIComponent(id); note.appendChild(document.createTextNode(" ")); note.appendChild(a); }
+        }
+        return;
+      }
       $("f-edit").hidden = false; warn = ui.warnings($("save")); warn.show(s.warnings);
       if (used.length) { $("f-used").textContent = "Saving changes this for " + and(used) + "."; $("f-used").hidden = false; }
       build(f.kind === "standard" ? "standard" : "basic", s);
