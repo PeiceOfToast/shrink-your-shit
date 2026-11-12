@@ -361,9 +361,10 @@ func TestRealSaveToAnotherFolder(t *testing.T) {
 	if tempLeft(want) || tempLeft(src) {
 		t.Error("a temp file was left")
 	}
-	// again: the name is taken in the folder for new files, so nothing is made or replaced
+	// again, with a database that didn't make it: the name is taken in the folder for new files by a file
+	// "we" didn't make, so nothing is made or replaced (design's words, V5a)
 	made, _ := os.ReadFile(want)
-	if j := run(); j.Status != jobs.Failed || !strings.Contains(j.Error, "in the folder for new files") {
+	if j := run(); j.Status != jobs.Failed || !strings.Contains(j.Error, "A file named e1.mkv is already in "+filepath.Dir(want)+" and wasn't made by Shrink Your Shit.") {
 		t.Errorf("name taken: %s %q", j.Status, j.Error)
 	}
 	if again, _ := os.ReadFile(want); string(again) != string(made) {
