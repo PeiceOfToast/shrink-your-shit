@@ -338,7 +338,7 @@ func (s *Store) Complete(id int64, outputPath string, sizeAfter int64) error {
 	if j, err := s.Get(id); err == nil {
 		disk, _ = diskOf(filepath.Dir(j.Path))
 	}
-	return s.transition(id, Done, `, progress=100, output_path=?, size_after=?, output_mtime=?, original_disk=?`, outputPath, sizeAfter, mtime, disk)
+	return s.transition(id, Done, `, progress=100, output_path=?, size_after=?, output_mtime=?, original_disk=?, again_from=0`, outputPath, sizeAfter, mtime, disk)
 }
 
 // Fail marks a running job failed: code is one of ReasonCodes, msg the plain words.

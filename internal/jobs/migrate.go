@@ -368,6 +368,11 @@ END;`},
 	// pass) is found by index, not by reading every job.
 	{33, "jobs by path", `
 CREATE INDEX IF NOT EXISTS jobs_path ON jobs(path);`},
+	// Convert again (design 11:45Z): a done job run again from its original kept in .syp-trash names
+	// that original's record here (0: from the original in place); cleared when it is done again.
+	// 34, not 33: 33 is the jobs-by-path index, merged first (orch-lead 13:44Z).
+	{34, "convert again", `
+ALTER TABLE jobs ADD COLUMN again_from INTEGER NOT NULL DEFAULT 0;`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone
