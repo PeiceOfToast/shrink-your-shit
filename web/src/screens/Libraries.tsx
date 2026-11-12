@@ -9,6 +9,7 @@ import { SignedOut, failed, type Answer } from "../api";
 import { addLibrary, checkFolder, firstFiles, getLibraryV2, getSettings, listLibraries, listLibrariesV2, listWorkflows, patchLibrary, patchLibraryV2, removeLibrary, scanLibrary, setLibraryWorkflow, type WorkflowChoice } from "../libraryApi";
 import { listJobs } from "../jobsApi";
 import { Link, navigate, useSearch } from "../router";
+import { Browse } from "../FolderPicker";
 import { onLive } from "../live";
 import { getPublishedDoc, listWorkflows as listWorkflowDocs } from "../workflowApi";
 import { bytes, clock, count, duration, plural } from "../format";
@@ -188,8 +189,9 @@ export function FolderField({ f, free }: { f: ReturnType<typeof useFolder>; free
   const r = f.report;
   return (
     <div className="field"><label htmlFor="lib-path">Folder</label>
-      <input id="lib-path" className="input mono" value={f.path} aria-describedby="lib-path-check" placeholder="/media/movies"
+      <div className="folderrow"><input id="lib-path" className="input mono" value={f.path} aria-describedby="lib-path-check" placeholder="/media/movies"
         onChange={(e) => f.setPath(e.target.value)} onBlur={f.now} />
+        <Browse value={f.path} onPick={(p) => f.setPath(p)} /></div>
       <div id="lib-path-check" className="stack" style={{ gap: 4 }}>
         {!f.checked ? <span className="hint">The folder is checked as you type.</span>
           : !r ? <span className="hint">Checking the folder...</span>
@@ -405,7 +407,8 @@ function Output({ v, reload }: { v: Library; reload: () => void }) {
           <p className="muted" role="status">{said}</p></>}
         {o.policy === "separate_folder" && !oneFolder && pub.loaded && <form className="stack" onSubmit={(e) => (e.preventDefault(), save(dir.trim() || null))}>
           <div className="field"><label htmlFor="lib-over">Use a different folder for this library</label>
-            <input id="lib-over" className="input mono" value={dir} placeholder={v.paths[0] + " (shrunk)"} onChange={(e) => setDir(e.target.value)} aria-describedby="lib-over-h" />
+            <div className="folderrow"><input id="lib-over" className="input mono" value={dir} placeholder={v.paths[0] + " (shrunk)"} onChange={(e) => setDir(e.target.value)} aria-describedby="lib-over-h" />
+              <Browse value={dir} start={v.paths[0] ? v.paths[0].replace(/[\\/][^\\/]*[\\/]?$/, "") || "/" : ""} onPick={setDir} /></div>
             <span className="hint" id="lib-over-h">This is the one place to override the folder for {v.name} only.</span></div>
           {error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{error}</span></p>}
           <p className="muted" role="status">{said}</p>
