@@ -13,7 +13,7 @@ import { PageHead } from "../PageHead";
 import { Link, onLeave } from "../router";
 import { useData } from "../useData";
 import { getDraft, getWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked } from "../workflowApi";
-import { ICON } from "./WorkflowStack";
+import { ICON, Options, Reg } from "./WorkflowStack";
 import type { Layout, Node, PublishPreview, StepDefinition, ValidationIssue, WorkflowDoc, WorkflowRevision } from "../types/v2";
 
 // The step categories' colour stripes (tokens.css --cat-*).
@@ -126,6 +126,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
     push({ doc: { ...doc, edges: [...kept, { id: newId(), from: c.source, fromPort: c.sourceHandle ?? "success", to: c.target, toPort: c.targetHandle ?? "in" }] } });
   };
   const valid = (c: Connection | RFEdge) => c.source !== c.target && !!c.target && (defs.find((x) => x.type === doc.nodes.find((n) => n.id === c.target)?.type)?.inputs ?? []).length > 0;
+  const setNode = (n: Node) => push({ doc: { ...doc, nodes: doc.nodes.map((x) => (x.id === n.id ? n : x)) } });
   const removeEdges = (ids: string[]) => { if (ids.length) push({ doc: { ...doc, edges: doc.edges.filter((e) => !ids.includes(e.id)) } }); setSelEdge(null); };
   const onNodesChange = (ch: NodeChange<GNodeT>[]) => {
     // a click, or Enter / Space on a focused step (React Flow selects it), opens its panel (review bf13684 P2)
@@ -210,6 +211,15 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
               <p className="muted sm">{pickedDef?.typeLabel}{!picked.enabled && " · Off"}</p>
               {checked.stepSummaries?.[picked.id] && <p>{checked.stepSummaries[picked.id]}</p>}
               {pickedDef?.description && <p className="sm">{pickedDef.description}</p>}
+              {/* step 2b (SCREENS V4 Inspector): the step's own form, the same as the step list's (schema-driven), with the server's problems inline */}
+              {edit && pickedDef && !pickedDef.readOnly && <form className="stack ginform" onSubmit={(e) => e.preventDefault()} aria-label={"Settings of " + (picked.name ?? pickedDef.name)}>
+                <div className="field"><label htmlFor={"gn-" + picked.id}>Name</label>
+                  <input id={"gn-" + picked.id} className="input" value={picked.name ?? ""} placeholder={pickedDef.name} onChange={(e) => setNode({ ...picked, name: e.target.value || undefined })} /></div>
+                {!pickedDef.alwaysOn && <label className="row nw"><input type="checkbox" role="switch" className="switch" checked={picked.enabled} onChange={(e) => setNode({ ...picked, enabled: e.target.checked })} /><span>On</span></label>}
+                <Reg.Provider value={{ defs, words: checked.stepSummaries ?? {}, libs: [] }}>
+                  <Options n={picked} issues={issues} set={(k, v) => setNode({ ...picked, config: { ...picked.config, [k]: v } })} />
+                </Reg.Provider>
+              </form>}
               {(pickedDef?.outputs?.length ?? 0) > 0 && <dl className="kv sm">{pickedDef!.outputs.map((p) => <Fragment key={p.name}><dt>{p.label}</dt><dd>{doc.edges.filter((e) => e.from === picked.id && e.fromPort === p.name).map((e) => nameOf(e.to)).join(", ") || "Nothing connected"}</dd></Fragment>)}</dl>}
             </div> : <p className="muted">{edit ? "Select a step to see it. Drag from a port on the right of a step to another step to connect them; select a connection to delete it." : "Select a step to see what it does."}</p>}
             <h3 className="h3">Problems{issues.length ? " (" + issues.length + ")" : ""}</h3>

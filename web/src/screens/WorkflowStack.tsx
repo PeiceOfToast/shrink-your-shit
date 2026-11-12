@@ -15,7 +15,7 @@ import type { JSONSchema, Node, PublishPreview, StepDefinition, ValidationIssue,
 
 // The step definitions and the server's words for each step of the document being edited.
 // libs: the folders of the libraries that use this workflow, for "Next to each library" (V5a).
-const Reg = createContext<{ defs: StepDefinition[]; words: Record<string, string>; libs: string[] }>({ defs: [], words: {}, libs: [] });
+export const Reg = createContext<{ defs: StepDefinition[]; words: Record<string, string>; libs: string[] }>({ defs: [], words: {}, libs: [] });
 function useReg() { const r = useContext(Reg); return { stepDef: (t: string) => r.defs.find((d) => d.type === t), summary: (n: Node) => r.words[n.id] ?? "", libs: r.libs }; }
 
 // The server's icon keys (registry) -> design's sprite.
@@ -61,14 +61,26 @@ function Field({ id, name, s, value, set }: { id: string; name: string; s: JSONS
   if (s.enum)
     return <div className="field"><label htmlFor={fid}>{title}</label><select id={fid} className="input" value={String(value)} onChange={(e) => set(labels(s).find((o) => String(o[0]) === e.target.value)?.[0])}>
       {labels(s).map(([v, l]) => <option key={String(v)} value={String(v)}>{l}</option>)}</select><Hint text={hintFor(s, value)} />{typeof s.description === "string" && <span className="hint">{s.description}</span>}</div>;
+  // a list of choices (V6a check: "Video format is one of"): a checkbox per choice
+  const items = s.items as JSONSchema | undefined;
+  if (s.type === "array" && items?.enum) {
+    const on = (value as unknown[]) ?? [];
+    return (
+      <fieldset className="field choice"><legend className="lab">{title}</legend><div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+        {labels(items).map(([v, l]) => <label key={String(v)} className="row nw"><input type="checkbox" checked={on.includes(v)} onChange={(e) => set(e.target.checked ? [...on, v] : on.filter((x) => x !== v))} /><span>{l}</span></label>)}
+      </div>{typeof s.description === "string" && <span className="hint">{s.description}</span>}</fieldset>);
+  }
   const hint = typeof s.description === "string" ? <span className="hint" id={fid + "-h"}>{s.description}{s.type === "array" ? " One per line." : ""}</span> : null;
+  if (s.type === "integer" || s.type === "number") // a number, saved as a number (empty: not set)
+    return <div className="field"><label htmlFor={fid}>{title}</label><input id={fid} className="input" type="number" inputMode="decimal" min={s.minimum as number | undefined} step={s.type === "integer" ? 1 : "any"}
+      value={value == null ? "" : String(value)} onChange={(e) => set(e.target.value === "" ? undefined : s.type === "integer" ? Math.trunc(Number(e.target.value)) : Number(e.target.value))} aria-describedby={hint ? fid + "-h" : undefined} />{hint}</div>;
   if (s.type === "array")
     return <div className="field"><label htmlFor={fid}>{title}</label><textarea id={fid} className="input" rows={2} value={((value as string[]) ?? []).join("\n")}
       onChange={(e) => set(e.target.value.split("\n").map((x) => x.trim()).filter(Boolean))} aria-describedby={hint ? fid + "-h" : undefined} />{hint}</div>;
   return <div className="field"><label htmlFor={fid}>{title}</label><input id={fid} className="input" value={String(value ?? "")} placeholder={(s["x-placeholder"] as string) ?? undefined} onChange={(e) => set(e.target.value)} aria-describedby={hint ? fid + "-h" : undefined} />{hint}</div>;
 }
 
-function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown) => void; issues: ValidationIssue[] }) {
+export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown) => void; issues: ValidationIssue[] }) {
   const { stepDef, libs } = useReg(), def = stepDef(n.type)!, props = Object.fromEntries(Object.entries((def.configSchema.properties ?? {}) as Props).filter(([, s]) => !s.readOnly)) as Props, c = n.config;
   const keys = Object.keys(props).filter((k) => !(MORE[n.type] ?? []).includes(k)), more = (MORE[n.type] ?? []).filter((k) => props[k]);
   const field = (k: string) => <Field key={k} id={n.id} name={k} s={props[k]} value={c[k] ?? props[k].default} set={(v) => set(k, v)} />;
