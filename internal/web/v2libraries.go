@@ -92,7 +92,7 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			"scan": scan,
 			"counts": map[string]int{"files": l.LastScanVideos, "waiting": c.Waiting, "running": c.Working,
 				"completed": cards[jobs.CardProcessed], "skipped": cards[jobs.CardSkipped], "failed": cards[jobs.CardFailed]},
-			"bytes":  map[string]int64{"freed": c.FreedBytes, "waitingToFree": c.WaitingBytes},
+			"bytes":  map[string]int64{"freed": c.FreedBytes, "waitingToFree": c.WaitingBytes, "couldFree": c.CouldFreeBytes},
 			"output": map[string]any{"policy": policy, "folder": folder, "overrideFolder": nilIfEmpty(l.OverrideFolder), "problem": problem},
 			// CAN'T YET: per-library scan frequency (one scan pass walks every library, and a new file is
 			// decided on its second look a pass later), include/exclude (the workflow's Ignore list is it)
