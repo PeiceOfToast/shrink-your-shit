@@ -16,8 +16,9 @@ export function ProcessingSettings() {
   const [said, setSaid] = useState(""), [bad, setBad] = useState(false), [busy, setBusy] = useState(false);
   const s = st.data, now = s?.scanEvery;
   // A value set some other way (the startup flag, or the API) is shown as one more choice; "(set at startup)" only
-  // when it is the flag's. The server's minimum isn't sent, so a choice below it is refused with the server's words.
-  const options = now && !CHOICES.includes(now) ? [...CHOICES, now].sort((a, b) => a - b) : CHOICES;
+  // when it is the flag's. Choices outside the server's bounds (#146 scanEveryMin/Max) aren't listed (design).
+  const fits = (v: number) => v >= (s?.scanEveryMin ?? 0) && v <= (s?.scanEveryMax ?? Infinity);
+  const listed = CHOICES.filter(fits), options = [...listed, ...(now && !listed.includes(now) ? [now] : [])].sort((a, b) => a - b); // the live value always shows
   const pick = async (v: number) => {
     setSaid(""); setBad(false); setBusy(true);
     try {
@@ -36,7 +37,7 @@ export function ProcessingSettings() {
           {!s ? <p className="muted">{st.error?.message ?? "Loading..."}</p> : now === undefined ? <p className="muted">This server doesn't say how often it looks for new files.</p> : <>
             <div className="field"><label htmlFor="scan-every">Look for new files</label>
               <select id="scan-every" className="input" value={now} disabled={busy} onChange={(e) => pick(Number(e.target.value))} aria-describedby="scan-every-h">
-                {options.map((v) => <option key={v} value={v}>{every(v) + (v === now && !CHOICES.includes(v) && s.scanEverySource === "flag" ? " (set at startup)" : "")}</option>)}
+                {options.map((v) => <option key={v} value={v}>{every(v) + (v === now && !listed.includes(v) && s.scanEverySource === "flag" ? " (set at startup)" : "")}</option>)}
               </select>
               <span className="hint" id="scan-every-h">A new file is added once it hasn't changed between two checks, so it can take up to twice this long to appear. Choose a longer time if checking a big library keeps the disk busy.</span></div>
             {said && <p className={bad ? "st bad" : "muted"} role={bad ? "alert" : "status"}>{said}</p>}
