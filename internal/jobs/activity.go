@@ -145,11 +145,26 @@ FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id WHERE j.status IN (?,?) O
 // files or a bitrate or size cap, it is not "already in this format", and each pass converted it again,
 // a generation worse each time (dev-qa, #109 QA). Kept in the jobs table, so it holds after a restart;
 // a different file put at that path later (another size or time) is looked at as usual.
+//
+// A job done without its output's time (0: before migration 7 recorded it, which filled it in only from
+// a file record of that size, never for a replace at the same name; or the output not readable then)
+// owns the file there of the size it wrote, and that time is recorded now, at its first look: an
+// upgrading install doesn't convert its old outputs once more (review fd13e2e). Done here rather than in
+// a start-up pass, which would stat every old output, and hang on (or miss) a library that is offline.
 func (s *Store) IsOwnOutput(path string, size, mtime int64) (bool, error) {
 	var yes bool
 	err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM jobs WHERE output_path=? AND status='done' AND size_after=? AND output_mtime=? AND output_mtime<>0)`,
 		path, size, mtime).Scan(&yes)
-	return yes, err
+	if err != nil || yes {
+		return yes, err
+	}
+	r, err := s.db.Exec(`UPDATE jobs SET output_mtime=? WHERE id=(SELECT id FROM jobs WHERE output_path=? AND status='done' AND size_after=? AND output_mtime=0
+  ORDER BY id DESC LIMIT 1)`, mtime, path, size)
+	if err != nil {
+		return false, err
+	}
+	n, _ := r.RowsAffected()
+	return n == 1, nil
 }
 
 // convertedSQL is true for a files row that is the output of a done conversion: the scanner skips it

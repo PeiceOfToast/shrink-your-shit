@@ -607,3 +607,47 @@ func TestQueuedFileIsNotStillChangingAfterASave(t *testing.T) {
 		t.Error("its job is still waiting")
 	}
 }
+
+// A job done before its output's time was recorded (output_mtime 0: before migration 7, or not readable
+// then) still owns its output when the size is the one it wrote: an upgrading install doesn't convert
+// its old outputs once more (review fd13e2e). One the person replaced by hand (another size) is looked at.
+func TestOldDoneJobsOwnTheirOutputs(t *testing.T) {
+	s, st, lib, _ := setup(t, h264Big)
+	os.Remove(filepath.Join(lib, "a.mkv"))
+	done := func(name string) int64 {
+		p := filepath.Join(lib, name)
+		id, err := st.Enqueue(jobs.Job{Library: lib, Path: p})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.Claim("w"); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.Complete(id, p, 5); err != nil { // the output not there yet: its time is 0, as for an old job
+			t.Fatal(err)
+		}
+		return id
+	}
+	done("old.mkv")
+	done("changed.mkv")
+	os.WriteFile(filepath.Join(lib, "old.mkv"), []byte("12345"), 0o644)       // as the job wrote it
+	os.WriteFile(filepath.Join(lib, "changed.mkv"), []byte("1234567"), 0o644) // replaced by hand
+	past := time.Now().Add(-time.Hour)
+	os.Chtimes(filepath.Join(lib, "old.mkv"), past, past)
+	os.Chtimes(filepath.Join(lib, "changed.mkv"), past, past)
+	s.ScanOnce(context.Background())
+	if n := s.ScanOnce(context.Background()); n != 1 {
+		t.Errorf("%d queued, want 1 (only the file changed by hand)", n)
+	}
+	if open, _ := st.HasOpenJob(filepath.Join(lib, "old.mkv")); open {
+		t.Error("the old job's output was queued again")
+	}
+	if open, _ := st.HasOpenJob(filepath.Join(lib, "changed.mkv")); !open {
+		t.Error("the file replaced by hand was not looked at")
+	}
+	// its time is now known: a later change of the file (same size, new time) is looked at again
+	fi, _ := os.Stat(filepath.Join(lib, "old.mkv"))
+	if own, _ := st.IsOwnOutput(filepath.Join(lib, "old.mkv"), 5, fi.ModTime().UnixNano()+1); own {
+		t.Error("after the first look, another time still counts as ours")
+	}
+}

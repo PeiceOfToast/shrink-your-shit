@@ -97,7 +97,7 @@ export function Shell({ title, proto, children }: { title: string; proto: boolea
         </header>
         {proto && (
           <div className="proto" role="note">
-            <Icon id="i-alert" /><span><strong>Prototype</strong> · this page is not built yet. Nothing here changes your files.</span>
+            <Icon id="i-alert" /><span><strong>Prototype</strong> · this page shows sample data or is not built yet. Nothing you do here changes your files.</span>
           </div>
         )}
         <main className="content" id="main">{children}</main>
