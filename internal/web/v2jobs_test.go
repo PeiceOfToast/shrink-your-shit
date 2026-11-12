@@ -4,6 +4,7 @@ package web
 
 import (
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -56,6 +57,20 @@ func TestV2Jobs(t *testing.T) {
 	}
 	if s := list("skipped"); s.Total != 1 || s.Items[0]["state"] != "skipped" || s.Items[0]["origin"] != "scan" {
 		t.Errorf("skipped %+v", s.Items)
+	}
+	// every item's reason is {code, message} | null, as every v2 reason (ui-shop 23:27Z)
+	want := map[string]any{
+		"failed.mkv":  map[string]any{"code": "convert_failed", "message": "Converting did not finish"},
+		"retry.mkv":   map[string]any{"code": "convert_failed", "message": "busy"},
+		"skipped.mkv": map[string]any{"code": rules.SkipAlreadyInFormat, "message": "It is already HEVC in MKV."},
+		"waiting.mkv": nil, "done.mkv": nil,
+	}
+	for _, tab := range []string{"waiting", "completed", "failed", "skipped"} {
+		for _, it := range list(tab).Items {
+			if r, ok := it["reason"]; !ok || !reflect.DeepEqual(r, want[it["name"].(string)]) {
+				t.Errorf("%s: reason %#v, want %#v", it["name"], r, want[it["name"].(string)])
+			}
+		}
 	}
 	if code, _, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs?tab=everything"}); code != 400 {
 		t.Errorf("bad tab %d", code)
