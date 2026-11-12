@@ -96,8 +96,42 @@ func leaseGone(err error) bool {
 	return errors.As(err, &ae) && ae.Code == "lease_gone"
 }
 
+// sweepLeases removes the lease folders an earlier run of this worker left in work (CT 221: one killed
+// with kill -9 left ~180 MB). It runs before Work takes a lease, when this worker holds none (it takes
+// one at a time, and removes each lease's folder when it ends). Only folders named like a lease id (24
+// hex digits) go, never a link or anything else in work.
+func sweepLeases(work string) {
+	entries, err := os.ReadDir(work)
+	if err != nil {
+		return // no folder yet: nothing left over
+	}
+	for _, e := range entries {
+		if !e.IsDir() || !isLeaseID(e.Name()) { // a symlink is not a dir entry here
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(work, e.Name())); err != nil {
+			log.Printf("couldn't remove a leftover lease folder %s: %v", e.Name(), err)
+		} else {
+			log.Printf("removed a leftover lease folder %s (from an earlier run)", e.Name())
+		}
+	}
+}
+
+func isLeaseID(name string) bool {
+	if len(name) != 24 {
+		return false
+	}
+	for _, r := range name {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 // Work leases and converts jobs until ctx ends, one at a time (the heartbeats run beside it, in Run).
 func (c *Client) Work(ctx context.Context, cv Converter) {
+	sweepLeases(cv.Work)
 	for ctx.Err() == nil {
 		did, err := c.workOne(ctx, cv)
 		var ae *APIError
