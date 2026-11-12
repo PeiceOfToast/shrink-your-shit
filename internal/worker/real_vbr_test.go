@@ -4,6 +4,7 @@ package worker
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -57,5 +58,58 @@ func TestRealVBR720MediumWith3MbpsLimit(t *testing.T) {
 	t.Logf("average %.0f kbps (720p Medium: 2500; limit 3000)", avg)
 	if avg < 2500*0.85 || avg > 2500*1.15 {
 		t.Errorf("average %.0f kbps, not close to 2500", avg)
+	}
+}
+
+// Review a772397: every format VBR is offered for really encodes with a peak limit (HEVC, H.264, VP9);
+// AV1 isn't offered VBR (SVT-AV1 takes a peak limit only with CRF), and its quality mode with a level
+// encodes. Formats this ffmpeg lacks are skipped.
+func TestRealVBREveryFormatOffered(t *testing.T) {
+	needTools(t)
+	encoders := media.Encoders(context.Background(), media.OSExec{}, "ffmpeg")
+	rules.SetAvailableFormats(encoders)
+	defer rules.SetAvailableFormats(nil)
+	dir := t.TempDir()
+	src := filepath.Join(dir, "clip.mkv")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=25:duration=3",
+		"-c:v", "libx264", "-preset", "ultrafast", "-b:v", "8M", "-pix_fmt", "yuv420p", src)
+	for _, c := range []struct{ format, rate, codec string }{
+		{"hevc", "vbr", "hevc"}, {"h264", "vbr", "h264"}, {"vp9", "vbr", "vp9"}, {"av1", "quality", "av1"},
+	} {
+		t.Run(c.format+" "+c.rate, func(t *testing.T) {
+			if !encoders[rules.VideoFormats[c.format].Encoder] {
+				t.Skip("this ffmpeg has no " + rules.VideoFormats[c.format].Encoder)
+			}
+			in := filepath.Join(t.TempDir(), "clip.mkv")
+			b, _ := os.ReadFile(src)
+			os.WriteFile(in, b, 0o644)
+			sel := rules.DefaultSelectors(3)
+			sel.Format, sel.MaxBitrate, sel.Audio, sel.OnlyMyLanguages = c.format, "medium", "as_is", false
+			if c.format == "vp9" {
+				sel.FileType = "webm"
+				sel.Audio = "stereo_opus"
+			}
+			if c.rate == "vbr" {
+				sel.RateControl, sel.VBRMaxKbps = "vbr", 6000
+			}
+			if err := sel.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			tmpl := sel.Template()
+			st, id := realJob(t, in, 3)
+			w := realWorker(st, media.OSExec{})
+			w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+			w.KeepDays, w.Journal = func() int { return 7 }, st // a WebM replaces an MKV: a new name, recorded
+			if err := w.run(t); err != nil {
+				t.Fatal(err)
+			}
+			j, _ := st.Get(id)
+			if j.Status != jobs.Done {
+				t.Fatalf("%s %q", j.Status, j.Error)
+			}
+			if v := probe(t, j.OutputPath).Video(); v == nil || v.Codec != c.codec {
+				t.Errorf("made %+v", v)
+			}
+		})
 	}
 }

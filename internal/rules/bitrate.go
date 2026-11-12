@@ -173,3 +173,7 @@ func VBRKbps(level, f string, w, h int, v *media.Stream, sourceKbps, limit int) 
 	}
 	return target, max
 }
+
+// VBRFormat reports whether format f can be made with VBR and a peak limit: not AV1 (SVT-AV1 takes a
+// peak limit only with CRF: "Max Bitrate only supported with CRF mode").
+func VBRFormat(f string) bool { return f != "av1" }

@@ -103,6 +103,9 @@ func (s Selectors) Validate() error {
 	switch s.RateControl {
 	case "", "quality":
 	case "vbr":
+		if !VBRFormat(s.Format) { // SVT-AV1 takes a peak limit only with CRF (review a772397: every file failed)
+			return &SelectorError{"invalid", "VBR with a peak limit isn't available for AV1; use quality mode. Nothing was changed."}
+		}
 		if s.MaxBitrate == "none" || s.MaxBitrate == "" {
 			return &SelectorError{"invalid", "VBR aims at a level's bitrate: choose Low, Medium or High. Nothing was changed."}
 		}

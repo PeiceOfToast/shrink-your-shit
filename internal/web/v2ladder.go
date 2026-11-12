@@ -32,7 +32,18 @@ func v2Ladder(api *http.ServeMux) {
 		}
 		writeJSON(w, map[string]any{"unit": "Mbps", "rows": rows, "formats": formats,
 			"resolutionRow": map[string]string{"1080": "1080", "720": "720", "480": "sd"},
+			"vbrFormats":    vbrFormats(), // VBR with a peak limit is offered only for these (not AV1)
 			// the rough-picture warning's room for HDR or 10-bit and for 50-60 fps (not the levels)
 			"roughAllowance": map[string]float64{"hdr": 1.25, "highFps": 1.4}})
 	})
+}
+
+func vbrFormats() []string {
+	out := []string{}
+	for _, f := range []string{"hevc", "h264", "av1", "vp9"} {
+		if rules.VBRFormat(f) {
+			out = append(out, f)
+		}
+	}
+	return out
 }

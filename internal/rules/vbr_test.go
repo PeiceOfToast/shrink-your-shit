@@ -41,6 +41,8 @@ func TestVBR(t *testing.T) {
 	if got := extraArgs(VideoEncode{Extra: VideoFormats["vp9"].Extra["normal"]}); !slices.Contains(got, "-b:v") {
 		t.Errorf("quality keeps it: %v", got)
 	}
+	SetAvailableFormats(map[string]bool{"libx265": true, "libx264": true, "libsvtav1": true, "libvpx-vp9": true})
+	defer SetAvailableFormats(nil)
 	for _, c := range []struct {
 		change func(*Selectors)
 		words  string
@@ -50,6 +52,7 @@ func TestVBR(t *testing.T) {
 		{func(s *Selectors) { s.Resolution, s.VBRMaxKbps = "keep", 1000 }, "Must be at least 1.2 Mbps, the Medium figure for 480p and below."},
 		{func(s *Selectors) { s.VBRMaxKbps = 0 }, "from 0.1 to 500 Mbps"},
 		{func(s *Selectors) { s.RateControl = "cbr" }, "rateControl"},
+		{func(s *Selectors) { s.Format = "av1" }, "VBR with a peak limit isn't available for AV1; use quality mode."},
 	} {
 		bad := s
 		c.change(&bad)
