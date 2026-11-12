@@ -5,6 +5,7 @@ package web
 import (
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"encoding/json"
@@ -278,5 +279,38 @@ func TestSettingsScanEvery(t *testing.T) {
 	}
 	if s, _ := LoadSettings(st); s.ScanEvery != 120 { // main gives it to the scanner at start
 		t.Errorf("stored %d", s.ScanEvery)
+	}
+}
+
+// ui-shop 04:11Z: GET carries the bounds PATCH enforces for scanEvery, from the same place, so they
+// are exactly the accepted edges; they can't be changed.
+func TestSettingsScanEveryBounds(t *testing.T) {
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	a, _, _ := OpenAccess(t.TempDir(), false)
+	srv := httptest.NewServer(Handler(st, a, Engine{ScanEvery: 45 * time.Second, Settle: 20 * time.Second, SetScanEvery: func(time.Duration) {}}))
+	defer srv.Close()
+	for _, path := range []string{"/api/settings", "/api/v2/settings"} {
+		_, body, _ := do(t, nil, srv, call{method: "GET", path: path})
+		var s struct{ ScanEveryMin, ScanEveryMax int }
+		json.Unmarshal([]byte(body), &s)
+		if s.ScanEveryMin != 20 || s.ScanEveryMax != 86400 {
+			t.Fatalf("%s: min %d max %d", path, s.ScanEveryMin, s.ScanEveryMax)
+		}
+	}
+	patch := func(n int) int {
+		code, _, _ := do(t, nil, srv, call{method: "PATCH", path: "/api/settings", body: `{"scanEvery":` + strconv.Itoa(n) + `}`, ctype: "application/json"})
+		return code
+	}
+	for n, want := range map[int]int{20: 200, 19: 400, 86400: 200, 86401: 400} {
+		if got := patch(n); got != want {
+			t.Errorf("scanEvery %d: %d, want %d", n, got, want)
+		}
+	}
+	if _, b, _ := do(t, nil, srv, call{method: "PATCH", path: "/api/settings", body: `{"scanEveryMin":1,"scanEveryMax":5}`, ctype: "application/json"}); !strings.Contains(b, `"scanEveryMin":20`) || !strings.Contains(b, `"scanEveryMax":86400`) {
+		t.Errorf("bounds changed: %s", b)
 	}
 }
