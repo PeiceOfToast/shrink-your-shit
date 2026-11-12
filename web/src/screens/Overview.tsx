@@ -11,7 +11,7 @@ import { onLive } from "../live";
 import { PageHead } from "../PageHead";
 import { Link } from "../router";
 import { useData } from "../useData";
-import { allWorkers } from "../workersApi";
+import { allWorkers, listWorkers } from "../workersApi";
 import { getOverview, type Overview as O, type OverviewJob } from "../overviewApi";
 import { mockState, scanAll, summary } from "../mock";
 import { WorkersSwitch } from "./Workers";
@@ -19,6 +19,8 @@ import type { JobProgressEvent } from "../types/jobs";
 
 const STATE: Record<string, [string, string]> = { busy: ["Converting", "run"], online: ["Ready", ""], draining: ["Finishing", "warn"], paused: ["Off", ""], offline: ["Offline", "bad"], stalled: ["Not responding", "bad"] };
 const slots = (w: O["workers"][number]) => w.slots.cpu ?? { used: w.slots.used ?? 0, total: w.slots.total ?? 0 };
+// review a7d25ec P2-1: a percentage as people read it (one decimal below 10, whole above; "under 0.1%" for a sliver)
+const pctTxt = (n: number) => (n > 0 && n < 0.1 ? "under 0.1%" : (n < 10 ? Math.round(n * 10) / 10 : Math.round(n)) + "%");
 const pct = (n: number | null) => (n == null ? null : Math.max(0, Math.min(100, Math.round(n))));
 const left = (s: number | null) => (s == null ? "not known yet" : s < 90 ? "under 2 min" : "about " + (s < 5400 ? Math.round(s / 60) + " min" : Math.round(s / 3600) + " h"));
 const perGB = (s: number | null) => (s == null ? "not recorded" : s < 60 ? Math.round(s) + " s" : Math.floor(s / 60) + " min" + (Math.round(s % 60) ? " " + Math.round(s % 60) + " s" : ""));
@@ -46,9 +48,12 @@ function DayChart({ title, days, value, fmt, color }: { title: string; days: O["
 
 export function Overview() {
   // the sample install never calls the server (a 401 there would send the page to Sign in)
+  // review 61dc891 P2-2: the workers (count, switch and rows) come from GET /api/v2/workers, the Workers page's source,
+  // which has remote workers too; the overview's own worker entries add their files' progress
+  const wl = useData(listWorkers, [], 15000);
   const o = useData(getOverview, [], 15000), sum = useData<{ last24h: { failed: number } }>(() => (MOCK ? Promise.resolve(summary(mockState())) : getSummary()), [], 30000);
   const [live, setLive] = useState<Record<string, Partial<OverviewJob>>>({}), [said, setSaid] = useState("");
-  const reload = useRef(o.reload); reload.current = o.reload;
+  const reload = useRef(o.reload); reload.current = () => (o.reload(), wl.reload());
   useEffect(() => {
     let t: ReturnType<typeof setTimeout> | undefined;
     return onLive((type, data) => {
@@ -56,18 +61,26 @@ export function Overview() {
       if (type === "job.state" || type === "library.changed" || type === "resync" || type.startsWith("processing.") || type.startsWith("worker.")) { clearTimeout(t); t = setTimeout(() => (reload.current(), setLive({})), 400); }
     });
   }, []);
-  const act = async (p: Promise<Answer<unknown>>) => { try { const r = await p; setSaid(failed(r) ? r.error.message : ""); } catch (e) { if (!(e instanceof SignedOut)) throw e; } o.reload(); };
+  const act = async (p: Promise<Answer<unknown>>) => { try { const r = await p; setSaid(failed(r) ? r.error.message : ""); } catch (e) { if (!(e instanceof SignedOut)) throw e; } o.reload(); wl.reload(); };
   if (!o.data) return <div className="stack"><PageHead icon="i-dashboard" title="Dashboard" /><div className="empty">{o.error?.message ?? "Loading..."}</div></div>;
   const v = o.data, h = v.headline, job = (j: OverviewJob) => ({ ...j, ...live[j.jobId] });
-  const on = v.workers.filter((w) => w.status === "busy" || w.status === "online").length, fin = v.workers.filter((w) => w.status === "draining").length;
-  const busy = v.workers.some((w) => w.jobs.length > 0), failed24 = sum.data && !failed(sum.data) ? sum.data.last24h.failed : null;
+  // one row per worker of GET /api/v2/workers; its files' progress from the overview (or, for a worker the overview
+  // doesn't list, from Converting now by job id)
+  // review a7d25ec P2-2: the overview's worker entries put every job under this computer, so a row's files are the
+  // worker's own currentJobIds; progress, fps and speed are looked up by job id in the overview (wherever it put them)
+  const jobInfo = (id: string): OverviewJob => { const j = v.workers.flatMap((x) => x.jobs).find((x) => x.jobId === id), a = v.active.find((x) => x.jobId === id);
+    return j ?? { jobId: id, name: a?.name ?? "Job " + id, percent: a?.percent ?? null, fps: null, speed: null, etaS: a?.etaS ?? null }; };
+  const rows: O["workers"] = (wl.data ?? []).length ? wl.data!.map((w) => { const ow = v.workers.find((x) => x.id === w.id);
+    return { id: w.id, name: w.name, kind: ow?.kind ?? "remote", status: w.status, slots: w.slots, cpuPercent: ow?.cpuPercent ?? null, gpuPercent: ow?.gpuPercent ?? null, jobs: w.currentJobIds.map(jobInfo) }; }) : v.workers;
+  const on = rows.filter((w) => w.status === "busy" || w.status === "online").length, fin = rows.filter((w) => w.status === "draining").length;
+  const busy = rows.some((w) => w.jobs.length > 0), failed24 = sum.data && !failed(sum.data) ? sum.data.last24h.failed : null;
   const rec = v.daily.filter((d) => d.recorded), first = rec[0]?.day, tot = { done: rec.reduce((a, d) => a + d.completed, 0), skipped: rec.reduce((a, d) => a + d.skipped, 0), failed: rec.reduce((a, d) => a + d.failed, 0) };
-  const workerOf = (id: string) => v.workers.find((w) => w.jobs.some((j) => j.jobId === id))?.name;
+  const workerOf = (id: string) => rows.find((w) => w.jobs.some((j) => j.jobId === id))?.name;
   const more = [h.waitingToFree > 0 && bytes(h.waitingToFree) + " more" + (h.nextFreeAt ? " by " + dayName(h.nextFreeAt.slice(0, 10)) : ""), h.couldFree > 0 && "could free " + bytes(h.couldFree) + " if you remove the originals"].filter(Boolean).join(" · ");
   return (
     <div className="stack ov">
       <PageHead icon="i-dashboard" title="Dashboard">
-        <WorkersSwitch n={on} m={v.workers.length} busy={busy} finishing={fin} onSet={(a) => act(allWorkers(a))} />
+        <WorkersSwitch n={on} m={rows.length} busy={busy} finishing={fin} onSet={(a) => act(allWorkers(a))} />
         <button className="btn sm ghost" type="button" onClick={() => (MOCK ? scanAll() : act(scanAllLibraries()))}><Icon id="i-refresh" />Scan all libraries</button>
       </PageHead>
       {said && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{said}</span></p>}
@@ -82,9 +95,9 @@ export function Overview() {
       </section>
 
       <section className="sec" aria-labelledby="ov-w"><h2 id="ov-w">Workers <Link className="more" to="/workers">Workers page</Link></h2>
-        {!v.workers.length ? <p className="muted">No workers yet.</p> : (
+        {!rows.length ? <p className="muted">No workers yet.</p> : (
           <table className="tbl ovt"><thead><tr><th>Worker</th><th>Now</th><th>Progress</th><th className="num">Speed</th><th className="num">Slots</th><th className="num">CPU · GPU</th></tr></thead>
-            <tbody>{v.workers.map((w) => { const [t, cls] = STATE[w.status] ?? [w.status, ""], js = w.jobs.map(job), sl = slots(w);
+            <tbody>{rows.map((w) => { const [t, cls] = STATE[w.status] ?? [w.status, ""], js = w.jobs.map(job), sl = slots(w);
               return <tr key={w.id}>
                 <td className="nm"><b>{w.name}</b> <span className={"pill " + cls}>{t}</span></td>
                 <td className="full">{js.length ? js.map((j) => <span key={j.jobId} className="mono sm fname">{j.name}</span>) : <span className="muted">Nothing</span>}</td>
@@ -114,7 +127,7 @@ export function Overview() {
               <td className="nm"><Link to={"/libraries/" + l.id}><b>{l.name}</b></Link></td>
               <td className="num" data-l="Before">{bytes(l.bytesBefore)}</td>
               <td className="num" data-l="Now">{bytes(l.bytesNow)}</td>
-              <td className="num" data-l="Saved">{l.saved > 0 ? <><b>{bytes(l.saved)}</b>{l.savedPercent != null && " · " + l.savedPercent + "%"}</> : "nothing yet"}{l.saved === 0 && l.couldFree > 0 && <span className="sub">could free {bytes(l.couldFree)} by removing the originals</span>}</td>
+              <td className="num" data-l="Saved">{l.saved > 0 ? <><b>{bytes(l.saved)}</b>{l.savedPercent != null && " · " + pctTxt(l.savedPercent)}</> : "nothing yet"}{l.saved === 0 && l.couldFree > 0 && <span className="sub">could free {bytes(l.couldFree)} by removing the originals</span>}</td>
               <td className="num full" data-l="Done · Waiting · Skipped · Failed">{[l.counts.done, l.counts.waiting, l.counts.skipped, l.counts.failed].map(count).join(" · ")}</td>
               <td>{l.state === "paused" ? <span className="pill warn">Paused</span> : <span className="pill">Watching</span>}</td>
             </tr>)}</tbody></table>
@@ -141,7 +154,7 @@ export function Overview() {
                 <dt>Time per GB</dt><dd>{perGB(v.averages.secondsPerGB)}</dd></dl>
             </div>
           </div>)}
-        {first && <p className="muted sm">History starts {dayName(first)}, when this install began keeping it. Earlier days are not recorded, not estimated.{MOCK ? "" : " Days are " + v.timeZone + " days."}</p>}
+        {first && <p className="muted sm">History starts {dayName(first)}, when this install began keeping it. Earlier days are not recorded, not estimated.{MOCK || /^(Etc\/)?UTC$/.test(v.timeZone) ? "" : " Days run midnight to midnight, " + v.timeZone.split("/").pop()!.replace(/_/g, " ") + " time."}</p>}
       </section>
     </div>
   );
