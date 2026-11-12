@@ -133,9 +133,11 @@ func (c *Client) workOne(ctx context.Context, cv Converter) (did bool, err error
 	if err := os.MkdirAll(cv.Work, 0o700); err != nil {
 		return false, err
 	}
-	if cv.free() < cv.MinFree { // no room: no lease (the Workers page shows it idle)
+	if free := cv.free(); free < cv.MinFree { // no room: no lease, and it says why (#174 QA e)
+		c.holding(fmt.Sprintf("Not taking work: %s free on %s, below the %s it keeps free (--min-free-gb).", gb(free), cv.Work, gb(cv.MinFree)))
 		return false, nil
 	}
+	c.holding("")
 	l, err := c.Lease(ctx)
 	if err != nil || l == nil {
 		return false, err
@@ -414,3 +416,6 @@ func (c *Client) report(ctx context.Context, l *Lease, body map[string]any) erro
 	}
 	return nil
 }
+
+// gb is a size in GB, to one decimal.
+func gb(n uint64) string { return strconv.FormatFloat(float64(n)/(1<<30), 'f', 1, 64) + " GB" }

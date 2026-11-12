@@ -3,6 +3,7 @@
 package web
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"io"
@@ -317,5 +318,70 @@ func TestRemoteWorkerUpdateWords(t *testing.T) {
 		if got != want {
 			t.Errorf("%s: %q", ver, got)
 		}
+	}
+}
+
+// #174 QA e (orch-lead 16:12Z): a worker says why it takes no work; only known codes, at most 200
+// characters without control characters; worker.updated when the reason starts, ends or changes code,
+// not when only its figures change.
+func TestWorkerHoldingBack(t *testing.T) {
+	if holdingBack(&struct{ Code, Message string }{"mining", "x"}) != nil {
+		t.Error("an unknown code is dropped")
+	}
+	if h := holdingBack(&struct{ Code, Message string }{"low_disk", "Not taking work:\x1b[31m 1 GB\n free" + strings.Repeat("x", 300)}); h == nil ||
+		strings.ContainsAny(h["message"], "\x1b\n") || len([]rune(h["message"])) != 200 {
+		t.Errorf("sanitized: %q", h)
+	}
+	srv, st, _, _ := libServer(t, false)
+	code, _, _ := st.NewPairing(time.Now())
+	c, b := workerCall(t, srv, "pair", "", `{"code":"`+code+`"}`, WorkerAPILevel)
+	var w struct{ WorkerID, Token string }
+	json.Unmarshal([]byte(b), &w)
+	if c != 200 {
+		t.Fatalf("pair %d %s", c, b)
+	}
+	beat := func(hold string) {
+		t.Helper()
+		if c, b := workerCall(t, srv, "heartbeat", w.Token, `{"freeSlots":1,"holdingBack":`+hold+`}`, WorkerAPILevel); c != 200 {
+			t.Fatalf("heartbeat %d %s", c, b)
+		}
+	}
+	v := newWorkerView(st, &settingsStore{store: st}, Engine{})
+	v.checkStatuses(context.Background(), true) // the first check only takes note
+	events := func() int {
+		var n int
+		_, last, _ := st.EventBounds()
+		evs, _ := st.EventsAfter(0, int(last)+1)
+		for _, e := range evs {
+			if e.Kind == "worker.updated" {
+				n++
+			}
+		}
+		return n
+	}
+	beat(`{"code":"low_disk","message":"Not taking work: 1.0 GB free"}`)
+	v.checkStatuses(context.Background(), true)
+	if _, b, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/workers/" + w.WorkerID}); !strings.Contains(b, `"holdingBack":{"code":"low_disk","message":"Not taking work: 1.0 GB free"}`) {
+		t.Errorf("shown: %s", b)
+	}
+	if n := events(); n != 1 {
+		t.Errorf("it started holding back: %d events", n)
+	}
+	beat(`{"code":"low_disk","message":"Not taking work: 0.9 GB free"}`) // only the figure moved
+	v.checkStatuses(context.Background(), true)
+	if n := events(); n != 1 {
+		t.Errorf("only its figure changed: %d events", n)
+	}
+	beat(`null`)
+	v.checkStatuses(context.Background(), true)
+	if _, b, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/workers/" + w.WorkerID}); !strings.Contains(b, `"holdingBack":null`) {
+		t.Errorf("cleared: %s", b)
+	}
+	if n := events(); n != 2 {
+		t.Errorf("it takes work again: %d events", n)
+	}
+	beat(`{"code":"mining","message":"x"}`)
+	if _, b, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/workers/" + w.WorkerID}); !strings.Contains(b, `"holdingBack":null`) {
+		t.Errorf("an unknown code: %s", b)
 	}
 }

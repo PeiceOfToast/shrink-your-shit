@@ -206,6 +206,10 @@ func (v *workerView) remoteWith(rw jobs.RemoteWorker, working []jobs.Working) (m
 	if l, ok := workerLoads.Load(rw.ID); ok && status != "offline" {
 		load = l.(sysload.Load)
 	}
+	var holding any // why it takes no work now (#174 QA e); null when it does, or is offline
+	if h, ok := workerHolds.Load(rw.ID); ok && status != "offline" {
+		holding = h
+	}
 	var update any // Q7: no self-update; the words say what to do
 	if rw.Version != "" && v.eng.Version != "" && rw.Version != v.eng.Version {
 		update = map[string]any{"serverVersion": v.eng.Version,
@@ -214,9 +218,10 @@ func (v *workerView) remoteWith(rw jobs.RemoteWorker, working []jobs.Working) (m
 	return map[string]any{
 		"id": rw.ID, "name": rw.Name, "kind": "remote", "enabled": enabled, "host": nil, "os": nil, "arch": nil,
 		"appVersion": rw.Version, "status": status, "statusSince": since, "lastHeartbeatAt": nilIfEmpty(rw.LastSeen), "update": update,
-		"slots": map[string]any{"cpu": map[string]any{"total": 1, "used": len(ids)}, "gpu": nil},
-		"live":  liveLoad(load),
-		"gpus":  []any{}, "ffmpeg": nil, "capabilities": caps, "currentJobIds": ids,
+		"holdingBack": holding,
+		"slots":       map[string]any{"cpu": map[string]any{"total": 1, "used": len(ids)}, "gpu": nil},
+		"live":        liveLoad(load),
+		"gpus":        []any{}, "ffmpeg": nil, "capabilities": caps, "currentJobIds": ids,
 		"tags": []string{}, "pool": nil, "schedule": nil, "pathMappings": mappings,
 	}, nil
 }
@@ -692,6 +697,9 @@ func (v *workerView) checkStatuses(ctx context.Context, now bool) {
 	for _, rw := range remotes {
 		if r, err := v.remoteWith(rw, working); err == nil {
 			cur[rw.ID] = r["status"].(string)
+			if h, ok := r["holdingBack"].(map[string]string); ok { // its reason starting, ending or changing code counts too (ui-shop 16:12Z), not its figures
+				cur[rw.ID] += "\x00" + h["code"]
+			}
 		}
 	}
 	v.mu.Lock()
@@ -702,6 +710,7 @@ func (v *workerView) checkStatuses(ctx context.Context, now bool) {
 		return
 	}
 	emit := func(id, status string) {
+		status, _, _ = strings.Cut(status, "\x00") // the status alone; the reason's code only told a change
 		v.store.RecordEvent("worker.updated", map[string]any{"type": "worker.updated", "workerId": id, "status": status})
 	}
 	for id, st := range cur {
