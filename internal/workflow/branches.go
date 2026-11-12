@@ -150,7 +150,7 @@ func branchTemplate(d Doc) (rules.Template, []Issue) {
 		case TypeEnd:
 			reason, _ := n.Config["reason"].(string)
 			if reason == "" {
-				reason = "Left alone by this workflow."
+				reason = "Left alone by this workflow"
 			}
 			branches = append(branches, rules.Branch{Checks: checks, End: reason, Path: append(clone(path), n.ID)})
 		case TypeInput:
@@ -238,7 +238,7 @@ func failureOf(c Node, out map[[2]string]string, byID map[string]Node, issues *[
 			add("invalid_config", "'"+f.Name+"' falls back to a step that isn't in this workflow.")
 			return nil
 		case t.Type == TypeEnd:
-			f.Action, f.SkipWords = "skip", "Left alone by this workflow."
+			f.Action, f.SkipWords = "skip", "Left alone by this workflow"
 			if r, _ := t.Config["reason"].(string); r != "" {
 				f.SkipWords = r
 			}
@@ -261,7 +261,7 @@ func failureOf(c Node, out map[[2]string]string, byID map[string]Node, issues *[
 	case "skip", "stop":
 		f.Action = e.Action
 		if e.Action == "skip" {
-			f.SkipWords = f.Name + " didn't work, so the file was left as it is."
+			f.SkipWords = f.Name + " didn't work, so the file was left as it is"
 		}
 	case "retry":
 		f.Action, f.Max, f.BackoffSeconds, f.Then = "retry", e.Max, e.BackoffSeconds, e.Then
@@ -282,7 +282,7 @@ func failureOf(c Node, out map[[2]string]string, byID map[string]Node, issues *[
 			add("invalid_config", "After the last try, stop or leave the file alone.")
 			return nil
 		}
-		f.SkipWords = f.Name + " didn't work after " + strconv.Itoa(f.Max) + " tries, so the file was left as it is."
+		f.SkipWords = f.Name + " didn't work after " + strconv.Itoa(f.Max) + " tries, so the file was left as it is"
 	default:
 		add("invalid_config", "Choose what happens when '"+f.Name+"' doesn't work: try again, leave the file alone, stop, or another path.")
 		return nil

@@ -488,16 +488,19 @@ func (s *Store) Skip(id int64, words, code string) error {
 	if j.Status != Queued && j.Status != Running {
 		return ErrNotStoppable
 	}
+	words = strings.TrimRight(strings.TrimSpace(words), ".") // a workflow's own reason may end with one: shown with one added
 	f := userStoppedFile(j.Path)
-	f.Decision, f.Reason = "skip: "+words, code
+	f.Decision, f.Reason, f.JobID = "skip: "+words, code, id
 	if err := s.PutFile(f); err != nil {
 		return err
 	}
+	j.Attempts++                                          // the try that ended here
 	s.endEvent(j, "skipped", code, upperFirst(words)+".") // V2: the row goes, its history stays
 	if _, err = s.db.Exec(`DELETE FROM jobs WHERE id=?`, id); err != nil {
 		return err
 	}
-	s.jobsRemoved(id)
+	// its steps and run log stay while its file's record names it (V6 review: a skip after three tries
+	// showed no tries): the Skipped list's row opens them (ForgetGoneJobSteps keeps them)
 	return nil
 }
 
@@ -510,8 +513,8 @@ var ErrNotStoppable = errors.New("this file is not waiting or converting")
 // endEvent writes a job's last history entry when it ends by being deleted (skipped, stopped): the
 // triggers of migration 21 see only status changes.
 func (s *Store) endEvent(j Job, to, reason, message string) {
-	s.db.Exec(`INSERT INTO events(kind, job_id, at, from_status, to_status, reason, worker, data) VALUES ('job',?,?,?,?,?,?,json_object('message',?,'path',?))`,
-		j.ID, s.stamp(), string(j.Status), to, reason, j.Worker, message, j.Path) // the path: the row goes (the feed names the file)
+	s.db.Exec(`INSERT INTO events(kind, job_id, at, from_status, to_status, reason, worker, data) VALUES ('job',?,?,?,?,?,?,json_object('message',?,'path',?,'attempts',?))`,
+		j.ID, s.stamp(), string(j.Status), to, reason, j.Worker, message, j.Path, j.Attempts) // the path: the row goes (the feed names the file)
 }
 
 // upperFirst is s with its first letter capitalised (skip words are written to follow "skip: ").

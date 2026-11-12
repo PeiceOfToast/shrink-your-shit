@@ -118,7 +118,7 @@ func ToTemplate(d Doc, current rules.Template) (rules.Template, []Issue) {
 		return t, nil
 	}
 	if !slices.Equal(types, PresetOrder) {
-		return rules.Template{}, []Issue{notRunnable("This version can run the Shrink videos steps in their order. Other steps and orders come in a later update; you can save it as a draft.", "")}
+		return rules.Template{}, []Issue{chainIssue(order)}
 	}
 	s, issues := selectorsOf(order)
 	if len(issues) > 0 {
@@ -255,6 +255,31 @@ func straightChain(d Doc) ([]Node, bool) {
 		return nil, false
 	}
 	return order, true
+}
+
+// chainIssue says what keeps order, the steps of a path that converts, from running: the first Shrink
+// videos step it lacks, a step this version can't run there, or the order (V6 review: name the step).
+func chainIssue(order []Node) Issue {
+	const draft = " You can save the workflow as a draft meanwhile."
+	have := map[string]bool{}
+	for _, n := range order {
+		have[n.Type] = true
+	}
+	for _, t := range PresetOrder {
+		if !have[t] {
+			name := t
+			if d, ok := Definition(t); ok {
+				name = d.Name
+			}
+			return notRunnable("This path converts without '"+name+"'. A path that converts runs every Shrink videos step, in order: add it."+draft, "")
+		}
+	}
+	for _, n := range order {
+		if !slices.Contains(PresetOrder, n.Type) {
+			return notRunnable("'"+nodeName(n)+"' can't run among the steps that convert yet. Remove it from this path."+draft, n.ID)
+		}
+	}
+	return notRunnable("The steps that convert run in the Shrink videos order. Put this path's steps in that order."+draft, "")
 }
 
 func notRunnable(msg, nodeID string) Issue {
