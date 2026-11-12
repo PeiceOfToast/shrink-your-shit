@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -60,7 +61,10 @@ func (stuckEncode) Stream(ctx context.Context, onLine func(string), name string,
 }
 
 // remoteJob makes a 2-second file in a new library, queues it and returns the job's id.
-func remoteJob(t *testing.T, st *jobs.Store, lib string) int64 {
+func remoteJob(t *testing.T, st *jobs.Store, lib string) int64 { return remoteJobLen(t, st, lib, 2) }
+
+// remoteJobLen is remoteJob with the length the library says the file has (0: unknown).
+func remoteJobLen(t *testing.T, st *jobs.Store, lib string, dur float64) int64 {
 	t.Helper()
 	os.MkdirAll(lib, 0o755)
 	src := filepath.Join(lib, "Movie.mkv")
@@ -69,7 +73,7 @@ func remoteJob(t *testing.T, st *jobs.Store, lib string) int64 {
 		t.Fatalf("%v %s", err, out)
 	}
 	l, _ := st.AddLibrary("Movies", lib, rules.SliderTemplate(3), true)
-	id, _ := st.Enqueue(jobs.Job{Library: lib, LibraryID: l.ID, Path: src, DurationSec: 2, SizeBefore: 1000})
+	id, _ := st.Enqueue(jobs.Job{Library: lib, LibraryID: l.ID, Path: src, DurationSec: dur, SizeBefore: 1000})
 	return id
 }
 
@@ -146,5 +150,52 @@ func TestRemoteChecksAndUnjudgedWorkersAreNotStopped(t *testing.T) {
 			t.Errorf("%s: %s %q", c.name, j.Status, j.Error)
 		}
 		cl.call(ctx, "leases/"+l.ID+"/release", map[string]any{}, nil)
+	}
+}
+
+// slowThenReal is an ffmpeg that moves on for a while (as a long encode does), then really converts.
+type slowThenReal struct {
+	media.OSExec
+	for_ time.Duration
+}
+
+func (x slowThenReal) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
+	if name == "ffmpeg" && slices.Contains(args, "libx265") {
+		for i, end := int64(0), time.Now().Add(x.for_); time.Now().Before(end); i++ {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(10 * time.Millisecond):
+				onLine("out_time_us=" + strconv.FormatInt(1000+i*1000, 10))
+				onLine("progress=continue")
+			}
+		}
+	}
+	return x.OSExec.Stream(ctx, onLine, name, args...)
+}
+
+// orch-lead 20:03Z: a remote encode of a file whose length we don't know still reports its position, which
+// renews the lease; one that takes longer than LeaseFor is not taken back and run again, but finishes once.
+func TestRemoteEncodeOfUnknownLengthKeepsItsLease(t *testing.T) {
+	needFFmpeg(t)
+	oldLease, oldPoll, oldEvery := jobs.LeaseFor, PlanPoll, ProgressEvery
+	jobs.LeaseFor, PlanPoll, ProgressEvery = 400*time.Millisecond, 50*time.Millisecond, 20*time.Millisecond
+	defer func() { jobs.LeaseFor, PlanPoll, ProgressEvery = oldLease, oldPoll, oldEvery }()
+	srv, st, lib := stallServer(t, 5*time.Second)
+	id := remoteJobLen(t, st, lib, 0)
+	c := pairClient(t, srv, st)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go c.Work(ctx, Converter{Exec: slowThenReal{for_: 1500 * time.Millisecond}, FFmpeg: "ffmpeg", FFprobe: "ffprobe", Work: t.TempDir(),
+		FreeSpace: func(string) (uint64, error) { return 1 << 40, nil }})
+	var j jobs.Job
+	for end := time.Now().Add(30 * time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
+		st.RequeueExpiredLeases(0) // what the server's sweep does
+		if j, _ = st.Get(id); j.Status != jobs.Queued && j.Status != jobs.Running {
+			break
+		}
+	}
+	if j.Status != jobs.Done || j.Attempts > 1 {
+		t.Errorf("%s %q, %d tries", j.Status, j.Error, j.Attempts)
 	}
 }
