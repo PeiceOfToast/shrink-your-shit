@@ -40,7 +40,7 @@ func v2Summary(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 		perLibrary := []map[string]any{} // every library, also with nothing saved yet
 		for _, l := range all {
 			c := libCounts[l.ID]
-			perLibrary = append(perLibrary, map[string]any{"libraryId": strconv.FormatInt(l.ID, 10), "freed": c.FreedBytes, "waitingToFree": c.WaitingBytes, "couldFree": c.CouldFreeBytes})
+			perLibrary = append(perLibrary, map[string]any{"libraryId": strconv.FormatInt(l.ID, 10), "freed": c.FreedBytes, "waitingToFree": c.WaitingBytes, "couldFree": c.CouldFreeBytes, "grew": c.GrewBytes})
 		}
 		workers, err := wv.all(r.Context()) // the same list as GET /workers (#186 review)
 		if err != nil {
@@ -109,7 +109,7 @@ func v2Summary(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 			"activity":  map[string]any{"converting": a.WorkingFiles, "waiting": a.WaitingFiles, "workersRunning": running(workers)},
 			"jobCounts": jobCounts,
 			"last24h":   map[string]any{"completed": done, "failed": failed, "skipped": ends["skipped"], "successRate": rate},
-			"bytes": map[string]any{"freed": a.FreedBytes, "waitingToFree": a.WaitingBytes, "couldFree": a.CouldFreeBytes,
+			"bytes": map[string]any{"freed": a.FreedBytes, "waitingToFree": a.WaitingBytes, "couldFree": a.CouldFreeBytes, "grew": a.GrewBytes,
 				"freedLast7d": week, "perLibrary": perLibrary}, // V5c: dated, and per library
 			"workers":          workers,
 			"activeJobs":       active,

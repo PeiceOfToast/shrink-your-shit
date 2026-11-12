@@ -126,7 +126,7 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 			libraries = append(libraries, map[string]any{"id": strconv.FormatInt(l.ID, 10), "name": l.Name, "state": state,
 				// now: the files a scan sees (an original waiting in .syp-trash isn't one: review ab99630 P3-3)
 				"bytesBefore": t.BytesBefore, "bytesNow": t.BytesBefore - c.FreedBytes - c.WaitingBytes, "saved": c.FreedBytes, "savedPercent": pct,
-				"waitingToFree": c.WaitingBytes, "couldFree": c.CouldFreeBytes,
+				"waitingToFree": c.WaitingBytes, "couldFree": c.CouldFreeBytes, "grew": c.GrewBytes,
 				"counts": map[string]int{"done": t.Done, "waiting": c.Waiting, "skipped": t.Skipped, "failed": c.Failed}})
 		}
 		now := time.Now()
@@ -149,7 +149,7 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 		zone := zoneName(now)
 		writeJSON(w, map[string]any{
 			"headline": map[string]any{"freed": a.FreedBytes, "waitingToFree": a.WaitingBytes, "nextFreeAt": trash.NextDeleteAt,
-				"couldFree": a.CouldFreeBytes, "filesConverted": converted, "filesWaiting": a.WaitingFiles}, // NET
+				"couldFree": a.CouldFreeBytes, "grew": a.GrewBytes, "filesConverted": converted, "filesWaiting": a.WaitingFiles}, // NET
 			"trash":     trash, // GROSS (the originals' own size): never added to the headline
 			"workers":   workers,
 			"active":    active,
