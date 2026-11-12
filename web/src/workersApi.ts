@@ -14,6 +14,13 @@ export async function getWorker(id: string): Promise<Answer<Worker>> {
   return call("GET", base(id));
 }
 // POST /workers/{id}/start|stop|drain: drain finishes what it is converting, then stops.
+// User review 11-12 item 2 (#171): every worker at once (the "Workers on" switch), answered with the workers list.
+// drain = "Stop after these files". Never per worker: /workers/{id}/... becomes per-worker later.
+export async function allWorkers(action: "start" | "stop" | "drain"): Promise<Answer<Worker[]>> {
+  if (MOCK) { for (const w of mock.mockState().workers) if (w.status !== "offline" && w.status !== "stalled") mock.workerAction(w.id, action); return mock.mockState().workers; }
+  const r = await call<{ items: Worker[] }>("POST", "/api/v2/workers/all/" + action);
+  return failed(r) ? r : r.items;
+}
 export async function workerAction(id: string, action: "start" | "stop" | "drain"): Promise<Answer<unknown>> {
   if (MOCK) { const e = mock.workerAction(id, action); return e ? { error: { code: "invalid", message: e } } : {}; }
   return call("POST", base(id) + "/" + action);
