@@ -35,7 +35,7 @@ export function GeneralSettings() {
 // [code, name, name in the language]); added by typing a name and picking it.
 function Languages({ start, saved }: { start: string[]; saved: () => void }) {
   const [codes, setCodes] = useState(start), [list, setList] = useState<[string, string, string?][]>([]), [typed, setTyped] = useState(""), [said, setSaid] = useState(""), [bad, setBad] = useState(false);
-  useEffect(() => { fetch("/assets/languages.json").then((r) => r.json()).then(setList, () => {}); }, []);
+  useEffect(() => { fetch("/languages.json").then((r) => r.json()).then(setList, () => {}); }, []);
   const name = (c: string) => list.find((l) => l[0] === c)?.[1] ?? c;
   const add = (raw = typed) => {
     const t = raw.trim().toLowerCase(); if (!t) return;
@@ -170,7 +170,7 @@ export function AboutSettings() {
       <section className="card" aria-labelledby="lic-h"><div className="hd"><h2 id="lic-h">Licences</h2></div>
         <div className="bd stack">
           <p>Shrink Your Shit is free software under the GNU Affero General Public License, version 3.</p>
-          <p><a href="/next/licenses.md" target="_blank" rel="noopener">The licences of the parts this interface is built with</a> (React, React Flow and others).</p>
+          <p><a href="/licenses.md" target="_blank" rel="noopener">The licences of the parts this interface is built with</a> (React, React Flow and others).</p>
         </div></section>
     </div>);
 }

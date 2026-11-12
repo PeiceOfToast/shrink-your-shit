@@ -9,7 +9,7 @@ import { call, failed } from "./api";
 import { BASE } from "./router";
 import { fromLink } from "./screens/SignIn";
 
-// The sign-in link the server prints (?token=) signs in on any /next page, /next/signin included. The token leaves the
+// The sign-in link the server prints (?token=) signs in on any page, /signin included. The token leaves the
 // address bar first (replaceState, so it isn't kept in history), then POST /api/login; the page goes on to where the
 // link pointed (signin's next, or the Dashboard). A wrong token opens Sign in with the server's words, the field empty.
 async function linkSignIn() {

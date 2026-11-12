@@ -238,7 +238,7 @@ func main() {
 			}
 		}()
 	} else {
-		log.Print("The converter is not installed correctly (ffmpeg and ffprobe with libx265 and the ssim filter are needed), so nothing is scanned or converted. The web page's Settings > System says what is missing; fix it, then restart shrink-your-shit.")
+		log.Print("The converter is not installed correctly (ffmpeg and ffprobe with libx265 and the ssim filter are needed), so nothing is scanned or converted. The web page's Settings > About says what is missing; fix it, then restart shrink-your-shit.")
 	}
 	// Kept originals are purged every hour whether or not converting can run (review 172f049).
 	go func() {

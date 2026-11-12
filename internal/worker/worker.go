@@ -340,7 +340,7 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 			return true, err
 		}
 		// The person sees what happened in plain words; the technical error goes to the log
-		// (Settings > System shows its last lines).
+		// (Settings > About shows its last lines).
 		w.jobf(job.ID, " (%s) failed: %v", job.Path, err)
 		w.Queue.AddStep(job.ID, "converted", false, plainFailure(err))
 		if ferr := w.Queue.Fail(job.ID, reasonCode(err), plainFailure(err)); ferr != nil {
@@ -407,7 +407,7 @@ type SkippedError struct{ Words, Code string }
 
 func (e *SkippedError) Error() string { return "skipped: " + e.Words }
 
-const cannotRead = "shrink-your-shit is not allowed to read this file, so nothing was converted. Let it read the file (Settings > System says how), then press Retry."
+const cannotRead = "shrink-your-shit is not allowed to read this file, so nothing was converted. Let it read the file (Settings > About says how), then press Retry."
 
 const diskFull = "The disk is full, so converting stopped. Your original was not touched. Free some space, then press Retry."
 
@@ -421,9 +421,9 @@ func plainFailure(err error) string {
 	case errors.Is(err, syscall.ENOSPC):
 		return diskFull
 	case errors.Is(err, fs.ErrPermission):
-		return "shrink-your-shit is not allowed to write in this folder, so converting stopped. Your original was not touched. Let it write there (Settings > System says how), then press Retry."
+		return "shrink-your-shit is not allowed to write in this folder, so converting stopped. Your original was not touched. Let it write there (Settings > About says how), then press Retry."
 	}
-	return "Converting did not finish. Your original was not touched. Press Retry; if it keeps failing, Settings > System shows what went wrong."
+	return "Converting did not finish. Your original was not touched. Press Retry; if it keeps failing, Settings > About shows what went wrong."
 }
 
 // reasonCode is the code of a failed or refused conversion (one of jobs.JobReasonCodes), beside its

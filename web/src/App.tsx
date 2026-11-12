@@ -34,7 +34,7 @@ export function App() {
   // A server whose first run isn't done opens on it (IA.md: shown until done). Upgrades from v1 have it done.
   useEffect(() => {
     if (MOCK || path !== "/") return;
-    getSettings().then((r) => { if (!failed(r) && !r.firstRunDone && location.pathname.replace(/\/+$/, "") === "/next") navigate("/start"); })
+    getSettings().then((r) => { if (!failed(r) && !r.firstRunDone && (location.pathname === "/" || location.pathname === "")) navigate("/start"); })
       .catch((e) => { if (!(e instanceof SignedOut)) throw e; });
   }, [path]);
   return (
