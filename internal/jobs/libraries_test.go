@@ -427,14 +427,27 @@ func TestRenamedReplacesCountLikeReplaces(t *testing.T) {
 	s.SetSwapState(purged, OriginalPurged)
 	b, _ := s.Enqueue(Job{LibraryID: l.ID, Path: "/m/beside.mkv", SizeBefore: 1000})
 	s.Claim("w")
-	s.Complete(b, "/m/beside.hevc.mkv", 400) // beside: neither
+	s.Complete(b, "/m/beside.hevc.mkv", 400) // beside: could free (its original never goes by itself), not waiting (design 01:55Z)
 
-	c, _ := s.Counts()
-	if c[l.ID].FreedBytes != 700 || c[l.ID].WaitingBytes != 600 {
-		t.Errorf("counts: freed %d waiting %d, want 700 and 600", c[l.ID].FreedBytes, c[l.ID].WaitingBytes)
+	check := func(freed, waiting, could int64) {
+		t.Helper()
+		c, _ := s.Counts()
+		if c[l.ID].FreedBytes != freed || c[l.ID].WaitingBytes != waiting || c[l.ID].CouldFreeBytes != could {
+			t.Errorf("counts: freed %d waiting %d could %d, want %d %d %d", c[l.ID].FreedBytes, c[l.ID].WaitingBytes, c[l.ID].CouldFreeBytes, freed, waiting, could)
+		}
+		a, err := s.ActivitySummary()
+		if err != nil || a.FreedBytes != freed || a.WaitingBytes != waiting || a.CouldFreeBytes != could {
+			t.Errorf("summary: freed %d waiting %d could %d, want %d %d %d (%v)", a.FreedBytes, a.WaitingBytes, a.CouldFreeBytes, freed, waiting, could, err)
+		}
 	}
-	a, err := s.ActivitySummary()
-	if err != nil || a.FreedBytes != 700 || a.WaitingBytes != 600 {
-		t.Errorf("summary: freed %d waiting %d, want 700 and 600 (%v)", a.FreedBytes, a.WaitingBytes, err)
+	check(700, 600, 600)
+	s.SetOriginalGone(b) // a scan found the original gone: freed from now
+	check(1300, 600, 0)
+	// dated: the beside one now, the purged one on its copy's delete day (an hour ahead here)
+	if n, _ := s.FreedSince(time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)); n != 1300 {
+		t.Errorf("freed since a minute ago %d, want 1300", n)
+	}
+	if n, _ := s.FreedSince(time.Now().Add(30 * time.Minute).UTC().Format(time.RFC3339)); n != 700 {
+		t.Errorf("freed from half an hour ahead %d, want the purged one's 700", n)
 	}
 }

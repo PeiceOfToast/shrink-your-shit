@@ -326,6 +326,15 @@ CREATE TABLE workers (id TEXT PRIMARY KEY, name TEXT NOT NULL, tags TEXT NOT NUL
 	// default beside it). 25, not 24: V4a's workers table is 24.
 	{25, "library output folder", `
 ALTER TABLE libraries ADD COLUMN override_folder TEXT NOT NULL DEFAULT '';`},
+	// V5b: a library's priority, which its new and waiting jobs take.
+	{26, "library priority", `
+ALTER TABLE libraries ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;`},
+	// V5c (output-first, design call 3): when a scan found that a converted file's original, left where
+	// it was, is gone (its saving counts as freed from then), or that it changed (it counts nowhere).
+	{27, "original gone", `
+ALTER TABLE jobs ADD COLUMN original_gone_at TEXT NOT NULL DEFAULT '';
+ALTER TABLE jobs ADD COLUMN original_changed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE jobs ADD COLUMN original_disk TEXT NOT NULL DEFAULT '';`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone

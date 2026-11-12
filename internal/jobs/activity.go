@@ -13,9 +13,10 @@ import (
 // Activity's figures and lists (slice 21b, UI-API-CONTRACT.md "Activity"). They only read.
 
 // Summary is the Home page's figures (contract F1: freed counts originals already gone, waiting those
-// still kept; freed + waiting = all saved).
+// still kept in .syp-trash, could free those left where they were; freed + waiting + could = all saved).
 type Summary struct {
 	FreedBytes, WaitingBytes   int64
+	CouldFreeBytes             int64
 	WorkingFiles, WaitingFiles int
 	Skipped, Failed            int
 }
@@ -23,11 +24,9 @@ type Summary struct {
 // ActivitySummary adds up every library (and jobs from before libraries).
 func (s *Store) ActivitySummary() (Summary, error) {
 	var a Summary
-	err := s.db.QueryRow(`SELECT
-  COALESCE(SUM(CASE WHEN status=? AND size_after>0 AND `+replacedSQL+` AND NOT `+keptSQL+` THEN size_before-size_after END),0),
-  COALESCE(SUM(CASE WHEN status=? AND size_after>0 AND `+replacedSQL+` AND `+keptSQL+` THEN size_before-size_after END),0),
+	err := s.db.QueryRow(`SELECT COALESCE(SUM(`+freedSQL+`),0), COALESCE(SUM(`+waitingSQL+`),0), COALESCE(SUM(`+couldFreeSQL+`),0),
   COALESCE(SUM(status=?),0), COALESCE(SUM(status=?),0), COALESCE(SUM(status IN (?,?)),0)
-FROM jobs`, Done, OriginalKept, Done, OriginalKept, Running, Queued, Failed, Kept).Scan(&a.FreedBytes, &a.WaitingBytes, &a.WorkingFiles, &a.WaitingFiles, &a.Failed)
+FROM jobs`, Running, Queued, Failed, Kept).Scan(&a.FreedBytes, &a.WaitingBytes, &a.CouldFreeBytes, &a.WorkingFiles, &a.WaitingFiles, &a.Failed)
 	if err != nil {
 		return a, err
 	}
