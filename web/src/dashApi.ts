@@ -19,14 +19,19 @@ export interface RealSummary {
   processingPaused: boolean; intakePaused: boolean;
 }
 export const getSummary = (): Promise<Answer<RealSummary>> => call("GET", "/api/v2/summary");
-async function eachWorker(verb: "start" | "stop"): Promise<Answer<unknown>> {
+// Start all / Stop all: each worker's own action. Stop all with now false is "Stop after these files": a busy worker
+// drains (finishes its files, then stops), an idle one stops (review ab98ef3: Stop all never throws a conversion away
+// without asking). Every worker is tried; the failures are named.
+async function eachWorker(verb: (w: Worker) => "start" | "stop" | "drain" | null): Promise<Answer<unknown>> {
   const r = await call<{ items: Worker[] }>("GET", "/api/v2/workers");
   if (failed(r)) return r;
-  for (const w of r.items) { const x = await call("POST", "/api/v2/workers/" + encodeURIComponent(w.id) + "/" + verb); if (failed(x)) return x; }
-  return {};
+  const bad: string[] = [];
+  for (const w of r.items) { const v = verb(w); if (!v) continue; const x = await call("POST", "/api/v2/workers/" + encodeURIComponent(w.id) + "/" + v); if (failed(x)) bad.push(w.name + ": " + x.error.message); }
+  return bad.length ? { error: { code: "some_failed", message: "Not changed: " + bad.join(" ") } } : {};
 }
-export const startAllWorkers = () => eachWorker("start");
-export const stopAllWorkers = () => eachWorker("stop");
+const connected = (w: Worker) => w.status !== "offline" && w.status !== "stalled";
+export const startAllWorkers = () => eachWorker((w) => (w.status === "paused" ? "start" : null));
+export const stopAllWorkers = (now: boolean) => eachWorker((w) => (!connected(w) || w.status === "paused" ? null : !now && w.currentJobIds.length ? "drain" : "stop"));
 export async function scanAllLibraries(): Promise<Answer<unknown>> {
   const r = await call<{ items: { id: string }[] }>("GET", "/api/libraries");
   if (failed(r)) return r;

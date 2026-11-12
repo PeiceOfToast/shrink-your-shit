@@ -14,6 +14,7 @@ import { getActivity, getSummary, scanAllLibraries, startAllWorkers, stopAllWork
 import { jobAction } from "../jobsApi";
 import { onLive } from "../live";
 import { useData } from "../useData";
+import { StopAll } from "./Workers";
 import type { ActivityEvent, Summary } from "../types/v2";
 import type { JobItem, JobProgressEvent } from "../types/jobs";
 
@@ -34,6 +35,7 @@ const EVENT_ICON: Record<ActivityEvent["type"], string> = {
 interface Row { id: string; name: string; sub: string; percent: number | null; line: string; reason?: string; meta?: string }
 interface View {
   running: boolean; workersRunning: number | null; offline: number | null;
+  busy: boolean;                  // a worker is converting now (live): Stop all asks first
   waiting: number; converting: number; done24: number; failed24: number; success: number | null; freed: number; could: number;
   online: string | null;          // the Workers tile: "2 of 3"
   active: Row[]; failures: Row[];
@@ -42,7 +44,7 @@ interface View {
   activity: { id: string; icon: string; text: string; at: string }[] | null;
   fresh: boolean; steps: [string, boolean, string?][]; libraries: number; scanning: boolean; updated: Date;
 }
-interface Acts { start: () => void; stop: () => void; scan: () => void; retry: (id: string) => void }
+interface Acts { start: () => void; stop: (now: boolean) => void; scan: () => void; retry: (id: string) => void }
 
 // A file name may wrap after ".", "_" or "-" (never mid-word), at most 2 lines, then "..."; the whole name in title.
 function Name({ text, className = "" }: { text: string; className?: string }) {
@@ -85,7 +87,7 @@ function MockDashboard() {
   const trash = useData(getTrash, [], 60000).data;
   const libName = (id: string) => s.libraries.find((l) => l.id === id)?.name ?? id;
   const v: View = {
-    running: sum.activity.workersRunning > 0, workersRunning: sum.activity.workersRunning, offline: sum.badges.workersOffline,
+    running: sum.activity.workersRunning > 0, workersRunning: sum.activity.workersRunning, offline: sum.badges.workersOffline, busy: s.workers.some((w) => w.currentJobIds.length > 0),
     waiting: sum.activity.waiting, converting: sum.activity.converting, done24: sum.last24h.completed, failed24: sum.last24h.failed,
     success: sum.last24h.successRate, freed: sum.bytes.freed, could: sum.bytes.waitingToFree,
     online: sum.workers.filter((w) => w.status === "online" || w.status === "busy" || w.status === "draining").length + " of " + sum.workers.length,
@@ -136,6 +138,7 @@ function RealDashboard() {
   const going = ws?.filter((w) => w.status === "busy" || w.status === "online" || w.status === "draining").length ?? 0;
   const v: View = {
     running: ws ? going > 0 : s.activity.workersRunning && !s.processingPaused, workersRunning: ws ? going : null, offline: s.badges.workersOffline,
+    busy: ws ? ws.some((w) => w.status === "busy" || w.currentJobIds.length > 0) : s.activity.converting > 0, // the heartbeat's status is live; the counts lag
     waiting: s.activity.waiting, converting: s.activity.converting, done24: s.last24h.completed, failed24: s.last24h.failed, success: s.last24h.successRate,
     // 'could free' is V5c's couldFree (originals left in place), not waitingToFree: waitingToFree is the originals kept
     // in .syp-trash, which the trash line ("+N by <date>") already shows. Until couldFree lands, nothing reads "could free".
@@ -153,7 +156,7 @@ function RealDashboard() {
     libraries: nlib, scanning: !!libs.data?.some((l) => l.status.kind === "scanning"), updated: new Date(),
   };
   return <>
-    <DashboardView v={v} trash={trash} acts={{ start: () => act(startAllWorkers()), stop: () => act(stopAllWorkers()), scan: () => act(scanAllLibraries()), retry: (id) => act(jobAction("retry", [id])) }} />
+    <DashboardView v={v} trash={trash} acts={{ start: () => act(startAllWorkers()), stop: (now) => act(stopAllWorkers(now)), scan: () => act(scanAllLibraries()), retry: (id) => act(jobAction("retry", [id])) }} />
     {said && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{said}</span></p>}
   </>;
 }
@@ -161,9 +164,9 @@ function RealDashboard() {
 function DashboardView({ v, trash, acts }: { v: View; trash?: { bytes: number; lastDeleteAt: string | null }; acts: Acts }) {
   const [why, setWhy] = useState(false);
   // D2: the status and the page's actions sit in the header row; on phones the actions go under "...".
-  const actions = <>
+  const actions = (inline?: boolean) => <>
     {v.running
-      ? <button className="btn sm" type="button" onClick={acts.stop}><Icon id="i-stop" />Stop all</button>
+      ? <StopAll busy={v.busy} onStop={acts.stop} inline={inline} />
       : <button className="btn sm" type="button" onClick={acts.start}><Icon id="i-play" />Start all</button>}
     {v.libraries > 0 && <button className="btn sm ghost" type="button" onClick={acts.scan} disabled={v.scanning}><Icon id="i-refresh" />{v.scanning ? "Scanning..." : "Scan all libraries"}</button>}
   </>;
@@ -175,8 +178,8 @@ function DashboardView({ v, trash, acts }: { v: View; trash?: { bytes: number; l
           ? <span className="pill run"><Icon id="i-play" />{v.workersRunning != null ? "Running · " + plural(v.workersRunning, "worker", "workers") : "Running"}</span>
           : <span className="pill" title="Nothing converts until you start a worker."><Icon id="i-stop" />Stopped</span>}
         {v.offline != null && v.offline > 0 && <span className="pill bad"><Icon id="i-wifi-off" />{plural(v.offline, "worker offline", "workers offline")}</span>}
-        <span className="desk">{actions}</span>
-        <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions}</div></details>
+        <span className="desk">{actions()}</span>
+        <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions(true)}</div></details>
       </PageHead>
       {!v.running && !v.fresh && <p className="muted sm" style={{ marginTop: -8 }}>Nothing converts until you start a worker.</p>}
       {v.fresh && <Setup steps={v.steps} onDone={v.steps.filter((x) => x[1]).length} />}

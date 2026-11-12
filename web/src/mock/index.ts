@@ -158,7 +158,11 @@ export function startAll() {
   }));
   change(() => log("setting.changed", "All workers started"));
 }
-export function stopAll() {
+export function stopAll(now = true) {
+  if (!now) { // Stop after these files: a busy worker finishes them (drain), an idle one stops
+    for (const w of state.workers) if (w.status === "online" || w.status === "busy") workerAction(w.id, w.currentJobIds.length ? "drain" : "stop");
+    return;
+  }
   change((s) => {
     for (const j of s.jobs) if (j.state === "running") (j.state = "queued", (j.subState = "processing_paused"), (j.worker = null), (j.progress = null), (j.currentStep = null));
     s.jobs = s.jobs.filter((j) => j.state !== "queued"); // back in the queue
