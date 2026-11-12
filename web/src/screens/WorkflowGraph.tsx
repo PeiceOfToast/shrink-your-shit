@@ -93,9 +93,9 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
       const k = e.key.toLowerCase(), redo = (k === "z" && e.shiftKey) || k === "y";
       if (k === "c" || k === "v") { // copy / paste a step
         const { sel: s0, doc: d0, layout: l0 } = keys.current;
-        if (k === "c") { const n = d0.nodes.find((x) => x.id === s0); if (n && defs.find((x) => x.type === n.type)?.category !== "input") (clip.current = n), setSaid("Copied " + (n.name ?? defs.find((x) => x.type === n.type)?.name) + ". Ctrl+V pastes it."); return; }
+        if (k === "c") { const n = d0.nodes.find((x) => x.id === s0); if (n && defs.find((x) => x.type === n.type)?.category !== "input") (clip.current = n), (pastes.current = 0), setSaid("Copied " + (n.name ?? defs.find((x) => x.type === n.type)?.name) + ". Ctrl+V pastes it."); return; }
         const c = clip.current, d = c && defs.find((x) => x.type === c.type), at = c && (l0.nodes[c.id] ?? { x: 0, y: 0 });
-        if (c && d && at) { e.preventDefault(); keys.current.addNode(d, c, { x: at.x + 40, y: at.y + 40 }); } // review fded51f P2: the add of NOW, not of page load
+        if (c && d && at) { e.preventDefault(); const k = ++pastes.current; keys.current.addNode(d, c, { x: at.x + 40 * k, y: at.y + 40 * k }); } // re-review d4d78a9 P3: each paste a step further, never stacked // review fded51f P2: the add of NOW, not of page load
         return;
       }
       if (k !== "z" && k !== "y") return;
@@ -154,7 +154,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
     push({ doc: { ...doc, nodes: doc.nodes.filter((n) => !gone.includes(n.id)), edges: doc.edges.filter((e) => !gone.includes(e.from) && !gone.includes(e.to)) }, layout: { ...layout, nodes } });
     setSel(null);
   };
-  const clip = useRef<Node | null>(null);
+  const clip = useRef<Node | null>(null), pastes = useRef(0);
   const removeEdges = (ids: string[]) => { if (ids.length) push({ doc: { ...doc, edges: doc.edges.filter((e) => !ids.includes(e.id)) } }); setSelEdge(null); };
   const onNodesChange = (ch: NodeChange<GNodeT>[]) => {
     // a click, or Enter / Space on a focused step (React Flow selects it), opens its panel (review bf13684 P2)
