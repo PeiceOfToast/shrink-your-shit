@@ -40,12 +40,7 @@ func v2EventStream(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 			serverError(w, err)
 			return
 		}
-		h := w.Header()
-		h.Set("Content-Type", "text/event-stream")
-		h.Set("Cache-Control", "no-cache")
-		h.Set("X-Accel-Buffering", "no") // a proxy must not hold the stream back
-		http.NewResponseController(w).SetWriteDeadline(time.Time{})
-		w.WriteHeader(http.StatusOK)
+		startStream(w)
 
 		from := r.Header.Get("Last-Event-ID")
 		if from == "" {
@@ -104,6 +99,11 @@ func v2EventStream(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 					return // the page reconnects and replays from its last id
 				}
 				for _, e := range evs {
+					// V3d: an activity feed entry first, with no id of its own: a page that drops between
+					// the two gets both again from the previous id (the entry's own id tells it apart)
+					if a, ok := store.ActivityOf(e); ok {
+						send(w, -1, "activity", map[string]any{"type": "activity", "event": a})
+					}
 					typ, data := eventMessage(e)
 					send(w, e.Seq, typ, data)
 					last = e.Seq
@@ -136,6 +136,16 @@ func eventMessage(e jobs.Event) (string, map[string]any) {
 		m["reason"] = map[string]string{"code": e.Reason, "message": d.Message}
 	}
 	return "job.state", m
+}
+
+// startStream sends a stream's headers: never cached or held back by a proxy, and no write deadline.
+func startStream(w http.ResponseWriter) {
+	h := w.Header()
+	h.Set("Content-Type", "text/event-stream")
+	h.Set("Cache-Control", "no-cache")
+	h.Set("X-Accel-Buffering", "no") // a proxy must not hold the stream back
+	http.NewResponseController(w).SetWriteDeadline(time.Time{})
+	w.WriteHeader(http.StatusOK)
 }
 
 // send writes one SSE message; id -1: none (job.progress, not replayed). Hello and resync carry the

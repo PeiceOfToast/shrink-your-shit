@@ -39,11 +39,12 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	workerRoutes(api, store, ss, eng)
 	previewRoutes(api, store, eng)
 	wv := newWorkerView(store, ss, eng)
-	v2Summary(api, store, wv)     // V3c: /api/v2/summary, processing and intake pauses
-	v2EventStream(api, store, wv) // V3a: /api/v2/events (live updates)
-	v2Workers(api, wv)            // V4a: /api/v2/workers
-	v2Jobs(api, store)            // V2: /api/v2/jobs
-	v2Workflows(api, store, eng)  // UI rebuild, V1: /api/v2 workflows (UI-API-CONTRACT-v2.md)
+	v2Summary(api, store, wv)             // V3c: /api/v2/summary, processing and intake pauses
+	v2EventStream(api, store, wv)         // V3a: /api/v2/events (live updates)
+	v2Workers(api, wv)                    // V4a: /api/v2/workers
+	v2Jobs(api, store)                    // V2: /api/v2/jobs
+	v2JobStreams(api, store, eng.RunLogs) // V3d: /api/v2/activity, per-job streams
+	v2Workflows(api, store, eng)          // UI rebuild, V1: /api/v2 workflows (UI-API-CONTRACT-v2.md)
 	// For health checks: answers without signing in and says nothing else.
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
