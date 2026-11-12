@@ -509,3 +509,10 @@ label.chk{cursor:pointer}
 .jobs .prog{min-width:160px}
 @media (max-width:640px){.drawer{width:100vw;border-left:0}}
 .menu .pop{max-width:calc(100vw - 16px)}   /* never wider than the screen; Shell keeps it on the screen */
+
+/* V7 Workers: cards, one column on phones */
+.wgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(340px,100%),1fr));gap:var(--gap)}
+.wcard>.hd h2 a{color:var(--text);text-decoration:none}.wcard>.hd h2 a:hover{text-decoration:underline}
+.wcard.dim .bd,.wcard.dim h2 a{color:var(--text-2)}
+.wcard dd a{display:block}
+@media (pointer:coarse){.wcard dd a{display:flex;align-items:center;min-height:44px}}

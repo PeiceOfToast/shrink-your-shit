@@ -389,3 +389,15 @@ export function scanLibrary(id: ID) {
 }
 // PATCH /settings
 export const setSettings = (patch: Partial<Settings>) => change((s) => { s.settings = { ...s.settings, ...patch }; });
+
+// V7 Workers on the mock: one worker's start / stop / drain, and PATCH {name, slots, tags}.
+export function workerAction(id: ID, action: "start" | "stop" | "drain"): string | null {
+  const w = state.workers.find((x) => x.id === id);
+  if (!w) return "There is no such worker.";
+  if (w.status === "offline" || w.status === "stalled") return "This worker isn't connected.";
+  change((s) => { const x = s.workers.find((y) => y.id === id)!; x.status = action === "start" ? (x.currentJobIds.length ? "busy" : "online") : action === "drain" && x.currentJobIds.length ? "draining" : "paused"; x.statusSince = new Date().toISOString(); if (action === "stop") (x.currentJobIds = []), (x.slots.cpu.used = 0); });
+  return null;
+}
+export function patchWorker(id: ID, p: { name?: string; slots?: { cpu?: number }; tags?: string[] }) {
+  change((s) => { const x = s.workers.find((y) => y.id === id); if (!x) return; if (p.name) x.name = p.name; if (p.slots?.cpu) x.slots.cpu.total = p.slots.cpu; if (p.tags) x.tags = p.tags; });
+}
