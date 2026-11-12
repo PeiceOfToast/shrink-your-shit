@@ -84,11 +84,19 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
     onLeave(() => { const n = now.current; if (!n.dirty) return; if (!window.confirm("You have unsaved changes in this draft.\n\nOK saves them and leaves. Cancel stays on this page.")) return false; void saveDraft(id, n.doc, n.layout, n.etag).catch(() => {}); });
     return () => onLeave(null);
   }, [id]);
+  const keys = useRef({ sel, doc, layout }); keys.current = { sel, doc, layout };
   useEffect(() => { // review f03fcad P3: Ctrl+Z undo, Ctrl+Shift+Z or Ctrl+Y redo (not while typing in a field)
     if (!edit) return;
     const key = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || (e.target as HTMLElement)?.closest?.("input, textarea, select, [contenteditable]")) return;
       const k = e.key.toLowerCase(), redo = (k === "z" && e.shiftKey) || k === "y";
+      if (k === "c" || k === "v") { // copy / paste a step
+        const { sel: s0, doc: d0, layout: l0 } = keys.current;
+        if (k === "c") { const n = d0.nodes.find((x) => x.id === s0); if (n && defs.find((x) => x.type === n.type)?.category !== "input") (clip.current = n), setSaid("Copied " + (n.name ?? defs.find((x) => x.type === n.type)?.name) + ". Ctrl+V pastes it."); return; }
+        const c = clip.current, d = c && defs.find((x) => x.type === c.type), at = c && (l0.nodes[c.id] ?? { x: 0, y: 0 });
+        if (c && d && at) { e.preventDefault(); addNode(d, c, { x: at.x + 40, y: at.y + 40 }); }
+        return;
+      }
       if (k !== "z" && k !== "y") return;
       e.preventDefault();
       setHist((h) => (redo ? (h.at < h.list.length - 1 ? { ...h, at: h.at + 1 } : h) : h.at > 0 ? { ...h, at: h.at - 1 } : h));
@@ -104,7 +112,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
     const nodes: GNodeT[] = doc.nodes.map((n) => {
       const mine = issues.filter((i) => i.nodeId === n.id), summary = checked.stepSummaries?.[n.id] ?? "";
       const def = defs.find((x) => x.type === n.type);
-      return { id: n.id, type: "step", position: layout.nodes[n.id] ?? { x: 0, y: 0 }, draggable: edit, connectable: edit, deletable: false, selected: n.id === sel,
+      return { id: n.id, type: "step", position: layout.nodes[n.id] ?? { x: 0, y: 0 }, draggable: edit, connectable: edit, deletable: edit && def?.category !== "input", selected: n.id === sel,
         initialWidth: W, initialHeight: H(def?.outputs?.length ?? 1), measured: dims[n.id], // review f03fcad: the minimap only draws nodes with a size
         ariaLabel: [title(n) + (n.enabled ? "" : " (off)"), summary, ...mine.map((i) => (i.severity === "error" ? "Problem: " : "Warning: ") + i.message)].filter(Boolean).join(". "),
         data: { node: n, def: defs.find((x) => x.type === n.type), summary, issues: mine, edit } };
@@ -127,6 +135,24 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
   };
   const valid = (c: Connection | RFEdge) => c.source !== c.target && !!c.target && (defs.find((x) => x.type === doc.nodes.find((n) => n.id === c.target)?.type)?.inputs ?? []).length > 0;
   const setNode = (n: Node) => push({ doc: { ...doc, nodes: doc.nodes.map((x) => (x.id === n.id ? n : x)) } });
+  // step 3 (SCREENS V4 Palette): add a step at the centre of the view (its settings: the server's defaults), remove steps
+  // with their connections, copy/paste a step (its settings, not its connections)
+  const rf = useReactFlow();
+  const centre = () => { const box = document.querySelector(".gcanvas")?.getBoundingClientRect(); return box ? rf.screenToFlowPosition({ x: box.left + box.width / 2 - W / 2, y: box.top + box.height / 2 - 40 }) : { x: 0, y: 0 }; };
+  const addNode = (d: StepDefinition, base?: Node, at?: { x: number; y: number }) => {
+    const n: Node = base ? { ...structuredClone(base), id: newId() } : { id: newId(), type: d.type, typeVersion: d.typeVersion, config: {}, enabled: true };
+    const p = at ?? centre();
+    push({ doc: { ...doc, nodes: [...doc.nodes, n] }, layout: { ...layout, nodes: { ...layout.nodes, [n.id]: { x: Math.round(p.x), y: Math.round(p.y) } } } });
+    setSel(n.id); setSelEdge(null); setSaid("Added " + (n.name ?? d.name) + ". Connect it from a port of another step.");
+  };
+  const removeNodes = (ids: string[]) => {
+    const gone = ids.filter((i) => defs.find((x) => x.type === doc.nodes.find((n) => n.id === i)?.type)?.category !== "input");
+    if (!gone.length) return;
+    const nodes = { ...layout.nodes }; for (const i of gone) delete nodes[i];
+    push({ doc: { ...doc, nodes: doc.nodes.filter((n) => !gone.includes(n.id)), edges: doc.edges.filter((e) => !gone.includes(e.from) && !gone.includes(e.to)) }, layout: { ...layout, nodes } });
+    setSel(null);
+  };
+  const clip = useRef<Node | null>(null);
   const removeEdges = (ids: string[]) => { if (ids.length) push({ doc: { ...doc, edges: doc.edges.filter((e) => !ids.includes(e.id)) } }); setSelEdge(null); };
   const onNodesChange = (ch: NodeChange<GNodeT>[]) => {
     // a click, or Enter / Space on a focused step (React Flow selects it), opens its panel (review bf13684 P2)
@@ -192,10 +218,11 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
           <div className="row"><button className="btn primary" type="button" disabled={(panel.validation ?? []).some((v) => v.severity === "error")} onClick={doPublish}>Publish v{panel.nextNumber}</button>
             <button className="btn ghost" type="button" onClick={() => setPanel(null)}>Cancel</button></div>
         </div></section>)}
-      <div className="graphwrap">
+      <div className={"graphwrap" + (edit ? " withpal" : "")}>
+        {edit && <Palette defs={defs} onAdd={(d) => addNode(d)} />}
         <div className="gcanvas" aria-label={"The steps of " + name + " as a graph"}>
           <ReactFlow nodes={shown} edges={edges} nodeTypes={nodeTypes} fitView minZoom={0.2} maxZoom={2} nodesDraggable={edit} nodesConnectable={edit} elementsSelectable
-            onConnect={connect} isValidConnection={valid} onNodesChange={onNodesChange} onEdgesDelete={(es) => removeEdges(es.map((e) => e.id))} deleteKeyCode={edit ? ["Delete", "Backspace"] : null}
+            onConnect={connect} isValidConnection={valid} onNodesChange={onNodesChange} onEdgesDelete={(es) => removeEdges(es.map((e) => e.id))} onNodesDelete={(ns) => removeNodes(ns.map((n) => n.id))} deleteKeyCode={edit ? ["Delete", "Backspace"] : null}
             onNodeClick={(_, n) => (setSel(n.id), setSelEdge(null))} onEdgeClick={(_, e) => (setSelEdge(e.id), setSel(null))} onPaneClick={() => (setSel(null), setSelEdge(null))}>
             <Background gap={20} />
             <MiniMap pannable zoomable ariaLabel="Overview of the graph" nodeColor="var(--border-strong)" nodeStrokeColor="var(--text-2)" nodeBorderRadius={4} />
@@ -211,6 +238,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
               <p className="muted sm">{pickedDef?.typeLabel}{!picked.enabled && " · Off"}</p>
               {checked.stepSummaries?.[picked.id] && <p>{checked.stepSummaries[picked.id]}</p>}
               {pickedDef?.description && <p className="sm">{pickedDef.description}</p>}
+              {edit && pickedDef?.category !== "input" && <div className="row"><button className="btn sm" type="button" onClick={() => removeNodes([picked.id])}><Icon id="i-trash" />Delete this step</button></div>}
               {/* step 2b (SCREENS V4 Inspector): the step's own form, the same as the step list's (schema-driven), with the server's problems inline */}
               {edit && pickedDef && !pickedDef.readOnly && <form className="stack ginform" onSubmit={(e) => e.preventDefault()} aria-label={"Settings of " + (picked.name ?? pickedDef.name)}>
                 <div className="field"><label htmlFor={"gn-" + picked.id}>Name</label>
@@ -232,6 +260,30 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
         </aside>
       </div>
     </div>);
+}
+
+// The palette (SCREENS V4): search, then the step types by category; double-click or Enter adds one at the view's
+// centre. The library trigger and migration-only types aren't offered; categories with nothing to add aren't shown.
+const CAT_NAME: Record<string, string> = { filter: "Checks", video: "Video", audio: "Audio", subtitles: "Subtitles", container: "File type", verify: "Check the result", output: "Save", flow: "Flow" };
+function Palette({ defs, onAdd }: { defs: StepDefinition[]; onAdd: (d: StepDefinition) => void }) {
+  const [q, setQ] = useState("");
+  const shown = defs.filter((d) => d.category !== "input" && !d.readOnly && !d.deprecated && (!q || (d.name + " " + d.description + " " + d.typeLabel).toLowerCase().includes(q.toLowerCase())));
+  const cats = Object.keys(CAT_NAME).filter((c) => shown.some((d) => d.category === c));
+  return (
+    <aside className="card gpal" aria-label="Steps you can add">
+      <div className="bd stack">
+        <input className="input" type="search" placeholder="Search steps" aria-label="Search steps" value={q} onChange={(e) => setQ(e.target.value)} />
+        {!cats.length && <p className="muted sm">No step matches.</p>}
+        {cats.map((c) => (
+          <details key={c} open className="gfold"><summary className="lab">{CAT_NAME[c]}</summary>
+            <ul className="gpl">{shown.filter((d) => d.category === c).map((d) => (
+              <li key={d.type}><button type="button" className="gpi" style={{ ["--cat" as string]: CAT[d.category] }} title={d.description + " Double-click or press Enter to add it."}
+                onDoubleClick={() => onAdd(d)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), onAdd(d))} aria-label={"Add " + d.name + ": " + d.description}>
+                <Icon id={ICON[d.icon] ?? "i-workflow"} /><span className="sp"><strong>{d.name}</strong><small>{d.description}</small></span><span className="tt">{d.typeLabel}</span></button></li>))}</ul>
+          </details>))}
+        <p className="hint">Double-click a step (or Enter) to add it at the centre of the view, then connect it.</p>
+      </div>
+    </aside>);
 }
 
 const newId = () => (crypto.randomUUID ? crypto.randomUUID() : "n" + Math.random().toString(36).slice(2));

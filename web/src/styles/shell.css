@@ -618,3 +618,14 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .fpick .ftr{justify-content:flex-start;gap:8px;flex-wrap:wrap}.fpick .ftr .btn.primary{max-width:100%;overflow-wrap:anywhere;white-space:normal;text-align:left}
 .folderrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.folderrow>.input{flex:1 1 240px;min-width:0}
 @media (max-width:640px){.fpick{padding:0;align-items:stretch}.fpick .dlg{width:100%;max-height:none;height:100%;border-radius:0;border:0}}
+/* V4 palette (mockup .nd): a column left of the canvas on wide screens */
+.graphwrap.withpal{grid-template-columns:260px minmax(0,1fr) 300px}
+.gpal{align-self:start;max-height:min(72vh,720px);overflow:auto}
+.gfold>summary{cursor:pointer;margin-bottom:6px}
+.gpl{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.gpi{display:flex;gap:8px;width:100%;padding:6px 8px;border:1px solid var(--border);border-left:3px solid var(--cat,var(--accent));border-radius:var(--radius-sm);background:var(--bg);color:var(--text);font:inherit;text-align:left;cursor:copy;align-items:flex-start}
+.gpi:hover,.gpi:focus-visible{border-color:var(--border-strong);background:var(--surface)}
+.gpi .ic{width:16px;height:16px;flex:none;margin-top:2px;color:var(--cat,var(--accent))}
+.gpi small{display:block;color:var(--text-2);font-size:11.5px}
+.gpi .tt{margin-left:auto;font-size:11px;color:var(--text-2);border:1px solid var(--border-strong);border-radius:4px;padding:0 5px;white-space:nowrap}
+@media (max-width:1280px){.graphwrap.withpal{grid-template-columns:220px minmax(0,1fr)}.graphwrap.withpal .ginspect{grid-column:1/-1}}
