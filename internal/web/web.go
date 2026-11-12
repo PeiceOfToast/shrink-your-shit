@@ -31,7 +31,7 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	libraryRoutes(api, store, eng)
 	systemRoutes(api, store, eng)
 	ss := &settingsStore{store: store}
-	settingsRoutes(api, ss, access)
+	settingsRoutes(api, ss, access, eng)
 	flowRoutes(api, store, ss, eng)
 	settingRoutes(api, store, eng)
 	activityRoutes(api, store, ss, time.Now, eng)

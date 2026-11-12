@@ -74,7 +74,11 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			scanning = eng.Scanning()
 		}
 		found, isScanning := scanning[l.ID]
-		scan := map[string]any{"state": "idle", "progress": nil, "lastScanAt": nilIfEmpty(l.LastScan), "nextScanAt": nil, "scheduleLabel": scheduleLabel(eng.ScanEvery)}
+		every := eng.ScanEvery // the interval the scanner runs with: a saved one wins over the flag (#136)
+		if set, err := LoadSettings(store); err == nil && set.ScanEvery > 0 {
+			every = time.Duration(set.ScanEvery) * time.Second
+		}
+		scan := map[string]any{"state": "idle", "progress": nil, "lastScanAt": nilIfEmpty(l.LastScan), "nextScanAt": nil, "scheduleLabel": scheduleLabel(every)}
 		if isScanning {
 			scan["state"], scan["progress"] = "scanning", found
 		}
@@ -103,7 +107,7 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			// CAN'T YET: per-library scan frequency (one scan pass walks every library, and a new file is
 			// decided on its second look a pass later), include/exclude (the workflow's Ignore list is it)
 			"discovery": map[string]any{"subfolders": true, "settleSeconds": int(eng.Settle.Seconds()), "followLinks": false,
-				"include": []string{}, "exclude": []string{}, "scanEverySeconds": int(eng.ScanEvery.Seconds())},
+				"include": []string{}, "exclude": []string{}, "scanEverySeconds": int(every.Seconds())},
 			"status": status,
 		}, nil
 	}
