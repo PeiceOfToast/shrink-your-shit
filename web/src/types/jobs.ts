@@ -8,7 +8,7 @@ export type Tab = "waiting" | "running" | "completed" | "skipped" | "failed";
 export interface Reason { code: string; message: string } // #122: a fixed code; show the message
 export interface Progress { stage: string; percent: number | null; workflowPercent: number; elapsedS: number; speed: number | null; etaS: number | null; fps: number | null; bitrateKbps: number | null }
 
-// GET /api/v2/jobs?tab=&q=&libraryId=&limit=&offset= -> {items, total, counts}
+// GET /api/v2/jobs?tab=&q=&libraryId=&sort=queue&limit=&offset= -> {items, total, counts}
 export interface JobItem {
   id: ID;                 // the job id, or "skip-N" for a file left out by a scan (no detail behind it)
   jobId?: ID;
@@ -19,7 +19,8 @@ export interface JobItem {
   bytes: number; codec: string | null; resolution: string | null; durationSec: number | null;
   // waiting / retrying / skipped
   attempts?: number; retryAt?: Time | null; status?: string; detail?: string | null;
-  priority?: number;       // the contract's Job.priority; not on list rows yet (asked of workshop with sort=queue)
+  priority?: number | null; // #134: on every job row (null for a scan skip); > 0 First, < 0 Last
+  position?: number | null; // #134, Waiting tab: place in the queue (1: taken next); null when it isn't taken now
   reason?: Reason | null; skippedId?: ID; // #130: {code, message} on every row (code for icon/colour; show the message)
   // running
   progress?: Progress; worker?: string; convertingTo?: string; encoder?: string; decoder?: string; percent?: number; etaSeconds?: number; fps?: number; bitrateKbps?: number;
