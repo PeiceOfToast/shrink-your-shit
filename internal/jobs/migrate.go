@@ -364,6 +364,10 @@ WHEN NOT EXISTS (SELECT 1 FROM events WHERE kind = 'job' AND job_id = old.id AND
   VALUES ('job', old.id, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), old.status, 'cancelled', 'removed', old.worker,
     json_object('message', 'This job was removed from the list.', 'path', old.path, 'attempts', old.attempts));
 END;`},
+	// review 89d22b3: a job by its file (Stranded, HasOpenJob, the scanner's look at every file each
+	// pass) is found by index, not by reading every job.
+	{33, "jobs by path", `
+CREATE INDEX IF NOT EXISTS jobs_path ON jobs(path);`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone
