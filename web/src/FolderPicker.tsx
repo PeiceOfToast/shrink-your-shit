@@ -39,7 +39,7 @@ export function Browse({ value, onPick, start, label = "Browse..." }: { value: s
 
 function Picker({ from, onPick, onClose }: { from: string; onPick: (p: string) => void; onClose: () => void }) {
   const [cur, setCur] = useState<Dirs | null>(null), [err, setErr] = useState(""), [at, setAt] = useState(""), [hidden, setHidden] = useState(false), [q, setQ] = useState("");
-  const id = useId(), title = useRef<HTMLHeadingElement>(null);
+  const id = useId(), title = useRef<HTMLHeadingElement>(null), box = useRef<HTMLDivElement>(null);
   const go = async (p: string) => {
     setErr(""); setQ(""); setAt(p);
     const r = await listDirs(p);
@@ -48,12 +48,15 @@ function Picker({ from, onPick, onClose }: { from: string; onPick: (p: string) =
   };
   // start: the field's folder if it exists, else its nearest existing parent, else the top
   useEffect(() => { (async () => { let p = from; for (let i = 0; i < 30; i++) { if (await go(p)) break; if (!p || p === "/") { await go(""); break; } const up = parentOf(p); if (up === p) { await go(""); break; } p = up; } title.current?.focus(); })(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // opening a folder replaces the list, and the button that had the focus with it: keep the focus in the dialog (the
+  // new list's first folder, else the title), so Enter keeps going down and Escape still closes
+  useEffect(() => { if (box.current && !box.current.contains(document.activeElement)) (box.current.querySelector<HTMLElement>(".list li button") ?? title.current)?.focus(); }, [cur, err]);
   const shown = (cur?.dirs ?? []).filter((d) => hidden || !d.startsWith(".")).filter((d) => !q || d.toLowerCase().includes(q.toLowerCase())).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
   const top = at === "" || at === "/", upTo = cur?.parent ?? (top ? null : parentOf(at));
   const usable = !!cur && cur.path !== "";
   return (
     <div className="fpick" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="dlg" role="dialog" aria-modal="true" aria-labelledby={id + "-t"} onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), onClose())}>
+      <div ref={box} className="dlg" role="dialog" aria-modal="true" aria-labelledby={id + "-t"} onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), onClose())}>
         <div className="row hdr"><h2 id={id + "-t"} ref={title} tabIndex={-1}>Choose a folder</h2><span className="sp" />
           <button className="btn sm icon ghost" type="button" aria-label="Close" onClick={onClose}><Icon id="i-x" /></button></div>
         <div className="row crumbs">
