@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -257,8 +258,8 @@ func (s *Store) transition(id int64, to Status, set string, args ...any) error {
 func (s *Store) Claim(worker string) (Job, error) {
 	now := s.stamp()
 	var id int64
-	// One statement, so a pause or a stop request set before it is always seen: no job is taken while
-	// paused, and none whose stop was requested.
+	// One statement, so a pause or a stop request set before it is always seen: no job is taken by a
+	// worker that is off (its own flag: user review 11-12 item 2), and none whose stop was requested.
 	// It takes no job of a library being removed (BeginRemove), under the same lock, so after BeginRemove
 	// returns no claim for that library can start.
 	s.removeMu.Lock()
@@ -273,8 +274,8 @@ func (s *Store) Claim(worker string) (Job, error) {
 	err := s.db.QueryRow(`UPDATE jobs SET status=?, updated=?, worker=?, progress=0, error='', error_code='', started=?, lease_id=?, lease_expires=?
 WHERE id=(SELECT id FROM jobs WHERE status=? AND stop_requested=0`+skip+` AND (retry_at='' OR retry_at<=?) AND `+libraryOnSQL+`
   ORDER BY priority DESC, id LIMIT 1) AND status=?
-AND NOT EXISTS (SELECT 1 FROM app_meta WHERE key='paused' AND value='1') RETURNING id`,
-		append(args, Queued)...).Scan(&id)
+AND EXISTS (SELECT 1 FROM workers WHERE enabled=1 AND id=`+workerRecordSQL+`) RETURNING id`,
+		append(args, Queued, worker)...).Scan(&id)
 	s.removeMu.Unlock()
 	if errors.Is(err, sql.ErrNoRows) {
 		return Job{}, ErrNoJob
@@ -291,6 +292,23 @@ func (s *Store) HasOpenJob(path string) (bool, error) {
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM jobs WHERE path=? AND status IN (?,?)`, path, Queued, Running).Scan(&n)
 	return n > 0, err
 }
+
+// Stranded reports whether path's file record says it was queued while no job of it exists at all (its
+// queued job was removed with its library, before removals cleared that): it is decided again (ui-shop,
+// #159 QA). A job that ended (done, failed, kept) still exists, so its file is never queued twice.
+func (s *Store) Stranded(f File) bool {
+	if !strings.HasPrefix(f.Decision, DecisionQueued) {
+		return false
+	}
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM jobs WHERE path=?`, f.Path).Scan(&n); err != nil {
+		return false
+	}
+	return n == 0
+}
+
+// DecisionQueued begins the file record's decision of a file the scanner queued.
+const DecisionQueued = "queued: "
 
 // RecordPlan stores the Plan a running job converts with (JSON) and its fingerprint.
 func (s *Store) RecordPlan(id int64, plan, fingerprint string) error {
@@ -320,7 +338,7 @@ func (s *Store) Complete(id int64, outputPath string, sizeAfter int64) error {
 	if j, err := s.Get(id); err == nil {
 		disk, _ = diskOf(filepath.Dir(j.Path))
 	}
-	return s.transition(id, Done, `, progress=100, output_path=?, size_after=?, output_mtime=?, original_disk=?`, outputPath, sizeAfter, mtime, disk)
+	return s.transition(id, Done, `, progress=100, output_path=?, size_after=?, output_mtime=?, original_disk=?, again_from=0`, outputPath, sizeAfter, mtime, disk)
 }
 
 // Fail marks a running job failed: code is one of ReasonCodes, msg the plain words.

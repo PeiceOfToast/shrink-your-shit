@@ -89,6 +89,8 @@ type Worker struct {
 	Logs *runlog.Logs
 	// verified is the probe of the new file the last check passed (S5: stored for its final path).
 	verified media.Info
+	// remote is the job a worker on another computer converts, run here (V7b2); nil for a local one.
+	remote *RemoteJob
 	// failures: the running job's path's choices for when it doesn't work (V6b; under mu)
 	failures *rules.Failures
 	// lease: the running job's lease (V7a; under mu)
@@ -236,9 +238,18 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 	w.lease, _ = w.Queue.LeaseOf(job.ID)
 	lease := w.lease
 	w.mu.Unlock()
-	renewDone := make(chan struct{})
-	defer close(renewDone)
-	go w.renewLease(job.ID, lease, renewDone) // V7a: kept while it works, the probe and the checks too
+	return w.runClaimed(ctx, job, jobCtx, cancel, lease, true)
+}
+
+// runClaimed runs job, claimed for this worker (current, cancelJob and lease set), and records its
+// outcome. renew: this worker renews its lease (a local job; a remote worker renews its own, V7b2).
+func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Context, cancel context.CancelFunc, lease string, renew bool) (bool, error) {
+	var err error
+	if renew {
+		renewDone := make(chan struct{})
+		defer close(renewDone)
+		go w.renewLease(job.ID, lease, renewDone) // V7a: kept while it works, the probe and the checks too
+	}
 	w.jobf(job.ID, ": started")
 	if testHook != nil {
 		testHook("registered")
@@ -261,6 +272,12 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 		w.current, w.cancelJob, w.stopped = 0, nil, stopNone
 		w.mu.Unlock()
 	}()
+	// The job was given back to the queue (its lease ended: V7a, V7b2): another worker has it now, so
+	// there is nothing to record here.
+	if errors.Is(err, errLeaseLost) {
+		w.jobf(job.ID, ": given back to the queue (this worker no longer holds it)")
+		return true, nil
+	}
 	// A stop asked for on the job's record wins over a pause or a shutdown, so it never waits in the
 	// queue as a job no claim takes. Once the new file is in place (err == nil) the job is done.
 	if err != nil {
@@ -484,6 +501,31 @@ func (w *Worker) watchStall(id int64) func() {
 	return func() { close(done) }
 }
 
+// watchRemoteStall is watchStall for a remote worker's encode: the worker reports its position, and the
+// job is stopped (stopStall, the same words and retry rules) when it hasn't moved on for stallAfter
+// while the worker says it is converting.
+func (w *Worker) watchRemoteStall(id int64, rj *RemoteJob) func() {
+	after := w.stallAfter()
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(max(after/20, 10*time.Millisecond))
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case now := <-t.C:
+				if still, judging := rj.stillFor(now); judging && still >= after {
+					w.jobf(id, ": the remote encode made no progress for %s, stopping it", after)
+					w.stop(id, stopStall)
+					return
+				}
+			}
+		}
+	}()
+	return func() { close(done) }
+}
+
 // BesidePath is the output name in Beside mode.
 func BesidePath(src string) string { return BesidePathAs(src, filepath.Ext(src)) }
 
@@ -512,11 +554,17 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 		return "", retryable(ferr, retryGeneral) // the database was busy
 	}
+	// Convert again (design 11:45Z): a file that replaced its original runs from the original kept in
+	// .syp-trash, never from our own output; the new file replaces our earlier one (replaceOwnOutput).
+	srcPath, again, err := w.againSource(job)
+	if err != nil {
+		return "", err
+	}
 	// A link is never followed: checked before opening, and the open itself does not follow one (slice 23).
-	if lst, err := os.Lstat(job.Path); err == nil && lst.Mode()&fs.ModeSymlink != 0 {
+	if lst, err := os.Lstat(srcPath); err == nil && lst.Mode()&fs.ModeSymlink != 0 {
 		return "", kept("%s", rules.SkipWords[rules.SkipSymlink])
 	}
-	before, serr := statOpen(job.Path)
+	before, serr := statOpen(srcPath)
 	if errors.Is(serr, errIsLink) {
 		return "", kept("%s", rules.SkipWords[rules.SkipSymlink])
 	}
@@ -531,13 +579,13 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	// The file as the system keeps it (on Windows read through its handle, with its change time, which
 	// os.FileInfo does not carry there): compared again before the swap (review 86970d8).
-	beforeState, err := readSourceState(job.Path, before)
+	beforeState, err := readSourceState(srcPath, before)
 	if err != nil {
 		return "", failed(cannotRead, err)
 	}
 	// The file guards again (slice 23; the scanner decided earlier, and the file may have gained another
 	// name since): a shared file is left alone. sourceUnchanged checks it again right before the swap.
-	if media.LinkCount(job.Path, before) > 1 {
+	if media.LinkCount(srcPath, before) > 1 {
 		return "", kept("%s", rules.SkipWords[rules.SkipSharedFile])
 	}
 	if err := removeLeftoverTemps(job.Path); err != nil {
@@ -552,7 +600,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 
 	// What the source looks like (and so what the new file must look like).
 	pctx, pcancel := context.WithTimeout(ctx, quickTimeout)
-	src, perr := media.Probe(pctx, w.Exec, w.FFprobe, job.Path)
+	src, perr := media.Probe(pctx, w.Exec, w.FFprobe, srcPath)
 	pcancel()
 	if perr != nil {
 		if errors.Is(pctx.Err(), context.DeadlineExceeded) {
@@ -561,13 +609,13 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		log.Printf("worker %s: %s: %v", w.ID, job.Path, perr)
 		return "", kept("the original can't be read any more, so it was left as it is")
 	}
-	if err := w.preflight(job.Path, before.Size()); err != nil {
+	if err := w.preflight(srcPath, before.Size()); err != nil {
 		return "", err
 	}
 	var packets int64
 	if ord := src.MainVideoOrdinal(); ord >= 0 {
 		cctx, ccancel := context.WithTimeout(ctx, countTimeout)
-		n, cerr := media.CountVideoPackets(cctx, w.Exec, w.FFprobe, job.Path, ord)
+		n, cerr := media.CountVideoPackets(cctx, w.Exec, w.FFprobe, srcPath, ord)
 		ccancel()
 		if cerr != nil {
 			return "", checkFailed(cctx, "counting the original's video frames", cerr)
@@ -591,12 +639,18 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// (review a09f6f5: a job queued before migration 17 or a setting change). Only these skips: the
 	// others stay the scanner's decision, as before Plans.
 	if words, code := tmpl.DolbyVisionHold(src); code != "" { // from the probe, not the Plan's skip (review 7ab8f72)
+		if again != nil {
+			return "", againLeftAlone()
+		}
 		return "", &SkippedError{Words: words, Code: code}
 	}
 	// Any skip of the Plan made now (the flow changed since the job was queued: an HDR file with a
 	// non-HEVC target, a choice that can't run...) ends the job as a skipped file with that reason,
 	// never an encode (review 6cafc6f: the second such case after Dolby Vision). The scanner's rules
 	// for what is queued are unchanged.
+	if plan.Skip != "" && again != nil { // the done job stays done: its file and kept original as they are
+		return "", againLeftAlone()
+	}
 	if plan.Skip != "" {
 		code := plan.SkipCode
 		if code == "" {
@@ -676,16 +730,18 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 	}
 	if keepsOriginal(plan) { // the name is taken already: no point converting (checked again at the end)
-		if OutputMode(plan.Output) == Folder {
+		if OutputMode(plan.Output) == Folder || OutputMode(plan.Output) == Beside { // beside too (Convert again, design 11:45Z)
 			// our own earlier output may be there (the original changed and is converted again): it is
 			// replaced once the new file passes its checks; a file we didn't make never is (design 01:04Z)
 			if lst, err := os.Lstat(newName); err == nil && !w.ownOutput(newName, lst) {
-				return "", failed(notOurs(newName), fs.ErrExist)
+				return "", failed(takenWords(plan)(newName), fs.ErrExist)
 			}
 		} else if _, err := os.Lstat(newName); err == nil {
 			return "", failed(fmt.Sprintf("There is already a file named %s next to the original, so the new file was not made. Nothing was changed. Move or rename that file, then press Retry.", filepath.Base(newName)), fs.ErrExist)
 		}
-	} else if newName != job.Path && exists(newName) { // a renaming replace never replaces another file
+	} else if again != nil && OutputMode(plan.Output) != Replace {
+		return "", failed("This library's workflow no longer replaces files, so this file can't be converted again from its kept original. Nothing was changed.", errors.New("convert again: not a replace"))
+	} else if newName != job.Path && exists(newName) && (again == nil || newName != again.Dest()) { // a renaming replace never replaces another file (Convert again: but our own earlier one)
 		return "", failed(rules.NameTaken(newName), fs.ErrExist)
 	}
 	// Subtitles saved as .srt files go beside the new file and never over another file: a name taken
@@ -704,21 +760,42 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		return "", err
 	}
 	tmp := stage.path
-	args := plan.FFmpegArgs(job.Path, tmp)
-	stopWatch := w.watchStall(job.ID)
+	args := plan.FFmpegArgs(srcPath, tmp)
 	setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWords(plan),
 		Decoder: decoderWords(src), Progress: media.Progress{ETASeconds: -1}})
 	defer dropLive(job.ID)
-	var tenths progressLines
-	encErr, terr := media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
-		w.progressAt.Store(time.Now().UnixNano())
-		w.Queue.Progress(job.ID, p.Percent)
-		updateLive(job.ID, p)
-		if line := tenths.next(p); line != "" {
-			w.jobf(job.ID, ": %s", line)
+	var encErr string
+	var terr error
+	if w.remote != nil { // V7b2: a worker on another computer converts and checks; its file comes up here
+		stopWatch := w.watchRemoteStall(job.ID, w.remote)
+		encErr, terr = w.remote.convert(ctx, w, job, snap, srcPath, tmp)
+		stopWatch()
+		var k *KeptError
+		if errors.As(terr, &k) || errors.Is(terr, errLeaseLost) {
+			return "", terr
 		}
-	})
-	stopWatch()
+	} else {
+		stopWatch := w.watchStall(job.ID)
+		var tenths progressLines
+		at := -1.0 // the furthest position ffmpeg has reached
+		encErr, terr = media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
+			// only a position further on is progress: a stuck ffmpeg can keep reporting the same one (a
+			// damaged file, 21 min on a test run, never stopped), which mustn't hold off the stall stop
+			if p.OutTimeUS > at {
+				at = p.OutTimeUS
+				w.progressAt.Store(time.Now().UnixNano())
+			}
+			if job.DurationSec <= 0 {
+				return // no length: no percent to show
+			}
+			w.Queue.Progress(job.ID, p.Percent)
+			updateLive(job.ID, p)
+			if line := tenths.next(p); line != "" {
+				w.jobf(job.ID, ": %s", line)
+			}
+		})
+		stopWatch()
+	}
 	if s := strings.TrimSpace(encErr); s != "" && w.Logs != nil {
 		w.Logs.Append(job.ID, "ffmpeg said:\n"+s) // errors only (the encode runs at -v error)
 	}
@@ -747,13 +824,13 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 
 	// If the source changed while we encoded, the new file is stale: say so first (otherwise the
 	// checks would report a confusing mismatch), and check again right before replacing.
-	if err := sourceUnchanged(job.Path, before, beforeState); err != nil {
+	if err := sourceUnchanged(srcPath, before, beforeState); err != nil {
 		return "", err
 	}
 	if err := stage.intact(); err != nil {
 		return "", err
 	}
-	if err := w.verify(ctx, src, exp, job.Path, tmp, before.Size()); err != nil {
+	if err := w.verify(ctx, src, exp, srcPath, tmp, before.Size()); err != nil {
 		var k *KeptError
 		if errors.As(err, &k) && plan.Video.PeakLimitKbps > 0 && strings.HasPrefix(k.Reason, pictureTooDifferent) {
 			// design (SCREENS V3 step 3): VBR's own words; the measured similarity goes to the run log
@@ -805,7 +882,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		return "", err
 	}
 	stillOK := func() error {
-		if err := sourceUnchanged(job.Path, before, beforeState); err != nil {
+		if err := sourceUnchanged(srcPath, before, beforeState); err != nil {
 			return err
 		}
 		if err := w.stillHolds(job.ID); err != nil { // V7a: a worker that lost its lease never puts a file in place
@@ -834,6 +911,14 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if w.KeepDays != nil {
 		days = w.KeepDays()
 	}
+	if again != nil { // Convert again: our earlier file goes, the original stays kept (its days start again)
+		if err := w.replaceOwnOutput(ctx, *again, stage, final, days, stillOK); err != nil {
+			removePlaced()
+			return "", err
+		}
+		swapped()
+		return final, nil
+	}
 	renaming := !keepsOriginal(plan) && final != job.Path
 	if renaming && w.Journal == nil {
 		return "", failed("This setting changes the file type, which needs the record of kept originals, and it is not available here. Your original was not touched.", errors.New("no journal"))
@@ -853,7 +938,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	case OutputMode(plan.Output) == Folder:
 		move = w.moveIntoFolder // never over a file we didn't make
 	case keepsOriginal(plan):
-		move = moveBeside // never over another file
+		move = w.moveBeside // never over another file, but our own earlier one (Convert again)
 	}
 	if err := move(ctx, tmp, final, stillOK); err != nil {
 		removePlaced()
@@ -1134,21 +1219,33 @@ func sourceUnchanged(path string, before os.FileInfo, beforeState media.State) e
 	return nil
 }
 
-// moveIntoPlace renames tmp over final. On Windows the rename fails while
-// another program (a media player, a virus scanner) holds the target open, so
-// it is retried for a while there. Elsewhere one try is enough.
-// moveBeside is moveIntoPlace for the new file next to the original: it never replaces a file already
-// at that name, one that was there before or one that appeared while converting (renameNoReplace, slice
-// 18). Then nothing is moved, and the job fails with a plain reason.
-func moveBeside(ctx context.Context, tmp, final string, stillOK func() error) error {
-	return moveNoClobber(ctx, tmp, final, stillOK, func(name string) string {
-		return fmt.Sprintf("There is already a file named %s next to the original, so the new file was not put there. Nothing was changed. Move or rename that file, then press Retry.", filepath.Base(name))
-	})
-}
-
 // moveIntoFolder puts the new file in the folder for new files (it passed its checks): over our own
 // earlier output of the same file, which goes now, but never over a file we didn't make (design 01:04Z).
 func (w *Worker) moveIntoFolder(ctx context.Context, tmp, final string, stillOK func() error) error {
+	return w.moveOverOwn(ctx, tmp, final, stillOK, notOurs)
+}
+
+// moveBeside is moveIntoFolder for the new file next to the original (slice 18, Convert again).
+func (w *Worker) moveBeside(ctx context.Context, tmp, final string, stillOK func() error) error {
+	return w.moveOverOwn(ctx, tmp, final, stillOK, besideTaken)
+}
+
+// takenWords is the failure for a file we didn't make at the new file's name.
+func takenWords(plan rules.Plan) func(string) string {
+	if OutputMode(plan.Output) == Beside {
+		return besideTaken
+	}
+	return notOurs
+}
+
+// besideTaken is the failure for a file we didn't make at the name beside the original.
+func besideTaken(name string) string {
+	return fmt.Sprintf("There is already a file named %s next to the original, so the new file was not put there. Nothing was changed. Move or rename that file, then press Retry.", filepath.Base(name))
+}
+
+// moveOverOwn renames tmp to final over our own earlier output there (it goes now), never over a file
+// we didn't make (taken says so).
+func (w *Worker) moveOverOwn(ctx context.Context, tmp, final string, stillOK func() error, taken func(string) string) error {
 	return moveNoClobber(ctx, tmp, final, func() error {
 		if err := stillOK(); err != nil {
 			return err
@@ -1157,7 +1254,7 @@ func (w *Worker) moveIntoFolder(ctx context.Context, tmp, final string, stillOK 
 			return os.Remove(final) // the older generation: the original is still in the library
 		}
 		return nil
-	}, notOurs)
+	}, taken)
 }
 
 // ownOutput reports whether the regular file at p (lst its Lstat) is one a done job of ours wrote.
@@ -1193,6 +1290,9 @@ func moveNoClobber(ctx context.Context, tmp, final string, stillOK func() error,
 	}, tmp, final, tries, time.Second)
 }
 
+// moveIntoPlace renames tmp over final. On Windows the rename fails while
+// another program (a media player, a virus scanner) holds the target open, so
+// it is retried for a while there. Elsewhere one try is enough.
 func moveIntoPlace(ctx context.Context, tmp, final string, stillOK func() error) error {
 	tries := 1
 	if runtime.GOOS == "windows" {
