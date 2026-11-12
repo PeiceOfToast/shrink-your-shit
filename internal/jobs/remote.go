@@ -83,7 +83,7 @@ func (s *Store) Pair(code, name, version string, apiLevel int, capabilities stri
 		capabilities = "{}"
 	}
 	w := RemoteWorker{ID: "w-" + strings.ToLower(randomText(6)), Name: name, Version: version, APILevel: apiLevel,
-		LastSeen: now.UTC().Format(time.RFC3339), Capabilities: capabilities}
+		LastSeen: now.UTC().Format(time.RFC3339Nano), Capabilities: capabilities}
 	token := randomText(32)
 	// a new worker is on only if another worker is on (or there is none): with every worker off it
 	// arrives off, so nothing converts until the person starts it (ui-shop via orch-lead 17:58Z)
@@ -114,7 +114,7 @@ func (s *Store) WorkerByToken(token string) (RemoteWorker, error) {
 
 // SeenWorker records that remote worker id called now, with its version.
 func (s *Store) SeenWorker(id, version string, apiLevel int, now time.Time) error {
-	_, err := s.db.Exec(`UPDATE workers SET last_seen=?, version=?, api_level=? WHERE id=? AND kind='remote'`, now.UTC().Format(time.RFC3339), version, apiLevel, id)
+	_, err := s.db.Exec(`UPDATE workers SET last_seen=?, version=?, api_level=? WHERE id=? AND kind='remote'`, now.UTC().Format(time.RFC3339Nano), version, apiLevel, id)
 	return err
 }
 

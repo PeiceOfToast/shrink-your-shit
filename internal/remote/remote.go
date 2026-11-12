@@ -17,6 +17,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/sysload"
 )
 
 // APILevel is the worker API level this worker speaks (the server's web.WorkerAPILevel).
@@ -59,6 +61,7 @@ func (s State) Save(dir string) error {
 type Client struct {
 	Server, Token, Version string
 	HTTP                   *http.Client
+	meter                  sysload.Meter // this computer's load, sent with each heartbeat (V7d)
 }
 
 // APIError is a refusal from the server: its code and words.
@@ -116,7 +119,9 @@ func (c *Client) Pair(ctx context.Context, code, name string) (State, error) {
 
 // Heartbeat says this worker is there, with its free slots.
 func (c *Client) Heartbeat(ctx context.Context, free int) error {
-	return c.call(ctx, "heartbeat", map[string]any{"freeSlots": free}, nil)
+	l := c.meter.Sample()
+	return c.call(ctx, "heartbeat", map[string]any{"freeSlots": free, "cpuPercent": l.CPUPercent, "memUsedBytes": l.MemUsedBytes,
+		"memTotalBytes": l.MemTotalBytes}, nil)
 }
 
 // Run sends heartbeats until ctx ends. It stops early, with the server's words, when the server says

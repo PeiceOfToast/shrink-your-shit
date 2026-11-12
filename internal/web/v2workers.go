@@ -17,6 +17,7 @@ import (
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/doctor"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/sysload"
 )
 
 // V4a (UI-API-CONTRACT-v2.md, Workers; slices/v2-engine/v4-plan.md): the workers in the contract's
@@ -33,6 +34,17 @@ type workerView struct {
 	mu     sync.Mutex
 	status string
 	since  time.Time // when this program first saw the status (an approximation: it is read on demand)
+
+	meter       sysload.Meter       // this computer's load (V7d)
+	remoteSince map[string]statusAt // remote workers' statuses, as last seen, and since when
+	seen        map[string]string   // every worker's status at the last check (worker.updated on a change)
+	checked     time.Time           // when the statuses were last checked
+}
+
+// statusAt is a status and when it began.
+type statusAt struct {
+	status string
+	since  time.Time
 }
 
 var processStart = time.Now()
@@ -129,15 +141,21 @@ func (v *workerView) local(ctx context.Context) (map[string]any, error) {
 		"appVersion": v.eng.Version, "status": status, "statusSince": since.UTC().Format(time.RFC3339),
 		"lastHeartbeatAt": time.Now().UTC().Format(time.RFC3339), // in this program: answering is its heartbeat
 		"slots":           v.slots(cfg, s, len(working), t),
-		"live":            map[string]any{"cpuPercent": nil, "memUsedBytes": nil, "memTotalBytes": nil, "gpu": []any{}}, // CAN'T YET
+		"live":            liveLoad(v.meter.Sample()), // V7d: this computer, measured as remote workers measure theirs
+		"update":          nil,
 		"gpus":            gpus, "ffmpeg": ff, "capabilities": capabilities(t, ok), "currentJobIds": ids,
 		"tags": cfg.Tags, "pool": cfg.Pool, "schedule": schedule, "pathMappings": []any{},
 	}, nil
 }
 
-// remoteOfflineAfter: a remote worker that hasn't called for this long shows offline (it heartbeats
-// every 10 s).
-const remoteOfflineAfter = 30 * time.Second
+// RemoteOfflineAfter: a remote worker not heard from (any call: a heartbeat, a lease, an upload...) for
+// this long shows offline; it heartbeats every 10 s, beside its work (V7d).
+var RemoteOfflineAfter = 30 * time.Second
+
+// liveLoad is a load as the contract's live figures (nil: not measured; GPU load isn't yet).
+func liveLoad(l sysload.Load) map[string]any {
+	return map[string]any{"cpuPercent": l.CPUPercent, "memUsedBytes": l.MemUsedBytes, "memTotalBytes": l.MemTotalBytes, "gpu": []any{}}
+}
 
 // remote is a paired worker on another computer in the contract's shape (V7b1): what it reported, its
 // running jobs, and offline once it stops calling.
@@ -146,6 +164,11 @@ func (v *workerView) remote(rw jobs.RemoteWorker) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	return v.remoteWith(rw, working)
+}
+
+// remoteWith is remote with the running jobs read once for a whole list (review da46389).
+func (v *workerView) remoteWith(rw jobs.RemoteWorker, working []jobs.Working) (map[string]any, error) {
 	ids := []string{}
 	for _, j := range working {
 		if j.Worker == rw.ID {
@@ -156,7 +179,7 @@ func (v *workerView) remote(rw jobs.RemoteWorker) (map[string]any, error) {
 	enabled := v.store.WorkerEnabled(rw.ID)
 	status := "online"
 	switch {
-	case seen.IsZero() || time.Since(seen) > remoteOfflineAfter:
+	case seen.IsZero() || time.Since(seen) > RemoteOfflineAfter:
 		status = "offline"
 	case !enabled && len(ids) > 0:
 		status = "draining"
@@ -169,11 +192,21 @@ func (v *workerView) remote(rw jobs.RemoteWorker) (map[string]any, error) {
 	if c := json.RawMessage(rw.Capabilities); json.Valid(c) && string(c) != "{}" {
 		caps = c
 	}
+	since := v.remoteStatusSince(rw.ID, status, seen)
+	var load sysload.Load
+	if l, ok := workerLoads.Load(rw.ID); ok && status != "offline" {
+		load = l.(sysload.Load)
+	}
+	var update any // Q7: no self-update; the words say what to do
+	if rw.Version != "" && v.eng.Version != "" && rw.Version != v.eng.Version {
+		update = map[string]any{"serverVersion": v.eng.Version,
+			"words": "This worker runs " + rw.Version + "; the server runs " + v.eng.Version + ". Install " + v.eng.Version + " on that computer, then start the worker again."}
+	}
 	return map[string]any{
 		"id": rw.ID, "name": rw.Name, "kind": "remote", "enabled": enabled, "host": nil, "os": nil, "arch": nil,
-		"appVersion": rw.Version, "status": status, "statusSince": nil, "lastHeartbeatAt": nilIfEmpty(rw.LastSeen),
+		"appVersion": rw.Version, "status": status, "statusSince": since, "lastHeartbeatAt": nilIfEmpty(rw.LastSeen), "update": update,
 		"slots": map[string]any{"cpu": map[string]any{"total": 1, "used": len(ids)}, "gpu": nil},
-		"live":  map[string]any{"cpuPercent": nil, "memUsedBytes": nil, "memTotalBytes": nil, "gpu": []any{}},
+		"live":  liveLoad(load),
 		"gpus":  []any{}, "ffmpeg": nil, "capabilities": caps, "currentJobIds": ids,
 		"tags": []string{}, "pool": nil, "schedule": nil, "pathMappings": []any{},
 	}, nil
@@ -271,8 +304,13 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 			serverError(w, err)
 			return
 		}
+		working, err := v.store.WorkingJobs()
+		if err != nil {
+			serverError(w, err)
+			return
+		}
 		for _, rw := range remotes {
-			one, err := v.remote(rw)
+			one, err := v.remoteWith(rw, working)
 			if err != nil {
 				serverError(w, err)
 				return
@@ -327,6 +365,7 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 			serverError(w, err)
 			return
 		}
+		v.checkStatuses(r.Context(), true)
 		writeJSON(w, map[string]any{"ok": true})
 	})
 	api.HandleFunc("PATCH /api/v2/workers/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -489,6 +528,7 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 		if !readJSON(w, r, &in) || !act(w, "all", r.PathValue("action")) {
 			return
 		}
+		v.checkStatuses(r.Context(), true)
 		list(w, r)
 	})
 	// one worker, answered with that worker
@@ -497,6 +537,7 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 		if !found(w, r) || !readJSON(w, r, &in) || !act(w, r.PathValue("id"), r.PathValue("action")) {
 			return
 		}
+		v.checkStatuses(r.Context(), true)
 		if rw, ok := v.remoteByID(r.PathValue("id")); ok {
 			one, err := v.remote(rw)
 			if err != nil {
@@ -534,4 +575,91 @@ func (v *workerView) remoteByID(id string) (jobs.RemoteWorker, bool) {
 		}
 	}
 	return jobs.RemoteWorker{}, false
+}
+
+// remoteStatusSince is when remote worker id's status began: offline, when it was last heard from plus
+// the offline wait; otherwise when this program first saw it in that status.
+func (v *workerView) remoteStatusSince(id, status string, lastSeen time.Time) string {
+	if status == "offline" && !lastSeen.IsZero() {
+		return lastSeen.Add(RemoteOfflineAfter).UTC().Format(time.RFC3339)
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.remoteSince == nil {
+		v.remoteSince = map[string]statusAt{}
+	}
+	at, ok := v.remoteSince[id]
+	if !ok || at.status != status {
+		at = statusAt{status: status, since: time.Now()}
+		v.remoteSince[id] = at
+	}
+	return at.since.UTC().Format(time.RFC3339)
+}
+
+// StatusCheckEvery is the least time between two checks of every worker's status.
+var StatusCheckEvery = 2 * time.Second
+
+// checkStatuses records worker.updated {workerId, status} for each worker whose status changed since
+// the last check (offline, back, switched on or off, paired, removed: "removed"), and nothing when none
+// did (V7d). The first check only takes note. now forces a check within StatusCheckEvery.
+func (v *workerView) checkStatuses(ctx context.Context, now bool) {
+	v.mu.Lock()
+	if !now && time.Since(v.checked) < StatusCheckEvery {
+		v.mu.Unlock()
+		return
+	}
+	v.checked = time.Now()
+	v.mu.Unlock()
+	cur := map[string]string{}
+	if l, err := v.local(ctx); err == nil {
+		cur[jobs.LocalWorker] = l["status"].(string)
+	}
+	remotes, err := v.store.RemoteWorkers()
+	if err != nil {
+		return
+	}
+	working, err := v.store.WorkingJobs()
+	if err != nil {
+		return
+	}
+	for _, rw := range remotes {
+		if r, err := v.remoteWith(rw, working); err == nil {
+			cur[rw.ID] = r["status"].(string)
+		}
+	}
+	v.mu.Lock()
+	prev, first := v.seen, v.seen == nil
+	v.seen = cur
+	v.mu.Unlock()
+	if first {
+		return
+	}
+	emit := func(id, status string) {
+		v.store.RecordEvent("worker.updated", map[string]any{"type": "worker.updated", "workerId": id, "status": status})
+	}
+	for id, st := range cur {
+		if prev[id] != st {
+			emit(id, st)
+		}
+	}
+	for id := range prev {
+		if _, ok := cur[id]; !ok {
+			emit(id, "removed")
+		}
+	}
+}
+
+// offlineCount is how many workers are offline now (the summary's badge).
+func (v *workerView) offlineCount() int {
+	remotes, err := v.store.RemoteWorkers()
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, rw := range remotes {
+		if seen, _ := time.Parse(time.RFC3339, rw.LastSeen); seen.IsZero() || time.Since(seen) > RemoteOfflineAfter {
+			n++
+		}
+	}
+	return n
 }

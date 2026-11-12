@@ -295,3 +295,27 @@ func TestEachWorkerOnAndOff(t *testing.T) {
 		t.Errorf("no such worker: %d", c)
 	}
 }
+
+// V7d: a worker on another version is told what to do (Q7: no self-update); one on this version isn't.
+func TestRemoteWorkerUpdateWords(t *testing.T) {
+	_, st, _, _ := libServer(t, false)
+	v := newWorkerView(st, &settingsStore{store: st}, Engine{Version: "1.5.0"})
+	for ver, want := range map[string]string{"1.4.0": "This worker runs 1.4.0; the server runs 1.5.0. Install 1.5.0 on that computer, then start the worker again.", "1.5.0": ""} {
+		code, _, _ := st.NewPairing(time.Now())
+		rw, _, err := st.Pair(code, "W "+ver, ver, 1, "", time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		item, err := v.remote(rw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := ""
+		if u, ok := item["update"].(map[string]any); ok {
+			got = u["words"].(string)
+		}
+		if got != want {
+			t.Errorf("%s: %q", ver, got)
+		}
+	}
+}
