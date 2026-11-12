@@ -354,6 +354,16 @@ ALTER TABLE jobs ADD COLUMN lease_expires TEXT NOT NULL DEFAULT '';`},
 	// and run log stay while it does, so the Skipped list can show what happened (Store.Skip).
 	{31, "skipped file job", `
 ALTER TABLE files ADD COLUMN job_id INTEGER NOT NULL DEFAULT 0;`},
+	// ui-shop 10:54Z: a job removed outright (with its library) keeps its file's path and its tries in its
+	// last history entry, as a skip or a stop records them, so its detail names the file, not "Job 8".
+	{32, "removed job path", `
+DROP TRIGGER IF EXISTS events_job_removed;
+CREATE TRIGGER events_job_removed AFTER DELETE ON jobs
+WHEN NOT EXISTS (SELECT 1 FROM events WHERE kind = 'job' AND job_id = old.id AND to_status IN ('skipped', 'cancelled')) BEGIN
+  INSERT INTO events(kind, job_id, at, from_status, to_status, reason, worker, data)
+  VALUES ('job', old.id, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), old.status, 'cancelled', 'removed', old.worker,
+    json_object('message', 'This job was removed from the list.', 'path', old.path, 'attempts', old.attempts));
+END;`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone
