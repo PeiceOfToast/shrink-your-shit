@@ -341,6 +341,10 @@ ALTER TABLE jobs ADD COLUMN original_disk TEXT NOT NULL DEFAULT '';`},
 ALTER TABLE jobs ADD COLUMN route TEXT NOT NULL DEFAULT '';
 ALTER TABLE job_steps ADD COLUMN node_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE job_steps ADD COLUMN port TEXT NOT NULL DEFAULT '';`},
+	// V6b (failure ports): the path a job falls back to (a rules.Branch, JSON; '' = none): its next run
+	// converts the original with that path's settings.
+	{29, "job fallback", `
+ALTER TABLE jobs ADD COLUMN fallback TEXT NOT NULL DEFAULT '';`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone

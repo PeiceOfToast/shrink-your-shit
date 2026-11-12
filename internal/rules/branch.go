@@ -97,6 +97,8 @@ type Branch struct {
 	Then   *Template     `json:"then,omitempty"` // the steps that convert, as a straight workflow
 	End    string        `json:"end,omitempty"`  // "Leave the file alone": its words (Then is nil)
 	Path   []string      `json:"path"`           // the node ids along it, input to the end
+	// OnFailure: what the path does when its conversion doesn't work (V6b).
+	OnFailure *Failures `json:"onFailure,omitempty"`
 }
 
 // SkipLeftByWorkflow is a file a workflow's "Leave the file alone" step ended (V6a).
@@ -170,4 +172,51 @@ func (t Template) Parts() []Template {
 		}
 	}
 	return out
+}
+
+// Failure is what a path does when a step of its conversion doesn't work (V6b): retry, skip, stop or
+// fall back to another path. Set on "Convert video" (the conversion run) and "Check the result" (the
+// checks said no); none: today's behaviour (failures that may pass are tried again, then it fails).
+type Failure struct {
+	NodeID         string  `json:"nodeId"` // the step whose failure this is
+	Name           string  `json:"name"`   // its name, for the words
+	Action         string  `json:"action"` // retry | skip | stop | fallback
+	Max            int     `json:"max,omitempty"`
+	BackoffSeconds int     `json:"backoffSeconds,omitempty"`
+	Then           string  `json:"then,omitempty"`      // after the last retry: skip | stop
+	SkipWords      string  `json:"skipWords,omitempty"` // skip: the reason ("Leave the file alone" on the error port)
+	Fallback       *Branch `json:"fallback,omitempty"`  // fallback: the other path, converted from the original
+}
+
+// Failures are a path's policies: for the conversion run, and for the checks of the result.
+type Failures struct {
+	Convert *Failure `json:"convert,omitempty"`
+	Check   *Failure `json:"check,omitempty"`
+}
+
+// For is the policy for a failure of the conversion run (check false) or of its checks (true): the
+// check's own, else the conversion's.
+func (f *Failures) For(check bool) *Failure {
+	switch {
+	case f == nil:
+		return nil
+	case check && f.Check != nil:
+		return f.Check
+	}
+	return f.Convert
+}
+
+// CompileBranch is the Plan of path b for a file (a fallback path run on its own): its conversion, or
+// "Leave the file alone".
+func CompileBranch(b Branch, info media.Info, languages string) Plan {
+	var p Plan
+	if b.Then == nil {
+		p = Plan{Kind: KindBranches, Skip: lowerFirst(b.End), SkipCode: SkipLeftByWorkflow}
+	} else {
+		then := *b.Then
+		then.Languages = languages
+		p = then.Compile(info)
+	}
+	p.Path, p.OnFailure = b.Path, b.OnFailure
+	return p
 }

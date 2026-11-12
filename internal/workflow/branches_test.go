@@ -135,3 +135,76 @@ func TestCheckPortsHaveWords(t *testing.T) {
 		t.Errorf("%+v", e)
 	}
 }
+
+// errorDoc: a straight workflow (quality 5) whose "Convert video" error port leads to the nodes in to.
+func errorDoc(to []Node) (Doc, Node) {
+	d := FromTemplate(rules.SliderTemplate(5), nil)
+	var conv Node
+	for _, n := range d.Nodes {
+		if n.Type == TypeConvert {
+			conv = n
+		}
+	}
+	if len(to) > 0 {
+		d.Nodes = append(d.Nodes, to...)
+		d.Edges = append(d.Edges, Edge{ID: NewID(), From: conv.ID, FromPort: "error", To: to[0].ID, ToPort: "in"})
+		d.Edges = append(d.Edges, chainEdges(to)...)
+	}
+	return d, conv
+}
+
+// V6b: what a path does when converting doesn't work, from its error port's link or its onError.
+func TestFailurePoliciesCompile(t *testing.T) {
+	failure := func(d Doc) *rules.Failure {
+		t.Helper()
+		tm, issues := ToTemplate(d, rules.Template{})
+		if len(issues) > 0 || tm.Branches == nil || len(*tm.Branches) != 1 || (*tm.Branches)[0].OnFailure == nil {
+			t.Fatalf("%+v %v", tm, issues)
+		}
+		return (*tm.Branches)[0].OnFailure.Convert
+	}
+	other := segment(rules.SliderTemplate(1))
+	d, conv := errorDoc(other)
+	if f := failure(d); f.Action != "fallback" || f.NodeID != conv.ID || f.Fallback == nil || f.Fallback.Then == nil || len(f.Fallback.Path) == 0 {
+		t.Errorf("fallback %+v", f)
+	}
+	d, _ = errorDoc([]Node{{ID: NewID(), Type: TypeEnd, TypeVersion: 1, Enabled: true, Config: map[string]any{"reason": "Too hard to convert."}}})
+	if f := failure(d); f.Action != "skip" || f.SkipWords != "Too hard to convert." {
+		t.Errorf("skip %+v", f)
+	}
+	d, conv = errorDoc(nil) // a straight workflow with its own choice: it runs as a path with that choice
+	for i := range d.Nodes {
+		if d.Nodes[i].ID == conv.ID {
+			d.Nodes[i].OnError = &ErrorPolicy{Action: "retry", Max: 2, BackoffSeconds: 30, Then: "skip"}
+		}
+	}
+	if f := failure(d); f.Action != "retry" || f.Max != 2 || f.BackoffSeconds != 30 || f.Then != "skip" {
+		t.Errorf("retry %+v", f)
+	}
+	issue := func(d Doc, code string) {
+		t.Helper()
+		_, issues := ToTemplate(d, rules.Template{})
+		for _, i := range issues {
+			if i.Code == code {
+				return
+			}
+		}
+		t.Errorf("no %s in %+v", code, issues)
+	}
+	for i := range d.Nodes {
+		if d.Nodes[i].ID == conv.ID {
+			d.Nodes[i].OnError = &ErrorPolicy{Action: "retry", Max: 11}
+		}
+	}
+	issue(d, "invalid_config")
+	d, conv = errorDoc(segment(rules.SliderTemplate(1))) // a link and a different own choice
+	for i := range d.Nodes {
+		if d.Nodes[i].ID == conv.ID {
+			d.Nodes[i].OnError = &ErrorPolicy{Action: "skip"}
+		}
+	}
+	issue(d, "error_policy_conflict")
+	check := Node{ID: NewID(), Type: TypeCheck, TypeVersion: 1, Name: "Is it big?", Enabled: true, Config: map[string]any{"size": 1000}}
+	d, _ = errorDoc([]Node{check})
+	issue(d, "fallback_must_convert")
+}
