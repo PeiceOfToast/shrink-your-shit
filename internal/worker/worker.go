@@ -501,6 +501,31 @@ func (w *Worker) watchStall(id int64) func() {
 	return func() { close(done) }
 }
 
+// watchRemoteStall is watchStall for a remote worker's encode: the worker reports its position, and the
+// job is stopped (stopStall, the same words and retry rules) when it hasn't moved on for stallAfter
+// while the worker says it is converting.
+func (w *Worker) watchRemoteStall(id int64, rj *RemoteJob) func() {
+	after := w.stallAfter()
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(max(after/20, 10*time.Millisecond))
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case now := <-t.C:
+				if still, judging := rj.stillFor(now); judging && still >= after {
+					w.jobf(id, ": the remote encode made no progress for %s, stopping it", after)
+					w.stop(id, stopStall)
+					return
+				}
+			}
+		}
+	}()
+	return func() { close(done) }
+}
+
 // BesidePath is the output name in Beside mode.
 func BesidePath(src string) string { return BesidePathAs(src, filepath.Ext(src)) }
 
@@ -742,7 +767,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	var encErr string
 	var terr error
 	if w.remote != nil { // V7b2: a worker on another computer converts and checks; its file comes up here
+		stopWatch := w.watchRemoteStall(job.ID, w.remote)
 		encErr, terr = w.remote.convert(ctx, w, job, snap, srcPath, tmp)
+		stopWatch()
 		var k *KeptError
 		if errors.As(terr, &k) || errors.Is(terr, errLeaseLost) {
 			return "", terr
