@@ -252,7 +252,8 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine) http.
 			return
 		}
 		workerLoads.Store(wk.ID, in.Load) // V7d: the Workers page's live figures
-		writeJSON(w, map[string]any{"workerId": wk.ID, "paused": store.Paused()})
+		tests.expire(store, func(string) bool { return true })
+		writeJSON(w, map[string]any{"workerId": wk.ID, "paused": store.Paused(), "pathTests": tests.pending(wk.ID)}) // V7c
 	})
 	// a lease: at most one job (the plan comes with V7b2); none: {lease: null}
 	mux.HandleFunc("POST /api/worker/v1/lease", func(w http.ResponseWriter, r *http.Request) {
@@ -340,7 +341,27 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine) http.
 		}
 		writeJSON(w, map[string]any{"ok": true})
 	})
-	remoteRoutes(mux, store, gate, leaseOf, runs)
+	remoteRoutes(mux, store, gate, leaseOf, runs, eng)
+	// V7c: a worker's answer to a path test
+	mux.HandleFunc("POST /api/worker/v1/paths/{test}/result", func(w http.ResponseWriter, r *http.Request) {
+		wk, ok := gate(w, r, false)
+		if !ok {
+			return
+		}
+		var in struct {
+			SHA256  string
+			Wrote   bool
+			Problem string
+		}
+		if !readJSON(w, r, &in) {
+			return
+		}
+		if !tests.answer(store, wk.ID, r.PathValue("test"), in.SHA256, in.Wrote, in.Problem) {
+			apiError(w, http.StatusConflict, "test_gone", "This test has ended already.")
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
+	})
 	mux.HandleFunc("/api/worker/v1/", func(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusNotFound, "not_found", "There is no such worker call.")
 	})

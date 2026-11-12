@@ -64,13 +64,14 @@ func uploadName(p worker.RemotePlan, part string, index int) (string, bool) {
 }
 
 func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.ResponseWriter, *http.Request, bool) (jobs.RemoteWorker, bool),
-	leaseOf func(http.ResponseWriter, *http.Request) (jobs.RemoteWorker, jobs.Job, string, bool), runs *remoteRuns) {
+	leaseOf func(http.ResponseWriter, *http.Request) (jobs.RemoteWorker, jobs.Job, string, bool), runs *remoteRuns, eng Engine) {
 	// run is the server's run of the request's lease (the lease held, and renewed: the worker is there)
 	run := func(w http.ResponseWriter, r *http.Request) (*worker.RemoteJob, jobs.Job, bool) {
-		_, j, lease, ok := leaseOf(w, r)
+		wk, j, lease, ok := leaseOf(w, r)
 		if !ok {
 			return nil, j, false
 		}
+		r.Header.Set("X-SYP-Worker-Id", wk.ID) // for the handlers below (not from the worker: overwritten here)
 		rj := runs.get(lease)
 		if rj == nil {
 			apiError(w, http.StatusConflict, "lease_gone", "This job was given back to the queue (its lease ended). Ask for new work.")
@@ -94,8 +95,12 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 			serverError(w, err)
 			return
 		}
+		wk := r.Header.Get("X-SYP-Worker-Id") // set by run (below)
 		writeJSON(w, map[string]any{"snapshot": p.Snapshot, "source": map[string]any{"name": filepath.Base(p.Source), "bytes": st.Size()},
-			"subtitles": len(p.Snapshot.Plan.SubtitleFiles())})
+			"subtitles": len(p.Snapshot.Plan.SubtitleFiles()),
+			// V7c: through a shared folder that passed its test: read the original there, write the checked
+			// file into the run's staged file there (the same checks either way); "" = transfer
+			"sourceOnWorker": usableMapping(store, wk, p.Source, false), "stageOnWorker": usableMapping(store, wk, p.Stage, true)})
 	})
 	mux.HandleFunc("GET /api/worker/v1/leases/{lease}/source", func(w http.ResponseWriter, r *http.Request) {
 		rj, _, ok := run(w, r)
@@ -196,6 +201,21 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 			return
 		}
 		writeJSON(w, map[string]any{"bytes": have + n})
+	})
+	// V7c: a line for the job's run log (a shared folder that didn't work, so the bytes were transferred)
+	mux.HandleFunc("POST /api/worker/v1/leases/{lease}/note", func(w http.ResponseWriter, r *http.Request) {
+		_, j, ok := run(w, r)
+		if !ok {
+			return
+		}
+		var in struct{ Text string }
+		if !readJSON(w, r, &in) {
+			return
+		}
+		if eng.RunLogs != nil && in.Text != "" {
+			eng.RunLogs.Append(j.ID, "worker: "+strings.TrimSpace(in.Text))
+		}
+		writeJSON(w, map[string]any{"ok": true})
 	})
 	mux.HandleFunc("POST /api/worker/v1/leases/{lease}/report", func(w http.ResponseWriter, r *http.Request) {
 		rj, j, ok := run(w, r)

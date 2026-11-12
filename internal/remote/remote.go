@@ -8,6 +8,8 @@ package remote
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -120,8 +122,15 @@ func (c *Client) Pair(ctx context.Context, code, name string) (State, error) {
 // Heartbeat says this worker is there, with its free slots.
 func (c *Client) Heartbeat(ctx context.Context, free int) error {
 	l := c.meter.Sample()
-	return c.call(ctx, "heartbeat", map[string]any{"freeSlots": free, "cpuPercent": l.CPUPercent, "memUsedBytes": l.MemUsedBytes,
-		"memTotalBytes": l.MemTotalBytes}, nil)
+	var out struct{ PathTests []PathTest }
+	if err := c.call(ctx, "heartbeat", map[string]any{"freeSlots": free, "cpuPercent": l.CPUPercent, "memUsedBytes": l.MemUsedBytes,
+		"memTotalBytes": l.MemTotalBytes}, &out); err != nil {
+		return err
+	}
+	for _, t := range out.PathTests { // V7c: its shared folders' tests ride the heartbeat's answer
+		c.runPathTest(ctx, t)
+	}
+	return nil
 }
 
 // Run sends heartbeats until ctx ends. It stops early, with the server's words, when the server says
@@ -151,5 +160,35 @@ func (c *Client) Run(ctx context.Context) error {
 			return nil
 		case <-t.C:
 		}
+	}
+}
+
+// PathTest is a shared folder's real test (V7c): read the server's probe at Read through the mapping;
+// for read_write also write WriteContent at Write. Nothing else is ever written.
+type PathTest struct {
+	ID, Read     string
+	Write        *string
+	WriteContent *string
+}
+
+func (c *Client) runPathTest(ctx context.Context, t PathTest) {
+	res := map[string]any{}
+	b, err := os.ReadFile(t.Read)
+	switch {
+	case err != nil:
+		res["problem"] = "This worker can't open " + t.Read + ": " + err.Error()
+	default:
+		h := sha256.Sum256(b)
+		res["sha256"] = hex.EncodeToString(h[:])
+		if t.Write != nil && t.WriteContent != nil {
+			if err := os.WriteFile(*t.Write, []byte(*t.WriteContent), 0o644); err != nil {
+				res["problem"] = "This worker can't write in " + filepath.Dir(*t.Write) + ": " + err.Error()
+			} else {
+				res["wrote"] = true
+			}
+		}
+	}
+	if err := c.call(ctx, "paths/"+t.ID+"/result", res, nil); err != nil {
+		log.Printf("path test %s: %v", t.ID, err)
 	}
 }
