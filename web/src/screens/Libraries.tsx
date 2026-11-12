@@ -9,7 +9,7 @@ import { SignedOut, failed, type Answer } from "../api";
 import { addLibrary, checkFolder, firstFiles, getLibraryV2, getSettings, listLibraries, listLibrariesV2, listWorkflows, patchLibrary, patchLibraryV2, scanLibrary, setLibraryWorkflow, type WorkflowChoice } from "../libraryApi";
 import { Link, navigate, useSearch } from "../router";
 import { onLive } from "../live";
-import { getPublishedDoc } from "../workflowApi";
+import { getPublishedDoc, listWorkflows as listWorkflowDocs } from "../workflowApi";
 import { bytes, clock, count, duration, plural } from "../format";
 import { useData } from "../useData";
 import type { FirstFiles, FolderReport, LibraryItem } from "../types/v1";
@@ -63,6 +63,8 @@ const Problem = ({ m }: { m?: string }) => (m ? <p className="st bad" role="aler
 
 export function Libraries() {
   const libs = useData(listLibrariesV2, [], 3000);
+  // user item 3 (design 7.1): each row shows its workflow's summary in full ("Standard · Balanced · ..."), from the workflows list
+  const docs = useData(listWorkflowDocs, [], 10000), tag = (l: Library) => docs.data?.find((w) => w.id === l.workflowId)?.summaryTag ?? "";
   useEffect(() => onLive((t) => { if (t === "library.changed") libs.reload(); }), []); // eslint-disable-line react-hooks/exhaustive-deps -- #150: at once
   const [sel, setSel] = useState<string[]>([]), [said, setSaid] = useState(""), [q, setQ] = useState(""), [selecting, setSelecting] = useState(false);
   const all = libs.data ?? [], items = all.filter((l) => !q || (l.name + " " + l.paths.join(" ")).toLowerCase().includes(q.toLowerCase()));
@@ -115,8 +117,9 @@ export function Libraries() {
                 <span className="sub mono">{l.paths.join(", ")}</span>
                 {paused(l) && <span className="sub">Paused · {count(l.counts.waiting)} waiting, not converting</span>}
                 <span className="sub phone">{paused(l) ? "Paused · " + count(l.counts.waiting) + " waiting, not converting"
-                  : [l.workflowName, count(l.counts.waiting) + " waiting", l.scan.lastScanAt ? "scanned " + lastScan(l.scan.lastScanAt) : "not scanned yet"].join(" · ")}</span></td>
-              <td data-p="2"><Link to={"/workflows/" + l.workflowId}>{l.workflowName}</Link></td>
+                  : [l.workflowName, count(l.counts.waiting) + " waiting", l.scan.lastScanAt ? "scanned " + lastScan(l.scan.lastScanAt) : "not scanned yet"].join(" · ")}</span>
+                {tag(l) && <span className="sub phone">{tag(l)}</span>}</td>
+              <td data-p="2"><Link to={"/workflows/" + l.workflowId}>{l.workflowName}</Link>{tag(l) && <span className="sub">{tag(l)}</span>}</td>
               <td className="num" data-p="3">{count(l.counts.waiting)}</td>
               <td className="nowrap" data-p="4">{lastScan(l.scan.lastScanAt)}</td>
               <td className="nowrap" data-p="5">{priorityWord(l.priority)}</td>
