@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
 
@@ -147,8 +148,16 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 			d["reason"] = reasonOf(events[n-1])
 		}
 		meta := map[string]any{"before": nil, "after": nil}
-		if raw, ok := store.LatestProbe(j.Path); ok {
-			meta["before"] = json.RawMessage(raw)
+		var snap rules.Snapshot
+		if json.Unmarshal([]byte(j.Plan), &snap) == nil && snap.Source != nil {
+			meta["before"] = snap.Source // the original as probed when the job was planned
+		} else if j.OutputPath == "" || j.OutputPath != j.Path {
+			// a job planned before that was recorded: its original's probe is still the one at its
+			// name only when the new file went elsewhere; after a replace at the same name it would be
+			// the new file's, so before stays null (dev-review 04:27Z)
+			if raw, ok := store.LatestProbe(j.Path); ok {
+				meta["before"] = json.RawMessage(raw)
+			}
 		}
 		if j.OutputPath != "" {
 			if raw, ok := store.LatestProbe(j.OutputPath); ok {
