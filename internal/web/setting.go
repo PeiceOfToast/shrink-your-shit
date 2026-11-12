@@ -415,6 +415,10 @@ func settingTemplate(w http.ResponseWriter, store *jobs.Store, body map[string]j
 	}
 	for k := range body {
 		if selectorFields[strings.ToLower(k)] {
+			if keepsNextToLibrary(body, cur) {
+				apiError(w, http.StatusConflict, "edit_in_new_ui", "This workflow saves new files next to each library, which this page can't show. Edit it in the new UI. Nothing was changed.")
+				return rules.Template{}, false
+			}
 			s, err := readSelectors(body, store.Languages())
 			var se *rules.SelectorError
 			if errors.As(err, &se) {
@@ -427,6 +431,26 @@ func settingTemplate(w http.ResponseWriter, store *jobs.Store, body map[string]j
 	// neither Basic nor Standard: quality is not a number
 	apiError(w, http.StatusBadRequest, "invalid_json", "The request body is not valid JSON.")
 	return rules.Template{}, false
+}
+
+// keepsNextToLibrary reports whether a Standard save from the old page (v1) would quietly lose cur's
+// "next to each library" (V5a, set through v2): v1 has no folderMode, so its editor sends "folder" with an
+// empty folder (or no choice for after converting at all). Choosing another place on purpose (replace,
+// beside, a folder) is a change it can make (ui-shop 11:59Z).
+func keepsNextToLibrary(body map[string]json.RawMessage, cur rules.Template) bool {
+	if cur.Selectors == nil || cur.Selectors.AfterConverting != "folder" || cur.Selectors.FolderMode != rules.NextToLibrary {
+		return false
+	}
+	var after, dir string
+	for k, v := range body {
+		switch strings.ToLower(k) {
+		case "afterconverting":
+			json.Unmarshal(v, &after)
+		case "outputdir":
+			json.Unmarshal(v, &dir)
+		}
+	}
+	return (after == "" || after == "folder") && strings.TrimSpace(dir) == ""
 }
 
 // readBasic reads a Basic (slider) save (S4): a body whose only choice besides quality is audio, with one
