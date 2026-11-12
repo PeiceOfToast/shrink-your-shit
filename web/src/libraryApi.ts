@@ -115,6 +115,11 @@ export const getToken = (): Promise<Answer<{ token: string }>> => (MOCK ? M({ to
 export const rotateToken = (): Promise<Answer<{ token: string }>> => (MOCK ? M({ token: "sample-token-" + Date.now().toString(36) }) : call("POST", "/api/settings/token/rotate"));
 export const signOut = (): Promise<Answer<unknown>> => (MOCK ? M({}) : call("POST", "/api/logout"));
 
+// Settings > About: GET /api/system/health (the old Settings > System): checks, version, the last log lines.
+export interface Health { checks: { id: string; label: string; status: "ok" | "warn" | "bad"; detail: string }[]; version: string; logsTail: string[] }
+export const getHealth = (): Promise<Answer<Health>> => (MOCK ? M({ version: "2.0.0 (sample)", logsTail: ["12:00:01 scanned 3 libraries: no new files"],
+  checks: [{ id: "ffmpeg", label: "FFmpeg is installed", status: "ok", detail: "" }, { id: "disk", label: "Space on /media", status: "warn", detail: "120 GB free" }] }) : call("GET", "/api/system/health"));
+
 export async function getTrash(): Promise<Answer<Trash>> {
   return MOCK ? mock.mockState().trash : call("GET", "/api/v2/trash");
 }
