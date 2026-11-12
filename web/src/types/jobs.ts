@@ -19,6 +19,7 @@ export interface JobItem {
   bytes: number; codec: string | null; resolution: string | null; durationSec: number | null;
   // waiting / retrying / skipped
   attempts?: number; retryAt?: Time | null; status?: string; detail?: string | null;
+  priority?: number;       // the contract's Job.priority; not on list rows yet (asked of workshop with sort=queue)
   reason?: Reason | null; skippedId?: ID; // #130: {code, message} on every row (code for icon/colour; show the message)
   // running
   progress?: Progress; worker?: string; convertingTo?: string; encoder?: string; decoder?: string; percent?: number; etaSeconds?: number; fps?: number; bitrateKbps?: number;
