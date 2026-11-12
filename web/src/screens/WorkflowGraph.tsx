@@ -84,7 +84,8 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
     onLeave(() => { const n = now.current; if (!n.dirty) return; if (!window.confirm("You have unsaved changes in this draft.\n\nOK saves them and leaves. Cancel stays on this page.")) return false; void saveDraft(id, n.doc, n.layout, n.etag).catch(() => {}); });
     return () => onLeave(null);
   }, [id]);
-  const keys = useRef({ sel, doc, layout }); keys.current = { sel, doc, layout };
+  // the keyboard handler reads the page as it is NOW (filled in each render, below addNode)
+  const keys = useRef<{ sel: string | null; doc: WorkflowDoc; layout: Layout; addNode: (d: StepDefinition, base?: Node, at?: { x: number; y: number }) => void }>({ sel, doc, layout, addNode: () => {} });
   useEffect(() => { // review f03fcad P3: Ctrl+Z undo, Ctrl+Shift+Z or Ctrl+Y redo (not while typing in a field)
     if (!edit) return;
     const key = (e: KeyboardEvent) => {
@@ -94,7 +95,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
         const { sel: s0, doc: d0, layout: l0 } = keys.current;
         if (k === "c") { const n = d0.nodes.find((x) => x.id === s0); if (n && defs.find((x) => x.type === n.type)?.category !== "input") (clip.current = n), setSaid("Copied " + (n.name ?? defs.find((x) => x.type === n.type)?.name) + ". Ctrl+V pastes it."); return; }
         const c = clip.current, d = c && defs.find((x) => x.type === c.type), at = c && (l0.nodes[c.id] ?? { x: 0, y: 0 });
-        if (c && d && at) { e.preventDefault(); addNode(d, c, { x: at.x + 40, y: at.y + 40 }); }
+        if (c && d && at) { e.preventDefault(); keys.current.addNode(d, c, { x: at.x + 40, y: at.y + 40 }); } // review fded51f P2: the add of NOW, not of page load
         return;
       }
       if (k !== "z" && k !== "y") return;
@@ -145,6 +146,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
     push({ doc: { ...doc, nodes: [...doc.nodes, n] }, layout: { ...layout, nodes: { ...layout.nodes, [n.id]: { x: Math.round(p.x), y: Math.round(p.y) } } } });
     setSel(n.id); setSelEdge(null); setSaid("Added " + (n.name ?? d.name) + ". Connect it from a port of another step.");
   };
+  keys.current = { sel, doc, layout, addNode };
   const removeNodes = (ids: string[]) => {
     const gone = ids.filter((i) => defs.find((x) => x.type === doc.nodes.find((n) => n.id === i)?.type)?.category !== "input");
     if (!gone.length) return;
@@ -222,7 +224,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
         {edit && <Palette defs={defs} onAdd={(d) => addNode(d)} />}
         <div className="gcanvas" aria-label={"The steps of " + name + " as a graph"}>
           <ReactFlow nodes={shown} edges={edges} nodeTypes={nodeTypes} fitView minZoom={0.2} maxZoom={2} nodesDraggable={edit} nodesConnectable={edit} elementsSelectable
-            onConnect={connect} isValidConnection={valid} onNodesChange={onNodesChange} onEdgesDelete={(es) => removeEdges(es.map((e) => e.id))} onNodesDelete={(ns) => removeNodes(ns.map((n) => n.id))} deleteKeyCode={edit ? ["Delete", "Backspace"] : null}
+            onConnect={connect} isValidConnection={valid} onNodesChange={onNodesChange} onDelete={({ nodes: ns, edges: es }) => (ns.length ? removeNodes(ns.map((n) => n.id)) : removeEdges(es.map((e) => e.id)))} deleteKeyCode={edit ? ["Delete", "Backspace"] : null}
             onNodeClick={(_, n) => (setSel(n.id), setSelEdge(null))} onEdgeClick={(_, e) => (setSelEdge(e.id), setSel(null))} onPaneClick={() => (setSel(null), setSelEdge(null))}>
             <Background gap={20} />
             <MiniMap pannable zoomable ariaLabel="Overview of the graph" nodeColor="var(--border-strong)" nodeStrokeColor="var(--text-2)" nodeBorderRadius={4} />
