@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -18,7 +19,11 @@ type Selectors struct {
 	Format     string `json:"format"`     // hevc (AvailableFormats)
 	Resolution string `json:"resolution"` // keep | 1080 | 720 | 480: the largest picture height; never upscaled
 	MaxBitrate string `json:"maxBitrate"` // none | high | medium | low (S6: Ladder): a peak cap beside the quality
-	Audio      string `json:"audio"`      // AvailableAudio (S6: design E's six choices)
+	// RateControl (user review 11-12 item 1): "" or "quality" is today's (the quality, with the level as
+	// a cap); "vbr" aims at the level's bitrate for the new file's height, never above VBRMaxKbps.
+	RateControl string `json:"rateControl,omitempty"`
+	VBRMaxKbps  int    `json:"vbrMaxKbps,omitempty"` // vbr: the person's own limit (kbps)
+	Audio       string `json:"audio"`                // AvailableAudio (S6: design E's six choices)
 	// OnlyMyLanguages keeps only the audio in the person's languages, and tracks with none (S6; on by default).
 	OnlyMyLanguages bool   `json:"onlyMyLanguages"`
 	Subtitles       string `json:"subtitles"`           // AvailableSubtitles
@@ -94,6 +99,25 @@ func (s Selectors) Validate() error {
 	}
 	if !contains(BitrateLevels, s.MaxBitrate) {
 		return invalid("maxBitrate", s.MaxBitrate)
+	}
+	switch s.RateControl {
+	case "", "quality":
+	case "vbr":
+		if s.MaxBitrate == "none" || s.MaxBitrate == "" {
+			return &SelectorError{"invalid", "VBR aims at a level's bitrate: choose Low, Medium or High. Nothing was changed."}
+		}
+		if s.VBRMaxKbps < 100 || s.VBRMaxKbps > 500000 {
+			return &SelectorError{"invalid", "Set the VBR limit from 0.1 to 500 Mbps. Nothing was changed."}
+		}
+		if h := resolutions[s.Resolution]; h > 0 { // a fixed size: its row is known
+			row := HeightRow(0, h)
+			if t := Ladder[ladderFormat(s.Format)][s.MaxBitrate][row]; float64(s.VBRMaxKbps) < t*1000 {
+				return &SelectorError{"invalid", fmt.Sprintf("The limit is below %s's %s Mbps for %s. Raise it, or choose a lower level. Nothing was changed.",
+					upperFirst(s.MaxBitrate), strconv.FormatFloat(t, 'f', -1, 64), RowLabel(row))}
+			}
+		}
+	default:
+		return invalid("rateControl", s.RateControl)
 	}
 	switch {
 	case !contains(allAudio, s.Audio):

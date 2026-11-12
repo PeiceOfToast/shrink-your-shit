@@ -141,3 +141,31 @@ func RoughWarning(level, f string, shapes []Shape) string {
 	return fmt.Sprintf("%s may look blocky in dark or fast scenes for %s files%s (%g Mbps). Choose %s to avoid that.",
 		upperFirst(level), what, fps, row[worst.Row], betterLevel[level])
 }
+
+// RowLabel is a ladder row in words ("sd": 480p and below).
+func RowLabel(row string) string {
+	switch row {
+	case "2160":
+		return "4K"
+	case "sd":
+		return "480p and below"
+	}
+	return row + "p"
+}
+
+// LadderRows are the ladder's rows, largest first.
+var LadderRows = []string{"2160", "1440", "1080", "720", "sd"}
+
+// VBRKbps is a VBR encode's target and limit (user review 11-12 item 1): the level's figure for the
+// new file's height, never more than the limit, and neither more than the source has now.
+func VBRKbps(level, f string, w, h int, v *media.Stream, sourceKbps, limit int) (target, max int) {
+	target = CapKbps(level, f, w, h, v, sourceKbps)
+	max = limit
+	if sourceKbps > 0 && sourceKbps < max {
+		max = sourceKbps
+	}
+	if target > max {
+		target = max
+	}
+	return target, max
+}
