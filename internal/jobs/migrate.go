@@ -368,6 +368,16 @@ END;`},
 	// that original's record here (0: from the original in place); cleared when it is done again.
 	{33, "convert again", `
 ALTER TABLE jobs ADD COLUMN again_from INTEGER NOT NULL DEFAULT 0;`},
+	// V7b (remote workers, slices/v2-engine/v7-plan.md): a worker on another computer, paired with a
+	// one-time code, answers with its own token (only its hash is kept); local is the built-in one.
+	{34, "remote workers", `
+ALTER TABLE workers ADD COLUMN kind TEXT NOT NULL DEFAULT 'local';
+ALTER TABLE workers ADD COLUMN token_hash TEXT NOT NULL DEFAULT '';
+ALTER TABLE workers ADD COLUMN version TEXT NOT NULL DEFAULT '';
+ALTER TABLE workers ADD COLUMN api_level INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE workers ADD COLUMN last_seen TEXT NOT NULL DEFAULT '';
+ALTER TABLE workers ADD COLUMN capabilities TEXT NOT NULL DEFAULT '{}';
+CREATE TABLE worker_pairings (code_hash TEXT PRIMARY KEY, expires TEXT NOT NULL, used_at TEXT NOT NULL DEFAULT '');`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone
