@@ -122,13 +122,21 @@ func ids(d Doc) []string {
 	return out
 }
 
-// The preset's default Save the result (next to each library) is saved, but can't be published
-// before V5; the other choices can.
+// The preset's default Save the result, next to each library, runs (V5a); so do the other choices.
 func TestPresetDefaults(t *testing.T) {
 	d := roundTrip(t, Preset())
 	r := Validate(d)
-	if !r.Stackable || len(r.Issues) != 1 || r.Issues[0].Code != "not_runnable_yet" || r.Issues[0].ConfigPath != "/folderMode" {
+	if !r.Stackable || len(r.Issues) != 0 {
 		t.Fatalf("%+v", r)
+	}
+	tm, issues := ToTemplate(d, rules.Template{})
+	if len(issues) > 0 || tm.Selectors == nil || tm.Selectors.AfterConverting != "folder" || tm.Selectors.FolderMode != rules.NextToLibrary || tm.Selectors.OutputDir != "" {
+		t.Fatalf("next to each library: %+v %v", tm.Selectors, issues)
+	}
+	for _, n := range FromTemplate(tm, nil).Nodes { // and back
+		if n.Type == TypeCommit && (n.Config["policy"] != "separate_folder" || n.Config["folderMode"] != rules.NextToLibrary) {
+			t.Errorf("back from the template: %v", n.Config)
+		}
 	}
 	if r.StepSummaries[d.Nodes[2].ID] != "HEVC · Balanced quality · same resolution" || !strings.Contains(r.StepSummaries[d.Nodes[3].ID], "in your languages") {
 		t.Errorf("summaries %v", r.StepSummaries)

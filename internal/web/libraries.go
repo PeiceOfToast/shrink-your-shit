@@ -227,10 +227,12 @@ func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		}
 		var l jobs.Library
 		var err error
+		// its flow's folder for new files (none for a new flow: GetFlow(0) fails), and never around
+		// another library's (V5a): on either path
+		if folderRefused(w, store, flowID, jobs.Library{Name: name, Path: path}) {
+			return
+		}
 		if flowID > 0 {
-			if folderRefused(w, store, flowID, path) {
-				return
-			}
 			l, err = store.AddLibraryOnFlow(name, path, flowID, false)
 		} else {
 			l, err = store.AddLibrary(name, path, rules.SliderTemplate(pos), false) // not started: nothing scanned or queued
@@ -285,8 +287,10 @@ func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			in.Path = &p
 		}
 		if in.Path != nil {
-			if cur, err := store.GetLibrary(id); err == nil && folderRefused(w, store, cur.FlowID, *in.Path) {
-				return
+			if cur, err := store.GetLibrary(id); err == nil {
+				if cur.Path = *in.Path; folderRefused(w, store, cur.FlowID, cur) { // checked at its new place
+					return
+				}
 			}
 		}
 		l, err := store.UpdateLibrary(id, in.Name, in.Path)

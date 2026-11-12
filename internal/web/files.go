@@ -227,9 +227,10 @@ func fileItem(store *jobs.Store, libs []jobs.Library, row jobs.FileRow, card str
 }
 
 // outputBlockers says why dir can't be a flow's folder for new files (S6, "Save to another folder";
-// contract 21:10Z item 5): not_writable, low_space (under 10 GB free), inside_library (inside a library
-// of this flow, so new files would be converted again; or a library inside it). Empty: it can be used.
-func outputBlockers(store *jobs.Store, flowID int64, dir string, moreLibraries ...string) []map[string]string {
+// contract 21:10Z item 5): not_writable, low_space (under 10 GB free), inside_library (inside any
+// library, so new files would be converted again; or a library inside it; V5a: every library, not only
+// the flow's). Library except (0: none) is left out: it is being moved. Empty: it can be used.
+func outputBlockers(store *jobs.Store, except int64, dir string, moreLibraries ...string) []map[string]string {
 	out := []map[string]string{}
 	add := func(code, msg string) { out = append(out, map[string]string{"code": code, "message": msg}) }
 	if !filepath.IsAbs(dir) {
@@ -242,15 +243,7 @@ func outputBlockers(store *jobs.Store, flowID int64, dir string, moreLibraries .
 		add("system_folder", "This is a system folder. Choose a folder for your videos.")
 		return out
 	}
-	paths := moreLibraries // a library being added to this flow or moved (checked before it is saved)
-	if libs, err := store.Libraries(); err == nil {
-		for _, l := range libs {
-			if l.FlowID == flowID {
-				paths = append(paths, l.Path)
-			}
-		}
-	}
-	for _, lp := range paths {
+	for _, lp := range append(moreLibraries, otherLibraries(store, except)...) { // moreLibraries: one being added or moved
 		if outputInside(dir, lp) {
 			add("inside_library", "This folder is inside the library, so new files would be converted again. Pick a folder outside "+lp+".")
 			break
@@ -296,19 +289,67 @@ func resolved(path string) string {
 	}
 }
 
-// folderRefused answers 400 when library path libPath would use (or move under) flow flowID whose new
-// files go to another folder inside or around it: checked when a library joins a flow or moves, not
-// only when the flow is saved (review 6cafc6f).
-func folderRefused(w http.ResponseWriter, store *jobs.Store, flowID int64, libPath string) bool {
-	f, err := store.GetFlow(flowID)
-	if err != nil || f.Template.Selectors == nil || f.Template.Selectors.AfterConverting != "folder" {
-		return false
+// folderRefused answers 400 when library lib (being added: ID 0; or moved: its new Path) would use
+// flow flowID whose new files go to a folder inside or around it, or to none (V5a: "Next to each
+// library" with no usable folder), or when lib's folder would hold another library's new files:
+// checked when a library joins a flow or moves, not only when the flow is saved (review 6cafc6f).
+func folderRefused(w http.ResponseWriter, store *jobs.Store, flowID int64, lib jobs.Library) bool {
+	refuse := func(code, msg string) bool { apiError(w, http.StatusBadRequest, code, msg); return true }
+	if f, err := store.GetFlow(flowID); err == nil {
+		dir, problem := libraryFolder(f.Template, lib)
+		if problem != nil {
+			return refuse(problem.Code, problem.Message+" Nothing was changed.")
+		}
+		if b := outputInsideBlocker(dir, lib.Path); b != nil {
+			return refuse(b.Code, b.Message)
+		}
+		for _, lp := range otherLibraries(store, lib.ID) {
+			if dir != "" && outputInside(dir, lp) {
+				return refuse("inside_library", "This flow saves this library's new files to "+dir+", which is inside the library at "+lp+" (or holds it), so new files would be converted again. Choose another folder. Nothing was changed.")
+			}
+		}
 	}
-	if b := outputInsideBlocker(f.Template.Selectors.OutputDir, libPath); b != nil {
-		apiError(w, http.StatusBadRequest, b.Code, b.Message)
-		return true
+	libs, _ := store.Libraries() // the other libraries' folders for new files: never inside this one
+	for _, m := range libs {
+		if m.ID == lib.ID {
+			continue
+		}
+		f, err := store.GetFlow(m.FlowID)
+		if err != nil {
+			continue
+		}
+		if dir, _ := libraryFolder(f.Template, m); dir != "" && outputInside(dir, lib.Path) {
+			return refuse("inside_library", lib.Path+" holds "+dir+", where "+m.Name+"'s new files go, so they would be converted again. Choose another folder. Nothing was changed.")
+		}
 	}
 	return false
+}
+
+// libraryFolder is where library l's new files go with template t ("" when t keeps them beside the
+// original or replaces it), or why there is no folder (V5a: "Next to each library").
+func libraryFolder(t rules.Template, l jobs.Library) (string, *jobs.FolderProblem) {
+	s := t.Selectors
+	switch {
+	case s == nil || s.AfterConverting != "folder":
+		return "", nil
+	case s.FolderMode != rules.NextToLibrary:
+		return s.OutputDir, nil
+	case l.OverrideFolder != "":
+		return l.OverrideFolder, nil
+	}
+	return jobs.NextToLibrary(l.Name, l.Path)
+}
+
+// otherLibraries are the paths of every library but except (0: none).
+func otherLibraries(store *jobs.Store, except int64) []string {
+	var out []string
+	libs, _ := store.Libraries()
+	for _, l := range libs {
+		if l.ID != except {
+			out = append(out, l.Path)
+		}
+	}
+	return out
 }
 
 // outputInside reports whether new files saved to dir would land inside library folder lib, or around

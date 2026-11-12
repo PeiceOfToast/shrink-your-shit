@@ -46,6 +46,11 @@ type Queue interface {
 	Keep(id int64, code, reason string) error
 	// RetryLater puts a job whose failure may pass back in the queue, not to be taken before at (DD-2).
 	RetryLater(id int64, at time.Time, code, reason string) error
+	// OutputFolder is a library's folder for new files with "Next to each library" (V5a), or why it has
+	// none.
+	OutputFolder(libraryID int64, libPath string) (string, *jobs.FolderProblem, error)
+	// IsOwnOutput reports whether the file at path (this size and time) is one a done job wrote.
+	IsOwnOutput(path string, size, mtime int64) (bool, error)
 	// RecordPlan stores the Plan a running job converts with (JSON) and its fingerprint.
 	RecordPlan(id int64, plan, fingerprint string) error
 	// Skip ends a job as a skipped file with words and a reason code (S3: Dolby Vision left alone).
@@ -604,7 +609,18 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	case Beside:
 		newName = BesidePathAs(job.Path, ext)
 	case Folder:
-		newName = FolderPath(plan.OutputDir, job.Library, job.Path, ext)
+		dir := plan.OutputDir
+		if plan.FolderMode == rules.NextToLibrary { // V5a: the library's own folder beside it, or its override
+			d, problem, err := w.Queue.OutputFolder(job.LibraryID, job.Library)
+			if err != nil {
+				return "", retryable(failed("This library's folder for new files could not be read, so converting did not start. Your original was not touched. Press Retry.", err), retryGeneral)
+			}
+			if problem != nil {
+				return "", failed(problem.Message+" Your original was not touched.", errors.New(problem.Code))
+			}
+			dir = d
+		}
+		newName = FolderPath(dir, job.Library, job.Path, ext)
 		if err := os.MkdirAll(filepath.Dir(newName), 0o755); err != nil {
 			return "", failed("The folder for new files can't be written to, so nothing was converted. Your original was not touched. Check the flow's folder, then press Retry.", err)
 		}
@@ -613,12 +629,14 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 	}
 	if keepsOriginal(plan) { // the name is taken already: no point converting (checked again at the end)
-		if _, err := os.Lstat(newName); err == nil {
-			where := "next to the original"
-			if OutputMode(plan.Output) == Folder {
-				where = "in the folder for new files"
+		if OutputMode(plan.Output) == Folder {
+			// our own earlier output may be there (the original changed and is converted again): it is
+			// replaced once the new file passes its checks; a file we didn't make never is (design 01:04Z)
+			if lst, err := os.Lstat(newName); err == nil && !w.ownOutput(newName, lst) {
+				return "", failed(notOurs(newName), fs.ErrExist)
 			}
-			return "", failed(fmt.Sprintf("There is already a file named %s %s, so the new file was not made. Nothing was changed. Move or rename that file, then press Retry.", filepath.Base(newName), where), fs.ErrExist)
+		} else if _, err := os.Lstat(newName); err == nil {
+			return "", failed(fmt.Sprintf("There is already a file named %s next to the original, so the new file was not made. Nothing was changed. Move or rename that file, then press Retry.", filepath.Base(newName)), fs.ErrExist)
 		}
 	} else if newName != job.Path && exists(newName) { // a renaming replace never replaces another file
 		return "", failed(rules.NameTaken(newName), fs.ErrExist)
@@ -775,8 +793,11 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		return final, nil
 	}
 	move := moveIntoPlace
-	if keepsOriginal(plan) {
-		move = moveBeside // beside or in another folder: never over another file
+	switch {
+	case OutputMode(plan.Output) == Folder:
+		move = w.moveIntoFolder // never over a file we didn't make
+	case keepsOriginal(plan):
+		move = moveBeside // never over another file
 	}
 	if err := move(ctx, tmp, final, stillOK); err != nil {
 		removePlaced()
@@ -1067,6 +1088,34 @@ func moveBeside(ctx context.Context, tmp, final string, stillOK func() error) er
 	return moveNoClobber(ctx, tmp, final, stillOK, func(name string) string {
 		return fmt.Sprintf("There is already a file named %s next to the original, so the new file was not put there. Nothing was changed. Move or rename that file, then press Retry.", filepath.Base(name))
 	})
+}
+
+// moveIntoFolder puts the new file in the folder for new files (it passed its checks): over our own
+// earlier output of the same file, which goes now, but never over a file we didn't make (design 01:04Z).
+func (w *Worker) moveIntoFolder(ctx context.Context, tmp, final string, stillOK func() error) error {
+	return moveNoClobber(ctx, tmp, final, func() error {
+		if err := stillOK(); err != nil {
+			return err
+		}
+		if lst, err := os.Lstat(final); err == nil && w.ownOutput(final, lst) {
+			return os.Remove(final) // the older generation: the original is still in the library
+		}
+		return nil
+	}, notOurs)
+}
+
+// ownOutput reports whether the regular file at p (lst its Lstat) is one a done job of ours wrote.
+func (w *Worker) ownOutput(p string, lst fs.FileInfo) bool {
+	if !lst.Mode().IsRegular() {
+		return false
+	}
+	own, err := w.Queue.IsOwnOutput(p, lst.Size(), lst.ModTime().UnixNano())
+	return err == nil && own
+}
+
+// notOurs is the failure for a file we didn't make at a new file's name in the folder (design 01:04Z).
+func notOurs(p string) string {
+	return fmt.Sprintf("A file named %s is already in %s and wasn't made by Shrink Your Shit. Nothing was changed. Move or rename it, then press Retry.", filepath.Base(p), filepath.Dir(p))
 }
 
 // moveNoClobber renames tmp to final only if nothing is at final (renameNoReplace); a name taken fails

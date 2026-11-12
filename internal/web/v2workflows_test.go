@@ -102,11 +102,9 @@ func TestV2Workflows(t *testing.T) {
 	id := nw["id"].(string)
 	_, body = get("/api/v2/workflows/" + id + "/draft")
 	d := decode[v2Rev](t, body)
-	if d.Status != "draft" || !d.Stackable || len(d.Validation) != 1 || d.Validation[0].Code != "not_runnable_yet" || d.StepSummaries[d.Workflow.Nodes[2].ID] == "" {
+	// V5a: the preset's Save step (next to each library) runs, so a new workflow has no errors
+	if d.Status != "draft" || !d.Stackable || len(d.Validation) != 0 || d.StepSummaries[d.Workflow.Nodes[2].ID] == "" {
 		t.Fatalf("draft %s", body)
-	}
-	if code, body := send("POST", "/api/v2/workflows/"+id+"/publish", `{"etag":"`+d.Etag+`"}`, ""); code != 400 || errCode(body) != "has_errors" {
-		t.Errorf("publish with errors: %d %s", code, body)
 	}
 	// the old pages don't list a never-published workflow
 	if _, body := get("/api/flows"); strings.Contains(body, "Shrink TV") {
@@ -398,7 +396,7 @@ func TestV2DraftWorkflowFields(t *testing.T) {
 	srv, _, _, _ := libServer(t, false)
 	_, body := post(t, srv, "POST", "/api/v2/workflows", `{"name":"Fresh"}`)
 	w := decode[map[string]any](t, body)
-	if w["presetId"] != "shrink_videos" || w["changesOriginals"] != false || w["summaryTag"] != "" { // next to each library: not runnable yet, so no tag
+	if w["presetId"] != "shrink_videos" || w["changesOriginals"] != false || w["summaryTag"] == "" { // next to each library runs (V5a): its tag
 		t.Errorf("fresh draft %s", body)
 	}
 	id := w["id"].(string)
