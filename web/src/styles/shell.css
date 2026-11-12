@@ -331,7 +331,7 @@ input.switch:checked{background:var(--accent);border-color:var(--accent)}
 input.switch:checked::after{left:19px;background:var(--on-accent)}
 input[type=checkbox]:not(.switch),input[type=radio]{accent-color:var(--accent);width:18px;height:18px;margin:0;flex:none}
 .radio>input{margin-top:2px}
-.radio:has(input:checked){border-color:var(--accent);background:var(--raised);box-shadow:inset 0 0 0 1px var(--accent)}
+input[type=radio]:focus-visible{border-radius:50%;outline-offset:3px} /* review 628ebc3 P3: plain radios (clean pass 2): no box around the chosen one; focus is a ring, not a square on the dot */
 .radio label{font-weight:var(--fw-strong);cursor:pointer}
 input[type=range]{width:100%;accent-color:var(--accent);height:28px;margin:0}
 label.chk{cursor:pointer}

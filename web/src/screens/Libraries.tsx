@@ -64,7 +64,7 @@ const Problem = ({ m }: { m?: string }) => (m ? <p className="st bad" role="aler
 export function Libraries() {
   const libs = useData(listLibrariesV2, [], 3000);
   // user item 3 (design 7.1): each row shows its workflow's summary in full ("Standard · Balanced · ..."), from the workflows list
-  const docs = useData(listWorkflowDocs, [], 10000), tag = (l: Library) => docs.data?.find((w) => w.id === l.workflowId)?.summaryTag ?? "";
+  const docs = useData(listWorkflowDocs, [], 10000), tag = (l: Library) => { const t = docs.data?.find((w) => w.id === l.workflowId)?.summaryTag ?? ""; return t.trim() === l.workflowName.trim() ? "" : t; }; // review 628ebc3 P2: a workflow named by its summary (the default) shows it once
   useEffect(() => onLive((t) => { if (t === "library.changed") libs.reload(); }), []); // eslint-disable-line react-hooks/exhaustive-deps -- #150: at once
   const [sel, setSel] = useState<string[]>([]), [said, setSaid] = useState(""), [q, setQ] = useState(""), [selecting, setSelecting] = useState(false);
   const all = libs.data ?? [], items = all.filter((l) => !q || (l.name + " " + l.paths.join(" ")).toLowerCase().includes(q.toLowerCase()));
