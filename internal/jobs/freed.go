@@ -11,6 +11,12 @@ package jobs
 //     goes by itself: the person can remove it. Once a scan finds it gone, it is freed; if it changed
 //     instead (another size), it is a new file and the old saving counts nowhere.
 
+// newestSQL is true for a jobs row with no later done job for the same file: a file is counted once,
+// by its newest conversion (checked last in each bucket: a row reaches it in one bucket at most, so
+// it costs one lookup by the jobs_path index, not four). Republishing a workflow queues every file again, and each earlier done job
+// would otherwise count the same original's saving once more (ui-shop review d10d17e, orch-lead 18:29Z).
+const newestSQL = `NOT EXISTS (SELECT 1 FROM jobs later WHERE later.path=jobs.path AND later.status='done' AND later.id>jobs.id)`
+
 // leftSQL is true for a done job (of table jobs) that left its original where it was.
 const leftSQL = `(output_path<>'' AND output_path<>path AND NOT EXISTS (SELECT 1 FROM originals o WHERE o.job_id=jobs.id))`
 
@@ -18,15 +24,15 @@ const keptNowSQL = `EXISTS (SELECT 1 FROM originals o WHERE o.job_id=jobs.id AND
 
 // freedSQL, waitingSQL and couldFreeSQL are a jobs row's freed, waiting and could-free bytes (NULL: none).
 const (
-	freedSQL     = `CASE WHEN status='done' AND size_after>0 AND ((` + replacedSQL + ` AND NOT ` + keptNowSQL + `) OR (` + leftSQL + ` AND original_gone_at<>'' AND original_changed=0)) THEN ` + savedSQL + ` END`
-	waitingSQL   = `CASE WHEN status='done' AND size_after>0 AND ` + replacedSQL + ` AND ` + keptNowSQL + ` THEN ` + savedSQL + ` END`
-	couldFreeSQL = `CASE WHEN status='done' AND size_after>0 AND ` + leftSQL + ` AND original_gone_at='' AND original_changed=0 THEN ` + savedSQL + ` END`
+	freedSQL     = `CASE WHEN status='done' AND size_after>0 AND ((` + replacedSQL + ` AND NOT ` + keptNowSQL + `) OR (` + leftSQL + ` AND original_gone_at<>'' AND original_changed=0)) AND ` + newestSQL + ` THEN ` + savedSQL + ` END`
+	waitingSQL   = `CASE WHEN status='done' AND size_after>0 AND ` + replacedSQL + ` AND ` + keptNowSQL + ` AND ` + newestSQL + ` THEN ` + savedSQL + ` END`
+	couldFreeSQL = `CASE WHEN status='done' AND size_after>0 AND ` + leftSQL + ` AND original_gone_at='' AND original_changed=0 AND ` + newestSQL + ` THEN ` + savedSQL + ` END`
 	// savedSQL is one file's saving, never below 0: a new file bigger than its original (kept by design,
 	// always-standardize 11-07) saves nothing, and its growth counts in grewSQL instead, so a total never
 	// hides it nor goes negative (orch-lead 18:15Z)
 	savedSQL = `MAX(size_before-size_after, 0)`
 	// grewSQL is how much bigger a done job's new file is than its original (NULL: not bigger)
-	grewSQL = `CASE WHEN status='done' AND size_after>size_before AND size_before>0 THEN size_after-size_before END`
+	grewSQL = `CASE WHEN status='done' AND size_after>size_before AND size_before>0 AND ` + newestSQL + ` THEN size_after-size_before END`
 	// freedAtSQL is when a freed saving was freed: the original found gone, its kept copy's delete day,
 	// or the conversion's end (replaced with nothing kept).
 	freedAtSQL = `CASE WHEN ` + leftSQL + ` THEN original_gone_at
