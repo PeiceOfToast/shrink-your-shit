@@ -206,7 +206,9 @@ export interface ValidationIssue {
     | "unknown_node_type" | "unknown_type_version" | "missing_config" | "invalid_config" | "unknown_config_key"
     | "missing_variable" | "capability_unavailable" | "capability_unknown" | "unsafe_output_path"
     | "dangling_edge" | "unknown_port" | "port_type_mismatch"
-    | "not_runnable_yet" | "unknown_schema_version" | "duplicate_id"; // the last three: added in V1 (Built in V1)
+    | "not_runnable_yet" | "unknown_schema_version" | "duplicate_id" // the last three: added in V1 (Built in V1)
+    | "unconnected_port" | "port_used_twice" | "empty_check" | "branch_in_conversion" | "path_without_save" | "fallback_loop" // V6a/V6b
+    | (string & {}); // a newer server's code: show its message
   severity: "error" | "warning";
   message: string;
   nodeId?: ID; edgeId?: ID; port?: string; configPath?: string;

@@ -19,7 +19,7 @@ const Reg = createContext<{ defs: StepDefinition[]; words: Record<string, string
 function useReg() { const r = useContext(Reg); return { stepDef: (t: string) => r.defs.find((d) => d.type === t), summary: (n: Node) => r.words[n.id] ?? "", libs: r.libs }; }
 
 // The server's icon keys (registry) -> design's sprite.
-export const ICON: Record<string, string> = { folder: "i-folder", filter: "i-shield", video: "i-video", audio: "i-audio", subtitles: "i-subtitle", file: "i-file", check: "i-checks", save: "i-save", cond: "i-cond", history: "i-history" };
+export const ICON: Record<string, string> = { folder: "i-folder", filter: "i-shield", video: "i-video", audio: "i-audio", subtitles: "i-subtitle", file: "i-file", check: "i-checks", save: "i-save", cond: "i-cond", history: "i-history", branch: "i-branch", stop: "i-stop" }; // branch, stop: V6a check + end
 // The words around each option come from the server's step definitions (#114: title, description, x-enumHints for
 // each choice, x-placeholder); the page adds none of its own.
 const MORE: Record<string, string[]> = { "video.convert": ["format", "resolution", "maxBitrate", "speed"] };
