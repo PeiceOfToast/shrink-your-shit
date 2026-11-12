@@ -240,7 +240,7 @@ func TestEventsMigrationKeepsSeq(t *testing.T) {
 		`CREATE TRIGGER job_events_status AFTER UPDATE OF status ON jobs BEGIN SELECT 1; END`,
 		`CREATE TRIGGER job_events_removed AFTER DELETE ON jobs BEGIN SELECT 1; END`,
 		`INSERT INTO job_events(seq, job_id, at, to_status) VALUES (41, 7, '2026-11-01T00:00:00Z', 'queued'), (42, 7, '2026-11-01T00:00:01Z', 'running')`,
-		`ALTER TABLE jobs DROP COLUMN error_code`, `DROP TABLE workers`, `ALTER TABLE libraries DROP COLUMN override_folder`, `ALTER TABLE libraries DROP COLUMN priority`, `ALTER TABLE jobs DROP COLUMN original_gone_at`, `ALTER TABLE jobs DROP COLUMN original_changed`, `ALTER TABLE jobs DROP COLUMN original_disk`, `ALTER TABLE jobs DROP COLUMN route`, `ALTER TABLE job_steps DROP COLUMN node_id`, `ALTER TABLE job_steps DROP COLUMN port`, `ALTER TABLE jobs DROP COLUMN fallback`, `ALTER TABLE jobs DROP COLUMN lease_id`, `ALTER TABLE jobs DROP COLUMN lease_expires`, `ALTER TABLE files DROP COLUMN job_id`, // migrations 23 to 27 run again
+		`ALTER TABLE jobs DROP COLUMN error_code`, `DROP TABLE workers`, `ALTER TABLE libraries DROP COLUMN override_folder`, `ALTER TABLE libraries DROP COLUMN priority`, `ALTER TABLE jobs DROP COLUMN original_gone_at`, `ALTER TABLE jobs DROP COLUMN original_changed`, `ALTER TABLE jobs DROP COLUMN original_disk`, `ALTER TABLE jobs DROP COLUMN route`, `ALTER TABLE job_steps DROP COLUMN node_id`, `ALTER TABLE job_steps DROP COLUMN port`, `ALTER TABLE jobs DROP COLUMN fallback`, `ALTER TABLE jobs DROP COLUMN lease_id`, `ALTER TABLE jobs DROP COLUMN lease_expires`, `ALTER TABLE files DROP COLUMN job_id`, `ALTER TABLE jobs DROP COLUMN again_from`, `DROP TABLE worker_pairings`, // migrations 23 to 27 run again
 		`PRAGMA user_version=21`} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
@@ -308,7 +308,7 @@ func TestReasonCodesMigration(t *testing.T) {
 		`DROP TRIGGER events_job_status`, `DROP TRIGGER events_job_removed`,
 		`CREATE TRIGGER events_job_status AFTER UPDATE OF status ON jobs BEGIN SELECT 1; END`,
 		`CREATE TRIGGER events_job_removed AFTER DELETE ON jobs BEGIN SELECT 1; END`,
-		`ALTER TABLE jobs DROP COLUMN error_code`, `DROP TABLE workers`, `ALTER TABLE libraries DROP COLUMN override_folder`, `ALTER TABLE libraries DROP COLUMN priority`, `ALTER TABLE jobs DROP COLUMN original_gone_at`, `ALTER TABLE jobs DROP COLUMN original_changed`, `ALTER TABLE jobs DROP COLUMN original_disk`, `ALTER TABLE jobs DROP COLUMN route`, `ALTER TABLE job_steps DROP COLUMN node_id`, `ALTER TABLE job_steps DROP COLUMN port`, `ALTER TABLE jobs DROP COLUMN fallback`, `ALTER TABLE jobs DROP COLUMN lease_id`, `ALTER TABLE jobs DROP COLUMN lease_expires`, `ALTER TABLE files DROP COLUMN job_id`, `PRAGMA user_version=22`} {
+		`ALTER TABLE jobs DROP COLUMN error_code`, `DROP TABLE workers`, `ALTER TABLE libraries DROP COLUMN override_folder`, `ALTER TABLE libraries DROP COLUMN priority`, `ALTER TABLE jobs DROP COLUMN original_gone_at`, `ALTER TABLE jobs DROP COLUMN original_changed`, `ALTER TABLE jobs DROP COLUMN original_disk`, `ALTER TABLE jobs DROP COLUMN route`, `ALTER TABLE job_steps DROP COLUMN node_id`, `ALTER TABLE job_steps DROP COLUMN port`, `ALTER TABLE jobs DROP COLUMN fallback`, `ALTER TABLE jobs DROP COLUMN lease_id`, `ALTER TABLE jobs DROP COLUMN lease_expires`, `ALTER TABLE files DROP COLUMN job_id`, `ALTER TABLE jobs DROP COLUMN again_from`, `DROP TABLE worker_pairings`, `PRAGMA user_version=22`} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}

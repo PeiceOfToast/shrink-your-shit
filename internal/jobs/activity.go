@@ -152,7 +152,9 @@ FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id WHERE j.status IN (?,?) O
 // a start-up pass, which would stat every old output, and hang on (or miss) a library that is offline.
 func (s *Store) IsOwnOutput(path string, size, mtime int64) (bool, error) {
 	var yes bool
-	err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM jobs WHERE output_path=? AND status='done' AND size_after=? AND output_mtime=? AND output_mtime<>0)`,
+	// any status: only Complete sets output_path, and a done job converted again (queued, running, or
+	// failed meanwhile) still owns its earlier output (Convert again, design 11:45Z)
+	err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM jobs WHERE output_path=? AND size_after=? AND output_mtime=? AND output_mtime<>0)`,
 		path, size, mtime).Scan(&yes)
 	if err != nil || yes {
 		return yes, err

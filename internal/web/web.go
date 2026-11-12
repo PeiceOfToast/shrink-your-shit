@@ -27,6 +27,7 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	mux := http.NewServeMux()
 	api := http.NewServeMux()
 	mux.Handle("/api/", access.guard(api))
+	mux.Handle("/api/worker/v1/", workerAPI(store, eng.Transport, eng.Version, eng)) // V7b1: remote workers, their own tokens
 	access.routes(api)
 	libraryRoutes(api, store, eng)
 	systemRoutes(api, store, eng)

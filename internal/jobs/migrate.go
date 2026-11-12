@@ -364,6 +364,27 @@ WHEN NOT EXISTS (SELECT 1 FROM events WHERE kind = 'job' AND job_id = old.id AND
   VALUES ('job', old.id, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), old.status, 'cancelled', 'removed', old.worker,
     json_object('message', 'This job was removed from the list.', 'path', old.path, 'attempts', old.attempts));
 END;`},
+	// review 89d22b3: a job by its file (Stranded, HasOpenJob, the scanner's look at every file each
+	// pass) is found by index, not by reading every job.
+	{33, "jobs by path", `
+CREATE INDEX IF NOT EXISTS jobs_path ON jobs(path);`},
+	// Convert again (design 11:45Z): a done job run again from its original kept in .syp-trash names
+	// that original's record here (0: from the original in place); cleared when it is done again.
+	// 34, not 33: 33 is the jobs-by-path index, merged first (orch-lead 13:44Z).
+	{34, "convert again", `
+ALTER TABLE jobs ADD COLUMN again_from INTEGER NOT NULL DEFAULT 0;`},
+	// V7b (remote workers, slices/v2-engine/v7-plan.md): a worker on another computer, paired with a
+	// one-time code, answers with its own token (only its hash is kept); local is the built-in one.
+	// 35, not 34: 33 (jobs by path) and 34 (Convert again) merge first (orch-lead 13:44Z).
+	{35, "remote workers", `
+ALTER TABLE workers ADD COLUMN kind TEXT NOT NULL DEFAULT 'local';
+ALTER TABLE workers ADD COLUMN token_hash TEXT NOT NULL DEFAULT '';
+ALTER TABLE workers ADD COLUMN version TEXT NOT NULL DEFAULT '';
+ALTER TABLE workers ADD COLUMN api_level INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE workers ADD COLUMN last_seen TEXT NOT NULL DEFAULT '';
+ALTER TABLE workers ADD COLUMN capabilities TEXT NOT NULL DEFAULT '{}';
+CREATE TABLE worker_pairings (code_hash TEXT PRIMARY KEY, expires TEXT NOT NULL, used_at TEXT NOT NULL DEFAULT '');
+CREATE INDEX workers_token ON workers(token_hash);`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone
