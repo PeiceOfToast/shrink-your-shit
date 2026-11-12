@@ -327,14 +327,27 @@ func (c *Client) download(ctx context.Context, l *Lease, to string) error {
 func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules.Snapshot, src, out string) (string, error) {
 	cctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	// the server judges the encode for its stall stop between "converting" (sent at the start, then with the
+	// position every ProgressEvery) and "checking" (sent when the encode ends): the checks and the upload
+	// that follow report nothing, so they must not count (orch-lead 19:13Z)
+	report := func(body map[string]any) error {
+		return c.call(cctx, "leases/"+l.ID+"/progress", body, nil)
+	}
+	if e := report(map[string]any{"stage": "converting", "outTimeUs": 0}); leaseGone(e) {
+		return "", e
+	}
 	var last time.Time
 	var gone error
 	stderr, err := media.Transcode(cctx, cv.Exec, cv.FFmpeg, snap.Plan.FFmpegArgs(src, out), l.Job.DurationSec, func(p media.Progress) {
-		if l.Job.DurationSec <= 0 || time.Since(last) < 5*time.Second {
-			return // no length: no percent to report, as before Transcode reported the position alone (#187)
+		if time.Since(last) < ProgressEvery {
+			return
 		}
 		last = time.Now()
-		if e := c.call(cctx, "leases/"+l.ID+"/progress", map[string]any{"percent": p.Percent, "stage": "converting"}, nil); leaseGone(e) {
+		body := map[string]any{"stage": "converting", "outTimeUs": p.OutTimeUS}
+		if l.Job.DurationSec > 0 {
+			body["percent"] = p.Percent // a length we don't know has no percent
+		}
+		if e := report(body); leaseGone(e) {
 			gone = e
 			cancel() // the job went back to the queue: stop converting it
 		}
@@ -342,8 +355,12 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 	if gone != nil {
 		return stderr, gone
 	}
+	report(map[string]any{"stage": "checking"}) // the encode ended (also when it failed): no longer judged
 	return stderr, err
 }
+
+// ProgressEvery is how often a converting worker reports where its encode is.
+var ProgressEvery = 5 * time.Second
 
 // upload sends the file at name as part (index), going on from what the server has; it returns the
 // file's SHA-256 and size.

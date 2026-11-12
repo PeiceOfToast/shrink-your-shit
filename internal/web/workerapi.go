@@ -318,8 +318,9 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine) http.
 			return
 		}
 		var in struct {
-			Percent float64
-			Stage   string
+			Percent   float64
+			Stage     string
+			OutTimeUs *float64 // where its encode is: a worker that sends it is judged for the stall stop
 		}
 		if !readJSON(w, r, &in) {
 			return
@@ -330,6 +331,14 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine) http.
 		}
 		if in.Percent > 0 {
 			store.Progress(j.ID, in.Percent)
+		}
+		if rj := runs.get(lease); rj != nil { // the stall stop (orch-lead 19:13Z): only "converting" with a position counts
+			switch {
+			case in.Stage == "converting" && in.OutTimeUs != nil:
+				rj.Converting(*in.OutTimeUs, time.Now())
+			case in.Stage != "converting":
+				rj.EncodeEnded()
+			}
 		}
 		_, expires, _ := store.LeaseHeld(lease, j.Worker)
 		writeJSON(w, map[string]any{"ok": true, "expiresAt": expires})
