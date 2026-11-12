@@ -103,7 +103,7 @@ export function Jobs() {
   };
   const actions = <>
     <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("retry")}><Icon id="i-refresh" />Retry</button>
-    <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("requeue")}><Icon id="i-arrow-r" />Put back in queue</button>
+    {(tab === "skipped" || tab === "failed") && <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("requeue")}><Icon id="i-arrow-r" />Put back in queue</button>} {/* only where the server takes it: skips (convert-again) and failed jobs */}
     <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("cancel")}><Icon id="i-stop" />Cancel</button>
     {tab === "waiting" && <span className="row nw" style={{ gap: 4 }}>
       <select className="input sm" aria-label="Priority" value={prio} onChange={(e) => setPrio(e.target.value as Pin | "none")}><option value="first">First</option><option value="none">Normal</option><option value="last">Last</option></select>
@@ -225,7 +225,8 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
             {(state === "failed" || state === "retry_wait") && <button className="btn sm" type="button" onClick={() => run("retry")}><Icon id="i-refresh" />{state === "retry_wait" ? "Try now" : "Retry"}</button>}
             {active && <button className="btn sm" type="button" onClick={() => run("cancel")}><Icon id="i-stop" />{state === "queued" || state === "retry_wait" ? "Cancel" : "Stop"}</button>}
             {/* a skipped file whose job is gone (a workflow's skip: the server says removed) can still be converted again (review f1aaf30) */}
-            {(state === "skipped" || state === "cancelled" || state === "completed") && (!j?.removed || !!row?.id.startsWith("skip-")) && <button className="btn sm" type="button" onClick={() => run("requeue")}><Icon id="i-arrow-r" />Convert again</button>}
+            {/* dev-qa (qa-v6-v7a C): a Done job can't go back to the queue (the server refuses done -> queued), so no Convert again there */}
+            {(state === "skipped" || state === "cancelled") && (!j?.removed || !!row?.id.startsWith("skip-")) && <button className="btn sm" type="button" onClick={() => run("requeue")}><Icon id="i-arrow-r" />Convert again</button>}
             <span className="sp" /><button className="btn sm ghost" type="button" title="Copy the job ID" onClick={() => navigator.clipboard?.writeText(id).then(() => setSaid("Job ID " + id + " copied."), () => setSaid("Job ID: " + id))}><Icon id="i-copy" />ID {id}</button>
           </div>
           <p className="muted" role="status">{said}</p>
