@@ -77,9 +77,27 @@ func TestV1ReadsV2Folders(t *testing.T) {
 	if f, _ := st.GetFlow(next.ID); f.Template.Selectors == nil || f.Template.Selectors.FolderMode != rules.NextToLibrary || f.Template.Selectors.Speed != "normal" {
 		t.Errorf("changed: %+v", f.Template.Selectors)
 	}
-	// choosing another place on purpose is a change the old page can make
+	// whatever the body says (review ac8fde4 P2): the old editor's exact body choosing replace, to the flow
+	// and to its library, and a stale old page saving after the new UI made it "next to each library"
 	replace := strings.Replace(old, `"afterConverting":"folder","outputDir":""`, `"afterConverting":"replace"`, 1)
-	if code, body, _ := do(t, nil, srv, call{method: "PUT", path: "/api/flows/" + strconv.FormatInt(next.ID, 10) + "/setting", body: replace, ctype: "application/json"}); code != 200 {
-		t.Errorf("replace on purpose: %d %s", code, body)
+	for _, p := range []string{libPath + "/setting", "/api/flows/" + strconv.FormatInt(next.ID, 10) + "/setting"} {
+		if code, body, _ := do(t, nil, srv, call{method: "PUT", path: p, body: replace, ctype: "application/json"}); code != 409 || errCode(body) != "edit_in_new_ui" {
+			t.Errorf("replace %s: %d %s", p, code, body)
+		}
+	}
+	if f, _ := st.GetFlow(next.ID); f.Template.Selectors == nil || f.Template.Selectors.AfterConverting != "folder" || f.Template.Selectors.FolderMode != rules.NextToLibrary {
+		t.Errorf("changed: %+v", f.Template.Selectors)
+	}
+	stale, _ := st.AddFlow("Standard", rules.DefaultSelectors(3).Template()) // open in an old page...
+	st.SetFlowTemplate(stale.ID, sel(rules.NextToLibrary, ""))               // ...made "next to each library" in the new UI
+	if code, body, _ := do(t, nil, srv, call{method: "PUT", path: "/api/flows/" + strconv.FormatInt(stale.ID, 10) + "/setting", body: replace, ctype: "application/json"}); code != 409 || errCode(body) != "edit_in_new_ui" {
+		t.Errorf("stale page: %d %s", code, body)
+	}
+	if f, _ := st.GetFlow(stale.ID); f.Template.Selectors == nil || f.Template.Selectors.FolderMode != rules.NextToLibrary {
+		t.Errorf("stale page changed it: %+v", f.Template.Selectors)
+	}
+	// a flow the old page can show still saves
+	if code, body, _ := do(t, nil, srv, call{method: "PUT", path: "/api/flows/" + strconv.FormatInt(one.ID, 10) + "/setting", body: replace, ctype: "application/json"}); code != 200 {
+		t.Errorf("one folder: %d %s", code, body)
 	}
 }
