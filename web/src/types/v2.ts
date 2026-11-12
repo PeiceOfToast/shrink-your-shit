@@ -84,12 +84,12 @@ export interface Library {
   counts: { files: number; waiting: number; running: number; completed: number; skipped: number; failed: number };
   bytes: { freed: number; waitingToFree: number };
   output: {
-    policy: CommitPolicy;
+    policy: CommitPolicy | null; // null: its workflow can't be read
     folder: string | null;
     overrideFolder: string | null;
-    problem: { code: "no_default_folder" | "system_folder" | "inside_library" | "not_writable" | "low_space"; message: string } | null;
+    problem: { code: string; message: string } | null; // no_default_folder, inside_library...: show the message
   };
-  discovery: { subfolders: boolean; settleSeconds: number; followLinks: boolean; include: string[]; exclude: string[] };
+  discovery: { subfolders: boolean; settleSeconds: number; followLinks: boolean; include: string[]; exclude: string[]; scanEverySeconds?: number }; // V5b: the effective interval
   status: "ok" | "scanning" | "path_missing" | "not_readable" | "disabled";
 }
 
@@ -122,7 +122,8 @@ export interface ActivityEvent { // GET /activity
 
 // GET /api/v2/settings: v1's settings (contract: Settings), including first run's firstRunDone/firstRunStep.
 // firstRunLibrary (#116): first run's step 1 folder, kept until a library is created (then null; PATCH null clears it).
-export interface Settings { firstRunDone: boolean; firstRunStep: number; intakePaused: boolean; catalogueEnabled: boolean; firstRunLibrary: { name: string; path: string } | null }
+export interface Settings { firstRunDone: boolean; firstRunStep: number; intakePaused: boolean; catalogueEnabled: boolean; firstRunLibrary: { name: string; path: string } | null;
+  scanEvery?: number; scanEverySource?: "flag" | "saved"; scanEveryMin?: number; scanEveryMax?: number } // #136: seconds; "flag" until someone changes it here; #146: the bounds
 
 // GET /api/v2/trash (contract update 01:33Z; workshop branch v2-trash-settings): originals replaced and kept in the
 // trash until their date. Later embedded as Summary.bytes.trash.

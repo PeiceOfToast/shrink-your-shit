@@ -14,3 +14,8 @@ export function elapsed(s: number): string { // 12:08, 1:02:03
   return h ? `${h}:${p(m)}:${p(sec)}` : `${m}:${p(sec)}`;
 }
 export const plural = (n: number, one: string, many: string) => `${count(n)} ${n === 1 ? one : many}`;
+// A number of seconds in words, design's way (SCREENS V9): "30 seconds", "1 minute", "5 minutes", "1 hour".
+export function duration(s: number): string {
+  const [n, unit] = s % 3600 === 0 ? [s / 3600, "hour"] : s % 60 === 0 ? [s / 60, "minute"] : [s, "second"];
+  return n + " " + unit + (n === 1 ? "" : "s");
+}

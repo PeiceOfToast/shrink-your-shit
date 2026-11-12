@@ -31,4 +31,5 @@ export interface FirstFiles { items: FirstFile[]; total: number; stillLooking: b
 export interface FlowItem { id: ID; name: string; usedBy: string[]; madeWith: string; changedAt: Time; kind: string; tag: string } // GET /api/flows -> {items, total}
 export interface WorkerV1 { id: ID; name: string; host: string; state: string; filesAtOnce: number; gpu: { found: boolean; vendor: string | null }; converting: unknown[]; quietUntil: Time | null } // GET /api/workers -> {workers}
 // GET/PATCH /api/settings: the fields first run uses (the server sends more).
-export interface FirstRunSettings { firstRunDone: boolean; firstRunStep: number; firstRunLibrary: { name: string; path: string } | null }
+export interface FirstRunSettings { firstRunDone: boolean; firstRunStep: number; firstRunLibrary: { name: string; path: string } | null;
+  scanEvery?: number; scanEverySource?: "flag" | "saved"; scanEveryMin?: number; scanEveryMax?: number } // #136/#146: how often libraries are looked at, in seconds, and what PATCH accepts
