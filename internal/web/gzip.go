@@ -21,7 +21,7 @@ var assetTypes = map[string]string{
 	".json": "application/json",
 }
 
-// gzipAssets wraps a handler of embedded files under prefix ("/assets/", "/next/"): it sets the
+// gzipAssets wraps a handler of embedded files under prefix (the app's "/"): it sets the
 // Content-Type, and a browser that accepts gzip gets each file compressed (once, on first use, then
 // kept); anything else goes to next as before.
 func gzipAssets(prefix string, files fs.FS, next http.HandlerFunc) http.HandlerFunc {
