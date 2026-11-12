@@ -67,7 +67,7 @@ func (s *Store) ConvertAgainCheck(id int64) (AgainCheck, error) {
 		// (the setting was lowered), shows its due date only, and says so
 		if t, err := time.Parse(time.RFC3339, o.DeleteOn); err == nil {
 			if t.After(time.Now()) {
-				gone.Message = "Can't convert again: the original was deleted (it was due to be deleted on " + t.Local().Format("2 January 2006") + ")."
+				gone.Message = "Can't convert again: the original has been deleted. The date wasn't recorded." // design: the due date would mislead
 			} else {
 				gone.DeletedAt = o.DeleteOn
 				gone.Message = "Can't convert again: the original was deleted on " + t.Local().Format("2 January 2006") + "."

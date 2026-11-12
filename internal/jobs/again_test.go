@@ -57,7 +57,7 @@ func TestOriginalGoneWords(t *testing.T) {
 	s.Complete(id, "/m/a.mkv", 1)
 	s.db.Exec(`UPDATE originals SET state=? WHERE id=?`, OriginalPurged, row) // an old purge: the due date stays
 	c, _ := s.ConvertAgainCheck(id)
-	if c.Possible || c.DeletedAt != "" || !strings.Contains(c.Message, "the original was deleted (it was due to be deleted on "+due.Local().Format("2 January 2006")+")") {
+	if c.Possible || c.DeletedAt != "" || c.Message != "Can't convert again: the original has been deleted. The date wasn't recorded." {
 		t.Errorf("old: %+v", c)
 	}
 	s.SetSwapState(row, OriginalPurged) // a purge now records when
