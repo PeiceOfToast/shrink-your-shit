@@ -488,12 +488,14 @@ type JobEvent struct {
 	From   *string `json:"from"`
 	To     string  `json:"to"`
 	Reason string  `json:"reason,omitempty"`
-	Worker string  `json:"worker,omitempty"`
+	// Message is the reason's sentence (migration 23), "" when there is no reason.
+	Message string `json:"message,omitempty"`
+	Worker  string `json:"worker,omitempty"`
 }
 
 // JobEvents is job id's history, oldest first; it stays after the job's row is gone.
 func (s *Store) JobEvents(id int64) ([]JobEvent, error) {
-	rows, err := s.db.Query(`SELECT seq, at, from_status, to_status, reason, worker FROM events WHERE kind='job' AND job_id=? ORDER BY seq`, id)
+	rows, err := s.db.Query(`SELECT seq, at, from_status, to_status, reason, COALESCE(json_extract(data,'$.message'),''), worker FROM events WHERE kind='job' AND job_id=? ORDER BY seq`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -502,7 +504,7 @@ func (s *Store) JobEvents(id int64) ([]JobEvent, error) {
 	for rows.Next() {
 		var e JobEvent
 		var from sql.NullString
-		if err := rows.Scan(&e.Seq, &e.At, &from, &e.To, &e.Reason, &e.Worker); err != nil {
+		if err := rows.Scan(&e.Seq, &e.At, &from, &e.To, &e.Reason, &e.Message, &e.Worker); err != nil {
 			return nil, err
 		}
 		if from.Valid {
@@ -607,6 +609,60 @@ FROM events WHERE seq > ? ORDER BY seq LIMIT ?`, seq, limit)
 func (s *Store) EventBounds() (oldest, newest int64, err error) {
 	err = s.db.QueryRow(`SELECT COALESCE(MIN(seq),0), COALESCE(MAX(seq),0) FROM events`).Scan(&oldest, &newest)
 	return oldest, newest, err
+}
+
+// RecordEvent writes a non-job event (kind, its facts as data) to the live stream's sequence (V3c).
+func (s *Store) RecordEvent(kind string, data map[string]any) error {
+	b, _ := json.Marshal(data)
+	_, err := s.db.Exec(`INSERT INTO events(kind, at, data) VALUES (?,?,?)`, kind, s.stamp(), string(b))
+	return err
+}
+
+// JobEndsSince counts job history entries since at by the state they went to (done, failed, kept,
+// skipped, cancelled, ...): the summary's last 24 hours (V3c).
+func (s *Store) JobEndsSince(at string) (map[string]int, error) {
+	rows, err := s.db.Query(`SELECT COALESCE(to_status,''), COUNT(*) FROM events WHERE kind='job' AND at >= ? GROUP BY to_status`, at)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var k string
+		var n int
+		if err := rows.Scan(&k, &n); err != nil {
+			return nil, err
+		}
+		out[k] = n
+	}
+	return out, rows.Err()
+}
+
+// HourOfWork is one hour of the summary's throughput: jobs done, and what they saved (measured sizes).
+type HourOfWork struct {
+	HourStart  string `json:"hourStart"`
+	Completed  int    `json:"completed"`
+	SavedBytes int64  `json:"savedBytes"`
+}
+
+// Throughput are the hours since at with jobs done, oldest first (V3c).
+func (s *Store) Throughput(at string) ([]HourOfWork, error) {
+	rows, err := s.db.Query(`SELECT substr(e.at,1,13) || ':00:00Z', COUNT(*), COALESCE(SUM(MAX(j.size_before - COALESCE(j.size_after,0), 0)),0)
+FROM events e LEFT JOIN jobs j ON j.id = e.job_id
+WHERE e.kind='job' AND e.to_status='done' AND e.at >= ? GROUP BY substr(e.at,1,13) ORDER BY 1`, at)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []HourOfWork{}
+	for rows.Next() {
+		var h HourOfWork
+		if err := rows.Scan(&h.HourStart, &h.Completed, &h.SavedBytes); err != nil {
+			return nil, err
+		}
+		out = append(out, h)
+	}
+	return out, rows.Err()
 }
 
 // CorruptFlowForTest makes a flow's template unreadable, as TestOpenSurvivesABadFlow does (for other

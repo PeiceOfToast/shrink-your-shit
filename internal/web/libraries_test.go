@@ -362,9 +362,9 @@ func TestLibraryCardStatus(t *testing.T) {
 	if s := status(); s["kind"] != "converting" || s["converting"] != 1.0 || s["toDo"] != 1.0 {
 		t.Errorf("converting: %v", s)
 	}
-	st.Fail(a1, "x")
+	st.Fail(a1, "convert_failed", "x")
 	b, _ := st.Claim("w")
-	st.Keep(b.ID, "y")
+	st.Keep(b.ID, "kept_original", "y")
 	if c := card(); c["failedFiles"] != 2.0 {
 		t.Errorf("failed and kept: %v", c["failedFiles"])
 	}

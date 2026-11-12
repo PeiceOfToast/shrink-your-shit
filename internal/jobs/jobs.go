@@ -263,7 +263,7 @@ func (s *Store) Claim(worker string) (Job, error) {
 	}
 	// A job waiting to be tried again (DD-2) is not taken before its time.
 	args = append(args, now)
-	err := s.db.QueryRow(`UPDATE jobs SET status=?, updated=?, worker=?, progress=0, error='', started=?
+	err := s.db.QueryRow(`UPDATE jobs SET status=?, updated=?, worker=?, progress=0, error='', error_code='', started=?
 WHERE id=(SELECT id FROM jobs WHERE status=? AND stop_requested=0`+skip+` AND (retry_at='' OR retry_at<=?) ORDER BY priority DESC, id LIMIT 1) AND status=?
 AND NOT EXISTS (SELECT 1 FROM app_meta WHERE key='paused' AND value='1') RETURNING id`,
 		append(args, Queued)...).Scan(&id)
@@ -307,25 +307,25 @@ func (s *Store) Complete(id int64, outputPath string, sizeAfter int64) error {
 	return s.transition(id, Done, `, progress=100, output_path=?, size_after=?, output_mtime=?`, outputPath, sizeAfter, mtime)
 }
 
-// Fail marks a running job failed.
-func (s *Store) Fail(id int64, msg string) error {
-	return s.transition(id, Failed, `, error=?, attempts=attempts+1, retry_at=''`, msg)
+// Fail marks a running job failed: code is one of ReasonCodes, msg the plain words.
+func (s *Store) Fail(id int64, code, msg string) error {
+	return s.transition(id, Failed, `, error=?, error_code=?, attempts=attempts+1, retry_at=''`, msg, code)
 }
 
 // RetryLater puts a running job back in the queue after a failure that may pass (DD-2): one more try
 // counted, not taken before at; reason (its plain words) stays on it meanwhile.
-func (s *Store) RetryLater(id int64, at time.Time, reason string) error {
-	return s.transition(id, Queued, `, progress=0, worker='', error=?, attempts=attempts+1, retry_at=?`, reason, at.UTC().Format(time.RFC3339))
+func (s *Store) RetryLater(id int64, at time.Time, code, reason string) error {
+	return s.transition(id, Queued, `, progress=0, worker='', error=?, error_code=?, attempts=attempts+1, retry_at=?`, reason, code, at.UTC().Format(time.RFC3339))
 }
 
-// Keep marks a running job "kept original": a safety check refused the result, reason says why.
-func (s *Store) Keep(id int64, reason string) error {
-	return s.transition(id, Kept, `, error=?, attempts=attempts+1, retry_at=''`, reason)
+// Keep marks a running job "kept original": a safety check refused the result, code and reason say why.
+func (s *Store) Keep(id int64, code, reason string) error {
+	return s.transition(id, Kept, `, error=?, error_code=?, attempts=attempts+1, retry_at=''`, reason, code)
 }
 
 // Retry puts a failed or kept job back in the queue: a fresh start (no tries counted, no wait).
 func (s *Store) Retry(id int64) error {
-	return s.transition(id, Queued, `, progress=0, error='', worker='', attempts=0, retry_at=''`)
+	return s.transition(id, Queued, `, progress=0, error='', error_code='', worker='', attempts=0, retry_at=''`)
 }
 
 // Release puts a running job back in the queue (the worker was told to stop).

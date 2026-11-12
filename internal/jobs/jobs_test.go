@@ -67,7 +67,7 @@ func TestLifecycle(t *testing.T) {
 	if j.Status != Done || j.Progress != 100 || j.SizeAfter != 40 {
 		t.Errorf("after complete: %+v", j)
 	}
-	if err := s.Fail(id, "x"); err == nil {
+	if err := s.Fail(id, "convert_failed", "x"); err == nil {
 		t.Error("done -> failed must be rejected")
 	}
 	if err := s.Retry(id); err == nil {
@@ -78,11 +78,11 @@ func TestLifecycle(t *testing.T) {
 func TestFailAndRetry(t *testing.T) {
 	s := open(t)
 	id, _ := s.Enqueue(Job{Path: "/a"})
-	if err := s.Fail(id, "no"); err == nil {
+	if err := s.Fail(id, "convert_failed", "no"); err == nil {
 		t.Error("queued -> failed must be rejected")
 	}
 	s.Claim("w")
-	if err := s.Fail(id, "ffmpeg exploded"); err != nil {
+	if err := s.Fail(id, "convert_failed", "ffmpeg exploded"); err != nil {
 		t.Fatal(err)
 	}
 	if j, _ := s.Get(id); j.Status != Failed || j.Error != "ffmpeg exploded" {
@@ -131,11 +131,11 @@ func TestFilesAndList(t *testing.T) {
 func TestKeepAndRetry(t *testing.T) {
 	s := open(t)
 	id, _ := s.Enqueue(Job{Path: "/a"})
-	if err := s.Keep(id, "no"); err == nil {
+	if err := s.Keep(id, "kept_original", "no"); err == nil {
 		t.Error("queued -> kept must be rejected")
 	}
 	s.Claim("w")
-	if err := s.Keep(id, "the output has 1 audio stream, the source has 2"); err != nil {
+	if err := s.Keep(id, "kept_original", "the output has 1 audio stream, the source has 2"); err != nil {
 		t.Fatal(err)
 	}
 	j, _ := s.Get(id)
@@ -374,7 +374,7 @@ func TestRetryLaterWaitsItsTime(t *testing.T) {
 	s.now = func() time.Time { return now }
 	id, _ := s.Enqueue(Job{Path: "/m/a.mkv"})
 	s.Claim("w")
-	if err := s.RetryLater(id, now.Add(5*time.Minute), "The disk is full."); err != nil {
+	if err := s.RetryLater(id, now.Add(5*time.Minute), "convert_failed", "The disk is full."); err != nil {
 		t.Fatal(err)
 	}
 	if j, _ := s.Get(id); j.Status != Queued || j.Attempts != 1 || j.RetryAt != "2026-11-07T20:05:00Z" || j.Error != "The disk is full." {
@@ -390,7 +390,7 @@ func TestRetryLaterWaitsItsTime(t *testing.T) {
 	if j, err := s.Claim("w"); err != nil || j.ID != id || j.Attempts != 1 {
 		t.Fatalf("not claimed when due: %+v %v", j, err)
 	}
-	s.Fail(id, "The disk is full.")
+	s.Fail(id, "convert_failed", "The disk is full.")
 	if j, _ := s.Get(id); j.Attempts != 2 || j.RetryAt != "" {
 		t.Errorf("after the final failure: %+v", j)
 	}

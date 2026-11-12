@@ -110,10 +110,10 @@ func TestActivitySummaryQueueFailedSkipped(t *testing.T) {
 	// one failed, one kept by a check
 	f1, _ := st.Enqueue(jobs.Job{Library: dir, LibraryID: l.ID, Path: dir + "/broken.mkv"})
 	st.Claim("t")
-	st.Fail(f1, "ffmpeg stopped: invalid data")
+	st.Fail(f1, "convert_failed", "ffmpeg stopped: invalid data")
 	f2, _ := st.Enqueue(jobs.Job{Library: dir, LibraryID: l.ID, Path: dir + "/short.mkv"})
 	st.Claim("t")
-	st.Keep(f2, "the new file is 3 minutes shorter than the original")
+	st.Keep(f2, "kept_original", "the new file is 3 minutes shorter than the original")
 	// one running at 50%, two waiting
 	run, _ := st.Enqueue(jobs.Job{Library: dir, LibraryID: l.ID, Path: dir + "/now.mkv", SizeBefore: 8000})
 	st.Claim("t")
@@ -583,7 +583,7 @@ func TestRetryingAndAttempts(t *testing.T) {
 	id, _ := st.Enqueue(jobs.Job{LibraryID: l.ID, Path: "/m/a.mkv"})
 	st.Claim("w")
 	at := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
-	st.RetryLater(id, at, "The disk is full, so converting stopped.")
+	st.RetryLater(id, at, "convert_failed", "The disk is full, so converting stopped.")
 
 	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/activity/queue"})
 	var q struct {
@@ -601,7 +601,7 @@ func TestRetryingAndAttempts(t *testing.T) {
 
 	once, _ := st.Enqueue(jobs.Job{LibraryID: l.ID, Path: "/m/b.mkv"})
 	st.Claim("w") // takes b (a waits an hour)
-	st.Fail(once, "Converting stopped with an error.")
+	st.Fail(once, "convert_failed", "Converting stopped with an error.")
 	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/activity/failed"})
 	var f struct{ Items []map[string]any }
 	json.Unmarshal([]byte(body), &f)

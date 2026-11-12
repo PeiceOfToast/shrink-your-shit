@@ -35,7 +35,7 @@ type Queue interface {
 	Claim(worker string) (jobs.Job, error)
 	Progress(id int64, pct float64) error
 	Complete(id int64, outputPath string, sizeAfter int64) error
-	Fail(id int64, msg string) error
+	Fail(id int64, code, msg string) error
 	// Release puts a running job back in the queue (used on shutdown).
 	Release(id int64) error
 	// UserStopped turns a job the person stopped into a file skipped as user_stopped.
@@ -43,9 +43,9 @@ type Queue interface {
 	// StopRequested reports whether "Stop this file" was asked for a running job (checked before the swap).
 	StopRequested(id int64) (bool, error)
 	// Keep marks a job "kept original": a safety check refused the result (reason says why).
-	Keep(id int64, reason string) error
+	Keep(id int64, code, reason string) error
 	// RetryLater puts a job whose failure may pass back in the queue, not to be taken before at (DD-2).
-	RetryLater(id int64, at time.Time, reason string) error
+	RetryLater(id int64, at time.Time, code, reason string) error
 	// RecordPlan stores the Plan a running job converts with (JSON) and its fingerprint.
 	RecordPlan(id int64, plan, fingerprint string) error
 	// Skip ends a job as a skipped file with words and a reason code (S3: Dolby Vision left alone).
@@ -257,7 +257,7 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 		case stopUser:
 			return true, w.Queue.UserStopped(job.ID)
 		case stopStall:
-			return true, w.Queue.Fail(job.ID, fmt.Sprintf("Stopped: no progress for %s. The original is untouched; press Retry to try again.", w.stallAfter()))
+			return true, w.Queue.Fail(job.ID, jobs.ReasonStalled, fmt.Sprintf("Stopped: no progress for %s. The original is untouched; press Retry to try again.", w.stallAfter()))
 		}
 	}
 	if err != nil {
@@ -273,14 +273,14 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 		// A failure that may pass, with a try left: back in the queue for later, from the start (DD-2).
 		if wait, ok := retryIn(err, job.Attempts); ok {
 			w.jobf(job.ID, " (%s): try %d of %d failed, trying again in %s: %v", job.Path, job.Attempts+1, maxTries, wait, err)
-			return true, w.Queue.RetryLater(job.ID, w.now().Add(wait), plainReason(err))
+			return true, w.Queue.RetryLater(job.ID, w.now().Add(wait), reasonCode(err), plainReason(err))
 		}
 		var ke *KeptError
 		if errors.As(err, &ke) {
 			// A safety check said no: the original is untouched, the temp file is gone.
 			w.jobf(job.ID, ": a check said no, the original is kept: %s", ke.Reason)
 			w.Queue.AddStep(job.ID, "verified", false, ke.Reason)
-			if kerr := w.Queue.Keep(job.ID, ke.Reason); kerr != nil {
+			if kerr := w.Queue.Keep(job.ID, reasonCode(err), ke.Reason); kerr != nil {
 				return true, kerr
 			}
 			return true, err
@@ -289,7 +289,7 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 		// (Settings > System shows its last lines).
 		w.jobf(job.ID, " (%s) failed: %v", job.Path, err)
 		w.Queue.AddStep(job.ID, "converted", false, plainFailure(err))
-		if ferr := w.Queue.Fail(job.ID, plainFailure(err)); ferr != nil {
+		if ferr := w.Queue.Fail(job.ID, reasonCode(err), plainFailure(err)); ferr != nil {
 			return true, ferr
 		}
 		return true, err
@@ -367,6 +367,28 @@ func plainFailure(err error) string {
 		return "shrink-your-shit is not allowed to write in this folder, so converting stopped. Your original was not touched. Let it write there (Settings > System says how), then press Retry."
 	}
 	return "Converting did not finish. Your original was not touched. Press Retry; if it keeps failing, Settings > System shows what went wrong."
+}
+
+// reasonCode is the code of a failed or refused conversion (one of jobs.JobReasonCodes), beside its
+// plain words (plainReason): the same cases, in the same order.
+func reasonCode(err error) string {
+	var ke *KeptError
+	var fe *FailedError
+	switch {
+	case errors.As(err, &ke):
+		return ke.Code
+	case errors.As(err, &fe) && fe.Plain == diskFull:
+		return jobs.ReasonDiskFull
+	case errors.As(err, &fe) && fe.Plain == cannotRead:
+		return jobs.ReasonCannotRead
+	case errors.As(err, &fe):
+		return jobs.ReasonConvertFailed
+	case errors.Is(err, syscall.ENOSPC):
+		return jobs.ReasonDiskFull
+	case errors.Is(err, fs.ErrPermission):
+		return jobs.ReasonCannotWrite
+	}
+	return jobs.ReasonConvertFailed
 }
 
 // plainReason is the plain words of a failed or refused conversion.

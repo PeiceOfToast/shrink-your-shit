@@ -5,8 +5,11 @@ package web
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"net/http"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -103,6 +106,29 @@ func TestV2EventStream(t *testing.T) {
 	if m := nextMessage(t, stream(t, srv.URL, created.id)); m.event != "resync" {
 		t.Errorf("pruned gap %+v", m)
 	}
+	// an id above the newest (the database was restored from a backup, or replaced): resync, not silence
+	if m := nextMessage(t, stream(t, srv.URL, "999999")); m.event != "resync" {
+		t.Errorf("id ahead of the newest %+v", m)
+	}
+}
+
+// Hello and resync carry the newest seq as their id: a browser that drops right after hello and
+// reconnects with that Last-Event-ID gets what happened meanwhile (ui-shop, cap-778a2f0).
+func TestV2EventStreamHelloHasID(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	hello := nextMessage(t, stream(t, srv.URL, ""))
+	if hello.event != "hello" || hello.id == "" || !strings.Contains(hello.data, `"seq":`+hello.id) {
+		t.Fatalf("hello %+v", hello)
+	}
+	st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "a.mkv")}) // while it was away
+	if m := nextMessage(t, stream(t, srv.URL, hello.id)); m.event != "job.state" || !strings.Contains(m.data, `"to":"queued"`) {
+		t.Errorf("reconnect after hello: %+v", m)
+	}
+	resync := nextMessage(t, stream(t, srv.URL, "999999"))
+	if resync.event != "resync" || resync.id == "" || !strings.Contains(resync.data, `"seq":`+resync.id) {
+		t.Errorf("resync %+v", resync)
+	}
 }
 
 // The stream is behind the same sign-in as the rest of /api.
@@ -137,5 +163,73 @@ func TestV2EventStreamProgress(t *testing.T) {
 			t.Errorf("progress %+v", m)
 		}
 		break
+	}
+}
+
+// V3c: the summary in one call; the two pauses, each an event in the live stream.
+func TestV2SummaryAndPauses(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	st.SetPaused(false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	done, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "a.mkv"), SizeBefore: 1000})
+	st.Claim("w")
+	st.Complete(done, filepath.Join(lib.Path, "a.mkv"), 400)
+	bad, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "b.mkv"), SizeBefore: 1000})
+	st.Claim("w")
+	st.Fail(bad, "convert_failed", "Converting did not finish")
+	st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "c.mkv"), SizeBefore: 1000})
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/summary"})
+	for _, want := range []string{`"completed":1`, `"failed":1`, `"successRate":0.5`, `"waiting":1`, `"failed24h":1`,
+		`"savedBytes":600`, `"processingPaused":false`, `"intakePaused":false`, `"recentFailures":[{`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("summary lacks %s: %s", want, body)
+		}
+	}
+	c := stream(t, srv.URL, "")
+	nextMessage(t, c) // hello
+	if code, b := post(t, srv, "POST", "/api/v2/intake/pause", `{}`); code != 200 || !st.IntakePaused() {
+		t.Fatalf("intake pause %d %s", code, b)
+	}
+	if code, b := post(t, srv, "POST", "/api/v2/processing/pause", `{}`); code != 200 || !st.Paused() {
+		t.Fatalf("processing pause %d %s", code, b)
+	}
+	for _, want := range []string{"intake.paused", "processing.paused"} {
+		m := nextMessage(t, c)
+		if m.event != want || m.id == "" || !strings.Contains(m.data, want) {
+			t.Errorf("want %s: %+v", want, m)
+		}
+	}
+	if _, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/summary"}); !strings.Contains(body, `"processingPaused":true`) || !strings.Contains(body, `"intakePaused":true`) {
+		t.Errorf("paused summary %s", body)
+	}
+}
+
+// A failure's reason is {code, message}: the code a fixed one, the sentence beside it (cap-778a2f0).
+func TestV2ReasonIsCodeAndMessage(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	st.SetPaused(false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "a.mkv")})
+	st.Claim("w")
+	c := stream(t, srv.URL, "")
+	nextMessage(t, c) // hello
+	st.RetryLater(id, time.Now().Add(time.Hour), jobs.ReasonLowDiskSpace, "there is not enough free disk space next to this file")
+	if m := nextMessage(t, c); !strings.Contains(m.data, `"reason":{"code":"low_disk_space","message":"there is not enough free disk space next to this file"}`) {
+		t.Errorf("stream %+v", m)
+	}
+	code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10)})
+	var d struct {
+		Reason any
+		Events []struct{ Reason any }
+	}
+	json.Unmarshal([]byte(body), &d)
+	want := map[string]any{"code": "low_disk_space", "message": "there is not enough free disk space next to this file"}
+	if code != 200 || !reflect.DeepEqual(d.Reason, want) || len(d.Events) == 0 || !reflect.DeepEqual(d.Events[len(d.Events)-1].Reason, want) {
+		t.Errorf("job: reason and its history entry should both be %v: %d %s", want, code, body)
+	}
+	for _, e := range d.Events[:len(d.Events)-1] { // a change with no reason (created, running): null, never ""
+		if e.Reason != nil {
+			t.Errorf("history entry without a reason: %v", e.Reason)
+		}
 	}
 }

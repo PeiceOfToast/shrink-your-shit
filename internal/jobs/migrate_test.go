@@ -394,6 +394,7 @@ func TestMigration7BackfillsSkipReasons(t *testing.T) {
 		`ALTER TABLE flows DROP COLUMN description`, `ALTER TABLE flows DROP COLUMN status`, `ALTER TABLE flows DROP COLUMN favourite`,
 		`ALTER TABLE flows DROP COLUMN tags`, `DROP TABLE workflow_revisions`, // and 20
 		`DROP TRIGGER events_job_insert`, `DROP TRIGGER events_job_status`, `DROP TRIGGER events_job_removed`, `DROP INDEX jobs_claim`, `DROP TABLE events`, `ALTER TABLE jobs DROP COLUMN priority`, // and 21
+		`ALTER TABLE jobs DROP COLUMN error_code`, // and 23
 		`PRAGMA user_version=6`} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
@@ -477,7 +478,7 @@ func TestAlwaysStandardizeMigration(t *testing.T) {
 	for p, why := range kept {
 		id, _ := s.Enqueue(Job{Path: p})
 		s.Claim("w")
-		s.Keep(id, why)
+		s.Keep(id, "kept_original", why)
 		ids[p] = id
 	}
 	for p, reason := range map[string]string{"/m/small.mkv": "already_efficient", "/m/wns.mkv": "would_not_shrink",
@@ -563,11 +564,12 @@ func TestWorkersStartStoppedMigration(t *testing.T) {
 	}
 }
 
-// rewind20 takes away what migrations 20, 21 and 22 added, for tests that set user_version below it.
+// rewind20 takes away what migrations 20 to 23 added, for tests that set user_version below it.
 func rewind20(s *Store) {
 	for _, q := range []string{`ALTER TABLE flows DROP COLUMN description`, `ALTER TABLE flows DROP COLUMN status`,
 		`ALTER TABLE flows DROP COLUMN favourite`, `ALTER TABLE flows DROP COLUMN tags`, `DROP TABLE workflow_revisions`,
-		`DROP TRIGGER events_job_insert`, `DROP TRIGGER events_job_status`, `DROP TRIGGER events_job_removed`, `DROP INDEX jobs_claim`, `DROP TABLE events`, `ALTER TABLE jobs DROP COLUMN priority`} { // and 21
+		`DROP TRIGGER events_job_insert`, `DROP TRIGGER events_job_status`, `DROP TRIGGER events_job_removed`, `DROP INDEX jobs_claim`, `DROP TABLE events`, `ALTER TABLE jobs DROP COLUMN priority`, // and 21
+		`ALTER TABLE jobs DROP COLUMN error_code`} { // and 23
 		s.db.Exec(q)
 	}
 }
