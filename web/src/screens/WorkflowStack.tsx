@@ -74,7 +74,7 @@ function Field({ id, name, s, value, set }: { id: string; name: string; s: JSONS
   const hint = typeof s.description === "string" ? <span className="hint" id={fid + "-h"}>{s.description}{s.type === "array" ? " One per line." : ""}</span> : null;
   if (s.type === "integer" || s.type === "number") // a number, saved as a number (empty: not set)
     return <div className="field"><label htmlFor={fid}>{title}</label><input id={fid} className="input" type="number" inputMode="decimal" min={s.minimum as number | undefined} step={s.type === "integer" ? 1 : "any"}
-      value={value == null ? "" : String(value)} onChange={(e) => set(e.target.value === "" ? undefined : s.type === "integer" ? Math.trunc(Number(e.target.value)) : Number(e.target.value))} aria-describedby={hint ? fid + "-h" : undefined} />{hint}</div>;
+      value={value == null ? "" : String(value)} onChange={(e) => { if (e.target.value === "") return set(undefined); const n = s.type === "integer" ? Math.trunc(Number(e.target.value)) : Number(e.target.value), lo = s.minimum as number | undefined; set(lo != null && n < lo ? lo : n); }} aria-describedby={hint ? fid + "-h" : undefined} />{hint}</div>;
   if (s.type === "array")
     return <div className="field"><label htmlFor={fid}>{title}</label><textarea id={fid} className="input" rows={2} value={((value as string[]) ?? []).join("\n")}
       onChange={(e) => set(e.target.value.split("\n").map((x) => x.trim()).filter(Boolean))} aria-describedby={hint ? fid + "-h" : undefined} />{hint}</div>;
