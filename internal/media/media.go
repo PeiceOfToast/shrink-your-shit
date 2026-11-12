@@ -5,7 +5,7 @@
 package media
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Exec runs external programs.
@@ -35,8 +36,7 @@ type Exec interface {
 type OSExec struct{}
 
 func (OSExec) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	dieWithParent(cmd)
+	cmd := command(ctx, name, args...)
 	var out limitedBuffer
 	var stderr tail
 	var errText strings.Builder
@@ -68,8 +68,7 @@ func (l *limitedBuffer) Write(p []byte) (int, error) {
 }
 
 func (OSExec) Capture(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	dieWithParent(cmd)
+	cmd := command(ctx, name, args...)
 	var out limitedBuffer
 	errBuf := headBuffer{max: maxStderrBytes}
 	cmd.Stdout, cmd.Stderr = &out, &errBuf
@@ -104,26 +103,63 @@ func (h *headBuffer) Write(p []byte) (int, error) {
 }
 
 func (OSExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	dieWithParent(cmd)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return "", err
-	}
+	cmd := command(ctx, name, args...)
+	// lines go through a writer, not a read loop: Wait (with WaitDelay) then ends a stopped run even when
+	// something it started still holds its output open (QA finding B)
+	lines := &lineWriter{onLine: onLine}
 	var last strings.Builder
 	head := headBuffer{max: maxStderrBytes}
-	cmd.Stderr = io.MultiWriter(&tail{b: &last, max: 2000}, &head)
+	cmd.Stdout, cmd.Stderr = lines, io.MultiWriter(&tail{b: &last, max: 2000}, &head)
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("%s: %w", name, err)
 	}
-	sc := bufio.NewScanner(stdout)
-	for sc.Scan() {
-		onLine(sc.Text())
-	}
-	if err := cmd.Wait(); err != nil {
+	err := cmd.Wait()
+	lines.flush()
+	if err != nil {
 		return string(head.buf), fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(last.String()))
 	}
 	return string(head.buf), nil
+}
+
+// StopWaitDelay is how long a stopped program's output may stay open, held by something it started,
+// before the run is ended anyway (QA finding B: a converter's leftover child held the job in Running).
+var StopWaitDelay = 5 * time.Second
+
+// command is name with args, ended with ctx: killed with everything it started (its own process group,
+// where the system has them), it dies with this program, and its run ends at most StopWaitDelay after
+// the kill even if a leftover still holds its output.
+func command(ctx context.Context, name string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, name, args...)
+	dieWithParent(cmd)
+	killGroup(cmd)
+	cmd.WaitDelay = StopWaitDelay
+	return cmd
+}
+
+// lineWriter calls onLine for each line written to it, without its line end (as bufio.ScanLines).
+type lineWriter struct {
+	buf    []byte
+	onLine func(string)
+}
+
+func (l *lineWriter) Write(p []byte) (int, error) {
+	l.buf = append(l.buf, p...)
+	for {
+		i := bytes.IndexByte(l.buf, '\n')
+		if i < 0 {
+			return len(p), nil
+		}
+		l.onLine(strings.TrimSuffix(string(l.buf[:i]), "\r"))
+		l.buf = l.buf[i+1:]
+	}
+}
+
+// flush gives the last line, if it had no line end.
+func (l *lineWriter) flush() {
+	if len(l.buf) > 0 {
+		l.onLine(strings.TrimSuffix(string(l.buf), "\r"))
+		l.buf = nil
+	}
 }
 
 // tail keeps only the last max bytes written (ffmpeg's error is at the end).
