@@ -92,8 +92,7 @@ export function AppearanceSettings() {
     <div className="stack">
       <PageHead icon="i-settings" title="Settings" />
       <SettingsTabs at="appearance" />
-      <div className="card">
-        <div className="hd"><h2>Appearance</h2></div>
+      <div className="card">{/* clean pass 2 (7.1): the tab names the panel, so no second "Appearance" heading */}
         <div className="bd stack">
           <Choice legend="Theme" name="theme" value={draft.theme} options={THEMES.map(([v, l]) => [v, l])} onPick={set("theme")} />
           <Choice legend="Accent" name="accent" value={draft.accent} options={ACCENTS} onPick={set("accent")} />
