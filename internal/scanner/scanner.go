@@ -63,6 +63,8 @@ type Scanner struct {
 	Now    func() time.Time
 
 	wake      chan struct{}
+	reset     chan struct{} // SetEvery: the wait is timed again
+	every     time.Duration // how often a pass starts (Run's, or SetEvery's)
 	mu        sync.Mutex
 	nextScan  time.Time
 	firstLook map[string]look // each file as first seen unchanged (the two-look rule)
@@ -402,21 +404,51 @@ func (s *Scanner) Run(ctx context.Context, every time.Duration) {
 	if s.wake == nil {
 		s.wake = make(chan struct{}, 1)
 	}
-	wake := s.wake
+	if s.reset == nil {
+		s.reset = make(chan struct{}, 1)
+	}
+	if s.every == 0 { // SetEvery before Run (a saved setting) wins over the flag
+		s.every = every
+	}
+	wake, reset := s.wake, s.reset
 	s.mu.Unlock()
 	for {
 		if n := s.ScanOnce(ctx); n > 0 {
 			log.Printf("scan: queued %d job(s)", n)
 		}
-		s.mu.Lock()
-		s.nextScan = time.Now().Add(every)
-		s.mu.Unlock()
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(every):
-		case <-wake:
+		done := time.Now()
+	wait:
+		for {
+			s.mu.Lock()
+			next := done.Add(s.every) // a new interval counts from the last pass (SetEvery)
+			s.nextScan = next
+			s.mu.Unlock()
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Until(next)):
+				break wait
+			case <-wake:
+				break wait
+			case <-reset:
+			}
 		}
+	}
+}
+
+// SetEvery changes how often Run starts a pass, at once: the next one is due that long after the last
+// (Settings' scanEvery, applied without a restart).
+func (s *Scanner) SetEvery(every time.Duration) {
+	s.mu.Lock()
+	s.every = every
+	if s.reset == nil {
+		s.reset = make(chan struct{}, 1)
+	}
+	r := s.reset
+	s.mu.Unlock()
+	select {
+	case r <- struct{}{}:
+	default:
 	}
 }
 
