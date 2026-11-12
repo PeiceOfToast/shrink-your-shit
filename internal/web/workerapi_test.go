@@ -178,7 +178,7 @@ func TestWorkerAPIRefusesPlainHTTPFromOutside(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	h := workerAPI(st, Transport{}, "test")
+	h := workerAPI(st, Transport{}, "test", Engine{DataDir: t.TempDir()})
 	for _, xfp := range []string{"", "https"} {
 		r := httptest.NewRequest("POST", "/api/worker/v1/pair", strings.NewReader(`{"code":"x"}`))
 		r.RemoteAddr = "203.0.113.9:4000"
@@ -205,7 +205,7 @@ func TestPairingTriesAreLimited(t *testing.T) {
 	defer st.Close()
 	delay := PairFailDelay
 	defer func() { PairFailDelay = delay }()
-	h := workerAPI(st, Transport{}, "test")
+	h := workerAPI(st, Transport{}, "test", Engine{DataDir: t.TempDir()})
 	pairFrom := func(peer, code string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("POST", "/api/worker/v1/pair", strings.NewReader(`{"code":"`+code+`"}`))
 		r.RemoteAddr = peer + ":4000"
