@@ -529,6 +529,9 @@ label.chk{cursor:pointer}
 @media (pointer:coarse){.wcard dd a{display:flex;align-items:center;min-height:44px}}
 .mchip.prio{margin-left:6px;vertical-align:middle}
 .joblog{max-height:320px;overflow:auto;margin:0;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font:var(--fs-sm)/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
+/* Settings tabs on a phone: shades at the end(s) that have more tabs to scroll to; the page-coloured covers move with
+   the content and hide a shade once that end is reached (review 36420a9 P3) */
+nav.tabs[aria-label="Settings sections"]{background:linear-gradient(to right,var(--bg) 45%,transparent) left center/28px 100% no-repeat local,linear-gradient(to left,var(--bg) 45%,transparent) right center/28px 100% no-repeat local,linear-gradient(to right,color-mix(in srgb,var(--text) 30%,transparent),transparent) left center/16px 100% no-repeat scroll,linear-gradient(to left,color-mix(in srgb,var(--text) 30%,transparent),transparent) right center/16px 100% no-repeat scroll;background-color:var(--bg)}
 
 /* V4 Graph (SCREENS V4, mockups/workflow-graph.html): canvas + a side panel; nodes as in the mockup's .gn */
 .graphwrap{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:var(--gap);min-height:560px}
