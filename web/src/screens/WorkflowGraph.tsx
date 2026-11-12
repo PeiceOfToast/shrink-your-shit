@@ -195,6 +195,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
   };
 
   const issues = checked.issues ?? [], errors = issues.filter((i) => i.severity === "error");
+  const badValues = issues.filter((i) => i.code === "invalid_config"); // #165: blocks Save draft and Publish until fixed
   const picked = doc.nodes.find((n) => n.id === sel), pickedDef = picked && defs.find((x) => x.type === picked.type);
   const nameOf = (nid?: string) => { const t = doc.nodes.find((n) => n.id === nid); return t ? t.name ?? defs.find((x) => x.type === t.type)?.name ?? t.type : ""; };
   const shown = nodes.map((n) => (drag[n.id] ? { ...n, position: drag[n.id] } : n));
@@ -206,11 +207,12 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
         {edit && <>
           <button className="btn sm icon ghost" type="button" title="Undo" aria-label="Undo" disabled={hist.at === 0} onClick={() => setHist({ ...hist, at: hist.at - 1 })}><Icon id="i-undo" /></button>
           <button className="btn sm icon ghost" type="button" title="Redo" aria-label="Redo" disabled={hist.at === hist.list.length - 1} onClick={() => setHist({ ...hist, at: hist.at + 1 })}><Icon id="i-redo" /></button>
-          <button className="btn sm" type="button" disabled={!dirty} onClick={save}>Save draft</button>
-          <button className="btn sm primary" type="button" onClick={openPublish}>Publish</button></>}
+          <button className="btn sm" type="button" disabled={!dirty || badValues.length > 0} title={badValues.length ? "Fix the settings marked in red first" : undefined} onClick={save}>Save draft</button>
+          <button className="btn sm primary" type="button" disabled={badValues.length > 0} title={badValues.length ? "Fix the settings marked in red first" : undefined} onClick={openPublish}>Publish</button></>}
       </PageHead>
       <p className="muted sm phone" role="note">Editing works best on a larger screen. Here you can look around, zoom and see each step.</p>
       <p className="muted" role="status">{said}</p>
+      {edit && badValues.length > 0 && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{badValues.length === 1 ? "A setting has a value it can't use" : badValues.length + " settings have values they can't use"} ({[...new Set(badValues.map((i) => nameOf(i.nodeId)))].join(", ")}). Fix {badValues.length === 1 ? "it" : "them"} to save the draft or publish.</span></p>}
       {panel && (
         <section className="card" aria-labelledby="pub-h"><div className="hd"><h2 id="pub-h">Publish v{panel.nextNumber}</h2></div><div className="bd stack">
           {panel.changes.length ? <ul style={{ margin: 0 }}>{panel.changes.map((c) => <li key={c.nodeId + c.kind}>{c.kind === "added" ? "Added: " : c.kind === "removed" ? "Removed: " : ""}{c.summary}</li>)}</ul> : <p className="muted">No changes since the last version.</p>}
@@ -255,7 +257,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
             <h3 className="h3">Problems{issues.length ? " (" + issues.length + ")" : ""}</h3>
             {!issues.length ? <p className="st ok"><Icon id="i-check-c" /><span>No problems.</span></p> : <ul className="gprobs">{issues.map((i, k) => (
               <li key={k} className={"st " + (i.severity === "error" ? "bad" : "warn")}><Icon id="i-alert" /><span>
-                {i.nodeId ? <button className="linkbtn" type="button" onClick={() => (setSel(i.nodeId!), setSelEdge(null))}><strong>{nameOf(i.nodeId)}:</strong> {i.message}</button> : i.message}
+                {i.nodeId ? <button className="linkbtn" type="button" onClick={() => (setSel(i.nodeId!), setSelEdge(null))}>{/^In '/.test(i.message) ? null : <><strong>{nameOf(i.nodeId)}:</strong> </>}{i.message}</button> : i.message}
                 {edit && i.code === "unconnected_port" && i.nodeId && i.port && endDef && <> <button className="btn sm" type="button" onClick={() => leaveAlone(i.nodeId!, i.port!)}>Leave the file alone here</button></>}</span></li>))}</ul>}
             {errors.length > 0 && <p className="sm muted">Publish waits until the problems are fixed.</p>}
           </div>

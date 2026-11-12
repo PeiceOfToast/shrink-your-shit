@@ -631,3 +631,4 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 @media (max-width:1280px){.graphwrap.withpal{grid-template-columns:220px minmax(0,1fr)}.graphwrap.withpal .ginspect{grid-column:1/-1}}
 .ginspect .ginform .input,.ginspect .ginform select{width:100%;max-width:100%;min-width:0} /* review 13f1c75 P3: no cut-off selects in the narrow panel */
 @media (pointer:coarse){.gfold>summary{min-height:44px;display:flex;align-items:center}.gpi{min-height:44px}}
+.fieldbad>.field .input,.fieldbad>.field select,.fieldbad>fieldset{border-color:var(--error);box-shadow:0 0 0 1px var(--error)} /* #165: a setting with a value it cannot use */

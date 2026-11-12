@@ -212,7 +212,7 @@ export interface ValidationIssue {
     | (string & {}); // a newer server's code: show its message
   severity: "error" | "warning";
   message: string;
-  nodeId?: ID; edgeId?: ID; port?: string; configPath?: string;
+  nodeId?: ID; edgeId?: ID; port?: string; configPath?: string; field?: string; // field: #165, the setting's key (invalid_config)
 }
 // GET /workflows/{id}/publish-preview (V1 also returns validation).
 export interface PublishPreview {

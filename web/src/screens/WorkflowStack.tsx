@@ -65,7 +65,7 @@ function Field({ id, name, s, value, set }: { id: string; name: string; s: JSONS
   // a list of choices (V6a check: "Video format is one of"): a checkbox per choice
   const items = s.items as JSONSchema | undefined;
   if (s.type === "array" && items?.enum) {
-    const on = (value as unknown[]) ?? [];
+    const known = labels(items).map((o) => o[0]), on = ((value as unknown[]) ?? []).filter((x) => known.includes(x)); // a change drops values it doesn't know (#165: so a bad item can be fixed)
     return (
       <fieldset className="field choice"><legend className="lab">{title}</legend><div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
         {labels(items).map(([v, l]) => <label key={String(v)} className="row nw"><input type="checkbox" checked={on.includes(v)} onChange={(e) => set(e.target.checked ? [...on, v] : on.filter((x) => x !== v))} /><span>{l}</span></label>)}
@@ -84,7 +84,13 @@ function Field({ id, name, s, value, set }: { id: string; name: string; s: JSONS
 export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown) => void; issues: ValidationIssue[] }) {
   const { stepDef, libs } = useReg(), def = stepDef(n.type)!, props = Object.fromEntries(Object.entries((def.configSchema.properties ?? {}) as Props).filter(([, s]) => !s.readOnly)) as Props, c = n.config;
   const keys = Object.keys(props).filter((k) => !(MORE[n.type] ?? []).includes(k)), more = (MORE[n.type] ?? []).filter((k) => props[k]);
-  const field = (k: string) => <Field key={k} id={n.id} name={k} s={props[k]} value={c[k] ?? props[k].default} set={(v) => set(k, v)} />;
+  // #165: a setting's own problems (invalid_config, keyed on the step + field) show at that field, which is marked
+  const bad = (k: string) => issues.filter((i) => i.nodeId === n.id && (i.field === k || i.configPath === "/" + k) && i.code !== "unconnected_port");
+  const field = (k: string) => { const b = bad(k); return (
+    <div key={k} className={b.length ? "fieldbad" : undefined} data-field={k} aria-invalid={b.length ? true : undefined}>
+      <Field id={n.id} name={k} s={props[k]} value={c[k] ?? props[k].default} set={(v) => set(k, v)} />
+      {b.map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
+    </div>); };
   const problem = (path: string) => issues.filter((i) => i.nodeId === n.id && i.configPath === path).map((i) => <span key={i.code} className="hint" style={{ color: "var(--error-text)" }}>{i.message}</span>);
   if (n.type === "output.commit") {
     const policy = (c.policy as string) ?? "separate_folder", mode = (c.folderMode as string) ?? "next_to_library";
