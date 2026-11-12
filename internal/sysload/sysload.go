@@ -4,7 +4,10 @@
 // it can't measure (not Linux yet), the figures are nil: shown as "not measured", never guessed.
 package sysload
 
-import "sync"
+import (
+	"math"
+	"sync"
+)
 
 // Load is one measurement.
 type Load struct {
@@ -26,10 +29,7 @@ func (m *Meter) Sample() Load {
 	m.mu.Lock()
 	if ok && m.total > 0 && total > m.total {
 		busy := 100 * (1 - float64(idle-m.idle)/float64(total-m.total))
-		if busy < 0 {
-			busy = 0
-		}
-		l.CPUPercent = &busy
+		l.CPUPercent = Clamp(&busy)
 	}
 	if ok {
 		m.idle, m.total = idle, total
@@ -39,4 +39,14 @@ func (m *Meter) Sample() Load {
 		l.MemUsedBytes, l.MemTotalBytes = &used, &all
 	}
 	return l
+}
+
+// Clamp keeps a processor figure within 0..100; NaN or an infinity is "not measured" (nil). A worker's
+// report is clamped the same way on the server (review da46389).
+func Clamp(p *float64) *float64 {
+	if p == nil || math.IsNaN(*p) || math.IsInf(*p, 0) {
+		return nil
+	}
+	v := math.Min(100, math.Max(0, *p))
+	return &v
 }

@@ -253,7 +253,8 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine) http.
 		if !readJSON(w, r, &in) {
 			return
 		}
-		workerLoads.Store(wk.ID, in.Load) // V7d: the Workers page's live figures
+		in.Load.CPUPercent = sysload.Clamp(in.Load.CPUPercent) // a worker's word: within 0..100
+		workerLoads.Store(wk.ID, in.Load)                      // V7d: the Workers page's live figures
 		if h := holdingBack(in.HoldingBack); h != nil {
 			workerHolds.Store(wk.ID, h)
 		} else {
