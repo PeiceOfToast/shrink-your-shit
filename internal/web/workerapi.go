@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/sysload"
@@ -247,11 +248,17 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine) http.
 		var in struct {
 			FreeSlots int
 			sysload.Load
+			HoldingBack *struct{ Code, Message string } // why it takes no work now (#174 QA e)
 		}
 		if !readJSON(w, r, &in) {
 			return
 		}
 		workerLoads.Store(wk.ID, in.Load) // V7d: the Workers page's live figures
+		if h := holdingBack(in.HoldingBack); h != nil {
+			workerHolds.Store(wk.ID, h)
+		} else {
+			workerHolds.Delete(wk.ID)
+		}
 		tests.expire(store, func(string) bool { return true })
 		writeJSON(w, map[string]any{"workerId": wk.ID, "paused": store.Paused(), "pathTests": tests.pending(wk.ID)}) // V7c
 	})
@@ -370,3 +377,31 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine) http.
 
 // workerLoads are the remote workers' last reported loads (sysload.Load), by worker id (V7d).
 var workerLoads sync.Map
+
+// workerHolds are why remote workers take no work now ({code, message}), by worker id (#174 QA e).
+var workerHolds sync.Map
+
+// holdingKnown are the reasons a worker may give for taking no work.
+var holdingKnown = map[string]bool{"low_disk": true}
+
+// holdingBack is a worker's reason as the Workers page may show it (orch-lead 16:12Z): a known code
+// only (else nil), its words at most 200 characters, without control characters; the page shows it as
+// text.
+func holdingBack(h *struct{ Code, Message string }) map[string]string {
+	if h == nil || !holdingKnown[h.Code] {
+		return nil
+	}
+	msg := strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, h.Message))
+	if r := []rune(msg); len(r) > 200 {
+		msg = string(r[:200])
+	}
+	if msg == "" {
+		return nil
+	}
+	return map[string]string{"code": h.Code, "message": msg}
+}

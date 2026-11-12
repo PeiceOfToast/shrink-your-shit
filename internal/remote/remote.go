@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/sysload"
@@ -64,6 +65,32 @@ type Client struct {
 	Server, Token, Version string
 	HTTP                   *http.Client
 	meter                  sysload.Meter // this computer's load, sent with each heartbeat (V7d)
+
+	holdMu   sync.Mutex
+	holdBack string // why it takes no work now ("" takes work), sent with each heartbeat (#174 QA e)
+}
+
+// holding sets why this worker takes no work ("" when it does again), saying so in its log once per
+// change.
+func (c *Client) holding(why string) {
+	c.holdMu.Lock()
+	defer c.holdMu.Unlock()
+	if why == c.holdBack {
+		return
+	}
+	switch {
+	case why != "":
+		log.Print(why)
+	default:
+		log.Print("Taking work again: there is room in its work folder.")
+	}
+	c.holdBack = why
+}
+
+func (c *Client) holdingBack() string {
+	c.holdMu.Lock()
+	defer c.holdMu.Unlock()
+	return c.holdBack
 }
 
 // APIError is a refusal from the server: its code and words.
@@ -123,8 +150,12 @@ func (c *Client) Pair(ctx context.Context, code, name string) (State, error) {
 func (c *Client) Heartbeat(ctx context.Context, free int) error {
 	l := c.meter.Sample()
 	var out struct{ PathTests []PathTest }
+	var hold any
+	if why := c.holdingBack(); why != "" {
+		hold = map[string]string{"code": "low_disk", "message": why}
+	}
 	if err := c.call(ctx, "heartbeat", map[string]any{"freeSlots": free, "cpuPercent": l.CPUPercent, "memUsedBytes": l.MemUsedBytes,
-		"memTotalBytes": l.MemTotalBytes}, &out); err != nil {
+		"memTotalBytes": l.MemTotalBytes, "holdingBack": hold}, &out); err != nil {
 		return err
 	}
 	for _, t := range out.PathTests { // V7c: its shared folders' tests ride the heartbeat's answer
