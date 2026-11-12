@@ -195,7 +195,11 @@ func selectorsOf(order []Node) (rules.Selectors, []Issue) {
 	}
 	if err := s.Validate(); err != nil {
 		msg := strings.TrimSuffix(err.Error(), " Nothing was changed.")
-		return s, []Issue{{Code: "invalid_config", Severity: "error", NodeID: by[nodeForMessage(msg)].ID, Message: msg}}
+		i := Issue{Code: "invalid_config", Severity: "error", NodeID: by[nodeForMessage(msg)].ID, Message: msg}
+		if f := fieldForMessage(msg); f != "" {
+			i.ConfigPath, i.Field = "/"+f, f
+		}
+		return s, []Issue{i}
 	}
 	return s, nil
 }
@@ -339,4 +343,15 @@ func convertConfig(s rules.Selectors) map[string]any {
 		c["rateControl"], c["vbrMaxKbps"] = "vbr", s.VBRMaxKbps
 	}
 	return c
+}
+
+// fieldForMessage is the Convert video setting a VBR message is about (user review 11-12 item 1).
+func fieldForMessage(msg string) string {
+	switch {
+	case strings.HasPrefix(msg, "Must be at least"), strings.Contains(msg, "peak limit"):
+		return "vbrMaxKbps"
+	case strings.HasPrefix(msg, "VBR aims at"):
+		return "maxBitrate"
+	}
+	return ""
 }

@@ -5,6 +5,7 @@ package rules
 import (
 	"fmt"
 	"math"
+	"strconv"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 )
@@ -141,6 +142,9 @@ func RoughWarning(level, f string, shapes []Shape) string {
 	return fmt.Sprintf("%s may look blocky in dark or fast scenes for %s files%s (%g Mbps). Choose %s to avoid that.",
 		upperFirst(level), what, fps, row[worst.Row], betterLevel[level])
 }
+
+// Mbps is kbps in the ladder's words: 3000 is "3", 2500 is "2.5".
+func Mbps(kbps int) string { return strconv.FormatFloat(float64(kbps)/1000, 'f', -1, 64) }
 
 // RowLabel is a ladder row in words ("sd": 480p and below).
 func RowLabel(row string) string {

@@ -107,14 +107,18 @@ func (s Selectors) Validate() error {
 			return &SelectorError{"invalid", "VBR aims at a level's bitrate: choose Low, Medium or High. Nothing was changed."}
 		}
 		if s.VBRMaxKbps < 100 || s.VBRMaxKbps > 500000 {
-			return &SelectorError{"invalid", "Set the VBR limit from 0.1 to 500 Mbps. Nothing was changed."}
+			return &SelectorError{"invalid", "Set the peak limit from 0.1 to 500 Mbps. Nothing was changed."}
 		}
-		if h := resolutions[s.Resolution]; h > 0 { // a fixed size: its row is known
-			row := HeightRow(0, h)
-			if t := Ladder[ladderFormat(s.Format)][s.MaxBitrate][row]; float64(s.VBRMaxKbps) < t*1000 {
-				return &SelectorError{"invalid", fmt.Sprintf("The limit is below %s's %s Mbps for %s. Raise it, or choose a lower level. Nothing was changed.",
-					upperFirst(s.MaxBitrate), strconv.FormatFloat(t, 'f', -1, 64), RowLabel(row))}
-			}
+		// design (SCREENS V3 step 3): at least the level's figure for the resolution; with "Same
+		// resolution", for the lowest row the level can reach, so it's never refused for a file it could
+		// fit (a file whose own row needs more is encoded at the limit: VBRKbps)
+		row := "sd"
+		if h := resolutions[s.Resolution]; h > 0 {
+			row = HeightRow(0, h)
+		}
+		if t := Ladder[ladderFormat(s.Format)][s.MaxBitrate][row]; float64(s.VBRMaxKbps) < t*1000 {
+			return &SelectorError{"invalid", fmt.Sprintf("Must be at least %s Mbps, the %s figure for %s. Nothing was changed.",
+				strconv.FormatFloat(t, 'f', -1, 64), upperFirst(s.MaxBitrate), RowLabel(row))}
 		}
 	default:
 		return invalid("rateControl", s.RateControl)

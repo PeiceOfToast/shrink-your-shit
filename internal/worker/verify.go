@@ -64,6 +64,9 @@ type KeptError struct{ Code, Reason string } // Code: one of jobs.JobReasonCodes
 
 func (e *KeptError) Error() string { return "kept original: " + e.Reason }
 
+// pictureTooDifferent begins the picture check's refusal.
+const pictureTooDifferent = "the picture of the new file is too different from the original"
+
 func kept(format string, a ...any) error {
 	return &KeptError{Code: jobs.ReasonKeptOriginal, Reason: fmt.Sprintf(format, a...)}
 }
@@ -283,7 +286,7 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 			}
 		}
 		if best < threshold { // one place that is too different is enough
-			return kept("the picture of the new file is too different from the original (similarity %.3f at %s, %.2f is required)",
+			return kept(pictureTooDifferent+" (similarity %.3f at %s, %.2f is required)",
 				best, rules.Clock(seg.start), threshold)
 		}
 	}

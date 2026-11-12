@@ -93,3 +93,27 @@ func TestVBRThroughAWorkflow(t *testing.T) {
 		}
 	}
 }
+
+// Design (SCREENS V3 step 3): a peak limit below the level's figure is invalid_config on the Convert
+// video step's vbrMaxKbps, in the design's words.
+func TestVBRLimitBelowTheLevel(t *testing.T) {
+	s := rules.DefaultSelectors(3)
+	s.Ignore = []string{}
+	s.Resolution, s.MaxBitrate, s.RateControl, s.VBRMaxKbps = "720", "medium", "vbr", 3000
+	d := FromTemplate(s.Template(), nil)
+	var convert string
+	for i, n := range d.Nodes {
+		if n.Type == TypeConvert {
+			d.Nodes[i].Config["vbrMaxKbps"] = 2000
+			convert = n.ID
+		}
+	}
+	_, issues := ToTemplate(d, rules.Template{})
+	if len(issues) != 1 || issues[0].Code != "invalid_config" || issues[0].NodeID != convert || issues[0].Field != "vbrMaxKbps" ||
+		issues[0].Message != "Must be at least 2.5 Mbps, the Medium figure for 720p." {
+		t.Errorf("%+v", issues)
+	}
+	if def, _ := Definition(TypeConvert); def.ConfigSchema["properties"].(map[string]any)["vbrMaxKbps"].(map[string]any)["title"] != "Peak limit (kbps)" {
+		t.Error("the field is the Peak limit")
+	}
+}

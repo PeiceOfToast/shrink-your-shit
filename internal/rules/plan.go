@@ -89,6 +89,8 @@ type VideoEncode struct {
 	MaxRateKbps int `json:"maxRateKbps,omitempty"`
 	// TargetKbps: a VBR encode's average (user review 11-12 item 1), in place of the CRF; 0 = quality.
 	TargetKbps int `json:"targetKbps,omitempty"`
+	// PeakLimitKbps: the person's own VBR limit, as set (MaxRateKbps may be lower: the source's).
+	PeakLimitKbps int `json:"peakLimitKbps,omitempty"`
 	// Height scales the picture down to this height, keeping its shape (selectors' resolution); 0 = as it is.
 	Height int `json:"height,omitempty"`
 	// Copy: the video is copied as it is, not encoded (S4: an HEVC file only repackaged as MKV). The
@@ -563,6 +565,7 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 		Index: info.MainVideoOrdinal(), MaxRateKbps: CapKbps(s.MaxBitrate, target, w, h, v, sourceVideoKbps(info, v)), Height: height}
 	if s.RateControl == "vbr" {
 		p.Video.TargetKbps, p.Video.MaxRateKbps = VBRKbps(s.MaxBitrate, target, w, h, v, sourceVideoKbps(info, v), s.VBRMaxKbps)
+		p.Video.PeakLimitKbps = s.VBRMaxKbps
 	}
 	if target != "hevc" {
 		p.Video.Format = target
