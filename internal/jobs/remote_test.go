@@ -41,8 +41,8 @@ func TestUpgradeFrom34AddsRemoteWorkers(t *testing.T) {
 	}
 }
 
-// rewind35 takes away what migration 35 (remote workers) added.
-var rewind35 = []string{`DROP INDEX workers_token`, `DROP TABLE worker_pairings`, `ALTER TABLE workers DROP COLUMN kind`, `ALTER TABLE workers DROP COLUMN token_hash`,
+// rewind35 takes away what migrations 35 (remote workers) and 36 (workers on and off) added.
+var rewind35 = []string{`ALTER TABLE workers DROP COLUMN enabled`, `DROP INDEX workers_token`, `DROP TABLE worker_pairings`, `ALTER TABLE workers DROP COLUMN kind`, `ALTER TABLE workers DROP COLUMN token_hash`,
 	`ALTER TABLE workers DROP COLUMN version`, `ALTER TABLE workers DROP COLUMN api_level`, `ALTER TABLE workers DROP COLUMN last_seen`,
 	`ALTER TABLE workers DROP COLUMN capabilities`}
 
