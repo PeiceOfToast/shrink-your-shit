@@ -310,7 +310,7 @@ func v2Events(evs []jobs.JobEvent) []map[string]any {
 			from = eventState(*e.From)
 		}
 		out = append(out, map[string]any{"seq": e.Seq, "at": e.At, "from": from, "to": eventState(e.To),
-			"reason": nilIfEmpty(e.Reason), "workerId": nilIfEmpty(e.Worker)})
+			"reason": reasonOf(e), "workerId": nilIfEmpty(e.Worker)}) // {code, message} | null, as everywhere in v2
 	}
 	return out
 }

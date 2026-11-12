@@ -297,10 +297,10 @@ END;`},
 	// comes from where the job went (ReasonCodes lists them all).
 	{23, "reason codes", `
 ALTER TABLE jobs ADD COLUMN error_code TEXT NOT NULL DEFAULT '';
-UPDATE jobs SET error_code = CASE status WHEN 'failed' THEN 'convert_failed' WHEN 'kept' THEN 'kept_original' ELSE 'retry_later' END
+UPDATE jobs SET error_code = ` + legacyReasonCode("error", "status") + `
   WHERE error <> '';
 UPDATE events SET data = json_object('message', reason),
-  reason = CASE to_status WHEN 'failed' THEN 'convert_failed' WHEN 'kept' THEN 'kept_original' ELSE 'retry_later' END
+  reason = ` + legacyReasonCode("reason", "to_status") + `
   WHERE kind = 'job' AND reason <> '' AND (reason GLOB '*[^a-z0-9_]*');
 DROP TRIGGER events_job_status;
 CREATE TRIGGER events_job_status AFTER UPDATE OF status ON jobs WHEN old.status <> new.status BEGIN
@@ -317,6 +317,19 @@ END;
 UPDATE events SET data = json_object('message', 'This job was removed from the list.') WHERE kind = 'job' AND reason = 'removed' AND data IS NULL;
 UPDATE events SET data = json_object('message', 'You stopped this file. It is left as it is until you press Convert again.')
   WHERE kind = 'job' AND reason = 'user_stopped' AND data IS NULL;`},
+}
+
+// legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone
+// (column text), the job having gone to status (column state): the worker's own sentences say which
+// case it was; any other gets the code of where the job went (review abe2b0e).
+func legacyReasonCode(text, state string) string {
+	return `CASE
+    WHEN ` + text + ` LIKE 'there is not enough free disk space next to this file%' THEN 'low_disk_space'
+    WHEN ` + text + ` LIKE 'The disk is full%' THEN 'disk_full'
+    WHEN ` + text + ` LIKE 'shrink-your-shit is not allowed to read this file%' THEN 'cannot_read'
+    WHEN ` + text + ` LIKE 'shrink-your-shit is not allowed to write in this folder%' THEN 'cannot_write'
+    WHEN ` + text + ` LIKE 'Stopped: no progress for %' THEN 'stalled'
+    WHEN ` + state + ` = 'failed' THEN 'convert_failed' WHEN ` + state + ` = 'kept' THEN 'kept_original' ELSE 'retry_later' END`
 }
 
 // keepBackups is how many pre-upgrade backups (<db>.bak-v<old version>) are kept.

@@ -300,6 +300,11 @@ func TestReasonCodesMigration(t *testing.T) {
 	for _, q := range []string{ // back to version 22: the sentence was the code
 		`UPDATE events SET reason='Converting did not finish.', data=NULL WHERE kind='job' AND to_status='failed'`,
 		`INSERT INTO events(kind, job_id, at, from_status, to_status, reason) VALUES ('job', 99, '2026-11-01T00:00:00Z', 'running', 'cancelled', 'user_stopped')`,
+		// the worker's own sentences: a low-space retry and a stall (review abe2b0e: not legacy retry_later)
+		`INSERT INTO events(kind, job_id, at, from_status, to_status, reason) VALUES
+		  ('job', 98, '2026-11-01T00:00:00Z', 'running', 'queued', 'there is not enough free disk space next to this file: about 2.0 GB is needed to convert it safely, 1.0 GB is free'),
+		  ('job', 97, '2026-11-01T00:00:00Z', 'running', 'failed', 'Stopped: no progress for 10m0s. The original is untouched; press Retry to try again.'),
+		  ('job', 96, '2026-11-01T00:00:00Z', 'running', 'queued', 'Something else that may pass.')`,
 		`DROP TRIGGER events_job_status`, `DROP TRIGGER events_job_removed`,
 		`CREATE TRIGGER events_job_status AFTER UPDATE OF status ON jobs BEGIN SELECT 1; END`,
 		`CREATE TRIGGER events_job_removed AFTER DELETE ON jobs BEGIN SELECT 1; END`,
@@ -319,6 +324,11 @@ func TestReasonCodesMigration(t *testing.T) {
 	}
 	if ev, _ := s.JobEvents(99); len(ev) != 1 || ev[0].Reason != UserStoppedReason || ev[0].Message == "" {
 		t.Errorf("old stop %+v", ev)
+	}
+	for job, want := range map[int64]string{98: ReasonLowDiskSpace, 97: ReasonStalled, 96: ReasonRetryLater} {
+		if ev, _ := s.JobEvents(job); len(ev) != 1 || ev[0].Reason != want || ev[0].Message == "" {
+			t.Errorf("old event of job %d: %+v, want %s", job, ev, want)
+		}
 	}
 	var code string
 	s.db.QueryRow(`SELECT error_code FROM jobs WHERE id=?`, id).Scan(&code)

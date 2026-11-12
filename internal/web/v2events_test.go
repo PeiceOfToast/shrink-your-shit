@@ -5,8 +5,10 @@ package web
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"net/http"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -216,7 +218,18 @@ func TestV2ReasonIsCodeAndMessage(t *testing.T) {
 		t.Errorf("stream %+v", m)
 	}
 	code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10)})
-	if code != 200 || !strings.Contains(body, `"reason":{"code":"low_disk_space","message":"there is not enough free disk space next to this file"}`) {
-		t.Errorf("job %d %s", code, body)
+	var d struct {
+		Reason any
+		Events []struct{ Reason any }
+	}
+	json.Unmarshal([]byte(body), &d)
+	want := map[string]any{"code": "low_disk_space", "message": "there is not enough free disk space next to this file"}
+	if code != 200 || !reflect.DeepEqual(d.Reason, want) || len(d.Events) == 0 || !reflect.DeepEqual(d.Events[len(d.Events)-1].Reason, want) {
+		t.Errorf("job: reason and its history entry should both be %v: %d %s", want, code, body)
+	}
+	for _, e := range d.Events[:len(d.Events)-1] { // a change with no reason (created, running): null, never ""
+		if e.Reason != nil {
+			t.Errorf("history entry without a reason: %v", e.Reason)
+		}
 	}
 }
