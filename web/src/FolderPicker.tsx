@@ -56,7 +56,13 @@ function Picker({ from, onPick, onClose }: { from: string; onPick: (p: string) =
   const usable = !!cur && cur.path !== "";
   return (
     <div className="fpick" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={box} className="dlg" role="dialog" aria-modal="true" aria-labelledby={id + "-t"} onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), onClose())}>
+      <div ref={box} className="dlg" role="dialog" aria-modal="true" aria-labelledby={id + "-t"} onKeyDown={(e) => {
+        if (e.key === "Escape") return (e.stopPropagation(), onClose());
+        // aria-modal: Tab wraps inside the box (QA #196 clause 3), first <-> last; focus outside the box goes to the nearest end
+        if (e.key !== "Tab") return;
+        const f = [...box.current!.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href]")], i = f.indexOf(document.activeElement as HTMLElement), last = f.length - 1;
+        if (e.shiftKey ? i <= 0 : i === -1 || i === last) { e.preventDefault(); (e.shiftKey ? f[last] : f[0])?.focus(); }
+      }}>
         <div className="row hdr"><h2 id={id + "-t"} ref={title} tabIndex={-1}>Choose a folder</h2><span className="sp" />
           <button className="btn sm icon ghost" type="button" aria-label="Close" onClick={onClose}><Icon id="i-x" /></button></div>
         <div className="row crumbs">
