@@ -667,3 +667,31 @@ func TestOldDoneJobsOwnTheirOutputs(t *testing.T) {
 		t.Error("after the first look, another time still counts as ours")
 	}
 }
+
+// Settings' scanEvery, applied without a restart: the next pass is due that long after the last one.
+func TestSetEveryRetimesTheNextScan(t *testing.T) {
+	s, _, _, _ := setup(t, hevcBig)
+	passes := make(chan struct{}, 10)
+	targets := s.Targets
+	s.Targets = func() ([]Target, error) { passes <- struct{}{}; return targets() }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.Run(ctx, time.Hour)
+	<-passes // the first pass
+	deadline := time.Now().Add(2 * time.Second)
+	for s.NextScan().IsZero() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if next := time.Until(s.NextScan()); next < 50*time.Minute {
+		t.Fatalf("an hour's interval: next in %s", next)
+	}
+	s.SetEvery(50 * time.Millisecond)
+	select {
+	case <-passes: // the shorter interval took effect without waiting out the hour
+	case <-time.After(3 * time.Second):
+		t.Fatal("no pass after SetEvery")
+	}
+	if next := time.Until(s.NextScan()); next > time.Second {
+		t.Errorf("next in %s after SetEvery(50ms)", next)
+	}
+}

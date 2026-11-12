@@ -20,12 +20,15 @@ type Selectors struct {
 	MaxBitrate string `json:"maxBitrate"` // none | high | medium | low (S6: Ladder): a peak cap beside the quality
 	Audio      string `json:"audio"`      // AvailableAudio (S6: design E's six choices)
 	// OnlyMyLanguages keeps only the audio in the person's languages, and tracks with none (S6; on by default).
-	OnlyMyLanguages bool     `json:"onlyMyLanguages"`
-	Subtitles       string   `json:"subtitles"`           // AvailableSubtitles
-	FileType        string   `json:"fileType"`            // mkv | mp4 | webm | keep (AvailableFileTypes)
-	AfterConverting string   `json:"afterConverting"`     // replace | beside | folder (S6: with OutputDir)
-	OutputDir       string   `json:"outputDir,omitempty"` // folder: where the new files go (design E)
-	Ignore          []string `json:"ignore"`              // folders, files or patterns in the library not looked at
+	OnlyMyLanguages bool   `json:"onlyMyLanguages"`
+	Subtitles       string `json:"subtitles"`           // AvailableSubtitles
+	FileType        string `json:"fileType"`            // mkv | mp4 | webm | keep (AvailableFileTypes)
+	AfterConverting string `json:"afterConverting"`     // replace | beside | folder (S6: with OutputDir)
+	OutputDir       string `json:"outputDir,omitempty"` // folder: where the new files go (design E)
+	// FolderMode is "next_to_library" (V5a, output-first: each library's own folder beside it, or its
+	// override; OutputDir unused) or "" (one folder for all: OutputDir).
+	FolderMode string   `json:"folderMode,omitempty"`
+	Ignore     []string `json:"ignore"` // folders, files or patterns in the library not looked at
 	// IncludeDolbyVision converts Dolby Vision profiles 7 and 8 as HDR10/HLG (S3; replaces skipHdr: HDR10
 	// is always converted and kept as HDR). Profile 5 is left as it is whatever this says.
 	IncludeDolbyVision bool `json:"includeDolbyVision"`
@@ -113,7 +116,9 @@ func (s Selectors) Validate() error {
 		return notYet(`Changing the file type needs "Put the new file next to the original" for now; replacing with a new file type comes in an update.`)
 	}
 	switch {
-	case s.AfterConverting == "folder" && (strings.TrimSpace(s.OutputDir) == "" || !filepath.IsAbs(s.OutputDir)):
+	case s.AfterConverting == "folder" && s.FolderMode != "" && s.FolderMode != NextToLibrary:
+		return invalid("folderMode", s.FolderMode)
+	case s.AfterConverting == "folder" && s.FolderMode == "" && (strings.TrimSpace(s.OutputDir) == "" || !filepath.IsAbs(s.OutputDir)):
 		return &SelectorError{"output_dir_needed", "Choose the folder for new files (a full path). Nothing was changed."}
 	}
 	switch { // choices that can't go together (design E, 21:22Z; the page moves the other field first)
@@ -268,3 +273,6 @@ func (s Selectors) Upgraded() Selectors {
 // KeepVP9OpusWarning is design's warning (02:30Z) for "Keep as is" with VP9 or Opus: an MP4 can't hold
 // them, so such a file becomes MKV (the job log says so for each file).
 const KeepVP9OpusWarning = "With VP9 or Opus, .mp4 files become .mkv files, so they get a new name. After converting, rescan this library in Radarr, Sonarr, Plex or Jellyfin."
+
+// NextToLibrary is FolderMode's "each library's own folder beside it" (V5a).
+const NextToLibrary = "next_to_library"
