@@ -24,7 +24,7 @@ export async function call<T>(method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE
     return { error: OFFLINE };
   }
   if (r.status === 401 && path !== "/api/login") {
-    const here = location.pathname.replace(/^\/next/, "") + location.search;
+    const here = location.pathname + location.search;
     if (!here.startsWith("/signin")) navigate("/signin?next=" + encodeURIComponent(here));
     throw new SignedOut();
   }

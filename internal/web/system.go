@@ -12,7 +12,7 @@ import (
 )
 
 // systemRoutes are the setup checks: the folder check first-run runs as soon as a folder is chosen,
-// and the health report Settings > System shows. Both use the doctor package, as the `doctor` command does.
+// and the health report Settings > About shows. Both use the doctor package, as the `doctor` command does.
 func systemRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 	api.HandleFunc("POST /api/libraries/check", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {

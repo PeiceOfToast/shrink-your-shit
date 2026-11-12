@@ -89,6 +89,8 @@ type Worker struct {
 	Logs *runlog.Logs
 	// verified is the probe of the new file the last check passed (S5: stored for its final path).
 	verified media.Info
+	// remote is the job a worker on another computer converts, run here (V7b2); nil for a local one.
+	remote *RemoteJob
 	// failures: the running job's path's choices for when it doesn't work (V6b; under mu)
 	failures *rules.Failures
 	// lease: the running job's lease (V7a; under mu)
@@ -236,9 +238,18 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 	w.lease, _ = w.Queue.LeaseOf(job.ID)
 	lease := w.lease
 	w.mu.Unlock()
-	renewDone := make(chan struct{})
-	defer close(renewDone)
-	go w.renewLease(job.ID, lease, renewDone) // V7a: kept while it works, the probe and the checks too
+	return w.runClaimed(ctx, job, jobCtx, cancel, lease, true)
+}
+
+// runClaimed runs job, claimed for this worker (current, cancelJob and lease set), and records its
+// outcome. renew: this worker renews its lease (a local job; a remote worker renews its own, V7b2).
+func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Context, cancel context.CancelFunc, lease string, renew bool) (bool, error) {
+	var err error
+	if renew {
+		renewDone := make(chan struct{})
+		defer close(renewDone)
+		go w.renewLease(job.ID, lease, renewDone) // V7a: kept while it works, the probe and the checks too
+	}
 	w.jobf(job.ID, ": started")
 	if testHook != nil {
 		testHook("registered")
@@ -261,6 +272,12 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 		w.current, w.cancelJob, w.stopped = 0, nil, stopNone
 		w.mu.Unlock()
 	}()
+	// The job was given back to the queue (its lease ended: V7a, V7b2): another worker has it now, so
+	// there is nothing to record here.
+	if errors.Is(err, errLeaseLost) {
+		w.jobf(job.ID, ": given back to the queue (this worker no longer holds it)")
+		return true, nil
+	}
 	// A stop asked for on the job's record wins over a pause or a shutdown, so it never waits in the
 	// queue as a job no claim takes. Once the new file is in place (err == nil) the job is done.
 	if err != nil {
@@ -323,7 +340,7 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 			return true, err
 		}
 		// The person sees what happened in plain words; the technical error goes to the log
-		// (Settings > System shows its last lines).
+		// (Settings > About shows its last lines).
 		w.jobf(job.ID, " (%s) failed: %v", job.Path, err)
 		w.Queue.AddStep(job.ID, "converted", false, plainFailure(err))
 		if ferr := w.Queue.Fail(job.ID, reasonCode(err), plainFailure(err)); ferr != nil {
@@ -390,7 +407,7 @@ type SkippedError struct{ Words, Code string }
 
 func (e *SkippedError) Error() string { return "skipped: " + e.Words }
 
-const cannotRead = "shrink-your-shit is not allowed to read this file, so nothing was converted. Let it read the file (Settings > System says how), then press Retry."
+const cannotRead = "shrink-your-shit is not allowed to read this file, so nothing was converted. Let it read the file (Settings > About says how), then press Retry."
 
 const diskFull = "The disk is full, so converting stopped. Your original was not touched. Free some space, then press Retry."
 
@@ -404,9 +421,9 @@ func plainFailure(err error) string {
 	case errors.Is(err, syscall.ENOSPC):
 		return diskFull
 	case errors.Is(err, fs.ErrPermission):
-		return "shrink-your-shit is not allowed to write in this folder, so converting stopped. Your original was not touched. Let it write there (Settings > System says how), then press Retry."
+		return "shrink-your-shit is not allowed to write in this folder, so converting stopped. Your original was not touched. Let it write there (Settings > About says how), then press Retry."
 	}
-	return "Converting did not finish. Your original was not touched. Press Retry; if it keeps failing, Settings > System shows what went wrong."
+	return "Converting did not finish. Your original was not touched. Press Retry; if it keeps failing, Settings > About shows what went wrong."
 }
 
 // reasonCode is the code of a failed or refused conversion (one of jobs.JobReasonCodes), beside its
@@ -475,6 +492,31 @@ func (w *Worker) watchStall(id int64) func() {
 			case <-t.C:
 				if time.Since(time.Unix(0, w.progressAt.Load())) >= after {
 					w.jobf(id, ": no progress for %s, stopping it", after)
+					w.stop(id, stopStall)
+					return
+				}
+			}
+		}
+	}()
+	return func() { close(done) }
+}
+
+// watchRemoteStall is watchStall for a remote worker's encode: the worker reports its position, and the
+// job is stopped (stopStall, the same words and retry rules) when it hasn't moved on for stallAfter
+// while the worker says it is converting.
+func (w *Worker) watchRemoteStall(id int64, rj *RemoteJob) func() {
+	after := w.stallAfter()
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(max(after/20, 10*time.Millisecond))
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case now := <-t.C:
+				if still, judging := rj.stillFor(now); judging && still >= after {
+					w.jobf(id, ": the remote encode made no progress for %s, stopping it", after)
 					w.stop(id, stopStall)
 					return
 				}
@@ -719,20 +761,41 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	tmp := stage.path
 	args := plan.FFmpegArgs(srcPath, tmp)
-	stopWatch := w.watchStall(job.ID)
 	setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWords(plan),
 		Decoder: decoderWords(src), Progress: media.Progress{ETASeconds: -1}})
 	defer dropLive(job.ID)
-	var tenths progressLines
-	encErr, terr := media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
-		w.progressAt.Store(time.Now().UnixNano())
-		w.Queue.Progress(job.ID, p.Percent)
-		updateLive(job.ID, p)
-		if line := tenths.next(p); line != "" {
-			w.jobf(job.ID, ": %s", line)
+	var encErr string
+	var terr error
+	if w.remote != nil { // V7b2: a worker on another computer converts and checks; its file comes up here
+		stopWatch := w.watchRemoteStall(job.ID, w.remote)
+		encErr, terr = w.remote.convert(ctx, w, job, snap, srcPath, tmp)
+		stopWatch()
+		var k *KeptError
+		if errors.As(terr, &k) || errors.Is(terr, errLeaseLost) {
+			return "", terr
 		}
-	})
-	stopWatch()
+	} else {
+		stopWatch := w.watchStall(job.ID)
+		var tenths progressLines
+		at := -1.0 // the furthest position ffmpeg has reached
+		encErr, terr = media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
+			// only a position further on is progress: a stuck ffmpeg can keep reporting the same one (a
+			// damaged file, 21 min on a test run, never stopped), which mustn't hold off the stall stop
+			if p.OutTimeUS > at {
+				at = p.OutTimeUS
+				w.progressAt.Store(time.Now().UnixNano())
+			}
+			if job.DurationSec <= 0 {
+				return // no length: no percent to show
+			}
+			w.Queue.Progress(job.ID, p.Percent)
+			updateLive(job.ID, p)
+			if line := tenths.next(p); line != "" {
+				w.jobf(job.ID, ": %s", line)
+			}
+		})
+		stopWatch()
+	}
 	if s := strings.TrimSpace(encErr); s != "" && w.Logs != nil {
 		w.Logs.Append(job.ID, "ffmpeg said:\n"+s) // errors only (the encode runs at -v error)
 	}

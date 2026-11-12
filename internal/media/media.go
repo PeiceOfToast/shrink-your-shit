@@ -5,7 +5,7 @@
 package media
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Exec runs external programs.
@@ -35,8 +36,7 @@ type Exec interface {
 type OSExec struct{}
 
 func (OSExec) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	dieWithParent(cmd)
+	cmd := command(ctx, name, args...)
 	var out limitedBuffer
 	var stderr tail
 	var errText strings.Builder
@@ -68,8 +68,7 @@ func (l *limitedBuffer) Write(p []byte) (int, error) {
 }
 
 func (OSExec) Capture(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	dieWithParent(cmd)
+	cmd := command(ctx, name, args...)
 	var out limitedBuffer
 	errBuf := headBuffer{max: maxStderrBytes}
 	cmd.Stdout, cmd.Stderr = &out, &errBuf
@@ -104,26 +103,63 @@ func (h *headBuffer) Write(p []byte) (int, error) {
 }
 
 func (OSExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	dieWithParent(cmd)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return "", err
-	}
+	cmd := command(ctx, name, args...)
+	// lines go through a writer, not a read loop: Wait (with WaitDelay) then ends a stopped run even when
+	// something it started still holds its output open (QA finding B)
+	lines := &lineWriter{onLine: onLine}
 	var last strings.Builder
 	head := headBuffer{max: maxStderrBytes}
-	cmd.Stderr = io.MultiWriter(&tail{b: &last, max: 2000}, &head)
+	cmd.Stdout, cmd.Stderr = lines, io.MultiWriter(&tail{b: &last, max: 2000}, &head)
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("%s: %w", name, err)
 	}
-	sc := bufio.NewScanner(stdout)
-	for sc.Scan() {
-		onLine(sc.Text())
-	}
-	if err := cmd.Wait(); err != nil {
+	err := cmd.Wait()
+	lines.flush()
+	if err != nil {
 		return string(head.buf), fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(last.String()))
 	}
 	return string(head.buf), nil
+}
+
+// StopWaitDelay is how long a stopped program's output may stay open, held by something it started,
+// before the run is ended anyway (QA finding B: a converter's leftover child held the job in Running).
+var StopWaitDelay = 5 * time.Second
+
+// command is name with args, ended with ctx: killed with everything it started (its own process group,
+// where the system has them), it dies with this program, and its run ends at most StopWaitDelay after
+// the kill even if a leftover still holds its output.
+func command(ctx context.Context, name string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, name, args...)
+	dieWithParent(cmd)
+	killGroup(cmd)
+	cmd.WaitDelay = StopWaitDelay
+	return cmd
+}
+
+// lineWriter calls onLine for each line written to it, without its line end (as bufio.ScanLines).
+type lineWriter struct {
+	buf    []byte
+	onLine func(string)
+}
+
+func (l *lineWriter) Write(p []byte) (int, error) {
+	l.buf = append(l.buf, p...)
+	for {
+		i := bytes.IndexByte(l.buf, '\n')
+		if i < 0 {
+			return len(p), nil
+		}
+		l.onLine(strings.TrimSuffix(string(l.buf[:i]), "\r"))
+		l.buf = l.buf[i+1:]
+	}
+}
+
+// flush gives the last line, if it had no line end.
+func (l *lineWriter) flush() {
+	if len(l.buf) > 0 {
+		l.onLine(strings.TrimSuffix(string(l.buf), "\r"))
+		l.buf = nil
+	}
 }
 
 // tail keeps only the last max bytes written (ffmpeg's error is at the end).
@@ -299,6 +335,7 @@ func ParseProgress(line string, durationSec float64) (float64, bool) {
 // the source's length done, and the latest fps, bitrate and speed (0 when ffmpeg says N/A or has not
 // said yet). ETASeconds is the time left at that speed, -1 while unknown.
 type Progress struct {
+	OutTimeUS   float64 // where ffmpeg is in the source (out_time_us): it moving is what progress means
 	Percent     float64
 	FPS         float64
 	BitrateKbps float64
@@ -307,7 +344,8 @@ type Progress struct {
 }
 
 // Transcode runs ffmpeg and reports each progress point through onProgress (on every out_time_us line,
-// with the block's other values as last seen). It returns what ffmpeg printed on stderr (at the error
+// with the block's other values as last seen; with durationSec 0, a length we don't know, the position
+// only, so a stall can still be told from a slow encode). It returns what ffmpeg printed on stderr (at the error
 // level the args ask for), which includes decode errors in the source.
 func Transcode(ctx context.Context, x Exec, ffmpeg string, args []string, durationSec float64, onProgress func(Progress)) (string, error) {
 	p := Progress{ETASeconds: -1}
@@ -322,6 +360,14 @@ func Transcode(ctx context.Context, x Exec, ffmpeg string, args []string, durati
 		case "speed": // "1.25x", or "N/A"
 			p.Speed, _ = strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(v, "x")), 64)
 		}
+		if k != "out_time_us" {
+			return
+		}
+		us, err := strconv.ParseFloat(v, 64)
+		if err != nil || us < 0 { // "N/A" before the first frame
+			return
+		}
+		p.OutTimeUS = us
 		if pct, ok := ParseProgress(line, durationSec); ok {
 			p.Percent, p.ETASeconds = pct, -1
 			if p.Speed > 0 {
@@ -335,8 +381,8 @@ func Transcode(ctx context.Context, x Exec, ffmpeg string, args []string, durati
 				}
 				p.ETASeconds = sum / float64(len(etas))
 			}
-			onProgress(p)
 		}
+		onProgress(p) // a length we don't know: the position only (Percent 0, ETASeconds -1)
 	}, ffmpeg, args...)
 }
 

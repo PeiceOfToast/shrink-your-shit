@@ -9,7 +9,8 @@ import { SignedOut, failed, type Answer } from "../api";
 import { order } from "../mock/steps"; // the steps in running order: a property of the document, not data
 import { useData } from "../useData";
 import { getDraft, getWorkflow, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked } from "../workflowApi";
-import { onLeave } from "../router";
+import { Link, onLeave } from "../router";
+import { Browse } from "../FolderPicker";
 import { listLibraries, shrunk } from "../libraryApi";
 import type { JSONSchema, Node, PublishPreview, StepDefinition, ValidationIssue, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
 
@@ -19,7 +20,7 @@ const Reg = createContext<{ defs: StepDefinition[]; words: Record<string, string
 function useReg() { const r = useContext(Reg); return { stepDef: (t: string) => r.defs.find((d) => d.type === t), summary: (n: Node) => r.words[n.id] ?? "", libs: r.libs }; }
 
 // The server's icon keys (registry) -> design's sprite.
-const ICON: Record<string, string> = { folder: "i-folder", filter: "i-shield", video: "i-video", audio: "i-audio", subtitles: "i-subtitle", file: "i-file", check: "i-checks", save: "i-save", cond: "i-cond", history: "i-history" };
+export const ICON: Record<string, string> = { folder: "i-folder", filter: "i-shield", video: "i-video", audio: "i-audio", subtitles: "i-subtitle", file: "i-file", check: "i-checks", save: "i-save", cond: "i-cond", history: "i-history" };
 // The words around each option come from the server's step definitions (#114: title, description, x-enumHints for
 // each choice, x-placeholder); the page adds none of its own.
 const MORE: Record<string, string[]> = { "video.convert": ["format", "resolution", "maxBitrate", "speed"] };
@@ -90,7 +91,7 @@ function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown) => 
           </div><Hint text={hintFor(props.folderMode, mode)} />{problem("/folderMode")}
           {mode === "next_to_library" && libs.length > 0 && <ul className="mono sm" style={{ listStyle: "none", margin: "6px 0 0", padding: 0 }} aria-label="Where each library's new files go">
             {libs.map((p) => <li key={p} style={{ overflowWrap: "anywhere" }}>{p} → {shrunk(p)}</li>)}</ul>}</fieldset>)}
-        {policy === "separate_folder" && mode === "one_folder" && <>{field("folder")}{problem("/folder")}</>}
+        {policy === "separate_folder" && mode === "one_folder" && <>{field("folder")}<div className="row"><Browse value={String(c.folder ?? "")} onPick={(p) => set("folder", p)} /></div>{problem("/folder")}</>}
       </div>);
   }
   return (
@@ -135,12 +136,12 @@ function Step({ n, i, open, toggle, update, issues }: { n: Node; i: number; open
 }
 
 // A workflow with branches: the steps in order with the branches named, nothing editable (spec 5.7; SCREENS V3).
-function ReadOnly({ doc }: { doc: WorkflowDoc }) {
+function ReadOnly({ doc, id }: { doc: WorkflowDoc; id: string }) {
   const { stepDef, summary } = useReg();
   const name = (id: string) => { const n = doc.nodes.find((x) => x.id === id); return n ? (n.name ?? stepDef(n.type)?.name ?? n.type) + " (" + summary(n) + ")" : id; };
   return (
     <div className="stack">
-      <div className="note"><Icon id="i-info" /><div>This workflow has conditions that the list can't show. The graph, where you can see and change them, comes in a later step of the new interface.</div></div>
+      <div className="note"><Icon id="i-info" /><div>This workflow has conditions that the list can't show. <Link to={"/workflows/" + id + "/graph"}>Open graph</Link> to see them.</div></div>
       <ol className="card bd stack" style={{ margin: 0, paddingLeft: 36 }}>
         {doc.nodes.map((n) => {
           const out = doc.edges.filter((e) => e.from === n.id && e.fromPort !== "success");
@@ -248,6 +249,7 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
           <span className="pill">{w.version == null || w.draftDiffers || dirty ? "Draft" : "Published"}</span>
           <span className="muted sm">{w.version == null ? "Not published yet" : "v" + w.version + " published" + (w.draftDiffers || dirty ? " · v" + (w.version + 1) + " draft" : "")}</span>
         </>}>
+        <Link className="btn sm ghost" to={"/workflows/" + id + "/graph"}>Graph</Link>
         {canStack && <>
           <span className="desk">{tools}</span>
           <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{tools}</div></details>
@@ -274,7 +276,7 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
 
       {canStack ? <ol className="steps">{order(doc).map((n, i) => (
         <Step key={n.id} n={n} i={i} open={open === n.id} toggle={() => setOpen(open === n.id ? null : n.id)} update={update} issues={issues} />))}</ol>
-        : <ReadOnly doc={doc} />}
+        : <ReadOnly doc={doc} id={id} />}
     </div>
     </Reg.Provider>);
 }

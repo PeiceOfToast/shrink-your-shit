@@ -273,8 +273,9 @@ func TestHealthzPagesAndAssetsArePublic(t *testing.T) {
 	if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/healthz"}); code != 200 || body != "ok\n" {
 		t.Errorf("healthz: %d %q", code, body)
 	}
-	for _, p := range []string{"/assets/app.css", "/assets/app.js", "/libraries/", "/settings/"} {
-		if code, _, _ := do(t, nil, srv, call{method: "GET", path: p}); code != 200 {
+	// one UI: the app's pages load without signing in (200, or 503 in a copy built without the web UI); its data is /api
+	for _, p := range []string{"/", "/libraries", "/settings/general", "/signin"} {
+		if code, _, _ := do(t, nil, srv, call{method: "GET", path: p}); code != 200 && code != http.StatusServiceUnavailable {
 			t.Errorf("%s: %d, must load without signing in", p, code)
 		}
 	}

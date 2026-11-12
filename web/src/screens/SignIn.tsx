@@ -1,18 +1,22 @@
 // Sign in (a 401 from the API comes here; api.ts). POST /api/login {token} sets the same cookie the current interface
 // uses, so signing in on either is enough for both.
 import { PageHead } from "../PageHead";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { call, failed } from "../api";
 import { navigate, useSearch } from "../router";
 
+export const fromLink = { error: "" }; // a sign-in link with a wrong token (main.tsx): its message, shown once
+
 export function SignIn() {
   const next = new URLSearchParams(useSearch()).get("next") ?? "/";
-  const [token, setToken] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false);
+  const [token, setToken] = useState(""), [error, setError] = useState(fromLink.error), [busy, setBusy] = useState(false);
+  useEffect(() => { fromLink.error = ""; }, []); // shown once
   const go = async () => {
     setError(""); setBusy(true);
     const r = await call("POST", "/api/login", { token: token.trim() }).finally(() => setBusy(false));
     if (failed(r)) return setError(r.error.message);
-    navigate(next.startsWith("/") && !next.startsWith("/signin") ? next : "/");
+    // only a path on this site: browsers read "//host", "/\\host" and "/<tab>/host" as another site
+    navigate(/^\/(?![\/\\])/.test(next) && !/[\x00-\x1f\\]/.test(next) && !next.startsWith("/signin") ? next : "/");
   };
   return (
     <div className="stack" style={{ maxWidth: 520 }}>
