@@ -2,7 +2,7 @@
 // the real /api/v2/workers (#132) with worker.heartbeat live, or the mock with ?mock=1. Shown only when the server has
 // it: live CPU, memory and GPU load (null today), graphics cards (none listed). Hidden until the engine has them
 // (design): files at once on the graphics card (converting is processor-only), Paths and path tests, Schedule, Logs.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, plural } from "../format";
@@ -73,6 +73,29 @@ function StopAsk({ w, onDone, onCancel }: { w: Worker; onDone: (m: string) => vo
   );
 }
 
+// Stop all (header of Workers and the Dashboard): when any worker is converting, the same question as Stop on one
+// worker (review ab98ef3), in a popover; otherwise it stops at once. onStop(now): now false = finish these files.
+// inline (inside the phone "..." menu): the question opens in place, never a popover inside a popover.
+export function StopAll({ busy, onStop, inline }: { busy: boolean; onStop: (now: boolean) => void; inline?: boolean }) {
+  const [now, setNow] = useState(false), [asking, setAsking] = useState(false), ref = useRef<HTMLDetailsElement>(null), group = useId(); // the Dashboard draws its actions twice (desk, phone menu): one radio group each
+  if (!busy) return <button className="btn sm" type="button" onClick={() => onStop(true)}><Icon id="i-stop" />Stop all</button>;
+  const close = () => (ref.current?.removeAttribute("open"), setAsking(false));
+  const ask = (
+        <fieldset className="stack choice" style={{ border: 0, padding: 0, margin: 0 }}>
+          <legend className="lab">Stop all workers?</legend>
+          <label className="radio"><input type="radio" name={group} checked={!now} onChange={() => setNow(false)} /><span><strong>Stop after these files</strong><span className="hint" style={{ display: "block" }}>Each worker finishes what it is converting, then stops.</span></span></label>
+          <label className="radio"><input type="radio" name={group} checked={now} onChange={() => setNow(true)} /><span><strong>Stop now</strong><span className="hint" style={{ display: "block" }}>The files being converted go back to the queue. Your originals aren't touched.</span></span></label>
+          <div className="row"><button className="btn sm primary" type="button" onClick={() => { close(); onStop(now); }}>Stop</button>
+            <button className="btn sm ghost" type="button" onClick={close}>Cancel</button></div>
+        </fieldset>);
+  if (inline) return asking ? <div role="group" aria-label="Stop all workers?" style={{ padding: 8, maxWidth: "calc(100vw - 48px)" }}>{ask}</div>
+    : <button className="btn sm" type="button" onClick={() => setAsking(true)}><Icon id="i-stop" />Stop all</button>;
+  return (
+    <details className="menu" ref={ref}><summary className="btn sm"><Icon id="i-stop" />Stop all</summary>
+      <div className="pop" role="dialog" aria-label="Stop all workers?" style={{ width: 320, maxWidth: "calc(100vw - 16px)", padding: 12 }}>{ask}</div>
+    </details>);
+}
+
 function StartStop({ w, onDone }: { w: Worker; onDone: (m: string) => void }) {
   const [asking, setAsking] = useState(false);
   if (w.status === "offline" || w.status === "stalled") return <span className="muted sm">Waiting for it to connect</span>; // design: no Start on an offline worker
@@ -96,11 +119,20 @@ export function Workers() {
   const names = Object.fromEntries((jobs.data && !failed(jobs.data) ? jobs.data.items : []).map((j) => [j.id, j.name]));
   const list = (ws.data ?? []).map(live), anyGoing = list.some(going);
   const done = (m: string) => (setSaid(m), ws.reload());
-  const all = async (a: "start" | "stop") => { for (const w of list) if ((a === "start" ? w.status === "paused" : going(w))) await act(workerAction(w.id, a), setSaid); setSaid(a === "start" ? "Workers started." : "Workers stopped."); ws.reload(); };
+  // every worker is tried; the line names the ones that failed instead of saying they all changed (review ab98ef3 P3)
+  const all = async (a: "start" | "stop" | "drain-busy") => {
+    const bad: string[] = [];
+    for (const w of list) {
+      const v = a === "start" ? (w.status === "paused" ? "start" : null) : going(w) ? (a === "drain-busy" && w.currentJobIds.length ? "drain" : "stop") : null;
+      if (v) await act(workerAction(w.id, v), (m) => bad.push(w.name + ": " + m));
+    }
+    setSaid(bad.length ? "Not changed: " + bad.join(" ") : a === "start" ? "Workers started." : a === "stop" ? "Workers stopped." : "Workers finish their files, then stop.");
+    ws.reload();
+  };
   return (
     <div className="stack">
       <PageHead icon="i-worker" title="Workers" help="The computers that convert your files. Nothing converts until a worker is started.">
-        {list.length > 0 && (anyGoing ? <button className="btn sm" type="button" onClick={() => all("stop")}><Icon id="i-stop" />Stop all</button>
+        {list.length > 0 && (anyGoing ? <StopAll busy={list.some((w) => going(w) && w.currentJobIds.length > 0)} onStop={(now) => all(now ? "stop" : "drain-busy")} />
           : <button className="btn sm" type="button" onClick={() => all("start")}><Icon id="i-play" />Start all</button>)}
       </PageHead>
       {upd.data === true && <div className="note"><Icon id="i-info" /><div className="sp">Converting is stopped after the update. Press Start to carry on.</div>
@@ -163,7 +195,7 @@ export function WorkerPage({ id }: { id: string }) {
         {!caps.length ? <div className="empty">Not tested yet.</div> : (
           <div className="list"><table className="tbl">
             <thead><tr><th>Format</th><th>How</th><th className="stc">Result</th><th data-p="3">When</th></tr></thead>
-            <tbody>{caps.map((c) => <tr key={c.key}><td className="idc"><span className="ttl">{(c.kind === "decoder" ? "Decode " : "") + (FORMAT(c.key) || c.label)}</span><span className="sub">{c.label}</span><span className="sub phone">{c.test === "failed" ? c.detail : ""}</span></td><td>{how(c)}</td>
+            <tbody>{caps.map((c) => <tr key={c.key}><td className="idc"><span className="ttl">{(c.kind === "decoder" ? "Decode " : "") + (FORMAT(c.key) || c.label)}</span><span className="sub">{c.label}</span><span className="sub phone">{[c.label, c.test === "failed" && c.detail].filter(Boolean).join(" · ")}</span></td><td>{how(c)}</td>
               <td className="stc"><span className={"pill " + (c.test === "passed" ? "ok" : c.test === "failed" ? "" : "")} title={c.detail}>{c.test === "passed" ? (c.slot === "gpu" ? "Works; not used yet" : "Works") : c.test === "failed" ? "Doesn't work here" : "Not tested"}</span></td>
               <td data-p="3" className="sm">{c.testedAt ? "Tested " + clock(c.testedAt) : ""}{c.test === "failed" && c.detail ? <span className="sub">{c.detail}</span> : null}</td></tr>)}</tbody>
           </table></div>)}
