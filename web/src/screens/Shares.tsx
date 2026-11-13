@@ -60,15 +60,27 @@ function ShareRow({ share, resp, onChanged, said }: { share: Share; resp: Shares
   );
 }
 
+// Focus moves into the drawer; when it closes, focus goes back to what opened it (a menu item's ··· button), as V9d Keyboard says.
+function useDrawerFocus(box: { current: HTMLElement | null }) {
+  useEffect(() => {
+    const a = document.activeElement as HTMLElement | null;
+    const from = a?.closest("details")?.querySelector<HTMLElement>("summary") ?? a;
+    box.current?.focus();
+    return () => { if (from?.isConnected) from.focus(); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
 function RemoveDialog({ share, onCancel, onDone, said }: { share: Share; onCancel: () => void; onDone: () => void; said: (m: string) => void }) {
   const [error, setError] = useState("");
+  const box = useRef<HTMLElement>(null);
+  useDrawerFocus(box);
   const remove = async () => {
     const r = await act(deleteShare(share.id), setError);
     if (r === undefined) { said("Removed."); onDone(); }
   };
   return (
     <div className="drawer-wrap" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
-      <aside className="drawer" tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="rm-s" onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), onCancel())}>
+      <aside ref={box} className="drawer" tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="rm-s" onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), onCancel())}>
         <div className="hd"><button className="btn icon ghost sm" type="button" aria-label="Close" onClick={onCancel}><Icon id="i-chev-l" /></button><div className="sp"><h3 id="rm-s" style={{ margin: 0 }}>Remove {share.name}?</h3></div></div>
         <div className="bd">
           <p style={{ margin: 0 }}>Shrink Your Shit disconnects from it. Nothing on the share is changed or deleted.{share.setup ? " Also remove it from the server:" : ""}</p>
@@ -121,7 +133,7 @@ function ShareSheet({ share, resp, onDone, onCancel, said }: { share?: Share; re
     if (r) { if (r.setup && !edit) setSavedShare(r as Share); else { said(edit ? "Saved." : "Added."); onDone(r); } }
   };
 
-  useEffect(() => { box.current?.focus(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useDrawerFocus(box);
   const ss = savedShare;
   const close = () => { if (ss) { said("Added."); onDone(); } else onCancel(); };
   return (
