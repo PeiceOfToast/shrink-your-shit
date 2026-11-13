@@ -695,8 +695,9 @@ func setupForMode(store *jobs.Store, sh jobs.Share) any {
 		}
 		return map[string]any{
 			"kind": "compose",
-			"text": note + "volumes:\n  " + vol + ":\n    driver_opts:\n" + driver +
-				"\n\nservices:\n  shrink-your-shit:  # the app's service in your compose file\n    volumes:\n      - " +
+			// Pasted into an existing compose file, so no top-level keys: each part says where it goes.
+			"text": note + "# Add under the top-level volumes: in your compose file:\n  " + vol + ":\n    driver_opts:\n" + driver +
+				"\n\n# Add under services: shrink-your-shit: volumes: in your compose file:\n      - " +
 				fmt.Sprintf("%q", vol+":"+mpt),
 			"removeText": fmt.Sprintf("Remove the %q volume from your compose file and restart.", vol),
 		}

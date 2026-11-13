@@ -268,11 +268,11 @@ func TestDockerSetupTextWorksForEachShare(t *testing.T) {
 		{"smb with password", jobs.Share{Name: "Movies NAS", Type: "smb", Address: `\\nas\movies`, Username: "bob"}, "hunter2-secret",
 			[]string{`device: "//nas/movies"`,
 				`o: "addr=nas,username=bob,password=${SYP_MOVIES_NAS_PASSWORD},vers=3.1.1,soft,uid=1000,gid=1000,file_mode=0660,dir_mode=0770"`,
-				"SYP_MOVIES_NAS_PASSWORD=<the share password> in the .env file", "  shrink-your-shit:"}},
+				"SYP_MOVIES_NAS_PASSWORD=<the share password> in the .env file", "# Add under services: shrink-your-shit: volumes:"}},
 		{"smb guest", jobs.Share{Name: "Movies NAS", Type: "smb", Address: `\\nas\movies`, Guest: true}, "",
-			[]string{`device: "//nas/movies"`, `o: "addr=nas,guest,vers=3.1.1,soft,uid=1000,gid=1000,file_mode=0660,dir_mode=0770"`, "  shrink-your-shit:"}},
+			[]string{`device: "//nas/movies"`, `o: "addr=nas,guest,vers=3.1.1,soft,uid=1000,gid=1000,file_mode=0660,dir_mode=0770"`, "# Add under services: shrink-your-shit: volumes:"}},
 		{"nfs", jobs.Share{Name: "Movies NAS", Type: "nfs", Address: "nas:/export"}, "",
-			[]string{`type: nfs`, `device: ":/export"`, `o: "addr=nas,soft,nfsvers=4"`, "  shrink-your-shit:"}},
+			[]string{`type: nfs`, `device: ":/export"`, `o: "addr=nas,soft,nfsvers=4"`, "# Add under services: shrink-your-shit: volumes:"}},
 	}
 	for _, c := range cases {
 		sh, err := st.SaveShare(c.sh, c.pw)
@@ -289,6 +289,11 @@ func TestDockerSetupTextWorksForEachShare(t *testing.T) {
 		vol := `- "movies-nas:` + m["path"].(string) + `"`
 		if setup["kind"] != "compose" || !strings.Contains(text, vol) {
 			t.Errorf("%s: the volume line does not use the share's path %q: %s", c.name, m["path"], text)
+		}
+		for _, l := range strings.Split(text, "\n") {
+			if strings.HasPrefix(l, "volumes:") || strings.HasPrefix(l, "services:") {
+				t.Errorf("%s: a top-level %q key breaks an existing compose file when pasted:\n%s", c.name, l, text)
+			}
 		}
 		for _, w := range c.want {
 			if !strings.Contains(text, w) {
