@@ -43,7 +43,7 @@ export function ProcessingSettings() {
             {said && <p className={bad ? "st bad" : "muted"} role={bad ? "alert" : "status"}>{said}</p>}
             {/* E (SCREENS V9): job logs are deleted after this; 0 = Forever. Shown only when the server reports logKeepDays (not yet on dev) */}
             {s.logKeepDays !== undefined && <div className="field"><label htmlFor="log-keep">Keep job logs for</label>
-              <select id="log-keep" className="input" value={s.logKeepDays ?? 30} disabled={busy} onChange={async (e) => { setBusy(true); const r = await patchSettings({ logKeepDays: Number(e.target.value) }); setBusy(false); if (failed(r)) { setBad(true); setSaid(r.error.message); } else { setBad(false); setSaid("Saved. Job logs are kept " + (Number(e.target.value) ? "for " + e.target.value + " days." : "for ever.")); st.reload(); } }} aria-describedby="log-keep-h" style={{ width: "auto" }}>
+              <select id="log-keep" className="input" value={s.logKeepDays ?? 30} disabled={busy} onChange={async (e) => { const v = Number(e.target.value); setBusy(true); const r = await patchSettings({ logKeepDays: v }); setBusy(false); if (failed(r)) { setBad(true); setSaid(r.error.message); } else { setBad(false); setSaid("Saved. Job logs are kept " + (v ? "for " + v + " days." : "for ever.")); st.reload(); } }} aria-describedby="log-keep-h" style={{ width: "auto" }}>
                 {[[7, "7 days"], [30, "30 days (default)"], [90, "90 days"], [0, "Forever"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
               <span className="hint" id="log-keep-h">Logs of finished and failed jobs are deleted after this. Your files aren't affected.</span></div>}
           </>}
