@@ -127,6 +127,9 @@ func TestShareAnswersNeedsAMountAndAFolder(t *testing.T) {
 // D4c: a file waiting in a share-paused library says why (share_offline) on the jobs list; the share's
 // folder being down is what ShareDownFor reports for a failed convert, and only then.
 func TestWaitingFileSaysItsShareIsOffline(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("app mode (the mount helper, share mount points) is Linux only")
+	}
 	srv, st, _, _ := libServer(t, false)
 	st.SetPaused(false)
 	root := shareRoot
