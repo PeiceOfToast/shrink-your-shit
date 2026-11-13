@@ -72,3 +72,31 @@ func TestDeleteShareClearsItsPause(t *testing.T) {
 		t.Errorf("still share-paused by %d after the share was deleted", l.SharePausedBy)
 	}
 }
+
+// D4c: a running job whose share stopped answering goes back in the queue (share_dropped, no try counted), and
+// its library is paused by the share at once.
+func TestShareDroppedRequeuesAndPausesTheLibrary(t *testing.T) {
+	s := open(t)
+	s.SetPaused(false)
+	mount := t.TempDir()
+	nas, _ := s.AddLibrary("NAS", filepath.Join(mount, "Movies"), rules.SliderTemplate(3), true)
+	job, _ := s.Enqueue(Job{Library: nas.Path, LibraryID: nas.ID, Path: filepath.Join(nas.Path, "a.mkv")})
+	if _, err := s.Claim("w"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ShareDropped(job, 7, mount, "Put back in the queue: NAS stopped answering."); err != nil {
+		t.Fatal(err)
+	}
+	j, _ := s.Get(job)
+	var code string
+	s.db.QueryRow(`SELECT error_code FROM jobs WHERE id=?`, job).Scan(&code)
+	if j.Status != Queued || code != ReasonShareDropped || j.Attempts != 0 {
+		t.Errorf("want queued with share_dropped and no try counted, got %s %+v", code, j)
+	}
+	if l, _ := s.GetLibrary(nas.ID); l.SharePausedBy != 7 {
+		t.Errorf("library not paused by its share: %+v", l)
+	}
+	if _, err := s.Claim("w"); err != ErrNoJob {
+		t.Errorf("the file was taken again while its share is down: %v", err)
+	}
+}

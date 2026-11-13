@@ -50,6 +50,8 @@ type Queue interface {
 	Keep(id int64, code, reason string) error
 	// RetryLater puts a job whose failure may pass back in the queue, not to be taken before at (DD-2).
 	RetryLater(id int64, at time.Time, code, reason string) error
+	// ShareDropped puts a job back in the queue because its share stopped answering (D4c): not a failure.
+	ShareDropped(id, shareID int64, mountPath, words string) error
 	// OutputFolder is a library's folder for new files with "Next to each library" (V5a), or why it has
 	// none.
 	OutputFolder(libraryID int64, libPath string) (string, *jobs.FolderProblem, error)
@@ -88,7 +90,20 @@ const (
 )
 
 // Worker pulls jobs from a Queue and runs ffmpeg.
+// ShareDown is the saved share a library's folder is in, when that share does not answer (D4c). Answering
+// is set when the share answers now but had an outage or reconnect while the job ran: the job is still put
+// back, and nothing is paused.
+type ShareDown struct {
+	ShareID   int64
+	Name      string
+	MountPath string
+	Answering bool
+}
+
 type Worker struct {
+	// ShareDown says whether a library's folder is on a share that does not answer now (nil: no shares
+	// are checked). A convert that fails while it does is put back in the queue, not failed (D4c).
+	ShareDown func(folder string, jobID int64) (ShareDown, bool)
 	// verified is the probe of the new file the last check passed (S5: stored for its final path).
 	verified media.Info
 	check    *checkResult // the picture check's score for the job in hand (nil: none ran); set by the comparison
@@ -308,6 +323,20 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 		if ctx.Err() != nil {
 			// Shutting down: not the file's fault, so run it again next start.
 			return true, w.Queue.Release(job.ID)
+		}
+		// D4c: a share that stopped answering is not this file's failure: back in the queue, its libraries
+		// paused by the share until it answers, and no try counted.
+		if w.ShareDown != nil {
+			if sd, down := w.ShareDown(job.Library, job.ID); down {
+				if sd.Answering {
+					words := "Put back in the queue: " + sd.Name + " lost its connection during the convert."
+					w.jobf(job.ID, " (%s): %s", job.Path, words)
+					return true, w.Queue.ShareDropped(job.ID, 0, "", words)
+				}
+				words := "Put back in the queue: " + sd.Name + " stopped answering."
+				w.jobf(job.ID, " (%s): %s", job.Path, words)
+				return true, w.Queue.ShareDropped(job.ID, sd.ShareID, sd.MountPath, words)
+			}
 		}
 		var se *SkippedError
 		if errors.As(err, &se) { // left alone by its flow (S3): Skipped, not failed, never retried
