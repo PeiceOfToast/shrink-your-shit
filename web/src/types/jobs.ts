@@ -45,7 +45,8 @@ export interface JobDetail {
   convertAgain?: { possible: boolean; reason: { code: string; message: string; deletedAt: Time | null } | null };
 }
 export interface Probe { container?: string; videoCodec?: string; bitrateKbps?: number; durationSec?: number; sizeBytes?: number;
-  streams?: { index: number; type: string; codec: string; Width?: number; Height?: number; channels?: number; channelLayout?: string; language?: string }[] }
+  // frameRate, bitDepth, colorTransfer, dolbyVision: the scan's video stream fields (workshop, 11-13 01:24Z)
+  streams?: { index: number; type: string; codec: string; Width?: number; Height?: number; channels?: number; channelLayout?: string; language?: string; frameRate?: number; bitDepth?: number; colorTransfer?: string; dolbyVision?: boolean }[] }
 
 // POST /api/v2/jobs/actions {action, ids, pin?} -> {results: [{id, ok, code?, message?}]}
 export type JobAction = "retry" | "requeue" | "cancel" | "reprioritize";

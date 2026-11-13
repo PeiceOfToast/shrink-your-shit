@@ -10,6 +10,7 @@ import { convertDoneAgain, findSkip, getJob, getJobLog, jobAction, listJobs, lis
 import { getWorkflow } from "../workflowApi";
 import { getHealth, getSettings } from "../libraryApi";
 import { onLive } from "../live";
+import { listLibraries } from "../libraryApi";
 import { Empty, PageHead } from "../PageHead";
 import { navigate, useSearch } from "../router";
 import { useData } from "../useData";
@@ -56,10 +57,12 @@ const key = (j: JobItem) => j.jobId ?? j.id;
 
 export function Jobs() {
   const search = new URLSearchParams(useSearch());
-  const tab = (TABS.find(([t]) => t === search.get("tab"))?.[0] ?? "waiting") as Tab, open = search.get("job");
+  const tab = (TABS.find(([t]) => t === search.get("tab"))?.[0] ?? "waiting") as Tab, open = search.get("job"), library = search.get("libraryId") ?? "";
+  // "See its jobs" (a library page) filters every tab to that library; the library's name shows as a chip that clears it
+  const libs = useData(listLibraries, [], 60000);
   const [q, setQ] = useState(""), [selecting, setSelecting] = useState(false), [sel, setSel] = useState<string[]>([]), [said, setSaid] = useState(""), [prio, setPrio] = useState<Pin | "none">("first");
   // each answer remembers its tab and search, so a tab switch never shows the last tab's rows while it loads
-  const page = useData(() => listJobs(tab, q).then((r) => (failed(r) ? r : { ...r, for: tab + "|" + q })), [tab, q], 15000);
+  const page = useData(() => listJobs(tab, q, library).then((r) => (failed(r) ? r : { ...r, for: tab + "|" + q + "|" + library })), [tab, q, library], 15000);
   const [live, setLive] = useState<Record<string, JobProgressEvent["progress"]>>({});
   const reload = useRef(page.reload); reload.current = page.reload;
   const shown = useRef<{ tab: Tab; rows: Map<string, JobState> }>({ tab, rows: new Map() });
@@ -83,8 +86,8 @@ export function Jobs() {
     });
   }, []);
   useEffect(() => setSel([]), [tab]);
-  const go = (t: Tab, job?: string | null) => navigate("/jobs?tab=" + t + (job ? "&job=" + encodeURIComponent(job) : ""));
-  const current = page.data?.for === tab + "|" + q ? page.data : undefined;
+  const go = (t: Tab, job?: string | null) => navigate("/jobs?tab=" + t + (library ? "&libraryId=" + encodeURIComponent(library) : "") + (job ? "&job=" + encodeURIComponent(job) : ""));
+  const current = page.data?.for === tab + "|" + q + "|" + library ? page.data : undefined;
   const items = (current?.items ?? []).map((j) => (live[j.id] && RUNS.includes(j.state) ? { ...j, progress: live[j.id] } : j)), counts = page.data?.counts;
   shown.current = { tab, rows: new Map((current?.items ?? []).map((j) => [j.jobId ?? j.id, j.state])) };
   const picked = items.filter((j) => sel.includes(j.id)), none = !picked.length;
@@ -114,6 +117,8 @@ export function Jobs() {
   return (
     <div className="stack">
       <PageHead icon="i-jobs" title="Jobs" help="Every file the workers look at: waiting, converting, done, skipped and failed." />
+      {library && <div className="row" style={{ gap: 6 }}><span className="mchip">Library: {libs.data?.find((l) => l.id === library)?.name ?? library}
+        <button className="btn sm icon ghost" type="button" aria-label="Clear the library filter" onClick={() => navigate("/jobs?tab=" + tab)}><Icon id="i-x" /></button></span></div>}
       <div className="tabs" role="tablist" aria-label="Jobs">
         {TABS.map(([t, label]) => <button key={t} role="tab" type="button" aria-selected={tab === t} onClick={() => tab !== t && go(t)}>{label}{counts && <span className="n">{count(counts[t])}</span>}</button>)}
       </div>
@@ -215,7 +220,8 @@ function StepLog({ id, worker, failedIdx }: { id: string; worker: string | null;
       {l.steps.map((st, i) => {
         const hit = q ? matches(st, q) : 0;
         const pr = st.probe as Probe | null, v = pr?.streams?.find((x) => x.type === "video"), n = (t: string) => (pr?.streams ?? []).filter((x) => x.type === t).length;
-        const sum = pr && [pr.videoCodec?.toUpperCase().replace("H264", "H.264"), v?.Width && v.Height ? v.Width + "×" + v.Height : "", n("audio") && n("audio") + " audio", n("subtitle") && n("subtitle") + " subtitles", pr.durationSec ? elapsed(pr.durationSec) : "", pr.sizeBytes ? bytes(pr.sizeBytes) : ""].filter(Boolean).join(" · ");
+        const hdr = v?.dolbyVision ? "Dolby Vision" : v?.colorTransfer === "smpte2084" ? "HDR10" : v?.colorTransfer === "arib-std-b67" ? "HLG" : "";
+        const sum = pr && [pr.videoCodec?.toUpperCase().replace("H264", "H.264"), v?.Width && v.Height ? v.Width + "×" + v.Height : "", v?.frameRate ? +v.frameRate.toFixed(3) + " fps" : "", [v?.bitDepth ? v.bitDepth + "-bit" : "", hdr].filter(Boolean).join(" "), n("audio") && n("audio") + " audio", n("subtitle") && n("subtitle") + " subtitles", pr.durationSec ? elapsed(pr.durationSec) : "", pr.sizeBytes ? bytes(pr.sizeBytes) : ""].filter(Boolean).join(" · ");
         return (
           <details key={i} id={"job-step-" + (i + 1)} open={q ? hit > 0 : st.outcome !== "ok" || i + 1 === failedIdx} className="stepd" style={{ borderTop: "1px solid var(--border)", padding: "8px 0" }}>
             <summary className="row nw" style={{ gap: 8, flexWrap: "wrap", cursor: "pointer" }}><strong>{st.name}</strong><span className="sm muted">{clock(st.startedAt)} · took {dur(st.tookMs)}</span>

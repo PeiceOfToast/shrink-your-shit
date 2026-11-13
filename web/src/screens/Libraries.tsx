@@ -279,6 +279,7 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
         {v && <Status l={v} />}
         {v && v.enabled && <button className="btn" type="button" onClick={() => pauseResume([v], false, setNote).then(reload)}><Icon id="i-pause" />Pause</button>}
         {v && paused(v) && <button className="btn" type="button" onClick={() => pauseResume([v], true, setNote).then(reload)}><Icon id="i-play" />Resume</button>}
+        {l && <Link className="btn" to={"/jobs?tab=completed&libraryId=" + encodeURIComponent(l.id)}><Icon id="i-jobs" />See its jobs</Link>}
         {l && <button className="btn" type="button" disabled={v?.scan.state === "scanning"} onClick={scan}><Icon id="i-refresh" />{v?.scan.state === "scanning" ? "Scanning..." : "Scan now"}</button>}
       </PageHead>
       {note && <p className="muted" role="status">{note}</p>}

@@ -3,10 +3,10 @@ import { call, failed, MOCK, type Answer } from "./api";
 import { mockAction, mockJob, mockJobs, mockJobLog, mockConvertAgain } from "./mock/jobs";
 import type { ActionResult, JobAction, JobDetail, JobsPage, Probe, Tab, Pin } from "./types/jobs";
 
-export async function listJobs(tab: Tab, q: string): Promise<Answer<JobsPage>> {
+export async function listJobs(tab: Tab, q: string, library = ""): Promise<Answer<JobsPage>> {
   if (MOCK) return mockJobs(tab, q);
   // #134: the Waiting tab in the order the worker takes files, each with its position; the page never reorders it
-  return call("GET", "/api/v2/jobs?tab=" + tab + (tab === "waiting" ? "&sort=queue" : "") + "&limit=200" + (q ? "&q=" + encodeURIComponent(q) : ""));
+  return call("GET", "/api/v2/jobs?tab=" + tab + (tab === "waiting" ? "&sort=queue" : "") + "&limit=200" + (q ? "&q=" + encodeURIComponent(q) : "") + (library ? "&libraryId=" + encodeURIComponent(library) : ""));
 }
 // review a8f85e0 P3: a skipped or stopped job's row in the Skipped tab when it isn't in the first page. Its own row went
 // when it was skipped or stopped, so its detail has no file name to search by: page through the tab, 500 at a time
