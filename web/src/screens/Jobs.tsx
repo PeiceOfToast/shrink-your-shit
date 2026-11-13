@@ -179,7 +179,7 @@ function WhyFailed({ id, msg, code, worker, f }: { id: string; msg: string; code
       <h3><Icon id="i-alert" /> Why it failed <span className="pill bad">Failed</span></h3>
       <p style={{ fontSize: "var(--fs-lg)" }}>{msg}</p>
       <p className="sm muted mono">{code}</p>
-      <p className="sm">In step {f.stepIndex} of {f.stepCount}, <a href={"#job-step-" + f.stepIndex}>{f.step}</a>, after {t}{f.mediaTime ? " (at " + f.mediaTime + " in the video)" : ""}.</p>
+      <p className="sm">In step {f.stepIndex + 1} of {f.stepCount}, <a href={"#job-step-" + f.stepIndex}>{({ encode: "Converting video", check: "Checking the picture" } as Record<string, string>)[f.step] ?? f.step}</a>, after {t}{f.mediaTime ? " (at " + f.mediaTime + " in the video)" : ""}.</p>
       {f.hint && <p><strong>What you can do:</strong> {f.hint}</p>}
       {f.ffmpegRan === false
         ? <p className="sm muted">ffmpeg didn't run.</p>
@@ -340,7 +340,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
       <aside className="drawer jobd" ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="jd-h">
         <div className={"hd" + (state === "failed" ? " failed" : "")}>
           <button className="btn icon ghost" type="button" aria-label="Close" onClick={onClose}><Icon id="i-chev-l" /></button>
-          <div className="sp"><h2 id="jd-h" className="clamp2" title={name}>{name}</h2>{state && <Pill j={{ state, retryAt: j?.retryAt ?? own?.retryAt, subState: own?.subState }} />}</div>
+          <div className="sp"><h2 id="jd-h" className="clamp2" title={name}>{name}</h2>{state && <span style={{ alignSelf: "flex-start" }}><Pill j={{ state, retryAt: j?.retryAt ?? own?.retryAt, subState: own?.subState }} /></span>}</div>
           {/* SCREENS V6b header: Retry, Cancel or Stop, and the job ID to copy (the body keeps the rest) */}
           <div className="row nw" style={{ gap: 6, flexWrap: "wrap" }}>
             {(state === "failed" || state === "retry_wait") && <button className="btn sm" type="button" onClick={() => run("retry")}><Icon id="i-refresh" />{state === "retry_wait" ? "Try now" : "Retry"}</button>}
@@ -349,12 +349,11 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           </div>
         </div>
         <div className="bd">
-          <div className="row">
-            {/* a skipped file whose job is gone (a workflow's skip: the server says removed) can still be converted again (review f1aaf30) */}
+          {(done && ca?.possible) || (state === "skipped" || state === "cancelled") ? <div className="row">
             {done && ca?.possible && <button className="btn sm" type="button" aria-expanded={again} onClick={() => setAgain(!again)}><Icon id="i-arrow-r" />Convert again</button>}
             {(state === "skipped" || state === "cancelled") && (!j?.removed || !!own?.id.startsWith("skip-")) && <button className="btn sm" type="button" onClick={() => run("requeue")}><Icon id="i-arrow-r" />Convert again</button>}
             <span className="sp" />
-          </div>
+          </div> : null}
           {done && ca && !ca.possible && ca.reason && <p className="muted sm">{ca.reason.message}</p>}
           {again && <div role="alertdialog" aria-label="Convert again?" style={{ padding: 12, border: "1px solid var(--border-strong)", borderRadius: "var(--radius)", background: "var(--raised)" }} onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), setAgain(false))}>
             <p style={{ margin: "0 0 8px" }}>Convert {name} again{wf.data && !failed(wf.data) ? " with " + wf.data.name + (wf.data.version ? " v" + wf.data.version : "") : ""}? It starts from the original, never from the new file. The earlier new file is replaced once the new one passes its check.</p>
