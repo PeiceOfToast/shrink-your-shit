@@ -190,6 +190,9 @@ jobs:
           enc=$(docker run --rm --entrypoint ffmpeg shrink-your-shit -hide_banner -encoders)
           echo "$enc" | grep -qw hevc_qsv || { echo "$enc" | grep hevc; echo "hevc_qsv is not an encoder"; exit 1; }
           echo "$enc" | grep -qw hevc_vaapi || { echo "$enc" | grep hevc; echo "hevc_vaapi is not an encoder"; exit 1; }
+      - name: Intel GPU runtime files are in the x86_64 image
+        run: |
+          docker run --rm --entrypoint sh shrink-your-shit -c 'ls /usr/lib/x86_64-linux-gnu/libmfx-gen.so.1.2 /usr/lib/x86_64-linux-gnu/libvpl.so.2 /usr/lib/x86_64-linux-gnu/dri/iHD_drv_video.so'
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - name: arm64 image builds (no push)
