@@ -279,7 +279,7 @@ func testSMB(address, username, password string, guest bool) map[string]any {
 	dialer := &smb2.Dialer{Initiator: ini}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	session, err := dialer.Dial(ctx, server+":445")
+	session, err := dialer.Dial(ctx, net.JoinHostPort(server, smbPort))
 	if err != nil {
 		return smbError(err)
 	}
@@ -304,6 +304,10 @@ func testSMB(address, username, password string, guest bool) map[string]any {
 	}
 	return map[string]any{"ok": true, "address": address, "folders": folders, "moreFolders": more, "portOnly": false}
 }
+
+// smbPort and nfsPort are the ports the Test button tries. Tests point them at a port known to be closed:
+// a Windows machine (CI runners included) runs its own SMB server on 445.
+var smbPort, nfsPort = "445", "2049"
 
 func smbError(err error) map[string]any {
 	msg := err.Error()
@@ -332,7 +336,7 @@ func testNFS(address string) map[string]any {
 	if server == "" {
 		return map[string]any{"ok": false, "code": "invalid_address", "message": "Use server:/export."}
 	}
-	conn, err := net.DialTimeout("tcp", server+":2049", 10*time.Second)
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(server, nfsPort), 10*time.Second)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "no such host") {
 			return map[string]any{"ok": false, "code": "host_not_found", "message": "The NFS server was not found."}

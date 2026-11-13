@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -175,6 +176,8 @@ func TestSharesTestUnreachable(t *testing.T) {
 	os.Setenv("HOME", home)
 	defer os.Unsetenv("HOME")
 	srv, _, _ := server(t, false)
+	smbPort = closedPort(t) // this machine may run its own SMB server on 445 (Windows does)
+	defer func() { smbPort = "445" }()
 
 	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares/test",
 		body: `{"address":"\\\\127.0.0.1\\share"}`, ctype: "application/json"})
@@ -364,4 +367,16 @@ func TestSharesTestSMBCodes(t *testing.T) {
 			t.Errorf("%q: code %q, want %q", c.err, got, c.code)
 		}
 	}
+}
+
+// closedPort is a local TCP port with nothing listening: one that was free a moment ago.
+func closedPort(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, port, _ := net.SplitHostPort(ln.Addr().String())
+	ln.Close()
+	return port
 }
