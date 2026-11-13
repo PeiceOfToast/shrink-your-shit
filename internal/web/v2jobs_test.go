@@ -320,3 +320,36 @@ func TestCompletedTabListsWhatItCounts(t *testing.T) {
 		t.Errorf("completed: counts %v total %d items %d\n%s", r.Counts, r.Total, len(r.Items), body)
 	}
 }
+
+// User review 11-13 item E: a failed job's list item and detail carry its failure summary (step, exit code, the
+// last five error lines) and its log state; a job with no summary has failure null.
+func TestFailureSummaryInTheAPI(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	f1, _ := st.Enqueue(jobs.Job{Library: "/m", LibraryID: l.ID, Path: "/m/broken.mkv"})
+	st.Claim("t")
+	st.RecordRunStep(f1, jobs.RunStep{Index: 0, Name: "encode", Outcome: "failed", Command: "ffmpeg -i x"})
+	st.AppendLogLine(f1, 0, "stderr", "Invalid data found when processing input")
+	st.SetFailureSummary(f1, jobs.FailureSummary{Step: 0, StepCount: 1, AfterMs: 4000, MediaTime: "00:41:12", ExitCode: 1,
+		KeyLines: []string{"a", "b", "c", "d", "e", "f", "Invalid data found when processing input"}})
+	st.Fail(f1, "convert_failed", "Converting stopped with an error.")
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs?tab=failed&limit=200"})
+	var r struct{ Items []map[string]any }
+	json.Unmarshal([]byte(body), &r)
+	if len(r.Items) != 1 {
+		t.Fatalf("failed tab: %s", body)
+	}
+	f := r.Items[0]["failure"].(map[string]any)
+	if f["step"] != "encode" || f["exitCode"] != 1.0 || f["mediaTime"] != "00:41:12" || f["hint"] != nil || r.Items[0]["logState"] != "complete" {
+		t.Errorf("failure %v logState %v", f, r.Items[0]["logState"])
+	}
+	if lines := f["keyLines"].([]any); len(lines) != 5 || lines[4] != "Invalid data found when processing input" {
+		t.Errorf("key lines %v", lines)
+	}
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(f1, 10)})
+	var d map[string]any
+	json.Unmarshal([]byte(body), &d)
+	if d["failure"] == nil || d["logState"] != "complete" {
+		t.Errorf("detail: %s", body)
+	}
+}

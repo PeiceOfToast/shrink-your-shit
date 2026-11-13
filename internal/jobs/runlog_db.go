@@ -148,3 +148,10 @@ func (s *Store) FailureOf(id int64) (*FailureSummary, error) {
 	}
 	return &f, nil
 }
+
+// LogLineCount is how many log lines job id has in the database (0: none, a job before this was recorded).
+func (s *Store) LogLineCount(id int64) (int, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM job_log_lines WHERE job_id=?`, id).Scan(&n)
+	return n, err
+}
