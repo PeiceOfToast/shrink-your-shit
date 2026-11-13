@@ -13,8 +13,9 @@ import (
 // A failed Quick Sync or VA-API test says why when the device is the cause: no /dev/dri at all, or a
 // render node this user cannot open. Other failed encoders keep the generic line.
 func TestIntelFailureSaysWhy(t *testing.T) {
-	origNodes, origOpen := renderNodes, openRender
-	t.Cleanup(func() { renderNodes, openRender = origNodes, origOpen })
+	origNodes, origOpen, origDRI := renderNodes, openRender, usesDevDRI
+	t.Cleanup(func() { renderNodes, openRender, usesDevDRI = origNodes, origOpen, origDRI })
+	usesDevDRI = true
 
 	detail := func(enc string) string {
 		for _, c := range capabilities(doctor.Tools{HardwareListed: []string{enc}}, true) {
@@ -51,5 +52,11 @@ func TestIntelFailureSaysWhy(t *testing.T) {
 	renderNodes = func() []string { return nil }
 	if d := detail("hevc_nvenc"); d != failed {
 		t.Errorf("nvenc: %q", d)
+	}
+
+	// Off Linux (Windows Quick Sync uses D3D11, not /dev/dri) the device lines would mislead.
+	usesDevDRI = false
+	if d := detail("hevc_qsv"); d != failed {
+		t.Errorf("not linux: %q", d)
 	}
 }

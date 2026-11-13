@@ -282,6 +282,10 @@ var encoderLabels = map[string]string{
 
 const failed = "ffmpeg lists it, but a test frame failed on this computer."
 
+// usesDevDRI: only Linux reaches the GPU through /dev/dri (Windows Quick Sync goes through D3D11), so
+// the device lines would mislead anywhere else.
+var usesDevDRI = runtime.GOOS == "linux"
+
 // Seams for intelFailure: the render nodes doctor's vaapiDevice globs, and an open for read and write
 // as this user. Tests swap them; the real ones touch /dev/dri.
 var renderNodes = func() []string {
@@ -343,7 +347,7 @@ func capabilities(t doctor.Tools, ok bool) []map[string]any {
 	}
 	for _, e := range t.HardwareListed {
 		detail := failed
-		if e == "hevc_qsv" || e == "hevc_vaapi" {
+		if usesDevDRI && (e == "hevc_qsv" || e == "hevc_vaapi") {
 			detail = intelFailure()
 		}
 		add("encoder", e, encoderLabels[e], "gpu", "failed", detail)
