@@ -50,10 +50,8 @@ export function mockJobLog(id: string): { state: string; steps: { name: string; 
   const out = f48190 ? "[hevc @ 0x55d1] Error while decoding stream #0:0: Invalid data found when processing input\nConversion failed!" : "";
   const step = (name: string, outcome: string, extra: Record<string, unknown>) => ({ name, startedAt: at(300), tookMs: outcome === "ok" ? 120000 : outcome === "failed" && f48191 ? 0 : 252000, outcome, command: null, probe: null, check: null, outputLines: 0, output: "", result: outcome === "ok" ? "Done" : "Failed", ...extra });
   const conv: Record<string, unknown> = f48191 ? {} : { command: "ffmpeg -i in.mkv -c:v libx265 -crf 23 out.mkv", probe: { videoCodec: "h264", bitrateKbps: 12109, durationSec: 7200, sizeBytes: j.file?.bytes ?? 0, streams: [{ index: 0, type: "video", codec: "h264", Width: 1920, Height: 1080 }] }, check: failed ? { score: 0.912, min: 0.95, passed: false } : { score: 0.973, min: 0.95, passed: true }, outputLines: f48190 ? 2 : 184, output: out };
-  const checkStep = f48190 ? { name: "check", startedAt: at(11), tookMs: 1000, outcome: "failed" as const, command: null, probe: null, check: null, outputLines: 0, output: "", result: "New file too short" } : null;
   return { state: "complete", final: f48190 ? "The new file is 4 s shorter than the original. The original is kept." : f48191 ? "There isn't enough free space." : "Done · 41% smaller", steps: [
     step("encode", f48190 ? "failed" : f48191 ? "failed" : "ok", { ...conv, result: failed ? "Failed" : "Done · 41% smaller" }),
-    ...(checkStep ? [checkStep] : []),
   ] };
 }
 export function mockJob(id: string): JobDetail | null {
@@ -66,7 +64,7 @@ export function mockJob(id: string): JobDetail | null {
     // removed: as the server, a job-backed skip's own row is gone (removed: true)
     id, state: j.state, removed: j.origin === "scan", reason, attempts: j.attempts ?? 0,
     // the sample's failure (E-API-SHAPE): the sentence is the reason's; the server sends raw step name 'encode' or 'check'
-    ...(j.state === "failed" && j.id === "48190" ? { failure: { step: "encode", stepIndex: 0, stepCount: 2, afterMs: 252000, mediaTime: "00:41:12", hint: "The file is corrupt or uses an unsupported codec.", ffmpegRan: true, exitCode: 1, keyLines: ["[hevc @ 0x55d1] Error while decoding stream #0:0: Invalid data found when processing input", "Conversion failed!"] } } : {}),
+    ...(j.state === "failed" && j.id === "48190" ? { failure: { step: "encode", stepIndex: 0, stepCount: 1, afterMs: 252000, mediaTime: "00:41:12", hint: "The file is corrupt or uses an unsupported codec.", ffmpegRan: true, exitCode: 1, keyLines: ["[hevc @ 0x55d1] Error while decoding stream #0:0: Invalid data found when processing input", "Conversion failed!"] } } : {}),
     ...(j.state === "failed" && j.id === "48191" ? { failure: { step: "encode", stepIndex: 0, stepCount: 1, afterMs: 0, mediaTime: null, hint: "Free some space on that disk, then press Retry.", ffmpegRan: false, exitCode: null, keyLines: [] } } : {}), retryAt: j.retryAt ?? null, error: null, worker: j.worker ?? null,
     file: { path: j.path, bytes: j.beforeBytes ?? j.bytes }, createdAt: at(300), updatedAt: at(5),
     library: { id: j.libraryId, name: j.library }, workflow: { id: "w1", revisionId: "w1r4", version: 4 },
