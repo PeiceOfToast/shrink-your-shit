@@ -1,12 +1,12 @@
 // D: Network shares settings (SCREENS V9d, D-API-SHAPE.md). Mock only (the engine is after item E).
 // The share list table, Add/Edit sheet, Remove dialog, Test button, and the connect-mode-specific UI.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Icon } from "../Icon";
 import { MOCK, failed, type Answer } from "../api";
 import { Empty, PageHead } from "../PageHead";
 import { SettingsTabs } from "../pages";
 import { useData } from "../useData";
-import { addShare, checkShare, deleteShare, getShares, patchShare, reconnectShare, testShare } from "../sharesApi";
+import { addShare, checkShare, deleteShare, getShares, patchShare, reconnectShare, sharesSupported, testShare } from "../sharesApi";
 import type { Share, ShareTestResult, SharesResponse, ShareType } from "../types/shares";
 
 async function act<T>(p: Promise<Answer<T>>, say: (m: string) => void): Promise<T | null> {
@@ -67,7 +67,8 @@ function RemoveDialog({ share, onCancel, onDone, said }: { share: Share; onCance
       onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), onCancel())}>
       <h3 style={{ margin: 0 }}>Remove {share.name}?</h3>
       <p style={{ margin: "8px 0" }}>Shrink Your Shit disconnects from it. Nothing on the share is changed or deleted.{share.setup ? " Also remove it from the server:" : ""}</p>
-      {share.setup && <div className="codebox"><code>{share.setup.removeText}</code><button className="btn sm" type="button"><Icon id="i-copy" />Copy</button></div>}
+      {share.setup && <div className="stack" style={{ gap: 6, marginTop: 8 }}><div className="codebox"><code>{share.setup.text}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(share.setup!.text).catch(() => {})}><Icon id="i-copy" />Copy</button></div>
+          <p className="hint" style={{ margin: 0 }}>To remove it later: <code className="sm muted">{share.setup.removeText}</code> <button className="linkbtn" type="button" onClick={() => navigator.clipboard?.writeText(share.setup!.removeText).catch(() => {})}>Copy</button></p></div>}
       {share.libraries.length > 0 && <p className="st bad" style={{ margin: 0 }}><Icon id="i-alert" /><span>{share.libraries.map((l) => l.name).join(" and ")} use this share. Change their folders or remove them first.</span></p>}
       {error && <p className="st bad" style={{ margin: 0 }}><Icon id="i-alert" /><span>{error}</span></p>}
       <div className="row" style={{ gap: 8, marginTop: 8 }}>
@@ -157,14 +158,16 @@ function ShareSheet({ share, resp, onDone, onCancel, said }: { share?: Share; re
 }
 
 export function SharesSettings() {
-  const resp = useData(getShares, []), [said, setSaid] = useState(""), [adding, setAdding] = useState(false);
+  const resp = useData(getShares, []), [said, setSaid] = useState(""), [adding, setAdding] = useState(false), [supported, setSupported] = useState<boolean | null>(MOCK ? true : null);
   const data = resp.data;
+  useEffect(() => { if (!MOCK && supported === null) sharesSupported().then(setSupported); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const showSharesTab = MOCK || (supported !== false && !resp.error?.message);
   return (
     <div className="stack">
       <PageHead icon="i-shares" title="Settings" />
-      <SettingsTabs at="shares" shares={MOCK || !resp.error ? undefined : false} />
+      <SettingsTabs at="shares" shares={showSharesTab ? undefined : false} />
       <p className="muted" role="status">{said}</p>
-      {resp.error && !MOCK ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{resp.error.message}</span></p> : !data ? <div className="empty">Loading...</div> : <>
+      {resp.error && supported === false ? <p className="muted">This server doesn't have network shares yet.</p> : resp.error && !MOCK ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{resp.error.message}</span></p> : !data ? <div className="empty">Loading...</div> : <>
         <div className="row" style={{ gap: 6 }}>
           <p className="muted" style={{ margin: 0 }}>Use a folder on a NAS or another computer as a library. Shrink Your Shit connects to it and reconnects after a restart.</p>
           <span className="sp" />
