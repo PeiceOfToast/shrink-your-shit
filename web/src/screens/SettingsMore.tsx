@@ -58,7 +58,7 @@ function Languages({ start, saved }: { start: string[]; saved: () => void }) {
         <div className="field"><label htmlFor="lang-add">Add a language</label>
           {/* an own list, not a datalist: the browser's datalist popup is its own chrome and opened off the screen
               (review item B); .lang-opts (shell.css) is left-anchored under the field and never wider than the screen */}
-          <div className="row" style={{ gap: 8, position: "relative" }} onBlur={(e) => e.relatedTarget instanceof Node && !e.currentTarget.contains(e.relatedTarget) && (setOpen(false), setAt(-1))}>
+          <div className="row" style={{ gap: 8, position: "relative" }} onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node) && (setOpen(false), setAt(-1))}>
             <input id="lang-add" className="input" autoComplete="off" role="combobox" aria-expanded={open} aria-controls="lang-opts" aria-autocomplete="list" aria-activedescendant={at >= 0 ? "lang-o" + at : undefined} aria-describedby="lang-h2" value={typed}
               onChange={(e) => (setTyped(e.target.value), setAt(-1), setOpen(true))}
               onFocus={() => setOpen(true)}
