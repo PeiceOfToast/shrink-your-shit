@@ -18,7 +18,6 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
-	"github.com/shrink-your-shit/shrink-your-shit/internal/runlog"
 )
 
 // The Standard selectors on real files (slice 25a): each choice changes the real ffmpeg output as
@@ -468,11 +467,10 @@ func TestRealKeepWebMBecomesMKV(t *testing.T) {
 	st, id := realJob(t, src, 3)
 	st.SetPaused(false)
 	w := realWorker(st, media.OSExec{})
-	w.Logs = &runlog.Logs{Dir: t.TempDir()}
 	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
 	w.run(t)
 	j, _ := st.Get(id)
-	text, _, _ := w.Logs.Read(id, 0)
+	text := logTextOf(st, id)
 	if j.Status != jobs.Done {
 		t.Fatalf("%s %q\n%s", j.Status, j.Error, text)
 	}

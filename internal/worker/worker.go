@@ -28,7 +28,6 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
-	"github.com/shrink-your-shit/shrink-your-shit/internal/runlog"
 )
 
 // Queue is everything a worker needs from the job store.
@@ -90,8 +89,6 @@ const (
 
 // Worker pulls jobs from a Queue and runs ffmpeg.
 type Worker struct {
-	// Logs keeps each job's run log (S5); nil: none.
-	Logs *runlog.Logs
 	// verified is the probe of the new file the last check passed (S5: stored for its final path).
 	verified media.Info
 	// remote is the job a worker on another computer converts, run here (V7b2); nil for a local one.
@@ -401,10 +398,7 @@ func failed(plain string, err error) error { return &FailedError{plain, err} }
 func (w *Worker) jobf(id int64, format string, a ...any) {
 	msg := fmt.Sprintf(format, a...)
 	log.Printf("worker %s: job %d%s", w.ID, id, msg)
-	if w.Logs != nil {
-		w.Logs.Append(id, w.now().UTC().Format("15:04:05")+" "+strings.TrimPrefix(strings.TrimPrefix(msg, ":"), " "))
-	}
-	if w.Queue != nil {
+	if w.Queue != nil { // the job's log lives in the database (user review 11-13 item E)
 		w.Queue.AppendLogLine(id, 0, "app", strings.TrimPrefix(strings.TrimPrefix(msg, ":"), " "))
 	}
 }
@@ -842,9 +836,6 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		stopWatch()
 	}
 	w.recordEncode(job.ID, args, encStart, encErr, terr)
-	if s := strings.TrimSpace(encErr); s != "" && w.Logs != nil {
-		w.Logs.Append(job.ID, "ffmpeg said:\n"+s) // errors only (the encode runs at -v error)
-	}
 	if terr == nil {
 		w.Queue.AddStep(job.ID, "converted", true, "Converted: "+convertingTo(plan, src)+".")
 	}

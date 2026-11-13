@@ -10,7 +10,6 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
-	"github.com/shrink-your-shit/shrink-your-shit/internal/runlog"
 )
 
 // S3 with real ffmpeg: an HDR10 file converts with its HDR intact (ffprobe on the new file shows PQ,
@@ -92,7 +91,6 @@ func TestRealRunLogAndSteps(t *testing.T) {
 	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=3:size=640x360:rate=25", "-c:v", "libx264", "-b:v", "3000k", src)
 	st, id := realJob(t, src, 3)
 	w := realWorker(st, media.OSExec{})
-	w.Logs = &runlog.Logs{Dir: t.TempDir()}
 	w.Template = func(jobs.Job) (rules.Template, error) { return rules.BasicTemplate(3, "keep_all"), nil }
 	w.KeepDays, w.Journal = func() int { return 7 }, st
 	w.run(t)
@@ -110,7 +108,7 @@ func TestRealRunLogAndSteps(t *testing.T) {
 	if strings.Join(names, ",") != "converted,verified,replaced" {
 		t.Errorf("steps %v", names)
 	}
-	text, _, _ := w.Logs.Read(id, 0)
+	text := logTextOf(st, id)
 	if !strings.Contains(text, "started") || !strings.Contains(text, "done") {
 		t.Errorf("run log %q", text)
 	}

@@ -16,7 +16,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -160,27 +159,20 @@ func main() {
 		log.Printf("requeued %d job(s) interrupted by the last shutdown", n)
 	}
 	// Kept originals whose days are up are deleted now and then every hour (slice 18).
-	runLogs := &runlog.Logs{Dir: filepath.Join(*data, "logs")} // each job's run log (S5)
-	store.OnJobsRemoved = func(ids []int64) {                  // a job's log goes with it (review 43e6f66)
-		for _, id := range ids {
-			runLogs.Remove(id)
+	if n, err := store.ImportRunLogs(filepath.Join(*data, "logs")); err != nil { // user review 11-13 item E: the old files, into SQLite, once
+		log.Printf("run logs: imported %d, then: %v", n, err)
+	} else if n > 0 {
+		log.Printf("imported %d run log(s) into the database", n)
+	}
+	store.OnJobsRemoved = func(ids []int64) { // a job's log goes with it (review 43e6f66)
+		if err := store.RemoveJobLogs(ids); err != nil {
+			log.Printf("job logs: %v", err)
 		}
 	}
-	sweepLogs := func() { // the run logs' limits: their job is gone, 30 days, 100 MiB in all
-		ids, err := store.ForgetGoneJobSteps()
-		if err != nil {
+	sweepLogs := func() { // the job history's 30 days (the log lines' limit comes with logKeepDays)
+		if _, err := store.ForgetGoneJobSteps(); err != nil {
 			log.Printf("run logs: %v", err)
 			return
-		}
-		if entries, err := os.ReadDir(runLogs.Dir); err == nil {
-			for _, e := range entries {
-				if id, err := strconv.ParseInt(strings.TrimSuffix(e.Name(), ".log"), 10, 64); err == nil && !ids[id] {
-					runLogs.Remove(id)
-				}
-			}
-		}
-		if _, err := runLogs.Sweep(time.Now(), runlog.MaxAge, runlog.Total); err != nil {
-			log.Printf("run logs: %v", err)
 		}
 		if _, err := store.PruneJobEvents(time.Now().Add(-runlog.MaxAge)); err != nil { // jobs' history: the logs' 30 days
 			log.Printf("job history: %v", err)
@@ -266,7 +258,7 @@ func main() {
 			if n > 1 {
 				id = fmt.Sprintf("builtin-%d", n)
 			}
-			return &worker.Worker{ID: id, Logs: runLogs, Queue: store, Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath,
+			return &worker.Worker{ID: id, Queue: store, Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath,
 				Template: store.TemplateFor, Poll: 3 * time.Second,
 				DecodeCheck: *decode, MinSSIM: *minSSIM, KeepDays: keepDays, Journal: store, Sidecars: store,
 				Paused: func() bool { return !store.WorkerEnabled(jobs.LocalWorker) }, StallAfter: *stallAfter} // this computer's own switch
@@ -306,7 +298,7 @@ func main() {
 			}
 		},
 		ScanNow: sc.ScanNow, NextScan: sc.NextScan, ScanEvery: *every, Settle: *settle, SetScanEvery: sc.SetEvery, Scanning: sc.Scanning, RequeueJob: pool.RequeueJob, PauseNow: pool.PauseNow, StopFile: pool.StopFile,
-		RunLogs: runLogs, Doctor: chk, DataDir: *data, Version: version, Logs: logs,
+		Doctor: chk, DataDir: *data, Version: version, Logs: logs,
 		Preview:    &preview.Previewer{Store: store, Exec: media.OSExec{}, FFprobe: ffprobePath},
 		FirstFiles: &preview.FirstLister{Exec: media.OSExec{}, FFprobe: ffprobePath}})}
 	go func() {

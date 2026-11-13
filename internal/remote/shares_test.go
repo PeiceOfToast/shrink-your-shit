@@ -21,7 +21,6 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
-	"github.com/shrink-your-shit/shrink-your-shit/internal/runlog"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/web"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
@@ -41,8 +40,8 @@ func (c *counting) RoundTrip(r *http.Request) (*http.Response, error) {
 	return http.DefaultTransport.RoundTrip(r)
 }
 
-// sharesServer is server() with run logs, so a worker's notes can be read.
-func sharesServer(t *testing.T) (*httptest.Server, *jobs.Store, string, *runlog.Logs) {
+// sharesServer is server() (its jobs' logs are in the database).
+func sharesServer(t *testing.T) (*httptest.Server, *jobs.Store, string) {
 	t.Helper()
 	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
@@ -51,17 +50,16 @@ func sharesServer(t *testing.T) (*httptest.Server, *jobs.Store, string, *runlog.
 	st.SetPaused(false)
 	t.Cleanup(func() { st.Close() })
 	access, _, _ := web.OpenAccess(t.TempDir(), false)
-	logs := &runlog.Logs{Dir: t.TempDir()}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	srv := httptest.NewServer(web.Handler(st, access, web.Engine{DataDir: t.TempDir(), RunLogs: logs,
+	srv := httptest.NewServer(web.Handler(st, access, web.Engine{DataDir: t.TempDir(),
 		RunRemote: func(job jobs.Job, id string, rj *worker.RemoteJob) {
 			w := &worker.Worker{ID: id, Queue: st, Exec: media.OSExec{}, FFmpeg: "ffmpeg", FFprobe: "ffprobe", Template: st.TemplateFor,
-				KeepDays: func() int { return 7 }, Journal: st, Sidecars: st, Logs: logs}
+				KeepDays: func() int { return 7 }, Journal: st, Sidecars: st}
 			w.RunRemote(ctx, job, rj)
 		}}))
 	t.Cleanup(srv.Close)
-	return srv, st, t.TempDir(), logs
+	return srv, st, t.TempDir()
 }
 
 func send(t *testing.T, srv *httptest.Server, method, path, body string) (int, string) {
@@ -101,7 +99,7 @@ func mapping(t *testing.T, srv *httptest.Server, id string) (status, detail stri
 // fails mid-job falls back to transfer and the run log says so; a changed mapping is untested again.
 func TestSharedFolders(t *testing.T) {
 	needFFmpeg(t)
-	srv, st, lib, logs := sharesServer(t)
+	srv, st, lib := sharesServer(t)
 	oldBeat, oldPoll := HeartbeatEvery, PlanPoll
 	HeartbeatEvery, PlanPoll = 50*time.Millisecond, 50*time.Millisecond
 	defer func() { HeartbeatEvery, PlanPoll = oldBeat, oldPoll }()
@@ -187,7 +185,7 @@ func TestSharedFolders(t *testing.T) {
 	if j := done(id2); j.Status != jobs.Done {
 		t.Fatalf("after the share broke: %s %q", j.Status, j.Error)
 	}
-	text, _, _ := logs.Read(id2, 0)
+	text := logTextOf(st, id2)
 	if cnt.downloads.Load() == 0 || cnt.uploads.Load() == 0 || !strings.Contains(text, "downloaded instead") || !strings.Contains(text, "uploaded instead") {
 		t.Errorf("fallback: downloads %d uploads %d, log:\n%s", cnt.downloads.Load(), cnt.uploads.Load(), text)
 	}
@@ -205,7 +203,7 @@ func jsonString(s string) string {
 
 // A test the worker never answers ends failed with words, and an offline worker can't be tested.
 func TestSharedFolderTestsEnd(t *testing.T) {
-	srv, st, lib, _ := sharesServer(t)
+	srv, st, lib := sharesServer(t)
 	oldTimeout := web.PathTestTimeout
 	web.PathTestTimeout = 200 * time.Millisecond
 	defer func() { web.PathTestTimeout = oldTimeout }()
@@ -237,7 +235,7 @@ func TestSharedFolderTestsEnd(t *testing.T) {
 // characters and a length cap; nothing usable is refused.
 func TestWorkerNoteCantForgeLogLines(t *testing.T) {
 	needFFmpeg(t)
-	srv, st, lib, logs := sharesServer(t)
+	srv, st, lib := sharesServer(t)
 	src := filepath.Join(lib, "Movie.mkv")
 	if out, err := exec.Command("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=duration=1:size=160x90:rate=25",
 		"-c:v", "libx264", "-pix_fmt", "yuv420p", src).CombinedOutput(); err != nil {
@@ -274,7 +272,7 @@ func TestWorkerNoteCantForgeLogLines(t *testing.T) {
 	if err := note(" \n\x1b\x00​ "); !errors.As(err, &e) || e.Status != 400 {
 		t.Errorf("nothing usable: %v", err)
 	}
-	text, _, _ := logs.Read(id, 0)
+	text := logTextOf(st, id)
 	var notes []string
 	for _, line := range strings.Split(text, "\n") {
 		if strings.Contains(line, "Worker: ") {
@@ -293,4 +291,14 @@ func TestWorkerNoteCantForgeLogLines(t *testing.T) {
 	if got := len([]rune(notes[1][strings.Index(notes[1], "Worker: ")+len("Worker: "):])); got != web.NoteMaxChars {
 		t.Errorf("capped at %d, got %d", web.NoteMaxChars, got)
 	}
+}
+
+// logTextOf is job id's log lines as one text (the log lives in the database).
+func logTextOf(st *jobs.Store, id int64) string {
+	lines, _ := st.LogLines(id)
+	var texts []string
+	for _, l := range lines {
+		texts = append(texts, l.Text)
+	}
+	return strings.Join(texts, "\n")
 }

@@ -4,6 +4,7 @@ package jobs
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -64,5 +65,33 @@ func TestFailureSummaryExitAndRan(t *testing.T) {
 	}
 	if f, _ := s.FailureOf(2); f == nil || f.ExitCode != -1 || f.FfmpegRan || len(f.KeyLines) != 0 {
 		t.Errorf("never ran: %+v", f)
+	}
+}
+
+// User review 11-13 item E: an old run-log file's lines go into the database, in order, and the file is gone; a
+// second import finds nothing.
+func TestImportRunLogs(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(filepath.Join(dir, "syp.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	logs := filepath.Join(dir, "logs")
+	os.MkdirAll(logs, 0o755)
+	os.WriteFile(filepath.Join(logs, "7.log"), []byte("10:00:01 started\nffmpeg said:\nInvalid data\n"), 0o644)
+	os.WriteFile(filepath.Join(logs, "notes.txt"), []byte("not a job"), 0o644)
+	if n, err := s.ImportRunLogs(logs); err != nil || n != 1 {
+		t.Fatalf("import %d %v", n, err)
+	}
+	lines, _ := s.LogLines(7)
+	if len(lines) != 3 || lines[0].Text != "10:00:01 started" || lines[2].Text != "Invalid data" || lines[0].Stream != "app" {
+		t.Errorf("lines %+v", lines)
+	}
+	if _, err := os.Stat(filepath.Join(logs, "7.log")); !os.IsNotExist(err) {
+		t.Errorf("the file is still there: %v", err)
+	}
+	if n, _ := s.ImportRunLogs(logs); n != 0 {
+		t.Errorf("second import: %d", n)
 	}
 }

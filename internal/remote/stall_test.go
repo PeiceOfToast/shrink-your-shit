@@ -17,7 +17,6 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
-	"github.com/shrink-your-shit/shrink-your-shit/internal/runlog"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/web"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
@@ -32,13 +31,12 @@ func stallServer(t *testing.T, stall time.Duration) (*httptest.Server, *jobs.Sto
 	st.SetPaused(false)
 	t.Cleanup(func() { st.Close() })
 	access, _, _ := web.OpenAccess(t.TempDir(), false)
-	logs := &runlog.Logs{Dir: t.TempDir()}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	srv := httptest.NewServer(web.Handler(st, access, web.Engine{DataDir: t.TempDir(), RunLogs: logs,
+	srv := httptest.NewServer(web.Handler(st, access, web.Engine{DataDir: t.TempDir(),
 		RunRemote: func(job jobs.Job, id string, rj *worker.RemoteJob) {
 			w := &worker.Worker{ID: id, Queue: st, Exec: media.OSExec{}, FFmpeg: "ffmpeg", FFprobe: "ffprobe", Template: st.TemplateFor,
-				KeepDays: func() int { return 7 }, Journal: st, Sidecars: st, Logs: logs, StallAfter: stall}
+				KeepDays: func() int { return 7 }, Journal: st, Sidecars: st, StallAfter: stall}
 			w.RunRemote(ctx, job, rj)
 		}}))
 	t.Cleanup(srv.Close)

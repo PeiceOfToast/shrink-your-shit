@@ -15,7 +15,6 @@ import (
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
-	"github.com/shrink-your-shit/shrink-your-shit/internal/runlog"
 )
 
 // The Files view (S5): one list by card, with every card's fields, the counts, and a job's run log.
@@ -27,8 +26,7 @@ func TestFilesView(t *testing.T) {
 	defer st.Close()
 	st.SetPaused(false) // a new install starts with its worker stopped (S2); these jobs are claimed
 	a, _, _ := OpenAccess(t.TempDir(), false)
-	logs := &runlog.Logs{Dir: t.TempDir()}
-	srv := httptest.NewServer(Handler(st, a, Engine{RunLogs: logs}))
+	srv := httptest.NewServer(Handler(st, a, Engine{}))
 	defer srv.Close()
 	lib, _ := st.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
 	m := lib.Path // the stored (absolute) folder: D:\m on Windows
@@ -42,7 +40,7 @@ func TestFilesView(t *testing.T) {
 	st.PutFile(jobs.File{Path: filepath.Join(m, "Old.mkv"), Size: 5, Decision: "skip: x", Reason: rules.SkipAlreadyHEVC})
 	st.PutProbe(filepath.Join(m, "Film.mkv"), 400, 1, `{"durationSec":60,"streams":[{"type":"video","codec":"hevc","Width":1920,"Height":1080}]}`)
 	st.AddStep(done, "found", true, "Found in /m.")
-	logs.Append(done, "12:00:00 started")
+	st.AppendLogLine(done, 0, "app", "12:00:00 started")
 
 	get := func(q string) (map[string]any, []map[string]any) {
 		t.Helper()
@@ -93,7 +91,7 @@ func TestFilesView(t *testing.T) {
 		Live    bool
 	}
 	json.Unmarshal([]byte(body), &lg)
-	if len(lg.Summary) != 1 || lg.Text != "12:00:00 started\n" || lg.Next != len(lg.Text) || lg.Live {
+	if len(lg.Summary) != 1 || !strings.HasSuffix(lg.Text, " 12:00:00 started\n") || lg.Next != 1 || lg.Live { // the cursor is the line's seq
 		t.Errorf("log %s", body)
 	}
 	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/activity/files/" + itoa(failed) + "/log"})
@@ -114,7 +112,7 @@ func TestFilesViewBeside(t *testing.T) {
 	defer st.Close()
 	st.SetPaused(false)
 	a, _, _ := OpenAccess(t.TempDir(), false)
-	srv := httptest.NewServer(Handler(st, a, Engine{RunLogs: &runlog.Logs{Dir: t.TempDir()}}))
+	srv := httptest.NewServer(Handler(st, a, Engine{}))
 	defer srv.Close()
 	lib, _ := st.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
 	id, _ := st.Enqueue(jobs.Job{Library: "/m", LibraryID: lib.ID, Path: "/m/Film.mkv", SizeBefore: 1000})
@@ -142,7 +140,7 @@ func TestFilesViewReplaceAndBeside(t *testing.T) {
 	defer st.Close()
 	st.SetPaused(false)
 	a, _, _ := OpenAccess(t.TempDir(), false)
-	srv := httptest.NewServer(Handler(st, a, Engine{RunLogs: &runlog.Logs{Dir: t.TempDir()}}))
+	srv := httptest.NewServer(Handler(st, a, Engine{}))
 	defer srv.Close()
 	lib, _ := st.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
 	m := lib.Path

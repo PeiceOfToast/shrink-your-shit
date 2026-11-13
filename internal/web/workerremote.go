@@ -237,9 +237,7 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 			apiError(w, http.StatusBadRequest, "invalid", "A note needs some text.")
 			return
 		}
-		if eng.RunLogs != nil {
-			eng.RunLogs.Append(j.ID, "Worker: "+text) // prefixed: a worker's note can't pass for the server's line
-		}
+		store.AppendLogLine(j.ID, 0, "app", "Worker: "+text) // prefixed: a worker's note can't pass for the server's line
 		writeJSON(w, map[string]any{"ok": true})
 	})
 	mux.HandleFunc("POST /api/worker/v1/leases/{lease}/report", func(w http.ResponseWriter, r *http.Request) {
