@@ -48,7 +48,9 @@ export function mockJob(id: string): JobDetail | null {
   const reason = j.reason ?? null;
   return {
     // removed: as the server, a job-backed skip's own row is gone (removed: true)
-    id, state: j.state, removed: j.origin === "scan", reason, attempts: j.attempts ?? 0, retryAt: j.retryAt ?? null, error: null, worker: j.worker ?? null,
+    id, state: j.state, removed: j.origin === "scan", reason, attempts: j.attempts ?? 0,
+    // the sample's failure (E-API-SHAPE): the sentence is the reason's; this is where it stopped and the ffmpeg lines
+    ...(j.state === "failed" ? { failure: { step: "Converting video", stepIndex: 3, stepCount: 5, afterMs: 252000, mediaTime: "00:41:12", hint: null, exitCode: 1, keyLines: ["[hevc @ 0x55d1] Error while decoding stream #0:0: Invalid data found when processing input", "Conversion failed!"] } } : {}), retryAt: j.retryAt ?? null, error: null, worker: j.worker ?? null,
     file: { path: j.path, bytes: j.beforeBytes ?? j.bytes }, createdAt: at(300), updatedAt: at(5),
     library: { id: j.libraryId, name: j.library }, workflow: { id: "w1", revisionId: "w1r4", version: 4 },
     events: old ? [] : [{ seq: 1, at: at(300), from: null, to: "queued", reason: null, workerId: null },

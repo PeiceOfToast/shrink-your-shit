@@ -12,7 +12,7 @@ import { onLive } from "../live";
 import { Empty, PageHead } from "../PageHead";
 import { navigate, useSearch } from "../router";
 import { useData } from "../useData";
-import type { JobAction, JobDetail, JobItem, JobProgressEvent, JobState, Probe, Tab, Pin } from "../types/jobs";
+import type { Failure, JobAction, JobDetail, JobItem, JobProgressEvent, JobState, Probe, Tab, Pin } from "../types/jobs";
 
 const TABS: [Tab, string][] = [["waiting", "Waiting"], ["running", "Running"], ["completed", "Done"], ["skipped", "Skipped"], ["failed", "Failed"]];
 // Spec states in words (SCREENS V6); a cancelled file lists under Skipped and reads "Cancelled".
@@ -157,6 +157,20 @@ export function Jobs() {
 // The job's log (SCREENS V6: streaming, searchable, Download): GET /api/v2/jobs/{id}/log/stream (#131). Each piece
 // comes as job.log {text, next} with next as its id, so the browser's own reconnect resumes where it stopped; "end"
 // comes once the job is over and the whole log has been sent.
+// E (SCREENS V6b 'Why it failed'): the sentence, where it stopped, the server's hint when it has one, and the last
+// ffmpeg error lines (at most five) behind a disclosure. Each part is left out when the server sends none.
+function WhyFailed({ msg, f }: { msg: string; f: Failure }) {
+  const s = Math.round(f.afterMs / 1000), t = s >= 60 ? Math.floor(s / 60) + " min " + (s % 60) + " s" : s + " s";
+  return (
+    <section className="note" role="region" aria-label="Why it failed" style={{ display: "block" }}>
+      <h3><Icon id="i-alert" /> Why it failed</h3>
+      <p style={{ fontSize: "var(--fs-lg)" }}>{msg}</p>
+      <p className="sm">In step {f.stepIndex} of {f.stepCount}, {f.step}, after {t}{f.mediaTime ? " (at " + f.mediaTime + " in the video)" : ""}.</p>
+      {f.hint && <p>{f.hint}</p>}
+      {f.keyLines.length > 0 && <details><summary className="sm">Last lines from ffmpeg</summary><pre className="joblog">{f.keyLines.join("\n")}</pre></details>}
+    </section>);
+}
+
 function JobLog({ id, name }: { id: string; name: string }) {
   const [text, setText] = useState(""), [done, setDone] = useState(false), [gone, setGone] = useState(false), [q, setQ] = useState(""), [follow, setFollow] = useState(true);
   const box = useRef<HTMLPreElement>(null);
@@ -271,6 +285,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {/* review db7b1f1 P3: "removed" is the server's flag, not a person's word. Only a job removed with its library
               gets a note; a job that ended as a skip shows its reason under Why like any other. */}
           {j?.removed && j.reason?.code === "removed" ? <div className="note"><Icon id="i-info" /><div>Its library was removed, so this file won't be converted.</div></div>
+            : j?.failure ? <WhyFailed msg={reason} f={j.failure} />
             : reason && <section><h3>Why</h3><p>{reason}</p></section>}
           <section><h3>File</h3><dl className="kv">
             {(own?.path ?? j?.file?.path) && <><dt>Source</dt><dd className="mono sm">{own?.path ?? j?.file?.path}</dd></>} {/* review 54ff228: no '-' when the server doesn't keep the path (a removed library's job) */}
