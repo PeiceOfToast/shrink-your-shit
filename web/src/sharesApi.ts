@@ -76,7 +76,7 @@ export async function deleteShare(id: string): Promise<Answer<void>> {
     const share = s.shares.find((x) => x.id === id);
     if (share && share.libraries.length > 0) return { error: { code: "share_in_use", message: "Libraries use this share.", libraries: share.libraries } } as unknown as Answer<void>;
     s.shares = s.shares.filter((x) => x.id !== id);
-    return undefined as unknown as Answer<void>;
+    return null as unknown as Answer<void>; // like the real server: 204, no body
   }
   return call("DELETE", "/api/v2/shares/" + encodeURIComponent(id));
 }
