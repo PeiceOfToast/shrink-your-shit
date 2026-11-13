@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -275,23 +276,28 @@ func testSMB(address, username, password string, guest bool) map[string]any {
 	}
 	server := parts[0]
 	shareName := strings.Join(parts[1:], "\\")
+	// Reject addresses with a port
+	if strings.Contains(server, ":") {
+		return map[string]any{"ok": false, "code": "invalid_address",
+			"message": "Leave out the port: SMB always uses 445."}
+	}
 	ini := &smb2.NTLMInitiator{User: username, Password: password}
 	dialer := &smb2.Dialer{Initiator: ini}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	session, err := dialer.Dial(ctx, net.JoinHostPort(server, smbPort))
 	if err != nil {
-		return smbError(err)
+		return smbError(err, server, shareName)
 	}
 	share, err := session.Mount(shareName)
 	if err != nil {
 		session.Logoff()
-		return smbError(err)
+		return smbError(err, server, shareName)
 	}
 	entries, err := share.ReadDir("")
 	session.Logoff()
 	if err != nil {
-		return smbError(err)
+		return smbError(err, server, shareName)
 	}
 	var folders []string
 	more := 0
@@ -309,26 +315,28 @@ func testSMB(address, username, password string, guest bool) map[string]any {
 // a Windows machine (CI runners included) runs its own SMB server on 445.
 var smbPort, nfsPort = "445", "2049"
 
-func smbError(err error) map[string]any {
+func smbError(err error, server, share string) map[string]any {
 	msg := err.Error()
 	low := strings.ToLower(msg)
+	var code, message string
 	switch {
 	case strings.Contains(low, "no such host"), strings.Contains(low, "nodename nor servname"):
-		return map[string]any{"ok": false, "code": "host_not_found", "message": msg}
+		code, message = "host_not_found", "Can't find a computer called "+server+". Check the name, or use its IP address."
 	case strings.Contains(low, "refused"), strings.Contains(low, "no route"):
-		return map[string]any{"ok": false, "code": "host_unreachable", "message": msg}
+		code, message = "host_unreachable", server+" doesn't answer. Check it's on and on the same network."
 	case strings.Contains(low, "timeout"), strings.Contains(low, "timed out"):
-		return map[string]any{"ok": false, "code": "timeout", "message": "The server didn't answer in time."}
+		code, message = "timeout", "Timed out after 10 seconds."
 	case strings.Contains(low, "logon failure"), strings.Contains(low, "logon"):
-		return map[string]any{"ok": false, "code": "auth_failed", "message": "The username or password is not correct."}
+		code, message = "auth_failed", "The username or password is wrong."
 	case strings.Contains(low, "access denied"):
-		return map[string]any{"ok": false, "code": "access_denied", "message": "Access denied: the account doesn't have permission on this share."}
+		code, message = "access_denied", "This user can't open "+share+"."
 	case strings.Contains(low, "not found"), strings.Contains(low, "does not exist"):
-		// TODO D2: detect this error from go-smb2 and, when the server lists shares,
-		// return "shares": [...] with the server's export list for the UI to suggest.
-		return map[string]any{"ok": false, "code": "share_not_found", "message": msg}
+		code, message = "share_not_found", server+" has no shared folder called "+share+"."
+	default:
+		code, message = "mount_failed", msg
 	}
-	return map[string]any{"ok": false, "code": "mount_failed", "message": msg}
+	log.Printf("smb test: server=%s share=%s err=%s code=%s", server, share, msg, code)
+	return map[string]any{"ok": false, "code": code, "message": message}
 }
 
 func testNFS(address string) map[string]any {
@@ -336,15 +344,23 @@ func testNFS(address string) map[string]any {
 	if server == "" {
 		return map[string]any{"ok": false, "code": "invalid_address", "message": "Use server:/export."}
 	}
+	// Reject addresses with a port in the server part (e.g. "nas:2049:/path")
+	if strings.Contains(server, ":") || strings.Count(address, ":") > 1 {
+		return map[string]any{"ok": false, "code": "invalid_address",
+			"message": "Leave out the port: NFS uses 2049."}
+	}
 	conn, err := net.DialTimeout("tcp", net.JoinHostPort(server, nfsPort), 10*time.Second)
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "no such host") {
-			return map[string]any{"ok": false, "code": "host_not_found", "message": "The NFS server was not found."}
+		msg := err.Error()
+		if strings.Contains(strings.ToLower(msg), "no such host") {
+			return map[string]any{"ok": false, "code": "host_not_found",
+				"message": "Can't find a computer called " + server + ". Check the name, or use its IP address."}
 		}
-		if strings.Contains(strings.ToLower(err.Error()), "refused") {
-			return map[string]any{"ok": false, "code": "host_unreachable", "message": "The NFS server didn't answer."}
+		if strings.Contains(strings.ToLower(msg), "refused") {
+			return map[string]any{"ok": false, "code": "host_unreachable",
+				"message": server + " doesn't answer. Check it's on and on the same network."}
 		}
-		return map[string]any{"ok": false, "code": "timeout", "message": "The NFS server didn't answer in time."}
+		return map[string]any{"ok": false, "code": "timeout", "message": "Timed out after 10 seconds."}
 	}
 	conn.Close()
 	return map[string]any{"ok": true, "address": address, "folders": []string{}, "moreFolders": 0, "portOnly": true}

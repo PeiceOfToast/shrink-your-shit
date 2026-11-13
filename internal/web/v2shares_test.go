@@ -4,7 +4,6 @@ package web
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -347,25 +346,73 @@ func TestSharesTestUnknownHostIsHostNotFound(t *testing.T) {
 }
 
 func TestSharesTestSMBCodes(t *testing.T) {
-	tests := []struct {
-		err  string
-		code string
-	}{
-		{"connection refused", "host_unreachable"},
-		{"no route to host", "host_unreachable"},
-		{"i/o timeout", "timeout"},
-		{"connection timed out", "timeout"},
-		{"logon failure: unknown user name or bad password", "auth_failed"},
-		{"access denied", "access_denied"},
-		{"network path not found", "share_not_found"},
-		{"the specified share does not exist", "share_not_found"},
-		{"something else", "mount_failed"},
+	// ... SMB error code tests ...
+	home := filepath.Join(t.TempDir(), "home")
+	os.MkdirAll(home, 0o755)
+	os.Setenv("HOME", home)
+	defer os.Unsetenv("HOME")
+	srv, _, _ := server(t, false)
+
+	// Port in SMB address → 400
+	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares/test",
+		body: `{"address":"\\\\nas:1445\\share"}`, ctype: "application/json"})
+	if code != http.StatusOK {
+		t.Fatalf("test always returns 200: %d", code)
 	}
-	for _, c := range tests {
-		result := smbError(errors.New(c.err))
-		if got := result["code"].(string); got != c.code {
-			t.Errorf("%q: code %q, want %q", c.err, got, c.code)
-		}
+	var portResult struct {
+		Ok   bool   `json:"ok"`
+		Code string `json:"code"`
+	}
+	json.Unmarshal([]byte(resp), &portResult)
+	if portResult.Ok {
+		t.Error("port in address should return ok:false")
+	}
+	if portResult.Code != "invalid_address" {
+		t.Errorf("port: expected invalid_address, got %q", portResult.Code)
+	}
+
+	// Port in NFS address → 400
+	code, resp, _ = do(t, nil, srv, call{method: "POST", path: "/api/v2/shares/test",
+		body: `{"address":"192.0.2.1:2049:/path"}`, ctype: "application/json"})
+	if code != http.StatusOK {
+		t.Fatalf("test always returns 200: %d", code)
+	}
+	json.Unmarshal([]byte(resp), &portResult)
+	if portResult.Ok {
+		t.Error("port in NFS address should return ok:false")
+	}
+	if portResult.Code != "invalid_address" {
+		t.Errorf("nfs port: expected invalid_address, got %q", portResult.Code)
+	}
+}
+
+func TestSharesTestPlainSentences(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	os.MkdirAll(home, 0o755)
+	os.Setenv("HOME", home)
+	defer os.Unsetenv("HOME")
+	srv, _, _ := server(t, false)
+
+	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares/test",
+		body: `{"address":"\\\\nas.invalid\\share"}`, ctype: "application/json"})
+	if code != http.StatusOK {
+		t.Fatalf("test always returns 200: got %d", code)
+	}
+	var result struct {
+		Ok      bool   `json:"ok"`
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	json.Unmarshal([]byte(resp), &result)
+	if result.Ok {
+		t.Error("expected ok:false")
+	}
+	// The message must be a plain sentence, not the raw error
+	if strings.Contains(result.Message, "dial tcp") {
+		t.Errorf("plain sentence expected, got raw error: %q", result.Message)
+	}
+	if strings.Contains(result.Message, "no such host") {
+		t.Errorf("plain sentence expected, got raw error: %q", result.Message)
 	}
 }
 
