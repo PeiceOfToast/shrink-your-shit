@@ -39,7 +39,6 @@ export const STEP_DEFS: StepDefinition[] = [
       format: wd({ ...en(Object.keys(FORMATS), Object.values(FORMATS)), "x-available": ["hevc", "h264", "av1", "vp9"] }, "hevc", "Video format", "segmented"),
       resolution: wd(en(["keep", "1080", "720", "480"], ["Same as the original", "At most 1080p", "At most 720p", "At most 480p"]), "keep", "Resolution"),
       maxBitrate: wd(en(["none", "high", "medium", "low"], ["No limit", "High", "Medium", "Low"]), "none", "Max bitrate"),
-      vbrMaxKbps: { type: "integer", title: "Max bitrate", minimum: 1 },
       speed: wd(en(["faster", "normal", "slower"], ["Faster", "Normal", "Slower (smaller files)"]), "normal", "Speed"),
     }, ["quality", "format", "resolution", "maxBitrate", "speed"]) }),
   def({ type: "audio.tracks", category: "audio", name: "Audio", icon: "audio", typeLabel: "Audio", description: "Which sound tracks the new file has.",

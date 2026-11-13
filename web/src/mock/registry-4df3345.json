@@ -182,6 +182,12 @@
       "Low"
      ]
     },
+    "vbrMaxKbps": {
+     "description": "No scene goes above this. The picture aims for Balanced quality (CRF 23).",
+     "minimum": 1,
+     "title": "Max bitrate",
+     "type": "integer"
+    },
     "quality": {
      "default": 3,
      "enum": [
