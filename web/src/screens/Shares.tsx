@@ -75,8 +75,9 @@ function RemoveDialog({ share, onCancel, onDone, said }: { share: Share; onCance
   const box = useRef<HTMLElement>(null);
   useDrawerFocus(box);
   const remove = async () => {
-    const r = await act(deleteShare(share.id), setError);
-    if (r === undefined) { said("Removed."); onDone(); }
+    // The server answers 204 with no body, so success is any answer that isn't an error (act can't tell null apart).
+    let r; try { r = await deleteShare(share.id); } catch { return; }
+    if (failed(r)) setError(r.error.message); else { said("Removed."); onDone(); }
   };
   return (
     <div className="drawer-wrap" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
