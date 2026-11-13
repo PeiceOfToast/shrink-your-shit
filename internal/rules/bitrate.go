@@ -117,6 +117,15 @@ func FigureMbps(f, level, row string, legacy bool) float64 {
 	return t[ladderFormat(f)][level][row]
 }
 
+// VBR with a max (QA 11-13): -maxrate is 80% of the person's max and -bufsize a fifth of it. Measured with real
+// encodes (720p, H.264 and HEVC, easy and noisy clips, at 3000 and 6000 kbps): with -maxrate and -bufsize at the max,
+// the first whole second burst to 3704 kbps and later ones ran 6% over. shortcut: the 80% and the fifth are measured
+// on three synthetic clips, not on every source; upgrade if a real source's whole second goes over the max.
+func vbrMaxRateKbps(max int) int { return max * 4 / 5 }
+
+// vbrBufsizeKbps is the VBV buffer of VBR with a max: a fifth of the max (see vbrMaxRateKbps).
+func vbrBufsizeKbps(max int) int { return max / 5 }
+
 // peakKbps is Bitrate level's peak: 1.5x the level's average, never above the source (sourceKbps; 0 unknown).
 func peakKbps(target, sourceKbps int) int {
 	peak := target * 3 / 2

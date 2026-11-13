@@ -21,30 +21,36 @@ import (
 // that max, on a real, busy 1080p file (H.264 at 10 Mbps, so neither the level nor the max is above it).
 func TestRealBitrateLevelAndVBRAt720(t *testing.T) {
 	needTools(t)
-	src := filepath.Join(t.TempDir(), "Busy.mkv")
+	dir := t.TempDir()
+	busy := filepath.Join(dir, "Busy.mkv")
 	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=25:duration=12", "-vf", "noise=alls=10:allf=t",
-		"-c:v", "libx264", "-preset", "ultrafast", "-b:v", "10M", "-pix_fmt", "yuv420p", src)
+		"-c:v", "libx264", "-preset", "ultrafast", "-b:v", "10M", "-pix_fmt", "yuv420p", busy)
 	level := rules.DefaultSelectors(3)
 	level.Resolution, level.MaxBitrate, level.RateControl, level.Audio, level.OnlyMyLanguages = "720", "medium", "level", "as_is", false
-	vbr := rules.DefaultSelectors(3)
-	vbr.Resolution, vbr.RateControl, vbr.VBRMaxKbps, vbr.Audio, vbr.OnlyMyLanguages = "720", "vbr", 3000, "as_is", false
-	for name, sel := range map[string]rules.Selectors{"level": level, "vbr": vbr} {
-		if err := sel.Validate(); err != nil {
+	if err := level.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	out := realEncode720(t, busy, level.Template())
+	avg := realAverage720(t, out)
+	peak, sec := realPeakSecond(t, out)
+	t.Logf("level busy: average %.0f kbps, busiest second %.0f kbps (second %d)", avg, peak, sec)
+	if avg < 2400*0.85 || avg > 2400*1.15 {
+		t.Errorf("level: average %.0f kbps, not close to 2400", avg)
+	}
+	// VBR with a 3 Mbps max, strict (user's check, QA 11-13): every whole second, the first included, is at or under the max
+	// (a noisier clip is refused by the picture check at this max: the original is kept, which is the check's job)
+	for name, src := range map[string]string{"busy": busy} {
+		vbr := rules.DefaultSelectors(3)
+		vbr.Resolution, vbr.RateControl, vbr.VBRMaxKbps, vbr.Audio, vbr.OnlyMyLanguages = "720", "vbr", 3000, "as_is", false
+		if err := vbr.Validate(); err != nil {
 			t.Fatal(err)
 		}
-		out := realEncode720(t, src, sel.Template())
+		out := realEncode720(t, src, vbr.Template())
 		avg := realAverage720(t, out)
 		peak, sec := realPeakSecond(t, out)
-		t.Logf("%s: average %.0f kbps, busiest second %.0f kbps (second %d)", name, avg, peak, sec)
-		if name == "level" && (avg < 2400*0.85 || avg > 2400*1.15) {
-			t.Errorf("level: average %.0f kbps, not close to 2400", avg)
-		}
-		if name == "vbr" && avg > 3000 {
-			t.Errorf("vbr: average %.0f kbps is above the 3000 max", avg)
-		}
-		// the user's check: no second goes over the max (5% allowed for the encoder's own overshoot)
-		if name == "vbr" && peak > 3000*1.05 {
-			t.Errorf("vbr: busiest second %.0f kbps is over the 3000 max by more than 5%%", peak)
+		t.Logf("vbr %s: average %.0f kbps, busiest second %.0f kbps (second %d)", name, avg, peak, sec)
+		if peak > 3000 {
+			t.Errorf("vbr %s: busiest second %.0f kbps is over the 3000 max (second %d)", name, peak, sec)
 		}
 	}
 }
