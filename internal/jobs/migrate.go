@@ -408,6 +408,18 @@ WHERE json_extract(template, '$.kind') = 'selectors' AND COALESCE(json_extract(t
 UPDATE flows SET template = json_set(template, '$.selectors.rateControl', 'vbr_legacy',
   '$.selectors.notices', json('[{"code":"bitrate_meaning_changed","message":"Bitrate levels changed in this update. This flow keeps producing the same files until you edit its bitrate setting."}]'))
 WHERE json_extract(template, '$.kind') = 'selectors' AND json_extract(template, '$.selectors.rateControl') = 'vbr';`},
+	// User review 11-13 item E: every job's log lives in SQLite (lines and steps), and a failed job's summary beside it.
+	// IF NOT EXISTS throughout: the tests that rewind user_version re-run this step on a database that has it.
+	{39, "job logs in sqlite", `
+CREATE TABLE IF NOT EXISTS job_run_steps (job_id INTEGER NOT NULL, idx INTEGER NOT NULL, name TEXT NOT NULL, started_at TEXT NOT NULL DEFAULT '',
+  took_ms INTEGER NOT NULL DEFAULT 0, outcome TEXT NOT NULL DEFAULT '', command TEXT NOT NULL DEFAULT '', probe TEXT NOT NULL DEFAULT '',
+  check_score REAL, check_min REAL, check_passed INTEGER, output_lines INTEGER NOT NULL DEFAULT 0, result TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (job_id, idx));
+CREATE TABLE IF NOT EXISTS job_log_lines (job_id INTEGER NOT NULL, seq INTEGER NOT NULL, ts TEXT NOT NULL, step INTEGER NOT NULL DEFAULT 0,
+  stream TEXT NOT NULL, text TEXT NOT NULL, PRIMARY KEY (job_id, seq));
+CREATE TABLE IF NOT EXISTS job_failures (job_id INTEGER PRIMARY KEY, step INTEGER NOT NULL DEFAULT -1, step_count INTEGER NOT NULL DEFAULT 0,
+  after_ms INTEGER NOT NULL DEFAULT 0, media_time TEXT NOT NULL DEFAULT '', hint TEXT NOT NULL DEFAULT '', exit_code INTEGER NOT NULL DEFAULT -1,
+  ffmpeg_ran INTEGER NOT NULL DEFAULT 1, key_lines TEXT NOT NULL DEFAULT '[]');`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone

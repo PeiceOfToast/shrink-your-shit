@@ -30,6 +30,7 @@ type FileFilter struct {
 	Show      string
 	LibraryID int64
 	Q         string
+	Path      string   // jobs: only the job of this exact file path (user review 11-13 item E: a file's history)
 	Reasons   []string // skipped: only these reasons (none: every reason)
 	Kept      bool
 	// QueueOrder: waiting jobs in the order workers take them (Claim's: priority, then age), ready ones
@@ -93,6 +94,10 @@ const jobFrom = `FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id LEFT JOI
 // filters is the condition and arguments for f's library and name (both cards' kinds).
 func (f FileFilter) jobFilters() (string, []any) {
 	where, args := "", []any{}
+	if f.Path != "" {
+		where += " AND j.path=?"
+		args = append(args, f.Path)
+	}
 	if f.LibraryID > 0 {
 		where += " AND j.library_id=?"
 		args = append(args, f.LibraryID)

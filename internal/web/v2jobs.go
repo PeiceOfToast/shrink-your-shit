@@ -57,6 +57,7 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 			apiError(w, http.StatusBadRequest, "invalid", "sort is queue, or left out.")
 			return
 		}
+		f.Path = q.Get("path") // a file's jobs (user review 11-13 item E): per tab, the UI asks each one
 		if lib := q.Get("libraryId"); lib != "" {
 			id, err := strconv.ParseInt(lib, 10, 64)
 			if err != nil || id <= 0 {
@@ -185,9 +186,15 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 		if j.Status == jobs.Queued && j.RetryAt != "" {
 			d["state"] = "retry_wait"
 		}
-		d["reason"] = nil // a failure, a kept original or a retry: its code and words, from the change that set them
+		d["logState"], d["failure"] = logState(store, id), nil // user review 11-13 item E
+		d["reason"] = nil                                      // a failure, a kept original or a retry: its code and words, from the change that set them
 		if n := len(events); j.Error != "" && n > 0 {
 			d["reason"] = reasonOf(events[n-1])
+		}
+		if m, ok := d["reason"].(map[string]string); ok && j.Status == jobs.Failed { // design's code and sentence, as the list shows them
+			stored := m["code"]
+			m["code"], m["message"] = failureCode(store, id, stored), failureMessage(store, id, stored, j.Path, j.OutputPath, m["message"])
+			d["failure"] = failureView(store, id, stored, j.Path, j.OutputPath, m["message"])
 		}
 		meta := map[string]any{"before": nil, "after": nil}
 		var snap rules.Snapshot
@@ -311,9 +318,18 @@ func v2JobItem(store *jobs.Store, it map[string]any, row jobs.FileRow, card stri
 	case card == jobs.CardSkipped:
 		it["reason"] = map[string]string{"code": row.Reason, "message": it["detail"].(string)}
 	case row.ErrorCode != "" && (card == jobs.CardFailed || card == jobs.CardUnprocessed && row.RetryAt != ""):
-		it["reason"] = map[string]string{"code": row.ErrorCode, "message": row.Error}
+		msg := row.Error // a retry keeps its own words; a failure gets design's sentence (11-13 E)
+		if card == jobs.CardFailed {
+			msg = failureMessage(store, row.JobID, row.ErrorCode, row.Path, row.OutputPath, row.Error)
+		}
+		it["reason"] = map[string]string{"code": failureCode(store, row.JobID, row.ErrorCode), "message": msg}
 	default:
 		it["reason"] = nil
+	}
+	// user review 11-13 item E: why a failed job failed, and whether its log is in the database
+	it["failure"], it["logState"] = nil, logState(store, row.JobID)
+	if card == jobs.CardFailed {
+		it["failure"] = failureView(store, row.JobID, row.ErrorCode, row.Path, row.OutputPath, row.Error)
 	}
 	switch card {
 	case jobs.CardUnprocessed:

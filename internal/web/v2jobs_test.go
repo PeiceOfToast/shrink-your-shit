@@ -62,8 +62,8 @@ func TestV2Jobs(t *testing.T) {
 	}
 	// every item's reason is {code, message} | null, as every v2 reason (ui-shop 23:27Z)
 	want := map[string]any{
-		"failed.mkv":  map[string]any{"code": "convert_failed", "message": "Converting did not finish"},
-		"retry.mkv":   map[string]any{"code": "convert_failed", "message": "busy"},
+		"failed.mkv":  map[string]any{"code": "ffmpeg_error", "message": "ffmpeg stopped with an error."},
+		"retry.mkv":   map[string]any{"code": "ffmpeg_error", "message": "busy"},
 		"skipped.mkv": map[string]any{"code": rules.SkipAlreadyInFormat, "message": "It is already HEVC in MKV."},
 		"waiting.mkv": nil, "done.mkv": nil,
 	}
@@ -296,5 +296,127 @@ func TestV2JobsPinsOverLibraryPriority(t *testing.T) {
 	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs?tab=waiting&sort=queue"})
 	if !strings.Contains(body, `"pin":null`) {
 		t.Errorf("unpinned %s", body)
+	}
+}
+
+// User review 11-13 item E: the Done tab's count and its list agree (the preview showed counts.completed 4 with
+// items []): four completed jobs are four items under tab=completed.
+func TestCompletedTabListsWhatItCounts(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	for _, p := range []string{"/m/a.mkv", "/m/b.mkv", "/m/c.mkv", "/m/d.mkv"} {
+		done(t, st, l.ID, p, p, 1000, 400)
+	}
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs?tab=completed&limit=200"})
+	var r struct {
+		Items  []map[string]any
+		Total  int
+		Counts map[string]int
+	}
+	if err := json.Unmarshal([]byte(body), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Counts["completed"] != 4 || r.Total != 4 || len(r.Items) != 4 {
+		t.Errorf("completed: counts %v total %d items %d\n%s", r.Counts, r.Total, len(r.Items), body)
+	}
+}
+
+// User review 11-13 item E: a failed job's list item and detail carry its failure summary (step, exit code, the
+// last five error lines) and its log state; a job with no summary has failure null.
+func TestFailureSummaryInTheAPI(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	f1, _ := st.Enqueue(jobs.Job{Library: "/m", LibraryID: l.ID, Path: "/m/broken.mkv"})
+	st.Claim("t")
+	st.RecordRunStep(f1, jobs.RunStep{Index: 0, Name: "encode", Outcome: "failed", Command: "ffmpeg -i x"})
+	st.AppendLogLine(f1, 0, "stderr", "Invalid data found when processing input")
+	st.SetFailureSummary(f1, jobs.FailureSummary{Step: 0, StepCount: 1, AfterMs: 4000, MediaTime: "00:41:12", ExitCode: 1,
+		KeyLines: []string{"a", "b", "c", "d", "e", "f", "Invalid data found when processing input"}})
+	st.Fail(f1, "convert_failed", "Converting stopped with an error.")
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs?tab=failed&limit=200"})
+	var r struct{ Items []map[string]any }
+	json.Unmarshal([]byte(body), &r)
+	if len(r.Items) != 1 {
+		t.Fatalf("failed tab: %s", body)
+	}
+	f := r.Items[0]["failure"].(map[string]any)
+	if f["step"] != "encode" || f["exitCode"] != 1.0 || f["mediaTime"] != "00:41:12" || r.Items[0]["logState"] != "complete" ||
+		f["hint"] != "Play the file around that point to check it. Retry won't help with the same file." ||
+		r.Items[0]["reason"].(map[string]any)["message"] != "The source file is damaged at 00:41:12." {
+		t.Errorf("failure %v logState %v", f, r.Items[0]["logState"])
+	}
+	if lines := f["keyLines"].([]any); len(lines) != 5 || lines[4] != "Invalid data found when processing input" {
+		t.Errorf("key lines %v", lines)
+	}
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(f1, 10)})
+	var d map[string]any
+	json.Unmarshal([]byte(body), &d)
+	if d["failure"] == nil || d["logState"] != "complete" {
+		t.Errorf("detail: %s", body)
+	}
+}
+
+// User review 11-13 item E: the job's log endpoint gives its steps (command, timing, the failed step's output) and
+// the download gives every line as text.
+func TestJobLogEndpoint(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	id, _ := st.Enqueue(jobs.Job{Library: "/m", LibraryID: l.ID, Path: "/m/a.mkv"})
+	st.Claim("t")
+	st.AppendLogLine(id, 0, "app", "started")
+	st.RecordRunStep(id, jobs.RunStep{Index: 0, Name: "encode", StartedAt: "t0", TookMs: 1500, Outcome: "failed",
+		Command: "ffmpeg -i in.mkv out.mkv", Probe: `{"codec":"h264"}`, OutputLines: 1})
+	st.AppendLogLine(id, 0, "stderr", "Invalid data found when processing input")
+	st.SetFailureSummary(id, jobs.FailureSummary{Step: 0, StepCount: 1, ExitCode: 1, KeyLines: []string{"Invalid data found when processing input"}})
+	st.Fail(id, "convert_failed", "Converting stopped with an error.")
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10) + "/log"})
+	var r struct {
+		State string
+		Final string
+		Steps []map[string]any
+	}
+	if err := json.Unmarshal([]byte(body), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.State != "complete" || r.Final != "failed" || len(r.Steps) != 1 || r.Steps[0]["command"] != "ffmpeg -i in.mkv out.mkv" ||
+		r.Steps[0]["tookMs"] != 1500.0 || r.Steps[0]["probe"] == nil {
+		t.Errorf("log %s", body)
+	}
+	if out := r.Steps[0]["output"].([]any); len(out) != 1 || out[0] != "Invalid data found when processing input" {
+		t.Errorf("failed step output %v", out)
+	}
+	_, text, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10) + "/log/download"})
+	if !strings.Contains(text, "started") || !strings.Contains(text, "Invalid data found") {
+		t.Errorf("download: %s", text)
+	}
+}
+
+// User review 11-13 item E: ?path= lists one file's jobs on a tab (exact path, the job's own file).
+func TestJobsByPath(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	done(t, st, l.ID, "/m/a.mkv", "/m/a.mkv", 1000, 400)
+	done(t, st, l.ID, "/m/a.mkv.bak", "/m/a.mkv.bak", 1000, 400)
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs?tab=completed&path=/m/a.mkv"})
+	var r struct{ Items []map[string]any }
+	json.Unmarshal([]byte(body), &r)
+	if len(r.Items) != 1 || r.Items[0]["name"] != "a.mkv" {
+		t.Errorf("by path: %s", body)
+	}
+}
+
+// #214 P2: a job whose ffmpeg never ran says so (ffmpegRan false), with exitCode null and no key lines.
+func TestFailureNeverRanInTheAPI(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	id, _ := st.Enqueue(jobs.Job{Library: "/m", LibraryID: l.ID, Path: "/m/never.mkv"})
+	st.Claim("t")
+	st.SetFailureSummary(id, jobs.FailureSummary{Step: 0, StepCount: 1, ExitCode: -1, FfmpegRan: false})
+	st.Fail(id, "convert_failed", "Converting did not finish.")
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10)})
+	var d struct{ Failure map[string]any }
+	json.Unmarshal([]byte(body), &d)
+	if d.Failure["ffmpegRan"] != false || d.Failure["exitCode"] != nil || len(d.Failure["keyLines"].([]any)) != 0 {
+		t.Errorf("never ran: %v", d.Failure)
 	}
 }

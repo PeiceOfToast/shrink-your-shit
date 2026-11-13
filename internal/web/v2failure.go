@@ -1,0 +1,81 @@
+// Copyright (C) shrink-your-shit contributors. Licensed under AGPL-3.0-or-later.
+
+package web
+
+import (
+	"path/filepath"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+)
+
+// failureView is a failed job's summary as the API shows it (user review 11-13 item E): the step it stopped
+// at, after how long, the exit code and the last five error lines of ffmpeg; nil when the job has none.
+func failureView(store *jobs.Store, id int64, errorCode, path, outputPath, message string) map[string]any {
+	f, err := store.FailureOf(id)
+	if err != nil || f == nil {
+		return nil
+	}
+	_, hint := jobs.FailureWords(failureCode(store, id, errorCode), failureFacts(store, id, path, outputPath, message))
+	name := ""
+	if steps, err := store.RunSteps(id); err == nil && f.Step >= 0 && f.Step < len(steps) {
+		name = steps[f.Step].Name
+	}
+	keys := f.KeyLines
+	if len(keys) > 5 {
+		keys = keys[len(keys)-5:]
+	}
+	if keys == nil {
+		keys = []string{}
+	}
+	var media, hintOut, exit any
+	if f.MediaTime != "" {
+		media = f.MediaTime
+	}
+	if hint != "" {
+		hintOut = hint
+	}
+	if f.ExitCode >= 0 {
+		exit = f.ExitCode
+	}
+	// ffmpegRan is false when ffmpeg never started (the UI says "ffmpeg didn't run."); exitCode is null then, and when a signal ended it
+	return map[string]any{"step": name, "stepIndex": f.Step, "stepCount": f.StepCount, "afterMs": f.AfterMs,
+		"mediaTime": media, "hint": hintOut, "exitCode": exit, "ffmpegRan": f.FfmpegRan, "keyLines": keys}
+}
+
+// logState is whether job id has its log in the database: complete (it has lines) or none.
+func logState(store *jobs.Store, id int64) string {
+	if n, err := store.LogLineCount(id); err == nil && n > 0 {
+		return "complete"
+	}
+	return "none"
+}
+
+// failureCode is a failed job's code in design's V6b names, from its stored code and its ffmpeg key lines.
+func failureCode(store *jobs.Store, id int64, errorCode string) string {
+	var lines []string
+	if f, err := store.FailureOf(id); err == nil && f != nil {
+		lines = f.KeyLines
+	}
+	return jobs.FailureCode(errorCode, lines)
+}
+
+// failureFacts is what a failed job's sentence can name: its file, its output folder, and the summary's details.
+func failureFacts(store *jobs.Store, id int64, path, outputPath, message string) jobs.FailureFacts {
+	facts := jobs.FailureFacts{Path: path, ExitCode: -1, Stored: message}
+	if f, err := store.FailureOf(id); err == nil && f != nil {
+		facts.ExitCode, facts.MediaTime, facts.KeyLines = f.ExitCode, f.MediaTime, f.KeyLines
+	}
+	// the folder a write was refused in: the new file's, from ffmpeg's own line; else the output path's, when it is
+	// not the source (a replace writes next to the source: then no folder is named). Never the source's folder.
+	facts.Folder = jobs.DeniedFolder(facts.KeyLines)
+	if facts.Folder == "" && outputPath != "" && outputPath != path {
+		facts.Folder = filepath.Dir(outputPath)
+	}
+	return facts
+}
+
+// failureMessage is a failed job's sentence in design's words (the stored words for a code the table does not name).
+func failureMessage(store *jobs.Store, id int64, errorCode, path, outputPath, stored string) string {
+	msg, _ := jobs.FailureWords(failureCode(store, id, errorCode), failureFacts(store, id, path, outputPath, stored))
+	return msg
+}
