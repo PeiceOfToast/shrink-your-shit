@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSharesCreateAndList(t *testing.T) {
@@ -310,6 +311,8 @@ func TestSharesEmptyListIsArray(t *testing.T) {
 }
 
 // #217 fix 6: unknown host returns host_not_found, not mount_failed.
+// Uses the reserved .invalid TLD (RFC 6761) so the DNS lookup fails fast and
+// does not depend on the network or the local resolver's timeout.
 func TestSharesTestUnknownHostIsHostNotFound(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	os.MkdirAll(home, 0o755)
@@ -317,8 +320,10 @@ func TestSharesTestUnknownHostIsHostNotFound(t *testing.T) {
 	defer os.Unsetenv("HOME")
 	srv, _, _ := server(t, false)
 
+	start := time.Now()
 	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares/test",
-		body: `{"address":"\\\\192.0.2.1\\share"}`, ctype: "application/json"})
+		body: `{"address":"\\\\nas.invalid\\share"}`, ctype: "application/json"})
+	elapsed := time.Since(start)
 	if code != http.StatusOK {
 		t.Fatalf("test: %d %s", code, resp)
 	}
@@ -327,8 +332,13 @@ func TestSharesTestUnknownHostIsHostNotFound(t *testing.T) {
 		Code string `json:"code"`
 	}
 	json.Unmarshal([]byte(resp), &result)
-	// 192.0.2.1 is in the TEST-NET range (RFC 5737), which should get refused or unreachable
-	if !result.Ok && result.Code != "host_not_found" && result.Code != "host_unreachable" && result.Code != "timeout" {
+	if result.Ok {
+		t.Error("expected ok to be false")
+	}
+	if elapsed > 3*time.Second {
+		t.Errorf("test took %v, want under ~3s", elapsed)
+	}
+	if result.Code != "host_not_found" && result.Code != "host_unreachable" && result.Code != "timeout" {
 		t.Errorf("expected host_not_found/host_unreachable/timeout, got %q", result.Code)
 	}
 }
