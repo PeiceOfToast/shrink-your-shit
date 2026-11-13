@@ -279,7 +279,7 @@ func main() {
 		},
 	}
 	if store.Paused() {
-		log.Printf("converting is paused: turn workers on (Dashboard or Workers)")
+		log.Printf("converting is paused: turn the Workers switch on (Dashboard or Workers)")
 	}
 	workerDone := make(chan struct{})
 	if converts {
