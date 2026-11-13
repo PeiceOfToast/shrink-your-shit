@@ -4,7 +4,6 @@ import { useState } from "react";
 import { Icon } from "../Icon";
 import { failed, type Answer } from "../api";
 import { Empty, PageHead } from "../PageHead";
-import { Link } from "../router";
 import { SettingsTabs } from "../pages";
 import { useData } from "../useData";
 import { addShare, checkShare, deleteShare, getShares, patchShare, reconnectShare, testShare } from "../sharesApi";
