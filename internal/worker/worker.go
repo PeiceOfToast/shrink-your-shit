@@ -38,6 +38,10 @@ type Queue interface {
 	Fail(id int64, code, msg string) error
 	// Release puts a running job back in the queue (used on shutdown).
 	Release(id int64) error
+	// The job's log lines, steps and failure summary in the database (user review 11-13 item E).
+	AppendLogLine(id int64, step int, stream, text string) error
+	RecordRunStep(id int64, st jobs.RunStep) error
+	SetFailureSummary(id int64, f jobs.FailureSummary) error
 	// UserStopped turns a job the person stopped into a file skipped as user_stopped.
 	UserStopped(id int64) error
 	// StopRequested reports whether "Stop this file" was asked for a running job (checked before the swap).
@@ -399,6 +403,44 @@ func (w *Worker) jobf(id int64, format string, a ...any) {
 	if w.Logs != nil {
 		w.Logs.Append(id, w.now().UTC().Format("15:04:05")+" "+strings.TrimPrefix(strings.TrimPrefix(msg, ":"), " "))
 	}
+	if w.Queue != nil {
+		w.Queue.AppendLogLine(id, 0, "app", strings.TrimPrefix(strings.TrimPrefix(msg, ":"), " "))
+	}
+}
+
+// recordEncode keeps the encode step in the database: its command, how long it took, the ffmpeg lines it wrote
+// and, when it failed, the failure summary (the last error lines of ffmpeg, or the last lines if none report one).
+func (w *Worker) recordEncode(id int64, args []string, started time.Time, encErr string, terr error) {
+	if w.Queue == nil {
+		return
+	}
+	lines := strings.Split(strings.TrimSpace(encErr), "\n")
+	if encErr == "" {
+		lines = nil
+	}
+	for _, l := range lines {
+		w.Queue.AppendLogLine(id, 0, "stderr", l)
+	}
+	outcome := "ok"
+	if terr != nil {
+		outcome = "failed"
+	}
+	w.Queue.RecordRunStep(id, jobs.RunStep{Index: 0, Name: "encode", StartedAt: started.UTC().Format(time.RFC3339),
+		TookMs: w.now().Sub(started).Milliseconds(), Outcome: outcome, Command: "ffmpeg " + strings.Join(args, " "), OutputLines: len(lines)})
+	if terr == nil {
+		return
+	}
+	var keys []string
+	for _, l := range lines {
+		if strings.Contains(strings.ToLower(l), "error") || strings.Contains(strings.ToLower(l), "invalid") {
+			keys = append(keys, l)
+		}
+	}
+	if len(keys) == 0 && len(lines) > 0 {
+		keys = lines[max(0, len(lines)-5):]
+	}
+	w.Queue.SetFailureSummary(id, jobs.FailureSummary{Step: 0, StepCount: 1, AfterMs: w.now().Sub(started).Milliseconds(),
+		ExitCode: -1, KeyLines: keys})
 }
 
 // SkippedError: the file is not converted because its flow leaves it alone (S3's Dolby Vision skips);
@@ -766,6 +808,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	defer dropLive(job.ID)
 	var encErr string
 	var terr error
+	encStart := w.now()
 	if w.remote != nil { // V7b2: a worker on another computer converts and checks; its file comes up here
 		stopWatch := w.watchRemoteStall(job.ID, w.remote)
 		encErr, terr = w.remote.convert(ctx, w, job, snap, srcPath, tmp)
@@ -796,6 +839,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		})
 		stopWatch()
 	}
+	w.recordEncode(job.ID, args, encStart, encErr, terr)
 	if s := strings.TrimSpace(encErr); s != "" && w.Logs != nil {
 		w.Logs.Append(job.ID, "ffmpeg said:\n"+s) // errors only (the encode runs at -v error)
 	}

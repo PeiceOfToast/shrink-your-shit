@@ -193,7 +193,7 @@ func (s *scenario) handle(name string, args []string) (string, string, error) {
 			}
 			if s.encodeErr != nil {
 				os.WriteFile(last, []byte("partial"), 0o644)
-				return "out_time_us=50000000\n", "", s.encodeErr
+				return "out_time_us=50000000\n", s.encodeStderr, s.encodeErr // ffmpeg prints why on the error too
 			}
 			// the new file is the first output; extracted subtitles (sub.N.srt) come after it (slice 25b)
 			for _, a := range args {
