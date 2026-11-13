@@ -59,8 +59,12 @@ func v2JobLog(api *http.ServeMux, store *jobs.Store) {
 			}
 			out = append(out, m)
 		}
+		final := finalState(store, id)
+		if len(steps) == 0 && len(lines) > 0 {
+			out = append(out, importedStep(lines, final))
+		}
 		j, _ := store.Get(id)
-		writeJSON(w, map[string]any{"state": logState(store, id, j.Status, ""), "steps": out, "final": nilIfEmpty(finalState(store, id))})
+		writeJSON(w, map[string]any{"state": logState(store, id, j.Status, ""), "steps": out, "final": nilIfEmpty(final)})
 	})
 	api.HandleFunc("GET /api/v2/jobs/{id}/log/download", func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
@@ -90,4 +94,20 @@ func finalState(store *jobs.Store, id int64) string {
 		return ""
 	}
 	return string(j.Status)
+}
+
+// importedStep is the one step shown for a job whose log came from an old .log file (imported once when job logs
+// moved into the database): its lines belong to no step, so without this the drawer showed nothing (design's
+// preview check 11-13 05:12Z). Design V6b: "Older log, not split into steps"; no time, duration, command,
+// source or picture check; the last 200 lines as output, and outputLines for "Show all N".
+func importedStep(lines []jobs.LogLine, final string) map[string]any {
+	text := make([]string, 0, len(lines))
+	for _, l := range lines {
+		text = append(text, l.Text)
+	}
+	if len(text) > 200 {
+		text = text[len(text)-200:]
+	}
+	return map[string]any{"name": "imported", "startedAt": nil, "tookMs": nil, "outcome": nilIfEmpty(final),
+		"command": nil, "probe": nil, "check": nil, "outputLines": len(lines), "output": text, "result": nil}
 }
