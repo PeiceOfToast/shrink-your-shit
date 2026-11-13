@@ -7,7 +7,7 @@ let supportsShares: boolean | null = null;
 export async function sharesSupported(): Promise<boolean> {
   if (MOCK) return true;
   if (supportsShares !== null) return supportsShares;
-  const r = await call("GET", "/api/v2/shares?limit=1");
+  const r: Answer<object> = await call("GET", "/api/v2/shares?limit=1");
   supportsShares = !("error" in r);
   return supportsShares;
 }

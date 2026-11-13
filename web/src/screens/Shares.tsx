@@ -10,7 +10,7 @@ import { addShare, checkShare, deleteShare, getShares, patchShare, reconnectShar
 import type { Share, ShareTestResult, SharesResponse, ShareType } from "../types/shares";
 
 async function act<T>(p: Promise<Answer<T>>, say: (m: string) => void): Promise<T | null> {
-  try { const r = await p; if (failed(r)) return (say(r.error.message), null); return r; } catch { return null; }
+  try { const r = await p; if (failed(r)) return (say(r.error.message), null); return r; } catch (_) { return null; }
 }
 
 // The type label and its hint
