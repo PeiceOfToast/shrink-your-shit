@@ -420,6 +420,20 @@ CREATE TABLE IF NOT EXISTS job_log_lines (job_id INTEGER NOT NULL, seq INTEGER N
 CREATE TABLE IF NOT EXISTS job_failures (job_id INTEGER PRIMARY KEY, step INTEGER NOT NULL DEFAULT -1, step_count INTEGER NOT NULL DEFAULT 0,
   after_ms INTEGER NOT NULL DEFAULT 0, media_time TEXT NOT NULL DEFAULT '', hint TEXT NOT NULL DEFAULT '', exit_code INTEGER NOT NULL DEFAULT -1,
   ffmpeg_ran INTEGER NOT NULL DEFAULT 1, key_lines TEXT NOT NULL DEFAULT '[]');`},
+	// Item D (network shares): the record for each SMB/NFS share, and where each one is mounted.
+	{40, "network shares", `
+CREATE TABLE IF NOT EXISTS shares (
+  id INTEGER PRIMARY KEY,
+  type TEXT NOT NULL, address TEXT NOT NULL,
+  name TEXT NOT NULL, guest INTEGER NOT NULL DEFAULT 0, username TEXT,
+  encrypted_password BLOB, auth_nonce BLOB,
+  created TEXT NOT NULL, updated TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS share_mounts (
+  id INTEGER PRIMARY KEY,
+  share_id INTEGER NOT NULL REFERENCES shares(id),
+  mount_path TEXT NOT NULL, platform TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'waiting_setup', error TEXT,
+  mounted_at TEXT, since TEXT);`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone
