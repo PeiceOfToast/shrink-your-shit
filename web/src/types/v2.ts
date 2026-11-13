@@ -103,7 +103,8 @@ export interface Summary { // GET /summary
     freed: number;
     waitingToFree: number;
     freedLast7d: number;
-    perLibrary: { libraryId: ID; freed: number; waitingToFree: number }[];
+    grew?: number;
+    perLibrary: { libraryId: ID; freed: number; waitingToFree: number; grew?: number }[];
   };
   workers: { id: ID; name: string; status: WorkerStatus; slots: Worker["slots"]; currentJobIds: ID[] }[];
   activeJobs: Job[];
