@@ -91,6 +91,7 @@ const (
 type Worker struct {
 	// verified is the probe of the new file the last check passed (S5: stored for its final path).
 	verified media.Info
+	check    *checkResult // the picture check's score for the job in hand (nil: none ran); set by the comparison
 	// remote is the job a worker on another computer converts, run here (V7b2); nil for a local one.
 	remote *RemoteJob
 	// failures: the running job's path's choices for when it doesn't work (V6b; under mu)
@@ -405,7 +406,7 @@ func (w *Worker) jobf(id int64, format string, a ...any) {
 
 // recordEncode keeps the encode step in the database: its command, how long it took, the ffmpeg lines it wrote
 // and, when it failed, the failure summary (the last error lines of ffmpeg, or the last lines if none report one).
-func (w *Worker) recordEncode(id int64, args []string, started time.Time, encErr string, terr error) {
+func (w *Worker) recordEncode(id int64, args []string, started time.Time, encErr string, terr error, probe string) {
 	if w.Queue == nil {
 		return
 	}
@@ -421,7 +422,7 @@ func (w *Worker) recordEncode(id int64, args []string, started time.Time, encErr
 		outcome = "failed"
 	}
 	w.Queue.RecordRunStep(id, jobs.RunStep{Index: 0, Name: "encode", StartedAt: started.UTC().Format(time.RFC3339),
-		TookMs: w.now().Sub(started).Milliseconds(), Outcome: outcome, Command: "ffmpeg " + strings.Join(args, " "), OutputLines: len(lines)})
+		TookMs: w.now().Sub(started).Milliseconds(), Outcome: outcome, Command: "ffmpeg " + strings.Join(args, " "), Probe: probe, OutputLines: len(lines)})
 	if terr == nil {
 		return
 	}
@@ -835,7 +836,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		})
 		stopWatch()
 	}
-	w.recordEncode(job.ID, args, encStart, encErr, terr)
+	w.recordEncode(job.ID, args, encStart, encErr, terr, probeSummary(src))
 	if terr == nil {
 		w.Queue.AddStep(job.ID, "converted", true, "Converted: "+convertingTo(plan, src)+".")
 	}
@@ -867,7 +868,11 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if err := stage.intact(); err != nil {
 		return "", err
 	}
-	if err := w.verify(ctx, src, exp, srcPath, tmp, before.Size()); err != nil {
+	w.check = nil
+	checkStart := w.now()
+	verr := w.verify(ctx, src, exp, srcPath, tmp, before.Size())
+	w.recordCheck(job.ID, checkStart, verr)
+	if err := verr; err != nil {
 		var k *KeptError
 		if errors.As(err, &k) && plan.Video.PeakLimitKbps > 0 && strings.HasPrefix(k.Reason, pictureTooDifferent) {
 			// design (SCREENS V3 step 3): VBR's own words; the measured similarity goes to the run log
@@ -1468,4 +1473,25 @@ func ffmpegExit(err error) (ran bool, exit int) {
 		return true, ee.ExitCode()
 	}
 	return false, -1
+}
+
+// checkResult is the picture check's score for a job and the least it needed (the job's check step).
+type checkResult struct {
+	Score, Min float64
+	Passed     bool
+}
+
+// recordCheck keeps the job's check step: the picture score, when the check ran (w.check, set by the picture comparison).
+func (w *Worker) recordCheck(id int64, started time.Time, verr error) {
+	if w.Queue == nil || w.check == nil {
+		return
+	}
+	c := w.check
+	outcome := "ok"
+	if verr != nil {
+		outcome = "failed"
+	}
+	passed := c.Passed
+	w.Queue.RecordRunStep(id, jobs.RunStep{Index: 1, Name: "check", StartedAt: started.UTC().Format(time.RFC3339),
+		TookMs: w.now().Sub(started).Milliseconds(), Outcome: outcome, CheckScore: &c.Score, CheckMin: &c.Min, CheckPassed: &passed})
 }
