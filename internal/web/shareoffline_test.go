@@ -266,11 +266,13 @@ func TestDockerSetupTextWorksForEachShare(t *testing.T) {
 		want []string
 	}{
 		{"smb with password", jobs.Share{Name: "Movies NAS", Type: "smb", Address: `\\nas\movies`, Username: "bob"}, "hunter2-secret",
-			[]string{`device: "//nas/movies"`, `o: "credentials=/path/to/movies-nas.cred,vers=3.1.1,soft"`, "username=... and password=..."}},
+			[]string{`device: "//nas/movies"`,
+				`o: "addr=nas,username=bob,password=${SYP_MOVIES_NAS_PASSWORD},vers=3.1.1,soft,uid=1000,gid=1000,file_mode=0660,dir_mode=0770"`,
+				"SYP_MOVIES_NAS_PASSWORD=<the share password> in the .env file", "  shrink-your-shit:"}},
 		{"smb guest", jobs.Share{Name: "Movies NAS", Type: "smb", Address: `\\nas\movies`, Guest: true}, "",
-			[]string{`device: "//nas/movies"`, `o: "guest,vers=3.1.1,soft"`}},
+			[]string{`device: "//nas/movies"`, `o: "addr=nas,guest,vers=3.1.1,soft,uid=1000,gid=1000,file_mode=0660,dir_mode=0770"`, "  shrink-your-shit:"}},
 		{"nfs", jobs.Share{Name: "Movies NAS", Type: "nfs", Address: "nas:/export"}, "",
-			[]string{`type: nfs`, `device: ":/export"`, `o: "addr=nas,soft,nfsvers=4"`}},
+			[]string{`type: nfs`, `device: ":/export"`, `o: "addr=nas,soft,nfsvers=4"`, "  shrink-your-shit:"}},
 	}
 	for _, c := range cases {
 		sh, err := st.SaveShare(c.sh, c.pw)

@@ -593,6 +593,18 @@ func shareToJSON(store *jobs.Store, sh jobs.Share) map[string]any {
 	}
 }
 
+// passwordEnv is the .env variable that holds a share's password for its compose volume: SYP_<VOL>_PASSWORD,
+// with every character outside A-Z 0-9 in the volume name turned into _.
+func passwordEnv(vol string) string {
+	name := strings.Map(func(r rune) rune {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			return r
+		}
+		return '_'
+	}, strings.ToUpper(vol))
+	return "SYP_" + name + "_PASSWORD"
+}
+
 func sanitiseName(name string, id int64) string {
 	r := strings.ToLower(name)
 	r = strings.ReplaceAll(r, " ", "-")
@@ -659,27 +671,32 @@ func setupForMode(store *jobs.Store, sh jobs.Share) any {
 		}
 	case "docker":
 		vol := sanitiseName(sh.Name, sh.ID)
-		var driver string
+		var driver, note string
 		if sh.Type == "nfs" {
 			server, export, ok := strings.Cut(sh.Address, ":")
 			if !ok {
 				export = "/"
 			}
 			driver = fmt.Sprintf("      type: nfs\n      device: %q\n      o: %q", ":"+export, "addr="+server+",soft,nfsvers=4")
-		} else if sh.Guest {
-			driver = fmt.Sprintf("      type: cifs\n      device: %q\n      o: \"guest,vers=3.1.1,soft\"", mntAddr)
 		} else {
-			driver = fmt.Sprintf("      type: cifs\n      device: %q\n      o: %q", mntAddr,
-				"credentials=/path/to/"+vol+".cred,vers=3.1.1,soft")
-		}
-		note := ""
-		if sh.Type == "smb" && !sh.Guest {
-			note = "# You create /path/to/" + vol + ".cred yourself, mode 600, with two lines: username=... and password=...\n"
+			// Docker's local driver mounts with mount(2): it needs addr=, and it reads no credentials file.
+			// uid/gid 1000 match the image's USER, so the app can write to the mount.
+			host := addressHost("smb", sh.Address)
+			owner := "uid=1000,gid=1000,file_mode=0660,dir_mode=0770"
+			if sh.Guest {
+				driver = fmt.Sprintf("      type: cifs\n      device: %q\n      o: %q", mntAddr,
+					"addr="+host+",guest,vers=3.1.1,soft,"+owner)
+			} else {
+				envName := passwordEnv(vol)
+				driver = fmt.Sprintf("      type: cifs\n      device: %q\n      o: %q", mntAddr,
+					"addr="+host+",username="+sh.Username+",password=${"+envName+"},vers=3.1.1,soft,"+owner)
+				note = "# Put " + envName + "=<the share password> in the .env file beside your compose file (chmod 600 .env).\n"
+			}
 		}
 		return map[string]any{
 			"kind": "compose",
 			"text": note + "volumes:\n  " + vol + ":\n    driver_opts:\n" + driver +
-				"\n\nservices:\n  syp:  # the app's service: use its name in your compose file\n    volumes:\n      - " +
+				"\n\nservices:\n  shrink-your-shit:  # the app's service in your compose file\n    volumes:\n      - " +
 				fmt.Sprintf("%q", vol+":"+mpt),
 			"removeText": fmt.Sprintf("Remove the %q volume from your compose file and restart.", vol),
 		}
