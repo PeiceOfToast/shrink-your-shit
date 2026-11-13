@@ -571,6 +571,9 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	case "vbr": // the quality at CRF 23, the bitrate never above the person's max; no level
 		p.Video.CRF = 23 + vf.CRFOffset
 		p.Video.MaxRateKbps, p.Video.PeakLimitKbps = s.VBRMaxKbps, s.VBRMaxKbps
+		if src > 0 && src < s.VBRMaxKbps { // a file never gets more than its source has (review 11-13 item A, #211)
+			p.Video.MaxRateKbps = src
+		}
 	case "quality_legacy": // CRF, with the old level as a cap
 		p.Video.MaxRateKbps = legacyCapKbps(s.MaxBitrate, target, w, h, src)
 	case "vbr_legacy":

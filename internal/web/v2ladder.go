@@ -33,6 +33,7 @@ func v2Ladder(api *http.ServeMux) {
 		// the slider's settings, each position as the Convert step explains it (user review 11-13 item A)
 		slider := []map[string]any{}
 		for _, p := range rules.Slider {
+			// capKbps null means no cap: no slider position has one
 			slider = append(slider, map[string]any{"position": p.Position, "name": p.Name, "format": "hevc", "crf": p.CRF,
 				"keepsResolution": true, "capKbps": nil, "saveLowPct": p.SaveLowPct, "saveHighPct": p.SaveHighPct, "ssimMin": p.MinSSIM})
 		}

@@ -40,6 +40,11 @@ func TestBitrateLevelAndVBR(t *testing.T) {
 		strings.Contains(vargs, "-b:v") || !strings.Contains(vargs, "-maxrate:v:0 3000k") {
 		t.Errorf("VBR with a 3 Mbps max: %+v\n%s", pv.Video, vargs)
 	}
+	// a 1500 kbps source under a 3000 max: the peak is the source's, never more than it has (review #211)
+	if low := v.Template().Compile(h264(1920, 1080, 1500)); low.Video.MaxRateKbps != 1500 || low.Video.PeakLimitKbps != 3000 ||
+		!strings.Contains(strings.Join(low.FFmpegArgs("in.mkv", "out.mkv"), " "), "-maxrate:v:0 1500k") {
+		t.Errorf("VBR on a 1500 kbps source: %+v", low.Video)
+	}
 	if pv.Video.CRF != 23 {
 		t.Errorf("VBR's quality is CRF 23, got %d", pv.Video.CRF)
 	}
