@@ -165,9 +165,9 @@ function ShareSheet({ share, resp, onDone, onCancel, said }: { share?: Share; re
               ? <div className="note ok" role="status" aria-live="polite"><Icon id="i-check-c" /><span>{testResult.portOnly ? "The server answers on the NFS port. The folder itself is checked when the share connects." : "Connected. Folders at the top: " + testResult.folders!.slice(0, 3).join(", ") + (testResult.moreFolders ? ", and " + testResult.moreFolders + " more." : ".")}</span></div>
               : <div className="note bad" role="status" aria-live="polite"><Icon id="i-alert" /><span>{testResult.message + (testResult.shares?.length ? " The server offers: " + testResult.shares.join(", ") : "")}</span></div>)}
             {error && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{error}</span></p>}
-            <div className="row" style={{ gap: 8, marginTop: 8 }}>{!ss && <button className="btn primary" type="button" disabled={saving} onClick={save}>{saving ? "Saving..." : edit ? "Save" : "Save and connect"}</button>}
-              <button className="btn ghost" type="button" onClick={() => { if (ss) { said("Added."); onDone(); } else onCancel(); }}>{ss ? "Close" : "Cancel"}</button></div>
           </>}
+          <div className="row" style={{ gap: 8, marginTop: 8 }}>{!ss && <button className="btn primary" type="button" disabled={saving} onClick={save}>{saving ? "Saving..." : edit ? "Save" : "Save and connect"}</button>}
+            <button className="btn ghost" type="button" onClick={() => { if (ss) { said("Added."); onDone(); } else onCancel(); }}>{ss ? "Close" : "Cancel"}</button></div>
         </div>
       </aside>
     </div>
