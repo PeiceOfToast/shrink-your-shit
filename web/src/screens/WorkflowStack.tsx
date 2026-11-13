@@ -118,6 +118,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
     const x: Record<string, unknown> = {}, rc = String(c.rateControl ?? "quality"), custom = c.kind === "selectors";
     if (n.type === "video.convert") {
       if (rc.endsWith("_legacy") && k !== "rateControl") x.rateControl = k === "quality" ? "quality" : "level";
+      if (k !== "quality" && k !== "kind" && c.kind !== "selectors") x.kind = "selectors"; // a custom edit turns the slider off
       if (k === "format" && v === "av1" && custom && rc !== "quality") { x.rateControl = "quality"; setSaid("Switched to Quality only: AV1 can't use a bitrate. Your bitrate settings are kept if you switch back."); }
       else setSaid("");
     }
@@ -141,7 +142,8 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
     const legacy = rc.endsWith("_legacy"), vbr = rc === "vbr", q = rc === "quality";
     const sl = lad?.slider.find((x) => x.position === Number(c.quality ?? 3) && x.format === String(c.format ?? "hevc"));
     // Opening More options is the switch to custom: kind and rateControl in one update (AV1 gets Quality only)
-    const custom = () => set("kind", "selectors", { rateControl: av1 ? "quality" : "level" });
+    // an old flow keeps its meaning until its first edit (design: 'Changing its bitrate settings switches it')
+    const custom = () => !legacy && set("kind", "selectors", { rateControl: av1 ? "quality" : "level" });
     return (
       <div className="stack">
         {legacy && <div className="note"><Icon id="i-info" /><div>This step was set up before 13 Nov and still makes the same files as before. Changing its bitrate settings switches it to the new rules.</div></div>}
