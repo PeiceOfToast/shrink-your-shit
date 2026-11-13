@@ -143,7 +143,7 @@ export function Libraries() {
 // folder for new files are V5b's PATCH /api/v2/libraries/{id}.
 // "See its jobs" (V6b): Jobs filtered to this library, on Failed when it has failed jobs, else Completed (the counts follow libraryId)
 function SeeJobs({ id }: { id: string }) {
-  const c = useData(() => listJobs("failed", "", id), [id]);
+  const c = useData(() => listJobs("failed", "", id, 1), [id]); // only the counts are wanted
   const tab = c.data && !failed(c.data) && c.data.counts.failed > 0 ? "failed" : "completed";
   return <Link className="btn" to={"/jobs?tab=" + tab + "&libraryId=" + encodeURIComponent(id)}><Icon id="i-jobs" />See its jobs</Link>;
 }
