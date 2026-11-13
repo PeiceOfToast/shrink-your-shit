@@ -115,12 +115,15 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
   // edit (the slider's quality, or level in custom settings); AV1 takes Quality only, with a line saying so once
   const [said, setSaid] = useState("");
   const put = (k: string, v: unknown) => {
-    const x: Record<string, unknown> = {}, rc = String(c.rateControl ?? "quality"), custom = c.kind === "selectors";
+    const x: Record<string, unknown> = {}, rc = String(c.rateControl ?? "quality");
     if (n.type === "video.convert") {
-      if (rc.endsWith("_legacy") && k !== "rateControl") x.rateControl = k === "quality" ? "quality" : "level";
+      // decide from the format this edit leaves (not the saved one): AV1 takes Quality only (engine #211 refuses the rest)
+      const fmt = k === "format" ? String(v) : String(c.format ?? "hevc");
+      if (rc.endsWith("_legacy") && k !== "rateControl") x.rateControl = fmt === "av1" || k === "quality" ? "quality" : "level";
       if (k !== "quality" && k !== "kind" && c.kind !== "selectors") x.kind = "selectors"; // a custom edit turns the slider off
-      if (k === "format" && v === "av1" && custom && rc !== "quality") { x.rateControl = "quality"; setSaid("Switched to Quality only: AV1 can't use a bitrate. Your bitrate settings are kept if you switch back."); }
-      else setSaid("");
+      const next = String(x.rateControl ?? rc);
+      if (fmt === "av1" && next !== "quality") { x.rateControl = "quality"; setSaid(k === "format" ? "Switched to Quality only: AV1 can't use a bitrate. Your bitrate settings are kept if you switch back." : ""); }
+      else if (k === "format") setSaid("");
     }
     set(k, v, x);
   };
