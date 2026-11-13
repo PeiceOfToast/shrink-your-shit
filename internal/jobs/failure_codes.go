@@ -5,6 +5,7 @@ package jobs
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -60,6 +61,7 @@ type FailureFacts struct {
 	MediaTime    string
 	Stored       string // the stored plain words, used for a code the table does not name
 	KeyLines     []string
+	Needed, Free uint64 // space needed/free for no_space (0 = unknown)
 }
 
 var encoderName = regexp.MustCompile(`unknown encoder '([^']+)'`)
@@ -86,6 +88,10 @@ func FailureWords(code string, f FailureFacts) (message, hint string) {
 		where := "the output folder"
 		if f.Folder != "" {
 			where = f.Folder
+		}
+		if f.Needed > 0 && f.Free > 0 {
+			return "Not enough space in " + where + ": it needs about " + gb(f.Needed) + " and " + gb(f.Free) + " is free.",
+				"Free some space there, then Retry."
 		}
 		return "Not enough space in " + where + " to finish converting.", "Free some space there, then Retry."
 	case "source_damaged":
@@ -237,4 +243,9 @@ func anys(ss []string) []any {
 		out[i] = s
 	}
 	return out
+}
+
+// gb shows a byte count in GB, to one decimal, for the no_space figures.
+func gb(n uint64) string {
+	return strconv.FormatFloat(float64(n)/(1<<30), 'f', 1, 64) + " GB"
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -253,6 +254,8 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 			Kept    string            // its checks said no (the words)
 			Message string            // it failed: why
 			Stderr  string
+			Steps   []jobs.RunStep
+			Failure *jobs.FailureSummary
 		}
 		if !readJSON(w, r, &in) {
 			return
@@ -285,6 +288,20 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 				}
 			}
 		}
+		// store the remote worker's steps and failure summary directly, so the log looks complete even
+		// before the server-side recordEncode runs (E part 3: the remote brings back its data)
+		for _, st := range in.Steps {
+			if err := store.RecordRunStep(j.ID, st); err != nil {
+				log.Printf("remote step store: %v", err)
+			}
+		}
+		if in.Failure != nil {
+			if err := store.SetFailureSummary(j.ID, *in.Failure); err != nil {
+				log.Printf("remote failure store: %v", err)
+			}
+		}
+		res.Steps = in.Steps
+		res.Failure = in.Failure
 		if !rj.Deliver(res) {
 			apiError(w, http.StatusConflict, "lease_gone", "This job already has an answer, or was given back to the queue.")
 			return

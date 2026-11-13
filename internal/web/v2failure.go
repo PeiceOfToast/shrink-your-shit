@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
 
 // failureView is a failed job's summary as the API shows it (user review 11-13 item E): the step it stopped
@@ -82,6 +83,13 @@ func failureFacts(store *jobs.Store, id int64, path, outputPath, message string)
 	facts.Folder = jobs.DeniedFolder(facts.KeyLines)
 	if facts.Folder == "" && outputPath != "" && outputPath != path {
 		facts.Folder = filepath.Dir(outputPath)
+	}
+	// no_space: the needed and free space for the sentence figures
+	if facts.Folder != "" {
+		if j, err := store.Get(id); err == nil && j.SizeBefore > 0 {
+			facts.Needed = worker.SpaceNeeded(j.SizeBefore)
+			facts.Free, _ = worker.DiskFree(facts.Folder)
+		}
 	}
 	return facts
 }
