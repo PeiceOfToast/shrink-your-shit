@@ -178,10 +178,25 @@ jobs:
   docker:
     name: docker image
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - run: docker build -t shrink-your-shit .
+      - name: Intel Quick Sync and VA-API are built into ffmpeg
+        run: |
+          hw=$(docker run --rm --entrypoint ffmpeg shrink-your-shit -hide_banner -hwaccels)
+          echo "$hw" | grep -qw qsv || { echo "$hw"; echo "qsv is not in -hwaccels"; exit 1; }
+          echo "$hw" | grep -qw vaapi || { echo "$hw"; echo "vaapi is not in -hwaccels"; exit 1; }
+          enc=$(docker run --rm --entrypoint ffmpeg shrink-your-shit -hide_banner -encoders)
+          echo "$enc" | grep -qw hevc_qsv || { echo "$enc" | grep hevc; echo "hevc_qsv is not an encoder"; exit 1; }
+          echo "$enc" | grep -qw hevc_vaapi || { echo "$enc" | grep hevc; echo "hevc_vaapi is not an encoder"; exit 1; }
+      - name: Intel GPU runtime files are in the x86_64 image
+        run: |
+          docker run --rm --entrypoint sh shrink-your-shit -c 'ls /usr/lib/x86_64-linux-gnu/libmfx-gen.so.1.2 /usr/lib/x86_64-linux-gnu/libvpl.so.2 /usr/lib/x86_64-linux-gnu/dri/iHD_drv_video.so'
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: arm64 image builds (no push)
+        run: docker buildx build --platform linux/arm64 .
       - name: smoke test (web page answers inside the container)
         run: |
           docker run -d --name syp -p 8484:8484 -v "$RUNNER_TEMP":/media shrink-your-shit
@@ -202,6 +217,11 @@ jobs:
           tok=$(docker exec syp shrink-your-shit token | sed -n 's/^Access token: //p')
           test -n "$tok"
           curl -fsS -H "Authorization: Bearer $tok" http://127.0.0.1:8484/api/status
+          # no /dev/dri here: after a real encoder test, Quick Sync and VA-API are failed with the device reason
+          w=$(curl -fsS -X POST -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8484/api/v2/workers/local/capabilities/test)
+          for e in hevc_qsv hevc_vaapi; do
+            echo "$w" | jq -e --arg k "encoder:$e" '.capabilities[] | select(.key == $k) | select(.test == "failed" and (.detail | contains("/dev/dri is missing")))' >/dev/null || { echo "$w" | jq '.capabilities'; echo "$e: want failed with the /dev/dri reason"; exit 1; }
+          done
 
   windows-installer:
     name: windows installer (build + install/convert/uninstall test)

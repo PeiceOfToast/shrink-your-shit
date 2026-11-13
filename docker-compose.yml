@@ -15,6 +15,12 @@ services:
     # environment:
     #   SYP_LIBRARIES: /media:/media2   # several folders, separated by ":"
     # command: ["-min-bitrate", "3000", "-crf", "24"]   # extra settings, same flags as the program
+    # Intel GPU (Quick Sync). Uncomment both, then set the group id of "render" on the host:
+    #   getent group render | cut -d: -f3
+    # devices:
+    #   - /dev/dri:/dev/dri
+    # group_add:
+    #   - "<render group id>"
     restart: unless-stopped
 
 volumes:

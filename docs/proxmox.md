@@ -105,6 +105,14 @@ tried this. Route B is simpler for a Proxmox LXC.
    `systemctl edit shrink-your-shit` (a drop-in); the installer rewrites the unit file each run.
    Logs: `journalctl -u shrink-your-shit -f`. The database is in `/var/lib/shrink-your-shit`.
 
+## Intel Quick Sync in Docker
+
+The image (x86_64) already has the Intel drivers. Quick Sync needs Intel Tiger Lake or newer; older Intel
+chips use VA-API, with the same compose block. To use the GPU: uncomment the "Intel GPU" block in
+`docker-compose.yml` and set `group_add` to the host's render group id (`getent group render | cut -d: -f3`).
+On a Proxmox LXC, pass `/dev/dri` into the container first (e.g. `dev0: /dev/dri/renderD128` in
+`/etc/pve/lxc/<id>.conf`, then restart it). Run `docker compose up -d`, then check the Workers page shows Intel.
+
 ## Mounting your media into the container
 
 On the Proxmox host, add a bind mount (container id `101`, host folder `/tank/videos-copy`):
@@ -130,7 +138,8 @@ container avoids the shift but is less isolated.
 
 ## What has and hasn't been checked
 
-Checked: the Docker image builds; in it the program runs as uid 1000, ffmpeg 6.1 (with
+Checked on the earlier Alpine image, before the switch to Debian 13 (the Debian image is not
+yet built or run here): the Docker image builds; in it the program runs as uid 1000, ffmpeg (with
 libx265) and ffprobe are present, the web page answers and the healthcheck goes healthy,
 and real files (an mkv with subtitles and an mp4) were converted to HEVC from a mounted
 folder, with the database in a named volume. `docker stop` ends it cleanly in under a
