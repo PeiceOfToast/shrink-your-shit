@@ -299,15 +299,17 @@ func detectMode() (mode, platform string) {
 	if m := os.Getenv("SYP_HELPER_MODE"); m != "" {
 		return m, runtime.GOOS
 	}
-	if os.Getenv("container") != "" {
-		return "docker", runtime.GOOS
-	}
-	if runtime.GOOS == "linux" && os.Geteuid() != 0 {
-		if _, err := os.Stat("/run/shrink-your-shit/helper.sock"); err != nil {
-			return "manual", runtime.GOOS
+	// app mode on Linux when the helper socket answers
+	if runtime.GOOS == "linux" {
+		if _, err := os.Stat("/run/shrink-your-shit/helper.sock"); err == nil {
+			return "app", runtime.GOOS
+		}
+		// socket may not be reachable in tests, check env
+		if os.Getenv("SYP_HELPER_SOCKET") != "" {
+			return "app", runtime.GOOS
 		}
 	}
-	return "app", runtime.GOOS
+	return "manual", runtime.GOOS
 }
 
 func testShare(typ, address, username, password string, guest bool) map[string]any {
@@ -453,7 +455,16 @@ func sanitiseName(name string) string {
 			out = append(out, c)
 		}
 	}
-	return string(out)
+	result := string(out)
+	if result == "" || result[0] == '-' || result[0] == '_' {
+		return "share"
+	}
+	return result
+}
+
+// shellQuote wraps a value in single quotes, escaping any internal single quotes.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 // nameTaken checks whether another share with the same name exists (case-insensitive).
@@ -475,11 +486,15 @@ func setupForMode(store *jobs.Store, sh jobs.Share) any {
 	mode, _ := detectMode()
 	switch mode {
 	case "manual":
+		opts := ""
+		if sh.Username != "" {
+			opts = " -o username=" + shellQuote(sh.Username)
+		}
 		return map[string]any{
 			"kind": "command",
-			"text": fmt.Sprintf("sudo mount -t %s -o username=%s,vers=3.1.1,soft,noexec %s /var/lib/syp/shares/%s",
-				sh.Type, sh.Username, sh.Address, sanitiseName(sh.Name)),
-			"removeText": fmt.Sprintf("sudo umount /var/lib/syp/shares/%s", sanitiseName(sh.Name)),
+			"text": "sudo mount -t " + shellQuote(sh.Type) + opts + ",vers=3.1.1,soft,noexec " +
+				shellQuote(sh.Address) + " " + shellQuote("/var/lib/syp/shares/"+sanitiseName(sh.Name)),
+			"removeText": "sudo umount " + shellQuote("/var/lib/syp/shares/"+sanitiseName(sh.Name)),
 		}
 	case "docker":
 		return map[string]any{
