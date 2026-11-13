@@ -14,7 +14,7 @@ export interface RealSummary {
   last24h: { completed: number; failed: number; skipped: number; successRate: number | null };
   // V5c (#137): freed; waitingToFree = originals in .syp-trash, gone by their date; couldFree = originals left in place
   // (nothing removes them). Three separate figures, never added together (design 01:55Z).
-  bytes: { freed: number; waitingToFree: number; couldFree?: number; freedLast7d: number | null; perLibrary: { libraryId: string; freed: number; waitingToFree: number; couldFree?: number }[] | null };
+  bytes: { freed: number; waitingToFree: number; couldFree?: number; grew?: number; freedLast7d: number | null; perLibrary: { libraryId: string; freed: number; waitingToFree: number; couldFree?: number; grew?: number }[] | null };
   workers: Worker[] | null;
   activeJobs: JobItem[]; recentFailures: JobItem[];
   throughput: { hourStart: string; completed: number; savedBytes: number }[];
