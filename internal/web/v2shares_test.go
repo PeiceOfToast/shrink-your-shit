@@ -920,3 +920,50 @@ func TestSharesAppModeRenameUnmountsOldMountPoint(t *testing.T) {
 		t.Errorf("helper calls %q: want an unmount of old, then a mount of new", got)
 	}
 }
+
+func TestSharesAppModeBusyOldMountIsNotReportedConnected(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	os.MkdirAll(home, 0o755)
+	t.Setenv("HOME", home)
+
+	sock := filepath.Join(dir, "helper.sock")
+	saved := helper.HelperSocket
+	helper.HelperSocket = sock
+	defer func() { helper.HelperSocket = saved }()
+	cmds := fakeHelper(t, sock, func(c map[string]any) map[string]any {
+		if c["cmd"] == "unmount" {
+			return map[string]any{"ok": false, "error": map[string]any{"code": "failed", "message": "target is busy"}}
+		}
+		return map[string]any{"ok": true, "pid": 42}
+	})
+
+	srv, _, _ := server(t, false)
+	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares",
+		body:  `{"address":"\\\\nas\\share","name":"Old","username":"u","password":"p"}`,
+		ctype: "application/json"})
+	if code != http.StatusCreated {
+		t.Fatalf("POST: %d %s", code, resp)
+	}
+	var created map[string]any
+	json.Unmarshal([]byte(resp), &created)
+	id := fmt.Sprintf("%v", created["id"])
+
+	code, resp, _ = do(t, nil, srv, call{method: "PATCH", path: "/api/v2/shares/" + id,
+		body: `{"address":"\\\\other\\share"}`, ctype: "application/json"})
+	if code != http.StatusOK {
+		t.Fatalf("PATCH: %d %s", code, resp)
+	}
+	mounts := 0
+	for _, c := range cmds() {
+		if c["cmd"] == "mount" {
+			mounts++
+		}
+	}
+	if mounts != 1 {
+		t.Errorf("mounts = %d, want 1 (no new mount while the old one is busy)", mounts)
+	}
+	if strings.Contains(resp, `"connected"`) || !strings.Contains(resp, "mount_failed") {
+		t.Errorf("PATCH answer should say not connected with mount_failed: %s", resp)
+	}
+}

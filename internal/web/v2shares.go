@@ -150,9 +150,12 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 			return
 		}
 		if mode, _ := detectMode(); mode == "app" && changed {
-			_ = helper.Unmount(oldMpt) // a rename moves the mount point; the old one must not stay mounted
-			sh, err := store.ShareByID(id)
-			if err == nil && sh != nil {
+			// The old mount must go first: the helper treats an already-mounted
+			// point as done, so a busy old mount would stay on the old server.
+			if uErr := helper.Unmount(oldMpt); uErr != nil {
+				store.SetShareMountStatus(id, "linux", "not_connected",
+					`{"code":"mount_failed","message":`+jsonStr("The old connection is still in use, so the change isn't connected yet. Stop what is using the share, then Reconnect. "+uErr.Error())+`}`)
+			} else if sh, err := store.ShareByID(id); err == nil && sh != nil {
 				stale := pw
 				if stale == "" {
 					stale, _ = store.DecryptSharePassword(id)
