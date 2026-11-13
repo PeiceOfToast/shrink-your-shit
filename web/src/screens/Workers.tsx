@@ -35,14 +35,42 @@ const ago = (t: string | null) => {
 };
 const FORMAT = (k: string) => (/265|hevc/i.test(k) ? "HEVC" : /264/i.test(k) ? "H.264" : /av1/i.test(k) ? "AV1" : /vp9/i.test(k) ? "VP9" : "");
 const how = (c: Capability) => (c.slot === "cpu" ? "Processor" : c.label.split(",")[0]);
-// "HEVC, H.264, AV1 and VP9 on the processor · NVENC found, not used for converting yet"
-function encoders(w: Worker): string {
-  const ok = w.capabilities.filter((c) => c.kind === "encoder" && c.test === "passed");
-  const cpu = [...new Set(ok.filter((c) => c.slot === "cpu").map((c) => FORMAT(c.key)).filter(Boolean))];
-  const gpu = [...new Set(ok.filter((c) => c.slot === "gpu").map(how))];
-  if (!w.capabilities.length) return "Not tested yet";
-  if (!cpu.length && !gpu.length) return "No encoder works yet";
-  return [cpu.length && (cpu.length > 1 ? cpu.slice(0, -1).join(", ") + " and " + cpu.at(-1) : cpu[0]) + " on the processor", gpu.length && gpu.join(", ") + " found, not used for converting yet"].filter(Boolean).join(" · ");
+// Encoder cards (SCREENS V7, 11-13): one per encoder type; these five always, the extras only when found. Lit when a
+// test of that type passed (with its formats); dim with the reason otherwise. Converting is processor-only, so a lit
+// graphics card says so.
+const TYPES: [string, Capability["slot"], (c: Capability) => boolean][] = [
+  ["Processor", "cpu", (c) => c.slot === "cpu"],
+  ["NVIDIA", "gpu", (c) => c.key.endsWith("_nvenc")],
+  ["Intel Quick Sync", "gpu", (c) => c.key.endsWith("_qsv")],
+  ["AMD", "gpu", (c) => c.key.endsWith("_amf")],
+  ["Apple", "gpu", (c) => c.key.endsWith("_videotoolbox")],
+  ["Graphics card (VAAPI)", "gpu", (c) => c.key.endsWith("_vaapi")],
+  ["Windows encoder", "gpu", (c) => c.key.endsWith("_mf")],
+  ["Other encoder", "gpu", (c) => c.key.endsWith("_v4l2m2m")],
+];
+type Card = { name: string; gpu: boolean; found: boolean; lit: boolean; formats: string; why: string; detail?: string; at: string | null };
+function cards(w: Worker): Card[] {
+  const encs = w.capabilities.filter((c) => c.kind === "encoder"), untested = !w.capabilities.length;
+  return TYPES.map(([name, slot, pick]): Card => {
+    const cs = encs.filter(pick), ok = cs.filter((c) => c.test === "passed"), bad = cs.find((c) => c.test === "failed");
+    return {
+      name, gpu: slot === "gpu", found: cs.length > 0, lit: ok.length > 0, detail: bad?.detail,
+      formats: ["H.264", "HEVC", "AV1", "VP9"].filter((f) => ok.some((c) => FORMAT(c.key) === f)).join(" · "),
+      why: untested ? "Not tested yet" : ok.length ? "" : bad ? "Found, but its test failed" : "Not on this computer",
+      at: cs.map((c) => c.testedAt).filter(Boolean).sort().at(-1) ?? null,
+    };
+  }).filter((c, i) => i < 5 || c.found);
+}
+// the directory's row (small) and the Capabilities tab (big, with the time each was tested and a failure's detail)
+function EncoderCards({ w, big }: { w: Worker; big?: boolean }) {
+  return <ul className={"ec-grid" + (big ? " big" : "")} aria-label={"Encoders on " + w.name}>{cards(w).map((c) => (
+    <li key={c.name} className={"ec" + (c.lit ? " lit" : "") + (big ? " ec-lg" : "")}>
+      <span className="ec-t">{c.lit && <Icon id="i-check" />}<b>{c.name}</b>{c.lit && <span className="ec-ok">Works</span>}</span>
+      {c.lit ? <span>{c.formats}</span> : <span>{c.why}</span>}
+      {c.lit && c.gpu && <span>Not used for converting yet</span>}
+      {big && c.detail && <span className="mono">{c.detail}</span>}
+      {big && c.at && <span className="ec-meta">Tested {new Date(c.at).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}
+    </li>))}</ul>;
 }
 async function act<T>(p: Promise<Answer<T>>, say: (m: string) => void): Promise<T | null> {
   try { const r = await p; if (failed(r)) return (say(r.error.message), null); return r; } catch (e) { if (e instanceof SignedOut) return null; throw e; }
@@ -189,24 +217,19 @@ export function Workers() {
       <p className="muted" role="status">{said}</p>
       {ws.error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{ws.error.message}</span></p>}
       {!ws.loaded ? <div className="empty">Loading...</div> : !list.length ? <Empty icon="i-worker" text="No workers yet." /> : (
-        // design 7.2: flat rows (name and host, now, slots, encoders, last heard); on phones the name and its action
-        // lead, then each figure on its own labelled line
-        <table className="tbl wk"><thead><tr><th>Worker</th><th>Now</th><th className="num">Slots</th><th>Encoders</th><th className="num">Last heard</th><th><span className="sr">Start or stop</span></th></tr></thead>
-          <tbody>{list.map((w) => {
-            const [t, cls, icon] = words(w), gone = w.status === "offline" || w.status === "stalled";
-            return (
-              <tr key={w.id} className={gone ? "dim" : undefined}>
-                <td className="nm"><Link className="ttl" to={"/workers/" + encodeURIComponent(w.id)}>{w.name}</Link>
-                  <span className="sub">{[w.host, OS[w.os ?? ""]].filter(Boolean).join(" · ")}</span>
-                  {w.tags.length > 0 && <span className="chips" aria-label="Tags">{w.tags.map((x) => <span className="mchip" key={x}>{x}</span>)}</span>}</td>
-                <td className="now"><span className="nowl"><span className={"pill " + cls}><Icon id={icon} />{t}</span>
-                  {w.currentJobIds.map((id) => <Link key={id} className="mono sm" to={"/jobs?tab=running&job=" + encodeURIComponent(id)}>{names[id] ?? "Job " + id}</Link>)}</span></td>
-                <td className="num" data-l="Slots">{w.slots.cpu.used} of {w.slots.cpu.total}</td>
-                <td data-l="Encoders">{encoders(w)}</td>
-                <td className="num" data-l="Last heard">{ago(w.lastHeartbeatAt)}</td>
-                <td className="act"><StartStop w={w} onDone={done} /></td>
-              </tr>);
-          })}</tbody></table>)}
+        <div className="wgrid">{list.map((w) => {
+          const [t, cls, icon] = words(w), gone = w.status === "offline" || w.status === "stalled";
+          return <article key={w.id} className={"card wcard" + (gone ? " dim" : "")}>
+            <div className="hd"><h3><Link to={"/workers/" + encodeURIComponent(w.id)}>{w.name}</Link></h3><span className="sp" /><StartStop w={w} onDone={done} /></div>
+            <div className="bd stack">
+              <p className="sm muted">{[w.host, OS[w.os ?? ""], w.arch, "last heard " + ago(w.lastHeartbeatAt)].filter(Boolean).join(" · ")}</p>
+              {w.tags.length > 0 && <div className="chips" aria-label="Tags">{w.tags.map((x) => <span className="mchip" key={x}>{x}</span>)}</div>}
+              <p><span className={"pill " + cls}><Icon id={icon} />{t}</span></p>
+              {w.currentJobIds.map((id) => <p key={id} className="sm">Converting <Link className="mono" to={"/jobs?tab=running&job=" + encodeURIComponent(id)}>{names[id] ?? "Job " + id}</Link></p>)}
+              <div><h4 className="sm muted ec-h">Encoders</h4><EncoderCards w={w} /></div>
+            </div>
+          </article>;
+        })}</div>)}
     </div>
   );
 }
@@ -221,7 +244,7 @@ export function WorkerPage({ id }: { id: string }) {
   if (!d.data) return <div className="stack"><PageHead icon="i-worker" crumbs={[["Workers", "/workers"]]} title="Worker not found" /><p className="st bad"><Icon id="i-alert" /><span>{d.error?.message}</span></p></div>;
   const w = live(d.data), [t, cls, icon] = words(w);
   const rows = jobs.data && !failed(jobs.data) ? jobs.data.items.filter((j) => w.currentJobIds.includes(j.id)) : [];
-  const caps = w.capabilities.filter((c) => c.kind === "encoder" || c.kind === "decoder");
+  const decoders = w.capabilities.filter((c) => c.kind === "decoder");
   const others = w.capabilities.filter((c) => c.kind !== "encoder" && c.kind !== "decoder");
   return (
     <div className="stack">
@@ -241,16 +264,18 @@ export function WorkerPage({ id }: { id: string }) {
         <p className="sm muted">Graphics card: {w.gpus.length ? "not used for converting yet" : "none found"}.</p>
       </>}
       {tab === "capabilities" && <section className="card panel">
-        <div className="hd"><h2>Encoders and decoders found</h2><span className="sp" />
+        <div className="hd"><h2>Encoders</h2><span className="sp" />
           <button className="btn sm" type="button" disabled={busy} onClick={async () => { setBusy(true); const r = await act(testCapabilities(id), setSaid); setBusy(false); if (r) (setSaid("Tested again."), d.reload()); }}><Icon id="i-refresh" />{busy ? "Testing..." : "Test again"}</button></div>
         <p className="sm muted" style={{ padding: "8px var(--pad) 0" }}>Each one was tested with a short real conversion, not guessed from the graphics card's name.</p>
-        {!caps.length ? <div className="empty">Not tested yet.</div> : (
+        <div style={{ padding: "8px var(--pad) 0" }}><EncoderCards w={w} big /></div>
+        {decoders.length > 0 && <>
+          <h3 className="ec-h" style={{ margin: "16px var(--pad) 6px" }}>Decoders</h3>
           <div className="list"><table className="tbl">
             <thead><tr><th>Format</th><th>How</th><th className="stc">Result</th><th data-p="3">When</th></tr></thead>
-            <tbody>{caps.map((c) => <tr key={c.key}><td className="idc"><span className="ttl">{(c.kind === "decoder" ? "Decode " : "") + (FORMAT(c.key) || c.label)}</span><span className="sub">{c.label}</span><span className="sub phone">{[c.label, c.test === "failed" && c.detail].filter(Boolean).join(" · ")}</span></td><td>{how(c)}</td>
-              <td className="stc"><span className={"pill " + (c.test === "passed" ? "ok" : c.test === "failed" ? "" : "")} title={c.detail}>{c.test === "passed" ? (c.slot === "gpu" ? "Works; not used yet" : "Works") : c.test === "failed" ? "Doesn't work here" : "Not tested"}</span></td>
+            <tbody>{decoders.map((c) => <tr key={c.key}><td className="idc"><span className="ttl">{FORMAT(c.key) || c.label}</span><span className="sub">{c.label}</span><span className="sub phone">{[c.label, c.test === "failed" && c.detail].filter(Boolean).join(" · ")}</span></td><td>{how(c)}</td>
+              <td className="stc"><span className={"pill " + (c.test === "passed" ? "ok" : c.test === "failed" ? "" : "")} title={c.detail}>{c.test === "passed" ? "Works" : c.test === "failed" ? "Doesn't work here" : "Not tested"}</span></td>
               <td data-p="3" className="sm">{c.testedAt ? "Tested " + clock(c.testedAt) : ""}{c.test === "failed" && c.detail ? <span className="sub">{c.detail}</span> : null}</td></tr>)}</tbody>
-          </table></div>)}
+          </table></div></>}
         {others.length > 0 && <p className="sm muted" style={{ padding: "8px var(--pad)" }}>Also: {others.map((c) => c.label + (c.test === "passed" ? "" : " (doesn't work)")).join(", ")}.</p>}
         <p className="sm" style={{ padding: "0 var(--pad) var(--pad)" }}>FFmpeg {w.ffmpeg ? w.ffmpeg.version + " · " + w.ffmpeg.path : "not found"}</p>
       </section>}
