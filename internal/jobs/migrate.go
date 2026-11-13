@@ -408,7 +408,7 @@ WHERE json_extract(template, '$.kind') = 'selectors' AND COALESCE(json_extract(t
 UPDATE flows SET template = json_set(template, '$.selectors.rateControl', 'vbr_legacy',
   '$.selectors.notices', json('[{"code":"bitrate_meaning_changed","message":"Bitrate levels changed in this update. This flow keeps producing the same files until you edit its bitrate setting."}]'))
 WHERE json_extract(template, '$.kind') = 'selectors' AND json_extract(template, '$.selectors.rateControl') = 'vbr';`},
-	// User review 11-13 item E: every job's log lives in SQLite (lines and steps), and a failed job's summary beside it.
+// User review 11-13 item E: every job's log lives in SQLite (lines and steps), and a failed job's summary beside it.
 	// IF NOT EXISTS throughout: the tests that rewind user_version re-run this step on a database that has it.
 	{39, "job logs in sqlite", `
 CREATE TABLE IF NOT EXISTS job_run_steps (job_id INTEGER NOT NULL, idx INTEGER NOT NULL, name TEXT NOT NULL, started_at TEXT NOT NULL DEFAULT '',
@@ -420,6 +420,20 @@ CREATE TABLE IF NOT EXISTS job_log_lines (job_id INTEGER NOT NULL, seq INTEGER N
 CREATE TABLE IF NOT EXISTS job_failures (job_id INTEGER PRIMARY KEY, step INTEGER NOT NULL DEFAULT -1, step_count INTEGER NOT NULL DEFAULT 0,
   after_ms INTEGER NOT NULL DEFAULT 0, media_time TEXT NOT NULL DEFAULT '', hint TEXT NOT NULL DEFAULT '', exit_code INTEGER NOT NULL DEFAULT -1,
   ffmpeg_ran INTEGER NOT NULL DEFAULT 1, key_lines TEXT NOT NULL DEFAULT '[]');`},
+	// Item D (network shares): the record for each SMB/NFS share, and where each one is mounted.
+	{41, "network shares", `
+CREATE TABLE IF NOT EXISTS shares (
+  id INTEGER PRIMARY KEY,
+  type TEXT NOT NULL, address TEXT NOT NULL,
+  name TEXT NOT NULL, guest INTEGER NOT NULL DEFAULT 0, username TEXT,
+  encrypted_password BLOB, auth_nonce BLOB,
+  created TEXT NOT NULL, updated TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS share_mounts (
+  id INTEGER PRIMARY KEY,
+  share_id INTEGER NOT NULL REFERENCES shares(id),
+  mount_path TEXT NOT NULL, platform TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'waiting_setup', error TEXT,
+  mounted_at TEXT, since TEXT);`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone
