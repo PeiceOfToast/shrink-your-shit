@@ -42,10 +42,19 @@ func failureView(store *jobs.Store, id int64, errorCode, path, outputPath, messa
 		"mediaTime": media, "hint": hintOut, "exitCode": exit, "ffmpegRan": f.FfmpegRan, "keyLines": keys}
 }
 
-// logState is whether job id has its log in the database: complete (it has lines) or none.
-func logState(store *jobs.Store, id int64) string {
-	if n, err := store.LogLineCount(id); err == nil && n > 0 {
+// logState is where job id's log stands (user review 11-13 item E): coming_back while the job runs (its lines still
+// arrive), complete when they are in the database, lost when its worker stopped and there are none, else none.
+// expired (its lines pruned by logKeepDays) comes with the retention setting.
+func logState(store *jobs.Store, id int64, status jobs.Status, errorCode string) string {
+	if status == jobs.Running {
+		return "coming_back"
+	}
+	n, err := store.LogLineCount(id)
+	switch {
+	case err == nil && n > 0:
 		return "complete"
+	case errorCode == jobs.ReasonWorkerLost:
+		return "lost"
 	}
 	return "none"
 }

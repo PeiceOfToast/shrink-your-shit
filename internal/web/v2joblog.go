@@ -59,7 +59,8 @@ func v2JobLog(api *http.ServeMux, store *jobs.Store) {
 			}
 			out = append(out, m)
 		}
-		writeJSON(w, map[string]any{"state": logState(store, id), "steps": out, "final": nilIfEmpty(finalState(store, id))})
+		j, _ := store.Get(id)
+		writeJSON(w, map[string]any{"state": logState(store, id, j.Status, ""), "steps": out, "final": nilIfEmpty(finalState(store, id))})
 	})
 	api.HandleFunc("GET /api/v2/jobs/{id}/log/download", func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
