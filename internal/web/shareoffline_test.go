@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,6 +19,9 @@ import (
 // paused_share with pausedBy); when it answers again they start by themselves. The person's own pause
 // stays "disabled" through both.
 func TestShareOutagePausesItsLibrariesUntilItAnswers(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("app mode (the mount helper, share mount points) is Linux only")
+	}
 	srv, st, _, _ := libServer(t, false)
 	st.SetPaused(false)
 	root := shareRoot
