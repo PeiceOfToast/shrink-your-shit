@@ -1,6 +1,7 @@
 // D: Network shares settings (SCREENS V9d, D-API-SHAPE.md). Mock only (the engine is after item E).
 // The share list table, Add/Edit sheet (drawer), Remove dialog, Test button, and the connect-mode-specific UI.
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "../Icon";
 import { failed, type Answer } from "../api";
 import { Empty, PageHead } from "../PageHead";
@@ -52,8 +53,8 @@ function ShareRow({ share, resp, onChanged, said }: { share: Share; resp: Shares
             <button className="it" type="button" onClick={(e) => { closeMenu(e); setRemoving(true); }}>Remove...</button>
           </div>
         </details>
-        {removing && <RemoveDialog share={share} onCancel={() => setRemoving(false)} onDone={() => { setRemoving(false); onChanged(); }} said={said} />}
-        {editing && <ShareSheet share={share} resp={resp} onDone={() => { setEditing(false); onChanged(); }} onCancel={() => setEditing(false)} said={said} />}
+        {removing && createPortal(<RemoveDialog share={share} onCancel={() => setRemoving(false)} onDone={() => { setRemoving(false); onChanged(); }} said={said} />, document.body)}
+        {editing && createPortal(<ShareSheet share={share} resp={resp} onDone={() => { setEditing(false); onChanged(); }} onCancel={() => setEditing(false)} said={said} />, document.body)}
       </td>
     </tr>
   );
