@@ -6,53 +6,41 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"database/sql"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 )
 
-// ShareKeySize for AES-256.
 const ShareKeySize = 32
 
-// ShareNonceSize for AES-256-GCM (12 bytes is the GCM standard).
-const ShareNonceSize = 12
-
-// Share is one network share record (table shares, migration 39).
 type Share struct {
 	ID                int64
-	Type              string // "smb" | "nfs"
-	Address           string // "//server/share" or "server:/export"
+	Type              string
+	Address           string
 	Name              string
 	Guest             bool
 	Username          string
 	HasPassword       bool
 	EncryptedPassword []byte
 	Nonce             []byte
-	Tag               []byte
 	Created, Updated  string
 }
 
-// ShareMount is a share's mount on one platform (table share_mounts).
 type ShareMount struct {
 	ID        int64
 	ShareID   int64
 	MountPath string
-	Platform  string // "linux" | "windows" | "macos" | "docker"
-	Status    string // "connected" | "not_connected" | "connecting" | "waiting_setup"
+	Platform  string
+	Status    string
 	Error     string
 	MountedAt string
 	Since     string
 }
 
-// shareKeyPath returns the path to the share encryption key file, outside the data folder.
-// Linux service: /etc/shrink-your-shit/share-key
-// Linux user install / macOS: ~/.config/shrink-your-shit/share-key
-// Windows: DPAPI (handled separately)
 func shareKeyPath() string {
-	// /etc is only for the system service install
 	if os.Geteuid() == 0 || os.Getuid() == 0 {
 		return "/etc/shrink-your-shit/share-key"
 	}
@@ -63,16 +51,16 @@ func shareKeyPath() string {
 	return filepath.Join(home, ".config", "shrink-your-shit", "share-key")
 }
 
-// loadOrCreateShareKey reads the share encryption key, creating a new 256-bit key if none exists.
 func loadOrCreateShareKey() ([]byte, error) {
 	path := shareKeyPath()
 	b, err := os.ReadFile(path)
 	if err == nil && len(b) == ShareKeySize {
 		return b, nil
 	}
-	// generate a new key
 	key := make([]byte, ShareKeySize)
-	rand.Read(key)
+	if _, err := io.ReadFull(rand.Reader, key); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
@@ -82,40 +70,32 @@ func loadOrCreateShareKey() ([]byte, error) {
 	return key, nil
 }
 
-// encryptSharePassword encrypts plaintext with AES-256-GCM using the share key, returning
-// (ciphertext, nonce, tag). nil plaintext returns nil. The nonce is prepended to the ciphertext
-// in the blob stored in the database; the tag is the last 16 bytes of the GCM output.
-func encryptSharePassword(plaintext string) ([]byte, []byte, []byte, error) {
+func encryptSharePassword(plaintext string) ([]byte, []byte, error) {
 	if plaintext == "" {
-		return nil, nil, nil, nil
+		return nil, nil, nil
 	}
 	key, err := loadOrCreateShareKey()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	bc, err := aes.NewCipher(key)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
-	// NewGCM generates a random 12-byte nonce and prepends it to the ciphertext
-	aead, err := cipher.NewGCM(bc)
+	gcm, err := cipher.NewGCM(bc)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
-	// Seal returns the ciphertext with nonce+tag appended.
-	var out = aead.Seal([]byte(plaintext), nil, nil, make([]byte, len(plaintext)+ShareNonceSize+16))
-	// out = nonce (12) + ciphertext + tag (16)
-	if len(out) < ShareNonceSize + 16 {
-		return nil, nil, nil, errors.New("seal output too short")
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, nil, err
 	}
-	nonce := out[:ShareNonceSize]
-	ctLen := len(plaintext)
-	return out[ShareNonceSize:ShareNonceSize+ctLen], nonce, out[ShareNonceSize+ctLen:ShareNonceSize+ctLen+16], nil
+	ct := gcm.Seal(nil, nonce, []byte(plaintext), nil)
+	return ct, nonce, nil
 }
 
-// decryptSharePassword decrypts ciphertext+nonce+tag with AES-256-GCM. Returns "" for nil blob.
-func decryptSharePassword(ct, nonce, tag []byte) (string, error) {
-	if ct == nil || nonce == nil || tag == nil {
+func decryptSharePassword(ct, nonce []byte) (string, error) {
+	if ct == nil || nonce == nil {
 		return "", nil
 	}
 	key, err := loadOrCreateShareKey()
@@ -126,29 +106,20 @@ func decryptSharePassword(ct, nonce, tag []byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// Rebuild the combined blob: nonce + ciphertext + tag
-	combined := make([]byte, len(nonce)+len(ct)+len(tag))
-	for i, b := range nonce { combined[i] = b }
-	off := len(nonce)
-	for i, b := range ct { combined[off+i] = b }
-	off += len(ct)
-	for i, b := range tag { combined[off+i] = b }
-	aead, err := cipher.NewGCM(bc)
+	gcm, err := cipher.NewGCM(bc)
 	if err != nil {
 		return "", err
 	}
-	// Open reads the ciphertext+nonce+tag and returns the plaintext.
-	pt, err := aead.Open(combined, nil, nil, make([]byte, len(combined)))
+	pt, err := gcm.Open(nil, nonce, ct, nil)
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(pt)), nil
+	return string(pt), nil
 }
 
-// LoadShares returns all network share records.
 func (s *Store) LoadShares() ([]Share, error) {
 	rows, err := s.db.Query(`SELECT id, type, address, name, guest, username,
-		encrypted_password, auth_nonce, auth_tag, created, updated FROM shares ORDER BY name`)
+		encrypted_password, auth_nonce, created, updated FROM shares ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -156,14 +127,13 @@ func (s *Store) LoadShares() ([]Share, error) {
 	for rows.Next() {
 		var sh Share
 		rows.Scan(&sh.ID, &sh.Type, &sh.Address, &sh.Name, &sh.Guest, &sh.Username,
-			&sh.EncryptedPassword, &sh.Nonce, &sh.Tag, &sh.Created, &sh.Updated)
+			&sh.EncryptedPassword, &sh.Nonce, &sh.Created, &sh.Updated)
 		sh.HasPassword = sh.EncryptedPassword != nil
 		out = append(out, sh)
 	}
 	return out, nil
 }
 
-// SaveShare inserts a new share and returns its id.
 func (s *Store) SaveShare(sh Share, password string) (Share, error) {
 	if sh.Name == "" {
 		return sh, errors.New("name is required")
@@ -171,7 +141,7 @@ func (s *Store) SaveShare(sh Share, password string) (Share, error) {
 	if sh.Address == "" {
 		return sh, errors.New("address is required")
 	}
-	ct, nonce, tag, err := encryptSharePassword(password)
+	ct, nonce, err := encryptSharePassword(password)
 	if err != nil {
 		return sh, err
 	}
@@ -179,10 +149,8 @@ func (s *Store) SaveShare(sh Share, password string) (Share, error) {
 	guest := 0
 	if sh.Guest { guest = 1 }
 	r, err := s.db.Exec(`INSERT INTO shares(type, address, name, guest, username,
-		encrypted_password, auth_nonce, auth_tag, created, updated)
-		VALUES(?,?,?,?,?,?,?,?,?,?)`,
-		sh.Type, sh.Address, sh.Name, guest, sh.Username,
-		ct, nonce, tag, now, now)
+		encrypted_password, auth_nonce, created, updated) VALUES(?,?,?,?,?,?,?,?,?)`,
+		sh.Type, sh.Address, sh.Name, guest, sh.Username, ct, nonce, now, now)
 	if err != nil {
 		return sh, err
 	}
@@ -197,7 +165,6 @@ func (s *Store) SaveShare(sh Share, password string) (Share, error) {
 	return sh, nil
 }
 
-// UpdateShare updates a share's editable fields.
 func (s *Store) UpdateShare(id int64, name, address, typeStr, username string, guest bool, password string) error {
 	name = strings.TrimSpace(name)
 	var sets []string
@@ -214,16 +181,15 @@ func (s *Store) UpdateShare(id int64, name, address, typeStr, username string, g
 		sets = append(sets, "type=?")
 		args = append(args, typeStr)
 	}
-	// username: explicitly set to empty string to clear it, or keep existing
 	sets = append(sets, "guest=?, username=?")
 	args = append(args, guest, username)
 	if password != "" {
-		ct, nonce, tag, err := encryptSharePassword(password)
+		ct, nonce, err := encryptSharePassword(password)
 		if err != nil {
 			return err
 		}
-		sets = append(sets, "encrypted_password=?, auth_nonce=?, auth_tag=?")
-		args = append(args, ct, nonce, tag)
+		sets = append(sets, "encrypted_password=?, auth_nonce=?")
+		args = append(args, ct, nonce)
 	}
 	now := s.now().UTC().Format(time.RFC3339)
 	sets = append(sets, "updated=?")
@@ -232,7 +198,6 @@ func (s *Store) UpdateShare(id int64, name, address, typeStr, username string, g
 	return err
 }
 
-// DeleteShare deletes a share and its mount records.
 func (s *Store) DeleteShare(id int64) error {
 	_, err := s.db.Exec(`DELETE FROM share_mounts WHERE share_id=?`, id)
 	if err != nil {
@@ -242,21 +207,19 @@ func (s *Store) DeleteShare(id int64) error {
 	return err
 }
 
-// ShareByID returns one share by id.
 func (s *Store) ShareByID(id int64) (*Share, error) {
-	row := s.db.QueryRow(`SELECT id, type, address, name, guest, username,
-		encrypted_password, auth_nonce, auth_tag, created, updated FROM shares WHERE id=?`, id)
-	if row == nil {
-		return nil, sql.ErrNoRows
-	}
 	var sh Share
-	row.Scan(&sh.ID, &sh.Type, &sh.Address, &sh.Name, &sh.Guest, &sh.Username,
-		&sh.EncryptedPassword, &sh.Nonce, &sh.Tag, &sh.Created, &sh.Updated)
+	err := s.db.QueryRow(`SELECT id, type, address, name, guest, username,
+		encrypted_password, auth_nonce, created, updated FROM shares WHERE id=?`, id).Scan(
+		&sh.ID, &sh.Type, &sh.Address, &sh.Name, &sh.Guest, &sh.Username,
+		&sh.EncryptedPassword, &sh.Nonce, &sh.Created, &sh.Updated)
+	if err != nil {
+		return nil, nil
+	}
 	sh.HasPassword = sh.EncryptedPassword != nil
 	return &sh, nil
 }
 
-// ShareMountsByShare returns the mount records for a share.
 func (s *Store) ShareMountsByShare(shareID int64) ([]ShareMount, error) {
 	rows, err := s.db.Query(`SELECT id, share_id, mount_path, platform, status, error, mounted_at, since
 		FROM share_mounts WHERE share_id=?`, shareID)
@@ -272,7 +235,15 @@ func (s *Store) ShareMountsByShare(shareID int64) ([]ShareMount, error) {
 	return out, nil
 }
 
-// SetShareMountStatus updates a mount record's status.
+// DecryptSharePassword returns the plaintext password for a share (used from the web package).
+func (s *Store) DecryptSharePassword(id int64) (string, error) {
+	sh, err := s.ShareByID(id)
+	if err != nil || sh == nil {
+		return "", err
+	}
+	return decryptSharePassword(sh.EncryptedPassword, sh.Nonce)
+}
+
 func (s *Store) SetShareMountStatus(shareID int64, platform, status, error string) error {
 	now := s.now().UTC().Format(time.RFC3339)
 	r, err := s.db.Exec(`UPDATE share_mounts SET status=?, error=?, since=COALESCE(since,?), mounted_at=CASE WHEN ?='connected' THEN ? ELSE mounted_at END

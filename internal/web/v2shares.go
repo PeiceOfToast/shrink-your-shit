@@ -3,17 +3,20 @@
 package web
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"runtime"
 	"strconv"
 	"strings"
 
+	"github.com/cloudsoda/go-smb2"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 )
 
-// v2Shares is the network shares API (item D, user review 11-13). See slices/11-ui-web/D-API-SHAPE.md.
 func v2Shares(api *http.ServeMux, store *jobs.Store) {
 	mode, platform := detectMode()
 	nfsOK := platform != "darwin"
@@ -32,16 +35,12 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 		writeJSON(w, map[string]any{
 			"mode": mode, "platform": platform,
 			"nfsSupported": nfsOK, "testedPlatform": tested,
-			"serverAddress": nil,
-			"items": items,
+			"serverAddress": nil, "items": items,
 		})
 	})
 
 	api.HandleFunc("POST /api/v2/shares", func(w http.ResponseWriter, r *http.Request) {
-		var in struct {
-			Type, Address, Name, Username, Password string
-			Guest                                   bool
-		}
+		var in struct{ Type, Address, Name, Username, Password string; Guest bool }
 		if !readJSON(w, r, &in) {
 			return
 		}
@@ -51,25 +50,16 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 			apiError(w, http.StatusBadRequest, "invalid_address", "Address and name are required.")
 			return
 		}
-		// Normalise the address
-		if strings.HasPrefix(in.Address, "\\\\") || strings.HasPrefix(in.Address, "//") {
-			in.Type = "smb"
-		} else if strings.Contains(in.Address, ":/") {
-			in.Type = "nfs"
-		} else {
-			apiError(w, http.StatusBadRequest, "invalid_address",
-				"Address must start with \\\\ for SMB or contain :/ for NFS (e.g. server:/export).")
+		addr, typ, err := parseAddress(in.Address)
+		if err != nil {
+			apiError(w, http.StatusBadRequest, "invalid_address", err.Error())
 			return
 		}
-		sh := jobs.Share{Type: in.Type, Address: in.Address, Name: in.Name,
-			Guest: in.Guest, Username: in.Username}
+		sh := jobs.Share{Type: typ, Address: addr, Name: in.Name, Guest: in.Guest, Username: in.Username}
 		saved, err := store.SaveShare(sh, in.Password)
 		if err != nil {
 			serverError(w, err)
 			return
-		}
-		if mode == "app" {
-			// TODO D2/D4: trigger mount via helper
 		}
 		writeJSONStatus(w, http.StatusCreated, shareToJSON(store, saved))
 	})
@@ -80,11 +70,7 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 			apiError(w, http.StatusNotFound, "not_found", "There is no such share.")
 			return
 		}
-		var in struct {
-			Name, Address, Type, Username, Password string
-			Guest                                   bool
-			_Guest                                  bool // sentinel: was it provided?
-		}
+		var in struct{ Name, Address, Type, Username, Password string; Guest bool }
 		if !readJSON(w, r, &in) {
 			return
 		}
@@ -106,7 +92,6 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 			apiError(w, http.StatusNotFound, "not_found", "There is no such share.")
 			return
 		}
-		// Check if any library uses this share (stub: actual check in D4)
 		if err := store.DeleteShare(id); err != nil {
 			serverError(w, err)
 			return
@@ -115,19 +100,24 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 	})
 
 	api.HandleFunc("POST /api/v2/shares/test", func(w http.ResponseWriter, r *http.Request) {
-		var in struct {
-			Type, Address, Username, Password, ID string
-			Guest                                 bool
-		}
+		var in struct{ Type, Address, Username, Password, ID string; Guest bool }
 		if !readJSON(w, r, &in) {
 			return
 		}
-		// TODO D2: call the pure-Go SMB client (go-smb2) for SMB, or TCP connect for NFS
-		// For now, return a placeholder result
-		writeJSON(w, map[string]any{
-			"ok": true, "address": in.Address,
-			"folders": []string{}, "moreFolders": 0, "portOnly": in.Type == "nfs",
-		})
+		addr, typ, err := parseAddress(in.Address)
+		if err != nil {
+			writeJSON(w, map[string]any{"ok": false, "code": "invalid_address", "message": err.Error()})
+			return
+		}
+		pw := in.Password
+		if pw == "" && in.ID != "" {
+			if id, parseErr := strconv.ParseInt(in.ID, 10, 64); parseErr == nil {
+				if sh, loadErr := store.ShareByID(id); loadErr == nil && sh != nil {
+					pw, _ = store.DecryptSharePassword(id)
+				}
+			}
+		}
+		writeJSON(w, testShare(typ, addr, in.Username, pw, in.Guest))
 	})
 
 	api.HandleFunc("POST /api/v2/shares/{id}/reconnect", func(w http.ResponseWriter, r *http.Request) {
@@ -159,19 +149,34 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 	})
 }
 
-// detectMode returns (mode, platform) for the current install.
+func parseAddress(raw string) (addr, typ string, err error) {
+	raw = strings.TrimSpace(raw)
+	low := strings.ToLower(raw)
+	switch {
+	case strings.HasPrefix(low, "smb://"):
+		addr = `\\` + strings.ReplaceAll(raw[6:], "/", `\`)
+		return addr, "smb", nil
+	case strings.HasPrefix(low, "nfs://"):
+		addr = raw[6:]
+		return addr, "nfs", nil
+	case strings.HasPrefix(raw, `\\`):
+		return raw, "smb", nil
+	case strings.Contains(raw, ":/"):
+		return raw, "nfs", nil
+	case strings.Contains(raw, ":"):
+		return raw, "nfs", nil
+	}
+	return "", "", errors.New("Address must start with \\\\ or smb:// for SMB, or server:/export for NFS.")
+}
+
 func detectMode() (mode, platform string) {
-	// D2/install.sh sets SYP_HELPER_MODE=app|manual|docker
 	if m := os.Getenv("SYP_HELPER_MODE"); m != "" {
 		return m, runtime.GOOS
 	}
-	// Default: detect Docker, then fall back to app or manual
 	if os.Getenv("container") != "" {
 		return "docker", runtime.GOOS
 	}
-	// Linux without the helper: manual mode
 	if runtime.GOOS == "linux" && os.Geteuid() != 0 {
-		// Check if helper socket exists
 		if _, err := os.Stat("/run/shrink-your-shit/helper.sock"); err != nil {
 			return "manual", runtime.GOOS
 		}
@@ -179,7 +184,81 @@ func detectMode() (mode, platform string) {
 	return "app", runtime.GOOS
 }
 
-// shareToJSON converts a Share to the API response map.
+func testShare(typ, address, username, password string, guest bool) map[string]any {
+	if typ == "smb" {
+		return testSMB(address, username, password, guest)
+	}
+	return testNFS(address)
+}
+
+func testSMB(address, username, password string, guest bool) map[string]any {
+	parts := strings.Split(strings.TrimPrefix(address, `\\`), `\`)
+	if len(parts) < 2 {
+		return map[string]any{"ok": false, "code": "invalid_address", "message": "Use \\\\server\\share."}
+	}
+	server := parts[0]
+	shareName := strings.Join(parts[1:], "\\")
+	ini := &smb2.NTLMInitiator{User: username, Password: password}
+	dialer := &smb2.Dialer{Initiator: ini}
+	ctx := context.Background()
+	session, err := dialer.Dial(ctx, server+":445")
+	if err != nil {
+		return smbError(err)
+	}
+	share, err := session.Mount(shareName)
+	if err != nil {
+		session.Logoff()
+		return smbError(err)
+	}
+	entries, err := share.ReadDir("")
+	session.Logoff()
+	if err != nil {
+		return smbError(err)
+	}
+	var folders []string
+	more := 0
+	for _, e := range entries {
+		if e.IsDir() && len(folders) < 3 {
+			folders = append(folders, e.Name())
+		} else if e.IsDir() {
+			more++
+		}
+	}
+	return map[string]any{"ok": true, "address": address, "folders": folders, "moreFolders": more, "portOnly": false}
+}
+
+func smbError(err error) map[string]any {
+	msg := err.Error()
+	low := strings.ToLower(msg)
+	switch {
+	case strings.Contains(low, "refused"), strings.Contains(low, "no route"):
+		return map[string]any{"ok": false, "code": "host_unreachable", "message": msg}
+	case strings.Contains(low, "timeout"), strings.Contains(low, "timed out"):
+		return map[string]any{"ok": false, "code": "timeout", "message": "The server didn't answer in time."}
+	case strings.Contains(low, "authentication"), strings.Contains(low, "login"), strings.Contains(low, "access denied"):
+		return map[string]any{"ok": false, "code": "auth_failed", "message": "Access denied: the username or password is not correct."}
+	case strings.Contains(low, "not found"), strings.Contains(low, "does not exist"):
+		return map[string]any{"ok": false, "code": "share_not_found", "message": msg}
+	}
+	return map[string]any{"ok": false, "code": "mount_failed", "message": msg}
+}
+
+func testNFS(address string) map[string]any {
+	server := strings.Split(address, ":")[0]
+	if server == "" {
+		return map[string]any{"ok": false, "code": "invalid_address", "message": "Use server:/export."}
+	}
+	conn, err := net.Dial("tcp", server+":2049")
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "refused") {
+			return map[string]any{"ok": false, "code": "host_unreachable", "message": "The NFS server didn't answer."}
+		}
+		return map[string]any{"ok": false, "code": "timeout", "message": "The NFS server didn't answer in time."}
+	}
+	conn.Close()
+	return map[string]any{"ok": true, "address": address, "folders": []string{}, "moreFolders": 0, "portOnly": true}
+}
+
 func shareToJSON(store *jobs.Store, sh jobs.Share) map[string]any {
 	status := "waiting_setup"
 	var reason any = nil
@@ -187,10 +266,9 @@ func shareToJSON(store *jobs.Store, sh jobs.Share) map[string]any {
 	if mode == "app" {
 		status = "not_connected"
 	}
-	// Look up mount status if applicable
 	mounts, err := store.ShareMountsByShare(sh.ID)
 	if err == nil && len(mounts) > 0 {
-		m := mounts[0]                  // primary mount
+		m := mounts[0]
 		status = m.Status
 		if m.Error != "" {
 			reason = map[string]any{"code": "mount_failed", "message": m.Error}
@@ -200,28 +278,16 @@ func shareToJSON(store *jobs.Store, sh jobs.Share) map[string]any {
 			reason = nil
 		}
 	}
-	addr := sh.Address
-	// Normalise backslashes for display
-	addr = strings.ReplaceAll(addr, "/", "\\")
-	hasPw := sh.HasPassword
+	addr := strings.ReplaceAll(sh.Address, "/", "\\")
 	return map[string]any{
-		"id": strconv.FormatInt(sh.ID, 10),
-		"name": sh.Name,
-		"type": sh.Type,
-		"address": addr,
-		"guest": sh.Guest,
-		"username": nilIfEmpty(sh.Username),
-		"hasPassword": hasPw,
-		"status": status,
-		"since": nil,
-		"reason": reason,
+		"id": strconv.FormatInt(sh.ID, 10), "name": sh.Name, "type": sh.Type,
+		"address": addr, "guest": sh.Guest, "username": nilIfEmpty(sh.Username),
+		"hasPassword": sh.HasPassword, "status": status, "since": nil, "reason": reason,
 		"path": "/var/lib/syp/shares/" + sanitiseName(sh.Name),
-		"libraries": []any{},            // TODO D4: libraries using this share
-		"setup": setupForMode(store, sh),
+		"libraries": []any{}, "setup": setupForMode(store, sh),
 	}
 }
 
-// sanitiseName makes a share name safe as a directory name.
 func sanitiseName(name string) string {
 	r := strings.ToLower(name)
 	r = strings.ReplaceAll(r, " ", "-")
@@ -234,7 +300,6 @@ func sanitiseName(name string) string {
 	return string(out)
 }
 
-// setupForMode returns the setup object (for manual/docker modes) or nil.
 func setupForMode(store *jobs.Store, sh jobs.Share) any {
 	mode, _ := detectMode()
 	switch mode {
