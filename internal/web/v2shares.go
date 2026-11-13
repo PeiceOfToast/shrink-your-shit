@@ -28,7 +28,7 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 			serverError(w, err)
 			return
 		}
-		var items []map[string]any
+		items := make([]map[string]any, 0)
 		for _, sh := range all {
 			items = append(items, shareToJSON(store, sh))
 		}
@@ -53,6 +53,14 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 			apiError(w, http.StatusBadRequest, "invalid_address", "Address and name are required.")
 			return
 		}
+		if in.Type != "" && in.Type != "smb" && in.Type != "nfs" {
+			apiError(w, http.StatusBadRequest, "invalid", "Share type must be smb or nfs.")
+			return
+		}
+		if err := nameTaken(store, in.Name, 0); err != nil {
+			apiError(w, http.StatusConflict, "name_taken", err.Error())
+			return
+		}
 		addr, typ, err := parseAddress(in.Address)
 		if err != nil {
 			apiError(w, http.StatusBadRequest, "invalid_address", err.Error())
@@ -73,14 +81,57 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 			apiError(w, http.StatusNotFound, "not_found", "There is no such share.")
 			return
 		}
-		var in struct {
-			Name, Address, Type, Username, Password string
-			Guest                                   bool
-		}
-		if !readJSON(w, r, &in) {
+		existing, err := store.ShareByID(id)
+		if err != nil || existing == nil {
+			apiError(w, http.StatusNotFound, "not_found", "There is no such share.")
 			return
 		}
-		if err := store.UpdateShare(id, in.Name, in.Address, in.Type, in.Username, in.Guest, in.Password); err != nil {
+		// Decode as a map so we only apply fields actually present in the body
+		var raw map[string]any
+		if !readJSON(w, r, &raw) {
+			return
+		}
+		name := existing.Name
+		address := existing.Address
+		typeStr := existing.Type
+		username := existing.Username
+		guest := existing.Guest
+		pw := ""
+		if pwStr, ok := raw["password"].(string); ok {
+			pw = pwStr
+		}
+		if v, ok := raw["name"].(string); ok && v != "" {
+			if err := nameTaken(store, v, id); err != nil {
+				apiError(w, http.StatusConflict, "name_taken", err.Error())
+				return
+			}
+			name = v
+		}
+		if v, ok := raw["type"].(string); ok && v != "" {
+			if v != "smb" && v != "nfs" {
+				apiError(w, http.StatusBadRequest, "invalid", "Share type must be smb or nfs.")
+				return
+			}
+			typeStr = v
+		}
+		if v, ok := raw["address"].(string); ok && v != "" {
+			a, t, pErr := parseAddress(v)
+			if pErr != nil {
+				apiError(w, http.StatusBadRequest, "invalid_address", pErr.Error())
+				return
+			}
+			address = a
+			typeStr = t
+		}
+		if v, ok := raw["username"].(string); ok {
+			username = v
+		}
+		if _, ok := raw["guest"].(bool); ok {
+			if v, ok2 := raw["guest"].(bool); ok2 {
+				guest = v
+			}
+		}
+		if err := store.UpdateShare(id, name, address, typeStr, username, guest, pw); err != nil {
 			serverError(w, err)
 			return
 		}
@@ -111,6 +162,10 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 			Guest                                 bool
 		}
 		if !readJSON(w, r, &in) {
+			return
+		}
+		if in.Type != "" && in.Type != "smb" && in.Type != "nfs" {
+			writeJSON(w, map[string]any{"ok": false, "code": "invalid", "message": "Share type must be smb or nfs."})
 			return
 		}
 		addr, typ, err := parseAddress(in.Address)
@@ -252,6 +307,8 @@ func smbError(err error) map[string]any {
 	msg := err.Error()
 	low := strings.ToLower(msg)
 	switch {
+	case strings.Contains(low, "no such host"), strings.Contains(low, "nodename nor servname"):
+		return map[string]any{"ok": false, "code": "host_not_found", "message": msg}
 	case strings.Contains(low, "refused"), strings.Contains(low, "no route"):
 		return map[string]any{"ok": false, "code": "host_unreachable", "message": msg}
 	case strings.Contains(low, "timeout"), strings.Contains(low, "timed out"):
@@ -271,6 +328,9 @@ func testNFS(address string) map[string]any {
 	}
 	conn, err := net.Dial("tcp", server+":2049")
 	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "no such host") {
+			return map[string]any{"ok": false, "code": "host_not_found", "message": "The NFS server was not found."}
+		}
 		if strings.Contains(strings.ToLower(err.Error()), "refused") {
 			return map[string]any{"ok": false, "code": "host_unreachable", "message": "The NFS server didn't answer."}
 		}
@@ -299,7 +359,10 @@ func shareToJSON(store *jobs.Store, sh jobs.Share) map[string]any {
 			reason = nil
 		}
 	}
-	addr := strings.ReplaceAll(sh.Address, "/", "\\")
+	addr := sh.Address
+	if sh.Type == "smb" {
+		addr = strings.ReplaceAll(sh.Address, "/", "\\")
+	}
 	return map[string]any{
 		"id": strconv.FormatInt(sh.ID, 10), "name": sh.Name, "type": sh.Type,
 		"address": addr, "guest": sh.Guest, "username": nilIfEmpty(sh.Username),
@@ -319,6 +382,21 @@ func sanitiseName(name string) string {
 		}
 	}
 	return string(out)
+}
+
+// nameTaken checks whether another share with the same name exists (case-insensitive).
+func nameTaken(store *jobs.Store, name string, excludeID int64) error {
+	all, err := store.LoadShares()
+	if err != nil {
+		return err
+	}
+	low := strings.ToLower(strings.TrimSpace(name))
+	for _, sh := range all {
+		if strings.ToLower(strings.TrimSpace(sh.Name)) == low && sh.ID != excludeID {
+			return errors.New("A share with this name already exists.")
+		}
+	}
+	return nil
 }
 
 func setupForMode(store *jobs.Store, sh jobs.Share) any {

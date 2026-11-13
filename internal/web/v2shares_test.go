@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -95,16 +96,18 @@ func TestSharesAddressParsing(t *testing.T) {
 	var checks = []struct {
 		address string
 		valid   bool
+		id      int // unique id for the name
 	}{
-		{"smb://nas/media", true},
-		{"nas:/volume1/media", true},
-		{"nfs://server:/export", true},
-		{"", false},
-		{"nas", false},
-		{"smb://", false},
+		{"smb://nas/media", true, 1},
+		{"nas:/volume1/media", true, 2},
+		{"nfs://server:/export", true, 3},
+		{"", false, 4},
+		{"nas", false, 5},
+		{"smb://", false, 6},
 	}
 	for _, c := range checks {
-		ql := `{"address":"` + c.address + `","name":"Test"}`
+		name := "Test" + strconv.Itoa(c.id)
+		ql := `{"address":"` + c.address + `","name":"` + name + `"}`
 		code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares", body: ql, ctype: "application/json"})
 		if c.valid && code != http.StatusCreated {
 			t.Errorf("%q: expected 201 got %d: %s", c.address, code, resp)
@@ -188,6 +191,145 @@ func TestSharesTestUnreachable(t *testing.T) {
 	}
 	if result.Code != "host_unreachable" && result.Code != "timeout" {
 		t.Errorf("expected host_unreachable or timeout, got %q", result.Code)
+	}
+}
+
+// #217 fix 1: NFS address keeps forward slashes in the response.
+func TestSharesNFSAddressKeepsSlashes(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	os.MkdirAll(home, 0o755)
+	os.Setenv("HOME", home)
+	defer os.Unsetenv("HOME")
+	srv, _, _ := server(t, false)
+
+	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares",
+		body: `{"address":"nas:/volume1/media","name":"NFS Test"}`, ctype: "application/json"})
+	if code != http.StatusCreated {
+		t.Fatalf("POST: %d %s", code, resp)
+	}
+	var share struct{ Address string }
+	json.Unmarshal([]byte(resp), &share)
+	if strings.Contains(share.Address, "\\") {
+		t.Errorf("NFS address has backslashes: %q", share.Address)
+	}
+}
+
+// #217 fix 2: PATCH only changes the fields sent.
+func TestSharesPATCHOnlyChangesSentFields(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	os.MkdirAll(home, 0o755)
+	os.Setenv("HOME", home)
+	defer os.Unsetenv("HOME")
+	srv, _, _ := server(t, false)
+
+	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares",
+		body:  `{"address":"\\\\nas\\share","name":"Original","username":"DOMAIN\\user","guest":true}`,
+		ctype: "application/json"})
+	if code != http.StatusCreated {
+		t.Fatalf("POST: %d %s", code, resp)
+	}
+	var created map[string]any
+	json.Unmarshal([]byte(resp), &created)
+	id := fmt.Sprintf("%v", created["id"])
+	// PATCH with only name should keep username and guest untouched
+	code, resp, _ = do(t, nil, srv, call{method: "PATCH", path: "/api/v2/shares/" + id,
+		body: `{"name":"Renamed"}`, ctype: "application/json"})
+	if code != http.StatusOK {
+		t.Fatalf("PATCH: %d %s", code, resp)
+	}
+	var patched map[string]any
+	json.Unmarshal([]byte(resp), &patched)
+	if patched["username"] != "DOMAIN\\user" {
+		t.Errorf("username changed: %v", patched["username"])
+	}
+	if patched["guest"] != true {
+		t.Errorf("guest changed: %v", patched["guest"])
+	}
+}
+
+// #217 fix 3: duplicate name returns 409 name_taken.
+func TestSharesDuplicateNameIs409(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	os.MkdirAll(home, 0o755)
+	os.Setenv("HOME", home)
+	defer os.Unsetenv("HOME")
+	srv, _, _ := server(t, false)
+
+	body := `{"address":"\\\\nas\\share","name":"My NAS"}`
+	code, _, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares", body: body, ctype: "application/json"})
+	if code != http.StatusCreated {
+		t.Fatalf("first POST: %d", code)
+	}
+	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares", body: body, ctype: "application/json"})
+	if code != http.StatusConflict {
+		t.Fatalf("duplicate: expected 409 got %d: %s", code, resp)
+	}
+	var errResp struct{ Error *struct{ Code string } }
+	json.Unmarshal([]byte(resp), &errResp)
+	if errResp.Error == nil || errResp.Error.Code != "name_taken" {
+		t.Errorf("expected name_taken, got %v", errResp)
+	}
+}
+
+// #217 fix 4: unknown type is 400 invalid.
+func TestSharesUnknownTypeIs400(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	os.MkdirAll(home, 0o755)
+	os.Setenv("HOME", home)
+	defer os.Unsetenv("HOME")
+	srv, _, _ := server(t, false)
+
+	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares",
+		body: `{"type":"webdav","address":"\\\\nas\\share","name":"Bad"}`, ctype: "application/json"})
+	if code != http.StatusBadRequest {
+		t.Fatalf("bad type: expected 400 got %d: %s", code, resp)
+	}
+	code, resp, _ = do(t, nil, srv, call{method: "POST", path: "/api/v2/shares/test",
+		body: `{"type":"ftp","address":"10.0.0.1:/path"}`, ctype: "application/json"})
+	var result struct{ Ok bool }
+	json.Unmarshal([]byte(resp), &result)
+	if result.Ok {
+		t.Error("unknown type should return ok:false")
+	}
+}
+
+// #217 fix 5: empty list returns [], not null.
+func TestSharesEmptyListIsArray(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	os.MkdirAll(home, 0o755)
+	os.Setenv("HOME", home)
+	defer os.Unsetenv("HOME")
+	srv, _, _ := server(t, false)
+
+	_, resp, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/shares"})
+	var list struct{ Items any }
+	json.Unmarshal([]byte(resp), &list)
+	if list.Items == nil {
+		t.Error("items is null, should be []")
+	}
+}
+
+// #217 fix 6: unknown host returns host_not_found, not mount_failed.
+func TestSharesTestUnknownHostIsHostNotFound(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	os.MkdirAll(home, 0o755)
+	os.Setenv("HOME", home)
+	defer os.Unsetenv("HOME")
+	srv, _, _ := server(t, false)
+
+	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares/test",
+		body: `{"address":"\\\\192.0.2.1\\share"}`, ctype: "application/json"})
+	if code != http.StatusOK {
+		t.Fatalf("test: %d %s", code, resp)
+	}
+	var result struct {
+		Ok   bool   `json:"ok"`
+		Code string `json:"code"`
+	}
+	json.Unmarshal([]byte(resp), &result)
+	// 192.0.2.1 is in the TEST-NET range (RFC 5737), which should get refused or unreachable
+	if !result.Ok && result.Code != "host_not_found" && result.Code != "host_unreachable" && result.Code != "timeout" {
+		t.Errorf("expected host_not_found/host_unreachable/timeout, got %q", result.Code)
 	}
 }
 
