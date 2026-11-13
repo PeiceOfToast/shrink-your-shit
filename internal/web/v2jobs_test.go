@@ -388,3 +388,17 @@ func TestJobLogEndpoint(t *testing.T) {
 		t.Errorf("download: %s", text)
 	}
 }
+
+// User review 11-13 item E: ?path= lists one file's jobs on a tab (exact path, the job's own file).
+func TestJobsByPath(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	done(t, st, l.ID, "/m/a.mkv", "/m/a.mkv", 1000, 400)
+	done(t, st, l.ID, "/m/a.mkv.bak", "/m/a.mkv.bak", 1000, 400)
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs?tab=completed&path=/m/a.mkv"})
+	var r struct{ Items []map[string]any }
+	json.Unmarshal([]byte(body), &r)
+	if len(r.Items) != 1 || r.Items[0]["name"] != "a.mkv" {
+		t.Errorf("by path: %s", body)
+	}
+}
