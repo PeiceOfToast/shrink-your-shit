@@ -114,6 +114,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
   // one edit writes its switches in the same update (A-API-SHAPE, engine #211): an old flow takes the new meaning on any
   // edit (the slider's quality, or level in custom settings); AV1 takes Quality only, with a line saying so once
   const [said, setSaid] = useState("");
+  const [ask, setAsk] = useState(false); // "Go back to the slider?" (SCREENS V3)
   const put = (k: string, v: unknown) => {
     const x: Record<string, unknown> = {}, rc = String(c.rateControl ?? "quality");
     if (n.type === "video.convert") {
@@ -147,6 +148,12 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
     // Opening More options is the switch to custom: kind and rateControl in one update (AV1 gets Quality only)
     // an old flow keeps its meaning until its first edit (design: 'Changing its bitrate settings switches it')
     const custom = () => !legacy && set("kind", "selectors", { rateControl: av1 ? "quality" : "level" });
+    // the slider's own values: custom settings that differ from them are asked about before they're cleared (SCREENS V3)
+    const SLIDER = { format: "hevc", resolution: "keep", maxBitrate: "none", speed: "normal", rateControl: "quality" };
+    const differs = Object.entries(SLIDER).some(([k, v]) => String(c[k] ?? v) !== v) || c.vbrMaxKbps != null;
+    const backToSlider = () => { setAsk(false); set("kind", "slider", { ...SLIDER, vbrMaxKbps: undefined }); };
+    const keep = () => { setAsk(false); if (moreRef.current) moreRef.current.open = true; };
+    const goBack = () => (differs ? setAsk(true) : backToSlider());
     return (
       <div className="stack">
         {legacy && <div className="note"><Icon id="i-info" /><div>This step was set up before 13 Nov and still makes the same files as before. Changing its bitrate settings switches it to the new rules.</div></div>}
@@ -155,8 +162,12 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
           {sl && <p className="sm">{((labels(props.format).find((f) => f[0] === sl.format)?.[1] ?? sl.format) as string).split(" (")[0] + " · quality " + sl.crf + " (CRF) · " + (sl.keepsResolution ? "keeps the resolution" : "lowers the resolution") + " · " + (sl.capKbps ? "capped at " + sl.capKbps.toLocaleString() + " kbps" : "no bitrate cap") + " · usually about " + sl.saveLowPct + "-" + sl.saveHighPct + "% smaller"}</p>}
           <p className="hint">Lower quality numbers mean a better picture and bigger files. The number is for 1080p; 720p and smaller files use one lower, 4K one higher. Every file's picture is checked after converting, and the original stays if it doesn't pass.</p>
         </>}
-        {sel && <p className="note"><Icon id="i-info" /><span>Using your own settings. The slider is off. <button className="linkbtn" type="button" onClick={() => set("kind", "slider", { rateControl: "quality" })}>Use the slider again</button></span></p>}
-        <details ref={moreRef} onToggle={(e) => e.currentTarget.open && !sel && custom()}><summary className="btn sm" style={{ display: "inline-flex" }}>More options</summary>
+        {sel && <p className="note"><Icon id="i-info" /><span>Using your own settings. The slider is off. <button className="linkbtn" type="button" onClick={goBack}>Use the slider again</button></span></p>}
+        {ask && <div className="note" role="alertdialog" aria-labelledby={n.id + "-go"} onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), keep())}>
+          <Icon id="i-alert" /><div className="sp"><strong id={n.id + "-go"}>Go back to the slider?</strong> Your custom settings will be cleared.</div>
+          <button className="btn sm primary" type="button" onClick={backToSlider}>Clear and use the slider</button>
+          <button className="btn sm ghost" type="button" autoFocus onClick={keep}>Keep my settings</button></div>}
+        <details ref={moreRef} onToggle={(e) => (e.currentTarget.open ? !sel && custom() : sel && goBack())}><summary className="btn sm" style={{ display: "inline-flex" }}>More options</summary>
           <div className="grid cols2" style={{ marginTop: 12 }}>
             {field("format")}{field("resolution")}{field("speed")}
             {q && sel && field("quality")}
