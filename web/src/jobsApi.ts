@@ -24,13 +24,19 @@ export async function getJobLog(id: string): Promise<Answer<JobLog>> {
   if (MOCK) return mockJobLog(id);
   return call("GET", "/api/v2/jobs/" + encodeURIComponent(id) + "/log");
 }
-// E: a file's jobs, every state, newest first: the list takes ?path= (the file's exact path) on each tab, so five asks
+// E: a file's jobs, every state, newest first: the list takes ?path= (the file's exact path) on each tab, so five asks.
+// The line is only shown when the server actually filtered by path (the returned items all have the requested path).
+// Without the path filter (dev before workshop #214), fileJobs returns [] and the line is hidden.
 const TABS: Tab[] = ["waiting", "running", "completed", "skipped", "failed"];
 export async function fileJobs(path: string): Promise<Answer<JobItem[]>> {
   const rs = MOCK ? TABS.map((t) => mockJobs(t, "")) : await Promise.all(TABS.map((t) => call<JobsPage>("GET", "/api/v2/jobs?tab=" + t + "&limit=200&path=" + encodeURIComponent(path))));
   const bad = rs.find((r) => failed(r)); if (bad) return bad;
+  const items = rs.flatMap((r) => (r as JobsPage).items);
+  // shortcut: no items means nothing to show anyway
+  // shortcut: if any item has a different path, the server didn't filter — return nothing to avoid a partial list
+  if (!items.length || !items.every((j) => j.path === path)) return [];
   const at = (j: JobItem) => j.finishedAt ?? "";
-  return rs.flatMap((r) => (r as JobsPage).items).filter((j) => j.path === path).sort((a, b) => (at(a) < at(b) ? 1 : -1));
+  return items.sort((a, b) => (at(a) < at(b) ? 1 : -1));
 }
 export async function getJob(id: string): Promise<Answer<JobDetail>> {
   if (MOCK) return mockJob(id) ?? { error: { code: "not_found", message: "There is no such job." } };
