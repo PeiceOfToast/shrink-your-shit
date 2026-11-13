@@ -17,6 +17,7 @@ func TestEncryptionRoundTrip(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the key folder on Windows
 	defer os.Unsetenv("HOME")
 
 	orig := "MySecretPassword123!"
@@ -41,6 +42,7 @@ func TestEncryptionWrongKey(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the key folder on Windows
 	defer os.Unsetenv("HOME")
 
 	ct, nonce, err := encryptSharePassword("hunter2")
@@ -50,7 +52,11 @@ func TestEncryptionWrongKey(t *testing.T) {
 	// Replace the key with a different one
 	key := make([]byte, 32)
 	rand.Read(key)
-	os.WriteFile(filepath.Join(home, ".config", "shrink-your-shit", "share-key"), key, 0o600)
+	wrapped, err := wrapShareKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(shareKeyPath(), wrapped, 0o600)
 
 	_, err = decryptSharePassword(ct, nonce)
 	if err == nil {
@@ -63,6 +69,7 @@ func TestEncryptionDifferentOutputs(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the key folder on Windows
 	defer os.Unsetenv("HOME")
 
 	ct1, _, _ := encryptSharePassword("same")
@@ -89,6 +96,7 @@ func TestSaveShareRoundTrip(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the key folder on Windows
 	defer os.Unsetenv("HOME")
 
 	s, err := Open(filepath.Join(t.TempDir(), "syp.db"))
@@ -132,6 +140,7 @@ func TestUpdateSharePassword(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the key folder on Windows
 	defer os.Unsetenv("HOME")
 
 	s, err := Open(filepath.Join(t.TempDir(), "syp.db"))
@@ -169,6 +178,7 @@ func TestDeleteShare(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the key folder on Windows
 	defer os.Unsetenv("HOME")
 
 	s, err := Open(filepath.Join(t.TempDir(), "syp.db"))
@@ -213,6 +223,7 @@ func TestLoadSharesEmpty(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the key folder on Windows
 	defer os.Unsetenv("HOME")
 
 	s, err := Open(filepath.Join(t.TempDir(), "syp.db"))
@@ -235,6 +246,7 @@ func TestGuestShare(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the key folder on Windows
 	defer os.Unsetenv("HOME")
 
 	s, err := Open(filepath.Join(t.TempDir(), "syp.db"))
@@ -260,6 +272,7 @@ func TestGuestShare(t *testing.T) {
 // since is when the current status began: it resets when the status changes and stays while it doesn't.
 func TestShareMountSinceResetsOnStatusChange(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("APPDATA", os.Getenv("HOME")) // the key folder on Windows
 	s, err := Open(filepath.Join(t.TempDir(), "syp.db"))
 	if err != nil {
 		t.Fatal(err)

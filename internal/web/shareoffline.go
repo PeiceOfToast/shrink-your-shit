@@ -30,17 +30,23 @@ var shareStatTimeout = 5 * time.Second
 
 // shareAnswers reports whether the share mounted at mountPath answers now. Tests replace it.
 var shareAnswers = func(mountPath string) bool {
+	if onWindows() { // Windows has no mount table to read: the path is the share itself
+		return statWithin(mountPath, shareStatTimeout)
+	}
 	return mountedAt(mountPath) && statWithin(mountPath, shareStatTimeout)
 }
 
-// mountPointFor is where share sh is mounted.
+// mountPointFor is where share sh is mounted: its \\server\share path on Windows.
 func mountPointFor(sh jobs.Share) string {
+	if onWindows() {
+		return uncPath(sh.Address)
+	}
 	return shareRoot + "/" + sanitiseName(sh.Name, sh.ID)
 }
 
-// shareWatched is whether shares are checked here: Linux, in every mode. The helper mounts them in app mode;
+// shareWatched is whether shares are checked here: Linux and Windows, in every mode. The helper mounts them in app mode;
 // in manual and docker mode the person mounts them, and a share waits for that (waiting_setup) until it answers.
-func shareWatched() bool { return runtime.GOOS == "linux" }
+func shareWatched() bool { return runtime.GOOS == "linux" || runtime.GOOS == "windows" }
 
 // WatchShares checks each saved share every shareWatchEvery, where shareWatched says so.
 func WatchShares(store *jobs.Store) {
@@ -72,7 +78,7 @@ func checkShare(store *jobs.Store, sh jobs.Share) {
 	status := mountStatus(store, sh.ID)
 	if shareAnswers(mp) {
 		if status != "connected" {
-			store.SetShareMountStatus(sh.ID, "linux", "connected", "")
+			store.SetShareMountStatus(sh.ID, runtime.GOOS, "connected", "")
 			log.Printf("share %q: answering again", sh.Name)
 		}
 		if ids, err := store.ResumeSharePause(sh.ID); err != nil {
@@ -89,7 +95,7 @@ func checkShare(store *jobs.Store, sh jobs.Share) {
 	}
 	if status == "connected" { // an outage: say so once, with the reason the page shows
 		reason, _ := json.Marshal(map[string]string{"code": "host_unreachable", "message": sh.Name + " stopped answering."})
-		store.SetShareMountStatus(sh.ID, "linux", "not_connected", string(reason))
+		store.SetShareMountStatus(sh.ID, runtime.GOOS, "not_connected", string(reason))
 		log.Printf("share %q: stopped answering", sh.Name)
 	}
 	if ids, err := store.PauseLibrariesForShare(sh.ID, mp); err != nil {

@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -41,6 +42,13 @@ type ShareMount struct {
 }
 
 func shareKeyPath() string {
+	if runtime.GOOS == "windows" { // the person's own profile: HOME is usually unset there
+		dir, err := os.UserConfigDir()
+		if err != nil {
+			dir = "."
+		}
+		return filepath.Join(dir, "shrink-your-shit", "share-key")
+	}
 	if os.Geteuid() == 0 || os.Getuid() == 0 {
 		return "/etc/shrink-your-shit/share-key"
 	}
@@ -53,18 +61,23 @@ func shareKeyPath() string {
 
 func loadOrCreateShareKey() ([]byte, error) {
 	path := shareKeyPath()
-	b, err := os.ReadFile(path)
-	if err == nil && len(b) == ShareKeySize {
-		return b, nil
+	if b, err := os.ReadFile(path); err == nil {
+		if key, err := unwrapShareKey(b); err == nil && len(key) == ShareKeySize {
+			return key, nil
+		}
 	}
 	key := make([]byte, ShareKeySize)
 	if _, err := io.ReadFull(rand.Reader, key); err != nil {
 		return nil, err
 	}
+	wrapped, err := wrapShareKey(key)
+	if err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(path, key, 0o600); err != nil {
+	if err := os.WriteFile(path, wrapped, 0o600); err != nil {
 		return nil, err
 	}
 	return key, nil

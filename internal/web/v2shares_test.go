@@ -25,6 +25,7 @@ func TestSharesCreateAndList(t *testing.T) {
 	home := filepath.Join(dir, "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the share key folder on Windows
 	defer os.Unsetenv("HOME")
 	srv, _, _ := server(t, false)
 
@@ -64,6 +65,7 @@ func TestSharesPATCHKeepsPassword(t *testing.T) {
 	home := filepath.Join(dir, "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the share key folder on Windows
 	defer os.Unsetenv("HOME")
 	srv, _, _ := server(t, false)
 
@@ -96,6 +98,7 @@ func TestSharesAddressParsing(t *testing.T) {
 	home := filepath.Join(dir, "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the share key folder on Windows
 	defer os.Unsetenv("HOME")
 	srv, _, _ := server(t, false)
 
@@ -119,6 +122,9 @@ func TestSharesAddressParsing(t *testing.T) {
 		{"smb://[fe80::1]:1445/media", false, 13},
 	}
 	for _, c := range checks {
+		if runtime.GOOS == "windows" && !strings.HasPrefix(c.address, "smb://") {
+			continue // Windows has no NFS
+		}
 		name := "Test" + strconv.Itoa(c.id)
 		ql := `{"address":"` + c.address + `","name":"` + name + `"}`
 		code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares", body: ql, ctype: "application/json"})
@@ -136,6 +142,7 @@ func TestSharesListHasModeFields(t *testing.T) {
 	home := filepath.Join(dir, "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the share key folder on Windows
 	defer os.Unsetenv("HOME")
 	srv, _, _ := server(t, false)
 
@@ -159,6 +166,7 @@ func TestSharesTestInvalidAddress(t *testing.T) {
 	home := filepath.Join(dir, "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the share key folder on Windows
 	defer os.Unsetenv("HOME")
 	srv, _, _ := server(t, false)
 
@@ -187,6 +195,7 @@ func TestSharesTestSavedPasswordOnlyToSavedAddress(t *testing.T) {
 	home := filepath.Join(dir, "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the share key folder on Windows
 	defer os.Unsetenv("HOME")
 	srv, _, _ := server(t, false)
 
@@ -235,6 +244,7 @@ func TestSharesTestUnreachable(t *testing.T) {
 	home := filepath.Join(dir, "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the share key folder on Windows
 	defer os.Unsetenv("HOME")
 	srv, _, _ := server(t, false)
 	smbPort = closedPort(t) // this machine may run its own SMB server on 445 (Windows does)
@@ -261,9 +271,13 @@ func TestSharesTestUnreachable(t *testing.T) {
 
 // #217 fix 1: NFS address keeps forward slashes in the response.
 func TestSharesNFSAddressKeepsSlashes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no NFS")
+	}
 	home := filepath.Join(t.TempDir(), "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the share key folder on Windows
 	defer os.Unsetenv("HOME")
 	srv, _, _ := server(t, false)
 
@@ -284,6 +298,7 @@ func TestSharesPATCHOnlyChangesSentFields(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the share key folder on Windows
 	defer os.Unsetenv("HOME")
 	srv, _, _ := server(t, false)
 
@@ -317,6 +332,7 @@ func TestSharesDuplicateNameIs409(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the share key folder on Windows
 	defer os.Unsetenv("HOME")
 	srv, _, _ := server(t, false)
 
@@ -341,6 +357,7 @@ func TestSharesUnknownTypeIs400(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the share key folder on Windows
 	defer os.Unsetenv("HOME")
 	srv, _, _ := server(t, false)
 
@@ -363,6 +380,7 @@ func TestSharesEmptyListIsArray(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the share key folder on Windows
 	defer os.Unsetenv("HOME")
 	srv, _, _ := server(t, false)
 
@@ -381,6 +399,7 @@ func TestSharesTestUnknownHostIsHostNotFound(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the share key folder on Windows
 	defer os.Unsetenv("HOME")
 	srv, _, _ := server(t, false)
 
@@ -411,6 +430,7 @@ func TestSharesTestSMBCodes(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the share key folder on Windows
 	defer os.Unsetenv("HOME")
 	srv, _, _ := server(t, false)
 
@@ -451,6 +471,7 @@ func TestSharesTestPlainSentences(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the share key folder on Windows
 	defer os.Unsetenv("HOME")
 	srv, _, _ := server(t, false)
 
@@ -684,9 +705,13 @@ func TestSharesAppModeDeleteCallsUnmount(t *testing.T) {
 
 // Test manual mode setup text for SMB with username
 func TestSharesManualSetupTextSMB(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows connects shares itself: no manual setup")
+	}
 	home := filepath.Join(t.TempDir(), "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the share key folder on Windows
 	defer os.Unsetenv("HOME")
 	srv, _, _ := server(t, false)
 
@@ -727,9 +752,13 @@ func TestSharesManualSetupTextSMB(t *testing.T) {
 
 // Test manual mode setup text for NFS
 func TestSharesManualSetupTextNFS(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no NFS")
+	}
 	home := filepath.Join(t.TempDir(), "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the share key folder on Windows
 	defer os.Unsetenv("HOME")
 	srv, _, _ := server(t, false)
 
@@ -759,9 +788,13 @@ func TestSharesManualSetupTextNFS(t *testing.T) {
 
 // Test manual mode setup text for guest SMB share
 func TestSharesManualSetupTextGuest(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows connects shares itself: no manual setup")
+	}
 	home := filepath.Join(t.TempDir(), "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the share key folder on Windows
 	defer os.Unsetenv("HOME")
 	srv, _, _ := server(t, false)
 
@@ -784,9 +817,13 @@ func TestSharesManualSetupTextGuest(t *testing.T) {
 
 // Test manual mode setup text for a name containing a quote
 func TestSharesManualSetupTextQuotedName(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows connects shares itself: no manual setup")
+	}
 	home := filepath.Join(t.TempDir(), "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home) // the share key folder on Windows
 	defer os.Unsetenv("HOME")
 	srv, _, _ := server(t, false)
 

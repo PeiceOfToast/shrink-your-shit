@@ -257,6 +257,9 @@ func TestNeverConnectedShareWaitsForItsSetup(t *testing.T) {
 // D3a: the docker setup text is a compose snippet that works for each kind of share, its volume line uses the
 // share's path, and the password never appears in the share's JSON.
 func TestDockerSetupTextWorksForEachShare(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows connects shares itself: no Docker setup")
+	}
 	t.Setenv("container", "docker")
 	_, st, _, _ := libServer(t, false)
 	cases := []struct {
