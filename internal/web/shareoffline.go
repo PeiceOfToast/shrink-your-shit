@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
 
 // D4b: a share that stops answering pauses the libraries in its folder by itself; when it answers
@@ -101,6 +102,22 @@ func sharePausedBy(store *jobs.Store, l jobs.Library) map[string]any {
 		return nil
 	}
 	return map[string]any{"shareId": strconv.FormatInt(sh.ID, 10), "shareName": sh.Name, "since": l.SharePausedSince, "use": "folder"}
+}
+
+// ShareDownFor is the saved share whose folder holds folder, when that share does not answer now. The
+// worker asks when a convert fails: a failure while the share is down is put back, not failed (D4c).
+func ShareDownFor(store *jobs.Store, folder string) (worker.ShareDown, bool) {
+	shares, err := store.LoadShares()
+	if err != nil {
+		return worker.ShareDown{}, false
+	}
+	for _, sh := range shares {
+		mp := mountPointFor(sh)
+		if (folder == mp || jobs.Within(folder, mp)) && !shareAnswers(mp) {
+			return worker.ShareDown{ShareID: sh.ID, Name: sh.Name, MountPath: mp}, true
+		}
+	}
+	return worker.ShareDown{}, false
 }
 
 // mountStatus is share id's status on this computer ("" when it has no mount record yet).

@@ -350,6 +350,11 @@ func v2JobItem(store *jobs.Store, it map[string]any, row jobs.FileRow, card stri
 		} else if store.Paused() {
 			it["subState"] = "processing_paused"
 		}
+		if l, err := store.GetLibrary(row.LibraryID); err == nil && row.RetryAt == "" {
+			if sp := sharePausedBy(store, l); sp != nil { // D4c: it waits because its share is not answering
+				it["reason"] = map[string]string{"code": jobs.ReasonShareOffline, "message": "Waiting: " + sp["shareName"].(string) + " isn't connected."}
+			}
+		}
 	case jobs.CardProcessing:
 		steps, _ := store.Steps(row.JobID)
 		pct := livePercent(row.JobID)

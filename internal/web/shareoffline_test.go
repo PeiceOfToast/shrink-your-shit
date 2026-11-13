@@ -123,3 +123,44 @@ func TestShareAnswersNeedsAMountAndAFolder(t *testing.T) {
 		t.Errorf("an existing folder did not answer")
 	}
 }
+
+// D4c: a file waiting in a share-paused library says why (share_offline) on the jobs list; the share's
+// folder being down is what ShareDownFor reports for a failed convert, and only then.
+func TestWaitingFileSaysItsShareIsOffline(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	st.SetPaused(false)
+	root := shareRoot
+	shareRoot = t.TempDir()
+	shareAnswers = func(p string) bool { _, err := os.Stat(p); return err == nil }
+	t.Cleanup(func() {
+		shareRoot = root
+		shareAnswers = func(p string) bool { return mountedAt(p) && statWithin(p, shareStatTimeout) }
+	})
+
+	sh, _ := st.SaveShare(jobs.Share{Name: "Movies NAS", Type: "smb", Address: "//nas/movies"}, "")
+	mp := mountPointFor(sh)
+	if err := os.MkdirAll(filepath.Join(mp, "Films"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	films, _ := st.AddLibrary("Films", filepath.Join(mp, "Films"), rules.SliderTemplate(3), true)
+	st.Enqueue(jobs.Job{Library: films.Path, LibraryID: films.ID, Path: filepath.Join(films.Path, "a.mkv")})
+
+	if _, ok := ShareDownFor(st, filepath.Join(mp, "Films")); ok {
+		t.Fatal("a share that answers reads as down")
+	}
+	if err := os.RemoveAll(mp); err != nil {
+		t.Fatal(err)
+	}
+	if d, ok := ShareDownFor(st, filepath.Join(mp, "Films")); !ok || d.ShareID != sh.ID || d.MountPath != mp {
+		t.Fatalf("down share not found: %+v %v", d, ok)
+	}
+	if _, ok := ShareDownFor(st, t.TempDir()); ok {
+		t.Error("a folder on no share reads as down")
+	}
+	checkShares(st)
+
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs"})
+	if !strings.Contains(body, `"code":"share_offline"`) || !strings.Contains(body, "Movies NAS isn't connected.") {
+		t.Errorf("waiting file does not say why: %s", body)
+	}
+}

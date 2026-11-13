@@ -30,6 +30,18 @@ func (s *Store) PauseLibrariesForShare(shareID int64, mountPath string) ([]int64
 	return paused, nil
 }
 
+// ShareDropped puts a running job back in the queue because its share stopped answering. It is not a
+// failure: no try is counted, and the libraries in that folder are paused by the share at once, so no
+// claim takes their jobs until it answers. words are the plain reason the page shows.
+func (s *Store) ShareDropped(id, shareID int64, mountPath, words string) error {
+	if err := s.transition(id, Queued, `, progress=0, worker='', error=?, error_code=?, retry_at=''`, words, ReasonShareDropped); err != nil {
+		return err
+	}
+	s.AddStep(id, "share", false, words)
+	_, err := s.PauseLibrariesForShare(shareID, mountPath)
+	return err
+}
+
 // ResumeSharePause clears the share pause of every library share id paused. The libraries stay as the
 // person left them (started or not).
 func (s *Store) ResumeSharePause(shareID int64) ([]int64, error) {
