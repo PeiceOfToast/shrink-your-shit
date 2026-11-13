@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -1022,5 +1023,71 @@ func TestSharesAppModeBusyOldMountIsNotReportedConnected(t *testing.T) {
 	}
 	if strings.Contains(resp, `"connected"`) || !strings.Contains(resp, "mount_failed") {
 		t.Errorf("PATCH answer should say not connected with mount_failed: %s", resp)
+	}
+}
+
+// Start-up remount: every saved share is mounted again; one that the helper refuses is shown
+// as not connected with its reason, and the other stays connected.
+func TestRemountSharesAtStart(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	os.MkdirAll(home, 0o755)
+	t.Setenv("HOME", home)
+
+	sock := filepath.Join(dir, "helper.sock")
+	saved := helper.HelperSocket
+	helper.HelperSocket = sock
+	defer func() { helper.HelperSocket = saved }()
+	var failSecond atomic.Bool
+	cmds := fakeHelper(t, sock, func(cmd map[string]any) map[string]any {
+		if mpt, _ := cmd["mountPoint"].(string); failSecond.Load() && strings.HasSuffix(mpt, "/second") {
+			return map[string]any{"ok": false, "error": map[string]any{"code": "share_not_found", "message": "no such file"}}
+		}
+		return map[string]any{"ok": true, "pid": 42}
+	})
+
+	srv, _, st := server(t, false)
+	for _, name := range []string{"First", "Second"} {
+		body := fmt.Sprintf(`{"address":"\\\\nas\\%s","name":%q,"username":"u","password":"p"}`, strings.ToLower(name), name)
+		if code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares", body: body, ctype: "application/json"}); code != http.StatusCreated {
+			t.Fatalf("POST %s: %d %s", name, code, resp)
+		}
+	}
+
+	before := len(cmds())
+	failSecond.Store(true)
+	RemountShares(st)
+
+	var mountPoints []string
+	for _, c := range cmds()[before:] {
+		if c["cmd"] == "mount" {
+			mpt, _ := c["mountPoint"].(string)
+			mountPoints = append(mountPoints, mpt)
+			if c["password"] == nil || c["password"] == "" {
+				t.Errorf("remount sent no password for %s", mpt)
+			}
+		}
+	}
+	if len(mountPoints) != 2 || !strings.HasSuffix(mountPoints[0], "/first") || !strings.HasSuffix(mountPoints[1], "/second") {
+		t.Fatalf("expected remount of first and second, got %v", mountPoints)
+	}
+
+	code, resp, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/shares"})
+	if code != http.StatusOK {
+		t.Fatalf("GET: %d %s", code, resp)
+	}
+	var list struct {
+		Items []map[string]any `json:"items"`
+	}
+	json.Unmarshal([]byte(resp), &list)
+	status := map[string]any{}
+	for _, it := range list.Items {
+		status[fmt.Sprint(it["name"])] = it["status"]
+	}
+	if status["First"] != "connected" {
+		t.Errorf("First: want connected, got %v", status["First"])
+	}
+	if status["Second"] != "not_connected" {
+		t.Errorf("Second: want not_connected, got %v", status["Second"])
 	}
 }

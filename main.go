@@ -332,6 +332,7 @@ func main() {
 	} else {
 		log.Printf("shrink-your-shit %s: %d librar%s; web UI at http://%s", version, len(all), map[bool]string{true: "y", false: "ies"}[len(all) == 1], *addr)
 	}
+	go web.RemountShares(store) // saved shares come back after a restart (app mode only)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		stop()
 		<-workerDone
