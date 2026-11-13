@@ -117,12 +117,13 @@ function ShareSheet({ share, resp, onDone, onCancel, said }: { share?: Share; re
 
   useEffect(() => { box.current?.focus(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const ss = savedShare;
+  const close = () => { if (ss) { said("Added."); onDone(); } else onCancel(); };
   return (
-    <div className="drawer-wrap" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
-      <aside ref={box} className="drawer" tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={edit ? "es" : "ns"} onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), onCancel())}>
+    <div className="drawer-wrap" onMouseDown={(e) => e.target === e.currentTarget && close()}>
+      <aside ref={box} className="drawer" tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={edit ? "es" : "ns"} onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), close())}>
         <div className="hd"><h3 id={edit ? "es" : "ns"} style={{ margin: 0 }}>{edit ? share!.name : ss ? ss.name : "Add a share"}</h3>
           {edit && <p className="hint" style={{ margin: "4px 0 0" }}>{share!.address} · {TYPE[share!.type].label}</p>}
-          <button className="btn icon ghost" type="button" aria-label="Close" onClick={onCancel}><Icon id="i-chev-l" /></button></div>
+          <button className="btn icon ghost" type="button" aria-label="Close" onClick={close}><Icon id="i-chev-l" /></button></div>
         <div className="bd">
           {ss?.setup ? <>
             <p className="st warn" style={{ margin: 0 }}><Icon id="i-clock" />Waiting for setup on the server</p>
@@ -167,7 +168,7 @@ function ShareSheet({ share, resp, onDone, onCancel, said }: { share?: Share; re
             {error && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{error}</span></p>}
           </>}
           <div className="row" style={{ gap: 8, marginTop: 8 }}>{!ss && <button className="btn primary" type="button" disabled={saving} onClick={save}>{saving ? "Saving..." : edit ? "Save" : "Save and connect"}</button>}
-            <button className="btn ghost" type="button" onClick={() => { if (ss) { said("Added."); onDone(); } else onCancel(); }}>{ss ? "Close" : "Cancel"}</button></div>
+            <button className="btn ghost" type="button" onClick={close}>{ss ? "Close" : "Cancel"}</button></div>
         </div>
       </aside>
     </div>
