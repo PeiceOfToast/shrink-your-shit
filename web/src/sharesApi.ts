@@ -8,7 +8,9 @@ export async function sharesSupported(): Promise<boolean> {
   if (MOCK) return true;
   if (supportsShares !== null) return supportsShares;
   const r: Answer<object> = await call("GET", "/api/v2/shares?limit=1");
-  supportsShares = !("error" in r);
+  // only a 404/not_found means not supported; other errors (auth, offline) keep the tab visible
+  const code = "error" in r ? (r as { error: { code: string } }).error.code : "";
+  supportsShares = !(code === "http_404" || code === "not_found");
   return supportsShares;
 }
 

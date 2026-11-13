@@ -1,26 +1,25 @@
 // D: Network shares settings (SCREENS V9d, D-API-SHAPE.md). Mock only (the engine is after item E).
 // The share list table, Add/Edit sheet, Remove dialog, Test button, and the connect-mode-specific UI.
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Icon } from "../Icon";
-import { MOCK, failed, type Answer } from "../api";
+import { failed, type Answer } from "../api";
 import { Empty, PageHead } from "../PageHead";
 import { SettingsTabs } from "../pages";
 import { useData } from "../useData";
-import { addShare, checkShare, deleteShare, getShares, patchShare, reconnectShare, sharesSupported, testShare } from "../sharesApi";
+import { addShare, checkShare, deleteShare, getShares, patchShare, reconnectShare, testShare } from "../sharesApi";
 import type { Share, ShareTestResult, SharesResponse, ShareType } from "../types/shares";
 
 async function act<T>(p: Promise<Answer<T>>, say: (m: string) => void): Promise<T | null> {
   try { const r = await p; if (failed(r)) return (say(r.error.message), null); return r; } catch (_) { return null; }
 }
 
-// The type label and its hint
 const TYPE: Record<ShareType, { label: string; hint: string }> = {
   smb: { label: "SMB", hint: "Windows shares and most NAS boxes (Synology, QNAP, TrueNAS, Unraid)." },
   nfs: { label: "NFS", hint: "Linux servers and NAS boxes set up for NFS." },
 };
 
 function ShareRow({ share, resp, onChanged, said }: { share: Share; resp: SharesResponse; onChanged: () => void; said: (m: string) => void }) {
-  const [menu, setMenu] = useState(false), [removing, setRemoving] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [editing, setEditing] = useState(false);
   const libs = share.libraries.map((l) => l.name).join(", ");
   const statusClass = share.status === "connected" ? "ok" : share.status === "not_connected" ? "bad" : share.status === "waiting_setup" ? "warn" : "";
@@ -36,18 +35,19 @@ function ShareRow({ share, resp, onChanged, said }: { share: Share; resp: Shares
       <td className="full">{TYPE[share.type].label}</td>
       <td className="full"><span className={"st " + statusClass}><Icon id={statusIcon} /><span>{statusText}</span></span>
         {share.reason && <span className="sub">{share.reason.message}</span>}
-        {share.setup && <span className="sub">Setup needed on the server</span>}
+        {share.status === "waiting_setup" && share.setup && <div className="codebox" style={{ marginTop: 8 }}><code>{share.setup.text}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(share.setup!.text).catch(() => {})}><Icon id="i-copy" />Copy</button></div>}
+        {(canReconnect || canCheck) && <div className="row" style={{ marginTop: 8 }}>{canReconnect && <button className="btn sm" type="button" onClick={reconnect}><Icon id="i-refresh" />Reconnect</button>}{canCheck && <button className="btn sm" type="button" onClick={reconnect}><Icon id="i-refresh" />Check again</button>}</div>}
       </td>
       <td className="full">{libs ? <a href="#">{libs}</a> : <span className="muted">Not used</span>}</td>
       <td className="act">
-        <details className="menu" style={{ display: menu ? undefined : "inline-block" }}>
-          <summary className="btn icon ghost sm" aria-label={"Actions for " + share.name} onClick={() => setMenu(!menu)} style={{ display: "inline-flex" }}><Icon id="i-more" /></summary>
-          {menu && <div className="pop" role="menu">
-            {canReconnect && <button className="it" type="button" onClick={() => (setMenu(false), reconnect())}>Reconnect</button>}
-            {canCheck && <button className="it" type="button" onClick={() => (setMenu(false), reconnect())}>Check again</button>}
-            <button className="it" type="button" onClick={() => (setMenu(false), setEditing(true))}>Edit</button>
-            <button className="it" type="button" onClick={() => (setMenu(false), setRemoving(true))}>Remove...</button>
-          </div>}
+        <details className="menu" style={{ display: "inline-block" }}>
+          <summary className="btn icon ghost sm" aria-label={"Actions for " + share.name} style={{ display: "inline-flex" }}><Icon id="i-more" /></summary>
+          <div className="pop" role="menu">
+            {canReconnect && <button className="it" type="button" onClick={() => { setRemoving(false); reconnect(); }}>Reconnect</button>}
+            {canCheck && <button className="it" type="button" onClick={() => { setRemoving(false); reconnect(); }}>Check again</button>}
+            <button className="it" type="button" onClick={() => setEditing(true)}>Edit</button>
+            <button className="it" type="button" onClick={() => setRemoving(true)}>Remove...</button>
+          </div>
         </details>
         {removing && <RemoveDialog share={share} onCancel={() => setRemoving(false)} onDone={() => { setRemoving(false); onChanged(); }} said={said} />}
         {editing && <ShareSheet share={share} resp={resp} onDone={() => { setEditing(false); onChanged(); }} onCancel={() => setEditing(false)} said={said} />}
@@ -67,8 +67,7 @@ function RemoveDialog({ share, onCancel, onDone, said }: { share: Share; onCance
       onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), onCancel())}>
       <h3 style={{ margin: 0 }}>Remove {share.name}?</h3>
       <p style={{ margin: "8px 0" }}>Shrink Your Shit disconnects from it. Nothing on the share is changed or deleted.{share.setup ? " Also remove it from the server:" : ""}</p>
-      {share.setup && <div className="stack" style={{ gap: 6, marginTop: 8 }}><div className="codebox"><code>{share.setup.text}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(share.setup!.text).catch(() => {})}><Icon id="i-copy" />Copy</button></div>
-          <p className="hint" style={{ margin: 0 }}>To remove it later: <code className="sm muted">{share.setup.removeText}</code> <button className="linkbtn" type="button" onClick={() => navigator.clipboard?.writeText(share.setup!.removeText).catch(() => {})}>Copy</button></p></div>}
+      {share.setup && <div className="codebox"><code>{share.setup.removeText}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(share.setup!.removeText).catch(() => {})}><Icon id="i-copy" />Copy</button></div>}
       {share.libraries.length > 0 && <p className="st bad" style={{ margin: 0 }}><Icon id="i-alert" /><span>{share.libraries.map((l) => l.name).join(" and ")} use this share. Change their folders or remove them first.</span></p>}
       {error && <p className="st bad" style={{ margin: 0 }}><Icon id="i-alert" /><span>{error}</span></p>}
       <div className="row" style={{ gap: 8, marginTop: 8 }}>
@@ -92,6 +91,7 @@ function ShareSheet({ share, resp, onDone, onCancel, said }: { share?: Share; re
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [savedSetup, setSavedSetup] = useState<Share["setup"] | null>(null);
 
   const testNow = async () => {
     setTesting(true); setTestResult(null); setError("");
@@ -106,14 +106,21 @@ function ShareSheet({ share, resp, onDone, onCancel, said }: { share?: Share; re
       ? await act(patchShare(share!.id, { type, address: address.trim(), name: name.trim() || address.trim().split(/[\\/]/).pop()!, guest, username: guest ? undefined : username, password: password || undefined }), setError)
       : await act(addShare({ type, address: address.trim(), name: name.trim() || address.trim().split(/[\\/]/).pop()!, guest: type === "nfs" ? true : guest, username: type === "nfs" ? undefined : (guest ? undefined : username), password: type === "nfs" ? undefined : (password || undefined) }), setError);
     setSaving(false);
-    if (r) { said(edit ? "Saved." : "Added."); onDone(r); }
+    if (r) { if (r.setup && !edit) setSavedSetup(r.setup); else { said(edit ? "Saved." : "Added."); onDone(r); } }
   };
 
   return (
     <div className="sheet" role="dialog" aria-labelledby={edit ? "es" : "ns"} style={{ maxWidth: 520 }}>
-      <div className="hd"><h3 id={edit ? "es" : "ns"}>{edit ? share!.name : "Add a share"}</h3>
+      <div className="hd"><h3 id={edit ? "es" : "ns"}>{edit ? share!.name : savedSetup ? share!.name : "Add a share"}</h3>
         {edit && <p className="hint" style={{ margin: "4px 0 0" }}>{share!.address} · {TYPE[share!.type].label}</p>}</div>
       <div className="bd">
+        {savedSetup ? <>
+          <p className="st warn" style={{ margin: 0 }}><Icon id="i-clock" />Waiting for setup on the server</p>
+          <h4 style={{ margin: 0 }}>Finish on the server</h4>
+          <p style={{ margin: 0 }}>Run this once on this server, as root:</p>
+          <div className="codebox"><code>{savedSetup.text}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(savedSetup.text).catch(() => {})}><Icon id="i-copy" />Copy</button></div>
+          <p className="hint" style={{ margin: 0 }}>It connects the share now and after every restart.</p>
+        </> : <>
         <fieldset className="types"><legend>Type</legend>
           <label className={"radio" + (type === "smb" ? " sel" : "")}><input type="radio" name="st" checked={type === "smb"} onChange={() => setType("smb")} disabled={edit} />
             <span><strong>SMB</strong><span className="hint blk">{TYPE.smb.hint}</span></span></label>
@@ -146,28 +153,27 @@ function ShareSheet({ share, resp, onDone, onCancel, said }: { share?: Share; re
         <div className="row"><button className="btn sm" type="button" disabled={testing || saving} onClick={testNow}>{testing ? "Testing..." : "Test"}</button></div>
         {testResult && (testResult.ok
           ? <div className="note ok" role="status" aria-live="polite"><Icon id="i-check-c" /><span>{testResult.portOnly ? "The server answers on the NFS port. The folder itself is checked when the share connects." : "Connected. Folders at the top: " + testResult.folders!.slice(0, 3).join(", ") + (testResult.moreFolders ? ", and " + testResult.moreFolders + " more." : ".")}</span></div>
-          : <div className="note bad" role="status" aria-live="polite"><Icon id="i-alert" /><span>{testResult.message}</span></div>)}
+          : <div className="note bad" role="status" aria-live="polite"><Icon id="i-alert" /><span>{testResult.message + (testResult.shares?.length ? " The server offers: " + testResult.shares.join(", ") : "")}</span></div>)}
         {error && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{error}</span></p>}
+        </>}
       </div>
       <div className="ft">
-        <button className="btn primary" type="button" disabled={saving} onClick={save}>{saving ? "Saving..." : edit ? "Save" : "Save and connect"}</button>
-        <button className="btn ghost" type="button" onClick={onCancel}>Cancel</button>
+        {!savedSetup && <button className="btn primary" type="button" disabled={saving} onClick={save}>{saving ? "Saving..." : edit ? "Save" : "Save and connect"}</button>}
+        <button className="btn ghost" type="button" onClick={() => { if (savedSetup) onDone(); else onCancel(); }}>{savedSetup ? "Close" : "Cancel"}</button>
       </div>
     </div>
   );
 }
 
 export function SharesSettings() {
-  const resp = useData(getShares, []), [said, setSaid] = useState(""), [adding, setAdding] = useState(false), [supported, setSupported] = useState<boolean | null>(MOCK ? true : null);
+  const resp = useData(getShares, []), [said, setSaid] = useState(""), [adding, setAdding] = useState(false);
   const data = resp.data;
-  useEffect(() => { if (!MOCK && supported === null) sharesSupported().then(setSupported); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const showSharesTab = MOCK || (supported !== false && !resp.error?.message);
   return (
     <div className="stack">
       <PageHead icon="i-shares" title="Settings" />
-      <SettingsTabs at="shares" shares={showSharesTab ? undefined : false} />
+      <SettingsTabs at="shares" />
       <p className="muted" role="status">{said}</p>
-      {resp.error && supported === false ? <p className="muted">This server doesn't have network shares yet.</p> : resp.error && !MOCK ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{resp.error.message}</span></p> : !data ? <div className="empty">Loading...</div> : <>
+      {resp.error ? <p className="muted">This server doesn't have network shares yet.</p> : !data ? <div className="empty">Loading...</div> : <>
         <div className="row" style={{ gap: 6 }}>
           <p className="muted" style={{ margin: 0 }}>Use a folder on a NAS or another computer as a library. Shrink Your Shit connects to it and reconnects after a restart.</p>
           <span className="sp" />
