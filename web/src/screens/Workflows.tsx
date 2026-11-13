@@ -35,8 +35,11 @@ function RowMenu({ w, onSaid, reload }: { w: Workflow; onSaid: (s: string) => vo
       <summary className="btn sm icon ghost" aria-label={"More for " + w.name}><Icon id="i-more" /></summary>
       <div className="pop" role="menu">
         <button type="button" className="it" role="menuitem" onClick={async () => { close(); if (await act(duplicateWorkflow(w.id), onSaid)) (onSaid(w.name + " duplicated."), reload()); }}><Icon id="i-copy" />Duplicate</button>
-        <button type="button" className="it" role="menuitem" disabled={!!used} aria-describedby={used ? "used-" + w.id : undefined}
-          onClick={async () => { close(); if (window.confirm("Delete the workflow " + w.name + "? This can't be undone.") && (await act(deleteWorkflow(w.id), onSaid))) (onSaid(w.name + " deleted."), reload()); }}>
+        <button type="button" className="it" role="menuitem" aria-disabled={used ? true : undefined} aria-describedby={used ? "used-" + w.id : undefined}
+          onClick={async () => { if (used) return; close(); if (!window.confirm("Delete the workflow " + w.name + "? This can't be undone.")) return;
+            // The server answers 204 with no body (null), which act() can't tell apart from a failure.
+            let r; try { r = await deleteWorkflow(w.id); } catch { return; }
+            if (failed(r)) onSaid(r.error.message); else { onSaid(w.name + " deleted."); reload(); } }}>
           <Icon id="i-trash" />Delete
         </button>
         {used && <div className="hint" id={"used-" + w.id} style={{ padding: "0 10px 6px" }}>Used by {used}</div>}

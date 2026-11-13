@@ -194,12 +194,20 @@ func MatchedKeyLines(lines []string) []string {
 
 var deniedOutput = regexp.MustCompile(`(?i)output\s+(\S.*?):\s*permission denied`)
 
-// DeniedFolder is the folder ffmpeg could not write to, from its "Error opening output <path>: Permission denied"
-// line (user review 11-13 item E, QA of #214): the new file's folder, never the source's. A path inside a staging folder
-// (".syp…") names the folder above it. "" when no line names a path.
+// deniedWrite is the worker's own line for a write refused while putting the new file in place:
+// "Couldn't write <path>: <the system's words>" (worker placeError.keyLine).
+var deniedWrite = regexp.MustCompile(`(?i)^couldn't write (\S.*): (?:permission denied|read-only file system|access is denied)`)
+
+// DeniedFolder is the folder a write was refused in: from ffmpeg's "Error opening output <path>: Permission denied"
+// line (user review 11-13 item E, QA of #214), or the worker's "Couldn't write <path>: ..." line when putting the new
+// file in place was refused (the manager's check). It is the new file's folder, never the source's. A path inside a
+// staging folder (".syp…") names the folder above it. "" when no line names a path.
 func DeniedFolder(lines []string) string {
 	for _, l := range lines {
 		m := deniedOutput.FindStringSubmatch(l)
+		if m == nil {
+			m = deniedWrite.FindStringSubmatch(l)
+		}
 		if m == nil || !strings.ContainsAny(m[1], `/\`) {
 			continue
 		}
@@ -231,7 +239,7 @@ var classifierOrder = []struct {
 	{"encoder_unavailable", []string{"unknown encoder", "encoder not found", "error while opening encoder", "could not open encoder",
 		"error creating a mfx session", "error initializing output stream", "no device", "device not available", "encoder not available"}},
 	{"no_space", []string{"no space left on device"}},
-	{"output_not_writable", []string{"permission denied"}},
+	{"output_not_writable", []string{"permission denied", "read-only file system", "access is denied"}},
 	{"source_missing", []string{"no such file or directory"}},
 	{"source_damaged", []string{"invalid data found when processing input", "moov atom not found", "error while decoding",
 		"decode_slice_header error", "non-existing pps", "invalid nal unit"}},
