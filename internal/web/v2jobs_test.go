@@ -62,7 +62,7 @@ func TestV2Jobs(t *testing.T) {
 	}
 	// every item's reason is {code, message} | null, as every v2 reason (ui-shop 23:27Z)
 	want := map[string]any{
-		"failed.mkv":  map[string]any{"code": "ffmpeg_error", "message": "Converting did not finish"},
+		"failed.mkv":  map[string]any{"code": "ffmpeg_error", "message": "ffmpeg stopped with an error."},
 		"retry.mkv":   map[string]any{"code": "ffmpeg_error", "message": "busy"},
 		"skipped.mkv": map[string]any{"code": rules.SkipAlreadyInFormat, "message": "It is already HEVC in MKV."},
 		"waiting.mkv": nil, "done.mkv": nil,
@@ -340,7 +340,9 @@ func TestFailureSummaryInTheAPI(t *testing.T) {
 		t.Fatalf("failed tab: %s", body)
 	}
 	f := r.Items[0]["failure"].(map[string]any)
-	if f["step"] != "encode" || f["exitCode"] != 1.0 || f["mediaTime"] != "00:41:12" || f["hint"] != nil || r.Items[0]["logState"] != "complete" {
+	if f["step"] != "encode" || f["exitCode"] != 1.0 || f["mediaTime"] != "00:41:12" || r.Items[0]["logState"] != "complete" ||
+		f["hint"] != "Play the file around that point to check it. Retry won't help with the same file." ||
+		r.Items[0]["reason"].(map[string]any)["message"] != "The source file is damaged at 00:41:12." {
 		t.Errorf("failure %v logState %v", f, r.Items[0]["logState"])
 	}
 	if lines := f["keyLines"].([]any); len(lines) != 5 || lines[4] != "Invalid data found when processing input" {

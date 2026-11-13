@@ -36,3 +36,31 @@ func TestFailureCodes(t *testing.T) {
 		}
 	}
 }
+
+// User review 11-13 item E: design's sentences; a fact the server lacks is left out, not guessed.
+func TestFailureWords(t *testing.T) {
+	f := FailureFacts{Path: "/media/movies/Movie.mkv", Folder: "/mnt/out", ExitCode: 1, MediaTime: "00:41:12", Stored: "Converting did not finish",
+		KeyLines: []string{"[AVEncoder @ 0x1] Unknown encoder 'h264_qsv'"}}
+	for _, c := range []struct{ code, message string }{
+		{"encoder_unavailable", "The encoder couldn't start: h264_qsv isn't available on this worker."},
+		{"output_not_writable", "Couldn't write to /mnt/out: permission denied."},
+		{"no_space", "Not enough space in /mnt/out to finish converting."},
+		{"source_damaged", "The source file is damaged at 00:41:12."},
+		{"source_missing", "Couldn't read /media/movies/Movie.mkv: the file is missing."},
+		{"ffmpeg_error", "ffmpeg stopped with an error (exit code 1)."},
+		{"cannot_read", "Converting did not finish"},
+	} {
+		if got, _ := FailureWords(c.code, f); got != c.message {
+			t.Errorf("%s: %q, want %q", c.code, got, c.message)
+		}
+	}
+	if _, hint := FailureWords("source_damaged", FailureFacts{ExitCode: -1}); hint == "" {
+		t.Error("a damaged source has a hint")
+	}
+	if msg, _ := FailureWords("source_damaged", FailureFacts{ExitCode: -1}); msg != "The source file is damaged." {
+		t.Errorf("no media time: %q", msg)
+	}
+	if msg, _ := FailureWords("ffmpeg_error", FailureFacts{ExitCode: -1}); msg != "ffmpeg stopped with an error." {
+		t.Errorf("no exit code: %q", msg)
+	}
+}

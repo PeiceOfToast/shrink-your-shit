@@ -2,7 +2,11 @@
 
 package jobs
 
-import "strings"
+import (
+	"fmt"
+	"regexp"
+	"strings"
+)
 
 // FailureCode is a failed job's code in design's V6b table (user review 11-13 item E): the stored error code mapped
 // onto those names. A generic failure is told apart by its ffmpeg key lines: a missing encoder, a damaged source, a
@@ -44,4 +48,57 @@ func classifyKeyLines(lines []string) string {
 		return "source_damaged"
 	}
 	return "ffmpeg_error"
+}
+
+// FailureFacts are what a failed job's sentence can name: its file, its output folder, the encoder and exit code
+// ffmpeg reported, the place in the video where it stopped (when known) and the stored message.
+type FailureFacts struct {
+	Path, Folder string
+	ExitCode     int // -1: none
+	MediaTime    string
+	Stored       string // the stored plain words, used for a code the table does not name
+	KeyLines     []string
+}
+
+var encoderName = regexp.MustCompile(`unknown encoder '([^']+)'`)
+
+// FailureWords is design's sentence and "what you can do" for a failed job's code (USER-REVIEW 11-13 item E, V6b).
+// A fact the server does not have is left out of the sentence rather than guessed. A code the table does not name
+// keeps the stored words and no hint.
+func FailureWords(code string, f FailureFacts) (message, hint string) {
+	switch code {
+	case "encoder_unavailable":
+		what := "The encoder"
+		if m := encoderName.FindStringSubmatch(strings.ToLower(strings.Join(f.KeyLines, "\n"))); m != nil {
+			what = m[1]
+		}
+		return "The encoder couldn't start: " + what + " isn't available on this worker.",
+			"Test the encoders on the Workers page, or convert on the processor."
+	case "output_not_writable":
+		return "Couldn't write to " + f.Folder + ": permission denied.", "Let shrink-your-shit write to that folder, then Retry."
+	case "no_space":
+		return "Not enough space in " + f.Folder + " to finish converting.", "Free some space there, then Retry."
+	case "source_damaged":
+		msg := "The source file is damaged."
+		if f.MediaTime != "" {
+			msg = "The source file is damaged at " + f.MediaTime + "."
+		}
+		return msg, "Play the file around that point to check it. Retry won't help with the same file."
+	case "source_missing":
+		return "Couldn't read " + f.Path + ": the file is missing.", "Check that the file is still there, then Retry."
+	case "check_failed":
+		return "The new file didn't pass the picture check. The original is untouched.",
+			"Pick a higher quality on the Convert step, or lower the check on the workflow."
+	case "worker_lost":
+		return "The worker stopped answering during the conversion.", "Check that the worker is running. The file can be retried on any worker."
+	case "stalled":
+		return "The conversion stopped making progress and was stopped.",
+			"Retry. If it stops again at the same point, the last ffmpeg lines above show where."
+	case "ffmpeg_error":
+		if f.ExitCode >= 0 {
+			return fmt.Sprintf("ffmpeg stopped with an error (exit code %d).", f.ExitCode), ""
+		}
+		return "ffmpeg stopped with an error.", ""
+	}
+	return f.Stored, ""
 }
