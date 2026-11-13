@@ -3,6 +3,7 @@
 package worker
 
 import (
+	"context"
 	"os"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
@@ -73,6 +74,16 @@ func TestPlaceRefusedGetsAReplaceStep(t *testing.T) {
 	maxTries = 1 // the last try: the failure is final, not put back in the queue
 	t.Cleanup(func() { maxTries = old })
 
+	// Both ways a replace goes: straight over the original, and the default that keeps the original in
+	// .syp-trash (that one first makes the folder, which the read-only library refuses).
+	for _, keep := range []bool{false, true} {
+		t.Run(map[bool]string{false: "replace", true: "keeping originals"}[keep], func(t *testing.T) {
+			placeRefused(t, keep)
+		})
+	}
+}
+
+func placeRefused(t *testing.T, keep bool) {
 	s := newScenario(t)
 	swapHook = func(at string) error {
 		if at == "before swap" {
@@ -81,7 +92,11 @@ func TestPlaceRefusedGetsAReplaceStep(t *testing.T) {
 		return nil
 	}
 	t.Cleanup(func() { swapHook = nil; os.Chmod(s.dir, 0o755) })
-	s.run(Replace)
+	if keep {
+		s.keeping(7).RunOne(context.Background())
+	} else {
+		s.run(Replace)
+	}
 
 	if j := s.job(); j.Status != jobs.Failed {
 		t.Fatalf("job %s (%s)", j.Status, j.Error)
