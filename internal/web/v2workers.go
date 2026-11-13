@@ -280,6 +280,36 @@ var encoderLabels = map[string]string{
 	"hevc_v4l2m2m": "V4L2, HEVC (hardware)",
 }
 
+const failed = "ffmpeg lists it, but a test frame failed on this computer."
+
+// Seams for intelFailure: the render nodes doctor's vaapiDevice globs, and an open for read and write
+// as this user. Tests swap them; the real ones touch /dev/dri.
+var renderNodes = func() []string {
+	m, _ := filepath.Glob("/dev/dri/renderD*")
+	return m
+}
+
+var openRender = func(path string) error {
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}
+
+// intelFailure says why a failed Quick Sync or VA-API test is failing when the device is the cause;
+// otherwise the generic line. Only hevc_qsv and hevc_vaapi come here.
+func intelFailure() string {
+	nodes := renderNodes()
+	if len(nodes) == 0 {
+		return "No graphics device here (/dev/dri is missing). In Docker, add the Intel GPU block from docker-compose.yml and restart."
+	}
+	if err := openRender(nodes[0]); err != nil {
+		return "Can't open " + nodes[0] + ": the app's user isn't in its group. In Docker, set group_add to the host's render group id (getent group render | cut -d: -f3)."
+	}
+	return failed
+}
+
 // capabilities are the encoder test's findings as the contract's Capability list ([] before the first
 // test): each encoder tested with a real frame, passed or failed; ffprobe and the picture check.
 func capabilities(t doctor.Tools, ok bool) []map[string]any {
@@ -298,7 +328,6 @@ func capabilities(t doctor.Tools, ok bool) []map[string]any {
 		}
 		out = append(out, c)
 	}
-	const failed = "ffmpeg lists it, but a test frame failed on this computer."
 	for _, e := range t.Software {
 		add("encoder", e, encoderLabels[e], "cpu", "passed", "")
 	}
@@ -313,7 +342,11 @@ func capabilities(t doctor.Tools, ok bool) []map[string]any {
 		add("encoder", e, encoderLabels[e], "gpu", "passed", detail)
 	}
 	for _, e := range t.HardwareListed {
-		add("encoder", e, encoderLabels[e], "gpu", "failed", failed)
+		detail := failed
+		if e == "hevc_qsv" || e == "hevc_vaapi" {
+			detail = intelFailure()
+		}
+		add("encoder", e, encoderLabels[e], "gpu", "failed", detail)
 	}
 	if t.FFprobe != "" {
 		add("tool", "ffprobe", "ffprobe "+t.FFprobeVersion, "cpu", "passed", "")
