@@ -40,6 +40,16 @@ export function mockJobs(tab: Tab, q: string): JobsPage {
 // A removed job (its library was removed) and one from before the update, for the drawer's two special cases.
 const REMOVED: JobDetail = { id: "47001", state: "cancelled", removed: true, reason: { code: "removed", message: "Its library was removed, so this file wasn't converted." },
   events: [{ seq: 3, at: at(300), from: null, to: "queued", reason: null, workerId: null }, { seq: 9, at: at(200), from: "queued", to: "cancelled", reason: "removed", workerId: null }], steps: [] };
+// The sample's log by step: the steps the job went through, the failing one with its last lines
+export function mockJobLog(id: string): { state: string; steps: { name: string; startedAt: string; tookMs: number; outcome: string; command: string | null; output: string; result: string }[]; final: string } | { error: { code: string; message: string } } {
+  const j = mockJob(id);
+  if (!j) return { error: { code: "not_found", message: "There is no such job." } };
+  const failed = j.state === "failed";
+  return { state: "complete", final: j.state, steps: [
+    { name: "Found the file", startedAt: at(300), tookMs: 120, outcome: "ok", command: null, output: "", result: "Found" },
+    { name: "Converting video", startedAt: at(290), tookMs: 252000, outcome: failed ? "failed" : "ok", command: "ffmpeg -i in.mkv -c:v libx265 -crf 23 out.mkv", output: failed ? "[hevc @ 0x55d1] Error while decoding stream #0:0: Invalid data found when processing input\nConversion failed!" : "", result: failed ? "Failed" : "Done" },
+  ] };
+}
 export function mockJob(id: string): JobDetail | null {
   if (id === REMOVED.id) return REMOVED;
   const j = items.find((x) => x.id === id || (x.jobId === id && x.origin === "scan"));

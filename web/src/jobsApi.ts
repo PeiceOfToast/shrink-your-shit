@@ -1,6 +1,6 @@
 // V6 Jobs on the real /api/v2/jobs (#113), or the sample jobs with ?mock=1 (mock/jobs.ts).
 import { call, failed, MOCK, type Answer } from "./api";
-import { mockAction, mockJob, mockJobs, mockConvertAgain } from "./mock/jobs";
+import { mockAction, mockJob, mockJobs, mockJobLog, mockConvertAgain } from "./mock/jobs";
 import type { ActionResult, JobAction, JobDetail, JobsPage, Tab, Pin } from "./types/jobs";
 
 export async function listJobs(tab: Tab, q: string): Promise<Answer<JobsPage>> {
@@ -16,6 +16,13 @@ export async function findSkip(jobId: string): Promise<Answer<JobsPage>> {
     const r = await call<JobsPage>("GET", "/api/v2/jobs?tab=skipped&limit=500&offset=" + at);
     if (failed(r) || r.items.some((x) => x.jobId === jobId) || !r.items.length || at + r.items.length >= r.total) return r;
   }
+}
+// E: the job's log by step (GET /log, a finished job's full record; /log/stream stays for running jobs)
+export interface LogStep { name: string; startedAt: string; tookMs: number; outcome: string; command: string | null; output: string; result: string }
+export interface JobLog { state: string; steps: LogStep[]; final: string }
+export async function getJobLog(id: string): Promise<Answer<JobLog>> {
+  if (MOCK) return mockJobLog(id);
+  return call("GET", "/api/v2/jobs/" + encodeURIComponent(id) + "/log");
 }
 export async function getJob(id: string): Promise<Answer<JobDetail>> {
   if (MOCK) return mockJob(id) ?? { error: { code: "not_found", message: "There is no such job." } };

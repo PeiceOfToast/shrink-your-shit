@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, count, elapsed, plural } from "../format";
-import { convertDoneAgain, findSkip, getJob, jobAction, listJobs, listKept, restoreKept } from "../jobsApi";
+import { convertDoneAgain, findSkip, getJob, getJobLog, jobAction, listJobs, listKept, restoreKept } from "../jobsApi";
 import { getWorkflow } from "../workflowApi";
 import { onLive } from "../live";
 import { Empty, PageHead } from "../PageHead";
@@ -159,15 +159,43 @@ export function Jobs() {
 // comes once the job is over and the whole log has been sent.
 // E (SCREENS V6b 'Why it failed'): the sentence, where it stopped, the server's hint when it has one, and the last
 // ffmpeg error lines (at most five) behind a disclosure. Each part is left out when the server sends none.
-function WhyFailed({ msg, f }: { msg: string; f: Failure }) {
-  const s = Math.round(f.afterMs / 1000), t = s >= 60 ? Math.floor(s / 60) + " min " + (s % 60) + " s" : s + " s";
+// durations read '4 min 12 s' and '0.1 s' everywhere (the design's phone note)
+const dur = (ms: number) => { const s = ms / 1000; return s < 1 ? s.toFixed(1) + " s" : s < 60 ? Math.round(s) + " s" : Math.floor(s / 60) + " min " + (Math.round(s) % 60) + " s"; };
+// SCREENS V6b / mockup: the sentence, the reason code small under it, where it stopped (linked to the log), the hint as
+// 'What you can do' (left out when null), the last ffmpeg lines with Copy, and what comes next. --error left border.
+function WhyFailed({ id, msg, code, f }: { id: string; msg: string; code: string; f: Failure }) {
+  const t = dur(f.afterMs), box = useRef<HTMLElement>(null);
+  const copy = (text: string) => navigator.clipboard?.writeText(text).catch(() => {});
   return (
-    <section className="note" role="region" aria-label="Why it failed" style={{ display: "block" }}>
-      <h3><Icon id="i-alert" /> Why it failed</h3>
+    <section ref={box} className="note" role="region" aria-label="Why it failed" style={{ display: "block", borderLeft: "3px solid var(--error)" }}>
+      <h3><Icon id="i-alert" /> Why it failed <span className="pill bad">Failed</span></h3>
       <p style={{ fontSize: "var(--fs-lg)" }}>{msg}</p>
-      <p className="sm">In step {f.stepIndex} of {f.stepCount}, {f.step}, after {t}{f.mediaTime ? " (at " + f.mediaTime + " in the video)" : ""}.</p>
-      {f.hint && <p>{f.hint}</p>}
-      {f.keyLines.length > 0 && <details><summary className="sm">Last lines from ffmpeg</summary><pre className="joblog">{f.keyLines.join("\n")}</pre></details>}
+      <p className="sm muted mono">{code}</p>
+      <p className="sm">In step {f.stepIndex} of {f.stepCount}, <a href={"#job-step-" + f.stepIndex}>{f.step}</a>, after {t}{f.mediaTime ? " (at " + f.mediaTime + " in the video)" : ""}.</p>
+      {f.hint && <p><strong>What you can do:</strong> {f.hint}</p>}
+      {f.keyLines.length > 0
+        ? <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">Last lines from ffmpeg</span><button className="btn sm ghost" type="button" onClick={() => copy(f.keyLines.join("\n"))}><Icon id="i-copy" />Copy</button></div>
+          <pre className="joblog">{f.keyLines.join("\n")}</pre></div>
+        : <p className="sm muted">ffmpeg didn't run.</p>}
+      <div className="row" style={{ gap: 8 }}>
+        {!MOCK && <a className="btn sm" href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}><Icon id="i-download" />Open the full log</a>}
+        <button className="btn sm ghost" type="button" onClick={() => copy(box.current?.innerText ?? "")}><Icon id="i-copy" />Copy summary</button>
+      </div>
+    </section>);
+}
+
+// E: a finished job's log by step (GET /log): each step's name, how long it took and how it ended; a failed step's last lines
+function StepLog({ id }: { id: string }) {
+  const d = useData(() => getJobLog(id), [id]);
+  if (!d.loaded) return <section><h3>Log</h3><p className="muted">Loading the log...</p></section>;
+  if (!d.data) return <section><h3>Log</h3><p className="muted">{d.error?.message ?? "The log can't be shown."}</p></section>;
+  return (
+    <section id="job-log"><h3>Log</h3>
+      <ol className="stack" style={{ listStyle: "none", padding: 0, margin: 0 }}>{d.data.steps.map((st, i) => (
+        <li key={i} id={"job-step-" + (i + 1)}><div className="row nw" style={{ gap: 8 }}><strong>{st.name}</strong><span className="sm muted">{dur(st.tookMs)}</span>
+          <span className={"pill " + (st.outcome === "ok" ? "ok" : "bad")}>{st.outcome === "ok" ? "Done" : "Failed"}</span></div>
+          {st.command && <pre className="joblog sm">{st.command}</pre>}
+          {st.output && <pre className="joblog sm">{st.output}</pre>}</li>))}</ol>
     </section>);
 }
 
@@ -285,7 +313,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {/* review db7b1f1 P3: "removed" is the server's flag, not a person's word. Only a job removed with its library
               gets a note; a job that ended as a skip shows its reason under Why like any other. */}
           {j?.removed && j.reason?.code === "removed" ? <div className="note"><Icon id="i-info" /><div>Its library was removed, so this file won't be converted.</div></div>
-            : j?.failure ? <WhyFailed msg={reason} f={j.failure} />
+            : j?.failure ? <WhyFailed id={id} msg={reason} code={j.reason?.code ?? ""} f={j.failure} />
             : reason && <section><h3>Why</h3><p>{reason}</p></section>}
           <section><h3>File</h3><dl className="kv">
             {(own?.path ?? j?.file?.path) && <><dt>Source</dt><dd className="mono sm">{own?.path ?? j?.file?.path}</dd></>} {/* review 54ff228: no '-' when the server doesn't keep the path (a removed library's job) */}
@@ -308,7 +336,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {/* review db7b1f1 P2: the scan sentence only for a file a scan left out; a cancelled file whose job the server
               doesn't send yet claims nothing about scans or steps */}
           {scan && <section><h3>Timeline</h3><p className="muted">{state === "cancelled" ? "Cancelled." : "This file was left out when its library was scanned, so it has no job and no steps."}</p></section>}
-          {!scan && <JobLog id={id} name={name} />}
+          {!scan && (active ? <JobLog id={id} name={name} /> : <StepLog id={id} />)}
           {/* #148: before is the original; null for an older job that replaced a file of the same name: said so, never blank */}
           {(before || after) && <section><h3>Result</h3><table className="tbl kvt"><thead><tr><th /><th>Before</th><th>After</th></tr></thead><tbody>
             <tr><th>Video</th>{before ? <td>{before.video}</td> : <td rowSpan={4} className="muted">Not recorded for this job</td>}<td>{after?.video ?? "-"}</td></tr>
