@@ -40,7 +40,7 @@ export async function duplicateWorkflow(id: string): Promise<Answer<Workflow>> {
   return call("POST", base(id) + "/duplicate");
 }
 export async function deleteWorkflow(id: string): Promise<Answer<unknown>> {
-  if (MOCK) { const e = mock.deleteWorkflow(id); return e ? no("in_use", e) : {}; }
+  if (MOCK) { const e = mock.deleteWorkflow(id); return e ? no("in_use", e) : null; } // like the real server: 204, no body
   return call("DELETE", base(id));
 }
 // The published document (what libraries run): GET /workflows/{id}, then /revisions/{publishedRevisionId}. null: never published.
