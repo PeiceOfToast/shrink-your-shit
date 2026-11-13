@@ -428,12 +428,12 @@ func (w *Worker) recordEncode(id int64, args []string, started time.Time, encErr
 	}
 	var keys []string
 	for _, l := range lines {
+		if jobs.InfoLine(l) {
+			continue
+		}
 		if strings.Contains(strings.ToLower(l), "error") || strings.Contains(strings.ToLower(l), "invalid") {
 			keys = append(keys, l)
 		}
-	}
-	if len(keys) == 0 && len(lines) > 0 {
-		keys = lines[max(0, len(lines)-5):]
 	}
 	ran, exit := ffmpegExit(terr)
 	w.Queue.SetFailureSummary(id, jobs.FailureSummary{Step: 0, StepCount: 1, AfterMs: w.now().Sub(started).Milliseconds(),

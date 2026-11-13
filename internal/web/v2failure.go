@@ -76,7 +76,7 @@ func failureCode(store *jobs.Store, id int64, errorCode string) string {
 func failureFacts(store *jobs.Store, id int64, path, outputPath, message string) jobs.FailureFacts {
 	facts := jobs.FailureFacts{Path: path, ExitCode: -1, Stored: message}
 	if f, err := store.FailureOf(id); err == nil && f != nil {
-		facts.ExitCode, facts.MediaTime, facts.KeyLines = f.ExitCode, f.MediaTime, f.KeyLines
+		facts.ExitCode, facts.MediaTime, facts.KeyLines, facts.FfmpegRan = f.ExitCode, f.MediaTime, f.KeyLines, f.FfmpegRan
 	}
 	// the folder a write was refused in: the new file's, from ffmpeg's own line; else the output path's, when it is
 	// not the source (a replace writes next to the source: then no folder is named). Never the source's folder.

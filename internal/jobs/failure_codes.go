@@ -63,6 +63,7 @@ type FailureFacts struct {
 	KeyLines     []string
 	Needed, Free uint64 // space needed/free for no_space (0 = unknown)
 	WorkerName   string // the worker's display name ("this computer" for local)
+	FfmpegRan    bool   // ffmpeg started (false: never ran or was never started)
 }
 
 // encoderFamily maps the suffix after the codec (e.g. h264_qsv → Intel Quick Sync)
@@ -138,6 +139,13 @@ func FailureWords(code string, f FailureFacts) (message, hint string) {
 		return "The conversion stopped making progress and was stopped.",
 			"Retry. If it stops again at the same point, the last ffmpeg lines above show where."
 	case "ffmpeg_error":
+		// 255 = ffmpeg was stopped; -1 = killed by a signal
+		if f.ExitCode == 255 {
+			return "ffmpeg was stopped before it finished (exit code 255).", ""
+		}
+		if f.ExitCode == -1 && f.FfmpegRan {
+			return "ffmpeg was stopped before it finished (stopped by a signal).", ""
+		}
 		if f.ExitCode >= 0 {
 			return fmt.Sprintf("ffmpeg stopped with an error (exit code %d).", f.ExitCode), ""
 		}
@@ -146,8 +154,16 @@ func FailureWords(code string, f FailureFacts) (message, hint string) {
 	return f.Stored, ""
 }
 
+// InfoLine returns true for ffmpeg informational lines that should not be key lines.
+func InfoLine(l string) bool {
+	low := strings.ToLower(l)
+	return strings.Contains(low, "[info]") || strings.Contains(low, "[verbose]") ||
+		strings.HasPrefix(low, "frame=") || strings.HasPrefix(low, "stream mapping") ||
+		strings.HasPrefix(low, "press [q]") || strings.Contains(low, "encoder settings")
+}
+
 // MatchedKeyLines are the failure's key lines: the lines that give the code classifyKeyLines chose (the lines that
-// say why), else the lines that report an error, else the last lines (user review 11-13 item E, QA of #214).
+// say why), else the lines that report an error, else [] (never informational lines, never the last 5 lines).
 func MatchedKeyLines(lines []string) []string {
 	code := classifyKeyLines(lines)
 	if code != "ffmpeg_error" {
@@ -163,6 +179,9 @@ func MatchedKeyLines(lines []string) []string {
 	}
 	var errs []string
 	for _, l := range lines {
+		if InfoLine(l) {
+			continue
+		}
 		if low := strings.ToLower(l); strings.Contains(low, "error") || strings.Contains(low, "invalid") {
 			errs = append(errs, l)
 		}
@@ -170,10 +189,7 @@ func MatchedKeyLines(lines []string) []string {
 	if len(errs) > 0 {
 		return errs
 	}
-	if len(lines) > 5 {
-		return lines[len(lines)-5:]
-	}
-	return lines
+	return nil
 }
 
 var deniedOutput = regexp.MustCompile(`(?i)output\s+(\S.*?):\s*permission denied`)

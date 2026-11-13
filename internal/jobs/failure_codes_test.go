@@ -89,8 +89,8 @@ func TestMatchedKeyLines(t *testing.T) {
 		t.Errorf("permission: %q", got)
 	}
 	generic := []string{"a", "b", "c", "d", "e", "f", "g"}
-	if got := MatchedKeyLines(generic); len(got) != 5 || got[0] != "c" {
-		t.Errorf("no error line: %q", got)
+	if got := MatchedKeyLines(generic); len(got) != 0 {
+		t.Errorf("no error line: expected [], got %q", got)
 	}
 }
 
