@@ -72,7 +72,10 @@ func TestEncryptionDifferentOutputs(t *testing.T) {
 	if len(ct1) == len(ct2) {
 		match := true
 		for i := 0; i < len(ct1); i++ {
-			if ct1[i] != ct2[i] { match = false; break }
+			if ct1[i] != ct2[i] {
+				match = false
+				break
+			}
 		}
 		if match {
 			t.Error("same password encrypted twice gives same ciphertext")

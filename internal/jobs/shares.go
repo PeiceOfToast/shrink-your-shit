@@ -147,7 +147,9 @@ func (s *Store) SaveShare(sh Share, password string) (Share, error) {
 	}
 	now := s.now().UTC().Format(time.RFC3339)
 	guest := 0
-	if sh.Guest { guest = 1 }
+	if sh.Guest {
+		guest = 1
+	}
 	r, err := s.db.Exec(`INSERT INTO shares(type, address, name, guest, username,
 		encrypted_password, auth_nonce, created, updated) VALUES(?,?,?,?,?,?,?,?,?)`,
 		sh.Type, sh.Address, sh.Name, guest, sh.Username, ct, nonce, now, now)
