@@ -122,6 +122,12 @@ func (w *Worker) keepAndReplace(ctx context.Context, job jobs.Job, stage *staged
 	dir := filepath.Join(filepath.Dir(job.Path), TrashDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		log.Printf("folder for kept originals %s: %v", dir, err)
+		if errors.Is(err, fs.ErrPermission) {
+			// The library folder refuses a new entry (it turned read-only after the encode): a failed
+			// replace step whose key line names .syp-trash, so the person's sentence names its folder
+			// (jobs.DeniedFolder), not a safety check that said no (manager's job 7).
+			return err
+		}
 		return kept("the folder that keeps originals couldn't be made here, so the original was left as it is. Check that shrink-your-shit may write in this folder")
 	}
 	hash, err := SampleHash(job.Path)
