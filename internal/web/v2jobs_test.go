@@ -62,8 +62,8 @@ func TestV2Jobs(t *testing.T) {
 	}
 	// every item's reason is {code, message} | null, as every v2 reason (ui-shop 23:27Z)
 	want := map[string]any{
-		"failed.mkv":  map[string]any{"code": "convert_failed", "message": "Converting did not finish"},
-		"retry.mkv":   map[string]any{"code": "convert_failed", "message": "busy"},
+		"failed.mkv":  map[string]any{"code": "ffmpeg_error", "message": "Converting did not finish"},
+		"retry.mkv":   map[string]any{"code": "ffmpeg_error", "message": "busy"},
 		"skipped.mkv": map[string]any{"code": rules.SkipAlreadyInFormat, "message": "It is already HEVC in MKV."},
 		"waiting.mkv": nil, "done.mkv": nil,
 	}

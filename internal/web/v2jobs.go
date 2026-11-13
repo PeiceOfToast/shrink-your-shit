@@ -193,6 +193,9 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 		if n := len(events); j.Error != "" && n > 0 {
 			d["reason"] = reasonOf(events[n-1])
 		}
+		if m, ok := d["reason"].(map[string]string); ok && j.Status == jobs.Failed { // design's names, as the list shows them
+			m["code"] = failureCode(store, id, m["code"])
+		}
 		meta := map[string]any{"before": nil, "after": nil}
 		var snap rules.Snapshot
 		if json.Unmarshal([]byte(j.Plan), &snap) == nil && snap.Source != nil {
@@ -315,7 +318,7 @@ func v2JobItem(store *jobs.Store, it map[string]any, row jobs.FileRow, card stri
 	case card == jobs.CardSkipped:
 		it["reason"] = map[string]string{"code": row.Reason, "message": it["detail"].(string)}
 	case row.ErrorCode != "" && (card == jobs.CardFailed || card == jobs.CardUnprocessed && row.RetryAt != ""):
-		it["reason"] = map[string]string{"code": row.ErrorCode, "message": row.Error}
+		it["reason"] = map[string]string{"code": failureCode(store, row.JobID, row.ErrorCode), "message": row.Error} // design's names (11-13 E)
 	default:
 		it["reason"] = nil
 	}

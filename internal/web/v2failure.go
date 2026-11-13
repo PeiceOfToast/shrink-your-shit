@@ -43,3 +43,12 @@ func logState(store *jobs.Store, id int64) string {
 	}
 	return "none"
 }
+
+// failureCode is a failed job's code in design's V6b names, from its stored code and its ffmpeg key lines.
+func failureCode(store *jobs.Store, id int64, errorCode string) string {
+	var lines []string
+	if f, err := store.FailureOf(id); err == nil && f != nil {
+		lines = f.KeyLines
+	}
+	return jobs.FailureCode(errorCode, lines)
+}
