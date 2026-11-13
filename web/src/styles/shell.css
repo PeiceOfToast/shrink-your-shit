@@ -520,6 +520,10 @@ label.chk{cursor:pointer}
 .tbl .posc{width:44px;text-align:right;color:var(--text-2);font-variant-numeric:tabular-nums;white-space:nowrap}
 @media (max-width:640px){.drawer{width:100vw;border-left:0}}
 .menu .pop{max-width:calc(100vw - 16px)}   /* never wider than the screen; Shell keeps it on the screen */
+.lang-opts{right:auto;left:0;min-width:100%;max-width:calc(100vw - 16px);max-height:280px;overflow:auto;display:flex;flex-direction:column;background:var(--raised);border:1px solid var(--border-strong);border-radius:var(--radius);box-shadow:0 8px 24px rgb(0 0 0/.35);padding:6px;z-index:50} /* review item B: under its field, never off the screen (left-anchored, max-width) */
+.lang-opts .it{justify-content:space-between}
+.lang-opts .it.on{background:var(--surface)}
+.lang-opts .it .muted{color:var(--text-2);text-align:right}
 
 /* V7 Workers: cards, one column on phones */
 .wgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(340px,100%),1fr));gap:var(--gap)}
