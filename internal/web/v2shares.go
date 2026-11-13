@@ -4,8 +4,10 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/helper"
 	"log"
 	"net"
 	"net/http"
@@ -20,11 +22,12 @@ import (
 )
 
 func v2Shares(api *http.ServeMux, store *jobs.Store) {
-	mode, platform := detectMode()
+	_, platform := detectMode()
 	nfsOK := platform != "darwin"
 	tested := platform != "darwin"
 
 	api.HandleFunc("GET /api/v2/shares", func(w http.ResponseWriter, r *http.Request) {
+		mode, _ := detectMode() // per request: the helper can start or stop while the app runs
 		all, err := store.LoadShares()
 		if err != nil {
 			serverError(w, err)
@@ -74,6 +77,7 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 			serverError(w, err)
 			return
 		}
+		tryMount(store, saved, in.Password)
 		writeJSONStatus(w, http.StatusCreated, shareToJSON(store, saved))
 	})
 
@@ -99,8 +103,11 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 		username := existing.Username
 		guest := existing.Guest
 		pw := ""
+		changed := false
+		oldMpt := "/var/lib/syp/shares/" + sanitiseName(existing.Name, existing.ID)
 		if pwStr, ok := raw["password"].(string); ok {
 			pw = pwStr
+			changed = true
 		}
 		if v, ok := raw["name"].(string); ok && v != "" {
 			if err := nameTaken(store, v, id); err != nil {
@@ -108,6 +115,7 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 				return
 			}
 			name = v
+			changed = true
 		}
 		if v, ok := raw["type"].(string); ok && v != "" {
 			if v != "smb" && v != "nfs" {
@@ -115,6 +123,7 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 				return
 			}
 			typeStr = v
+			changed = true
 		}
 		if v, ok := raw["address"].(string); ok && v != "" {
 			a, t, pErr := parseAddress(v)
@@ -124,18 +133,35 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 			}
 			address = a
 			typeStr = t
+			changed = true
 		}
 		if v, ok := raw["username"].(string); ok {
 			username = v
+			changed = true
 		}
 		if _, ok := raw["guest"].(bool); ok {
 			if v, ok2 := raw["guest"].(bool); ok2 {
 				guest = v
+				changed = true
 			}
 		}
 		if err := store.UpdateShare(id, name, address, typeStr, username, guest, pw); err != nil {
 			serverError(w, err)
 			return
+		}
+		if mode, _ := detectMode(); mode == "app" && changed {
+			// The old mount must go first: the helper treats an already-mounted
+			// point as done, so a busy old mount would stay on the old server.
+			if uErr := helper.Unmount(oldMpt); uErr != nil {
+				store.SetShareMountStatus(id, "linux", "not_connected",
+					`{"code":"mount_failed","message":`+jsonStr("The old connection is still in use, so the change isn't connected yet. Stop what is using the share, then Reconnect. "+uErr.Error())+`}`)
+			} else if sh, err := store.ShareByID(id); err == nil && sh != nil {
+				stale := pw
+				if stale == "" {
+					stale, _ = store.DecryptSharePassword(id)
+				}
+				tryMount(store, *sh, stale)
+			}
 		}
 		sh, err := store.ShareByID(id)
 		if err != nil || sh == nil {
@@ -150,6 +176,17 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 		if err != nil || id <= 0 {
 			apiError(w, http.StatusNotFound, "not_found", "There is no such share.")
 			return
+		}
+		if mode, _ := detectMode(); mode == "app" {
+			sh, err := store.ShareByID(id)
+			if err == nil && sh != nil {
+				mpt := "/var/lib/syp/shares/" + sanitiseName(sh.Name, sh.ID)
+				if err := helper.Unmount(mpt); err != nil {
+					apiError(w, http.StatusConflict, "share_in_use",
+						"The share could not be unmounted. "+err.Error()+".")
+					return
+				}
+			}
 		}
 		if err := store.DeleteShare(id); err != nil {
 			serverError(w, err)
@@ -197,6 +234,10 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 			apiError(w, http.StatusNotFound, "not_found", "There is no such share.")
 			return
 		}
+		if mode, _ := detectMode(); mode == "app" {
+			pw, _ := store.DecryptSharePassword(id)
+			tryMount(store, *sh, pw)
+		}
 		writeJSON(w, shareToJSON(store, *sh))
 	})
 
@@ -213,6 +254,77 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 		}
 		writeJSON(w, shareToJSON(store, *sh))
 	})
+}
+
+// tryMount attempts to mount the share via the helper, storing the result.
+func tryMount(store *jobs.Store, sh jobs.Share, password string) {
+	mode, _ := detectMode()
+	if mode != "app" {
+		return
+	}
+	addr := mountAddress(sh.Type, sh.Address)
+	kind := "cifs"
+	if sh.Type == "nfs" {
+		kind = "nfs"
+	}
+	mpt := "/var/lib/syp/shares/" + sanitiseName(sh.Name, sh.ID)
+	opts := mountOptions(sh.Type)
+	err := helper.Mount(kind, addr, mpt, opts, sh.Username, password)
+	if err != nil {
+		reason := mountErrReason(err)
+		store.SetShareMountStatus(sh.ID, "linux", "not_connected", reason)
+		return
+	}
+	store.SetShareMountStatus(sh.ID, "linux", "connected", "")
+}
+
+func mountAddress(typ, addr string) string {
+	if typ == "nfs" {
+		return addr // server:/export stays as-is
+	}
+	// smb: \\server\share → //server/share
+	base := strings.TrimPrefix(addr, `\\`)
+	return "//" + strings.ReplaceAll(base, `\`, "/")
+}
+
+func mountOptions(typ string) map[string]string {
+	if typ == "nfs" {
+		return map[string]string{}
+	}
+	return map[string]string{"vers": "3.1.1", "soft": ""}
+}
+
+// mountErrReason serialises a helper error to a JSON string storing code + message.
+func mountErrReason(err error) string {
+	msg := err.Error()
+	low := strings.ToLower(msg)
+	// helper unreachable (socket dial failed)
+	if strings.HasPrefix(low, "helper:") {
+		return `{"code":"helper_missing","message":"The network share helper isn't running. Run the installer again and answer yes, or connect it yourself."}`
+	}
+	var he *helper.MountError
+	if errors.As(err, &he) && (he.Code == "not_allowed" || he.Code == "bad_request") {
+		return `{"code":"mount_failed","message":` + jsonStr(msg) + `}`
+	}
+	switch {
+	case strings.Contains(low, "permission denied"), strings.Contains(low, "error(13)"):
+		return `{"code":"auth_failed","message":"The username or password is wrong."}`
+	case strings.Contains(low, "no such file or directory"), strings.Contains(low, "error(2)"):
+		return `{"code":"share_not_found","message":` + jsonStr(msg) + `}`
+	case strings.Contains(low, "host is down"), strings.Contains(low, "no route"), strings.Contains(low, "error(112)"), strings.Contains(low, "error(113)"):
+		return `{"code":"host_unreachable","message":"The server is not reachable."}`
+	case strings.Contains(low, "timed out"):
+		return `{"code":"timeout","message":"The server didn't answer in time."}`
+	}
+	return `{"code":"mount_failed","message":` + jsonStr(msg) + `}`
+}
+
+// jsonStr wraps a string in JSON quotes with escaping.
+func jsonStr(s string) string {
+	esc := strings.ReplaceAll(s, `\`, `\\`)
+	esc = strings.ReplaceAll(esc, `"`, `\"`)
+	esc = strings.ReplaceAll(esc, "\n", `\n`)
+	return `"` + esc + `"`
 }
 
 // parseAddress cleans a share address and refuses one with a port: the root helper takes none (SMB always uses
@@ -296,18 +408,21 @@ func parseAddressForm(raw string) (addr, typ string, err error) {
 }
 
 func detectMode() (mode, platform string) {
-	if m := os.Getenv("SYP_HELPER_MODE"); m != "" {
-		return m, runtime.GOOS
-	}
 	if os.Getenv("container") != "" {
 		return "docker", runtime.GOOS
 	}
-	if runtime.GOOS == "linux" && os.Geteuid() != 0 {
-		if _, err := os.Stat("/run/shrink-your-shit/helper.sock"); err != nil {
-			return "manual", runtime.GOOS
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return "docker", runtime.GOOS
+	}
+	if runtime.GOOS == "linux" {
+		// app mode when the helper socket answers (dial with 1s timeout)
+		conn, err := net.DialTimeout("unix", helper.HelperSocket, time.Second)
+		if err == nil {
+			conn.Close()
+			return "app", runtime.GOOS
 		}
 	}
-	return "app", runtime.GOOS
+	return "manual", runtime.GOOS
 }
 
 func testShare(typ, address, username, password string, guest bool) map[string]any {
@@ -415,6 +530,7 @@ func testNFS(address string) map[string]any {
 func shareToJSON(store *jobs.Store, sh jobs.Share) map[string]any {
 	status := "waiting_setup"
 	var reason any = nil
+	var since string = ""
 	mode, _ := detectMode()
 	if mode == "app" {
 		status = "not_connected"
@@ -423,8 +539,15 @@ func shareToJSON(store *jobs.Store, sh jobs.Share) map[string]any {
 	if err == nil && len(mounts) > 0 {
 		m := mounts[0]
 		status = m.Status
+		since = m.Since
 		if m.Error != "" {
-			reason = map[string]any{"code": "mount_failed", "message": m.Error}
+			// Try to parse as structured JSON error
+			var parsed map[string]any
+			if json.Unmarshal([]byte(m.Error), &parsed) == nil && parsed["code"] != nil {
+				reason = parsed
+			} else {
+				reason = map[string]any{"code": "mount_failed", "message": m.Error}
+			}
 		}
 		if m.Status == "connected" {
 			status = "connected"
@@ -438,13 +561,13 @@ func shareToJSON(store *jobs.Store, sh jobs.Share) map[string]any {
 	return map[string]any{
 		"id": strconv.FormatInt(sh.ID, 10), "name": sh.Name, "type": sh.Type,
 		"address": addr, "guest": sh.Guest, "username": nilIfEmpty(sh.Username),
-		"hasPassword": sh.HasPassword, "status": status, "since": nil, "reason": reason,
-		"path":      "/var/lib/syp/shares/" + sanitiseName(sh.Name),
+		"hasPassword": sh.HasPassword, "status": status, "since": nilIfEmpty(since), "reason": reason,
+		"path":      "/var/lib/syp/shares/" + sanitiseName(sh.Name, sh.ID),
 		"libraries": []any{}, "setup": setupForMode(store, sh),
 	}
 }
 
-func sanitiseName(name string) string {
+func sanitiseName(name string, id int64) string {
 	r := strings.ToLower(name)
 	r = strings.ReplaceAll(r, " ", "-")
 	var out []rune
@@ -453,7 +576,16 @@ func sanitiseName(name string) string {
 			out = append(out, c)
 		}
 	}
-	return string(out)
+	result := string(out)
+	if result == "" || result[0] == '-' || result[0] == '_' {
+		return "share-" + strconv.FormatInt(id, 10)
+	}
+	return result
+}
+
+// shellQuote wraps a value in single quotes, escaping any internal single quotes.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 // nameTaken checks whether another share with the same name exists (case-insensitive).
@@ -473,20 +605,38 @@ func nameTaken(store *jobs.Store, name string, excludeID int64) error {
 
 func setupForMode(store *jobs.Store, sh jobs.Share) any {
 	mode, _ := detectMode()
+	mpt := "/var/lib/syp/shares/" + sanitiseName(sh.Name, sh.ID)
+	mntAddr := mountAddress(sh.Type, sh.Address)
 	switch mode {
 	case "manual":
+		mkdir := "sudo mkdir -p " + shellQuote(mpt) + " && "
+		var opts string
+		if sh.Type == "smb" {
+			mountCmd := "sudo mount -t cifs " + shellQuote(mntAddr) + " " + shellQuote(mpt) + " -o "
+			if sh.Guest {
+				opts = "guest,vers=3.1.1,soft,nosuid,nodev,noexec,uid=syp,gid=syp,file_mode=0660,dir_mode=0770"
+			} else {
+				opts = "username=" + sh.Username + ",vers=3.1.1,soft,nosuid,nodev,noexec,uid=syp,gid=syp,file_mode=0660,dir_mode=0770"
+			}
+			return map[string]any{
+				"kind":       "command",
+				"text":       mkdir + mountCmd + shellQuote(opts),
+				"removeText": "sudo umount " + shellQuote(mpt),
+			}
+		}
+		// NFS
+		opts = "soft,nosuid,nodev,noexec"
 		return map[string]any{
-			"kind": "command",
-			"text": fmt.Sprintf("sudo mount -t %s -o username=%s,vers=3.1.1,soft,noexec %s /var/lib/syp/shares/%s",
-				sh.Type, sh.Username, sh.Address, sanitiseName(sh.Name)),
-			"removeText": fmt.Sprintf("sudo umount /var/lib/syp/shares/%s", sanitiseName(sh.Name)),
+			"kind":       "command",
+			"text":       mkdir + "sudo mount -t nfs " + shellQuote(mntAddr) + " " + shellQuote(mpt) + " -o " + shellQuote(opts),
+			"removeText": "sudo umount " + shellQuote(mpt),
 		}
 	case "docker":
 		return map[string]any{
 			"kind": "compose",
 			"text": fmt.Sprintf("  %s:\n    driver_opts:\n      type: %s\n      device: %q\n      o: credentials=/path/to/credentials-file,vers=3.1.1,soft",
-				sanitiseName(sh.Name), sh.Type, sh.Address),
-			"removeText": fmt.Sprintf("Remove the %q volume from your compose file and restart.", sanitiseName(sh.Name)),
+				sanitiseName(sh.Name, sh.ID), sh.Type, sh.Address),
+			"removeText": fmt.Sprintf("Remove the %q volume from your compose file and restart.", sanitiseName(sh.Name, sh.ID)),
 		}
 	}
 	return nil

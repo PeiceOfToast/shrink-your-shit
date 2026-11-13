@@ -28,6 +28,7 @@ LIBS=${SYP_LIBRARIES:-}
 FLAG_LIBS=
 ADDR=${SYP_ADDR:-}
 NO_START=
+NETWORK_SHARES=
 RUN_FG=
 
 say() { printf '%s\n' "$*"; }
@@ -37,7 +38,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 
 usage() {
   cat <<'USAGE'
-Usage: install.sh [--library DIR]... [--addr ADDR] [--version X.Y.Z] [--no-start] [--run]
+Usage: install.sh [--library DIR]... [--addr ADDR] [--version X.Y.Z] [--network-shares|--no-network-shares] [--no-start] [--run]
   --library DIR    folder to watch (repeat for several); default: none, add folders on the web page
   --addr ADDR      web address, default 127.0.0.1:8484 (this computer only); beyond it, an access token is needed
   --version X.Y.Z  install that release instead of the newest
@@ -54,6 +55,8 @@ while [ $# -gt 0 ]; do
     --version) [ $# -ge 2 ] || die "--version needs a number like 0.1.0"; VERSION=$2; shift 2 ;;
     --no-start) NO_START=1; shift ;;
     --run) RUN_FG=1; shift ;;
+    --network-shares) NETWORK_SHARES=1; shift ;;
+    --no-network-shares) NETWORK_SHARES=0; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1 (try --help)" ;;
   esac
@@ -279,6 +282,81 @@ NoNewPrivileges=true
 WantedBy=multi-user.target
 UNIT
     $SUDO install -m 0644 "$tmp/unit" "$UNIT"
+
+    # ── Network shares helper (user review 11-13 item D) ──────────────────
+    # A small root helper that can only mount SMB/NFS shares in /var/lib/syp/shares. Opt-in. An upgrade keeps
+    # the earlier choice: only --no-network-shares or answering "no" removes it.
+    HELPER_DIR=/usr/local/libexec/shrink-your-shit
+    HELPER_BIN=$HELPER_DIR/syp-network-helper
+    HELPER_UNIT=/etc/systemd/system/syp-network-helper.service
+    if [ -z "$NETWORK_SHARES" ] && [ -f "$HELPER_UNIT" ]; then
+      NETWORK_SHARES=1 # installed before: keep it (and update it)
+    fi
+    if [ -z "$NETWORK_SHARES" ]; then
+      # Ask on the terminal, not stdin: with "curl ... | sh" stdin is the script itself.
+      if [ -t 1 ] && (: </dev/tty) 2>/dev/null; then
+        printf '%s\n%s\n%s' "Let Shrink Your Shit connect network shares (SMB/NFS) itself?" \
+          "This installs a small helper that runs as root and can only mount shares in /var/lib/syp/shares." \
+          "[y/N] " >/dev/tty
+        yn=
+        read -r yn </dev/tty || yn=
+        case $yn in y|Y|yes|Yes) NETWORK_SHARES=1 ;; *) NETWORK_SHARES=0 ;; esac
+      else
+        NETWORK_SHARES=0 # unattended: no root helper unless asked for
+      fi
+    fi
+    if [ "$NETWORK_SHARES" = 1 ] && [ ! -f "$tmp/x/syp-network-helper" ]; then
+      warn "this release has no network-share helper; network shares stay manual"
+      NETWORK_SHARES=0
+    fi
+    if [ "$NETWORK_SHARES" = 1 ]; then
+      # The helper refuses a shares folder anyone but root can write (a planted symlink could redirect a mount).
+      $SUDO install -d -o root -g root -m 0755 /var/lib/syp /var/lib/syp/shares "$HELPER_DIR"
+      $SUDO install -o root -g root -m 0755 "$tmp/x/syp-network-helper" "$HELPER_BIN"
+      if ! have mount.cifs || ! have mount.nfs; then
+        if have apt-get; then
+          $SUDO apt-get update -qq
+          $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cifs-utils nfs-common
+        elif have dnf; then
+          $SUDO dnf install -y cifs-utils nfs-utils
+        elif have yum; then
+          $SUDO yum install -y cifs-utils nfs-utils
+        elif have apk; then
+          $SUDO apk add --no-cache cifs-utils nfs-utils
+        else
+          warn "install cifs-utils and the NFS client tools yourself; network shares need them"
+        fi
+      fi
+      # No sandboxing on purpose: ProtectSystem/ProtectHome/PrivateTmp/PrivateMounts would give the helper its
+      # own mount namespace, and the shares it mounts would be invisible to the app (orch-lead review of D2).
+      cat > "$tmp/helper-unit" <<HLPUNIT
+[Unit]
+Description=Shrink Your Shit network share helper (mounts SMB/NFS shares in /var/lib/syp/shares)
+After=network-online.target
+Wants=network-online.target
+Before=shrink-your-shit.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=$HELPER_BIN -user syp
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+HLPUNIT
+      $SUDO install -m 0644 "$tmp/helper-unit" "$HELPER_UNIT"
+      $SUDO systemctl daemon-reload
+      $SUDO systemctl enable syp-network-helper >/dev/null 2>&1
+      $SUDO systemctl restart syp-network-helper # an upgrade runs the new helper
+    elif [ -f "$HELPER_UNIT" ] || [ -f "$HELPER_BIN" ]; then
+      # Asked to remove it. The shares folder and whatever is mounted there are left alone.
+      $SUDO systemctl disable --now syp-network-helper >/dev/null 2>&1 || true
+      $SUDO rm -f "$HELPER_UNIT" "$HELPER_BIN"
+      say "Removed the network-share helper. Shares already mounted stay mounted until the next restart."
+    fi
+
     $SUDO systemctl daemon-reload
     if [ -n "$NO_START" ]; then
       $SUDO systemctl enable shrink-your-shit >/dev/null 2>&1
