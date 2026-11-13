@@ -298,9 +298,11 @@ func mountErrReason(err error) string {
 	if strings.HasPrefix(low, "helper:") {
 		return `{"code":"helper_missing","message":"The network share helper isn't running. Run the installer again and answer yes, or connect it yourself."}`
 	}
-	switch {
-	case strings.Contains(low, "not_allowed"), strings.Contains(low, "bad_request"):
+	var he *helper.MountError
+	if errors.As(err, &he) && (he.Code == "not_allowed" || he.Code == "bad_request") {
 		return `{"code":"mount_failed","message":` + jsonStr(msg) + `}`
+	}
+	switch {
 	case strings.Contains(low, "permission denied"), strings.Contains(low, "error(13)"):
 		return `{"code":"auth_failed","message":"The username or password is wrong."}`
 	case strings.Contains(low, "no such file or directory"), strings.Contains(low, "error(2)"):
@@ -354,10 +356,6 @@ func parseAddress(raw string) (addr, typ string, err error) {
 }
 
 func detectMode() (mode, platform string) {
-	if m := os.Getenv("SYP_HELPER_MODE"); m != "" {
-		return m, runtime.GOOS
-	}
-	// Restore: docker detection (was removed in 10d3843)
 	if os.Getenv("container") != "" {
 		return "docker", runtime.GOOS
 	}
@@ -513,10 +511,7 @@ func sanitiseName(name string, id int64) string {
 	}
 	result := string(out)
 	if result == "" || result[0] == '-' || result[0] == '_' {
-		if id > 0 {
-			return "share-" + strconv.FormatInt(id, 10)
-		}
-		return "share"
+		return "share-" + strconv.FormatInt(id, 10)
 	}
 	return result
 }
@@ -554,7 +549,7 @@ func setupForMode(store *jobs.Store, sh jobs.Share) any {
 			if sh.Guest {
 				opts = "guest,vers=3.1.1,soft,nosuid,nodev,noexec,uid=syp,gid=syp,file_mode=0660,dir_mode=0770"
 			} else {
-				opts = "username=" + shellQuote(sh.Username) + ",vers=3.1.1,soft,nosuid,nodev,noexec,uid=syp,gid=syp,file_mode=0660,dir_mode=0770"
+				opts = "username=" + sh.Username + ",vers=3.1.1,soft,nosuid,nodev,noexec,uid=syp,gid=syp,file_mode=0660,dir_mode=0770"
 			}
 			return map[string]any{
 				"kind":       "command",

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/helper"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"net"
 	"net/http"
 	"os"
@@ -436,10 +437,6 @@ func TestSanitiseNameFallbackWithID(t *testing.T) {
 	if sanitiseName("_bad", 3) != "share-3" {
 		t.Errorf("underscore prefix: expected share-3, got %q", sanitiseName("_bad", 3))
 	}
-	// Without id -> "share" (legacy fallback)
-	if sanitiseName("", 0) != "share" {
-		t.Errorf("no id: expected share, got %q", sanitiseName("", 0))
-	}
 	// Normal name works as before
 	if sanitiseName("My Videos", 0) != "my-videos" {
 		t.Errorf("normal name: expected my-videos, got %q", sanitiseName("My Videos", 0))
@@ -452,11 +449,11 @@ func TestDetectModeDockerByEnv(t *testing.T) {
 	defer os.Unsetenv("container")
 	mode, platform := detectMode()
 	if mode != "docker" {
-		t.Errorf("SYP_HELPER_MODE not set, container set: expected docker, got %q on %q", mode, platform)
+		t.Errorf("container set: expected docker, got %q on %q", mode, platform)
 	}
 }
 
-// app mode via SYP_HELPER_MODE forces the handler path.
+// app mode: the fake helper socket answers, so detectMode picks app.
 // Test that a mount error is mapped to not_connected with a reason.
 func TestSharesAppModeMountErrorMaps(t *testing.T) {
 	dir := t.TempDir()
@@ -469,8 +466,6 @@ func TestSharesAppModeMountErrorMaps(t *testing.T) {
 	savedSocket := helper.HelperSocket
 	helper.HelperSocket = sockPath
 	defer func() { helper.HelperSocket = savedSocket }()
-	os.Setenv("SYP_HELPER_MODE", "app")
-	defer os.Unsetenv("SYP_HELPER_MODE")
 
 	// Fake helper: accept, read command, respond with error
 	ln, err := net.Listen("unix", sockPath)
@@ -505,7 +500,7 @@ func TestSharesAppModeMountErrorMaps(t *testing.T) {
 	var created map[string]any
 	json.Unmarshal([]byte(resp), &created)
 	status, _ := created["status"].(string)
-	reason := created["reason"]
+	reason, _ := created["reason"].(map[string]any)
 	if status != "not_connected" {
 		t.Errorf("expected not_connected, got %q", status)
 	}
@@ -535,8 +530,6 @@ func TestSharesPostAppModeCallsMount(t *testing.T) {
 	savedSocket := helper.HelperSocket
 	helper.HelperSocket = sockPath
 	defer func() { helper.HelperSocket = savedSocket }()
-	os.Setenv("SYP_HELPER_MODE", "app")
-	defer os.Unsetenv("SYP_HELPER_MODE")
 
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
@@ -613,8 +606,6 @@ func TestSharesAppModeDeleteCallsUnmount(t *testing.T) {
 	savedSocket := helper.HelperSocket
 	helper.HelperSocket = sockPath
 	defer func() { helper.HelperSocket = savedSocket }()
-	os.Setenv("SYP_HELPER_MODE", "app")
-	defer os.Unsetenv("SYP_HELPER_MODE")
 
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
@@ -690,7 +681,7 @@ func TestSharesManualSetupTextSMB(t *testing.T) {
 	}
 	var created map[string]any
 	json.Unmarshal([]byte(resp), &created)
-	setup := created["setup"]
+	setup, _ := created["setup"].(map[string]any)
 	if setup == nil {
 		t.Error("setup is null")
 		return
@@ -733,8 +724,8 @@ func TestSharesManualSetupTextNFS(t *testing.T) {
 	}
 	var created map[string]any
 	json.Unmarshal([]byte(resp), &created)
-	text, _ := created["setup"]["text"].(string)
-	removeText, _ := created["setup"]["removeText"].(string)
+	text := setupField(created, "text")
+	removeText := setupField(created, "removeText")
 	if !strings.Contains(text, "mount -t nfs") {
 		t.Errorf("expected nfs mount: %q", text)
 	}
@@ -765,7 +756,7 @@ func TestSharesManualSetupTextGuest(t *testing.T) {
 	}
 	var created map[string]any
 	json.Unmarshal([]byte(resp), &created)
-	text, _ := created["setup"]["text"].(string)
+	text := setupField(created, "text")
 	if !strings.Contains(text, "guest,") {
 		t.Errorf("expected guest option: %q", text)
 	}
@@ -790,7 +781,7 @@ func TestSharesManualSetupTextQuotedName(t *testing.T) {
 	}
 	var created map[string]any
 	json.Unmarshal([]byte(resp), &created)
-	text, _ := created["setup"]["text"].(string)
+	text := setupField(created, "text")
 	if !strings.Contains(text, "bob-s-share") {
 		t.Errorf("expected sanitised name bob-s-share: %q", text)
 	}
@@ -836,4 +827,91 @@ func TestShareAddressHostAndPort(t *testing.T) {
 	if dialHost("[fe80::1]") != "fe80::1" || dialHost("nas") != "nas" {
 		t.Error("dialHost")
 	}
+}
+
+// The helper's own refusals keep their mount_failed reason; mount errors are
+// mapped by their text.
+func TestMountErrReasonMapping(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		code string
+	}{
+		{"helper bad_request", &helper.MountError{Code: "bad_request", Message: "x"}, "mount_failed"},
+		{"helper not_allowed", &helper.MountError{Code: "not_allowed", Message: "no"}, "mount_failed"},
+		{"permission denied", fmt.Errorf("mount error(13): Permission denied"), "auth_failed"},
+		{"no such file", fmt.Errorf("mount error(2): No such file or directory"), "share_not_found"},
+		{"no route", fmt.Errorf("mount error(113): No route to host"), "host_unreachable"},
+		{"timed out", fmt.Errorf("mount: timed out"), "timeout"},
+		{"helper socket down", fmt.Errorf("helper: dial unix: no such file"), "helper_missing"},
+		{"anything else", fmt.Errorf("something odd"), "mount_failed"},
+	}
+	for _, c := range cases {
+		var r struct {
+			Code string `json:"code"`
+		}
+		if err := json.Unmarshal([]byte(mountErrReason(c.err)), &r); err != nil {
+			t.Fatalf("%s: reason is not JSON: %v", c.name, err)
+		}
+		if r.Code != c.code {
+			t.Errorf("%s: expected %s, got %s", c.name, c.code, r.Code)
+		}
+	}
+}
+
+// detectMode: app when the helper socket answers, manual when it does not.
+func TestDetectModeAppAndManualBySocket(t *testing.T) {
+	t.Setenv("container", "")
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		t.Skip("running inside docker")
+	}
+	dir := t.TempDir()
+	saved := helper.HelperSocket
+	defer func() { helper.HelperSocket = saved }()
+
+	helper.HelperSocket = filepath.Join(dir, "absent.sock")
+	mode, platform := detectMode()
+	if platform == "linux" && mode != "manual" {
+		t.Errorf("no helper socket: expected manual, got %q", mode)
+	}
+
+	sock := filepath.Join(dir, "up.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	helper.HelperSocket = sock
+	mode, platform = detectMode()
+	if platform == "linux" && mode != "app" {
+		t.Errorf("helper socket answers: expected app, got %q", mode)
+	}
+}
+
+// The manual mount command shell-quotes the username once, so the value that
+// mount.cifs receives is the username itself, with no stray quotes.
+func TestManualSetupQuotesUsername(t *testing.T) {
+	t.Setenv("container", "")
+	saved := helper.HelperSocket
+	defer func() { helper.HelperSocket = saved }()
+	helper.HelperSocket = filepath.Join(t.TempDir(), "absent.sock")
+
+	sh := jobs.Share{Type: "smb", Address: `\\nas\media`, Name: "Media", Username: "o'brien x"}
+	setup, ok := setupForMode(nil, sh).(map[string]any)
+	if !ok {
+		t.Skip("not in manual mode on this platform")
+	}
+	want := "sudo mkdir -p '/var/lib/syp/shares/media' && " +
+		"sudo mount -t cifs '//nas/media' '/var/lib/syp/shares/media' -o " +
+		shellQuote("username=o'brien x,vers=3.1.1,soft,nosuid,nodev,noexec,uid=syp,gid=syp,file_mode=0660,dir_mode=0770")
+	if got, _ := setup["text"].(string); got != want {
+		t.Errorf("manual text:\n got %s\nwant %s", got, want)
+	}
+}
+
+// setupField reads one string field of a share's setup object from a response.
+func setupField(created map[string]any, key string) string {
+	setup, _ := created["setup"].(map[string]any)
+	s, _ := setup[key].(string)
+	return s
 }

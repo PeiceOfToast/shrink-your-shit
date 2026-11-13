@@ -61,6 +61,25 @@ func call(cmd Command) (Response, error) {
 	return res, nil
 }
 
+// MountError is a refusal or failure the helper reported, with its code.
+type MountError struct {
+	Code    string
+	Message string
+}
+
+func (e *MountError) Error() string { return e.Message }
+
+// answerError turns a helper answer that is not OK into a *MountError.
+func answerError(res Response) error {
+	if res.OK {
+		return nil
+	}
+	if res.Error == nil {
+		return &MountError{Code: "unknown", Message: "the helper failed"}
+	}
+	return &MountError{Code: res.Error.Code, Message: res.Error.Message}
+}
+
 // Mount tells the helper to mount a share.
 func Mount(kind, address, mountPoint string, options map[string]string, username, password string) error {
 	res, err := call(Command{
@@ -71,10 +90,7 @@ func Mount(kind, address, mountPoint string, options map[string]string, username
 	if err != nil {
 		return err
 	}
-	if !res.OK && res.Error != nil {
-		return errors.New(res.Error.Message)
-	}
-	return nil
+	return answerError(res)
 }
 
 // Unmount tells the helper to unmount a share.
@@ -83,10 +99,7 @@ func Unmount(mountPoint string) error {
 	if err != nil {
 		return err
 	}
-	if !res.OK && res.Error != nil {
-		return errors.New(res.Error.Message)
-	}
-	return nil
+	return answerError(res)
 }
 
 // Status checks whether a mount is active.
