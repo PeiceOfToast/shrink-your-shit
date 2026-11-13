@@ -40,7 +40,10 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 	})
 
 	api.HandleFunc("POST /api/v2/shares", func(w http.ResponseWriter, r *http.Request) {
-		var in struct{ Type, Address, Name, Username, Password string; Guest bool }
+		var in struct {
+			Type, Address, Name, Username, Password string
+			Guest                                   bool
+		}
 		if !readJSON(w, r, &in) {
 			return
 		}
@@ -70,7 +73,10 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 			apiError(w, http.StatusNotFound, "not_found", "There is no such share.")
 			return
 		}
-		var in struct{ Name, Address, Type, Username, Password string; Guest bool }
+		var in struct {
+			Name, Address, Type, Username, Password string
+			Guest                                   bool
+		}
 		if !readJSON(w, r, &in) {
 			return
 		}
@@ -100,7 +106,10 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 	})
 
 	api.HandleFunc("POST /api/v2/shares/test", func(w http.ResponseWriter, r *http.Request) {
-		var in struct{ Type, Address, Username, Password, ID string; Guest bool }
+		var in struct {
+			Type, Address, Username, Password, ID string
+			Guest                                 bool
+		}
 		if !readJSON(w, r, &in) {
 			return
 		}
@@ -154,16 +163,28 @@ func parseAddress(raw string) (addr, typ string, err error) {
 	low := strings.ToLower(raw)
 	switch {
 	case strings.HasPrefix(low, "smb://"):
-		addr = `\\` + strings.ReplaceAll(raw[6:], "/", `\`)
+		rest := raw[6:]
+		if rest == "" {
+			return "", "", errors.New("SMB address missing server and share after smb://")
+		}
+		addr = `\\` + strings.ReplaceAll(rest, "/", `\`)
 		return addr, "smb", nil
 	case strings.HasPrefix(low, "nfs://"):
-		addr = raw[6:]
+		rest := raw[6:]
+		if rest == "" {
+			return "", "", errors.New("NFS address missing server and export after nfs://")
+		}
+		addr = rest
 		return addr, "nfs", nil
 	case strings.HasPrefix(raw, `\\`):
+		if raw == `\\` {
+			return "", "", errors.New("SMB address missing server and share after \\\\")
+		}
 		return raw, "smb", nil
 	case strings.Contains(raw, ":/"):
-		return raw, "nfs", nil
-	case strings.Contains(raw, ":"):
+		if strings.HasPrefix(raw, ":") {
+			return "", "", errors.New("NFS address missing server before :/")
+		}
 		return raw, "nfs", nil
 	}
 	return "", "", errors.New("Address must start with \\\\ or smb:// for SMB, or server:/export for NFS.")
@@ -283,7 +304,7 @@ func shareToJSON(store *jobs.Store, sh jobs.Share) map[string]any {
 		"id": strconv.FormatInt(sh.ID, 10), "name": sh.Name, "type": sh.Type,
 		"address": addr, "guest": sh.Guest, "username": nilIfEmpty(sh.Username),
 		"hasPassword": sh.HasPassword, "status": status, "since": nil, "reason": reason,
-		"path": "/var/lib/syp/shares/" + sanitiseName(sh.Name),
+		"path":      "/var/lib/syp/shares/" + sanitiseName(sh.Name),
 		"libraries": []any{}, "setup": setupForMode(store, sh),
 	}
 }
