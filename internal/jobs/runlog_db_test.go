@@ -3,7 +3,10 @@
 package jobs
 
 import (
+	"time"
+
 	"fmt"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"os"
 	"path/filepath"
 	"testing"
@@ -93,5 +96,43 @@ func TestImportRunLogs(t *testing.T) {
 	}
 	if n, _ := s.ImportRunLogs(logs); n != 0 {
 		t.Errorf("second import: %d", n)
+	}
+}
+
+// logKeepDays: a finished job's lines and steps are pruned past the cutoff; a running job, a recent one and the failure
+// summary stay.
+func TestPruneJobLogs(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "syp.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.SetPaused(false)
+	l, _ := s.AddLibrary("m", t.TempDir(), rules.SliderTemplate(3), true)
+	old, _ := s.Enqueue(Job{Library: "m", LibraryID: l.ID, Path: "/m/old.mkv"})
+	s.Claim("t")
+	s.AppendLogLine(old, 0, "app", "a line")
+	s.RecordRunStep(old, RunStep{Index: 0, Name: "encode", Outcome: "ok"})
+	s.Complete(old, "/m/old.mkv", 1)
+	running, _ := s.Enqueue(Job{Library: "m", LibraryID: l.ID, Path: "/m/run.mkv"})
+	s.Claim("t")
+	s.AppendLogLine(running, 0, "app", "still going")
+	// the cutoff is the future: the finished job is past it, the running one is never pruned
+	n, err := s.PruneJobLogs(time.Now().Add(time.Hour))
+	if err != nil || n != 1 {
+		t.Fatalf("pruned %d %v", n, err)
+	}
+	if lines, _ := s.LogLines(old); len(lines) != 0 {
+		t.Errorf("old lines stayed: %+v", lines)
+	}
+	if steps, _ := s.RunSteps(old); len(steps) != 0 {
+		t.Errorf("old steps stayed: %+v", steps)
+	}
+	if lines, _ := s.LogLines(running); len(lines) != 1 {
+		t.Errorf("running job's line pruned: %+v", lines)
+	}
+	// a cutoff in the past prunes nothing
+	if n, _ := s.PruneJobLogs(time.Now().Add(-time.Hour)); n != 0 {
+		t.Errorf("recent pruned: %d", n)
 	}
 }

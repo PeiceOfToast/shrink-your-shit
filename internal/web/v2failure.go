@@ -56,6 +56,9 @@ func logState(store *jobs.Store, id int64, status jobs.Status, errorCode string)
 	case errorCode == jobs.ReasonWorkerLost:
 		return "lost"
 	}
+	if steps, err := store.RunSteps(id); err == nil && len(steps) > 0 { // it had a log, and logKeepDays has pruned it
+		return "expired"
+	}
 	return "none"
 }
 

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // User review 11-13 item E: a job's log lines, steps and failure summary live in SQLite (migration 39), so the
@@ -229,4 +230,37 @@ func (s *Store) RemoveJobLogs(ids []int64) error {
 		}
 	}
 	return nil
+}
+
+// PruneJobLogs deletes the log lines and run steps of finished jobs (done, failed, kept, skipped) whose last change is
+// before the cutoff (logKeepDays). The job rows and their failure summaries stay; their logState then says expired.
+// It returns how many log lines went. SQLite reuses the freed pages; the file shrinks only when it is vacuumed (a later step).
+func (s *Store) PruneJobLogs(before time.Time) (int64, error) {
+	rows, err := s.db.Query(`SELECT id FROM jobs WHERE status IN ('done','failed','kept','skipped') AND updated<?`, before.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	var n int64
+	for _, id := range ids {
+		r, err := s.db.Exec(`DELETE FROM job_log_lines WHERE job_id=?`, id)
+		if err != nil {
+			return n, err
+		}
+		k, _ := r.RowsAffected()
+		n += k
+		if _, err := s.db.Exec(`DELETE FROM job_run_steps WHERE job_id=?`, id); err != nil {
+			return n, err
+		}
+	}
+	return n, nil
 }

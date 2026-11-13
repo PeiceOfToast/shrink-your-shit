@@ -140,6 +140,14 @@ func main() {
 		}
 		return s.KeepOriginalsDays
 	}
+	// logKeepDays: how long a finished job's log is kept (user review 11-13 item E); 0 is forever.
+	logKeepDays := func() int {
+		s, err := web.LoadSettings(store)
+		if err != nil {
+			return 30
+		}
+		return s.LogKeepDays
+	}
 	// A swap a crash interrupted is finished or undone first, so its job is not converted twice.
 	for _, said := range worker.RecoverSwaps(store, store, keepDays(), time.Now()) {
 		log.Printf("recovery: %s", said)
@@ -169,10 +177,15 @@ func main() {
 			log.Printf("job logs: %v", err)
 		}
 	}
-	sweepLogs := func() { // the job history's 30 days (the log lines' limit comes with logKeepDays)
+	sweepLogs := func() { // the job history's 30 days, and each finished job's log for logKeepDays (0: forever)
 		if _, err := store.ForgetGoneJobSteps(); err != nil {
 			log.Printf("run logs: %v", err)
 			return
+		}
+		if days := logKeepDays(); days > 0 {
+			if _, err := store.PruneJobLogs(time.Now().AddDate(0, 0, -days)); err != nil {
+				log.Printf("job logs: %v", err)
+			}
 		}
 		if _, err := store.PruneJobEvents(time.Now().Add(-runlog.MaxAge)); err != nil { // jobs' history: the logs' 30 days
 			log.Printf("job history: %v", err)

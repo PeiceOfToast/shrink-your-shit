@@ -31,11 +31,13 @@ type Settings struct {
 	// needn't exist yet); null when there is none (design, 02:41Z).
 	FirstRunLibrary   *FirstRunLibrary `json:"firstRunLibrary"`
 	KeepOriginalsDays int              `json:"keepOriginalsDays"`
-	ParallelJobs      int              `json:"parallelJobs"`
-	QuietHours        QuietHours       `json:"quietHours"`
-	LowPriority       bool             `json:"lowPriority"`
-	ScanSchedule      string           `json:"scanSchedule"` // "HH:MM", or "" for none
-	QueueOrder        string           `json:"queueOrder"`   // newest|oldest|largest|smallest
+	// LogKeepDays is how long a finished job's log is kept (user review 11-13 item E): 7, 30, 90, or 0 for forever.
+	LogKeepDays  int        `json:"logKeepDays"`
+	ParallelJobs int        `json:"parallelJobs"`
+	QuietHours   QuietHours `json:"quietHours"`
+	LowPriority  bool       `json:"lowPriority"`
+	ScanSchedule string     `json:"scanSchedule"` // "HH:MM", or "" for none
+	QueueOrder   string     `json:"queueOrder"`   // newest|oldest|largest|smallest
 	// Languages are the person's languages for "Keep only my languages" (slice 25b): ISO 639-2 codes,
 	// stored in one form (rules.CanonLang); two-letter codes and the 639-2/T forms are accepted.
 	Languages []string `json:"languages"`
@@ -59,7 +61,7 @@ type FirstRunLibrary struct {
 const settingsKey = "settings"
 
 func defaultSettings() Settings {
-	return Settings{OldControlLevel: "basic", FirstRunStep: 1, KeepOriginalsDays: 7, ParallelJobs: 1,
+	return Settings{OldControlLevel: "basic", FirstRunStep: 1, KeepOriginalsDays: 7, LogKeepDays: 30, ParallelJobs: 1,
 		LowPriority: true, ScanSchedule: "02:00", QueueOrder: "newest", Languages: []string{}}
 }
 
@@ -76,6 +78,8 @@ func (s Settings) problem() (code, msg string) {
 		return "invalid_setting", fmt.Sprintf("%q is not a language code (use codes like eng, fre, ger, or en, fr, de).", badLanguage(s.Languages))
 	case s.KeepOriginalsDays < 0 || s.KeepOriginalsDays > 365:
 		return "invalid_setting", "Enter a whole number of days, from 0 to 365."
+	case !oneOf(fmt.Sprint(s.LogKeepDays), "0", "7", "30", "90"):
+		return "invalid_setting", "logKeepDays is 7, 30 or 90 days, or 0 to keep logs forever."
 	case s.ParallelJobs < 1 || s.ParallelJobs > 8:
 		return "invalid_setting", "Enter a whole number from 1 to 8."
 	case (s.QuietHours.From == "") != (s.QuietHours.To == ""):
