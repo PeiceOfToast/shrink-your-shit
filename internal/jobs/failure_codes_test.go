@@ -196,6 +196,7 @@ func TestReasonConditionMatchesFailureCode(t *testing.T) {
 		}
 	}
 }
+
 // P3: encoder family names are mapped from the codec suffix; product name is capitalised.
 func TestEncoderFamilyAndProductName(t *testing.T) {
 	var checks = []struct {

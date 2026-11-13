@@ -61,19 +61,19 @@ type FailureFacts struct {
 	MediaTime    string
 	Stored       string // the stored plain words, used for a code the table does not name
 	KeyLines     []string
-	Needed, Free uint64    // space needed/free for no_space (0 = unknown)
-	WorkerName   string    // the worker's display name ("this computer" for local)
+	Needed, Free uint64 // space needed/free for no_space (0 = unknown)
+	WorkerName   string // the worker's display name ("this computer" for local)
 }
 
 // encoderFamily maps the suffix after the codec (e.g. h264_qsv → Intel Quick Sync)
 // from the -c:v arg or the "Unknown encoder" line.
 var encoderFamily = map[string]string{
-	"qsv":    "Intel Quick Sync",
-	"nvenc":  "NVIDIA",
-	"amf":    "AMD",
-	"amdhw":  "AMD",
+	"qsv":          "Intel Quick Sync",
+	"nvenc":        "NVIDIA",
+	"amf":          "AMD",
+	"amdhw":        "AMD",
 	"videotoolbox": "Apple",
-	"vaapi":  "graphics card",
+	"vaapi":        "graphics card",
 }
 
 var encoderName = regexp.MustCompile(`unknown encoder '([^']+)'`)
