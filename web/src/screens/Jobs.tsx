@@ -181,10 +181,10 @@ function WhyFailed({ id, msg, code, worker, f }: { id: string; msg: string; code
       <p className="sm muted mono">{code}</p>
       <p className="sm">In step {f.stepIndex} of {f.stepCount}, <a href={"#job-step-" + f.stepIndex}>{f.step}</a>, after {t}{f.mediaTime ? " (at " + f.mediaTime + " in the video)" : ""}.</p>
       {f.hint && <p><strong>What you can do:</strong> {f.hint}</p>}
-      {f.ffmpegRan
-        ? <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">What ffmpeg said</span><button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(f.keyLines.join("\n")).catch(() => {})}><Icon id="i-copy" />Copy</button></div>
-          <pre className="joblog">{f.keyLines.join("\n")}</pre></div>
-        : <p className="sm muted">ffmpeg didn't run.</p>}
+      {f.ffmpegRan === false
+        ? <p className="sm muted">ffmpeg didn't run.</p>
+        : f.keyLines.length > 0 && <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">What ffmpeg said</span><button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(f.keyLines.join("\n")).catch(() => {})}><Icon id="i-copy" />Copy</button></div>
+          <pre className="joblog">{f.keyLines.join("\n")}</pre></div>}
       <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
         <a className="btn sm" href={"#job-step-" + f.stepIndex}><Icon id="i-file" />Open the full log</a>
         {!MOCK && <a className="btn sm ghost" href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}><Icon id="i-download" />Download</a>}
@@ -231,7 +231,7 @@ function StepLog({ id, worker, failedIdx }: { id: string; worker: string | null;
               {st.command && <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">Command</span><button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(st.command ?? "").catch(() => {})}><Icon id="i-copy" />Copy</button></div>
                 <pre className="joblog sm">{st.command}</pre></div>}
               {sum && <p className="sm">Source: {sum}</p>}
-              {st.check && <p className="sm">Picture check: Score {st.check.score.toFixed(3)} (needs {st.check.min.toFixed(3)}) · {st.check.passed ? "passed" : "failed"}</p>}
+              {st.check && <p className="sm">Picture check: Score {st.check.score.toFixed(3)}{st.check.min != null ? " (needs " + st.check.min.toFixed(3) + ")" : ""}{st.check.passed != null ? " · " + (st.check.passed ? "passed" : "failed") : ""}</p>}
               {st.outputLines > 0 && <details open={st.outcome !== "ok"}><summary className="sm">Show ffmpeg output ({st.outputLines} lines)</summary>
                 {st.outputLines > 200 && <p className="sm"><a href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}>Download all {st.outputLines.toLocaleString()} lines</a></p>}
                 <pre className="joblog sm">{st.output}</pre></details>}

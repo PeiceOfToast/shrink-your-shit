@@ -18,7 +18,7 @@ export async function findSkip(jobId: string): Promise<Answer<JobsPage>> {
   }
 }
 // E: the job's log by step (GET /log, a finished job's full record; /log/stream stays for running jobs)
-export interface LogStep { name: string; startedAt: string; tookMs: number; outcome: string; command: string | null; probe: Probe | null; check: { score: number; min: number; passed: boolean } | null; outputLines: number; output: string; result: string }
+export interface LogStep { name: string; startedAt: string; tookMs: number; outcome: string; command: string | null; probe: Probe | null; check: { score: number; min: number | null; passed: boolean | null } | null; outputLines: number; output: string; result: string }
 export interface JobLog { state: string; steps: LogStep[]; final: string }
 export async function getJobLog(id: string): Promise<Answer<JobLog>> {
   if (MOCK) return mockJobLog(id);

@@ -42,7 +42,7 @@ export function mockJobs(tab: Tab, q: string, path?: string): JobsPage {
 const REMOVED: JobDetail = { id: "47001", state: "cancelled", removed: true, reason: { code: "removed", message: "Its library was removed, so this file wasn't converted." },
   events: [{ seq: 3, at: at(300), from: null, to: "queued", reason: null, workerId: null }, { seq: 9, at: at(200), from: "queued", to: "cancelled", reason: "removed", workerId: null }], steps: [] };
 // The sample's log by step: the steps the job went through, the failing one with its last lines
-export function mockJobLog(id: string): { state: string; steps: { name: string; startedAt: string; tookMs: number; outcome: string; command: string | null; probe: Probe | null; check: { score: number; min: number; passed: boolean } | null; outputLines: number; output: string; result: string }[]; final: string } | { error: { code: string; message: string } } {
+export function mockJobLog(id: string): { state: string; steps: { name: string; startedAt: string; tookMs: number; outcome: string; command: string | null; probe: Probe | null; check: { score: number; min: number | null; passed: boolean | null } | null; outputLines: number; output: string; result: string }[]; final: string } | { error: { code: string; message: string } } {
   const j = mockJob(id);
   if (!j) return { error: { code: "not_found", message: "There is no such job." } };
   const failed = j.state === "failed";
