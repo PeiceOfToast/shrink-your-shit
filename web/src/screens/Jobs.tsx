@@ -187,7 +187,7 @@ function WhyFailed({ id, msg, code, worker, f }: { id: string; msg: string; code
         ? <p className="sm muted">ffmpeg didn't run.</p>
         : f.keyLines.length > 0 && <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">What ffmpeg said</span><button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(f.keyLines.join("\n")).catch(() => {})}><Icon id="i-copy" />Copy</button></div>
           <pre className="joblog">{f.keyLines.join("\n")}</pre></div>}
-      <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+      <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: 12 }}>
         <a className="btn sm" href={"#job-step-" + (f.stepIndex + 1)}><Icon id="i-file" />Open the full log</a>
         {!MOCK && <a className="btn sm ghost" href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}><Icon id="i-download" />Download</a>}
         <button className="btn sm ghost" type="button" onClick={copy}><Icon id="i-copy" />Copy summary</button>
@@ -360,7 +360,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {again && <div role="alertdialog" aria-label="Convert again?" style={{ padding: 12, border: "1px solid var(--border-strong)", borderRadius: "var(--radius)", background: "var(--raised)" }} onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), setAgain(false))}>
             <p style={{ margin: "0 0 8px" }}>Convert {name} again{wf.data && !failed(wf.data) ? " with " + wf.data.name + (wf.data.version ? " v" + wf.data.version : "") : ""}? It starts from the original, never from the new file. The earlier new file is replaced once the new one passes its check.</p>
             <div className="row"><button className="btn sm primary" type="button" autoFocus onClick={runAgain}>Convert again</button><button className="btn sm ghost" type="button" onClick={() => setAgain(false)}>Cancel</button></div></div>}
-          <p className="muted" role="status">{said}</p>
+          {said && <p className="muted" role="status" style={{ margin: 0 }}>{said}</p>}
           {d.error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{d.error.message}</span></p>}
           {/* review db7b1f1 P3: "removed" is the server's flag, not a person's word. Only a job removed with its library
               gets a note; a job that ended as a skip shows its reason under Why like any other. */}
