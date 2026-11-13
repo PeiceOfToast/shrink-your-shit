@@ -99,6 +99,10 @@ function ShareSheet({ share, resp, onDone, onCancel, said }: { share?: Share; re
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [savedShare, setSavedShare] = useState<Share | null>(null);
+  const block = (setup: Share["setup"]) => <><p className="st warn" style={{ margin: 0 }}><Icon id="i-clock" />Waiting for setup on the server</p><h4 style={{ margin: 0 }}>Finish on the server</h4>
+    <p style={{ margin: 0 }}>Run this once on this server, as root:</p>
+    <div className="codebox"><code>{setup!.text}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(setup!.text).catch(() => {})}><Icon id="i-copy" />Copy</button></div>
+    <p className="hint" style={{ margin: 0 }}>It connects the share now and after every restart.</p></>;
   const box = useRef<HTMLElement>(null);
 
   const testNow = async () => {
@@ -126,13 +130,7 @@ function ShareSheet({ share, resp, onDone, onCancel, said }: { share?: Share; re
         <div className="hd"><button className="btn icon ghost" type="button" aria-label="Close" onClick={close}><Icon id="i-chev-l" /></button><div className="sp"><h3 id={edit ? "es" : "ns"} style={{ margin: 0 }}>{edit ? share!.name : ss ? ss.name : "Add a share"}</h3>
           {edit && <p className="hint" style={{ margin: 0 }}>{share!.address} · {TYPE[share!.type].label}</p>}</div></div>
         <div className="bd">
-          {ss?.setup || (edit && share?.setup && share.status === "waiting_setup") ? <>
-            <p className="st warn" style={{ margin: 0 }}><Icon id="i-clock" />Waiting for setup on the server</p>
-            <h4 style={{ margin: 0 }}>Finish on the server</h4>
-            <p style={{ margin: 0 }}>Run this once on this server, as root:</p>
-            <div className="codebox"><code>{(ss?.setup ?? share!.setup!).text}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText((ss?.setup ?? share!.setup!).text).catch(() => {})}><Icon id="i-copy" />Copy</button></div>
-            <p className="hint" style={{ margin: 0 }}>It connects the share now and after every restart.</p>
-          </> : <>
+          {ss?.setup ? block(ss.setup) : <>{edit && share?.setup && share.status === "waiting_setup" && block(share.setup)}<>
             <fieldset style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}><legend style={{ fontWeight: "var(--fw-strong)", marginBottom: 6, padding: 0 }}>Type</legend>
               <label className={"radio" + (type === "smb" ? " sel" : "")}><input type="radio" name="st" checked={type === "smb"} onChange={() => setType("smb")} disabled={edit} />
                 <span><strong>SMB</strong><span className="hint" style={{ display: "block" }}>{TYPE.smb.hint}</span></span></label>
