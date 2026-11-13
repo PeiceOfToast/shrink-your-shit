@@ -23,11 +23,11 @@ import (
 
 func v2Shares(api *http.ServeMux, store *jobs.Store) {
 	_, platform := detectMode()
-	nfsOK := platform != "darwin"
 	tested := platform != "darwin"
 
 	api.HandleFunc("GET /api/v2/shares", func(w http.ResponseWriter, r *http.Request) {
 		mode, _ := detectMode() // per request: the helper can start or stop while the app runs
+		nfsOK := platform != "darwin" && !onWindows()
 		all, err := store.LoadShares()
 		if err != nil {
 			serverError(w, err)
@@ -69,6 +69,10 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 		addr, typ, err := parseAddress(in.Address)
 		if err != nil {
 			apiError(w, http.StatusBadRequest, "invalid_address", err.Error())
+			return
+		}
+		if typ == "nfs" && onWindows() {
+			apiError(w, http.StatusBadRequest, "nfs_unsupported", "NFS shares can't be used on Windows. Add the share as SMB.")
 			return
 		}
 		sh := jobs.Share{Type: typ, Address: addr, Name: in.Name, Guest: in.Guest, Username: in.Username}
@@ -152,8 +156,8 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 		if mode, _ := detectMode(); mode == "app" && changed {
 			// The old mount must go first: the helper treats an already-mounted
 			// point as done, so a busy old mount would stay on the old server.
-			if uErr := helper.Unmount(oldMpt); uErr != nil {
-				store.SetShareMountStatus(id, "linux", "not_connected",
+			if uErr := unmountShare(oldMpt); uErr != nil {
+				store.SetShareMountStatus(id, runtime.GOOS, "not_connected",
 					`{"code":"mount_failed","message":`+jsonStr("The old connection is still in use, so the change isn't connected yet. Stop what is using the share, then Reconnect. "+uErr.Error())+`}`)
 			} else if sh, err := store.ShareByID(id); err == nil && sh != nil {
 				stale := pw
@@ -181,7 +185,7 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 			sh, err := store.ShareByID(id)
 			if err == nil && sh != nil {
 				mpt := mountPointFor(*sh)
-				if err := helper.Unmount(mpt); err != nil {
+				if err := unmountShare(mpt); err != nil {
 					apiError(w, http.StatusConflict, "share_in_use",
 						"The share could not be unmounted. "+err.Error()+".")
 					return
@@ -266,6 +270,14 @@ func tryMount(store *jobs.Store, sh jobs.Share, password string) {
 	if mode != "app" {
 		return
 	}
+	if onWindows() {
+		if err := connectWindowsShare(sh, password); err != nil {
+			store.SetShareMountStatus(sh.ID, runtime.GOOS, "not_connected", winMountReason(err))
+			return
+		}
+		store.SetShareMountStatus(sh.ID, runtime.GOOS, "connected", "")
+		return
+	}
 	addr := mountAddress(sh.Type, sh.Address)
 	kind := "cifs"
 	if sh.Type == "nfs" {
@@ -276,10 +288,10 @@ func tryMount(store *jobs.Store, sh jobs.Share, password string) {
 	err := helper.Mount(kind, addr, mpt, opts, sh.Username, password)
 	if err != nil {
 		reason := mountErrReason(err)
-		store.SetShareMountStatus(sh.ID, "linux", "not_connected", reason)
+		store.SetShareMountStatus(sh.ID, runtime.GOOS, "not_connected", reason)
 		return
 	}
-	store.SetShareMountStatus(sh.ID, "linux", "connected", "")
+	store.SetShareMountStatus(sh.ID, runtime.GOOS, "connected", "")
 }
 
 // RemountShares mounts every saved share again when the server starts (app mode only), so
@@ -436,6 +448,9 @@ func detectMode() (mode, platform string) {
 	}
 	if _, err := os.Stat("/.dockerenv"); err == nil {
 		return "docker", runtime.GOOS
+	}
+	if onWindows() { // the app runs as the person, and connects the share itself
+		return "app", runtime.GOOS
 	}
 	if runtime.GOOS == "linux" {
 		// app mode when the helper socket answers (dial with 1s timeout)
