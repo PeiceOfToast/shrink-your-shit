@@ -187,7 +187,6 @@ function WhyFailed({ id, msg, code, worker, f }: { id: string; msg: string; code
     </section>);
 }
 
-// durations read '4 min 12 s' and '0.1 s' everywhere (the design's phone note)
 // count of q in a step's searchable text (case-insensitive)
 const matches = (st: { name: string; command: string | null; output: string; result: string }, q: string) => [st.name, st.command ?? "", st.output, st.result].join("\n").toLowerCase().split(q.toLowerCase()).length - 1;
 // E: a finished job's log by step (GET /log), SCREENS V6b: each step a row that opens; the failed step open; inside a step
@@ -210,11 +209,13 @@ function StepLog({ id, worker, failedIdx }: { id: string; worker: string | null;
       {/* V6b Search: every step's command, output and result; the steps with matches open and are counted */}
       <div className="row" style={{ gap: 6, margin: "8px 0", flexWrap: "wrap" }}>
         <input className="input sm" type="search" placeholder="Search the log" aria-label="Search the log" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
+        {!MOCK && <a className="btn sm" href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}><Icon id="i-download" />Download the full log</a>}
         {q && <span className="sm muted" role="status">{(() => { const ns = l.steps.map((st) => matches(st, q)), t = ns.reduce((x, y) => x + y, 0), k = ns.filter((x) => x > 0).length; return t ? t + " matches in " + k + " step" + (k > 1 ? "s" : "") : "No match"; })()}</span>}
       </div>
       {l.steps.map((st, i) => {
         const hit = q ? matches(st, q) : 0;
-        const pr = st.probe as Probe | null, sum = pr && [pr.videoCodec?.toUpperCase().replace("H264", "H.264"), (pr.streams ?? []).find((x) => x.type === "video")?.Width && (pr.streams ?? []).find((x) => x.type === "video")!.Width + "×" + (pr.streams ?? []).find((x) => x.type === "video")!.Height, pr.durationSec ? elapsed(pr.durationSec) : "", pr.sizeBytes ? bytes(pr.sizeBytes) : ""].filter(Boolean).join(" · ");
+        const pr = st.probe as Probe | null, v = pr?.streams?.find((x) => x.type === "video"), n = (t: string) => (pr?.streams ?? []).filter((x) => x.type === t).length;
+        const sum = pr && [pr.videoCodec?.toUpperCase().replace("H264", "H.264"), v?.Width && v.Height ? v.Width + "×" + v.Height : "", n("audio") && n("audio") + " audio", n("subtitle") && n("subtitle") + " subtitles", pr.durationSec ? elapsed(pr.durationSec) : "", pr.sizeBytes ? bytes(pr.sizeBytes) : ""].filter(Boolean).join(" · ");
         return (
           <details key={i} id={"job-step-" + (i + 1)} open={q ? hit > 0 : st.outcome !== "ok" || i + 1 === failedIdx} className="stepd" style={{ borderTop: "1px solid var(--border)", padding: "8px 0" }}>
             <summary className="row nw" style={{ gap: 8, flexWrap: "wrap", cursor: "pointer" }}><strong>{st.name}</strong><span className="sm muted">{clock(st.startedAt)} · took {dur(st.tookMs)}</span>
