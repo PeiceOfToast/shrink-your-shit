@@ -1,8 +1,8 @@
 // D: Network shares settings (SCREENS V9d, D-API-SHAPE.md). Mock only (the engine is after item E).
-// The share list table, Add/Edit sheet, Remove dialog, Test button, and the connect-mode-specific UI.
-import { useState } from "react";
+// The share list table, Add/Edit sheet (drawer), Remove dialog, Test button, and the connect-mode-specific UI.
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
-import { failed, type Answer } from "../api";
+import { MOCK, failed, type Answer } from "../api";
 import { Empty, PageHead } from "../PageHead";
 import { SettingsTabs } from "../pages";
 import { useData } from "../useData";
@@ -44,7 +44,7 @@ function ShareRow({ share, resp, onChanged, said }: { share: Share; resp: Shares
       <td className="actc">
         <details className="menu" style={{ display: menu ? undefined : "inline-block" }}>
           <summary className="btn icon ghost sm" aria-label={"Actions for " + share.name} onClick={() => setMenu(!menu)} style={{ display: "inline-flex" }}><Icon id="i-more" /></summary>
-          {menu && <div className="pop" role="menu">
+          {menu && <div className="pop over" role="menu">
             {canReconnect && <button className="it" type="button" onClick={() => (setMenu(false), reconnect())}>Reconnect</button>}
             {canCheck && <button className="it" type="button" onClick={() => (setMenu(false), reconnect())}>Check again</button>}
             <button className="it" type="button" onClick={() => (setMenu(false), setEditing(true))}>Edit</button>
@@ -65,17 +65,20 @@ function RemoveDialog({ share, onCancel, onDone, said }: { share: Share; onCance
     if (r === undefined) { said("Removed."); onDone(); }
   };
   return (
-    <div className="dlg" role="alertdialog" aria-label="Remove share?" style={{ padding: 12, border: "1px solid var(--border-strong)", borderRadius: "var(--radius)", background: "var(--raised)" }}
-      onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), onCancel())}>
-      <h3 style={{ margin: 0 }}>Remove {share.name}?</h3>
-      <p style={{ margin: "8px 0" }}>Shrink Your Shit disconnects from it. Nothing on the share is changed or deleted.{share.setup ? " Also remove it from the server:" : ""}</p>
-      {share.setup && <div className="codebox"><code>{share.setup.removeText}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(share.setup!.removeText).catch(() => {})}><Icon id="i-copy" />Copy</button></div>}
-      {share.libraries.length > 0 && <p className="st bad" style={{ margin: 0 }}><Icon id="i-alert" /><span>{share.libraries.map((l) => l.name).join(" and ")} use this share. Change their folders or remove them first.</span></p>}
-      {error && <p className="st bad" style={{ margin: 0 }}><Icon id="i-alert" /><span>{error}</span></p>}
-      <div className="row" style={{ gap: 8, marginTop: 8 }}>
-        {share.libraries.length === 0 && <button className="btn sm primary" type="button" onClick={remove}><Icon id="i-x" />Remove share</button>}
-        <button className="btn sm ghost" type="button" onClick={onCancel}>Keep it</button>
-      </div>
+    <div className="drawer-wrap" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
+      <aside className="drawer" tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="rm-s" onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), onCancel())}>
+        <div className="hd"><h3 id="rm-s" style={{ margin: 0 }}>Remove {share.name}?</h3><button className="btn icon ghost sm" type="button" aria-label="Close" onClick={onCancel}><Icon id="i-x" /></button></div>
+        <div className="bd">
+          <p style={{ margin: 0 }}>Shrink Your Shit disconnects from it. Nothing on the share is changed or deleted.{share.setup ? " Also remove it from the server:" : ""}</p>
+          {share.setup && <div className="codebox"><code>{share.setup.removeText}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(share.setup!.removeText).catch(() => {})}><Icon id="i-copy" />Copy</button></div>}
+          {share.libraries.length > 0 && <p className="st bad" style={{ margin: 0 }}><Icon id="i-alert" /><span>{share.libraries.map((l) => l.name).join(" and ")} use this share. Change their folders or remove them first.</span></p>}
+          {error && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{error}</span></p>}
+          <div className="row" style={{ gap: 8 }}>
+            {share.libraries.length === 0 && <button className="btn primary" type="button" onClick={remove}><Icon id="i-x" />Remove share</button>}
+            <button className="btn ghost" type="button" onClick={onCancel}>Keep it</button>
+          </div>
+        </div>
+      </aside>
     </div>
   );
 }
@@ -94,6 +97,7 @@ function ShareSheet({ share, resp, onDone, onCancel, said }: { share?: Share; re
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [savedShare, setSavedShare] = useState<Share | null>(null);
+  const box = useRef<HTMLElement>(null);
 
   const testNow = async () => {
     setTesting(true); setTestResult(null); setError("");
@@ -111,59 +115,61 @@ function ShareSheet({ share, resp, onDone, onCancel, said }: { share?: Share; re
     if (r) { if (r.setup && !edit) setSavedShare(r as Share); else { said(edit ? "Saved." : "Added."); onDone(r); } }
   };
 
+  useEffect(() => { box.current?.focus(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const ss = savedShare;
   return (
-    <div className="sheet" role="dialog" aria-labelledby={edit ? "es" : "ns"} style={{ maxWidth: 520 }}>
-      <div className="hd"><h3 id={edit ? "es" : "ns"}>{edit ? share!.name : ss ? ss.name : "Add a share"}</h3>
-        {edit && <p className="hint" style={{ margin: "4px 0 0" }}>{share!.address} · {TYPE[share!.type].label}</p>}</div>
-      <div className="bd">
-        {ss?.setup ? <>
-          <p className="st warn" style={{ margin: 0 }}><Icon id="i-clock" />Waiting for setup on the server</p>
-          <h4 style={{ margin: 0 }}>Finish on the server</h4>
-          <p style={{ margin: 0 }}>Run this once on this server, as root:</p>
-          <div className="codebox"><code>{ss.setup.text}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(ss.setup!.text).catch(() => {})}><Icon id="i-copy" />Copy</button></div>
-          <p className="hint" style={{ margin: 0 }}>It connects the share now and after every restart.</p>
-        </> : <>
-        <fieldset className="types"><legend>Type</legend>
-          <label className={"radio" + (type === "smb" ? " sel" : "")}><input type="radio" name="st" checked={type === "smb"} onChange={() => setType("smb")} disabled={edit} />
-            <span><strong>SMB</strong><span className="hint blk">{TYPE.smb.hint}</span></span></label>
-          <label className={"radio" + (type === "nfs" ? " sel" : "")}><input type="radio" name="st" checked={type === "nfs"} onChange={() => setType("nfs")} disabled={!resp.nfsSupported || edit} />
-            <span><strong>NFS</strong><span className="hint blk">{TYPE.nfs.hint}</span>{!resp.nfsSupported && <span className="hint blk">NFS isn't supported on Mac yet.</span>}</span></label>
-        </fieldset>
-        <div className="field"><label htmlFor="sa">Address</label>
-          <input className="input mono" id="sa" value={address} onChange={(e) => setAddress(e.target.value)} placeholder={type === "smb" ? "\\\\nas\\media" : "nas:/volume1/media"} />
-          <span className="hint">Also accepts {type === "smb" ? "smb://nas/media" : "nfs://nas/volume1/media"}. Saved as {type === "smb" ? "\\\\nas\\media" : "nas:/volume1/media"}</span></div>
-        <div className="field"><label htmlFor="sn">Name</label>
-          <input className="input" id="sn" value={name || address.split(/[\\/]/).pop() || ""} onChange={(e) => setName(e.target.value)} />
-          <span className="hint">Shown in the folder browser and on Libraries.</span></div>
-        {type === "smb" && <>
-          <fieldset className="types"><legend>Sign in</legend>
-            <label className={"radio" + (!guest ? " sel" : "")}><input type="radio" name="si" checked={!guest} onChange={() => setGuest(false)} /><span><strong>With a username</strong></span></label>
-            <label className={"radio" + (guest ? " sel" : "")}><input type="radio" name="si" checked={guest} onChange={() => setGuest(true)} /><span><strong>As a guest</strong></span></label>
-          </fieldset>
-          {!guest && <>
-            <div className="field"><label htmlFor="su">Username</label>
-              <input className="input" id="su" value={username} onChange={(e) => setUsername(e.target.value)} /><span className="hint">For a domain account: DOMAIN\name</span></div>
-            <div className="field"><label htmlFor="sp">Password</label>
-              <div className="pw"><input className="input" id="sp" type={showPw ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder={edit ? "Leave empty to keep the saved password." : ""} />
-                <button className="btn sm" type="button" aria-pressed={showPw} onClick={() => setShowPw(!showPw)}>{showPw ? "Hide" : "Show"}</button></div>
-              <span className="hint">Stored encrypted in this app's data and never shown again. It keeps copies and backups of the data safe, not someone who can already sign in to this computer.</span></div>
+    <div className="drawer-wrap" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
+      <aside ref={box} className="drawer" tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={edit ? "es" : "ns"} onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), onCancel())}>
+        <div className="hd"><h3 id={edit ? "es" : "ns"} style={{ margin: 0 }}>{edit ? share!.name : ss ? ss.name : "Add a share"}</h3>
+          {edit && <p className="hint" style={{ margin: "4px 0 0" }}>{share!.address} · {TYPE[share!.type].label}</p>}
+          <button className="btn icon ghost" type="button" aria-label="Close" onClick={onCancel}><Icon id="i-chev-l" /></button></div>
+        <div className="bd">
+          {ss?.setup ? <>
+            <p className="st warn" style={{ margin: 0 }}><Icon id="i-clock" />Waiting for setup on the server</p>
+            <h4 style={{ margin: 0 }}>Finish on the server</h4>
+            <p style={{ margin: 0 }}>Run this once on this server, as root:</p>
+            <div className="codebox"><code>{ss.setup.text}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(ss.setup!.text).catch(() => {})}><Icon id="i-copy" />Copy</button></div>
+            <p className="hint" style={{ margin: 0 }}>It connects the share now and after every restart.</p>
+          </> : <>
+            <fieldset style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}><legend style={{ fontWeight: "var(--fw-strong)", marginBottom: 6, padding: 0 }}>Type</legend>
+              <label className={"radio" + (type === "smb" ? " sel" : "")}><input type="radio" name="st" checked={type === "smb"} onChange={() => setType("smb")} disabled={edit} />
+                <span><strong>SMB</strong><span className="hint blk">{TYPE.smb.hint}</span></span></label>
+              <label className={"radio" + (type === "nfs" ? " sel" : "")}><input type="radio" name="st" checked={type === "nfs"} onChange={() => setType("nfs")} disabled={!resp.nfsSupported || edit} />
+                <span><strong>NFS</strong><span className="hint blk">{TYPE.nfs.hint}</span>{!resp.nfsSupported && <span className="hint blk">NFS isn't supported on Mac yet.</span>}</span></label>
+            </fieldset>
+            <div className="field"><label htmlFor="sa">Address</label>
+              <input className="input mono" id="sa" value={address} onChange={(e) => setAddress(e.target.value)} placeholder={type === "smb" ? "\\\\nas\\media" : "nas:/volume1/media"} />
+              <span className="hint">Also accepts {type === "smb" ? "smb://nas/media" : "nfs://nas/volume1/media"}. Saved as {type === "smb" ? "\\\\nas\\media" : "nas:/volume1/media"}</span></div>
+            <div className="field"><label htmlFor="sn">Name</label>
+              <input className="input" id="sn" value={name || address.split(/[\\/]/).pop() || ""} onChange={(e) => setName(e.target.value)} />
+              <span className="hint">Shown in the folder browser and on Libraries.</span></div>
+            {type === "smb" && <>
+              <fieldset style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}><legend style={{ fontWeight: "var(--fw-strong)", marginBottom: 6, padding: 0 }}>Sign in</legend>
+                <label className={"radio" + (!guest ? " sel" : "")}><input type="radio" name="si" checked={!guest} onChange={() => setGuest(false)} /><span><strong>With a username</strong></span></label>
+                <label className={"radio" + (guest ? " sel" : "")}><input type="radio" name="si" checked={guest} onChange={() => setGuest(true)} /><span><strong>As a guest</strong></span></label>
+              </fieldset>
+              {!guest && <>
+                <div className="field"><label htmlFor="su">Username</label>
+                  <input className="input" id="su" value={username} onChange={(e) => setUsername(e.target.value)} /><span className="hint">For a domain account: DOMAIN\name</span></div>
+                <div className="field"><label htmlFor="sp">Password</label>
+                  <div className="pw"><input className="input" id="sp" type={showPw ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder={edit ? "Leave empty to keep the saved password." : ""} />
+                    <button className="btn sm" type="button" aria-pressed={showPw} onClick={() => setShowPw(!showPw)}>{showPw ? "Hide" : "Show"}</button></div>
+                  <span className="hint">Stored encrypted in this app's data and never shown again. It keeps copies and backups of the data safe, not someone who can already sign in to this computer.</span></div>
+              </>}
+            </>}
+            {type === "nfs" && <p className="hint" style={{ marginTop: 8 }}>NFS has no password. The server must allow this computer's address ({resp.serverAddress ?? "this server"}).</p>}
+            {!resp.testedPlatform && <p className="hint" style={{ marginTop: 8 }}>Network shares are not tested on a Mac yet. If one doesn't connect, the share's status says why.</p>}
+            {resp.mode === "manual" && <p className="hint" style={{ marginTop: 8 }}>To let the app connect shares itself, run the installer again and answer yes to network shares.</p>}
+            <div className="row"><button className="btn sm" type="button" disabled={testing || saving} onClick={testNow}>{testing ? "Testing..." : "Test"}</button></div>
+            {testResult && (testResult.ok
+              ? <div className="note ok" role="status" aria-live="polite"><Icon id="i-check-c" /><span>{testResult.portOnly ? "The server answers on the NFS port. The folder itself is checked when the share connects." : "Connected. Folders at the top: " + testResult.folders!.slice(0, 3).join(", ") + (testResult.moreFolders ? ", and " + testResult.moreFolders + " more." : ".")}</span></div>
+              : <div className="note bad" role="status" aria-live="polite"><Icon id="i-alert" /><span>{testResult.message + (testResult.shares?.length ? " The server offers: " + testResult.shares.join(", ") : "")}</span></div>)}
+            {error && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{error}</span></p>}
+            <div className="row" style={{ gap: 8, marginTop: 8 }}><button className="btn primary" type="button" disabled={saving} onClick={save}>{saving ? "Saving..." : edit ? "Save" : "Save and connect"}</button>
+              <button className="btn ghost" type="button" onClick={onCancel}>Cancel</button></div>
           </>}
-        </>}
-        {type === "nfs" && <p className="hint" style={{ marginTop: 8 }}>NFS has no password. The server must allow this computer's address ({resp.serverAddress ?? "this server"}).</p>}
-        {!resp.testedPlatform && <p className="hint" style={{ marginTop: 8 }}>Network shares are not tested on a Mac yet. If one doesn't connect, the share's status says why.</p>}
-        {resp.mode === "manual" && <p className="hint" style={{ marginTop: 8 }}>To let the app connect shares itself, run the installer again and answer yes to network shares.</p>}
-        <div className="row"><button className="btn sm" type="button" disabled={testing || saving} onClick={testNow}>{testing ? "Testing..." : "Test"}</button></div>
-        {testResult && (testResult.ok
-          ? <div className="note ok" role="status" aria-live="polite"><Icon id="i-check-c" /><span>{testResult.portOnly ? "The server answers on the NFS port. The folder itself is checked when the share connects." : "Connected. Folders at the top: " + testResult.folders!.slice(0, 3).join(", ") + (testResult.moreFolders ? ", and " + testResult.moreFolders + " more." : ".")}</span></div>
-          : <div className="note bad" role="status" aria-live="polite"><Icon id="i-alert" /><span>{testResult.message + (testResult.shares?.length ? " The server offers: " + testResult.shares.join(", ") : "")}</span></div>)}
-        {error && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{error}</span></p>}
-        </>}
-      </div>
-      <div className="ft">
-        {!ss && <button className="btn primary" type="button" disabled={saving} onClick={save}>{saving ? "Saving..." : edit ? "Save" : "Save and connect"}</button>}
-        <button className="btn ghost" type="button" onClick={() => { if (ss) { said("Added."); onDone(); } else onCancel(); }}>{ss ? "Close" : "Cancel"}</button>
-      </div>
+        </div>
+      </aside>
     </div>
   );
 }
@@ -187,7 +193,7 @@ export function SharesSettings() {
         {(data.items ?? []).length === 0
           ? <Empty icon="i-shares" text="No network shares yet. Libraries can still use any folder this computer can already see." />
           : <div className="list"><table className="tbl"><thead><tr>
-            <th>Name</th><th data-p="2">Type</th><th className="stc">Status</th><th className="stc">Used by</th><th><span className="sr">Actions</span></th>
+            <th>Name</th><th data-p="2">Type</th><th className="stc">Status</th><th data-p="2">Used by</th><th><span className="sr">Actions</span></th>
           </tr></thead>
               <tbody>{(data.items ?? []).map((s) => <ShareRow key={s.id} share={s} resp={data} onChanged={resp.reload} said={setSaid} />)}</tbody>
             </table>
