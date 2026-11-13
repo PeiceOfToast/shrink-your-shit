@@ -663,6 +663,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	// What the conversion will do, logged only now that it runs (review 48f07eb: a skipped Plan
 	// converts nothing, so its notes would be untrue).
+	if plan.Video.TargetKbps > 0 && plan.Video.TargetKbps == plan.Video.PeakLimitKbps { // the limit is below the level's figure
+		w.jobf(job.ID, ": the peak limit is below the level's bitrate, so the average is the limit (%s Mbps)", rules.Mbps(plan.Video.TargetKbps))
+	}
 	if plan.MainAudioUsed { // Basic's stereo AAC found no track in the person's languages (S4)
 		w.jobf(job.ID, " (%s): %s", job.Path, rules.NoAudioInMyLanguageMain)
 	}
@@ -835,7 +838,12 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		if errors.As(err, &k) && plan.Video.PeakLimitKbps > 0 && strings.HasPrefix(k.Reason, pictureTooDifferent) {
 			// design (SCREENS V3 step 3): VBR's own words; the measured similarity goes to the run log
 			w.jobf(job.ID, ": %s", k.Reason)
-			k.Reason = "Kept the original: under a " + rules.Mbps(plan.Video.PeakLimitKbps) + " Mbps peak limit the picture would suffer."
+			// design (SCREENS V3 step 3); review a772397 P3: name the figure that actually bound it
+			if plan.Video.TargetKbps < plan.Video.PeakLimitKbps { // the level's figure, not the limit
+				k.Reason = "Kept the original: at the level's " + rules.Mbps(plan.Video.TargetKbps) + " Mbps bitrate the picture would suffer."
+			} else {
+				k.Reason = "Kept the original: under a " + rules.Mbps(plan.Video.PeakLimitKbps) + " Mbps peak limit the picture would suffer."
+			}
 		}
 		return "", err
 	}

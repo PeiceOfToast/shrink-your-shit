@@ -60,6 +60,12 @@ func TestVBR(t *testing.T) {
 			t.Errorf("want %q: %v", c.words, err)
 		}
 	}
+	// a revision saved before the AV1 check is skipped with the words that say what to change
+	av1 := s
+	av1.Format = "av1"
+	if p := (Template{Kind: KindSelectors, Selectors: &av1}).Compile(h264(1920, 1080, 8000)); !strings.Contains(p.Skip, "edit the workflow to use quality mode") {
+		t.Errorf("AV1 VBR skip: %q", p.Skip)
+	}
 	// Same resolution: checked against the lowest row the level reaches (never refused for a file it
 	// could fit); a file whose own row needs more is encoded at the limit, never refused at run time
 	keep := s

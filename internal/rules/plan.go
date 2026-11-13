@@ -179,6 +179,9 @@ func (t Template) Compile(info media.Info) Plan {
 		s := t.Selectors.Upgraded() // a flow saved before S6 runs as its migration will save it
 		if s.Validate() != nil {
 			p.Skip, p.SkipCode = "its library's setting has a choice this version cannot run", SkipSettingCannotRun
+			if s.RateControl == "vbr" && !VBRFormat(s.Format) { // a revision published before the AV1 check
+				p.Skip = "VBR with a peak limit isn't available for AV1; edit the workflow to use quality mode."
+			}
 			return p
 		}
 		return compileSelectors(p, s, info, SplitLanguages(t.Languages), false)
