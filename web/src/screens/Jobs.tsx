@@ -226,7 +226,7 @@ function StepLog({ id, worker, failedIdx }: { id: string; worker: string | null;
               {sum && <p className="sm">Source: {sum}</p>}
               {st.check && <p className="sm">Picture check: Score {st.check.score.toFixed(3)} (needs {st.check.min.toFixed(3)}) · {st.check.passed ? "passed" : "failed"}</p>}
               {st.outputLines > 0 && <details open={st.outcome !== "ok"}><summary className="sm">Show ffmpeg output ({st.outputLines} lines)</summary>
-                {st.outputLines > 200 && <p className="sm"><a href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}>Show all {st.outputLines.toLocaleString()} lines</a></p>}
+                {st.outputLines > 200 && <p className="sm"><a href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}>Download all {st.outputLines.toLocaleString()} lines</a></p>}
                 <pre className="joblog sm">{st.output}</pre></details>}
               {st.result && <p className="sm">{st.result}</p>}
             </div>
