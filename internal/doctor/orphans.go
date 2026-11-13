@@ -61,9 +61,9 @@ func OrphanedOriginals(root string, known map[string]bool) []OrphanFolder {
 // Message is design's sentence for the folder, with the real count, size and path.
 func (o OrphanFolder) Message() string {
 	if o.Files == 1 {
-		return fmt.Sprintf("1 original file (%s) from an earlier setup is still in the hidden folder %s. It is not listed under Kept originals and will not be deleted automatically. Move it back or delete it yourself; we won't touch it.", rules.HumanBytes(o.Bytes), o.Dir)
+		return fmt.Sprintf("1 original file (%s) from an earlier setup is still in the hidden folder %s. It is not one of the originals kept by shrink-your-shit and will not be deleted automatically. Move it back or delete it yourself; we won't touch it.", rules.HumanBytes(o.Bytes), o.Dir)
 	}
-	return fmt.Sprintf("%d original files (%s) from an earlier setup are still in the hidden folder %s. They are not listed under Kept originals and will not be deleted automatically. Move them back or delete them yourself; we won't touch them.", o.Files, rules.HumanBytes(o.Bytes), o.Dir)
+	return fmt.Sprintf("%d original files (%s) from an earlier setup are still in the hidden folder %s. They are not among the originals kept by shrink-your-shit and will not be deleted automatically. Move them back or delete them yourself; we won't touch them.", o.Files, rules.HumanBytes(o.Bytes), o.Dir)
 }
 
 // canonFile is p with its folder's links resolved (the file itself is not followed), compared without
