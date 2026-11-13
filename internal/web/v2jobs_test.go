@@ -420,3 +420,48 @@ func TestFailureNeverRanInTheAPI(t *testing.T) {
 		t.Errorf("never ran: %v", d.Failure)
 	}
 }
+
+// User review 11-13 item E: a running job's log is still coming back; a worker-lost job with no lines is lost.
+func TestLogStates(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	run, _ := st.Enqueue(jobs.Job{Library: "/m", LibraryID: l.ID, Path: "/m/run.mkv"})
+	st.Claim("t")
+	lost, _ := st.Enqueue(jobs.Job{Library: "/m", LibraryID: l.ID, Path: "/m/lost.mkv"})
+	st.Claim("t")
+	st.Fail(lost, "worker_lost", "The worker stopped answering.")
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs?tab=running&limit=200"})
+	var r struct{ Items []map[string]any }
+	json.Unmarshal([]byte(body), &r)
+	if len(r.Items) != 1 || r.Items[0]["logState"] != "coming_back" {
+		t.Errorf("running: %s", body)
+	}
+	_ = run
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(lost, 10)})
+	var d map[string]any
+	json.Unmarshal([]byte(body), &d)
+	if d["logState"] != "lost" {
+		t.Errorf("worker lost: %s", body)
+	}
+}
+
+// User review 11-13 item E: ?reason= lists the failures with one design code; an unknown code is refused.
+func TestJobsByReason(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	lost, _ := st.Enqueue(jobs.Job{Library: "/m", LibraryID: l.ID, Path: "/m/lost.mkv"})
+	st.Claim("t")
+	st.Fail(lost, "worker_lost", "The worker stopped answering.")
+	other, _ := st.Enqueue(jobs.Job{Library: "/m", LibraryID: l.ID, Path: "/m/other.mkv"})
+	st.Claim("t")
+	st.Fail(other, "convert_failed", "Converting did not finish.")
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs?tab=failed&reason=worker_lost&limit=200"})
+	var r struct{ Items []map[string]any }
+	json.Unmarshal([]byte(body), &r)
+	if len(r.Items) != 1 || r.Items[0]["name"] != "lost.mkv" {
+		t.Errorf("worker_lost: %s", body)
+	}
+	if code, _ := post(t, srv, "GET", "/api/v2/jobs?tab=failed&reason=nonsense", ""); code != 400 {
+		t.Errorf("unknown reason: %d", code)
+	}
+}

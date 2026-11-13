@@ -293,7 +293,8 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 				break
 			}
 		}
-		if best < threshold { // one place that is too different is enough
+		w.check = &checkResult{Score: best, Min: threshold, Passed: best >= threshold} // the score that decided it (the job's check step)
+		if best < threshold {                                                          // one place that is too different is enough
 			return kept(pictureTooDifferent+" (similarity %.3f at %s, %.2f is required)",
 				best, rules.Clock(seg.start), threshold)
 		}

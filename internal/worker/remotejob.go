@@ -34,9 +34,11 @@ type RemotePlan struct {
 // RemoteResult is a remote worker's answer: its checked file is in the plan's Stage (its extracted
 // subtitles at their staged names), or why it didn't work.
 type RemoteResult struct {
-	Stderr string // what its ffmpeg said (damage in the original shows there)
-	Kept   string // its checks said no: the original is kept, as a local check would
-	Err    error  // it failed to convert
+	Stderr  string               // what its ffmpeg said (damage in the original shows there)
+	Kept    string               // its checks said no: the original is kept, as a local check would
+	Err     error                // it failed to convert
+	Steps   []jobs.RunStep       // the run steps (encode, probe, check) with the remote's own timings
+	Failure *jobs.FailureSummary // the remote's failure summary (exit code, key lines, etc.)
 }
 
 // RemoteJob joins the server's run of a leased job with the remote worker converting it.

@@ -6,6 +6,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
 )
 
 // User review 11-13 item E: a job's log lines, steps and failure summary live in SQLite (migration 39), so the
@@ -155,4 +160,107 @@ func (s *Store) LogLineCount(id int64) (int, error) {
 	var n int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM job_log_lines WHERE job_id=?`, id).Scan(&n)
 	return n, err
+}
+
+// ImportRunLogs moves the old run-log files (dir/<job id>.log, from before the log lived in SQLite) into the
+// database as app lines, then removes each file once its lines are committed. Once the folder is empty this does
+// nothing, so it is safe to run at every start. It returns how many files it imported.
+func (s *Store) ImportRunLogs(dir string) (int, error) {
+	files, err := filepath.Glob(filepath.Join(dir, "*.log"))
+	if err != nil {
+		return 0, err
+	}
+	imported := 0
+	for _, f := range files {
+		id, err := strconv.ParseInt(strings.TrimSuffix(filepath.Base(f), ".log"), 10, 64)
+		if err != nil || id <= 0 {
+			continue // not a job's log
+		}
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return imported, err
+		}
+		tx, err := s.db.Begin()
+		if err != nil {
+			return imported, err
+		}
+		for _, line := range strings.Split(strings.TrimRight(string(b), "\n"), "\n") {
+			if _, err := tx.Exec(`INSERT INTO job_log_lines(job_id, seq, ts, step, stream, text)
+SELECT ?, COALESCE(MAX(seq),0)+1, ?, 0, 'app', ? FROM job_log_lines WHERE job_id=?`, id, s.stamp(), line, id); err != nil {
+				tx.Rollback()
+				return imported, err
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return imported, err
+		}
+		if err := os.Remove(f); err != nil {
+			return imported, err
+		}
+		imported++
+	}
+	return imported, nil
+}
+
+// LogLinesAfter is job id's log lines after sequence number after, at most limit of them: a reader's next piece.
+func (s *Store) LogLinesAfter(id, after int64, limit int) ([]LogLine, error) {
+	rows, err := s.db.Query(`SELECT seq, ts, step, stream, text FROM job_log_lines WHERE job_id=? AND seq>? ORDER BY seq LIMIT ?`, id, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []LogLine{}
+	for rows.Next() {
+		var l LogLine
+		if err := rows.Scan(&l.Seq, &l.At, &l.Step, &l.Stream, &l.Text); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+// RemoveJobLogs deletes the log lines and steps of jobs that are gone (their rows were removed).
+func (s *Store) RemoveJobLogs(ids []int64) error {
+	for _, id := range ids {
+		for _, q := range []string{`DELETE FROM job_log_lines WHERE job_id=?`, `DELETE FROM job_run_steps WHERE job_id=?`, `DELETE FROM job_failures WHERE job_id=?`} {
+			if _, err := s.db.Exec(q, id); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// PruneJobLogs deletes the log lines and run steps of finished jobs (done, failed, kept, skipped) whose last change is
+// before the cutoff (logKeepDays). The job rows and their failure summaries stay; their logState then says expired.
+// It returns how many log lines went. SQLite reuses the freed pages; the file shrinks only when it is vacuumed (a later step).
+func (s *Store) PruneJobLogs(before time.Time) (int64, error) {
+	rows, err := s.db.Query(`SELECT id FROM jobs WHERE status IN ('done','failed','kept','skipped') AND updated<?`, before.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	var n int64
+	for _, id := range ids {
+		r, err := s.db.Exec(`DELETE FROM job_log_lines WHERE job_id=?`, id)
+		if err != nil {
+			return n, err
+		}
+		k, _ := r.RowsAffected()
+		n += k
+		if _, err := s.db.Exec(`DELETE FROM job_run_steps WHERE job_id=?`, id); err != nil {
+			return n, err
+		}
+	}
+	return n, nil
 }

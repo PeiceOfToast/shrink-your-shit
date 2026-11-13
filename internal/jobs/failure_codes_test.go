@@ -3,8 +3,13 @@
 package jobs
 
 import (
+	"encoding/json"
+	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
 // User review 11-13 item E: each code of design's V6b table, from the stored code or from ffmpeg's own lines (the
@@ -45,7 +50,7 @@ func TestFailureWords(t *testing.T) {
 	f := FailureFacts{Path: "/media/movies/Movie.mkv", Folder: "/mnt/out", ExitCode: 1, MediaTime: "00:41:12", Stored: "Converting did not finish",
 		KeyLines: []string{"[AVEncoder @ 0x1] Unknown encoder 'h264_qsv'"}}
 	for _, c := range []struct{ code, message string }{
-		{"encoder_unavailable", "The encoder couldn't start: h264_qsv isn't available on this worker."},
+		{"encoder_unavailable", "The encoder couldn't start: Intel Quick Sync (h264_qsv) isn't available on this computer."},
 		{"output_not_writable", "Couldn't write to /mnt/out: permission denied."},
 		{"no_space", "Not enough space in /mnt/out to finish converting."},
 		{"source_damaged", "The source file is damaged at 00:41:12."},
@@ -84,8 +89,8 @@ func TestMatchedKeyLines(t *testing.T) {
 		t.Errorf("permission: %q", got)
 	}
 	generic := []string{"a", "b", "c", "d", "e", "f", "g"}
-	if got := MatchedKeyLines(generic); len(got) != 5 || got[0] != "c" {
-		t.Errorf("no error line: %q", got)
+	if got := MatchedKeyLines(generic); len(got) != 0 {
+		t.Errorf("no error line: expected [], got %q", got)
 	}
 }
 
@@ -97,6 +102,7 @@ func TestDeniedFolder(t *testing.T) {
 	}{
 		{[]string{"Error opening output /mnt/out/new.mkv: Permission denied"}, "/mnt/out"},
 		{[]string{"Error opening output /srv/media/.syp-tmp/.Movie.abc.syp-tmp.mkv: Permission denied"}, "/srv/media"},
+		{[]string{"Error opening output /mnt/media/out (shrunk)/.output.123.syp-tmp/new.mkv: Permission denied"}, "/mnt/media/out (shrunk)"},
 		{[]string{"Error opening output files: Permission denied"}, ""}, // no path in it
 		{[]string{"Conversion failed!"}, ""},
 	} {
@@ -132,5 +138,95 @@ func TestQSVKeyLines(t *testing.T) {
 	have := strings.Join(got, "\n")
 	if !strings.Contains(have, "Error creating a MFX session: -9.") || !strings.Contains(have, "Error while opening encoder") {
 		t.Errorf("key lines leave out the encoder lines: %q", got)
+	}
+}
+
+// ?reason=: the SQL condition selects exactly the jobs FailureCode names with that code (checked on real rows).
+func TestReasonConditionMatchesFailureCode(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "syp.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.SetPaused(false)
+	l, _ := s.AddLibrary("m", t.TempDir(), rules.SliderTemplate(3), true)
+	for i, c := range []struct {
+		code  string
+		lines []string
+	}{
+		{ReasonDiskFull, nil}, {ReasonCannotWrite, nil}, {ReasonKeptOriginal, nil}, {ReasonStalled, nil}, {ReasonWorkerLost, nil},
+		{ReasonConvertFailed, []string{"[AVEncoder @ 0x1] Unknown encoder 'h264_qsv'"}},
+		{ReasonConvertFailed, []string{"/mnt/out/Movie.mkv: Permission denied"}},
+		{ReasonConvertFailed, []string{"/media/Movie.mkv: No such file or directory"}},
+		{ReasonConvertFailed, []string{"[mov,mp4 @ 0x3] moov atom not found"}},
+		{ReasonConvertFailed, []string{"Conversion failed!"}},
+		{ReasonConvertFailed, nil},
+	} {
+		id, _ := s.Enqueue(Job{Library: "m", LibraryID: l.ID, Path: fmt.Sprintf("/m/%d.mkv", i)})
+		s.Claim("t")
+		if len(c.lines) > 0 {
+			s.SetFailureSummary(id, FailureSummary{ExitCode: 1, KeyLines: c.lines})
+		}
+		s.Fail(id, c.code, "x")
+	}
+	for _, want := range []string{"no_space", "output_not_writable", "check_failed", "stalled", "worker_lost",
+		"encoder_unavailable", "source_missing", "source_damaged", "ffmpeg_error"} {
+		cond, args, ok := ReasonCondition(want)
+		if !ok {
+			t.Fatalf("no condition for %s", want)
+		}
+		var got []string
+		rows, err := s.db.Query(`SELECT j.path, j.error_code, COALESCE((SELECT key_lines FROM job_failures WHERE job_id=j.id), '[]') FROM jobs j WHERE `+cond, args...)
+		if err != nil {
+			t.Fatalf("%s: %v", want, err)
+		}
+		for rows.Next() {
+			var path, code, raw string
+			rows.Scan(&path, &code, &raw)
+			var lines []string
+			json.Unmarshal([]byte(raw), &lines)
+			if FailureCode(code, lines) != want {
+				t.Errorf("%s selected %s (%s), which is %s", want, path, code, FailureCode(code, lines))
+			}
+			got = append(got, path)
+		}
+		rows.Close()
+		if len(got) == 0 {
+			t.Errorf("%s selected nothing", want)
+		}
+	}
+}
+
+// P3: encoder family names are mapped from the codec suffix; product name is capitalised.
+func TestEncoderFamilyAndProductName(t *testing.T) {
+	var checks = []struct {
+		keyLines []string
+		worker   string
+		want     string
+	}{
+		{[]string{"[AVEncoder @ 0x1] Unknown encoder 'h264_qsv'"}, "",
+			"The encoder couldn't start: Intel Quick Sync (h264_qsv) isn't available on this computer."},
+		{[]string{"[AVEncoder @ 0x2] Unknown encoder 'hevc_nvenc'"}, "",
+			"The encoder couldn't start: NVIDIA (hevc_nvenc) isn't available on this computer."},
+		{[]string{"[AVEncoder @ 0x3] Unknown encoder 'av1_amf'"}, "",
+			"The encoder couldn't start: AMD (av1_amf) isn't available on this computer."},
+		{[]string{"[AVEncoder @ 0x4] Unknown encoder 'h264_videotoolbox'"}, "",
+			"The encoder couldn't start: Apple (h264_videotoolbox) isn't available on this computer."},
+		{[]string{"[AVEncoder @ 0x5] Error while opening encoder"}, "Worker 1",
+			"The encoder couldn't start: The encoder isn't available on Worker 1."},
+	}
+	for _, c := range checks {
+		f := FailureFacts{KeyLines: c.keyLines, WorkerName: c.worker}
+		got, _ := FailureWords("encoder_unavailable", f)
+		if got != c.want {
+			t.Errorf("%q worker=%q: %q, want %q", c.keyLines, c.worker, got, c.want)
+		}
+	}
+	// The product name in hints is "Shrink Your Shit", not "shrink-your-shit"
+	if _, hint := FailureWords("output_not_writable", FailureFacts{ExitCode: -1}); strings.Contains(hint, "shrink-your-shit") {
+		t.Errorf("hint uses lowercase product name: %q", hint)
+	}
+	if _, hint := FailureWords("output_not_writable", FailureFacts{ExitCode: -1}); !strings.Contains(hint, "Shrink Your Shit") {
+		t.Errorf("hint missing capitalised product name: %q", hint)
 	}
 }

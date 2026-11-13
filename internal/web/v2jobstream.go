@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
-	"github.com/shrink-your-shit/shrink-your-shit/internal/runlog"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
 
@@ -26,7 +25,7 @@ import (
 //
 // Both job streams send `end` and close once the job is no longer waiting or converting and its log
 // is all sent; a page that wants more (a retry) opens them again.
-func v2JobStreams(api *http.ServeMux, store *jobs.Store, logs *runlog.Logs) {
+func v2JobStreams(api *http.ServeMux, store *jobs.Store) {
 	api.HandleFunc("GET /api/v2/activity", func(w http.ResponseWriter, r *http.Request) {
 		before, _ := strconv.ParseInt(r.URL.Query().Get("before"), 10, 64)
 		limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -50,7 +49,7 @@ func v2JobStreams(api *http.ServeMux, store *jobs.Store, logs *runlog.Logs) {
 			from = r.URL.Query().Get("from")
 		}
 		at, _ := strconv.ParseInt(from, 10, 64)
-		jobStream(w, r, store, logs, id, at, false)
+		jobStream(w, r, store, id, at, false)
 	})
 	api.HandleFunc("GET /api/v2/jobs/{id}/events", func(w http.ResponseWriter, r *http.Request) {
 		id, ok := streamJob(w, r, store)
@@ -58,7 +57,7 @@ func v2JobStreams(api *http.ServeMux, store *jobs.Store, logs *runlog.Logs) {
 			return
 		}
 		at, _ := strconv.ParseInt(r.URL.Query().Get("logFrom"), 10, 64)
-		jobStream(w, r, store, logs, id, at, true)
+		jobStream(w, r, store, id, at, true)
 	})
 }
 
@@ -85,7 +84,7 @@ func streamJob(w http.ResponseWriter, r *http.Request, store *jobs.Store) (int64
 }
 
 // jobStream streams job id's log from byte logAt, and with all, its changes, steps and progress too.
-func jobStream(w http.ResponseWriter, r *http.Request, store *jobs.Store, logs *runlog.Logs, id, logAt int64, all bool) {
+func jobStream(w http.ResponseWriter, r *http.Request, store *jobs.Store, id, logAt int64, all bool) {
 	flusher := w.(http.Flusher)
 	jobID := strconv.FormatInt(id, 10)
 	var last int64 // the newest seq sent of this job's changes
@@ -161,7 +160,7 @@ func jobStream(w http.ResponseWriter, r *http.Request, store *jobs.Store, logs *
 				stepsSent = len(steps)
 			}
 			for { // the log, in ReadMax pieces, until it is all sent
-				text, next, err := logs.Read(id, logAt)
+				text, next, err := logText(store, id, logAt)
 				if err != nil || text == "" {
 					break
 				}
@@ -174,7 +173,7 @@ func jobStream(w http.ResponseWriter, r *http.Request, store *jobs.Store, logs *
 			}
 			flusher.Flush()
 			if ended {
-				if text, _, _ := logs.Read(id, logAt); text == "" { // nothing written since
+				if text, _, _ := logText(store, id, logAt); text == "" { // nothing written since
 					send(w, -1, "end", map[string]any{"type": "end", "jobId": jobID})
 					flusher.Flush()
 					return

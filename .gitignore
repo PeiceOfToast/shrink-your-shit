@@ -8,3 +8,6 @@ shrink-your-shit
 /internal/web/next/dist/*
 !/internal/web/next/dist/.keep
 /web/node_modules/
+
+# Local build output
+/bin/

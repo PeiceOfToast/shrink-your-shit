@@ -23,7 +23,6 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
-	"github.com/shrink-your-shit/shrink-your-shit/internal/runlog"
 )
 
 // ---- a scripted fake ffmpeg/ffprobe ----
@@ -1272,9 +1271,8 @@ func TestRunLogProgress(t *testing.T) {
 	}
 	s.progressOut = out.String()
 	w := s.worker(Replace)
-	w.Logs = &runlog.Logs{Dir: t.TempDir()}
 	w.RunOne(context.Background())
-	text, _, _ := w.Logs.Read(s.id, 0)
+	text := logTextOf(s.store, s.id)
 	var got []string
 	for _, l := range strings.Split(text, "\n") {
 		if i := strings.Index(l, "% done"); i > 0 {
@@ -1318,7 +1316,6 @@ func TestSkippedPlanLogsNoActionNotes(t *testing.T) {
 	s.srcSpec.streams[1] = aud("truehd", "eng", 8)
 	s.srcSpec.streams[2] = sub("hdmv_pgs_subtitle", "eng", false)
 	w := s.worker(Replace)
-	w.Logs = &runlog.Logs{Dir: t.TempDir()}
 	sel := rules.DefaultSelectors(3)
 	sel.Audio, sel.FileType = "as_is", "mp4"
 	tmpl := sel.Template()
@@ -1330,7 +1327,7 @@ func TestSkippedPlanLogsNoActionNotes(t *testing.T) {
 	if s.count("libx265") != 0 {
 		t.Fatalf("encoded:\n%s", strings.Join(s.calls, "\n"))
 	}
-	text, _, _ := w.Logs.Read(s.id, 0)
+	text := logTextOf(s.store, s.id)
 	if strings.Contains(text, rules.FoldedNote) {
 		t.Errorf("a skipped file's log claims a conversion:\n%s", text)
 	}
@@ -1347,14 +1344,23 @@ func TestStyledSubtitlesNote(t *testing.T) {
 	s.srcSpec.streams[2] = sub("ass", "eng", false)
 	s.outSpec.streams[2] = sub("mov_text", "eng", false)
 	w := s.worker(Replace)
-	w.Logs = &runlog.Logs{Dir: t.TempDir()}
 	sel := rules.DefaultSelectors(3)
 	sel.FileType, sel.AfterConverting = "mp4", "beside"
 	tmpl := sel.Template()
 	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
 	w.RunOne(context.Background())
-	text, _, _ := w.Logs.Read(s.id, 0)
+	text := logTextOf(s.store, s.id)
 	if strings.Count(text, rules.StyledSubsNote) != 1 {
 		t.Errorf("the note %d times in:\n%s", strings.Count(text, rules.StyledSubsNote), text)
 	}
+}
+
+// logTextOf is job id's log lines as one text, for a test to look in (the log lives in the database).
+func logTextOf(store *jobs.Store, id int64) string {
+	lines, _ := store.LogLines(id)
+	var texts []string
+	for _, l := range lines {
+		texts = append(texts, l.Text)
+	}
+	return strings.Join(texts, "\n")
 }

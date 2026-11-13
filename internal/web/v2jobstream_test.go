@@ -17,10 +17,9 @@ import (
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
-	"github.com/shrink-your-shit/shrink-your-shit/internal/runlog"
 )
 
-func streamServer(t *testing.T) (*httptest.Server, *jobs.Store, *runlog.Logs, jobs.Library) {
+func streamServer(t *testing.T) (*httptest.Server, *jobs.Store, jobs.Library) {
 	t.Helper()
 	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
@@ -29,11 +28,10 @@ func streamServer(t *testing.T) (*httptest.Server, *jobs.Store, *runlog.Logs, jo
 	st.SetPaused(false)
 	t.Cleanup(func() { st.Close() })
 	a, _, _ := OpenAccess(t.TempDir(), false)
-	logs := &runlog.Logs{Dir: t.TempDir()}
-	srv := httptest.NewServer(Handler(st, a, Engine{RunLogs: logs}))
+	srv := httptest.NewServer(Handler(st, a, Engine{}))
 	t.Cleanup(srv.Close)
 	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
-	return srv, st, logs, lib
+	return srv, st, lib
 }
 
 // streamAt opens the stream at path (with Last-Event-ID lastID unless empty); its messages come on the
@@ -98,7 +96,7 @@ func until(t *testing.T, c <-chan sseMessage, event string) sseMessage {
 // V3d: the feed lists what happened, newest first, in words; the live stream sends each new entry as
 // activity, before the change it comes from.
 func TestV2ActivityFeed(t *testing.T) {
-	srv, st, _, lib := streamServer(t)
+	srv, st, lib := streamServer(t)
 	add := func(name string) int64 {
 		id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, name), SizeBefore: 2 << 30})
 		return id
@@ -148,7 +146,7 @@ func TestV2ActivityFeed(t *testing.T) {
 
 // Publishing a workflow is an event of its own (workflow.published) and a feed entry.
 func TestV2PublishIsAnEvent(t *testing.T) {
-	srv, st, _, lib := streamServer(t)
+	srv, st, lib := streamServer(t)
 	st.EnsureRevisions() // the library's flow gets its revision 1, as at start-up
 	c := streamAt(t, srv.URL, "/api/v2/events", "")
 	until(t, c, "hello")
@@ -175,22 +173,22 @@ func TestV2PublishIsAnEvent(t *testing.T) {
 // A job's log streams as it is written, its id the byte offset to go on from; once the job has ended and
 // its log is all sent, end.
 func TestV2JobLogStream(t *testing.T) {
-	srv, st, logs, lib := streamServer(t)
+	srv, st, lib := streamServer(t)
 	id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "a.mkv")})
 	st.Claim("w")
-	logs.Append(id, "probing\n")
+	st.AppendLogLine(id, 0, "app", "probing") // the log lives in the database; its cursor is the line's seq
 	path := "/api/v2/jobs/" + strconv.FormatInt(id, 10) + "/log/stream"
 	c := streamAt(t, srv.URL, path, "")
 	m := until(t, c, "job.log")
-	if !strings.Contains(m.data, `"text":"probing\n"`) || m.id != "8" || !strings.Contains(m.data, `"next":8`) {
+	if !strings.Contains(m.data, `probing\n"`) || m.id != "1" || !strings.Contains(m.data, `"next":1`) {
 		t.Fatalf("first %+v", m)
 	}
-	logs.Append(id, "converting\n")
-	if m := until(t, c, "job.log"); !strings.Contains(m.data, `"text":"converting\n"`) || m.id != "19" {
+	st.AppendLogLine(id, 0, "app", "converting")
+	if m := until(t, c, "job.log"); !strings.Contains(m.data, `converting\n"`) || m.id != "2" {
 		t.Errorf("as it is written %+v", m)
 	}
 	// a reconnect from an offset gets only what came after it
-	if m := until(t, streamAt(t, srv.URL, path, "8"), "job.log"); !strings.Contains(m.data, `"text":"converting\n"`) {
+	if m := until(t, streamAt(t, srv.URL, path, "1"), "job.log"); !strings.Contains(m.data, `converting\n"`) {
 		t.Errorf("reconnect %+v", m)
 	}
 	st.Complete(id, filepath.Join(lib.Path, "a.mkv"), 1)
@@ -205,7 +203,7 @@ func TestV2JobLogStream(t *testing.T) {
 
 // One job's events: its changes (id: the seq, replayed after Last-Event-ID), new steps, its log, then end.
 func TestV2JobEventStream(t *testing.T) {
-	srv, st, logs, lib := streamServer(t)
+	srv, st, lib := streamServer(t)
 	id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "a.mkv")})
 	other, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "b.mkv")})
 	path := "/api/v2/jobs/" + strconv.FormatInt(id, 10) + "/events"
@@ -220,8 +218,8 @@ func TestV2JobEventStream(t *testing.T) {
 	if m := until(t, c, "job.step"); !strings.Contains(m.data, `"words":"To be converted."`) {
 		t.Errorf("step %+v", m)
 	}
-	logs.Append(id, "converting\n")
-	if m := until(t, c, "job.log"); !strings.Contains(m.data, `"text":"converting\n"`) || m.id != "" {
+	st.AppendLogLine(id, 0, "app", "converting")
+	if m := until(t, c, "job.log"); !strings.Contains(m.data, `converting\n"`) || m.id != "" {
 		t.Errorf("log %+v", m)
 	}
 	st.Claim("w2") // the other job starts: not in this stream (the next job.state must be this job's)
@@ -245,7 +243,7 @@ func TestV2JobEventStream(t *testing.T) {
 // Review 6f2b3a6 (a race seen under load): a job that ends just after a poll has read its changes still
 // gets its last change on the stream before end.
 func TestJobStreamSendsTheLastChangeBeforeEnd(t *testing.T) {
-	srv, st, _, lib := streamServer(t)
+	srv, st, lib := streamServer(t)
 	id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "a.mkv")})
 	st.Claim("w")
 	var once sync.Once

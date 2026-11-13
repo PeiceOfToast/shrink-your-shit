@@ -80,7 +80,7 @@ func filesRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			return
 		}
 		from, _ := strconv.ParseInt(r.URL.Query().Get("from"), 10, 64)
-		text, next, err := eng.RunLogs.Read(id, from)
+		text, next, err := logText(store, id, from)
 		if err != nil {
 			serverError(w, err)
 			return
