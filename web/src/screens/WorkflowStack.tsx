@@ -154,7 +154,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
         <details ref={moreRef} onToggle={(e) => e.currentTarget.open && !sel && custom()}><summary className="btn sm" style={{ display: "inline-flex" }}>More options</summary>
           <div className="grid cols2" style={{ marginTop: 12 }}>
             {field("format")}{field("resolution")}{field("speed")}
-            {q && field("quality")}
+            {q && sel && field("quality")}
             {av1 && sel && <p className="hint" role="status">AV1 can only use Quality only. Pick HEVC or H.264 to set a bitrate.</p>}
             <fieldset className="field choice stack"><legend className="lab">Bitrate</legend>
               <label className="radio" style={{ alignItems: "flex-start" }}><input type="radio" name={n.id + "-rc"} checked={rc === "level"} disabled={av1} onChange={() => put("rateControl", "level")} />
