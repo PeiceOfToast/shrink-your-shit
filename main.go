@@ -258,7 +258,7 @@ func main() {
 			}
 		}
 	}()
-	// As many workers as Settings > Performance's parallelJobs (followed live); Pause all stops them
+	// As many workers as the worker's parallel jobs setting (Workers page; followed live); Pause all stops them
 	// taking work and survives a restart.
 	pool := &worker.Pool{
 		New: func(n int) *worker.Worker {
@@ -279,7 +279,7 @@ func main() {
 		},
 	}
 	if store.Paused() {
-		log.Printf("converting is paused (Activity > Resume)")
+		log.Printf("converting is paused: turn the Workers switch on (Dashboard or Workers)")
 	}
 	workerDone := make(chan struct{})
 	if converts {

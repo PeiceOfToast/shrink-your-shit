@@ -31,7 +31,7 @@ func restoreCommand(args []string, out, errOut io.Writer) int {
 	data := fs.String("data", "", "with --force: the service's data folder, if it was started with its own -data (default: the installed service's)")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 1 {
 		fmt.Fprintln(errOut, "usage: shrink-your-shit restore [--force [--data <folder>]] <kept id | path of the converted file>")
-		fmt.Fprintln(errOut, "The kept originals and their ids are listed under Activity > Kept originals.")
+		fmt.Fprintln(errOut, "Kept originals are counted in Settings > Safety (Keeping originals). To get one back, open its job in Jobs > Done and choose Get original back.")
 		return 2
 	}
 	env := envFile(linuxEnvFile)
@@ -80,7 +80,7 @@ func restoreCommand(args []string, out, errOut io.Writer) int {
 			}
 		}
 		if id == 0 {
-			fmt.Fprintf(errOut, "No kept original for %s. Nothing was changed. (Activity > Kept originals lists them.)\n", which)
+			fmt.Fprintf(errOut, "No kept original for %s. Nothing was changed. (To get one back, open its job in Jobs > Done and choose Get original back.)\n", which)
 			return 1
 		}
 	}
