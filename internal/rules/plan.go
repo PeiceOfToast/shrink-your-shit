@@ -91,6 +91,8 @@ type VideoEncode struct {
 	TargetKbps int `json:"targetKbps,omitempty"`
 	// PeakLimitKbps: the person's own VBR limit, as set (MaxRateKbps may be lower: the source's).
 	PeakLimitKbps int `json:"peakLimitKbps,omitempty"`
+	// OneSecondBuffer: -bufsize is the max (a one-second window), not twice it: VBR with a max (QA 11-13).
+	OneSecondBuffer bool `json:"oneSecondBuffer,omitempty"`
 	// Height scales the picture down to this height, keeping its shape (selectors' resolution); 0 = as it is.
 	Height int `json:"height,omitempty"`
 	// Copy: the video is copied as it is, not encoded (S4: an HEVC file only repackaged as MKV). The
@@ -245,7 +247,11 @@ func (p Plan) FFmpegArgs(in, out string) []string {
 	args = append(args, p.trackArgs()...)
 	if p.Video.MaxRateKbps > 0 && !vp9Capped(p.Video) { // VP9's cap is its -b:v (extraArgs)
 		k := strconv.Itoa(p.Video.MaxRateKbps) + "k"
-		args = append(args, "-maxrate:"+v, k, "-bufsize:"+v, strconv.Itoa(2*p.Video.MaxRateKbps)+"k")
+		buf := 2 * p.Video.MaxRateKbps
+		if p.Video.OneSecondBuffer { // VBR with a max: a one-second window, so a second never goes over the max (QA 11-13)
+			buf = p.Video.MaxRateKbps
+		}
+		args = append(args, "-maxrate:"+v, k, "-bufsize:"+v, strconv.Itoa(buf)+"k")
 	}
 	if p.Video.Tag != "" {
 		args = append(args, "-tag:"+v, p.Video.Tag)
@@ -570,7 +576,7 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 		p.Video.MaxRateKbps = peakKbps(p.Video.TargetKbps, src)
 	case "vbr": // the quality at CRF 23, the bitrate never above the person's max; no level
 		p.Video.CRF = 23 + vf.CRFOffset
-		p.Video.MaxRateKbps, p.Video.PeakLimitKbps = s.VBRMaxKbps, s.VBRMaxKbps
+		p.Video.MaxRateKbps, p.Video.PeakLimitKbps, p.Video.OneSecondBuffer = s.VBRMaxKbps, s.VBRMaxKbps, true
 		if src > 0 && src < s.VBRMaxKbps { // a file never gets more than its source has (review 11-13 item A, #211)
 			p.Video.MaxRateKbps = src
 		}

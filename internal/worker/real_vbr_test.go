@@ -32,19 +32,25 @@ func TestRealBitrateLevelAndVBRAt720(t *testing.T) {
 		if err := sel.Validate(); err != nil {
 			t.Fatal(err)
 		}
-		avg := realAverage720(t, src, sel.Template())
-		t.Logf("%s: average %.0f kbps", name, avg)
+		out := realEncode720(t, src, sel.Template())
+		avg := realAverage720(t, out)
+		peak, sec := realPeakSecond(t, out)
+		t.Logf("%s: average %.0f kbps, busiest second %.0f kbps (second %d)", name, avg, peak, sec)
 		if name == "level" && (avg < 2400*0.85 || avg > 2400*1.15) {
 			t.Errorf("level: average %.0f kbps, not close to 2400", avg)
 		}
 		if name == "vbr" && avg > 3000 {
 			t.Errorf("vbr: average %.0f kbps is above the 3000 max", avg)
 		}
+		// the user's check: no second goes over the max (5% allowed for the encoder's own overshoot)
+		if name == "vbr" && peak > 3000*1.05 {
+			t.Errorf("vbr: busiest second %.0f kbps is over the 3000 max by more than 5%%", peak)
+		}
 	}
 }
 
-// realAverage720 encodes src with tmpl and returns the output's average video bitrate in kbps; the output is 720p.
-func realAverage720(t *testing.T, src string, tmpl rules.Template) float64 {
+// realEncode720 encodes src with tmpl (720p expected) and returns the output's path.
+func realEncode720(t *testing.T, src string, tmpl rules.Template) string {
 	t.Helper()
 	in := filepath.Join(t.TempDir(), "in.mkv")
 	b, _ := os.ReadFile(src)
@@ -62,17 +68,54 @@ func realAverage720(t *testing.T, src string, tmpl rules.Template) float64 {
 	if h := probe(t, j.OutputPath).Video().Height; h != 720 {
 		t.Errorf("height %d", h)
 	}
-	out, err := exec.CommandContext(context.Background(), "ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=size",
-		"-of", "csv=p=0", j.OutputPath).Output()
+	return j.OutputPath
+}
+
+// packetSizes is the video packets' (time in seconds, bytes) of file path.
+func packetSizes(t *testing.T, path string) (times []float64, sizes []int64) {
+	t.Helper()
+	out, err := exec.CommandContext(context.Background(), "ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time,size",
+		"-of", "csv=p=0", path).Output()
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		f := strings.Split(strings.TrimSuffix(l, ","), ",")
+		if len(f) != 2 {
+			continue
+		}
+		ts, _ := strconv.ParseFloat(f[0], 64)
+		n, _ := strconv.ParseInt(f[1], 10, 64)
+		times, sizes = append(times, ts), append(sizes, n)
+	}
+	return times, sizes
+}
+
+// realAverage720 is the output's average video bitrate in kbps over its length (12 s).
+func realAverage720(t *testing.T, path string) float64 {
+	t.Helper()
+	_, sizes := packetSizes(t, path)
 	var bytes int64
-	for _, l := range strings.Fields(string(out)) {
-		n, _ := strconv.ParseInt(strings.TrimSuffix(l, ","), 10, 64)
+	for _, n := range sizes {
 		bytes += n
 	}
 	return float64(bytes*8) / 12 / 1000
+}
+
+// realPeakSecond is the largest one-second video bitrate of path in kbps, and the second it was in.
+func realPeakSecond(t *testing.T, path string) (peak float64, second int) {
+	t.Helper()
+	times, sizes := packetSizes(t, path)
+	per := map[int]int64{}
+	for i, ts := range times {
+		per[int(ts)] += sizes[i]
+	}
+	for sec, n := range per {
+		if kbps := float64(n*8) / 1000; kbps > peak {
+			peak, second = kbps, sec
+		}
+	}
+	return peak, second
 }
 
 // Review a772397: every format VBR is offered for really encodes with a peak limit (HEVC, H.264, VP9);
