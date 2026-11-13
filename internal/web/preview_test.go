@@ -87,8 +87,8 @@ func TestPreviewEndpoint(t *testing.T) {
 	}
 
 	// the Standard selectors are previewed as they would run (slice 25a)
-	code, out, b = pv(fmt.Sprintf(`{"setting":{"quality":3,"resolution":"720","maxBitrate":"10","fileType":"mkv","afterConverting":"beside"},"sampleFile":%q}`, filepath.Join(dir, "a.mkv")))
-	if code != 200 || out.Sample == nil || out.Sample.Lines[0] != "Video: converted to the smaller format and made 720 lines high (from 1080), same length, at most 4 Mbps" ||
+	code, out, b = pv(fmt.Sprintf(`{"setting":{"quality":3,"resolution":"720","maxBitrate":"none","fileType":"mkv","afterConverting":"beside"},"sampleFile":%q}`, filepath.Join(dir, "a.mkv")))
+	if code != 200 || out.Sample == nil || out.Sample.Lines[0] != "Video: converted to the smaller format and made 720 lines high (from 1080), same length" ||
 		!strings.Contains(strings.Join(out.Sample.Lines, "|"), "The new MKV file is written next to the original") {
 		t.Errorf("selectors sample: %d %s", code, b)
 	}

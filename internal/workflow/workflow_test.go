@@ -60,7 +60,13 @@ func TestMigrationKeepsBehaviour(t *testing.T) {
 	templates = append(templates, basic)
 	for _, f := range []func(*rules.Selectors){
 		func(s *rules.Selectors) {},
-		func(s *rules.Selectors) { s.Format, s.MaxBitrate, s.Resolution = "h264", "medium", "720" },
+		func(s *rules.Selectors) {
+			s.Format, s.MaxBitrate, s.Resolution, s.RateControl = "h264", "medium", "720", "quality_legacy"
+		},
+		func(s *rules.Selectors) { s.MaxBitrate, s.RateControl = "medium", "level" },
+		func(s *rules.Selectors) { s.RateControl, s.VBRMaxKbps = "vbr", 3000 },
+		func(s *rules.Selectors) { s.MaxBitrate, s.RateControl = "medium", "quality_legacy" },
+		func(s *rules.Selectors) { s.MaxBitrate, s.RateControl, s.VBRMaxKbps = "medium", "vbr_legacy", 3000 },
 		func(s *rules.Selectors) { s.Audio, s.OnlyMyLanguages, s.FileType = "eac3_surround", false, "mp4" },
 		func(s *rules.Selectors) { s.Format, s.Audio, s.FileType = "vp9", "stereo_opus", "webm" },
 		func(s *rules.Selectors) {

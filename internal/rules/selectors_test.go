@@ -67,7 +67,7 @@ func TestSelectorsCompile(t *testing.T) {
 		t.Errorf("2.4:1: %d", w)
 	}
 	// speed and the cap
-	p = sel(func(s *Selectors) { s.Speed = "slower"; s.MaxBitrate = "high" }).Compile(h264(1920, 1080, 30000))
+	p = sel(func(s *Selectors) { s.Speed = "slower"; s.MaxBitrate, s.RateControl = "high", "quality_legacy" }).Compile(h264(1920, 1080, 30000))
 	args := strings.Join(p.FFmpegArgs("i", "o"), " ")
 	if !strings.Contains(args, "-preset slow") || !strings.Contains(args, "-maxrate:v:0 8000k -bufsize:v:0 16000k") { // High, 1080p HEVC (S6 ladder)
 		t.Errorf("args %s", args)

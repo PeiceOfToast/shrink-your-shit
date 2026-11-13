@@ -141,14 +141,15 @@ func Definitions() []StepDefinition {
 				"format":  withDefault(formats, "hevc", "Video format", "segmented"),
 				"resolution": described(withDefault(enum([]any{"keep", "1080", "720", "480"}, []string{"Keep as is", "At most 1080p", "At most 720p", "At most 480p"}), "keep", "Resolution", ""),
 					"Videos are only ever made smaller, never stretched."),
-				"maxBitrate": bitrate(described(withDefault(enum([]any{"none", "high", "medium", "low"}, []string{"No limit", "High", "Medium", "Low"}), "none", "Max bitrate", ""),
+				"maxBitrate": bitrate(described(withDefault(enum([]any{"none", "high", "medium", "low"}, []string{"No limit", "High", "Medium", "Low"}), "none", "Bitrate level", ""),
 					"Caps how much data each second of video may use. A file never gets more than it has now. Quality still sets the picture; the cap only matters in busy scenes.")),
 				"speed": described(withDefault(enum([]any{"faster", "normal", "slower"}, []string{"Faster, larger files", "Normal", "Slower, smaller files"}), "normal", "Speed", ""),
 					"Slower takes about twice as long."),
-				// user review 11-12 item 1: VBR aims at the level's bitrate for the new file's height, under a limit
-				"rateControl": described(withDefault(enum([]any{"quality", "vbr"}, []string{"Quality", "VBR"}), "quality", "Rate control", "segmented"),
-					"Quality keeps the picture steady and uses the level as a cap. VBR aims at the level's bitrate and never goes above your limit."),
-				"vbrMaxKbps": described(map[string]any{"type": "integer", "minimum": 100, "maximum": 500000, "title": "Peak limit (kbps)"},
+				// user review 11-13 item A: a level is the average (its peak 1.5x); VBR is CRF 23 under the max, no level
+				// the two *_legacy values are flows saved before item A: they keep their files until edited
+				"rateControl": described(withDefault(enum([]any{"quality", "level", "vbr", "quality_legacy", "vbr_legacy"}, []string{"Quality", "Bitrate level", "VBR with a max", "Quality with a level (earlier)", "VBR (earlier)"}), "quality", "Rate control", "segmented"),
+					"Bitrate level aims at the level's bitrate for the new file's height. VBR with a max keeps the quality steady and never goes above your limit. Quality has no bitrate cap."),
+				"vbrMaxKbps": described(map[string]any{"type": "integer", "minimum": 100, "maximum": 500000, "title": "Max bitrate (kbps)"},
 					"The most data each second may use with VBR. A file never gets more than it has now."),
 			}, []string{"quality", "format", "resolution", "maxBitrate", "speed"})}),
 		def(StepDefinition{Type: TypeAudio, Category: "audio", Name: "Audio", Icon: "audio", TypeLabel: "Audio",

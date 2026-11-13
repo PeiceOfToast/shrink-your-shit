@@ -31,7 +31,7 @@ func TestRealOwnOutputIsNeverConvertedAgain(t *testing.T) {
 			sel := rules.DefaultSelectors(3)
 			// QA's case: H.264 sources, a bitrate cap (so the output is never "already in this format"),
 			// the file type changed to MKV
-			sel.MaxBitrate, sel.FileType, sel.AfterConverting = "medium", c.fileType, mode
+			sel.MaxBitrate, sel.RateControl, sel.FileType, sel.AfterConverting = "medium", "level", c.fileType, mode
 			if mode == "folder" {
 				sel.OutputDir = filepath.Join(lib, "Shrunk") // inside the library, so the scan walks it
 			}

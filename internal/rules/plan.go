@@ -91,6 +91,8 @@ type VideoEncode struct {
 	TargetKbps int `json:"targetKbps,omitempty"`
 	// PeakLimitKbps: the person's own VBR limit, as set (MaxRateKbps may be lower: the source's).
 	PeakLimitKbps int `json:"peakLimitKbps,omitempty"`
+	// BufsizeKbps is the VBV buffer when it is not twice MaxRateKbps: VBR with a max (QA 11-13); 0 = 2x.
+	BufsizeKbps int `json:"bufsizeKbps,omitempty"`
 	// Height scales the picture down to this height, keeping its shape (selectors' resolution); 0 = as it is.
 	Height int `json:"height,omitempty"`
 	// Copy: the video is copied as it is, not encoded (S4: an HEVC file only repackaged as MKV). The
@@ -245,7 +247,11 @@ func (p Plan) FFmpegArgs(in, out string) []string {
 	args = append(args, p.trackArgs()...)
 	if p.Video.MaxRateKbps > 0 && !vp9Capped(p.Video) { // VP9's cap is its -b:v (extraArgs)
 		k := strconv.Itoa(p.Video.MaxRateKbps) + "k"
-		args = append(args, "-maxrate:"+v, k, "-bufsize:"+v, strconv.Itoa(2*p.Video.MaxRateKbps)+"k")
+		buf := 2 * p.Video.MaxRateKbps
+		if p.Video.BufsizeKbps > 0 {
+			buf = p.Video.BufsizeKbps
+		}
+		args = append(args, "-maxrate:"+v, k, "-bufsize:"+v, strconv.Itoa(buf)+"k")
 	}
 	if p.Video.Tag != "" {
 		args = append(args, "-tag:"+v, p.Video.Tag)
@@ -561,10 +567,24 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 		target = "hevc"
 	}
 	vf := VideoFormats[target]
+	src := sourceVideoKbps(info, v)
 	p.Video = VideoEncode{Codec: vf.Encoder, CRF: crf + vf.CRFOffset, Preset: vf.Presets[s.Speed], Tag: vf.Tag,
-		Index: info.MainVideoOrdinal(), MaxRateKbps: CapKbps(s.MaxBitrate, target, w, h, v, sourceVideoKbps(info, v)), Height: height}
-	if s.RateControl == "vbr" {
-		p.Video.TargetKbps, p.Video.MaxRateKbps = VBRKbps(s.MaxBitrate, target, w, h, v, sourceVideoKbps(info, v), s.VBRMaxKbps)
+		Index: info.MainVideoOrdinal(), Height: height}
+	switch s.RateControl { // user review 11-13 item A; the *_legacy meanings compile as they did before it
+	case "level": // the level's figure is the average, its peak 1.5x (never above the source)
+		p.Video.TargetKbps = CapKbps(s.MaxBitrate, target, w, h, v, src)
+		p.Video.MaxRateKbps = peakKbps(p.Video.TargetKbps, src)
+	case "vbr": // the quality at CRF 23, the bitrate never above the person's max; no level
+		p.Video.CRF = 23 + vf.CRFOffset
+		p.Video.PeakLimitKbps = s.VBRMaxKbps
+		p.Video.MaxRateKbps, p.Video.BufsizeKbps = vbrMaxRateKbps(s.VBRMaxKbps), vbrBufsizeKbps(s.VBRMaxKbps)
+		if src > 0 && src < p.Video.MaxRateKbps { // a file never gets more than its source has (review 11-13 item A, #211)
+			p.Video.MaxRateKbps = src
+		}
+	case "quality_legacy": // CRF, with the old level as a cap
+		p.Video.MaxRateKbps = legacyCapKbps(s.MaxBitrate, target, w, h, src)
+	case "vbr_legacy":
+		p.Video.TargetKbps, p.Video.MaxRateKbps = legacyVBRKbps(s.MaxBitrate, target, w, h, src, s.VBRMaxKbps)
 		p.Video.PeakLimitKbps = s.VBRMaxKbps
 	}
 	if target != "hevc" {

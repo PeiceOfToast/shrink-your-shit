@@ -231,29 +231,22 @@ func TestCheckOutput(t *testing.T) {
 // on the setting's GET, from the videos of the flow's libraries.
 func TestRoughPictureWarning(t *testing.T) {
 	srv, st, _, _ := libServer(t, false)
-	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), false)
+	// the v1 setting cannot write a level (user review 11-13 item A: the new UI does), so a level flow is seeded
+	s := rules.DefaultSelectors(3)
+	s.FileType, s.MaxBitrate, s.RateControl = "keep", "low", "level"
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), s.Template(), false)
 	st.PutProbe(filepath.Join(lib.Path, "uhd.mkv"), 1, 1, `{"streams":[{"type":"video","codec":"hevc","Width":3840,"Height":2160,"bitDepth":10,"frameRate":60,"colorTransfer":"smpte2084"}]}`)
 	path := "/api/flows/" + itoa(lib.FlowID)
-	warn := func(body string) []string {
-		t.Helper()
-		_, b := post(t, srv, "POST", path+"/warnings", body)
-		var v struct{ Warnings []string }
-		json.Unmarshal([]byte(b), &v)
-		return v.Warnings
-	}
-	if w := warn(`{"quality":3,"maxBitrate":"low","fileType":"keep"}`); len(w) != 1 || !strings.Contains(w[0], "Low may look blocky in dark or fast scenes for 4K HDR files at 50-60 fps (8 Mbps). Choose Medium or No limit to avoid that.") {
-		t.Errorf("low: %v", w)
-	}
-	if w := warn(`{"quality":3,"maxBitrate":"none","fileType":"keep"}`); len(w) != 0 {
-		t.Errorf("no limit: %v", w)
-	}
-	if f, _ := st.GetFlow(lib.FlowID); f.Template.Kind != rules.KindSlider {
-		t.Error("the warnings check saved something")
-	}
-	post(t, srv, "PUT", path+"/setting", `{"quality":3,"maxBitrate":"low","fileType":"keep"}`)
 	_, b, _ := do(t, nil, srv, call{method: "GET", path: path + "/setting"})
-	if !strings.Contains(b, "may look blocky") {
+	if !strings.Contains(b, "Low may look blocky in dark or fast scenes for 4K HDR files at 50-60 fps (7.8 Mbps).") {
 		t.Errorf("GET warnings: %s", b)
+	}
+	_, w := post(t, srv, "POST", path+"/warnings", `{"quality":3,"maxBitrate":"none","fileType":"keep"}`)
+	if !strings.Contains(w, `"warnings":[]`) {
+		t.Errorf("no limit: %s", w)
+	}
+	if f, _ := st.GetFlow(lib.FlowID); f.Template.Selectors == nil || f.Template.Selectors.MaxBitrate != "low" {
+		t.Error("the warnings check saved something")
 	}
 }
 

@@ -22,7 +22,7 @@ func TestVBRKeptWords(t *testing.T) {
 	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
 	w.RunOne(context.Background())
 	j := s.job()
-	if j.Status != jobs.Kept || j.Error != "Kept the original: under a 3 Mbps peak limit the picture would suffer." {
+	if j.Status != jobs.Kept || j.Error != "Kept the original: under a 3 Mbps max bitrate the picture would suffer." {
 		t.Errorf("%s %q", j.Status, j.Error)
 	}
 	s.assertOriginalSafe()
