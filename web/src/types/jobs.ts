@@ -6,6 +6,8 @@ import type { ID, Time } from "./v2";
 export type JobState = "queued" | "preparing" | "running" | "validating" | "committing" | "completed" | "skipped" | "failed" | "cancelled" | "retry_wait";
 export type Tab = "waiting" | "running" | "completed" | "skipped" | "failed";
 export interface Reason { code: string; message: string } // #122: a fixed code; show the message
+// E (E-API-SHAPE, final): where a failed job stopped; keyLines: the last ffmpeg lines that report an error (at most 5)
+export interface Failure { step: string; stepIndex: number; stepCount: number; afterMs: number; mediaTime: string | null; hint: string | null; ffmpegRan: boolean; exitCode: number | null; keyLines: string[] }
 export interface Progress { stage: string; percent: number | null; workflowPercent: number; elapsedS: number; speed: number | null; etaS: number | null; fps: number | null; bitrateKbps: number | null }
 
 // GET /api/v2/jobs?tab=&q=&libraryId=&sort=queue&limit=&offset= -> {items, total, counts}
@@ -35,7 +37,7 @@ export interface JobsPage { items: JobItem[]; total: number; counts: Record<Tab,
 export interface JobStep { step: string; at: Time; ok: boolean; words: string } // v1's steps
 export interface JobEvent { seq: number; at: Time; from: JobState | null; to: JobState; reason: string | null; workerId: ID | null }
 export interface JobDetail {
-  id: ID; state: JobState; removed: boolean; reason: Reason | null; events: JobEvent[]; steps: JobStep[];
+  id: ID; state: JobState; removed: boolean; reason: Reason | null; failure?: Failure | null; events: JobEvent[]; steps: JobStep[];
   file?: { path: string; bytes: number }; attempts?: number; retryAt?: Time | null; error?: string | null; worker?: string | null;
   createdAt?: Time; updatedAt?: Time; library?: { id: ID; name: string }; workflow?: { id: ID; revisionId: ID; version: number };
   metadata?: { before: Probe | null; after: Probe | null };
@@ -43,7 +45,8 @@ export interface JobDetail {
   convertAgain?: { possible: boolean; reason: { code: string; message: string; deletedAt: Time | null } | null };
 }
 export interface Probe { container?: string; videoCodec?: string; bitrateKbps?: number; durationSec?: number; sizeBytes?: number;
-  streams?: { index: number; type: string; codec: string; Width?: number; Height?: number; channels?: number; channelLayout?: string; language?: string }[] }
+  // frameRate, bitDepth, colorTransfer, dolbyVision: the scan's video stream fields (workshop, 11-13 01:24Z)
+  streams?: { index: number; type: string; codec: string; Width?: number; Height?: number; channels?: number; channelLayout?: string; language?: string; frameRate?: number; bitDepth?: number; colorTransfer?: string; dolbyVision?: boolean }[] }
 
 // POST /api/v2/jobs/actions {action, ids, pin?} -> {results: [{id, ok, code?, message?}]}
 export type JobAction = "retry" | "requeue" | "cancel" | "reprioritize";

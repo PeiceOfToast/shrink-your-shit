@@ -141,6 +141,13 @@ export function Libraries() {
 // /libraries/new and /libraries/:id(?tab=discovery|output). The General form: a new library is POSTed, an existing one
 // PATCHed (name, folder; v1, which also gives its free space) and its workflow PUT; priority, Pause/Resume and the
 // folder for new files are V5b's PATCH /api/v2/libraries/{id}.
+// "See its jobs" (V6b): Jobs filtered to this library, on Failed when it has failed jobs, else Completed (the counts follow libraryId)
+function SeeJobs({ id }: { id: string }) {
+  const c = useData(() => listJobs("failed", "", id, 1), [id]); // only the counts are wanted
+  const tab = c.data && !failed(c.data) && c.data.counts.failed > 0 ? "failed" : "completed";
+  return <Link className="btn" to={"/jobs?tab=" + tab + "&libraryId=" + encodeURIComponent(id)}><Icon id="i-jobs" />See its jobs</Link>;
+}
+
 export function LibraryPage({ id }: { id: string }) {
   const libs = useData(listLibraries, [], 3000), wfs = useData(listWorkflows, [], 10000);
   const v2 = useData(() => (id === "new" ? Promise.resolve(null) : getLibraryV2(id)), [id], 3000);
@@ -279,6 +286,7 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
         {v && <Status l={v} />}
         {v && v.enabled && <button className="btn" type="button" onClick={() => pauseResume([v], false, setNote).then(reload)}><Icon id="i-pause" />Pause</button>}
         {v && paused(v) && <button className="btn" type="button" onClick={() => pauseResume([v], true, setNote).then(reload)}><Icon id="i-play" />Resume</button>}
+        {l && <SeeJobs id={l.id} />}
         {l && <button className="btn" type="button" disabled={v?.scan.state === "scanning"} onClick={scan}><Icon id="i-refresh" />{v?.scan.state === "scanning" ? "Scanning..." : "Scan now"}</button>}
       </PageHead>
       {note && <p className="muted" role="status">{note}</p>}

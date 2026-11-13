@@ -125,7 +125,7 @@ export interface ActivityEvent { // GET /activity
 // firstRunLibrary (#116): first run's step 1 folder, kept until a library is created (then null; PATCH null clears it).
 export interface Settings { firstRunDone: boolean; firstRunStep: number; intakePaused: boolean; catalogueEnabled: boolean; firstRunLibrary: { name: string; path: string } | null;
   scanEvery?: number; scanEverySource?: "flag" | "saved"; scanEveryMin?: number; scanEveryMax?: number;
-  languages?: string[]; keepOriginalsDays?: number; trashPath?: string; authRequired?: boolean } // #136: seconds; "flag" until someone changes it here; #146: the bounds
+  languages?: string[]; keepOriginalsDays?: number; trashPath?: string; authRequired?: boolean; logKeepDays?: number } // #136: seconds; "flag" until someone changes it here; #146: the bounds; E: job logs kept, days (0 = forever)
 
 // GET /api/v2/trash (contract update 01:33Z; workshop branch v2-trash-settings): originals replaced and kept in the
 // trash until their date. Later embedded as Summary.bytes.trash.

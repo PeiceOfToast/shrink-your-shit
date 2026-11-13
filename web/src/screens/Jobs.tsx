@@ -6,16 +6,19 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, count, elapsed, plural } from "../format";
-import { convertDoneAgain, findSkip, getJob, jobAction, listJobs, listKept, restoreKept } from "../jobsApi";
+import { convertDoneAgain, fileJobs, findSkip, getJob, getJobLog, jobAction, listJobs, listKept, restoreKept } from "../jobsApi";
 import { getWorkflow } from "../workflowApi";
+import { getHealth, getSettings } from "../libraryApi";
 import { onLive } from "../live";
+import { listLibraries } from "../libraryApi";
 import { Empty, PageHead } from "../PageHead";
 import { navigate, useSearch } from "../router";
 import { useData } from "../useData";
-import type { JobAction, JobDetail, JobItem, JobProgressEvent, JobState, Probe, Tab, Pin } from "../types/jobs";
+import type { Failure, JobAction, JobDetail, JobItem, JobProgressEvent, JobState, Probe, Tab, Pin } from "../types/jobs";
 
 const TABS: [Tab, string][] = [["waiting", "Waiting"], ["running", "Running"], ["completed", "Done"], ["skipped", "Skipped"], ["failed", "Failed"]];
 // Spec states in words (SCREENS V6); a cancelled file lists under Skipped and reads "Cancelled".
+const tabOf = (st: JobState): Tab => (st === "queued" || st === "retry_wait" ? "waiting" : st === "completed" ? "completed" : st === "skipped" || st === "cancelled" ? "skipped" : st === "failed" ? "failed" : "running");
 const WORD: Record<JobState, string> = { queued: "Waiting", preparing: "Preparing", running: "Running", validating: "Checking", committing: "Saving",
   completed: "Done", skipped: "Skipped", failed: "Failed", cancelled: "Cancelled", retry_wait: "Retry" };
 const PILL: Partial<Record<JobState, string>> = { preparing: "run", running: "run", validating: "run", committing: "run", completed: "ok", failed: "bad", retry_wait: "warn" };
@@ -55,10 +58,12 @@ const key = (j: JobItem) => j.jobId ?? j.id;
 
 export function Jobs() {
   const search = new URLSearchParams(useSearch());
-  const tab = (TABS.find(([t]) => t === search.get("tab"))?.[0] ?? "waiting") as Tab, open = search.get("job");
+  const tab = (TABS.find(([t]) => t === search.get("tab"))?.[0] ?? "waiting") as Tab, open = search.get("job"), library = search.get("libraryId") ?? "";
+  // "See its jobs" (a library page) filters every tab to that library; the library's name shows as a chip that clears it
+  const libs = useData(listLibraries, [], 60000);
   const [q, setQ] = useState(""), [selecting, setSelecting] = useState(false), [sel, setSel] = useState<string[]>([]), [said, setSaid] = useState(""), [prio, setPrio] = useState<Pin | "none">("first");
   // each answer remembers its tab and search, so a tab switch never shows the last tab's rows while it loads
-  const page = useData(() => listJobs(tab, q).then((r) => (failed(r) ? r : { ...r, for: tab + "|" + q })), [tab, q], 15000);
+  const page = useData(() => listJobs(tab, q, library).then((r) => (failed(r) ? r : { ...r, for: tab + "|" + q + "|" + library })), [tab, q, library], 15000);
   const [live, setLive] = useState<Record<string, JobProgressEvent["progress"]>>({});
   const reload = useRef(page.reload); reload.current = page.reload;
   const shown = useRef<{ tab: Tab; rows: Map<string, JobState> }>({ tab, rows: new Map() });
@@ -82,8 +87,8 @@ export function Jobs() {
     });
   }, []);
   useEffect(() => setSel([]), [tab]);
-  const go = (t: Tab, job?: string | null) => navigate("/jobs?tab=" + t + (job ? "&job=" + encodeURIComponent(job) : ""));
-  const current = page.data?.for === tab + "|" + q ? page.data : undefined;
+  const go = (t: Tab, job?: string | null) => navigate("/jobs?tab=" + t + (library ? "&libraryId=" + encodeURIComponent(library) : "") + (job ? "&job=" + encodeURIComponent(job) : ""));
+  const current = page.data?.for === tab + "|" + q + "|" + library ? page.data : undefined;
   const items = (current?.items ?? []).map((j) => (live[j.id] && RUNS.includes(j.state) ? { ...j, progress: live[j.id] } : j)), counts = page.data?.counts;
   shown.current = { tab, rows: new Map((current?.items ?? []).map((j) => [j.jobId ?? j.id, j.state])) };
   const picked = items.filter((j) => sel.includes(j.id)), none = !picked.length;
@@ -113,6 +118,8 @@ export function Jobs() {
   return (
     <div className="stack">
       <PageHead icon="i-jobs" title="Jobs" help="Every file the workers look at: waiting, converting, done, skipped and failed." />
+      {library && <div className="row" style={{ gap: 6 }}><span className="mchip">Library: {libs.data?.find((l) => l.id === library)?.name ?? library}
+        <button className="btn sm icon ghost" type="button" aria-label="Clear the library filter" onClick={() => navigate("/jobs?tab=" + tab)}><Icon id="i-x" /></button></span></div>}
       <div className="tabs" role="tablist" aria-label="Jobs">
         {TABS.map(([t, label]) => <button key={t} role="tab" type="button" aria-selected={tab === t} onClick={() => tab !== t && go(t)}>{label}{counts && <span className="n">{count(counts[t])}</span>}</button>)}
       </div>
@@ -157,6 +164,87 @@ export function Jobs() {
 // The job's log (SCREENS V6: streaming, searchable, Download): GET /api/v2/jobs/{id}/log/stream (#131). Each piece
 // comes as job.log {text, next} with next as its id, so the browser's own reconnect resumes where it stopped; "end"
 // comes once the job is over and the whole log has been sent.
+// E (SCREENS V6b 'Why it failed'): the sentence, where it stopped, the server's hint when it has one, and the last
+// ffmpeg error lines (at most five) behind a disclosure. Each part is left out when the server sends none.
+// durations read '4 min 12 s' and '0.1 s' everywhere (the design's phone note)
+const dur = (ms: number) => { const s = ms / 1000; return s < 1 ? s.toFixed(1) + " s" : s < 60 ? Math.round(s) + " s" : Math.floor(s / 60) + " min " + (Math.round(s) % 60) + " s"; };
+// map server step labels to person-facing names (workshop #217: encode, check)
+const stepLabel = (s: string) => ({ encode: "Converting video", check: "Checking the picture" } as Record<string, string>)[s] ?? s;
+// SCREENS V6b: the sentence, the reason code small under it, where it stops (the step opens in the log), the hint as
+// 'What you can do' (left out when null), the last ffmpeg lines with Copy, and the buttons. --error left border.
+function WhyFailed({ id, msg, code, worker, f }: { id: string; msg: string; code: string; worker: string | null; f: Failure }) {
+  const t = dur(f.afterMs), box = useRef<HTMLElement>(null), ver = useData(getHealth, []).data?.version;
+  // Copy summary: the plain text a bug report needs (V6b item 5): the job, its worker and the app version, then the box
+  const copy = () => navigator.clipboard?.writeText("Job " + id + " · " + (worker ?? "no worker") + " · Shrink Your Shit " + (ver ?? "") + "\n" + (box.current?.innerText ?? "")).catch(() => {});
+  return (
+    <section ref={box} className="note" role="region" aria-label="Why it failed" style={{ display: "block", borderLeft: "3px solid var(--error)" }}>
+      <h3><Icon id="i-alert" /> Why it failed <span className="pill bad">Failed</span></h3>
+      <p style={{ fontSize: "var(--fs-lg)" }}>{msg}</p>
+      <p className="sm muted mono">{code}</p>
+      <p className="sm">In step {f.stepIndex + 1} of {f.stepCount}, <a href={"#job-step-" + (f.stepIndex + 1)}>{stepLabel(f.step)}</a>, after {t}{f.mediaTime ? " (at " + f.mediaTime + " in the video)" : ""}.</p>
+      {f.hint && <p><strong>What you can do:</strong> {f.hint}</p>}
+      {f.ffmpegRan === false
+        ? <p className="sm muted">ffmpeg didn't run.</p>
+        : f.keyLines.length > 0 && <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">What ffmpeg said</span><button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(f.keyLines.join("\n")).catch(() => {})}><Icon id="i-copy" />Copy</button></div>
+          <pre className="joblog">{f.keyLines.join("\n")}</pre></div>}
+      <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+        <a className="btn sm" href={"#job-step-" + (f.stepIndex + 1)}><Icon id="i-file" />Open the full log</a>
+        {!MOCK && <a className="btn sm ghost" href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}><Icon id="i-download" />Download</a>}
+        <button className="btn sm ghost" type="button" onClick={copy}><Icon id="i-copy" />Copy summary</button>
+      </div>
+    </section>);
+}
+
+// count of q in a step's searchable text (case-insensitive)
+const matches = (st: { name: string; command: string | null; output: string; result: string }, q: string) => [st.name, st.command ?? "", st.output, st.result].join("\n").toLowerCase().split(q.toLowerCase()).length - 1;
+// E: a finished job's log by step (GET /log), SCREENS V6b: each step a row that opens; the failed step open; inside a step
+// its command, its source, its picture check, its ffmpeg output (last 200 lines on a failure, the rest by download), its
+// result; the log's last line is the job's final line.
+function StepLog({ id, worker, failedIdx }: { id: string; worker: string | null; failedIdx: number | null }) {
+  const d = useData(() => getJobLog(id), [id]), keep = useData(getSettings, []), [q, setQ] = useState("");
+  if (!d.loaded) return <section><h3>Log</h3><p className="muted">Loading the log...</p></section>;
+  if (!d.data) return <section><h3>Log</h3><p className="muted">{d.error?.message ?? "The log can't be shown."}</p></section>;
+  const l = d.data, days = (keep.data as { logKeepDays?: number } | undefined)?.logKeepDays ?? 30;
+  // SCREENS V6b 'States': a log that isn't all here says why, in the design's words
+  const who = worker ?? "The worker";
+  const note: Record<string, string | null> = {
+    complete: null, coming_back: "The log from " + who + " is still coming back.", lost: who + " went offline before sending its log. The summary above is what we know.",
+    none: "No log was kept for this job. Jobs from before 13 Nov don't have one.", expired: "This job's log was deleted after " + days + " days (Settings > Processing).",
+  };
+  return (
+    <section id="job-log"><h3>Log</h3>
+      {note[l.state] ? <p className="sm muted">{note[l.state]}</p> : <>
+      {/* V6b Search: every step's command, output and result; the steps with matches open and are counted */}
+      <div className="row" style={{ gap: 6, margin: "8px 0", flexWrap: "wrap" }}>
+        <input className="input sm" type="search" placeholder="Search the log" aria-label="Search the log" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
+        {!MOCK && <a className="btn sm" href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}><Icon id="i-download" />Download the full log</a>}
+        {q && <span className="sm muted" role="status">{(() => { const ns = l.steps.map((st) => matches(st, q)), t = ns.reduce((x, y) => x + y, 0), k = ns.filter((x) => x > 0).length; return t ? t + " matches in " + k + " step" + (k > 1 ? "s" : "") : "No match"; })()}</span>}
+      </div>
+      {l.steps.map((st, i) => {
+        const hit = q ? matches(st, q) : 0;
+        const pr = st.probe as Probe | null, v = pr?.streams?.find((x) => x.type === "video"), n = (t: string) => (pr?.streams ?? []).filter((x) => x.type === t).length;
+        const hdr = v?.dolbyVision ? "Dolby Vision" : v?.colorTransfer === "smpte2084" ? "HDR10" : v?.colorTransfer === "arib-std-b67" ? "HLG" : "";
+        const sum = pr && [pr.videoCodec?.toUpperCase().replace("H264", "H.264"), v?.Width && v.Height ? v.Width + "×" + v.Height : "", v?.frameRate ? +v.frameRate.toFixed(3) + " fps" : "", [v?.bitDepth ? v.bitDepth + "-bit" : "", hdr].filter(Boolean).join(" "), n("audio") && n("audio") + " audio", n("subtitle") && n("subtitle") + " subtitles", pr.durationSec ? elapsed(pr.durationSec) : "", pr.sizeBytes ? bytes(pr.sizeBytes) : ""].filter(Boolean).join(" · ");
+        return (
+          <details key={i} id={"job-step-" + (i + 1)} open={q ? hit > 0 : st.outcome !== "ok" || i === failedIdx} className="stepd" style={{ borderTop: "1px solid var(--border)", padding: "8px 0" }}>
+            <summary className="row nw" style={{ gap: 8, flexWrap: "wrap", cursor: "pointer" }}><strong>{stepLabel(st.name)}</strong><span className="sm muted">{clock(st.startedAt)} · took {dur(st.tookMs)}</span>
+              <span className={"pill " + (st.outcome === "ok" ? "ok" : "bad")}>{st.outcome === "ok" ? "Done" : "Failed"}</span>{hit > 0 && <span className="pill">{hit} match{hit > 1 ? "es" : ""}</span>}</summary>
+            <div className="stack" style={{ gap: 6, paddingTop: 6 }}>
+              {st.command && <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">Command</span><button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(st.command ?? "").catch(() => {})}><Icon id="i-copy" />Copy</button></div>
+                <pre className="joblog sm">{st.command}</pre></div>}
+              {sum && <p className="sm">Source: {sum}</p>}
+              {st.check && <p className="sm">Picture check: Score {st.check.score.toFixed(3)}{st.check.min != null ? " (needs " + st.check.min.toFixed(3) + ")" : ""}{st.check.passed != null ? " · " + (st.check.passed ? "passed" : "failed") : ""}</p>}
+              {st.outputLines > 0 && <details open={st.outcome !== "ok"}><summary className="sm">Show ffmpeg output ({st.outputLines} lines)</summary>
+                {st.outputLines > 200 && <p className="sm"><a href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}>Download all {st.outputLines.toLocaleString()} lines</a></p>}
+                <pre className="joblog sm">{st.output}</pre></details>}
+              {st.result && <p className="sm">{st.result}</p>}
+            </div>
+          </details>);
+      })}
+      {l.final && <p className="sm" style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>{l.final}</p>}</>}
+    </section>);
+}
+
 function JobLog({ id, name }: { id: string; name: string }) {
   const [text, setText] = useState(""), [done, setDone] = useState(false), [gone, setGone] = useState(false), [q, setQ] = useState(""), [follow, setFollow] = useState(true);
   const box = useRef<HTMLPreElement>(null);
@@ -215,6 +303,9 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
     return failed(first) || first.items.some((x) => x.jobId === id) ? first : findSkip(id);
   }, [id, !!row, !!ended]);
   const own = row ?? skips.data?.items.find((x) => x.jobId === id);
+  // E: this file's other jobs, newest first (not this job); left out when there are none
+  const filePath = own?.path ?? "", fj = useData(() => (filePath ? fileJobs(filePath) : Promise.resolve([] as JobItem[])), [filePath]).data;
+  const others = !fj || failed(fj) ? [] : fj.filter((x) => (x.jobId ?? x.id) !== id);
   const j = d.data, state = (j?.state ?? own?.state) as JobState | undefined, name = own?.name ?? j?.file?.path.split("/").pop() ?? "Job " + id;
   const active = state && ["queued", "retry_wait", "preparing", "running", "validating", "committing"].includes(state);
   const run = async (a: JobAction) => {
@@ -249,28 +340,32 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   return (
     <div className="drawer-wrap" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <aside className="drawer jobd" ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="jd-h">
-        <div className="hd">
+        <div className={"hd" + (state === "failed" ? " failed" : "")}>
           <button className="btn icon ghost" type="button" aria-label="Close" onClick={onClose}><Icon id="i-chev-l" /></button>
-          <div className="sp"><h2 id="jd-h" className="clamp2" title={name}>{name}</h2>{state && <Pill j={{ state, retryAt: j?.retryAt ?? own?.retryAt, subState: own?.subState }} />}</div>
-        </div>
-        <div className="bd">
-          <div className="row">
+          <div className="sp"><h2 id="jd-h" className="clamp2" title={name}>{name}</h2>{state && <span style={{ alignSelf: "flex-start" }}><Pill j={{ state, retryAt: j?.retryAt ?? own?.retryAt, subState: own?.subState }} /></span>}</div>
+          {/* SCREENS V6b header: Retry, Cancel or Stop, and the job ID to copy (the body keeps the rest) */}
+          <div className="row nw" style={{ gap: 6, flexWrap: "wrap" }}>
             {(state === "failed" || state === "retry_wait") && <button className="btn sm" type="button" onClick={() => run("retry")}><Icon id="i-refresh" />{state === "retry_wait" ? "Try now" : "Retry"}</button>}
             {active && <button className="btn sm" type="button" onClick={() => run("cancel")}><Icon id="i-stop" />{state === "queued" || state === "retry_wait" ? "Cancel" : "Stop"}</button>}
-            {/* a skipped file whose job is gone (a workflow's skip: the server says removed) can still be converted again (review f1aaf30) */}
+            <button className="btn sm ghost" type="button" title="Copy the job ID" onClick={() => navigator.clipboard?.writeText(id).then(() => setSaid("Job ID " + id + " copied."), () => setSaid("Job ID: " + id))}><Icon id="i-copy" />ID {id}</button>
+          </div>
+        </div>
+        <div className="bd">
+          {(done && ca?.possible) || (state === "skipped" || state === "cancelled") ? <div className="row">
             {done && ca?.possible && <button className="btn sm" type="button" aria-expanded={again} onClick={() => setAgain(!again)}><Icon id="i-arrow-r" />Convert again</button>}
             {(state === "skipped" || state === "cancelled") && (!j?.removed || !!own?.id.startsWith("skip-")) && <button className="btn sm" type="button" onClick={() => run("requeue")}><Icon id="i-arrow-r" />Convert again</button>}
-            <span className="sp" /><button className="btn sm ghost" type="button" title="Copy the job ID" onClick={() => navigator.clipboard?.writeText(id).then(() => setSaid("Job ID " + id + " copied."), () => setSaid("Job ID: " + id))}><Icon id="i-copy" />ID {id}</button>
-          </div>
+            <span className="sp" />
+          </div> : null}
           {done && ca && !ca.possible && ca.reason && <p className="muted sm">{ca.reason.message}</p>}
           {again && <div role="alertdialog" aria-label="Convert again?" style={{ padding: 12, border: "1px solid var(--border-strong)", borderRadius: "var(--radius)", background: "var(--raised)" }} onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), setAgain(false))}>
             <p style={{ margin: "0 0 8px" }}>Convert {name} again{wf.data && !failed(wf.data) ? " with " + wf.data.name + (wf.data.version ? " v" + wf.data.version : "") : ""}? It starts from the original, never from the new file. The earlier new file is replaced once the new one passes its check.</p>
             <div className="row"><button className="btn sm primary" type="button" autoFocus onClick={runAgain}>Convert again</button><button className="btn sm ghost" type="button" onClick={() => setAgain(false)}>Cancel</button></div></div>}
-          <p className="muted" role="status">{said}</p>
+          <p className="muted" role="status" style={said ? { margin: 0 } : { display: "contents" }}>{said}</p>{/* always present so it is announced; takes no space while empty */}
           {d.error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{d.error.message}</span></p>}
           {/* review db7b1f1 P3: "removed" is the server's flag, not a person's word. Only a job removed with its library
               gets a note; a job that ended as a skip shows its reason under Why like any other. */}
           {j?.removed && j.reason?.code === "removed" ? <div className="note"><Icon id="i-info" /><div>Its library was removed, so this file won't be converted.</div></div>
+            : j?.failure ? <WhyFailed id={id} msg={reason} code={j.reason?.code ?? ""} worker={j.worker ?? null} f={j.failure} />
             : reason && <section><h3>Why</h3><p>{reason}</p></section>}
           <section><h3>File</h3><dl className="kv">
             {(own?.path ?? j?.file?.path) && <><dt>Source</dt><dd className="mono sm">{own?.path ?? j?.file?.path}</dd></>} {/* review 54ff228: no '-' when the server doesn't keep the path (a removed library's job) */}
@@ -278,7 +373,9 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
             {own?.state === "completed" && <>{own.originalState !== "restored" && <><dt>Size</dt><dd>{saved(own.beforeBytes, own.afterBytes)}</dd></>} {/* review 66edc3d P3: after a restore the file is the original again: no saving */}
               <dt>Original</dt><dd>{kept ? keptLine : own.originalState === "kept" ? "Kept " + plural(own.keptDaysLeft ?? 0, "more day", "more days") + ", then deleted" : own.originalState === "removed" ? "Deleted after the keep period" : "Left in place"}</dd></>}
             {!own && kept && <><dt>Original</dt><dd>{keptLine}</dd></>}
-          </dl></section>
+          </dl>
+          {others.length > 0 && <p className="sm" style={{ marginTop: 8 }}>This file's other jobs: {others.map((x, i) => <span key={x.jobId ?? x.id}>{i > 0 && " · "}<a className="linkbtn" href={"/jobs?tab=" + tabOf(x.state) + "&job=" + encodeURIComponent(x.jobId ?? x.id)} onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate("/jobs?tab=" + tabOf(x.state) + "&job=" + encodeURIComponent(x.jobId ?? x.id)); }}}>{WORD[x.state] ?? x.state} {x.finishedAt ? new Date(x.finishedAt).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}</a></span>)}</p>}
+        </section>
           {back && kept && <div role="alertdialog" aria-label="Get the original back?" style={{ padding: 12, border: "1px solid var(--border-strong)", borderRadius: "var(--radius)", background: "var(--raised)" }}
             onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), closeBack())}>
             <p style={{ margin: "0 0 8px" }}><strong>Get the original of “{name}” back?</strong> The original ({bytes(kept.originalBytes)}) goes back in place and the smaller version{kept.newPath && kept.newPath.split(/[\\/]/).pop() !== name ? ", " + kept.newPath.split(/[\\/]/).pop() + "," : ""} is deleted. This file won't be converted again unless you press Convert again.</p>
@@ -293,7 +390,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {/* review db7b1f1 P2: the scan sentence only for a file a scan left out; a cancelled file whose job the server
               doesn't send yet claims nothing about scans or steps */}
           {scan && <section><h3>Timeline</h3><p className="muted">{state === "cancelled" ? "Cancelled." : "This file was left out when its library was scanned, so it has no job and no steps."}</p></section>}
-          {!scan && <JobLog id={id} name={name} />}
+          {!scan && (active ? <JobLog id={id} name={name} /> : <StepLog id={id} worker={j?.worker ?? null} failedIdx={j?.failure?.stepIndex ?? null} />)}
           {/* #148: before is the original; null for an older job that replaced a file of the same name: said so, never blank */}
           {(before || after) && <section><h3>Result</h3><table className="tbl kvt"><thead><tr><th /><th>Before</th><th>After</th></tr></thead><tbody>
             <tr><th>Video</th>{before ? <td>{before.video}</td> : <td rowSpan={4} className="muted">Not recorded for this job</td>}<td>{after?.video ?? "-"}</td></tr>
