@@ -31,18 +31,18 @@ function ShareRow({ share, resp, onChanged, said }: { share: Share; resp: Shares
 
   return (
     <tr>
-      <td className="idc"><Link className="ttl" to={"/settings/shares"}>{share.name}</Link>
+      <td className="idc"><button className="ttl linkbtn" type="button" onClick={() => setEditing(true)}>{share.name}</button>
         <span className="sub mono">{share.address}</span>
         {share.libraries.length > 0 && <span className="sub phone">Used by {libs}</span>}
         <span className="sub phone">{TYPE[share.type].label}</span></td>
       <td data-p="2">{TYPE[share.type].label}</td>
       <td className="stc"><span className={"st " + statusClass}><Icon id={statusIcon} /><span>{statusText}</span></span>
-        {share.reason && <span className="sub">{share.reason.message}</span>}
-        {share.status === "waiting_setup" && share.setup && <div className="codebox" style={{ marginTop: 8 }}><code>{share.setup.text}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(share.setup!.text).catch(() => {})}><Icon id="i-copy" />Copy</button></div>}
-        {(canReconnect || canCheck) && <div className="row" style={{ marginTop: 8 }}>{canReconnect && <button className="btn sm" type="button" onClick={reconnect}><Icon id="i-refresh" />Reconnect</button>}{canCheck && <button className="btn sm" type="button" onClick={reconnect}><Icon id="i-refresh" />Check again</button>}</div>}
+        {share.reason && <span className="sub over">{share.reason.message}</span>}
+        {share.status === "waiting_setup" && share.setup && <div className="codebox over" style={{ marginTop: 8 }}><code>{share.setup.text}</code><button className="btn sm over" type="button" onClick={() => navigator.clipboard?.writeText(share.setup!.text).catch(() => {})}><Icon id="i-copy" />Copy</button></div>}
+        {(canReconnect || canCheck) && <div className="row over" style={{ marginTop: 8 }}>{canReconnect && <button className="btn sm over" type="button" onClick={reconnect}><Icon id="i-refresh" />Reconnect</button>}{canCheck && <button className="btn sm over" type="button" onClick={reconnect}><Icon id="i-refresh" />Check again</button>}</div>}
       </td>
-      <td className="stc">{libs ? <a href="#">{libs}</a> : <span className="muted">Not used</span>}</td>
-      <td className="act">
+      <td data-p="2">{libs ? <a href="#">{libs}</a> : <span className="muted">Not used</span>}</td>
+      <td className="actc">
         <details className="menu" style={{ display: menu ? undefined : "inline-block" }}>
           <summary className="btn icon ghost sm" aria-label={"Actions for " + share.name} onClick={() => setMenu(!menu)} style={{ display: "inline-flex" }}><Icon id="i-more" /></summary>
           {menu && <div className="pop" role="menu">
