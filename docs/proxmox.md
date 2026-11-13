@@ -105,6 +105,13 @@ tried this. Route B is simpler for a Proxmox LXC.
    `systemctl edit shrink-your-shit` (a drop-in); the installer rewrites the unit file each run.
    Logs: `journalctl -u shrink-your-shit -f`. The database is in `/var/lib/shrink-your-shit`.
 
+## Intel Quick Sync in Docker
+
+The image (x86_64) already has the Intel drivers. To use the GPU: uncomment the "Intel GPU" block in
+`docker-compose.yml` and set `group_add` to the host's render group id (`getent group render | cut -d: -f3`).
+On a Proxmox LXC, pass `/dev/dri` into the container first (e.g. `dev0: /dev/dri/renderD128` in
+`/etc/pve/lxc/<id>.conf`, then restart it). Run `docker compose up -d`, then check the Workers page shows Intel.
+
 ## Mounting your media into the container
 
 On the Proxmox host, add a bind mount (container id `101`, host folder `/tank/videos-copy`):
