@@ -25,6 +25,7 @@ let items: JobItem[] = [
  reason: { code: "user_stopped", message: "You stopped this file. It is left as it is until you press Convert again." }, detail: "You stopped it.", skippedId: "2" }),
   base("48190", "Wedding.Raw.2018.mov", ".", HOME, "failed", { detail: "The new file is 4 s shorter than the original. The original is kept.", reason: { code: "convert_failed", message: "The new file is 4 s shorter than the original. The original is kept." } }),
   base("48191", "Crash.Test.2024.mp4", "Crash Test (2024)", HOME, "failed", { detail: "There isn't enough free space to write the new file. About 571 MB is needed, 101 MB is free.", reason: { code: "no_space", message: "There isn't enough free space to write the new file. About 571 MB is needed, 101 MB is free." } }),
+  base("no-log", "Old.Movie.2020.mp4", "Old Movies", HOME, "completed", { beforeBytes: 8 * GB, afterBytes: 4 * GB, bytes: 4 * GB, codec: "HEVC", finishedAt: at(60 * 24 * 60), flow: { id: "w1", name: "Shrink videos" }, originalState: "removed" }),
 ];
 const TAB: Record<Tab, JobState[]> = { waiting: ["queued", "retry_wait"], running: ["preparing", "running", "validating", "committing"], completed: ["completed"], skipped: ["skipped", "cancelled"], failed: ["failed"] };
 const tabOf = (s: JobState) => (Object.keys(TAB) as Tab[]).find((t) => TAB[t].includes(s))!;
@@ -50,6 +51,7 @@ export function mockJobLog(id: string): { state: string; steps: { name: string; 
   const out = f48190 ? "[hevc @ 0x55d1] Error while decoding stream #0:0: Invalid data found when processing input\nConversion failed!" : "";
   const step = (name: string, outcome: string, extra: Record<string, unknown>) => ({ name, startedAt: at(300), tookMs: outcome === "ok" ? 120000 : outcome === "failed" && f48191 ? 0 : 252000, outcome, command: null, probe: null, check: null, outputLines: 0, output: "", result: outcome === "ok" ? "Done" : "Failed", ...extra });
   const conv: Record<string, unknown> = f48191 ? {} : { command: "ffmpeg -i in.mkv -c:v libx265 -crf 23 out.mkv", probe: { videoCodec: "h264", bitrateKbps: 12109, durationSec: 7200, sizeBytes: j.file?.bytes ?? 0, streams: [{ index: 0, type: "video", codec: "h264", Width: 1920, Height: 1080 }] }, check: failed ? { score: 0.912, min: 0.95, passed: false } : { score: 0.973, min: 0.95, passed: true }, outputLines: f48190 ? 2 : 184, output: out };
+  if (id === "no-log") return { state: "none", steps: [], final: "" };
   return { state: "complete", final: f48190 ? "The new file is 4 s shorter than the original. The original is kept." : f48191 ? "There isn't enough free space." : "Done · 41% smaller", steps: [
     step("encode", f48190 ? "failed" : f48191 ? "failed" : "ok", { ...conv, result: failed ? "Failed" : "Done · 41% smaller" }),
   ] };
@@ -58,7 +60,7 @@ export function mockJob(id: string): JobDetail | null {
   if (id === REMOVED.id) return REMOVED;
   const j = items.find((x) => x.id === id || (x.jobId === id && x.origin === "scan"));
   if (!j || (j.origin === "scan" && !j.jobId)) return null; // a scan skip has no job; a skip with a job (#149) has its steps
-  const old = id === "41002"; // finished before the update: no history
+  const old = id === "41002" || id === "no-log"; // finished before the update: no history
   const reason = j.reason ?? null;
   return {
     // removed: as the server, a job-backed skip's own row is gone (removed: true)

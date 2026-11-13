@@ -209,8 +209,10 @@ function StepLog({ id, worker, failedIdx }: { id: string; worker: string | null;
   const who = worker ?? "The worker";
   const note: Record<string, string | null> = {
     complete: null, coming_back: "The log from " + who + " is still coming back.", lost: who + " went offline before sending its log. The summary above is what we know.",
-    none: "No log was kept for this job. Jobs from before 13 Nov don't have one.", expired: "This job's log was deleted after " + days + " days (Settings > Processing).",
+    none: "No log was kept for this job. Jobs that ran before job logs were added don't have one.", expired: "This job's log was deleted after " + days + " days (Settings > Processing).",
   };
+  // an empty steps array (whatever the state) means the job ran before logs existed: same message as none
+  if (!l.steps.length) return <section id="job-log"><h3>Log</h3><p className="sm muted">{note.none}</p></section>;
   return (
     <section id="job-log"><h3>Log</h3>
       {note[l.state] ? <p className="sm muted">{note[l.state]}</p> : <>
