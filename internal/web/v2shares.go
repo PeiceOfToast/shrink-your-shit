@@ -215,12 +215,13 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 		pw := in.Password
 		if pw == "" && in.ID != "" {
 			if id, parseErr := strconv.ParseInt(in.ID, 10, 64); parseErr == nil {
-				if sh, loadErr := store.ShareByID(id); loadErr == nil && sh != nil {
+				// The saved password only ever goes to the share's own address and type.
+				if sh, loadErr := store.ShareByID(id); loadErr == nil && sh != nil && sh.Address == addr && sh.Type == typ {
 					pw, _ = store.DecryptSharePassword(id)
 				}
 			}
 		}
-		writeJSON(w, testShare(typ, addr, in.Username, pw, in.Guest))
+		writeJSON(w, testShareFn(typ, addr, in.Username, pw, in.Guest))
 	})
 
 	api.HandleFunc("POST /api/v2/shares/{id}/reconnect", func(w http.ResponseWriter, r *http.Request) {
@@ -424,6 +425,9 @@ func detectMode() (mode, platform string) {
 	}
 	return "manual", runtime.GOOS
 }
+
+// testShareFn is testShare; a package var so tests can see which password a test would send.
+var testShareFn = testShare
 
 func testShare(typ, address, username, password string, guest bool) map[string]any {
 	if typ == "smb" {
