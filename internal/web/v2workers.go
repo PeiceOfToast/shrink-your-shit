@@ -306,10 +306,10 @@ var openRender = func(path string) error {
 func intelFailure() string {
 	nodes := renderNodes()
 	if len(nodes) == 0 {
-		return "No graphics device here (/dev/dri is missing). In Docker, add the Intel GPU block from docker-compose.yml and restart."
+		return "No graphics device here (/dev/dri is missing). In Docker, add the Intel GPU block from docker-compose.yml and restart; on a host install, check the graphics driver is loaded."
 	}
 	if err := openRender(nodes[0]); err != nil {
-		return "Can't open " + nodes[0] + ": the app's user isn't in its group. In Docker, set group_add to the host's render group id (getent group render | cut -d: -f3)."
+		return "Can't open " + nodes[0] + ": the app's user isn't in its group. In Docker, set group_add to the host's render group id (getent group render | cut -d: -f3); on a host install, add the app's user to the render group."
 	}
 	return failed
 }

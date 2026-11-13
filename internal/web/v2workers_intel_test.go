@@ -39,7 +39,7 @@ func TestIntelFailureSaysWhy(t *testing.T) {
 
 	renderNodes = func() []string { return []string{"/dev/dri/renderD128"} }
 	openRender = func(path string) error { return errors.New("permission denied") }
-	if d := detail("hevc_qsv"); d != "Can't open /dev/dri/renderD128: the app's user isn't in its group. In Docker, set group_add to the host's render group id (getent group render | cut -d: -f3)." {
+	if d := detail("hevc_qsv"); d != "Can't open /dev/dri/renderD128: the app's user isn't in its group. In Docker, set group_add to the host's render group id (getent group render | cut -d: -f3); on a host install, add the app's user to the render group." {
 		t.Errorf("not in group: %q", d)
 	}
 
