@@ -279,6 +279,25 @@ func tryMount(store *jobs.Store, sh jobs.Share, password string) {
 	store.SetShareMountStatus(sh.ID, "linux", "connected", "")
 }
 
+// RemountShares mounts every saved share again when the server starts (app mode only), so
+// libraries on shares are not empty after a reboot. It logs one line per share, never the password.
+func RemountShares(store *jobs.Store) {
+	if mode, _ := detectMode(); mode != "app" {
+		return
+	}
+	shares, err := store.LoadShares()
+	if err != nil {
+		log.Printf("shares: could not load saved shares: %v", err)
+		return
+	}
+	for _, sh := range shares {
+		pw, _ := store.DecryptSharePassword(sh.ID)
+		tryMount(store, sh, pw)
+		status, _ := shareToJSON(store, sh)["status"].(string)
+		log.Printf("share %q: %s", sh.Name, status)
+	}
+}
+
 func mountAddress(typ, addr string) string {
 	if typ == "nfs" {
 		return addr // server:/export stays as-is
