@@ -64,3 +64,24 @@ func TestFailureWords(t *testing.T) {
 		t.Errorf("no exit code: %q", msg)
 	}
 }
+
+// QA of #214: the key lines are the ones that matched the code (the QA run's real lines), not any line with "error".
+func TestMatchedKeyLines(t *testing.T) {
+	enc := []string{"frame=   12 fps=0.0", "Input #0, matroska", "[vost#0:0/h264_qsv] Unknown encoder 'h264_qsv'",
+		"Error while opening encoder for output stream #0:0", "Conversion failed!"}
+	if got := MatchedKeyLines(enc); len(got) != 2 || got[0] != "[vost#0:0/h264_qsv] Unknown encoder 'h264_qsv'" {
+		t.Errorf("encoder: %q", got)
+	}
+	dmg := []string{"Input #0, matroska", "Invalid NAL unit size (3307 > 1706).", "Invalid data found when processing input"}
+	if got := MatchedKeyLines(dmg); len(got) != 2 || got[0] != "Invalid NAL unit size (3307 > 1706)." {
+		t.Errorf("damaged: %q", got)
+	}
+	perm := []string{"Error opening output /x/new.mkv: Permission denied", "Error opening output files: Permission denied"}
+	if got := MatchedKeyLines(perm); len(got) != 2 {
+		t.Errorf("permission: %q", got)
+	}
+	generic := []string{"a", "b", "c", "d", "e", "f", "g"}
+	if got := MatchedKeyLines(generic); len(got) != 5 || got[0] != "c" {
+		t.Errorf("no error line: %q", got)
+	}
+}

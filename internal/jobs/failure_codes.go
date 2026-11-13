@@ -102,3 +102,33 @@ func FailureWords(code string, f FailureFacts) (message, hint string) {
 	}
 	return f.Stored, ""
 }
+
+// MatchedKeyLines are the failure's key lines: the lines that give the code classifyKeyLines chose (the lines that
+// say why), else the lines that report an error, else the last lines (user review 11-13 item E, QA of #214).
+func MatchedKeyLines(lines []string) []string {
+	code := classifyKeyLines(lines)
+	if code != "ffmpeg_error" {
+		var out []string
+		for _, l := range lines {
+			if classifyKeyLines([]string{l}) == code {
+				out = append(out, l)
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	var errs []string
+	for _, l := range lines {
+		if low := strings.ToLower(l); strings.Contains(low, "error") || strings.Contains(low, "invalid") {
+			errs = append(errs, l)
+		}
+	}
+	if len(errs) > 0 {
+		return errs
+	}
+	if len(lines) > 5 {
+		return lines[len(lines)-5:]
+	}
+	return lines
+}
