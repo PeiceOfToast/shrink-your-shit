@@ -170,3 +170,68 @@ func DeniedFolder(lines []string) string {
 	}
 	return ""
 }
+
+// classifierOrder is classifyKeyLines' precedence: the first code whose lines match is the failure's.
+var classifierOrder = []struct {
+	code     string
+	patterns []string
+}{
+	{"encoder_unavailable", []string{"unknown encoder", "encoder not found", "error while opening encoder", "could not open encoder",
+		"error creating a mfx session", "error initializing output stream", "no device", "device not available", "encoder not available"}},
+	{"no_space", []string{"no space left on device"}},
+	{"output_not_writable", []string{"permission denied"}},
+	{"source_missing", []string{"no such file or directory"}},
+	{"source_damaged", []string{"invalid data found when processing input", "moov atom not found", "error while decoding",
+		"decode_slice_header error", "non-existing pps", "invalid nal unit"}},
+}
+
+// ReasonCondition is the SQL condition (on jobs as j; the failure's key lines are read from job_failures) of a
+// design failure code, for ?reason=: the stored error code, or for a generic failure the key lines that
+// classifyKeyLines would give it. ok is false for a code no failure has. Its args go in order.
+func ReasonCondition(code string) (cond string, args []any, ok bool) {
+	stored := map[string][]string{"no_space": {ReasonDiskFull, ReasonLowDiskSpace}, "output_not_writable": {ReasonCannotWrite},
+		"check_failed": {ReasonKeptOriginal}, "stalled": {ReasonStalled}, "worker_lost": {ReasonWorkerLost}}
+	if codes, found := stored[code]; found {
+		marks := strings.Repeat(",?", len(codes)-1)
+		return "j.error_code IN (?" + marks + ")", anys(codes), true
+	}
+	keys := `lower(COALESCE((SELECT key_lines FROM job_failures WHERE job_id=j.id), ''))`
+	match := func(patterns []string) string {
+		parts := make([]string, len(patterns))
+		for i, p := range patterns {
+			parts[i] = keys + " LIKE ?"
+			args = append(args, "%"+p+"%")
+		}
+		return "(" + strings.Join(parts, " OR ") + ")"
+	}
+	conds := []string{"j.error_code=?"}
+	args = []any{ReasonConvertFailed}
+	found, pos := code == "ffmpeg_error", len(classifierOrder) // ffmpeg_error: matches none of them
+	for i, c := range classifierOrder {
+		if c.code == code {
+			found, pos = true, i
+		}
+	}
+	if !found {
+		return "", nil, false
+	}
+	for i := 0; i < pos; i++ { // an earlier code's lines win over this one
+		conds = append(conds, "NOT "+match(classifierOrder[i].patterns))
+	}
+	if code != "ffmpeg_error" {
+		conds = append(conds, match(classifierOrder[pos].patterns))
+	} else {
+		for _, c := range classifierOrder {
+			conds = append(conds, "NOT "+match(c.patterns))
+		}
+	}
+	return strings.Join(conds, " AND "), args, true
+}
+
+func anys(ss []string) []any {
+	out := make([]any, len(ss))
+	for i, s := range ss {
+		out[i] = s
+	}
+	return out
+}

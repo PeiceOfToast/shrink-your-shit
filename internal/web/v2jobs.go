@@ -57,7 +57,14 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 			apiError(w, http.StatusBadRequest, "invalid", "sort is queue, or left out.")
 			return
 		}
-		f.Path = q.Get("path") // a file's jobs (user review 11-13 item E): per tab, the UI asks each one
+		f.Path = q.Get("path")                       // a file's jobs (user review 11-13 item E): per tab, the UI asks each one
+		if reason := q.Get("reason"); reason != "" { // failures with one design code
+			if _, _, ok := jobs.ReasonCondition(reason); !ok {
+				apiError(w, http.StatusBadRequest, "invalid", "reason is one of the failure codes (for example no_space or source_damaged).")
+				return
+			}
+			f.Reason = reason
+		}
 		if lib := q.Get("libraryId"); lib != "" {
 			id, err := strconv.ParseInt(lib, 10, 64)
 			if err != nil || id <= 0 {

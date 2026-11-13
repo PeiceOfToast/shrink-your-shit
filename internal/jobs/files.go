@@ -31,6 +31,7 @@ type FileFilter struct {
 	LibraryID int64
 	Q         string
 	Path      string   // jobs: only the job of this exact file path (user review 11-13 item E: a file's history)
+	Reason    string   // jobs: only failures with this design code (ReasonCondition); "" for any
 	Reasons   []string // skipped: only these reasons (none: every reason)
 	Kept      bool
 	// QueueOrder: waiting jobs in the order workers take them (Claim's: priority, then age), ready ones
@@ -97,6 +98,12 @@ func (f FileFilter) jobFilters() (string, []any) {
 	if f.Path != "" {
 		where += " AND j.path=?"
 		args = append(args, f.Path)
+	}
+	if f.Reason != "" { // the caller checked the code (ReasonCondition ok)
+		if cond, rargs, ok := ReasonCondition(f.Reason); ok {
+			where += " AND " + cond
+			args = append(args, rargs...)
+		}
 	}
 	if f.LibraryID > 0 {
 		where += " AND j.library_id=?"

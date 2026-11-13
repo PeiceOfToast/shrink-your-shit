@@ -3,8 +3,13 @@
 package jobs
 
 import (
+	"encoding/json"
+	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
 // User review 11-13 item E: each code of design's V6b table, from the stored code or from ffmpeg's own lines (the
@@ -132,5 +137,61 @@ func TestQSVKeyLines(t *testing.T) {
 	have := strings.Join(got, "\n")
 	if !strings.Contains(have, "Error creating a MFX session: -9.") || !strings.Contains(have, "Error while opening encoder") {
 		t.Errorf("key lines leave out the encoder lines: %q", got)
+	}
+}
+
+// ?reason=: the SQL condition selects exactly the jobs FailureCode names with that code (checked on real rows).
+func TestReasonConditionMatchesFailureCode(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "syp.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.SetPaused(false)                                                    // the test's worker is started (S2: a new install starts stopped)
+	l, _ := s.AddLibrary("m", t.TempDir(), rules.SliderTemplate(3), true) // a started library: its jobs are claimed
+	for i, c := range []struct {
+		code  string
+		lines []string
+	}{
+		{ReasonDiskFull, nil}, {ReasonCannotWrite, nil}, {ReasonKeptOriginal, nil}, {ReasonStalled, nil}, {ReasonWorkerLost, nil},
+		{ReasonConvertFailed, []string{"[AVEncoder @ 0x1] Unknown encoder 'h264_qsv'"}},
+		{ReasonConvertFailed, []string{"/mnt/out/Movie.mkv: Permission denied"}},
+		{ReasonConvertFailed, []string{"/media/Movie.mkv: No such file or directory"}},
+		{ReasonConvertFailed, []string{"[mov,mp4 @ 0x3] moov atom not found"}},
+		{ReasonConvertFailed, []string{"Conversion failed!"}},
+		{ReasonConvertFailed, nil},
+	} {
+		id, _ := s.Enqueue(Job{Library: "m", LibraryID: l.ID, Path: fmt.Sprintf("/m/%d.mkv", i)})
+		s.Claim("t")
+		if len(c.lines) > 0 {
+			s.SetFailureSummary(id, FailureSummary{ExitCode: 1, KeyLines: c.lines})
+		}
+		s.Fail(id, c.code, "x")
+	}
+	for _, want := range []string{"no_space", "output_not_writable", "check_failed", "stalled", "worker_lost",
+		"encoder_unavailable", "source_missing", "source_damaged", "ffmpeg_error"} {
+		cond, args, ok := ReasonCondition(want)
+		if !ok {
+			t.Fatalf("no condition for %s", want)
+		}
+		var got []string
+		rows, err := s.db.Query(`SELECT j.path, j.error_code, COALESCE((SELECT key_lines FROM job_failures WHERE job_id=j.id), '[]') FROM jobs j WHERE `+cond, args...)
+		if err != nil {
+			t.Fatalf("%s: %v", want, err)
+		}
+		for rows.Next() {
+			var path, code, raw string
+			rows.Scan(&path, &code, &raw)
+			var lines []string
+			json.Unmarshal([]byte(raw), &lines)
+			if FailureCode(code, lines) != want {
+				t.Errorf("%s selected %s (%s), which is %s", want, path, code, FailureCode(code, lines))
+			}
+			got = append(got, path)
+		}
+		rows.Close()
+		if len(got) == 0 {
+			t.Errorf("%s selected nothing", want)
+		}
 	}
 }
