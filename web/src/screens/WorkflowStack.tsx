@@ -147,7 +147,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
                 <span><strong>As set up before 13 Nov</strong><span className="hint" style={{ display: "block" }}>Makes the same files as before.</span></span></label>}
             </fieldset>
             {/* shortcut: the level and limit of an old flow show as fields, not as plain text; upgrade when design asks for the plain text */}
-            <fieldset disabled={vbr} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>{field("maxBitrate")}{vbr && <span className="hint">Not used with VBR.</span>}</fieldset>
+            <fieldset disabled={vbr} style={{ border: 0, padding: 0, margin: 0, minWidth: 0, opacity: vbr ? 0.5 : 1 }}>{field("maxBitrate")}{vbr && <span className="hint">Not used with VBR.</span>}</fieldset>
             {vbr && field("vbrMaxKbps")}
           </div>
         </details>
