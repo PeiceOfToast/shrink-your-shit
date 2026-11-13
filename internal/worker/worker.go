@@ -125,9 +125,6 @@ type Worker struct {
 	Paused func() bool
 	// StallAfter: an encode with no progress for this long is stopped and fails (0: DefaultStallAfter).
 	StallAfter time.Duration
-	// PlaceStarted is recorded when the place/replace phase begins, so a place error can log a replace
-	// step with the correct timing. Set in process() before installSubtitles.
-	PlaceStarted time.Time
 	// KeepDays is how many days a replaced original is kept in .syp-trash (keep.go); 0 or nil: it is
 	// deleted by the rename, as before slice 17. Journal records those swaps (needed when keeping).
 	KeepDays func() int
@@ -345,13 +342,12 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 			}
 			return true, err
 		}
-		// The person sees what happened in plain words; the technical error goes to the log
-		// (Settings > About shows its last lines).
+		// Mark errors from the place/replace phase (after the check: staging -> final path,
+		// the swap into the library, kept-original moves) with a type.
 		var pe *placeError
 		if errors.As(err, &pe) {
-			// A place/replace phase failure: the encode and check both passed, but the
-			// file could not be put in place. Record a replace step and the failure summary.
-			w.replaceStep(job.ID, w.PlaceStarted, true, pe.Error())
+			// placeError already recorded the replace step and timeline. Call Fail so the
+			// job shows the right code; the failure box gets its summary from the stored step.
 			w.Queue.AddStep(job.ID, "replaced", false, plainFailure(err))
 			if ferr := w.Queue.Fail(job.ID, reasonCode(err), plainFailure(err)); ferr != nil {
 				return true, ferr
@@ -487,20 +483,43 @@ func (w *Worker) replaceStep(id int64, started time.Time, failed bool, result st
 		return
 	}
 	w.Queue.AppendLogLine(id, 2, "app", result)
-	// One key line: the OS error
 	w.Queue.SetFailureSummary(id, jobs.FailureSummary{
 		Step: 2, StepCount: 3, AfterMs: tookMs,
 		ExitCode: -1, FfmpegRan: true, KeyLines: []string{result},
 	})
 }
 
-// placeWrap wraps an error from the place/replace phase with the target path.
-// Returns nil when err is nil.
-func placeWrap(path string, err error) error {
+// placeError records the place failure steps and returns a wrapped error.
+// It extracts the path from *os.PathError / *os.LinkError when present, and
+// names a .syp staging folder's parent instead of the staging folder itself.
+func (w *Worker) placeError(jobID int64, placeStarted time.Time, final string, err error) error {
 	if err == nil {
 		return nil
 	}
+	path := final
+	var pe *os.PathError
+	if errors.As(err, &pe) {
+		path = pe.Path
+	}
+	var le *os.LinkError
+	if errors.As(err, &le) {
+		path = le.New
+	}
+	if i := strings.LastIndex(path, "/.syp"); i >= 0 {
+		path = path[:i]
+	} else if i := strings.LastIndex(path, "\\.syp"); i >= 0 {
+		path = path[:i]
+	}
+	msg := fmt.Sprintf("Couldn't write to %s: %v", path, err)
+	w.replaceStep(jobID, placeStarted, true, msg)
+	w.Queue.AddStep(jobID, "replaced", false, msg)
 	return &placeError{Path: path, Err: err}
+}
+func (w *Worker) placeWrap(jobID int64, placeStarted time.Time, final string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return w.placeError(jobID, placeStarted, final, err)
 }
 
 func (e *SkippedError) Error() string { return "skipped: " + e.Words }
@@ -991,10 +1010,10 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 		return stage.intact()
 	}
-	w.PlaceStarted = w.now()
+	placeStarted := w.now()
 	placed, err := w.installSubtitles(plan, job.ID, tmp, final)
 	if err != nil {
-		return "", placeWrap(final, err)
+		return "", w.placeError(job.ID, placeStarted, final, err)
 	}
 	if len(placed) > 0 {
 		if err := hook("subtitles placed"); err != nil {
@@ -1016,10 +1035,10 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if again != nil { // Convert again: our earlier file goes, the original stays kept (its days start again)
 		if err := w.replaceOwnOutput(ctx, *again, stage, final, days, stillOK); err != nil {
 			removePlaced()
-			return "", placeWrap(final, err)
+			return "", w.placeError(job.ID, placeStarted, final, err)
 		}
 		swapped()
-		w.replaceStep(job.ID, w.PlaceStarted, false, "")
+		w.replaceStep(job.ID, placeStarted, false, "")
 		return final, nil
 	}
 	renaming := !keepsOriginal(plan) && final != job.Path
@@ -1031,10 +1050,10 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		// (also with 0 days: then it is deleted right after), so no step of it is ever unrecorded.
 		if err := w.keepAndReplace(ctx, job, stage, before, final, days, stillOK); err != nil {
 			removePlaced()
-			return "", placeWrap(final, err)
+			return "", w.placeError(job.ID, placeStarted, final, err)
 		}
 		swapped()
-		w.replaceStep(job.ID, w.PlaceStarted, false, "")
+		w.replaceStep(job.ID, placeStarted, false, "")
 		return final, nil
 	}
 	move := moveIntoPlace
@@ -1048,7 +1067,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		removePlaced()
 		var f *FailedError
 		if errors.As(err, &f) {
-			return "", placeWrap(final, err)
+			return "", w.placeError(job.ID, placeStarted, final, err)
 		}
 		var k *KeptError
 		if errors.As(err, &k) {
@@ -1057,7 +1076,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		return "", retryable(failed("The new file could not be put in place, so your original was kept as it was. Press Retry.", fmt.Errorf("move result into place: %w", err)), retryGeneral) // busy or locked
 	}
 	swapped()
-	w.replaceStep(job.ID, w.PlaceStarted, false, "")
+	w.replaceStep(job.ID, placeStarted, false, "")
 	return final, nil
 }
 
