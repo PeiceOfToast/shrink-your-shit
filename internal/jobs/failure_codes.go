@@ -160,8 +160,11 @@ func DeniedFolder(lines []string) string {
 		}
 		for {
 			i := strings.LastIndexAny(dir, `/\`)
+			if i < 0 {
+				break
+			}
 			base := dir[i+1:]
-			if i < 0 || !strings.HasPrefix(base, ".syp") {
+			if !strings.HasPrefix(base, ".syp") && !strings.HasSuffix(base, ".syp-tmp") {
 				break
 			}
 			dir = dir[:i]

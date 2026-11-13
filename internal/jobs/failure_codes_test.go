@@ -102,6 +102,7 @@ func TestDeniedFolder(t *testing.T) {
 	}{
 		{[]string{"Error opening output /mnt/out/new.mkv: Permission denied"}, "/mnt/out"},
 		{[]string{"Error opening output /srv/media/.syp-tmp/.Movie.abc.syp-tmp.mkv: Permission denied"}, "/srv/media"},
+		{[]string{"Error opening output /mnt/media/out (shrunk)/.output.123.syp-tmp/new.mkv: Permission denied"}, "/mnt/media/out (shrunk)"},
 		{[]string{"Error opening output files: Permission denied"}, ""}, // no path in it
 		{[]string{"Conversion failed!"}, ""},
 	} {
