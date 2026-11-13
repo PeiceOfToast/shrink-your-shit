@@ -353,3 +353,38 @@ func TestFailureSummaryInTheAPI(t *testing.T) {
 		t.Errorf("detail: %s", body)
 	}
 }
+
+// User review 11-13 item E: the job's log endpoint gives its steps (command, timing, the failed step's output) and
+// the download gives every line as text.
+func TestJobLogEndpoint(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	id, _ := st.Enqueue(jobs.Job{Library: "/m", LibraryID: l.ID, Path: "/m/a.mkv"})
+	st.Claim("t")
+	st.AppendLogLine(id, 0, "app", "started")
+	st.RecordRunStep(id, jobs.RunStep{Index: 0, Name: "encode", StartedAt: "t0", TookMs: 1500, Outcome: "failed",
+		Command: "ffmpeg -i in.mkv out.mkv", Probe: `{"codec":"h264"}`, OutputLines: 1})
+	st.AppendLogLine(id, 0, "stderr", "Invalid data found when processing input")
+	st.SetFailureSummary(id, jobs.FailureSummary{Step: 0, StepCount: 1, ExitCode: 1, KeyLines: []string{"Invalid data found when processing input"}})
+	st.Fail(id, "convert_failed", "Converting stopped with an error.")
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10) + "/log"})
+	var r struct {
+		State string
+		Final string
+		Steps []map[string]any
+	}
+	if err := json.Unmarshal([]byte(body), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.State != "complete" || r.Final != "failed" || len(r.Steps) != 1 || r.Steps[0]["command"] != "ffmpeg -i in.mkv out.mkv" ||
+		r.Steps[0]["tookMs"] != 1500.0 || r.Steps[0]["probe"] == nil {
+		t.Errorf("log %s", body)
+	}
+	if out := r.Steps[0]["output"].([]any); len(out) != 1 || out[0] != "Invalid data found when processing input" {
+		t.Errorf("failed step output %v", out)
+	}
+	_, text, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10) + "/log/download"})
+	if !strings.Contains(text, "started") || !strings.Contains(text, "Invalid data found") {
+		t.Errorf("download: %s", text)
+	}
+}
