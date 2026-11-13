@@ -62,12 +62,13 @@ func TestValidateAddress(t *testing.T) {
 func TestValidateOptions(t *testing.T) {
 	ok := []map[string]string{
 		nil, {}, {"vers": "3.1.1"}, {"vers": "4"}, {"soft": ""}, {"hard": ""}, {"timeo": "600"},
-		{"sec": "ntlmssp"}, {"domain": "WORKGROUP"}, {"port": "445", "rsize": "1048576"},
+		{"sec": "ntlmssp"}, {"domain": "WORKGROUP"}, {"domain": "CORP_1"}, {"port": "445", "rsize": "1048576"},
 	}
 	bad := []map[string]string{
 		{"vers": "3.0,suid"},    // a comma would add another option
 		{"vers": "3=1"},         // and so would '='
 		{"domain": "CORP,exec"}, // the same through another option
+		{"domain": "CORP X"},    // no spaces in a domain name
 		{"sec": "krb5,dev"},     //
 		{"soft": "1"},           // a flag takes no value
 		{"timeo": "-1"}, {"timeo": "1e9"}, {"port": "445,suid"},

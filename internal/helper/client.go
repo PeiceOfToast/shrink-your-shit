@@ -80,12 +80,30 @@ func answerError(res Response) error {
 	return &MountError{Code: res.Error.Code, Message: res.Error.Message}
 }
 
-// Mount tells the helper to mount a share.
+// SplitDomain takes a Windows sign-in name apart: DOMAIN\user gives user and DOMAIN. user@domain and a
+// plain name stay as they are, with no domain (cifs takes user@domain itself).
+func SplitDomain(name string) (user, domain string) {
+	if d, u, ok := strings.Cut(name, `\`); ok && d != "" && u != "" {
+		return u, d
+	}
+	return name, ""
+}
+
+// Mount tells the helper to mount a share. A DOMAIN\user name becomes username=user with domain=DOMAIN.
 func Mount(kind, address, mountPoint string, options map[string]string, username, password string) error {
+	user, domain := SplitDomain(username)
+	if domain != "" {
+		withDomain := make(map[string]string, len(options)+1)
+		for k, v := range options {
+			withDomain[k] = v
+		}
+		withDomain["domain"] = domain
+		options = withDomain
+	}
 	res, err := call(Command{
 		Cmd: "mount", Kind: kind, Address: address,
 		MountPoint: mountPoint, Options: options,
-		Username: username, Password: password,
+		Username: user, Password: password,
 	})
 	if err != nil {
 		return err

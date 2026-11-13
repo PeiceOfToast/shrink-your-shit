@@ -473,6 +473,12 @@ func testShare(typ, address, username, password string, guest bool) map[string]a
 	return testNFS(address)
 }
 
+// smbInitiator is the NTLM sign-in for the Test button: DOMAIN\user becomes User=user, Domain=DOMAIN.
+func smbInitiator(username, password string) *smb2.NTLMInitiator {
+	user, domain := helper.SplitDomain(username)
+	return &smb2.NTLMInitiator{User: user, Password: password, Domain: domain}
+}
+
 func testSMB(address, username, password string, guest bool) map[string]any {
 	parts := strings.Split(strings.TrimPrefix(address, `\\`), `\`)
 	if len(parts) < 2 {
@@ -484,8 +490,7 @@ func testSMB(address, username, password string, guest bool) map[string]any {
 		return map[string]any{"ok": false, "code": "invalid_address",
 			"message": "Leave out the port: SMB always uses 445."}
 	}
-	ini := &smb2.NTLMInitiator{User: username, Password: password}
-	dialer := &smb2.Dialer{Initiator: ini}
+	dialer := &smb2.Dialer{Initiator: smbInitiator(username, password)}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	session, err := dialer.Dial(ctx, net.JoinHostPort(dialHost(server), smbPort))
@@ -656,6 +661,14 @@ func nameTaken(store *jobs.Store, name string, excludeID int64) error {
 	return nil
 }
 
+// domainOpt is the ",domain=" mount option for a Windows domain, or nothing when there is none.
+func domainOpt(domain string) string {
+	if domain == "" {
+		return ""
+	}
+	return ",domain=" + domain
+}
+
 func setupForMode(store *jobs.Store, sh jobs.Share) any {
 	mode, _ := detectMode()
 	mpt := mountPointFor(sh)
@@ -669,7 +682,8 @@ func setupForMode(store *jobs.Store, sh jobs.Share) any {
 			if sh.Guest {
 				opts = "guest,vers=3.1.1,soft,nosuid,nodev,noexec,uid=syp,gid=syp,file_mode=0660,dir_mode=0770"
 			} else {
-				opts = "username=" + sh.Username + ",vers=3.1.1,soft,nosuid,nodev,noexec,uid=syp,gid=syp,file_mode=0660,dir_mode=0770"
+				user, dom := helper.SplitDomain(sh.Username)
+				opts = "username=" + user + domainOpt(dom) + ",vers=3.1.1,soft,nosuid,nodev,noexec,uid=syp,gid=syp,file_mode=0660,dir_mode=0770"
 			}
 			return map[string]any{
 				"kind":       "command",
@@ -703,8 +717,9 @@ func setupForMode(store *jobs.Store, sh jobs.Share) any {
 					"addr="+host+",guest,vers=3.1.1,soft,"+owner)
 			} else {
 				envName := passwordEnv(vol)
+				user, dom := helper.SplitDomain(sh.Username)
 				driver = fmt.Sprintf("      type: cifs\n      device: %q\n      o: %q", mntAddr,
-					"addr="+host+",username="+sh.Username+",password=${"+envName+"},vers=3.1.1,soft,"+owner)
+					"addr="+host+",username="+user+domainOpt(dom)+",password=${"+envName+"},vers=3.1.1,soft,"+owner)
 				note = "# Put " + envName + "=<the share password> in the .env file beside your compose file (chmod 600 .env).\n"
 			}
 		}

@@ -86,7 +86,7 @@ var (
 	number  = regexp.MustCompile(`^[0-9]{1,9}$`)
 	version = regexp.MustCompile(`^[0-9]{1,2}(\.[0-9]{1,2}){0,2}$`)
 	word    = regexp.MustCompile(`^[a-z0-9]{1,16}$`)
-	domain  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$`)
+	domain  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$`)
 )
 
 // allowedOptions is every option a request may carry, with the rule its value must meet
