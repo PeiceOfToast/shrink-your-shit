@@ -2,6 +2,7 @@
 // step definitions and their configSchema, validate.go for the step summaries; "Next to each library" runs since V5a #133).
 import REGISTRY from "./registry-4df3345.json";
 import type { Edge, JSONSchema, Node, Port, PublishPreview, StepDefinition, ValidationIssue, WorkflowDoc, WorkflowRevision } from "../types/v2";
+import type { Ladder } from "../workflowApi";
 
 const inPort: Port = { name: "in", label: "In", kind: "file", outcome: "success" };
 const success: Port = { name: "success", label: "Next", kind: "file", outcome: "success" };
@@ -38,6 +39,7 @@ export const STEP_DEFS: StepDefinition[] = [
       format: wd({ ...en(Object.keys(FORMATS), Object.values(FORMATS)), "x-available": ["hevc", "h264", "av1", "vp9"] }, "hevc", "Video format", "segmented"),
       resolution: wd(en(["keep", "1080", "720", "480"], ["Same as the original", "At most 1080p", "At most 720p", "At most 480p"]), "keep", "Resolution"),
       maxBitrate: wd(en(["none", "high", "medium", "low"], ["No limit", "High", "Medium", "Low"]), "none", "Max bitrate"),
+      vbrMaxKbps: { type: "integer", title: "Max bitrate", minimum: 1 },
       speed: wd(en(["faster", "normal", "slower"], ["Faster", "Normal", "Slower (smaller files)"]), "normal", "Speed"),
     }, ["quality", "format", "resolution", "maxBitrate", "speed"]) }),
   def({ type: "audio.tracks", category: "audio", name: "Audio", icon: "audio", typeLabel: "Audio", description: "Which sound tracks the new file has.",
@@ -70,6 +72,21 @@ export const STEP_DEFS: StepDefinition[] = [
 for (const d of STEP_DEFS) { const r = (REGISTRY as unknown as Record<string, Pick<StepDefinition, "name" | "description" | "configSchema">>)[d.type]; if (r) Object.assign(d, r); }
 export const stepDef = (type: string) => STEP_DEFS.find((d) => d.type === type);
 
+// GET /api/v2/bitrate-ladder as A-API-SHAPE gives it: the registry's ladder in kbps, the slider table (CRF and the
+// save range per position; the figures are the sample's, not the engine's), and the 60 fps and HDR factors.
+export function mockLadder(): Ladder {
+  const L = (REGISTRY as unknown as Record<string, { configSchema: { properties: { maxBitrate: { "x-bitrateLadder": Record<string, Record<string, Record<string, number>>> } } } }>)["video.convert"].configSchema.properties.maxBitrate["x-bitrateLadder"];
+  const rows = ["sd", "720", "1080", "1440", "2160"];
+  const crf = [28, 26, 23, 21, 18], save = [[60, 85], [40, 70], [10, 55], [5, 30], [0, 15]];
+  return {
+    unit: "kbps", rows: [{ row: "sd", label: "480p and below" }, { row: "720", label: "720p" }, { row: "1080", label: "1080p" }, { row: "1440", label: "1440p" }, { row: "2160", label: "2160p" }],
+    formats: Object.fromEntries(Object.entries(L).map(([f, lv]) => [f, Object.fromEntries(rows.map((r) => [r, { low: lv.low[r] * 1000, medium: lv.medium[r] * 1000, high: lv.high[r] * 1000, rough: 0 }]))])),
+    resolutionRow: { "480": "sd", "720": "720", "1080": "1080", "1440": "1440", "2160": "2160" }, vbrFormats: ["hevc", "h264"],
+    factors: { fps60: 1.4, hdr: 1.25 },
+    slider: Object.keys(FORMATS).flatMap((f) => QUALITY.map((name, i) => ({ position: i + 1, name, format: f, crf: crf[i], keepsResolution: true, capKbps: null, saveLowPct: save[i][0], saveHighPct: save[i][1] }))),
+  };
+}
+
 const str = (c: Record<string, unknown>, k: string, d: string) => (typeof c[k] === "string" ? (c[k] as string) : d);
 // Step summaries as V1's validate.go summary() words them (server-rendered stepSummaries).
 export function summary(n: Node): string {
@@ -79,9 +96,10 @@ export function summary(n: Node): string {
     case "input.library": return "Every video in the libraries that use this workflow";
     case "filter.video_skips": return c.includeDolbyVision === true ? "Skips files already in this format and AV1 or VP9 videos; Dolby Vision files become HDR10" : "Skips Dolby Vision files, files already in this format, and AV1 or VP9 videos";
     case "video.convert": {
-      const r = str(c, "resolution", "keep"), b = str(c, "maxBitrate", "none");
-      return [FORMATS[str(c, "format", "hevc")] ?? "HEVC", (Number(c.quality) === 3 ? "Balanced quality" : QUALITY[(Number(c.quality) || 3) - 1]), r === "keep" ? "same resolution" : "at most " + r + "p",
-        ...(b !== "none" ? [b[0].toUpperCase() + b.slice(1) + " bitrate limit"] : [])].join(" · ");
+      // A-API-SHAPE: a slider step names its position; custom settings name the resolution and the level or VBR max
+      const r = str(c, "resolution", "keep"), b = str(c, "maxBitrate", "none"), f = FORMATS[str(c, "format", "hevc")] ?? "HEVC";
+      if (c.kind === "selectors") return "Custom: " + f + " · " + (r === "keep" ? "same resolution" : r + "p") + " · " + (c.rateControl === "vbr" ? "VBR, max " + (Number(c.vbrMaxKbps) || 0).toLocaleString() + " kbps" : b[0].toUpperCase() + b.slice(1));
+      return [f, QUALITY[(Number(c.quality) || 3) - 1], r === "keep" ? "same resolution" : "at most " + r + "p"].join(" · ");
     }
     case "audio.tracks": return (AUDIO.find((a) => a[0] === str(c, "audio", "stereo_aac"))?.[1] ?? "") + (c.onlyMyLanguages === false ? "" : ", in your languages");
     case "subtitles.tracks": return SUBS[str(c, "subtitles", "keep_all")];
