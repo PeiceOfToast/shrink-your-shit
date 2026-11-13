@@ -169,7 +169,7 @@ export function Jobs() {
 // durations read '4 min 12 s' and '0.1 s' everywhere (the design's phone note)
 const dur = (ms: number) => { const s = ms / 1000; return s < 1 ? s.toFixed(1) + " s" : s < 60 ? Math.round(s) + " s" : Math.floor(s / 60) + " min " + (Math.round(s) % 60) + " s"; };
 // map server step labels to person-facing names (workshop #217: encode, check)
-const stepLabel = (s: string) => ({ encode: "Converting video", check: "Checking the picture" } as Record<string, string>)[s] ?? s;
+const stepLabel = (s: string) => ({ encode: "Converting video", check: "Checking the picture", imported: "Older log, not split into steps", replace: "Save the result" } as Record<string, string>)[s] ?? s;
 // SCREENS V6b: the sentence, the reason code small under it, where it stops (the step opens in the log), the hint as
 // 'What you can do' (left out when null), the last ffmpeg lines with Copy, and the buttons. --error left border.
 function WhyFailed({ id, msg, code, worker, f }: { id: string; msg: string; code: string; worker: string | null; f: Failure }) {
@@ -185,7 +185,7 @@ function WhyFailed({ id, msg, code, worker, f }: { id: string; msg: string; code
       {f.hint && <p><strong>What you can do:</strong> {f.hint}</p>}
       {f.ffmpegRan === false
         ? <p className="sm muted">ffmpeg didn't run.</p>
-        : f.keyLines.length > 0 && <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">What ffmpeg said</span><button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(f.keyLines.join("\n")).catch(() => {})}><Icon id="i-copy" />Copy</button></div>
+        : f.keyLines.length > 0 && <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">{(f.step === "encode" || f.step === "check" ? "What ffmpeg said" : "The error")}</span><button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(f.keyLines.join("\n")).catch(() => {})}><Icon id="i-copy" />Copy</button></div>
           <pre className="joblog">{f.keyLines.join("\n")}</pre></div>}
       <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: 12 }}>
         <a className="btn sm" href={"#job-step-" + (f.stepIndex + 1)}><Icon id="i-file" />Open the full log</a>
@@ -229,8 +229,8 @@ function StepLog({ id, worker, failedIdx }: { id: string; worker: string | null;
         const sum = pr && [pr.videoCodec?.toUpperCase().replace("H264", "H.264"), v?.Width && v.Height ? v.Width + "×" + v.Height : "", v?.frameRate ? +v.frameRate.toFixed(3) + " fps" : "", [v?.bitDepth ? v.bitDepth + "-bit" : "", hdr].filter(Boolean).join(" "), n("audio") && n("audio") + " audio", n("subtitle") && n("subtitle") + " subtitles", pr.durationSec ? elapsed(pr.durationSec) : "", pr.sizeBytes ? bytes(pr.sizeBytes) : ""].filter(Boolean).join(" · ");
         return (
           <details key={i} id={"job-step-" + (i + 1)} open={q ? hit > 0 : st.outcome !== "ok" || i === failedIdx} className="stepd" style={{ borderTop: "1px solid var(--border)", padding: "8px 0" }}>
-            <summary className="row nw" style={{ gap: 8, flexWrap: "wrap", cursor: "pointer" }}><strong>{stepLabel(st.name)}</strong><span className="sm muted">{clock(st.startedAt)} · took {dur(st.tookMs)}</span>
-              <span className={"pill " + (st.outcome === "ok" ? "ok" : "bad")}>{st.outcome === "ok" ? "Done" : "Failed"}</span>{hit > 0 && <span className="pill">{hit} match{hit > 1 ? "es" : ""}</span>}</summary>
+            <summary className="row nw" style={{ gap: 8, flexWrap: "wrap", cursor: "pointer" }}><strong>{stepLabel(st.name)}</strong>{st.startedAt && <span className="sm muted">{clock(st.startedAt)} · took {dur(st.tookMs)}</span>}
+              {st.name === "imported" && st.outcome === "completed" ? <span className="pill ok">Done</span> : st.name === "imported" && st.outcome === "failed" ? <span className="pill bad">Failed</span> : st.name !== "imported" ? <span className={"pill " + (st.outcome === "ok" ? "ok" : "bad")}>{st.outcome === "ok" ? "Done" : "Failed"}</span> : null}{hit > 0 && <span className="pill">{hit} match{hit > 1 ? "es" : ""}</span>}</summary>
             <div className="stack" style={{ gap: 6, paddingTop: 6 }}>
               {st.command && <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">Command</span><button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(st.command ?? "").catch(() => {})}><Icon id="i-copy" />Copy</button></div>
                 <pre className="joblog sm">{st.command}</pre></div>}
