@@ -104,20 +104,46 @@ func sharePausedBy(store *jobs.Store, l jobs.Library) map[string]any {
 	return map[string]any{"shareId": strconv.FormatInt(sh.ID, 10), "shareName": sh.Name, "since": l.SharePausedSince, "use": "folder"}
 }
 
-// ShareDownFor is the saved share whose folder holds folder, when that share does not answer now. The
-// worker asks when a convert fails: a failure while the share is down is put back, not failed (D4c).
-func ShareDownFor(store *jobs.Store, folder string) (worker.ShareDown, bool) {
+// ShareDownFor is the saved share whose folder holds folder, when that share does not answer now, or had an
+// outage or reconnect since job jobID started (its convert may have failed on a stale handle). The worker
+// asks when a convert fails: a failure while the share is down is put back, not failed (D4c).
+func ShareDownFor(store *jobs.Store, folder string, jobID int64) (worker.ShareDown, bool) {
 	shares, err := store.LoadShares()
 	if err != nil {
 		return worker.ShareDown{}, false
 	}
+	started := store.JobStarted(jobID)
 	for _, sh := range shares {
 		mp := mountPointFor(sh)
-		if (folder == mp || jobs.Within(folder, mp)) && !shareAnswers(mp) {
+		if folder != mp && !jobs.Within(folder, mp) {
+			continue
+		}
+		if !shareAnswers(mp) {
 			return worker.ShareDown{ShareID: sh.ID, Name: sh.Name, MountPath: mp}, true
+		}
+		if statusChangedSince(store, sh.ID, started) {
+			return worker.ShareDown{ShareID: sh.ID, Name: sh.Name, MountPath: mp, Answering: true}, true
 		}
 	}
 	return worker.ShareDown{}, false
+}
+
+// statusChangedSince reports whether share id's mount status changed after started (RFC3339, UTC): an outage
+// or a reconnect while a job ran. A job never claimed ("") has none.
+func statusChangedSince(store *jobs.Store, id int64, started string) bool {
+	if started == "" {
+		return false
+	}
+	mounts, err := store.ShareMountsByShare(id)
+	if err != nil {
+		return false
+	}
+	for _, m := range mounts {
+		if m.Since > started {
+			return true
+		}
+	}
+	return false
 }
 
 // mountStatus is share id's status on this computer ("" when it has no mount record yet).

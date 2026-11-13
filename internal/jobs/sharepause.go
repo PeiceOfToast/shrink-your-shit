@@ -32,14 +32,25 @@ func (s *Store) PauseLibrariesForShare(shareID int64, mountPath string) ([]int64
 
 // ShareDropped puts a running job back in the queue because its share stopped answering. It is not a
 // failure: no try is counted, and the libraries in that folder are paused by the share at once, so no
-// claim takes their jobs until it answers. words are the plain reason the page shows.
+// claim takes their jobs until it answers. words are the plain reason the page shows. A shareID of 0
+// means the share answers again (it had an outage during the convert): the job is requeued, nothing paused.
 func (s *Store) ShareDropped(id, shareID int64, mountPath, words string) error {
 	if err := s.transition(id, Queued, `, progress=0, worker='', error=?, error_code=?, retry_at=''`, words, ReasonShareDropped); err != nil {
 		return err
 	}
 	s.AddStep(id, "share", false, words)
+	if shareID == 0 {
+		return nil
+	}
 	_, err := s.PauseLibrariesForShare(shareID, mountPath)
 	return err
+}
+
+// JobStarted is when job id was claimed (RFC3339, UTC; "" when it was never claimed).
+func (s *Store) JobStarted(id int64) string {
+	var started string
+	s.db.QueryRow(`SELECT COALESCE(started,'') FROM jobs WHERE id=?`, id).Scan(&started)
+	return started
 }
 
 // ResumeSharePause clears the share pause of every library share id paused. The libraries stay as the

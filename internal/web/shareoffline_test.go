@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -148,16 +149,16 @@ func TestWaitingFileSaysItsShareIsOffline(t *testing.T) {
 	films, _ := st.AddLibrary("Films", filepath.Join(mp, "Films"), rules.SliderTemplate(3), true)
 	st.Enqueue(jobs.Job{Library: films.Path, LibraryID: films.ID, Path: filepath.Join(films.Path, "a.mkv")})
 
-	if _, ok := ShareDownFor(st, filepath.Join(mp, "Films")); ok {
+	if _, ok := ShareDownFor(st, filepath.Join(mp, "Films"), 0); ok {
 		t.Fatal("a share that answers reads as down")
 	}
 	if err := os.RemoveAll(mp); err != nil {
 		t.Fatal(err)
 	}
-	if d, ok := ShareDownFor(st, filepath.Join(mp, "Films")); !ok || d.ShareID != sh.ID || d.MountPath != mp {
+	if d, ok := ShareDownFor(st, filepath.Join(mp, "Films"), 0); !ok || d.ShareID != sh.ID || d.MountPath != mp {
 		t.Fatalf("down share not found: %+v %v", d, ok)
 	}
-	if _, ok := ShareDownFor(st, t.TempDir()); ok {
+	if _, ok := ShareDownFor(st, t.TempDir(), 0); ok {
 		t.Error("a folder on no share reads as down")
 	}
 	checkShares(st)
@@ -165,5 +166,46 @@ func TestWaitingFileSaysItsShareIsOffline(t *testing.T) {
 	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs"})
 	if !strings.Contains(body, `"code":"share_offline"`) || !strings.Contains(body, "Movies NAS isn't connected.") {
 		t.Errorf("waiting file does not say why: %s", body)
+	}
+}
+
+// D4c fix: a share that drops and comes back while a convert runs is down for that convert, so its failure is
+// put back; a share with no change since the job started is not.
+func TestShareChangedDuringConvertCountsAsDown(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("app mode (the mount helper, share mount points) is Linux only")
+	}
+	_, st, _, _ := libServer(t, false)
+	root := shareRoot
+	shareRoot = t.TempDir()
+	shareAnswers = func(p string) bool { _, err := os.Stat(p); return err == nil }
+	t.Cleanup(func() {
+		shareRoot = root
+		shareAnswers = func(p string) bool { return mountedAt(p) && statWithin(p, shareStatTimeout) }
+	})
+
+	sh, _ := st.SaveShare(jobs.Share{Name: "Movies NAS", Type: "smb", Address: "//nas/movies"}, "")
+	mp := mountPointFor(sh)
+	if err := os.MkdirAll(filepath.Join(mp, "Films"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	films, _ := st.AddLibrary("Films", filepath.Join(mp, "Films"), rules.SliderTemplate(3), true)
+	st.Enqueue(jobs.Job{Library: films.Path, LibraryID: films.ID, Path: filepath.Join(films.Path, "a.mkv")})
+	st.SetShareMountStatus(sh.ID, "linux", "connected", "")
+	time.Sleep(1100 * time.Millisecond) // RFC3339 is to the second: the next stamps must differ
+	job, err := st.Claim("w")
+	if err != nil {
+		t.Fatal(err)
+	}
+	folder := filepath.Join(mp, "Films")
+	if _, ok := ShareDownFor(st, folder, job.ID); ok {
+		t.Fatal("a share connected since before the job started reads as changed")
+	}
+	time.Sleep(1100 * time.Millisecond)
+	st.SetShareMountStatus(sh.ID, "linux", "not_connected", "gone")
+	st.SetShareMountStatus(sh.ID, "linux", "connected", "")
+	d, ok := ShareDownFor(st, folder, job.ID)
+	if !ok || !d.Answering || d.ShareID != sh.ID || d.MountPath != mp {
+		t.Fatalf("an outage during the convert is not down for it: %+v %v", d, ok)
 	}
 }
