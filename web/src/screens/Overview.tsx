@@ -85,7 +85,9 @@ export function Overview() {
       </PageHead>
       {said && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{said}</span></p>}
       <section className="headline" aria-label="Totals">
-        <div><div className="big">{bytes(h.freed)}<small>saved</small></div>{more && <div className="muted">{more}</div>}</div>
+        <div><div className="big">{bytes(h.freed)}<small>saved</small></div>{more && <div className="muted">{more}</div>}
+          {/* design SCREENS V2 Space rules: neutral, on its own line, only when > 0; never added to or taken from the figures */}
+          {(h.grew ?? 0) > 0 && <div className="muted sm">{bytes(h.grew!)} added by files that came out bigger</div>}</div>
         <div className="stats">
           <div><b>{count(h.filesConverted)}</b><span>files converted</span></div>
           <div><b>{count(h.filesWaiting)}</b><span>waiting</span></div>
@@ -127,7 +129,7 @@ export function Overview() {
               <td className="nm"><Link to={"/libraries/" + l.id}><b>{l.name}</b></Link></td>
               <td className="num" data-l="Before">{bytes(l.bytesBefore)}</td>
               <td className="num" data-l="Now">{bytes(l.bytesNow)}</td>
-              <td className="num" data-l="Saved">{l.saved > 0 ? <><b>{bytes(l.saved)}</b>{l.savedPercent != null && " · " + pctTxt(l.savedPercent)}</> : "nothing yet"}{l.waitingToFree > 0 && <span className="sub">{bytes(l.waitingToFree)} more{h.nextFreeAt ? " by " + dayName(h.nextFreeAt.slice(0, 10)) : ""}</span>}{l.saved === 0 && l.couldFree > 0 && <span className="sub">could free {bytes(l.couldFree)} by removing the originals</span>}</td>
+              <td className="num" data-l="Saved">{l.saved > 0 ? <><b>{bytes(l.saved)}</b>{l.savedPercent != null && " · " + pctTxt(l.savedPercent)}</> : "nothing yet"}{(l.grew ?? 0) > 0 && <span className="sub">{bytes(l.grew!)} added by bigger files</span>}{l.waitingToFree > 0 && <span className="sub">{bytes(l.waitingToFree)} more{h.nextFreeAt ? " by " + dayName(h.nextFreeAt.slice(0, 10)) : ""}</span>}{l.saved === 0 && l.couldFree > 0 && <span className="sub">could free {bytes(l.couldFree)} by removing the originals</span>}</td>
               <td className="num full" data-l="Done · Waiting · Skipped · Failed">{[l.counts.done, l.counts.waiting, l.counts.skipped, l.counts.failed].map(count).join(" · ")}</td>
               <td>{l.state === "paused" ? <span className="pill warn">Paused</span> : <span className="pill">Watching</span>}</td>
             </tr>)}</tbody></table>

@@ -82,7 +82,7 @@ export interface Library {
   priority: number;
   scan: { state: "idle" | "scanning" | "settling"; progress: number | null; lastScanAt: Time | null; nextScanAt: Time | null; scheduleLabel: string };
   counts: { files: number; waiting: number; running: number; completed: number; skipped: number; failed: number };
-  bytes: { freed: number; waitingToFree: number };
+  bytes: { freed: number; waitingToFree: number; grew?: number };
   output: {
     policy: CommitPolicy | null; // null: its workflow can't be read
     folder: string | null;

@@ -15,7 +15,7 @@ function library(id: ID, name: string, path: string, freed: number, waitingToFre
     id, name, paths: [path], fileType: "video", enabled: true, workflowId: "w1", workflowName: "Shrink videos", priority: 0,
     scan: { state: "idle", progress: null, lastScanAt: ago(90), nextScanAt: ago(-270), scheduleLabel: "Every 6 hours" },
     counts: { files, waiting: Math.round(files * 0.4), running: 0, completed: Math.round(files * 0.5), skipped: 12, failed: 1 },
-    bytes: { freed, waitingToFree },
+    bytes: { freed, waitingToFree, grew: 0 },
     output: { policy: "separate_folder", folder: path + " (shrunk)", overrideFolder: null, problem: null },
     discovery: { subfolders: true, settleSeconds: 15, followLinks: false, include: [], exclude: [] },
     status: "ok",
@@ -71,7 +71,7 @@ function running(): State {
   const step = (index: number, name: string) => ({ nodeId: "n" + index, name, index, count: 5 });
   return {
     settings: { firstRunDone: true, firstRunStep: 4, intakePaused: false, catalogueEnabled: false, firstRunLibrary: null, scanEvery: 45, scanEverySource: "flag" }, // 45 s: the flag's unlisted value
-    libraries: [library("l1", "Movies", "/media/movies", 8.1 * GB, 780 * GB, 1600), library("l2", "TV Shows", "/media/tv", 0, 410 * GB, 900), { ...library("l3", "Home videos", "/media/home", 28.3 * GB, 10 * GB, 300), workflowId: "w2", workflowName: "Home videos - my rules" }],
+    libraries: [{ ...library("l1", "Movies", "/media/movies", 8.1 * GB, 780 * GB, 1600), bytes: { freed: 8.1 * GB, waitingToFree: 780 * GB, grew: 1.1 * GB } }, library("l2", "TV Shows", "/media/tv", 0, 410 * GB, 900), { ...library("l3", "Home videos", "/media/home", 28.3 * GB, 10 * GB, 300), workflowId: "w2", workflowName: "Home videos - my rules" }],
     workers: [worker("this", "This computer", "busy", [1, 2], [0, 1], 120, ["j-48213"]), worker("nas", "NAS box", "busy", [1, 1], [0, 0], 300, ["j-48214"]), worker("laptop", "Laptop", "offline", [0, 1], [0, 0], 22, [])],
     jobs: [
       job("j-48213", "Dune.Part.Two.2024.2160p.REMUX.mkv", MOVIES, "running", { subState: "converting", worker: { id: "this", name: "This computer" }, currentStep: step(3, "Convert video"), startedAt: ago(12),
@@ -139,8 +139,8 @@ export function summary(s: State): Summary {
     // The rate follows the 24 h counts, so a retried failure changes it (completed of completed + failed; skips aren't failures).
     last24h: { ...s.last24h, successRate: s.last24h.completed + s.last24h.failed ? s.last24h.completed / (s.last24h.completed + s.last24h.failed) : null },
     bytes: {
-      freed: s.libraries.reduce((a, l) => a + l.bytes.freed, 0), waitingToFree: s.libraries.reduce((a, l) => a + l.bytes.waitingToFree, 0), freedLast7d: 0,
-      perLibrary: s.libraries.map((l) => ({ libraryId: l.id, freed: l.bytes.freed, waitingToFree: l.bytes.waitingToFree })),
+      freed: s.libraries.reduce((a, l) => a + l.bytes.freed, 0), waitingToFree: s.libraries.reduce((a, l) => a + l.bytes.waitingToFree, 0), grew: s.libraries.reduce((a, l) => a + (l.bytes.grew ?? 0), 0), freedLast7d: 0,
+      perLibrary: s.libraries.map((l) => ({ libraryId: l.id, freed: l.bytes.freed, waitingToFree: l.bytes.waitingToFree, grew: l.bytes.grew ?? 0 })),
     },
     workers: s.workers.map((w) => ({ id: w.id, name: w.name, status: w.status, slots: w.slots, currentJobIds: w.currentJobIds })),
     activeJobs: active,
