@@ -2,7 +2,10 @@
 
 package jobs
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // User review 11-13 item E: each code of design's V6b table, from the stored code or from ffmpeg's own lines (the
 // sample lines are ffmpeg's messages as it prints them).
@@ -83,5 +86,51 @@ func TestMatchedKeyLines(t *testing.T) {
 	generic := []string{"a", "b", "c", "d", "e", "f", "g"}
 	if got := MatchedKeyLines(generic); len(got) != 5 || got[0] != "c" {
 		t.Errorf("no error line: %q", got)
+	}
+}
+
+// QA of #214: the folder a write was refused in is the new file's (never the source's, never the staging folder's name).
+func TestDeniedFolder(t *testing.T) {
+	for _, c := range []struct {
+		lines []string
+		want  string
+	}{
+		{[]string{"Error opening output /mnt/out/new.mkv: Permission denied"}, "/mnt/out"},
+		{[]string{"Error opening output /srv/media/.syp-tmp/.Movie.abc.syp-tmp.mkv: Permission denied"}, "/srv/media"},
+		{[]string{"Error opening output files: Permission denied"}, ""}, // no path in it
+		{[]string{"Conversion failed!"}, ""},
+	} {
+		if got := DeniedFolder(c.lines); got != c.want {
+			t.Errorf("%q: %q, want %q", c.lines, got, c.want)
+		}
+	}
+}
+
+// QA of #214: a refused output with no folder named says so, and never names the source.
+func TestOutputNotWritableWords(t *testing.T) {
+	if msg, _ := FailureWords("output_not_writable", FailureFacts{ExitCode: -1}); msg != "Couldn't write to the output folder: permission denied." {
+		t.Errorf("no folder: %q", msg)
+	}
+	if msg, _ := FailureWords("output_not_writable", FailureFacts{Folder: "/mnt/out", ExitCode: -1}); msg != "Couldn't write to /mnt/out: permission denied." {
+		t.Errorf("folder: %q", msg)
+	}
+}
+
+// QA of #214, the real stderr of the QSV failure: the encoder-open lines are key lines, and the failure is the encoder's.
+func TestQSVKeyLines(t *testing.T) {
+	qsv := []string{
+		"[h264_qsv @ 0x5f1] Error creating a MFX session: -9.",
+		"[vost#0:0/h264_qsv @ 0x5f2] Error while opening encoder for output stream #0:0 - maybe incorrect parameters such as bit_rate, rate, width or height",
+		"[vost#0:0/h264_qsv @ 0x5f2] Error sending frames to consumers: Unknown error occurred",
+		"Error sending frames to consumers: Unknown error occurred",
+		"Conversion failed!",
+	}
+	if got := classifyKeyLines(qsv); got != "encoder_unavailable" {
+		t.Fatalf("code %s", got)
+	}
+	got := MatchedKeyLines(qsv)
+	have := strings.Join(got, "\n")
+	if !strings.Contains(have, "Error creating a MFX session: -9.") || !strings.Contains(have, "Error while opening encoder") {
+		t.Errorf("key lines leave out the encoder lines: %q", got)
 	}
 }

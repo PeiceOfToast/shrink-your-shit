@@ -61,13 +61,15 @@ func failureCode(store *jobs.Store, id int64, errorCode string) string {
 
 // failureFacts is what a failed job's sentence can name: its file, its output folder, and the summary's details.
 func failureFacts(store *jobs.Store, id int64, path, outputPath, message string) jobs.FailureFacts {
-	folder := filepath.Dir(path)
-	if outputPath != "" {
-		folder = filepath.Dir(outputPath)
-	}
-	facts := jobs.FailureFacts{Path: path, Folder: folder, ExitCode: -1, Stored: message}
+	facts := jobs.FailureFacts{Path: path, ExitCode: -1, Stored: message}
 	if f, err := store.FailureOf(id); err == nil && f != nil {
 		facts.ExitCode, facts.MediaTime, facts.KeyLines = f.ExitCode, f.MediaTime, f.KeyLines
+	}
+	// the folder a write was refused in: the new file's, from ffmpeg's own line; else the output path's, when it is
+	// not the source (a replace writes next to the source: then no folder is named). Never the source's folder.
+	facts.Folder = jobs.DeniedFolder(facts.KeyLines)
+	if facts.Folder == "" && outputPath != "" && outputPath != path {
+		facts.Folder = filepath.Dir(outputPath)
 	}
 	return facts
 }

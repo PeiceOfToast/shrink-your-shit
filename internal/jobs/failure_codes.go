@@ -34,7 +34,9 @@ func classifyKeyLines(lines []string) string {
 	text := strings.ToLower(strings.Join(lines, "\n"))
 	switch {
 	case strings.Contains(text, "unknown encoder"), strings.Contains(text, "encoder not found"),
-		strings.Contains(text, "error while opening encoder"), strings.Contains(text, "could not open encoder"):
+		strings.Contains(text, "error while opening encoder"), strings.Contains(text, "could not open encoder"),
+		strings.Contains(text, "error creating a mfx session"), strings.Contains(text, "error initializing output stream"),
+		strings.Contains(text, "no device"), strings.Contains(text, "device not available"), strings.Contains(text, "encoder not available"):
 		return "encoder_unavailable"
 	case strings.Contains(text, "no space left on device"):
 		return "no_space"
@@ -75,9 +77,17 @@ func FailureWords(code string, f FailureFacts) (message, hint string) {
 		return "The encoder couldn't start: " + what + " isn't available on this worker.",
 			"Test the encoders on the Workers page, or convert on the processor."
 	case "output_not_writable":
-		return "Couldn't write to " + f.Folder + ": permission denied.", "Let shrink-your-shit write to that folder, then Retry."
+		where := "the output folder"
+		if f.Folder != "" {
+			where = f.Folder
+		}
+		return "Couldn't write to " + where + ": permission denied.", "Let shrink-your-shit write to that folder, then Retry."
 	case "no_space":
-		return "Not enough space in " + f.Folder + " to finish converting.", "Free some space there, then Retry."
+		where := "the output folder"
+		if f.Folder != "" {
+			where = f.Folder
+		}
+		return "Not enough space in " + where + " to finish converting.", "Free some space there, then Retry."
 	case "source_damaged":
 		msg := "The source file is damaged."
 		if f.MediaTime != "" {
@@ -131,4 +141,32 @@ func MatchedKeyLines(lines []string) []string {
 		return lines[len(lines)-5:]
 	}
 	return lines
+}
+
+var deniedOutput = regexp.MustCompile(`(?i)output\s+(\S.*?):\s*permission denied`)
+
+// DeniedFolder is the folder ffmpeg could not write to, from its "Error opening output <path>: Permission denied"
+// line (user review 11-13 item E, QA of #214): the new file's folder, never the source's. A path inside a staging folder
+// (".syp…") names the folder above it. "" when no line names a path.
+func DeniedFolder(lines []string) string {
+	for _, l := range lines {
+		m := deniedOutput.FindStringSubmatch(l)
+		if m == nil || !strings.ContainsAny(m[1], `/\`) {
+			continue
+		}
+		dir := m[1]
+		if i := strings.LastIndexAny(dir, `/\`); i >= 0 {
+			dir = dir[:i]
+		}
+		for {
+			i := strings.LastIndexAny(dir, `/\`)
+			base := dir[i+1:]
+			if i < 0 || !strings.HasPrefix(base, ".syp") {
+				break
+			}
+			dir = dir[:i]
+		}
+		return dir
+	}
+	return ""
 }
