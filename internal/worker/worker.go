@@ -1469,8 +1469,8 @@ func (w *Worker) stillHolds(id int64) error {
 }
 
 // ffmpegExit tells, from the error of a failed encode, whether ffmpeg ran and what it exited with: a run that ended
-// with an exit status ran (its status is -1 when a signal ended it, so no code); a program that could not be started
-// did not run.
+// with an exit status ran. On POSIX a signal ends a run with no status (-1, so no code); Windows has no signals and
+// reports the process's exit code. A program that could not be started did not run.
 func ffmpegExit(err error) (ran bool, exit int) {
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
