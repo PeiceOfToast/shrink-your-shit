@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Icon } from "../Icon";
 import { failed, type Answer } from "../api";
 import { Empty, PageHead } from "../PageHead";
+import { Link } from "../router";
 import { SettingsTabs } from "../pages";
 import { useData } from "../useData";
 import { addShare, checkShare, deleteShare, getShares, patchShare, reconnectShare, testShare } from "../sharesApi";
@@ -30,14 +31,17 @@ function ShareRow({ share, resp, onChanged, said }: { share: Share; resp: Shares
 
   return (
     <tr>
-      <td><b>{share.name}</b><span className="sub mono">{share.address}</span></td>
-      <td className="full">{TYPE[share.type].label}</td>
-      <td className="full"><span className={"st " + statusClass}><Icon id={statusIcon} /><span>{statusText}</span></span>
+      <td className="idc"><Link className="ttl" to={"/settings/shares"}>{share.name}</Link>
+        <span className="sub mono">{share.address}</span>
+        {share.libraries.length > 0 && <span className="sub phone">Used by {libs}</span>}
+        <span className="sub phone">{TYPE[share.type].label}</span></td>
+      <td data-p="2">{TYPE[share.type].label}</td>
+      <td className="stc"><span className={"st " + statusClass}><Icon id={statusIcon} /><span>{statusText}</span></span>
         {share.reason && <span className="sub">{share.reason.message}</span>}
         {share.status === "waiting_setup" && share.setup && <div className="codebox" style={{ marginTop: 8 }}><code>{share.setup.text}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(share.setup!.text).catch(() => {})}><Icon id="i-copy" />Copy</button></div>}
         {(canReconnect || canCheck) && <div className="row" style={{ marginTop: 8 }}>{canReconnect && <button className="btn sm" type="button" onClick={reconnect}><Icon id="i-refresh" />Reconnect</button>}{canCheck && <button className="btn sm" type="button" onClick={reconnect}><Icon id="i-refresh" />Check again</button>}</div>}
       </td>
-      <td className="full">{libs ? <a href="#">{libs}</a> : <span className="muted">Not used</span>}</td>
+      <td className="stc">{libs ? <a href="#">{libs}</a> : <span className="muted">Not used</span>}</td>
       <td className="act">
         <details className="menu" style={{ display: menu ? undefined : "inline-block" }}>
           <summary className="btn icon ghost sm" aria-label={"Actions for " + share.name} onClick={() => setMenu(!menu)} style={{ display: "inline-flex" }}><Icon id="i-more" /></summary>
@@ -181,13 +185,14 @@ export function SharesSettings() {
           <span className="sp" />
           <button className="btn primary" type="button" onClick={() => setAdding(true)}><Icon id="i-plus" />Add a share</button>
         </div>
-        {data.items.length === 0
+        {(data.items ?? []).length === 0
           ? <Empty icon="i-shares" text="No network shares yet. Libraries can still use any folder this computer can already see." />
-          : <div className="card"><div className="bd" style={{ padding: 0 }}>
-            <table className="nsh"><thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Used by</th><th><span className="sr">Actions</span></th></tr></thead>
-              <tbody>{data.items.map((s) => <ShareRow key={s.id} share={s} resp={data} onChanged={resp.reload} said={setSaid} />)}</tbody>
+          : <div className="list"><table className="tbl"><thead><tr>
+            <th>Name</th><th data-p="2">Type</th><th className="stc">Status</th><th className="stc">Used by</th><th><span className="sr">Actions</span></th>
+          </tr></thead>
+              <tbody>{(data.items ?? []).map((s) => <ShareRow key={s.id} share={s} resp={data} onChanged={resp.reload} said={setSaid} />)}</tbody>
             </table>
-          </div></div>}
+          </div>}
         {adding && <ShareSheet resp={data} onDone={() => { setAdding(false); resp.reload(); }} onCancel={() => setAdding(false)} said={setSaid} />}
       </>}
     </div>
