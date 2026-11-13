@@ -334,7 +334,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   return (
     <div className="drawer-wrap" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <aside className="drawer jobd" ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="jd-h">
-        <div className="hd">
+        <div className={"hd" + (state === "failed" ? " failed" : "")}>
           <button className="btn icon ghost" type="button" aria-label="Close" onClick={onClose}><Icon id="i-chev-l" /></button>
           <div className="sp"><h2 id="jd-h" className="clamp2" title={name}>{name}</h2>{state && <Pill j={{ state, retryAt: j?.retryAt ?? own?.retryAt, subState: own?.subState }} />}</div>
         </div>

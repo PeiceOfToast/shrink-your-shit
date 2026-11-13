@@ -357,8 +357,8 @@ label.chk{cursor:pointer}
 .phone,.tbl .sub.phone{display:none}
 @media (max-width:1100px){.tbl [data-p="6"],.tbl [data-p="7"]{display:none}}
 @media (max-width:900px){.tbl [data-p="4"],.tbl [data-p="5"]{display:none}}
-@media (max-width:599px){.tbl [data-p="3"]{display:none}.tline li{flex-wrap:wrap}.tline li>.nowrap{flex-basis:100%;padding-left:24px}} /* E: phones drop Worker; a Timeline time sits under its step; the header keeps Retry and the ID (the Why box says Failed) */
-@media (max-width:599px){.drawer.jobd>.hd .pill{display:none}}
+@media (max-width:599px){.tbl.jobs [data-p="3"]{display:none}.tline li{flex-wrap:wrap}.tline li>.nowrap{flex-basis:100%;padding-left:24px}} /* E: phones drop the Jobs table's Worker column; a Timeline time sits under its step */
+@media (max-width:599px){.drawer.jobd>.hd.failed .pill{display:none}} /* a failed job's header hides the pill: the Why box says Failed */
 @media (max-width:640px){
   .phone{display:revert}
   .ltools .desk{display:none}
