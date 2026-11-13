@@ -64,7 +64,7 @@ func TestBitrateLevelAndVBR(t *testing.T) {
 		{func(s *Selectors) { s.RateControl, s.MaxBitrate = "level", "none" }, "Bitrate level needs Low, Medium or High"},
 		{func(s *Selectors) { s.RateControl, s.MaxBitrate = "quality", "medium" }, "A bitrate level with the quality is now Bitrate level"},
 		{func(s *Selectors) { s.RateControl = "cbr" }, "rateControl"},
-		{func(s *Selectors) { s.RateControl, s.VBRMaxKbps = "vbr", 0 }, "from 0.1 to 500 Mbps"},
+		{func(s *Selectors) { s.RateControl, s.VBRMaxKbps = "vbr", 0 }, "from 100 to 500,000 kbps"},
 	} {
 		bad := s
 		c.change(&bad)

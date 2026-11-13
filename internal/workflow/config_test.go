@@ -110,10 +110,10 @@ func TestVBRLimitRange(t *testing.T) {
 	}
 	_, issues := ToTemplate(d, rules.Template{})
 	if len(issues) != 1 || issues[0].Code != "invalid_config" || issues[0].NodeID != convert || issues[0].Field != "vbrMaxKbps" ||
-		issues[0].Message != "Set the peak limit from 0.1 to 500 Mbps." {
+		issues[0].Message != "Set the max bitrate from 100 to 500,000 kbps." {
 		t.Errorf("%+v", issues)
 	}
-	if def, _ := Definition(TypeConvert); def.ConfigSchema["properties"].(map[string]any)["vbrMaxKbps"].(map[string]any)["title"] != "Peak limit (kbps)" {
-		t.Error("the field is the Peak limit")
+	if def, _ := Definition(TypeConvert); def.ConfigSchema["properties"].(map[string]any)["vbrMaxKbps"].(map[string]any)["title"] != "Max bitrate (kbps)" {
+		t.Error("the field is the Max bitrate")
 	}
 }

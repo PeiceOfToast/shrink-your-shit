@@ -355,7 +355,7 @@ func convertConfig(s rules.Selectors) map[string]any {
 // fieldForMessage is the Convert video setting a rate control message is about (user review 11-12 item 1, 11-13 A).
 func fieldForMessage(msg string) string {
 	switch {
-	case strings.Contains(msg, "peak limit"):
+	case strings.Contains(msg, "max bitrate"):
 		return "vbrMaxKbps"
 	case strings.HasPrefix(msg, "Bitrate level needs"), strings.HasPrefix(msg, "A bitrate level with the quality"):
 		return "maxBitrate"

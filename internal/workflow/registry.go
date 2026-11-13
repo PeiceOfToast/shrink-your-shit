@@ -149,7 +149,7 @@ func Definitions() []StepDefinition {
 				// the two *_legacy values are flows saved before item A: they keep their files until edited
 				"rateControl": described(withDefault(enum([]any{"quality", "level", "vbr", "quality_legacy", "vbr_legacy"}, []string{"Quality", "Bitrate level", "VBR with a max", "Quality with a level (earlier)", "VBR (earlier)"}), "quality", "Rate control", "segmented"),
 					"Bitrate level aims at the level's bitrate for the new file's height. VBR with a max keeps the quality steady and never goes above your limit. Quality has no bitrate cap."),
-				"vbrMaxKbps": described(map[string]any{"type": "integer", "minimum": 100, "maximum": 500000, "title": "Peak limit (kbps)"},
+				"vbrMaxKbps": described(map[string]any{"type": "integer", "minimum": 100, "maximum": 500000, "title": "Max bitrate (kbps)"},
 					"The most data each second may use with VBR. A file never gets more than it has now."),
 			}, []string{"quality", "format", "resolution", "maxBitrate", "speed"})}),
 		def(StepDefinition{Type: TypeAudio, Category: "audio", Name: "Audio", Icon: "audio", TypeLabel: "Audio",

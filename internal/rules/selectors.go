@@ -123,10 +123,10 @@ func (s Selectors) Validate() error {
 		}
 	case "vbr": // user review 11-13 item A: the quality at CRF 23 under VBRMaxKbps; no level
 		if !VBRFormat(s.Format) { // SVT-AV1 takes a peak limit only with CRF (review a772397: every file failed)
-			return &SelectorError{"invalid", "VBR with a peak limit isn't available for AV1; use quality mode. Nothing was changed."}
+			return &SelectorError{"invalid", "VBR with a max bitrate isn't available for AV1; use Quality only. Nothing was changed."}
 		}
 		if s.VBRMaxKbps < 100 || s.VBRMaxKbps > 500000 {
-			return &SelectorError{"invalid", "Set the peak limit from 0.1 to 500 Mbps. Nothing was changed."}
+			return &SelectorError{"invalid", "Set the max bitrate from 100 to 500,000 kbps. Nothing was changed."}
 		}
 	case "quality_legacy", "vbr_legacy": // a flow saved before item A (migration 38) runs as it was
 	default:
