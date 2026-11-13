@@ -59,8 +59,8 @@ function Choice<T extends string | number>({ legend, name, value, options, onPic
 export function SettingsTabs({ at }: { at: "general" | "shares" | "appearance" | "processing" | "safety" | "integrations" | "backup" | "about" }) {
   const tab = (k: typeof at, label: string) => <Link to={"/settings/" + k} aria-current={at === k ? "page" : undefined}>{label}</Link>;
   // the shares tab shows only when the server has the shares API (404 = not built yet)
-  const [shares, setShares] = useState(MOCK || true);
-  useEffect(() => { if (!MOCK) sharesSupported().then(setShares); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const [shares, setShares] = useState(true);
+  useEffect(() => { if (!MOCK) { const f = async () => setShares(await sharesSupported()); f(); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <nav className="tabs" aria-label="Settings sections">
       {tab("general", "General")}{shares && tab("shares", "Network shares")}{tab("appearance", "Appearance")}{tab("processing", "Processing")}{tab("safety", "Safety")}{tab("integrations", "Integrations")}{tab("backup", "Backup")}{tab("about", "About")}

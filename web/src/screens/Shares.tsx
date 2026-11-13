@@ -19,14 +19,13 @@ const TYPE: Record<ShareType, { label: string; hint: string }> = {
 };
 
 function ShareRow({ share, resp, onChanged, said }: { share: Share; resp: SharesResponse; onChanged: () => void; said: (m: string) => void }) {
-  const [removing, setRemoving] = useState(false);
-  const [editing, setEditing] = useState(false);
+  const [menu, setMenu] = useState(false), [removing, setRemoving] = useState(false), [editing, setEditing] = useState(false);
   const libs = share.libraries.map((l) => l.name).join(", ");
   const statusClass = share.status === "connected" ? "ok" : share.status === "not_connected" ? "bad" : share.status === "waiting_setup" ? "warn" : "";
   const statusIcon = share.status === "connected" ? "i-check-c" : share.status === "connecting" || share.status === "waiting_setup" ? "i-clock" : "i-alert";
   const statusText = share.status === "connected" ? "Connected" : share.status === "connecting" ? "Connecting..." : share.status === "waiting_setup" ? "Waiting for setup on the server" : "Not connected" + (share.since ? " since " + new Date(share.since).toLocaleDateString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
   const canReconnect = share.status !== "connected" && resp.mode === "app";
-  const canCheck = resp.mode === "manual" || resp.mode === "docker";
+  const canCheck = share.status !== "connected" && (resp.mode === "manual" || resp.mode === "docker");
   const reconnect = async () => { const r = await act(canReconnect ? reconnectShare(share.id) : checkShare(share.id), said); if (r) { said("Done."); onChanged(); } };
 
   return (
@@ -40,14 +39,14 @@ function ShareRow({ share, resp, onChanged, said }: { share: Share; resp: Shares
       </td>
       <td className="full">{libs ? <a href="#">{libs}</a> : <span className="muted">Not used</span>}</td>
       <td className="act">
-        <details className="menu" style={{ display: "inline-block" }}>
-          <summary className="btn icon ghost sm" aria-label={"Actions for " + share.name} style={{ display: "inline-flex" }}><Icon id="i-more" /></summary>
-          <div className="pop" role="menu">
-            {canReconnect && <button className="it" type="button" onClick={() => { setRemoving(false); reconnect(); }}>Reconnect</button>}
-            {canCheck && <button className="it" type="button" onClick={() => { setRemoving(false); reconnect(); }}>Check again</button>}
-            <button className="it" type="button" onClick={() => setEditing(true)}>Edit</button>
-            <button className="it" type="button" onClick={() => setRemoving(true)}>Remove...</button>
-          </div>
+        <details className="menu" style={{ display: menu ? undefined : "inline-block" }}>
+          <summary className="btn icon ghost sm" aria-label={"Actions for " + share.name} onClick={() => setMenu(!menu)} style={{ display: "inline-flex" }}><Icon id="i-more" /></summary>
+          {menu && <div className="pop" role="menu">
+            {canReconnect && <button className="it" type="button" onClick={() => (setMenu(false), reconnect())}>Reconnect</button>}
+            {canCheck && <button className="it" type="button" onClick={() => (setMenu(false), reconnect())}>Check again</button>}
+            <button className="it" type="button" onClick={() => (setMenu(false), setEditing(true))}>Edit</button>
+            <button className="it" type="button" onClick={() => (setMenu(false), setRemoving(true))}>Remove...</button>
+          </div>}
         </details>
         {removing && <RemoveDialog share={share} onCancel={() => setRemoving(false)} onDone={() => { setRemoving(false); onChanged(); }} said={said} />}
         {editing && <ShareSheet share={share} resp={resp} onDone={() => { setEditing(false); onChanged(); }} onCancel={() => setEditing(false)} said={said} />}
@@ -91,7 +90,7 @@ function ShareSheet({ share, resp, onDone, onCancel, said }: { share?: Share; re
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [savedSetup, setSavedSetup] = useState<Share["setup"] | null>(null);
+  const [savedShare, setSavedShare] = useState<Share | null>(null);
 
   const testNow = async () => {
     setTesting(true); setTestResult(null); setError("");
@@ -106,19 +105,20 @@ function ShareSheet({ share, resp, onDone, onCancel, said }: { share?: Share; re
       ? await act(patchShare(share!.id, { type, address: address.trim(), name: name.trim() || address.trim().split(/[\\/]/).pop()!, guest, username: guest ? undefined : username, password: password || undefined }), setError)
       : await act(addShare({ type, address: address.trim(), name: name.trim() || address.trim().split(/[\\/]/).pop()!, guest: type === "nfs" ? true : guest, username: type === "nfs" ? undefined : (guest ? undefined : username), password: type === "nfs" ? undefined : (password || undefined) }), setError);
     setSaving(false);
-    if (r) { if (r.setup && !edit) setSavedSetup(r.setup); else { said(edit ? "Saved." : "Added."); onDone(r); } }
+    if (r) { if (r.setup && !edit) setSavedShare(r as Share); else { said(edit ? "Saved." : "Added."); onDone(r); } }
   };
 
+  const ss = savedShare;
   return (
     <div className="sheet" role="dialog" aria-labelledby={edit ? "es" : "ns"} style={{ maxWidth: 520 }}>
-      <div className="hd"><h3 id={edit ? "es" : "ns"}>{edit ? share!.name : savedSetup ? share!.name : "Add a share"}</h3>
+      <div className="hd"><h3 id={edit ? "es" : "ns"}>{edit ? share!.name : ss ? ss.name : "Add a share"}</h3>
         {edit && <p className="hint" style={{ margin: "4px 0 0" }}>{share!.address} · {TYPE[share!.type].label}</p>}</div>
       <div className="bd">
-        {savedSetup ? <>
+        {ss?.setup ? <>
           <p className="st warn" style={{ margin: 0 }}><Icon id="i-clock" />Waiting for setup on the server</p>
           <h4 style={{ margin: 0 }}>Finish on the server</h4>
           <p style={{ margin: 0 }}>Run this once on this server, as root:</p>
-          <div className="codebox"><code>{savedSetup.text}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(savedSetup.text).catch(() => {})}><Icon id="i-copy" />Copy</button></div>
+          <div className="codebox"><code>{ss.setup.text}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(ss.setup!.text).catch(() => {})}><Icon id="i-copy" />Copy</button></div>
           <p className="hint" style={{ margin: 0 }}>It connects the share now and after every restart.</p>
         </> : <>
         <fieldset className="types"><legend>Type</legend>
@@ -158,12 +158,14 @@ function ShareSheet({ share, resp, onDone, onCancel, said }: { share?: Share; re
         </>}
       </div>
       <div className="ft">
-        {!savedSetup && <button className="btn primary" type="button" disabled={saving} onClick={save}>{saving ? "Saving..." : edit ? "Save" : "Save and connect"}</button>}
-        <button className="btn ghost" type="button" onClick={() => { if (savedSetup) onDone(); else onCancel(); }}>{savedSetup ? "Close" : "Cancel"}</button>
+        {!ss && <button className="btn primary" type="button" disabled={saving} onClick={save}>{saving ? "Saving..." : edit ? "Save" : "Save and connect"}</button>}
+        <button className="btn ghost" type="button" onClick={() => { if (ss) { said("Added."); onDone(); } else onCancel(); }}>{ss ? "Close" : "Cancel"}</button>
       </div>
     </div>
   );
 }
+
+const is404 = (e: { code?: string }) => e.code === "http_404" || e.code === "not_found";
 
 export function SharesSettings() {
   const resp = useData(getShares, []), [said, setSaid] = useState(""), [adding, setAdding] = useState(false);
@@ -173,7 +175,7 @@ export function SharesSettings() {
       <PageHead icon="i-shares" title="Settings" />
       <SettingsTabs at="shares" />
       <p className="muted" role="status">{said}</p>
-      {resp.error ? <p className="muted">This server doesn't have network shares yet.</p> : !data ? <div className="empty">Loading...</div> : <>
+      {resp.error && is404(resp.error) ? <p className="muted">This server doesn't have network shares yet.</p> : resp.error ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{resp.error.message}</span></p> : !data ? <div className="empty">Loading...</div> : <>
         <div className="row" style={{ gap: 6 }}>
           <p className="muted" style={{ margin: 0 }}>Use a folder on a NAS or another computer as a library. Shrink Your Shit connects to it and reconnects after a restart.</p>
           <span className="sp" />
