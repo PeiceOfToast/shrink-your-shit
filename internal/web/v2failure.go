@@ -32,8 +32,9 @@ func failureView(store *jobs.Store, id int64) map[string]any {
 	if f.ExitCode >= 0 {
 		exit = f.ExitCode
 	}
+	// ffmpegRan is false when ffmpeg never started (the UI says "ffmpeg didn't run."); exitCode is null then, and when a signal ended it
 	return map[string]any{"step": name, "stepIndex": f.Step, "stepCount": f.StepCount, "afterMs": f.AfterMs,
-		"mediaTime": media, "hint": hint, "exitCode": exit, "keyLines": keys}
+		"mediaTime": media, "hint": hint, "exitCode": exit, "ffmpegRan": f.FfmpegRan, "keyLines": keys}
 }
 
 // logState is whether job id has its log in the database: complete (it has lines) or none.

@@ -419,7 +419,7 @@ CREATE TABLE IF NOT EXISTS job_log_lines (job_id INTEGER NOT NULL, seq INTEGER N
   stream TEXT NOT NULL, text TEXT NOT NULL, PRIMARY KEY (job_id, seq));
 CREATE TABLE IF NOT EXISTS job_failures (job_id INTEGER PRIMARY KEY, step INTEGER NOT NULL DEFAULT -1, step_count INTEGER NOT NULL DEFAULT 0,
   after_ms INTEGER NOT NULL DEFAULT 0, media_time TEXT NOT NULL DEFAULT '', hint TEXT NOT NULL DEFAULT '', exit_code INTEGER NOT NULL DEFAULT -1,
-  key_lines TEXT NOT NULL DEFAULT '[]');`},
+  ffmpeg_ran INTEGER NOT NULL DEFAULT 1, key_lines TEXT NOT NULL DEFAULT '[]');`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone

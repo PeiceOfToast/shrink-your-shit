@@ -49,3 +49,20 @@ func TestJobLogInSQLite(t *testing.T) {
 		t.Fatalf("failure %+v %v", f, err)
 	}
 }
+
+// #214 P2: a failure summary keeps its exit status (-1: none) and whether ffmpeg ran.
+func TestFailureSummaryExitAndRan(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "syp.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.SetFailureSummary(1, FailureSummary{ExitCode: 3, FfmpegRan: true, KeyLines: []string{"x"}})
+	s.SetFailureSummary(2, FailureSummary{ExitCode: -1, FfmpegRan: false})
+	if f, _ := s.FailureOf(1); f == nil || f.ExitCode != 3 || !f.FfmpegRan {
+		t.Errorf("ran and exited: %+v", f)
+	}
+	if f, _ := s.FailureOf(2); f == nil || f.ExitCode != -1 || f.FfmpegRan || len(f.KeyLines) != 0 {
+		t.Errorf("never ran: %+v", f)
+	}
+}

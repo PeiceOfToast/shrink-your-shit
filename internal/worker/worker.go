@@ -16,6 +16,7 @@ import (
 	"io/fs"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -439,8 +440,9 @@ func (w *Worker) recordEncode(id int64, args []string, started time.Time, encErr
 	if len(keys) == 0 && len(lines) > 0 {
 		keys = lines[max(0, len(lines)-5):]
 	}
+	ran, exit := ffmpegExit(terr)
 	w.Queue.SetFailureSummary(id, jobs.FailureSummary{Step: 0, StepCount: 1, AfterMs: w.now().Sub(started).Milliseconds(),
-		ExitCode: -1, KeyLines: keys})
+		ExitCode: exit, FfmpegRan: ran, KeyLines: keys})
 }
 
 // SkippedError: the file is not converted because its flow leaves it alone (S3's Dolby Vision skips);
@@ -1464,4 +1466,15 @@ func (w *Worker) stillHolds(id int64) error {
 		return failed("This file was given back to the queue while this worker was busy, so nothing was put in place. The original was not touched.", errLeaseLost)
 	}
 	return nil
+}
+
+// ffmpegExit tells, from the error of a failed encode, whether ffmpeg ran and what it exited with: a run that ended
+// with an exit status ran (its status is -1 when a signal ended it, so no code); a program that could not be started
+// did not run.
+func ffmpegExit(err error) (ran bool, exit int) {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return true, ee.ExitCode()
+	}
+	return false, -1
 }

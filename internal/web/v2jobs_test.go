@@ -402,3 +402,19 @@ func TestJobsByPath(t *testing.T) {
 		t.Errorf("by path: %s", body)
 	}
 }
+
+// #214 P2: a job whose ffmpeg never ran says so (ffmpegRan false), with exitCode null and no key lines.
+func TestFailureNeverRanInTheAPI(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	id, _ := st.Enqueue(jobs.Job{Library: "/m", LibraryID: l.ID, Path: "/m/never.mkv"})
+	st.Claim("t")
+	st.SetFailureSummary(id, jobs.FailureSummary{Step: 0, StepCount: 1, ExitCode: -1, FfmpegRan: false})
+	st.Fail(id, "convert_failed", "Converting did not finish.")
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10)})
+	var d struct{ Failure map[string]any }
+	json.Unmarshal([]byte(body), &d)
+	if d.Failure["ffmpegRan"] != false || d.Failure["exitCode"] != nil || len(d.Failure["keyLines"].([]any)) != 0 {
+		t.Errorf("never ran: %v", d.Failure)
+	}
+}

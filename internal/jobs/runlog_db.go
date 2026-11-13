@@ -45,7 +45,8 @@ type FailureSummary struct {
 	Step, StepCount int
 	AfterMs         int64
 	MediaTime, Hint string
-	ExitCode        int
+	ExitCode        int  // -1: none (ffmpeg didn't run, or was killed by a signal)
+	FfmpegRan       bool // false: ffmpeg never started (its program could not be run)
 	KeyLines        []string
 }
 
@@ -126,8 +127,8 @@ func (s *Store) SetFailureSummary(id int64, f FailureSummary) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(`INSERT OR REPLACE INTO job_failures(job_id, step, step_count, after_ms, media_time, hint, exit_code, key_lines)
-VALUES(?,?,?,?,?,?,?,?)`, id, f.Step, f.StepCount, f.AfterMs, f.MediaTime, f.Hint, f.ExitCode, string(b))
+	_, err = s.db.Exec(`INSERT OR REPLACE INTO job_failures(job_id, step, step_count, after_ms, media_time, hint, exit_code, ffmpeg_ran, key_lines)
+VALUES(?,?,?,?,?,?,?,?,?)`, id, f.Step, f.StepCount, f.AfterMs, f.MediaTime, f.Hint, f.ExitCode, f.FfmpegRan, string(b))
 	return err
 }
 
@@ -135,8 +136,8 @@ VALUES(?,?,?,?,?,?,?,?)`, id, f.Step, f.StepCount, f.AfterMs, f.MediaTime, f.Hin
 func (s *Store) FailureOf(id int64) (*FailureSummary, error) {
 	var f FailureSummary
 	var raw string
-	err := s.db.QueryRow(`SELECT step, step_count, after_ms, media_time, hint, exit_code, key_lines FROM job_failures WHERE job_id=?`, id).
-		Scan(&f.Step, &f.StepCount, &f.AfterMs, &f.MediaTime, &f.Hint, &f.ExitCode, &raw)
+	err := s.db.QueryRow(`SELECT step, step_count, after_ms, media_time, hint, exit_code, ffmpeg_ran, key_lines FROM job_failures WHERE job_id=?`, id).
+		Scan(&f.Step, &f.StepCount, &f.AfterMs, &f.MediaTime, &f.Hint, &f.ExitCode, &f.FfmpegRan, &raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
