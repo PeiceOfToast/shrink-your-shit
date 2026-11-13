@@ -66,6 +66,7 @@ interface State {
   wf: Workflow[];
   trash: Trash; // GET /trash (not on dev yet: mocked like the rest of the page)
   shares: ShareItem[]; // D: network shares
+  mode: "app" | "manual" | "docker"; // D: share connect mode
 }
 
 // D: minimal share item for mock state
@@ -110,6 +111,7 @@ function running(): State {
       workflow("w4", "Old settings", "Carried over from an earlier install", { summaryTag: "Settings from an earlier install" }),
     ],
     trash: { bytes: 120 * GB, files: 14, nextDeleteAt: ago(-60 * 24), lastDeleteAt: ago(-60 * 24 * 7) },
+    mode: "app",
     shares: [
       { id: "1", name: "Movies NAS", type: "smb", address: "\\\\nas\\movies", guest: false, username: "mediauser", hasPassword: true,
         status: "connected", since: ago(60 * 24 * 30), reason: null,
@@ -128,7 +130,7 @@ function fresh(): State {
     settings: { firstRunDone: false, firstRunStep: 1, intakePaused: false, catalogueEnabled: false, firstRunLibrary: null, scanEvery: 30, scanEverySource: "flag" },
     libraries: [],
     workers: [worker("this", "This computer", "paused", [0, 2], [0, 0], 5, [])], // workers start stopped (rebuild decision)
-    jobs: [], waiting: 0, last24h: { completed: 0, failed: 0, skipped: 0, successRate: null }, activity: [], wf: [], trash: { bytes: 0, files: 0, nextDeleteAt: null, lastDeleteAt: null },
+    jobs: [], waiting: 0, last24h: { completed: 0, failed: 0, skipped: 0, successRate: null }, activity: [], wf: [], trash: { bytes: 0, files: 0, nextDeleteAt: null, lastDeleteAt: null }, shares: [], mode: "app",
   };
 }
 

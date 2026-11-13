@@ -1,15 +1,13 @@
 // D: Network shares settings (SCREENS V9d, D-API-SHAPE.md). Mock only (the engine is after item E).
 // The share list table, Add/Edit sheet, Remove dialog, Test button, and the connect-mode-specific UI.
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { Icon } from "../Icon";
-import { failed, type Answer } from "../api";
+import { MOCK, failed, type Answer } from "../api";
 import { Empty, PageHead } from "../PageHead";
 import { SettingsTabs } from "../pages";
 import { useData } from "../useData";
 import { addShare, checkShare, deleteShare, getShares, patchShare, reconnectShare, testShare } from "../sharesApi";
 import type { Share, ShareTestResult, SharesResponse, ShareType } from "../types/shares";
-
-const KB = (s: string) => <><span className="kbd">{s}</span></>;
 
 async function act<T>(p: Promise<Answer<T>>, say: (m: string) => void): Promise<T | null> {
   try { const r = await p; if (failed(r)) return (say(r.error.message), null); return r; } catch { return null; }
@@ -164,9 +162,9 @@ export function SharesSettings() {
   return (
     <div className="stack">
       <PageHead icon="i-shares" title="Settings" />
-      <SettingsTabs at="shares" />
+      <SettingsTabs at="shares" shares={MOCK || !resp.error ? undefined : false} />
       <p className="muted" role="status">{said}</p>
-      {!data ? <div className="empty">Loading...</div> : <>
+      {resp.error && !MOCK ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{resp.error.message}</span></p> : !data ? <div className="empty">Loading...</div> : <>
         <div className="row" style={{ gap: 6 }}>
           <p className="muted" style={{ margin: 0 }}>Use a folder on a NAS or another computer as a library. Shrink Your Shit connects to it and reconnects after a restart.</p>
           <span className="sp" />
