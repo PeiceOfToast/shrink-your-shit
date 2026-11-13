@@ -188,11 +188,13 @@ function WhyFailed({ id, msg, code, worker, f }: { id: string; msg: string; code
 }
 
 // durations read '4 min 12 s' and '0.1 s' everywhere (the design's phone note)
+// count of q in a step's searchable text (case-insensitive)
+const matches = (st: { name: string; command: string | null; output: string; result: string }, q: string) => [st.name, st.command ?? "", st.output, st.result].join("\n").toLowerCase().split(q.toLowerCase()).length - 1;
 // E: a finished job's log by step (GET /log), SCREENS V6b: each step a row that opens; the failed step open; inside a step
 // its command, its source, its picture check, its ffmpeg output (last 200 lines on a failure, the rest by download), its
 // result; the log's last line is the job's final line.
 function StepLog({ id, worker, failedIdx }: { id: string; worker: string | null; failedIdx: number | null }) {
-  const d = useData(() => getJobLog(id), [id]), keep = useData(getSettings, []);
+  const d = useData(() => getJobLog(id), [id]), keep = useData(getSettings, []), [q, setQ] = useState("");
   if (!d.loaded) return <section><h3>Log</h3><p className="muted">Loading the log...</p></section>;
   if (!d.data) return <section><h3>Log</h3><p className="muted">{d.error?.message ?? "The log can't be shown."}</p></section>;
   const l = d.data, days = (keep.data as { logKeepDays?: number } | undefined)?.logKeepDays ?? 30;
@@ -205,12 +207,18 @@ function StepLog({ id, worker, failedIdx }: { id: string; worker: string | null;
   return (
     <section id="job-log"><h3>Log</h3>
       {note[l.state] ? <p className="sm muted">{note[l.state]}</p> : <>
+      {/* V6b Search: every step's command, output and result; the steps with matches open and are counted */}
+      <div className="row" style={{ gap: 6, margin: "8px 0", flexWrap: "wrap" }}>
+        <input className="input sm" type="search" placeholder="Search the log" aria-label="Search the log" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
+        {q && <span className="sm muted" role="status">{(() => { const ns = l.steps.map((st) => matches(st, q)), t = ns.reduce((x, y) => x + y, 0), k = ns.filter((x) => x > 0).length; return t ? t + " matches in " + k + " step" + (k > 1 ? "s" : "") : "No match"; })()}</span>}
+      </div>
       {l.steps.map((st, i) => {
+        const hit = q ? matches(st, q) : 0;
         const pr = st.probe as Probe | null, sum = pr && [pr.videoCodec?.toUpperCase().replace("H264", "H.264"), (pr.streams ?? []).find((x) => x.type === "video")?.Width && (pr.streams ?? []).find((x) => x.type === "video")!.Width + "×" + (pr.streams ?? []).find((x) => x.type === "video")!.Height, pr.durationSec ? elapsed(pr.durationSec) : "", pr.sizeBytes ? bytes(pr.sizeBytes) : ""].filter(Boolean).join(" · ");
         return (
-          <details key={i} id={"job-step-" + (i + 1)} open={st.outcome !== "ok" || i + 1 === failedIdx} className="stepd" style={{ borderTop: "1px solid var(--border)", padding: "8px 0" }}>
+          <details key={i} id={"job-step-" + (i + 1)} open={q ? hit > 0 : st.outcome !== "ok" || i + 1 === failedIdx} className="stepd" style={{ borderTop: "1px solid var(--border)", padding: "8px 0" }}>
             <summary className="row nw" style={{ gap: 8, flexWrap: "wrap", cursor: "pointer" }}><strong>{st.name}</strong><span className="sm muted">{clock(st.startedAt)} · took {dur(st.tookMs)}</span>
-              <span className={"pill " + (st.outcome === "ok" ? "ok" : "bad")}>{st.outcome === "ok" ? "Done" : "Failed"}</span></summary>
+              <span className={"pill " + (st.outcome === "ok" ? "ok" : "bad")}>{st.outcome === "ok" ? "Done" : "Failed"}</span>{hit > 0 && <span className="pill">{hit} match{hit > 1 ? "es" : ""}</span>}</summary>
             <div className="stack" style={{ gap: 6, paddingTop: 6 }}>
               {st.command && <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">Command</span><button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(st.command ?? "").catch(() => {})}><Icon id="i-copy" />Copy</button></div>
                 <pre className="joblog sm">{st.command}</pre></div>}
