@@ -182,6 +182,13 @@
       "Low"
      ]
     },
+    "vbrMaxKbps": {
+     "description": "The most data each second may use with VBR. A file never gets more than it has now.",
+     "maximum": 500000,
+     "minimum": 100,
+     "title": "Peak limit (kbps)",
+     "type": "integer"
+    },
     "quality": {
      "default": 3,
      "enum": [

@@ -86,7 +86,10 @@ function Field({ id, name, s, value, set }: { id: string; name: string; s: JSONS
 // file's own height picks it). VBR is offered only for the formats the ladder lists, has no "No limit", and its peak
 // limit says the level's figure it must reach. null: the field isn't shown.
 const mbps = (l: Ladder, n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 1 }) + " " + l.unit;
+// SCREENS V3 'Convert video, revised 11-13': the one line under the chosen slider position (its words, not the engine's hints)
+const SLIDER_WORDS = ["The smallest files. Fine detail and dark scenes can look a little softer.", "Smaller files, with little you'd notice.", "A good picture at a much smaller size. Right for most libraries.", "Close to the original. Saves less space.", "Very hard to tell from the original. Saves the least space."];
 function convertField(k: string, s: JSONSchema, c: Record<string, unknown>, l: Ladder | undefined): JSONSchema | null {
+  if (k === "quality") return { ...s, "x-enumHints": SLIDER_WORDS };
   const fmt = String(c.format ?? "hevc"), vbr = c.rateControl === "vbr", row = l?.resolutionRow[String(c.resolution ?? "keep")];
   const byRow = l ? l.formats[fmt] ?? l.formats.hevc : undefined, level = String(c.maxBitrate ?? "none") as "low" | "medium" | "high" | "none";
   if (k === "rateControl") return !l || vbr || l.vbrFormats.includes(fmt) ? s : null; // a VBR choice stays visible so it can be undone
@@ -102,15 +105,31 @@ function convertField(k: string, s: JSONSchema, c: Record<string, unknown>, l: L
   return { ...s, enum: e, "x-enumLabels": named, description: (s.description as string) + perRow };
 }
 
-export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown) => void; issues: ValidationIssue[] }) {
+export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown, more?: Record<string, unknown>) => void; issues: ValidationIssue[] }) {
   const { stepDef, libs } = useReg(), def = stepDef(n.type)!, props = Object.fromEntries(Object.entries((def.configSchema.properties ?? {}) as Props).filter(([, s]) => !s.readOnly)) as Props, c = n.config;
   const lad = useData(getLadder, []).data, conv = (k: string) => (n.type === "video.convert" ? convertField(k, props[k], c, lad) : props[k]);
   const keys = Object.keys(props).filter((k) => !(MORE[n.type] ?? []).includes(k)), more = (MORE[n.type] ?? []).filter((k) => props[k] && conv(k));
   // #165: a setting's own problems (invalid_config, keyed on the step + field) show at that field, which is marked
   const bad = (k: string) => issues.filter((i) => i.nodeId === n.id && (i.field === k || i.configPath === "/" + k) && i.code !== "unconnected_port");
+  // one edit writes its switches in the same update (A-API-SHAPE, engine #211): an old flow takes the new meaning on any
+  // edit (the slider's quality, or level in custom settings); AV1 takes Quality only, with a line saying so once
+  const [said, setSaid] = useState("");
+  const put = (k: string, v: unknown) => {
+    const x: Record<string, unknown> = {}, rc = String(c.rateControl ?? "quality");
+    if (n.type === "video.convert") {
+      // decide from the format this edit leaves (not the saved one): AV1 takes Quality only (engine #211 refuses the rest)
+      const fmt = k === "format" ? String(v) : String(c.format ?? "hevc");
+      if (rc.endsWith("_legacy") && k !== "rateControl") x.rateControl = fmt === "av1" || k === "quality" ? "quality" : "level";
+      if (k !== "quality" && k !== "kind" && c.kind !== "selectors") x.kind = "selectors"; // a custom edit turns the slider off
+      const next = String(x.rateControl ?? rc);
+      if (fmt === "av1" && next !== "quality") { x.rateControl = "quality"; setSaid(k === "format" ? "Switched to Quality only: AV1 can't use a bitrate. Your bitrate settings are kept if you switch back." : ""); }
+      else if (k === "format") setSaid("");
+    }
+    set(k, v, x);
+  };
   const field = (k: string) => { const b = bad(k), sk = conv(k); if (!sk) return null; return (
     <div key={k} className={b.length ? "fieldbad" : undefined} data-field={k} aria-invalid={b.length ? true : undefined}>
-      <Field id={n.id} name={k} s={sk} value={c[k] ?? sk.default} set={(v) => set(k, v)} />
+      <Field id={n.id} name={k} s={sk} value={c[k] ?? sk.default} set={(v) => put(k, v)} />
       {b.map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
     </div>); };
   // a problem in a field under 'More options' opens it by itself (review c0189fa P3), also when the problems list picks
@@ -118,6 +137,51 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
   const moreRef = useRef<HTMLDetailsElement>(null), moreBad = more.some((k) => bad(k).length > 0);
   useEffect(() => { if (moreBad && moreRef.current) moreRef.current.open = true; }, [moreBad, n.id]);
   const problem = (path: string) => issues.filter((i) => i.nodeId === n.id && i.configPath === path).map((i) => <span key={i.code} className="hint" style={{ color: "var(--error-text)" }}>{i.message}</span>);
+  if (n.type === "video.convert") {
+    // A-API-SHAPE + engine #211 + SCREENS V3 'Convert video, revised 11-13' (01:05Z): the slider (rateControl quality), or
+    // custom settings (kind selectors) with three rate controls: Bitrate level, VBR with a max, Quality only. AV1 takes
+    // Quality only; old flows show their meaning until an edit.
+    const sel = c.kind === "selectors", rc = String(c.rateControl ?? "quality"), av1 = String(c.format ?? "hevc") === "av1";
+    const legacy = rc.endsWith("_legacy"), vbr = rc === "vbr", q = rc === "quality";
+    const sl = lad?.slider.find((x) => x.position === Number(c.quality ?? 3) && x.format === String(c.format ?? "hevc"));
+    // Opening More options is the switch to custom: kind and rateControl in one update (AV1 gets Quality only)
+    // an old flow keeps its meaning until its first edit (design: 'Changing its bitrate settings switches it')
+    const custom = () => !legacy && set("kind", "selectors", { rateControl: av1 ? "quality" : "level" });
+    return (
+      <div className="stack">
+        {legacy && <div className="note"><Icon id="i-info" /><div>This step was set up before 13 Nov and still makes the same files as before. Changing its bitrate settings switches it to the new rules.</div></div>}
+        {!sel && <>
+          {field("quality")}
+          {sl && <p className="sm">{((labels(props.format).find((f) => f[0] === sl.format)?.[1] ?? sl.format) as string).split(" (")[0] + " · quality " + sl.crf + " (CRF) · " + (sl.keepsResolution ? "keeps the resolution" : "lowers the resolution") + " · " + (sl.capKbps ? "capped at " + sl.capKbps.toLocaleString() + " kbps" : "no bitrate cap") + " · usually about " + sl.saveLowPct + "-" + sl.saveHighPct + "% smaller"}</p>}
+          <p className="hint">Lower quality numbers mean a better picture and bigger files. The number is for 1080p; 720p and smaller files use one lower, 4K one higher. Every file's picture is checked after converting, and the original stays if it doesn't pass.</p>
+        </>}
+        {sel && <p className="note"><Icon id="i-info" /><span>Using your own settings. The slider is off. <button className="linkbtn" type="button" onClick={() => set("kind", "slider", { rateControl: "quality" })}>Use the slider again</button></span></p>}
+        <details ref={moreRef} onToggle={(e) => e.currentTarget.open && !sel && custom()}><summary className="btn sm" style={{ display: "inline-flex" }}>More options</summary>
+          <div className="grid cols2" style={{ marginTop: 12 }}>
+            {field("format")}{field("resolution")}{field("speed")}
+            {q && sel && field("quality")}
+            {av1 && sel && <p className="hint" role="status">AV1 can only use Quality only. Pick HEVC or H.264 to set a bitrate.</p>}
+            <fieldset className="field choice stack"><legend className="lab">Bitrate</legend>
+              <label className="radio" style={{ alignItems: "flex-start" }}><input type="radio" name={n.id + "-rc"} checked={rc === "level"} disabled={av1} onChange={() => put("rateControl", "level")} />
+                <span><strong>Bitrate level</strong><span className="hint" style={{ display: "block" }}>Aims for the level's bitrate for each file's resolution.</span></span></label>
+              <label className="radio" style={{ alignItems: "flex-start" }}><input type="radio" name={n.id + "-rc"} checked={rc === "vbr"} disabled={av1} onChange={() => put("rateControl", "vbr")} />
+                <span><strong>VBR with a max</strong><span className="hint" style={{ display: "block" }}>Aims for a steady picture and uses only the bitrate each scene needs, never above your max.</span></span></label>
+              <label className="radio" style={{ alignItems: "flex-start" }}><input type="radio" name={n.id + "-rc"} checked={rc === "quality"} onChange={() => put("rateControl", "quality")} />
+                <span><strong>Quality only</strong><span className="hint" style={{ display: "block" }}>Uses the Quality setting above, with no bitrate limit. File sizes vary the most.</span></span></label>
+              {legacy && <label className="radio" style={{ alignItems: "flex-start" }}><input type="radio" name={n.id + "-rc"} checked onChange={() => undefined} />
+                <span><strong>As set up before 13 Nov</strong><span className="hint" style={{ display: "block" }}>Makes the same files as before.</span></span></label>}
+            </fieldset>
+            {/* shortcut: the level and limit of an old flow show as fields, not as plain text; upgrade when design asks for the plain text */}
+            <fieldset disabled={vbr || q} style={{ border: 0, padding: 0, margin: 0, minWidth: 0, opacity: vbr || q ? 0.5 : 1 }}>{field("maxBitrate")}
+              {vbr && <span className="hint">Not used with VBR.</span>}{q && <span className="hint">Not used with Quality only.</span>}
+              {!vbr && !q && lad && <p className="hint">Raised by {Math.round((lad.factors.fps60 - 1) * 100)}% for 60 fps files and by {Math.round((lad.factors.hdr - 1) * 100)}% for HDR. A file never gets more bitrate than it has now.</p>}</fieldset>
+            {vbr && field("vbrMaxKbps")}
+          </div>
+        </details>
+        {said && <p className="hint" role="status">{said}</p>}
+        <p className="hint">Every video not already in this format is converted, even if the new file isn't smaller, so your library ends up in one format. Jobs shows the size before and after.</p>
+      </div>);
+  }
   if (n.type === "output.commit") {
     const policy = (c.policy as string) ?? "separate_folder", mode = (c.folderMode as string) ?? "next_to_library";
     return (
@@ -175,7 +239,7 @@ function Step({ n, i, open, toggle, update, issues }: { n: Node; i: number; open
       </div>
       {open && hasOptions && <div className="sopts" id={n.id + "-opts"} role="group" aria-label={"Options for " + def.name} onKeyDown={(e) => e.key === "Escape" && toggle()}>
         <div className="sheethd phone"><button ref={back} className="btn icon ghost" type="button" aria-label="Back to the steps" onClick={toggle}><Icon id="i-chev-l" /></button><strong>{def.name}</strong></div>
-        <Options n={n} issues={issues} set={(k, v) => update({ ...n, config: { ...n.config, [k]: v } })} /></div>}
+        <Options n={n} issues={issues} set={(k, v, more) => update({ ...n, config: { ...n.config, [k]: v, ...more } })} /></div>}
     </li>);
 }
 
