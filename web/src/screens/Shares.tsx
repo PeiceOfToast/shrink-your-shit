@@ -130,7 +130,7 @@ function ShareSheet({ share, resp, onDone, onCancel, said }: { share?: Share; re
         <div className="hd"><button className="btn icon ghost" type="button" aria-label="Close" onClick={close}><Icon id="i-chev-l" /></button><div className="sp"><h3 id={edit ? "es" : "ns"} style={{ margin: 0 }}>{edit ? share!.name : ss ? ss.name : "Add a share"}</h3>
           {edit && <p className="hint" style={{ margin: 0 }}>{share!.address} · {TYPE[share!.type].label}</p>}</div></div>
         <div className="bd">
-          {ss?.setup ? block(ss.setup) : <>{edit && share?.setup && share.status === "waiting_setup" && block(share.setup)}<>
+          {ss?.setup ? block(ss.setup) : <>{edit && share?.setup && share.status === "waiting_setup" && block(share.setup)}
             <fieldset style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}><legend style={{ fontWeight: "var(--fw-strong)", marginBottom: 6, padding: 0 }}>Type</legend>
               <label className={"radio" + (type === "smb" ? " sel" : "")}><input type="radio" name="st" checked={type === "smb"} onChange={() => setType("smb")} disabled={edit} />
                 <span><strong>SMB</strong><span className="hint" style={{ display: "block" }}>{TYPE.smb.hint}</span></span></label>
