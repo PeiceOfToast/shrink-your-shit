@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,9 +38,13 @@ func mountPointFor(sh jobs.Share) string {
 	return shareRoot + "/" + sanitiseName(sh.Name, sh.ID)
 }
 
-// WatchShares checks each saved share every shareWatchEvery, in app mode only (the helper mounts them).
+// shareWatched is whether shares are checked here: Linux, in every mode. The helper mounts them in app mode;
+// in manual and docker mode the person mounts them, and a share waits for that (waiting_setup) until it answers.
+func shareWatched() bool { return runtime.GOOS == "linux" }
+
+// WatchShares checks each saved share every shareWatchEvery, where shareWatched says so.
 func WatchShares(store *jobs.Store) {
-	if mode, _ := detectMode(); mode != "app" {
+	if !shareWatched() {
 		return
 	}
 	t := time.NewTicker(shareWatchEvery)
@@ -57,30 +62,40 @@ func checkShares(store *jobs.Store) {
 		return
 	}
 	for _, sh := range shares {
-		mp := mountPointFor(sh)
-		status := mountStatus(store, sh.ID)
-		if shareAnswers(mp) {
-			if status != "connected" {
-				store.SetShareMountStatus(sh.ID, "linux", "connected", "")
-				log.Printf("share %q: answering again", sh.Name)
-			}
-			if ids, err := store.ResumeSharePause(sh.ID); err != nil {
-				log.Printf("share %q: could not resume its libraries: %v", sh.Name, err)
-			} else if len(ids) > 0 {
-				log.Printf("share %q: %d librar%s back on", sh.Name, len(ids), plural(len(ids)))
-			}
-			continue
+		checkShare(store, sh)
+	}
+}
+
+// checkShare updates one share's status and the libraries in its folder, once.
+func checkShare(store *jobs.Store, sh jobs.Share) {
+	mp := mountPointFor(sh)
+	status := mountStatus(store, sh.ID)
+	if shareAnswers(mp) {
+		if status != "connected" {
+			store.SetShareMountStatus(sh.ID, "linux", "connected", "")
+			log.Printf("share %q: answering again", sh.Name)
 		}
-		if status == "connected" { // an outage: say so once, with the reason the page shows
-			reason, _ := json.Marshal(map[string]string{"code": "host_unreachable", "message": sh.Name + " stopped answering."})
-			store.SetShareMountStatus(sh.ID, "linux", "not_connected", string(reason))
-			log.Printf("share %q: stopped answering", sh.Name)
-		}
-		if ids, err := store.PauseLibrariesForShare(sh.ID, mp); err != nil {
-			log.Printf("share %q: could not pause its libraries: %v", sh.Name, err)
+		if ids, err := store.ResumeSharePause(sh.ID); err != nil {
+			log.Printf("share %q: could not resume its libraries: %v", sh.Name, err)
 		} else if len(ids) > 0 {
-			log.Printf("share %q: %d librar%s paused until it answers", sh.Name, len(ids), plural(len(ids)))
+			log.Printf("share %q: %d librar%s back on", sh.Name, len(ids), plural(len(ids)))
 		}
+		return
+	}
+	if status == "" {
+		if mode, _ := detectMode(); mode != "app" {
+			return // manual or docker, never connected: still waiting for the setup, not down
+		}
+	}
+	if status == "connected" { // an outage: say so once, with the reason the page shows
+		reason, _ := json.Marshal(map[string]string{"code": "host_unreachable", "message": sh.Name + " stopped answering."})
+		store.SetShareMountStatus(sh.ID, "linux", "not_connected", string(reason))
+		log.Printf("share %q: stopped answering", sh.Name)
+	}
+	if ids, err := store.PauseLibrariesForShare(sh.ID, mp); err != nil {
+		log.Printf("share %q: could not pause its libraries: %v", sh.Name, err)
+	} else if len(ids) > 0 {
+		log.Printf("share %q: %d librar%s paused until it answers", sh.Name, len(ids), plural(len(ids)))
 	}
 }
 
