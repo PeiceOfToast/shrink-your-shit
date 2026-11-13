@@ -183,9 +183,10 @@
      ]
     },
     "vbrMaxKbps": {
-     "description": "No scene goes above this. The picture aims for Balanced quality (CRF 23).",
-     "minimum": 1,
-     "title": "Max bitrate",
+     "description": "The most data each second may use with VBR. A file never gets more than it has now.",
+     "maximum": 500000,
+     "minimum": 100,
+     "title": "Peak limit (kbps)",
      "type": "integer"
     },
     "quality": {
