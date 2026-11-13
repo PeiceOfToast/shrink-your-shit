@@ -179,6 +179,56 @@ func TestSharesTestInvalidAddress(t *testing.T) {
 	}
 }
 
+// The saved password is sent only to the share's own address: a test by id against another
+// address must not carry it (it would hand a stored password to any host the caller names).
+func TestSharesTestSavedPasswordOnlyToSavedAddress(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	os.MkdirAll(home, 0o755)
+	os.Setenv("HOME", home)
+	defer os.Unsetenv("HOME")
+	srv, _, _ := server(t, false)
+
+	const body = `{"address":"\\\\nas\\media","name":"Saved","username":"user","password":"secret"}`
+	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares", body: body, ctype: "application/json"})
+	if code != http.StatusCreated {
+		t.Fatalf("POST: %d %s", code, resp)
+	}
+	var created map[string]any
+	json.Unmarshal([]byte(resp), &created)
+	id, _ := created["id"].(string)
+	if id == "" {
+		t.Fatalf("no id in POST response: %q", resp)
+	}
+
+	var sent []string
+	orig := testShareFn
+	testShareFn = func(typ, address, username, password string, guest bool) map[string]any {
+		sent = append(sent, password)
+		return map[string]any{"ok": false, "code": "stub"}
+	}
+	defer func() { testShareFn = orig }()
+
+	test := func(address string) {
+		t.Helper()
+		b := fmt.Sprintf(`{"id":%q,"address":%q}`, id, address)
+		if code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares/test", body: b, ctype: "application/json"}); code != http.StatusOK {
+			t.Fatalf("test %s: %d %s", address, code, resp)
+		}
+	}
+	test(`\\evil\media`)
+	test(`\\nas\media`)
+	if len(sent) != 2 {
+		t.Fatalf("expected 2 test calls, got %d", len(sent))
+	}
+	if sent[0] != "" {
+		t.Errorf("saved password sent to another address: %q", sent[0])
+	}
+	if sent[1] != "secret" {
+		t.Errorf("saved password not used for its own address: %q", sent[1])
+	}
+}
+
 func TestSharesTestUnreachable(t *testing.T) {
 	dir := t.TempDir()
 	home := filepath.Join(dir, "home")
