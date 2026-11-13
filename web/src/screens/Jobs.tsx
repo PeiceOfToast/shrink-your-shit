@@ -8,6 +8,7 @@ import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, count, elapsed, plural } from "../format";
 import { convertDoneAgain, findSkip, getJob, getJobLog, jobAction, listJobs, listKept, restoreKept } from "../jobsApi";
 import { getWorkflow } from "../workflowApi";
+import { getSettings } from "../libraryApi";
 import { onLive } from "../live";
 import { Empty, PageHead } from "../PageHead";
 import { navigate, useSearch } from "../router";
@@ -185,17 +186,25 @@ function WhyFailed({ id, msg, code, f }: { id: string; msg: string; code: string
 }
 
 // E: a finished job's log by step (GET /log): each step's name, how long it took and how it ended; a failed step's last lines
-function StepLog({ id }: { id: string }) {
-  const d = useData(() => getJobLog(id), [id]);
+function StepLog({ id, worker }: { id: string; worker: string | null }) {
+  const d = useData(() => getJobLog(id), [id]), keep = useData(getSettings, []);
+  // SCREENS V6b 'States': a log that isn't all here says why, in the design's words
+  const who = worker ?? "The worker";
+  const note: Record<string, string | null> = {
+    complete: null, coming_back: "The log from " + who + " is still coming back.", lost: who + " went offline before sending its log. The summary above is what we know.",
+    none: "No log was kept for this job. Jobs from before 13 Nov don't have one.",
+    expired: "This job's log was deleted after " + ((keep.data as { logKeepDays?: number } | undefined)?.logKeepDays ?? 30) + " days (Settings > Processing).",
+  };
   if (!d.loaded) return <section><h3>Log</h3><p className="muted">Loading the log...</p></section>;
   if (!d.data) return <section><h3>Log</h3><p className="muted">{d.error?.message ?? "The log can't be shown."}</p></section>;
   return (
     <section id="job-log"><h3>Log</h3>
       <ol className="stack" style={{ listStyle: "none", padding: 0, margin: 0 }}>{d.data.steps.map((st, i) => (
-        <li key={i} id={"job-step-" + (i + 1)}><div className="row nw" style={{ gap: 8 }}><strong>{st.name}</strong><span className="sm muted">{dur(st.tookMs)}</span>
+        <li key={i} id={"job-step-" + (i + 1)}><div className="row" style={{ gap: 4, flexWrap: "wrap" }}><strong>{st.name}</strong><span className="sm muted">{dur(st.tookMs)}</span>
           <span className={"pill " + (st.outcome === "ok" ? "ok" : "bad")}>{st.outcome === "ok" ? "Done" : "Failed"}</span></div>
           {st.command && <pre className="joblog sm">{st.command}</pre>}
           {st.output && <pre className="joblog sm">{st.output}</pre>}</li>))}</ol>
+      {note[d.data.state] && <p className="sm muted">{note[d.data.state]}</p>}
     </section>);
 }
 
@@ -336,7 +345,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {/* review db7b1f1 P2: the scan sentence only for a file a scan left out; a cancelled file whose job the server
               doesn't send yet claims nothing about scans or steps */}
           {scan && <section><h3>Timeline</h3><p className="muted">{state === "cancelled" ? "Cancelled." : "This file was left out when its library was scanned, so it has no job and no steps."}</p></section>}
-          {!scan && (active ? <JobLog id={id} name={name} /> : <StepLog id={id} />)}
+          {!scan && (active ? <JobLog id={id} name={name} /> : <StepLog id={id} worker={j?.worker ?? null} />)}
           {/* #148: before is the original; null for an older job that replaced a file of the same name: said so, never blank */}
           {(before || after) && <section><h3>Result</h3><table className="tbl kvt"><thead><tr><th /><th>Before</th><th>After</th></tr></thead><tbody>
             <tr><th>Video</th>{before ? <td>{before.video}</td> : <td rowSpan={4} className="muted">Not recorded for this job</td>}<td>{after?.video ?? "-"}</td></tr>
