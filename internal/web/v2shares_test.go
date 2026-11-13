@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -459,6 +460,9 @@ func TestDetectModeDockerByEnv(t *testing.T) {
 // skipped rather than served.
 func fakeHelper(t *testing.T, sock string, reply func(map[string]any) map[string]any) func() []map[string]any {
 	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("app mode (the mount helper) is Linux only")
+	}
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
 		t.Fatal(err)
@@ -838,6 +842,9 @@ func TestDetectModeAppAndManualBySocket(t *testing.T) {
 		t.Errorf("no helper socket: expected manual, got %q", mode)
 	}
 
+	if runtime.GOOS != "linux" {
+		t.Skip("app mode (the mount helper) is Linux only")
+	}
 	sock := filepath.Join(dir, "up.sock")
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
