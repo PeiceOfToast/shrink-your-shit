@@ -50,7 +50,7 @@ func TestFailureWords(t *testing.T) {
 	f := FailureFacts{Path: "/media/movies/Movie.mkv", Folder: "/mnt/out", ExitCode: 1, MediaTime: "00:41:12", Stored: "Converting did not finish",
 		KeyLines: []string{"[AVEncoder @ 0x1] Unknown encoder 'h264_qsv'"}}
 	for _, c := range []struct{ code, message string }{
-		{"encoder_unavailable", "The encoder couldn't start: h264_qsv isn't available on this worker."},
+		{"encoder_unavailable", "The encoder couldn't start: Intel Quick Sync (h264_qsv) isn't available on this computer."},
 		{"output_not_writable", "Couldn't write to /mnt/out: permission denied."},
 		{"no_space", "Not enough space in /mnt/out to finish converting."},
 		{"source_damaged", "The source file is damaged at 00:41:12."},
@@ -148,8 +148,8 @@ func TestReasonConditionMatchesFailureCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	s.SetPaused(false)                                                    // the test's worker is started (S2: a new install starts stopped)
-	l, _ := s.AddLibrary("m", t.TempDir(), rules.SliderTemplate(3), true) // a started library: its jobs are claimed
+	s.SetPaused(false)
+	l, _ := s.AddLibrary("m", t.TempDir(), rules.SliderTemplate(3), true)
 	for i, c := range []struct {
 		code  string
 		lines []string
@@ -194,5 +194,38 @@ func TestReasonConditionMatchesFailureCode(t *testing.T) {
 		if len(got) == 0 {
 			t.Errorf("%s selected nothing", want)
 		}
+	}
+}
+// P3: encoder family names are mapped from the codec suffix; product name is capitalised.
+func TestEncoderFamilyAndProductName(t *testing.T) {
+	var checks = []struct {
+		keyLines []string
+		worker   string
+		want     string
+	}{
+		{[]string{"[AVEncoder @ 0x1] Unknown encoder 'h264_qsv'"}, "",
+			"The encoder couldn't start: Intel Quick Sync (h264_qsv) isn't available on this computer."},
+		{[]string{"[AVEncoder @ 0x2] Unknown encoder 'hevc_nvenc'"}, "",
+			"The encoder couldn't start: NVIDIA (hevc_nvenc) isn't available on this computer."},
+		{[]string{"[AVEncoder @ 0x3] Unknown encoder 'av1_amf'"}, "",
+			"The encoder couldn't start: AMD (av1_amf) isn't available on this computer."},
+		{[]string{"[AVEncoder @ 0x4] Unknown encoder 'h264_videotoolbox'"}, "",
+			"The encoder couldn't start: Apple (h264_videotoolbox) isn't available on this computer."},
+		{[]string{"[AVEncoder @ 0x5] Error while opening encoder"}, "Worker 1",
+			"The encoder couldn't start: The encoder isn't available on Worker 1."},
+	}
+	for _, c := range checks {
+		f := FailureFacts{KeyLines: c.keyLines, WorkerName: c.worker}
+		got, _ := FailureWords("encoder_unavailable", f)
+		if got != c.want {
+			t.Errorf("%q worker=%q: %q, want %q", c.keyLines, c.worker, got, c.want)
+		}
+	}
+	// The product name in hints is "Shrink Your Shit", not "shrink-your-shit"
+	if _, hint := FailureWords("output_not_writable", FailureFacts{ExitCode: -1}); strings.Contains(hint, "shrink-your-shit") {
+		t.Errorf("hint uses lowercase product name: %q", hint)
+	}
+	if _, hint := FailureWords("output_not_writable", FailureFacts{ExitCode: -1}); !strings.Contains(hint, "Shrink Your Shit") {
+		t.Errorf("hint missing capitalised product name: %q", hint)
 	}
 }

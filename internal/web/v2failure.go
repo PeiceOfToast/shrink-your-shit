@@ -84,11 +84,19 @@ func failureFacts(store *jobs.Store, id int64, path, outputPath, message string)
 	if facts.Folder == "" && outputPath != "" && outputPath != path {
 		facts.Folder = filepath.Dir(outputPath)
 	}
-	// no_space: the needed and free space for the sentence figures
+// no_space: the needed and free space for the sentence figures
 	if facts.Folder != "" {
 		if j, err := store.Get(id); err == nil && j.SizeBefore > 0 {
 			facts.Needed = worker.SpaceNeeded(j.SizeBefore)
 			facts.Free, _ = worker.DiskFree(facts.Folder)
+		}
+	}
+	// the worker's display name (P3: encoder message names the worker)
+	if j, err := store.Get(id); err == nil && j.Worker != "" {
+		if j.Worker == "local" {
+			facts.WorkerName = "this computer"
+		} else {
+			facts.WorkerName = j.Worker
 		}
 	}
 	return facts

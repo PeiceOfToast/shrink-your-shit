@@ -61,7 +61,19 @@ type FailureFacts struct {
 	MediaTime    string
 	Stored       string // the stored plain words, used for a code the table does not name
 	KeyLines     []string
-	Needed, Free uint64 // space needed/free for no_space (0 = unknown)
+	Needed, Free uint64    // space needed/free for no_space (0 = unknown)
+	WorkerName   string    // the worker's display name ("this computer" for local)
+}
+
+// encoderFamily maps the suffix after the codec (e.g. h264_qsv → Intel Quick Sync)
+// from the -c:v arg or the "Unknown encoder" line.
+var encoderFamily = map[string]string{
+	"qsv":    "Intel Quick Sync",
+	"nvenc":  "NVIDIA",
+	"amf":    "AMD",
+	"amdhw":  "AMD",
+	"videotoolbox": "Apple",
+	"vaapi":  "graphics card",
 }
 
 var encoderName = regexp.MustCompile(`unknown encoder '([^']+)'`)
@@ -72,18 +84,33 @@ var encoderName = regexp.MustCompile(`unknown encoder '([^']+)'`)
 func FailureWords(code string, f FailureFacts) (message, hint string) {
 	switch code {
 	case "encoder_unavailable":
-		what := "The encoder"
+		name := ""
+		family := "The encoder"
 		if m := encoderName.FindStringSubmatch(strings.ToLower(strings.Join(f.KeyLines, "\n"))); m != nil {
-			what = m[1]
+			name = m[1] // e.g. "h264_qsv"
+			// extract the suffix after the first underscore: qsv, nvenc, amf, videotoolbox, vaapi
+			if i := strings.LastIndex(name, "_"); i >= 0 {
+				if f, found := encoderFamily[name[i+1:]]; found {
+					family = f
+				}
+			}
 		}
-		return "The encoder couldn't start: " + what + " isn't available on this worker.",
+		worker := "this computer"
+		if f.WorkerName != "" {
+			worker = f.WorkerName
+		}
+		if name != "" {
+			return "The encoder couldn't start: " + family + " (" + name + ") isn't available on " + worker + ".",
+				"Test the encoders on the Workers page, or convert on the processor."
+		}
+		return "The encoder couldn't start: " + family + " isn't available on " + worker + ".",
 			"Test the encoders on the Workers page, or convert on the processor."
 	case "output_not_writable":
 		where := "the output folder"
 		if f.Folder != "" {
 			where = f.Folder
 		}
-		return "Couldn't write to " + where + ": permission denied.", "Let shrink-your-shit write to that folder, then Retry."
+		return "Couldn't write to " + where + ": permission denied.", "Let Shrink Your Shit write to that folder, then Retry."
 	case "no_space":
 		where := "the output folder"
 		if f.Folder != "" {
