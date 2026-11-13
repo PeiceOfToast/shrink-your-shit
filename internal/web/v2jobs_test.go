@@ -465,3 +465,52 @@ func TestJobsByReason(t *testing.T) {
 		t.Errorf("unknown reason: %d", code)
 	}
 }
+
+// A job whose log was imported from an old .log file has lines but no steps: /log shows them as one "imported"
+// step (the last 200 lines; outputLines counts all), not an empty log (design's preview check 11-13).
+func TestJobLogImportedLinesShowAsOneStep(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	id, _ := st.Enqueue(jobs.Job{Library: "/m", LibraryID: l.ID, Path: "/m/a.mkv"})
+	st.Claim("t")
+	for i := 0; i < 250; i++ {
+		st.AppendLogLine(id, 0, "app", "line "+strconv.Itoa(i))
+	}
+	st.Complete(id, "/m/a.hevc.mkv", 100)
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10) + "/log"})
+	var r struct {
+		State string
+		Steps []struct {
+			Name        string
+			Outcome     *string
+			TookMs      *float64
+			Command     *string
+			OutputLines int
+			Output      []string
+		}
+	}
+	if err := json.Unmarshal([]byte(body), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.State != "complete" || len(r.Steps) != 1 {
+		t.Fatalf("log %s", body)
+	}
+	s := r.Steps[0]
+	if s.Name != "imported" || s.TookMs != nil || s.Command != nil || s.OutputLines != 250 || len(s.Output) != 200 ||
+		s.Output[0] != "line 50" || s.Output[199] != "line 249" || s.Outcome == nil || *s.Outcome != "done" {
+		t.Errorf("imported step %+v", s)
+	}
+
+	// a job with no lines and no steps has no log at all: state none, no steps
+	id2, _ := st.Enqueue(jobs.Job{Library: "/m", LibraryID: l.ID, Path: "/m/b.mkv"})
+	st.Claim("t")
+	st.Complete(id2, "/m/b.hevc.mkv", 100)
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id2, 10) + "/log"})
+	r.Steps = nil
+	if err := json.Unmarshal([]byte(body), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.State != "none" || len(r.Steps) != 0 {
+		t.Errorf("no log: %s", body)
+	}
+}
