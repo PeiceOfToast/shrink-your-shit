@@ -19,7 +19,7 @@ const TYPE: Record<ShareType, { label: string; hint: string }> = {
 };
 
 function ShareRow({ share, resp, onChanged, said }: { share: Share; resp: SharesResponse; onChanged: () => void; said: (m: string) => void }) {
-  const [menu, setMenu] = useState(false), [removing, setRemoving] = useState(false), [editing, setEditing] = useState(false);
+  const [removing, setRemoving] = useState(false), [editing, setEditing] = useState(false);
   const libs = share.libraries.map((l) => l.name).join(", ");
   const statusClass = share.status === "connected" ? "ok" : share.status === "not_connected" ? "bad" : share.status === "waiting_setup" ? "warn" : "";
   const statusIcon = share.status === "connected" ? "i-check-c" : share.status === "connecting" || share.status === "waiting_setup" ? "i-clock" : "i-alert";
@@ -27,29 +27,32 @@ function ShareRow({ share, resp, onChanged, said }: { share: Share; resp: Shares
   const canReconnect = share.status !== "connected" && resp.mode === "app";
   const canCheck = share.status !== "connected" && (resp.mode === "manual" || resp.mode === "docker");
   const reconnect = async () => { const r = await act(canReconnect ? reconnectShare(share.id) : checkShare(share.id), said); if (r) { said("Done."); onChanged(); } };
+  const closeMenu = (e: React.MouseEvent) => { (e.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open"); };
 
   return (
     <tr>
       <td className="idc"><button className="ttl linkbtn" type="button" onClick={() => setEditing(true)}>{share.name}</button>
         <span className="sub mono">{share.address}</span>
+        {share.reason && <span className="sub phone">{share.reason.message}</span>}
+        {(canReconnect || canCheck) && <span className="sub phone">{canReconnect ? "Reconnect" : canCheck ? "Check again" : ""}</span>}
         {share.libraries.length > 0 && <span className="sub phone">Used by {libs}</span>}
         <span className="sub phone">{TYPE[share.type].label}</span></td>
       <td data-p="2">{TYPE[share.type].label}</td>
       <td className="stc"><span className={"st " + statusClass}><Icon id={statusIcon} /><span>{statusText}</span></span>
-        {share.reason && <span className="sub over">{share.reason.message}</span>}
-        {share.status === "waiting_setup" && share.setup && <div className="codebox over" style={{ marginTop: 8 }}><code>{share.setup.text}</code><button className="btn sm over" type="button" onClick={() => navigator.clipboard?.writeText(share.setup!.text).catch(() => {})}><Icon id="i-copy" />Copy</button></div>}
-        {(canReconnect || canCheck) && <div className="row over" style={{ marginTop: 8 }}>{canReconnect && <button className="btn sm over" type="button" onClick={reconnect}><Icon id="i-refresh" />Reconnect</button>}{canCheck && <button className="btn sm over" type="button" onClick={reconnect}><Icon id="i-refresh" />Check again</button>}</div>}
+        {share.reason && <span className="sub">{share.reason.message}</span>}
+        {share.status === "waiting_setup" && share.setup && <div className="codebox" style={{ marginTop: 8 }}><code>{share.setup.text}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(share.setup!.text).catch(() => {})}><Icon id="i-copy" />Copy</button></div>}
+        {(canReconnect || canCheck) && <div className="row" style={{ marginTop: 8 }}>{canReconnect && <button className="btn sm" type="button" onClick={() => reconnect()}><Icon id="i-refresh" />Reconnect</button>}{canCheck && <button className="btn sm" type="button" onClick={() => reconnect()}><Icon id="i-refresh" />Check again</button>}</div>}
       </td>
       <td data-p="2">{libs ? <a href="#">{libs}</a> : <span className="muted">Not used</span>}</td>
       <td className="actc">
-        <details className="menu" open={menu}>
-          <summary className="btn icon ghost sm" aria-label={"Actions for " + share.name} onClick={() => setMenu(!menu)}><Icon id="i-more" /></summary>
-          {menu && <div className="pop" role="menu">
-            {canReconnect && <button className="it" type="button" onClick={() => (setMenu(false), reconnect())}>Reconnect</button>}
-            {canCheck && <button className="it" type="button" onClick={() => (setMenu(false), reconnect())}>Check again</button>}
-            <button className="it" type="button" onClick={() => (setMenu(false), setEditing(true))}>Edit</button>
-            <button className="it" type="button" onClick={() => (setMenu(false), setRemoving(true))}>Remove...</button>
-          </div>}
+        <details className="menu">
+          <summary className="btn icon ghost sm" aria-label={"Actions for " + share.name}><Icon id="i-more" /></summary>
+          <div className="pop" role="menu">
+            {canReconnect && <button className="it" type="button" onClick={(e) => { closeMenu(e); reconnect(); }}>Reconnect</button>}
+            {canCheck && <button className="it" type="button" onClick={(e) => { closeMenu(e); reconnect(); }}>Check again</button>}
+            <button className="it" type="button" onClick={(e) => { closeMenu(e); setEditing(true); }}>Edit</button>
+            <button className="it" type="button" onClick={(e) => { closeMenu(e); setRemoving(true); }}>Remove...</button>
+          </div>
         </details>
         {removing && <RemoveDialog share={share} onCancel={() => setRemoving(false)} onDone={() => { setRemoving(false); onChanged(); }} said={said} />}
         {editing && <ShareSheet share={share} resp={resp} onDone={() => { setEditing(false); onChanged(); }} onCancel={() => setEditing(false)} said={said} />}
