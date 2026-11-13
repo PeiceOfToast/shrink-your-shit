@@ -1,7 +1,7 @@
 // V6 Jobs on the real /api/v2/jobs (#113), or the sample jobs with ?mock=1 (mock/jobs.ts).
 import { call, failed, MOCK, type Answer } from "./api";
 import { mockAction, mockJob, mockJobs, mockJobLog, mockConvertAgain } from "./mock/jobs";
-import type { ActionResult, JobAction, JobDetail, JobsPage, Probe, Tab, Pin } from "./types/jobs";
+import type { ActionResult, JobAction, JobDetail, JobItem, JobsPage, Probe, Tab, Pin } from "./types/jobs";
 
 export async function listJobs(tab: Tab, q: string, library = "", limit = 200): Promise<Answer<JobsPage>> {
   if (MOCK) return mockJobs(tab, q);
@@ -23,6 +23,14 @@ export interface JobLog { state: string; steps: LogStep[]; final: string }
 export async function getJobLog(id: string): Promise<Answer<JobLog>> {
   if (MOCK) return mockJobLog(id);
   return call("GET", "/api/v2/jobs/" + encodeURIComponent(id) + "/log");
+}
+// E: a file's jobs, every state, newest first: the list takes ?path= (the file's exact path) on each tab, so five asks
+const TABS: Tab[] = ["waiting", "running", "completed", "skipped", "failed"];
+export async function fileJobs(path: string): Promise<Answer<JobItem[]>> {
+  const rs = MOCK ? TABS.map((t) => mockJobs(t, "")) : await Promise.all(TABS.map((t) => call<JobsPage>("GET", "/api/v2/jobs?tab=" + t + "&limit=200&path=" + encodeURIComponent(path))));
+  const bad = rs.find((r) => failed(r)); if (bad) return bad;
+  const at = (j: JobItem) => j.finishedAt ?? "";
+  return rs.flatMap((r) => (r as JobsPage).items).filter((j) => j.path === path).sort((a, b) => (at(a) < at(b) ? 1 : -1));
 }
 export async function getJob(id: string): Promise<Answer<JobDetail>> {
   if (MOCK) return mockJob(id) ?? { error: { code: "not_found", message: "There is no such job." } };
