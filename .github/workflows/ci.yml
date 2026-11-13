@@ -217,6 +217,11 @@ jobs:
           tok=$(docker exec syp shrink-your-shit token | sed -n 's/^Access token: //p')
           test -n "$tok"
           curl -fsS -H "Authorization: Bearer $tok" http://127.0.0.1:8484/api/status
+          # no /dev/dri here: after a real encoder test, Quick Sync and VA-API are failed with the device reason
+          w=$(curl -fsS -X POST -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8484/api/v2/workers/local/capabilities/test)
+          for e in hevc_qsv hevc_vaapi; do
+            echo "$w" | jq -e --arg k "encoder:$e" '.capabilities[] | select(.key == $k) | select(.test == "failed" and (.detail | contains("/dev/dri is missing")))' >/dev/null || { echo "$w" | jq '.capabilities'; echo "$e: want failed with the /dev/dri reason"; exit 1; }
+          done
 
   windows-installer:
     name: windows installer (build + install/convert/uninstall test)
