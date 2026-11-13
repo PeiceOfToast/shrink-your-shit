@@ -835,7 +835,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		if errors.As(err, &k) && plan.Video.PeakLimitKbps > 0 && strings.HasPrefix(k.Reason, pictureTooDifferent) {
 			// design (SCREENS V3 step 3): VBR's own words; the measured similarity goes to the run log
 			w.jobf(job.ID, ": %s", k.Reason)
-			k.Reason = "Kept the original: under a " + rules.Mbps(plan.Video.PeakLimitKbps) + " Mbps peak limit the picture would suffer."
+			k.Reason = "Kept the original: under a " + rules.Mbps(plan.Video.PeakLimitKbps) + " Mbps max bitrate the picture would suffer."
 		}
 		return "", err
 	}
