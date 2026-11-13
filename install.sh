@@ -28,6 +28,7 @@ LIBS=${SYP_LIBRARIES:-}
 FLAG_LIBS=
 ADDR=${SYP_ADDR:-}
 NO_START=
+NETWORK_SHARES=
 RUN_FG=
 
 say() { printf '%s\n' "$*"; }
@@ -37,7 +38,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 
 usage() {
   cat <<'USAGE'
-Usage: install.sh [--library DIR]... [--addr ADDR] [--version X.Y.Z] [--no-start] [--run]
+Usage: install.sh [--library DIR]... [--addr ADDR] [--version X.Y.Z] [--network-shares|--no-network-shares] [--no-start] [--run]
   --library DIR    folder to watch (repeat for several); default: none, add folders on the web page
   --addr ADDR      web address, default 127.0.0.1:8484 (this computer only); beyond it, an access token is needed
   --version X.Y.Z  install that release instead of the newest
@@ -54,6 +55,8 @@ while [ $# -gt 0 ]; do
     --version) [ $# -ge 2 ] || die "--version needs a number like 0.1.0"; VERSION=$2; shift 2 ;;
     --no-start) NO_START=1; shift ;;
     --run) RUN_FG=1; shift ;;
+    --network-shares) NETWORK_SHARES=1; shift ;;
+    --no-network-shares) NETWORK_SHARES=0; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1 (try --help)" ;;
   esac
@@ -279,6 +282,63 @@ NoNewPrivileges=true
 WantedBy=multi-user.target
 UNIT
     $SUDO install -m 0644 "$tmp/unit" "$UNIT"
+
+    # ── Network shares helper ──────────────────────────────────────────────
+    HELPER_BIN=/usr/local/libexec/shrink-your-shit/syp-network-helper
+    HELPER_UNIT=/etc/systemd/system/syp-network-helper.service
+    HELPER_USER=syp
+    if [ -z "$NETWORK_SHARES" ]; then
+      # No flag: ask on an interactive terminal
+      if [ -t 0 ] && [ -t 1 ]; then
+        printf "Let Shrink Your Shit connect network shares (SMB/NFS) itself?\n"
+        printf "This installs a small helper that runs as root and can only mount\n"
+        printf "shares in /var/lib/syp/shares. [y/N] "
+        read -r yn
+        case $yn in y|Y) NETWORK_SHARES=1 ;; *) NETWORK_SHARES=0 ;; esac
+      else
+        NETWORK_SHARES=0
+      fi
+    fi
+    if [ "$NETWORK_SHARES" = 1 ]; then
+      # Install helper binary (included in the release archive for Linux)
+      $SUDO install -d -o root -g root -m 0755 /var/lib/syp /var/lib/syp/shares
+      $SUDO install -o root -g root -m 0755 "$tmp/x/syp-network-helper" "$HELPER_BIN"
+      # Install mount packages if missing
+      if ! have mount.cifs; then
+        if have apt-get; then
+          $SUDO apt-get install -y --no-install-recommends cifs-utils nfs-common
+        elif have dnf; then
+          $SUDO dnf install -y cifs-utils nfs-utils
+        elif have apk; then
+          $SUDO apk add cifs-utils nfs-utils
+        fi
+      fi
+      # Write the helper service unit
+      cat > "$tmp/helper-unit" <<HLPUNIT
+[Unit]
+Description=Shrink Your Shit network share helper (mounts SMB/NFS shares in /var/lib/syp/shares)
+After=network-online.target
+Wants=network-online.target
+Before=shrink-your-shit.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=$HELPER_BIN -user $HELPER_USER
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+HLPUNIT
+      $SUDO install -m 0644 "$tmp/helper-unit" "$HELPER_UNIT"
+      $SUDO systemctl enable --now syp-network-helper
+    elif [ "$NETWORK_SHARES" = 0 ] && [ -f "$HELPER_UNIT" ]; then
+      $SUDO systemctl disable --now syp-network-helper 2>/dev/null || true
+      $SUDO rm -f "$HELPER_UNIT" "$HELPER_BIN"
+      $SUDO systemctl daemon-reload
+    fi
+
     $SUDO systemctl daemon-reload
     if [ -n "$NO_START" ]; then
       $SUDO systemctl enable shrink-your-shit >/dev/null 2>&1
