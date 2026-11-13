@@ -105,6 +105,13 @@ func TestSharesAddressParsing(t *testing.T) {
 		{"", false, 4},
 		{"nas", false, 5},
 		{"smb://", false, 6},
+		// a port is refused when saving too (the root helper takes none); IPv6 in brackets is not a port
+		{"smb://nas:1445/media", false, 7},
+		{"nas:2049:/volume1/media", false, 9},
+		{"nfs://nas:2049/volume1", false, 10},
+		{"smb://[fe80::1]/media", true, 11},
+		{"[fd00::2]:/srv/nfs", true, 12},
+		{"smb://[fe80::1]:1445/media", false, 13},
 	}
 	for _, c := range checks {
 		name := "Test" + strconv.Itoa(c.id)
@@ -426,4 +433,30 @@ func closedPort(t *testing.T) string {
 	_, port, _ := net.SplitHostPort(ln.Addr().String())
 	ln.Close()
 	return port
+}
+
+// hasPort and addressHost (orch-lead, ui-shop QA of #217): a port is found in both forms; an IPv6 address alone is not one.
+func TestShareAddressHostAndPort(t *testing.T) {
+	for _, c := range []struct {
+		typ, addr, host string
+		port            bool
+	}{
+		{"smb", `\\nas\media`, "nas", false},
+		{"smb", `\\nas:1445\media`, "nas:1445", true},
+		{"smb", `\\[fe80::1]\media`, "[fe80::1]", false},
+		{"smb", `\\[fe80::1]:1445\media`, "[fe80::1]:1445", true},
+		{"nfs", "nas:/volume1/media", "nas", false},
+		{"nfs", "nas:2049:/volume1", "nas:2049", true},
+		{"nfs", "[fd00::2]:/srv/nfs", "[fd00::2]", false},
+		{"nfs", "10.0.0.2:/export", "10.0.0.2", false},
+		{"nfs", "[fd00::2]:2049:/x", "[fd00::2]:2049", true},
+	} {
+		host := addressHost(c.typ, c.addr)
+		if host != c.host || hasPort(host) != c.port {
+			t.Errorf("%s %q: host %q port %v, want %q %v", c.typ, c.addr, host, hasPort(host), c.host, c.port)
+		}
+	}
+	if dialHost("[fe80::1]") != "fe80::1" || dialHost("nas") != "nas" {
+		t.Error("dialHost")
+	}
 }

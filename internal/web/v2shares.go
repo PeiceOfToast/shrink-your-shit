@@ -215,7 +215,55 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 	})
 }
 
+// parseAddress cleans a share address and refuses one with a port: the root helper takes none (SMB always uses
+// 445, NFS 2049), so a share saved with one could never connect (orch-lead, ui-shop QA of #217).
 func parseAddress(raw string) (addr, typ string, err error) {
+	addr, typ, err = parseAddressForm(raw)
+	if err != nil {
+		return "", "", err
+	}
+	if hasPort(addressHost(typ, addr)) {
+		if typ == "smb" {
+			return "", "", errors.New("Leave out the port: SMB always uses 445.")
+		}
+		return "", "", errors.New("Leave out the port: NFS uses 2049.")
+	}
+	return addr, typ, nil
+}
+
+// addressHost is the server part of a cleaned address: \\server\share or server:/export (IPv6 in brackets).
+func addressHost(typ, addr string) string {
+	if typ == "smb" {
+		return strings.SplitN(strings.TrimPrefix(addr, `\\`), `\`, 2)[0]
+	}
+	if strings.HasPrefix(addr, "[") { // [fd00::2]:/export, or with a port [fd00::2]:2049:/export
+		if i := strings.Index(addr, "]"); i >= 0 {
+			rest := addr[i+1:]
+			if j := strings.Index(rest, ":/"); j >= 0 {
+				return addr[:i+1] + rest[:j]
+			}
+			return addr[:i+1] + strings.SplitN(rest, "/", 2)[0]
+		}
+	}
+	if i := strings.Index(addr, ":/"); i >= 0 {
+		return addr[:i]
+	}
+	return strings.SplitN(addr, "/", 2)[0]
+}
+
+// hasPort reports whether a host names a port: "nas:1445", or "[fe80::1]:1445" (a bracketed IPv6 address alone has none).
+func hasPort(host string) bool {
+	if strings.HasPrefix(host, "[") {
+		i := strings.Index(host, "]")
+		return i >= 0 && strings.HasPrefix(host[i+1:], ":")
+	}
+	return strings.Contains(host, ":")
+}
+
+// dialHost is a host for net.JoinHostPort: an IPv6 address without its brackets.
+func dialHost(host string) string { return strings.TrimSuffix(strings.TrimPrefix(host, "["), "]") }
+
+func parseAddressForm(raw string) (addr, typ string, err error) {
 	raw = strings.TrimSpace(raw)
 	low := strings.ToLower(raw)
 	switch {
@@ -276,8 +324,7 @@ func testSMB(address, username, password string, guest bool) map[string]any {
 	}
 	server := parts[0]
 	shareName := strings.Join(parts[1:], "\\")
-	// Reject addresses with a port
-	if strings.Contains(server, ":") {
+	if hasPort(server) { // parseAddress refuses these first; kept for a direct call
 		return map[string]any{"ok": false, "code": "invalid_address",
 			"message": "Leave out the port: SMB always uses 445."}
 	}
@@ -285,7 +332,7 @@ func testSMB(address, username, password string, guest bool) map[string]any {
 	dialer := &smb2.Dialer{Initiator: ini}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	session, err := dialer.Dial(ctx, net.JoinHostPort(server, smbPort))
+	session, err := dialer.Dial(ctx, net.JoinHostPort(dialHost(server), smbPort))
 	if err != nil {
 		return smbError(err, server, shareName)
 	}
@@ -340,16 +387,15 @@ func smbError(err error, server, share string) map[string]any {
 }
 
 func testNFS(address string) map[string]any {
-	server := strings.Split(address, ":")[0]
+	server := addressHost("nfs", address)
 	if server == "" {
 		return map[string]any{"ok": false, "code": "invalid_address", "message": "Use server:/export."}
 	}
-	// Reject addresses with a port in the server part (e.g. "nas:2049:/path")
-	if strings.Contains(server, ":") || strings.Count(address, ":") > 1 {
+	if hasPort(server) { // parseAddress refuses these first; kept for a direct call
 		return map[string]any{"ok": false, "code": "invalid_address",
 			"message": "Leave out the port: NFS uses 2049."}
 	}
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(server, nfsPort), 10*time.Second)
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(dialHost(server), nfsPort), 10*time.Second)
 	if err != nil {
 		msg := err.Error()
 		if strings.Contains(strings.ToLower(msg), "no such host") {
