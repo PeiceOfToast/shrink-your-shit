@@ -36,17 +36,17 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	workerRoutes(api, store, ss, eng)
 	previewRoutes(api, store, eng)
 	wv := newWorkerView(store, ss, eng)
-	v2Shares(api, store)                  // Item D: /api/v2/shares
-	v2Summary(api, store, wv)             // V3c: /api/v2/summary, processing and intake pauses
-	v2Overview(api, store, wv)            // user review 11-12 item 5: /api/v2/overview
-	v2EventStream(api, store, wv)         // V3a: /api/v2/events (live updates)
-	v2Workers(api, wv)                    // V4a: /api/v2/workers
-	v2Libraries(api, store, eng)          // V5b: /api/v2/libraries
-	v2Jobs(api, store)                    // V2: /api/v2/jobs
-	v2JobLog(api, store)                  // user review 11-13 item E: /api/v2/jobs/{id}/log
-	v2Ladder(api)                         // user review 11-12 item 1: /api/v2/bitrate-ladder
-	v2JobStreams(api, store)              // V3d: /api/v2/activity, per-job streams
-	v2Workflows(api, store, eng)          // UI rebuild, V1: /api/v2 workflows
+	v2Shares(api, store)          // Item D: /api/v2/shares
+	v2Summary(api, store, wv)     // V3c: /api/v2/summary, processing and intake pauses
+	v2Overview(api, store, wv)    // user review 11-12 item 5: /api/v2/overview
+	v2EventStream(api, store, wv) // V3a: /api/v2/events (live updates)
+	v2Workers(api, wv)            // V4a: /api/v2/workers
+	v2Libraries(api, store, eng)  // V5b: /api/v2/libraries
+	v2Jobs(api, store)            // V2: /api/v2/jobs
+	v2JobLog(api, store)          // user review 11-13 item E: /api/v2/jobs/{id}/log
+	v2Ladder(api)                 // user review 11-12 item 1: /api/v2/bitrate-ladder
+	v2JobStreams(api, store)      // V3d: /api/v2/activity, per-job streams
+	v2Workflows(api, store, eng)  // UI rebuild, V1: /api/v2 workflows
 	// For health checks: answers without signing in and says nothing else.
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")

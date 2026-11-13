@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cloudsoda/go-smb2"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
@@ -276,7 +277,8 @@ func testSMB(address, username, password string, guest bool) map[string]any {
 	shareName := strings.Join(parts[1:], "\\")
 	ini := &smb2.NTLMInitiator{User: username, Password: password}
 	dialer := &smb2.Dialer{Initiator: ini}
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	session, err := dialer.Dial(ctx, server+":445")
 	if err != nil {
 		return smbError(err)
@@ -313,9 +315,13 @@ func smbError(err error) map[string]any {
 		return map[string]any{"ok": false, "code": "host_unreachable", "message": msg}
 	case strings.Contains(low, "timeout"), strings.Contains(low, "timed out"):
 		return map[string]any{"ok": false, "code": "timeout", "message": "The server didn't answer in time."}
-	case strings.Contains(low, "authentication"), strings.Contains(low, "login"), strings.Contains(low, "access denied"):
-		return map[string]any{"ok": false, "code": "auth_failed", "message": "Access denied: the username or password is not correct."}
+	case strings.Contains(low, "logon failure"), strings.Contains(low, "logon"):
+		return map[string]any{"ok": false, "code": "auth_failed", "message": "The username or password is not correct."}
+	case strings.Contains(low, "access denied"):
+		return map[string]any{"ok": false, "code": "access_denied", "message": "Access denied: the account doesn't have permission on this share."}
 	case strings.Contains(low, "not found"), strings.Contains(low, "does not exist"):
+		// TODO D2: detect this error from go-smb2 and, when the server lists shares,
+		// return "shares": [...] with the server's export list for the UI to suggest.
 		return map[string]any{"ok": false, "code": "share_not_found", "message": msg}
 	}
 	return map[string]any{"ok": false, "code": "mount_failed", "message": msg}
@@ -326,7 +332,7 @@ func testNFS(address string) map[string]any {
 	if server == "" {
 		return map[string]any{"ok": false, "code": "invalid_address", "message": "Use server:/export."}
 	}
-	conn, err := net.Dial("tcp", server+":2049")
+	conn, err := net.DialTimeout("tcp", server+":2049", 10*time.Second)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "no such host") {
 			return map[string]any{"ok": false, "code": "host_not_found", "message": "The NFS server was not found."}
