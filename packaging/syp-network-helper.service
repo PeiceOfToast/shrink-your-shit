@@ -1,0 +1,25 @@
+[Unit]
+Description=Shrink Your Shit network share helper (SMB/NFS)
+Documentation=https://github.com/PeiceOfToast/shrink-your-shit
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/lib/shrink-your-shit/syp-network-helper -user syp
+Restart=on-failure
+RestartSec=5
+# ProtectHome=read-only is OK: the helper reads /etc/shrink-your-shit/share-key
+# and writes credentials to /run/shrink-your-shit/. PrivateTmp is NOT set:
+# the helper writes under /run, and PrivateTmp would redirect it to a private
+# /run that the app cannot find. NoNewPrivileges is NOT set: mount.cifs may
+# need setuid helpers (mount.nfs) on some systems.
+ProtectHome=read-only
+ProtectSystem=full
+ReadWritePaths=/run/shrink-your-shit /var/lib/syp/shares /etc/shrink-your-shit
+CapabilityBoundingSet=CAP_SYS_ADMIN
+AmbientCapabilities=CAP_SYS_ADMIN
+
+[Install]
+WantedBy=multi-user.target
