@@ -43,6 +43,7 @@ export async function addShare(input: ShareCreateInput): Promise<Answer<Share>> 
           : "# Remove the volume block for " + input.name + " from compose.yml",
       },
     };
+    mockState().shares = [...mockState().shares, share];
     if (mode === "app") setTimeout(() => { const st = mockState(); const x = st.shares.find((x) => x.id === id); if (x) x.status = "connected"; }, 1500);
     return share;
   }
