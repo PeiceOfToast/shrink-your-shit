@@ -104,7 +104,7 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 		guest := existing.Guest
 		pw := ""
 		changed := false
-		oldMpt := "/var/lib/syp/shares/" + sanitiseName(existing.Name, existing.ID)
+		oldMpt := mountPointFor(*existing)
 		if pwStr, ok := raw["password"].(string); ok {
 			pw = pwStr
 			changed = true
@@ -180,7 +180,7 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 		if mode, _ := detectMode(); mode == "app" {
 			sh, err := store.ShareByID(id)
 			if err == nil && sh != nil {
-				mpt := "/var/lib/syp/shares/" + sanitiseName(sh.Name, sh.ID)
+				mpt := mountPointFor(*sh)
 				if err := helper.Unmount(mpt); err != nil {
 					apiError(w, http.StatusConflict, "share_in_use",
 						"The share could not be unmounted. "+err.Error()+".")
@@ -252,6 +252,9 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 		if err != nil || sh == nil {
 			apiError(w, http.StatusNotFound, "not_found", "There is no such share.")
 			return
+		}
+		if shareWatched() {
+			checkShare(store, *sh) // the person has just set it up: look now, not in a minute
 		}
 		writeJSON(w, shareToJSON(store, *sh))
 	})
@@ -585,7 +588,7 @@ func shareToJSON(store *jobs.Store, sh jobs.Share) map[string]any {
 		"id": strconv.FormatInt(sh.ID, 10), "name": sh.Name, "type": sh.Type,
 		"address": addr, "guest": sh.Guest, "username": nilIfEmpty(sh.Username),
 		"hasPassword": sh.HasPassword, "status": status, "since": nilIfEmpty(since), "reason": reason,
-		"path":      "/var/lib/syp/shares/" + sanitiseName(sh.Name, sh.ID),
+		"path":      mountPointFor(sh),
 		"libraries": []any{}, "setup": setupForMode(store, sh),
 	}
 }
@@ -628,7 +631,7 @@ func nameTaken(store *jobs.Store, name string, excludeID int64) error {
 
 func setupForMode(store *jobs.Store, sh jobs.Share) any {
 	mode, _ := detectMode()
-	mpt := "/var/lib/syp/shares/" + sanitiseName(sh.Name, sh.ID)
+	mpt := mountPointFor(sh)
 	mntAddr := mountAddress(sh.Type, sh.Address)
 	switch mode {
 	case "manual":
@@ -655,11 +658,30 @@ func setupForMode(store *jobs.Store, sh jobs.Share) any {
 			"removeText": "sudo umount " + shellQuote(mpt),
 		}
 	case "docker":
+		vol := sanitiseName(sh.Name, sh.ID)
+		var driver string
+		if sh.Type == "nfs" {
+			server, export, ok := strings.Cut(sh.Address, ":")
+			if !ok {
+				export = "/"
+			}
+			driver = fmt.Sprintf("      type: nfs\n      device: %q\n      o: %q", ":"+export, "addr="+server+",soft,nfsvers=4")
+		} else if sh.Guest {
+			driver = fmt.Sprintf("      type: cifs\n      device: %q\n      o: \"guest,vers=3.1.1,soft\"", mntAddr)
+		} else {
+			driver = fmt.Sprintf("      type: cifs\n      device: %q\n      o: %q", mntAddr,
+				"credentials=/path/to/"+vol+".cred,vers=3.1.1,soft")
+		}
+		note := ""
+		if sh.Type == "smb" && !sh.Guest {
+			note = "# You create /path/to/" + vol + ".cred yourself, mode 600, with two lines: username=... and password=...\n"
+		}
 		return map[string]any{
 			"kind": "compose",
-			"text": fmt.Sprintf("  %s:\n    driver_opts:\n      type: %s\n      device: %q\n      o: credentials=/path/to/credentials-file,vers=3.1.1,soft",
-				sanitiseName(sh.Name, sh.ID), sh.Type, sh.Address),
-			"removeText": fmt.Sprintf("Remove the %q volume from your compose file and restart.", sanitiseName(sh.Name, sh.ID)),
+			"text": note + "volumes:\n  " + vol + ":\n    driver_opts:\n" + driver +
+				"\n\nservices:\n  syp:  # the app's service: use its name in your compose file\n    volumes:\n      - " +
+				fmt.Sprintf("%q", vol+":"+mpt),
+			"removeText": fmt.Sprintf("Remove the %q volume from your compose file and restart.", vol),
 		}
 	}
 	return nil
