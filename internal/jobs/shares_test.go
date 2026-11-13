@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestEncryptionRoundTrip encrypts a password and decrypts it back.
@@ -253,5 +254,37 @@ func TestGuestShare(t *testing.T) {
 	got, _ := s.ShareByID(saved.ID)
 	if got.HasPassword {
 		t.Error("guest share has hasPassword=true")
+	}
+}
+
+// since is when the current status began: it resets when the status changes and stays while it doesn't.
+func TestShareMountSinceResetsOnStatusChange(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	s, err := Open(filepath.Join(t.TempDir(), "syp.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Date(2026, 11, 13, 10, 0, 0, 0, time.UTC)
+	s.now = func() time.Time { return now }
+	saved, _ := s.SaveShare(Share{Type: "smb", Address: `\\nas\share`, Name: "T"}, "pw")
+	since := func() string {
+		m, _ := s.ShareMountsByShare(saved.ID)
+		if len(m) == 0 {
+			t.Fatal("no mount row")
+		}
+		return m[0].Since
+	}
+	_ = s.SetShareMountStatus(saved.ID, "linux", "connected", "")
+	first := since()
+	now = now.Add(time.Hour)
+	_ = s.SetShareMountStatus(saved.ID, "linux", "connected", "")
+	if since() != first {
+		t.Errorf("same status moved since: %s -> %s", first, since())
+	}
+	now = now.Add(time.Hour)
+	_ = s.SetShareMountStatus(saved.ID, "linux", "not_connected", `{"code":"timeout"}`)
+	if want := now.Format(time.RFC3339); since() != want {
+		t.Errorf("status change: since %s, want %s", since(), want)
 	}
 }

@@ -223,7 +223,7 @@ func (s *Store) ShareByID(id int64) (*Share, error) {
 }
 
 func (s *Store) ShareMountsByShare(shareID int64) ([]ShareMount, error) {
-	rows, err := s.db.Query(`SELECT id, share_id, mount_path, platform, status, error, mounted_at, since
+	rows, err := s.db.Query(`SELECT id, share_id, mount_path, platform, status, COALESCE(error,''), COALESCE(mounted_at,''), COALESCE(since,'')
 		FROM share_mounts WHERE share_id=?`, shareID)
 	if err != nil {
 		return nil, err
@@ -248,8 +248,9 @@ func (s *Store) DecryptSharePassword(id int64) (string, error) {
 
 func (s *Store) SetShareMountStatus(shareID int64, platform, status, error string) error {
 	now := s.now().UTC().Format(time.RFC3339)
-	r, err := s.db.Exec(`UPDATE share_mounts SET status=?, error=?, since=COALESCE(since,?), mounted_at=CASE WHEN ?='connected' THEN ? ELSE mounted_at END
-		WHERE share_id=? AND platform=?`, status, error, now, status, now, shareID, platform)
+	r, err := s.db.Exec(`UPDATE share_mounts SET since=CASE WHEN status=? AND since IS NOT NULL THEN since ELSE ? END, status=?, error=?,
+		mounted_at=CASE WHEN ?='connected' THEN ? ELSE mounted_at END
+		WHERE share_id=? AND platform=?`, status, now, status, error, status, now, shareID, platform)
 	if err != nil {
 		return err
 	}

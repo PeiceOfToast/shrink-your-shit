@@ -22,12 +22,12 @@ import (
 )
 
 func v2Shares(api *http.ServeMux, store *jobs.Store) {
-	mode, platform := detectMode()
+	_, platform := detectMode()
 	nfsOK := platform != "darwin"
 	tested := platform != "darwin"
 
 	api.HandleFunc("GET /api/v2/shares", func(w http.ResponseWriter, r *http.Request) {
-		mode, platform = detectMode()
+		mode, _ := detectMode() // per request: the helper can start or stop while the app runs
 		all, err := store.LoadShares()
 		if err != nil {
 			serverError(w, err)
@@ -77,9 +77,7 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 			serverError(w, err)
 			return
 		}
-		if mode == "app" {
-			tryMount(store, saved, in.Password)
-		}
+		tryMount(store, saved, in.Password)
 		writeJSONStatus(w, http.StatusCreated, shareToJSON(store, saved))
 	})
 
@@ -106,6 +104,7 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 		guest := existing.Guest
 		pw := ""
 		changed := false
+		oldMpt := "/var/lib/syp/shares/" + sanitiseName(existing.Name, existing.ID)
 		if pwStr, ok := raw["password"].(string); ok {
 			pw = pwStr
 			changed = true
@@ -150,7 +149,8 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 			serverError(w, err)
 			return
 		}
-		if mode == "app" && changed {
+		if mode, _ := detectMode(); mode == "app" && changed {
+			_ = helper.Unmount(oldMpt) // a rename moves the mount point; the old one must not stay mounted
 			sh, err := store.ShareByID(id)
 			if err == nil && sh != nil {
 				stale := pw
@@ -174,7 +174,7 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 			apiError(w, http.StatusNotFound, "not_found", "There is no such share.")
 			return
 		}
-		if mode == "app" {
+		if mode, _ := detectMode(); mode == "app" {
 			sh, err := store.ShareByID(id)
 			if err == nil && sh != nil {
 				mpt := "/var/lib/syp/shares/" + sanitiseName(sh.Name, sh.ID)
@@ -231,7 +231,7 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 			apiError(w, http.StatusNotFound, "not_found", "There is no such share.")
 			return
 		}
-		if mode == "app" {
+		if mode, _ := detectMode(); mode == "app" {
 			pw, _ := store.DecryptSharePassword(id)
 			tryMount(store, *sh, pw)
 		}

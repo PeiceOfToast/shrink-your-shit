@@ -878,3 +878,45 @@ func setupField(created map[string]any, key string) string {
 	s, _ := setup[key].(string)
 	return s
 }
+
+// A rename moves the mount point, so PATCH unmounts the old one before mounting at the new one.
+func TestSharesAppModeRenameUnmountsOldMountPoint(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	os.MkdirAll(home, 0o755)
+	t.Setenv("HOME", home)
+
+	sock := filepath.Join(dir, "helper.sock")
+	saved := helper.HelperSocket
+	helper.HelperSocket = sock
+	defer func() { helper.HelperSocket = saved }()
+	cmds := fakeHelper(t, sock, func(map[string]any) map[string]any {
+		return map[string]any{"ok": true, "pid": 42}
+	})
+
+	srv, _, _ := server(t, false)
+	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares",
+		body:  `{"address":"\\\\nas\\share","name":"Old","username":"u","password":"p"}`,
+		ctype: "application/json"})
+	if code != http.StatusCreated {
+		t.Fatalf("POST: %d %s", code, resp)
+	}
+	var created map[string]any
+	json.Unmarshal([]byte(resp), &created)
+	id := fmt.Sprintf("%v", created["id"])
+
+	code, resp, _ = do(t, nil, srv, call{method: "PATCH", path: "/api/v2/shares/" + id,
+		body: `{"name":"New"}`, ctype: "application/json"})
+	if code != http.StatusOK {
+		t.Fatalf("PATCH: %d %s", code, resp)
+	}
+	var order []string
+	for _, c := range cmds() {
+		mp, _ := c["mountPoint"].(string)
+		order = append(order, fmt.Sprintf("%v %s", c["cmd"], filepath.Base(mp)))
+	}
+	got := strings.Join(order, ", ")
+	if !strings.Contains(got, "unmount old, mount new") {
+		t.Errorf("helper calls %q: want an unmount of old, then a mount of new", got)
+	}
+}
