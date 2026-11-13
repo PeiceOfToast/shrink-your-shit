@@ -54,11 +54,11 @@ function Choice<T extends string | number>({ legend, name, value, options, onPic
 // Settings > Appearance (DESIGN/v2/THEMES.md): changes show at once and are kept on Save; leaving with unsaved
 // changes asks. The advanced theme editor (custom colours, presets, import/export) comes later.
 // Settings' tabs (SCREENS V9); the others come with their settings.
-export function SettingsTabs({ at }: { at: "general" | "appearance" | "processing" | "safety" | "integrations" | "backup" | "about" }) {
+export function SettingsTabs({ at }: { at: "general" | "shares" | "appearance" | "processing" | "safety" | "integrations" | "backup" | "about" }) {
   const tab = (k: typeof at, label: string) => <Link to={"/settings/" + k} aria-current={at === k ? "page" : undefined}>{label}</Link>;
   return (
     <nav className="tabs" aria-label="Settings sections">
-      {tab("general", "General")}{tab("appearance", "Appearance")}{tab("processing", "Processing")}{tab("safety", "Safety")}{tab("integrations", "Integrations")}{tab("backup", "Backup")}{tab("about", "About")}
+      {tab("general", "General")}{tab("shares", "Network shares")}{tab("appearance", "Appearance")}{tab("processing", "Processing")}{tab("safety", "Safety")}{tab("integrations", "Integrations")}{tab("backup", "Backup")}{tab("about", "About")}
     </nav>);
 }
 

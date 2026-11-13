@@ -65,6 +65,18 @@ interface State {
   activity: ActivityEvent[];
   wf: Workflow[];
   trash: Trash; // GET /trash (not on dev yet: mocked like the rest of the page)
+  shares: ShareItem[]; // D: network shares
+}
+
+// D: minimal share item for mock state
+interface ShareItem {
+  id: string; name: string; type: "smb" | "nfs"; address: string; guest: boolean;
+  username: string | null; hasPassword: boolean;
+  status: "connected" | "not_connected" | "connecting" | "waiting_setup";
+  since: string | null; reason: { code: string; message: string } | null;
+  path: string;
+  libraries: { id: string; name: string; use: "folder" | "output" }[];
+  setup: null | { kind: "command" | "compose"; text: string; removeText: string };
 }
 
 function running(): State {
@@ -98,6 +110,17 @@ function running(): State {
       workflow("w4", "Old settings", "Carried over from an earlier install", { summaryTag: "Settings from an earlier install" }),
     ],
     trash: { bytes: 120 * GB, files: 14, nextDeleteAt: ago(-60 * 24), lastDeleteAt: ago(-60 * 24 * 7) },
+    shares: [
+      { id: "1", name: "Movies NAS", type: "smb", address: "\\\\nas\\movies", guest: false, username: "mediauser", hasPassword: true,
+        status: "connected", since: ago(60 * 24 * 30), reason: null,
+        path: "/var/lib/syp/shares/movies-nas", libraries: [{ id: "l1", name: "Movies", use: "folder" }], setup: null },
+      { id: "2", name: "Music NAS", type: "nfs", address: "nas:/volume1/music", guest: true, username: null, hasPassword: false,
+        status: "not_connected", since: ago(1), reason: { code: "host_unreachable", message: "nas doesn't answer." },
+        path: "/var/lib/syp/shares/music-nas", libraries: [{ id: "l2", name: "TV Shows", use: "folder" }], setup: null },
+      { id: "3", name: "Backups", type: "smb", address: "\\\\nas\\backups", guest: false, username: "backupuser", hasPassword: true,
+        status: "connected", since: ago(60 * 24 * 14), reason: null,
+        path: "/var/lib/syp/shares/backups", libraries: [], setup: null },
+    ],
   };
 }
 function fresh(): State {
@@ -441,4 +464,18 @@ export function workerAction(id: ID, action: "start" | "stop" | "drain"): string
 }
 export function patchWorker(id: ID, p: { name?: string; slots?: { cpu?: number }; tags?: string[] }) {
   change((s) => { const x = s.workers.find((y) => y.id === id); if (!x) return; if (p.name) x.name = p.name; if (p.slots?.cpu) x.slots.cpu.total = p.slots.cpu; if (p.tags) x.tags = p.tags; });
+}
+
+// D: share actions
+export function addShareItem(s: ShareItem) {
+  change((st) => { st.shares = [...st.shares, s]; });
+}
+export function removeShareItem(id: string) {
+  change((st) => { st.shares = st.shares.filter((x) => x.id !== id); });
+}
+export function updateShareItem(id: string, patch: Partial<ShareItem>) {
+  change((st) => {
+    const x = st.shares.find((s) => s.id === id);
+    if (x) Object.assign(x, patch);
+  });
 }
