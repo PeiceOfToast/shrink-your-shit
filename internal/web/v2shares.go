@@ -179,7 +179,7 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 				mpt := "/var/lib/syp/shares/" + sanitiseName(sh.Name, sh.ID)
 				if err := helper.Unmount(mpt); err != nil {
 					apiError(w, http.StatusConflict, "share_in_use",
-						"The share could not be unmounted. " + err.Error() + ".")
+						"The share could not be unmounted. "+err.Error()+".")
 					return
 				}
 			}
@@ -497,7 +497,7 @@ func shareToJSON(store *jobs.Store, sh jobs.Share) map[string]any {
 		"id": strconv.FormatInt(sh.ID, 10), "name": sh.Name, "type": sh.Type,
 		"address": addr, "guest": sh.Guest, "username": nilIfEmpty(sh.Username),
 		"hasPassword": sh.HasPassword, "status": status, "since": nilIfEmpty(since), "reason": reason,
-		"path": "/var/lib/syp/shares/" + sanitiseName(sh.Name, sh.ID),
+		"path":      "/var/lib/syp/shares/" + sanitiseName(sh.Name, sh.ID),
 		"libraries": []any{}, "setup": setupForMode(store, sh),
 	}
 }
@@ -557,16 +557,16 @@ func setupForMode(store *jobs.Store, sh jobs.Share) any {
 				opts = "username=" + shellQuote(sh.Username) + ",vers=3.1.1,soft,nosuid,nodev,noexec,uid=syp,gid=syp,file_mode=0660,dir_mode=0770"
 			}
 			return map[string]any{
-				"kind": "command",
-				"text": mkdir + mountCmd + shellQuote(opts),
+				"kind":       "command",
+				"text":       mkdir + mountCmd + shellQuote(opts),
 				"removeText": "sudo umount " + shellQuote(mpt),
 			}
 		}
 		// NFS
 		opts = "soft,nosuid,nodev,noexec"
 		return map[string]any{
-			"kind": "command",
-			"text": mkdir + "sudo mount -t nfs " + shellQuote(mntAddr) + " " + shellQuote(mpt) + " -o " + shellQuote(opts),
+			"kind":       "command",
+			"text":       mkdir + "sudo mount -t nfs " + shellQuote(mntAddr) + " " + shellQuote(mpt) + " -o " + shellQuote(opts),
 			"removeText": "sudo umount " + shellQuote(mpt),
 		}
 	case "docker":

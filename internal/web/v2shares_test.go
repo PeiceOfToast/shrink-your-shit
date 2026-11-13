@@ -488,7 +488,7 @@ func TestSharesAppModeMountErrorMaps(t *testing.T) {
 		json.NewDecoder(conn).Decode(&cmd)
 		// Reply with an auth failure
 		json.NewEncoder(conn).Encode(map[string]any{
-			"ok": false,
+			"ok":    false,
 			"error": map[string]any{"code": "bad_request", "message": "Permission denied for user test"},
 		})
 		conn.Close()
@@ -497,7 +497,7 @@ func TestSharesAppModeMountErrorMaps(t *testing.T) {
 	srv, _, _ := server(t, false)
 
 	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares",
-		body: `{"address":"\\\\nas\\media","name":"MountTest","username":"user","password":"secret"}`,
+		body:  `{"address":"\\\\nas\\media","name":"MountTest","username":"user","password":"secret"}`,
 		ctype: "application/json"})
 	if code != http.StatusCreated {
 		t.Fatalf("POST: %d %s", code, resp)
@@ -562,7 +562,7 @@ func TestSharesPostAppModeCallsMount(t *testing.T) {
 	srv, _, _ := server(t, false)
 
 	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares",
-		body: `{"address":"\\\\nas\\media\\Movies","name":"My Share","username":"alice","password":"p@ss"}`,
+		body:  `{"address":"\\\\nas\\media\\Movies","name":"My Share","username":"alice","password":"p@ss"}`,
 		ctype: "application/json"})
 	if code != http.StatusCreated {
 		t.Fatalf("POST: %d %s", code, resp)
@@ -652,7 +652,7 @@ func TestSharesAppModeDeleteCallsUnmount(t *testing.T) {
 
 	// Create a share
 	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares",
-		body: `{"address":"\\\\nas\\share","name":"ToDelete","username":"u","password":"p"}`,
+		body:  `{"address":"\\\\nas\\share","name":"ToDelete","username":"u","password":"p"}`,
 		ctype: "application/json"})
 	if code != http.StatusCreated {
 		t.Fatalf("POST: %d %s", code, resp)
@@ -683,7 +683,7 @@ func TestSharesManualSetupTextSMB(t *testing.T) {
 	srv, _, _ := server(t, false)
 
 	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares",
-		body: `{"address":"\\\\server\\share","name":"MyShare","username":"alice"}`,
+		body:  `{"address":"\\\\server\\share","name":"MyShare","username":"alice"}`,
 		ctype: "application/json"})
 	if code != http.StatusCreated {
 		t.Fatalf("POST: %d %s", code, resp)
@@ -726,7 +726,7 @@ func TestSharesManualSetupTextNFS(t *testing.T) {
 	srv, _, _ := server(t, false)
 
 	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares",
-		body: `{"address":"server:/export","name":"NFSShare","type":"nfs"}`,
+		body:  `{"address":"server:/export","name":"NFSShare","type":"nfs"}`,
 		ctype: "application/json"})
 	if code != http.StatusCreated {
 		t.Fatalf("POST: %d %s", code, resp)
@@ -758,7 +758,7 @@ func TestSharesManualSetupTextGuest(t *testing.T) {
 	srv, _, _ := server(t, false)
 
 	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares",
-		body: `{"address":"\\\\server\\share","name":"GuestShare","guest":true}`,
+		body:  `{"address":"\\\\server\\share","name":"GuestShare","guest":true}`,
 		ctype: "application/json"})
 	if code != http.StatusCreated {
 		t.Fatalf("POST: %d %s", code, resp)
@@ -783,7 +783,7 @@ func TestSharesManualSetupTextQuotedName(t *testing.T) {
 	srv, _, _ := server(t, false)
 
 	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares",
-		body: `{"address":"\\\\nas\\media","name":"Bob's Share","username":"alice"}`,
+		body:  `{"address":"\\\\nas\\media","name":"Bob's Share","username":"alice"}`,
 		ctype: "application/json"})
 	if code != http.StatusCreated {
 		t.Fatalf("POST: %d %s", code, resp)
