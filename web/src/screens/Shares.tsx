@@ -177,7 +177,7 @@ export function SharesSettings() {
               <tbody>{data.items.map((s) => <ShareRow key={s.id} share={s} resp={data} onChanged={resp.reload} said={setSaid} />)}</tbody>
             </table>
           </div></div>}
-        {adding && <ShareSheet resp={data} onDone={(r) => { setAdding(false); resp.reload(); }} onCancel={() => setAdding(false)} said={setSaid} />}
+        {adding && <ShareSheet resp={data} onDone={() => { setAdding(false); resp.reload(); }} onCancel={() => setAdding(false)} said={setSaid} />}
       </>}
     </div>
   );
