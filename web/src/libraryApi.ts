@@ -54,7 +54,7 @@ export async function scanLibrary(id: string): Promise<Answer<unknown>> {
 }
 
 export async function getSettings(): Promise<Answer<FirstRunSettings>> {
-  if (MOCK) { const s = mock.mockState().settings; return { firstRunDone: s.firstRunDone, firstRunStep: s.firstRunStep, firstRunLibrary: s.firstRunLibrary ?? null, scanEvery: s.scanEvery, scanEverySource: s.scanEverySource, scanEveryMin: 15, scanEveryMax: 86400, languages: s.languages ?? ["eng"], keepOriginalsDays: s.keepOriginalsDays ?? 7, trashPath: "Kept next to each file, in a folder called .syp-trash", authRequired: true }; }
+  if (MOCK) { const s = mock.mockState().settings; return { firstRunDone: s.firstRunDone, firstRunStep: s.firstRunStep, firstRunLibrary: s.firstRunLibrary ?? null, scanEvery: s.scanEvery, scanEverySource: s.scanEverySource, scanEveryMin: 15, scanEveryMax: 86400, languages: s.languages ?? ["eng"], keepOriginalsDays: s.keepOriginalsDays ?? 7, logKeepDays: 30, trashPath: "Kept next to each file, in a folder called .syp-trash", authRequired: true }; }
   return call("GET", "/api/v2/settings"); // #111: v1's settings at the v2 path
 }
 export async function patchSettings(p: Partial<FirstRunSettings>): Promise<Answer<unknown>> {

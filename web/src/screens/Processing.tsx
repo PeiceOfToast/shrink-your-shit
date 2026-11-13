@@ -41,11 +41,11 @@ export function ProcessingSettings() {
               </select>
               <span className="hint" id="scan-every-h">A new file is added once it hasn't changed between two checks, so it can take up to twice this long to appear. Choose a longer time if checking a big library keeps the disk busy.</span></div>
             {said && <p className={bad ? "st bad" : "muted"} role={bad ? "alert" : "status"}>{said}</p>}
-            {/* E (SCREENS V9): job logs and their step data are deleted after this (the files too); 0 = Forever */}
-            <div className="field"><label htmlFor="log-keep">Keep job logs for</label>
+            {/* E (SCREENS V9): job logs are deleted after this; 0 = Forever. Shown only when the server reports logKeepDays (not yet on dev) */}
+            {s.logKeepDays !== undefined && <div className="field"><label htmlFor="log-keep">Keep job logs for</label>
               <select id="log-keep" className="input" value={s.logKeepDays ?? 30} disabled={busy} onChange={async (e) => { setBusy(true); const r = await patchSettings({ logKeepDays: Number(e.target.value) }); setBusy(false); if (failed(r)) { setBad(true); setSaid(r.error.message); } else { setBad(false); setSaid("Saved. Job logs are kept " + (Number(e.target.value) ? "for " + e.target.value + " days." : "for ever.")); st.reload(); } }} aria-describedby="log-keep-h" style={{ width: "auto" }}>
                 {[[7, "7 days"], [30, "30 days (default)"], [90, "90 days"], [0, "Forever"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
-              <span className="hint" id="log-keep-h">Logs of finished and failed jobs are deleted after this. Your files aren't affected.</span></div>
+              <span className="hint" id="log-keep-h">Logs of finished and failed jobs are deleted after this. Your files aren't affected.</span></div>}
           </>}
         </div>
       </div>
