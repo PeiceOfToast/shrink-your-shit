@@ -512,7 +512,9 @@ func (w *Worker) placeError(jobID int64, placeStarted time.Time, final string, e
 	}
 	msg := fmt.Sprintf("Couldn't write to %s: %v", path, err)
 	w.replaceStep(jobID, placeStarted, true, msg)
-	w.Queue.AddStep(jobID, "replaced", false, msg)
+	if w.Queue != nil {
+		w.Queue.AddStep(jobID, "replaced", false, msg)
+	}
 	return &placeError{Path: path, Err: err}
 }
 func (w *Worker) placeWrap(jobID int64, placeStarted time.Time, final string, err error) error {
