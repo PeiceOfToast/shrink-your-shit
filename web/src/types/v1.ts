@@ -33,4 +33,4 @@ export interface WorkerV1 { id: ID; name: string; host: string; state: string; f
 // GET/PATCH /api/settings: the fields first run uses (the server sends more).
 export interface FirstRunSettings { firstRunDone: boolean; firstRunStep: number; firstRunLibrary: { name: string; path: string } | null;
   scanEvery?: number; scanEverySource?: "flag" | "saved"; scanEveryMin?: number; scanEveryMax?: number;
-  languages?: string[]; keepOriginalsDays?: number; trashPath?: string; authRequired?: boolean } // #136/#146: how often libraries are looked at, in seconds, and what PATCH accepts
+  languages?: string[]; keepOriginalsDays?: number; trashPath?: string; authRequired?: boolean; logKeepDays?: number } // E: job logs kept, days (0 = forever) // #136/#146: how often libraries are looked at, in seconds, and what PATCH accepts
