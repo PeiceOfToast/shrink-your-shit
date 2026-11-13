@@ -141,7 +141,7 @@ func Definitions() []StepDefinition {
 				"format":  withDefault(formats, "hevc", "Video format", "segmented"),
 				"resolution": described(withDefault(enum([]any{"keep", "1080", "720", "480"}, []string{"Keep as is", "At most 1080p", "At most 720p", "At most 480p"}), "keep", "Resolution", ""),
 					"Videos are only ever made smaller, never stretched."),
-				"maxBitrate": bitrate(described(withDefault(enum([]any{"none", "high", "medium", "low"}, []string{"No limit", "High", "Medium", "Low"}), "none", "Max bitrate", ""),
+				"maxBitrate": bitrate(described(withDefault(enum([]any{"none", "high", "medium", "low"}, []string{"No limit", "High", "Medium", "Low"}), "none", "Bitrate level", ""),
 					"Caps how much data each second of video may use. A file never gets more than it has now. Quality still sets the picture; the cap only matters in busy scenes.")),
 				"speed": described(withDefault(enum([]any{"faster", "normal", "slower"}, []string{"Faster, larger files", "Normal", "Slower, smaller files"}), "normal", "Speed", ""),
 					"Slower takes about twice as long."),
