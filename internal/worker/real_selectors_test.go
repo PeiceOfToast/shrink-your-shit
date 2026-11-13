@@ -134,6 +134,9 @@ func TestRealMaxBitrateCap(t *testing.T) {
 	encode := func(maxBitrate string) (avg, peak float64) {
 		s := rules.DefaultSelectors(5)
 		s.MaxBitrate, s.Speed = maxBitrate, "faster"
+		if maxBitrate != "none" { // a cap beside the quality: the meaning saved before user review 11-13 item A
+			s.RateControl = "quality_legacy"
+		}
 		plan := s.Template().Compile(info)
 		if plan.Skip != "" {
 			t.Fatal(plan.Skip)

@@ -336,12 +336,12 @@ func flowSteps(t rules.Template) []map[string]any {
 			detail += "; preset " + preset
 		}
 		add("video", "Make the video smaller at "+pos.Name+", "+size, detail)
-		if s.MaxBitrate != "none" {
-			f := s.Format
-			if rules.Ladder[f] == nil {
-				f = "hevc"
-			}
-			add("video", "Limit the bitrate: "+s.MaxBitrate, fmt.Sprintf("at most %g Mbps at 1080p (by the new file's size), never more than the file has", rules.Ladder[f][s.MaxBitrate]["1080"]))
+		switch {
+		case s.RateControl == "vbr" || s.RateControl == "vbr_legacy": // user review 11-13 item A: a peak limit, CRF 23 quality
+			add("video", "Keep the bitrate under "+rules.Mbps(s.VBRMaxKbps)+" Mbps at most", "the quality is kept steady; busy scenes may use up to that peak, never more than the file has")
+		case s.MaxBitrate != "none":
+			legacy := strings.HasSuffix(s.RateControl, "_legacy")
+			add("video", "Bitrate: "+s.MaxBitrate, fmt.Sprintf("about %g Mbps at 1080p (by the new file's size), never more than the file has", rules.FigureMbps(s.Format, s.MaxBitrate, "1080", legacy)))
 		}
 		switch s.Audio {
 		case "stereo_aac": // Basic's default (S4)

@@ -35,7 +35,7 @@ func TestRealNextToLibrary(t *testing.T) {
 	writeSource("2")
 	before, _ := os.ReadFile(src)
 	sel := rules.DefaultSelectors(3)
-	sel.MaxBitrate, sel.FileType, sel.AfterConverting, sel.FolderMode = "medium", "mkv", "folder", rules.NextToLibrary
+	sel.MaxBitrate, sel.RateControl, sel.FileType, sel.AfterConverting, sel.FolderMode = "medium", "level", "mkv", "folder", rules.NextToLibrary
 	tmpl := sel.Template()
 	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {

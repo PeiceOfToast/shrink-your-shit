@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
@@ -19,11 +18,14 @@ type Selectors struct {
 	Format     string `json:"format"`     // hevc (AvailableFormats)
 	Resolution string `json:"resolution"` // keep | 1080 | 720 | 480: the largest picture height; never upscaled
 	MaxBitrate string `json:"maxBitrate"` // none | high | medium | low (S6: Ladder): a peak cap beside the quality
-	// RateControl (user review 11-12 item 1): "" or "quality" is today's (the quality, with the level as
-	// a cap); "vbr" aims at the level's bitrate for the new file's height, never above VBRMaxKbps.
+	// RateControl (user review 11-13 item A): "level" aims at MaxBitrate's figure for the new file's height
+	// (the average; the peak is 1.5x); "vbr" is the quality at CRF 23 with VBRMaxKbps as the peak (no level);
+	// "" or "quality" is CRF alone. The *_legacy values are flows saved before item A, compiled as they were.
 	RateControl string `json:"rateControl,omitempty"`
 	VBRMaxKbps  int    `json:"vbrMaxKbps,omitempty"` // vbr: the person's own limit (kbps)
-	Audio       string `json:"audio"`                // AvailableAudio (S6: design E's six choices)
+	// Notices are coded notes shown on the flow until its next publish (migration 38: bitrate_meaning_changed).
+	Notices []Notice `json:"notices,omitempty"`
+	Audio   string   `json:"audio"` // AvailableAudio (S6: design E's six choices)
 	// OnlyMyLanguages keeps only the audio in the person's languages, and tracks with none (S6; on by default).
 	OnlyMyLanguages bool   `json:"onlyMyLanguages"`
 	Subtitles       string `json:"subtitles"`           // AvailableSubtitles
@@ -74,6 +76,13 @@ func DefaultSelectors(q int) Selectors {
 // (a real choice this version cannot do yet).
 type SelectorError struct{ Code, Message string }
 
+// Notice is a coded note about a flow (user review 11-13 item A), shown on the flow until its next
+// publish. Words through the leads for design.
+type Notice struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
 func (e *SelectorError) Error() string { return e.Message }
 
 // Validate checks every choice. Not-yet choices say so in plain words; nothing is saved then.
@@ -102,27 +111,24 @@ func (s Selectors) Validate() error {
 	}
 	switch s.RateControl {
 	case "", "quality":
-	case "vbr":
+		if s.MaxBitrate != "none" && s.MaxBitrate != "" {
+			return &SelectorError{"invalid", "A bitrate level with the quality is now Bitrate level: choose Bitrate level or VBR with a max. Nothing was changed."}
+		}
+	case "level":
+		if s.MaxBitrate == "none" || s.MaxBitrate == "" {
+			return &SelectorError{"invalid", "Bitrate level needs Low, Medium or High. Nothing was changed."}
+		}
+		if s.Format == "av1" { // SVT-AV1 takes a peak limit only with CRF, and the level sets one (found on CT 200)
+			return &SelectorError{"invalid", "Bitrate level isn't available for AV1: choose quality, or another format. Nothing was changed."}
+		}
+	case "vbr": // user review 11-13 item A: the quality at CRF 23 under VBRMaxKbps; no level
 		if !VBRFormat(s.Format) { // SVT-AV1 takes a peak limit only with CRF (review a772397: every file failed)
 			return &SelectorError{"invalid", "VBR with a peak limit isn't available for AV1; use quality mode. Nothing was changed."}
-		}
-		if s.MaxBitrate == "none" || s.MaxBitrate == "" {
-			return &SelectorError{"invalid", "VBR aims at a level's bitrate: choose Low, Medium or High. Nothing was changed."}
 		}
 		if s.VBRMaxKbps < 100 || s.VBRMaxKbps > 500000 {
 			return &SelectorError{"invalid", "Set the peak limit from 0.1 to 500 Mbps. Nothing was changed."}
 		}
-		// design (SCREENS V3 step 3): at least the level's figure for the resolution; with "Same
-		// resolution", for the lowest row the level can reach, so it's never refused for a file it could
-		// fit (a file whose own row needs more is encoded at the limit: VBRKbps)
-		row := "sd"
-		if h := resolutions[s.Resolution]; h > 0 {
-			row = HeightRow(0, h)
-		}
-		if t := Ladder[ladderFormat(s.Format)][s.MaxBitrate][row]; float64(s.VBRMaxKbps) < t*1000 {
-			return &SelectorError{"invalid", fmt.Sprintf("Must be at least %s Mbps, the %s figure for %s. Nothing was changed.",
-				strconv.FormatFloat(t, 'f', -1, 64), upperFirst(s.MaxBitrate), RowLabel(row))}
-		}
+	case "quality_legacy", "vbr_legacy": // a flow saved before item A (migration 38) runs as it was
 	default:
 		return invalid("rateControl", s.RateControl)
 	}

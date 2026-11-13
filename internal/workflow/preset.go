@@ -159,8 +159,12 @@ func selectorsOf(order []Node) (rules.Selectors, []Issue) {
 	s.Quality = intOf(cv, "quality", s.Quality)
 	s.Format, s.Resolution = strOf(cv, "format", s.Format), strOf(cv, "resolution", s.Resolution)
 	s.MaxBitrate, s.Speed = strOf(cv, "maxBitrate", s.MaxBitrate), strOf(cv, "speed", s.Speed)
-	if strOf(cv, "rateControl", "quality") == "vbr" { // quality: as before (the same template, item 1)
-		s.RateControl, s.VBRMaxKbps = "vbr", intOf(cv, "vbrMaxKbps", 0)
+	s.RateControl = strOf(cv, "rateControl", "") // item A; the *_legacy values keep a saved flow's files
+	if s.RateControl == "quality" {
+		s.RateControl = "" // the default is saved as absent, so an unchanged flow keeps its template
+	}
+	if s.RateControl == "vbr" || s.RateControl == "vbr_legacy" {
+		s.VBRMaxKbps = intOf(cv, "vbrMaxKbps", 0)
 	}
 	if a := by[TypeAudio]; a.Enabled {
 		s.Audio, s.OnlyMyLanguages = strOf(a.Config, "audio", s.Audio), boolOf(a.Config, "onlyMyLanguages", s.OnlyMyLanguages)
@@ -336,21 +340,24 @@ func hasOnError(d Doc) bool {
 	return false
 }
 
-// convertConfig is the Convert video step's config for s; VBR's keys only when it is chosen (item 1).
+// convertConfig is the Convert video step's config for s; the rate control keys only when it is not the default.
 func convertConfig(s rules.Selectors) map[string]any {
 	c := map[string]any{"quality": s.Quality, "format": s.Format, "resolution": s.Resolution, "maxBitrate": s.MaxBitrate, "speed": s.Speed}
-	if s.RateControl == "vbr" {
-		c["rateControl"], c["vbrMaxKbps"] = "vbr", s.VBRMaxKbps
+	if s.RateControl != "" && s.RateControl != "quality" {
+		c["rateControl"] = s.RateControl
+		if s.RateControl == "vbr" || s.RateControl == "vbr_legacy" {
+			c["vbrMaxKbps"] = s.VBRMaxKbps
+		}
 	}
 	return c
 }
 
-// fieldForMessage is the Convert video setting a VBR message is about (user review 11-12 item 1).
+// fieldForMessage is the Convert video setting a rate control message is about (user review 11-12 item 1, 11-13 A).
 func fieldForMessage(msg string) string {
 	switch {
-	case strings.HasPrefix(msg, "Must be at least"), strings.Contains(msg, "peak limit"):
+	case strings.Contains(msg, "peak limit"):
 		return "vbrMaxKbps"
-	case strings.HasPrefix(msg, "VBR aims at"):
+	case strings.HasPrefix(msg, "Bitrate level needs"), strings.HasPrefix(msg, "A bitrate level with the quality"):
 		return "maxBitrate"
 	}
 	return ""

@@ -229,11 +229,11 @@ func TestSelectorsSaveAndReadBack(t *testing.T) {
 		t.Errorf("a Standard save at the defaults stays Standard, not Basic (review 6e60704): %v", v)
 	}
 	// any other choice is a selectors setting, read back as saved; there is no minSavingPct (always standardize)
-	if code, body := post(t, srv, "PUT", path, `{"quality":2,"speed":"slower","resolution":"720","maxBitrate":"10","fileType":"mkv","afterConverting":"beside","ignore":["Extras","*.sample.mkv"],"skipSmall":false}`); code != 200 {
+	if code, body := post(t, srv, "PUT", path, `{"quality":2,"speed":"slower","resolution":"720","maxBitrate":"none","fileType":"mkv","afterConverting":"beside","ignore":["Extras","*.sample.mkv"],"skipSmall":false}`); code != 200 {
 		t.Fatalf("selectors: %d %s", code, body)
 	}
 	v := get()
-	for k, want := range map[string]any{"kind": "selectors", "quality": 2.0, "speed": "slower", "resolution": "720", "maxBitrate": "high",
+	for k, want := range map[string]any{"kind": "selectors", "quality": 2.0, "speed": "slower", "resolution": "720", "maxBitrate": "none",
 		"fileType": "mkv", "afterConverting": "beside", "includeDolbyVision": false} {
 		if v[k] != want {
 			t.Errorf("%s = %v, want %v", k, v[k], want)

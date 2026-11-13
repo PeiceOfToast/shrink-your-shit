@@ -114,14 +114,14 @@ func TestBitrateCap(t *testing.T) {
 		src, want     int
 	}{
 		{"none", "hevc", 1920, 1080, sdr, 0, 0},
-		{"medium", "hevc", 1920, 1080, sdr, 0, 5000},
+		{"medium", "hevc", 1920, 1080, sdr, 0, 3600},
 		{"low", "h264", 1280, 720, sdr, 0, 2500},
 		{"high", "av1", 3840, 2160, sdr, 0, 15000},
-		{"medium", "vp9", 1920, 1080, sdr, 0, 5000},                           // HEVC's column
-		{"medium", "hevc", 1920, 1080, &media.Stream{FrameRate: 60}, 0, 5000}, // the ladder's number (design E); allowances raise the rough line
-		{"medium", "hevc", 3840, 2160, &media.Stream{BitDepth: 10, FrameRate: 24}, 0, 12000},
-		{"high", "hevc", 1920, 1080, sdr, 3000, 3000}, // never more than the file has
-		{"low", "hevc", 640, 360, sdr, 0, 800},
+		{"medium", "vp9", 1920, 1080, sdr, 0, 3600},                                          // HEVC's column
+		{"medium", "hevc", 1920, 1080, &media.Stream{FrameRate: 60}, 0, 5040},                // 50-60 fps: +40% (user review 11-13 item A)
+		{"medium", "hevc", 3840, 2160, &media.Stream{BitDepth: 10, FrameRate: 24}, 0, 15000}, // HDR or 10-bit: +25%
+		{"high", "hevc", 1920, 1080, sdr, 3000, 3000},                                        // never more than the file has
+		{"low", "hevc", 640, 360, sdr, 0, 600},
 	} {
 		if got := CapKbps(c.level, c.format, c.w, c.h, c.v, c.src); got != c.want {
 			t.Errorf("%s %s %dx%d: %d, want %d", c.level, c.format, c.w, c.h, got, c.want)
@@ -144,10 +144,10 @@ func TestRoughWarning(t *testing.T) {
 		shapes        []Shape
 		want          string
 	}{
-		{"low", "hevc", []Shape{sdr1080}, ""}, // 3 Mbps is above 2
-		{"low", "hevc", []Shape{sdr1080, hdr4k60}, "Low may look blocky in dark or fast scenes for 4K HDR files at 50-60 fps (8 Mbps). Choose Medium or No limit to avoid that."},
-		{"low", "hevc", []Shape{{Row: "2160", HDR: true}}, ""}, // 6 x 1.25 = 7.5, below 8
-		{"low", "h264", []Shape{{Row: "1080", HighFPS: true}}, "Low may look blocky in dark or fast scenes for 1080p files at 50-60 fps (5 Mbps). Choose Medium or No limit to avoid that."}, // 4 x 1.4 = 5.6
+		{"low", "hevc", []Shape{sdr1080}, "Low may look blocky in dark or fast scenes for 1080p files (1.8 Mbps). Choose Medium or No limit to avoid that."}, // 1.8 is below 2
+		{"low", "hevc", []Shape{sdr1080, hdr4k60}, "Low may look blocky in dark or fast scenes for 4K HDR files at 50-60 fps (7.8 Mbps). Choose Medium or No limit to avoid that."},
+		{"low", "hevc", []Shape{{Row: "2160", HDR: true}}, ""}, // 6 x 1.25 = 7.5, below 7.8
+		{"low", "h264", []Shape{{Row: "1080", HighFPS: true}}, "Low may look blocky in dark or fast scenes for 1080p files at 50-60 fps (3 Mbps). Choose Medium or No limit to avoid that."}, // 4 x 1.4 = 5.6
 		{"none", "hevc", []Shape{hdr4k60}, ""},
 		{"high", "hevc", []Shape{hdr4k60}, ""},
 	} {
@@ -206,7 +206,7 @@ func TestLossless71Ceiling(t *testing.T) {
 		t.Fatalf("estimate %d", got)
 	}
 	s := DefaultSelectors(3)
-	s.MaxBitrate, s.FileType = "high", "keep"
+	s.MaxBitrate, s.FileType, s.RateControl = "high", "keep", "quality_legacy"
 	if p := s.Template().Compile(i); p.Video.MaxRateKbps != 12000-640*8 {
 		t.Errorf("cap %d, want the video's estimate %d (never above the source video)", p.Video.MaxRateKbps, 12000-640*8)
 	}

@@ -398,6 +398,16 @@ DELETE FROM app_meta WHERE key='paused';`},
 CREATE TABLE worker_paths (worker_id TEXT NOT NULL, server TEXT NOT NULL, worker TEXT NOT NULL, mode TEXT NOT NULL,
   test TEXT NOT NULL DEFAULT '', tested_at TEXT NOT NULL DEFAULT '', detail TEXT NOT NULL DEFAULT '', pending_until TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (worker_id, server));`},
+	// User review 11-13 item A: the level and VBR meanings changed. A flow saved with the old meaning keeps
+	// its files (quality_legacy, vbr_legacy) and carries a coded notice until its next publish.
+	{38, "bitrate meanings", `
+UPDATE flows SET template = json_set(template, '$.selectors.rateControl', 'quality_legacy',
+  '$.selectors.notices', json('[{"code":"bitrate_meaning_changed","message":"Bitrate levels changed in this update. This flow keeps producing the same files until you edit its bitrate setting."}]'))
+WHERE json_extract(template, '$.kind') = 'selectors' AND COALESCE(json_extract(template, '$.selectors.rateControl'), 'quality') = 'quality'
+  AND json_extract(template, '$.selectors.maxBitrate') IN ('low', 'medium', 'high');
+UPDATE flows SET template = json_set(template, '$.selectors.rateControl', 'vbr_legacy',
+  '$.selectors.notices', json('[{"code":"bitrate_meaning_changed","message":"Bitrate levels changed in this update. This flow keeps producing the same files until you edit its bitrate setting."}]'))
+WHERE json_extract(template, '$.kind') = 'selectors' AND json_extract(template, '$.selectors.rateControl') = 'vbr';`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone

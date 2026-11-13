@@ -26,7 +26,7 @@ func guardTemplates() map[string]Template {
 	}
 	sel("selectors-default", func(*Selectors) {})
 	sel("selectors-mp4", func(s *Selectors) { s.FileType = "mp4" })
-	sel("selectors-keep-medium", func(s *Selectors) { s.FileType, s.MaxBitrate = "keep", "medium" })
+	sel("selectors-keep-medium", func(s *Selectors) { s.FileType, s.MaxBitrate, s.RateControl = "keep", "medium", "quality_legacy" })
 	sel("selectors-720-stereo", func(s *Selectors) { s.Resolution, s.Audio = "720", "stereo_aac" })
 	sel("selectors-beside", func(s *Selectors) { s.AfterConverting = "beside" })
 	sel("selectors-folder-next", func(s *Selectors) { s.AfterConverting, s.FolderMode = "folder", NextToLibrary })

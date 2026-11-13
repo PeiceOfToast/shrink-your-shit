@@ -741,3 +741,58 @@ func TestStandardReworkOpusMP4(t *testing.T) {
 		t.Errorf("the migrated flow can't run: %q", p.Skip)
 	}
 }
+
+// User review 11-13 item A (migration 38): a flow saved with the old level or VBR meaning keeps its files as
+// quality_legacy or vbr_legacy, with a coded notice that a publish clears; a flow with no level is untouched.
+func TestBitrateMeaningsMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "syp.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	quality := rules.DefaultSelectors(3)
+	quality.MaxBitrate = "medium"
+	vbr := rules.DefaultSelectors(3)
+	vbr.MaxBitrate, vbr.RateControl, vbr.VBRMaxKbps = "medium", "vbr", 3000
+	plain := rules.DefaultSelectors(3)
+	ids := map[string]int64{}
+	for name, sel := range map[string]rules.Selectors{"quality": quality, "vbr": vbr, "plain": plain} {
+		l, _ := s.AddLibrary("/"+name, "/"+name, sel.Template(), true)
+		ids[name] = l.FlowID
+	}
+	s.db.Exec(`PRAGMA user_version = 37`) // migration 38 runs on the next open
+	s.Close()
+	if s, err = Open(path); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for name, want := range map[string]string{"quality": "quality_legacy", "vbr": "vbr_legacy", "plain": ""} {
+		f, _ := s.GetFlow(ids[name])
+		sel := f.Template.Selectors
+		if sel.RateControl != want || (want == "") != (len(sel.Notices) == 0) {
+			t.Errorf("%s: rate control %q notices %+v, want %q", name, sel.RateControl, sel.Notices, want)
+		}
+		if want != "" && (sel.Notices[0].Code != "bitrate_meaning_changed" || sel.MaxBitrate != map[string]string{"quality": "medium", "vbr": "medium"}[name]) {
+			t.Errorf("%s: %+v", name, sel)
+		}
+	}
+	// a publish clears the notice (the flow keeps running the same way)
+	f, _ := s.GetFlow(ids["quality"])
+	if _, err := s.EnsureRevision(ids["quality"]); err != nil {
+		t.Fatal(err)
+	}
+	d, _, err := s.Draft(ids["quality"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := s.SaveDraft(ids["quality"], d.Doc, d.Layout, d.Etag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Publish(ids["quality"], saved.Etag, f.Template); err != nil {
+		t.Fatal(err)
+	}
+	if f, _ := s.GetFlow(ids["quality"]); len(f.Template.Selectors.Notices) != 0 || f.Template.Selectors.RateControl != "quality_legacy" {
+		t.Errorf("after the publish: %+v", f.Template.Selectors)
+	}
+}

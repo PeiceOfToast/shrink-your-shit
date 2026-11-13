@@ -14,9 +14,21 @@ import (
 // for the new file's height and video format. Starting values to calibrate (D8).
 var BitrateLevels = []string{"none", "high", "medium", "low"}
 
-// Ladder is Mbps by format, level and height ("2160", "1440", "1080", "720", "sd"). VP9 has no column in
-// research: it uses HEVC's (a similar efficiency).
+// Ladder is Mbps by format, level and height ("2160", "1440", "1080", "720", "sd") at 30 fps SDR: the H.264
+// live-stream figures (user review 11-13 item A), scaled so each level gives about the same picture in
+// every format (HEVC and VP9 x0.6, AV1 x0.5). VP9 has no column: it uses HEVC's.
 var Ladder = map[string]map[string]map[string]float64{
+	"h264": {"low": {"2160": 13, "1440": 6, "1080": 3, "720": 2.5, "sd": 1}, "medium": {"2160": 20, "1440": 9, "1080": 6, "720": 4, "sd": 1.5},
+		"high": {"2160": 30, "1440": 13, "1080": 9, "720": 6, "sd": 2.5}},
+	"hevc": {"low": {"2160": 7.8, "1440": 3.6, "1080": 1.8, "720": 1.5, "sd": 0.6}, "medium": {"2160": 12, "1440": 5.4, "1080": 3.6, "720": 2.4, "sd": 0.9},
+		"high": {"2160": 18, "1440": 7.8, "1080": 5.4, "720": 3.6, "sd": 1.5}},
+	"av1": {"low": {"2160": 6.5, "1440": 3, "1080": 1.5, "720": 1.25, "sd": 0.5}, "medium": {"2160": 10, "1440": 4.5, "1080": 3, "720": 2, "sd": 0.75},
+		"high": {"2160": 15, "1440": 6.5, "1080": 4.5, "720": 3, "sd": 1.25}},
+}
+
+// ladderLegacy is the ladder before user review 11-13 item A. A flow saved before it keeps its files (the
+// quality_legacy and vbr_legacy meanings compile with these figures) until the person edits it.
+var ladderLegacy = map[string]map[string]map[string]float64{
 	"hevc": {"low": {"2160": 8, "1440": 5, "1080": 3, "720": 1.5, "sd": 0.8}, "medium": {"2160": 12, "1440": 8, "1080": 5, "720": 2.5, "sd": 1.2},
 		"high": {"2160": 20, "1440": 12, "1080": 8, "720": 4, "sd": 2}},
 	"h264": {"low": {"2160": 16, "1440": 9, "1080": 5, "720": 2.5, "sd": 1.2}, "medium": {"2160": 25, "1440": 14, "1080": 8, "720": 4, "sd": 2},
@@ -66,20 +78,57 @@ func allowance(hdr bool, fps float64) float64 {
 	return a
 }
 
-// CapKbps is the level's cap for the new file (w x h after any scaling, format f): the ladder's number
-// for its height (design E: the cap is the number the page shows; the HDR and frame-rate allowances
-// raise the "looks rough" line, RoughWarning), never above the source's own video bitrate
-// (sourceKbps; 0 unknown); 0 for "none".
+// CapKbps is the level's figure for the new file (w x h after any scaling, format f, video v) in Bitrate
+// level mode: the ladder's number for its height, raised for 50-60 fps and HDR (allowance), and never above
+// the source's own video bitrate (sourceKbps; 0 unknown); 0 for "none".
 func CapKbps(level, f string, w, h int, v *media.Stream, sourceKbps int) int {
-	row, ok := Ladder[ladderFormat(f)][level]
+	allow := 1.0
+	if v != nil {
+		s := ShapeOf(v)
+		fps := 0.0
+		if s.HighFPS {
+			fps = 60
+		}
+		allow = allowance(s.HDR, fps)
+	}
+	return levelKbps(Ladder, level, f, w, h, sourceKbps, allow)
+}
+
+// levelKbps is a ladder figure in kbps for height w x h, times allow, never above sourceKbps (0: "none").
+func levelKbps(table map[string]map[string]map[string]float64, level, f string, w, h, sourceKbps int, allow float64) int {
+	row, ok := table[ladderFormat(f)][level]
 	if !ok {
 		return 0
 	}
-	kbps := int(math.Round(row[HeightRow(w, h)] * 1000))
+	kbps := int(math.Round(row[HeightRow(w, h)] * 1000 * allow))
 	if sourceKbps > 0 && sourceKbps < kbps {
 		kbps = sourceKbps // a file is never given more than it has now
 	}
 	return kbps
+}
+
+// FigureMbps is a level's figure in Mbps for format f and height row, in the meaning the flow runs with:
+// legacy is a quality_legacy or vbr_legacy flow (the ladder before user review 11-13 item A).
+func FigureMbps(f, level, row string, legacy bool) float64 {
+	t := Ladder
+	if legacy {
+		t = ladderLegacy
+	}
+	return t[ladderFormat(f)][level][row]
+}
+
+// peakKbps is Bitrate level's peak: 1.5x the level's average, never above the source (sourceKbps; 0 unknown).
+func peakKbps(target, sourceKbps int) int {
+	peak := target * 3 / 2
+	if sourceKbps > 0 && sourceKbps < peak {
+		peak = sourceKbps
+	}
+	return peak
+}
+
+// legacyCapKbps is CapKbps before user review 11-13 item A (quality_legacy): the old ladder, no allowances.
+func legacyCapKbps(level, f string, w, h, sourceKbps int) int {
+	return levelKbps(ladderLegacy, level, f, w, h, sourceKbps, 1)
 }
 
 // OldBitrateLevel is the level a cap saved before S6 (Mbps) becomes: the nearest 1080p HEVC level
@@ -160,10 +209,10 @@ func RowLabel(row string) string {
 // LadderRows are the ladder's rows, largest first.
 var LadderRows = []string{"2160", "1440", "1080", "720", "sd"}
 
-// VBRKbps is a VBR encode's target and limit (user review 11-12 item 1): the level's figure for the
-// new file's height, never more than the limit, and neither more than the source has now.
-func VBRKbps(level, f string, w, h int, v *media.Stream, sourceKbps, limit int) (target, max int) {
-	target = CapKbps(level, f, w, h, v, sourceKbps)
+// legacyVBRKbps is a vbr_legacy encode's target and limit (user review 11-12 item 1, before 11-13 item A):
+// the old level's figure for the new file's height, never more than the limit, and not more than the source.
+func legacyVBRKbps(level, f string, w, h, sourceKbps, limit int) (target, max int) {
+	target = legacyCapKbps(level, f, w, h, sourceKbps)
 	max = limit
 	if sourceKbps > 0 && sourceKbps < max {
 		max = sourceKbps

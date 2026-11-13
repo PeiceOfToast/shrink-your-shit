@@ -561,10 +561,20 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 		target = "hevc"
 	}
 	vf := VideoFormats[target]
+	src := sourceVideoKbps(info, v)
 	p.Video = VideoEncode{Codec: vf.Encoder, CRF: crf + vf.CRFOffset, Preset: vf.Presets[s.Speed], Tag: vf.Tag,
-		Index: info.MainVideoOrdinal(), MaxRateKbps: CapKbps(s.MaxBitrate, target, w, h, v, sourceVideoKbps(info, v)), Height: height}
-	if s.RateControl == "vbr" {
-		p.Video.TargetKbps, p.Video.MaxRateKbps = VBRKbps(s.MaxBitrate, target, w, h, v, sourceVideoKbps(info, v), s.VBRMaxKbps)
+		Index: info.MainVideoOrdinal(), Height: height}
+	switch s.RateControl { // user review 11-13 item A; the *_legacy meanings compile as they did before it
+	case "level": // the level's figure is the average, its peak 1.5x (never above the source)
+		p.Video.TargetKbps = CapKbps(s.MaxBitrate, target, w, h, v, src)
+		p.Video.MaxRateKbps = peakKbps(p.Video.TargetKbps, src)
+	case "vbr": // the quality at CRF 23, the bitrate never above the person's max; no level
+		p.Video.CRF = 23 + vf.CRFOffset
+		p.Video.MaxRateKbps, p.Video.PeakLimitKbps = s.VBRMaxKbps, s.VBRMaxKbps
+	case "quality_legacy": // CRF, with the old level as a cap
+		p.Video.MaxRateKbps = legacyCapKbps(s.MaxBitrate, target, w, h, src)
+	case "vbr_legacy":
+		p.Video.TargetKbps, p.Video.MaxRateKbps = legacyVBRKbps(s.MaxBitrate, target, w, h, src, s.VBRMaxKbps)
 		p.Video.PeakLimitKbps = s.VBRMaxKbps
 	}
 	if target != "hevc" {

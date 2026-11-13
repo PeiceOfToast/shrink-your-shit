@@ -106,7 +106,7 @@ func normalLayout(l *workflow.Layout) {
 func templateHash(t rules.Template) string {
 	if t.Selectors != nil {
 		s := *t.Selectors
-		s.Notes = nil
+		s.Notes, s.Notices = nil, nil
 		t.Selectors = &s
 	}
 	b, _ := json.Marshal(t)
@@ -282,6 +282,11 @@ func (s *Store) Publish(flowID int64, etag string, t rules.Template) (Revision, 
 	}
 	if _, err := tx.Exec(`UPDATE flows SET status='enabled' WHERE id=? AND status='draft'`, flowID); err != nil {
 		return Revision{}, err
+	}
+	if t.Selectors != nil && t.Selectors.Notices != nil { // a publish clears the coded notices (user review 11-13 item A)
+		sel := *t.Selectors
+		sel.Notices = nil
+		t.Selectors = &sel
 	}
 	if err := s.setTemplate(tx, flowID, t); err != nil {
 		return Revision{}, err
