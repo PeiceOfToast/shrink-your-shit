@@ -67,6 +67,25 @@ func TestSharesDomainUsernameMount(t *testing.T) {
 	}
 }
 
+// The Test button signs in with the same split: DOMAIN\user is user plus Domain.
+func TestSMBInitiatorSplitsDomain(t *testing.T) {
+	for _, c := range domainCases {
+		var name, user, dom string
+		switch c.name {
+		case "domain":
+			name, user, dom = `CORP\alice`, "alice", "CORP"
+		case "upn":
+			name, user, dom = "alice@corp.example", "alice@corp.example", ""
+		default:
+			name, user, dom = "alice", "alice", ""
+		}
+		ini := smbInitiator(name, "pw")
+		if ini.User != user || ini.Domain != dom || ini.Password != "pw" {
+			t.Errorf("%s: got User=%q Domain=%q, want %q %q", name, ini.User, ini.Domain, user, dom)
+		}
+	}
+}
+
 // Manual and Docker setup texts: the same split, so the text a user copies mounts the same way.
 func TestSharesDomainUsernameSetupText(t *testing.T) {
 	if runtime.GOOS == "windows" {

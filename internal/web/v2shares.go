@@ -473,6 +473,12 @@ func testShare(typ, address, username, password string, guest bool) map[string]a
 	return testNFS(address)
 }
 
+// smbInitiator is the NTLM sign-in for the Test button: DOMAIN\user becomes User=user, Domain=DOMAIN.
+func smbInitiator(username, password string) *smb2.NTLMInitiator {
+	user, domain := helper.SplitDomain(username)
+	return &smb2.NTLMInitiator{User: user, Password: password, Domain: domain}
+}
+
 func testSMB(address, username, password string, guest bool) map[string]any {
 	parts := strings.Split(strings.TrimPrefix(address, `\\`), `\`)
 	if len(parts) < 2 {
@@ -484,8 +490,7 @@ func testSMB(address, username, password string, guest bool) map[string]any {
 		return map[string]any{"ok": false, "code": "invalid_address",
 			"message": "Leave out the port: SMB always uses 445."}
 	}
-	ini := &smb2.NTLMInitiator{User: username, Password: password}
-	dialer := &smb2.Dialer{Initiator: ini}
+	dialer := &smb2.Dialer{Initiator: smbInitiator(username, password)}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	session, err := dialer.Dial(ctx, net.JoinHostPort(dialHost(server), smbPort))
