@@ -298,3 +298,25 @@ func TestV2JobsPinsOverLibraryPriority(t *testing.T) {
 		t.Errorf("unpinned %s", body)
 	}
 }
+
+// User review 11-13 item E: the Done tab's count and its list agree (the preview showed counts.completed 4 with
+// items []): four completed jobs are four items under tab=completed.
+func TestCompletedTabListsWhatItCounts(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	for _, p := range []string{"/m/a.mkv", "/m/b.mkv", "/m/c.mkv", "/m/d.mkv"} {
+		done(t, st, l.ID, p, p, 1000, 400)
+	}
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs?tab=completed&limit=200"})
+	var r struct {
+		Items  []map[string]any
+		Total  int
+		Counts map[string]int
+	}
+	if err := json.Unmarshal([]byte(body), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Counts["completed"] != 4 || r.Total != 4 || len(r.Items) != 4 {
+		t.Errorf("completed: counts %v total %d items %d\n%s", r.Counts, r.Total, len(r.Items), body)
+	}
+}
