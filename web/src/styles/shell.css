@@ -55,6 +55,9 @@ code,.mono{font-family:var(--mono);font-size:.92em}
 .menu .pop{position:absolute;right:0;top:calc(100% + 6px);min-width:220px;background:var(--raised);border:1px solid var(--border-strong);border-radius:var(--radius);box-shadow:0 8px 24px rgb(0 0 0/.35);padding:6px;z-index:50}
 .pop .it{display:flex;align-items:center;gap:10px;width:100%;min-height:36px;padding:0 10px;border:0;background:none;color:var(--text);font:inherit;border-radius:var(--radius-sm);cursor:pointer;text-decoration:none;text-align:left}
 .pop .it:hover{background:var(--surface)}
+/* Unavailable item: muted, never red, no hover; stays focusable (aria-disabled, not disabled) so its hint is read out. */
+.pop .it[aria-disabled=true]{color:var(--text-2);cursor:default}
+.pop .it[aria-disabled=true]:hover{background:none}
 .pop .it[aria-checked=true]{font-weight:var(--fw-strong)}
 .pop .it[aria-checked=true]::after{content:"";margin-left:auto;width:8px;height:8px;border-radius:50%;background:var(--accent)}
 .pop .hd{font-size:var(--fs-sm);color:var(--text-2);padding:6px 10px 2px}
