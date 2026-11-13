@@ -61,7 +61,7 @@ function Languages({ start, saved }: { start: string[]; saved: () => void }) {
           <div className="row" style={{ gap: 8, position: "relative" }} onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node) && (setOpen(false), setAt(-1))}>
             <input id="lang-add" className="input" autoComplete="off" role="combobox" aria-expanded={open} aria-controls="lang-opts" aria-autocomplete="list" aria-activedescendant={at >= 0 ? "lang-o" + at : undefined} aria-describedby="lang-h2" value={typed}
               onChange={(e) => (setTyped(e.target.value), setAt(-1), setOpen(true))}
-              onFocus={() => setOpen(true)}
+              onFocus={() => setOpen(true)} onClick={() => setOpen(true)}
               onKeyDown={(e) => {
                 // a pick from the list adds at once, as the old page did; typed text waits for Add or Enter
                 if (e.key === "ArrowDown" && hits.length) return (e.preventDefault(), setOpen(true), setAt((a) => Math.min(a + 1, hits.length - 1)));
