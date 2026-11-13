@@ -88,9 +88,12 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			}
 		}
 		status := "ok"
+		pausedBy := sharePausedBy(store, l) // D4b: a share's outage; the person's own pause stays "disabled"
 		switch {
 		case !l.Started:
 			status = "disabled"
+		case pausedBy != nil:
+			status = "paused_share"
 		case freeBytes(l.Path) == nil: // time-limited: a hung network mount can't stall the list
 			status = "path_missing"
 		case isScanning:
@@ -108,7 +111,7 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			// decided on its second look a pass later), include/exclude (the workflow's Ignore list is it)
 			"discovery": map[string]any{"subfolders": true, "settleSeconds": int(eng.Settle.Seconds()), "followLinks": false,
 				"include": []string{}, "exclude": []string{}, "scanEverySeconds": int(every.Seconds())},
-			"status": status,
+			"status": status, "pausedBy": pausedBy,
 		}, nil
 	}
 	one := func(w http.ResponseWriter, id int64, code int) {

@@ -268,7 +268,7 @@ func tryMount(store *jobs.Store, sh jobs.Share, password string) {
 	if sh.Type == "nfs" {
 		kind = "nfs"
 	}
-	mpt := "/var/lib/syp/shares/" + sanitiseName(sh.Name, sh.ID)
+	mpt := mountPointFor(sh)
 	opts := mountOptions(sh.Type)
 	err := helper.Mount(kind, addr, mpt, opts, sh.Username, password)
 	if err != nil {

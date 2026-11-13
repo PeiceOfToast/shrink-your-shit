@@ -478,14 +478,14 @@ func jobIDs(q interface {
 	return ids, rows.Err()
 }
 
-// libraryOnSQL is true for a job (of table jobs) whose library is started, or that has none: a paused
-// library's jobs stay waiting and are not taken (V5b).
-const libraryOnSQL = `(jobs.library_id IS NULL OR jobs.library_id IN (SELECT id FROM libraries WHERE started=1))`
+// libraryOnSQL is true for a job (of table jobs) whose library is started and not paused by its share, or
+// that has none: a paused library's jobs stay waiting and are not taken (V5b; D4b for a share's pause).
+const libraryOnSQL = `(jobs.library_id IS NULL OR jobs.library_id IN (SELECT id FROM libraries WHERE started=1 AND share_paused_id IS NULL))`
 
 // libraryOn is libraryOnSQL for the jobs row named alias: Claim, the queue's order and its positions use
 // the same condition (review-5d8b1f9).
 func libraryOn(alias string) string {
-	return `(` + alias + `.library_id IS NULL OR ` + alias + `.library_id IN (SELECT id FROM libraries WHERE started=1))`
+	return `(` + alias + `.library_id IS NULL OR ` + alias + `.library_id IN (SELECT id FROM libraries WHERE started=1 AND share_paused_id IS NULL))`
 }
 
 // AddDecision records a check's answer on job id's timeline (V6a): the step "branch", the check's node,

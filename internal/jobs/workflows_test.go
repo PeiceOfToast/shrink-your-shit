@@ -232,7 +232,7 @@ func TestEventsMigrationKeepsSeq(t *testing.T) {
 		t.Fatal(err)
 	}
 	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
-	for _, q := range []string{ // back to version 21's shape, with history at seq 41 and 42
+	for _, q := range append(append([]string{}, rewindShareMigrations...), // back to version 21's shape, with history at seq 41 and 42
 		`DROP TRIGGER events_job_insert`, `DROP TRIGGER events_job_status`, `DROP TRIGGER events_job_removed`, `DROP TABLE events`,
 		`CREATE TABLE job_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, job_id INTEGER NOT NULL, at TEXT NOT NULL,
 		  from_status TEXT, to_status TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', worker TEXT NOT NULL DEFAULT '')`,
@@ -241,7 +241,7 @@ func TestEventsMigrationKeepsSeq(t *testing.T) {
 		`CREATE TRIGGER job_events_removed AFTER DELETE ON jobs BEGIN SELECT 1; END`,
 		`INSERT INTO job_events(seq, job_id, at, to_status) VALUES (41, 7, '2026-11-01T00:00:00Z', 'queued'), (42, 7, '2026-11-01T00:00:01Z', 'running')`,
 		`ALTER TABLE jobs DROP COLUMN error_code`, `DROP TABLE workers`, `ALTER TABLE libraries DROP COLUMN override_folder`, `ALTER TABLE libraries DROP COLUMN priority`, `ALTER TABLE jobs DROP COLUMN original_gone_at`, `ALTER TABLE jobs DROP COLUMN original_changed`, `ALTER TABLE jobs DROP COLUMN original_disk`, `ALTER TABLE jobs DROP COLUMN route`, `ALTER TABLE job_steps DROP COLUMN node_id`, `ALTER TABLE job_steps DROP COLUMN port`, `ALTER TABLE jobs DROP COLUMN fallback`, `ALTER TABLE jobs DROP COLUMN lease_id`, `ALTER TABLE jobs DROP COLUMN lease_expires`, `ALTER TABLE files DROP COLUMN job_id`, `ALTER TABLE jobs DROP COLUMN again_from`, `DROP TABLE worker_pairings`, `DROP TABLE IF EXISTS worker_paths`, // migrations 23 to 27 run again
-		`PRAGMA user_version=21`} {
+		`PRAGMA user_version=21`) {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}
@@ -297,7 +297,7 @@ func TestReasonCodesMigration(t *testing.T) {
 	if err := s.Fail(id, ReasonConvertFailed, "Converting did not finish."); err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range []string{ // back to version 22: the sentence was the code
+	for _, q := range append(append([]string{}, rewindShareMigrations...), // back to version 22: the sentence was the code
 		`UPDATE events SET reason='Converting did not finish.', data=NULL WHERE kind='job' AND to_status='failed'`,
 		`INSERT INTO events(kind, job_id, at, from_status, to_status, reason) VALUES ('job', 99, '2026-11-01T00:00:00Z', 'running', 'cancelled', 'user_stopped')`,
 		// the worker's own sentences: a low-space retry and a stall (review abe2b0e: not legacy retry_later)
@@ -308,7 +308,7 @@ func TestReasonCodesMigration(t *testing.T) {
 		`DROP TRIGGER events_job_status`, `DROP TRIGGER events_job_removed`,
 		`CREATE TRIGGER events_job_status AFTER UPDATE OF status ON jobs BEGIN SELECT 1; END`,
 		`CREATE TRIGGER events_job_removed AFTER DELETE ON jobs BEGIN SELECT 1; END`,
-		`ALTER TABLE jobs DROP COLUMN error_code`, `DROP TABLE workers`, `ALTER TABLE libraries DROP COLUMN override_folder`, `ALTER TABLE libraries DROP COLUMN priority`, `ALTER TABLE jobs DROP COLUMN original_gone_at`, `ALTER TABLE jobs DROP COLUMN original_changed`, `ALTER TABLE jobs DROP COLUMN original_disk`, `ALTER TABLE jobs DROP COLUMN route`, `ALTER TABLE job_steps DROP COLUMN node_id`, `ALTER TABLE job_steps DROP COLUMN port`, `ALTER TABLE jobs DROP COLUMN fallback`, `ALTER TABLE jobs DROP COLUMN lease_id`, `ALTER TABLE jobs DROP COLUMN lease_expires`, `ALTER TABLE files DROP COLUMN job_id`, `ALTER TABLE jobs DROP COLUMN again_from`, `DROP TABLE worker_pairings`, `DROP TABLE IF EXISTS worker_paths`, `PRAGMA user_version=22`} {
+		`ALTER TABLE jobs DROP COLUMN error_code`, `DROP TABLE workers`, `ALTER TABLE libraries DROP COLUMN override_folder`, `ALTER TABLE libraries DROP COLUMN priority`, `ALTER TABLE jobs DROP COLUMN original_gone_at`, `ALTER TABLE jobs DROP COLUMN original_changed`, `ALTER TABLE jobs DROP COLUMN original_disk`, `ALTER TABLE jobs DROP COLUMN route`, `ALTER TABLE job_steps DROP COLUMN node_id`, `ALTER TABLE job_steps DROP COLUMN port`, `ALTER TABLE jobs DROP COLUMN fallback`, `ALTER TABLE jobs DROP COLUMN lease_id`, `ALTER TABLE jobs DROP COLUMN lease_expires`, `ALTER TABLE files DROP COLUMN job_id`, `ALTER TABLE jobs DROP COLUMN again_from`, `DROP TABLE worker_pairings`, `DROP TABLE IF EXISTS worker_paths`, `PRAGMA user_version=22`) {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}

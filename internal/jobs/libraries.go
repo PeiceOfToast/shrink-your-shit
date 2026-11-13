@@ -34,6 +34,10 @@ type Library struct {
 	OverrideFolder string `json:"overrideFolder"`
 	// Priority goes to its new and waiting jobs: higher is taken first (V5b; 0 by default).
 	Priority int `json:"priority"`
+	// SharePausedBy is the share whose outage paused this library (0: none), and SharePausedSince when
+	// (D4b). Separate from Started, which is the person's own pause.
+	SharePausedBy    int64  `json:"sharePausedBy"`
+	SharePausedSince string `json:"sharePausedSince"`
 }
 
 // Flow is one flow record. Its behaviour is its template until the graph engine (slice 30).
@@ -107,11 +111,11 @@ func Within(p, dir string) bool {
 	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
-const libCols = `id,name,path,flow_id,started,created,last_scan,last_scan_videos,override_folder,priority`
+const libCols = `id,name,path,flow_id,started,created,last_scan,last_scan_videos,override_folder,priority,COALESCE(share_paused_id,0),share_paused_since`
 
 func scanLibrary(r interface{ Scan(...any) error }) (Library, error) {
 	var l Library
-	err := r.Scan(&l.ID, &l.Name, &l.Path, &l.FlowID, &l.Started, &l.Created, &l.LastScan, &l.LastScanVideos, &l.OverrideFolder, &l.Priority)
+	err := r.Scan(&l.ID, &l.Name, &l.Path, &l.FlowID, &l.Started, &l.Created, &l.LastScan, &l.LastScanVideos, &l.OverrideFolder, &l.Priority, &l.SharePausedBy, &l.SharePausedSince)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
 	}

@@ -434,6 +434,11 @@ CREATE TABLE IF NOT EXISTS share_mounts (
   mount_path TEXT NOT NULL, platform TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'waiting_setup', error TEXT,
   mounted_at TEXT, since TEXT);`},
+	// D4b: a library on a share that stopped answering is paused by the share, not by the person. It is
+	// its own column, never started: the person's pause stays as it was. NULL: not share-paused.
+	{41, "library share pause", `
+ALTER TABLE libraries ADD COLUMN share_paused_id INTEGER;
+ALTER TABLE libraries ADD COLUMN share_paused_since TEXT NOT NULL DEFAULT '';`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone
