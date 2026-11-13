@@ -19,8 +19,8 @@ import type { Failure, JobAction, JobDetail, JobItem, JobProgressEvent, JobState
 const TABS: [Tab, string][] = [["waiting", "Waiting"], ["running", "Running"], ["completed", "Done"], ["skipped", "Skipped"], ["failed", "Failed"]];
 // Spec states in words (SCREENS V6); a cancelled file lists under Skipped and reads "Cancelled".
 const tabOf = (st: JobState): Tab => (st === "queued" || st === "retry_wait" ? "waiting" : st === "completed" ? "completed" : st === "skipped" || st === "cancelled" ? "skipped" : st === "failed" ? "failed" : "running");
-const WORD: Record<JobState, string> = { queued: "Waiting", preparing: "Preparing", running: "Running", validating: "Checking", committing: "Saving",
-  completed: "Done", skipped: "Skipped", failed: "Failed", cancelled: "Cancelled", retry_wait: "Retry" };
+const WORD: Record<string, string> = { queued: "Waiting", preparing: "Preparing", running: "Running", validating: "Checking", committing: "Saving",
+  completed: "Done", skipped: "Skipped", failed: "Failed", cancelled: "Cancelled", retry_wait: "Retry", done: "Done", kept: "Original kept: the new file wasn't used." };
 const PILL: Partial<Record<JobState, string>> = { preparing: "run", running: "run", validating: "run", committing: "run", completed: "ok", failed: "bad", retry_wait: "warn" };
 const ICON: Partial<Record<JobState, string>> = { completed: "i-check-c", failed: "i-x-c", skipped: "i-skip", cancelled: "i-stop", retry_wait: "i-clock", queued: "i-clock" };
 // V5b: a waiting file whose library is paused (subState library_disabled) reads "Library paused" (design SCREENS V5);
@@ -168,6 +168,7 @@ export function Jobs() {
 // ffmpeg error lines (at most five) behind a disclosure. Each part is left out when the server sends none.
 // durations read '4 min 12 s' and '0.1 s' everywhere (the design's phone note)
 const dur = (ms: number) => { const s = ms / 1000; return s < 1 ? s.toFixed(1) + " s" : s < 60 ? Math.round(s) + " s" : Math.floor(s / 60) + " min " + (Math.round(s) % 60) + " s"; };
+const text = (o: string | string[]) => Array.isArray(o) ? o.join("\n") : o;
 // map server step labels to person-facing names (workshop #217: encode, check)
 const stepLabel = (s: string) => ({ encode: "Converting video", check: "Checking the picture", imported: "Older log, not split into steps", replace: "Save the result" } as Record<string, string>)[s] ?? s;
 // SCREENS V6b: the sentence, the reason code small under it, where it stops (the step opens in the log), the hint as
@@ -196,7 +197,7 @@ function WhyFailed({ id, msg, code, worker, f }: { id: string; msg: string; code
 }
 
 // count of q in a step's searchable text (case-insensitive)
-const matches = (st: { name: string; command: string | null; output: string; result: string }, q: string) => [st.name, st.command ?? "", st.output, st.result].join("\n").toLowerCase().split(q.toLowerCase()).length - 1;
+const matches = (st: { name: string; command: string | null; output: string | string[]; result: string | null }, q: string) => [st.name, st.command ?? "", text(st.output), st.result ?? ""].join("\n").toLowerCase().split(q.toLowerCase()).length - 1;
 // E: a finished job's log by step (GET /log), SCREENS V6b: each step a row that opens; the failed step open; inside a step
 // its command, its source, its picture check, its ffmpeg output (last 200 lines on a failure, the rest by download), its
 // result; the log's last line is the job's final line.
@@ -230,7 +231,7 @@ function StepLog({ id, worker, failedIdx }: { id: string; worker: string | null;
         return (
           <details key={i} id={"job-step-" + (i + 1)} open={q ? hit > 0 : st.outcome !== "ok" || i === failedIdx} className="stepd" style={{ borderTop: "1px solid var(--border)", padding: "8px 0" }}>
             <summary className="row nw" style={{ gap: 8, flexWrap: "wrap", cursor: "pointer" }}><strong>{stepLabel(st.name)}</strong>{st.startedAt && st.tookMs != null && <span className="sm muted">{clock(st.startedAt)} · took {dur(st.tookMs)}</span>}
-              {st.name === "imported" && st.outcome === "completed" ? <span className="pill ok">Done</span> : st.name === "imported" && st.outcome === "failed" ? <span className="pill bad">Failed</span> : st.name !== "imported" ? <span className={"pill " + (st.outcome === "ok" ? "ok" : "bad")}>{st.outcome === "ok" ? "Done" : "Failed"}</span> : null}{hit > 0 && <span className="pill">{hit} match{hit > 1 ? "es" : ""}</span>}</summary>
+              {["ok", "done", "completed"].includes(st.outcome) ? <span className="pill ok">Done</span> : st.outcome === "failed" ? <span className="pill bad">Failed</span> : null}{hit > 0 && <span className="pill">{hit} match{hit > 1 ? "es" : ""}</span>}</summary>
             <div className="stack" style={{ gap: 6, paddingTop: 6 }}>
               {st.command && <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">Command</span><button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(st.command ?? "").catch(() => {})}><Icon id="i-copy" />Copy</button></div>
                 <pre className="joblog sm">{st.command}</pre></div>}
@@ -238,12 +239,12 @@ function StepLog({ id, worker, failedIdx }: { id: string; worker: string | null;
               {st.check && <p className="sm">Picture check: Score {st.check.score.toFixed(3)}{st.check.min != null ? " (needs " + st.check.min.toFixed(3) + ")" : ""}{st.check.passed != null ? " · " + (st.check.passed ? "passed" : "failed") : ""}</p>}
               {st.outputLines > 0 && <details open={st.outcome !== "ok"}><summary className="sm">Show ffmpeg output ({st.outputLines} lines)</summary>
                 {st.outputLines > 200 && <p className="sm"><a href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}>Download all {st.outputLines.toLocaleString()} lines</a></p>}
-                <pre className="joblog sm">{st.output}</pre></details>}
+                <pre className="joblog sm">{text(st.output)}</pre></details>}
               {st.result && <p className="sm">{st.result}</p>}
             </div>
           </details>);
       })}
-      {l.final && <p className="sm" style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>{l.final}</p>}</>}
+      {(l.final != null && WORD[l.final]) && <p className="sm" style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>{WORD[l.final]}</p>}</>}
     </section>);
 }
 

@@ -45,27 +45,27 @@ export function mockJobs(tab: Tab, q: string, path?: string): JobsPage {
 const REMOVED: JobDetail = { id: "47001", state: "cancelled", removed: true, reason: { code: "removed", message: "Its library was removed, so this file wasn't converted." },
   events: [{ seq: 3, at: at(300), from: null, to: "queued", reason: null, workerId: null }, { seq: 9, at: at(200), from: "queued", to: "cancelled", reason: "removed", workerId: null }], steps: [] };
 // The sample's log by step: the steps the job went through, the failing one with its last lines
-export function mockJobLog(id: string): { state: string; steps: { name: string; startedAt: string | null; tookMs: number | null; outcome: string; command: string | null; probe: Probe | null; check: { score: number; min: number | null; passed: boolean | null } | null; outputLines: number; output: string; result: string }[]; final: string } | { error: { code: string; message: string } } {
+export function mockJobLog(id: string): { state: string; steps: { name: string; startedAt: string | null; tookMs: number | null; outcome: string; command: string | null; probe: Probe | null; check: { score: number; min: number | null; passed: boolean | null } | null; outputLines: number; output: string | string[]; result: string | null }[]; final: string | null } | { error: { code: string; message: string } } {
   const j = mockJob(id);
   if (!j) return { error: { code: "not_found", message: "There is no such job." } };
   const failed = j.state === "failed";
   const f48190 = id === "48190", f48191 = id === "48191";
-  const out = f48190 ? "[hevc @ 0x55d1] Error while decoding stream #0:0: Invalid data found when processing input\nConversion failed!" : "";
-  const step = (name: string, outcome: string, extra: Record<string, unknown>) => ({ name, startedAt: at(300), tookMs: outcome === "ok" ? 120000 : outcome === "failed" && f48191 ? 0 : 252000, outcome, command: null, probe: null, check: null, outputLines: 0, output: "", result: outcome === "ok" ? "Done" : "Failed", ...extra });
+  const out = f48190 ? ["[hevc @ 0x55d1] Error while decoding stream #0:0: Invalid data found when processing input", "Conversion failed!"] : [];
+  const step = (name: string, outcome: string, extra: Record<string, unknown>) => ({ name, startedAt: at(300), tookMs: outcome === "ok" ? 120000 : outcome === "failed" && f48191 ? 0 : 252000, outcome, command: null, probe: null, check: null, outputLines: 0, output: [], result: outcome === "ok" ? "Done" : "Failed", ...extra });
   const conv: Record<string, unknown> = f48191 ? {} : { command: "ffmpeg -i in.mkv -c:v libx265 -crf 23 out.mkv", probe: { videoCodec: "h264", bitrateKbps: 12109, durationSec: 7200, sizeBytes: j.file?.bytes ?? 0, streams: [{ index: 0, type: "video", codec: "h264", Width: 1920, Height: 1080 }] }, check: failed ? { score: 0.912, min: 0.95, passed: false } : { score: 0.973, min: 0.95, passed: true }, outputLines: f48190 ? 2 : 184, output: out };
-  if (id === "no-log") return { state: "none", steps: [], final: "" };
+  if (id === "no-log") return { state: "none", steps: [], final: null };
   if (id === "old-log-imported") {
     const lines = Array.from({ length: 250 }, (_, i) => "line " + (i + 1) + ": FFMPEG frame output for this old job");
-    return { state: "complete", steps: [{ name: "imported", startedAt: null, tookMs: null, outcome: "completed", command: null, probe: null, check: null, outputLines: 250, output: lines.slice(-200).join("\n"), result: "Done" }], final: "Done" };
+    return { state: "complete", steps: [{ name: "imported", startedAt: null, tookMs: null, outcome: "done", command: null, probe: null, check: null, outputLines: 250, output: lines.slice(-200), result: "Done" }], final: "done" };
   }
   if (id === "failed-replace") {
     return { state: "complete", steps: [
-      { name: "encode", startedAt: "2026-11-11T14:00:00Z", tookMs: 120000, outcome: "ok", command: "ffmpeg -i in.mkv -c:v libx265 -crf 22 out.mkv", probe: { videoCodec: "h264", bitrateKbps: 8000, durationSec: 3600, sizeBytes: 3 * GB, streams: [{ index: 0, type: "video", codec: "h264", Width: 1920, Height: 1080 }] }, check: { score: 0.967, min: 0.95, passed: true }, outputLines: 10, output: "[hevc @ 0x55d1] output file #0 does not contain any stream", result: "Done" },
-      { name: "check", startedAt: "2026-11-11T14:02:00Z", tookMs: 5000, outcome: "ok", command: null, probe: null, check: { score: 0.967, min: 0.95, passed: true }, outputLines: 0, output: "", result: "Passed" },
-      { name: "replace", startedAt: "2026-11-11T14:02:05Z", tookMs: 500, outcome: "failed", command: null, probe: null, check: null, outputLines: 0, output: "", result: "Failed" },
+      { name: "encode", startedAt: "2026-11-11T14:00:00Z", tookMs: 120000, outcome: "ok", command: "ffmpeg -i in.mkv -c:v libx265 -crf 22 out.mkv", probe: { videoCodec: "h264", bitrateKbps: 8000, durationSec: 3600, sizeBytes: 3 * GB, streams: [{ index: 0, type: "video", codec: "h264", Width: 1920, Height: 1080 }] }, check: { score: 0.967, min: 0.95, passed: true }, outputLines: 10, output: ["[hevc @ 0x55d1] output file #0 does not contain any stream"], result: "Done" },
+      { name: "check", startedAt: "2026-11-11T14:02:00Z", tookMs: 5000, outcome: "ok", command: null, probe: null, check: { score: 0.967, min: 0.95, passed: true }, outputLines: 0, output: [], result: "Passed" },
+      { name: "replace", startedAt: "2026-11-11T14:02:05Z", tookMs: 500, outcome: "failed", command: null, probe: null, check: null, outputLines: 0, output: [], result: "Failed" },
     ], final: "The new file was converted, but saving it in place of the original failed." };
   }
-  return { state: "complete", final: f48190 ? "The new file is 4 s shorter than the original. The original is kept." : f48191 ? "There isn't enough free space." : "Done · 41% smaller", steps: [
+  return { state: "complete", final: f48191 ? "kept" : "done", steps: [
     step("encode", f48190 ? "failed" : f48191 ? "failed" : "ok", { ...conv, result: failed ? "Failed" : "Done · 41% smaller" }),
   ] };
 }
