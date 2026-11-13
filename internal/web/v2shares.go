@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/helper"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -306,7 +307,7 @@ func mountErrReason(err error) string {
 	case strings.Contains(low, "permission denied"), strings.Contains(low, "error(13)"):
 		return `{"code":"auth_failed","message":"The username or password is wrong."}`
 	case strings.Contains(low, "no such file or directory"), strings.Contains(low, "error(2)"):
-		return `{"code":"share_not_found","message":"` + jsonStr(msg) + `"}`
+		return `{"code":"share_not_found","message":` + jsonStr(msg) + `}`
 	case strings.Contains(low, "host is down"), strings.Contains(low, "no route"), strings.Contains(low, "error(112)"), strings.Contains(low, "error(113)"):
 		return `{"code":"host_unreachable","message":"The server is not reachable."}`
 	case strings.Contains(low, "timed out"):
@@ -323,7 +324,55 @@ func jsonStr(s string) string {
 	return `"` + esc + `"`
 }
 
+// parseAddress cleans a share address and refuses one with a port: the root helper takes none (SMB always uses
+// 445, NFS 2049), so a share saved with one could never connect (orch-lead, ui-shop QA of #217).
 func parseAddress(raw string) (addr, typ string, err error) {
+	addr, typ, err = parseAddressForm(raw)
+	if err != nil {
+		return "", "", err
+	}
+	if hasPort(addressHost(typ, addr)) {
+		if typ == "smb" {
+			return "", "", errors.New("Leave out the port: SMB always uses 445.")
+		}
+		return "", "", errors.New("Leave out the port: NFS uses 2049.")
+	}
+	return addr, typ, nil
+}
+
+// addressHost is the server part of a cleaned address: \\server\share or server:/export (IPv6 in brackets).
+func addressHost(typ, addr string) string {
+	if typ == "smb" {
+		return strings.SplitN(strings.TrimPrefix(addr, `\\`), `\`, 2)[0]
+	}
+	if strings.HasPrefix(addr, "[") { // [fd00::2]:/export, or with a port [fd00::2]:2049:/export
+		if i := strings.Index(addr, "]"); i >= 0 {
+			rest := addr[i+1:]
+			if j := strings.Index(rest, ":/"); j >= 0 {
+				return addr[:i+1] + rest[:j]
+			}
+			return addr[:i+1] + strings.SplitN(rest, "/", 2)[0]
+		}
+	}
+	if i := strings.Index(addr, ":/"); i >= 0 {
+		return addr[:i]
+	}
+	return strings.SplitN(addr, "/", 2)[0]
+}
+
+// hasPort reports whether a host names a port: "nas:1445", or "[fe80::1]:1445" (a bracketed IPv6 address alone has none).
+func hasPort(host string) bool {
+	if strings.HasPrefix(host, "[") {
+		i := strings.Index(host, "]")
+		return i >= 0 && strings.HasPrefix(host[i+1:], ":")
+	}
+	return strings.Contains(host, ":")
+}
+
+// dialHost is a host for net.JoinHostPort: an IPv6 address without its brackets.
+func dialHost(host string) string { return strings.TrimSuffix(strings.TrimPrefix(host, "["), "]") }
+
+func parseAddressForm(raw string) (addr, typ string, err error) {
 	raw = strings.TrimSpace(raw)
 	low := strings.ToLower(raw)
 	switch {
@@ -387,23 +436,27 @@ func testSMB(address, username, password string, guest bool) map[string]any {
 	}
 	server := parts[0]
 	shareName := strings.Join(parts[1:], "\\")
+	if hasPort(server) { // parseAddress refuses these first; kept for a direct call
+		return map[string]any{"ok": false, "code": "invalid_address",
+			"message": "Leave out the port: SMB always uses 445."}
+	}
 	ini := &smb2.NTLMInitiator{User: username, Password: password}
 	dialer := &smb2.Dialer{Initiator: ini}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	session, err := dialer.Dial(ctx, net.JoinHostPort(server, smbPort))
+	session, err := dialer.Dial(ctx, net.JoinHostPort(dialHost(server), smbPort))
 	if err != nil {
-		return smbError(err)
+		return smbError(err, server, shareName)
 	}
 	share, err := session.Mount(shareName)
 	if err != nil {
 		session.Logoff()
-		return smbError(err)
+		return smbError(err, server, shareName)
 	}
 	entries, err := share.ReadDir("")
 	session.Logoff()
 	if err != nil {
-		return smbError(err)
+		return smbError(err, server, shareName)
 	}
 	var folders []string
 	more := 0
@@ -421,40 +474,51 @@ func testSMB(address, username, password string, guest bool) map[string]any {
 // a Windows machine (CI runners included) runs its own SMB server on 445.
 var smbPort, nfsPort = "445", "2049"
 
-func smbError(err error) map[string]any {
+func smbError(err error, server, share string) map[string]any {
 	msg := err.Error()
 	low := strings.ToLower(msg)
+	var code, message string
 	switch {
 	case strings.Contains(low, "no such host"), strings.Contains(low, "nodename nor servname"):
-		return map[string]any{"ok": false, "code": "host_not_found", "message": msg}
+		code, message = "host_not_found", "Can't find a computer called "+server+". Check the name, or use its IP address."
 	case strings.Contains(low, "refused"), strings.Contains(low, "no route"):
-		return map[string]any{"ok": false, "code": "host_unreachable", "message": msg}
+		code, message = "host_unreachable", server+" doesn't answer. Check it's on and on the same network."
 	case strings.Contains(low, "timeout"), strings.Contains(low, "timed out"):
-		return map[string]any{"ok": false, "code": "timeout", "message": "The server didn't answer in time."}
+		code, message = "timeout", "Timed out after 10 seconds."
 	case strings.Contains(low, "logon failure"), strings.Contains(low, "logon"):
-		return map[string]any{"ok": false, "code": "auth_failed", "message": "The username or password is not correct."}
+		code, message = "auth_failed", "The username or password is wrong."
 	case strings.Contains(low, "access denied"):
-		return map[string]any{"ok": false, "code": "access_denied", "message": "Access denied: the account doesn't have permission on this share."}
+		code, message = "access_denied", "This user can't open "+share+"."
 	case strings.Contains(low, "not found"), strings.Contains(low, "does not exist"):
-		return map[string]any{"ok": false, "code": "share_not_found", "message": msg}
+		code, message = "share_not_found", server+" has no shared folder called "+share+"."
+	default:
+		code, message = "mount_failed", msg
 	}
-	return map[string]any{"ok": false, "code": "mount_failed", "message": msg}
+	log.Printf("smb test: server=%s share=%s err=%s code=%s", server, share, msg, code)
+	return map[string]any{"ok": false, "code": code, "message": message}
 }
 
 func testNFS(address string) map[string]any {
-	server := strings.Split(address, ":")[0]
+	server := addressHost("nfs", address)
 	if server == "" {
 		return map[string]any{"ok": false, "code": "invalid_address", "message": "Use server:/export."}
 	}
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(server, nfsPort), 10*time.Second)
+	if hasPort(server) { // parseAddress refuses these first; kept for a direct call
+		return map[string]any{"ok": false, "code": "invalid_address",
+			"message": "Leave out the port: NFS uses 2049."}
+	}
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(dialHost(server), nfsPort), 10*time.Second)
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "no such host") {
-			return map[string]any{"ok": false, "code": "host_not_found", "message": "The NFS server was not found."}
+		msg := err.Error()
+		if strings.Contains(strings.ToLower(msg), "no such host") {
+			return map[string]any{"ok": false, "code": "host_not_found",
+				"message": "Can't find a computer called " + server + ". Check the name, or use its IP address."}
 		}
-		if strings.Contains(strings.ToLower(err.Error()), "refused") {
-			return map[string]any{"ok": false, "code": "host_unreachable", "message": "The NFS server didn't answer."}
+		if strings.Contains(strings.ToLower(msg), "refused") {
+			return map[string]any{"ok": false, "code": "host_unreachable",
+				"message": server + " doesn't answer. Check it's on and on the same network."}
 		}
-		return map[string]any{"ok": false, "code": "timeout", "message": "The NFS server didn't answer in time."}
+		return map[string]any{"ok": false, "code": "timeout", "message": "Timed out after 10 seconds."}
 	}
 	conn.Close()
 	return map[string]any{"ok": true, "address": address, "folders": []string{}, "moreFolders": 0, "portOnly": true}
