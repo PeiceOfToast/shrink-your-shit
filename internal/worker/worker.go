@@ -346,8 +346,11 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 		// the swap into the library, kept-original moves) with a type.
 		var pe *placeError
 		if errors.As(err, &pe) {
-			// placeError already recorded the replace step and timeline. Call Fail so the
-			// job shows the right code; the failure box gets its summary from the stored step.
+			// The new file was made and checked, but putting it in place was refused (user review 11-13
+			// item E, the manager's check): a failed 'replace' step with the OS error as its key line,
+			// and a 'replaced' timeline entry instead of a second 'converted'.
+			w.jobf(job.ID, " (%s) failed putting the new file in place: %v", job.Path, err)
+			w.replaceStep(job.ID, pe.Started, true, pe.keyLine())
 			w.Queue.AddStep(job.ID, "replaced", false, plainFailure(err))
 			if ferr := w.Queue.Fail(job.ID, reasonCode(err), plainFailure(err)); ferr != nil {
 				return true, ferr
@@ -457,8 +460,10 @@ type SkippedError struct{ Words, Code string }
 // placeError is an error from the place/replace phase (after the encode and check).
 // It wraps the underlying error with the path that was being written to.
 type placeError struct {
-	Path string
-	Err  error
+	Path    string    // the file or folder the system refused, exactly as the OS error names it
+	Words   string    // the OS error's own words ("permission denied", "read-only file system")
+	Started time.Time // when putting the new file in place began, for the replace step's timing
+	Err     error
 }
 
 func (e *placeError) Error() string { return e.Err.Error() }
@@ -496,33 +501,23 @@ func (w *Worker) placeError(jobID int64, placeStarted time.Time, final string, e
 	if err == nil {
 		return nil
 	}
-	path := final
-	var pe *os.PathError
-	if errors.As(err, &pe) {
-		path = pe.Path
+	pe := &placeError{Path: final, Started: placeStarted, Err: err}
+	var pathErr *os.PathError
+	var linkErr *os.LinkError
+	switch {
+	case errors.As(err, &linkErr): // rename/link: the destination is where the write was refused
+		pe.Path, pe.Words = linkErr.New, linkErr.Err.Error()
+	case errors.As(err, &pathErr):
+		pe.Path, pe.Words = pathErr.Path, pathErr.Err.Error()
+	default:
+		pe.Words = err.Error()
 	}
-	var le *os.LinkError
-	if errors.As(err, &le) {
-		path = le.New
-	}
-	if i := strings.LastIndex(path, "/.syp"); i >= 0 {
-		path = path[:i]
-	} else if i := strings.LastIndex(path, "\\.syp"); i >= 0 {
-		path = path[:i]
-	}
-	msg := fmt.Sprintf("Couldn't write to %s: %v", path, err)
-	w.replaceStep(jobID, placeStarted, true, msg)
-	if w.Queue != nil {
-		w.Queue.AddStep(jobID, "replaced", false, msg)
-	}
-	return &placeError{Path: path, Err: err}
+	return pe
 }
-func (w *Worker) placeWrap(jobID int64, placeStarted time.Time, final string, err error) error {
-	if err == nil {
-		return nil
-	}
-	return w.placeError(jobID, placeStarted, final, err)
-}
+
+// keyLine is the failure summary's line for a place error, in the form jobs.DeniedFolder reads
+// ("Couldn't write <path>: <words>"), so the person's sentence names the real folder.
+func (e *placeError) keyLine() string { return "Couldn't write " + e.Path + ": " + e.Words }
 
 func (e *SkippedError) Error() string { return "skipped: " + e.Words }
 
@@ -1075,7 +1070,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		if errors.As(err, &k) {
 			return "", err
 		}
-		return "", retryable(failed("The new file could not be put in place, so your original was kept as it was. Press Retry.", fmt.Errorf("move result into place: %w", err)), retryGeneral) // busy or locked
+		return "", w.placeError(job.ID, placeStarted, final, retryable(failed("The new file could not be put in place, so your original was kept as it was. Press Retry.", fmt.Errorf("move result into place: %w", err)), retryGeneral)) // busy or locked
 	}
 	swapped()
 	w.replaceStep(job.ID, placeStarted, false, "")

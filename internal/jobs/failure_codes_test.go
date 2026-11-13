@@ -104,6 +104,12 @@ func TestDeniedFolder(t *testing.T) {
 		{[]string{"Error opening output /srv/media/.syp-tmp/.Movie.abc.syp-tmp.mkv: Permission denied"}, "/srv/media"},
 		{[]string{"Error opening output /mnt/media/out (shrunk)/.output.123.syp-tmp/new.mkv: Permission denied"}, "/mnt/media/out (shrunk)"},
 		{[]string{"Error opening output files: Permission denied"}, ""}, // no path in it
+		// the worker's line when putting the new file in place was refused (the manager's check of item E)
+		{[]string{"Couldn't write /mnt/media/My Film (2001).mkv: permission denied"}, "/mnt/media"},
+		{[]string{"Couldn't write /mnt/media/.My Film.123.syp-tmp/new.mkv: permission denied"}, "/mnt/media"},
+		{[]string{"Couldn't write /mnt/nas/Movies/x.mkv: read-only file system"}, "/mnt/nas/Movies"},
+		{[]string{`Couldn't write D:\Movies\x.mkv: Access is denied.`}, `D:\Movies`},
+		{[]string{"Couldn't write /mnt/out/x.mkv: no space left on device"}, ""}, // not a refused write
 		{[]string{"Conversion failed!"}, ""},
 	} {
 		if got := DeniedFolder(c.lines); got != c.want {
