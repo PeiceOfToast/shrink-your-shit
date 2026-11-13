@@ -9,6 +9,7 @@ import { branchedDoc, legacyDoc, presetDoc, preview, revision, summary as stepSu
 const now = Date.now(), ago = (min: number) => new Date(now - min * 60e3).toISOString();
 const GB = 1e9;
 const mockMode = new URLSearchParams(location.search).get("mock");
+const shareMode = new URLSearchParams(location.search).get("sharemode") || "app";
 
 function library(id: ID, name: string, path: string, freed: number, waitingToFree: number, files: number): Library {
   return {
@@ -111,7 +112,7 @@ function running(): State {
       workflow("w4", "Old settings", "Carried over from an earlier install", { summaryTag: "Settings from an earlier install" }),
     ],
     trash: { bytes: 120 * GB, files: 14, nextDeleteAt: ago(-60 * 24), lastDeleteAt: ago(-60 * 24 * 7) },
-    mode: "app",
+    mode: shareMode as "app" | "manual" | "docker",
     shares: [
       { id: "1", name: "Movies NAS", type: "smb", address: "\\\\nas\\movies", guest: false, username: "mediauser", hasPassword: true,
         status: "connected", since: ago(60 * 24 * 30), reason: null,

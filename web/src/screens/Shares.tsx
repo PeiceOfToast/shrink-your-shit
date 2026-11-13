@@ -42,9 +42,9 @@ function ShareRow({ share, resp, onChanged, said }: { share: Share; resp: Shares
       </td>
       <td data-p="2">{libs ? <a href="#">{libs}</a> : <span className="muted">Not used</span>}</td>
       <td className="actc">
-        <details className="menu" style={{ display: menu ? undefined : "inline-block" }}>
-          <summary className="btn icon ghost sm" aria-label={"Actions for " + share.name} onClick={() => setMenu(!menu)} style={{ display: "inline-flex" }}><Icon id="i-more" /></summary>
-          {menu && <div className="pop over" role="menu">
+        <details className="menu" open={menu}>
+          <summary className="btn icon ghost sm" aria-label={"Actions for " + share.name} onClick={() => setMenu(!menu)}><Icon id="i-more" /></summary>
+          {menu && <div className="pop" role="menu">
             {canReconnect && <button className="it" type="button" onClick={() => (setMenu(false), reconnect())}>Reconnect</button>}
             {canCheck && <button className="it" type="button" onClick={() => (setMenu(false), reconnect())}>Check again</button>}
             <button className="it" type="button" onClick={() => (setMenu(false), setEditing(true))}>Edit</button>
@@ -67,7 +67,7 @@ function RemoveDialog({ share, onCancel, onDone, said }: { share: Share; onCance
   return (
     <div className="drawer-wrap" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
       <aside className="drawer" tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="rm-s" onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), onCancel())}>
-        <div className="hd"><h3 id="rm-s" style={{ margin: 0 }}>Remove {share.name}?</h3><button className="btn icon ghost sm" type="button" aria-label="Close" onClick={onCancel}><Icon id="i-x" /></button></div>
+        <div className="hd"><button className="btn icon ghost sm" type="button" aria-label="Close" onClick={onCancel}><Icon id="i-chev-l" /></button><div className="sp"><h3 id="rm-s" style={{ margin: 0 }}>Remove {share.name}?</h3></div></div>
         <div className="bd">
           <p style={{ margin: 0 }}>Shrink Your Shit disconnects from it. Nothing on the share is changed or deleted.{share.setup ? " Also remove it from the server:" : ""}</p>
           {share.setup && <div className="codebox"><code>{share.setup.removeText}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(share.setup!.removeText).catch(() => {})}><Icon id="i-copy" />Copy</button></div>}
@@ -121,9 +121,8 @@ function ShareSheet({ share, resp, onDone, onCancel, said }: { share?: Share; re
   return (
     <div className="drawer-wrap" onMouseDown={(e) => e.target === e.currentTarget && close()}>
       <aside ref={box} className="drawer" tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={edit ? "es" : "ns"} onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), close())}>
-        <div className="hd"><h3 id={edit ? "es" : "ns"} style={{ margin: 0 }}>{edit ? share!.name : ss ? ss.name : "Add a share"}</h3>
-          {edit && <p className="hint" style={{ margin: "4px 0 0" }}>{share!.address} · {TYPE[share!.type].label}</p>}
-          <button className="btn icon ghost" type="button" aria-label="Close" onClick={close}><Icon id="i-chev-l" /></button></div>
+        <div className="hd"><button className="btn icon ghost" type="button" aria-label="Close" onClick={close}><Icon id="i-chev-l" /></button><div className="sp"><h3 id={edit ? "es" : "ns"} style={{ margin: 0 }}>{edit ? share!.name : ss ? ss.name : "Add a share"}</h3>
+          {edit && <p className="hint" style={{ margin: 0 }}>{share!.address} · {TYPE[share!.type].label}</p>}</div></div>
         <div className="bd">
           {ss?.setup ? <>
             <p className="st warn" style={{ margin: 0 }}><Icon id="i-clock" />Waiting for setup on the server</p>
@@ -134,9 +133,9 @@ function ShareSheet({ share, resp, onDone, onCancel, said }: { share?: Share; re
           </> : <>
             <fieldset style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}><legend style={{ fontWeight: "var(--fw-strong)", marginBottom: 6, padding: 0 }}>Type</legend>
               <label className={"radio" + (type === "smb" ? " sel" : "")}><input type="radio" name="st" checked={type === "smb"} onChange={() => setType("smb")} disabled={edit} />
-                <span><strong>SMB</strong><span className="hint blk">{TYPE.smb.hint}</span></span></label>
+                <span><strong>SMB</strong><span className="hint" style={{ display: "block" }}>{TYPE.smb.hint}</span></span></label>
               <label className={"radio" + (type === "nfs" ? " sel" : "")}><input type="radio" name="st" checked={type === "nfs"} onChange={() => setType("nfs")} disabled={!resp.nfsSupported || edit} />
-                <span><strong>NFS</strong><span className="hint blk">{TYPE.nfs.hint}</span>{!resp.nfsSupported && <span className="hint blk">NFS isn't supported on Mac yet.</span>}</span></label>
+                <span><strong>NFS</strong><span className="hint" style={{ display: "block" }}>{TYPE.nfs.hint}</span>{!resp.nfsSupported && <span className="hint" style={{ display: "block" }}>NFS isn't supported on Mac yet.</span>}</span></label>
             </fieldset>
             <div className="field"><label htmlFor="sa">Address</label>
               <input className="input mono" id="sa" value={address} onChange={(e) => setAddress(e.target.value)} placeholder={type === "smb" ? "\\\\nas\\media" : "nas:/volume1/media"} />
