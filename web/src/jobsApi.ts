@@ -29,7 +29,7 @@ export async function getJobLog(id: string): Promise<Answer<JobLog>> {
 // Without the path filter (dev before workshop #214), fileJobs returns [] and the line is hidden.
 const TABS: Tab[] = ["waiting", "running", "completed", "skipped", "failed"];
 export async function fileJobs(path: string): Promise<Answer<JobItem[]>> {
-  const rs = MOCK ? TABS.map((t) => mockJobs(t, "")) : await Promise.all(TABS.map((t) => call<JobsPage>("GET", "/api/v2/jobs?tab=" + t + "&limit=200&path=" + encodeURIComponent(path))));
+  const rs = MOCK ? TABS.map((t) => mockJobs(t, "", path)) : await Promise.all(TABS.map((t) => call<JobsPage>("GET", "/api/v2/jobs?tab=" + t + "&limit=200&path=" + encodeURIComponent(path))));
   const bad = rs.find((r) => failed(r)); if (bad) return bad;
   const items = rs.flatMap((r) => (r as JobsPage).items);
   // shortcut: no items means nothing to show anyway

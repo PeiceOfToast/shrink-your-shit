@@ -7,7 +7,7 @@ export type JobState = "queued" | "preparing" | "running" | "validating" | "comm
 export type Tab = "waiting" | "running" | "completed" | "skipped" | "failed";
 export interface Reason { code: string; message: string } // #122: a fixed code; show the message
 // E (E-API-SHAPE, final): where a failed job stopped; keyLines: the last ffmpeg lines that report an error (at most 5)
-export interface Failure { step: string; stepIndex: number; stepCount: number; afterMs: number; mediaTime: string | null; hint: string | null; exitCode: number | null; keyLines: string[] }
+export interface Failure { step: string; stepIndex: number; stepCount: number; afterMs: number; mediaTime: string | null; hint: string | null; ffmpegRan: boolean; exitCode: number | null; keyLines: string[] }
 export interface Progress { stage: string; percent: number | null; workflowPercent: number; elapsedS: number; speed: number | null; etaS: number | null; fps: number | null; bitrateKbps: number | null }
 
 // GET /api/v2/jobs?tab=&q=&libraryId=&sort=queue&limit=&offset= -> {items, total, counts}

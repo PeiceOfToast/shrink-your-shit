@@ -24,12 +24,13 @@ let items: JobItem[] = [
   base("skip-2", "Severance.S02E07.1080p.WEB-DL.mkv", "Season 2", TV, "cancelled", { jobId: "47002", // #149: a stopped job keeps its job (steps, tries)
  reason: { code: "user_stopped", message: "You stopped this file. It is left as it is until you press Convert again." }, detail: "You stopped it.", skippedId: "2" }),
   base("48190", "Wedding.Raw.2018.mov", ".", HOME, "failed", { detail: "The new file is 4 s shorter than the original. The original is kept.", reason: { code: "convert_failed", message: "The new file is 4 s shorter than the original. The original is kept." } }),
+  base("48191", "Crash.Test.2024.mp4", "Crash Test (2024)", HOME, "failed", { detail: "The encoder ran but did not produce usable output.", reason: { code: "encode_failed", message: "The encoder ran but did not produce usable output." } }),
 ];
 const TAB: Record<Tab, JobState[]> = { waiting: ["queued", "retry_wait"], running: ["preparing", "running", "validating", "committing"], completed: ["completed"], skipped: ["skipped", "cancelled"], failed: ["failed"] };
 const tabOf = (s: JobState) => (Object.keys(TAB) as Tab[]).find((t) => TAB[t].includes(s))!;
-export function mockJobs(tab: Tab, q: string): JobsPage {
+export function mockJobs(tab: Tab, q: string, path?: string): JobsPage {
   const counts = Object.fromEntries((Object.keys(TAB) as Tab[]).map((t) => [t, items.filter((j) => tabOf(j.state) === t).length])) as Record<Tab, number>;
-  let rows = items.filter((j) => tabOf(j.state) === tab && (!q || j.name.toLowerCase().includes(q.toLowerCase())));
+  let rows = items.filter((j) => tabOf(j.state) === tab && (!q || j.name.toLowerCase().includes(q.toLowerCase())) && (!path || j.path === path));
   if (tab === "waiting") { // as the server with sort=queue (#134): taken-now files by priority, then age; a retry waiting for its time has no place
     const rank = (j: JobItem) => (j.pin === "first" ? 2 : j.pin === "last" ? 0 : 1); // #143: pinned first, then by priority, pinned last at the end
     const now = rows.filter((j) => j.state === "queued").sort((a, b) => rank(b) - rank(a) || (b.priority ?? 0) - (a.priority ?? 0));
@@ -61,7 +62,8 @@ export function mockJob(id: string): JobDetail | null {
     // removed: as the server, a job-backed skip's own row is gone (removed: true)
     id, state: j.state, removed: j.origin === "scan", reason, attempts: j.attempts ?? 0,
     // the sample's failure (E-API-SHAPE): the sentence is the reason's; this is where it stopped and the ffmpeg lines
-    ...(j.state === "failed" ? { failure: { step: "Converting video", stepIndex: 3, stepCount: 5, afterMs: 252000, mediaTime: "00:41:12", hint: null, exitCode: 1, keyLines: ["[hevc @ 0x55d1] Error while decoding stream #0:0: Invalid data found when processing input", "Conversion failed!"] } } : {}), retryAt: j.retryAt ?? null, error: null, worker: j.worker ?? null,
+    ...(j.state === "failed" && j.id === "48190" ? { failure: { step: "Converting video", stepIndex: 3, stepCount: 5, afterMs: 252000, mediaTime: "00:41:12", hint: "The file is corrupt or uses an unsupported codec.", ffmpegRan: true, exitCode: 1, keyLines: ["[hevc @ 0x55d1] Error while decoding stream #0:0: Invalid data found when processing input", "Conversion failed!"] } } : {}),
+    ...(j.state === "failed" && j.id === "48191" ? { failure: { step: "Checking the output", stepIndex: 4, stepCount: 5, afterMs: 18000, mediaTime: null, hint: null, ffmpegRan: false, exitCode: null, keyLines: [] } } : {}), retryAt: j.retryAt ?? null, error: null, worker: j.worker ?? null,
     file: { path: j.path, bytes: j.beforeBytes ?? j.bytes }, createdAt: at(300), updatedAt: at(5),
     library: { id: j.libraryId, name: j.library }, workflow: { id: "w1", revisionId: "w1r4", version: 4 },
     events: old ? [] : [{ seq: 1, at: at(300), from: null, to: "queued", reason: null, workerId: null },
