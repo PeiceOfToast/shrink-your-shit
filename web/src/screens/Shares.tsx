@@ -23,7 +23,6 @@ function ShareRow({ share, resp, onChanged, said }: { share: Share; resp: Shares
   const libs = share.libraries.map((l) => l.name).join(", ");
   const statusClass = share.status === "connected" ? "ok" : share.status === "not_connected" ? "bad" : share.status === "waiting_setup" ? "warn" : "";
   const statusIcon = share.status === "connected" ? "i-check-c" : share.status === "connecting" || share.status === "waiting_setup" ? "i-clock" : "i-alert";
-  const statusText = share.status === "connected" ? "Connected" : share.status === "connecting" ? "Connecting..." : share.status === "waiting_setup" ? "Waiting for setup on the server" : "Not connected" + (share.since ? " since " + new Date(share.since).toLocaleDateString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
   const canReconnect = share.status !== "connected" && resp.mode === "app";
   const canCheck = share.status !== "connected" && (resp.mode === "manual" || resp.mode === "docker");
   const reconnect = async () => { const r = await act(canReconnect ? reconnectShare(share.id) : checkShare(share.id), said); if (r) { said("Done."); onChanged(); } };
@@ -34,14 +33,13 @@ function ShareRow({ share, resp, onChanged, said }: { share: Share; resp: Shares
       <td className="idc"><button className="ttl linkbtn" type="button" onClick={() => setEditing(true)}>{share.name}</button>
         <span className="sub mono">{share.address}</span>
         {share.reason && <span className="sub phone">{share.reason.message}</span>}
-        {(canReconnect || canCheck) && <span className="sub phone">{canReconnect ? "Reconnect" : canCheck ? "Check again" : ""}</span>}
         {share.libraries.length > 0 && <span className="sub phone">Used by {libs}</span>}
         <span className="sub phone">{TYPE[share.type].label}</span></td>
       <td data-p="2">{TYPE[share.type].label}</td>
-      <td className="stc"><span className={"st " + statusClass}><Icon id={statusIcon} /><span>{statusText}</span></span>
-        {share.reason && <span className="sub">{share.reason.message}</span>}
-        {share.status === "waiting_setup" && share.setup && <div className="codebox" style={{ marginTop: 8 }}><code>{share.setup.text}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(share.setup!.text).catch(() => {})}><Icon id="i-copy" />Copy</button></div>}
-        {(canReconnect || canCheck) && <div className="row" style={{ marginTop: 8 }}>{canReconnect && <button className="btn sm" type="button" onClick={() => reconnect()}><Icon id="i-refresh" />Reconnect</button>}{canCheck && <button className="btn sm" type="button" onClick={() => reconnect()}><Icon id="i-refresh" />Check again</button>}</div>}
+      <td className="stc"><span className={"st " + statusClass}><Icon id={statusIcon} /><span>{share.status === "connected" ? "Connected" : share.status === "connecting" ? "Connecting..." : share.status === "waiting_setup" ? "Waiting for setup on the server" : "Not connected"}<span className="desk">{share.since ? " since " + new Date(share.since).toLocaleDateString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}</span></span></span>
+        {share.reason && <span className="sub desk">{share.reason.message}</span>}
+        {share.status === "waiting_setup" && share.setup && <div className="codebox desk" style={{ marginTop: 8 }}><code>{share.setup.text}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(share.setup!.text).catch(() => {})}><Icon id="i-copy" />Copy</button></div>}
+        {(canReconnect || canCheck) && <div className="row desk" style={{ marginTop: 8 }}>{canReconnect && <button className="btn sm" type="button" onClick={() => reconnect()}><Icon id="i-refresh" />Reconnect</button>}{canCheck && <button className="btn sm" type="button" onClick={() => reconnect()}><Icon id="i-refresh" />Check again</button>}</div>}
       </td>
       <td data-p="2">{libs ? <a href="#">{libs}</a> : <span className="muted">Not used</span>}</td>
       <td className="actc">
