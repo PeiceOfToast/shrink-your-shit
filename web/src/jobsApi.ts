@@ -1,7 +1,7 @@
 // V6 Jobs on the real /api/v2/jobs (#113), or the sample jobs with ?mock=1 (mock/jobs.ts).
 import { call, failed, MOCK, type Answer } from "./api";
 import { mockAction, mockJob, mockJobs, mockJobLog, mockConvertAgain } from "./mock/jobs";
-import type { ActionResult, JobAction, JobDetail, JobsPage, Tab, Pin } from "./types/jobs";
+import type { ActionResult, JobAction, JobDetail, JobsPage, Probe, Tab, Pin } from "./types/jobs";
 
 export async function listJobs(tab: Tab, q: string): Promise<Answer<JobsPage>> {
   if (MOCK) return mockJobs(tab, q);
@@ -18,7 +18,7 @@ export async function findSkip(jobId: string): Promise<Answer<JobsPage>> {
   }
 }
 // E: the job's log by step (GET /log, a finished job's full record; /log/stream stays for running jobs)
-export interface LogStep { name: string; startedAt: string; tookMs: number; outcome: string; command: string | null; output: string; result: string }
+export interface LogStep { name: string; startedAt: string; tookMs: number; outcome: string; command: string | null; probe: Probe | null; check: { score: number; min: number; passed: boolean } | null; outputLines: number; output: string; result: string }
 export interface JobLog { state: string; steps: LogStep[]; final: string }
 export async function getJobLog(id: string): Promise<Answer<JobLog>> {
   if (MOCK) return mockJobLog(id);

@@ -8,7 +8,7 @@ import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, count, elapsed, plural } from "../format";
 import { convertDoneAgain, findSkip, getJob, getJobLog, jobAction, listJobs, listKept, restoreKept } from "../jobsApi";
 import { getWorkflow } from "../workflowApi";
-import { getSettings } from "../libraryApi";
+import { getHealth, getSettings } from "../libraryApi";
 import { onLive } from "../live";
 import { Empty, PageHead } from "../PageHead";
 import { navigate, useSearch } from "../router";
@@ -162,11 +162,12 @@ export function Jobs() {
 // ffmpeg error lines (at most five) behind a disclosure. Each part is left out when the server sends none.
 // durations read '4 min 12 s' and '0.1 s' everywhere (the design's phone note)
 const dur = (ms: number) => { const s = ms / 1000; return s < 1 ? s.toFixed(1) + " s" : s < 60 ? Math.round(s) + " s" : Math.floor(s / 60) + " min " + (Math.round(s) % 60) + " s"; };
-// SCREENS V6b / mockup: the sentence, the reason code small under it, where it stopped (linked to the log), the hint as
-// 'What you can do' (left out when null), the last ffmpeg lines with Copy, and what comes next. --error left border.
-function WhyFailed({ id, msg, code, f }: { id: string; msg: string; code: string; f: Failure }) {
-  const t = dur(f.afterMs), box = useRef<HTMLElement>(null);
-  const copy = (text: string) => navigator.clipboard?.writeText(text).catch(() => {});
+// SCREENS V6b: the sentence, the reason code small under it, where it stopped (the step opens in the log), the hint as
+// 'What you can do' (left out when null), the last ffmpeg lines with Copy, and the buttons. --error left border.
+function WhyFailed({ id, msg, code, worker, f }: { id: string; msg: string; code: string; worker: string | null; f: Failure }) {
+  const t = dur(f.afterMs), box = useRef<HTMLElement>(null), ver = useData(getHealth, []).data?.version;
+  // Copy summary: the plain text a bug report needs (V6b item 5): the job, its worker and the app version, then the box
+  const copy = () => navigator.clipboard?.writeText("Job " + id + " · " + (worker ?? "no worker") + " · Shrink Your Shit " + (ver ?? "") + "\n" + (box.current?.innerText ?? "")).catch(() => {});
   return (
     <section ref={box} className="note" role="region" aria-label="Why it failed" style={{ display: "block", borderLeft: "3px solid var(--error)" }}>
       <h3><Icon id="i-alert" /> Why it failed <span className="pill bad">Failed</span></h3>
@@ -175,36 +176,54 @@ function WhyFailed({ id, msg, code, f }: { id: string; msg: string; code: string
       <p className="sm">In step {f.stepIndex} of {f.stepCount}, <a href={"#job-step-" + f.stepIndex}>{f.step}</a>, after {t}{f.mediaTime ? " (at " + f.mediaTime + " in the video)" : ""}.</p>
       {f.hint && <p><strong>What you can do:</strong> {f.hint}</p>}
       {f.keyLines.length > 0
-        ? <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">Last lines from ffmpeg</span><button className="btn sm ghost" type="button" onClick={() => copy(f.keyLines.join("\n"))}><Icon id="i-copy" />Copy</button></div>
+        ? <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">Last lines from ffmpeg</span><button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(f.keyLines.join("\n")).catch(() => {})}><Icon id="i-copy" />Copy</button></div>
           <pre className="joblog">{f.keyLines.join("\n")}</pre></div>
         : <p className="sm muted">ffmpeg didn't run.</p>}
-      <div className="row" style={{ gap: 8 }}>
-        {!MOCK && <a className="btn sm" href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}><Icon id="i-download" />Open the full log</a>}
-        <button className="btn sm ghost" type="button" onClick={() => copy(box.current?.innerText ?? "")}><Icon id="i-copy" />Copy summary</button>
+      <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+        <a className="btn sm" href={"#job-step-" + f.stepIndex}><Icon id="i-file" />Open the full log</a>
+        {!MOCK && <a className="btn sm ghost" href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}><Icon id="i-download" />Download</a>}
+        <button className="btn sm ghost" type="button" onClick={copy}><Icon id="i-copy" />Copy summary</button>
       </div>
     </section>);
 }
 
-// E: a finished job's log by step (GET /log): each step's name, how long it took and how it ended; a failed step's last lines
-function StepLog({ id, worker }: { id: string; worker: string | null }) {
+// durations read '4 min 12 s' and '0.1 s' everywhere (the design's phone note)
+// E: a finished job's log by step (GET /log), SCREENS V6b: each step a row that opens; the failed step open; inside a step
+// its command, its source, its picture check, its ffmpeg output (last 200 lines on a failure, the rest by download), its
+// result; the log's last line is the job's final line.
+function StepLog({ id, worker, failedIdx }: { id: string; worker: string | null; failedIdx: number | null }) {
   const d = useData(() => getJobLog(id), [id]), keep = useData(getSettings, []);
+  if (!d.loaded) return <section><h3>Log</h3><p className="muted">Loading the log...</p></section>;
+  if (!d.data) return <section><h3>Log</h3><p className="muted">{d.error?.message ?? "The log can't be shown."}</p></section>;
+  const l = d.data, days = (keep.data as { logKeepDays?: number } | undefined)?.logKeepDays ?? 30;
   // SCREENS V6b 'States': a log that isn't all here says why, in the design's words
   const who = worker ?? "The worker";
   const note: Record<string, string | null> = {
     complete: null, coming_back: "The log from " + who + " is still coming back.", lost: who + " went offline before sending its log. The summary above is what we know.",
-    none: "No log was kept for this job. Jobs from before 13 Nov don't have one.",
-    expired: "This job's log was deleted after " + ((keep.data as { logKeepDays?: number } | undefined)?.logKeepDays ?? 30) + " days (Settings > Processing).",
+    none: "No log was kept for this job. Jobs from before 13 Nov don't have one.", expired: "This job's log was deleted after " + days + " days (Settings > Processing).",
   };
-  if (!d.loaded) return <section><h3>Log</h3><p className="muted">Loading the log...</p></section>;
-  if (!d.data) return <section><h3>Log</h3><p className="muted">{d.error?.message ?? "The log can't be shown."}</p></section>;
   return (
     <section id="job-log"><h3>Log</h3>
-      <ol className="stack" style={{ listStyle: "none", padding: 0, margin: 0 }}>{d.data.steps.map((st, i) => (
-        <li key={i} id={"job-step-" + (i + 1)}><div className="row" style={{ gap: 4, flexWrap: "wrap" }}><strong>{st.name}</strong><span className="sm muted">{dur(st.tookMs)}</span>
-          <span className={"pill " + (st.outcome === "ok" ? "ok" : "bad")}>{st.outcome === "ok" ? "Done" : "Failed"}</span></div>
-          {st.command && <pre className="joblog sm">{st.command}</pre>}
-          {st.output && <pre className="joblog sm">{st.output}</pre>}</li>))}</ol>
-      {note[d.data.state] && <p className="sm muted">{note[d.data.state]}</p>}
+      {note[l.state] ? <p className="sm muted">{note[l.state]}</p> : <>
+      {l.steps.map((st, i) => {
+        const pr = st.probe as Probe | null, sum = pr && [pr.videoCodec?.toUpperCase().replace("H264", "H.264"), (pr.streams ?? []).find((x) => x.type === "video")?.Width && (pr.streams ?? []).find((x) => x.type === "video")!.Width + "×" + (pr.streams ?? []).find((x) => x.type === "video")!.Height, pr.durationSec ? elapsed(pr.durationSec) : "", pr.sizeBytes ? bytes(pr.sizeBytes) : ""].filter(Boolean).join(" · ");
+        return (
+          <details key={i} id={"job-step-" + (i + 1)} open={st.outcome !== "ok" || i + 1 === failedIdx} className="stepd" style={{ borderTop: "1px solid var(--border)", padding: "8px 0" }}>
+            <summary className="row nw" style={{ gap: 8, flexWrap: "wrap", cursor: "pointer" }}><strong>{st.name}</strong><span className="sm muted">{clock(st.startedAt)} · took {dur(st.tookMs)}</span>
+              <span className={"pill " + (st.outcome === "ok" ? "ok" : "bad")}>{st.outcome === "ok" ? "Done" : "Failed"}</span></summary>
+            <div className="stack" style={{ gap: 6, paddingTop: 6 }}>
+              {st.command && <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">Command</span><button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(st.command ?? "").catch(() => {})}><Icon id="i-copy" />Copy</button></div>
+                <pre className="joblog sm">{st.command}</pre></div>}
+              {sum && <p className="sm">Source: {sum}</p>}
+              {st.check && <p className="sm">Picture check: Score {st.check.score.toFixed(3)} (needs {st.check.min.toFixed(3)}) · {st.check.passed ? "passed" : "failed"}</p>}
+              {st.outputLines > 0 && <details open={st.outcome !== "ok"}><summary className="sm">Show ffmpeg output ({st.outputLines} lines)</summary>
+                {st.outputLines > 200 && <p className="sm"><a href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}>Show all {st.outputLines.toLocaleString()} lines</a></p>}
+                <pre className="joblog sm">{st.output}</pre></details>}
+              {st.result && <p className="sm">{st.result}</p>}
+            </div>
+          </details>);
+      })}
+      {l.final && <p className="sm" style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>{l.final}</p>}</>}
     </section>);
 }
 
@@ -322,7 +341,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {/* review db7b1f1 P3: "removed" is the server's flag, not a person's word. Only a job removed with its library
               gets a note; a job that ended as a skip shows its reason under Why like any other. */}
           {j?.removed && j.reason?.code === "removed" ? <div className="note"><Icon id="i-info" /><div>Its library was removed, so this file won't be converted.</div></div>
-            : j?.failure ? <WhyFailed id={id} msg={reason} code={j.reason?.code ?? ""} f={j.failure} />
+            : j?.failure ? <WhyFailed id={id} msg={reason} code={j.reason?.code ?? ""} worker={j.worker ?? null} f={j.failure} />
             : reason && <section><h3>Why</h3><p>{reason}</p></section>}
           <section><h3>File</h3><dl className="kv">
             {(own?.path ?? j?.file?.path) && <><dt>Source</dt><dd className="mono sm">{own?.path ?? j?.file?.path}</dd></>} {/* review 54ff228: no '-' when the server doesn't keep the path (a removed library's job) */}
@@ -345,7 +364,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {/* review db7b1f1 P2: the scan sentence only for a file a scan left out; a cancelled file whose job the server
               doesn't send yet claims nothing about scans or steps */}
           {scan && <section><h3>Timeline</h3><p className="muted">{state === "cancelled" ? "Cancelled." : "This file was left out when its library was scanned, so it has no job and no steps."}</p></section>}
-          {!scan && (active ? <JobLog id={id} name={name} /> : <StepLog id={id} worker={j?.worker ?? null} />)}
+          {!scan && (active ? <JobLog id={id} name={name} /> : <StepLog id={id} worker={j?.worker ?? null} failedIdx={j?.failure?.stepIndex ?? null} />)}
           {/* #148: before is the original; null for an older job that replaced a file of the same name: said so, never blank */}
           {(before || after) && <section><h3>Result</h3><table className="tbl kvt"><thead><tr><th /><th>Before</th><th>After</th></tr></thead><tbody>
             <tr><th>Video</th>{before ? <td>{before.video}</td> : <td rowSpan={4} className="muted">Not recorded for this job</td>}<td>{after?.video ?? "-"}</td></tr>
