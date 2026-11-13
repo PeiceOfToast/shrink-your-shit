@@ -201,6 +201,9 @@ func (s *Store) UpdateShare(id int64, name, address, typeStr, username string, g
 }
 
 func (s *Store) DeleteShare(id int64) error {
+	if _, err := s.ResumeSharePause(id); err != nil { // a library paused by this share is not left paused by nothing
+		return err
+	}
 	_, err := s.db.Exec(`DELETE FROM share_mounts WHERE share_id=?`, id)
 	if err != nil {
 		return err

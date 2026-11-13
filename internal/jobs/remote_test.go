@@ -41,10 +41,10 @@ func TestUpgradeFrom34AddsRemoteWorkers(t *testing.T) {
 	}
 }
 
-// rewind35 takes away what migrations 35 (remote workers) and 36 (workers on and off) added.
-var rewind35 = []string{`DROP TABLE worker_paths`, `ALTER TABLE workers DROP COLUMN enabled`, `DROP INDEX workers_token`, `DROP TABLE worker_pairings`, `ALTER TABLE workers DROP COLUMN kind`, `ALTER TABLE workers DROP COLUMN token_hash`,
+// rewind35 takes away what migrations 35 (remote workers), 36 (workers on and off) and 41 (library share pause) added.
+var rewind35 = append(append([]string{}, rewindShareMigrations...), `DROP TABLE worker_paths`, `ALTER TABLE workers DROP COLUMN enabled`, `DROP INDEX workers_token`, `DROP TABLE worker_pairings`, `ALTER TABLE workers DROP COLUMN kind`, `ALTER TABLE workers DROP COLUMN token_hash`,
 	`ALTER TABLE workers DROP COLUMN version`, `ALTER TABLE workers DROP COLUMN api_level`, `ALTER TABLE workers DROP COLUMN last_seen`,
-	`ALTER TABLE workers DROP COLUMN capabilities`}
+	`ALTER TABLE workers DROP COLUMN capabilities`)
 
 // review 95756cc: every worker call finds its worker by its token's hash, by index.
 func TestWorkerByTokenUsesItsIndex(t *testing.T) {
@@ -121,7 +121,7 @@ func TestWorkersOnAndOff(t *testing.T) {
 	// an install paused before this version: every worker off
 	s, _ = Open(p)
 	s.SetPaused(true)
-	for _, q := range append([]string{`INSERT INTO app_meta(key, value) VALUES ('paused', '1')`, `UPDATE workers SET enabled=1`}, `ALTER TABLE workers DROP COLUMN enabled`, `DROP TABLE worker_paths`, `PRAGMA user_version=35`) {
+	for _, q := range append(append([]string{`INSERT INTO app_meta(key, value) VALUES ('paused', '1')`, `UPDATE workers SET enabled=1`}, rewindShareMigrations...), `ALTER TABLE workers DROP COLUMN enabled`, `DROP TABLE worker_paths`, `PRAGMA user_version=35`) {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}

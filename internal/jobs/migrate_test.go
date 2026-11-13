@@ -383,7 +383,7 @@ func TestMigration7BackfillsSkipReasons(t *testing.T) {
 		t.Fatal(err)
 	}
 	// back to version 6: as an install from before 21b left it
-	for _, q := range []string{`DROP TRIGGER events_job_removed`, // first: since 32 it reads jobs.attempts
+	for _, q := range append(append([]string{}, rewindShareMigrations...), `DROP TRIGGER events_job_removed`, // first: since 32 it reads jobs.attempts
 		`DROP INDEX files_reason`, `DROP INDEX jobs_output`, `ALTER TABLE files DROP COLUMN reason`,
 		`ALTER TABLE jobs DROP COLUMN started`, `ALTER TABLE jobs DROP COLUMN output_mtime`,
 		`ALTER TABLE originals DROP COLUMN aside`, `ALTER TABLE jobs DROP COLUMN stop_requested`, `DROP TABLE sidecars`, // and migrations 8, 9 and 10
@@ -397,7 +397,7 @@ func TestMigration7BackfillsSkipReasons(t *testing.T) {
 		`DROP TRIGGER events_job_insert`, `DROP TRIGGER events_job_status`, `DROP INDEX jobs_claim`, `DROP TABLE events`, `ALTER TABLE jobs DROP COLUMN priority`, // and 21
 		`ALTER TABLE jobs DROP COLUMN error_code`,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  // and 23
 		`DROP TABLE workers`, `ALTER TABLE libraries DROP COLUMN override_folder`, `ALTER TABLE libraries DROP COLUMN priority`, `ALTER TABLE jobs DROP COLUMN original_gone_at`, `ALTER TABLE jobs DROP COLUMN original_changed`, `ALTER TABLE jobs DROP COLUMN original_disk`, `ALTER TABLE jobs DROP COLUMN route`, `ALTER TABLE job_steps DROP COLUMN node_id`, `ALTER TABLE job_steps DROP COLUMN port`, `ALTER TABLE jobs DROP COLUMN fallback`, `ALTER TABLE jobs DROP COLUMN lease_id`, `ALTER TABLE jobs DROP COLUMN lease_expires`, `ALTER TABLE files DROP COLUMN job_id`, `ALTER TABLE jobs DROP COLUMN again_from`, `DROP TABLE worker_pairings`, `DROP TABLE IF EXISTS worker_paths`, // and 24-27
-		`PRAGMA user_version=6`} {
+		`PRAGMA user_version=6`) {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}
@@ -568,14 +568,17 @@ func TestWorkersStartStoppedMigration(t *testing.T) {
 
 // rewind20 takes away what migrations 20 to 23 added, for tests that set user_version below it.
 func rewind20(s *Store) {
-	for _, q := range []string{`ALTER TABLE flows DROP COLUMN description`, `ALTER TABLE flows DROP COLUMN status`,
+	for _, q := range append(append([]string{}, rewindShareMigrations...), `ALTER TABLE flows DROP COLUMN description`, `ALTER TABLE flows DROP COLUMN status`,
 		`ALTER TABLE flows DROP COLUMN favourite`, `ALTER TABLE flows DROP COLUMN tags`, `DROP TABLE workflow_revisions`,
 		`DROP TRIGGER events_job_insert`, `DROP TRIGGER events_job_status`, `DROP TRIGGER events_job_removed`, `DROP INDEX jobs_claim`, `DROP TABLE events`, `ALTER TABLE jobs DROP COLUMN priority`, // and 21
 		`ALTER TABLE jobs DROP COLUMN error_code`,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    // and 23
-		`DROP TABLE workers`, `ALTER TABLE libraries DROP COLUMN override_folder`, `ALTER TABLE libraries DROP COLUMN priority`, `ALTER TABLE jobs DROP COLUMN original_gone_at`, `ALTER TABLE jobs DROP COLUMN original_changed`, `ALTER TABLE jobs DROP COLUMN original_disk`, `ALTER TABLE jobs DROP COLUMN route`, `ALTER TABLE job_steps DROP COLUMN node_id`, `ALTER TABLE job_steps DROP COLUMN port`, `ALTER TABLE jobs DROP COLUMN fallback`, `ALTER TABLE jobs DROP COLUMN lease_id`, `ALTER TABLE jobs DROP COLUMN lease_expires`, `ALTER TABLE files DROP COLUMN job_id`, `ALTER TABLE jobs DROP COLUMN again_from`, `DROP TABLE worker_pairings`, `DROP TABLE IF EXISTS worker_paths`} { // and 24-27
+		`DROP TABLE workers`, `ALTER TABLE libraries DROP COLUMN override_folder`, `ALTER TABLE libraries DROP COLUMN priority`, `ALTER TABLE jobs DROP COLUMN original_gone_at`, `ALTER TABLE jobs DROP COLUMN original_changed`, `ALTER TABLE jobs DROP COLUMN original_disk`, `ALTER TABLE jobs DROP COLUMN route`, `ALTER TABLE job_steps DROP COLUMN node_id`, `ALTER TABLE job_steps DROP COLUMN port`, `ALTER TABLE jobs DROP COLUMN fallback`, `ALTER TABLE jobs DROP COLUMN lease_id`, `ALTER TABLE jobs DROP COLUMN lease_expires`, `ALTER TABLE files DROP COLUMN job_id`, `ALTER TABLE jobs DROP COLUMN again_from`, `DROP TABLE worker_pairings`, `DROP TABLE IF EXISTS worker_paths`) { // and 24-27
 		s.db.Exec(q)
 	}
 }
+
+// rewindShareMigrations takes away what migration 41 (library share pause) added, for tests that set user_version below it.
+var rewindShareMigrations = []string{`ALTER TABLE libraries DROP COLUMN share_paused_since`, `ALTER TABLE libraries DROP COLUMN share_paused_id`}
 
 // rewind15 takes away what migration 15 added, for tests that set user_version below it.
 func rewind15(s *Store) {
@@ -759,6 +762,9 @@ func TestBitrateMeaningsMigration(t *testing.T) {
 	for name, sel := range map[string]rules.Selectors{"quality": quality, "vbr": vbr, "plain": plain} {
 		l, _ := s.AddLibrary("/"+name, "/"+name, sel.Template(), true)
 		ids[name] = l.FlowID
+	}
+	for _, q := range rewindShareMigrations { // migration 41 runs again on the next open
+		s.db.Exec(q)
 	}
 	s.db.Exec(`PRAGMA user_version = 37`) // migration 38 runs on the next open
 	s.Close()

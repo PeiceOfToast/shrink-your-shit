@@ -116,8 +116,12 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 			t := totals[l.ID]
 			c := st.counts[l.ID]
 			state := "active"
-			if !l.Started {
+			pausedBy := sharePausedBy(store, l) // D4b
+			switch {
+			case !l.Started:
 				state = "paused"
+			case pausedBy != nil:
+				state = "paused_share"
 			}
 			var pct any
 			if t.BytesBefore > 0 {
@@ -127,7 +131,7 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 				// now: the files a scan sees (an original waiting in .syp-trash isn't one: review ab99630 P3-3)
 				"bytesBefore": t.BytesBefore, "bytesNow": t.BytesBefore - c.FreedBytes - c.WaitingBytes, "saved": c.FreedBytes, "savedPercent": pct,
 				"waitingToFree": c.WaitingBytes, "couldFree": c.CouldFreeBytes, "grew": c.GrewBytes,
-				"counts": map[string]int{"done": t.Done, "waiting": c.Waiting, "skipped": t.Skipped, "failed": c.Failed}})
+				"counts": map[string]int{"done": t.Done, "waiting": c.Waiting, "skipped": t.Skipped, "failed": c.Failed}, "pausedBy": pausedBy})
 		}
 		now := time.Now()
 		days := st.days
