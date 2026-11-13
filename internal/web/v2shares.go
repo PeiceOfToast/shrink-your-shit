@@ -4,9 +4,10 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/helper"
 	"net"
 	"net/http"
 	"os"
@@ -25,6 +26,7 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 	tested := platform != "darwin"
 
 	api.HandleFunc("GET /api/v2/shares", func(w http.ResponseWriter, r *http.Request) {
+		mode, platform = detectMode()
 		all, err := store.LoadShares()
 		if err != nil {
 			serverError(w, err)
@@ -74,6 +76,9 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 			serverError(w, err)
 			return
 		}
+		if mode == "app" {
+			tryMount(store, saved, in.Password)
+		}
 		writeJSONStatus(w, http.StatusCreated, shareToJSON(store, saved))
 	})
 
@@ -99,8 +104,10 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 		username := existing.Username
 		guest := existing.Guest
 		pw := ""
+		changed := false
 		if pwStr, ok := raw["password"].(string); ok {
 			pw = pwStr
+			changed = true
 		}
 		if v, ok := raw["name"].(string); ok && v != "" {
 			if err := nameTaken(store, v, id); err != nil {
@@ -108,6 +115,7 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 				return
 			}
 			name = v
+			changed = true
 		}
 		if v, ok := raw["type"].(string); ok && v != "" {
 			if v != "smb" && v != "nfs" {
@@ -115,6 +123,7 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 				return
 			}
 			typeStr = v
+			changed = true
 		}
 		if v, ok := raw["address"].(string); ok && v != "" {
 			a, t, pErr := parseAddress(v)
@@ -124,18 +133,31 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 			}
 			address = a
 			typeStr = t
+			changed = true
 		}
 		if v, ok := raw["username"].(string); ok {
 			username = v
+			changed = true
 		}
 		if _, ok := raw["guest"].(bool); ok {
 			if v, ok2 := raw["guest"].(bool); ok2 {
 				guest = v
+				changed = true
 			}
 		}
 		if err := store.UpdateShare(id, name, address, typeStr, username, guest, pw); err != nil {
 			serverError(w, err)
 			return
+		}
+		if mode == "app" && changed {
+			sh, err := store.ShareByID(id)
+			if err == nil && sh != nil {
+				stale := pw
+				if stale == "" {
+					stale, _ = store.DecryptSharePassword(id)
+				}
+				tryMount(store, *sh, stale)
+			}
 		}
 		sh, err := store.ShareByID(id)
 		if err != nil || sh == nil {
@@ -150,6 +172,17 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 		if err != nil || id <= 0 {
 			apiError(w, http.StatusNotFound, "not_found", "There is no such share.")
 			return
+		}
+		if mode == "app" {
+			sh, err := store.ShareByID(id)
+			if err == nil && sh != nil {
+				mpt := "/var/lib/syp/shares/" + sanitiseName(sh.Name, sh.ID)
+				if err := helper.Unmount(mpt); err != nil {
+					apiError(w, http.StatusConflict, "share_in_use",
+						"The share could not be unmounted. " + err.Error() + ".")
+					return
+				}
+			}
 		}
 		if err := store.DeleteShare(id); err != nil {
 			serverError(w, err)
@@ -197,6 +230,10 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 			apiError(w, http.StatusNotFound, "not_found", "There is no such share.")
 			return
 		}
+		if mode == "app" {
+			pw, _ := store.DecryptSharePassword(id)
+			tryMount(store, *sh, pw)
+		}
 		writeJSON(w, shareToJSON(store, *sh))
 	})
 
@@ -215,55 +252,76 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 	})
 }
 
-// parseAddress cleans a share address and refuses one with a port: the root helper takes none (SMB always uses
-// 445, NFS 2049), so a share saved with one could never connect (orch-lead, ui-shop QA of #217).
-func parseAddress(raw string) (addr, typ string, err error) {
-	addr, typ, err = parseAddressForm(raw)
+// tryMount attempts to mount the share via the helper, storing the result.
+func tryMount(store *jobs.Store, sh jobs.Share, password string) {
+	mode, _ := detectMode()
+	if mode != "app" {
+		return
+	}
+	addr := mountAddress(sh.Type, sh.Address)
+	kind := "cifs"
+	if sh.Type == "nfs" {
+		kind = "nfs"
+	}
+	mpt := "/var/lib/syp/shares/" + sanitiseName(sh.Name, sh.ID)
+	opts := mountOptions(sh.Type)
+	err := helper.Mount(kind, addr, mpt, opts, sh.Username, password)
 	if err != nil {
-		return "", "", err
+		reason := mountErrReason(err)
+		store.SetShareMountStatus(sh.ID, "linux", "not_connected", reason)
+		return
 	}
-	if hasPort(addressHost(typ, addr)) {
-		if typ == "smb" {
-			return "", "", errors.New("Leave out the port: SMB always uses 445.")
-		}
-		return "", "", errors.New("Leave out the port: NFS uses 2049.")
-	}
-	return addr, typ, nil
+	store.SetShareMountStatus(sh.ID, "linux", "connected", "")
 }
 
-// addressHost is the server part of a cleaned address: \\server\share or server:/export (IPv6 in brackets).
-func addressHost(typ, addr string) string {
-	if typ == "smb" {
-		return strings.SplitN(strings.TrimPrefix(addr, `\\`), `\`, 2)[0]
+func mountAddress(typ, addr string) string {
+	if typ == "nfs" {
+		return addr // server:/export stays as-is
 	}
-	if strings.HasPrefix(addr, "[") { // [fd00::2]:/export, or with a port [fd00::2]:2049:/export
-		if i := strings.Index(addr, "]"); i >= 0 {
-			rest := addr[i+1:]
-			if j := strings.Index(rest, ":/"); j >= 0 {
-				return addr[:i+1] + rest[:j]
-			}
-			return addr[:i+1] + strings.SplitN(rest, "/", 2)[0]
-		}
-	}
-	if i := strings.Index(addr, ":/"); i >= 0 {
-		return addr[:i]
-	}
-	return strings.SplitN(addr, "/", 2)[0]
+	// smb: \\server\share → //server/share
+	base := strings.TrimPrefix(addr, `\\`)
+	return "//" + strings.ReplaceAll(base, `\`, "/")
 }
 
-// hasPort reports whether a host names a port: "nas:1445", or "[fe80::1]:1445" (a bracketed IPv6 address alone has none).
-func hasPort(host string) bool {
-	if strings.HasPrefix(host, "[") {
-		i := strings.Index(host, "]")
-		return i >= 0 && strings.HasPrefix(host[i+1:], ":")
+func mountOptions(typ string) map[string]string {
+	if typ == "nfs" {
+		return map[string]string{}
 	}
-	return strings.Contains(host, ":")
+	return map[string]string{"vers": "3.1.1", "soft": ""}
 }
 
-// dialHost is a host for net.JoinHostPort: an IPv6 address without its brackets.
-func dialHost(host string) string { return strings.TrimSuffix(strings.TrimPrefix(host, "["), "]") }
+// mountErrReason serialises a helper error to a JSON string storing code + message.
+func mountErrReason(err error) string {
+	msg := err.Error()
+	low := strings.ToLower(msg)
+	// helper unreachable (socket dial failed)
+	if strings.HasPrefix(low, "helper:") {
+		return `{"code":"helper_missing","message":"The network share helper isn't running. Run the installer again and answer yes, or connect it yourself."}`
+	}
+	switch {
+	case strings.Contains(low, "not_allowed"), strings.Contains(low, "bad_request"):
+		return `{"code":"mount_failed","message":` + jsonStr(msg) + `}`
+	case strings.Contains(low, "permission denied"), strings.Contains(low, "error(13)"):
+		return `{"code":"auth_failed","message":"The username or password is wrong."}`
+	case strings.Contains(low, "no such file or directory"), strings.Contains(low, "error(2)"):
+		return `{"code":"share_not_found","message":"` + jsonStr(msg) + `"}`
+	case strings.Contains(low, "host is down"), strings.Contains(low, "no route"), strings.Contains(low, "error(112)"), strings.Contains(low, "error(113)"):
+		return `{"code":"host_unreachable","message":"The server is not reachable."}`
+	case strings.Contains(low, "timed out"):
+		return `{"code":"timeout","message":"The server didn't answer in time."}`
+	}
+	return `{"code":"mount_failed","message":` + jsonStr(msg) + `}`
+}
 
-func parseAddressForm(raw string) (addr, typ string, err error) {
+// jsonStr wraps a string in JSON quotes with escaping.
+func jsonStr(s string) string {
+	esc := strings.ReplaceAll(s, `\`, `\\`)
+	esc = strings.ReplaceAll(esc, `"`, `\"`)
+	esc = strings.ReplaceAll(esc, "\n", `\n`)
+	return `"` + esc + `"`
+}
+
+func parseAddress(raw string) (addr, typ string, err error) {
 	raw = strings.TrimSpace(raw)
 	low := strings.ToLower(raw)
 	switch {
@@ -299,13 +357,18 @@ func detectMode() (mode, platform string) {
 	if m := os.Getenv("SYP_HELPER_MODE"); m != "" {
 		return m, runtime.GOOS
 	}
-	// app mode on Linux when the helper socket answers
+	// Restore: docker detection (was removed in 10d3843)
+	if os.Getenv("container") != "" {
+		return "docker", runtime.GOOS
+	}
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return "docker", runtime.GOOS
+	}
 	if runtime.GOOS == "linux" {
-		if _, err := os.Stat("/run/shrink-your-shit/helper.sock"); err == nil {
-			return "app", runtime.GOOS
-		}
-		// socket may not be reachable in tests, check env
-		if os.Getenv("SYP_HELPER_SOCKET") != "" {
+		// app mode when the helper socket answers (dial with 1s timeout)
+		conn, err := net.DialTimeout("unix", helper.HelperSocket, time.Second)
+		if err == nil {
+			conn.Close()
 			return "app", runtime.GOOS
 		}
 	}
@@ -326,27 +389,23 @@ func testSMB(address, username, password string, guest bool) map[string]any {
 	}
 	server := parts[0]
 	shareName := strings.Join(parts[1:], "\\")
-	if hasPort(server) { // parseAddress refuses these first; kept for a direct call
-		return map[string]any{"ok": false, "code": "invalid_address",
-			"message": "Leave out the port: SMB always uses 445."}
-	}
 	ini := &smb2.NTLMInitiator{User: username, Password: password}
 	dialer := &smb2.Dialer{Initiator: ini}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	session, err := dialer.Dial(ctx, net.JoinHostPort(dialHost(server), smbPort))
+	session, err := dialer.Dial(ctx, net.JoinHostPort(server, smbPort))
 	if err != nil {
-		return smbError(err, server, shareName)
+		return smbError(err)
 	}
 	share, err := session.Mount(shareName)
 	if err != nil {
 		session.Logoff()
-		return smbError(err, server, shareName)
+		return smbError(err)
 	}
 	entries, err := share.ReadDir("")
 	session.Logoff()
 	if err != nil {
-		return smbError(err, server, shareName)
+		return smbError(err)
 	}
 	var folders []string
 	more := 0
@@ -364,51 +423,40 @@ func testSMB(address, username, password string, guest bool) map[string]any {
 // a Windows machine (CI runners included) runs its own SMB server on 445.
 var smbPort, nfsPort = "445", "2049"
 
-func smbError(err error, server, share string) map[string]any {
+func smbError(err error) map[string]any {
 	msg := err.Error()
 	low := strings.ToLower(msg)
-	var code, message string
 	switch {
 	case strings.Contains(low, "no such host"), strings.Contains(low, "nodename nor servname"):
-		code, message = "host_not_found", "Can't find a computer called "+server+". Check the name, or use its IP address."
+		return map[string]any{"ok": false, "code": "host_not_found", "message": msg}
 	case strings.Contains(low, "refused"), strings.Contains(low, "no route"):
-		code, message = "host_unreachable", server+" doesn't answer. Check it's on and on the same network."
+		return map[string]any{"ok": false, "code": "host_unreachable", "message": msg}
 	case strings.Contains(low, "timeout"), strings.Contains(low, "timed out"):
-		code, message = "timeout", "Timed out after 10 seconds."
+		return map[string]any{"ok": false, "code": "timeout", "message": "The server didn't answer in time."}
 	case strings.Contains(low, "logon failure"), strings.Contains(low, "logon"):
-		code, message = "auth_failed", "The username or password is wrong."
+		return map[string]any{"ok": false, "code": "auth_failed", "message": "The username or password is not correct."}
 	case strings.Contains(low, "access denied"):
-		code, message = "access_denied", "This user can't open "+share+"."
+		return map[string]any{"ok": false, "code": "access_denied", "message": "Access denied: the account doesn't have permission on this share."}
 	case strings.Contains(low, "not found"), strings.Contains(low, "does not exist"):
-		code, message = "share_not_found", server+" has no shared folder called "+share+"."
-	default:
-		code, message = "mount_failed", msg
+		return map[string]any{"ok": false, "code": "share_not_found", "message": msg}
 	}
-	log.Printf("smb test: server=%s share=%s err=%s code=%s", server, share, msg, code)
-	return map[string]any{"ok": false, "code": code, "message": message}
+	return map[string]any{"ok": false, "code": "mount_failed", "message": msg}
 }
 
 func testNFS(address string) map[string]any {
-	server := addressHost("nfs", address)
+	server := strings.Split(address, ":")[0]
 	if server == "" {
 		return map[string]any{"ok": false, "code": "invalid_address", "message": "Use server:/export."}
 	}
-	if hasPort(server) { // parseAddress refuses these first; kept for a direct call
-		return map[string]any{"ok": false, "code": "invalid_address",
-			"message": "Leave out the port: NFS uses 2049."}
-	}
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(dialHost(server), nfsPort), 10*time.Second)
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(server, nfsPort), 10*time.Second)
 	if err != nil {
-		msg := err.Error()
-		if strings.Contains(strings.ToLower(msg), "no such host") {
-			return map[string]any{"ok": false, "code": "host_not_found",
-				"message": "Can't find a computer called " + server + ". Check the name, or use its IP address."}
+		if strings.Contains(strings.ToLower(err.Error()), "no such host") {
+			return map[string]any{"ok": false, "code": "host_not_found", "message": "The NFS server was not found."}
 		}
-		if strings.Contains(strings.ToLower(msg), "refused") {
-			return map[string]any{"ok": false, "code": "host_unreachable",
-				"message": server + " doesn't answer. Check it's on and on the same network."}
+		if strings.Contains(strings.ToLower(err.Error()), "refused") {
+			return map[string]any{"ok": false, "code": "host_unreachable", "message": "The NFS server didn't answer."}
 		}
-		return map[string]any{"ok": false, "code": "timeout", "message": "Timed out after 10 seconds."}
+		return map[string]any{"ok": false, "code": "timeout", "message": "The NFS server didn't answer in time."}
 	}
 	conn.Close()
 	return map[string]any{"ok": true, "address": address, "folders": []string{}, "moreFolders": 0, "portOnly": true}
@@ -417,6 +465,7 @@ func testNFS(address string) map[string]any {
 func shareToJSON(store *jobs.Store, sh jobs.Share) map[string]any {
 	status := "waiting_setup"
 	var reason any = nil
+	var since string = ""
 	mode, _ := detectMode()
 	if mode == "app" {
 		status = "not_connected"
@@ -425,8 +474,15 @@ func shareToJSON(store *jobs.Store, sh jobs.Share) map[string]any {
 	if err == nil && len(mounts) > 0 {
 		m := mounts[0]
 		status = m.Status
+		since = m.Since
 		if m.Error != "" {
-			reason = map[string]any{"code": "mount_failed", "message": m.Error}
+			// Try to parse as structured JSON error
+			var parsed map[string]any
+			if json.Unmarshal([]byte(m.Error), &parsed) == nil && parsed["code"] != nil {
+				reason = parsed
+			} else {
+				reason = map[string]any{"code": "mount_failed", "message": m.Error}
+			}
 		}
 		if m.Status == "connected" {
 			status = "connected"
@@ -440,13 +496,13 @@ func shareToJSON(store *jobs.Store, sh jobs.Share) map[string]any {
 	return map[string]any{
 		"id": strconv.FormatInt(sh.ID, 10), "name": sh.Name, "type": sh.Type,
 		"address": addr, "guest": sh.Guest, "username": nilIfEmpty(sh.Username),
-		"hasPassword": sh.HasPassword, "status": status, "since": nil, "reason": reason,
-		"path":      "/var/lib/syp/shares/" + sanitiseName(sh.Name),
+		"hasPassword": sh.HasPassword, "status": status, "since": nilIfEmpty(since), "reason": reason,
+		"path": "/var/lib/syp/shares/" + sanitiseName(sh.Name, sh.ID),
 		"libraries": []any{}, "setup": setupForMode(store, sh),
 	}
 }
 
-func sanitiseName(name string) string {
+func sanitiseName(name string, id int64) string {
 	r := strings.ToLower(name)
 	r = strings.ReplaceAll(r, " ", "-")
 	var out []rune
@@ -457,6 +513,9 @@ func sanitiseName(name string) string {
 	}
 	result := string(out)
 	if result == "" || result[0] == '-' || result[0] == '_' {
+		if id > 0 {
+			return "share-" + strconv.FormatInt(id, 10)
+		}
 		return "share"
 	}
 	return result
@@ -484,24 +543,38 @@ func nameTaken(store *jobs.Store, name string, excludeID int64) error {
 
 func setupForMode(store *jobs.Store, sh jobs.Share) any {
 	mode, _ := detectMode()
+	mpt := "/var/lib/syp/shares/" + sanitiseName(sh.Name, sh.ID)
+	mntAddr := mountAddress(sh.Type, sh.Address)
 	switch mode {
 	case "manual":
-		opts := ""
-		if sh.Username != "" {
-			opts = " -o username=" + shellQuote(sh.Username)
+		mkdir := "sudo mkdir -p " + shellQuote(mpt) + " && "
+		var opts string
+		if sh.Type == "smb" {
+			mountCmd := "sudo mount -t cifs " + shellQuote(mntAddr) + " " + shellQuote(mpt) + " -o "
+			if sh.Guest {
+				opts = "guest,vers=3.1.1,soft,nosuid,nodev,noexec,uid=syp,gid=syp,file_mode=0660,dir_mode=0770"
+			} else {
+				opts = "username=" + shellQuote(sh.Username) + ",vers=3.1.1,soft,nosuid,nodev,noexec,uid=syp,gid=syp,file_mode=0660,dir_mode=0770"
+			}
+			return map[string]any{
+				"kind": "command",
+				"text": mkdir + mountCmd + shellQuote(opts),
+				"removeText": "sudo umount " + shellQuote(mpt),
+			}
 		}
+		// NFS
+		opts = "soft,nosuid,nodev,noexec"
 		return map[string]any{
 			"kind": "command",
-			"text": "sudo mount -t " + shellQuote(sh.Type) + opts + ",vers=3.1.1,soft,noexec " +
-				shellQuote(sh.Address) + " " + shellQuote("/var/lib/syp/shares/"+sanitiseName(sh.Name)),
-			"removeText": "sudo umount " + shellQuote("/var/lib/syp/shares/"+sanitiseName(sh.Name)),
+			"text": mkdir + "sudo mount -t nfs " + shellQuote(mntAddr) + " " + shellQuote(mpt) + " -o " + shellQuote(opts),
+			"removeText": "sudo umount " + shellQuote(mpt),
 		}
 	case "docker":
 		return map[string]any{
 			"kind": "compose",
 			"text": fmt.Sprintf("  %s:\n    driver_opts:\n      type: %s\n      device: %q\n      o: credentials=/path/to/credentials-file,vers=3.1.1,soft",
-				sanitiseName(sh.Name), sh.Type, sh.Address),
-			"removeText": fmt.Sprintf("Remove the %q volume from your compose file and restart.", sanitiseName(sh.Name)),
+				sanitiseName(sh.Name, sh.ID), sh.Type, sh.Address),
+			"removeText": fmt.Sprintf("Remove the %q volume from your compose file and restart.", sanitiseName(sh.Name, sh.ID)),
 		}
 	}
 	return nil

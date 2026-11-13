@@ -14,7 +14,8 @@ import (
 )
 
 // HelperSocket is the default Unix socket path.
-const HelperSocket = "/run/shrink-your-shit/helper.sock"
+// Tests override this var to point at a temp socket.
+var HelperSocket = "/run/shrink-your-shit/helper.sock"
 
 // HelperTimeout is the dial timeout for socket connections.
 const HelperTimeout = 5 * time.Second

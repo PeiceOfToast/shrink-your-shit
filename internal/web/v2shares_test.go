@@ -5,6 +5,7 @@ package web
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/helper"
 	"net"
 	"net/http"
 	"os"
@@ -353,7 +354,6 @@ func TestSharesTestUnknownHostIsHostNotFound(t *testing.T) {
 }
 
 func TestSharesTestSMBCodes(t *testing.T) {
-	// ... SMB error code tests ...
 	home := filepath.Join(t.TempDir(), "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
@@ -420,6 +420,383 @@ func TestSharesTestPlainSentences(t *testing.T) {
 	}
 	if strings.Contains(result.Message, "no such host") {
 		t.Errorf("plain sentence expected, got raw error: %q", result.Message)
+	}
+}
+
+// D2 Part C tests: fake helper, detectMode, sanitiseName, manual text
+
+// Test sanitiseName fallback is share-<id>, never a bare "share" with the same id.
+func TestSanitiseNameFallbackWithID(t *testing.T) {
+	if sanitiseName("", 42) != "share-42" {
+		t.Errorf("empty name: expected share-42, got %q", sanitiseName("", 42))
+	}
+	if sanitiseName("-bad", 7) != "share-7" {
+		t.Errorf("dash prefix: expected share-7, got %q", sanitiseName("-bad", 7))
+	}
+	if sanitiseName("_bad", 3) != "share-3" {
+		t.Errorf("underscore prefix: expected share-3, got %q", sanitiseName("_bad", 3))
+	}
+	// Without id -> "share" (legacy fallback)
+	if sanitiseName("", 0) != "share" {
+		t.Errorf("no id: expected share, got %q", sanitiseName("", 0))
+	}
+	// Normal name works as before
+	if sanitiseName("My Videos", 0) != "my-videos" {
+		t.Errorf("normal name: expected my-videos, got %q", sanitiseName("My Videos", 0))
+	}
+}
+
+// detectMode returns docker when container env is set (restored detection)
+func TestDetectModeDockerByEnv(t *testing.T) {
+	os.Setenv("container", "abc123")
+	defer os.Unsetenv("container")
+	mode, platform := detectMode()
+	if mode != "docker" {
+		t.Errorf("SYP_HELPER_MODE not set, container set: expected docker, got %q on %q", mode, platform)
+	}
+}
+
+// app mode via SYP_HELPER_MODE forces the handler path.
+// Test that a mount error is mapped to not_connected with a reason.
+func TestSharesAppModeMountErrorMaps(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	os.MkdirAll(home, 0o755)
+	os.Setenv("HOME", home)
+	defer os.Unsetenv("HOME")
+
+	sockPath := filepath.Join(dir, "helper.sock")
+	savedSocket := helper.HelperSocket
+	helper.HelperSocket = sockPath
+	defer func() { helper.HelperSocket = savedSocket }()
+	os.Setenv("SYP_HELPER_MODE", "app")
+	defer os.Unsetenv("SYP_HELPER_MODE")
+
+	// Fake helper: accept, read command, respond with error
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		// Read the mount command
+		var cmd map[string]any
+		json.NewDecoder(conn).Decode(&cmd)
+		// Reply with an auth failure
+		json.NewEncoder(conn).Encode(map[string]any{
+			"ok": false,
+			"error": map[string]any{"code": "bad_request", "message": "Permission denied for user test"},
+		})
+		conn.Close()
+	}()
+
+	srv, _, _ := server(t, false)
+
+	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares",
+		body: `{"address":"\\\\nas\\media","name":"MountTest","username":"user","password":"secret"}`,
+		ctype: "application/json"})
+	if code != http.StatusCreated {
+		t.Fatalf("POST: %d %s", code, resp)
+	}
+	var created map[string]any
+	json.Unmarshal([]byte(resp), &created)
+	status, _ := created["status"].(string)
+	reason := created["reason"]
+	if status != "not_connected" {
+		t.Errorf("expected not_connected, got %q", status)
+	}
+	if reason == nil {
+		t.Error("expected reason on mount failure")
+	} else {
+		rCode, _ := reason["code"].(string)
+		rMsg, _ := reason["message"].(string)
+		if rCode != "mount_failed" {
+			t.Errorf("expected mount_failed reason code, got %q", rCode)
+		}
+		if !strings.Contains(rMsg, "Permission denied") {
+			t.Errorf("expected Permission denied in message, got %q", rMsg)
+		}
+	}
+}
+
+// Test that POST in app mode calls Mount with correct args via a fake helper.
+func TestSharesPostAppModeCallsMount(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	os.MkdirAll(home, 0o755)
+	os.Setenv("HOME", home)
+	defer os.Unsetenv("HOME")
+
+	sockPath := filepath.Join(dir, "helper.sock")
+	savedSocket := helper.HelperSocket
+	helper.HelperSocket = sockPath
+	defer func() { helper.HelperSocket = savedSocket }()
+	os.Setenv("SYP_HELPER_MODE", "app")
+	defer os.Unsetenv("SYP_HELPER_MODE")
+
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+
+	var gotCmd map[string]any
+	gotCmdOK := false
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		var cmd map[string]any
+		json.NewDecoder(conn).Decode(&cmd)
+		gotCmd = cmd
+		gotCmdOK = true
+		json.NewEncoder(conn).Encode(map[string]any{"ok": true, "pid": 42})
+		conn.Close()
+	}()
+
+	srv, _, _ := server(t, false)
+
+	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares",
+		body: `{"address":"\\\\nas\\media\\Movies","name":"My Share","username":"alice","password":"p@ss"}`,
+		ctype: "application/json"})
+	if code != http.StatusCreated {
+		t.Fatalf("POST: %d %s", code, resp)
+	}
+	if !gotCmdOK {
+		t.Error("helper was never called")
+		return
+	}
+	cmdStr, _ := gotCmd["cmd"].(string)
+	if cmdStr != "mount" {
+		t.Errorf("expected mount command, got %q", cmdStr)
+	}
+	kind, _ := gotCmd["kind"].(string)
+	if kind != "cifs" {
+		t.Errorf("expected cifs kind, got %q", kind)
+	}
+	mpt, _ := gotCmd["mountPoint"].(string)
+	if !strings.HasSuffix(mpt, "/my-share") {
+		t.Errorf("expected mountPoint ending /my-share, got %q", mpt)
+	}
+	pw, _ := gotCmd["password"].(string)
+	if pw != "p@ss" {
+		t.Errorf("password not sent correctly: %q", pw)
+	}
+	addr, _ := gotCmd["address"].(string)
+	// address should be //server/share (not \\server\share)
+	if addr != "//nas/media/Movies" {
+		t.Errorf("expected //nas/media/Movies, got %q", addr)
+	}
+	// Verify the share is visible as connected
+	var created map[string]any
+	json.Unmarshal([]byte(resp), &created)
+	status, _ := created["status"].(string)
+	if status != "connected" {
+		t.Errorf("expected connected status, got %q", status)
+	}
+}
+
+// Test that DELETE calls helper.Unmount before deleting
+func TestSharesAppModeDeleteCallsUnmount(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	os.MkdirAll(home, 0o755)
+	os.Setenv("HOME", home)
+	defer os.Unsetenv("HOME")
+
+	sockPath := filepath.Join(dir, "helper.sock")
+	savedSocket := helper.HelperSocket
+	helper.HelperSocket = sockPath
+	defer func() { helper.HelperSocket = savedSocket }()
+	os.Setenv("SYP_HELPER_MODE", "app")
+	defer os.Unsetenv("SYP_HELPER_MODE")
+
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+
+	var gotUnmount bool
+	var unmountPath string
+	go func() {
+		// First connection: mount (from POST)
+		conn, err := ln.Accept()
+		if err == nil {
+			var cmd map[string]any
+			json.NewDecoder(conn).Decode(&cmd)
+			json.NewEncoder(conn).Encode(map[string]any{"ok": true, "pid": 42})
+			conn.Close()
+		}
+		// Second connection: unmount (from DELETE)
+		conn, err = ln.Accept()
+		if err == nil {
+			var cmd map[string]any
+			json.NewDecoder(conn).Decode(&cmd)
+			gotUnmount = true
+			cmdStr, _ := cmd["cmd"].(string)
+			if cmdStr == "unmount" {
+				unmountPath, _ = cmd["mountPoint"].(string)
+			}
+			json.NewEncoder(conn).Encode(map[string]any{"ok": true, "pid": 42})
+			conn.Close()
+		}
+	}()
+
+	srv, _, _ := server(t, false)
+
+	// Create a share
+	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares",
+		body: `{"address":"\\\\nas\\share","name":"ToDelete","username":"u","password":"p"}`,
+		ctype: "application/json"})
+	if code != http.StatusCreated {
+		t.Fatalf("POST: %d %s", code, resp)
+	}
+	var created map[string]any
+	json.Unmarshal([]byte(resp), &created)
+	id := fmt.Sprintf("%v", created["id"])
+
+	gotUnmount = false
+	// Delete the share
+	code, resp, _ = do(t, nil, srv, call{method: "DELETE", path: "/api/v2/shares/" + id})
+	if code != http.StatusNoContent {
+		t.Fatalf("DELETE: expected 204 got %d: %s", code, resp)
+	}
+	if !gotUnmount {
+		t.Error("helper.Unmount was not called")
+	} else if !strings.HasSuffix(unmountPath, "/to-delete") {
+		t.Errorf("expected unmount path ending /to-delete, got %q", unmountPath)
+	}
+}
+
+// Test manual mode setup text for SMB with username
+func TestSharesManualSetupTextSMB(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	os.MkdirAll(home, 0o755)
+	os.Setenv("HOME", home)
+	defer os.Unsetenv("HOME")
+	srv, _, _ := server(t, false)
+
+	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares",
+		body: `{"address":"\\\\server\\share","name":"MyShare","username":"alice"}`,
+		ctype: "application/json"})
+	if code != http.StatusCreated {
+		t.Fatalf("POST: %d %s", code, resp)
+	}
+	var created map[string]any
+	json.Unmarshal([]byte(resp), &created)
+	setup := created["setup"]
+	if setup == nil {
+		t.Error("setup is null")
+		return
+	}
+	text, _ := setup["text"].(string)
+	removeText, _ := setup["removeText"].(string)
+	if !strings.Contains(text, "mount -t cifs") {
+		t.Errorf("expected cifs mount: %q", text)
+	}
+	if !strings.Contains(text, "//server/share") {
+		t.Errorf("expected //server/share: %q", text)
+	}
+	if !strings.Contains(text, "username=alice") {
+		t.Errorf("expected username=alice: %q", text)
+	}
+	if !strings.Contains(text, "nosuid") {
+		t.Errorf("expected nosuid: %q", text)
+	}
+	if !strings.Contains(text, "mkdir -p") {
+		t.Errorf("expected mkdir: %q", text)
+	}
+	if !strings.Contains(removeText, "sudo umount") {
+		t.Errorf("expected sudo umount: %q", removeText)
+	}
+}
+
+// Test manual mode setup text for NFS
+func TestSharesManualSetupTextNFS(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	os.MkdirAll(home, 0o755)
+	os.Setenv("HOME", home)
+	defer os.Unsetenv("HOME")
+	srv, _, _ := server(t, false)
+
+	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares",
+		body: `{"address":"server:/export","name":"NFSShare","type":"nfs"}`,
+		ctype: "application/json"})
+	if code != http.StatusCreated {
+		t.Fatalf("POST: %d %s", code, resp)
+	}
+	var created map[string]any
+	json.Unmarshal([]byte(resp), &created)
+	text, _ := created["setup"]["text"].(string)
+	removeText, _ := created["setup"]["removeText"].(string)
+	if !strings.Contains(text, "mount -t nfs") {
+		t.Errorf("expected nfs mount: %q", text)
+	}
+	if !strings.Contains(text, "server:/export") {
+		t.Errorf("expected server:/export address: %q", text)
+	}
+	if !strings.Contains(text, "nosuid") {
+		t.Errorf("expected nosuid: %q", text)
+	}
+	if !strings.Contains(removeText, "sudo umount") {
+		t.Errorf("expected sudo umount: %q", removeText)
+	}
+}
+
+// Test manual mode setup text for guest SMB share
+func TestSharesManualSetupTextGuest(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	os.MkdirAll(home, 0o755)
+	os.Setenv("HOME", home)
+	defer os.Unsetenv("HOME")
+	srv, _, _ := server(t, false)
+
+	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares",
+		body: `{"address":"\\\\server\\share","name":"GuestShare","guest":true}`,
+		ctype: "application/json"})
+	if code != http.StatusCreated {
+		t.Fatalf("POST: %d %s", code, resp)
+	}
+	var created map[string]any
+	json.Unmarshal([]byte(resp), &created)
+	text, _ := created["setup"]["text"].(string)
+	if !strings.Contains(text, "guest,") {
+		t.Errorf("expected guest option: %q", text)
+	}
+	if strings.Contains(text, "username=") {
+		t.Errorf("guest share should not have username=: %q", text)
+	}
+}
+
+// Test manual mode setup text for a name containing a quote
+func TestSharesManualSetupTextQuotedName(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	os.MkdirAll(home, 0o755)
+	os.Setenv("HOME", home)
+	defer os.Unsetenv("HOME")
+	srv, _, _ := server(t, false)
+
+	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares",
+		body: `{"address":"\\\\nas\\media","name":"Bob's Share","username":"alice"}`,
+		ctype: "application/json"})
+	if code != http.StatusCreated {
+		t.Fatalf("POST: %d %s", code, resp)
+	}
+	var created map[string]any
+	json.Unmarshal([]byte(resp), &created)
+	text, _ := created["setup"]["text"].(string)
+	if !strings.Contains(text, "bob-s-share") {
+		t.Errorf("expected sanitised name bob-s-share: %q", text)
+	}
+	// The share path should be properly quoted
+	if !strings.Contains(text, "'/var/lib/syp/shares/bob-s-share'") {
+		t.Errorf("expected quoted path: %q", text)
 	}
 }
 
