@@ -209,18 +209,29 @@ token_out() {
   fi
 }
 
-# lan_ip: this computer's address on the local network, taken from the default route (so a Docker bridge
-# address is not picked). Empty when none is found.
+# lan_ip: this computer's address on the local network. The default route's address comes first, then the other
+# interfaces', in interface order. Loopback, Docker and virtual bridges (docker*, br-*, veth*, virbr*) and the
+# 172.17.0.0/16 Docker bridge are never picked: a link with one of those can't open from another computer.
+# Empty when nothing usable is found, and the caller prints the program's own placeholder.
 lan_ip() {
+  cand=
+  if have ip; then
+    cand=$( { ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p'
+              ip -4 -o addr show 2>/dev/null | awk '$2 !~ /^(lo|docker.*|br-.*|veth.*|virbr.*)$/ { sub(/\/.*/, "", $4); print $4 }'
+            } ) || true
+  else
+    if have route && have ipconfig; then
+      iface=$(route -n get default 2>/dev/null | sed -n 's/.*interface: //p' | head -n 1) || true
+      if [ -n "$iface" ]; then cand=$(ipconfig getifaddr "$iface" 2>/dev/null) || true; fi
+    fi
+    if [ -z "$cand" ] && have hostname; then cand=$(hostname -I 2>/dev/null | tr ' ' '\n') || true; fi
+  fi
   ip=
-  if have ip; then ip=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n 1) || true; fi
-  if [ -z "$ip" ] && have route && have ipconfig; then
-    iface=$(route -n get default 2>/dev/null | sed -n 's/.*interface: //p' | head -n 1) || true
-    if [ -n "$iface" ]; then ip=$(ipconfig getifaddr "$iface" 2>/dev/null) || true; fi
-  fi
-  if [ -z "$ip" ] && have hostname; then
-    ip=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^127\.' | head -n 1) || true
-  fi
+  for c in $cand; do
+    case $c in ''|127.*|172.17.*) continue ;; esac
+    ip=$c
+    break
+  done
   printf '%s' "$ip"
 }
 
