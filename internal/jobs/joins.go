@@ -14,7 +14,8 @@ import (
 // a worker that never picked up its allow never had a token, so it can never have called the server.
 
 // JoinRequest is one join request. Times are unix nanoseconds. Decision is "" while waiting, else "allowed",
-// "picked" (allowed, its token handed out) or "denied".
+// "picked" (allowed, its token handed out), "denied", or "not_connected" (picked, and the worker never called in
+// before the window ended: a notice the person dismisses).
 type JoinRequest struct {
 	ID, SecretHash          string
 	Name, OS, Arch, Version string
@@ -62,9 +63,9 @@ func (s *Store) Join(id string) (JoinRequest, error) {
 	return r, err
 }
 
-// JoinsWaiting lists the requests still unanswered, newest first.
+// JoinsWaiting lists the requests the person still has to act on (unanswered, or a not-connected notice), newest first.
 func (s *Store) JoinsWaiting() ([]JoinRequest, error) {
-	rows, err := s.db.Query(`SELECT ` + joinCols + ` FROM join_requests WHERE decision='' ORDER BY asked_ns DESC`)
+	rows, err := s.db.Query(`SELECT ` + joinCols + ` FROM join_requests WHERE decision IN ('', 'not_connected') ORDER BY asked_ns DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -106,44 +107,57 @@ func (s *Store) AnswerJoin(id, decision, workerID, workerName string) error {
 	return nil
 }
 
-// dropUnseenWorker removes remote worker id if no job ever ran on it. Call inside a transaction.
-func dropUnseenWorker(tx *sql.Tx, id string) error {
+// dropUnseenWorker removes remote worker id if it never called in and no job ever ran on it, and says whether it
+// did. Call inside a transaction.
+func dropUnseenWorker(tx *sql.Tx, id string) (bool, error) {
 	if id == "" {
-		return nil
+		return false, nil
 	}
 	// never heard from (its own call would have set last_seen) and no jobs
-	_, err := tx.Exec(`DELETE FROM workers WHERE id=? AND kind='remote' AND last_seen='' AND NOT EXISTS (SELECT 1 FROM jobs WHERE worker=?)`, id, id)
-	return err
+	r, err := tx.Exec(`DELETE FROM workers WHERE id=? AND kind='remote' AND last_seen='' AND NOT EXISTS (SELECT 1 FROM jobs WHERE worker=?)`, id, id)
+	if err != nil {
+		return false, err
+	}
+	n, _ := r.RowsAffected()
+	return n == 1, nil
 }
 
 // PruneJoins drops the requests whose window has passed by nowNS. An allowed one that nobody picked up takes its
-// unseen worker with it; a denied one just goes.
+// unseen worker with it. A picked-up one whose worker never called in takes it too, and stays as a not-connected
+// notice until the person dismisses it. Any other is just dropped.
 func (s *Store) PruneJoins(nowNS int64) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	rows, err := tx.Query(`SELECT worker_id FROM join_requests WHERE decision IN ('allowed','picked') AND expires_ns<=?`, nowNS)
+	rows, err := tx.Query(`SELECT id, decision, worker_id FROM join_requests WHERE decision IN ('allowed','picked') AND expires_ns<=?`, nowNS)
 	if err != nil {
 		return err
 	}
-	var workers []string
+	type expiredAllow struct{ id, decision, worker string }
+	var expired []expiredAllow
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var e expiredAllow
+		if err := rows.Scan(&e.id, &e.decision, &e.worker); err != nil {
 			rows.Close()
 			return err
 		}
-		workers = append(workers, id)
+		expired = append(expired, e)
 	}
 	rows.Close()
-	for _, id := range workers {
-		if err := dropUnseenWorker(tx, id); err != nil {
+	for _, e := range expired {
+		removed, err := dropUnseenWorker(tx, e.worker)
+		if err != nil {
 			return err
 		}
+		if e.decision == "picked" && removed {
+			if _, err := tx.Exec(`UPDATE join_requests SET decision='not_connected' WHERE id=?`, e.id); err != nil {
+				return err
+			}
+		}
 	}
-	if _, err := tx.Exec(`DELETE FROM join_requests WHERE decision<>'' AND expires_ns<=?`, nowNS); err != nil {
+	if _, err := tx.Exec(`DELETE FROM join_requests WHERE decision NOT IN ('', 'not_connected') AND expires_ns<=?`, nowNS); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -166,7 +180,7 @@ func (s *Store) DismissJoin(id string) error {
 		return err
 	}
 	if decision == "allowed" || decision == "picked" {
-		if err := dropUnseenWorker(tx, worker); err != nil {
+		if _, err := dropUnseenWorker(tx, worker); err != nil {
 			return err
 		}
 	}
