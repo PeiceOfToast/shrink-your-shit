@@ -51,7 +51,7 @@ export interface Capability {
   label: string;
   slot: "cpu" | "gpu";
   device?: string;
-  test: "passed" | "failed" | "untested";
+  test: "passed" | "failed" | "untested" | "unsupported" | "not_present"; // F1 #250 unsupported: the card can't do this format (dim). #254 not_present: no card for it here.
   testedAt: Time | null; detail?: string;
 }
 // E4 (ONE-COMMAND-SETUP.md section 9): GET /api/v2/workers/join-requests. A worker that ran the install command asks to
