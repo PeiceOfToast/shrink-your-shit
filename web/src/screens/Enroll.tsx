@@ -39,12 +39,13 @@ export function Enroll({ setup, reload, noMain }: { setup: Setup; reload: () => 
   const [err, setErr] = useState(""), [busy, setBusy] = useState(false), [problem, setProblem] = useState<Problem | null>(null);
   const [, setNow] = useState(0);
   const me = useData(listWorkers, []), mine = me.data?.find((w) => w.kind === "local")?.appVersion;
-  const head = useRef<HTMLHeadingElement>(null), focusPick = useRef(false);
+  const head = useRef<HTMLHeadingElement>(null), focusPick = useRef(false), chose = useRef(false); // chose: the person picked a card
 
   const look = async () => {
     setFound(null);
     const r = await listServers(), list = failed(r) ? [] : r, ok = list.filter((s) => s.matchesVersion);
     setFound(list);
+    if (chose.current) return; // a search that ends later never changes what the person picked (lead 08:04Z: Continue became Ask to join)
     setPick(list.length === 1 && ok.length === 1 ? ok[0].url : noMain ? "other" : "main"); // the server's card when exactly one is found
   };
   useEffect(() => { look(); }, []);
@@ -125,7 +126,7 @@ export function Enroll({ setup, reload, noMain }: { setup: Setup; reload: () => 
 
   const card = (value: string, title: string, text: ReactNode, off?: string) => (
     <label key={value} className={"card radio enroll-card" + (pick === value ? " sel" : "") + (off ? " off" : "")}>
-      <input type="radio" name="enroll" value={value} checked={pick === value} disabled={!!off} onChange={() => (setPick(value), setErr(""))} />
+      <input type="radio" name="enroll" value={value} checked={pick === value} disabled={!!off} onClick={() => (chose.current = true)} onChange={() => (setPick(value), setErr(""))} />
       <span><strong>{title}</strong><span className="hint">{text}</span>{off && <span className="hint">{off}</span>}</span>
     </label>
   );
