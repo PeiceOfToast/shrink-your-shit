@@ -56,6 +56,7 @@ type joinReq struct {
 	decision           string
 	workerID, token    string // set when allowed; the worker reads them by polling with its secret
 	workerName         string
+	port               int // the web port the worker answers on; 0 means joinPort
 }
 
 type joinBook struct {
@@ -223,6 +224,11 @@ func (b *joinBook) allow(id string, now time.Time) (jobs.RemoteWorker, error) {
 	if err != nil {
 		return jobs.RemoteWorker{}, err
 	}
+	// Allowing is the go-ahead: the worker starts on. Pairing by code does not do this (Pair leaves a new worker off
+	// when every worker is off), so the person's allow is what turns it on.
+	if err := b.store.SetWorkerEnabled(wk.ID, true); err != nil {
+		log.Printf("join: %s is paired, but turning it on failed: %v", wk.ID, err)
+	}
 	r.decision, r.workerID, r.workerName, r.token = "allowed", wk.ID, wk.Name, token
 	for _, oid := range old {
 		if err := b.store.RemoveWorker(oid); err != nil && !errors.Is(err, jobs.ErrNotFound) {
@@ -264,6 +270,7 @@ type joinBody struct {
 	Name         string          `json:"name"`
 	OS           string          `json:"os"`
 	Hardware     *string         `json:"hardware"`
+	Port         int             `json:"port"` // the worker's web port, for the link on the Workers page; 0 when not sent
 	Capabilities json.RawMessage `json:"capabilities"`
 }
 
@@ -272,6 +279,8 @@ func (in joinBody) problem() string {
 	switch {
 	case strings.TrimSpace(in.Name) == "" || len(in.Name) > 80:
 		return "The name is needed, at most 80 characters."
+	case in.Port < 0 || in.Port > 65535:
+		return "The port is a number from 1 to 65535."
 	case len(in.OS) > 40:
 		return "The operating system is at most 40 characters."
 	case in.Hardware != nil && len(*in.Hardware) > 200:
@@ -339,7 +348,7 @@ func (b *joinBook) ask(w http.ResponseWriter, r *http.Request, t Transport, limi
 		caps = "{}"
 	}
 	req := &joinReq{name: strings.TrimSpace(in.Name), os: in.OS, version: v, hardware: in.Hardware, apiLevel: level,
-		capabilities: caps, address: client}
+		capabilities: caps, address: client, port: in.Port}
 	id, secret, err := b.add(req, now())
 	if errors.Is(err, errJoinFull) {
 		apiError(w, http.StatusTooManyRequests, "too_many_joins", "Too many join requests are waiting. Allow or dismiss some on the Workers page.")
@@ -396,8 +405,12 @@ func (v *workerView) joinViews(now time.Time) []map[string]any {
 		if r.hardware != nil {
 			hardware = *r.hardware
 		}
+		port := joinPort
+		if r.port > 0 {
+			port = strconv.Itoa(r.port)
+		}
 		out = append(out, map[string]any{"id": r.id, "name": r.name, "address": addr.String(), "os": r.os,
-			"hardware": hardware, "url": "http://" + net.JoinHostPort(addr.String(), joinPort),
+			"hardware": hardware, "url": "http://" + net.JoinHostPort(addr.String(), port),
 			"askedAt": r.askedAt.UTC().Format(time.RFC3339), "expiresAt": r.expiresAt.UTC().Format(time.RFC3339),
 			"state": state, "replacesWorker": names[r.name]})
 	}

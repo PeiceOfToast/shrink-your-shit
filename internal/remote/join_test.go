@@ -26,7 +26,7 @@ func fakeJoin(t *testing.T, states ...string) *httptest.Server {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/worker/v1/join":
 			w.WriteHeader(202)
-			w.Write([]byte(`{"id":"j-1","expiresAt":"2026-11-14T03:00:00Z","secret":"s3cret"}`))
+			w.Write([]byte(`{"id":"j-1","expiresAt":"2099-01-01T00:00:00Z","secret":"s3cret"}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/worker/v1/join/j-1":
 			if r.Header.Get("Authorization") != "Bearer s3cret" {
 				w.WriteHeader(404)
@@ -40,6 +40,9 @@ func fakeJoin(t *testing.T, states ...string) *httptest.Server {
 			case "gone":
 				w.WriteHeader(404)
 				w.Write([]byte(`{"error":{"code":"join_request_not_found","message":"There is no such join request. Nothing was changed."}}`))
+			case "error":
+				w.WriteHeader(503)
+				w.Write([]byte(`{"error":{"code":"busy","message":"Busy."}}`))
 			default:
 				w.Write([]byte(`{"state":"` + st + `"}`))
 			}
@@ -83,6 +86,28 @@ func TestJoinDroppedRequestSaysSo(t *testing.T) {
 	_, err := (&Client{Server: srv.URL, Version: "1.2.3"}).Join(context.Background(), "Office PC", "linux")
 	if err == nil || err.Error() != "The server no longer has this join request (it restarted or dropped it). Run the command again." {
 		t.Errorf("dropped: %v", err)
+	}
+}
+
+// A server that is busy or briefly unreachable does not end the join: the wait says "unreachable" after three
+// failed polls in a row, keeps polling, and says "waiting" again when the server answers.
+func TestJoinSurvivesATransientFailure(t *testing.T) {
+	srv := fakeJoin(t, "error", "error", "error", "waiting", "allowed")
+	c := &Client{Server: srv.URL, Version: "1.2.3"}
+	a, err := c.Ask(context.Background(), "Office PC", "linux", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seen []string
+	st, err := c.Wait(context.Background(), a, func(s string) { seen = append(seen, s) })
+	if err != nil {
+		t.Fatalf("join ended on a transient failure: %v", err)
+	}
+	if st.Token != "tok" {
+		t.Errorf("state %+v", st)
+	}
+	if len(seen) != 2 || seen[0] != "unreachable" || seen[1] != "waiting" {
+		t.Errorf("reports %v, want [unreachable waiting]", seen)
 	}
 }
 

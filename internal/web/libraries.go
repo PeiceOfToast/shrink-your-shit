@@ -34,6 +34,8 @@ type Engine struct {
 	FirstFiles   *preview.FirstLister // the first 5 videos of a folder (slice A)
 	StopFile     func(id int64) bool  // stop a running job the person stopped; false if no worker runs it
 	Preview      *preview.Previewer   // the dry run (slice 19)
+	Port         int                  // the web port this install answers on (from -addr); a join tells the server where to find it
+	Joiner       WorkerJoiner         // joins a server as its worker (the setup page); nil: this install can't join
 
 	Doctor  *doctor.Checker // the setup checks (nil: not available)
 	DataDir string          // the data folder, for the health report

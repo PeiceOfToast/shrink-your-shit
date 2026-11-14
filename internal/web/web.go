@@ -49,7 +49,7 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	v2Ladder(api)                 // user review 11-12 item 1: /api/v2/bitrate-ladder
 	v2JobStreams(api, store)      // V3d: /api/v2/activity, per-job streams
 	v2Workflows(api, store, eng)  // UI rebuild, V1: /api/v2 workflows
-	v2Setup(api, store, ss)       // one-command setup: the install's role, GET /api/v2/setup
+	v2Setup(api, store, ss, eng)  // one-command setup: the install's role, GET /api/v2/setup
 	// For health checks: answers without signing in and says nothing else.
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")

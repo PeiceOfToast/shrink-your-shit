@@ -143,7 +143,9 @@ func (c *Client) callWith(ctx context.Context, method, path string, in, out any,
 		return &APIError{Status: res.StatusCode, Code: e.Error.Code, Message: e.Error.Message}
 	}
 	if out != nil {
-		return json.NewDecoder(res.Body).Decode(out)
+		if err := json.NewDecoder(res.Body).Decode(out); err != nil {
+			return fmt.Errorf("%w: %v", ErrNotWorkerAPI, err)
+		}
 	}
 	return nil
 }
@@ -166,29 +168,87 @@ var (
 	ErrJoinExpired = errors.New("Nobody allowed it within 10 minutes. Run the command again.")
 )
 
-// Join asks the server to let this worker join, then waits until the person allows it there (the same State
-// Pair returns), denies it, or the request expires. ctx ends the wait.
-func (c *Client) Join(ctx context.Context, name, osName string) (State, error) {
-	var asked struct{ ID, Secret string }
-	if err := c.call(ctx, "join", map[string]any{"name": name, "os": osName, "capabilities": map[string]any{}}, &asked); err != nil {
-		return State{}, err
+// ErrNotWorkerAPI means the server answered with something other than the worker API's JSON: another
+// program, or a server of another kind.
+var ErrNotWorkerAPI = errors.New("the server answered, but not as a shrink-your-shit server")
+
+// Asked is a join request the server took: its id, the secret the wait polls with, and when the request
+// expires (RFC 3339; "" when the server did not say).
+type Asked struct {
+	ID, Secret, ExpiresAt string
+}
+
+// Ask sends the join request and returns at once with the server's answer. port is the web port this
+// worker answers on, so the server's Workers page can link to it; 0 sends none (the server assumes 8484).
+func (c *Client) Ask(ctx context.Context, name, osName string, port int) (Asked, error) {
+	in := map[string]any{"name": name, "os": osName, "capabilities": map[string]any{}}
+	if port > 0 {
+		in["port"] = port
 	}
+	var a struct{ ID, Secret, ExpiresAt string }
+	if err := c.call(ctx, "join", in, &a); err != nil {
+		return Asked{}, err
+	}
+	return Asked{ID: a.ID, Secret: a.Secret, ExpiresAt: a.ExpiresAt}, nil
+}
+
+// joinTrouble is how many polls in a row may fail (the network, the server restarting) before Wait reports
+// "unreachable". Wait keeps polling until the request ends either way.
+const joinTrouble = 3
+
+// joinGrace lets a request end on the server's clock before this worker gives up on it.
+const joinGrace = time.Minute
+
+// Wait polls until the person answers the request and returns the same State Pair returns. Allowed, denied
+// and expired end it; a failed poll the server can't answer for now (the network, a 5xx, a 429) does not.
+// report, if not nil, hears "unreachable" after joinTrouble failed polls in a row and "waiting" when the
+// server answers again. ctx ends the wait with ctx's error.
+func (c *Client) Wait(ctx context.Context, a Asked, report func(state string)) (State, error) {
+	var deadline time.Time
+	if t, err := time.Parse(time.RFC3339, a.ExpiresAt); err == nil {
+		deadline = t.Add(joinGrace)
+	}
+	fails, unreachable := 0, false
 	for {
+		if !deadline.IsZero() && !time.Now().Before(deadline) {
+			return State{}, ErrJoinExpired
+		}
 		var out struct{ State, WorkerID, Name, Token string }
-		if err := c.callWith(ctx, http.MethodGet, "join/"+asked.ID, nil, &out, asked.Secret); err != nil {
+		err := c.callWith(ctx, http.MethodGet, "join/"+a.ID, nil, &out, a.Secret)
+		if ctx.Err() != nil {
+			return State{}, ctx.Err()
+		}
+		switch {
+		case err != nil && transientPoll(err):
+			fails++
+			if fails >= joinTrouble && !unreachable {
+				unreachable = true
+				if report != nil {
+					report("unreachable")
+				}
+			}
+		case err != nil:
 			var e *APIError
 			if errors.As(err, &e) && e.Code == "join_request_not_found" {
 				return State{}, errors.New("The server no longer has this join request (it restarted or dropped it). Run the command again.")
 			}
 			return State{}, err
-		}
-		switch out.State {
-		case "allowed":
-			return State{Server: c.Server, WorkerID: out.WorkerID, Name: out.Name, Token: out.Token}, nil
-		case "denied":
-			return State{}, ErrJoinDenied
-		case "expired":
-			return State{}, ErrJoinExpired
+		default:
+			fails = 0
+			if unreachable {
+				unreachable = false
+				if report != nil {
+					report("waiting")
+				}
+			}
+			switch out.State {
+			case "allowed":
+				return State{Server: c.Server, WorkerID: out.WorkerID, Name: out.Name, Token: out.Token}, nil
+			case "denied":
+				return State{}, ErrJoinDenied
+			case "expired":
+				return State{}, ErrJoinExpired
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -196,6 +256,26 @@ func (c *Client) Join(ctx context.Context, name, osName string) (State, error) {
 		case <-time.After(JoinEvery):
 		}
 	}
+}
+
+// transientPoll says whether a failed poll may succeed on the next try: the network failed, or the server
+// is busy or restarting. A refusal that will not change (a wrong secret, a request that is gone) is not.
+func transientPoll(err error) bool {
+	var e *APIError
+	if errors.As(err, &e) {
+		return e.Status >= 500 || e.Status == http.StatusTooManyRequests
+	}
+	return !errors.Is(err, ErrNotWorkerAPI)
+}
+
+// Join asks the server to let this worker join, then waits until the person allows it there (the same State
+// Pair returns), denies it, or the request expires. ctx ends the wait.
+func (c *Client) Join(ctx context.Context, name, osName string) (State, error) {
+	a, err := c.Ask(ctx, name, osName, 0)
+	if err != nil {
+		return State{}, err
+	}
+	return c.Wait(ctx, a, nil)
 }
 
 // Heartbeat says this worker is there, with its free slots.

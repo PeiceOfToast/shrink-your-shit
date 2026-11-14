@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 )
 
 // joinFrom sends a worker's request from a peer address. tls makes it an https request, as a proxy or TLS
@@ -47,6 +49,9 @@ func askJoin(t *testing.T, srv *httptest.Server, name string) (id, secret string
 
 func TestJoinFromTheLocalNetworkIsAllowed(t *testing.T) {
 	srv, st, _, _ := libServer(t, false)
+	if err := st.SetWorkerEnabled(jobs.LocalWorker, false); err != nil { // every worker off: a new worker would arrive off
+		t.Fatal(err)
+	}
 	id, secret := askJoin(t, srv, "Office PC")
 
 	code, b, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/workers"})
@@ -69,8 +74,13 @@ func TestJoinFromTheLocalNetworkIsAllowed(t *testing.T) {
 	}
 	var got struct{ Token string }
 	json.Unmarshal([]byte(b), &got)
-	if _, err := st.WorkerByToken(got.Token); err != nil {
-		t.Errorf("the credential pairs the worker: %v", err)
+	wk, err := st.WorkerByToken(got.Token)
+	if err != nil {
+		t.Fatalf("the credential pairs the worker: %v", err)
+	}
+	// Allowing is the go-ahead: the worker starts on, with no second step to press start.
+	if !st.WorkerEnabled(wk.ID) {
+		t.Errorf("an allowed join's worker starts disabled")
 	}
 }
 
