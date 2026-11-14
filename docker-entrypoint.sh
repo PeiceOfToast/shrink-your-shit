@@ -47,4 +47,4 @@ else
     echo "network shares: manual (container can't mount: $reason)"
 fi
 
-exec setpriv --reuid=1000 --regid=1000 --init-groups "$APP" "$@"
+exec run-as-syp "$APP" "$@" # syp, with the /dev/dri groups (see run-as-syp.sh)

@@ -108,8 +108,8 @@ tried this. Route B is simpler for a Proxmox LXC.
 ## Intel Quick Sync in Docker
 
 The image (x86_64) already has the Intel drivers. Quick Sync needs Intel Tiger Lake or newer; older Intel
-chips use VA-API, with the same compose block. To use the GPU: uncomment the "Intel GPU" block in
-`docker-compose.yml` and set `group_add` to the host's render group id (`getent group render | cut -d: -f3`).
+chips use VA-API, with the same compose block. To use the GPU: uncomment the `devices:` block for
+graphics in `docker-compose.yml`. The app joins the group of `/dev/dri` itself, so `group_add` is not needed.
 On a Proxmox LXC, pass `/dev/dri` into the container first (e.g. `dev0: /dev/dri/renderD128` in
 `/etc/pve/lxc/<id>.conf`, then restart it). Run `docker compose up -d`, then check the Workers page shows Intel.
 

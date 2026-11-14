@@ -42,11 +42,12 @@ COPY --from=build /out/shrink-your-shit /usr/local/lib/shrink-your-shit/shrink-y
 # and never leave root-owned files in /config.
 RUN printf '%s\n' '#!/bin/sh' \
     'APP=/usr/local/lib/shrink-your-shit/shrink-your-shit' \
-    'if [ "$(id -u)" = 0 ]; then exec setpriv --reuid=1000 --regid=1000 --init-groups "$APP" "$@"; fi' \
+    'if [ "$(id -u)" = 0 ]; then exec run-as-syp "$APP" "$@"; fi' \
     'exec "$APP" "$@"' > /usr/local/bin/shrink-your-shit && chmod 0755 /usr/local/bin/shrink-your-shit
 COPY --from=build /out/syp-network-helper /usr/local/bin/syp-network-helper
+COPY run-as-syp.sh /usr/local/bin/run-as-syp
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh /usr/local/bin/run-as-syp
 
 # /config holds the database, /media is the library folder. The web UI must listen on
 # all addresses inside the container; publish the port only to machines you trust.

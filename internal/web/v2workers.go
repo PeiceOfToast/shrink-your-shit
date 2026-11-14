@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -395,7 +396,10 @@ func intelFailure() string {
 		return "No graphics device here (/dev/dri is missing). In Docker, add the Intel GPU block from docker-compose.yml and restart; on a host install, check the graphics driver is loaded."
 	}
 	if err := openRender(nodes[0]); err != nil {
-		return "Can't open " + nodes[0] + ": the app's user isn't in its group. In Docker, set group_add to the host's render group id (getent group render | cut -d: -f3); on a host install, add the app's user to the render group."
+		if !errors.Is(err, fs.ErrPermission) {
+			return "Can't open " + nodes[0] + ": " + err.Error() + "."
+		}
+		return "Can't open " + nodes[0] + ": the app's user isn't allowed to. On a host install, add the app's user to the render group. In Docker the app joins the device's group itself; if this still shows, the device's group on the host isn't visible in the container (check the LXC or Docker device settings)."
 	}
 	return failed
 }
