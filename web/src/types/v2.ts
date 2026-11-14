@@ -58,7 +58,9 @@ export interface Capability {
 // join; decided and expired requests stay about 10 minutes so the card can show the outcome.
 export interface JoinRequest {
   id: ID; name: string; address: string; os?: string; hardware: string | null; url: string;
-  askedAt: Time; expiresAt: Time; state: "waiting" | "expired"; replacesWorker: boolean;
+  askedAt: Time; expiresAt: Time; replacesWorker: boolean;
+  // not_connected (workshop 07:34Z): allowed, but the worker never called before its 10 minutes ended; stays until dismissed
+  state: "waiting" | "expired" | "not_connected";
 }
 export interface Worker {
   id: ID; name: string; kind: "local" | "remote";
