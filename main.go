@@ -12,10 +12,12 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -24,6 +26,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/preview"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/remote"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/runlog"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/scanner"
@@ -314,7 +317,7 @@ func main() {
 			}
 		},
 		ScanNow: sc.ScanNow, NextScan: sc.NextScan, ScanEvery: *every, Settle: *settle, SetScanEvery: sc.SetEvery, Scanning: sc.Scanning, RequeueJob: pool.RequeueJob, PauseNow: pool.PauseNow, StopFile: pool.StopFile,
-		Doctor: chk, DataDir: *data, Version: version, Logs: logs,
+		Doctor: chk, DataDir: *data, Version: version, Logs: logs, Port: portOf(*addr), Joiner: &remote.Joiner{Version: version},
 		Preview:    &preview.Previewer{Store: store, Exec: media.OSExec{}, FFprobe: ffprobePath},
 		FirstFiles: &preview.FirstLister{Exec: media.OSExec{}, FFprobe: ffprobePath}})}
 	go func() {
@@ -372,4 +375,14 @@ func scanTargets(store *jobs.Store) func() ([]scanner.Target, error) {
 		}
 		return out, nil
 	}
+}
+
+// portOf is the port of a listen address ("127.0.0.1:8484" -> 8484); 0 when there is none.
+func portOf(addr string) int {
+	_, p, err := net.SplitHostPort(addr)
+	if err != nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(p)
+	return n
 }

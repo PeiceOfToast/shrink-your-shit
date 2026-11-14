@@ -27,7 +27,7 @@ func joinServer(t *testing.T, states ...string) *httptest.Server {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/worker/v1/join":
 			w.WriteHeader(202)
-			w.Write([]byte(`{"id":"j-1","expiresAt":"2026-11-14T03:00:00Z","secret":"s3cret"}`))
+			w.Write([]byte(`{"id":"j-1","expiresAt":"2099-01-01T00:00:00Z","secret":"s3cret"}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/worker/v1/join/j-1" && r.Header.Get("Authorization") == "Bearer s3cret":
 			i := min(int(polls.Add(1))-1, len(states)-1)
 			if states[i] == "allowed" {
