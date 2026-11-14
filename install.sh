@@ -221,8 +221,9 @@ token_out() {
 }
 
 # lan_ip: this computer's address on the local network. The default route's address comes first, then the other
-# interfaces', in interface order. Loopback, Docker and virtual bridges (docker*, br-*, veth*, virbr*) and the
-# 172.17.0.0/16 Docker bridge are never picked: a link with one of those can't open from another computer.
+# interfaces', in interface order. Loopback and Docker or virtual bridge interfaces (docker*, br-*, veth*, virbr*) are
+# skipped by name. Without the ip command, hostname -I is used, and its 172.16.0.0/12 addresses (where Docker puts its
+# bridges) are skipped too: a link with a bridge address can't open from another computer.
 # Empty when nothing usable is found, and the caller prints the program's own placeholder.
 lan_ip() {
   cand=
@@ -235,11 +236,13 @@ lan_ip() {
       iface=$(route -n get default 2>/dev/null | sed -n 's/.*interface: //p' | head -n 1) || true
       if [ -n "$iface" ]; then cand=$(ipconfig getifaddr "$iface" 2>/dev/null) || true; fi
     fi
-    if [ -z "$cand" ] && have hostname; then cand=$(hostname -I 2>/dev/null | tr ' ' '\n') || true; fi
+    if [ -z "$cand" ] && have hostname; then
+      cand=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -vE '^172\.(1[6-9]|2[0-9]|3[01])\.') || true
+    fi
   fi
   ip=
   for c in $cand; do
-    case $c in ''|127.*|172.17.*) continue ;; esac
+    case $c in ''|127.*) continue ;; esac
     ip=$c
     break
   done
