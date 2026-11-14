@@ -91,8 +91,11 @@ func (f *Finder) scan() []Found {
 	found := []Found{}
 	seen := map[string]bool{}
 	add := func(e *zeroconf.ServiceEntry) {
+		if e == nil { // a closed entries channel yields nil: nothing more is coming
+			return
+		}
 		srv, ok := fromEntry(e)
-		if ok && !seen[srv.key()] {
+		if ok && !seen[srv.key()] && len(found) < maxServers {
 			seen[srv.key()] = true
 			found = append(found, srv)
 		}
@@ -102,12 +105,18 @@ func (f *Finder) scan() []Found {
 		defer close(read)
 		for {
 			select {
-			case e := <-entries:
+			case e, ok := <-entries:
+				if !ok { // the browse ended and closed entries
+					return
+				}
 				add(e)
 			case <-ctx.Done():
 				for { // what already arrived still counts
 					select {
-					case e := <-entries:
+					case e, ok := <-entries:
+						if !ok {
+							return
+						}
 						add(e)
 					default:
 						return
@@ -129,8 +138,20 @@ func (s Found) key() string {
 	return s.Name + "|" + s.Address + "|" + strconv.Itoa(s.Port)
 }
 
-// fromEntry turns one answer into a Found. An answer with no address to reach it by is skipped.
+// Limits on what the network may send. Answers come from strangers on the LAN, so a name or version is cut to
+// maxText characters (truncated, not dropped), a port outside 1-65535 drops the answer, and a browse keeps at most
+// maxServers answers.
+const (
+	maxText    = 128
+	maxServers = 64
+)
+
+// fromEntry turns one answer into a Found. An answer with no address to reach it by, or a port that is not a port,
+// is skipped.
 func fromEntry(e *zeroconf.ServiceEntry) (Found, bool) {
+	if e.Port < 1 || e.Port > 65535 {
+		return Found{}, false
+	}
 	var addr string
 	switch {
 	case len(e.AddrIPv4) > 0:
@@ -149,5 +170,13 @@ func fromEntry(e *zeroconf.ServiceEntry) (Found, bool) {
 			version = v
 		}
 	}
-	return Found{Name: e.Instance, Address: addr, Port: e.Port, Version: version}, true
+	return Found{Name: clip(e.Instance), Address: addr, Port: e.Port, Version: clip(version)}, true
+}
+
+// clip cuts s to maxText characters.
+func clip(s string) string {
+	if r := []rune(s); len(r) > maxText {
+		return string(r[:maxText])
+	}
+	return s
 }
