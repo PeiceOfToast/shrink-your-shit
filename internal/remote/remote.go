@@ -37,6 +37,9 @@ type State struct {
 	WorkerID string `json:"workerId"`
 	Name     string `json:"name"`
 	Token    string `json:"token"`
+	// ServerName is the name the server shows for itself (the one the person saw when joining). Empty in a state
+	// saved before it was kept; then the address stands in for it.
+	ServerName string `json:"serverName,omitempty"`
 }
 
 // StateFile is the state's file name in the worker's data folder.

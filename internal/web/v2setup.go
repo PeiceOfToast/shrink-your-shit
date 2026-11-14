@@ -33,6 +33,8 @@ type serverItem struct {
 // ServerFinder lists the servers on this network that announce themselves. main supplies discover.Finder.
 type ServerFinder interface {
 	Servers() []discover.Found
+	// Known is the last browse's list, read without browsing: a join never waits on a scan to name its server.
+	Known() []discover.Found
 }
 
 // WorkerJoiner is how this install joins a server as its worker. main supplies remote.Joiner. web does not import
@@ -44,8 +46,10 @@ type WorkerJoiner interface {
 	Ask(ctx context.Context, serverURL, name, osName string, port int) (id, secret, expiresAt string, err error)
 	// Wait polls until the person answers; allowed, it returns the worker's id, name and token.
 	Wait(ctx context.Context, serverURL, id, secret, expiresAt string, report func(state string)) (workerID, workerName, token string, err error)
-	// Save keeps a worker's credential in dir.
-	Save(dir, serverURL, id, name, token string) error
+	// Save keeps a worker's credential in dir, with the name the server shows for itself.
+	Save(dir, serverURL, serverName, id, name, token string) error
+	// Saved reads the credential Save kept in dir: the server's address and its name ("" if none was kept).
+	Saved(dir string) (serverURL, serverName string, ok bool)
 	// Forget removes the credential Save kept in dir, when the role could not be set after it.
 	Forget(dir string)
 }
@@ -86,10 +90,27 @@ type setupWaits struct {
 	store  *jobs.Store
 	joiner WorkerJoiner
 	onRole func(role string)
+	finder ServerFinder // names a server by what it announced; nil names it by its address
+	dir    string       // the worker's saved state
 	mu     sync.Mutex
 	cur    *setupJoin
 	gen    int
 	cancel context.CancelFunc
+}
+
+// serverNameFor is the name a server shows for itself: the name the last browse heard at its address and port, else
+// the address without its scheme. It never starts a browse.
+func (sw *setupWaits) serverNameFor(serverURL string) string {
+	if sw.finder != nil {
+		if u, err := url.Parse(serverURL); err == nil {
+			for _, f := range sw.finder.Known() {
+				if f.Name != "" && u.Host == net.JoinHostPort(f.Address, strconv.Itoa(f.Port)) {
+					return f.Name
+				}
+			}
+		}
+	}
+	return hostOf(serverURL)
 }
 
 // stopLocked ends the wait and forgets the join. Call with mu held.
@@ -129,8 +150,22 @@ func (sw *setupWaits) view(role string) map[string]any {
 			exp = j.expiresAt
 		}
 		join = map[string]any{"serverName": j.serverName, "serverUrl": j.serverURL, "state": j.state, "expiresAt": exp}
+	} else if server, name, ok := sw.savedJoin(role); ok {
+		// A worker after a restart: the join is over, but the page still names the server it is working for.
+		if name == "" {
+			name = hostOf(server)
+		}
+		join = map[string]any{"serverName": name, "serverUrl": server, "state": "allowed", "expiresAt": nil}
 	}
 	return map[string]any{"role": role, "join": join}
+}
+
+// savedJoin is the server this worker's saved state names, when the role is worker. Call with mu held.
+func (sw *setupWaits) savedJoin(role string) (serverURL, serverName string, ok bool) {
+	if role != "worker" || sw.joiner == nil {
+		return "", "", false
+	}
+	return sw.joiner.Saved(sw.dir)
 }
 
 // set records a wait's state, if that wait still matters.
@@ -171,7 +206,7 @@ func (sw *setupWaits) allowed(gen int, serverURL, id, name, token, dir string) {
 	if sw.gen != gen || sw.cur == nil {
 		return
 	}
-	if err := sw.joiner.Save(dir, serverURL, id, name, token); err != nil {
+	if err := sw.joiner.Save(dir, serverURL, sw.cur.serverName, id, name, token); err != nil {
 		log.Printf("setup: allowed, but the token couldn't be saved in %s: %v", dir, err)
 		sw.cur.state = "not_saved"
 		sw.changedLocked()
@@ -229,8 +264,8 @@ func setupServerError(w http.ResponseWriter, serverURL string, err error) {
 //     invalid_server_url and invalid_role are 400; 409 role_change_busy while jobs run, for a change to worker
 //     or unset.
 func v2Setup(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng Engine) {
-	sw := &setupWaits{store: store, joiner: eng.Joiner, onRole: eng.RoleChanged}
 	workerDir := filepath.Join(eng.DataDir, "worker")
+	sw := &setupWaits{store: store, joiner: eng.Joiner, onRole: eng.RoleChanged, finder: eng.Finder, dir: workerDir}
 	// current is the saved role. When none is saved, an install that already has a library or has got past
 	// the first step predates the role, so it is a server and never sees the enrollment page.
 	current := func() (string, error) {
@@ -302,7 +337,8 @@ func v2Setup(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng Engin
 			setupServerError(w, serverURL, err)
 			return
 		}
-		if err := eng.Joiner.Save(workerDir, serverURL, id, name, token); err != nil {
+		serverName := sw.serverNameFor(serverURL)
+		if err := eng.Joiner.Save(workerDir, serverURL, serverName, id, name, token); err != nil {
 			apiError(w, http.StatusInternalServerError, "token_not_saved", "The server paired with this computer, but its token couldn't be saved here: "+err.Error()+" Nothing was changed.")
 			return
 		}
@@ -313,7 +349,7 @@ func v2Setup(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng Engin
 			eng.Joiner.Forget(workerDir)
 			return
 		}
-		sw.replace(&setupJoin{serverName: hostOf(serverURL), serverURL: serverURL, state: "allowed"})
+		sw.replace(&setupJoin{serverName: serverName, serverURL: serverURL, state: "allowed"})
 		answerWithRole(w, http.StatusOK)
 	}
 
@@ -325,7 +361,7 @@ func v2Setup(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng Engin
 		if joinCode(err) == "not_local" {
 			ss.mu.Lock()
 			defer ss.mu.Unlock()
-			sw.replace(&setupJoin{serverName: hostOf(serverURL), serverURL: serverURL, state: "not_local"})
+			sw.replace(&setupJoin{serverName: sw.serverNameFor(serverURL), serverURL: serverURL, state: "not_local"})
 			answerWithRole(w, http.StatusOK)
 			return
 		}
@@ -338,7 +374,7 @@ func v2Setup(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng Engin
 		wctx, wcancel := context.WithCancel(context.Background())
 		sw.cancel = wcancel
 		gen := sw.gen
-		sw.cur = &setupJoin{serverName: hostOf(serverURL), serverURL: serverURL, state: "waiting", expiresAt: expiresAt}
+		sw.cur = &setupJoin{serverName: sw.serverNameFor(serverURL), serverURL: serverURL, state: "waiting", expiresAt: expiresAt}
 		sw.changedLocked()
 		sw.mu.Unlock()
 		// The answer is written before the wait starts, so it shows the join as waiting, not a later state.
