@@ -278,7 +278,7 @@ func main() {
 				Template: store.TemplateFor, Poll: 3 * time.Second,
 				DecodeCheck: *decode, MinSSIM: *minSSIM, KeepDays: keepDays, Journal: store, Sidecars: store,
 				Paused: func() bool { return !store.WorkerEnabled(jobs.LocalWorker) }, StallAfter: *stallAfter, // this computer's own switch
-				Encoder: web.LocalPrimaryEncoder(store, chk),
+				Encoder: web.LocalEncoderFor(store, chk),
 				ShareDown: func(folder string, jobID int64) (worker.ShareDown, bool) {
 					return web.ShareDownFor(store, folder, jobID)
 				}}

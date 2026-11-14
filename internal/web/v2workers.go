@@ -21,6 +21,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/pathmap"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/sysload"
 )
 
@@ -280,24 +281,18 @@ func passedGPU(caps []map[string]any) []string {
 	return out
 }
 
-// mainEncoderGPU is the passed graphics encoders that may be the main encoder. Until F2 (plans use h264/av1 on the
-// graphics card) only HEVC may: an H.264 or AV1 main encoder would silently convert on the processor.
-func mainEncoderGPU(caps []map[string]any) []string {
-	out := []string{}
-	for _, e := range passedGPU(caps) {
-		if encoderFormat(e) == "hevc" {
-			out = append(out, e)
-		}
-	}
-	return out
-}
-
-// primaryEncoder is the encoder a worker encodes with: the saved choice while its test still passes
-// (cpu always does), else the first HEVC graphics encoder that passes, else cpu.
+// primaryEncoder is the main encoder a worker encodes with: the saved choice while its test still passes
+// (cpu always does), else the first HEVC graphics encoder that passes, else the first graphics encoder of any
+// format that passes, else cpu. Its family is what each plan's format uses (see LocalEncoderFor).
 func primaryEncoder(saved *string, caps []map[string]any) string {
-	passed := mainEncoderGPU(caps)
+	passed := passedGPU(caps)
 	if saved != nil && (*saved == "cpu" || slices.Contains(passed, *saved)) {
 		return *saved
+	}
+	for _, e := range passed {
+		if encoderFormat(e) == "hevc" {
+			return e
+		}
 	}
 	if len(passed) > 0 {
 		return passed[0]
@@ -685,7 +680,7 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 				To   string `json:"to"`
 			} `json:"schedule"`
 			PathMappings   *[]struct{ Server, Worker, Mode string } `json:"pathMappings"`   // V7c: remote workers only
-			PrimaryEncoder *string                                  `json:"primaryEncoder"` // local only: cpu, or an HEVC graphics encoder whose test passed (H.264 and AV1 wait for F2)
+			PrimaryEncoder *string                                  `json:"primaryEncoder"` // local only: cpu, or a graphics encoder whose test passed
 		}
 		if !found(w, r) || !readJSON(w, r, &in) {
 			return
@@ -794,7 +789,7 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 				apiError(w, http.StatusBadRequest, "invalid_encoder", "The main encoder is cpu or a graphics encoder that passed its test. Nothing was changed.")
 				return
 			}
-			if name != "cpu" && !slices.Contains(mainEncoderGPU(caps), name) {
+			if name != "cpu" && !slices.Contains(passedGPU(caps), name) {
 				label := encoderLabels[name]
 				if label == "" {
 					label = name
@@ -1024,14 +1019,27 @@ func (v *workerView) offlineCount() int {
 	return n
 }
 
-// LocalPrimaryEncoder is the local worker's primary encoder, as the Workers page shows it: its saved
-// choice while its test passes, else the first graphics encoder that passes, else "cpu". The worker
-// asks it at each job's start.
-func LocalPrimaryEncoder(store *jobs.Store, chk *doctor.Checker) func() string {
-	return func() string {
+// LocalEncoderFor is the graphics encoder the local worker uses for a plan whose video is codec ("" for the
+// processor). It is the main encoder's family in that codec's format, and only if that encoder passed its test
+// here. note is the job-log line when the format's encoder did not pass (the processor is used then); it is
+// empty for the processor by choice. The worker asks at each job's start.
+func LocalEncoderFor(store *jobs.Store, chk *doctor.Checker) func(codec string) (enc, note string) {
+	return func(codec string) (string, string) {
 		cfg, _ := store.WorkerConfigOf(jobs.LocalWorker)
 		v := &workerView{store: store, eng: Engine{Doctor: chk}}
 		t, ok := v.tools()
-		return primaryEncoder(cfg.PrimaryEncoder, capabilities(t, ok))
+		caps := capabilities(t, ok)
+		main := primaryEncoder(cfg.PrimaryEncoder, caps)
+		if main == "cpu" {
+			return "", ""
+		}
+		want := rules.GraphicsEncoder(codec, main)
+		if want == "" {
+			return "", ""
+		}
+		if slices.Contains(passedGPU(caps), want) {
+			return want, ""
+		}
+		return "", "encoder " + want + " didn't pass its test here; using the processor"
 	}
 }
