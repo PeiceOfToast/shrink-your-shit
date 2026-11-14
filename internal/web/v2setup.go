@@ -14,8 +14,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/discover"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 )
+
+// ServerFinder lists the servers on this network that announce themselves. main supplies discover.Finder.
+type ServerFinder interface {
+	Servers() []discover.Found
+}
 
 // WorkerJoiner is how this install joins a server as its worker. main supplies remote.Joiner. web does not import
 // remote: remote's tests import web, so that import would be a cycle. Failures carry a JoinCode (see joinCode).
@@ -339,6 +345,17 @@ func v2Setup(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng Engin
 			return
 		}
 		writeJSON(w, sw.view(role))
+	})
+	// The servers on this network that announce themselves, so a worker's join page can offer them. Empty, not an
+	// error, when none answer or multicast is unavailable.
+	api.HandleFunc("GET /api/v2/setup/servers", func(w http.ResponseWriter, r *http.Request) {
+		servers := []discover.Found{}
+		if eng.Finder != nil {
+			if found := eng.Finder.Servers(); found != nil {
+				servers = found
+			}
+		}
+		writeJSON(w, map[string]any{"servers": servers})
 	})
 	api.HandleFunc("POST /api/v2/setup/role", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {

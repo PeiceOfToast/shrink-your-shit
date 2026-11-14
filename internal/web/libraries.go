@@ -30,6 +30,7 @@ type Engine struct {
 	SetScanEvery func(time.Duration)  // change how often a pass starts, now (Settings' scanEvery)
 	RequeueJob   func(id int64)       // stop a running job and put it back in the queue (its library is being removed)
 	RoleChanged  func(role string)    // the install's role was saved (called after each change; main starts or stops its worker loop)
+	Finder       ServerFinder         // the servers on this network that announce themselves (E4: GET /api/v2/setup/servers); nil finds none
 	PauseNow     func()               // stop the running jobs and put them back in the queue (Pause all)
 	Scanning     func() map[int64]int // libraries being scanned now, with the videos found so far (slice A)
 	FirstFiles   *preview.FirstLister // the first 5 videos of a folder (slice A)

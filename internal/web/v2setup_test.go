@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/discover"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/remote"
 )
@@ -305,5 +306,50 @@ func TestSetupAllowedTellsTheAppTheRoleChanged(t *testing.T) {
 	defer mu.Unlock()
 	if len(roles) != 1 || roles[0] != "worker" {
 		t.Errorf("role changes told to the app: %v, want [worker]", roles)
+	}
+}
+
+// fakeFinder answers the server list a browse would find.
+type fakeFinder []discover.Found
+
+func (f fakeFinder) Servers() []discover.Found { return f }
+
+// The servers route answers the browse's list. It sits on the same mux as the other setup routes, so it has their sign-in.
+func TestSetupServersListsWhatAnswered(t *testing.T) {
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	a, _, _ := OpenAccess(t.TempDir(), false)
+	found := fakeFinder{{Name: "Office", Address: "192.168.1.20", Port: 8484, Version: "1.4.0"}}
+	srv := httptest.NewServer(Handler(st, a, Engine{DataDir: t.TempDir(), Version: "1.2.3", Port: 8484, Finder: found}))
+	t.Cleanup(srv.Close)
+
+	c := jar(t)
+	code, body, _ := do(t, c, srv, call{method: "GET", path: "/api/v2/setup/servers"})
+	if code != http.StatusOK {
+		t.Fatalf("GET servers: %d %s", code, body)
+	}
+	want := `{"servers":[{"name":"Office","address":"192.168.1.20","port":8484,"version":"1.4.0"}]}`
+	if strings.TrimSpace(body) != want {
+		t.Errorf("body %s, want %s", strings.TrimSpace(body), want)
+	}
+}
+
+func TestSetupServersIsEmptyWhenNothingAnswers(t *testing.T) {
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	a, _, _ := OpenAccess(t.TempDir(), false)
+	srv := httptest.NewServer(Handler(st, a, Engine{DataDir: t.TempDir(), Version: "1.2.3", Port: 8484, Finder: fakeFinder(nil)}))
+	t.Cleanup(srv.Close)
+
+	c := jar(t)
+	code, body, _ := do(t, c, srv, call{method: "GET", path: "/api/v2/setup/servers"})
+	if code != http.StatusOK || strings.TrimSpace(body) != `{"servers":[]}` {
+		t.Fatalf("GET servers: %d %s, want an empty list", code, body)
 	}
 }
