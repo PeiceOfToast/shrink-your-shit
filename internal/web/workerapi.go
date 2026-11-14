@@ -245,7 +245,7 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine, joins
 		if _, ok := gate(w, r, true); !ok {
 			return
 		}
-		joins.ask(w, r, t, now)
+		joins.ask(w, r, t, limiter, now)
 	})
 	mux.HandleFunc("GET /api/worker/v1/join/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := gate(w, r, true); !ok {

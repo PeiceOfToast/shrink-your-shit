@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log"
 	"net"
 	"net/http"
 	"net/netip"
@@ -93,6 +94,21 @@ func (b *joinBook) prune(now time.Time) {
 	}
 }
 
+// dropOldestExpired removes the oldest unanswered request whose window has passed, to make room when the cap is
+// reached. Expired requests otherwise stay until dismissed, so 50 stale asks would lock out every new join.
+// Call with mu held.
+func (b *joinBook) dropOldestExpired(now time.Time) {
+	var oldest *joinReq
+	for _, r := range b.reqs {
+		if r.decision == "" && !now.Before(r.expiresAt) && (oldest == nil || r.askedAt.Before(oldest.askedAt)) {
+			oldest = r
+		}
+	}
+	if oldest != nil {
+		delete(b.reqs, oldest.id)
+	}
+}
+
 // pendingLocked counts requests not yet answered or dismissed. Call with mu held.
 func (b *joinBook) pendingLocked() int {
 	n := 0
@@ -108,6 +124,9 @@ func (b *joinBook) pendingLocked() int {
 func (b *joinBook) add(r *joinReq, now time.Time) (id, secret string, err error) {
 	b.mu.Lock()
 	b.prune(now)
+	if b.pendingLocked() >= maxPendingJoins {
+		b.dropOldestExpired(now)
+	}
 	if b.pendingLocked() >= maxPendingJoins {
 		b.mu.Unlock()
 		return "", "", errJoinFull
@@ -207,7 +226,9 @@ func (b *joinBook) allow(id string, now time.Time) (jobs.RemoteWorker, error) {
 	r.decision, r.workerID, r.workerName, r.token = "allowed", wk.ID, wk.Name, token
 	for _, oid := range old {
 		if err := b.store.RemoveWorker(oid); err != nil && !errors.Is(err, jobs.ErrNotFound) {
-			return wk, err
+			// The new worker is paired and the request is answered, so this is not a failed allow. The old
+			// worker stays in the list until someone removes it.
+			log.Printf("join: %s is paired, but removing the old worker %s failed: %v", wk.ID, oid, err)
 		}
 	}
 	return wk, nil
@@ -264,12 +285,26 @@ func (in joinBody) problem() string {
 }
 
 // fromLocal reports whether a join comes from the server's own network. A TLS peer from outside passes the
-// transport check, so it gets this answer.
-func fromLocal(w http.ResponseWriter, client netip.Addr) bool {
-	if private(client) {
+// transport check, so it gets this answer. A proxy on this host forwards the internet's address in these
+// headers, and a peer that is not a trusted proxy can send them too, so such a request is refused, not read as
+// local.
+func fromLocal(w http.ResponseWriter, r *http.Request, t Transport, client netip.Addr) bool {
+	forwarded := r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-IP") != "" || r.Header.Get("Forwarded") != ""
+	if private(client) && !(forwarded && !trustedPeer(t, r)) {
 		return true
 	}
 	apiError(w, http.StatusForbidden, "not_local", "Join requests come from the server's own network. Pair with a code from the Workers page instead. Nothing was changed.")
+	return false
+}
+
+// trustedPeer says whether the direct peer is one of the server's trusted proxies.
+func trustedPeer(t Transport, r *http.Request) bool {
+	peer, _ := peerAddr(r)
+	for _, p := range t.TrustedProxies {
+		if p.Contains(peer) {
+			return true
+		}
+	}
 	return false
 }
 
@@ -280,9 +315,14 @@ func tooManyTries(w http.ResponseWriter, until time.Time) {
 }
 
 // ask handles POST /api/worker/v1/join. The gate has already checked the transport and the worker's API level.
-func (b *joinBook) ask(w http.ResponseWriter, r *http.Request, t Transport, now func() time.Time) {
+func (b *joinBook) ask(w http.ResponseWriter, r *http.Request, t Transport, limiter *pairLimiter, now func() time.Time) {
 	client := t.Client(r)
-	if !fromLocal(w, client) {
+	if !fromLocal(w, r, t, client) {
+		return
+	}
+	// An address locked by wrong codes or secrets gets no new request either. Asking itself does not count.
+	if locked, until := limiter.locked(client, now()); locked {
+		tooManyTries(w, until)
 		return
 	}
 	var in joinBody
@@ -316,7 +356,7 @@ func (b *joinBook) ask(w http.ResponseWriter, r *http.Request, t Transport, now 
 // the same limiter as pairing codes.
 func (b *joinBook) poll(w http.ResponseWriter, r *http.Request, t Transport, limiter *pairLimiter, now func() time.Time) {
 	client := t.Client(r)
-	if !fromLocal(w, client) {
+	if !fromLocal(w, r, t, client) {
 		return
 	}
 	if locked, until := limiter.locked(client, now()); locked {
@@ -351,12 +391,13 @@ func (v *workerView) joinViews(now time.Time) []map[string]any {
 		if !now.Before(r.expiresAt) {
 			state = "expired"
 		}
+		addr := r.address.WithZone("") // a link-local zone (fe80::1%eth0) would make a URL browsers can't open
 		var hardware any
 		if r.hardware != nil {
 			hardware = *r.hardware
 		}
-		out = append(out, map[string]any{"id": r.id, "name": r.name, "address": r.address.String(), "os": r.os,
-			"hardware": hardware, "url": "http://" + net.JoinHostPort(r.address.String(), joinPort),
+		out = append(out, map[string]any{"id": r.id, "name": r.name, "address": addr.String(), "os": r.os,
+			"hardware": hardware, "url": "http://" + net.JoinHostPort(addr.String(), joinPort),
 			"askedAt": r.askedAt.UTC().Format(time.RFC3339), "expiresAt": r.expiresAt.UTC().Format(time.RFC3339),
 			"state": state, "replacesWorker": names[r.name]})
 	}
