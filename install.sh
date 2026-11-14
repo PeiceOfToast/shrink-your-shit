@@ -323,8 +323,8 @@ docker_mode() {
       *) continue ;;
     esac
     gid=$(stat -c %g "$node" 2>/dev/null) || continue
-    grep -qx "      - \"$gid\"" "$dtmp/groups" && continue # another render node in this group already added it
-    printf '      - "%s"\n' "$gid" >> "$dtmp/groups"
+    # Another render node in the same group adds that group once; its name still goes in the list.
+    if ! grep -qx "      - \"$gid\"" "$dtmp/groups"; then printf '      - "%s"\n' "$gid" >> "$dtmp/groups"; fi
     gpus="${gpus:+$gpus, }$name"
   done
   nvidia=
