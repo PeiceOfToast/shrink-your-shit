@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"syscall"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
@@ -27,6 +28,7 @@ func workerCommand(args []string, out, errOut io.Writer) int {
 	fl.SetOutput(errOut)
 	server := fl.String("server", "", "the server's address, e.g. http://192.168.1.10:8484 (https:// outside your network)")
 	pair := fl.String("pair", "", "the pairing code from the server's Workers page (first run only)")
+	join := fl.Bool("join", false, "ask the server to let this worker join; the person clicks Allow on its Workers page (no code)")
 	name := fl.String("name", "", "this worker's name on the Workers page (default: this computer's name)")
 	data := fl.String("data", filepath.Join(defaultDataDir(), "worker"), "folder for this worker's token (env SYP_WORKER_DATA)")
 	work := fl.String("work", "", "folder for the originals it downloads and the new files it makes (default: <data>/work)")
@@ -39,10 +41,37 @@ func workerCommand(args []string, out, errOut io.Writer) int {
 	if v := os.Getenv("SYP_WORKER_DATA"); v != "" && !flagSet(fl, "data") {
 		*data = v
 	}
+	if *pair != "" && *join {
+		fmt.Fprintln(errOut, "Use --pair or --join, not both.")
+		return 2
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	st, err := remote.Load(*data)
 	switch {
+	case *join:
+		if *server == "" {
+			fmt.Fprintln(errOut, "Joining needs the server's address: --server http://<server>:8484")
+			return 2
+		}
+		if *name == "" {
+			*name, _ = os.Hostname()
+		}
+		c := &remote.Client{Server: *server, Version: version}
+		fmt.Fprintf(out, "Waiting for %s to allow this worker. Open its Workers page and click Allow.\n", *server)
+		if st, err = c.Join(ctx, *name, runtime.GOOS); err != nil {
+			if errors.Is(err, remote.ErrJoinDenied) || errors.Is(err, remote.ErrJoinExpired) {
+				fmt.Fprintln(errOut, err)
+			} else {
+				fmt.Fprintf(errOut, "Joining didn't work: %v\n", err)
+			}
+			return 1
+		}
+		if err := st.Save(*data); err != nil {
+			fmt.Fprintf(errOut, "Allowed, but the token couldn't be saved in %s: %v\n", *data, err)
+			return 1
+		}
+		fmt.Fprintf(out, "Joined %s as %q. It shows on the server's Workers page.\n", st.Server, st.Name)
 	case *pair != "":
 		if *server == "" {
 			fmt.Fprintln(errOut, "Pairing needs the server's address: --server http://<server>:8484")
