@@ -156,3 +156,40 @@ func TestClosedEntriesEndTheReaderWithoutPanicking(t *testing.T) {
 		}
 	}
 }
+
+// Known reads the last browse's list: it never browses, and it does not wait on a browse in progress.
+func TestKnownReadsTheLastBrowseWithoutBrowsing(t *testing.T) {
+	var calls atomic.Int32
+	office := &zeroconf.ServiceEntry{ServiceRecord: zeroconf.ServiceRecord{Instance: "Office"}, Port: 8484,
+		AddrIPv4: []net.IP{net.ParseIP("192.168.1.20")}}
+	f := finder(fakeBrowse(&calls, nil, office))
+	if got := f.Known(); len(got) != 0 || calls.Load() != 0 {
+		t.Fatalf("before any browse: %+v, browses %d", got, calls.Load())
+	}
+	f.Servers()
+	if got := f.Known(); len(got) != 1 || got[0].Name != "Office" || calls.Load() != 1 {
+		t.Errorf("after a browse: %+v, browses %d, want Office and 1 browse", got, calls.Load())
+	}
+}
+
+func TestKnownDoesNotWaitOnABrowseInProgress(t *testing.T) {
+	started := make(chan struct{})
+	slow := func(ctx context.Context, out chan<- *zeroconf.ServiceEntry) error {
+		close(started)
+		defer close(out)
+		<-ctx.Done()
+		return nil
+	}
+	f := finder(slow)
+	done := make(chan struct{})
+	go func() { f.Servers(); close(done) }()
+	<-started
+	answer := make(chan []Found, 1)
+	go func() { answer <- f.Known() }()
+	select {
+	case <-answer:
+	case <-time.After(time.Second):
+		t.Fatal("Known waited on a browse in progress")
+	}
+	<-done
+}

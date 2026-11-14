@@ -95,8 +95,8 @@ export function Enroll({ setup, reload, noMain }: { setup: Setup; reload: () => 
       switch (panel) {
         case "waiting": return ["Waiting for " + name + " to allow this worker.", <><p>On {name}, open Workers and press Allow.</p><p className="muted">{minutes(j!.expiresAt)}</p></>,
           <><a className="btn primary" href={url.replace(/\/$/, "") + "/workers"} target="_blank" rel="noreferrer">Open {name}'s Workers page<span className="sr"> (opens in a new tab)</span></a><button className="btn" type="button" disabled={busy} onClick={back}>Cancel request</button></>];
-        case "allowed": return ["Joined " + name + ". Its jobs run here.", <p className="muted">This page now only shows this worker's status.</p>,
-          <a className="btn primary" href={url}>Open {name}</a>];
+        case "allowed": return ["Joined " + name + ". This computer now converts videos for " + name + ".", <p>See what it&apos;s doing on {name}&apos;s Workers page.</p>, // design 04:36Z
+          <a className="btn primary" href={url.replace(/\/$/, "") + "/workers"}>Open {name}&apos;s Workers page</a>];
         case "denied": return [name + " said no. Nothing was changed.", null, Back];
         case "expired": return ["No answer in 10 minutes.", null, <><button className="btn primary" type="button" disabled={busy} onClick={() => ask(url)}>Ask again</button>{Back}</>];
         case "unreachable": return ["Couldn't reach " + hostOf(url) + (problem?.reason ? ": " + problem.reason : "") + ".", <p>Check that it is on and on the same network.</p>,
@@ -151,14 +151,22 @@ export function Enroll({ setup, reload, noMain }: { setup: Setup; reload: () => 
 
 // A worker's own page, at every address (section 11, fallback 00:43Z: no status endpoint yet).
 export function WorkerHome({ setup }: { setup: Setup }) {
-  const name = setup.join?.serverName ?? "another server", url = setup.join?.serverUrl;
-  return (
+  const name = setup.join?.serverName, url = setup.join?.serverUrl;
+  const Change = <a className="btn" href="/settings/general">Change role</a>;
+  if (!name || !url) return ( // the server isn't known (after a restart, until the API keeps it): design 04:53Z
+    <div className="enroll stack">
+      <h1>This computer is a worker</h1>
+      <p>It converts videos for a server on your network. Open that server&apos;s Workers page to see what it&apos;s doing.</p>
+      <div className="row enroll-btns">{Change}</div>
+    </div>
+  );
+  return ( // design 04:52Z: the same words as the joined page
     <div className="enroll stack">
       <h1>This computer is a worker for {name}</h1>
-      <p className="muted">Everything about this worker is on {name}'s Workers page.</p>
+      <p>This computer now converts videos for {name}.</p>
+      <p>See what it&apos;s doing on {name}&apos;s Workers page.</p>
       <div className="row enroll-btns">
-        {url && <a className="btn primary" href={url}>Open {name}</a>}
-        <a className="btn" href="/settings/general">Change role</a>
+        <a className="btn primary" href={url.replace(/\/$/, "") + "/workers"}>Open {name}&apos;s Workers page</a>{Change}
       </div>
     </div>
   );

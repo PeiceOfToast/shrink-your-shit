@@ -249,7 +249,7 @@ function JoinCards({ joins, workers, on, reload }: { joins: JoinRequest[]; worke
         return <article key={j.id} className="card joinc"><p><Icon id="i-check-c" /> {allowed(j.name)}</p>
           <div className="row jbtn">{wid && <Link className="btn primary" to={"/workers/" + encodeURIComponent(wid)}>Open {j.name}</Link>}<button className="btn" type="button" onClick={() => hide(j.id)}>Done</button></div></article>;
       }
-      if (j.state === "expired") return <article key={j.id} className="card joinc"><p>{j.name}&apos;s request expired. To ask again, run the install command on {j.name} again.</p>{err}
+      if (j.state === "expired") return <article key={j.id} className="card joinc"><p>{j.name}&apos;s request expired. To ask again, press Ask again on {j.name}&apos;s setup page, or run the install command on {j.name} again.</p>{/* design 05:14Z */}{err}
         <div className="row jbtn"><button className="btn" type="button" onClick={() => dismiss(j)}>Dismiss</button></div></article>;
       const asked = mins(t - Date.parse(j.askedAt)), left = Math.ceil((Date.parse(j.expiresAt) - t) / 60000);
       return <article key={j.id} className="card joinc" aria-labelledby={"jr-" + j.id}>

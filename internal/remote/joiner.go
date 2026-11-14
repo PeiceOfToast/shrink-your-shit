@@ -80,9 +80,19 @@ func (j *Joiner) Wait(ctx context.Context, serverURL, id, secret, expiresAt stri
 	return st.WorkerID, st.Name, st.Token, nil
 }
 
-// Save keeps a worker's credential in dir, where the worker command reads it.
-func (j *Joiner) Save(dir, serverURL, id, name, token string) error {
-	return State{Server: serverURL, WorkerID: id, Name: name, Token: token}.Save(dir)
+// Save keeps a worker's credential in dir, where the worker command reads it, with the server's name.
+func (j *Joiner) Save(dir, serverURL, serverName, id, name, token string) error {
+	return State{Server: serverURL, ServerName: serverName, WorkerID: id, Name: name, Token: token}.Save(dir)
+}
+
+// Saved reads the saved credential in dir: the server's address and the name it shows for itself ("" for a state
+// saved before that was kept). ok is false when nothing usable is saved. The token is never returned.
+func (j *Joiner) Saved(dir string) (serverURL, serverName string, ok bool) {
+	st, err := Load(dir)
+	if err != nil || st.Server == "" {
+		return "", "", false
+	}
+	return st.Server, st.ServerName, true
 }
 
 // Forget removes the credential in dir, so the worker command can't start on it.
