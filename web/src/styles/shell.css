@@ -630,6 +630,10 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .joins{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr))}
 .joinc{padding:12px 14px;display:flex;flex-direction:column;gap:6px}.joinc h3{margin:0}.joinc .facts{overflow-wrap:anywhere}
 @media (max-width:640px){.joinc .jbtn>.btn{flex:1 1 0;min-height:44px;justify-content:center}}
+.enroll{max-width:640px;margin:0 auto;width:100%}.enroll h1,.enroll h2{margin:0}
+.enroll-card{align-items:flex-start;padding:14px 16px;min-height:0;cursor:pointer}.enroll-card input{margin-top:3px;accent-color:var(--accent)}
+.enroll-card>span{display:flex;flex-direction:column;gap:2px}.enroll-card.off{cursor:default}.enroll-card.off strong{color:var(--text-2)}
+@media (max-width:640px){.enroll-btns{flex-direction:column;align-items:stretch}.enroll-btns>.btn{justify-content:center;min-height:44px}}
 .addpanel{display:flex;flex-direction:column;gap:8px;max-width:640px}.addpanel textarea{width:100%;resize:none;overflow-wrap:anywhere}
 /* G3 folder picker: a 560 px dialog on desktop, a full-height sheet on phones; the path wraps, rows 44 px */
 .fpick{position:fixed;inset:0;z-index:80;background:rgb(0 0 0/.5);display:flex;align-items:center;justify-content:center;padding:16px}

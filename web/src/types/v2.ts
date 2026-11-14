@@ -260,3 +260,12 @@ export interface StepDefinition {
   deprecated?: boolean;
   readOnly?: boolean; // migration-only types (video.legacy_settings): kept as they are, never edited (workshop #109)
 }
+
+// Enrollment (ONE-COMMAND-SETUP.md section 11; workshop 00:42Z): GET /api/v2/setup, /setup/servers, POST /setup/role
+export type JoinState = "waiting" | "allowed" | "denied" | "expired" | "unreachable" | "not_local";
+export interface Setup {
+  role: "unset" | "server" | "worker";
+  join: null | { serverName: string; serverUrl: string; state: JoinState; expiresAt: Time | null };
+}
+export interface FoundServer { name: string; address: string; url: string; version: string; matchesVersion: boolean }
+export type RoleBody = { role: "server" | "unset" } | { role: "worker"; serverUrl: string; pairCode?: string };
