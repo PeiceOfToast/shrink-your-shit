@@ -268,8 +268,7 @@ function JoinCards({ joins, workers, on, reload }: { joins: JoinRequest[]; worke
 
 function StartStop({ w, onDone }: { w: Worker; onDone: (m: string) => void }) {
   const [asking, setAsking] = useState(false);
-  if (w.status === "offline" && !w.lastHeartbeatAt) return null; // its status already says Waiting to connect
-  if (w.status === "offline" || w.status === "stalled") return <span className="muted sm">Waiting for it to connect</span>; // design: no Start on an offline worker
+  if (w.status === "offline" || w.status === "stalled") return null; // no Start on an offline worker; its status says why (design 07:36Z: never 'waiting' once it has called)
   if (asking) return <StopAsk w={w} onDone={(m) => (setAsking(false), onDone(m))} onCancel={() => setAsking(false)} />;
   if (w.status === "paused") return <button className="btn sm" type="button" onClick={async () => { if (await act(workerAction(w.id, "start"), onDone)) onDone(w.name + " started."); }}><Icon id="i-play" />Start</button>;
   return <button className="btn sm" type="button" onClick={async () => { if (w.currentJobIds.length) return setAsking(true); if (await act(workerAction(w.id, "stop"), onDone)) onDone(w.name + " stopped."); }}><Icon id="i-stop" />Stop</button>;
