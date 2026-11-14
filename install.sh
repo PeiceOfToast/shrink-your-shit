@@ -16,6 +16,7 @@
 #   --version X.Y.Z   install that release instead of the newest
 #   --no-start        install but do not start
 #   --run             run in the foreground at the end (for containers / machines without a service manager)
+#   --docker          run in a Docker container (compose file in /opt/shrink-your-shit) instead of as a service (Linux)
 #
 # Environment: SYP_BASE_URL (where releases are downloaded from; file:///some/dir works for offline
 # or test use), SYP_LIBRARIES, SYP_ADDR.
@@ -30,6 +31,7 @@ ADDR=${SYP_ADDR:-}
 NO_START=
 NETWORK_SHARES=
 RUN_FG=
+DOCKER=        # --docker: run the app in a container instead of as a service
 UPDATED=        # set when an earlier install is found (this run upgrades it)
 NEW_VERSION=
 NS_LINE=        # the network-share line of the final output
@@ -56,7 +58,7 @@ quiet_run() {
 
 usage() {
   cat <<'USAGE'
-Usage: install.sh [--library DIR]... [--addr ADDR] [--version X.Y.Z] [--network-shares|--no-network-shares] [--no-start] [--run]
+Usage: install.sh [--library DIR]... [--addr ADDR] [--version X.Y.Z] [--network-shares|--no-network-shares] [--no-start] [--run] [--docker]
   --library DIR    folder to watch (repeat for several); default: none, add folders on the web page
   --addr ADDR      web address, default 0.0.0.0:8484 (other computers on the network sign in with the access token);
                    127.0.0.1:8484 is this computer only
@@ -64,6 +66,7 @@ Usage: install.sh [--library DIR]... [--addr ADDR] [--version X.Y.Z] [--network-
   --network-shares / --no-network-shares   set up (default) or skip the SMB/NFS share helper
   --no-start       install but do not start
   --run            run in the foreground at the end (containers / no service manager)
+  --docker         run in a Docker container instead of as a service (Linux; needs Docker and the Compose plugin)
 Environment: SYP_BASE_URL (download location; file:///dir works), SYP_LIBRARIES, SYP_ADDR
 USAGE
 }
@@ -75,6 +78,7 @@ while [ $# -gt 0 ]; do
     --version) [ $# -ge 2 ] || die "--version needs a number like 0.1.0"; VERSION=$2; shift 2 ;;
     --no-start) NO_START=1; shift ;;
     --run) RUN_FG=1; shift ;;
+    --docker) DOCKER=1; shift ;;
     --network-shares) NETWORK_SHARES=1; shift ;;
     --no-network-shares) NETWORK_SHARES=0; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -138,53 +142,6 @@ if [ "$OS" = linux ]; then
   fi
 fi
 
-# ---- ffmpeg ----
-ffmpeg_ok() { have ffmpeg && have ffprobe; }
-
-install_ffmpeg() {
-  ffmpeg_ok && return 0
-  if [ "$OS" = darwin ]; then
-    have brew || die "ffmpeg is missing and Homebrew is not installed. Install Homebrew from https://brew.sh, then run this again."
-    quiet_run "installing ffmpeg with Homebrew" brew install ffmpeg
-  elif have apt-get; then
-    quiet_run "updating the package lists" $SUDO apt-get update -qq
-    quiet_run "installing ffmpeg" $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg ca-certificates
-  elif have dnf; then
-    quiet_run "installing ffmpeg" $SUDO dnf install -y ffmpeg || die "dnf could not install ffmpeg. On Fedora/RHEL enable RPM Fusion (https://rpmfusion.org) first, or install ffmpeg yourself, then run this again."
-  elif have pacman; then
-    quiet_run "installing ffmpeg" $SUDO pacman -S --noconfirm --needed ffmpeg
-  elif have apk; then
-    quiet_run "installing ffmpeg" $SUDO apk add --no-cache ffmpeg
-  elif have zypper; then
-    quiet_run "installing ffmpeg" $SUDO zypper --non-interactive install ffmpeg || die "zypper could not install ffmpeg. Enable the Packman repository (https://en.opensuse.org/Additional_package_repositories) or install ffmpeg yourself, then run this again."
-  else
-    die "ffmpeg is missing and no supported package manager was found (apt, dnf, pacman, apk, zypper, brew). Install ffmpeg yourself, then run this again."
-  fi
-  ffmpeg_ok || die "ffmpeg still not found after installing it. Check the messages above."
-}
-
-install_ffmpeg
-ffmpeg -hide_banner -encoders 2>/dev/null | grep -q libx265 \
-  || die "the installed ffmpeg cannot encode HEVC (no libx265). Install a full ffmpeg build and run this again. On Fedora/RHEL that means enabling RPM Fusion (https://rpmfusion.org) and running: sudo dnf swap ffmpeg-free ffmpeg --allowerasing"
-
-# ---- download and verify ----
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
-name=shrink-your-shit_${OS}_${ARCH}.tar.gz
-fetch "$BASE_URL/$name" "$tmp/$name" || die "could not download $BASE_URL/$name. Is there a published release yet? (--version X.Y.Z picks one; SYP_BASE_URL points elsewhere)"
-fetch "$BASE_URL/checksums.txt" "$tmp/checksums.txt" || die "could not download $BASE_URL/checksums.txt, so the download cannot be verified"
-want=$(grep "  $name\$" "$tmp/checksums.txt" | cut -d' ' -f1 || true)
-[ -n "$want" ] || die "checksums.txt has no entry for $name"
-got=$(sha256_of "$tmp/$name")
-[ "$want" = "$got" ] || die "checksum mismatch for $name (expected $want, got $got). Not installing."
-mkdir "$tmp/x"
-tar -xzf "$tmp/$name" -C "$tmp/x" --strip-components=1 --no-same-owner
-[ -f "$tmp/x/shrink-your-shit" ] || die "the download did not contain the program"
-
-NEW_VERSION=$("$tmp/x/shrink-your-shit" -version 2>/dev/null | awk '{print $2}') || true
-PORT_ADDR=${ADDR:-0.0.0.0:8484}
 
 # The address to ask "are you up?" on: the host part of the listen address; "all addresses"
 # (0.0.0.0, ::, nothing) means ask on this computer.
@@ -254,6 +211,7 @@ ready_block() {
   say ""
   if [ -n "$UPDATED" ]; then say "Updated to ${NEW_VERSION:-the new release}. Your settings are kept."; fi
   if [ -n "$NS_LINE" ]; then say "$NS_LINE"; fi
+  if [ -z "${DOCKER_RUN:-}" ] && have docker; then say "Docker is installed here. To run Shrink Your Shit in Docker instead, run this again with --docker."; fi
   case $PORT_ADDR in
     127.*|localhost:*|\[::1\]:*)
       say "Listening on this computer only, so workers can't find it. To let other computers in, run this again with --addr 0.0.0.0:$PORT."
@@ -335,6 +293,169 @@ gpu_access() {
     say "No graphics chip for video found. Converting on the processor: slower, but it works."
   fi
 }
+
+# ======================= Docker (--docker) =======================
+# The app runs from the published image in a container, not as a service. The only file this writes on the computer is
+# the compose file in $DOCKER_DIR. A re-run keeps that file, so its settings and data volume stay as they were.
+DOCKER_DIR=${SYP_DOCKER_DIR:-/opt/shrink-your-shit}   # SYP_DOCKER_DIR is for tests only
+DOCKER_IMAGE=ghcr.io/peiceoftoast/shrink-your-shit:latest
+
+docker_mode() {
+  [ "$OS" = linux ] || die "--docker is for Linux. On macOS, run this again without --docker."
+  have docker || die "--docker needs Docker, and it isn't installed here. Install Docker, or run this again without --docker."
+  $SUDO docker compose version >/dev/null 2>&1 || die "--docker needs the Docker Compose plugin (docker compose). Install it, or run this again without --docker."
+  [ -z "$LIBS" ] || warn "--library and SYP_LIBRARIES are not used with --docker yet. Add the folders to $DOCKER_DIR/docker-compose.yml as volumes."
+  file=$DOCKER_DIR/docker-compose.yml
+  dtmp=$(mktemp -d)
+  trap 'rm -rf "$dtmp"' EXIT
+
+  # Graphics: Intel and AMD through /dev/dri, with each device's group; NVIDIA through the container runtime.
+  : > "$dtmp/groups"
+  gpus=
+  dri=${SYP_DEV:-/dev}/dri
+  for node in "$dri"/renderD*; do
+    [ -e "$node" ] || continue
+    vendor=$(cat "${SYP_SYS:-/sys}/class/drm/$(basename "$node")/device/vendor" 2>/dev/null || true)
+    case $vendor in
+      0x8086) name="Intel Quick Sync" ;;
+      0x1002) name="AMD graphics" ;;
+      *) continue ;;
+    esac
+    gid=$(stat -c %g "$node" 2>/dev/null) || continue
+    printf '      - "%s"\n' "$gid" >> "$dtmp/groups"
+    gpus="${gpus:+$gpus, }$name"
+  done
+  nvidia=
+  if nvidia_card; then
+    model=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n 1 | sed 's/^NVIDIA //') || true
+    if [ -n "$model" ]; then
+      nvidia=1
+      gpus="${gpus:+$gpus, }NVIDIA $model"
+    fi
+  fi
+  if [ -n "$gpus" ]; then passed="$gpus passed through"; else passed="processor only"; fi
+
+  {
+    cat <<YML
+# Written by install.sh --docker. A re-run keeps this file; delete it to have the installer write it again.
+services:
+  shrink-your-shit:
+    image: $DOCKER_IMAGE
+    ports:
+      - "8484:8484"
+    volumes:
+      - syp-config:/config
+    restart: unless-stopped
+YML
+    if [ "$NETWORK_SHARES" != 0 ]; then cat <<YML
+    # Lets the app mount SMB and NFS shares. It gives the container mount rights (close to privileged);
+    # delete these lines if you don't use network shares.
+    cap_add:
+      - SYS_ADMIN
+      - DAC_READ_SEARCH
+    security_opt:
+      - "apparmor:unconfined"
+YML
+    fi
+    if [ -s "$dtmp/groups" ]; then
+      printf '    devices:\n      - /dev/dri:/dev/dri\n    group_add:\n'
+      cat "$dtmp/groups"
+    fi
+    if [ -n "$nvidia" ]; then cat <<YML
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+YML
+    fi
+    printf 'volumes:\n  syp-config:\n'
+  } > "$dtmp/compose.yml"
+
+  if [ -f "$file" ]; then
+    say "Kept $file (the settings from the earlier run)."
+  else
+    $SUDO install -d -m 0755 "$DOCKER_DIR"
+    $SUDO install -m 0644 "$dtmp/compose.yml" "$file"
+    say "Wrote $file ($passed)."
+  fi
+
+  if [ -n "$NO_START" ]; then
+    say "Installed, not started (--no-start). Start it with: docker compose -f $file up -d"
+    exit 0
+  fi
+  say "Starting the container..."
+  quiet_run "starting the container" $SUDO docker compose -f "$file" up -d
+  PORT_ADDR=0.0.0.0:8484
+  PORT=8484
+  if health_check; then :; else
+    rc=$?
+    [ "$rc" = 2 ] || die "the container did not answer on port $PORT. See: docker compose -f $file logs"
+  fi
+  TOKEN_OUT=$($SUDO docker compose -f "$file" exec -T shrink-your-shit shrink-your-shit token 2>/dev/null) || true
+  TOKEN_CMD="sudo docker compose -f $file exec shrink-your-shit shrink-your-shit"   # ready_block adds: token
+  if [ "$NETWORK_SHARES" = 0 ]; then
+    NS_LINE="Network shares: off (--no-network-shares)."
+  else
+    NS_LINE="Network shares: ready (the container can connect SMB and NFS shares itself)."
+  fi
+  DOCKER_RUN=1
+  ready_block
+  exit 0
+}
+
+if [ -n "$DOCKER" ]; then docker_mode; fi
+
+
+# ---- ffmpeg ----
+ffmpeg_ok() { have ffmpeg && have ffprobe; }
+
+install_ffmpeg() {
+  ffmpeg_ok && return 0
+  if [ "$OS" = darwin ]; then
+    have brew || die "ffmpeg is missing and Homebrew is not installed. Install Homebrew from https://brew.sh, then run this again."
+    quiet_run "installing ffmpeg with Homebrew" brew install ffmpeg
+  elif have apt-get; then
+    quiet_run "updating the package lists" $SUDO apt-get update -qq
+    quiet_run "installing ffmpeg" $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg ca-certificates
+  elif have dnf; then
+    quiet_run "installing ffmpeg" $SUDO dnf install -y ffmpeg || die "dnf could not install ffmpeg. On Fedora/RHEL enable RPM Fusion (https://rpmfusion.org) first, or install ffmpeg yourself, then run this again."
+  elif have pacman; then
+    quiet_run "installing ffmpeg" $SUDO pacman -S --noconfirm --needed ffmpeg
+  elif have apk; then
+    quiet_run "installing ffmpeg" $SUDO apk add --no-cache ffmpeg
+  elif have zypper; then
+    quiet_run "installing ffmpeg" $SUDO zypper --non-interactive install ffmpeg || die "zypper could not install ffmpeg. Enable the Packman repository (https://en.opensuse.org/Additional_package_repositories) or install ffmpeg yourself, then run this again."
+  else
+    die "ffmpeg is missing and no supported package manager was found (apt, dnf, pacman, apk, zypper, brew). Install ffmpeg yourself, then run this again."
+  fi
+  ffmpeg_ok || die "ffmpeg still not found after installing it. Check the messages above."
+}
+
+install_ffmpeg
+ffmpeg -hide_banner -encoders 2>/dev/null | grep -q libx265 \
+  || die "the installed ffmpeg cannot encode HEVC (no libx265). Install a full ffmpeg build and run this again. On Fedora/RHEL that means enabling RPM Fusion (https://rpmfusion.org) and running: sudo dnf swap ffmpeg-free ffmpeg --allowerasing"
+
+# ---- download and verify ----
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+name=shrink-your-shit_${OS}_${ARCH}.tar.gz
+fetch "$BASE_URL/$name" "$tmp/$name" || die "could not download $BASE_URL/$name. Is there a published release yet? (--version X.Y.Z picks one; SYP_BASE_URL points elsewhere)"
+fetch "$BASE_URL/checksums.txt" "$tmp/checksums.txt" || die "could not download $BASE_URL/checksums.txt, so the download cannot be verified"
+want=$(grep "  $name\$" "$tmp/checksums.txt" | cut -d' ' -f1 || true)
+[ -n "$want" ] || die "checksums.txt has no entry for $name"
+got=$(sha256_of "$tmp/$name")
+[ "$want" = "$got" ] || die "checksum mismatch for $name (expected $want, got $got). Not installing."
+mkdir "$tmp/x"
+tar -xzf "$tmp/$name" -C "$tmp/x" --strip-components=1 --no-same-owner
+[ -f "$tmp/x/shrink-your-shit" ] || die "the download did not contain the program"
+
+NEW_VERSION=$("$tmp/x/shrink-your-shit" -version 2>/dev/null | awk '{print $2}') || true
+PORT_ADDR=${ADDR:-0.0.0.0:8484}
 
 # ======================= Linux =======================
 if [ "$OS" = linux ]; then
