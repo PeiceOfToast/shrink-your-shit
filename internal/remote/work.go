@@ -79,6 +79,9 @@ type Lease struct {
 		Bytes       int64
 		DurationSec float64
 	}
+	// Primary is the server's main encoder for this worker: cpu, or a graphics encoder its report passed. nil from
+	// a server that doesn't send one: this worker converts on the processor.
+	Primary *string `json:"primaryEncoder"`
 }
 
 // Lease asks for one job; nil when there is none.
@@ -367,30 +370,70 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 	report := func(body map[string]any) error {
 		return c.call(cctx, "leases/"+l.ID+"/progress", body, nil)
 	}
-	if e := report(map[string]any{"stage": "converting", "outTimeUs": 0}); leaseGone(e) {
+	args, enc, note := encoderArgs(snap.Plan, l.Primary, rules.PassedGraphics(c.Caps), src, out)
+	if note != "" {
+		c.note(ctx, l, note)
+	}
+	if e := report(map[string]any{"stage": "converting", "outTimeUs": 0, "encoder": enc}); leaseGone(e) {
 		return "", e
 	}
 	var last time.Time
 	var gone error
-	stderr, err := media.Transcode(cctx, cv.Exec, cv.FFmpeg, snap.Plan.FFmpegArgs(src, out), l.Job.DurationSec, func(p media.Progress) {
-		if time.Since(last) < ProgressEvery {
-			return
+	run := func(args []string) (string, error) {
+		return media.Transcode(cctx, cv.Exec, cv.FFmpeg, args, l.Job.DurationSec, func(p media.Progress) {
+			if time.Since(last) < ProgressEvery {
+				return
+			}
+			last = time.Now()
+			body := map[string]any{"stage": "converting", "outTimeUs": p.OutTimeUS, "encoder": enc}
+			if l.Job.DurationSec > 0 {
+				body["percent"] = p.Percent // a length we don't know has no percent
+			}
+			if e := report(body); leaseGone(e) {
+				gone = e
+				cancel() // the job went back to the queue: stop converting it
+			}
+		})
+	}
+	stderr, err := run(args)
+	if err != nil && enc != "" && cctx.Err() == nil {
+		// a graphics encoder that fails converts again on the processor, as a local worker does
+		reason := err.Error()
+		if s := strings.TrimSpace(stderr); s != "" {
+			reason = strings.SplitN(s, "\n", 2)[0]
 		}
-		last = time.Now()
-		body := map[string]any{"stage": "converting", "outTimeUs": p.OutTimeUS}
-		if l.Job.DurationSec > 0 {
-			body["percent"] = p.Percent // a length we don't know has no percent
+		c.note(ctx, l, fmt.Sprintf("%s failed (%s); converted on the processor", enc, reason))
+		if e := os.Truncate(out, 0); e != nil { // the same staged file: the server checks its identity
+			return stderr, fmt.Errorf("clearing the partial output: %w", e)
 		}
-		if e := report(body); leaseGone(e) {
-			gone = e
-			cancel() // the job went back to the queue: stop converting it
-		}
-	})
+		enc = ""
+		report(map[string]any{"stage": "converting", "outTimeUs": 0, "encoder": enc}) // the live label names the processor now
+		stderr, err = run(snap.Plan.FFmpegArgs(src, out))
+	}
 	if gone != nil {
 		return stderr, gone
 	}
 	report(map[string]any{"stage": "checking"}) // the encode ended (also when it failed): no longer judged
 	return stderr, err
+}
+
+// encoderArgs is the ffmpeg arguments for a plan on this worker: its main encoder's for the plan's format when
+// this worker's own test passed it (rules.EncoderFor, as the local worker picks), else the processor. enc is the
+// graphics encoder used ("" for the processor); note is for the job log when the processor is used because of
+// one ("" for the processor by choice, and for a server that sends no main encoder).
+func encoderArgs(plan rules.Plan, main *string, passed []string, src, out string) (args []string, enc, note string) {
+	if main == nil || plan.Video.Copy {
+		return plan.FFmpegArgs(src, out), "", ""
+	}
+	var want string
+	want, note = rules.EncoderFor(plan.Video.Codec, *main, passed)
+	if want == "" {
+		return plan.FFmpegArgs(src, out), "", note
+	}
+	if args, ok := plan.FFmpegArgsWith(src, out, want); ok {
+		return args, want, ""
+	}
+	return plan.FFmpegArgs(src, out), "", fmt.Sprintf("encoder %s can't do this file; using the processor", want)
 }
 
 // ProgressEvery is how often a converting worker reports where its encode is.

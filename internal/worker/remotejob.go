@@ -46,6 +46,7 @@ type RemoteJob struct {
 	Lease   string
 	mu      sync.Mutex
 	plan    *RemotePlan
+	job     int64 // the job the plan is for: its live row shows the encoder the remote worker uses
 	planned chan struct{}
 	result  chan RemoteResult
 	ended   chan struct{}
@@ -64,6 +65,17 @@ func (r *RemoteJob) Converting(pos float64, now time.Time) {
 	defer r.mu.Unlock()
 	if !r.judging || pos > r.pos {
 		r.judging, r.pos, r.movedAt = true, pos, now
+	}
+}
+
+// SetEncoder puts the encoder the remote worker converts with ("" for the processor) on the job's live row, in
+// the words a local job uses. Nothing changes before the plan is known.
+func (r *RemoteJob) SetEncoder(enc string) {
+	r.mu.Lock()
+	plan, id := r.plan, r.job
+	r.mu.Unlock()
+	if plan != nil {
+		setLiveEncoder(id, encoderWordsUsed(plan.Snapshot.Plan, enc))
 	}
 }
 
@@ -125,6 +137,7 @@ var RemoteCheckEvery = 5 * time.Second
 func (r *RemoteJob) convert(ctx context.Context, w *Worker, job jobs.Job, snap rules.Snapshot, srcPath, tmp string) (string, error) {
 	r.mu.Lock()
 	r.plan = &RemotePlan{Snapshot: snap, Source: srcPath, Stage: tmp}
+	r.job = job.ID
 	r.mu.Unlock()
 	close(r.planned)
 	t := time.NewTicker(RemoteCheckEvery)

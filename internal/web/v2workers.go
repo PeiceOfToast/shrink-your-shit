@@ -230,8 +230,10 @@ func (v *workerView) remoteWith(rw jobs.RemoteWorker, working []jobs.Working) (m
 	case len(ids) > 0:
 		status = "busy"
 	}
-	var capList []map[string]any
-	json.Unmarshal([]byte(rw.Capabilities), &capList) // "{}" or junk: no list, so the default
+	main, err := remoteMainEncoder(v.store, rw)
+	if err != nil {
+		return nil, err
+	}
 	var caps any = []any{}
 	if c := json.RawMessage(rw.Capabilities); json.Valid(c) && string(c) != "{}" {
 		caps = c
@@ -265,21 +267,45 @@ func (v *workerView) remoteWith(rw jobs.RemoteWorker, working []jobs.Working) (m
 		"live":        liveLoad(load),
 		"gpus":        []any{}, "ffmpeg": nil, "capabilities": caps, "currentJobIds": ids,
 		"tags": []string{}, "pool": nil, "schedule": nil, "pathMappings": mappings,
-		"primaryEncoder": primaryEncoder(nil, capList),
+		"primaryEncoder": main,
 	}, nil
 }
 
-// passedGPU is the graphics encoders whose capability test passed on a worker, in the doctor's order.
-func passedGPU(caps []map[string]any) []string {
-	out := []string{}
-	for _, c := range caps {
-		key, _ := c["key"].(string)
-		if c["kind"] == "encoder" && c["slot"] == "gpu" && c["test"] == "passed" {
-			out = append(out, strings.TrimPrefix(key, "encoder:"))
-		}
-	}
-	return out
+// remoteCaps is the capability list a remote worker reported ("{}" or junk: none).
+func remoteCaps(rw jobs.RemoteWorker) []map[string]any {
+	var capList []map[string]any
+	json.Unmarshal([]byte(rw.Capabilities), &capList)
+	return capList
 }
+
+// remoteMainEncoder is the main encoder a remote worker converts with: its saved choice while its own report
+// still passes it, else the default (primaryEncoder), as the card shows.
+func remoteMainEncoder(store *jobs.Store, rw jobs.RemoteWorker) (string, error) {
+	cfg, err := store.WorkerConfigOf(rw.ID)
+	if err != nil {
+		return "", err
+	}
+	return primaryEncoder(cfg.PrimaryEncoder, remoteCaps(rw)), nil
+}
+
+// mainEncoderRefusal says why name can't be a worker's main encoder with caps: an HTTP status, code and words;
+// status 0 when it can.
+func mainEncoderRefusal(name string, caps []map[string]any) (status int, code, msg string) {
+	if name != "cpu" && !graphicsEncoder(name) {
+		return http.StatusBadRequest, "invalid_encoder", "The main encoder is cpu or a graphics encoder that passed its test. Nothing was changed."
+	}
+	if name != "cpu" && !slices.Contains(passedGPU(caps), name) {
+		label := encoderLabels[name]
+		if label == "" {
+			label = name
+		}
+		return http.StatusConflict, "encoder_not_working", label + " isn't working on this worker, so it can't be the main encoder."
+	}
+	return 0, "", ""
+}
+
+// passedGPU is the graphics encoders whose capability test passed on a worker, in the doctor's order.
+func passedGPU(caps []map[string]any) []string { return rules.PassedGraphics(caps) }
 
 // primaryEncoder is the main encoder a worker encodes with: the saved choice while its test still passes
 // (cpu always does), else the first HEVC graphics encoder that passes, else the first graphics encoder of any
@@ -712,13 +738,26 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 			return
 		}
 		if rw, remote := v.remoteByID(r.PathValue("id")); remote {
-			if in.PathMappings == nil {
-				apiError(w, http.StatusBadRequest, "not_available", "For a worker on another computer, only its shared folders (pathMappings) can be set here. Nothing was changed.")
+			if in.PathMappings == nil && in.PrimaryEncoder == nil {
+				apiError(w, http.StatusBadRequest, "not_available", "For a worker on another computer, only its shared folders (pathMappings) and its main encoder (primaryEncoder) can be set here. Nothing was changed.")
 				return
+			}
+			var main *string // checked against this worker's own report; saved once everything checks
+			if in.PrimaryEncoder != nil {
+				name := strings.TrimSpace(*in.PrimaryEncoder)
+				if status, code, msg := mainEncoderRefusal(name, remoteCaps(rw)); status != 0 {
+					apiError(w, status, code, msg)
+					return
+				}
+				main = &name
+			}
+			mappings := []struct{ Server, Worker, Mode string }{}
+			if in.PathMappings != nil {
+				mappings = *in.PathMappings
 			}
 			list := []jobs.PathMapping{}
 			seen := map[string]bool{}
-			for _, m := range *in.PathMappings {
+			for _, m := range mappings {
 				sv := filepath.Clean(strings.TrimSpace(m.Server))
 				wp := strings.TrimSpace(m.Worker)
 				if !filepath.IsAbs(sv) || wp == "" || (m.Mode != "read" && m.Mode != "read_write") || seen[sv] {
@@ -728,9 +767,23 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 				seen[sv] = true
 				list = append(list, jobs.PathMapping{Server: sv, Worker: pathmap.CleanWorker(wp), Mode: m.Mode})
 			}
-			if err := v.store.SetPathMappings(rw.ID, list); err != nil {
-				serverError(w, err)
-				return
+			if in.PathMappings != nil {
+				if err := v.store.SetPathMappings(rw.ID, list); err != nil {
+					serverError(w, err)
+					return
+				}
+			}
+			if main != nil {
+				cfg, err := v.store.WorkerConfigOf(rw.ID)
+				if err != nil {
+					serverError(w, err)
+					return
+				}
+				cfg.PrimaryEncoder = main
+				if err := v.store.SetWorkerConfig(cfg); err != nil {
+					serverError(w, err)
+					return
+				}
 			}
 			one, err := v.remote(rw)
 			if err != nil {
@@ -810,17 +863,8 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 		if in.PrimaryEncoder != nil {
 			name := strings.TrimSpace(*in.PrimaryEncoder)
 			t, ok := v.tools()
-			caps := capabilities(t, ok)
-			if name != "cpu" && !graphicsEncoder(name) {
-				apiError(w, http.StatusBadRequest, "invalid_encoder", "The main encoder is cpu or a graphics encoder that passed its test. Nothing was changed.")
-				return
-			}
-			if name != "cpu" && !slices.Contains(passedGPU(caps), name) {
-				label := encoderLabels[name]
-				if label == "" {
-					label = name
-				}
-				apiError(w, http.StatusConflict, "encoder_not_working", label+" isn't working on this worker, so it can't be the main encoder.")
+			if status, code, msg := mainEncoderRefusal(name, capabilities(t, ok)); status != 0 {
+				apiError(w, status, code, msg)
 				return
 			}
 			cfg.PrimaryEncoder = &name
@@ -1055,17 +1099,6 @@ func LocalEncoderFor(store *jobs.Store, chk *doctor.Checker) func(codec string) 
 		v := &workerView{store: store, eng: Engine{Doctor: chk}}
 		t, ok := v.tools()
 		caps := capabilities(t, ok)
-		main := primaryEncoder(cfg.PrimaryEncoder, caps)
-		if main == "cpu" {
-			return "", ""
-		}
-		want := rules.GraphicsEncoder(codec, main)
-		if want == "" {
-			return "", ""
-		}
-		if slices.Contains(passedGPU(caps), want) {
-			return want, ""
-		}
-		return "", "encoder " + want + " didn't pass its test here; using the processor"
+		return rules.EncoderFor(codec, primaryEncoder(cfg.PrimaryEncoder, caps), passedGPU(caps))
 	}
 }
