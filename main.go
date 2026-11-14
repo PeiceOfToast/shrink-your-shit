@@ -294,6 +294,9 @@ func main() {
 	if store.Paused() {
 		log.Printf("converting is paused: turn the Workers switch on (Dashboard or Workers)")
 	}
+	// The saved role goes first, so a joined install's local pool is held before it can claim a job. A join saved
+	// before this start keeps working without a restart.
+	joined.SetRole(web.SavedRole(store))
 	workerDone := make(chan struct{})
 	if converts {
 		go func() { pool.Run(ctx); close(workerDone) }()
@@ -341,9 +344,8 @@ func main() {
 	} else {
 		log.Printf("shrink-your-shit %s: %d librar%s; web UI at http://%s", version, len(all), map[bool]string{true: "y", false: "ies"}[len(all) == 1], *addr)
 	}
-	go web.RemountShares(store)          // saved shares come back after a restart (app mode only)
-	go web.WatchShares(store)            // a library whose share stops answering pauses until it does (app mode only)
-	joined.SetRole(web.SavedRole(store)) // a join saved before this start keeps working without a restart
+	go web.RemountShares(store) // saved shares come back after a restart (app mode only)
+	go web.WatchShares(store)   // a library whose share stops answering pauses until it does (app mode only)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		stop()
 		<-workerDone
