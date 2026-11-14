@@ -206,3 +206,58 @@ func TestRemoteEncodeOfUnknownLengthKeepsItsLease(t *testing.T) {
 		t.Errorf("%s %q, %d tries", j.Status, j.Error, j.Attempts)
 	}
 }
+
+// heldEncode is an ffmpeg that starts its encode and runs until it is stopped; it says when it starts and when it stops.
+type heldEncode struct {
+	media.OSExec
+	started, stopped chan struct{}
+}
+
+func (x heldEncode) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
+	if name == "ffmpeg" && slices.Contains(args, "libx265") {
+		select {
+		case x.started <- struct{}{}:
+		default:
+		}
+		<-ctx.Done()
+		select {
+		case x.stopped <- struct{}{}:
+		default:
+		}
+		return "", ctx.Err()
+	}
+	return x.OSExec.Stream(ctx, onLine, name, args...)
+}
+
+// The server gives a job's lease back while the worker encodes it. The renewal answers lease_gone, and the worker
+// stops that encode at once instead of running it to the end for a job someone else now has.
+func TestLeaseGivenBackStopsTheEncodeWithoutAReport(t *testing.T) {
+	needFFmpeg(t)
+	oldPoll, oldEvery, oldRenew := PlanPoll, ProgressEvery, RenewEvery
+	PlanPoll, ProgressEvery, RenewEvery = 50*time.Millisecond, 20*time.Millisecond, 50*time.Millisecond
+	defer func() { PlanPoll, ProgressEvery, RenewEvery = oldPoll, oldEvery, oldRenew }()
+	srv, st, lib := stallServer(t, time.Minute)
+	id := remoteJob(t, st, lib)
+	c := pairClient(t, srv, st)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	x := heldEncode{started: make(chan struct{}, 1), stopped: make(chan struct{}, 1)}
+	go c.Work(ctx, Converter{Exec: x, FFmpeg: "ffmpeg", FFprobe: "ffprobe", Work: t.TempDir(),
+		FreeSpace: func(string) (uint64, error) { return 1 << 40, nil }})
+	select {
+	case <-x.started:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the encode never started")
+	}
+	if err := st.Release(id); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-x.stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the encode went on after its lease was given back")
+	}
+	if j, _ := st.Get(id); j.Status == jobs.Done {
+		t.Errorf("a job whose lease was given back was reported done")
+	}
+}
