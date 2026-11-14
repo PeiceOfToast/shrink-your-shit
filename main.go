@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/discover"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/doctor"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
@@ -226,7 +227,8 @@ func main() {
 	converts := tools.Converts()
 	// E3b2: a joined install runs its worker loop from here (joinedworker.go).
 	joined := newJoinedWorker(filepath.Join(*data, "worker"), tools.FFmpeg, tools.FFprobe)
-	if tools.FFmpeg != "" { // the video formats Standard can offer (S6): the encoders this ffmpeg has
+	announce := &announcer{on: exposedToNetwork(*addr), port: portOf(*addr), version: version} // E4: a server is findable on the network
+	if tools.FFmpeg != "" {                                                                    // the video formats Standard can offer (S6): the encoders this ffmpeg has
 		rules.SetAvailableFormats(media.Encoders(ctx, x, tools.FFmpeg))
 	}
 	chk.ToolsNow() // the hardware check starts in the background, after the converter's: Workers has it soon after
@@ -298,6 +300,7 @@ func main() {
 	// The saved role goes first, so a joined install's local pool is held before it can claim a job. A join saved
 	// before this start keeps working without a restart.
 	joined.SetRole(web.SavedRole(store))
+	announce.SetRole(announceRole(store))
 	workerDone := make(chan struct{})
 	if converts {
 		go func() { pool.Run(ctx); close(workerDone) }()
@@ -324,9 +327,9 @@ func main() {
 		},
 		ScanNow: sc.ScanNow, NextScan: sc.NextScan, ScanEvery: *every, Settle: *settle, SetScanEvery: sc.SetEvery, Scanning: sc.Scanning, RequeueJob: pool.RequeueJob, PauseNow: pool.PauseNow, StopFile: pool.StopFile,
 		Doctor: chk, DataDir: *data, Version: version, Logs: logs, Port: portOf(*addr), Joiner: &remote.Joiner{Version: version},
-		RoleChanged: joined.SetRole,
-		Preview:     &preview.Previewer{Store: store, Exec: media.OSExec{}, FFprobe: ffprobePath},
-		FirstFiles:  &preview.FirstLister{Exec: media.OSExec{}, FFprobe: ffprobePath}})}
+		RoleChanged: func(role string) { joined.SetRole(role); announce.SetRole(role) }, Finder: discover.NewFinder(),
+		Preview:    &preview.Previewer{Store: store, Exec: media.OSExec{}, FFprobe: ffprobePath},
+		FirstFiles: &preview.FirstLister{Exec: media.OSExec{}, FFprobe: ffprobePath}})}
 	go func() {
 		<-ctx.Done()
 		srv.Shutdown(context.Background())

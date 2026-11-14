@@ -6,16 +6,34 @@ import (
 	"context"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"sync"
 	"time"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/discover"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 )
+
+// serverItem is one server the setup page can offer: its name, address and web address, its version, and whether
+// that version is this install's own.
+type serverItem struct {
+	Name           string `json:"name"`
+	Address        string `json:"address"`
+	URL            string `json:"url"`
+	Version        string `json:"version"`
+	MatchesVersion bool   `json:"matchesVersion"`
+}
+
+// ServerFinder lists the servers on this network that announce themselves. main supplies discover.Finder.
+type ServerFinder interface {
+	Servers() []discover.Found
+}
 
 // WorkerJoiner is how this install joins a server as its worker. main supplies remote.Joiner. web does not import
 // remote: remote's tests import web, so that import would be a cycle. Failures carry a JoinCode (see joinCode).
@@ -339,6 +357,23 @@ func v2Setup(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng Engin
 			return
 		}
 		writeJSON(w, sw.view(role))
+	})
+	// The servers on this network that announce themselves, so a worker's join page can offer them. Empty, not an
+	// error, when none answer or multicast is unavailable.
+	api.HandleFunc("GET /api/v2/setup/servers", func(w http.ResponseWriter, r *http.Request) {
+		items := []serverItem{}
+		if eng.Finder != nil {
+			for _, f := range eng.Finder.Servers() {
+				items = append(items, serverItem{
+					Name:           f.Name,
+					Address:        f.Address,
+					URL:            "http://" + net.JoinHostPort(f.Address, strconv.Itoa(f.Port)),
+					Version:        f.Version,
+					MatchesVersion: f.Version == eng.Version,
+				})
+			}
+		}
+		writeJSON(w, map[string]any{"items": items})
 	})
 	api.HandleFunc("POST /api/v2/setup/role", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
