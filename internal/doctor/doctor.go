@@ -62,6 +62,21 @@ type Tools struct {
 // softwareEncoders are the formats' software encoders, tested like the hardware ones.
 var softwareEncoders = []string{"libx265", "libx264", "libsvtav1", "libvpx-vp9"}
 
+// hardwareEncoders are the graphics encoders tested, in this order: per family HEVC, then H.264, then AV1
+// (HEVC first, so a family that has it keeps it as the default primary encoder).
+var hardwareEncoders = []string{
+	"hevc_nvenc", "h264_nvenc", "av1_nvenc",
+	"hevc_qsv", "h264_qsv", "av1_qsv",
+	"hevc_vaapi", "h264_vaapi", "av1_vaapi",
+	"hevc_amf", "h264_amf", "av1_amf",
+	"hevc_videotoolbox", "h264_videotoolbox", "av1_videotoolbox",
+}
+
+// has10Bit says whether enc gets the 10-bit test: HEVC and AV1 only (H.264 has no 10-bit profile here).
+func has10Bit(enc string) bool {
+	return strings.HasPrefix(enc, "hevc_") || strings.HasPrefix(enc, "av1_")
+}
+
 // withEncoders is t with the encoder test's result hw, made at at.
 func (t Tools) withEncoders(hw [5][]string, at time.Time) Tools {
 	t.Hardware, t.HardwareListed, t.Hardware10, t.Software, t.SoftwareListed, t.TestedAt = hw[0], hw[1], hw[2], hw[3], hw[4], at
@@ -141,11 +156,11 @@ func (c *Checker) hardwareTest(ctx context.Context, t Tools) (hw [5][]string) {
 		return hw
 	}
 	if out, _ := c.Exec.Output(ctx, t.FFmpeg, "-hide_banner", "-encoders"); len(out) > 0 {
-		for _, enc := range []string{"hevc_nvenc", "hevc_qsv", "hevc_vaapi", "hevc_videotoolbox", "hevc_amf", "hevc_mf", "hevc_v4l2m2m"} {
+		for _, enc := range hardwareEncoders {
 			if strings.Contains(string(out), " "+enc+" ") {
 				if c.encodes(ctx, enc, false) {
 					hw[0] = append(hw[0], enc)
-					if c.encodes(ctx, enc, true) {
+					if has10Bit(enc) && c.encodes(ctx, enc, true) {
 						hw[2] = append(hw[2], enc)
 					}
 				} else {
@@ -270,7 +285,7 @@ func encodeArgs(enc string, tenBit bool, device string) []string {
 		args = append(args, "-pix_fmt", "p010le")
 	}
 	args = append(args, "-c:v", enc)
-	if tenBit {
+	if tenBit && strings.HasPrefix(enc, "hevc_") { // av1_* reject main10: their p010 frames are enough
 		args = append(args, "-profile:v", "main10")
 	}
 	return append(args, "-f", "null", "-")

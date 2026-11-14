@@ -31,8 +31,8 @@ export async function workerAction(id: string, action: "start" | "stop" | "drain
   if (MOCK) { const e = mock.workerAction(id, action); return e ? { error: { code: "invalid", message: e } } : {}; }
   return call("POST", base(id) + "/" + action);
 }
-export async function patchWorker(id: string, p: { name?: string; slots?: { cpu?: number }; tags?: string[] }): Promise<Answer<Worker>> {
-  if (MOCK) { mock.patchWorker(id, p); return mock.mockState().workers.find((w) => w.id === id)!; }
+export async function patchWorker(id: string, p: { name?: string; slots?: { cpu?: number }; tags?: string[]; primaryEncoder?: string }): Promise<Answer<Worker>> {
+  if (MOCK) { const e = p.primaryEncoder && mock.primaryProblem(id, p.primaryEncoder); if (e) return { error: { code: "encoder_not_working", message: e } }; mock.patchWorker(id, p); return mock.mockState().workers.find((w) => w.id === id)!; }
   return call("PATCH", base(id), p);
 }
 // POST /workers/{id}/capabilities/test: a short real conversion with each encoder; answers the worker.

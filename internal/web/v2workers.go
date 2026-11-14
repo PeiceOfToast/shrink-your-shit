@@ -19,6 +19,7 @@ import (
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/doctor"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/pathmap"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/sysload"
 )
@@ -279,10 +280,22 @@ func passedGPU(caps []map[string]any) []string {
 	return out
 }
 
+// mainEncoderGPU is the passed graphics encoders that may be the main encoder. Until F2 (plans use h264/av1 on the
+// graphics card) only HEVC may: an H.264 or AV1 main encoder would silently convert on the processor.
+func mainEncoderGPU(caps []map[string]any) []string {
+	out := []string{}
+	for _, e := range passedGPU(caps) {
+		if encoderFormat(e) == "hevc" {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // primaryEncoder is the encoder a worker encodes with: the saved choice while its test still passes
-// (cpu always does), else the first graphics encoder that passes, else cpu.
+// (cpu always does), else the first HEVC graphics encoder that passes, else cpu.
 func primaryEncoder(saved *string, caps []map[string]any) string {
-	passed := passedGPU(caps)
+	passed := mainEncoderGPU(caps)
 	if saved != nil && (*saved == "cpu" || slices.Contains(passed, *saved)) {
 		return *saved
 	}
@@ -308,8 +321,50 @@ func gpuVendor(v string) string {
 var encoderLabels = map[string]string{
 	"libx265": "x265, HEVC (processor)", "libx264": "x264, H.264 (processor)", "libsvtav1": "SVT-AV1 (processor)", "libvpx-vp9": "VP9 (processor)",
 	"hevc_nvenc": "NVIDIA NVENC, HEVC (graphics card)", "hevc_qsv": "Intel Quick Sync, HEVC (graphics)", "hevc_vaapi": "VA-API, HEVC (graphics)",
-	"hevc_amf": "AMD AMF, HEVC (graphics card)", "hevc_videotoolbox": "VideoToolbox, HEVC (Apple)", "hevc_mf": "Media Foundation, HEVC (graphics)",
-	"hevc_v4l2m2m": "V4L2, HEVC (hardware)",
+	"hevc_amf": "AMD AMF, HEVC (graphics card)", "hevc_videotoolbox": "VideoToolbox, HEVC (Apple)",
+	"h264_nvenc": "NVIDIA NVENC, H.264 (graphics card)", "av1_nvenc": "NVIDIA NVENC, AV1 (graphics card)",
+	"h264_qsv": "Intel Quick Sync, H.264 (graphics)", "av1_qsv": "Intel Quick Sync, AV1 (graphics)",
+	"h264_vaapi": "VA-API, H.264 (graphics)", "av1_vaapi": "VA-API, AV1 (graphics)",
+	"h264_amf": "AMD AMF, H.264 (graphics card)", "av1_amf": "AMD AMF, AV1 (graphics card)",
+	"h264_videotoolbox": "VideoToolbox, H.264 (Apple)", "av1_videotoolbox": "VideoToolbox, AV1 (Apple)",
+}
+
+// encoderFormat is the video format an encoder writes: hevc, h264, av1 or vp9 ("" if unknown).
+func encoderFormat(e string) string {
+	switch {
+	case strings.HasPrefix(e, "hevc_"), e == "libx265":
+		return "hevc"
+	case strings.HasPrefix(e, "h264_"), e == "libx264":
+		return "h264"
+	case strings.HasPrefix(e, "av1_"), e == "libsvtav1":
+		return "av1"
+	case e == "libvpx-vp9":
+		return "vp9"
+	}
+	return ""
+}
+
+// graphicsFamily is a graphics encoder's family ("nvenc", "qsv", ...); "" for a processor encoder.
+func graphicsFamily(e string) string {
+	if i := strings.LastIndex(e, "_"); i > 0 {
+		return e[i+1:]
+	}
+	return ""
+}
+
+// otherFormatPassed says whether a graphics encoder failed while another format of its family passed. Then the
+// card does the family but not this format, which is "unsupported", not a fault.
+func otherFormatPassed(passed []string, e string) bool {
+	fam := graphicsFamily(e)
+	if fam == "" {
+		return false
+	}
+	for _, p := range passed {
+		if graphicsFamily(p) == fam && encoderFormat(p) != encoderFormat(e) {
+			return true
+		}
+	}
+	return false
 }
 
 const failed = "ffmpeg lists it, but a test frame failed on this computer."
@@ -318,8 +373,8 @@ const failed = "ffmpeg lists it, but a test frame failed on this computer."
 // the device lines would mislead anywhere else.
 var usesDevDRI = runtime.GOOS == "linux"
 
-// Seams for intelFailure: the render nodes doctor's vaapiDevice globs, and an open for read and write
-// as this user. Tests swap them; the real ones touch /dev/dri.
+// Seams for intelFailure: the render nodes (media.VAAPIDevice picks one from them), and an open for read
+// and write as this user. Tests swap them; the real ones touch /dev/dri.
 var renderNodes = func() []string {
 	m, _ := filepath.Glob("/dev/dri/renderD*")
 	return m
@@ -355,6 +410,17 @@ const (
 	vendorAMD   = "0x1002"
 )
 
+// graphicsEncoder says whether an encoder name is a graphics-card one, by the family suffix doctor
+// probes (hevc_nvenc, hevc_qsv, ...), whether or not this computer has it. Processor encoders are not.
+func graphicsEncoder(e string) bool {
+	for _, s := range []string{"_nvenc", "_qsv", "_vaapi", "_amf", "_videotoolbox"} {
+		if strings.HasSuffix(e, s) {
+			return true
+		}
+	}
+	return false
+}
+
 // encoderDevice says whether the device an encoder needs is on this computer: "found" or "missing".
 // It is "" (no field) for software encoders, for hardware encoders whose device we don't check, and
 // everywhere but Linux.
@@ -378,7 +444,36 @@ func encoderDevice(e string) string {
 	if found {
 		return "found"
 	}
+	// A render node whose vendor we can't read may be this encoder's card: we don't know, so we don't say it's missing.
+	if !strings.HasSuffix(e, "_nvenc") && unknownVendor() {
+		return ""
+	}
 	return "missing"
+}
+
+// unknownVendor says whether a render node is present whose PCI vendor can't be read.
+func unknownVendor() bool {
+	for _, n := range renderNodes() {
+		if renderVendor(n) == "" {
+			return true
+		}
+	}
+	return false
+}
+
+// missingCard is the line for a graphics encoder whose card is not in this computer.
+func missingCard(e string) string {
+	switch {
+	case strings.HasSuffix(e, "_nvenc"):
+		return "No NVIDIA graphics card in this computer (/dev/nvidia0 is missing). In Docker, give the container the NVIDIA device and restart; on a host install, check the NVIDIA driver is loaded."
+	case strings.HasSuffix(e, "_qsv"):
+		return "No Intel graphics card in this computer."
+	case strings.HasSuffix(e, "_vaapi"):
+		return "No Intel or AMD graphics card in this computer."
+	case strings.HasSuffix(e, "_amf"):
+		return "No AMD graphics card in this computer."
+	}
+	return "No graphics card in this computer."
 }
 
 var openRender = func(path string) error {
@@ -390,17 +485,18 @@ var openRender = func(path string) error {
 }
 
 // intelFailure says why a failed Quick Sync or VA-API test is failing when the device is the cause;
-// otherwise the generic line. Only hevc_qsv and hevc_vaapi come here.
+// otherwise the generic line. Only the Quick Sync and VA-API encoders come here.
 func intelFailure() string {
 	nodes := renderNodes()
 	if len(nodes) == 0 {
 		return "No graphics device here (/dev/dri is missing). In Docker, add the Intel GPU block from docker-compose.yml and restart; on a host install, check the graphics driver is loaded."
 	}
-	if err := openRender(nodes[0]); err != nil {
+	dev := media.ChooseVAAPI(nodes, renderVendor)
+	if err := openRender(dev); err != nil {
 		if !errors.Is(err, fs.ErrPermission) {
-			return "Can't open " + nodes[0] + ": " + err.Error() + "."
+			return "Can't open " + dev + ": " + err.Error() + "."
 		}
-		return "Can't open " + nodes[0] + ": the app's user isn't allowed to. On a host install, add the app's user to the render group. In Docker the app joins the device's group itself; if this still shows, the device's group on the host isn't visible in the container (check the LXC or Docker device settings)."
+		return "Can't open " + dev + ": the app's user isn't allowed to. On a host install, add the app's user to the render group. In Docker the app joins the device's group itself; if this still shows, the device's group on the host isn't visible in the container (check the LXC or Docker device settings)."
 	}
 	return failed
 }
@@ -423,17 +519,25 @@ func capabilities(t doctor.Tools, ok bool) []map[string]any {
 		}
 		out = append(out, c)
 	}
+	// annotate adds the format of the encoder just added, its graphics family for a graphics encoder, and the
+	// device for a hardware encoder.
+	annotate := func(e, slot string) {
+		c := out[len(out)-1]
+		c["format"] = encoderFormat(e)
+		if slot == "gpu" {
+			c["family"] = graphicsFamily(e)
+			if d := encoderDevice(e); d != "" {
+				c["device"] = d
+			}
+		}
+	}
 	for _, e := range t.Software {
 		add("encoder", e, encoderLabels[e], "cpu", "passed", "")
+		annotate(e, "cpu")
 	}
 	for _, e := range t.SoftwareListed {
 		add("encoder", e, encoderLabels[e], "cpu", "failed", failed)
-	}
-	// setDevice adds the device field to the capability just added, for a hardware encoder.
-	setDevice := func(e string) {
-		if d := encoderDevice(e); d != "" {
-			out[len(out)-1]["device"] = d
-		}
+		annotate(e, "cpu")
 	}
 	for _, e := range t.Hardware {
 		detail := "8-bit only: HDR files are converted on the processor."
@@ -441,15 +545,25 @@ func capabilities(t doctor.Tools, ok bool) []map[string]any {
 			detail = "10-bit too (HDR)."
 		}
 		add("encoder", e, encoderLabels[e], "gpu", "passed", detail)
-		setDevice(e)
+		annotate(e, "gpu")
 	}
 	for _, e := range t.HardwareListed {
-		detail := failed
-		if usesDevDRI && (e == "hevc_qsv" || e == "hevc_vaapi") {
+		test, detail := "failed", failed
+		switch {
+		case encoderDevice(e) == "missing":
+			// ffmpeg lists the encoder, but this computer has no card for it: not a fault, not there.
+			test, detail = "not_present", missingCard(e)
+			if usesDevDRI && len(renderNodes()) == 0 && (strings.HasSuffix(e, "_qsv") || strings.HasSuffix(e, "_vaapi")) {
+				detail += " " + intelFailure() // no /dev/dri at all: say how to give it to the container
+			}
+		case otherFormatPassed(t.Hardware, e):
+			// The card does this family's other format, so only this one is missing.
+			test, detail = "unsupported", "Not supported by this graphics card."
+		case usesDevDRI && (strings.HasSuffix(e, "_qsv") || strings.HasSuffix(e, "_vaapi")):
 			detail = intelFailure()
 		}
-		add("encoder", e, encoderLabels[e], "gpu", "failed", detail)
-		setDevice(e)
+		add("encoder", e, encoderLabels[e], "gpu", test, detail)
+		annotate(e, "gpu")
 	}
 	if t.FFprobe != "" {
 		add("tool", "ffprobe", "ffprobe "+t.FFprobeVersion, "cpu", "passed", "")
@@ -571,7 +685,7 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 				To   string `json:"to"`
 			} `json:"schedule"`
 			PathMappings   *[]struct{ Server, Worker, Mode string } `json:"pathMappings"`   // V7c: remote workers only
-			PrimaryEncoder *string                                  `json:"primaryEncoder"` // local only: cpu, or a graphics encoder whose test passed
+			PrimaryEncoder *string                                  `json:"primaryEncoder"` // local only: cpu, or an HEVC graphics encoder whose test passed (H.264 and AV1 wait for F2)
 		}
 		if !found(w, r) || !readJSON(w, r, &in) {
 			return
@@ -675,13 +789,15 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 		if in.PrimaryEncoder != nil {
 			name := strings.TrimSpace(*in.PrimaryEncoder)
 			t, ok := v.tools()
-			if name != "cpu" && !slices.Contains(passedGPU(capabilities(t, ok)), name) {
+			caps := capabilities(t, ok)
+			if name != "cpu" && !graphicsEncoder(name) {
+				apiError(w, http.StatusBadRequest, "invalid_encoder", "The main encoder is cpu or a graphics encoder that passed its test. Nothing was changed.")
+				return
+			}
+			if name != "cpu" && !slices.Contains(mainEncoderGPU(caps), name) {
 				label := encoderLabels[name]
 				if label == "" {
 					label = name
-				}
-				if label == "" {
-					label = "That encoder"
 				}
 				apiError(w, http.StatusConflict, "encoder_not_working", label+" isn't working on this worker, so it can't be the main encoder.")
 				return
@@ -906,4 +1022,16 @@ func (v *workerView) offlineCount() int {
 		}
 	}
 	return n
+}
+
+// LocalPrimaryEncoder is the local worker's primary encoder, as the Workers page shows it: its saved
+// choice while its test passes, else the first graphics encoder that passes, else "cpu". The worker
+// asks it at each job's start.
+func LocalPrimaryEncoder(store *jobs.Store, chk *doctor.Checker) func() string {
+	return func() string {
+		cfg, _ := store.WorkerConfigOf(jobs.LocalWorker)
+		v := &workerView{store: store, eng: Engine{Doctor: chk}}
+		t, ok := v.tools()
+		return primaryEncoder(cfg.PrimaryEncoder, capabilities(t, ok))
+	}
 }
