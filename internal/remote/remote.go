@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -102,15 +103,25 @@ type APIError struct {
 func (e *APIError) Error() string { return e.Message }
 
 func (c *Client) call(ctx context.Context, path string, in, out any) error {
-	b, _ := json.Marshal(in)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(c.Server, "/")+"/api/worker/v1/"+path, bytes.NewReader(b))
+	return c.callWith(ctx, http.MethodPost, path, in, out, c.Token)
+}
+
+// callWith calls one worker API path with the given bearer token ("" sends none). in is sent as JSON when
+// it is not nil.
+func (c *Client) callWith(ctx context.Context, method, path string, in, out any, token string) error {
+	var body io.Reader
+	if in != nil {
+		b, _ := json.Marshal(in)
+		body = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, strings.TrimSuffix(c.Server, "/")+"/api/worker/v1/"+path, body)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-SYP-Worker", fmt.Sprintf("%s; api=%d", c.Version, APILevel))
-	if c.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Token)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	h := c.HTTP
 	if h == nil {
@@ -144,6 +155,47 @@ func (c *Client) Pair(ctx context.Context, code, name string) (State, error) {
 		return State{}, err
 	}
 	return State{Server: c.Server, WorkerID: out.WorkerID, Name: out.Name, Token: out.Token}, nil
+}
+
+// JoinEvery is how often a joining worker asks the server whether the person has answered.
+var JoinEvery = 2 * time.Second
+
+// ErrJoinDenied and ErrJoinExpired end a join the person did not complete.
+var (
+	ErrJoinDenied  = errors.New("The server said no.")
+	ErrJoinExpired = errors.New("Nobody allowed it within 10 minutes. Run the command again.")
+)
+
+// Join asks the server to let this worker join, then waits until the person allows it there (the same State
+// Pair returns), denies it, or the request expires. ctx ends the wait.
+func (c *Client) Join(ctx context.Context, name, osName string) (State, error) {
+	var asked struct{ ID, Secret string }
+	if err := c.call(ctx, "join", map[string]any{"name": name, "os": osName, "capabilities": map[string]any{}}, &asked); err != nil {
+		return State{}, err
+	}
+	for {
+		var out struct{ State, WorkerID, Name, Token string }
+		if err := c.callWith(ctx, http.MethodGet, "join/"+asked.ID, nil, &out, asked.Secret); err != nil {
+			var e *APIError
+			if errors.As(err, &e) && e.Code == "join_request_not_found" {
+				return State{}, errors.New("The server no longer has this join request (it restarted or dropped it). Run the command again.")
+			}
+			return State{}, err
+		}
+		switch out.State {
+		case "allowed":
+			return State{Server: c.Server, WorkerID: out.WorkerID, Name: out.Name, Token: out.Token}, nil
+		case "denied":
+			return State{}, ErrJoinDenied
+		case "expired":
+			return State{}, ErrJoinExpired
+		}
+		select {
+		case <-ctx.Done():
+			return State{}, ctx.Err()
+		case <-time.After(JoinEvery):
+		}
+	}
 }
 
 // Heartbeat says this worker is there, with its free slots.
