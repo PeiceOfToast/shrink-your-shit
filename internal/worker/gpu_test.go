@@ -46,7 +46,7 @@ func TestGPUFailureConvertsOnTheProcessor(t *testing.T) {
 	s := newScenario(t)
 	s.failEncoder = "hevc_nvenc"
 	w := s.worker(Replace)
-	w.Encoder = func() string { return "hevc_nvenc" }
+	w.Encoder = func(string) string { return "hevc_nvenc" }
 	if _, err := w.RunOne(context.Background()); err != nil {
 		t.Fatalf("RunOne: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestGPUFailureConvertsOnTheProcessor(t *testing.T) {
 func TestUnsupportedEncoderUsesProcessorFirst(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
-	w.Encoder = func() string { return "hevc_videotoolbox" }
+	w.Encoder = func(string) string { return "hevc_videotoolbox" }
 	if _, err := w.RunOne(context.Background()); err != nil {
 		t.Fatalf("RunOne: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestUnsupportedEncoderUsesProcessorFirst(t *testing.T) {
 func TestCPUChoiceNeverAsksForAGraphicsEncoder(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
-	w.Encoder = func() string { return "cpu" }
+	w.Encoder = func(string) string { return "" }
 	if _, err := w.RunOne(context.Background()); err != nil {
 		t.Fatalf("RunOne: %v", err)
 	}

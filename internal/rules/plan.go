@@ -219,21 +219,58 @@ func (p Plan) FFmpegArgs(in, out string) []string {
 	return args
 }
 
-// graphicsEncoders are the hardware HEVC encoders FFmpegArgsWith knows, by ffmpeg's name.
-var graphicsEncoders = map[string]bool{"hevc_nvenc": true, "hevc_qsv": true, "hevc_vaapi": true, "hevc_amf": true}
+// formatPrefix is each video codec's graphics encoder prefix: libx265 uses hevc_<family>, libx264 h264_<family>,
+// libsvtav1 av1_<family>. A codec not here (VP9, copy) has no graphics encoder.
+var formatPrefix = map[string]string{"libx265": "hevc", "libx264": "h264", "libsvtav1": "av1"}
+
+// graphicsFamilies are the graphics families an encoder name can end in (nvenc, qsv, vaapi, amf).
+var graphicsFamilies = []string{"nvenc", "qsv", "vaapi", "amf"}
+
+// graphicsEncoders are the graphics encoders FFmpegArgsWith knows, by ffmpeg's name: each format's encoder in
+// each family.
+var graphicsEncoders = func() map[string]bool {
+	m := map[string]bool{}
+	for _, prefix := range formatPrefix {
+		for _, fam := range graphicsFamilies {
+			m[prefix+"_"+fam] = true
+		}
+	}
+	return m
+}()
+
+// GraphicsFamily is the graphics family of an encoder name: "qsv" for hevc_qsv, "" for a processor's name.
+func GraphicsFamily(enc string) string {
+	return enc[strings.LastIndex(enc, "_")+1:]
+}
+
+// GraphicsEncoder is the graphics encoder for codec's format in enc's family: GraphicsEncoder("libx264",
+// "hevc_qsv") is "h264_qsv". "" when codec has no graphics encoder or enc's family is not one of them.
+func GraphicsEncoder(codec, enc string) string {
+	prefix, ok := formatPrefix[codec]
+	if !ok {
+		return ""
+	}
+	if name := prefix + "_" + GraphicsFamily(enc); graphicsEncoders[name] {
+		return name
+	}
+	return ""
+}
 
 // vaapiDevice is the render node VAAPI encodes on (media.VAAPIDevice); a seam, so tests can pick one.
 var vaapiDevice = media.VAAPIDevice
 
 // FFmpegArgsWith is FFmpegArgs with the video encoded by enc. "" or "cpu" is the processor, exactly
-// FFmpegArgs. A graphics HEVC encoder (hevc_nvenc, hevc_qsv, hevc_vaapi, hevc_amf) is used for an HEVC
-// encode (libx265, not a copy), and ok is then true. ok is false when enc is not one of those, or the
-// Plan can't use one: the arguments are the processor's either way.
+// FFmpegArgs. A graphics encoder for the Plan's codec (hevc_* for libx265, h264_* for libx264, av1_* for
+// libsvtav1; nvenc, qsv, vaapi or amf) is used for an encode that isn't a copy, and ok is then true. An H.264
+// or AV1 HDR encode has no graphics path (it stays on the processor). ok is false when enc is not one of
+// those, or the Plan can't use one: the arguments are the processor's either way.
 func (p Plan) FFmpegArgsWith(in, out, enc string) ([]string, bool) {
 	if enc == "" || enc == "cpu" {
 		return p.ffmpegArgs(in, out, ""), true
 	}
-	if !graphicsEncoders[enc] || p.Video.Copy || p.Video.Codec != "libx265" {
+	prefix, ok := formatPrefix[p.Video.Codec]
+	if !ok || !graphicsEncoders[enc] || !strings.HasPrefix(enc, prefix+"_") || p.Video.Copy ||
+		(p.Video.HDR != nil && p.Video.Codec != "libx265") {
 		return p.ffmpegArgs(in, out, ""), false
 	}
 	return p.ffmpegArgs(in, out, enc), true
@@ -242,11 +279,12 @@ func (p Plan) FFmpegArgsWith(in, out, enc string) ([]string, bool) {
 // ffmpegArgs builds the arguments; gpu is a graphics encoder's name, or "" for the processor's.
 func (p Plan) ffmpegArgs(in, out, gpu string) []string {
 	v := "v:" + strconv.Itoa(p.Video.Index)
+	fam := GraphicsFamily(gpu) // "" for the processor
 	args := []string{"-y", "-nostdin", "-v", "error", "-progress", "pipe:1", "-nostats"}
-	switch gpu { // a hardware device is set up before the input
-	case "hevc_qsv":
+	switch fam { // a hardware device is set up before the input
+	case "qsv":
 		args = append(args, "-init_hw_device", "qsv=qsv:hw")
-	case "hevc_vaapi":
+	case "vaapi":
 		args = append(args, "-init_hw_device", "vaapi=va:"+vaapiDevice(), "-filter_hw_device", "va")
 	}
 	args = append(args, "-i", in,
@@ -268,7 +306,7 @@ func (p Plan) ffmpegArgs(in, out, gpu string) []string {
 		args = append(args, "-c:"+v, gpu, "-b:"+v, kbps)
 	default:
 		args = append(args, "-c:"+v, gpu)
-		args = append(args, gpuQuality(gpu, p.Video.CRF)...)
+		args = append(args, gpuQuality(fam, p.Video.CRF)...)
 	}
 	if gpu == "" && p.Video.Preset != "" { // a graphics encoder has no x265 presets
 		args = append(args, "-preset", p.Video.Preset)
@@ -276,7 +314,7 @@ func (p Plan) ffmpegArgs(in, out, gpu string) []string {
 	if gpu == "" {
 		args = append(args, extraArgs(p.Video)...)
 	} else {
-		args = append(args, withoutX265(extraArgs(p.Video))...)
+		args = append(args, withoutSoftwareParams(extraArgs(p.Video))...)
 	}
 	if h := p.Video.HDR; h != nil { // 10-bit main10 with the HDR written explicitly (S3)
 		if gpu == "" {
@@ -286,7 +324,7 @@ func (p Plan) ffmpegArgs(in, out, gpu string) []string {
 		} else {
 			args = append(args, "-profile:"+v, "main10",
 				"-color_primaries:"+v, h.Primaries, "-color_trc:"+v, h.Transfer, "-colorspace:"+v, h.Matrix)
-			if gpu != "hevc_vaapi" { // VAAPI's frames are made p010 by its filter instead
+			if fam != "vaapi" { // VAAPI's frames are made p010 by its filter instead
 				args = append(args, "-pix_fmt:"+v, "p010le")
 			}
 		}
@@ -295,7 +333,7 @@ func (p Plan) ffmpegArgs(in, out, gpu string) []string {
 	if p.Video.Height > 0 {
 		vf = append(vf, "scale=-2:"+strconv.Itoa(p.Video.Height))
 	}
-	if gpu == "hevc_vaapi" { // software frames go up to the device last, after any scale
+	if fam == "vaapi" { // software frames go up to the device last, after any scale
 		format := "nv12"
 		if p.Video.HDR != nil {
 			format = "p010"
@@ -321,26 +359,28 @@ func (p Plan) ffmpegArgs(in, out, gpu string) []string {
 	return p.withSubtitleFiles(args, out)
 }
 
-// gpuQuality is a graphics encoder's constant-quality arguments at crf, in its own names.
-func gpuQuality(enc string, crf int) []string {
+// gpuQuality is a graphics family's constant-quality arguments at crf, in its encoders' names. The same
+// family's H.264 and AV1 encoders take the same options as its HEVC one.
+func gpuQuality(fam string, crf int) []string {
 	n := strconv.Itoa(crf)
-	switch enc {
-	case "hevc_nvenc":
+	switch fam {
+	case "nvenc":
 		return []string{"-rc", "vbr", "-cq", n}
-	case "hevc_qsv":
+	case "qsv":
 		return []string{"-global_quality", n}
-	case "hevc_vaapi":
+	case "vaapi":
 		return []string{"-rc_mode", "CQP", "-qp", n}
-	default: // hevc_amf
+	default: // amf
 		return []string{"-rc", "cqp", "-qp_i", n, "-qp_p", n}
 	}
 }
 
-// withoutX265 drops libx265's "-x265-params" and its value: a graphics encoder has none.
-func withoutX265(args []string) []string {
+// withoutSoftwareParams drops a software encoder's own parameter options and their values (libx265's, SVT-AV1's,
+// x264's): a graphics encoder has none.
+func withoutSoftwareParams(args []string) []string {
 	var out []string
 	for i := 0; i < len(args); i++ {
-		if strings.HasPrefix(args[i], "-x265-params") {
+		if strings.HasPrefix(args[i], "-x265-params") || strings.HasPrefix(args[i], "-svtav1-params") || strings.HasPrefix(args[i], "-x264-params") {
 			i++
 			continue
 		}

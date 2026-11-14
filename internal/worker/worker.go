@@ -104,9 +104,9 @@ type Worker struct {
 	// ShareDown says whether a library's folder is on a share that does not answer now (nil: no shares
 	// are checked). A convert that fails while it does is put back in the queue, not failed (D4c).
 	ShareDown func(folder string, jobID int64) (ShareDown, bool)
-	// Encoder is the local worker's primary encoder: ffmpeg's name of a graphics HEVC encoder, or "cpu"
-	// (or nil: the processor). A plan it can't do, and a graphics encode that fails, use the processor.
-	Encoder func() string
+	// Encoder is the graphics encoder the local worker uses for a video codec (ffmpeg's name, e.g. libx264), or ""
+	// for the processor (or nil: the processor). A plan it can't do, and a graphics encode that fails, use the processor.
+	Encoder func(codec string) string
 	// verified is the probe of the new file the last check passed (S5: stored for its final path).
 	verified media.Info
 	check    *checkResult // the picture check's score for the job in hand (nil: none ran); set by the comparison
@@ -906,12 +906,12 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		return "", err
 	}
 	tmp := stage.path
-	// The local worker encodes with its primary encoder (a graphics one) when it can do this plan; else,
+	// The local worker encodes with its graphics encoder for this plan's format when it can do this plan; else,
 	// and for a remote worker, the processor (its own arguments are FFmpegArgs, unchanged).
 	gpu := ""
 	args := plan.FFmpegArgs(srcPath, tmp)
-	if w.remote == nil {
-		if want := w.primaryEncoder(); want != "" && want != "cpu" {
+	if w.remote == nil && w.Encoder != nil {
+		if want := w.Encoder(plan.Video.Codec); want != "" && !plan.Video.Copy {
 			var ok bool
 			if args, ok = plan.FFmpegArgsWith(srcPath, tmp, want); ok {
 				gpu = want
@@ -1618,14 +1618,6 @@ func (w *Worker) recordCheck(id int64, started time.Time, verr error) {
 	passed := c.Passed
 	w.Queue.RecordRunStep(id, jobs.RunStep{Index: 1, Name: "check", StartedAt: started.UTC().Format(time.RFC3339),
 		TookMs: w.now().Sub(started).Milliseconds(), Outcome: outcome, CheckScore: &c.Score, CheckMin: &c.Min, CheckPassed: &passed})
-}
-
-// primaryEncoder is the encoder this worker encodes with, from its Encoder (see there).
-func (w *Worker) primaryEncoder() string {
-	if w.Encoder == nil {
-		return ""
-	}
-	return w.Encoder()
 }
 
 // gpuFailed says whether a graphics encode that ended with err should convert again on the processor:
