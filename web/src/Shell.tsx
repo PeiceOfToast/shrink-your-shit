@@ -91,7 +91,7 @@ export function Shell({ title, proto, children }: { title: string; proto: boolea
   // the summary's badges: every 30 s, and at once when a worker asks to join
   const sum = useData<{ badges: { joinRequestsWaiting?: number } }>(() => (MOCK ? Promise.resolve(summary(mockState())) : getSummary()), [], 30000);
   const again = useRef(sum.reload); again.current = sum.reload;
-  useEffect(() => onLive((t) => { if (t === "worker.join_request" || t === "resync") again.current(); }), []);
+  useEffect(() => onLive((t) => { if (t === "workers.changed" || t === "resync") again.current(); }), []);
   const joins = sum.data?.badges.joinRequestsWaiting ?? 0, waiting = plural(joins, "worker", "workers") + " waiting to join";
   return (
     // On a narrow screen the open menu's scrim is shell.css's .app.nav-open::after, so a tap on it is a click on .app
