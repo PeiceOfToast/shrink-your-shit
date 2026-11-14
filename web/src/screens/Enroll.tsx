@@ -95,8 +95,8 @@ export function Enroll({ setup, reload, noMain }: { setup: Setup; reload: () => 
       switch (panel) {
         case "waiting": return ["Waiting for " + name + " to allow this worker.", <><p>On {name}, open Workers and press Allow.</p><p className="muted">{minutes(j!.expiresAt)}</p></>,
           <><a className="btn primary" href={url.replace(/\/$/, "") + "/workers"} target="_blank" rel="noreferrer">Open {name}'s Workers page<span className="sr"> (opens in a new tab)</span></a><button className="btn" type="button" disabled={busy} onClick={back}>Cancel request</button></>];
-        case "allowed": return ["Joined " + name + ". Its jobs run here.", <p className="muted">This page now only shows this worker's status.</p>,
-          <a className="btn primary" href={url}>Open {name}</a>];
+        case "allowed": return ["Joined " + name + ". This computer now converts videos for " + name + ".", <p>See what it&apos;s doing on {name}&apos;s Workers page.</p>, // design 04:36Z
+          <a className="btn primary" href={url.replace(/\/$/, "") + "/workers"}>Open {name}&apos;s Workers page</a>];
         case "denied": return [name + " said no. Nothing was changed.", null, Back];
         case "expired": return ["No answer in 10 minutes.", null, <><button className="btn primary" type="button" disabled={busy} onClick={() => ask(url)}>Ask again</button>{Back}</>];
         case "unreachable": return ["Couldn't reach " + hostOf(url) + (problem?.reason ? ": " + problem.reason : "") + ".", <p>Check that it is on and on the same network.</p>,
@@ -106,6 +106,10 @@ export function Enroll({ setup, reload, noMain }: { setup: Setup; reload: () => 
           <p>Use a pairing code instead: on {name} open Workers and press Add a worker.</p>
           <label className="field"><span className="lab">Pairing code</span><input className="input" inputMode="numeric" autoComplete="off" value={code} onChange={(e) => setCode(e.target.value)} /></label></>,
           <><button className="btn primary" type="submit" disabled={busy || !code.trim()}>Join with code</button>{Back}</>];
+        case "not_saved": return [name + " allowed this worker, but this computer couldn't finish joining.", <p>Ask again to finish.</p>, // design 03:28Z
+          <><button className="btn primary" type="button" disabled={busy} onClick={() => ask(url)}>Ask again</button>{Back}</>];
+        // a state this page doesn't know yet (a newer server) must not blank the page
+        default: return ["Joining " + name + " didn't finish (" + String(panel) + "). Go back and try again.", null, Back]; // design 03:28Z: raw state kept for support
       }
     })();
     return (
