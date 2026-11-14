@@ -974,3 +974,15 @@ func (v *workerView) offlineCount() int {
 	}
 	return n
 }
+
+// LocalPrimaryEncoder is the local worker's primary encoder, as the Workers page shows it: its saved
+// choice while its test passes, else the first graphics encoder that passes, else "cpu". The worker
+// asks it at each job's start.
+func LocalPrimaryEncoder(store *jobs.Store, chk *doctor.Checker) func() string {
+	return func() string {
+		cfg, _ := store.WorkerConfigOf(jobs.LocalWorker)
+		v := &workerView{store: store, eng: Engine{Doctor: chk}}
+		t, ok := v.tools()
+		return primaryEncoder(cfg.PrimaryEncoder, capabilities(t, ok))
+	}
+}
