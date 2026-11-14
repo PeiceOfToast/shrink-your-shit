@@ -167,11 +167,11 @@ func (c *Client) capsReport() any {
 
 // Pair exchanges a pairing code for this worker's token.
 func (c *Client) Pair(ctx context.Context, code, name string) (State, error) {
-	var out struct{ WorkerID, Name, Token string }
+	var out struct{ WorkerID, Name, Token, ServerName string }
 	if err := c.call(ctx, "pair", map[string]any{"code": code, "name": name, "os": runtime.GOOS, "arch": runtime.GOARCH, "capabilities": c.capsReport()}, &out); err != nil {
 		return State{}, err
 	}
-	return State{Server: c.Server, WorkerID: out.WorkerID, Name: out.Name, Token: out.Token}, nil
+	return State{Server: c.Server, WorkerID: out.WorkerID, Name: out.Name, Token: out.Token, ServerName: out.ServerName}, nil
 }
 
 // JoinEvery is how often a joining worker asks the server whether the person has answered.
@@ -191,6 +191,8 @@ var ErrNotWorkerAPI = errors.New("the server answered, but not as a shrink-your-
 // expires (RFC 3339; "" when the server did not say).
 type Asked struct {
 	ID, Secret, ExpiresAt string
+	// ServerName is the name the server shows for itself; "" from a server that does not say.
+	ServerName string
 }
 
 // Ask sends the join request and returns at once with the server's answer. port is the web port this
@@ -200,11 +202,11 @@ func (c *Client) Ask(ctx context.Context, name, osName string, port int) (Asked,
 	if port > 0 {
 		in["port"] = port
 	}
-	var a struct{ ID, Secret, ExpiresAt string }
+	var a struct{ ID, Secret, ExpiresAt, ServerName string }
 	if err := c.call(ctx, "join", in, &a); err != nil {
 		return Asked{}, err
 	}
-	return Asked{ID: a.ID, Secret: a.Secret, ExpiresAt: a.ExpiresAt}, nil
+	return Asked{ID: a.ID, Secret: a.Secret, ExpiresAt: a.ExpiresAt, ServerName: a.ServerName}, nil
 }
 
 // joinTrouble is how many polls in a row may fail (the network, the server restarting) before Wait reports

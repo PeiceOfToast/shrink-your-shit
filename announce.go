@@ -4,7 +4,6 @@ package main
 
 import (
 	"log"
-	"os"
 	"sync"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/discover"
@@ -54,10 +53,7 @@ func (a *announcer) SetRole(role string) {
 	if a.stop != nil {
 		return
 	}
-	name, _ := os.Hostname()
-	if name == "" {
-		name = "shrink-your-shit"
-	}
+	name := discover.ServerName()
 	announce := a.announce
 	if announce == nil {
 		announce = discover.Announce

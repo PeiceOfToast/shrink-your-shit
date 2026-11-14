@@ -41,9 +41,9 @@ type ServerFinder interface {
 // remote: remote's tests import web, so that import would be a cycle. Failures carry a JoinCode (see joinCode).
 type WorkerJoiner interface {
 	// Pair pairs with a code: the worker's id, the name the server gives it, and its token.
-	Pair(ctx context.Context, serverURL, code, name string) (id, workerName, token string, err error)
+	Pair(ctx context.Context, serverURL, code, name string) (id, workerName, token, serverName string, err error)
 	// Ask asks the server to let this computer in: the request's id, the secret to poll it with, and when it expires.
-	Ask(ctx context.Context, serverURL, name, osName string, port int) (id, secret, expiresAt string, err error)
+	Ask(ctx context.Context, serverURL, name, osName string, port int) (id, secret, expiresAt, serverName string, err error)
 	// Wait polls until the person answers; allowed, it returns the worker's id, name and token.
 	Wait(ctx context.Context, serverURL, id, secret, expiresAt string, report func(state string)) (workerID, workerName, token string, err error)
 	// Save keeps a worker's credential in dir, with the name the server shows for itself.
@@ -111,6 +111,15 @@ func (sw *setupWaits) serverNameFor(serverURL string) string {
 		}
 	}
 	return hostOf(serverURL)
+}
+
+// joinName is the name a join shows for its server: the one the server gave in its reply, else the one the browse
+// heard, else the address.
+func (sw *setupWaits) joinName(serverURL, replied string) string {
+	if replied != "" {
+		return replied
+	}
+	return sw.serverNameFor(serverURL)
 }
 
 // stopLocked ends the wait and forgets the join. Call with mu held.
@@ -328,7 +337,7 @@ func v2Setup(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng Engin
 	pairWorker := func(w http.ResponseWriter, r *http.Request, serverURL, code string) {
 		ctx, cancel := context.WithTimeout(r.Context(), setupTimeout)
 		defer cancel()
-		id, name, token, err := eng.Joiner.Pair(ctx, serverURL, code, hostName())
+		id, name, token, replied, err := eng.Joiner.Pair(ctx, serverURL, code, hostName())
 		if err != nil {
 			if joinCode(err) == "pairing_invalid" {
 				apiError(w, http.StatusBadRequest, "pair_code_invalid", "This pairing code isn't valid (it works once, for 15 minutes). Make a new one on the server's Workers page. Nothing was changed.")
@@ -337,7 +346,7 @@ func v2Setup(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng Engin
 			setupServerError(w, serverURL, err)
 			return
 		}
-		serverName := sw.serverNameFor(serverURL)
+		serverName := sw.joinName(serverURL, replied)
 		if err := eng.Joiner.Save(workerDir, serverURL, serverName, id, name, token); err != nil {
 			apiError(w, http.StatusInternalServerError, "token_not_saved", "The server paired with this computer, but its token couldn't be saved here: "+err.Error()+" Nothing was changed.")
 			return
@@ -357,7 +366,7 @@ func v2Setup(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng Engin
 	askWorker := func(w http.ResponseWriter, r *http.Request, serverURL string) {
 		ctx, cancel := context.WithTimeout(r.Context(), setupTimeout)
 		defer cancel()
-		id, secret, expiresAt, err := eng.Joiner.Ask(ctx, serverURL, hostName(), runtime.GOOS, eng.Port)
+		id, secret, expiresAt, replied, err := eng.Joiner.Ask(ctx, serverURL, hostName(), runtime.GOOS, eng.Port)
 		if joinCode(err) == "not_local" {
 			ss.mu.Lock()
 			defer ss.mu.Unlock()
@@ -374,7 +383,7 @@ func v2Setup(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng Engin
 		wctx, wcancel := context.WithCancel(context.Background())
 		sw.cancel = wcancel
 		gen := sw.gen
-		sw.cur = &setupJoin{serverName: sw.serverNameFor(serverURL), serverURL: serverURL, state: "waiting", expiresAt: expiresAt}
+		sw.cur = &setupJoin{serverName: sw.joinName(serverURL, replied), serverURL: serverURL, state: "waiting", expiresAt: expiresAt}
 		sw.changedLocked()
 		sw.mu.Unlock()
 		// The answer is written before the wait starts, so it shows the join as waiting, not a later state.

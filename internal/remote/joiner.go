@@ -54,21 +54,21 @@ func fail(err error) error {
 }
 
 // Pair pairs with a code: the worker's id, the name the server gives it, and its token.
-func (j *Joiner) Pair(ctx context.Context, serverURL, code, name string) (id, workerName, token string, err error) {
+func (j *Joiner) Pair(ctx context.Context, serverURL, code, name string) (id, workerName, token, serverName string, err error) {
 	st, err := j.client(serverURL).Pair(ctx, code, name)
 	if err != nil {
-		return "", "", "", fail(err)
+		return "", "", "", "", fail(err)
 	}
-	return st.WorkerID, st.Name, st.Token, nil
+	return st.WorkerID, st.Name, st.Token, st.ServerName, nil
 }
 
 // Ask asks the server to let this computer in: the request's id, the secret to poll it with, and when it expires.
-func (j *Joiner) Ask(ctx context.Context, serverURL, name, osName string, port int) (id, secret, expiresAt string, err error) {
+func (j *Joiner) Ask(ctx context.Context, serverURL, name, osName string, port int) (id, secret, expiresAt, serverName string, err error) {
 	a, err := j.client(serverURL).Ask(ctx, name, osName, port)
 	if err != nil {
-		return "", "", "", fail(err)
+		return "", "", "", "", fail(err)
 	}
-	return a.ID, a.Secret, a.ExpiresAt, nil
+	return a.ID, a.Secret, a.ExpiresAt, a.ServerName, nil
 }
 
 // Wait polls the server until the person answers. Allowed, it returns the worker's id, name and token.

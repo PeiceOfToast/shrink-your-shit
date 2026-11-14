@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/discover"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 )
 
@@ -391,7 +392,7 @@ func (b *joinBook) ask(w http.ResponseWriter, r *http.Request, t Transport, limi
 		serverError(w, err)
 		return
 	}
-	writeJSONStatus(w, http.StatusAccepted, map[string]any{"id": id, "expiresAt": req.expiresAt.UTC().Format(time.RFC3339), "secret": secret})
+	writeJSONStatus(w, http.StatusAccepted, map[string]any{"id": id, "expiresAt": req.expiresAt.UTC().Format(time.RFC3339), "secret": secret, "serverName": discover.ServerName()})
 }
 
 // poll handles GET /api/worker/v1/join/{id}, with the secret as the bearer token. Wrong guesses count against
