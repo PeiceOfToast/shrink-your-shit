@@ -263,7 +263,7 @@ export interface StepDefinition {
 }
 
 // Enrollment (ONE-COMMAND-SETUP.md section 11; workshop 00:42Z): GET /api/v2/setup, /setup/servers, POST /setup/role
-export type JoinState = "waiting" | "allowed" | "denied" | "expired" | "unreachable" | "not_local";
+export type JoinState = "waiting" | "allowed" | "denied" | "expired" | "unreachable" | "not_local" | "not_saved"; // #257 not_saved: allowed, but this install could not save the worker credential; asking again fixes it
 export interface Setup {
   role: "unset" | "server" | "worker";
   join: null | { serverName: string; serverUrl: string; state: JoinState; expiresAt: Time | null };

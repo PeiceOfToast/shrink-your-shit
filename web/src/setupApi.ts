@@ -11,7 +11,7 @@ export async function getSetup(): Promise<Answer<Setup>> {
 export async function listServers(): Promise<Answer<FoundServer[]>> {
   if (MOCK) return new Promise((ok) => setTimeout(() => ok(mock.foundServers.map((s) => ({ ...s }))), 1500));
   const r = await call<{ items: FoundServer[] }>("GET", "/api/v2/setup/servers");
-  return failed(r) ? r : r.items;
+  return failed(r) ? r : Array.isArray(r?.items) ? r.items : []; // an answer this page can't read reads as none found, not a crash
 }
 // {role:'server'} goes on to the normal first run; {role:'worker', serverUrl} asks to join (join.state waiting);
 // {role:'unset'} cancels a request (Cancel request, Back). Errors: server_unreachable, not_a_server,
