@@ -29,7 +29,6 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/preview"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/remote"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
-	"github.com/shrink-your-shit/shrink-your-shit/internal/runlog"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/scanner"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/web"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
@@ -191,7 +190,8 @@ func main() {
 				log.Printf("job logs: %v", err)
 			}
 		}
-		if _, err := store.PruneJobEvents(time.Now().Add(-runlog.MaxAge)); err != nil { // jobs' history: the logs' 30 days
+		const jobHistoryDays = 30 // how long a job's history (its steps and events) is kept
+		if _, err := store.PruneJobEvents(time.Now().Add(-jobHistoryDays * 24 * time.Hour)); err != nil {
 			log.Printf("job history: %v", err)
 		}
 	}
