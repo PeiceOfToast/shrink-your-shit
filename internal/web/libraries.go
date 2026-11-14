@@ -29,6 +29,7 @@ type Engine struct {
 	Settle       time.Duration        // how long a file must stay the same before it is decided (-settle)
 	SetScanEvery func(time.Duration)  // change how often a pass starts, now (Settings' scanEvery)
 	RequeueJob   func(id int64)       // stop a running job and put it back in the queue (its library is being removed)
+	RoleChanged  func(role string)    // the install's role was saved (called after each change; main starts or stops its worker loop)
 	PauseNow     func()               // stop the running jobs and put them back in the queue (Pause all)
 	Scanning     func() map[int64]int // libraries being scanned now, with the videos found so far (slice A)
 	FirstFiles   *preview.FirstLister // the first 5 videos of a folder (slice A)

@@ -44,6 +44,12 @@ func joinCode(err error) string {
 	return ""
 }
 
+// SavedRole is the install's saved role: "worker", "server", "unset", or "" when none is saved yet.
+func SavedRole(store *jobs.Store) string {
+	role, _, _ := store.Meta(setupRoleKey)
+	return role
+}
+
 // setupRoleKey is the app_meta key the install's role is kept under. It is not a setting: the settings
 // PATCH cannot change it, only POST /api/v2/setup/role can.
 const setupRoleKey = "setupRole"
@@ -61,6 +67,7 @@ type setupJoin struct {
 type setupWaits struct {
 	store  *jobs.Store
 	joiner WorkerJoiner
+	onRole func(role string)
 	mu     sync.Mutex
 	cur    *setupJoin
 	gen    int
@@ -159,6 +166,9 @@ func (sw *setupWaits) allowed(gen int, serverURL, id, name, token, dir string) {
 		sw.changedLocked()
 		return
 	}
+	if sw.onRole != nil {
+		sw.onRole("worker")
+	}
 	sw.cur.state = "allowed"
 	sw.changedLocked()
 }
@@ -201,7 +211,7 @@ func setupServerError(w http.ResponseWriter, serverURL string, err error) {
 //     invalid_server_url and invalid_role are 400; 409 role_change_busy while jobs run, for a change to worker
 //     or unset.
 func v2Setup(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng Engine) {
-	sw := &setupWaits{store: store, joiner: eng.Joiner}
+	sw := &setupWaits{store: store, joiner: eng.Joiner, onRole: eng.RoleChanged}
 	workerDir := filepath.Join(eng.DataDir, "worker")
 	// current is the saved role. When none is saved, an install that already has a library or has got past
 	// the first step predates the role, so it is a server and never sees the enrollment page.
@@ -241,6 +251,9 @@ func v2Setup(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng Engin
 		if err := store.SetMeta(setupRoleKey, role); err != nil {
 			serverError(w, err)
 			return false
+		}
+		if eng.RoleChanged != nil {
+			eng.RoleChanged(role)
 		}
 		if err := store.RecordEvent("setup.changed", map[string]any{"type": "setup.changed", "role": role}); err != nil {
 			serverError(w, err)

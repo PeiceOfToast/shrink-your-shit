@@ -224,6 +224,8 @@ func main() {
 	chk := &doctor.Checker{Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath, KnownOriginals: store.KnownOriginals}
 	tools := chk.Converter(ctx)
 	converts := tools.Converts()
+	// E3b2: a joined install runs its worker loop from here (joinedworker.go).
+	joined := newJoinedWorker(filepath.Join(*data, "worker"), tools.FFmpeg, tools.FFprobe)
 	if tools.FFmpeg != "" { // the video formats Standard can offer (S6): the encoders this ffmpeg has
 		rules.SetAvailableFormats(media.Encoders(ctx, x, tools.FFmpeg))
 	}
@@ -277,7 +279,7 @@ func main() {
 			return &worker.Worker{ID: id, Queue: store, Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath,
 				Template: store.TemplateFor, Poll: 3 * time.Second,
 				DecodeCheck: *decode, MinSSIM: *minSSIM, KeepDays: keepDays, Journal: store, Sidecars: store,
-				Paused: func() bool { return !store.WorkerEnabled(jobs.LocalWorker) }, StallAfter: *stallAfter, // this computer's own switch
+				Paused: func() bool { return !localPoolTakes(joined, store.WorkerEnabled(jobs.LocalWorker)) }, StallAfter: *stallAfter, // this computer's own switch, and not while joined
 				ShareDown: func(folder string, jobID int64) (worker.ShareDown, bool) {
 					return web.ShareDownFor(store, folder, jobID)
 				}}
@@ -318,8 +320,9 @@ func main() {
 		},
 		ScanNow: sc.ScanNow, NextScan: sc.NextScan, ScanEvery: *every, Settle: *settle, SetScanEvery: sc.SetEvery, Scanning: sc.Scanning, RequeueJob: pool.RequeueJob, PauseNow: pool.PauseNow, StopFile: pool.StopFile,
 		Doctor: chk, DataDir: *data, Version: version, Logs: logs, Port: portOf(*addr), Joiner: &remote.Joiner{Version: version},
-		Preview:    &preview.Previewer{Store: store, Exec: media.OSExec{}, FFprobe: ffprobePath},
-		FirstFiles: &preview.FirstLister{Exec: media.OSExec{}, FFprobe: ffprobePath}})}
+		RoleChanged: joined.SetRole,
+		Preview:     &preview.Previewer{Store: store, Exec: media.OSExec{}, FFprobe: ffprobePath},
+		FirstFiles:  &preview.FirstLister{Exec: media.OSExec{}, FFprobe: ffprobePath}})}
 	go func() {
 		<-ctx.Done()
 		srv.Shutdown(context.Background())
@@ -338,8 +341,9 @@ func main() {
 	} else {
 		log.Printf("shrink-your-shit %s: %d librar%s; web UI at http://%s", version, len(all), map[bool]string{true: "y", false: "ies"}[len(all) == 1], *addr)
 	}
-	go web.RemountShares(store) // saved shares come back after a restart (app mode only)
-	go web.WatchShares(store)   // a library whose share stops answering pauses until it does (app mode only)
+	go web.RemountShares(store)          // saved shares come back after a restart (app mode only)
+	go web.WatchShares(store)            // a library whose share stops answering pauses until it does (app mode only)
+	joined.SetRole(web.SavedRole(store)) // a join saved before this start keeps working without a restart
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		stop()
 		<-workerDone
