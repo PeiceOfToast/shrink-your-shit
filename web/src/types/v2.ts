@@ -101,7 +101,7 @@ export interface Library {
 
 export interface Summary { // GET /summary
   seq: number;
-  badges: { failed24h: number; workersOffline: number; pluginUpdates: number };
+  badges: { failed24h: number; workersOffline: number; pluginUpdates: number; joinRequestsWaiting?: number };
   activity: { converting: number; waiting: number; workersRunning: number };
   jobCounts: Record<JobState, number>;
   last24h: { completed: number; failed: number; skipped: number; successRate: number | null };
