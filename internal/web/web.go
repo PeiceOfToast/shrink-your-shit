@@ -23,7 +23,8 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	mux := http.NewServeMux()
 	api := http.NewServeMux()
 	mux.Handle("/api/", access.guard(api))
-	mux.Handle("/api/worker/v1/", workerAPI(store, eng.Transport, eng.Version, eng)) // V7b1: remote workers, their own tokens
+	joins := newJoinBook(store)                                                             // E2: join requests from new workers
+	mux.Handle("/api/worker/v1/", workerAPI(store, eng.Transport, eng.Version, eng, joins)) // V7b1: remote workers, their own tokens
 	access.routes(api)
 	libraryRoutes(api, store, eng)
 	systemRoutes(api, store, eng)
@@ -35,18 +36,20 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	filesRoutes(api, store, eng) // S5, the Files view
 	workerRoutes(api, store, ss, eng)
 	previewRoutes(api, store, eng)
-	wv := newWorkerView(store, ss, eng)
+	wv := newWorkerView(store, ss, eng, joins)
 	v2Shares(api, store)          // Item D: /api/v2/shares
 	v2Summary(api, store, wv)     // V3c: /api/v2/summary, processing and intake pauses
 	v2Overview(api, store, wv)    // user review 11-12 item 5: /api/v2/overview
 	v2EventStream(api, store, wv) // V3a: /api/v2/events (live updates)
 	v2Workers(api, wv)            // V4a: /api/v2/workers
+	v2JoinRequests(api, wv)       // E2: allow, deny or dismiss a join request
 	v2Libraries(api, store, eng)  // V5b: /api/v2/libraries
 	v2Jobs(api, store)            // V2: /api/v2/jobs
 	v2JobLog(api, store)          // user review 11-13 item E: /api/v2/jobs/{id}/log
 	v2Ladder(api)                 // user review 11-12 item 1: /api/v2/bitrate-ladder
 	v2JobStreams(api, store)      // V3d: /api/v2/activity, per-job streams
 	v2Workflows(api, store, eng)  // UI rebuild, V1: /api/v2 workflows
+	v2Setup(api, store, ss)       // one-command setup: the install's role, GET /api/v2/setup
 	// For health checks: answers without signing in and says nothing else.
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")

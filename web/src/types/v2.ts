@@ -54,6 +54,12 @@ export interface Capability {
   test: "passed" | "failed" | "untested";
   testedAt: Time | null; detail?: string;
 }
+// E4 (ONE-COMMAND-SETUP.md section 9): GET /api/v2/workers/join-requests. A worker that ran the install command asks to
+// join; decided and expired requests stay about 10 minutes so the card can show the outcome.
+export interface JoinRequest {
+  id: ID; name: string; address: string; os?: string; hardware: string | null; url: string;
+  askedAt: Time; expiresAt: Time; state: "waiting" | "expired"; replacesWorker: boolean;
+}
 export interface Worker {
   id: ID; name: string; kind: "local" | "remote";
   host: string; os: "linux" | "windows" | "darwin"; arch: string; appVersion: string;
@@ -95,7 +101,7 @@ export interface Library {
 
 export interface Summary { // GET /summary
   seq: number;
-  badges: { failed24h: number; workersOffline: number; pluginUpdates: number };
+  badges: { failed24h: number; workersOffline: number; pluginUpdates: number; joinRequestsWaiting?: number };
   activity: { converting: number; waiting: number; workersRunning: number };
   jobCounts: Record<JobState, number>;
   last24h: { completed: number; failed: number; skipped: number; successRate: number | null };
@@ -254,3 +260,12 @@ export interface StepDefinition {
   deprecated?: boolean;
   readOnly?: boolean; // migration-only types (video.legacy_settings): kept as they are, never edited (workshop #109)
 }
+
+// Enrollment (ONE-COMMAND-SETUP.md section 11; workshop 00:42Z): GET /api/v2/setup, /setup/servers, POST /setup/role
+export type JoinState = "waiting" | "allowed" | "denied" | "expired" | "unreachable" | "not_local";
+export interface Setup {
+  role: "unset" | "server" | "worker";
+  join: null | { serverName: string; serverUrl: string; state: JoinState; expiresAt: Time | null };
+}
+export interface FoundServer { name: string; address: string; url: string; version: string; matchesVersion: boolean }
+export type RoleBody = { role: "server" | "unset" } | { role: "worker"; serverUrl: string; pairCode?: string };

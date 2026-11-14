@@ -626,6 +626,14 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
   .tbl.wk .num{text-align:left}
 }
 @media (pointer:coarse){.tbl.wk .nowl a{display:inline-flex;align-items:center;min-height:44px}} /* a converting file in a worker row is a 44 px target on touch, as it was in the cards (M7) */
+/* E4 join card (ONE-COMMAND-SETUP.md section 9): above the workers; on a phone Allow and Deny share the width, 44 px tall */
+.joins{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr))}
+.joinc{padding:12px 14px;display:flex;flex-direction:column;gap:6px}.joinc h3{margin:0}.joinc .facts{overflow-wrap:anywhere}
+@media (max-width:640px){.joinc .jbtn>.btn{flex:1 1 0;min-height:44px;justify-content:center}}
+.enroll{max-width:640px;margin:0 auto;width:100%}.enroll h1,.enroll h2{margin:0}
+.enroll-card{align-items:flex-start;padding:14px 16px;min-height:0;cursor:pointer}.enroll-card input{margin-top:3px;accent-color:var(--accent)}
+.enroll-card>span{display:flex;flex-direction:column;gap:2px}.enroll-card.off{cursor:default}.enroll-card.off strong{color:var(--text-2)}
+@media (max-width:640px){.enroll-btns{flex-direction:column;align-items:stretch}.enroll-btns>.btn{justify-content:center;min-height:44px}}
 .addpanel{display:flex;flex-direction:column;gap:8px;max-width:640px}.addpanel textarea{width:100%;resize:none;overflow-wrap:anywhere}
 /* G3 folder picker: a 560 px dialog on desktop, a full-height sheet on phones; the path wraps, rows 44 px */
 .fpick{position:fixed;inset:0;z-index:80;background:rgb(0 0 0/.5);display:flex;align-items:center;justify-content:center;padding:16px}
@@ -642,6 +650,9 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .fpick .ftr{justify-content:flex-start;gap:8px;flex-wrap:wrap}.fpick .ftr .btn.primary{max-width:100%;overflow-wrap:anywhere;white-space:normal;text-align:left}
 .folderrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.folderrow>.input{flex:1 1 240px;min-width:0}
 @media (max-width:640px){.fpick{padding:0;align-items:stretch}.fpick .dlg{width:100%;max-height:none;height:100%;border-radius:0;border:0}}
+/* a small confirm (Settings > This computer): 440 px, stays a centred box on phones */
+.fpick.small .dlg{width:min(440px,100%);height:auto}.fpick.small h2{font-size:var(--fs-lg);margin:0}.fpick.small p{margin:0}
+@media (max-width:640px){.fpick.small{padding:16px;align-items:center}.fpick.small .dlg{border-radius:var(--radius);border:1px solid var(--border-strong)}}
 /* V4 palette (mockup .nd): a column left of the canvas on wide screens */
 .graphwrap.withpal{grid-template-columns:260px minmax(0,1fr) 300px}
 .gpal{align-self:start;max-height:min(72vh,720px);overflow:auto}

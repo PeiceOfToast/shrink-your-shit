@@ -2,7 +2,7 @@
 // screens offer, really applied to that state. Every screen using it shows the Prototype banner. ?mock=fresh shows a
 // new install (no libraries yet) for review. When a contract endpoint lands, its function here becomes the fetch.
 import { useSyncExternalStore } from "react";
-import type { ActivityEvent, ID, Job, JobState, Library, PublishPreview, Settings, Summary, Template, Trash, Worker, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
+import type { ActivityEvent, FoundServer, ID, JoinRequest, JoinState, RoleBody, Setup, Job, JobState, Library, PublishPreview, Settings, Summary, Template, Trash, Worker, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
 import type { FirstFiles, FolderReport, Issue, LibraryItem } from "../types/v1";
 import { branchedDoc, legacyDoc, presetDoc, preview, revision, summary as stepSummary } from "./steps";
 
@@ -68,6 +68,7 @@ interface State {
   trash: Trash; // GET /trash (not on dev yet: mocked like the rest of the page)
   shares: ShareItem[]; // D: network shares
   mode: "app" | "manual" | "docker"; // D: share connect mode
+  setup: Setup; // enrollment (section 11): fresh is unset, running is a server
 }
 
 // D: minimal share item for mock state
@@ -113,7 +114,7 @@ function running(): State {
     ],
     trash: { bytes: 120 * GB, files: 14, nextDeleteAt: ago(-60 * 24), lastDeleteAt: ago(-60 * 24 * 7) },
     mode: shareMode as "app" | "manual" | "docker",
-    shares: [
+    setup: { role: "server", join: null }, shares: [
       { id: "1", name: "Movies NAS", type: "smb", address: "\\\\nas\\movies", guest: false, username: "mediauser", hasPassword: true,
         status: "connected", since: ago(60 * 24 * 30), reason: null,
         path: "/var/lib/syp/shares/movies-nas", libraries: [{ id: "l1", name: "Movies", use: "folder" }], setup: null },
@@ -131,7 +132,7 @@ function fresh(): State {
     settings: { firstRunDone: false, firstRunStep: 1, intakePaused: false, catalogueEnabled: false, firstRunLibrary: null, scanEvery: 30, scanEverySource: "flag" },
     libraries: [],
     workers: [worker("this", "This computer", "paused", [0, 2], [0, 0], 5, [])], // workers start stopped (rebuild decision)
-    jobs: [], waiting: 0, last24h: { completed: 0, failed: 0, skipped: 0, successRate: null }, activity: [], wf: [], trash: { bytes: 0, files: 0, nextDeleteAt: null, lastDeleteAt: null }, shares: [], mode: "app",
+    jobs: [], waiting: 0, last24h: { completed: 0, failed: 0, skipped: 0, successRate: null }, activity: [], wf: [], trash: { bytes: 0, files: 0, nextDeleteAt: null, lastDeleteAt: null }, shares: [], mode: "app", setup: { role: "unset", join: null },
   };
 }
 
@@ -159,7 +160,8 @@ export function summary(s: State): Summary {
   const workersRunning = s.workers.filter((w) => w.status === "online" || w.status === "busy").length;
   return {
     seq: version,
-    badges: { failed24h: s.last24h.failed, workersOffline: s.workers.filter((w) => w.status === "offline" || w.status === "stalled").length, pluginUpdates: 0 },
+    badges: { failed24h: s.last24h.failed, workersOffline: s.workers.filter((w) => w.status === "offline" || w.status === "stalled").length, pluginUpdates: 0,
+      joinRequestsWaiting: joins.filter((j) => j.state === "waiting" && Date.parse(j.expiresAt) > Date.now()).length },
     activity: { converting: active.length, waiting: counts.queued + counts.retry_wait, workersRunning },
     jobCounts: counts,
     // The rate follows the 24 h counts, so a retried failure changes it (completed of completed + failed; skips aren't failures).
@@ -467,6 +469,65 @@ export function workerAction(id: ID, action: "start" | "stop" | "drain"): string
 }
 export function patchWorker(id: ID, p: { name?: string; slots?: { cpu?: number }; tags?: string[] }) {
   change((s) => { const x = s.workers.find((y) => y.id === id); if (!x) return; if (p.name) x.name = p.name; if (p.slots?.cpu) x.slots.cpu.total = p.slots.cpu; if (p.tags) x.tags = p.tags; });
+}
+
+// E4 join requests on the mock (GET /workers joinRequests): three waiting (laptop replaces the existing Laptop), one expired.
+// Allow adds the worker stopped, like any new one; allow, deny and dismiss take the request off the list.
+const at = (min: number) => new Date(Date.now() + min * 60000).toISOString();
+const jr = (id: ID, name: string, address: string, os: string, hardware: string | null, ago: number, state: JoinRequest["state"] = "waiting", replacesWorker = false): JoinRequest =>
+  ({ id, name, address, os, hardware, url: "http://" + address + ":8484", askedAt: at(-ago), expiresAt: at(10 - ago), state, replacesWorker });
+export const joins: JoinRequest[] = mockMode === "fresh" ? [] : [
+  jr("jr3", "attic-pc", "192.168.1.60", "linux", "NVIDIA GeForce RTX 3060", 0.5),
+  jr("jr2", "laptop", "192.168.1.44", "windows", null, 1, "waiting", true),
+  jr("jr1", "nuc", "192.168.1.31", "linux", "Intel UHD Graphics 770", 2),
+  jr("jr4", "pi", "192.168.1.50", "linux", null, 14, "expired"),
+];
+const NOT_FOUND = "There is no such request. It may have been answered already.";
+const take = (id: ID) => { const i = joins.findIndex((x) => x.id === id); return i < 0 ? null : joins.splice(i, 1)[0]; };
+const openJoin = (id: ID) => { const j = joins.find((x) => x.id === id); return !j ? NOT_FOUND : j.state !== "waiting" || Date.parse(j.expiresAt) <= Date.now() ? "This request has expired. Run the install command on that computer again." : j; };
+export function allowJoin(id: ID): { worker: Worker } | string {
+  const j = openJoin(id); if (typeof j === "string") return j;
+  const w: Worker = { ...worker("w-" + j.id, j.name, "paused", [0, 2], [0, j.hardware ? 1 : 0], 0, []), os: (j.os ?? "linux") as Worker["os"] };
+  change((s) => { take(id); s.workers = [...s.workers.filter((x) => x.name.toLowerCase() !== j.name.toLowerCase()), w]; });
+  return { worker: w };
+}
+export function denyJoin(id: ID): string | null {
+  const j = openJoin(id); if (typeof j === "string") return j;
+  change(() => { take(id); });
+  return null;
+}
+export function dismissJoin(id: ID): string | null {
+  if (!joins.some((x) => x.id === id)) return NOT_FOUND;
+  change(() => { take(id); });
+  return null;
+}
+// Enrollment. A join's outcome comes from the address typed, so every state can be seen: "unreach" can't be reached,
+// "noserver" isn't a server, "far" is another network (not_local), "deny" says no, "expire" runs out (after 5 s, not 10 min); anything
+// else (and the found nas) is allowed after 5 s. Pairing code 123456 joins, 000000 has expired, others are wrong.
+export const foundServers: FoundServer[] = [
+  { name: "nas", address: "192.168.1.10", url: "http://192.168.1.10:8484", version: "2.0.0", matchesVersion: true },
+  { name: "old-box", address: "192.168.1.20", url: "http://192.168.1.20:8484", version: "1.3.0", matchesVersion: false },
+];
+let joinTimer: ReturnType<typeof setTimeout> | undefined;
+export function setRole(b: RoleBody): Setup | { error: { code: string; message: string } } {
+  clearTimeout(joinTimer);
+  // Settings > This computer: a set role doesn't change while jobs convert (409 role_change_busy, workshop 00:43Z)
+  const busy = state.jobs.filter((j) => j.state === "running").length, cur = state.setup.role;
+  if (busy && b.role !== cur && (cur === "server" || (cur === "worker" && state.setup.join?.state !== "waiting")))
+    return { error: { code: "role_change_busy", message: busy + " jobs are converting now.", runningJobs: busy } as { code: string; message: string } };
+  if (b.role !== "worker") { change((s) => { s.setup = { role: b.role, join: null }; if (b.role === "server") s.settings.firstRunStep = 1; }); return state.setup; }
+  const u = b.serverUrl, host = u.replace(/^https?:\/\//, "").replace(/[:/].*$/, ""), name = foundServers.find((f) => f.url === u)?.name ?? host;
+  if (/unreach/.test(u)) return { error: { code: "server_unreachable", message: "no answer on port 8484" } };
+  if (/noserver/.test(u)) return { error: { code: "not_a_server", message: "Not a Shrink Your Shit server." } };
+  if (b.pairCode !== undefined) {
+    if (b.pairCode === "000000") return { error: { code: "pair_code_expired", message: "That code has expired." } };
+    if (b.pairCode !== "123456") return { error: { code: "pair_code_invalid", message: "That code isn't right." } };
+  }
+  const at = (st: JoinState) => change((s) => { s.setup = { role: "worker", join: { serverName: name, serverUrl: u, state: st, expiresAt: new Date(Date.now() + 10 * 60000).toISOString() } }; });
+  if (b.pairCode !== undefined) at("allowed");
+  else if (/far/.test(u)) at("not_local");
+  else { at("waiting"); joinTimer = setTimeout(() => at(/deny/.test(u) ? "denied" : /expire/.test(u) ? "expired" : "allowed"), 5000); }
+  return state.setup;
 }
 
 // D: share actions

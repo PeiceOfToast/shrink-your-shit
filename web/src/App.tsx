@@ -17,7 +17,11 @@ import { Workflows } from "./screens/Workflows";
 import { WorkflowStack } from "./screens/WorkflowStack";
 import { WorkflowGraph } from "./screens/WorkflowGraph";
 import { navigate, usePath } from "./router";
-import { Shell } from "./Shell";
+import { Shell, ThemeMenu } from "./Shell";
+import { Icon } from "./Icon";
+import { WorkerHome } from "./screens/Enroll";
+import { getSetup } from "./setupApi";
+import { useData } from "./useData";
 
 export function App() {
   const raw = usePath();
@@ -31,13 +35,23 @@ export function App() {
   // Screens on the real server (no Sample data pill): Dashboard, Libraries, first run, Workflows, the step list, Jobs.
   const real = !MOCK && (start || signin || path === "/libraries" || path.startsWith("/libraries/") || path === "/workflows" || /^\/workflows\/[^/]+(\/graph)?$/.test(path) || path === "/jobs" || path === "/" || path === "/workers" || /^\/workers\/[^/]+$/.test(path));
   const title = settings ? "Settings" : start ? "Set up" : signin ? "Sign in" : item ? item.label : "Page not found";
+  // A computer that joined another server shows only its worker page, at every address but Settings (Change role).
+  const su = useData(getSetup, []), joined = su.data?.role === "worker" && (!su.data.join || su.data.join.state === "allowed");
   useEffect(() => { document.title = title + " · Shrink Your Shit"; }, [title]);
   // A server whose first run isn't done opens on it (IA.md: shown until done). Upgrades from v1 have it done.
   useEffect(() => {
     if (MOCK || path !== "/") return;
-    getSettings().then((r) => { if (!failed(r) && !r.firstRunDone && (location.pathname === "/" || location.pathname === "")) navigate("/start"); })
+    Promise.all([getSettings(), getSetup()]).then(([r, s]) => { // a joined worker stays on its own page
+      if (!failed(r) && !r.firstRunDone && !(!failed(s) && s.role === "worker" && (!s.join || s.join.state === "allowed")) && (location.pathname === "/" || location.pathname === "")) navigate("/start"); })
       .catch((e) => { if (!(e instanceof SignedOut)) throw e; });
   }, [path]);
+  if (joined && !settings && !start && !signin) return (
+    <>
+      <div dangerouslySetInnerHTML={{ __html: sprite }} />
+      <header className="topbar"><span className="brand"><span className="logo"><Icon id="i-layers" /></span><span className="t">Shrink Your Shit</span></span><div className="sp" /><ThemeMenu /></header>
+      <main className="content" id="main"><WorkerHome setup={su.data!} /></main>
+    </>
+  );
   return (
     <>
       <div dangerouslySetInnerHTML={{ __html: sprite }} />

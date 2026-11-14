@@ -442,7 +442,36 @@ func parseAddressForm(raw string) (addr, typ string, err error) {
 	return "", "", errors.New("Address must start with \\\\ or smb:// for SMB, or server:/export for NFS.")
 }
 
+// uidMapFile is the kernel's user-namespace map for this process. A package var so tests can point
+// it at a fake map.
+var uidMapFile = "/proc/self/uid_map"
+
+// inUserNamespace reports whether the process is in a user namespace (for example Docker inside a
+// Proxmox LXC), which stops the kernel allowing NFS and SMB mounts. The map is the whole host range
+// ("0 0 4294967295") outside one. An unreadable map counts as not in one.
+func inUserNamespace() bool {
+	b, err := os.ReadFile(uidMapFile)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if f := strings.Fields(line); len(f) == 3 && f[0] == "0" && f[1] == "0" && f[2] == "4294967295" {
+			return false
+		}
+	}
+	return true
+}
+
 func detectMode() (mode, platform string) {
+	if runtime.GOOS == "linux" {
+		// app mode when the helper socket answers (dial with 1s timeout). This comes before the
+		// Docker checks: in the image the entrypoint starts the helper, and then the app mounts itself.
+		conn, err := net.DialTimeout("unix", helper.HelperSocket, time.Second)
+		if err == nil {
+			conn.Close()
+			return "app", runtime.GOOS
+		}
+	}
 	if os.Getenv("container") != "" {
 		return "docker", runtime.GOOS
 	}
@@ -451,14 +480,6 @@ func detectMode() (mode, platform string) {
 	}
 	if onWindows() { // the app runs as the person, and connects the share itself
 		return "app", runtime.GOOS
-	}
-	if runtime.GOOS == "linux" {
-		// app mode when the helper socket answers (dial with 1s timeout)
-		conn, err := net.DialTimeout("unix", helper.HelperSocket, time.Second)
-		if err == nil {
-			conn.Close()
-			return "app", runtime.GOOS
-		}
 	}
 	return "manual", runtime.GOOS
 }
@@ -723,10 +744,26 @@ func setupForMode(store *jobs.Store, sh jobs.Share) any {
 				note = "# Put " + envName + "=<the share password> in the .env file beside your compose file (chmod 600 .env).\n"
 			}
 		}
+		// Offer the app's own mount only when the container can make one. In a user namespace it can't,
+		// so the text says why and gives only the volume.
+		// In a user namespace Docker's own volume can't mount NFS or SMB either (the kernel refuses both
+		// there), so the share has to be mounted outside and passed in as a folder.
+		if inUserNamespace() {
+			return map[string]any{
+				"kind": "compose",
+				"text": "# This container runs in a user namespace (for example an unprivileged Proxmox LXC), so neither the app nor Docker can mount network shares here.\n" +
+					"# Mount the share on the Proxmox host, pass the folder into the LXC (pct set <id> -mp0 <host folder>,mp=/mnt/" + vol + "),\n" +
+					"# then add under services: shrink-your-shit: volumes: in your compose file:\n      - " + fmt.Sprintf("%q", "/mnt/"+vol+":"+mpt),
+				"removeText": fmt.Sprintf("Remove the %q line from your compose file and restart.", "/mnt/"+vol+":"+mpt),
+			}
+		}
+		prefix := "# To let the app mount this share itself, add these lines under services: shrink-your-shit: and restart:\n" +
+			"    cap_add:\n      - SYS_ADMIN\n      - DAC_READ_SEARCH\n    security_opt:\n      - \"apparmor:unconfined\"\n" +
+			"# Or mount it with a Docker volume instead:\n"
 		return map[string]any{
 			"kind": "compose",
 			// Pasted into an existing compose file, so no top-level keys: each part says where it goes.
-			"text": note + "# Add under the top-level volumes: in your compose file:\n  " + vol + ":\n    driver_opts:\n" + driver +
+			"text": prefix + note + "# Add under the top-level volumes: in your compose file:\n  " + vol + ":\n    driver_opts:\n" + driver +
 				"\n\n# Add under services: shrink-your-shit: volumes: in your compose file:\n      - " +
 				fmt.Sprintf("%q", vol+":"+mpt),
 			"removeText": fmt.Sprintf("Remove the %q volume from your compose file and restart.", vol),

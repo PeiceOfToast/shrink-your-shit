@@ -179,7 +179,7 @@ func TestWorkerAPIRefusesPlainHTTPFromOutside(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	h := workerAPI(st, Transport{}, "test", Engine{DataDir: t.TempDir()})
+	h := workerAPI(st, Transport{}, "test", Engine{DataDir: t.TempDir()}, newJoinBook(st))
 	for _, xfp := range []string{"", "https"} {
 		r := httptest.NewRequest("POST", "/api/worker/v1/pair", strings.NewReader(`{"code":"x"}`))
 		r.RemoteAddr = "203.0.113.9:4000"
@@ -206,7 +206,7 @@ func TestPairingTriesAreLimited(t *testing.T) {
 	defer st.Close()
 	delay := PairFailDelay
 	defer func() { PairFailDelay = delay }()
-	h := workerAPI(st, Transport{}, "test", Engine{DataDir: t.TempDir()})
+	h := workerAPI(st, Transport{}, "test", Engine{DataDir: t.TempDir()}, newJoinBook(st))
 	pairFrom := func(peer, code string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("POST", "/api/worker/v1/pair", strings.NewReader(`{"code":"`+code+`"}`))
 		r.RemoteAddr = peer + ":4000"
@@ -300,7 +300,7 @@ func TestEachWorkerOnAndOff(t *testing.T) {
 // V7d: a worker on another version is told what to do (Q7: no self-update); one on this version isn't.
 func TestRemoteWorkerUpdateWords(t *testing.T) {
 	_, st, _, _ := libServer(t, false)
-	v := newWorkerView(st, &settingsStore{store: st}, Engine{Version: "1.5.0"})
+	v := newWorkerView(st, &settingsStore{store: st}, Engine{Version: "1.5.0"}, newJoinBook(st))
 	for ver, want := range map[string]string{"1.4.0": "This worker runs 1.4.0; the server runs 1.5.0. Install 1.5.0 on that computer, then start the worker again.", "1.5.0": ""} {
 		code, _, _ := st.NewPairing(time.Now())
 		rw, _, err := st.Pair(code, "W "+ver, ver, 1, "", time.Now())
@@ -346,7 +346,7 @@ func TestWorkerHoldingBack(t *testing.T) {
 			t.Fatalf("heartbeat %d %s", c, b)
 		}
 	}
-	v := newWorkerView(st, &settingsStore{store: st}, Engine{})
+	v := newWorkerView(st, &settingsStore{store: st}, Engine{}, newJoinBook(st))
 	v.checkStatuses(context.Background(), true) // the first check only takes note
 	events := func() int {
 		var n int

@@ -4,6 +4,7 @@ package web
 
 import (
 	"errors"
+	"io/fs"
 	"strings"
 	"testing"
 
@@ -38,9 +39,14 @@ func TestIntelFailureSaysWhy(t *testing.T) {
 	}
 
 	renderNodes = func() []string { return []string{"/dev/dri/renderD128"} }
-	openRender = func(path string) error { return errors.New("permission denied") }
-	if d := detail("hevc_qsv"); d != "Can't open /dev/dri/renderD128: the app's user isn't in its group. In Docker, set group_add to the host's render group id (getent group render | cut -d: -f3); on a host install, add the app's user to the render group." {
-		t.Errorf("not in group: %q", d)
+	openRender = func(path string) error { return &fs.PathError{Op: "open", Path: path, Err: fs.ErrPermission} }
+	if d := detail("hevc_qsv"); !strings.HasPrefix(d, "Can't open /dev/dri/renderD128: the app's user isn't allowed to.") || strings.Contains(d, "group_add") {
+		t.Errorf("not allowed: %q", d)
+	}
+	// Any other open error is shown as it is, not blamed on the group.
+	openRender = func(string) error { return errors.New("no such device") }
+	if d := detail("hevc_qsv"); d != "Can't open /dev/dri/renderD128: no such device." {
+		t.Errorf("other open error: %q", d)
 	}
 
 	openRender = func(string) error { return nil }
