@@ -178,7 +178,7 @@ func (b *joinBook) get(id, secret string, now time.Time) (string, joinReq, error
 	return b.state(&req, now), req, nil
 }
 
-// pending lists requests the person still has to act on (waiting or expired), newest first.
+// pending lists requests the person still has to act on (waiting, expired, or a not-connected notice), newest first.
 func (b *joinBook) pending(now time.Time) []joinReq {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -194,11 +194,12 @@ func (b *joinBook) pending(now time.Time) []joinReq {
 	return out
 }
 
-// waiting counts requests still open for an answer (not the expired ones). This is the summary badge.
+// waiting counts requests still open for an answer (not the expired ones, nor a not-connected notice). This is the
+// summary badge.
 func (b *joinBook) waiting(now time.Time) int {
 	n := 0
 	for _, r := range b.pending(now) {
-		if now.Before(r.expiresAt) {
+		if r.decision == "" && now.Before(r.expiresAt) {
 			n++
 		}
 	}
@@ -443,7 +444,10 @@ func (v *workerView) joinViews(now time.Time) []map[string]any {
 	out := []map[string]any{}
 	for _, r := range v.joins.pending(now) {
 		state := "waiting"
-		if !now.Before(r.expiresAt) {
+		switch {
+		case r.decision == "not_connected":
+			state = "not_connected"
+		case !now.Before(r.expiresAt):
 			state = "expired"
 		}
 		addr := r.address.WithZone("") // a link-local zone (fe80::1%eth0) would make a URL browsers can't open
