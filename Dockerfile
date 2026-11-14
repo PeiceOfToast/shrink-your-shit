@@ -37,7 +37,13 @@ RUN set -eux; \
     useradd -u 1000 -m syp; \
     mkdir -p /config /media /var/lib/syp/shares; \
     chown syp /config /media
-COPY --from=build /out/shrink-your-shit /usr/local/bin/shrink-your-shit
+COPY --from=build /out/shrink-your-shit /usr/local/lib/shrink-your-shit/shrink-your-shit
+# docker exec runs as root; this wrapper runs the app as syp so token/doctor/restore see what the app sees
+# and never leave root-owned files in /config.
+RUN printf '%s\n' '#!/bin/sh' \
+    'APP=/usr/local/lib/shrink-your-shit/shrink-your-shit' \
+    'if [ "$(id -u)" = 0 ]; then exec setpriv --reuid=1000 --regid=1000 --init-groups "$APP" "$@"; fi' \
+    'exec "$APP" "$@"' > /usr/local/bin/shrink-your-shit && chmod 0755 /usr/local/bin/shrink-your-shit
 COPY --from=build /out/syp-network-helper /usr/local/bin/syp-network-helper
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh
