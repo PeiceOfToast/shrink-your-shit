@@ -60,3 +60,34 @@ func TestLeases(t *testing.T) {
 		t.Error("the old lease renewed")
 	}
 }
+
+// Once the server has accepted a worker's done report it finishes the job with no worker renewing the lease.
+// The lease's own time runs out during that finish; the expired-lease sweep must not requeue the job, and the
+// finish must end it Done. A report from a worker that no longer holds the lease is refused.
+func TestAFinishingJobIsNotRequeued(t *testing.T) {
+	s := open(t)
+	s.SetPaused(false)
+	now := time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)
+	s.now = func() time.Time { return now }
+	id, _ := s.Enqueue(Job{Path: "/m/a.mkv"})
+	if _, err := s.Claim("w1"); err != nil {
+		t.Fatal(err)
+	}
+	lease, _ := s.LeaseOf(id)
+	if ok, err := s.HoldThroughFinish(id, "not-the-lease"); ok || err != nil {
+		t.Fatalf("a stranger's lease held the finish: %v %v", ok, err)
+	}
+	now = now.Add(LeaseFor + time.Minute) // the worker's lease has run out by now
+	if ok, err := s.HoldThroughFinish(id, lease); !ok || err != nil {
+		t.Fatalf("the holder's report was refused: %v %v", ok, err)
+	}
+	if n, err := s.RequeueExpiredLeases(0); n != 0 || err != nil {
+		t.Fatalf("the sweep took a job the server is finishing: %d %v", n, err)
+	}
+	if err := s.Complete(id, "/m/a.mkv", 1); err != nil {
+		t.Fatal(err)
+	}
+	if j, _ := s.Get(id); j.Status != Done {
+		t.Errorf("finished job is %s, want done", j.Status)
+	}
+}
