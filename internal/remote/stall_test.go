@@ -176,11 +176,13 @@ func (x slowThenReal) Stream(ctx context.Context, onLine func(string), name stri
 // renews the lease; one that takes longer than LeaseFor is not taken back and run again, but finishes once.
 func TestRemoteEncodeOfUnknownLengthKeepsItsLease(t *testing.T) {
 	needFFmpeg(t)
-	oldLease, oldPoll, oldEvery := jobs.LeaseFor, PlanPoll, ProgressEvery
+	oldLease, oldPoll, oldEvery, oldRenew := jobs.LeaseFor, PlanPoll, ProgressEvery, RenewEvery
 	// ffmpeg prints its position about every 0.5 s (its -progress cadence): the lease must outlast that and the
-	// real encode's start, or a slow run loses it between two reports (ffmpeg 8 CI, 2026-11-12)
-	jobs.LeaseFor, PlanPoll, ProgressEvery = 1500*time.Millisecond, 50*time.Millisecond, 20*time.Millisecond
-	defer func() { jobs.LeaseFor, PlanPoll, ProgressEvery = oldLease, oldPoll, oldEvery }()
+	// real encode's start, or a slow run loses it between two reports (ffmpeg 8 CI, 2026-11-12). The worker
+	// renews between reports (keepLease), every RenewEvery: well inside LeaseFor even on a loaded host, where
+	// the checks and upload after the encode can take longer than LeaseFor (the 2026-11-14 flake).
+	jobs.LeaseFor, PlanPoll, ProgressEvery, RenewEvery = 1500*time.Millisecond, 50*time.Millisecond, 20*time.Millisecond, 200*time.Millisecond
+	defer func() { jobs.LeaseFor, PlanPoll, ProgressEvery, RenewEvery = oldLease, oldPoll, oldEvery, oldRenew }()
 	srv, st, lib := stallServer(t, 5*time.Second)
 	id := remoteJobLen(t, st, lib, 0)
 	c := pairClient(t, srv, st)
@@ -191,7 +193,12 @@ func TestRemoteEncodeOfUnknownLengthKeepsItsLease(t *testing.T) {
 	var j jobs.Job
 	for end := time.Now().Add(30 * time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
 		st.RequeueExpiredLeases(0) // what the server's sweep does
-		if j, _ = st.Get(id); j.Status != jobs.Queued && j.Status != jobs.Running {
+		got, err := st.Get(id)
+		if err != nil { // a read that failed is not the job's state: look again
+			t.Logf("reading the job: %v", err)
+			continue
+		}
+		if j = got; j.Status != jobs.Queued && j.Status != jobs.Running {
 			break
 		}
 	}

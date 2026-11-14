@@ -179,6 +179,7 @@ func (c *Client) workOne(ctx context.Context, cv Converter) (did bool, err error
 	if err != nil || l == nil {
 		return false, err
 	}
+	defer c.keepLease(ctx, l)()
 	dir := filepath.Join(cv.Work, filepath.Base(l.ID))
 	defer os.RemoveAll(dir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -255,6 +256,31 @@ type Plan struct {
 	Snapshot                      rules.Snapshot
 	Subtitles                     int
 	SourceOnWorker, StageOnWorker string // V7c: through a shared folder; "" = transfer
+}
+
+// RenewEvery is how often a worker renews a lease it holds between its reports (well inside jobs.LeaseFor).
+var RenewEvery = 10 * time.Second
+
+// keepLease renews l every RenewEvery until the returned stop is called. The download, the checks and the
+// upload report nothing, so without this a slow one loses the lease and the job runs again (the local
+// worker renews its lease the same way, on a ticker). Asking for the plan renews the lease and changes nothing.
+func (c *Client) keepLease(ctx context.Context, l *Lease) (stop func()) {
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(RenewEvery)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				if res, err := c.request(ctx, http.MethodGet, "leases/"+l.ID+"/plan", nil, nil); err == nil {
+					res.Body.Close()
+				}
+			}
+		}
+	}()
+	return func() { close(done) }
 }
 
 // plan waits for the server to make the job's plan (asking renews the lease).
