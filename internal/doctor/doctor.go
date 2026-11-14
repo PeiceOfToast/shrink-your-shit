@@ -63,14 +63,13 @@ type Tools struct {
 var softwareEncoders = []string{"libx265", "libx264", "libsvtav1", "libvpx-vp9"}
 
 // hardwareEncoders are the graphics encoders tested, in this order: per family HEVC, then H.264, then AV1
-// (HEVC first, so a family that has it keeps it as the default primary encoder); hevc_mf and hevc_v4l2m2m last.
+// (HEVC first, so a family that has it keeps it as the default primary encoder).
 var hardwareEncoders = []string{
 	"hevc_nvenc", "h264_nvenc", "av1_nvenc",
 	"hevc_qsv", "h264_qsv", "av1_qsv",
 	"hevc_vaapi", "h264_vaapi", "av1_vaapi",
 	"hevc_amf", "h264_amf", "av1_amf",
 	"hevc_videotoolbox", "h264_videotoolbox", "av1_videotoolbox",
-	"hevc_mf", "hevc_v4l2m2m",
 }
 
 // has10Bit says whether enc gets the 10-bit test: HEVC and AV1 only (H.264 has no 10-bit profile here).

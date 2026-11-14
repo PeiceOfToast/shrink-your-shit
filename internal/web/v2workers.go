@@ -316,9 +316,8 @@ func gpuVendor(v string) string {
 var encoderLabels = map[string]string{
 	"libx265": "x265, HEVC (processor)", "libx264": "x264, H.264 (processor)", "libsvtav1": "SVT-AV1 (processor)", "libvpx-vp9": "VP9 (processor)",
 	"hevc_nvenc": "NVIDIA NVENC, HEVC (graphics card)", "hevc_qsv": "Intel Quick Sync, HEVC (graphics)", "hevc_vaapi": "VA-API, HEVC (graphics)",
-	"hevc_amf": "AMD AMF, HEVC (graphics card)", "hevc_videotoolbox": "VideoToolbox, HEVC (Apple)", "hevc_mf": "Media Foundation, HEVC (graphics)",
-	"hevc_v4l2m2m": "V4L2, HEVC (hardware)",
-	"h264_nvenc":   "NVIDIA NVENC, H.264 (graphics card)", "av1_nvenc": "NVIDIA NVENC, AV1 (graphics card)",
+	"hevc_amf": "AMD AMF, HEVC (graphics card)", "hevc_videotoolbox": "VideoToolbox, HEVC (Apple)",
+	"h264_nvenc": "NVIDIA NVENC, H.264 (graphics card)", "av1_nvenc": "NVIDIA NVENC, AV1 (graphics card)",
 	"h264_qsv": "Intel Quick Sync, H.264 (graphics)", "av1_qsv": "Intel Quick Sync, AV1 (graphics)",
 	"h264_vaapi": "VA-API, H.264 (graphics)", "av1_vaapi": "VA-API, AV1 (graphics)",
 	"h264_amf": "AMD AMF, H.264 (graphics card)", "av1_amf": "AMD AMF, AV1 (graphics card)",
@@ -409,7 +408,7 @@ const (
 // graphicsEncoder says whether an encoder name is a graphics-card one, by the family suffix doctor
 // probes (hevc_nvenc, hevc_qsv, ...), whether or not this computer has it. Processor encoders are not.
 func graphicsEncoder(e string) bool {
-	for _, s := range []string{"_nvenc", "_qsv", "_vaapi", "_amf", "_videotoolbox", "_mf", "_v4l2m2m"} {
+	for _, s := range []string{"_nvenc", "_qsv", "_vaapi", "_amf", "_videotoolbox"} {
 		if strings.HasSuffix(e, s) {
 			return true
 		}
@@ -440,7 +439,36 @@ func encoderDevice(e string) string {
 	if found {
 		return "found"
 	}
+	// A render node whose vendor we can't read may be this encoder's card: we don't know, so we don't say it's missing.
+	if !strings.HasSuffix(e, "_nvenc") && unknownVendor() {
+		return ""
+	}
 	return "missing"
+}
+
+// unknownVendor says whether a render node is present whose PCI vendor can't be read.
+func unknownVendor() bool {
+	for _, n := range renderNodes() {
+		if renderVendor(n) == "" {
+			return true
+		}
+	}
+	return false
+}
+
+// missingCard is the line for a graphics encoder whose card is not in this computer.
+func missingCard(e string) string {
+	switch {
+	case strings.HasSuffix(e, "_nvenc"):
+		return "No NVIDIA graphics card in this computer (/dev/nvidia0 is missing). In Docker, give the container the NVIDIA device and restart; on a host install, check the NVIDIA driver is loaded."
+	case strings.HasSuffix(e, "_qsv"):
+		return "No Intel graphics card in this computer."
+	case strings.HasSuffix(e, "_vaapi"):
+		return "No Intel or AMD graphics card in this computer."
+	case strings.HasSuffix(e, "_amf"):
+		return "No AMD graphics card in this computer."
+	}
+	return "No graphics card in this computer."
 }
 
 var openRender = func(path string) error {
@@ -517,13 +545,17 @@ func capabilities(t doctor.Tools, ok bool) []map[string]any {
 	for _, e := range t.HardwareListed {
 		test, detail := "failed", failed
 		switch {
+		case encoderDevice(e) == "missing":
+			// ffmpeg lists the encoder, but this computer has no card for it: not a fault, not there.
+			test, detail = "not_present", missingCard(e)
+			if usesDevDRI && len(renderNodes()) == 0 && (strings.HasSuffix(e, "_qsv") || strings.HasSuffix(e, "_vaapi")) {
+				detail += " " + intelFailure() // no /dev/dri at all: say how to give it to the container
+			}
 		case otherFormatPassed(t.Hardware, e):
 			// The card does this family's other format, so only this one is missing.
 			test, detail = "unsupported", "Not supported by this graphics card."
 		case usesDevDRI && (strings.HasSuffix(e, "_qsv") || strings.HasSuffix(e, "_vaapi")):
 			detail = intelFailure()
-		case strings.HasSuffix(e, "_nvenc") && encoderDevice(e) == "missing":
-			detail = "No NVIDIA card here (/dev/nvidia0 is missing). In Docker, give the container the NVIDIA device and restart; on a host install, check the NVIDIA driver is loaded."
 		}
 		add("encoder", e, encoderLabels[e], "gpu", test, detail)
 		annotate(e, "gpu")

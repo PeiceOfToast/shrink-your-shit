@@ -19,6 +19,7 @@ func TestIntelFailureSaysWhy(t *testing.T) {
 		renderNodes, openRender, usesDevDRI, renderVendor, nvidiaDevicePresent = origNodes, origOpen, origDRI, origVendor, origNvidia
 	})
 	usesDevDRI = true
+	renderVendor = func(string) string { return vendorIntel } // the Intel node the cases below open
 
 	detail := func(enc string) string {
 		for _, c := range capabilities(doctor.Tools{HardwareListed: []string{enc}}, true) {
@@ -72,7 +73,7 @@ func TestIntelFailureSaysWhy(t *testing.T) {
 
 	// NVENC says the card is missing when /dev/nvidia0 is, and keeps the generic line when it is there.
 	nvidiaDevicePresent = func() bool { return false }
-	if d := detail("hevc_nvenc"); !strings.HasPrefix(d, "No NVIDIA card here (/dev/nvidia0 is missing).") {
+	if d := detail("hevc_nvenc"); !strings.HasPrefix(d, "No NVIDIA graphics card in this computer (/dev/nvidia0 is missing).") {
 		t.Errorf("nvenc without the device: %q", d)
 	}
 	nvidiaDevicePresent = func() bool { return true }
@@ -80,11 +81,11 @@ func TestIntelFailureSaysWhy(t *testing.T) {
 		t.Errorf("nvenc with the device: %q", d)
 	}
 
-	// Other encoders never get the device lines, even with no device.
+	// AMF with no AMD render node says the card is not in this computer (its test is not_present).
 	nvidiaDevicePresent = func() bool { return true }
 	renderNodes = func() []string { return nil }
-	if d := detail("hevc_amf"); d != failed {
-		t.Errorf("amf: %q", d)
+	if d := detail("hevc_amf"); d != "No AMD graphics card in this computer." {
+		t.Errorf("amf without a card: %q", d)
 	}
 
 	// Off Linux (Windows Quick Sync uses D3D11, not /dev/dri) the device lines would mislead.

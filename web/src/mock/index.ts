@@ -2,7 +2,7 @@
 // screens offer, really applied to that state. Every screen using it shows the Prototype banner. ?mock=fresh shows a
 // new install (no libraries yet) for review. When a contract endpoint lands, its function here becomes the fetch.
 import { useSyncExternalStore } from "react";
-import type { ActivityEvent, FoundServer, ID, JoinRequest, JoinState, RoleBody, Setup, Job, JobState, Library, PublishPreview, Settings, Summary, Template, Trash, Worker, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
+import type { ActivityEvent, Capability, FoundServer, ID, JoinRequest, JoinState, RoleBody, Setup, Job, JobState, Library, PublishPreview, Settings, Summary, Template, Trash, Worker, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
 import type { FirstFiles, FolderReport, Issue, LibraryItem } from "../types/v1";
 import { branchedDoc, legacyDoc, presetDoc, preview, revision, summary as stepSummary } from "./steps";
 
@@ -30,6 +30,12 @@ function worker(id: ID, name: string, status: Worker["status"], cpu: [number, nu
     live: { cpuPercent: null, memUsedBytes: null, memTotalBytes: null, gpu: [] }, gpus: [], ffmpeg: null, capabilities: [],
     currentJobIds: jobs, tags: [], pool: null, schedule: null, pathMappings: [],
   };
+}
+// running sample: This computer has working Intel Quick Sync (picked first) and no NVIDIA card
+function tested(w: Worker, qsv: boolean): Worker {
+  const c = (key: string, label: string, slot: "cpu" | "gpu", ok: boolean, device?: string): Capability => ({ key: "encoder:" + key, kind: "encoder", label, slot, test: ok ? "passed" : "failed", testedAt: ago(60), ...(device ? { device } : {}), ...(ok ? {} : { detail: "No graphics device here." }) });
+  return { ...w, primaryEncoder: qsv ? "hevc_qsv" : "cpu", capabilities: [c("libx264", "H.264", "cpu", true), c("libx265", "HEVC", "cpu", true), c("libsvtav1", "AV1", "cpu", true),
+    c("h264_qsv", "Intel Quick Sync, H.264", "gpu", qsv, qsv ? "found" : "missing"), c("hevc_qsv", "Intel Quick Sync, HEVC", "gpu", qsv, qsv ? "found" : "missing"), c("hevc_nvenc", "NVIDIA, HEVC", "gpu", false, "missing")] };
 }
 function job(id: ID, name: string, lib: [ID, string], state: JobState, extra: Partial<Job>): Job {
   return {
@@ -87,7 +93,7 @@ function running(): State {
   return {
     settings: { firstRunDone: true, firstRunStep: 4, intakePaused: false, catalogueEnabled: false, firstRunLibrary: null, scanEvery: 45, scanEverySource: "flag" }, // 45 s: the flag's unlisted value
     libraries: [{ ...library("l1", "Movies", "/media/movies", 8.1 * GB, 780 * GB, 1600), bytes: { freed: 8.1 * GB, waitingToFree: 780 * GB, grew: 1.1 * GB } }, library("l2", "TV Shows", "/media/tv", 0, 410 * GB, 900), { ...library("l3", "Home videos", "/media/home", 28.3 * GB, 10 * GB, 300), workflowId: "w2", workflowName: "Home videos - my rules" }],
-    workers: [worker("this", "This computer", "busy", [1, 2], [0, 1], 120, ["j-48213"]), worker("nas", "NAS box", "busy", [1, 1], [0, 0], 300, ["j-48214"]), worker("laptop", "Laptop", "offline", [0, 1], [0, 0], 22, [])],
+    workers: [tested(worker("this", "This computer", "busy", [1, 2], [0, 1], 120, ["j-48213"]), true), tested(worker("nas", "NAS box", "busy", [1, 1], [0, 0], 300, ["j-48214"]), false), worker("laptop", "Laptop", "offline", [0, 1], [0, 0], 22, [])],
     jobs: [
       job("j-48213", "Dune.Part.Two.2024.2160p.REMUX.mkv", MOVIES, "running", { subState: "converting", worker: { id: "this", name: "This computer" }, currentStep: step(3, "Convert video"), startedAt: ago(12),
         progress: { stage: "Converting video", percent: 62, workflowPercent: 55, elapsedS: 728, speed: 1.7, etaS: 450, fps: 41, bitrateKbps: 9800 } }),
@@ -467,8 +473,15 @@ export function workerAction(id: ID, action: "start" | "stop" | "drain"): string
   change((s) => { const x = s.workers.find((y) => y.id === id)!; x.status = action === "start" ? (x.currentJobIds.length ? "busy" : "online") : action === "drain" && x.currentJobIds.length ? "draining" : "paused"; x.statusSince = new Date().toISOString(); if (action === "stop") (x.currentJobIds = []), (x.slots.cpu.used = 0); });
   return null;
 }
-export function patchWorker(id: ID, p: { name?: string; slots?: { cpu?: number }; tags?: string[] }) {
-  change((s) => { const x = s.workers.find((y) => y.id === id); if (!x) return; if (p.name) x.name = p.name; if (p.slots?.cpu) x.slots.cpu.total = p.slots.cpu; if (p.tags) x.tags = p.tags; });
+export function patchWorker(id: ID, p: { name?: string; slots?: { cpu?: number }; tags?: string[]; primaryEncoder?: string }) {
+  change((s) => { const x = s.workers.find((y) => y.id === id); if (!x) return; if (p.primaryEncoder) x.primaryEncoder = p.primaryEncoder; if (p.name) x.name = p.name; if (p.slots?.cpu) x.slots.cpu.total = p.slots.cpu; if (p.tags) x.tags = p.tags; });
+}
+
+// PATCH primaryEncoder: 409 encoder_not_working unless that encoder's test passed
+export function primaryProblem(id: ID, enc: string): string | null {
+  const w = mockState().workers.find((y) => y.id === id);
+  if (enc === "cpu" || w?.capabilities.some((c) => c.key === "encoder:" + enc && c.test === "passed")) return null;
+  return "That encoder's test didn't pass on " + (w?.name ?? "this worker") + ".";
 }
 
 // E4 join requests on the mock (GET /workers joinRequests): three waiting (laptop replaces the existing Laptop), one expired.

@@ -48,33 +48,49 @@ const TYPES: [string, Capability["slot"], string, (c: Capability) => boolean][] 
   ["Graphics card (VAAPI)", "gpu", "graphics device", (c) => c.key.endsWith("_vaapi")],
   ["Apple", "gpu", "Apple encoder", (c) => c.key.endsWith("_videotoolbox")],
 ];
-type Card = { name: string; gpu: boolean; lit: boolean; formats: [string, boolean][]; why: string; detail?: string; at: string | null };
+type Card = { name: string; gpu: boolean; lit: boolean; formats: [string, boolean][]; why: string; detail?: string; at: string | null; enc: string; primary: boolean };
 function cards(w: Worker): Card[] {
   const encs = w.capabilities.filter((c) => c.kind === "encoder"), untested = !w.capabilities.length;
   return TYPES.map(([name, slot, noun, pick]): Card => {
-    const cs = encs.filter(pick), ok = cs.filter((c) => c.test === "passed"), bad = cs.find((c) => c.test === "failed");
+    const cs = encs.filter(pick), ok = cs.filter((c) => c.test === "passed"), bad = cs.find((c) => c.test === "failed") ?? cs.find((c) => c.test === "not_present"); // #254: not_present keeps its how-to-fix detail
     const all = ["H.264", "HEVC", "AV1", ...(cs.some((c) => FORMAT(c.key) === "VP9") ? ["VP9"] : [])];
+    // the radio's value: 'cpu', or this type's passed HEVC encoder as the API names it (hevc_qsv). Until F2 only HEVC can be the
+    // main encoder (PATCH h264_*/av1_* is 409), so a card with no passed HEVC can't be picked.
+    const enc = slot === "cpu" ? "cpu" : ok.find((c) => FORMAT(c.key) === "HEVC")?.key.replace(/^encoder:/, "") ?? "";
+    const p = w.primaryEncoder ?? "cpu";
     return {
+      enc, primary: pick({ key: "encoder:" + p, slot: p === "cpu" ? "cpu" : "gpu" } as Capability),
       name, gpu: slot === "gpu", lit: ok.length > 0, detail: bad?.detail,
       formats: all.map((f): [string, boolean] => [f, ok.some((c) => FORMAT(c.key) === f)]),
       why: untested ? "Not tested yet" : ok.length ? "" : !cs.length ? "Not on this computer"
-        : cs.some((c) => c.device === "missing") ? "No " + noun + " in this computer"
+        : cs.some((c) => c.device === "missing" || c.test === "not_present") ? "No " + noun + " in this computer"
         : cs.some((c) => c.device === "found") ? "Found, but its test failed" : "No working " + noun + " found",
       at: cs.map((c) => c.testedAt).filter(Boolean).sort().at(-1) ?? null,
     };
   });
 }
-// the directory's row (small) and the Capabilities tab (big, with the time each was tested and a failure's detail)
-function EncoderCards({ w, big }: { w: Worker; big?: boolean }) {
-  return <ul className={"ec-grid" + (big ? " big" : "")} aria-label={"Encoders on " + w.name}>{cards(w).map((c) => (
-    <li key={c.name} className={"ec" + (c.lit ? " lit" : "") + (big ? " ec-lg" : "")}>
-      <span className="ec-t">{c.lit && <Icon id="i-check" />}<b>{c.name}</b>{c.lit && <span className="ec-ok">Works</span>}</span>
-      {!c.lit && <span>{c.why}</span>}
-      <span className="ec-f">{c.formats.map(([f, on]) => <span key={f} className={on ? "on" : ""}>{f}{!on && <span className="sr"> (no)</span>}</span>)}</span>
-      {c.lit && c.gpu && <span>Not used for converting yet</span>}
-      {big && c.detail && <span className="mono">{c.detail}</span>}
-      {big && c.at && <span className="ec-meta">Tested {new Date(c.at).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}
-    </li>))}</ul>;
+// the directory's row (small) and the Capabilities tab (big, with the time each was tested and a failure's detail).
+// User ask 11-14: a radio on each card picks the worker's primary encoder; only lit cards can be picked; CPU is the fallback.
+function EncoderCards({ w, big, reload }: { w: Worker; big?: boolean; reload?: () => void }) {
+  const [msg, setMsg] = useState(""), cs = cards(w), cur = cs.find((c) => c.primary && c.lit) ?? cs[0];
+  // design 02:36Z: until F2 a working card with no HEVC stays focusable (aria-disabled) and says why. Drop this when F2 lands.
+  const why = (c: Card) => "nohevc-" + w.id + "-" + c.name.replace(/\W/g, "") + (big ? "-big" : "");
+  const pick = async (c: Card) => { setMsg(""); if (await act(patchWorker(w.id, { primaryEncoder: c.enc }), setMsg)) { setMsg(c.name + " is now used first."); reload?.(); } };
+  return <div className="ec-wrap" role="radiogroup" aria-label={"Primary encoder on " + w.name}>
+    <ul className={"ec-grid" + (big ? " big" : "")}>{cs.map((c) => (
+      <li key={c.name} className={"ec" + (c.lit ? " lit" : "") + (big ? " ec-lg" : "") + (c === cur ? " primary" : "")}>
+        <label className="ec-t"><input type="radio" name={"primary-" + w.id + (big ? "-big" : "")} checked={c === cur} disabled={!c.lit}
+          aria-disabled={!c.enc || undefined} aria-describedby={c.lit && !c.enc ? why(c) : undefined} onChange={() => c.enc && pick(c)} />
+          <b>{c.name}</b>{c.lit && <span className="ec-ok">Works</span>}{c === cur && <span className="ec-ok">{c.lit ? "· " : ""}Used first</span>}</label>
+        {!c.lit && <span>{c.why}</span>}
+        <span className="ec-f">{c.formats.map(([f, on]) => <span key={f} className={on ? "on" : ""}>{f}{!on && <span className="sr"> (no)</span>}</span>)}</span>
+        {c.lit && !c.enc && <span id={why(c)}>Can&apos;t be picked yet: it makes {c.formats.filter(([, on]) => on).map(([f]) => f).join(" and ")}, not HEVC.</span>}
+        {big && c.detail && <span className="mono">{c.detail}</span>}
+        {big && c.at && <span className="ec-meta">Tested {new Date(c.at).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}
+      </li>))}</ul>
+    <p className="sm muted ec-fb">{cur.gpu ? "If " + cur.name + " fails, this worker uses the processor (CPU)." : "This worker uses the processor (CPU)."}</p>
+    <p className="sm" role="status">{msg}</p>
+  </div>;
 }
 async function act<T>(p: Promise<Answer<T>>, say: (m: string) => void): Promise<T | null> {
   try { const r = await p; if (failed(r)) return (say(r.error.message), null); return r; } catch (e) { if (e instanceof SignedOut) return null; throw e; }
@@ -306,7 +322,7 @@ export function Workers() {
               {w.tags.length > 0 && <div className="chips" aria-label="Tags">{w.tags.map((x) => <span className="mchip" key={x}>{x}</span>)}</div>}
               <p><span className={"pill " + cls}><Icon id={icon} />{t}</span></p>
               {w.currentJobIds.map((id) => <p key={id} className="sm">Converting <Link className="mono" to={"/jobs?tab=running&job=" + encodeURIComponent(id)}>{names[id] ?? "Job " + id}</Link></p>)}
-              <div><h4 className="sm muted ec-h">Encoders</h4><EncoderCards w={w} /></div>
+              <div><h4 className="sm muted ec-h">Encoders</h4><EncoderCards w={w} reload={ws.reload} /></div>
             </div>
           </article>;
         })}</div>)}
@@ -347,7 +363,7 @@ export function WorkerPage({ id }: { id: string }) {
         <div className="hd"><h2>Encoders</h2><span className="sp" />
           <button className="btn sm" type="button" disabled={busy} onClick={async () => { setBusy(true); const r = await act(testCapabilities(id), setSaid); setBusy(false); if (r) (setSaid("Tested again."), d.reload()); }}><Icon id="i-refresh" />{busy ? "Testing..." : "Test again"}</button></div>
         <p className="sm muted" style={{ padding: "8px var(--pad) 0" }}>Each one was tested with a short real conversion, not guessed from the graphics card's name.</p>
-        <div style={{ padding: "8px var(--pad) 0" }}><EncoderCards w={w} big /></div>
+        <div style={{ padding: "8px var(--pad) 0" }}><EncoderCards w={w} big reload={d.reload} /></div>
         {decoders.length > 0 && <>
           <h3 className="ec-h" style={{ margin: "16px var(--pad) 6px" }}>Decoders</h3>
           <div className="list"><table className="tbl">
