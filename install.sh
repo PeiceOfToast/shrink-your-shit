@@ -278,6 +278,64 @@ ready_block() {
   say "Shrink Your Shit replaces original video files after checking the result. Try it on a copy first."
 }
 
+# ---- graphics (Linux): one Found line per chip, the service user given the device's group ----
+# SYP_DEV and SYP_SYS are for tests only (where /dev and /sys are).
+# give_service_access NODE: add the service user to the group that owns NODE. On failure, print why, return 1.
+give_service_access() {
+  g=$(stat -c %G "$1" 2>/dev/null) || { printf '%s' "can't read the device's group"; return 1; }
+  if [ "$g" = root ]; then printf '%s' "the device belongs to root"; return 1; fi
+  if id -nG syp 2>/dev/null | tr ' ' '\n' | grep -qxF "$g"; then return 0; fi
+  if have usermod; then
+    out=$($SUDO usermod -aG "$g" syp 2>&1) || { printf '%s' "$out" | tr '\n' ' '; return 1; }
+  elif have addgroup; then
+    out=$($SUDO addgroup syp "$g" 2>&1) || { printf '%s' "$out" | tr '\n' ' '; return 1; }
+  else
+    printf '%s' "neither usermod nor addgroup is available"; return 1
+  fi
+}
+
+# nvidia_card: is there an NVIDIA display device on the PCI bus (0x10de, class 0x03...)?
+nvidia_card() {
+  for v in "${SYP_SYS:-/sys}"/bus/pci/devices/*/vendor; do
+    [ -e "$v" ] || continue
+    [ "$(cat "$v" 2>/dev/null)" = 0x10de ] || continue
+    case $(cat "$(dirname "$v")/class" 2>/dev/null) in 0x03*) return 0 ;; esac
+  done
+  return 1
+}
+
+gpu_access() {
+  dri=${SYP_DEV:-/dev}/dri
+  shown=
+  for node in "$dri"/renderD*; do
+    [ -e "$node" ] || continue
+    vendor=$(cat "${SYP_SYS:-/sys}/class/drm/$(basename "$node")/device/vendor" 2>/dev/null || true)
+    case $vendor in
+      0x8086) name="Intel Quick Sync" ;;
+      0x1002) name="AMD graphics" ;;
+      *) continue ;;
+    esac
+    shown=1
+    if reason=$(give_service_access "$node"); then
+      say "Found: $name ($(basename "$node")). Using it."
+    else
+      say "Found: $name ($(basename "$node")), but couldn't give the service access to it: $reason. Converting on the processor for now."
+    fi
+  done
+  if nvidia_card; then
+    shown=1
+    model=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n 1 | sed 's/^NVIDIA //') || true
+    if [ -n "$model" ]; then
+      say "Found: NVIDIA $model. Using it."
+    else
+      say "Found an NVIDIA card, but its driver isn't installed. Converting on the processor for now. Install the NVIDIA driver, then run this again."
+    fi
+  fi
+  if [ -z "$shown" ]; then
+    say "No graphics chip for video found. Converting on the processor: slower, but it works."
+  fi
+}
+
 # ======================= Linux =======================
 if [ "$OS" = linux ]; then
   BIN=/usr/local/bin/shrink-your-shit
@@ -299,6 +357,7 @@ if [ "$OS" = linux ]; then
     fi
   fi
   $SUDO install -d -o syp -g syp -m 0750 "$DATA_DIR"
+  gpu_access
 
   # Library: given, or kept from a previous install, or none (the web page's first run asks for it).
   if [ -z "$LIBS" ] && [ -f "$ENV_FILE" ]; then
