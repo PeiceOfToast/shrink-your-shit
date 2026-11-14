@@ -135,7 +135,7 @@ export function Enroll({ setup, reload, noMain }: { setup: Setup; reload: () => 
       <h1 id="enroll-h">How will this computer be used?</h1>
       <div className="stack" role="radiogroup" aria-labelledby="enroll-h">
         {!noMain && card("main", "Main server", "Keeps your libraries and this web page. Choose this for your first computer.")}
-        {(found ?? []).map((s) => card(s.url, "Join \"" + s.name + "\" at " + s.address, "Becomes a worker: " + s.name + " sends it videos to convert. " + s.name + " · version " + s.version,
+        {(found ?? []).map((s) => card(s.url, "Join \"" + s.name + "\" at " + s.address, "Becomes a worker: " + s.name + " sends it videos to convert. Version " + s.version, // design 08:10Z: name once
           s.matchesVersion ? undefined : s.name + " runs version " + s.version + (mine ? " and this is " + mine : "") + ". Update one of them so they match."))}
         {card("other", "Join another server", "Type its address")}
       </div>
