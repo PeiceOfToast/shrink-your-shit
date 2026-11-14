@@ -31,9 +31,10 @@ const minutes = (iso: string | null) => { // the 15 s tick re-renders it
 
 type Problem = { kind: "unreachable" | "not_a_server"; url: string; reason: string };
 
-export function Enroll({ setup, reload }: { setup: Setup; reload: () => Promise<void> }) {
+// noMain: a server that is becoming a worker (Settings > This computer) gets no Main server card.
+export function Enroll({ setup, reload, noMain }: { setup: Setup; reload: () => Promise<void>; noMain?: boolean }) {
   const [found, setFound] = useState<FoundServer[] | null>(null);
-  const [pick, setPick] = useState("main"); // "main", "other" or a found server's url
+  const [pick, setPick] = useState(noMain ? "other" : "main"); // "main", "other" or a found server's url
   const [addr, setAddr] = useState(""), [code, setCode] = useState("");
   const [err, setErr] = useState(""), [busy, setBusy] = useState(false), [problem, setProblem] = useState<Problem | null>(null);
   const [, setNow] = useState(0);
@@ -44,7 +45,7 @@ export function Enroll({ setup, reload }: { setup: Setup; reload: () => Promise<
     setFound(null);
     const r = await listServers(), list = failed(r) ? [] : r, ok = list.filter((s) => s.matchesVersion);
     setFound(list);
-    setPick(list.length === 1 && ok.length === 1 ? ok[0].url : "main"); // the server's card when exactly one is found
+    setPick(list.length === 1 && ok.length === 1 ? ok[0].url : noMain ? "other" : "main"); // the server's card when exactly one is found
   };
   useEffect(() => { look(); }, []);
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 15000); return () => clearInterval(t); }, []);
@@ -128,7 +129,7 @@ export function Enroll({ setup, reload }: { setup: Setup; reload: () => Promise<
     <form className="enroll stack" onSubmit={(e) => (e.preventDefault(), go())}>
       <h1 id="enroll-h">How will this computer be used?</h1>
       <div className="stack" role="radiogroup" aria-labelledby="enroll-h">
-        {card("main", "Main server", "Keeps your libraries and this web page. Choose this for your first computer.")}
+        {!noMain && card("main", "Main server", "Keeps your libraries and this web page. Choose this for your first computer.")}
         {(found ?? []).map((s) => card(s.url, "Join \"" + s.name + "\" at " + s.address, "Becomes a worker: " + s.name + " sends it videos to convert. " + s.name + " · version " + s.version,
           s.matchesVersion ? undefined : s.name + " runs version " + s.version + (mine ? " and this is " + mine : "") + ". Update one of them so they match."))}
         {card("other", "Join another server", "Type its address")}

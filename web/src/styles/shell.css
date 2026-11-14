@@ -650,6 +650,9 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .fpick .ftr{justify-content:flex-start;gap:8px;flex-wrap:wrap}.fpick .ftr .btn.primary{max-width:100%;overflow-wrap:anywhere;white-space:normal;text-align:left}
 .folderrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.folderrow>.input{flex:1 1 240px;min-width:0}
 @media (max-width:640px){.fpick{padding:0;align-items:stretch}.fpick .dlg{width:100%;max-height:none;height:100%;border-radius:0;border:0}}
+/* a small confirm (Settings > This computer): 440 px, stays a centred box on phones */
+.fpick.small .dlg{width:min(440px,100%);height:auto}.fpick.small h2{font-size:var(--fs-lg);margin:0}.fpick.small p{margin:0}
+@media (max-width:640px){.fpick.small{padding:16px;align-items:center}.fpick.small .dlg{border-radius:var(--radius);border:1px solid var(--border-strong)}}
 /* V4 palette (mockup .nd): a column left of the canvas on wide screens */
 .graphwrap.withpal{grid-template-columns:260px minmax(0,1fr) 300px}
 .gpal{align-self:start;max-height:min(72vh,720px);overflow:auto}

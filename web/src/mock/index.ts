@@ -511,6 +511,10 @@ export const foundServers: FoundServer[] = [
 let joinTimer: ReturnType<typeof setTimeout> | undefined;
 export function setRole(b: RoleBody): Setup | { error: { code: string; message: string } } {
   clearTimeout(joinTimer);
+  // Settings > This computer: a set role doesn't change while jobs convert (409 role_change_busy, workshop 00:43Z)
+  const busy = state.jobs.filter((j) => j.state === "running").length, cur = state.setup.role;
+  if (busy && b.role !== cur && (cur === "server" || (cur === "worker" && state.setup.join?.state !== "waiting")))
+    return { error: { code: "role_change_busy", message: busy + " jobs are converting now.", runningJobs: busy } as { code: string; message: string } };
   if (b.role !== "worker") { change((s) => { s.setup = { role: b.role, join: null }; if (b.role === "server") s.settings.firstRunStep = 1; }); return state.setup; }
   const u = b.serverUrl, host = u.replace(/^https?:\/\//, "").replace(/[:/].*$/, ""), name = foundServers.find((f) => f.url === u)?.name ?? host;
   if (/unreach/.test(u)) return { error: { code: "server_unreachable", message: "no answer on port 8484" } };
