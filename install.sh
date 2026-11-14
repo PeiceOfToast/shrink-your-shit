@@ -209,7 +209,8 @@ lan_ip() {
 # ready_block: the last thing the installer prints. Only what was found, and the link to open.
 ready_block() {
   say ""
-  if [ -n "$UPDATED" ]; then say "Updated to ${NEW_VERSION:-the new release}. Your settings are kept."; fi
+  if [ -n "${DOCKER_UPDATED:-}" ]; then say "Updated the container. Your settings are kept."
+  elif [ -n "$UPDATED" ]; then say "Updated to ${NEW_VERSION:-the new release}. Your settings are kept."; fi
   if [ -n "$NS_LINE" ]; then say "$NS_LINE"; fi
   if [ -z "${DOCKER_RUN:-}" ] && have docker; then say "Docker is installed here. To run Shrink Your Shit in Docker instead, run this again with --docker."; fi
   case $PORT_ADDR in
@@ -337,7 +338,7 @@ docker_mode() {
 
   {
     cat <<YML
-# Written by install.sh --docker. A re-run keeps this file; delete it to have the installer write it again.
+# Written by install.sh --docker. A re-run keeps this file and updates the image. To change the GPU or other settings, delete this file and run install.sh --docker again.
 services:
   shrink-your-shit:
     image: $DOCKER_IMAGE
@@ -375,6 +376,7 @@ YML
   } > "$dtmp/compose.yml"
 
   if [ -f "$file" ]; then
+    DOCKER_UPDATED=1
     say "Kept $file (the settings from the earlier run)."
   else
     $SUDO install -d -m 0755 "$DOCKER_DIR"
@@ -386,6 +388,8 @@ YML
     say "Installed, not started (--no-start). Start it with: docker compose -f $file up -d"
     exit 0
   fi
+  # Pull the newest image. If the pull fails (offline, or not published yet), start the copy already here.
+  quiet_run "pulling the image" $SUDO docker compose -f "$file" pull || warn "could not pull the newest image; starting the copy already on this computer."
   say "Starting the container..."
   quiet_run "starting the container" $SUDO docker compose -f "$file" up -d
   PORT_ADDR=0.0.0.0:8484
