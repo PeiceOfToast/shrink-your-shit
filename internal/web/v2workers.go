@@ -278,10 +278,22 @@ func passedGPU(caps []map[string]any) []string {
 	return out
 }
 
+// mainEncoderGPU is the passed graphics encoders that may be the main encoder. Until F2 (plans use h264/av1 on the
+// graphics card) only HEVC may: an H.264 or AV1 main encoder would silently convert on the processor.
+func mainEncoderGPU(caps []map[string]any) []string {
+	out := []string{}
+	for _, e := range passedGPU(caps) {
+		if encoderFormat(e) == "hevc" {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // primaryEncoder is the encoder a worker encodes with: the saved choice while its test still passes
-// (cpu always does), else the first graphics encoder that passes, else cpu.
+// (cpu always does), else the first HEVC graphics encoder that passes, else cpu.
 func primaryEncoder(saved *string, caps []map[string]any) string {
-	passed := passedGPU(caps)
+	passed := mainEncoderGPU(caps)
 	if saved != nil && (*saved == "cpu" || slices.Contains(passed, *saved)) {
 		return *saved
 	}
@@ -625,7 +637,7 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 				To   string `json:"to"`
 			} `json:"schedule"`
 			PathMappings   *[]struct{ Server, Worker, Mode string } `json:"pathMappings"`   // V7c: remote workers only
-			PrimaryEncoder *string                                  `json:"primaryEncoder"` // local only: cpu, or a graphics encoder whose test passed
+			PrimaryEncoder *string                                  `json:"primaryEncoder"` // local only: cpu, or an HEVC graphics encoder whose test passed (H.264 and AV1 wait for F2)
 		}
 		if !found(w, r) || !readJSON(w, r, &in) {
 			return
@@ -729,7 +741,7 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 		if in.PrimaryEncoder != nil {
 			name := strings.TrimSpace(*in.PrimaryEncoder)
 			t, ok := v.tools()
-			if name != "cpu" && !slices.Contains(passedGPU(capabilities(t, ok)), name) {
+			if name != "cpu" && !slices.Contains(mainEncoderGPU(capabilities(t, ok)), name) {
 				label := encoderLabels[name]
 				if label == "" {
 					label = name
