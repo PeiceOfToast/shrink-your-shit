@@ -469,25 +469,34 @@ export function patchWorker(id: ID, p: { name?: string; slots?: { cpu?: number }
   change((s) => { const x = s.workers.find((y) => y.id === id); if (!x) return; if (p.name) x.name = p.name; if (p.slots?.cpu) x.slots.cpu.total = p.slots.cpu; if (p.tags) x.tags = p.tags; });
 }
 
-// E4 join requests on the mock: three waiting (one named like an existing worker), one expired. Allow adds the worker
-// stopped, like any new one, replacing a worker with the same name.
+// E4 join requests on the mock (GET /workers joinRequests): three waiting (laptop replaces the existing Laptop), one expired.
+// Allow adds the worker stopped, like any new one; allow, deny and dismiss take the request off the list.
 const at = (min: number) => new Date(Date.now() + min * 60000).toISOString();
+const jr = (id: ID, name: string, address: string, os: string, hardware: string | null, ago: number, state: JoinRequest["state"] = "waiting", replacesWorker = false): JoinRequest =>
+  ({ id, name, address, os, hardware, url: "http://" + address + ":8484", askedAt: at(-ago), expiresAt: at(10 - ago), state, replacesWorker });
 export const joins: JoinRequest[] = mockMode === "fresh" ? [] : [
-  { id: "jr1", name: "nuc", address: "192.168.1.31", os: "linux", encoders: ["Intel Quick Sync"], requestedAt: at(-2), expiresAt: at(8), state: "waiting" },
-  { id: "jr2", name: "laptop", address: "192.168.1.44", os: "windows", encoders: [], requestedAt: at(-1), expiresAt: at(9), state: "waiting" },
-  { id: "jr3", name: "attic-pc", address: "192.168.1.60", os: "linux", encoders: ["NVIDIA NVENC"], requestedAt: at(-0.5), expiresAt: at(9.5), state: "waiting" },
-  { id: "jr4", name: "pi", address: "192.168.1.50", os: "linux", encoders: [], requestedAt: at(-14), expiresAt: at(-4), state: "expired" },
+  jr("jr3", "attic-pc", "192.168.1.60", "linux", "NVIDIA GeForce RTX 3060", 0.5),
+  jr("jr2", "laptop", "192.168.1.44", "windows", null, 1, "waiting", true),
+  jr("jr1", "nuc", "192.168.1.31", "linux", "Intel UHD Graphics 770", 2),
+  jr("jr4", "pi", "192.168.1.50", "linux", null, 14, "expired"),
 ];
-const openJoin = (id: ID) => { const j = joins.find((x) => x.id === id); return !j ? "There is no such request." : j.state !== "waiting" || Date.parse(j.expiresAt) <= Date.now() ? "This request has expired. Run the install command on that computer again." : j; };
-export function allowJoin(id: ID): { workerId: ID } | string {
+const NOT_FOUND = "There is no such request. It may have been answered already.";
+const take = (id: ID) => { const i = joins.findIndex((x) => x.id === id); return i < 0 ? null : joins.splice(i, 1)[0]; };
+const openJoin = (id: ID) => { const j = joins.find((x) => x.id === id); return !j ? NOT_FOUND : j.state !== "waiting" || Date.parse(j.expiresAt) <= Date.now() ? "This request has expired. Run the install command on that computer again." : j; };
+export function allowJoin(id: ID): { worker: Worker } | string {
   const j = openJoin(id); if (typeof j === "string") return j;
-  const workerId = "w-" + j.id;
-  change((s) => { s.workers = [...s.workers.filter((w) => w.name.toLowerCase() !== j.name.toLowerCase()), { ...worker(workerId, j.name, "paused", [0, 2], [0, j.encoders.length ? 1 : 0], 0, []), os: (j.os ?? "linux") as Worker["os"] }]; j.state = "allowed"; });
-  return { workerId };
+  const w: Worker = { ...worker("w-" + j.id, j.name, "paused", [0, 2], [0, j.hardware ? 1 : 0], 0, []), os: (j.os ?? "linux") as Worker["os"] };
+  change((s) => { take(id); s.workers = [...s.workers.filter((x) => x.name.toLowerCase() !== j.name.toLowerCase()), w]; });
+  return { worker: w };
 }
 export function denyJoin(id: ID): string | null {
   const j = openJoin(id); if (typeof j === "string") return j;
-  change(() => { j.state = "denied"; });
+  change(() => { take(id); });
+  return null;
+}
+export function dismissJoin(id: ID): string | null {
+  if (!joins.some((x) => x.id === id)) return NOT_FOUND;
+  change(() => { take(id); });
   return null;
 }
 

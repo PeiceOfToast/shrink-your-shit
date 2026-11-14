@@ -5,9 +5,15 @@ import type { JoinRequest, Worker } from "./types/v2";
 
 const base = (id: string) => "/api/v2/workers/" + encodeURIComponent(id);
 export async function listWorkers(): Promise<Answer<Worker[]>> {
-  if (MOCK) return mock.mockState().workers;
-  const r = await call<{ items: Worker[] }>("GET", "/api/v2/workers");
+  const r = await workersPage();
   return failed(r) ? r : r.items;
+}
+// The Workers page: the workers plus join requests (E4, ONE-COMMAND-SETUP.md section 9) from the same call, newest first.
+export interface WorkersPage { items: Worker[]; joinRequests: JoinRequest[] }
+export async function workersPage(): Promise<Answer<WorkersPage>> {
+  if (MOCK) return { items: mock.mockState().workers, joinRequests: mock.joins.map((j) => ({ ...j })) };
+  const r = await call<WorkersPage>("GET", "/api/v2/workers");
+  return failed(r) ? r : { items: r.items, joinRequests: r.joinRequests ?? [] };
 }
 export async function getWorker(id: string): Promise<Answer<Worker>> {
   if (MOCK) return mock.mockState().workers.find((w) => w.id === id) ?? { error: { code: "not_found", message: "There is no such worker." } };
@@ -50,19 +56,19 @@ export async function newPairing(): Promise<Answer<Pairing>> {
   return call("POST", "/api/v2/workers/pairings", {});
 }
 
-// E4 (ONE-COMMAND-SETUP.md section 9): join requests from workers that ran the install command. allow -> 200 {workerId};
-// deny -> 204 (no body: call() answers null, so callers check failed(), never truthiness); 409 join_request_expired.
+// E4 join requests: allow -> 200 {worker}; deny and dismiss -> 204 (no body: call() answers null, so callers check failed(),
+// never truthiness); 404 join_request_not_found, 409 join_request_expired.
 const jbase = (id: string) => "/api/v2/workers/join-requests/" + encodeURIComponent(id);
-export async function listJoinRequests(): Promise<Answer<JoinRequest[]>> {
-  if (MOCK) return mock.joins.map((j) => ({ ...j }));
-  const r = await call<{ items: JoinRequest[] }>("GET", "/api/v2/workers/join-requests");
-  return failed(r) ? r : r.items;
-}
-export async function allowJoin(id: string): Promise<Answer<{ workerId: string }>> {
-  if (MOCK) { const r = mock.allowJoin(id); return typeof r === "string" ? { error: { code: "join_request_expired", message: r } } : r; }
+const mockAnswer = (e: string | null) => (e ? { error: { code: e.startsWith("There is no") ? "join_request_not_found" : "join_request_expired", message: e } } : null);
+export async function allowJoin(id: string): Promise<Answer<{ worker: Worker }>> {
+  if (MOCK) { const r = mock.allowJoin(id); return typeof r === "string" ? mockAnswer(r)! : r; }
   return call("POST", jbase(id) + "/allow");
 }
 export async function denyJoin(id: string): Promise<Answer<unknown>> {
-  if (MOCK) { const e = mock.denyJoin(id); return e ? { error: { code: "join_request_expired", message: e } } : null; }
+  if (MOCK) return mockAnswer(mock.denyJoin(id));
   return call("POST", jbase(id) + "/deny");
+}
+export async function dismissJoin(id: string): Promise<Answer<unknown>> {
+  if (MOCK) return mockAnswer(mock.dismissJoin(id));
+  return call("POST", jbase(id) + "/dismiss");
 }

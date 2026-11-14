@@ -57,8 +57,8 @@ export interface Capability {
 // E4 (ONE-COMMAND-SETUP.md section 9): GET /api/v2/workers/join-requests. A worker that ran the install command asks to
 // join; decided and expired requests stay about 10 minutes so the card can show the outcome.
 export interface JoinRequest {
-  id: ID; name: string; address: string; os?: string; encoders: string[];
-  requestedAt: Time; expiresAt: Time; state: "waiting" | "allowed" | "denied" | "expired";
+  id: ID; name: string; address: string; os?: string; hardware: string | null; url: string;
+  askedAt: Time; expiresAt: Time; state: "waiting" | "expired"; replacesWorker: boolean;
 }
 export interface Worker {
   id: ID; name: string; kind: "local" | "remote";
