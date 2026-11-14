@@ -439,6 +439,8 @@ CREATE TABLE IF NOT EXISTS share_mounts (
 	{41, "library share pause", `
 ALTER TABLE libraries ADD COLUMN share_paused_id INTEGER;
 ALTER TABLE libraries ADD COLUMN share_paused_since TEXT NOT NULL DEFAULT '';`},
+	{42, "worker primary encoder", `
+ALTER TABLE workers ADD COLUMN primary_encoder TEXT;`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone
