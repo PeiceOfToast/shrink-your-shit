@@ -87,13 +87,13 @@ func TestDockerSetupOffersCapLines(t *testing.T) {
 func TestDockerSetupUserNamespaceNoCapLines(t *testing.T) {
 	writeUIDMap(t, "         0     100000      65536\n")
 	text := setupDockerNoHelper(t)
-	if !strings.Contains(text, "# This container runs in a user namespace (for example a Proxmox LXC), so it can't mount shares itself. Use a Docker volume:") {
+	if !strings.Contains(text, "so neither the app nor Docker can mount network shares here") {
 		t.Errorf("user namespace text missing:\n%s", text)
 	}
 	if strings.Contains(text, "cap_add") || strings.Contains(text, "SYS_ADMIN") {
 		t.Errorf("user namespace must not offer cap lines:\n%s", text)
 	}
-	if !strings.Contains(text, "# Add under the top-level volumes: in your compose file:") {
-		t.Errorf("volume text missing in user namespace:\n%s", text)
+	if strings.Contains(text, "driver_opts") || !strings.Contains(text, "pct set") {
+		t.Errorf("user namespace must give the host-mount steps, not a Docker volume:\n%s", text)
 	}
 }

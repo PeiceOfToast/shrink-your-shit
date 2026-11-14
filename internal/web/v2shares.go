@@ -746,14 +746,20 @@ func setupForMode(store *jobs.Store, sh jobs.Share) any {
 		}
 		// Offer the app's own mount only when the container can make one. In a user namespace it can't,
 		// so the text says why and gives only the volume.
-		var prefix string
+		// In a user namespace Docker's own volume can't mount NFS or SMB either (the kernel refuses both
+		// there), so the share has to be mounted outside and passed in as a folder.
 		if inUserNamespace() {
-			prefix = "# This container runs in a user namespace (for example a Proxmox LXC), so it can't mount shares itself. Use a Docker volume:\n"
-		} else {
-			prefix = "# To let the app mount this share itself, add these lines under services: shrink-your-shit: and restart:\n" +
-				"    cap_add:\n      - SYS_ADMIN\n      - DAC_READ_SEARCH\n    security_opt:\n      - \"apparmor:unconfined\"\n" +
-				"# Or mount it with a Docker volume instead:\n"
+			return map[string]any{
+				"kind": "compose",
+				"text": "# This container runs in a user namespace (for example an unprivileged Proxmox LXC), so neither the app nor Docker can mount network shares here.\n" +
+					"# Mount the share on the Proxmox host, pass the folder into the LXC (pct set <id> -mp0 <host folder>,mp=/mnt/" + vol + "),\n" +
+					"# then add under services: shrink-your-shit: volumes: in your compose file:\n      - " + fmt.Sprintf("%q", "/mnt/"+vol+":"+mpt),
+				"removeText": fmt.Sprintf("Remove the %q line from your compose file and restart.", "/mnt/"+vol+":"+mpt),
+			}
 		}
+		prefix := "# To let the app mount this share itself, add these lines under services: shrink-your-shit: and restart:\n" +
+			"    cap_add:\n      - SYS_ADMIN\n      - DAC_READ_SEARCH\n    security_opt:\n      - \"apparmor:unconfined\"\n" +
+			"# Or mount it with a Docker volume instead:\n"
 		return map[string]any{
 			"kind": "compose",
 			// Pasted into an existing compose file, so no top-level keys: each part says where it goes.
