@@ -119,6 +119,18 @@ func TestMountOptionsAlwaysSafe(t *testing.T) {
 	}
 }
 
+// In a container (-nfs-nolock) NFS gets nolock, since there is no rpc.statd; cifs never does.
+func TestMountOptionsNFSNoLock(t *testing.T) {
+	nfsNoLock = true
+	defer func() { nfsNoLock = false }()
+	if got := mountOptions("nfs", nil, 1001, 1002, ""); got != "nosuid,nodev,noexec,nolock" {
+		t.Errorf("nfs with -nfs-nolock: %s", got)
+	}
+	if got := mountOptions("cifs", nil, 1001, 1002, ""); strings.Contains(got, "nolock") {
+		t.Errorf("cifs must not get nolock: %s", got)
+	}
+}
+
 // withSharesDir points sharesDir at a temp folder for one test.
 func withSharesDir(t *testing.T) string {
 	t.Helper()

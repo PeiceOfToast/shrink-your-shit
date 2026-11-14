@@ -84,6 +84,7 @@ type service struct{ uid, gid int }
 
 func main() {
 	userName := flag.String("user", "", "the service user that may call the helper (required)")
+	flag.BoolVar(&nfsNoLock, "nfs-nolock", false, "mount NFS with nolock (for containers, which have no rpc.statd)")
 	flag.Parse()
 	if *userName == "" {
 		log.Fatal("-user is required")

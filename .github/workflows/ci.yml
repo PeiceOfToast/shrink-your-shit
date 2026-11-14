@@ -203,6 +203,8 @@ jobs:
           up=
           for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8484/healthz && up=1 && break; sleep 1; done
           [ -n "$up" ] || { docker logs syp; exit 1; }
+          # no capabilities here: the container cannot mount, so the Shares page stays in manual mode
+          docker logs syp 2>&1 | grep -q 'network shares: manual' || { docker logs syp; exit 1; }
           # listening beyond loopback: /api needs the token that `shrink-your-shit token` shows
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8484/api/status)" = 401
           # the image carries the built UI at / (a 200 page that loads its script), not the 503 "not built" page
@@ -222,6 +224,13 @@ jobs:
           for e in hevc_qsv hevc_vaapi; do
             echo "$w" | jq -e --arg k "encoder:$e" '.capabilities[] | select(.key == $k) | select(.test == "failed" and (.detail | contains("/dev/dri is missing")))' >/dev/null || { echo "$w" | jq '.capabilities'; echo "$e: want failed with the /dev/dri reason"; exit 1; }
           done
+      - name: network shares mount inside the container when it is allowed to
+        run: |
+          docker run -d --name syp-caps --cap-add SYS_ADMIN --cap-add DAC_READ_SEARCH --security-opt apparmor=unconfined -v "$RUNNER_TEMP":/media shrink-your-shit
+          for i in $(seq 1 20); do docker logs syp-caps 2>&1 | grep -q 'network shares:' && break; sleep 1; done
+          docker logs syp-caps 2>&1 | grep -q 'network shares: mounting inside the container' || { docker logs syp-caps; exit 1; }
+          docker exec syp-caps test -S /run/shrink-your-shit/helper.sock || { docker logs syp-caps; exit 1; }
+          docker rm -f syp-caps
 
   windows-installer:
     name: windows installer (build + install/convert/uninstall test)
