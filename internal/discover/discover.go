@@ -60,6 +60,17 @@ type Finder struct {
 	at    time.Time
 	have  bool
 	found []Found
+
+	lastMu sync.Mutex // guards last, which Known reads without waiting for a browse
+	last   []Found
+}
+
+// Known returns the servers the last browse found. It never browses, and it never waits on one in progress: it is
+// empty until a Servers call has finished a browse.
+func (f *Finder) Known() []Found {
+	f.lastMu.Lock()
+	defer f.lastMu.Unlock()
+	return f.last
 }
 
 // NewFinder is the Finder a server uses: a 2 s browse, answers kept for 5 s.
@@ -78,6 +89,9 @@ func (f *Finder) Servers() []Found {
 	f.found = f.scan()
 	f.at = time.Now()
 	f.have = true
+	f.lastMu.Lock()
+	f.last = f.found
+	f.lastMu.Unlock()
 	return f.found
 }
 

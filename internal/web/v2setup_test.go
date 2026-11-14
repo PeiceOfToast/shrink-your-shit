@@ -7,8 +7,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -313,6 +315,172 @@ func TestSetupAllowedTellsTheAppTheRoleChanged(t *testing.T) {
 type fakeFinder []discover.Found
 
 func (f fakeFinder) Servers() []discover.Found { return f }
+func (f fakeFinder) Known() []discover.Found   { return f }
+
+// scanFinder is a finder with a fixed list; scans counts the browses Servers starts. Known never browses.
+type scanFinder struct {
+	found []discover.Found
+	scans *int
+}
+
+func (f scanFinder) Servers() []discover.Found { *f.scans++; return f.found }
+func (f scanFinder) Known() []discover.Found   { return f.found }
+
+// hostPort is the address and port of a test server's URL.
+func hostPort(t *testing.T, srvURL string) (string, int) {
+	t.Helper()
+	u, err := url.Parse(srvURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, _ := strconv.Atoi(u.Port())
+	return u.Hostname(), port
+}
+
+// setupServerWithFinder is setupServer, with a finder that names servers.
+func setupServerWithFinder(t *testing.T, f ServerFinder) (*httptest.Server, string) {
+	t.Helper()
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	a, _, _ := OpenAccess(t.TempDir(), false)
+	dir := t.TempDir()
+	srv := httptest.NewServer(Handler(st, a, Engine{DataDir: dir, Version: "1.2.3", Port: 8484, Joiner: &remote.Joiner{Version: "1.2.3"}, Finder: f}))
+	t.Cleanup(srv.Close)
+	return srv, dir
+}
+
+// A paired server is named as the browse announced it, and pairing starts no browse of its own.
+func TestSetupPairNamesAFoundServerAsItAnnounced(t *testing.T) {
+	remoteSrv, _ := fakeRemote(t)
+	host, port := hostPort(t, remoteSrv.URL)
+	scans := 0
+	srv, dir := setupServerWithFinder(t, scanFinder{found: []discover.Found{{Name: "Office NAS", Address: host, Port: port}}, scans: &scans})
+	c := jar(t)
+	code, body, _ := do(t, c, srv, call{method: "POST", path: "/api/v2/setup/role", ctype: "application/json",
+		body: `{"role":"worker","serverUrl":"` + remoteSrv.URL + `","pairCode":"good"}`})
+	if code != http.StatusOK || !strings.Contains(body, `"serverName":"Office NAS"`) {
+		t.Fatalf("pair: %d %s", code, body)
+	}
+	if scans != 0 {
+		t.Errorf("pairing started %d browses, want none", scans)
+	}
+	if st, err := remote.Load(filepath.Join(dir, "worker")); err != nil || st.ServerName != "Office NAS" {
+		t.Errorf("saved server name: %+v, %v", st, err)
+	}
+}
+
+// A server the browse did not hear keeps its address as its name.
+func TestSetupPairNamesAServerNotFoundByItsAddress(t *testing.T) {
+	remoteSrv, _ := fakeRemote(t)
+	scans := 0
+	srv, _ := setupServerWithFinder(t, scanFinder{found: []discover.Found{{Name: "Den", Address: "10.0.0.9", Port: 8484}}, scans: &scans})
+	c := jar(t)
+	code, body, _ := do(t, c, srv, call{method: "POST", path: "/api/v2/setup/role", ctype: "application/json",
+		body: `{"role":"worker","serverUrl":"` + remoteSrv.URL + `","pairCode":"good"}`})
+	if code != http.StatusOK || !strings.Contains(body, `"serverName":"`+mustHost(t, remoteSrv.URL)+`"`) {
+		t.Fatalf("pair: %d %s", code, body)
+	}
+}
+
+func mustHost(t *testing.T, srvURL string) string {
+	t.Helper()
+	u, err := url.Parse(srvURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u.Host
+}
+
+// After a restart the worker's page still names the server it is working for, and never shows its token.
+func TestSavedWorkerKeepsItsServerNameAfterARestart(t *testing.T) {
+	remoteSrv, _ := fakeRemote(t)
+	host, port := hostPort(t, remoteSrv.URL)
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	access, _, _ := OpenAccess(t.TempDir(), false)
+	dir := t.TempDir()
+	scans := 0
+	before := httptest.NewServer(Handler(st, access, Engine{DataDir: dir, Version: "1.2.3", Port: 8484, Joiner: &remote.Joiner{Version: "1.2.3"},
+		Finder: scanFinder{found: []discover.Found{{Name: "Office NAS", Address: host, Port: port}}, scans: &scans}}))
+	c := jar(t)
+	if code, body, _ := do(t, c, before, call{method: "POST", path: "/api/v2/setup/role", ctype: "application/json",
+		body: `{"role":"worker","serverUrl":"` + remoteSrv.URL + `","pairCode":"good"}`}); code != http.StatusOK {
+		t.Fatalf("pair: %d %s", code, body)
+	}
+	before.Close()
+
+	after := httptest.NewServer(Handler(st, access, Engine{DataDir: dir, Version: "1.2.3", Port: 8484, Joiner: &remote.Joiner{Version: "1.2.3"}}))
+	t.Cleanup(after.Close)
+	code, body, _ := do(t, c, after, call{method: "GET", path: "/api/v2/setup"})
+	if code != http.StatusOK {
+		t.Fatalf("GET setup after restart: %d %s", code, body)
+	}
+	var v struct {
+		Role string
+		Join map[string]any
+	}
+	if err := json.Unmarshal([]byte(body), &v); err != nil {
+		t.Fatal(err)
+	}
+	if v.Role != "worker" || v.Join["serverName"] != "Office NAS" || v.Join["serverUrl"] != remoteSrv.URL || v.Join["state"] != "allowed" {
+		t.Errorf("after a restart: role %q join %v", v.Role, v.Join)
+	}
+	if strings.Contains(body, `"tok"`) || strings.Contains(body, "token") {
+		t.Errorf("the page shows the token: %s", body)
+	}
+}
+
+// A state saved before the server's name was kept shows the address.
+func TestSavedWorkerWithoutAServerNameShowsItsAddress(t *testing.T) {
+	remoteSrv, _ := fakeRemote(t)
+	srv, dir := setupServer(t)
+	c := jar(t)
+	if code, body, _ := do(t, c, srv, call{method: "POST", path: "/api/v2/setup/role", ctype: "application/json",
+		body: `{"role":"worker","serverUrl":"` + remoteSrv.URL + `","pairCode":"good"}`}); code != http.StatusOK {
+		t.Fatalf("pair: %d %s", code, body)
+	}
+	if err := (remote.State{Server: remoteSrv.URL, WorkerID: "w-1", Name: "Office PC", Token: "tok"}).Save(filepath.Join(dir, "worker")); err != nil {
+		t.Fatal(err)
+	}
+	v := setupState(t, c, srv)
+	j, _ := v["join"].(map[string]any)
+	if j["serverName"] != mustHost(t, remoteSrv.URL) {
+		t.Errorf("join %v, want the address %q", j, mustHost(t, remoteSrv.URL))
+	}
+}
+
+// A worker with no saved state has no join to show.
+func TestSavedWorkerWithoutItsStateHasNoJoin(t *testing.T) {
+	remoteSrv, _ := fakeRemote(t)
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	access, _, _ := OpenAccess(t.TempDir(), false)
+	dir := t.TempDir()
+	before := httptest.NewServer(Handler(st, access, Engine{DataDir: dir, Version: "1.2.3", Port: 8484, Joiner: &remote.Joiner{Version: "1.2.3"}}))
+	c := jar(t)
+	if code, body, _ := do(t, c, before, call{method: "POST", path: "/api/v2/setup/role", ctype: "application/json",
+		body: `{"role":"worker","serverUrl":"` + remoteSrv.URL + `","pairCode":"good"}`}); code != http.StatusOK {
+		t.Fatalf("pair: %d %s", code, body)
+	}
+	before.Close()
+	if err := os.Remove(filepath.Join(dir, "worker", remote.StateFile)); err != nil {
+		t.Fatal(err)
+	}
+	after := httptest.NewServer(Handler(st, access, Engine{DataDir: dir, Version: "1.2.3", Port: 8484, Joiner: &remote.Joiner{Version: "1.2.3"}}))
+	t.Cleanup(after.Close)
+	if v := setupState(t, c, after); v["join"] != nil {
+		t.Errorf("join %v, want none", v["join"])
+	}
+}
 
 // The servers route answers the browse's list. It sits on the same mux as the other setup routes, so it has their sign-in.
 func TestSetupServersListsWhatAnswered(t *testing.T) {
