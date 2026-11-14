@@ -18,7 +18,7 @@ import { Link, usePath } from "./router";
 const mac = /Mac|iPhone|iPad/.test(navigator.platform);
 
 // The top bar's quick Theme menu: the same two settings as Settings > Appearance, applied at once.
-function ThemeMenu() {
+export function ThemeMenu() {
   const a = useAppearance();
   const ref = useRef<HTMLDetailsElement>(null);
   const close = () => ref.current?.removeAttribute("open");

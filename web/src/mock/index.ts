@@ -2,7 +2,7 @@
 // screens offer, really applied to that state. Every screen using it shows the Prototype banner. ?mock=fresh shows a
 // new install (no libraries yet) for review. When a contract endpoint lands, its function here becomes the fetch.
 import { useSyncExternalStore } from "react";
-import type { ActivityEvent, ID, JoinRequest, Job, JobState, Library, PublishPreview, Settings, Summary, Template, Trash, Worker, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
+import type { ActivityEvent, FoundServer, ID, JoinRequest, JoinState, RoleBody, Setup, Job, JobState, Library, PublishPreview, Settings, Summary, Template, Trash, Worker, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
 import type { FirstFiles, FolderReport, Issue, LibraryItem } from "../types/v1";
 import { branchedDoc, legacyDoc, presetDoc, preview, revision, summary as stepSummary } from "./steps";
 
@@ -68,6 +68,7 @@ interface State {
   trash: Trash; // GET /trash (not on dev yet: mocked like the rest of the page)
   shares: ShareItem[]; // D: network shares
   mode: "app" | "manual" | "docker"; // D: share connect mode
+  setup: Setup; // enrollment (section 11): fresh is unset, running is a server
 }
 
 // D: minimal share item for mock state
@@ -113,7 +114,7 @@ function running(): State {
     ],
     trash: { bytes: 120 * GB, files: 14, nextDeleteAt: ago(-60 * 24), lastDeleteAt: ago(-60 * 24 * 7) },
     mode: shareMode as "app" | "manual" | "docker",
-    shares: [
+    setup: { role: "server", join: null }, shares: [
       { id: "1", name: "Movies NAS", type: "smb", address: "\\\\nas\\movies", guest: false, username: "mediauser", hasPassword: true,
         status: "connected", since: ago(60 * 24 * 30), reason: null,
         path: "/var/lib/syp/shares/movies-nas", libraries: [{ id: "l1", name: "Movies", use: "folder" }], setup: null },
@@ -131,7 +132,7 @@ function fresh(): State {
     settings: { firstRunDone: false, firstRunStep: 1, intakePaused: false, catalogueEnabled: false, firstRunLibrary: null, scanEvery: 30, scanEverySource: "flag" },
     libraries: [],
     workers: [worker("this", "This computer", "paused", [0, 2], [0, 0], 5, [])], // workers start stopped (rebuild decision)
-    jobs: [], waiting: 0, last24h: { completed: 0, failed: 0, skipped: 0, successRate: null }, activity: [], wf: [], trash: { bytes: 0, files: 0, nextDeleteAt: null, lastDeleteAt: null }, shares: [], mode: "app",
+    jobs: [], waiting: 0, last24h: { completed: 0, failed: 0, skipped: 0, successRate: null }, activity: [], wf: [], trash: { bytes: 0, files: 0, nextDeleteAt: null, lastDeleteAt: null }, shares: [], mode: "app", setup: { role: "unset", join: null },
   };
 }
 
@@ -499,6 +500,30 @@ export function dismissJoin(id: ID): string | null {
   if (!joins.some((x) => x.id === id)) return NOT_FOUND;
   change(() => { take(id); });
   return null;
+}
+// Enrollment. A join's outcome comes from the address typed, so every state can be seen: "unreach" can't be reached,
+// "noserver" isn't a server, "far" is another network (not_local), "deny" says no, "expire" runs out (after 5 s, not 10 min); anything
+// else (and the found nas) is allowed after 5 s. Pairing code 123456 joins, 000000 has expired, others are wrong.
+export const foundServers: FoundServer[] = [
+  { name: "nas", address: "192.168.1.10", url: "http://192.168.1.10:8484", version: "2.0.0", matchesVersion: true },
+  { name: "old-box", address: "192.168.1.20", url: "http://192.168.1.20:8484", version: "1.3.0", matchesVersion: false },
+];
+let joinTimer: ReturnType<typeof setTimeout> | undefined;
+export function setRole(b: RoleBody): Setup | { error: { code: string; message: string } } {
+  clearTimeout(joinTimer);
+  if (b.role !== "worker") { change((s) => { s.setup = { role: b.role, join: null }; if (b.role === "server") s.settings.firstRunStep = 1; }); return state.setup; }
+  const u = b.serverUrl, host = u.replace(/^https?:\/\//, "").replace(/[:/].*$/, ""), name = foundServers.find((f) => f.url === u)?.name ?? host;
+  if (/unreach/.test(u)) return { error: { code: "server_unreachable", message: "no answer on port 8484" } };
+  if (/noserver/.test(u)) return { error: { code: "not_a_server", message: "Not a Shrink Your Shit server." } };
+  if (b.pairCode !== undefined) {
+    if (b.pairCode === "000000") return { error: { code: "pair_code_expired", message: "That code has expired." } };
+    if (b.pairCode !== "123456") return { error: { code: "pair_code_invalid", message: "That code isn't right." } };
+  }
+  const at = (st: JoinState) => change((s) => { s.setup = { role: "worker", join: { serverName: name, serverUrl: u, state: st, expiresAt: new Date(Date.now() + 10 * 60000).toISOString() } }; });
+  if (b.pairCode !== undefined) at("allowed");
+  else if (/far/.test(u)) at("not_local");
+  else { at("waiting"); joinTimer = setTimeout(() => at(/deny/.test(u) ? "denied" : /expire/.test(u) ? "expired" : "allowed"), 5000); }
+  return state.setup;
 }
 
 // D: share actions

@@ -15,6 +15,7 @@ import type { FirstRunSettings } from "../types/v1";
 import { FirstFive, FolderField, suggestName, useFolder } from "./Libraries";
 import { Browse } from "../FolderPicker";
 import { START_SIMPLE } from "./Workflows";
+import { Enroll, WorkerHome, useSetup } from "./Enroll";
 
 type Kept = NonNullable<FirstRunSettings["firstRunLibrary"]>;
 // Runs one request; its error message goes to `onError`. False when it failed (or the user is signed out).
@@ -23,8 +24,11 @@ async function ok<T>(p: Promise<Answer<T>>, onError: (m: string, code: string) =
 }
 
 export function Start() {
+  const su = useSetup(), setup = su.data; // step 0 (section 11): server or worker? An older server without /setup skips it
   const st = useData(getSettings, []), libs = useData(listLibraries, []), wfs = useData(listWorkflows, []);
   const [editing, setEditing] = useState(false), [error, setError] = useState("");
+  if (!su.loaded) return <div className="empty">Loading...</div>;
+  if (setup && setup.role !== "server") return setup.role === "worker" && !setup.join ? <WorkerHome setup={setup} /> : <Enroll setup={setup} reload={su.reload} />;
   if (!st.loaded || !libs.loaded) return <div className="empty">{st.error?.message ?? libs.error?.message ?? "Loading..."}</div>;
   const s = st.data!, lib = libs.data?.[0], kept = s.firstRunLibrary;
   const wfName = lib && (wfs.data?.find((w) => w.id === lib.flowId)?.name ?? lib.settingLabel);
