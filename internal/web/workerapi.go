@@ -219,15 +219,19 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine, joins
 			return
 		}
 		var in struct {
-			Code, Name   string
-			Capabilities json.RawMessage
+			Code, Name, OS, Arch string
+			Capabilities         json.RawMessage
 		}
 		if !readJSON(w, r, &in) {
 			return
 		}
+		caps, ok := reportedCaps(in.Capabilities)
+		if !ok || len(in.OS) > 40 || len(in.Arch) > 40 {
+			apiError(w, http.StatusBadRequest, "invalid_capabilities", "This worker's encoder test or computer details aren't in the form the server takes. Update the worker and pair it again.")
+			return
+		}
 		v, level := workerVersion(r)
-		caps := string(in.Capabilities)
-		wk, token, err := store.Pair(in.Code, in.Name, v, level, caps, now())
+		wk, token, err := store.Pair(in.Code, in.Name, v, in.OS, in.Arch, level, caps, now())
 		if errors.Is(err, jobs.ErrPairingInvalid) {
 			limiter.fail(client, now())
 			time.Sleep(PairFailDelay) // no lock held: other requests go on
@@ -260,11 +264,24 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine, joins
 		}
 		var in struct {
 			FreeSlots int
+			OS, Arch  string
 			sysload.Load
-			HoldingBack *struct{ Code, Message string } // why it takes no work now (#174 QA e)
+			Capabilities json.RawMessage
+			HoldingBack  *struct{ Code, Message string } // why it takes no work now (#174 QA e)
 		}
 		if !readJSON(w, r, &in) {
 			return
+		}
+		if len(in.Capabilities) > 0 { // a worker that reports its encoder test (an older one sends none)
+			caps, ok := reportedCaps(in.Capabilities)
+			if !ok || len(in.OS) > 40 || len(in.Arch) > 40 {
+				apiError(w, http.StatusBadRequest, "invalid_capabilities", "This worker's encoder test or computer details aren't in the form the server takes. Update the worker and pair it again.")
+				return
+			}
+			if err := store.SetWorkerReport(wk.ID, in.OS, in.Arch, caps); err != nil {
+				serverError(w, err)
+				return
+			}
 		}
 		in.Load.CPUPercent = sysload.Clamp(in.Load.CPUPercent) // a worker's word: within 0..100
 		workerLoads.Store(wk.ID, in.Load)                      // V7d: the Workers page's live figures

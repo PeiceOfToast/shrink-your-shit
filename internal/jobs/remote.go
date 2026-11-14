@@ -27,9 +27,10 @@ var ErrPairingInvalid = errors.New("this pairing code is not valid: make a new o
 // RemoteWorker is a paired worker on another computer.
 type RemoteWorker struct {
 	ID, Name, Version string
+	OS, Arch          string // what it reports about its computer ("" until it says)
 	APILevel          int
 	LastSeen          string // when it last called (RFC 3339; "" never)
-	Capabilities      string // JSON, as it reported them
+	Capabilities      string // JSON: the encoder test list it reported ("{}" when none)
 }
 
 func hashOf(s string) string {
@@ -61,7 +62,7 @@ func normalCode(c string) string {
 }
 
 // Pair exchanges a pairing code for a new remote worker and its token (shown once, to the worker).
-func (s *Store) Pair(code, name, version string, apiLevel int, capabilities string, now time.Time) (RemoteWorker, string, error) {
+func (s *Store) Pair(code, name, version, osName, arch string, apiLevel int, capabilities string, now time.Time) (RemoteWorker, string, error) {
 	was := s.Paused() // pairing never turns processing on by itself (orch-lead 17:58Z): see the insert
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -82,14 +83,14 @@ func (s *Store) Pair(code, name, version string, apiLevel int, capabilities stri
 	if capabilities == "" {
 		capabilities = "{}"
 	}
-	w := RemoteWorker{ID: "w-" + strings.ToLower(randomText(6)), Name: name, Version: version, APILevel: apiLevel,
+	w := RemoteWorker{ID: "w-" + strings.ToLower(randomText(6)), Name: name, Version: version, OS: osName, Arch: arch, APILevel: apiLevel,
 		LastSeen: now.UTC().Format(time.RFC3339Nano), Capabilities: capabilities}
 	token := randomText(32)
 	// a new worker is on only if another worker is on (or there is none): with every worker off it
 	// arrives off, so nothing converts until the person starts it (ui-shop via orch-lead 17:58Z)
-	if _, err := tx.Exec(`INSERT INTO workers(id, name, kind, token_hash, version, api_level, last_seen, capabilities, enabled)
-VALUES (?,?,?,?,?,?,?,?, EXISTS(SELECT 1 FROM workers WHERE enabled=1) OR NOT EXISTS(SELECT 1 FROM workers))`,
-		w.ID, w.Name, "remote", hashOf(token), w.Version, w.APILevel, w.LastSeen, w.Capabilities); err != nil {
+	if _, err := tx.Exec(`INSERT INTO workers(id, name, kind, token_hash, version, api_level, last_seen, capabilities, os, arch, enabled)
+VALUES (?,?,?,?,?,?,?,?,?,?, EXISTS(SELECT 1 FROM workers WHERE enabled=1) OR NOT EXISTS(SELECT 1 FROM workers))`,
+		w.ID, w.Name, "remote", hashOf(token), w.Version, w.APILevel, w.LastSeen, w.Capabilities, w.OS, w.Arch); err != nil {
 		return RemoteWorker{}, "", err
 	}
 	if err := tx.Commit(); err != nil {
@@ -104,8 +105,8 @@ func (s *Store) WorkerByToken(token string) (RemoteWorker, error) {
 		return RemoteWorker{}, ErrNotFound
 	}
 	var w RemoteWorker
-	err := s.db.QueryRow(`SELECT id, name, version, api_level, last_seen, capabilities FROM workers WHERE kind='remote' AND token_hash=?`, hashOf(token)).
-		Scan(&w.ID, &w.Name, &w.Version, &w.APILevel, &w.LastSeen, &w.Capabilities)
+	err := s.db.QueryRow(`SELECT id, name, version, os, arch, api_level, last_seen, capabilities FROM workers WHERE kind='remote' AND token_hash=?`, hashOf(token)).
+		Scan(&w.ID, &w.Name, &w.Version, &w.OS, &w.Arch, &w.APILevel, &w.LastSeen, &w.Capabilities)
 	if errors.Is(err, sql.ErrNoRows) {
 		return w, ErrNotFound
 	}
@@ -118,9 +119,15 @@ func (s *Store) SeenWorker(id, version string, apiLevel int, now time.Time) erro
 	return err
 }
 
+// SetWorkerReport records what remote worker id reports now about its computer and its encoder test.
+func (s *Store) SetWorkerReport(id, osName, arch, capabilities string) error {
+	_, err := s.db.Exec(`UPDATE workers SET os=?, arch=?, capabilities=? WHERE id=? AND kind='remote'`, osName, arch, capabilities, id)
+	return err
+}
+
 // RemoteWorkers lists the paired workers, oldest first.
 func (s *Store) RemoteWorkers() ([]RemoteWorker, error) {
-	rows, err := s.db.Query(`SELECT id, name, version, api_level, last_seen, capabilities FROM workers WHERE kind='remote' ORDER BY rowid`)
+	rows, err := s.db.Query(`SELECT id, name, version, os, arch, api_level, last_seen, capabilities FROM workers WHERE kind='remote' ORDER BY rowid`)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +135,7 @@ func (s *Store) RemoteWorkers() ([]RemoteWorker, error) {
 	out := []RemoteWorker{}
 	for rows.Next() {
 		var w RemoteWorker
-		if err := rows.Scan(&w.ID, &w.Name, &w.Version, &w.APILevel, &w.LastSeen, &w.Capabilities); err != nil {
+		if err := rows.Scan(&w.ID, &w.Name, &w.Version, &w.OS, &w.Arch, &w.APILevel, &w.LastSeen, &w.Capabilities); err != nil {
 			return nil, err
 		}
 		out = append(out, w)

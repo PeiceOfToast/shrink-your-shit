@@ -251,7 +251,7 @@ func TestPairingTriesAreLimited(t *testing.T) {
 func TestEachWorkerOnAndOff(t *testing.T) {
 	srv, st, _, _ := libServer(t, false)
 	code, _, _ := st.NewPairing(time.Now())
-	rw, _, err := st.Pair(code, "Desktop", "1", 1, "", time.Now())
+	rw, _, err := st.Pair(code, "Desktop", "1", "", "", 1, "", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +303,7 @@ func TestRemoteWorkerUpdateWords(t *testing.T) {
 	v := newWorkerView(st, &settingsStore{store: st}, Engine{Version: "1.5.0"}, newJoinBook(st))
 	for ver, want := range map[string]string{"1.4.0": "This worker runs 1.4.0; the server runs 1.5.0. Install 1.5.0 on that computer, then start the worker again.", "1.5.0": ""} {
 		code, _, _ := st.NewPairing(time.Now())
-		rw, _, err := st.Pair(code, "W "+ver, ver, 1, "", time.Now())
+		rw, _, err := st.Pair(code, "W "+ver, ver, "", "", 1, "", time.Now())
 		if err != nil {
 			t.Fatal(err)
 		}

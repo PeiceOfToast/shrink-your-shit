@@ -258,7 +258,7 @@ func (v *workerView) remoteWith(rw jobs.RemoteWorker, working []jobs.Working) (m
 			"words": "This worker runs " + rw.Version + "; the server runs " + v.eng.Version + ". Install " + v.eng.Version + " on that computer, then start the worker again."}
 	}
 	return map[string]any{
-		"id": rw.ID, "name": rw.Name, "kind": "remote", "enabled": enabled, "host": nil, "os": nil, "arch": nil,
+		"id": rw.ID, "name": rw.Name, "kind": "remote", "enabled": enabled, "host": nil, "os": nilIfEmpty(rw.OS), "arch": nilIfEmpty(rw.Arch),
 		"appVersion": rw.Version, "status": status, "statusSince": since, "lastHeartbeatAt": nilIfEmpty(rw.LastSeen), "update": update,
 		"holdingBack": holding,
 		"slots":       map[string]any{"cpu": map[string]any{"total": 1, "used": len(ids)}, "gpu": nil},
@@ -498,6 +498,32 @@ func intelFailure() string {
 
 // capabilities are the encoder test's findings as the contract's Capability list ([] before the first
 // test): each encoder tested with a real frame, passed or failed; ffprobe and the picture check.
+// WorkerCapabilities is the encoder test list a computer reports: the list the server shows for its own
+// computer, which a remote worker sends on pair, join and heartbeat.
+func WorkerCapabilities(t doctor.Tools, ok bool) []map[string]any { return capabilities(t, ok) }
+
+// reportedCaps checks a remote worker's report of its encoder test: the list of capabilities (as
+// WorkerCapabilities builds it), or the empty object an older worker sends. It returns the list as stored:
+// JSON, "{}" for none.
+func reportedCaps(raw json.RawMessage) (string, bool) {
+	s := strings.TrimSpace(string(raw))
+	if s == "" || s == "{}" {
+		return "{}", true
+	}
+	if len(raw) > 8<<10 || !strings.HasPrefix(s, "[") {
+		return "", false
+	}
+	var list []map[string]any
+	if json.Unmarshal(raw, &list) != nil {
+		return "", false
+	}
+	if list == nil { // "[]": no encoders passed or listed
+		list = []map[string]any{}
+	}
+	b, err := json.Marshal(list)
+	return string(b), err == nil
+}
+
 func capabilities(t doctor.Tools, ok bool) []map[string]any {
 	out := []map[string]any{}
 	if !ok {

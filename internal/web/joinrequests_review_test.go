@@ -87,7 +87,7 @@ func TestJoinListSaysItReplacesAWorker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := st.Pair(code, "Office PC", "test", 1, "{}", time.Now()); err != nil {
+	if _, _, err := st.Pair(code, "Office PC", "test", "", "", 1, "{}", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	askJoin(t, srv, "Office PC")

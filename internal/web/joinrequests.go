@@ -47,7 +47,8 @@ var (
 // joinReq is one request. decision is "" while unanswered, else "allowed" or "denied".
 type joinReq struct {
 	id, secretHash     string
-	name, os, version  string
+	name, os, arch     string
+	version            string
 	hardware           *string
 	apiLevel           int
 	capabilities       string
@@ -220,7 +221,7 @@ func (b *joinBook) allow(id string, now time.Time) (jobs.RemoteWorker, error) {
 	if err != nil {
 		return jobs.RemoteWorker{}, err
 	}
-	wk, token, err := b.store.Pair(code, r.name, r.version, r.apiLevel, r.capabilities, now)
+	wk, token, err := b.store.Pair(code, r.name, r.version, r.os, r.arch, r.apiLevel, r.capabilities, now)
 	if err != nil {
 		return jobs.RemoteWorker{}, err
 	}
@@ -269,6 +270,7 @@ func (b *joinBook) dismiss(id string) error {
 type joinBody struct {
 	Name         string          `json:"name"`
 	OS           string          `json:"os"`
+	Arch         string          `json:"arch"` // the processor type; "" from an older worker
 	Hardware     *string         `json:"hardware"`
 	Port         int             `json:"port"` // the worker's web port, for the link on the Workers page; 0 when not sent
 	Capabilities json.RawMessage `json:"capabilities"`
@@ -283,12 +285,15 @@ func (in joinBody) problem() string {
 		return "The port is a number from 1 to 65535."
 	case len(in.OS) > 40:
 		return "The operating system is at most 40 characters."
+	case len(in.Arch) > 40:
+		return "The processor type is at most 40 characters."
 	case in.Hardware != nil && len(*in.Hardware) > 200:
 		return "The hardware description is at most 200 characters."
 	case len(in.Capabilities) > 8<<10:
 		return "The capabilities are at most 8 KiB."
-	case len(in.Capabilities) > 0 && !strings.HasPrefix(strings.TrimSpace(string(in.Capabilities)), "{"):
-		return "The capabilities are an object."
+	}
+	if _, ok := reportedCaps(in.Capabilities); !ok {
+		return "The capabilities are an empty object, or a list of the encoder tests."
 	}
 	return ""
 }
@@ -343,11 +348,8 @@ func (b *joinBook) ask(w http.ResponseWriter, r *http.Request, t Transport, limi
 		return
 	}
 	v, level := workerVersion(r)
-	caps := string(in.Capabilities)
-	if caps == "" {
-		caps = "{}"
-	}
-	req := &joinReq{name: strings.TrimSpace(in.Name), os: in.OS, version: v, hardware: in.Hardware, apiLevel: level,
+	caps, _ := reportedCaps(in.Capabilities) // problem() has checked it
+	req := &joinReq{name: strings.TrimSpace(in.Name), os: in.OS, arch: in.Arch, version: v, hardware: in.Hardware, apiLevel: level,
 		capabilities: caps, address: client, port: in.Port}
 	id, secret, err := b.add(req, now())
 	if errors.Is(err, errJoinFull) {
