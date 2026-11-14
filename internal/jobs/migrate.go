@@ -195,7 +195,7 @@ UPDATE flows SET template = json_set(json_remove(template, '$.selectors.skipHdr'
 WHERE json_extract(template, '$.kind') = 'selectors' AND json_type(template, '$.selectors') = 'object';
 DELETE FROM files WHERE reason = 'hdr_dv';`},
 	// S5, the Files view: each job's step summary (found, checked, converted, verified, kept, replaced),
-	// in plain words. Its full run log is a file (internal/runlog). Rows of a job that is gone are
+	// in plain words. Its log lines are in job_log_lines. Rows of a job that is gone are
 	// removed by the retention sweep (ForgetGoneJobSteps).
 	{18, "job steps", `
 CREATE TABLE IF NOT EXISTS job_steps (job_id INTEGER NOT NULL, step TEXT NOT NULL, at TEXT NOT NULL, ok INTEGER NOT NULL, words TEXT NOT NULL);
