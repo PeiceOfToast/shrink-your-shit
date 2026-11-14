@@ -13,8 +13,8 @@ import (
 // An allowed request that expires unpicked removes the worker Allow created, but only if that worker has no jobs:
 // a worker that never picked up its allow never had a token, so it can never have called the server.
 
-// JoinRequest is one join request. Times are unix nanoseconds. Decision is "" while waiting, else "allowed" or
-// "denied".
+// JoinRequest is one join request. Times are unix nanoseconds. Decision is "" while waiting, else "allowed",
+// "picked" (allowed, its token handed out) or "denied".
 type JoinRequest struct {
 	ID, SecretHash          string
 	Name, OS, Arch, Version string
@@ -111,7 +111,8 @@ func dropUnseenWorker(tx *sql.Tx, id string) error {
 	if id == "" {
 		return nil
 	}
-	_, err := tx.Exec(`DELETE FROM workers WHERE id=? AND kind='remote' AND NOT EXISTS (SELECT 1 FROM jobs WHERE worker=?)`, id, id)
+	// never heard from (its own call would have set last_seen) and no jobs
+	_, err := tx.Exec(`DELETE FROM workers WHERE id=? AND kind='remote' AND last_seen='' AND NOT EXISTS (SELECT 1 FROM jobs WHERE worker=?)`, id, id)
 	return err
 }
 
@@ -123,7 +124,7 @@ func (s *Store) PruneJoins(nowNS int64) error {
 		return err
 	}
 	defer tx.Rollback()
-	rows, err := tx.Query(`SELECT worker_id FROM join_requests WHERE decision='allowed' AND expires_ns<=?`, nowNS)
+	rows, err := tx.Query(`SELECT worker_id FROM join_requests WHERE decision IN ('allowed','picked') AND expires_ns<=?`, nowNS)
 	if err != nil {
 		return err
 	}
@@ -164,7 +165,7 @@ func (s *Store) DismissJoin(id string) error {
 	if err != nil {
 		return err
 	}
-	if decision == "allowed" {
+	if decision == "allowed" || decision == "picked" {
 		if err := dropUnseenWorker(tx, worker); err != nil {
 			return err
 		}
@@ -200,7 +201,7 @@ func (s *Store) PickUpJoin(id string) (workerID, token string, err error) {
 	if n, _ := r.RowsAffected(); n == 0 {
 		return "", "", ErrNotFound
 	}
-	if _, err := tx.Exec(`DELETE FROM join_requests WHERE id=?`, id); err != nil {
+	if _, err := tx.Exec(`UPDATE join_requests SET decision='picked' WHERE id=?`, id); err != nil {
 		return "", "", err
 	}
 	return workerID, token, tx.Commit()

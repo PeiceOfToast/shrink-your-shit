@@ -119,6 +119,13 @@ func (s *Store) SeenWorker(id, version string, apiLevel int, now time.Time) erro
 	return err
 }
 
+// ClearSeen forgets when remote worker id last called, so it reads offline until its own first call. Pairing
+// counts as a call; an allow does not (the worker has not spoken yet).
+func (s *Store) ClearSeen(id string) error {
+	_, err := s.db.Exec(`UPDATE workers SET last_seen='' WHERE id=? AND kind='remote'`, id)
+	return err
+}
+
 // SetWorkerReport records what remote worker id reports now about its computer and its encoder test.
 func (s *Store) SetWorkerReport(id, osName, arch, capabilities string) error {
 	_, err := s.db.Exec(`UPDATE workers SET os=?, arch=?, capabilities=? WHERE id=? AND kind='remote'`, osName, arch, capabilities, id)

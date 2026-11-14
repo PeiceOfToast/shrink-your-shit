@@ -148,6 +148,8 @@ func (b *joinBook) add(r *joinReq, now time.Time) (id, secret string, err error)
 // state is what the worker and the person see: waiting, expired, allowed or denied. Call with mu held.
 func (b *joinBook) state(r *joinReq, now time.Time) string {
 	switch {
+	case r.decision == "picked":
+		return "allowed" // its token was handed out; a second poll finds nothing (PickUpJoin)
 	case r.decision != "":
 		return r.decision
 	case !now.Before(r.expiresAt):
@@ -252,6 +254,10 @@ func (b *joinBook) allow(id string, now time.Time) (jobs.RemoteWorker, error) {
 	// when every worker is off), so the person's allow is what turns it on.
 	if err := b.store.SetWorkerEnabled(wk.ID, true); err != nil {
 		log.Printf("join: %s is paired, but turning it on failed: %v", wk.ID, err)
+	}
+	// The card reads online only once the worker itself has called: Pair counted as a call, the allow is not one.
+	if err := b.store.ClearSeen(wk.ID); err != nil {
+		log.Printf("join: %s is paired, but clearing its last call failed: %v", wk.ID, err)
 	}
 	for _, oid := range old {
 		if err := b.store.RemoveWorker(oid); err != nil && !errors.Is(err, jobs.ErrNotFound) {
