@@ -42,6 +42,18 @@ warn() { printf 'WARNING: %s\n' "$*" >&2; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# quiet_run WHAT COMMAND...: runs a package step with its output in a log file, so a successful run prints nothing.
+# On failure it prints the log's last 20 lines and the log's path, then returns the command's status.
+quiet_run() {
+  q_what=$1; shift
+  q_log=$(mktemp "${TMPDIR:-/tmp}/shrink-your-shit-install.XXXXXX") || die "could not make a log file to $q_what"
+  "$@" >"$q_log" 2>&1 && { rm -f "$q_log"; return 0; }
+  q_rc=$?
+  printf 'ERROR: %s failed. Last 20 lines of its output (full log: %s):\n' "$q_what" "$q_log" >&2
+  tail -n 20 "$q_log" >&2
+  return "$q_rc"
+}
+
 usage() {
   cat <<'USAGE'
 Usage: install.sh [--library DIR]... [--addr ADDR] [--version X.Y.Z] [--network-shares|--no-network-shares] [--no-start] [--run]
@@ -112,13 +124,14 @@ sha256_of() {
   fi
 }
 
+say "Shrink Your Shit installer"
+
 # ---- privileges ----
 SUDO=
 if [ "$OS" = linux ]; then
   if [ "$(id -u)" -ne 0 ]; then
     if have sudo; then
       SUDO=sudo
-      say "Not running as root: using sudo to install the program, its service and ffmpeg system-wide."
     else
       die "this needs root to install system-wide. Run it as root, or install sudo first."
     fi
@@ -130,21 +143,20 @@ ffmpeg_ok() { have ffmpeg && have ffprobe; }
 
 install_ffmpeg() {
   ffmpeg_ok && return 0
-  say "ffmpeg is not installed. Installing it..."
   if [ "$OS" = darwin ]; then
     have brew || die "ffmpeg is missing and Homebrew is not installed. Install Homebrew from https://brew.sh, then run this again."
-    brew install ffmpeg
+    quiet_run "installing ffmpeg with Homebrew" brew install ffmpeg
   elif have apt-get; then
-    $SUDO apt-get update -qq
-    $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg ca-certificates
+    quiet_run "updating the package lists" $SUDO apt-get update -qq
+    quiet_run "installing ffmpeg" $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg ca-certificates
   elif have dnf; then
-    $SUDO dnf install -y ffmpeg || die "dnf could not install ffmpeg. On Fedora/RHEL enable RPM Fusion (https://rpmfusion.org) first, or install ffmpeg yourself, then run this again."
+    quiet_run "installing ffmpeg" $SUDO dnf install -y ffmpeg || die "dnf could not install ffmpeg. On Fedora/RHEL enable RPM Fusion (https://rpmfusion.org) first, or install ffmpeg yourself, then run this again."
   elif have pacman; then
-    $SUDO pacman -S --noconfirm --needed ffmpeg
+    quiet_run "installing ffmpeg" $SUDO pacman -S --noconfirm --needed ffmpeg
   elif have apk; then
-    $SUDO apk add --no-cache ffmpeg
+    quiet_run "installing ffmpeg" $SUDO apk add --no-cache ffmpeg
   elif have zypper; then
-    $SUDO zypper --non-interactive install ffmpeg || die "zypper could not install ffmpeg. Enable the Packman repository (https://en.opensuse.org/Additional_package_repositories) or install ffmpeg yourself, then run this again."
+    quiet_run "installing ffmpeg" $SUDO zypper --non-interactive install ffmpeg || die "zypper could not install ffmpeg. Enable the Packman repository (https://en.opensuse.org/Additional_package_repositories) or install ffmpeg yourself, then run this again."
   else
     die "ffmpeg is missing and no supported package manager was found (apt, dnf, pacman, apk, zypper, brew). Install ffmpeg yourself, then run this again."
   fi
@@ -161,7 +173,6 @@ trap 'rm -rf "$tmp"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 name=shrink-your-shit_${OS}_${ARCH}.tar.gz
-say "Downloading $name from $BASE_URL ..."
 fetch "$BASE_URL/$name" "$tmp/$name" || die "could not download $BASE_URL/$name. Is there a published release yet? (--version X.Y.Z picks one; SYP_BASE_URL points elsewhere)"
 fetch "$BASE_URL/checksums.txt" "$tmp/checksums.txt" || die "could not download $BASE_URL/checksums.txt, so the download cannot be verified"
 want=$(grep "  $name\$" "$tmp/checksums.txt" | cut -d' ' -f1 || true)
@@ -290,7 +301,6 @@ if [ "$OS" = linux ]; then
   if [ -z "$LIBS" ] && [ -f "$ENV_FILE" ]; then
     LIBS=$(sed -n 's/^SYP_LIBRARIES=//p' "$ENV_FILE" | tail -n 1)
   fi
-  [ -n "$LIBS" ] || say "No library folder given: add your video folders on the web page."
   OLDIFS=$IFS; IFS=:
   for d in $LIBS; do
     [ -d "$d" ] || die "library folder '$d' does not exist"
@@ -356,15 +366,15 @@ UNIT
       $SUDO install -o root -g root -m 0755 "$tmp/x/syp-network-helper" "$HELPER_BIN"
       if ! have mount.cifs || ! have mount.nfs; then
         if have apt-get; then
-          $SUDO apt-get update -qq || true
-          $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cifs-utils nfs-common \
+          quiet_run "updating the package lists" $SUDO apt-get update -qq || true
+          quiet_run "installing cifs-utils and nfs-common" $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cifs-utils nfs-common \
             || NS_REASON="could not install cifs-utils and nfs-common"
         elif have dnf; then
-          $SUDO dnf install -y cifs-utils nfs-utils || NS_REASON="could not install cifs-utils and nfs-utils"
+          quiet_run "installing cifs-utils and nfs-utils" $SUDO dnf install -y cifs-utils nfs-utils || NS_REASON="could not install cifs-utils and nfs-utils"
         elif have yum; then
-          $SUDO yum install -y cifs-utils nfs-utils || NS_REASON="could not install cifs-utils and nfs-utils"
+          quiet_run "installing cifs-utils and nfs-utils" $SUDO yum install -y cifs-utils nfs-utils || NS_REASON="could not install cifs-utils and nfs-utils"
         elif have apk; then
-          $SUDO apk add --no-cache cifs-utils nfs-utils || NS_REASON="could not install cifs-utils and nfs-utils"
+          quiet_run "installing cifs-utils and nfs-utils" $SUDO apk add --no-cache cifs-utils nfs-utils || NS_REASON="could not install cifs-utils and nfs-utils"
         else
           NS_REASON="no package manager found for cifs-utils and the NFS client tools"
         fi
@@ -461,7 +471,6 @@ if [ -z "$ADDR" ]; then
   [ -z "$old_addr" ] || PORT_ADDR=$old_addr
 fi
 PORT=${PORT_ADDR##*:}
-[ -n "$LIBS" ] || say "No library folder given: add your video folders on the web page."
 OLDIFS=$IFS; IFS=:
 for d in $LIBS; do [ -d "$d" ] || die "library folder '$d' does not exist"; done
 IFS=$OLDIFS
