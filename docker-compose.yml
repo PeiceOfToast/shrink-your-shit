@@ -12,6 +12,12 @@ services:
     volumes:
       - syp-config:/config              # database (a named volume, so it is writable by the program)
       - /path/to/COPY-of-your-videos:/media
+    # Lets the app mount NFS/SMB shares added on the Shares page; delete cap_add and security_opt to mount them on the host instead.
+    cap_add:
+      - SYS_ADMIN
+      - DAC_READ_SEARCH
+    security_opt:
+      - "apparmor:unconfined"
     # environment:
     #   SYP_LIBRARIES: /media:/media2   # several folders, separated by ":"
     # command: ["-min-bitrate", "3000", "-crf", "24"]   # extra settings, same flags as the program
