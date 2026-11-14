@@ -7,7 +7,7 @@ set -eu
 dri=${SYP_DRI:-/dev/dri}
 gids=$(
     {
-        id -G syp
+        id -G 1000
         id -G
         for d in "$dri"/renderD* "$dri"/card*; do
             if [ -e "$d" ]; then stat -c %g "$d"; fi
