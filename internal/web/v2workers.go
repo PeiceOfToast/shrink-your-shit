@@ -309,6 +309,49 @@ var encoderLabels = map[string]string{
 	"hevc_nvenc": "NVIDIA NVENC, HEVC (graphics card)", "hevc_qsv": "Intel Quick Sync, HEVC (graphics)", "hevc_vaapi": "VA-API, HEVC (graphics)",
 	"hevc_amf": "AMD AMF, HEVC (graphics card)", "hevc_videotoolbox": "VideoToolbox, HEVC (Apple)", "hevc_mf": "Media Foundation, HEVC (graphics)",
 	"hevc_v4l2m2m": "V4L2, HEVC (hardware)",
+	"h264_nvenc":   "NVIDIA NVENC, H.264 (graphics card)", "av1_nvenc": "NVIDIA NVENC, AV1 (graphics card)",
+	"h264_qsv": "Intel Quick Sync, H.264 (graphics)", "av1_qsv": "Intel Quick Sync, AV1 (graphics)",
+	"h264_vaapi": "VA-API, H.264 (graphics)", "av1_vaapi": "VA-API, AV1 (graphics)",
+	"h264_amf": "AMD AMF, H.264 (graphics card)", "av1_amf": "AMD AMF, AV1 (graphics card)",
+	"h264_videotoolbox": "VideoToolbox, H.264 (Apple)", "av1_videotoolbox": "VideoToolbox, AV1 (Apple)",
+}
+
+// encoderFormat is the video format an encoder writes: hevc, h264, av1 or vp9 ("" if unknown).
+func encoderFormat(e string) string {
+	switch {
+	case strings.HasPrefix(e, "hevc_"), e == "libx265":
+		return "hevc"
+	case strings.HasPrefix(e, "h264_"), e == "libx264":
+		return "h264"
+	case strings.HasPrefix(e, "av1_"), e == "libsvtav1":
+		return "av1"
+	case e == "libvpx-vp9":
+		return "vp9"
+	}
+	return ""
+}
+
+// graphicsFamily is a graphics encoder's family ("nvenc", "qsv", ...); "" for a processor encoder.
+func graphicsFamily(e string) string {
+	if i := strings.LastIndex(e, "_"); i > 0 {
+		return e[i+1:]
+	}
+	return ""
+}
+
+// otherFormatPassed says whether a graphics encoder failed while another format of its family passed. Then the
+// card does the family but not this format, which is "unsupported", not a fault.
+func otherFormatPassed(passed []string, e string) bool {
+	fam := graphicsFamily(e)
+	if fam == "" {
+		return false
+	}
+	for _, p := range passed {
+		if graphicsFamily(p) == fam && encoderFormat(p) != encoderFormat(e) {
+			return true
+		}
+	}
+	return false
 }
 
 const failed = "ffmpeg lists it, but a test frame failed on this computer."
@@ -389,7 +432,7 @@ var openRender = func(path string) error {
 }
 
 // intelFailure says why a failed Quick Sync or VA-API test is failing when the device is the cause;
-// otherwise the generic line. Only hevc_qsv and hevc_vaapi come here.
+// otherwise the generic line. Only the Quick Sync and VA-API encoders come here.
 func intelFailure() string {
 	nodes := renderNodes()
 	if len(nodes) == 0 {
@@ -422,17 +465,25 @@ func capabilities(t doctor.Tools, ok bool) []map[string]any {
 		}
 		out = append(out, c)
 	}
+	// annotate adds the format of the encoder just added, its graphics family for a graphics encoder, and the
+	// device for a hardware encoder.
+	annotate := func(e, slot string) {
+		c := out[len(out)-1]
+		c["format"] = encoderFormat(e)
+		if slot == "gpu" {
+			c["family"] = graphicsFamily(e)
+			if d := encoderDevice(e); d != "" {
+				c["device"] = d
+			}
+		}
+	}
 	for _, e := range t.Software {
 		add("encoder", e, encoderLabels[e], "cpu", "passed", "")
+		annotate(e, "cpu")
 	}
 	for _, e := range t.SoftwareListed {
 		add("encoder", e, encoderLabels[e], "cpu", "failed", failed)
-	}
-	// setDevice adds the device field to the capability just added, for a hardware encoder.
-	setDevice := func(e string) {
-		if d := encoderDevice(e); d != "" {
-			out[len(out)-1]["device"] = d
-		}
+		annotate(e, "cpu")
 	}
 	for _, e := range t.Hardware {
 		detail := "8-bit only: HDR files are converted on the processor."
@@ -440,15 +491,19 @@ func capabilities(t doctor.Tools, ok bool) []map[string]any {
 			detail = "10-bit too (HDR)."
 		}
 		add("encoder", e, encoderLabels[e], "gpu", "passed", detail)
-		setDevice(e)
+		annotate(e, "gpu")
 	}
 	for _, e := range t.HardwareListed {
-		detail := failed
-		if usesDevDRI && (e == "hevc_qsv" || e == "hevc_vaapi") {
+		test, detail := "failed", failed
+		switch {
+		case otherFormatPassed(t.Hardware, e):
+			// The card does this family's other format, so only this one is missing.
+			test, detail = "unsupported", "Not supported by this graphics card."
+		case usesDevDRI && (strings.HasSuffix(e, "_qsv") || strings.HasSuffix(e, "_vaapi")):
 			detail = intelFailure()
 		}
-		add("encoder", e, encoderLabels[e], "gpu", "failed", detail)
-		setDevice(e)
+		add("encoder", e, encoderLabels[e], "gpu", test, detail)
+		annotate(e, "gpu")
 	}
 	if t.FFprobe != "" {
 		add("tool", "ffprobe", "ffprobe "+t.FFprobeVersion, "cpu", "passed", "")
