@@ -942,13 +942,18 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			if reason == "" {
 				reason = terr.Error()
 			}
-			os.Remove(tmp)
-			w.jobf(job.ID, ": %s failed (%s); converted on the processor", gpu, reason)
-			args = plan.FFmpegArgs(srcPath, tmp)
-			setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWords(plan),
-				Decoder: decoderWords(src), Progress: media.Progress{ETASeconds: -1}})
-			encStart = w.now()
-			encErr, terr = w.encodeLocal(ctx, job, args)
+			// Truncate, don't remove: the staged file is checked by identity (staged.intact), so the retry must
+			// write into the same file, not a new one that may get another inode.
+			if err := os.Truncate(tmp, 0); err != nil {
+				encErr, terr = "", fmt.Errorf("clearing the partial output: %w", err)
+			} else {
+				w.jobf(job.ID, ": %s failed (%s); converted on the processor", gpu, reason)
+				args = plan.FFmpegArgs(srcPath, tmp)
+				setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWords(plan),
+					Decoder: decoderWords(src), Progress: media.Progress{ETASeconds: -1}})
+				encStart = w.now()
+				encErr, terr = w.encodeLocal(ctx, job, args)
+			}
 		}
 	}
 	w.recordEncode(job.ID, args, encStart, encErr, terr, probeSummary(src))
