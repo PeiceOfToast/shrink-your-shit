@@ -600,6 +600,19 @@ func (s *Store) HoldsLease(id int64, lease string) (bool, error) {
 
 // RequeueExpiredLeases puts running jobs whose lease ran out back in the queue, to be tried again after
 // wait (a try counted; the timeline says why). It returns how many.
+// MaxLostInARow is how many worker-lost requeues in a row a job gets before it waits like a failed try.
+var MaxLostInARow = 3
+
+// lostInARow counts job id's worker-lost requeues since its last requeue for any other reason. The job's status
+// history (events) keeps each change with its reason, so this needs no column of its own.
+func (s *Store) lostInARow(id int64) (int, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM events WHERE kind='job' AND job_id=? AND to_status=? AND reason=?
+  AND seq > (SELECT COALESCE(MAX(seq),0) FROM events WHERE kind='job' AND job_id=? AND to_status=? AND reason<>?)`,
+		id, Queued, ReasonWorkerLost, id, Queued, ReasonWorkerLost).Scan(&n)
+	return n, err
+}
+
 func (s *Store) RequeueExpiredLeases(wait time.Duration) (int, error) {
 	now := s.now().UTC()
 	rows, err := s.db.Query(`SELECT id, worker FROM jobs WHERE status=? AND lease_expires<>'' AND lease_expires<?`, Running, now.Format(leaseTime))
@@ -623,9 +636,20 @@ func (s *Store) RequeueExpiredLeases(wait time.Duration) (int, error) {
 	n := 0
 	for _, l := range expired {
 		words := "Its worker (" + l.worker + ") stopped answering, so it goes back in the queue. The original was not touched."
-		r, err := s.db.Exec(`UPDATE jobs SET status=?, updated=?, progress=0, worker='', error=?, error_code=?, attempts=attempts+1, retry_at=?,
+		// A lost worker is not the job's fault: it is retakeable at once and not counted as a try. A job that
+		// keeps losing its worker (MaxLostInARow in a row, e.g. a file that crashes each worker) gets the normal
+		// wait and is counted, so it cannot loop forever.
+		lost, err := s.lostInARow(l.id)
+		if err != nil {
+			return n, err
+		}
+		counted, retryAt := 0, ""
+		if lost+1 >= MaxLostInARow {
+			counted, retryAt = 1, now.Add(wait).Format(time.RFC3339)
+		}
+		r, err := s.db.Exec(`UPDATE jobs SET status=?, updated=?, progress=0, worker='', error=?, error_code=?, attempts=attempts+?, retry_at=?,
   lease_id='', lease_expires='' WHERE id=? AND status=? AND lease_expires<>'' AND lease_expires<?`,
-			Queued, s.stamp(), words, ReasonWorkerLost, now.Add(wait).Format(time.RFC3339), l.id, Running, now.Format(leaseTime))
+			Queued, s.stamp(), words, ReasonWorkerLost, counted, retryAt, l.id, Running, now.Format(leaseTime))
 		if err != nil {
 			return n, err
 		}
