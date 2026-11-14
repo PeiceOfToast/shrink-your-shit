@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -215,34 +216,101 @@ func (t Template) Compile(info media.Info) Plan {
 // the Plan says, everything else (audio, subtitles, attachments, extra streams) is copied, data
 // streams are dropped, and the container stays the input's. Progress goes to stdout.
 func (p Plan) FFmpegArgs(in, out string) []string {
+	args, _ := p.FFmpegArgsWith(in, out, "")
+	return args
+}
+
+// graphicsEncoders are the hardware HEVC encoders FFmpegArgsWith knows, by ffmpeg's name.
+var graphicsEncoders = map[string]bool{"hevc_nvenc": true, "hevc_qsv": true, "hevc_vaapi": true, "hevc_amf": true}
+
+// vaapiDevice is the render node VAAPI encodes on: the first one present, as doctor's test encode picks it.
+// A seam, so tests need no /dev/dri.
+var vaapiDevice = func() string {
+	if m, _ := filepath.Glob("/dev/dri/renderD*"); len(m) > 0 {
+		return m[0]
+	}
+	return "/dev/dri/renderD128"
+}
+
+// FFmpegArgsWith is FFmpegArgs with the video encoded by enc. "" or "cpu" is the processor, exactly
+// FFmpegArgs. A graphics HEVC encoder (hevc_nvenc, hevc_qsv, hevc_vaapi, hevc_amf) is used for an HEVC
+// encode (libx265, not a copy), and ok is then true. ok is false when enc is not one of those, or the
+// Plan can't use one: the arguments are the processor's either way.
+func (p Plan) FFmpegArgsWith(in, out, enc string) ([]string, bool) {
+	if enc == "" || enc == "cpu" {
+		return p.ffmpegArgs(in, out, ""), true
+	}
+	if !graphicsEncoders[enc] || p.Video.Copy || p.Video.Codec != "libx265" {
+		return p.ffmpegArgs(in, out, ""), false
+	}
+	return p.ffmpegArgs(in, out, enc), true
+}
+
+// ffmpegArgs builds the arguments; gpu is a graphics encoder's name, or "" for the processor's.
+func (p Plan) ffmpegArgs(in, out, gpu string) []string {
 	v := "v:" + strconv.Itoa(p.Video.Index)
-	args := []string{
-		"-y", "-nostdin", "-v", "error", "-progress", "pipe:1", "-nostats",
-		"-i", in,
+	args := []string{"-y", "-nostdin", "-v", "error", "-progress", "pipe:1", "-nostats"}
+	switch gpu { // a hardware device is set up before the input
+	case "hevc_qsv":
+		args = append(args, "-init_hw_device", "qsv=qsv:hw")
+	case "hevc_vaapi":
+		args = append(args, "-init_hw_device", "vaapi=va:"+vaapiDevice(), "-filter_hw_device", "va")
+	}
+	args = append(args, "-i", in,
 		"-map", "0", "-map", "-0:d",
 		"-c", "copy",
-	}
+	)
 	if p.Video.Copy { // repackaged: the video as it is (the global -c copy), audio as planned
 		args = append(args, p.trackArgs()...)
 		args = append(args, out)
 		return p.withSubtitleFiles(args, out)
 	}
-	if p.Video.TargetKbps > 0 { // VBR: an average to aim at, in place of the quality
-		args = append(args, "-c:"+v, p.Video.Codec, "-b:"+v, strconv.Itoa(p.Video.TargetKbps)+"k")
-	} else {
+	kbps := strconv.Itoa(p.Video.TargetKbps) + "k"
+	switch {
+	case gpu == "" && p.Video.TargetKbps > 0: // VBR: an average to aim at, in place of the quality
+		args = append(args, "-c:"+v, p.Video.Codec, "-b:"+v, kbps)
+	case gpu == "":
 		args = append(args, "-c:"+v, p.Video.Codec, "-crf", strconv.Itoa(p.Video.CRF))
+	case p.Video.TargetKbps > 0:
+		args = append(args, "-c:"+v, gpu, "-b:"+v, kbps)
+	default:
+		args = append(args, "-c:"+v, gpu)
+		args = append(args, gpuQuality(gpu, p.Video.CRF)...)
 	}
-	if p.Video.Preset != "" {
+	if gpu == "" && p.Video.Preset != "" { // a graphics encoder has no x265 presets
 		args = append(args, "-preset", p.Video.Preset)
 	}
-	args = append(args, extraArgs(p.Video)...)
-	if h := p.Video.HDR; h != nil { // 10-bit main10 with the HDR written explicitly (S3)
-		args = append(args, "-pix_fmt:"+v, "yuv420p10le", "-profile:"+v, "main10",
-			"-color_primaries:"+v, h.Primaries, "-color_trc:"+v, h.Transfer, "-colorspace:"+v, h.Matrix,
-			"-x265-params:"+v, h.x265Params())
+	if gpu == "" {
+		args = append(args, extraArgs(p.Video)...)
+	} else {
+		args = append(args, withoutX265(extraArgs(p.Video))...)
 	}
+	if h := p.Video.HDR; h != nil { // 10-bit main10 with the HDR written explicitly (S3)
+		if gpu == "" {
+			args = append(args, "-pix_fmt:"+v, "yuv420p10le", "-profile:"+v, "main10",
+				"-color_primaries:"+v, h.Primaries, "-color_trc:"+v, h.Transfer, "-colorspace:"+v, h.Matrix,
+				"-x265-params:"+v, h.x265Params())
+		} else {
+			args = append(args, "-profile:"+v, "main10",
+				"-color_primaries:"+v, h.Primaries, "-color_trc:"+v, h.Transfer, "-colorspace:"+v, h.Matrix)
+			if gpu != "hevc_vaapi" { // VAAPI's frames are made p010 by its filter instead
+				args = append(args, "-pix_fmt:"+v, "p010le")
+			}
+		}
+	}
+	var vf []string
 	if p.Video.Height > 0 {
-		args = append(args, "-filter:"+v, "scale=-2:"+strconv.Itoa(p.Video.Height))
+		vf = append(vf, "scale=-2:"+strconv.Itoa(p.Video.Height))
+	}
+	if gpu == "hevc_vaapi" { // software frames go up to the device last, after any scale
+		format := "nv12"
+		if p.Video.HDR != nil {
+			format = "p010"
+		}
+		vf = append(vf, "format="+format, "hwupload")
+	}
+	if len(vf) > 0 {
+		args = append(args, "-filter:"+v, strings.Join(vf, ","))
 	}
 	args = append(args, p.trackArgs()...)
 	if p.Video.MaxRateKbps > 0 && !vp9Capped(p.Video) { // VP9's cap is its -b:v (extraArgs)
@@ -258,6 +326,34 @@ func (p Plan) FFmpegArgs(in, out string) []string {
 	}
 	args = append(args, out)
 	return p.withSubtitleFiles(args, out)
+}
+
+// gpuQuality is a graphics encoder's constant-quality arguments at crf, in its own names.
+func gpuQuality(enc string, crf int) []string {
+	n := strconv.Itoa(crf)
+	switch enc {
+	case "hevc_nvenc":
+		return []string{"-rc", "vbr", "-cq", n}
+	case "hevc_qsv":
+		return []string{"-global_quality", n}
+	case "hevc_vaapi":
+		return []string{"-rc_mode", "CQP", "-qp", n}
+	default: // hevc_amf
+		return []string{"-rc", "cqp", "-qp_i", n, "-qp_p", n}
+	}
+}
+
+// withoutX265 drops libx265's "-x265-params" and its value: a graphics encoder has none.
+func withoutX265(args []string) []string {
+	var out []string
+	for i := 0; i < len(args); i++ {
+		if strings.HasPrefix(args[i], "-x265-params") {
+			i++
+			continue
+		}
+		out = append(out, args[i])
+	}
+	return out
 }
 
 // withSubtitleFiles adds the extracted subtitles: one more output each, next to the new file (the
