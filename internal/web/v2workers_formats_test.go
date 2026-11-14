@@ -22,6 +22,7 @@ func capabilityByKey(caps []map[string]any, key string) map[string]any {
 // A graphics card that does HEVC but not AV1 in the same family marks AV1 "unsupported", not "failed".
 // Each encoder row names its format; a graphics row also names its family.
 func TestCapabilitiesMarksAFormatTheCardLacksAsUnsupported(t *testing.T) {
+	seamIntelCard(t) // the card is there: hevc passed on it
 	caps := capabilities(doctor.Tools{
 		Hardware:       []string{"hevc_vaapi"},
 		HardwareListed: []string{"av1_vaapi"},
@@ -51,6 +52,7 @@ func TestCapabilitiesMarksAFormatTheCardLacksAsUnsupported(t *testing.T) {
 
 // When no format of a graphics family passed, each failed format stays "failed".
 func TestCapabilitiesKeepsFailedWhenNothingOfTheFamilyPassed(t *testing.T) {
+	seamIntelCard(t) // the card is there but no format of its family passed: failed, not not_present
 	caps := capabilities(doctor.Tools{
 		HardwareListed: []string{"hevc_qsv", "h264_qsv", "av1_qsv"},
 		TestedAt:       time.Now(),
