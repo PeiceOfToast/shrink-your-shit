@@ -11,8 +11,8 @@
 #   curl -fsSL <url>/install.sh | sh -s -- --library /srv/videos --addr 0.0.0.0:8484
 #
 #   --library DIR     folder to watch (repeat for several). Default: none; add folders on the web page.
-#   --addr ADDR       web address (default 127.0.0.1:8484, this computer only; with 0.0.0.0:8484
-#                     other machines sign in with an access token, shown at the end)
+#   --addr ADDR       web address (default 0.0.0.0:8484: other computers on the network reach it and sign in
+#                     with the access token in the link shown at the end; 127.0.0.1:8484 is this computer only)
 #   --version X.Y.Z   install that release instead of the newest
 #   --no-start        install but do not start
 #   --run             run in the foreground at the end (for containers / machines without a service manager)
@@ -30,6 +30,12 @@ ADDR=${SYP_ADDR:-}
 NO_START=
 NETWORK_SHARES=
 RUN_FG=
+UPDATED=        # set when an earlier install is found (this run upgrades it)
+NEW_VERSION=
+NS_LINE=        # the network-share line of the final output
+NS_REASON=      # why the share helper could not be set up
+TOKEN_OUT=      # the program's `token` output (its access token and sign-in address)
+TOKEN_CMD=      # how to show the sign-in link again, for the final output
 
 say() { printf '%s\n' "$*"; }
 warn() { printf 'WARNING: %s\n' "$*" >&2; }
@@ -40,8 +46,10 @@ usage() {
   cat <<'USAGE'
 Usage: install.sh [--library DIR]... [--addr ADDR] [--version X.Y.Z] [--network-shares|--no-network-shares] [--no-start] [--run]
   --library DIR    folder to watch (repeat for several); default: none, add folders on the web page
-  --addr ADDR      web address, default 127.0.0.1:8484 (this computer only); beyond it, an access token is needed
+  --addr ADDR      web address, default 0.0.0.0:8484 (other computers on the network sign in with the access token);
+                   127.0.0.1:8484 is this computer only
   --version X.Y.Z  install that release instead of the newest
+  --network-shares / --no-network-shares   set up (default) or skip the SMB/NFS share helper
   --no-start       install but do not start
   --run            run in the foreground at the end (containers / no service manager)
 Environment: SYP_BASE_URL (download location; file:///dir works), SYP_LIBRARIES, SYP_ADDR
@@ -164,7 +172,8 @@ mkdir "$tmp/x"
 tar -xzf "$tmp/$name" -C "$tmp/x" --strip-components=1 --no-same-owner
 [ -f "$tmp/x/shrink-your-shit" ] || die "the download did not contain the program"
 
-PORT_ADDR=${ADDR:-127.0.0.1:8484}
+NEW_VERSION=$("$tmp/x/shrink-your-shit" -version 2>/dev/null | awk '{print $2}') || true
+PORT_ADDR=${ADDR:-0.0.0.0:8484}
 
 # The address to ask "are you up?" on: the host part of the listen address; "all addresses"
 # (0.0.0.0, ::, nothing) means ask on this computer.
@@ -191,24 +200,57 @@ health_check() {
   return 1
 }
 
-# signin_url BASE: on loopback, BASE. Beyond it, the sign-in address the program's `token` command
-# gives for the configured address (it made the token on its first start), with this machine's
-# network address for "all addresses"; BASE if that fails.
-signin_url() {
-  case $PORT_ADDR in 127.*|localhost:*|\[::1\]:*) printf '%s' "$1"; return ;; esac
+# token_out: the program's `token` output (its access token and sign-in address). Empty if it fails.
+token_out() {
   if [ -n "${TOKEN_DATA:-}" ]; then
-    u=$($SUDO env SYP_ADDR="$PORT_ADDR" SYP_DATA="$TOKEN_DATA" "$BIN" token 2>/dev/null | sed -n 's/^Sign-in address: //p')
+    $SUDO env SYP_ADDR="$PORT_ADDR" SYP_DATA="$TOKEN_DATA" "$BIN" token 2>/dev/null || true
   else
-    u=$($SUDO env SYP_ADDR="$PORT_ADDR" "$BIN" token 2>/dev/null | sed -n 's/^Sign-in address: //p')
+    $SUDO env SYP_ADDR="$PORT_ADDR" "$BIN" token 2>/dev/null || true
   fi
-  printf '%s' "${u:-$1}"
 }
 
-finish() { # finish URL_NOTE
+# lan_ip: this computer's address on the local network, taken from the default route (so a Docker bridge
+# address is not picked). Empty when none is found.
+lan_ip() {
+  ip=
+  if have ip; then ip=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n 1) || true; fi
+  if [ -z "$ip" ] && have route && have ipconfig; then
+    iface=$(route -n get default 2>/dev/null | sed -n 's/.*interface: //p' | head -n 1) || true
+    if [ -n "$iface" ]; then ip=$(ipconfig getifaddr "$iface" 2>/dev/null) || true; fi
+  fi
+  if [ -z "$ip" ] && have hostname; then
+    ip=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^127\.' | head -n 1) || true
+  fi
+  printf '%s' "$ip"
+}
+
+# ready_block: the last thing the installer prints. Only what was found, and the link to open.
+ready_block() {
   say ""
-  say "Installed. Open $1"
-  say "Settings: $SETTINGS_NOTE"
-  say "Note: shrink-your-shit REPLACES original video files (after checking the result). Try it on a copy first."
+  if [ -n "$UPDATED" ]; then say "Updated to ${NEW_VERSION:-the new release}. Your settings are kept."; fi
+  if [ -n "$NS_LINE" ]; then say "$NS_LINE"; fi
+  case $PORT_ADDR in
+    127.*|localhost:*|\[::1\]:*)
+      say "Listening on this computer only, so workers can't find it. To let other computers in, run this again with --addr 0.0.0.0:$PORT."
+      say "Ready. Open this on this computer to finish setting up:"
+      say "  http://127.0.0.1:$PORT/" ;;
+    *)
+      tok=$(printf '%s\n' "$TOKEN_OUT" | sed -n 's/.*[?&]token=\([^&]*\).*/\1/p' | head -n 1)
+      q=
+      if [ -n "$tok" ]; then q="?token=$tok"; fi
+      ip=$(lan_ip)
+      if [ -n "$ip" ]; then
+        link="http://$ip:$PORT/$q"
+      else # no default route: the program's own sign-in address, which names this computer's address
+        link=$(printf '%s\n' "$TOKEN_OUT" | sed -n 's/^Sign-in address: //p' | head -n 1)
+        link=${link:-"http://<this computer's address>:$PORT/"}
+      fi
+      say "Ready. Open this on any computer on your network to finish setting up:"
+      say "  $link"
+      say "This link signs you in. To see it again: $TOKEN_CMD token"
+      say "There is no HTTPS: use it on a network you trust." ;;
+  esac
+  say "Shrink Your Shit replaces original video files after checking the result. Try it on a copy first."
 }
 
 # ======================= Linux =======================
@@ -217,7 +259,9 @@ if [ "$OS" = linux ]; then
   ENV_FILE=/etc/default/shrink-your-shit
   DATA_DIR=/var/lib/shrink-your-shit
   UNIT=/etc/systemd/system/shrink-your-shit.service
-  SETTINGS_NOTE="$ENV_FILE (then: sudo systemctl restart shrink-your-shit)   Logs: journalctl -u shrink-your-shit -f"
+  TOKEN_DATA=$DATA_DIR
+  TOKEN_CMD='sudo shrink-your-shit'
+  if [ -f "$ENV_FILE" ]; then UPDATED=1; fi
 
   if ! id syp >/dev/null 2>&1; then
     if have useradd; then
@@ -289,24 +333,10 @@ UNIT
     HELPER_DIR=/usr/local/libexec/shrink-your-shit
     HELPER_BIN=$HELPER_DIR/syp-network-helper
     HELPER_UNIT=/etc/systemd/system/syp-network-helper.service
-    if [ -z "$NETWORK_SHARES" ] && [ -f "$HELPER_UNIT" ]; then
-      NETWORK_SHARES=1 # installed before: keep it (and update it)
-    fi
-    if [ -z "$NETWORK_SHARES" ]; then
-      # Ask on the terminal, not stdin: with "curl ... | sh" stdin is the script itself.
-      if [ -t 1 ] && (: </dev/tty) 2>/dev/null; then
-        printf '%s\n%s\n%s' "Let Shrink Your Shit connect network shares (SMB/NFS) itself?" \
-          "This installs a small helper that runs as root and can only mount shares in /var/lib/syp/shares." \
-          "[y/N] " >/dev/tty
-        yn=
-        read -r yn </dev/tty || yn=
-        case $yn in y|Y|yes|Yes) NETWORK_SHARES=1 ;; *) NETWORK_SHARES=0 ;; esac
-      else
-        NETWORK_SHARES=0 # unattended: no root helper unless asked for
-      fi
-    fi
+    # Set up by default, without a question. The helper runs as root but can only mount shares in /var/lib/syp/shares.
+    if [ -z "$NETWORK_SHARES" ]; then NETWORK_SHARES=1; fi
     if [ "$NETWORK_SHARES" = 1 ] && [ ! -f "$tmp/x/syp-network-helper" ]; then
-      warn "this release has no network-share helper; network shares stay manual"
+      NS_REASON="this release has no network-share helper"
       NETWORK_SHARES=0
     fi
     if [ "$NETWORK_SHARES" = 1 ]; then
@@ -315,16 +345,17 @@ UNIT
       $SUDO install -o root -g root -m 0755 "$tmp/x/syp-network-helper" "$HELPER_BIN"
       if ! have mount.cifs || ! have mount.nfs; then
         if have apt-get; then
-          $SUDO apt-get update -qq
-          $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cifs-utils nfs-common
+          $SUDO apt-get update -qq || true
+          $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cifs-utils nfs-common \
+            || NS_REASON="could not install cifs-utils and nfs-common"
         elif have dnf; then
-          $SUDO dnf install -y cifs-utils nfs-utils
+          $SUDO dnf install -y cifs-utils nfs-utils || NS_REASON="could not install cifs-utils and nfs-utils"
         elif have yum; then
-          $SUDO yum install -y cifs-utils nfs-utils
+          $SUDO yum install -y cifs-utils nfs-utils || NS_REASON="could not install cifs-utils and nfs-utils"
         elif have apk; then
-          $SUDO apk add --no-cache cifs-utils nfs-utils
+          $SUDO apk add --no-cache cifs-utils nfs-utils || NS_REASON="could not install cifs-utils and nfs-utils"
         else
-          warn "install cifs-utils and the NFS client tools yourself; network shares need them"
+          NS_REASON="no package manager found for cifs-utils and the NFS client tools"
         fi
       fi
       # No sandboxing on purpose: ProtectSystem/ProtectHome/PrivateTmp/PrivateMounts would give the helper its
@@ -358,6 +389,13 @@ HLPUNIT
     fi
 
     $SUDO systemctl daemon-reload
+    if [ -n "$NS_REASON" ]; then
+      NS_LINE="Network shares: not set up ($NS_REASON). You can still use folders this computer already sees."
+    elif [ "$NETWORK_SHARES" = 1 ]; then
+      NS_LINE="Network shares: ready (the app can connect SMB and NFS shares itself)."
+    else
+      NS_LINE="Network shares: off (--no-network-shares)."
+    fi
     if [ -n "$NO_START" ]; then
       $SUDO systemctl enable shrink-your-shit >/dev/null 2>&1
       say "Installed, not started (--no-start). Start it with: sudo systemctl start shrink-your-shit"
@@ -369,13 +407,8 @@ HLPUNIT
       rc=$?
       [ "$rc" = 2 ] || die "the service did not answer on port $PORT. See: journalctl -u shrink-your-shit -n 50"
     fi
-    host=127.0.0.1
-    case $PORT_ADDR in 127.*|localhost:*) ;; *) host=$(hostname -I 2>/dev/null | cut -d' ' -f1); host=${host:-this-machine} ;; esac
-    finish "$(signin_url "http://$host:$PORT")"
-    case $PORT_ADDR in
-      127.*|localhost:*) say "It only listens on this computer. For other machines on your network: run this again with --addr 0.0.0.0:$PORT (they then sign in with an access token)." ;;
-      *) say "That address carries the access token. To see it again: sudo shrink-your-shit token. There is no HTTPS: use it on a network you trust." ;;
-    esac
+    TOKEN_OUT=$(token_out)
+    ready_block
     exit 0
   fi
 
@@ -402,7 +435,8 @@ BIN=$BIN_DIR/shrink-your-shit
 DATA_DIR=$HOME/Library/Application\ Support/shrink-your-shit
 PLIST=$HOME/Library/LaunchAgents/dev.shrink-your-shit.plist
 LOG=$HOME/Library/Logs/shrink-your-shit.log
-SETTINGS_NOTE="$PLIST (then: launchctl kickstart -k gui/$(id -u)/dev.shrink-your-shit)   Log: $LOG"
+TOKEN_CMD=$BIN
+if [ -f "$PLIST" ]; then UPDATED=1; fi
 
 # Settings from a previous install are kept unless a flag says otherwise (upgrade = re-run).
 plist_get() { # plist_get KEY  (reads our own plist, where each key and its string share a line)
@@ -466,5 +500,5 @@ if health_check; then :; else
   [ "$rc" = 2 ] || die "the service did not answer on port $PORT. See $LOG"
 fi
 TOKEN_DATA=$DATA_DIR
-finish "$(signin_url "http://127.0.0.1:$PORT")"
-case $PORT_ADDR in 127.*|localhost:*) ;; *) say "It is reachable from other machines, which sign in with the access token in that address. To see it again: shrink-your-shit token. There is no HTTPS: use it on a network you trust." ;; esac
+TOKEN_OUT=$(token_out)
+ready_block
