@@ -212,7 +212,7 @@ ready_block() {
   if [ -n "${DOCKER_UPDATED:-}" ]; then say "Updated the container. Your settings are kept."
   elif [ -n "$UPDATED" ]; then say "Updated to ${NEW_VERSION:-the new release}. Your settings are kept."; fi
   if [ -n "$NS_LINE" ]; then say "$NS_LINE"; fi
-  if [ -z "${DOCKER_RUN:-}" ] && have docker; then say "Docker is installed here. To run Shrink Your Shit in Docker instead, run this again with --docker."; fi
+  if [ "$OS" = linux ] && [ -z "${DOCKER_RUN:-}" ] && have docker; then say "Docker is installed here. To run Shrink Your Shit in Docker instead, run this again with --docker."; fi
   case $PORT_ADDR in
     127.*|localhost:*|\[::1\]:*)
       say "Listening on this computer only, so workers can't find it. To let other computers in, run this again with --addr 0.0.0.0:$PORT."
@@ -323,6 +323,7 @@ docker_mode() {
       *) continue ;;
     esac
     gid=$(stat -c %g "$node" 2>/dev/null) || continue
+    grep -qx "      - \"$gid\"" "$dtmp/groups" && continue # another render node in this group already added it
     printf '      - "%s"\n' "$gid" >> "$dtmp/groups"
     gpus="${gpus:+$gpus, }$name"
   done
