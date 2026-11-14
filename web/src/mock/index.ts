@@ -484,7 +484,8 @@ export function primaryProblem(id: ID, enc: string): string | null {
   return "That encoder's test didn't pass on " + (w?.name ?? "this worker") + ".";
 }
 
-// E4 join requests on the mock (GET /workers joinRequests): three waiting (laptop replaces the existing Laptop), one expired.
+// E4 join requests on the mock (GET /workers joinRequests): three waiting (laptop replaces the existing Laptop), one expired,
+// one allowed that never connected.
 // Allow adds the worker stopped, like any new one; allow, deny and dismiss take the request off the list.
 const at = (min: number) => new Date(Date.now() + min * 60000).toISOString();
 const jr = (id: ID, name: string, address: string, os: string, hardware: string | null, ago: number, state: JoinRequest["state"] = "waiting", replacesWorker = false): JoinRequest =>
@@ -494,6 +495,7 @@ export const joins: JoinRequest[] = mockMode === "fresh" ? [] : [
   jr("jr2", "laptop", "192.168.1.44", "windows", null, 1, "waiting", true),
   jr("jr1", "nuc", "192.168.1.31", "linux", "Intel UHD Graphics 770", 2),
   jr("jr4", "pi", "192.168.1.50", "linux", null, 14, "expired"),
+  jr("jr5", "garage", "192.168.1.52", "linux", null, 16, "not_connected"),
 ];
 const NOT_FOUND = "There is no such request. It may have been answered already.";
 const take = (id: ID) => { const i = joins.findIndex((x) => x.id === id); return i < 0 ? null : joins.splice(i, 1)[0]; };
