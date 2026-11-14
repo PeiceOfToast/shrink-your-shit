@@ -12,7 +12,8 @@ services:
     volumes:
       - syp-config:/config              # database (a named volume, so it is writable by the program)
       - /path/to/COPY-of-your-videos:/media
-    # Lets the app mount NFS/SMB shares added on the Shares page; delete cap_add and security_opt to mount them on the host instead.
+    # Lets the app mount NFS/SMB shares added on the Shares page. It gives the container mount rights (close to privileged);
+    # if you don't use network shares, or mount them on the host, delete cap_add and security_opt.
     cap_add:
       - SYS_ADMIN
       - DAC_READ_SEARCH
