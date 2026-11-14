@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -151,10 +152,14 @@ func TestRemoteChecksAndUnjudgedWorkersAreNotStopped(t *testing.T) {
 	}
 }
 
-// slowThenReal is an ffmpeg that moves on for a while (as a long encode does), then really converts.
+// slowThenReal is an ffmpeg that moves on for a while (as a long encode does), then really converts. Once the
+// encode is done (encoded set), each later run is silent for after: the checks and the wait before the upload,
+// when nothing reports a position, so only the worker's lease renewals keep the job.
 type slowThenReal struct {
 	media.OSExec
-	for_ time.Duration
+	for_    time.Duration
+	after   time.Duration
+	encoded *atomic.Bool
 }
 
 func (x slowThenReal) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
@@ -168,8 +173,34 @@ func (x slowThenReal) Stream(ctx context.Context, onLine func(string), name stri
 				onLine("progress=continue")
 			}
 		}
+	} else if x.encoded.Load() {
+		if err := x.silent(ctx); err != nil {
+			return "", err
+		}
 	}
-	return x.OSExec.Stream(ctx, onLine, name, args...)
+	out, err := x.OSExec.Stream(ctx, onLine, name, args...)
+	if name == "ffmpeg" && slices.Contains(args, "libx265") {
+		x.encoded.Store(true)
+	}
+	return out, err
+}
+
+func (x slowThenReal) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
+	if x.encoded.Load() {
+		if err := x.silent(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return x.OSExec.Output(ctx, name, args...)
+}
+
+func (x slowThenReal) silent(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(x.after):
+		return nil
+	}
 }
 
 // orch-lead 20:03Z: a remote encode of a file whose length we don't know still reports its position, which
@@ -181,14 +212,14 @@ func TestRemoteEncodeOfUnknownLengthKeepsItsLease(t *testing.T) {
 	// real encode's start, or a slow run loses it between two reports (ffmpeg 8 CI, 2026-11-12). The worker
 	// renews between reports (keepLease), every RenewEvery: well inside LeaseFor even on a loaded host, where
 	// the checks and upload after the encode can take longer than LeaseFor (the 2026-11-14 flake).
-	jobs.LeaseFor, PlanPoll, ProgressEvery, RenewEvery = 1500*time.Millisecond, 50*time.Millisecond, 20*time.Millisecond, 200*time.Millisecond
+	jobs.LeaseFor, PlanPoll, ProgressEvery, RenewEvery = 3*time.Second, 50*time.Millisecond, 20*time.Millisecond, 300*time.Millisecond
 	defer func() { jobs.LeaseFor, PlanPoll, ProgressEvery, RenewEvery = oldLease, oldPoll, oldEvery, oldRenew }()
 	srv, st, lib := stallServer(t, 5*time.Second)
 	id := remoteJobLen(t, st, lib, 0)
 	c := pairClient(t, srv, st)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go c.Work(ctx, Converter{Exec: slowThenReal{for_: 3 * time.Second}, FFmpeg: "ffmpeg", FFprobe: "ffprobe", Work: t.TempDir(),
+	go c.Work(ctx, Converter{Exec: slowThenReal{for_: 6 * time.Second, after: 5 * time.Second, encoded: new(atomic.Bool)}, FFmpeg: "ffmpeg", FFprobe: "ffprobe", Work: t.TempDir(),
 		FreeSpace: func(string) (uint64, error) { return 1 << 40, nil }})
 	var j jobs.Job
 	for end := time.Now().Add(30 * time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
