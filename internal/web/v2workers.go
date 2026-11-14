@@ -989,20 +989,25 @@ func (v *workerView) offlineCount() int {
 
 // LocalEncoderFor is the graphics encoder the local worker uses for a plan whose video is codec ("" for the
 // processor). It is the main encoder's family in that codec's format, and only if that encoder passed its test
-// here. The worker asks at each job's start.
-func LocalEncoderFor(store *jobs.Store, chk *doctor.Checker) func(codec string) string {
-	return func(codec string) string {
+// here. note is the job-log line when the format's encoder did not pass (the processor is used then); it is
+// empty for the processor by choice. The worker asks at each job's start.
+func LocalEncoderFor(store *jobs.Store, chk *doctor.Checker) func(codec string) (enc, note string) {
+	return func(codec string) (string, string) {
 		cfg, _ := store.WorkerConfigOf(jobs.LocalWorker)
 		v := &workerView{store: store, eng: Engine{Doctor: chk}}
 		t, ok := v.tools()
 		caps := capabilities(t, ok)
 		main := primaryEncoder(cfg.PrimaryEncoder, caps)
 		if main == "cpu" {
-			return ""
+			return "", ""
 		}
-		if want := rules.GraphicsEncoder(codec, main); want != "" && slices.Contains(passedGPU(caps), want) {
-			return want
+		want := rules.GraphicsEncoder(codec, main)
+		if want == "" {
+			return "", ""
 		}
-		return ""
+		if slices.Contains(passedGPU(caps), want) {
+			return want, ""
+		}
+		return "", "encoder " + want + " didn't pass its test here; using the processor"
 	}
 }

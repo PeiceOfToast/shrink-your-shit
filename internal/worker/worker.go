@@ -106,7 +106,8 @@ type Worker struct {
 	ShareDown func(folder string, jobID int64) (ShareDown, bool)
 	// Encoder is the graphics encoder the local worker uses for a video codec (ffmpeg's name, e.g. libx264), or ""
 	// for the processor (or nil: the processor). A plan it can't do, and a graphics encode that fails, use the processor.
-	Encoder func(codec string) string
+	// note, when set, is the job-log line for a processor the worker fell back to (not set for a processor by choice).
+	Encoder func(codec string) (enc, note string)
 	// verified is the probe of the new file the last check passed (S5: stored for its final path).
 	verified media.Info
 	check    *checkResult // the picture check's score for the job in hand (nil: none ran); set by the comparison
@@ -911,13 +912,16 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	gpu := ""
 	args := plan.FFmpegArgs(srcPath, tmp)
 	if w.remote == nil && w.Encoder != nil {
-		if want := w.Encoder(plan.Video.Codec); want != "" && !plan.Video.Copy {
+		want, note := w.Encoder(plan.Video.Codec)
+		if want != "" && !plan.Video.Copy {
 			var ok bool
 			if args, ok = plan.FFmpegArgsWith(srcPath, tmp, want); ok {
 				gpu = want
 			} else {
 				w.jobf(job.ID, ": encoder %s can't do this file; using the processor", want)
 			}
+		} else if note != "" && !plan.Video.Copy {
+			w.jobf(job.ID, ": %s", note)
 		}
 	}
 	setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWordsUsed(plan, gpu),

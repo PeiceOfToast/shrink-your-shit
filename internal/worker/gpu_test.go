@@ -46,7 +46,7 @@ func TestGPUFailureConvertsOnTheProcessor(t *testing.T) {
 	s := newScenario(t)
 	s.failEncoder = "hevc_nvenc"
 	w := s.worker(Replace)
-	w.Encoder = func(string) string { return "hevc_nvenc" }
+	w.Encoder = func(string) (string, string) { return "hevc_nvenc", "" }
 	if _, err := w.RunOne(context.Background()); err != nil {
 		t.Fatalf("RunOne: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestGPUFailureConvertsOnTheProcessor(t *testing.T) {
 func TestUnsupportedEncoderUsesProcessorFirst(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
-	w.Encoder = func(string) string { return "hevc_videotoolbox" }
+	w.Encoder = func(string) (string, string) { return "hevc_videotoolbox", "" }
 	if _, err := w.RunOne(context.Background()); err != nil {
 		t.Fatalf("RunOne: %v", err)
 	}
@@ -89,13 +89,33 @@ func TestUnsupportedEncoderUsesProcessorFirst(t *testing.T) {
 func TestCPUChoiceNeverAsksForAGraphicsEncoder(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
-	w.Encoder = func(string) string { return "" }
+	w.Encoder = func(string) (string, string) { return "", "" }
 	if _, err := w.RunOne(context.Background()); err != nil {
 		t.Fatalf("RunOne: %v", err)
 	}
 	enc := encodeCalls(s)
 	if len(enc) != 1 || !strings.Contains(enc[0], "libx265") || strings.Contains(enc[0], "hevc_") {
 		t.Fatalf("encodes: %v", enc)
+	}
+}
+
+// The main encoder is graphics, but this plan's format encoder did not pass: the processor runs, and the reason is
+// in the job log once.
+func TestFormatEncoderThatDidNotPassIsLogged(t *testing.T) {
+	s := newScenario(t)
+	w := s.worker(Replace)
+	w.Encoder = func(string) (string, string) {
+		return "", "encoder h264_qsv didn't pass its test here; using the processor"
+	}
+	if _, err := w.RunOne(context.Background()); err != nil {
+		t.Fatalf("RunOne: %v", err)
+	}
+	enc := encodeCalls(s)
+	if len(enc) != 1 || !strings.Contains(enc[0], "libx265") || strings.Contains(enc[0], "_qsv") {
+		t.Fatalf("encodes, want the processor alone:\n%s", strings.Join(enc, "\n"))
+	}
+	if n := logCount(t, s, "encoder h264_qsv didn't pass its test here; using the processor"); n != 1 {
+		t.Errorf("reason line: %d, want 1", n)
 	}
 }
 
