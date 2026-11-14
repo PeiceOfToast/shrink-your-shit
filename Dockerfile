@@ -52,7 +52,10 @@ RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh
 # all addresses inside the container; publish the port only to machines you trust.
 # The container starts as root only so the entrypoint can run the network-share helper; the app
 # then runs as syp (uid 1000). Do not set USER here.
+# HOME=/config: the app keeps the key that encrypts share passwords in $HOME/.config, which must be
+# writable by uid 1000 and survive restarts.
 ENV SYP_DATA=/config \
+    HOME=/config \
     SYP_LIBRARIES=/media \
     SYP_ADDR=0.0.0.0:8484
 VOLUME ["/config"]

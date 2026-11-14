@@ -134,6 +134,10 @@ func validateCredentials(username, password string) error {
 // options the helper always forces. mount(8) defaults to suid, dev and exec, so leaving them out
 // is not enough: nosuid, nodev and noexec are always added. For cifs, the files belong to the
 // service user (uid/gid) so the app can read and write them; nfs keeps the server's owners.
+// nfsNoLock adds nolock to NFS mounts (the -nfs-nolock flag). A container has no rpc.statd, so
+// without it an NFSv3 mount fails ("rpc.statd is not running"); file locks then stay on this machine.
+var nfsNoLock bool
+
 func mountOptions(kind string, opts map[string]string, uid, gid int, credPath string) string {
 	keys := make([]string, 0, len(opts))
 	for k := range opts {
@@ -149,6 +153,9 @@ func mountOptions(kind string, opts map[string]string, uid, gid int, credPath st
 		}
 	}
 	out = append(out, "nosuid", "nodev", "noexec")
+	if kind == "nfs" && nfsNoLock {
+		out = append(out, "nolock")
+	}
 	if kind == "cifs" {
 		out = append(out, "uid="+strconv.Itoa(uid), "gid="+strconv.Itoa(gid), "file_mode=0660", "dir_mode=0770")
 		if credPath != "" {

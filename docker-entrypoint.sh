@@ -32,7 +32,7 @@ mount_problem() {
 
 reason=$(mount_problem)
 if [ -z "$reason" ]; then
-    syp-network-helper -user syp &
+    syp-network-helper -user syp -nfs-nolock &
     i=0
     while [ ! -S "$SOCK" ] && [ "$i" -lt 25 ]; do
         sleep 0.2
