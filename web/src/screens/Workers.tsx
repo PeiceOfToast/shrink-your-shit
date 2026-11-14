@@ -73,14 +73,18 @@ function cards(w: Worker): Card[] {
 // User ask 11-14: a radio on each card picks the worker's primary encoder; only lit cards can be picked; CPU is the fallback.
 function EncoderCards({ w, big, reload }: { w: Worker; big?: boolean; reload?: () => void }) {
   const [msg, setMsg] = useState(""), cs = cards(w), cur = cs.find((c) => c.primary && c.lit) ?? cs[0];
+  // design 02:36Z: until F2 a working card with no HEVC stays focusable (aria-disabled) and says why. Drop this when F2 lands.
+  const why = (c: Card) => "nohevc-" + w.id + "-" + c.name.replace(/\W/g, "") + (big ? "-big" : "");
   const pick = async (c: Card) => { setMsg(""); if (await act(patchWorker(w.id, { primaryEncoder: c.enc }), setMsg)) { setMsg(c.name + " is now used first."); reload?.(); } };
   return <div className="ec-wrap" role="radiogroup" aria-label={"Primary encoder on " + w.name}>
     <ul className={"ec-grid" + (big ? " big" : "")}>{cs.map((c) => (
       <li key={c.name} className={"ec" + (c.lit ? " lit" : "") + (big ? " ec-lg" : "") + (c === cur ? " primary" : "")}>
-        <label className="ec-t"><input type="radio" name={"primary-" + w.id + (big ? "-big" : "")} checked={c === cur} disabled={!c.lit || !c.enc} onChange={() => pick(c)} />
+        <label className="ec-t"><input type="radio" name={"primary-" + w.id + (big ? "-big" : "")} checked={c === cur} disabled={!c.lit}
+          aria-disabled={!c.enc || undefined} aria-describedby={c.lit && !c.enc ? why(c) : undefined} onChange={() => c.enc && pick(c)} />
           <b>{c.name}</b>{c.lit && <span className="ec-ok">Works</span>}{c === cur && <span className="ec-ok">{c.lit ? "· " : ""}Used first</span>}</label>
         {!c.lit && <span>{c.why}</span>}
         <span className="ec-f">{c.formats.map(([f, on]) => <span key={f} className={on ? "on" : ""}>{f}{!on && <span className="sr"> (no)</span>}</span>)}</span>
+        {c.lit && !c.enc && <span id={why(c)}>Can&apos;t be picked yet: it makes {c.formats.filter(([, on]) => on).map(([f]) => f).join(" and ")}, not HEVC.</span>}
         {big && c.detail && <span className="mono">{c.detail}</span>}
         {big && c.at && <span className="ec-meta">Tested {new Date(c.at).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}
       </li>))}</ul>
