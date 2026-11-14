@@ -763,7 +763,7 @@ func TestBitrateMeaningsMigration(t *testing.T) {
 		l, _ := s.AddLibrary("/"+name, "/"+name, sel.Template(), true)
 		ids[name] = l.FlowID
 	}
-	for _, q := range append([]string{`ALTER TABLE workers DROP COLUMN primary_encoder`}, rewindShareMigrations...) { // 42 and 41 run again on the next open
+	for _, q := range append([]string{`ALTER TABLE workers DROP COLUMN primary_encoder`, `ALTER TABLE workers DROP COLUMN os`, `ALTER TABLE workers DROP COLUMN arch`}, rewindShareMigrations...) { // 42 and 41 run again on the next open
 		s.db.Exec(q)
 	}
 	s.db.Exec(`PRAGMA user_version = 37`) // migration 38 runs on the next open

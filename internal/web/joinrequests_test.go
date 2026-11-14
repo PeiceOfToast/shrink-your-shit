@@ -154,7 +154,7 @@ func TestJoinReplacesAWorkerOfTheSameName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	old, _, err := st.Pair(code, "Office PC", "test", 1, "{}", time.Now())
+	old, _, err := st.Pair(code, "Office PC", "test", "", "", 1, "{}", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

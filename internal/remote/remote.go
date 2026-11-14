@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -65,7 +66,10 @@ func (s State) Save(dir string) error {
 type Client struct {
 	Server, Token, Version string
 	HTTP                   *http.Client
-	meter                  sysload.Meter // this computer's load, sent with each heartbeat (V7d)
+	// Caps is this computer's encoder test, as the server builds it for its own computer (nil until the
+	// test has run: then pair, join and heartbeat send {}, as an older worker does).
+	Caps  []map[string]any
+	meter sysload.Meter // this computer's load, sent with each heartbeat (V7d)
 
 	holdMu   sync.Mutex
 	holdBack string // why it takes no work now ("" takes work), sent with each heartbeat (#174 QA e)
@@ -150,10 +154,18 @@ func (c *Client) callWith(ctx context.Context, method, path string, in, out any,
 	return nil
 }
 
+// capsReport is the encoder test this worker sends: its list, or {} before the test has run.
+func (c *Client) capsReport() any {
+	if c.Caps == nil {
+		return map[string]any{}
+	}
+	return c.Caps
+}
+
 // Pair exchanges a pairing code for this worker's token.
 func (c *Client) Pair(ctx context.Context, code, name string) (State, error) {
 	var out struct{ WorkerID, Name, Token string }
-	if err := c.call(ctx, "pair", map[string]any{"code": code, "name": name, "capabilities": map[string]any{}}, &out); err != nil {
+	if err := c.call(ctx, "pair", map[string]any{"code": code, "name": name, "os": runtime.GOOS, "arch": runtime.GOARCH, "capabilities": c.capsReport()}, &out); err != nil {
 		return State{}, err
 	}
 	return State{Server: c.Server, WorkerID: out.WorkerID, Name: out.Name, Token: out.Token}, nil
@@ -181,7 +193,7 @@ type Asked struct {
 // Ask sends the join request and returns at once with the server's answer. port is the web port this
 // worker answers on, so the server's Workers page can link to it; 0 sends none (the server assumes 8484).
 func (c *Client) Ask(ctx context.Context, name, osName string, port int) (Asked, error) {
-	in := map[string]any{"name": name, "os": osName, "capabilities": map[string]any{}}
+	in := map[string]any{"name": name, "os": osName, "arch": runtime.GOARCH, "capabilities": c.capsReport()}
 	if port > 0 {
 		in["port"] = port
 	}
@@ -286,8 +298,12 @@ func (c *Client) Heartbeat(ctx context.Context, free int) error {
 	if why := c.holdingBack(); why != "" {
 		hold = map[string]string{"code": "low_disk", "message": why}
 	}
-	if err := c.call(ctx, "heartbeat", map[string]any{"freeSlots": free, "cpuPercent": l.CPUPercent, "memUsedBytes": l.MemUsedBytes,
-		"memTotalBytes": l.MemTotalBytes, "holdingBack": hold}, &out); err != nil {
+	in := map[string]any{"freeSlots": free, "cpuPercent": l.CPUPercent, "memUsedBytes": l.MemUsedBytes,
+		"memTotalBytes": l.MemTotalBytes, "holdingBack": hold}
+	if c.Caps != nil { // sent once the test has run; before that the server keeps what the pairing said
+		in["os"], in["arch"], in["capabilities"] = runtime.GOOS, runtime.GOARCH, c.Caps
+	}
+	if err := c.call(ctx, "heartbeat", in, &out); err != nil {
 		return err
 	}
 	for _, t := range out.PathTests { // V7c: its shared folders' tests ride the heartbeat's answer

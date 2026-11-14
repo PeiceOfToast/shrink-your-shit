@@ -441,6 +441,10 @@ ALTER TABLE libraries ADD COLUMN share_paused_id INTEGER;
 ALTER TABLE libraries ADD COLUMN share_paused_since TEXT NOT NULL DEFAULT '';`},
 	{42, "worker primary encoder", `
 ALTER TABLE workers ADD COLUMN primary_encoder TEXT;`},
+	{43, "worker os", `
+ALTER TABLE workers ADD COLUMN os TEXT NOT NULL DEFAULT '';`},
+	{44, "worker arch", `
+ALTER TABLE workers ADD COLUMN arch TEXT NOT NULL DEFAULT '';`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone

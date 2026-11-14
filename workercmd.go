@@ -15,8 +15,10 @@ import (
 	"runtime"
 	"syscall"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/doctor"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/remote"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/web"
 )
 
 // workerCommand is "shrink-your-shit worker": this program as a worker for a server on another
@@ -47,6 +49,7 @@ func workerCommand(args []string, out, errOut io.Writer) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	ff, fp, toolsErr := findTools(*ffmpeg, *ffprobe) // pairing and joining still work without them: they report no encoders
 	st, err := remote.Load(*data)
 	switch {
 	case *join:
@@ -57,7 +60,8 @@ func workerCommand(args []string, out, errOut io.Writer) int {
 		if *name == "" {
 			*name, _ = os.Hostname()
 		}
-		c := &remote.Client{Server: *server, Version: version}
+		fmt.Fprintln(out, "Testing this computer's encoders first, so the server can show them.")
+		c := &remote.Client{Server: *server, Version: version, Caps: testEncoders(ctx, ff, fp)}
 		fmt.Fprintf(out, "Waiting for %s to allow this worker. Open its Workers page and click Allow.\n", *server)
 		if st, err = c.Join(ctx, *name, runtime.GOOS); err != nil {
 			if errors.Is(err, remote.ErrJoinDenied) || errors.Is(err, remote.ErrJoinExpired) {
@@ -80,7 +84,8 @@ func workerCommand(args []string, out, errOut io.Writer) int {
 		if *name == "" {
 			*name, _ = os.Hostname()
 		}
-		c := &remote.Client{Server: *server, Version: version}
+		fmt.Fprintln(out, "Testing this computer's encoders first, so the server can show them.")
+		c := &remote.Client{Server: *server, Version: version, Caps: testEncoders(ctx, ff, fp)}
 		if st, err = c.Pair(ctx, *pair, *name); err != nil {
 			fmt.Fprintf(errOut, "Pairing didn't work: %v\n", err)
 			return 1
@@ -109,13 +114,13 @@ func workerCommand(args []string, out, errOut io.Writer) int {
 		return 1
 	}
 	defer release()
-	ff, fp, err := findTools(*ffmpeg, *ffprobe)
-	if err != nil {
-		fmt.Fprintf(errOut, "This worker needs ffmpeg and ffprobe: %v\n", err)
+	if toolsErr != nil {
+		fmt.Fprintf(errOut, "This worker needs ffmpeg and ffprobe: %v\n", toolsErr)
 		return 1
 	}
+	fmt.Fprintln(out, "Testing this computer's encoders first, so the server can show them.")
+	c := &remote.Client{Server: st.Server, Token: st.Token, Version: version, Caps: testEncoders(ctx, ff, fp)}
 	fmt.Fprintf(out, "Working for %s as %q. Stop it with Ctrl+C.\n", st.Server, st.Name)
-	c := &remote.Client{Server: st.Server, Token: st.Token, Version: version}
 	wctx, wcancel := context.WithCancel(ctx)
 	defer wcancel()
 	go c.Work(wctx, remote.Converter{Exec: media.OSExec{}, FFmpeg: ff, FFprobe: fp, Work: *work, MinFree: uint64(*minFree) << 30})
@@ -124,6 +129,19 @@ func workerCommand(args []string, out, errOut io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// testEncoders runs this computer's encoder test the way the server runs its own, and returns the list a
+// remote worker reports (see remote.Client.Caps). It is nil when the test was cut short.
+func testEncoders(ctx context.Context, ff, fp string) []map[string]any {
+	if ff == "" || fp == "" { // the tools are missing: nothing to test
+		return nil
+	}
+	t := (&doctor.Checker{Exec: media.OSExec{}, FFmpeg: ff, FFprobe: fp}).Tools(ctx)
+	if ctx.Err() != nil {
+		return nil
+	}
+	return web.WorkerCapabilities(t, true)
 }
 
 // takeWorkFolder locks a worker's --work folder for this process: a second worker on the same folder

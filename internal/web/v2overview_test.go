@@ -145,7 +145,7 @@ func TestOverviewAndSummaryListEveryWorker(t *testing.T) {
 	srv, st, _, _ := libServer(t, false)
 	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
 	code, _, _ := st.NewPairing(time.Now())
-	rw, _, err := st.Pair(code, "Desktop", "1", WorkerAPILevel, "", time.Now())
+	rw, _, err := st.Pair(code, "Desktop", "1", "", "", WorkerAPILevel, "", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestLocalWorkerListsOnlyItsOwnJobs(t *testing.T) {
 	srv, st, _, _ := libServer(t, false)
 	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
 	code, _, _ := st.NewPairing(time.Now())
-	rw, _, err := st.Pair(code, "Desktop", "1", WorkerAPILevel, "", time.Now())
+	rw, _, err := st.Pair(code, "Desktop", "1", "", "", WorkerAPILevel, "", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestRemoteJobsProgressIsTheReportedOne(t *testing.T) {
 	srv, st, a, _ := libServer(t, true)
 	person := a.Token()
 	code, _, _ := st.NewPairing(time.Now())
-	rw, token, err := st.Pair(code, "Desktop", "1", WorkerAPILevel, "", time.Now())
+	rw, token, err := st.Pair(code, "Desktop", "1", "", "", WorkerAPILevel, "", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -36,13 +36,13 @@ func TestUpgradeFrom34AddsRemoteWorkers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if w, tok, err := s.Pair(code, "Desktop", "1", 1, "", time.Now()); err != nil || tok == "" {
+	if w, tok, err := s.Pair(code, "Desktop", "1", "", "", 1, "", time.Now()); err != nil || tok == "" {
 		t.Errorf("%+v %v", w, err)
 	}
 }
 
 // rewind35 takes away what migrations 35 (remote workers), 36 (workers on and off) and 41 (library share pause) added.
-var rewind35 = append(append([]string{`ALTER TABLE workers DROP COLUMN primary_encoder`}, rewindShareMigrations...), `DROP TABLE worker_paths`, `ALTER TABLE workers DROP COLUMN enabled`, `DROP INDEX workers_token`, `DROP TABLE worker_pairings`, `ALTER TABLE workers DROP COLUMN kind`, `ALTER TABLE workers DROP COLUMN token_hash`,
+var rewind35 = append(append([]string{`ALTER TABLE workers DROP COLUMN primary_encoder`, `ALTER TABLE workers DROP COLUMN os`, `ALTER TABLE workers DROP COLUMN arch`}, rewindShareMigrations...), `DROP TABLE worker_paths`, `ALTER TABLE workers DROP COLUMN enabled`, `DROP INDEX workers_token`, `DROP TABLE worker_pairings`, `ALTER TABLE workers DROP COLUMN kind`, `ALTER TABLE workers DROP COLUMN token_hash`,
 	`ALTER TABLE workers DROP COLUMN version`, `ALTER TABLE workers DROP COLUMN api_level`, `ALTER TABLE workers DROP COLUMN last_seen`,
 	`ALTER TABLE workers DROP COLUMN capabilities`)
 
@@ -83,7 +83,7 @@ func TestWorkersOnAndOff(t *testing.T) {
 		return n
 	}
 	code, _, _ := s.NewPairing(time.Now())
-	rw, _, err := s.Pair(code, "Desktop", "1", 1, "", time.Now())
+	rw, _, err := s.Pair(code, "Desktop", "1", "", "", 1, "", time.Now())
 	if err != nil || s.WorkerEnabled(rw.ID) || !s.Paused() || pauseEvents() != 0 {
 		t.Fatalf("paired while every worker is off: on %v, paused %v, events %d, %v", s.WorkerEnabled(rw.ID), s.Paused(), pauseEvents(), err)
 	}
@@ -91,7 +91,7 @@ func TestWorkersOnAndOff(t *testing.T) {
 		t.Errorf("started by the person: paused %v, events %d, %v", s.Paused(), pauseEvents(), err)
 	}
 	code, _, _ = s.NewPairing(time.Now())
-	if rw2, _, err := s.Pair(code, "Laptop", "1", 1, "", time.Now()); err != nil || !s.WorkerEnabled(rw2.ID) || pauseEvents() != 1 {
+	if rw2, _, err := s.Pair(code, "Laptop", "1", "", "", 1, "", time.Now()); err != nil || !s.WorkerEnabled(rw2.ID) || pauseEvents() != 1 {
 		t.Errorf("paired while one is on: on %v, events %d, %v", s.WorkerEnabled(rw2.ID), pauseEvents(), err)
 	}
 	s.Enqueue(Job{Library: "/m", Path: "/m/a.mkv"})
@@ -121,7 +121,7 @@ func TestWorkersOnAndOff(t *testing.T) {
 	// an install paused before this version: every worker off
 	s, _ = Open(p)
 	s.SetPaused(true)
-	for _, q := range append(append([]string{`INSERT INTO app_meta(key, value) VALUES ('paused', '1')`, `UPDATE workers SET enabled=1`}, rewindShareMigrations...), `ALTER TABLE workers DROP COLUMN enabled`, `ALTER TABLE workers DROP COLUMN primary_encoder`, `DROP TABLE worker_paths`, `PRAGMA user_version=35`) {
+	for _, q := range append(append([]string{`INSERT INTO app_meta(key, value) VALUES ('paused', '1')`, `UPDATE workers SET enabled=1`}, rewindShareMigrations...), `ALTER TABLE workers DROP COLUMN enabled`, `ALTER TABLE workers DROP COLUMN primary_encoder`, `ALTER TABLE workers DROP COLUMN os`, `ALTER TABLE workers DROP COLUMN arch`, `DROP TABLE worker_paths`, `PRAGMA user_version=35`) {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}

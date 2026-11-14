@@ -74,6 +74,7 @@ func (j *joinedWorker) SetRole(role string) {
 		defer release()
 		work := make(chan struct{})
 		go func() { defer close(work); c.Work(ctx, conv) }()
+		c.Caps = testEncoders(ctx, j.ffmpeg, j.ffprobe) // before the first heartbeat, which reports it
 		if err := c.Run(ctx); err != nil && ctx.Err() == nil {
 			log.Printf("worker: the server refused this worker: %v", err)
 		}
