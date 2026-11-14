@@ -24,7 +24,8 @@ function words(w: Worker): [string, string, string] {
     case "busy": case "online": return ["Running · " + busy, "run", "i-play"];
     case "draining": return ["Draining · " + plural(w.currentJobIds.length, "file", "files") + " left", "warn", "i-pause"];
     case "paused": return ["Stopped", "", "i-stop"];
-    case "offline": return ["Offline since " + clock(w.statusSince), "bad", "i-wifi-off"];
+    // allowed but it has never called this server (workshop 07:32Z: lastHeartbeatAt stays null until then); design 07:32Z
+    case "offline": if (!w.lastHeartbeatAt) return ["Waiting to connect", "", "i-wifi-off"]; return ["Offline since " + clock(w.statusSince), "bad", "i-wifi-off"];
     default: return ["Not responding since " + clock(w.statusSince), "bad", "i-alert"];
   }
 }
@@ -267,7 +268,7 @@ function JoinCards({ joins, workers, on, reload }: { joins: JoinRequest[]; worke
 
 function StartStop({ w, onDone }: { w: Worker; onDone: (m: string) => void }) {
   const [asking, setAsking] = useState(false);
-  if (w.status === "offline" || w.status === "stalled") return <span className="muted sm">Waiting for it to connect</span>; // design: no Start on an offline worker
+  if (w.status === "offline" || w.status === "stalled") return null; // no Start on an offline worker; its status says why (design 07:36Z: never 'waiting' once it has called)
   if (asking) return <StopAsk w={w} onDone={(m) => (setAsking(false), onDone(m))} onCancel={() => setAsking(false)} />;
   if (w.status === "paused") return <button className="btn sm" type="button" onClick={async () => { if (await act(workerAction(w.id, "start"), onDone)) onDone(w.name + " started."); }}><Icon id="i-play" />Start</button>;
   return <button className="btn sm" type="button" onClick={async () => { if (w.currentJobIds.length) return setAsking(true); if (await act(workerAction(w.id, "stop"), onDone)) onDone(w.name + " stopped."); }}><Icon id="i-stop" />Stop</button>;
@@ -314,7 +315,7 @@ export function Workers() {
           return <article key={w.id} className={"card wcard" + (gone ? " dim" : "")}>
             <div className="hd"><h3><Link to={"/workers/" + encodeURIComponent(w.id)}>{w.name}</Link></h3><span className="sp" /><StartStop w={w} onDone={done} /></div>
             <div className="bd stack">
-              <p className="sm muted">{[w.host, OS[w.os ?? ""], w.arch, "last heard " + ago(w.lastHeartbeatAt)].filter(Boolean).join(" · ")}</p>
+              <p className="sm muted">{[w.host, OS[w.os ?? ""], w.arch, w.lastHeartbeatAt && "last heard " + ago(w.lastHeartbeatAt)].filter(Boolean).join(" · ")}</p>
               {w.tags.length > 0 && <div className="chips" aria-label="Tags">{w.tags.map((x) => <span className="mchip" key={x}>{x}</span>)}</div>}
               <p><span className={"pill " + cls}><Icon id={icon} />{t}</span></p>
               {w.currentJobIds.map((id) => <p key={id} className="sm">Converting <Link className="mono" to={"/jobs?tab=running&job=" + encodeURIComponent(id)}>{names[id] ?? "Job " + id}</Link></p>)}
