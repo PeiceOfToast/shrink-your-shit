@@ -52,13 +52,13 @@ type Card = { name: string; gpu: boolean; lit: boolean; formats: [string, boolea
 function cards(w: Worker): Card[] {
   const encs = w.capabilities.filter((c) => c.kind === "encoder"), untested = !w.capabilities.length;
   return TYPES.map(([name, slot, noun, pick]): Card => {
-    const cs = encs.filter(pick), ok = cs.filter((c) => c.test === "passed"), bad = cs.find((c) => c.test === "failed");
+    const cs = encs.filter(pick), ok = cs.filter((c) => c.test === "passed"), bad = cs.find((c) => c.test === "failed") ?? cs.find((c) => c.test === "not_present"); // #254: not_present keeps its how-to-fix detail
     const all = ["H.264", "HEVC", "AV1", ...(cs.some((c) => FORMAT(c.key) === "VP9") ? ["VP9"] : [])];
     return {
       name, gpu: slot === "gpu", lit: ok.length > 0, detail: bad?.detail,
       formats: all.map((f): [string, boolean] => [f, ok.some((c) => FORMAT(c.key) === f)]),
       why: untested ? "Not tested yet" : ok.length ? "" : !cs.length ? "Not on this computer"
-        : cs.some((c) => c.device === "missing") ? "No " + noun + " in this computer"
+        : cs.some((c) => c.device === "missing" || c.test === "not_present") ? "No " + noun + " in this computer"
         : cs.some((c) => c.device === "found") ? "Found, but its test failed" : "No working " + noun + " found",
       at: cs.map((c) => c.testedAt).filter(Boolean).sort().at(-1) ?? null,
     };
