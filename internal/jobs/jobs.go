@@ -567,7 +567,22 @@ func (s *Store) LeaseOf(id int64) (string, error) {
 
 // RenewLease extends lease on job id; false: the job isn't running on that lease any more.
 func (s *Store) RenewLease(id int64, lease string) (bool, error) {
-	r, err := s.db.Exec(`UPDATE jobs SET lease_expires=? WHERE id=? AND status=? AND lease_id=?`, s.leaseUntil(), id, Running, lease)
+	return s.extendLease(id, lease, s.leaseUntil())
+}
+
+// FinishFor is how long the server may take to finish a job once its worker's done report is accepted
+// (put the file in place, record it). No worker renews the lease then, and a slow share can take minutes.
+var FinishFor = 10 * time.Minute
+
+// HoldThroughFinish is called when a worker's done report is accepted: the lease of job id is extended
+// to cover the server's finish, so the expired-lease sweep cannot requeue it meanwhile. false: the job
+// isn't running on that lease any more, so the report must not be finished.
+func (s *Store) HoldThroughFinish(id int64, lease string) (bool, error) {
+	return s.extendLease(id, lease, s.now().Add(FinishFor).UTC().Format(leaseTime))
+}
+
+func (s *Store) extendLease(id int64, lease, until string) (bool, error) {
+	r, err := s.db.Exec(`UPDATE jobs SET lease_expires=? WHERE id=? AND status=? AND lease_id=?`, until, id, Running, lease)
 	if err != nil {
 		return false, err
 	}

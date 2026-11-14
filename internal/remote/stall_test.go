@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -151,10 +152,14 @@ func TestRemoteChecksAndUnjudgedWorkersAreNotStopped(t *testing.T) {
 	}
 }
 
-// slowThenReal is an ffmpeg that moves on for a while (as a long encode does), then really converts.
+// slowThenReal is an ffmpeg that moves on for a while (as a long encode does), then really converts. Once the
+// encode is done (encoded set), each later run is silent for after: the checks and the wait before the upload,
+// when nothing reports a position, so only the worker's lease renewals keep the job.
 type slowThenReal struct {
 	media.OSExec
-	for_ time.Duration
+	for_    time.Duration
+	after   time.Duration
+	encoded *atomic.Bool
 }
 
 func (x slowThenReal) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
@@ -168,34 +173,122 @@ func (x slowThenReal) Stream(ctx context.Context, onLine func(string), name stri
 				onLine("progress=continue")
 			}
 		}
+	} else if x.encoded.Load() {
+		if err := x.silent(ctx); err != nil {
+			return "", err
+		}
 	}
-	return x.OSExec.Stream(ctx, onLine, name, args...)
+	out, err := x.OSExec.Stream(ctx, onLine, name, args...)
+	if name == "ffmpeg" && slices.Contains(args, "libx265") {
+		x.encoded.Store(true)
+	}
+	return out, err
+}
+
+func (x slowThenReal) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
+	if x.encoded.Load() {
+		if err := x.silent(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return x.OSExec.Output(ctx, name, args...)
+}
+
+func (x slowThenReal) silent(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(x.after):
+		return nil
+	}
 }
 
 // orch-lead 20:03Z: a remote encode of a file whose length we don't know still reports its position, which
 // renews the lease; one that takes longer than LeaseFor is not taken back and run again, but finishes once.
 func TestRemoteEncodeOfUnknownLengthKeepsItsLease(t *testing.T) {
 	needFFmpeg(t)
-	oldLease, oldPoll, oldEvery := jobs.LeaseFor, PlanPoll, ProgressEvery
+	oldLease, oldPoll, oldEvery, oldRenew := jobs.LeaseFor, PlanPoll, ProgressEvery, RenewEvery
 	// ffmpeg prints its position about every 0.5 s (its -progress cadence): the lease must outlast that and the
-	// real encode's start, or a slow run loses it between two reports (ffmpeg 8 CI, 2026-11-12)
-	jobs.LeaseFor, PlanPoll, ProgressEvery = 1500*time.Millisecond, 50*time.Millisecond, 20*time.Millisecond
-	defer func() { jobs.LeaseFor, PlanPoll, ProgressEvery = oldLease, oldPoll, oldEvery }()
+	// real encode's start, or a slow run loses it between two reports (ffmpeg 8 CI, 2026-11-12). The worker
+	// renews between reports (keepLease), every RenewEvery: well inside LeaseFor even on a loaded host, where
+	// the checks and upload after the encode can take longer than LeaseFor (the 2026-11-14 flake).
+	jobs.LeaseFor, PlanPoll, ProgressEvery, RenewEvery = 3*time.Second, 50*time.Millisecond, 20*time.Millisecond, 300*time.Millisecond
+	defer func() { jobs.LeaseFor, PlanPoll, ProgressEvery, RenewEvery = oldLease, oldPoll, oldEvery, oldRenew }()
 	srv, st, lib := stallServer(t, 5*time.Second)
 	id := remoteJobLen(t, st, lib, 0)
 	c := pairClient(t, srv, st)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go c.Work(ctx, Converter{Exec: slowThenReal{for_: 3 * time.Second}, FFmpeg: "ffmpeg", FFprobe: "ffprobe", Work: t.TempDir(),
+	go c.Work(ctx, Converter{Exec: slowThenReal{for_: 6 * time.Second, after: 5 * time.Second, encoded: new(atomic.Bool)}, FFmpeg: "ffmpeg", FFprobe: "ffprobe", Work: t.TempDir(),
 		FreeSpace: func(string) (uint64, error) { return 1 << 40, nil }})
 	var j jobs.Job
 	for end := time.Now().Add(30 * time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
 		st.RequeueExpiredLeases(0) // what the server's sweep does
-		if j, _ = st.Get(id); j.Status != jobs.Queued && j.Status != jobs.Running {
+		got, err := st.Get(id)
+		if err != nil { // a read that failed is not the job's state: look again
+			t.Logf("reading the job: %v", err)
+			continue
+		}
+		if j = got; j.Status != jobs.Queued && j.Status != jobs.Running {
 			break
 		}
 	}
 	if j.Status != jobs.Done || j.Attempts > 1 {
 		t.Errorf("%s %q, %d tries", j.Status, j.Error, j.Attempts)
+	}
+}
+
+// heldEncode is an ffmpeg that starts its encode and runs until it is stopped; it says when it starts and when it stops.
+type heldEncode struct {
+	media.OSExec
+	started, stopped chan struct{}
+}
+
+func (x heldEncode) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
+	if name == "ffmpeg" && slices.Contains(args, "libx265") {
+		select {
+		case x.started <- struct{}{}:
+		default:
+		}
+		<-ctx.Done()
+		select {
+		case x.stopped <- struct{}{}:
+		default:
+		}
+		return "", ctx.Err()
+	}
+	return x.OSExec.Stream(ctx, onLine, name, args...)
+}
+
+// The server gives a job's lease back while the worker encodes it. The renewal answers lease_gone, and the worker
+// stops that encode at once instead of running it to the end for a job someone else now has.
+func TestLeaseGivenBackStopsTheEncodeWithoutAReport(t *testing.T) {
+	needFFmpeg(t)
+	oldPoll, oldEvery, oldRenew := PlanPoll, ProgressEvery, RenewEvery
+	PlanPoll, ProgressEvery, RenewEvery = 50*time.Millisecond, 20*time.Millisecond, 50*time.Millisecond
+	defer func() { PlanPoll, ProgressEvery, RenewEvery = oldPoll, oldEvery, oldRenew }()
+	srv, st, lib := stallServer(t, time.Minute)
+	id := remoteJob(t, st, lib)
+	c := pairClient(t, srv, st)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	x := heldEncode{started: make(chan struct{}, 1), stopped: make(chan struct{}, 1)}
+	go c.Work(ctx, Converter{Exec: x, FFmpeg: "ffmpeg", FFprobe: "ffprobe", Work: t.TempDir(),
+		FreeSpace: func(string) (uint64, error) { return 1 << 40, nil }})
+	select {
+	case <-x.started:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the encode never started")
+	}
+	if err := st.Release(id); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-x.stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the encode went on after its lease was given back")
+	}
+	if j, _ := st.Get(id); j.Status == jobs.Done {
+		t.Errorf("a job whose lease was given back was reported done")
 	}
 }
