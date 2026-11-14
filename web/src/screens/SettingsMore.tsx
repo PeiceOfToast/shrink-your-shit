@@ -50,7 +50,7 @@ function ThisComputer() {
     if (!failed(r)) return navigate(worker ? "/start" : "/start?worker=1");
     const n = (r.error as { runningJobs?: number }).runningJobs;
     setErr(r.error.code !== "role_change_busy" ? r.error.message
-      : <>{n ? plural(n, "job is", "jobs are") : "Jobs are"} converting now. Stop them on <Link to="/jobs">Jobs</Link> first, or wait.</>);
+      : <>{n ? plural(n, "job is", "jobs are") : "Jobs are"} converting now. Stop {n === 1 ? "it" : "them"} on <Link to="/jobs">Jobs</Link> first, or wait.</>);
     btn.current?.focus();
   };
   return (
