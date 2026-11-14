@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/remote"
 )
@@ -100,4 +101,10 @@ func (j *joinedWorker) stopLocked() {
 // not a joined worker (the joined worker does the converting then).
 func localPoolTakes(j *joinedWorker, switchOn bool) bool {
 	return switchOn && !j.Working()
+}
+
+// localGate is the local pool's Paused check: this computer's own switch, and not while the install is a joined
+// worker. main uses it for the pool, and the tests use the same function.
+func localGate(j *joinedWorker, store *jobs.Store) func() bool {
+	return func() bool { return !localPoolTakes(j, store.WorkerEnabled(jobs.LocalWorker)) }
 }

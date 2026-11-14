@@ -4,6 +4,9 @@ package main
 
 import (
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -103,7 +106,7 @@ func TestSavedWorkerRoleKeepsTheLocalPoolFromClaimingAtStartup(t *testing.T) {
 	j := newJoinedWorker(filepath.Join(dir, "worker"), "/usr/bin/ffmpeg", "/usr/bin/ffprobe")
 	j.SetRole("worker") // main does this before the local pool starts
 	t.Cleanup(func() { j.SetRole("unset") })
-	local := &worker.Worker{ID: "local", Queue: st, Paused: func() bool { return !localPoolTakes(j, true) }}
+	local := &worker.Worker{ID: "local", Queue: st, Paused: localGate(j, st)} // the gate main gives the local pool
 	ran, err := local.RunOne(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -113,5 +116,46 @@ func TestSavedWorkerRoleKeepsTheLocalPoolFromClaimingAtStartup(t *testing.T) {
 	}
 	if job, _ := st.Get(id); job.Status != jobs.Queued {
 		t.Errorf("job status %s, want it still queued for the joined worker", job.Status)
+	}
+}
+
+// main applies the saved role before the local pool starts. This reads main.go and fails if the role call moves
+// after pool.Run, so the startup test cannot pass while the order is wrong.
+func TestMainAppliesTheSavedRoleBeforeThePoolRuns(t *testing.T) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "main.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var setRole, poolRun token.Pos
+	ast.Inspect(f, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		recv, ok := sel.X.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		if recv.Name == "joined" && sel.Sel.Name == "SetRole" && setRole == token.NoPos {
+			setRole = call.Pos()
+		}
+		if recv.Name == "pool" && sel.Sel.Name == "Run" && poolRun == token.NoPos {
+			poolRun = call.Pos()
+		}
+		return true
+	})
+	if setRole == token.NoPos {
+		t.Fatal("main.go no longer applies the saved role (joined.SetRole)")
+	}
+	if poolRun == token.NoPos {
+		t.Fatal("main.go no longer runs the pool (pool.Run) in the form this test reads")
+	}
+	if setRole > poolRun {
+		t.Error("main.go applies the saved role after the local pool starts")
 	}
 }
