@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -234,5 +235,44 @@ func TestSetupNotLocalLeavesTheRoleAlone(t *testing.T) {
 	code, body, _ := do(t, c, srv, call{method: "POST", path: "/api/v2/setup/role", ctype: "application/json", body: `{"role":"worker","serverUrl":"` + remoteSrv.URL + `"}`})
 	if code != http.StatusOK || !strings.Contains(body, `"state":"not_local"`) || !strings.Contains(body, `"role":"unset"`) {
 		t.Errorf("not local: %d %s", code, body)
+	}
+}
+
+// An install that is already a server can't ask to join another server: 409, and no join request leaves it, so a
+// request from elsewhere on the network can't change the role.
+func TestSetupEnrolledInstallRefusesTheWorkerRole(t *testing.T) {
+	srv, _ := setupServer(t)
+	remoteSrv, joinBody := fakeRemote(t, "waiting")
+	c := jar(t)
+	if code, body, _ := do(t, c, srv, call{method: "POST", path: "/api/v2/setup/role", ctype: "application/json", body: `{"role":"server"}`}); code != http.StatusOK {
+		t.Fatalf("set server: %d %s", code, body)
+	}
+	code, body, _ := do(t, c, srv, call{method: "POST", path: "/api/v2/setup/role", ctype: "application/json", body: `{"role":"worker","serverUrl":"` + remoteSrv.URL + `"}`})
+	if code != http.StatusConflict || errCode(body) != "role_already_set" {
+		t.Fatalf("worker on a server: %d %s", code, body)
+	}
+	select {
+	case b := <-joinBody:
+		t.Errorf("a join request was sent: %s", b)
+	default:
+	}
+	if v := setupState(t, c, srv); v["role"] != "server" || v["join"] != nil {
+		t.Errorf("role or join changed: %v", v)
+	}
+}
+
+// The server allowed the join, but the token can't be saved: the state says so, not "expired", and the role stays unset.
+func TestSetupAllowedButTokenNotSavedSaysSo(t *testing.T) {
+	srv, dir := setupServer(t)
+	// A file where the worker's folder goes makes the token save fail.
+	if err := os.WriteFile(filepath.Join(dir, "worker"), []byte("not a folder"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	remoteSrv, _ := fakeRemote(t, "waiting", "allowed")
+	c := jar(t)
+	do(t, c, srv, call{method: "POST", path: "/api/v2/setup/role", ctype: "application/json", body: `{"role":"worker","serverUrl":"` + remoteSrv.URL + `"}`})
+	v := waitFor(t, c, srv, "not_saved", func(v map[string]any) bool { return joinState(v) == "not_saved" })
+	if v["role"] != "unset" {
+		t.Errorf("a failed token save changed the role: %v", v)
 	}
 }

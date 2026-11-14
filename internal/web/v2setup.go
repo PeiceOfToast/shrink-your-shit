@@ -28,6 +28,8 @@ type WorkerJoiner interface {
 	Wait(ctx context.Context, serverURL, id, secret, expiresAt string, report func(state string)) (workerID, workerName, token string, err error)
 	// Save keeps a worker's credential in dir.
 	Save(dir, serverURL, id, name, token string) error
+	// Forget removes the credential Save kept in dir, when the role could not be set after it.
+	Forget(dir string)
 }
 
 // joinTicket is a pending join: what Wait polls with.
@@ -146,13 +148,14 @@ func (sw *setupWaits) allowed(gen int, serverURL, id, name, token, dir string) {
 	}
 	if err := sw.joiner.Save(dir, serverURL, id, name, token); err != nil {
 		log.Printf("setup: allowed, but the token couldn't be saved in %s: %v", dir, err)
-		sw.cur.state = "expired"
+		sw.cur.state = "not_saved"
 		sw.changedLocked()
 		return
 	}
 	if err := sw.store.SetMeta(setupRoleKey, "worker"); err != nil {
 		log.Printf("setup: allowed, but the role couldn't be saved: %v", err)
-		sw.cur.state = "expired"
+		sw.joiner.Forget(dir)
+		sw.cur.state = "not_saved"
 		sw.changedLocked()
 		return
 	}
@@ -269,15 +272,18 @@ func v2Setup(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng Engin
 			return
 		}
 		if err := eng.Joiner.Save(workerDir, serverURL, id, name, token); err != nil {
-			serverError(w, err)
+			apiError(w, http.StatusInternalServerError, "token_not_saved", "The server paired with this computer, but its token couldn't be saved here: "+err.Error()+" Nothing was changed.")
 			return
 		}
 		ss.mu.Lock()
 		defer ss.mu.Unlock()
-		sw.replace(&setupJoin{serverName: hostOf(serverURL), serverURL: serverURL, state: "allowed"})
-		if setRole(w, "worker") {
-			answerWithRole(w, http.StatusOK)
+		// The role is written last; if that fails, the saved token goes, so the worker command can't start on it.
+		if !setRole(w, "worker") {
+			eng.Joiner.Forget(workerDir)
+			return
 		}
+		sw.replace(&setupJoin{serverName: hostOf(serverURL), serverURL: serverURL, state: "allowed"})
+		answerWithRole(w, http.StatusOK)
 	}
 
 	// askWorker sends the join request and starts waiting for the person's answer in the background.
@@ -342,8 +348,19 @@ func v2Setup(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng Engin
 			return
 		}
 		if in.Role == "worker" {
-			// The request reaches a server, so no lock is held across it; only the busy check and the save are.
+			// The request reaches a server, so no lock is held across it; only the checks and the save are.
 			ss.mu.Lock()
+			cur, err := current()
+			if err != nil {
+				ss.mu.Unlock()
+				serverError(w, err)
+				return
+			}
+			if cur != "unset" {
+				ss.mu.Unlock()
+				apiError(w, http.StatusConflict, "role_already_set", "This install is already a "+cur+", so it can't ask to join a server. Set its role to unset first. Nothing was changed.")
+				return
+			}
 			blocked := busy(w)
 			ss.mu.Unlock()
 			if blocked {

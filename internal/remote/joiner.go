@@ -5,6 +5,8 @@ package remote
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 )
 
 // Joiner is the worker side of joining a server, for the setup page. It is the Client with each failure coded
@@ -81,4 +83,9 @@ func (j *Joiner) Wait(ctx context.Context, serverURL, id, secret, expiresAt stri
 // Save keeps a worker's credential in dir, where the worker command reads it.
 func (j *Joiner) Save(dir, serverURL, id, name, token string) error {
 	return State{Server: serverURL, WorkerID: id, Name: name, Token: token}.Save(dir)
+}
+
+// Forget removes the credential in dir, so the worker command can't start on it.
+func (j *Joiner) Forget(dir string) {
+	os.Remove(filepath.Join(dir, StateFile))
 }
