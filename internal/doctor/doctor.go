@@ -245,7 +245,7 @@ func (c *Checker) Converter(ctx context.Context) Tools {
 func (c *Checker) encodes(ctx context.Context, enc string, tenBit bool) bool {
 	tctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	_, err := c.Exec.Output(tctx, c.FFmpeg, encodeArgs(enc, tenBit, vaapiDevice())...)
+	_, err := c.Exec.Output(tctx, c.FFmpeg, encodeArgs(enc, tenBit, media.VAAPIDevice())...)
 	return err == nil
 }
 
@@ -274,14 +274,6 @@ func encodeArgs(enc string, tenBit bool, device string) []string {
 		args = append(args, "-profile:v", "main10")
 	}
 	return append(args, "-f", "null", "-")
-}
-
-// vaapiDevice is the first DRM render node (/dev/dri/renderD128 on most machines).
-func vaapiDevice() string {
-	if m, _ := filepath.Glob("/dev/dri/renderD*"); len(m) > 0 {
-		return m[0]
-	}
-	return "/dev/dri/renderD128"
 }
 
 func (c *Checker) freeSpace(dir string) (uint64, error) {

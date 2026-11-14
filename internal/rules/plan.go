@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -223,14 +222,8 @@ func (p Plan) FFmpegArgs(in, out string) []string {
 // graphicsEncoders are the hardware HEVC encoders FFmpegArgsWith knows, by ffmpeg's name.
 var graphicsEncoders = map[string]bool{"hevc_nvenc": true, "hevc_qsv": true, "hevc_vaapi": true, "hevc_amf": true}
 
-// vaapiDevice is the render node VAAPI encodes on: the first one present, as doctor's test encode picks it.
-// A seam, so tests need no /dev/dri.
-var vaapiDevice = func() string {
-	if m, _ := filepath.Glob("/dev/dri/renderD*"); len(m) > 0 {
-		return m[0]
-	}
-	return "/dev/dri/renderD128"
-}
+// vaapiDevice is the render node VAAPI encodes on (media.VAAPIDevice); a seam, so tests can pick one.
+var vaapiDevice = media.VAAPIDevice
 
 // FFmpegArgsWith is FFmpegArgs with the video encoded by enc. "" or "cpu" is the processor, exactly
 // FFmpegArgs. A graphics HEVC encoder (hevc_nvenc, hevc_qsv, hevc_vaapi, hevc_amf) is used for an HEVC
