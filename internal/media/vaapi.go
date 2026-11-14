@@ -26,11 +26,16 @@ var (
 // /dev/dri/renderD128, as on most machines.
 func VAAPIDevice() string {
 	nodes, _ := renderNodes()
+	return ChooseVAAPI(nodes, pciVendor)
+}
+
+// ChooseVAAPI is VAAPIDevice's choice among the given render nodes, with vendor giving each one's PCI vendor id.
+func ChooseVAAPI(nodes []string, vendor func(string) string) string {
 	if len(nodes) == 0 {
 		return "/dev/dri/renderD128"
 	}
 	for _, n := range nodes {
-		if v := pciVendor(n); v == "0x8086" || v == "0x1002" { // Intel, AMD
+		if v := vendor(n); v == "0x8086" || v == "0x1002" { // Intel, AMD
 			return n
 		}
 	}

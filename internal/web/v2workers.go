@@ -19,6 +19,7 @@ import (
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/doctor"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/pathmap"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/sysload"
 )
@@ -373,8 +374,8 @@ const failed = "ffmpeg lists it, but a test frame failed on this computer."
 // the device lines would mislead anywhere else.
 var usesDevDRI = runtime.GOOS == "linux"
 
-// Seams for intelFailure: the render nodes doctor's vaapiDevice globs, and an open for read and write
-// as this user. Tests swap them; the real ones touch /dev/dri.
+// Seams for intelFailure: the render nodes (media.VAAPIDevice picks one from them), and an open for read
+// and write as this user. Tests swap them; the real ones touch /dev/dri.
 var renderNodes = func() []string {
 	m, _ := filepath.Glob("/dev/dri/renderD*")
 	return m
@@ -409,6 +410,17 @@ const (
 	vendorIntel = "0x8086"
 	vendorAMD   = "0x1002"
 )
+
+// graphicsEncoder says whether an encoder name is a graphics-card one, by the family suffix doctor
+// probes (hevc_nvenc, hevc_qsv, ...), whether or not this computer has it. Processor encoders are not.
+func graphicsEncoder(e string) bool {
+	for _, s := range []string{"_nvenc", "_qsv", "_vaapi", "_amf", "_videotoolbox", "_mf", "_v4l2m2m"} {
+		if strings.HasSuffix(e, s) {
+			return true
+		}
+	}
+	return false
+}
 
 // encoderDevice says whether the device an encoder needs is on this computer: "found" or "missing".
 // It is "" (no field) for software encoders, for hardware encoders whose device we don't check, and
@@ -451,11 +463,12 @@ func intelFailure() string {
 	if len(nodes) == 0 {
 		return "No graphics device here (/dev/dri is missing). In Docker, add the Intel GPU block from docker-compose.yml and restart; on a host install, check the graphics driver is loaded."
 	}
-	if err := openRender(nodes[0]); err != nil {
+	dev := media.ChooseVAAPI(nodes, renderVendor)
+	if err := openRender(dev); err != nil {
 		if !errors.Is(err, fs.ErrPermission) {
-			return "Can't open " + nodes[0] + ": " + err.Error() + "."
+			return "Can't open " + dev + ": " + err.Error() + "."
 		}
-		return "Can't open " + nodes[0] + ": the app's user isn't allowed to. On a host install, add the app's user to the render group. In Docker the app joins the device's group itself; if this still shows, the device's group on the host isn't visible in the container (check the LXC or Docker device settings)."
+		return "Can't open " + dev + ": the app's user isn't allowed to. On a host install, add the app's user to the render group. In Docker the app joins the device's group itself; if this still shows, the device's group on the host isn't visible in the container (check the LXC or Docker device settings)."
 	}
 	return failed
 }
@@ -514,6 +527,8 @@ func capabilities(t doctor.Tools, ok bool) []map[string]any {
 			test, detail = "unsupported", "Not supported by this graphics card."
 		case usesDevDRI && (strings.HasSuffix(e, "_qsv") || strings.HasSuffix(e, "_vaapi")):
 			detail = intelFailure()
+		case strings.HasSuffix(e, "_nvenc") && encoderDevice(e) == "missing":
+			detail = "No NVIDIA card here (/dev/nvidia0 is missing). In Docker, give the container the NVIDIA device and restart; on a host install, check the NVIDIA driver is loaded."
 		}
 		add("encoder", e, encoderLabels[e], "gpu", test, detail)
 		annotate(e, "gpu")
@@ -742,13 +757,15 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 		if in.PrimaryEncoder != nil {
 			name := strings.TrimSpace(*in.PrimaryEncoder)
 			t, ok := v.tools()
-			if name != "cpu" && !slices.Contains(mainEncoderGPU(capabilities(t, ok)), name) {
+			caps := capabilities(t, ok)
+			if name != "cpu" && !graphicsEncoder(name) {
+				apiError(w, http.StatusBadRequest, "invalid_encoder", "The main encoder is cpu or a graphics encoder that passed its test. Nothing was changed.")
+				return
+			}
+			if name != "cpu" && !slices.Contains(mainEncoderGPU(caps), name) {
 				label := encoderLabels[name]
 				if label == "" {
 					label = name
-				}
-				if label == "" {
-					label = "That encoder"
 				}
 				apiError(w, http.StatusConflict, "encoder_not_working", label+" isn't working on this worker, so it can't be the main encoder.")
 				return
