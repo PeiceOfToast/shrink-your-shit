@@ -444,7 +444,21 @@ func encoderDevice(e string) string {
 	if found {
 		return "found"
 	}
+	// A render node whose vendor we can't read may be this encoder's card: we don't know, so we don't say it's missing.
+	if !strings.HasSuffix(e, "_nvenc") && unknownVendor() {
+		return ""
+	}
 	return "missing"
+}
+
+// unknownVendor says whether a render node is present whose PCI vendor can't be read.
+func unknownVendor() bool {
+	for _, n := range renderNodes() {
+		if renderVendor(n) == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // missingCard is the line for a graphics encoder whose card is not in this computer.

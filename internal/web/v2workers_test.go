@@ -21,6 +21,12 @@ import (
 // x265 and NVENC (10-bit too), fails with x264 and VA-API.
 func workersServer(t *testing.T) (*httptest.Server, *jobs.Store) {
 	t.Helper()
+	return workersServerFailing(t, "")
+}
+
+// workersServerFailing is workersServer, but the test of encoder failing (e.g. "hevc_nvenc") fails.
+func workersServerFailing(t *testing.T, failing string) (*httptest.Server, *jobs.Store) {
+	t.Helper()
 	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -35,6 +41,8 @@ func workersServer(t *testing.T) (*httptest.Server, *jobs.Store) {
 			return " V....D libx265  HEVC\n V....D libx264  H.264\n V....D hevc_nvenc  NVENC\n V....D hevc_vaapi  VAAPI\n", "", nil
 		case strings.Contains(a, "-filters"):
 			return " ... ssim              VV->V      SSIM\n", "", nil
+		case failing != "" && strings.Contains(a, "-c:v "+failing):
+			return "", "", errors.New("exit status 1")
 		case strings.Contains(a, "-c:v libx265"), strings.Contains(a, "-c:v hevc_nvenc"):
 			return "", "", nil
 		}
