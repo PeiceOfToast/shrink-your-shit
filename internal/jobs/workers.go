@@ -13,11 +13,12 @@ const LocalWorker = "local"
 
 // WorkerConfig is what the person sets on a worker (migration 24).
 type WorkerConfig struct {
-	ID       string
-	Name     string
-	Tags     []string
-	Pool     *string
-	GPUSlots *int // nil: the default (from the encoder test)
+	ID             string
+	Name           string
+	Tags           []string
+	Pool           *string
+	GPUSlots       *int    // nil: the default (from the encoder test)
+	PrimaryEncoder *string // nil: the default (the first graphics encoder whose test passed, else cpu)
 }
 
 // WorkerConfigOf is worker id's settings; the local worker's defaults when it has none saved.
@@ -26,7 +27,8 @@ func (s *Store) WorkerConfigOf(id string) (WorkerConfig, error) {
 	var tags string
 	var pool sql.NullString
 	var gpu sql.NullInt64
-	err := s.db.QueryRow(`SELECT name, tags, pool, gpu_slots FROM workers WHERE id=?`, id).Scan(&c.Name, &tags, &pool, &gpu)
+	var prim sql.NullString
+	err := s.db.QueryRow(`SELECT name, tags, pool, gpu_slots, primary_encoder FROM workers WHERE id=?`, id).Scan(&c.Name, &tags, &pool, &gpu, &prim)
 	if errors.Is(err, sql.ErrNoRows) {
 		return c, nil
 	}
@@ -41,6 +43,9 @@ func (s *Store) WorkerConfigOf(id string) (WorkerConfig, error) {
 		n := int(gpu.Int64)
 		c.GPUSlots = &n
 	}
+	if prim.Valid {
+		c.PrimaryEncoder = &prim.String
+	}
 	return c, nil
 }
 
@@ -50,9 +55,9 @@ func (s *Store) SetWorkerConfig(c WorkerConfig) error {
 		c.Tags = []string{}
 	}
 	tags, _ := json.Marshal(c.Tags)
-	_, err := s.db.Exec(`INSERT INTO workers(id, name, tags, pool, gpu_slots) VALUES (?,?,?,?,?)
-ON CONFLICT(id) DO UPDATE SET name=excluded.name, tags=excluded.tags, pool=excluded.pool, gpu_slots=excluded.gpu_slots`,
-		c.ID, c.Name, string(tags), c.Pool, c.GPUSlots)
+	_, err := s.db.Exec(`INSERT INTO workers(id, name, tags, pool, gpu_slots, primary_encoder) VALUES (?,?,?,?,?,?)
+ON CONFLICT(id) DO UPDATE SET name=excluded.name, tags=excluded.tags, pool=excluded.pool, gpu_slots=excluded.gpu_slots, primary_encoder=excluded.primary_encoder`,
+		c.ID, c.Name, string(tags), c.Pool, c.GPUSlots, c.PrimaryEncoder)
 	return err
 }
 

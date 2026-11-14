@@ -126,6 +126,7 @@ func (v *workerView) local(ctx context.Context) (map[string]any, error) {
 	since := v.since
 	v.mu.Unlock()
 	t, ok := v.tools()
+	caps := capabilities(t, ok)
 	var ff any
 	gpus := []map[string]any{}
 	if ok && t.FFmpeg != "" {
@@ -145,8 +146,9 @@ func (v *workerView) local(ctx context.Context) (map[string]any, error) {
 		"slots":           v.slots(cfg, s, len(working), t),
 		"live":            liveLoad(v.meter.Sample()), // V7d: this computer, measured as remote workers measure theirs
 		"update":          nil,
-		"gpus":            gpus, "ffmpeg": ff, "capabilities": capabilities(t, ok), "currentJobIds": ids,
+		"gpus":            gpus, "ffmpeg": ff, "capabilities": caps, "currentJobIds": ids,
 		"tags": cfg.Tags, "pool": cfg.Pool, "schedule": schedule, "pathMappings": []any{},
+		"primaryEncoder": primaryEncoder(cfg.PrimaryEncoder, caps),
 	}, nil
 }
 
@@ -224,6 +226,8 @@ func (v *workerView) remoteWith(rw jobs.RemoteWorker, working []jobs.Working) (m
 	case len(ids) > 0:
 		status = "busy"
 	}
+	var capList []map[string]any
+	json.Unmarshal([]byte(rw.Capabilities), &capList) // "{}" or junk: no list, so the default
 	var caps any = []any{}
 	if c := json.RawMessage(rw.Capabilities); json.Valid(c) && string(c) != "{}" {
 		caps = c
@@ -257,7 +261,33 @@ func (v *workerView) remoteWith(rw jobs.RemoteWorker, working []jobs.Working) (m
 		"live":        liveLoad(load),
 		"gpus":        []any{}, "ffmpeg": nil, "capabilities": caps, "currentJobIds": ids,
 		"tags": []string{}, "pool": nil, "schedule": nil, "pathMappings": mappings,
+		"primaryEncoder": primaryEncoder(nil, capList),
 	}, nil
+}
+
+// passedGPU is the graphics encoders whose capability test passed on a worker, in the doctor's order.
+func passedGPU(caps []map[string]any) []string {
+	out := []string{}
+	for _, c := range caps {
+		key, _ := c["key"].(string)
+		if c["kind"] == "encoder" && c["slot"] == "gpu" && c["test"] == "passed" {
+			out = append(out, strings.TrimPrefix(key, "encoder:"))
+		}
+	}
+	return out
+}
+
+// primaryEncoder is the encoder a worker encodes with: the saved choice while its test still passes
+// (cpu always does), else the first graphics encoder that passes, else cpu.
+func primaryEncoder(saved *string, caps []map[string]any) string {
+	passed := passedGPU(caps)
+	if saved != nil && (*saved == "cpu" || slices.Contains(passed, *saved)) {
+		return *saved
+	}
+	if len(passed) > 0 {
+		return passed[0]
+	}
+	return "cpu"
 }
 
 // gpuVendor is the contract's vendor word for doctor.GPU's.
@@ -471,7 +501,8 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 				From string `json:"from"`
 				To   string `json:"to"`
 			} `json:"schedule"`
-			PathMappings *[]struct{ Server, Worker, Mode string } `json:"pathMappings"` // V7c: remote workers only
+			PathMappings   *[]struct{ Server, Worker, Mode string } `json:"pathMappings"`   // V7c: remote workers only
+			PrimaryEncoder *string                                  `json:"primaryEncoder"` // local only: cpu, or a graphics encoder whose test passed
 		}
 		if !found(w, r) || !readJSON(w, r, &in) {
 			return
@@ -571,6 +602,22 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 			if p := strings.TrimSpace(*in.Pool); p != "" {
 				cfg.Pool = &p
 			}
+		}
+		if in.PrimaryEncoder != nil {
+			name := strings.TrimSpace(*in.PrimaryEncoder)
+			t, ok := v.tools()
+			if name != "cpu" && !slices.Contains(passedGPU(capabilities(t, ok)), name) {
+				label := encoderLabels[name]
+				if label == "" {
+					label = name
+				}
+				if label == "" {
+					label = "That encoder"
+				}
+				apiError(w, http.StatusConflict, "encoder_not_working", label+" isn't working on this worker, so it can't be the main encoder.")
+				return
+			}
+			cfg.PrimaryEncoder = &name
 		}
 		saveSettings := false
 		if cpu != nil {
