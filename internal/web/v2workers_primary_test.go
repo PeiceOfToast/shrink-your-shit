@@ -37,8 +37,9 @@ func TestPrimaryEncoderSavedWinsOnlyWhilePassing(t *testing.T) {
 	}
 }
 
-// PATCH takes cpu or a passing graphics encoder, refuses anything else with 409 encoder_not_working,
-// and the refusal changes nothing.
+// PATCH takes cpu or a passing graphics encoder. A graphics encoder that failed is refused with 409
+// encoder_not_working; any other name (a processor encoder, an unknown one) with 400 invalid_encoder.
+// Either refusal changes nothing.
 func TestPatchPrimaryEncoderRefusesFailedOrUnknown(t *testing.T) {
 	srv, _ := workersServer(t)
 	if code, b, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/workers/local/capabilities/test", body: "{}", ctype: "application/json"}); code != 200 {
@@ -69,6 +70,15 @@ func TestPatchPrimaryEncoderRefusesFailedOrUnknown(t *testing.T) {
 		}
 		if msg := want + " isn't working on this worker, so it can't be the main encoder."; !strings.Contains(b, msg) {
 			t.Errorf("PATCH %s message: %s, want %q", enc, b, msg)
+		}
+	}
+	for _, enc := range []string{"libx265", "not_an_encoder", ""} {
+		code, b := patch(enc)
+		if code != 400 || errCode(b) != "invalid_encoder" {
+			t.Errorf("PATCH %q: %d %s, want 400 invalid_encoder", enc, code, b)
+		}
+		if msg := "The main encoder is cpu or a graphics encoder that passed its test. Nothing was changed."; !strings.Contains(b, msg) {
+			t.Errorf("PATCH %q message: %s", enc, b)
 		}
 	}
 	if got := primary(); got != "hevc_nvenc" {

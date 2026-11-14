@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -70,7 +71,7 @@ func TestJoinAllowedSavesTheTokenThenCarriesOn(t *testing.T) {
 	if st.Token != "tok" || st.WorkerID != "w-9" || st.Server != srv.URL {
 		t.Errorf("saved state %+v", st)
 	}
-	if fi, err := os.Stat(filepath.Join(data, remote.StateFile)); err == nil && fi.Mode().Perm()&0o077 != 0 {
+	if fi, err := os.Stat(filepath.Join(data, remote.StateFile)); err == nil && runtime.GOOS != "windows" && fi.Mode().Perm()&0o077 != 0 {
 		t.Errorf("token file mode %v, want owner only", fi.Mode().Perm())
 	}
 }

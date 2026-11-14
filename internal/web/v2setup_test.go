@@ -20,6 +20,13 @@ import (
 )
 
 // setupServer is a web server with its own data folder and web port 8484, as a worker's join reports it.
+// TestMain sets the join poll once for the whole package: a join wait can outlive its test, so the knob is never
+// changed per test.
+func TestMain(m *testing.M) {
+	remote.JoinEvery = time.Millisecond
+	os.Exit(m.Run())
+}
+
 func setupServer(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
 	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
@@ -75,9 +82,6 @@ func fakeRemote(t *testing.T, states ...string) (*httptest.Server, chan string) 
 		}
 	}))
 	t.Cleanup(srv.Close)
-	old := remote.JoinEvery
-	remote.JoinEvery = time.Millisecond
-	t.Cleanup(func() { remote.JoinEvery = old })
 	return srv, joinBody
 }
 

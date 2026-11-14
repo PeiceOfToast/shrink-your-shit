@@ -51,7 +51,7 @@ export interface Capability {
   label: string;
   slot: "cpu" | "gpu";
   device?: string;
-  test: "passed" | "failed" | "untested";
+  test: "passed" | "failed" | "untested" | "unsupported" | "not_present"; // F1 #250 unsupported: the card can't do this format (dim). #254 not_present: no card for it here.
   testedAt: Time | null; detail?: string;
 }
 // E4 (ONE-COMMAND-SETUP.md section 9): GET /api/v2/workers/join-requests. A worker that ran the install command asks to
@@ -75,6 +75,7 @@ export interface Worker {
   tags: string[]; pool: string | null;
   schedule: { from: string; to: string } | null;
   pathMappings: { server: string; worker: string; test: "read" | "read_write" | "failed" | null; testedAt: Time | null }[];
+  primaryEncoder?: string; // 'cpu' or an encoder name (hevc_qsv…): the effective choice, CPU is the fallback
 }
 
 export interface Library {

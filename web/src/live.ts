@@ -11,7 +11,7 @@ let es: EventSource | null = null, seq: number | null = null, retry: ReturnType<
 let state = { lost: false, lastAt: null as Date | null }, tries = 0;
 const set = (s: Partial<typeof state>) => { state = { ...state, ...s }; watchers.forEach((w) => w()); };
 const emit = (type: string, data: unknown) => listeners.forEach((l) => l(type, data));
-const TYPES = ["hello", "resync", "job.state", "job.progress", "processing.paused", "processing.resumed", "activity", "worker.heartbeat", "library.changed"]; // library.changed: #150
+const TYPES = ["hello", "resync", "job.state", "job.progress", "processing.paused", "processing.resumed", "activity", "worker.heartbeat", "library.changed", "workers.changed", "setup.changed"]; // library.changed: #150. A name missing here never reaches onLive (EventSource drops named events nobody subscribed to).
 
 function open() {
   if (MOCK || es) return;

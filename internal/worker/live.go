@@ -129,6 +129,26 @@ func encoderWords(plan rules.Plan) string {
 	return plan.Video.Codec
 }
 
+// encoderWordsUsed is encoderWords for the encoder that actually runs: gpu is a graphics encoder's
+// ffmpeg name, or "" for the processor.
+func encoderWordsUsed(plan rules.Plan, gpu string) string {
+	label, ok := graphicsNames["hevc_"+rules.GraphicsFamily(gpu)] // the family's name, whichever format it encodes
+	if gpu == "" || plan.Video.Copy || !ok {
+		return encoderWords(plan)
+	}
+	if plan.Video.Codec == "libx265" {
+		return label
+	}
+	return label + ", " + formatWords[plan.Video.Codec]
+}
+
+// formatWords are the non-HEVC graphics formats as people name them.
+var formatWords = map[string]string{"libx264": "H.264", "libsvtav1": "AV1"}
+
+// graphicsNames are the graphics families as people name them, by their HEVC encoder.
+var graphicsNames = map[string]string{"hevc_nvenc": "NVIDIA NVENC (graphics)", "hevc_qsv": "Intel Quick Sync (graphics)",
+	"hevc_vaapi": "VA-API (graphics)", "hevc_amf": "AMD AMF (graphics)"}
+
 // encoderNames are ffmpeg's software encoders as people name them (S5 proposal).
 var encoderNames = map[string]string{"libx265": "x265", "libx264": "x264", "libsvtav1": "SVT-AV1", "libvpx-vp9": "VP9"}
 
