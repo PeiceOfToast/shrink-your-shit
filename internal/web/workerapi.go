@@ -176,7 +176,7 @@ func workerVersion(r *http.Request) (string, int) {
 }
 
 // workerAPI is the /api/worker/v1/ handler.
-func workerAPI(store *jobs.Store, t Transport, version string, eng Engine) http.Handler {
+func workerAPI(store *jobs.Store, t Transport, version string, eng Engine, joins *joinBook) http.Handler {
 	mux := http.NewServeMux()
 	runs := &remoteRuns{byLease: map[string]*worker.RemoteJob{}}
 	now := time.Now
@@ -239,6 +239,19 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine) http.
 			return
 		}
 		writeJSON(w, map[string]any{"workerId": wk.ID, "name": wk.Name, "token": token})
+	})
+	// E2: a new install asks to join from the server's own network; the person allows it (no code to type).
+	mux.HandleFunc("POST /api/worker/v1/join", func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := gate(w, r, true); !ok {
+			return
+		}
+		joins.ask(w, r, t, now)
+	})
+	mux.HandleFunc("GET /api/worker/v1/join/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := gate(w, r, true); !ok {
+			return
+		}
+		joins.poll(w, r, t, limiter, now)
 	})
 	mux.HandleFunc("POST /api/worker/v1/heartbeat", func(w http.ResponseWriter, r *http.Request) {
 		wk, ok := gate(w, r, false)

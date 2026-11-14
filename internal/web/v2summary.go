@@ -105,7 +105,7 @@ func v2Summary(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 		}
 		writeJSON(w, map[string]any{
 			"seq":       seq,
-			"badges":    map[string]any{"failed24h": failed, "workersOffline": wv.offlineCount(), "pluginUpdates": 0}, // V7d: remote workers not heard from
+			"badges":    map[string]any{"failed24h": failed, "workersOffline": wv.offlineCount(), "joinRequestsWaiting": wv.joins.waiting(time.Now()), "pluginUpdates": 0}, // V7d: remote workers not heard from; E2: joins to answer
 			"activity":  map[string]any{"converting": a.WorkingFiles, "waiting": a.WaitingFiles, "workersRunning": running(workers)},
 			"jobCounts": jobCounts,
 			"last24h":   map[string]any{"completed": done, "failed": failed, "skipped": ends["skipped"], "successRate": rate},
