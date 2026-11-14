@@ -23,12 +23,10 @@ services:
     # environment:
     #   SYP_LIBRARIES: /media:/media2   # several folders, separated by ":"
     # command: ["-min-bitrate", "3000", "-crf", "24"]   # extra settings, same flags as the program
-    # Intel GPU (Quick Sync). Uncomment both, then set the group id of "render" on the host:
-    #   getent group render | cut -d: -f3
+    # Intel or AMD graphics (Quick Sync, VA-API): uncomment these two lines. The app joins the device's
+    # group itself, so there is no group id to look up.
     # devices:
     #   - /dev/dri:/dev/dri
-    # group_add:
-    #   - "<render group id>"
     restart: unless-stopped
 
 volumes:

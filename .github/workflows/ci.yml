@@ -193,6 +193,15 @@ jobs:
       - name: Intel GPU runtime files are in the x86_64 image
         run: |
           docker run --rm --entrypoint sh shrink-your-shit -c 'ls /usr/lib/x86_64-linux-gnu/libmfx-gen.so.1.2 /usr/lib/x86_64-linux-gnu/libvpl.so.2 /usr/lib/x86_64-linux-gnu/dri/iHD_drv_video.so'
+      - name: the app runs with the /dev/dri groups (render group is automatic)
+        run: |
+          # A fake device folder: run-as-syp must add its group, the one Docker added, and syp's own.
+          g=$(docker run --rm --group-add 4242 --entrypoint sh shrink-your-shit -c \
+            'mkdir /tmp/dri && touch /tmp/dri/renderD128 && chgrp 4343 /tmp/dri/renderD128 && SYP_DRI=/tmp/dri run-as-syp sh -c "id -u; id -G"')
+          echo "$g"
+          echo "$g" | head -1 | grep -qx 1000 || { echo "not running as uid 1000"; exit 1; }
+          for want in 1000 4242 4343; do echo "$g" | tail -1 | tr ' ' '\n' | grep -qx "$want" || { echo "group $want missing"; exit 1; }; done
+          echo "$g" | tail -1 | tr ' ' '\n' | grep -qx 0 && { echo "root group kept"; exit 1; } || true
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - name: arm64 image builds (no push)
