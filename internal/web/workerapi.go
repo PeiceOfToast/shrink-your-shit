@@ -307,6 +307,11 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine, joins
 			writeJSON(w, map[string]any{"lease": nil})
 			return
 		}
+		main, err := remoteMainEncoder(store, wk) // the worker's main encoder for this job (before the claim: a failure leaves no lease)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
 		j, err := store.Claim(wk.ID)
 		if errors.Is(err, jobs.ErrNoJob) {
 			writeJSON(w, map[string]any{"lease": nil})
@@ -326,7 +331,7 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine, joins
 				runs.remove(rj.Lease)
 			}()
 		}
-		writeJSON(w, map[string]any{"lease": map[string]any{"id": lease, "expiresAt": expires,
+		writeJSON(w, map[string]any{"lease": map[string]any{"id": lease, "expiresAt": expires, "primaryEncoder": main,
 			"job": map[string]any{"id": strconv.FormatInt(j.ID, 10), "name": filepath.Base(j.Path), "bytes": j.SizeBefore, "durationSec": j.DurationSec}}})
 	})
 	leaseOf := func(w http.ResponseWriter, r *http.Request) (jobs.RemoteWorker, jobs.Job, string, bool) {
@@ -351,6 +356,7 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine, joins
 			Percent   float64
 			Stage     string
 			OutTimeUs *float64 // where its encode is: a worker that sends it is judged for the stall stop
+			Encoder   string   // the graphics encoder it converts with ("" = the processor): the live label says it
 		}
 		if !readJSON(w, r, &in) {
 			return
@@ -369,6 +375,7 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine, joins
 			switch {
 			case in.Stage == "converting" && in.OutTimeUs != nil:
 				rj.Converting(*in.OutTimeUs, time.Now())
+				rj.SetEncoder(in.Encoder)
 			case in.Stage != "converting":
 				rj.EncodeEnded()
 			}

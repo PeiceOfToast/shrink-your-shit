@@ -56,6 +56,16 @@ func ReportLive(id int64, percent, outTimeUS float64) {
 	}
 }
 
+// setLiveEncoder changes the encoder words of a job that is running (a remote worker's own choice).
+func setLiveEncoder(id int64, words string) {
+	live.Lock()
+	defer live.Unlock()
+	if j, ok := live.jobs[id]; ok {
+		j.Encoder = words
+		live.jobs[id] = j
+	}
+}
+
 func dropLive(id int64) {
 	live.Lock()
 	defer live.Unlock()
