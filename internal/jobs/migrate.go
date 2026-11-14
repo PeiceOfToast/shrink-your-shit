@@ -445,6 +445,16 @@ ALTER TABLE workers ADD COLUMN primary_encoder TEXT;`},
 ALTER TABLE workers ADD COLUMN os TEXT NOT NULL DEFAULT '';`},
 	{44, "worker arch", `
 ALTER TABLE workers ADD COLUMN arch TEXT NOT NULL DEFAULT '';`},
+	// Join requests (E2) survive a server restart. Times are unix nanoseconds. The secret is kept as its hash; the
+	// worker's token is never kept, only the hash of the one minted when the worker picks the allow up.
+	{45, "join requests", `
+CREATE TABLE IF NOT EXISTS join_requests (
+	id TEXT PRIMARY KEY, secret_hash TEXT NOT NULL,
+	name TEXT NOT NULL, os TEXT NOT NULL DEFAULT '', arch TEXT NOT NULL DEFAULT '', version TEXT NOT NULL DEFAULT '',
+	hardware TEXT, api_level INTEGER NOT NULL DEFAULT 0, capabilities TEXT NOT NULL DEFAULT '{}',
+	address TEXT NOT NULL DEFAULT '', port INTEGER NOT NULL DEFAULT 0,
+	asked_ns INTEGER NOT NULL, expires_ns INTEGER NOT NULL,
+	decision TEXT NOT NULL DEFAULT '', worker_id TEXT NOT NULL DEFAULT '', worker_name TEXT NOT NULL DEFAULT '');`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone
