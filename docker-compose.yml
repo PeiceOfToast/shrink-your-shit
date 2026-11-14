@@ -11,6 +11,7 @@ services:
       - "8484:8484"        # needs the access token (docker exec <name> shrink-your-shit token); no HTTPS, so never expose it to the internet
     volumes:
       - syp-config:/config              # database (a named volume, so it is writable by the program)
+                                        # it also holds the key to saved share passwords: keep backups of it private
       - /path/to/COPY-of-your-videos:/media
     # Lets the app mount NFS/SMB shares added on the Shares page. It gives the container mount rights (close to privileged);
     # if you don't use network shares, or mount them on the host, delete cap_add and security_opt.
