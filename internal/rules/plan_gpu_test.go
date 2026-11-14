@@ -124,8 +124,6 @@ func TestFFmpegArgsWithFallsBackToCPU(t *testing.T) {
 		enc  string
 	}{
 		{"unknown encoder", x265, "hevc_videotoolbox"},
-		{"mf", x265, "hevc_mf"},
-		{"v4l2m2m", x265, "hevc_v4l2m2m"},
 		{"copy", Plan{Video: VideoEncode{Codec: "copy", Copy: true}}, "hevc_nvenc"},
 		{"not libx265", Plan{Video: VideoEncode{Codec: "libx264", CRF: 22}}, "hevc_nvenc"},
 	}

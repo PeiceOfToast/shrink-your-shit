@@ -59,6 +59,7 @@ type v2Worker struct {
 
 // V4a: the local worker in the contract's shape, its capabilities from real test frames.
 func TestV2Workers(t *testing.T) {
+	seamIntelCard(t) // hevc_vaapi is listed and its card is present: failed, whatever this computer has
 	srv, st := workersServer(t)
 	code, body, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/workers/local/capabilities/test", body: "{}", ctype: "application/json"})
 	wk := decode[v2Worker](t, body)
