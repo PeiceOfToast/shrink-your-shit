@@ -42,6 +42,7 @@ type workerView struct {
 	remoteSince map[string]statusAt // remote workers' statuses, as last seen, and since when
 	seen        map[string]string   // every worker's status at the last check (worker.updated on a change)
 	checked     time.Time           // when the statuses were last checked
+	joins       *joinBook           // join requests waiting for the person (E2)
 }
 
 // statusAt is a status and when it began.
@@ -52,9 +53,9 @@ type statusAt struct {
 
 var processStart = time.Now()
 
-func newWorkerView(store *jobs.Store, ss *settingsStore, eng Engine) *workerView {
+func newWorkerView(store *jobs.Store, ss *settingsStore, eng Engine, joins *joinBook) *workerView {
 	host, _ := os.Hostname()
-	return &workerView{store: store, ss: ss, eng: eng, host: host, since: processStart}
+	return &workerView{store: store, ss: ss, eng: eng, host: host, since: processStart, joins: joins}
 }
 
 // tools is the last encoder test (ok false: none yet; it starts in the background).
@@ -481,7 +482,7 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 			serverError(w, err)
 			return
 		}
-		writeJSON(w, map[string]any{"items": items, "total": len(items)})
+		writeJSON(w, map[string]any{"items": items, "total": len(items), "joinRequests": v.joinViews(time.Now())})
 	}
 	api.HandleFunc("GET /api/v2/workers", list)
 	api.HandleFunc("GET /api/v2/workers/{id}", func(w http.ResponseWriter, r *http.Request) {
