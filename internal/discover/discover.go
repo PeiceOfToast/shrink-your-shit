@@ -8,6 +8,7 @@ package discover
 import (
 	"context"
 	"log"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,6 +19,15 @@ import (
 
 // Service is the DNS-SD service type every shrink-your-shit server announces.
 const Service = "_syp._tcp"
+
+// ServerName is the name a server shows for itself: on the network, and in its replies to a joining or pairing
+// worker. It is the computer's host name, or "shrink-your-shit" when that has none.
+func ServerName() string {
+	if h, _ := os.Hostname(); h != "" {
+		return h
+	}
+	return "shrink-your-shit"
+}
 
 // Found is one server a browse answered: its announced name, the address and port to reach it, and its version.
 type Found struct {

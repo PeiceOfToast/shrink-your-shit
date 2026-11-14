@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/discover"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/sysload"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
@@ -242,7 +243,7 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine, joins
 			serverError(w, err)
 			return
 		}
-		writeJSON(w, map[string]any{"workerId": wk.ID, "name": wk.Name, "token": token})
+		writeJSON(w, map[string]any{"workerId": wk.ID, "name": wk.Name, "token": token, "serverName": discover.ServerName()})
 	})
 	// E2: a new install asks to join from the server's own network; the person allows it (no code to type).
 	mux.HandleFunc("POST /api/worker/v1/join", func(w http.ResponseWriter, r *http.Request) {
