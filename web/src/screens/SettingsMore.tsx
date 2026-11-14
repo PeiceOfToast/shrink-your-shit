@@ -3,14 +3,16 @@
 // when asked for, never kept by the page; a new one; Sign out, only when the server needs a token). Safety: how long
 // replaced originals are kept, where, and what the trash holds now (its whole size lives here, not beside Space saved:
 // design 05:34Z). Not here: log retention (no setting on the server).
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { PageHead } from "../PageHead";
 import { SignedOut, failed, type Answer } from "../api";
 import { bytes, plural } from "../format";
 import { getHealth, getSettings, getToken, getTrash, patchSettings, rotateToken, signOut } from "../libraryApi";
 import { SettingsTabs } from "../pages";
-import { navigate } from "../router";
+import { Link, navigate } from "../router";
+import { setRole } from "../setupApi";
+import { useSetup } from "./Enroll";
 import { useData } from "../useData";
 
 async function act<T>(p: Promise<Answer<T>>, say: (m: string) => void): Promise<T | null> {
@@ -25,9 +27,64 @@ export function GeneralSettings() {
       <PageHead icon="i-settings" title="Settings" />
       <SettingsTabs at="general" />
       {!st.data ? <div className="empty">{st.error?.message ?? "Loading..."}</div> : <>
+        <ThisComputer />
         <Languages start={st.data.languages ?? []} saved={st.reload} />
         <Access auth={!!st.data.authRequired} />
       </>}
+    </div>);
+}
+
+// This computer (ONE-COMMAND-SETUP.md section 11): main server or a worker, and Change... with a confirm. Server to
+// worker clears the role and opens the choice page without Main server; worker to server starts setup. While jobs
+// convert the server refuses (409 role_change_busy). Hidden on an older server without /api/v2/setup.
+function ThisComputer() {
+  const su = useSetup(), s = su.data;
+  const [ask, setAsk] = useState(false), [busy, setBusy] = useState(false), [err, setErr] = useState<ReactNode>(null);
+  const btn = useRef<HTMLButtonElement>(null);
+  if (!s) return null;
+  const worker = s.role === "worker", name = s.join?.serverName ?? "the other server";
+  const go = async () => {
+    setBusy(true); setErr(null);
+    let r; try { r = await setRole(worker ? { role: "server" } : { role: "unset" }); } catch (e) { setBusy(false); if (e instanceof SignedOut) return; throw e; }
+    setBusy(false); setAsk(false);
+    if (!failed(r)) return navigate(worker ? "/start" : "/start?worker=1");
+    const n = (r.error as { runningJobs?: number }).runningJobs;
+    setErr(r.error.code !== "role_change_busy" ? r.error.message
+      : <>{n ? plural(n, "job is", "jobs are") : "Jobs are"} converting now. Stop {n === 1 ? "it" : "them"} on <Link to="/jobs">Jobs</Link> first, or wait.</>);
+    btn.current?.focus();
+  };
+  return (
+    <section className="card" aria-labelledby="pc-h"><div className="hd"><h2 id="pc-h">This computer</h2></div>
+      <div className="bd stack">
+        <div className="row"><strong>{s.role === "server" ? "Main server" : worker ? "Worker for " + name : "Not chosen yet"}</strong>
+          <button ref={btn} className="btn" type="button" onClick={() => (s.role === "unset" ? navigate("/start") : (setErr(null), setAsk(true)))}>Change...</button></div>
+        {err && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{err}</span></p>}
+      </div>
+      {ask && (worker
+        ? <Confirm title={"Stop being a worker for " + name + "?"} body={name + " stops sending jobs here. This computer becomes its own server and starts setup."}
+            yes="Make it a server" no="Keep as worker" busy={busy} onYes={go} onNo={() => (setAsk(false), btn.current?.focus())} />
+        : <Confirm title="Make this computer a worker?" body="Its libraries and workflows stop running here. Nothing is deleted. Switch back in Settings to use them again."
+            yes="Make it a worker" no="Keep as server" busy={busy} onYes={go} onNo={() => (setAsk(false), btn.current?.focus())} />)}
+    </section>);
+}
+
+// A small modal confirm (the folder picker's dialog look): focus starts on the title, Tab stays inside, Escape keeps.
+function Confirm({ title, body, yes, no, busy, onYes, onNo }: { title: string; body: string; yes: string; no: string; busy: boolean; onYes: () => void; onNo: () => void }) {
+  const id = useId(), box = useRef<HTMLDivElement>(null), head = useRef<HTMLHeadingElement>(null);
+  useEffect(() => { head.current?.focus(); }, []);
+  return (
+    <div className="fpick small" onMouseDown={(e) => e.target === e.currentTarget && onNo()}>
+      <div ref={box} className="dlg" role="dialog" aria-modal="true" aria-labelledby={id + "-t"} aria-describedby={id + "-b"} onKeyDown={(e) => {
+        if (e.key === "Escape") return (e.stopPropagation(), onNo());
+        if (e.key !== "Tab") return;
+        const f = [...box.current!.querySelectorAll<HTMLElement>("button:not(:disabled)")], i = f.indexOf(document.activeElement as HTMLElement), last = f.length - 1;
+        if (e.shiftKey ? i <= 0 : i === -1 || i === last) { e.preventDefault(); (e.shiftKey ? f[last] : f[0])?.focus(); }
+      }}>
+        <h2 id={id + "-t"} ref={head} tabIndex={-1}>{title}</h2>
+        <p id={id + "-b"}>{body}</p>
+        <div className="row enroll-btns"><button className="btn primary" type="button" disabled={busy} onClick={onYes}>{yes}</button>
+          <button className="btn" type="button" disabled={busy} onClick={onNo}>{no}</button></div>
+      </div>
     </div>);
 }
 

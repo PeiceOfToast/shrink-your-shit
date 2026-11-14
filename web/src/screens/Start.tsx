@@ -28,7 +28,7 @@ export function Start() {
   const st = useData(getSettings, []), libs = useData(listLibraries, []), wfs = useData(listWorkflows, []);
   const [editing, setEditing] = useState(false), [error, setError] = useState("");
   if (!su.loaded) return <div className="empty">Loading...</div>;
-  if (setup && setup.role !== "server") return setup.role === "worker" && !setup.join ? <WorkerHome setup={setup} /> : <Enroll setup={setup} reload={su.reload} />;
+  if (setup && setup.role !== "server") return setup.role === "worker" && !setup.join ? <WorkerHome setup={setup} /> : <Enroll setup={setup} reload={su.reload} noMain={new URLSearchParams(location.search).has("worker")} />;
   if (!st.loaded || !libs.loaded) return <div className="empty">{st.error?.message ?? libs.error?.message ?? "Loading..."}</div>;
   const s = st.data!, lib = libs.data?.[0], kept = s.firstRunLibrary;
   const wfName = lib && (wfs.data?.find((w) => w.id === lib.flowId)?.name ?? lib.settingLabel);
