@@ -106,6 +106,10 @@ export function Enroll({ setup, reload, noMain }: { setup: Setup; reload: () => 
           <p>Use a pairing code instead: on {name} open Workers and press Add a worker.</p>
           <label className="field"><span className="lab">Pairing code</span><input className="input" inputMode="numeric" autoComplete="off" value={code} onChange={(e) => setCode(e.target.value)} /></label></>,
           <><button className="btn primary" type="submit" disabled={busy || !code.trim()}>Join with code</button>{Back}</>];
+        case "not_saved": return [name + " allowed this worker, but this computer couldn't save the key it was given.", <p>Ask again to get a new one.</p>,
+          <><button className="btn primary" type="button" disabled={busy} onClick={() => ask(url)}>Ask again</button>{Back}</>];
+        // a state this page doesn't know yet (a newer server) must not blank the page
+        default: return ["Joining " + name + ": " + String(panel).replace(/_/g, " ") + ".", null, Back];
       }
     })();
     return (
