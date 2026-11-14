@@ -300,7 +300,7 @@ func main() {
 	// The saved role goes first, so a joined install's local pool is held before it can claim a job. A join saved
 	// before this start keeps working without a restart.
 	joined.SetRole(web.SavedRole(store))
-	announce.SetRole(web.SavedRole(store))
+	announce.SetRole(announceRole(store))
 	workerDone := make(chan struct{})
 	if converts {
 		go func() { pool.Run(ctx); close(workerDone) }()
