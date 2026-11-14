@@ -206,7 +206,7 @@ function JoinCards({ workers, on, reload }: { workers: Worker[]; on: boolean; re
     if (failed(r)) { setErrs((e) => ({ ...e, [j.id]: r.error.message })); d.reload(); return; }
     if (allow) { setIds((m) => ({ ...m, [j.id]: (r as { workerId: string }).workerId })); setHeard(allowed(j.name)); reload(); }
     else setHeard("Denied " + j.name + ". It was told no.");
-    refocus.current = true; d.reload();
+    await d.reload(); refocus.current = true; setNow(Date.now()); // focus moves once the card shows the outcome (its Allow is gone)
   };
   const allowed = (n: string) => "Allowed: " + n + ". " + (on ? "It starts converting now." : "It waits, like the others, until you turn workers on.");
   const mins = (ms: number) => Math.round(ms / 60000);
