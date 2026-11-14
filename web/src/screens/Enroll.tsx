@@ -151,14 +151,22 @@ export function Enroll({ setup, reload, noMain }: { setup: Setup; reload: () => 
 
 // A worker's own page, at every address (section 11, fallback 00:43Z: no status endpoint yet).
 export function WorkerHome({ setup }: { setup: Setup }) {
-  const name = setup.join?.serverName ?? "another server", url = setup.join?.serverUrl;
-  return (
+  const name = setup.join?.serverName, url = setup.join?.serverUrl;
+  const Change = <a className="btn" href="/settings/general">Change role</a>;
+  if (!name || !url) return ( // the server isn't known (after a restart, until the API keeps it): design 04:53Z
+    <div className="enroll stack">
+      <h1>This computer is a worker</h1>
+      <p>It converts videos for a server on your network. Open that server&apos;s Workers page to see what it&apos;s doing.</p>
+      <div className="row enroll-btns">{Change}</div>
+    </div>
+  );
+  return ( // design 04:52Z: the same words as the joined page
     <div className="enroll stack">
       <h1>This computer is a worker for {name}</h1>
-      <p className="muted">Everything about this worker is on {name}'s Workers page.</p>
+      <p>This computer now converts videos for {name}.</p>
+      <p>See what it&apos;s doing on {name}&apos;s Workers page.</p>
       <div className="row enroll-btns">
-        {url && <a className="btn primary" href={url}>Open {name}</a>}
-        <a className="btn" href="/settings/general">Change role</a>
+        <a className="btn primary" href={url.replace(/\/$/, "") + "/workers"}>Open {name}&apos;s Workers page</a>{Change}
       </div>
     </div>
   );
