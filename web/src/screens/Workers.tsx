@@ -35,38 +35,42 @@ const ago = (t: string | null) => {
 };
 const FORMAT = (k: string) => (/265|hevc/i.test(k) ? "HEVC" : /264/i.test(k) ? "H.264" : /av1/i.test(k) ? "AV1" : /vp9/i.test(k) ? "VP9" : "");
 const how = (c: Capability) => (c.slot === "cpu" ? "Processor" : c.label.split(",")[0]);
-// Encoder cards (SCREENS V7, 11-13): one per encoder type; these five always, the extras only when found. Lit when a
-// test of that type passed (with its formats); dim with the reason otherwise. Converting is processor-only, so a lit
-// graphics card says so.
-const TYPES: [string, Capability["slot"], (c: Capability) => boolean][] = [
-  ["Processor", "cpu", (c) => c.slot === "cpu"],
-  ["NVIDIA", "gpu", (c) => c.key.endsWith("_nvenc")],
-  ["Intel Quick Sync", "gpu", (c) => c.key.endsWith("_qsv")],
-  ["AMD", "gpu", (c) => c.key.endsWith("_amf")],
-  ["Apple", "gpu", (c) => c.key.endsWith("_videotoolbox")],
-  ["Graphics card (VAAPI)", "gpu", (c) => c.key.endsWith("_vaapi")],
-  ["Windows encoder", "gpu", (c) => c.key.endsWith("_mf")],
-  ["Other encoder", "gpu", (c) => c.key.endsWith("_v4l2m2m")],
+// Encoder cards (SCREENS V7, 11-13): one per encoder type, always these six (other types aren't shown at all). Lit
+// only when a test of that type passed. User bug 11-14: ffmpeg LISTING an encoder (nvenc, qsv, amf are built in) is
+// never "found": a failed test says "No working ... found", or, when the server says the device is missing, "No ... in
+// this computer". Every tile lists H.264 / HEVC / AV1 like the Processor card, each lit when its test passed.
+// Converting is processor-only, so a lit graphics card says so.
+const TYPES: [string, Capability["slot"], string, (c: Capability) => boolean][] = [ // user 11-14: these six, in this order, nothing else
+  ["Processor", "cpu", "processor encoder", (c) => c.slot === "cpu"],
+  ["Intel Quick Sync", "gpu", "Intel graphics", (c) => c.key.endsWith("_qsv")],
+  ["NVIDIA", "gpu", "NVIDIA card", (c) => c.key.endsWith("_nvenc")],
+  ["AMD", "gpu", "AMD graphics card", (c) => c.key.endsWith("_amf")],
+  ["Graphics card (VAAPI)", "gpu", "graphics device", (c) => c.key.endsWith("_vaapi")],
+  ["Apple", "gpu", "Apple encoder", (c) => c.key.endsWith("_videotoolbox")],
 ];
-type Card = { name: string; gpu: boolean; found: boolean; lit: boolean; formats: string; why: string; detail?: string; at: string | null };
+type Card = { name: string; gpu: boolean; lit: boolean; formats: [string, boolean][]; why: string; detail?: string; at: string | null };
 function cards(w: Worker): Card[] {
   const encs = w.capabilities.filter((c) => c.kind === "encoder"), untested = !w.capabilities.length;
-  return TYPES.map(([name, slot, pick]): Card => {
+  return TYPES.map(([name, slot, noun, pick]): Card => {
     const cs = encs.filter(pick), ok = cs.filter((c) => c.test === "passed"), bad = cs.find((c) => c.test === "failed");
+    const all = ["H.264", "HEVC", "AV1", ...(cs.some((c) => FORMAT(c.key) === "VP9") ? ["VP9"] : [])];
     return {
-      name, gpu: slot === "gpu", found: cs.length > 0, lit: ok.length > 0, detail: bad?.detail,
-      formats: ["H.264", "HEVC", "AV1", "VP9"].filter((f) => ok.some((c) => FORMAT(c.key) === f)).join(" · "),
-      why: untested ? "Not tested yet" : ok.length ? "" : bad ? "Found, but its test failed" : "Not on this computer",
+      name, gpu: slot === "gpu", lit: ok.length > 0, detail: bad?.detail,
+      formats: all.map((f): [string, boolean] => [f, ok.some((c) => FORMAT(c.key) === f)]),
+      why: untested ? "Not tested yet" : ok.length ? "" : !cs.length ? "Not on this computer"
+        : cs.some((c) => c.device === "missing") ? "No " + noun + " in this computer"
+        : cs.some((c) => c.device === "found") ? "Found, but its test failed" : "No working " + noun + " found",
       at: cs.map((c) => c.testedAt).filter(Boolean).sort().at(-1) ?? null,
     };
-  }).filter((c, i) => i < 5 || c.found);
+  });
 }
 // the directory's row (small) and the Capabilities tab (big, with the time each was tested and a failure's detail)
 function EncoderCards({ w, big }: { w: Worker; big?: boolean }) {
   return <ul className={"ec-grid" + (big ? " big" : "")} aria-label={"Encoders on " + w.name}>{cards(w).map((c) => (
     <li key={c.name} className={"ec" + (c.lit ? " lit" : "") + (big ? " ec-lg" : "")}>
       <span className="ec-t">{c.lit && <Icon id="i-check" />}<b>{c.name}</b>{c.lit && <span className="ec-ok">Works</span>}</span>
-      {c.lit ? <span>{c.formats}</span> : <span>{c.why}</span>}
+      {!c.lit && <span>{c.why}</span>}
+      <span className="ec-f">{c.formats.map(([f, on]) => <span key={f} className={on ? "on" : ""}>{f}{!on && <span className="sr"> (no)</span>}</span>)}</span>
       {c.lit && c.gpu && <span>Not used for converting yet</span>}
       {big && c.detail && <span className="mono">{c.detail}</span>}
       {big && c.at && <span className="ec-meta">Tested {new Date(c.at).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}
