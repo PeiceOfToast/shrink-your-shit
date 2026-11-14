@@ -14,7 +14,6 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,8 +24,8 @@ import (
 
 // Join requests (one-command setup, E2). A new worker install asks to join from the server's own network; the
 // person allows it on the Workers page instead of copying a pairing code. Allowing pairs exactly as a pairing
-// code does (NewPairing then Pair), so there is one credential mechanism. Requests live in memory: a restart
-// drops them and the worker asks again.
+// code does (NewPairing then Pair), so there is one credential mechanism. Requests are kept in the store, so an
+// allowed one survives a restart; the worker gets its token when it picks the allow up.
 
 // JoinFor is how long a join request waits for the person's answer.
 var JoinFor = 10 * time.Minute
@@ -55,19 +54,39 @@ type joinReq struct {
 	address            netip.Addr
 	askedAt, expiresAt time.Time
 	decision           string
-	workerID, token    string // set when allowed; the worker reads them by polling with its secret
+	workerID           string // set when allowed; the worker gets its token by polling with its secret
 	workerName         string
 	port               int // the web port the worker answers on; 0 means joinPort
 }
 
 type joinBook struct {
 	store *jobs.Store
-	mu    sync.Mutex
-	reqs  map[string]*joinReq
+	mu    sync.Mutex // one answer at a time: allow, deny and dismiss check the request, then write it
 }
 
 func newJoinBook(store *jobs.Store) *joinBook {
-	return &joinBook{store: store, reqs: map[string]*joinReq{}}
+	return &joinBook{store: store}
+}
+
+// joinRowOf is r as the store keeps it.
+func joinRowOf(r *joinReq) jobs.JoinRequest {
+	addr := ""
+	if r.address.IsValid() {
+		addr = r.address.String()
+	}
+	return jobs.JoinRequest{ID: r.id, SecretHash: r.secretHash, Name: r.name, OS: r.os, Arch: r.arch, Version: r.version,
+		Hardware: r.hardware, APILevel: r.apiLevel, Capabilities: r.capabilities, Address: addr, Port: r.port,
+		AskedNS: r.askedAt.UnixNano(), ExpiresNS: r.expiresAt.UnixNano(), Decision: r.decision,
+		WorkerID: r.workerID, WorkerName: r.workerName}
+}
+
+// joinReqOf is a stored request as the book uses it.
+func joinReqOf(row jobs.JoinRequest) joinReq {
+	addr, _ := netip.ParseAddr(row.Address)
+	return joinReq{id: row.ID, secretHash: row.SecretHash, name: row.Name, os: row.OS, arch: row.Arch, version: row.Version,
+		hardware: row.Hardware, apiLevel: row.APILevel, capabilities: row.Capabilities, address: addr, port: row.Port,
+		askedAt: time.Unix(0, row.AskedNS), expiresAt: time.Unix(0, row.ExpiresNS), decision: row.Decision,
+		workerID: row.WorkerID, workerName: row.WorkerName}
 }
 
 func joinRandom(n int) string {
@@ -86,58 +105,41 @@ func (b *joinBook) changed() {
 	b.store.RecordEvent("workers.changed", map[string]any{"type": "workers.changed"})
 }
 
-// prune drops answered requests whose window has passed. Unanswered ones stay (shown as expired) until the
-// person dismisses them. Call with mu held.
+// prune drops the requests whose window has passed. An allowed one nobody picked up takes its unseen worker with
+// it. Unanswered ones stay (shown as expired) until the person dismisses them. Call with mu held.
 func (b *joinBook) prune(now time.Time) {
-	for id, r := range b.reqs {
-		if r.decision != "" && !now.Before(r.expiresAt) {
-			delete(b.reqs, id)
-		}
+	if err := b.store.PruneJoins(now.UnixNano()); err != nil {
+		log.Printf("join: dropping expired requests failed: %v", err)
 	}
-}
-
-// dropOldestExpired removes the oldest unanswered request whose window has passed, to make room when the cap is
-// reached. Expired requests otherwise stay until dismissed, so 50 stale asks would lock out every new join.
-// Call with mu held.
-func (b *joinBook) dropOldestExpired(now time.Time) {
-	var oldest *joinReq
-	for _, r := range b.reqs {
-		if r.decision == "" && !now.Before(r.expiresAt) && (oldest == nil || r.askedAt.Before(oldest.askedAt)) {
-			oldest = r
-		}
-	}
-	if oldest != nil {
-		delete(b.reqs, oldest.id)
-	}
-}
-
-// pendingLocked counts requests not yet answered or dismissed. Call with mu held.
-func (b *joinBook) pendingLocked() int {
-	n := 0
-	for _, r := range b.reqs {
-		if r.decision == "" {
-			n++
-		}
-	}
-	return n
 }
 
 // add records a request asked now and starts its window. It returns the id and the secret the worker polls with.
 func (b *joinBook) add(r *joinReq, now time.Time) (id, secret string, err error) {
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.prune(now)
-	if b.pendingLocked() >= maxPendingJoins {
-		b.dropOldestExpired(now)
+	waiting, err := b.store.CountWaitingJoins()
+	if err != nil {
+		return "", "", err
 	}
-	if b.pendingLocked() >= maxPendingJoins {
-		b.mu.Unlock()
+	if waiting >= maxPendingJoins {
+		// Expired requests otherwise stay until dismissed, so 50 stale asks would lock out every new join.
+		if err := b.store.DropOldestExpiredJoin(now.UnixNano()); err != nil {
+			return "", "", err
+		}
+		if waiting, err = b.store.CountWaitingJoins(); err != nil {
+			return "", "", err
+		}
+	}
+	if waiting >= maxPendingJoins {
 		return "", "", errJoinFull
 	}
 	id = "j-" + joinRandom(9)
 	secret = joinRandom(32)
 	r.id, r.secretHash, r.askedAt, r.expiresAt = id, joinDigest(secret), now, now.Add(JoinFor)
-	b.reqs[id] = r
-	b.mu.Unlock()
+	if err := b.store.AddJoin(joinRowOf(r)); err != nil {
+		return "", "", err
+	}
 	time.AfterFunc(JoinFor, b.changed) // the list shows it as expired then
 	b.changed()
 	return id, secret, nil
@@ -154,17 +156,24 @@ func (b *joinBook) state(r *joinReq, now time.Time) string {
 	return "waiting"
 }
 
-// get answers a poll: the state, and the credential once allowed. A wrong secret and an unknown id look the
-// same (errJoinNotFound), so a guess learns nothing.
+// get answers a poll: the state, and the request once answered. A wrong secret and an unknown id look the same
+// (errJoinNotFound), so a guess learns nothing.
 func (b *joinBook) get(id, secret string, now time.Time) (string, joinReq, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.prune(now)
-	req := b.reqs[id]
-	if req == nil || subtle.ConstantTimeCompare([]byte(joinDigest(secret)), []byte(req.secretHash)) != 1 {
+	row, err := b.store.Join(id)
+	if errors.Is(err, jobs.ErrNotFound) {
 		return "", joinReq{}, errJoinNotFound
 	}
-	return b.state(req, now), *req, nil
+	if err != nil {
+		return "", joinReq{}, err
+	}
+	req := joinReqOf(row)
+	if subtle.ConstantTimeCompare([]byte(joinDigest(secret)), []byte(req.secretHash)) != 1 {
+		return "", joinReq{}, errJoinNotFound
+	}
+	return b.state(&req, now), req, nil
 }
 
 // pending lists requests the person still has to act on (waiting or expired), newest first.
@@ -172,13 +181,14 @@ func (b *joinBook) pending(now time.Time) []joinReq {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.prune(now)
-	out := []joinReq{}
-	for _, r := range b.reqs {
-		if r.decision == "" {
-			out = append(out, *r)
-		}
+	rows, err := b.store.JoinsWaiting()
+	if err != nil {
+		log.Printf("join: listing requests failed: %v", err)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].askedAt.After(out[j].askedAt) })
+	out := []joinReq{}
+	for _, row := range rows {
+		out = append(out, joinReqOf(row))
+	}
 	return out
 }
 
@@ -193,18 +203,23 @@ func (b *joinBook) waiting(now time.Time) int {
 	return n
 }
 
-// allow pairs the worker the way a pairing code does. A worker of the same name that already exists is removed
-// only after the new one is paired, so a failed pairing leaves the old one as it was.
+// allow pairs the worker the way a pairing code does. The worker gets its token when it next polls. A worker of the
+// same name that already exists is removed only after the new one is paired, so a failed pairing leaves the old one
+// as it was.
 func (b *joinBook) allow(id string, now time.Time) (jobs.RemoteWorker, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	r := b.reqs[id]
-	switch {
-	case r == nil:
+	row, err := b.store.Join(id)
+	if errors.Is(err, jobs.ErrNotFound) {
 		return jobs.RemoteWorker{}, errJoinNotFound
-	case r.decision != "":
+	}
+	if err != nil {
+		return jobs.RemoteWorker{}, err
+	}
+	switch {
+	case row.Decision != "":
 		return jobs.RemoteWorker{}, errJoinAnswered
-	case !now.Before(r.expiresAt):
+	case !now.Before(time.Unix(0, row.ExpiresNS)):
 		return jobs.RemoteWorker{}, errJoinExpired
 	}
 	remotes, err := b.store.RemoteWorkers()
@@ -213,7 +228,7 @@ func (b *joinBook) allow(id string, now time.Time) (jobs.RemoteWorker, error) {
 	}
 	var old []string
 	for _, rw := range remotes {
-		if rw.Name == r.name {
+		if rw.Name == row.Name {
 			old = append(old, rw.ID)
 		}
 	}
@@ -221,8 +236,16 @@ func (b *joinBook) allow(id string, now time.Time) (jobs.RemoteWorker, error) {
 	if err != nil {
 		return jobs.RemoteWorker{}, err
 	}
-	wk, token, err := b.store.Pair(code, r.name, r.version, r.os, r.arch, r.apiLevel, r.capabilities, now)
+	// The token Pair returns is not given out: the worker's real one is minted when it picks the allow up.
+	wk, _, err := b.store.Pair(code, row.Name, row.Version, row.OS, row.Arch, row.APILevel, row.Capabilities, now)
 	if err != nil {
+		return jobs.RemoteWorker{}, err
+	}
+	if err := b.store.AnswerJoin(id, "allowed", wk.ID, wk.Name); err != nil {
+		// The answer did not save, so the worker Pair made is taken back: nothing is left behind.
+		if rmErr := b.store.RemoveWorker(wk.ID); rmErr != nil {
+			log.Printf("join: %s was paired, the answer did not save, and removing it failed: %v", wk.ID, rmErr)
+		}
 		return jobs.RemoteWorker{}, err
 	}
 	// Allowing is the go-ahead: the worker starts on. Pairing by code does not do this (Pair leaves a new worker off
@@ -230,7 +253,6 @@ func (b *joinBook) allow(id string, now time.Time) (jobs.RemoteWorker, error) {
 	if err := b.store.SetWorkerEnabled(wk.ID, true); err != nil {
 		log.Printf("join: %s is paired, but turning it on failed: %v", wk.ID, err)
 	}
-	r.decision, r.workerID, r.workerName, r.token = "allowed", wk.ID, wk.Name, token
 	for _, oid := range old {
 		if err := b.store.RemoveWorker(oid); err != nil && !errors.Is(err, jobs.ErrNotFound) {
 			// The new worker is paired and the request is answered, so this is not a failed allow. The old
@@ -245,25 +267,27 @@ func (b *joinBook) allow(id string, now time.Time) (jobs.RemoteWorker, error) {
 func (b *joinBook) deny(id string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	r := b.reqs[id]
-	if r == nil {
+	if _, err := b.store.Join(id); errors.Is(err, jobs.ErrNotFound) {
 		return errJoinNotFound
+	} else if err != nil {
+		return err
 	}
-	if r.decision == "" {
-		r.decision = "denied"
+	// Already answered: nothing changes.
+	if err := b.store.AnswerJoin(id, "denied", "", ""); err != nil && !errors.Is(err, jobs.ErrNotFound) {
+		return err
 	}
 	return nil
 }
 
-// dismiss removes a request from the list.
+// dismiss removes a request from the list. An allowed one nobody picked up takes its unseen worker with it.
 func (b *joinBook) dismiss(id string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if _, ok := b.reqs[id]; !ok {
+	if err := b.store.DismissJoin(id); errors.Is(err, jobs.ErrNotFound) {
 		return errJoinNotFound
+	} else {
+		return err
 	}
-	delete(b.reqs, id)
-	return nil
 }
 
 // joinBody is what a joining worker sends. Strangers on the network reach this, so each field is bounded.
@@ -381,9 +405,23 @@ func (b *joinBook) poll(w http.ResponseWriter, r *http.Request, t Transport, lim
 		apiError(w, http.StatusNotFound, "join_request_not_found", "There is no such join request. Nothing was changed.")
 		return
 	}
+	if err != nil {
+		serverError(w, err)
+		return
+	}
 	out := map[string]any{"state": state}
 	if state == "allowed" {
-		out["workerId"], out["name"], out["token"] = req.workerID, req.workerName, req.token
+		// The token is minted now, once: the request is gone after this, so a second poll finds nothing.
+		workerID, token, err := b.store.PickUpJoin(req.id)
+		if errors.Is(err, jobs.ErrNotFound) {
+			apiError(w, http.StatusNotFound, "join_request_not_found", "There is no such join request. Nothing was changed.")
+			return
+		}
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		out["workerId"], out["name"], out["token"] = workerID, req.workerName, token
 	}
 	writeJSON(w, out)
 }
