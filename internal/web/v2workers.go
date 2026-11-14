@@ -299,6 +299,30 @@ var nvidiaDevicePresent = func() bool {
 	return err == nil
 }
 
+// renderVendor is the PCI vendor id of a render node ("0x8086" Intel, "0x1002" AMD, "0x10de" NVIDIA),
+// "" if unknown. Tests swap it.
+var renderVendor = func(node string) string {
+	b, _ := os.ReadFile(filepath.Join("/sys/class/drm", filepath.Base(node), "device", "vendor"))
+	return strings.TrimSpace(string(b))
+}
+
+// hasRenderNode says whether a render node from one of vendors is present.
+func hasRenderNode(vendors ...string) bool {
+	for _, n := range renderNodes() {
+		for _, v := range vendors {
+			if renderVendor(n) == v {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+const (
+	vendorIntel = "0x8086"
+	vendorAMD   = "0x1002"
+)
+
 // encoderDevice says whether the device an encoder needs is on this computer: "found" or "missing".
 // It is "" (no field) for software encoders, for hardware encoders whose device we don't check, and
 // everywhere but Linux.
@@ -308,8 +332,12 @@ func encoderDevice(e string) string {
 	}
 	var found bool
 	switch {
-	case strings.HasSuffix(e, "_qsv"), strings.HasSuffix(e, "_vaapi"), strings.HasSuffix(e, "_amf"):
-		found = len(renderNodes()) > 0
+	case strings.HasSuffix(e, "_qsv"):
+		found = hasRenderNode(vendorIntel)
+	case strings.HasSuffix(e, "_amf"):
+		found = hasRenderNode(vendorAMD)
+	case strings.HasSuffix(e, "_vaapi"): // Intel and AMD drivers both do VA-API
+		found = hasRenderNode(vendorIntel, vendorAMD)
 	case strings.HasSuffix(e, "_nvenc"):
 		found = nvidiaDevicePresent()
 	default:
