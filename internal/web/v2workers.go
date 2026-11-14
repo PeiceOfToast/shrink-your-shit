@@ -293,6 +293,34 @@ var renderNodes = func() []string {
 	return m
 }
 
+// nvidiaDevicePresent is the seam for the NVIDIA device node (/dev/nvidia0). Tests swap it.
+var nvidiaDevicePresent = func() bool {
+	_, err := os.Stat("/dev/nvidia0")
+	return err == nil
+}
+
+// encoderDevice says whether the device an encoder needs is on this computer: "found" or "missing".
+// It is "" (no field) for software encoders, for hardware encoders whose device we don't check, and
+// everywhere but Linux.
+func encoderDevice(e string) string {
+	if !usesDevDRI {
+		return ""
+	}
+	var found bool
+	switch {
+	case strings.HasSuffix(e, "_qsv"), strings.HasSuffix(e, "_vaapi"), strings.HasSuffix(e, "_amf"):
+		found = len(renderNodes()) > 0
+	case strings.HasSuffix(e, "_nvenc"):
+		found = nvidiaDevicePresent()
+	default:
+		return ""
+	}
+	if found {
+		return "found"
+	}
+	return "missing"
+}
+
 var openRender = func(path string) error {
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
@@ -338,12 +366,19 @@ func capabilities(t doctor.Tools, ok bool) []map[string]any {
 	for _, e := range t.SoftwareListed {
 		add("encoder", e, encoderLabels[e], "cpu", "failed", failed)
 	}
+	// setDevice adds the device field to the capability just added, for a hardware encoder.
+	setDevice := func(e string) {
+		if d := encoderDevice(e); d != "" {
+			out[len(out)-1]["device"] = d
+		}
+	}
 	for _, e := range t.Hardware {
 		detail := "8-bit only: HDR files are converted on the processor."
 		if slices.Contains(t.Hardware10, e) {
 			detail = "10-bit too (HDR)."
 		}
 		add("encoder", e, encoderLabels[e], "gpu", "passed", detail)
+		setDevice(e)
 	}
 	for _, e := range t.HardwareListed {
 		detail := failed
@@ -351,6 +386,7 @@ func capabilities(t doctor.Tools, ok bool) []map[string]any {
 			detail = intelFailure()
 		}
 		add("encoder", e, encoderLabels[e], "gpu", "failed", detail)
+		setDevice(e)
 	}
 	if t.FFprobe != "" {
 		add("tool", "ffprobe", "ffprobe "+t.FFprobeVersion, "cpu", "passed", "")
