@@ -102,6 +102,7 @@ type scenario struct {
 	srcPackets, outPackets int
 	content                string // what the fake encoder writes
 	encodeErr              error
+	failEncoder            string                                // an encode that asks for this ffmpeg encoder fails (encodeErr); others run
 	encodeStderr           string                                // what ffmpeg prints while converting (decode errors in the original show up here)
 	hang                   func(name string, args []string) bool // if it returns true the call blocks until its context ends
 	decodeStderr           string
@@ -189,6 +190,10 @@ func (s *scenario) handle(name string, args []string) (string, string, error) {
 		case s.has(args, "libx265") || s.has(args, "-progress"): // the encode (or a repackaging, S4: -c copy only)
 			if s.onEncode != nil {
 				s.onEncode()
+			}
+			if s.failEncoder != "" && s.has(args, s.failEncoder) {
+				os.WriteFile(last, []byte("partial"), 0o644)
+				return "", "Impossible to open the device\n", errors.New("ffmpeg exited 1")
 			}
 			if s.encodeErr != nil {
 				os.WriteFile(last, []byte("partial"), 0o644)

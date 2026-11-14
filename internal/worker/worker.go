@@ -104,6 +104,9 @@ type Worker struct {
 	// ShareDown says whether a library's folder is on a share that does not answer now (nil: no shares
 	// are checked). A convert that fails while it does is put back in the queue, not failed (D4c).
 	ShareDown func(folder string, jobID int64) (ShareDown, bool)
+	// Encoder is the local worker's primary encoder: ffmpeg's name of a graphics HEVC encoder, or "cpu"
+	// (or nil: the processor). A plan it can't do, and a graphics encode that fails, use the processor.
+	Encoder func() string
 	// verified is the probe of the new file the last check passed (S5: stored for its final path).
 	verified media.Info
 	check    *checkResult // the picture check's score for the job in hand (nil: none ran); set by the comparison
@@ -903,8 +906,21 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		return "", err
 	}
 	tmp := stage.path
+	// The local worker encodes with its primary encoder (a graphics one) when it can do this plan; else,
+	// and for a remote worker, the processor (its own arguments are FFmpegArgs, unchanged).
+	gpu := ""
 	args := plan.FFmpegArgs(srcPath, tmp)
-	setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWords(plan),
+	if w.remote == nil {
+		if want := w.primaryEncoder(); want != "" && want != "cpu" {
+			var ok bool
+			if args, ok = plan.FFmpegArgsWith(srcPath, tmp, want); ok {
+				gpu = want
+			} else {
+				w.jobf(job.ID, ": encoder %s can't do this file; using the processor", want)
+			}
+		}
+	}
+	setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWordsUsed(plan, gpu),
 		Decoder: decoderWords(src), Progress: media.Progress{ETASeconds: -1}})
 	defer dropLive(job.ID)
 	var encErr string
@@ -919,26 +935,21 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			return "", terr
 		}
 	} else {
-		stopWatch := w.watchStall(job.ID)
-		var tenths progressLines
-		at := -1.0 // the furthest position ffmpeg has reached
-		encErr, terr = media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
-			// only a position further on is progress: a stuck ffmpeg can keep reporting the same one (a
-			// damaged file, 21 min on a test run, never stopped), which mustn't hold off the stall stop
-			if p.OutTimeUS > at {
-				at = p.OutTimeUS
-				w.progressAt.Store(time.Now().UnixNano())
+		encErr, terr = w.encodeLocal(ctx, job, args)
+		if gpu != "" && w.gpuFailed(ctx, terr) { // a graphics encoder that fails converts again on the processor
+			w.recordEncode(job.ID, args, encStart, encErr, terr, probeSummary(src))
+			reason := firstLines(encErr, 1)
+			if reason == "" {
+				reason = terr.Error()
 			}
-			if job.DurationSec <= 0 {
-				return // no length: no percent to show
-			}
-			w.Queue.Progress(job.ID, p.Percent)
-			updateLive(job.ID, p)
-			if line := tenths.next(p); line != "" {
-				w.jobf(job.ID, ": %s", line)
-			}
-		})
-		stopWatch()
+			os.Remove(tmp)
+			w.jobf(job.ID, ": %s failed (%s); converted on the processor", gpu, reason)
+			args = plan.FFmpegArgs(srcPath, tmp)
+			setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWords(plan),
+				Decoder: decoderWords(src), Progress: media.Progress{ETASeconds: -1}})
+			encStart = w.now()
+			encErr, terr = w.encodeLocal(ctx, job, args)
+		}
 	}
 	w.recordEncode(job.ID, args, encStart, encErr, terr, probeSummary(src))
 	if terr == nil {
@@ -1602,4 +1613,50 @@ func (w *Worker) recordCheck(id int64, started time.Time, verr error) {
 	passed := c.Passed
 	w.Queue.RecordRunStep(id, jobs.RunStep{Index: 1, Name: "check", StartedAt: started.UTC().Format(time.RFC3339),
 		TookMs: w.now().Sub(started).Milliseconds(), Outcome: outcome, CheckScore: &c.Score, CheckMin: &c.Min, CheckPassed: &passed})
+}
+
+// primaryEncoder is the encoder this worker encodes with, from its Encoder (see there).
+func (w *Worker) primaryEncoder() string {
+	if w.Encoder == nil {
+		return ""
+	}
+	return w.Encoder()
+}
+
+// gpuFailed says whether a graphics encode that ended with err should convert again on the processor:
+// an ffmpeg error, not a stop (cancel, shutdown, the stall stop) or a lost lease.
+func (w *Worker) gpuFailed(ctx context.Context, err error) bool {
+	if err == nil || ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, errLeaseLost) {
+		return false
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.stopped != stopStall
+}
+
+// encodeLocal runs ffmpeg for the local worker's job: its progress, stall watch and live figures.
+func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (string, error) {
+	var encErr string
+	var terr error
+	stopWatch := w.watchStall(job.ID)
+	var tenths progressLines
+	at := -1.0 // the furthest position ffmpeg has reached
+	encErr, terr = media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
+		// only a position further on is progress: a stuck ffmpeg can keep reporting the same one (a
+		// damaged file, 21 min on a test run, never stopped), which mustn't hold off the stall stop
+		if p.OutTimeUS > at {
+			at = p.OutTimeUS
+			w.progressAt.Store(time.Now().UnixNano())
+		}
+		if job.DurationSec <= 0 {
+			return // no length: no percent to show
+		}
+		w.Queue.Progress(job.ID, p.Percent)
+		updateLive(job.ID, p)
+		if line := tenths.next(p); line != "" {
+			w.jobf(job.ID, ": %s", line)
+		}
+	})
+	stopWatch()
+	return encErr, terr
 }
