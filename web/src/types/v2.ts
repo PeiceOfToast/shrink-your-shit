@@ -75,6 +75,7 @@ export interface Worker {
   tags: string[]; pool: string | null;
   schedule: { from: string; to: string } | null;
   pathMappings: { server: string; worker: string; test: "read" | "read_write" | "failed" | null; testedAt: Time | null }[];
+  primaryEncoder?: string; // 'cpu' or an encoder name (hevc_qsv…): the effective choice, CPU is the fallback
 }
 
 export interface Library {
