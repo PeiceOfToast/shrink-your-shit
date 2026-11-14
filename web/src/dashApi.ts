@@ -8,7 +8,7 @@ import type { ActivityEvent, Worker } from "./types/v2";
 // recentFailures are the jobs list's rows; workersRunning is a yes/no; workers are full Workers (#132).
 export interface RealSummary {
   seq: number;
-  badges: { failed24h: number; workersOffline: number | null; pluginUpdates: number };
+  badges: { failed24h: number; workersOffline: number | null; pluginUpdates: number; joinRequestsWaiting?: number };
   activity: { converting: number; waiting: number; workersRunning: boolean };
   jobCounts: Record<string, number>;
   last24h: { completed: number; failed: number; skipped: number; successRate: number | null };

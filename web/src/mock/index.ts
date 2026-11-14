@@ -159,7 +159,8 @@ export function summary(s: State): Summary {
   const workersRunning = s.workers.filter((w) => w.status === "online" || w.status === "busy").length;
   return {
     seq: version,
-    badges: { failed24h: s.last24h.failed, workersOffline: s.workers.filter((w) => w.status === "offline" || w.status === "stalled").length, pluginUpdates: 0 },
+    badges: { failed24h: s.last24h.failed, workersOffline: s.workers.filter((w) => w.status === "offline" || w.status === "stalled").length, pluginUpdates: 0,
+      joinRequestsWaiting: joins.filter((j) => j.state === "waiting" && Date.parse(j.expiresAt) > Date.now()).length },
     activity: { converting: active.length, waiting: counts.queued + counts.retry_wait, workersRunning },
     jobCounts: counts,
     // The rate follows the 24 h counts, so a retried failure changes it (completed of completed + failed; skips aren't failures).
