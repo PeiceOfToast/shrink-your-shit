@@ -81,38 +81,47 @@ func (f *Finder) Servers() []Found {
 	return f.found
 }
 
-// scan listens for one window and collects the servers that answered, one per name, address and port.
+// scan listens for one window and collects the servers that answered, one per name, address and port. The reader
+// ends with the window, not with entries being closed: a browse that fails before it starts (no multicast) never
+// closes entries, and the reader must not be left waiting on it.
 func (f *Finder) scan() []Found {
 	ctx, cancel := context.WithTimeout(context.Background(), f.window)
 	defer cancel()
 	entries := make(chan *zeroconf.ServiceEntry, 16)
-	var mu sync.Mutex // the reader may still be running when the window ends
 	found := []Found{}
 	seen := map[string]bool{}
+	add := func(e *zeroconf.ServiceEntry) {
+		srv, ok := fromEntry(e)
+		if ok && !seen[srv.key()] {
+			seen[srv.key()] = true
+			found = append(found, srv)
+		}
+	}
 	read := make(chan struct{})
 	go func() {
 		defer close(read)
-		for e := range entries {
-			srv, ok := fromEntry(e)
-			mu.Lock()
-			if ok && !seen[srv.key()] {
-				seen[srv.key()] = true
-				found = append(found, srv)
+		for {
+			select {
+			case e := <-entries:
+				add(e)
+			case <-ctx.Done():
+				for { // what already arrived still counts
+					select {
+					case e := <-entries:
+						add(e)
+					default:
+						return
+					}
+				}
 			}
-			mu.Unlock()
 		}
 	}()
 	if err := f.browse(ctx, entries); err != nil {
 		log.Printf("discover: can't look for servers on the network: %v", err)
+		cancel()
 	}
 	<-ctx.Done()
-	select {
-	case <-read:
-	case <-time.After(f.window):
-		log.Printf("discover: a browse didn't finish; showing what it found")
-	}
-	mu.Lock()
-	defer mu.Unlock()
+	<-read
 	return found
 }
 

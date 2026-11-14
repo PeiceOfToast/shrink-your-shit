@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -85,5 +86,27 @@ func TestServersReusesAnAnswerBriefly(t *testing.T) {
 	f.Servers()
 	if n := calls.Load(); n != 2 {
 		t.Errorf("browses %d, want 2 once the answer is stale", n)
+	}
+}
+
+// A browse that fails before it starts (the no-multicast case: NewResolver errors) never closes its entries. Each scan
+// must still leave no goroutine behind.
+func TestFailingBrowseLeavesNoGoroutineBehind(t *testing.T) {
+	failing := func(ctx context.Context, out chan<- *zeroconf.ServiceEntry) error {
+		return errors.New("no suitable interface")
+	}
+	f := finder(failing)
+	before := runtime.NumGoroutine()
+	for i := 0; i < 5; i++ {
+		if got := f.scan(); len(got) != 0 {
+			t.Fatalf("scan %d found %+v, want nothing", i, got)
+		}
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for runtime.NumGoroutine() > before && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if after := runtime.NumGoroutine(); after > before {
+		t.Errorf("goroutines before 5 failing scans %d, after %d: each scan leaks one", before, after)
 	}
 }
