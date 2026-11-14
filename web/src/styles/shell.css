@@ -546,6 +546,8 @@ label.chk{cursor:pointer}
 .ec-t{display:flex;align-items:center;flex-wrap:wrap;gap:4px 6px}
 .ec-t .ic{width:14px;height:14px;color:var(--accent-text)}
 .ec-ok{color:var(--success-text);font-weight:var(--fw-strong)}
+/* formats on every tile (user bug 11-14): lit when tested, dim otherwise, like the Processor card */
+.ec-f{display:flex;flex-wrap:wrap;gap:2px 8px}.ec-f>span{color:var(--text-2);text-decoration:line-through}.ec-f>span.on{color:var(--text);text-decoration:none;font-weight:var(--fw-strong)}
 .ec-meta{color:var(--text-2);margin-top:4px}
 @media (max-width:479px){.ec-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.ec-grid.big{grid-template-columns:minmax(0,1fr)}}
 @media (pointer:coarse){.wcard dd a{display:flex;align-items:center;min-height:44px}}
