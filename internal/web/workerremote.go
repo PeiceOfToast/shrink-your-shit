@@ -302,7 +302,14 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 		}
 		res.Steps = in.Steps
 		res.Failure = in.Failure
-		if !rj.Deliver(res) {
+		// the server finishes the job after this report, and no worker renews its lease then: the lease
+		// covers that finish (the holder check is in the same step)
+		held, err := store.HoldThroughFinish(j.ID, rj.Lease)
+		if err != nil {
+			apiError(w, http.StatusInternalServerError, "lease_check_failed", "The server couldn't check the job's lease: "+err.Error())
+			return
+		}
+		if !held || !rj.Deliver(res) {
 			apiError(w, http.StatusConflict, "lease_gone", "This job already has an answer, or was given back to the queue.")
 			return
 		}
