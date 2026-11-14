@@ -1,7 +1,7 @@
 // V7 Workers on the real /api/v2/workers (#132), or the mock's workers with ?mock=1 (the same Worker shape).
 import { call, failed, MOCK, type Answer } from "./api";
 import * as mock from "./mock";
-import type { Worker } from "./types/v2";
+import type { JoinRequest, Worker } from "./types/v2";
 
 const base = (id: string) => "/api/v2/workers/" + encodeURIComponent(id);
 export async function listWorkers(): Promise<Answer<Worker[]>> {
@@ -48,4 +48,21 @@ export interface Pairing { code: string; expiresAt: string; command: string; pla
 export async function newPairing(): Promise<Answer<Pairing>> {
   if (MOCK) return { error: { code: "not_available", message: "The sample install can't pair a worker." } };
   return call("POST", "/api/v2/workers/pairings", {});
+}
+
+// E4 (ONE-COMMAND-SETUP.md section 9): join requests from workers that ran the install command. allow -> 200 {workerId};
+// deny -> 204 (no body: call() answers null, so callers check failed(), never truthiness); 409 join_request_expired.
+const jbase = (id: string) => "/api/v2/workers/join-requests/" + encodeURIComponent(id);
+export async function listJoinRequests(): Promise<Answer<JoinRequest[]>> {
+  if (MOCK) return mock.joins.map((j) => ({ ...j }));
+  const r = await call<{ items: JoinRequest[] }>("GET", "/api/v2/workers/join-requests");
+  return failed(r) ? r : r.items;
+}
+export async function allowJoin(id: string): Promise<Answer<{ workerId: string }>> {
+  if (MOCK) { const r = mock.allowJoin(id); return typeof r === "string" ? { error: { code: "join_request_expired", message: r } } : r; }
+  return call("POST", jbase(id) + "/allow");
+}
+export async function denyJoin(id: string): Promise<Answer<unknown>> {
+  if (MOCK) { const e = mock.denyJoin(id); return e ? { error: { code: "join_request_expired", message: e } } : null; }
+  return call("POST", jbase(id) + "/deny");
 }

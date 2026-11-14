@@ -11,8 +11,8 @@ import { onLive } from "../live";
 import { Empty, PageHead } from "../PageHead";
 import { Link, navigate, useSearch } from "../router";
 import { useData } from "../useData";
-import { allWorkers, newPairing, type Pairing, dismissUpdateNotice, getWorker, listWorkers, patchWorker, stoppedByUpdate, testCapabilities, workerAction } from "../workersApi";
-import type { Capability, Worker } from "../types/v2";
+import { allWorkers, allowJoin, denyJoin, listJoinRequests, newPairing, type Pairing, dismissUpdateNotice, getWorker, listWorkers, patchWorker, stoppedByUpdate, testCapabilities, workerAction } from "../workersApi";
+import type { Capability, JoinRequest, Worker } from "../types/v2";
 
 // review 61dc891 P2-1: only what the server reports (a remote worker may send no OS or host): no guess, no stray dot
 const OS: Record<string, string> = { linux: "Linux", darwin: "macOS", windows: "Windows" };
@@ -158,6 +158,7 @@ function AddWorker({ workers, reload }: { workers: Worker[]; reload: () => void 
     <span className="addw"><button className="btn sm" type="button" aria-expanded={open} aria-controls={group} onClick={() => { if (open) return setOpen(false); setOpen(true); if (came || !p || gone) make(); }}><Icon id="i-plus" />Add a worker</button>
       {said && <span className="muted sm" role="status">{said}</span>}</span>
     {open && <div className="swask addpanel" id={group} role="region" aria-label="Add a worker">
+      <p className="sm">Easiest: run the install command on the other computer. It finds this server and asks to join here.</p>
       {came ? <>
         <p role="status"><Icon id="i-check-c" /> Connected: <strong>{came.name}</strong>.</p>
         <div className="row"><Link className="btn sm primary" to={"/workers/" + encodeURIComponent(came.id)}>Open {came.name}</Link><button className="btn sm ghost" type="button" onClick={() => (setOpen(false), setCame(null))}>Done</button></div></>
@@ -172,6 +173,71 @@ function AddWorker({ workers, reload }: { workers: Worker[]; reload: () => void 
         <p className="muted sm" aria-live="polite">Waiting for the worker to connect...</p></>}
     </div>}
   </>;
+}
+
+// E4 (ONE-COMMAND-SETUP.md section 9): a worker that ran the install command asks to join. One card per request, newest
+// first, above the workers; more than 3 fold into "N more requests". Decided and expired requests stay (the server keeps
+// them about 10 minutes) until Done or Dismiss. New requests are announced once; the countdown is visual only.
+function JoinCards({ workers, on, reload }: { workers: Worker[]; on: boolean; reload: () => void }) {
+  const d = useData(listJoinRequests, [], 15000);
+  const [hidden, setHidden] = useState<string[]>([]), [all, setAll] = useState(false), [now, setNow] = useState(Date.now());
+  const [errs, setErrs] = useState<Record<string, string>>({}), [ids, setIds] = useState<Record<string, string>>({}), [heard, setHeard] = useState("");
+  const told = useRef<string[]>([]), box = useRef<HTMLDivElement>(null), refocus = useRef(false);
+  const load = useRef(d.reload); load.current = d.reload;
+  useEffect(() => onLive((t) => { if (t === "worker.join_request" || t === "resync") load.current(); }), []);
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 15000); return () => clearInterval(t); }, []);
+  const t = Math.max(now, Date.now());
+  const items = (d.data ?? []).filter((j) => !hidden.includes(j.id))
+    .map((j): JoinRequest => (j.state === "waiting" && Date.parse(j.expiresAt) <= t ? { ...j, state: "expired" } : j))
+    .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt));
+  const fresh = items.filter((j) => j.state === "waiting" && !told.current.includes(j.id));
+  useEffect(() => { if (!fresh.length) return; told.current.push(...fresh.map((j) => j.id)); setHeard(fresh.map((j) => "New worker " + j.name + " wants to join.").join(" ")); }, [fresh.map((j) => j.id).join()]); // eslint-disable-line react-hooks/exhaustive-deps
+  // after Allow, Deny, Done or Dismiss: the next card's Allow, or else the Workers heading
+  useEffect(() => {
+    if (!refocus.current) return; refocus.current = false;
+    const next = box.current?.querySelector<HTMLElement>(".allow");
+    if (next) return next.focus();
+    const h = document.querySelector<HTMLElement>(".pagehead h1"); if (h) { h.tabIndex = -1; h.focus(); }
+  });
+  const hide = (id: string) => { refocus.current = true; setHidden((h) => [...h, id]); };
+  const decide = async (j: JoinRequest, allow: boolean) => {
+    setErrs((e) => ({ ...e, [j.id]: "" }));
+    let r; try { r = allow ? await allowJoin(j.id) : await denyJoin(j.id); } catch { return; } // signed out: going to sign-in
+    if (failed(r)) { setErrs((e) => ({ ...e, [j.id]: r.error.message })); d.reload(); return; }
+    if (allow) { setIds((m) => ({ ...m, [j.id]: (r as { workerId: string }).workerId })); setHeard(allowed(j.name)); reload(); }
+    else setHeard("Denied " + j.name + ". It was told no.");
+    refocus.current = true; d.reload();
+  };
+  const allowed = (n: string) => "Allowed: " + n + ". " + (on ? "It starts converting now." : "It waits, like the others, until you turn workers on.");
+  const mins = (ms: number) => Math.round(ms / 60000);
+  const shown = all ? items : items.slice(0, 3), more = items.length - shown.length;
+  if (!items.length) return <p className="sr" aria-live="polite">{heard}</p>;
+  return <div className="stack" ref={box}>
+    <p className="sr" aria-live="polite">{heard}</p>
+    <div className="joins">{shown.map((j) => {
+      const err = errs[j.id] && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{errs[j.id]}</span></p>;
+      if (j.state === "denied") return <article key={j.id} className="card joinc"><p>Denied {j.name}. It was told no.</p>
+        <div className="row jbtn"><button className="btn" type="button" onClick={() => hide(j.id)}>Done</button></div></article>;
+      if (j.state === "expired") return <article key={j.id} className="card joinc"><p>{j.name}&apos;s request expired. To ask again, run the install command on {j.name} again.</p>{err}
+        <div className="row jbtn"><button className="btn" type="button" onClick={() => hide(j.id)}>Dismiss</button></div></article>;
+      if (j.state === "allowed") {
+        const wid = ids[j.id] ?? workers.find((w) => w.name.toLowerCase() === j.name.toLowerCase())?.id;
+        return <article key={j.id} className="card joinc"><p><Icon id="i-check-c" /> {allowed(j.name)}</p>
+          <div className="row jbtn">{wid && <Link className="btn primary" to={"/workers/" + encodeURIComponent(wid)}>Open {j.name}</Link>}<button className="btn" type="button" onClick={() => hide(j.id)}>Done</button></div></article>;
+      }
+      const asked = mins(t - Date.parse(j.requestedAt)), left = Math.ceil((Date.parse(j.expiresAt) - t) / 60000);
+      const clash = workers.some((w) => w.name.toLowerCase() === j.name.toLowerCase());
+      return <article key={j.id} className="card joinc" aria-labelledby={"jr-" + j.id}>
+        <h3 id={"jr-" + j.id}>New worker wants to join</h3>
+        <p className="sm facts">{[j.name, j.address, OS[j.os ?? ""], j.encoders.join(", ")].filter(Boolean).join(" · ")}</p>
+        {clash && <p className="sm">A worker named {j.name} already exists. Allowing replaces it.</p>}
+        <p className="sm muted">{asked < 1 ? "Asked just now" : "Asked " + plural(asked, "minute", "minutes") + " ago"} · {left <= 1 ? "expires in less than a minute" : "expires in " + left + " minutes"}</p>
+        {err}
+        <div className="row jbtn"><button className="btn primary allow" type="button" onClick={() => decide(j, true)}>Allow</button><button className="btn" type="button" onClick={() => decide(j, false)}>Deny</button></div>
+      </article>;
+    })}</div>
+    {more > 0 && <div><button className="btn sm ghost" type="button" onClick={() => setAll(true)}>{plural(more, "more request", "more requests")}</button></div>}
+  </div>;
 }
 
 function StartStop({ w, onDone }: { w: Worker; onDone: (m: string) => void }) {
@@ -216,6 +282,7 @@ export function Workers() {
         <button className="btn sm ghost" type="button" onClick={async () => { await act(dismissUpdateNotice(), setSaid); upd.reload(); }}>Dismiss</button></div>}
       <p className="muted" role="status">{said}</p>
       {ws.error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{ws.error.message}</span></p>}
+      <JoinCards workers={ws.data ?? []} on={n > 0} reload={ws.reload} />
       {!ws.loaded ? <div className="empty">Loading...</div> : !list.length ? <Empty icon="i-worker" text="No workers yet." /> : (
         <div className="wgrid">{list.map((w) => {
           const [t, cls, icon] = words(w), gone = w.status === "offline" || w.status === "stalled";

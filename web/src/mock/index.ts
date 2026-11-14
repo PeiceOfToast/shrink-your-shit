@@ -2,7 +2,7 @@
 // screens offer, really applied to that state. Every screen using it shows the Prototype banner. ?mock=fresh shows a
 // new install (no libraries yet) for review. When a contract endpoint lands, its function here becomes the fetch.
 import { useSyncExternalStore } from "react";
-import type { ActivityEvent, ID, Job, JobState, Library, PublishPreview, Settings, Summary, Template, Trash, Worker, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
+import type { ActivityEvent, ID, JoinRequest, Job, JobState, Library, PublishPreview, Settings, Summary, Template, Trash, Worker, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
 import type { FirstFiles, FolderReport, Issue, LibraryItem } from "../types/v1";
 import { branchedDoc, legacyDoc, presetDoc, preview, revision, summary as stepSummary } from "./steps";
 
@@ -467,6 +467,28 @@ export function workerAction(id: ID, action: "start" | "stop" | "drain"): string
 }
 export function patchWorker(id: ID, p: { name?: string; slots?: { cpu?: number }; tags?: string[] }) {
   change((s) => { const x = s.workers.find((y) => y.id === id); if (!x) return; if (p.name) x.name = p.name; if (p.slots?.cpu) x.slots.cpu.total = p.slots.cpu; if (p.tags) x.tags = p.tags; });
+}
+
+// E4 join requests on the mock: three waiting (one named like an existing worker), one expired. Allow adds the worker
+// stopped, like any new one, replacing a worker with the same name.
+const at = (min: number) => new Date(Date.now() + min * 60000).toISOString();
+export const joins: JoinRequest[] = mockMode === "fresh" ? [] : [
+  { id: "jr1", name: "nuc", address: "192.168.1.31", os: "linux", encoders: ["Intel Quick Sync"], requestedAt: at(-2), expiresAt: at(8), state: "waiting" },
+  { id: "jr2", name: "laptop", address: "192.168.1.44", os: "windows", encoders: [], requestedAt: at(-1), expiresAt: at(9), state: "waiting" },
+  { id: "jr3", name: "attic-pc", address: "192.168.1.60", os: "linux", encoders: ["NVIDIA NVENC"], requestedAt: at(-0.5), expiresAt: at(9.5), state: "waiting" },
+  { id: "jr4", name: "pi", address: "192.168.1.50", os: "linux", encoders: [], requestedAt: at(-14), expiresAt: at(-4), state: "expired" },
+];
+const openJoin = (id: ID) => { const j = joins.find((x) => x.id === id); return !j ? "There is no such request." : j.state !== "waiting" || Date.parse(j.expiresAt) <= Date.now() ? "This request has expired. Run the install command on that computer again." : j; };
+export function allowJoin(id: ID): { workerId: ID } | string {
+  const j = openJoin(id); if (typeof j === "string") return j;
+  const workerId = "w-" + j.id;
+  change((s) => { s.workers = [...s.workers.filter((w) => w.name.toLowerCase() !== j.name.toLowerCase()), { ...worker(workerId, j.name, "paused", [0, 2], [0, j.encoders.length ? 1 : 0], 0, []), os: (j.os ?? "linux") as Worker["os"] }]; j.state = "allowed"; });
+  return { workerId };
+}
+export function denyJoin(id: ID): string | null {
+  const j = openJoin(id); if (typeof j === "string") return j;
+  change(() => { j.state = "denied"; });
+  return null;
 }
 
 // D: share actions
