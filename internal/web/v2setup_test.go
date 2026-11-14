@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -278,5 +279,31 @@ func TestSetupAllowedButTokenNotSavedSaysSo(t *testing.T) {
 	v := waitFor(t, c, srv, "not_saved", func(v map[string]any) bool { return joinState(v) == "not_saved" })
 	if v["role"] != "unset" {
 		t.Errorf("a failed token save changed the role: %v", v)
+	}
+}
+
+// An allowed join tells the app the role is now worker, so its worker loop starts without a restart.
+func TestSetupAllowedTellsTheAppTheRoleChanged(t *testing.T) {
+	dir := t.TempDir()
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	a, _, _ := OpenAccess(t.TempDir(), false)
+	var mu sync.Mutex
+	var roles []string
+	srv := httptest.NewServer(Handler(st, a, Engine{DataDir: dir, Version: "1.2.3", Port: 8484, Joiner: &remote.Joiner{Version: "1.2.3"},
+		RoleChanged: func(role string) { mu.Lock(); roles = append(roles, role); mu.Unlock() }}))
+	t.Cleanup(srv.Close)
+
+	remoteSrv, _ := fakeRemote(t, "waiting", "allowed")
+	c := jar(t)
+	do(t, c, srv, call{method: "POST", path: "/api/v2/setup/role", ctype: "application/json", body: `{"role":"worker","serverUrl":"` + remoteSrv.URL + `"}`})
+	waitFor(t, c, srv, "the worker role", func(v map[string]any) bool { return v["role"] == "worker" })
+	mu.Lock()
+	defer mu.Unlock()
+	if len(roles) != 1 || roles[0] != "worker" {
+		t.Errorf("role changes told to the app: %v, want [worker]", roles)
 	}
 }
