@@ -12,7 +12,8 @@ import (
 )
 
 // V7a: a worker whose job was taken back (its lease ran out while it was stuck) never puts the new file
-// in place; the original is untouched and the job waits in the queue for another try.
+// in place; the original is untouched and the job goes back in the queue. A lost worker isn't the job's fault,
+// so it may be taken again at once: no retry wait (see jobs.RequeueExpiredLeases).
 func TestLostLeaseNeverCommits(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
@@ -30,8 +31,8 @@ func TestLostLeaseNeverCommits(t *testing.T) {
 	defer func() { swapHook = nil }()
 	w.RunOne(context.Background())
 	j := s.job()
-	if j.Status != jobs.Queued || j.RetryAt == "" {
-		t.Errorf("the job should wait in the queue: %s %q", j.Status, j.Error)
+	if j.Status != jobs.Queued || j.RetryAt != "" {
+		t.Errorf("the job should be back in the queue with no retry wait: %s retryAt=%q %q", j.Status, j.RetryAt, j.Error)
 	}
 	s.assertOriginalSafe()
 	if b, _ := os.ReadFile(s.src); string(b) != "original-bytes" {
