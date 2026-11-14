@@ -389,7 +389,7 @@ YML
     exit 0
   fi
   # Pull the newest image. If the pull fails (offline, or not published yet), start the copy already here.
-  quiet_run "pulling the image" $SUDO docker compose -f "$file" pull || warn "could not pull the newest image; starting the copy already on this computer."
+  $SUDO docker compose -f "$file" pull >"$dtmp/pull.log" 2>&1 || warn "could not pull the newest image; starting the copy already on this computer."
   say "Starting the container..."
   quiet_run "starting the container" $SUDO docker compose -f "$file" up -d
   PORT_ADDR=0.0.0.0:8484
