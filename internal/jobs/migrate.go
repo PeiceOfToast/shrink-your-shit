@@ -455,6 +455,13 @@ CREATE TABLE IF NOT EXISTS join_requests (
 	address TEXT NOT NULL DEFAULT '', port INTEGER NOT NULL DEFAULT 0,
 	asked_ns INTEGER NOT NULL, expires_ns INTEGER NOT NULL,
 	decision TEXT NOT NULL DEFAULT '', worker_id TEXT NOT NULL DEFAULT '', worker_name TEXT NOT NULL DEFAULT '');`},
+	// Encoder tests (Q1): each test run's result per encoder, for a computer ("server", or worker:<id>), kept
+	// newest-first in RecordEncoderTests' bounded history. A run is keyed by its test time.
+	{46, "encoder tests", `
+CREATE TABLE IF NOT EXISTS encoder_tests (
+	computer TEXT NOT NULL, tested_at TEXT NOT NULL, encoder TEXT NOT NULL,
+	passed INTEGER NOT NULL, detail TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (computer, tested_at, encoder));`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone

@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
@@ -228,12 +229,15 @@ func (c *Client) workOne(ctx context.Context, cv Converter) (did bool, err error
 		}
 		return true, c.report(ctx, l, map[string]any{"ok": false, "message": err.Error(), "stderr": stderr, "args": ran})
 	}
-	if err := worker.CheckResult(ctx, cv.Exec, cv.FFmpeg, cv.FFprobe, snap, src, out); err != nil {
+	checkStart := time.Now()
+	score, err := worker.CheckResult(ctx, cv.Exec, cv.FFmpeg, cv.FFprobe, snap, src, out)
+	steps := checkSteps(checkStart, score, err) // the job's check step, as the server keeps a local one (Q1)
+	if err != nil {
 		var k *worker.KeptError
 		if errors.As(err, &k) {
-			return true, c.report(ctx, l, map[string]any{"kept": k.Reason, "stderr": stderr, "args": ran})
+			return true, c.report(ctx, l, map[string]any{"kept": k.Reason, "stderr": stderr, "steps": steps, "args": ran})
 		}
-		return true, c.report(ctx, l, map[string]any{"ok": false, "message": "the checks didn't finish: " + err.Error(), "stderr": stderr, "args": ran})
+		return true, c.report(ctx, l, map[string]any{"ok": false, "message": "the checks didn't finish: " + err.Error(), "stderr": stderr, "steps": steps, "args": ran})
 	}
 	var sum string
 	var size int64
@@ -256,7 +260,21 @@ func (c *Client) workOne(ctx context.Context, cv Converter) (did bool, err error
 		subSums[strconv.Itoa(k)] = s
 	}
 	log.Printf("job %s: converted and checked; the server puts it in place", l.Job.ID)
-	return true, c.report(ctx, l, map[string]any{"ok": true, "sha256": sum, "bytes": size, "subs": subSums, "stderr": stderr, "args": ran})
+	return true, c.report(ctx, l, map[string]any{"ok": true, "sha256": sum, "bytes": size, "subs": subSums, "stderr": stderr, "steps": steps, "args": ran})
+}
+
+// checkSteps is the job's check step for a report: the picture score when the check ran, none otherwise.
+func checkSteps(started time.Time, score *worker.CheckScore, verr error) []jobs.RunStep {
+	if score == nil {
+		return []jobs.RunStep{}
+	}
+	outcome := "ok"
+	if verr != nil {
+		outcome = "failed"
+	}
+	passed := score.Passed
+	return []jobs.RunStep{{Index: 1, Name: "check", StartedAt: started.UTC().Format(time.RFC3339),
+		TookMs: time.Since(started).Milliseconds(), Outcome: outcome, CheckScore: &score.Score, CheckMin: &score.Min, CheckPassed: &passed}}
 }
 
 // Plan is a leased job's plan, as the server made it.

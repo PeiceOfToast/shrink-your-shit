@@ -5,6 +5,7 @@ package web
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net"
 	"net/http"
 	"net/netip"
@@ -243,6 +244,9 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine, joins
 			serverError(w, err)
 			return
 		}
+		if err := recordReportedTests(store, wk.ID, caps); err != nil { // Q1: the run is kept in the database
+			log.Printf("worker %s: encoder tests: %v", wk.ID, err)
+		}
 		writeJSON(w, map[string]any{"workerId": wk.ID, "name": wk.Name, "token": token, "serverName": discover.ServerName()})
 	})
 	// E2: a new install asks to join from the server's own network; the person allows it (no code to type).
@@ -282,6 +286,9 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine, joins
 			if err := store.SetWorkerReport(wk.ID, in.OS, in.Arch, caps); err != nil {
 				serverError(w, err)
 				return
+			}
+			if err := recordReportedTests(store, wk.ID, caps); err != nil { // Q1: a new run is kept (a repeat is not)
+				log.Printf("worker %s: encoder tests: %v", wk.ID, err)
 			}
 		}
 		in.Load.CPUPercent = sysload.Clamp(in.Load.CPUPercent) // a worker's word: within 0..100
