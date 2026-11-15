@@ -278,13 +278,12 @@ func (c *statsCache) get(store *jobs.Store) (*stats, error) {
 		return c.st, nil
 	}
 	st := &stats{}
-	if st.a, err = store.ActivitySummary(); err != nil {
+	t, err := store.TotalsOf()
+	if err != nil {
 		return nil, err
 	}
-	if st.counts, err = store.Counts(); err != nil {
-		return nil, err
-	}
-	if st.days, err = store.Days(30, now); err != nil {
+	st.a, st.counts = t.Summary, t.Counts
+	if st.days, err = store.Days(30, now, t.FreedByDay); err != nil {
 		return nil, err
 	}
 	if st.saving, st.savingOK, st.perGB, st.timeOK, err = store.Averages(); err != nil {
