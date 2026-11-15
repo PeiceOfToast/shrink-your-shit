@@ -43,8 +43,8 @@ func (l *libFlag) String() string     { return strings.Join(*l, ",") }
 func (l *libFlag) Set(v string) error { *l = append(*l, v); return nil }
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "token" {
-		os.Exit(tokenCommand(os.Stdout, os.Stderr))
+	if rest, ok := tokenArgs(os.Args[1:]); ok { // before flag parsing: no data lock is taken
+		os.Exit(tokenCommand(rest, os.Stdout, os.Stderr))
 	}
 	if len(os.Args) > 1 && os.Args[1] == "doctor" {
 		os.Exit(doctorCommand(os.Stdout, os.Stderr))
