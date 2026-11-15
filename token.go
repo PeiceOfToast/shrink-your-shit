@@ -44,13 +44,14 @@ func tokenCommand(args []string, out, errOut io.Writer) int {
 	fl := flag.NewFlagSet("token", flag.ContinueOnError)
 	fl.SetOutput(errOut)
 	data := fl.String("data", "", "the service's data folder, if it was started with its own -data (default: the installed service's)")
-	if err := fl.Parse(args); err != nil || fl.NArg() != 0 {
-		fmt.Fprintln(errOut, "usage: shrink-your-shit token [-data <folder>]   (or: shrink-your-shit -data <folder> token)")
+	addr := fl.String("addr", "", "with -data: the address that service listens on, for the sign-in address")
+	if err := fl.Parse(args); err != nil || fl.NArg() != 0 || (*addr != "" && *data == "") {
+		fmt.Fprintln(errOut, "usage: shrink-your-shit token [-data <folder> [-addr <address>]]   (or: shrink-your-shit -data <folder> token)")
 		return 2
 	}
 	env := envFile(linuxEnvFile)
 	if *data != "" {
-		return tokenFromFolder(*data, env, out, errOut)
+		return tokenFromFolder(*data, *addr, out, errOut)
 	}
 	var denied error
 	for _, dir := range tokenDirs(env) {
@@ -74,7 +75,8 @@ func tokenCommand(args []string, out, errOut io.Writer) int {
 }
 
 // tokenFromFolder reads the token from the one folder given with -data, and says what it found there.
-func tokenFromFolder(dir string, env map[string]string, out, errOut io.Writer) int {
+// The sign-in address is the one given with -addr, never the installed service's (another server's token).
+func tokenFromFolder(dir, addr string, out, errOut io.Writer) int {
 	tok, err := web.ReadToken(dir)
 	switch {
 	case errors.Is(err, fs.ErrPermission):
@@ -90,12 +92,18 @@ func tokenFromFolder(dir string, env map[string]string, out, errOut io.Writer) i
 		fmt.Fprintf(errOut, "The access token file in %s is empty.\n", dir)
 		return 1
 	}
-	printToken(tok, env, out)
+	printTokenAt(tok, addr, out)
 	return 0
 }
 
+// printToken prints the token with the installed service's sign-in address.
 func printToken(tok string, env map[string]string, out io.Writer) {
-	if addr := installedAddr(env); addr != "" {
+	printTokenAt(tok, installedAddr(env), out)
+}
+
+// printTokenAt prints the token with the sign-in address for addr; "" when no address is known.
+func printTokenAt(tok, addr string, out io.Writer) {
+	if addr != "" {
 		fmt.Fprintf(out, "Access token: %s\nSign-in address: %s\n", tok, signInURL(addr, tok))
 	} else {
 		fmt.Fprintf(out, "Access token: %s\nSign-in address: http://<this computer's address>:8484/?token=%s\n"+

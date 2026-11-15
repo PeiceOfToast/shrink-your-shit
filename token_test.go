@@ -228,3 +228,39 @@ func TestTokenUsageErrorIsExit2(t *testing.T) {
 		t.Errorf("rc %d: %q", rc, errOut.String())
 	}
 }
+
+// With -data, the sign-in address is never the installed service's: that address goes with another token.
+func TestTokenWithDataDoesNotUseTheInstalledAddress(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, web.TokenFile), []byte("from-data\n"), 0o600)
+	t.Setenv("SYP_ADDR", "192.0.2.7:8484")
+	var out, errOut bytes.Buffer
+	if rc := tokenCommand([]string{"-data", dir}, &out, &errOut); rc != 0 {
+		t.Fatalf("rc %d: %s", rc, errOut.String())
+	}
+	if strings.Contains(out.String(), "192.0.2.7") || !strings.Contains(out.String(), "http://<this computer's address>:8484/?token=from-data") {
+		t.Errorf("got\n%s", out.String())
+	}
+}
+
+// -addr gives the address of the server the -data folder belongs to.
+func TestTokenWithDataAddrBuildsTheAddress(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, web.TokenFile), []byte("from-data\n"), 0o600)
+	t.Setenv("SYP_ADDR", "192.0.2.7:8484")
+	var out, errOut bytes.Buffer
+	if rc := tokenCommand([]string{"-data", dir, "-addr", "192.0.2.5:9100"}, &out, &errOut); rc != 0 {
+		t.Fatalf("rc %d: %s", rc, errOut.String())
+	}
+	if want := "Sign-in address: http://192.0.2.5:9100/?token=from-data\n"; !strings.Contains(out.String(), want) {
+		t.Errorf("got\n%s\nwant it to contain %q", out.String(), want)
+	}
+}
+
+// -addr only means something with -data; without it, the token command is as before (no -addr flag).
+func TestTokenAddrNeedsData(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if rc := tokenCommand([]string{"-addr", ":9100"}, &out, &errOut); rc != 2 {
+		t.Errorf("rc %d: %q", rc, errOut.String())
+	}
+}
