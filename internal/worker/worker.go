@@ -932,8 +932,12 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	encStart := w.now()
 	if w.remote != nil { // V7b2: a worker on another computer converts and checks; its file comes up here
 		stopWatch := w.watchRemoteStall(job.ID, w.remote)
-		encErr, terr = w.remote.convert(ctx, w, job, snap, srcPath, tmp)
+		var ran []string
+		encErr, ran, terr = w.remote.convert(ctx, w, job, snap, srcPath, tmp)
 		stopWatch()
+		if ran != nil { // the command the remote ran (its processor's after a graphics encoder fell back), not the server's plan
+			args = ran
+		}
 		var k *KeptError
 		if errors.As(terr, &k) || errors.Is(terr, errLeaseLost) {
 			return "", terr

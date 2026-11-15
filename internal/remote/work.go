@@ -222,12 +222,12 @@ func (c *Client) workOne(ctx context.Context, cv Converter) (did bool, err error
 		ext = "." + snap.Plan.Container
 	}
 	out := filepath.Join(dir, "new"+ext)
-	stderr, err := c.convert(ctx, cv, l, snap, src, out)
+	stderr, ran, err := c.convert(ctx, cv, l, snap, src, out)
 	if err != nil {
 		if leaseGone(err) || ctx.Err() != nil {
 			return true, err
 		}
-		return true, c.report(ctx, l, map[string]any{"ok": false, "message": err.Error(), "stderr": stderr})
+		return true, c.report(ctx, l, map[string]any{"ok": false, "message": err.Error(), "stderr": stderr, "args": ran})
 	}
 	checkStart := time.Now()
 	score, err := worker.CheckResult(ctx, cv.Exec, cv.FFmpeg, cv.FFprobe, snap, src, out)
@@ -235,9 +235,9 @@ func (c *Client) workOne(ctx context.Context, cv Converter) (did bool, err error
 	if err != nil {
 		var k *worker.KeptError
 		if errors.As(err, &k) {
-			return true, c.report(ctx, l, map[string]any{"kept": k.Reason, "stderr": stderr, "steps": steps})
+			return true, c.report(ctx, l, map[string]any{"kept": k.Reason, "stderr": stderr, "steps": steps, "args": ran})
 		}
-		return true, c.report(ctx, l, map[string]any{"ok": false, "message": "the checks didn't finish: " + err.Error(), "stderr": stderr, "steps": steps})
+		return true, c.report(ctx, l, map[string]any{"ok": false, "message": "the checks didn't finish: " + err.Error(), "stderr": stderr, "steps": steps, "args": ran})
 	}
 	var sum string
 	var size int64
@@ -260,7 +260,7 @@ func (c *Client) workOne(ctx context.Context, cv Converter) (did bool, err error
 		subSums[strconv.Itoa(k)] = s
 	}
 	log.Printf("job %s: converted and checked; the server puts it in place", l.Job.ID)
-	return true, c.report(ctx, l, map[string]any{"ok": true, "sha256": sum, "bytes": size, "subs": subSums, "stderr": stderr, "steps": steps})
+	return true, c.report(ctx, l, map[string]any{"ok": true, "sha256": sum, "bytes": size, "subs": subSums, "stderr": stderr, "steps": steps, "args": ran})
 }
 
 // checkSteps is the job's check step for a report: the picture score when the check ran, none otherwise.
@@ -421,7 +421,9 @@ func (c *Client) download(ctx context.Context, l *Lease, to string) error {
 }
 
 // convert runs the plan's ffmpeg, reporting progress (which renews the lease).
-func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules.Snapshot, src, out string) (string, error) {
+// It also returns the ffmpeg arguments that ran (the processor's after a graphics encoder fell back), so the
+// job log records the command that was executed.
+func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules.Snapshot, src, out string) (string, []string, error) {
 	cctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	// the server judges the encode for its stall stop between "converting" (sent at the start, then with the
@@ -435,7 +437,7 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 		c.note(ctx, l, note)
 	}
 	if e := report(map[string]any{"stage": "converting", "outTimeUs": 0, "encoder": enc}); leaseGone(e) {
-		return "", e
+		return "", args, e
 	}
 	var last time.Time
 	var gone error
@@ -464,17 +466,18 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 		}
 		c.note(ctx, l, fmt.Sprintf("%s failed (%s); converted on the processor", enc, reason))
 		if e := os.Truncate(out, 0); e != nil { // the same staged file: the server checks its identity
-			return stderr, fmt.Errorf("clearing the partial output: %w", e)
+			return stderr, args, fmt.Errorf("clearing the partial output: %w", e)
 		}
 		enc = ""
 		report(map[string]any{"stage": "converting", "outTimeUs": 0, "encoder": enc}) // the live label names the processor now
-		stderr, err = run(snap.Plan.FFmpegArgs(src, out))
+		args = snap.Plan.FFmpegArgs(src, out)
+		stderr, err = run(args)
 	}
 	if gone != nil {
-		return stderr, gone
+		return stderr, args, gone
 	}
 	report(map[string]any{"stage": "checking"}) // the encode ended (also when it failed): no longer judged
-	return stderr, err
+	return stderr, args, err
 }
 
 // encoderArgs is the ffmpeg arguments for a plan on this worker: its main encoder's for the plan's format when

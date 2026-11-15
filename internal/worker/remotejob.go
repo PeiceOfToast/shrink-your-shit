@@ -35,6 +35,7 @@ type RemotePlan struct {
 // subtitles at their staged names), or why it didn't work.
 type RemoteResult struct {
 	Stderr  string               // what its ffmpeg said (damage in the original shows there)
+	Command []string             // the ffmpeg arguments it ran: the job log records these, not the server's plan
 	Kept    string               // its checks said no: the original is kept, as a local check would
 	Err     error                // it failed to convert
 	Steps   []jobs.RunStep       // the run steps (encode, probe, check) with the remote's own timings
@@ -134,7 +135,8 @@ var RemoteCheckEvery = 5 * time.Second
 
 // convert gives the plan to the remote worker and waits for its file, put at tmp (and its subtitles at
 // their staged names). A lease that ended (the worker stopped answering) ends the wait: errLeaseLost.
-func (r *RemoteJob) convert(ctx context.Context, w *Worker, job jobs.Job, snap rules.Snapshot, srcPath, tmp string) (string, error) {
+// It also returns the ffmpeg arguments the remote worker ran (nil when it reported none).
+func (r *RemoteJob) convert(ctx context.Context, w *Worker, job jobs.Job, snap rules.Snapshot, srcPath, tmp string) (string, []string, error) {
 	r.mu.Lock()
 	r.plan = &RemotePlan{Snapshot: snap, Source: srcPath, Stage: tmp}
 	r.job = job.ID
@@ -145,19 +147,19 @@ func (r *RemoteJob) convert(ctx context.Context, w *Worker, job jobs.Job, snap r
 	for {
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return "", nil, ctx.Err()
 		case <-t.C:
 			if held, err := w.Queue.HoldsLease(job.ID, r.Lease); err == nil && !held {
-				return "", errLeaseLost
+				return "", nil, errLeaseLost
 			}
 		case res := <-r.result:
 			switch {
 			case res.Kept != "":
-				return res.Stderr, kept("%s", res.Kept)
+				return res.Stderr, res.Command, kept("%s", res.Kept)
 			case res.Err != nil:
-				return res.Stderr, res.Err
+				return res.Stderr, res.Command, res.Err
 			}
-			return res.Stderr, nil // the upload is in tmp already
+			return res.Stderr, res.Command, nil // the upload is in tmp already
 		}
 	}
 }
