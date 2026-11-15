@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -18,7 +19,7 @@ func TestTokenCommandPrintsTokenAndSignInAddress(t *testing.T) {
 	t.Setenv("SYP_DATA", dir)
 	t.Setenv("SYP_ADDR", "192.0.2.7:9000")
 	var out, errOut bytes.Buffer
-	if rc := tokenCommand(&out, &errOut); rc != 0 {
+	if rc := tokenCommand(nil, &out, &errOut); rc != 0 {
 		t.Fatalf("rc %d: %s", rc, errOut.String())
 	}
 	want := "Access token: abc_DEF-123\nSign-in address: http://192.0.2.7:9000/?token=abc_DEF-123\n"
@@ -37,7 +38,7 @@ func TestTokenCommandWithNoToken(t *testing.T) {
 		t.Skip("an installed service's token exists on this machine")
 	}
 	var out, errOut bytes.Buffer
-	if rc := tokenCommand(&out, &errOut); rc != 1 || !strings.Contains(errOut.String(), "No access token") {
+	if rc := tokenCommand(nil, &out, &errOut); rc != 1 || !strings.Contains(errOut.String(), "No access token") {
 		t.Errorf("rc %d, %q", rc, errOut.String())
 	}
 }
@@ -70,7 +71,7 @@ func TestTokenCommandFindsTheInstalledAddress(t *testing.T) {
 	}
 	run := func() string {
 		var out, errOut bytes.Buffer
-		if rc := tokenCommand(&out, &errOut); rc != 0 {
+		if rc := tokenCommand(nil, &out, &errOut); rc != 0 {
 			t.Fatalf("rc %d %s", rc, errOut.String())
 		}
 		return out.String()
@@ -127,5 +128,103 @@ func TestInstalledDataDirOnEachLayout(t *testing.T) {
 	t.Setenv("SYP_DATA", "/srv/own")
 	if got := installedDataDir(map[string]string{"SYP_DATA": "/var/lib/shrink-your-shit"}); got != "/srv/own" {
 		t.Errorf("SYP_DATA: %q", got)
+	}
+}
+
+func TestTokenArgsBothOrders(t *testing.T) {
+	cases := []struct {
+		args []string
+		want []string
+		ok   bool
+	}{
+		{[]string{"token"}, []string{}, true},
+		{[]string{"token", "-data", "/d"}, []string{"-data", "/d"}, true},
+		{[]string{"-data", "/d", "token"}, []string{"-data", "/d"}, true},
+		{[]string{"--data", "/d", "token"}, []string{"-data", "/d"}, true},
+		{[]string{"-data=/d", "token"}, []string{"-data=/d"}, true},
+		{[]string{"-data", "/d"}, nil, false},
+		{[]string{"-addr", ":8484"}, nil, false},
+		{nil, nil, false},
+	}
+	for _, c := range cases {
+		got, ok := tokenArgs(c.args)
+		if ok != c.ok || strings.Join(got, "|") != strings.Join(c.want, "|") {
+			t.Errorf("tokenArgs(%q) = %q, %v; want %q, %v", c.args, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+// -data reads that folder and no other, whichever argument order brought it here.
+func TestTokenWithDataReadsOnlyThatFolder(t *testing.T) {
+	dir, other := t.TempDir(), t.TempDir()
+	os.WriteFile(filepath.Join(dir, web.TokenFile), []byte("from-data\n"), 0o600)
+	os.WriteFile(filepath.Join(other, web.TokenFile), []byte("from-env\n"), 0o600)
+	t.Setenv("SYP_DATA", other)
+	t.Setenv("SYP_ADDR", "192.0.2.7:9000")
+	for _, args := range [][]string{{"-data", dir}, {"-data=" + dir}} {
+		var out, errOut bytes.Buffer
+		if rc := tokenCommand(args, &out, &errOut); rc != 0 {
+			t.Fatalf("%v: rc %d: %s", args, rc, errOut.String())
+		}
+		if !strings.Contains(out.String(), "Access token: from-data\n") {
+			t.Errorf("%v: got\n%s", args, out.String())
+		}
+	}
+}
+
+// A folder with no token file says so, names the folder, and never claims no token is set.
+func TestTokenWithDataMissingFileNamesTheFolder(t *testing.T) {
+	dir := t.TempDir()
+	var out, errOut bytes.Buffer
+	if rc := tokenCommand([]string{"-data", dir}, &out, &errOut); rc != 1 {
+		t.Fatalf("rc %d", rc)
+	}
+	msg := errOut.String()
+	if !strings.Contains(msg, dir) || !strings.Contains(msg, web.TokenFile) || strings.Contains(msg, "No access token is set") {
+		t.Errorf("message: %q", msg)
+	}
+}
+
+// A read error that is not a permission problem is reported as itself, not as "no token".
+func TestTokenWithDataReportsTheRealReadError(t *testing.T) {
+	dir := t.TempDir()
+	os.Mkdir(filepath.Join(dir, web.TokenFile), 0o755) // a folder where the file should be
+	var out, errOut bytes.Buffer
+	if rc := tokenCommand([]string{"-data", dir}, &out, &errOut); rc != 1 {
+		t.Fatalf("rc %d", rc)
+	}
+	msg := errOut.String()
+	if !strings.Contains(msg, "Cannot read the access token in "+dir) || strings.Contains(msg, "No access token") {
+		t.Errorf("message: %q", msg)
+	}
+}
+
+func TestTokenWithDataEmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, web.TokenFile), []byte(" \n"), 0o600)
+	var out, errOut bytes.Buffer
+	if rc := tokenCommand([]string{"-data", dir}, &out, &errOut); rc != 1 || !strings.Contains(errOut.String(), "is empty") {
+		t.Errorf("rc %d: %q", rc, errOut.String())
+	}
+}
+
+// Denied access gets the sudo hint for this folder. Root reads anything, so the test needs another user.
+func TestTokenWithDataPermissionDenied(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a non-root Unix user to be denied")
+	}
+	dir := t.TempDir()
+	p := filepath.Join(dir, web.TokenFile)
+	os.WriteFile(p, []byte("tok\n"), 0o000)
+	var out, errOut bytes.Buffer
+	if rc := tokenCommand([]string{"-data", dir}, &out, &errOut); rc != 1 || !strings.Contains(errOut.String(), "sudo shrink-your-shit token -data "+dir) {
+		t.Errorf("rc %d: %q", rc, errOut.String())
+	}
+}
+
+func TestTokenUsageErrorIsExit2(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if rc := tokenCommand([]string{"extra"}, &out, &errOut); rc != 2 {
+		t.Errorf("rc %d: %q", rc, errOut.String())
 	}
 }

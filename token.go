@@ -5,6 +5,7 @@ package main
 import (
 	"bufio"
 	"errors"
+	"flag"
 	"fmt"
 	"html"
 	"io"
@@ -22,10 +23,35 @@ import (
 // linuxEnvFile is where install.sh keeps the Linux service's settings.
 const linuxEnvFile = "/etc/default/shrink-your-shit"
 
-// tokenCommand is "shrink-your-shit token": print the access token and the sign-in address. It finds
-// the installed service's data folder by itself, so nobody has to pass flags.
-func tokenCommand(out, errOut io.Writer) int {
+// tokenArgs picks the token command out of the program's arguments: "token [-data X]" or "-data X token"
+// (also -data=X and --data). ok is false when the arguments are not the token command.
+func tokenArgs(args []string) (rest []string, ok bool) {
+	switch {
+	case len(args) > 0 && args[0] == "token":
+		return args[1:], true
+	case len(args) == 3 && (args[0] == "-data" || args[0] == "--data") && args[2] == "token":
+		return []string{"-data", args[1]}, true
+	case len(args) == 2 && (strings.HasPrefix(args[0], "-data=") || strings.HasPrefix(args[0], "--data=")) && args[1] == "token":
+		return args[:1], true
+	}
+	return nil, false
+}
+
+// tokenCommand is "shrink-your-shit token": print the access token and the sign-in address. Without
+// -data it finds the installed service's data folder by itself. With -data it reads only that folder,
+// and takes no data lock, so it works while the service runs.
+func tokenCommand(args []string, out, errOut io.Writer) int {
+	fl := flag.NewFlagSet("token", flag.ContinueOnError)
+	fl.SetOutput(errOut)
+	data := fl.String("data", "", "the service's data folder, if it was started with its own -data (default: the installed service's)")
+	if err := fl.Parse(args); err != nil || fl.NArg() != 0 {
+		fmt.Fprintln(errOut, "usage: shrink-your-shit token [-data <folder>]   (or: shrink-your-shit -data <folder> token)")
+		return 2
+	}
 	env := envFile(linuxEnvFile)
+	if *data != "" {
+		return tokenFromFolder(*data, env, out, errOut)
+	}
 	var denied error
 	for _, dir := range tokenDirs(env) {
 		tok, err := web.ReadToken(dir)
@@ -36,12 +62,7 @@ func tokenCommand(out, errOut io.Writer) int {
 		if err != nil || tok == "" {
 			continue
 		}
-		if addr := installedAddr(env); addr != "" {
-			fmt.Fprintf(out, "Access token: %s\nSign-in address: %s\n", tok, signInURL(addr, tok))
-		} else {
-			fmt.Fprintf(out, "Access token: %s\nSign-in address: http://<this computer's address>:8484/?token=%s\n"+
-				"(use the port you set with -addr or SYP_ADDR if it is not 8484)\n", tok, url.QueryEscape(tok))
-		}
+		printToken(tok, env, out)
 		return 0
 	}
 	if denied != nil {
@@ -50,6 +71,36 @@ func tokenCommand(out, errOut io.Writer) int {
 	}
 	fmt.Fprintln(errOut, "No access token is set. That means the web page only listens on this computer and needs no sign-in.")
 	return 1
+}
+
+// tokenFromFolder reads the token from the one folder given with -data, and says what it found there.
+func tokenFromFolder(dir string, env map[string]string, out, errOut io.Writer) int {
+	tok, err := web.ReadToken(dir)
+	switch {
+	case errors.Is(err, fs.ErrPermission):
+		fmt.Fprintf(errOut, "Cannot read the access token in %s (%v).\nRun it as the user the service runs as, or with sudo: sudo shrink-your-shit token -data %s\n", dir, err, dir)
+		return 1
+	case errors.Is(err, fs.ErrNotExist):
+		fmt.Fprintf(errOut, "No access token in %s: there is no %s there. A service started with this folder makes one when it listens beyond this computer.\n", dir, web.TokenFile)
+		return 1
+	case err != nil:
+		fmt.Fprintf(errOut, "Cannot read the access token in %s: %v\n", dir, err)
+		return 1
+	case tok == "":
+		fmt.Fprintf(errOut, "The access token file in %s is empty.\n", dir)
+		return 1
+	}
+	printToken(tok, env, out)
+	return 0
+}
+
+func printToken(tok string, env map[string]string, out io.Writer) {
+	if addr := installedAddr(env); addr != "" {
+		fmt.Fprintf(out, "Access token: %s\nSign-in address: %s\n", tok, signInURL(addr, tok))
+	} else {
+		fmt.Fprintf(out, "Access token: %s\nSign-in address: http://<this computer's address>:8484/?token=%s\n"+
+			"(use the port you set with -addr or SYP_ADDR if it is not 8484)\n", tok, url.QueryEscape(tok))
+	}
 }
 
 // installedAddr is the address the program was set up to listen on: SYP_ADDR, else what an installer
