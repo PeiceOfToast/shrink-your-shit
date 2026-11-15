@@ -254,6 +254,7 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 			Kept    string            // its checks said no (the words)
 			Message string            // it failed: why
 			Stderr  string
+			Args    []string // the ffmpeg arguments it ran
 			Steps   []jobs.RunStep
 			Failure *jobs.FailureSummary
 		}
@@ -261,7 +262,7 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 			return
 		}
 		pl, _ := rj.Plan()
-		res := worker.RemoteResult{Stderr: in.Stderr}
+		res := worker.RemoteResult{Stderr: in.Stderr, Command: in.Args}
 		switch {
 		case in.Kept != "":
 			res.Kept = in.Kept

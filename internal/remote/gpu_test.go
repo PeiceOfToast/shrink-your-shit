@@ -88,7 +88,7 @@ func convertH264(t *testing.T, primary *string, caps []map[string]any, x *record
 	if err := os.WriteFile(out, nil, 0o600); err != nil { // the staged file the encode writes into
 		t.Fatal(err)
 	}
-	_, err = c.convert(context.Background(), cv, l, rules.Snapshot{Plan: plan}, "/in.mkv", out)
+	_, _, err = c.convert(context.Background(), cv, l, rules.Snapshot{Plan: plan}, "/in.mkv", out)
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
 	return rec.notes, rec.encoders, err
