@@ -263,6 +263,41 @@ nvidia_card() {
   return 1
 }
 
+# apt_install PKG...: a quiet, non-interactive install without recommended packages. Failure is the caller's to judge.
+apt_install() {
+  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends "$@" >/dev/null 2>&1
+}
+
+# have_va_driver KIND: is the VA-API driver for KIND (intel or amd) on this machine? Decided by its file, so it
+# works on every distribution. SYP_DRI (tests only) replaces the folders searched.
+have_va_driver() {
+  case $1 in
+    intel) files="iHD_drv_video.so i965_drv_video.so" ;;
+    amd) files="radeonsi_drv_video.so" ;;
+  esac
+  dirs=${SYP_DRI:-${LIBVA_DRIVERS_PATH:+$(printf '%s' "$LIBVA_DRIVERS_PATH" | tr ':' ' ')} /usr/lib/x86_64-linux-gnu/dri /usr/lib/aarch64-linux-gnu/dri /usr/lib64/dri /usr/lib/dri}
+  for d in $dirs; do
+    for f in $files; do [ -e "$d/$f" ] && return 0; done
+  done
+  return 1
+}
+
+# video_driver KIND (intel or amd): make sure the chip's VA-API driver is installed. With apt it installs it when
+# it is missing (package lists updated once per install). 0: the driver is there.
+APT_UPDATED=
+video_driver() {
+  have_va_driver "$1" && return 0
+  have apt-get || return 1
+  if [ -z "$APT_UPDATED" ]; then $SUDO apt-get update -qq >/dev/null 2>&1 || true; APT_UPDATED=1; fi
+  case $1 in
+    intel)
+      apt_install intel-media-va-driver-non-free || apt_install intel-media-va-driver || true
+      apt_install libmfx-gen1.2 || true ;; # not every release has it: skipped quietly
+    amd) apt_install mesa-va-drivers || true ;;
+  esac
+  have_va_driver "$1"
+}
+
 gpu_access() {
   dri=${SYP_DEV:-/dev}/dri
   shown=
@@ -270,13 +305,17 @@ gpu_access() {
     [ -e "$node" ] || continue
     vendor=$(cat "${SYP_SYS:-/sys}/class/drm/$(basename "$node")/device/vendor" 2>/dev/null || true)
     case $vendor in
-      0x8086) name="Intel Quick Sync" ;;
-      0x1002) name="AMD graphics" ;;
+      0x8086) name="Intel Quick Sync"; kind=intel ;;
+      0x1002) name="AMD graphics"; kind=amd ;;
       *) continue ;;
     esac
     shown=1
     if reason=$(give_service_access "$node"); then
-      say "Found: $name ($(basename "$node")). Using it."
+      if video_driver "$kind"; then
+        say "Found: $name ($(basename "$node")). Using it."
+      else
+        say "Found: $name ($(basename "$node")), but its video driver isn't installed. Converting on the processor for now. Install the $kind VA-API video driver, then run this again."
+      fi
     else
       say "Found: $name ($(basename "$node")), but couldn't give the service access to it: $reason. Converting on the processor for now."
     fi
