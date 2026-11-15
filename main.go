@@ -223,6 +223,15 @@ func main() {
 
 	x := media.OSExec{}
 	chk := &doctor.Checker{Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath, KnownOriginals: store.KnownOriginals}
+	chk.OnTested = func(at time.Time, rs []doctor.EncoderResult) { // Q1: this computer's test run is kept in the database
+		rows := make([]jobs.EncoderTest, 0, len(rs))
+		for _, r := range rs {
+			rows = append(rows, jobs.EncoderTest{Encoder: r.Encoder, Passed: r.Passed, Detail: r.Detail})
+		}
+		if err := store.RecordEncoderTests("server", at.UTC().Format(time.RFC3339), rows); err != nil {
+			log.Printf("encoder tests: %v", err)
+		}
+	}
 	tools := chk.Converter(ctx)
 	converts := tools.Converts()
 	// E3b2: a joined install runs its worker loop from here (joinedworker.go).

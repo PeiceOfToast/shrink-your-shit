@@ -110,7 +110,7 @@ type Worker struct {
 	Encoder func(codec string) (enc, note string)
 	// verified is the probe of the new file the last check passed (S5: stored for its final path).
 	verified media.Info
-	check    *checkResult // the picture check's score for the job in hand (nil: none ran); set by the comparison
+	check    *CheckScore // the picture check's score for the job in hand (nil: none ran); set by the comparison
 	// remote is the job a worker on another computer converts, run here (V7b2); nil for a local one.
 	remote *RemoteJob
 	// failures: the running job's path's choices for when it doesn't work (V6b; under mu)
@@ -1603,8 +1603,8 @@ func ffmpegExit(err error) (ran bool, exit int) {
 	return false, -1
 }
 
-// checkResult is the picture check's score for a job and the least it needed (the job's check step).
-type checkResult struct {
+// CheckScore is the picture check's score for a job and the least it needed (the job's check step).
+type CheckScore struct {
 	Score, Min float64
 	Passed     bool
 }
