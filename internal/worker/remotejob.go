@@ -188,16 +188,18 @@ const remoteDecodeFull = 120
 
 // CheckResult runs the checks a local conversion's result gets (its shape, a decode, the picture check
 // at the plan's threshold) on the file at out, made from src: a remote worker's checks before it
-// uploads (Q4 a). A *KeptError: a check said no.
-func CheckResult(ctx context.Context, x media.Exec, ffmpeg, ffprobe string, snap rules.Snapshot, src, out string) error {
+// uploads (Q4 a). A *KeptError: a check said no. The picture check's score is returned when it ran (nil
+// when none did), so the remote report can carry the job's check step.
+func CheckResult(ctx context.Context, x media.Exec, ffmpeg, ffprobe string, snap rules.Snapshot, src, out string) (*CheckScore, error) {
 	if snap.Source == nil {
-		return errors.New("the plan has no probe of the original")
+		return nil, errors.New("the plan has no probe of the original")
 	}
 	st, err := os.Stat(src)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	w := &Worker{Exec: x, FFmpeg: ffmpeg, FFprobe: ffprobe, MinSSIM: snap.Verify.MinSSIM, DecodeCheck: snap.Verify.DecodeCheck,
 		FullDecodeMaxSec: snap.Verify.FullDecodeMaxSec}
-	return w.verify(ctx, *snap.Source, snap.Expect, src, out, st.Size())
+	err = w.verify(ctx, *snap.Source, snap.Expect, src, out, st.Size())
+	return w.check, err
 }

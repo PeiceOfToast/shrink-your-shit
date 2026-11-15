@@ -95,6 +95,9 @@ type Checker struct {
 	// KnownOriginals are the kept originals the database knows (jobs.Store.KnownOriginals); nil: the
 	// check for orphaned ones is skipped (no database at hand).
 	KnownOriginals func() (map[string]bool, error)
+	// OnTested, when set, gets each hardware test run's results once it is stored (the database keeps them;
+	// nil: nothing is kept). It is called without the lock.
+	OnTested func(at time.Time, results []EncoderResult)
 
 	mu      sync.Mutex
 	tools   *Tools // the converter, without the hardware test
@@ -138,14 +141,54 @@ func (c *Checker) Tools(ctx context.Context) Tools {
 		c.mu.Unlock()
 		hw := c.hardwareTest(ctx, t)
 		c.mu.Lock()
-		if ctx.Err() == nil { // a test cut short by its caller is not a result: the next caller runs it again
-			c.hw, c.hwAt = &hw, time.Now()
+		at := time.Now()
+		stored := ctx.Err() == nil // a test cut short by its caller is not a result: the next caller runs it again
+		if stored {
+			c.hw, c.hwAt = &hw, at
 		}
 		c.hwRun = nil
 		close(run)
 		c.mu.Unlock()
-		return t.withEncoders(hw, time.Now())
+		if stored && c.OnTested != nil {
+			c.OnTested(at, resultsOf(hw))
+		}
+		return t.withEncoders(hw, at)
 	}
+}
+
+// EncoderResult is one encoder's result in a test run: Passed when it encoded a test frame; Detail "10-bit"
+// for a working hardware encoder that also did 10-bit.
+type EncoderResult struct {
+	Encoder string
+	Passed  bool
+	Detail  string
+}
+
+// results lists the test run's encoders: the working ones (hardware, then software), then the listed ones
+// that did not work.
+func resultsOf(hw [5][]string) []EncoderResult {
+	var out []EncoderResult
+	ten := map[string]bool{}
+	for _, e := range hw[2] {
+		ten[e] = true
+	}
+	for _, e := range hw[0] {
+		d := ""
+		if ten[e] {
+			d = "10-bit"
+		}
+		out = append(out, EncoderResult{Encoder: e, Passed: true, Detail: d})
+	}
+	for _, e := range hw[3] {
+		out = append(out, EncoderResult{Encoder: e, Passed: true})
+	}
+	for _, e := range hw[1] {
+		out = append(out, EncoderResult{Encoder: e})
+	}
+	for _, e := range hw[4] {
+		out = append(out, EncoderResult{Encoder: e})
+	}
+	return out
 }
 
 // hardwareTest finds the hardware HEVC encoders ffmpeg lists and tries each on one tiny frame (listed
