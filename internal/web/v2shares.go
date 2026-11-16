@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -66,7 +67,7 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 			apiError(w, http.StatusConflict, "name_taken", err.Error())
 			return
 		}
-		addr, typ, err := parseAddress(in.Address)
+		addr, typ, err := parseAddress(in.Address, in.Type)
 		if err != nil {
 			apiError(w, http.StatusBadRequest, "invalid_address", err.Error())
 			return
@@ -130,7 +131,7 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 			changed = true
 		}
 		if v, ok := raw["address"].(string); ok && v != "" {
-			a, t, pErr := parseAddress(v)
+			a, t, pErr := parseAddress(v, typeStr)
 			if pErr != nil {
 				apiError(w, http.StatusBadRequest, "invalid_address", pErr.Error())
 				return
@@ -211,7 +212,7 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 			writeJSON(w, map[string]any{"ok": false, "code": "invalid", "message": "Share type must be smb or nfs."})
 			return
 		}
-		addr, typ, err := parseAddress(in.Address)
+		addr, typ, err := parseAddress(in.Address, in.Type)
 		if err != nil {
 			writeJSON(w, map[string]any{"ok": false, "code": "invalid_address", "message": err.Error()})
 			return
@@ -364,8 +365,8 @@ func jsonStr(s string) string {
 
 // parseAddress cleans a share address and refuses one with a port: the root helper takes none (SMB always uses
 // 445, NFS 2049), so a share saved with one could never connect (orch-lead, ui-shop QA of #217).
-func parseAddress(raw string) (addr, typ string, err error) {
-	addr, typ, err = parseAddressForm(raw)
+func parseAddress(raw, reqType string) (addr, typ string, err error) {
+	addr, typ, err = parseAddressForm(raw, reqType)
 	if err != nil {
 		return "", "", err
 	}
@@ -374,6 +375,10 @@ func parseAddress(raw string) (addr, typ string, err error) {
 			return "", "", errors.New("Leave out the port: SMB always uses 445.")
 		}
 		return "", "", errors.New("Leave out the port: NFS uses 2049.")
+	}
+	// never save an NFS address the root helper would refuse at mount time
+	if typ == "nfs" && (len(addr) > 1024 || !nfsRule.MatchString(addr)) {
+		return "", "", errNFSLooks
 	}
 	return addr, typ, nil
 }
@@ -410,7 +415,9 @@ func hasPort(host string) bool {
 // dialHost is a host for net.JoinHostPort: an IPv6 address without its brackets.
 func dialHost(host string) string { return strings.TrimSuffix(strings.TrimPrefix(host, "["), "]") }
 
-func parseAddressForm(raw string) (addr, typ string, err error) {
+// parseAddressForm reads the address as its form says, with reqType the share type the request sends.
+// A bare host/path is NFS only when that type is nfs; it is never guessed as SMB.
+func parseAddressForm(raw, reqType string) (addr, typ string, err error) {
 	raw = strings.TrimSpace(raw)
 	low := strings.ToLower(raw)
 	switch {
@@ -426,8 +433,8 @@ func parseAddressForm(raw string) (addr, typ string, err error) {
 		if rest == "" {
 			return "", "", errors.New("NFS address missing server and export after nfs://")
 		}
-		addr = rest
-		return addr, "nfs", nil
+		addr, err = nfsAddr(rest)
+		return addr, "nfs", err
 	case strings.HasPrefix(raw, `\\`):
 		if raw == `\\` {
 			return "", "", errors.New("SMB address missing server and share after \\\\")
@@ -437,10 +444,36 @@ func parseAddressForm(raw string) (addr, typ string, err error) {
 		if strings.HasPrefix(raw, ":") {
 			return "", "", errors.New("NFS address missing server before :/")
 		}
+		if reqType == "nfs" {
+			addr, err = nfsAddr(raw)
+			return addr, "nfs", err
+		}
 		return raw, "nfs", nil
+	case reqType == "nfs" && raw != "":
+		addr, err = nfsAddr(raw)
+		return addr, "nfs", err
 	}
 	return "", "", errors.New("Address must start with \\\\ or smb:// for SMB, or server:/export for NFS.")
 }
+
+// nfsAddr makes an NFS address host:/path: host/path and host:/path both become it (nfs:// is already
+// removed by the caller). A host with no path is refused here, with the same sentence as the rule.
+func nfsAddr(rest string) (string, error) {
+	slash := strings.Index(rest, "/")
+	if i := strings.Index(rest, ":/"); i >= 0 && (slash < 0 || i < slash) {
+		return rest, nil
+	}
+	if slash <= 0 {
+		return "", errNFSLooks
+	}
+	return rest[:slash] + ":" + rest[slash:], nil
+}
+
+var errNFSLooks = errors.New("An NFS address looks like nas:/volume1/media.")
+
+// nfsRule is the root helper's rule for an NFS address (nfsAddress in cmd/syp-network-helper/validate.go):
+// host:/export, no control characters, no backslash. The cmd package can't be imported, so it is copied here.
+var nfsRule = regexp.MustCompile(`^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|\[[0-9A-Fa-f:.]{2,45}\]):/[^\x00-\x1f\x7f\\]*$`)
 
 // uidMapFile is the kernel's user-namespace map for this process. A package var so tests can point
 // it at a fake map.

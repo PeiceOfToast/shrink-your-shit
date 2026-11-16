@@ -1128,3 +1128,84 @@ func TestRemountSharesAtStart(t *testing.T) {
 		t.Errorf("Second: want not_connected, got %v", status["Second"])
 	}
 }
+
+// The three NFS forms are one address, host:/path; a bare host/path is NFS only when the request says nfs.
+func TestNFSAddressFormsNormaliseToHostColonPath(t *testing.T) {
+	for _, c := range []struct{ raw, reqType, want string }{
+		{"nas/volume1/media", "nfs", "nas:/volume1/media"},
+		{"nfs://nas/volume1/media", "", "nas:/volume1/media"},
+		{"nas:/volume1/media", "nfs", "nas:/volume1/media"},
+		{"10.10.1.50/mnt/DataSSD/SSD", "nfs", "10.10.1.50:/mnt/DataSSD/SSD"},
+	} {
+		addr, typ, err := parseAddress(c.raw, c.reqType)
+		if err != nil || typ != "nfs" || addr != c.want {
+			t.Errorf("%q (type %q): got %q %q %v, want %q nfs", c.raw, c.reqType, addr, typ, err, c.want)
+		}
+	}
+}
+
+// A bare host/path is never guessed as SMB, and SMB addresses are unchanged.
+func TestBareAddressIsNotGuessedAndSMBIsUnchanged(t *testing.T) {
+	if _, _, err := parseAddress("nas/volume1/media", ""); err == nil {
+		t.Error("a bare host/path without type nfs was accepted")
+	}
+	if _, _, err := parseAddress("nas/share", "smb"); err == nil {
+		t.Error("a bare host/path with type smb was accepted")
+	}
+	for _, c := range []struct{ raw, want string }{
+		{`\\nas\media`, `\\nas\media`},
+		{"smb://nas/media", `\\nas\media`},
+	} {
+		addr, typ, err := parseAddress(c.raw, "smb")
+		if err != nil || typ != "smb" || addr != c.want {
+			t.Errorf("%q: got %q %q %v, want %q smb", c.raw, addr, typ, err, c.want)
+		}
+	}
+}
+
+// A junk NFS address is refused when saved, and nothing is stored.
+func TestNFSJunkAddressRefusedAtSaveStoresNothing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no NFS")
+	}
+	home := filepath.Join(t.TempDir(), "home")
+	os.MkdirAll(home, 0o755)
+	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home)
+	defer os.Unsetenv("HOME")
+	srv, _, _ := server(t, false)
+
+	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares",
+		body: `{"type":"nfs","address":"junk","name":"Junk NFS"}`, ctype: "application/json"})
+	if code != http.StatusBadRequest || !strings.Contains(resp, "An NFS address looks like nas:/volume1/media.") {
+		t.Errorf("junk: %d %s", code, resp)
+	}
+	_, list, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/shares"})
+	if strings.Contains(list, "Junk NFS") {
+		t.Errorf("a refused share was stored: %s", list)
+	}
+}
+
+// The user's input, typed as host/path with type nfs, is saved as host:/path and shown that way.
+func TestNFSUserInputSavesAsHostColonPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no NFS")
+	}
+	home := filepath.Join(t.TempDir(), "home")
+	os.MkdirAll(home, 0o755)
+	os.Setenv("HOME", home)
+	t.Setenv("APPDATA", home)
+	defer os.Unsetenv("HOME")
+	srv, _, _ := server(t, false)
+
+	code, resp, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/shares",
+		body: `{"type":"nfs","address":"10.10.1.50/mnt/DataSSD/SSD","name":"DataSSD"}`, ctype: "application/json"})
+	if code != http.StatusCreated {
+		t.Fatalf("POST: %d %s", code, resp)
+	}
+	var share struct{ Address string }
+	json.Unmarshal([]byte(resp), &share)
+	if share.Address != "10.10.1.50:/mnt/DataSSD/SSD" {
+		t.Errorf("saved address %q, want 10.10.1.50:/mnt/DataSSD/SSD", share.Address)
+	}
+}
