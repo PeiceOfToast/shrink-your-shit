@@ -371,6 +371,10 @@ func parseAddress(raw, reqType string) (addr, typ string, err error) {
 	if err != nil {
 		return "", "", err
 	}
+	// an address in another type's form is refused, not saved as that type (an NFS share is never saved as SMB)
+	if reqType != "" && typ != reqType {
+		return "", "", fmt.Errorf("That address is for %s, but this share is %s.", strings.ToUpper(typ), strings.ToUpper(reqType))
+	}
 	if hasPort(addressHost(typ, addr)) {
 		if typ == "smb" {
 			return "", "", errors.New("Leave out the port: SMB always uses 445.")
