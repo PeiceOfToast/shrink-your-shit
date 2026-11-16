@@ -219,3 +219,17 @@ func TestSharesDirMustNotBeWritableByOthers(t *testing.T) {
 		t.Error("symlinked shares folder accepted")
 	}
 }
+
+// The same host table as internal/web's TestNFSRuleHostsMatchHelperTable: the two rules must agree.
+func TestNFSAddressHostsMatchWebTable(t *testing.T) {
+	for _, h := range []string{"nas", "10.0.0.1", "[fe80::1]", "a.b-c"} {
+		if err := validateAddress("nfs", h+":/export"); err != nil {
+			t.Errorf("%q refused: %v", h, err)
+		}
+	}
+	for _, h := range []string{"bad host", "-nas", "nas!"} {
+		if validateAddress("nfs", h+":/export") == nil {
+			t.Errorf("%q accepted", h)
+		}
+	}
+}
