@@ -10,6 +10,7 @@ const now = Date.now(), ago = (min: number) => new Date(now - min * 60e3).toISOS
 const GB = 1e9;
 const mockMode = new URLSearchParams(location.search).get("mock");
 const shareMode = new URLSearchParams(location.search).get("sharemode") || "app";
+const shareReason = new URLSearchParams(location.search).get("sharereason") === "unprivileged";
 
 function library(id: ID, name: string, path: string, freed: number, waitingToFree: number, files: number): Library {
   return {
@@ -74,6 +75,7 @@ interface State {
   trash: Trash; // GET /trash (not on dev yet: mocked like the rest of the page)
   shares: ShareItem[]; // D: network shares
   mode: "app" | "manual" | "docker"; // D: share connect mode
+  modeReason: "unprivileged_container" | null; // D: sample with ?sharereason=unprivileged
   setup: Setup; // enrollment (section 11): fresh is unset, running is a server
 }
 
@@ -120,6 +122,7 @@ function running(): State {
     ],
     trash: { bytes: 120 * GB, files: 14, nextDeleteAt: ago(-60 * 24), lastDeleteAt: ago(-60 * 24 * 7) },
     mode: shareMode as "app" | "manual" | "docker",
+    modeReason: shareReason && shareMode !== "app" ? "unprivileged_container" : null,
     setup: { role: "server", join: null }, shares: [
       { id: "1", name: "Movies NAS", type: "smb", address: "\\\\nas\\movies", guest: false, username: "mediauser", hasPassword: true,
         status: "connected", since: ago(60 * 24 * 30), reason: null,
@@ -138,7 +141,7 @@ function fresh(): State {
     settings: { firstRunDone: false, firstRunStep: 1, intakePaused: false, catalogueEnabled: false, firstRunLibrary: null, scanEvery: 30, scanEverySource: "flag" },
     libraries: [],
     workers: [worker("this", "This computer", "paused", [0, 2], [0, 0], 5, [])], // workers start stopped (rebuild decision)
-    jobs: [], waiting: 0, last24h: { completed: 0, failed: 0, skipped: 0, successRate: null }, activity: [], wf: [], trash: { bytes: 0, files: 0, nextDeleteAt: null, lastDeleteAt: null }, shares: [], mode: "app", setup: { role: "unset", join: null },
+    jobs: [], waiting: 0, last24h: { completed: 0, failed: 0, skipped: 0, successRate: null }, activity: [], wf: [], trash: { bytes: 0, files: 0, nextDeleteAt: null, lastDeleteAt: null }, shares: [], mode: "app", modeReason: null, setup: { role: "unset", join: null },
   };
 }
 

@@ -97,3 +97,21 @@ func TestDockerSetupUserNamespaceNoCapLines(t *testing.T) {
 		t.Errorf("user namespace must give the host-mount steps, not a Docker volume:\n%s", text)
 	}
 }
+
+// The page explains a manual or docker share setup only inside an unprivileged container (a namespace
+// map that is not the whole host range); a full map and the app mode give no reason.
+func TestModeReasonOnlyInUnprivilegedContainer(t *testing.T) {
+	writeUIDMap(t, "         0       1000          1\n")
+	for _, mode := range []string{"manual", "docker"} {
+		if got := modeReasonFor(mode); got != "unprivileged_container" {
+			t.Errorf("namespace map, mode %s: got %v, want unprivileged_container", mode, got)
+		}
+	}
+	if got := modeReasonFor("app"); got != nil {
+		t.Errorf("namespace map, mode app: got %v, want null", got)
+	}
+	writeUIDMap(t, "         0          0 4294967295\n")
+	if got := modeReasonFor("manual"); got != nil {
+		t.Errorf("full map, mode manual: got %v, want null", got)
+	}
+}

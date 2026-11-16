@@ -28,6 +28,7 @@ export interface Share {
 
 export interface SharesResponse {
   mode: ShareMode;
+  modeReason: "unprivileged_container" | null; // why manual or docker: the server is in an unprivileged container
   platform: Platform;
   nfsSupported: boolean;
   testedPlatform: boolean;

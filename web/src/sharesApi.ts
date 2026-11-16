@@ -17,7 +17,7 @@ export async function sharesSupported(): Promise<boolean> {
 export async function getShares(): Promise<Answer<SharesResponse>> {
   if (MOCK) {
     const s = mockState();
-    return { mode: s.mode, platform: "linux", nfsSupported: true, testedPlatform: true, serverAddress: "192.168.1.20", items: s.shares };
+    return { mode: s.mode, modeReason: s.modeReason, platform: "linux", nfsSupported: true, testedPlatform: true, serverAddress: "192.168.1.20", items: s.shares };
   }
   return call("GET", "/api/v2/shares");
 }

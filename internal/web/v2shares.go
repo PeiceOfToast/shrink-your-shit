@@ -42,6 +42,7 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 			"mode": mode, "platform": platform,
 			"nfsSupported": nfsOK, "testedPlatform": tested,
 			"serverAddress": nil, "items": items,
+			"modeReason": modeReasonFor(mode),
 		})
 	})
 
@@ -493,6 +494,15 @@ func inUserNamespace() bool {
 		}
 	}
 	return true
+}
+
+// modeReasonFor says why the shares are manual or docker in an unprivileged container, for the page to
+// explain in plain words; nil (null) otherwise.
+func modeReasonFor(mode string) any {
+	if (mode == "manual" || mode == "docker") && inUserNamespace() {
+		return "unprivileged_container"
+	}
+	return nil
 }
 
 func detectMode() (mode, platform string) {
