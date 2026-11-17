@@ -218,7 +218,9 @@ func (w *Worker) decodeRun(ctx context.Context, tmp string, videoOrd int, start,
 	if length > 0 {
 		args = append(args, "-ss", secs(start))
 	}
-	args = append(args, "-i", tmp)
+	// -copyts: keep the file's own timestamps. Without it ffmpeg shifts AAC's priming (about -21 ms) into
+	// the video, and the null muxer then reports false "non monotonically increasing dts" errors.
+	args = append(args, "-copyts", "-i", tmp)
 	if length > 0 {
 		args = append(args, "-t", secs(length))
 	}
