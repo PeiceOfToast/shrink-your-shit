@@ -462,7 +462,7 @@ func (w *Worker) recordEncode(id int64, args []string, started time.Time, encErr
 	}
 	for _, l := range lines {
 		stream := "stderr"
-		if strings.HasPrefix(l, "libva info:") { // the GPU driver's chatter: kept in the log, not shown as ffmpeg's output
+		if strings.HasPrefix(strings.ToLower(l), "libva info:") { // the GPU driver's chatter: kept in the log, not shown as ffmpeg's output
 			stream = "info"
 		}
 		w.Queue.AppendLogLine(id, 0, stream, l)

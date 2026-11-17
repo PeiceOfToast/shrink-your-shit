@@ -228,15 +228,14 @@ var (
 
 func (w *Worker) decodeRun(ctx context.Context, tmp string, videoOrd int, start, length, playSec, fps float64) error {
 	args := []string{"-v", "error", "-xerror", "-nostdin", "-progress", "pipe:1"}
+	// -ss and -t go before -i as input options. With -copyts an output -t is an absolute end time, so a
+	// sample starting at 5 s with length 3 played nothing.
 	if length > 0 {
-		args = append(args, "-ss", secs(start))
+		args = append(args, "-ss", secs(start), "-t", secs(length))
 	}
 	// -copyts: keep the file's own timestamps. Without it ffmpeg shifts AAC's priming (about -21 ms) into
 	// the video, and the null muxer then reports false "non monotonically increasing dts" errors.
 	args = append(args, "-copyts", "-i", tmp)
-	if length > 0 {
-		args = append(args, "-t", secs(length))
-	}
 	// Only the video is played: it is the part this program re-encoded. The audio and subtitles are
 	// copied bit for bit from the original, so any oddity in them was already in the original.
 	args = append(args, "-map", fmt.Sprintf("0:v:%d", videoOrd), "-f", "null", "-")
@@ -258,7 +257,25 @@ func (w *Worker) decodeRun(ctx context.Context, tmp string, videoOrd int, start,
 		log.Printf("playback test of %s: %s", tmp, firstLines(text, 3))
 		return playbackKept(progress, string(stderr), start, length, playSec, fps)
 	}
+	// A sample that played no frames proves nothing: keep the original rather than pass it silently.
+	if frame, ok := progressFrame(progress); length > 0 && (!ok || frame == 0) {
+		return playedNothingKept(progress, start, length, fps)
+	}
 	return nil
+}
+
+// playedNothingKept is the refusal for a sampled playback test that decoded no frames.
+func playedNothingKept(progress []byte, start, length, fps float64) error {
+	ke := kept("the playback test of the new file played nothing from its sample, so the original is kept").(*KeptError)
+	where := "Where: playback did not report how far it got"
+	if frame, ok := progressFrame(progress); ok {
+		where = fmt.Sprintf("Where: playback reached frame %d", frame)
+		if fps > 0 {
+			where += fmt.Sprintf(" (about %s)", rules.Clock(start+float64(frame)/fps))
+		}
+	}
+	ke.Detail = []string{fmt.Sprintf("Check: playback test, %d s sample from %s", int(length), rules.Clock(start)), where}
+	return ke
 }
 
 // playbackKept is the refusal for a file that does not play cleanly. The reason is plain; the job log gets the

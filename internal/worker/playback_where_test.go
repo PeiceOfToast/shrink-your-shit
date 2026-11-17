@@ -3,6 +3,7 @@
 package worker
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -44,5 +45,38 @@ func TestPlaybackWhereSaysFrameAndTime(t *testing.T) {
 			}
 			t.Errorf("no Where line in detail %q", k.Detail)
 		})
+	}
+}
+
+// stubExec answers the playback test with fixed ffmpeg output and no error.
+type stubExec struct{ progress string }
+
+func (s stubExec) Stream(context.Context, func(string), string, ...string) (string, error) {
+	return "", nil
+}
+
+func (s stubExec) Output(context.Context, string, ...string) ([]byte, error) {
+	return nil, nil
+}
+
+func (s stubExec) Capture(context.Context, string, ...string) ([]byte, []byte, error) {
+	return []byte(s.progress), nil, nil
+}
+
+// A sampled playback test that reports frame=0 played nothing: the original is kept, not passed.
+func TestSampledZeroFrameIsKept(t *testing.T) {
+	w := &Worker{Exec: stubExec{progress: "out_time_us=0\nframe=0\nprogress=end\n"}, FFmpeg: "ffmpeg"}
+	err := w.decodeRun(context.Background(), "x.mkv", 0, 5, 3, 10, 25)
+	var k *KeptError
+	if !errors.As(err, &k) {
+		t.Fatalf("decodeRun returned %v, want a *KeptError", err)
+	}
+	if !strings.Contains(k.Reason, "played nothing") {
+		t.Errorf("reason %q does not say the playback test played nothing", k.Reason)
+	}
+	assertPlain(t, k.Reason)
+	want := "Where: playback reached frame 0 (about 0:00:05)"
+	if len(k.Detail) < 2 || k.Detail[1] != want {
+		t.Errorf("detail %q, want second line %q", k.Detail, want)
 	}
 }

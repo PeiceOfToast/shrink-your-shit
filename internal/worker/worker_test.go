@@ -613,6 +613,8 @@ func TestDecodeModes(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			s := newScenario(t)
 			s.srcSpec.duration, s.outSpec.duration = c.duration, c.duration
+			// each playback run plays frames: a sample that reports none is kept, not passed
+			s.decodeStdout = "out_time_us=0\nframe=100\nprogress=end\n"
 			w := s.worker(Replace)
 			w.DecodeCheck = c.mode
 			w.RunOne(context.Background())
