@@ -289,8 +289,20 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 				}
 			}
 		}
+		// the server finishes the job after this report, and no worker renews its lease then: the lease
+		// covers that finish (the holder check is in the same step)
+		held, err := store.HoldThroughFinish(j.ID, rj.Lease)
+		if err != nil {
+			apiError(w, http.StatusInternalServerError, "lease_check_failed", "The server couldn't check the job's lease: "+err.Error())
+			return
+		}
+		if !held {
+			apiError(w, http.StatusConflict, "lease_gone", "This job already has an answer, or was given back to the queue.")
+			return
+		}
 		// store the remote worker's steps and failure summary directly, so the log looks complete even
-		// before the server-side recordEncode runs (E part 3: the remote brings back its data)
+		// before the server-side recordEncode runs (E part 3: the remote brings back its data). Only the
+		// attempt that holds the lease writes: a late report must not change the current attempt's record.
 		for _, st := range in.Steps {
 			if err := store.RecordRunStep(j.ID, st); err != nil {
 				log.Printf("remote step store: %v", err)
@@ -300,17 +312,13 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 			if err := store.SetFailureSummary(j.ID, *in.Failure); err != nil {
 				log.Printf("remote failure store: %v", err)
 			}
+		} else if err := store.ClearFailureSummary(j.ID); err != nil {
+			// this attempt has no failure of its own (kept, or done): an earlier attempt's must not show
+			log.Printf("remote failure clear: %v", err)
 		}
 		res.Steps = in.Steps
 		res.Failure = in.Failure
-		// the server finishes the job after this report, and no worker renews its lease then: the lease
-		// covers that finish (the holder check is in the same step)
-		held, err := store.HoldThroughFinish(j.ID, rj.Lease)
-		if err != nil {
-			apiError(w, http.StatusInternalServerError, "lease_check_failed", "The server couldn't check the job's lease: "+err.Error())
-			return
-		}
-		if !held || !rj.Deliver(res) {
+		if !rj.Deliver(res) {
 			apiError(w, http.StatusConflict, "lease_gone", "This job already has an answer, or was given back to the queue.")
 			return
 		}

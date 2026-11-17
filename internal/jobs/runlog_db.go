@@ -137,6 +137,13 @@ VALUES(?,?,?,?,?,?,?,?,?)`, id, f.Step, f.StepCount, f.AfterMs, f.MediaTime, f.H
 	return err
 }
 
+// ClearFailureSummary removes job id's failure summary: a new attempt has started, and an earlier attempt's
+// failure is not that attempt's own.
+func (s *Store) ClearFailureSummary(id int64) error {
+	_, err := s.db.Exec(`DELETE FROM job_failures WHERE job_id=?`, id)
+	return err
+}
+
 // FailureOf is job id's failure summary; nil when it has none (not failed, or failed before this was recorded).
 func (s *Store) FailureOf(id int64) (*FailureSummary, error) {
 	var f FailureSummary
