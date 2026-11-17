@@ -765,7 +765,7 @@ func TestSSIMAlignsTheNewFileByTheEncodersStartDelay(t *testing.T) {
 	}
 	joined := strings.Join(s.calls, "\n")
 	for _, want := range []string{
-		"-noaccurate_seek -ss 38.000 -t 23.000 -i", // both read from 12 s before the middle sample
+		"-noaccurate_seek -ss 38.000 -i", // both read from 12 s before the middle sample, with no input -t
 		"[0:v:0]setpts=PTS-(0.023000)/TB,trim=start=50.000:duration=10.000[a]",
 		"[1:v:0]setpts=PTS-(0.040000)/TB,trim=start=50.000:duration=10.000[b]",
 	} {

@@ -501,7 +501,8 @@ func sampleSegments(duration float64) []segment {
 // seconds later with x264's defaults) but the HEVC result exactly at it. So the comparison never
 // trusts where a seek landed: it decodes from a little earlier, keeps the real timestamps, and cuts
 // the same stretch out of both by time. A keyframe gap longer than the margin only shortens the
-// stretch that is compared; it cannot pair different pictures.
+// stretch that is compared; it cannot pair different pictures. Wherever a seek lands earlier than
+// from, the trim still covers the whole sample, because the input is not cut short by a -t.
 const seekMargin = 12.0
 
 // scaleTo is the filter that brings the original's picture to the new file's size when a flow scaled it
@@ -519,7 +520,6 @@ func scaleTo(src, out *media.Stream) string {
 // time.
 func (w *Worker) ssimSegment(ctx context.Context, srcPath, tmp string, sv, ov int, seg segment, srcStart, outStart float64, scale string) (float64, []frameScore, error) {
 	from := max(seg.start-seekMargin, 0)
-	read := secs(seg.start + seg.length - from + 1)
 	cut := func(in, stream int, start float64, extra, label string) string {
 		// a start time can be negative (MP4 edit lists), so it is not formatted with secs
 		return fmt.Sprintf("[%d:v:%d]setpts=PTS-(%s)/TB,trim=start=%s:duration=%s%s[%s]",
@@ -528,12 +528,14 @@ func (w *Worker) ssimSegment(ctx context.Context, srcPath, tmp string, sv, ov in
 	// Reading from the start needs no seek, and must not have one: in an AVI, "-ss 0" jumps to a
 	// later keyframe (measured: 8.4 s in the original, 1.4 s in the new file), so a good file's
 	// start sample scored 0.878-0.934 and was refused.
+	// No input -t: it counts from where the seek lands, which can be ten seconds before from, and would
+	// cut the sample short. The trim filters end the stretch, and ffmpeg stops reading once they are done.
 	input := func(path string) []string {
 		a := []string{"-noaccurate_seek"}
 		if from > 0 {
 			a = append(a, "-ss", secs(from))
 		}
-		return append(a, "-t", read, "-i", path)
+		return append(a, "-i", path)
 	}
 	args := []string{"-hide_banner", "-nostdin", "-v", "info", "-nostats", "-copyts"}
 	args = append(args, input(srcPath)...)
