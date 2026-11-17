@@ -106,6 +106,7 @@ type scenario struct {
 	encodeStderr           string                                // what ffmpeg prints while converting (decode errors in the original show up here)
 	hang                   func(name string, args []string) bool // if it returns true the call blocks until its context ends
 	decodeStderr           string
+	decodeStdout           string // ffmpeg's -progress output for a playback test (how far it got)
 	decodeErr              error
 	hasSSIM                bool
 	ssimStderr             string
@@ -187,7 +188,7 @@ func (s *scenario) handle(name string, args []string) (string, string, error) {
 		return s.outSpec.json(), "", nil
 	case "ffmpeg":
 		switch {
-		case s.has(args, "libx265") || s.has(args, "-progress"): // the encode (or a repackaging, S4: -c copy only)
+		case (s.has(args, "libx265") || s.has(args, "-progress")) && !s.has(args, "-xerror"): // the encode (or a repackaging, S4: -c copy only); the playback test also passes -progress
 			if s.onEncode != nil {
 				s.onEncode()
 			}
@@ -225,7 +226,7 @@ func (s *scenario) handle(name string, args []string) (string, string, error) {
 			}
 			return " ... psnr              VV->V      Calculate the PSNR.\n", "", nil
 		case s.has(args, "-xerror"):
-			return "", s.decodeStderr, s.decodeErr
+			return s.decodeStdout, s.decodeStderr, s.decodeErr
 		case s.has(args, "-lavfi"):
 			s.mu.Lock()
 			after := s.afterChecks
@@ -612,13 +613,15 @@ func TestDecodeModes(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			s := newScenario(t)
 			s.srcSpec.duration, s.outSpec.duration = c.duration, c.duration
+			// each playback run plays frames: a sample that reports none is kept, not passed
+			s.decodeStdout = "out_time_us=0\nframe=100\nprogress=end\n"
 			w := s.worker(Replace)
 			w.DecodeCheck = c.mode
 			w.RunOne(context.Background())
 			if got := s.count("-xerror"); got != c.want {
 				t.Errorf("playback runs: %d, want %d", got, c.want)
 			}
-			if sampled := s.count("-xerror") > 0 && strings.Contains(strings.Join(s.calls, "\n"), "-xerror -nostdin -ss"); sampled != c.sampled {
+			if sampled := s.count("-xerror") > 0 && strings.Contains(strings.Join(s.calls, "\n"), "-xerror -nostdin -progress pipe:1 -ss"); sampled != c.sampled {
 				t.Errorf("sampled=%v, want %v", sampled, c.sampled)
 			}
 			if j := s.job(); j.Status != jobs.Done {
