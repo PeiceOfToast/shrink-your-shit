@@ -1636,8 +1636,9 @@ func (w *Worker) recordCheck(id int64, started time.Time, verr error) {
 		TookMs: w.now().Sub(started).Milliseconds(), Outcome: outcome, CheckScore: &c.Score, CheckMin: &c.Min, CheckPassed: &passed})
 }
 
-// recordCheckFailure keeps the check step of a refused conversion: the plain reason, the job log's detail (what
-// was checked, how far playback got, the errors, and the encode and both files), and the failure summary.
+// recordCheckFailure keeps the check step of a refused conversion: the plain reason and the job log's detail (what
+// was checked, how far playback got, the errors, and the encode and both files). It sets no failure summary: a
+// kept job is not a failed one, and the drawer would call a summary "Why it failed".
 func (w *Worker) recordCheckFailure(id int64, started time.Time, ke *KeptError, args []string, src media.Info) {
 	if w.Queue == nil {
 		return
@@ -1654,8 +1655,6 @@ func (w *Worker) recordCheckFailure(id int64, started time.Time, ke *KeptError, 
 	for _, l := range detail {
 		w.Queue.AppendLogLine(id, 1, "check", l)
 	}
-	w.Queue.SetFailureSummary(id, jobs.FailureSummary{Step: 1, StepCount: 3, AfterMs: w.now().Sub(started).Milliseconds(),
-		ExitCode: -1, FfmpegRan: true, KeyLines: ke.Lines})
 }
 
 // encoderDetail is the job log's encoder line: the video encoder, its quality setting and the hardware used.

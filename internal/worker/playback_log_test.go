@@ -50,7 +50,7 @@ func TestPlaybackKeptLogSaysWhy(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Check: playback test of the whole new file (0:00:00 to ",
-		"Where: playback reached 0:00:03 (frame 72)",
+		"Where: playback reached frame 72 (about 0:00:03)",
 		"Errors: 9 error lines from ffmpeg, 7 different",
 		"Encoder: libx265, -crf 26, hardware: none",
 		"Original: ",
@@ -89,9 +89,9 @@ func TestPlaybackKeptLogSaysWhy(t *testing.T) {
 	if !checked {
 		t.Errorf("no failed check step recorded: %+v", steps)
 	}
-	f, err := s.store.FailureOf(s.id)
-	if err != nil || f == nil || f.Step != 1 || f.StepCount != 3 || len(f.KeyLines) != 5 {
-		t.Errorf("failure summary %+v (err %v), want step 1 of 3 with 5 key lines", f, err)
+	// A kept job is not a failed one: no failure summary, or the drawer would say "Why it failed".
+	if f, err := s.store.FailureOf(s.id); err != nil || f != nil {
+		t.Errorf("kept job has a failure summary %+v (err %v), want none", f, err)
 	}
 }
 

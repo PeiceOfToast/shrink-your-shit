@@ -63,7 +63,6 @@ func checkFailed(cctx context.Context, what string, err error) error {
 type KeptError struct {
 	Code, Reason string   // Code: one of jobs.JobReasonCodes
 	Detail       []string // the technical lines for the job log: which check, how far it got, the errors
-	Lines        []string // ffmpeg's own error lines (distinct, at most 5), for the failure summary
 }
 
 func (e *KeptError) Error() string { return "kept original: " + e.Reason }
@@ -200,12 +199,16 @@ func (w *Worker) decodeCheck(ctx context.Context, out media.Info, tmp string) er
 		limit = DefaultFullDecodeMaxSec
 	}
 	ord := out.MainVideoOrdinal()
+	var fps float64 // the frame rate turns ffmpeg's frame count into a position for the job log
+	if v := out.Video(); v != nil {
+		fps = v.FrameRate
+	}
 	if w.DecodeCheck == "always" || out.DurationSec <= 0 || out.DurationSec <= limit {
-		return w.decodeRun(ctx, tmp, ord, 0, 0, out.DurationSec)
+		return w.decodeRun(ctx, tmp, ord, 0, 0, out.DurationSec, fps)
 	}
 	// Long file: three samples of a minute each, at the start, middle and end.
 	for _, start := range []float64{0, out.DurationSec/2 - 30, out.DurationSec - 65} {
-		if err := w.decodeRun(ctx, tmp, ord, start, 60, 60); err != nil {
+		if err := w.decodeRun(ctx, tmp, ord, start, 60, 60, fps); err != nil {
 			return err
 		}
 	}
@@ -223,7 +226,7 @@ var (
 	numRe  = regexp.MustCompile(`[0-9]+`)
 )
 
-func (w *Worker) decodeRun(ctx context.Context, tmp string, videoOrd int, start, length, playSec float64) error {
+func (w *Worker) decodeRun(ctx context.Context, tmp string, videoOrd int, start, length, playSec, fps float64) error {
 	args := []string{"-v", "error", "-xerror", "-nostdin", "-progress", "pipe:1"}
 	if length > 0 {
 		args = append(args, "-ss", secs(start))
@@ -253,14 +256,14 @@ func (w *Worker) decodeRun(ctx context.Context, tmp string, videoOrd int, start,
 			text = err.Error()
 		}
 		log.Printf("playback test of %s: %s", tmp, firstLines(text, 3))
-		return playbackKept(progress, string(stderr), start, length, playSec)
+		return playbackKept(progress, string(stderr), start, length, playSec, fps)
 	}
 	return nil
 }
 
 // playbackKept is the refusal for a file that does not play cleanly. The reason is plain; the job log gets the
 // technical detail: which check ran, how far playback got, and ffmpeg's distinct error lines.
-func playbackKept(progress []byte, stderr string, start, length, playSec float64) error {
+func playbackKept(progress []byte, stderr string, start, length, playSec, fps float64) error {
 	var lines []string
 	for _, l := range strings.Split(stderr, "\n") {
 		if l = strings.TrimSpace(l); l != "" && !opusParserRe.MatchString(l) {
@@ -293,36 +296,31 @@ func playbackKept(progress []byte, stderr string, start, length, playSec float64
 	if length == 0 {
 		check = "Check: playback test of the whole new file (0:00:00 to " + rules.Clock(playSec) + ")"
 	}
+	// ffmpeg's out_time is 0 when the output is the null muxer, so the position is the frame count over the rate.
 	where := "Where: playback did not report how far it got"
-	if sec, frame, ok := progressPoint(progress); ok {
-		where = "Where: playback reached " + rules.Clock(sec)
-		if frame != "" {
-			where += " (frame " + frame + ")"
+	if frame, ok := progressFrame(progress); ok {
+		where = fmt.Sprintf("Where: playback reached frame %d", frame)
+		if fps > 0 {
+			where += fmt.Sprintf(" (about %s)", rules.Clock(start+float64(frame)/fps))
 		}
 	}
 	ke := kept("%s", reason).(*KeptError)
 	ke.Detail = append([]string{check, where, fmt.Sprintf("Errors: %d error lines from ffmpeg, %d different", n, len(seen))}, shown...)
-	ke.Lines = shown
 	return ke
 }
 
-// progressPoint reads ffmpeg's -progress output: the last position playback reached and its frame.
-func progressPoint(out []byte) (sec float64, frame string, ok bool) {
+// progressFrame reads ffmpeg's -progress output: the last frame playback reached.
+func progressFrame(out []byte) (frame int64, ok bool) {
 	for _, l := range strings.Split(string(out), "\n") {
 		k, v, found := strings.Cut(strings.TrimSpace(l), "=")
-		if !found {
+		if !found || k != "frame" {
 			continue
 		}
-		switch k {
-		case "out_time_us":
-			if us, err := strconv.ParseFloat(v, 64); err == nil && us >= 0 {
-				sec, ok = us/1e6, true
-			}
-		case "frame":
-			frame = v
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
+			frame, ok = n, true
 		}
 	}
-	return sec, frame, ok
+	return frame, ok
 }
 
 func cutRunes(s string, n int) string {
