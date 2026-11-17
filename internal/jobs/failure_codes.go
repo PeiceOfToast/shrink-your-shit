@@ -159,7 +159,7 @@ func InfoLine(l string) bool {
 	low := strings.ToLower(l)
 	return strings.Contains(low, "[info]") || strings.Contains(low, "[verbose]") ||
 		strings.HasPrefix(low, "frame=") || strings.HasPrefix(low, "stream mapping") ||
-		strings.HasPrefix(low, "press [q]") || strings.Contains(low, "encoder settings")
+		strings.HasPrefix(low, "press [q]") || strings.Contains(low, "encoder settings") || strings.HasPrefix(low, "libva info:")
 }
 
 // MatchedKeyLines are the failure's key lines: the lines that give the code classifyKeyLines chose (the lines that

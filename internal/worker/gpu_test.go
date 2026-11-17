@@ -17,7 +17,7 @@ func encodeCalls(s *scenario) []string {
 	defer s.mu.Unlock()
 	var out []string
 	for _, c := range s.calls {
-		if strings.HasPrefix(c, "ffmpeg ") && strings.Contains(c, "-progress") {
+		if strings.HasPrefix(c, "ffmpeg ") && strings.Contains(c, "-progress") && !strings.Contains(c, "-xerror") { // -xerror is the playback test, not an encode
 			out = append(out, c)
 		}
 	}

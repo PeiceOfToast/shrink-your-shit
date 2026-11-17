@@ -23,4 +23,8 @@ func TestDecodeRun24fpsAACNoFalseAlarm(t *testing.T) {
 	if err := w.decodeRun(context.Background(), p, 0, 0, 0, 10); err != nil {
 		t.Fatalf("playback check false alarm: %v", err)
 	}
+	// The sampled path (a 5 s sample from 2 s) has the same false alarm without -copyts.
+	if err := w.decodeRun(context.Background(), p, 0, 2, 5, 5); err != nil {
+		t.Fatalf("playback check false alarm on the sampled path: %v", err)
+	}
 }

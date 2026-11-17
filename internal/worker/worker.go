@@ -461,7 +461,11 @@ func (w *Worker) recordEncode(id int64, args []string, started time.Time, encErr
 		lines = nil
 	}
 	for _, l := range lines {
-		w.Queue.AppendLogLine(id, 0, "stderr", l)
+		stream := "stderr"
+		if strings.HasPrefix(l, "libva info:") { // the GPU driver's chatter: kept in the log, not shown as ffmpeg's output
+			stream = "info"
+		}
+		w.Queue.AppendLogLine(id, 0, stream, l)
 	}
 	outcome := "ok"
 	if terr != nil {
@@ -997,6 +1001,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		return "", err
 	}
 	w.check = nil
+	w.verified = media.Info{} // the new file's probe is only what this check read (a failed probe leaves it empty)
 	checkStart := w.now()
 	verr := w.verify(ctx, src, exp, srcPath, tmp, before.Size())
 	w.recordCheck(job.ID, checkStart, verr)
@@ -1006,6 +1011,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			// design (SCREENS V3 step 3): VBR's own words; the measured similarity goes to the run log
 			w.jobf(job.ID, ": %s", k.Reason)
 			k.Reason = "Kept the original: under a " + rules.Mbps(plan.Video.PeakLimitKbps) + " Mbps max bitrate the picture would suffer."
+		}
+		if errors.As(err, &k) {
+			w.recordCheckFailure(job.ID, checkStart, k, args, src)
 		}
 		return "", err
 	}
@@ -1626,6 +1634,72 @@ func (w *Worker) recordCheck(id int64, started time.Time, verr error) {
 	passed := c.Passed
 	w.Queue.RecordRunStep(id, jobs.RunStep{Index: 1, Name: "check", StartedAt: started.UTC().Format(time.RFC3339),
 		TookMs: w.now().Sub(started).Milliseconds(), Outcome: outcome, CheckScore: &c.Score, CheckMin: &c.Min, CheckPassed: &passed})
+}
+
+// recordCheckFailure keeps the check step of a refused conversion: the plain reason, the job log's detail (what
+// was checked, how far playback got, the errors, and the encode and both files), and the failure summary.
+func (w *Worker) recordCheckFailure(id int64, started time.Time, ke *KeptError, args []string, src media.Info) {
+	if w.Queue == nil {
+		return
+	}
+	newFile := "not read"
+	if w.verified.DurationSec > 0 {
+		newFile = fileSummary(w.verified)
+	}
+	detail := append(append([]string(nil), ke.Detail...), encoderDetail(args), "Original: "+fileSummary(src), "New file: "+newFile)
+	if w.check == nil { // the picture check did not run: this is the job's check step
+		w.Queue.RecordRunStep(id, jobs.RunStep{Index: 1, Name: "check", StartedAt: started.UTC().Format(time.RFC3339),
+			TookMs: w.now().Sub(started).Milliseconds(), Outcome: "failed", Result: ke.Reason})
+	}
+	for _, l := range detail {
+		w.Queue.AppendLogLine(id, 1, "check", l)
+	}
+	w.Queue.SetFailureSummary(id, jobs.FailureSummary{Step: 1, StepCount: 3, AfterMs: w.now().Sub(started).Milliseconds(),
+		ExitCode: -1, FfmpegRan: true, KeyLines: ke.Lines})
+}
+
+// encoderDetail is the job log's encoder line: the video encoder, its quality setting and the hardware used.
+func encoderDetail(args []string) string {
+	argOf := func(flag string) string {
+		for i := 0; i+1 < len(args); i++ {
+			if args[i] == flag || strings.HasPrefix(args[i], flag+":") { // -c:v also matches -c:v:0
+				return args[i+1]
+			}
+		}
+		return ""
+	}
+	quality := "none"
+	for _, f := range []string{"-global_quality", "-crf", "-cq", "-qp", "-b:v"} {
+		if v := argOf(f); v != "" {
+			quality = f + " " + v
+			break
+		}
+	}
+	hw := argOf("-init_hw_device")
+	if hw == "" {
+		hw = argOf("-hwaccel")
+	}
+	if hw == "" {
+		hw = "none"
+	}
+	return fmt.Sprintf("Encoder: %s, %s, hardware: %s", argOf("-c:v"), quality, hw)
+}
+
+// fileSummary is a file in a few plain words for the job log: "hevc 1920x1080 23.976 fps 10-bit, 1 audio, 2 subtitles, 0:44:12".
+func fileSummary(info media.Info) string {
+	var parts []string
+	if v := info.Video(); v != nil {
+		s := fmt.Sprintf("%s %dx%d", v.Codec, v.Width, v.Height)
+		if v.FrameRate > 0 {
+			s += fmt.Sprintf(" %.3f fps", v.FrameRate)
+		}
+		if v.BitDepth > 0 {
+			s += fmt.Sprintf(" %d-bit", v.BitDepth)
+		}
+		parts = append(parts, s)
+	}
+	parts = append(parts, fmt.Sprintf("%d audio", len(info.Audio())), fmt.Sprintf("%d subtitles", len(info.Subtitles())), rules.Clock(info.DurationSec))
+	return strings.Join(parts, ", ")
 }
 
 // gpuFailed says whether a graphics encode that ended with err should convert again on the processor:

@@ -60,7 +60,11 @@ func checkFailed(cctx context.Context, what string, err error) error {
 }
 
 // KeptError means a safety check refused the new file (or could not run): the original is kept.
-type KeptError struct{ Code, Reason string } // Code: one of jobs.JobReasonCodes
+type KeptError struct {
+	Code, Reason string   // Code: one of jobs.JobReasonCodes
+	Detail       []string // the technical lines for the job log: which check, how far it got, the errors
+	Lines        []string // ffmpeg's own error lines (distinct, at most 5), for the failure summary
+}
 
 func (e *KeptError) Error() string { return "kept original: " + e.Reason }
 
@@ -213,8 +217,14 @@ func (w *Worker) decodeCheck(ctx context.Context, out media.Info, tmp string) er
 // to the end and the exit status is 0). It says nothing about the video that is being checked.
 var opusParserRe = regexp.MustCompile(`(?m)^\[opus @ [0-9a-fx]+\] Error parsing Opus packet header\.\s*$`)
 
+// addrRe and numRe make two ffmpeg error lines the same when only their addresses and numbers differ.
+var (
+	addrRe = regexp.MustCompile(` @ 0x[0-9a-fA-F]+`)
+	numRe  = regexp.MustCompile(`[0-9]+`)
+)
+
 func (w *Worker) decodeRun(ctx context.Context, tmp string, videoOrd int, start, length, playSec float64) error {
-	args := []string{"-v", "error", "-xerror", "-nostdin"}
+	args := []string{"-v", "error", "-xerror", "-nostdin", "-progress", "pipe:1"}
 	if length > 0 {
 		args = append(args, "-ss", secs(start))
 	}
@@ -233,7 +243,7 @@ func (w *Worker) decodeRun(ctx context.Context, tmp string, videoOrd int, start,
 	}
 	dctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	_, stderr, err := w.Exec.Capture(dctx, w.FFmpeg, args...)
+	progress, stderr, err := w.Exec.Capture(dctx, w.FFmpeg, args...)
 	text := strings.TrimSpace(opusParserRe.ReplaceAllString(string(stderr), ""))
 	if errors.Is(dctx.Err(), context.DeadlineExceeded) {
 		return checkFailed(dctx, "the playback test of the new file", err)
@@ -243,9 +253,83 @@ func (w *Worker) decodeRun(ctx context.Context, tmp string, videoOrd int, start,
 			text = err.Error()
 		}
 		log.Printf("playback test of %s: %s", tmp, firstLines(text, 3))
-		return kept("the new file does not play cleanly (it has errors when played back)")
+		return playbackKept(progress, string(stderr), start, length, playSec)
 	}
 	return nil
+}
+
+// playbackKept is the refusal for a file that does not play cleanly. The reason is plain; the job log gets the
+// technical detail: which check ran, how far playback got, and ffmpeg's distinct error lines.
+func playbackKept(progress []byte, stderr string, start, length, playSec float64) error {
+	var lines []string
+	for _, l := range strings.Split(stderr, "\n") {
+		if l = strings.TrimSpace(l); l != "" && !opusParserRe.MatchString(l) {
+			lines = append(lines, l)
+		}
+	}
+	seen := map[string]bool{}
+	var shown []string
+	for _, l := range lines {
+		key := numRe.ReplaceAllString(addrRe.ReplaceAllString(l, ""), "#")
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		if len(shown) < 5 {
+			shown = append(shown, cutRunes(l, 200))
+		}
+	}
+	n := len(lines)
+	reason := "the new file does not play cleanly"
+	switch {
+	case n == 1:
+		reason += ": it reported 1 error when played back"
+	case n > 1:
+		reason += fmt.Sprintf(": it reported %d errors when played back", n)
+	default:
+		reason += " (playback stopped with an error)"
+	}
+	check := fmt.Sprintf("Check: playback test, %d s sample from %s", int(length), rules.Clock(start))
+	if length == 0 {
+		check = "Check: playback test of the whole new file (0:00:00 to " + rules.Clock(playSec) + ")"
+	}
+	where := "Where: playback did not report how far it got"
+	if sec, frame, ok := progressPoint(progress); ok {
+		where = "Where: playback reached " + rules.Clock(sec)
+		if frame != "" {
+			where += " (frame " + frame + ")"
+		}
+	}
+	ke := kept("%s", reason).(*KeptError)
+	ke.Detail = append([]string{check, where, fmt.Sprintf("Errors: %d error lines from ffmpeg, %d different", n, len(seen))}, shown...)
+	ke.Lines = shown
+	return ke
+}
+
+// progressPoint reads ffmpeg's -progress output: the last position playback reached and its frame.
+func progressPoint(out []byte) (sec float64, frame string, ok bool) {
+	for _, l := range strings.Split(string(out), "\n") {
+		k, v, found := strings.Cut(strings.TrimSpace(l), "=")
+		if !found {
+			continue
+		}
+		switch k {
+		case "out_time_us":
+			if us, err := strconv.ParseFloat(v, 64); err == nil && us >= 0 {
+				sec, ok = us/1e6, true
+			}
+		case "frame":
+			frame = v
+		}
+	}
+	return sec, frame, ok
+}
+
+func cutRunes(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n])
+	}
+	return s
 }
 
 // ---- picture quality ----

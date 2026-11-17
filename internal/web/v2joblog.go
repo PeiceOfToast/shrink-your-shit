@@ -48,7 +48,7 @@ func v2JobLog(api *http.ServeMux, store *jobs.Store) {
 			if st.Index == failed { // the last 200 lines of the failed step: the output that says where it stopped
 				var mine []string
 				for _, l := range lines {
-					if l.Step == st.Index && l.Stream != "app" { // ffmpeg's own output, not the worker's words
+					if l.Step == st.Index && l.Stream != "app" && l.Stream != "info" { // ffmpeg's own output, not the worker's words
 						mine = append(mine, l.Text)
 					}
 				}
