@@ -42,6 +42,7 @@ type Queue interface {
 	AppendLogLine(id int64, step int, stream, text string) error
 	RecordRunStep(id int64, st jobs.RunStep) error
 	SetFailureSummary(id int64, f jobs.FailureSummary) error
+	ClearFailureSummary(id int64) error
 	// UserStopped turns a job the person stopped into a file skipped as user_stopped.
 	UserStopped(id int64) error
 	// StopRequested reports whether "Stop this file" was asked for a running job (checked before the swap).
@@ -273,6 +274,10 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 		go w.renewLease(job.ID, lease, renewDone) // V7a: kept while it works, the probe and the checks too
 	}
 	w.jobf(job.ID, ": started")
+	// a new attempt: an earlier attempt's failure summary is not this one's (a kept attempt would show it)
+	if err := w.Queue.ClearFailureSummary(job.ID); err != nil {
+		log.Printf("clear failure summary of job %d: %v", job.ID, err)
+	}
 	if testHook != nil {
 		testHook("registered")
 	}

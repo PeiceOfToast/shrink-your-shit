@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -371,6 +372,7 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 	if planSSIM > 0 { // the flow's own threshold (a slider position's SSIM gate)
 		threshold = planSSIM
 	}
+	segs := sampleSegments(src.DurationSec)
 	// Both pictures are put on one timeline by their own video start time (the encoder can delay the
 	// first frame: measured, a good encode scored 0.93 instead of 0.985 without this). If that still
 	// scores low, the new file is tried one frame earlier and later too and the best counts: a
@@ -380,27 +382,104 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 	if sMain.FrameRate > 0 {
 		frame = 1 / sMain.FrameRate
 	}
-	for _, seg := range sampleSegments(src.DurationSec) {
+	var done []placeScore // the places measured so far, for the job log
+	for _, seg := range segs {
 		best := -1.0
+		var bestFrames []frameScore // the best alignment's frames: the worst of them are the job log's evidence
 		for _, nudge := range []float64{0, -frame, frame} {
-			score, err := w.ssimSegment(ctx, srcPath, tmp, sv, ov, seg, sMain.StartTime, oMain.StartTime+nudge, scaleTo(sMain, oMain))
+			score, frames, err := w.ssimSegment(ctx, srcPath, tmp, sv, ov, seg, sMain.StartTime, oMain.StartTime+nudge, scaleTo(sMain, oMain))
 			if err != nil {
 				return err
 			}
 			if score > best {
-				best = score
+				best, bestFrames = score, frames
 			}
 			if best >= threshold {
 				break
 			}
 		}
+		done = append(done, placeScore{at: seg.start, score: best})
 		w.check = &CheckScore{Score: best, Min: threshold, Passed: best >= threshold} // the score that decided it (the job's check step)
 		if best < threshold {                                                         // one place that is too different is enough
-			return kept(pictureTooDifferent+" (similarity %.3f at %s, %.2f is required)",
-				best, rules.Clock(seg.start), threshold)
+			ke := kept(pictureTooDifferent+" (similarity %.3f at %s, %.2f is required)",
+				best, rules.Clock(seg.start), threshold).(*KeptError)
+			ke.Detail = ssimDetail(src.DurationSec, segs, done, bestFrames, sMain.FrameRate, threshold)
+			return ke
 		}
 	}
 	return nil
+}
+
+// placeScore is one place's picture similarity as it was measured.
+type placeScore struct{ at, score float64 }
+
+// frameScore is one frame's picture similarity; n counts from 1 within the compared stretch.
+type frameScore struct {
+	n     int
+	score float64
+}
+
+// ssimFrameRe reads ffmpeg's per-frame stats lines, e.g. "n:12 Y:0.991 U:0.998 V:0.997 All:0.993 (21.5)".
+var ssimFrameRe = regexp.MustCompile(`(?m)^n:([0-9]+) .*?All:([0-9.]+)`)
+
+func parseFrameScores(stdout []byte) []frameScore {
+	var out []frameScore
+	for _, m := range ssimFrameRe.FindAllSubmatch(stdout, -1) {
+		n, err1 := strconv.Atoi(string(m[1]))
+		score, err2 := strconv.ParseFloat(string(m[2]), 64)
+		if err1 == nil && err2 == nil {
+			out = append(out, frameScore{n: n, score: score})
+		}
+	}
+	return out
+}
+
+// ssimDetail is the job log's account of a picture refusal, in plain words: where the comparison ran, the
+// score at each place measured so far, and the worst frames of the failing place (fps 0: frame numbers only).
+func ssimDetail(duration float64, segs []segment, done []placeScore, frames []frameScore, fps, threshold float64) []string {
+	var lines []string
+	if duration > 0 && duration < 30 {
+		lines = append(lines, "Check: picture comparison (SSIM) of the whole file")
+	} else {
+		var at []string
+		for _, s := range segs {
+			at = append(at, rules.Clock(s.start))
+		}
+		lines = append(lines, fmt.Sprintf("Check: picture comparison (SSIM) at %d places, %d s each: %s",
+			len(segs), int(segs[0].length), strings.Join(at, ", ")))
+	}
+	var measured []string
+	for _, p := range done {
+		measured = append(measured, fmt.Sprintf("%s %.3f", rules.Clock(p.at), p.score))
+	}
+	scores := strings.Join(measured, ", ") + fmt.Sprintf(" (%.2f required)", threshold)
+	if rest := segs[len(done):]; len(rest) > 0 {
+		var na []string
+		for _, s := range rest {
+			na = append(na, rules.Clock(s.start)+" not measured")
+		}
+		scores += "; " + strings.Join(na, ", ")
+	}
+	lines = append(lines, "Scores: "+scores,
+		"Alignment: the new file was also tried one frame earlier and later; the best score counts")
+	if len(frames) > 0 {
+		worst := append([]frameScore(nil), frames...)
+		sort.SliceStable(worst, func(i, j int) bool { return worst[i].score < worst[j].score })
+		if len(worst) > 3 {
+			worst = worst[:3]
+		}
+		at := done[len(done)-1].at
+		var shown []string
+		for _, f := range worst {
+			where := fmt.Sprintf("frame %d", f.n)
+			if fps > 0 {
+				where = rules.Clock(at + float64(f.n-1)/fps)
+			}
+			shown = append(shown, fmt.Sprintf("%s (%.3f)", where, f.score))
+		}
+		lines = append(lines, "Worst frames: "+strings.Join(shown, ", "))
+	}
+	return lines
 }
 
 type segment struct{ start, length float64 }
@@ -438,7 +517,7 @@ func scaleTo(src, out *media.Stream) string {
 // sv and the new file's video stream ov. srcStart and outStart are the times at which each file's
 // video starts; subtracting them puts both on one timeline, where the ssim filter pairs frames by
 // time.
-func (w *Worker) ssimSegment(ctx context.Context, srcPath, tmp string, sv, ov int, seg segment, srcStart, outStart float64, scale string) (float64, error) {
+func (w *Worker) ssimSegment(ctx context.Context, srcPath, tmp string, sv, ov int, seg segment, srcStart, outStart float64, scale string) (float64, []frameScore, error) {
 	from := max(seg.start-seekMargin, 0)
 	read := secs(seg.start + seg.length - from + 1)
 	cut := func(in, stream int, start float64, extra, label string) string {
@@ -460,23 +539,23 @@ func (w *Worker) ssimSegment(ctx context.Context, srcPath, tmp string, sv, ov in
 	args = append(args, input(srcPath)...)
 	args = append(args, input(tmp)...)
 	args = append(args,
-		"-lavfi", cut(0, sv, srcStart, scale, "a")+";"+cut(1, ov, outStart, "", "b")+";[a][b]ssim",
+		"-lavfi", cut(0, sv, srcStart, scale, "a")+";"+cut(1, ov, outStart, "", "b")+";[a][b]ssim=stats_file=-",
 		"-f", "null", "-")
 	sctx, cancel := context.WithTimeout(ctx, sampleTimeout)
 	defer cancel()
-	_, stderr, err := w.Exec.Capture(sctx, w.FFmpeg, args...)
+	stdout, stderr, err := w.Exec.Capture(sctx, w.FFmpeg, args...)
 	if err != nil {
-		return 0, checkFailed(sctx, fmt.Sprintf("the picture comparison at %s", rules.Clock(seg.start)), err)
+		return 0, nil, checkFailed(sctx, fmt.Sprintf("the picture comparison at %s", rules.Clock(seg.start)), err)
 	}
 	m := ssimRe.FindSubmatch(stderr)
 	if m == nil {
-		return 0, kept("the picture comparison at %s gave no result", rules.Clock(seg.start))
+		return 0, nil, kept("the picture comparison at %s gave no result", rules.Clock(seg.start))
 	}
 	score, perr := strconv.ParseFloat(string(m[1]), 64)
 	if perr != nil {
-		return 0, kept("the picture comparison at %s gave an unreadable result", rules.Clock(seg.start))
+		return 0, nil, kept("the picture comparison at %s gave an unreadable result", rules.Clock(seg.start))
 	}
-	return score, nil
+	return score, parseFrameScores(stdout), nil
 }
 
 // hasFilter asks ffmpeg once whether it has a filter.

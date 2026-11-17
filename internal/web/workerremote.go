@@ -300,6 +300,9 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 			if err := store.SetFailureSummary(j.ID, *in.Failure); err != nil {
 				log.Printf("remote failure store: %v", err)
 			}
+		} else if err := store.ClearFailureSummary(j.ID); err != nil {
+			// this attempt has no failure of its own (kept, or done): an earlier attempt's must not show
+			log.Printf("remote failure clear: %v", err)
 		}
 		res.Steps = in.Steps
 		res.Failure = in.Failure

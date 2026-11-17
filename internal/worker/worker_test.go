@@ -110,6 +110,7 @@ type scenario struct {
 	decodeErr              error
 	hasSSIM                bool
 	ssimStderr             string
+	ssimStats              string // the ssim filter's per-frame lines (stdout)
 	ssimErr                error
 	freeBytes              uint64
 	freeErr                error
@@ -235,7 +236,7 @@ func (s *scenario) handle(name string, args []string) (string, string, error) {
 			if after != nil {
 				after()
 			}
-			return "", s.ssimStderr, s.ssimErr
+			return s.ssimStats, s.ssimStderr, s.ssimErr
 		}
 	}
 	return "", "", fmt.Errorf("unexpected call: %s %v", name, args)
