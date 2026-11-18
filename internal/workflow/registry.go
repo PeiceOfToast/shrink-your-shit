@@ -137,6 +137,9 @@ func Definitions() []StepDefinition {
 			Requires: []string{}, RequiresByConfig: map[string]map[string][]string{"format": {"hevc": {"encoder:libx265"},
 				"h264": {"encoder:libx264"}, "av1": {"encoder:libsvtav1"}, "vp9": {"encoder:libvpx-vp9"}}},
 			ConfigSchema: object(map[string]any{
+				// the slider and More options write this; forms skip readOnly settings, so it is not a field
+				"kind": withDefault(map[string]any{"enum": []any{"slider", "selectors"}, "x-enumLabels": []string{"Slider", "Custom settings"},
+					"readOnly": true}, "slider", "Kind", ""),
 				"quality": withDefault(quality, 3, "Quality", "slider"),
 				"format":  withDefault(formats, "hevc", "Video format", "segmented"),
 				"resolution": described(withDefault(enum([]any{"keep", "1080", "720", "480"}, []string{"Keep as is", "At most 1080p", "At most 720p", "At most 480p"}), "keep", "Resolution", ""),
