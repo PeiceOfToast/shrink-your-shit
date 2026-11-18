@@ -38,7 +38,8 @@ func v2JobLog(api *http.ServeMux, store *jobs.Store) {
 		out := []map[string]any{}
 		for _, st := range steps {
 			m := map[string]any{"name": st.Name, "startedAt": st.StartedAt, "tookMs": st.TookMs, "outcome": st.Outcome,
-				"command": nilIfEmpty(st.Command), "probe": nil, "check": nil, "outputLines": st.OutputLines, "output": []string{}, "result": nilIfEmpty(st.Result)}
+				"command": nilIfEmpty(st.Command), "probe": nil, "check": nil, "outputLines": st.OutputLines, "output": []string{}, "result": nilIfEmpty(st.Result),
+				"found": checkFound(lines, st.Index, st.StartedAt)}
 			if json.Valid([]byte(st.Probe)) && st.Probe != "" {
 				m["probe"] = json.RawMessage(st.Probe) // the probe summary, as the step recorded it
 			}
@@ -87,6 +88,20 @@ func v2JobLog(api *http.ServeMux, store *jobs.Store) {
 	})
 }
 
+// checkFound is what a step's check wrote to the log in this attempt, in order (its "check" lines): the drawer's
+// "What the check found" for a kept job, which has no failure output. A retry keeps the earlier attempt's lines
+// under the same step index, so only lines from the step's current start on count (both are RFC 3339 UTC, so they
+// compare as text). [] when there are none, never null.
+func checkFound(lines []jobs.LogLine, step int, startedAt string) []string {
+	out := []string{}
+	for _, l := range lines {
+		if l.Step == step && l.Stream == "check" && l.At >= startedAt {
+			out = append(out, l.Text)
+		}
+	}
+	return out
+}
+
 // finalState is how the job ended, as its status names it ("" while it has no status: a removed job).
 func finalState(store *jobs.Store, id int64) string {
 	j, err := store.Get(id)
@@ -109,5 +124,5 @@ func importedStep(lines []jobs.LogLine, final string) map[string]any {
 		text = text[len(text)-200:]
 	}
 	return map[string]any{"name": "imported", "startedAt": nil, "tookMs": nil, "outcome": nilIfEmpty(final),
-		"command": nil, "probe": nil, "check": nil, "outputLines": len(lines), "output": text, "result": nil}
+		"command": nil, "probe": nil, "check": nil, "outputLines": len(lines), "output": text, "result": nil, "found": []string{}}
 }
