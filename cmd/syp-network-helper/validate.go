@@ -20,18 +20,22 @@ import (
 	"syscall"
 )
 
-// sharesDir is the only folder the helper mounts in: one entry per share, directly inside it.
-// It must be owned by root and not writable by anyone else, so the service user can't plant a
-// symlink there (a symlink "x -> /etc" would make root mount the share over /etc).
-var sharesDir = "/var/lib/syp/shares"
+// The helper mounts each share directly inside one of two folders: mntDir (a share made after the upgrade)
+// or sharesDir (an older share). Each must be owned by root and not writable by anyone else, so the service
+// user can't plant a symlink there (a symlink "x -> /etc" would make root mount the share over /etc).
+// /mnt is also the person's own mount folder, so under it the helper only unmounts what it mounted (ownedHere).
+var (
+	mntDir    = "/mnt"
+	sharesDir = "/var/lib/syp/shares"
+)
 
 // mountName is a share's folder name inside sharesDir: what the app's sanitiseName produces.
 // Lower-case letters, digits, '.', '_' and '-', not starting with '.' or '-', at most 64.
 var mountName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 
-// validateMountPoint accepts only sharesDir/<mountName>, already in clean form: no "..",
+// validateMountPoint accepts only mntDir/<mountName> or sharesDir/<mountName>, already in clean form: no "..",
 // no "./", no trailing slash, no deeper path. Used for mount, unmount AND status, so the
-// helper never unmounts or touches anything outside sharesDir.
+// helper never unmounts or touches anything elsewhere.
 func validateMountPoint(mp string) error {
 	if mp == "" {
 		return errors.New("mount point is required")
@@ -39,8 +43,8 @@ func validateMountPoint(mp string) error {
 	if filepath.Clean(mp) != mp {
 		return errors.New("mount point must be a clean path")
 	}
-	if filepath.Dir(mp) != sharesDir {
-		return fmt.Errorf("mount point must be directly inside %s", sharesDir)
+	if dir := filepath.Dir(mp); dir != mntDir && dir != sharesDir {
+		return fmt.Errorf("mount point must be directly inside %s or %s", mntDir, sharesDir)
 	}
 	if !mountName.MatchString(filepath.Base(mp)) {
 		return errors.New("mount point name may only use a-z, 0-9, '.', '_' and '-'")
@@ -167,22 +171,22 @@ func mountOptions(kind string, opts map[string]string, uid, gid int, credPath st
 	return strings.Join(out, ",")
 }
 
-// checkSharesDir makes sure sharesDir is a real folder (not a symlink), owned by rootUID and not
-// writable by group or others, so nobody but root can create or swap entries in it.
-func checkSharesDir(rootUID int) error {
-	fi, err := os.Lstat(sharesDir)
+// checkSharesDir makes sure dir (mntDir or sharesDir) is a real folder (not a symlink), owned by rootUID and
+// not writable by group or others, so nobody but root can create or swap entries in it.
+func checkSharesDir(dir string, rootUID int) error {
+	fi, err := os.Lstat(dir)
 	if err != nil {
-		return fmt.Errorf("shares folder: %w", err)
+		return fmt.Errorf("%s: %w", dir, err)
 	}
 	if !fi.IsDir() || fi.Mode()&os.ModeSymlink != 0 {
-		return errors.New("shares folder is not a real folder")
+		return fmt.Errorf("%s is not a real folder", dir)
 	}
 	st, ok := fi.Sys().(*syscall.Stat_t)
 	if !ok || int(st.Uid) != rootUID {
-		return errors.New("shares folder must be owned by root")
+		return fmt.Errorf("%s must be owned by root", dir)
 	}
 	if fi.Mode().Perm()&0o022 != 0 {
-		return errors.New("shares folder must not be writable by group or others")
+		return fmt.Errorf("%s must not be writable by group or others", dir)
 	}
 	return nil
 }
@@ -190,7 +194,7 @@ func checkSharesDir(rootUID int) error {
 // prepareMountPoint makes the share's folder if it isn't there, and refuses anything that isn't
 // a plain folder owned by rootUID (a symlink or a file put there some other way).
 func prepareMountPoint(mp string, rootUID int) error {
-	if err := checkSharesDir(rootUID); err != nil {
+	if err := checkSharesDir(filepath.Dir(mp), rootUID); err != nil {
 		return err
 	}
 	if err := os.Mkdir(mp, 0o755); err != nil && !errors.Is(err, os.ErrExist) {
@@ -213,7 +217,7 @@ func prepareMountPoint(mp string, rootUID int) error {
 // so a planted "x -> /home" could make root unmount /home. The shares folder must still be
 // root-only, and the mount point, if it exists, must not be a symlink.
 func checkExistingMountPoint(mp string, rootUID int) error {
-	if err := checkSharesDir(rootUID); err != nil {
+	if err := checkSharesDir(filepath.Dir(mp), rootUID); err != nil {
 		return err
 	}
 	fi, err := os.Lstat(mp)

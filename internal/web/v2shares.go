@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -82,6 +83,13 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 		if err != nil {
 			serverError(w, err)
 			return
+		}
+		if !onWindows() { // the folder needs the new id for a name that sanitises to nothing
+			saved.MountPoint = newShareRoot + "/" + sanitiseName(saved.Name, saved.ID)
+			if err := store.SetShareMountPoint(saved.ID, saved.MountPoint); err != nil {
+				serverError(w, err)
+				return
+			}
 		}
 		tryMount(store, saved, in.Password)
 		writeJSONStatus(w, http.StatusCreated, shareToJSON(store, saved))
@@ -154,6 +162,12 @@ func v2Shares(api *http.ServeMux, store *jobs.Store) {
 		if err := store.UpdateShare(id, name, address, typeStr, username, guest, pw); err != nil {
 			serverError(w, err)
 			return
+		}
+		if existing.MountPoint != "" && name != existing.Name { // a renamed share's folder follows its name, in the same place
+			if err := store.SetShareMountPoint(id, path.Dir(existing.MountPoint)+"/"+sanitiseName(name, id)); err != nil {
+				serverError(w, err)
+				return
+			}
 		}
 		if mode, _ := detectMode(); mode == "app" && changed {
 			// The old mount must go first: the helper treats an already-mounted
@@ -701,6 +715,9 @@ func sanitiseName(name string, id int64) string {
 		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_' {
 			out = append(out, c)
 		}
+	}
+	if len(out) > 64 { // the helper takes a folder name of at most 64 characters
+		out = out[:64]
 	}
 	result := string(out)
 	if result == "" || result[0] == '-' || result[0] == '_' {

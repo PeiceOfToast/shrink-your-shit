@@ -19,8 +19,12 @@ import (
 // D4b: a share that stops answering pauses the libraries in its folder by itself; when it answers
 // again they start by themselves. The person's own pause is not touched (jobs.PauseLibrariesForShare).
 
-// shareRoot is where each share is mounted (tests point it at a temp folder).
+// shareRoot is where older shares are mounted, at shareRoot/<name> (tests point it at a temp folder).
 var shareRoot = "/var/lib/syp/shares"
+
+// newShareRoot is where a share made on Linux is mounted, at newShareRoot/<name>: the normal place for a mount,
+// and the helper mounts only there and in shareRoot. Tests point it at a temp folder.
+var newShareRoot = "/mnt"
 
 // shareWatchEvery is how often each share is checked (a var, so a test can shorten it).
 var shareWatchEvery = time.Minute
@@ -36,10 +40,14 @@ var shareAnswers = func(mountPath string) bool {
 	return mountedAt(mountPath) && statWithin(mountPath, shareStatTimeout)
 }
 
-// mountPointFor is where share sh is mounted: its \\server\share path on Windows.
+// mountPointFor is where share sh is mounted: its \\server\share path on Windows, else the folder it was given
+// (a share made after the upgrade), or for an older share shareRoot/<name>.
 func mountPointFor(sh jobs.Share) string {
 	if onWindows() {
 		return uncPath(sh.Address)
+	}
+	if sh.MountPoint != "" {
+		return sh.MountPoint
 	}
 	return shareRoot + "/" + sanitiseName(sh.Name, sh.ID)
 }

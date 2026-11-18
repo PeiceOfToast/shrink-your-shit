@@ -35,7 +35,7 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends $pkgs; \
     rm -rf /var/lib/apt/lists/*; \
     useradd -u 1000 -m syp; \
-    mkdir -p /config /media /var/lib/syp/shares; \
+    mkdir -p /config /media /mnt /var/lib/syp/shares; \
     chown syp /config /media
 COPY --from=build /out/shrink-your-shit /usr/local/lib/shrink-your-shit/shrink-your-shit
 # docker exec runs as root; this wrapper runs the app as syp so token/doctor/restore see what the app sees

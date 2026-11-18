@@ -576,12 +576,12 @@ UNIT
     $SUDO install -m 0644 "$tmp/unit" "$UNIT"
 
     # ── Network shares helper (user review 11-13 item D) ──────────────────
-    # A small root helper that can only mount SMB/NFS shares in /var/lib/syp/shares. Opt-in. An upgrade keeps
+    # A small root helper that can only mount SMB/NFS shares in /mnt (and older shares in /var/lib/syp/shares). Opt-in. An upgrade keeps
     # the earlier choice: only --no-network-shares or answering "no" removes it.
     HELPER_DIR=/usr/local/libexec/shrink-your-shit
     HELPER_BIN=$HELPER_DIR/syp-network-helper
     HELPER_UNIT=/etc/systemd/system/syp-network-helper.service
-    # Set up by default, without a question. The helper runs as root but can only mount shares in /var/lib/syp/shares.
+    # Set up by default, without a question. The helper runs as root but can only mount shares in /mnt and /var/lib/syp/shares.
     if [ -z "$NETWORK_SHARES" ]; then NETWORK_SHARES=1; fi
     if [ "$NETWORK_SHARES" = 1 ] && [ ! -f "$tmp/x/syp-network-helper" ]; then
       NS_REASON="this release has no network-share helper"
@@ -590,6 +590,8 @@ UNIT
     if [ "$NETWORK_SHARES" = 1 ]; then
       # The helper refuses a shares folder anyone but root can write (a planted symlink could redirect a mount).
       $SUDO install -d -o root -g root -m 0755 /var/lib/syp /var/lib/syp/shares "$HELPER_DIR"
+      # /mnt is the person's own folder too: create it if it is missing, never change an existing one.
+      [ -d /mnt ] || $SUDO install -d -o root -g root -m 0755 /mnt
       $SUDO install -o root -g root -m 0755 "$tmp/x/syp-network-helper" "$HELPER_BIN"
       if ! have mount.cifs || ! have mount.nfs; then
         if have apt-get; then
@@ -610,7 +612,7 @@ UNIT
       # own mount namespace, and the shares it mounts would be invisible to the app (orch-lead review of D2).
       cat > "$tmp/helper-unit" <<HLPUNIT
 [Unit]
-Description=Shrink Your Shit network share helper (mounts SMB/NFS shares in /var/lib/syp/shares)
+Description=Shrink Your Shit network share helper (mounts SMB/NFS shares in /mnt and /var/lib/syp/shares)
 After=network-online.target
 Wants=network-online.target
 Before=shrink-your-shit.service

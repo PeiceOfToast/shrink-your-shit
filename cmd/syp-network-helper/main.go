@@ -9,15 +9,16 @@
 // The service unit runs it as root with `-user <service user>`. It listens on a Unix socket that
 // only root and the service user's group can open, and serves one request at a time:
 //
-//	{"cmd":"mount","kind":"cifs","address":"//nas/media","mountPoint":"/var/lib/syp/shares/media",
+//	{"cmd":"mount","kind":"cifs","address":"//nas/media","mountPoint":"/mnt/media",
 //	 "options":{"vers":"3.1.1"},"username":"me","password":"secret"}
 //	{"cmd":"unmount","mountPoint":"..."}   {"cmd":"status","mountPoint":"..."}
 //
 // Security rules (validate.go holds the checks; this file only wires them):
 //  1. The caller must be root or the service user (SO_PEERCRED). If its identity can't be read,
 //     it is refused. If the service user can't be found at start, the helper doesn't start.
-//  2. Every request's mount point must be directly inside the shares folder (validateMountPoint),
-//     for unmount and status too, so nothing else on the system can be unmounted.
+//  2. Every request's mount point must be directly inside /mnt or the shares folder (validateMountPoint),
+//     for unmount and status too. Under /mnt the helper unmounts only what it mounted itself (ownedHere),
+//     so the person's own mounts there are safe.
 //  3. Only cifs and nfs, with an address of the right shape (validateAddress).
 //  4. Only allowlisted options with checked values (validateOptions). nosuid, nodev and noexec
 //     are always forced, and for cifs the files belong to the service user (mountOptions).
@@ -203,11 +204,27 @@ func mount(req request, svc service) answer {
 	if req.Kind == "nfs" && (req.Username != "" || req.Password != "") {
 		return fail("bad_request", "NFS has no username or password")
 	}
-	if err := prepareMountPoint(req.MountPoint, 0); err != nil { // rule 5
+	if err := prepareMountPoint(req.MountPoint, rootOwner); err != nil { // rule 5
 		return fail("mount_failed", err.Error())
 	}
-	if isMounted(req.MountPoint) {
-		return answer{OK: true} // already connected
+	typ, src, err := mountEntry(req.MountPoint)
+	if err != nil {
+		return fail("mount_failed", "could not read the mount table: "+err.Error())
+	}
+	if typ != "" { // already connected, or something else is there
+		if ownedHere(req.MountPoint, typ, src) {
+			return answer{OK: true}
+		}
+		return fail("mount_failed", "something else is already mounted at "+req.MountPoint+", so the share can't go there")
+	}
+	if filepath.Dir(req.MountPoint) == mntDir { // a folder under /mnt must be empty: it is the share's, not the person's
+		entries, err := os.ReadDir(req.MountPoint)
+		if err != nil {
+			return fail("mount_failed", err.Error())
+		}
+		if len(entries) > 0 {
+			return fail("mount_failed", req.MountPoint+" is not empty, so the share can't go there")
+		}
 	}
 	credPath := ""
 	if req.Kind == "cifs" && req.Username != "" { // rule 6
@@ -223,6 +240,19 @@ func mount(req request, svc service) answer {
 	// rule 7: "--" ends mount's options, so nothing after it can be read as one.
 	if out, err := run("mount", "-t", req.Kind, "-o", opts, "--", req.Address, req.MountPoint); err != nil {
 		return fail("mount_failed", "mount: "+out)
+	}
+	if filepath.Dir(req.MountPoint) == mntDir { // so unmount can tell this mount from the person's own
+		_, src, err := mountEntry(req.MountPoint)
+		if err == nil && src == "" {
+			err = errors.New("the mount is not in the mount table")
+		}
+		if err == nil {
+			err = record(req.MountPoint, src)
+		}
+		if err != nil {
+			_, _ = run("umount", "--", req.MountPoint)
+			return fail("mount_failed", "could not record the mount: "+err.Error())
+		}
 	}
 	return answer{OK: true}
 }
@@ -249,12 +279,24 @@ func writeCredentials(username, password string) (string, error) {
 }
 
 func unmount(mp string) answer {
-	if err := checkExistingMountPoint(mp, 0); err != nil { // rule 5, for unmount too
+	if err := checkExistingMountPoint(mp, rootOwner); err != nil { // rule 5, for unmount too
 		return fail("unmount_failed", err.Error())
 	}
-	if isMounted(mp) {
+	typ, src, err := mountEntry(mp)
+	if err != nil {
+		return fail("unmount_failed", "could not read the mount table: "+err.Error())
+	}
+	if typ != "" {
+		if !ownedHere(mp, typ, src) { // rule 2: the person's own mount is not the helper's to unmount
+			return fail("unmount_failed", mp+" was not mounted by the helper, so it is left alone")
+		}
 		if out, err := run("umount", "--", mp); err != nil {
 			return fail("unmount_failed", "umount: "+out)
+		}
+	}
+	if filepath.Dir(mp) == mntDir {
+		if err := forget(mp); err != nil {
+			return fail("unmount_failed", "could not update the helper's record: "+err.Error())
 		}
 	}
 	_ = os.Remove(mp) // only succeeds on an empty folder: never deletes anything on the share
@@ -262,18 +304,17 @@ func unmount(mp string) answer {
 }
 
 func status(mp string) answer {
-	if err := checkExistingMountPoint(mp, 0); err != nil {
+	if err := checkExistingMountPoint(mp, rootOwner); err != nil {
 		return fail("bad_request", err.Error())
 	}
-	if !isMounted(mp) {
+	typ, _, err := mountEntry(mp)
+	if err != nil {
+		return fail("bad_request", "could not read the mount table: "+err.Error())
+	}
+	if typ == "" {
 		return fail("not_mounted", "not mounted")
 	}
 	return answer{OK: true}
-}
-
-func isMounted(mp string) bool {
-	_, err := run("mountpoint", "-q", "--", mp)
-	return err == nil
 }
 
 // run starts a program with an argument list (never a shell) and a time limit, and returns its
