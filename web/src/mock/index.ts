@@ -132,7 +132,7 @@ function running(): State {
         path: "/var/lib/syp/shares/music-nas", libraries: [{ id: "l2", name: "TV Shows", use: "folder" }], setup: null },
       { id: "3", name: "Backups", type: "smb", address: "\\\\nas\\backups", guest: false, username: "backupuser", hasPassword: true,
         status: "connected", since: ago(60 * 24 * 14), reason: null,
-        path: "/var/lib/syp/shares/backups", libraries: [], setup: null },
+        path: "/mnt/backups", libraries: [], setup: null },
     ],
   };
 }

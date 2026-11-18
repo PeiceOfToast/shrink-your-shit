@@ -22,6 +22,29 @@ export async function getShares(): Promise<Answer<SharesResponse>> {
   return call("GET", "/api/v2/shares");
 }
 
+// Mock only: the setup text the server writes for a new share (internal/web/v2shares.go setupForMode),
+// without its user-namespace variant. New shares mount at /mnt/<name> (#304).
+const mockVol = (name: string, id: string) => { const r = name.toLowerCase().replace(/ /g, "-").replace(/[^a-z0-9_-]/g, "").slice(0, 64); return !r || /^[-_]/.test(r) ? "share-" + id : r; };
+function mockSetup(mode: string, i: ShareCreateInput, vol: string) {
+  const q = (x: string) => "'" + x.replace(/'/g, "'\\''") + "'", mpt = "/mnt/" + vol;
+  const addr = i.type === "nfs" ? i.address : "//" + i.address.replace(/^\\\\/, "").replace(/\\/g, "/");
+  if (mode === "manual") {
+    const opts = i.type === "nfs" ? "soft,nosuid,nodev,noexec"
+      : (i.guest ? "guest" : "username=" + (i.username ?? "")) + ",vers=3.1.1,soft,nosuid,nodev,noexec,uid=syp,gid=syp,file_mode=0660,dir_mode=0770";
+    return { kind: "command" as const, text: "sudo mkdir -p " + q(mpt) + " && sudo mount -t " + (i.type === "nfs" ? "nfs" : "cifs") + " " + q(addr) + " " + q(mpt) + " -o " + q(opts), removeText: "sudo umount " + q(mpt) };
+  }
+  const env = "SYP_" + vol.toUpperCase().replace(/[^A-Z0-9]/g, "_") + "_PASSWORD";
+  const [server, exp] = i.address.includes(":") ? [i.address.slice(0, i.address.indexOf(":")), i.address.slice(i.address.indexOf(":") + 1)] : [i.address, "/"];
+  const host = addr.slice(2).split("/")[0], owner = "uid=1000,gid=1000,file_mode=0660,dir_mode=0770";
+  const driver = i.type === "nfs" ? '      type: nfs\n      device: ":' + exp + '"\n      o: "addr=' + server + ',soft,nfsvers=4"'
+    : '      type: cifs\n      device: "' + addr + '"\n      o: "addr=' + host + "," + (i.guest ? "guest" : "username=" + (i.username ?? "") + ",password=${" + env + "}") + ",vers=3.1.1,soft," + owner + '"';
+  const note = i.type === "nfs" || i.guest ? "" : "# Put " + env + "=<the share password> in the .env file beside your compose file (chmod 600 .env).\n";
+  return { kind: "compose" as const,
+    text: "# To let the app mount this share itself, add these lines under services: shrink-your-shit: and restart:\n    cap_add:\n      - SYS_ADMIN\n      - DAC_READ_SEARCH\n    security_opt:\n      - \"apparmor:unconfined\"\n# Or mount it with a Docker volume instead:\n" +
+      note + "# Add under the top-level volumes: in your compose file:\n  " + vol + ":\n    driver_opts:\n" + driver + "\n\n# Add under services: shrink-your-shit: volumes: in your compose file:\n      - \"" + vol + ":" + mpt + '"',
+    removeText: 'Remove the "' + vol + '" volume from your compose file and restart.' };
+}
+
 export async function addShare(input: ShareCreateInput): Promise<Answer<Share>> {
   if (MOCK) {
     const s = mockState();
@@ -32,16 +55,8 @@ export async function addShare(input: ShareCreateInput): Promise<Answer<Share>> 
       guest: input.guest, username: input.guest ? null : input.username ?? null,
       hasPassword: !input.guest && !!input.password,
       status: mode === "app" ? "connecting" : "waiting_setup", since: null, reason: null,
-      path: "/var/lib/syp/shares/" + input.name.toLowerCase().replace(/\s+/g, "-"),
-      libraries: [], setup: mode === "app" ? null : {
-        kind: mode === "manual" ? "command" : "compose",
-        text: mode === "manual"
-          ? "sudo /opt/shrink-your-shit/bin/connect-share " + id
-          : "volume:\n  - type: cifs\n    source: " + input.address + "\n    target: /mnt/shares/" + input.name.toLowerCase().replace(/\s+/g, "-") + "\n    options:\n      - credentials=/etc/syp/shares/" + id,
-        removeText: mode === "manual"
-          ? "sudo /opt/shrink-your-shit/bin/connect-share " + id + " --remove"
-          : "# Remove the volume block for " + input.name + " from compose.yml",
-      },
+      path: "/mnt/" + mockVol(input.name, id),
+      libraries: [], setup: mode === "app" ? null : mockSetup(mode, input, mockVol(input.name, id)),
     };
     mockState().shares = [...mockState().shares, share];
     if (mode === "app") setTimeout(() => { const st = mockState(); const x = st.shares.find((x) => x.id === id); if (x) x.status = "connected"; }, 1500);
