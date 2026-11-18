@@ -797,10 +797,10 @@ func TestSSIMGenuinelyBadStaysBadAtEveryAlignment(t *testing.T) {
 
 // ---- damage in the original, seen while converting ----
 
-func TestOriginalWithDecodeErrorsIsNotConverted(t *testing.T) {
+// Damage to the file as a whole keeps the original, however little of it there is. (A few damaged pictures
+// are tolerated: see source_damage_test.go.)
+func TestOriginalWithFileDamageIsNotConverted(t *testing.T) {
 	for _, stderr := range []string{
-		"[h264 @ 0x55] error while decoding MB 41 22, bytestream -5",
-		"[h264 @ 0x55] concealing 120 DC, 120 AC, 120 MV errors in P frame",
 		"[matroska,webm @ 0x1] Invalid data found when processing input",
 		"[mov,mp4 @ 0x1] moov atom not found",
 	} {
@@ -824,12 +824,12 @@ func TestBenignMessagesDoNotRefuseAGoodFile(t *testing.T) {
 }
 
 func TestSourceDamageClassifier(t *testing.T) {
-	if sourceDamage("") != "" || sourceDamage("\n  \n") != "" {
+	if sourceDamage("").Found() || sourceDamage("\n  \n").Found() {
 		t.Error("nothing printed means nothing wrong")
 	}
 	got := sourceDamage("noise\n[h264 @ 1] error while decoding MB 1 2\n[h264 @ 1] Last message repeated 3 times\n[h264 @ 1] concealing 5 DC")
-	if !strings.Contains(got, "error while decoding") || !strings.Contains(got, "concealing") || strings.Contains(got, "repeated") {
-		t.Errorf("%q", got)
+	if got.Pictures != 1 || got.FileLevel || len(got.Lines) != 2 || !strings.Contains(got.Lines[0], "error while decoding") || !strings.Contains(got.Lines[1], "concealing") {
+		t.Errorf("%+v", got)
 	}
 }
 
