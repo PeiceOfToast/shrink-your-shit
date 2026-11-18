@@ -55,10 +55,15 @@ export function Overview() {
   const [live, setLive] = useState<Record<string, Partial<OverviewJob>>>({}), [said, setSaid] = useState("");
   const reload = useRef(o.reload); reload.current = () => (o.reload(), wl.reload());
   useEffect(() => {
-    let t: ReturnType<typeof setTimeout> | undefined;
+    let t: ReturnType<typeof setTimeout> | undefined, clear = false;
     return onLive((type, data) => {
-      if (type === "job.progress") { const e = data as JobProgressEvent; setLive((m) => ({ ...m, [e.jobId]: { percent: e.progress.percent ?? null, fps: e.progress.fps ?? null, speed: e.progress.speed ?? null, etaS: e.progress.etaS ?? null } })); return; }
-      if (type === "job.state" || type === "library.changed" || type === "resync" || type.startsWith("processing.") || type.startsWith("worker.")) { clearTimeout(t); t = setTimeout(() => (reload.current(), setLive({})), 400); }
+      // CT 124 flicker (manager row 11-18): a progress event's unknown (null) figure never hides one already known, and the
+      // 5 s worker.heartbeat refreshes the figures without dropping the live progress; a job or library change does drop it
+      if (type === "job.progress") { const e = data as JobProgressEvent, p = { percent: e.progress.percent, fps: e.progress.fps, speed: e.progress.speed, etaS: e.progress.etaS };
+        setLive((m) => ({ ...m, [e.jobId]: { ...m[e.jobId], ...Object.fromEntries(Object.entries(p).filter(([, x]) => x != null)) } })); return; }
+      if (type === "job.state" || type === "library.changed" || type === "resync" || type.startsWith("processing.") || type.startsWith("worker.")) {
+        clear ||= type !== "worker.heartbeat"; clearTimeout(t);
+        t = setTimeout(() => { reload.current(); if (clear) setLive({}); clear = false; }, 400); }
     });
   }, []);
   const act = async (p: Promise<Answer<unknown>>) => { try { const r = await p; setSaid(failed(r) ? r.error.message : ""); } catch (e) { if (!(e instanceof SignedOut)) throw e; } o.reload(); wl.reload(); };
