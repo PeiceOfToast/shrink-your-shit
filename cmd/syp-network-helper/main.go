@@ -207,12 +207,12 @@ func mount(req request, svc service) answer {
 	if err := prepareMountPoint(req.MountPoint, rootOwner); err != nil { // rule 5
 		return fail("mount_failed", err.Error())
 	}
-	typ, err := mountType(req.MountPoint)
+	typ, src, err := mountEntry(req.MountPoint)
 	if err != nil {
 		return fail("mount_failed", "could not read the mount table: "+err.Error())
 	}
 	if typ != "" { // already connected, or something else is there
-		if ownedHere(req.MountPoint, typ) {
+		if ownedHere(req.MountPoint, typ, src) {
 			return answer{OK: true}
 		}
 		return fail("mount_failed", "something else is already mounted at "+req.MountPoint+", so the share can't go there")
@@ -242,7 +242,14 @@ func mount(req request, svc service) answer {
 		return fail("mount_failed", "mount: "+out)
 	}
 	if filepath.Dir(req.MountPoint) == mntDir { // so unmount can tell this mount from the person's own
-		if err := record(req.MountPoint); err != nil {
+		_, src, err := mountEntry(req.MountPoint)
+		if err == nil && src == "" {
+			err = errors.New("the mount is not in the mount table")
+		}
+		if err == nil {
+			err = record(req.MountPoint, src)
+		}
+		if err != nil {
 			_, _ = run("umount", "--", req.MountPoint)
 			return fail("mount_failed", "could not record the mount: "+err.Error())
 		}
@@ -275,12 +282,12 @@ func unmount(mp string) answer {
 	if err := checkExistingMountPoint(mp, rootOwner); err != nil { // rule 5, for unmount too
 		return fail("unmount_failed", err.Error())
 	}
-	typ, err := mountType(mp)
+	typ, src, err := mountEntry(mp)
 	if err != nil {
 		return fail("unmount_failed", "could not read the mount table: "+err.Error())
 	}
 	if typ != "" {
-		if !ownedHere(mp, typ) { // rule 2: the person's own mount is not the helper's to unmount
+		if !ownedHere(mp, typ, src) { // rule 2: the person's own mount is not the helper's to unmount
 			return fail("unmount_failed", mp+" was not mounted by the helper, so it is left alone")
 		}
 		if out, err := run("umount", "--", mp); err != nil {
@@ -300,7 +307,7 @@ func status(mp string) answer {
 	if err := checkExistingMountPoint(mp, rootOwner); err != nil {
 		return fail("bad_request", err.Error())
 	}
-	typ, err := mountType(mp)
+	typ, _, err := mountEntry(mp)
 	if err != nil {
 		return fail("bad_request", "could not read the mount table: "+err.Error())
 	}

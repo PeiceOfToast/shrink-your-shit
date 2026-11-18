@@ -111,16 +111,16 @@ func TestRecordedMountUnderMntIsOurs(t *testing.T) {
 	}
 	writeTable(t, table, "//nas/media "+mp+" cifs rw 0 0")
 
-	if ownedHere(mp, "cifs") {
+	if ownedHere(mp, "cifs", "//nas/media") {
 		t.Error("an unrecorded mount counted as the helper's")
 	}
-	if err := record(mp); err != nil {
+	if err := record(mp, "//nas/media"); err != nil {
 		t.Fatal(err)
 	}
-	if !ownedHere(mp, "cifs") {
+	if !ownedHere(mp, "cifs", "//nas/media") {
 		t.Error("a recorded network mount not counted as the helper's")
 	}
-	if ownedHere(mp, "ext4") {
+	if ownedHere(mp, "ext4", "//nas/media") {
 		t.Error("a recorded non-network mount counted as the helper's")
 	}
 	if got := mount(request{Cmd: "mount", Kind: "cifs", Address: "//nas/media", MountPoint: mp}, service{}); !got.OK {
@@ -131,17 +131,20 @@ func TestRecordedMountUnderMntIsOurs(t *testing.T) {
 func TestRecordRoundTrip(t *testing.T) {
 	_, _ = withMnt(t)
 	a, b := "/mnt/a", "/mnt/b"
-	if err := record(a); err != nil {
+	if err := record(a, "//nas/a"); err != nil {
 		t.Fatal(err)
 	}
-	if err := record(b); err != nil {
+	if err := record(b, "//nas/b"); err != nil {
+		t.Fatal(err)
+	}
+	if err := record(b, "//nas/b"); err != nil { // recording again keeps one line
 		t.Fatal(err)
 	}
 	if err := forget(a); err != nil {
 		t.Fatal(err)
 	}
-	if recorded(a) || !recorded(b) {
-		t.Errorf("after forgetting a: a=%v b=%v", recorded(a), recorded(b))
+	if recorded(a, "//nas/a") || !recorded(b, "//nas/b") {
+		t.Errorf("after forgetting a: a=%v b=%v", recorded(a, "//nas/a"), recorded(b, "//nas/b"))
 	}
 	if err := forget(b); err != nil {
 		t.Fatal(err)
@@ -149,8 +152,32 @@ func TestRecordRoundTrip(t *testing.T) {
 	if err := forget(b); err != nil { // forgetting twice is fine
 		t.Fatal(err)
 	}
-	if recorded(b) {
+	if recorded(b, "//nas/b") {
 		t.Error("b still recorded")
+	}
+}
+
+// A recorded mount that went away outside the helper leaves its record behind. If the person then mounts their own
+// share at the same folder, it is still theirs: not counted as connected, and never unmounted.
+func TestStaleRecordDoesNotClaimThePersonsMount(t *testing.T) {
+	mnt, table := withMnt(t)
+	mp := filepath.Join(mnt, "media")
+	if err := os.Mkdir(mp, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := record(mp, "//nas/media"); err != nil {
+		t.Fatal(err)
+	}
+	writeTable(t, table, "//person/own "+mp+" cifs rw 0 0")
+
+	if ownedHere(mp, "cifs", "//person/own") {
+		t.Error("the person's mount counted as the helper's")
+	}
+	if got := mount(request{Cmd: "mount", Kind: "cifs", Address: "//nas/media", MountPoint: mp}, service{}); got.OK {
+		t.Errorf("mount reported connected over the person's share: %+v", got)
+	}
+	if got := unmount(mp); got.OK || got.Error == nil || !strings.Contains(got.Error.Message, "left alone") {
+		t.Errorf("unmount of the person's mount: %+v", got)
 	}
 }
 

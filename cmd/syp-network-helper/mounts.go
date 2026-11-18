@@ -17,54 +17,58 @@ import (
 // procMounts is the kernel's mount table (tests point it at a fake table).
 var procMounts = "/proc/self/mounts"
 
-// helperMounts lists the /mnt mount points this helper mounted, one per line. It lives in /run, so it lasts exactly as
+// helperMounts lists the /mnt mounts this helper made, one "<source> <mount point>" per line, with the source as the
+// mount table shows it. It lives in /run, so it lasts exactly as
 // long as the mounts do: a reboot clears both. Tests point it at a temp file.
 var helperMounts = "/run/shrink-your-shit/helper-mounts"
 
 // rootOwner is the uid that must own the folders the helper uses (root; tests use their own uid).
 var rootOwner = 0
 
-// mountType returns the filesystem type mounted at mp, or "" if nothing is mounted there. The last entry for mp is
-// the top mount, the one that counts.
-func mountType(mp string) (string, error) {
+// mountEntry returns the filesystem type and source mounted at mp, or "" if nothing is mounted there. The last entry
+// for mp is the top mount, the one that counts.
+func mountEntry(mp string) (typ, src string, err error) {
 	data, err := os.ReadFile(procMounts)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	typ := ""
 	for _, line := range strings.Split(string(data), "\n") {
 		if f := strings.Fields(line); len(f) >= 3 && f[1] == mp {
-			typ = f[2]
+			typ, src = f[2], f[0]
 		}
 	}
-	return typ, nil
+	return typ, src, nil
 }
 
-// ownedHere says whether the helper may unmount the mount at mp (of type typ), or count it as connected. Its own
-// folder, sharesDir, is only ever mounted by the helper. /mnt is the person's too: there only a network mount the
-// helper recorded is the helper's.
-func ownedHere(mp, typ string) bool {
+// ownedHere says whether the helper may unmount the mount at mp (of type typ, from src), or count it as connected.
+// Its own folder, sharesDir, is only ever mounted by the helper. /mnt is the person's too: there only a network mount
+// the helper recorded, from the same source, is the helper's. The source check matters when a recorded mount went
+// away outside the helper and the person mounted their own share at the same folder.
+func ownedHere(mp, typ, src string) bool {
 	if filepath.Dir(mp) == sharesDir {
 		return true
 	}
-	return (typ == "cifs" || typ == "nfs") && recorded(mp)
+	return (typ == "cifs" || typ == "nfs") && recorded(mp, src)
 }
 
-func recorded(mp string) bool {
+func recorded(mp, src string) bool {
 	data, err := os.ReadFile(helperMounts)
-	if err != nil {
+	if err != nil || src == "" {
 		return false
 	}
 	for _, line := range strings.Split(string(data), "\n") {
-		if line == mp {
+		if line == src+" "+mp {
 			return true
 		}
 	}
 	return false
 }
 
-// record notes that the helper mounted mp.
-func record(mp string) error {
+// record notes that the helper mounted src at mp.
+func record(mp, src string) error {
+	if err := forget(mp); err != nil { // one line per mount point
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(helperMounts), 0o700); err != nil {
 		return err
 	}
@@ -72,7 +76,7 @@ func record(mp string) error {
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintln(f, mp)
+	_, err = fmt.Fprintln(f, src, mp)
 	return errors.Join(err, f.Close())
 }
 
@@ -87,7 +91,7 @@ func forget(mp string) error {
 	}
 	var keep []string
 	for _, line := range strings.Split(string(data), "\n") {
-		if line != "" && line != mp {
+		if f := strings.Fields(line); len(f) == 2 && f[1] != mp {
 			keep = append(keep, line)
 		}
 	}

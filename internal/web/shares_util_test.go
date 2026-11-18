@@ -2,7 +2,10 @@
 
 package web
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestSanitiseName ensures the mount point name is never empty or leading with -/_.
 func TestSanitiseName(t *testing.T) {
@@ -13,6 +16,7 @@ func TestSanitiseName(t *testing.T) {
 		{"_x", "share-7"},
 		{"hello", "hello"},
 		{"A&B", "ab"},
+		{strings.Repeat("a", 70), strings.Repeat("a", 64)}, // the helper takes at most 64
 	}
 	for _, c := range cases {
 		if got := sanitiseName(c.in, 7); got != c.want {

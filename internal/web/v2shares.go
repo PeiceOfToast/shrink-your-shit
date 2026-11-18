@@ -716,6 +716,9 @@ func sanitiseName(name string, id int64) string {
 			out = append(out, c)
 		}
 	}
+	if len(out) > 64 { // the helper takes a folder name of at most 64 characters
+		out = out[:64]
+	}
 	result := string(out)
 	if result == "" || result[0] == '-' || result[0] == '_' {
 		return "share-" + strconv.FormatInt(id, 10)
