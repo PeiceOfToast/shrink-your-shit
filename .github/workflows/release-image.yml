@@ -3,10 +3,15 @@ name: Publish image
 # Pushing a version tag like v0.1.0 (vN.N.N, optionally with a -rc1 suffix) builds a linux/amd64 + linux/arm64 image and publishes it to
 # ghcr.io/<owner>/<repo> as 0.1.0 and latest (pre-releases like v0.1.0-rc1 get no latest). Running it by hand on a branch only builds and
 # smoke-tests (nothing is pushed); running it by hand, even on a tag, never publishes: only a pushed tag does.
+# A pull request that touches the image files also only builds and smoke-tests.
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
   workflow_dispatch:
+  # A pull request that changes the image builds and smoke-tests it (nothing is pushed), so a change to the
+  # entrypoint or Dockerfile can't break the release unnoticed (v0.1.0's smoke test failed only at the tag).
+  pull_request:
+    paths: [Dockerfile, docker-entrypoint.sh, run-as-syp.sh, .dockerignore, .github/workflows/release-image.yml]
 
 permissions:
   contents: read
@@ -47,13 +52,20 @@ jobs:
           tags: syp-smoke
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: Smoke test (non-root, web page answers)
+      - name: Smoke test (web page answers, app runs as uid 1000)
         run: |
-          test "$(docker run --rm --entrypoint id syp-smoke -u)" = 1000
           docker run -d --name syp -p 8484:8484 -v "$RUNNER_TEMP":/media syp-smoke
-          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8484/healthz && exit 0; sleep 1; done
-          docker logs syp
-          exit 1
+          ok=
+          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8484/healthz && { ok=1; break; }; sleep 1; done
+          if [ -z "$ok" ]; then docker logs syp; exit 1; fi
+          # The container starts as root (the entrypoint may start the share helper) and then execs the app as syp,
+          # so the app is PID 1: it must be the app, running as uid 1000 (real, effective, saved and filesystem uid).
+          # cmdline and status are world-readable; /proc/1/exe is not (root in the container has no CAP_SYS_PTRACE).
+          exe=$(docker exec syp sh -c "tr '\0' '\n' < /proc/1/cmdline | head -n 1")
+          uids=$(docker exec syp grep '^Uid:' /proc/1/status)
+          echo "PID 1: $exe, $uids"
+          test "$exe" = /usr/local/lib/shrink-your-shit/shrink-your-shit
+          test "$(echo $uids)" = "Uid: 1000 1000 1000 1000"
       - name: Build and push multi-arch image
         uses: docker/build-push-action@v6
         with:
