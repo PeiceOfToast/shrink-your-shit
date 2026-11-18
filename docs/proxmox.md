@@ -9,8 +9,10 @@
 - **It REPLACES your original video files** (the default `-output replace`). Start with a
   **copy** of some media, check the results, and only then point it at the real thing.
   `-output beside` keeps the original and writes `name.hevc.mkv` next to it.
-- **There is no login yet.** Anyone who can open the web page can see your file names and
-  retry jobs. Keep it on your home network. Never forward the port to the internet.
+- **Sign in with the access token.** The page asks for it from other machines; the installer prints
+  an address that carries it, and `sudo shrink-your-shit token` (or, for Docker,
+  `docker exec <container name> shrink-your-shit token`) shows it again. There is no HTTPS: keep it
+  on your home network and never forward the port to the internet.
 - Transcoding is CPU-heavy. Give the container a few cores; it runs at low priority (systemd
   route) but will still use what it's given. GPU/hardware encoding is not supported yet.
 
@@ -94,14 +96,22 @@ tried this. Route B is simpler for a Proxmox LXC.
    ```
    It installs ffmpeg, creates a `syp` user, installs the program to `/usr/local/bin`, starts a
    systemd service (also on boot) and prints the address. Run it again later to upgrade; your
-   settings are kept. `--addr 0.0.0.0:8484` lets other computers open the page; there is no
-   login yet, so only do that on a network you trust.
+   settings are kept. `--addr 0.0.0.0:8484` lets other computers open the page; they sign in
+   with the access token in the address the installer prints.
    > Needs a published release (none yet; see the README). Until then it stops with "could not
    > download".
 4. Settings are in `/etc/default/shrink-your-shit` (`SYP_LIBRARIES`, `SYP_ADDR`, `SYP_DATA`).
    After editing: `systemctl restart shrink-your-shit`. To change the service itself, use
    `systemctl edit shrink-your-shit` (a drop-in); the installer rewrites the unit file each run.
    Logs: `journalctl -u shrink-your-shit -f`. The database is in `/var/lib/shrink-your-shit`.
+
+## Intel Quick Sync in Docker
+
+The image (x86_64) already has the Intel drivers. Quick Sync needs Intel Tiger Lake or newer; older Intel
+chips use VA-API, with the same compose block. To use the GPU: uncomment the `devices:` block for
+graphics in `docker-compose.yml`. The app joins the group of `/dev/dri` itself, so `group_add` is not needed.
+On a Proxmox LXC, pass `/dev/dri` into the container first (e.g. `dev0: /dev/dri/renderD128` in
+`/etc/pve/lxc/<id>.conf`, then restart it). Run `docker compose up -d`, then check the Workers page shows Intel.
 
 ## Mounting your media into the container
 
@@ -128,7 +138,8 @@ container avoids the shift but is less isolated.
 
 ## What has and hasn't been checked
 
-Checked: the Docker image builds; in it the program runs as uid 1000, ffmpeg 6.1 (with
+Checked on the earlier Alpine image, before the switch to Debian 13 (the Debian image is not
+yet built or run here): the Docker image builds; in it the program runs as uid 1000, ffmpeg (with
 libx265) and ffprobe are present, the web page answers and the healthcheck goes healthy,
 and real files (an mkv with subtitles and an mp4) were converted to HEVC from a mounted
 folder, with the database in a named volume. `docker stop` ends it cleanly in under a

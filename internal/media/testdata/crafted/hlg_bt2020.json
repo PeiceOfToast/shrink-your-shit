@@ -1,0 +1,26 @@
+{
+ "streams": [
+  {
+   "disposition": {
+    "default": 0,
+    "forced": 0,
+    "attached_pic": 0
+   },
+   "index": 0,
+   "codec_name": "hevc",
+   "codec_type": "video",
+   "width": 1920,
+   "height": 1080,
+   "pix_fmt": "yuv420p10le",
+   "r_frame_rate": "50/1",
+   "avg_frame_rate": "50/1",
+   "color_space": "bt2020nc",
+   "color_transfer": "arib-std-b67",
+   "color_primaries": "bt2020"
+  }
+ ],
+ "format": {
+  "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+  "duration": "60"
+ }
+}

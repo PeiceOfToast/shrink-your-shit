@@ -1,0 +1,48 @@
+{
+ "streams": [
+  {
+   "codec_type": "video",
+   "codec_name": "mpeg2video",
+   "width": 720,
+   "height": 576,
+   "r_frame_rate": "25/1",
+   "avg_frame_rate": "0/0",
+   "bit_rate": 6000000
+  },
+  {
+   "codec_type": "audio",
+   "codec_name": "mp2",
+   "channels": "2",
+   "sample_rate": 48000
+  },
+  {
+   "index": 7,
+   "codec_type": "subtitle",
+   "codec_name": "someweirdsub",
+   "tags": {
+    "LANGUAGE": "ger",
+    "Title": "Deutsch"
+   }
+  },
+  {
+   "codec_type": "data",
+   "codec_name": "bin_data"
+  },
+  {
+   "codec_type": "attachment",
+   "codec_name": "ttf",
+   "tags": {
+    "FILENAME": "a.ttf",
+    "MimeType": "font/ttf"
+   }
+  },
+  {
+   "codec_type": "somethingnew",
+   "codec_name": "x"
+  }
+ ],
+ "format": {
+  "format_name": "mpeg",
+  "duration": "3600.0"
+ }
+}

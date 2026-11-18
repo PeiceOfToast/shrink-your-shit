@@ -1,0 +1,185 @@
+// Copyright (C) shrink-your-shit contributors. Licensed under AGPL-3.0-or-later.
+
+package jobs
+
+import (
+	"database/sql"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+// The overview's numbers (user review 11-12 item 5, slices/v2-engine/review-items-shapes.md), from the
+// jobs, their history and the scanner's file records. Nothing is estimated: what isn't recorded says so.
+
+// LibraryTotals are a library's sizes and counts for the overview.
+type LibraryTotals struct {
+	// BytesBefore: its videos as the scanner first decided them (a converted file's record keeps its
+	// original's size).
+	BytesBefore    int64
+	Done, Skipped  int
+	VideosRecorded int
+}
+
+// LibraryTotalsOf is library l's totals: its files' records by a path range, which the files' primary
+// key serves (review ab99630 P2-2: substr() read every record per library).
+func (s *Store) LibraryTotalsOf(l Library) (LibraryTotals, error) {
+	var t LibraryTotals
+	lo, hi := pathRange(l.Path)
+	if err := s.db.QueryRow(`SELECT COALESCE(SUM(size),0), COUNT(*), COALESCE(SUM(CASE WHEN decision LIKE 'skip:%' THEN 1 ELSE 0 END),0)
+FROM files WHERE path >= ? AND path < ?`, lo, hi).Scan(&t.BytesBefore, &t.VideosRecorded, &t.Skipped); err != nil {
+		return t, err
+	}
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM jobs WHERE library_id=? AND status=?`, l.ID, Done).Scan(&t.Done)
+	return t, err
+}
+
+// pathRange is [lo, hi) holding every path inside dir: dir + separator up to dir + the next character.
+func pathRange(dir string) (string, string) {
+	sep := string(filepath.Separator)
+	root := strings.TrimSuffix(dir, sep)
+	return root + sep, root + string(rune(sep[0]+1))
+}
+
+// Day is one day's totals in the overview (server-local days).
+type Day struct {
+	Day                        string `json:"day"` // 2026-11-12
+	Recorded                   bool   `json:"recorded"`
+	Completed, Skipped, Failed int
+	FreedBytes                 int64 // NET, freed that day (review ab99630 P2-1)
+}
+
+// Days are the last n days' totals, oldest first: conversions finished, files skipped (also stopped),
+// failed (also kept by a check), and the bytes freed that day (NET, from freed: TotalsOf's FreedByDay).
+// A day before the first recorded history is Recorded false (zeroes, not estimates).
+func (s *Store) Days(n int, now time.Time, freed map[string]int64) ([]Day, error) {
+	var first string
+	s.db.QueryRow(`SELECT COALESCE(MIN(date(at, 'localtime')), '') FROM events WHERE kind='job'`).Scan(&first)
+	from := now.AddDate(0, 0, -(n - 1)).Format("2006-01-02")
+	by := map[string]*Day{}
+	rows, err := s.db.Query(`SELECT date(at, 'localtime') AS d, to_status, COUNT(*) FROM events
+WHERE kind='job' AND to_status IN ('done','skipped','cancelled','failed','kept') AND date(at, 'localtime') >= ? GROUP BY d, to_status`, from)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var d, st string
+		var c int
+		if err := rows.Scan(&d, &st, &c); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if by[d] == nil {
+			by[d] = &Day{Day: d}
+		}
+		switch st {
+		case "done":
+			by[d].Completed += c
+		case "skipped", "cancelled":
+			by[d].Skipped += c
+		default:
+			by[d].Failed += c
+		}
+	}
+	rows.Close()
+	out := make([]Day, 0, n)
+	for i := n - 1; i >= 0; i-- {
+		d := now.AddDate(0, 0, -i).Format("2006-01-02")
+		day := Day{Day: d}
+		if x := by[d]; x != nil {
+			day = *x
+		}
+		day.FreedBytes = freed[d]
+		day.Recorded = first != "" && d >= first
+		out = append(out, day)
+	}
+	return out, nil
+}
+
+// Totals are the overview's job figures from one pass over the jobs: what ActivitySummary, Counts and
+// Days' freed bytes give, which each scan the table on its own (the overview recomputes after every
+// change, so one scan instead of three).
+type Totals struct {
+	Summary    Summary
+	Counts     map[int64]LibraryCounts
+	FreedByDay map[string]int64 // NET freed bytes by local day, dated as Days dates them
+}
+
+// TotalsOf is the overview's figures in one pass: jobs grouped by library and freed day.
+func (s *Store) TotalsOf() (Totals, error) {
+	t := Totals{Counts: map[int64]LibraryCounts{}, FreedByDay: map[string]int64{}}
+	rows, err := s.db.Query(`SELECT library_id, date(`+freedAtSQL+`, 'localtime') AS d,
+  COALESCE(SUM(status=?),0), COALESCE(SUM(status=?),0), COALESCE(SUM(status IN (?,?)),0),
+  COALESCE(SUM(`+freedSQL+`),0), COALESCE(SUM(`+waitingSQL+`),0), COALESCE(SUM(`+couldFreeSQL+`),0), COALESCE(SUM(`+grewSQL+`),0)
+FROM jobs GROUP BY library_id, d`, Running, Queued, Failed, Kept)
+	if err != nil {
+		return t, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var lib sql.NullInt64
+		var day sql.NullString
+		var working, waiting, failed int
+		var freed, waitingB, couldFree, grew int64
+		if err := rows.Scan(&lib, &day, &working, &waiting, &failed, &freed, &waitingB, &couldFree, &grew); err != nil {
+			return t, err
+		}
+		a := &t.Summary
+		a.WorkingFiles += working
+		a.WaitingFiles += waiting
+		a.Failed += failed
+		a.FreedBytes += freed
+		a.WaitingBytes += waitingB
+		a.CouldFreeBytes += couldFree
+		a.GrewBytes += grew
+		if day.Valid {
+			t.FreedByDay[day.String] += freed
+		}
+		if lib.Valid { // Counts leaves out jobs from before libraries
+			c := t.Counts[lib.Int64]
+			c.Working += working
+			c.Waiting += waiting
+			c.Failed += failed
+			c.FreedBytes += freed
+			c.WaitingBytes += waitingB
+			c.CouldFreeBytes += couldFree
+			c.GrewBytes += grew
+			t.Counts[lib.Int64] = c
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return t, err
+	}
+	err = s.db.QueryRow(`SELECT COUNT(*) FROM files WHERE reason<>'' AND NOT ` + convertedSQL).Scan(&t.Summary.Skipped)
+	return t, err
+}
+
+// Averages over the conversions done: the share saved, and the time per GB of original (only jobs
+// whose start was recorded); ok false when there are none.
+func (s *Store) Averages() (savingPercent float64, savingOK bool, secondsPerGB float64, timeOK bool, err error) {
+	var before, after int64
+	if err = s.db.QueryRow(`SELECT COALESCE(SUM(size_before),0), COALESCE(SUM(size_after),0) FROM jobs WHERE status=? AND size_before>0 AND size_after>0`, Done).
+		Scan(&before, &after); err != nil {
+		return
+	}
+	if before > 0 {
+		savingPercent, savingOK = 100*float64(before-after)/float64(before), true
+	}
+	var secs float64
+	var timedBytes int64
+	if err = s.db.QueryRow(`SELECT COALESCE(SUM((julianday(updated)-julianday(started))*86400),0), COALESCE(SUM(size_before),0)
+FROM jobs WHERE status=? AND started<>'' AND size_before>0`, Done).Scan(&secs, &timedBytes); err != nil {
+		return
+	}
+	if timedBytes > 0 && secs > 0 {
+		secondsPerGB, timeOK = secs/(float64(timedBytes)/1e9), true
+	}
+	return
+}
+
+// DoneCount is how many files were converted (also by jobs made before libraries were records).
+func (s *Store) DoneCount() (int, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM jobs WHERE status=?`, Done).Scan(&n)
+	return n, err
+}

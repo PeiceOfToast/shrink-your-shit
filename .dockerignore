@@ -9,3 +9,5 @@ data
 *.db
 *.db-*
 docs
+web/node_modules
+internal/web/next/dist

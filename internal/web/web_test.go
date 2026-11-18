@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
 func TestStatusAndRetry(t *testing.T) {
@@ -18,11 +19,13 @@ func TestStatusAndRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	st.SetPaused(false) // the test's worker is started (S2: a new install starts stopped)
 	defer st.Close()
-	id, _ := st.Enqueue(jobs.Job{Library: "/lib", Path: "/lib/a.mkv"})
+	st.AddLibrary("lib", "/videos", rules.SliderTemplate(3), true)
+	id, _ := st.Enqueue(jobs.Job{Library: "/videos", Path: "/videos/a.mkv"})
 	st.Claim("w")
-	st.Fail(id, "bad")
-	srv := httptest.NewServer(Handler(st, []string{"/lib"}))
+	st.Fail(id, "convert_failed", "bad")
+	srv := httptest.NewServer(Handler(st, openAccess(t), Engine{}))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/api/status")
@@ -37,23 +40,21 @@ func TestStatusAndRetry(t *testing.T) {
 	if len(out.Libraries) != 1 || len(out.Jobs) != 1 || out.Jobs[0].Status != jobs.Failed {
 		t.Fatalf("%+v", out)
 	}
-	resp, _ = http.Post(srv.URL+"/api/jobs/1/retry", "", nil)
+	resp, _ = http.Post(srv.URL+"/api/jobs/1/retry", "application/json", strings.NewReader("{}"))
 	if resp.StatusCode != 200 {
 		t.Errorf("retry: %d", resp.StatusCode)
 	}
 	if j, _ := st.Get(id); j.Status != jobs.Queued {
 		t.Errorf("%+v", j)
 	}
-	resp, _ = http.Post(srv.URL+"/api/jobs/1/retry", "", nil)
+	resp, _ = http.Post(srv.URL+"/api/jobs/1/retry", "application/json", strings.NewReader("{}"))
 	if resp.StatusCode != 409 {
 		t.Errorf("retrying a queued job should be 409, got %d", resp.StatusCode)
 	}
+	// / is the app: its page (200), or the "not built" page (503) in a copy built without web/ (CI's test jobs)
 	resp, _ = http.Get(srv.URL + "/")
-	b := new(strings.Builder)
-	buf := make([]byte, 4096)
-	n, _ := resp.Body.Read(buf)
-	b.Write(buf[:n])
-	if !strings.Contains(b.String(), "shrink-your-shit") {
-		t.Error("index page not served")
+	resp.Body.Close()
+	if (resp.StatusCode != 200 && resp.StatusCode != http.StatusServiceUnavailable) || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/html") {
+		t.Errorf("index page not served: %d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
 	}
 }

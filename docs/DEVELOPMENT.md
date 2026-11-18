@@ -9,7 +9,7 @@ When this file and the code disagree, trust the code and fix this file.
 | Tool | Version | Why |
 |---|---|---|
 | Go | 1.26 or newer | `go.mod` says `go 1.26.0`; that is the minimum `modernc.org/sqlite` needs. Official `golang` Docker images do not auto-download toolchains, so the `Dockerfile` base (`golang:1.26-alpine`) must be kept in step with `go.mod`. |
-| ffmpeg + ffprobe | any recent (tested 6.1 and 8.0) with libx265 | the real encoder. **Unit tests do not need it** (they use a fake runner); only manual end-to-end runs do. |
+| ffmpeg + ffprobe | any recent (tested 6.1, 7.1 and 8.0) with libx265 | the real encoder. **Unit tests do not need it** (they use a fake runner). The real-ffmpeg tests (`TestReal*`) use it when it is on `PATH` and skip otherwise; `SYP_REQUIRE_FFMPEG=1` makes them fail instead of skipping (CI's Linux job sets it). |
 | Docker | optional (tested 29.1) | to build/run the container image |
 | shellcheck, actionlint | optional | lint `install.sh`, `scripts/build-release.sh` and the workflows in `.github/workflows/` |
 
@@ -46,7 +46,12 @@ not running: the Windows and macOS tests ran for the first time in CI (see
 
 ```
 ./shrink-your-shit -library /path/to/COPY-of-videos -data ./data -scan-every 5s
-# web page: http://127.0.0.1:8484   (JSON: /api/status)
+# web page: http://127.0.0.1:8484   (JSON: /api/status; health: /healthz)
+# a new data folder is a fresh install: the library waits for first-run's Start, and nothing converts
+# until a worker is started (every install, new or updated, starts with its worker stopped). Press
+# Start on the web page (first-run, or Workers), or through the API:
+curl -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8484/api/libraries/1/scan
+curl -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8484/api/workers/this/start
 ```
 
 The program **replaces originals by default**. Always develop against a copy (or pass
@@ -106,15 +111,57 @@ docker run --rm -v "$PWD/install.sh:/install.sh:ro" -v "$PWD/dist:/release:ro" -
 systemd path was tested the same way in a privileged `jrei/systemd-debian:12` container. Neither
 has been run against a real GitHub release.
 
+### The Windows installer
+
+`installer/windows/` has the Inno Setup script (`shrink-your-shit.iss`), `build.ps1` (builds the
+exe, then runs `ISCC.exe`; Windows with Go and Inno Setup 6 only), `extract-ffmpeg.ps1` and
+`smoke-test.ps1` (the CI test). The `.iss` can be compiled on Linux with the Docker image
+`amake/innosetup` (that was done to check it compiles); running the installer needs Windows, and
+only CI has done that. To refresh the pinned ffmpeg, change the URL and SHA-256 at the top of the
+`.iss` together (`sha256sum` the zip you downloaded).
+
+### Trying a dev build
+
+**These are untested dev builds**: whatever was on `dev` at that commit, not a release. Use them to try
+a change before it is released, not for a library you care about without the originals kept.
+
+Every push to `dev` runs `.github/workflows/dev-build.yml`. It builds the 5 platform archives and the
+Windows installer with the version `0.0.0-dev+<commit>` and keeps them for 14 days as one workflow
+artifact, `shrink-your-shit-dev-<commit>`: the archives, `shrink-your-shit-setup-dev-<commit>.exe` and
+`checksums.txt` (every file). It publishes nothing: no GitHub Release, no tag, no container image, and
+`install.sh` and the installer still download the latest release by default. `shrink-your-shit
+-version` and the installer's version say `0.0.0-dev+<commit>`. A maintainer can also run it by hand on
+any branch (Actions > Dev build > Run workflow).
+
+To install one:
+
+1. Open the run under Actions > Dev build (pick the commit), and download the artifact
+   `shrink-your-shit-dev-<commit>` at the bottom of the page. Downloading needs a GitHub login.
+2. Unzip it into a folder, for example `~/syp-dev`.
+3. Linux or macOS, with `install.sh` from the same commit (or `main`):
+   ```sh
+   SYP_BASE_URL=file://$HOME/syp-dev sh install.sh --library /path/to/videos
+   ```
+   It takes the archive for this computer from that folder and checks it against `checksums.txt`, as
+   it does with a release. Windows: run `shrink-your-shit-setup-dev-<commit>.exe`.
+4. Nothing converts until you press **Start** on the Workers page: every install, new or updated,
+   starts with its worker stopped.
+5. To go back to the released version, run the installer again without `SYP_BASE_URL` (or the latest
+   release's setup exe on Windows).
+
 ## Continuous integration
 
-`.github/workflows/ci.yml`, triggered on pull requests and pushes to `main`:
+`.github/workflows/ci.yml`, triggered on pull requests and pushes to `main` and `dev`:
 
 | Job | Checks |
 |---|---|
-| `test` (ubuntu, windows, macos) | `go vet ./...` and `go test -count=1 ./...` on each OS |
+| `test` (ubuntu, windows, macos) | `go vet ./...` and `go test -count=1 ./...` on each OS. **ubuntu** also installs Ubuntu's ffmpeg package (6.1 on `ubuntu-latest` = Ubuntu 24.04 when this was written; the job prints the exact version) and runs the tests with `SYP_REQUIRE_FFMPEG=1`, so the real-ffmpeg tests run; it lists every `TestReal*` result and fails if one skipped. They take about 2.5 minutes (measured on the Debian test guest: worker package 153 s). **windows and macos** have no ffmpeg, so they run the fake-runner tests only. |
 | `build` (5 targets) | `go build ./...` and `go vet ./...` with `CGO_ENABLED=0` for linux amd64/arm64, windows amd64, darwin arm64/amd64 |
-| `docker` | `docker build`, then starts the container and curls `/api/status` |
+| `docker` | `docker build`, then starts the container, waits for `/healthz`, checks `/api/status` is 401 without the token and answers with the token from `docker exec syp shrink-your-shit token` |
+| `windows-installer` | builds the Windows installer, then on the runner: silent install, real conversion, upgrade, uninstall |
+
+Pushes to `dev` also run `dev-build.yml` (above, "Trying a dev build"): it builds and keeps the dev
+artifacts, and tests nothing beyond the binary's `-version`; ci.yml does the testing.
 
 Go version comes from `go.mod`. Actions are pinned to major versions. Check a PR's status
 with `gh pr checks <number>`; what has been observed so far is in [STATUS.md](STATUS.md).

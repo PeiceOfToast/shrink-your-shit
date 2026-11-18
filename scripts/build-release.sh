@@ -1,7 +1,7 @@
 #!/bin/sh
 # Build the release files into ./dist: one archive per platform plus checksums.txt.
 # Usage: sh scripts/build-release.sh <version>      (e.g. 0.1.0; a leading "v" is removed)
-# Needs: go, tar, zip (or python3), sha256sum (or shasum). Used by .github/workflows/release-binaries.yml;
+# Needs: go, Node LTS with npm (web/.nvmrc; the new UI), tar, zip (or python3), sha256sum (or shasum). Used by .github/workflows/release-binaries.yml;
 # run it yourself to see exactly what a release would contain.
 set -eu
 
@@ -14,6 +14,9 @@ mkdir -p "$dist"
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 
+# The UI (web/, served at /) is built once into internal/web/next/dist and embedded in every binary.
+(cd "$root/web" && npm ci --no-audit --no-fund && npm run build)
+
 for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
   os=${target%/*}
   arch=${target#*/}
@@ -23,6 +26,11 @@ for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; d
   mkdir -p "$stage/$name"
   (cd "$root" && CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath \
     -ldflags "-s -w -X main.version=$version" -o "$stage/$name/$exe" .)
+  # The network-shares helper is a separate binary, for Linux only.
+  if [ "$os" = linux ]; then
+    (cd "$root" && CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath \
+      -ldflags "-s -w" -o "$stage/$name/syp-network-helper" ./cmd/syp-network-helper/)
+  fi
   cp "$root/LICENSE" "$root/README.md" "$stage/$name/"
   if [ "$os" = windows ]; then
     if command -v zip >/dev/null 2>&1; then
