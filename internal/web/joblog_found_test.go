@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -89,5 +90,30 @@ func TestImportedStepFoundIsEmpty(t *testing.T) {
 	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10) + "/log"})
 	if !strings.Contains(body, `"name":"imported"`) || !strings.Contains(body, `"found":[]`) {
 		t.Errorf("imported step must carry found: [] : %s", body)
+	}
+}
+
+// A retried job keeps the earlier attempt's log lines under the same step index; "found" shows only what the
+// current attempt's check wrote (lines from the step's current start on).
+func TestJobLogFoundOnlyThisAttempt(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	id, _ := st.Enqueue(jobs.Job{Library: "/m", LibraryID: l.ID, Path: "/m/a.mkv"})
+	st.Claim("t")
+	st.RecordRunStep(id, jobs.RunStep{Index: 0, Name: "encode", Outcome: "ok"})
+	st.RecordRunStep(id, jobs.RunStep{Index: 1, Name: "check", Outcome: "failed", StartedAt: time.Now().UTC().Format(time.RFC3339)})
+	st.AppendLogLine(id, 1, "check", "OLD")
+	time.Sleep(1100 * time.Millisecond) // stamps are whole seconds; the retry's check starts in a later one
+	st.RecordRunStep(id, jobs.RunStep{Index: 1, Name: "check", Outcome: "ok", StartedAt: time.Now().UTC().Format(time.RFC3339)})
+	st.AppendLogLine(id, 1, "check", "NEW")
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10) + "/log"})
+	var r struct {
+		Steps []map[string]any
+	}
+	if err := json.Unmarshal([]byte(body), &r); err != nil || len(r.Steps) != 2 {
+		t.Fatalf("log %s", body)
+	}
+	if f := r.Steps[1]["found"].([]any); len(f) != 1 || f[0] != "NEW" {
+		t.Errorf("found %v, want [NEW]", f)
 	}
 }

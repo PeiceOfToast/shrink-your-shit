@@ -10,21 +10,6 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 )
 
-// logHas reports whether the job log has a line on the given step and stream containing text.
-func (s *scenario) logHas(step int, stream, text string) bool {
-	s.t.Helper()
-	lines, err := s.store.LogLines(s.id)
-	if err != nil {
-		s.t.Fatal(err)
-	}
-	for _, l := range lines {
-		if l.Step == step && l.Stream == stream && strings.Contains(l.Text, text) {
-			return true
-		}
-	}
-	return false
-}
-
 // hasLabels fails the test unless lines start with the labels, in order (the drawer's "What the check found"
 // reads these words, so the labels are part of what the UI shows).
 func hasLabels(t *testing.T, what string, lines []string, labels ...string) {
