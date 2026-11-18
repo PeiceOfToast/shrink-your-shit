@@ -4,6 +4,7 @@ package worker
 
 import (
 	"errors"
+	"fmt"
 	"os/exec"
 	"time"
 )
@@ -54,6 +55,22 @@ func retryIn(err error, attempts int) (time.Duration, bool) {
 	}
 	waits := retryWaits[re.kind]
 	return waits[min(attempts, len(waits)-1)], true
+}
+
+// retryNote is the failure step a try writes before it goes back in the queue. Without it the job's last
+// step is the converted one of the try that failed, and the page reads "validating" while it converts again.
+func retryNote(try, tries int, plain string, wait time.Duration) string {
+	return fmt.Sprintf("Try %d of %d didn't work: %s. Trying again in %s.", try, tries, plain, waitWords(wait))
+}
+
+// waitWords says a wait the way the page reads it: "5 minutes", "2 hours".
+func waitWords(d time.Duration) string {
+	if d >= time.Hour && d%time.Hour == 0 {
+		n := int(d / time.Hour)
+		return fmt.Sprintf("%d %s", n, plural(n, "hour", "hours"))
+	}
+	n := int(d.Round(time.Minute) / time.Minute)
+	return fmt.Sprintf("%d %s", n, plural(n, "minute", "minutes"))
 }
 
 // killedBySignal reports whether a program ended because the system stopped it (out of memory, killed),

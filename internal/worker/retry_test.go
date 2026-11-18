@@ -312,3 +312,20 @@ func TestARetryClearsItsLeftoverSrtAfterTheSettingChanged(t *testing.T) {
 		t.Errorf("records left: %+v", left)
 	}
 }
+
+// A try that converted and then failed leaves a failure step last, so the page does not read the next try
+// as validating: the failure step says which try it was and when the next one starts.
+func TestARetryWritesItsFailureStep(t *testing.T) {
+	s := newScenario(t)
+	s.ssimErr = errors.New("exit status 1") // the check cannot run, after the conversion
+	s.retrying().RunOne(context.Background())
+	s.wantRetry(1, 5*time.Minute, "could not be done")
+	steps, _ := s.store.Steps(s.id)
+	if len(steps) == 0 {
+		t.Fatal("no steps")
+	}
+	last := steps[len(steps)-1]
+	if last.Step != "failure" || last.OK || !strings.HasPrefix(last.Words, "Try 1 of 3 didn't work: ") || !strings.HasSuffix(last.Words, ". Trying again in 5 minutes.") {
+		t.Errorf("last step %+v, want a failure step for try 1 of 3 in 5 minutes", last)
+	}
+}
