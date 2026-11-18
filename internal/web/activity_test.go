@@ -443,7 +443,9 @@ func TestDeleteLibraryLeavesNothingHalfDone(t *testing.T) {
 	}}))
 	defer srv.Close()
 	defer func(d time.Duration) { libraryStopWait = d }(libraryStopWait)
-	libraryStopWait = 2 * time.Second
+	// The swap is finished by this test's own goroutine, which on a slow runner (Windows CI) can take
+	// longer than 2 s to get there; a short wait made step 1 answer 409 before the swap ended.
+	libraryStopWait = 30 * time.Second
 	del := func(id int64) (int, string) { return post(t, srv, "DELETE", fmt.Sprintf("/api/libraries/%d", id), "") }
 	gone := func(id int64, jobIDs ...int64) {
 		t.Helper()
