@@ -462,6 +462,10 @@ CREATE TABLE IF NOT EXISTS encoder_tests (
 	computer TEXT NOT NULL, tested_at TEXT NOT NULL, encoder TEXT NOT NULL,
 	passed INTEGER NOT NULL, detail TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (computer, tested_at, encoder));`},
+	// Shares made after this upgrade mount under /mnt/<name>. An empty mount_point is an older share, whose folder is
+	// /var/lib/syp/shares/<name> as before (the sanitised name can't be rebuilt in SQL, so old rows are not filled in).
+	{47, "share mount point", `
+ALTER TABLE shares ADD COLUMN mount_point TEXT NOT NULL DEFAULT '';`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone

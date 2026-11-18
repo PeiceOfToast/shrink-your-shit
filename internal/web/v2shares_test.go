@@ -820,6 +820,7 @@ func TestSharesManualSetupTextQuotedName(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows connects shares itself: no manual setup")
 	}
+	newRoot, _ := setMountRoots(t) // a new share goes under a temp folder, not the real /mnt
 	home := filepath.Join(t.TempDir(), "home")
 	os.MkdirAll(home, 0o755)
 	os.Setenv("HOME", home)
@@ -841,7 +842,7 @@ func TestSharesManualSetupTextQuotedName(t *testing.T) {
 		t.Errorf("expected sanitised name bobs-share: %q", text)
 	}
 	// The share path should be properly quoted
-	if !strings.Contains(text, "'/var/lib/syp/shares/bobs-share'") {
+	if !strings.Contains(text, "'"+newRoot+"/bobs-share'") {
 		t.Errorf("expected quoted path: %q", text)
 	}
 }

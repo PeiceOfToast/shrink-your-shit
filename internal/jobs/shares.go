@@ -22,6 +22,7 @@ type Share struct {
 	Type              string
 	Address           string
 	Name              string
+	MountPoint        string // where it is mounted; "" is an older share at /var/lib/syp/shares/<name>
 	Guest             bool
 	Username          string
 	HasPassword       bool
@@ -132,7 +133,7 @@ func decryptSharePassword(ct, nonce []byte) (string, error) {
 
 func (s *Store) LoadShares() ([]Share, error) {
 	rows, err := s.db.Query(`SELECT id, type, address, name, guest, username,
-		encrypted_password, auth_nonce, created, updated FROM shares ORDER BY name`)
+		encrypted_password, auth_nonce, created, updated, mount_point FROM shares ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +141,7 @@ func (s *Store) LoadShares() ([]Share, error) {
 	for rows.Next() {
 		var sh Share
 		rows.Scan(&sh.ID, &sh.Type, &sh.Address, &sh.Name, &sh.Guest, &sh.Username,
-			&sh.EncryptedPassword, &sh.Nonce, &sh.Created, &sh.Updated)
+			&sh.EncryptedPassword, &sh.Nonce, &sh.Created, &sh.Updated, &sh.MountPoint)
 		sh.HasPassword = sh.EncryptedPassword != nil
 		out = append(out, sh)
 	}
@@ -213,6 +214,12 @@ func (s *Store) UpdateShare(id int64, name, address, typeStr, username string, g
 	return err
 }
 
+// SetShareMountPoint records where share id is mounted (a share made or renamed on Linux).
+func (s *Store) SetShareMountPoint(id int64, mountPoint string) error {
+	_, err := s.db.Exec(`UPDATE shares SET mount_point=? WHERE id=?`, mountPoint, id)
+	return err
+}
+
 func (s *Store) DeleteShare(id int64) error {
 	if _, err := s.ResumeSharePause(id); err != nil { // a library paused by this share is not left paused by nothing
 		return err
@@ -228,9 +235,9 @@ func (s *Store) DeleteShare(id int64) error {
 func (s *Store) ShareByID(id int64) (*Share, error) {
 	var sh Share
 	err := s.db.QueryRow(`SELECT id, type, address, name, guest, username,
-		encrypted_password, auth_nonce, created, updated FROM shares WHERE id=?`, id).Scan(
+		encrypted_password, auth_nonce, created, updated, mount_point FROM shares WHERE id=?`, id).Scan(
 		&sh.ID, &sh.Type, &sh.Address, &sh.Name, &sh.Guest, &sh.Username,
-		&sh.EncryptedPassword, &sh.Nonce, &sh.Created, &sh.Updated)
+		&sh.EncryptedPassword, &sh.Nonce, &sh.Created, &sh.Updated, &sh.MountPoint)
 	if err != nil {
 		return nil, nil
 	}

@@ -197,14 +197,14 @@ func TestSharesDirMustNotBeWritableByOthers(t *testing.T) {
 		if err := os.Chmod(dir, mode); err != nil {
 			t.Fatal(err)
 		}
-		if checkSharesDir(me) == nil {
+		if checkSharesDir(sharesDir, me) == nil {
 			t.Errorf("shares folder %o accepted", mode)
 		}
 	}
 	if err := os.Chmod(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := checkSharesDir(me); err != nil {
+	if err := checkSharesDir(sharesDir, me); err != nil {
 		t.Errorf("shares folder 0755 refused: %v", err)
 	}
 
@@ -215,7 +215,7 @@ func TestSharesDirMustNotBeWritableByOthers(t *testing.T) {
 		t.Fatal(err)
 	}
 	sharesDir = link
-	if checkSharesDir(me) == nil {
+	if checkSharesDir(sharesDir, me) == nil {
 		t.Error("symlinked shares folder accepted")
 	}
 }
