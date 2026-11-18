@@ -40,6 +40,7 @@ export const STEP_DEFS: StepDefinition[] = [
       resolution: wd(en(["keep", "1080", "720", "480"], ["Same as the original", "At most 1080p", "At most 720p", "At most 480p"]), "keep", "Resolution"),
       maxBitrate: wd(en(["none", "high", "medium", "low"], ["No limit", "High", "Medium", "Low"]), "none", "Max bitrate"),
       speed: wd(en(["faster", "normal", "slower"], ["Faster", "Normal", "Slower (smaller files)"]), "normal", "Speed"),
+      kind: wd({ ...en(["slider", "selectors"], ["Slider", "Custom settings"]), readOnly: true }, "slider", "Kind"), // as #292's schema: the slider and More options write it; forms skip it
     }, ["quality", "format", "resolution", "maxBitrate", "speed"]) }),
   def({ type: "audio.tracks", category: "audio", name: "Audio", icon: "audio", typeLabel: "Audio", description: "Which sound tracks the new file has.",
     outputs: [success], alwaysOn: false, runsWith: SEGMENT, sideEffects: "none",
