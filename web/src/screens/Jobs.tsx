@@ -2,11 +2,11 @@
 // (#113) with live updates from /api/v2/events (#118/#120/#122), or the sample jobs with ?mock=1. The server lists one
 // tab at a time (Waiting, Running, Done, Skipped, Failed); All and Paused tabs and the codec/step/worker filters come
 // when it has them. Not here yet: output path and Get original back (v2 has neither).
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, count, elapsed, plural } from "../format";
-import { convertDoneAgain, fileJobs, findSkip, getJob, getJobLog, jobAction, listJobs, listKept, restoreKept } from "../jobsApi";
+import { convertDoneAgain, fileJobs, findSkip, getJob, getJobLog, jobAction, listJobs, listKept, restoreKept, type JobLog } from "../jobsApi";
 import { getWorkflow } from "../workflowApi";
 import { getHealth, getSettings } from "../libraryApi";
 import { onLive } from "../live";
@@ -25,11 +25,13 @@ const PILL: Partial<Record<JobState, string>> = { preparing: "run", running: "ru
 const ICON: Partial<Record<JobState, string>> = { completed: "i-check-c", failed: "i-x-c", skipped: "i-skip", cancelled: "i-stop", retry_wait: "i-clock", queued: "i-clock" };
 // V5b: a waiting file whose library is paused (subState library_disabled) reads "Library paused" (design SCREENS V5);
 // it has no place in the queue, so its '#' is '–'.
-type PillJob = { state: JobState; retryAt?: string | null; subState?: string | null };
+type PillJob = { state: JobState; retryAt?: string | null; subState?: string | null; reason?: { code: string } | null };
 const libPaused = (j: PillJob) => j.state === "queued" && j.subState === "library_disabled";
-const words = (j: PillJob) => (libPaused(j) ? "Library paused" : j.state === "retry_wait" && j.retryAt ? "Retry at " + clock(j.retryAt) : WORD[j.state]);
+// de2f664: a check that refused the new file kept the original; the server lists it as failed (code kept_original), it reads "Original kept"
+const keptOrig = (j: PillJob) => j.state === "failed" && j.reason?.code === "kept_original";
+const words = (j: PillJob) => (libPaused(j) ? "Library paused" : keptOrig(j) ? "Original kept" : j.state === "retry_wait" && j.retryAt ? "Retry at " + clock(j.retryAt) : WORD[j.state]);
 function Pill({ j }: { j: PillJob }) {
-  return <span className={"pill " + (libPaused(j) ? "warn" : PILL[j.state] ?? "")}><Icon id={libPaused(j) ? "i-pause" : ICON[j.state] ?? "i-play"} />{words(j)}</span>;
+  return <span className={"pill " + (libPaused(j) || keptOrig(j) ? "warn" : PILL[j.state] ?? "")}><Icon id={libPaused(j) ? "i-pause" : keptOrig(j) ? "i-info" : ICON[j.state] ?? "i-play"} />{words(j)}</span>;
 }
 const reasonText = (j: JobItem) => j.reason?.message ?? j.detail ?? ""; // #130: every row's reason is {code, message}
 const saved = (b?: number, a?: number) => {
@@ -170,10 +172,59 @@ export function Jobs() {
 const dur = (ms: number) => { const s = ms / 1000; return s < 1 ? s.toFixed(1) + " s" : s < 60 ? Math.round(s) + " s" : Math.floor(s / 60) + " min " + (Math.round(s) % 60) + " s"; };
 const text = (o: string | string[]) => Array.isArray(o) ? o.join("\n") : o;
 // map server step labels to person-facing names (workshop #217: encode, check)
-const stepLabel = (s: string) => ({ encode: "Converting video", check: "Checking the picture", imported: "Older log, not split into steps", replace: "Save the result" } as Record<string, string>)[s] ?? s;
+// The check step is named by what it checked (its found Check line); an older log without one is "Checking the new file".
+const stepLabel = (s: string, found?: string[], scored = false) => s === "check" ? checkLabel(found, scored) : ({ encode: "Converting video", imported: "Older log, not split into steps", replace: "Save the result" } as Record<string, string>)[s] ?? s;
+const checkLabel = (found?: string[], scored = false) => {
+  const c = (found ?? []).find((l) => l.startsWith("Check: ")) ?? "";
+  return /^Check: picture/.test(c) ? "Checking the picture" : /^Check: playback/.test(c) ? "Checking playback" : /^Check: damage/.test(c) ? "Checking the original for damage" : scored ? "Checking the picture" : "Checking the new file"; // a remote worker records the picture score with no Check: line
+};
 // SCREENS V6b: the sentence, the reason code small under it, where it stops (the step opens in the log), the hint as
 // 'What you can do' (left out when null), the last ffmpeg lines with Copy, and the buttons. --error left border.
-function WhyFailed({ id, msg, code, worker, f }: { id: string; msg: string; code: string; worker: string | null; f: Failure }) {
+// SCREENS V6c What the check found: a check that kept the original or failed the job writes "Label: value" lines in its
+// step's found (worker verify.go, worker.go). They become design's rows (a row with no data is left out); libva lines are
+// driver messages; every other line is ffmpeg's output. A value this page can't read is shown as written.
+const cap = (v: string) => v.charAt(0).toUpperCase() + v.slice(1);
+export function readFound(lines: string[]) {
+  const rows: [string, string][] = [], errors: string[] = [], driver: string[] = [];
+  const add = (k: string, v?: string | null) => { if (v) rows.push([k, v]); };
+  for (const l of lines) {
+    const m = /^(Check|Scores|Alignment|Worst frames|Where|Errors|Encoder|Original|New file): (.+)$/.exec(l);
+    if (!m) { (/^libva\b/i.test(l) ? driver : errors).push(l); continue; }
+    const [, k, v] = m;
+    if (k === "Check") add("Check", cap(v.replace(/( at \d+ places?, \d+ s each): .*$/, "$1")));
+    else if (k === "Alignment") { const c = rows.find((r) => r[0] === "Check"); const t = "Also tried one frame earlier and later."; if (c) c[1] += "\n" + t; else add("Check", t); }
+    else if (k === "Scores") { // "0:01:00 0.912, 0:12:00 0.961 (0.95 required); 0:30:00 not measured"
+      const need = /\(([\d.]+) required\)/.exec(v)?.[1], at = v.replace(/ \([\d.]+ required\)/, "").split(/[;,] /).map((x) => x.trim()).filter(Boolean);
+      const low = at.map((x) => /^\S+ (\d+(?:\.\d+)?)$/.exec(x)?.[1]).filter((x): x is string => !!x).sort((a, b) => Number(a) - Number(b))[0];
+      add("Score", low ? "Lowest " + low + (need ? " · needs " + need : "") : null);
+      add("At each place", at.join(" · "));
+    }
+    else if (k === "Worst frames") add("Worst frame", cap(v.split(", ")[0])); // the server sorts them, worst first
+    else if (k === "Where") add("Stopped at", /reached frame (\d+)/.exec(v) ? "Frame " + /reached frame (\d+)/.exec(v)![1] : null);
+    else if (k === "Errors") add("Errors", cap(v.replace("error lines from ffmpeg", "lines from ffmpeg")));
+    else add(k, v);
+  }
+  return { rows, errors, driver };
+}
+const copyBox = (title: string, ls: string[]) => ls.length > 0 && <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">{title}</span>
+  <button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(ls.join("\n")).catch(() => {})}><Icon id="i-copy" />Copy</button></div><pre className="joblog sm">{ls.join("\n")}</pre></div>;
+const FoundRows = ({ rows }: { rows: [string, string][] }) => rows.length > 0 ? <dl className="kv">{rows.map(([k, v], i) => <Fragment key={i}><dt>{k}</dt><dd className="sm" style={{ whiteSpace: "pre-line", fontVariantNumeric: "tabular-nums" }}>{v}</dd></Fragment>)}</dl> : null;
+const Driver = ({ ls }: { ls: string[] }) => ls.length > 0 ? <details><summary className="sm" style={{ cursor: "pointer" }}>Driver messages ({ls.length})</summary>{copyBox("Driver messages", ls)}</details> : null;
+// A kept job: its own neutral section (keeping the original is the safe outcome, not an error).
+function CheckFound({ lines, reason }: { lines: string[]; reason: string }) {
+  const f = readFound(lines);
+  return (
+    <section className="note" role="region" aria-label="What the check found" style={{ display: "block" }}>
+      <h3><Icon id="i-info" /> What the check found</h3>
+      {reason && <p style={{ fontSize: "var(--fs-lg)" }}>{reason}</p>}
+      <FoundRows rows={f.rows} />
+      {copyBox("What ffmpeg said", f.errors)}
+      <Driver ls={f.driver} />
+    </section>);
+}
+
+function WhyFailed({ id, msg, code, worker, f, found = [] }: { id: string; msg: string; code: string; worker: string | null; f: Failure; found?: string[] }) {
+  const fd = readFound(found), ff = fd.errors.length ? fd.errors : f.keyLines; // V6c: one ffmpeg box
   const t = dur(f.afterMs), box = useRef<HTMLElement>(null), ver = useData(getHealth, []).data?.version;
   // Copy summary: the plain text a bug report needs (V6b item 5): the job, its worker and the app version, then the box
   const copy = () => navigator.clipboard?.writeText("Job " + id + " · " + (worker ?? "no worker") + " · Shrink Your Shit " + (ver ?? "") + "\n" + (box.current?.innerText ?? "")).catch(() => {});
@@ -182,12 +233,14 @@ function WhyFailed({ id, msg, code, worker, f }: { id: string; msg: string; code
       <h3><Icon id="i-alert" /> Why it failed <span className="pill bad">Failed</span></h3>
       <p style={{ fontSize: "var(--fs-lg)" }}>{msg}</p>
       <p className="sm muted mono">{code}</p>
-      <p className="sm">In step {f.stepIndex + 1} of {f.stepCount}, <a href={"#job-step-" + (f.stepIndex + 1)}>{stepLabel(f.step)}</a>, after {t}{f.mediaTime ? " (at " + f.mediaTime + " in the video)" : ""}.</p>
+      <p className="sm">In step {f.stepIndex + 1} of {f.stepCount}, <a href={"#job-step-" + (f.stepIndex + 1)}>{stepLabel(f.step, found)}</a>, after {t}{f.mediaTime ? " (at " + f.mediaTime + " in the video)" : ""}.</p>
+      <FoundRows rows={fd.rows} />
       {f.hint && <p><strong>What you can do:</strong> {f.hint}</p>}
       {f.ffmpegRan === false
         ? <p className="sm muted">ffmpeg didn't run.</p>
-        : f.keyLines.length > 0 && <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">{(f.step === "encode" || f.step === "check" ? "What ffmpeg said" : "The error")}</span><button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(f.keyLines.join("\n")).catch(() => {})}><Icon id="i-copy" />Copy</button></div>
-          <pre className="joblog">{f.keyLines.join("\n")}</pre></div>}
+        : ff.length > 0 && <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">{(f.step === "encode" || f.step === "check" ? "What ffmpeg said" : "The error")}</span><button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(ff.join("\n")).catch(() => {})}><Icon id="i-copy" />Copy</button></div>
+          <pre className="joblog">{ff.join("\n")}</pre></div>}
+      <Driver ls={fd.driver} />
       <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: 12 }}>
         <a className="btn sm" href={"#job-step-" + (f.stepIndex + 1)}><Icon id="i-file" />Open the full log</a>
         {!MOCK && <a className="btn sm ghost" href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}><Icon id="i-download" />Download</a>}
@@ -197,12 +250,12 @@ function WhyFailed({ id, msg, code, worker, f }: { id: string; msg: string; code
 }
 
 // count of q in a step's searchable text (case-insensitive)
-const matches = (st: { name: string; command: string | null; output: string | string[]; result: string | null }, q: string) => [st.name, st.command ?? "", text(st.output), st.result ?? ""].join("\n").toLowerCase().split(q.toLowerCase()).length - 1;
+const matches = (st: { name: string; command: string | null; output: string | string[]; result: string | null; found?: string[] }, q: string) => [st.name, st.command ?? "", text(st.output), (st.found ?? []).join("\n"), st.result ?? ""].join("\n").toLowerCase().split(q.toLowerCase()).length - 1;
 // E: a finished job's log by step (GET /log), SCREENS V6b: each step a row that opens; the failed step open; inside a step
 // its command, its source, its picture check, its ffmpeg output (last 200 lines on a failure, the rest by download), its
 // result; the log's last line is the job's final line.
-function StepLog({ id, worker, failedIdx }: { id: string; worker: string | null; failedIdx: number | null }) {
-  const d = useData(() => getJobLog(id), [id]), keep = useData(getSettings, []), [q, setQ] = useState("");
+function StepLog({ d, id, worker, failedIdx, kept }: { d: { loaded: boolean; data?: JobLog; error?: { message: string } }; id: string; worker: string | null; failedIdx: number | null; kept: boolean }) {
+  const keep = useData(getSettings, []), [q, setQ] = useState("");
   if (!d.loaded) return <section><h3>Log</h3><p className="muted">Loading the log...</p></section>;
   if (!d.data) return <section><h3>Log</h3><p className="muted">{d.error?.message ?? "The log can't be shown."}</p></section>;
   const l = d.data, days = (keep.data as { logKeepDays?: number } | undefined)?.logKeepDays ?? 30;
@@ -230,8 +283,8 @@ function StepLog({ id, worker, failedIdx }: { id: string; worker: string | null;
         const sum = pr && [pr.videoCodec?.toUpperCase().replace("H264", "H.264"), v?.Width && v.Height ? v.Width + "×" + v.Height : "", v?.frameRate ? +v.frameRate.toFixed(3) + " fps" : "", [v?.bitDepth ? v.bitDepth + "-bit" : "", hdr].filter(Boolean).join(" "), n("audio") && n("audio") + " audio", n("subtitle") && n("subtitle") + " subtitles", pr.durationSec ? elapsed(pr.durationSec) : "", pr.sizeBytes ? bytes(pr.sizeBytes) : ""].filter(Boolean).join(" · ");
         return (
           <details key={i} id={"job-step-" + (i + 1)} open={q ? hit > 0 : st.outcome !== "ok" || i === failedIdx} className="stepd" style={{ borderTop: "1px solid var(--border)", padding: "8px 0" }}>
-            <summary className="row nw" style={{ gap: 8, flexWrap: "wrap", cursor: "pointer" }}><strong>{stepLabel(st.name)}</strong>{st.startedAt && st.tookMs != null && <span className="sm muted">{clock(st.startedAt)} · took {dur(st.tookMs)}</span>}
-              {["ok", "done", "completed"].includes(st.outcome) ? <span className="pill ok">Done</span> : st.outcome === "failed" ? <span className="pill bad">Failed</span> : null}{hit > 0 && <span className="pill">{hit} match{hit > 1 ? "es" : ""}</span>}</summary>
+            <summary className="row nw" style={{ gap: 8, flexWrap: "wrap", cursor: "pointer" }}><strong>{stepLabel(st.name, st.found, st.check != null)}</strong>{st.startedAt && st.tookMs != null && <span className="sm muted">{clock(st.startedAt)} · took {dur(st.tookMs)}</span>}
+              {["ok", "done", "completed"].includes(st.outcome) ? <span className="pill ok">Done</span> : st.outcome === "failed" ? (kept ? <span className="pill warn">Original kept</span> : <span className="pill bad">Failed</span>) : null}{hit > 0 && <span className="pill">{hit} match{hit > 1 ? "es" : ""}</span>}</summary>
             <div className="stack" style={{ gap: 6, paddingTop: 6 }}>
               {st.command && <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">Command</span><button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(st.command ?? "").catch(() => {})}><Icon id="i-copy" />Copy</button></div>
                 <pre className="joblog sm">{st.command}</pre></div>}
@@ -240,6 +293,7 @@ function StepLog({ id, worker, failedIdx }: { id: string; worker: string | null;
               {st.outputLines > 0 && <details open={st.outcome !== "ok"}><summary className="sm">Show ffmpeg output ({st.outputLines} lines)</summary>
                 {st.outputLines > 200 && <p className="sm"><a href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}>Download all {st.outputLines.toLocaleString()} lines</a></p>}
                 <pre className="joblog sm">{text(st.output)}</pre></details>}
+              {(st.found?.length ?? 0) > 0 && <pre className="joblog sm">{st.found!.join("\n")}</pre>}
               {st.result && <p className="sm">{st.result}</p>}
             </div>
           </details>);
@@ -340,12 +394,16 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   };
   const before = fmtV(j?.metadata?.before), after = fmtV(j?.metadata?.after);
   const reason = j?.reason?.message ?? (row ? reasonText(row) : "");
+  // one fetch of the log for the step list and What the check found; fetched again when the job stops running
+  const log = useData(() => (scan || active ? Promise.resolve(null as unknown as JobLog) : getJobLog(id)), [id, scan, active]);
+  const found = (log.data?.steps ?? []).filter((st) => (st.found?.length ?? 0) > 0);
+  const kept0 = !!state && keptOrig({ state, reason: j?.reason ?? own?.reason });
   return (
     <div className="drawer-wrap" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <aside className="drawer jobd" ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="jd-h">
-        <div className={"hd" + (state === "failed" ? " failed" : "")}>
+        <div className={"hd" + (state === "failed" && !kept0 ? " failed" : "")}>
           <button className="btn icon ghost" type="button" aria-label="Close" onClick={onClose}><Icon id="i-chev-l" /></button>
-          <div className="sp"><h2 id="jd-h" className="clamp2" title={name}>{name}</h2>{state && <span style={{ alignSelf: "flex-start" }}><Pill j={{ state, retryAt: j?.retryAt ?? own?.retryAt, subState: own?.subState }} /></span>}</div>
+          <div className="sp"><h2 id="jd-h" className="clamp2" title={name}>{name}</h2>{state && <span style={{ alignSelf: "flex-start" }}><Pill j={{ state, retryAt: j?.retryAt ?? own?.retryAt, subState: own?.subState, reason: j?.reason ?? own?.reason }} /></span>}</div>
           {/* SCREENS V6b header: Retry, Cancel or Stop, and the job ID to copy (the body keeps the rest) */}
           <div className="row nw" style={{ gap: 6, flexWrap: "wrap" }}>
             {(state === "failed" || state === "retry_wait") && <button className="btn sm" type="button" onClick={() => run("retry")}><Icon id="i-refresh" />{state === "retry_wait" ? "Try now" : "Retry"}</button>}
@@ -368,7 +426,8 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {/* review db7b1f1 P3: "removed" is the server's flag, not a person's word. Only a job removed with its library
               gets a note; a job that ended as a skip shows its reason under Why like any other. */}
           {j?.removed && j.reason?.code === "removed" ? <div className="note"><Icon id="i-info" /><div>Its library was removed, so this file won't be converted.</div></div>
-            : j?.failure ? <WhyFailed id={id} msg={reason} code={j.reason?.code ?? ""} worker={j.worker ?? null} f={j.failure} />
+            : j?.failure ? <WhyFailed id={id} msg={reason} code={j.reason?.code ?? ""} worker={j.worker ?? null} f={j.failure} found={found.flatMap((st) => st.found!)} />
+            : found.length ? <CheckFound lines={found.flatMap((st) => st.found!)} reason={reason} />
             : reason && <section><h3>Why</h3><p>{reason}</p></section>}
           <section><h3>File</h3><dl className="kv">
             {(own?.path ?? j?.file?.path) && <><dt>Source</dt><dd className="mono sm">{own?.path ?? j?.file?.path}</dd></>} {/* review 54ff228: no '-' when the server doesn't keep the path (a removed library's job) */}
@@ -393,7 +452,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {/* review db7b1f1 P2: the scan sentence only for a file a scan left out; a cancelled file whose job the server
               doesn't send yet claims nothing about scans or steps */}
           {scan && <section><h3>Timeline</h3><p className="muted">{state === "cancelled" ? "Cancelled." : "This file was left out when its library was scanned, so it has no job and no steps."}</p></section>}
-          {!scan && (active ? <JobLog id={id} name={name} /> : <StepLog id={id} worker={j?.worker ?? null} failedIdx={j?.failure?.stepIndex ?? null} />)}
+          {!scan && (active ? <JobLog id={id} name={name} /> : <StepLog d={log} id={id} worker={j?.worker ?? null} failedIdx={j?.failure?.stepIndex ?? null} kept={kept0} />)}
           {/* #148: before is the original; null for an older job that replaced a file of the same name: said so, never blank */}
           {(before || after) && <section><h3>Result</h3><table className="tbl kvt"><thead><tr><th /><th>Before</th><th>After</th></tr></thead><tbody>
             <tr><th>Video</th>{before ? <td>{before.video}</td> : <td rowSpan={4} className="muted">Not recorded for this job</td>}<td>{after?.video ?? "-"}</td></tr>

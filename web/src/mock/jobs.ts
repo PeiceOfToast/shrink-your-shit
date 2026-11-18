@@ -27,6 +27,10 @@ let items: JobItem[] = [
   base("48191", "Crash.Test.2024.mp4", "Crash Test (2024)", HOME, "failed", { detail: "There isn't enough free space to write the new file. About 571 MB is needed, 101 MB is free.", reason: { code: "no_space", message: "There isn't enough free space to write the new file. About 571 MB is needed, 101 MB is free." } }),
   base("no-log", "Old.Movie.2020.mp4", "Old Movies", HOME, "completed", { beforeBytes: 8 * GB, afterBytes: 4 * GB, bytes: 4 * GB, codec: "HEVC", finishedAt: at(60 * 24 * 60), flow: { id: "w1", name: "Shrink videos" }, originalState: "removed" }),
   base("old-log-imported", "Imported.Log.mkv", "Old Imports", HOME, "completed", { beforeBytes: 3 * GB, afterBytes: 1.5 * GB, bytes: 1.5 * GB, codec: "HEVC", finishedAt: at(60 * 24 * 2), flow: { id: "w1", name: "Shrink videos" }, originalState: "kept", keptDaysLeft: 3 }),
+  // a check kept the original (state failed, code kept_original, no failure summary): its account is in the check step's found lines
+  base("48195", "Holiday.2021.1080p.mkv", "Holiday (2021)", HOME, "failed", { detail: "Kept the original: the picture changed too much (0.912, 0.95 required).", reason: { code: "kept_original", message: "Kept the original: the picture changed too much (0.912, 0.95 required)." } }),
+  base("48196", "Concert.2022.1080p.mkv", "Concert (2022)", HOME, "failed", { detail: "Kept the original: the new file didn't play to the end.", reason: { code: "kept_original", message: "Kept the original: the new file didn't play to the end." } }),
+  base("48197", "Old.Tape.1998.avi", "Old Tapes", HOME, "failed", { detail: "Kept the original: the original is damaged in 7 places.", reason: { code: "kept_original", message: "Kept the original: the original is damaged in 7 places." } }),
   base("failed-replace", "Replace.Fail.mkv", "Failed Saves", HOME, "failed", { detail: "The new file was converted, but saving it in place of the original failed.", reason: { code: "stalled", message: "The new file was converted, but saving it in place of the original failed." } }),
 ];
 const TAB: Record<Tab, JobState[]> = { waiting: ["queued", "retry_wait"], running: ["preparing", "running", "validating", "committing"], completed: ["completed"], skipped: ["skipped", "cancelled"], failed: ["failed"] };
@@ -45,7 +49,7 @@ export function mockJobs(tab: Tab, q: string, path?: string): JobsPage {
 const REMOVED: JobDetail = { id: "47001", state: "cancelled", removed: true, reason: { code: "removed", message: "Its library was removed, so this file wasn't converted." },
   events: [{ seq: 3, at: at(300), from: null, to: "queued", reason: null, workerId: null }, { seq: 9, at: at(200), from: "queued", to: "cancelled", reason: "removed", workerId: null }], steps: [] };
 // The sample's log by step: the steps the job went through, the failing one with its last lines
-export function mockJobLog(id: string): { state: string; steps: { name: string; startedAt: string | null; tookMs: number | null; outcome: string; command: string | null; probe: Probe | null; check: { score: number; min: number | null; passed: boolean | null } | null; outputLines: number; output: string | string[]; result: string | null }[]; final: string | null } | { error: { code: string; message: string } } {
+export function mockJobLog(id: string): { state: string; steps: { name: string; startedAt: string | null; tookMs: number | null; outcome: string; command: string | null; probe: Probe | null; check: { score: number; min: number | null; passed: boolean | null } | null; outputLines: number; output: string | string[]; result: string | null; found?: string[] }[]; final: string | null } | { error: { code: string; message: string } } {
   const j = mockJob(id);
   if (!j) return { error: { code: "not_found", message: "There is no such job." } };
   const failed = j.state === "failed";
@@ -65,6 +69,23 @@ export function mockJobLog(id: string): { state: string; steps: { name: string; 
       { name: "replace", startedAt: "2026-11-11T14:02:05Z", tookMs: 500, outcome: "failed", command: null, probe: null, check: null, outputLines: 0, output: [], result: "Failed" },
     ], final: "The new file was converted, but saving it in place of the original failed." };
   }
+  const found: Record<string, string[]> = {
+    // the server's own formats (worker verify.go ssimDetail/playback, worker.go encoderDetail/fileSummary, 11-18)
+    "48195": ["Check: picture comparison (SSIM) at 5 places, 10 s each: 0:01:00, 0:24:00, 0:48:00, 1:12:00, 1:36:00",
+      "Scores: 0:01:00 0.958, 0:24:00 0.912 (0.95 required); 0:48:00 not measured, 1:12:00 not measured, 1:36:00 not measured",
+      "Alignment: the new file was also tried one frame earlier and later; the best score counts", "Worst frames: 0:24:03 (0.801), 0:24:04 (0.823), 0:24:07 (0.840)",
+      "Encoder: hevc_qsv, -global_quality 25, hardware: qsv=hw", "Original: h264 1920x1080 23.976 fps 8-bit, 2 audio, 3 subtitles, 1:48:12", "New file: hevc 1920x1080 23.976 fps 8-bit, 2 audio, 3 subtitles, 1:48:12"],
+    "48196": ["Check: playback test, 30 s sample from 0:41:00", "Where: playback reached frame 61802", "Errors: 3 error lines from ffmpeg, 2 different",
+      "[hevc @ 0x5581] Could not find ref with POC 41", "[hevc @ 0x5581] Error constructing the frame RPS.", "libva info: VA-API version 1.20.0", "libva info: Trying to open /usr/lib/x86_64-linux-gnu/dri/iHD_drv_video.so",
+      "Encoder: hevc_vaapi, -qp 24, hardware: vaapi=va:/dev/dri/renderD128", "Original: h264 1920x1080 25.000 fps 8-bit, 1 audio, 0 subtitles, 1:02:40", "New file: hevc 1920x1080 25.000 fps 8-bit, 1 audio, 0 subtitles, 1:02:40"],
+    // workshop 11-18 01:07Z: the damaged-original check (step 1 'check'): the Check and Errors lines, then up to 5 of ffmpeg's
+    "48197": ["Check: damage in the original, read while converting", "Errors: 7 damaged pictures; up to 3 are tolerated",
+      "[h264 @ 0x55e0] error while decoding MB 41 22, bytestream -7", "[h264 @ 0x55e0] concealing 812 DC, 812 AC, 812 MV errors in P frame"],
+  };
+  if (found[id]) return { state: "complete", final: j.reason?.message ?? null, steps: [
+    step("encode", "ok", { ...conv, check: null, result: "Done" }),
+    step("check", "failed", { found: found[id], result: j.reason?.message ?? "Failed" }),
+  ] };
   return { state: "complete", final: f48191 ? "kept" : "done", steps: [
     step("encode", f48190 ? "failed" : f48191 ? "failed" : "ok", { ...conv, result: failed ? "Failed" : "Done · 41% smaller" }),
   ] };
