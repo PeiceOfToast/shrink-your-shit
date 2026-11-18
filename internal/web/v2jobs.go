@@ -390,9 +390,14 @@ func v2State(status string, steps []jobs.Step, percent *float64) string {
 	case "skipped", "cancelled":
 		return status
 	case string(jobs.Running):
+		// only this attempt's steps: a try that failed or kept the original ends with a step that is not
+		// ok, so a retried job's earlier converted/verified don't make it read validating or committing
 		last := ""
 		for _, s := range steps {
 			last = s.Step
+			if !s.OK {
+				last = ""
+			}
 		}
 		switch {
 		case last == "verified":
