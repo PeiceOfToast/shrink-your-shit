@@ -589,7 +589,9 @@ UNIT
     fi
     if [ "$NETWORK_SHARES" = 1 ]; then
       # The helper refuses a shares folder anyone but root can write (a planted symlink could redirect a mount).
-      $SUDO install -d -o root -g root -m 0755 /mnt /var/lib/syp /var/lib/syp/shares "$HELPER_DIR"
+      $SUDO install -d -o root -g root -m 0755 /var/lib/syp /var/lib/syp/shares "$HELPER_DIR"
+      # /mnt is the person's own folder too: create it if it is missing, never change an existing one.
+      [ -d /mnt ] || $SUDO install -d -o root -g root -m 0755 /mnt
       $SUDO install -o root -g root -m 0755 "$tmp/x/syp-network-helper" "$HELPER_BIN"
       if ! have mount.cifs || ! have mount.nfs; then
         if have apt-get; then
