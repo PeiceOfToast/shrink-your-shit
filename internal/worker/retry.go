@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -60,11 +61,15 @@ func retryIn(err error, attempts int) (time.Duration, bool) {
 // retryNote is the failure step a try writes before it goes back in the queue. Without it the job's last
 // step is the converted one of the try that failed, and the page reads "validating" while it converts again.
 func retryNote(try, tries int, plain string, wait time.Duration) string {
-	return fmt.Sprintf("Try %d of %d didn't work: %s. Trying again in %s.", try, tries, plain, waitWords(wait))
+	return fmt.Sprintf("Try %d of %d didn't work: %s. Trying again in %s.", try, tries, strings.TrimRight(plain, ". "), waitWords(wait))
 }
 
-// waitWords says a wait the way the page reads it: "5 minutes", "2 hours".
+// waitWords says a wait the way the page reads it: "30 seconds", "5 minutes", "2 hours".
 func waitWords(d time.Duration) string {
+	if d < time.Minute {
+		n := int(d.Round(time.Second) / time.Second)
+		return fmt.Sprintf("%d %s", n, plural(n, "second", "seconds"))
+	}
 	if d >= time.Hour && d%time.Hour == 0 {
 		n := int(d / time.Hour)
 		return fmt.Sprintf("%d %s", n, plural(n, "hour", "hours"))
