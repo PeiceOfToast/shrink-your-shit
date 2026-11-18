@@ -60,7 +60,8 @@ jobs:
           if [ -z "$ok" ]; then docker logs syp; exit 1; fi
           # The container starts as root (the entrypoint may start the share helper) and then execs the app as syp,
           # so the app is PID 1: it must be the app, running as uid 1000 (real, effective, saved and filesystem uid).
-          exe=$(docker exec syp readlink /proc/1/exe)
+          # cmdline and status are world-readable; /proc/1/exe is not (root in the container has no CAP_SYS_PTRACE).
+          exe=$(docker exec syp sh -c "tr '\0' '\n' < /proc/1/cmdline | head -n 1")
           uids=$(docker exec syp grep '^Uid:' /proc/1/status)
           echo "PID 1: $exe, $uids"
           test "$exe" = /usr/local/lib/shrink-your-shit/shrink-your-shit
