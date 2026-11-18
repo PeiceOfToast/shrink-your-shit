@@ -312,3 +312,38 @@ func TestARetryClearsItsLeftoverSrtAfterTheSettingChanged(t *testing.T) {
 		t.Errorf("records left: %+v", left)
 	}
 }
+
+// A try that converted and then failed leaves a failure step last, so the page does not read the next try
+// as validating: the failure step says which try it was and when the next one starts.
+func TestARetryWritesItsFailureStep(t *testing.T) {
+	s := newScenario(t)
+	s.ssimErr = errors.New("exit status 1") // the check cannot run, after the conversion
+	s.retrying().RunOne(context.Background())
+	s.wantRetry(1, 5*time.Minute, "could not be done")
+	steps, _ := s.store.Steps(s.id)
+	if len(steps) == 0 {
+		t.Fatal("no steps")
+	}
+	last := steps[len(steps)-1]
+	if last.Step != "failure" || last.OK || !strings.HasPrefix(last.Words, "Try 1 of 3 didn't work: ") || !strings.HasSuffix(last.Words, ". Trying again in 5 minutes.") {
+		t.Errorf("last step %+v, want a failure step for try 1 of 3 in 5 minutes", last)
+	}
+}
+
+// The note reads as one sentence: a reason's own full stop is not doubled, and a short wait is not "0 minutes".
+func TestRetryNoteWords(t *testing.T) {
+	for _, c := range []struct {
+		plain string
+		wait  time.Duration
+		want  string
+	}{
+		{"The conversion failed.", 5 * time.Minute, "Try 1 of 3 didn't work: The conversion failed. Trying again in 5 minutes."},
+		{"disk full", 10 * time.Second, "Try 1 of 3 didn't work: disk full. Trying again in 10 seconds."},
+		{"x", time.Minute, "Try 1 of 3 didn't work: x. Trying again in 1 minute."},
+		{"x", 2 * time.Hour, "Try 1 of 3 didn't work: x. Trying again in 2 hours."},
+	} {
+		if got := retryNote(1, 3, c.plain, c.wait); got != c.want {
+			t.Errorf("retryNote(%q, %s) = %q, want %q", c.plain, c.wait, got, c.want)
+		}
+	}
+}

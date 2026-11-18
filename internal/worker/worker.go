@@ -368,6 +368,7 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 		// A failure that may pass, with a try left: back in the queue for later, from the start (DD-2).
 		if wait, ok := retryIn(err, job.Attempts); ok && !noRetry {
 			w.jobf(job.ID, " (%s): try %d of %d failed, trying again in %s: %v", job.Path, job.Attempts+1, maxTries, wait, err)
+			w.Queue.AddFailureStep(job.ID, "", retryNote(job.Attempts+1, maxTries, plainReason(err), wait))
 			return true, w.Queue.RetryLater(job.ID, w.now().Add(wait), reasonCode(err), plainReason(err))
 		}
 		var ke *KeptError
@@ -1557,6 +1558,7 @@ func (w *Worker) applyFailure(job jobs.Job, err error, f *rules.Failure) (bool, 
 		if job.Attempts+1 < f.Max {
 			wait := time.Duration(f.BackoffSeconds) * time.Second
 			w.jobf(job.ID, " (%s): %s didn't work, try %d of %d, again in %s: %v", job.Path, f.Name, job.Attempts+1, f.Max, wait, err)
+			w.Queue.AddFailureStep(job.ID, f.NodeID, retryNote(job.Attempts+1, f.Max, plain, wait))
 			return true, w.Queue.RetryLater(job.ID, w.now().Add(wait), reasonCode(err), plain)
 		}
 		act = f.Then // the last try
