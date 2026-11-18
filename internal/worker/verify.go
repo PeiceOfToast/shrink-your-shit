@@ -616,12 +616,13 @@ func plural(n int, one, many string) string {
 const maxDamagedPictures = 3
 
 // fileDamageRe matches ffmpeg messages that mean the file as a whole is damaged (its container or header is
-// broken, or it ends early). Any of these keeps the original, however few. "corrupt" and "damaged" are
-// counted here too: when the message does not say which picture, the file as a whole is the safe reading.
-var fileDamageRe = regexp.MustCompile(`(?i)moov atom not found|invalid data found when processing input|truncated|unexpected end|header missing|corrupt|damaged`)
+// broken, or it ends early). Any of these keeps the original, however few. "damaged" is counted here too: when
+// the message does not say which picture, the file as a whole is the safe reading. "corrupt" is not: ffmpeg's
+// corrupt lines are per picture or packet (corrupted macroblock, corrupt decoded frame, Packet corrupt).
+var fileDamageRe = regexp.MustCompile(`(?i)moov atom not found|invalid data found when processing input|truncated|unexpected end|header missing|damaged`)
 
 // pictureDamageRe matches ffmpeg messages about one damaged picture (a broken slice or macroblock run).
-var pictureDamageRe = regexp.MustCompile(`(?i)error while decoding|cabac decode|concealing|invalid nal|slice end not reached|overread|out of range|missing reference|reference picture missing|no frame decoded`)
+var pictureDamageRe = regexp.MustCompile(`(?i)error while decoding|cabac decode|concealing|invalid nal|slice end not reached|overread|out of range|missing reference|reference picture missing|no frame decoded|corrupted macroblock|corrupt decoded frame|packet corrupt`)
 
 // brokenSliceRe matches the decoder's line for one broken slice. A picture's burst prints other lines too
 // (cabac decode, concealing), but they belong to the same picture, so only this line is counted.

@@ -100,3 +100,28 @@ func TestMoovAtomMissingIsKeptWhateverElse(t *testing.T) {
 		t.Error("the check log should say the file as a whole is damaged")
 	}
 }
+
+// ffmpeg's "corrupt" lines are about one picture or packet, not the file: one of them is a little damage that is
+// tolerated, and enough of them are counted as pictures like any other picture damage.
+func TestCorruptLinesCountAsPictures(t *testing.T) {
+	for _, tc := range []struct {
+		stderr   string
+		pictures int
+	}{
+		{"[h264 @ 0x55] corrupted macroblock 12 30 (total_coeff=-1)", 1},
+		{"[h264 @ 0x55] corrupt decoded frame in stream 0", 1},
+		{"[mpegts @ 0x55] Packet corrupt (stream = 0, dts = 9000).", 1},
+		{strings.Repeat("[NULL @ 0x55] corrupt decoded frame in stream 0\n", 4), 4},
+	} {
+		rep := sourceDamage(tc.stderr)
+		if rep.FileLevel || rep.Pictures != tc.pictures {
+			t.Errorf("%q: %+v, want %d damaged pictures and not file-level", tc.stderr, rep, tc.pictures)
+		}
+	}
+	s := newScenario(t)
+	s.encodeStderr = "[h264 @ 0x55] corrupted macroblock 12 30 (total_coeff=-1)"
+	s.run(Replace)
+	if j := s.job(); j.Status != jobs.Done {
+		t.Fatalf("one corrupted macroblock: status %s (error %q), want done", j.Status, j.Error)
+	}
+}
