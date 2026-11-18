@@ -603,25 +603,78 @@ func firstLines(s string, n int) string {
 // starts in the middle of a group of pictures, for instance) and so must not count as damage.
 var benignRe = regexp.MustCompile(`(?i)last message repeated|non-existing pps|non-existing sps|no frame!|decode_slice_header error|mmco: unref short failure|increasing reorder buffer|timestamps are unset|^x265 \[`)
 
-// damageRe matches ffmpeg messages that mean the coded data itself is broken.
-var damageRe = regexp.MustCompile(`(?i)error while decoding|invalid nal|concealing|corrupt|invalid data found|overread|cabac decode|slice end not reached|damaged|truncated|unexpected end|moov atom not found|header missing|out of range|missing reference|reference picture missing`)
+// plural picks the word for a count: plural(1, "picture", "pictures") is "picture".
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
 
-// sourceDamage looks at what ffmpeg printed (at the error level) while converting and returns the first
-// few lines that show the original file itself is damaged, or "" if there are none. The encode decodes
-// the original's video, so decode errors in it show up here at no extra cost.
-func sourceDamage(stderr string) string {
+// maxDamagedPictures is how many damaged pictures an original may have and still be converted. One broken
+// picture is a little damage (a bad macroblock in one P-frame, as in a copied file); more means the source is failing.
+const maxDamagedPictures = 3
+
+// fileDamageRe matches ffmpeg messages that mean the file as a whole is damaged (its container or header is
+// broken, or it ends early). Any of these keeps the original, however few. "corrupt" and "damaged" are
+// counted here too: when the message does not say which picture, the file as a whole is the safe reading.
+var fileDamageRe = regexp.MustCompile(`(?i)moov atom not found|invalid data found when processing input|truncated|unexpected end|header missing|corrupt|damaged`)
+
+// pictureDamageRe matches ffmpeg messages about one damaged picture (a broken slice or macroblock run).
+var pictureDamageRe = regexp.MustCompile(`(?i)error while decoding|cabac decode|concealing|invalid nal|slice end not reached|overread|out of range|missing reference|reference picture missing|no frame decoded`)
+
+// brokenSliceRe matches the decoder's line for one broken slice. A picture's burst prints other lines too
+// (cabac decode, concealing), but they belong to the same picture, so only this line is counted.
+var brokenSliceRe = regexp.MustCompile(`(?i)error while decoding`)
+
+// sourceDamageReport is what sourceDamage found in the original.
+type sourceDamageReport struct {
+	Pictures  int      // damaged pictures: one per broken-slice line, or per other picture line when there is none
+	FileLevel bool     // the file as a whole is damaged
+	Lines     []string // the first few damage lines (at most maxDamageLinesShown), for the job log
+}
+
+// maxDamageLinesShown is how many of ffmpeg's damage lines the job log quotes for a refused original.
+const maxDamageLinesShown = 5
+
+// Found says whether anything in the original looked damaged.
+func (d sourceDamageReport) Found() bool { return d.Pictures > 0 || d.FileLevel }
+
+// sourceDamage looks at what ffmpeg printed (at the error level) while converting and reports the damage that
+// shows the original file itself is broken. The encode decodes the original's video, so decode errors in it show
+// up here at no extra cost. Counting: a broken picture usually prints a few lines (cabac decode of ..., error while
+// decoding MB ..., concealing ...); one "error while decoding" line per picture is what is counted, so the burst
+// counts as one. The count is a proxy for damage that clusters over a visible stretch: ffmpeg gives no times at
+// the error level, so a run of damaged pictures cannot be measured in seconds here.
+func sourceDamage(stderr string) sourceDamageReport {
+	var rep sourceDamageReport
 	var hits []string
+	slices, pictureLines := 0, 0
 	for _, line := range strings.Split(stderr, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || benignRe.MatchString(line) {
 			continue
 		}
-		if damageRe.MatchString(line) {
-			hits = append(hits, line)
+		switch {
+		case fileDamageRe.MatchString(line):
+			rep.FileLevel = true
+		case pictureDamageRe.MatchString(line):
+			pictureLines++
+			if brokenSliceRe.MatchString(line) {
+				slices++
+			}
+		default:
+			continue
 		}
+		hits = append(hits, line)
 	}
-	if len(hits) == 0 {
-		return ""
+	rep.Pictures = slices
+	if slices == 0 {
+		rep.Pictures = pictureLines
 	}
-	return firstLines(strings.Join(hits, "\n"), 3)
+	if len(hits) > maxDamageLinesShown {
+		hits = hits[:maxDamageLinesShown]
+	}
+	rep.Lines = hits
+	return rep
 }
