@@ -20,8 +20,8 @@ import (
 
 // fakeUpdateHelper is syp-update-helper: it records requests and answers with its state.
 type fakeUpdateHelper struct {
-	mu       sync.Mutex
-	calls    []update.HelperRequest
+	mu              sync.Mutex
+	calls           []update.HelperRequest
 	state           string // after an install: what status answers
 	errMsg          string
 	previous        bool

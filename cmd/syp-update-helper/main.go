@@ -67,13 +67,13 @@ type helper struct {
 	version    func(bin string) (string, error)
 	wait, poll time.Duration // how long a restarted program has to answer, and how often it is asked
 
-	mu       sync.Mutex
-	busy     bool
-	gen      int    // changes when an operation starts or ends: a version read across one is stale
-	state    string // idle | downloading | installing | failed
-	err      string
-	prevVer  string // the version of <bin>.previous, read after each operation (not on every status call)
-	done  chan struct{} // closed when the current operation ends (tests wait on it)
+	mu      sync.Mutex
+	busy    bool
+	gen     int    // changes when an operation starts or ends: a version read across one is stale
+	state   string // idle | downloading | installing | failed
+	err     string
+	prevVer string        // the version of <bin>.previous, read after each operation (not on every status call)
+	done    chan struct{} // closed when the current operation ends (tests wait on it)
 }
 
 func main() {
