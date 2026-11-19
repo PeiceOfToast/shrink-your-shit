@@ -262,7 +262,13 @@ done
 unknown=$(printf '%s\n' "$owned_installed" | grep -vxF -e "$plist" -e "$bin" -e "$data" -e "$applog" | grep -v '^$' || true)
 [ -z "$unknown" ] || fail "install created entries uninstall does not remove: $unknown"
 launchctl bootout "$label" || fail "launchctl bootout failed"
-if launchctl print "$label" >/dev/null 2>&1; then fail "agent still loaded after bootout"; fi
+# bootout returns before launchd has unloaded the agent (CI saw it still loaded right after): wait up to 10 s.
+unloaded=
+for _ in $(seq 1 20); do
+  if ! launchctl print "$label" >/dev/null 2>&1; then unloaded=1; break; fi
+  sleep 0.5
+done
+[ -n "$unloaded" ] || fail "agent still loaded after bootout"
 rm -f "$plist" "$bin" "$applog"
 rm -rf "$data"
 owned_after=$(owned_paths)
