@@ -46,6 +46,9 @@ type Result struct {
 	From    string `json:"from"`
 	To      string `json:"to"`
 	Message string `json:"message"`
+	// RolledBack: the previous version is running again (an update that failed and was rolled back, or a
+	// roll back that worked). OK stays false for a failed update even then.
+	RolledBack bool `json:"rolledBack"`
 	// DataRestored: the database went back to the copy from before the update (the newer one is kept)
 	DataRestored bool      `json:"dataRestored"`
 	Backup       string    `json:"backup,omitempty"` // after a good update: the copy a manual roll back restores
@@ -97,6 +100,7 @@ func Settle(dataDir string, m *Marker, version string, now time.Time) (Result, e
 	switch {
 	case m.Kind == "rollback" && switched:
 		r.Message = fmt.Sprintf("Rolled back from %s to %s", m.From, version)
+		r.RolledBack = true
 	case m.Kind == "rollback":
 		r.Message = fmt.Sprintf("Roll back failed; still on %s", version)
 	case switched:
@@ -105,8 +109,10 @@ func Settle(dataDir string, m *Marker, version string, now time.Time) (Result, e
 	default:
 		r.To = m.To
 		r.Message = fmt.Sprintf("Update to %s failed; rolled back to %s", m.To, version)
+		r.RolledBack = true
 		if msg := watcherFailure(dataDir, m); msg != "" {
 			r.Message = msg // the watcher wrote the detail (what failed, what was put back): keep it
+			r.RolledBack = false
 		} else if watcherLostResult(dataDir, m) {
 			log.Printf("the update watcher left no result for the update to %s (see update/watch.log)", m.To)
 		}
