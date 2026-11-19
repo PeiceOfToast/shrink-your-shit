@@ -105,3 +105,31 @@ func TestEmptyVideoThatGetsContentIsDecidedAgain(t *testing.T) {
 		t.Error("the file with content was not probed")
 	}
 }
+
+// Touching an empty file that already failed adds no second failed row (review #429: the still-changing step overwrote
+// the record, so the next look failed it again).
+func TestEmptyVideoTouchedAfterFailingStaysOneRow(t *testing.T) {
+	s, st, lib, _ := setup(t, h264Big)
+	clock := time.Now().Add(time.Hour)
+	s.Now, s.MinAge = func() time.Time { return clock }, time.Minute
+	z := filepath.Join(lib, "z.mkv")
+	os.WriteFile(z, nil, 0o644)
+	for i := 0; i < 2; i++ {
+		s.ScanOnce(t.Context())
+		clock = clock.Add(2 * time.Minute)
+	}
+	if got := len(rowsOf(t, st, z)); got != 1 {
+		t.Fatalf("%d job rows before the touch, want 1", got)
+	}
+	touched := clock.Add(-30 * time.Second)
+	if err := os.Chtimes(z, touched, touched); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		s.ScanOnce(t.Context())
+		clock = clock.Add(2 * time.Minute)
+	}
+	if got := len(rowsOf(t, st, z)); got != 1 {
+		t.Errorf("%d job rows after a touch, want 1", got)
+	}
+}

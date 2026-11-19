@@ -322,14 +322,16 @@ func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.Fil
 		}
 		return false
 	}
+	// An empty file already failed stays decided while it stays empty. Checked before the still-changing step: a touch
+	// would make that step overwrite the record, and the next look would add a second failed row (review #429).
+	if prev != nil && prev.Size == 0 && st.Size() == 0 && strings.HasPrefix(prev.Decision, emptyFileDecision) {
+		return false
+	}
 	if s.observe(path, st, now()) || !s.ready(path, st, now()) {
 		s.recordSkip(path, st, rules.SkipStillChanging)
 		return false
 	}
 	if st.Size() == 0 { // nothing to read: a failed job with its plain reason, never probed or converted
-		if prev != nil && prev.Size == 0 && strings.HasPrefix(prev.Decision, emptyFileDecision) {
-			return false // already decided: a touch alone does not add another row
-		}
 		s.failEmpty(t, path, st)
 		return false
 	}
