@@ -4,9 +4,15 @@ import { mockAction, mockJob, mockJobs, mockJobLog, mockConvertAgain } from "./m
 import type { ActionResult, JobAction, JobDetail, JobItem, JobsPage, Probe, Tab, Pin } from "./types/jobs";
 
 export async function listJobs(tab: Tab, q: string, library = "", limit = 200): Promise<Answer<JobsPage>> {
-  if (MOCK) return mockJobs(tab, q);
-  // #134: the Waiting tab in the order the worker takes files, each with its position; the page never reorders it
-  return call("GET", "/api/v2/jobs?tab=" + tab + (tab === "waiting" ? "&sort=queue" : "") + "&limit=" + limit + (q ? "&q=" + encodeURIComponent(q) : "") + (library ? "&libraryId=" + encodeURIComponent(library) : ""));
+  if (MOCK) return mockJobs(tab, q, undefined, limit, library);
+  // #134: the Waiting tab in the order the worker takes files, each with its position; the page never reorders it.
+  // The server gives at most 500 rows per ask (files.go pageOf), so a longer list (Show more) is asked for 500 at a time
+  const url = (n: number, at: number) => "/api/v2/jobs?tab=" + tab + (tab === "waiting" ? "&sort=queue" : "") + "&limit=" + n + (at ? "&offset=" + at : "") + (q ? "&q=" + encodeURIComponent(q) : "") + (library ? "&libraryId=" + encodeURIComponent(library) : "");
+  if (limit <= 500) return call("GET", url(limit, 0));
+  const rs = await Promise.all(Array.from({ length: Math.ceil(limit / 500) }, (_, i) => call<JobsPage>("GET", url(Math.min(500, limit - i * 500), i * 500))));
+  const bad = rs.find((r) => failed(r)); if (bad) return bad;
+  const ps = rs as JobsPage[];
+  return { ...ps[0], items: ps.flatMap((p) => p.items) };
 }
 // review a8f85e0 P3: a skipped or stopped job's row in the Skipped tab when it isn't in the first page. Its own row went
 // when it was skipped or stopped, so its detail has no file name to search by: page through the tab, 500 at a time

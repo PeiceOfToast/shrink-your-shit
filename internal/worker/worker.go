@@ -51,6 +51,12 @@ type Queue interface {
 	Keep(id int64, code, reason string) error
 	// RetryLater puts a job whose failure may pass back in the queue, not to be taken before at (DD-2).
 	RetryLater(id int64, at time.Time, code, reason string) error
+	// EncoderFell records a graphics encoder's failure on worker (the job converts on the processor); paused says
+	// whether it stops the worker's graphics encoder for a while. EncoderWorked ends a run of failures.
+	EncoderFell(id int64, worker, encoder, reason string) (paused bool, err error)
+	EncoderWorked(worker string) error
+	// EncoderPaused: whether worker's graphics encoder is paused, and until when.
+	EncoderPaused(worker string) (until time.Time, paused bool, err error)
 	// ShareDropped puts a job back in the queue because its share stopped answering (D4c): not a failure.
 	ShareDropped(id, shareID int64, mountPath, words string) error
 	// OutputFolder is a library's folder for new files with "Next to each library" (V5a), or why it has
@@ -920,15 +926,23 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// The local worker encodes with its graphics encoder for this plan's format when it can do this plan; else,
 	// and for a remote worker, the processor (its own arguments are FFmpegArgs, unchanged).
 	gpu := ""
+	fell := false // the graphics encoder failed and the processor is retrying the file
+	fellReason := ""
 	args := plan.FFmpegArgs(srcPath, tmp)
 	if w.remote == nil && w.Encoder != nil {
 		want, note := w.Encoder(plan.Video.Codec)
 		if want != "" && !plan.Video.Copy {
+			until, paused, err := w.Queue.EncoderPaused(w.ID)
 			var ok bool
-			if args, ok = plan.FFmpegArgsWith(srcPath, tmp, want); ok {
-				gpu = want
-			} else {
-				w.jobf(job.ID, ": encoder %s can't do this file; using the processor", want)
+			switch {
+			case err == nil && paused:
+				w.jobf(job.ID, ": %s is paused until %s after three failures in a row; using the processor", want, until.Local().Format("15:04"))
+			default:
+				if args, ok = plan.FFmpegArgsWith(srcPath, tmp, want); ok {
+					gpu = want
+				} else {
+					w.jobf(job.ID, ": encoder %s can't do this file; using the processor", want)
+				}
 			}
 		} else if note != "" && !plan.Video.Copy {
 			w.jobf(job.ID, ": %s", note)
@@ -954,7 +968,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 	} else {
 		encErr, terr = w.encodeLocal(ctx, job, args)
-		if gpu != "" && w.gpuFailed(ctx, terr) { // a graphics encoder that fails converts again on the processor
+		if gpu != "" && w.gpuFailed(ctx, terr, encErr) { // a graphics encoder that fails converts again on the processor
 			w.recordEncode(job.ID, args, encStart, encErr, terr, probeSummary(src))
 			reason := firstLines(encErr, 1)
 			if reason == "" {
@@ -965,7 +979,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			if err := os.Truncate(tmp, 0); err != nil {
 				encErr, terr = "", fmt.Errorf("clearing the partial output: %w", err)
 			} else {
-				w.jobf(job.ID, ": %s failed (%s); converted on the processor", gpu, reason)
+				fell, fellReason = true, shortReason(reason)
 				args = plan.FFmpegArgs(srcPath, tmp)
 				setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWords(plan),
 					Decoder: decoderWords(src), Progress: media.Progress{ETASeconds: -1}})
@@ -975,6 +989,19 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 	}
 	w.recordEncode(job.ID, args, encStart, encErr, terr, probeSummary(src))
+	if fell && terr == nil { // the processor converted the file, so the graphics encoder was the fault: it counts
+		w.jobf(job.ID, ": %s failed (%s); converted on the processor", gpu, fellReason)
+		if paused, err := w.Queue.EncoderFell(job.ID, w.ID, gpu, fellReason); err != nil {
+			w.jobf(job.ID, ": could not record the fall-back: %v", err)
+		} else if paused {
+			w.jobf(job.ID, ": %s failed three times in a row, so it is paused for an hour", gpu)
+		}
+	}
+	if gpu != "" && !fell && terr == nil { // the graphics encoder converted the file: its run of failures ends
+		if err := w.Queue.EncoderWorked(w.ID); err != nil {
+			w.jobf(job.ID, ": could not record the encoder's success: %v", err)
+		}
+	}
 	if terr == nil {
 		w.Queue.AddStep(job.ID, "converted", true, "Converted: "+convertingTo(plan, src)+".")
 	}
@@ -1725,15 +1752,28 @@ func fileSummary(info media.Info) string {
 	return strings.Join(parts, ", ")
 }
 
-// gpuFailed says whether a graphics encode that ended with err should convert again on the processor:
-// an ffmpeg error, not a stop (cancel, shutdown, the stall stop) or a lost lease.
-func (w *Worker) gpuFailed(ctx context.Context, err error) bool {
+// encoderReasonMax caps the reason a fall-back keeps, as the remote path's notes are capped.
+const encoderReasonMax = 300
+
+// shortReason is reason cut to encoderReasonMax characters.
+func shortReason(reason string) string {
+	if r := []rune(reason); len(r) > encoderReasonMax {
+		return string(r[:encoderReasonMax])
+	}
+	return reason
+}
+
+// gpuFailed says whether a graphics encode that ended with err should convert again on the processor: only an
+// encoder or ffmpeg failure (jobs.FallsBackToProcessor), never a stop (cancel, shutdown, the stall stop), a lost
+// lease, a full disk, or a damaged or missing source.
+func (w *Worker) gpuFailed(ctx context.Context, err error, stderr string) bool {
 	if err == nil || ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, errLeaseLost) {
 		return false
 	}
 	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.stopped != stopStall
+	stalled := w.stopped == stopStall
+	w.mu.Unlock()
+	return !stalled && jobs.FallsBackToProcessor(strings.Split(stderr, "\n"))
 }
 
 // encodeLocal runs ffmpeg for the local worker's job: its progress, stall watch and live figures.

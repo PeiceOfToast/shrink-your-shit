@@ -32,7 +32,7 @@ function Status({ it }: { it: Integration | undefined }) {
   const r = it.lastResult;
   if (!r) return <span className="st"><Icon id="i-clock" />Saved · not tested yet</span>;
   if (r.ok) return <span className="st ok"><Icon id="i-check" />Connected · last told {clock(r.at)}</span>;
-  return <span className="st warn"><Icon id="i-alert" /><span>Failed at {clock(r.at)}: {dot(r.message)}.</span></span>;
+  return <span className="st warn"><Icon id="i-alert" /><span className="fail">Failed at {clock(r.at)}: <span className="why">{dot(r.message)}.</span></span></span>;
 }
 
 // connected but a folder is missing or outside the libraries: a warning, not a tick

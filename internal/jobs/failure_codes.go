@@ -139,6 +139,10 @@ func FailureWords(code string, f FailureFacts) (message, hint string) {
 		return "The conversion stopped making progress and was stopped.",
 			"Retry. If it stops again at the same point, the last ffmpeg lines above show where."
 	case "ffmpeg_error":
+		// ffmpeg never ran (a folder setup failure, say): the worker's own sentence is the true one
+		if !f.FfmpegRan && f.ExitCode < 0 && f.Stored != "" {
+			return f.Stored, ""
+		}
 		// 255 = ffmpeg was stopped; -1 = killed by a signal
 		if f.ExitCode == 255 {
 			return "ffmpeg was stopped before it finished (exit code 255).", ""
@@ -197,6 +201,13 @@ var deniedOutput = regexp.MustCompile(`(?i)output\s+(\S.*?):\s*permission denied
 // deniedWrite is the worker's own line for a write refused while putting the new file in place:
 // "Couldn't write <path>: <the system's words>" (worker placeError.keyLine).
 var deniedWrite = regexp.MustCompile(`(?i)^couldn't write (\S.*): (?:permission denied|read-only file system|access is denied)`)
+
+// LastName is the last name of a path, for / and \ separators alike: a remote worker can send Windows paths to a
+// Linux server, where filepath.Base would not split them.
+func LastName(p string) string {
+	t := strings.TrimRight(p, `/\`)
+	return t[strings.LastIndexAny(t, `/\`)+1:]
+}
 
 // DeniedFolder is the folder a write was refused in: from ffmpeg's "Error opening output <path>: Permission denied"
 // line (user review 11-13 item E, QA of #214), or the worker's "Couldn't write <path>: ..." line when putting the new

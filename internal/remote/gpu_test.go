@@ -22,6 +22,7 @@ import (
 type recordExec struct {
 	calls [][]string
 	fail  func(args []string) bool
+	msg   string // what a failing call prints (default: a graphics encoder's device error)
 }
 
 func (x *recordExec) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -35,6 +36,9 @@ func (x *recordExec) Capture(ctx context.Context, name string, args ...string) (
 func (x *recordExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
 	x.calls = append(x.calls, args)
 	if x.fail != nil && x.fail(args) {
+		if x.msg != "" {
+			return x.msg, errors.New("exit status 1")
+		}
 		return "Device creation failed", errors.New("exit status 1")
 	}
 	return "", nil
@@ -46,6 +50,7 @@ type recorder struct {
 	mu       sync.Mutex
 	notes    []string
 	encoders []string
+	worked   int // the structured "a graphics encoder converted a file" notes it was sent
 }
 
 func recordingServer(t *testing.T) (*httptest.Server, *recorder) {
@@ -58,8 +63,13 @@ func recordingServer(t *testing.T) (*httptest.Server, *recorder) {
 		defer rec.mu.Unlock()
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/note"):
+			if in["encoderWorked"] == true {
+				rec.worked++
+			}
 			text, _ := in["text"].(string)
-			rec.notes = append(rec.notes, text)
+			if text != "" { // a note with no text is a structured signal (a graphics encoder's success), not a job-log line
+				rec.notes = append(rec.notes, text)
+			}
 		case strings.HasSuffix(r.URL.Path, "/progress") && in["stage"] == "converting":
 			enc, _ := in["encoder"].(string)
 			rec.encoders = append(rec.encoders, enc)
@@ -79,6 +89,15 @@ func encoderCap(name, test string) map[string]any {
 // named, and the error.
 func convertH264(t *testing.T, primary *string, caps []map[string]any, x *recordExec, copyVideo bool) (notes, encs []string, err error) {
 	t.Helper()
+	rec, err := convertH264Rec(t, primary, caps, x, copyVideo)
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	return rec.notes, rec.encoders, err
+}
+
+// convertH264Rec is convertH264 with the server's record of what the worker sent.
+func convertH264Rec(t *testing.T, primary *string, caps []map[string]any, x *recordExec, copyVideo bool) (*recorder, error) {
+	t.Helper()
 	srv, rec := recordingServer(t)
 	c := &Client{Server: srv.URL, Version: "test", Caps: caps}
 	l := &Lease{ID: "L1", Primary: primary}
@@ -88,10 +107,8 @@ func convertH264(t *testing.T, primary *string, caps []map[string]any, x *record
 	if err := os.WriteFile(out, nil, 0o600); err != nil { // the staged file the encode writes into
 		t.Fatal(err)
 	}
-	_, _, err = c.convert(context.Background(), cv, l, rules.Snapshot{Plan: plan}, "/in.mkv", out)
-	rec.mu.Lock()
-	defer rec.mu.Unlock()
-	return rec.notes, rec.encoders, err
+	_, _, err := c.convert(context.Background(), cv, l, rules.Snapshot{Plan: plan}, "/in.mkv", out)
+	return rec, err
 }
 
 func ptr(s string) *string { return &s }
