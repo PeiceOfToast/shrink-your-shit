@@ -27,8 +27,9 @@ const (
 	freedSQL   = `CASE WHEN status='done' AND size_after>0 AND ((` + replacedSQL + ` AND NOT ` + keptNowSQL + `) OR (` + leftSQL + ` AND original_gone_at<>'' AND original_changed=0)) AND ` + newestSQL + ` THEN ` + savedSQL + ` END`
 	waitingSQL = `CASE WHEN status='done' AND size_after>0 AND ` + replacedSQL + ` AND ` + keptNowSQL + ` AND output_gone_at='' AND ` + newestSQL + ` THEN ` + savedSQL + ` END`
 	// goneSQL is what a replaced file's bytes still counted in the overview's bytesNow once its output is gone
-	// from the library (the original's size, less the saving already freed): the file is no longer there.
-	goneSQL      = `CASE WHEN status='done' AND size_after>0 AND ` + replacedSQL + ` AND output_gone_at<>'' AND ` + newestSQL + ` THEN size_before-COALESCE(` + freedSQL + `,0) END`
+	// from the library (the original's size, less the saving already freed, plus the growth that bytesNow adds
+	// back): the file is no longer there.
+	goneSQL      = `CASE WHEN status='done' AND size_after>0 AND ` + replacedSQL + ` AND output_gone_at<>'' AND ` + newestSQL + ` THEN size_before-COALESCE(` + freedSQL + `,0)+COALESCE(` + grewSQL + `,0) END`
 	couldFreeSQL = `CASE WHEN status='done' AND size_after>0 AND ` + leftSQL + ` AND original_gone_at='' AND original_changed=0 AND ` + newestSQL + ` THEN ` + savedSQL + ` END`
 	// savedSQL is one file's saving, never below 0: a new file bigger than its original (kept by design,
 	// always-standardize 11-07) saves nothing, and its growth counts in grewSQL instead, so a total never
@@ -36,6 +37,9 @@ const (
 	savedSQL = `MAX(size_before-size_after, 0)`
 	// grewSQL is how much bigger a done job's new file is than its original (NULL: not bigger)
 	grewSQL = `CASE WHEN status='done' AND size_after>size_before AND size_before>0 AND ` + newestSQL + ` THEN size_after-size_before END`
+	// grewNowSQL is the growth bytesNow adds: only a replaced file's, since the new file then stands where the
+	// library's record (the original's size) is. A left output is not in the library's bytes, so it adds none (#403).
+	grewNowSQL = `CASE WHEN status='done' AND size_after>size_before AND size_before>0 AND ` + replacedSQL + ` AND ` + newestSQL + ` THEN size_after-size_before END`
 	// freedAtSQL is when a freed saving was freed: the original found gone, its kept copy's delete day,
 	// or the conversion's end (replaced with nothing kept).
 	freedAtSQL = `CASE WHEN ` + leftSQL + ` THEN original_gone_at
