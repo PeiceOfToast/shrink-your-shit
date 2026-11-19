@@ -3,6 +3,7 @@
 package jobs
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -12,11 +13,12 @@ import (
 // and a worker's skip (a file record written by the job) both count, once each.
 func TestLibrarySkippedIsWhatTheSkippedListShows(t *testing.T) {
 	s := open(t)
-	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
-	if err := s.PutFile(File{Path: "/m/broken.mkv", Decision: "unreadable", Reason: rules.SkipUnreadable}); err != nil {
+	root := t.TempDir() // paths are built with filepath, so the library range matches on every OS
+	l, _ := s.AddLibrary("Movies", root, rules.SliderTemplate(3), true)
+	if err := s.PutFile(File{Path: filepath.Join(root, "broken.mkv"), Decision: "unreadable", Reason: rules.SkipUnreadable}); err != nil {
 		t.Fatal(err)
 	}
-	id, _ := s.Enqueue(Job{LibraryID: l.ID, Path: "/m/hevc.mkv", SizeBefore: 1000})
+	id, _ := s.Enqueue(Job{LibraryID: l.ID, Path: filepath.Join(root, "hevc.mkv"), SizeBefore: 1000})
 	s.Claim("w")
 	if err := s.Skip(id, "too small to bother", "too_small"); err != nil {
 		t.Fatal(err)
