@@ -248,6 +248,20 @@ choose their setting and press Start. `-from-codec`, `-min-bitrate`, `-crf`, `-p
 settings its libraries keep converting with. Each library keeps its own settings (its flow) after
 that: changing these flags later does not change libraries that already exist.
 
+## Notifications
+
+shrink-your-shit can tell you about its work by a webhook (a generic JSON POST) or a Discord channel webhook.
+Add a target with `POST /api/v2/notifications/targets` (`{name, kind, url}`; `kind` is `webhook` or `discord`).
+Each target picks its events (`jobFailed`, `needsYou`, `fileFinished`, `batchFinished`, `workerOffline`,
+`encoderFellBack`). The defaults are on for `jobFailed`, `needsYou`, `batchFinished` and `workerOffline`.
+`POST /api/v2/notifications/test` sends one message now and says whether it arrived.
+
+The address is stored encrypted and is never shown again: the API shows only its host. Sending runs in the
+background with retries and never delays or fails a conversion. A target that fails three sends in a row
+shows `failingSince`. A batch summary (`PATCH /api/v2/notifications` with `summary`) is `off`, `drained`
+(when the queue empties, the default), `daily` or `weekly` at a time you choose. Set `linkBase`
+(for example `http://nas:8484`) so messages link to the job. Without it, they have no links.
+
 ## For developers
 
 ```

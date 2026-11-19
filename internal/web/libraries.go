@@ -17,6 +17,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/doctor"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/integrations"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/notify"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/preview"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
@@ -47,6 +48,8 @@ type Engine struct {
 	Logs    *doctor.LogTail // the last log lines, for the health report
 
 	Transport Transport // which connections remote workers may use (V7b1: -trusted-proxies)
+
+	Notify *notify.Service // the notifications API and sender (main runs it); nil: the notifications routes are not served
 	// RunRemote runs a job a remote worker leased, on this server, until it ends (V7b2); nil: remote
 	// workers can lease but nothing runs (tests of the API alone).
 	RunRemote func(job jobs.Job, workerID string, rj *worker.RemoteJob)

@@ -27,6 +27,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/integrations"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/notify"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/preview"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/remote"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -341,8 +342,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("-trusted-proxies: %v", err)
 	}
+	notifier := notify.New(store, notify.Options{Logf: log.Printf}) // news to a webhook or Discord; never blocks a job
+	go notifier.Run(ctx.Done())
 	srv := &http.Server{Addr: *addr, Handler: web.Handler(store, access, web.Engine{
 		Transport:    web.Transport{TrustedProxies: proxies},
+		Notify:       notifier,
 		Integrations: integ,
 		RunRemote: func(job jobs.Job, workerID string, rj *worker.RemoteJob) { // V7b2: a remote worker's job, run here
 			w := pool.New(1)
