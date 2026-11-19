@@ -8,7 +8,7 @@ import { Icon } from "../Icon";
 import { PageHead } from "../PageHead";
 import { SignedOut, failed, type Answer } from "../api";
 import { bytes, plural } from "../format";
-import { checkUpdate, getConverting, getHealth, getUpdate, installUpdate, type UpdateNotice, getSettings, getToken, getTrash, patchSettings, rotateToken, signOut } from "../libraryApi";
+import { checkUpdate, getConverting, getHealth, getUpdate, installUpdate, rollbackUpdate, type UpdateNotice, getSettings, getToken, getTrash, patchSettings, rotateToken, signOut } from "../libraryApi";
 import { SettingsTabs } from "../pages";
 import { Link, navigate } from "../router";
 import { setRole } from "../setupApi";
@@ -240,9 +240,9 @@ function Updates({ version }: { version?: string }) {
 
 // The update button (SCREENS:301, updater part 2, contract ## Update). Which block shows follows method, install.state and
 // lastResult. While an install runs the card re-reads every 3 s; when the server is gone (it restarts) it says so.
-// Roll back stays out until GET /update says a previous version is kept (design gap a).
+// Roll back (#336) shows only when the helper keeps a previous version, and works with update checks off.
 const REFUSED: Record<string, string> = { job_running: "A file just started converting.", not_available: "There's no newer version now.",
-  updates_off: "Update checks are off. Turn them on to update.", update_in_progress: "", install_unsupported: "" };
+  updates_off: "Update checks are off. Turn them on to update.", update_in_progress: "", install_unsupported: "", no_previous: "There's no earlier version kept to go back to." };
 const noV = (m: string) => m.replace(/\bv(?=\d)/g, ""); // design gap d: versions read as on the Version line
 // plain http has no clipboard API (the user's http://IP:8484), or it can be refused: then copy the old way, as Workers does
 async function copyText(t: string): Promise<boolean> {
@@ -256,32 +256,44 @@ function Copy({ t }: { t: string }) {
     {said && <span className="hint" role="status">{said}</span>}</>);
 }
 function Install({ d, reload, check }: { d: UpdateNotice; reload: () => void; check: () => void }) {
-  const jobs = useData(getConverting, []), [busy, setBusy] = useState(false), [said, setSaid] = useState(""), [gone, setGone] = useState(false), [late, setLate] = useState(false), [noNew, setNoNew] = useState(false);
+  const jobs = useData(getConverting, []), [busy, setBusy] = useState(false), [said, setSaid] = useState(""), [gone, setGone] = useState(false), [late, setLate] = useState(false), [noNew, setNoNew] = useState(false), [rbFail, setRbFail] = useState("");
+  // rolling: what the page saw when Roll back was accepted; it waits until the version or the last result changes
+  const [ask, setAsk] = useState(false), [rolling, setRolling] = useState<{ from: string; msg: string } | null>(null);
   const st = d.install.state, running = st === "waiting" || st === "downloading" || st === "installing", n = jobs.data ?? 0, to = d.latest ?? "", last = d.lastResult;
+  useEffect(() => { if (rolling && (d.current !== rolling.from || (d.lastResult?.message ?? "") !== rolling.msg)) setRolling(null); }, [d, rolling]);
+  useEffect(() => setRbFail(""), [d.current]); // a late restart clears an old roll back failure
+  // a helper that accepts but never restarts the app would leave "Restarting..." up forever
+  useEffect(() => { if (!rolling) return; const t = setTimeout(() => { setRolling(null); setRbFail(`still on ${rolling.from} after 3 minutes. Try again, or check the server's log.`); }, 180000); return () => clearTimeout(t); }, [rolling]);
   useEffect(() => {
-    if (!running && !gone) return;
+    if (!running && !gone && !rolling) return;
     const t = setInterval(async () => { const r = await getUpdate().catch(() => null); if (!r || failed(r)) setGone(r?.error.code === "offline" || !r); else { setGone(false); reload(); } }, 3000);
     return () => clearInterval(t);
-  }, [running, gone, reload]);
+  }, [running, gone, rolling, reload]);
   const go = async (when: "now" | "after-job") => {
-    setBusy(true); setSaid(""); setNoNew(false);
+    setBusy(true); setSaid(""); setNoNew(false); setRbFail("");
     try { const r = await installUpdate(when); if (!failed(r)) holdLost(120000); else { setNoNew(r.error.code === "not_available"); setSaid(r.error.code in REFUSED ? REFUSED[r.error.code] : r.error.message); if (r.error.code === "job_running") setLate(true); jobs.reload(); } }
     catch (e) { if (!(e instanceof SignedOut)) throw e; }
     setBusy(false); reload();
   };
-  const wait = late || n > 0, retry = !!last && !last.ok && last.to === to;
+  const back = async () => {
+    setBusy(true); setSaid(""); setNoNew(false); setRbFail("");
+    try { const r = await rollbackUpdate(); if (!failed(r)) { holdLost(120000); setRolling({ from: d.current, msg: d.lastResult?.message ?? "" }); } else if (r.error.code in REFUSED) setSaid(REFUSED[r.error.code]); else setRbFail(/[.!?]$/.test(r.error.message) ? r.error.message : r.error.message + "."); }
+    catch (e) { if (!(e instanceof SignedOut)) throw e; }
+    setBusy(false); setAsk(false); reload();
+  };
+  const prev = d.rollback.version, prevName = prev ?? "the previous version", wait = late || n > 0, retry = !!last && !last.ok && last.to === to;
   const spin = (t: string, rest = "") => <p className="st run" role="status" style={{ margin: 0, alignItems: "flex-start" }}><span className="spin" style={{ display: "inline-flex", marginTop: 2 }}><Icon id="i-refresh" /></span><span>{t}{rest && <span style={{ fontWeight: 400, color: "var(--text)" }}> {rest}</span>}</span></p>;
   return (<>
-    {last && !running && !gone && (last.ok
-      ? <p className="st ok" style={{ margin: 0 }}><Icon id="i-check-c" /><span>{noV(last.message)}.{d.url && <> <a href={d.url} target="_blank" rel="noopener">What's new</a></>}</span></p>
+    {last && !running && !gone && !rolling && (last.ok
+      ? <p className="st ok" style={{ margin: 0 }}><Icon id="i-check-c" /><span>{noV(last.message)}.{d.url && !last.message.startsWith("Rolled back") && <> <a href={d.url} target="_blank" rel="noopener">What's new</a></>}</span></p>
       : <p className="st warn" style={{ margin: 0, alignItems: "flex-start" }}><Icon id="i-alert" /><span className="why" style={{ fontWeight: 400, color: "var(--text)" }}>{noV(last.message)}.</span></p>)}
-    {gone ? spin("Restarting...", "this page reconnects by itself.")
+    {gone || rolling ? spin("Restarting...", "this page reconnects by itself.")
       : st === "waiting" ? <p role="status" style={{ margin: 0 }}>Updating to {to} when the converting files finish.</p>
       : st === "downloading" ? spin(`Downloading ${to}...`)
       : st === "installing" ? spin(`Installing ${to}.`, "The app restarts, and this page reconnects by itself.")
       : st === "failed" ? <p className="st warn" style={{ margin: 0, alignItems: "flex-start" }}><Icon id="i-alert" /><span>Couldn't update to {to}: <span style={{ fontWeight: 400, color: "var(--text)" }}>{d.install.error}. Nothing changed; still on {d.current}.</span></span></p>
       : null}
-    {d.available && !running && !gone && (d.method === "helper" ? <div className="stack" style={{ gap: 6 }}>
+    {d.available && !running && !gone && !rolling && (d.method === "helper" ? <div className="stack" style={{ gap: 6 }}>
         {wait && n > 0 && <p style={{ margin: 0 }}>{plural(n, "file is", "files are")} converting.</p>}
         <div><button className={"btn " + (retry || st === "failed" ? "" : "primary")} type="button" disabled={busy} onClick={() => go(wait ? "after-job" : "now")}>
           {retry || st === "failed" ? "Try again" : wait ? (n > 1 ? "Update when they finish" : "Update when it finishes") : `Update to ${to}`}</button></div>
@@ -290,11 +302,20 @@ function Install({ d, reload, check }: { d: UpdateNotice; reload: () => void; ch
       : d.method === "commands" && d.commands ? <div className="stack" style={{ gap: 6 }}>
         <p style={{ margin: 0 }}>{d.installType === "docker" ? "This runs in Docker. Update it where your compose file is:" : "To update, run this on the server:"}</p>
         <Copy t={d.commands.join("\n")} />
+        {d.helperCommand && <><p style={{ margin: 0 }}>To update from this page instead, run the installer once with the update helper:</p>
+          <Copy t={d.helperCommand} />
+          <span className="hint">The helper runs as root and only installs releases of this app, checked against their checksums.</span></>}
+        {d.os === "darwin" && <span className="hint">Updating on macOS hasn't been tested yet.</span>}
         {d.installType === "docker" && <span className="hint">Or let <a href="https://containrrr.dev/watchtower/" target="_blank" rel="noopener">Watchtower</a> update the container for you.</span>}
       </div>
       : d.installType === "windows" ? <p style={{ margin: 0 }}>Download the new installer from the {d.url ? <a href={d.url} target="_blank" rel="noopener">release page</a> : "release page"}.</p>
       : d.installType === "source" ? <p style={{ margin: 0 }}>Built from source: pull and build again.</p> : null)}
+    {rbFail && <p className="st warn" role="alert" style={{ margin: 0, alignItems: "flex-start" }}><Icon id="i-alert" /><span>Couldn't roll back: <span style={{ fontWeight: 400, color: "var(--text)" }}>{rbFail}</span></span></p>}
     {said && <p className="st warn" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{said}{noNew && <> <button className="linkbtn" type="button" onClick={() => (setSaid(""), setNoNew(false), check())}>Check now</button></>}</span></p>}
+    {d.method === "helper" && st === "idle" && d.rollback.available && !gone && !rolling &&
+      <div><button className="btn" type="button" disabled={busy} onClick={() => setAsk(true)}>{prev ? `Roll back to ${prev}` : "Roll back"}</button></div>}
+    {ask && <Confirm title={`Go back to ${prevName}?`} yes="Roll back" no="Cancel" busy={busy} onYes={back} onNo={() => setAsk(false)}
+      body={`The app restarts on ${prevName}. ` + (d.rollback.dataRestored ? "Settings and job history go back to how they were before the update. Files converted since then stay as they are." : "Settings and job history stay as they are.")} />}
   </>);
 }
 
