@@ -342,7 +342,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("-trusted-proxies: %v", err)
 	}
-	notifier := notify.New(store, notify.Options{Logf: log.Printf}) // news to a webhook or Discord; never blocks a job
+	notifier := notify.New(store, notify.Options{Logf: log.Printf, // news to a webhook or Discord; never blocks a job
+		FailureText: func(id int64) string { return web.FailureSentence(store, id) }})
 	go notifier.Run(ctx.Done())
 	srv := &http.Server{Addr: *addr, Handler: web.Handler(store, access, web.Engine{
 		Transport:    web.Transport{TrustedProxies: proxies},
