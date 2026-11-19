@@ -19,6 +19,8 @@ type LibraryTotals struct {
 	BytesBefore    int64
 	Done, Skipped  int
 	VideosRecorded int
+	// LeftNowBytes is what the left outputs in the library add (their new files, where a scan finds them): see leftNowSQL.
+	LeftNowBytes int64
 }
 
 // LibraryTotalsOf is library l's totals: its files' records by a path range, which the files' primary
@@ -35,15 +37,19 @@ FROM files WHERE path >= ? AND path < ?`, lo, hi).Scan(&t.BytesBefore, &t.Videos
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM files WHERE `+sw, sa...).Scan(&t.Skipped); err != nil {
 		return t, err
 	}
+	if err := s.db.QueryRow(`SELECT COALESCE(SUM(`+leftNowSQL+`),0) FROM jobs WHERE library_id=?`, lo, hi, lo, hi, l.ID).Scan(&t.LeftNowBytes); err != nil {
+		return t, err
+	}
 	err := s.db.QueryRow(`SELECT COUNT(DISTINCT path) FROM jobs WHERE library_id=? AND status=?`, l.ID, Done).Scan(&t.Done)
 	return t, err
 }
 
 // BytesNow is the bytes a scan sees in a library: the bytes recorded, less the saving freed, the saving
 // waiting in the trash, and the converted files a scan found gone (their bytes are no longer there), plus the
-// growth of converted files bigger than their originals (they are in the library at their new size). Never below 0.
+// growth of converted files bigger than their originals (they are in the library at their new size), and the
+// left outputs in the library (beside their originals, or in a folder inside it). Never below 0.
 func BytesNow(t LibraryTotals, c LibraryCounts) int64 {
-	return max(0, t.BytesBefore-c.FreedBytes-c.WaitingBytes-c.GoneBytes+c.GrewNowBytes)
+	return max(0, t.BytesBefore-c.FreedBytes-c.WaitingBytes-c.GoneBytes+c.GrewNowBytes+t.LeftNowBytes)
 }
 
 // pathRange is [lo, hi) holding every path inside dir: dir + separator up to dir + the next character.
