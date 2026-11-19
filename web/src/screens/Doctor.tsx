@@ -1,4 +1,4 @@
-// Settings > Health (user item 10; contract "Doctor"): every check with OK / Warning / Fail, its one sentence and, when
+// Settings > Health (user item 10; contract "Doctor"): every check with OK / Warning / Fail (or a dimmed Not present for hardware that isn't there: counted nowhere, no Fix), its one sentence and, when
 // something needs doing, the fix (a sentence, so no Copy button: design). Check again re-runs the fast checks; Test encoders again runs the
 // test encodes too (up to ~15 s). It changes no settings; Test encoders again also refreshes which encoder conversions use. Open before the first run (App.tsx), linked from
 // the first-run page and from the Dashboard when a check fails.
@@ -12,7 +12,7 @@ import { SettingsTabs } from "../pages";
 import type { Doctor, DoctorCheck } from "../types/doctor";
 import type { Issue } from "../types/v1";
 
-const PILL: Record<DoctorCheck["status"], [string, string]> = { ok: ["ok", "OK"], warn: ["warn", "Warning"], bad: ["bad", "Fail"] };
+const PILL: Record<DoctorCheck["status"], [string, string]> = { ok: ["ok", "OK"], warn: ["warn", "Warning"], bad: ["bad", "Fail"], absent: ["", "Not present"] };
 const GROUPS: [string, (id: string) => boolean][] = [
   ["Tools", (id) => ["ffmpeg", "ffprobe", "x265", "ssim"].includes(id)],
   ["Encoders", (id) => id.startsWith("encoder:")],
@@ -22,11 +22,11 @@ const GROUPS: [string, (id: string) => boolean][] = [
 const group = (id: string) => GROUPS.find(([, f]) => f(id))?.[0] ?? "Other";
 
 function Check({ c }: { c: DoctorCheck }) {
-  const [cls, word] = PILL[c.status] ?? PILL.warn;
+  const [cls, word] = PILL[c.status] ?? PILL.warn, absent = c.status === "absent";
   return (
     <li className="stack" style={{ gap: 4 }}>
-      <div className="row nw" style={{ alignItems: "baseline", gap: 8 }}><span className={"pill " + cls}>{word}</span><span>{c.detail}</span></div>
-      {c.hint && <p className="muted" style={{ margin: "0 0 0 4px" }}><strong>Fix:</strong> {c.hint}</p>}
+      <div className="row nw" style={{ alignItems: "baseline", gap: 8 }}><span className={"pill " + cls}>{word}</span><span style={absent ? { color: "var(--text-2)" } : undefined}>{c.detail}</span></div>
+      {c.hint && !absent && <p className="muted" style={{ margin: "0 0 0 4px" }}><strong>Fix:</strong> {c.hint}</p>}
     </li>);
 }
 
