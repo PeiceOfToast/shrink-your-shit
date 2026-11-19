@@ -26,8 +26,13 @@ type LibraryTotals struct {
 func (s *Store) LibraryTotalsOf(l Library) (LibraryTotals, error) {
 	var t LibraryTotals
 	lo, hi := pathRange(l.Path)
-	if err := s.db.QueryRow(`SELECT COALESCE(SUM(size),0), COUNT(*), COALESCE(SUM(CASE WHEN decision LIKE 'skip:%' THEN 1 ELSE 0 END),0)
-FROM files WHERE path >= ? AND path < ?`, lo, hi).Scan(&t.BytesBefore, &t.VideosRecorded, &t.Skipped); err != nil {
+	if err := s.db.QueryRow(`SELECT COALESCE(SUM(size),0), COUNT(*)
+FROM files WHERE path >= ? AND path < ?`, lo, hi).Scan(&t.BytesBefore, &t.VideosRecorded); err != nil {
+		return t, err
+	}
+	// Skipped is the count Jobs > Skipped shows for this library (the same filter, so they cannot disagree).
+	sw, sa := FileFilter{LibraryID: l.ID}.skipFilters()
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM files WHERE `+sw, sa...).Scan(&t.Skipped); err != nil {
 		return t, err
 	}
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM jobs WHERE library_id=? AND status=?`, l.ID, Done).Scan(&t.Done)
