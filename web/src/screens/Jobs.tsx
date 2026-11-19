@@ -68,6 +68,7 @@ export function Jobs() {
   // Show more (parity 11-19 #1): 200 rows at first, 200 more per press; a new tab, search or library starts again at 200.
   // The rows already shown stay while more load (the answer's "for" leaves the count out)
   const [more, setMore] = useState({ for: "", n: 200 }), lim = more.for === tab + "|" + q + "|" + library ? more.n : 200;
+  if (more.for && more.for !== tab + "|" + q + "|" + library) setMore({ for: "", n: 200 }); // forget it on leaving, so coming back is 200 too (review 29156ce P3)
   const page = useData(() => listJobs(tab, q, library, lim).then((r) => (failed(r) ? r : { ...r, for: tab + "|" + q + "|" + library })), [tab, q, library, lim], 15000);
   const [live, setLive] = useState<Record<string, JobProgressEvent["progress"]>>({});
   const reload = useRef(page.reload); reload.current = page.reload;
@@ -161,7 +162,7 @@ export function Jobs() {
             </tr>))}
           </tbody>
         </table></div>)}
-      {current && current.total > items.length && <p className="row muted sm" style={{ gap: 8, justifyContent: "center" }}>Showing {items.length.toLocaleString()} of {current.total.toLocaleString()} ·
+      {current && current.total > items.length && <p className="row muted sm" style={{ gap: 8, justifyContent: "center" }}>Showing {items.length.toLocaleString()} of {current.total.toLocaleString()}
         <button className="btn sm" type="button" disabled={items.length < Math.min(lim, current.total)} onClick={() => setMore({ for: tab + "|" + q + "|" + library, n: lim + 200 })}>Show {Math.min(200, current.total - items.length)} more</button></p>}
       {open && <Drawer id={open} row={items.find((j) => key(j) === open)} onClose={() => go(tab)} onChanged={page.reload} />}
     </div>
