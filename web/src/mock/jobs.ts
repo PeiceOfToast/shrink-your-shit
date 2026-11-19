@@ -94,7 +94,7 @@ export function mockJobLog(id: string): { state: string; steps: { name: string; 
     step("encode", f48190 ? "failed" : f48191 ? "failed" : "ok", { ...conv, result: failed ? "Failed" : "Done · 41% smaller" }),
   ] };
 }
-const FELL = "hevc_qsv failed (ffmpeg exited with code 1); converted on the processor."; // #323's step words
+const FELL = "Intel Quick Sync (hevc_qsv) failed: ffmpeg exited with code 1. Converted on the processor instead."; // #323's step words
 const NOT_TOLD = "Sonarr didn't answer in 60 s; it will notice the file at its next scan."; // #333's media_refresh words
 export function mockJob(id: string): JobDetail | null {
   if (id === REMOVED.id) return REMOVED;
@@ -117,7 +117,7 @@ export function mockJob(id: string): JobDetail | null {
     steps: old ? [] : [{ step: "found", at: at(300), ok: true, words: "Found in " + j.path.replace(/\/[^/]+$/, "") + "." }, { step: "checked", at: at(300), ok: true, words: "To be converted: H.264 at 12109 kbps." },
       ...(j.id === "48160" ? [{ step: "encoder_fallback", at: at(30), ok: false, words: FELL }] : []),
       ...(j.state === "completed" ? [{ step: "converted", at: at(12), ok: true, words: "Converted: HEVC · 8-bit · MKV." }, { step: "verified", at: at(11), ok: true, words: "Every check passed: the new file is complete, plays cleanly and looks like the original." }] : []),
-      ...(j.id === "48165" ? [{ step: "media_refresh", at: at(11), ok: true, words: "Sonarr rescanned Severance." }, { step: "media_refresh", at: at(10), ok: false, words: NOT_TOLD }] : []),
+      ...(j.id === "48165" || j.id === "48160" ? [{ step: "media_refresh", at: at(10), ok: false, words: j.id === "48160" ? NOT_TOLD.replace("Sonarr", "Radarr") : NOT_TOLD }] : []),
       ...(j.state === "failed" && j.id === "48190" ? [{ step: "converted", at: at(12), ok: false, words: "The new file is 4 s shorter than the original. The original is kept." }] : []),
       ...(j.state === "failed" && j.id === "48191" ? [{ step: "converted", at: at(12), ok: false, words: "There isn't enough free space to write the new file. About 571 MB is needed, 101 MB is free." }] : []),
       ...(j.state === "failed" && j.id === "failed-replace" ? [{ step: "found", at: at(300), ok: true, words: "Found in /media/home/Failed Saves." }, { step: "checked", at: at(100), ok: true, words: "To be converted: H.264 at 8000 kbps." }, { step: "converted", at: at(15), ok: true, words: "Converted: HEVC · 8-bit · MKV." }, { step: "verified", at: at(14), ok: true, words: "Every check passed." }, { step: "saved", at: at(13), ok: false, words: "Saving in place failed: permission denied." }] : [])],

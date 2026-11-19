@@ -29,6 +29,12 @@ const ICON: Partial<Record<JobState, string>> = { completed: "i-check-c", failed
 type PillJob = { state: JobState; retryAt?: string | null; subState?: string | null; reason?: { code: string } | null; warning?: string | null };
 // steps that warn without failing the job: the processor fallback (#323) and a Sonarr/Radarr that wasn't told (#333)
 const SOFT = ["encoder_fallback", "media_refresh"];
+// the top note, one line per warning: the server's warning names only the first (#333), so the steps give the rest
+const warnLines = (j: JobDetail) => {
+  const out = j.steps.some((s) => s.step === "encoder_fallback") ? ["The graphics encoder failed, so this file was converted on the processor, which is slower. The timeline below has the error."] : [];
+  out.push(...j.steps.filter((s) => s.step === "media_refresh" && !s.ok).map((s) => s.words));
+  return out.length ? out : [j.warning ?? ""];
+};
 const fell = (j: PillJob) => j.state === "completed" && !!j.warning; // #323: done on the processor after the graphics encoder failed
 const libPaused = (j: PillJob) => j.state === "queued" && j.subState === "library_disabled";
 // de2f664: a check that refused the new file kept the original; the server lists it as failed (code kept_original), it reads "Original kept"
@@ -472,7 +478,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {d.error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{d.error.message}</span></p>}
           {/* review db7b1f1 P3: "removed" is the server's flag, not a person's word. Only a job removed with its library
               gets a note; a job that ended as a skip shows its reason under Why like any other. */}
-          {done && j?.warning && <div className="note warn"><Icon id="i-alert" /><div>{j.steps.some((s) => s.step === "encoder_fallback") ? "The graphics encoder failed, so this file was converted on the processor, which is slower. The timeline below has the error." : j.warning}</div></div>}
+          {done && j?.warning && <div className="note warn"><Icon id="i-alert" /><div>{warnLines(j).map((w) => <div key={w}>{w}</div>)}</div></div>}
           {j?.removed && j.reason?.code === "removed" ? <div className="note"><Icon id="i-info" /><div>Its library was removed, so this file won't be converted.</div></div>
             : j?.failure ? <WhyFailed id={id} msg={reason} code={j.reason?.code ?? ""} worker={j.worker ?? null} f={j.failure} found={found.flatMap((st) => st.found!)} />
             : found.length ? <CheckFound lines={found.flatMap((st) => st.found!)} reason={reason} />
