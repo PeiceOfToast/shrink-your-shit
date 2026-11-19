@@ -428,6 +428,9 @@ func TestSummaryText(t *testing.T) {
 	if got != want {
 		t.Fatalf("summary text %q, want %q", got, want)
 	}
+	if got := summaryText(jobs.Batch{Converted: 2, Saved: -20_000_000}); got != "2 converted, 0.0 GB smaller, 0 waiting to be freed, 0 failed." {
+		t.Fatalf("a batch that grew: %q", got)
+	}
 }
 
 // Through a real tick: a drained summary arrives once the queue empties, and names the batch.
@@ -475,7 +478,7 @@ func TestUnreachableNamesTheHostOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.OK || res.Message != "Could not reach 127.0.0.1." {
+	if res.OK || res.Message != "Could not reach "+ln.Addr().String()+"." {
 		t.Errorf("unreachable test: %+v", res)
 	}
 	s, err := svc.Get()
@@ -483,7 +486,7 @@ func TestUnreachableNamesTheHostOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := json.Marshal(s)
-	if strings.Contains(string(b), secret) || !strings.Contains(string(b), "Could not reach 127.0.0.1.") {
+	if strings.Contains(string(b), secret) || !strings.Contains(string(b), "Could not reach "+ln.Addr().String()+".") {
 		t.Errorf("GET should hold the host-only message and no secret: %s", b)
 	}
 	if strings.Contains(lg.all(), secret) {

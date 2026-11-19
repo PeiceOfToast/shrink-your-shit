@@ -361,7 +361,7 @@ func summaryDue(sum Summary, now, last time.Time, b jobs.Batch) (send, advance b
 // summaryText is the contract's batch line: "N converted, X GB smaller, Y waiting to be freed, Z failed."
 func summaryText(b jobs.Batch) string {
 	return fmt.Sprintf("%d converted, %.1f GB smaller, %d waiting to be freed, %d failed.",
-		b.Converted, float64(b.Saved)/1e9, b.Waiting, b.Failed)
+		b.Converted, float64(max(b.Saved, 0))/1e9, b.Waiting, b.Failed) // a batch that grew reads 0.0, not -0.0
 }
 
 // notifyAll queues msg for every enabled target that wants this kind of news.
@@ -478,7 +478,7 @@ func (s *Service) record(id string, res Result) {
 func (s *Service) post(kind, addr string, m message) Result {
 	host := ""
 	if u, err := url.Parse(addr); err == nil {
-		host = u.Hostname()
+		host = u.Host // host and port; never the path, query or user, which can hold the secret
 	}
 	var body []byte
 	if kind == "discord" {
@@ -494,7 +494,7 @@ func (s *Service) post(kind, addr string, m message) Result {
 	req.Header.Set("User-Agent", "shrink-your-shit")
 	resp, err := s.opt.Client.Do(req)
 	if err != nil {
-		// the client's error text carries the whole address, so only the host is named
+		// the client's error text carries the whole address, so only the host and port are named
 		return Result{OK: false, Message: fmt.Sprintf("Could not reach %s.", host)}
 	}
 	io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
