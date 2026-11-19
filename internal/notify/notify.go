@@ -239,18 +239,15 @@ func (s *Service) events() {
 		if e.Kind != "job" {
 			continue
 		}
-		name, why := "A file", e.Reason
+		name := "A file"
 		if j, err := s.st.Get(e.JobID); err == nil {
 			name = filepath.Base(j.Path)
-			if w := firstSentence(j.Error); w != "" { // the reason's sentence, not its code
-				why = w
-			}
 		}
 		switch e.To {
 		case "failed":
-			s.notifyAll("jobFailed", "/jobs?tab=failed", fmt.Sprintf("Failed: %s. %s", name, why), "job.failed")
+			s.notifyAll("jobFailed", "/jobs?tab=failed", fmt.Sprintf("Failed: %s. %s", name, failedWords(e.Reason)), "job.failed")
 		case "kept":
-			s.notifyAll("needsYou", "/jobs?tab=completed", fmt.Sprintf("Kept the original of %s: %s", name, why), "job.kept")
+			s.notifyAll("needsYou", "/jobs?tab=completed", fmt.Sprintf("Kept the original of %s: a safety check refused the new file.", name), "job.kept")
 		case "done":
 			s.notifyAll("fileFinished", "/jobs?tab=completed", fmt.Sprintf("Converted: %s.", name), "job.done")
 		}
@@ -361,16 +358,24 @@ func summaryDue(sum Summary, now, last time.Time, b jobs.Batch) (send, advance b
 	return advance && found, advance
 }
 
-// firstSentence is the first sentence of a job's stored words: enough to say why, without ffmpeg's lines.
-func firstSentence(s string) string {
-	s = strings.TrimSpace(s)
-	if i := strings.IndexAny(s, "\n"); i >= 0 {
-		s = s[:i]
+// failedWords says why a job failed in fixed words from its code. The job's stored sentence is not sent: some name
+// a full path, and a notification leaves this computer.
+func failedWords(code string) string {
+	switch code {
+	case jobs.ReasonDiskFull:
+		return "The disk filled up."
+	case jobs.ReasonCannotRead:
+		return "Not allowed to read the file."
+	case jobs.ReasonCannotWrite:
+		return "Not allowed to write in its folder."
+	case jobs.ReasonStalled:
+		return "The conversion stopped making progress."
+	case jobs.ReasonLowDiskSpace:
+		return "Not enough free space next to the file."
+	case jobs.ReasonWorkerLost:
+		return "Its worker stopped answering."
 	}
-	if i := strings.Index(s, ". "); i >= 0 {
-		s = s[:i+1]
-	}
-	return strings.TrimSpace(s)
+	return "The conversion stopped with an error."
 }
 
 // summaryText is the contract's batch line: "N converted, X GB smaller, Y waiting to be freed, Z failed."

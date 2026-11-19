@@ -494,22 +494,23 @@ func TestUnreachableNamesTheHostOnly(t *testing.T) {
 	}
 }
 
-// A failure's message is its stored sentence, not its code, and leaves ffmpeg's lines out.
-func TestFailureTextIsTheSentenceNotTheCode(t *testing.T) {
+// A failure's message is fixed words for its code: never the code, never the stored words (they can hold a path).
+func TestFailureTextIsWordsNotCodeOrPath(t *testing.T) {
 	st, svc, _, _ := fixture(t)
 	start(t, svc)
 	r := newRx(t, 200)
 	mustCreate(t, svc, NewTarget{Name: "hook", Kind: "webhook", URL: r.srv.URL + "/hook/tok"})
 	id := enqueue(t, st, "/media/a.mkv")
 	claim(t, st)
-	if err := st.Fail(id, "convert_failed", "Converting stopped with an error. Your original was not touched.\nffmpeg: exit status 1"); err != nil {
+	// stored words that name a folder (as worker.go's notOurs and again.go do) never reach the target
+	if err := st.Fail(id, jobs.ReasonCannotWrite, "The file at /home/someone/private/a.mkv is not the one that was queued."); err != nil {
 		t.Fatal(err)
 	}
 	svc.Tick()
 	svc.Idle()
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if len(r.bodies) != 1 || r.bodies[0]["text"] != "Failed: a.mkv. Converting stopped with an error." {
+	if len(r.bodies) != 1 || r.bodies[0]["text"] != "Failed: a.mkv. Not allowed to write in its folder." {
 		t.Fatalf("failure message: %v", r.bodies)
 	}
 }
