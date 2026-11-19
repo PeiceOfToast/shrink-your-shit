@@ -89,11 +89,7 @@ func family(enc string) string {
 // The fast checks run on every call.
 func (c *Checker) API(ctx context.Context, in APIInput, retest bool) Doctor {
 	if retest {
-		c.mu.Lock()
-		if c.hwRun == nil {
-			c.hw = nil
-		}
-		c.mu.Unlock()
+		c.Retest(ctx)
 	}
 	t, probes := c.tested(ctx, time.Duration(math.MaxInt64))
 	inUse := in.InUse

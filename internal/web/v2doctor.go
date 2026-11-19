@@ -26,8 +26,11 @@ func v2Doctor(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		for _, l := range libs {
 			ls = append(ls, doctor.Library{ID: l.ID, Name: l.Name, Path: l.Path})
 		}
+		if r.URL.Query().Get("retest") == "1" {
+			eng.Doctor.Retest(r.Context()) // first: the encoder below is the one conversions use after this test
+		}
 		inUse, _ := LocalEncoderFor(store, eng.Doctor)("libx265") // "" when conversions use the processor
 		in := doctor.APIInput{Version: eng.Version, DataDir: eng.DataDir, Libs: ls, InUse: inUse, Device: encoderDevice}
-		writeJSON(w, eng.Doctor.API(r.Context(), in, r.URL.Query().Get("retest") == "1"))
+		writeJSON(w, eng.Doctor.API(r.Context(), in, false))
 	})
 }

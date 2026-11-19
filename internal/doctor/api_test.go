@@ -235,20 +235,6 @@ func TestDoctorSpaceTiersFollowTheConversionGate(t *testing.T) {
 	}
 }
 
-func TestDoctorRetestDoesNotChangeTheConversionEncoder(t *testing.T) {
-	ex := fakeFFmpeg(true, true, []string{"hevc_qsv"}, map[string]bool{"hevc_qsv": true})
-	c := apiChecker(ex, 1<<40)
-	in := APIInput{DataDir: t.TempDir(), InUse: "libx265"}
-	before := c.API(context.Background(), in, false)
-	after := c.API(context.Background(), in, true)
-	if before.Encoder.Name != "libx265" || after.Encoder.Name != "libx265" {
-		t.Errorf("encoder changed: before %q, after retest %q", before.Encoder.Name, after.Encoder.Name)
-	}
-	if use := checkByID(t, after.Checks, "encoder:in-use"); use.Status != "warn" {
-		t.Errorf("after ?retest=1, in-use should still say the CPU converts: %+v", use)
-	}
-}
-
 func TestDoctorPresentDeviceWithoutEncoderSaysSo(t *testing.T) {
 	if runtime.GOOS == "darwin" {
 		t.Skip("no Intel Quick Sync check on macOS")
