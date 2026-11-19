@@ -97,6 +97,8 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Checksums for every file, the Windows installer included
+        run: cd dist && rm -f checksums.txt && sha256sum -- * > checksums.txt
       - name: Create the GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

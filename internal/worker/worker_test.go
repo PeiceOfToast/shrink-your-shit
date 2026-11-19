@@ -102,6 +102,7 @@ type scenario struct {
 	srcPackets, outPackets int
 	content                string // what the fake encoder writes
 	encodeErr              error
+	failAllEncodes         bool                                  // every encode fails, the processor's retry too
 	failEncoder            string                                // an encode that asks for this ffmpeg encoder fails (encodeErr); others run
 	encodeStderr           string                                // what ffmpeg prints while converting (decode errors in the original show up here)
 	hang                   func(name string, args []string) bool // if it returns true the call blocks until its context ends
@@ -193,7 +194,7 @@ func (s *scenario) handle(name string, args []string) (string, string, error) {
 			if s.onEncode != nil {
 				s.onEncode()
 			}
-			if s.failEncoder != "" && s.has(args, s.failEncoder) {
+			if s.failAllEncodes || s.failEncoder != "" && s.has(args, s.failEncoder) {
 				os.WriteFile(last, []byte("partial"), 0o644)
 				// a second name keeps this file's inode alive, so a file removed and made again can't reuse it:
 				// the identity check then tells the two apart on every platform, not only where inodes are reused
