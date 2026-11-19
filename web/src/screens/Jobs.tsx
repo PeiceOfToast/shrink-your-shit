@@ -10,6 +10,7 @@ import { convertDoneAgain, fileJobs, findSkip, getJob, getJobLog, jobAction, lis
 import { getWorkflow } from "../workflowApi";
 import { getHealth, getSettings } from "../libraryApi";
 import { onLive } from "../live";
+import { FileName } from "../FileName";
 import { listLibraries, listLibrariesV2 } from "../libraryApi";
 import { Empty, PageHead } from "../PageHead";
 import { Link, navigate, useSearch } from "../router";
@@ -27,6 +28,14 @@ const ICON: Partial<Record<JobState, string>> = { completed: "i-check-c", failed
 // V5b: a waiting file whose library is paused (subState library_disabled) reads "Library paused" (design SCREENS V5);
 // it has no place in the queue, so its '#' is '–'.
 type PillJob = { state: JobState; retryAt?: string | null; subState?: string | null; reason?: { code: string } | null; warning?: string | null };
+// steps that warn without failing the job: the processor fallback (#323) and a Sonarr/Radarr that wasn't told (#333)
+const SOFT = ["encoder_fallback", "media_refresh"];
+// the top note, one line per warning: the server's warning names only the first (#333), so the steps give the rest
+const warnLines = (j: JobDetail) => {
+  const out = j.steps.some((s) => s.step === "encoder_fallback") ? ["The graphics encoder failed, so this file was converted on the processor, which is slower. The timeline below has the error."] : [];
+  out.push(...j.steps.filter((s) => s.step === "media_refresh" && !s.ok).map((s) => s.words));
+  return out.length ? out : [j.warning ?? ""];
+};
 const fell = (j: PillJob) => j.state === "completed" && !!j.warning; // #323: done on the processor after the graphics encoder failed
 const libPaused = (j: PillJob) => j.state === "queued" && j.subState === "library_disabled";
 // de2f664: a check that refused the new file kept the original; the server lists it as failed (code kept_original), it reads "Original kept"
@@ -165,7 +174,7 @@ export function Jobs() {
               <td className="selc"><label className="hit"><input type="checkbox" aria-label={"Select " + j.name} checked={sel.includes(j.id)} onChange={(e) => setSel(e.target.checked ? [...sel, j.id] : sel.filter((x) => x !== j.id))} /></label></td>
               {tab === "waiting" && <td className="posc" title={j.position != null ? "Place " + j.position + " in the queue" : "Not taken now"}>{j.position ?? "–"}</td>}
               <td className="idc"><a className="ttl" href={"/jobs?tab=" + tab + "&job=" + encodeURIComponent(key(j))} data-job={key(j)} title={j.path}
-                onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); go(tab, key(j)); } }}>{j.name}</a>
+                onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); go(tab, key(j)); } }}><FileName n={j.name} /></a>
                 {j.pin && <span className="mchip prio">{j.pin === "first" ? "First" : "Last"}</span>}
                 <span className="sub">{[j.library, j.folder !== "." && j.folder, [j.codec, j.resolution].filter(Boolean).join(" ")].filter(Boolean).join(" · ")}</span>
                 <span className="sub phone">{j.progress ? Math.round(j.progress.percent ?? j.progress.workflowPercent) + "% · " + j.progress.stage : j.state === "completed" ? saved(j.beforeBytes, j.afterBytes) : reasonText(j) || j.library}</span></td>
@@ -448,7 +457,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
       <aside className="drawer jobd" ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="jd-h">
         <div className={"hd" + (state === "failed" && !kept0 ? " failed" : "")}>
           <button className="btn icon ghost" type="button" aria-label="Close" onClick={onClose}><Icon id="i-chev-l" /></button>
-          <div className="sp"><h2 id="jd-h" className="clamp2" title={name}>{name}</h2>{state && <span style={{ alignSelf: "flex-start" }}><Pill j={{ state, retryAt: j?.retryAt ?? own?.retryAt, subState: own?.subState, reason: j?.reason ?? own?.reason, warning: j?.warning }} /></span>}</div>
+          <div className="sp"><h2 id="jd-h" className="clamp2" title={name}><FileName n={name} /></h2>{state && <span style={{ alignSelf: "flex-start" }}><Pill j={{ state, retryAt: j?.retryAt ?? own?.retryAt, subState: own?.subState, reason: j?.reason ?? own?.reason, warning: j?.warning }} /></span>}</div>
           {/* SCREENS V6b header: Retry, Cancel or Stop, and the job ID to copy (the body keeps the rest) */}
           <div className="row nw" style={{ gap: 6, flexWrap: "wrap" }}>
             {(state === "failed" || state === "retry_wait") && <button className="btn sm" type="button" onClick={() => run("retry")}><Icon id="i-refresh" />{state === "retry_wait" ? "Try now" : "Retry"}</button>}
@@ -470,7 +479,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {d.error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{d.error.message}</span></p>}
           {/* review db7b1f1 P3: "removed" is the server's flag, not a person's word. Only a job removed with its library
               gets a note; a job that ended as a skip shows its reason under Why like any other. */}
-          {done && j?.warning && <div className="note warn"><Icon id="i-alert" /><div>The graphics encoder failed, so this file was converted on the processor, which is slower. The timeline below has the error.</div></div>}
+          {done && j?.warning && <div className="note warn"><Icon id="i-alert" /><div style={{ display: "grid", gap: 6 }}>{warnLines(j).map((w, i) => <div key={i}>{w}</div>)}</div></div>}
           {j?.removed && j.reason?.code === "removed" ? <div className="note"><Icon id="i-info" /><div>Its library was removed, so this file won't be converted.</div></div>
             : j?.failure ? <WhyFailed id={id} msg={reason} code={j.reason?.code ?? ""} worker={j.worker ?? null} f={j.failure} found={found.flatMap((st) => st.found!)} />
             : found.length ? <CheckFound lines={found.flatMap((st) => st.found!)} reason={reason} />
@@ -492,7 +501,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {(j?.workflow || rule) && <section><h3>Workflow</h3><p>{rule ? <a className="linkbtn" href={"/workflows/" + encodeURIComponent(rule.id)} onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate("/workflows/" + encodeURIComponent(rule.id)); }}}>Change rule in {rule.name}</a> : own?.flow?.name ?? "Its library's workflow"}{j?.workflow && " · v" + j.workflow.version}</p></section>}
           {!scan && <section><h3>Timeline</h3>
             {!j ? <p className="muted">Loading...</p> : !j.steps.length && !j.events.length ? <p className="muted">No step history for jobs from before the update.</p> : <>
-              {j.steps.length > 0 && <ol className="tline">{j.steps.map((s, i) => <li key={i} className={s.ok ? "" : s.step === "encoder_fallback" ? "warn" : "bad"}><Icon id={s.ok ? "i-check-c" : s.step === "encoder_fallback" ? "i-alert" : "i-x-c"} /><span className="sp">{s.words}</span><span className="muted sm nowrap">{clock(s.at)}</span></li>)}</ol>}
+              {j.steps.length > 0 && <ol className="tline">{j.steps.map((s, i) => <li key={i} className={s.ok ? "" : SOFT.includes(s.step) ? "warn" : "bad"}><Icon id={s.ok ? "i-check-c" : SOFT.includes(s.step) ? "i-alert" : "i-x-c"} /><span className="sp">{s.words}</span><span className="muted sm nowrap">{clock(s.at)}</span></li>)}</ol>}
               {j.events.length > 0 && <p className="sm muted">History: {j.events.map((e) => WORD[e.to] + " " + clock(e.at)).join(" → ")}</p>}
             </>}
           </section>}

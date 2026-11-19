@@ -503,7 +503,6 @@ label.chk{cursor:pointer}
      The Dashboard's short lists keep 3 */
   .list .tbl .sub.phone{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;overflow-wrap:anywhere}
   .plist .sub{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;overflow-wrap:anywhere}
-  .plist .ttl.clamp2{-webkit-line-clamp:1}
   .plist .prog>.sm{display:none}
   .sline>.sp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 }
