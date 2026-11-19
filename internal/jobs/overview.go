@@ -53,8 +53,9 @@ type Day struct {
 
 // latestEndsSQL is every file's latest end (done, skipped, cancelled, failed, kept) with rn 1 for the newest:
 // a file is its path over all its job rows, so a requeued file that later passes has done as its latest end
-// and no failure left in the counts. The history itself stays in events; only the counts read this.
-const latestEndsSQL = `WITH ends AS (SELECT e.at, e.to_status, ROW_NUMBER() OVER (PARTITION BY COALESCE(j.path, 'job:' || e.job_id) ORDER BY e.seq DESC) AS rn
+// and no failure left in the counts. The history itself stays in events; only the counts read this. Skip and
+// cancel delete the job row, so its end event names the path in its data: the file is still the same file.
+const latestEndsSQL = `WITH ends AS (SELECT e.at, e.to_status, ROW_NUMBER() OVER (PARTITION BY COALESCE(j.path, json_extract(e.data, '$.path'), 'job:' || e.job_id) ORDER BY e.seq DESC) AS rn
 FROM events e LEFT JOIN jobs j ON j.id=e.job_id WHERE e.kind='job' AND e.to_status IN ('done','skipped','cancelled','failed','kept'))
 `
 

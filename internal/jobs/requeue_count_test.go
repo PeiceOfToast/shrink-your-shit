@@ -144,3 +144,57 @@ func TestFailThenFailCountsOnceOnTheLatestDay(t *testing.T) {
 		t.Errorf("the first day's failure must not count: %+v", got)
 	}
 }
+
+// A requeued file that is then skipped or cancelled is one file, counted once as skipped. Skip and cancel
+// delete the job row, so the end event has to name the path itself.
+func TestFailThenRequeuedAndSkippedCountsAsSkipped(t *testing.T) {
+	s := open(t)
+	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
+	first, _ := s.Enqueue(Job{LibraryID: l.ID, Path: "/m/a.mkv", SizeBefore: 1000})
+	s.Claim("w")
+	s.Fail(first, "convert_failed", "boom")
+	second, _ := s.Enqueue(Job{LibraryID: l.ID, Path: "/m/a.mkv", SizeBefore: 1000})
+	if err := s.Skip(second, "too small to bother", "too_small"); err != nil {
+		t.Fatal(err)
+	}
+	checkFailedThenEnded(t, s, "skipped")
+}
+
+func TestFailThenRequeuedAndCancelledCountsAsSkipped(t *testing.T) {
+	s := open(t)
+	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
+	first, _ := s.Enqueue(Job{LibraryID: l.ID, Path: "/m/a.mkv", SizeBefore: 1000})
+	s.Claim("w")
+	s.Fail(first, "convert_failed", "boom")
+	second, _ := s.Enqueue(Job{LibraryID: l.ID, Path: "/m/a.mkv", SizeBefore: 1000})
+	if _, err := s.RequestStop(second); err != nil {
+		t.Fatal(err)
+	}
+	checkFailedThenEnded(t, s, "cancelled")
+}
+
+// checkFailedThenEnded: the file's latest end is its skip or cancel, so it is one skipped and no failed,
+// in the days and in the last 24 hours.
+func checkFailedThenEnded(t *testing.T, s *Store, what string) {
+	t.Helper()
+	days := dayCounts(t, s)
+	if failed, skipped := sumDaysSkipped(days); failed != 0 || skipped != 1 {
+		t.Errorf("fail, then requeued and %s: failed %d, skipped %d over the days; want 0 and 1", what, failed, skipped)
+	}
+	ends, err := s.JobEndsSince(time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ends["failed"] != 0 || ends["kept"] != 0 || ends["skipped"]+ends["cancelled"] != 1 {
+		t.Errorf("last 24 hours, fail then %s: %v; want no failure and one skipped or cancelled", what, ends)
+	}
+}
+
+// sumDaysSkipped is the failed and skipped counts over every day listed (skipped includes stopped files).
+func sumDaysSkipped(days map[string]Day) (failed, skipped int) {
+	for _, d := range days {
+		failed += d.Failed
+		skipped += d.Skipped
+	}
+	return failed, skipped
+}
