@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -451,5 +452,37 @@ func TestDrainedSummarySendsTheBatch(t *testing.T) {
 	r.mu.Unlock()
 	if len(texts) != 1 || !strings.HasPrefix(texts[0], "1 converted, ") {
 		t.Fatalf("batch messages %q, want one that starts \"1 converted, \"", texts)
+	}
+}
+
+// An address that can't be reached is named by its host only: the client's own error text holds the
+// whole URL, token included, and lastResult is served by GET (review P2-1 on #330).
+func TestUnreachableNamesTheHostOnly(t *testing.T) {
+	_, svc, _, lg := fixture(t)
+	const secret = "SECRETTOKEN9921"
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := "http://" + ln.Addr().String() + "/hook/" + secret
+	ln.Close() // nothing listens there now
+	tg := mustCreate(t, svc, NewTarget{Name: "hook", Kind: "webhook", URL: addr})
+	res, err := svc.Test(tg.ID, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK || res.Message != "Could not reach 127.0.0.1." {
+		t.Errorf("unreachable test: %+v", res)
+	}
+	s, err := svc.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(s)
+	if strings.Contains(string(b), secret) || !strings.Contains(string(b), "Could not reach 127.0.0.1.") {
+		t.Errorf("GET should hold the host-only message and no secret: %s", b)
+	}
+	if strings.Contains(lg.all(), secret) {
+		t.Errorf("a log line shows the secret: %s", lg.all())
 	}
 }
