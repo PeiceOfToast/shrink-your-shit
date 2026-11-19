@@ -11,11 +11,16 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
 // MaxBackupBytes is the largest backup that can be previewed or restored. A variable so tests can lower it.
 var MaxBackupBytes int64 = 200 << 20
+
+// MaxRestoreBytes is the most decompressed data a backup can hold and still be previewed or restored. The app's own
+// backups are gzipped JSON that can be much bigger than the upload cap. A variable so tests can lower it.
+var MaxRestoreBytes int64 = 4 << 30
 
 var (
 	// ErrNotABackup means the file is not one of this program's backups.
@@ -30,7 +35,7 @@ var (
 // before it is held in memory. Real rows are far smaller.
 const maxBackupRow = 16 << 20
 
-// boundedReader counts the decompressed bytes of a backup: all of them up to a few times MaxBackupBytes,
+// boundedReader counts the decompressed bytes of a backup: all of them up to MaxRestoreBytes,
 // and, between resets, the bytes of the one row being decoded (maxBackupRow).
 type boundedReader struct {
 	r     io.Reader
@@ -42,7 +47,7 @@ type boundedReader struct {
 // whole: the decoder gets ErrTooLarge instead of the rest of it.
 func (b *boundedReader) Read(p []byte) (int, error) {
 	room := maxBackupRow - b.row
-	if left := 4*MaxBackupBytes - b.total; left < room {
+	if left := MaxRestoreBytes - b.total; left < room {
 		room = left
 	}
 	if room <= 0 {
@@ -89,6 +94,34 @@ type BackupPreview struct {
 }
 
 // PreviewBackup reads the backup file at path and says what it holds. Nothing in the database changes.
+// RestoreNeed is the free space a restore of the backup at path needs beside the database: the backup's decompressed
+// size, plus the database file as it is now. It returns the directory that space is taken from. It reads the whole
+// backup once and changes nothing.
+func (s *Store) RestoreNeed(path string) (int64, string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, "", err
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return 0, "", ErrNotABackup
+	}
+	defer gz.Close()
+	n, err := io.Copy(io.Discard, gz)
+	if err != nil {
+		return 0, "", ErrNotABackup
+	}
+	if n > MaxRestoreBytes {
+		return 0, "", ErrTooLarge
+	}
+	var dbSize int64
+	if st, err := os.Stat(s.path); err == nil {
+		dbSize = st.Size()
+	}
+	return n + dbSize, filepath.Dir(s.path), nil
+}
+
 func (s *Store) PreviewBackup(path string) (BackupPreview, error) {
 	sc := backupScan{key: readShareKeyHere()}
 	h, err := walkBackup(path, sc.add)

@@ -175,3 +175,45 @@ func TestApplyIsRefusedWhileAJobRuns(t *testing.T) {
 		t.Errorf("a refused apply still made a backup: %d before, %d after", len(before), len(after))
 	}
 }
+
+// Apply checks the free space before anything changes: a restore that would not fit is refused with
+// not_enough_space, the data is as it was, and no safety backup is made.
+func TestApplyRefusesWhenFreeSpaceIsShort(t *testing.T) {
+	srv, st, _ := doctorServer(t, false)
+	code, body := post(t, srv, "POST", "/api/v2/backups", "")
+	var made jobs.BackupInfo
+	if err := json.Unmarshal([]byte(body), &made); err != nil || code != 201 {
+		t.Fatalf("make: %d %s", code, body)
+	}
+	code, body = post(t, srv, "POST", "/api/v2/backups/preview", `{"backupId":"`+made.ID+`"}`)
+	var prev struct {
+		PreviewID string `json:"previewId"`
+	}
+	if err := json.Unmarshal([]byte(body), &prev); err != nil || code != 200 {
+		t.Fatalf("preview: %d %s", code, body)
+	}
+	// A change after the backup: a restore would put the backed-up setting back, so a change made means the data differs.
+	if code, body := post(t, srv, "PATCH", "/api/settings", `{"backupKeep":7}`); code != 200 {
+		t.Fatalf("change: %d %s", code, body)
+	}
+	before, _ := st.ListBackups()
+
+	oldFree := diskFree
+	diskFree = func(string) (uint64, error) { return 1024, nil } // 1 KB free: nothing fits
+	t.Cleanup(func() { diskFree = oldFree })
+
+	code, body = post(t, srv, "POST", "/api/v2/backups/apply", `{"previewId":"`+prev.PreviewID+`"}`)
+	if code != 507 || errCode(body) != "not_enough_space" {
+		t.Fatalf("apply with little free space: %d %s", code, body)
+	}
+	if after, _ := st.ListBackups(); len(after) != len(before) {
+		t.Errorf("a refused apply still made a backup: %d before, %d after", len(before), len(after))
+	}
+	code, body = post(t, srv, "GET", "/api/settings", "")
+	var s struct {
+		BackupKeep int `json:"backupKeep"`
+	}
+	if err := json.Unmarshal([]byte(body), &s); err != nil || code != 200 || s.BackupKeep != 7 {
+		t.Errorf("a refused apply changed the settings: %d %s", code, body)
+	}
+}
