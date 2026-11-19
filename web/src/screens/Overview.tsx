@@ -24,7 +24,7 @@ const pctTxt = (n: number) => (n > 0 && n < 0.1 ? "under 0.1%" : (n < 10 ? Math.
 const pct = (n: number | null) => (n == null ? null : Math.max(0, Math.min(100, Math.round(n))));
 const left = (s: number | null) => (s == null ? "not known yet" : s < 90 ? "under 2 min" : "about " + (s < 5400 ? Math.round(s / 60) + " min" : Math.round(s / 3600) + " h"));
 const perGB = (s: number | null) => (s == null ? "not recorded" : s < 60 ? Math.round(s) + " s" : Math.floor(s / 60) + " min" + (Math.round(s % 60) ? " " + Math.round(s % 60) + " s" : ""));
-const dayName = (d: string) => new Date(d + "T12:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" });
+const dayName = (d: string) => new Date(d + "T12:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" }).replace(" ", "\u00a0"); // "Nov 20" never splits
 
 function Bar({ p, label }: { p: number | null; label?: string }) {
   return <div className="prog"><div className="bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={p ?? undefined} aria-label={label ?? (p == null ? "Progress not known" : p + "%")}><i style={{ width: (p ?? 0) + "%" }} /></div><span className="num">{p == null ? "" : p + "%"}</span></div>;

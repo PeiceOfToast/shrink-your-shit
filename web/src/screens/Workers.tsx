@@ -13,6 +13,7 @@ import { Link, navigate, useSearch } from "../router";
 import { useData } from "../useData";
 import { allWorkers, allowJoin, denyJoin, dismissJoin, newPairing, type Pairing, dismissUpdateNotice, getWorker, patchWorker, workersPage, stoppedByUpdate, testCapabilities, workerAction } from "../workersApi";
 import type { Capability, JoinRequest, Worker } from "../types/v2";
+import { FileName } from "../FileName";
 
 // review 61dc891 P2-1: only what the server reports (a remote worker may send no OS or host): no guess, no stray dot
 const OS: Record<string, string> = { linux: "Linux", darwin: "macOS", windows: "Windows" };
@@ -353,7 +354,7 @@ export function WorkerPage({ id }: { id: string }) {
         <Live w={w} />
         <section className="card panel"><div className="hd"><h2>Current jobs</h2><span className="sp" /><Link className="btn sm ghost" to="/jobs?tab=running">View all</Link></div>
           {!rows.length ? <div className="empty">{w.status === "paused" ? "Stopped: nothing is converting." : "Nothing is converting right now."}</div> : (
-            <ul className="plist">{rows.map((j) => <li key={j.id}><div className="sp"><Link className="ttl clamp2" to={"/jobs?tab=running&job=" + encodeURIComponent(j.id)}>{j.name}</Link><span className="sub">{j.library} · {j.progress?.stage ?? ""}</span></div>
+            <ul className="plist">{rows.map((j) => <li key={j.id}><div className="sp"><Link className="ttl clamp2" to={"/jobs?tab=running&job=" + encodeURIComponent(j.id)}><FileName n={j.name} /></Link><span className="sub">{j.library} · {j.progress?.stage ?? ""}</span></div>
               {j.progress && <span className="sm">{Math.round(j.progress.percent ?? j.progress.workflowPercent)}%</span>}</li>)}</ul>)}
         </section>
         <p className="sm muted">Graphics card: {w.gpus.length ? "not used for converting yet" : "none found"}.</p>
