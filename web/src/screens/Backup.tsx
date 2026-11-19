@@ -59,10 +59,9 @@ function Row({ b, onRestore, reload, said }: { b: Backup; onRestore: (b: Backup)
   const del = async () => {
     if (busy) return;
     setBusy(true);
-    const r = await deleteBackup(b.id).catch(() => null);
-    setBusy(false);
-    if (!r) return;
-    if (failed(r)) { setMsg(r.error.message); return; }
+    let r;
+    try { r = await deleteBackup(b.id); } finally { setBusy(false); }
+    if (failed(r)) { setMsg(r.error.message); return; } // a deleted backup answers with an empty body (null): that is success
     said("Backup deleted."); reload();
   };
   return (
