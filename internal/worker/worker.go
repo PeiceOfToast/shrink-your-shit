@@ -71,8 +71,8 @@ type Queue interface {
 	// FallBack puts a job back in the queue along another path; AddFailureStep records a failure (V6b).
 	FallBack(id int64, branch string, path []string, nodeID, words string) error
 	AddFailureStep(id int64, nodeID, words string) error
-	// IsOwnOutput reports whether the file at path (this size and time) is one a done job wrote.
-	IsOwnOutput(path string, size, mtime int64) (bool, error)
+	// IsOwnOutputExact reports whether the file at path (this size and time) is one a done job wrote.
+	IsOwnOutputExact(path string, size, mtime int64) (bool, error)
 	// RecordPlan stores the Plan a running job converts with (JSON) and its fingerprint.
 	RecordPlan(id int64, plan, fingerprint string) error
 	// Skip ends a job as a skipped file with words and a reason code (S3: Dolby Vision left alone).
@@ -1497,7 +1497,7 @@ func (w *Worker) ownOutput(p string, lst fs.FileInfo) bool {
 	if !lst.Mode().IsRegular() {
 		return false
 	}
-	own, err := w.Queue.IsOwnOutput(p, lst.Size(), lst.ModTime().UnixNano())
+	own, err := w.Queue.IsOwnOutputExact(p, lst.Size(), lst.ModTime().UnixNano())
 	return err == nil && own
 }
 

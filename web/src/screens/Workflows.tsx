@@ -4,7 +4,7 @@
 import { Empty, PageHead } from "../PageHead";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
-import { plural } from "../format";
+import { count, plural } from "../format";
 import { SignedOut, failed, type Answer } from "../api";
 import { useData } from "../useData";
 import { createWorkflow, deleteWorkflow, duplicateWorkflow, listTemplates, listWorkflows, patchWorkflow } from "../workflowApi";
@@ -17,6 +17,16 @@ export const START_SIMPLE = "A list of steps with plain choices. HEVC, same reso
 // An action's answer: its error message goes to `say`; signed out goes to sign-in (api.ts).
 async function act<T>(p: Promise<Answer<T>>, say: (m: string) => void): Promise<T | null> {
   try { const r = await p; if (failed(r)) return (say(r.error.message), null); return r; } catch (e) { if (e instanceof SignedOut) return null; throw e; }
+}
+
+// Recent runs (spec V3, 18:50Z): one quiet line from lastRun, which covers the past 7 days. Zero parts are left out;
+// "failed" uses the error text colour; "skipped" comes after it, muted (lead 18:53Z).
+function Runs({ r }: { r: Workflow["lastRun"] }) {
+  if (!r.at) return <span className="muted sm">Not run yet</span>;
+  const min = Math.max(0, Math.round((Date.now() - new Date(r.at).getTime()) / 60000));
+  const when = min < 1 ? "just now" : min < 60 ? `${min} min ago` : min < 1440 ? `${Math.round(min / 60)} h ago` : plural(Math.round(min / 1440), "day", "days") + " ago";
+  const done = r.completed > 0 ? `${count(r.completed)} done` : "", failed = r.failed > 0 ? `${count(r.failed)} failed` : "", skipped = r.skipped > 0 ? `${count(r.skipped)} skipped` : "";
+  return (<span className="muted sm">Ran {when}{(done || failed || skipped) && " · past 7 days: "}{done}{done && (failed || skipped) && ", "}{failed && <span style={{ color: "var(--error-text)" }}>{failed}</span>}{failed && skipped && ", "}{skipped}</span>);
 }
 
 function RowMenu({ w, onSaid, reload }: { w: Workflow; onSaid: (s: string) => void; reload: () => void }) {
@@ -125,7 +135,7 @@ export function Workflows() {
         {!wfs.loaded ? <div className="empty">Loading...</div> : rows.length === 0 ? (all.length ? <div className="empty">No workflow matches.</div>
           : <Empty icon="i-workflow" text="No workflows yet. A workflow says what happens to each file.">{!wizard && <button className="btn primary" type="button" onClick={() => (setWizard(true), setSaid(""))}><Icon id="i-plus" />New workflow</button>}</Empty>) : (
           <div className="list"><table className="tbl">
-            <thead><tr><th>Name</th><th data-p="2">Libraries</th><th data-p="3">Version</th><th className="num" data-p="4">Active jobs</th><th data-p="5">Tags</th><th className="stc">Check</th><th className="actc">Enabled</th><th className="actc"><span className="sr">Menu</span></th></tr></thead>
+            <thead><tr><th>Name</th><th data-p="2">Libraries</th><th data-p="3">Version</th><th data-p="6">Recent runs</th><th data-p="6">Tags</th><th className="stc">Check</th><th className="actc">Enabled</th><th className="actc"><span className="sr">Menu</span></th></tr></thead>
             <tbody>{rows.map((w) => {
               const problems = w.validation.errors + w.validation.warnings;
               const used = w.libraries.length ? w.libraries.map((l) => l.name).join(", ") : "No library";
@@ -136,11 +146,11 @@ export function Workflows() {
                     <button className="btn sm icon ghost over star" type="button" aria-pressed={w.favourite} aria-label={"Favourite: " + w.name} onClick={async () => { if (await act(patchWorkflow(w.id, { favourite: !w.favourite }), setSaid)) wfs.reload(); }}
                       style={w.favourite ? { color: "var(--warning-text)" } : undefined}><Icon id="i-star" /></button>
                     <span><Link className="ttl" to={"/workflows/" + w.id}>{w.name}</Link><span className="sub" title={w.description}>{w.description}</span>
-                      <span className="sub phone">{used} · {version}</span></span></span></td>
+                      <span className="sub phone">{used} · {version}</span><span className="sub phone runs"><Runs r={w.lastRun} /></span></span></span></td>
                   <td data-p="2">{w.libraries.length ? used : <span className="muted">None</span>}</td>
                   <td className="nowrap" data-p="3">{version}</td>
-                  <td className="num" data-p="4">{w.activeJobs}</td>
-                  <td data-p="5"><span className="chips">{w.tags.map((t) => <span className="mchip" key={t}>{t}</span>)}</span></td>
+                  <td data-p="6"><Runs r={w.lastRun} /></td>
+                  <td data-p="6"><span className="chips">{w.tags.map((t) => <span className="mchip" key={t}>{t}</span>)}</span></td>
                   <td className="stc">{problems ? <span className={"pill " + (w.validation.errors ? "bad" : "warn")}><Icon id="i-alert" />{plural(problems, "problem", "problems")}</span>
                     : <span className="pill"><Icon id="i-check-c" />OK</span>}</td>
                   <td className="actc">{w.status === "draft" ? <span className="muted" aria-label="Not published yet">-</span>

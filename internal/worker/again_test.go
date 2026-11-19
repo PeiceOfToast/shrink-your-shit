@@ -126,3 +126,24 @@ func TestConvertAgainBesideReplacesOurOutput(t *testing.T) {
 		t.Errorf("beside %q, original %q", read(out), read(s.src))
 	}
 }
+
+// #400: a file the person put at our output's name, the same size as our output, is not ours. Another
+// conversion into the same name (Beside) matches the path, the size and the time, so it fails
+// "There is already a file named" and leaves the file alone; a size-only match would delete it.
+func TestBesideKeepsSameSizeUserFile(t *testing.T) {
+	s := newScenario(t)
+	w := s.worker(Beside)
+	w.RunOne(context.Background())
+	out := BesidePath(s.src)
+	own := strings.Repeat("x", len(read(out)))
+	os.WriteFile(out, []byte(own), 0o644)
+	s.id, _ = s.store.Enqueue(jobs.Job{Library: s.dir, Path: s.src, DurationSec: 100})
+	s.content = "newer"
+	w.RunOne(context.Background())
+	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "There is already a file named") {
+		t.Errorf("%s %q", j.Status, j.Error)
+	}
+	if read(out) != own {
+		t.Errorf("the person's file %q was replaced by %q", own, read(out))
+	}
+}
