@@ -13,6 +13,7 @@ import (
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/update"
 )
 
 // Settings are the global settings (UI-API-CONTRACT.md "Settings and first-run"). This slice stores
@@ -44,7 +45,14 @@ type Settings struct {
 	// ScanEvery is how often libraries are looked at, in seconds, once someone has changed it here (0:
 	// not changed: the -scan-every flag is used; design 01:41Z, a saved value wins).
 	ScanEvery int `json:"scanEvery"`
+	// CheckForUpdates is whether the app asks GitHub once a day whether a newer release exists. Off until the
+	// person turns it on (nil is off): the page promises nothing is sent anywhere unless they turn it on.
+	// syp-manager 11-19 02:50Z, for the user until morning.
+	CheckForUpdates *bool `json:"checkForUpdates"`
 }
+
+// UpdateChecks is whether the app may ask GitHub for a newer release: only once the person turned it on.
+func (s Settings) UpdateChecks() bool { return s.CheckForUpdates != nil && *s.CheckForUpdates }
 
 // QuietHours: both "HH:MM", or both "".
 type QuietHours struct {
@@ -61,8 +69,9 @@ type FirstRunLibrary struct {
 const settingsKey = "settings"
 
 func defaultSettings() Settings {
+	off := false
 	return Settings{OldControlLevel: "basic", FirstRunStep: 1, KeepOriginalsDays: 7, LogKeepDays: 30, ParallelJobs: 1,
-		LowPriority: true, ScanSchedule: "02:00", QueueOrder: "newest", Languages: []string{}}
+		LowPriority: true, ScanSchedule: "02:00", QueueOrder: "newest", Languages: []string{}, CheckForUpdates: &off}
 }
 
 var hhmm = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
@@ -155,7 +164,11 @@ func settingsRoutes(api *http.ServeMux, ss *settingsStore, access *Access, eng E
 		// them); "basic" and false when none is stored, as a fresh install had
 		m["controlLevel"], m["perLibraryFlow"] = cmp.Or(s.OldControlLevel, "basic"), s.OldPerLibraryFlow != nil && *s.OldPerLibraryFlow
 		m["trashPath"] = "Kept next to each file, in a folder called .syp-trash"
-		m["updateAvailable"] = nil
+		m["checkForUpdates"] = s.UpdateChecks()
+		m["updateAvailable"] = nil // the newer release's version, from the last check, when the checks are on
+		if st, err := update.Load(ss.store, eng.Version); err == nil && s.UpdateChecks() && st.Available {
+			m["updateAvailable"] = st.Latest
+		}
 		// how often libraries are looked at, in seconds: the value the scanner runs with now (ui-shop
 		// 01:41Z). It is the -scan-every flag; once it can be changed here, a saved value wins (design).
 		m["scanEvery"], m["scanEverySource"] = int(eng.ScanEvery.Seconds()), "flag"
@@ -163,10 +176,8 @@ func settingsRoutes(api *http.ServeMux, ss *settingsStore, access *Access, eng E
 		if s.ScanEvery > 0 {
 			m["scanEvery"], m["scanEverySource"] = s.ScanEvery, "saved"
 		}
-		m["integrations"] = map[string]any{ // integrations come in a later slice; empty, so the page can show them
-			"sonarr": map[string]any{"url": "", "hasKey": false}, "radarr": map[string]any{"url": "", "hasKey": false},
+		m["integrations"] = map[string]any{ // plex and jellyfin come in a later slice; empty, so the page can show them
 			"plex": map[string]any{"url": "", "hasKey": false}, "jellyfin": map[string]any{"url": "", "hasKey": false},
-			"notifications": map[string]any{"webhookUrl": "", "onDone": false, "onFailed": true, "onNeedsAttention": true},
 		}
 		return m
 	}

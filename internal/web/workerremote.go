@@ -229,16 +229,38 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 		if !ok {
 			return
 		}
-		var in struct{ Text string }
+		var in struct {
+			Text          string
+			EncoderFell   *struct{ Encoder, Reason string } // a graphics encoder failed and the processor converts the file
+			EncoderWorked bool                              // a graphics encoder converted a file: its failures in a row end
+		}
 		if !readJSON(w, r, &in) {
 			return
 		}
 		text := cleanWorkerText(in.Text, NoteMaxChars) // review 15b1898: one line, no control characters, capped
-		if text == "" {
+		if text == "" && in.EncoderFell == nil && !in.EncoderWorked {
 			apiError(w, http.StatusBadRequest, "invalid", "A note needs some text.")
 			return
 		}
-		store.AppendLogLine(j.ID, 0, "app", "Worker: "+text) // prefixed: a worker's note can't pass for the server's line
+		if in.EncoderWorked {
+			if err := store.EncoderWorked(j.Worker); err != nil {
+				serverError(w, err)
+				return
+			}
+		}
+		if f := in.EncoderFell; f != nil {
+			if !graphicsEncoder(f.Encoder) {
+				apiError(w, http.StatusBadRequest, "invalid", "A fall-back names a graphics encoder.")
+				return
+			}
+			if _, err := store.EncoderFell(j.ID, j.Worker, f.Encoder, cleanWorkerText(f.Reason, NoteMaxChars)); err != nil {
+				serverError(w, err)
+				return
+			}
+		}
+		if text != "" {
+			store.AppendLogLine(j.ID, 0, "app", "Worker: "+text) // prefixed: a worker's note can't pass for the server's line
+		}
 		writeJSON(w, map[string]any{"ok": true})
 	})
 	mux.HandleFunc("POST /api/worker/v1/leases/{lease}/report", func(w http.ResponseWriter, r *http.Request) {

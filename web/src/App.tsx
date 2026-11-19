@@ -24,6 +24,7 @@ import { ConnectionsSettings } from "./screens/Connections";
 import { getSetup } from "./setupApi";
 import { useData } from "./useData";
 
+let firstRunDone = false;
 export function App() {
   const raw = usePath();
   const p0 = raw.length > 1 ? raw.replace(/\/+$/, "") : raw; // "/settings/" is "/settings"
@@ -41,11 +42,13 @@ export function App() {
   // A computer that joined another server shows only its worker page, at every address but Settings (Change role).
   const su = useData(getSetup, []), joined = su.data?.role === "worker" && (!su.data.join || su.data.join.state === "allowed");
   useEffect(() => { document.title = title + " · Shrink Your Shit"; }, [title]);
-  // A server whose first run isn't done opens on it (IA.md: shown until done). Upgrades from v1 have it done.
+  // Until the first run is done, every page goes to it (IA.md; parity G8), except sign-in and the About/Health pages. Upgrades from v1 have it done.
+  const open = (p: string) => p === "/start" || p === "/signin" || p === "/settings/about" || p === "/settings/health";
   useEffect(() => {
-    if (MOCK || path !== "/") return;
+    if (MOCK || firstRunDone || open(path)) return;
     Promise.all([getSettings(), getSetup()]).then(([r, s]) => { // a joined worker stays on its own page
-      if (!failed(r) && !r.firstRunDone && !(!failed(s) && s.role === "worker" && (!s.join || s.join.state === "allowed")) && (location.pathname === "/" || location.pathname === "")) navigate("/start"); })
+      if (!failed(r) && r.firstRunDone) firstRunDone = true; // stop asking on every page once it is done
+      if (!failed(r) && !r.firstRunDone && !(!failed(s) && s.role === "worker" && (!s.join || s.join.state === "allowed")) && !open(location.pathname)) navigate("/start"); })
       .catch((e) => { if (!(e instanceof SignedOut)) throw e; });
   }, [path]);
   if (joined && !settings && !start && !signin) return (

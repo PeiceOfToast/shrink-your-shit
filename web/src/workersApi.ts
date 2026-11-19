@@ -72,3 +72,10 @@ export async function dismissJoin(id: string): Promise<Answer<unknown>> {
   if (MOCK) return mockAnswer(mock.dismissJoin(id));
   return call("POST", jbase(id) + "/dismiss");
 }
+
+// When no worker is running (none converting, ready or finishing a file): "stopped" if any is paused, since
+// Workers can turn it on; "offline" when every one is offline or stalled, since this app can't start that computer.
+export function noWorker(ws: { status: string }[]): "" | "stopped" | "offline" {
+  if (!ws.length || ws.some((w) => w.status === "busy" || w.status === "online" || w.status === "draining")) return "";
+  return ws.some((w) => w.status === "paused") ? "stopped" : "offline";
+}

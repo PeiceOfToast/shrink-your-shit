@@ -102,6 +102,20 @@ func failureFacts(store *jobs.Store, id int64, path, outputPath, message string)
 	return facts
 }
 
+// FailureSentence is job id's failure sentence as the Jobs page shows it, for a notification; "" when the job is not there.
+func FailureSentence(store *jobs.Store, id int64) string {
+	j, err := store.Get(id)
+	if err != nil || j.Error == "" {
+		return ""
+	}
+	events, err := store.JobEvents(id) // the code and stored words are on the last event, as the Jobs detail reads them
+	if err != nil || len(events) == 0 {
+		return ""
+	}
+	last := events[len(events)-1]
+	return failureMessage(store, id, last.Reason, j.Path, j.OutputPath, last.Message)
+}
+
 // failureMessage is a failed job's sentence in design's words (the stored words for a code the table does not name).
 func failureMessage(store *jobs.Store, id int64, errorCode, path, outputPath, stored string) string {
 	msg, _ := jobs.FailureWords(failureCode(store, id, errorCode), failureFacts(store, id, path, outputPath, stored))
