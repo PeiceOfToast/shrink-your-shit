@@ -21,7 +21,13 @@ func updateServer(t *testing.T, latest string) (srv *httptest.Server, ss *settin
 	t.Helper()
 	var n atomic.Int32
 	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n.Add(1)
+		// The checker asks the releases path, which is "/" here. Any other path is a stray request from
+		// somewhere else in the package: log it, do not count it.
+		if r.URL.Path == "/" {
+			n.Add(1)
+		} else {
+			t.Logf("stray request to %s, not counted", r.URL.Path)
+		}
 		w.Write([]byte(latest))
 	}))
 	t.Cleanup(gh.Close)
