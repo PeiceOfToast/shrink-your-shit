@@ -9,6 +9,7 @@ import { branchedDoc, legacyDoc, presetDoc, preview, revision, summary as stepSu
 const now = Date.now(), ago = (min: number) => new Date(now - min * 60e3).toISOString();
 const GB = 1e9;
 const mockMode = new URLSearchParams(location.search).get("mock");
+const workersOff = new URLSearchParams(location.search).has("workersoffline"); // every worker offline, none paused
 const shareMode = new URLSearchParams(location.search).get("sharemode") || "app";
 const shareReason = new URLSearchParams(location.search).get("sharereason") === "unprivileged";
 
@@ -95,7 +96,7 @@ function running(): State {
   return {
     settings: { firstRunDone: true, firstRunStep: 4, intakePaused: false, catalogueEnabled: false, firstRunLibrary: null, scanEvery: 45, scanEverySource: "flag" }, // 45 s: the flag's unlisted value
     libraries: [{ ...library("l1", "Movies", "/media/movies", 8.1 * GB, 780 * GB, 1600), bytes: { freed: 8.1 * GB, waitingToFree: 780 * GB, grew: 1.1 * GB } }, library("l2", "TV Shows", "/media/tv", 0, 410 * GB, 900), { ...library("l3", "Home videos", "/media/home", 28.3 * GB, 10 * GB, 300), workflowId: "w2", workflowName: "Home videos - my rules" }],
-    workers: [tested(worker("this", "This computer", "busy", [1, 2], [0, 1], 120, ["j-48213"]), true), tested(worker("nas", "NAS box", "busy", [1, 1], [0, 0], 300, ["j-48214"]), false), worker("laptop", "Laptop", "offline", [0, 1], [0, 0], 22, [])],
+    workers: [tested(worker("this", "This computer", "busy", [1, 2], [0, 1], 120, ["j-48213"]), true), tested(worker("nas", "NAS box", "busy", [1, 1], [0, 0], 300, ["j-48214"]), false), worker("laptop", "Laptop", "offline", [0, 1], [0, 0], 22, [])].map((w) => (workersOff ? { ...w, status: "offline" as const } : w)),
     jobs: [
       job("j-48213", "Dune.Part.Two.2024.2160p.REMUX.mkv", MOVIES, "running", { subState: "converting", worker: { id: "this", name: "This computer" }, currentStep: step(3, "Convert video"), startedAt: ago(12),
         progress: { stage: "Converting video", percent: 62, workflowPercent: 55, elapsedS: 728, speed: 1.7, etaS: 450, fps: 41, bitrateKbps: 9800 } }),
