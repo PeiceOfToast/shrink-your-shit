@@ -4,7 +4,7 @@ import { mockAction, mockJob, mockJobs, mockJobLog, mockConvertAgain } from "./m
 import type { ActionResult, JobAction, JobDetail, JobItem, JobsPage, Probe, Tab, Pin } from "./types/jobs";
 
 export async function listJobs(tab: Tab, q: string, library = "", limit = 200): Promise<Answer<JobsPage>> {
-  if (MOCK) return mockJobs(tab, q, undefined, limit);
+  if (MOCK) return mockJobs(tab, q, undefined, limit, library);
   // #134: the Waiting tab in the order the worker takes files, each with its position; the page never reorders it.
   // The server gives at most 500 rows per ask (files.go pageOf), so a longer list (Show more) is asked for 500 at a time
   const url = (n: number, at: number) => "/api/v2/jobs?tab=" + tab + (tab === "waiting" ? "&sort=queue" : "") + "&limit=" + n + (at ? "&offset=" + at : "") + (q ? "&q=" + encodeURIComponent(q) : "") + (library ? "&libraryId=" + encodeURIComponent(library) : "");
