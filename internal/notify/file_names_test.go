@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 )
 
 // A failure notification names files, never folders: each path in the Jobs sentence is cut to its last name, for
@@ -51,5 +53,27 @@ func TestFailureNotificationHoldsNoFolder(t *testing.T) {
 		if strings.ContainsAny(got[len("Failed: a.mkv. "):], `/\`) {
 			t.Errorf("notification %q still names a folder", got)
 		}
+	}
+}
+
+// A path the patterns can't cut (an unknown folder with spaces) never goes out: the notification falls back to the
+// fixed words for the failure's code rather than send a folder name (review of #342).
+func TestFailureSentenceFailsClosedOnALeftoverFolder(t *testing.T) {
+	for _, text := range []string{
+		"Couldn't read My Movies/Film.mkv: the file is missing.",
+		`Couldn't write to My Movies\Out: permission denied.`,
+		`The file at TV Shows\Ep.mkv is not the one that was queued.`,
+	} {
+		s := &Service{}
+		s.opt.FailureText = func(int64) string { return text }
+		got := s.failureSentence(jobs.Event{JobID: 1, Reason: jobs.ReasonCannotWrite})
+		if want := failedWords(jobs.ReasonCannotWrite); got != want {
+			t.Errorf("for %q: %q, want the fixed words %q", text, got, want)
+		}
+	}
+	s := &Service{}
+	s.opt.FailureText = func(int64) string { return "Couldn't read /srv/media/Film.mkv: the file is missing." }
+	if got := s.failureSentence(jobs.Event{JobID: 1}); got != "Couldn't read Film.mkv: the file is missing." {
+		t.Errorf("a cuttable path: %q", got)
 	}
 }

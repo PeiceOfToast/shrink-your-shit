@@ -118,8 +118,8 @@ func FailureSentence(store *jobs.Store, id int64) string {
 	// the stored words are the job's Error, as the Jobs list reads them; the event's message can be empty
 	facts := failureFacts(store, id, j.Path, j.OutputPath, j.Error)
 	msg, _ := jobs.FailureWords(failureCode(store, id, last.Reason), facts)
-	known := []string{facts.Folder, j.Path, j.OutputPath, j.Library}
-	if o, err := store.OriginalOfJob(id); err == nil { // the file a Convert again found in place of (its Dest)
+	known := []string{facts.Folder, j.Path, j.OutputPath} // not the library root: a short one (/mnt) would be cut inside other paths
+	if o, err := store.OriginalOfJob(id); err == nil {    // the file a Convert again found in place of (its Dest)
 		known = append(known, o.Path, o.NewPath, o.Dest())
 	}
 	return withoutKnownFolders(msg, known...)

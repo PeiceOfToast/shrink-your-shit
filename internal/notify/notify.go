@@ -288,8 +288,12 @@ func namesAPath(w string) bool {
 // failureSentence is the first line of the Jobs sentence for a failed job, or failedWords for its code when there is none.
 func (s *Service) failureSentence(e jobs.Event) string {
 	if s.opt.FailureText != nil {
+		// fail closed: a separator left after the cut (a path the patterns can't see, say with spaces in a
+		// folder name) means a folder might go out, so the fixed words go instead
 		if line, _, _ := strings.Cut(strings.TrimSpace(s.opt.FailureText(e.JobID)), "\n"); line != "" {
-			return line
+			if line = withoutFolders(line); !strings.ContainsAny(line, `/\`) {
+				return line
+			}
 		}
 	}
 	return failedWords(e.Reason)
