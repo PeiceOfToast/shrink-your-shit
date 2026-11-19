@@ -35,7 +35,7 @@ FROM files WHERE path >= ? AND path < ?`, lo, hi).Scan(&t.BytesBefore, &t.Videos
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM files WHERE `+sw, sa...).Scan(&t.Skipped); err != nil {
 		return t, err
 	}
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM jobs WHERE library_id=? AND status=?`, l.ID, Done).Scan(&t.Done)
+	err := s.db.QueryRow(`SELECT COUNT(DISTINCT path) FROM jobs WHERE library_id=? AND status=?`, l.ID, Done).Scan(&t.Done)
 	return t, err
 }
 
@@ -229,9 +229,10 @@ FROM jobs WHERE status=? AND started<>'' AND size_before>0`, Done).Scan(&secs, &
 	return
 }
 
-// DoneCount is how many files were converted (also by jobs made before libraries were records).
+// DoneCount is how many files were converted: a file converted twice counts once (also by jobs made before
+// libraries were records).
 func (s *Store) DoneCount() (int, error) {
 	var n int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM jobs WHERE status=?`, Done).Scan(&n)
+	err := s.db.QueryRow(`SELECT COUNT(DISTINCT path) FROM jobs WHERE status=?`, Done).Scan(&n)
 	return n, err
 }
