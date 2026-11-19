@@ -161,7 +161,7 @@ export function Jobs() {
         <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions}</div></details>
         {sel.length > 0 && <span className="muted sm">{sel.length} selected</span>}
         {/* parity 11-19 #2 (G4): pick a library here too; it sets the same ?libraryId= as "See its jobs", and the chip above stays */}
-        {tab === "completed" && <button className="btn sm" type="button" aria-pressed={kept} onClick={() => navigate(query("completed", library, !kept))}>{TRASH_WORDS}</button>}
+        {tab === "completed" && <button className="btn sm trash" type="button" aria-pressed={kept} onClick={() => navigate(query("completed", library, !kept))}>{TRASH_WORDS}</button>}
         {(libs.data?.length ?? 0) > 1 && <select className="input sm lib" aria-label="Library" value={library} onChange={(e) => navigate(query(tab, e.target.value, kept))}>
           <option value="">Library: All</option>
           {libs.data?.map((l) => <option key={l.id} value={l.id}>Library: {l.name}</option>)}
