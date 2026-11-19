@@ -24,12 +24,15 @@ import (
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/discover"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/doctor"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/integrations"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/notify"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/preview"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/remote"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/scanner"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/update"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/web"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
@@ -129,11 +132,18 @@ func main() {
 		log.Fatalf("data folder %s: %v", *data, err)
 	}
 	defer releaseLock()
-	store, err := jobs.Open(filepath.Join(*data, "syp.db"))
+	dbPath := filepath.Join(*data, "syp.db")
+	pending := update.ReadMarker(*data) // an update or roll back the update helper made: settled below, once serving
+	store, err := openStore(dbPath, pending)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer store.Close()
+	if pending != nil && pending.Resume { // workers were turned off for the update
+		if err := store.SetPaused(false); err != nil {
+			log.Printf("update: %v", err)
+		}
+	}
 	// keepDays is how long replaced originals are kept in .syp-trash (Settings > Safety; 7 by default).
 	keepDays := func() int {
 		s, err := web.LoadSettings(store)
@@ -220,6 +230,11 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM) // SIGTERM is a no-op on Windows; Ctrl+C works everywhere
 	defer stop()
+	// the update notice: asks GitHub at most once a day, in the background, and not at all when the person turned checks off
+	go update.Run(ctx, &update.Checker{Store: store, Current: version}, func() bool {
+		s, err := web.LoadSettings(store)
+		return err == nil && s.UpdateChecks()
+	})
 
 	x := media.OSExec{}
 	chk := &doctor.Checker{Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath, KnownOriginals: store.KnownOriginals}
@@ -281,6 +296,7 @@ func main() {
 	}()
 	// As many workers as the worker's parallel jobs setting (Workers page; followed live); Pause all stops them
 	// taking work and survives a restart.
+	integ := integrations.New(store, integrations.Options{Logf: log.Printf}) // Sonarr and Radarr: told after a replace
 	pool := &worker.Pool{
 		New: func(n int) *worker.Worker {
 			id := "builtin"
@@ -294,7 +310,8 @@ func main() {
 				Encoder: web.LocalEncoderFor(store, chk),
 				ShareDown: func(folder string, jobID int64) (worker.ShareDown, bool) {
 					return web.ShareDownFor(store, folder, jobID)
-				}}
+				},
+				OnDone: func(job jobs.Job, final string) { integ.Tell(job.ID, final) }}
 		},
 		Size: func() int {
 			if s, err := web.LoadSettings(store); err == nil {
@@ -325,8 +342,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("-trusted-proxies: %v", err)
 	}
+	notifier := notify.New(store, notify.Options{Logf: log.Printf}) // news to a webhook or Discord; never blocks a job
+	go notifier.Run(ctx.Done())
 	srv := &http.Server{Addr: *addr, Handler: web.Handler(store, access, web.Engine{
-		Transport: web.Transport{TrustedProxies: proxies},
+		Transport:    web.Transport{TrustedProxies: proxies},
+		Notify:       notifier,
+		Integrations: integ,
 		RunRemote: func(job jobs.Job, workerID string, rj *worker.RemoteJob) { // V7b2: a remote worker's job, run here
 			w := pool.New(1)
 			w.ID, w.Paused = workerID, nil // a pause stops new leases; a leased job goes on
@@ -359,13 +380,43 @@ func main() {
 	}
 	go web.RemountShares(store) // saved shares come back after a restart (app mode only)
 	go web.WatchShares(store)   // a library whose share stops answering pauses until it does (app mode only)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	ln, err := net.Listen("tcp", *addr)
+	if err == nil && pending != nil { // serving now: the update (or roll back) is settled
+		if r, err := update.Settle(*data, pending, version, time.Now().UTC()); err != nil {
+			log.Printf("update: %v", err)
+		} else {
+			log.Printf("update: %s", r.Message)
+		}
+	}
+	if err == nil {
+		err = srv.Serve(ln)
+	}
+	if err != nil && err != http.ErrServerClosed {
 		stop()
 		<-workerDone
 		log.Print(err)
 		return // deferred store.Close runs after the worker has stopped
 	}
 	<-workerDone // let an interrupted job go back in the queue before closing the database
+}
+
+// openStore opens the database. A program rolled back past a database upgrade finds a database it
+// refuses (ErrNewerDatabase): then the copy the app made before the update (pending's backup) goes back.
+func openStore(dbPath string, pending *update.Marker) (*jobs.Store, error) {
+	store, err := jobs.Open(dbPath)
+	if !errors.Is(err, jobs.ErrNewerDatabase) || pending == nil || pending.Backup == "" {
+		return store, err
+	}
+	if err := update.RestoreDB(pending.Backup, dbPath); err != nil {
+		return nil, fmt.Errorf("update: could not put the database back from %s: %v", pending.Backup, err)
+	}
+	log.Printf("update: the database was put back from %s (the newer one is kept as %s.rolled-back)", pending.Backup, dbPath)
+	// the result says so; saved now, so a start that stops before it is settled still says so next time
+	pending.DataRestored = true
+	if err := update.WriteMarker(filepath.Dir(dbPath), *pending); err != nil {
+		log.Printf("update: %v", err)
+	}
+	return jobs.Open(dbPath)
 }
 
 // scanTargets lists the started libraries for the scanner, each with its flow's rule. A library whose

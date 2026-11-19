@@ -25,6 +25,7 @@ catches a damaged download, not a compromised release), installs ffmpeg if you d
 sets the program up as a service that starts on boot, starts it, and prints the web address.
 Run the same line again later to upgrade; your settings are kept. It uses `sudo` on Linux
 and tells you when it does; on macOS it installs for your user only (no sudo).
+The app can check GitHub once a day for a newer release and show a notice. That check is off until you turn it on in Settings; with it off, the app sends nothing anywhere.
 
 Point it at your videos, and (on a server you will open from another computer) let the
 network in. Other machines then sign in with an access token; the installer ends by printing an
@@ -174,7 +175,13 @@ that file, `~/.local/bin/shrink-your-shit` and the log `~/Library/Logs/shrink-yo
 
 `shrink-your-shit doctor` checks the converter (ffmpeg, ffprobe, the HEVC encoder, the picture check),
 the data folder and every library folder, and says in plain words what to fix. It asks the running
-program, so the folder checks are made as the user the service runs as:
+program, so the folder checks are made as the user the service runs as.
+
+When a graphics encoder (a GPU, such as Intel QSV or NVIDIA NVENC) fails with an encoder or ffmpeg
+error, the file is converted again on the processor, and the job log says so. A full disk or a damaged
+source file still fails the job as before. If a
+worker's graphics encoder fails three times in a row, that worker uses the processor for an hour, and
+the health check warns until then.
 
 | Where it runs | Command |
 |---|---|
@@ -240,6 +247,20 @@ choose their setting and press Start. `-from-codec`, `-min-bitrate`, `-crf`, `-p
 `-output` only matter for an install upgraded from a version before libraries: they are the
 settings its libraries keep converting with. Each library keeps its own settings (its flow) after
 that: changing these flags later does not change libraries that already exist.
+
+## Notifications
+
+shrink-your-shit can tell you about its work by a webhook (a generic JSON POST) or a Discord channel webhook.
+Add a target with `POST /api/v2/notifications/targets` (`{name, kind, url}`; `kind` is `webhook` or `discord`).
+Each target picks its events (`jobFailed`, `needsYou`, `fileFinished`, `batchFinished`, `workerOffline`,
+`encoderFellBack`). The defaults are on for `jobFailed`, `needsYou`, `batchFinished` and `workerOffline`.
+`POST /api/v2/notifications/test` sends one message now and says whether it arrived.
+
+The address is stored encrypted and is never shown again: the API shows only its host. Sending runs in the
+background with retries and never delays or fails a conversion. A target that fails three sends in a row
+shows `failingSince`. A batch summary (`PATCH /api/v2/notifications` with `summary`) is `off`, `drained`
+(when the queue empties, the default), `daily` or `weekly` at a time you choose. Set `linkBase`
+(for example `http://nas:8484`) so messages link to the job. Without it, they have no links.
 
 ## For developers
 

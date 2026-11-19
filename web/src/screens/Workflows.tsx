@@ -1,5 +1,5 @@
 // V3 Workflows list, Templates tab and the New workflow wizard (spec 5.1, 5.2; DESIGN/v2 SCREENS V3,
-// mockups/workflows.html), on the real /api/v2 (#109) or the mock with ?mock=1. Not here yet: the Stack view (Open, V3b), Export, Test run, History,
+// mockups/workflows.html), on the real /api/v2 (#109) or the mock with ?mock=1. Opening one goes to its step list (WorkflowStack.tsx). Not here yet: Export, Test run, History,
 // Import, the Cards view. Archive isn't in the contract.
 import { Empty, PageHead } from "../PageHead";
 import { useEffect, useRef, useState } from "react";

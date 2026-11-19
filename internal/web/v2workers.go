@@ -285,6 +285,12 @@ func remoteMainEncoder(store *jobs.Store, rw jobs.RemoteWorker) (string, error) 
 	if err != nil {
 		return "", err
 	}
+	// three failures in a row: the processor until the pause ends (the graphics encoder is not offered)
+	if _, paused, err := store.EncoderPaused(rw.ID); err != nil {
+		return "", err
+	} else if paused {
+		return "cpu", nil
+	}
 	return primaryEncoder(cfg.PrimaryEncoder, remoteCaps(rw)), nil
 }
 
