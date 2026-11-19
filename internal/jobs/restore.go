@@ -93,7 +93,6 @@ type BackupPreview struct {
 	Warnings          []string `json:"warnings"`
 }
 
-// PreviewBackup reads the backup file at path and says what it holds. Nothing in the database changes.
 // RestoreNeed is the free space a restore of the backup at path needs beside the database: the backup's decompressed
 // size, plus the database file as it is now. It returns the directory that space is taken from. It reads the whole
 // backup once and changes nothing.
@@ -122,6 +121,7 @@ func (s *Store) RestoreNeed(path string) (int64, string, error) {
 	return n + dbSize, filepath.Dir(s.path), nil
 }
 
+// PreviewBackup reads the backup file at path and says what it holds. Nothing in the database changes.
 func (s *Store) PreviewBackup(path string) (BackupPreview, error) {
 	sc := backupScan{key: readShareKeyHere()}
 	h, err := walkBackup(path, sc.add)
