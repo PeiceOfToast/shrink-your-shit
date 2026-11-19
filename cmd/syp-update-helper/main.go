@@ -289,7 +289,7 @@ func (h *helper) install(version string) error {
 	h.setState("installing")
 	prev := h.bin + ".previous"
 	// The copy before the previous one (the version a roll back should reach after an automatic roll back)
-	// moves aside until the new program answers. Without this, renaming the current program over prev
+	// moves aside until the new program answers. Without this, linking the current program as prev
 	// would lose it, and an automatic roll back would leave nothing to roll back to.
 	older := prev + ".older"
 	hadPrev := exists(prev)
@@ -305,18 +305,15 @@ func (h *helper) install(version string) error {
 			return err
 		}
 	}
-	if err := os.Rename(h.bin, prev); err != nil { // the running program keeps its file open; nothing stops
+	// prev becomes a second name for the current program, so <bin> never goes missing: the only move that
+	// touches <bin> is next -> bin, which replaces it in one step or not at all.
+	if err := os.Link(h.bin, prev); err != nil {
 		os.Remove(next)
 		return errors.Join(err, restoreOlder())
 	}
-	if err := os.Rename(next, h.bin); err != nil {
-		if perr := os.Rename(prev, h.bin); perr != nil { // prev still holds the current program: .older must not overwrite it
-			// A copy would fail for the same reason the rename did (same folder); the running service keeps working,
-			// so say exactly which file to move back before the next restart.
-			return fmt.Errorf("could not install v%s, and could not put the current program back: move %s to %s before restarting the service: %w",
-				version, prev, h.bin, errors.Join(err, perr))
-		}
-		return errors.Join(err, restoreOlder())
+	if err := os.Rename(next, h.bin); err != nil { // <bin> is still the current program; nothing changed
+		os.Remove(next)
+		return errors.Join(err, os.Remove(prev), restoreOlder())
 	}
 	if h.restartHealthy() {
 		if hadPrev {
