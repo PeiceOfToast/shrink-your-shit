@@ -194,20 +194,6 @@ export function SafetySettings() {
     </div>);
 }
 
-// Backup (SCREENS V9): the server answers backups with 501 not_available for now, so this tab only says so (design's
-// words); no button that can't work.
-export function BackupSettings() {
-  return (
-    <div className="stack">
-      <PageHead icon="i-settings" title="Settings" />
-      <SettingsTabs at="backup" />
-      <section className="card"><div className="bd stack">
-        <p><strong>This backs up settings, not your videos.</strong></p>
-        <p className="muted">Exporting your settings and workflows, and importing them with a preview of what changes, come in a later version.</p>
-      </div></section>
-    </div>);
-}
-
 // Updates (SCREENS:293, About block): the #324 switch, off until the person turns it on, and the version line.
 const SENT = "Once a day it asks GitHub which version is newest. GitHub sees this app's version and your IP address, as with any web request. Nothing about your files or settings is sent. Checking installs nothing.";
 const at = (t: string) => `${day(t)}, ${new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
