@@ -108,43 +108,56 @@ type Checker struct {
 	refreshing bool
 	// hwRun is closed when the hardware test in flight ends (nil: none runs): one at a time
 	hwRun chan struct{}
+	// run collects the 8-bit test encodes of the hardware test in flight (nil: none); probes are the last
+	// stored run's, by encoder, for the Doctor page.
+	run    map[string]Probe
+	probes map[string]Probe
 }
 
 const toolsTTL = 10 * time.Minute
 
 // Tools checks the converter, hardware encoders included (cached for ten minutes: the hardware test
 // encodes take a moment).
+func (c *Checker) Tools(ctx context.Context) Tools {
+	t, _ := c.tested(ctx, toolsTTL)
+	return t
+}
+
+// tested is Tools with each encoder's test encode, and a stored test result older than maxAge is run again.
 //
 // The hardware test encodes run without the lock (it is taken only to read and store the result), so
 // Converter, ToolsNow and the startup check never wait for them (review 0605262).
-func (c *Checker) Tools(ctx context.Context) Tools {
+func (c *Checker) tested(ctx context.Context, maxAge time.Duration) (Tools, map[string]Probe) {
 	t := c.Converter(ctx)
 	c.mu.Lock()
 	for {
-		if c.hw != nil && time.Since(c.hwAt) < toolsTTL { // fresh: shared
-			hw, at := *c.hw, c.hwAt
+		if c.hw != nil && time.Since(c.hwAt) < maxAge { // fresh: shared
+			hw, at, probes := *c.hw, c.hwAt, c.probes
 			c.mu.Unlock()
-			return t.withEncoders(hw, at)
+			return t.withEncoders(hw, at), probes
 		}
 		if run := c.hwRun; run != nil { // one test at a time (GPU session limits, review c66c66b): wait for it
 			c.mu.Unlock()
 			select {
 			case <-run:
 			case <-ctx.Done():
-				return t // no hardware result for this caller; the running test still stores its own
+				return t, nil // no hardware result for this caller; the running test still stores its own
 			}
 			c.mu.Lock()
 			continue
 		}
 		run := make(chan struct{})
 		c.hwRun = run
+		c.run = map[string]Probe{}
 		c.mu.Unlock()
 		hw := c.hardwareTest(ctx, t)
 		c.mu.Lock()
 		at := time.Now()
+		probes := c.run
+		c.run = nil
 		stored := ctx.Err() == nil // a test cut short by its caller is not a result: the next caller runs it again
 		if stored {
-			c.hw, c.hwAt = &hw, at
+			c.hw, c.hwAt, c.probes = &hw, at, probes
 		}
 		c.hwRun = nil
 		close(run)
@@ -152,8 +165,15 @@ func (c *Checker) Tools(ctx context.Context) Tools {
 		if stored && c.OnTested != nil {
 			c.OnTested(at, resultsOf(hw))
 		}
-		return t.withEncoders(hw, at)
+		return t.withEncoders(hw, at), probes
 	}
+}
+
+// Probe is one encoder's test encode: how long it took, and ffmpeg's last error line when it failed.
+type Probe struct {
+	OK   bool
+	Took time.Duration
+	Err  string
 }
 
 // EncoderResult is one encoder's result in a test run: Passed when it encoded a test frame; Detail "10-bit"
@@ -303,8 +323,32 @@ func (c *Checker) Converter(ctx context.Context) Tools {
 func (c *Checker) encodes(ctx context.Context, enc string, tenBit bool) bool {
 	tctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
+	start := time.Now()
 	_, err := c.Exec.Output(tctx, c.FFmpeg, encodeArgs(enc, tenBit, media.VAAPIDevice())...)
+	if !tenBit && c.run != nil { // the hardware test's run, read by Tools (the Doctor page shows it)
+		p := Probe{OK: err == nil, Took: time.Since(start)}
+		if err != nil {
+			p.Err = lastErrorLine(err)
+		}
+		c.run[enc] = p
+	}
 	return err == nil
+}
+
+// lastErrorLine is the last line of an ffmpeg failure, without the "ffmpeg: exit status 1:" prefix.
+func lastErrorLine(err error) string {
+	lines := strings.Split(strings.TrimSpace(err.Error()), "\n")
+	line := strings.TrimSpace(lines[len(lines)-1])
+	if i := strings.LastIndex(line, ": "); i >= 0 {
+		line = line[i+2:]
+	}
+	if line == "" {
+		return "no reason given"
+	}
+	if len(line) > 200 {
+		line = line[:200]
+	}
+	return line
 }
 
 // encodeArgs is the test encode for enc's family (research 1.2): VAAPI must open its device and upload

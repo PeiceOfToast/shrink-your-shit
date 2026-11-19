@@ -169,3 +169,24 @@ func TestNoDefaultFolderFields(t *testing.T) {
 		t.Errorf("refusal %d %s", code, body)
 	}
 }
+
+func TestV2DoctorServesTheContractShape(t *testing.T) {
+	srv, st, _ := doctorServer(t, false)
+	st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/doctor"})
+	var d doctor.Doctor
+	if err := json.Unmarshal([]byte(body), &d); err != nil || code != 200 {
+		t.Fatalf("%d %s", code, body)
+	}
+	if d.Version != "1.2.3" || d.RanAt == "" || d.Encoder.Name == "" || d.Encoder.Label == "" || len(d.Checks) < 6 {
+		t.Errorf("%+v", d)
+	}
+	for _, c := range d.Checks {
+		if (c.Status == "ok") != (c.Hint == nil) && c.Status == "bad" {
+			t.Errorf("a failed check needs a hint, an ok one none: %+v", c)
+		}
+	}
+	if !strings.Contains(body, `"hint":null`) || !strings.Contains(body, `"encodersTestedAt"`) {
+		t.Errorf("contract keys missing: %s", body)
+	}
+}
