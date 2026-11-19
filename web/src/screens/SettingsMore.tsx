@@ -59,6 +59,7 @@ function ThisComputer() {
       <div className="bd stack">
         <div className="row"><strong>{s.role === "server" ? "Main server" : worker ? "Worker for " + name : "Not chosen yet"}</strong>
           <button ref={btn} className="btn" type="button" onClick={() => (s.role === "unset" ? navigate("/start") : (setErr(null), setAsk(true)))}>Change...</button></div>
+        {s.role === "server" && <p className="muted" style={{ margin: 0 }}>Keeps your libraries and this web page.</p>}
         {err && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{err}</span></p>}
       </div>
       {ask && (worker

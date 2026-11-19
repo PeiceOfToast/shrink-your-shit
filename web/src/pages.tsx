@@ -38,7 +38,7 @@ function Choice<T extends string | number>({ legend, name, value, options, onPic
   legend: string; name: string; value: T; options: [T, string, string?][]; onPick: (v: T) => void;
 }) {
   return (
-    <fieldset className="field choice">
+    <fieldset className="field choice prefs">
       <legend className="lab">{legend}</legend>
       <div className="row">
         {options.map(([v, label, swatch]) => (
@@ -61,8 +61,11 @@ export function SettingsTabs({ at }: { at: "general" | "shares" | "appearance" |
   // the shares tab shows only when the server has the shares API (404 = not built yet)
   const [shares, setShares] = useState(true);
   useEffect(() => { if (!MOCK) { const f = async () => setShares(await sharesSupported()); f(); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // pass 5 #4: the active tab is in view on load and after a change. Scrolls the row sideways only, never the page.
+  const nav = useRef<HTMLElement>(null);
+  useEffect(() => { const n = nav.current, a = n?.querySelector<HTMLElement>("[aria-current=page]"); if (n && a) n.scrollLeft += a.getBoundingClientRect().left - n.getBoundingClientRect().left - (n.clientWidth - a.offsetWidth) / 2; }, [at, shares]);
   return (
-    <nav className="tabs" aria-label="Settings sections">
+    <nav className="tabs" ref={nav} aria-label="Settings sections">
       {tab("general", "General")}{shares && tab("shares", "Network shares")}{tab("appearance", "Appearance")}{tab("processing", "Processing")}{tab("safety", "Safety")}{tab("connections", "Connections")}{tab("notifications", "Notifications")}{tab("backup", "Backup")}{tab("health", "Health")}{tab("about", "About")}
     </nav>);
 }

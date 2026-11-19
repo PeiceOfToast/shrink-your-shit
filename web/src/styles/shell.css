@@ -627,6 +627,12 @@ body{font-variant-numeric:tabular-nums} /* [taste: tabular numerals in anything 
   .pagehead>.sp{flex-basis:100%;height:0} /* header actions wrap onto their own row under the title */
 }
 p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; .st stays one line in pills and table cells */
+@media (max-width:600px){
+  nav.tabs[aria-label="Settings sections"]{flex-wrap:nowrap;overflow-x:auto;row-gap:0} /* pass 5 #4: Settings tabs are one row that scrolls sideways below 600 px */
+  .choice.prefs>.row{column-gap:8px} /* pass 5 #4: at phone width the four Text size radios fit one row, so "130%" doesn't wrap alone */
+}
+@media (min-width:600px){.sumsel{max-width:320px}} /* pass 5 #4 (design): the summary select is full width on a phone, capped from 600 px up */
+.choice.prefs>.row>.radio{white-space:nowrap} /* pass 5 #4: "130%" stays with its radio. Appearance choices only (short fixed labels); workflow, setup and Stop radios take longer labels that must wrap */
 /* user item 2 (design 7.2): the "Workers on" switch, its question on its own row, Add a worker, flat worker rows */
 .sw{display:inline-flex;align-items:center;gap:10px;min-height:44px;cursor:pointer}
 .sw b{font-weight:var(--fw-strong)}
