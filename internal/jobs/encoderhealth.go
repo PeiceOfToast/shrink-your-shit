@@ -5,6 +5,7 @@ package jobs
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -59,7 +60,7 @@ func (s *Store) saveEncoderHealth(worker string, h encoderHealth) error {
 // EncoderFell records that job id's graphics encoder (encoder) failed on worker and the job converts on the
 // processor. It reports whether this fall-back paused the worker's graphics encoder.
 func (s *Store) EncoderFell(id int64, worker, encoder, reason string) (bool, error) {
-	if err := s.AddStep(id, EncoderFallbackStep, false, fmt.Sprintf("%s failed (%s); converted on the processor.", encoder, reason)); err != nil {
+	if err := s.AddStep(id, EncoderFallbackStep, false, fallbackWords(encoder, reason)); err != nil {
 		return false, err
 	}
 	h, err := s.encoderHealthOf(worker)
@@ -130,4 +131,17 @@ func (s *Store) EncoderFallbacksSince(at time.Time) ([]EncoderFallback, error) {
 		out = append(out, f)
 	}
 	return out, rows.Err()
+}
+
+// fallbackWords is the fall-back step's sentence, which people read in the timeline and as the job's warning:
+// the encoder's friendly name first (design 11-19), "Intel Quick Sync (hevc_qsv) failed: <reason>. Converted on
+// the processor instead."
+func fallbackWords(encoder, reason string) string {
+	name := encoder
+	if i := strings.LastIndex(encoder, "_"); i >= 0 {
+		if f, ok := encoderFamily[encoder[i+1:]]; ok {
+			name = f + " (" + encoder + ")"
+		}
+	}
+	return fmt.Sprintf("%s failed: %s. Converted on the processor instead.", name, strings.TrimRight(reason, ". "))
 }

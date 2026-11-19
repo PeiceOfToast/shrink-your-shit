@@ -110,3 +110,23 @@ func TestEncoderLastFellIsTheLatest(t *testing.T) {
 		t.Fatalf("EncoderLastFell = %q, %q, %v; want the second fall-back", enc, reason, err)
 	}
 }
+
+// The fall-back step's words name the encoder plainly first (design 11-19); an unknown family keeps the raw name.
+func TestFallbackWords(t *testing.T) {
+	s := open(t)
+	id, _ := s.Enqueue(Job{Path: "/m/a.mkv", SizeBefore: 100})
+	if _, err := s.EncoderFell(id, "w", "hevc_qsv", "ffmpeg exited with code 1"); err != nil {
+		t.Fatal(err)
+	}
+	steps, err := s.Steps(id)
+	if err != nil || len(steps) == 0 {
+		t.Fatalf("steps %v, %v", steps, err)
+	}
+	want := "Intel Quick Sync (hevc_qsv) failed: ffmpeg exited with code 1. Converted on the processor instead."
+	if got := steps[len(steps)-1].Words; got != want {
+		t.Errorf("words %q, want %q", got, want)
+	}
+	if got := fallbackWords("hevc_foo", "broke."); got != "hevc_foo failed: broke. Converted on the processor instead." {
+		t.Errorf("unknown family: %q", got)
+	}
+}
