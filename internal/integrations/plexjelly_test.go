@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -25,7 +26,7 @@ const (
 	plexIdent        = `{"MediaContainer":{"version":"1.41.3.9314-a0bfb8370"}}`
 	plexSecs         = `{"MediaContainer":{"size":1,"Directory":[{"key":"1","title":"Movies","Location":[{"id":1,"path":"/data/movies"}]}]}}`
 	jellyInfoJSON    = `{"Version":"10.10.3","ServerName":"home"}`
-	jellyFoldersJSON = `[{"Name":"Movies","Locations":["/data/movies"]}]`
+	jellyFoldersJSON = `[{"Name":"Movies","ItemId":"lib1","Locations":["/data/movies"]}]`
 )
 
 // sent is one call as the fake saw it: what the app sent, not what it meant.
@@ -316,7 +317,7 @@ func TestJellyfinIsToldTheFileChangedUnderItsMapping(t *testing.T) {
 	want2 := []sent{
 		{"GET", "/Library/VirtualFolders", "", auth},
 		{"POST", "/Library/Media/Updated", "", auth},
-		{"GET", "/Items", jellyItemQuery("film"), auth},
+		{"GET", "/Items", jellyListQuery(0), auth},
 	}
 	if got := f.seen(); !reflect.DeepEqual(got, want2) {
 		t.Errorf("calls = %+v, want %+v", got, want2)
@@ -362,9 +363,111 @@ func TestJellyfinGetsADeleteAndACreateWhenTheExtensionChanges(t *testing.T) {
 	}
 }
 
-// jellyItemQuery is the query the item search sends for a file named name.
-func jellyItemQuery(name string) string {
-	return url.Values{"Recursive": {"true"}, "IncludeItemTypes": {"Movie,Episode,Video"}, "searchTerm": {name}, "Fields": {"Path"}}.Encode()
+// jellyListQuery is the query that lists the library lib1 from item start, a page at a time.
+func jellyListQuery(start int) string {
+	return url.Values{"ParentId": {"lib1"}, "Recursive": {"true"}, "IncludeItemTypes": {"Movie,Episode,Video"},
+		"Fields": {"Path"}, "EnableImages": {"false"}, "EnableUserData": {"false"},
+		"StartIndex": {strconv.Itoa(start)}, "Limit": {strconv.Itoa(jellyPage)}}.Encode()
+}
+
+// newJellyLibrary is a Jellyfin with one library, lib1, holding paths, listed a page at a time. Its title search finds
+// nothing, as Jellyfin's would not for a file named for its release. It returns the server and the items refreshed.
+func newJellyLibrary(t *testing.T, paths []string) (*httptest.Server, *[]string) {
+	t.Helper()
+	auth := `MediaBrowser Token="` + jellyKey + `"`
+	var refreshed []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != auth {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/Library/VirtualFolders":
+			io.WriteString(w, `[{"Name":"Movies","ItemId":"lib1","Locations":["/data/movies"]}]`)
+		case r.URL.Path == "/Library/Media/Updated":
+			io.WriteString(w, "")
+		case r.URL.Path == "/Items":
+			q := r.URL.Query()
+			if q.Get("searchTerm") != "" || q.Get("ParentId") != "lib1" {
+				io.WriteString(w, `{"Items":[],"TotalRecordCount":0}`)
+				return
+			}
+			start, _ := strconv.Atoi(q.Get("StartIndex"))
+			end := start + jellyPage
+			if end > len(paths) {
+				end = len(paths)
+			}
+			var items []map[string]string
+			for i := start; i < end; i++ {
+				items = append(items, map[string]string{"Id": "id" + strconv.Itoa(i), "Path": paths[i]})
+			}
+			json.NewEncoder(w).Encode(map[string]any{"Items": items, "TotalRecordCount": len(paths)})
+		case strings.HasPrefix(r.URL.Path, "/Items/") && strings.HasSuffix(r.URL.Path, "/Refresh"):
+			refreshed = append(refreshed, strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/Items/"), "/Refresh"))
+			io.WriteString(w, "")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &refreshed
+}
+
+// TestJellyfinRefreshesAReleaseNamedFileByItsPath: the title Jellyfin gave the file is not its name, and the item is
+// still found and refreshed.
+func TestJellyfinRefreshesAReleaseNamedFileByItsPath(t *testing.T) {
+	file := "/data/movies/Some.Movie.2019.1080p.WEB-DL.x264-GRP.mkv"
+	srv, refreshed := newJellyLibrary(t, []string{"/data/movies/Other/other.mkv", file})
+	h := newHarness(t)
+	saveInstance(t, h, Jellyfin, srv.URL, jellyKey, nil)
+	steps := tellOnce(t, h, file, file)
+	if len(steps) != 1 || !steps[0].OK {
+		t.Fatalf("steps = %+v", steps)
+	}
+	if want := []string{"id1"}; !reflect.DeepEqual(*refreshed, want) {
+		t.Errorf("refreshed = %v, want %v", *refreshed, want)
+	}
+}
+
+// TestJellyfinFindsTheItemOnALaterPage: a library of 1,200 items is listed in pages of 500, and the item on the third
+// page is found; the walk stops there.
+func TestJellyfinFindsTheItemOnALaterPage(t *testing.T) {
+	var paths []string
+	for i := 0; i < 1200; i++ {
+		paths = append(paths, "/data/movies/Film"+strconv.Itoa(i)+"/film"+strconv.Itoa(i)+".mkv")
+	}
+	file := paths[1100]
+	srv, refreshed := newJellyLibrary(t, paths)
+	h := newHarness(t)
+	saveInstance(t, h, Jellyfin, srv.URL, jellyKey, nil)
+	steps := tellOnce(t, h, file, file)
+	if len(steps) != 1 || !steps[0].OK {
+		t.Fatalf("steps = %+v", steps)
+	}
+	if want := []string{"id1100"}; !reflect.DeepEqual(*refreshed, want) {
+		t.Errorf("refreshed = %v, want %v", *refreshed, want)
+	}
+}
+
+// TestSamePathFoldsOnlyWindowsPaths: a Windows path matches without case and with either separator; a POSIX path
+// must match exactly.
+func TestSamePathFoldsOnlyWindowsPaths(t *testing.T) {
+	cases := []struct {
+		item, file string
+		want       bool
+	}{
+		{`D:\Movies\Film\film.mkv`, `d:/movies/FILM/Film.MKV`, true},
+		{`D:/Movies/Film/film.mkv`, `D:\Movies\Film\film.mkv`, true},
+		{`D:\Movies\Film\film.mkv`, `D:\Movies\Other\film.mkv`, false},
+		{"/data/movies/Film/film.mkv", "/data/movies/film/Film.mkv", false},
+		{"/data/movies/Film/film.mkv", "/data/movies/Film/film.mkv", true},
+	}
+	for _, c := range cases {
+		if got := samePath(c.item, c.file); got != c.want {
+			t.Errorf("samePath(%q, %q) = %v, want %v", c.item, c.file, got, c.want)
+		}
+	}
 }
 
 func TestJellyfinRefreshesTheItemWithTheFilesPath(t *testing.T) {
@@ -387,7 +490,7 @@ func TestJellyfinRefreshesTheItemWithTheFilesPath(t *testing.T) {
 	want := []sent{
 		{"GET", "/Library/VirtualFolders", "", auth},
 		{"POST", "/Library/Media/Updated", "", auth},
-		{"GET", "/Items", jellyItemQuery("film"), auth},
+		{"GET", "/Items", jellyListQuery(0), auth},
 		{"POST", "/Items/abc123/Refresh", refresh, auth},
 	}
 	if got := f.seen(); !reflect.DeepEqual(got, want) {

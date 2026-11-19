@@ -6,8 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 )
+
+// jellyPage is how many items one listing of a library asks for. Each listing carries only the id and path of each.
+const jellyPage = 500
 
 // jellyUpdate is one entry of Jellyfin's POST /Library/Media/Updated.
 type jellyUpdate struct {
@@ -30,6 +34,7 @@ type plexSections struct {
 // jellyFolder is one media folder of GET /Library/VirtualFolders.
 type jellyFolder struct {
 	Name      string   `json:"Name"`
+	ItemID    string   `json:"ItemId"`
 	Locations []string `json:"Locations"`
 }
 
@@ -191,11 +196,14 @@ func (s *Service) tellJellyfin(ki kindInfo, name, base, key, old, file string) (
 	if msg := s.getJSON(ki, base, key, "/Library/VirtualFolders", noNextScan, &folders); msg != "" {
 		return msg, false, false
 	}
-	inLibrary := false
+	inLibrary, library := false, ""
 	for _, f := range folders {
 		for _, l := range f.Locations {
 			if _, ok := under(file, l); ok {
 				inLibrary = true
+				if library == "" {
+					library = f.ItemID
+				}
 			}
 		}
 	}
@@ -216,44 +224,65 @@ func (s *Service) tellJellyfin(ki kindInfo, name, base, key, old, file string) (
 	if !ok2(st) {
 		return answer(ki, st), false, false
 	}
-	if msg, good, answered := s.refreshJellyItem(ki, base, key, file); !good {
+	if msg, good, answered := s.refreshJellyItem(ki, base, key, library, file); !good {
 		return msg, false, answered
 	}
 	return fmt.Sprintf("Told Jellyfin (%s) the file changed.", name), true, true
 }
 
 // refreshJellyItem refreshes the one item whose file is file, so Jellyfin probes it again and shows the new size. A
-// file Jellyfin has not indexed yet has no item, and then nothing is refreshed. Jellyfin ignores a path filter, so the
-// item is searched by its file name and matched on the exact path.
-func (s *Service) refreshJellyItem(ki kindInfo, base, key, file string) (msg string, good, answered bool) {
-	name := file[strings.LastIndexAny(file, `/\`)+1:]
-	if i := strings.LastIndex(name, "."); i > 0 {
-		name = name[:i]
+// file Jellyfin has not indexed yet has no item, and then nothing is refreshed. Jellyfin searches item titles, and a
+// release-named file's title is not its name, so the library's items are listed with their paths, a page at a time,
+// and matched on the path. The walk stops at the page that holds the file.
+func (s *Service) refreshJellyItem(ki kindInfo, base, key, library, file string) (msg string, good, answered bool) {
+	if library == "" {
+		return "", true, true
 	}
-	q := url.Values{"Recursive": {"true"}, "IncludeItemTypes": {"Movie,Episode,Video"}, "searchTerm": {name}, "Fields": {"Path"}}
-	var found struct {
-		Items []struct {
-			ID   string `json:"Id"`
-			Path string `json:"Path"`
-		} `json:"Items"`
-	}
-	if msg := s.getJSON(ki, base, key, "/Items?"+q.Encode(), noNextScan, &found); msg != "" {
-		return msg, false, false
-	}
-	for _, it := range found.Items {
-		if it.Path != file {
-			continue
+	for start := 0; ; start += jellyPage {
+		q := url.Values{"ParentId": {library}, "Recursive": {"true"}, "IncludeItemTypes": {"Movie,Episode,Video"},
+			"Fields": {"Path"}, "EnableImages": {"false"}, "EnableUserData": {"false"},
+			"StartIndex": {strconv.Itoa(start)}, "Limit": {strconv.Itoa(jellyPage)}}
+		var page struct {
+			Items []struct {
+				ID   string `json:"Id"`
+				Path string `json:"Path"`
+			} `json:"Items"`
+			Total int `json:"TotalRecordCount"`
 		}
-		rq := url.Values{"metadataRefreshMode": {"FullRefresh"}, "imageRefreshMode": {"None"},
-			"replaceAllMetadata": {"false"}, "replaceAllImages": {"false"}}
-		st, _, err := s.do(ki, "POST", base, key, "/Items/"+url.PathEscape(it.ID)+"/Refresh?"+rq.Encode(), nil)
-		if err != nil {
-			return unreached(ki, base, err, noNextScan), false, false
+		if msg := s.getJSON(ki, base, key, "/Items?"+q.Encode(), noNextScan, &page); msg != "" {
+			return msg, false, false
 		}
-		if !ok2(st) {
-			return answer(ki, st), false, false
+		for _, it := range page.Items {
+			if !samePath(it.Path, file) {
+				continue
+			}
+			rq := url.Values{"metadataRefreshMode": {"FullRefresh"}, "imageRefreshMode": {"None"},
+				"replaceAllMetadata": {"false"}, "replaceAllImages": {"false"}}
+			st, _, err := s.do(ki, "POST", base, key, "/Items/"+url.PathEscape(it.ID)+"/Refresh?"+rq.Encode(), nil)
+			if err != nil {
+				return unreached(ki, base, err, noNextScan), false, false
+			}
+			if !ok2(st) {
+				return answer(ki, st), false, false
+			}
+			return "", true, true
 		}
-		break
+		if len(page.Items) == 0 || start+len(page.Items) >= page.Total {
+			return "", true, true
+		}
 	}
-	return "", true, true
+}
+
+// samePath says whether an item's path is the file's. A Windows-style path (backslashes or a drive letter) is
+// compared without case and with either separator; any other path must match exactly.
+func samePath(itemPath, file string) bool {
+	if !windowsStyle(itemPath) && !windowsStyle(file) {
+		return itemPath == file
+	}
+	return strings.EqualFold(strings.ReplaceAll(itemPath, `\`, "/"), strings.ReplaceAll(file, `\`, "/"))
+}
+
+// windowsStyle says whether p is a Windows path: it has a backslash or starts with a drive letter.
+func windowsStyle(p string) bool {
+	return strings.Contains(p, `\`) || (len(p) > 1 && p[1] == ':')
 }
