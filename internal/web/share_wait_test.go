@@ -5,6 +5,7 @@ package web
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -13,6 +14,9 @@ import (
 
 // A library inside a saved share's mount point waits while the share does not answer, and not after it does.
 func TestLibraryOnAShareWaitsUntilItAnswers(t *testing.T) {
+	if runtime.GOOS != "linux" { // macOS: shares are not watched; Windows: the mount point is the real \\server\share path
+		t.Skip("share mount points (a folder that exists once mounted) are Linux only")
+	}
 	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatal(err)
