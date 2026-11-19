@@ -356,6 +356,35 @@ func TestFailureSummaryInTheAPI(t *testing.T) {
 	}
 }
 
+// Item 8a: a failed job's timeline line carries the same code and reason sentence as its detail, not the stored
+// generic words.
+func TestFailureTimelineShowsTheReasonSentence(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	id, _ := st.Enqueue(jobs.Job{Library: "/m", LibraryID: l.ID, Path: "/m/locked.mkv"})
+	st.Claim("t")
+	const generic = "Converting stopped with an error. Press Retry; if it keeps failing, the file may be damaged."
+	st.Fail(id, jobs.ReasonCannotWrite, generic)
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10)})
+	var d struct {
+		Reason map[string]any
+		Events []struct {
+			Reason map[string]any
+		}
+	}
+	json.Unmarshal([]byte(body), &d)
+	sentence, _ := d.Reason["message"].(string)
+	if d.Reason["code"] != "output_not_writable" || sentence == "" || sentence == generic {
+		t.Fatalf("detail reason %v", d.Reason)
+	}
+	if len(d.Events) == 0 {
+		t.Fatalf("no timeline: %s", body)
+	}
+	if last := d.Events[len(d.Events)-1].Reason; last["code"] != d.Reason["code"] || last["message"] != sentence {
+		t.Errorf("timeline reason %v, want %v", last, d.Reason)
+	}
+}
+
 // User review 11-13 item E: the job's log endpoint gives its steps (command, timing, the failed step's output) and
 // the download gives every line as text.
 func TestJobLogEndpoint(t *testing.T) {

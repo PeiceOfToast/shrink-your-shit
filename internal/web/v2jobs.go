@@ -205,6 +205,12 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 			stored := m["code"]
 			m["code"], m["message"] = failureCode(store, id, stored), failureMessage(store, id, stored, j.Path, j.OutputPath, m["message"])
 			d["failure"] = failureView(store, id, stored, j.Path, j.OutputPath, m["message"])
+			// the timeline's last entry is this same failure: it shows the same code and sentence, not the stored words
+			if evs, ok := d["events"].([]map[string]any); ok && len(evs) > 0 {
+				if r, ok := evs[len(evs)-1]["reason"].(map[string]string); ok {
+					r["code"], r["message"] = m["code"], m["message"]
+				}
+			}
 		}
 		meta := map[string]any{"before": nil, "after": nil}
 		var snap rules.Snapshot
