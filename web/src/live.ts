@@ -8,7 +8,7 @@ import { MOCK } from "./api";
 type Listener = (type: string, data: unknown) => void;
 const listeners = new Set<Listener>(), watchers = new Set<() => void>();
 let es: EventSource | null = null, seq: number | null = null, retry: ReturnType<typeof setTimeout> | undefined, lostTimer: ReturnType<typeof setTimeout> | undefined;
-let state = { lost: false, lastAt: null as Date | null }, tries = 0;
+let state = { lost: false, lastAt: null as Date | null }, tries = 0, holdUntil = 0;
 const set = (s: Partial<typeof state>) => { state = { ...state, ...s }; watchers.forEach((w) => w()); };
 const emit = (type: string, data: unknown) => listeners.forEach((l) => l(type, data));
 const TYPES = ["hello", "resync", "job.state", "job.progress", "processing.paused", "processing.resumed", "activity", "worker.heartbeat", "library.changed", "workers.changed", "setup.changed"]; // library.changed: #150. A name missing here never reaches onLive (EventSource drops named events nobody subscribed to).
@@ -25,7 +25,7 @@ function open() {
   });
   es.onerror = () => { // our own reconnect, with ?since, so nothing between hello and the first event is lost
     es?.close(); es = null;
-    clearTimeout(lostTimer); lostTimer = setTimeout(() => set({ lost: true }), 3000);
+    clearTimeout(lostTimer); lostTimer = setTimeout(() => set({ lost: true }), Math.max(3000, holdUntil - Date.now()));
     const wait = [1000, 2000, 5000, 10000][Math.min(tries++, 3)];
     retry = setTimeout(() => listeners.size && open(), wait);
   };
@@ -37,6 +37,8 @@ export function onLive(l: Listener): () => void {
   listeners.add(l); open();
   return () => { listeners.delete(l); if (!listeners.size) close(); };
 }
+// After an Update or Roll back click the server restarts on purpose: hold the lost bar back for `ms` (design: 2 min).
+export const holdLost = (ms: number) => { holdUntil = Date.now() + ms; };
 export function useLiveStatus() {
   return useSyncExternalStore((f) => (watchers.add(f), () => watchers.delete(f)), () => state);
 }

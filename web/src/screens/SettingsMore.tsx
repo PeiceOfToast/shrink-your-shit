@@ -8,12 +8,13 @@ import { Icon } from "../Icon";
 import { PageHead } from "../PageHead";
 import { SignedOut, failed, type Answer } from "../api";
 import { bytes, plural } from "../format";
-import { checkUpdate, getHealth, getUpdate, getSettings, getToken, getTrash, patchSettings, rotateToken, signOut } from "../libraryApi";
+import { checkUpdate, getConverting, getHealth, getUpdate, installUpdate, type UpdateNotice, getSettings, getToken, getTrash, patchSettings, rotateToken, signOut } from "../libraryApi";
 import { SettingsTabs } from "../pages";
 import { Link, navigate } from "../router";
 import { setRole } from "../setupApi";
 import { useSetup } from "./Enroll";
 import { useData } from "../useData";
+import { holdLost } from "../live";
 
 async function act<T>(p: Promise<Answer<T>>, say: (m: string) => void): Promise<T | null> {
   try { const r = await p; if (failed(r)) return (say(r.error.message), null); return r; } catch (e) { if (e instanceof SignedOut) return null; throw e; }
@@ -208,7 +209,7 @@ export function BackupSettings() {
 }
 
 // Updates (SCREENS:293, About block): the #324 switch, off until the person turns it on, and the version line.
-const SENT = "Once a day it asks GitHub which version is newest. GitHub sees this app's version and your IP address, as with any web request. Nothing about your files or settings is sent. It only tells you; nothing is installed.";
+const SENT = "Once a day it asks GitHub which version is newest. GitHub sees this app's version and your IP address, as with any web request. Nothing about your files or settings is sent. Checking installs nothing.";
 const at = (t: string) => `${day(t)}, ${new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 function Updates({ version }: { version?: string }) {
   const st = useData(getSettings, []), u = useData(getUpdate, []), [busy, setBusy] = useState(false), [said, setSaid] = useState("");
@@ -230,10 +231,71 @@ function Updates({ version }: { version?: string }) {
               : d.available && d.latest ? <><span className="pill warn"><Icon id="i-download" />Version {d.latest} is available</span>{d.url && <> <a href={d.url} target="_blank" rel="noopener">What's new</a></>}</>
                 : d.error && d.checkedAt ? <span className="st warn"><Icon id="i-alert" /><span>Couldn't check for updates at {at(d.checkedAt)}.</span></span>
                   : d.checkedAt ? <span className="muted">Up to date. Checked {at(d.checkedAt)}.</span> : <span className="muted">Not checked yet.</span>}</p>
-          {d.enabled && <button className="btn sm" type="button" disabled={busy} onClick={now}><Icon id="i-refresh" />{busy ? "Checking..." : "Check now"}</button>}
+          {d.enabled && d.install.state !== "downloading" && d.install.state !== "installing" && <button className="btn sm" type="button" disabled={busy} onClick={now}><Icon id="i-refresh" />{busy ? "Checking..." : "Check now"}</button>}
         </div>}
         {said && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{said}</span></p>}
+        {d && <Install d={d} reload={u.reload} check={now} />}
       </div></section>);
+}
+
+// The update button (SCREENS:301, updater part 2, contract ## Update). Which block shows follows method, install.state and
+// lastResult. While an install runs the card re-reads every 3 s; when the server is gone (it restarts) it says so.
+// Roll back stays out until GET /update says a previous version is kept (design gap a).
+const REFUSED: Record<string, string> = { job_running: "A file just started converting.", not_available: "There's no newer version now.",
+  updates_off: "Update checks are off. Turn them on to update.", update_in_progress: "", install_unsupported: "" };
+const noV = (m: string) => m.replace(/\bv(?=\d)/g, ""); // design gap d: versions read as on the Version line
+// plain http has no clipboard API (the user's http://IP:8484), or it can be refused: then copy the old way, as Workers does
+async function copyText(t: string): Promise<boolean> {
+  try { if (navigator.clipboard) { await navigator.clipboard.writeText(t); return true; } } catch { /* refused: fall back */ }
+  const a = document.createElement("textarea"); a.value = t; a.setAttribute("readonly", ""); a.style.position = "fixed"; a.style.opacity = "0";
+  document.body.appendChild(a); a.select(); const ok = document.execCommand("copy"); a.remove(); return ok;
+}
+function Copy({ t }: { t: string }) {
+  const [said, setSaid] = useState("");
+  return (<><div className="codebox"><code>{t}</code><button className="btn sm" type="button" onClick={async () => setSaid((await copyText(t)) ? "Copied." : "Select the command and copy it.")}><Icon id="i-copy" />Copy</button></div>
+    {said && <span className="hint" role="status">{said}</span>}</>);
+}
+function Install({ d, reload, check }: { d: UpdateNotice; reload: () => void; check: () => void }) {
+  const jobs = useData(getConverting, []), [busy, setBusy] = useState(false), [said, setSaid] = useState(""), [gone, setGone] = useState(false), [late, setLate] = useState(false), [noNew, setNoNew] = useState(false);
+  const st = d.install.state, running = st === "waiting" || st === "downloading" || st === "installing", n = jobs.data ?? 0, to = d.latest ?? "", last = d.lastResult;
+  useEffect(() => {
+    if (!running && !gone) return;
+    const t = setInterval(async () => { const r = await getUpdate().catch(() => null); if (!r || failed(r)) setGone(r?.error.code === "offline" || !r); else { setGone(false); reload(); } }, 3000);
+    return () => clearInterval(t);
+  }, [running, gone, reload]);
+  const go = async (when: "now" | "after-job") => {
+    setBusy(true); setSaid(""); setNoNew(false);
+    try { const r = await installUpdate(when); if (!failed(r)) holdLost(120000); else { setNoNew(r.error.code === "not_available"); setSaid(r.error.code in REFUSED ? REFUSED[r.error.code] : r.error.message); if (r.error.code === "job_running") setLate(true); jobs.reload(); } }
+    catch (e) { if (!(e instanceof SignedOut)) throw e; }
+    setBusy(false); reload();
+  };
+  const wait = late || n > 0, retry = !!last && !last.ok && last.to === to;
+  const spin = (t: string, rest = "") => <p className="st run" role="status" style={{ margin: 0, alignItems: "flex-start" }}><span className="spin" style={{ display: "inline-flex", marginTop: 2 }}><Icon id="i-refresh" /></span><span>{t}{rest && <span style={{ fontWeight: 400, color: "var(--text)" }}> {rest}</span>}</span></p>;
+  return (<>
+    {last && !running && !gone && (last.ok
+      ? <p className="st ok" style={{ margin: 0 }}><Icon id="i-check-c" /><span>{noV(last.message)}.{d.url && <> <a href={d.url} target="_blank" rel="noopener">What's new</a></>}</span></p>
+      : <p className="st warn" style={{ margin: 0, alignItems: "flex-start" }}><Icon id="i-alert" /><span className="why" style={{ fontWeight: 400, color: "var(--text)" }}>{noV(last.message)}.</span></p>)}
+    {gone ? spin("Restarting...", "this page reconnects by itself.")
+      : st === "waiting" ? <p role="status" style={{ margin: 0 }}>Updating to {to} when the converting files finish.</p>
+      : st === "downloading" ? spin(`Downloading ${to}...`)
+      : st === "installing" ? spin(`Installing ${to}.`, "The app restarts, and this page reconnects by itself.")
+      : st === "failed" ? <p className="st warn" style={{ margin: 0, alignItems: "flex-start" }}><Icon id="i-alert" /><span>Couldn't update to {to}: <span style={{ fontWeight: 400, color: "var(--text)" }}>{d.install.error}. Nothing changed; still on {d.current}.</span></span></p>
+      : null}
+    {d.available && !running && !gone && (d.method === "helper" ? <div className="stack" style={{ gap: 6 }}>
+        {wait && n > 0 && <p style={{ margin: 0 }}>{plural(n, "file is", "files are")} converting.</p>}
+        <div><button className={"btn " + (retry || st === "failed" ? "" : "primary")} type="button" disabled={busy} onClick={() => go(wait ? "after-job" : "now")}>
+          {retry || st === "failed" ? "Try again" : wait ? (n > 1 ? "Update when they finish" : "Update when it finishes") : `Update to ${to}`}</button></div>
+        <span className="hint">{wait ? <>Or stop them on <Link to="/jobs">Jobs</Link>, then update.</> : `Takes about a minute. The current version is kept: if ${to} doesn't start properly, it goes back to ${d.current} by itself.`}</span>
+      </div>
+      : d.method === "commands" && d.commands ? <div className="stack" style={{ gap: 6 }}>
+        <p style={{ margin: 0 }}>{d.installType === "docker" ? "This runs in Docker. Update it where your compose file is:" : "To update, run this on the server:"}</p>
+        <Copy t={d.commands.join("\n")} />
+        {d.installType === "docker" && <span className="hint">Or let <a href="https://containrrr.dev/watchtower/" target="_blank" rel="noopener">Watchtower</a> update the container for you.</span>}
+      </div>
+      : d.installType === "windows" ? <p style={{ margin: 0 }}>Download the new installer from the {d.url ? <a href={d.url} target="_blank" rel="noopener">release page</a> : "release page"}.</p>
+      : d.installType === "source" ? <p style={{ margin: 0 }}>Built from source: pull and build again.</p> : null)}
+    {said && <p className="st warn" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{said}{noNew && <> <button className="linkbtn" type="button" onClick={() => (setSaid(""), setNoNew(false), check())}>Check now</button></>}</span></p>}
+  </>);
 }
 
 // About (SCREENS V9: version, health report, licences): the old Settings > System's health checks and log lines.
