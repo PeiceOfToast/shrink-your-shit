@@ -244,7 +244,17 @@ function Updates({ version }: { version?: string }) {
 const REFUSED: Record<string, string> = { job_running: "A file just started converting.", not_available: "There's no newer version now.",
   updates_off: "Update checks are off. Turn them on to update.", update_in_progress: "", install_unsupported: "" };
 const noV = (m: string) => m.replace(/\bv(?=\d)/g, ""); // design gap d: versions read as on the Version line
-const copy = (t: string) => <div className="codebox"><code>{t}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(t).catch(() => {})}><Icon id="i-copy" />Copy</button></div>;
+// plain http has no clipboard API (the user's http://IP:8484), or it can be refused: then copy the old way, as Workers does
+async function copyText(t: string): Promise<boolean> {
+  try { if (navigator.clipboard) { await navigator.clipboard.writeText(t); return true; } } catch { /* refused: fall back */ }
+  const a = document.createElement("textarea"); a.value = t; a.setAttribute("readonly", ""); a.style.position = "fixed"; a.style.opacity = "0";
+  document.body.appendChild(a); a.select(); const ok = document.execCommand("copy"); a.remove(); return ok;
+}
+function Copy({ t }: { t: string }) {
+  const [said, setSaid] = useState("");
+  return (<><div className="codebox"><code>{t}</code><button className="btn sm" type="button" onClick={async () => setSaid((await copyText(t)) ? "Copied." : "Select the command and copy it.")}><Icon id="i-copy" />Copy</button></div>
+    {said && <span className="hint" role="status">{said}</span>}</>);
+}
 function Install({ d, reload, check }: { d: UpdateNotice; reload: () => void; check: () => void }) {
   const jobs = useData(getConverting, []), [busy, setBusy] = useState(false), [said, setSaid] = useState(""), [gone, setGone] = useState(false), [late, setLate] = useState(false), [noNew, setNoNew] = useState(false);
   const st = d.install.state, running = st === "waiting" || st === "downloading" || st === "installing", n = jobs.data ?? 0, to = d.latest ?? "", last = d.lastResult;
@@ -279,7 +289,7 @@ function Install({ d, reload, check }: { d: UpdateNotice; reload: () => void; ch
       </div>
       : d.method === "commands" && d.commands ? <div className="stack" style={{ gap: 6 }}>
         <p style={{ margin: 0 }}>{d.installType === "docker" ? "This runs in Docker. Update it where your compose file is:" : "To update, run this on the server:"}</p>
-        {copy(d.commands.join("\n"))}
+        <Copy t={d.commands.join("\n")} />
         {d.installType === "docker" && <span className="hint">Or let <a href="https://containrrr.dev/watchtower/" target="_blank" rel="noopener">Watchtower</a> update the container for you.</span>}
       </div>
       : d.installType === "windows" ? <p style={{ margin: 0 }}>Download the new installer from the {d.url ? <a href={d.url} target="_blank" rel="noopener">release page</a> : "release page"}.</p>
