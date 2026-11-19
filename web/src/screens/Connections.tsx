@@ -167,7 +167,7 @@ export function ConnectionsSettings() {
       <p className="muted" role="status" style={{ margin: 0 }}>{said}</p>
       {notHere ? <p className="muted">This server can't connect to media apps yet.</p>
         : d.error && !d.data ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{d.error.message}</span></p>
-          : !d.data ? <div className="empty">Loading...</div>
+          : !d.data ? <div className="empty">Loading…</div>
             : <>{KINDS.map((k) => <AppCard key={k} kind={k} it={d.data!.find((x) => x.kind === k)} reload={d.reload} said={setSaid} />)}
               {/* contract "Plex / Jellyfin": said once on the screen */}
               <p className="hint" style={{ margin: 0 }}>Changing a file's container (.mp4 to .mkv) can reset its watched state in Jellyfin, and sometimes in Plex.</p></>}

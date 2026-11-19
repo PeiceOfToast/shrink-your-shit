@@ -113,7 +113,7 @@ export function Libraries() {
         <input className="input find" type="search" placeholder="Filter libraries" aria-label="Filter libraries" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       <p className="muted" role="status">{said}</p>
-      {!libs.loaded ? <div className="empty">Loading...</div> : all.length === 0 ? <Empty icon="i-library" text="No libraries yet. A library is a folder that is watched for videos."><Link className="btn primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link></Empty>
+      {!libs.loaded ? <div className="empty">Loading…</div> : all.length === 0 ? <Empty icon="i-library" text="No libraries yet. A library is a folder that is watched for videos."><Link className="btn primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link></Empty>
         : items.length === 0 ? <div className="empty">No library matches.</div> : (
         <div className={"list" + (selecting ? " selecting" : "")}><table className="tbl">
           <thead><tr>
@@ -157,7 +157,7 @@ export function LibraryPage({ id }: { id: string }) {
   const v2 = useData(() => (id === "new" ? Promise.resolve(null) : getLibraryV2(id)), [id], 3000);
   useEffect(() => onLive((t, d) => { if (t === "library.changed" && (d as { libraryId?: string })?.libraryId === id) (v2.reload(), libs.reload()); }), [id]); // eslint-disable-line react-hooks/exhaustive-deps
   const l = id === "new" ? null : libs.data?.find((x) => x.id === id);
-  if (id !== "new" && !libs.loaded) return <div className="empty">Loading...</div>;
+  if (id !== "new" && !libs.loaded) return <div className="empty">Loading…</div>;
   if (id !== "new" && !l) return (
     <div className="stack"><PageHead icon="i-library" crumbs={[["Libraries", "/libraries"]]} title="Library not found" />
       <Problem m={libs.error?.message} />
@@ -205,7 +205,7 @@ export function FolderField({ f, free }: { f: ReturnType<typeof useFolder>; free
         <Browse value={f.path} onPick={(p) => f.setPath(p)} /></div>
       <div id="lib-path-check" className="stack" style={{ gap: 4 }}>
         {!f.checked ? <span className="hint">The folder is checked as you type.</span>
-          : !r ? <span className="hint">Checking the folder...</span>
+          : !r ? <span className="hint">Checking the folder…</span>
           : failed(r) ? <span className="st bad" role="alert"><Icon id="i-alert" /><span>{r.error.message}</span></span>
           : r.blockers.length ? r.blockers.map((b) => <span key={b.code} className="st bad" role="alert"><Icon id="i-alert" /><span>{b.message}</span></span>)
           : <span className="st ok"><Icon id="i-check-c" /><span>{plural(r.videoCount, "video", "videos")}, {bytes(r.totalBytes)}{free != null ? " · " + bytes(free) + " free" : ""}</span></span>}
@@ -221,19 +221,19 @@ export function FirstFive({ f, scanned = false }: { f: ReturnType<typeof useFold
       <div className="hd"><h2 id="first-h">{scanned ? "Files in this folder" : "Is this the right folder?"}</h2></div>
       <div className="bd stack" aria-live="polite">
         {!f.ok ? <p className="muted">Give a folder that passes the check, and its first 5 videos show here.</p>
-          : !r ? <p className="muted">Looking for videos in <span className="mono">{f.checked}</span>...</p>
+          : !r ? <p className="muted">Looking for videos in <span className="mono">{f.checked}</span>…</p>
           : failed(r) ? <p className="st bad"><Icon id="i-alert" /><span>{r.error.message}</span></p>
           : <>
             <p className="muted">{r.items.length < 5 ? "Files found in" : "The first 5 files found in"} <span className="mono">{f.checked}</span>.{scanned ? "" : " Nothing is converted by looking."}</p>
-            {r.items.length === 0 ? <p>{r.stillLooking ? "Still looking..." : "No video files found in this folder."}</p> : (
+            {r.items.length === 0 ? <p>{r.stillLooking ? "Still looking…" : "No video files found in this folder."}</p> : (
               <div className="tscroll"><table className="tbl">
                 <thead><tr><th>File</th><th>Video</th><th className="num">Size</th></tr></thead>
                 <tbody>{r.items.map((x) => (
                   <tr key={x.path}><td className="mono sm">{x.folder === "." ? x.name : x.folder + "/" + x.name}</td>
-                    <td className="nowrap">{x.state === "unreadable" ? "Can't be read" : x.codec || x.resolution ? <span className="chips">{[x.codec, x.resolution].filter(Boolean).map((c) => <span className="mchip" key={c}>{c}</span>)}</span> : "Checking..."}</td><td className="num">{bytes(x.bytes)}</td></tr>))}
+                    <td className="nowrap">{x.state === "unreadable" ? "Can't be read" : x.codec || x.resolution ? <span className="chips">{[x.codec, x.resolution].filter(Boolean).map((c) => <span className="mchip" key={c}>{c}</span>)}</span> : "Checking…"}</td><td className="num">{bytes(x.bytes)}</td></tr>))}
                 </tbody>
               </table></div>)}
-            {r.items.length > 0 && r.stillLooking && <p className="muted sm">Still looking...</p>}
+            {r.items.length > 0 && r.stillLooking && <p className="muted sm">Still looking…</p>}
           </>}
       </div>
     </section>
@@ -242,7 +242,7 @@ export function FirstFive({ f, scanned = false }: { f: ReturnType<typeof useFold
 
 // The Workflow select. A workflow that can't be used yet (on the mock: never published, 87faa4b) is listed but disabled.
 export function WorkflowField({ value, onChange, workflows, self }: { value: string; onChange: (id: string) => void; workflows?: WorkflowChoice[]; self?: string }) {
-  if (!workflows) return <div className="field"><span className="lab">Workflow</span><span className="muted">Loading...</span></div>;
+  if (!workflows) return <div className="field"><span className="lab">Workflow</span><span className="muted">Loading…</span></div>;
   const others = (workflows.find((w) => w.id === value)?.usedBy ?? []).filter((n) => n !== self);
   return (
     <div className="field"><label htmlFor="lib-wf">Workflow</label>
@@ -292,7 +292,7 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
         {v && v.enabled && <button className="btn" type="button" onClick={() => pauseResume([v], false, setNote).then(reload)}><Icon id="i-pause" />Pause</button>}
         {v && paused(v) && <button className="btn" type="button" onClick={() => pauseResume([v], true, setNote).then(reload)}><Icon id="i-play" />Resume</button>}
         {l && <SeeJobs id={l.id} />}
-        {l && <button className="btn" type="button" disabled={v?.scan.state === "scanning"} onClick={scan}><Icon id="i-refresh" />{v?.scan.state === "scanning" ? "Scanning..." : "Scan now"}</button>}
+        {l && <button className="btn" type="button" disabled={v?.scan.state === "scanning"} onClick={scan}><Icon id="i-refresh" />{v?.scan.state === "scanning" ? "Scanning…" : "Scan now"}</button>}
       </PageHead>
       {note && <p className="muted" role="status">{note}</p>}
       {v && notStarted(v) && <p className="muted" role="note">This library isn't started yet: nothing is looked for or converted until you press Scan now.</p>}
@@ -301,7 +301,7 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
         {[["general", "General"], ["discovery", "Discovery"], ["output", "Output"]].map(([k, t]) =>
           <Link key={k} to={"/libraries/" + l.id + (k === "general" ? "" : "?tab=" + k)} aria-current={tab === k ? "page" : undefined}>{t}</Link>)}
       </nav>}
-      {tab === "discovery" ? <Discovery every={v?.discovery.scanEverySeconds} /> : tab === "output" ? (v ? <Output v={v} reload={reload} /> : <div className="empty">Loading...</div>) :
+      {tab === "discovery" ? <Discovery every={v?.discovery.scanEverySeconds} /> : tab === "output" ? (v ? <Output v={v} reload={reload} /> : <div className="empty">Loading…</div>) :
       <div className="grid cols2">
         <section className="card" aria-labelledby="gen-h">
           <div className="hd"><h2 id="gen-h">Library</h2></div>
@@ -354,7 +354,7 @@ function RemoveSection({ l, v }: { l: LibraryItem; v: Library }) {
       <div className="hd"><h2 id="rm-h">Remove this library</h2></div>
       <div className="bd stack">
         <p className="muted">Stops watching this folder. Nothing in it is changed or deleted.</p>
-        <div className="row"><button ref={opener} className="btn danger" type="button" aria-expanded={ask} onClick={() => (setErr(""), setAsk(!ask))}>Remove library...</button></div>
+        <div className="row"><button ref={opener} className="btn danger" type="button" aria-expanded={ask} onClick={() => (setErr(""), setAsk(!ask))}>Remove library…</button></div>
         {ask && <div role="alertdialog" aria-labelledby="rm-q" aria-describedby="rm-d" className="stack" onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), back())}
           style={{ padding: 12, border: "1px solid var(--border-strong)", borderRadius: "var(--radius)", background: "var(--raised)" }}>
           <strong id="rm-q">Remove {l.name}?</strong>
@@ -382,7 +382,7 @@ function Discovery({ every }: { every?: number }) {
     <section className="card" aria-labelledby="disc-h">
       <div className="hd"><h2 id="disc-h">Discovery</h2></div>
       <div className="bd">{n ? <p>Libraries are checked for new files every {duration(n)}. <Link to="/settings/processing">Change it in Settings &gt; Processing.</Link></p>
-        : <p className="muted">{st.loaded ? "This server doesn't say how often it looks for new files." : "Loading..."}</p>}</div>
+        : <p className="muted">{st.loaded ? "This server doesn't say how often it looks for new files." : "Loading…"}</p>}</div>
     </section>);
 }
 
