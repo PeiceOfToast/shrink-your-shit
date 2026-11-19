@@ -40,7 +40,7 @@ export function Start() {
   return (
     <div className="stack" style={{ maxWidth: 880 }}>
       <PageHead title="Set up Shrink Your Shit"><span className="muted">{done} of 3 done</span></PageHead>
-      <p className="muted">Three short steps. Each is saved as you go. Nothing converts until you start a worker.</p>
+      <p className="muted">Three short steps. Each is saved as you go. Nothing converts until you start a worker. To see whether this computer is ready first, <Link to="/settings/health">run the health checks</Link>.</p>
       <div className="bar" role="progressbar" aria-label="Setup" aria-valuemin={0} aria-valuemax={3} aria-valuenow={done}><i style={{ width: (100 * done) / 3 + "%" }} /></div>
       {error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{error}</span></p>}
       {step > 1 && <Done n={1} what="Library" text={lib ? lib.name + " · " + lib.path : kept!.name + " · " + kept!.path}
