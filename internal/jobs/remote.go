@@ -150,17 +150,28 @@ func (s *Store) RemoteWorkers() ([]RemoteWorker, error) {
 	return out, rows.Err()
 }
 
-// RemoveWorker removes remote worker id: its token stops working at once, and the jobs it was running
-// go back to the queue (their leases end with them).
+// RemoveWorker removes remote worker id: its token stops working at once, its path mappings go with it, and the
+// jobs it was running go back to the queue (their leases end with them).
 func (s *Store) RemoveWorker(id string) error {
 	was := s.Paused()
 	defer s.pausedChanged(was)
-	r, err := s.db.Exec(`DELETE FROM workers WHERE id=? AND kind='remote'`, id)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	r, err := tx.Exec(`DELETE FROM workers WHERE id=? AND kind='remote'`, id)
 	if err != nil {
 		return err
 	}
 	if n, _ := r.RowsAffected(); n == 0 {
 		return ErrNotFound
+	}
+	if _, err := tx.Exec(`DELETE FROM worker_paths WHERE worker_id=?`, id); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
 	}
 	running, err := jobIDs(s.db, `SELECT id FROM jobs WHERE status=? AND worker=?`, Running, id)
 	if err != nil {
