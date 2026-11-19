@@ -26,7 +26,7 @@ type Summary struct {
 func (s *Store) ActivitySummary() (Summary, error) {
 	var a Summary
 	err := s.db.QueryRow(`SELECT COALESCE(SUM(`+freedSQL+`),0), COALESCE(SUM(`+waitingSQL+`),0), COALESCE(SUM(`+couldFreeSQL+`),0), COALESCE(SUM(`+grewSQL+`),0),
-  COALESCE(SUM(status=?),0), COALESCE(SUM(status=?),0), COALESCE(SUM(status IN (?,?)),0)
+  COALESCE(SUM(status=?),0), COALESCE(SUM(status=?),0), COALESCE(SUM(status IN (?,?) AND `+newestJobOf("jobs")+`),0)
 FROM jobs`, Running, Queued, Failed, Kept).Scan(&a.FreedBytes, &a.WaitingBytes, &a.CouldFreeBytes, &a.GrewBytes, &a.WorkingFiles, &a.WaitingFiles, &a.Failed)
 	if err != nil {
 		return a, err
@@ -118,11 +118,11 @@ FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id WHERE j.status=? AND j.re
 // first, with their library's name; and how many there are.
 func (s *Store) FailedJobs(limit, offset int) ([]Working, int, error) {
 	var total int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM jobs WHERE status IN (?,?)`, Failed, Kept).Scan(&total); err != nil {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM jobs WHERE status IN (?,?) AND `+newestJobOf("jobs"), Failed, Kept).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	rows, err := s.db.Query(`SELECT `+prefixedCols+`, COALESCE(l.name, j.library), ''
-FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id WHERE j.status IN (?,?) ORDER BY j.id DESC LIMIT ? OFFSET ?`, Failed, Kept, limit, offset)
+FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id WHERE j.status IN (?,?) AND `+newestJobOf("j")+` ORDER BY j.id DESC LIMIT ? OFFSET ?`, Failed, Kept, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}

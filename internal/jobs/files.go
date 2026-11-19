@@ -75,12 +75,21 @@ func nameOf(col string) string {
 	return "lower(replace(" + p + ", rtrim(" + p + ", replace(" + p + ",'/','')), ''))"
 }
 
+// newestJobOf is SQL true for the newest job (table t) of its library and path. A file that failed and was
+// then given a newer job (a retry made by a workflow change) counts as its newest job only, so a failure
+// counts while it is the file's latest job, once per file.
+// It is an uncorrelated subquery (the newest id of each path and library, NULL library included), so SQLite
+// evaluates it once per statement rather than once per row.
+func newestJobOf(t string) string {
+	return t + `.id IN (SELECT MAX(id) FROM jobs GROUP BY path, library_id)`
+}
+
 // jobWhere is each job card's condition.
 var jobWhere = map[string]string{
 	CardUnprocessed: "j.status='queued'",
 	CardProcessing:  "j.status='running'",
 	CardProcessed:   "j.status='done'",
-	CardFailed:      "j.status IN ('failed','kept')",
+	CardFailed:      "j.status IN ('failed','kept') AND " + newestJobOf("j"),
 }
 
 var jobOrder = map[string]string{

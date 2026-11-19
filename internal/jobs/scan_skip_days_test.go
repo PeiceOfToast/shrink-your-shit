@@ -90,8 +90,8 @@ func TestMigration48AddsDecidedAtAndKeepsRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if v := version(t, s.db); v != 48 {
-		t.Fatalf("version %d after the upgrade, want 48", v)
+	if v := version(t, s.db); v != latestVersion() {
+		t.Fatalf("version %d after the upgrade, want %d", v, latestVersion())
 	}
 	var at *string
 	var decision string
