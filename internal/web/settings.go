@@ -45,13 +45,14 @@ type Settings struct {
 	// ScanEvery is how often libraries are looked at, in seconds, once someone has changed it here (0:
 	// not changed: the -scan-every flag is used; design 01:41Z, a saved value wins).
 	ScanEvery int `json:"scanEvery"`
-	// CheckForUpdates is whether the app asks GitHub once a day whether a newer release exists (a nil pointer
-	// is on, as a fresh install has it: see UpdateChecks).
+	// CheckForUpdates is whether the app asks GitHub once a day whether a newer release exists. Off until the
+	// person turns it on (nil is off): the page promises nothing is sent anywhere unless they turn it on.
+	// syp-manager 11-19 02:50Z, for the user until morning.
 	CheckForUpdates *bool `json:"checkForUpdates"`
 }
 
-// UpdateChecks is whether the app may ask GitHub for a newer release: on unless the person turned it off.
-func (s Settings) UpdateChecks() bool { return s.CheckForUpdates == nil || *s.CheckForUpdates }
+// UpdateChecks is whether the app may ask GitHub for a newer release: only once the person turned it on.
+func (s Settings) UpdateChecks() bool { return s.CheckForUpdates != nil && *s.CheckForUpdates }
 
 // QuietHours: both "HH:MM", or both "".
 type QuietHours struct {
@@ -68,9 +69,9 @@ type FirstRunLibrary struct {
 const settingsKey = "settings"
 
 func defaultSettings() Settings {
-	on := true
+	off := false
 	return Settings{OldControlLevel: "basic", FirstRunStep: 1, KeepOriginalsDays: 7, LogKeepDays: 30, ParallelJobs: 1,
-		LowPriority: true, ScanSchedule: "02:00", QueueOrder: "newest", Languages: []string{}, CheckForUpdates: &on}
+		LowPriority: true, ScanSchedule: "02:00", QueueOrder: "newest", Languages: []string{}, CheckForUpdates: &off}
 }
 
 var hhmm = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)

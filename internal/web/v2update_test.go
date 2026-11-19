@@ -32,6 +32,15 @@ func updateServer(t *testing.T, latest string) (srv *httptest.Server, ss *settin
 	}
 	t.Cleanup(func() { st.Close() })
 	ss = &settingsStore{store: st}
+	s, err := ss.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	on := true // checks start off; these tests turn them on as the person would
+	s.CheckForUpdates = &on
+	if err := ss.save(s); err != nil {
+		t.Fatal(err)
+	}
 	a, _, _ := OpenAccess(t.TempDir(), false)
 	eng := Engine{Version: "0.1.1"}
 	mux := http.NewServeMux()
@@ -150,5 +159,15 @@ func TestUpdateOffMakesNoRequest(t *testing.T) {
 	}
 	if n.Load() != 0 {
 		t.Errorf("GitHub asked %d times with checks off, want none", n.Load())
+	}
+}
+
+// Checks are off until the person turns them on: on a fresh install, and for settings saved before the switch existed.
+func TestUpdateChecksStartOff(t *testing.T) {
+	if defaultSettings().UpdateChecks() {
+		t.Error("a fresh install has update checks on; they must start off")
+	}
+	if (Settings{}).UpdateChecks() {
+		t.Error("settings saved without checkForUpdates read as on; they must read as off")
 	}
 }
