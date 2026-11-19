@@ -47,7 +47,7 @@ function Preview({ p, onCancel }: { p: Pending; onCancel: () => void }) {
         <p className="muted" style={{ margin: 0 }}>Restoring replaces everything on this server with what's in the backup. Nothing is merged. A backup of how things are now is made first, so you can go back.</p>
         <div className="row" style={{ gap: 8 }}>
           <button className="btn danger" type="button" onClick={apply} aria-disabled={busy}>{busy ? "Restoring…" : "Restore"}</button>
-          <button className="btn ghost" type="button" onClick={onCancel} disabled={busy}>Cancel</button>
+          <button className="btn ghost" type="button" onClick={() => { if (!busy) onCancel(); }} aria-disabled={busy}>Cancel</button>
         </div>
         <div role="alert">{error && <p className="st bad" style={{ margin: 0 }}><Icon id="i-alert" /><span>{error}</span></p>}</div>
       </div>
@@ -55,9 +55,13 @@ function Preview({ p, onCancel }: { p: Pending; onCancel: () => void }) {
 }
 
 function Row({ b, onRestore, reload, said }: { b: Backup; onRestore: (b: Backup) => void; reload: () => void; said: (m: string) => void }) {
-  const [confirm, setConfirm] = useState(false), [msg, setMsg] = useState("");
+  const [confirm, setConfirm] = useState(false), [msg, setMsg] = useState(""), [busy, setBusy] = useState(false);
   const del = async () => {
-    const r = await deleteBackup(b.id);
+    if (busy) return;
+    setBusy(true);
+    const r = await deleteBackup(b.id).catch(() => null);
+    setBusy(false);
+    if (!r) return;
     if (failed(r)) { setMsg(r.error.message); return; }
     said("Backup deleted."); reload();
   };
@@ -71,8 +75,8 @@ function Row({ b, onRestore, reload, said }: { b: Backup; onRestore: (b: Backup)
       {confirm
         ? <div className="row" role="group" aria-label={"Delete backup " + b.name} style={{ gap: 8 }}>
           <span>Delete this backup? It can't be brought back.</span>
-          <button className="btn sm danger" type="button" onClick={del}>Delete</button>
-          <button className="btn sm ghost" type="button" onClick={() => setConfirm(false)}>Cancel</button>
+          <button className="btn sm danger" type="button" onClick={del} aria-disabled={busy}>{busy ? "Deleting…" : "Delete"}</button>
+          <button className="btn sm ghost" type="button" onClick={() => { if (!busy) setConfirm(false); }} aria-disabled={busy}>Cancel</button>
           {msg && <span className="st bad"><Icon id="i-alert" />{msg}</span>}
         </div>
         : <div className="row" style={{ gap: 6 }}>
@@ -85,9 +89,9 @@ function Row({ b, onRestore, reload, said }: { b: Backup; onRestore: (b: Backup)
 
 export function BackupSettings() {
   const d = useData(listBackups, []), [said, setSaid] = useState(""), [busy, setBusy] = useState(""), [error, setError] = useState("");
-  const [pending, setPending] = useState<Pending | null>(null), file = useRef<HTMLInputElement>(null);
+  const [pending, setPending] = useState<Pending | null>(null), [fileError, setFileError] = useState(""), file = useRef<HTMLInputElement>(null);
   useEffect(() => { try { const m = sessionStorage.getItem(DONE); if (m) { sessionStorage.removeItem(DONE); setSaid(m); } } catch { /* nothing to show */ } }, []);
-  const notHere = d.error && ["http_404", "http_501", "not_found", "not_available"].includes(d.error.code);
+  const notHere = d.error && ["http_404", "http_501", "not_found"].includes(d.error.code);
 
   // the busy buttons stay focusable (aria-disabled, not disabled), so focus stays put while they work
   const backUp = async () => {
@@ -100,12 +104,12 @@ export function BackupSettings() {
     setSaid("Backup made. Download it to keep a copy off this computer."); d.reload();
   };
   const preview = async (from: File | Backup) => {
-    setBusy("preview"); setError(""); setSaid(""); setPending(null);
+    setBusy("preview"); setError(""); setFileError(""); setSaid(""); setPending(null);
     const r = await previewBackup(from instanceof File ? from : { backupId: from.id }).catch(() => null);
     setBusy("");
     if (file.current) file.current.value = "";
     if (!r) return;
-    if (failed(r)) { setError(r.error.message); return; }
+    if (failed(r)) { (from instanceof File ? setFileError : setError)(r.error.message); return; }
     setPending({ preview: r, from: from instanceof File ? from.name : "the backup from " + when(from.createdAt) });
   };
 
@@ -140,6 +144,7 @@ export function BackupSettings() {
                   <div className="row"><button className="btn" type="button" onClick={() => { if (!busy) file.current?.click(); }} aria-disabled={!!busy}>Choose a backup file…</button>
                     <input ref={file} type="file" accept=".gz,.json,application/gzip,application/json" hidden
                       onChange={(e) => { const f = e.target.files?.[0]; if (f) preview(f); }} /></div>
+                  <div role="alert">{fileError && <p className="st bad" style={{ margin: 0 }}><Icon id="i-alert" /><span>{fileError}</span></p>}</div>
                 </div>
               </section>
             </>}
