@@ -195,7 +195,12 @@ func TestUpdateHelperFailureBeforeTheSwapCleansUp(t *testing.T) {
 	fake.mu.Lock()
 	fake.state, fake.errMsg = "failed", "checksum mismatch"
 	fake.mu.Unlock()
-	updWaitFor(t, "the clean-up", func() bool { return update.ReadMarker(u.dataDir) == nil && !st.Paused() })
+	// wait for the failed state (set after the clean-up), then look at the marker once: reading it in a loop holds
+	// the file open, and on Windows that can make the clean-up's delete fail
+	updWaitFor(t, "the failed state", func() bool { u.mu.Lock(); defer u.mu.Unlock(); return u.state == "failed" })
+	if update.ReadMarker(u.dataDir) != nil || st.Paused() {
+		t.Errorf("not cleaned up: marker %v, paused %v", update.ReadMarker(u.dataDir), st.Paused())
+	}
 	_, body := getJSON(t, srv.URL+"/api/v2/update")
 	if inst := body["install"].(map[string]any); inst["state"] != "failed" || inst["error"] != "checksum mismatch" {
 		t.Errorf("install %v", inst)
