@@ -43,6 +43,7 @@ export interface JobDetail {
   metadata?: { before: Probe | null; after: Probe | null };
   // #163: a Done job converts again from its original, when the server says it can; else why not (its own words)
   convertAgain?: { possible: boolean; reason: { code: string; message: string; deletedAt: Time | null } | null };
+  warning?: string | null; // #323: the graphics encoder fell back to the processor (the encoder_fallback step's words); the state stays
 }
 export interface Probe { container?: string; videoCodec?: string; bitrateKbps?: number; durationSec?: number; sizeBytes?: number;
   // frameRate, bitDepth, colorTransfer, dolbyVision: the scan's video stream fields (workshop, 11-13 01:24Z)

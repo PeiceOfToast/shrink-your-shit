@@ -12,7 +12,8 @@ import { getHealth, getSettings } from "../libraryApi";
 import { onLive } from "../live";
 import { listLibraries } from "../libraryApi";
 import { Empty, PageHead } from "../PageHead";
-import { navigate, useSearch } from "../router";
+import { Link, navigate, useSearch } from "../router";
+import { listWorkers } from "../workersApi";
 import { useData } from "../useData";
 import type { Failure, JobAction, JobDetail, JobItem, JobProgressEvent, JobState, Probe, Tab, Pin } from "../types/jobs";
 
@@ -25,13 +26,14 @@ const PILL: Partial<Record<JobState, string>> = { preparing: "run", running: "ru
 const ICON: Partial<Record<JobState, string>> = { completed: "i-check-c", failed: "i-x-c", skipped: "i-skip", cancelled: "i-stop", retry_wait: "i-clock", queued: "i-clock" };
 // V5b: a waiting file whose library is paused (subState library_disabled) reads "Library paused" (design SCREENS V5);
 // it has no place in the queue, so its '#' is '–'.
-type PillJob = { state: JobState; retryAt?: string | null; subState?: string | null; reason?: { code: string } | null };
+type PillJob = { state: JobState; retryAt?: string | null; subState?: string | null; reason?: { code: string } | null; warning?: string | null };
+const fell = (j: PillJob) => j.state === "completed" && !!j.warning; // #323: done on the processor after the graphics encoder failed
 const libPaused = (j: PillJob) => j.state === "queued" && j.subState === "library_disabled";
 // de2f664: a check that refused the new file kept the original; the server lists it as failed (code kept_original), it reads "Original kept"
 const keptOrig = (j: PillJob) => j.state === "failed" && j.reason?.code === "kept_original";
-const words = (j: PillJob) => (libPaused(j) ? "Library paused" : keptOrig(j) ? "Original kept" : j.state === "retry_wait" && j.retryAt ? "Retry at " + clock(j.retryAt) : WORD[j.state]);
+const words = (j: PillJob) => (libPaused(j) ? "Library paused" : keptOrig(j) ? "Original kept" : fell(j) ? "Done, with a warning" : j.state === "retry_wait" && j.retryAt ? "Retry at " + clock(j.retryAt) : WORD[j.state]);
 function Pill({ j }: { j: PillJob }) {
-  return <span className={"pill " + (libPaused(j) || keptOrig(j) ? "warn" : PILL[j.state] ?? "")}><Icon id={libPaused(j) ? "i-pause" : keptOrig(j) ? "i-info" : ICON[j.state] ?? "i-play"} />{words(j)}</span>;
+  return <span className={"pill " + (libPaused(j) || keptOrig(j) || fell(j) ? "warn" : PILL[j.state] ?? "")}><Icon id={libPaused(j) ? "i-pause" : keptOrig(j) ? "i-info" : fell(j) ? "i-alert" : ICON[j.state] ?? "i-play"} />{words(j)}</span>;
 }
 const reasonText = (j: JobItem) => j.reason?.message ?? j.detail ?? ""; // #130: every row's reason is {code, message}
 const saved = (b?: number, a?: number) => {
@@ -63,6 +65,9 @@ export function Jobs() {
   const tab = (TABS.find(([t]) => t === search.get("tab"))?.[0] ?? "waiting") as Tab, open = search.get("job"), library = search.get("libraryId") ?? "";
   // "See its jobs" (a library page) filters every tab to that library; the library's name shows as a chip that clears it
   const libs = useData(listLibraries, [], 60000);
+  // parity item 8: with every worker stopped nothing here moves, so say so (a worker finishing its file still runs)
+  const wk = useData(listWorkers, [], 15000), wl = wk.data && !failed(wk.data) ? wk.data : [];
+  const noWorker = wl.length > 0 && !wl.some((w) => w.status === "busy" || w.status === "online" || w.status === "draining");
   const [q, setQ] = useState(""), [selecting, setSelecting] = useState(false), [sel, setSel] = useState<string[]>([]), [said, setSaid] = useState(""), [prio, setPrio] = useState<Pin | "none">("first");
   // each answer remembers its tab and search, so a tab switch never shows the last tab's rows while it loads
   // Show more (parity 11-19 #1): 200 rows at first, 200 more per press; a new tab, search or library starts again at 200.
@@ -124,6 +129,7 @@ export function Jobs() {
   return (
     <div className="stack">
       <PageHead icon="i-jobs" title="Jobs" help="Every file the workers look at: waiting, converting, done, skipped and failed." />
+      {noWorker && <p className="st warn" role="status"><Icon id="i-alert" /><span>No worker is running. <Link to="/workers">Turn workers on.</Link></span></p>}
       {library && <div className="row" style={{ gap: 6 }}><span className="mchip">Library: {libs.data?.find((l) => l.id === library)?.name ?? library}
         <button className="btn sm icon ghost" type="button" aria-label="Clear the library filter" onClick={() => navigate("/jobs?tab=" + tab)}><Icon id="i-x" /></button></span></div>}
       <div className="tabs" role="tablist" aria-label="Jobs">
@@ -255,13 +261,30 @@ function WhyFailed({ id, msg, code, worker, f, found = [] }: { id: string; msg: 
     </section>);
 }
 
+// G6: copy the whole log, not just the search hits (spec: "Copy the whole log"); over about 1 MB it is too long for
+// the clipboard. Plain http (http://IP:8484) has no clipboard API, so as in Workers the text is selected in a
+// textarea and copied the old way.
+const copyLogText = async (t: string, say: (s: string) => void) => {
+  if (t.length > 1_000_000) return say("Too long to copy; use Download.");
+  let ok = false;
+  try { if (navigator.clipboard) { await navigator.clipboard.writeText(t); ok = true; } } catch { /* refused: fall back */ }
+  if (!ok) {
+    const a = document.createElement("textarea"); a.value = t; a.readOnly = true; a.style.position = "fixed"; a.style.opacity = "0";
+    document.body.appendChild(a); a.select(); try { ok = document.execCommand("copy"); } catch { ok = false; } a.remove();
+  }
+  say(ok ? "Log copied." : "Couldn't copy; use Download.");
+};
 // count of q in a step's searchable text (case-insensitive)
 const matches = (st: { name: string; command: string | null; output: string | string[]; result: string | null; found?: string[] }, q: string) => [st.name, st.command ?? "", text(st.output), (st.found ?? []).join("\n"), st.result ?? ""].join("\n").toLowerCase().split(q.toLowerCase()).length - 1;
 // E: a finished job's log by step (GET /log), SCREENS V6b: each step a row that opens; the failed step open; inside a step
 // its command, its source, its picture check, its ffmpeg output (last 200 lines on a failure, the rest by download), its
 // result; the log's last line is the job's final line.
 function StepLog({ d, id, worker, failedIdx, kept }: { d: { loaded: boolean; data?: JobLog; error?: { message: string } }; id: string; worker: string | null; failedIdx: number | null; kept: boolean }) {
-  const keep = useData(getSettings, []), [q, setQ] = useState("");
+  const keep = useData(getSettings, []), [q, setQ] = useState(""), [copied, setCopied] = useState("");
+  useEffect(() => setCopied(""), [id]);
+  // a finished job's whole log is on the server (the steps here keep only the last 200 lines of a failure)
+  const copyAll = () => MOCK ? copyLogText((d.data?.steps ?? []).map((st) => [st.name, st.command, text(st.output), st.result].filter(Boolean).join("\n")).join("\n"), setCopied)
+    : fetch("/api/v2/jobs/" + encodeURIComponent(id) + "/log/download", { credentials: "same-origin" }).then((r) => (r.ok ? r.text() : Promise.reject())).then((t) => copyLogText(t, setCopied), () => setCopied("Couldn't copy; use Download."));
   if (!d.loaded) return <section><h3>Log</h3><p className="muted">Loading the log...</p></section>;
   if (!d.data) return <section><h3>Log</h3><p className="muted">{d.error?.message ?? "The log can't be shown."}</p></section>;
   const l = d.data, days = (keep.data as { logKeepDays?: number } | undefined)?.logKeepDays ?? 30;
@@ -279,9 +302,11 @@ function StepLog({ d, id, worker, failedIdx, kept }: { d: { loaded: boolean; dat
       {/* V6b Search: every step's command, output and result; the steps with matches open and are counted */}
       <div className="row" style={{ gap: 6, margin: "8px 0", flexWrap: "wrap" }}>
         <input className="input sm" type="search" placeholder="Search the log" aria-label="Search the log" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
+        <button className="btn sm ghost" type="button" onClick={copyAll}><Icon id="i-copy" />Copy log</button>
         {!MOCK && <a className="btn sm" href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}><Icon id="i-download" />Download the full log</a>}
         {q && <span className="sm muted" role="status">{(() => { const ns = l.steps.map((st) => matches(st, q)), t = ns.reduce((x, y) => x + y, 0), k = ns.filter((x) => x > 0).length; return t ? t + " matches in " + k + " step" + (k > 1 ? "s" : "") : "No match"; })()}</span>}
       </div>
+      <p className="sm muted" role="status" style={{ margin: copied ? "0 0 6px" : 0 }}>{copied}</p>
       {l.steps.map((st, i) => {
         const hit = q ? matches(st, q) : 0;
         const pr = st.probe as Probe | null, v = pr?.streams?.find((x) => x.type === "video"), n = (t: string) => (pr?.streams ?? []).filter((x) => x.type === t).length;
@@ -309,10 +334,10 @@ function StepLog({ d, id, worker, failedIdx, kept }: { d: { loaded: boolean; dat
 }
 
 function JobLog({ id, name }: { id: string; name: string }) {
-  const [text, setText] = useState(""), [done, setDone] = useState(false), [gone, setGone] = useState(false), [q, setQ] = useState(""), [follow, setFollow] = useState(true);
+  const [text, setText] = useState(""), [done, setDone] = useState(false), [gone, setGone] = useState(false), [q, setQ] = useState(""), [follow, setFollow] = useState(true), [copied, setCopied] = useState("");
   const box = useRef<HTMLPreElement>(null);
   useEffect(() => {
-    setText(""); setDone(false); setGone(false);
+    setText(""); setDone(false); setGone(false); setCopied("");
     if (MOCK) { setText("01:12:03 started on This computer\n01:12:04 Converting video: HEVC, Balanced quality\n01:13:10 10% done · about 9 min left\n01:14:22 25% done · about 7 min left\n"); setDone(true); return; }
     const es = new EventSource("/api/v2/jobs/" + encodeURIComponent(id) + "/log/stream?from=0");
     es.addEventListener("job.log", (e) => { const d = JSON.parse((e as MessageEvent).data) as { text: string }; setText((t) => t + d.text); });
@@ -322,14 +347,17 @@ function JobLog({ id, name }: { id: string; name: string }) {
   }, [id]);
   useEffect(() => { if (follow && box.current) box.current.scrollTop = box.current.scrollHeight; }, [text, follow]);
   const shown = q ? text.split("\n").filter((l) => l.toLowerCase().includes(q.toLowerCase())).join("\n") : text;
+  const copyLog = () => copyLogText(text, setCopied);
   const download = () => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" })); a.download = name.replace(/\.[^.]+$/, "") + ".log"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); };
   return (
     <section><h3>Log</h3>
       <div className="row" style={{ gap: 6, marginBottom: 6 }}>
         <input className="input sm" type="search" placeholder="Search the log" aria-label="Search the log" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
         {!done && <button className="btn sm ghost" type="button" aria-pressed={follow} onClick={() => setFollow(!follow)}>{follow ? "Stop following" : "Follow"}</button>}
+        <button className="btn sm ghost" type="button" disabled={!text} onClick={copyLog}><Icon id="i-copy" />Copy log</button>
         <button className="btn sm ghost" type="button" disabled={!text} onClick={download}><Icon id="i-download" />{q ? "Download the whole log" : "Download"}</button>
       </div>
+      <p className="sm muted" role="status" style={{ margin: copied ? "0 0 6px" : 0 }}>{copied}</p>
       <pre className="joblog" ref={box} tabIndex={0} aria-label="Log" aria-live="off">{shown || (text ? "No line matches." : done ? "The log is empty." : gone ? "The log can't be shown." : "Waiting for the log...")}</pre>
       <p className="sm muted">{done ? "The log is complete." : gone ? "The server didn't send it. Close and open this file again to retry." : "Live: new lines appear as they are written."}</p>
     </section>
@@ -409,7 +437,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
       <aside className="drawer jobd" ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="jd-h">
         <div className={"hd" + (state === "failed" && !kept0 ? " failed" : "")}>
           <button className="btn icon ghost" type="button" aria-label="Close" onClick={onClose}><Icon id="i-chev-l" /></button>
-          <div className="sp"><h2 id="jd-h" className="clamp2" title={name}>{name}</h2>{state && <span style={{ alignSelf: "flex-start" }}><Pill j={{ state, retryAt: j?.retryAt ?? own?.retryAt, subState: own?.subState, reason: j?.reason ?? own?.reason }} /></span>}</div>
+          <div className="sp"><h2 id="jd-h" className="clamp2" title={name}>{name}</h2>{state && <span style={{ alignSelf: "flex-start" }}><Pill j={{ state, retryAt: j?.retryAt ?? own?.retryAt, subState: own?.subState, reason: j?.reason ?? own?.reason, warning: j?.warning }} /></span>}</div>
           {/* SCREENS V6b header: Retry, Cancel or Stop, and the job ID to copy (the body keeps the rest) */}
           <div className="row nw" style={{ gap: 6, flexWrap: "wrap" }}>
             {(state === "failed" || state === "retry_wait") && <button className="btn sm" type="button" onClick={() => run("retry")}><Icon id="i-refresh" />{state === "retry_wait" ? "Try now" : "Retry"}</button>}
@@ -431,6 +459,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {d.error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{d.error.message}</span></p>}
           {/* review db7b1f1 P3: "removed" is the server's flag, not a person's word. Only a job removed with its library
               gets a note; a job that ended as a skip shows its reason under Why like any other. */}
+          {done && j?.warning && <div className="note warn"><Icon id="i-alert" /><div>The graphics encoder failed, so this file was converted on the processor, which is slower. The timeline below has the error.</div></div>}
           {j?.removed && j.reason?.code === "removed" ? <div className="note"><Icon id="i-info" /><div>Its library was removed, so this file won't be converted.</div></div>
             : j?.failure ? <WhyFailed id={id} msg={reason} code={j.reason?.code ?? ""} worker={j.worker ?? null} f={j.failure} found={found.flatMap((st) => st.found!)} />
             : found.length ? <CheckFound lines={found.flatMap((st) => st.found!)} reason={reason} />
@@ -451,7 +480,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {j?.workflow && <section><h3>Workflow</h3><p>{own?.flow?.name ?? "Its library's workflow"} · v{j.workflow.version}</p></section>}
           {!scan && <section><h3>Timeline</h3>
             {!j ? <p className="muted">Loading...</p> : !j.steps.length && !j.events.length ? <p className="muted">No step history for jobs from before the update.</p> : <>
-              {j.steps.length > 0 && <ol className="tline">{j.steps.map((s, i) => <li key={i} className={s.ok ? "" : "bad"}><Icon id={s.ok ? "i-check-c" : "i-x-c"} /><span className="sp">{s.words}</span><span className="muted sm nowrap">{clock(s.at)}</span></li>)}</ol>}
+              {j.steps.length > 0 && <ol className="tline">{j.steps.map((s, i) => <li key={i} className={s.ok ? "" : s.step === "encoder_fallback" ? "warn" : "bad"}><Icon id={s.ok ? "i-check-c" : s.step === "encoder_fallback" ? "i-alert" : "i-x-c"} /><span className="sp">{s.words}</span><span className="muted sm nowrap">{clock(s.at)}</span></li>)}</ol>}
               {j.events.length > 0 && <p className="sm muted">History: {j.events.map((e) => WORD[e.to] + " " + clock(e.at)).join(" → ")}</p>}
             </>}
           </section>}

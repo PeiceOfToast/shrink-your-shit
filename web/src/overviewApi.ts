@@ -19,6 +19,8 @@ export interface Overview {
   // original is still in the trash (<= savedBytes). freedBytes is dated by the delete day. Optional until #309 merges.
   timeZone: string;
   averages: { fileShrinkPercent: number | null; secondsPerGB: number | null };
+  // #323: graphics-encoder fall-backs today, per worker; pausedUntil is set after three in a row (an hour on the processor)
+  encoderFallbacks?: { workerId: string; worker: string; encoder: string; lastError: string; count: number; at: string; pausedUntil: string | null }[];
 }
 
 export function getOverview(): Promise<Answer<Overview>> {
@@ -31,6 +33,7 @@ function sample(): Overview {
   const jobs = sum.activeJobs.map((j) => ({ jobId: j.id, name: j.file.name, percent: j.progress?.percent ?? null, fps: j.progress?.fps ?? null, speed: j.progress?.speed ?? null, etaS: j.progress?.etaS ?? null }));
   const days = Array.from({ length: 30 }, (_, i) => { const d = new Date(Date.now() - (29 - i) * 864e5); return d.toISOString().slice(0, 10); });
   const libs = s.libraries, tot = (f: (l: (typeof libs)[number]) => number) => libs.reduce((a, l) => a + f(l), 0);
+  const fell = new URLSearchParams(location.search).has("fallback"); // ?mock=1&fallback: a paused graphics encoder
   return {
     headline: { freed: tot((l) => l.bytes.freed), waitingToFree: tot((l) => l.bytes.waitingToFree), nextFreeAt: s.trash.nextDeleteAt, couldFree: 0, grew: tot((l) => l.bytes.grew ?? 0),
       filesConverted: tot((l) => l.counts.completed), filesWaiting: tot((l) => l.counts.waiting) },
@@ -50,5 +53,7 @@ function sample(): Overview {
           savedBytes: Math.round((0.4 + ((i * 5) % 9) / 6) * GB), waitingBytes: i < 23 ? 0 : Math.round((0.4 + ((i * 5) % 9) / 6) * GB) }),
     timeZone: "Europe/London",
     averages: { fileShrinkPercent: 38, secondsPerGB: 130 },
+    encoderFallbacks: fell ? [{ workerId: s.workers[0].id, worker: s.workers[0].name, encoder: "hevc_qsv", lastError: "ffmpeg exited with code 1",
+      count: 3, at: new Date(Date.now() - 6e5).toISOString(), pausedUntil: new Date(Date.now() + 50 * 6e4).toISOString() }] : [],
   };
 }

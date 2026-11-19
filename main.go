@@ -131,11 +131,18 @@ func main() {
 		log.Fatalf("data folder %s: %v", *data, err)
 	}
 	defer releaseLock()
-	store, err := jobs.Open(filepath.Join(*data, "syp.db"))
+	dbPath := filepath.Join(*data, "syp.db")
+	pending := update.ReadMarker(*data) // an update or roll back the update helper made: settled below, once serving
+	store, err := openStore(dbPath, pending)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer store.Close()
+	if pending != nil && pending.Resume { // workers were turned off for the update
+		if err := store.SetPaused(false); err != nil {
+			log.Printf("update: %v", err)
+		}
+	}
 	// keepDays is how long replaced originals are kept in .syp-trash (Settings > Safety; 7 by default).
 	keepDays := func() int {
 		s, err := web.LoadSettings(store)
@@ -369,13 +376,43 @@ func main() {
 	}
 	go web.RemountShares(store) // saved shares come back after a restart (app mode only)
 	go web.WatchShares(store)   // a library whose share stops answering pauses until it does (app mode only)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	ln, err := net.Listen("tcp", *addr)
+	if err == nil && pending != nil { // serving now: the update (or roll back) is settled
+		if r, err := update.Settle(*data, pending, version, time.Now().UTC()); err != nil {
+			log.Printf("update: %v", err)
+		} else {
+			log.Printf("update: %s", r.Message)
+		}
+	}
+	if err == nil {
+		err = srv.Serve(ln)
+	}
+	if err != nil && err != http.ErrServerClosed {
 		stop()
 		<-workerDone
 		log.Print(err)
 		return // deferred store.Close runs after the worker has stopped
 	}
 	<-workerDone // let an interrupted job go back in the queue before closing the database
+}
+
+// openStore opens the database. A program rolled back past a database upgrade finds a database it
+// refuses (ErrNewerDatabase): then the copy the app made before the update (pending's backup) goes back.
+func openStore(dbPath string, pending *update.Marker) (*jobs.Store, error) {
+	store, err := jobs.Open(dbPath)
+	if !errors.Is(err, jobs.ErrNewerDatabase) || pending == nil || pending.Backup == "" {
+		return store, err
+	}
+	if err := update.RestoreDB(pending.Backup, dbPath); err != nil {
+		return nil, fmt.Errorf("update: could not put the database back from %s: %v", pending.Backup, err)
+	}
+	log.Printf("update: the database was put back from %s (the newer one is kept as %s.rolled-back)", pending.Backup, dbPath)
+	// the result says so; saved now, so a start that stops before it is settled still says so next time
+	pending.DataRestored = true
+	if err := update.WriteMarker(filepath.Dir(dbPath), *pending); err != nil {
+		log.Printf("update: %v", err)
+	}
+	return jobs.Open(dbPath)
 }
 
 // scanTargets lists the started libraries for the scanner, each with its flow's rule. A library whose
