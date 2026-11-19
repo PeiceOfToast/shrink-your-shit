@@ -21,3 +21,12 @@ export function duration(s: number): string {
   const [n, unit] = s % 3600 === 0 ? [s / 3600, "hour"] : s % 60 === 0 ? [s / 60, "minute"] : [s, "second"];
   return n + " " + unit + (n === 1 ? "" : "s");
 }
+// Copy text. Plain http (http://IP:8484) has no clipboard API, so the text is selected in a textarea and copied the
+// old way (as Jobs' log copy does). True when it worked.
+export async function copyText(t: string): Promise<boolean> {
+  try { if (navigator.clipboard) { await navigator.clipboard.writeText(t); return true; } } catch { /* refused: fall back */ }
+  const back = document.activeElement as HTMLElement | null; // select() moves focus; give it back after
+  const a = document.createElement("textarea"); a.value = t; a.readOnly = true; a.style.position = "fixed"; a.style.opacity = "0";
+  document.body.appendChild(a); a.select(); let ok = false; try { ok = document.execCommand("copy"); } catch { ok = false; } a.remove(); back?.focus();
+  return ok;
+}

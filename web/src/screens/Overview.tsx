@@ -7,6 +7,7 @@ import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, count, encoderName, plural } from "../format";
 import { getSummary, scanAllLibraries } from "../dashApi";
+import { getDoctor } from "../doctorApi";
 import { onLive } from "../live";
 import { PageHead } from "../PageHead";
 import { Link } from "../router";
@@ -73,6 +74,7 @@ export function Overview() {
   // review 61dc891 P2-2: the workers (count, switch and rows) come from GET /api/v2/workers, the Workers page's source,
   // which has remote workers too; the overview's own worker entries add their files' progress
   const wl = useData(listWorkers, [], 15000);
+  const doc = useData(() => getDoctor(), [], 300000); // a Fail shows a line linking to Settings > Health; no answer, no line
   const o = useData(getOverview, [], 15000), sum = useData<{ last24h: { failed: number } }>(() => (MOCK ? Promise.resolve(summary(mockState())) : getSummary()), [], 30000);
   const [live, setLive] = useState<Record<string, Partial<OverviewJob>>>({}), [said, setSaid] = useState("");
   const reload = useRef(o.reload); reload.current = () => (o.reload(), wl.reload());
@@ -113,6 +115,9 @@ export function Overview() {
         <button className="btn sm ghost" type="button" onClick={() => (MOCK ? scanAll() : act(scanAllLibraries()))}><Icon id="i-refresh" />Scan all libraries</button>
       </PageHead>
       {said && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{said}</span></p>}
+      {(() => { const bad = doc.data?.checks.filter((c) => c.status === "bad") ?? []; return bad.length > 0 && <div className="note bad"><Icon id="i-alert" /><div>
+        <b>{bad.length === 1 ? "A health check failed" : plural(bad.length, "health check", "health checks") + " failed"}:</b> {bad[0].detail} <Link to="/settings/health">See the health checks</Link>
+      </div></div>; })()}
       {v.encoderFallbacks?.map((f) => <div key={f.workerId} className="note warn"><Icon id="i-alert" /><div>
         <b>{f.worker}'s graphics encoder ({encoderName(f.encoder)}) failed {f.count === 1 ? "once" : plural(f.count, "time", "times")} today.</b>{" "}
         {f.pausedUntil ? <>It converts on the processor until {clock(f.pausedUntil)}, which is slower. <Link to={"/workers/" + encodeURIComponent(f.workerId) + "?tab=capabilities"}>Test the encoders</Link></> : (f.count === 1 ? "That file was" : "Those files were") + " converted on the processor instead, which is slower."}
