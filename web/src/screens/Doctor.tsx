@@ -1,5 +1,5 @@
 // Settings > Health (user item 10; contract "Doctor"): every check with OK / Warning / Fail, its one sentence and, when
-// something needs doing, the fix with a Copy button. Check again re-runs the fast checks; Test encoders again runs the
+// something needs doing, the fix (a sentence, so no Copy button: design). Check again re-runs the fast checks; Test encoders again runs the
 // test encodes too (up to ~15 s). It reports only; it changes nothing. Open before the first run (App.tsx), linked from
 // the first-run page and from the Dashboard when a check fails.
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -7,7 +7,7 @@ import { Icon } from "../Icon";
 import { PageHead } from "../PageHead";
 import { SignedOut, failed } from "../api";
 import { getDoctor } from "../doctorApi";
-import { clock, copyText, plural } from "../format";
+import { clock, plural } from "../format";
 import { SettingsTabs } from "../pages";
 import type { Doctor, DoctorCheck } from "../types/doctor";
 import type { Issue } from "../types/v1";
@@ -21,24 +21,20 @@ const GROUPS: [string, (id: string) => boolean][] = [
 ];
 const group = (id: string) => GROUPS.find(([, f]) => f(id))?.[0] ?? "Other";
 
-function Check({ c, said }: { c: DoctorCheck; said: (m: string) => void }) {
+function Check({ c }: { c: DoctorCheck }) {
   const [cls, word] = PILL[c.status] ?? PILL.warn;
   return (
     <li className="stack" style={{ gap: 4 }}>
       <div className="row nw" style={{ alignItems: "baseline", gap: 8 }}><span className={"pill " + cls}>{word}</span><span>{c.detail}</span></div>
-      {c.hint && <div className="row" style={{ gap: 8, marginLeft: 4 }}>
-        <span className="muted"><strong>Fix:</strong> {c.hint}</span>
-        <button className="btn sm ghost" type="button" aria-label={"Copy the fix for " + c.label}
-          onClick={async () => said((await copyText(c.hint!)) ? "Copied the fix for " + c.label + "." : "Couldn't copy. Select the text instead.")}><Icon id="i-copy" />Copy</button>
-      </div>}
+      {c.hint && <p className="muted" style={{ margin: "0 0 0 4px" }}><strong>Fix:</strong> {c.hint}</p>}
     </li>);
 }
 
 export function HealthSettings() {
-  const [d, setD] = useState<Doctor | null>(null), [error, setError] = useState<Issue | null>(null), [busy, setBusy] = useState<"" | "check" | "test">("check"), [said, setSaid] = useState("");
+  const [d, setD] = useState<Doctor | null>(null), [error, setError] = useState<Issue | null>(null), [busy, setBusy] = useState<"" | "check" | "test">("check");
   const n = useRef(0);
   const run = useCallback(async (retest: boolean) => {
-    const my = ++n.current; setBusy(retest ? "test" : "check"); setSaid("");
+    const my = ++n.current; setBusy(retest ? "test" : "check");
     try {
       const r = await getDoctor(retest);
       if (my !== n.current) return;
@@ -63,13 +59,13 @@ export function HealthSettings() {
               <section className="card" aria-labelledby="hs-h">
                 <div className="hd"><h2 id="hs-h">{summary}</h2></div>
                 <div className="bd stack">
-                  <p style={{ margin: 0 }}>Conversions use {d.encoder.label}.</p>
+                  <p style={{ margin: 0 }}>Conversions use {d.encoder.hardware ? "" : "the "}{d.encoder.label}.</p>
                   <p className="muted" style={{ margin: 0 }}>Checked at {clock(d.ranAt)}. {d.encodersTestedAt ? "Encoders tested at " + clock(d.encodersTestedAt) + "." : "Encoders not tested yet."} Version {d.version}.</p>
                   <div className="row" style={{ gap: 8 }}>
                     <button className="btn sm" type="button" aria-disabled={!!busy} onClick={() => { if (!busy) run(false); }}>{busy === "check" ? "Checking…" : "Check again"}</button>
                     <button className="btn sm" type="button" aria-disabled={!!busy} onClick={() => { if (!busy) run(true); }}>{busy === "test" ? "Testing encoders…" : "Test encoders again"}</button>
                   </div>
-                  <p className="muted" role="status" style={{ margin: 0 }}>{busy === "test" ? "Testing encoders… This takes up to 15 seconds." : said}</p>
+                  <p className="muted" role="status" style={{ margin: 0 }}>{busy === "test" && "Testing encoders… This takes up to 15 seconds."}</p>
                   {error && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{error.message}</span></p>}
                 </div>
               </section>
@@ -77,7 +73,7 @@ export function HealthSettings() {
                 <section key={g} className="card" aria-labelledby={"hg-" + g}>
                   <div className="hd"><h2 id={"hg-" + g}>{g}</h2></div>
                   <div className="bd"><ul className="stack" style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                    {cs.map((c) => <Check key={c.id} c={c} said={setSaid} />)}</ul></div>
+                    {cs.map((c) => <Check key={c.id} c={c} />)}</ul></div>
                 </section>; })}
             </>}
     </div>);
