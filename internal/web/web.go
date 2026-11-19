@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/update"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/web/next"
 )
 
@@ -30,6 +31,7 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	systemRoutes(api, store, eng)
 	ss := &settingsStore{store: store}
 	settingsRoutes(api, ss, access, eng)
+	v2Update(api, &update.Checker{Store: store, Current: eng.Version}, ss) // the update notice: GET /api/v2/update
 	flowRoutes(api, store, ss, eng)
 	settingRoutes(api, store, eng)
 	activityRoutes(api, store, ss, time.Now, eng)
