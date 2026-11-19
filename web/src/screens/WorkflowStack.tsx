@@ -159,7 +159,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
         {legacy && <div className="note"><Icon id="i-info" /><div>This step was set up before 13 Nov and still makes the same files as before. Changing its bitrate settings switches it to the new rules.</div></div>}
         {!sel && <>
           {field("quality")}
-          {sl && <p className="sm">{((labels(props.format).find((f) => f[0] === sl.format)?.[1] ?? sl.format) as string).split(" (")[0] + " · quality " + sl.crf + " (CRF) · " + (sl.keepsResolution ? "keeps the resolution" : "lowers the resolution") + " · " + (sl.capKbps ? "capped at " + sl.capKbps.toLocaleString() + " kbps" : "no bitrate cap") + " · usually about " + sl.saveLowPct + "-" + sl.saveHighPct + "% smaller"}</p>}
+          {sl && <p className="sm">{((labels(props.format).find((f) => f[0] === sl.format)?.[1] ?? sl.format) as string).split(" (")[0] + " · quality " + sl.crf + " (CRF) · " + (sl.keepsResolution ? "keeps the resolution" : "lowers the resolution") + " · " + (sl.capKbps ? "capped at " + sl.capKbps.toLocaleString() + " kbps" : "no bitrate cap") + " · usually about " + sl.saveLowPct + "–" + sl.saveHighPct + "% smaller"}</p>}
           <p className="hint">Lower quality numbers mean a better picture and bigger files. The number is for 1080p; 720p and smaller files use one lower, 4K one higher. Every file's picture is checked after converting, and the original stays if it doesn't pass.</p>
         </>}
         {sel && <p className="note"><Icon id="i-info" /><span>Using your own settings. The slider is off. <button className="linkbtn" type="button" onClick={goBack}>Use the slider again</button></span></p>}
