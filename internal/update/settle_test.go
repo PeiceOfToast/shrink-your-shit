@@ -74,8 +74,29 @@ func TestSettleKeepsTheWatchersFailure(t *testing.T) {
 	if r.OK || r.Message != msg {
 		t.Errorf("settled as %+v, want the watcher's message %q", r, msg)
 	}
+	if r.RolledBack {
+		t.Errorf("rolledBack true, want false: the watcher says the previous version did not start")
+	}
 	if got := LastResult(dir); got == nil || got.Message != msg {
 		t.Errorf("stored result %+v, want the watcher's message", got)
+	}
+}
+
+// A manual roll back says rolledBack only when the previous version is running.
+func TestSettleRollbackSaysWhetherItSwitched(t *testing.T) {
+	at := time.Date(2026, 11, 19, 7, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		running string
+		want    bool
+	}{{"0.1.0", true}, {"0.2.0", false}} {
+		m := &Marker{Kind: "rollback", From: "0.2.0", To: "0.1.0", At: at}
+		r, err := Settle(t.TempDir(), m, c.running, at.Add(time.Minute))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.RolledBack != c.want || r.OK != c.want {
+			t.Errorf("running %s: rolledBack %v ok %v, want %v", c.running, r.RolledBack, r.OK, c.want)
+		}
 	}
 }
 
