@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Icon } from "../Icon";
 import { failed, type Answer } from "../api";
-import { PageHead } from "../PageHead";
+import { LoadFailed, PageHead } from "../PageHead";
 import { SettingsTabs } from "../pages";
 import { useData } from "../useData";
 import { clock } from "../format";
@@ -166,7 +166,7 @@ export function ConnectionsSettings() {
       <p className="muted" style={{ margin: 0 }}>Tell your media apps when a file changes, so they show the new file and Sonarr and Radarr don't download it again.</p>
       <p className="muted" role="status" style={{ margin: 0 }}>{said}</p>
       {notHere ? <p className="muted">This server can't connect to media apps yet.</p>
-        : d.error && !d.data ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{d.error.message}</span></p>
+        : d.error && !d.data ? <LoadFailed error={d.error} reload={d.reload} />
           : !d.data ? <div className="empty">Loading…</div>
             : <>{KINDS.map((k) => <AppCard key={k} kind={k} it={d.data!.find((x) => x.kind === k)} reload={d.reload} said={setSaid} />)}
               {/* contract "Plex / Jellyfin": said once on the screen */}
