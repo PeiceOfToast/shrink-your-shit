@@ -69,21 +69,37 @@ print(len(json.load(sys.stdin)["items"]))
 '
 }
 
-# Prints the state of the job for movie.mp4 ("completed", "failed", "queued", ...), or "none".
-# A failed job's reason goes to stderr.
+# Prints the state of the job for movie.mp4 ("completed", "failed", "running", "waiting", ...), or "none".
+# The bare /api/v2/jobs is the Waiting tab only: a job leaves it as soon as a worker takes it. So every tab is
+# asked. A failed job's reason goes to stderr.
 movie_status() {
-  api /api/v2/jobs | python3 -c '
+  for tab in running waiting completed failed; do
+    api "/api/v2/jobs?tab=$tab&limit=200" | python3 -c '
 import json, sys
+tab = sys.argv[1]
 items = json.load(sys.stdin)["items"]
 hit = [j for j in items if str(j.get("path", "")).endswith("movie.mp4")]
-if not hit:
-    print("none")
-else:
+if hit:
     j = hit[0]
-    print(j.get("state", "?"))
+    print(j.get("state", tab))
     if j.get("state") == "failed":
         print("ERROR: " + json.dumps(j.get("reason")), file=sys.stderr)
-'
+    sys.exit(0)
+sys.exit(1)
+' "$tab" && return 0
+  done
+  echo none
+}
+
+# Copies what a failure needs into $diag: the app log and the library and job lists. Best effort.
+diag_dump() {
+  cp "$applog" "$diag/shrink-your-shit.log" 2>/dev/null || true
+  if [ -n "$TOKEN" ]; then
+    api /api/libraries >"$diag/api-libraries.json" 2>&1 || true
+    for tab in running waiting completed failed; do
+      api "/api/v2/jobs?tab=$tab&limit=200" >"$diag/api-v2-jobs-$tab.json" 2>&1 || true
+    done
+  fi
 }
 
 step "1. install with the README's line (the repo's install.sh; the release comes from the local folder)"
@@ -109,6 +125,8 @@ command -v ffmpeg >/dev/null || fail "ffmpeg not on PATH after install"
 ffmpeg -v error -f lavfi -i 'testsrc2=duration=12:size=1280x720:rate=30' \
   -f lavfi -i 'sine=duration=12' -c:v libx264 -b:v 8M -c:a aac "$lib/movie.mp4" \
   || fail "could not make the test clip"
+# Backdated like installer/windows/smoke-test.ps1: a file written seconds ago is still "being copied" to the scanner.
+touch -t "$(date -v-2M +%Y%m%d%H%M.%S)" "$lib/movie.mp4"
 before=$(stat -f %z "$lib/movie.mp4")
 echo "clip made: $before bytes"
 # The clip is made after install because it needs ffmpeg, which install.sh installs; the library folder
@@ -127,10 +145,13 @@ ok=0
 for _ in $(seq 1 60); do
   st=$(movie_status 2>"$work/movie-err.txt" || true)
   if [ "$st" = completed ]; then ok=1; break; fi
-  if [ "$st" = failed ]; then cat "$work/movie-err.txt" >&2; fail "conversion job failed"; fi
+  if [ "$st" = failed ]; then diag_dump; cat "$work/movie-err.txt" >&2; fail "conversion job failed"; fi
   sleep 10
 done
-[ "$ok" = 1 ] || fail "conversion did not finish in 10 minutes (last status: ${st:-none})"
+if [ "$ok" != 1 ]; then
+  diag_dump
+  fail "conversion did not finish in 10 minutes (last status: ${st:-none})"
+fi
 [ -f "$lib/movie.mkv" ] || fail "no movie.mkv after conversion: $(ls -A "$lib" | tr '\n' ' ')"
 [ ! -f "$lib/movie.mp4" ] || fail "movie.mp4 still there after it became movie.mkv"
 codec=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 "$lib/movie.mkv")
