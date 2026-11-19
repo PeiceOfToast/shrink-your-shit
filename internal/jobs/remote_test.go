@@ -3,6 +3,7 @@
 package jobs
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -131,5 +132,41 @@ func TestWorkersOnAndOff(t *testing.T) {
 	defer s.Close()
 	if !s.Paused() || s.WorkerEnabled(rw.ID) || s.WorkerEnabled(LocalWorker) {
 		t.Error("the pause wasn't carried to every worker")
+	}
+}
+
+// Removing a worker drops its path mappings too, in the same change as its row; another worker's stay.
+func TestRemoveWorkerLeavesNoPathMappings(t *testing.T) {
+	s := open(t) // closes the store, so Windows can remove the temp folder
+	pair := func(name string) string {
+		code, _, _ := s.NewPairing(time.Now())
+		rw, _, err := s.Pair(code, name, "1", "", "", 1, "", time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetPathMappings(rw.ID, []PathMapping{{Server: "srv", Worker: "/w", Mode: "map"}}); err != nil {
+			t.Fatal(err)
+		}
+		return rw.ID
+	}
+	gone, kept := pair("Gone"), pair("Kept")
+	if err := s.RemoveWorker(gone); err != nil {
+		t.Fatal(err)
+	}
+	count := func(id string) (n int) {
+		s.db.QueryRow(`SELECT COUNT(*) FROM worker_paths WHERE worker_id=?`, id).Scan(&n)
+		return n
+	}
+	if n := count(gone); n != 0 {
+		t.Errorf("a removed worker keeps %d path mappings", n)
+	}
+	if n := count(kept); n != 1 {
+		t.Errorf("another worker's path mappings: %d, want 1", n)
+	}
+	if err := s.RemoveWorker(gone); !errors.Is(err, ErrNotFound) {
+		t.Errorf("removing a worker twice: %v, want ErrNotFound", err)
+	}
+	if n := count(kept); n != 1 {
+		t.Errorf("a failed removal changed another worker's mappings: %d", n)
 	}
 }
