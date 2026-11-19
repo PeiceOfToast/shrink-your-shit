@@ -64,7 +64,8 @@ let mockChecked = Date.now() - 36e5; // the sample's last check, kept like the s
 const mockUpdate = (): UpdateNotice => { const on = !!mock.mockState().settings.checkForUpdates, q = new URLSearchParams(location.search), up = q.has("update");
   return { enabled: on, current: "2.0.0", latest: on ? (up ? "2.1.0" : "2.0.0") : null, available: on && up, notes: "", url: on && up ? "https://github.com/" : null,
     publishedAt: null, checkedAt: on ? new Date(mockChecked).toISOString() : null, error: on && q.has("updateerr") ? "Get \"https://api.github.com/...\": dial tcp: i/o timeout" : null, installType: "script" }; };
-export const getUpdate = (): Promise<Answer<UpdateNotice>> => (MOCK ? M(mockUpdate()) : call("GET", "/api/v2/update"));
+export const getUpdate = (): Promise<Answer<UpdateNotice>> => (!MOCK ? call("GET", "/api/v2/update")
+  : new URLSearchParams(location.search).has("updatefail") ? M({ error: { code: "internal", message: "Couldn't load the update status." } }) : M(mockUpdate()));
 export const checkUpdate = (): Promise<Answer<UpdateNotice>> => (MOCK ? M((mockChecked = Date.now(), mockUpdate())) : call("POST", "/api/v2/update/check"));
 export async function patchSettings(p: Partial<FirstRunSettings>): Promise<Answer<unknown>> {
   if (MOCK) return mock.setSettings(p);
