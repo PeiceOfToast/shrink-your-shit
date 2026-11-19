@@ -118,3 +118,35 @@ func TestVP9QualityWithALevel(t *testing.T) {
 		t.Errorf("no level: %s", args)
 	}
 }
+
+// Review a772397 item 2: a saved AV1 VBR flow is skipped with the words that say what to change.
+func TestSavedAV1VBRSkipsWithItsWords(t *testing.T) {
+	SetAvailableFormats(map[string]bool{"libx265": true, "libsvtav1": true})
+	defer SetAvailableFormats(nil)
+	s := DefaultSelectors(3)
+	s.Format, s.Resolution, s.RateControl, s.VBRMaxKbps = "av1", "720", "vbr", 3000
+	p := s.Template().Compile(h264(1920, 1080, 8000))
+	const want = "AV1 can't use VBR with a max. Edit the workflow's Convert step and pick Quality only."
+	if p.Skip != want || p.SkipCode != SkipSettingCannotRun {
+		t.Errorf("AV1 VBR skip: %q (%v), want %q", p.Skip, p.SkipCode, want)
+	}
+}
+
+// The max that set a VBR file's bitrate: the limit when there is no average or the average was cut to it.
+func TestPeakLimitBindsAndAverageIsMax(t *testing.T) {
+	for _, c := range []struct {
+		name            string
+		v               VideoEncode
+		binds, avgIsMax bool
+	}{
+		{"no limit", VideoEncode{TargetKbps: 3000, MaxRateKbps: 3000}, false, false},
+		{"quality mode, limit is the peak", VideoEncode{MaxRateKbps: 2400, PeakLimitKbps: 3000}, true, false},
+		{"average cut to the limit", VideoEncode{TargetKbps: 3000, MaxRateKbps: 3000, PeakLimitKbps: 3000}, true, true},
+		{"average under the limit", VideoEncode{TargetKbps: 2000, MaxRateKbps: 2000, PeakLimitKbps: 3000}, false, false},
+		{"average under limit, max at limit", VideoEncode{TargetKbps: 2000, MaxRateKbps: 3000, PeakLimitKbps: 3000}, false, false},
+	} {
+		if c.v.PeakLimitBinds() != c.binds || c.v.AverageIsMax() != c.avgIsMax {
+			t.Errorf("%s: binds %v, average is max %v", c.name, c.v.PeakLimitBinds(), c.v.AverageIsMax())
+		}
+	}
+}
