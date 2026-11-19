@@ -343,3 +343,45 @@ func TestReasonCodesMigration(t *testing.T) {
 		t.Errorf("new retry %+v", last)
 	}
 }
+
+// A workflow's Failed counts each file once, by its newest job (as the library card does): a file that failed twice
+// (two job rows) is one failure, and a file that failed and then finished is none.
+func TestWorkflowFailedCountsEachFileOnce(t *testing.T) {
+	s := open(t)
+	l, _ := s.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	s.SetPaused(false)
+	a := filepath.Join(l.Path, "a.mkv")
+	b := filepath.Join(l.Path, "b.mkv")
+
+	// a.mkv: fails, is queued again (a workflow change makes a new job row), and fails again.
+	for i := 0; i < 2; i++ {
+		s.Enqueue(Job{LibraryID: l.ID, Path: a, SizeBefore: 1000})
+		j, err := s.Claim("w")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Fail(j.ID, "boom", "boom"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// b.mkv: fails, then its newer job finishes.
+	s.Enqueue(Job{LibraryID: l.ID, Path: b, SizeBefore: 1000})
+	j, _ := s.Claim("w")
+	s.Fail(j.ID, "boom", "boom")
+	s.Enqueue(Job{LibraryID: l.ID, Path: b, SizeBefore: 1000})
+	j, _ = s.Claim("w")
+	if err := s.Complete(j.ID, b, 400); err != nil {
+		t.Fatal(err)
+	}
+
+	runs, err := s.WorkflowRunsSince(l.FlowID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runs.Failed != 1 {
+		t.Errorf("workflow Failed %d, want 1: a.mkv is one failed file (its two rows), b.mkv's newer job is done", runs.Failed)
+	}
+	if runs.Completed != 1 {
+		t.Errorf("workflow Completed %d, want 1 (b.mkv's done job; Completed is unchanged)", runs.Completed)
+	}
+}

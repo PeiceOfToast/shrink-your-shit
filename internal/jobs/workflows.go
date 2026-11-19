@@ -421,13 +421,15 @@ type WorkflowRuns struct {
 	LastAt                    string
 }
 
+// WorkflowRunsSince counts a flow's runs since a time. Failed counts each file once, by its newest job, as the
+// library card and Jobs > Failed do (a file that failed twice, or failed and then finished, is not two failures).
 func (s *Store) WorkflowRunsSince(flowID int64, since string) (WorkflowRuns, error) {
 	var r WorkflowRuns
 	var last sql.NullString
 	err := s.db.QueryRow(`SELECT
   COALESCE(SUM(j.status IN ('queued','running')),0),
   COALESCE(SUM(j.status='done' AND j.updated>=?),0),
-  COALESCE(SUM(j.status IN ('failed','kept') AND j.updated>=?),0),
+  COALESCE(SUM(j.status IN ('failed','kept') AND j.updated>=? AND `+newestJobOf("j")+`),0),
   MAX(CASE WHEN j.status IN ('done','failed','kept') THEN j.updated END)
 FROM jobs j JOIN libraries l ON l.id=j.library_id WHERE l.flow_id=?`, since, since, flowID).Scan(&r.Active, &r.Completed, &r.Failed, &last)
 	r.LastAt = last.String
