@@ -129,12 +129,12 @@ export function Libraries() {
                 <span className="sub phone">{paused(l) ? "Paused · " + count(l.counts.waiting) + " waiting, not converting"
                   : [l.workflowName, count(l.counts.waiting) + " waiting", l.scan.lastScanAt ? "scanned " + lastScan(l.scan.lastScanAt) : "not scanned yet"].join(" · ")}</span>
                 {tag(l) && <span className="sub phone" title={tag(l)}>{shortTag(tag(l))}</span>}</td>
-              <td data-p="2"><Link to={"/workflows/" + l.workflowId}>{l.workflowName}</Link>{tag(l) && <span className="sub" title={tag(l)}>{shortTag(tag(l))}</span>}</td>
+              <td data-p="2"><Link to={"/workflows/" + l.workflowId}>{l.workflowName}</Link>{tag(l) && <span className="sub nowrap" title={tag(l)}>{shortTag(tag(l))}</span>}</td>
               <td className="num" data-p="3">{count(l.counts.waiting)}</td>
               <td className="nowrap" data-p="4">{lastScan(l.scan.lastScanAt)}</td>
               <td className="nowrap" data-p="5">{priorityWord(l.priority)}</td>
               <td className="num" data-p="6">{count(l.counts.files)}</td>
-              <td className="stc"><Status l={l} />{l.counts.failed > 0 && <Link className="failedlink" to={"/jobs?tab=failed&libraryId=" + encodeURIComponent(l.id)}>{count(l.counts.failed)} failed</Link>}</td>
+              <td className="stc"><Status l={l} />{l.counts.failed > 0 && <Link className="failedlink over" to={"/jobs?tab=failed&libraryId=" + encodeURIComponent(l.id)}>{count(l.counts.failed)} failed</Link>}</td>
             </tr>))}
           </tbody>
         </table></div>)}
