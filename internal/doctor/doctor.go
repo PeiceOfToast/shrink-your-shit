@@ -100,6 +100,9 @@ type Checker struct {
 	// KnownOriginals are the kept originals the database knows (jobs.Store.KnownOriginals); nil: the
 	// check for orphaned ones is skipped (no database at hand).
 	KnownOriginals func() (map[string]bool, error)
+	// JobOutput is jobs.Store.OutputOfJob: it tells a file Convert again moved aside from a real orphan
+	// (nil: every orphan gets the orphan wording).
+	JobOutput func(id int64) (string, bool, error)
 	// OnTested, when set, gets each hardware test run's results once it is stored (the database keeps them;
 	// nil: nothing is kept). It is called without the lock.
 	OnTested func(at time.Time, results []EncoderResult)
@@ -472,8 +475,15 @@ func (c *Checker) Folder(ctx context.Context, path string) (r FolderReport) {
 	// FIRST-RUN.md "States and errors"). The health report's details may be technical.
 	if c.KnownOriginals != nil {
 		if known, err := c.KnownOriginals(); err == nil {
-			for _, o := range OrphanedOriginals(path, known) {
-				r.Notes = append(r.Notes, Issue{Code: "orphaned_originals", Message: o.Message()})
+			var moved []string
+			for _, o := range OrphanedOriginals(path, known, c.JobOutput) {
+				if o.Files > 0 {
+					r.Notes = append(r.Notes, Issue{Code: "orphaned_originals", Message: o.Message()})
+				}
+				moved = append(moved, o.Moved...)
+			}
+			if len(moved) > 0 { // one note for the library: its check ID is per code
+				r.Notes = append(r.Notes, Issue{Code: "moved_aside_outputs", Message: MovedAsideNote(moved)})
 			}
 		}
 	}

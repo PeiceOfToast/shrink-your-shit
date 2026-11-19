@@ -255,6 +255,20 @@ func nullID(id int64) any {
 	return id
 }
 
+// OutputOfJob is the output path of job id, and whether the job exists. The doctor uses it to tell a file that
+// Convert again moved aside (named for the job that made it) from a real orphan.
+func (s *Store) OutputOfJob(id int64) (string, bool, error) {
+	var out string
+	err := s.db.QueryRow(`SELECT output_path FROM jobs WHERE id=?`, id).Scan(&out)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return out, true, nil
+}
+
 // KnownOriginals are the files in .syp-trash folders that the originals journal points at (any state),
 // so a file there that is not among them is an orphan: an original from an earlier setup whose database
 // is gone (doctor.OrphanedOriginals).
