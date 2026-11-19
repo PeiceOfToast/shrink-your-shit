@@ -246,6 +246,20 @@ func TestUpdateRollback(t *testing.T) {
 	}
 }
 
+// A roll back that put the database back says so in lastResult.
+func TestUpdateLastResultSaysTheDatabaseWentBack(t *testing.T) {
+	srv, u, _, _ := installServer(t, "script")
+	m := &update.Marker{Kind: "rollback", From: "0.2.0", To: "0.1.1", DataRestored: true}
+	if _, err := update.Settle(u.dataDir, m, "0.1.1", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	_, body := getJSON(t, srv.URL+"/api/v2/update")
+	last, _ := body["lastResult"].(map[string]any)
+	if last["dataRestored"] != true || last["message"] != "Rolled back from v0.2.0 to v0.1.1; changes made since the update were undone (kept in syp.db.rolled-back)" {
+		t.Errorf("lastResult %v", body["lastResult"])
+	}
+}
+
 // After a roll back, the stored result is in GET /api/v2/update.
 func TestUpdateLastResultShown(t *testing.T) {
 	srv, u, _, _ := installServer(t, "script")
@@ -255,7 +269,7 @@ func TestUpdateLastResultShown(t *testing.T) {
 	}
 	_, body := getJSON(t, srv.URL+"/api/v2/update")
 	last, _ := body["lastResult"].(map[string]any)
-	if last["ok"] != false || last["message"] != "Update to v0.2.0 failed; rolled back to v0.1.1" || last["from"] != "0.1.1" || last["to"] != "0.2.0" {
+	if last["ok"] != false || last["message"] != "Update to v0.2.0 failed; rolled back to v0.1.1" || last["from"] != "0.1.1" || last["to"] != "0.2.0" || last["dataRestored"] != false {
 		t.Errorf("lastResult %v", body["lastResult"])
 	}
 }

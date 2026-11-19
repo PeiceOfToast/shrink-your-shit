@@ -25,6 +25,9 @@ const ReleaseBase = "https://github.com/PeiceOfToast/shrink-your-shit/releases/d
 // maxDownload caps an archive or checksums.txt (a release archive is about 30 MB).
 const maxDownload = 512 << 20
 
+// maxProgram caps the program taken out of an archive; a larger one is refused, not cut short.
+var maxProgram int64 = maxDownload
+
 var strictVersion = regexp.MustCompile(`^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$`)
 
 // ValidVersion reports whether v is a plain x.y.z release number (no "v", no suffix, no leading zeros).
@@ -135,11 +138,14 @@ func extract(r io.Reader, entry, dest string) error {
 		if h.Name != entry || h.Typeflag != tar.TypeReg {
 			continue
 		}
+		if h.Size > maxProgram {
+			return fmt.Errorf("the program in the archive is %d bytes, more than the %d allowed", h.Size, maxProgram)
+		}
 		out, err := os.CreateTemp(filepath.Dir(dest), ".syp-new-")
 		if err != nil {
 			return err
 		}
-		_, cerr := io.Copy(out, io.LimitReader(tr, maxDownload))
+		_, cerr := io.Copy(out, tr) // tar gives exactly h.Size bytes
 		err = errors.Join(cerr, out.Chmod(0o755), out.Close())
 		if err == nil {
 			err = os.Rename(out.Name(), dest)

@@ -165,3 +165,43 @@ func TestRestoreDB(t *testing.T) {
 		t.Errorf("the newer database's WAL is still there: %v", err)
 	}
 }
+
+// A rolled-back start that put the database back says so, for a roll back and a failed update alike.
+func TestSettleSaysTheDatabaseWentBack(t *testing.T) {
+	dir := t.TempDir()
+	for _, c := range []struct {
+		m       Marker
+		version string
+		want    string
+	}{
+		{Marker{Kind: "rollback", From: "9.0.1", To: "9.0.0", DataRestored: true}, "9.0.0",
+			"Rolled back from v9.0.1 to v9.0.0; changes made since the update were undone (kept in syp.db.rolled-back)"},
+		{Marker{Kind: "update", From: "9.0.0", To: "9.0.1", DataRestored: true}, "9.0.0",
+			"Update to v9.0.1 failed; rolled back to v9.0.0; changes made since the update were undone (kept in syp.db.rolled-back)"},
+	} {
+		WriteMarker(dir, c.m)
+		r, err := Settle(dir, ReadMarker(dir), c.version, testNow)
+		if err != nil || r.Message != c.want || !r.DataRestored || !LastResult(dir).DataRestored {
+			t.Errorf("%s: %+v %v", c.m.Kind, r, err)
+		}
+	}
+	WriteMarker(dir, Marker{Kind: "rollback", From: "9.0.1"})
+	if r, _ := Settle(dir, ReadMarker(dir), "9.0.0", testNow); r.DataRestored || strings.Contains(r.Message, "undone") {
+		t.Errorf("no restore: %+v", r)
+	}
+}
+
+func TestFetchRefusesAProgramOverTheCap(t *testing.T) {
+	old := maxProgram
+	maxProgram = 5
+	t.Cleanup(func() { maxProgram = old })
+	srv := releaseServer(t, "1.2.3", releaseArchive(t, "linux", "amd64", []byte("123456")), "")
+	dir := t.TempDir()
+	err := Fetch(context.Background(), srv.Client(), srv.URL, "1.2.3", "linux", "amd64", filepath.Join(dir, "p"))
+	if err == nil || !strings.Contains(err.Error(), "more than the 5 allowed") {
+		t.Fatalf("err = %v", err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("left behind: %v", entries)
+	}
+}

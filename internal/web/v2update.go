@@ -324,7 +324,7 @@ func (u *updater) bodyLocked(st update.Status, on bool) map[string]any {
 	}
 	var last any
 	if r := update.LastResult(u.dataDir); r != nil {
-		last = map[string]any{"ok": r.OK, "from": r.From, "to": r.To, "message": r.Message}
+		last = map[string]any{"ok": r.OK, "from": r.From, "to": r.To, "message": r.Message, "dataRestored": r.DataRestored}
 	}
 	return map[string]any{
 		"enabled": on, "current": st.Current, "latest": emptyAsNil(st.Latest), "available": on && st.Available,

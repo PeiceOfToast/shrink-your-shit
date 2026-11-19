@@ -403,6 +403,11 @@ func openStore(dbPath string, pending *update.Marker) (*jobs.Store, error) {
 		return nil, fmt.Errorf("update: could not put the database back from %s: %v", pending.Backup, err)
 	}
 	log.Printf("update: the database was put back from %s (the newer one is kept as %s.rolled-back)", pending.Backup, dbPath)
+	// the result says so; saved now, so a start that stops before it is settled still says so next time
+	pending.DataRestored = true
+	if err := update.WriteMarker(filepath.Dir(dbPath), *pending); err != nil {
+		log.Printf("update: %v", err)
+	}
 	return jobs.Open(dbPath)
 }
 

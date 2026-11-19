@@ -10,6 +10,8 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -163,5 +165,78 @@ func TestRollbackSwapsBackAndUndoesWhenThePreviousDoesNotAnswer(t *testing.T) {
 	h.handle(update.HelperRequest{Cmd: "rollback"})
 	if a := finish(t, h); a.State != "failed" || read(t, h.bin) != "prev" || read(t, h.bin+".previous") != "old" {
 		t.Errorf("failed rollback: %+v, bin %q", a, read(t, h.bin))
+	}
+}
+
+// serveAs runs one request through serve as a caller with uid (ok false: its identity can't be read).
+func serveAs(t *testing.T, h *helper, uid int, ok bool, req string) update.HelperAnswer {
+	t.Helper()
+	old := callerUID
+	callerUID = func(*net.UnixConn) (int, bool) { return uid, ok }
+	t.Cleanup(func() { callerUID = old })
+	sock := filepath.Join(t.TempDir(), "s")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		if c, err := ln.Accept(); err == nil {
+			serve(c.(*net.UnixConn), 1000, h)
+		}
+	}()
+	c, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.Write([]byte(req + "\n"))
+	var a update.HelperAnswer
+	if err := json.NewDecoder(c).Decode(&a); err != nil {
+		t.Fatal(err)
+	}
+	return a
+}
+
+// Only root and the service user (uid 1000 here) may use the helper; an unreadable caller is refused.
+func TestOnlyRootAndTheServiceUserMayCall(t *testing.T) {
+	h, _ := testHelper(t, "", func() bool { return true })
+	os.WriteFile(h.bin+".previous", []byte("prev"), 0o755)
+	for _, c := range []struct {
+		uid  int
+		ok   bool
+		want string
+	}{{1001, true, "not_allowed"}, {65534, true, "not_allowed"}, {1000, false, "not_allowed"}, {0, false, "not_allowed"}} {
+		if a := serveAs(t, h, c.uid, c.ok, `{"cmd":"rollback"}`); a.OK || a.Code != c.want {
+			t.Errorf("uid %d (read %v): %+v, want %s", c.uid, c.ok, a, c.want)
+		}
+	}
+	if read(t, h.bin) != "old" {
+		t.Fatal("a refused caller changed the program")
+	}
+	for _, uid := range []int{1000, 0} {
+		if a := serveAs(t, h, uid, true, `{"cmd":"status"}`); !a.OK || a.State != "idle" {
+			t.Errorf("uid %d status: %+v", uid, a)
+		}
+	}
+}
+
+// A program that hangs on -version does not hold up a status call.
+func TestStatusAnswersWhileTheVersionIsRead(t *testing.T) {
+	h, _ := testHelper(t, "", func() bool { return true })
+	release := make(chan struct{})
+	h.version = func(string) (string, error) { <-release; return "0.1.0", nil }
+	defer close(release)
+	go h.handle(update.HelperRequest{Cmd: "install", Version: "0.2.0"})
+	time.Sleep(20 * time.Millisecond)
+	got := make(chan update.HelperAnswer, 1)
+	go func() { got <- h.handle(update.HelperRequest{Cmd: "status"}) }()
+	select {
+	case a := <-got:
+		if !a.OK || a.State != "idle" {
+			t.Errorf("status: %+v", a)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("status waited for the version read")
 	}
 }

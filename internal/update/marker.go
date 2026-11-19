@@ -19,6 +19,9 @@ import (
 
 const markerFile, resultFile = "update.json", "update-result.json"
 
+// RolledBackDB is where RestoreDB keeps the database it replaced (the app's database is syp.db).
+const RolledBackDB = "syp.db.rolled-back"
+
 // Marker is an update or roll back in progress.
 type Marker struct {
 	Kind   string    `json:"kind"`   // "update" or "rollback"
@@ -27,17 +30,21 @@ type Marker struct {
 	Backup string    `json:"backup"` // a database copy from before the update ("" if none)
 	Resume bool      `json:"resume"` // workers were turned off for it: turn them on again
 	At     time.Time `json:"at"`
+	// DataRestored: the start after it put Backup back, undoing the changes made since the update
+	DataRestored bool `json:"dataRestored,omitempty"`
 }
 
 // Result is how the last update or roll back ended, shown until the next one.
 type Result struct {
-	OK      bool      `json:"ok"`
-	Kind    string    `json:"kind"`
-	From    string    `json:"from"`
-	To      string    `json:"to"`
-	Message string    `json:"message"`
-	Backup  string    `json:"backup,omitempty"` // after a good update: the copy a manual roll back restores
-	At      time.Time `json:"at"`
+	OK      bool   `json:"ok"`
+	Kind    string `json:"kind"`
+	From    string `json:"from"`
+	To      string `json:"to"`
+	Message string `json:"message"`
+	// DataRestored: the database went back to the copy from before the update (the newer one is kept)
+	DataRestored bool      `json:"dataRestored"`
+	Backup       string    `json:"backup,omitempty"` // after a good update: the copy a manual roll back restores
+	At           time.Time `json:"at"`
 }
 
 // WriteMarker saves m in dataDir.
@@ -76,7 +83,7 @@ func LastResult(dataDir string) *Result {
 // marker. Call it once the program is serving (a new version that never gets this far is rolled back).
 func Settle(dataDir string, m *Marker, version string, now time.Time) (Result, error) {
 	switched := version != m.From
-	r := Result{OK: switched, Kind: m.Kind, From: m.From, To: version, At: now}
+	r := Result{OK: switched, Kind: m.Kind, From: m.From, To: version, DataRestored: m.DataRestored, At: now}
 	switch {
 	case m.Kind == "rollback" && switched:
 		r.Message = fmt.Sprintf("Rolled back from v%s to v%s", m.From, version)
@@ -88,6 +95,9 @@ func Settle(dataDir string, m *Marker, version string, now time.Time) (Result, e
 	default:
 		r.To = m.To
 		r.Message = fmt.Sprintf("Update to v%s failed; rolled back to v%s", m.To, version)
+	}
+	if m.DataRestored {
+		r.Message += "; changes made since the update were undone (kept in " + RolledBackDB + ")"
 	}
 	if err := writeJSON(filepath.Join(dataDir, resultFile), r); err != nil {
 		return r, err

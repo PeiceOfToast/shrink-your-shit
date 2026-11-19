@@ -133,7 +133,7 @@ func main() {
 			log.Printf("accept: %v", err)
 			continue
 		}
-		serve(conn.(*net.UnixConn), uid, h)
+		go serve(conn.(*net.UnixConn), uid, h) // a slow request never holds up a status call
 	}
 	_ = os.Remove(*sock)
 }
@@ -142,7 +142,7 @@ func serve(c *net.UnixConn, svcUID int, h *helper) {
 	defer c.Close()
 	_ = c.SetDeadline(time.Now().Add(connLimit))
 	reply := func(a update.HelperAnswer) { _ = json.NewEncoder(c).Encode(a) }
-	if uid, ok := peerUID(c); !ok || (uid != 0 && uid != svcUID) { // rule 1: fail closed
+	if uid, ok := callerUID(c); !ok || (uid != 0 && uid != svcUID) { // rule 1: fail closed
 		reply(update.HelperAnswer{Code: "not_allowed", Message: "this user may not use the update helper"})
 		return
 	}
@@ -153,6 +153,9 @@ func serve(c *net.UnixConn, svcUID int, h *helper) {
 	}
 	reply(h.handle(req))
 }
+
+// callerUID is peerUID; tests replace it to be a caller of their choosing.
+var callerUID = peerUID
 
 func peerUID(c *net.UnixConn) (int, bool) {
 	raw, err := c.SyscallConn()
@@ -171,6 +174,13 @@ func peerUID(c *net.UnixConn) (int, bool) {
 
 // handle answers at once; an install or roll back goes on in the background (the app is restarted under it).
 func (h *helper) handle(req update.HelperRequest) update.HelperAnswer {
+	// The installed program is asked its version before the lock is taken: a program that hangs on
+	// -version (up to runLimit) must not hold up status calls.
+	var cur string
+	var curErr error
+	if req.Cmd == "install" && update.ValidVersion(req.Version) {
+		cur, curErr = h.version(h.bin)
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	refuse := func(code, msg string) update.HelperAnswer {
@@ -193,9 +203,8 @@ func (h *helper) handle(req update.HelperRequest) update.HelperAnswer {
 		if !update.ValidVersion(req.Version) { // rule 2
 			return refuse("bad_request", "the version must be a plain x.y.z")
 		}
-		cur, err := h.version(h.bin)
-		if err != nil {
-			return refuse("bad_request", err.Error())
+		if curErr != nil {
+			return refuse("bad_request", curErr.Error())
 		}
 		if !update.Newer(req.Version, cur) {
 			return refuse("not_newer", fmt.Sprintf("v%s is not newer than the installed v%s", req.Version, cur))
