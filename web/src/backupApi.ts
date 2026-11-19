@@ -1,10 +1,10 @@
-// Backups (contract "Backup"). The server routes aren't on dev yet, so ?mock= keeps an in-memory list.
+// Backups (contract "Backup"). ?mock= keeps an in-memory list; its names match the server's (…-2006-01-02-150405.json.gz).
 // Mock files: a name with "bad" isn't a backup, "new" is from a newer app, "busy" finds conversions running on restore.
 import { call, MOCK, type Answer } from "./api";
 import type { Backup, BackupApplied, BackupList, BackupPreview } from "./types/backup";
 
 const ago = (h: number) => new Date(Date.now() - h * 3600000).toISOString();
-const fileName = (t: string) => "shrink-your-shit-backup-" + t.slice(0, 16).replace("T", "-").replace(":", "") + ".json.gz";
+const fileName = (t: string) => "shrink-your-shit-backup-" + t.slice(0, 19).replace("T", "-").replace(/:/g, "") + ".json.gz";
 const mk = (id: string, h: number, reason: Backup["reason"], appVersion: string, sizeBytes: number): Backup => ({ id, name: fileName(ago(h)), createdAt: ago(h), reason, appVersion, sizeBytes });
 let mock: Backup[] = new URLSearchParams(location.search).get("mock") === "fresh" ? [] : [
   mk("4", 3, "manual", "0.3.1", 412_000), mk("3", 26, "before_update", "0.3.0", 398_500),
