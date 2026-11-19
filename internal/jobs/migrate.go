@@ -587,6 +587,17 @@ func failedMigration(m migration, err error, backup string) error {
 	return errors.New(msg)
 }
 
+// Backup saves a consistent copy of the database as <db>.bak-v<its schema version>, as before a
+// migration (the newest keepBackups are kept), and returns its path. The updater makes one before a
+// new program is installed, so a roll back can put it back.
+func (s *Store) Backup() (string, error) {
+	v, err := s.userVersion()
+	if err != nil {
+		return "", err
+	}
+	return s.backup(v)
+}
+
 // backup saves a consistent copy of the database as <db>.bak-v<version> (replacing one from a
 // previous attempt) and deletes all but the newest keepBackups of them.
 func (s *Store) backup(version int) (string, error) {
