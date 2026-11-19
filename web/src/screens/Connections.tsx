@@ -32,20 +32,21 @@ function Status({ it }: { it: Integration | undefined }) {
   const r = it.lastResult;
   if (!r) return <span className="st"><Icon id="i-clock" />Saved · not tested yet</span>;
   if (r.ok) return <span className="st ok"><Icon id="i-check" />Connected · last told {clock(r.at)}</span>;
-  return <span className="st warn"><Icon id="i-alert" /><span>Didn't answer at {clock(r.at)}: {dot(r.message)}.</span></span>;
+  return <span className="st warn"><Icon id="i-alert" /><span>Failed at {clock(r.at)}: {dot(r.message)}.</span></span>;
 }
 
 // connected but a folder is missing or outside the libraries: a warning, not a tick
 const gap = (r: IntegrationTestResult) => r.ok && r.folders.some((f) => f.ourPath === null || !f.inLibrary);
-function Result({ tone, text }: { tone: "ok" | "warn" | "bad"; text: string }) {
+type Tone = "ok" | "warn" | "bad";
+function Result({ tone, text }: { tone: Tone; text: string }) {
   return <p className={"st " + tone} style={{ margin: 0 }}><Icon id={tone === "ok" ? "i-check" : "i-alert"} /><span>{text}</span></p>;
 }
 
-function Form({ kind, it, onDone, onCancel }: { kind: IntegrationKind; it?: Integration; onDone: (msg: string) => void; onCancel: () => void }) {
+function Form({ kind, it, onDone, onCancel, onTested }: { kind: IntegrationKind; it?: Integration; onDone: (m: { tone: Tone; text: string }) => void; onCancel: () => void; onTested: () => void }) {
   const app = APP[kind].name, id = "c-" + kind;
   const [url, setUrl] = useState(it?.url ?? ""), [key, setKey] = useState(""), [changeKey, setChangeKey] = useState(!it?.hasKey);
   const [maps, setMaps] = useState<PathMapping[]>(it?.pathMappings.length ? it.pathMappings : []);
-  const [busy, setBusy] = useState(false), [result, setResult] = useState<{ tone: "ok" | "warn" | "bad"; text: string } | null>(null), [error, setError] = useState("");
+  const [busy, setBusy] = useState(false), [result, setResult] = useState<{ tone: Tone; text: string } | null>(null), [error, setError] = useState("");
   const rows = maps.filter((m) => m.theirPath.trim() || m.ourPath.trim()).map((m) => ({ theirPath: m.theirPath.trim(), ourPath: m.ourPath.trim() }));
   const setMap = (i: number, p: Partial<PathMapping>) => setMaps(maps.map((m, j) => (j === i ? { ...m, ...p } : m)));
   const run = async <T,>(p: Promise<Answer<T>>): Promise<T | null> => {
@@ -53,7 +54,11 @@ function Form({ kind, it, onDone, onCancel }: { kind: IntegrationKind; it?: Inte
   };
   const test = async () => {
     setBusy(true); setError(""); setResult(null);
-    const r = await run(it ? testIntegration({ id: it.id, url: url.trim(), ...(key && { apiKey: key }), pathMappings: rows }) : testIntegration({ kind, url: url.trim(), apiKey: key, pathMappings: rows }));
+    // nothing changed: a plain Test of the saved one, which also updates the card's status (contract: only that sets lastResult)
+    const same = it && url.trim() === it.url && !key && JSON.stringify(rows) === JSON.stringify(it.pathMappings);
+    const r = await run(!it ? testIntegration({ kind, url: url.trim(), apiKey: key, pathMappings: rows })
+      : same ? testIntegration({ id: it.id }) : testIntegration({ id: it.id, url: url.trim(), ...(key && { apiKey: key }), pathMappings: rows }));
+    if (r && same) onTested();
     if (r) setResult({ tone: !r.ok ? "bad" : gap(r) ? "warn" : "ok", text: testSentence(kind, r) });
     setBusy(false);
   };
@@ -64,7 +69,7 @@ function Form({ kind, it, onDone, onCancel }: { kind: IntegrationKind; it?: Inte
     if (!saved) { setBusy(false); return; }
     const r = await run(testIntegration({ id: saved.id })); // Save runs the same test; this one sets lastResult
     setBusy(false);
-    onDone(r?.ok ? "Saved. " + testSentence(kind, r) : `Saved, but ${app} didn't answer, so files won't be refreshed until it does.`);
+    onDone(r?.ok ? { tone: gap(r) ? "warn" : "ok", text: "Saved. " + testSentence(kind, r) } : { tone: "warn", text: `Saved, but ${app} didn't answer, so files won't be refreshed until it does.` });
   };
   return (
     <form className="stack cform" onSubmit={(e) => { e.preventDefault(); save(); }} onInput={() => setResult(null)}>
@@ -74,12 +79,12 @@ function Form({ kind, it, onDone, onCancel }: { kind: IntegrationKind; it?: Inte
           onChange={(e) => setUrl(e.target.value)} placeholder={`http://192.168.1.20:${APP[kind].port}`} />
       </div>
       <div className="field">
-        <label htmlFor={id + "-key"}>API key</label>
+        {changeKey ? <label htmlFor={id + "-key"}>API key</label> : <span className="lab">API key</span>}
         {changeKey
           ? <input className="input mono" id={id + "-key"} type="password" autoComplete="off" required={!it} value={key} onChange={(e) => setKey(e.target.value)}
             placeholder={it ? "Leave empty to keep the saved key." : ""} />
           : <p className="row" style={{ margin: 0, gap: 8 }} id={id + "-key"}><span className="st ok"><Icon id="i-check" />Saved</span>
-            <button className="btn sm ghost" type="button" onClick={() => setChangeKey(true)}>Change</button></p>}
+            <button className="btn sm ghost" type="button" onClick={() => setChangeKey(true)} aria-label="Change the saved API key">Change</button></p>}
         <span className="hint">In {app}: Settings &gt; General &gt; Security.</span>
       </div>
       <details className="cfold" open={maps.length > 0 || undefined}>
@@ -108,7 +113,7 @@ function Form({ kind, it, onDone, onCancel }: { kind: IntegrationKind; it?: Inte
 }
 
 function AppCard({ kind, it, reload, said }: { kind: IntegrationKind; it?: Integration; reload: () => void; said: (m: string) => void }) {
-  const app = APP[kind].name, [open, setOpen] = useState(false), [confirm, setConfirm] = useState(false), [msg, setMsg] = useState("");
+  const app = APP[kind].name, [open, setOpen] = useState(false), [confirm, setConfirm] = useState(false), [msg, setMsg] = useState(""), [saved, setSaved] = useState<{ tone: Tone; text: string } | null>(null);
   const remove = async () => {
     const r = await removeIntegration(it!.id);
     if (failed(r)) { setMsg(r.error.message); return; }
@@ -121,11 +126,12 @@ function AppCard({ kind, it, reload, said }: { kind: IntegrationKind; it?: Integ
         <Status it={it} />
         <span className="sp" />
         {!open && !confirm && (it
-          ? <span className="row nw" style={{ gap: 6 }}><button className="btn sm" type="button" onClick={() => setOpen(true)}>Edit</button>
-            <button className="btn sm ghost" type="button" onClick={() => setConfirm(true)}>Remove</button></span>
-          : <button className="btn primary sm" type="button" onClick={() => setOpen(true)}>Connect</button>)}
+          ? <span className="row nw" style={{ gap: 6 }}><button className="btn sm" type="button" onClick={() => { setOpen(true); setSaved(null); }} aria-label={"Edit " + app}>Edit</button>
+            <button className="btn sm ghost" type="button" onClick={() => { setConfirm(true); setSaved(null); }} aria-label={"Remove " + app}>Remove</button></span>
+          : <button className="btn primary sm" type="button" onClick={() => { setOpen(true); setSaved(null); }}>Connect</button>)}
       </div>
       <div className="bd stack">
+        {saved && <div role="status"><Result tone={saved.tone} text={saved.text} /></div>}
         <p className="muted" style={{ margin: 0 }}>Rescans each converted file, so it doesn't download it again.{it && <> <span className="mono">{it.url}</span></>}</p>
         {confirm && <div className="row" role="group" aria-label={"Remove " + app} style={{ gap: 8 }}>
           <span>Remove {app}? It won't be told about converted files.</span>
@@ -133,7 +139,7 @@ function AppCard({ kind, it, reload, said }: { kind: IntegrationKind; it?: Integ
           <button className="btn sm ghost" type="button" onClick={() => setConfirm(false)}>Cancel</button>
           {msg && <span className="st bad"><Icon id="i-alert" />{msg}</span>}
         </div>}
-        {open && <Form kind={kind} it={it} onCancel={() => setOpen(false)} onDone={(m) => { setOpen(false); said(m); reload(); }} />}
+        {open && <Form kind={kind} it={it} onTested={reload} onCancel={() => setOpen(false)} onDone={(m) => { setOpen(false); setSaved(m); said(""); reload(); }} />}
       </div>
     </section>);
 }
