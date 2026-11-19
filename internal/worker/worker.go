@@ -119,7 +119,10 @@ type Worker struct {
 	Encoder func(codec string) (enc, note string)
 	// verified is the probe of the new file the last check passed (S5: stored for its final path).
 	verified media.Info
-	check    *CheckScore // the picture check's score for the job in hand (nil: none ran); set by the comparison
+	// movedAside is the trash sentence for our earlier output this job moved aside (Convert again). The job's kept
+	// step says it too, since the Job page Timeline shows steps, not the log.
+	movedAside string
+	check      *CheckScore // the picture check's score for the job in hand (nil: none ran); set by the comparison
 	// remote is the job a worker on another computer converts, run here (V7b2); nil for a local one.
 	remote *RemoteJob
 	// failures: the running job's path's choices for when it doesn't work (V6b; under mu)
@@ -428,11 +431,11 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 	w.jobf(job.ID, ": done, %s: %s -> %s", final, rules.HumanBytes(job.SizeBefore), rules.HumanBytes(size))
 	w.Queue.AddStep(job.ID, "verified", true, "Every check passed: the new file is complete, plays cleanly and looks like the original.")
 	if filepath.Dir(final) != filepath.Dir(job.Path) { // "Save to another folder" (S6)
-		w.Queue.AddStep(job.ID, "kept", true, "The new file was written to "+filepath.Dir(final)+"; the original stays where it is.")
+		w.Queue.AddStep(job.ID, "kept", true, w.withMovedAside("The new file was written to "+filepath.Dir(final)+"; the original stays where it is."))
 	} else if w.Mode == Beside {
-		w.Queue.AddStep(job.ID, "kept", true, "The new file was written next to the original, which stays as it is.")
+		w.Queue.AddStep(job.ID, "kept", true, w.withMovedAside("The new file was written next to the original, which stays as it is."))
 	} else {
-		w.Queue.AddStep(job.ID, "replaced", true, fmt.Sprintf("The new file is in place: %s to %s.", rules.HumanBytes(job.SizeBefore), rules.HumanBytes(size)))
+		w.Queue.AddStep(job.ID, "replaced", true, w.withMovedAside(fmt.Sprintf("The new file is in place: %s to %s.", rules.HumanBytes(job.SizeBefore), rules.HumanBytes(size))))
 	}
 	if err := w.Queue.Complete(job.ID, final, size); err != nil {
 		return true, err
@@ -704,6 +707,7 @@ func BesidePathAs(src, ext string) string {
 // file next to the original; every check runs on that temp file; the rename is the very last step, and
 // any error or "no" before it removes the temp file and leaves the original exactly as it was.
 func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err error) {
+	w.movedAside = ""
 	// An earlier try of this job may have left .srt files it could not remove (they are on record): they
 	// go first, on every try and whatever the setting is now, each only if it is still exactly ours, so a
 	// try never takes its own file for someone else's and none is left behind. One that still cannot be
@@ -1539,8 +1543,17 @@ func (w *Worker) setAside(jobID int64, final string) error {
 	if err := os.Rename(final, dst); err != nil {
 		return refused(err)
 	}
-	w.Queue.AppendLogLine(jobID, 0, "app", fmt.Sprintf("Your earlier converted file %s had been changed since it was made, so it was moved to the trash (%s) and the new file took its place.", name, filepath.Join(TrashDir, filepath.Base(dst))))
+	w.movedAside = fmt.Sprintf("Your earlier converted file %s had been changed since it was made, so it was moved to the trash (%s) and the new file took its place.", name, filepath.Join(TrashDir, filepath.Base(dst)))
+	w.Queue.AppendLogLine(jobID, 0, "app", w.movedAside)
 	return nil
+}
+
+// withMovedAside adds the trash sentence to a step's words when this job moved our earlier output aside.
+func (w *Worker) withMovedAside(words string) string {
+	if w.movedAside == "" {
+		return words
+	}
+	return words + " " + w.movedAside
 }
 
 // ownOutput reports whether the regular file at p (lst its Lstat) is one a done job of ours wrote.

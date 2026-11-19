@@ -63,9 +63,7 @@ func convertedThenAgain(t *testing.T, folder bool, change func(out string)) (*sc
 		t.Fatal(err)
 	}
 	s.content = "newer"
-	if _, err := w.RunOne(context.Background()); err != nil {
-		t.Fatal(err)
-	}
+	w.RunOne(context.Background()) // the job's own status says how it went; the tests check it
 	return s, out, old
 }
 
@@ -147,8 +145,12 @@ func TestUnrecordedFileAtTheOutputNameIsRefused(t *testing.T) {
 		os.MkdirAll(filepath.Dir(out), 0o755)
 		os.WriteFile(out, []byte("the person's own"), 0o644)
 		w.RunOne(context.Background())
-		if j := s.job(); j.Status != jobs.Failed || j.Error == "" {
-			t.Errorf("%s %q, want it failed", j.Status, j.Error)
+		words := "wasn't made by Shrink Your Shit"
+		if !folder {
+			words = "There is already a file named"
+		}
+		if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, words) {
+			t.Errorf("%s %q, want it failed with %q", j.Status, j.Error, words)
 		}
 		if read(out) != "the person's own" || len(trashedBeside(t, out)) != 0 {
 			t.Errorf("at the name %q, trash %v", read(out), trashedBeside(t, out))
@@ -192,4 +194,88 @@ func logHas(t *testing.T, s *scenario, words string) bool {
 		}
 	}
 	return false
+}
+
+// A symlink at a recorded output name is not our output (only a regular file is moved aside): the job fails, and the
+// link and its target stay where they are, with nothing in the trash.
+func TestConvertAgainRefusesASymlinkAtTheOutputName(t *testing.T) {
+	forBothPolicies(t, func(t *testing.T, folder bool) {
+		target := filepath.Join(t.TempDir(), "target.mkv")
+		if err := os.WriteFile(target, []byte("elsewhere"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		s, out, _ := convertedThenAgain(t, folder, func(out string) {
+			if err := os.Remove(out); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(target, out); err != nil {
+				t.Skipf("symlinks need privileges here: %v", err)
+			}
+		})
+		if j := s.job(); j.Status != jobs.Failed {
+			t.Fatalf("again: %s %q, want it failed", j.Status, j.Error)
+		}
+		if fi, err := os.Lstat(out); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+			t.Errorf("at the name: %v, want the symlink kept", err)
+		} else if to, _ := os.Readlink(out); to != target {
+			t.Errorf("symlink points at %q, want %q", to, target)
+		}
+		if read(target) != "elsewhere" {
+			t.Errorf("the link's target changed to %q", read(target))
+		}
+		if kept := trashedBeside(t, out); len(kept) != 0 {
+			t.Errorf("trash %v, want none", kept)
+		}
+	})
+}
+
+// A directory at a recorded output name is not our output either: the job fails and the directory stays, with
+// nothing in the trash.
+func TestConvertAgainRefusesADirectoryAtTheOutputName(t *testing.T) {
+	forBothPolicies(t, func(t *testing.T, folder bool) {
+		s, out, _ := convertedThenAgain(t, folder, func(out string) {
+			if err := os.Remove(out); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(out, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		})
+		if j := s.job(); j.Status != jobs.Failed {
+			t.Fatalf("again: %s %q, want it failed", j.Status, j.Error)
+		}
+		if fi, err := os.Stat(out); err != nil || !fi.IsDir() {
+			t.Errorf("at the name: %v, want the directory kept", err)
+		}
+		if kept := trashedBeside(t, out); len(kept) != 0 {
+			t.Errorf("trash %v, want none", kept)
+		}
+	})
+}
+
+// The job's steps carry the trash sentence too: the Job page Timeline shows steps, not the log.
+func TestConvertAgainMovedAsideIsInTheKeptStep(t *testing.T) {
+	forBothPolicies(t, func(t *testing.T, folder bool) {
+		later := time.Now().Add(72 * time.Hour)
+		s, _, _ := convertedThenAgain(t, folder, func(out string) {
+			if err := os.Chtimes(out, later, later); err != nil {
+				t.Fatal(err)
+			}
+		})
+		if j := s.job(); j.Status != jobs.Done {
+			t.Fatalf("again: %s %q", j.Status, j.Error)
+		}
+		steps, err := s.store.Steps(s.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, st := range steps {
+			if st.Step == "kept" || st.Step == "replaced" {
+				if strings.Contains(st.Words, "was moved to the trash") {
+					return
+				}
+			}
+		}
+		t.Errorf("no kept or replaced step says the changed file was moved to the trash: %+v", steps)
+	})
 }
