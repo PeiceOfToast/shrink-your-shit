@@ -40,7 +40,7 @@ export interface Job {
   originalUntouched: boolean | null;
   sizes: { before: number; after: number | null; saved: number | null };
   output: { path: string | null; policy: CommitPolicy; committedAt: Time | null };
-  originalState: "untouched" | "kept" | "replaced" | "restored" | "removed" | null;
+  originalState: "untouched" | "kept" | "restored" | "deleted" | "left_in_place" | "kept_beside" | null;
   createdAt: Time; startedAt: Time | null; endedAt: Time | null; durationSec: number | null;
 }
 

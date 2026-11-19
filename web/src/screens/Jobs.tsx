@@ -63,7 +63,7 @@ function Detail({ j }: { j: JobItem }) {
     return <div className="prog"><div className="row nw"><div className="bar" role="progressbar" aria-label={p.stage} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)}><i style={{ width: pct + "%" }} /></div><span className="sm">{Math.round(pct)}%</span></div>
       <span className="sm muted">{[p.stage, p.fps != null && p.fps + " fps", elapsed(p.elapsedS), p.etaS ? "about " + elapsed(p.etaS) + " left" : ""].filter(Boolean).join(" · ")}</span></div>;
   }
-  if (j.state === "completed") return <span className="sm">{saved(j.beforeBytes, j.afterBytes)}{j.originalState === "kept" && j.keptDaysLeft != null && <span className="muted"> · original kept {plural(j.keptDaysLeft, "more day", "more days")}</span>}</span>;
+  if (j.state === "completed") return <span className="sm">{saved(j.beforeBytes, j.afterBytes)}{j.originalState === "kept" && j.keptDaysLeft != null && <span className="muted"> · {j.keptDaysLeft > 0 ? "original in the trash " + plural(j.keptDaysLeft, "more day", "more days") : "original in the trash, deleted today"}</span>}</span>;
   return <span className="sm muted clamp2" title={reasonText(j)}>{reasonText(j)}</span>;
 }
 
@@ -442,7 +442,11 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
     const r = await act(restoreKept(kept!.keptId), setSaid);
     if (r) { setSaid(r.message); kl.reload(); d.reload(); onChanged(); }
   };
-  const keptLine = kept && <>Replaced · kept until {new Date(kept.deleteOn).toLocaleDateString(undefined, { day: "numeric", month: "short" })} · <button ref={backBtn} className="linkbtn" type="button" aria-expanded={back} onClick={() => setBack(!back)}>Get original back</button></>;
+  // design SCREENS V6 (11-19 14:09Z): the Original line by the server's originalState
+  const keptWords = (n: number) => (n > 0 ? "In the trash for " + plural(n, "more day", "more days") + ", then deleted" : "In the trash, deleted today");
+  const saving = own?.beforeBytes != null && own.afterBytes != null ? own.beforeBytes - own.afterBytes : 0; // the Size row's figure, as bytes
+  const freeNote = saving > 0 ? " Removing the original frees " + bytes(saving) + "." : "";
+  const keptLine = kept && <>{keptWords(Math.max(0, Math.ceil((new Date(kept.deleteOn).getTime() - Date.now()) / 864e5)))} · <button ref={backBtn} className="linkbtn" type="button" aria-expanded={back} onClick={() => setBack(!back)}>Get original back</button></>;
   // #163: a Done job converts again when the server says so (never decided here); the confirm names the workflow's
   // CURRENT version, which is what runs. Design's two variants (replace vs output-first, the keep days) need the job's
   // policy from the server: until then one sentence that holds for both.
@@ -498,7 +502,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
             {(own?.path ?? j?.file?.path) && <><dt>Source</dt><dd className="mono sm">{own?.path ?? j?.file?.path}</dd></>} {/* review 54ff228: no '-' when the server doesn't keep the path (a removed library's job) */}
             {(j?.library || own) && <><dt>Library</dt><dd>{j?.library?.name ?? own?.library}</dd></>}
             {own?.state === "completed" && <>{own.originalState !== "restored" && <><dt>Size</dt><dd>{saved(own.beforeBytes, own.afterBytes)}</dd></>} {/* review 66edc3d P3: after a restore the file is the original again: no saving */}
-              <dt>Original</dt><dd>{kept ? keptLine : own.originalState === "kept" ? "Kept " + plural(own.keptDaysLeft ?? 0, "more day", "more days") + ", then deleted" : own.originalState === "removed" ? "Deleted after the keep period" : "Left in place"}</dd></>}
+              <dt>Original</dt><dd>{kept ? keptLine : own.originalState === "kept" ? keptWords(own.keptDaysLeft ?? 0) : own.originalState === "restored" ? "Put back in place. The smaller version was deleted." : own.originalState === "deleted" ? "Deleted. The new file replaced it." : own.originalState === "left_in_place" ? "Left where it was. The new file is in another folder." + freeNote : own.originalState === "kept_beside" ? "Kept next to the new file, in the same folder." + freeNote : "Left in place"}</dd></>}
             {!own && kept && <><dt>Original</dt><dd>{keptLine}</dd></>}
           </dl>
           {others.length > 0 && <p className="sm" style={{ marginTop: 8 }}>This file's other jobs: {others.map((x, i) => <span key={x.jobId ?? x.id}>{i > 0 && " · "}<a className="linkbtn" href={"/jobs?tab=" + tabOf(x.state) + "&job=" + encodeURIComponent(x.jobId ?? x.id)} onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate("/jobs?tab=" + tabOf(x.state) + "&job=" + encodeURIComponent(x.jobId ?? x.id)); }}}>{WORD[x.state] ?? x.state} {x.finishedAt ? new Date(x.finishedAt).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}</a></span>)}</p>}
