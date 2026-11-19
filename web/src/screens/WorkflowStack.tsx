@@ -292,7 +292,7 @@ function StackPage({ id }: { id: string }) {
   const meta = useData(() => getWorkflow(id), [id]), defs = useData(stepDefinitions, []), draft = useData(() => getDraft(id), [id]);
   const problem = meta.error ?? defs.error ?? draft.error;
   if (meta.error?.code === "not_found" || (meta.loaded && !meta.data)) return <div className="card"><div className="bd">There is no such workflow. It may have been deleted.</div></div>;
-  if (!meta.data || !defs.data || !draft.data) return <div className="empty">{problem?.message ?? "Loading..."}</div>;
+  if (!meta.data || !defs.data || !draft.data) return <div className="empty">{problem?.message ?? "Loading…"}</div>;
   return <Editor id={id} w={meta.data} defs={defs.data} first={draft.data} reloadMeta={meta.reload} />;
 }
 

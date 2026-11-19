@@ -142,7 +142,7 @@ export function Enroll({ setup, reload, noMain }: { setup: Setup; reload: () => 
       {pick === "other" && <label className="field"><span className="lab">Address</span>
         <input className="input" autoFocus placeholder="192.168.1.10 or nas.local" value={addr} onChange={(e) => setAddr(e.target.value)} />
         <span className="hint">Find it in the address bar when you open Shrink Your Shit on that computer.</span></label>}
-      <p className="muted" aria-live="polite">{found === null ? "Looking for Shrink Your Shit servers on your network..."
+      <p className="muted" aria-live="polite">{found === null ? "Looking for Shrink Your Shit servers on your network…"
         : !found.length && <>No other servers found on your network. <button className="linkbtn" type="button" onClick={look}>Look again</button></>}</p>
       {err && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{err}</span></p>}
       <div className="row enroll-btns"><button className="btn primary" type="submit" disabled={busy}>{pick === "main" ? "Continue" : "Ask to join"}</button></div>

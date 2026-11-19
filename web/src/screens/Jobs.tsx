@@ -5,7 +5,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
-import { bytes, clock, count, elapsed, plural } from "../format";
+import { bytes, clock, count, elapsed, plural, stepTime } from "../format";
 import { convertDoneAgain, fileJobs, findSkip, getJob, getJobLog, jobAction, listJobs, listKept, restoreKept, type JobLog } from "../jobsApi";
 import { getWorkflow } from "../workflowApi";
 import { getHealth, getSettings } from "../libraryApi";
@@ -177,7 +177,7 @@ export function Jobs() {
       </div>
       <p className="muted" role="status">{said}</p>
       {page.error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{page.error.message}</span></p>}
-      {!current ? <div className="empty">Loading...</div> : !items.length ? (q ? <div className="empty">No file matches.</div>
+      {!current ? <div className="empty">Loading…</div> : !items.length ? (q ? <div className="empty">No file matches.</div>
         : <Empty icon="i-jobs" text={kept ? TRASH_EMPTY : left ? LEFT_EMPTY : { waiting: "Nothing is waiting.", running: "Nothing is converting right now.", completed: "No file is done yet.", skipped: "No file was skipped.", failed: "Nothing has failed." }[tab]} />) : (
         <div className={"list" + (selecting ? " selecting" : "")}><table className="tbl jobs">
           <thead><tr>
@@ -188,7 +188,7 @@ export function Jobs() {
           <tbody>{items.map((j) => (
             <tr key={j.id} className={sel.includes(j.id) ? "sel" : undefined}>
               <td className="selc"><label className="hit"><input type="checkbox" aria-label={"Select " + j.name} checked={sel.includes(j.id)} onChange={(e) => setSel(e.target.checked ? [...sel, j.id] : sel.filter((x) => x !== j.id))} /></label></td>
-              {tab === "waiting" && <td className="posc" title={j.position != null ? "Place " + j.position + " in the queue" : "Not taken now"}>{j.position ?? "–"}</td>}
+              {tab === "waiting" && <td className="posc" title={j.position != null ? "Place " + j.position + " in the queue" : "Not taken now"}>{j.position ?? "—"}</td>}
               <td className="idc"><a className="ttl" href={"/jobs?tab=" + tab + "&job=" + encodeURIComponent(key(j))} data-job={key(j)} title={j.path}
                 onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); go(tab, key(j)); } }}><FileName n={j.name} /></a>
                 {j.pin && <span className="mchip prio">{j.pin === "first" ? "First" : "Last"}</span>}
@@ -213,8 +213,6 @@ export function Jobs() {
 // comes once the job is over and the whole log has been sent.
 // E (SCREENS V6b 'Why it failed'): the sentence, where it stopped, the server's hint when it has one, and the last
 // ffmpeg error lines (at most five) behind a disclosure. Each part is left out when the server sends none.
-// durations read '4 min 12 s' and '0.1 s' everywhere (the design's phone note)
-const dur = (ms: number) => { const s = ms / 1000; return s < 1 ? s.toFixed(1) + " s" : s < 60 ? Math.round(s) + " s" : Math.floor(s / 60) + " min " + (Math.round(s) % 60) + " s"; };
 const text = (o: string | string[]) => Array.isArray(o) ? o.join("\n") : o;
 // map server step labels to person-facing names (workshop #217: encode, check)
 // The check step is named by what it checked (its found Check line); an older log without one is "Checking the new file".
@@ -270,7 +268,7 @@ function CheckFound({ lines, reason }: { lines: string[]; reason: string }) {
 
 function WhyFailed({ id, msg, code, worker, f, found = [] }: { id: string; msg: string; code: string; worker: string | null; f: Failure; found?: string[] }) {
   const fd = readFound(found), ff = fd.errors.length ? fd.errors : f.keyLines; // V6c: one ffmpeg box
-  const t = dur(f.afterMs), box = useRef<HTMLElement>(null), ver = useData(getHealth, []).data?.version;
+  const t = stepTime(f.afterMs), box = useRef<HTMLElement>(null), ver = useData(getHealth, []).data?.version;
   // Copy summary: the plain text a bug report needs (V6b item 5): the job, its worker and the app version, then the box
   const copy = () => navigator.clipboard?.writeText("Job " + id + " · " + (worker ?? "no worker") + " · Shrink Your Shit " + (ver ?? "") + "\n" + (box.current?.innerText ?? "")).catch(() => {});
   return (
@@ -318,7 +316,7 @@ function StepLog({ d, id, worker, failedIdx, kept }: { d: { loaded: boolean; dat
   // a finished job's whole log is on the server (the steps here keep only the last 200 lines of a failure)
   const copyAll = () => MOCK ? copyLogText((d.data?.steps ?? []).map((st) => [st.name, st.command, text(st.output), st.result].filter(Boolean).join("\n")).join("\n"), setCopied)
     : fetch("/api/v2/jobs/" + encodeURIComponent(id) + "/log/download", { credentials: "same-origin" }).then((r) => (r.ok ? r.text() : Promise.reject())).then((t) => copyLogText(t, setCopied), () => setCopied("Couldn't copy; use Download."));
-  if (!d.loaded) return <section><h3>Log</h3><p className="muted">Loading the log...</p></section>;
+  if (!d.loaded) return <section><h3>Log</h3><p className="muted">Loading the log…</p></section>;
   if (!d.data) return <section><h3>Log</h3><p className="muted">{d.error?.message ?? "The log can't be shown."}</p></section>;
   const l = d.data, days = (keep.data as { logKeepDays?: number } | undefined)?.logKeepDays ?? 30;
   // SCREENS V6b 'States': a log that isn't all here says why, in the design's words
@@ -347,13 +345,13 @@ function StepLog({ d, id, worker, failedIdx, kept }: { d: { loaded: boolean; dat
         const sum = pr && [pr.videoCodec?.toUpperCase().replace("H264", "H.264"), v?.Width && v.Height ? v.Width + "×" + v.Height : "", v?.frameRate ? +v.frameRate.toFixed(3) + " fps" : "", [v?.bitDepth ? v.bitDepth + "-bit" : "", hdr].filter(Boolean).join(" "), n("audio") && n("audio") + " audio", n("subtitle") && n("subtitle") + " subtitles", pr.durationSec ? elapsed(pr.durationSec) : "", pr.sizeBytes ? bytes(pr.sizeBytes) : ""].filter(Boolean).join(" · ");
         return (
           <details key={i} id={"job-step-" + (i + 1)} open={q ? hit > 0 : st.outcome !== "ok" || i === failedIdx} className="stepd" style={{ borderTop: "1px solid var(--border)", padding: "8px 0" }}>
-            <summary className="row nw" style={{ gap: 8, flexWrap: "wrap", cursor: "pointer" }}><strong>{stepLabel(st.name, st.found, st.check != null)}</strong>{st.startedAt && st.tookMs != null && <span className="sm muted">{clock(st.startedAt)} · took {dur(st.tookMs)}</span>}
+            <summary className="row nw" style={{ gap: 8, flexWrap: "wrap", cursor: "pointer" }}><strong>{stepLabel(st.name, st.found, st.check != null)}</strong>{st.startedAt && st.tookMs != null && <span className="sm muted">{clock(st.startedAt)} · took {stepTime(st.tookMs)}</span>}
               {["ok", "done", "completed"].includes(st.outcome) ? <span className="pill ok">Done</span> : st.outcome === "failed" ? (kept ? <span className="pill warn">Original kept</span> : <span className="pill bad">Failed</span>) : null}{hit > 0 && <span className="pill">{hit} match{hit > 1 ? "es" : ""}</span>}</summary>
             <div className="stack" style={{ gap: 6, paddingTop: 6 }}>
               {st.command && <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">Command</span><button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(st.command ?? "").catch(() => {})}><Icon id="i-copy" />Copy</button></div>
                 <pre className="joblog sm">{st.command}</pre></div>}
               {sum && <p className="sm">Source: {sum}</p>}
-              {st.check && <p className="sm">Picture check: Score {st.check.score.toFixed(3)}{st.check.min != null ? " (needs " + st.check.min.toFixed(3) + ")" : ""}{st.check.passed != null ? " · " + (st.check.passed ? "passed" : "failed") : ""}</p>}
+              {st.check && <p className="sm">Picture check: score {st.check.score.toFixed(3)}{st.check.min != null ? " (needs " + st.check.min.toFixed(3) + ")" : ""}{st.check.passed != null ? " · " + (st.check.passed ? "passed" : "failed") : ""}</p>}
               {st.outputLines > 0 && <details open={st.outcome !== "ok"}><summary className="sm">Show ffmpeg output ({st.outputLines} lines)</summary>
                 {st.outputLines > 200 && <p className="sm"><a href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}>Download all {st.outputLines.toLocaleString()} lines</a></p>}
                 <pre className="joblog sm">{text(st.output)}</pre></details>}
@@ -391,7 +389,7 @@ function JobLog({ id, name }: { id: string; name: string }) {
         <button className="btn sm ghost" type="button" disabled={!text} onClick={download}><Icon id="i-download" />{q ? "Download the whole log" : "Download"}</button>
       </div>
       <p className="sm muted" role="status" style={{ margin: copied ? "0 0 6px" : 0 }}>{copied}</p>
-      <pre className="joblog" ref={box} tabIndex={0} aria-label="Log" aria-live="off">{shown || (text ? "No line matches." : done ? "The log is empty." : gone ? "The log can't be shown." : "Waiting for the log...")}</pre>
+      <pre className="joblog" ref={box} tabIndex={0} aria-label="Log" aria-live="off">{shown || (text ? "No line matches." : done ? "The log is empty." : gone ? "The log can't be shown." : "Waiting for the log…")}</pre>
       <p className="sm muted">{done ? "The log is complete." : gone ? "The server didn't send it. Close and open this file again to retry." : "Live: new lines appear as they are written."}</p>
     </section>
   );
@@ -400,9 +398,9 @@ function JobLog({ id, name }: { id: string; name: string }) {
 const fmtV = (p: Probe | null | undefined) => {
   if (!p) return null;
   const v = p.streams?.find((s) => s.type === "video"), a = p.streams?.filter((s) => s.type === "audio") ?? [];
-  return { video: [p.videoCodec?.toUpperCase().replace("H264", "H.264"), v?.Height ? v.Height + "p" : ""].filter(Boolean).join(" · ") || "-",
+  return { video: [p.videoCodec?.toUpperCase().replace("H264", "H.264"), v?.Height ? v.Height + "p" : ""].filter(Boolean).join(" · ") || "—",
     audio: a.map((x) => x.codec.toUpperCase() + (x.channelLayout ? " " + x.channelLayout : "")).join(", ") || "None",
-    bitrate: p.bitrateKbps ? count(p.bitrateKbps) + " kbps" : "-", size: p.sizeBytes ? bytes(p.sizeBytes) : "-" };
+    bitrate: p.bitrateKbps ? count(p.bitrateKbps) + " kbps" : "—", size: p.sizeBytes ? bytes(p.sizeBytes) : "—" };
 };
 
 // The job drawer (?job=<id>): right side, 520 px; a full-screen sheet on phones. Esc closes; focus returns to the row.
@@ -520,7 +518,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {/* G7: a skipped file links to the workflow whose rule skipped it (a scan's skip has no job: its library's workflow) */}
           {(j?.workflow || rule) && <section><h3>Workflow</h3><p>{rule ? <a className="linkbtn" href={"/workflows/" + encodeURIComponent(rule.id)} onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate("/workflows/" + encodeURIComponent(rule.id)); }}}>Change rule in {rule.name}</a> : own?.flow?.name ?? "Its library's workflow"}{j?.workflow && " · v" + j.workflow.version}</p></section>}
           {!scan && <section><h3>Timeline</h3>
-            {!j ? <p className="muted">Loading...</p> : !j.steps.length && !j.events.length ? <p className="muted">No step history for jobs from before the update.</p> : <>
+            {!j ? <p className="muted">Loading…</p> : !j.steps.length && !j.events.length ? <p className="muted">No step history for jobs from before the update.</p> : <>
               {j.steps.length > 0 && <ol className="tline">{j.steps.map((s, i) => <li key={i} className={s.ok ? "" : SOFT.includes(s.step) ? "warn" : "bad"}><Icon id={s.ok ? "i-check-c" : SOFT.includes(s.step) ? "i-alert" : "i-x-c"} /><span className="sp">{cap(s.words)}</span><span className="muted sm nowrap">{clock(s.at)}</span></li>)}</ol>}
               {j.events.length > 0 && <p className="sm muted">History: {j.events.map((e) => WORD[e.to] + " " + clock(e.at)).join(" → ")}</p>}
             </>}
@@ -531,10 +529,10 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {!scan && (active ? <JobLog id={id} name={name} /> : <StepLog d={log} id={id} worker={j?.worker ?? null} failedIdx={j?.failure?.stepIndex ?? null} kept={kept0} />)}
           {/* #148: before is the original; null for an older job that replaced a file of the same name: said so, never blank */}
           {(before || after) && <section><h3>Result</h3><table className="tbl kvt"><thead><tr><th /><th>Before</th><th>After</th></tr></thead><tbody>
-            <tr><th>Video</th>{before ? <td>{before.video}</td> : <td rowSpan={4} className="muted">Not recorded for this job</td>}<td>{after?.video ?? "-"}</td></tr>
-            <tr><th>Audio</th>{before && <td>{before.audio}</td>}<td>{after?.audio ?? "-"}</td></tr>
-            <tr><th>Bitrate</th>{before && <td>{before.bitrate}</td>}<td>{after?.bitrate ?? "-"}</td></tr>
-            <tr><th>Size</th>{before && <td>{before.size}</td>}<td>{after?.size ?? "-"}</td></tr></tbody></table></section>}
+            <tr><th>Video</th>{before ? <td>{before.video}</td> : <td rowSpan={4} className="muted">Not recorded for this job</td>}<td>{after?.video ?? "—"}</td></tr>
+            <tr><th>Audio</th>{before && <td>{before.audio}</td>}<td>{after?.audio ?? "—"}</td></tr>
+            <tr><th>Bitrate</th>{before && <td>{before.bitrate}</td>}<td>{after?.bitrate ?? "—"}</td></tr>
+            <tr><th>Size</th>{before && <td>{before.size}</td>}<td>{after?.size ?? "—"}</td></tr></tbody></table></section>}
         </div>
       </aside>
     </div>

@@ -57,7 +57,7 @@ export function WorkflowGraph({ id }: { id: string }) {
   const w = useData(() => getWorkflow(id), [id]), defs = useData(stepDefinitions, []), d = useData(() => getDraft(id), [id]);
   const problem = w.error ?? defs.error ?? d.error;
   if (w.error?.code === "not_found") return <div className="card"><div className="bd">There is no such workflow. It may have been deleted.</div></div>;
-  if (!w.data || !defs.data || !d.data) return <div className="empty">{problem?.message ?? "Loading..."}</div>;
+  if (!w.data || !defs.data || !d.data) return <div className="empty">{problem?.message ?? "Loading…"}</div>;
   return <ReactFlowProvider><Canvas id={id} name={w.data.name} published={w.data.version} doc={d.data} defs={defs.data} /></ReactFlowProvider>;
 }
 

@@ -234,7 +234,7 @@ export function NotificationsSettings() {
       <p className="muted" role="status" style={{ margin: 0 }}>{said}</p>
       {notHere ? <p className="muted">This server can't send notifications yet.</p>
         : d.error && !d.data ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{d.error.message}</span></p>
-          : !d.data ? <div className="empty">Loading...</div>
+          : !d.data ? <div className="empty">Loading…</div>
             : (
               <>
                 <section className="card" aria-labelledby="h-where">

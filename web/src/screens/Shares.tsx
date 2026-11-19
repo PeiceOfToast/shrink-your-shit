@@ -37,7 +37,7 @@ function ShareRow({ share, resp, onChanged, said }: { share: Share; resp: Shares
         {share.libraries.length > 0 && <span className="sub phone">Used by {libs}</span>}
         <span className="sub phone">{TYPE[share.type].label}</span></td>
       <td data-p="2">{TYPE[share.type].label}</td>
-      <td className="stc"><span className={"st " + statusClass}><Icon id={statusIcon} /><span>{share.status === "connected" ? "Connected" : share.status === "connecting" ? "Connecting..." : share.status === "waiting_setup" ? "Waiting for setup on the server" : "Not connected"}<span className="desk">{share.since ? " since " + new Date(share.since).toLocaleDateString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}</span></span></span>
+      <td className="stc"><span className={"st " + statusClass}><Icon id={statusIcon} /><span>{share.status === "connected" ? "Connected" : share.status === "connecting" ? "Connecting…" : share.status === "waiting_setup" ? "Waiting for setup on the server" : "Not connected"}<span className="desk">{share.since ? " since " + new Date(share.since).toLocaleDateString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}</span></span></span>
         {share.reason && <span className="sub desk">{share.reason.message}</span>}
         {share.status === "waiting_setup" && share.setup && resp.modeReason === "unprivileged_container" && <p className="hint desk" style={{ margin: "8px 0 0" }}>Shrink Your Shit runs in an unprivileged container here, so it can't connect network shares itself. Mount each share on the host with the commands below, or run it on a full computer or VM, or in a privileged Proxmox container with <code>mount=nfs;cifs</code>.</p>}
         {share.status === "waiting_setup" && share.setup && <div className="codebox desk" style={{ marginTop: 8 }}><code>{share.setup.text}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(share.setup!.text).catch(() => {})}><Icon id="i-copy" />Copy</button></div>}
@@ -51,7 +51,7 @@ function ShareRow({ share, resp, onChanged, said }: { share: Share; resp: Shares
             {canReconnect && <button className="it" type="button" onClick={(e) => { closeMenu(e); reconnect(); }}>Reconnect</button>}
             {canCheck && <button className="it" type="button" onClick={(e) => { closeMenu(e); reconnect(); }}>Check again</button>}
             <button className="it" type="button" onClick={(e) => { closeMenu(e); setEditing(true); }}>Edit</button>
-            <button className="it" type="button" onClick={(e) => { closeMenu(e); setRemoving(true); }}>Remove...</button>
+            <button className="it" type="button" onClick={(e) => { closeMenu(e); setRemoving(true); }}>Remove…</button>
           </div>
         </details>
         {removing && createPortal(<RemoveDialog share={share} onCancel={() => setRemoving(false)} onDone={() => { setRemoving(false); onChanged(); }} said={said} />, document.body)}
@@ -180,13 +180,13 @@ function ShareSheet({ share, resp, onDone, onCancel, said }: { share?: Share; re
             {type === "nfs" && <p className="hint" style={{ marginTop: 8 }}>NFS has no password. The server must allow this computer's address ({resp.serverAddress ?? "this server"}).</p>}
             {!resp.testedPlatform && <p className="hint" style={{ marginTop: 8 }}>Network shares are not tested on a Mac yet. If one doesn't connect, the share's status says why.</p>}
             {resp.modeReason === "unprivileged_container" ? <p className="hint" style={{ marginTop: 8 }}>Shrink Your Shit runs in an unprivileged container here, so it can't connect network shares itself. Save the share, and this page then shows the commands to mount it on the host.</p> : resp.mode === "manual" && <p className="hint" style={{ marginTop: 8 }}>To let the app connect shares itself, run the installer again and answer yes to network shares.</p>}
-            <div className="row"><button className="btn sm" type="button" disabled={testing || saving} onClick={testNow}>{testing ? "Testing..." : "Test"}</button></div>
+            <div className="row"><button className="btn sm" type="button" disabled={testing || saving} onClick={testNow}>{testing ? "Testing…" : "Test"}</button></div>
             {testResult && (testResult.ok
               ? <div className="note ok" role="status" aria-live="polite"><Icon id="i-check-c" /><span>{testResult.portOnly ? "The server answers on the NFS port. The folder itself is checked when the share connects." : "Connected. Folders at the top: " + testResult.folders!.slice(0, 3).join(", ") + (testResult.moreFolders ? ", and " + testResult.moreFolders + " more." : ".")}</span></div>
               : <div className="note bad" role="status" aria-live="polite"><Icon id="i-alert" /><span>{testResult.message + (testResult.shares?.length ? " The server offers: " + testResult.shares.join(", ") : "")}</span></div>)}
             {error && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{error}</span></p>}
           </>}
-          <div className="row" style={{ gap: 8, marginTop: 8 }}>{!ss && <button className="btn primary" type="button" disabled={saving} onClick={save}>{saving ? "Saving..." : edit ? "Save" : "Save and connect"}</button>}
+          <div className="row" style={{ gap: 8, marginTop: 8 }}>{!ss && <button className="btn primary" type="button" disabled={saving} onClick={save}>{saving ? "Saving…" : edit ? "Save" : "Save and connect"}</button>}
             <button className="btn ghost" type="button" onClick={close}>{ss ? "Close" : "Cancel"}</button></div>
         </div>
       </aside>
@@ -204,7 +204,7 @@ export function SharesSettings() {
       <PageHead icon="i-shares" title="Settings" />
       <SettingsTabs at="shares" />
       <p className="muted" role="status">{said}</p>
-      {resp.error && is404(resp.error) ? <p className="muted">This server doesn't have network shares yet.</p> : resp.error ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{resp.error.message}</span></p> : !data ? <div className="empty">Loading...</div> : <>
+      {resp.error && is404(resp.error) ? <p className="muted">This server doesn't have network shares yet.</p> : resp.error ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{resp.error.message}</span></p> : !data ? <div className="empty">Loading…</div> : <>
         <div className="row" style={{ gap: 6 }}>
           <p className="muted" style={{ margin: 0 }}>Use a folder on a NAS or another computer as a library. Shrink Your Shit connects to it and reconnects after a restart.</p>
           <span className="sp" />
