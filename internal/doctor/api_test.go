@@ -78,7 +78,7 @@ func TestDoctorPassedEncoderIsTimedAndCPUStillConverts(t *testing.T) {
 	if qsv.Status != "ok" || !strings.HasPrefix(qsv.Detail, "Intel Quick Sync encoded a test clip in ") || !strings.HasSuffix(qsv.Detail, " s.") {
 		t.Errorf("qsv: %+v", qsv)
 	}
-	if nv := checkByID(t, d.Checks, "encoder:nvenc"); nv.Status != "warn" || nv.Detail != "No NVIDIA card found." || nv.Hint != nil {
+	if nv := checkByID(t, d.Checks, "encoder:nvenc"); nv.Status != "absent" || nv.Detail != "No NVIDIA card found." || nv.Hint != nil {
 		t.Errorf("nvenc: %+v", nv)
 	}
 	use := checkByID(t, d.Checks, "encoder:in-use")
@@ -98,7 +98,7 @@ func TestDoctorPresentEncoderThatFailsIsBad(t *testing.T) {
 		t.Errorf("present: %+v", va)
 	}
 	absent := c.API(context.Background(), APIInput{DataDir: t.TempDir(), Device: func(string) string { return "missing" }}, false)
-	if va := checkByID(t, absent.Checks, "encoder:vaapi"); va.Status != "warn" || va.Detail != "No VA-API graphics found." {
+	if va := checkByID(t, absent.Checks, "encoder:vaapi"); va.Status != "absent" || va.Detail != "No VA-API graphics found." {
 		t.Errorf("absent: %+v", va)
 	}
 }
@@ -249,5 +249,24 @@ func TestDoctorPresentDeviceWithoutEncoderSaysSo(t *testing.T) {
 	ch := checkByID(t, c.API(context.Background(), in, false).Checks, "encoder:qsv")
 	if ch.Status != "warn" || ch.Detail != "Intel Quick Sync is present, but ffmpeg has no hevc_qsv encoder." {
 		t.Errorf("%+v", ch)
+	}
+}
+
+// An orphaned original has its own hint: it is not an access problem, so "Fix the folder" doesn't fit it.
+func TestDoctorOrphanedOriginalsHaveTheirOwnHint(t *testing.T) {
+	dir := t.TempDir()
+	trash := filepath.Join(dir, ".syp-trash")
+	if err := os.MkdirAll(trash, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(trash, "old.1.mkv"), make([]byte, 1000), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := apiChecker(fakeFFmpeg(true, true, nil, nil), 1<<40)
+	c.KnownOriginals = func() (map[string]bool, error) { return map[string]bool{}, nil }
+	d := c.API(context.Background(), APIInput{DataDir: t.TempDir(), Libs: []Library{{ID: 9, Name: "Movies", Path: dir}}}, false)
+	orph := checkByID(t, d.Checks, "library:9:orphaned_originals")
+	if orph.Hint == nil || *orph.Hint != "Move them back or delete them, then press Check again." {
+		t.Errorf("orphaned originals hint: %+v", orph)
 	}
 }

@@ -32,7 +32,7 @@ type DoctorEncoder struct {
 type DoctorCheck struct {
 	ID     string  `json:"id"`
 	Label  string  `json:"label"`
-	Status string  `json:"status"` // ok | warn | bad
+	Status string  `json:"status"` // ok | warn | bad | absent (absent: the hardware isn't here; counts as nothing)
 	Detail string  `json:"detail"`
 	Hint   *string `json:"hint"`
 }
@@ -156,7 +156,7 @@ func toolChecks(t Tools) []DoctorCheck {
 
 // encoderChecks has one check per graphics family the platform could have, then whether conversions use
 // one. A family that ffmpeg lists is test-encoded; a present device that fails the test is bad, an absent
-// one is a warning.
+// one is absent (no warning).
 func encoderChecks(in APIInput, probes map[string]Probe, inUse string) []DoctorCheck {
 	var out []DoctorCheck
 	var passed []string
@@ -182,7 +182,11 @@ func encoderChecks(in APIInput, probes map[string]Probe, inUse string) []DoctorC
 			if device == "found" { // the device is there; ffmpeg just has no encoder for it
 				detail = word + " is present, but ffmpeg has no " + enc + " encoder."
 			}
-			out = append(out, DoctorCheck{ID: id, Label: label, Status: "warn", Detail: detail})
+			status := "warn"
+			if device == "missing" { // no card here: nothing to fix, so it isn't a warning
+				status = "absent"
+			}
+			out = append(out, DoctorCheck{ID: id, Label: label, Status: status, Detail: detail})
 		}
 	}
 	cpu := "Conversions use the " + cpuWords["libx265"] + "."
@@ -242,8 +246,12 @@ func (c *Checker) libraryChecks(ctx context.Context, l Library) []DoctorCheck {
 			key := map[string]string{"read_only": "access", "unreadable": "access", "system_folder": "access",
 				"low_space": "space", "hardlinks": "hardlinks"}[is.Code]
 			if key == "" {
+				h := "Fix the folder, then check again on the Libraries page."
+				if is.Code == "orphaned_originals" {
+					h = "Move them back or delete them, then press Check again."
+				}
 				extra = append(extra, DoctorCheck{ID: prefix + ":" + is.Code, Label: "Library: " + l.Name, Status: status,
-					Detail: l.Name + ": " + is.Message, Hint: hint("Fix the folder, then check again on the Libraries page.")})
+					Detail: l.Name + ": " + is.Message, Hint: hint(h)})
 				continue
 			}
 			s := slots[key]
