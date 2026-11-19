@@ -14,20 +14,20 @@ import (
 // it next to waiting: the saved bytes split as waiting + could free, with nothing freed yet.
 func TestDailyCouldFreeForAKeptOriginal(t *testing.T) {
 	s := open(t)
-	root := t.TempDir() // filepath paths, so the library range matches on every OS
-	l, _ := s.AddLibrary("Movies", root, rules.SliderTemplate(3), true)
+	// files go under l.Path, the stored (resolved) folder: macOS /var is /private/var, Windows RUNNER~1 is the long name
+	l, _ := s.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
 	day := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 12, 0, 0, 0, time.Local)
 
 	// a.mkv: converted beside its original, which stays where it is: saves 600, all could free
-	a, _ := s.Enqueue(Job{LibraryID: l.ID, Path: filepath.Join(root, "a.mkv"), SizeBefore: 1000})
+	a, _ := s.Enqueue(Job{LibraryID: l.ID, Path: filepath.Join(l.Path, "a.mkv"), SizeBefore: 1000})
 	s.Claim("w")
-	s.Complete(a, filepath.Join(root, "a.hevc.mkv"), 400)
+	s.Complete(a, filepath.Join(l.Path, "a.hevc.mkv"), 400)
 
 	// b.mkv: replaced, its original kept in the trash: saves 600, all waiting
-	b, _ := s.Enqueue(Job{LibraryID: l.ID, Path: filepath.Join(root, "b.mkv"), SizeBefore: 1000})
+	b, _ := s.Enqueue(Job{LibraryID: l.ID, Path: filepath.Join(l.Path, "b.mkv"), SizeBefore: 1000})
 	s.Claim("w")
-	s.Complete(b, filepath.Join(root, "b.mkv"), 400)
-	ib, err := s.BeginSwap(Original{JobID: b, LibraryID: l.ID, Path: filepath.Join(root, "b.mkv"), Trash: filepath.Join(root, ".syp-trash", "b.mkv"), NewPath: filepath.Join(root, "b.mkv")})
+	s.Complete(b, filepath.Join(l.Path, "b.mkv"), 400)
+	ib, err := s.BeginSwap(Original{JobID: b, LibraryID: l.ID, Path: filepath.Join(l.Path, "b.mkv"), Trash: filepath.Join(l.Path, ".syp-trash", "b.mkv"), NewPath: filepath.Join(l.Path, "b.mkv")})
 	if err != nil {
 		t.Fatal(err)
 	}
