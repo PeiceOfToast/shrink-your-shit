@@ -106,6 +106,9 @@ func main() {
 			}
 			return "", fmt.Errorf("could not read the installed version: %v %s", err, out)
 		}}
+	if err := repairLeftovers(h.bin); err != nil { // a crash during an install or roll back left files in the wrong names
+		log.Printf("update leftovers: %v", err)
+	}
 	go h.readPrevious() // a helper restarted after an update still knows what its previous version is
 
 	dir := filepath.Dir(*sock)
@@ -307,9 +310,12 @@ func (h *helper) install(version string) error {
 	}
 	// prev becomes a second name for the current program, so <bin> never goes missing: the only move that
 	// touches <bin> is next -> bin, which replaces it in one step or not at all.
-	if err := os.Link(h.bin, prev); err != nil {
-		os.Remove(next)
-		return errors.Join(err, restoreOlder())
+	if err := link(h.bin, prev); err != nil {
+		// no hard links on this disk: keep the previous program as a copy instead
+		if cerr := copyFile(h.bin, prev); cerr != nil {
+			os.Remove(next)
+			return errors.Join(err, cerr, restoreOlder())
+		}
 	}
 	if err := os.Rename(next, h.bin); err != nil { // <bin> is still the current program; nothing changed
 		os.Remove(next)
@@ -333,13 +339,13 @@ func (h *helper) install(version string) error {
 
 // rollback swaps the program and the previous one, and swaps them back if the previous does not answer.
 func (h *helper) rollback() error {
-	if err := swap(h.bin, h.bin+".previous"); err != nil {
+	if err := exchange(h.bin, h.bin+".previous"); err != nil {
 		return err
 	}
 	if h.restartHealthy() {
 		return nil
 	}
-	if err := swap(h.bin, h.bin+".previous"); err != nil {
+	if err := exchange(h.bin, h.bin+".previous"); err != nil {
 		return fmt.Errorf("the previous version did not answer, and could not be swapped back: %v", err)
 	}
 	return h.afterUndo(fmt.Sprintf("the previous version did not answer within %s; kept the current one", h.wait))
@@ -368,15 +374,77 @@ func (h *helper) restartHealthy() bool {
 	}
 }
 
-func swap(a, b string) error {
-	tmp := a + ".swap"
-	if err := os.Rename(a, tmp); err != nil {
+// exchange swaps a and b in one step, so neither name is ever missing. Tests replace it.
+var exchange = func(a, b string) error {
+	err := unix.Renameat2(unix.AT_FDCWD, a, unix.AT_FDCWD, b, unix.RENAME_EXCHANGE)
+	if errors.Is(err, unix.EINVAL) || errors.Is(err, unix.ENOSYS) || errors.Is(err, unix.ENOTSUP) {
+		return fmt.Errorf("this disk can't swap the programs in one step, so nothing was changed: %v", err)
+	}
+	return err
+}
+
+// link makes prev a second name for the program. Tests replace it to see a disk without hard links.
+var link = os.Link
+
+// copyFile writes a copy of src to dst the way install needs it: under a temp name, synced, then renamed.
+func copyFile(src, dst string) error {
+	fi, err := os.Stat(src)
+	if err != nil {
 		return err
 	}
-	if err := os.Rename(b, a); err != nil {
-		return errors.Join(err, os.Rename(tmp, a))
+	in, err := os.Open(src)
+	if err != nil {
+		return err
 	}
-	return os.Rename(tmp, b)
+	defer in.Close()
+	tmp := dst + copyingSuffix
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(out, in)
+	if err == nil {
+		err = out.Chmod(fi.Mode().Perm())
+	}
+	if err == nil {
+		err = out.Sync()
+	}
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, dst)
+}
+
+const copyingSuffix = ".copying"
+
+// repairLeftovers fixes what a crash during an install left behind (the install's order: previous -> older,
+// link the program as previous, rename the new program in). Two cases:
+//   - previous is the same file as the program (the crash came between the link and the rename): previous
+//     is removed, which leaves the program as it was.
+//   - previous is missing but older is there: older is the version before the last install; it is put back
+//     as previous so a roll back still reaches it.
+func repairLeftovers(bin string) error {
+	prev := bin + ".previous"
+	os.Remove(prev + copyingSuffix) // a copy that never got renamed
+	if sameFile(prev, bin) {
+		if err := os.Remove(prev); err != nil {
+			return err
+		}
+	}
+	if !exists(prev) && exists(prev+".older") {
+		return os.Rename(prev+".older", prev)
+	}
+	return nil
+}
+
+func sameFile(a, b string) bool {
+	fa, err1 := os.Stat(a)
+	fb, err2 := os.Stat(b)
+	return err1 == nil && err2 == nil && os.SameFile(fa, fb)
 }
 
 func exists(p string) bool { _, err := os.Stat(p); return err == nil }
