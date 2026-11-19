@@ -43,7 +43,7 @@ function Status({ t }: { t: NotifyTarget }) {
   const r = t.lastResult;
   if (!r) return <span className="st"><Icon id="i-clock" />Not sent yet</span>;
   if (r.ok) return <span className="st ok"><Icon id="i-check" />Last sent {clock(r.at)}</span>;
-  return <span className="st warn"><Icon id="i-alert" /><span>Last send failed {clock(r.at)}: {dot(r.message)}.</span></span>;
+  return <span className="st warn"><Icon id="i-alert" /><span className="fail">Last send failed {clock(r.at)}: <span className="why">{dot(r.message)}.</span></span></span>;
 }
 
 function EventToggles({ value, onChange }: { value: NotifyEvents; onChange: (e: NotifyEvents) => void }) {
@@ -97,12 +97,12 @@ function TargetForm({ t, reload, onDone, onCancel }: { t?: NotifyTarget; reload:
         </div>)}
       <div className="field">
         <label htmlFor={id + "-name"}>Name</label>
-        <input className="input" id={id + "-name"} required value={name} onChange={(e) => setName(e.target.value)} placeholder={k === "discord" ? "#media" : "Home Assistant"} />
+        <input className="input" style={{ maxWidth: 320 }} id={id + "-name"} required value={name} onChange={(e) => setName(e.target.value)} placeholder={k === "discord" ? "#media" : "Home Assistant"} />
       </div>
       <div className="field">
         {changeUrl ? <label htmlFor={id + "-url"}>{k === "discord" ? "Webhook address" : "Address"}</label> : <span className="lab">{k === "discord" ? "Webhook address" : "Address"}</span>}
         {changeUrl
-          ? <input className="input mono" id={id + "-url"} type="password" autoComplete="off" spellCheck={false} required={!t} value={url}
+          ? <input className="input mono" style={{ maxWidth: 320 }} id={id + "-url"} type="password" autoComplete="off" spellCheck={false} required={!t} value={url}
             onChange={(e) => setUrl(e.target.value)} placeholder={t ? "Paste the new address" : ""} />
           : <p className="row" style={{ margin: 0, gap: 8 }} id={id + "-url"}><span className="mono">{t!.urlShown}</span>
             <button className="btn sm ghost" type="button" onClick={() => setChangeUrl(true)} aria-label="Change the address">Change</button></p>}

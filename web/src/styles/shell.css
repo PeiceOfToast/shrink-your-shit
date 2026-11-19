@@ -129,6 +129,7 @@ textarea.input{min-height:72px;font-family:var(--mono);font-size:var(--fs-sm)}
 .pill.warn,.pill.sample{background:color-mix(in srgb,var(--warning) 14%,transparent);color:var(--warning-text)}
 .st.ok{color:var(--success-text)}.st.run{color:var(--accent-text)}.st.bad{color:var(--error-text)}.st.warn{color:var(--warning-text)}.st.wait{color:var(--text-2)}
 .st .ic{width:16px;height:16px}
+.st:has(>.fail){align-items:flex-start}.st:has(>.fail)>.ic{margin-top:2px}.st .fail{white-space:normal}.st .why{font-weight:400;color:var(--text)}
 
 /* cards, tables */
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);min-width:0}
@@ -326,7 +327,7 @@ td .tnc{max-width:230px}
 .jt td .tnc{max-width:165px}
 .jt td:nth-child(n+4) .tnc{max-width:none}
 .jt td:nth-child(3) .tnc{max-width:135px}
-.field>.seg{align-self:flex-start}
+.field>.seg,.stack>.seg{align-self:flex-start}
 
 /* native controls (review 1) */
 input.switch{appearance:none;-webkit-appearance:none;position:relative;display:inline-block;width:38px;height:22px;border-radius:11px;background:var(--surface);border:1px solid var(--border-strong);flex:none;margin:0;cursor:pointer;vertical-align:middle}
