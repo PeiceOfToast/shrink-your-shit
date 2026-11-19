@@ -15,7 +15,7 @@ const APP: Record<IntegrationKind, { name: string; port: number; key: string; wh
   sonarr: { name: "Sonarr", port: 8989, key: "API key", where: "In Sonarr: Settings > General > Security.", does: "Rescans each converted file, so it doesn't download it again.", dirs: ["/tv", "/mnt/media/tv"] },
   radarr: { name: "Radarr", port: 7878, key: "API key", where: "In Radarr: Settings > General > Security.", does: "Rescans each converted file, so it doesn't download it again.", dirs: ["/movies", "/mnt/media/movies"] },
   plex: { name: "Plex", port: 32400, key: "Token", where: "Plex's help page \"Finding an authentication token\" shows where it is.", does: "Scans the folder of each converted file, so Plex plays the new one.", dirs: ["/data/movies", "/mnt/media/movies"] },
-  jellyfin: { name: "Jellyfin", port: 8096, key: "API key", where: "In Jellyfin: Dashboard > API Keys > +.", does: "Tells Jellyfin each converted file changed, so it plays the new one.", dirs: ["/media/movies", "/mnt/media/movies"] },
+  jellyfin: { name: "Jellyfin", port: 8096, key: "API key", where: "In Jellyfin: Dashboard > Advanced > API Keys > +.", does: "Tells Jellyfin each converted file changed, so it plays the new one.", dirs: ["/media/movies", "/mnt/media/movies"] },
 };
 const KINDS = Object.keys(APP) as IntegrationKind[];
 const dot = (s: string) => s.replace(/[.\s]+$/, "");
