@@ -38,7 +38,7 @@ function Choice<T extends string | number>({ legend, name, value, options, onPic
   legend: string; name: string; value: T; options: [T, string, string?][]; onPick: (v: T) => void;
 }) {
   return (
-    <fieldset className="field choice">
+    <fieldset className="field choice prefs">
       <legend className="lab">{legend}</legend>
       <div className="row">
         {options.map(([v, label, swatch]) => (
