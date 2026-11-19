@@ -375,9 +375,10 @@ type restorer struct {
 	exists map[string]bool
 }
 
-// keptTables are the worker tables a restore never touches: live state, so a worker paired after the backup
-// stays, a worker removed after it stays removed, and the rows the backup holds for them are ignored.
-var keptTables = map[string]bool{"workers": true, "worker_pairings": true}
+// keptTables are the per-worker state tables a restore never touches: live state, so a worker paired after the
+// backup keeps its path mappings and pairing requests, a worker removed after it gets none back, and the rows the
+// backup holds for them are ignored. History that names a worker (job events, encoder test results) is restored.
+var keptTables = map[string]bool{"workers": true, "worker_pairings": true, "worker_paths": true, "join_requests": true}
 
 // workerSignInWarning is the preview's note about the worker tables (the restore keeps them as they are).
 const workerSignInWarning = "Workers are kept as they are now. A restore doesn't add, remove or change workers, so pair again any worker that isn't listed."

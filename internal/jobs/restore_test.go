@@ -144,6 +144,7 @@ func addRemoteWorker(t *testing.T, s *Store, id, token string) {
 func TestRestoreKeepsWorkerSignIns(t *testing.T) {
 	s := restoreTestStore(t)
 	addRemoteWorker(t, s, "gone", "tok-gone")
+	restoreExec(t, s, `INSERT INTO worker_paths(worker_id, server, worker, mode) VALUES('gone','srv','w','map')`)
 	addRemoteWorker(t, s, "kept", "tok-old")
 	restoreExec(t, s, `INSERT INTO worker_pairings(code_hash, expires) VALUES('code-then', '2099-01-01T00:00:00Z')`)
 	b, err := s.WriteBackup(ReasonManual)
@@ -156,10 +157,14 @@ func TestRestoreKeepsWorkerSignIns(t *testing.T) {
 	if err := s.RemoveWorker("gone"); err != nil {
 		t.Fatal(err)
 	}
+	// Its path mappings are gone too, so only the backup still has them.
+	restoreExec(t, s, `DELETE FROM worker_paths WHERE worker_id='gone'`)
 	restoreExec(t, s, `UPDATE workers SET token_hash=? WHERE id='kept'`, hashOf("tok-now"))
 	restoreExec(t, s, `DELETE FROM worker_pairings WHERE code_hash='code-then'`)
 	restoreExec(t, s, `INSERT INTO worker_pairings(code_hash, expires) VALUES('code-now', '2099-01-01T00:00:00Z')`)
 	addRemoteWorker(t, s, "newer", "tok-newer") // paired after the backup
+	restoreExec(t, s, `INSERT INTO worker_paths(worker_id, server, worker, mode) VALUES('newer','srv','w','map')`)
+	restoreExec(t, s, `INSERT INTO join_requests(id, secret_hash, name, asked_ns, expires_ns) VALUES('jr-new','h','n',1,2)`)
 
 	p, err := s.PreviewBackup(path)
 	if err != nil {
@@ -181,6 +186,15 @@ func TestRestoreKeepsWorkerSignIns(t *testing.T) {
 	s.db.QueryRow(`SELECT COUNT(*) FROM workers WHERE id='gone'`).Scan(&gone)
 	if gone != 0 {
 		t.Errorf("a worker removed after the backup is listed again")
+	}
+	// (a) a worker paired after the backup keeps its path mappings; (b) a removed worker gets none back;
+	// (c) a join request made after the backup is still there
+	var paths, goneRows, joins int
+	s.db.QueryRow(`SELECT COUNT(*) FROM worker_paths WHERE worker_id='newer'`).Scan(&paths)
+	s.db.QueryRow(`SELECT COUNT(*) FROM worker_paths WHERE worker_id='gone'`).Scan(&goneRows)
+	s.db.QueryRow(`SELECT COUNT(*) FROM join_requests WHERE id='jr-new'`).Scan(&joins)
+	if paths != 1 || goneRows != 0 || joins != 1 {
+		t.Errorf("worker paths of a newer worker %d (want 1), of a removed worker %d (want 0), a join request made after the backup %d (want 1)", paths, goneRows, joins)
 	}
 	if _, err := s.WorkerByToken("tok-gone"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("a worker revoked after the backup signs in again: %v", err)
