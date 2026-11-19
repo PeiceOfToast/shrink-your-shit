@@ -194,7 +194,7 @@ func (s *Service) tellPlex(ki kindInfo, name, base, key, file string) (summary s
 func (s *Service) tellJellyfin(ki kindInfo, name, base, key, old, file string) (summary string, ok, answered bool) {
 	var folders []jellyFolder
 	if msg := s.getJSON(ki, base, key, "/Library/VirtualFolders", noNextScan, &folders); msg != "" {
-		return msg, false, false
+		return "Couldn't tell " + ki.label + " (" + name + "): the library lookup failed: " + msg, false, false
 	}
 	inLibrary, library := false, ""
 	for _, f := range folders {
@@ -219,13 +219,13 @@ func (s *Service) tellJellyfin(ki kindInfo, name, base, key, old, file string) (
 	}
 	st, _, err := s.do(ki, "POST", base, key, "/Library/Media/Updated", map[string]any{"Updates": updates})
 	if err != nil {
-		return unreached(ki, base, err, noNextScan), false, false
+		return "Couldn't tell " + ki.label + " (" + name + "): the update failed: " + unreached(ki, base, err, noNextScan), false, false
 	}
 	if !ok2(st) {
-		return answer(ki, st), false, false
+		return "Couldn't tell " + ki.label + " (" + name + "): the update failed: " + answer(ki, st), false, false
 	}
 	if msg, good, answered := s.refreshJellyItem(ki, base, key, library, file); !good {
-		return msg, false, answered
+		return "Couldn't tell " + ki.label + " (" + name + "): " + msg, false, answered
 	}
 	return fmt.Sprintf("Told Jellyfin (%s) the file changed.", name), true, true
 }
@@ -250,7 +250,7 @@ func (s *Service) refreshJellyItem(ki kindInfo, base, key, library, file string)
 			Total int `json:"TotalRecordCount"`
 		}
 		if msg := s.getJSON(ki, base, key, "/Items?"+q.Encode(), noNextScan, &page); msg != "" {
-			return msg, false, false
+			return "the search failed: " + msg, false, false
 		}
 		for _, it := range page.Items {
 			if !samePath(it.Path, file) {
@@ -260,10 +260,10 @@ func (s *Service) refreshJellyItem(ki kindInfo, base, key, library, file string)
 				"replaceAllMetadata": {"false"}, "replaceAllImages": {"false"}}
 			st, _, err := s.do(ki, "POST", base, key, "/Items/"+url.PathEscape(it.ID)+"/Refresh?"+rq.Encode(), nil)
 			if err != nil {
-				return unreached(ki, base, err, noNextScan), false, false
+				return "the refresh failed: " + unreached(ki, base, err, noNextScan), false, false
 			}
 			if !ok2(st) {
-				return answer(ki, st), false, false
+				return "the refresh failed: " + answer(ki, st), false, false
 			}
 			return "", true, true
 		}
