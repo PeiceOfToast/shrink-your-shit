@@ -25,7 +25,7 @@
   --warning-text: var(--warning);
   --error-text: var(--error);
   --focus: var(--accent);   /* 2 px ring plus 2 px offset; 6.2:1 on the page */
-  --chart-muted: #56657A;   /* ADDED (dataviz check): "skipped" in a chart next to success/error; CVD dE 12, 3:1 on bg */
+  --chart-muted: #6A7C9F;   /* "skipped" and "originals kept" in charts, next to success/error/pending; 3.85:1 on --surface (design 11-19: 3:1+ on the card), protan dE 8.2 from --error */
   --chart-pending: #9FE3C4; /* saving still waiting in the trash: a lighter tint of --success (design 11-19: the darker step was 2.5:1 on bg); 3:1+ on bg, dE 15 from --success */
 }
 
