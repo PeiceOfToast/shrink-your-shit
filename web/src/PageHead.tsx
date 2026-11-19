@@ -42,5 +42,5 @@ export function Empty({ icon, text, children }: { icon: string; text: ReactNode;
 // A first load that failed (pass 6 PR A): the Empty layout, what happened and one action. Shown only while there is no data;
 // a failed refresh over data keeps the data and a red line above it instead.
 export function LoadFailed({ error, reload }: { error?: { message: string }; reload: () => unknown }) {
-  return <div className="empty1" role="alert"><Icon id="i-alert" /><p>Couldn't load this. {error?.message}</p><button className="btn primary" type="button" onClick={() => reload()}>Try again</button></div>;
+  return <div className="empty1" role="alert"><Icon id="i-alert" /><p>{error?.message || "Couldn't load this."}</p><button className="btn primary" type="button" onClick={() => reload()}>Try again</button></div>;
 }
