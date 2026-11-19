@@ -147,7 +147,7 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 		for _, d := range days {
 			daily = append(daily, map[string]any{"day": d.Day, "recorded": d.Recorded, "completed": d.Completed, "skipped": d.Skipped,
 				"failed": d.Failed, "freedBytes": d.FreedBytes,
-				"savedBytes": d.SavedBytes, "waitingBytes": d.WaitingBytes})
+				"savedBytes": d.SavedBytes, "waitingBytes": d.WaitingBytes, "couldFreeBytes": d.CouldFreeBytes})
 		}
 		saving, savingOK, perGB, timeOK := st.saving, st.savingOK, st.perGB, st.timeOK
 		// fileShrinkPercent: how much smaller converted files come out, NOT space saved (review ab99630 P2-1)
