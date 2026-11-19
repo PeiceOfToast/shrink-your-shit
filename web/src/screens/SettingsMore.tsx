@@ -276,7 +276,7 @@ function Install({ d, reload, check }: { d: UpdateNotice; reload: () => void; ch
       : <p className="st warn" style={{ margin: 0, alignItems: "flex-start" }}><Icon id="i-alert" /><span className="why" style={{ fontWeight: 400, color: "var(--text)" }}>{noV(last.message)}.</span></p>)}
     {gone || rolling ? spin("Restarting…", "this page reconnects by itself.")
       : st === "waiting" ? <p role="status" style={{ margin: 0 }}>Updating to {to} when the converting files finish.</p>
-      : st === "downloading" ? spin(`Downloading ${to}...`)
+      : st === "downloading" ? spin(`Downloading ${to}…`)
       : st === "installing" ? spin(`Installing ${to}.`, "The app restarts, and this page reconnects by itself.")
       : st === "failed" ? <p className="st warn" style={{ margin: 0, alignItems: "flex-start" }}><Icon id="i-alert" /><span>Couldn't update to {to}: <span style={{ fontWeight: 400, color: "var(--text)" }}>{d.install.error}. Nothing changed; still on {d.current}.</span></span></p>
       : null}

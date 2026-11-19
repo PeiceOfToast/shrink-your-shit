@@ -221,7 +221,7 @@ export function FirstFive({ f, scanned = false }: { f: ReturnType<typeof useFold
       <div className="hd"><h2 id="first-h">{scanned ? "Files in this folder" : "Is this the right folder?"}</h2></div>
       <div className="bd stack" aria-live="polite">
         {!f.ok ? <p className="muted">Give a folder that passes the check, and its first 5 videos show here.</p>
-          : !r ? <p className="muted">Looking for videos in <span className="mono">{f.checked}</span>...</p>
+          : !r ? <p className="muted">Looking for videos in <span className="mono">{f.checked}</span>…</p>
           : failed(r) ? <p className="st bad"><Icon id="i-alert" /><span>{r.error.message}</span></p>
           : <>
             <p className="muted">{r.items.length < 5 ? "Files found in" : "The first 5 files found in"} <span className="mono">{f.checked}</span>.{scanned ? "" : " Nothing is converted by looking."}</p>
