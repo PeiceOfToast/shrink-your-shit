@@ -538,6 +538,7 @@ type LibraryCounts struct {
 	FreedBytes, WaitingBytes int64
 	CouldFreeBytes           int64 // originals left where they were (output-first), still there (V5c)
 	GrewBytes                int64 // new files bigger than their originals: the growth (never in the above)
+	GrewNowBytes             int64 // the growth bytesNow adds: replaced files only (TotalsOf only)
 	GoneBytes                int64 // replaced files whose converted file a scan found gone: no longer in bytesNow (TotalsOf only)
 }
 
