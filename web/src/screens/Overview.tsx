@@ -121,7 +121,7 @@ export function Overview() {
     tot.waiting > 0 && <Link to="/jobs?tab=completed&kept=1">{bytes(tot.waiting) + " waiting in the trash"}</Link>, tot.kept > 0 && <Link to="/jobs?tab=completed&left=1">{bytes(tot.kept) + " in originals left in place"}</Link>]
     .filter(Boolean).map((p, i) => <Fragment key={i}>{i > 0 && " · "}{p}</Fragment>);
   const workerOf = (id: string) => rows.find((w) => w.jobs.some((j) => j.jobId === id))?.name;
-  const more = [h.waitingToFree > 0 && bytes(h.waitingToFree) + (h.freed > 0 ? " more" : " frees") + (h.nextFreeAt ? " by " + dayName(h.nextFreeAt.slice(0, 10)) : ""), h.couldFree > 0 && "could free " + bytes(h.couldFree) + " if you remove the originals"].filter(Boolean).join(" · ");
+  const more = [h.waitingToFree > 0 && bytes(h.waitingToFree) + (h.freed > 0 ? " more" : " frees") + (h.nextFreeAt ? " by " + dayName(h.nextFreeAt.slice(0, 10)) : ""), h.couldFree > 0 && <Link to="/jobs?tab=completed&left=1">{"could free " + bytes(h.couldFree) + " if you remove the originals"}</Link>].filter(Boolean).map((p, i) => <Fragment key={i}>{i > 0 && " · "}{p}</Fragment>);
   return (
     <div className="stack ov">
       <PageHead icon="i-dashboard" title="Dashboard">
@@ -137,7 +137,7 @@ export function Overview() {
         {f.pausedUntil ? <>It converts on the processor until {clock(f.pausedUntil)}, which is slower. <Link to={"/workers/" + encodeURIComponent(f.workerId) + "?tab=capabilities"}>Test the encoders</Link></> : (f.count === 1 ? "That file was" : "Those files were") + " converted on the processor instead, which is slower."}
       </div></div>)}
       <section className="headline" aria-label="Totals">
-        <div><div className="big">{h.freed > 0 ? <>{bytes(h.freed)}<small>saved</small></> : "Nothing saved yet"}</div>{more && <div className="muted">{more}</div>}
+        <div><div className="big">{h.freed > 0 ? <>{bytes(h.freed)}<small>saved</small></> : "Nothing saved yet"}</div>{more.length > 0 && <div className="muted">{more}</div>}
           {/* design SCREENS V2 Space rules: neutral, on its own line, only when > 0; never added to or taken from the figures */}
           {(h.grew ?? 0) > 0 && <div className="muted sm">{bytes(h.grew!)} added by files that came out bigger</div>}</div>
         <div className="stats">
@@ -208,7 +208,7 @@ export function Overview() {
               <td className="nm"><Link to={"/libraries/" + l.id}><b>{l.name}</b></Link></td>
               <td className="num" data-l="Before">{bytes(l.bytesBefore)}</td>
               <td className="num" data-l="Now">{bytes(l.bytesNow)}</td>
-              <td className="num" data-l="Saved">{l.saved > 0 ? <><b>{bytes(l.saved)}</b>{l.savedPercent != null && " · " + pctTxt(l.savedPercent)}</> : l.waitingToFree > 0 ? <><b>{bytes(l.waitingToFree)} smaller</b>{h.nextFreeAt && " · frees from " + dayName(h.nextFreeAt.slice(0, 10))}</> : "nothing yet"}{(l.grew ?? 0) > 0 && <span className="sub">{bytes(l.grew!)} added by bigger files</span>}{l.saved > 0 && l.waitingToFree > 0 && <span className="sub">{bytes(l.waitingToFree)} more{h.nextFreeAt ? ", frees from " + dayName(h.nextFreeAt.slice(0, 10)) : ""}</span>}{l.saved === 0 && l.couldFree > 0 && <span className="sub"><Link to={"/jobs?tab=completed&left=1&libraryId=" + encodeURIComponent(String(l.id))}>{"could free " + bytes(l.couldFree) + " by removing the originals"}</Link></span>}</td>
+              <td className="num" data-l="Saved">{l.saved > 0 ? <><b>{bytes(l.saved)}</b>{l.savedPercent != null && " · " + pctTxt(l.savedPercent)}</> : l.waitingToFree > 0 ? <><b>{bytes(l.waitingToFree)} smaller</b>{h.nextFreeAt && " · frees from " + dayName(h.nextFreeAt.slice(0, 10))}</> : "nothing yet"}{(l.grew ?? 0) > 0 && <span className="sub">{bytes(l.grew!)} added by bigger files</span>}{l.saved > 0 && l.waitingToFree > 0 && <span className="sub">{bytes(l.waitingToFree)} more{h.nextFreeAt ? ", frees from " + dayName(h.nextFreeAt.slice(0, 10)) : ""}</span>}{l.saved === 0 && l.couldFree > 0 && <span className="sub"><Link className="ul" to={"/jobs?tab=completed&left=1&libraryId=" + encodeURIComponent(String(l.id))}>{"could free " + bytes(l.couldFree) + " by removing the originals"}</Link></span>}</td>
               <td className="num full" data-l="Done · Waiting · Skipped · Failed">{[l.counts.done, l.counts.waiting, l.counts.skipped, l.counts.failed].map(count).join(" · ")}</td>
               <td>{l.state === "paused" ? <span className="pill warn">Paused</span> : <span className="pill">Watching</span>}</td>
             </tr>)}</tbody></table>
