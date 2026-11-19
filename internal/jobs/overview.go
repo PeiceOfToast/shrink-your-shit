@@ -49,6 +49,7 @@ type Day struct {
 	FreedBytes                 int64 // NET, freed that day (review ab99630 P2-1)
 	SavedBytes                 int64 // NET, saved by the conversions that finished that day (their finish day, as 'completed')
 	WaitingBytes               int64 // the part of SavedBytes whose original is still kept in the trash
+	CouldFreeBytes             int64 // the part of SavedBytes whose original was left where it was
 }
 
 // latestEndsSQL is every file's latest end (done, skipped, cancelled, failed, kept) with rn 1 for the newest:
@@ -103,6 +104,7 @@ WHERE rn=1 AND date(at, 'localtime') >= ? GROUP BY d, to_status`, from)
 		day.FreedBytes = t.FreedByDay[d]
 		day.SavedBytes = t.SavedByDay[d]
 		day.WaitingBytes = t.WaitingByDay[d]
+		day.CouldFreeBytes = t.CouldFreeByDay[d]
 		day.Recorded = first != "" && d >= first
 		out = append(out, day)
 	}
@@ -119,11 +121,12 @@ type Totals struct {
 	// SavedByDay and WaitingByDay are NET saved bytes (and the part still waiting in the trash) by the
 	// local day of each conversion's 'done' event; each file counts once, by its newest conversion.
 	SavedByDay, WaitingByDay map[string]int64
+	CouldFreeByDay           map[string]int64
 }
 
 // TotalsOf is the overview's figures in one pass: jobs grouped by library and freed day.
 func (s *Store) TotalsOf() (Totals, error) {
-	t := Totals{Counts: map[int64]LibraryCounts{}, FreedByDay: map[string]int64{}, SavedByDay: map[string]int64{}, WaitingByDay: map[string]int64{}}
+	t := Totals{Counts: map[int64]LibraryCounts{}, FreedByDay: map[string]int64{}, SavedByDay: map[string]int64{}, WaitingByDay: map[string]int64{}, CouldFreeByDay: map[string]int64{}}
 	rows, err := s.db.Query(`SELECT library_id, date(`+freedAtSQL+`, 'localtime') AS d,
   COALESCE(SUM(status=?),0), COALESCE(SUM(status=?),0), COALESCE(SUM(status IN (?,?)),0),
   COALESCE(SUM(`+freedSQL+`),0), COALESCE(SUM(`+waitingSQL+`),0), COALESCE(SUM(`+couldFreeSQL+`),0), COALESCE(SUM(`+grewSQL+`),0)
@@ -177,7 +180,7 @@ FROM jobs GROUP BY library_id, d`, Running, Queued, Failed, Kept)
 // 'done' event (the same day the events table gives it), and the rows are the newest conversion per file.
 func (s *Store) savedByDay(t *Totals) error {
 	rows, err := s.db.Query(`SELECT (SELECT date(e.at, 'localtime') FROM events e WHERE e.kind='job' AND e.job_id=jobs.id AND e.to_status=? ORDER BY e.seq DESC LIMIT 1) AS d,
-  COALESCE(SUM(`+savedSQL+`),0), COALESCE(SUM(`+waitingSQL+`),0)
+  COALESCE(SUM(`+savedSQL+`),0), COALESCE(SUM(`+waitingSQL+`),0), COALESCE(SUM(`+couldFreeSQL+`),0)
 FROM jobs WHERE status=? AND size_after>0 AND `+newestSQL+` GROUP BY d`, Done, Done)
 	if err != nil {
 		return err
@@ -185,13 +188,14 @@ FROM jobs WHERE status=? AND size_after>0 AND `+newestSQL+` GROUP BY d`, Done, D
 	defer rows.Close()
 	for rows.Next() {
 		var day sql.NullString
-		var saved, waiting int64
-		if err := rows.Scan(&day, &saved, &waiting); err != nil {
+		var saved, waiting, could int64
+		if err := rows.Scan(&day, &saved, &waiting, &could); err != nil {
 			return err
 		}
 		if day.Valid {
 			t.SavedByDay[day.String] += saved
 			t.WaitingByDay[day.String] += waiting
+			t.CouldFreeByDay[day.String] += could
 		}
 	}
 	return rows.Err()
