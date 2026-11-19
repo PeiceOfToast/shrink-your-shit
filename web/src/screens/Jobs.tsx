@@ -406,7 +406,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   };
   const skip = state === "skipped", lw = useData(() => (skip ? listLibrariesV2() : Promise.resolve(null)), [id, skip]);
   const lib = lw.data && !failed(lw.data) ? lw.data.find((l) => l.id === (j?.library?.id ?? own?.libraryId)) : undefined;
-  const rule = !skip ? null : lib ? { id: lib.workflowId, name: lib.workflowName } : j?.workflow ? { id: j.workflow.id, name: own?.flow?.name ?? "its workflow" } : null;
+  const rule = !skip ? null : j?.workflow ? { id: j.workflow.id, name: lib?.workflowId === j.workflow.id ? lib.workflowName : own?.flow?.name ?? "its workflow" } : lib ? { id: lib.workflowId, name: lib.workflowName } : null; // the workflow that skipped it; a scan's skip has no job, so its library's
   const before = fmtV(j?.metadata?.before), after = fmtV(j?.metadata?.after);
   const reason = j?.reason?.message ?? (row ? reasonText(row) : "");
   // one fetch of the log for the step list and What the check found; fetched again when the job stops running
