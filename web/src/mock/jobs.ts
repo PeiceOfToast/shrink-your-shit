@@ -39,11 +39,11 @@ let items: JobItem[] = [
 if (new URLSearchParams(location.search).get("jobs") === "many") items = [...items, ...Array.from({ length: 450 }, (_, i) => base("5" + String(i).padStart(4, "0"), "Home.Video." + String(i + 1).padStart(3, "0") + ".mp4", ".", HOME, "queued", { subState: "waiting", attempts: 0, retryAt: null, status: "waiting", detail: null, bytes: 2 * GB }))];
 const TAB: Record<Tab, JobState[]> = { waiting: ["queued", "retry_wait"], running: ["preparing", "running", "validating", "committing"], completed: ["completed"], skipped: ["skipped", "cancelled"], failed: ["failed"] };
 const tabOf = (s: JobState) => (Object.keys(TAB) as Tab[]).find((t) => TAB[t].includes(s))!;
-export function mockJobs(tab: Tab, q: string, path?: string, limit = 200, library = "", kept = false): JobsPage {
+export function mockJobs(tab: Tab, q: string, path?: string, limit = 200, library = "", kept = false, left = false): JobsPage {
   const mine = items.filter((j) => !library || j.libraryId === library); // as the server: ?libraryId= narrows the rows and the tab counts
   const counts = Object.fromEntries((Object.keys(TAB) as Tab[]).map((t) => [t, mine.filter((j) => tabOf(j.state) === t).length])) as Record<Tab, number>;
-  // as the server with ?kept=1 (Done only): the rows whose original is still kept; the counts stay the tab's own
-  let rows = mine.filter((j) => tabOf(j.state) === tab && (!q || j.name.toLowerCase().includes(q.toLowerCase())) && (!path || j.path === path) && (!kept || (tab === "completed" && j.originalState === "kept")));
+  // as the server with ?kept=1 or ?left=1 (Done only): the rows whose original is still kept, or still left beside or in place; the counts stay the tab's own
+  let rows = mine.filter((j) => tabOf(j.state) === tab && (!q || j.name.toLowerCase().includes(q.toLowerCase())) && (!path || j.path === path) && (!kept || (tab === "completed" && j.originalState === "kept")) && (!left || (tab === "completed" && (j.originalState === "left_in_place" || j.originalState === "kept_beside"))));
   if (tab === "waiting") { // as the server with sort=queue (#134): taken-now files by priority, then age; a retry waiting for its time has no place
     const rank = (j: JobItem) => (j.pin === "first" ? 2 : j.pin === "last" ? 0 : 1); // #143: pinned first, then by priority, pinned last at the end
     const now = rows.filter((j) => j.state === "queued").sort((a, b) => rank(b) - rank(a) || (b.priority ?? 0) - (a.priority ?? 0));
