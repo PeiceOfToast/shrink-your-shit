@@ -475,13 +475,15 @@ func (c *Checker) Folder(ctx context.Context, path string) (r FolderReport) {
 	// FIRST-RUN.md "States and errors"). The health report's details may be technical.
 	if c.KnownOriginals != nil {
 		if known, err := c.KnownOriginals(); err == nil {
+			var moved []string
 			for _, o := range OrphanedOriginals(path, known, c.JobOutput) {
 				if o.Files > 0 {
 					r.Notes = append(r.Notes, Issue{Code: "orphaned_originals", Message: o.Message()})
 				}
-				for _, name := range o.Moved {
-					r.Notes = append(r.Notes, Issue{Code: "orphaned_originals", Message: MovedAsideMessage(name)})
-				}
+				moved = append(moved, o.Moved...)
+			}
+			if len(moved) > 0 { // one note for the library: its check ID is per code
+				r.Notes = append(r.Notes, Issue{Code: "moved_aside_outputs", Message: MovedAsideNote(moved)})
 			}
 		}
 	}

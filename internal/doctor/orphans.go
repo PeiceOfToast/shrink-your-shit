@@ -57,6 +57,20 @@ func MovedAsideMessage(name string) string {
 	return name + " is an earlier converted file that had been changed; Convert again moved it here so the new file could take its place. Delete it when you no longer need it."
 }
 
+// MovedAsideNote is the one note for all of a library's moved-aside files: the single-file sentence for one,
+// otherwise a count with up to five names.
+func MovedAsideNote(names []string) string {
+	if len(names) == 1 {
+		return MovedAsideMessage(names[0])
+	}
+	shown, more := names, ""
+	if len(names) > 5 {
+		shown, more = names[:5], fmt.Sprintf(" and %d more", len(names)-5)
+	}
+	return fmt.Sprintf("%d earlier converted files had been changed, so Convert again moved them to the trash: %s%s. Delete them when you no longer need them.",
+		len(names), strings.Join(shown, ", "), more)
+}
+
 // OrphanedOriginals lists the .syp-trash folders under root (one beside each converted file, so in
 // subfolders too) that hold files not in known (jobs.Store.KnownOriginals). A file that movedAside names
 // goes to Moved instead. It only reads. Slice 28's uninstall summary is meant to list these too, with this

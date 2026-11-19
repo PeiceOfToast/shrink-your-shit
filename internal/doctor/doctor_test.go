@@ -629,12 +629,10 @@ func TestMovedAsideOutputIsNamedAsSuch(t *testing.T) {
 	var orphan []string
 	moved := map[string]bool{}
 	for _, n := range c.Folder(context.Background(), dir).Notes {
-		if n.Code != "orphaned_originals" {
-			continue
-		}
-		if n.Message == MovedAsideMessage("movie.2.mkv") {
+		switch n.Code {
+		case "moved_aside_outputs":
 			moved[n.Message] = true
-		} else {
+		case "orphaned_originals":
 			orphan = append(orphan, n.Message)
 		}
 	}
@@ -649,5 +647,41 @@ func TestMovedAsideOutputIsNamedAsSuch(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(trash, "movie.2.mkv")); err != nil {
 		t.Error("nothing may be touched")
+	}
+}
+
+// Several moved-aside files in one library are one note (one check ID per code), listing the names.
+func TestMovedAsideFilesAreOneNotePerLibrary(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, ".syp-trash"), 0o755)
+	os.MkdirAll(filepath.Join(dir, "Shows", ".syp-trash"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".syp-trash", "a.2.mkv"), []byte("a"), 0o644)
+	os.WriteFile(filepath.Join(dir, "Shows", ".syp-trash", "b.3.mkv"), []byte("b"), 0o644)
+	c := checker(1 << 40)
+	c.KnownOriginals = func() (map[string]bool, error) { return map[string]bool{}, nil }
+	c.JobOutput = func(id int64) (string, bool, error) {
+		return map[int64]string{2: "/lib/a.mkv", 3: "/lib/b.mkv"}[id], id == 2 || id == 3, nil
+	}
+	var got []Issue
+	for _, n := range c.Folder(context.Background(), dir).Notes {
+		if n.Code == "moved_aside_outputs" {
+			got = append(got, n)
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("%d moved-aside notes, want 1: %+v", len(got), got)
+	}
+	want := "2 earlier converted files had been changed, so Convert again moved them to the trash: a.2.mkv, b.3.mkv. Delete them when you no longer need them."
+	if got[0].Message != want {
+		t.Errorf("note %q, want %q", got[0].Message, want)
+	}
+}
+
+// More than five names are counted after the first five.
+func TestMovedAsideNoteListsFiveThenCounts(t *testing.T) {
+	names := []string{"1.mkv", "2.mkv", "3.mkv", "4.mkv", "5.mkv", "6.mkv", "7.mkv"}
+	want := "7 earlier converted files had been changed, so Convert again moved them to the trash: 1.mkv, 2.mkv, 3.mkv, 4.mkv, 5.mkv and 2 more. Delete them when you no longer need them."
+	if got := MovedAsideNote(names); got != want {
+		t.Errorf("%q, want %q", got, want)
 	}
 }
