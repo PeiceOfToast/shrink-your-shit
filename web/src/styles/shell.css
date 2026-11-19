@@ -364,6 +364,7 @@ label.chk{cursor:pointer}
 .ltools .input.sm{width:auto;min-height:32px;padding-top:0;padding-bottom:0;font-size:var(--fs-sm)}
 .ltools .find{margin-left:auto;width:240px;max-width:100%;min-height:32px;font-size:var(--fs-sm)}
 .ltools .lib{margin-left:auto;max-width:220px}.ltools .lib + .find{margin-left:0} /* Jobs: the library pick sits just before search */
+.ltools .filt{display:flex;align-items:center;gap:6px;margin-left:auto}.ltools .filt .lib{margin-left:0}.ltools .filt + .find{margin-left:0} /* Jobs: the trash toggle and the library pick wrap together as one group */
 .ltools .desk{display:contents}
 .ltools .pop .btn{width:100%;justify-content:flex-start}
 .chips{display:inline-flex;gap:4px;flex-wrap:wrap}
