@@ -303,7 +303,8 @@ func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.Fil
 	if open, _ := s.Store.HasOpenJob(path); open {
 		return false
 	}
-	// our own output (replace with a new file type, a folder for the new files): never converted again
+	// our own output (replace with a new file type, a folder for the new files): never converted again,
+	// even when it was only touched since
 	if own, err := s.Store.IsOwnOutput(path, st.Size(), st.ModTime().UnixNano()); err != nil {
 		log.Printf("scan %s: %v", path, err)
 		return false
