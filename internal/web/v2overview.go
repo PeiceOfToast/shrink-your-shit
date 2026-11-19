@@ -21,8 +21,8 @@ import (
 // with their files' live progress, the active jobs, each library's sizes and counts, the last 30 days,
 // and averages. Live: the page fetches it again on /api/v2/events' messages. Nothing is estimated:
 // what isn't recorded is null, or a day with recorded false.
-func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView) {
-	overviewStats, libTotals := &statsCache{}, &libraryTotals{} // this server's store's
+func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView, libTotals *libraryTotals) {
+	overviewStats := &statsCache{} // this server's store's
 	api.HandleFunc("GET /api/v2/overview", func(w http.ResponseWriter, r *http.Request) {
 		st, err := overviewStats.get(store)
 		if err != nil {
@@ -213,10 +213,10 @@ func zoneName(now time.Time) string {
 	return z
 }
 
-// libraryTotals caches each library's totals (its files' records): they change with a scan or a
-// library change, not with each job event that makes the page fetch the overview again (review ab99630
-// P2-2). Its key: each library's folder and last scan (a library added, removed or moved changes it;
-// a skip recorded between scans shows at the next scan).
+// libraryTotals caches each library's totals (its files' records and done jobs), so the Dashboard and
+// Libraries pages don't recount on every request (review ab99630 P2-2). Its key: each library's folder and
+// last scan, and the newest event (a job finishing or a skip recorded changes the totals at once; the
+// events are what the pages refresh on). Shared by the Dashboard and Libraries: one count, one answer.
 type libraryTotals struct {
 	mu   sync.Mutex
 	key  string
@@ -224,7 +224,12 @@ type libraryTotals struct {
 }
 
 func (c *libraryTotals) get(store *jobs.Store, libs []jobs.Library) (map[int64]jobs.LibraryTotals, error) {
+	_, newest, err := store.EventBounds()
+	if err != nil {
+		return nil, err
+	}
 	var b strings.Builder
+	fmt.Fprintf(&b, "%d;", newest)
 	for _, l := range libs {
 		fmt.Fprintf(&b, "%d|%s|%s|%d;", l.ID, l.Path, l.LastScan, l.LastScanVideos)
 	}
