@@ -48,6 +48,14 @@ func keptConversion(t *testing.T) (*Scanner, *jobs.Store, jobs.Library, string) 
 	if got := before.Counts[l.ID].WaitingBytes; got != 3 {
 		t.Fatalf("waiting before the delete %d, want 3 (5 - 2)", got)
 	}
+	// The record keeps the original's 5 bytes; the 3 saved are waiting in the trash, so bytesNow is the new file's 2.
+	lt, err := st.LibraryTotalsOf(l)
+	if err != nil || lt.BytesBefore != 5 {
+		t.Fatalf("BytesBefore before the delete %d (err %v), want 5 (the record's size before the conversion)", lt.BytesBefore, err)
+	}
+	if now := jobs.BytesNow(lt, before.Counts[l.ID]); now != 2 {
+		t.Fatalf("bytesNow before the delete %d, want 2 (BytesBefore 5 less the waiting 3)", now)
+	}
 	return s, st, l, a
 }
 
@@ -145,12 +153,12 @@ func TestDeletedReplacedFileWithNothingKeptLeavesTheOverview(t *testing.T) {
 	if got := before.Counts[l.ID].FreedBytes; got != 3 {
 		t.Fatalf("freed before the delete %d, want 3 (5 - 2)", got)
 	}
+	if lt.BytesBefore != 5 {
+		t.Fatalf("BytesBefore %d before the delete, want 5 (the record's size before the conversion)", lt.BytesBefore)
+	}
 	if now := jobs.BytesNow(lt, before.Counts[l.ID]); now != 2 {
-		rec, _ := st.GetFile(a)
-		fi, _ := os.Stat(a)
-		t.Fatalf("bytesNow before the delete %d, want 2: BytesBefore %d, freed %d, waiting %d, gone %d; record size %d mtime %d; stat size %d mtime %d",
-			now, lt.BytesBefore, before.Counts[l.ID].FreedBytes, before.Counts[l.ID].WaitingBytes, before.Counts[l.ID].GoneBytes,
-			rec.Size, rec.ModTime, fi.Size(), fi.ModTime().UnixNano())
+		t.Fatalf("bytesNow before the delete %d, want 2: BytesBefore %d, freed %d, waiting %d, gone %d",
+			now, lt.BytesBefore, before.Counts[l.ID].FreedBytes, before.Counts[l.ID].WaitingBytes, before.Counts[l.ID].GoneBytes)
 	}
 
 	if err := os.Remove(a); err != nil {
