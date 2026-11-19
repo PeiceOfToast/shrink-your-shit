@@ -19,6 +19,9 @@ import (
 
 const markerFile, resultFile = "update.json", "update-result.json"
 
+// updateDir (in the data folder) holds what a Windows update needs while it runs: the installers and the watcher.
+const updateDir = "update"
+
 // RolledBackDB is where RestoreDB keeps the database it replaced (the app's database is syp.db).
 const RolledBackDB = "syp.db.rolled-back"
 
@@ -50,6 +53,11 @@ type Result struct {
 // WriteMarker saves m in dataDir.
 func WriteMarker(dataDir string, m Marker) error {
 	return writeJSON(filepath.Join(dataDir, markerFile), m)
+}
+
+// WriteResult saves r as the result the app shows.
+func WriteResult(dataDir string, r Result) error {
+	return writeJSON(filepath.Join(dataDir, resultFile), r)
 }
 
 // RemoveMarker deletes the marker (an update that failed before the program was swapped).
