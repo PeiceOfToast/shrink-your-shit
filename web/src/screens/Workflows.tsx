@@ -105,7 +105,9 @@ export function Workflows() {
   const setTab = (t: string) => navigate("/workflows" + (t === "templates" ? "?tab=templates" : ""));
   const [q, setQ] = useState(""), [tag, setTag] = useState(""), [fav, setFav] = useState(false), [wizard, setWizard] = useState(false), [said, setSaid] = useState("");
   const tags = [...new Set(all.flatMap((w) => w.tags))].sort();
-  const rows = all.filter((w) => (!q || (w.name + " " + w.description).toLowerCase().includes(q.toLowerCase())) && (!tag || w.tags.includes(tag)) && (!fav || w.favourite));
+  // Pass 5 #3: with no tag on any workflow, the Tags column and the Tag filter are hidden. Based on the list the API returned, so filtering never hides them.
+  const hasTags = tags.length > 0, activeTag = hasTags ? tag : "";
+  const rows = all.filter((w) => (!q || (w.name + " " + w.description).toLowerCase().includes(q.toLowerCase())) && (!activeTag || w.tags.includes(activeTag)) && (!fav || w.favourite));
   return (
     <div className="stack">
       <PageHead icon="i-workflow" title="Workflows" help="What happens to each file. A library uses one workflow." />
@@ -125,9 +127,9 @@ export function Workflows() {
         {/* one toolbar (clean pass T4): New workflow first, filters, search on the right */}
         <div className="ltools" role="toolbar" aria-label="Workflows">
           {!wizard && <button className="btn sm primary" type="button" onClick={() => (setWizard(true), setSaid(""))}><Icon id="i-plus" />New workflow</button>}
-          <select className="input sm" aria-label="Tag" value={tag} onChange={(e) => setTag(e.target.value)}>
+          {hasTags && <select className="input sm" aria-label="Tag" value={activeTag} onChange={(e) => setTag(e.target.value)}>
             <option value="">Tag: any</option>{tags.map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
+          </select>}
           <button className="btn sm ghost" type="button" aria-pressed={fav} onClick={() => setFav(!fav)}><Icon id="i-star" />Favourites</button>
           <input className="input find" type="search" placeholder="Search workflows" aria-label="Search workflows" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
@@ -135,7 +137,7 @@ export function Workflows() {
         {!wfs.loaded ? <div className="empty">Loading...</div> : rows.length === 0 ? (all.length ? <div className="empty">No workflow matches.</div>
           : <Empty icon="i-workflow" text="No workflows yet. A workflow says what happens to each file.">{!wizard && <button className="btn primary" type="button" onClick={() => (setWizard(true), setSaid(""))}><Icon id="i-plus" />New workflow</button>}</Empty>) : (
           <div className="list"><table className="tbl">
-            <thead><tr><th>Name</th><th data-p="2">Libraries</th><th data-p="3">Version</th><th data-p="6">Recent runs</th><th data-p="6">Tags</th><th className="stc">Check</th><th className="actc">Enabled</th><th className="actc"><span className="sr">Menu</span></th></tr></thead>
+            <thead><tr><th>Name</th><th data-p="2">Libraries</th><th data-p="3">Version</th><th data-p="6">Recent runs</th>{hasTags && <th data-p="6">Tags</th>}<th className="stc">Check</th><th className="actc">Enabled</th><th className="actc"><span className="sr">Menu</span></th></tr></thead>
             <tbody>{rows.map((w) => {
               const problems = w.validation.errors + w.validation.warnings;
               const used = w.libraries.length ? w.libraries.map((l) => l.name).join(", ") : "No library";
@@ -150,7 +152,7 @@ export function Workflows() {
                   <td data-p="2">{w.libraries.length ? used : <span className="muted">None</span>}</td>
                   <td className="nowrap" data-p="3">{version}</td>
                   <td data-p="6"><Runs r={w.lastRun} /></td>
-                  <td data-p="6"><span className="chips">{w.tags.map((t) => <span className="mchip" key={t}>{t}</span>)}</span></td>
+                  {hasTags && <td data-p="6"><span className="chips">{w.tags.map((t) => <span className="mchip" key={t}>{t}</span>)}</span></td>}
                   <td className="stc">{problems ? <span className={"pill " + (w.validation.errors ? "bad" : "warn")}><Icon id="i-alert" />{plural(problems, "problem", "problems")}</span>
                     : <span className="pill"><Icon id="i-check-c" />OK</span>}</td>
                   <td className="actc">{w.status === "draft" ? <span className="muted" aria-label="Not published yet">-</span>
