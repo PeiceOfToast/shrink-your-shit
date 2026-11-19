@@ -128,11 +128,13 @@ function AppCard({ kind, it, reload, said }: { kind: IntegrationKind; it?: Integ
         {!open && !confirm && (it
           ? <span className="row nw" style={{ gap: 6 }}><button className="btn sm" type="button" onClick={() => { setOpen(true); setSaved(null); }} aria-label={"Edit " + app}>Edit</button>
             <button className="btn sm ghost" type="button" onClick={() => { setConfirm(true); setSaved(null); }} aria-label={"Remove " + app}>Remove</button></span>
-          : <button className="btn primary sm" type="button" onClick={() => { setOpen(true); setSaved(null); }}>Connect</button>)}
+          : <button className="btn primary sm" type="button" onClick={() => { setOpen(true); setSaved(null); }} aria-label={"Connect " + app}>Connect</button>)}
       </div>
       <div className="bd stack">
-        {saved && <div role="status"><Result tone={saved.tone} text={saved.text} /></div>}
-        <p className="muted" style={{ margin: 0 }}>Rescans each converted file, so it doesn't download it again.{it && <> <span className="mono">{it.url}</span></>}</p>
+        <div>{/* the live region stays mounted so a screen reader announces the text when it arrives */}
+          <div role="status">{saved && <div style={{ marginBottom: "var(--gap)" }}><Result tone={saved.tone} text={saved.text} /></div>}</div>
+          <p className="muted" style={{ margin: 0 }}>Rescans each converted file, so it doesn't download it again.{it && <> <span className="mono">{it.url}</span></>}</p>
+        </div>
         {confirm && <div className="row" role="group" aria-label={"Remove " + app} style={{ gap: 8 }}>
           <span>Remove {app}? It won't be told about converted files.</span>
           <button className="btn sm danger" type="button" onClick={remove}>Remove</button>
