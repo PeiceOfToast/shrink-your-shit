@@ -158,18 +158,39 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 		if timeOK {
 			avg["secondsPerGB"] = perGB
 		}
+		// graphics-encoder fall-backs today, per worker: the count, and when the worker's encoder is paused
+		fallbacks, err := store.EncoderFallbacksSince(time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local))
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		encoderFallbacks := []map[string]any{}
+		for _, f := range fallbacks {
+			encoder, lastError, err := store.EncoderLastFell(f.Worker)
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+			row := map[string]any{"workerId": f.Worker, "worker": workerName(store, f.Worker), "encoder": encoder, "lastError": lastError,
+				"count": f.Count, "at": f.At, "pausedUntil": nil}
+			if until, paused, err := store.EncoderPaused(f.Worker); err == nil && paused {
+				row["pausedUntil"] = until.UTC().Format(time.RFC3339)
+			}
+			encoderFallbacks = append(encoderFallbacks, row)
+		}
 		converted := st.converted
 		zone := zoneName(now)
 		writeJSON(w, map[string]any{
 			"headline": map[string]any{"freed": a.FreedBytes, "waitingToFree": a.WaitingBytes, "nextFreeAt": trash.NextDeleteAt,
 				"couldFree": a.CouldFreeBytes, "grew": a.GrewBytes, "filesConverted": converted, "filesWaiting": a.WaitingFiles}, // NET
-			"trash":     trash, // GROSS (the originals' own size): never added to the headline
-			"workers":   workers,
-			"active":    active,
-			"libraries": libraries,
-			"daily":     daily,
-			"timeZone":  zone,
-			"averages":  avg,
+			"trash":            trash, // GROSS (the originals' own size): never added to the headline
+			"workers":          workers,
+			"active":           active,
+			"libraries":        libraries,
+			"daily":            daily,
+			"timeZone":         zone,
+			"averages":         avg,
+			"encoderFallbacks": encoderFallbacks,
 		})
 	})
 }
