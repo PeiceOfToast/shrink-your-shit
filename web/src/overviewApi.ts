@@ -14,7 +14,9 @@ export interface Overview {
   active: { jobId: string; library: { id: string; name: string } | null; name: string; percent: number | null; etaS: number | null; expectedSavingBytes: number | null }[];
   libraries: { id: string; name: string; state: "active" | "paused"; bytesBefore: number; bytesNow: number; saved: number; savedPercent: number | null; waitingToFree: number; couldFree: number; grew?: number;
     counts: { done: number; waiting: number; skipped: number; failed: number } }[];
-  daily: { day: string; recorded: boolean; completed: number; skipped: number; failed: number; freedBytes: number }[];
+  daily: { day: string; recorded: boolean; completed: number; skipped: number; failed: number; freedBytes: number; savedBytes?: number; waitingBytes?: number }[];
+  // workshop #309 (11-19): savedBytes = NET saving of conversions finished that day; waitingBytes = the part of it whose
+  // original is still in the trash (<= savedBytes). freedBytes is dated by the delete day. Optional until #309 merges.
   timeZone: string;
   averages: { fileShrinkPercent: number | null; secondsPerGB: number | null };
 }
@@ -28,19 +30,24 @@ function sample(): Overview {
   const s = mock.mockState(), sum = mock.summary(s), GB = 1e9;
   const jobs = sum.activeJobs.map((j) => ({ jobId: j.id, name: j.file.name, percent: j.progress?.percent ?? null, fps: j.progress?.fps ?? null, speed: j.progress?.speed ?? null, etaS: j.progress?.etaS ?? null }));
   const days = Array.from({ length: 30 }, (_, i) => { const d = new Date(Date.now() - (29 - i) * 864e5); return d.toISOString().slice(0, 10); });
+  const libs = s.libraries, tot = (f: (l: (typeof libs)[number]) => number) => libs.reduce((a, l) => a + f(l), 0);
   return {
-    headline: { freed: sum.bytes.freed, waitingToFree: s.trash.bytes, nextFreeAt: s.trash.nextDeleteAt, couldFree: sum.bytes.waitingToFree, grew: sum.bytes.grew ?? 0, filesConverted: sum.jobCounts.completed ?? 0, filesWaiting: sum.activity.waiting },
+    headline: { freed: tot((l) => l.bytes.freed), waitingToFree: tot((l) => l.bytes.waitingToFree), nextFreeAt: s.trash.nextDeleteAt, couldFree: 0, grew: tot((l) => l.bytes.grew ?? 0),
+      filesConverted: tot((l) => l.counts.completed), filesWaiting: tot((l) => l.counts.waiting) },
     trash: { bytes: s.trash.bytes, files: s.trash.files, nextDeleteAt: s.trash.nextDeleteAt },
     workers: s.workers.map((w) => ({ id: w.id, name: w.name, kind: w.id === "local" ? "builtin" : "remote", status: w.status, slots: w.slots,
-      jobs: jobs.filter((j) => w.currentJobIds.includes(j.jobId)), cpuPercent: null, gpuPercent: null })),
+      jobs: jobs.filter((j) => w.currentJobIds.includes(j.jobId)), cpuPercent: w.status === "busy" ? 40 + w.name.length * 3 : null, gpuPercent: w.id === "local" ? 22 : null })),
     active: sum.activeJobs.map((j) => ({ jobId: j.id, library: j.library, name: j.file.name, percent: j.progress?.percent ?? null, etaS: j.progress?.etaS ?? null, expectedSavingBytes: null })),
     libraries: s.libraries.map((l) => {
       const now = l.counts.files * 1.4 * GB, saved = l.bytes.freed;
-      return { id: l.id, name: l.name, state: l.enabled ? "active" : "paused", bytesBefore: now + saved, bytesNow: now, saved, savedPercent: now + saved > 0 ? Math.round((saved / (now + saved)) * 1000) / 10 : null,
+      return { id: l.id, name: l.name, state: l.enabled ? "active" : "paused", bytesBefore: now + saved + l.bytes.waitingToFree, bytesNow: now, saved, savedPercent: saved > 0 ? Math.round((saved / (now + saved + l.bytes.waitingToFree)) * 1000) / 10 : null,
         waitingToFree: l.bytes.waitingToFree, couldFree: 0, grew: l.bytes.grew ?? 0, counts: { done: l.counts.completed, waiting: l.counts.waiting, skipped: l.counts.skipped, failed: l.counts.failed } };
     }),
     daily: days.map((day, i) => i < 6 ? { day, recorded: false, completed: 0, skipped: 0, failed: 0, freedBytes: 0 }
-      : { day, recorded: true, completed: 6 + ((i * 7) % 13), skipped: i % 3, failed: i % 7 === 0 ? 1 : 0, freedBytes: (0.4 + ((i * 5) % 9) / 6) * GB }),
+      // the last week's originals are still in the trash (CT 124's shape): that saving is waiting, not freed
+      : { day, recorded: true, completed: 6 + ((i * 7) % 13), skipped: i % 3, failed: i % 7 === 0 ? 1 : i % 11 === 0 ? 3 : 0,
+          freedBytes: i >= 13 && i < 30 ? Math.round((0.4 + (((i - 7) * 5) % 9) / 6) * GB) : 0,
+          savedBytes: Math.round((0.4 + ((i * 5) % 9) / 6) * GB), waitingBytes: i < 23 ? 0 : Math.round((0.4 + ((i * 5) % 9) / 6) * GB) }),
     timeZone: "Europe/London",
     averages: { fileShrinkPercent: 38, secondsPerGB: 130 },
   };

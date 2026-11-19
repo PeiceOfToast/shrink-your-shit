@@ -12,8 +12,8 @@ marked **never verified** has not been seen working by anyone. Update this file 
 | 3 | GitHub Actions CI: tests on Linux/Windows/macOS, 5-target cross-compile, Docker build + smoke test | PR #2 |
 | 4 | Dockerfile, compose example, Debian/Ubuntu install script and systemd unit, `docs/proxmox.md`, `SYP_ADDR` / `SYP_LIBRARIES` | PR #3, docs follow-up PR #4 |
 | 5 | Docs (DEVELOPMENT, ARCHITECTURE, STATUS) | PR #5 |
-| 6 | Workflow that publishes a multi-arch image to GHCR on version tags (never run) | PR #6 |
-| 7a | Workflow + `scripts/build-release.sh` that build the 5 binaries and attach them to a GitHub Release on version tags (never run), `-version` flag | PR #7 |
+| 6 | Workflow that publishes a multi-arch image to GHCR on version tags (v0.1.0 run failed its smoke test; v0.1.1 run succeeded) | PR #6 |
+| 7a | Workflow + `scripts/build-release.sh` that build the 5 binaries and attach them to a GitHub Release on version tags (ran for v0.1.0 and v0.1.1), `-version` flag | PR #7 |
 | 7b | `install.sh` at the repo root: one-line installer for Linux/macOS (replaces the old `deploy/install.sh`) | PR #8 |
 | 7c | Windows installer (`installer/windows`, Inno Setup), built and tested on a Windows runner in CI and attached to releases | this change |
 | 11 | Access token beyond loopback: sign-in cookie or Bearer, CSRF checks on writes, `token` command, `GET /healthz` for health checks, installer prints the sign-in address | this change |
@@ -94,10 +94,11 @@ was extracted and run by the CI test.
   a fake ffmpeg). Includes: the Windows replace-retry against a genuinely locked file, SQLite on
   a Windows path, UNC and long paths, Ctrl+C on Windows.
 - `install.sh` on **macOS** (launchd agent, Homebrew, quarantine flag), on Fedora/Arch/Alpine/openSUSE
-  package managers, downloading from real GitHub release URLs (no release exists yet), and
-  inside a real Proxmox LXC.
-- The two release workflows (`release-binaries.yml`, `release-image.yml`) on GitHub: they have
-  only been linted with `actionlint` and their steps run by hand.
+  package managers. (The one-line install from the real v0.1.1 release was run on fresh Debian 13,
+  Ubuntu 24.04 and Ubuntu 26.04 Proxmox LXCs on 2026-11-19: install, ffmpeg, service after a reboot
+  and upgrade in place on all three, converting a clip on Debian 13 (after giving the
+  service user `syp` write access to the library folder), the README's uninstall steps on
+  Ubuntu 24.04.)
 - Every Proxmox step in `docs/proxmox.md`: LXC bind mounts and the UID shift, running the
   service in an unprivileged LXC, Docker inside an LXC (nesting/keyctl), Proxmox's OCI image
   import.
@@ -190,8 +191,6 @@ only a folder holding nothing but our regular temp file is removed).
 - Failed jobs are not retried automatically (manual Retry button).
 - Subtitle/attachment copying relies on keeping the input's container; data streams are dropped.
 - `go test -race` has not been run (needs cgo).
-- No release has been published: the release workflows exist but no version tag has been pushed, so
-  the installer has nothing to download and the GHCR package does not exist (and will start private).
 
 ## Planned next
 
