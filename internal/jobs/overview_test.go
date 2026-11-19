@@ -68,7 +68,7 @@ func TestTotalsOfMatchTheSeparateFigures(t *testing.T) {
 	if !reflect.DeepEqual(tot.FreedByDay, wantByDay) {
 		t.Errorf("freed by day %v, want %v", tot.FreedByDay, wantByDay)
 	}
-	days, err := s.Days(30, time.Now(), tot.FreedByDay)
+	days, err := s.Days(30, time.Now(), tot)
 	if err != nil {
 		t.Fatal(err)
 	}
