@@ -30,6 +30,7 @@ FLAG_LIBS=
 ADDR=${SYP_ADDR:-}
 NO_START=
 NETWORK_SHARES=
+UPDATE_HELPER=  # --update-helper / --no-update-helper: the root helper behind the web page's Update button
 RUN_FG=
 DOCKER=        # --docker: run the app in a container instead of as a service
 UPDATED=        # set when an earlier install is found (this run upgrades it)
@@ -58,12 +59,14 @@ quiet_run() {
 
 usage() {
   cat <<'USAGE'
-Usage: install.sh [--library DIR]... [--addr ADDR] [--version X.Y.Z] [--network-shares|--no-network-shares] [--no-start] [--run] [--docker]
+Usage: install.sh [--library DIR]... [--addr ADDR] [--version X.Y.Z] [--network-shares|--no-network-shares] [--update-helper|--no-update-helper] [--no-start] [--run] [--docker]
   --library DIR    folder to watch (repeat for several); default: none, add folders on the web page
   --addr ADDR      web address, default 0.0.0.0:8484 (other computers on the network sign in with the access token);
                    127.0.0.1:8484 is this computer only
   --version X.Y.Z  install that release instead of the newest
   --network-shares / --no-network-shares   set up (default) or skip the SMB/NFS share helper
+  --update-helper / --no-update-helper     set up or remove the helper that lets the web page install updates
+                   (Linux with systemd; off by default, an upgrade keeps the earlier choice)
   --no-start       install but do not start
   --run            run in the foreground at the end (containers / no service manager)
   --docker         run in a Docker container instead of as a service (Linux; needs Docker and the Compose plugin)
@@ -81,6 +84,8 @@ while [ $# -gt 0 ]; do
     --docker) DOCKER=1; shift ;;
     --network-shares) NETWORK_SHARES=1; shift ;;
     --no-network-shares) NETWORK_SHARES=0; shift ;;
+    --update-helper) UPDATE_HELPER=1; shift ;;
+    --no-update-helper) UPDATE_HELPER=0; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1 (try --help)" ;;
   esac
@@ -637,6 +642,48 @@ HLPUNIT
       $SUDO systemctl disable --now syp-network-helper >/dev/null 2>&1 || true
       $SUDO rm -f "$HELPER_UNIT" "$HELPER_BIN"
       say "Removed the network-share helper. Shares already mounted stay mounted until the next restart."
+    fi
+
+    # ── Update helper ─────────────────────────────────────────────────────
+    # A small root helper that installs a newer release when the person clicks Update on the web page: it takes
+    # only a version number, checks the download against the release's checksums.txt, keeps the previous
+    # program and puts it back if the new one does not answer. Opt-in; an upgrade keeps the earlier choice.
+    UPD_BIN=$HELPER_DIR/syp-update-helper
+    UPD_UNIT=/etc/systemd/system/syp-update-helper.service
+    if [ -z "$UPDATE_HELPER" ]; then
+      if [ -f "$UPD_UNIT" ]; then UPDATE_HELPER=1; else UPDATE_HELPER=0; fi
+    fi
+    if [ "$UPDATE_HELPER" = 1 ] && [ ! -f "$tmp/x/syp-update-helper" ]; then
+      warn "this release has no update helper; the web page will show the update command instead"
+      UPDATE_HELPER=0
+    fi
+    if [ "$UPDATE_HELPER" = 1 ]; then
+      $SUDO install -d -o root -g root -m 0755 "$HELPER_DIR"
+      $SUDO install -o root -g root -m 0755 "$tmp/x/syp-update-helper" "$UPD_BIN"
+      cat > "$tmp/update-unit" <<UPDUNIT
+[Unit]
+Description=Shrink Your Shit update helper (installs a newer release when asked from the web page)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=$UPD_BIN -user syp -bin $BIN -unit shrink-your-shit -health http://$(check_host "$PORT_ADDR"):$PORT/healthz
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UPDUNIT
+      $SUDO install -m 0644 "$tmp/update-unit" "$UPD_UNIT"
+      $SUDO systemctl daemon-reload
+      $SUDO systemctl enable syp-update-helper >/dev/null 2>&1
+      $SUDO systemctl restart syp-update-helper
+    elif [ -f "$UPD_UNIT" ] || [ -f "$UPD_BIN" ]; then
+      $SUDO systemctl disable --now syp-update-helper >/dev/null 2>&1 || true
+      $SUDO rm -f "$UPD_UNIT" "$UPD_BIN"
+      say "Removed the update helper. The web page shows the update command instead of a button."
     fi
 
     $SUDO systemctl daemon-reload

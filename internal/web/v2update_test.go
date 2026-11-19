@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
-	"github.com/shrink-your-shit/shrink-your-shit/internal/update"
 )
 
 // updateServer serves the update routes and the settings page against a fake GitHub that answers latest and
@@ -44,7 +43,9 @@ func updateServer(t *testing.T, latest string) (srv *httptest.Server, ss *settin
 	a, _, _ := OpenAccess(t.TempDir(), false)
 	eng := Engine{Version: "0.1.1"}
 	mux := http.NewServeMux()
-	v2Update(mux, &update.Checker{Store: st, Current: "0.1.1", URL: gh.URL}, ss)
+	u := newUpdater(ss, eng)
+	u.ck.URL = gh.URL
+	v2Update(mux, u)
 	settingsRoutes(mux, ss, a, eng)
 	srv = httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
