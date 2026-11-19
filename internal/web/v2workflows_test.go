@@ -5,6 +5,7 @@ package web
 import (
 	"encoding/json"
 	"net/http"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -435,5 +436,24 @@ func TestV2ListSurvivesABadFlow(t *testing.T) {
 	}
 	if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/workflows/" + strconv.FormatInt(bad.FlowID, 10)}); code < 400 || !strings.Contains(body, `"message"`) {
 		t.Errorf("the bad one: %d %s", code, body)
+	}
+}
+
+// The Workflows list's lastRun.skipped is the flow's skipped files in the 7-day window, as Jobs > Skipped counts
+// them, not a constant.
+func TestV2WorkflowLastRunCountsSkipped(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, err := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutFile(jobs.File{Path: filepath.Join(l.Path, "a.mkv"), Size: 1000, Decision: "skip: already HEVC", Reason: "already_hevc"}); err != nil {
+		t.Fatal(err)
+	}
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/workflows/" + strconv.FormatInt(l.FlowID, 10)})
+	w := decode[map[string]any](t, body)
+	lr, _ := w["lastRun"].(map[string]any)
+	if lr["skipped"] != float64(1) {
+		t.Errorf("lastRun.skipped %v, want 1 (a.mkv was skipped in the window): %s", lr["skipped"], body)
 	}
 }
