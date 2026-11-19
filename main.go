@@ -55,6 +55,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "worker" { // V7b: a worker for a server on another computer
 		os.Exit(workerCommand(os.Args[2:], os.Stdout, os.Stderr))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "update-watch" { // the Windows update's watcher, started by the app (no data lock)
+		os.Exit(update.RunWatcher(os.Args[2:]))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "restore" {
 		os.Exit(restoreCommand(os.Args[2:], os.Stdout, os.Stderr))
 	}

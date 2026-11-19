@@ -48,8 +48,9 @@ templates) come without it: install it first with `apt-get install -y curl` (as 
 
 > **Tested so far:** the Linux installer was run on fresh Debian 13, Ubuntu 24.04 and Ubuntu 26.04
 > containers. The macOS installer has never been run on a Mac. The Windows installer passed an automated
-> silent install / convert a video / upgrade / uninstall test on a GitHub Windows runner, but it has
-> **not** been tried on a real PC.
+> silent install / convert a video / upgrade / uninstall test on a GitHub Windows runner, and the same
+> steps passed on a Windows Server 2025 virtual machine (v0.1.0 install, upgrade to v0.1.1, uninstall).
+> It installs for the current user and starts the program when that user logs on, not at boot.
 
 **Windows:** download **[shrink-your-shit-setup.exe](https://github.com/PeiceOfToast/shrink-your-shit/releases/latest/download/shrink-your-shit-setup.exe)**
 and run it. It installs for your user only (no administrator prompt), asks which folder holds your
