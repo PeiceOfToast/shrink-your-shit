@@ -240,7 +240,7 @@ func main() {
 	})
 
 	x := media.OSExec{}
-	chk := &doctor.Checker{Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath, KnownOriginals: store.KnownOriginals}
+	chk := &doctor.Checker{Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath, KnownOriginals: store.KnownOriginals, JobOutput: store.OutputOfJob}
 	chk.OnTested = func(at time.Time, rs []doctor.EncoderResult) { // Q1: this computer's test run is kept in the database
 		rows := make([]jobs.EncoderTest, 0, len(rs))
 		for _, r := range rs {

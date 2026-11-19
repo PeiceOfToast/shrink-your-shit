@@ -250,6 +250,9 @@ func (c *Checker) libraryChecks(ctx context.Context, l Library) []DoctorCheck {
 				if is.Code == "orphaned_originals" {
 					h = "Move them back or delete them, then press Check again."
 				}
+				if is.Code == "moved_aside_outputs" { // never "move back": that would overwrite the new conversion
+					h = "Delete them when you no longer need them, then press Check again."
+				}
 				extra = append(extra, DoctorCheck{ID: prefix + ":" + is.Code, Label: "Library: " + l.Name, Status: status,
 					Detail: l.Name + ": " + is.Message, Hint: hint(h)})
 				continue
