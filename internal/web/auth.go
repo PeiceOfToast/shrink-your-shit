@@ -167,7 +167,8 @@ func (a *Access) guard(next http.Handler) http.Handler {
 		b := bearer(r)
 		if writes(r.Method) {
 			mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
-			if mt != "application/json" {
+			uploadPreview := mt == "multipart/form-data" && r.URL.Path == "/api/v2/backups/preview" // a backup file to look at
+			if mt != "application/json" && !uploadPreview {
 				apiError(w, http.StatusForbidden, "csrf", "Changes must be sent as JSON (Content-Type: application/json). Nothing was changed.")
 				return
 			}
