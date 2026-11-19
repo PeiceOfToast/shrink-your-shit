@@ -5,10 +5,12 @@
 package update
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -24,6 +26,35 @@ func startDetached(exe string, args []string) error {
 		return err
 	}
 	return cmd.Process.Release()
+}
+
+// stopChildren ends the processes whose parent is pid, except keep. They are the app's direct children (its
+// ffmpeg and ffprobe runs); a child keeps the app's PID as its parent after the app ends. keep is the watcher,
+// which is also the app's child, so it is never ended. A child that is already gone is not an error.
+func stopChildren(pid, keep int) error {
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(snap)
+	e := windows.ProcessEntry32{}
+	e.Size = uint32(unsafe.Sizeof(e))
+	var kids []int
+	for err = windows.Process32First(snap, &e); err == nil; err = windows.Process32Next(snap, &e) {
+		if int(e.ParentProcessID) == pid && int(e.ProcessID) != keep {
+			kids = append(kids, int(e.ProcessID))
+		}
+	}
+	if err != windows.ERROR_NO_MORE_FILES {
+		return err
+	}
+	var errs []error
+	for _, k := range kids {
+		if err := stopProcess(k); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // stopProcess ends one process and waits for it to exit. It is not a tree kill: the watcher is the app's child,

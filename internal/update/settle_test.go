@@ -3,13 +3,60 @@
 package update
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"log"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+// When the watcher's result could not be saved, the next start says so in the app's log (the detail is only in
+// update/watch.log). A rollback with no failure to save logs nothing.
+func TestSettleLogsWhenTheWatcherLeftNoResult(t *testing.T) {
+	at := time.Date(2026, 11, 19, 7, 0, 0, 0, time.UTC)
+	m := &Marker{Kind: "update", From: "0.1.0", To: "0.2.0", At: at}
+	cases := []struct {
+		name, watchLog string
+		want           bool
+	}{
+		{"result could not be saved", "did not come up; putting 0.1.0 back\nthe result above could not be saved, so the app shows a generic message at its next start: access denied\n", true},
+		{"rolled back with no failure to save", "did not come up; putting 0.1.0 back\n", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			logPath := filepath.Join(dir, updateDir, "watch.log")
+			if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(logPath, []byte(c.watchLog), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chtimes(logPath, at.Add(time.Minute), at.Add(time.Minute)); err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			old := log.Writer()
+			log.SetOutput(&out)
+			defer log.SetOutput(old)
+			r, err := Settle(dir, m, "0.1.0", at.Add(2*time.Minute))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := "Update to 0.2.0 failed; rolled back to 0.1.0"; r.Message != want {
+				t.Errorf("message %q, want the generic %q", r.Message, want)
+			}
+			got := strings.Contains(out.String(), "left no result") && strings.Contains(out.String(), "update/watch.log")
+			if got != c.want {
+				t.Errorf("logged %q; want the no-result line %v", out.String(), c.want)
+			}
+		})
+	}
+}
 
 // The watcher's failure detail is what the next start shows, not the generic line Settle writes.
 func TestSettleKeepsTheWatchersFailure(t *testing.T) {

@@ -11,3 +11,5 @@ var errNotWindows = errors.New("the Windows update runs on Windows only")
 func startDetached(exe string, args []string) error { return errNotWindows }
 
 func stopProcess(pid int) error { return errNotWindows }
+
+func stopChildren(pid, keep int) error { return errNotWindows }

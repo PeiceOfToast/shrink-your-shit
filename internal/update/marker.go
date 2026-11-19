@@ -3,10 +3,12 @@
 package update
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -105,6 +107,8 @@ func Settle(dataDir string, m *Marker, version string, now time.Time) (Result, e
 		r.Message = fmt.Sprintf("Update to %s failed; rolled back to %s", m.To, version)
 		if msg := watcherFailure(dataDir, m); msg != "" {
 			r.Message = msg // the watcher wrote the detail (what failed, what was put back): keep it
+		} else if watcherLostResult(dataDir, m) {
+			log.Printf("the update watcher left no result for the update to %s (see update/watch.log)", m.To)
 		}
 	}
 	if m.DataRestored {
@@ -124,6 +128,18 @@ func watcherFailure(dataDir string, m *Marker) string {
 		return ""
 	}
 	return prev.Message
+}
+
+// watcherLostResult reports whether the watcher ran for this update (its log was written after it started) and
+// logged that its result could not be saved, so the detail is only in that log.
+func watcherLostResult(dataDir string, m *Marker) bool {
+	path := filepath.Join(dataDir, updateDir, "watch.log")
+	fi, err := os.Stat(path)
+	if err != nil || fi.ModTime().Before(m.At) {
+		return false
+	}
+	b, err := os.ReadFile(path)
+	return err == nil && bytes.Contains(b, []byte(unsavedNote))
 }
 
 // RestoreDB puts the backup in place of the database at db. The database it replaces is kept as
