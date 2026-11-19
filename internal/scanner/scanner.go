@@ -494,7 +494,8 @@ func onDisk(p, disk string) bool {
 	return ok && d == disk
 }
 
-// markOutputsGone records the converted files (replaced in their own place) that this pass no longer found:
+// markOutputsGone records the converted files (replaced in their own place, or left beside their original in the
+// library) that this pass no longer found:
 // their bytes count nowhere in the overview any more (bytesNow, waitingToFree). A converted file that is back
 // has its mark cleared. Same rules as markOriginalsGone: only in libraries walked whole, and gone only while
 // the disk its folder was on is still there.
@@ -504,7 +505,12 @@ func (s *Scanner) markOutputsGone(walked []int64, sizes map[string]int64) {
 		log.Printf("scan: converted files: %v", err)
 		return
 	}
-	for _, o := range outs {
+	left, err := s.Store.LeftOutputs(walked)
+	if err != nil {
+		log.Printf("scan: left outputs: %v", err)
+		return
+	}
+	for _, o := range append(outs, left...) {
 		if _, seen := sizes[o.Path]; seen {
 			if o.Gone {
 				if err := s.Store.SetOutputBack(o.JobID); err != nil {
