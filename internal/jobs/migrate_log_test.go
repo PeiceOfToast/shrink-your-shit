@@ -76,3 +76,40 @@ func TestOpenWithNothingToDoLogsNoStepLine(t *testing.T) {
 		t.Errorf("step lines on an up-to-date database: %q", steps)
 	}
 }
+
+// A step that fails rolls the whole upgrade back, so no step line may be logged for it or for the steps before it
+// (they were applied only inside the transaction that was rolled back).
+func TestRolledBackUpgradeLogsNoStepLine(t *testing.T) {
+	path := legacyDB(t)
+	withMigrations(t, append(append([]migration{}, migrations...),
+		migration{latestVersion() + 1, "breaks", `THIS IS NOT SQL;`}))
+	out := captureLog(t)
+	s, err := Open(path)
+	if err == nil {
+		s.Close()
+		t.Fatal("the failing step must make Open fail")
+	}
+	if steps := stepLines(out.String()); len(steps) != 0 {
+		t.Errorf("%d step lines after a rolled-back upgrade, want 0: %q", len(steps), steps)
+	}
+}
+
+// Every statement of the appended step succeeds, and the deferred foreign key fails only at COMMIT. The step lines must
+// not be logged then either, since the upgrade was rolled back.
+func TestFailedCommitLogsNoStepLine(t *testing.T) {
+	path := legacyDB(t)
+	withMigrations(t, append(append([]migration{}, migrations...),
+		migration{latestVersion() + 1, "fails at commit", `PRAGMA defer_foreign_keys=ON;
+CREATE TABLE fk_probe_parent(id INTEGER PRIMARY KEY);
+CREATE TABLE fk_probe_child(p INTEGER REFERENCES fk_probe_parent(id));
+INSERT INTO fk_probe_child(p) VALUES (99);`}))
+	out := captureLog(t)
+	s, err := Open(path)
+	if err == nil {
+		s.Close()
+		t.Fatal("a commit that fails must make Open fail")
+	}
+	if steps := stepLines(out.String()); len(steps) != 0 {
+		t.Errorf("%d step lines after a failed commit, want 0: %q", len(steps), steps)
+	}
+}
