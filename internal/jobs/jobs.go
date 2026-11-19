@@ -134,6 +134,7 @@ func OpenAs(path, appVersion string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	s.removeStaleFiles()
 	return s, nil
 }
 

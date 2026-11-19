@@ -98,7 +98,7 @@ func (s *Store) WriteBackup(reason string) (BackupInfo, error) {
 // dumpTo writes the database as a gzipped JSON object: the header fields, then "tables" with each table's
 // rows as objects keyed by column name.
 func (s *Store) dumpTo(path, reason string, now time.Time) (err error) {
-	f, err := os.Create(path)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600) // the file holds the whole database
 	if err != nil {
 		return err
 	}
@@ -282,6 +282,18 @@ func (s *Store) pruneAutomatic() {
 		}
 		if n++; n > keep {
 			os.Remove(filepath.Join(s.backupDir(), b.ID+".json.gz"))
+		}
+	}
+}
+
+// removeStaleFiles removes what a crash can leave in the backups folder: a backup that was being written
+// (*.json.gz.tmp) and a previewed copy (preview-*.part). It runs when the store opens, before anything of
+// this program writes there.
+func (s *Store) removeStaleFiles() {
+	for _, pat := range []string{"*.json.gz.tmp", "preview-*.part"} {
+		m, _ := filepath.Glob(filepath.Join(s.backupDir(), pat))
+		for _, f := range m {
+			os.Remove(f)
 		}
 	}
 }

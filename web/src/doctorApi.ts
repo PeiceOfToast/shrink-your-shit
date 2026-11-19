@@ -14,6 +14,7 @@ function mockDoctor(): Doctor {
       c("ssim", "Quality check", "ok", "ffmpeg can measure quality (SSIM)."),
       c("encoder:qsv", "Intel Quick Sync", "bad", "Quick Sync is present but the test encode failed: Device creation failed.", "Give the container /dev/dri (see README, Hardware)."),
       c("encoder:vaapi", "VAAPI", "warn", "No VAAPI device found."),
+      c("encoder:nvenc", "NVIDIA NVENC", "absent", "No NVIDIA card found."),
       c("encoder:in-use", "Encoder in use", "ok", "Conversions use the CPU (x265)."),
       c("data", "Data folder", "ok", "Data folder is writable."),
       ...(fresh ? [c("libraries", "Libraries", "warn", "No libraries yet, so there is nothing to convert.", "Add a library in Libraries.")] : [
