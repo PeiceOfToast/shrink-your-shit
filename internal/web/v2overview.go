@@ -263,7 +263,6 @@ func (c *libraryTotals) get(store *jobs.Store, libs []jobs.Library) (map[int64]j
 			if nearest {
 				o, i := out[outer.ID], out[inner.ID]
 				o.BytesBefore -= i.BytesBefore
-				o.LeftNowBytes -= i.LeftNowBytes
 				o.Skipped -= i.Skipped
 				o.VideosRecorded -= i.VideosRecorded
 				out[outer.ID] = o
