@@ -86,15 +86,15 @@ func Settle(dataDir string, m *Marker, version string, now time.Time) (Result, e
 	r := Result{OK: switched, Kind: m.Kind, From: m.From, To: version, DataRestored: m.DataRestored, At: now}
 	switch {
 	case m.Kind == "rollback" && switched:
-		r.Message = fmt.Sprintf("Rolled back from v%s to v%s", m.From, version)
+		r.Message = fmt.Sprintf("Rolled back from %s to %s", m.From, version)
 	case m.Kind == "rollback":
-		r.Message = fmt.Sprintf("Roll back failed; still on v%s", version)
+		r.Message = fmt.Sprintf("Roll back failed; still on %s", version)
 	case switched:
-		r.Message = fmt.Sprintf("Updated from v%s to v%s", m.From, version)
+		r.Message = fmt.Sprintf("Updated from %s to %s", m.From, version)
 		r.Backup = m.Backup
 	default:
 		r.To = m.To
-		r.Message = fmt.Sprintf("Update to v%s failed; rolled back to v%s", m.To, version)
+		r.Message = fmt.Sprintf("Update to %s failed; rolled back to %s", m.To, version)
 	}
 	if m.DataRestored {
 		r.Message += "; changes made since the update were undone (kept in " + RolledBackDB + ")"

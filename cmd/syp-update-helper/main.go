@@ -67,11 +67,12 @@ type helper struct {
 	version    func(bin string) (string, error)
 	wait, poll time.Duration // how long a restarted program has to answer, and how often it is asked
 
-	mu    sync.Mutex
-	busy  bool
-	gen   int    // changes when an operation starts or ends: a version read across one is stale
-	state string // idle | downloading | installing | failed
-	err   string
+	mu       sync.Mutex
+	busy     bool
+	gen      int    // changes when an operation starts or ends: a version read across one is stale
+	state    string // idle | downloading | installing | failed
+	err      string
+	prevVer  string // the version of <bin>.previous, read after each operation (not on every status call)
 	done  chan struct{} // closed when the current operation ends (tests wait on it)
 }
 
@@ -105,6 +106,7 @@ func main() {
 			}
 			return "", fmt.Errorf("could not read the installed version: %v %s", err, out)
 		}}
+	go h.readPrevious() // a helper restarted after an update still knows what its previous version is
 
 	dir := filepath.Dir(*sock)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -233,6 +235,7 @@ func (h *helper) handle(req update.HelperRequest) update.HelperAnswer {
 	log.Printf("%s %s", req.Cmd, req.Version)
 	go func() {
 		err := work()
+		h.readPrevious() // busy is still set, so nothing else runs meanwhile
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		h.busy, h.state, h.err = false, "idle", ""
@@ -253,7 +256,25 @@ func (h *helper) statusLocked() update.HelperAnswer {
 	if st == "" {
 		st = "idle"
 	}
-	return update.HelperAnswer{OK: true, State: st, Error: h.err, Previous: exists(h.bin + ".previous")}
+	a := update.HelperAnswer{OK: true, State: st, Error: h.err, Previous: exists(h.bin + ".previous")}
+	if a.Previous {
+		a.PreviousVersion = h.prevVer
+	}
+	return a
+}
+
+// readPrevious asks <bin>.previous its version. It runs after each operation and once at start, so a
+// status call only reads the kept value.
+func (h *helper) readPrevious() {
+	v := ""
+	if exists(h.bin + ".previous") {
+		if s, err := h.version(h.bin + ".previous"); err == nil {
+			v = s
+		}
+	}
+	h.mu.Lock()
+	h.prevVer = v
+	h.mu.Unlock()
 }
 
 func (h *helper) setState(s string) { h.mu.Lock(); h.state = s; h.mu.Unlock() }
@@ -267,18 +288,41 @@ func (h *helper) install(version string) error {
 	}
 	h.setState("installing")
 	prev := h.bin + ".previous"
+	// The copy before the previous one (the version a roll back should reach after an automatic roll back)
+	// moves aside until the new program answers. Without this, renaming the current program over prev
+	// would lose it, and an automatic roll back would leave nothing to roll back to.
+	older := prev + ".older"
+	hadPrev := exists(prev)
+	restoreOlder := func() error {
+		if !hadPrev {
+			return nil
+		}
+		return os.Rename(older, prev)
+	}
+	if hadPrev {
+		if err := os.Rename(prev, older); err != nil {
+			os.Remove(next)
+			return err
+		}
+	}
 	if err := os.Rename(h.bin, prev); err != nil { // the running program keeps its file open; nothing stops
 		os.Remove(next)
-		return err
+		return errors.Join(err, restoreOlder())
 	}
 	if err := os.Rename(next, h.bin); err != nil {
-		return errors.Join(err, os.Rename(prev, h.bin))
+		return errors.Join(err, os.Rename(prev, h.bin), restoreOlder())
 	}
 	if h.restartHealthy() {
+		if hadPrev {
+			os.Remove(older)
+		}
 		return nil
 	}
 	if err := os.Rename(prev, h.bin); err != nil { // rule 3: the new program goes, the previous comes back
 		return fmt.Errorf("v%s did not answer, and the previous version could not be put back: %v", version, err)
+	}
+	if err := restoreOlder(); err != nil { // and the copy before it is kept as the previous one again
+		return fmt.Errorf("v%s did not answer and was rolled back, but the version before it could not be kept: %v", version, err)
 	}
 	return h.afterUndo(fmt.Sprintf("v%s did not answer within %s; rolled back to the previous version", version, h.wait))
 }

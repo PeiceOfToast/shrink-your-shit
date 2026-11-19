@@ -129,7 +129,7 @@ func TestSettleBothWays(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, err := Settle(dir, ReadMarker(dir), "0.2.0", testNow)
-	if err != nil || !r.OK || r.Message != "Updated from v0.1.0 to v0.2.0" || r.Backup != m.Backup {
+	if err != nil || !r.OK || r.Message != "Updated from 0.1.0 to 0.2.0" || r.Backup != m.Backup {
 		t.Fatalf("new version: %+v %v", r, err)
 	}
 	if ReadMarker(dir) != nil {
@@ -137,11 +137,11 @@ func TestSettleBothWays(t *testing.T) {
 	}
 	WriteMarker(dir, m)
 	r, _ = Settle(dir, ReadMarker(dir), "0.1.0", testNow)
-	if got := LastResult(dir); r.OK || got == nil || got.Message != "Update to v0.2.0 failed; rolled back to v0.1.0" || got.From != "0.1.0" || got.To != "0.2.0" {
+	if got := LastResult(dir); r.OK || got == nil || got.Message != "Update to 0.2.0 failed; rolled back to 0.1.0" || got.From != "0.1.0" || got.To != "0.2.0" {
 		t.Fatalf("rolled back: %+v", got)
 	}
 	WriteMarker(dir, Marker{Kind: "rollback", From: "0.2.0"})
-	if r, _ := Settle(dir, ReadMarker(dir), "0.1.0", testNow); !r.OK || r.Message != "Rolled back from v0.2.0 to v0.1.0" {
+	if r, _ := Settle(dir, ReadMarker(dir), "0.1.0", testNow); !r.OK || r.Message != "Rolled back from 0.2.0 to 0.1.0" {
 		t.Errorf("manual roll back: %+v", r)
 	}
 }
@@ -175,9 +175,9 @@ func TestSettleSaysTheDatabaseWentBack(t *testing.T) {
 		want    string
 	}{
 		{Marker{Kind: "rollback", From: "9.0.1", To: "9.0.0", DataRestored: true}, "9.0.0",
-			"Rolled back from v9.0.1 to v9.0.0; changes made since the update were undone (kept in syp.db.rolled-back)"},
+			"Rolled back from 9.0.1 to 9.0.0; changes made since the update were undone (kept in syp.db.rolled-back)"},
 		{Marker{Kind: "update", From: "9.0.0", To: "9.0.1", DataRestored: true}, "9.0.0",
-			"Update to v9.0.1 failed; rolled back to v9.0.0; changes made since the update were undone (kept in syp.db.rolled-back)"},
+			"Update to 9.0.1 failed; rolled back to 9.0.0; changes made since the update were undone (kept in syp.db.rolled-back)"},
 	} {
 		WriteMarker(dir, c.m)
 		r, err := Settle(dir, ReadMarker(dir), c.version, testNow)

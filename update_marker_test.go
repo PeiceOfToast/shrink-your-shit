@@ -55,7 +55,7 @@ func TestStartAfterARollBackRestoresTheDatabase(t *testing.T) {
 	}
 	r, err := update.Settle(data, pending, "0.1.0", time.Now())
 	if err != nil || r.OK || !r.DataRestored ||
-		r.Message != "Update to v0.2.0 failed; rolled back to v0.1.0; changes made since the update were undone (kept in syp.db.rolled-back)" {
+		r.Message != "Update to 0.2.0 failed; rolled back to 0.1.0; changes made since the update were undone (kept in syp.db.rolled-back)" {
 		t.Errorf("result %+v %v", r, err)
 	}
 	if update.ReadMarker(data) != nil {
@@ -77,7 +77,7 @@ func TestStartOfTheNewVersionRecordsSuccess(t *testing.T) {
 	if _, err := os.Stat(db + ".rolled-back"); !os.IsNotExist(err) {
 		t.Errorf("a database was put back on a good update: %v", err)
 	}
-	if r, _ := update.Settle(data, pending, "0.2.0", time.Now()); !r.OK || r.DataRestored || r.Message != "Updated from v0.1.0 to v0.2.0" {
+	if r, _ := update.Settle(data, pending, "0.2.0", time.Now()); !r.OK || r.DataRestored || r.Message != "Updated from 0.1.0 to 0.2.0" {
 		t.Errorf("result %+v", r)
 	}
 	if update.ReadMarker(data) != nil || update.LastResult(data) == nil {
