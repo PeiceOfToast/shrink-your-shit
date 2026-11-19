@@ -30,6 +30,7 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	systemRoutes(api, store, eng)
 	ss := &settingsStore{store: store}
 	settingsRoutes(api, ss, access, eng)
+	v2Update(api, newUpdater(ss, eng)) // the update notice and the update: /api/v2/update
 	flowRoutes(api, store, ss, eng)
 	settingRoutes(api, store, eng)
 	activityRoutes(api, store, ss, time.Now, eng)
