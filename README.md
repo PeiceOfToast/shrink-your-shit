@@ -41,6 +41,7 @@ when it can't; fix it with `sudo chown -R syp:syp /path/to/videos` (or give `syp
 
 On macOS the service is a login item (a launchd agent), so the installer must be run in a
 normal desktop session (Terminal.app), not over plain SSH; the service then starts at login.
+On a Mac you update by running the install line again (the Update screen shows it); there is no automatic roll back.
 The program is unsigned: macOS or Windows may warn the first time it runs.
 
 The one-line command needs `curl`. Minimal Debian and Ubuntu containers (including the Proxmox
