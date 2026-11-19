@@ -13,7 +13,7 @@ import { onLive } from "../live";
 import { listLibraries } from "../libraryApi";
 import { Empty, PageHead } from "../PageHead";
 import { Link, navigate, useSearch } from "../router";
-import { listWorkers } from "../workersApi";
+import { listWorkers, noWorker } from "../workersApi";
 import { useData } from "../useData";
 import type { Failure, JobAction, JobDetail, JobItem, JobProgressEvent, JobState, Probe, Tab, Pin } from "../types/jobs";
 
@@ -67,7 +67,7 @@ export function Jobs() {
   const libs = useData(listLibraries, [], 60000);
   // parity item 8: with every worker stopped nothing here moves, so say so (a worker finishing its file still runs)
   const wk = useData(listWorkers, [], 15000), wl = wk.data && !failed(wk.data) ? wk.data : [];
-  const noWorker = wl.length > 0 && !wl.some((w) => w.status === "busy" || w.status === "online" || w.status === "draining");
+  const off = noWorker(wl);
   const [q, setQ] = useState(""), [selecting, setSelecting] = useState(false), [sel, setSel] = useState<string[]>([]), [said, setSaid] = useState(""), [prio, setPrio] = useState<Pin | "none">("first");
   // each answer remembers its tab and search, so a tab switch never shows the last tab's rows while it loads
   // Show more (parity 11-19 #1): 200 rows at first, 200 more per press; a new tab, search or library starts again at 200.
@@ -129,7 +129,9 @@ export function Jobs() {
   return (
     <div className="stack">
       <PageHead icon="i-jobs" title="Jobs" help="Every file the workers look at: waiting, converting, done, skipped and failed." />
-      {noWorker && <p className="st warn" role="status"><Icon id="i-alert" /><span>No worker is running. <Link to="/workers">Turn workers on.</Link></span></p>}
+      {off && <p className="st warn" role="status"><Icon id="i-alert" /><span>{off === "offline"
+        ? <>No worker is connected. <Link to="/workers">See Workers.</Link></>
+        : <>No worker is running. <Link to="/workers">Turn workers on.</Link></>}</span></p>}
       {library && <div className="row" style={{ gap: 6 }}><span className="mchip">Library: {libs.data?.find((l) => l.id === library)?.name ?? library}
         <button className="btn sm icon ghost" type="button" aria-label="Clear the library filter" onClick={() => navigate("/jobs?tab=" + tab)}><Icon id="i-x" /></button></span></div>}
       <div className="tabs" role="tablist" aria-label="Jobs">
@@ -140,6 +142,12 @@ export function Jobs() {
         <button className="btn sm ghost phone" type="button" aria-pressed={selecting} onClick={() => (setSelecting(!selecting), setSel([]))}>{selecting ? "Done" : "Select"}</button>
         <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions}</div></details>
         {sel.length > 0 && <span className="muted sm">{sel.length} selected</span>}
+        {/* parity 11-19 #2 (G4): pick a library here too; it sets the same ?libraryId= as "See its jobs", and the chip above stays */}
+        {(libs.data?.length ?? 0) > 1 && <select className="input sm lib" aria-label="Library" value={library} onChange={(e) => navigate("/jobs?tab=" + tab + (e.target.value ? "&libraryId=" + encodeURIComponent(e.target.value) : ""))}>
+          <option value="">Library: All</option>
+          {libs.data?.map((l) => <option key={l.id} value={l.id}>Library: {l.name}</option>)}
+          {library && !libs.data?.some((l) => l.id === library) && <option value={library}>Library: {library}</option>}
+        </select>}
         <input className="input find" type="search" placeholder="Search file names" aria-label="Search file names" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       <p className="muted" role="status">{said}</p>

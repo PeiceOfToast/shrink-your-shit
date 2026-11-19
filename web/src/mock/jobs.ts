@@ -3,7 +3,7 @@
 import type { ActionResult, JobAction, JobDetail, JobItem, JobState, JobsPage, Probe, Tab } from "../types/jobs";
 
 const GB = 1e9, now = Date.now(), at = (min: number) => new Date(now - min * 60e3).toISOString();
-const MOV = ["Movies", "1"] as const, TV = ["TV Shows", "2"] as const, HOME = ["Home videos", "3"] as const;
+const MOV = ["Movies", "l1"] as const, TV = ["TV Shows", "l2"] as const, HOME = ["Home videos", "l3"] as const; // ids as in the mock library list
 const base = (id: string, name: string, folder: string, lib: readonly [string, string], state: JobState, extra: Partial<JobItem>): JobItem => ({
   id, jobId: id.startsWith("skip-") ? undefined : id, origin: id.startsWith("skip-") ? "scan" : "job", state, subState: null, name, folder,
   path: "/media/" + lib[0].toLowerCase().replace(" ", "") + "/" + (folder === "." ? "" : folder + "/") + name, library: lib[0], libraryId: lib[1],
@@ -37,9 +37,10 @@ let items: JobItem[] = [
 if (new URLSearchParams(location.search).get("jobs") === "many") items = [...items, ...Array.from({ length: 450 }, (_, i) => base("5" + String(i).padStart(4, "0"), "Home.Video." + String(i + 1).padStart(3, "0") + ".mp4", ".", HOME, "queued", { subState: "waiting", attempts: 0, retryAt: null, status: "waiting", detail: null, bytes: 2 * GB }))];
 const TAB: Record<Tab, JobState[]> = { waiting: ["queued", "retry_wait"], running: ["preparing", "running", "validating", "committing"], completed: ["completed"], skipped: ["skipped", "cancelled"], failed: ["failed"] };
 const tabOf = (s: JobState) => (Object.keys(TAB) as Tab[]).find((t) => TAB[t].includes(s))!;
-export function mockJobs(tab: Tab, q: string, path?: string, limit = 200): JobsPage {
-  const counts = Object.fromEntries((Object.keys(TAB) as Tab[]).map((t) => [t, items.filter((j) => tabOf(j.state) === t).length])) as Record<Tab, number>;
-  let rows = items.filter((j) => tabOf(j.state) === tab && (!q || j.name.toLowerCase().includes(q.toLowerCase())) && (!path || j.path === path));
+export function mockJobs(tab: Tab, q: string, path?: string, limit = 200, library = ""): JobsPage {
+  const mine = items.filter((j) => !library || j.libraryId === library); // as the server: ?libraryId= narrows the rows and the tab counts
+  const counts = Object.fromEntries((Object.keys(TAB) as Tab[]).map((t) => [t, mine.filter((j) => tabOf(j.state) === t).length])) as Record<Tab, number>;
+  let rows = mine.filter((j) => tabOf(j.state) === tab && (!q || j.name.toLowerCase().includes(q.toLowerCase())) && (!path || j.path === path));
   if (tab === "waiting") { // as the server with sort=queue (#134): taken-now files by priority, then age; a retry waiting for its time has no place
     const rank = (j: JobItem) => (j.pin === "first" ? 2 : j.pin === "last" ? 0 : 1); // #143: pinned first, then by priority, pinned last at the end
     const now = rows.filter((j) => j.state === "queued").sort((a, b) => rank(b) - rank(a) || (b.priority ?? 0) - (a.priority ?? 0));
