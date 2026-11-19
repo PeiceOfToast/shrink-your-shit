@@ -1,4 +1,4 @@
-// Backups (contract "Backup"). ?mock= keeps an in-memory list; its names match the server's (…-2006-01-02-150405.json.gz).
+// Backups (contract "Backup"). ?mock= keeps an in-memory list; its names use the contract's format with seconds (…-2006-01-02-150405.json.gz).
 // Mock files: a name with "bad" isn't a backup, "new" is from a newer app, "busy" finds conversions running on restore.
 import { call, MOCK, type Answer } from "./api";
 import type { Backup, BackupApplied, BackupList, BackupPreview } from "./types/backup";
