@@ -178,3 +178,44 @@ func TestDeletedReplacedFileWithNothingKeptLeavesTheOverview(t *testing.T) {
 		t.Errorf("freed after the delete %d, want 3: the saved history does not change", c.FreedBytes)
 	}
 }
+
+// A beside output (the original left where it was, the new file next to it in the library) that the person
+// deletes: the next scan finds it gone, and bytesNow drops back to the original's bytes alone. Before the scan
+// the library holds both (5 + 2).
+func TestDeletedBesideOutputLeavesTheOverview(t *testing.T) {
+	s, st, lib, _ := setup(t, h264Big)
+	if n := settle(s); n != 1 {
+		t.Fatalf("queued %d, want 1", n)
+	}
+	libs, err := st.Libraries()
+	if err != nil || len(libs) != 1 {
+		t.Fatalf("libraries %v, %v", libs, err)
+	}
+	l := libs[0]
+	out := filepath.Join(lib, "a.hevc.mkv")
+
+	id, err := st.Claim("w")
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(out, []byte("ab"), 0o644)
+	if err := st.Complete(id.ID, out, 2); err != nil {
+		t.Fatal(err)
+	}
+	settle(s)
+	lt, _ := st.LibraryTotalsOf(l)
+	c0, _ := st.TotalsOf()
+	if now := jobs.BytesNow(lt, c0.Counts[l.ID]); now != 7 {
+		t.Fatalf("bytesNow with the beside output %d, want 7 (the original's 5 and the new file's 2)", now)
+	}
+
+	if err := os.Remove(out); err != nil {
+		t.Fatal(err)
+	}
+	settle(s)
+	c, _ := st.TotalsOf()
+	lt, _ = st.LibraryTotalsOf(l)
+	if now := jobs.BytesNow(lt, c.Counts[l.ID]); now != 5 {
+		t.Errorf("bytesNow after the beside output is deleted %d, want 5 (the original alone)", now)
+	}
+}

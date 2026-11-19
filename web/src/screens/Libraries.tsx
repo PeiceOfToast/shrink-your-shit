@@ -62,6 +62,10 @@ export async function pauseResume(ls: Library[], enabled: boolean, say: (m: stri
   say((done ? who + (enabled ? " resumed." : " paused. Files already converting will finish.") : "") + (bad.length ? " Not changed: " + bad.join(" ") : ""));
 }
 const Problem = ({ m }: { m?: string }) => (m ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{m}</span></p> : null);
+// Pass 5 PR 2: a path breaks only after a "/" or "\" (a <wbr> after each separator), so a segment moves to the next line whole
+const breakPath = (p: string) => p.split(/(?<=[\\/])/).map((s, i, a) => <span key={i} className="pathseg">{s}{i < a.length - 1 && <wbr />}</span>);
+// the muted workflow line keeps its first two parts ("Standard · Balanced"); the full summary is the tooltip
+const shortTag = (t: string) => t.split(" · ").slice(0, 2).join(" · ");
 
 // the line the Libraries list shows once after a library was removed (G1: "Movies removed. Nothing in ... was changed.")
 const flash = { said: "" };
@@ -120,17 +124,17 @@ export function Libraries() {
             <tr key={l.id} className={sel.includes(l.id) ? "sel" : undefined}>
               <td className="selc"><label className="hit"><input type="checkbox" aria-label={"Select " + l.name} checked={sel.includes(l.id)} onChange={(e) => setSel(e.target.checked ? [...sel, l.id] : sel.filter((x) => x !== l.id))} /></label></td>
               <td className="idc"><Link className="ttl" to={"/libraries/" + l.id}>{l.name}</Link>
-                <span className="sub mono">{l.paths.join(", ")}</span>
+                <span className="sub mono path" title={l.paths.join(", ")}>{l.paths.map((p, i) => <span key={i}>{i > 0 && ", "}{breakPath(p)}</span>)}</span>
                 {paused(l) && <span className="sub">Paused · {count(l.counts.waiting)} waiting, not converting</span>}
                 <span className="sub phone">{paused(l) ? "Paused · " + count(l.counts.waiting) + " waiting, not converting"
                   : [l.workflowName, count(l.counts.waiting) + " waiting", l.scan.lastScanAt ? "scanned " + lastScan(l.scan.lastScanAt) : "not scanned yet"].join(" · ")}</span>
-                {tag(l) && <span className="sub phone">{tag(l)}</span>}</td>
-              <td data-p="2"><Link to={"/workflows/" + l.workflowId}>{l.workflowName}</Link>{tag(l) && <span className="sub">{tag(l)}</span>}</td>
+                {tag(l) && <span className="sub phone" title={tag(l)}>{shortTag(tag(l))}</span>}</td>
+              <td data-p="2"><Link to={"/workflows/" + l.workflowId}>{l.workflowName}</Link>{tag(l) && <span className="sub wftag" title={tag(l)}>{shortTag(tag(l))}</span>}</td>
               <td className="num" data-p="3">{count(l.counts.waiting)}</td>
               <td className="nowrap" data-p="4">{lastScan(l.scan.lastScanAt)}</td>
               <td className="nowrap" data-p="5">{priorityWord(l.priority)}</td>
               <td className="num" data-p="6">{count(l.counts.files)}</td>
-              <td className="stc"><Status l={l} /></td>
+              <td className="stc"><Status l={l} />{l.counts.failed > 0 && <Link className="failedlink over" to={"/jobs?tab=failed&libraryId=" + encodeURIComponent(l.id)}>{count(l.counts.failed)} failed</Link>}</td>
             </tr>))}
           </tbody>
         </table></div>)}
