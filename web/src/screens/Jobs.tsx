@@ -10,7 +10,7 @@ import { convertDoneAgain, fileJobs, findSkip, getJob, getJobLog, jobAction, lis
 import { getWorkflow } from "../workflowApi";
 import { getHealth, getSettings } from "../libraryApi";
 import { onLive } from "../live";
-import { listLibraries } from "../libraryApi";
+import { listLibraries, listLibrariesV2 } from "../libraryApi";
 import { Empty, PageHead } from "../PageHead";
 import { Link, navigate, useSearch } from "../router";
 import { listWorkers, noWorker } from "../workersApi";
@@ -434,6 +434,9 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
     const r = await act(convertDoneAgain(id), setSaid);
     if (r) { setSaid("Queued again. It converts from the original; the earlier new file stays until the new one passes its check."); d.reload(); onChanged(); }
   };
+  const skip = state === "skipped", lw = useData(() => (skip ? listLibrariesV2() : Promise.resolve(null)), [id, skip]);
+  const lib = lw.data && !failed(lw.data) ? lw.data.find((l) => l.id === (j?.library?.id ?? own?.libraryId)) : undefined;
+  const rule = !skip ? null : j?.workflow ? { id: j.workflow.id, name: lib?.workflowId === j.workflow.id ? lib.workflowName : own?.flow?.name ?? "its workflow" } : lib ? { id: lib.workflowId, name: lib.workflowName } : null; // the workflow that skipped it; a scan's skip has no job, so its library's
   const before = fmtV(j?.metadata?.before), after = fmtV(j?.metadata?.after);
   const reason = j?.reason?.message ?? (row ? reasonText(row) : "");
   // one fetch of the log for the step list and What the check found; fetched again when the job stops running
@@ -485,7 +488,8 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
             onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), closeBack())}>
             <p style={{ margin: "0 0 8px" }}><strong>Get the original of “{name}” back?</strong> The original ({bytes(kept.originalBytes)}) goes back in place and the smaller version{kept.newPath && kept.newPath.split(/[\\/]/).pop() !== name ? ", " + kept.newPath.split(/[\\/]/).pop() + "," : ""} is deleted. This file won't be converted again unless you press Convert again.</p>
             <div className="row"><button className="btn primary" type="button" autoFocus onClick={getBack}>Get original back</button><button className="btn ghost" type="button" onClick={closeBack}>Cancel</button></div></div>}
-          {j?.workflow && <section><h3>Workflow</h3><p>{own?.flow?.name ?? "Its library's workflow"} · v{j.workflow.version}</p></section>}
+          {/* G7: a skipped file links to the workflow whose rule skipped it (a scan's skip has no job: its library's workflow) */}
+          {(j?.workflow || rule) && <section><h3>Workflow</h3><p>{rule ? <a className="linkbtn" href={"/workflows/" + encodeURIComponent(rule.id)} onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate("/workflows/" + encodeURIComponent(rule.id)); }}}>Change rule in {rule.name}</a> : own?.flow?.name ?? "Its library's workflow"}{j?.workflow && " · v" + j.workflow.version}</p></section>}
           {!scan && <section><h3>Timeline</h3>
             {!j ? <p className="muted">Loading...</p> : !j.steps.length && !j.events.length ? <p className="muted">No step history for jobs from before the update.</p> : <>
               {j.steps.length > 0 && <ol className="tline">{j.steps.map((s, i) => <li key={i} className={s.ok ? "" : s.step === "encoder_fallback" ? "warn" : "bad"}><Icon id={s.ok ? "i-check-c" : s.step === "encoder_fallback" ? "i-alert" : "i-x-c"} /><span className="sp">{s.words}</span><span className="muted sm nowrap">{clock(s.at)}</span></li>)}</ol>}
