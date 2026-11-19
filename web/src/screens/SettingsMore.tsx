@@ -261,6 +261,8 @@ function Install({ d, reload, check }: { d: UpdateNotice; reload: () => void; ch
   const [ask, setAsk] = useState(false), [rolling, setRolling] = useState<{ from: string; msg: string } | null>(null);
   const st = d.install.state, running = st === "waiting" || st === "downloading" || st === "installing", n = jobs.data ?? 0, to = d.latest ?? "", last = d.lastResult;
   useEffect(() => { if (rolling && (d.current !== rolling.from || (d.lastResult?.message ?? "") !== rolling.msg)) setRolling(null); }, [d, rolling]);
+  // a helper that accepts but never restarts the app would leave "Restarting..." up forever
+  useEffect(() => { if (!rolling) return; const t = setTimeout(() => { setRolling(null); setRbFail("the app didn't restart within 3 minutes. Check the server's log."); }, 180000); return () => clearTimeout(t); }, [rolling]);
   useEffect(() => {
     if (!running && !gone && !rolling) return;
     const t = setInterval(async () => { const r = await getUpdate().catch(() => null); if (!r || failed(r)) setGone(r?.error.code === "offline" || !r); else { setGone(false); reload(); } }, 3000);
