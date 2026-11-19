@@ -12,8 +12,8 @@ marked **never verified** has not been seen working by anyone. Update this file 
 | 3 | GitHub Actions CI: tests on Linux/Windows/macOS, 5-target cross-compile, Docker build + smoke test | PR #2 |
 | 4 | Dockerfile, compose example, Debian/Ubuntu install script and systemd unit, `docs/proxmox.md`, `SYP_ADDR` / `SYP_LIBRARIES` | PR #3, docs follow-up PR #4 |
 | 5 | Docs (DEVELOPMENT, ARCHITECTURE, STATUS) | PR #5 |
-| 6 | Workflow that publishes a multi-arch image to GHCR on version tags (never run) | PR #6 |
-| 7a | Workflow + `scripts/build-release.sh` that build the 5 binaries and attach them to a GitHub Release on version tags (never run), `-version` flag | PR #7 |
+| 6 | Workflow that publishes a multi-arch image to GHCR on version tags (ran for v0.1.0 and v0.1.1) | PR #6 |
+| 7a | Workflow + `scripts/build-release.sh` that build the 5 binaries and attach them to a GitHub Release on version tags (ran for v0.1.0 and v0.1.1), `-version` flag | PR #7 |
 | 7b | `install.sh` at the repo root: one-line installer for Linux/macOS (replaces the old `deploy/install.sh`) | PR #8 |
 | 7c | Windows installer (`installer/windows`, Inno Setup), built and tested on a Windows runner in CI and attached to releases | this change |
 | 11 | Access token beyond loopback: sign-in cookie or Bearer, CSRF checks on writes, `token` command, `GET /healthz` for health checks, installer prints the sign-in address | this change |

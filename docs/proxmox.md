@@ -153,9 +153,8 @@ failed clearly without sudo, on a tampered download and on a missing library fol
 
 The Dockerfile cross-compiles the Go program for the target platform; a `linux/arm64` build of
 that stage produced an aarch64 binary. **Not checked:** the arm64 image actually running (no
-emulation was available when this was written), the release workflow
-(`release-image.yml`; it has been through `actionlint` only, and has never run on GitHub),
-and pulling the image from `ghcr.io`.
+emulation was available when this was written) and pulling the image from `ghcr.io`. The release
+workflow (`release-image.yml`) has run on GitHub for v0.1.0 and v0.1.1.
 
 **Checked** (2026-11-19): the one-line installer with the published v0.1.1 release inside fresh,
 unprivileged Debian 13, Ubuntu 24.04 and Ubuntu 26.04 LXCs (`nesting=1`): install, ffmpeg, service
