@@ -926,7 +926,8 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// The local worker encodes with its graphics encoder for this plan's format when it can do this plan; else,
 	// and for a remote worker, the processor (its own arguments are FFmpegArgs, unchanged).
 	gpu := ""
-	fell := false // the graphics encoder failed and the processor converted the file
+	fell := false // the graphics encoder failed and the processor is retrying the file
+	fellReason := ""
 	args := plan.FFmpegArgs(srcPath, tmp)
 	if w.remote == nil && w.Encoder != nil {
 		want, note := w.Encoder(plan.Video.Codec)
@@ -978,13 +979,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			if err := os.Truncate(tmp, 0); err != nil {
 				encErr, terr = "", fmt.Errorf("clearing the partial output: %w", err)
 			} else {
-				w.jobf(job.ID, ": %s failed (%s); converted on the processor", gpu, reason)
-				if paused, err := w.Queue.EncoderFell(job.ID, w.ID, gpu, reason); err != nil {
-					w.jobf(job.ID, ": could not record the fall-back: %v", err)
-				} else if paused {
-					w.jobf(job.ID, ": %s failed three times in a row, so it is paused for an hour", gpu)
-				}
-				fell = true
+				fell, fellReason = true, shortReason(reason)
 				args = plan.FFmpegArgs(srcPath, tmp)
 				setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWords(plan),
 					Decoder: decoderWords(src), Progress: media.Progress{ETASeconds: -1}})
@@ -994,6 +989,14 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 	}
 	w.recordEncode(job.ID, args, encStart, encErr, terr, probeSummary(src))
+	if fell && terr == nil { // the processor converted the file, so the graphics encoder was the fault: it counts
+		w.jobf(job.ID, ": %s failed (%s); converted on the processor", gpu, fellReason)
+		if paused, err := w.Queue.EncoderFell(job.ID, w.ID, gpu, fellReason); err != nil {
+			w.jobf(job.ID, ": could not record the fall-back: %v", err)
+		} else if paused {
+			w.jobf(job.ID, ": %s failed three times in a row, so it is paused for an hour", gpu)
+		}
+	}
 	if gpu != "" && !fell && terr == nil { // the graphics encoder converted the file: its run of failures ends
 		if err := w.Queue.EncoderWorked(w.ID); err != nil {
 			w.jobf(job.ID, ": could not record the encoder's success: %v", err)
@@ -1747,6 +1750,17 @@ func fileSummary(info media.Info) string {
 	}
 	parts = append(parts, fmt.Sprintf("%d audio", len(info.Audio())), fmt.Sprintf("%d subtitles", len(info.Subtitles())), rules.Clock(info.DurationSec))
 	return strings.Join(parts, ", ")
+}
+
+// encoderReasonMax caps the reason a fall-back keeps, as the remote path's notes are capped.
+const encoderReasonMax = 300
+
+// shortReason is reason cut to encoderReasonMax characters.
+func shortReason(reason string) string {
+	if r := []rune(reason); len(r) > encoderReasonMax {
+		return string(r[:encoderReasonMax])
+	}
+	return reason
 }
 
 // gpuFailed says whether a graphics encode that ended with err should convert again on the processor: only an

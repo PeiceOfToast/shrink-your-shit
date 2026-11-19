@@ -481,14 +481,17 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 		if s := strings.TrimSpace(stderr); s != "" {
 			reason = strings.SplitN(s, "\n", 2)[0]
 		}
-		c.noteFell(ctx, l, enc, reason)
 		if e := os.Truncate(out, 0); e != nil { // the same staged file: the server checks its identity
 			return stderr, args, fmt.Errorf("clearing the partial output: %w", e)
 		}
+		failed, failedReason := enc, reason
 		enc = ""
 		report(map[string]any{"stage": "converting", "outTimeUs": 0, "encoder": enc}) // the live label names the processor now
 		args = snap.Plan.FFmpegArgs(src, out)
 		stderr, err = run(args)
+		if err == nil && gone == nil { // the processor converted it, so the graphics encoder was the fault: it counts
+			c.noteFell(ctx, l, failed, failedReason)
+		}
 	}
 	if gone != nil {
 		return stderr, args, gone
