@@ -23,6 +23,8 @@ func TestKeptVBRWordsNamesTheMaxThatBound(t *testing.T) {
 			"Kept the original: under a 2,000 kbps max bitrate the picture would suffer."},
 		{"the level's figure, with thousands", rules.VideoEncode{TargetKbps: 3600, MaxRateKbps: 3600, PeakLimitKbps: 5000},
 			"Kept the original: under a 3,600 kbps max bitrate the picture would suffer."},
+		{"saved legacy flow: the source cap is not the level's figure", rules.VideoEncode{TargetKbps: 3600, MaxRateKbps: 8000, PeakLimitKbps: 5000},
+			"Kept the original: under a 3,600 kbps max bitrate the picture would suffer."},
 	}
 	for _, c := range cases {
 		if got := keptVBRWords(c.v); got != c.want {

@@ -1566,7 +1566,7 @@ func renameRetry(ctx context.Context, rename func(a, b string) error, a, b strin
 // keptVBRWords is the kept-original reason for a VBR file whose picture was too different (review a772397
 // item 1): it names the max that actually set the file's bitrate, the person's limit or the level's figure.
 func keptVBRWords(v rules.VideoEncode) string {
-	kbps := v.MaxRateKbps
+	kbps := v.TargetKbps // the level's figure: MaxRateKbps can be the source's cap in a saved VBR flow
 	if v.PeakLimitBinds() {
 		kbps = v.PeakLimitKbps
 	}
