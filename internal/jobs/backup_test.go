@@ -157,3 +157,15 @@ func TestMigrationWritesAFileBackup(t *testing.T) {
 		t.Fatalf("list %+v %v", list, err)
 	}
 }
+
+// Backups made in the same minute get different names (ui-shop, #357 real-server test): the seconds are in it.
+func TestBackupNamesTellSameMinuteBackupsApart(t *testing.T) {
+	a := backupName(time.Date(2026, 11, 19, 11, 16, 5, 0, time.UTC))
+	b := backupName(time.Date(2026, 11, 19, 11, 16, 40, 0, time.UTC))
+	if a == b {
+		t.Fatalf("two backups in the same minute share the name %q", a)
+	}
+	if want := "shrink-your-shit-backup-2026-11-19-111605.json.gz"; a != want {
+		t.Errorf("name %q, want %q", a, want)
+	}
+}

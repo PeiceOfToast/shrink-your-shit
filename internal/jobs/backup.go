@@ -314,6 +314,12 @@ func (s *Store) backupKeep() int {
 	return st.BackupKeep
 }
 
+// backupName is the file name a person sees for a backup. Seconds are in it, so two made in the same minute
+// do not share a name.
+func backupName(created time.Time) string {
+	return "shrink-your-shit-backup-" + created.Format("2006-01-02-150405") + ".json.gz"
+}
+
 // backupInfoOf reads a backup's header (not its tables) and its size.
 func backupInfoOf(path, id string) (BackupInfo, error) {
 	st, err := os.Stat(path)
@@ -363,7 +369,7 @@ func backupInfoOf(path, id string) (BackupInfo, error) {
 		return BackupInfo{}, err
 	}
 	return BackupInfo{
-		ID: id, Name: "shrink-your-shit-backup-" + created.Format("2006-01-02-1504") + ".json.gz",
+		ID: id, Name: backupName(created),
 		CreatedAt: h.CreatedAt, Reason: h.Reason, AppVersion: h.AppVersion, SizeBytes: st.Size(),
 	}, nil
 }
