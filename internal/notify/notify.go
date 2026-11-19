@@ -145,6 +145,9 @@ type Options struct {
 	Now          func() time.Time
 	Logf         func(format string, args ...any)
 	Backoff      []time.Duration // the waits before each retry of a failed send
+	// FailureText is the sentence the Jobs page shows for a failed job, by job id ("" when it has none). A failure
+	// sends its first line; failedWords is the fallback.
+	FailureText func(jobID int64) string
 }
 
 // Service keeps the setup and sends the news.
@@ -245,7 +248,7 @@ func (s *Service) events() {
 		}
 		switch e.To {
 		case "failed":
-			s.notifyAll("jobFailed", "/jobs?tab=failed", fmt.Sprintf("Failed: %s. %s", name, failedWords(e.Reason)), "job.failed")
+			s.notifyAll("jobFailed", "/jobs?tab=failed", fmt.Sprintf("Failed: %s. %s", name, s.failureSentence(e)), "job.failed")
 		case "kept":
 			s.notifyAll("needsYou", "/jobs?tab=completed", fmt.Sprintf("Kept the original of %s: a safety check refused the new file.", name), "job.kept")
 		case "done":
@@ -253,6 +256,16 @@ func (s *Service) events() {
 		}
 	}
 	s.setCursor(eventCursor, cur)
+}
+
+// failureSentence is the first line of the Jobs sentence for a failed job, or failedWords for its code when there is none.
+func (s *Service) failureSentence(e jobs.Event) string {
+	if s.opt.FailureText != nil {
+		if line, _, _ := strings.Cut(strings.TrimSpace(s.opt.FailureText(e.JobID)), "\n"); line != "" {
+			return line
+		}
+	}
+	return failedWords(e.Reason)
 }
 
 func (s *Service) fallbacks() {
@@ -358,8 +371,8 @@ func summaryDue(sum Summary, now, last time.Time, b jobs.Batch) (send, advance b
 	return advance && found, advance
 }
 
-// failedWords says why a job failed in fixed words from its code. The job's stored sentence is not sent: some name
-// a full path, and a notification leaves this computer.
+// failedWords says why a job failed in fixed words from its code. It is the fallback when Options.FailureText is
+// not set or says nothing; when it is set, the Jobs sentence is sent instead (it can name the output folder, as Jobs does).
 func failedWords(code string) string {
 	switch code {
 	case jobs.ReasonDiskFull:
