@@ -44,7 +44,8 @@ func swrWaitFor(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-// A page that is live gets the last value at once while a slow recompute runs, and then the new one.
+// A request gets the last value at once while a slow recompute runs, and then the new one. There is no "live page"
+// window: the first ask after a quiet spell is served at once too (QA #421: it took 3-9 s at 200k jobs).
 func TestSWRServesTheLastValueWhileItRecomputes(t *testing.T) {
 	setSWR(t, 10*time.Millisecond, 0)
 	var key fakeKey
