@@ -476,6 +476,10 @@ ALTER TABLE files ADD COLUMN decided_at TEXT;`},
 	// once per file: this index makes that one pass over the index.
 	{49, "jobs newest by path", `
 CREATE INDEX IF NOT EXISTS jobs_newest ON jobs(path, library_id, id);`},
+	// A converted file (replaced in its place) found gone by a scan: its bytes count nowhere in the overview
+	// (bytesNow, waitingToFree). Set and cleared by the scanner; history (saved totals) is not changed.
+	{50, "output gone", `
+ALTER TABLE jobs ADD COLUMN output_gone_at TEXT NOT NULL DEFAULT '';`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone

@@ -135,15 +135,9 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView, libTotals
 			if t.BytesBefore > 0 {
 				pct = 100 * float64(c.FreedBytes) / float64(t.BytesBefore)
 			}
-			// bytesNow is what the folder holds now. With nothing before (the folder empty, originals only in the
-			// trash) the subtraction goes negative, so it is floored at 0.
-			bytesNow := t.BytesBefore - c.FreedBytes - c.WaitingBytes
-			if bytesNow < 0 {
-				bytesNow = 0
-			}
 			libraries = append(libraries, map[string]any{"id": strconv.FormatInt(l.ID, 10), "name": l.Name, "state": state,
 				// now: the files a scan sees (an original waiting in .syp-trash isn't one: review ab99630 P3-3)
-				"bytesBefore": t.BytesBefore, "bytesNow": bytesNow, "saved": c.FreedBytes, "savedPercent": pct,
+				"bytesBefore": t.BytesBefore, "bytesNow": jobs.BytesNow(t, c), "saved": c.FreedBytes, "savedPercent": pct,
 				"waitingToFree": c.WaitingBytes, "couldFree": c.CouldFreeBytes, "grew": c.GrewBytes,
 				"counts": map[string]int{"done": t.Done, "waiting": c.Waiting, "skipped": t.Skipped, "failed": c.Failed}, "pausedBy": pausedBy})
 		}

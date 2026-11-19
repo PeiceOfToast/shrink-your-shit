@@ -183,6 +183,7 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 	if ctx.Err() == nil {
 		s.forgetUnseen(seen)
 		s.markOriginalsGone(walked, sizes)
+		s.markOutputsGone(walked, sizes)
 	}
 	return queued
 }
@@ -479,6 +480,49 @@ func (s *Scanner) NextScan() time.Time {
 	return s.nextScan
 }
 
+// onDisk is whether p's nearest existing folder is on disk (a folder deleted with p counts as its folder's disk).
+func onDisk(p, disk string) bool {
+	at := filepath.Dir(p)
+	for {
+		if _, err := os.Stat(at); err == nil || filepath.Dir(at) == at {
+			break
+		}
+		at = filepath.Dir(at)
+	}
+	d, ok := originalDisk(at)
+	return ok && d == disk
+}
+
+// markOutputsGone records the converted files (replaced in their own place) that this pass no longer found:
+// their bytes count nowhere in the overview any more (bytesNow, waitingToFree). A converted file that is back
+// has its mark cleared. Same rules as markOriginalsGone: only in libraries walked whole, and gone only while
+// the disk its folder was on is still there.
+func (s *Scanner) markOutputsGone(walked []int64, sizes map[string]int64) {
+	outs, err := s.Store.ReplacedOutputs(walked)
+	if err != nil {
+		log.Printf("scan: converted files: %v", err)
+		return
+	}
+	for _, o := range outs {
+		if _, seen := sizes[o.Path]; seen {
+			if o.Gone {
+				if err := s.Store.SetOutputBack(o.JobID); err != nil {
+					log.Printf("scan: %s: %v", o.Path, err)
+				}
+			}
+			continue
+		}
+		if o.Disk == "" || o.Gone || !onDisk(o.Path, o.Disk) {
+			continue
+		}
+		if _, err := os.Lstat(o.Path); errors.Is(err, fs.ErrNotExist) {
+			if err := s.Store.SetOutputGone(o.JobID); err != nil {
+				log.Printf("scan: %s: %v", o.Path, err)
+			}
+		}
+	}
+}
+
 // markOriginalsGone records the originals left where they were (beside, or with a folder for new files)
 // that this pass no longer found, so their saving counts as freed, and those that changed (another
 // size: it is a new file, converted on its own), whose saving no longer counts (V5c, design call 3).
@@ -511,14 +555,7 @@ func (s *Scanner) markOriginalsGone(walked []int64, sizes map[string]int64) {
 		if o.Disk == "" {
 			continue
 		}
-		at := dir
-		for {
-			if _, err := os.Stat(at); err == nil || filepath.Dir(at) == at {
-				break
-			}
-			at = filepath.Dir(at)
-		}
-		if d, ok := originalDisk(at); !ok || d != o.Disk {
+		if !onDisk(o.Path, o.Disk) {
 			continue
 		}
 		if _, err := os.Lstat(o.Path); errors.Is(err, fs.ErrNotExist) {
