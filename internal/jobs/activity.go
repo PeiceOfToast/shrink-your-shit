@@ -153,8 +153,7 @@ FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id WHERE j.status IN (?,?) A
 // more (review fd13e2e). Done here rather than in a start-up pass, which would stat every old output, and
 // hang on (or miss) a library that is offline.
 func (s *Store) IsOwnOutput(path string, size, mtime int64) (bool, error) {
-	if _, err := s.db.Exec(`UPDATE jobs SET output_mtime=? WHERE id=(SELECT id FROM jobs WHERE output_path=? AND status='done' AND size_after=? AND output_mtime=0
-  ORDER BY id DESC LIMIT 1)`, mtime, path, size); err != nil {
+	if err := s.recordOutputTime(path, size, mtime); err != nil {
 		return false, err
 	}
 	// any status: only Complete sets output_path, and a done job converted again (queued, running, or
@@ -162,6 +161,27 @@ func (s *Store) IsOwnOutput(path string, size, mtime int64) (bool, error) {
 	var yes bool
 	err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM jobs WHERE output_path=? AND size_after=?)`, path, size).Scan(&yes)
 	return yes, err
+}
+
+// IsOwnOutputExact is the worker's test before it removes or overwrites a file at an output name: the path, the
+// size and the time must all be the ones a done job recorded. A file we did not write there is never ours, even at
+// the same size (#400: a size-only match would delete the person's own file).
+func (s *Store) IsOwnOutputExact(path string, size, mtime int64) (bool, error) {
+	if err := s.recordOutputTime(path, size, mtime); err != nil {
+		return false, err
+	}
+	var yes bool
+	err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM jobs WHERE output_path=? AND size_after=? AND output_mtime=? AND output_mtime<>0)`,
+		path, size, mtime).Scan(&yes)
+	return yes, err
+}
+
+// recordOutputTime fills in the time of the newest done job at path with this size, when it has none yet
+// (see IsOwnOutput).
+func (s *Store) recordOutputTime(path string, size, mtime int64) error {
+	_, err := s.db.Exec(`UPDATE jobs SET output_mtime=? WHERE id=(SELECT id FROM jobs WHERE output_path=? AND status='done' AND size_after=? AND output_mtime=0
+  ORDER BY id DESC LIMIT 1)`, mtime, path, size)
+	return err
 }
 
 // convertedSQL is true for a files row that is the output of a done conversion: the scanner skips it
