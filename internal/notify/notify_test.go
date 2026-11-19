@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -57,6 +58,9 @@ func (r *rx) events() []string {
 }
 
 func (r *rx) count() int { return len(r.events()) }
+
+// sorted returns a sorted copy: messages are sent in parallel, so their arrival order is not fixed.
+func sorted(s []string) []string { return slices.Sorted(slices.Values(s)) }
 
 // clock is a settable time, safe for the send goroutines to read.
 type clock struct {
@@ -170,7 +174,7 @@ func TestEachEventFiresAndItsToggleTurnsItOff(t *testing.T) {
 	}
 	svc.Tick()
 	svc.Idle()
-	if got := r.events(); fmt.Sprint(got) != "[job.failed job.kept]" {
+	if got := r.events(); fmt.Sprint(sorted(got)) != "[job.failed job.kept]" {
 		t.Fatalf("defaults: got %v, want [job.failed job.kept]", got)
 	}
 
@@ -201,7 +205,7 @@ func TestEachEventFiresAndItsToggleTurnsItOff(t *testing.T) {
 	st.AddStep(id, jobs.EncoderFallbackStep, true, "fell back")
 	svc.Tick()
 	svc.Idle()
-	if got := r.events(); fmt.Sprint(got[2:]) != "[job.done encoder.fell]" {
+	if got := r.events(); fmt.Sprint(sorted(got[2:])) != "[encoder.fell job.done]" {
 		t.Fatalf("after turning on: got %v, want the last two [job.done encoder.fell]", got[2:])
 	}
 }
