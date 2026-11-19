@@ -153,13 +153,14 @@ func (s *Store) GetFile(path string) (*File, error) {
 	return &f, err
 }
 
-// PutFile records what was seen for a path.
-func (s *Store) PutFile(f File) error { return putFile(s.db, f) }
+// PutFile records what was seen for a path. Its decision is dated now (decided_at): the daily chart counts
+// a scan's skip on that day.
+func (s *Store) PutFile(f File) error { return putFile(s.db, f, s.stamp()) }
 
-func putFile(x execer, f File) error {
-	_, err := x.Exec(`INSERT INTO files(path,size,mtime,codec,decision,reason,job_id) VALUES(?,?,?,?,?,?,?)
-ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,codec=excluded.codec,decision=excluded.decision,reason=excluded.reason,job_id=excluded.job_id`,
-		f.Path, f.Size, f.ModTime, f.Codec, f.Decision, f.Reason, f.JobID)
+func putFile(x execer, f File, decidedAt string) error {
+	_, err := x.Exec(`INSERT INTO files(path,size,mtime,codec,decision,reason,job_id,decided_at) VALUES(?,?,?,?,?,?,?,?)
+ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,codec=excluded.codec,decision=excluded.decision,reason=excluded.reason,job_id=excluded.job_id,decided_at=excluded.decided_at`,
+		f.Path, f.Size, f.ModTime, f.Codec, f.Decision, f.Reason, f.JobID, decidedAt)
 	return err
 }
 

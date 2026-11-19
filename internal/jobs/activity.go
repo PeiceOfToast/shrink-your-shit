@@ -353,7 +353,7 @@ func (s *Store) RequestStop(id int64) (running bool, err error) {
 	}
 	switch Status(status) {
 	case Queued:
-		if err := putFile(tx, userStoppedFile(path, id)); err != nil {
+		if err := putFile(tx, userStoppedFile(path, id), s.stamp()); err != nil {
 			return false, err
 		}
 		if _, err := tx.Exec(`INSERT INTO events(kind, job_id, at, from_status, to_status, reason, data) VALUES ('job',?,?,?,?,?,json_object('message',?,'path',?,'attempts',?))`, id, s.stamp(), status, "cancelled", UserStoppedReason, userStoppedWords, path, attempts); err != nil {
