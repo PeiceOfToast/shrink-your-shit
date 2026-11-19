@@ -146,7 +146,11 @@ func TestDeletedReplacedFileWithNothingKeptLeavesTheOverview(t *testing.T) {
 		t.Fatalf("freed before the delete %d, want 3 (5 - 2)", got)
 	}
 	if now := jobs.BytesNow(lt, before.Counts[l.ID]); now != 2 {
-		t.Fatalf("bytesNow before the delete %d, want 2", now)
+		rec, _ := st.GetFile(a)
+		fi, _ := os.Stat(a)
+		t.Fatalf("bytesNow before the delete %d, want 2: BytesBefore %d, freed %d, waiting %d, gone %d; record size %d mtime %d; stat size %d mtime %d",
+			now, lt.BytesBefore, before.Counts[l.ID].FreedBytes, before.Counts[l.ID].WaitingBytes, before.Counts[l.ID].GoneBytes,
+			rec.Size, rec.ModTime, fi.Size(), fi.ModTime().UnixNano())
 	}
 
 	if err := os.Remove(a); err != nil {
