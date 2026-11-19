@@ -97,7 +97,7 @@ func (w *Watcher) poll() time.Duration {
 func (w *Watcher) fail(msg string) error {
 	w.logf("%s", msg)
 	if err := WriteResult(w.DataDir, Result{OK: false, Kind: "update", From: w.From, To: w.To, Message: msg, At: time.Now().UTC()}); err != nil {
-		w.logf("update: %v", err)
+		w.logf("the result above could not be saved, so the app shows a generic message at its next start: %v", err)
 		return err
 	}
 	return fmt.Errorf("%s", msg)
