@@ -2,6 +2,7 @@
 // updates, database changes and restores) with Download, Restore and Delete, and restore from a file. A restore always shows
 // what the backup holds and its warnings first; nothing changes until Restore. After it the page reloads.
 import { useEffect, useRef, useState } from "react";
+import { FileName } from "../FileName";
 import { Icon } from "../Icon";
 import { PageHead } from "../PageHead";
 import { failed } from "../api";
@@ -70,7 +71,7 @@ function Row({ b, onRestore, reload, said }: { b: Backup; onRestore: (b: Backup)
         <strong>{when(b.createdAt)}</strong>
         <span className="muted">{REASON[b.reason]} · version {b.appVersion} · {bytes(b.sizeBytes)}</span>
       </div>
-      <span className="mono muted" style={{ overflowWrap: "anywhere" }}>{b.name}</span>
+      <span className="mono muted"><FileName n={b.name} /></span>
       {confirm
         ? <div className="row" role="group" aria-label={"Delete backup " + b.name} style={{ gap: 8 }}>
           <span>Delete this backup? It can't be brought back.</span>
