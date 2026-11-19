@@ -330,6 +330,11 @@ td .tnc{max-width:230px}
 .jt td:nth-child(n+4) .tnc{max-width:none}
 .jt td:nth-child(3) .tnc{max-width:135px}
 .field>.seg{align-self:flex-start}
+.pw{position:relative}.pw .input{padding-right:44px}.pw .btn{position:absolute;right:2px;top:50%;transform:translateY(-50%)} /* Sign in: Show/Hide inside the field */
+.pw .btn[aria-pressed=true]{color:var(--accent)}
+.where>summary{cursor:pointer;color:var(--accent);font-size:var(--fs-sm);width:max-content}
+.where dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 12px;margin:6px 0 0}.where dd{margin:0;min-width:0;overflow-wrap:anywhere}.where dt{font-weight:600}
+.where p{margin:6px 0 0}
 
 /* native controls (review 1) */
 input.switch{appearance:none;-webkit-appearance:none;position:relative;display:inline-block;width:38px;height:22px;border-radius:11px;background:var(--surface);border:1px solid var(--border-strong);flex:none;margin:0;cursor:pointer;vertical-align:middle}
