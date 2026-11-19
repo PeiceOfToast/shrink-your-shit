@@ -5,19 +5,24 @@ package update
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 )
 
 // watchFixture is a Watcher whose outside world is recorded: setups run in order, and healthy answers by
-// healthOK(number of setups run so far).
+// healthOK(number of setups run so far). events lists the steps in order; childErr is what stopping the
+// app's children returns.
 type watchFixture struct {
-	w     *Watcher
-	ran   []string
-	stops int
+	w        *Watcher
+	ran      []string
+	stops    int
+	events   []string
+	childErr error
 }
 
 func newWatchFixture(t *testing.T, healthOK func(ran int) bool, runErr map[string]error, stopErr error) *watchFixture {
@@ -29,13 +34,22 @@ func newWatchFixture(t *testing.T, healthOK func(ran int) bool, runErr map[strin
 		Wait: 20 * time.Millisecond, Poll: time.Millisecond,
 		StopApp: func(pid int) error {
 			f.stops++
+			f.events = append(f.events, "stop")
 			if pid != 4242 {
 				t.Errorf("stopped pid %d", pid)
 			}
 			return stopErr
 		},
+		StopChildren: func(pid, keep int) error {
+			f.events = append(f.events, "children")
+			if pid != 4242 || keep != os.Getpid() {
+				t.Errorf("stopped the children of %d, keeping %d; want the app and this watcher (%d)", pid, keep, os.Getpid())
+			}
+			return f.childErr
+		},
 		RunSetup: func(setup string) error {
 			f.ran = append(f.ran, filepath.Base(setup))
+			f.events = append(f.events, "setup:"+filepath.Base(setup))
 			return runErr[filepath.Base(setup)]
 		},
 		Healthy: func(string) bool { return healthOK(len(f.ran)) },
@@ -50,6 +64,35 @@ func newWatchFixture(t *testing.T, healthOK func(ran int) bool, runErr map[strin
 		t.Fatal(err)
 	}
 	return f
+}
+
+// The app is stopped first, then its children (an ffprobe it left running holds files the installer needs),
+// then the installer runs.
+func TestWatchStopsTheAppsChildrenBeforeTheInstaller(t *testing.T) {
+	f := newWatchFixture(t, func(int) bool { return true }, nil, nil)
+	if err := f.w.Watch(); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"stop", "children", "setup:new.exe"}; !slices.Equal(f.events, want) {
+		t.Errorf("steps %q, want %q", f.events, want)
+	}
+}
+
+// Children that cannot all be stopped are logged, and the update goes on: the installer reports its own failure.
+func TestWatchGoesOnWhenTheAppsChildrenCannotBeStopped(t *testing.T) {
+	f := newWatchFixture(t, func(int) bool { return true }, nil, nil)
+	f.childErr = errors.New("access denied")
+	var logs []string
+	f.w.Logf = func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }
+	if err := f.w.Watch(); err != nil {
+		t.Fatalf("Watch failed: %v", err)
+	}
+	if want := []string{"stop", "children", "setup:new.exe"}; !slices.Equal(f.events, want) {
+		t.Errorf("steps %q, want %q", f.events, want)
+	}
+	if joined := strings.Join(logs, "\n"); !strings.Contains(joined, "could not all be stopped") {
+		t.Errorf("log %q, want the children that could not be stopped", joined)
+	}
 }
 
 func (f *watchFixture) result(t *testing.T) *Result {

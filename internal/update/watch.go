@@ -37,11 +37,17 @@ type Watcher struct {
 	Health             string // the app's health address, on loopback
 	Wait, Poll         time.Duration
 
-	StopApp  func(pid int) error
-	RunSetup func(setup string) error
-	Healthy  func(url string) bool
-	Logf     func(format string, args ...any)
+	StopApp func(pid int) error
+	// StopChildren ends the processes the app started (an ffprobe it left running), except keep, the watcher
+	// itself. Those children keep the app's PID as their parent after it ends, so they are found after StopApp.
+	StopChildren func(pid, keep int) error
+	RunSetup     func(setup string) error
+	Healthy      func(url string) bool
+	Logf         func(format string, args ...any)
 }
+
+// unsavedNote is what the watcher logs when it cannot save its result; the next start looks for it in watch.log.
+const unsavedNote = "could not be saved"
 
 // Watch runs the update. It returns nil when a program is serving and will settle the marker itself (the new
 // one, or the previous one after a roll back). It returns an error only after writing a failed result.
@@ -50,6 +56,9 @@ func (w *Watcher) Watch() error {
 	defer os.Remove(w.OldSetup)
 	if err := w.StopApp(w.PID); err != nil {
 		return w.fail(fmt.Sprintf("Update to %s not started: the running program could not be stopped (%v)", w.To, err))
+	}
+	if err := w.StopChildren(w.PID, os.Getpid()); err != nil {
+		w.logf("the app's child processes could not all be stopped, so the installer may find files in use: %v", err)
 	}
 	err := w.RunSetup(w.NewSetup)
 	if err == nil && w.healthyWithin() {
@@ -97,7 +106,7 @@ func (w *Watcher) poll() time.Duration {
 func (w *Watcher) fail(msg string) error {
 	w.logf("%s", msg)
 	if err := WriteResult(w.DataDir, Result{OK: false, Kind: "update", From: w.From, To: w.To, Message: msg, At: time.Now().UTC()}); err != nil {
-		w.logf("the result above could not be saved, so the app shows a generic message at its next start: %v", err)
+		w.logf("the result above "+unsavedNote+", so the app shows a generic message at its next start: %v", err)
 		return err
 	}
 	return fmt.Errorf("%s", msg)
@@ -115,7 +124,7 @@ func (w *Watcher) logf(format string, args ...any) {
 // It returns the exit status.
 func RunWatcher(args []string) int {
 	fs := flag.NewFlagSet("update-watch", flag.ContinueOnError)
-	w := Watcher{StopApp: stopProcess, RunSetup: runSetup, Healthy: healthy}
+	w := Watcher{StopApp: stopProcess, StopChildren: stopChildren, RunSetup: runSetup, Healthy: healthy}
 	fs.IntVar(&w.PID, "pid", 0, "the app's process")
 	fs.StringVar(&w.From, "from", "", "the running version")
 	fs.StringVar(&w.To, "to", "", "the version asked for")
