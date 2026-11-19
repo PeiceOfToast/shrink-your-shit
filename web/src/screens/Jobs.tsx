@@ -19,9 +19,9 @@ import { useData } from "../useData";
 import type { Failure, JobAction, JobDetail, JobItem, JobProgressEvent, JobState, Probe, Tab, Pin } from "../types/jobs";
 
 const TABS: [Tab, string][] = [["waiting", "Waiting"], ["running", "Running"], ["completed", "Done"], ["skipped", "Skipped"], ["failed", "Failed"]];
-// G5: the Done filter for originals still kept. The words are a placeholder: design (orch-lead@design-claude) is choosing them. Keep them here.
-const KEPT_WORDS = "Original still kept";
-const KEPT_EMPTY = "No converted files still have their original kept.";
+// G5: the Done filter for originals waiting in the trash. The words come from design (SCREENS V6); keep them here.
+const TRASH_WORDS = "Original in the trash";
+const TRASH_EMPTY = "No files with their original in the trash.";
 // Spec states in words (SCREENS V6); a cancelled file lists under Skipped and reads "Cancelled".
 const tabOf = (st: JobState): Tab => (st === "queued" || st === "retry_wait" ? "waiting" : st === "completed" ? "completed" : st === "skipped" || st === "cancelled" ? "skipped" : st === "failed" ? "failed" : "running");
 const WORD: Record<string, string> = { queued: "Waiting", preparing: "Preparing", running: "Running", validating: "Checking", committing: "Saving",
@@ -150,8 +150,8 @@ export function Jobs() {
         : <>No worker is running. <Link to="/workers">Turn workers on.</Link></>}</span></p>}
       {library && <div className="row" style={{ gap: 6 }}><span className="mchip">Library: {libs.data?.find((l) => l.id === library)?.name ?? library}
         <button className="btn sm icon ghost" type="button" aria-label="Clear the library filter" onClick={() => navigate(query(tab, "", kept))}><Icon id="i-x" /></button></span></div>}
-      {kept && <div className="row" style={{ gap: 6 }}><span className="mchip">{KEPT_WORDS}
-        <button className="btn sm icon ghost" type="button" aria-label="Clear the kept filter" onClick={() => navigate(query(tab, library, false))}><Icon id="i-x" /></button></span></div>}
+      {kept && <div className="row" style={{ gap: 6 }}><span className="mchip">{TRASH_WORDS}
+        <button className="btn sm icon ghost" type="button" aria-label="Clear the original-in-the-trash filter" onClick={() => navigate(query(tab, library, false))}><Icon id="i-x" /></button></span></div>}
       <div className="tabs" role="tablist" aria-label="Jobs">
         {TABS.map(([t, label]) => <button key={t} role="tab" type="button" aria-selected={tab === t} onClick={() => tab !== t && go(t)}>{label}{counts && <span className="n">{count(t === "completed" && kept && current ? current.total : counts[t])}</span>}</button>)}
       </div>
@@ -161,7 +161,7 @@ export function Jobs() {
         <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions}</div></details>
         {sel.length > 0 && <span className="muted sm">{sel.length} selected</span>}
         {/* parity 11-19 #2 (G4): pick a library here too; it sets the same ?libraryId= as "See its jobs", and the chip above stays */}
-        {tab === "completed" && <button className="btn sm ghost" type="button" aria-pressed={kept} onClick={() => navigate(query("completed", library, !kept))}>{KEPT_WORDS}</button>}
+        {tab === "completed" && <button className="btn sm ghost" type="button" aria-pressed={kept} onClick={() => navigate(query("completed", library, !kept))}>{TRASH_WORDS}</button>}
         {(libs.data?.length ?? 0) > 1 && <select className="input sm lib" aria-label="Library" value={library} onChange={(e) => navigate(query(tab, e.target.value, kept))}>
           <option value="">Library: All</option>
           {libs.data?.map((l) => <option key={l.id} value={l.id}>Library: {l.name}</option>)}
@@ -172,7 +172,7 @@ export function Jobs() {
       <p className="muted" role="status">{said}</p>
       {page.error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{page.error.message}</span></p>}
       {!current ? <div className="empty">Loading...</div> : !items.length ? (q ? <div className="empty">No file matches.</div>
-        : <Empty icon="i-jobs" text={kept ? KEPT_EMPTY : { waiting: "Nothing is waiting.", running: "Nothing is converting right now.", completed: "No file is done yet.", skipped: "No file was skipped.", failed: "Nothing has failed." }[tab]} />) : (
+        : <Empty icon="i-jobs" text={kept ? TRASH_EMPTY : { waiting: "Nothing is waiting.", running: "Nothing is converting right now.", completed: "No file is done yet.", skipped: "No file was skipped.", failed: "Nothing has failed." }[tab]} />) : (
         <div className={"list" + (selecting ? " selecting" : "")}><table className="tbl jobs">
           <thead><tr>
             <th className="selc"><label className="hit"><input type="checkbox" aria-label="Select all" checked={sel.length === items.length} onChange={(e) => setSel(e.target.checked ? items.map((j) => j.id) : [])} /></label></th>
