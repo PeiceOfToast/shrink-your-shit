@@ -28,6 +28,7 @@ function Preview({ p, onCancel }: { p: Pending; onCancel: () => void }) {
   const [busy, setBusy] = useState(false), [error, setError] = useState(""), head = useRef<HTMLHeadingElement>(null);
   useEffect(() => head.current?.focus(), []);
   const apply = async () => {
+    if (busy) return;
     setBusy(true); setError("");
     const r = await applyBackup(p.preview.previewId).catch(() => null);
     setBusy(false);
@@ -45,7 +46,7 @@ function Preview({ p, onCancel }: { p: Pending; onCancel: () => void }) {
         {v.warnings.map((w) => <p key={w} className="st warn" style={{ margin: 0 }}><Icon id="i-alert" /><span>{w}</span></p>)}
         <p className="muted" style={{ margin: 0 }}>Restoring replaces everything on this server with what's in the backup. Nothing is merged. A backup of how things are now is made first, so you can go back.</p>
         <div className="row" style={{ gap: 8 }}>
-          <button className="btn danger" type="button" onClick={apply} disabled={busy}>{busy ? "Restoring…" : "Restore"}</button>
+          <button className="btn danger" type="button" onClick={apply} aria-disabled={busy}>{busy ? "Restoring…" : "Restore"}</button>
           <button className="btn ghost" type="button" onClick={onCancel} disabled={busy}>Cancel</button>
         </div>
         <div role="alert">{error && <p className="st bad" style={{ margin: 0 }}><Icon id="i-alert" /><span>{error}</span></p>}</div>
@@ -88,7 +89,9 @@ export function BackupSettings() {
   useEffect(() => { try { const m = sessionStorage.getItem(DONE); if (m) { sessionStorage.removeItem(DONE); setSaid(m); } } catch { /* nothing to show */ } }, []);
   const notHere = d.error && ["http_404", "http_501", "not_found", "not_available"].includes(d.error.code);
 
+  // the busy buttons stay focusable (aria-disabled, not disabled), so focus stays put while they work
   const backUp = async () => {
+    if (busy) return;
     setBusy("make"); setError(""); setSaid("");
     const r = await createBackup().catch(() => null);
     setBusy("");
@@ -120,7 +123,7 @@ export function BackupSettings() {
             : <>
               <section className="card" aria-labelledby="bk-h">
                 <div className="hd"><h2 id="bk-h">Back up</h2><span className="sp" />
-                  <button className="btn primary sm" type="button" onClick={backUp} disabled={!!busy}>{busy === "make" ? "Backing up…" : "Back up now"}</button></div>
+                  <button className="btn primary sm" type="button" onClick={backUp} aria-disabled={!!busy}>{busy === "make" ? "Backing up…" : "Back up now"}</button></div>
                 <div className="bd stack">
                   <p className="muted" style={{ margin: 0 }}>Share passwords and API keys are locked with this computer's key, which isn't in the backup. Restored on another computer, they need typing again.</p>
                   {d.data.backups.length === 0 ? <p className="muted" style={{ margin: 0 }}>No backups yet.</p>
@@ -134,7 +137,7 @@ export function BackupSettings() {
                 <div className="hd"><h2 id="rf-h">Restore from a file</h2></div>
                 <div className="bd stack">
                   <p className="muted" style={{ margin: 0 }}>Choose a backup file from this or another computer. You'll see what it holds before anything changes.</p>
-                  <div className="row"><button className="btn" type="button" onClick={() => file.current?.click()} disabled={!!busy}>Choose a backup file…</button>
+                  <div className="row"><button className="btn" type="button" onClick={() => { if (!busy) file.current?.click(); }} aria-disabled={!!busy}>Choose a backup file…</button>
                     <input ref={file} type="file" accept=".gz,.json,application/gzip,application/json" hidden
                       onChange={(e) => { const f = e.target.files?.[0]; if (f) preview(f); }} /></div>
                 </div>
