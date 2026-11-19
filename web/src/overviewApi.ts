@@ -14,9 +14,10 @@ export interface Overview {
   active: { jobId: string; library: { id: string; name: string } | null; name: string; percent: number | null; etaS: number | null; expectedSavingBytes: number | null }[];
   libraries: { id: string; name: string; state: "active" | "paused"; bytesBefore: number; bytesNow: number; saved: number; savedPercent: number | null; waitingToFree: number; couldFree: number; grew?: number;
     counts: { done: number; waiting: number; skipped: number; failed: number } }[];
-  daily: { day: string; recorded: boolean; completed: number; skipped: number; failed: number; freedBytes: number; savedBytes?: number; waitingBytes?: number }[];
+  daily: { day: string; recorded: boolean; completed: number; skipped: number; failed: number; freedBytes: number; savedBytes?: number; waitingBytes?: number; couldFreeBytes?: number }[];
   // workshop #309 (11-19): savedBytes = NET saving of conversions finished that day; waitingBytes = the part of it whose
   // original is still in the trash (<= savedBytes). freedBytes is dated by the delete day. Optional until #309 merges.
+  // workshop #367: couldFreeBytes = the part of savedBytes whose original was kept in place, dated like savedBytes.
   timeZone: string;
   averages: { fileShrinkPercent: number | null; secondsPerGB: number | null };
   // #323: graphics-encoder fall-backs today, per worker; pausedUntil is set after three in a row (an hour on the processor)
@@ -50,7 +51,7 @@ function sample(): Overview {
       // the last week's originals are still in the trash (CT 124's shape): that saving is waiting, not freed
       : { day, recorded: true, completed: 6 + ((i * 7) % 13), skipped: i % 3, failed: i % 7 === 0 ? 1 : i % 11 === 0 ? 3 : 0,
           freedBytes: i >= 13 && i < 30 ? Math.round((0.4 + (((i - 7) * 5) % 9) / 6) * GB) : 0,
-          savedBytes: Math.round((0.4 + ((i * 5) % 9) / 6) * GB), waitingBytes: i < 23 ? 0 : Math.round((0.4 + ((i * 5) % 9) / 6) * GB) }),
+          savedBytes: Math.round((0.4 + ((i * 5) % 9) / 6) * GB), waitingBytes: i < 23 ? 0 : Math.round((0.4 + ((i * 5) % 9) / 6) * GB), couldFreeBytes: 0 }),
     timeZone: "Europe/London",
     averages: { fileShrinkPercent: 38, secondsPerGB: 130 },
     encoderFallbacks: fell ? [{ workerId: s.workers[0].id, worker: s.workers[0].name, encoder: "hevc_qsv", lastError: "ffmpeg exited with code 1",
