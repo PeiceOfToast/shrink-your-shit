@@ -42,7 +42,7 @@ func seedOverview(t *testing.T, s *Store, n int) []Library {
 		if l.ID == libs[0].ID && rnd.Intn(4) == 0 { // by ID: on Windows AddLibrary stores the canonical path, not "/m"
 			l = libs[1] // some /m files sit under /m/sub too: the same file across libraries
 		}
-		path := fmt.Sprintf("%s/d%d/f%d.mkv", l.Path, rnd.Intn(30), rnd.Intn(n/8+1))
+		path := filepath.Join(l.Path, fmt.Sprintf("d%d", rnd.Intn(30)), fmt.Sprintf("f%d.mkv", rnd.Intn(n/8+1))) // native separators: on Windows l.Path is C:\m
 		st := statuses[rnd.Intn(len(statuses))]
 		before := int64(1000 + rnd.Intn(5000000))
 		after := int64(0)
@@ -53,7 +53,7 @@ func seedOverview(t *testing.T, s *Store, n int) []Library {
 			if rnd.Intn(5) == 0 {
 				after = before + 10 // grew
 			}
-			output = fmt.Sprintf("%s/shrunk/d%d/f%d.mkv", l.Path, rnd.Intn(30), i)
+			output = filepath.Join(l.Path, "shrunk", fmt.Sprintf("d%d", rnd.Intn(30)), fmt.Sprintf("f%d.mkv", i))
 			if rnd.Intn(2) == 0 {
 				output = path[:len(path)-4] + ".mkv" // replaced in place
 			}
