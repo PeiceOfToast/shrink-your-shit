@@ -34,6 +34,7 @@ type FileFilter struct {
 	Reason    string   // jobs: only failures with this design code (ReasonCondition); "" for any
 	Reasons   []string // skipped: only these reasons (none: every reason)
 	Kept      bool
+	Left      bool // processed: only those whose original was left where it was (could free)
 	// QueueOrder: waiting jobs in the order workers take them (Claim's: priority, then age), ready ones
 	// first, then those waiting to retry (soonest first) or being stopped.
 	QueueOrder    bool
@@ -88,6 +89,10 @@ var jobOrder = map[string]string{
 	CardProcessed:   "j.updated DESC, j.id DESC",               // newest first
 	CardFailed:      "j.updated DESC, j.id DESC",
 }
+
+// leftRows is the done jobs whose original is left where it was: the set the Dashboard's could-free number
+// sums (couldFreeSQL, freed.go), so this list and that number cannot disagree.
+const leftRows = `j.id IN (SELECT jobs.id FROM jobs WHERE ` + couldFreeSQL + ` IS NOT NULL)`
 
 const jobFrom = `FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id LEFT JOIN flows fl ON fl.id=l.flow_id
   LEFT JOIN originals o ON o.id=(SELECT MAX(id) FROM originals WHERE job_id=j.id)`
@@ -186,6 +191,12 @@ func (s *Store) FileList(f FileFilter) (rows []FileRow, total int, counts map[st
 			cond += " AND o.state=?"
 			args = append(append([]any{}, ja...), OriginalKept)
 			total = kept
+		}
+		if f.Show == CardProcessed && f.Left {
+			cond += " AND " + leftRows
+			if err := s.db.QueryRow(`SELECT COUNT(*) `+jobFrom+` WHERE `+cond, args...).Scan(&total); err != nil {
+				return nil, 0, nil, err
+			}
 		}
 		order, orderArgs := jobOrder[f.Show], []any{}
 		if f.QueueOrder && f.Show == CardUnprocessed {
