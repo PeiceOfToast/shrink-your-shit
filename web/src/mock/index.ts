@@ -115,10 +115,10 @@ function running(): State {
     ],
     wf: [
       workflow("w1", "Shrink videos", "Converts videos to HEVC, keeps your languages", { favourite: true, tags: ["default"], presetId: "shrink_videos", version: 4, draftDiffers: true,
-        summaryTag: "HEVC · Balanced · same resolution · Stereo AAC · MKV", libraries: [{ id: "l1", name: "Movies" }, { id: "l2", name: "TV Shows" }], activeJobs: 2, lastRun: { at: ago(1), completed: 131, failed: 2, skipped: 9 } }),
+        summaryTag: "HEVC · Balanced · same resolution · Stereo AAC · MKV", libraries: [{ id: "l1", name: "Movies" }, { id: "l2", name: "TV Shows" }], activeJobs: 2, lastRun: { at: ago(120), completed: 131, failed: 2, skipped: 9 } }),
       workflow("w2", "Home videos - my rules", "Replaces originals, keeps all audio, extra checks", { tags: ["home"], version: 2, validation: { errors: 0, warnings: 2 },
-        libraries: [{ id: "l3", name: "Home videos" }], changesOriginals: true, summaryTag: "HEVC · Better quality · All audio · MKV · Replaces originals" }),
-      workflow("w3", "Audio and subtitles only", "Leaves the picture alone", { status: "disabled", summaryTag: "Audio and subtitles · MKV" }),
+        libraries: [{ id: "l3", name: "Home videos" }], changesOriginals: true, lastRun: { at: ago(60 * 26), completed: 14, failed: 0, skipped: 0 }, summaryTag: "HEVC · Better quality · All audio · MKV · Replaces originals" }),
+      workflow("w3", "Audio and subtitles only", "Leaves the picture alone", { status: "disabled", lastRun: { at: ago(60 * 24 * 9), completed: 0, failed: 0, skipped: 0 },summaryTag: "Audio and subtitles · MKV" }),
       workflow("w4", "Old settings", "Carried over from an earlier install", { summaryTag: "Settings from an earlier install" }),
     ],
     trash: { bytes: 120 * GB, files: 14, nextDeleteAt: ago(-60 * 24), lastDeleteAt: ago(-60 * 24 * 7) },
