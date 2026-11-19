@@ -714,6 +714,7 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 @media (max-width:900px){
   .ov .headline{grid-template-columns:minmax(0,1fr);gap:8px}.ov .big{font-size:36px}.ov .stats{gap:20px}
   .ov .charts{grid-template-columns:minmax(0,1fr);gap:24px}
+  .ov .legend.ph{display:none}
   .ov .ovt,.ov .ovt tbody{display:block}.ov .ovt thead{display:none}
   .ov .ovt tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:10px 0;border-bottom:1px solid var(--border)}
   .ov .ovt td{display:block;border:0;height:auto;padding:0;text-align:left}

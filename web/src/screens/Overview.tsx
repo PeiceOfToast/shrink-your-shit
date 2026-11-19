@@ -48,7 +48,8 @@ function DayBars({ title, note, days, series, fmt, tick = true, extra }: { title
   const d = at == null ? null : days[at];
   return <figure className="dchart" onMouseLeave={() => setAt(null)}>
     <h3 className="ch">{title} <span className="muted">{note}</span></h3>
-    {series.length > 1 && <ul className="legend">{series.map((x) => <li key={x.label}><i style={{ background: x.color }} />{x.label}</li>)}</ul>}
+    {series.length > 1 ? <ul className="legend">{series.map((x) => <li key={x.label}><i style={{ background: x.color }} />{x.label}</li>)}</ul>
+      : <ul className="legend ph" aria-hidden="true"><li>&nbsp;</li></ul>/* design 11-19: keeps side-by-side baselines level; hidden when the charts stack */}
     <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={title + ", last " + n + " days" + (notRec ? "; the first " + notRec + " not recorded" : "") + ". The table below has every day."} className="daychart">
       {[0, 0.5, 1].map((f) => <line key={f} x1="0" x2={W} y1={base - y(max * f)} y2={base - y(max * f)} stroke={f ? "var(--border)" : "var(--border-strong)"} strokeWidth="1" vectorEffect="non-scaling-stroke" />)}
       {tick && <text x="0" y={top - 4} fill="var(--text-2)" fontSize="11">{fmt(max)}</text>}
