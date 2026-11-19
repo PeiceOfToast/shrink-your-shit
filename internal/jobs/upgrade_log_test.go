@@ -4,6 +4,7 @@ package jobs
 
 import (
 	"bytes"
+	"fmt"
 	"log"
 	"path/filepath"
 	"strings"
@@ -44,7 +45,20 @@ func TestUpgradeLogsOneLineWithVersionsAndBackup(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("want one upgrade line, got %d: %q", len(lines), buf.String())
 	}
-	for _, want := range []string{"from version 47 to 48", "backup before the upgrade:", "(also " + path + ".bak-v47)"} {
+	list, err := s.ListBackups()
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := ""
+	for _, b := range list {
+		if b.Reason == ReasonBeforeMigration {
+			name = b.Name
+		}
+	}
+	if name == "" {
+		t.Fatalf("no before-migration backup listed: %+v", list)
+	}
+	for _, want := range []string{fmt.Sprintf("from version 47 to %d", latestVersion()), "backup before the upgrade: " + name + " ", "(also " + path + ".bak-v47)"} {
 		if !strings.Contains(lines[0], want) {
 			t.Errorf("upgrade line %q lacks %q", lines[0], want)
 		}

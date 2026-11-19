@@ -588,7 +588,7 @@ func (s *Store) migrate() error {
 	}
 	// After the commit, so a rolled-back upgrade never logs as upgraded. A new database logs nothing.
 	if existing {
-		log.Printf("database upgraded from version %d to %d; backup before the upgrade: %s (also %s)", cur, latestVersion(), info.ID, backup)
+		log.Printf("database upgraded from version %d to %d; backup before the upgrade: %s (also %s)", cur, latestVersion(), info.Name, backup)
 	}
 	return nil
 }
