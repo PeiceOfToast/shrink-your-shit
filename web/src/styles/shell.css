@@ -205,8 +205,8 @@ table.tbl{width:100%;border-collapse:collapse}
 @media (max-width:1100px){.cols3{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:900px){
   .app,.app.rail-collapsed{grid-template-columns:minmax(0,1fr)}
-  .rail{position:fixed;left:0;top:0;width:min(280px,86vw);transform:translateX(-102%);transition:transform var(--motion);box-shadow:8px 0 32px rgb(0 0 0/.4)}
-  .app.nav-open .rail{transform:none}
+  .rail{position:fixed;left:0;top:0;width:min(280px,86vw);transform:translateX(-102%);transition:transform var(--motion)}
+  .app.nav-open .rail{transform:none;box-shadow:8px 0 32px rgb(0 0 0/.4)} /* closed: no shadow, its blur showed down the left edge */
   .app.nav-open::after{content:"";position:fixed;inset:0;background:rgb(0 0 0/.5);z-index:25}
   .app.rail-collapsed .lbl,.app.rail-collapsed .grp,.app.rail-collapsed .brand span.t{display:revert}
   .app.rail-collapsed .nav a{justify-content:flex-start;padding:0 12px}
@@ -672,7 +672,7 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 @media (pointer:coarse){.gfold>summary{min-height:44px;display:flex;align-items:center}.gpi{min-height:44px}}
 .fieldbad>.field .input,.fieldbad>.field select,.fieldbad>fieldset{border-color:var(--error);box-shadow:0 0 0 1px var(--error)} /* #165: a setting with a value it cannot use */
 /* user item 5 (design 7.3): the Dashboard as an overview: a headline band, flat sections, two small day charts */
-.ov .headline{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,2fr);gap:24px;align-items:end;padding:8px 0 16px;border-bottom:1px solid var(--border)}
+.ov .headline{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;align-items:end;padding:8px 0 16px;border-bottom:1px solid var(--border)}
 .ov .big{font-size:44px;line-height:1.05;font-weight:var(--fw-strong);letter-spacing:-.02em;margin-bottom:8px}
 .ov .big small{font-size:var(--fs-lg);font-weight:400;color:var(--text-2);letter-spacing:0;margin-left:6px}
 .ov .stats{display:flex;gap:32px;flex-wrap:wrap}
@@ -699,11 +699,11 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .ov .tip span{display:flex;align-items:center}.ov .tip em{font-style:normal;margin-left:auto;padding-left:16px;font-variant-numeric:tabular-nums;font-weight:var(--fw-strong)}
 .ov .chartfoot{display:flex;flex-wrap:wrap;gap:8px 32px;align-items:baseline;margin-top:12px;color:var(--text-2);font-size:var(--fs-sm)}
 .ov .chartfoot b{color:var(--text);margin-left:6px}.ov .chartfoot details{margin-left:auto}.ov .chartfoot details[open]{flex-basis:100%;margin-left:0}
-.ov .nochart{display:flex;align-items:center;gap:24px;padding:20px 24px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
-.ov .nochart svg{width:180px;flex:none}.ov .nochart p{margin:4px 0 0}
+.ov .nochart{position:relative}.ov .nochart p{position:absolute;left:0;right:0;top:calc(50% + 14px);transform:translateY(-50%);text-align:center;margin:0}.ov .nochart p span{background:var(--bg);padding:2px 12px;box-decoration-break:clone;-webkit-box-decoration-break:clone}
+
 @media (max-width:900px){
   .ov .headline{grid-template-columns:minmax(0,1fr);gap:8px}.ov .big{font-size:36px}.ov .stats{gap:20px}
-  .ov .charts{grid-template-columns:minmax(0,1fr);gap:24px}.ov .nochart{flex-direction:column;align-items:flex-start;gap:12px}
+  .ov .charts{grid-template-columns:minmax(0,1fr);gap:24px}
   .ov .ovt,.ov .ovt tbody{display:block}.ov .ovt thead{display:none}
   .ov .ovt tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:10px 0;border-bottom:1px solid var(--border)}
   .ov .ovt td{display:block;border:0;height:auto;padding:0;text-align:left}

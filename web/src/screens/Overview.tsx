@@ -36,7 +36,7 @@ type Series = { label: string; color: string; value: (d: Day) => number };
 // waiting are shown and named apart), thin bars with a 4 px rounded top on the baseline, 2 px gaps between parts,
 // hairline solid grid, a legend for 2 or more parts, a tooltip per day and the table view below. Days before history
 // are a flat stub, not a zero.
-function DayBars({ title, note, days, series, fmt }: { title: string; note: string; days: Day[]; series: Series[]; fmt: (n: number) => string }) {
+function DayBars({ title, note, days, series, fmt, tick = true, extra }: { title: string; note: string; days: Day[]; series: Series[]; fmt: (n: number) => string; tick?: boolean; extra?: (d: Day) => string | null }) {
   const [at, setAt] = useState<number | null>(null);
   const W = 600, H = 150, top = 14, base = H - 22, n = days.length, bw = W / n, barW = Math.min(16, bw * 0.7);
   const sum = (d: Day) => series.reduce((a, x) => a + x.value(d), 0), max = Math.max(1, ...days.filter((d) => d.recorded).map(sum));
@@ -49,7 +49,7 @@ function DayBars({ title, note, days, series, fmt }: { title: string; note: stri
     {series.length > 1 && <ul className="legend">{series.map((x) => <li key={x.label}><i style={{ background: x.color }} />{x.label}</li>)}</ul>}
     <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={title + ", last " + n + " days" + (notRec ? "; the first " + notRec + " not recorded" : "") + ". The table below has every day."} className="daychart">
       {[0, 0.5, 1].map((f) => <line key={f} x1="0" x2={W} y1={base - y(max * f)} y2={base - y(max * f)} stroke={f ? "var(--border)" : "var(--border-strong)"} strokeWidth="1" vectorEffect="non-scaling-stroke" />)}
-      <text x="0" y={top - 4} fill="var(--text-2)" fontSize="11">{fmt(max)}</text>
+      {tick && <text x="0" y={top - 4} fill="var(--text-2)" fontSize="11">{fmt(max)}</text>}
       {at != null && <rect x={at * bw} y={top} width={bw} height={base - top} fill="var(--raised)" />}
       {days.map((dd, i) => { const x = i * bw + (bw - barW) / 2;
         if (!dd.recorded) return <rect key={dd.day} x={x} y={base - 2} width={barW} height={2} fill="var(--border)" />;
@@ -63,6 +63,7 @@ function DayBars({ title, note, days, series, fmt }: { title: string; note: stri
     {d && <div className="tip" style={{ left: `clamp(80px, ${((at! + 0.5) / n) * 100}%, calc(100% - 80px))` }}>
       <b>{dayName(d.day)}</b>
       {d.recorded ? series.map((x) => <span key={x.label}><i style={{ background: x.color }} />{x.label}<em>{x.value(d) ? fmt(x.value(d)) : "none"}</em></span>) : <span className="muted">not recorded</span>}
+      {d.recorded && extra?.(d) && <span className="muted">{extra(d)}</span>}
     </div>}
   </figure>;
 }
@@ -101,8 +102,8 @@ export function Overview() {
   const on = rows.filter((w) => w.status === "busy" || w.status === "online").length, fin = rows.filter((w) => w.status === "draining").length;
   const busy = rows.some((w) => w.jobs.length > 0), failed24 = sum.data && !failed(sum.data) ? sum.data.last24h.failed : null;
   const rec = v.daily.filter((d) => d.recorded), first = rec[0]?.day, add = (f: (d: Day) => number) => rec.reduce((a, d) => a + f(d), 0);
-  const tot = { done: add((d) => d.completed), skipped: add((d) => d.skipped), failed: add((d) => d.failed), freed: add((d) => d.freedBytes), waiting: add((d) => d.waitingBytes ?? 0) };
-  const hasWait = rec.some((d) => d.waitingBytes != null), load = rows.some((w) => w.cpuPercent != null || w.gpuPercent != null);
+  const tot = { done: add((d) => d.completed), skipped: add((d) => d.skipped), failed: add((d) => d.failed), freed: add((d) => d.freedBytes), saved: add((d) => d.savedBytes ?? 0), waiting: add((d) => d.waitingBytes ?? 0) };
+  const split = rec.some((d) => d.savedBytes != null), load = rows.some((w) => w.cpuPercent != null || w.gpuPercent != null);
   const workerOf = (id: string) => rows.find((w) => w.jobs.some((j) => j.jobId === id))?.name;
   const more = [h.waitingToFree > 0 && bytes(h.waitingToFree) + " more" + (h.nextFreeAt ? " by " + dayName(h.nextFreeAt.slice(0, 10)) : ""), h.couldFree > 0 && "could free " + bytes(h.couldFree) + " if you remove the originals"].filter(Boolean).join(" · ");
   return (
@@ -117,7 +118,7 @@ export function Overview() {
           {/* design SCREENS V2 Space rules: neutral, on its own line, only when > 0; never added to or taken from the figures */}
           {(h.grew ?? 0) > 0 && <div className="muted sm">{bytes(h.grew!)} added by files that came out bigger</div>}</div>
         <div className="stats">
-          <div><b>{count(h.filesConverted)}</b><span>files converted</span></div>
+          <div><b>{count(h.filesConverted)}</b><span>files converted, all time</span></div>
           <div><b>{count(h.filesWaiting)}</b><span>waiting</span></div>
           <div><b>{count(v.active.length)}</b><span>converting now</span></div>
           {failed24 != null && <div><Link to="/jobs?tab=failed" className={failed24 > 0 ? "bad" : undefined}><b>{count(failed24)}</b></Link><span>failed in 24 h</span></div>}
@@ -125,13 +126,19 @@ export function Overview() {
       </section>
 
       <section className="sec" aria-labelledby="ov-a"><h2 id="ov-a">Last 30 days</h2>
-        {rec.length < 2 ? <div className="nochart">
-            <svg viewBox="0 0 300 60" aria-hidden="true">{[14, 22, 18, 30, 26, 38, 34, 44, 40, 52].map((hh, i) => <rect key={i} x={i * 30 + 8} y={60 - hh} width="14" height={hh} rx="3" fill="var(--border)" />)}</svg>
-            <div><b>Your charts start here</b><p className="muted">Each day's saved space and finished files show here once there are two days of history{first ? ". History started " + dayName(first) + "." : ". History starts today."}</p></div>
-          </div> : <>
+        {rec.length < 2 ? <div className="charts">{["Space saved per day", "Files per day"].map((t) => <figure key={t} className="dchart nochart">
+            <h3 className="ch">{t}</h3>
+            <svg viewBox="0 0 600 150" aria-hidden="true" className="daychart">{[14, 71, 128].map((yy, i) => <line key={yy} x1="0" x2="600" y1={yy} y2={yy} stroke={i === 2 ? "var(--border-strong)" : "var(--border)"} strokeWidth="1" vectorEffect="non-scaling-stroke" />)}</svg>
+            <p className="muted"><span>Charts start after two days of conversions. So far: {count(h.filesConverted)} {h.filesConverted === 1 ? "file" : "files"} converted.</span></p>
+          </figure>)}</div> : <>
           <div className="charts">
-            <DayBars title="Space saved per day" days={v.daily} fmt={bytes} note={[bytes(tot.freed) + " freed", hasWait && bytes(tot.waiting) + " waiting in the trash"].filter(Boolean).join(" · ")}
-              series={[{ label: "Freed", color: "var(--success)", value: (d) => d.freedBytes }, ...(hasWait ? [{ label: "Waiting in the trash", color: "var(--chart-pending)", value: (d: Day) => d.waitingBytes ?? 0 }] : [])]} />
+            {/* workshop 11-19: savedBytes and waitingBytes are dated by the day a conversion finished, freedBytes by the day an
+                original was deleted, so the split is savedBytes - waitingBytes freed + waitingBytes waiting; never freedBytes + waitingBytes.
+                An older server without savedBytes: freed per delete day only. No top tick: a bar's height adds parts kept apart */}
+            <DayBars title="Space saved per day" days={v.daily} fmt={bytes} tick={!split} note={split ? bytes(tot.saved - tot.waiting) + " freed · " + bytes(tot.waiting) + " waiting in the trash" : bytes(tot.freed) + " freed"}
+              extra={(d) => (split && (d.waitingBytes ?? 0) > 0 && h.nextFreeAt ? "Frees from " + dayName(h.nextFreeAt.slice(0, 10)) : null)}
+              series={split ? [{ label: "Freed", color: "var(--success)", value: (d) => Math.max(0, (d.savedBytes ?? 0) - (d.waitingBytes ?? 0)) }, { label: "Waiting in the trash", color: "var(--chart-pending)", value: (d) => d.waitingBytes ?? 0 }]
+                : [{ label: "Freed", color: "var(--success)", value: (d) => d.freedBytes }]} />
             <DayBars title="Files per day" days={v.daily} fmt={count} note={[count(tot.done) + " done", count(tot.skipped) + " skipped", count(tot.failed) + " failed"].join(" · ")}
               series={[{ label: "Done", color: "var(--success)", value: (d) => d.completed }, { label: "Skipped", color: "var(--chart-muted)", value: (d) => d.skipped }, { label: "Failed", color: "var(--error)", value: (d) => d.failed }]} />
           </div>
@@ -139,8 +146,8 @@ export function Overview() {
             <span>New files, on average <b>{v.averages.fileShrinkPercent == null ? "not recorded" : Math.round(v.averages.fileShrinkPercent) + "% smaller"}</b></span>
             <span>Time per GB <b>{perGB(v.averages.secondsPerGB)}</b></span>
             <details><summary className="muted">Show as a table</summary>
-              <div className="daytbl"><table className="tbl"><thead><tr><th>Day</th><th className="num">Freed</th>{hasWait && <th className="num">Waiting in the trash</th>}<th className="num">Done</th><th className="num">Skipped</th><th className="num">Failed</th></tr></thead>
-                <tbody>{[...v.daily].reverse().map((d) => <tr key={d.day}><td>{dayName(d.day)}</td>{d.recorded ? <><td className="num">{bytes(d.freedBytes)}</td>{hasWait && <td className="num">{bytes(d.waitingBytes ?? 0)}</td>}<td className="num">{count(d.completed)}</td><td className="num">{count(d.skipped)}</td><td className="num">{count(d.failed)}</td></> : <td colSpan={hasWait ? 5 : 4} className="muted">not recorded</td>}</tr>)}</tbody></table></div>
+              <div className="daytbl"><table className="tbl"><thead><tr><th>Day</th><th className="num">{split ? "Saved" : "Freed"}</th>{split && <th className="num">Waiting in the trash</th>}<th className="num">Done</th><th className="num">Skipped</th><th className="num">Failed</th></tr></thead>
+                <tbody>{[...v.daily].reverse().map((d) => <tr key={d.day}><td>{dayName(d.day)}</td>{d.recorded ? <><td className="num">{bytes(split ? d.savedBytes ?? 0 : d.freedBytes)}</td>{split && <td className="num">{bytes(d.waitingBytes ?? 0)}</td>}<td className="num">{count(d.completed)}</td><td className="num">{count(d.skipped)}</td><td className="num">{count(d.failed)}</td></> : <td colSpan={split ? 5 : 4} className="muted">not recorded</td>}</tr>)}</tbody></table></div>
             </details>
           </div></>}
         {first && rec.length >= 2 && <p className="muted sm">History starts {dayName(first)}, when this install began keeping it. Earlier days are not recorded, not estimated.{MOCK || /^(Etc\/)?UTC$/.test(v.timeZone) ? "" : " Days run midnight to midnight, " + v.timeZone.split("/").pop()!.replace(/_/g, " ") + " time."}</p>}
@@ -148,12 +155,10 @@ export function Overview() {
 
       <section className="sec" aria-labelledby="ov-w"><h2 id="ov-w">Workers <Link className="more" to="/workers">Workers page</Link></h2>
         {!rows.length ? <p className="muted">No workers yet.</p> : (
-          <table className="tbl ovt"><thead><tr><th>Worker</th><th>Now</th><th>Progress</th><th className="num">Speed</th><th className="num">Slots</th>{load && <th className="num">CPU · GPU</th>}</tr></thead>
+          <table className="tbl ovt"><thead><tr><th>Worker</th><th className="num">Speed</th><th className="num">Slots</th>{load && <th className="num">CPU · GPU</th>}</tr></thead>
             <tbody>{rows.map((w) => { const [t, cls] = STATE[w.status] ?? [w.status, ""], js = w.jobs.map(job), sl = slots(w);
               return <tr key={w.id}>
                 <td className="nm"><b>{w.name}</b> <span className={"pill " + cls}>{t}</span></td>
-                <td className="full">{js.length ? js.map((j) => <span key={j.jobId} className="mono sm fname">{j.name}</span>) : <span className="muted">Nothing</span>}</td>
-                <td className="full">{js.map((j) => <Bar key={j.jobId} p={pct(j.percent)} label={j.name} />)}</td>
                 <td className="num" data-l="Speed">{js.map((j) => [j.fps != null && Math.round(j.fps) + " fps", j.speed != null && j.speed.toFixed(1) + "× realtime"].filter(Boolean).join(" · ")).filter(Boolean).join(", ") || (js.length ? "not known yet" : "")}</td>
                 <td className="num" data-l="Slots">{sl.used} of {sl.total}</td>
                 {load && <td className="num" data-l="CPU · GPU">{w.cpuPercent == null && w.gpuPercent == null ? "not measured yet" : (w.cpuPercent == null ? "-" : Math.round(w.cpuPercent) + "%") + " · " + (w.gpuPercent == null ? "none" : Math.round(w.gpuPercent) + "%")}</td>}
@@ -178,7 +183,7 @@ export function Overview() {
               <td className="nm"><Link to={"/libraries/" + l.id}><b>{l.name}</b></Link></td>
               <td className="num" data-l="Before">{bytes(l.bytesBefore)}</td>
               <td className="num" data-l="Now">{bytes(l.bytesNow)}</td>
-              <td className="num" data-l="Saved">{l.saved > 0 ? <><b>{bytes(l.saved)}</b>{l.savedPercent != null && " · " + pctTxt(l.savedPercent)}</> : l.waitingToFree > 0 ? <b>{bytes(l.waitingToFree)} smaller</b> : "nothing yet"}{(l.grew ?? 0) > 0 && <span className="sub">{bytes(l.grew!)} added by bigger files</span>}{l.waitingToFree > 0 && <span className="sub">{l.saved > 0 ? bytes(l.waitingToFree) + " more, frees" : "frees"}{h.nextFreeAt ? " from " + dayName(h.nextFreeAt.slice(0, 10)) : " when the trash empties"}</span>}{l.saved === 0 && l.couldFree > 0 && <span className="sub">could free {bytes(l.couldFree)} by removing the originals</span>}</td>
+              <td className="num" data-l="Saved">{l.saved > 0 ? <><b>{bytes(l.saved)}</b>{l.savedPercent != null && " · " + pctTxt(l.savedPercent)}</> : l.waitingToFree > 0 ? <><b>{bytes(l.waitingToFree)} smaller</b>{h.nextFreeAt && " · frees from " + dayName(h.nextFreeAt.slice(0, 10))}</> : "nothing yet"}{(l.grew ?? 0) > 0 && <span className="sub">{bytes(l.grew!)} added by bigger files</span>}{l.saved > 0 && l.waitingToFree > 0 && <span className="sub">{bytes(l.waitingToFree)} more{h.nextFreeAt ? ", frees from " + dayName(h.nextFreeAt.slice(0, 10)) : ""}</span>}{l.saved === 0 && l.couldFree > 0 && <span className="sub">could free {bytes(l.couldFree)} by removing the originals</span>}</td>
               <td className="num full" data-l="Done · Waiting · Skipped · Failed">{[l.counts.done, l.counts.waiting, l.counts.skipped, l.counts.failed].map(count).join(" · ")}</td>
               <td>{l.state === "paused" ? <span className="pill warn">Paused</span> : <span className="pill">Watching</span>}</td>
             </tr>)}</tbody></table>
