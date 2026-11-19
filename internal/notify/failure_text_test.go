@@ -26,7 +26,7 @@ func TestFailureSentenceIsTheJobsOneWhenSet(t *testing.T) {
 	svc.Idle()
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if want := "Failed: a.mkv. Couldn't write to /mnt/out: permission denied."; len(r.bodies) != 1 || r.bodies[0]["text"] != want {
+	if want := "Failed: a.mkv. Couldn't write to out: permission denied."; len(r.bodies) != 1 || r.bodies[0]["text"] != want {
 		t.Fatalf("failure message: %v, want %q", r.bodies, want)
 	}
 }

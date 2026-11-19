@@ -4,6 +4,8 @@ package web
 
 import (
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
@@ -113,7 +115,44 @@ func FailureSentence(store *jobs.Store, id int64) string {
 		return ""
 	}
 	last := events[len(events)-1]
-	return failureMessage(store, id, last.Reason, j.Path, j.OutputPath, last.Message)
+	// the stored words are the job's Error, as the Jobs list reads them; the event's message can be empty
+	facts := failureFacts(store, id, j.Path, j.OutputPath, j.Error)
+	msg, _ := jobs.FailureWords(failureCode(store, id, last.Reason), facts)
+	known := []string{facts.Folder, j.Path, j.OutputPath} // not the library root: a short one (/mnt) would be cut inside other paths
+	if o, err := store.OriginalOfJob(id); err == nil {    // the file a Convert again found in place of (its Dest)
+		known = append(known, o.Path, o.NewPath, o.Dest())
+	}
+	return withoutKnownFolders(msg, known...)
+}
+
+// withoutKnownFolders replaces each path the job knows (and its folder) with its last name, exactly, longest first,
+// so a folder with spaces in its name leaves nothing behind. A notification leaves the server, so it names files only.
+func withoutKnownFolders(msg string, paths ...string) string {
+	seen := map[string]bool{}
+	var olds []string
+	add := func(p string) {
+		if strings.Trim(p, `/\`) == "" || seen[p] {
+			return
+		}
+		seen[p] = true
+		olds = append(olds, p)
+	}
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		add(p)
+		t := strings.TrimRight(p, `/\`)
+		if i := strings.LastIndexAny(t, `/\`); i > 0 {
+			add(t[:i]) // the folder
+		}
+	}
+	sort.SliceStable(olds, func(a, b int) bool { return len(olds[a]) > len(olds[b]) })
+	var pairs []string
+	for _, o := range olds {
+		pairs = append(pairs, o, jobs.LastName(o))
+	}
+	return strings.NewReplacer(pairs...).Replace(msg)
 }
 
 // failureMessage is a failed job's sentence in design's words (the stored words for a code the table does not name).

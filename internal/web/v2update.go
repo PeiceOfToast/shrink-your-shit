@@ -33,9 +33,12 @@ type updater struct {
 	poll        time.Duration // how often a waiting install looks at the running jobs and the helper
 	now         func() time.Time
 
-	mu    sync.Mutex
-	state string // "" | "waiting" (for running jobs to end) | "failed" (before the helper took over)
-	err   string
+	mu      sync.Mutex
+	state   string // "" | "waiting" (for running jobs to end) | "failed" (before the helper took over)
+	err     string
+	stop    chan struct{} // closed to call off a waiting install; nil when none waits
+	resume  bool          // the install paused the workers, so calling it off turns them back on
+	claimed bool          // the waiting install has started (its backup and marker): too late to call it off
 }
 
 func newUpdater(ss *settingsStore, eng Engine) *updater {
@@ -79,6 +82,7 @@ func v2Update(api *http.ServeMux, u *updater) {
 		writeJSON(w, u.body(st, true))
 	})
 	api.HandleFunc("POST /api/v2/update/install", u.install)
+	api.HandleFunc("POST /api/v2/update/cancel", u.cancel)
 	api.HandleFunc("POST /api/v2/update/rollback", u.rollback)
 }
 
@@ -162,7 +166,8 @@ func (u *updater) install(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u.state, u.err = "waiting", ""
-	go u.whenIdle(st.Latest, resume)
+	u.stop, u.resume, u.claimed = make(chan struct{}), resume, false
+	go u.whenIdle(st.Latest, resume, u.stop)
 	u.mu.Unlock()
 	if in.When == "now" { // nothing runs: start at once, so the answer already says so
 		u.waitStarted()
@@ -183,6 +188,41 @@ func (u *updater) waitStarted() {
 	}
 }
 
+// cancel calls off an install that waits for the running jobs to end: nothing is installed, and the workers the
+// install paused run again. Once the install has started (or the helper is busy), it is too late.
+func (u *updater) cancel(w http.ResponseWriter, r *http.Request) {
+	on, err := updatesOn(u.ss)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	st, err := update.Load(u.ss.store, u.ck.Current)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	switch {
+	case u.claimed: // started: its backup, marker or helper run is under way
+		apiError(w, http.StatusConflict, "update_in_progress", "the update has started; it can't be cancelled now")
+		return
+	case u.state != "waiting" || u.stop == nil:
+		apiError(w, http.StatusConflict, "nothing_to_cancel", "no update is waiting to start")
+		return
+	}
+	if u.resume {
+		if err := u.ss.store.SetPaused(false); err != nil { // before the stop: if this fails, the install still waits
+			serverError(w, err)
+			return
+		}
+	}
+	close(u.stop)
+	u.stop, u.resume = nil, false
+	u.state, u.err = "", ""
+	writeJSON(w, u.bodyLocked(st, on))
+}
+
 func (u *updater) running() (int, error) {
 	a, err := u.ss.store.ActivitySummary()
 	return a.WorkingFiles, err
@@ -190,15 +230,27 @@ func (u *updater) running() (int, error) {
 
 // whenIdle waits for the running jobs to end, then backs up the database, writes the marker and asks
 // the helper to install version. If the helper fails before the program is swapped (this program is
-// then still running), it undoes the marker and the pause.
-func (u *updater) whenIdle(version string, resume bool) {
+// then still running), it undoes the marker and the pause. A cancel (closing stop) ends the wait first.
+func (u *updater) whenIdle(version string, resume bool, stop chan struct{}) {
 	for {
 		n, err := u.running()
 		if err == nil && n == 0 {
 			break
 		}
-		time.Sleep(u.poll)
+		select {
+		case <-stop:
+			return
+		case <-time.After(u.poll):
+		}
 	}
+	// A cancel and the start decide here, under the lock: whichever gets it first wins.
+	u.mu.Lock()
+	if u.stop != stop {
+		u.mu.Unlock()
+		return
+	}
+	u.claimed = true
+	u.mu.Unlock()
 	fail := func(err error) {
 		log.Printf("update: %v", err)
 		update.RemoveMarker(u.dataDir)
@@ -206,7 +258,7 @@ func (u *updater) whenIdle(version string, resume bool) {
 			u.ss.store.SetPaused(false)
 		}
 		u.mu.Lock()
-		u.state, u.err = "failed", err.Error()
+		u.state, u.err, u.claimed, u.stop = "failed", err.Error(), false, nil
 		u.mu.Unlock()
 	}
 	backup, err := u.ss.store.Backup()
@@ -224,7 +276,7 @@ func (u *updater) whenIdle(version string, resume bool) {
 		return
 	}
 	u.mu.Lock()
-	u.state = ""
+	u.state, u.stop = "", nil // claimed stays: the helper is installing, so a cancel is too late
 	u.mu.Unlock()
 	// The helper restarts this program once the new one is in place. Until then, a failure (a download
 	// or checksum error) leaves this program running, and it cleans up after itself.
