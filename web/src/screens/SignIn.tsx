@@ -27,7 +27,7 @@ export function SignIn() {
         <div className="field"><label htmlFor="token">Access token</label>
           {/* parity 11-19 #3: Show/Hide in the field, and where to find the token (README "Signing in") */}
           <div className="pw"><input id="token" className="input mono" type={shown ? "text" : "password"} autoComplete="current-password" spellCheck={false} value={token} onChange={(e) => setToken(e.target.value)} aria-describedby="token-hint" />
-            <button className="btn sm icon ghost" type="button" aria-controls="token" aria-pressed={shown} aria-label={shown ? "Hide the token" : "Show the token"} title={shown ? "Hide" : "Show"} onClick={() => setShown(!shown)}><Icon id="i-eye" /></button></div>
+            <button className="btn sm icon ghost" type="button" aria-controls="token" aria-pressed={shown} aria-label="Show the token" title="Show the token" onClick={() => setShown(!shown)}><Icon id="i-eye" /></button></div>
           <span id="token-hint" className="hint">It is in the sign-in link the server printed when it started.</span>
           <details className="where"><summary>Where do I find it?</summary>
             <p className="hint">On the computer that runs shrink-your-shit:</p>
