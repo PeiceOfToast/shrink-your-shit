@@ -39,7 +39,7 @@ func seedOverview(t *testing.T, s *Store, n int) []Library {
 	}
 	for i := 0; i < n; i++ {
 		l := libs[rnd.Intn(len(libs))]
-		if l.Path == "/m" && rnd.Intn(4) == 0 {
+		if l.ID == libs[0].ID && rnd.Intn(4) == 0 { // by ID: on Windows AddLibrary stores the canonical path, not "/m"
 			l = libs[1] // some /m files sit under /m/sub too: the same file across libraries
 		}
 		path := fmt.Sprintf("%s/d%d/f%d.mkv", l.Path, rnd.Intn(30), rnd.Intn(n/8+1))
