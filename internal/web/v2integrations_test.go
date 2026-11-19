@@ -49,7 +49,7 @@ func TestV2IntegrationsRoutes(t *testing.T) {
 		code string
 	}{
 		"invalid_url":     {`{"kind":"sonarr","name":"a","url":"ftp://x","apiKey":"k"}`, "invalid_url"},
-		"invalid_kind":    {`{"kind":"plex","name":"a","url":"http://x","apiKey":"k"}`, "invalid_kind"},
+		"invalid_kind":    {`{"kind":"emby","name":"a","url":"http://x","apiKey":"k"}`, "invalid_kind"},
 		"missing_key":     {`{"kind":"sonarr","name":"a","url":"http://x"}`, "missing_key"},
 		"invalid_mapping": {`{"kind":"sonarr","name":"a","url":"http://x","apiKey":"k","pathMappings":[{"theirPath":"tv","ourPath":"/m"}]}`, "invalid_mapping"},
 	}

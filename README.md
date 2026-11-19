@@ -263,6 +263,15 @@ shows `failingSince`. A batch summary (`PATCH /api/v2/notifications` with `summa
 (when the queue empties, the default), `daily` or `weekly` at a time you choose. Set `linkBase`
 (for example `http://nas:8484`) so messages link to the job. Without it, they have no links.
 
+## Sonarr, Radarr, Plex and Jellyfin
+
+Add a server with `POST /api/v2/integrations` (`{kind, name, url, apiKey}`; `kind` is `sonarr`, `radarr`, `plex` or
+`jellyfin`). After a file is replaced, Sonarr or Radarr rescans its show or movie, Plex scans that file's folder in
+its section, and Jellyfin is told the file changed (its old path is reported deleted when the extension changed).
+A server that is down or does not answer is a warning on the job, never a failure. If the server's paths differ from
+ours, add `pathMappings` (`{theirPath, ourPath}`). Changing a file's container (`.mp4` to `.mkv`) may reset its
+watched state in Jellyfin, and possibly in Plex.
+
 ## For developers
 
 ```

@@ -41,23 +41,37 @@ const noNextScan = "; it will notice the file at its next scan"
 // Kind is which app an instance is.
 type Kind string
 
-// The kinds this version knows. Plex and Jellyfin come later with the same shape.
+// The kinds this version knows.
 const (
-	Sonarr Kind = "sonarr"
-	Radarr Kind = "radarr"
+	Sonarr   Kind = "sonarr"
+	Radarr   Kind = "radarr"
+	Plex     Kind = "plex"
+	Jellyfin Kind = "jellyfin"
 )
 
 type kindInfo struct {
 	label    string // the name people read
 	noun     string // what the app calls the thing a file belongs to, for messages
+	keyWord  string // what the secret is called in messages: "the API key is wrong"
 	listPath string
 	command  string // the rescan command's name
 	idField  string // the command's field for the item's id
+	auth     func(key string) (header, value string)
+}
+
+// headerKey sends the key in one header, as it is.
+func headerKey(name string) func(string) (string, string) {
+	return func(key string) (string, string) { return name, key }
 }
 
 var kinds = map[Kind]kindInfo{
-	Sonarr: {label: "Sonarr", noun: "show", listPath: "/api/v3/series", command: "RescanSeries", idField: "seriesId"},
-	Radarr: {label: "Radarr", noun: "movie", listPath: "/api/v3/movie", command: "RescanMovie", idField: "movieId"},
+	Sonarr: {label: "Sonarr", noun: "show", keyWord: "API key", listPath: "/api/v3/series", command: "RescanSeries",
+		idField: "seriesId", auth: headerKey("X-Api-Key")},
+	Radarr: {label: "Radarr", noun: "movie", keyWord: "API key", listPath: "/api/v3/movie", command: "RescanMovie",
+		idField: "movieId", auth: headerKey("X-Api-Key")},
+	Plex: {label: "Plex", noun: "library", keyWord: "token", auth: headerKey("X-Plex-Token")},
+	Jellyfin: {label: "Jellyfin", noun: "library", keyWord: "API key",
+		auth: func(key string) (string, string) { return "Authorization", `MediaBrowser Token="` + key + `"` }},
 }
 
 // Invalid is a request the contract refuses, with its code and what to say about it.
@@ -432,14 +446,20 @@ func (s *Service) Test(in TestIn) (TestResult, error) {
 // probe asks the instance for its version and then its root folders. answered says whether both calls worked.
 func (s *Service) probe(kind Kind, base, key string, maps []Mapping) (TestResult, bool) {
 	ki := kinds[kind]
+	if kind == Plex {
+		return s.probePlex(ki, base, key, maps)
+	}
+	if kind == Jellyfin {
+		return s.probeJellyfin(ki, base, key, maps)
+	}
 	out := TestResult{Folders: []Folder{}}
-	st, body, err := s.do("GET", base, key, "/api/v3/system/status", nil)
+	st, body, err := s.do(ki, "GET", base, key, "/api/v3/system/status", nil)
 	if err != nil {
 		out.Message = unreached(ki, base, err, "")
 		return out, false
 	}
 	if !ok2(st) {
-		out.Message = answer(ki.label, st)
+		out.Message = answer(ki, st)
 		return out, false
 	}
 	var sys struct {
@@ -450,13 +470,13 @@ func (s *Service) probe(kind Kind, base, key string, maps []Mapping) (TestResult
 		v := sys.Version
 		out.Version = &v
 	}
-	st, body, err = s.do("GET", base, key, "/api/v3/rootfolder", nil)
+	st, body, err = s.do(ki, "GET", base, key, "/api/v3/rootfolder", nil)
 	if err != nil {
 		out.Message = unreached(ki, base, err, "")
 		return out, false
 	}
 	if !ok2(st) {
-		out.Message = answer(ki.label, st)
+		out.Message = answer(ki, st)
 		return out, false
 	}
 	var roots []struct {
@@ -466,24 +486,11 @@ func (s *Service) probe(kind Kind, base, key string, maps []Mapping) (TestResult
 		out.Message = ki.label + " sent something the app doesn't understand."
 		return out, true
 	}
-	libs, _ := s.st.Libraries()
+	paths := make([]string, 0, len(roots))
 	for _, rf := range roots {
-		f := Folder{TheirPath: rf.Path}
-		if ours, ok := toOurs(rf.Path, maps); ok {
-			f.OurPath = &ours
-		} else if _, err := os.Stat(rf.Path); err == nil {
-			p := rf.Path
-			f.OurPath = &p
-		}
-		if f.OurPath != nil {
-			for _, l := range libs {
-				if _, ok := under(*f.OurPath, l.Path); ok {
-					f.InLibrary = true
-				}
-			}
-		}
-		out.Folders = append(out.Folders, f)
+		paths = append(paths, rf.Path)
 	}
+	out.Folders = s.mapFolders(paths, maps)
 	out.OK = true
 	if out.Version != nil {
 		out.Message = fmt.Sprintf("Connected to %s %s.", ki.label, *out.Version)
@@ -493,9 +500,41 @@ func (s *Service) probe(kind Kind, base, key string, maps []Mapping) (TestResult
 	return out, true
 }
 
-// Tell tells every enabled instance that the file at finalPath was replaced. It runs in the background, so a
-// slow or dead instance never holds the worker, and a warning never fails the job.
-func (s *Service) Tell(jobID int64, finalPath string) {
+// mapFolders turns their folder paths into Folder rows: mapped by maps, or kept when the path exists here.
+func (s *Service) mapFolders(paths []string, maps []Mapping) []Folder {
+	out := []Folder{}
+	libs, _ := s.st.Libraries()
+	for _, p := range paths {
+		f := Folder{TheirPath: p}
+		if ours, ok := toOurs(p, maps); ok {
+			f.OurPath = &ours
+		} else if _, err := os.Stat(p); err == nil {
+			f.OurPath = &p
+		}
+		if f.OurPath != nil {
+			for _, l := range libs {
+				if _, ok := under(*f.OurPath, l.Path); ok {
+					f.InLibrary = true
+				}
+			}
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+// Tell tells every enabled instance that the file at finalPath was replaced; from is the file it replaced
+// (the job's source). from is empty when the original was kept (Beside and Folder modes), so the new file is
+// only a new file. It runs in the background, so a slow or dead instance never holds the worker, and a
+// warning never fails the job.
+func (s *Service) Tell(jobID int64, from, finalPath string) {
+	// Beside and Folder modes keep the original: it is still there, so it was not replaced and is not reported
+	// as deleted. The new file is then a new file.
+	if from != "" && from != finalPath {
+		if _, err := os.Stat(from); err == nil {
+			from = ""
+		}
+	}
 	s.mu.Lock()
 	f, err := s.load()
 	s.mu.Unlock()
@@ -511,7 +550,7 @@ func (s *Service) Tell(jobID int64, finalPath string) {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			s.tellOne(jobID, rec, finalPath)
+			s.tellOne(jobID, rec, from, finalPath)
 		}()
 	}
 }
@@ -519,7 +558,7 @@ func (s *Service) Tell(jobID int64, finalPath string) {
 // Wait returns once the background tells started so far have finished (tests use it).
 func (s *Service) Wait() { s.wg.Wait() }
 
-func (s *Service) tellOne(jobID int64, r record, finalPath string) {
+func (s *Service) tellOne(jobID int64, r record, from, finalPath string) {
 	ki := kinds[r.Kind]
 	key, err := jobs.OpenSecret(r.Sealed, r.Nonce)
 	if err != nil {
@@ -527,7 +566,18 @@ func (s *Service) tellOne(jobID int64, r record, finalPath string) {
 		s.step(jobID, false, summary)
 		return
 	}
-	summary, ok, answered, owns := s.rescan(ki, r.URL, key, toTheirs(finalPath, r.Mappings))
+	var summary string
+	var ok, answered, owns bool
+	switch r.Kind {
+	case Plex:
+		summary, ok, answered = s.tellPlex(ki, r.Name, r.URL, key, toTheirs(finalPath, r.Mappings))
+		owns = true
+	case Jellyfin:
+		summary, ok, answered = s.tellJellyfin(ki, r.Name, r.URL, key, toTheirs(from, r.Mappings), toTheirs(finalPath, r.Mappings))
+		owns = true
+	default:
+		summary, ok, answered, owns = s.rescan(ki, r.URL, key, toTheirs(finalPath, r.Mappings))
+	}
 	if owns { // an instance without this file's show or movie (a Radarr told about an episode) leaves no step or log line
 		s.step(jobID, ok, summary)
 		s.logf("%s: %s", ki.label, summary)
@@ -544,12 +594,12 @@ func (s *Service) step(jobID int64, ok bool, summary string) {
 // rescan finds the item (series or movie) the file belongs to and asks the instance to rescan it. owns is
 // false only when the instance answered and has no item holding the file: the file is not its business.
 func (s *Service) rescan(ki kindInfo, base, key, file string) (summary string, ok, answered, owns bool) {
-	st, body, err := s.do("GET", base, key, ki.listPath, nil)
+	st, body, err := s.do(ki, "GET", base, key, ki.listPath, nil)
 	if err != nil {
 		return unreached(ki, base, err, noNextScan), false, false, true
 	}
 	if !ok2(st) {
-		return answer(ki.label, st), false, false, true
+		return answer(ki, st), false, false, true
 	}
 	var items []struct {
 		ID    int64  `json:"id"`
@@ -569,12 +619,12 @@ func (s *Service) rescan(ki kindInfo, base, key, file string) (summary string, o
 		return fmt.Sprintf("%s doesn't have this file's %s.", ki.label, ki.noun), true, true, false
 	}
 	it := items[best]
-	st, _, err = s.do("POST", base, key, "/api/v3/command", map[string]any{"name": ki.command, ki.idField: it.ID})
+	st, _, err = s.do(ki, "POST", base, key, "/api/v3/command", map[string]any{"name": ki.command, ki.idField: it.ID})
 	if err != nil {
 		return unreached(ki, base, err, noNextScan), false, false, true
 	}
 	if !ok2(st) {
-		return answer(ki.label, st), false, false, true
+		return answer(ki, st), false, false, true
 	}
 	title := it.Title
 	if title == "" {
@@ -616,8 +666,9 @@ func (s *Service) note(id string, res Result, answered bool) {
 	}
 }
 
-// do sends one request with the key in the header. The error may name the address; the key never appears in it.
-func (s *Service) do(method, base, key, p string, body any) (int, []byte, error) {
+// do sends one request with the key in the header the kind uses. The error may name the address; the key never
+// appears in it.
+func (s *Service) do(ki kindInfo, method, base, key, p string, body any) (int, []byte, error) {
 	var rd io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -630,7 +681,8 @@ func (s *Service) do(method, base, key, p string, body any) (int, []byte, error)
 	if err != nil {
 		return 0, nil, err
 	}
-	req.Header.Set("X-Api-Key", key)
+	h, v := ki.auth(key)
+	req.Header.Set(h, v)
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -647,14 +699,14 @@ func (s *Service) do(method, base, key, p string, body any) (int, []byte, error)
 func ok2(st int) bool { return st >= 200 && st < 300 }
 
 // answer is what an instance that answered with a bad status is said to have done.
-func answer(label string, st int) string {
+func answer(ki kindInfo, st int) string {
 	if st == http.StatusUnauthorized {
-		return label + " answered 401: the API key is wrong."
+		return fmt.Sprintf("%s answered 401: the %s is wrong.", ki.label, ki.keyWord)
 	}
 	if st >= 300 && st < 400 {
-		return label + " answered with a redirect to another address; check the address."
+		return ki.label + " answered with a redirect to another address; check the address."
 	}
-	return fmt.Sprintf("%s answered %d.", label, st)
+	return fmt.Sprintf("%s answered %d.", ki.label, st)
 }
 
 // unreached says an instance did not answer, naming only its host (never the address or the key).
@@ -703,7 +755,7 @@ func cleanMappings(ms []Mapping) []Mapping {
 }
 
 func invalidKind() error {
-	return Invalid{Code: "invalid_kind", Message: "The kind is sonarr or radarr."}
+	return Invalid{Code: "invalid_kind", Message: "The kind is sonarr, radarr, plex or jellyfin."}
 }
 
 func missingKey() error {

@@ -129,7 +129,7 @@ func TestCreateRefusesBadInput(t *testing.T) {
 		in   NewIntegration
 		code string
 	}{
-		{"kind", NewIntegration{Kind: "plex", URL: "http://x", APIKey: "k"}, "invalid_kind"},
+		{"kind", NewIntegration{Kind: "emby", URL: "http://x", APIKey: "k"}, "invalid_kind"},
 		{"url scheme", NewIntegration{Kind: Sonarr, URL: "ftp://x", APIKey: "k"}, "invalid_url"},
 		{"url no host", NewIntegration{Kind: Sonarr, URL: "http://", APIKey: "k"}, "invalid_url"},
 		{"no key", NewIntegration{Kind: Sonarr, URL: "http://x"}, "missing_key"},
@@ -158,7 +158,7 @@ func TestKeyNeverInAnyResponseOrLog(t *testing.T) {
 		t.Fatalf("Test by id: %+v, %v", res, err)
 	}
 	id := h.job(t, "/mnt/media/tv/The Show/s01e01.mkv")
-	h.svc.Tell(id, "/mnt/media/tv/The Show/s01e01.mkv")
+	h.svc.Tell(id, "", "/mnt/media/tv/The Show/s01e01.mkv")
 	h.svc.Wait()
 
 	list, _ := h.svc.List()
@@ -179,7 +179,7 @@ func TestPathMappingFindsTheSeriesAndRescans(t *testing.T) {
 		PathMappings: []Mapping{{TheirPath: "/tv", OurPath: "/mnt/media/tv"}}})
 	file := "/mnt/media/tv/The Show/s01e01.mkv"
 	id := h.job(t, file)
-	h.svc.Tell(id, file)
+	h.svc.Tell(id, "", file)
 	h.svc.Wait()
 
 	cmds := arr.commandsSeen()
@@ -205,7 +205,7 @@ func TestAnInstanceWithoutTheFileStaysQuiet(t *testing.T) {
 		PathMappings: []Mapping{{TheirPath: "/tv", OurPath: "/mnt/media/tv"}}})
 	file := "/mnt/media/tv/The Show/s01e01.mkv"
 	id := h.job(t, file)
-	h.svc.Tell(id, file)
+	h.svc.Tell(id, "", file)
 	h.svc.Wait()
 
 	if steps, _ := h.st.Steps(id); len(steps) != 0 {
@@ -245,13 +245,13 @@ func TestFailingSinceAfterThreeFailuresAndClearsOnSuccess(t *testing.T) {
 		PathMappings: []Mapping{{TheirPath: "/tv", OurPath: "/mnt/media/tv"}}})
 	file := "/mnt/media/tv/The Show/s01e01.mkv"
 	for i := 1; i <= 2; i++ {
-		h.svc.Tell(h.job(t, file), file)
+		h.svc.Tell(h.job(t, file), "", file)
 		h.svc.Wait()
 	}
 	if list, _ := h.svc.List(); list[0].FailingSince != nil {
 		t.Fatalf("failingSince set after 2 failures: %v", list[0].FailingSince)
 	}
-	h.svc.Tell(h.job(t, file), file)
+	h.svc.Tell(h.job(t, file), "", file)
 	h.svc.Wait()
 	list, _ := h.svc.List()
 	if list[0].FailingSince == nil {
@@ -260,7 +260,7 @@ func TestFailingSinceAfterThreeFailuresAndClearsOnSuccess(t *testing.T) {
 	first := list[0].FailingSince.UTC()
 
 	h.svc.Update(it.ID, Patch{APIKey: strp(goodKey)})
-	h.svc.Tell(h.job(t, file), file)
+	h.svc.Tell(h.job(t, file), "", file)
 	h.svc.Wait()
 	list, _ = h.svc.List()
 	if list[0].FailingSince != nil {
@@ -337,7 +337,7 @@ func TestDisabledInstanceIsNotTold(t *testing.T) {
 		PathMappings: []Mapping{{TheirPath: "/tv", OurPath: "/mnt/media/tv"}}})
 	file := "/mnt/media/tv/The Show/s01e01.mkv"
 	id := h.job(t, file)
-	h.svc.Tell(id, file)
+	h.svc.Tell(id, "", file)
 	h.svc.Wait()
 	if steps, _ := h.st.Steps(id); len(steps) != 0 {
 		t.Fatalf("a disabled instance recorded steps: %+v", steps)
@@ -392,7 +392,7 @@ func TestPathMappingRespectsTheBoundary(t *testing.T) {
 	h.svc.Create(NewIntegration{Kind: Sonarr, Name: "Home", URL: arr.srv.URL, APIKey: goodKey, PathMappings: maps})
 	file := "/mnt/media/tv/The Show/s01e01.mkv"
 	id := h.job(t, file)
-	h.svc.Tell(id, file)
+	h.svc.Tell(id, "", file)
 	h.svc.Wait()
 	if n := len(arr.commandsSeen()); n != 0 {
 		t.Fatalf("a rescan went to a series whose folder is only a prefix of the file's (%d)", n)
