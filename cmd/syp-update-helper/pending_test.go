@@ -37,13 +37,60 @@ func TestPendingNewProgramHealthyIsKept(t *testing.T) {
 	h.version = noRun(t, h.bin)
 	writeFile(t, h.bin, "new")
 	writeFile(t, h.bin+".previous", "old")
+	writeFile(t, h.bin+".previous.older", "older")
 	writeFile(t, h.bin+pendingSuffix, "0.2.0")
 	h.recoverPending()
 	if a := finish(t, h); a.State != "idle" || a.Error != "" {
 		t.Fatalf("recovery: %+v", a)
 	}
-	if exists(h.bin+pendingSuffix) || read(t, h.bin) != "new" || read(t, h.bin+".previous") != "old" || *restarts != 1 {
-		t.Errorf("pending kept %v, bin %q, previous %q, restarts %d", exists(h.bin+pendingSuffix), read(t, h.bin), read(t, h.bin+".previous"), *restarts)
+	if exists(h.bin+pendingSuffix) || exists(h.bin+".previous.older") || read(t, h.bin) != "new" || read(t, h.bin+".previous") != "old" || *restarts != 1 {
+		t.Errorf("pending kept %v, older kept %v, bin %q, previous %q, restarts %d", exists(h.bin+pendingSuffix), exists(h.bin+".previous.older"), read(t, h.bin), read(t, h.bin+".previous"), *restarts)
+	}
+}
+
+// Start after a crash that cut an install short, with the new program never healthy: startup puts the previous
+// program back. Recovery is held open on its first restart, so busy must be set while it runs.
+func TestStartupRecoversAnInstallACrashCutShort(t *testing.T) {
+	var h *helper
+	h, restarts := testHelper(t, "", func() bool { return fileIs(h.bin, "old") })
+	h.version = noRun(t, h.bin)
+	gate := make(chan struct{})
+	held := false
+	restart := h.restart
+	h.restart = func() error {
+		if !held {
+			held = true
+			<-gate
+		}
+		return restart()
+	}
+	writeFile(t, h.bin, "new")
+	writeFile(t, h.bin+".previous", "old")
+	writeFile(t, h.bin+pendingSuffix, "0.2.0")
+	h.startup()
+	if !h.busy {
+		t.Fatal("startup returned while the recovery had not started")
+	}
+	close(gate)
+	a := finish(t, h)
+	if a.State != "failed" || !strings.Contains(a.Error, "rolled back to the previous version") {
+		t.Fatalf("recovery: %+v", a)
+	}
+	if exists(h.bin+pendingSuffix) || read(t, h.bin) != "old" || *restarts != 2 {
+		t.Errorf("pending kept %v, bin %q, restarts %d", exists(h.bin+pendingSuffix), read(t, h.bin), *restarts)
+	}
+}
+
+// Start with no pending record: nothing is restarted, and the previous version is read once.
+func TestStartupWithNoRecordReadsThePreviousOnce(t *testing.T) {
+	h, restarts := testHelper(t, "", func() bool { return true })
+	writeFile(t, h.bin+".previous", "prev") // different bytes: a copy of the program would be removed (repairLeftovers)
+	h.startup()
+	h.mu.Lock()
+	prev, busy := h.prevVer, h.busy
+	h.mu.Unlock()
+	if prev != "0.1.0" || busy || *restarts != 0 {
+		t.Errorf("previous version %q, busy %v, restarts %d", prev, busy, *restarts)
 	}
 }
 

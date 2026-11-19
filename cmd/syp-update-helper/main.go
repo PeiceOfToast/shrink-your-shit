@@ -107,11 +107,7 @@ func main() {
 			}
 			return "", fmt.Errorf("could not read the installed version: %v %s", err, out)
 		}}
-	if err := repairLeftovers(h.bin); err != nil { // a crash during an install or roll back left files in the wrong names
-		log.Printf("update leftovers: %v", err)
-	}
-	h.recoverPending()  // an install a crash cut short is finished (or undone) before any request is taken
-	go h.readPrevious() // a helper restarted after an update still knows what its previous version is
+	h.startup() // the leftovers, and an install a crash cut short, are dealt with before the first request is taken
 
 	dir := filepath.Dir(*sock)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -356,18 +352,31 @@ func (h *helper) undoInstall(version string, restoreOlder func() error) error {
 	return h.afterUndo(msg)
 }
 
-// recoverPending finishes an install a crash cut short, when the pending record is still there. It runs once at
-// start, in the background, and refuses other operations meanwhile; a failure is shown in status like any other.
-func (h *helper) recoverPending() {
+// startup fixes what a crash left behind, before the socket listens. An install a crash cut short is finished in
+// the background (it refuses other operations meanwhile, and reads the previous version when it ends); otherwise
+// the previous version is read once here, while nothing else can change the files.
+func (h *helper) startup() {
+	if err := repairLeftovers(h.bin); err != nil { // a crash during an install or roll back left files in the wrong names
+		log.Printf("update leftovers: %v", err)
+	}
+	if h.recoverPending() {
+		return
+	}
+	h.readPrevious() // a helper restarted after an update still knows what its previous version is
+}
+
+// recoverPending finishes an install a crash cut short, when the pending record is still there. It reports whether
+// it started that in the background; a failure is shown in status like any other.
+func (h *helper) recoverPending() bool {
 	b, err := os.ReadFile(h.bin + pendingSuffix)
 	if err != nil {
-		return // none
+		return false // none
 	}
 	want := strings.TrimSpace(string(b))
 	if !update.ValidVersion(want) {
 		log.Printf("update leftovers: %s does not name a version; removed", h.bin+pendingSuffix)
 		clearPending(h.bin)
-		return
+		return false
 	}
 	h.mu.Lock()
 	h.busy, h.state, h.err, h.done = true, "installing", "", make(chan struct{})
@@ -388,6 +397,7 @@ func (h *helper) recoverPending() {
 		}
 		close(h.done)
 	}()
+	return true
 }
 
 // finishPending decides from the files, never by running the program (a broken new program may not run at all).
@@ -402,12 +412,13 @@ func (h *helper) finishPending(want string) error {
 		}
 		return nil
 	}
-	if h.restartHealthy() {
-		clearPending(h.bin)
-		return nil
-	}
 	prev := h.bin + ".previous"
 	older := prev + ".older"
+	if h.restartHealthy() {
+		clearPending(h.bin)
+		os.Remove(older) // as install's success path does: the copy before the previous one is no longer needed
+		return nil
+	}
 	return h.undoInstall(want, func() error {
 		if !exists(older) {
 			return nil
