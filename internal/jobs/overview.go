@@ -40,9 +40,10 @@ FROM files WHERE path >= ? AND path < ?`, lo, hi).Scan(&t.BytesBefore, &t.Videos
 }
 
 // BytesNow is the bytes a scan sees in a library: the bytes recorded, less the saving freed, the saving
-// waiting in the trash, and the converted files a scan found gone (their bytes are no longer there). Never below 0.
+// waiting in the trash, and the converted files a scan found gone (their bytes are no longer there), plus the
+// growth of converted files bigger than their originals (they are in the library at their new size). Never below 0.
 func BytesNow(t LibraryTotals, c LibraryCounts) int64 {
-	return max(0, t.BytesBefore-c.FreedBytes-c.WaitingBytes-c.GoneBytes)
+	return max(0, t.BytesBefore-c.FreedBytes-c.WaitingBytes-c.GoneBytes+c.GrewBytes)
 }
 
 // pathRange is [lo, hi) holding every path inside dir: dir + separator up to dir + the next character.
