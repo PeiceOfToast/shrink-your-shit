@@ -32,6 +32,8 @@ type HelperAnswer struct {
 	State    string `json:"state"`             // idle | downloading | installing | failed
 	Error    string `json:"error,omitempty"`   // the last operation's failure
 	Previous bool   `json:"previous"`          // a previous program is kept, so a roll back is possible
+	// PreviousVersion is the version of that previous program ("" when none is kept or it could not be read)
+	PreviousVersion string `json:"previousVersion,omitempty"`
 }
 
 // HelperError is a refusal the helper answered with.

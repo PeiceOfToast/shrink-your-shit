@@ -258,7 +258,7 @@ func (u *updater) rollback(w http.ResponseWriter, r *http.Request) {
 	}
 	// The database copy from before the last update goes back with the program, if this program made it.
 	m := update.Marker{Kind: "rollback", From: u.ck.Current, At: u.now().UTC()}
-	if last := update.LastResult(u.dataDir); last != nil && last.OK && last.Kind == "update" && last.To == u.ck.Current {
+	if last := u.lastUpdate(); last != nil {
 		m.To, m.Backup = last.From, last.Backup
 	}
 	if err := update.WriteMarker(u.dataDir, m); err != nil {
@@ -285,6 +285,16 @@ func (u *updater) rollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSONStatus(w, http.StatusAccepted, u.bodyLocked(st, true))
+}
+
+// lastUpdate is the stored result when a roll back now would also put the database back: the last change
+// was a good update to the running version. Nil otherwise.
+func (u *updater) lastUpdate() *update.Result {
+	last := update.LastResult(u.dataDir)
+	if last != nil && last.OK && last.Kind == "update" && last.To == u.ck.Current {
+		return last
+	}
+	return nil
 }
 
 // updatesOn reads the setting under the settings lock, as the settings handlers do.
@@ -322,6 +332,17 @@ func (u *updater) bodyLocked(st update.Status, on bool) map[string]any {
 	if method == "commands" {
 		commands = u.commands()
 	}
+	// the helper's line for a script install on Linux whose helper isn't answering: "commands" there is only
+	// install.sh, and the helper is what the person needs for the buttons
+	var helperCommand any
+	if u.installType() == "script" && u.goos == "linux" && method == "commands" {
+		helperCommand = installCommand + " -s -- --update-helper"
+	}
+	rollback := map[string]any{"available": false, "version": nil, "dataRestored": false}
+	if h != nil {
+		rollback["available"], rollback["version"] = h.Previous, emptyAsNil(h.PreviousVersion)
+		rollback["dataRestored"] = u.lastUpdate() != nil
+	}
 	var last any
 	if r := update.LastResult(u.dataDir); r != nil {
 		last = map[string]any{"ok": r.OK, "from": r.From, "to": r.To, "message": r.Message, "dataRestored": r.DataRestored}
@@ -330,8 +351,9 @@ func (u *updater) bodyLocked(st update.Status, on bool) map[string]any {
 		"enabled": on, "current": st.Current, "latest": emptyAsNil(st.Latest), "available": on && st.Available,
 		"notes": st.Notes, "url": emptyAsNil(st.URL), "publishedAt": emptyAsNil(st.PublishedAt),
 		"checkedAt": checked, "error": emptyAsNil(st.Error),
-		"installType": u.installType(),
-		"method":      method, "commands": commands, "install": install, "lastResult": last,
+		"installType": u.installType(), "os": u.goos,
+		"method": method, "commands": commands, "helperCommand": helperCommand,
+		"install": install, "rollback": rollback, "lastResult": last,
 	}
 }
 

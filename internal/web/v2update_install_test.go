@@ -20,11 +20,12 @@ import (
 
 // fakeUpdateHelper is syp-update-helper: it records requests and answers with its state.
 type fakeUpdateHelper struct {
-	mu       sync.Mutex
-	calls    []update.HelperRequest
-	state    string // after an install: what status answers
-	errMsg   string
-	previous bool
+	mu              sync.Mutex
+	calls           []update.HelperRequest
+	state           string // after an install: what status answers
+	errMsg          string
+	previous        bool
+	previousVersion string
 }
 
 func (f *fakeUpdateHelper) Call(r update.HelperRequest) (update.HelperAnswer, error) {
@@ -38,7 +39,7 @@ func (f *fakeUpdateHelper) Call(r update.HelperRequest) (update.HelperAnswer, er
 	if st == "" {
 		st = "idle"
 	}
-	return update.HelperAnswer{OK: true, State: st, Error: f.errMsg, Previous: f.previous}, nil
+	return update.HelperAnswer{OK: true, State: st, Error: f.errMsg, Previous: f.previous, PreviousVersion: f.previousVersion}, nil
 }
 
 func (f *fakeUpdateHelper) installs() []string {
@@ -255,7 +256,7 @@ func TestUpdateLastResultSaysTheDatabaseWentBack(t *testing.T) {
 	}
 	_, body := getJSON(t, srv.URL+"/api/v2/update")
 	last, _ := body["lastResult"].(map[string]any)
-	if last["dataRestored"] != true || last["message"] != "Rolled back from v0.2.0 to v0.1.1; changes made since the update were undone (kept in syp.db.rolled-back)" {
+	if last["dataRestored"] != true || last["message"] != "Rolled back from 0.2.0 to 0.1.1; changes made since the update were undone (kept in syp.db.rolled-back)" {
 		t.Errorf("lastResult %v", body["lastResult"])
 	}
 }
@@ -269,7 +270,43 @@ func TestUpdateLastResultShown(t *testing.T) {
 	}
 	_, body := getJSON(t, srv.URL+"/api/v2/update")
 	last, _ := body["lastResult"].(map[string]any)
-	if last["ok"] != false || last["message"] != "Update to v0.2.0 failed; rolled back to v0.1.1" || last["from"] != "0.1.1" || last["to"] != "0.2.0" || last["dataRestored"] != false {
+	if last["ok"] != false || last["message"] != "Update to 0.2.0 failed; rolled back to 0.1.1" || last["from"] != "0.1.1" || last["to"] != "0.2.0" || last["dataRestored"] != false {
 		t.Errorf("lastResult %v", body["lastResult"])
+	}
+}
+
+// The rollback block and the os and helperCommand fields: with the helper answering, without it, and off Linux.
+func TestUpdateGetSaysWhatRollbackAndInstallNeed(t *testing.T) {
+	srv, u, _, fake := installServer(t, "script")
+	fake.previous, fake.previousVersion = true, "0.1.0"
+	if _, err := update.Settle(u.dataDir, &update.Marker{Kind: "update", From: "0.1.0", To: "0.1.1"}, "0.1.1", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	_, body := getJSON(t, srv.URL+"/api/v2/update")
+	rb, _ := body["rollback"].(map[string]any)
+	if body["os"] != "linux" || body["helperCommand"] != nil || body["method"] != "helper" {
+		t.Errorf("helper answering: os %v, helperCommand %v, method %v", body["os"], body["helperCommand"], body["method"])
+	}
+	if rb["available"] != true || rb["version"] != "0.1.0" || rb["dataRestored"] != true {
+		t.Errorf("rollback with the helper answering: %v", rb)
+	}
+
+	// the helper is not answering on a script install: the line to install it, and no rollback
+	u.helper = update.Helper{Socket: filepath.Join(t.TempDir(), "none.sock")}
+	_, body = getJSON(t, srv.URL+"/api/v2/update")
+	rb, _ = body["rollback"].(map[string]any)
+	if cmd, _ := body["helperCommand"].(string); !strings.HasSuffix(cmd, "| sh -s -- --update-helper") || body["method"] != "commands" {
+		t.Errorf("helper not answering: helperCommand %v, method %v", body["helperCommand"], body["method"])
+	}
+	if rb["available"] != false || rb["version"] != nil || rb["dataRestored"] != false {
+		t.Errorf("rollback without the helper: %v, want {available false, version null, dataRestored false}", rb)
+	}
+
+	// Docker never gets the helper line
+	srv, _, _, _ = installServer(t, "docker")
+	_, body = getJSON(t, srv.URL+"/api/v2/update")
+	rb, _ = body["rollback"].(map[string]any)
+	if body["helperCommand"] != nil || rb["available"] != false || rb["version"] != nil || rb["dataRestored"] != false {
+		t.Errorf("docker: helperCommand %v, rollback %v", body["helperCommand"], rb)
 	}
 }

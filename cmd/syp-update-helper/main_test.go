@@ -28,25 +28,33 @@ import (
 // releaseServer serves release v<version> for this machine, with prog as its program.
 func releaseServer(t *testing.T, version, prog string) *httptest.Server {
 	t.Helper()
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gz)
-	tw.WriteHeader(&tar.Header{Name: "shrink-your-shit_linux_" + runtime.GOARCH + "/shrink-your-shit", Mode: 0o755, Size: int64(len(prog)), Typeflag: tar.TypeReg})
-	tw.Write([]byte(prog))
-	tw.Close()
-	gz.Close()
-	archive := buf.Bytes()
-	sum := sha256.Sum256(archive)
+	return releasesServer(t, map[string]string{version: prog})
+}
+
+// releasesServer serves each release (version -> its program) for this machine.
+func releasesServer(t *testing.T, progs map[string]string) *httptest.Server {
+	t.Helper()
 	name := update.ArchiveName("linux", runtime.GOARCH)
+	files := map[string][]byte{}
+	for version, prog := range progs {
+		var buf bytes.Buffer
+		gz := gzip.NewWriter(&buf)
+		tw := tar.NewWriter(gz)
+		tw.WriteHeader(&tar.Header{Name: "shrink-your-shit_linux_" + runtime.GOARCH + "/shrink-your-shit", Mode: 0o755, Size: int64(len(prog)), Typeflag: tar.TypeReg})
+		tw.Write([]byte(prog))
+		tw.Close()
+		gz.Close()
+		archive := buf.Bytes()
+		sum := sha256.Sum256(archive)
+		files["/v"+version+"/"+name] = archive
+		files["/v"+version+"/checksums.txt"] = []byte(hex.EncodeToString(sum[:]) + "  " + name + "\n")
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v" + version + "/" + name:
-			w.Write(archive)
-		case "/v" + version + "/checksums.txt":
-			w.Write([]byte(hex.EncodeToString(sum[:]) + "  " + name + "\n"))
-		default:
-			http.NotFound(w, r)
+		if b, ok := files[r.URL.Path]; ok {
+			w.Write(b)
+			return
 		}
+		http.NotFound(w, r)
 	}))
 	t.Cleanup(srv.Close)
 	return srv
@@ -142,6 +150,44 @@ func TestInstallRollsBackWhenTheNewProgramDoesNotAnswer(t *testing.T) {
 	}
 	if read(t, h.bin) != "old" || *restarts != 2 {
 		t.Errorf("bin %q, restarts %d: want the previous program back, restarted twice", read(t, h.bin), *restarts)
+	}
+}
+
+// 0.1.0 is installed, 0.2.0 is installed, then 0.3.0 does not answer and is rolled back by the helper. The
+// previous program must then be 0.1.0, so a manual roll back goes there (it used to be lost at the install).
+func TestAutomaticRollbackKeepsThePreviousSoAManualRollbackWorks(t *testing.T) {
+	srv := releasesServer(t, map[string]string{"0.2.0": "prog-0.2.0", "0.3.0": "prog-0.3.0"})
+	h, _ := testHelper(t, srv.URL, nil)
+	if err := os.WriteFile(h.bin, []byte("prog-0.1.0"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h.version = func(b string) (string, error) { return strings.TrimPrefix(read(t, b), "prog-"), nil }
+	h.healthy = func() bool { return !strings.Contains(read(t, h.bin), "0.3.0") }
+	prev := h.bin + ".previous"
+
+	h.handle(update.HelperRequest{Cmd: "install", Version: "0.2.0"})
+	if a := finish(t, h); a.State != "idle" || read(t, h.bin) != "prog-0.2.0" || read(t, prev) != "prog-0.1.0" || a.PreviousVersion != "0.1.0" {
+		t.Fatalf("install 0.2.0: %+v, bin %q, previous %q", a, read(t, h.bin), read(t, prev))
+	}
+
+	h.handle(update.HelperRequest{Cmd: "install", Version: "0.3.0"})
+	a := finish(t, h)
+	if a.State != "failed" || !strings.Contains(a.Error, "rolled back") || read(t, h.bin) != "prog-0.2.0" {
+		t.Fatalf("install 0.3.0 after its automatic roll back: %+v, bin %q", a, read(t, h.bin))
+	}
+	if !a.Previous || a.PreviousVersion != "0.1.0" || read(t, prev) != "prog-0.1.0" {
+		t.Fatalf("after the automatic roll back the previous is %v %q, want 0.1.0 kept: %+v", a.Previous, a.PreviousVersion, a)
+	}
+
+	if a := h.handle(update.HelperRequest{Cmd: "rollback"}); !a.OK {
+		t.Fatalf("manual rollback refused: %+v", a)
+	}
+	a = finish(t, h)
+	if a.State != "idle" || read(t, h.bin) != "prog-0.1.0" || read(t, prev) != "prog-0.2.0" || a.PreviousVersion != "0.2.0" {
+		t.Fatalf("manual rollback: %+v, bin %q, previous %q", a, read(t, h.bin), read(t, prev))
+	}
+	if _, err := os.Stat(prev + ".older"); !os.IsNotExist(err) {
+		t.Errorf("the kept copy is left behind: %v", err)
 	}
 }
 
