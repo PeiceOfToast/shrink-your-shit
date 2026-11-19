@@ -96,7 +96,8 @@ was extracted and run by the CI test.
 - `install.sh` on **macOS** (launchd agent, Homebrew, quarantine flag), on Fedora/Arch/Alpine/openSUSE
   package managers. (The one-line install from the real v0.1.1 release was run on fresh Debian 13,
   Ubuntu 24.04 and Ubuntu 26.04 Proxmox LXCs on 2026-11-19: install, ffmpeg, service after a reboot
-  and upgrade in place on all three, converting a clip on Debian 13, the README's uninstall steps on
+  and upgrade in place on all three, converting a clip on Debian 13 (after giving the
+  service user `syp` write access to the library folder), the README's uninstall steps on
   Ubuntu 24.04.)
 - Every Proxmox step in `docs/proxmox.md`: LXC bind mounts and the UID shift, running the
   service in an unprivileged LXC, Docker inside an LXC (nesting/keyctl), Proxmox's OCI image

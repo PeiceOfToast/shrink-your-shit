@@ -150,7 +150,8 @@ use it on a network you trust, never on the internet.
 **Linux:** stop the service and remove what the installer put in place:
 
 ```
-sudo systemctl disable --now shrink-your-shit syp-network-helper
+sudo systemctl disable --now shrink-your-shit
+sudo systemctl disable --now syp-network-helper   # only if network shares were set up (the default)
 sudo rm -f /etc/systemd/system/shrink-your-shit.service /etc/systemd/system/syp-network-helper.service \
   /etc/default/shrink-your-shit /usr/local/bin/shrink-your-shit
 sudo rm -rf /usr/local/libexec/shrink-your-shit /run/shrink-your-shit
@@ -165,7 +166,7 @@ share folders and refuses while anything is still in them. ffmpeg, curl, cifs-ut
 installed, since other programs may use them.
 
 **macOS:** `launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/dev.shrink-your-shit.plist`, then delete
-that file and `~/.local/bin/shrink-your-shit`. The data is in `~/Library/Application Support/shrink-your-shit`. (Not yet tried on a Mac.)
+that file, `~/.local/bin/shrink-your-shit` and the log `~/Library/Logs/shrink-your-shit.log`. The data is in `~/Library/Application Support/shrink-your-shit`. (Not yet tried on a Mac.)
 
 **Windows:** Settings > Apps (see [Install](#install-one-step)).
 
