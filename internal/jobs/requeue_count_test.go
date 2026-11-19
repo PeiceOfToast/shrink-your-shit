@@ -198,3 +198,37 @@ func sumDaysSkipped(days map[string]Day) (failed, skipped int) {
 	}
 	return failed, skipped
 }
+
+// The same job row retried, then stopped or skipped: its earlier failure and its end are one file, so one
+// skipped and no failed. Stop and skip delete the row, and the earlier events of that row have no path in
+// their data.
+func TestRetryThenStopOnTheSameRowCountsAsSkipped(t *testing.T) {
+	s := open(t)
+	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
+	id, _ := s.Enqueue(Job{LibraryID: l.ID, Path: "/m/c.mp4", SizeBefore: 1000})
+	s.Claim("w")
+	s.Fail(id, "convert_failed", "boom")
+	if err := s.Retry(id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RequestStop(id); err != nil {
+		t.Fatal(err)
+	}
+	checkFailedThenEnded(t, s, "stopped")
+}
+
+func TestRetryThenSkipOnTheSameRowCountsAsSkipped(t *testing.T) {
+	s := open(t)
+	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
+	id, _ := s.Enqueue(Job{LibraryID: l.ID, Path: "/m/c.mp4", SizeBefore: 1000})
+	s.Claim("w")
+	s.Fail(id, "convert_failed", "boom")
+	if err := s.Retry(id); err != nil {
+		t.Fatal(err)
+	}
+	s.Claim("w")
+	if err := s.Skip(id, "too small to bother", "too_small"); err != nil {
+		t.Fatal(err)
+	}
+	checkFailedThenEnded(t, s, "skipped")
+}
