@@ -193,20 +193,6 @@ export function SafetySettings() {
     </div>);
 }
 
-// Integrations (SCREENS V9): the server has none yet (Sonarr, Radarr, Plex, Jellyfin, notifications, the update check:
-// 'not available'), so this tab only says so, with design's promise. Nothing here is a control that does nothing.
-export function IntegrationsSettings() {
-  return (
-    <div className="stack">
-      <PageHead icon="i-settings" title="Settings" />
-      <SettingsTabs at="integrations" />
-      <section className="card"><div className="bd stack">
-        <p><strong>Shrink Your Shit sends nothing anywhere unless you turn something on here.</strong></p>
-        <p className="muted">Connections to Sonarr, Radarr, Plex and Jellyfin, notifications and the update check come in a later version. Until then, nothing is sent.</p>
-      </div></section>
-    </div>);
-}
-
 // Backup (SCREENS V9): the server answers backups with 501 not_available for now, so this tab only says so (design's
 // words); no button that can't work.
 export function BackupSettings() {

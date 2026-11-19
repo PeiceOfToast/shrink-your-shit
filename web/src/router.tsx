@@ -20,9 +20,9 @@ export function onLeave(f: (() => void | boolean) | null) {
   beforeLeave = f;
 }
 
-export function navigate(to: string) {
+export function navigate(to: string, replace = false) { // replace: an old address that moved (no Back step to it)
   if (beforeLeave?.() === false) return;
-  history.pushState(null, "", BASE + to);
+  history[replace ? "replaceState" : "pushState"](null, "", BASE + to);
   here = location.pathname + location.search;
   window.scrollTo(0, 0);
   notify();
