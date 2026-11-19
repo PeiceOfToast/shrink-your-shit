@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
 
 func apiChecker(ex *media.FakeExec, free uint64) *Checker {
@@ -66,7 +67,12 @@ func TestDoctorPassedEncoderIsTimedAndCPUStillConverts(t *testing.T) {
 		t.Skip("the platform's encoder families are checked by GOOS")
 	}
 	c := apiChecker(fakeFFmpeg(true, true, []string{"hevc_qsv"}, map[string]bool{"hevc_qsv": true}), 1<<40)
-	in := APIInput{DataDir: t.TempDir(), Device: func(string) string { return "found" }}
+	in := APIInput{DataDir: t.TempDir(), Device: func(enc string) string {
+		if enc == "hevc_qsv" {
+			return "found"
+		}
+		return "missing"
+	}}
 	d := c.API(context.Background(), in, false)
 	qsv := checkByID(t, d.Checks, "encoder:qsv")
 	if qsv.Status != "ok" || !strings.HasPrefix(qsv.Detail, "Intel Quick Sync encoded a test clip in ") || !strings.HasSuffix(qsv.Detail, " s.") {
@@ -141,7 +147,7 @@ func TestDoctorLibraryChecksHaveTheirOwnIDs(t *testing.T) {
 	c := apiChecker(fakeFFmpeg(true, true, nil, nil), 10<<20) // 10 MB free; needs about 64 MB
 	d := c.API(context.Background(), APIInput{DataDir: t.TempDir(), Libs: []Library{{ID: 7, Name: "Movies", Path: dir}}}, false)
 	space := checkByID(t, d.Checks, "library:7:space")
-	if space.Status != "bad" || !strings.HasPrefix(space.Detail, "Movies: Only") || space.Hint == nil {
+	if space.Status != "bad" || !strings.HasPrefix(space.Detail, "Movies: 0.0 GB free; the largest video here needs ") || space.Hint == nil {
 		t.Errorf("space: %+v", space)
 	}
 	if access := checkByID(t, d.Checks, "library:7:access"); access.Status != "ok" || access.Detail != "Movies: readable and writable." {
@@ -178,5 +184,84 @@ func TestDoctorJSONUsesTheContractKeys(t *testing.T) {
 	b, _ := json.Marshal(ch)
 	if !strings.Contains(string(b), `"hint":null`) {
 		t.Errorf("ok check must carry hint null: %s", b)
+	}
+}
+
+// largestVideo is the size of the biggest video in dir: the conversion gate's need is worker.SpaceNeeded of it.
+func largestVideo(t *testing.T, dir string) int64 {
+	t.Helper()
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var big int64
+	for _, e := range ents {
+		if info, err := e.Info(); err == nil && !e.IsDir() && info.Size() > big {
+			big = info.Size()
+		}
+	}
+	return big
+}
+
+func TestDoctorSpaceTiersFollowTheConversionGate(t *testing.T) {
+	dir := videosIn(t, 1000)
+	need := worker.SpaceNeeded(largestVideo(t, dir))
+	lib := []Library{{ID: 4, Name: "Movies", Path: dir}}
+	for _, tc := range []struct {
+		name   string
+		free   uint64
+		status string
+	}{
+		{"one byte under the gate's need refuses", need - 1, "bad"},
+		{"exactly the need is still under twice it", need, "warn"},
+		{"just under twice the need", 2*need - 1, "warn"},
+		{"twice the need is ok", 2 * need, "ok"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := apiChecker(fakeFFmpeg(true, true, nil, nil), tc.free)
+			d := c.API(context.Background(), APIInput{DataDir: t.TempDir(), Libs: lib}, false)
+			space := checkByID(t, d.Checks, "library:4:space")
+			if space.Status != tc.status {
+				t.Fatalf("status %q, want %q: %+v", space.Status, tc.status, space)
+			}
+			if tc.status == "ok" {
+				return
+			}
+			want := "Movies: " + gb(tc.free) + " free; the largest video here needs " + gb(need) + "."
+			if !strings.Contains(space.Detail, want) || space.Hint == nil {
+				t.Errorf("detail %q, want it to contain %q, with a hint", space.Detail, want)
+			}
+		})
+	}
+}
+
+func TestDoctorRetestDoesNotChangeTheConversionEncoder(t *testing.T) {
+	ex := fakeFFmpeg(true, true, []string{"hevc_qsv"}, map[string]bool{"hevc_qsv": true})
+	c := apiChecker(ex, 1<<40)
+	in := APIInput{DataDir: t.TempDir(), InUse: "libx265"}
+	before := c.API(context.Background(), in, false)
+	after := c.API(context.Background(), in, true)
+	if before.Encoder.Name != "libx265" || after.Encoder.Name != "libx265" {
+		t.Errorf("encoder changed: before %q, after retest %q", before.Encoder.Name, after.Encoder.Name)
+	}
+	if use := checkByID(t, after.Checks, "encoder:in-use"); use.Status != "warn" {
+		t.Errorf("after ?retest=1, in-use should still say the CPU converts: %+v", use)
+	}
+}
+
+func TestDoctorPresentDeviceWithoutEncoderSaysSo(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("no Intel Quick Sync check on macOS")
+	}
+	c := apiChecker(fakeFFmpeg(true, true, nil, nil), 1<<40)
+	in := APIInput{DataDir: t.TempDir(), Device: func(enc string) string {
+		if enc == "hevc_qsv" {
+			return "found"
+		}
+		return "missing"
+	}}
+	ch := checkByID(t, c.API(context.Background(), in, false).Checks, "encoder:qsv")
+	if ch.Status != "warn" || ch.Detail != "Intel Quick Sync is present, but ffmpeg has no hevc_qsv encoder." {
+		t.Errorf("%+v", ch)
 	}
 }

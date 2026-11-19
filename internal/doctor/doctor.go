@@ -40,6 +40,11 @@ type FolderReport struct {
 	Notes      []Issue `json:"notes"`
 	VideoCount int     `json:"videoCount"`
 	TotalBytes int64   `json:"totalBytes"`
+
+	// free and need are the disk's free space and the conversion gate's need for the largest video
+	// (worker.SpaceNeeded), when the disk could be measured: the Doctor's space tiers use them.
+	free, need uint64
+	spaceKnown bool
 }
 
 // Tools is what was found of the converter.
@@ -452,9 +457,12 @@ func (c *Checker) Folder(ctx context.Context, path string) (r FolderReport) {
 	} else if free, err := c.freeSpace(path); err != nil {
 		// Not silent: converting needs to know the space, and stops a file when it cannot.
 		r.Notes = append(r.Notes, Issue{Code: "space_unknown", Message: "We couldn't check how much space is free on this disk. Files here are only converted when there is room, so check that the disk is working."})
-	} else if need := worker.SpaceNeeded(largest); free < need {
-		r.Blockers = append(r.Blockers, Issue{Code: "low_space", Message: fmt.Sprintf(
-			"Only %s free on this disk. Free up space (about %s is enough to start), then press Check again.", gb(free), gb(need))})
+	} else {
+		r.free, r.need, r.spaceKnown = free, worker.SpaceNeeded(largest), true
+		if free < r.need {
+			r.Blockers = append(r.Blockers, Issue{Code: "low_space", Message: fmt.Sprintf(
+				"Only %s free on this disk. Free up space (about %s is enough to start), then press Check again.", gb(free), gb(r.need))})
+		}
 	}
 	tools := c.Tools(ctx)
 	if !tools.Converts() {

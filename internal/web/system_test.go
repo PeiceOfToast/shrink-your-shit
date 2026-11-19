@@ -182,8 +182,8 @@ func TestV2DoctorServesTheContractShape(t *testing.T) {
 		t.Errorf("%+v", d)
 	}
 	for _, c := range d.Checks {
-		if (c.Status == "ok") != (c.Hint == nil) && c.Status == "bad" {
-			t.Errorf("a failed check needs a hint, an ok one none: %+v", c)
+		if (c.Status == "ok" && c.Hint != nil) || (c.Status == "bad" && c.Hint == nil) {
+			t.Errorf("a bad check needs a hint, an ok one none: %+v", c)
 		}
 	}
 	if !strings.Contains(body, `"hint":null`) || !strings.Contains(body, `"encodersTestedAt"`) {

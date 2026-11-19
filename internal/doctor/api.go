@@ -182,7 +182,11 @@ func encoderChecks(in APIInput, probes map[string]Probe, inUse string) []DoctorC
 			out = append(out, DoctorCheck{ID: id, Label: label, Status: "bad",
 				Detail: fmt.Sprintf("%s is present but the test encode failed: %s", word, p.Err), Hint: hint(encoderHints[fam])})
 		default:
-			out = append(out, DoctorCheck{ID: id, Label: label, Status: "warn", Detail: notFoundWords[fam]})
+			detail := notFoundWords[fam]
+			if device == "found" { // the device is there; ffmpeg just has no encoder for it
+				detail = word + " is present, but ffmpeg has no " + enc + " encoder."
+			}
+			out = append(out, DoctorCheck{ID: id, Label: label, Status: "warn", Detail: detail})
 		}
 	}
 	cpu := "Conversions use the " + cpuWords["libx265"] + "."
@@ -232,6 +236,9 @@ func (c *Checker) libraryChecks(ctx context.Context, l Library) []DoctorCheck {
 			if is.Code == "no_converter" || is.Code == "no_hw_encoder" { // reported by the tool checks
 				continue
 			}
+			if is.Code == "low_space" { // the space tiers below say it, with the gate's own numbers
+				continue
+			}
 			status := "warn"
 			if bad {
 				status = "bad"
@@ -255,6 +262,20 @@ func (c *Checker) libraryChecks(ctx context.Context, l Library) []DoctorCheck {
 	}
 	add(r.Blockers, true)
 	add(r.Notes, false)
+	if r.spaceKnown && r.free < 2*r.need { // the conversion gate's need: bad where it refuses, warn below twice that
+		st := "warn"
+		if r.free < r.need {
+			st = "bad"
+		}
+		s := slots["space"]
+		if rank[st] > rank[s.status] {
+			s.status = st
+		}
+		if s.detail != "" {
+			s.detail += " "
+		}
+		s.detail += fmt.Sprintf("%s: %s free; the largest video here needs %s.", l.Name, gb(r.free), gb(r.need))
+	}
 	out := make([]DoctorCheck, 0, 3+len(extra))
 	for _, key := range []string{"access", "space", "hardlinks"} {
 		s := slots[key]
