@@ -69,3 +69,50 @@ func TestDeletedConvertedFileLeavesTheOverview(t *testing.T) {
 			now, bytesBefore.BytesBefore, c.FreedBytes, c.WaitingBytes, c.GoneBytes)
 	}
 }
+
+// The freed case: a replaced file with nothing kept (no original in the trash), whose converted file is then
+// deleted. Its saving is freed already; the bytes still in bytesNow must go too, so bytesNow is 0.
+func TestDeletedReplacedFileWithNothingKeptLeavesTheOverview(t *testing.T) {
+	s, st, lib, _ := setup(t, h264Big)
+	if n := settle(s); n != 1 {
+		t.Fatalf("queued %d, want 1", n)
+	}
+	libs, err := st.Libraries()
+	if err != nil || len(libs) != 1 {
+		t.Fatalf("libraries %v, %v", libs, err)
+	}
+	l := libs[0]
+	a := filepath.Join(lib, "a.mkv")
+
+	id, err := st.Claim("w")
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(a, []byte("ab"), 0o644)
+	if err := st.Complete(id.ID, a, 2); err != nil {
+		t.Fatal(err)
+	}
+	settle(s)
+	before, _ := st.TotalsOf()
+	lt, _ := st.LibraryTotalsOf(l)
+	if got := before.Counts[l.ID].FreedBytes; got != 3 {
+		t.Fatalf("freed before the delete %d, want 3 (5 - 2)", got)
+	}
+	if now := jobs.BytesNow(lt, before.Counts[l.ID]); now != 2 {
+		t.Fatalf("bytesNow before the delete %d, want 2", now)
+	}
+
+	if err := os.Remove(a); err != nil {
+		t.Fatal(err)
+	}
+	settle(s)
+	after, _ := st.TotalsOf()
+	c := after.Counts[l.ID]
+	if now := jobs.BytesNow(lt, c); now != 0 {
+		t.Errorf("bytesNow after the delete %d, want 0 (BytesBefore %d, freed %d, waiting %d, gone %d)",
+			now, lt.BytesBefore, c.FreedBytes, c.WaitingBytes, c.GoneBytes)
+	}
+	if c.FreedBytes != 3 {
+		t.Errorf("freed after the delete %d, want 3: the saved history does not change", c.FreedBytes)
+	}
+}
