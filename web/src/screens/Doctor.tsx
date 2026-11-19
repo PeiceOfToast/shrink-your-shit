@@ -1,6 +1,6 @@
 // Settings > Health (user item 10; contract "Doctor"): every check with OK / Warning / Fail, its one sentence and, when
 // something needs doing, the fix (a sentence, so no Copy button: design). Check again re-runs the fast checks; Test encoders again runs the
-// test encodes too (up to ~15 s). It reports only; it changes nothing. Open before the first run (App.tsx), linked from
+// test encodes too (up to ~15 s). It changes no settings; Test encoders again also refreshes which encoder conversions use. Open before the first run (App.tsx), linked from
 // the first-run page and from the Dashboard when a check fails.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
@@ -51,7 +51,7 @@ export function HealthSettings() {
     <div className="stack">
       <PageHead icon="i-settings" title="Settings" />
       <SettingsTabs at="health" />
-      <p className="muted" style={{ margin: 0 }}>Checks that this computer can convert your files. It only looks; it changes nothing.</p>
+      <p className="muted" style={{ margin: 0 }}>Checks that this computer can convert your files. It changes no settings. Fixed an encoder? Test encoders again, and the next conversion uses it.</p>
       {notHere ? <p className="muted">This server can't run the health checks yet.</p>
         : error && !d ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{error.message}</span></p>
           : !d ? <div className="empty" role="status">Checking…</div>
