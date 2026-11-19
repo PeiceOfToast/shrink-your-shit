@@ -545,6 +545,7 @@ if [ "$OS" = linux ]; then
   if [ -n "$LIBS" ] && { [ -n "$FLAG_LIBS" ] || [ -n "${SYP_LIBRARIES:-}" ] || ! haskv SYP_LIBRARIES; }; then setkv SYP_LIBRARIES "$LIBS"; fi
   if [ -n "$ADDR" ] || ! haskv SYP_ADDR; then setkv SYP_ADDR "$PORT_ADDR"; fi
   haskv SYP_DATA || setkv SYP_DATA "$DATA_DIR"
+  setkv SYP_INSTALL script # how the update notice says to update (internal/update InstallType)
   PORT_ADDR=$(sed -n 's/^SYP_ADDR=//p' "$newenv" | tail -n 1)
   PORT=${PORT_ADDR##*:}
   $SUDO mkdir -p "$(dirname "$ENV_FILE")"   # Alpine has no /etc/default
@@ -724,6 +725,7 @@ cat > "$PLIST" <<PL
     <key>SYP_LIBRARIES</key><string>$(esc "$LIBS")</string>
     <key>SYP_ADDR</key><string>$(esc "$PORT_ADDR")</string>
     <key>SYP_DATA</key><string>$(esc "$DATA_DIR")</string>
+    <key>SYP_INSTALL</key><string>script</string>
     <key>PATH</key><string>$(esc "$FFDIR"):/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
   </dict>
   <key>RunAtLoad</key><true/>

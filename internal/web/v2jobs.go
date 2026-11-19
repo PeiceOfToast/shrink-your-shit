@@ -311,7 +311,7 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 
 // v2JobItem is a Files item in the contract's Job terms: its state (spec 7), sub-state and progress.
 func v2JobItem(store *jobs.Store, it map[string]any, row jobs.FileRow, card string) map[string]any {
-	it["origin"] = "job"
+	it["origin"], it["warning"] = "job", nil
 	// ui-shop's First/Last chip reads pin from the row; priority is the job's place among the unpinned (its
 	// library's, for a pinned one), never the reserved numbers that keep a pin
 	it["priority"], it["pin"] = row.Priority, nil
@@ -363,6 +363,8 @@ func v2JobItem(store *jobs.Store, it map[string]any, row jobs.FileRow, card stri
 		it["progress"] = v2Progress(it["state"].(string), row.JobID, pct)
 	case jobs.CardProcessed:
 		it["state"], it["subState"] = "completed", nil
+		steps, _ := store.Steps(row.JobID) // the list flags a file a graphics encoder failed on (ui-shop 11-19)
+		it["warning"] = encoderWarning(steps)
 	case jobs.CardFailed:
 		it["state"], it["subState"] = "failed", nil
 	case jobs.CardSkipped:
