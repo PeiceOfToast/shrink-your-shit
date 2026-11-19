@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
-import { bytes, count } from "../format";
+import { bytes, clock, count, encoderName, plural } from "../format";
 import { getSummary, scanAllLibraries } from "../dashApi";
 import { onLive } from "../live";
 import { PageHead } from "../PageHead";
@@ -113,6 +113,10 @@ export function Overview() {
         <button className="btn sm ghost" type="button" onClick={() => (MOCK ? scanAll() : act(scanAllLibraries()))}><Icon id="i-refresh" />Scan all libraries</button>
       </PageHead>
       {said && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{said}</span></p>}
+      {v.encoderFallbacks?.map((f) => <div key={f.workerId} className="note warn"><Icon id="i-alert" /><div>
+        <b>{f.worker}'s graphics encoder ({encoderName(f.encoder)}) failed {f.count === 1 ? "once" : plural(f.count, "time", "times")} today.</b>{" "}
+        {f.pausedUntil ? <>It converts on the processor until {clock(f.pausedUntil)}, which is slower. <Link to="/settings/about">Health checks</Link></> : "Those files were converted on the processor instead, which is slower."}
+      </div></div>)}
       <section className="headline" aria-label="Totals">
         <div><div className="big">{h.freed > 0 ? <>{bytes(h.freed)}<small>saved</small></> : "Nothing saved yet"}</div>{more && <div className="muted">{more}</div>}
           {/* design SCREENS V2 Space rules: neutral, on its own line, only when > 0; never added to or taken from the figures */}
