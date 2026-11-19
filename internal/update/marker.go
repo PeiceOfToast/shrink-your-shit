@@ -19,6 +19,9 @@ import (
 
 const markerFile, resultFile = "update.json", "update-result.json"
 
+// updateDir (in the data folder) holds what a Windows update needs while it runs: the installers and the watcher.
+const updateDir = "update"
+
 // RolledBackDB is where RestoreDB keeps the database it replaced (the app's database is syp.db).
 const RolledBackDB = "syp.db.rolled-back"
 
@@ -50,6 +53,11 @@ type Result struct {
 // WriteMarker saves m in dataDir.
 func WriteMarker(dataDir string, m Marker) error {
 	return writeJSON(filepath.Join(dataDir, markerFile), m)
+}
+
+// WriteResult saves r as the result the app shows.
+func WriteResult(dataDir string, r Result) error {
+	return writeJSON(filepath.Join(dataDir, resultFile), r)
 }
 
 // RemoveMarker deletes the marker (an update that failed before the program was swapped).
@@ -95,6 +103,9 @@ func Settle(dataDir string, m *Marker, version string, now time.Time) (Result, e
 	default:
 		r.To = m.To
 		r.Message = fmt.Sprintf("Update to %s failed; rolled back to %s", m.To, version)
+		if msg := watcherFailure(dataDir, m); msg != "" {
+			r.Message = msg // the watcher wrote the detail (what failed, what was put back): keep it
+		}
 	}
 	if m.DataRestored {
 		r.Message += "; changes made since the update were undone (kept in " + RolledBackDB + ")"
@@ -103,6 +114,16 @@ func Settle(dataDir string, m *Marker, version string, now time.Time) (Result, e
 		return r, err
 	}
 	return r, RemoveMarker(dataDir)
+}
+
+// watcherFailure is the message the watcher wrote when this update failed, or "" when there is none. Only a
+// failure for the same update, written after it started, counts: an older result must not be shown.
+func watcherFailure(dataDir string, m *Marker) string {
+	prev := LastResult(dataDir)
+	if prev == nil || prev.OK || prev.Kind != "update" || prev.From != m.From || prev.To != m.To || prev.Message == "" || prev.At.Before(m.At) {
+		return ""
+	}
+	return prev.Message
 }
 
 // RestoreDB puts the backup in place of the database at db. The database it replaces is kept as

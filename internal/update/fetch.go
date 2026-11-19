@@ -19,8 +19,9 @@ import (
 	"strings"
 )
 
-// ReleaseBase is where release files are downloaded from: <base>/v<version>/<file>.
-const ReleaseBase = "https://github.com/PeiceOfToast/shrink-your-shit/releases/download"
+// ReleaseBase is where release files are downloaded from: <base>/v<version>/<file>. A var, so a test build can
+// point it at a local release server with -ldflags "-X .../internal/update.ReleaseBase=...".
+var ReleaseBase = "https://github.com/PeiceOfToast/shrink-your-shit/releases/download"
 
 // maxDownload caps an archive or checksums.txt (a release archive is about 30 MB).
 const maxDownload = 512 << 20

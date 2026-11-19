@@ -7,6 +7,8 @@ import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, count, encoderName, plural } from "../format";
 import { getSummary, scanAllLibraries } from "../dashApi";
+import { getDoctor } from "../doctorApi";
+const HEALTH_HIDDEN = "syp-health-dismissed"; // the failed checks the Dismiss was for
 import { onLive } from "../live";
 import { PageHead } from "../PageHead";
 import { Link } from "../router";
@@ -73,6 +75,12 @@ export function Overview() {
   // review 61dc891 P2-2: the workers (count, switch and rows) come from GET /api/v2/workers, the Workers page's source,
   // which has remote workers too; the overview's own worker entries add their files' progress
   const wl = useData(listWorkers, [], 15000);
+  const doc = useData(() => getDoctor(), [], 300000); // a Fail shows a line linking to Settings > Health; no answer, no line
+  // Dismiss hides it until the failed checks change (design V9h): an encoder Fail can stay for good while the CPU converts
+  const failedNow = (doc.data?.checks ?? []).filter((c) => c.status === "bad"), failKey = failedNow.map((c) => c.id + ":" + c.detail).join("|");
+  const [hidKey, setHidKey] = useState(() => { try { return localStorage.getItem(HEALTH_HIDDEN) ?? ""; } catch { return ""; } });
+  const hideHealth = () => { setHidKey(failKey); try { localStorage.setItem(HEALTH_HIDDEN, failKey); } catch { /* hidden for this visit only */ }
+    const h = document.querySelector<HTMLElement>(".pagehead h1"); if (h) { h.tabIndex = -1; h.focus(); } }; // the button goes away: focus the heading, as Workers does
   const o = useData(getOverview, [], 15000), sum = useData<{ last24h: { failed: number } }>(() => (MOCK ? Promise.resolve(summary(mockState())) : getSummary()), [], 30000);
   const [live, setLive] = useState<Record<string, Partial<OverviewJob>>>({}), [said, setSaid] = useState("");
   const reload = useRef(o.reload); reload.current = () => (o.reload(), wl.reload());
@@ -113,6 +121,9 @@ export function Overview() {
         <button className="btn sm ghost" type="button" onClick={() => (MOCK ? scanAll() : act(scanAllLibraries()))}><Icon id="i-refresh" />Scan all libraries</button>
       </PageHead>
       {said && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{said}</span></p>}
+      {failedNow.length > 0 && failKey !== hidKey && <div className="note bad"><Icon id="i-alert" /><div style={{ flex: 1 }}>
+        <b>{failedNow.length === 1 ? "A health check failed" : plural(failedNow.length, "health check", "health checks") + " failed"}:</b> {failedNow[0].detail} <Link to="/settings/health">Open Health</Link>
+      </div><button className="btn sm ghost" type="button" onClick={hideHealth}>Dismiss</button></div>}
       {v.encoderFallbacks?.map((f) => <div key={f.workerId} className="note warn"><Icon id="i-alert" /><div>
         <b>{f.worker}'s graphics encoder ({encoderName(f.encoder)}) failed {f.count === 1 ? "once" : plural(f.count, "time", "times")} today.</b>{" "}
         {f.pausedUntil ? <>It converts on the processor until {clock(f.pausedUntil)}, which is slower. <Link to={"/workers/" + encodeURIComponent(f.workerId) + "?tab=capabilities"}>Test the encoders</Link></> : (f.count === 1 ? "That file was" : "Those files were") + " converted on the processor instead, which is slower."}

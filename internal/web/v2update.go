@@ -44,7 +44,16 @@ type updater struct {
 func newUpdater(ss *settingsStore, eng Engine) *updater {
 	return &updater{ck: &update.Checker{Store: ss.store, Current: eng.Version}, ss: ss, dataDir: eng.DataDir,
 		installType: func() string { return update.InstallType(eng.Version, runtime.GOOS, update.DetectEnv()) },
-		goos:        runtime.GOOS, helper: update.Helper{}, poll: 5 * time.Second, now: time.Now}
+		goos:        runtime.GOOS, helper: updateHelperFor(eng), poll: 5 * time.Second, now: time.Now}
+}
+
+// updateHelperFor installs an update here: syp-update-helper's client on Linux, the Windows installer (which
+// starts the watcher) on Windows.
+func updateHelperFor(eng Engine) updateHelper {
+	if runtime.GOOS == "windows" {
+		return update.NewWindowsInstaller(eng.DataDir, eng.Version)
+	}
+	return update.Helper{}
 }
 
 // v2Update is the update notice and the update itself. GET /api/v2/update is the last check, kept (it asks
@@ -99,6 +108,10 @@ func (u *updater) method() (string, *update.HelperAnswer) {
 			}
 		}
 		return "commands", nil
+	case "windows":
+		if u.goos == "windows" { // the button starts the installer; rollback is automatic only (Previous stays false)
+			return "helper", &update.HelperAnswer{State: "idle"}
+		}
 	}
 	return "none", nil
 }

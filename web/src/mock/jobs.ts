@@ -118,6 +118,8 @@ export function mockJob(id: string): JobDetail | null {
       ...(j.id === "48160" ? [{ step: "encoder_fallback", at: at(30), ok: false, words: FELL }] : []),
       ...(j.state === "completed" ? [{ step: "converted", at: at(12), ok: true, words: "Converted: HEVC · 8-bit · MKV." }, { step: "verified", at: at(11), ok: true, words: "Every check passed: the new file is complete, plays cleanly and looks like the original." }] : []),
       ...(j.id === "48165" || j.id === "48160" ? [{ step: "media_refresh", at: at(10), ok: false, words: j.id === "48160" ? NOT_TOLD.replace("Sonarr", "Radarr") : NOT_TOLD }] : []),
+      // contract "Plex / Jellyfin": one media_refresh step per app; a told one is ok (the words are the server's)
+      ...(j.id === "48165" ? [{ step: "media_refresh", at: at(10), ok: true, words: "Told Plex (Home) to scan the folder" }] : []),
       ...(j.state === "failed" && j.id === "48190" ? [{ step: "converted", at: at(12), ok: false, words: "The new file is 4 s shorter than the original. The original is kept." }] : []),
       ...(j.state === "failed" && j.id === "48191" ? [{ step: "converted", at: at(12), ok: false, words: "There isn't enough free space to write the new file. About 571 MB is needed, 101 MB is free." }] : []),
       ...(j.state === "failed" && j.id === "failed-replace" ? [{ step: "found", at: at(300), ok: true, words: "Found in /media/home/Failed Saves." }, { step: "checked", at: at(100), ok: true, words: "To be converted: H.264 at 8000 kbps." }, { step: "converted", at: at(15), ok: true, words: "Converted: HEVC · 8-bit · MKV." }, { step: "verified", at: at(14), ok: true, words: "Every check passed." }, { step: "saved", at: at(13), ok: false, words: "Saving in place failed: permission denied." }] : [])],

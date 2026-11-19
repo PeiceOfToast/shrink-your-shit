@@ -194,20 +194,6 @@ export function SafetySettings() {
     </div>);
 }
 
-// Backup (SCREENS V9): the server answers backups with 501 not_available for now, so this tab only says so (design's
-// words); no button that can't work.
-export function BackupSettings() {
-  return (
-    <div className="stack">
-      <PageHead icon="i-settings" title="Settings" />
-      <SettingsTabs at="backup" />
-      <section className="card"><div className="bd stack">
-        <p><strong>This backs up settings, not your videos.</strong></p>
-        <p className="muted">Exporting your settings and workflows, and importing them with a preview of what changes, come in a later version.</p>
-      </div></section>
-    </div>);
-}
-
 // Updates (SCREENS:293, About block): the #324 switch, off until the person turns it on, and the version line.
 const SENT = "Once a day it asks GitHub which version is newest. GitHub sees this app's version and your IP address, as with any web request. Nothing about your files or settings is sent. Checking installs nothing.";
 const at = (t: string) => `${day(t)}, ${new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
@@ -319,21 +305,13 @@ function Install({ d, reload, check }: { d: UpdateNotice; reload: () => void; ch
   </>);
 }
 
-// About (SCREENS V9: version, health report, licences): the old Settings > System's health checks and log lines.
-const BADGE: Record<string, [string, string]> = { ok: ["ok", "OK"], warn: ["warn", "Heads up"], bad: ["bad", "Fix this"] };
+// About (SCREENS V9: version, log lines, updates, licences). The health checks have their own tab (Doctor.tsx).
 export function AboutSettings() {
   const h = useData(getHealth, []);
   return (
     <div className="stack">
       <PageHead icon="i-settings" title="Settings" />
       <SettingsTabs at="about" />
-      <section className="card" aria-labelledby="hc-h"><div className="hd"><h2 id="hc-h">Health checks</h2><span className="sp" /><button className="btn sm" type="button" onClick={h.reload}>Check again</button></div>
-        <div className="bd stack">
-          {!h.data ? <p className="muted" role="status">{h.error?.message ?? "Checking..."}</p> : <>
-            <ul className="stack" style={{ listStyle: "none", padding: 0, margin: 0 }} aria-live="polite" aria-label="Health checks">
-              {h.data.checks.map((c) => { const [cls, word] = BADGE[c.status] ?? BADGE.warn; return <li key={c.id} className="row nw" style={{ alignItems: "baseline", gap: 8 }}><span className={"pill " + cls}>{word}</span><span>{c.label}{c.detail ? ". " + c.detail : ""}</span></li>; })}</ul>
-            </>}
-        </div></section>
       <section className="card" aria-labelledby="log-h"><div className="hd"><h2 id="log-h">Recent log lines</h2></div>
         <div className="bd"><pre className="mono sm" tabIndex={0} role="region" aria-labelledby="log-h" style={{ overflow: "auto", maxHeight: "16rem", margin: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{h.data ? (h.data.logsTail.length ? h.data.logsTail.join("\n") : "Nothing has been logged yet.") : ""}</pre></div></section>
       <Updates version={h.data?.version} />
