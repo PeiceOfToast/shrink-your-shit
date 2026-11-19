@@ -58,6 +58,18 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 			apiError(w, http.StatusBadRequest, "invalid", "sort is queue, or left out.")
 			return
 		}
+		switch q.Get("kept") { // completed only: the files whose original is still kept (Original still kept)
+		case "", "0":
+		case "1":
+			if tab != "completed" {
+				apiError(w, http.StatusBadRequest, "invalid", "kept=1 is for the completed tab.")
+				return
+			}
+			f.Kept = true
+		default:
+			apiError(w, http.StatusBadRequest, "invalid", "kept is 1, or left out.")
+			return
+		}
 		f.Path = q.Get("path")                       // a file's jobs (user review 11-13 item E): per tab, the UI asks each one
 		if reason := q.Get("reason"); reason != "" { // failures with one design code
 			if _, _, ok := jobs.ReasonCondition(reason); !ok {
