@@ -244,7 +244,7 @@ func (s *Service) events() {
 		}
 		name := "A file"
 		if j, err := s.st.Get(e.JobID); err == nil {
-			name = filepath.Base(j.Path)
+			name = jobs.LastName(j.Path)
 		}
 		switch e.To {
 		case "failed":
@@ -268,8 +268,7 @@ func withoutFolders(text string) string {
 		if !namesAPath(w) {
 			return w
 		}
-		t := strings.TrimRight(w, `/\`)
-		return t[strings.LastIndexAny(t, `/\`)+1:]
+		return jobs.LastName(w)
 	})
 }
 
