@@ -94,10 +94,10 @@ was extracted and run by the CI test.
   a fake ffmpeg). Includes: the Windows replace-retry against a genuinely locked file, SQLite on
   a Windows path, UNC and long paths, Ctrl+C on Windows.
 - `install.sh` on **macOS** (launchd agent, Homebrew, quarantine flag), on Fedora/Arch/Alpine/openSUSE
-  package managers, downloading from real GitHub release URLs (no release exists yet), and
-  inside a real Proxmox LXC.
-- The two release workflows (`release-binaries.yml`, `release-image.yml`) on GitHub: they have
-  only been linted with `actionlint` and their steps run by hand.
+  package managers. (The one-line install from the real v0.1.1 release was run on fresh Debian 13,
+  Ubuntu 24.04 and Ubuntu 26.04 Proxmox LXCs on 2026-11-19: install, ffmpeg, service after a reboot
+  and upgrade in place on all three, converting a clip on Debian 13, the README's uninstall steps on
+  Ubuntu 24.04.)
 - Every Proxmox step in `docs/proxmox.md`: LXC bind mounts and the UID shift, running the
   service in an unprivileged LXC, Docker inside an LXC (nesting/keyctl), Proxmox's OCI image
   import.
@@ -190,8 +190,6 @@ only a folder holding nothing but our regular temp file is removed).
 - Failed jobs are not retried automatically (manual Retry button).
 - Subtitle/attachment copying relies on keeping the input's container; data streams are dropped.
 - `go test -race` has not been run (needs cgo).
-- No release has been published: the release workflows exist but no version tag has been pushed, so
-  the installer has nothing to download and the GHCR package does not exist (and will start private).
 
 ## Planned next
 

@@ -157,7 +157,10 @@ emulation was available when this was written), the release workflow
 (`release-image.yml`; it has been through `actionlint` only, and has never run on GitHub),
 and pulling the image from `ghcr.io`.
 
-**Not checked** (no Proxmox host was available): the installer inside a real Proxmox LXC, the
-Proxmox mount and permission steps, running Docker inside an LXC, Proxmox's OCI import, the
-installer's downloading from GitHub (it was tested against a locally served copy of a release;
-no release exists yet), and Fedora/Arch/Alpine/openSUSE package installs and macOS (never run).
+**Checked** (2026-11-19): the one-line installer with the published v0.1.1 release inside fresh,
+unprivileged Debian 13, Ubuntu 24.04 and Ubuntu 26.04 LXCs (`nesting=1`): install, ffmpeg, service
+after a reboot and upgrade in place on all three; converting a clip on Debian 13; the README's
+uninstall steps on Ubuntu 24.04. The templates have no `curl`: install it first.
+
+**Not checked:** the Proxmox mount and permission steps, running Docker inside an LXC, Proxmox's OCI
+import, and Fedora/Arch/Alpine/openSUSE package installs and macOS (never run).

@@ -34,14 +34,19 @@ address that already carries it (see [Signing in](#signing-in)):
 curl -fsSL https://raw.githubusercontent.com/PeiceOfToast/shrink-your-shit/main/install.sh | sh -s -- --library /path/to/videos --addr 0.0.0.0:8484
 ```
 
+The program runs as the user `syp`, which must be able to write in the videos folder, or converting
+stops with "not allowed to write in this folder" (your originals are not touched). The installer warns
+when it can't; fix it with `sudo chown -R syp:syp /path/to/videos` (or give `syp` group write access).
+
 On macOS the service is a login item (a launchd agent), so the installer must be run in a
 normal desktop session (Terminal.app), not over plain SSH; the service then starts at login.
 The program is unsigned: macOS or Windows may warn the first time it runs.
 
-> **Not working yet:** the installer downloads a published release, and none has been
-> published. Until the first release exists the Linux/macOS installer stops with "could not
-> download" and the Windows download link gives a "not found" page; use the manual steps below
-> instead. The macOS installer has never been run on a Mac. The Windows installer passed an automated
+The one-line command needs `curl`. Minimal Debian and Ubuntu containers (including the Proxmox
+templates) come without it: install it first with `apt-get install -y curl` (as root, or with `sudo`).
+
+> **Tested so far:** the Linux installer was run on fresh Debian 13, Ubuntu 24.04 and Ubuntu 26.04
+> containers. The macOS installer has never been run on a Mac. The Windows installer passed an automated
 > silent install / convert a video / upgrade / uninstall test on a GitHub Windows runner, but it has
 > **not** been tried on a real PC.
 
@@ -139,6 +144,30 @@ and address again:
 Settings can make a new token, which signs out every other browser. Scripts send the token as
 `Authorization: Bearer <token>`. There is no HTTPS, so the token crosses the network in plain text:
 use it on a network you trust, never on the internet.
+
+## Uninstalling
+
+**Linux:** stop the service and remove what the installer put in place:
+
+```
+sudo systemctl disable --now shrink-your-shit syp-network-helper
+sudo rm -f /etc/systemd/system/shrink-your-shit.service /etc/systemd/system/syp-network-helper.service \
+  /etc/default/shrink-your-shit /usr/local/bin/shrink-your-shit
+sudo rm -rf /usr/local/libexec/shrink-your-shit /run/shrink-your-shit
+sudo systemctl daemon-reload
+```
+
+Your videos are not touched, and neither are the kept originals in each library's `.syp-trash` folder. The job database and settings stay in `/var/lib/shrink-your-shit`;
+remove them with `sudo rm -rf /var/lib/shrink-your-shit` and the service user with `sudo userdel syp`.
+Network shares the app connected are mounted in `/mnt` (and older ones in `/var/lib/syp/shares`): they
+stay mounted until the next restart. `sudo rmdir /var/lib/syp/shares /var/lib/syp` removes the empty
+share folders and refuses while anything is still in them. ffmpeg, curl, cifs-utils and nfs-common stay
+installed, since other programs may use them.
+
+**macOS:** `launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/dev.shrink-your-shit.plist`, then delete
+that file and `~/.local/bin/shrink-your-shit`. The data is in `~/Library/Application Support/shrink-your-shit`. (Not yet tried on a Mac.)
+
+**Windows:** Settings > Apps (see [Install](#install-one-step)).
 
 ## Checking the setup
 
