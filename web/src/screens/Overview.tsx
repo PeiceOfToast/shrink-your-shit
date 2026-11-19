@@ -105,7 +105,7 @@ export function Overview() {
   const tot = { done: add((d) => d.completed), skipped: add((d) => d.skipped), failed: add((d) => d.failed), freed: add((d) => d.freedBytes), saved: add((d) => d.savedBytes ?? 0), waiting: add((d) => d.waitingBytes ?? 0) };
   const split = rec.some((d) => d.savedBytes != null), load = rows.some((w) => w.cpuPercent != null || w.gpuPercent != null);
   const workerOf = (id: string) => rows.find((w) => w.jobs.some((j) => j.jobId === id))?.name;
-  const more = [h.waitingToFree > 0 && bytes(h.waitingToFree) + " more" + (h.nextFreeAt ? " by " + dayName(h.nextFreeAt.slice(0, 10)) : ""), h.couldFree > 0 && "could free " + bytes(h.couldFree) + " if you remove the originals"].filter(Boolean).join(" · ");
+  const more = [h.waitingToFree > 0 && bytes(h.waitingToFree) + (h.freed > 0 ? " more" : " to free") + (h.nextFreeAt ? " by " + dayName(h.nextFreeAt.slice(0, 10)) : ""), h.couldFree > 0 && "could free " + bytes(h.couldFree) + " if you remove the originals"].filter(Boolean).join(" · ");
   return (
     <div className="stack ov">
       <PageHead icon="i-dashboard" title="Dashboard">
@@ -114,7 +114,7 @@ export function Overview() {
       </PageHead>
       {said && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{said}</span></p>}
       <section className="headline" aria-label="Totals">
-        <div><div className="big">{bytes(h.freed)}<small>saved</small></div>{more && <div className="muted">{more}</div>}
+        <div><div className="big">{h.freed > 0 ? <>{bytes(h.freed)}<small>saved</small></> : "Nothing saved yet"}</div>{more && <div className="muted">{more}</div>}
           {/* design SCREENS V2 Space rules: neutral, on its own line, only when > 0; never added to or taken from the figures */}
           {(h.grew ?? 0) > 0 && <div className="muted sm">{bytes(h.grew!)} added by files that came out bigger</div>}</div>
         <div className="stats">
