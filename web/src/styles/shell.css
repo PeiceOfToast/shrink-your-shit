@@ -626,9 +626,9 @@ body{font-variant-numeric:tabular-nums} /* [taste: tabular numerals in anything 
 p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; .st stays one line in pills and table cells */
 @media (max-width:600px){
   nav.tabs[aria-label="Settings sections"]{flex-wrap:nowrap;overflow-x:auto;row-gap:0} /* pass 5 #4: Settings tabs are one row that scrolls sideways below 600 px */
-  .choice .row{column-gap:8px} /* pass 5 #4: at phone width the four Text size radios fit one row, so "130%" doesn't wrap alone */
+  .field.choice>.row{column-gap:8px} /* pass 5 #4: at phone width the four Text size radios fit one row, so "130%" doesn't wrap alone */
 }
-.choice .radio{white-space:nowrap} /* pass 5 #4: "130%" stays with its radio, it doesn't wrap alone */
+.field.choice>.row>.radio{white-space:nowrap} /* pass 5 #4: "130%" stays with its radio. Only the Appearance choices (short labels); the setup and Stop radios carry sentence hints that must wrap */
 /* user item 2 (design 7.2): the "Workers on" switch, its question on its own row, Add a worker, flat worker rows */
 .sw{display:inline-flex;align-items:center;gap:10px;min-height:44px;cursor:pointer}
 .sw b{font-weight:var(--fw-strong)}
