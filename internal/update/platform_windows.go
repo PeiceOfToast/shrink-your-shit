@@ -5,7 +5,6 @@
 package update
 
 import (
-	"errors"
 	"fmt"
 	"os/exec"
 	"syscall"
@@ -45,16 +44,12 @@ func stopChildren(pid, keep int) error {
 			kids = append(kids, int(e.ProcessID))
 		}
 	}
+	// A walk that failed partway still ends the children it found; its error is reported after them.
+	var walkErr error
 	if err != windows.ERROR_NO_MORE_FILES {
-		return err
+		walkErr = err
 	}
-	var errs []error
-	for _, k := range kids {
-		if err := stopProcess(k); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
+	return endChildren(kids, walkErr, stopProcess)
 }
 
 // stopProcess ends one process and waits for it to exit. It is not a tree kill: the watcher is the app's child,
