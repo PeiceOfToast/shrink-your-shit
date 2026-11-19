@@ -78,8 +78,10 @@ func nameOf(col string) string {
 // newestJobOf is SQL true for the newest job (table t) of its library and path. A file that failed and was
 // then given a newer job (a retry made by a workflow change) counts as its newest job only, so a failure
 // counts while it is the file's latest job, once per file.
+// It is an uncorrelated subquery (the newest id of each path and library, NULL library included), so SQLite
+// evaluates it once per statement rather than once per row.
 func newestJobOf(t string) string {
-	return `NOT EXISTS (SELECT 1 FROM jobs later WHERE later.path=` + t + `.path AND later.library_id IS ` + t + `.library_id AND later.id>` + t + `.id)`
+	return t + `.id IN (SELECT MAX(id) FROM jobs GROUP BY path, library_id)`
 }
 
 // jobWhere is each job card's condition.

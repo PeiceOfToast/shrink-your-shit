@@ -472,6 +472,10 @@ ALTER TABLE shares ADD COLUMN mount_point TEXT NOT NULL DEFAULT '';`},
 	// those rows stay NULL and count on no day, as before.
 	{48, "scan skip decision time", `
 ALTER TABLE files ADD COLUMN decided_at TEXT;`},
+	// The failed counts find each file's newest job (MAX(id) per path and library) without reading every job
+	// once per file: this index makes that one pass over the index.
+	{49, "jobs newest by path", `
+CREATE INDEX IF NOT EXISTS jobs_newest ON jobs(path, library_id, id);`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone

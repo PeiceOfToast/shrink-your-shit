@@ -202,7 +202,8 @@ func TestJobsByPathUseTheirIndex(t *testing.T) {
 			plan += d + "; "
 		}
 		rows.Close()
-		if !strings.Contains(plan, "jobs_path") {
+		// jobs_newest (path, library_id, id) also starts with path: the planner may use either.
+		if !strings.Contains(plan, "jobs_path") && !strings.Contains(plan, "jobs_newest") {
 			t.Errorf("%s: plan %s", q, plan)
 		}
 	}

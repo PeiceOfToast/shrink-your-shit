@@ -30,11 +30,16 @@ func failedCounts(t *testing.T, s *Store, libID int64) map[string]int {
 	if err != nil {
 		t.Fatal(err)
 	}
+	counts, err := s.Counts()
+	if err != nil {
+		t.Fatal(err)
+	}
 	return map[string]int{
 		"jobs list":     total,
 		"library card":  cards[CardFailed],
 		"totals":        tot.Summary.Failed,
 		"library count": tot.Counts[libID].Failed,
+		"library list":  counts[libID].Failed,
 		"activity":      act.Failed,
 	}
 }
@@ -87,6 +92,39 @@ func TestTwoFailedJobsForOneFileCountOne(t *testing.T) {
 	failOnce(t, s, l.ID, "/m/a.mkv")
 	failOnce(t, s, l.ID, "/m/a.mkv")
 	want(t, failedCounts(t, s, l.ID), 1)
+}
+
+// The Jobs > Failed rows (not only their count) leave out a file that failed and then passed, and keep
+// the newest failed job of a file that failed twice.
+func TestFailedListRowsAreNewestJobsOnly(t *testing.T) {
+	s := open(t)
+	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
+	s.SetPaused(false)
+	passedOld := failOnce(t, s, l.ID, "/m/a.mkv")
+	id, _ := s.Enqueue(Job{LibraryID: l.ID, Path: "/m/a.mkv", SizeBefore: 1000})
+	if _, err := s.Claim("w"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Complete(id, "/m/a.mkv", 400); err != nil {
+		t.Fatal(err)
+	}
+	twiceOld := failOnce(t, s, l.ID, "/m/b.mkv")
+	twiceNew := failOnce(t, s, l.ID, "/m/b.mkv")
+	rows, total, err := s.FailedJobs(100, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(rows) != 1 {
+		t.Fatalf("total %d with %d rows, want one file failed", total, len(rows))
+	}
+	for _, r := range rows {
+		if r.ID == passedOld || r.ID == id || r.ID == twiceOld {
+			t.Errorf("row %d is not the file's newest failed job (it passed, or it is older)", r.ID)
+		}
+		if r.ID != twiceNew {
+			t.Errorf("row %d, want the newest failed job %d", r.ID, twiceNew)
+		}
+	}
 }
 
 func TestTwoFailedFilesCountTwo(t *testing.T) {
