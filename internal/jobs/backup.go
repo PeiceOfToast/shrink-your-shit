@@ -95,6 +95,9 @@ func (s *Store) WriteBackup(reason string) (BackupInfo, error) {
 	return backupInfoOf(final, id)
 }
 
+// dumpBetweenTables is a test seam: when set, dumpTo calls it before each table, while the dump's read is open.
+var dumpBetweenTables func()
+
 // dumpTo writes the database as a gzipped JSON object: the header fields, then "tables" with each table's
 // rows as objects keyed by column name.
 func (s *Store) dumpTo(path, reason string, now time.Time) (err error) {
@@ -113,7 +116,18 @@ func (s *Store) dumpTo(path, reason string, now time.Time) (err error) {
 			err = cerr
 		}
 	}()
-	tx, err := s.db.Begin() // one connection: nothing else uses the database until this read is done
+	// The dump reads through its own read-only connection, so the store's one connection stays free for the API
+	// while it runs. In WAL mode the read keeps the database as it was when the read began.
+	rdb, err := sql.Open("sqlite", s.path)
+	if err != nil {
+		return err
+	}
+	defer rdb.Close()
+	rdb.SetMaxOpenConns(1)
+	if _, err := rdb.Exec(`PRAGMA busy_timeout=5000; PRAGMA query_only=ON;`); err != nil {
+		return err
+	}
+	tx, err := rdb.Begin()
 	if err != nil {
 		return err
 	}
@@ -138,6 +152,9 @@ func (s *Store) dumpTo(path, reason string, now time.Time) (err error) {
 		return err
 	}
 	for i, name := range names {
+		if dumpBetweenTables != nil {
+			dumpBetweenTables()
+		}
 		key, _ := json.Marshal(name)
 		if _, err := io.WriteString(gz, sep(i)+string(key)+":["); err != nil {
 			return err
