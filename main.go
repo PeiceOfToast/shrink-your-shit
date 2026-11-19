@@ -30,6 +30,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/remote"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/scanner"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/update"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/web"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
@@ -220,6 +221,11 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM) // SIGTERM is a no-op on Windows; Ctrl+C works everywhere
 	defer stop()
+	// the update notice: asks GitHub at most once a day, in the background, and not at all when the person turned checks off
+	go update.Run(ctx, &update.Checker{Store: store, Current: version}, func() bool {
+		s, err := web.LoadSettings(store)
+		return err == nil && s.UpdateChecks()
+	})
 
 	x := media.OSExec{}
 	chk := &doctor.Checker{Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath, KnownOriginals: store.KnownOriginals}
