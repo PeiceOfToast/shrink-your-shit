@@ -37,6 +37,9 @@ const (
 	savedSQL = `MAX(size_before-size_after, 0)`
 	// grewSQL is how much bigger a done job's new file is than its original (NULL: not bigger)
 	grewSQL = `CASE WHEN status='done' AND size_after>size_before AND size_before>0 AND ` + newestSQL + ` THEN size_after-size_before END`
+	// grewNowSQL is the growth bytesNow adds: only a replaced file's, since the new file then stands where the
+	// library's record (the original's size) is. A left output is not in the library's bytes, so it adds none (#403).
+	grewNowSQL = `CASE WHEN status='done' AND size_after>size_before AND size_before>0 AND ` + replacedSQL + ` AND ` + newestSQL + ` THEN size_after-size_before END`
 	// freedAtSQL is when a freed saving was freed: the original found gone, its kept copy's delete day,
 	// or the conversion's end (replaced with nothing kept).
 	freedAtSQL = `CASE WHEN ` + leftSQL + ` THEN original_gone_at

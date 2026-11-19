@@ -43,7 +43,7 @@ FROM files WHERE path >= ? AND path < ?`, lo, hi).Scan(&t.BytesBefore, &t.Videos
 // waiting in the trash, and the converted files a scan found gone (their bytes are no longer there), plus the
 // growth of converted files bigger than their originals (they are in the library at their new size). Never below 0.
 func BytesNow(t LibraryTotals, c LibraryCounts) int64 {
-	return max(0, t.BytesBefore-c.FreedBytes-c.WaitingBytes-c.GoneBytes+c.GrewBytes)
+	return max(0, t.BytesBefore-c.FreedBytes-c.WaitingBytes-c.GoneBytes+c.GrewNowBytes)
 }
 
 // pathRange is [lo, hi) holding every path inside dir: dir + separator up to dir + the next character.
@@ -147,7 +147,7 @@ func (s *Store) TotalsOf() (Totals, error) {
 	t := Totals{Counts: map[int64]LibraryCounts{}, FreedByDay: map[string]int64{}, SavedByDay: map[string]int64{}, WaitingByDay: map[string]int64{}, CouldFreeByDay: map[string]int64{}}
 	rows, err := s.db.Query(`SELECT library_id, date(`+freedAtSQL+`, 'localtime') AS d,
   COALESCE(SUM(status=?),0), COALESCE(SUM(status=?),0), COALESCE(SUM(status IN (?,?) AND `+newestJobOf("jobs")+`),0),
-  COALESCE(SUM(`+freedSQL+`),0), COALESCE(SUM(`+waitingSQL+`),0), COALESCE(SUM(`+couldFreeSQL+`),0), COALESCE(SUM(`+grewSQL+`),0), COALESCE(SUM(`+goneSQL+`),0)
+  COALESCE(SUM(`+freedSQL+`),0), COALESCE(SUM(`+waitingSQL+`),0), COALESCE(SUM(`+couldFreeSQL+`),0), COALESCE(SUM(`+grewSQL+`),0), COALESCE(SUM(`+goneSQL+`),0), COALESCE(SUM(`+grewNowSQL+`),0)
 FROM jobs GROUP BY library_id, d`, Running, Queued, Failed, Kept)
 	if err != nil {
 		return t, err
@@ -157,8 +157,8 @@ FROM jobs GROUP BY library_id, d`, Running, Queued, Failed, Kept)
 		var lib sql.NullInt64
 		var day sql.NullString
 		var working, waiting, failed int
-		var freed, waitingB, couldFree, grew, gone int64
-		if err := rows.Scan(&lib, &day, &working, &waiting, &failed, &freed, &waitingB, &couldFree, &grew, &gone); err != nil {
+		var freed, waitingB, couldFree, grew, gone, grewNow int64
+		if err := rows.Scan(&lib, &day, &working, &waiting, &failed, &freed, &waitingB, &couldFree, &grew, &gone, &grewNow); err != nil {
 			return t, err
 		}
 		a := &t.Summary
@@ -182,6 +182,7 @@ FROM jobs GROUP BY library_id, d`, Running, Queued, Failed, Kept)
 			c.CouldFreeBytes += couldFree
 			c.GrewBytes += grew
 			c.GoneBytes += gone
+			c.GrewNowBytes += grewNow
 			t.Counts[lib.Int64] = c
 		}
 	}

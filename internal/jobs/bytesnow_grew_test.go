@@ -3,6 +3,7 @@
 package jobs
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -75,5 +76,37 @@ func TestBytesNowCountsAGrownReplacement(t *testing.T) {
 	}
 	if now := bytesNowOf(t, s, l); now != 400 {
 		t.Errorf("bytesNow %d, want 400: the library holds only the grown file", now)
+	}
+}
+
+// A folder output outside the library, the original kept where it was: the library holds the original at 300,
+// the new file is not in it, so bytesNow stays 300 (#403).
+func TestBytesNowIgnoresGrowthOfAFolderOutputOutsideTheLibrary(t *testing.T) {
+	s := open(t)
+	l, _ := s.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	a := filepath.Join(l.Path, "a.mkv")
+	s.PutFile(File{Path: a, Size: 300})
+	id, _ := s.Enqueue(Job{LibraryID: l.ID, Path: a, SizeBefore: 300})
+	s.Claim("w")
+	s.Complete(id, filepath.Join(t.TempDir(), "a.mkv"), 400)
+	if now := bytesNowOf(t, s, l); now != 300 {
+		t.Errorf("bytesNow %d, want 300: the 400-byte output is not in the library", now)
+	}
+}
+
+// A beside output (the original left in place) that is later deleted: nothing marks a left output gone, and
+// its growth was never in the library's bytes, so bytesNow stays 300 and does not go to 400 for good (#403).
+func TestBytesNowIgnoresGrowthOfABesideOutputOnceDeleted(t *testing.T) {
+	s := open(t)
+	l, _ := s.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	a := filepath.Join(l.Path, "a.mkv")
+	out := filepath.Join(l.Path, "a.hevc.mkv")
+	s.PutFile(File{Path: a, Size: 300})
+	id, _ := s.Enqueue(Job{LibraryID: l.ID, Path: a, SizeBefore: 300})
+	s.Claim("w")
+	s.Complete(id, out, 400)
+	os.Remove(out)
+	if now := bytesNowOf(t, s, l); now != 300 {
+		t.Errorf("bytesNow %d after the beside output is deleted, want 300", now)
 	}
 }
