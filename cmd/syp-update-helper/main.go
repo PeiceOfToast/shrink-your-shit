@@ -310,7 +310,10 @@ func (h *helper) install(version string) error {
 		return errors.Join(err, restoreOlder())
 	}
 	if err := os.Rename(next, h.bin); err != nil {
-		return errors.Join(err, os.Rename(prev, h.bin), restoreOlder())
+		if perr := os.Rename(prev, h.bin); perr != nil { // prev still holds the current program: .older must not overwrite it
+			return errors.Join(err, perr)
+		}
+		return errors.Join(err, restoreOlder())
 	}
 	if h.restartHealthy() {
 		if hadPrev {
@@ -321,10 +324,11 @@ func (h *helper) install(version string) error {
 	if err := os.Rename(prev, h.bin); err != nil { // rule 3: the new program goes, the previous comes back
 		return fmt.Errorf("v%s did not answer, and the previous version could not be put back: %v", version, err)
 	}
-	if err := restoreOlder(); err != nil { // and the copy before it is kept as the previous one again
-		return fmt.Errorf("v%s did not answer and was rolled back, but the version before it could not be kept: %v", version, err)
+	msg := fmt.Sprintf("v%s did not answer within %s; rolled back to the previous version", version, h.wait)
+	if err := restoreOlder(); err != nil { // and the copy before it is kept as the previous one again; the restart still happens
+		msg += fmt.Sprintf(", but the version before it could not be kept as the previous one: %v", err)
 	}
-	return h.afterUndo(fmt.Sprintf("v%s did not answer within %s; rolled back to the previous version", version, h.wait))
+	return h.afterUndo(msg)
 }
 
 // rollback swaps the program and the previous one, and swaps them back if the previous does not answer.
