@@ -5,6 +5,7 @@ package jobs
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -538,9 +539,10 @@ func (s *Store) migrate() error {
 	if err != nil {
 		return err
 	}
+	var info BackupInfo
 	backup := ""
 	if existing {
-		if _, err := s.WriteBackup(ReasonBeforeMigration); err != nil { // the copy people can see and restore
+		if info, err = s.WriteBackup(ReasonBeforeMigration); err != nil { // the copy people can see and restore
 			return fmt.Errorf("could not back up the database before upgrading it (%v); not upgrading", err)
 		}
 		if backup, err = s.backup(cur); err != nil { // the file copy a rollback puts back
@@ -583,6 +585,10 @@ func (s *Store) migrate() error {
 	}
 	if err := tx.Commit(); err != nil {
 		return failedMigration(pending[len(pending)-1], err, backup)
+	}
+	// After the commit, so a rolled-back upgrade never logs as upgraded. A new database logs nothing.
+	if existing {
+		log.Printf("database upgraded from version %d to %d; backup before the upgrade: %s (also %s)", cur, latestVersion(), info.Name, backup)
 	}
 	return nil
 }
