@@ -40,6 +40,20 @@ const (
 	// grewNowSQL is the growth bytesNow adds: only a replaced file's, since the new file then stands where the
 	// library's record (the original's size) is. A left output is not in the library's bytes, so it adds none (#403).
 	grewNowSQL = `CASE WHEN status='done' AND size_after>size_before AND size_before>0 AND ` + replacedSQL + ` AND ` + newestSQL + ` THEN size_after-size_before END`
+	// leftNowSQL is what a left job adds to its library's bytesNow, on top of the recorded bytes (LibraryTotalsOf
+	// binds the library's path range for leftInSQL, twice). The original's record stays in the library's bytes
+	// until it is gone, so while it is there the new file adds its size if it is in the library and not gone.
+	// Once the original is gone, freedSQL has already taken the saving off (original less new, never below 0):
+	// the file's bytes left are the growth, if the new file is bigger, and the library holds nothing of it when
+	// the new file is not in it, so that saving is taken back off.
+	leftNowSQL = `CASE WHEN ` + leftSQL + ` AND status='done' AND size_after>0 AND ` + newestSQL + ` THEN
+  CASE WHEN original_gone_at<>'' AND original_changed=0 THEN
+    CASE WHEN ` + leftInSQL + ` THEN MAX(size_after-size_before,0) ELSE -MIN(size_before,size_after) END
+  ELSE
+    CASE WHEN ` + leftInSQL + ` THEN size_after ELSE 0 END
+  END END`
+	// leftInSQL is a left output in its library now: inside the library's path range (two binds) and not known gone.
+	leftInSQL = `(output_path>=? AND output_path<? AND output_gone_at='')`
 	// freedAtSQL is when a freed saving was freed: the original found gone, its kept copy's delete day,
 	// or the conversion's end (replaced with nothing kept).
 	freedAtSQL = `CASE WHEN ` + leftSQL + ` THEN original_gone_at
@@ -95,6 +109,36 @@ func (s *Store) ReplacedOutputs(libraryIDs []int64) ([]LeftOriginal, error) {
 	var out []LeftOriginal
 	for _, id := range libraryIDs {
 		rows, err := s.db.Query(`SELECT id, output_path, size_after, original_disk, output_gone_at FROM jobs WHERE library_id=? AND status='done' AND output_path<>'' AND size_after>0 AND `+replacedSQL+` AND `+newestSQL, id)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var o LeftOriginal
+			var gone string
+			if err := rows.Scan(&o.JobID, &o.Path, &o.Size, &o.Disk, &gone); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			o.Gone = gone != ""
+			out = append(out, o)
+		}
+		rows.Close()
+	}
+	return out, nil
+}
+
+// LeftOutputs are the left outputs (the original left where it was, the new file beside it or in a folder)
+// of the given libraries that are inside the library, the newest conversion of each file, that a scan can
+// check. Their output_gone_at says the scan found them gone (leftNowSQL counts them until then).
+func (s *Store) LeftOutputs(libraryIDs []int64) ([]LeftOriginal, error) {
+	var out []LeftOriginal
+	for _, id := range libraryIDs {
+		l, err := s.GetLibrary(id)
+		if err != nil {
+			return nil, err
+		}
+		lo, hi := pathRange(l.Path)
+		rows, err := s.db.Query(`SELECT id, output_path, size_after, original_disk, output_gone_at FROM jobs WHERE library_id=? AND status='done' AND size_after>0 AND `+leftSQL+` AND `+newestSQL+` AND output_path>=? AND output_path<?`, id, lo, hi)
 		if err != nil {
 			return nil, err
 		}
