@@ -137,7 +137,7 @@ func main() {
 	defer releaseLock()
 	dbPath := filepath.Join(*data, "syp.db")
 	pending := update.ReadMarker(*data) // an update or roll back the update helper made: settled below, once serving
-	store, err := openStore(dbPath, pending)
+	store, err := openStore(dbPath, version, pending)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -406,8 +406,8 @@ func main() {
 
 // openStore opens the database. A program rolled back past a database upgrade finds a database it
 // refuses (ErrNewerDatabase): then the copy the app made before the update (pending's backup) goes back.
-func openStore(dbPath string, pending *update.Marker) (*jobs.Store, error) {
-	store, err := jobs.Open(dbPath)
+func openStore(dbPath, version string, pending *update.Marker) (*jobs.Store, error) {
+	store, err := jobs.OpenAs(dbPath, version)
 	if !errors.Is(err, jobs.ErrNewerDatabase) || pending == nil || pending.Backup == "" {
 		return store, err
 	}
@@ -420,7 +420,7 @@ func openStore(dbPath string, pending *update.Marker) (*jobs.Store, error) {
 	if err := update.WriteMarker(filepath.Dir(dbPath), *pending); err != nil {
 		log.Printf("update: %v", err)
 	}
-	return jobs.Open(dbPath)
+	return jobs.OpenAs(dbPath, version)
 }
 
 // scanTargets lists the started libraries for the scanner, each with its flow's rule. A library whose

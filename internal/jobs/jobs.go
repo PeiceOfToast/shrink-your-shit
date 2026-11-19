@@ -92,9 +92,10 @@ type File struct {
 
 // Store is the SQLite-backed store.
 type Store struct {
-	db   *sql.DB
-	path string
-	now  func() time.Time
+	db         *sql.DB
+	path       string
+	appVersion string // the program's version, written into its backups ("" if not given)
+	now        func() time.Time
 
 	// OnJobsRemoved is told the ids of jobs deleted (S5: their run logs go too); nil: nobody.
 	OnJobsRemoved func(ids []int64)
@@ -105,13 +106,16 @@ type Store struct {
 
 // Open opens (creating if needed) the database at path and brings its schema up to date
 // (see migrate.go). It refuses a database written by a newer program (ErrNewerDatabase).
-func Open(path string) (*Store, error) {
+func Open(path string) (*Store, error) { return OpenAs(path, "") }
+
+// OpenAs is Open for a program of the given version, whose backups say which version made them.
+func OpenAs(path, appVersion string) (*Store, error) {
 	db, err := sql.Open("sqlite", path) // plain path: no URI query, so Windows drive letters and backslashes are safe
 	if err != nil {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1) // SQLite: one writer; keeps claims atomic and simple
-	s := &Store{db: db, path: path, now: time.Now}
+	s := &Store{db: db, path: path, appVersion: appVersion, now: time.Now}
 	// Look at the schema version before changing anything (even the journal mode writes to the file).
 	if err := s.checkNotNewer(); err != nil {
 		db.Close()

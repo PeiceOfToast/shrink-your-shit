@@ -199,9 +199,6 @@ func TestActivitySummaryQueueFailedSkipped(t *testing.T) {
 	if code, _ := post(t, srv, "POST", "/api/skipped/"+id+"/convert-again", `{}`); code != 404 {
 		t.Errorf("again: %d", code)
 	}
-	if code, b := post(t, srv, "POST", "/api/system/backup", `{}`); code != 501 || !strings.Contains(b, "Nothing was downloaded") {
-		t.Errorf("backup %d %s", code, b)
-	}
 }
 
 // A converted file is "done", not "skipped", only while it is the file the job wrote: a different file

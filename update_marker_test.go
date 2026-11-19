@@ -42,7 +42,7 @@ func TestStartAfterARollBackRestoresTheDatabase(t *testing.T) {
 
 	update.WriteMarker(data, update.Marker{Kind: "update", From: "0.1.0", To: "0.2.0", Backup: backup})
 	pending := update.ReadMarker(data)
-	st, err = openStore(db, pending)
+	st, err = openStore(db, "", pending)
 	if err != nil {
 		t.Fatalf("open after the roll back: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestStartOfTheNewVersionRecordsSuccess(t *testing.T) {
 	db := filepath.Join(data, "syp.db")
 	update.WriteMarker(data, update.Marker{Kind: "update", From: "0.1.0", To: "0.2.0", Backup: db + ".bak-v1"})
 	pending := update.ReadMarker(data)
-	st, err := openStore(db, pending)
+	st, err := openStore(db, "", pending)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -535,7 +535,10 @@ func (s *Store) migrate() error {
 	}
 	backup := ""
 	if existing {
-		if backup, err = s.backup(cur); err != nil {
+		if _, err := s.WriteBackup(ReasonBeforeMigration); err != nil { // the copy people can see and restore
+			return fmt.Errorf("could not back up the database before upgrading it (%v); not upgrading", err)
+		}
+		if backup, err = s.backup(cur); err != nil { // the file copy a rollback puts back
 			return fmt.Errorf("could not back up the database before upgrading it (%v); not upgrading", err)
 		}
 	}
