@@ -603,3 +603,85 @@ func TestHardware10(t *testing.T) {
 		t.Errorf("hardware %v, 10-bit %v", tools.Hardware, tools.Hardware10)
 	}
 }
+
+// A file Convert again moved aside (named <stem>.<job id>.<ext>, the job's output being <stem>.<ext>) gets its own
+// note saying so; a real orphan keeps the orphan note; a name whose id matches no job, or a job whose output has
+// another name, keeps the orphan wording. Moved files are not counted as orphans.
+func TestMovedAsideOutputIsNamedAsSuch(t *testing.T) {
+	dir := t.TempDir()
+	trash := filepath.Join(dir, ".syp-trash")
+	os.MkdirAll(trash, 0o755)
+	os.WriteFile(filepath.Join(trash, "movie.2.mkv"), []byte("earlier output"), 0o644)
+	os.WriteFile(filepath.Join(trash, "real.7.mkv"), []byte("real orphan"), 0o644)
+	os.WriteFile(filepath.Join(trash, "stray.9.mkv"), []byte("no such job"), 0o644)
+	real, _ := filepath.EvalSymlinks(dir)
+	c := checker(1 << 40)
+	c.KnownOriginals = func() (map[string]bool, error) { return map[string]bool{}, nil }
+	c.JobOutput = func(id int64) (string, bool, error) {
+		switch id {
+		case 2:
+			return "/lib/movie.mkv", true, nil
+		case 7:
+			return "/lib/other.mkv", true, nil
+		}
+		return "", false, nil
+	}
+	var orphan []string
+	moved := map[string]bool{}
+	for _, n := range c.Folder(context.Background(), dir).Notes {
+		switch n.Code {
+		case "moved_aside_outputs":
+			moved[n.Message] = true
+		case "orphaned_originals":
+			orphan = append(orphan, n.Message)
+		}
+	}
+	if !moved[MovedAsideMessage("movie.2.mkv")] {
+		t.Errorf("no moved-aside note for movie.2.mkv; orphan notes %q", orphan)
+	}
+	if len(orphan) != 1 || !strings.HasPrefix(orphan[0], "2 original files ") || !strings.Contains(orphan[0], filepath.Join(real, ".syp-trash")) {
+		t.Errorf("orphan notes %q, want one note counting the 2 real orphans (not the moved file)", orphan)
+	}
+	if !strings.Contains(MovedAsideMessage("movie.2.mkv"), "is an earlier converted file that had been changed; Convert again moved it here so the new file could take its place.") {
+		t.Errorf("moved-aside wording: %q", MovedAsideMessage("movie.2.mkv"))
+	}
+	if _, err := os.Stat(filepath.Join(trash, "movie.2.mkv")); err != nil {
+		t.Error("nothing may be touched")
+	}
+}
+
+// Several moved-aside files in one library are one note (one check ID per code), listing the names.
+func TestMovedAsideFilesAreOneNotePerLibrary(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, ".syp-trash"), 0o755)
+	os.MkdirAll(filepath.Join(dir, "Shows", ".syp-trash"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".syp-trash", "a.2.mkv"), []byte("a"), 0o644)
+	os.WriteFile(filepath.Join(dir, "Shows", ".syp-trash", "b.3.mkv"), []byte("b"), 0o644)
+	c := checker(1 << 40)
+	c.KnownOriginals = func() (map[string]bool, error) { return map[string]bool{}, nil }
+	c.JobOutput = func(id int64) (string, bool, error) {
+		return map[int64]string{2: "/lib/a.mkv", 3: "/lib/b.mkv"}[id], id == 2 || id == 3, nil
+	}
+	var got []Issue
+	for _, n := range c.Folder(context.Background(), dir).Notes {
+		if n.Code == "moved_aside_outputs" {
+			got = append(got, n)
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("%d moved-aside notes, want 1: %+v", len(got), got)
+	}
+	want := "2 earlier converted files had been changed, so Convert again moved them to the trash: a.2.mkv, b.3.mkv. Delete them when you no longer need them."
+	if got[0].Message != want {
+		t.Errorf("note %q, want %q", got[0].Message, want)
+	}
+}
+
+// More than five names are counted after the first five.
+func TestMovedAsideNoteListsFiveThenCounts(t *testing.T) {
+	names := []string{"1.mkv", "2.mkv", "3.mkv", "4.mkv", "5.mkv", "6.mkv", "7.mkv"}
+	want := "7 earlier converted files had been changed, so Convert again moved them to the trash: 1.mkv, 2.mkv, 3.mkv, 4.mkv, 5.mkv and 2 more. Delete them when you no longer need them."
+	if got := MovedAsideNote(names); got != want {
+		t.Errorf("%q, want %q", got, want)
+	}
+}

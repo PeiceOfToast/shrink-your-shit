@@ -270,3 +270,33 @@ func TestDoctorOrphanedOriginalsHaveTheirOwnHint(t *testing.T) {
 		t.Errorf("orphaned originals hint: %+v", orph)
 	}
 }
+
+// A moved-aside output has its own code and hint, and "Move them back" would overwrite the new conversion, so the hint
+// never says it. Two of them are one check.
+func TestDoctorMovedAsideHasItsOwnCodeAndHint(t *testing.T) {
+	dir := t.TempDir()
+	trash := filepath.Join(dir, ".syp-trash")
+	if err := os.MkdirAll(trash, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(trash, "movie.2.mkv"), []byte("a"), 0o644)
+	os.WriteFile(filepath.Join(trash, "other.3.mkv"), []byte("b"), 0o644)
+	c := apiChecker(fakeFFmpeg(true, true, nil, nil), 1<<40)
+	c.KnownOriginals = func() (map[string]bool, error) { return map[string]bool{}, nil }
+	c.JobOutput = func(id int64) (string, bool, error) {
+		return map[int64]string{2: "/lib/movie.mkv", 3: "/lib/other.mkv"}[id], id == 2 || id == 3, nil
+	}
+	d := c.API(context.Background(), APIInput{DataDir: t.TempDir(), Libs: []Library{{ID: 9, Name: "Movies", Path: dir}}}, false)
+	n := 0
+	for _, ch := range d.Checks {
+		if ch.ID == "library:9:moved_aside_outputs" {
+			n++
+			if ch.Hint == nil || strings.Contains(*ch.Hint, "Move them back") || !strings.Contains(*ch.Hint, "Delete them when you no longer need them") {
+				t.Errorf("moved-aside hint: %+v", ch)
+			}
+		}
+	}
+	if n != 1 {
+		t.Errorf("%d checks with the moved-aside ID, want 1", n)
+	}
+}

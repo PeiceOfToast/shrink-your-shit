@@ -12,7 +12,7 @@ import { getHealth, getSettings } from "../libraryApi";
 import { onLive } from "../live";
 import { FileName } from "../FileName";
 import { listLibraries, listLibrariesV2 } from "../libraryApi";
-import { Empty, PageHead } from "../PageHead";
+import { Empty, LoadFailed, PageHead } from "../PageHead";
 import { Link, navigate, useSearch } from "../router";
 import { listWorkers, noWorker } from "../workersApi";
 import { useData } from "../useData";
@@ -119,7 +119,9 @@ export function Jobs() {
   useEffect(() => setSel([]), [tab]);
   const go = (t: Tab, job?: string | null) => navigate(query(t, library) +(job ? "&job=" + encodeURIComponent(job) : ""));
   const current = page.data?.for === scope ? page.data : undefined;
+  const noLibs = !!libs.data && libs.data.length === 0; // first run: no library yet, so no job can come
   const items = (current?.items ?? []).map((j) => (live[j.id] && RUNS.includes(j.state) ? { ...j, progress: live[j.id] } : j)), counts = page.data?.counts;
+  const firstRun = noLibs && !kept && !left && !!counts && TABS.every(([t]) => !counts[t]); // every tab empty: no bulk actions to offer
   shown.current = { tab, rows: new Map((current?.items ?? []).map((j) => [j.jobId ?? j.id, j.state])) };
   const picked = items.filter((j) => sel.includes(j.id)), none = !picked.length;
   const run = async (a: JobAction) => {
@@ -162,9 +164,11 @@ export function Jobs() {
         {TABS.map(([t, label]) => <button key={t} role="tab" type="button" aria-selected={tab === t} onClick={() => tab !== t && go(t)}>{label}{counts && <span className="n">{count(t === "completed" && (kept || left) && current ? current.total : counts[t])}</span>}</button>)}
       </div>
       <div className="ltools" role="toolbar" aria-label="Jobs">
-        <span className="desk">{actions}</span>
-        <button className="btn sm ghost phone" type="button" aria-pressed={selecting} onClick={() => (setSelecting(!selecting), setSel([]))}>{selecting ? "Done" : "Select"}</button>
-        <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions}</div></details>
+        {!firstRun && <>
+          <span className="desk">{actions}</span>
+          <button className="btn sm ghost phone" type="button" aria-pressed={selecting} onClick={() => (setSelecting(!selecting), setSel([]))}>{selecting ? "Done" : "Select"}</button>
+          <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions}</div></details>
+        </>}
         {sel.length > 0 && <span className="muted sm">{sel.length} selected</span>}
         {/* parity 11-19 #2 (G4): pick a library here too; it sets the same ?libraryId= as "See its jobs", and the chip above stays */}
         <span className="filt">{tab === "completed" && <button className="btn sm trash" type="button" aria-pressed={kept} onClick={() => navigate(query("completed", library, kept ? "" : "kept"))}>{TRASH_WORDS}</button>}{tab === "completed" && <button className="btn sm left-in-place" type="button" aria-pressed={left} onClick={() => navigate(query("completed", library, left ? "" : "left"))}>{LEFT_WORDS}</button>}
@@ -176,8 +180,9 @@ export function Jobs() {
         <input className="input find" type="search" placeholder="Search file names" aria-label="Search file names" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       <p className="muted" role="status">{said}</p>
-      {page.error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{page.error.message}</span></p>}
-      {!current ? <div className="empty">Loading…</div> : !items.length ? (q ? <div className="empty">No file matches.</div>
+      {page.error && current && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{page.error.message}</span></p>}
+      {!current ? (page.error ? <LoadFailed error={page.error} reload={page.reload} /> : <div className="empty">Loading…</div>) : !items.length ? (q ? <div className="empty">No file matches.</div>
+        : firstRun ? <Empty icon="i-jobs" text="No jobs yet. Jobs start when a library finds videos."><Link className="btn primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link></Empty>
         : <Empty icon="i-jobs" text={kept ? TRASH_EMPTY : left ? LEFT_EMPTY : { waiting: "Nothing is waiting.", running: "Nothing is converting right now.", completed: "No file is done yet.", skipped: "No file was skipped.", failed: "Nothing has failed." }[tab]} />) : (
         <div className={"list" + (selecting ? " selecting" : "")}><table className="tbl jobs">
           <thead><tr>
