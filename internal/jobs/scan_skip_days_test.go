@@ -162,3 +162,29 @@ func TestStillChangingAfterConversionKeepsTheConversionDay(t *testing.T) {
 		t.Errorf("changed day Skipped %d, want 0", got)
 	}
 }
+
+// An unreadable file is a skip the Skipped tab shows, so it counts on the day it was decided. A restored file
+// (its original put back) has a reason too, but it is not a skip on its restore day.
+func TestUnreadableCountsOnItsDayAndRestoredDoesNot(t *testing.T) {
+	s := open(t)
+	l, _ := s.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	s.SetPaused(false)
+	day := noonDaysAgo(2)
+	setClock(t, s, day)
+	bad := filepath.Join(l.Path, "bad.mkv")
+	if err := s.PutFile(File{Path: bad, Size: 1, ModTime: 1, Decision: "unreadable", Reason: "unreadable"}); err != nil {
+		t.Fatal(err)
+	}
+	back := filepath.Join(l.Path, "back.mkv")
+	if err := s.PutFile(File{Path: back, Size: 1, ModTime: 1, Decision: DecisionRestored, Reason: DecisionRestored}); err != nil {
+		t.Fatal(err)
+	}
+
+	days := dayCounts(t, s)
+	if got := days[day.Format("2006-01-02")].Skipped; got != 1 {
+		t.Errorf("Days[%s].Skipped %d, want 1 (the unreadable file only)", day.Format("2006-01-02"), got)
+	}
+	if _, skipped := sumDaysSkipped(days); skipped != 1 {
+		t.Errorf("skipped over the window %d, want 1", skipped)
+	}
+}

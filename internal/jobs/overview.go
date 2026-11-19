@@ -61,14 +61,14 @@ type Day struct {
 // a file is its path over all its job rows, so a requeued file that later passes has done as its latest end
 // and no failure left in the counts. The history itself stays in events; only the counts read this. Skip and
 // cancel delete the job row, so its end event names the path in its data: the file is still the same file.
-// A scan's skip (a file decision 'skip: ...', dated decided_at) is an end too, so the newest of the two wins:
+// A scan's skip (a file decision 'skip: ...', or unreadable, dated decided_at) is an end too, so the newest of the two wins:
 // a file counts once, on the day of its latest end. A still_changing look is not a skip (the file may still be
 // downloading), so it is no end. Same-second ties go to the job event.
 const latestEndsSQL = `WITH ends AS (SELECT at, to_status, ROW_NUMBER() OVER (PARTITION BY pkey ORDER BY at DESC, seq DESC) AS rn FROM (
 SELECT e.at, e.to_status, e.seq, COALESCE(j.path, (SELECT json_extract(x.data, '$.path') FROM events x WHERE x.job_id=e.job_id AND json_extract(x.data, '$.path') IS NOT NULL ORDER BY x.seq DESC LIMIT 1), 'job:' || e.job_id) AS pkey
 FROM events e LEFT JOIN jobs j ON j.id=e.job_id WHERE e.kind='job' AND e.to_status IN ('done','skipped','cancelled','failed','kept')
 UNION ALL
-SELECT decided_at, 'skipped', 0, path FROM files WHERE decision LIKE 'skip: %' AND reason<>'still_changing' AND decided_at IS NOT NULL))
+SELECT decided_at, 'skipped', 0, path FROM files WHERE ((decision LIKE 'skip: %' AND reason<>'still_changing') OR reason='unreadable') AND decided_at IS NOT NULL))
 `
 
 // Days are the last n days' totals, oldest first: files finished, files skipped (also stopped), files failed
