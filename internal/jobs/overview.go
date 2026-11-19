@@ -139,7 +139,7 @@ type Totals struct {
 func (s *Store) TotalsOf() (Totals, error) {
 	t := Totals{Counts: map[int64]LibraryCounts{}, FreedByDay: map[string]int64{}, SavedByDay: map[string]int64{}, WaitingByDay: map[string]int64{}, CouldFreeByDay: map[string]int64{}}
 	rows, err := s.db.Query(`SELECT library_id, date(`+freedAtSQL+`, 'localtime') AS d,
-  COALESCE(SUM(status=?),0), COALESCE(SUM(status=?),0), COALESCE(SUM(status IN (?,?)),0),
+  COALESCE(SUM(status=?),0), COALESCE(SUM(status=?),0), COALESCE(SUM(status IN (?,?) AND `+newestJobOf("jobs")+`),0),
   COALESCE(SUM(`+freedSQL+`),0), COALESCE(SUM(`+waitingSQL+`),0), COALESCE(SUM(`+couldFreeSQL+`),0), COALESCE(SUM(`+grewSQL+`),0)
 FROM jobs GROUP BY library_id, d`, Running, Queued, Failed, Kept)
 	if err != nil {

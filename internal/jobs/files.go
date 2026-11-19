@@ -75,12 +75,19 @@ func nameOf(col string) string {
 	return "lower(replace(" + p + ", rtrim(" + p + ", replace(" + p + ",'/','')), ''))"
 }
 
+// newestJobOf is SQL true for the newest job (table t) of its library and path. A file that failed and was
+// then given a newer job (a retry made by a workflow change) counts as its newest job only, so a failure
+// counts while it is the file's latest job, once per file.
+func newestJobOf(t string) string {
+	return `NOT EXISTS (SELECT 1 FROM jobs later WHERE later.path=` + t + `.path AND later.library_id IS ` + t + `.library_id AND later.id>` + t + `.id)`
+}
+
 // jobWhere is each job card's condition.
 var jobWhere = map[string]string{
 	CardUnprocessed: "j.status='queued'",
 	CardProcessing:  "j.status='running'",
 	CardProcessed:   "j.status='done'",
-	CardFailed:      "j.status IN ('failed','kept')",
+	CardFailed:      "j.status IN ('failed','kept') AND " + newestJobOf("j"),
 }
 
 var jobOrder = map[string]string{
