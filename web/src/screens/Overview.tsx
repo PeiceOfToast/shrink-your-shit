@@ -98,7 +98,7 @@ export function Overview() {
     });
   }, []);
   const act = async (p: Promise<Answer<unknown>>) => { try { const r = await p; setSaid(failed(r) ? r.error.message : ""); } catch (e) { if (!(e instanceof SignedOut)) throw e; } o.reload(); wl.reload(); };
-  if (!o.data) return <div className="stack"><PageHead icon="i-dashboard" title="Dashboard" /><div className="empty">{o.error?.message ?? "Loading..."}</div></div>;
+  if (!o.data) return <div className="stack"><PageHead icon="i-dashboard" title="Dashboard" /><div className="empty">{o.error?.message ?? "Loading…"}</div></div>;
   const v = o.data, h = v.headline, job = (j: OverviewJob) => ({ ...j, ...live[j.jobId] });
   // one row per worker of GET /api/v2/workers; its files' progress from the overview (or, for a worker the overview
   // doesn't list, from Converting now by job id)
@@ -189,7 +189,7 @@ export function Overview() {
                 <td className="nm"><b>{w.name}</b> <span className={"pill " + cls}>{t}</span></td>
                 <td className="num" data-l="Speed">{js.map((j) => [j.fps != null && Math.round(j.fps) + " fps", j.speed != null && j.speed.toFixed(1) + "× realtime"].filter(Boolean).join(" · ")).filter(Boolean).join(", ") || (js.length ? "not known yet" : "")}</td>
                 <td className="num" data-l="Slots">{sl.used} of {sl.total}</td>
-                {load && <td className="num" data-l="CPU · GPU">{w.cpuPercent == null && w.gpuPercent == null ? "not measured yet" : (w.cpuPercent == null ? "-" : Math.round(w.cpuPercent) + "%") + " · " + (w.gpuPercent == null ? "none" : Math.round(w.gpuPercent) + "%")}</td>}
+                {load && <td className="num" data-l="CPU · GPU">{w.cpuPercent == null && w.gpuPercent == null ? "Not measured yet" : (w.cpuPercent == null ? "—" : Math.round(w.cpuPercent) + "%") + " · " + (w.gpuPercent == null ? "—" : Math.round(w.gpuPercent) + "%")}</td>}
               </tr>; })}</tbody></table>)}
       </section>
       <section className="sec" aria-labelledby="ov-j"><h2 id="ov-j">Converting now <Link className="more" to="/jobs?tab=running">All jobs</Link></h2>

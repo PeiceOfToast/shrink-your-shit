@@ -123,7 +123,7 @@ export function BackupSettings() {
       {pending && <Preview key={pending.preview.previewId} p={pending} onCancel={() => setPending(null)} />}
       {notHere ? <p className="muted">This server can't make backups yet.</p>
         : d.error && !d.data ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{d.error.message}</span></p>
-          : !d.data ? <div className="empty">Loading...</div>
+          : !d.data ? <div className="empty">Loading…</div>
             : <>
               <section className="card" aria-labelledby="bk-h">
                 <div className="hd"><h2 id="bk-h">Back up</h2><span className="sp" />

@@ -34,7 +34,7 @@ export function ProcessingSettings() {
       <div className="card">
         <div className="hd"><h2>Processing</h2></div>
         <div className="bd stack">
-          {!s ? <p className="muted">{st.error?.message ?? "Loading..."}</p> : now === undefined ? <p className="muted">This server doesn't say how often it looks for new files.</p> : <>
+          {!s ? <p className="muted">{st.error?.message ?? "Loading…"}</p> : now === undefined ? <p className="muted">This server doesn't say how often it looks for new files.</p> : <>
             <div className="field"><label htmlFor="scan-every">Look for new files</label>
               <select id="scan-every" className="input" value={now} disabled={busy} onChange={(e) => pick(Number(e.target.value))} aria-describedby="scan-every-h">
                 {options.map((v) => <option key={v} value={v}>{every(v) + (v === now && !listed.includes(v) && s.scanEverySource === "flag" ? " (set at startup)" : "")}</option>)}

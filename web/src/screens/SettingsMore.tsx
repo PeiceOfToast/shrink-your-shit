@@ -27,7 +27,7 @@ export function GeneralSettings() {
     <div className="stack">
       <PageHead icon="i-settings" title="Settings" />
       <SettingsTabs at="general" />
-      {!st.data ? <div className="empty">{st.error?.message ?? "Loading..."}</div> : <>
+      {!st.data ? <div className="empty">{st.error?.message ?? "Loading…"}</div> : <>
         <ThisComputer />
         <Languages start={st.data.languages ?? []} saved={st.reload} />
         <Access auth={!!st.data.authRequired} />
@@ -58,7 +58,7 @@ function ThisComputer() {
     <section className="card" aria-labelledby="pc-h"><div className="hd"><h2 id="pc-h">This computer</h2></div>
       <div className="bd stack">
         <div className="row"><strong>{s.role === "server" ? "Main server" : worker ? "Worker for " + name : "Not chosen yet"}</strong>
-          <button ref={btn} className="btn" type="button" onClick={() => (s.role === "unset" ? navigate("/start") : (setErr(null), setAsk(true)))}>Change...</button></div>
+          <button ref={btn} className="btn" type="button" onClick={() => (s.role === "unset" ? navigate("/start") : (setErr(null), setAsk(true)))}>Change…</button></div>
         {s.role === "server" && <p className="muted" style={{ margin: 0 }}>Keeps your libraries and this web page.</p>}
         {err && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{err}</span></p>}
       </div>
@@ -180,7 +180,7 @@ export function SafetySettings() {
     <div className="stack">
       <PageHead icon="i-settings" title="Settings" />
       <SettingsTabs at="safety" />
-      {!st.data ? <div className="empty">{st.error?.message ?? "Loading..."}</div> : (
+      {!st.data ? <div className="empty">{st.error?.message ?? "Loading…"}</div> : (
         <section className="card" aria-labelledby="keep-h"><div className="hd"><h2 id="keep-h">Keeping originals</h2></div>
           <div className="bd stack">
             <div className="field"><label htmlFor="keep-days">Keep originals for (days)</label>
@@ -218,7 +218,7 @@ function Updates({ version }: { version?: string }) {
               : d.available && d.latest ? <><span className="pill warn"><Icon id="i-download" />Version {d.latest} is available</span>{d.url && <> <a href={d.url} target="_blank" rel="noopener">What's new</a></>}</>
                 : d.error && d.checkedAt ? <span className="st warn"><Icon id="i-alert" /><span>Couldn't check for updates at {at(d.checkedAt)}.</span></span>
                   : d.checkedAt ? <span className="muted">Up to date. Checked {at(d.checkedAt)}.</span> : <span className="muted">Not checked yet.</span>}</p>
-          {d.enabled && d.install.state !== "downloading" && d.install.state !== "installing" && <button className="btn sm" type="button" disabled={busy} onClick={now}><Icon id="i-refresh" />{busy ? "Checking..." : "Check now"}</button>}
+          {d.enabled && d.install.state !== "downloading" && d.install.state !== "installing" && <button className="btn sm" type="button" disabled={busy} onClick={now}><Icon id="i-refresh" />{busy ? "Checking…" : "Check now"}</button>}
         </div>}
         {said && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{said}</span></p>}
         {d && <Install d={d} reload={u.reload} check={now} />}
@@ -274,9 +274,9 @@ function Install({ d, reload, check }: { d: UpdateNotice; reload: () => void; ch
     {last && !running && !gone && !rolling && (last.ok
       ? <p className="st ok" style={{ margin: 0 }}><Icon id="i-check-c" /><span>{noV(last.message)}.{d.url && !last.rolledBack && <> <a href={d.url} target="_blank" rel="noopener">What's new</a></>}</span></p>
       : <p className="st warn" style={{ margin: 0, alignItems: "flex-start" }}><Icon id="i-alert" /><span className="why" style={{ fontWeight: 400, color: "var(--text)" }}>{noV(last.message)}.</span></p>)}
-    {gone || rolling ? spin("Restarting...", "this page reconnects by itself.")
+    {gone || rolling ? spin("Restarting…", "this page reconnects by itself.")
       : st === "waiting" ? <p role="status" style={{ margin: 0 }}>Updating to {to} when the converting files finish.</p>
-      : st === "downloading" ? spin(`Downloading ${to}...`)
+      : st === "downloading" ? spin(`Downloading ${to}…`)
       : st === "installing" ? spin(`Installing ${to}.`, "The app restarts, and this page reconnects by itself.")
       : st === "failed" ? <p className="st warn" style={{ margin: 0, alignItems: "flex-start" }}><Icon id="i-alert" /><span>Couldn't update to {to}: <span style={{ fontWeight: 400, color: "var(--text)" }}>{d.install.error}. Nothing changed; still on {d.current}.</span></span></p>
       : null}
