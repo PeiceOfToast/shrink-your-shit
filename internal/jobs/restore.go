@@ -139,19 +139,15 @@ func (s *Store) RestoreBackup(path string) (BackupContents, error) {
 	if err != nil {
 		return BackupContents{}, err
 	}
-	tokens, err := workerTokens(tx)
-	if err != nil {
-		return BackupContents{}, err
-	}
 	for _, n := range names {
-		if n == "worker_pairings" { // live sign-in state: kept as it is
+		if keptTables[n] { // workers and their pairings: live state, kept as it is
 			continue
 		}
 		if _, err := tx.Exec(`DELETE FROM ` + quoteIdent(n)); err != nil {
 			return BackupContents{}, err
 		}
 	}
-	r := &restorer{tx: tx, tables: map[string]*liveTable{}, exists: map[string]bool{}, tokens: tokens}
+	r := &restorer{tx: tx, tables: map[string]*liveTable{}, exists: map[string]bool{}}
 	for _, n := range names {
 		r.exists[n] = true
 	}
@@ -377,37 +373,18 @@ type restorer struct {
 	tx     *sql.Tx
 	tables map[string]*liveTable
 	exists map[string]bool
-	tokens map[string]string // each worker's sign-in as it is now, by worker id
 }
 
-// workerSignInWarning is the preview's note about worker sign-ins (the restore keeps them as they are).
-const workerSignInWarning = "Worker sign-ins are kept as they are now. A restore does not bring back a worker's sign-in, so a worker you removed after this backup stays removed."
+// keptTables are the worker tables a restore never touches: live state, so a worker paired after the backup
+// stays, a worker removed after it stays removed, and the rows the backup holds for them are ignored.
+var keptTables = map[string]bool{"workers": true, "worker_pairings": true}
 
-// workerTokens reads each remote worker's sign-in as the open database has it now, by worker id.
-func workerTokens(tx *sql.Tx) (map[string]string, error) {
-	rows, err := tx.Query(`SELECT id, token_hash FROM workers`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := map[string]string{}
-	for rows.Next() {
-		var id, hash string
-		if err := rows.Scan(&id, &hash); err != nil {
-			return nil, err
-		}
-		out[id] = hash
-	}
-	return out, rows.Err()
-}
+// workerSignInWarning is the preview's note about the worker tables (the restore keeps them as they are).
+const workerSignInWarning = "Workers are kept as they are now. A restore doesn't add, remove or change workers, so pair again any worker that isn't listed."
 
 func (r *restorer) insert(table string, row map[string]any) error {
-	if !r.exists[table] || table == "worker_pairings" {
-		return nil // a table this database does not have, or sign-in state that is kept as it is
-	}
-	if table == "workers" { // the sign-in stays what it is now; a worker removed since the backup cannot sign in
-		id, _ := row["id"].(string)
-		row["token_hash"] = r.tokens[id]
+	if !r.exists[table] || keptTables[table] {
+		return nil // a table this database does not have, or live worker state that is kept as it is
 	}
 	lt, ok := r.tables[table]
 	if !ok {

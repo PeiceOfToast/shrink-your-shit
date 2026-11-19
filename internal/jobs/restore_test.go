@@ -159,16 +159,28 @@ func TestRestoreKeepsWorkerSignIns(t *testing.T) {
 	restoreExec(t, s, `UPDATE workers SET token_hash=? WHERE id='kept'`, hashOf("tok-now"))
 	restoreExec(t, s, `DELETE FROM worker_pairings WHERE code_hash='code-then'`)
 	restoreExec(t, s, `INSERT INTO worker_pairings(code_hash, expires) VALUES('code-now', '2099-01-01T00:00:00Z')`)
+	addRemoteWorker(t, s, "newer", "tok-newer") // paired after the backup
 
 	p, err := s.PreviewBackup(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(p.Warnings) == 0 || p.Warnings[len(p.Warnings)-1] != workerSignInWarning {
-		t.Errorf("the preview has no worker sign-in warning: %v", p.Warnings)
+	const wantWarning = "Workers are kept as they are now. A restore doesn't add, remove or change workers, so pair again any worker that isn't listed."
+	if len(p.Warnings) == 0 || p.Warnings[len(p.Warnings)-1] != wantWarning {
+		t.Errorf("the preview's worker warning: %v", p.Warnings)
 	}
 	if _, err := s.RestoreBackup(path); err != nil {
 		t.Fatal(err)
+	}
+	// (a) a worker paired after the backup keeps its sign-in
+	if _, err := s.WorkerByToken("tok-newer"); err != nil {
+		t.Errorf("a worker paired after the backup can't sign in after a restore: %v", err)
+	}
+	// (b) a worker removed after the backup is not listed after a restore
+	var gone int
+	s.db.QueryRow(`SELECT COUNT(*) FROM workers WHERE id='gone'`).Scan(&gone)
+	if gone != 0 {
+		t.Errorf("a worker removed after the backup is listed again")
 	}
 	if _, err := s.WorkerByToken("tok-gone"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("a worker revoked after the backup signs in again: %v", err)
