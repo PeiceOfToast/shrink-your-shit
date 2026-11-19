@@ -493,3 +493,23 @@ func TestUnreachableNamesTheHostOnly(t *testing.T) {
 		t.Errorf("a log line shows the secret: %s", lg.all())
 	}
 }
+
+// A failure's message is its stored sentence, not its code, and leaves ffmpeg's lines out.
+func TestFailureTextIsTheSentenceNotTheCode(t *testing.T) {
+	st, svc, _, _ := fixture(t)
+	start(t, svc)
+	r := newRx(t, 200)
+	mustCreate(t, svc, NewTarget{Name: "hook", Kind: "webhook", URL: r.srv.URL + "/hook/tok"})
+	id := enqueue(t, st, "/media/a.mkv")
+	claim(t, st)
+	if err := st.Fail(id, "convert_failed", "Converting stopped with an error. Your original was not touched.\nffmpeg: exit status 1"); err != nil {
+		t.Fatal(err)
+	}
+	svc.Tick()
+	svc.Idle()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.bodies) != 1 || r.bodies[0]["text"] != "Failed: a.mkv. Converting stopped with an error." {
+		t.Fatalf("failure message: %v", r.bodies)
+	}
+}

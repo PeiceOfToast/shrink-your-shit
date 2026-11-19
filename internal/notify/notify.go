@@ -239,15 +239,18 @@ func (s *Service) events() {
 		if e.Kind != "job" {
 			continue
 		}
-		name := "A file"
+		name, why := "A file", e.Reason
 		if j, err := s.st.Get(e.JobID); err == nil {
 			name = filepath.Base(j.Path)
+			if w := firstSentence(j.Error); w != "" { // the reason's sentence, not its code
+				why = w
+			}
 		}
 		switch e.To {
 		case "failed":
-			s.notifyAll("jobFailed", "/jobs?tab=failed", fmt.Sprintf("Failed: %s. %s", name, e.Reason), "job.failed")
+			s.notifyAll("jobFailed", "/jobs?tab=failed", fmt.Sprintf("Failed: %s. %s", name, why), "job.failed")
 		case "kept":
-			s.notifyAll("needsYou", "/jobs?tab=completed", fmt.Sprintf("Kept the original of %s: %s", name, e.Reason), "job.kept")
+			s.notifyAll("needsYou", "/jobs?tab=completed", fmt.Sprintf("Kept the original of %s: %s", name, why), "job.kept")
 		case "done":
 			s.notifyAll("fileFinished", "/jobs?tab=completed", fmt.Sprintf("Converted: %s.", name), "job.done")
 		}
@@ -356,6 +359,18 @@ func summaryDue(sum Summary, now, last time.Time, b jobs.Batch) (send, advance b
 		advance = now.Weekday() == time.Monday && !now.Before(todayAt) && last.Before(todayAt)
 	}
 	return advance && found, advance
+}
+
+// firstSentence is the first sentence of a job's stored words: enough to say why, without ffmpeg's lines.
+func firstSentence(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexAny(s, "\n"); i >= 0 {
+		s = s[:i]
+	}
+	if i := strings.Index(s, ". "); i >= 0 {
+		s = s[:i+1]
+	}
+	return strings.TrimSpace(s)
 }
 
 // summaryText is the contract's batch line: "N converted, X GB smaller, Y waiting to be freed, Z failed."
