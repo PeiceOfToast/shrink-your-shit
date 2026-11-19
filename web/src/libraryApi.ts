@@ -59,14 +59,42 @@ export async function getSettings(): Promise<Answer<FirstRunSettings>> {
 }
 // #324 update notice: GET is the last check, kept (asks GitHub for nothing); POST check asks now (409 updates_off when off).
 export interface UpdateNotice { enabled: boolean; current: string; latest: string | null; available: boolean; notes: string; url: string | null;
-  publishedAt: string | null; checkedAt: string | null; error: string | null; installType: "script" | "windows" | "docker" | "source" }
+  publishedAt: string | null; checkedAt: string | null; error: string | null; installType: "script" | "windows" | "docker" | "source";
+  // #331 (contract ## Update): how this install updates, its install state, and the last finished update or rollback.
+  method: "helper" | "commands" | "none"; commands: string[] | null;
+  install: { state: "idle" | "waiting" | "downloading" | "installing" | "failed"; error: string | null };
+  lastResult: { ok: boolean; from: string; to: string; message: string; dataRestored: boolean } | null }
 let mockChecked = Date.now() - 36e5; // the sample's last check, kept like the server's
-const mockUpdate = (): UpdateNotice => { const on = !!mock.mockState().settings.checkForUpdates, q = new URLSearchParams(location.search), up = q.has("update");
-  return { enabled: on, current: "2.0.0", latest: on ? (up ? "2.1.0" : "2.0.0") : null, available: on && up, notes: "", url: on && up ? "https://github.com/" : null,
-    publishedAt: null, checkedAt: on ? new Date(mockChecked).toISOString() : null, error: on && q.has("updateerr") ? "Get \"https://api.github.com/...\": dial tcp: i/o timeout" : null, installType: "script" }; };
+let mockInstall: UpdateNotice["install"]["state"] | null = null; // set by a mock Update click
+// ?upd=can|jobs|waiting|downloading|installing|failed|done|rolledback|docker|commands|windows|source picks the update block.
+const upd = () => new URLSearchParams(location.search).get("upd") ?? "";
+const mockUpdate = (): UpdateNotice => { const on = !!mock.mockState().settings.checkForUpdates, q = new URLSearchParams(location.search), u = upd();
+  const up = q.has("update") || (!!u && u !== "done"), it = u === "docker" ? "docker" : u === "windows" ? "windows" : u === "source" ? "source" : "script";
+  const st = mockInstall ?? (["waiting", "downloading", "installing", "failed"].includes(u) ? u as UpdateNotice["install"]["state"] : "idle");
+  return { enabled: on, current: "2.0.0", latest: on ? (up ? "2.1.0" : "2.0.0") : null, available: on && up, notes: "", url: on ? "https://github.com/" : null,
+    publishedAt: null, checkedAt: on ? new Date(mockChecked).toISOString() : null, error: on && q.has("updateerr") ? "Get \"https://api.github.com/...\": dial tcp: i/o timeout" : null, installType: it,
+    method: u === "docker" || u === "commands" ? "commands" : it === "windows" || it === "source" ? "none" : "helper",
+    commands: u === "docker" ? ["docker compose pull", "docker compose up -d"] : u === "commands" ? ["curl -fsSL https://raw.githubusercontent.com/PeiceOfToast/shrink-your-shit/main/install.sh | sh"] : null,
+    install: { state: st, error: st === "failed" ? "checksum mismatch for shrink-your-shit_2.1.0_linux_amd64.tar.gz" : null },
+    lastResult: u === "done" ? { ok: true, from: "1.9.0", to: "2.0.0", message: "Updated from v1.9.0 to v2.0.0", dataRestored: false }
+      : u === "rolledback" ? { ok: false, from: "2.0.0", to: "2.1.0", message: "Update to v2.1.0 failed; rolled back to v2.0.0", dataRestored: false } : null }; };
 export const getUpdate = (): Promise<Answer<UpdateNotice>> => (!MOCK ? call("GET", "/api/v2/update")
   : new URLSearchParams(location.search).has("updatefail") ? M({ error: { code: "internal", message: "Couldn't load the update status." } }) : M(mockUpdate()));
 export const checkUpdate = (): Promise<Answer<UpdateNotice>> => (MOCK ? M((mockChecked = Date.now(), mockUpdate())) : call("POST", "/api/v2/update/check"));
+// POST install: 202 with the status body; 409 job_running / not_available / update_in_progress / updates_off / install_unsupported.
+export const installUpdate = (when: "now" | "after-job"): Promise<Answer<UpdateNotice>> => {
+  if (!MOCK) return call("POST", "/api/v2/update/install", { when });
+  const refuse = new URLSearchParams(location.search).get("updrefuse");
+  if (refuse) return M({ error: { code: refuse, message: refuse } });
+  if (when === "now" && upd() === "jobs") return M({ error: { code: "job_running", message: "a job is running; use after-job" } });
+  return M((mockInstall = when === "now" ? "downloading" : "waiting", mockUpdate()));
+};
+// How many files are converting now (the summary's activity), so the button can wait for them.
+export const getConverting = async (): Promise<Answer<number>> => {
+  if (MOCK) return upd() === "jobs" ? 2 : 0;
+  const r = await call<{ activity: { converting: number } }>("GET", "/api/v2/summary");
+  return failed(r) ? r : r.activity.converting;
+};
 export async function patchSettings(p: Partial<FirstRunSettings>): Promise<Answer<unknown>> {
   if (MOCK) return mock.setSettings(p);
   return call("PATCH", "/api/v2/settings", p);
