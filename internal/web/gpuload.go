@@ -3,6 +3,7 @@
 package web
 
 import (
+	"context"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -15,14 +16,20 @@ import (
 // gpuPercent is this computer's GPU use for the overview's workers: NVIDIA only, read from nvidia-smi
 // when it is on PATH (the busiest GPU's utilization). Anything else, or no nvidia-smi, is nil (not
 // measured). The command runs at most once every five seconds: the overview is fetched on each event.
+// The lock covers only the cache: the command runs without it, so a slow read never holds up others.
 func gpuPercent(now time.Time) *float64 {
 	gpuUse.mu.Lock()
-	defer gpuUse.mu.Unlock()
 	if gpuUse.ok && now.Sub(gpuUse.at) < 5*time.Second {
-		return gpuUse.val
+		v := gpuUse.val
+		gpuUse.mu.Unlock()
+		return v
 	}
-	gpuUse.val, gpuUse.at, gpuUse.ok = readNvidiaSMI(), now, true
-	return gpuUse.val
+	gpuUse.mu.Unlock()
+	v := readNvidiaSMI()
+	gpuUse.mu.Lock()
+	gpuUse.val, gpuUse.at, gpuUse.ok = v, now, true
+	gpuUse.mu.Unlock()
+	return v
 }
 
 // gpuUse is gpuPercent's cache.
@@ -34,12 +41,20 @@ var gpuUse struct {
 }
 
 // readNvidiaSMI is the reading gpuPercent caches; tests replace it.
-var readNvidiaSMI = func() *float64 {
+var readNvidiaSMI = func() *float64 { return queryNvidiaSMI(2 * time.Second) }
+
+// queryNvidiaSMI runs nvidia-smi and reads the busiest GPU. A command that takes longer than timeout is
+// stopped and reads as nil (not measured), so a wedged driver cannot hang the overview.
+func queryNvidiaSMI(timeout time.Duration) *float64 {
 	path, err := exec.LookPath("nvidia-smi")
 	if err != nil {
 		return nil
 	}
-	out, err := exec.Command(path, "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits")
+	cmd.WaitDelay = time.Second // a child that keeps the output open must not hold the wait
+	out, err := cmd.Output()
 	if err != nil {
 		return nil
 	}
