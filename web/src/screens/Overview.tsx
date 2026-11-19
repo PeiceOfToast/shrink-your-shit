@@ -2,7 +2,7 @@
 // GET /api/v2/overview (#177): the headline (space saved, NET, never added to the trash's GROSS bytes), the workers,
 // what is converting now, the libraries (the Libraries page's own figures) and the last 30 days. Live: job.progress
 // moves the bars in place; a job, library or worker change refetches. Every number comes from the server.
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, count, encoderName, plural } from "../format";
@@ -38,7 +38,7 @@ type Series = { label: string; color: string; value: (d: Day) => number };
 // waiting are shown and named apart), thin bars with a 4 px rounded top on the baseline, 2 px gaps between parts,
 // hairline solid grid, a legend for 2 or more parts, a tooltip per day and the table view below. Days before history
 // are a flat stub, not a zero.
-function DayBars({ title, note, days, series, fmt, tick = true, extra }: { title: string; note: string; days: Day[]; series: Series[]; fmt: (n: number) => string; tick?: boolean; extra?: (d: Day) => string | null }) {
+function DayBars({ title, note, days, series, fmt, tick = true, extra }: { title: string; note: ReactNode; days: Day[]; series: Series[]; fmt: (n: number) => string; tick?: boolean; extra?: (d: Day) => string | null }) {
   const [at, setAt] = useState<number | null>(null);
   const W = 600, H = 150, top = 14, base = H - 22, n = days.length, bw = W / n, barW = Math.min(16, bw * 0.7);
   const sum = (d: Day) => series.reduce((a, x) => a + x.value(d), 0), max = Math.max(1, ...days.filter((d) => d.recorded).map(sum));
@@ -118,7 +118,8 @@ export function Overview() {
   const hasSaved = rec.some((d) => d.savedBytes != null), three = hasSaved && rec.some((d) => d.couldFreeBytes != null), kept = !three && h.couldFree > 0 && hasSaved, split = !kept && hasSaved, load = rows.some((w) => w.cpuPercent != null || w.gpuPercent != null);
   // design 11-19 (SCREENS.md:37): never "0 KB" in the note, only the parts there are; the legend keeps all three, kept is --chart-muted
   const freedPart = Math.max(0, tot.saved - tot.waiting - tot.kept), spaceNote = [freedPart > 0 ? bytes(freedPart) + " freed" : "nothing freed yet",
-    tot.waiting > 0 && bytes(tot.waiting) + " waiting in the trash", tot.kept > 0 && bytes(tot.kept) + " in kept originals"].filter(Boolean).join(" · ");
+    tot.waiting > 0 && <Link to="/jobs?tab=completed&kept=1">{bytes(tot.waiting) + " waiting in the trash"}</Link>, tot.kept > 0 && bytes(tot.kept) + " in kept originals"]
+    .filter(Boolean).map((p, i) => <Fragment key={i}>{i > 0 && " · "}{p}</Fragment>);
   const workerOf = (id: string) => rows.find((w) => w.jobs.some((j) => j.jobId === id))?.name;
   const more = [h.waitingToFree > 0 && bytes(h.waitingToFree) + (h.freed > 0 ? " more" : " frees") + (h.nextFreeAt ? " by " + dayName(h.nextFreeAt.slice(0, 10)) : ""), h.couldFree > 0 && "could free " + bytes(h.couldFree) + " if you remove the originals"].filter(Boolean).join(" · ");
   return (
