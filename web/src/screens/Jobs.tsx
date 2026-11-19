@@ -138,8 +138,9 @@ export function Jobs() {
     setSel([]); page.reload();
   };
   const actions = <>
-    <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("retry")}><Icon id="i-refresh" />Retry</button>
-    {(tab === "skipped" || tab === "failed") && <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("requeue")}><Icon id="i-arrow-r" />Put back in queue</button>} {/* only where the server takes it: skips (convert-again) and failed jobs */}
+    {/* one word per action (pass 5): Retry only where the server can retry (failed, kept); a skip is Convert again */}
+    {(tab === "failed" || kept) && <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("retry")}><Icon id="i-refresh" />Retry</button>}
+    {tab === "skipped" && <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("requeue")}><Icon id="i-arrow-r" />Convert again</button>}
     <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("cancel")}><Icon id="i-stop" />Cancel</button>
     {tab === "waiting" && <span className="row nw" style={{ gap: 4 }}>
       <select className="input sm" aria-label="Priority" value={prio} onChange={(e) => setPrio(e.target.value as Pin | "none")}><option value="first">First</option><option value="none">Normal</option><option value="last">Last</option></select>
@@ -260,7 +261,7 @@ function CheckFound({ lines, reason }: { lines: string[]; reason: string }) {
   return (
     <section className="note" role="region" aria-label="What the check found" style={{ display: "block" }}>
       <h3><Icon id="i-info" /> What the check found</h3>
-      {reason && <p style={{ fontSize: "var(--fs-lg)" }}>{reason}</p>}
+      {reason && <p>{reason.charAt(0).toUpperCase() + reason.slice(1)}</p>}
       <FoundRows rows={f.rows} />
       {copyBox("What ffmpeg said", f.errors)}
       <Driver ls={f.driver} />
@@ -479,13 +480,13 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           <div className="sp"><h2 id="jd-h" className="clamp2" title={name}><FileName n={name} /></h2>{state && <span style={{ alignSelf: "flex-start" }}><Pill j={{ state, retryAt: j?.retryAt ?? own?.retryAt, subState: own?.subState, reason: j?.reason ?? own?.reason, warning: j?.warning }} /></span>}</div>
           {/* SCREENS V6b header: Retry, Cancel or Stop, and the job ID to copy (the body keeps the rest) */}
           <div className="row nw" style={{ gap: 6, flexWrap: "wrap" }}>
-            {(state === "failed" || state === "retry_wait") && <button className="btn sm" type="button" onClick={() => run("retry")}><Icon id="i-refresh" />{state === "retry_wait" ? "Try now" : "Retry"}</button>}
-            {active && <button className="btn sm" type="button" onClick={() => run("cancel")}><Icon id="i-stop" />{state === "queued" || state === "retry_wait" ? "Cancel" : "Stop"}</button>}
+            {active &&<button className="btn sm" type="button" onClick={() => run("cancel")}><Icon id="i-stop" />{state === "queued" || state === "retry_wait" ? "Cancel" : "Stop"}</button>}
             <button className="btn sm ghost" type="button" title="Copy the job ID" onClick={() => navigator.clipboard?.writeText(id).then(() => setSaid("Job ID " + id + " copied."), () => setSaid("Job ID: " + id))}><Icon id="i-copy" />ID {id}</button>
           </div>
         </div>
         <div className="bd">
-          {(done && ca?.possible) || (state === "skipped" || state === "cancelled") ? <div className="row">
+          {(done && ca?.possible) || (state === "skipped" || state === "cancelled" || state === "failed" || state === "retry_wait") ? <div className="row">
+            {(state === "failed" || state === "retry_wait") && <button className="btn sm" type="button" onClick={() => run("retry")}><Icon id="i-refresh" />{state === "retry_wait" ? "Try now" : "Retry"}</button>}
             {done && ca?.possible && <button className="btn sm" type="button" aria-expanded={again} onClick={() => setAgain(!again)}><Icon id="i-arrow-r" />Convert again</button>}
             {(state === "skipped" || state === "cancelled") && (!j?.removed || !!own?.id.startsWith("skip-")) && <button className="btn sm" type="button" onClick={() => run("requeue")}><Icon id="i-arrow-r" />Convert again</button>}
             <span className="sp" />
@@ -506,7 +507,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           <section><h3>File</h3><dl className="kv">
             {(own?.path ?? j?.file?.path) && <><dt>Source</dt><dd className="mono sm">{own?.path ?? j?.file?.path}</dd></>} {/* review 54ff228: no '-' when the server doesn't keep the path (a removed library's job) */}
             {(j?.library || own) && <><dt>Library</dt><dd>{j?.library?.name ?? own?.library}</dd></>}
-            {own?.state === "completed" && <>{own.originalState !== "restored" && <><dt>Size</dt><dd>{saved(own.beforeBytes, own.afterBytes)}</dd></>} {/* review 66edc3d P3: after a restore the file is the original again: no saving */}
+            {own?.state === "completed" && <>{own.originalState !== "restored" && <><dt>Size</dt><dd>{saved(own.beforeBytes, own.afterBytes)}</dd>{(own.afterBytes ?? 0) > (own.beforeBytes ?? 0) && <><dt /><dd className="muted sm">Used because it passed every check, even though it is bigger.</dd></>}</>} {/* review 66edc3d P3: after a restore the file is the original again: no saving */}
               <dt>Original</dt><dd>{kept ? keptLine : own.originalState === "kept" ? keptWords(own.keptDaysLeft ?? 0) : own.originalState === "restored" ? "Put back in place. The smaller version was deleted." : own.originalState === "deleted" ? "Deleted. The new file replaced it." : own.originalState === "left_in_place" ? "Left where it was. The new file is in another folder." + freeNote : own.originalState === "kept_beside" ? "Kept next to the new file, in the same folder." + freeNote : "Left in place"}</dd></>}
             {!own && kept && <><dt>Original</dt><dd>{keptLine}</dd></>}
           </dl>
