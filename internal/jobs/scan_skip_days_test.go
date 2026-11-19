@@ -76,7 +76,7 @@ func TestMigration48AddsDecidedAtAndKeepsRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range []string{`ALTER TABLE files DROP COLUMN decided_at`, `PRAGMA user_version=47`} {
+	for _, q := range []string{`ALTER TABLE files DROP COLUMN decided_at`, `ALTER TABLE jobs DROP COLUMN output_gone_at`, `PRAGMA user_version=47`} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}
@@ -113,7 +113,10 @@ func TestMigration48AddsDecidedAtAndKeepsRows(t *testing.T) {
 }
 
 // rewindDecidedAt takes away migration 48's column, for tests that set user_version below it (it runs again on the next open).
-func rewindDecidedAt(s *Store) { s.db.Exec(`ALTER TABLE files DROP COLUMN decided_at`) }
+func rewindDecidedAt(s *Store) {
+	s.db.Exec(`ALTER TABLE files DROP COLUMN decided_at`)
+	s.db.Exec(`ALTER TABLE jobs DROP COLUMN output_gone_at`)
+}
 
 // A file still changing (its first look, or a download in progress) is not a skip: it counts on no day, and a
 // conversion it changes after is still that conversion's day.
