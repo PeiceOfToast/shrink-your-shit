@@ -66,7 +66,7 @@ code,.mono{font-family:var(--mono);font-size:.92em}
 .pop hr{border:0;border-top:1px solid var(--border);margin:6px 0}
 .swatch{width:16px;height:16px;border-radius:50%;border:1px solid var(--border-strong);flex:none}
 .btn.menubtn{display:none}
-.proto{display:flex;align-items:center;gap:8px;padding:7px var(--pad);font-size:var(--fs-sm);background:color-mix(in srgb,var(--warning) 14%,var(--bg));border-bottom:1px solid color-mix(in srgb,var(--warning) 45%,var(--bg))}
+.proto{display:flex;align-items:center;gap:8px;padding:8px var(--pad);font-size:var(--fs-sm);background:color-mix(in srgb,var(--warning) 14%,var(--bg));border-bottom:1px solid color-mix(in srgb,var(--warning) 45%,var(--bg))}
 .proto .ic{color:var(--warning-text)}
 .connbar{display:none;align-items:center;gap:8px;padding:8px var(--pad);background:color-mix(in srgb,var(--error) 14%,var(--bg));border-bottom:1px solid color-mix(in srgb,var(--error) 45%,var(--bg))}
 .connbar .ic{color:var(--error-text)}
@@ -165,7 +165,7 @@ table.tbl{width:100%;border-collapse:collapse}
 .bar{height:6px;border-radius:3px;background:var(--raised);overflow:hidden;min-width:70px}
 .bar>i{display:block;height:100%;background:var(--accent);border-radius:3px}
 .bar.ok>i{background:var(--success)}.bar.bad>i{background:var(--error)}
-.prog{display:flex;flex-direction:column;gap:3px;min-width:80px}
+.prog{display:flex;flex-direction:column;gap:4px;min-width:80px}
 .tabs{display:flex;gap:2px;box-shadow:inset 0 -1px var(--border);overflow-x:auto;max-width:100%} /* line drawn inside the box: nothing overflows by a pixel, so no scroll bar */
 .tabs a,.tabs button{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 14px;color:var(--text-2);text-decoration:none;white-space:nowrap;border:0;background:none;font:inherit;cursor:pointer;border-bottom:3px solid transparent}
 .tabs [aria-selected=true],.tabs [aria-current=page]{color:var(--text);font-weight:var(--fw-strong);border-bottom-color:var(--accent)}
@@ -198,11 +198,11 @@ table.tbl{width:100%;border-collapse:collapse}
 .palette .ftr{display:flex;gap:16px;padding:8px 14px;border-top:1px solid var(--border);color:var(--text-2);font-size:var(--fs-sm);flex-wrap:wrap}
 .drawer-open .scrim{display:block}
 .drawer{position:fixed;top:0;right:0;bottom:0;width:min(520px,100vw);background:var(--surface);border-left:1px solid var(--border-strong);box-shadow:-8px 0 32px rgb(0 0 0/.4);z-index:65;display:flex;flex-direction:column}
-.drawer>.hd{display:flex;gap:var(--gap);align-items:flex-start;padding:14px var(--pad);border-bottom:1px solid var(--border)}
+.drawer>.hd{display:flex;gap:var(--gap);align-items:flex-start;padding:12px var(--pad);border-bottom:1px solid var(--border)}
 .drawer>.bd{overflow:auto;padding:var(--pad);display:flex;flex-direction:column;gap:calc(var(--gap)*1.5)}
 .drawer h3{margin-bottom:6px}
 .tl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:0}
-.tl li{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);align-items:center}
+.tl li{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);align-items:center}
 .tl li:last-child{border-bottom:0}
 .logbox{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;font-family:var(--mono);font-size:12px;max-height:150px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
 .mockbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
@@ -657,7 +657,7 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .joinc{padding:12px 14px;display:flex;flex-direction:column;gap:6px}.joinc h3{margin:0}.joinc .facts{overflow-wrap:anywhere}
 @media (max-width:640px){.joinc .jbtn>.btn{flex:1 1 0;min-height:44px;justify-content:center}}
 .enroll{max-width:640px;margin:0 auto;width:100%}.enroll h1,.enroll h2{margin:0}
-.enroll-card{align-items:flex-start;padding:14px 16px;min-height:0;cursor:pointer}.enroll-card input{margin-top:3px;accent-color:var(--accent)}
+.enroll-card{align-items:flex-start;padding:12px 16px;min-height:0;cursor:pointer}.enroll-card input{margin-top:3px;accent-color:var(--accent)}
 .enroll-card>span{display:flex;flex-direction:column;gap:2px}.enroll-card.off{cursor:default}.enroll-card.off strong{color:var(--text-2)}
 @media (max-width:640px){.enroll-btns{flex-direction:column;align-items:stretch}.enroll-btns>.btn{justify-content:center;min-height:44px}}
 .addpanel{display:flex;flex-direction:column;gap:8px;max-width:640px}.addpanel textarea{width:100%;resize:none;overflow-wrap:anywhere}
