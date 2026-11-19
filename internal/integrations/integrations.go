@@ -528,11 +528,11 @@ func (s *Service) tellOne(jobID int64, r record, finalPath string) {
 		return
 	}
 	summary, ok, answered, owns := s.rescan(ki, r.URL, key, toTheirs(finalPath, r.Mappings))
-	if owns { // an instance without this file's show or movie (a Radarr told about an episode) leaves no step
+	if owns { // an instance without this file's show or movie (a Radarr told about an episode) leaves no step or log line
 		s.step(jobID, ok, summary)
+		s.logf("%s: %s", ki.label, summary)
 	}
 	s.note(r.ID, Result{OK: ok, Message: summary, At: s.now()}, answered)
-	s.logf("%s: %s", ki.label, summary)
 }
 
 func (s *Service) step(jobID int64, ok bool, summary string) {

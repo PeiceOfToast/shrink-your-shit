@@ -221,6 +221,9 @@ func TestAnInstanceWithoutTheFileStaysQuiet(t *testing.T) {
 	if lr := list[0].LastResult; lr == nil || !lr.OK || lr.Message != "Sonarr doesn't have this file's show." {
 		t.Fatalf("lastResult = %+v", lr)
 	}
+	if strings.Contains(h.logs.String(), "doesn't have") {
+		t.Fatalf("an instance without the file wrote to the app log: %s", h.logs.String())
+	}
 }
 
 func TestWrongKeySaysSo(t *testing.T) {
