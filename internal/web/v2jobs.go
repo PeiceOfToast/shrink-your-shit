@@ -164,7 +164,7 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 				return
 			}
 			d := map[string]any{"id": strconv.FormatInt(id, 10), "state": v2State(last.To, nil, nil), "reason": reasonOf(last),
-				"events": v2Events(events), "steps": steps, "attempts": last.Attempts, "removed": true, "file": nil}
+				"warning": encoderWarning(steps), "events": v2Events(events), "steps": steps, "attempts": last.Attempts, "removed": true, "file": nil}
 			for _, e := range events { // its file as recorded when it went (ui-shop 10:54Z: not "Job 8")
 				if e.Path != "" {
 					d["file"] = map[string]any{"path": e.Path, "name": filepath.Base(e.Path), "folder": filepath.Dir(e.Path)}
@@ -183,7 +183,7 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 			return
 		}
 		d := map[string]any{"id": strconv.FormatInt(id, 10), "state": v2State(string(j.Status), steps, livePercent(id)),
-			"file": map[string]any{"path": j.Path, "bytes": j.SizeBefore}, "attempts": j.Attempts,
+			"warning": encoderWarning(steps), "file": map[string]any{"path": j.Path, "bytes": j.SizeBefore}, "attempts": j.Attempts,
 			"retryAt": nilIfEmpty(j.RetryAt), "error": nilIfEmpty(j.Error), "worker": nilIfEmpty(j.Worker),
 			"createdAt": j.Created, "updatedAt": j.Updated, "steps": steps, "events": v2Events(events), "removed": false,
 			"path": []string{}}
@@ -503,4 +503,15 @@ func convertAgainOf(store *jobs.Store, id int64, keepDays int) map[string]any {
 		a["reason"] = map[string]any{"code": c.Code, "message": c.Message, "deletedAt": nilIfEmpty(c.DeletedAt)}
 	}
 	return a
+}
+
+// encoderWarning is a job's warning when a graphics encoder fell back to the processor: the step's words (nil
+// when none). The job keeps its state; the warning only tells the person why it took longer.
+func encoderWarning(steps []jobs.Step) any {
+	for _, st := range steps {
+		if st.Step == jobs.EncoderFallbackStep {
+			return st.Words
+		}
+	}
+	return nil
 }

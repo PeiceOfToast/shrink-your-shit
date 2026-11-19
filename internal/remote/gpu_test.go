@@ -59,7 +59,9 @@ func recordingServer(t *testing.T) (*httptest.Server, *recorder) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/note"):
 			text, _ := in["text"].(string)
-			rec.notes = append(rec.notes, text)
+			if text != "" { // a note with no text is a structured signal (a graphics encoder's success), not a job-log line
+				rec.notes = append(rec.notes, text)
+			}
 		case strings.HasSuffix(r.URL.Path, "/progress") && in["stage"] == "converting":
 			enc, _ := in["encoder"].(string)
 			rec.encoders = append(rec.encoders, enc)
