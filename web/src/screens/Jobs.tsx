@@ -249,13 +249,20 @@ function WhyFailed({ id, msg, code, worker, f, found = [] }: { id: string; msg: 
     </section>);
 }
 
+// G6: copy the whole log, not just the search hits; over about 1 MB it is too long for the clipboard
+const copyLogText = (t: string, say: (s: string) => void) => t.length > 1_000_000 ? say("Too long to copy; use Download.")
+  : navigator.clipboard ? navigator.clipboard.writeText(t).then(() => say("Log copied."), () => say("Couldn't copy; use Download.")) : say("Couldn't copy; use Download.");
 // count of q in a step's searchable text (case-insensitive)
 const matches = (st: { name: string; command: string | null; output: string | string[]; result: string | null; found?: string[] }, q: string) => [st.name, st.command ?? "", text(st.output), (st.found ?? []).join("\n"), st.result ?? ""].join("\n").toLowerCase().split(q.toLowerCase()).length - 1;
 // E: a finished job's log by step (GET /log), SCREENS V6b: each step a row that opens; the failed step open; inside a step
 // its command, its source, its picture check, its ffmpeg output (last 200 lines on a failure, the rest by download), its
 // result; the log's last line is the job's final line.
 function StepLog({ d, id, worker, failedIdx, kept }: { d: { loaded: boolean; data?: JobLog; error?: { message: string } }; id: string; worker: string | null; failedIdx: number | null; kept: boolean }) {
-  const keep = useData(getSettings, []), [q, setQ] = useState("");
+  const keep = useData(getSettings, []), [q, setQ] = useState(""), [copied, setCopied] = useState("");
+  useEffect(() => setCopied(""), [id]);
+  // a finished job's whole log is on the server (the steps here keep only the last 200 lines of a failure)
+  const copyAll = () => MOCK ? copyLogText((d.data?.steps ?? []).map((st) => [st.name, st.command, text(st.output), st.result].filter(Boolean).join("\n")).join("\n"), setCopied)
+    : fetch("/api/v2/jobs/" + encodeURIComponent(id) + "/log/download", { credentials: "same-origin" }).then((r) => (r.ok ? r.text() : Promise.reject())).then((t) => copyLogText(t, setCopied), () => setCopied("Couldn't copy; use Download."));
   if (!d.loaded) return <section><h3>Log</h3><p className="muted">Loading the log...</p></section>;
   if (!d.data) return <section><h3>Log</h3><p className="muted">{d.error?.message ?? "The log can't be shown."}</p></section>;
   const l = d.data, days = (keep.data as { logKeepDays?: number } | undefined)?.logKeepDays ?? 30;
@@ -273,9 +280,11 @@ function StepLog({ d, id, worker, failedIdx, kept }: { d: { loaded: boolean; dat
       {/* V6b Search: every step's command, output and result; the steps with matches open and are counted */}
       <div className="row" style={{ gap: 6, margin: "8px 0", flexWrap: "wrap" }}>
         <input className="input sm" type="search" placeholder="Search the log" aria-label="Search the log" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
+        <button className="btn sm ghost" type="button" onClick={copyAll}><Icon id="i-copy" />Copy log</button>
         {!MOCK && <a className="btn sm" href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}><Icon id="i-download" />Download the full log</a>}
         {q && <span className="sm muted" role="status">{(() => { const ns = l.steps.map((st) => matches(st, q)), t = ns.reduce((x, y) => x + y, 0), k = ns.filter((x) => x > 0).length; return t ? t + " matches in " + k + " step" + (k > 1 ? "s" : "") : "No match"; })()}</span>}
       </div>
+      <p className="sm muted" role="status" style={copied ? { margin: "0 0 6px" } : { display: "contents" }}>{copied}</p>
       {l.steps.map((st, i) => {
         const hit = q ? matches(st, q) : 0;
         const pr = st.probe as Probe | null, v = pr?.streams?.find((x) => x.type === "video"), n = (t: string) => (pr?.streams ?? []).filter((x) => x.type === t).length;
@@ -303,10 +312,10 @@ function StepLog({ d, id, worker, failedIdx, kept }: { d: { loaded: boolean; dat
 }
 
 function JobLog({ id, name }: { id: string; name: string }) {
-  const [text, setText] = useState(""), [done, setDone] = useState(false), [gone, setGone] = useState(false), [q, setQ] = useState(""), [follow, setFollow] = useState(true);
+  const [text, setText] = useState(""), [done, setDone] = useState(false), [gone, setGone] = useState(false), [q, setQ] = useState(""), [follow, setFollow] = useState(true), [copied, setCopied] = useState("");
   const box = useRef<HTMLPreElement>(null);
   useEffect(() => {
-    setText(""); setDone(false); setGone(false);
+    setText(""); setDone(false); setGone(false); setCopied("");
     if (MOCK) { setText("01:12:03 started on This computer\n01:12:04 Converting video: HEVC, Balanced quality\n01:13:10 10% done · about 9 min left\n01:14:22 25% done · about 7 min left\n"); setDone(true); return; }
     const es = new EventSource("/api/v2/jobs/" + encodeURIComponent(id) + "/log/stream?from=0");
     es.addEventListener("job.log", (e) => { const d = JSON.parse((e as MessageEvent).data) as { text: string }; setText((t) => t + d.text); });
@@ -316,14 +325,17 @@ function JobLog({ id, name }: { id: string; name: string }) {
   }, [id]);
   useEffect(() => { if (follow && box.current) box.current.scrollTop = box.current.scrollHeight; }, [text, follow]);
   const shown = q ? text.split("\n").filter((l) => l.toLowerCase().includes(q.toLowerCase())).join("\n") : text;
+  const copyLog = () => copyLogText(text, setCopied);
   const download = () => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" })); a.download = name.replace(/\.[^.]+$/, "") + ".log"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); };
   return (
     <section><h3>Log</h3>
       <div className="row" style={{ gap: 6, marginBottom: 6 }}>
         <input className="input sm" type="search" placeholder="Search the log" aria-label="Search the log" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
         {!done && <button className="btn sm ghost" type="button" aria-pressed={follow} onClick={() => setFollow(!follow)}>{follow ? "Stop following" : "Follow"}</button>}
+        <button className="btn sm ghost" type="button" disabled={!text} onClick={copyLog}><Icon id="i-copy" />Copy log</button>
         <button className="btn sm ghost" type="button" disabled={!text} onClick={download}><Icon id="i-download" />{q ? "Download the whole log" : "Download"}</button>
       </div>
+      <p className="sm muted" role="status" style={copied ? { margin: "0 0 6px" } : { display: "contents" }}>{copied}</p>
       <pre className="joblog" ref={box} tabIndex={0} aria-label="Log" aria-live="off">{shown || (text ? "No line matches." : done ? "The log is empty." : gone ? "The log can't be shown." : "Waiting for the log...")}</pre>
       <p className="sm muted">{done ? "The log is complete." : gone ? "The server didn't send it. Close and open this file again to retry." : "Live: new lines appear as they are written."}</p>
     </section>
