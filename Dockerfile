@@ -57,6 +57,7 @@ RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh /usr/local/bin/run-as-syp
 # writable by uid 1000 and survive restarts.
 ENV SYP_DATA=/config \
     HOME=/config \
+    SYP_INSTALL=docker \
     SYP_LIBRARIES=/media \
     SYP_ADDR=0.0.0.0:8484
 VOLUME ["/config"]

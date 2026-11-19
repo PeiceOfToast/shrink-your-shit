@@ -33,9 +33,11 @@ let items: JobItem[] = [
   base("48197", "Old.Tape.1998.avi", "Old Tapes", HOME, "failed", { detail: "Kept the original: the original is damaged in 7 places.", reason: { code: "kept_original", message: "Kept the original: the original is damaged in 7 places." } }),
   base("failed-replace", "Replace.Fail.mkv", "Failed Saves", HOME, "failed", { detail: "The new file was converted, but saving it in place of the original failed.", reason: { code: "stalled", message: "The new file was converted, but saving it in place of the original failed." } }),
 ];
+// ?jobs=many: 450 more waiting files, to show the list past its first 200 (Show more)
+if (new URLSearchParams(location.search).get("jobs") === "many") items = [...items, ...Array.from({ length: 450 }, (_, i) => base("5" + String(i).padStart(4, "0"), "Home.Video." + String(i + 1).padStart(3, "0") + ".mp4", ".", HOME, "queued", { subState: "waiting", attempts: 0, retryAt: null, status: "waiting", detail: null, bytes: 2 * GB }))];
 const TAB: Record<Tab, JobState[]> = { waiting: ["queued", "retry_wait"], running: ["preparing", "running", "validating", "committing"], completed: ["completed"], skipped: ["skipped", "cancelled"], failed: ["failed"] };
 const tabOf = (s: JobState) => (Object.keys(TAB) as Tab[]).find((t) => TAB[t].includes(s))!;
-export function mockJobs(tab: Tab, q: string, path?: string): JobsPage {
+export function mockJobs(tab: Tab, q: string, path?: string, limit = 200): JobsPage {
   const counts = Object.fromEntries((Object.keys(TAB) as Tab[]).map((t) => [t, items.filter((j) => tabOf(j.state) === t).length])) as Record<Tab, number>;
   let rows = items.filter((j) => tabOf(j.state) === tab && (!q || j.name.toLowerCase().includes(q.toLowerCase())) && (!path || j.path === path));
   if (tab === "waiting") { // as the server with sort=queue (#134): taken-now files by priority, then age; a retry waiting for its time has no place
@@ -43,7 +45,7 @@ export function mockJobs(tab: Tab, q: string, path?: string): JobsPage {
     const now = rows.filter((j) => j.state === "queued").sort((a, b) => rank(b) - rank(a) || (b.priority ?? 0) - (a.priority ?? 0));
     rows = [...now.map((j, i) => ({ ...j, position: i + 1 })), ...rows.filter((j) => j.state !== "queued").map((j) => ({ ...j, position: null }))];
   }
-  return { items: rows, total: rows.length, counts };
+  return { items: rows.slice(0, limit), total: rows.length, counts };
 }
 // A removed job (its library was removed) and one from before the update, for the drawer's two special cases.
 const REMOVED: JobDetail = { id: "47001", state: "cancelled", removed: true, reason: { code: "removed", message: "Its library was removed, so this file wasn't converted." },
@@ -90,6 +92,7 @@ export function mockJobLog(id: string): { state: string; steps: { name: string; 
     step("encode", f48190 ? "failed" : f48191 ? "failed" : "ok", { ...conv, result: failed ? "Failed" : "Done · 41% smaller" }),
   ] };
 }
+const FELL = "hevc_qsv failed (ffmpeg exited with code 1); converted on the processor."; // #323's step words
 export function mockJob(id: string): JobDetail | null {
   if (id === REMOVED.id) return REMOVED;
   const j = items.find((x) => x.id === id || (x.jobId === id && x.origin === "scan"));
@@ -109,10 +112,12 @@ export function mockJob(id: string): JobDetail | null {
       ...(j.state !== "queued" ? [{ seq: 5, at: at(20), from: "queued" as JobState, to: "running" as JobState, reason: null, workerId: "builtin" }] : []),
       ...(["completed", "failed"].includes(j.state) ? [{ seq: 8, at: at(10), from: "running" as JobState, to: j.state, reason: j.state === "failed" ? "convert_failed" : null, workerId: "builtin" }] : [])],
     steps: old ? [] : [{ step: "found", at: at(300), ok: true, words: "Found in " + j.path.replace(/\/[^/]+$/, "") + "." }, { step: "checked", at: at(300), ok: true, words: "To be converted: H.264 at 12109 kbps." },
+      ...(j.id === "48160" ? [{ step: "encoder_fallback", at: at(30), ok: false, words: FELL }] : []),
       ...(j.state === "completed" ? [{ step: "converted", at: at(12), ok: true, words: "Converted: HEVC · 8-bit · MKV." }, { step: "verified", at: at(11), ok: true, words: "Every check passed: the new file is complete, plays cleanly and looks like the original." }] : []),
       ...(j.state === "failed" && j.id === "48190" ? [{ step: "converted", at: at(12), ok: false, words: "The new file is 4 s shorter than the original. The original is kept." }] : []),
       ...(j.state === "failed" && j.id === "48191" ? [{ step: "converted", at: at(12), ok: false, words: "There isn't enough free space to write the new file. About 571 MB is needed, 101 MB is free." }] : []),
       ...(j.state === "failed" && j.id === "failed-replace" ? [{ step: "found", at: at(300), ok: true, words: "Found in /media/home/Failed Saves." }, { step: "checked", at: at(100), ok: true, words: "To be converted: H.264 at 8000 kbps." }, { step: "converted", at: at(15), ok: true, words: "Converted: HEVC · 8-bit · MKV." }, { step: "verified", at: at(14), ok: true, words: "Every check passed." }, { step: "saved", at: at(13), ok: false, words: "Saving in place failed: permission denied." }] : [])],
+    warning: j.id === "48160" ? FELL : null,
     metadata: { before: old ? null : { container: "matroska,webm", videoCodec: "h264", bitrateKbps: 12109, durationSec: 7200, sizeBytes: j.beforeBytes ?? j.bytes, streams: [{ index: 0, type: "video", codec: "h264", Width: 1920, Height: 1080 }, { index: 1, type: "audio", codec: "dts", channels: 6, channelLayout: "5.1" }] },
       after: j.state === "completed" ? { container: "matroska,webm", videoCodec: "hevc", bitrateKbps: 5300, durationSec: 7200, sizeBytes: j.afterBytes, streams: [{ index: 0, type: "video", codec: "hevc", Width: 1920, Height: 1080 }, { index: 1, type: "audio", codec: "aac", channels: 2, channelLayout: "stereo" }] } : null },
   };
