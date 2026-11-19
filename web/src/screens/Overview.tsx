@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
-import { bytes, count } from "../format";
+import { bytes, clock, count, encoderName, plural } from "../format";
 import { getSummary, scanAllLibraries } from "../dashApi";
 import { onLive } from "../live";
 import { PageHead } from "../PageHead";
@@ -105,7 +105,7 @@ export function Overview() {
   const tot = { done: add((d) => d.completed), skipped: add((d) => d.skipped), failed: add((d) => d.failed), freed: add((d) => d.freedBytes), saved: add((d) => d.savedBytes ?? 0), waiting: add((d) => d.waitingBytes ?? 0) };
   const split = rec.some((d) => d.savedBytes != null), load = rows.some((w) => w.cpuPercent != null || w.gpuPercent != null);
   const workerOf = (id: string) => rows.find((w) => w.jobs.some((j) => j.jobId === id))?.name;
-  const more = [h.waitingToFree > 0 && bytes(h.waitingToFree) + " more" + (h.nextFreeAt ? " by " + dayName(h.nextFreeAt.slice(0, 10)) : ""), h.couldFree > 0 && "could free " + bytes(h.couldFree) + " if you remove the originals"].filter(Boolean).join(" · ");
+  const more = [h.waitingToFree > 0 && bytes(h.waitingToFree) + (h.freed > 0 ? " more" : " frees") + (h.nextFreeAt ? " by " + dayName(h.nextFreeAt.slice(0, 10)) : ""), h.couldFree > 0 && "could free " + bytes(h.couldFree) + " if you remove the originals"].filter(Boolean).join(" · ");
   return (
     <div className="stack ov">
       <PageHead icon="i-dashboard" title="Dashboard">
@@ -113,8 +113,12 @@ export function Overview() {
         <button className="btn sm ghost" type="button" onClick={() => (MOCK ? scanAll() : act(scanAllLibraries()))}><Icon id="i-refresh" />Scan all libraries</button>
       </PageHead>
       {said && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{said}</span></p>}
+      {v.encoderFallbacks?.map((f) => <div key={f.workerId} className="note warn"><Icon id="i-alert" /><div>
+        <b>{f.worker}'s graphics encoder ({encoderName(f.encoder)}) failed {f.count === 1 ? "once" : plural(f.count, "time", "times")} today.</b>{" "}
+        {f.pausedUntil ? <>It converts on the processor until {clock(f.pausedUntil)}, which is slower. <Link to={"/workers/" + encodeURIComponent(f.workerId) + "?tab=capabilities"}>Test the encoders</Link></> : (f.count === 1 ? "That file was" : "Those files were") + " converted on the processor instead, which is slower."}
+      </div></div>)}
       <section className="headline" aria-label="Totals">
-        <div><div className="big">{bytes(h.freed)}<small>saved</small></div>{more && <div className="muted">{more}</div>}
+        <div><div className="big">{h.freed > 0 ? <>{bytes(h.freed)}<small>saved</small></> : "Nothing saved yet"}</div>{more && <div className="muted">{more}</div>}
           {/* design SCREENS V2 Space rules: neutral, on its own line, only when > 0; never added to or taken from the figures */}
           {(h.grew ?? 0) > 0 && <div className="muted sm">{bytes(h.grew!)} added by files that came out bigger</div>}</div>
         <div className="stats">

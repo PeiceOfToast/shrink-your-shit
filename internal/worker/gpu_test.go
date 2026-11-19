@@ -119,29 +119,34 @@ func TestFormatEncoderThatDidNotPassIsLogged(t *testing.T) {
 	}
 }
 
-// A graphics failure that is a stop (the stall stop, a cancel, a lost lease) is not converted again.
-func TestGPUFailureOnlyRetriesAnFFmpegError(t *testing.T) {
+// A graphics failure converts again on the processor only when the encoder or ffmpeg failed. A stop (the stall
+// stop, a cancel, a lost lease), a full disk and a damaged source do not.
+func TestGPUFailureOnlyRetriesAnEncoderError(t *testing.T) {
 	w := &Worker{}
 	ffErr := errors.New("ffmpeg exited 1")
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
 	cases := []struct {
-		name string
-		ctx  context.Context
-		err  error
-		stop stopKind
-		want bool
+		name   string
+		ctx    context.Context
+		err    error
+		stop   stopKind
+		stderr string
+		want   bool
 	}{
-		{"ffmpeg error", context.Background(), ffErr, stopNone, true},
-		{"no error", context.Background(), nil, stopNone, false},
-		{"cancelled", cancelled, ffErr, stopNone, false},
-		{"cancel error", context.Background(), context.Canceled, stopNone, false},
-		{"stall stop", context.Background(), ffErr, stopStall, false},
-		{"lease lost", context.Background(), errLeaseLost, stopNone, false},
+		{"ffmpeg error", context.Background(), ffErr, stopNone, "something went wrong", true},
+		{"encoder missing", context.Background(), ffErr, stopNone, "Unknown encoder 'h264_qsv'", true},
+		{"no error", context.Background(), nil, stopNone, "", false},
+		{"cancelled", cancelled, ffErr, stopNone, "", false},
+		{"cancel error", context.Background(), context.Canceled, stopNone, "", false},
+		{"stall stop", context.Background(), ffErr, stopStall, "", false},
+		{"lease lost", context.Background(), errLeaseLost, stopNone, "", false},
+		{"disk full", context.Background(), ffErr, stopNone, "No space left on device", false},
+		{"damaged source", context.Background(), ffErr, stopNone, "Invalid data found when processing input", false},
 	}
 	for _, c := range cases {
 		w.stopped = c.stop
-		if got := w.gpuFailed(c.ctx, c.err); got != c.want {
+		if got := w.gpuFailed(c.ctx, c.err, c.stderr); got != c.want {
 			t.Errorf("%s: %v, want %v", c.name, got, c.want)
 		}
 	}

@@ -88,7 +88,7 @@ function Confirm({ title, body, yes, no, busy, onYes, onNo }: { title: string; b
     </div>);
 }
 
-// "Your languages": one list for the whole install, shown by name, saved as ISO 639-2 codes (/assets/languages.json:
+// "Your languages": one list for the whole install, shown by name, saved as ISO 639-2 codes (/languages.json:
 // [code, name, name in the language]); added by typing a name and picking it.
 function Languages({ start, saved }: { start: string[]; saved: () => void }) {
   const [codes, setCodes] = useState(start), [list, setList] = useState<[string, string, string?][]>([]), [typed, setTyped] = useState(""), [said, setSaid] = useState(""), [bad, setBad] = useState(false), [open, setOpen] = useState(false), [at, setAt] = useState(-1);
