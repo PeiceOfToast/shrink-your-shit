@@ -41,7 +41,49 @@ func setupServer(t *testing.T) (*httptest.Server, string) {
 	dir := t.TempDir()
 	srv := httptest.NewServer(Handler(st, a, Engine{DataDir: dir, Version: "1.2.3", Port: 8484, Joiner: &remote.Joiner{Version: "1.2.3"}}))
 	t.Cleanup(srv.Close)
+	// Runs before srv.Close: a join still waiting stops polling first, so it cannot poll a recycled port.
+	t.Cleanup(func() { stopSetupWaits(srv) })
 	return srv, dir
+}
+
+// stopSetupWaits unsets the role, which cancels a join still waiting (the same route a person uses). Errors are
+// ignored: it only runs at the end of a test.
+func stopSetupWaits(srv *httptest.Server) {
+	resp, err := http.Post(srv.URL+"/api/v2/setup/role", "application/json", strings.NewReader(`{"role":"unset"}`))
+	if err == nil {
+		resp.Body.Close()
+	}
+}
+
+// A join left waiting keeps polling its server until it ends or is cancelled. Unsetting the role cancels it:
+// after that the poll count stops rising.
+func TestStopSetupWaitsEndsAWaitingJoinsPolls(t *testing.T) {
+	srv, _ := setupServer(t)
+	var polls atomic.Int32
+	remoteSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/worker/v1/join":
+			w.WriteHeader(http.StatusAccepted)
+			w.Write([]byte(`{"id":"j-1","expiresAt":"2099-01-01T00:00:00Z","secret":"s3cret"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/worker/v1/join/j-1":
+			polls.Add(1)
+			w.Write([]byte(`{"state":"waiting"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(remoteSrv.Close)
+	c := jar(t)
+	do(t, c, srv, call{method: "POST", path: "/api/v2/setup/role", ctype: "application/json", body: `{"role":"worker","serverUrl":"` + remoteSrv.URL + `"}`})
+	waitFor(t, c, srv, "a poll", func(map[string]any) bool { return polls.Load() > 0 })
+
+	stopSetupWaits(srv)
+	settled := polls.Load()
+	time.Sleep(50 * time.Millisecond) // at 1 ms a poll, a live waiter would add dozens
+	// One poll can be in flight when the cancel lands; more than that means the wait is still running.
+	if after := polls.Load(); after > settled+1 {
+		t.Errorf("the join kept polling after it was stopped: %d polls, then %d", settled, after)
+	}
 }
 
 // fakeRemote is a server that a worker can ask to join: each join poll gets the next of states (the last repeats;
