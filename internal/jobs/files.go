@@ -102,7 +102,7 @@ var jobOrder = map[string]string{
 
 // leftRows is the done jobs whose original is left where it was: the set the Dashboard's could-free number
 // sums (couldFreeSQL, freed.go), so this list and that number cannot disagree.
-const leftRows = `j.id IN (SELECT jobs.id FROM jobs WHERE ` + couldFreeSQL + ` IS NOT NULL)`
+var leftRows = `j.id IN (SELECT jobs.id FROM jobs WHERE ` + couldFreeSQL + ` IS NOT NULL)`
 
 const jobFrom = `FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id LEFT JOIN flows fl ON fl.id=l.flow_id
   LEFT JOIN originals o ON o.id=(SELECT MAX(id) FROM originals WHERE job_id=j.id)`

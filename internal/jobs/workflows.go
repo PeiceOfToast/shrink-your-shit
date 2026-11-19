@@ -429,7 +429,7 @@ func (s *Store) WorkflowRunsSince(flowID int64, since string) (WorkflowRuns, err
 	var last sql.NullString
 	err := s.db.QueryRow(`SELECT
   COALESCE(SUM(j.status IN ('queued','running')),0),
-  COALESCE(SUM(j.status='done' AND j.updated>=? AND `+newestJobOf("j")+`),0),
+  COALESCE(SUM(`+convertedNow("j")+` AND j.updated>=? AND `+newestJobOf("j")+`),0),
   COALESCE(SUM(j.status IN ('failed','kept') AND j.updated>=? AND `+newestJobOf("j")+`),0),
   MAX(CASE WHEN j.status IN ('done','failed','kept') THEN j.updated END)
 FROM jobs j JOIN libraries l ON l.id=j.library_id WHERE l.flow_id=?`, since, since, flowID).Scan(&r.Active, &r.Completed, &r.Failed, &last)
@@ -715,7 +715,7 @@ func (s *Store) RecordEvent(kind string, data map[string]any) error {
 // that end is at or after at: the summary's last 24 hours (V3c). A file that failed and then passed counts
 // once, as done, on the day it passed.
 func (s *Store) JobEndsSince(at string) (map[string]int, error) {
-	rows, err := s.db.Query(latestEndsSQL+`SELECT COALESCE(to_status,''), COUNT(*) FROM ends WHERE rn=1 AND at >= ? GROUP BY to_status`, at)
+	rows, err := s.db.Query(latestEndsSQL+`SELECT COALESCE(to_status,''), COUNT(*) FROM ends WHERE rn=1 AND rs=0 AND at >= ? GROUP BY to_status`, at)
 	if err != nil {
 		return nil, err
 	}
@@ -743,7 +743,7 @@ type HourOfWork struct {
 func (s *Store) Throughput(at string) ([]HourOfWork, error) {
 	rows, err := s.db.Query(`SELECT substr(e.at,1,13) || ':00:00Z', COUNT(*), COALESCE(SUM(MAX(j.size_before - COALESCE(j.size_after,0), 0)),0)
 FROM events e LEFT JOIN jobs j ON j.id = e.job_id
-WHERE e.kind='job' AND e.to_status='done' AND e.at >= ? GROUP BY substr(e.at,1,13) ORDER BY 1`, at)
+WHERE e.kind='job' AND e.to_status='done' AND e.at >= ? AND `+notRestoredSQL("e.job_id")+` GROUP BY substr(e.at,1,13) ORDER BY 1`, at)
 	if err != nil {
 		return nil, err
 	}
