@@ -23,6 +23,7 @@ type swrCache[T any] struct {
 	mu     sync.Mutex // guards the fields below; never held across a compute
 	have   bool
 	key    string
+	want   string // the key of the last request: a background compute runs again until key catches up
 	val    T
 	asked  time.Time // the last request
 	queued bool      // a background compute is waiting or running
@@ -49,6 +50,7 @@ func (c *swrCache[T]) get(key func() (string, error), build func() (T, string, e
 	c.mu.Lock()
 	live := c.have && now.Sub(c.asked) <= swrAskWindow
 	c.asked = now
+	c.want = k
 	if c.have && c.key == k {
 		v := c.val
 		c.mu.Unlock()
@@ -114,6 +116,34 @@ func (c *swrCache[T]) startLocked(build func() (T, string, error)) {
 		return
 	}
 	c.queued = true
+	wait := c.waitLocked()
+	go func() {
+		for {
+			if wait > 0 {
+				time.Sleep(wait)
+			}
+			c.one.Lock()
+			_, err := c.run(build)
+			c.one.Unlock()
+			if err != nil {
+				log.Printf("numbers: background recompute failed, keeping the last ones: %v", err)
+			}
+			c.mu.Lock()
+			if err == nil && c.key != c.want { // the key moved while it ran: one more, or the page keeps old numbers
+				wait = c.waitLocked()
+				c.mu.Unlock()
+				continue
+			}
+			c.queued = false
+			c.mu.Unlock()
+			return
+		}
+	}()
+}
+
+// waitLocked is how long the next background compute waits: max(swrMinGap, 2 x the last compute) after the last
+// one started. The caller holds mu.
+func (c *swrCache[T]) waitLocked() time.Duration {
 	wait := swrMinGap
 	if 2*c.took > wait {
 		wait = 2 * c.took
@@ -121,18 +151,5 @@ func (c *swrCache[T]) startLocked(build func() (T, string, error)) {
 	if !c.ran.IsZero() {
 		wait -= time.Since(c.ran)
 	}
-	go func() {
-		if wait > 0 {
-			time.Sleep(wait)
-		}
-		c.one.Lock()
-		_, err := c.run(build)
-		c.one.Unlock()
-		if err != nil {
-			log.Printf("numbers: background recompute failed, keeping the last ones: %v", err)
-		}
-		c.mu.Lock()
-		c.queued = false
-		c.mu.Unlock()
-	}()
+	return wait
 }

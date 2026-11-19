@@ -170,3 +170,39 @@ func TestSWRErrorKeepsTheLastValue(t *testing.T) {
 
 // key.get2 is the key without the error, for the build closures above.
 func (f *fakeKey) get2() string { k, _ := f.get(); return k }
+
+// A key change while a background compute runs gives one more compute, with no further request: the cache ends on
+// the current key, not the one the running compute was for.
+func TestSWRKeyChangeDuringAComputeIsNotLost(t *testing.T) {
+	setSWR(t, 10*time.Millisecond, 0)
+	var key fakeKey
+	key.set("a")
+	started := make(chan string, 10)
+	release := make(chan struct{})
+	build := func() (string, string, error) {
+		k, _ := key.get() // the key at the start, as the real computes read it
+		started <- k
+		if k == "b" {
+			<-release // hold the compute for "b" until the key has moved on
+		} else {
+			time.Sleep(20 * time.Millisecond) // slow enough to count as slow
+		}
+		return k, k, nil
+	}
+	var c swrCache[string]
+	c.get(key.get, build) // "a", in the request
+	<-started
+	key.set("b")
+	c.get(key.get, build) // starts the background compute for "b"
+	if k := <-started; k != "b" {
+		t.Fatalf("background compute started for %q; want b", k)
+	}
+	key.set("c")
+	c.get(key.get, build) // a compute is running: gets the last value, queues nothing new
+	close(release)
+	swrWaitFor(t, "the cache to reach key c with no further request", func() bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.key == "c" && !c.queued
+	})
+}
