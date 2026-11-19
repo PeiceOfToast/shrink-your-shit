@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/integrations"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/notify"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/web/next"
@@ -57,6 +58,11 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 		notifier = notify.New(store, notify.Options{})
 	}
 	v2Notify(api, notifier) // notifications: targets, summary, test
+	svc := eng.Integrations // Sonarr and Radarr: /api/v2/integrations
+	if svc == nil {
+		svc = integrations.New(store, integrations.Options{})
+	}
+	v2Integrations(api, svc)
 	// For health checks: answers without signing in and says nothing else.
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/doctor"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/integrations"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/notify"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/preview"
@@ -24,21 +25,22 @@ import (
 
 // Engine is what the API needs from the running scanner and worker. Nil functions do nothing.
 type Engine struct {
-	ScanNow      func()               // start a scan pass now
-	NextScan     func() time.Time     // when the next regular pass starts
-	ScanEvery    time.Duration        // how often a pass starts (the -scan-every flag)
-	Settle       time.Duration        // how long a file must stay the same before it is decided (-settle)
-	SetScanEvery func(time.Duration)  // change how often a pass starts, now (Settings' scanEvery)
-	RequeueJob   func(id int64)       // stop a running job and put it back in the queue (its library is being removed)
-	RoleChanged  func(role string)    // the install's role was saved (called after each change; main starts or stops its worker loop)
-	Finder       ServerFinder         // the servers on this network that announce themselves (E4: GET /api/v2/setup/servers); nil finds none
-	PauseNow     func()               // stop the running jobs and put them back in the queue (Pause all)
-	Scanning     func() map[int64]int // libraries being scanned now, with the videos found so far (slice A)
-	FirstFiles   *preview.FirstLister // the first 5 videos of a folder (slice A)
-	StopFile     func(id int64) bool  // stop a running job the person stopped; false if no worker runs it
-	Preview      *preview.Previewer   // the dry run (slice 19)
-	Port         int                  // the web port this install answers on (from -addr); a join tells the server where to find it
-	Joiner       WorkerJoiner         // joins a server as its worker (the setup page); nil: this install can't join
+	ScanNow      func()                // start a scan pass now
+	NextScan     func() time.Time      // when the next regular pass starts
+	ScanEvery    time.Duration         // how often a pass starts (the -scan-every flag)
+	Settle       time.Duration         // how long a file must stay the same before it is decided (-settle)
+	SetScanEvery func(time.Duration)   // change how often a pass starts, now (Settings' scanEvery)
+	RequeueJob   func(id int64)        // stop a running job and put it back in the queue (its library is being removed)
+	RoleChanged  func(role string)     // the install's role was saved (called after each change; main starts or stops its worker loop)
+	Finder       ServerFinder          // the servers on this network that announce themselves (E4: GET /api/v2/setup/servers); nil finds none
+	PauseNow     func()                // stop the running jobs and put them back in the queue (Pause all)
+	Scanning     func() map[int64]int  // libraries being scanned now, with the videos found so far (slice A)
+	FirstFiles   *preview.FirstLister  // the first 5 videos of a folder (slice A)
+	StopFile     func(id int64) bool   // stop a running job the person stopped; false if no worker runs it
+	Integrations *integrations.Service // Sonarr and Radarr: the saved instances and the rescan after a replace; nil: none sent
+	Preview      *preview.Previewer    // the dry run (slice 19)
+	Port         int                   // the web port this install answers on (from -addr); a join tells the server where to find it
+	Joiner       WorkerJoiner          // joins a server as its worker (the setup page); nil: this install can't join
 
 	Doctor  *doctor.Checker // the setup checks (nil: not available)
 	DataDir string          // the data folder, for the health report

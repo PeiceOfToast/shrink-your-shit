@@ -24,6 +24,7 @@ import (
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/discover"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/doctor"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/integrations"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/notify"
@@ -295,6 +296,7 @@ func main() {
 	}()
 	// As many workers as the worker's parallel jobs setting (Workers page; followed live); Pause all stops them
 	// taking work and survives a restart.
+	integ := integrations.New(store, integrations.Options{Logf: log.Printf}) // Sonarr and Radarr: told after a replace
 	pool := &worker.Pool{
 		New: func(n int) *worker.Worker {
 			id := "builtin"
@@ -308,7 +310,8 @@ func main() {
 				Encoder: web.LocalEncoderFor(store, chk),
 				ShareDown: func(folder string, jobID int64) (worker.ShareDown, bool) {
 					return web.ShareDownFor(store, folder, jobID)
-				}}
+				},
+				OnDone: func(job jobs.Job, final string) { integ.Tell(job.ID, final) }}
 		},
 		Size: func() int {
 			if s, err := web.LoadSettings(store); err == nil {
@@ -342,8 +345,9 @@ func main() {
 	notifier := notify.New(store, notify.Options{Logf: log.Printf}) // news to a webhook or Discord; never blocks a job
 	go notifier.Run(ctx.Done())
 	srv := &http.Server{Addr: *addr, Handler: web.Handler(store, access, web.Engine{
-		Transport: web.Transport{TrustedProxies: proxies},
-		Notify:    notifier,
+		Transport:    web.Transport{TrustedProxies: proxies},
+		Notify:       notifier,
+		Integrations: integ,
 		RunRemote: func(job jobs.Job, workerID string, rj *worker.RemoteJob) { // V7b2: a remote worker's job, run here
 			w := pool.New(1)
 			w.ID, w.Paused = workerID, nil // a pause stops new leases; a leased job goes on
