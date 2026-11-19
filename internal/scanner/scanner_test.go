@@ -28,15 +28,19 @@ func setup(t *testing.T, probe string) (*Scanner, *jobs.Store, string, *media.Fa
 	}
 	st.SetPaused(false) // the test's worker is started (S2: a new install starts stopped)
 	t.Cleanup(func() { st.Close() })
-	lib := t.TempDir()
-	os.WriteFile(filepath.Join(lib, "a.mkv"), []byte("12345"), 0o644)
-	os.WriteFile(filepath.Join(lib, "notes.txt"), []byte("x"), 0o644)
-	os.WriteFile(filepath.Join(lib, "b.syp-tmp.mkv"), []byte("x"), 0o644)
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "a.mkv"), []byte("12345"), 0o644)
+	os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(dir, "b.syp-tmp.mkv"), []byte("x"), 0o644)
 	f := &media.FakeExec{Out: []byte(probe)}
-	l, err := st.AddLibrary("lib", lib, rules.SliderTemplate(3), true)
+	l, err := st.AddLibrary("lib", dir, rules.SliderTemplate(3), true)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The scan target is the library as the store keeps it (l.Path, resolved), as main.go's scanTargets gives it:
+	// on macOS (/var is a link to /private/var) or Windows (short names) the raw TempDir path is another spelling
+	// of the same folder, and the files would be stored under a path the overview's range does not match.
+	lib := l.Path
 	targets := func() ([]Target, error) {
 		return []Target{{LibraryID: l.ID, Path: lib, Template: rules.LegacyTemplate(rules.Default(), "replace")}}, nil
 	}
