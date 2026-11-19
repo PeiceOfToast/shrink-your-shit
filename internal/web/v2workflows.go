@@ -472,7 +472,7 @@ func workflowViewWith(store *jobs.Store, id int64, libs []jobs.Library) (map[str
 		"status": meta.Status, "favourite": meta.Favourite, "tags": meta.Tags, "presetId": nil, "summaryTag": f.Template.Tag(),
 		"publishedRevisionId": nil, "version": nil, "draftDiffers": false, "validation": map[string]int{"errors": errs, "warnings": warns},
 		"libraries": used, "activeJobs": runs.Active, "createdAt": f.Created, "changedAt": f.Changed,
-		"lastRun":          map[string]any{"at": nilIfEmpty(runs.LastAt), "completed": runs.Completed, "failed": runs.Failed, "skipped": 0},
+		"lastRun":          map[string]any{"at": nilIfEmpty(runs.LastAt), "completed": runs.Completed, "failed": runs.Failed, "skipped": runs.Skipped},
 		"changesOriginals": false}
 	if latest.ID != 0 {
 		v["publishedRevisionId"], v["version"] = strconv.FormatInt(latest.ID, 10), latest.Number
