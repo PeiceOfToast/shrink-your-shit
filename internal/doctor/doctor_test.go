@@ -603,3 +603,51 @@ func TestHardware10(t *testing.T) {
 		t.Errorf("hardware %v, 10-bit %v", tools.Hardware, tools.Hardware10)
 	}
 }
+
+// A file Convert again moved aside (named <stem>.<job id>.<ext>, the job's output being <stem>.<ext>) gets its own
+// note saying so; a real orphan keeps the orphan note; a name whose id matches no job, or a job whose output has
+// another name, keeps the orphan wording. Moved files are not counted as orphans.
+func TestMovedAsideOutputIsNamedAsSuch(t *testing.T) {
+	dir := t.TempDir()
+	trash := filepath.Join(dir, ".syp-trash")
+	os.MkdirAll(trash, 0o755)
+	os.WriteFile(filepath.Join(trash, "movie.2.mkv"), []byte("earlier output"), 0o644)
+	os.WriteFile(filepath.Join(trash, "real.7.mkv"), []byte("real orphan"), 0o644)
+	os.WriteFile(filepath.Join(trash, "stray.9.mkv"), []byte("no such job"), 0o644)
+	real, _ := filepath.EvalSymlinks(dir)
+	c := checker(1 << 40)
+	c.KnownOriginals = func() (map[string]bool, error) { return map[string]bool{}, nil }
+	c.JobOutput = func(id int64) (string, bool, error) {
+		switch id {
+		case 2:
+			return "/lib/movie.mkv", true, nil
+		case 7:
+			return "/lib/other.mkv", true, nil
+		}
+		return "", false, nil
+	}
+	var orphan []string
+	moved := map[string]bool{}
+	for _, n := range c.Folder(context.Background(), dir).Notes {
+		if n.Code != "orphaned_originals" {
+			continue
+		}
+		if n.Message == MovedAsideMessage("movie.2.mkv") {
+			moved[n.Message] = true
+		} else {
+			orphan = append(orphan, n.Message)
+		}
+	}
+	if !moved[MovedAsideMessage("movie.2.mkv")] {
+		t.Errorf("no moved-aside note for movie.2.mkv; orphan notes %q", orphan)
+	}
+	if len(orphan) != 1 || !strings.HasPrefix(orphan[0], "2 original files ") || !strings.Contains(orphan[0], filepath.Join(real, ".syp-trash")) {
+		t.Errorf("orphan notes %q, want one note counting the 2 real orphans (not the moved file)", orphan)
+	}
+	if !strings.Contains(MovedAsideMessage("movie.2.mkv"), "is an earlier converted file that had been changed; Convert again moved it here so the new file could take its place.") {
+		t.Errorf("moved-aside wording: %q", MovedAsideMessage("movie.2.mkv"))
+	}
+	if _, err := os.Stat(filepath.Join(trash, "movie.2.mkv")); err != nil {
+		t.Error("nothing may be touched")
+	}
+}

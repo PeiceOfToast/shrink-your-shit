@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -20,14 +22,46 @@ const trashDir = ".syp-trash"
 // originals, so they are only reported, never deleted, renamed or moved.
 type OrphanFolder struct {
 	Dir   string // the .syp-trash folder, full path
-	Files int
+	Files int    // orphans that are not moved-aside outputs (below)
 	Bytes int64
+	// Moved are the names of earlier converted files that Convert again moved here because they had been
+	// changed (worker trashPath: "<name>.<job id>.ext"). They are not orphans; each gets its own note.
+	Moved []string
+}
+
+// movedAsideRE splits a trash name's stem: the base, then the job id that moved it, then an optional
+// number when that name was taken (trashPath). The lazy base keeps "old.7.2" as base "old", id 7.
+var movedAsideRE = regexp.MustCompile(`^(.+?)\.(\d+)(?:\.\d+)?$`)
+
+// movedAside says whether name is an output that Convert again moved aside: its id belongs to a job whose
+// output has the same base name. outputOf is jobs.Store.OutputOfJob; nil means there is no database to ask.
+func movedAside(name string, outputOf func(id int64) (string, bool, error)) bool {
+	if outputOf == nil {
+		return false
+	}
+	ext := filepath.Ext(name)
+	m := movedAsideRE.FindStringSubmatch(strings.TrimSuffix(name, ext))
+	if m == nil {
+		return false
+	}
+	id, err := strconv.ParseInt(m[2], 10, 64)
+	if err != nil {
+		return false
+	}
+	out, ok, err := outputOf(id)
+	return err == nil && ok && filepath.Base(out) == m[1]+ext
+}
+
+// MovedAsideMessage is the note for one earlier converted file that Convert again moved to the trash.
+func MovedAsideMessage(name string) string {
+	return name + " is an earlier converted file that had been changed; Convert again moved it here so the new file could take its place. Delete it when you no longer need it."
 }
 
 // OrphanedOriginals lists the .syp-trash folders under root (one beside each converted file, so in
-// subfolders too) that hold files not in known (jobs.Store.KnownOriginals). It only reads. Slice 28's
-// uninstall summary is meant to list these too, with this function.
-func OrphanedOriginals(root string, known map[string]bool) []OrphanFolder {
+// subfolders too) that hold files not in known (jobs.Store.KnownOriginals). A file that movedAside names
+// goes to Moved instead. It only reads. Slice 28's uninstall summary is meant to list these too, with this
+// function.
+func OrphanedOriginals(root string, known map[string]bool, outputOf func(id int64) (string, bool, error)) []OrphanFolder {
 	// Both sides in one form: a path recorded through a linked folder (macOS /var is /private/var) is
 	// the same file as the one the walk finds (review 8fd5cd5).
 	canon := map[string]bool{}
@@ -44,13 +78,17 @@ func OrphanedOriginals(root string, known map[string]bool) []OrphanFolder {
 			if err != nil || !e.Type().IsRegular() || canon[canonFile(f)] {
 				return nil
 			}
+			if movedAside(e.Name(), outputOf) {
+				o.Moved = append(o.Moved, e.Name())
+				return nil
+			}
 			if info, err := e.Info(); err == nil {
 				o.Files++
 				o.Bytes += info.Size()
 			}
 			return nil
 		})
-		if o.Files > 0 {
+		if o.Files > 0 || len(o.Moved) > 0 {
 			out = append(out, o)
 		}
 		return fs.SkipDir
