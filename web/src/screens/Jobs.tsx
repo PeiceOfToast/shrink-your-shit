@@ -19,6 +19,9 @@ import { useData } from "../useData";
 import type { Failure, JobAction, JobDetail, JobItem, JobProgressEvent, JobState, Probe, Tab, Pin } from "../types/jobs";
 
 const TABS: [Tab, string][] = [["waiting", "Waiting"], ["running", "Running"], ["completed", "Done"], ["skipped", "Skipped"], ["failed", "Failed"]];
+// G5: the Done filter for originals still kept. The words are a placeholder: design (orch-lead@design-claude) is choosing them. Keep them here.
+const KEPT_WORDS = "Original still kept";
+const KEPT_EMPTY = "No converted files still have their original kept.";
 // Spec states in words (SCREENS V6); a cancelled file lists under Skipped and reads "Cancelled".
 const tabOf = (st: JobState): Tab => (st === "queued" || st === "retry_wait" ? "waiting" : st === "completed" ? "completed" : st === "skipped" || st === "cancelled" ? "skipped" : st === "failed" ? "failed" : "running");
 const WORD: Record<string, string> = { queued: "Waiting", preparing: "Preparing", running: "Running", validating: "Checking", committing: "Saving",
@@ -72,6 +75,9 @@ const key = (j: JobItem) => j.jobId ?? j.id;
 export function Jobs() {
   const search = new URLSearchParams(useSearch());
   const tab = (TABS.find(([t]) => t === search.get("tab"))?.[0] ?? "waiting") as Tab, open = search.get("job"), library = search.get("libraryId") ?? "";
+  // G5: ?kept=1 is Done-only (the server answers 400 on other tabs), so it reads as off on any other tab
+  const kept = tab === "completed" && search.get("kept") === "1";
+  const query = (t: Tab, lib: string, k: boolean) => "/jobs?tab=" + t + (lib ? "&libraryId=" + encodeURIComponent(lib) : "") + (k && t === "completed" ? "&kept=1" : "");
   // "See its jobs" (a library page) filters every tab to that library; the library's name shows as a chip that clears it
   const libs = useData(listLibraries, [], 60000);
   // parity item 8: with every worker stopped nothing here moves, so say so (a worker finishing its file still runs)
@@ -81,9 +87,10 @@ export function Jobs() {
   // each answer remembers its tab and search, so a tab switch never shows the last tab's rows while it loads
   // Show more (parity 11-19 #1): 200 rows at first, 200 more per press; a new tab, search or library starts again at 200.
   // The rows already shown stay while more load (the answer's "for" leaves the count out)
-  const [more, setMore] = useState({ for: "", n: 200 }), lim = more.for === tab + "|" + q + "|" + library ? more.n : 200;
-  if (more.for && more.for !== tab + "|" + q + "|" + library) setMore({ for: "", n: 200 }); // forget it on leaving, so coming back is 200 too (review 29156ce P3)
-  const page = useData(() => listJobs(tab, q, library, lim).then((r) => (failed(r) ? r : { ...r, for: tab + "|" + q + "|" + library })), [tab, q, library, lim], 15000);
+  const scope = tab + "|" + q + "|" + library + (kept ? "|kept" : "");
+  const [more, setMore] = useState({ for: "", n: 200 }), lim = more.for === scope ? more.n : 200;
+  if (more.for && more.for !== scope) setMore({ for: "", n: 200 }); // forget it on leaving, so coming back is 200 too (review 29156ce P3)
+  const page = useData(() => listJobs(tab, q, library, lim, kept).then((r) => (failed(r) ? r : { ...r, for: scope })), [tab, q, library, lim, kept], 15000);
   const [live, setLive] = useState<Record<string, JobProgressEvent["progress"]>>({});
   const reload = useRef(page.reload); reload.current = page.reload;
   const shown = useRef<{ tab: Tab; rows: Map<string, JobState> }>({ tab, rows: new Map() });
@@ -107,8 +114,8 @@ export function Jobs() {
     });
   }, []);
   useEffect(() => setSel([]), [tab]);
-  const go = (t: Tab, job?: string | null) => navigate("/jobs?tab=" + t + (library ? "&libraryId=" + encodeURIComponent(library) : "") + (job ? "&job=" + encodeURIComponent(job) : ""));
-  const current = page.data?.for === tab + "|" + q + "|" + library ? page.data : undefined;
+  const go = (t: Tab, job?: string | null) => navigate(query(t, library, kept) + (job ? "&job=" + encodeURIComponent(job) : ""));
+  const current = page.data?.for === scope ? page.data : undefined;
   const items = (current?.items ?? []).map((j) => (live[j.id] && RUNS.includes(j.state) ? { ...j, progress: live[j.id] } : j)), counts = page.data?.counts;
   shown.current = { tab, rows: new Map((current?.items ?? []).map((j) => [j.jobId ?? j.id, j.state])) };
   const picked = items.filter((j) => sel.includes(j.id)), none = !picked.length;
@@ -142,9 +149,11 @@ export function Jobs() {
         ? <>No worker is connected. <Link to="/workers">See Workers.</Link></>
         : <>No worker is running. <Link to="/workers">Turn workers on.</Link></>}</span></p>}
       {library && <div className="row" style={{ gap: 6 }}><span className="mchip">Library: {libs.data?.find((l) => l.id === library)?.name ?? library}
-        <button className="btn sm icon ghost" type="button" aria-label="Clear the library filter" onClick={() => navigate("/jobs?tab=" + tab)}><Icon id="i-x" /></button></span></div>}
+        <button className="btn sm icon ghost" type="button" aria-label="Clear the library filter" onClick={() => navigate(query(tab, "", kept))}><Icon id="i-x" /></button></span></div>}
+      {kept && <div className="row" style={{ gap: 6 }}><span className="mchip">{KEPT_WORDS}
+        <button className="btn sm icon ghost" type="button" aria-label="Clear the kept filter" onClick={() => navigate(query(tab, library, false))}><Icon id="i-x" /></button></span></div>}
       <div className="tabs" role="tablist" aria-label="Jobs">
-        {TABS.map(([t, label]) => <button key={t} role="tab" type="button" aria-selected={tab === t} onClick={() => tab !== t && go(t)}>{label}{counts && <span className="n">{count(counts[t])}</span>}</button>)}
+        {TABS.map(([t, label]) => <button key={t} role="tab" type="button" aria-selected={tab === t} onClick={() => tab !== t && go(t)}>{label}{counts && <span className="n">{count(t === "completed" && kept && current ? current.total : counts[t])}</span>}</button>)}
       </div>
       <div className="ltools" role="toolbar" aria-label="Jobs">
         <span className="desk">{actions}</span>
@@ -152,7 +161,8 @@ export function Jobs() {
         <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions}</div></details>
         {sel.length > 0 && <span className="muted sm">{sel.length} selected</span>}
         {/* parity 11-19 #2 (G4): pick a library here too; it sets the same ?libraryId= as "See its jobs", and the chip above stays */}
-        {(libs.data?.length ?? 0) > 1 && <select className="input sm lib" aria-label="Library" value={library} onChange={(e) => navigate("/jobs?tab=" + tab + (e.target.value ? "&libraryId=" + encodeURIComponent(e.target.value) : ""))}>
+        {tab === "completed" && <button className="btn sm ghost" type="button" aria-pressed={kept} onClick={() => navigate(query("completed", library, !kept))}>{KEPT_WORDS}</button>}
+        {(libs.data?.length ?? 0) > 1 && <select className="input sm lib" aria-label="Library" value={library} onChange={(e) => navigate(query(tab, e.target.value, kept))}>
           <option value="">Library: All</option>
           {libs.data?.map((l) => <option key={l.id} value={l.id}>Library: {l.name}</option>)}
           {library && !libs.data?.some((l) => l.id === library) && <option value={library}>Library: {library}</option>}
@@ -162,7 +172,7 @@ export function Jobs() {
       <p className="muted" role="status">{said}</p>
       {page.error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{page.error.message}</span></p>}
       {!current ? <div className="empty">Loading...</div> : !items.length ? (q ? <div className="empty">No file matches.</div>
-        : <Empty icon="i-jobs" text={{ waiting: "Nothing is waiting.", running: "Nothing is converting right now.", completed: "No file is done yet.", skipped: "No file was skipped.", failed: "Nothing has failed." }[tab]} />) : (
+        : <Empty icon="i-jobs" text={kept ? KEPT_EMPTY : { waiting: "Nothing is waiting.", running: "Nothing is converting right now.", completed: "No file is done yet.", skipped: "No file was skipped.", failed: "Nothing has failed." }[tab]} />) : (
         <div className={"list" + (selecting ? " selecting" : "")}><table className="tbl jobs">
           <thead><tr>
             <th className="selc"><label className="hit"><input type="checkbox" aria-label="Select all" checked={sel.length === items.length} onChange={(e) => setSel(e.target.checked ? items.map((j) => j.id) : [])} /></label></th>
@@ -186,7 +196,7 @@ export function Jobs() {
           </tbody>
         </table></div>)}
       {current && current.total > items.length && <p className="row muted sm" style={{ gap: 8, justifyContent: "center" }}>Showing {items.length.toLocaleString()} of {current.total.toLocaleString()}
-        <button className="btn sm" type="button" disabled={items.length < Math.min(lim, current.total)} onClick={() => setMore({ for: tab + "|" + q + "|" + library, n: lim + 200 })}>Show {Math.min(200, current.total - items.length)} more</button></p>}
+        <button className="btn sm" type="button" disabled={items.length < Math.min(lim, current.total)} onClick={() => setMore({ for: scope, n: lim + 200 })}>Show {Math.min(200, current.total - items.length)} more</button></p>}
       {open && <Drawer id={open} row={items.find((j) => key(j) === open)} onClose={() => go(tab)} onChanged={page.reload} />}
     </div>
   );
