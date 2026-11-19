@@ -157,7 +157,13 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 		}
 		encoderFallbacks := []map[string]any{}
 		for _, f := range fallbacks {
-			row := map[string]any{"workerId": f.Worker, "worker": workerName(store, f.Worker), "count": f.Count, "at": f.At, "pausedUntil": nil}
+			encoder, lastError, err := store.EncoderLastFell(f.Worker)
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+			row := map[string]any{"workerId": f.Worker, "worker": workerName(store, f.Worker), "encoder": encoder, "lastError": lastError,
+				"count": f.Count, "at": f.At, "pausedUntil": nil}
 			if until, paused, err := store.EncoderPaused(f.Worker); err == nil && paused {
 				row["pausedUntil"] = until.UTC().Format(time.RFC3339)
 			}

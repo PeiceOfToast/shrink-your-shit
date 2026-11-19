@@ -87,3 +87,26 @@ func TestEncoderFallbacksCountPerWorker(t *testing.T) {
 		t.Errorf("fall-backs after now = %+v, %v; want none", none, err)
 	}
 }
+
+// The overview shows the latest fall-back's encoder and reason: a second fall-back replaces the first.
+func TestEncoderLastFellIsTheLatest(t *testing.T) {
+	s := open(t)
+	s.Enqueue(Job{Path: "/m/c.mkv", SizeBefore: 100})
+	j, err := s.Claim("gpu-box")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enc, reason, err := s.EncoderLastFell("gpu-box"); err != nil || enc != "" || reason != "" {
+		t.Fatalf("before any fall-back: %q, %q, %v; want none", enc, reason, err)
+	}
+	if _, err := s.EncoderFell(j.ID, "gpu-box", "hevc_qsv", "Error while opening encoder"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EncoderFell(j.ID, "gpu-box", "h264_qsv", "Unknown encoder 'h264_qsv'"); err != nil {
+		t.Fatal(err)
+	}
+	enc, reason, err := s.EncoderLastFell("gpu-box")
+	if err != nil || enc != "h264_qsv" || reason != "Unknown encoder 'h264_qsv'" {
+		t.Fatalf("EncoderLastFell = %q, %q, %v; want the second fall-back", enc, reason, err)
+	}
+}

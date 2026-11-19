@@ -23,6 +23,8 @@ const (
 type encoderHealth struct {
 	Fails       int    `json:"fails"`                 // in a row, since the last success or pause
 	PausedUntil string `json:"pausedUntil,omitempty"` // RFC3339 UTC; "" when not paused
+	Encoder     string `json:"encoder,omitempty"`     // the latest fall-back's encoder, for the overview
+	LastError   string `json:"lastError,omitempty"`   // and its reason, the words its step carries
 }
 
 // FallsBackToProcessor reports whether a graphics encode that failed should convert again on the processor: an
@@ -64,6 +66,7 @@ func (s *Store) EncoderFell(id int64, worker, encoder, reason string) (bool, err
 	if err != nil {
 		return false, err
 	}
+	h.Encoder, h.LastError = encoder, reason
 	h.Fails++
 	paused := h.Fails >= encoderPauseAfter
 	if paused {
@@ -95,6 +98,12 @@ func (s *Store) EncoderPaused(worker string) (time.Time, bool, error) {
 		return time.Time{}, false, nil
 	}
 	return until, s.now().Before(until), nil
+}
+
+// EncoderLastFell is the encoder and the reason of worker's latest graphics-encoder fall-back ("" when none).
+func (s *Store) EncoderLastFell(worker string) (encoder, reason string, err error) {
+	h, err := s.encoderHealthOf(worker)
+	return h.Encoder, h.LastError, err
 }
 
 // EncoderFallback is one worker's graphics-encoder fall-backs since a time, for the overview.
