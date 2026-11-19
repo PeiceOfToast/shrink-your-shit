@@ -3,6 +3,7 @@
 package jobs
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -160,6 +161,7 @@ func TestOverviewNumbersMatchGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	want = bytes.ReplaceAll(want, []byte("\r\n"), []byte("\n")) // a Windows checkout may turn the file's line endings into CRLF
 	if string(want) != string(got) {
 		os.WriteFile(filepath.Join(t.TempDir(), "got.json"), got, 0o644)
 		t.Errorf("overview numbers changed from the golden file (%d bytes want, %d got)", len(want), len(got))
