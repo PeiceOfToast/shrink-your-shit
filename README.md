@@ -174,7 +174,13 @@ that file, `~/.local/bin/shrink-your-shit` and the log `~/Library/Logs/shrink-yo
 
 `shrink-your-shit doctor` checks the converter (ffmpeg, ffprobe, the HEVC encoder, the picture check),
 the data folder and every library folder, and says in plain words what to fix. It asks the running
-program, so the folder checks are made as the user the service runs as:
+program, so the folder checks are made as the user the service runs as.
+
+When a graphics encoder (a GPU, such as Intel QSV or NVIDIA NVENC) fails with an encoder or ffmpeg
+error, the file is converted again on the processor, and the job log says so. A full disk or a damaged
+source file still fails the job as before. If a
+worker's graphics encoder fails three times in a row, that worker uses the processor for an hour, and
+the health check warns until then.
 
 | Where it runs | Command |
 |---|---|
