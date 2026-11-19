@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // ErrNewerDatabase is returned by Open when the database was written by a newer version of the
@@ -579,10 +580,14 @@ func (s *Store) migrate() error {
 	if _, err := tx.Exec(`INSERT INTO temp.migrate_from(version) VALUES (?)`, from); err != nil {
 		return err
 	}
+	// One line per step, written after the commit like the summary, so a rolled-back step never logs.
+	var stepLog []string
 	for _, m := range pending {
+		start := time.Now()
 		if _, err := tx.Exec(m.sql); err != nil {
 			return failedMigration(m, err, backup)
 		}
+		stepLog = append(stepLog, fmt.Sprintf("migrate: %d %s applied in %dms", m.version, m.name, time.Since(start).Milliseconds()))
 	}
 	if _, err := tx.Exec(`DROP TABLE temp.migrate_from`); err != nil {
 		return err
@@ -596,6 +601,9 @@ func (s *Store) migrate() error {
 	}
 	// After the commit, so a rolled-back upgrade never logs as upgraded. A new database logs nothing.
 	if existing {
+		for _, line := range stepLog {
+			log.Print(line)
+		}
 		log.Printf("database upgraded from version %d to %d; backup before the upgrade: %s (also %s)", cur, latestVersion(), info.Name, backup)
 	}
 	return nil
