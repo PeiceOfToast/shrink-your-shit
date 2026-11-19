@@ -8,7 +8,7 @@ import { SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, plural } from "../format";
 import { listJobs } from "../jobsApi";
 import { onLive } from "../live";
-import { Empty, PageHead } from "../PageHead";
+import { Empty, LoadFailed, PageHead } from "../PageHead";
 import { Link, navigate, useSearch } from "../router";
 import { useData } from "../useData";
 import { allWorkers, allowJoin, denyJoin, dismissJoin, newPairing, type Pairing, dismissUpdateNotice, getWorker, patchWorker, workersPage, stoppedByUpdate, testCapabilities, workerAction } from "../workersApi";
@@ -310,9 +310,9 @@ export function Workers() {
       {upd.data === true && <div className="note"><Icon id="i-info" /><div className="sp">Converting is stopped after the update. Press Start to carry on.</div>
         <button className="btn sm ghost" type="button" onClick={async () => { await act(dismissUpdateNotice(), setSaid); upd.reload(); }}>Dismiss</button></div>}
       <p className="muted" role="status">{said}</p>
-      {ws.error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{ws.error.message}</span></p>}
+      {ws.error && ws.data && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{ws.error.message}</span></p>}
       <JoinCards joins={ws.data?.joinRequests ?? []} workers={all} on={n > 0} reload={ws.reload} />
-      {!ws.loaded ? <div className="empty">Loading…</div> : !list.length ? <Empty icon="i-worker" text="No workers yet." /> : (
+      {!ws.loaded ? <div className="empty">Loading…</div> : ws.error && !ws.data ? <LoadFailed error={ws.error} reload={ws.reload} /> : !list.length ? <Empty icon="i-worker" text="No workers yet." /> : (
         <div className="wgrid">{list.map((w) => {
           const [t, cls, icon] = words(w), gone = w.status === "offline" || w.status === "stalled";
           return <article key={w.id} className={"card wcard" + (gone ? " dim" : "")}>
@@ -337,7 +337,8 @@ export function WorkerPage({ id }: { id: string }) {
   const live = useLiveWorkers(() => (d.reload(), jobs.reload()));
   const [said, setSaid] = useState(""), [busy, setBusy] = useState(false);
   if (!d.loaded) return <div className="empty">Loading…</div>;
-  if (!d.data) return <div className="stack"><PageHead icon="i-worker" crumbs={[["Workers", "/workers"]]} title="Worker not found" /><p className="st bad"><Icon id="i-alert" /><span>{d.error?.message}</span></p></div>;
+  const gone = !!d.error && ["http_404", "not_found"].includes(d.error.code); // only an answer that says so is "not found"
+  if (!d.data) return <div className="stack"><PageHead icon="i-worker" crumbs={[["Workers", "/workers"]]} title={gone ? "Worker not found" : "Worker"} />{gone ? <p className="st bad"><Icon id="i-alert" /><span>{d.error?.message}</span></p> : <LoadFailed error={d.error} reload={d.reload} />}</div>;
   const w = live(d.data), [t, cls, icon] = words(w);
   const rows = jobs.data && !failed(jobs.data) ? jobs.data.items.filter((j) => w.currentJobIds.includes(j.id)) : [];
   const decoders = w.capabilities.filter((c) => c.kind === "decoder");

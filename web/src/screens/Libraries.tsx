@@ -2,7 +2,7 @@
 // Pause/Resume, priority, the folder for new files) and v1's routes for adding, renaming, moving and the workflow, or
 // the mock with ?mock=1. The library page has the General, Discovery and Output tabs; Filters and Statistics come later.
 // Not shown (CAN'T YET): description and tags, per-library scan settings, other file types.
-import { Empty, PageHead } from "../PageHead";
+import { Empty, LoadFailed, PageHead } from "../PageHead";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
@@ -102,7 +102,7 @@ export function Libraries() {
   return (
     <div className="stack">
       <PageHead icon="i-library" title="Libraries" help="The folders that are watched for videos." />
-      <Problem m={libs.error?.message} />
+      <Problem m={libs.data ? libs.error?.message : undefined} />
       {/* one toolbar (clean pass T4): Add first, selection actions, filter on the right; on phones Add, Select and "..." */}
       <div className="ltools" role="toolbar" aria-label="Libraries">
         <Link className="btn sm primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link>
@@ -113,7 +113,7 @@ export function Libraries() {
         <input className="input find" type="search" placeholder="Filter libraries" aria-label="Filter libraries" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       <p className="muted" role="status">{said}</p>
-      {!libs.loaded ? <div className="empty">Loading…</div> : all.length === 0 ? <Empty icon="i-library" text="No libraries yet. A library is a folder that is watched for videos."><Link className="btn primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link></Empty>
+      {!libs.loaded ? <div className="empty">Loading…</div> : libs.error && !libs.data ? <LoadFailed error={libs.error} reload={libs.reload} /> : all.length === 0 ? <Empty icon="i-library" text="No libraries yet. A library is a folder that is watched for videos."><Link className="btn primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link></Empty>
         : items.length === 0 ? <div className="empty">No library matches.</div> : (
         <div className={"list" + (selecting ? " selecting" : "")}><table className="tbl">
           <thead><tr>
@@ -157,7 +157,8 @@ export function LibraryPage({ id }: { id: string }) {
   const v2 = useData(() => (id === "new" ? Promise.resolve(null) : getLibraryV2(id)), [id], 3000);
   useEffect(() => onLive((t, d) => { if (t === "library.changed" && (d as { libraryId?: string })?.libraryId === id) (v2.reload(), libs.reload()); }), [id]); // eslint-disable-line react-hooks/exhaustive-deps
   const l = id === "new" ? null : libs.data?.find((x) => x.id === id);
-  if (id !== "new" && !libs.loaded) return <div className="empty">Loading…</div>;
+  if (id !== "new" && !libs.loaded) return <div className="stack"><PageHead icon="i-library" crumbs={[["Libraries", "/libraries"]]} title="Library" /><div className="empty">Loading…</div></div>;
+  if (id !== "new" && !l && libs.error && !libs.data) return <div className="stack"><PageHead icon="i-library" crumbs={[["Libraries", "/libraries"]]} title="Library" /><LoadFailed error={libs.error} reload={libs.reload} /></div>;
   if (id !== "new" && !l) return (
     <div className="stack"><PageHead icon="i-library" crumbs={[["Libraries", "/libraries"]]} title="Library not found" />
       <Problem m={libs.error?.message} />

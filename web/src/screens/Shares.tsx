@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "../Icon";
 import { failed, type Answer } from "../api";
-import { Empty, PageHead } from "../PageHead";
+import { Empty, LoadFailed, PageHead } from "../PageHead";
 import { SettingsTabs } from "../pages";
 import { useData } from "../useData";
 import { addShare, checkShare, deleteShare, getShares, patchShare, reconnectShare, testShare } from "../sharesApi";
@@ -204,7 +204,7 @@ export function SharesSettings() {
       <PageHead icon="i-shares" title="Settings" />
       <SettingsTabs at="shares" />
       <p className="muted" role="status">{said}</p>
-      {resp.error && is404(resp.error) ? <p className="muted">This server doesn't have network shares yet.</p> : resp.error ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{resp.error.message}</span></p> : !data ? <div className="empty">Loading…</div> : <>
+      {resp.error && is404(resp.error) ? <p className="muted">This server doesn't have network shares yet.</p> : resp.error && !data ? <LoadFailed error={resp.error} reload={resp.reload} /> : resp.error ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{resp.error.message}</span></p> : !data ? <div className="empty">Loading…</div> : <>
         <div className="row" style={{ gap: 6 }}>
           <p className="muted" style={{ margin: 0 }}>Use a folder on a NAS or another computer as a library. Shrink Your Shit connects to it and reconnects after a restart.</p>
           <span className="sp" />

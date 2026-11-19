@@ -10,7 +10,7 @@ import { getSummary, scanAllLibraries } from "../dashApi";
 import { getDoctor } from "../doctorApi";
 const HEALTH_HIDDEN = "syp-health-dismissed"; // the failed checks the Dismiss was for
 import { onLive } from "../live";
-import { PageHead } from "../PageHead";
+import { LoadFailed, PageHead } from "../PageHead";
 import { Link } from "../router";
 import { useData } from "../useData";
 import { allWorkers, listWorkers } from "../workersApi";
@@ -98,7 +98,7 @@ export function Overview() {
     });
   }, []);
   const act = async (p: Promise<Answer<unknown>>) => { try { const r = await p; setSaid(failed(r) ? r.error.message : ""); } catch (e) { if (!(e instanceof SignedOut)) throw e; } o.reload(); wl.reload(); };
-  if (!o.data) return <div className="stack"><PageHead icon="i-dashboard" title="Dashboard" /><div className="empty">{o.error?.message ?? "Loading…"}</div></div>;
+  if (!o.data) return <div className="stack"><PageHead icon="i-dashboard" title="Dashboard" />{o.error ? <LoadFailed error={o.error} reload={o.reload} /> : <div className="empty">Loading…</div>}</div>;
   const v = o.data, h = v.headline, job = (j: OverviewJob) => ({ ...j, ...live[j.jobId] });
   // one row per worker of GET /api/v2/workers; its files' progress from the overview (or, for a worker the overview
   // doesn't list, from Converting now by job id)
@@ -182,7 +182,7 @@ export function Overview() {
       </section>
 
       <section className="sec" aria-labelledby="ov-w"><h2 id="ov-w">Workers <Link className="more" to="/workers">Workers page</Link></h2>
-        {!rows.length ? <p className="muted">No workers yet.</p> : (
+        {!rows.length ? (wl.error && !wl.data ? <LoadFailed error={wl.error} reload={wl.reload} /> : <p className="muted">No workers yet.</p>) : (
           <table className="tbl ovt"><thead><tr><th>Worker</th><th className="num">Speed</th><th className="num">Slots</th>{load && <th className="num">CPU · GPU</th>}</tr></thead>
             <tbody>{rows.map((w) => { const [t, cls] = STATE[w.status] ?? [w.status, ""], js = w.jobs.map(job), sl = slots(w);
               return <tr key={w.id}>
