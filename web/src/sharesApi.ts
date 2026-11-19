@@ -23,9 +23,9 @@ export async function getShares(): Promise<Answer<SharesResponse>> {
 }
 
 // Mock only: the setup text the server writes for a new share (internal/web/v2shares.go setupForMode),
-// without its user-namespace variant. New shares mount at /mnt/<name> (#304).
+// including its user-namespace variant (unprivileged LXC). New shares mount at /mnt/<name> (#304).
 const mockVol = (name: string, id: string) => { const r = name.toLowerCase().replace(/ /g, "-").replace(/[^a-z0-9_-]/g, "").slice(0, 64); return !r || /^[-_]/.test(r) ? "share-" + id : r; };
-function mockSetup(mode: string, i: ShareCreateInput, vol: string) {
+function mockSetup(mode: string, i: ShareCreateInput, vol: string, userns: boolean) {
   const q = (x: string) => "'" + x.replace(/'/g, "'\\''") + "'", mpt = "/mnt/" + vol;
   const addr = i.type === "nfs" ? i.address : "//" + i.address.replace(/^\\\\/, "").replace(/\\/g, "/");
   if (mode === "manual") {
@@ -33,6 +33,11 @@ function mockSetup(mode: string, i: ShareCreateInput, vol: string) {
       : (i.guest ? "guest" : "username=" + (i.username ?? "")) + ",vers=3.1.1,soft,nosuid,nodev,noexec,uid=syp,gid=syp,file_mode=0660,dir_mode=0770";
     return { kind: "command" as const, text: "sudo mkdir -p " + q(mpt) + " && sudo mount -t " + (i.type === "nfs" ? "nfs" : "cifs") + " " + q(addr) + " " + q(mpt) + " -o " + q(opts), removeText: "sudo umount " + q(mpt) };
   }
+  if (userns) return { kind: "compose" as const,
+    text: "# This container runs in a user namespace (for example an unprivileged Proxmox LXC), so neither the app nor Docker can mount network shares here.\n" +
+      "# Mount the share on the Proxmox host, pass the folder into the LXC (pct set <id> -mp0 <host folder>,mp=/mnt/" + vol + "),\n" +
+      "# then add under services: shrink-your-shit: volumes: in your compose file:\n      - \"/mnt/" + vol + ":" + mpt + '"',
+    removeText: 'Remove the "/mnt/' + vol + ":" + mpt + '" line from your compose file and restart.' };
   const env = "SYP_" + vol.toUpperCase().replace(/[^A-Z0-9]/g, "_") + "_PASSWORD";
   const [server, exp] = i.address.includes(":") ? [i.address.slice(0, i.address.indexOf(":")), i.address.slice(i.address.indexOf(":") + 1)] : [i.address, "/"];
   const host = addr.slice(2).split("/")[0], owner = "uid=1000,gid=1000,file_mode=0660,dir_mode=0770";
@@ -56,7 +61,7 @@ export async function addShare(input: ShareCreateInput): Promise<Answer<Share>> 
       hasPassword: !input.guest && !!input.password,
       status: mode === "app" ? "connecting" : "waiting_setup", since: null, reason: null,
       path: "/mnt/" + mockVol(input.name, id),
-      libraries: [], setup: mode === "app" ? null : mockSetup(mode, input, mockVol(input.name, id)),
+      libraries: [], setup: mode === "app" ? null : mockSetup(mode, input, mockVol(input.name, id), s.modeReason === "unprivileged_container"),
     };
     mockState().shares = [...mockState().shares, share];
     if (mode === "app") setTimeout(() => { const st = mockState(); const x = st.shares.find((x) => x.id === id); if (x) x.status = "connected"; }, 1500);

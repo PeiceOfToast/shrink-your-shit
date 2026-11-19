@@ -33,9 +33,11 @@ let items: JobItem[] = [
   base("48197", "Old.Tape.1998.avi", "Old Tapes", HOME, "failed", { detail: "Kept the original: the original is damaged in 7 places.", reason: { code: "kept_original", message: "Kept the original: the original is damaged in 7 places." } }),
   base("failed-replace", "Replace.Fail.mkv", "Failed Saves", HOME, "failed", { detail: "The new file was converted, but saving it in place of the original failed.", reason: { code: "stalled", message: "The new file was converted, but saving it in place of the original failed." } }),
 ];
+// ?jobs=many: 450 more waiting files, to show the list past its first 200 (Show more)
+if (new URLSearchParams(location.search).get("jobs") === "many") items = [...items, ...Array.from({ length: 450 }, (_, i) => base("5" + String(i).padStart(4, "0"), "Home.Video." + String(i + 1).padStart(3, "0") + ".mp4", ".", HOME, "queued", { subState: "waiting", attempts: 0, retryAt: null, status: "waiting", detail: null, bytes: 2 * GB }))];
 const TAB: Record<Tab, JobState[]> = { waiting: ["queued", "retry_wait"], running: ["preparing", "running", "validating", "committing"], completed: ["completed"], skipped: ["skipped", "cancelled"], failed: ["failed"] };
 const tabOf = (s: JobState) => (Object.keys(TAB) as Tab[]).find((t) => TAB[t].includes(s))!;
-export function mockJobs(tab: Tab, q: string, path?: string): JobsPage {
+export function mockJobs(tab: Tab, q: string, path?: string, limit = 200): JobsPage {
   const counts = Object.fromEntries((Object.keys(TAB) as Tab[]).map((t) => [t, items.filter((j) => tabOf(j.state) === t).length])) as Record<Tab, number>;
   let rows = items.filter((j) => tabOf(j.state) === tab && (!q || j.name.toLowerCase().includes(q.toLowerCase())) && (!path || j.path === path));
   if (tab === "waiting") { // as the server with sort=queue (#134): taken-now files by priority, then age; a retry waiting for its time has no place
@@ -43,7 +45,7 @@ export function mockJobs(tab: Tab, q: string, path?: string): JobsPage {
     const now = rows.filter((j) => j.state === "queued").sort((a, b) => rank(b) - rank(a) || (b.priority ?? 0) - (a.priority ?? 0));
     rows = [...now.map((j, i) => ({ ...j, position: i + 1 })), ...rows.filter((j) => j.state !== "queued").map((j) => ({ ...j, position: null }))];
   }
-  return { items: rows, total: rows.length, counts };
+  return { items: rows.slice(0, limit), total: rows.length, counts };
 }
 // A removed job (its library was removed) and one from before the update, for the drawer's two special cases.
 const REMOVED: JobDetail = { id: "47001", state: "cancelled", removed: true, reason: { code: "removed", message: "Its library was removed, so this file wasn't converted." },
