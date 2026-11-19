@@ -166,6 +166,7 @@ table.tbl{width:100%;border-collapse:collapse}
 .tabs a,.tabs button{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 14px;color:var(--text-2);text-decoration:none;white-space:nowrap;border:0;background:none;font:inherit;cursor:pointer;border-bottom:3px solid transparent}
 .tabs [aria-selected=true],.tabs [aria-current=page]{color:var(--text);font-weight:var(--fw-strong);border-bottom-color:var(--accent)}
 .tabs .n{font-size:var(--fs-sm);background:var(--raised);border-radius:10px;padding:0 7px;color:var(--text-2)}
+.tabs :focus-visible{outline-offset:-2px;border-radius:4px} /* focus ring inside the tab: .tabs scrolls sideways, so a ring outside it was cut off (manager 11-19 (a)) */
 .note{display:flex;gap:10px;padding:10px 12px;border-radius:var(--radius-sm);border:1px solid var(--border-strong);background:var(--surface)}
 .note.warn{border-color:var(--warning);background:color-mix(in srgb,var(--warning) 10%,var(--surface))}
 .note.bad{border-color:var(--error);background:color-mix(in srgb,var(--error) 10%,var(--surface))}
@@ -205,8 +206,8 @@ table.tbl{width:100%;border-collapse:collapse}
 @media (max-width:1100px){.cols3{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:900px){
   .app,.app.rail-collapsed{grid-template-columns:minmax(0,1fr)}
-  .rail{position:fixed;left:0;top:0;width:min(280px,86vw);transform:translateX(-102%);transition:transform var(--motion);box-shadow:8px 0 32px rgb(0 0 0/.4)}
-  .app.nav-open .rail{transform:none}
+  .rail{position:fixed;left:0;top:0;width:min(280px,86vw);transform:translateX(-102%);transition:transform var(--motion)}
+  .app.nav-open .rail{transform:none;box-shadow:8px 0 32px rgb(0 0 0/.4)} /* closed: no shadow, its blur showed down the left edge */
   .app.nav-open::after{content:"";position:fixed;inset:0;background:rgb(0 0 0/.5);z-index:25}
   .app.rail-collapsed .lbl,.app.rail-collapsed .grp,.app.rail-collapsed .brand span.t{display:revert}
   .app.rail-collapsed .nav a{justify-content:flex-start;padding:0 12px}
@@ -556,7 +557,7 @@ label.chk{cursor:pointer}
 .joblog{max-height:320px;overflow:auto;margin:0;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font:var(--fs-sm)/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
 /* Share setup / remove text: keep its line breaks (compose YAML, commands), wrap long values inside the box, Copy under it */
 .codebox{display:flex;flex-direction:column;align-items:flex-start;gap:6px}
-.codebox code{display:block;box-sizing:border-box;width:100%;max-height:320px;overflow:auto;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font:var(--fs-sm)/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
+.codebox code{display:block;box-sizing:border-box;width:100%;overflow:auto;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font:var(--fs-sm)/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
 /* Settings tabs on a phone: shades at the end(s) that have more tabs to scroll to; the page-coloured covers move with
    the content and hide a shade once that end is reached (review 36420a9 P3) */
 nav.tabs[aria-label="Settings sections"]{background:linear-gradient(to right,var(--bg) 45%,transparent) left center/28px 100% no-repeat local,linear-gradient(to left,var(--bg) 45%,transparent) right center/28px 100% no-repeat local,linear-gradient(to right,color-mix(in srgb,var(--text) 30%,transparent),transparent) left center/16px 100% no-repeat scroll,linear-gradient(to left,color-mix(in srgb,var(--text) 30%,transparent),transparent) right center/16px 100% no-repeat scroll;background-color:var(--bg)}
@@ -672,7 +673,7 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 @media (pointer:coarse){.gfold>summary{min-height:44px;display:flex;align-items:center}.gpi{min-height:44px}}
 .fieldbad>.field .input,.fieldbad>.field select,.fieldbad>fieldset{border-color:var(--error);box-shadow:0 0 0 1px var(--error)} /* #165: a setting with a value it cannot use */
 /* user item 5 (design 7.3): the Dashboard as an overview: a headline band, flat sections, two small day charts */
-.ov .headline{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,2fr);gap:24px;align-items:end;padding:8px 0 16px;border-bottom:1px solid var(--border)}
+.ov .headline{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;align-items:end;padding:8px 0 16px;border-bottom:1px solid var(--border)}
 .ov .big{font-size:44px;line-height:1.05;font-weight:var(--fw-strong);letter-spacing:-.02em;margin-bottom:8px}
 .ov .big small{font-size:var(--fs-lg);font-weight:400;color:var(--text-2);letter-spacing:0;margin-left:6px}
 .ov .stats{display:flex;gap:32px;flex-wrap:wrap}
@@ -687,14 +688,23 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .ov .ovt th.num{text-align:right}
 .ov .ovt .prog{flex-direction:row;align-items:center;gap:8px;min-width:160px}.ov .ovt .prog .bar{flex:1 1 120px}
 .ov .fname{display:block;overflow-wrap:anywhere}
-.ov .analytics{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:32px}
-.ov .chart2{margin:0}.ov .chart2 h3.ch{font-size:var(--fs);font-weight:var(--fw-strong);margin:12px 0 4px;display:flex;gap:8px;align-items:baseline}
-.ov .daychart{width:100%;height:auto;display:block}
-.ov .kv dd{text-align:right;font-weight:var(--fw-strong)}
-.ov .outcome{display:flex;gap:2px;height:10px;border-radius:5px;overflow:hidden;margin:8px 0 4px}.ov .outcome i{display:block}
+/* pass 1 (row e8c7e61d): the day charts lead the page, two side by side; dataviz marks (see DayBars) */
+.ov .charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:32px}
+.ov .dchart{margin:0;position:relative;min-width:0}
+.ov .dchart h3.ch{font-size:var(--fs);font-weight:var(--fw-strong);margin:4px 0 6px;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline}
+.ov .dchart h3.ch .muted{font-weight:400;font-size:var(--fs-sm)}
+.ov .legend{display:flex;flex-wrap:wrap;gap:4px 16px;list-style:none;margin:0 0 6px;padding:0;font-size:var(--fs-sm);color:var(--text-2)}
+.ov .legend i,.ov .tip i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+.ov .daychart{width:100%;height:auto;display:block;overflow:visible}
+.ov .tip{position:absolute;top:44px;transform:translateX(-50%);pointer-events:none;z-index:5;display:grid;gap:3px;min-width:150px;padding:8px 10px;background:var(--raised);border:1px solid var(--border-strong);border-radius:var(--radius);font-size:var(--fs-sm);white-space:nowrap;box-shadow:0 8px 24px rgb(0 0 0/.25)}
+.ov .tip span{display:flex;align-items:center}.ov .tip em{font-style:normal;margin-left:auto;padding-left:16px;font-variant-numeric:tabular-nums;font-weight:var(--fw-strong)}
+.ov .chartfoot{display:flex;flex-wrap:wrap;gap:8px 32px;align-items:baseline;margin-top:12px;color:var(--text-2);font-size:var(--fs-sm)}
+.ov .chartfoot b{color:var(--text);margin-left:6px}.ov .chartfoot details{margin-left:auto}.ov .chartfoot details[open]{flex-basis:100%;margin-left:0}
+.ov .nochart{position:relative}.ov .nochart p{position:absolute;left:0;right:0;top:calc(50% + 14px);transform:translateY(-50%);text-align:center;margin:0}.ov .nochart p span{background:var(--bg);padding:2px 12px;box-decoration-break:clone;-webkit-box-decoration-break:clone}
+
 @media (max-width:900px){
   .ov .headline{grid-template-columns:minmax(0,1fr);gap:8px}.ov .big{font-size:36px}.ov .stats{gap:20px}
-  .ov .analytics{grid-template-columns:minmax(0,1fr)}
+  .ov .charts{grid-template-columns:minmax(0,1fr);gap:24px}
   .ov .ovt,.ov .ovt tbody{display:block}.ov .ovt thead{display:none}
   .ov .ovt tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:10px 0;border-bottom:1px solid var(--border)}
   .ov .ovt td{display:block;border:0;height:auto;padding:0;text-align:left}

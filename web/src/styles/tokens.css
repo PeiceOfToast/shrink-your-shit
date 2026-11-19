@@ -25,6 +25,8 @@
   --warning-text: var(--warning);
   --error-text: var(--error);
   --focus: var(--accent);   /* 2 px ring plus 2 px offset; 6.2:1 on the page */
+  --chart-muted: #56657A;   /* ADDED (dataviz check): "skipped" in a chart next to success/error; CVD dE 12, 3:1 on bg */
+  --chart-pending: #205F4A; /* ADDED (dataviz check): saving still waiting in the trash, a darker step of --success */
 }
 
 :root[data-theme="light"] {
@@ -48,6 +50,8 @@
   --warning-text: #8A5208;    /* ADDED: #A9650D is 3.96-4.3:1 on bg/sidebar/raised; this is 5.5:1 or more */
   --error-text: var(--error);
   --focus: var(--accent);
+  --chart-muted: #7D8BA0;
+  --chart-pending: #6FB19A;
 }
 
 /* System mode: no data-theme attribute set; follow the OS. */
@@ -59,6 +63,7 @@
     --accent: #365FE2; --accent-2: #7454C8; --on-accent: #FFFFFF; --accent-text: #365FE2;
     --success: #16835A; --warning: #A9650D; --error: #B72F43;
     --success-text: #13704D; --warning-text: #8A5208; --error-text: #B72F43; --focus: var(--accent);
+    --chart-muted: #7D8BA0; --chart-pending: #6FB19A;
   }
 }
 
