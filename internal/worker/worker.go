@@ -122,6 +122,9 @@ type Worker struct {
 	// movedAside is the trash sentence for our earlier output this job moved aside (Convert again). The job's kept
 	// step says it too, since the Job page Timeline shows steps, not the log.
 	movedAside string
+	// planOutput is the current job's plan output (replace, beside or folder), set by process: the job's last
+	// Timeline step follows it, not the worker's Mode.
+	planOutput OutputMode
 	check      *CheckScore // the picture check's score for the job in hand (nil: none ran); set by the comparison
 	// remote is the job a worker on another computer converts, run here (V7b2); nil for a local one.
 	remote *RemoteJob
@@ -432,7 +435,7 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 	w.Queue.AddStep(job.ID, "verified", true, "Every check passed: the new file is complete, plays cleanly and looks like the original.")
 	if filepath.Dir(final) != filepath.Dir(job.Path) { // "Save to another folder" (S6)
 		w.Queue.AddStep(job.ID, "kept", true, w.withMovedAside("The new file was written to "+filepath.Dir(final)+"; the original stays where it is."))
-	} else if w.Mode == Beside {
+	} else if w.planOutput == Beside {
 		w.Queue.AddStep(job.ID, "kept", true, w.withMovedAside("The new file was written next to the original, which stays as it is."))
 	} else {
 		w.Queue.AddStep(job.ID, "replaced", true, w.withMovedAside(fmt.Sprintf("The new file is in place: %s to %s.", rules.HumanBytes(job.SizeBefore), rules.HumanBytes(size))))
@@ -708,6 +711,7 @@ func BesidePathAs(src, ext string) string {
 // any error or "no" before it removes the temp file and leaves the original exactly as it was.
 func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err error) {
 	w.movedAside = ""
+	w.planOutput = ""
 	// An earlier try of this job may have left .srt files it could not remove (they are on record): they
 	// go first, on every try and whatever the setting is now, each only if it is still exactly ours, so a
 	// try never takes its own file for someone else's and none is left behind. One that still cannot be
@@ -803,6 +807,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	w.mu.Lock()
 	w.failures = plan.OnFailure // what this path does when it doesn't work (RunOne reads it)
+	w.planOutput = OutputMode(plan.Output)
 	w.mu.Unlock()
 	// Dolby Vision the flow leaves alone is never encoded, whatever was decided when the job was queued
 	// (review a09f6f5: a job queued before migration 17 or a setting change). Only these skips: the
