@@ -4,9 +4,11 @@ package web
 
 import (
 	"encoding/json"
+	"strconv"
 	"testing"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
 // A remote worker offers its graphics encoder until three falls in a row pause it, then it is offered the
@@ -79,5 +81,38 @@ func TestOverviewListsEncoderAndLastError(t *testing.T) {
 	r := out.EncoderFallbacks[0]
 	if r.Encoder != "h264_qsv" || r.LastError != "Unknown encoder 'h264_qsv'" || r.Count != 2 {
 		t.Errorf("row %+v: want encoder h264_qsv, lastError Unknown encoder 'h264_qsv', count 2", r)
+	}
+}
+
+// A completed file a graphics encoder failed on carries its warning in the Jobs list (ui-shop 11-19), so the list
+// can flag it; a plain completed file has warning null.
+func TestJobsListCarriesTheFallbackWarning(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	fell := done(t, st, l.ID, "/m/a.mkv", "/m/a.mkv", 1000, 400)
+	if err := st.AddStep(fell, jobs.EncoderFallbackStep, false, "hevc_qsv failed; converted on the processor."); err != nil {
+		t.Fatal(err)
+	}
+	done(t, st, l.ID, "/m/b.mkv", "/m/b.mkv", 1000, 400)
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs?tab=completed&limit=200"})
+	var r struct{ Items []map[string]any }
+	if err := json.Unmarshal([]byte(body), &r); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]any{}
+	for _, it := range r.Items {
+		w, ok := it["warning"]
+		if !ok {
+			t.Errorf("item %v has no warning field", it["id"])
+		}
+		got[it["id"].(string)] = w
+	}
+	if len(got) != 2 || got[strconv.FormatInt(fell, 10)] != "hevc_qsv failed; converted on the processor." {
+		t.Errorf("warnings by id %v, want the fallen job's words and null for the other\n%s", got, body)
+	}
+	for id, w := range got {
+		if id != strconv.FormatInt(fell, 10) && w != nil {
+			t.Errorf("job %s: warning %v, want null", id, w)
+		}
 	}
 }
