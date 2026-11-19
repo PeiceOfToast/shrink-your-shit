@@ -69,6 +69,7 @@ type helper struct {
 
 	mu    sync.Mutex
 	busy  bool
+	gen   int    // changes when an operation starts or ends: a version read across one is stale
 	state string // idle | downloading | installing | failed
 	err   string
 	done  chan struct{} // closed when the current operation ends (tests wait on it)
@@ -175,10 +176,15 @@ func peerUID(c *net.UnixConn) (int, bool) {
 // handle answers at once; an install or roll back goes on in the background (the app is restarted under it).
 func (h *helper) handle(req update.HelperRequest) update.HelperAnswer {
 	// The installed program is asked its version before the lock is taken: a program that hangs on
-	// -version (up to runLimit) must not hold up status calls.
+	// -version (up to runLimit) must not hold up status calls. h.gen, checked under the lock, refuses an
+	// install whose read overlapped another install or roll back (it could have read the replaced program).
 	var cur string
 	var curErr error
+	gen := -1
 	if req.Cmd == "install" && update.ValidVersion(req.Version) {
+		h.mu.Lock()
+		gen = h.gen
+		h.mu.Unlock()
 		cur, curErr = h.version(h.bin)
 	}
 	h.mu.Lock()
@@ -203,6 +209,9 @@ func (h *helper) handle(req update.HelperRequest) update.HelperAnswer {
 		if !update.ValidVersion(req.Version) { // rule 2
 			return refuse("bad_request", "the version must be a plain x.y.z")
 		}
+		if h.gen != gen { // another install or roll back started or ended meanwhile: cur may be stale
+			return refuse("busy", "the installed program changed while its version was read; try again")
+		}
 		if curErr != nil {
 			return refuse("bad_request", curErr.Error())
 		}
@@ -220,12 +229,14 @@ func (h *helper) handle(req update.HelperRequest) update.HelperAnswer {
 		work = h.rollback
 	}
 	h.busy, h.err, h.done = true, "", make(chan struct{})
+	h.gen++
 	log.Printf("%s %s", req.Cmd, req.Version)
 	go func() {
 		err := work()
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		h.busy, h.state, h.err = false, "idle", ""
+		h.gen++
 		if err != nil {
 			h.state, h.err = "failed", err.Error()
 			log.Printf("%s failed: %v", req.Cmd, err)

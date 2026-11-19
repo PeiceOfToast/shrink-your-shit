@@ -240,3 +240,60 @@ func TestStatusAnswersWhileTheVersionIsRead(t *testing.T) {
 		t.Fatal("status waited for the version read")
 	}
 }
+
+// A second install or a roll back while an install runs is refused as busy, and changes nothing.
+func TestASecondOperationWhileOneRunsIsRefused(t *testing.T) {
+	gate := make(chan struct{})
+	rel := releaseServer(t, "0.2.0", "new")
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-gate // the first install's download waits here
+		http.Redirect(w, r, rel.URL+r.URL.Path, http.StatusFound)
+	}))
+	t.Cleanup(slow.Close)
+	h, _ := testHelper(t, slow.URL, func() bool { return true })
+	os.WriteFile(h.bin+".previous", []byte("prev"), 0o755)
+	if a := h.handle(update.HelperRequest{Cmd: "install", Version: "0.2.0"}); !a.OK {
+		t.Fatalf("first install: %+v", a)
+	}
+	for _, req := range []update.HelperRequest{{Cmd: "install", Version: "0.3.0"}, {Cmd: "rollback"}} {
+		if a := h.handle(req); a.OK || a.Code != "busy" {
+			close(gate)
+			t.Fatalf("%s while an install runs: %+v, want busy", req.Cmd, a)
+		}
+	}
+	close(gate)
+	if a := finish(t, h); a.State != "idle" || read(t, h.bin) != "new" || read(t, h.bin+".previous") != "old" {
+		t.Errorf("after: %+v, bin %q", a, read(t, h.bin))
+	}
+}
+
+// B reads the installed version (slowly), A installs a newer one meanwhile: B's version is stale and
+// B must not install over A's (a downgrade).
+func TestAnInstallWhoseVersionReadOverlappedAnotherIsRefused(t *testing.T) {
+	srv := releaseServer(t, "0.2.0", "new")
+	h, _ := testHelper(t, srv.URL, func() bool { return true })
+	inRead, release := make(chan struct{}), make(chan struct{})
+	var first atomic.Bool
+	h.version = func(bin string) (string, error) {
+		v := map[string]string{"old": "0.1.0", "new": "0.2.0"}[read(t, bin)]
+		if first.CompareAndSwap(false, true) { // B's read: sees 0.1.0, then hangs
+			close(inRead)
+			<-release
+		}
+		return v, nil
+	}
+	got := make(chan update.HelperAnswer, 1)
+	go func() { got <- h.handle(update.HelperRequest{Cmd: "install", Version: "0.1.5"}) }() // B
+	<-inRead
+	if a := h.handle(update.HelperRequest{Cmd: "install", Version: "0.2.0"}); !a.OK { // A
+		t.Fatalf("A: %+v", a)
+	}
+	finish(t, h)
+	close(release)
+	if a := <-got; a.OK || a.Code != "busy" {
+		t.Errorf("B after A finished: %+v, want busy", a)
+	}
+	if read(t, h.bin) != "new" {
+		t.Errorf("bin %q: B installed over A", read(t, h.bin))
+	}
+}
