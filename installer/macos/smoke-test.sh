@@ -8,6 +8,9 @@
 # The token is never printed: it is masked with ::add-mask:: and install output is redacted before it is shown.
 set -euo pipefail
 
+# It deletes the install's data folder, so it runs only in CI (GitHub Actions sets CI=true), never on a Mac in use.
+[ -n "${CI:-}" ] || { echo "refusing to run outside CI: it deletes the shrink-your-shit data folder" >&2; exit 1; }
+
 rel=${1:?usage: smoke-test.sh <release-dir> <repo-root> <diag-dir>}
 root=${2:?usage: smoke-test.sh <release-dir> <repo-root> <diag-dir>}
 diag=${3:?usage: smoke-test.sh <release-dir> <repo-root> <diag-dir>}
@@ -29,6 +32,16 @@ fail() {
 step() {
   echo
   echo "== $*"
+}
+
+# Prints the install-owned paths that exist now: the launchd plist, the binary, the log, the data folder, and any
+# other entry named like them in the folders install.sh writes to. Uninstall must leave this list as it was.
+owned_paths() {
+  local dir
+  for dir in "$HOME/.local/bin" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs" "$HOME/Library/Application Support"; do
+    [ -d "$dir" ] && find "$dir" -maxdepth 1 \( -name 'shrink-your-shit*' -o -name 'dev.shrink-your-shit*' \)
+  done | sort || true
+  return 0
 }
 
 # Reads the token, masks it, and keeps it in TOKEN. The token command prints it twice; take one copy.
@@ -54,16 +67,17 @@ run_install() {
   local out="$work/install-$name.log"
   local rc=0
   SYP_BASE_URL="file://$rel" sh "$root/install.sh" "$@" >"$out" 2>&1 || rc=$?
-  sed -E 's/token=[A-Za-z0-9_-]+/token=REDACTED/g' "$out"
-  cp "$out" "$diag/install-$name.log"
-  sed -E -i '' 's/token=[A-Za-z0-9_-]+/token=REDACTED/g' "$diag/install-$name.log"
+  # The saved copy is written redacted: no unredacted copy ever sits in the diagnostics folder.
+  sed -E 's/token=[A-Za-z0-9_-]+/token=REDACTED/g' "$out" | tee "$diag/install-$name.log"
   echo "install ($name) exit $rc"
   [ "$rc" -eq 0 ] || fail "install.sh ($name) exited $rc"
 }
 
-# Prints the job count from /api/v2/jobs ({"items": [...], "total": N}).
-job_count() {
-  api /api/v2/jobs | python3 -c '
+# Prints how many jobs are in the Completed tab (the bare /api/v2/jobs is the Waiting tab only).
+completed_count() {
+  local body
+  body=$(api "/api/v2/jobs?tab=completed&limit=200") || return 1
+  printf '%s' "$body" | python3 -c '
 import json, sys
 print(len(json.load(sys.stdin)["items"]))
 '
@@ -71,13 +85,21 @@ print(len(json.load(sys.stdin)["items"]))
 
 # Prints the state of the job for movie.mp4 ("completed", "failed", "running", "waiting", ...), or "none".
 # The bare /api/v2/jobs is the Waiting tab only: a job leaves it as soon as a worker takes it. So every tab is
-# asked. A failed job's reason goes to stderr.
+# asked. A failed job's reason goes to stderr. Exit 2 means the API did not answer (or sent bad JSON): that is not
+# "none", and the caller must fail on it.
 movie_status() {
+  local tab body rc
   for tab in running waiting completed failed; do
-    api "/api/v2/jobs?tab=$tab&limit=200" | python3 -c '
+    body=$(api "/api/v2/jobs?tab=$tab&limit=200") || return 2
+    rc=0
+    printf '%s' "$body" | python3 -c '
 import json, sys
 tab = sys.argv[1]
-items = json.load(sys.stdin)["items"]
+try:
+    items = json.load(sys.stdin)["items"]
+except Exception as e:
+    print("bad job list for tab " + tab + ": " + str(e), file=sys.stderr)
+    sys.exit(3)
 hit = [j for j in items if str(j.get("path", "")).endswith("movie.mp4")]
 if hit:
     j = hit[0]
@@ -86,14 +108,22 @@ if hit:
         print("ERROR: " + json.dumps(j.get("reason")), file=sys.stderr)
     sys.exit(0)
 sys.exit(1)
-' "$tab" && return 0
+' "$tab" || rc=$?
+    case $rc in
+      0) return 0 ;;
+      1) ;;
+      *) return 2 ;;
+    esac
   done
   echo none
 }
 
 # Copies what a failure needs into $diag: the app log and the library and job lists. Best effort.
 diag_dump() {
-  cp "$applog" "$diag/shrink-your-shit.log" 2>/dev/null || true
+  # The app log holds the sign-in link: the copy is redacted as it is written.
+  if [ -f "$applog" ]; then
+    sed -E 's/token=[A-Za-z0-9_-]+/token=REDACTED/g' "$applog" >"$diag/shrink-your-shit.log" || true
+  fi
   if [ -n "$TOKEN" ]; then
     api /api/libraries >"$diag/api-libraries.json" 2>&1 || true
     for tab in running waiting completed failed; do
@@ -104,6 +134,7 @@ diag_dump() {
 
 step "1. install with the README's line (the repo's install.sh; the release comes from the local folder)"
 mkdir -p "$lib"
+owned_before=$(owned_paths)
 run_install first --library "$lib"
 
 step "2. the launchd agent and the page"
@@ -143,7 +174,9 @@ echo "worker state at install: $wstate"
 api /api/workers/this/start -X POST -H 'Content-Type: application/json' -d '{}' >/dev/null
 ok=0
 for _ in $(seq 1 60); do
-  st=$(movie_status 2>"$work/movie-err.txt" || true)
+  rc=0
+  st=$(movie_status 2>"$work/movie-err.txt") || rc=$?
+  if [ "$rc" -ne 0 ]; then diag_dump; cat "$work/movie-err.txt" >&2; fail "the job list did not answer during the conversion"; fi
   if [ "$st" = completed ]; then ok=1; break; fi
   if [ "$st" = failed ]; then diag_dump; cat "$work/movie-err.txt" >&2; fail "conversion job failed"; fi
   sleep 10
@@ -160,9 +193,9 @@ echo "codec=$codec size $before -> $after"
 [ "$codec" = hevc ] || fail "expected hevc, got $codec"
 [ "$after" -lt "$before" ] || fail "converted file is not smaller"
 ls "$lib/.syp-trash"/movie*.mp4 >/dev/null 2>&1 || fail "the original movie.mp4 is not kept in .syp-trash"
-jobs_before=$(job_count)
+completed_before=$(completed_count)
 libs_before=$(printf '%s' "$(api /api/libraries)" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["items"]))')
-echo "jobs before upgrade: $jobs_before, libraries: $libs_before"
+echo "completed jobs before upgrade: $completed_before, libraries: $libs_before"
 
 step "4. upgrade in place (run install.sh again, no flags): service back, data kept"
 run_install upgrade
@@ -171,20 +204,31 @@ code=$(curl -s -o /dev/null -w '%{http_code}' "$base/" || true)
 launchctl print "$label" >"$diag/launchctl-after-upgrade.txt" 2>&1 || fail "agent not loaded after upgrade"
 grep -q 'state = running' "$diag/launchctl-after-upgrade.txt" || fail "agent not running after upgrade"
 load_token
-jobs_after=$(job_count)
+completed_after=$(completed_count)
 libs_after=$(printf '%s' "$(api /api/libraries)" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["items"]))')
-echo "jobs after upgrade: $jobs_after, libraries: $libs_after"
-[ "$jobs_after" = "$jobs_before" ] || fail "job count changed on upgrade ($jobs_before -> $jobs_after)"
+echo "completed jobs after upgrade: $completed_after, libraries: $libs_after"
+[ "$completed_after" -ge "$completed_before" ] || fail "completed jobs went down on upgrade ($completed_before -> $completed_after)"
 [ "$libs_after" = "$libs_before" ] || fail "library count changed on upgrade ($libs_before -> $libs_after)"
+rc=0
+st=$(movie_status 2>"$work/movie-err.txt") || rc=$?
+[ "$rc" -eq 0 ] || fail "the job list did not answer after upgrade"
+[ "$st" = completed ] || fail "the converted movie is not completed after upgrade (state: $st)"
 
-step "5. uninstall: the files install.sh creates (the README has no macOS uninstall section yet)"
+step "5. uninstall: remove what install.sh created, then check nothing of it is left"
+owned_installed=$(owned_paths)
+echo "installed: $(printf '%s' "$owned_installed" | tr '\n' ' ')"
+for p in "$plist" "$bin" "$data"; do
+  printf '%s\n' "$owned_installed" | grep -qxF "$p" || fail "install did not create $p"
+done
+# An entry install.sh created that this script does not remove fails here, so the removal below stays complete.
+unknown=$(printf '%s\n' "$owned_installed" | grep -vxF -e "$plist" -e "$bin" -e "$data" -e "$applog" | grep -v '^$' || true)
+[ -z "$unknown" ] || fail "install created entries uninstall does not remove: $unknown"
 launchctl bootout "$label" || fail "launchctl bootout failed"
 if launchctl print "$label" >/dev/null 2>&1; then fail "agent still loaded after bootout"; fi
 rm -f "$plist" "$bin" "$applog"
 rm -rf "$data"
-for p in "$plist" "$bin" "$applog" "$data"; do
-  [ ! -e "$p" ] || fail "still there after uninstall: $p"
-done
+owned_after=$(owned_paths)
+[ "$owned_after" = "$owned_before" ] || fail "uninstall left shrink-your-shit entries: $(printf '%s' "$owned_after" | tr '\n' ' ')"
 code=$(curl -s -o /dev/null -w '%{http_code}' "$base/" || true)
 [ "$code" = 000 ] || fail "page still answers after uninstall (http $code)"
 # -x matches the process name only: -f would match this script, whose arguments contain the repo path.
