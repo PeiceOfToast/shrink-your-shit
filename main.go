@@ -311,7 +311,7 @@ func main() {
 				ShareDown: func(folder string, jobID int64) (worker.ShareDown, bool) {
 					return web.ShareDownFor(store, folder, jobID)
 				},
-				OnDone: func(job jobs.Job, final string) { integ.Tell(job.ID, final) }}
+				OnDone: func(job jobs.Job, final string) { integ.Tell(job.ID, job.Path, final) }}
 		},
 		Size: func() int {
 			if s, err := web.LoadSettings(store); err == nil {
