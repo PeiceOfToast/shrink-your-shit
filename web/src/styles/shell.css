@@ -360,6 +360,9 @@ label.chk{cursor:pointer}
 .tbl a{color:var(--text);font-weight:500}
 .tbl a.ttl,.tbl .ttl{font-weight:var(--fw-strong);color:var(--text)}
 .tbl td .sub{overflow-wrap:anywhere}
+.tbl td .sub.path{overflow-wrap:normal} /* Libraries: a path breaks only after "/" (see .pathseg) */
+.pathseg{white-space:nowrap}
+.tbl td .failedlink{display:block;margin-top:2px;font-size:var(--fs-sm);font-weight:600;color:var(--error-text)} /* Libraries: "2 failed" under the Status chip */
 .ltools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-height:36px}
 .ltools .btn.sm{min-height:32px}
 .ltools .input.sm{width:auto;min-height:32px;padding-top:0;padding-bottom:0;font-size:var(--fs-sm)}
