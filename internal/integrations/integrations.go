@@ -524,9 +524,17 @@ func (s *Service) mapFolders(paths []string, maps []Mapping) []Folder {
 }
 
 // Tell tells every enabled instance that the file at finalPath was replaced; from is the file it replaced
-// (the job's source). It runs in the background, so a slow or dead instance never holds the worker, and a
+// (the job's source). from is empty when the original was kept (Beside and Folder modes), so the new file is
+// only a new file. It runs in the background, so a slow or dead instance never holds the worker, and a
 // warning never fails the job.
 func (s *Service) Tell(jobID int64, from, finalPath string) {
+	// Beside and Folder modes keep the original: it is still there, so it was not replaced and is not reported
+	// as deleted. The new file is then a new file.
+	if from != "" && from != finalPath {
+		if _, err := os.Stat(from); err == nil {
+			from = ""
+		}
+	}
 	s.mu.Lock()
 	f, err := s.load()
 	s.mu.Unlock()

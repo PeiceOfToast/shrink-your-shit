@@ -182,8 +182,10 @@ func (s *Service) tellPlex(ki kindInfo, name, base, key, file string) (summary s
 	return fmt.Sprintf("Told Plex (%s) to scan the folder.", name), true, true
 }
 
-// tellJellyfin tells Jellyfin that the file changed. When its extension changed, the old path is reported deleted
-// and the new one created, as the contract says.
+// tellJellyfin tells Jellyfin about the file. A file made new (old is empty: the original was kept) is Created. A
+// replaced file whose extension changed has its old path Deleted and the new one Created, as the contract says.
+// Otherwise it is Modified. Then its item is refreshed, because a replaced file keeps its modified time and Jellyfin
+// would not probe it again.
 func (s *Service) tellJellyfin(ki kindInfo, name, base, key, old, file string) (summary string, ok, answered bool) {
 	var folders []jellyFolder
 	if msg := s.getJSON(ki, base, key, "/Library/VirtualFolders", noNextScan, &folders); msg != "" {
@@ -201,7 +203,10 @@ func (s *Service) tellJellyfin(ki kindInfo, name, base, key, old, file string) (
 		return ki.label + " has no library for this folder; nothing to scan.", false, true
 	}
 	updates := []jellyUpdate{{Path: file, UpdateType: "Modified"}}
-	if old != "" && extOf(old) != extOf(file) {
+	switch {
+	case old == "":
+		updates = []jellyUpdate{{Path: file, UpdateType: "Created"}}
+	case extOf(old) != extOf(file):
 		updates = []jellyUpdate{{Path: old, UpdateType: "Deleted"}, {Path: file, UpdateType: "Created"}}
 	}
 	st, _, err := s.do(ki, "POST", base, key, "/Library/Media/Updated", map[string]any{"Updates": updates})
@@ -211,5 +216,44 @@ func (s *Service) tellJellyfin(ki kindInfo, name, base, key, old, file string) (
 	if !ok2(st) {
 		return answer(ki, st), false, false
 	}
+	if msg, good, answered := s.refreshJellyItem(ki, base, key, file); !good {
+		return msg, false, answered
+	}
 	return fmt.Sprintf("Told Jellyfin (%s) the file changed.", name), true, true
+}
+
+// refreshJellyItem refreshes the one item whose file is file, so Jellyfin probes it again and shows the new size. A
+// file Jellyfin has not indexed yet has no item, and then nothing is refreshed. Jellyfin ignores a path filter, so the
+// item is searched by its file name and matched on the exact path.
+func (s *Service) refreshJellyItem(ki kindInfo, base, key, file string) (msg string, good, answered bool) {
+	name := file[strings.LastIndexAny(file, `/\`)+1:]
+	if i := strings.LastIndex(name, "."); i > 0 {
+		name = name[:i]
+	}
+	q := url.Values{"Recursive": {"true"}, "IncludeItemTypes": {"Movie,Episode,Video"}, "searchTerm": {name}, "Fields": {"Path"}}
+	var found struct {
+		Items []struct {
+			ID   string `json:"Id"`
+			Path string `json:"Path"`
+		} `json:"Items"`
+	}
+	if msg := s.getJSON(ki, base, key, "/Items?"+q.Encode(), noNextScan, &found); msg != "" {
+		return msg, false, false
+	}
+	for _, it := range found.Items {
+		if it.Path != file {
+			continue
+		}
+		rq := url.Values{"metadataRefreshMode": {"FullRefresh"}, "imageRefreshMode": {"None"},
+			"replaceAllMetadata": {"false"}, "replaceAllImages": {"false"}}
+		st, _, err := s.do(ki, "POST", base, key, "/Items/"+url.PathEscape(it.ID)+"/Refresh?"+rq.Encode(), nil)
+		if err != nil {
+			return unreached(ki, base, err, noNextScan), false, false
+		}
+		if !ok2(st) {
+			return answer(ki, st), false, false
+		}
+		break
+	}
+	return "", true, true
 }

@@ -7,6 +7,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -288,6 +291,7 @@ func TestJellyfinIsToldTheFileChangedUnderItsMapping(t *testing.T) {
 	f := newFakeMedia(t, "Authorization", auth, map[string]string{
 		"/Library/VirtualFolders": jellyFoldersJSON,
 		"/Library/Media/Updated":  "",
+		"/Items":                  `{"Items":[]}`,
 	})
 	h := newHarness(t)
 	saveInstance(t, h, Jellyfin, f.srv.URL, jellyKey, []Mapping{{TheirPath: "/data/movies", OurPath: "/mnt/media/movies"}})
@@ -312,6 +316,7 @@ func TestJellyfinIsToldTheFileChangedUnderItsMapping(t *testing.T) {
 	want2 := []sent{
 		{"GET", "/Library/VirtualFolders", "", auth},
 		{"POST", "/Library/Media/Updated", "", auth},
+		{"GET", "/Items", jellyItemQuery("film"), auth},
 	}
 	if got := f.seen(); !reflect.DeepEqual(got, want2) {
 		t.Errorf("calls = %+v, want %+v", got, want2)
@@ -333,6 +338,7 @@ func TestJellyfinGetsADeleteAndACreateWhenTheExtensionChanges(t *testing.T) {
 			f := newFakeMedia(t, "Authorization", `MediaBrowser Token="`+jellyKey+`"`, map[string]string{
 				"/Library/VirtualFolders": jellyFoldersJSON,
 				"/Library/Media/Updated":  "",
+				"/Items":                  `{"Items":[]}`,
 			})
 			h := newHarness(t)
 			saveInstance(t, h, Jellyfin, f.srv.URL, jellyKey, nil)
@@ -353,6 +359,75 @@ func TestJellyfinGetsADeleteAndACreateWhenTheExtensionChanges(t *testing.T) {
 				t.Errorf("updates = %+v, want %+v", body.Updates, c.want)
 			}
 		})
+	}
+}
+
+// jellyItemQuery is the query the item search sends for a file named name.
+func jellyItemQuery(name string) string {
+	return url.Values{"Recursive": {"true"}, "IncludeItemTypes": {"Movie,Episode,Video"}, "searchTerm": {name}, "Fields": {"Path"}}.Encode()
+}
+
+func TestJellyfinRefreshesTheItemWithTheFilesPath(t *testing.T) {
+	auth := `MediaBrowser Token="` + jellyKey + `"`
+	f := newFakeMedia(t, "Authorization", auth, map[string]string{
+		"/Library/VirtualFolders": jellyFoldersJSON,
+		"/Library/Media/Updated":  "",
+		"/Items":                  `{"Items":[{"Id":"other1","Path":"/data/other/Film/film.mkv"},{"Id":"abc123","Path":"/data/movies/Film/film.mkv"}]}`,
+		"/Items/abc123/Refresh":   "",
+	})
+	h := newHarness(t)
+	saveInstance(t, h, Jellyfin, f.srv.URL, jellyKey, nil)
+	file := "/data/movies/Film/film.mkv"
+	steps := tellOnce(t, h, file, file)
+	if len(steps) != 1 || !steps[0].OK {
+		t.Fatalf("steps = %+v", steps)
+	}
+	refresh := url.Values{"metadataRefreshMode": {"FullRefresh"}, "imageRefreshMode": {"None"},
+		"replaceAllMetadata": {"false"}, "replaceAllImages": {"false"}}.Encode()
+	want := []sent{
+		{"GET", "/Library/VirtualFolders", "", auth},
+		{"POST", "/Library/Media/Updated", "", auth},
+		{"GET", "/Items", jellyItemQuery("film"), auth},
+		{"POST", "/Items/abc123/Refresh", refresh, auth},
+	}
+	if got := f.seen(); !reflect.DeepEqual(got, want) {
+		t.Errorf("calls = %+v, want %+v", got, want)
+	}
+}
+
+func TestJellyfinIsToldOnlyOfANewFileWhenTheOriginalIsKept(t *testing.T) {
+	dir := t.TempDir()
+	orig := filepath.Join(dir, "film.mp4")
+	made := filepath.Join(dir, "film.hevc.mp4")
+	if err := os.WriteFile(orig, []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(made, []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := newFakeMedia(t, "Authorization", `MediaBrowser Token="`+jellyKey+`"`, map[string]string{
+		"/Library/VirtualFolders": jellyFoldersJSON,
+		"/Library/Media/Updated":  "",
+		"/Items":                  `{"Items":[]}`,
+	})
+	h := newHarness(t)
+	saveInstance(t, h, Jellyfin, f.srv.URL, jellyKey, []Mapping{{TheirPath: "/data/movies", OurPath: dir}})
+	steps := tellOnce(t, h, orig, made)
+	if len(steps) != 1 || !steps[0].OK {
+		t.Fatalf("steps = %+v", steps)
+	}
+	var body struct {
+		Updates []jellyUpdate `json:"Updates"`
+	}
+	if len(f.posted) != 1 {
+		t.Fatalf("posted %d bodies, want 1", len(f.posted))
+	}
+	if err := json.Unmarshal([]byte(f.posted[0]), &body); err != nil {
+		t.Fatal(err)
+	}
+	want := []jellyUpdate{{Path: "/data/movies/film.hevc.mp4", UpdateType: "Created"}}
+	if !reflect.DeepEqual(body.Updates, want) {
+		t.Errorf("updates = %+v, want %+v", body.Updates, want)
 	}
 }
 
