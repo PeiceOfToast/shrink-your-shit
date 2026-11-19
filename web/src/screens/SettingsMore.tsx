@@ -271,7 +271,7 @@ function Install({ d, reload, check }: { d: UpdateNotice; reload: () => void; ch
   const spin = (t: string, rest = "") => <p className="st run" role="status" style={{ margin: 0, alignItems: "flex-start" }}><span className="spin" style={{ display: "inline-flex", marginTop: 2 }}><Icon id="i-refresh" /></span><span>{t}{rest && <span style={{ fontWeight: 400, color: "var(--text)" }}> {rest}</span>}</span></p>;
   return (<>
     {last && !running && !gone && !rolling && (last.ok
-      ? <p className="st ok" style={{ margin: 0 }}><Icon id="i-check-c" /><span>{noV(last.message)}.{d.url && !last.message.startsWith("Rolled back") && <> <a href={d.url} target="_blank" rel="noopener">What's new</a></>}</span></p>
+      ? <p className="st ok" style={{ margin: 0 }}><Icon id="i-check-c" /><span>{noV(last.message)}.{d.url && !last.rolledBack && <> <a href={d.url} target="_blank" rel="noopener">What's new</a></>}</span></p>
       : <p className="st warn" style={{ margin: 0, alignItems: "flex-start" }}><Icon id="i-alert" /><span className="why" style={{ fontWeight: 400, color: "var(--text)" }}>{noV(last.message)}.</span></p>)}
     {gone || rolling ? spin("Restarting...", "this page reconnects by itself.")
       : st === "waiting" ? <p role="status" style={{ margin: 0 }}>Updating to {to} when the converting files finish.</p>

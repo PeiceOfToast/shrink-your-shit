@@ -66,7 +66,7 @@ export interface UpdateNotice { enabled: boolean; current: string; latest: strin
   os: "linux" | "darwin" | "windows"; helperCommand: string | null;
   rollback: { available: boolean; version: string | null; dataRestored: boolean };
   install: { state: "idle" | "waiting" | "downloading" | "installing" | "failed"; error: string | null };
-  lastResult: { ok: boolean; from: string; to: string; message: string; dataRestored: boolean } | null }
+  lastResult: { ok: boolean; from: string; to: string; message: string; dataRestored: boolean; rolledBack: boolean } | null }
 let mockChecked = Date.now() - 36e5; // the sample's last check, kept like the server's
 let mockInstall: UpdateNotice["install"]["state"] | null = null; // set by a mock Update click
 let mockRolled = false; // set by a mock Roll back click: the sample then runs the previous version
@@ -86,12 +86,12 @@ const mockUpdate = (): UpdateNotice => { const on = !!mock.mockState().settings.
     // keeps one (#336) and the database stays. ?rb adds a kept version to any helper state.
     rollback: helper && (u === "done" || u === "rolledback" || q.has("rb")) ? { available: true, version: "1.9.0", dataRestored: u === "done" } : { available: false, version: null, dataRestored: false },
     install: { state: st, error: st === "failed" ? "checksum mismatch for shrink-your-shit_2.1.0_linux_amd64.tar.gz" : null },
-    lastResult: u === "done" ? { ok: true, from: "1.9.0", to: "2.0.0", message: "Updated from v1.9.0 to v2.0.0", dataRestored: false }
-      : u === "rolledback" ? { ok: false, from: "2.0.0", to: "2.1.0", message: "Update to v2.1.0 failed; rolled back to v2.0.0", dataRestored: false } : null };
+    lastResult: u === "done" ? { ok: true, from: "1.9.0", to: "2.0.0", message: "Updated from v1.9.0 to v2.0.0", dataRestored: false, rolledBack: false }
+      : u === "rolledback" ? { ok: false, from: "2.0.0", to: "2.1.0", message: "Update to v2.1.0 failed; rolled back to v2.0.0", dataRestored: false, rolledBack: true } : null };
   // after a mock Roll back the sample runs 1.9.0, with nothing older kept
   return !mockRolled ? d : { ...d, current: "1.9.0", latest: on ? "2.0.0" : null, available: on, install: { state: "idle", error: null },
     rollback: { available: false, version: null, dataRestored: false },
-    lastResult: { ok: true, from: "2.0.0", to: "1.9.0", message: "Rolled back from 2.0.0 to 1.9.0" + (u === "done" ? "; changes made since the update were undone (kept in syp.db.rolled-back)" : ""), dataRestored: u === "done" } }; };
+    lastResult: { ok: true, from: "2.0.0", to: "1.9.0", message: "Rolled back from 2.0.0 to 1.9.0" + (u === "done" ? "; changes made since the update were undone (kept in syp.db.rolled-back)" : ""), dataRestored: u === "done", rolledBack: true } }; };
 export const getUpdate = (): Promise<Answer<UpdateNotice>> => (!MOCK ? call("GET", "/api/v2/update")
   : new URLSearchParams(location.search).has("updatefail") ? M({ error: { code: "internal", message: "Couldn't load the update status." } }) : M(mockUpdate()));
 export const checkUpdate = (): Promise<Answer<UpdateNotice>> => (MOCK ? M((mockChecked = Date.now(), mockUpdate())) : call("POST", "/api/v2/update/check"));
