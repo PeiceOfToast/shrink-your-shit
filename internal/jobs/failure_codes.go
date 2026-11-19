@@ -202,6 +202,13 @@ var deniedOutput = regexp.MustCompile(`(?i)output\s+(\S.*?):\s*permission denied
 // "Couldn't write <path>: <the system's words>" (worker placeError.keyLine).
 var deniedWrite = regexp.MustCompile(`(?i)^couldn't write (\S.*): (?:permission denied|read-only file system|access is denied)`)
 
+// LastName is the last name of a path, for / and \ separators alike: a remote worker can send Windows paths to a
+// Linux server, where filepath.Base would not split them.
+func LastName(p string) string {
+	t := strings.TrimRight(p, `/\`)
+	return t[strings.LastIndexAny(t, `/\`)+1:]
+}
+
 // DeniedFolder is the folder a write was refused in: from ffmpeg's "Error opening output <path>: Permission denied"
 // line (user review 11-13 item E, QA of #214), or the worker's "Couldn't write <path>: ..." line when putting the new
 // file in place was refused (the manager's check). It is the new file's folder, never the source's. A path inside a

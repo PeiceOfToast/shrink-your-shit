@@ -3,12 +3,12 @@
 // when asked for, never kept by the page; a new one; Sign out, only when the server needs a token). Safety: how long
 // replaced originals are kept, where, and what the trash holds now (its whole size lives here, not beside Space saved:
 // design 05:34Z). Not here: log retention (no setting on the server).
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { PageHead } from "../PageHead";
 import { SignedOut, failed, type Answer } from "../api";
 import { bytes, plural } from "../format";
-import { getHealth, getSettings, getToken, getTrash, patchSettings, rotateToken, signOut } from "../libraryApi";
+import { checkUpdate, getHealth, getUpdate, getSettings, getToken, getTrash, patchSettings, rotateToken, signOut } from "../libraryApi";
 import { SettingsTabs } from "../pages";
 import { Link, navigate } from "../router";
 import { setRole } from "../setupApi";
@@ -193,20 +193,6 @@ export function SafetySettings() {
     </div>);
 }
 
-// Integrations (SCREENS V9): the server has none yet (Sonarr, Radarr, Plex, Jellyfin, notifications, the update check:
-// 'not available'), so this tab only says so, with design's promise. Nothing here is a control that does nothing.
-export function IntegrationsSettings() {
-  return (
-    <div className="stack">
-      <PageHead icon="i-settings" title="Settings" />
-      <SettingsTabs at="integrations" />
-      <section className="card"><div className="bd stack">
-        <p><strong>Shrink Your Shit sends nothing anywhere unless you turn something on here.</strong></p>
-        <p className="muted">Connections to Sonarr, Radarr, Plex and Jellyfin, notifications and the update check come in a later version. Until then, nothing is sent.</p>
-      </div></section>
-    </div>);
-}
-
 // Backup (SCREENS V9): the server answers backups with 501 not_available for now, so this tab only says so (design's
 // words); no button that can't work.
 export function BackupSettings() {
@@ -219,6 +205,35 @@ export function BackupSettings() {
         <p className="muted">Exporting your settings and workflows, and importing them with a preview of what changes, come in a later version.</p>
       </div></section>
     </div>);
+}
+
+// Updates (SCREENS:293, About block): the #324 switch, off until the person turns it on, and the version line.
+const SENT = "Once a day it asks GitHub which version is newest. GitHub sees this app's version and your IP address, as with any web request. Nothing about your files or settings is sent. It only tells you; nothing is installed.";
+const at = (t: string) => `${day(t)}, ${new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+function Updates({ version }: { version?: string }) {
+  const st = useData(getSettings, []), u = useData(getUpdate, []), [busy, setBusy] = useState(false), [said, setSaid] = useState("");
+  const on = !!st.data?.checkForUpdates, d = u.data, sw = useRef<HTMLInputElement>(null);
+  const set = async (v: boolean) => { setBusy(true); setSaid(""); const r = await act(patchSettings({ checkForUpdates: v }), setSaid); setBusy(false); if (r) { st.reload(); u.reload(); } };
+  const now = async () => { setBusy(true); setSaid(""); const r = await act(checkUpdate(), setSaid); setBusy(false); if (r) u.reload(); };
+  const toSwitch = (e: MouseEvent) => { e.preventDefault(); sw.current?.scrollIntoView({ block: "center" }); sw.current?.focus(); };
+  return (
+    <section className="card" aria-labelledby="upd-h"><div className="hd"><h2 id="upd-h">Updates</h2></div>
+      <div className="bd stack">
+        <label className="row nw"><input ref={sw} id="upd-sw" type="checkbox" role="switch" className="switch" checked={on} disabled={!st.data || busy} aria-describedby="upd-hint" onChange={(e) => set(e.target.checked)} />
+          <span><strong>Check for updates</strong></span></label>
+        <span className="hint" id="upd-hint">{SENT}</span>
+        <div className="note"><Icon id="i-shield" /><span>Shrink Your Shit sends nothing anywhere unless you turn something on here.</span></div>
+        {!d ? (version || u.error) && <p role="status" style={{ margin: 0 }}>{version && <span>Shrink Your Shit {version}. </span>}{u.error && <span className="muted">{u.error.message}</span>}</p>
+          : <div className="row" style={{ alignItems: "baseline" }}>
+          <p role="status" style={{ margin: 0 }}><span>Shrink Your Shit {d.current || version}. </span>
+            {!d.enabled ? <span className="muted">Update checks are off. <a href="#upd-sw" onClick={toSwitch}>Turn them on</a></span>
+              : d.available && d.latest ? <><span className="pill warn"><Icon id="i-download" />Version {d.latest} is available</span>{d.url && <> <a href={d.url} target="_blank" rel="noopener">What's new</a></>}</>
+                : d.error && d.checkedAt ? <span className="st warn"><Icon id="i-alert" /><span>Couldn't check for updates at {at(d.checkedAt)}.</span></span>
+                  : d.checkedAt ? <span className="muted">Up to date. Checked {at(d.checkedAt)}.</span> : <span className="muted">Not checked yet.</span>}</p>
+          {d.enabled && <button className="btn sm" type="button" disabled={busy} onClick={now}><Icon id="i-refresh" />{busy ? "Checking..." : "Check now"}</button>}
+        </div>}
+        {said && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{said}</span></p>}
+      </div></section>);
 }
 
 // About (SCREENS V9: version, health report, licences): the old Settings > System's health checks and log lines.
@@ -234,10 +249,11 @@ export function AboutSettings() {
           {!h.data ? <p className="muted" role="status">{h.error?.message ?? "Checking..."}</p> : <>
             <ul className="stack" style={{ listStyle: "none", padding: 0, margin: 0 }} aria-live="polite" aria-label="Health checks">
               {h.data.checks.map((c) => { const [cls, word] = BADGE[c.status] ?? BADGE.warn; return <li key={c.id} className="row nw" style={{ alignItems: "baseline", gap: 8 }}><span className={"pill " + cls}>{word}</span><span>{c.label}{c.detail ? ". " + c.detail : ""}</span></li>; })}</ul>
-            <p className="muted">Shrink Your Shit {h.data.version}</p></>}
+            </>}
         </div></section>
       <section className="card" aria-labelledby="log-h"><div className="hd"><h2 id="log-h">Recent log lines</h2></div>
         <div className="bd"><pre className="mono sm" tabIndex={0} role="region" aria-labelledby="log-h" style={{ overflow: "auto", maxHeight: "16rem", margin: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{h.data ? (h.data.logsTail.length ? h.data.logsTail.join("\n") : "Nothing has been logged yet.") : ""}</pre></div></section>
+      <Updates version={h.data?.version} />
       <section className="card" aria-labelledby="lic-h"><div className="hd"><h2 id="lic-h">Licences</h2></div>
         <div className="bd stack">
           <p>Shrink Your Shit is free software under the GNU Affero General Public License, version 3.</p>

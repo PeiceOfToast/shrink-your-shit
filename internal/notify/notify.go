@@ -145,6 +145,9 @@ type Options struct {
 	Now          func() time.Time
 	Logf         func(format string, args ...any)
 	Backoff      []time.Duration // the waits before each retry of a failed send
+	// FailureText is the sentence the Jobs page shows for a failed job, by job id ("" when it has none). A failure
+	// sends its first line; failedWords is the fallback.
+	FailureText func(jobID int64) string
 }
 
 // Service keeps the setup and sends the news.
@@ -241,11 +244,11 @@ func (s *Service) events() {
 		}
 		name := "A file"
 		if j, err := s.st.Get(e.JobID); err == nil {
-			name = filepath.Base(j.Path)
+			name = jobs.LastName(j.Path)
 		}
 		switch e.To {
 		case "failed":
-			s.notifyAll("jobFailed", "/jobs?tab=failed", fmt.Sprintf("Failed: %s. %s", name, failedWords(e.Reason)), "job.failed")
+			s.notifyAll("jobFailed", "/jobs?tab=failed", withoutFolders(fmt.Sprintf("Failed: %s. %s", name, s.failureSentence(e))), "job.failed")
 		case "kept":
 			s.notifyAll("needsYou", "/jobs?tab=completed", fmt.Sprintf("Kept the original of %s: a safety check refused the new file.", name), "job.kept")
 		case "done":
@@ -253,6 +256,47 @@ func (s *Service) events() {
 		}
 	}
 	s.setCursor(eventCursor, cur)
+}
+
+// pathWord is a run of text with a separator in it: a candidate path.
+var pathWord = regexp.MustCompile(`[^\s'"]*[/\\][^\s'"]*`)
+
+// withoutFolders keeps a failure notification to file names. Each path in it becomes its last name, so no folder
+// leaves the server: webhooks go to outside services. The Jobs page keeps its own words.
+func withoutFolders(text string) string {
+	return pathWord.ReplaceAllStringFunc(text, func(w string) string {
+		if !namesAPath(w) {
+			return w
+		}
+		return jobs.LastName(w)
+	})
+}
+
+// namesAPath is true for a word that is a path: it starts with a separator or a drive (C:\), or has two separators.
+// "and/or" is not one.
+func namesAPath(w string) bool {
+	t := strings.TrimRight(w, `/\`)
+	if len(t) == 0 {
+		return false
+	}
+	if t[0] == '/' || t[0] == '\\' || (len(t) >= 3 && t[1] == ':' && (t[2] == '\\' || t[2] == '/')) {
+		return true
+	}
+	return strings.Count(t, "/")+strings.Count(t, `\`) >= 2
+}
+
+// failureSentence is the first line of the Jobs sentence for a failed job, or failedWords for its code when there is none.
+func (s *Service) failureSentence(e jobs.Event) string {
+	if s.opt.FailureText != nil {
+		// fail closed: a separator left after the cut (a path the patterns can't see, say with spaces in a
+		// folder name) means a folder might go out, so the fixed words go instead
+		if line, _, _ := strings.Cut(strings.TrimSpace(s.opt.FailureText(e.JobID)), "\n"); line != "" {
+			if line = withoutFolders(line); !strings.ContainsAny(line, `/\`) {
+				return line
+			}
+		}
+	}
+	return failedWords(e.Reason)
 }
 
 func (s *Service) fallbacks() {
@@ -358,8 +402,8 @@ func summaryDue(sum Summary, now, last time.Time, b jobs.Batch) (send, advance b
 	return advance && found, advance
 }
 
-// failedWords says why a job failed in fixed words from its code. The job's stored sentence is not sent: some name
-// a full path, and a notification leaves this computer.
+// failedWords says why a job failed in fixed words from its code. It is the fallback when Options.FailureText is
+// not set or says nothing; when it is set, the Jobs sentence is sent instead (it can name the output folder, as Jobs does).
 func failedWords(code string) string {
 	switch code {
 	case jobs.ReasonDiskFull:

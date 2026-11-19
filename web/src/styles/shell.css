@@ -726,3 +726,8 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 @media (pointer:coarse){.ov .sec>h2 .more,.ov .stats a,.ov a.fname,.ov td.nm a,.ov details>summary{display:inline-flex;align-items:center;min-height:44px}}
 .ov .kv{grid-template-columns:auto minmax(0,1fr)} /* the 30-day totals keep label and figure on one line on phones */
 @media (max-width:640px){.ov .stats{gap:12px 20px}.ov .stats div{min-width:calc(50% - 10px)}} /* review a7d25ec P3: the four headline figures sit two by two on a phone */
+/* Settings > Connections (V9e): a folder row is "<app> sees" -> "Shrink Your Shit sees" x; at phone widths the two fields stack */
+.cfold>summary{cursor:pointer;overflow-wrap:anywhere}
+.cmap{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr) auto;gap:8px;align-items:end}
+.cmap>.ic{margin-bottom:10px;color:var(--text-2)}
+@media (max-width:640px){.cmap{grid-template-columns:minmax(0,1fr) auto}.cmap>.ic{display:none}.cmap>.field:nth-of-type(2){grid-column:1}.cmap>button{grid-column:2;grid-row:1}}
