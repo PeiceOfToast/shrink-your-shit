@@ -107,7 +107,7 @@ export const installUpdate = (when: "now" | "after-job"): Promise<Answer<UpdateN
 export const rollbackUpdate = (): Promise<Answer<UpdateNotice>> => {
   if (!MOCK) return call("POST", "/api/v2/update/rollback", {});
   const refuse = new URLSearchParams(location.search).get("rbrefuse");
-  if (refuse) return M({ error: { code: refuse, message: refuse === "server_error" ? "could not reach the update helper" : refuse } });
+  if (refuse) return M({ error: { code: refuse, message: refuse === "server_error" ? "could not reach the update helper" : refuse === "no_previous" ? "there is no previous version to roll back to" : refuse } });
   return M((mockRolled = true, mockUpdate()));
 };
 // How many files are converting now (the summary's activity), so the button can wait for them.

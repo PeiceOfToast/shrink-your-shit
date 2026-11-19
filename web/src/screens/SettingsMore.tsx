@@ -242,7 +242,7 @@ function Updates({ version }: { version?: string }) {
 // lastResult. While an install runs the card re-reads every 3 s; when the server is gone (it restarts) it says so.
 // Roll back (#336) shows only when the helper keeps a previous version, and works with update checks off.
 const REFUSED: Record<string, string> = { job_running: "A file just started converting.", not_available: "There's no newer version now.",
-  updates_off: "Update checks are off. Turn them on to update.", update_in_progress: "", install_unsupported: "", no_previous: "" };
+  updates_off: "Update checks are off. Turn them on to update.", update_in_progress: "", install_unsupported: "", no_previous: "There's no earlier version kept to go back to." };
 const noV = (m: string) => m.replace(/\bv(?=\d)/g, ""); // design gap d: versions read as on the Version line
 // plain http has no clipboard API (the user's http://IP:8484), or it can be refused: then copy the old way, as Workers does
 async function copyText(t: string): Promise<boolean> {
@@ -256,7 +256,7 @@ function Copy({ t }: { t: string }) {
     {said && <span className="hint" role="status">{said}</span>}</>);
 }
 function Install({ d, reload, check }: { d: UpdateNotice; reload: () => void; check: () => void }) {
-  const jobs = useData(getConverting, []), [busy, setBusy] = useState(false), [said, setSaid] = useState(""), [gone, setGone] = useState(false), [late, setLate] = useState(false), [noNew, setNoNew] = useState(false);
+  const jobs = useData(getConverting, []), [busy, setBusy] = useState(false), [said, setSaid] = useState(""), [gone, setGone] = useState(false), [late, setLate] = useState(false), [noNew, setNoNew] = useState(false), [rbFail, setRbFail] = useState("");
   // rolling: what the page saw when Roll back was accepted; it waits until the version or the last result changes
   const [ask, setAsk] = useState(false), [rolling, setRolling] = useState<{ from: string; msg: string } | null>(null);
   const st = d.install.state, running = st === "waiting" || st === "downloading" || st === "installing", n = jobs.data ?? 0, to = d.latest ?? "", last = d.lastResult;
@@ -267,14 +267,14 @@ function Install({ d, reload, check }: { d: UpdateNotice; reload: () => void; ch
     return () => clearInterval(t);
   }, [running, gone, rolling, reload]);
   const go = async (when: "now" | "after-job") => {
-    setBusy(true); setSaid(""); setNoNew(false);
+    setBusy(true); setSaid(""); setNoNew(false); setRbFail("");
     try { const r = await installUpdate(when); if (!failed(r)) holdLost(120000); else { setNoNew(r.error.code === "not_available"); setSaid(r.error.code in REFUSED ? REFUSED[r.error.code] : r.error.message); if (r.error.code === "job_running") setLate(true); jobs.reload(); } }
     catch (e) { if (!(e instanceof SignedOut)) throw e; }
     setBusy(false); reload();
   };
   const back = async () => {
-    setBusy(true); setSaid(""); setNoNew(false);
-    try { const r = await rollbackUpdate(); if (!failed(r)) { holdLost(120000); setRolling({ from: d.current, msg: d.lastResult?.message ?? "" }); } else setSaid(r.error.code in REFUSED ? REFUSED[r.error.code] : `Couldn't roll back: ${r.error.message}`); }
+    setBusy(true); setSaid(""); setNoNew(false); setRbFail("");
+    try { const r = await rollbackUpdate(); if (!failed(r)) { holdLost(120000); setRolling({ from: d.current, msg: d.lastResult?.message ?? "" }); } else if (r.error.code in REFUSED) setSaid(REFUSED[r.error.code]); else setRbFail(/[.!?]$/.test(r.error.message) ? r.error.message : r.error.message + "."); }
     catch (e) { if (!(e instanceof SignedOut)) throw e; }
     setBusy(false); setAsk(false); reload();
   };
@@ -307,6 +307,7 @@ function Install({ d, reload, check }: { d: UpdateNotice; reload: () => void; ch
       </div>
       : d.installType === "windows" ? <p style={{ margin: 0 }}>Download the new installer from the {d.url ? <a href={d.url} target="_blank" rel="noopener">release page</a> : "release page"}.</p>
       : d.installType === "source" ? <p style={{ margin: 0 }}>Built from source: pull and build again.</p> : null)}
+    {rbFail && <p className="st warn" role="alert" style={{ margin: 0, alignItems: "flex-start" }}><Icon id="i-alert" /><span>Couldn't roll back: <span style={{ fontWeight: 400, color: "var(--text)" }}>{rbFail}</span></span></p>}
     {said && <p className="st warn" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{said}{noNew && <> <button className="linkbtn" type="button" onClick={() => (setSaid(""), setNoNew(false), check())}>Check now</button></>}</span></p>}
     {d.method === "helper" && st === "idle" && d.rollback.available && !gone && !rolling &&
       <div><button className="btn" type="button" disabled={busy} onClick={() => setAsk(true)}>{prev ? `Roll back to ${prev}` : "Roll back"}</button></div>}
