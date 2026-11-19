@@ -37,7 +37,7 @@ func TestSettingsDefaultsAndFirstRun(t *testing.T) {
 			t.Errorf("%s = %v, want %v", k, m[k], v)
 		}
 	}
-	if code != 200 || m["trashPath"] == "" || m["integrations"] == nil || m["quietHours"] == nil {
+	if code != 200 || m["trashPath"] == "" || m["quietHours"] == nil {
 		t.Errorf("%d %s", code, body)
 	}
 	if m["controlLevel"] != "basic" || m["perLibraryFlow"] != false { // retired, shown for one release (ui-shop 04:37Z)

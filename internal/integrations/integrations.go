@@ -535,7 +535,7 @@ func (s *Service) Tell(jobID int64, from, finalPath string) {
 		return
 	}
 	for _, r := range f.Items {
-		if !r.Enabled || r.Kind == Plex || r.Kind == Jellyfin { // Plex and Jellyfin are told in the next change
+		if !r.Enabled {
 			continue
 		}
 		rec := r
@@ -558,7 +558,18 @@ func (s *Service) tellOne(jobID int64, r record, from, finalPath string) {
 		s.step(jobID, false, summary)
 		return
 	}
-	summary, ok, answered, owns := s.rescan(ki, r.URL, key, toTheirs(finalPath, r.Mappings))
+	var summary string
+	var ok, answered, owns bool
+	switch r.Kind {
+	case Plex:
+		summary, ok, answered = s.tellPlex(ki, r.Name, r.URL, key, toTheirs(finalPath, r.Mappings))
+		owns = true
+	case Jellyfin:
+		summary, ok, answered = s.tellJellyfin(ki, r.Name, r.URL, key, toTheirs(from, r.Mappings), toTheirs(finalPath, r.Mappings))
+		owns = true
+	default:
+		summary, ok, answered, owns = s.rescan(ki, r.URL, key, toTheirs(finalPath, r.Mappings))
+	}
 	if owns { // an instance without this file's show or movie (a Radarr told about an episode) leaves no step or log line
 		s.step(jobID, ok, summary)
 		s.logf("%s: %s", ki.label, summary)
