@@ -79,7 +79,8 @@ export function Overview() {
   // Dismiss hides it until the failed checks change (design V9h): an encoder Fail can stay for good while the CPU converts
   const failedNow = (doc.data?.checks ?? []).filter((c) => c.status === "bad"), failKey = failedNow.map((c) => c.id + ":" + c.detail).join("|");
   const [hidKey, setHidKey] = useState(() => { try { return localStorage.getItem(HEALTH_HIDDEN) ?? ""; } catch { return ""; } });
-  const hideHealth = () => { setHidKey(failKey); try { localStorage.setItem(HEALTH_HIDDEN, failKey); } catch { /* hidden for this visit only */ } };
+  const hideHealth = () => { setHidKey(failKey); try { localStorage.setItem(HEALTH_HIDDEN, failKey); } catch { /* hidden for this visit only */ }
+    const h = document.querySelector<HTMLElement>(".pagehead h1"); if (h) { h.tabIndex = -1; h.focus(); } }; // the button goes away: focus the heading, as Workers does
   const o = useData(getOverview, [], 15000), sum = useData<{ last24h: { failed: number } }>(() => (MOCK ? Promise.resolve(summary(mockState())) : getSummary()), [], 30000);
   const [live, setLive] = useState<Record<string, Partial<OverviewJob>>>({}), [said, setSaid] = useState("");
   const reload = useRef(o.reload); reload.current = () => (o.reload(), wl.reload());
