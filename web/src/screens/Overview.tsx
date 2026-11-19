@@ -64,7 +64,7 @@ function DayBars({ title, note, days, series, fmt, tick = true, extra, quiet }: 
         return <g key={dd.day}>{parts.map((p, k) => { const last = k === parts.length - 1, gap = k ? 2 : 0, h = Math.max(1, p.h - gap); yy -= p.h;
           return last ? <path key={k} d={roundTop(x, yy, barW, h)} fill={p.s.color} /> : <rect key={k} x={x} y={yy} width={barW} height={h} fill={p.s.color} />; })}</g>; })}
       <text x="0" y={H - 4} fill="var(--text-2)" fontSize="12">{dayName(days[0].day)}</text>
-      {W >= 600 && <text x={W / 2} y={H - 4} fill="var(--text-2)" fontSize="12" textAnchor="middle">{dayName(days[Math.floor(n / 2)].day)}</text>}
+      {W >= 480 && <text x={W / 2} y={H - 4} fill="var(--text-2)" fontSize="12" textAnchor="middle">{dayName(days[Math.floor(n / 2)].day)}</text>}
       <text x={W} y={H - 4} fill="var(--text-2)" fontSize="12" textAnchor="end">{dayName(days[n - 1].day)}</text>
       {days.map((dd, i) => <rect key={dd.day} x={i * bw} y="0" width={bw} height={H} fill="transparent" onMouseEnter={() => setAt(i)} />)}
     </svg>
@@ -182,6 +182,7 @@ export function Overview() {
             </details>
           </div></>}
         {first && rec.length >= 2 && v.daily.length > 0 && first > v.daily[0].day && <p className="muted sm">Recorded from {dayName(first)}.</p>}
+        {rec.length >= 2 && !(MOCK || /^(Etc\/)?UTC$/.test(v.timeZone)) && <p className="muted sm">Days run midnight to midnight, {v.timeZone.split("/").pop()!.replace(/_/g, " ")} time.</p>}
       </section>
 
       <section className="sec" aria-labelledby="ov-w"><h2 id="ov-w">Workers <Link className="more" to="/workers">Workers page</Link></h2>
