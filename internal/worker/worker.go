@@ -1003,6 +1003,11 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 	}
 	w.recordEncode(job.ID, args, encStart, encErr, terr, probeSummary(src))
+	// Moved or deleted while converting: ffmpeg's read errors then say nothing about the file, so it is
+	// neither damaged nor the encoder's fault. Checked before the errors are read as damage.
+	if ctx.Err() == nil && sourceGone(srcPath) {
+		return "", failed(goneWords, errors.Join(terr, errors.New("the original is no longer at its path")))
+	}
 	if fell && terr == nil { // the processor converted the file, so the graphics encoder was the fault: it counts
 		w.jobf(job.ID, ": %s failed (%s); converted on the processor", gpu, fellReason)
 		if paused, err := w.Queue.EncoderFell(job.ID, w.ID, gpu, fellReason); err != nil {
@@ -1444,12 +1449,25 @@ func statOpen(path string) (os.FileInfo, error) {
 // readSourceState is media.FileState; tests change what it reports.
 var readSourceState = media.FileState
 
+// goneWords: the original was moved or deleted while it was converted. A failure, never a damaged file.
+const goneWords = "The file was moved or deleted while it was being converted."
+
+// sourceGone says whether nothing is at the original's path any more. Only a missing name counts: a
+// different file put in its place is a change (kept), and any other error proves nothing about the file.
+func sourceGone(path string) bool {
+	_, err := os.Lstat(path)
+	return errors.Is(err, fs.ErrNotExist)
+}
+
 // sourceUnchanged refuses the new file if the original is no longer the file that was read: a
 // different file now (another device or inode, or Windows file ID), or the same file with another
 // size, modification time or (where the system records one) change time. The change time catches
 // an edit that keeps the size and puts the modification time back, as some tag editors do.
 func sourceUnchanged(path string, before os.FileInfo, beforeState media.State) error {
 	now, err := os.Stat(path)
+	if err != nil && errors.Is(err, fs.ErrNotExist) {
+		return failed(goneWords, err)
+	}
 	if err != nil || !os.SameFile(now, before) || now.Size() != before.Size() || !now.ModTime().Equal(before.ModTime()) {
 		return retryable(kept("the original file changed while it was being converted, so the new file is out of date"), retryGeneral) // still being written
 	}
