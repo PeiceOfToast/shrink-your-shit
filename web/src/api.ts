@@ -14,11 +14,12 @@ export const failed = <T,>(r: Answer<T>): r is { error: Issue } =>
 export class SignedOut extends Error {}
 const OFFLINE: Issue = { code: "offline", message: "Can't reach the server. Check that it is running, then try again." };
 
-// One request. Writes always send JSON (the server refuses other writes). Errors come back as {error: {code, message}}.
+// One request. Writes send JSON (the server refuses other writes), except a FormData body. Errors come back as {error: {code, message}}.
 export async function call<T>(method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE", path: string, body?: unknown, headers: Record<string, string> = {}): Promise<Answer<T>> {
   let r: Response;
   try {
     r = await fetch(path, method === "GET" ? { credentials: "same-origin", headers }
+      : body instanceof FormData ? { method, credentials: "same-origin", headers, body } // a file upload (backup import: the one route the server takes multipart on)
       : { method, credentials: "same-origin", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body ?? {}) });
   } catch {
     return { error: OFFLINE };
