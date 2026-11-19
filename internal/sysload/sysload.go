@@ -41,7 +41,7 @@ func (m *Meter) Sample() Load {
 	idle, total, ok := readCPU()
 	now := clock()
 	m.mu.Lock()
-	if ok && m.total > 0 && total > m.total && now.Sub(m.at) < minInterval {
+	if ok && m.total > 0 && now.Sub(m.at) < minInterval {
 		// Too short to measure: the last figure, and the baseline stays where it was.
 		l.CPUPercent = m.last
 	} else if ok {

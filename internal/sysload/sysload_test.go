@@ -66,7 +66,9 @@ func TestMeterShortIntervalIsNotMeasured(t *testing.T) {
 	if l := m.Sample(); l.CPUPercent != nil {
 		t.Errorf("a 5 ms sample reported %v%%; want not measured", *l.CPUPercent)
 	}
-	at, idle, total = t0.Add(1005*time.Millisecond), 1900, 2000 // 1000 ticks, 900 idle, from the first baseline
+	at, idle, total = t0.Add(8*time.Millisecond), 1000, 1000 // no tick since the baseline: it must not become the baseline
+	m.Sample()
+	at, idle, total = t0.Add(505*time.Millisecond), 1900, 2000 // 1000 ticks, 900 idle, from the first baseline
 	l := m.Sample()
 	if l.CPUPercent == nil || math.Abs(*l.CPUPercent-10) > 0.01 {
 		t.Errorf("cpu %v after a long interval; want 10 measured from the first baseline", l.CPUPercent)
