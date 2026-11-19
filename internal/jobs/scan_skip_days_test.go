@@ -114,3 +114,51 @@ func TestMigration48AddsDecidedAtAndKeepsRows(t *testing.T) {
 
 // rewindDecidedAt takes away migration 48's column, for tests that set user_version below it (it runs again on the next open).
 func rewindDecidedAt(s *Store) { s.db.Exec(`ALTER TABLE files DROP COLUMN decided_at`) }
+
+// A file still changing (its first look, or a download in progress) is not a skip: it counts on no day, and a
+// conversion it changes after is still that conversion's day.
+func TestStillChangingCountsOnNoDay(t *testing.T) {
+	s := open(t)
+	l, _ := s.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	s.SetPaused(false)
+	day := noonDaysAgo(1)
+	setClock(t, s, day)
+	p := filepath.Join(l.Path, "downloading.mkv")
+	if err := s.PutFile(File{Path: p, Size: 1, ModTime: 1, Decision: "skip: this file changed since we last looked (it may still be downloading). We'll look at it again on the next scan", Reason: "still_changing"}); err != nil {
+		t.Fatal(err)
+	}
+
+	days := dayCounts(t, s)
+	if _, skipped := sumDaysSkipped(days); skipped != 0 {
+		t.Errorf("skipped over the window %d, want 0: a file still changing is not a skip", skipped)
+	}
+}
+
+// A converted file that changes again keeps its conversion as its latest end, on the conversion's day.
+func TestStillChangingAfterConversionKeepsTheConversionDay(t *testing.T) {
+	s := open(t)
+	l, _ := s.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	s.SetPaused(false)
+	converted := noonDaysAgo(3)
+	changed := noonDaysAgo(1)
+	p := filepath.Join(l.Path, "again.mkv")
+
+	setClock(t, s, converted)
+	id, _ := s.Enqueue(Job{LibraryID: l.ID, Path: p, SizeBefore: 1000})
+	s.Claim("w")
+	if err := s.Complete(id, p, 400); err != nil {
+		t.Fatal(err)
+	}
+	setClock(t, s, changed)
+	if err := s.PutFile(File{Path: p, Size: 500, ModTime: 2, Decision: "skip: this file changed since we last looked (it may still be downloading). We'll look at it again on the next scan", Reason: "still_changing"}); err != nil {
+		t.Fatal(err)
+	}
+
+	days := dayCounts(t, s)
+	if got := days[converted.Format("2006-01-02")].Completed; got != 1 {
+		t.Errorf("conversion day Completed %d, want 1: a still-changing look is not its latest end", got)
+	}
+	if got := days[changed.Format("2006-01-02")].Skipped; got != 0 {
+		t.Errorf("changed day Skipped %d, want 0", got)
+	}
+}
