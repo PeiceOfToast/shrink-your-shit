@@ -182,7 +182,7 @@ func (t Template) Compile(info media.Info) Plan {
 		if s.Validate() != nil {
 			p.Skip, p.SkipCode = "its library's setting has a choice this version cannot run", SkipSettingCannotRun
 			if s.RateControl == "vbr" && !VBRFormat(s.Format) { // saved before the AV1 fix: say what to change
-				p.Skip = "VBR with a peak limit isn't available for AV1; edit the workflow to use quality mode."
+				p.Skip = "AV1 can't use VBR with a max. Edit the workflow's Convert step and pick Quality only."
 			}
 			return p
 		}

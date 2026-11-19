@@ -126,7 +126,7 @@ func TestSavedAV1VBRSkipsWithItsWords(t *testing.T) {
 	s := DefaultSelectors(3)
 	s.Format, s.Resolution, s.RateControl, s.VBRMaxKbps = "av1", "720", "vbr", 3000
 	p := s.Template().Compile(h264(1920, 1080, 8000))
-	const want = "VBR with a peak limit isn't available for AV1; edit the workflow to use quality mode."
+	const want = "AV1 can't use VBR with a max. Edit the workflow's Convert step and pick Quality only."
 	if p.Skip != want || p.SkipCode != SkipSettingCannotRun {
 		t.Errorf("AV1 VBR skip: %q (%v), want %q", p.Skip, p.SkipCode, want)
 	}

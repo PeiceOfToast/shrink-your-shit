@@ -1566,10 +1566,11 @@ func renameRetry(ctx context.Context, rename func(a, b string) error, a, b strin
 // keptVBRWords is the kept-original reason for a VBR file whose picture was too different (review a772397
 // item 1): it names the max that actually set the file's bitrate, the person's limit or the level's figure.
 func keptVBRWords(v rules.VideoEncode) string {
+	kbps := v.MaxRateKbps
 	if v.PeakLimitBinds() {
-		return "Kept the original: under a " + rules.Mbps(v.PeakLimitKbps) + " Mbps max bitrate the picture would suffer."
+		kbps = v.PeakLimitKbps
 	}
-	return "Kept the original: at a " + rules.Mbps(v.MaxRateKbps) + " Mbps max bitrate the picture would suffer."
+	return "Kept the original: under a " + rules.KbpsWords(kbps) + " kbps max bitrate the picture would suffer."
 }
 
 // vbrAverageNote is the run-log line for a file held at its max all the way through (review a772397 item 3):
@@ -1578,7 +1579,7 @@ func vbrAverageNote(v rules.VideoEncode) string {
 	if !v.AverageIsMax() {
 		return ""
 	}
-	return "Average and max bitrate are both " + rules.Mbps(v.TargetKbps) + " Mbps, so the file runs at the max throughout."
+	return "Average and max bitrate are both " + rules.KbpsWords(v.TargetKbps) + " kbps, so the file runs at the max throughout."
 }
 
 // keepsOriginal is whether the plan leaves the original where it is (beside, or another folder, S6).

@@ -204,6 +204,15 @@ func RoughWarning(level, f string, shapes []Shape) string {
 // Mbps is kbps in the ladder's words: 3000 is "3", 2500 is "2.5".
 func Mbps(kbps int) string { return strconv.FormatFloat(float64(kbps)/1000, 'f', -1, 64) }
 
+// KbpsWords is kbps with thousands commas ("5,000"), as the person reads it in the words on a job.
+func KbpsWords(kbps int) string {
+	s := strconv.Itoa(kbps)
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	return s
+}
+
 // RowLabel is a ladder row in words ("sd": 480p and below).
 func RowLabel(row string) string {
 	switch row {
