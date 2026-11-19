@@ -196,7 +196,9 @@ func TestPathMappingFindsTheSeriesAndRescans(t *testing.T) {
 	}
 }
 
-func TestUnknownPathIsAWarningNotAFailure(t *testing.T) {
+// An instance without the file's show or movie stays quiet: with a Sonarr and a Radarr both set up, the one
+// that does not hold the file must not put a warning on every job.
+func TestAnInstanceWithoutTheFileStaysQuiet(t *testing.T) {
 	arr := newFakeArr(t, "/elsewhere/The Show")
 	h := newHarness(t)
 	h.svc.Create(NewIntegration{Kind: Sonarr, Name: "Home", URL: arr.srv.URL, APIKey: goodKey,
@@ -206,19 +208,18 @@ func TestUnknownPathIsAWarningNotAFailure(t *testing.T) {
 	h.svc.Tell(id, file)
 	h.svc.Wait()
 
-	steps, _ := h.st.Steps(id)
-	if len(steps) != 1 || steps[0].OK {
-		t.Fatalf("want one not-ok step, got %+v", steps)
-	}
-	want := "Sonarr doesn't have this file's show; it will notice the file at its next scan."
-	if steps[0].Words != want {
-		t.Fatalf("words = %q, want %q", steps[0].Words, want)
+	if steps, _ := h.st.Steps(id); len(steps) != 0 {
+		t.Fatalf("an instance without the file left steps: %+v", steps)
 	}
 	if len(arr.commandsSeen()) != 0 {
 		t.Fatal("a rescan was sent for a file the instance does not have")
 	}
-	if list, _ := h.svc.List(); list[0].FailingSince != nil {
+	list, _ := h.svc.List()
+	if list[0].FailingSince != nil {
 		t.Fatal("an unknown path must not start failingSince")
+	}
+	if lr := list[0].LastResult; lr == nil || !lr.OK || lr.Message != "Sonarr doesn't have this file's show." {
+		t.Fatalf("lastResult = %+v", lr)
 	}
 }
 
@@ -393,8 +394,7 @@ func TestPathMappingRespectsTheBoundary(t *testing.T) {
 	if n := len(arr.commandsSeen()); n != 0 {
 		t.Fatalf("a rescan went to a series whose folder is only a prefix of the file's (%d)", n)
 	}
-	steps, _ := h.st.Steps(id)
-	if len(steps) != 1 || steps[0].OK {
-		t.Fatalf("steps = %+v, want one not-ok step", steps)
+	if steps, _ := h.st.Steps(id); len(steps) != 0 {
+		t.Fatalf("steps = %+v, want none (the instance does not have the file)", steps)
 	}
 }

@@ -527,8 +527,10 @@ func (s *Service) tellOne(jobID int64, r record, finalPath string) {
 		s.step(jobID, false, summary)
 		return
 	}
-	summary, ok, answered := s.rescan(ki, r.URL, key, toTheirs(finalPath, r.Mappings))
-	s.step(jobID, ok, summary)
+	summary, ok, answered, owns := s.rescan(ki, r.URL, key, toTheirs(finalPath, r.Mappings))
+	if owns { // an instance without this file's show or movie (a Radarr told about an episode) leaves no step
+		s.step(jobID, ok, summary)
+	}
 	s.note(r.ID, Result{OK: ok, Message: summary, At: s.now()}, answered)
 	s.logf("%s: %s", ki.label, summary)
 }
@@ -539,14 +541,15 @@ func (s *Service) step(jobID int64, ok bool, summary string) {
 	}
 }
 
-// rescan finds the item (series or movie) the file belongs to and asks the instance to rescan it.
-func (s *Service) rescan(ki kindInfo, base, key, file string) (summary string, ok, answered bool) {
+// rescan finds the item (series or movie) the file belongs to and asks the instance to rescan it. owns is
+// false only when the instance answered and has no item holding the file: the file is not its business.
+func (s *Service) rescan(ki kindInfo, base, key, file string) (summary string, ok, answered, owns bool) {
 	st, body, err := s.do("GET", base, key, ki.listPath, nil)
 	if err != nil {
-		return unreached(ki, base, err, noNextScan), false, false
+		return unreached(ki, base, err, noNextScan), false, false, true
 	}
 	if !ok2(st) {
-		return answer(ki.label, st), false, false
+		return answer(ki.label, st), false, false, true
 	}
 	var items []struct {
 		ID    int64  `json:"id"`
@@ -554,7 +557,7 @@ func (s *Service) rescan(ki kindInfo, base, key, file string) (summary string, o
 		Path  string `json:"path"`
 	}
 	if err := json.Unmarshal(body, &items); err != nil {
-		return ki.label + " sent something the app doesn't understand.", false, false
+		return ki.label + " sent something the app doesn't understand.", false, false, true
 	}
 	best, bestLen := -1, -1
 	for i, it := range items {
@@ -563,21 +566,21 @@ func (s *Service) rescan(ki kindInfo, base, key, file string) (summary string, o
 		}
 	}
 	if best < 0 {
-		return fmt.Sprintf("%s doesn't have this file's %s%s.", ki.label, ki.noun, noNextScan), false, true
+		return fmt.Sprintf("%s doesn't have this file's %s.", ki.label, ki.noun), true, true, false
 	}
 	it := items[best]
 	st, _, err = s.do("POST", base, key, "/api/v3/command", map[string]any{"name": ki.command, ki.idField: it.ID})
 	if err != nil {
-		return unreached(ki, base, err, noNextScan), false, false
+		return unreached(ki, base, err, noNextScan), false, false, true
 	}
 	if !ok2(st) {
-		return answer(ki.label, st), false, false
+		return answer(ki.label, st), false, false, true
 	}
 	title := it.Title
 	if title == "" {
 		title = "it"
 	}
-	return fmt.Sprintf("%s rescanned %s.", ki.label, title), true, true
+	return fmt.Sprintf("%s rescanned %s.", ki.label, title), true, true, true
 }
 
 // note records an answer: it sets the last result, counts failures in a row and sets failingSince at the
