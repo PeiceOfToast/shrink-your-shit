@@ -73,6 +73,8 @@ type Queue interface {
 	AddFailureStep(id int64, nodeID, words string) error
 	// IsOwnOutputExact reports whether the file at path (this size and time) is one a done job wrote.
 	IsOwnOutputExact(path string, size, mtime int64) (bool, error)
+	// OutputOwner is the newest job whose output is path (ok false when none).
+	OutputOwner(path string) (id int64, ok bool, err error)
 	// RecordPlan stores the Plan a running job converts with (JSON) and its fingerprint.
 	RecordPlan(id int64, plan, fingerprint string) error
 	// Skip ends a job as a skipped file with words and a reason code (S3: Dolby Vision left alone).
@@ -896,7 +898,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		if OutputMode(plan.Output) == Folder || OutputMode(plan.Output) == Beside { // beside too (Convert again, design 11:45Z)
 			// our own earlier output may be there (the original changed and is converted again): it is
 			// replaced once the new file passes its checks; a file we didn't make never is (design 01:04Z)
-			if lst, err := os.Lstat(newName); err == nil && !w.ownOutput(newName, lst) {
+			if lst, err := os.Lstat(newName); err == nil && !w.ownOutput(newName, lst) && !w.setAsideable(newName, lst) {
 				return "", failed(takenWords(plan)(newName), fs.ErrExist)
 			}
 		} else if _, err := os.Lstat(newName); err == nil {
@@ -1170,9 +1172,13 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	move := moveIntoPlace
 	switch {
 	case OutputMode(plan.Output) == Folder:
-		move = w.moveIntoFolder // never over a file we didn't make
+		move = func(ctx context.Context, tmp, final string, stillOK func() error) error {
+			return w.moveIntoFolder(ctx, job.ID, tmp, final, stillOK) // never over a file we didn't make
+		}
 	case keepsOriginal(plan):
-		move = w.moveBeside // never over another file, but our own earlier one (Convert again)
+		move = func(ctx context.Context, tmp, final string, stillOK func() error) error {
+			return w.moveBeside(ctx, job.ID, tmp, final, stillOK) // never over another file, but our own earlier one (Convert again)
+		}
 	}
 	if err := move(ctx, tmp, final, stillOK); err != nil {
 		removePlaced()
@@ -1456,13 +1462,13 @@ func sourceUnchanged(path string, before os.FileInfo, beforeState media.State) e
 
 // moveIntoFolder puts the new file in the folder for new files (it passed its checks): over our own
 // earlier output of the same file, which goes now, but never over a file we didn't make (design 01:04Z).
-func (w *Worker) moveIntoFolder(ctx context.Context, tmp, final string, stillOK func() error) error {
-	return w.moveOverOwn(ctx, tmp, final, stillOK, notOurs)
+func (w *Worker) moveIntoFolder(ctx context.Context, jobID int64, tmp, final string, stillOK func() error) error {
+	return w.moveOverOwn(ctx, jobID, tmp, final, stillOK, notOurs)
 }
 
 // moveBeside is moveIntoFolder for the new file next to the original (slice 18, Convert again).
-func (w *Worker) moveBeside(ctx context.Context, tmp, final string, stillOK func() error) error {
-	return w.moveOverOwn(ctx, tmp, final, stillOK, besideTaken)
+func (w *Worker) moveBeside(ctx context.Context, jobID int64, tmp, final string, stillOK func() error) error {
+	return w.moveOverOwn(ctx, jobID, tmp, final, stillOK, besideTaken)
 }
 
 // takenWords is the failure for a file we didn't make at the new file's name.
@@ -1479,17 +1485,62 @@ func besideTaken(name string) string {
 }
 
 // moveOverOwn renames tmp to final over our own earlier output there (it goes now), never over a file
-// we didn't make (taken says so).
-func (w *Worker) moveOverOwn(ctx context.Context, tmp, final string, stillOK func() error, taken func(string) string) error {
+// we didn't make (taken says so). Our earlier output that changed since the job made it is moved aside first.
+func (w *Worker) moveOverOwn(ctx context.Context, jobID int64, tmp, final string, stillOK func() error, taken func(string) string) error {
 	return moveNoClobber(ctx, tmp, final, func() error {
 		if err := stillOK(); err != nil {
 			return err
 		}
-		if lst, err := os.Lstat(final); err == nil && w.ownOutput(final, lst) {
-			return os.Remove(final) // the older generation: the original is still in the library
+		if lst, err := os.Lstat(final); err == nil {
+			if w.ownOutput(final, lst) {
+				return os.Remove(final) // the older generation: the original is still in the library
+			}
+			if w.setAsideable(final, lst) {
+				return w.setAside(jobID, final)
+			}
 		}
 		return nil
 	}, taken)
+}
+
+// setAsideable says whether the regular file at p (lst its Lstat) is the output a done job of ours wrote at p,
+// changed since (its size or time is not the one recorded). Convert again moves such a file aside (setAside).
+func (w *Worker) setAsideable(p string, lst fs.FileInfo) bool {
+	if !lst.Mode().IsRegular() {
+		return false
+	}
+	_, ok, err := w.Queue.OutputOwner(p)
+	return err == nil && ok
+}
+
+// setAside moves our earlier output at final, changed since the job made it, into the .syp-trash beside it, so
+// the new file takes its name and the earlier one stays restorable (its name keeps the id of the job that made it).
+// The job log says so. A failure leaves the earlier output where it was.
+func (w *Worker) setAside(jobID int64, final string) error {
+	name := filepath.Base(final)
+	refused := func(err error) error {
+		return failed(fmt.Sprintf("Your earlier converted file %s had been changed since it was made, and it could not be moved to the trash, so nothing was changed. Move or rename it, then press Retry.", name), err)
+	}
+	owner, ok, err := w.Queue.OutputOwner(final)
+	if err == nil && !ok {
+		err = errors.New("no done job made this file")
+	}
+	if err != nil {
+		return refused(err)
+	}
+	dir := filepath.Join(filepath.Dir(final), TrashDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return refused(err)
+	}
+	dst, err := trashPath(dir, name, owner)
+	if err != nil {
+		return refused(err)
+	}
+	if err := os.Rename(final, dst); err != nil {
+		return refused(err)
+	}
+	w.Queue.AppendLogLine(jobID, 0, "app", fmt.Sprintf("Your earlier converted file %s had been changed since it was made, so it was moved to the trash (%s) and the new file took its place.", name, filepath.Join(TrashDir, filepath.Base(dst))))
+	return nil
 }
 
 // ownOutput reports whether the regular file at p (lst its Lstat) is one a done job of ours wrote.
