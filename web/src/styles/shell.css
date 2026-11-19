@@ -38,6 +38,8 @@ code,.mono{font-family:var(--mono);font-size:.92em}
 .rail-collapsed .lbl,.rail-collapsed .grp,.rail-collapsed .brand span.t{display:none}
 .rail-collapsed .nav a{justify-content:center;padding:0}
 .rail-collapsed .badge{position:absolute;top:4px;right:6px;margin:0;min-width:16px;height:16px;font-size:11px;padding:0 3px}
+.badge.off{background:var(--raised);color:var(--text-2);box-shadow:inset 0 0 0 1px var(--border-strong);font-weight:500}
+.rail-collapsed .badge.off{min-width:8px;height:8px;padding:0;font-size:0;top:8px;right:10px;background:var(--text-2)} /* no room for the word: a grey dot */
 .rail-collapsed .brand{justify-content:center;padding:0}
 .rail-collapsed .nav a[aria-current=page]::before{left:-8px}
 .main{min-width:0;display:flex;flex-direction:column}
@@ -129,6 +131,7 @@ textarea.input{min-height:72px;font-family:var(--mono);font-size:var(--fs-sm)}
 .pill.warn,.pill.sample{background:color-mix(in srgb,var(--warning) 14%,transparent);color:var(--warning-text)}
 .st.ok{color:var(--success-text)}.st.run{color:var(--accent-text)}.st.bad{color:var(--error-text)}.st.warn{color:var(--warning-text)}.st.wait{color:var(--text-2)}
 .st .ic{width:16px;height:16px}
+.st:has(>.fail){align-items:flex-start}.st:has(>.fail)>.ic{margin-top:2px}.st .fail{white-space:normal}.st .why{font-weight:400;color:var(--text)}
 
 /* cards, tables */
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);min-width:0}
@@ -212,6 +215,7 @@ table.tbl{width:100%;border-collapse:collapse}
   .app.rail-collapsed .lbl,.app.rail-collapsed .grp,.app.rail-collapsed .brand span.t{display:revert}
   .app.rail-collapsed .nav a{justify-content:flex-start;padding:0 12px}
   .app.rail-collapsed .badge{position:static;margin-left:auto;min-width:20px;height:20px;font-size:12px;padding:0 6px}
+  .app.rail-collapsed .badge.off{background:var(--raised)}
   .btn.menubtn{display:inline-flex}
   .search{flex:none;width:36px;padding:0;justify-content:center}.search .txt,.search .k{display:none}
   .cols2{grid-template-columns:minmax(0,1fr)}.w2{grid-column:auto}
@@ -326,7 +330,12 @@ td .tnc{max-width:230px}
 .jt td .tnc{max-width:165px}
 .jt td:nth-child(n+4) .tnc{max-width:none}
 .jt td:nth-child(3) .tnc{max-width:135px}
-.field>.seg{align-self:flex-start}
+.field>.seg,.stack>.seg{align-self:flex-start}
+.pw{position:relative}.pw .input{padding-right:44px}.pw .btn{position:absolute;right:2px;top:50%;transform:translateY(-50%)} /* Sign in: Show/Hide inside the field */
+.pw .btn[aria-pressed=true]{color:var(--accent)}
+.where>summary{cursor:pointer;color:var(--accent);font-size:var(--fs-sm);width:max-content}
+.where dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 12px;margin:6px 0 0}.where dd{margin:0;min-width:0;overflow-wrap:anywhere}.where dt{font-weight:600}
+.where p{margin:6px 0 0}
 
 /* native controls (review 1) */
 input.switch{appearance:none;-webkit-appearance:none;position:relative;display:inline-block;width:38px;height:22px;border-radius:11px;background:var(--surface);border:1px solid var(--border-strong);flex:none;margin:0;cursor:pointer;vertical-align:middle}
@@ -354,6 +363,7 @@ label.chk{cursor:pointer}
 .ltools .btn.sm{min-height:32px}
 .ltools .input.sm{width:auto;min-height:32px;padding-top:0;padding-bottom:0;font-size:var(--fs-sm)}
 .ltools .find{margin-left:auto;width:240px;max-width:100%;min-height:32px;font-size:var(--fs-sm)}
+.ltools .lib{margin-left:auto;max-width:220px}.ltools .lib + .find{margin-left:0} /* Jobs: the library pick sits just before search */
 .ltools .desk{display:contents}
 .ltools .pop .btn{width:100%;justify-content:flex-start}
 .chips{display:inline-flex;gap:4px;flex-wrap:wrap}
@@ -520,7 +530,7 @@ label.chk{cursor:pointer}
 .tline{list-style:none;margin:0;padding:0}
 .tline li{display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--border)}
 .tline li:last-child{border-bottom:0}
-.tline li .ic{color:var(--success-text);flex:none;margin-top:2px}.tline li.bad .ic{color:var(--error-text)}
+.tline li .ic{color:var(--success-text);flex:none;margin-top:2px}.tline li.bad .ic{color:var(--error-text)}.tline li.warn .ic{color:var(--warning-text)}
 .tbl.kvt th,.tbl.kvt td{padding:6px 8px;height:auto}
 .tbl.kvt tbody th{color:var(--text-2);font-weight:500;text-align:left}
 .jobs .prog{min-width:160px}

@@ -98,8 +98,16 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 					}
 				}
 			}
+			// cpuPercent is the worker's live figure (this computer's meter, or a remote's last report)
+			live, _ := it["live"].(map[string]any)
+			var gpu any // NVIDIA on this computer only; a remote's GPU isn't read (null)
+			if it["kind"] != "remote" {
+				if g := gpuPercent(time.Now()); g != nil {
+					gpu = *g
+				}
+			}
 			workers = append(workers, map[string]any{"id": it["id"], "name": it["name"], "kind": it["kind"], "status": it["status"],
-				"slots": it["slots"], "jobs": own, "cpuPercent": nil, "gpuPercent": nil})
+				"slots": it["slots"], "jobs": own, "cpuPercent": live["cpuPercent"], "gpuPercent": gpu})
 		}
 		libs, err := store.Libraries()
 		if err != nil {
@@ -138,7 +146,8 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 		daily := []map[string]any{}
 		for _, d := range days {
 			daily = append(daily, map[string]any{"day": d.Day, "recorded": d.Recorded, "completed": d.Completed, "skipped": d.Skipped,
-				"failed": d.Failed, "freedBytes": d.FreedBytes})
+				"failed": d.Failed, "freedBytes": d.FreedBytes,
+				"savedBytes": d.SavedBytes, "waitingBytes": d.WaitingBytes})
 		}
 		saving, savingOK, perGB, timeOK := st.saving, st.savingOK, st.perGB, st.timeOK
 		// fileShrinkPercent: how much smaller converted files come out, NOT space saved (review ab99630 P2-1)
@@ -149,18 +158,39 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 		if timeOK {
 			avg["secondsPerGB"] = perGB
 		}
+		// graphics-encoder fall-backs today, per worker: the count, and when the worker's encoder is paused
+		fallbacks, err := store.EncoderFallbacksSince(time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local))
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		encoderFallbacks := []map[string]any{}
+		for _, f := range fallbacks {
+			encoder, lastError, err := store.EncoderLastFell(f.Worker)
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+			row := map[string]any{"workerId": f.Worker, "worker": workerName(store, f.Worker), "encoder": encoder, "lastError": lastError,
+				"count": f.Count, "at": f.At, "pausedUntil": nil}
+			if until, paused, err := store.EncoderPaused(f.Worker); err == nil && paused {
+				row["pausedUntil"] = until.UTC().Format(time.RFC3339)
+			}
+			encoderFallbacks = append(encoderFallbacks, row)
+		}
 		converted := st.converted
 		zone := zoneName(now)
 		writeJSON(w, map[string]any{
 			"headline": map[string]any{"freed": a.FreedBytes, "waitingToFree": a.WaitingBytes, "nextFreeAt": trash.NextDeleteAt,
 				"couldFree": a.CouldFreeBytes, "grew": a.GrewBytes, "filesConverted": converted, "filesWaiting": a.WaitingFiles}, // NET
-			"trash":     trash, // GROSS (the originals' own size): never added to the headline
-			"workers":   workers,
-			"active":    active,
-			"libraries": libraries,
-			"daily":     daily,
-			"timeZone":  zone,
-			"averages":  avg,
+			"trash":            trash, // GROSS (the originals' own size): never added to the headline
+			"workers":          workers,
+			"active":           active,
+			"libraries":        libraries,
+			"daily":            daily,
+			"timeZone":         zone,
+			"averages":         avg,
+			"encoderFallbacks": encoderFallbacks,
 		})
 	})
 }
@@ -283,7 +313,7 @@ func (c *statsCache) get(store *jobs.Store) (*stats, error) {
 		return nil, err
 	}
 	st.a, st.counts = t.Summary, t.Counts
-	if st.days, err = store.Days(30, now, t.FreedByDay); err != nil {
+	if st.days, err = store.Days(30, now, t); err != nil {
 		return nil, err
 	}
 	if st.saving, st.savingOK, st.perGB, st.timeOK, err = store.Averages(); err != nil {

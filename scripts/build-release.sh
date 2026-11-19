@@ -26,10 +26,12 @@ for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; d
   mkdir -p "$stage/$name"
   (cd "$root" && CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath \
     -ldflags "-s -w -X main.version=$version" -o "$stage/$name/$exe" .)
-  # The network-shares helper is a separate binary, for Linux only.
+  # The network-shares and update helpers are separate binaries, for Linux only.
   if [ "$os" = linux ]; then
     (cd "$root" && CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath \
       -ldflags "-s -w" -o "$stage/$name/syp-network-helper" ./cmd/syp-network-helper/)
+    (cd "$root" && CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath \
+      -ldflags "-s -w" -o "$stage/$name/syp-update-helper" ./cmd/syp-update-helper/)
   fi
   cp "$root/LICENSE" "$root/README.md" "$stage/$name/"
   if [ "$os" = windows ]; then
