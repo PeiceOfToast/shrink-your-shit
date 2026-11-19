@@ -629,7 +629,7 @@ body{font-variant-numeric:tabular-nums} /* [taste: tabular numerals in anything 
 p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; .st stays one line in pills and table cells */
 @media (max-width:600px){
   nav.tabs[aria-label="Settings sections"]{flex-wrap:nowrap;overflow-x:auto;row-gap:0} /* pass 5 #4: Settings tabs are one row that scrolls sideways below 600 px */
-  .choice.prefs>.row{column-gap:8px} /* pass 5 #4: at phone width the four Text size radios fit one row, so "130%" doesn't wrap alone */
+  .choice.prefs>.row{column-gap:8px;row-gap:0} /* pass 5 #4: at phone width the four Text size radios fit one row, so "130%" doesn't wrap alone. pass 6: no extra row gap either, so a wrapped Accent row sits 44 px from the next (the 44 px targets stay) */
 }
 @media (min-width:600px){.sumsel{max-width:320px}} /* pass 5 #4 (design): the summary select is full width on a phone, capped from 600 px up */
 .choice.prefs>.row>.radio{white-space:nowrap} /* pass 5 #4: "130%" stays with its radio. Appearance choices only (short fixed labels); workflow, setup and Stop radios take longer labels that must wrap */
