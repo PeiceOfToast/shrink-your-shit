@@ -11,7 +11,7 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -278,7 +278,7 @@ func InstallType(current, goos string, env Env) string {
 	if exe == "/usr/local/bin/shrink-your-shit" {
 		return "script"
 	}
-	if home := env.Getenv("HOME"); home != "" && exe == filepath.Join(home, ".local", "bin", "shrink-your-shit") {
+	if home := env.Getenv("HOME"); home != "" && exe == path.Join(home, ".local", "bin", "shrink-your-shit") // install.sh paths are always /-separated {
 		return "script"
 	}
 	if goos == "windows" && current != "dev" {
