@@ -33,6 +33,7 @@ type FileFilter struct {
 	Path      string   // jobs: only the job of this exact file path (user review 11-13 item E: a file's history)
 	Reason    string   // jobs: only failures with this design code (ReasonCondition); "" for any
 	Reasons   []string // skipped: only these reasons (none: every reason)
+	Since     string   // skipped: only those decided at or after this time (RFC3339); "" for any
 	Kept      bool
 	Left      bool // processed: only those whose original was left where it was (could free)
 	// QueueOrder: waiting jobs in the order workers take them (Claim's: priority, then age), ready ones
@@ -137,6 +138,10 @@ func (f FileFilter) skipFilters() (string, []any) {
 		for _, r := range f.Reasons {
 			args = append(args, r)
 		}
+	}
+	if f.Since != "" {
+		where += ` AND files.decided_at>=?`
+		args = append(args, f.Since)
 	}
 	if f.LibraryID > 0 { // inside the library's folder, whatever the separator (Windows: review 43e6f66)
 		where += ` AND EXISTS (SELECT 1 FROM libraries l WHERE l.id=? AND

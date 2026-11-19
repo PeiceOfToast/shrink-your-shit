@@ -385,3 +385,63 @@ func TestWorkflowFailedCountsEachFileOnce(t *testing.T) {
 		t.Errorf("workflow Completed %d, want 1 (b.mkv's done job; Completed is unchanged)", runs.Completed)
 	}
 }
+
+// A file done twice (a workflow change made a second job for it) is one completed file: Completed counts each
+// file once, by its newest job, as Failed does.
+func TestWorkflowCompletedCountsEachFileOnce(t *testing.T) {
+	s := open(t)
+	l, _ := s.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	s.SetPaused(false)
+	a := filepath.Join(l.Path, "a.mkv")
+	for i := 0; i < 2; i++ {
+		s.Enqueue(Job{LibraryID: l.ID, Path: a, SizeBefore: 1000})
+		j, err := s.Claim("w")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Complete(j.ID, a, 400); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runs, err := s.WorkflowRunsSince(l.FlowID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runs.Completed != 1 {
+		t.Errorf("workflow Completed %d, want 1: a.mkv is one file, done by its newest job", runs.Completed)
+	}
+}
+
+// Skipped is the files Jobs > Skipped lists in the flow's libraries, decided since the window: a skip decided
+// before the window is not counted, nor is a skip in another flow's library.
+func TestWorkflowSkippedCountsSkipsInTheWindow(t *testing.T) {
+	s := open(t)
+	l, _ := s.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	other, _ := s.AddLibrary("Other", t.TempDir(), rules.SliderTemplate(3), true)
+	if other.FlowID == l.FlowID {
+		t.Fatal("the two libraries share a flow; the test needs one flow each")
+	}
+	skip := func(path string) File {
+		return File{Path: path, Size: 1000, Decision: "skip: already HEVC", Reason: "already_hevc"}
+	}
+	if err := s.PutFile(skip(filepath.Join(l.Path, "new.mkv"))); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutFile(skip(filepath.Join(l.Path, "old.mkv"))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE files SET decided_at=? WHERE path=?`, "2020-01-01T00:00:00Z", filepath.Join(l.Path, "old.mkv")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutFile(skip(filepath.Join(other.Path, "x.mkv"))); err != nil {
+		t.Fatal(err)
+	}
+	since := time.Now().Add(-7 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	runs, err := s.WorkflowRunsSince(l.FlowID, since)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runs.Skipped != 1 {
+		t.Errorf("workflow Skipped %d, want 1: only new.mkv is a skip of this flow decided in the window", runs.Skipped)
+	}
+}

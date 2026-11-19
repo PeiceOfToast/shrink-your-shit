@@ -417,23 +417,52 @@ func (s *Store) WorkflowIDs() ([]int64, error) {
 // WorkflowRuns are a workflow's jobs, over the libraries that use it: those waiting or running now,
 // and those done or failed since since (skipped files keep no job before V2), with the newest end.
 type WorkflowRuns struct {
-	Active, Completed, Failed int
-	LastAt                    string
+	Active, Completed, Failed, Skipped int
+	LastAt                             string
 }
 
-// WorkflowRunsSince counts a flow's runs since a time. Failed counts each file once, by its newest job, as the
-// library card and Jobs > Failed do (a file that failed twice, or failed and then finished, is not two failures).
+// WorkflowRunsSince counts a flow's runs since a time. Completed and Failed count each file once, by its newest job,
+// as Jobs > Failed does (a file that failed twice, or failed and then finished, is not two failures; a file done
+// twice is one completed file). Skipped is the files Jobs > Skipped lists in the flow's libraries, decided since.
 func (s *Store) WorkflowRunsSince(flowID int64, since string) (WorkflowRuns, error) {
 	var r WorkflowRuns
 	var last sql.NullString
 	err := s.db.QueryRow(`SELECT
   COALESCE(SUM(j.status IN ('queued','running')),0),
-  COALESCE(SUM(j.status='done' AND j.updated>=?),0),
+  COALESCE(SUM(j.status='done' AND j.updated>=? AND `+newestJobOf("j")+`),0),
   COALESCE(SUM(j.status IN ('failed','kept') AND j.updated>=? AND `+newestJobOf("j")+`),0),
   MAX(CASE WHEN j.status IN ('done','failed','kept') THEN j.updated END)
 FROM jobs j JOIN libraries l ON l.id=j.library_id WHERE l.flow_id=?`, since, since, flowID).Scan(&r.Active, &r.Completed, &r.Failed, &last)
+	if err != nil {
+		return r, err
+	}
 	r.LastAt = last.String
-	return r, err
+	rows, err := s.db.Query(`SELECT id FROM libraries WHERE flow_id=?`, flowID)
+	if err != nil {
+		return r, err
+	}
+	var libs []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return r, err
+		}
+		libs = append(libs, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return r, err
+	}
+	for _, id := range libs {
+		sw, sa := FileFilter{LibraryID: id, Since: since}.skipFilters()
+		var n int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM files WHERE `+sw, sa...).Scan(&n); err != nil {
+			return r, err
+		}
+		r.Skipped += n
+	}
+	return r, nil
 }
 
 // Trash is what .syp-trash holds now: originals kept after a replace, freed when their days are up.
