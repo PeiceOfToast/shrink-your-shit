@@ -60,7 +60,7 @@ function Detail({ j }: { j: JobItem }) {
     return <div className="prog"><div className="row nw"><div className="bar" role="progressbar" aria-label={p.stage} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)}><i style={{ width: pct + "%" }} /></div><span className="sm">{Math.round(pct)}%</span></div>
       <span className="sm muted">{[p.stage, p.fps != null && p.fps + " fps", elapsed(p.elapsedS), p.etaS ? "about " + elapsed(p.etaS) + " left" : ""].filter(Boolean).join(" · ")}</span></div>;
   }
-  if (j.state === "completed") return <span className="sm">{saved(j.beforeBytes, j.afterBytes)}{j.originalState === "kept" && j.keptDaysLeft != null && <span className="muted"> · in the trash for {plural(j.keptDaysLeft, "more day", "more days")}</span>}</span>;
+  if (j.state === "completed") return <span className="sm">{saved(j.beforeBytes, j.afterBytes)}{j.originalState === "kept" && j.keptDaysLeft != null && <span className="muted"> · original in the trash {plural(j.keptDaysLeft, "more day", "more days")}</span>}</span>;
   return <span className="sm muted clamp2" title={reasonText(j)}>{reasonText(j)}</span>;
 }
 
