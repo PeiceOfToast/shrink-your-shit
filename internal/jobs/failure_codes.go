@@ -139,6 +139,10 @@ func FailureWords(code string, f FailureFacts) (message, hint string) {
 		return "The conversion stopped making progress and was stopped.",
 			"Retry. If it stops again at the same point, the last ffmpeg lines above show where."
 	case "ffmpeg_error":
+		// ffmpeg never ran (a folder setup failure, say): the worker's own sentence is the true one
+		if !f.FfmpegRan && f.ExitCode < 0 && f.Stored != "" {
+			return f.Stored, ""
+		}
 		// 255 = ffmpeg was stopped; -1 = killed by a signal
 		if f.ExitCode == 255 {
 			return "ffmpeg was stopped before it finished (exit code 255).", ""
