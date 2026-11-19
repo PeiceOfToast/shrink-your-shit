@@ -14,7 +14,7 @@ export interface Overview {
   active: { jobId: string; library: { id: string; name: string } | null; name: string; percent: number | null; etaS: number | null; expectedSavingBytes: number | null }[];
   libraries: { id: string; name: string; state: "active" | "paused"; bytesBefore: number; bytesNow: number; saved: number; savedPercent: number | null; waitingToFree: number; couldFree: number; grew?: number;
     counts: { done: number; waiting: number; skipped: number; failed: number } }[];
-  daily: { day: string; recorded: boolean; completed: number; skipped: number; failed: number; freedBytes: number }[];
+  daily: { day: string; recorded: boolean; completed: number; skipped: number; failed: number; freedBytes: number; waitingBytes?: number }[]; // waitingBytes: PENDING workshop's name for the day's saving still in the trash
   timeZone: string;
   averages: { fileShrinkPercent: number | null; secondsPerGB: number | null };
 }
@@ -40,7 +40,9 @@ function sample(): Overview {
         waitingToFree: l.bytes.waitingToFree, couldFree: 0, grew: l.bytes.grew ?? 0, counts: { done: l.counts.completed, waiting: l.counts.waiting, skipped: l.counts.skipped, failed: l.counts.failed } };
     }),
     daily: days.map((day, i) => i < 6 ? { day, recorded: false, completed: 0, skipped: 0, failed: 0, freedBytes: 0 }
-      : { day, recorded: true, completed: 6 + ((i * 7) % 13), skipped: i % 3, failed: i % 7 === 0 ? 1 : 0, freedBytes: (0.4 + ((i * 5) % 9) / 6) * GB }),
+      // the last week's originals are still in the trash (CT 124's shape): that saving is waiting, not freed
+      : { day, recorded: true, completed: 6 + ((i * 7) % 13), skipped: i % 3, failed: i % 7 === 0 ? 1 : i % 11 === 0 ? 3 : 0,
+          freedBytes: i < 23 ? (0.4 + ((i * 5) % 9) / 6) * GB : 0, waitingBytes: i < 23 ? 0 : (0.4 + ((i * 5) % 9) / 6) * GB }),
     timeZone: "Europe/London",
     averages: { fileShrinkPercent: 38, secondsPerGB: 130 },
   };

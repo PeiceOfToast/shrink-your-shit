@@ -687,14 +687,23 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .ov .ovt th.num{text-align:right}
 .ov .ovt .prog{flex-direction:row;align-items:center;gap:8px;min-width:160px}.ov .ovt .prog .bar{flex:1 1 120px}
 .ov .fname{display:block;overflow-wrap:anywhere}
-.ov .analytics{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:32px}
-.ov .chart2{margin:0}.ov .chart2 h3.ch{font-size:var(--fs);font-weight:var(--fw-strong);margin:12px 0 4px;display:flex;gap:8px;align-items:baseline}
-.ov .daychart{width:100%;height:auto;display:block}
-.ov .kv dd{text-align:right;font-weight:var(--fw-strong)}
-.ov .outcome{display:flex;gap:2px;height:10px;border-radius:5px;overflow:hidden;margin:8px 0 4px}.ov .outcome i{display:block}
+/* pass 1 (row e8c7e61d): the day charts lead the page, two side by side; dataviz marks (see DayBars) */
+.ov .charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:32px}
+.ov .dchart{margin:0;position:relative;min-width:0}
+.ov .dchart h3.ch{font-size:var(--fs);font-weight:var(--fw-strong);margin:4px 0 6px;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline}
+.ov .dchart h3.ch .muted{font-weight:400;font-size:var(--fs-sm)}
+.ov .legend{display:flex;flex-wrap:wrap;gap:4px 16px;list-style:none;margin:0 0 6px;padding:0;font-size:var(--fs-sm);color:var(--text-2)}
+.ov .legend i,.ov .tip i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+.ov .daychart{width:100%;height:auto;display:block;overflow:visible}
+.ov .tip{position:absolute;top:44px;transform:translateX(-50%);pointer-events:none;z-index:5;display:grid;gap:3px;min-width:150px;padding:8px 10px;background:var(--raised);border:1px solid var(--border-strong);border-radius:var(--radius);font-size:var(--fs-sm);white-space:nowrap;box-shadow:0 8px 24px rgb(0 0 0/.25)}
+.ov .tip span{display:flex;align-items:center}.ov .tip em{font-style:normal;margin-left:auto;padding-left:16px;font-variant-numeric:tabular-nums;font-weight:var(--fw-strong)}
+.ov .chartfoot{display:flex;flex-wrap:wrap;gap:8px 32px;align-items:baseline;margin-top:12px;color:var(--text-2);font-size:var(--fs-sm)}
+.ov .chartfoot b{color:var(--text);margin-left:6px}.ov .chartfoot details{margin-left:auto}.ov .chartfoot details[open]{flex-basis:100%;margin-left:0}
+.ov .nochart{display:flex;align-items:center;gap:24px;padding:20px 24px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
+.ov .nochart svg{width:180px;flex:none}.ov .nochart p{margin:4px 0 0}
 @media (max-width:900px){
   .ov .headline{grid-template-columns:minmax(0,1fr);gap:8px}.ov .big{font-size:36px}.ov .stats{gap:20px}
-  .ov .analytics{grid-template-columns:minmax(0,1fr)}
+  .ov .charts{grid-template-columns:minmax(0,1fr);gap:24px}.ov .nochart{flex-direction:column;align-items:flex-start;gap:12px}
   .ov .ovt,.ov .ovt tbody{display:block}.ov .ovt thead{display:none}
   .ov .ovt tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:10px 0;border-bottom:1px solid var(--border)}
   .ov .ovt td{display:block;border:0;height:auto;padding:0;text-align:left}
