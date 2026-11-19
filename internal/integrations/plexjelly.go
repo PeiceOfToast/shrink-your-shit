@@ -194,7 +194,7 @@ func (s *Service) tellPlex(ki kindInfo, name, base, key, file string) (summary s
 func (s *Service) tellJellyfin(ki kindInfo, name, base, key, old, file string) (summary string, ok, answered bool) {
 	var folders []jellyFolder
 	if msg := s.getJSON(ki, base, key, "/Library/VirtualFolders", noNextScan, &folders); msg != "" {
-		return msg, false, false
+		return "Couldn't tell " + ki.label + " (" + name + "): the library lookup failed: " + msg, false, false
 	}
 	inLibrary, library := false, ""
 	for _, f := range folders {
@@ -219,10 +219,10 @@ func (s *Service) tellJellyfin(ki kindInfo, name, base, key, old, file string) (
 	}
 	st, _, err := s.do(ki, "POST", base, key, "/Library/Media/Updated", map[string]any{"Updates": updates})
 	if err != nil {
-		return unreached(ki, base, err, noNextScan), false, false
+		return "Couldn't tell " + ki.label + " (" + name + "): the update failed: " + unreached(ki, base, err, noNextScan), false, false
 	}
 	if !ok2(st) {
-		return answer(ki, st), false, false
+		return "Couldn't tell " + ki.label + " (" + name + "): the update failed: " + answer(ki, st), false, false
 	}
 	if msg, good, answered := s.refreshJellyItem(ki, base, key, library, file); !good {
 		return "Couldn't tell " + ki.label + " (" + name + "): " + msg, false, answered
