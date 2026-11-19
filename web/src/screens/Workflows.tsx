@@ -1,7 +1,7 @@
 // V3 Workflows list, Templates tab and the New workflow wizard (spec 5.1, 5.2; DESIGN/v2 SCREENS V3,
 // mockups/workflows.html), on the real /api/v2 (#109) or the mock with ?mock=1. Opening one goes to its step list (WorkflowStack.tsx). Not here yet: Export, Test run, History,
 // Import, the Cards view. Archive isn't in the contract.
-import { Empty, PageHead } from "../PageHead";
+import { Empty, LoadFailed, PageHead } from "../PageHead";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { count, plural } from "../format";
@@ -114,10 +114,10 @@ export function Workflows() {
       {wizard && <Wizard onClose={() => setWizard(false)} onMade={(w) => navigate("/workflows/" + w.id)} />}
       <div className="tabs" role="tablist">
         <button role="tab" type="button" aria-selected={tab === "workflows"} onClick={() => tab !== "workflows" && setTab("workflows")}>Workflows</button>
-        <button role="tab" type="button" aria-selected={tab === "templates"} onClick={() => tab !== "templates" && setTab("templates")}>Templates <span className="n">{templates.length}</span></button>
+        <button role="tab" type="button" aria-selected={tab === "templates"} onClick={() => tab !== "templates" && setTab("templates")}>Templates {tpl.data && <span className="n">{templates.length}</span>}</button>
       </div>
       <p className="muted" role="status">{said}</p>
-      {tab === "templates" ? (
+      {tab === "templates" ? (tpl.error && !tpl.data ? <LoadFailed error={tpl.error} reload={tpl.reload} /> :
         <div className="list"><table className="tbl">
           <thead><tr><th>Template</th><th data-p="3">What it does</th><th data-p="4">Steps it uses</th><th className="stc">Changes originals</th></tr></thead>
           <tbody>{templates.map((t) => <tr key={t.id}><td className="idc"><span className="ttl">{t.name}</span><span className="sub phone">{t.description}</span></td>
@@ -133,8 +133,8 @@ export function Workflows() {
           <button className="btn sm ghost" type="button" aria-pressed={fav} onClick={() => setFav(!fav)}><Icon id="i-star" />Favourites</button>
           <input className="input find" type="search" placeholder="Search workflows" aria-label="Search workflows" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
-        {wfs.error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{wfs.error.message}</span></p>}
-        {!wfs.loaded ? <div className="empty">Loading…</div> : rows.length === 0 ? (all.length ? <div className="empty">No workflow matches.</div>
+        {wfs.error && wfs.data && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{wfs.error.message}</span></p>}
+        {!wfs.loaded ? <div className="empty">Loading…</div> : wfs.error && !wfs.data ? <LoadFailed error={wfs.error} reload={wfs.reload} /> : rows.length === 0 ? (all.length ? <div className="empty">No workflow matches.</div>
           : <Empty icon="i-workflow" text="No workflows yet. A workflow says what happens to each file.">{!wizard && <button className="btn primary" type="button" onClick={() => (setWizard(true), setSaid(""))}><Icon id="i-plus" />New workflow</button>}</Empty>) : (
           <div className="list"><table className="tbl">
             <thead><tr><th>Name</th><th data-p="2">Libraries</th><th data-p="3">Version</th><th data-p="6">Recent runs</th>{hasTags && <th data-p="6">Tags</th>}<th className="stc">Check</th><th className="actc">Enabled</th><th className="actc"><span className="sr">Menu</span></th></tr></thead>
