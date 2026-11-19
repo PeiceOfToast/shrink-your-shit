@@ -4,6 +4,7 @@ package web
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -205,4 +206,31 @@ func TestSWRKeyChangeDuringAComputeIsNotLost(t *testing.T) {
 		defer c.mu.Unlock()
 		return c.key == "c" && !c.queued
 	})
+}
+
+// With nobody asking, the background computes stop, even though the key keeps moving (it holds the minute).
+func TestSWRBackgroundStopsWhenNobodyAsks(t *testing.T) {
+	setSWR(t, 10*time.Millisecond, 0)
+	var key fakeKey
+	key.set("a")
+	var builds atomic.Int32
+	build := func() (int, string, error) {
+		n := builds.Add(1)
+		time.Sleep(15 * time.Millisecond)
+		return int(n), fmt.Sprintf("minute-%d", n), nil // the key has moved on by the time each compute ends
+	}
+	var c swrCache[int]
+	c.get(key.get, build) // computed in the request
+	key.set("b")
+	c.get(key.get, build) // one background compute; then nobody asks again
+	swrWaitFor(t, "the background compute to stop", func() bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return !c.queued
+	})
+	n := builds.Load()
+	time.Sleep(100 * time.Millisecond)
+	if m := builds.Load(); m != n || n > 2 {
+		t.Fatalf("%d computes, then %d after 100 ms with nobody asking; want 2 and no more", n, m)
+	}
 }

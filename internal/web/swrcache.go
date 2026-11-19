@@ -23,7 +23,7 @@ type swrCache[T any] struct {
 	mu     sync.Mutex // guards the fields below; never held across a compute
 	have   bool
 	key    string
-	want   string // the key of the last request: a background compute runs again until key catches up
+	want   string // the key of a request that came while a background compute ran ("" if none): one more compute
 	val    T
 	asked  time.Time // the last request
 	queued bool      // a background compute is waiting or running
@@ -122,6 +122,9 @@ func (c *swrCache[T]) startLocked(build func() (T, string, error)) {
 			if wait > 0 {
 				time.Sleep(wait)
 			}
+			c.mu.Lock()
+			c.want = "" // only a request during this compute asks for another
+			c.mu.Unlock()
 			c.one.Lock()
 			_, err := c.run(build)
 			c.one.Unlock()
@@ -129,7 +132,7 @@ func (c *swrCache[T]) startLocked(build func() (T, string, error)) {
 				log.Printf("numbers: background recompute failed, keeping the last ones: %v", err)
 			}
 			c.mu.Lock()
-			if err == nil && c.key != c.want { // the key moved while it ran: one more, or the page keeps old numbers
+			if err == nil && c.want != "" && c.key != c.want { // a page asked for newer numbers while it ran: one more
 				wait = c.waitLocked()
 				c.mu.Unlock()
 				continue
