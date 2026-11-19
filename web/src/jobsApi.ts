@@ -3,12 +3,13 @@ import { call, failed, MOCK, type Answer } from "./api";
 import { mockAction, mockJob, mockJobs, mockJobLog, mockConvertAgain } from "./mock/jobs";
 import type { ActionResult, JobAction, JobDetail, JobItem, JobsPage, Probe, Tab, Pin } from "./types/jobs";
 
-// kept (G5): only the Done rows whose original is still kept; the server answers 400 on any other tab, so it is sent on Done only
-export async function listJobs(tab: Tab, q: string, library = "", limit = 200, kept = false): Promise<Answer<JobsPage>> {
-  if (MOCK) return mockJobs(tab, q, undefined, limit, library, kept);
+// kept (G5): only the Done rows whose original is still kept; left: the Done rows whose original is still beside or in place.
+// The server answers 400 on any other tab, and kept=1 with left=1 together, so both are sent on Done only and the page sends one at most
+export async function listJobs(tab: Tab, q: string, library = "", limit = 200, kept = false, left = false): Promise<Answer<JobsPage>> {
+  if (MOCK) return mockJobs(tab, q, undefined, limit, library, kept, left);
   // #134: the Waiting tab in the order the worker takes files, each with its position; the page never reorders it.
   // The server gives at most 500 rows per ask (files.go pageOf), so a longer list (Show more) is asked for 500 at a time
-  const url = (n: number, at: number) => "/api/v2/jobs?tab=" + tab + (tab === "waiting" ? "&sort=queue" : "") + "&limit=" + n + (at ? "&offset=" + at : "") + (q ? "&q=" + encodeURIComponent(q) : "") + (library ? "&libraryId=" + encodeURIComponent(library) : "") + (kept && tab === "completed" ? "&kept=1" : "");
+  const url = (n: number, at: number) => "/api/v2/jobs?tab=" + tab + (tab === "waiting" ? "&sort=queue" : "") + "&limit=" + n + (at ? "&offset=" + at : "") + (q ? "&q=" + encodeURIComponent(q) : "") + (library ? "&libraryId=" + encodeURIComponent(library) : "") + (kept && tab === "completed" ? "&kept=1" : "") + (left && tab === "completed" ? "&left=1" : "");
   if (limit <= 500) return call("GET", url(limit, 0));
   const rs = await Promise.all(Array.from({ length: Math.ceil(limit / 500) }, (_, i) => call<JobsPage>("GET", url(Math.min(500, limit - i * 500), i * 500))));
   const bad = rs.find((r) => failed(r)); if (bad) return bad;
