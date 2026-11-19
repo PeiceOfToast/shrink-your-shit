@@ -225,7 +225,7 @@ func recoverRestores(st Store, say func(string, ...any)) {
 // setting applies at the next purge). Only the recorded file is deleted, and only if its size is the
 // recorded one; anything else in .syp-trash is never touched. A library's record being deleted does
 // not matter. Returns what it did, for the log.
-func Purge(st Store, days int, now time.Time) []string {
+func Purge(st Store, days int, now time.Time, waiting func(path string) bool) []string {
 	rows, err := st.Originals(jobs.OriginalKept)
 	if err != nil {
 		return []string{"cannot read the kept originals: " + err.Error()}
@@ -233,6 +233,9 @@ func Purge(st Store, days int, now time.Time) []string {
 	var said []string
 	purged := 0
 	for _, o := range rows {
+		if waiting != nil && waiting(o.Path) { // on a share that isn't connected: its .syp-trash isn't there to see
+			continue
+		}
 		due, ok := jobs.KeptUntil(o.KeptAt, days)
 		if !ok {
 			continue

@@ -326,6 +326,11 @@ func RemountShares(store *jobs.Store) {
 		tryMount(store, sh, pw)
 		status, _ := shareToJSON(store, sh)["status"].(string)
 		log.Printf("share %q: %s", sh.Name, status)
+		if mountStatus(store, sh.ID) != "connected" { // its libraries wait until it answers (WatchShares resumes them)
+			if _, err := store.PauseLibrariesForShare(sh.ID, mountPointFor(sh)); err != nil {
+				log.Printf("share %q: could not pause its libraries: %v", sh.Name, err)
+			}
+		}
 	}
 }
 
