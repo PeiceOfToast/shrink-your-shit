@@ -40,20 +40,22 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	workerRoutes(api, store, ss, eng)
 	previewRoutes(api, store, eng)
 	wv := newWorkerView(store, ss, eng, joins)
-	v2Shares(api, store)          // Item D: /api/v2/shares
-	v2Summary(api, store, wv)     // V3c: /api/v2/summary, processing and intake pauses
-	v2Overview(api, store, wv)    // user review 11-12 item 5: /api/v2/overview
-	v2EventStream(api, store, wv) // V3a: /api/v2/events (live updates)
-	v2Workers(api, wv)            // V4a: /api/v2/workers
-	v2JoinRequests(api, wv)       // E2: allow, deny or dismiss a join request
-	v2Libraries(api, store, eng)  // V5b: /api/v2/libraries
-	v2Jobs(api, store)            // V2: /api/v2/jobs
-	v2JobLog(api, store)          // user review 11-13 item E: /api/v2/jobs/{id}/log
-	v2Ladder(api)                 // user review 11-12 item 1: /api/v2/bitrate-ladder
-	v2Doctor(api, store, eng)     // UI-API-CONTRACT-v2 "Doctor": /api/v2/doctor
-	v2JobStreams(api, store)      // V3d: /api/v2/activity, per-job streams
-	v2Workflows(api, store, eng)  // UI rebuild, V1: /api/v2 workflows
-	v2Setup(api, store, ss, eng)  // one-command setup: the install's role, GET /api/v2/setup
+	v2Shares(api, store)      // Item D: /api/v2/shares
+	v2Summary(api, store, wv) // V3c: /api/v2/summary, processing and intake pauses
+	// the Dashboard and Libraries share one totals cache: one count, one answer
+	libTotals := &libraryTotals{}
+	v2Overview(api, store, wv, libTotals)   // user review 11-12 item 5: /api/v2/overview
+	v2EventStream(api, store, wv)           // V3a: /api/v2/events (live updates)
+	v2Workers(api, wv)                      // V4a: /api/v2/workers
+	v2JoinRequests(api, wv)                 // E2: allow, deny or dismiss a join request
+	v2Libraries(api, store, eng, libTotals) // V5b: /api/v2/libraries
+	v2Jobs(api, store)                      // V2: /api/v2/jobs
+	v2JobLog(api, store)                    // user review 11-13 item E: /api/v2/jobs/{id}/log
+	v2Ladder(api)                           // user review 11-12 item 1: /api/v2/bitrate-ladder
+	v2Doctor(api, store, eng)               // UI-API-CONTRACT-v2 "Doctor": /api/v2/doctor
+	v2JobStreams(api, store)                // V3d: /api/v2/activity, per-job streams
+	v2Workflows(api, store, eng)            // UI rebuild, V1: /api/v2 workflows
+	v2Setup(api, store, ss, eng)            // one-command setup: the install's role, GET /api/v2/setup
 	notifier := eng.Notify
 	if notifier == nil { // no background sender here (tests): the routes still answer, nothing is sent
 		notifier = notify.New(store, notify.Options{})

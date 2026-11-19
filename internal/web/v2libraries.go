@@ -20,7 +20,7 @@ import (
 // V5b (UI-API-CONTRACT-v2.md, Libraries; slices/v2-engine/v5-plan.md): the libraries in the contract's
 // shape. Adding, renaming, choosing the workflow, removing and scanning go through v1's own handlers,
 // with all their checks; pausing, priority and the folder for new files are V5b's.
-func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine) {
+func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine, libTotals *libraryTotals) {
 	storeErr := func(w http.ResponseWriter, err error) {
 		if errors.Is(err, jobs.ErrNotFound) {
 			apiError(w, http.StatusNotFound, "not_found", "There is no such library.")
@@ -28,8 +28,9 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		}
 		serverError(w, err)
 	}
-	view := func(l jobs.Library, counts map[int64]jobs.LibraryCounts) (map[string]any, error) {
-		c := counts[l.ID]
+	// completed and skipped are the Dashboard's library counts (distinct files), not the Jobs tabs' per-job counts
+	view := func(l jobs.Library, counts map[int64]jobs.LibraryCounts, totals map[int64]jobs.LibraryTotals) (map[string]any, error) {
+		c, t := counts[l.ID], totals[l.ID]
 		_, _, cards, err := store.FileList(jobs.FileFilter{Show: jobs.CardProcessed, LibraryID: l.ID, Limit: 0})
 		if err != nil {
 			return nil, err
@@ -104,7 +105,7 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			"enabled": l.Started, "workflowId": strconv.FormatInt(l.FlowID, 10), "workflowName": name, "priority": l.Priority,
 			"scan": scan,
 			"counts": map[string]int{"files": l.LastScanVideos, "waiting": c.Waiting, "running": c.Working,
-				"completed": cards[jobs.CardProcessed], "skipped": cards[jobs.CardSkipped], "failed": cards[jobs.CardFailed]},
+				"completed": t.Done, "skipped": t.Skipped, "failed": cards[jobs.CardFailed]},
 			"bytes":  map[string]int64{"freed": c.FreedBytes, "waitingToFree": c.WaitingBytes, "couldFree": c.CouldFreeBytes, "grew": c.GrewBytes},
 			"output": map[string]any{"policy": policy, "folder": folder, "overrideFolder": nilIfEmpty(l.OverrideFolder), "problem": problem},
 			// CAN'T YET: per-library scan frequency (one scan pass walks every library, and a new file is
@@ -125,7 +126,17 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			serverError(w, err)
 			return
 		}
-		v, err := view(l, counts)
+		libs, err := store.Libraries()
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		totals, err := libTotals.get(store, libs)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		v, err := view(l, counts, totals)
 		if err != nil {
 			serverError(w, err)
 			return
@@ -177,13 +188,18 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			serverError(w, err)
 			return
 		}
+		totals, err := libTotals.get(store, libs)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
 		wf, st := r.URL.Query().Get("workflowId"), r.URL.Query().Get("status")
 		items := []map[string]any{}
 		for _, l := range libs {
 			if wf != "" && strconv.FormatInt(l.FlowID, 10) != wf {
 				continue
 			}
-			v, err := view(l, counts)
+			v, err := view(l, counts, totals)
 			if err != nil {
 				serverError(w, err)
 				return
