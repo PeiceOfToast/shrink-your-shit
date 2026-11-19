@@ -181,9 +181,9 @@ function SummaryCard({ s, reload, said }: { s: NotifySummary; reload: () => void
   return (
     <form className="bd stack" onSubmit={save}>
       <div className="row" style={{ alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
-        <div className="field">
+        <div className="field" style={{ flex: "1 1 280px", minWidth: 0 }}>
           <label htmlFor="n-sum">Send the summary</label>
-          <select id="n-sum" className="input" style={{ maxWidth: 320 }} value={mode} onChange={(e) => setMode(e.target.value as NotifySummaryMode)}>
+          <select id="n-sum" className="input" value={mode} onChange={(e) => setMode(e.target.value as NotifySummaryMode)}>
             {MODES.map((m) => <option key={m.v} value={m.v}>{m.label}</option>)}
           </select>
         </div>

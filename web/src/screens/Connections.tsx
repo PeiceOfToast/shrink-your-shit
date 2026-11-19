@@ -55,6 +55,8 @@ function Form({ kind, it, onDone, onCancel, onTested }: { kind: IntegrationKind;
   const [maps, setMaps] = useState<PathMapping[]>(it?.pathMappings.length ? it.pathMappings : []);
   const [busy, setBusy] = useState(false), [result, setResult] = useState<{ tone: Tone; text: string } | null>(null), [error, setError] = useState("");
   const rows = maps.filter((m) => m.theirPath.trim() || m.ourPath.trim()).map((m) => ({ theirPath: m.theirPath.trim(), ourPath: m.ourPath.trim() }));
+  // pass 5 #4: why Test is disabled, from the same conditions as its disabled prop below
+  const testWhy = !url.trim() && !it && !key ? "Fill in the address and API key to test." : !url.trim() ? "Fill in the address to test." : !it && !key ? "Fill in the API key to test." : "";
   const setMap = (i: number, p: Partial<PathMapping>) => setMaps(maps.map((m, j) => (j === i ? { ...m, ...p } : m)));
   const run = async <T,>(p: Promise<Answer<T>>): Promise<T | null> => {
     try { const r = await p; if (failed(r)) { setError(r.error.message); return null; } return r; } catch (_) { setError("Couldn't reach Shrink Your Shit. Try again."); return null; }
@@ -116,6 +118,7 @@ function Form({ kind, it, onDone, onCancel, onTested }: { kind: IntegrationKind;
         <button className="btn primary" type="submit" disabled={busy}>{busy ? "Working…" : "Save"}</button>
         <button className="btn ghost" type="button" onClick={onCancel} disabled={busy}>Cancel</button>
       </div>
+      {testWhy && !busy && <p className="muted sm" style={{ margin: 0 }}>{testWhy}</p>}
     </form>);
 }
 
