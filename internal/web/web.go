@@ -50,6 +50,7 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	v2Jobs(api, store)            // V2: /api/v2/jobs
 	v2JobLog(api, store)          // user review 11-13 item E: /api/v2/jobs/{id}/log
 	v2Ladder(api)                 // user review 11-12 item 1: /api/v2/bitrate-ladder
+	v2Doctor(api, store, eng)     // UI-API-CONTRACT-v2 "Doctor": /api/v2/doctor
 	v2JobStreams(api, store)      // V3d: /api/v2/activity, per-job streams
 	v2Workflows(api, store, eng)  // UI rebuild, V1: /api/v2 workflows
 	v2Setup(api, store, ss, eng)  // one-command setup: the install's role, GET /api/v2/setup
