@@ -28,19 +28,19 @@ type LibraryTotals struct {
 func (s *Store) LibraryTotalsOf(l Library) (LibraryTotals, error) {
 	var t LibraryTotals
 	lo, hi := pathRange(l.Path)
-	if err := s.db.QueryRow(`SELECT COALESCE(SUM(size),0), COUNT(*)
+	if err := s.reader().QueryRow(`SELECT COALESCE(SUM(size),0), COUNT(*)
 FROM files WHERE path >= ? AND path < ?`, lo, hi).Scan(&t.BytesBefore, &t.VideosRecorded); err != nil {
 		return t, err
 	}
 	// Skipped is the count Jobs > Skipped shows for this library (the same filter, so they cannot disagree).
 	sw, sa := FileFilter{LibraryID: l.ID}.skipFilters()
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM files WHERE `+sw, sa...).Scan(&t.Skipped); err != nil {
+	if err := s.reader().QueryRow(`SELECT COUNT(*) FROM files WHERE `+sw, sa...).Scan(&t.Skipped); err != nil {
 		return t, err
 	}
-	if err := s.db.QueryRow(`SELECT COALESCE(SUM(`+leftNowSQL+`),0) FROM jobs WHERE library_id=?`, lo, hi, lo, hi, l.ID).Scan(&t.LeftNowBytes); err != nil {
+	if err := s.reader().QueryRow(`SELECT COALESCE(SUM(`+leftNowSQL+`),0) FROM jobs WHERE library_id=?`, lo, hi, lo, hi, l.ID).Scan(&t.LeftNowBytes); err != nil {
 		return t, err
 	}
-	err := s.db.QueryRow(`SELECT COUNT(DISTINCT path) FROM jobs WHERE library_id=? AND status=?`, l.ID, Done).Scan(&t.Done)
+	err := s.reader().QueryRow(`SELECT COUNT(DISTINCT path) FROM jobs WHERE library_id=? AND status=?`, l.ID, Done).Scan(&t.Done)
 	return t, err
 }
 
@@ -90,10 +90,10 @@ SELECT decided_at, 'skipped', 0, path FROM files WHERE ((decision LIKE 'skip: %'
 // Recorded false (zeroes, not estimates).
 func (s *Store) Days(n int, now time.Time, t Totals) ([]Day, error) {
 	var first string
-	s.db.QueryRow(`SELECT COALESCE(MIN(date(at, 'localtime')), '') FROM events WHERE kind='job'`).Scan(&first)
+	s.reader().QueryRow(`SELECT COALESCE(MIN(date(at, 'localtime')), '') FROM events WHERE kind='job'`).Scan(&first)
 	from := now.AddDate(0, 0, -(n - 1)).Format("2006-01-02")
 	by := map[string]*Day{}
-	rows, err := s.db.Query(latestEndsSQL+`SELECT date(at, 'localtime') AS d, to_status, COUNT(*) FROM ends
+	rows, err := s.reader().Query(latestEndsSQL+`SELECT date(at, 'localtime') AS d, to_status, COUNT(*) FROM ends
 WHERE rn=1 AND date(at, 'localtime') >= ? GROUP BY d, to_status`, from)
 	if err != nil {
 		return nil, err
@@ -151,7 +151,7 @@ type Totals struct {
 // TotalsOf is the overview's figures in one pass: jobs grouped by library and freed day.
 func (s *Store) TotalsOf() (Totals, error) {
 	t := Totals{Counts: map[int64]LibraryCounts{}, FreedByDay: map[string]int64{}, SavedByDay: map[string]int64{}, WaitingByDay: map[string]int64{}, CouldFreeByDay: map[string]int64{}}
-	rows, err := s.db.Query(`SELECT library_id, date(`+freedAtSQL+`, 'localtime') AS d,
+	rows, err := s.reader().Query(`SELECT library_id, date(`+freedAtSQL+`, 'localtime') AS d,
   COALESCE(SUM(status=?),0), COALESCE(SUM(status=?),0), COALESCE(SUM(status IN (?,?) AND `+newestJobOf("jobs")+`),0),
   COALESCE(SUM(`+freedSQL+`),0), COALESCE(SUM(`+waitingSQL+`),0), COALESCE(SUM(`+couldFreeSQL+`),0), COALESCE(SUM(`+grewSQL+`),0), COALESCE(SUM(`+goneSQL+`),0), COALESCE(SUM(`+grewNowSQL+`),0)
 FROM jobs GROUP BY library_id, d`, Running, Queued, Failed, Kept)
@@ -198,14 +198,14 @@ FROM jobs GROUP BY library_id, d`, Running, Queued, Failed, Kept)
 	if err := s.savedByDay(&t); err != nil {
 		return t, err
 	}
-	err = s.db.QueryRow(`SELECT COUNT(*) FROM files WHERE reason<>'' AND NOT ` + convertedSQL).Scan(&t.Summary.Skipped)
+	err = s.reader().QueryRow(`SELECT COUNT(*) FROM files WHERE reason<>'' AND NOT ` + convertedSQL).Scan(&t.Summary.Skipped)
 	return t, err
 }
 
 // savedByDay fills t's saved and waiting bytes by day in one GROUP BY: each done job's day is its latest
 // 'done' event (the same day the events table gives it), and the rows are the newest conversion per file.
 func (s *Store) savedByDay(t *Totals) error {
-	rows, err := s.db.Query(`SELECT (SELECT date(e.at, 'localtime') FROM events e WHERE e.kind='job' AND e.job_id=jobs.id AND e.to_status=? ORDER BY e.seq DESC LIMIT 1) AS d,
+	rows, err := s.reader().Query(`SELECT (SELECT date(e.at, 'localtime') FROM events e WHERE e.kind='job' AND e.job_id=jobs.id AND e.to_status=? ORDER BY e.seq DESC LIMIT 1) AS d,
   COALESCE(SUM(`+savedSQL+`),0), COALESCE(SUM(`+waitingSQL+`),0), COALESCE(SUM(`+couldFreeSQL+`),0)
 FROM jobs WHERE status=? AND size_after>0 AND `+newestSQL+` GROUP BY d`, Done, Done)
 	if err != nil {
@@ -231,7 +231,7 @@ FROM jobs WHERE status=? AND size_after>0 AND `+newestSQL+` GROUP BY d`, Done, D
 // whose start was recorded); ok false when there are none.
 func (s *Store) Averages() (savingPercent float64, savingOK bool, secondsPerGB float64, timeOK bool, err error) {
 	var before, after int64
-	if err = s.db.QueryRow(`SELECT COALESCE(SUM(size_before),0), COALESCE(SUM(size_after),0) FROM jobs WHERE status=? AND size_before>0 AND size_after>0`, Done).
+	if err = s.reader().QueryRow(`SELECT COALESCE(SUM(size_before),0), COALESCE(SUM(size_after),0) FROM jobs WHERE status=? AND size_before>0 AND size_after>0`, Done).
 		Scan(&before, &after); err != nil {
 		return
 	}
@@ -240,7 +240,7 @@ func (s *Store) Averages() (savingPercent float64, savingOK bool, secondsPerGB f
 	}
 	var secs float64
 	var timedBytes int64
-	if err = s.db.QueryRow(`SELECT COALESCE(SUM((julianday(updated)-julianday(started))*86400),0), COALESCE(SUM(size_before),0)
+	if err = s.reader().QueryRow(`SELECT COALESCE(SUM((julianday(updated)-julianday(started))*86400),0), COALESCE(SUM(size_before),0)
 FROM jobs WHERE status=? AND started<>'' AND size_before>0`, Done).Scan(&secs, &timedBytes); err != nil {
 		return
 	}
@@ -254,6 +254,6 @@ FROM jobs WHERE status=? AND started<>'' AND size_before>0`, Done).Scan(&secs, &
 // libraries were records).
 func (s *Store) DoneCount() (int, error) {
 	var n int
-	err := s.db.QueryRow(`SELECT COUNT(DISTINCT path) FROM jobs WHERE status=?`, Done).Scan(&n)
+	err := s.reader().QueryRow(`SELECT COUNT(DISTINCT path) FROM jobs WHERE status=?`, Done).Scan(&n)
 	return n, err
 }

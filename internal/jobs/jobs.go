@@ -93,6 +93,7 @@ type File struct {
 // Store is the SQLite-backed store.
 type Store struct {
 	db         *sql.DB
+	ro         *sql.DB // a read-only handle on the same WAL file: the overview's reads run here, so they never hold db's one connection
 	path       string
 	appVersion string // the program's version, written into its backups ("" if not given)
 	now        func() time.Time
@@ -134,11 +135,37 @@ func OpenAs(path, appVersion string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	ro, err := sql.Open("sqlite", path)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	ro.SetMaxOpenConns(1) // one connection, pinned query_only: the same file, read only
+	if _, err := ro.Exec(`PRAGMA busy_timeout=5000; PRAGMA query_only=ON;`); err != nil {
+		ro.Close()
+		db.Close()
+		return nil, err
+	}
+	s.ro = ro
 	s.removeStaleFiles()
 	return s, nil
 }
 
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) Close() error {
+	if s.ro != nil {
+		s.ro.Close()
+	}
+	return s.db.Close()
+}
+
+// reader is the handle for reads that may take a while (the overview's sums): on WAL they don't wait for, or
+// hold up, the writer's one connection.
+func (s *Store) reader() *sql.DB {
+	if s.ro != nil {
+		return s.ro
+	}
+	return s.db
+}
 
 func (s *Store) stamp() string { return s.now().UTC().Format(time.RFC3339) }
 
