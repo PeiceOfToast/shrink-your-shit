@@ -108,6 +108,34 @@ func encryptSharePassword(plaintext string) ([]byte, []byte, error) {
 	return ct, nonce, nil
 }
 
+// readShareKeyHere returns this computer's share key if it exists. It never makes one: a preview of a backup
+// must not create a key as a side effect. Nil means there is no key here.
+func readShareKeyHere() []byte {
+	b, err := os.ReadFile(shareKeyPath())
+	if err != nil {
+		return nil
+	}
+	key, err := unwrapShareKey(b)
+	if err != nil || len(key) != ShareKeySize {
+		return nil
+	}
+	return key
+}
+
+// sealedOpens reports whether ct opens with key. A nil key, or a nonce of the wrong length, does not open.
+func sealedOpens(key, ct, nonce []byte) bool {
+	bc, err := aes.NewCipher(key)
+	if err != nil {
+		return false
+	}
+	gcm, err := cipher.NewGCM(bc)
+	if err != nil || len(nonce) != gcm.NonceSize() {
+		return false
+	}
+	_, err = gcm.Open(nil, nonce, ct, nil)
+	return err == nil
+}
+
 func decryptSharePassword(ct, nonce []byte) (string, error) {
 	if ct == nil || nonce == nil {
 		return "", nil

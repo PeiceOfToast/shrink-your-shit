@@ -83,12 +83,14 @@ type BackupPreview struct {
 	AppVersion    string         `json:"appVersion"`
 	CreatedAt     string         `json:"createdAt"`
 	Contents      BackupContents `json:"contents"`
-	Warnings      []string       `json:"warnings"`
+	// SecretsUnreadable is true when a password or token in the backup won't open on this computer.
+	SecretsUnreadable bool     `json:"secretsUnreadable,omitempty"`
+	Warnings          []string `json:"warnings"`
 }
 
 // PreviewBackup reads the backup file at path and says what it holds. Nothing in the database changes.
 func (s *Store) PreviewBackup(path string) (BackupPreview, error) {
-	var sc backupScan
+	sc := backupScan{key: readShareKeyHere()}
 	h, err := walkBackup(path, sc.add)
 	if err != nil {
 		return BackupPreview{}, err
@@ -100,8 +102,12 @@ func (s *Store) PreviewBackup(path string) (BackupPreview, error) {
 	if err := checkFormat(h, live, s.appVersion); err != nil {
 		return BackupPreview{}, err
 	}
+	warnings := libraryWarnings(sc.libraryPaths)
+	if sc.unreadable {
+		warnings = append(warnings, secretsWarning)
+	}
 	return BackupPreview{FormatVersion: h.FormatVersion, AppVersion: h.AppVersion, CreatedAt: h.CreatedAt,
-		Contents: sc.c, Warnings: append(libraryWarnings(sc.libraryPaths), workerSignInWarning)}, nil
+		Contents: sc.c, SecretsUnreadable: sc.unreadable, Warnings: append(warnings, workerSignInWarning)}, nil
 }
 
 // RestoreBackup replaces the contents of every table with the rows of the backup at path, in one transaction:
@@ -206,10 +212,30 @@ func checkFormat(h backupHeader, live int, thisVersion string) error {
 	return nil
 }
 
-// backupScan counts a backup's contents as its rows go past.
+// backupScan counts a backup's contents as its rows go past. key is this computer's share key (nil if none):
+// unreadable is set when a sealed password, token or URL in the backup does not open with it.
 type backupScan struct {
 	c            BackupContents
 	libraryPaths []string
+	key          []byte
+	unreadable   bool
+}
+
+// secretsWarning is the preview line for a backup whose sealed secrets this computer cannot open.
+const secretsWarning = "Passwords and tokens in this backup won't work here; enter them again after restoring."
+
+// sealed checks one sealed value. Empty means nothing was sealed, so there is nothing to open.
+func (sc *backupScan) sealed(ct, nonce []byte) {
+	if len(ct) > 0 && len(nonce) > 0 && !sealedOpens(sc.key, ct, nonce) {
+		sc.unreadable = true
+	}
+}
+
+// blob reads a []byte column or field as the backup holds it: base64 text, or nothing.
+func blob(v any) []byte {
+	s, _ := v.(string)
+	b, _ := base64.StdEncoding.DecodeString(s)
+	return b
 }
 
 func (sc *backupScan) add(table string, row map[string]any) error {
@@ -223,6 +249,7 @@ func (sc *backupScan) add(table string, row map[string]any) error {
 		}
 	case "shares":
 		sc.c.Shares++
+		sc.sealed(blob(row["encrypted_password"]), blob(row["auth_nonce"]))
 	case "jobs":
 		sc.c.Jobs++
 	case "app_meta":
@@ -233,10 +260,28 @@ func (sc *backupScan) add(table string, row map[string]any) error {
 			sc.c.Settings = true
 		case "integrations":
 			var doc struct {
-				Items []json.RawMessage `json:"items"`
+				Items []struct {
+					Sealed []byte `json:"sealed"`
+					Nonce  []byte `json:"nonce"`
+				} `json:"items"`
 			}
 			if json.Unmarshal([]byte(value), &doc) == nil {
 				sc.c.Connections = len(doc.Items)
+				for _, it := range doc.Items {
+					sc.sealed(it.Sealed, it.Nonce)
+				}
+			}
+		case "notifications":
+			var doc struct {
+				Targets []struct {
+					CT    []byte `json:"ct"`
+					Nonce []byte `json:"nonce"`
+				} `json:"targets"`
+			}
+			if json.Unmarshal([]byte(value), &doc) == nil {
+				for _, t := range doc.Targets {
+					sc.sealed(t.CT, t.Nonce)
+				}
 			}
 		}
 	}

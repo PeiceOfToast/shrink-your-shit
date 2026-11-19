@@ -34,7 +34,11 @@ func restoreExec(t *testing.T, s *Store, q string, args ...any) {
 
 func TestRestoreRoundTripPutsTheDataBack(t *testing.T) {
 	s := restoreTestStore(t)
-	pw, nonce := []byte{1, 2, 3, 0xff}, []byte{9, 8, 7}
+	useHome(t) // the share password is sealed with this computer's key, so the preview can open it
+	pw, nonce, err := encryptSharePassword("hunter2")
+	if err != nil {
+		t.Fatal(err)
+	}
 	restoreExec(t, s, `INSERT INTO app_meta(key,value) VALUES('probe','before')`)
 	restoreExec(t, s, `INSERT INTO shares(id,type,address,name,encrypted_password,auth_nonce,created,updated) VALUES(1,'smb','//h/x','n',?,?,'c','u')`, pw, nonce)
 	b, err := s.WriteBackup(ReasonManual)
