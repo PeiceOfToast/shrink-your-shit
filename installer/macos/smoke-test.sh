@@ -1,19 +1,26 @@
 #!/bin/bash
 # The macOS installer test, run by the "macos installer" job in .github/workflows/ci.yml (like
 # installer/windows/smoke-test.ps1 for Windows). It runs the repo's install.sh against a release-shaped
-# folder (SYP_BASE_URL=file://...), then: checks the launchd agent and the page, converts one clip,
-# upgrades in place, and uninstalls. Runs on macos-latest (bash 3.2: no bash 4 features).
+# folder (SYP_BASE_URL=file://...): release A is installed, then the agent and the page are checked, one clip is
+# converted, and an upgrade to release B (a different version) is checked by the version the program reports.
+# Then the Update screen is checked (on a Mac it says to run the install line; the button is refused), and the
+# install is uninstalled. Runs on macos-latest (bash 3.2: no bash 4 features).
 #
-# Usage: smoke-test.sh <release-dir> <repo-root> <diag-dir>
+# Usage: smoke-test.sh <release-a-dir> <repo-root> <diag-dir> <release-b-dir>
+# The versions are the ones ci.yml stamps into the two releases.
 # The token is never printed: it is masked with ::add-mask:: and install output is redacted before it is shown.
 set -euo pipefail
 
 # It deletes the install's data folder, so it runs only in CI (GitHub Actions sets CI=true), never on a Mac in use.
 [ -n "${CI:-}" ] || { echo "refusing to run outside CI: it deletes the shrink-your-shit data folder" >&2; exit 1; }
 
-rel=${1:?usage: smoke-test.sh <release-dir> <repo-root> <diag-dir>}
-root=${2:?usage: smoke-test.sh <release-dir> <repo-root> <diag-dir>}
-diag=${3:?usage: smoke-test.sh <release-dir> <repo-root> <diag-dir>}
+usage="usage: smoke-test.sh <release-a-dir> <repo-root> <diag-dir> <release-b-dir>"
+rel=${1:?$usage}
+root=${2:?$usage}
+diag=${3:?$usage}
+relb=${4:?$usage}
+version_a=0.0.0-ci-a
+version_b=0.0.0-ci-b
 work=$(mktemp -d)
 lib="$work/library"
 bin="$HOME/.local/bin/shrink-your-shit"
@@ -62,11 +69,11 @@ api() {
 # Runs install.sh with the given flags. Its output holds the sign-in link, so the saved copy is redacted
 # before it is shown.
 run_install() {
-  local name=$1
-  shift
+  local name=$1 release=$2
+  shift 2
   local out="$work/install-$name.log"
   local rc=0
-  SYP_BASE_URL="file://$rel" sh "$root/install.sh" "$@" >"$out" 2>&1 || rc=$?
+  SYP_BASE_URL="file://$release" sh "$root/install.sh" "$@" >"$out" 2>&1 || rc=$?
   # The saved copy is written redacted: no unredacted copy ever sits in the diagnostics folder.
   sed -E 's/token=[A-Za-z0-9_-]+/token=REDACTED/g' "$out" | tee "$diag/install-$name.log"
   echo "install ($name) exit $rc"
@@ -135,7 +142,7 @@ diag_dump() {
 step "1. install with the README's line (the repo's install.sh; the release comes from the local folder)"
 mkdir -p "$lib"
 owned_before=$(owned_paths)
-run_install first --library "$lib"
+run_install first "$rel" --library "$lib"
 
 step "2. the launchd agent and the page"
 if ! launchctl print "$label" >"$diag/launchctl.txt" 2>&1; then
@@ -150,6 +157,7 @@ load_token
 code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$base/api/v2/jobs" || true)
 echo "api /api/v2/jobs with token http $code"
 [ "$code" = 200 ] || fail "API did not answer 200 with the token (got $code)"
+api /api/v2/update | sh "$root/installer/macos/version-check.sh" "$version_a" || fail "release A is not the version running"
 
 step "3. convert one non-HEVC clip (ffmpeg came from Homebrew in step 1)"
 command -v ffmpeg >/dev/null || fail "ffmpeg not on PATH after install"
@@ -197,13 +205,14 @@ completed_before=$(completed_count)
 libs_before=$(printf '%s' "$(api /api/libraries)" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["items"]))')
 echo "completed jobs before upgrade: $completed_before, libraries: $libs_before"
 
-step "4. upgrade in place (run install.sh again, no flags): service back, data kept"
-run_install upgrade
+step "4. upgrade A -> B (run install.sh again with release B, no flags): the version changes, service back, data kept"
+run_install upgrade "$relb"
 code=$(curl -s -o /dev/null -w '%{http_code}' "$base/" || true)
 [ "$code" = 200 ] || fail "page did not answer 200 after upgrade (got $code)"
 launchctl print "$label" >"$diag/launchctl-after-upgrade.txt" 2>&1 || fail "agent not loaded after upgrade"
 grep -q 'state = running' "$diag/launchctl-after-upgrade.txt" || fail "agent not running after upgrade"
 load_token
+api /api/v2/update | sh "$root/installer/macos/version-check.sh" "$version_b" || fail "upgrade did not change the running version to B"
 completed_after=$(completed_count)
 libs_after=$(printf '%s' "$(api /api/libraries)" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["items"]))')
 echo "completed jobs after upgrade: $completed_after, libraries: $libs_after"
@@ -213,6 +222,35 @@ rc=0
 st=$(movie_status 2>"$work/movie-err.txt") || rc=$?
 [ "$rc" -eq 0 ] || fail "the job list did not answer after upgrade"
 [ "$st" = completed ] || fail "the converted movie is not completed after upgrade (state: $st)"
+
+step "4b. the Update screen on a Mac: it shows the install line to run, and the install button is refused"
+api /api/settings -X PATCH -H 'Content-Type: application/json' -d '{"checkForUpdates":true}' >/dev/null
+upd=$(api /api/v2/update)
+printf '%s' "$upd" | python3 -c '
+import json, sys
+u = json.load(sys.stdin)
+want = {"os": "darwin", "installType": "script", "method": "commands"}
+for k, v in want.items():
+    if u.get(k) != v:
+        sys.exit("update screen: " + k + " is " + repr(u.get(k)) + ", expected " + repr(v))
+if not any("install.sh | sh" in c for c in (u.get("commands") or [])):
+    sys.exit("update screen: no install line in commands: " + repr(u.get("commands")))
+if (u.get("install") or {}).get("state") != "idle":
+    sys.exit("update screen: install state is not idle: " + repr(u.get("install")))
+print("update screen: os darwin, method commands, install line shown, install idle")
+' || fail "the Update screen does not show the Mac install line"
+inst_body="$work/install-refusal.json"
+inst_code=$(curl -s -o "$inst_body" -w '%{http_code}' -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -X POST -d '{"when":"now"}' "$base/api/v2/update/install" || true)
+echo "POST /api/v2/update/install http $inst_code"
+[ "$inst_code" = 409 ] || fail "install on a Mac should be refused with 409 (got $inst_code)"
+python3 -c '
+import json, sys
+code = json.load(open(sys.argv[1]))["error"]["code"]
+if code != "install_unsupported":
+    sys.exit("refused with " + code + ", expected install_unsupported")
+' "$inst_body" || fail "install refusal is not install_unsupported"
+echo "install refused: install_unsupported"
 
 step "5. uninstall: remove what install.sh created, then check nothing of it is left"
 owned_installed=$(owned_paths)

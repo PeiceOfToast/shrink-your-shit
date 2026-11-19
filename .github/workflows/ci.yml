@@ -281,10 +281,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: web/.nvmrc
-      - name: Build the release folder (the same archives and checksums.txt a release has)
-        run: sh scripts/build-release.sh 0.0.0-ci
-      - name: Install as the README does, convert a clip, upgrade, uninstall
-        run: bash installer/macos/smoke-test.sh "$PWD/dist" "$PWD" "$RUNNER_TEMP/diag"
+      - name: Build releases A and B (the same archives and checksums.txt a release has; B is the upgrade)
+        run: |
+          sh scripts/build-release.sh 0.0.0-ci-a
+          mv dist "$RUNNER_TEMP/release-a"
+          sh scripts/build-release.sh 0.0.0-ci-b
+          mv dist "$RUNNER_TEMP/release-b"
+      - name: Install A as the README does, convert a clip, upgrade to B, check the Update screen, uninstall
+        run: bash installer/macos/smoke-test.sh "$RUNNER_TEMP/release-a" "$PWD" "$RUNNER_TEMP/diag" "$RUNNER_TEMP/release-b"
       - name: Keep the installer's logs when something went wrong
         if: always()
         uses: actions/upload-artifact@v4
