@@ -235,3 +235,19 @@ func legacyVBRKbps(level, f string, w, h, sourceKbps, limit int) (target, max in
 // VBRFormat reports whether format f can be made with VBR and a peak limit: not AV1 (SVT-AV1 takes a
 // peak limit only with CRF: "Max Bitrate only supported with CRF mode").
 func VBRFormat(f string) bool { return f != "av1" }
+
+// PeakLimitBinds says whether the person's VBR max set the file's bitrate, not the level's figure (review
+// a772397 item 1): with no average (quality mode) the peak is the limit, and with one it binds when the
+// average was cut down to the limit.
+func (v VideoEncode) PeakLimitBinds() bool {
+	if v.PeakLimitKbps <= 0 {
+		return false
+	}
+	return v.TargetKbps == 0 || v.TargetKbps >= v.PeakLimitKbps
+}
+
+// AverageIsMax says the limit binds and the average is the max too, so the file is at the max throughout
+// (review a772397 item 3): the run log says so.
+func (v VideoEncode) AverageIsMax() bool {
+	return v.PeakLimitBinds() && v.TargetKbps == v.MaxRateKbps
+}

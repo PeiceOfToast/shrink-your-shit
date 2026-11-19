@@ -948,6 +948,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			w.jobf(job.ID, ": %s", note)
 		}
 	}
+	if note := vbrAverageNote(plan.Video); note != "" {
+		w.jobf(job.ID, ": %s", note)
+	}
 	setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWordsUsed(plan, gpu),
 		Decoder: decoderWords(src), Progress: media.Progress{ETASeconds: -1}})
 	defer dropLive(job.ID)
@@ -1060,7 +1063,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		if errors.As(err, &k) && plan.Video.PeakLimitKbps > 0 && strings.HasPrefix(k.Reason, pictureTooDifferent) {
 			// design (SCREENS V3 step 3): VBR's own words; the measured similarity goes to the run log
 			w.jobf(job.ID, ": %s", k.Reason)
-			k.Reason = "Kept the original: under a " + rules.Mbps(plan.Video.PeakLimitKbps) + " Mbps max bitrate the picture would suffer."
+			k.Reason = keptVBRWords(plan.Video)
 		}
 		if errors.As(err, &k) {
 			w.recordCheckFailure(job.ID, checkStart, k, args, src)
@@ -1558,6 +1561,24 @@ func renameRetry(ctx context.Context, rename func(a, b string) error, a, b strin
 		}
 	}
 	return err
+}
+
+// keptVBRWords is the kept-original reason for a VBR file whose picture was too different (review a772397
+// item 1): it names the max that actually set the file's bitrate, the person's limit or the level's figure.
+func keptVBRWords(v rules.VideoEncode) string {
+	if v.PeakLimitBinds() {
+		return "Kept the original: under a " + rules.Mbps(v.PeakLimitKbps) + " Mbps max bitrate the picture would suffer."
+	}
+	return "Kept the original: at a " + rules.Mbps(v.MaxRateKbps) + " Mbps max bitrate the picture would suffer."
+}
+
+// vbrAverageNote is the run-log line for a file held at its max all the way through (review a772397 item 3):
+// "" unless the average and the max are the same.
+func vbrAverageNote(v rules.VideoEncode) string {
+	if !v.AverageIsMax() {
+		return ""
+	}
+	return "Average and max bitrate are both " + rules.Mbps(v.TargetKbps) + " Mbps, so the file runs at the max throughout."
 }
 
 // keepsOriginal is whether the plan leaves the original where it is (beside, or another folder, S6).
