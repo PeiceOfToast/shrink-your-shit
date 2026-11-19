@@ -49,6 +49,9 @@ type Settings struct {
 	// person turns it on (nil is off): the page promises nothing is sent anywhere unless they turn it on.
 	// syp-manager 11-19 02:50Z, for the user until morning.
 	CheckForUpdates *bool `json:"checkForUpdates"`
+	// BackupKeep is how many automatic backups (before an update or a migration) are kept, 1 to 50; manual
+	// ones stay until deleted (UI-API-CONTRACT-v2.md "Backup").
+	BackupKeep int `json:"backupKeep"`
 }
 
 // UpdateChecks is whether the app may ask GitHub for a newer release: only once the person turned it on.
@@ -71,7 +74,7 @@ const settingsKey = "settings"
 func defaultSettings() Settings {
 	off := false
 	return Settings{OldControlLevel: "basic", FirstRunStep: 1, KeepOriginalsDays: 7, LogKeepDays: 30, ParallelJobs: 1,
-		LowPriority: true, ScanSchedule: "02:00", QueueOrder: "newest", Languages: []string{}, CheckForUpdates: &off}
+		LowPriority: true, ScanSchedule: "02:00", QueueOrder: "newest", Languages: []string{}, CheckForUpdates: &off, BackupKeep: 10}
 }
 
 var hhmm = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
@@ -89,6 +92,8 @@ func (s Settings) problem() (code, msg string) {
 		return "invalid_setting", "Enter a whole number of days, from 0 to 365."
 	case !oneOf(fmt.Sprint(s.LogKeepDays), "0", "7", "30", "90"):
 		return "invalid_setting", "logKeepDays is 7, 30 or 90 days, or 0 to keep logs forever."
+	case s.BackupKeep < 1 || s.BackupKeep > 50:
+		return "invalid_setting", "Enter a whole number of backups to keep, from 1 to 50."
 	case s.ParallelJobs < 1 || s.ParallelJobs > 8:
 		return "invalid_setting", "Enter a whole number from 1 to 8."
 	case (s.QuietHours.From == "") != (s.QuietHours.To == ""):

@@ -63,6 +63,7 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 		svc = integrations.New(store, integrations.Options{})
 	}
 	v2Integrations(api, svc)
+	v2Backups(api, store, ss) // item 5: /api/v2/backups
 	// For health checks: answers without signing in and says nothing else.
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")

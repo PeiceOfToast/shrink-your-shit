@@ -346,10 +346,6 @@ func activityRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, no
 			}
 		}
 	})
-
-	api.HandleFunc("POST /api/system/backup", func(w http.ResponseWriter, r *http.Request) {
-		apiError(w, http.StatusNotImplemented, "not_available", "Backups come in a later update. Nothing was downloaded.")
-	})
 }
 
 // stopWait is how long "Stop this file" waits for the running conversion to end before it answers

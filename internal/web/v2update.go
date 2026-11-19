@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/update"
 )
 
@@ -274,7 +275,11 @@ func (u *updater) whenIdle(version string, resume bool, stop chan struct{}) {
 		u.state, u.err, u.claimed, u.stop = "failed", err.Error(), false, nil
 		u.mu.Unlock()
 	}
-	backup, err := u.ss.store.Backup()
+	if _, err := u.ss.store.WriteBackup(jobs.ReasonBeforeUpdate); err != nil { // the copy people can see and restore
+		fail(errors.New("could not back up the database: " + err.Error()))
+		return
+	}
+	backup, err := u.ss.store.Backup() // the file copy a rollback puts back
 	if err != nil {
 		fail(errors.New("could not back up the database: " + err.Error()))
 		return
