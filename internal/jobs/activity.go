@@ -140,33 +140,48 @@ FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id WHERE j.status IN (?,?) A
 	return out, total, rows.Err()
 }
 
-// IsOwnOutput reports whether the file at path, with this size and modification time, is the file a
-// done conversion wrote. The scanner never converts it again: with a new file type, a folder for the new
-// files or a bitrate or size cap, it is not "already in this format", and each pass converted it again,
-// a generation worse each time (dev-qa, #109 QA). Kept in the jobs table, so it holds after a restart;
-// a different file put at that path later (another size or time) is looked at as usual.
+// IsOwnOutput reports whether the file at path, with this size, is the file a done conversion wrote. The
+// scanner never converts it again: with a new file type, a folder for the new files or a bitrate or size cap,
+// it is not "already in this format", and each pass converted it again, a generation worse each time
+// (dev-qa, #109 QA). Kept in the jobs table, so it holds after a restart; a different size at that path
+// later is looked at as usual. The time is not part of it: a copy back or a sync tool that only touches the
+// same bytes leaves the file ours, so it is not converted again and its record keeps the original's size.
 //
 // A job done without its output's time (0: before migration 7 recorded it, which filled it in only from
 // a file record of that size, never for a replace at the same name; or the output not readable then)
-// owns the file there of the size it wrote, and that time is recorded now, at its first look: an
-// upgrading install doesn't convert its old outputs once more (review fd13e2e). Done here rather than in
-// a start-up pass, which would stat every old output, and hang on (or miss) a library that is offline.
+// has that time recorded now, at its first look: an upgrading install doesn't convert its old outputs once
+// more (review fd13e2e). Done here rather than in a start-up pass, which would stat every old output, and
+// hang on (or miss) a library that is offline.
 func (s *Store) IsOwnOutput(path string, size, mtime int64) (bool, error) {
-	var yes bool
-	// any status: only Complete sets output_path, and a done job converted again (queued, running, or
-	// failed meanwhile) still owns its earlier output (Convert again, design 11:45Z)
-	err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM jobs WHERE output_path=? AND size_after=? AND output_mtime=? AND output_mtime<>0)`,
-		path, size, mtime).Scan(&yes)
-	if err != nil || yes {
-		return yes, err
-	}
-	r, err := s.db.Exec(`UPDATE jobs SET output_mtime=? WHERE id=(SELECT id FROM jobs WHERE output_path=? AND status='done' AND size_after=? AND output_mtime=0
-  ORDER BY id DESC LIMIT 1)`, mtime, path, size)
-	if err != nil {
+	if err := s.recordOutputTime(path, size, mtime); err != nil {
 		return false, err
 	}
-	n, _ := r.RowsAffected()
-	return n == 1, nil
+	// any status: only Complete sets output_path, and a done job converted again (queued, running, or
+	// failed meanwhile) still owns its earlier output (Convert again, design 11:45Z)
+	var yes bool
+	err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM jobs WHERE output_path=? AND size_after=?)`, path, size).Scan(&yes)
+	return yes, err
+}
+
+// IsOwnOutputExact is the worker's test before it removes or overwrites a file at an output name: the path, the
+// size and the time must all be the ones a done job recorded. A file we did not write there is never ours, even at
+// the same size (#400: a size-only match would delete the person's own file).
+func (s *Store) IsOwnOutputExact(path string, size, mtime int64) (bool, error) {
+	if err := s.recordOutputTime(path, size, mtime); err != nil {
+		return false, err
+	}
+	var yes bool
+	err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM jobs WHERE output_path=? AND size_after=? AND output_mtime=? AND output_mtime<>0)`,
+		path, size, mtime).Scan(&yes)
+	return yes, err
+}
+
+// recordOutputTime fills in the time of the newest done job at path with this size, when it has none yet
+// (see IsOwnOutput).
+func (s *Store) recordOutputTime(path string, size, mtime int64) error {
+	_, err := s.db.Exec(`UPDATE jobs SET output_mtime=? WHERE id=(SELECT id FROM jobs WHERE output_path=? AND status='done' AND size_after=? AND output_mtime=0
+  ORDER BY id DESC LIMIT 1)`, mtime, path, size)
+	return err
 }
 
 // convertedSQL is true for a files row that is the output of a done conversion: the scanner skips it

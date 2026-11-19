@@ -665,10 +665,13 @@ func TestOldDoneJobsOwnTheirOutputs(t *testing.T) {
 	if open, _ := st.HasOpenJob(filepath.Join(lib, "changed.mkv")); !open {
 		t.Error("the file replaced by hand was not looked at")
 	}
-	// its time is now known: a later change of the file (same size, new time) is looked at again
+	// its time is now known; a touch (same size, another time) leaves it ours, and a change of size is looked at
 	fi, _ := os.Stat(filepath.Join(lib, "old.mkv"))
-	if own, _ := st.IsOwnOutput(filepath.Join(lib, "old.mkv"), 5, fi.ModTime().UnixNano()+1); own {
-		t.Error("after the first look, another time still counts as ours")
+	if own, _ := st.IsOwnOutput(filepath.Join(lib, "old.mkv"), 5, fi.ModTime().UnixNano()+1); !own {
+		t.Error("after the first look, a touch (same size, another time) is no longer ours")
+	}
+	if own, _ := st.IsOwnOutput(filepath.Join(lib, "old.mkv"), 6, fi.ModTime().UnixNano()); own {
+		t.Error("a different size at the output's path is still counted as ours")
 	}
 }
 

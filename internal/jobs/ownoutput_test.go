@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-// IsOwnOutput: the file a done job wrote, as it wrote it; a different file at that path later (another
-// size or time), a job not done, or an unknown time (0) is not ours.
+// IsOwnOutput: the file a done job wrote, at its size; a different size at that path later, or a job not
+// done, is not ours. A touched file (same size, another time) is still ours.
 func TestIsOwnOutput(t *testing.T) {
 	s := open(t)
 	dir := t.TempDir()
@@ -32,7 +32,7 @@ func TestIsOwnOutput(t *testing.T) {
 	if own, _ := s.IsOwnOutput(out, fi.Size()+1, fi.ModTime().UnixNano()); own {
 		t.Error("another size is ours")
 	}
-	if own, _ := s.IsOwnOutput(out, fi.Size(), fi.ModTime().UnixNano()+1); own {
-		t.Error("another time is ours")
+	if own, _ := s.IsOwnOutput(out, fi.Size(), fi.ModTime().UnixNano()+1); !own {
+		t.Error("a touched output (same size, another time) is not ours")
 	}
 }
