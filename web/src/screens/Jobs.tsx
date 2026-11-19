@@ -249,9 +249,19 @@ function WhyFailed({ id, msg, code, worker, f, found = [] }: { id: string; msg: 
     </section>);
 }
 
-// G6: copy the whole log, not just the search hits; over about 1 MB it is too long for the clipboard
-const copyLogText = (t: string, say: (s: string) => void) => t.length > 1_000_000 ? say("Too long to copy; use Download.")
-  : navigator.clipboard ? navigator.clipboard.writeText(t).then(() => say("Log copied."), () => say("Couldn't copy; use Download.")) : say("Couldn't copy; use Download.");
+// G6: copy the whole log, not just the search hits (spec: "Copy the whole log"); over about 1 MB it is too long for
+// the clipboard. Plain http (http://IP:8484) has no clipboard API, so as in Workers the text is selected in a
+// textarea and copied the old way.
+const copyLogText = async (t: string, say: (s: string) => void) => {
+  if (t.length > 1_000_000) return say("Too long to copy; use Download.");
+  let ok = false;
+  try { if (navigator.clipboard) { await navigator.clipboard.writeText(t); ok = true; } } catch { /* refused: fall back */ }
+  if (!ok) {
+    const a = document.createElement("textarea"); a.value = t; a.readOnly = true; a.style.position = "fixed"; a.style.opacity = "0";
+    document.body.appendChild(a); a.select(); try { ok = document.execCommand("copy"); } catch { ok = false; } a.remove();
+  }
+  say(ok ? "Log copied." : "Couldn't copy; use Download.");
+};
 // count of q in a step's searchable text (case-insensitive)
 const matches = (st: { name: string; command: string | null; output: string | string[]; result: string | null; found?: string[] }, q: string) => [st.name, st.command ?? "", text(st.output), (st.found ?? []).join("\n"), st.result ?? ""].join("\n").toLowerCase().split(q.toLowerCase()).length - 1;
 // E: a finished job's log by step (GET /log), SCREENS V6b: each step a row that opens; the failed step open; inside a step
@@ -284,7 +294,7 @@ function StepLog({ d, id, worker, failedIdx, kept }: { d: { loaded: boolean; dat
         {!MOCK && <a className="btn sm" href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}><Icon id="i-download" />Download the full log</a>}
         {q && <span className="sm muted" role="status">{(() => { const ns = l.steps.map((st) => matches(st, q)), t = ns.reduce((x, y) => x + y, 0), k = ns.filter((x) => x > 0).length; return t ? t + " matches in " + k + " step" + (k > 1 ? "s" : "") : "No match"; })()}</span>}
       </div>
-      <p className="sm muted" role="status" style={copied ? { margin: "0 0 6px" } : { display: "contents" }}>{copied}</p>
+      <p className="sm muted" role="status" style={{ margin: copied ? "0 0 6px" : 0 }}>{copied}</p>
       {l.steps.map((st, i) => {
         const hit = q ? matches(st, q) : 0;
         const pr = st.probe as Probe | null, v = pr?.streams?.find((x) => x.type === "video"), n = (t: string) => (pr?.streams ?? []).filter((x) => x.type === t).length;
@@ -335,7 +345,7 @@ function JobLog({ id, name }: { id: string; name: string }) {
         <button className="btn sm ghost" type="button" disabled={!text} onClick={copyLog}><Icon id="i-copy" />Copy log</button>
         <button className="btn sm ghost" type="button" disabled={!text} onClick={download}><Icon id="i-download" />{q ? "Download the whole log" : "Download"}</button>
       </div>
-      <p className="sm muted" role="status" style={copied ? { margin: "0 0 6px" } : { display: "contents" }}>{copied}</p>
+      <p className="sm muted" role="status" style={{ margin: copied ? "0 0 6px" : 0 }}>{copied}</p>
       <pre className="joblog" ref={box} tabIndex={0} aria-label="Log" aria-live="off">{shown || (text ? "No line matches." : done ? "The log is empty." : gone ? "The log can't be shown." : "Waiting for the log...")}</pre>
       <p className="sm muted">{done ? "The log is complete." : gone ? "The server didn't send it. Close and open this file again to retry." : "Live: new lines appear as they are written."}</p>
     </section>
