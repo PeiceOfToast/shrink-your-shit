@@ -22,7 +22,7 @@ const EVENTS: { key: keyof NotifyEvents; label: string; hint?: string; short: st
 const DEFAULT_EVENTS: NotifyEvents = { jobFailed: true, needsYou: true, fileFinished: false, batchFinished: true, workerOffline: true, encoderFellBack: false };
 const MODES: { v: NotifySummaryMode; label: string }[] = [
   { v: "off", label: "Off" },
-  { v: "drained", label: "When the queue is empty (at most once an hour)" },
+  { v: "drained", label: "When the queue is empty" },
   { v: "daily", label: "Every day" },
   { v: "weekly", label: "Every Monday" },
 ];
@@ -183,7 +183,7 @@ function SummaryCard({ s, reload, said }: { s: NotifySummary; reload: () => void
       <div className="row" style={{ alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
         <div className="field" style={{ flex: "1 1 280px", minWidth: 0 }}>
           <label htmlFor="n-sum">Send the summary</label>
-          <select id="n-sum" className="input" value={mode} onChange={(e) => setMode(e.target.value as NotifySummaryMode)}>
+          <select id="n-sum" className="input sumsel" value={mode} onChange={(e) => setMode(e.target.value as NotifySummaryMode)}>
             {MODES.map((m) => <option key={m.v} value={m.v}>{m.label}</option>)}
           </select>
         </div>
@@ -194,7 +194,7 @@ function SummaryCard({ s, reload, said }: { s: NotifySummary; reload: () => void
           </div>)}
         <button className="btn" type="submit" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
       </div>
-      <p className="hint" style={{ margin: 0 }}>It goes to the places with "The summary" on.</p>
+      <p className="hint" style={{ margin: 0 }}>It goes to the places with "The summary" on{mode === "drained" ? ", at most once an hour" : ""}.</p>
       <p className="hint" style={{ margin: 0 }}>Example: "Shrink Your Shit: 42 files done, 3.1 GB freed, 2 failed, 1 needs you."</p>
       {error && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{error}</span></p>}
     </form>);
