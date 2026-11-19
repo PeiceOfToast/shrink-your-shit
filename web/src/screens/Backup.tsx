@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { FileName } from "../FileName";
 import { Icon } from "../Icon";
-import { PageHead } from "../PageHead";
+import { LoadFailed, PageHead } from "../PageHead";
 import { failed } from "../api";
 import { applyBackup, createBackup, deleteBackup, downloadUrl, listBackups, previewBackup } from "../backupApi";
 import { bytes, clock, count, plural } from "../format";
@@ -122,7 +122,7 @@ export function BackupSettings() {
       <div role="alert">{error && <p className="st bad" style={{ margin: 0 }}><Icon id="i-alert" /><span>{error}</span></p>}</div>
       {pending && <Preview key={pending.preview.previewId} p={pending} onCancel={() => setPending(null)} />}
       {notHere ? <p className="muted">This server can't make backups yet.</p>
-        : d.error && !d.data ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{d.error.message}</span></p>
+        : d.error && !d.data ? <LoadFailed error={d.error} reload={d.reload} />
           : !d.data ? <div className="empty">Loading…</div>
             : <>
               <section className="card" aria-labelledby="bk-h">

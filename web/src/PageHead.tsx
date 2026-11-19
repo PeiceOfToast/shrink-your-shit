@@ -38,3 +38,9 @@ export function PageHead({ icon, title, help, crumbs, after, children }: { icon?
 export function Empty({ icon, text, children }: { icon: string; text: ReactNode; children?: ReactNode }) {
   return <div className="empty1"><Icon id={icon} /><p>{text}</p>{children}</div>;
 }
+
+// A first load that failed (pass 6 PR A): the Empty layout, what happened and one action. Shown only while there is no data;
+// a failed refresh over data keeps the data and a red line above it instead.
+export function LoadFailed({ error, reload }: { error?: { message: string }; reload: () => unknown }) {
+  return <div className="empty1" role="alert"><Icon id="i-alert" /><p>Couldn't load this. {error?.message}</p><button className="btn primary" type="button" onClick={() => reload()}>Try again</button></div>;
+}
