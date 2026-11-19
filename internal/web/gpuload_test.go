@@ -14,13 +14,7 @@ import (
 
 // A slow reading must not hold the cache's lock: a caller with a fresh cache gets it at once.
 func TestGPUSlowReadDoesNotHoldTheCache(t *testing.T) {
-	saved := readNvidiaSMI
-	t.Cleanup(func() {
-		readNvidiaSMI = saved
-		gpuUse.mu.Lock()
-		gpuUse.ok, gpuUse.val = false, nil
-		gpuUse.mu.Unlock()
-	})
+	resetGPU(t) // an earlier test's overview call may have cached a reading moments ago
 	ten := 10.0
 	t0 := time.Now()
 	readNvidiaSMI = func() *float64 { return &ten }
