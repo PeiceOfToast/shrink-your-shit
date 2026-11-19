@@ -201,6 +201,17 @@ func v2Backups(api *http.ServeMux, store *jobs.Store, ss *settingsStore) {
 			jobsRunning(w)
 			return
 		}
+		// The restore and the safety backup both need room beside the database, so the room is checked before
+		// either is written. Refused with nothing changed; a free space that is not known (nil) does not refuse.
+		need, dir, err := store.RestoreNeed(p.path)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		if free := freeBytes(dir); free != nil && *free < uint64(need) {
+			apiError(w, http.StatusInsufficientStorage, "not_enough_space", "There isn't enough free disk space to restore this backup (needs about "+humanSize(need)+", "+humanSize(int64(*free))+" free). Nothing was changed.")
+			return
+		}
 		safety, err := store.WriteBackup(jobs.ReasonBeforeImport)
 		if err != nil {
 			serverError(w, err)

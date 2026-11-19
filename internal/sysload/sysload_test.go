@@ -22,7 +22,7 @@ func TestMeter(t *testing.T) {
 	if first.CPUPercent != nil || first.MemTotalBytes == nil || *first.MemTotalBytes == 0 || *first.MemUsedBytes > *first.MemTotalBytes {
 		t.Fatalf("first %+v", first)
 	}
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(minInterval + 50*time.Millisecond) // the next figure needs a gap longer than a short sample
 	next := m.Sample()
 	if next.CPUPercent == nil || *next.CPUPercent < 0 || *next.CPUPercent > 100 {
 		t.Errorf("next cpu %v", next.CPUPercent)
@@ -44,5 +44,33 @@ func TestClamp(t *testing.T) {
 	}
 	if Clamp(nil) != nil {
 		t.Error("nil stays nil")
+	}
+}
+
+// ui-shop QA (P3): two polls a few ms apart (the meter is shared) see about one tick of processor time, all of it
+// busy by the arithmetic, and read 100% on an idle box. A short interval is not measured: it returns the last figure
+// and leaves the baseline where it was, so the next long-enough interval still measures from the old baseline.
+func TestMeterShortIntervalIsNotMeasured(t *testing.T) {
+	var at time.Time
+	var idle, total uint64
+	oldClock, oldRead := clock, readCPU
+	clock = func() time.Time { return at }
+	readCPU = func() (uint64, uint64, bool) { return idle, total, true }
+	t.Cleanup(func() { clock, readCPU = oldClock, oldRead })
+
+	var m Meter
+	t0 := time.Unix(1000, 0)
+	at, idle, total = t0, 1000, 1000
+	m.Sample()                                               // the baseline
+	at, idle, total = t0.Add(5*time.Millisecond), 1000, 1001 // one tick, and none of it idle
+	if l := m.Sample(); l.CPUPercent != nil {
+		t.Errorf("a 5 ms sample reported %v%%; want not measured", *l.CPUPercent)
+	}
+	at, idle, total = t0.Add(8*time.Millisecond), 1000, 1000 // no tick since the baseline: it must not become the baseline
+	m.Sample()
+	at, idle, total = t0.Add(505*time.Millisecond), 1900, 2000 // 1000 ticks, 900 idle, from the first baseline
+	l := m.Sample()
+	if l.CPUPercent == nil || math.Abs(*l.CPUPercent-10) > 0.01 {
+		t.Errorf("cpu %v after a long interval; want 10 measured from the first baseline", l.CPUPercent)
 	}
 }

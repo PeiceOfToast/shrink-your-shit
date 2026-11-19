@@ -379,3 +379,40 @@ func TestStageBackupRefusesOverTheLimit(t *testing.T) {
 	}
 	os.Remove(staged)
 }
+
+// The decompressed cap is MaxRestoreBytes, not a multiple of the upload cap: a backup the app wrote itself, a few MiB
+// of decompressed JSON, restores under the new cap. The old cap here was 4 × MaxBackupBytes = 4 MiB.
+func TestRestoreAcceptsADecompressedSizeOverTheOldCapUnderTheNewOne(t *testing.T) {
+	s := restoreTestStore(t)
+	oldUpload, oldRestore := MaxBackupBytes, MaxRestoreBytes
+	MaxBackupBytes, MaxRestoreBytes = 1<<20, 16<<20
+	t.Cleanup(func() { MaxBackupBytes, MaxRestoreBytes = oldUpload, oldRestore })
+	path := probeBackup(t, s, 6<<20)
+	if _, err := s.PreviewBackup(path); err != nil {
+		t.Fatalf("preview of a 6 MiB backup under the new cap: %v", err)
+	}
+	if _, err := s.RestoreBackup(path); err != nil {
+		t.Fatalf("restore of a 6 MiB backup under the new cap: %v", err)
+	}
+}
+
+// Over MaxRestoreBytes the backup is refused whole, and a refused restore changes nothing.
+func TestRestoreRefusesADecompressedSizeOverTheNewCap(t *testing.T) {
+	s := restoreTestStore(t)
+	restoreExec(t, s, `INSERT INTO app_meta(key,value) VALUES('probe','before')`)
+	oldUpload, oldRestore := MaxBackupBytes, MaxRestoreBytes
+	MaxBackupBytes, MaxRestoreBytes = 1<<20, 4<<20
+	t.Cleanup(func() { MaxBackupBytes, MaxRestoreBytes = oldUpload, oldRestore })
+	path := probeBackup(t, s, 6<<20)
+	if _, err := s.PreviewBackup(path); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("preview over the new cap: %v, want ErrTooLarge", err)
+	}
+	if _, err := s.RestoreBackup(path); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("restore over the new cap: %v, want ErrTooLarge", err)
+	}
+	var probe string
+	s.db.QueryRow(`SELECT value FROM app_meta WHERE key='probe'`).Scan(&probe)
+	if probe != "before" {
+		t.Errorf("a refused restore changed the data: probe = %q", probe)
+	}
+}
