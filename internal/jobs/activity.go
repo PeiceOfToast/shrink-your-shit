@@ -176,6 +176,16 @@ func (s *Store) IsOwnOutputExact(path string, size, mtime int64) (bool, error) {
 	return yes, err
 }
 
+// OutputOwner is the newest job whose output is path, and its id (ok false when none did). Any status: a done job
+// converted again (queued, running) still owns its earlier output (as IsOwnOutput says).
+func (s *Store) OutputOwner(path string) (id int64, ok bool, err error) {
+	err = s.db.QueryRow(`SELECT id FROM jobs WHERE output_path=? ORDER BY id DESC LIMIT 1`, path).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	return id, err == nil, err
+}
+
 // recordOutputTime fills in the time of the newest done job at path with this size, when it has none yet
 // (see IsOwnOutput).
 func (s *Store) recordOutputTime(path string, size, mtime int64) error {

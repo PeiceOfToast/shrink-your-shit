@@ -6,7 +6,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -89,19 +88,24 @@ func TestRealNextToLibrary(t *testing.T) {
 		t.Fatalf("our earlier output should be replaced: %s %s (sizes %d, %v)", j.Status, j.Error, first.Size(), second)
 	}
 
-	// a file there we didn't make: never replaced, the job fails in design's words
+	// a file at our recorded output path that is not our output any more: moved to the trash, not lost (decision A)
 	os.WriteFile(out, []byte("someone else's file"), 0o644)
 	writeSource("2")
 	if n := scan(); n != 1 {
 		t.Fatalf("changed again: %d queued", n)
 	}
 	w.run(t)
-	j := last()
-	want := "A file named Movie.mkv is already in " + filepath.Dir(out) + " and wasn't made by Shrink Your Shit. Nothing was changed. Move or rename it, then press Retry."
-	if j.Status != jobs.Failed || !strings.Contains(j.Error, want) {
-		t.Errorf("a file we didn't make: %s %q", j.Status, j.Error)
+	if j := last(); j.Status != jobs.Done {
+		t.Errorf("changed output at our path: %s %q", j.Status, j.Error)
 	}
-	if b, _ := os.ReadFile(out); string(b) != "someone else's file" {
-		t.Error("the file we didn't make was replaced")
+	if b, _ := os.ReadFile(out); string(b) == "someone else's file" {
+		t.Error("the changed output was not replaced by the new file")
+	}
+	kept, _ := filepath.Glob(filepath.Join(filepath.Dir(out), TrashDir, "*"))
+	if len(kept) != 1 {
+		t.Fatalf("trash %v, want the changed file kept once", kept)
+	}
+	if b, _ := os.ReadFile(kept[0]); string(b) != "someone else's file" {
+		t.Errorf("the trash holds %q, want the changed file", b)
 	}
 }
