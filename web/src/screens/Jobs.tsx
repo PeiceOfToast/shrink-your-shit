@@ -28,7 +28,7 @@ const ICON: Partial<Record<JobState, string>> = { completed: "i-check-c", failed
 // V5b: a waiting file whose library is paused (subState library_disabled) reads "Library paused" (design SCREENS V5);
 // it has no place in the queue, so its '#' is '–'.
 type PillJob = { state: JobState; retryAt?: string | null; subState?: string | null; reason?: { code: string } | null; warning?: string | null };
-// steps that warn without failing the job: the processor fallback (#323) and a Sonarr/Radarr that wasn't told (#333)
+// steps that warn without failing the job: the processor fallback (#323) and a media app (Sonarr, Radarr, Plex, Jellyfin) that wasn't told (#333)
 const SOFT = ["encoder_fallback", "media_refresh"];
 // the top note, one line per warning: the server's warning names only the first (#333), so the steps give the rest
 const warnLines = (j: JobDetail) => {

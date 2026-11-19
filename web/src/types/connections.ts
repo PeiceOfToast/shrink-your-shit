@@ -1,5 +1,5 @@
-// Sonarr / Radarr connections (UI-API-CONTRACT-v2.md "Sonarr / Radarr", workshop 11-19 02:44Z).
-export type IntegrationKind = "sonarr" | "radarr";
+// Media app connections (UI-API-CONTRACT-v2.md "Sonarr / Radarr", workshop 11-19 02:44Z; "Plex / Jellyfin", 07:42Z: same shape).
+export type IntegrationKind = "sonarr" | "radarr" | "plex" | "jellyfin";
 export interface PathMapping { theirPath: string; ourPath: string }
 export interface Integration {
   id: string; kind: IntegrationKind; name: string;
