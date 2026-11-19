@@ -589,7 +589,14 @@ func testSMB(address, username, password string, guest bool) map[string]any {
 	if err != nil {
 		return smbError(err, server, shareName)
 	}
-	var folders []string
+	folders, more := firstFolders(entries)
+	return map[string]any{"ok": true, "address": address, "folders": folders, "moreFolders": more, "portOnly": false}
+}
+
+// firstFolders returns up to three folder names and how many more there are. A share with no folders gives an
+// empty list, never nil: nil becomes JSON null, and the Shares page expects a list.
+func firstFolders(entries []os.FileInfo) ([]string, int) {
+	folders := []string{}
 	more := 0
 	for _, e := range entries {
 		if e.IsDir() && len(folders) < 3 {
@@ -598,7 +605,7 @@ func testSMB(address, username, password string, guest bool) map[string]any {
 			more++
 		}
 	}
-	return map[string]any{"ok": true, "address": address, "folders": folders, "moreFolders": more, "portOnly": false}
+	return folders, more
 }
 
 // smbPort and nfsPort are the ports the Test button tries. Tests point them at a port known to be closed:

@@ -1295,3 +1295,39 @@ func TestNFSRuleHostsMatchHelperTable(t *testing.T) {
 		}
 	}
 }
+
+// A share with no folders must send "folders":[] (not null): null blanked the Shares page after a successful Test.
+func TestShareTestFoldersIsAListWhenEmpty(t *testing.T) {
+	read := func(dir string) []os.FileInfo {
+		f, err := os.Open(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		infos, err := f.Readdir(-1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return infos
+	}
+	empty := t.TempDir()
+	if err := os.WriteFile(filepath.Join(empty, "a.mkv"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, entries := range [][]os.FileInfo{nil, read(empty)} {
+		folders, more := firstFolders(entries)
+		b, _ := json.Marshal(map[string]any{"folders": folders, "moreFolders": more})
+		if string(b) != `{"folders":[],"moreFolders":0}` {
+			t.Fatalf("got %s", b)
+		}
+	}
+	full := t.TempDir()
+	for _, n := range []string{"a", "b", "c", "d", "e"} {
+		if err := os.Mkdir(filepath.Join(full, n), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if folders, more := firstFolders(read(full)); len(folders) != 3 || more != 2 {
+		t.Fatalf("got %v and %d more, want 3 and 2 more", folders, more)
+	}
+}
