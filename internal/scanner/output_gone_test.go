@@ -11,10 +11,10 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 )
 
-// A converted file whose original was kept in the trash is deleted from the library: once a scan finds it
-// gone, the overview must stop counting it in bytesNow and waitingToFree (the trash's original is not in the
-// library either, and its saving is no longer waiting for anything that is still there).
-func TestDeletedConvertedFileLeavesTheOverview(t *testing.T) {
+// keptConversion is a converted file whose original (5 bytes) is kept in the trash and whose new 2-byte file sits
+// at the library path: its saving (3) is waiting in the trash. It returns the library and the converted file's path.
+func keptConversion(t *testing.T) (*Scanner, *jobs.Store, jobs.Library, string) {
+	t.Helper()
 	s, st, lib, _ := setup(t, h264Big)
 	if n := settle(s); n != 1 {
 		t.Fatalf("queued %d, want 1", n)
@@ -26,7 +26,6 @@ func TestDeletedConvertedFileLeavesTheOverview(t *testing.T) {
 	l := libs[0]
 	a := filepath.Join(lib, "a.mkv")
 
-	// The conversion: the original (5 bytes) goes to the trash, the 2-byte new file takes its place.
 	id, err := st.Claim("w")
 	if err != nil {
 		t.Fatal(err)
@@ -49,6 +48,14 @@ func TestDeletedConvertedFileLeavesTheOverview(t *testing.T) {
 	if got := before.Counts[l.ID].WaitingBytes; got != 3 {
 		t.Fatalf("waiting before the delete %d, want 3 (5 - 2)", got)
 	}
+	return s, st, l, a
+}
+
+// A converted file whose original was kept in the trash is deleted from the library: once a scan finds it
+// gone, the overview must stop counting it in bytesNow and waitingToFree (the trash's original is not in the
+// library either, and its saving is no longer waiting for anything that is still there).
+func TestDeletedConvertedFileLeavesTheOverview(t *testing.T) {
+	s, st, l, a := keptConversion(t)
 
 	// The person deletes the converted file; the next scan finds it gone.
 	if err := os.Remove(a); err != nil {
@@ -67,6 +74,46 @@ func TestDeletedConvertedFileLeavesTheOverview(t *testing.T) {
 	if now := jobs.BytesNow(bytesBefore, c); now != 0 {
 		t.Errorf("bytesNow after the delete %d, want 0 (BytesBefore %d, freed %d, waiting %d, gone %d)",
 			now, bytesBefore.BytesBefore, c.FreedBytes, c.WaitingBytes, c.GoneBytes)
+	}
+}
+
+// A file that comes back where it was (a sync tool moved it away and back, or a backup restored it) is no longer
+// gone: the scan clears its mark. (The scan then sees a changed file and records it again; that is not checked here.)
+func TestReturnedConvertedFileClearsTheGoneMark(t *testing.T) {
+	s, st, l, a := keptConversion(t)
+	if err := os.Remove(a); err != nil {
+		t.Fatal(err)
+	}
+	settle(s)
+	if c, _ := st.TotalsOf(); c.Counts[l.ID].GoneBytes != 5 {
+		t.Fatalf("gone after the delete %d, want 5", c.Counts[l.ID].GoneBytes)
+	}
+
+	os.WriteFile(a, []byte("ab"), 0o644)
+	settle(s)
+	if c, _ := st.TotalsOf(); c.Counts[l.ID].GoneBytes != 0 {
+		t.Errorf("gone after the file returned %d, want 0: the mark must clear", c.Counts[l.ID].GoneBytes)
+	}
+}
+
+// The disk guard: a converted file whose folder is on another disk than the one it was converted on (the library's
+// disk is unmounted, so a scan sees an empty folder on the root disk) is not gone. Its bytes stay where they were.
+func TestConvertedFileOnAnotherDiskIsNotMarkedGone(t *testing.T) {
+	s, st, l, a := keptConversion(t)
+	real := originalDisk
+	defer func() { originalDisk = real }()
+	originalDisk = func(string) (string, bool) { return "other-disk", true }
+
+	if err := os.Remove(a); err != nil {
+		t.Fatal(err)
+	}
+	settle(s)
+	c := func() jobs.LibraryCounts { t, _ := st.TotalsOf(); return t.Counts[l.ID] }()
+	if c.GoneBytes != 0 {
+		t.Errorf("gone %d, want 0: a file on another disk is not known to be gone", c.GoneBytes)
+	}
+	if c.WaitingBytes != 3 {
+		t.Errorf("waiting %d, want 3: the saving is still waiting in the trash", c.WaitingBytes)
 	}
 }
 
@@ -108,6 +155,9 @@ func TestDeletedReplacedFileWithNothingKeptLeavesTheOverview(t *testing.T) {
 	settle(s)
 	after, _ := st.TotalsOf()
 	c := after.Counts[l.ID]
+	if c.GoneBytes != 2 {
+		t.Errorf("gone after the delete %d, want 2 (size_before 5 less the freed 3): the clamp would hide a wrong term", c.GoneBytes)
+	}
 	if now := jobs.BytesNow(lt, c); now != 0 {
 		t.Errorf("bytesNow after the delete %d, want 0 (BytesBefore %d, freed %d, waiting %d, gone %d)",
 			now, lt.BytesBefore, c.FreedBytes, c.WaitingBytes, c.GoneBytes)

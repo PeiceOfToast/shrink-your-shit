@@ -19,7 +19,7 @@ func TestUpgradeLogsOneLineWithVersionsAndBackup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range []string{`ALTER TABLE files DROP COLUMN decided_at`, `ALTER TABLE jobs DROP COLUMN output_gone_at`, `PRAGMA user_version=47`} {
+	for _, q := range []string{`ALTER TABLE files DROP COLUMN decided_at`, `ALTER TABLE jobs DROP COLUMN output_gone_at`, `DROP INDEX IF EXISTS jobs_newest`, `PRAGMA user_version=47`} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}
