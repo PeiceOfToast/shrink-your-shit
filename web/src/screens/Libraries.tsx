@@ -213,17 +213,18 @@ export function FolderField({ f, free }: { f: ReturnType<typeof useFolder>; free
       </div></div>
   );
 }
-export function FirstFive({ f }: { f: ReturnType<typeof useFolder> }) {
+// scanned: the library has had its first scan (pass 5 #3). Before it, and in first run, the panel asks whether the folder is right.
+export function FirstFive({ f, scanned = false }: { f: ReturnType<typeof useFolder>; scanned?: boolean }) {
   const r = f.first;
   return (
     <section className="card" aria-labelledby="first-h">
-      <div className="hd"><h2 id="first-h">Is this the right folder?</h2></div>
+      <div className="hd"><h2 id="first-h">{scanned ? "Files in this folder" : "Is this the right folder?"}</h2></div>
       <div className="bd stack" aria-live="polite">
         {!f.ok ? <p className="muted">Give a folder that passes the check, and its first 5 videos show here.</p>
           : !r ? <p className="muted">Looking for videos in <span className="mono">{f.checked}</span>...</p>
           : failed(r) ? <p className="st bad"><Icon id="i-alert" /><span>{r.error.message}</span></p>
           : <>
-            <p className="muted">The first 5 files found in <span className="mono">{f.checked}</span>. Nothing is converted by looking.</p>
+            <p className="muted">{r.items.length < 5 ? "Files found in" : "The first 5 files found in"} <span className="mono">{f.checked}</span>.{scanned ? "" : " Nothing is converted by looking."}</p>
             {r.items.length === 0 ? <p>{r.stillLooking ? "Still looking..." : "No video files found in this folder."}</p> : (
               <div className="tscroll"><table className="tbl">
                 <thead><tr><th>File</th><th>Video</th><th className="num">Size</th></tr></thead>
@@ -324,7 +325,7 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
             </div>
           </form>
         </section>
-        <FirstFive f={f} />
+        <FirstFive f={f} scanned={!!v?.scan.lastScanAt && f.checked === l?.path} />
         {l && v && <RemoveSection l={l} v={v} />}
       </div>}
     </div>
