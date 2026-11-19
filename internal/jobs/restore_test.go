@@ -4,9 +4,12 @@ package jobs
 
 import (
 	"bytes"
+	"compress/gzip"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -49,7 +52,7 @@ func TestRestoreRoundTripPutsTheDataBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Contents.Shares != 1 || p.FormatVersion != backupFormat || p.AppVersion != "0.9.0" || len(p.Warnings) != 0 {
+	if p.Contents.Shares != 1 || p.FormatVersion != backupFormat || p.AppVersion != "0.9.0" || len(p.Warnings) != 1 || p.Warnings[0] != workerSignInWarning {
 		t.Fatalf("preview %+v", p)
 	}
 
@@ -131,6 +134,135 @@ func TestRestoreRefusesWhatIsNotABackupAndANewerSchema(t *testing.T) {
 	}
 }
 
+// addRemoteWorker writes a remote worker row the way pairing does, with the sign-in token's hash.
+func addRemoteWorker(t *testing.T, s *Store, id, token string) {
+	t.Helper()
+	restoreExec(t, s, `INSERT INTO workers(id, name, kind, token_hash, version, api_level, last_seen, capabilities, os, arch, enabled)
+		VALUES(?,?,'remote',?,'1',1,'','','linux','amd64',1)`, id, id, hashOf(token))
+}
+
+func TestRestoreKeepsWorkerSignIns(t *testing.T) {
+	s := restoreTestStore(t)
+	addRemoteWorker(t, s, "gone", "tok-gone")
+	addRemoteWorker(t, s, "kept", "tok-old")
+	restoreExec(t, s, `INSERT INTO worker_pairings(code_hash, expires) VALUES('code-then', '2099-01-01T00:00:00Z')`)
+	b, err := s.WriteBackup(ReasonManual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(s.backupDir(), b.ID+".json.gz")
+
+	// After the backup: one worker is removed (revoked), one gets a new sign-in, and a pairing code is issued.
+	if err := s.RemoveWorker("gone"); err != nil {
+		t.Fatal(err)
+	}
+	restoreExec(t, s, `UPDATE workers SET token_hash=? WHERE id='kept'`, hashOf("tok-now"))
+	restoreExec(t, s, `DELETE FROM worker_pairings WHERE code_hash='code-then'`)
+	restoreExec(t, s, `INSERT INTO worker_pairings(code_hash, expires) VALUES('code-now', '2099-01-01T00:00:00Z')`)
+
+	p, err := s.PreviewBackup(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Warnings) == 0 || p.Warnings[len(p.Warnings)-1] != workerSignInWarning {
+		t.Errorf("the preview has no worker sign-in warning: %v", p.Warnings)
+	}
+	if _, err := s.RestoreBackup(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.WorkerByToken("tok-gone"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a worker revoked after the backup signs in again: %v", err)
+	}
+	if _, err := s.WorkerByToken("tok-now"); err != nil {
+		t.Errorf("the current sign-in stopped working: %v", err)
+	}
+	if _, err := s.WorkerByToken("tok-old"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("the sign-in from the backup came back: %v", err)
+	}
+	var pairings int
+	s.db.QueryRow(`SELECT COUNT(*) FROM worker_pairings WHERE code_hash='code-now'`).Scan(&pairings)
+	if pairings != 1 {
+		t.Errorf("a pairing code issued after the backup was lost")
+	}
+	s.db.QueryRow(`SELECT COUNT(*) FROM worker_pairings WHERE code_hash='code-then'`).Scan(&pairings)
+	if pairings != 0 {
+		t.Errorf("a pairing code from the backup came back")
+	}
+}
+
+// probeBackup writes a backup file at the header of a real backup, then one app_meta value of size bytes.
+func probeBackup(t *testing.T, s *Store, size int) string {
+	t.Helper()
+	b, err := s.WriteBackup(ReasonManual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(s.backupDir(), b.ID+".json.gz"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	whole, err := io.ReadAll(zr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := whole[:bytes.Index(whole, []byte(`"tables":`))]
+	path := filepath.Join(s.backupDir(), "probe.json.gz")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	zw := gzip.NewWriter(f)
+	zw.Write(head)
+	zw.Write([]byte(`"tables":{"app_meta":[{"key":"big","value":"`))
+	chunk := bytes.Repeat([]byte("a"), 1<<20)
+	for n := 0; n < size; n += len(chunk) {
+		zw.Write(chunk)
+	}
+	zw.Write([]byte(`"}]}}`))
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestRestoreRefusesAHugeValueWithBoundedMemory(t *testing.T) {
+	s := restoreTestStore(t)
+	restoreExec(t, s, `INSERT INTO app_meta(key,value) VALUES('probe','before')`)
+	path := probeBackup(t, s, 256<<20)
+
+	// Each call is measured on its own: the value is 256 MiB, and a refused read must allocate a small
+	// multiple of the row cap (16 MiB), not the value.
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	_, err := s.PreviewBackup(path)
+	runtime.ReadMemStats(&after)
+	if !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("preview of a 256 MiB value: %v, want ErrTooLarge", err)
+	}
+	if used := after.TotalAlloc - before.TotalAlloc; used > 96<<20 {
+		t.Errorf("previewing the value allocated %d MiB; it should stay bounded", used>>20)
+	}
+	runtime.ReadMemStats(&before)
+	_, err = s.RestoreBackup(path)
+	runtime.ReadMemStats(&after)
+	if !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("restore of a 256 MiB value: %v, want ErrTooLarge", err)
+	}
+	if used := after.TotalAlloc - before.TotalAlloc; used > 96<<20 {
+		t.Errorf("restoring the value allocated %d MiB; it should stay bounded", used>>20)
+	}
+	var probe string
+	s.db.QueryRow(`SELECT value FROM app_meta WHERE key='probe'`).Scan(&probe)
+	if probe != "before" {
+		t.Errorf("a refused restore changed the data: probe = %q", probe)
+	}
+}
+
 func TestStagedCopyIsNotListedAsABackup(t *testing.T) {
 	s := restoreTestStore(t)
 	staged, err := s.StageBackup(strings.NewReader("copy"))
@@ -145,4 +277,75 @@ func TestStagedCopyIsNotListedAsABackup(t *testing.T) {
 	if b, err := os.ReadFile(staged); err != nil || string(b) != "copy" {
 		t.Errorf("staged copy = %q, %v", b, err)
 	}
+}
+
+func TestBackupFilesAreOwnerOnly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file modes are not owner-only on Windows")
+	}
+	s := restoreTestStore(t)
+	b, err := s.WriteBackup(ReasonManual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staged, err := s.StageBackup(strings.NewReader("copy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(staged)
+	for _, p := range []string{filepath.Join(s.backupDir(), b.ID+".json.gz"), staged} {
+		st, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m := st.Mode().Perm(); m != 0o600 {
+			t.Errorf("%s is %o, want 600", filepath.Base(p), m)
+		}
+	}
+}
+
+func TestStaleFilesAreRemovedWhenTheStoreOpens(t *testing.T) {
+	s := restoreTestStore(t)
+	if _, err := s.WriteBackup(ReasonManual); err != nil {
+		t.Fatal(err)
+	}
+	torn := filepath.Join(s.backupDir(), "20261119-100000-abcd-manual.json.gz.tmp")
+	part := filepath.Join(s.backupDir(), "preview-1.part")
+	for _, p := range []string{torn, part} {
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.Close()
+	s2, err := OpenAs(s.path, "0.9.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s2.Close() })
+	for _, p := range []string{torn, part} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("%s was kept when the store opened", filepath.Base(p))
+		}
+	}
+	if list, err := s2.ListBackups(); err != nil || len(list) != 1 {
+		t.Errorf("the finished backup went: %v %v", list, err)
+	}
+}
+
+func TestStageBackupRefusesOverTheLimit(t *testing.T) {
+	s := restoreTestStore(t)
+	old := MaxBackupBytes
+	MaxBackupBytes = 10
+	t.Cleanup(func() { MaxBackupBytes = old })
+	if _, err := s.StageBackup(strings.NewReader("12345678901")); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("over the limit: %v, want ErrTooLarge", err)
+	}
+	if left, _ := filepath.Glob(filepath.Join(s.backupDir(), "preview-*.part")); len(left) != 0 {
+		t.Errorf("an over-limit copy was kept: %v", left)
+	}
+	staged, err := s.StageBackup(strings.NewReader("1234567890"))
+	if err != nil {
+		t.Fatalf("exactly at the limit: %v", err)
+	}
+	os.Remove(staged)
 }

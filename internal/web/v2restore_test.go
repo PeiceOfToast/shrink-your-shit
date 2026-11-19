@@ -135,3 +135,43 @@ func TestPreviewsExpire(t *testing.T) {
 		t.Errorf("a dropped preview's file was kept: %v", err)
 	}
 }
+
+func TestUploadOverTheLimitIsTooLarge(t *testing.T) {
+	srv, _, _ := doctorServer(t, false)
+	old := jobs.MaxBackupBytes
+	jobs.MaxBackupBytes = 10
+	t.Cleanup(func() { jobs.MaxBackupBytes = old })
+	upload, ctype := backupUpload(t, "big.json.gz", []byte(strings.Repeat("x", 50)))
+	code, body, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/backups/preview", body: upload, ctype: ctype})
+	if code != 413 || errCode(body) != "too_large" {
+		t.Errorf("an upload over the limit: %d %s", code, body)
+	}
+}
+
+func TestApplyIsRefusedWhileAJobRuns(t *testing.T) {
+	srv, st, _ := doctorServer(t, false)
+	code, body := post(t, srv, "POST", "/api/v2/backups", "")
+	var made jobs.BackupInfo
+	if err := json.Unmarshal([]byte(body), &made); err != nil || code != 201 {
+		t.Fatalf("make: %d %s", code, body)
+	}
+	code, body = post(t, srv, "POST", "/api/v2/backups/preview", `{"backupId":"`+made.ID+`"}`)
+	var prev struct {
+		PreviewID string `json:"previewId"`
+	}
+	if err := json.Unmarshal([]byte(body), &prev); err != nil || code != 200 {
+		t.Fatalf("preview: %d %s", code, body)
+	}
+	if _, err := st.Enqueue(jobs.Job{Library: "/m", Path: "/m/r.mkv"}); err != nil {
+		t.Fatal(err)
+	}
+	st.Claim("w") // a job is running now
+	before, _ := st.ListBackups()
+	code, body = post(t, srv, "POST", "/api/v2/backups/apply", `{"previewId":"`+prev.PreviewID+`"}`)
+	if code != 409 || errCode(body) != "jobs_running" {
+		t.Fatalf("apply while a job runs: %d %s", code, body)
+	}
+	if after, _ := st.ListBackups(); len(after) != len(before) {
+		t.Errorf("a refused apply still made a backup: %d before, %d after", len(before), len(after))
+	}
+}

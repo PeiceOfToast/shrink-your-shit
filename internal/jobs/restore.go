@@ -14,8 +14,8 @@ import (
 	"strings"
 )
 
-// MaxBackupBytes is the largest backup that can be previewed or restored.
-const MaxBackupBytes = 200 << 20
+// MaxBackupBytes is the largest backup that can be previewed or restored. A variable so tests can lower it.
+var MaxBackupBytes int64 = 200 << 20
 
 var (
 	// ErrNotABackup means the file is not one of this program's backups.
@@ -25,6 +25,37 @@ var (
 	// ErrTooLarge means the file is over MaxBackupBytes.
 	ErrTooLarge = errors.New("backup too large")
 )
+
+// maxBackupRow caps the decompressed bytes of one row (one JSON value), so a single huge value is refused
+// before it is held in memory. Real rows are far smaller.
+const maxBackupRow = 16 << 20
+
+// boundedReader counts the decompressed bytes of a backup: all of them up to a few times MaxBackupBytes,
+// and, between resets, the bytes of the one row being decoded (maxBackupRow).
+type boundedReader struct {
+	r     io.Reader
+	total int64 // decompressed bytes so far
+	row   int64 // decompressed bytes since the last reset
+}
+
+// Read hands out no more than the bytes still allowed, so a value over the limit never reaches the decoder
+// whole: the decoder gets ErrTooLarge instead of the rest of it.
+func (b *boundedReader) Read(p []byte) (int, error) {
+	room := maxBackupRow - b.row
+	if left := 4*MaxBackupBytes - b.total; left < room {
+		room = left
+	}
+	if room <= 0 {
+		return 0, ErrTooLarge
+	}
+	if int64(len(p)) > room {
+		p = p[:room]
+	}
+	n, err := b.r.Read(p)
+	b.total += int64(n)
+	b.row += int64(n)
+	return n, err
+}
 
 // TooNewError is a backup whose schema is newer than this database's, so this program cannot restore it.
 type TooNewError struct {
@@ -70,7 +101,7 @@ func (s *Store) PreviewBackup(path string) (BackupPreview, error) {
 		return BackupPreview{}, err
 	}
 	return BackupPreview{FormatVersion: h.FormatVersion, AppVersion: h.AppVersion, CreatedAt: h.CreatedAt,
-		Contents: sc.c, Warnings: libraryWarnings(sc.libraryPaths)}, nil
+		Contents: sc.c, Warnings: append(libraryWarnings(sc.libraryPaths), workerSignInWarning)}, nil
 }
 
 // RestoreBackup replaces the contents of every table with the rows of the backup at path, in one transaction:
@@ -108,12 +139,19 @@ func (s *Store) RestoreBackup(path string) (BackupContents, error) {
 	if err != nil {
 		return BackupContents{}, err
 	}
+	tokens, err := workerTokens(tx)
+	if err != nil {
+		return BackupContents{}, err
+	}
 	for _, n := range names {
+		if n == "worker_pairings" { // live sign-in state: kept as it is
+			continue
+		}
 		if _, err := tx.Exec(`DELETE FROM ` + quoteIdent(n)); err != nil {
 			return BackupContents{}, err
 		}
 	}
-	r := &restorer{tx: tx, tables: map[string]*liveTable{}, exists: map[string]bool{}}
+	r := &restorer{tx: tx, tables: map[string]*liveTable{}, exists: map[string]bool{}, tokens: tokens}
 	for _, n := range names {
 		r.exists[n] = true
 	}
@@ -242,7 +280,8 @@ func walkBackup(path string, fn func(table string, row map[string]any) error) (b
 		return backupHeader{}, ErrNotABackup
 	}
 	defer gz.Close()
-	dec := json.NewDecoder(gz)
+	br := &boundedReader{r: gz}
+	dec := json.NewDecoder(br)
 	dec.UseNumber()
 	if err := expectDelim(dec, '{'); err != nil {
 		return backupHeader{}, err
@@ -252,17 +291,19 @@ func walkBackup(path string, fn func(table string, row map[string]any) error) (b
 		if !dec.More() {
 			return backupHeader{}, ErrNotABackup // no tables
 		}
+		br.row = 0
 		t, err := dec.Token()
 		if err != nil {
-			return backupHeader{}, ErrNotABackup
+			return backupHeader{}, notABackup(err)
 		}
 		key, _ := t.(string)
 		if key == "tables" {
 			break
 		}
 		var v json.RawMessage
+		br.row = 0
 		if err := dec.Decode(&v); err != nil {
-			return backupHeader{}, ErrNotABackup
+			return backupHeader{}, notABackup(err)
 		}
 		fields[key] = v
 	}
@@ -278,9 +319,10 @@ func walkBackup(path string, fn func(table string, row map[string]any) error) (b
 		return h, err
 	}
 	for dec.More() {
+		br.row = 0
 		t, err := dec.Token()
 		if err != nil {
-			return h, ErrNotABackup
+			return h, notABackup(err)
 		}
 		name, _ := t.(string)
 		if err := expectDelim(dec, '['); err != nil {
@@ -288,8 +330,9 @@ func walkBackup(path string, fn func(table string, row map[string]any) error) (b
 		}
 		for dec.More() {
 			var row map[string]any
+			br.row = 0
 			if err := dec.Decode(&row); err != nil {
-				return h, ErrNotABackup
+				return h, notABackup(err)
 			}
 			if err := fn(name, row); err != nil {
 				return h, err
@@ -302,10 +345,18 @@ func walkBackup(path string, fn func(table string, row map[string]any) error) (b
 	return h, expectDelim(dec, '}')
 }
 
+// notABackup maps a decoding error: a size limit stays a size limit, anything else means it is not a backup.
+func notABackup(err error) error {
+	if errors.Is(err, ErrTooLarge) {
+		return ErrTooLarge
+	}
+	return ErrNotABackup
+}
+
 func expectDelim(dec *json.Decoder, want json.Delim) error {
 	t, err := dec.Token()
 	if err != nil {
-		return ErrNotABackup
+		return notABackup(err)
 	}
 	if d, ok := t.(json.Delim); !ok || d != want {
 		return ErrNotABackup
@@ -326,11 +377,37 @@ type restorer struct {
 	tx     *sql.Tx
 	tables map[string]*liveTable
 	exists map[string]bool
+	tokens map[string]string // each worker's sign-in as it is now, by worker id
+}
+
+// workerSignInWarning is the preview's note about worker sign-ins (the restore keeps them as they are).
+const workerSignInWarning = "Worker sign-ins are kept as they are now. A restore does not bring back a worker's sign-in, so a worker you removed after this backup stays removed."
+
+// workerTokens reads each remote worker's sign-in as the open database has it now, by worker id.
+func workerTokens(tx *sql.Tx) (map[string]string, error) {
+	rows, err := tx.Query(`SELECT id, token_hash FROM workers`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id, hash string
+		if err := rows.Scan(&id, &hash); err != nil {
+			return nil, err
+		}
+		out[id] = hash
+	}
+	return out, rows.Err()
 }
 
 func (r *restorer) insert(table string, row map[string]any) error {
-	if !r.exists[table] {
-		return nil // a table this database does not have
+	if !r.exists[table] || table == "worker_pairings" {
+		return nil // a table this database does not have, or sign-in state that is kept as it is
+	}
+	if table == "workers" { // the sign-in stays what it is now; a worker removed since the backup cannot sign in
+		id, _ := row["id"].(string)
+		row["token_hash"] = r.tokens[id]
 	}
 	lt, ok := r.tables[table]
 	if !ok {

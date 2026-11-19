@@ -397,7 +397,14 @@ sampled hash (otherwise it is left alone and the row marked `needs_attention`); 
   (`files.reason`, migration 7: the Plan's `SkipCode`, `unreadable`, or slice 18's `restored`) and its
   plain words (`rules.SkipWords`). `POST /api/skipped/{id}/convert-again` forgets the record and wakes
   the scanner, which looks at the file afresh (and may skip it again for the same reason).
-- `POST /api/system/backup` answers 501 `not_available` until slice 38.
+- Backups (item 5; `UI-API-CONTRACT-v2.md` "Backup"): `GET /api/v2/backups` lists them with `keep`;
+  `POST /api/v2/backups` makes a manual one; `GET /api/v2/backups/{id}/download` and
+  `DELETE /api/v2/backups/{id}` do what they say. `POST /api/v2/backups/preview` reads a stored backup
+  (`{"backupId"}`) or an uploaded multipart `file` (at most 200 MB) and returns a `previewId` with what the
+  file holds. `POST /api/v2/backups/apply` (`{"previewId"}`) is refused with `jobs_running` while any job
+  runs, writes a `before_import` backup, then replaces the data in one transaction. Previews expire after
+  15 minutes and are lost on restart; their copies and any unfinished backup files are removed when the
+  store opens.
 
 ## Basic defaults (S4)
 

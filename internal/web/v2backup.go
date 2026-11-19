@@ -163,6 +163,8 @@ func v2Backups(api *http.ServeMux, store *jobs.Store, ss *settingsStore) {
 			switch {
 			case errors.Is(err, jobs.ErrNotABackup):
 				apiError(w, http.StatusBadRequest, "not_a_backup", "This file isn't a Shrink Your Shit backup.")
+			case errors.Is(err, jobs.ErrTooLarge):
+				apiError(w, http.StatusRequestEntityTooLarge, "too_large", "This backup holds data too large for this app to read.")
 			case errors.As(err, &tooNew):
 				apiError(w, http.StatusConflict, "backup_too_new", "This backup is from version "+tooNew.BackupVersion+", newer than this app ("+tooNew.ThisVersion+"). Update the app, then restore it.")
 			default:
