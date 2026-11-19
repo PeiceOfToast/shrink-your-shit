@@ -2,7 +2,7 @@
 // GET /api/v2/overview (#177): the headline (space saved, NET, never added to the trash's GROSS bytes), the workers,
 // what is converting now, the libraries (the Libraries page's own figures) and the last 30 days. Live: job.progress
 // moves the bars in place; a job, library or worker change refetches. Every number comes from the server.
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, count, encoderName, plural } from "../format";
@@ -38,29 +38,34 @@ type Series = { label: string; color: string; value: (d: Day) => number };
 // waiting are shown and named apart), thin bars with a 4 px rounded top on the baseline, 2 px gaps between parts,
 // hairline solid grid, a legend for 2 or more parts, a tooltip per day and the table view below. Days before history
 // are a flat stub, not a zero.
-function DayBars({ title, note, days, series, fmt, tick = true, extra }: { title: string; note: ReactNode; days: Day[]; series: Series[]; fmt: (n: number) => string; tick?: boolean; extra?: (d: Day) => string | null }) {
-  const [at, setAt] = useState<number | null>(null);
-  const W = 600, H = 150, top = 14, base = H - 22, n = days.length, bw = W / n, barW = Math.min(16, bw * 0.7);
-  const sum = (d: Day) => series.reduce((a, x) => a + x.value(d), 0), max = Math.max(1, ...days.filter((d) => d.recorded).map(sum));
+function DayBars({ title, note, days, series, fmt, tick = true, extra, quiet }: { title: string; note: ReactNode; days: Day[]; series: Series[]; fmt: (n: number) => string; tick?: boolean; extra?: (d: Day) => string | null; quiet: string }) {
+  const [at, setAt] = useState<number | null>(null), ref = useRef<SVGSVGElement>(null), [W, setW] = useState(600);
+  const n = days.length, sum = (d: Day) => series.reduce((a, x) => a + x.value(d), 0), allZero = days.every((x) => !x.recorded || sum(x) === 0);
+  // the viewBox is the measured width in px, so a label's font-size is its real size (12 px at any width) and the plot is 122 px tall
+  const H = 160, top = 16, base = H - 22, bw = W / n, barW = Math.min(16, bw * 0.7);
+  useLayoutEffect(() => { const el = ref.current; if (!el) return; const fit = () => setW(el.clientWidth || 600); fit(); const ro = new ResizeObserver(fit); ro.observe(el); return () => ro.disconnect(); }, [allZero]);
+  const max = Math.max(1, ...days.filter((d) => d.recorded).map(sum));
   const y = (v: number) => ((base - top) * v) / max, notRec = days.filter((d) => !d.recorded).length;
   const roundTop = (x: number, yy: number, w: number, h: number) => { const r = Math.min(4, h, w / 2);
     return `M${x},${yy + h}V${yy + r}Q${x},${yy} ${x + r},${yy}H${x + w - r}Q${x + w},${yy} ${x + w},${yy + r}V${yy + h}Z`; };
   const d = at == null ? null : days[at];
   return <figure className="dchart" onMouseLeave={() => setAt(null)}>
     <h3 className="ch">{title} <span className="muted">{note}</span></h3>
+    {allZero ? <p className="muted quiet">{quiet}</p> : <>
     {series.length > 1 ? <ul className="legend">{series.map((x) => <li key={x.label}><i style={{ background: x.color }} />{x.label}</li>)}</ul>
       : <ul className="legend ph" aria-hidden="true"><li>&nbsp;</li></ul>/* design 11-19: keeps side-by-side baselines level; hidden when the charts stack */}
-    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={title + ", last " + n + " days" + (notRec ? "; the first " + notRec + " not recorded" : "") + ". The table below has every day."} className="daychart">
+    <svg ref={ref} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={title + ", last " + n + " days" + (notRec ? "; the first " + notRec + " not recorded" : "") + ". The table below has every day."} className="daychart">
       {[0, 0.5, 1].map((f) => <line key={f} x1="0" x2={W} y1={base - y(max * f)} y2={base - y(max * f)} stroke={f ? "var(--border)" : "var(--border-strong)"} strokeWidth="1" vectorEffect="non-scaling-stroke" />)}
-      {tick && <text x="0" y={top - 4} fill="var(--text-2)" fontSize="11">{fmt(max)}</text>}
+      {tick && <text x="0" y={top - 4} fill="var(--text-2)" fontSize="12">{fmt(max)}</text>}
       {at != null && <rect x={at * bw} y={top} width={bw} height={base - top} fill="var(--raised)" />}
       {days.map((dd, i) => { const x = i * bw + (bw - barW) / 2;
         if (!dd.recorded) return <rect key={dd.day} x={x} y={base - 2} width={barW} height={2} fill="var(--border)" />;
         let yy = base; const parts = series.map((s) => ({ s, h: y(s.value(dd)) })).filter((p) => p.h > 0);
         return <g key={dd.day}>{parts.map((p, k) => { const last = k === parts.length - 1, gap = k ? 2 : 0, h = Math.max(1, p.h - gap); yy -= p.h;
           return last ? <path key={k} d={roundTop(x, yy, barW, h)} fill={p.s.color} /> : <rect key={k} x={x} y={yy} width={barW} height={h} fill={p.s.color} />; })}</g>; })}
-      <text x="0" y={H - 4} fill="var(--text-2)" fontSize="11">{dayName(days[0].day)}</text>
-      <text x={W} y={H - 4} fill="var(--text-2)" fontSize="11" textAnchor="end">{dayName(days[n - 1].day)}</text>
+      <text x="0" y={H - 4} fill="var(--text-2)" fontSize="12">{dayName(days[0].day)}</text>
+      {W >= 600 && <text x={W / 2} y={H - 4} fill="var(--text-2)" fontSize="12" textAnchor="middle">{dayName(days[Math.floor(n / 2)].day)}</text>}
+      <text x={W} y={H - 4} fill="var(--text-2)" fontSize="12" textAnchor="end">{dayName(days[n - 1].day)}</text>
       {days.map((dd, i) => <rect key={dd.day} x={i * bw} y="0" width={bw} height={H} fill="transparent" onMouseEnter={() => setAt(i)} />)}
     </svg>
     {d && <div className="tip" style={{ left: `clamp(80px, ${((at! + 0.5) / n) * 100}%, calc(100% - 80px))` }}>
@@ -68,6 +73,7 @@ function DayBars({ title, note, days, series, fmt, tick = true, extra }: { title
       {d.recorded ? series.map((x) => <span key={x.label}><i style={{ background: x.color }} />{x.label}<em>{x.value(d) ? fmt(x.value(d)) : "none"}</em></span>) : <span className="muted">not recorded</span>}
       {d.recorded && extra?.(d) && <span className="muted">{extra(d)}</span>}
     </div>}
+    </>}
   </figure>;
 }
 
@@ -99,7 +105,7 @@ export function Overview() {
   }, []);
   const act = async (p: Promise<Answer<unknown>>) => { try { const r = await p; setSaid(failed(r) ? r.error.message : ""); } catch (e) { if (!(e instanceof SignedOut)) throw e; } o.reload(); wl.reload(); };
   if (!o.data) return <div className="stack"><PageHead icon="i-dashboard" title="Dashboard" />{o.error ? <LoadFailed error={o.error} reload={o.reload} /> : <div className="empty">Loading…</div>}</div>;
-  const v = o.data, h = v.headline, job = (j: OverviewJob) => ({ ...j, ...live[j.jobId] });
+  const v = o.data, h = v.headline, noLibs = v.libraries.length === 0, job = (j: OverviewJob) => ({ ...j, ...live[j.jobId] });
   // one row per worker of GET /api/v2/workers; its files' progress from the overview (or, for a worker the overview
   // doesn't list, from Converting now by job id)
   // review a7d25ec P2-2: the overview's worker entries put every job under this computer, so a row's files are the
@@ -130,7 +136,7 @@ export function Overview() {
     <div className="stack ov">
       <PageHead icon="i-dashboard" title="Dashboard">
         <WorkersSwitch n={on} m={rows.length} busy={busy} finishing={fin} onSet={(a) => act(allWorkers(a))} />
-        <button className="btn sm ghost" type="button" onClick={() => (MOCK ? scanAll() : act(scanAllLibraries()))}><Icon id="i-refresh" />Scan all libraries</button>
+        {!noLibs && <button className="btn sm ghost" type="button" onClick={() => (MOCK ? scanAll() : act(scanAllLibraries()))}><Icon id="i-refresh" />Scan all libraries</button>}
       </PageHead>
       {said && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{said}</span></p>}
       {failedNow.length > 0 && failKey !== hidKey && <div className="note bad"><Icon id="i-alert" /><div style={{ flex: 1 }}>
@@ -142,6 +148,7 @@ export function Overview() {
       </div></div>)}
       <section className="headline" aria-label="Totals">
         <div><div className="big">{h.freed > 0 ? <>{bytes(h.freed)}<small>saved</small></> : "Nothing saved yet"}</div>{more.length > 0 && <div className="muted">{more}</div>}
+          {noLibs && h.freed <= 0 && <div className="muted"><Link to="/libraries/new">Add a library</Link> to start.</div>}
           {/* design SCREENS V2 Space rules: neutral, on its own line, only when > 0; never added to or taken from the figures */}
           {(h.grew ?? 0) > 0 && <div className="muted sm">{bytes(h.grew!)} added by files that came out bigger</div>}</div>
         <div className="stats">
@@ -153,22 +160,18 @@ export function Overview() {
       </section>
 
       <section className="sec" aria-labelledby="ov-a"><h2 id="ov-a">Last 30 days</h2>
-        {rec.length < 2 ? <><div className="charts">{["Space saved per day", "Files per day"].map((t) => <figure key={t} className="dchart nochart">
-            <h3 className="ch">{t}</h3>
-            <svg viewBox="0 0 600 150" aria-hidden="true" className="daychart">{[14, 71, 128].map((yy, i) => <line key={yy} x1="0" x2="600" y1={yy} y2={yy} stroke={i === 2 ? "var(--border-strong)" : "var(--border)"} strokeWidth="1" vectorEffect="non-scaling-stroke" />)}</svg>
-            <p className="muted"><span>Charts start after two days of conversions. So far: {count(h.filesConverted)} {h.filesConverted === 1 ? "file" : "files"} converted.</span></p>
-          </figure>)}</div>{hasAvg && <div className="chartfoot">{avgLine}</div>}</> : <>
+        {rec.length < 2 ? <><p className="muted quiet short">Charts start after two days of conversions. So far: {count(h.filesConverted)} {h.filesConverted === 1 ? "file" : "files"} converted.</p>{hasAvg && <div className="chartfoot">{avgLine}</div>}</> : <>
           <div className="charts">
             {/* workshop 11-19: savedBytes and waitingBytes are dated by the day a conversion finished, freedBytes by the day an
                 original was deleted, so the split is savedBytes - waitingBytes freed + waitingBytes waiting; never freedBytes + waitingBytes.
                 An older server without savedBytes: freed per delete day only. No top tick: a bar's height adds parts kept apart */}
-            <DayBars title={kept ? "Files made smaller per day" : "Space saved per day"} days={v.daily} fmt={bytes} tick={!split} note={kept ? bytes(tot.saved) + " smaller · " + (h.freed > 0 ? bytes(h.freed) + " freed so far" : "nothing freed yet: originals are kept") : split ? spaceNote : bytes(tot.freed) + " freed"}
+            <DayBars title={kept ? "Files made smaller per day" : "Space saved per day"} days={v.daily} fmt={bytes} tick={!split} quiet="Nothing saved in the last 30 days." note={kept ? bytes(tot.saved) + " smaller · " + (h.freed > 0 ? bytes(h.freed) + " freed so far" : "nothing freed yet: originals are kept") : split ? spaceNote : bytes(tot.freed) + " freed"}
               extra={(d) => (split && (d.waitingBytes ?? 0) > 0 && h.nextFreeAt ? "Frees from " + dayName(h.nextFreeAt.slice(0, 10)) : null)}
               series={split ? [{ label: "Freed", color: "var(--success)", value: (d) => Math.max(0, (d.savedBytes ?? 0) - (d.waitingBytes ?? 0) - (d.couldFreeBytes ?? 0)) }, { label: "Waiting in the trash", color: "var(--chart-pending)", value: (d) => d.waitingBytes ?? 0 },
                 ...(three ? [{ label: "Originals left in place", color: "var(--chart-muted)", value: (d: Day) => d.couldFreeBytes ?? 0 }] : [])]
                 : kept ? [{ label: "Smaller", color: "var(--success)", value: (d) => d.savedBytes ?? 0 }]
                 : [{ label: "Freed", color: "var(--success)", value: (d) => d.freedBytes }]} />
-            <DayBars title="Files per day" days={v.daily} fmt={count} note={[count(tot.done) + " done", count(tot.skipped) + " skipped", count(tot.failed) + " failed"].join(" · ")}
+            <DayBars title="Files per day" days={v.daily} fmt={count} quiet="No files in the last 30 days." note={[count(tot.done) + " done", count(tot.skipped) + " skipped", count(tot.failed) + " failed"].join(" · ")}
               series={[{ label: "Done", color: "var(--success)", value: (d) => d.completed }, { label: "Skipped", color: "var(--chart-muted)", value: (d) => d.skipped }, { label: "Failed", color: "var(--error)", value: (d) => d.failed }]} />
           </div>
           <div className="chartfoot">
@@ -178,7 +181,7 @@ export function Overview() {
                 <tbody>{[...v.daily].reverse().map((d) => <tr key={d.day}><td>{dayName(d.day)}</td>{d.recorded ? <><td className="num">{bytes(split || kept ? d.savedBytes ?? 0 : d.freedBytes)}</td>{split && <td className="num">{bytes(d.waitingBytes ?? 0)}</td>}{three && <td className="num">{bytes(d.couldFreeBytes ?? 0)}</td>}<td className="num">{count(d.completed)}</td><td className="num">{count(d.skipped)}</td><td className="num">{count(d.failed)}</td></> : <td colSpan={(split ? 5 : 4) + (three ? 1 : 0)} className="muted">not recorded</td>}</tr>)}</tbody></table></div>
             </details>
           </div></>}
-        {first && rec.length >= 2 && <p className="muted sm">History starts {dayName(first)}, when this install began keeping it. Earlier days are not recorded, not estimated.{MOCK || /^(Etc\/)?UTC$/.test(v.timeZone) ? "" : " Days run midnight to midnight, " + v.timeZone.split("/").pop()!.replace(/_/g, " ") + " time."}</p>}
+        {first && rec.length >= 2 && v.daily.length > 0 && first > v.daily[0].day && <p className="muted sm">Recorded from {dayName(first)}.</p>}
       </section>
 
       <section className="sec" aria-labelledby="ov-w"><h2 id="ov-w">Workers <Link className="more" to="/workers">Workers page</Link></h2>
@@ -193,7 +196,7 @@ export function Overview() {
               </tr>; })}</tbody></table>)}
       </section>
       <section className="sec" aria-labelledby="ov-j"><h2 id="ov-j">Converting now <Link className="more" to="/jobs?tab=running">All jobs</Link></h2>
-        {!v.active.length ? <p className="muted">Nothing is converting. Workers on starts them.</p> : (
+        {!v.active.length ? <p className="muted">{on > 0 ? "Nothing is converting." : "Nothing is converting. Turn workers on to start."}</p> : (
           <table className="tbl ovt"><thead><tr><th>File</th><th>Progress</th><th className="num">Time left</th><th className="num">Expected saving</th></tr></thead>
             <tbody>{v.active.map((a0) => { const a = { ...a0, ...live[a0.jobId] };
               return <tr key={a.jobId}>
