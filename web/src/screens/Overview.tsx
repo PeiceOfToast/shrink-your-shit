@@ -121,6 +121,10 @@ export function Overview() {
     tot.waiting > 0 && <Link to="/jobs?tab=completed&kept=1">{bytes(tot.waiting) + " waiting in the trash"}</Link>, tot.kept > 0 && <Link to="/jobs?tab=completed&left=1">{bytes(tot.kept) + " in originals left in place"}</Link>]
     .filter(Boolean).map((p, i) => <Fragment key={i}>{i > 0 && " · "}{p}</Fragment>);
   const workerOf = (id: string) => rows.find((w) => w.jobs.some((j) => j.jobId === id))?.name;
+  // the two averages, shown under the charts and under the "start after two days" placeholders alike
+  const hasAvg = v.averages.fileShrinkPercent != null || v.averages.secondsPerGB != null;
+  const avgLine = <><span>New files, on average <b>{v.averages.fileShrinkPercent == null ? "not recorded" : Math.round(v.averages.fileShrinkPercent) + "% smaller"}</b></span>
+            <span>Time per GB <b>{perGB(v.averages.secondsPerGB)}</b></span></>;
   const more = [h.waitingToFree > 0 && bytes(h.waitingToFree) + (h.freed > 0 ? " more" : " frees") + (h.nextFreeAt ? " by " + dayName(h.nextFreeAt.slice(0, 10)) : ""), h.couldFree > 0 && <Link to="/jobs?tab=completed&left=1">{"could free " + bytes(h.couldFree) + " if you remove the originals"}</Link>].filter(Boolean).map((p, i) => <Fragment key={i}>{i > 0 && " · "}{p}</Fragment>);
   return (
     <div className="stack ov">
@@ -149,11 +153,11 @@ export function Overview() {
       </section>
 
       <section className="sec" aria-labelledby="ov-a"><h2 id="ov-a">Last 30 days</h2>
-        {rec.length < 2 ? <div className="charts">{["Space saved per day", "Files per day"].map((t) => <figure key={t} className="dchart nochart">
+        {rec.length < 2 ? <><div className="charts">{["Space saved per day", "Files per day"].map((t) => <figure key={t} className="dchart nochart">
             <h3 className="ch">{t}</h3>
             <svg viewBox="0 0 600 150" aria-hidden="true" className="daychart">{[14, 71, 128].map((yy, i) => <line key={yy} x1="0" x2="600" y1={yy} y2={yy} stroke={i === 2 ? "var(--border-strong)" : "var(--border)"} strokeWidth="1" vectorEffect="non-scaling-stroke" />)}</svg>
             <p className="muted"><span>Charts start after two days of conversions. So far: {count(h.filesConverted)} {h.filesConverted === 1 ? "file" : "files"} converted.</span></p>
-          </figure>)}</div> : <>
+          </figure>)}</div>{hasAvg && <div className="chartfoot">{avgLine}</div>}</> : <>
           <div className="charts">
             {/* workshop 11-19: savedBytes and waitingBytes are dated by the day a conversion finished, freedBytes by the day an
                 original was deleted, so the split is savedBytes - waitingBytes freed + waitingBytes waiting; never freedBytes + waitingBytes.
@@ -168,8 +172,7 @@ export function Overview() {
               series={[{ label: "Done", color: "var(--success)", value: (d) => d.completed }, { label: "Skipped", color: "var(--chart-muted)", value: (d) => d.skipped }, { label: "Failed", color: "var(--error)", value: (d) => d.failed }]} />
           </div>
           <div className="chartfoot">
-            <span>New files, on average <b>{v.averages.fileShrinkPercent == null ? "not recorded" : Math.round(v.averages.fileShrinkPercent) + "% smaller"}</b></span>
-            <span>Time per GB <b>{perGB(v.averages.secondsPerGB)}</b></span>
+            {avgLine}
             <details><summary className="muted">Show as a table</summary>
               <div className="daytbl"><table className="tbl"><thead><tr><th>Day</th><th className="num">{kept ? "Smaller" : split ? "Saved" : "Freed"}</th>{split && <th className="num">Waiting in the trash</th>}{three && <th className="num">Originals left in place</th>}<th className="num">Done</th><th className="num">Skipped</th><th className="num">Failed</th></tr></thead>
                 <tbody>{[...v.daily].reverse().map((d) => <tr key={d.day}><td>{dayName(d.day)}</td>{d.recorded ? <><td className="num">{bytes(split || kept ? d.savedBytes ?? 0 : d.freedBytes)}</td>{split && <td className="num">{bytes(d.waitingBytes ?? 0)}</td>}{three && <td className="num">{bytes(d.couldFreeBytes ?? 0)}</td>}<td className="num">{count(d.completed)}</td><td className="num">{count(d.skipped)}</td><td className="num">{count(d.failed)}</td></> : <td colSpan={(split ? 5 : 4) + (three ? 1 : 0)} className="muted">not recorded</td>}</tr>)}</tbody></table></div>
