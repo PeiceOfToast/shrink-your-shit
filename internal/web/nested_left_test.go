@@ -3,6 +3,7 @@
 package web
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -25,12 +26,15 @@ func TestNestedLibraryLeftOutputsStayWithTheirOwnLibrary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(sub, 0o755); err != nil { // the inner folder must exist, or it keeps the unresolved path
+		t.Fatal(err)
+	}
 	inner, err := st.AddLibrary("Inner", sub, rules.SliderTemplate(3), true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.PutFile(jobs.File{Path: filepath.Join(root, "own.mkv"), Size: 1000})
-	a := filepath.Join(sub, "a.mkv")
+	st.PutFile(jobs.File{Path: filepath.Join(outer.Path, "own.mkv"), Size: 1000})
+	a := filepath.Join(inner.Path, "a.mkv")
 	st.PutFile(jobs.File{Path: a, Size: 300})
 	id, err := st.Enqueue(jobs.Job{LibraryID: inner.ID, Path: a, SizeBefore: 300})
 	if err != nil {
@@ -39,7 +43,7 @@ func TestNestedLibraryLeftOutputsStayWithTheirOwnLibrary(t *testing.T) {
 	if _, err := st.Claim("w"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Complete(id, filepath.Join(sub, "a.hevc.mkv"), 400); err != nil {
+	if err := st.Complete(id, filepath.Join(inner.Path, "a.hevc.mkv"), 400); err != nil {
 		t.Fatal(err)
 	}
 
