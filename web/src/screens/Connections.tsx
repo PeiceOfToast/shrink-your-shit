@@ -1,5 +1,5 @@
-// Settings > Connections (SCREENS V9e, mockups/settings-connections.html): tell Sonarr and Radarr when a file changes.
-// One of each app in this version; Plex and Jellyfin come later. Contract "Sonarr / Radarr" (workshop 11-19).
+// Settings > Connections (SCREENS V9e, mockups/settings-connections.html): tell Sonarr, Radarr, Plex and Jellyfin when a
+// file changes. One of each app in this version. Contract "Sonarr / Radarr" and "Plex / Jellyfin" (workshop 11-19).
 import { useState } from "react";
 import { Icon } from "../Icon";
 import { failed, type Answer } from "../api";
@@ -10,7 +10,14 @@ import { clock } from "../format";
 import { addIntegration, listIntegrations, patchIntegration, removeIntegration, testIntegration } from "../connectionsApi";
 import type { Integration, IntegrationKind, IntegrationTestResult, PathMapping } from "../types/connections";
 
-const APP: Record<IntegrationKind, { name: string; port: number }> = { sonarr: { name: "Sonarr", port: 8989 }, radarr: { name: "Radarr", port: 7878 } };
+// per app: the key's name and where to find it, what a change makes it do, and folder examples (theirs, ours)
+const APP: Record<IntegrationKind, { name: string; port: number; key: string; where: string; does: string; dirs: [string, string] }> = {
+  sonarr: { name: "Sonarr", port: 8989, key: "API key", where: "In Sonarr: Settings > General > Security.", does: "Rescans each converted file, so it doesn't download it again.", dirs: ["/tv", "/mnt/media/tv"] },
+  radarr: { name: "Radarr", port: 7878, key: "API key", where: "In Radarr: Settings > General > Security.", does: "Rescans each converted file, so it doesn't download it again.", dirs: ["/movies", "/mnt/media/movies"] },
+  plex: { name: "Plex", port: 32400, key: "Token", where: "Plex's help page \"Finding an authentication token\" shows where it is.", does: "Scans the folder of each converted file, so Plex plays the new one.", dirs: ["/data/movies", "/mnt/media/movies"] },
+  jellyfin: { name: "Jellyfin", port: 8096, key: "API key", where: "In Jellyfin: Dashboard > API Keys > +.", does: "Tells Jellyfin each converted file changed, so it plays the new one.", dirs: ["/media/movies", "/mnt/media/movies"] },
+};
+const KINDS = Object.keys(APP) as IntegrationKind[];
 const dot = (s: string) => s.replace(/[.\s]+$/, "");
 
 // The test's one sentence (V9e): built from its folders when it connected; the server's own words when it didn't.
@@ -79,13 +86,13 @@ function Form({ kind, it, onDone, onCancel, onTested }: { kind: IntegrationKind;
           onChange={(e) => setUrl(e.target.value)} placeholder={`http://192.168.1.20:${APP[kind].port}`} />
       </div>
       <div className="field">
-        {changeKey ? <label htmlFor={id + "-key"}>API key</label> : <span className="lab">API key</span>}
+        {changeKey ? <label htmlFor={id + "-key"}>{APP[kind].key}</label> : <span className="lab">{APP[kind].key}</span>}
         {changeKey
           ? <input className="input mono" id={id + "-key"} type="password" autoComplete="off" required={!it} value={key} onChange={(e) => setKey(e.target.value)}
             placeholder={it ? "Leave empty to keep the saved key." : ""} />
           : <p className="row" style={{ margin: 0, gap: 8 }} id={id + "-key"}><span className="st ok"><Icon id="i-check" />Saved</span>
-            <button className="btn sm ghost" type="button" onClick={() => setChangeKey(true)} aria-label="Change the saved API key">Change</button></p>}
-        <span className="hint">In {app}: Settings &gt; General &gt; Security.</span>
+            <button className="btn sm ghost" type="button" onClick={() => setChangeKey(true)} aria-label={"Change the saved " + APP[kind].key.toLowerCase()}>Change</button></p>}
+        <span className="hint">{APP[kind].where}</span>
       </div>
       <details className="cfold" open={maps.length > 0 || undefined}>
         <summary><strong>Folders</strong> <span className="muted">Only needed if {app} sees your files under a different path, for example in Docker.</span></summary>
@@ -93,10 +100,10 @@ function Form({ kind, it, onDone, onCancel, onTested }: { kind: IntegrationKind;
           {maps.map((m, i) => (
             <div className="cmap" key={i}>
               <label className="field"><span className="hint">{app} sees</span>
-                <input className="input mono" value={m.theirPath} onChange={(e) => setMap(i, { theirPath: e.target.value })} placeholder={kind === "sonarr" ? "/tv" : "/movies"} /></label>
+                <input className="input mono" value={m.theirPath} onChange={(e) => setMap(i, { theirPath: e.target.value })} placeholder={APP[kind].dirs[0]} /></label>
               <Icon id="i-arrow-r" />
               <label className="field"><span className="hint">Shrink Your Shit sees</span>
-                <input className="input mono" value={m.ourPath} onChange={(e) => setMap(i, { ourPath: e.target.value })} placeholder={kind === "sonarr" ? "/mnt/media/tv" : "/mnt/media/movies"} /></label>
+                <input className="input mono" value={m.ourPath} onChange={(e) => setMap(i, { ourPath: e.target.value })} placeholder={APP[kind].dirs[1]} /></label>
               <button className="btn sm icon ghost" type="button" aria-label={"Remove folder " + (i + 1)} onClick={() => { setMaps(maps.filter((_, j) => j !== i)); setResult(null); }}><Icon id="i-x" /></button>
             </div>))}
           {!maps.length && <p className="hint" style={{ margin: 0 }}>With no folders here, both see the same paths.</p>}
@@ -133,7 +140,7 @@ function AppCard({ kind, it, reload, said }: { kind: IntegrationKind; it?: Integ
       <div className="bd stack">
         <div>{/* the live region stays mounted so a screen reader announces the text when it arrives */}
           <div role="status">{saved && <div style={{ marginBottom: "var(--gap)" }}><Result tone={saved.tone} text={saved.text} /></div>}</div>
-          <p className="muted" style={{ margin: 0 }}>Rescans each converted file, so it doesn't download it again.{it && <> <span className="mono">{it.url}</span></>}</p>
+          <p className="muted" style={{ margin: 0 }}>{APP[kind].does}{it && <> <span className="mono">{it.url}</span></>}</p>
         </div>
         {confirm && <div className="row" role="group" aria-label={"Remove " + app} style={{ gap: 8 }}>
           <span>Remove {app}? It won't be told about converted files.</span>
@@ -155,9 +162,11 @@ export function ConnectionsSettings() {
       <SettingsTabs at="connections" />
       <p className="muted" style={{ margin: 0 }}>Tell your media apps when a file changes, so they show the new size and codec and don't download it again.</p>
       <p className="muted" role="status" style={{ margin: 0 }}>{said}</p>
-      {notHere ? <p className="muted">This server can't connect to Sonarr or Radarr yet.</p>
+      {notHere ? <p className="muted">This server can't connect to media apps yet.</p>
         : d.error && !d.data ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{d.error.message}</span></p>
           : !d.data ? <div className="empty">Loading...</div>
-            : (["sonarr", "radarr"] as const).map((k) => <AppCard key={k} kind={k} it={d.data!.find((x) => x.kind === k)} reload={d.reload} said={setSaid} />)}
+            : <>{KINDS.map((k) => <AppCard key={k} kind={k} it={d.data!.find((x) => x.kind === k)} reload={d.reload} said={setSaid} />)}
+              {/* contract "Plex / Jellyfin": said once on the screen */}
+              <p className="hint" style={{ margin: 0 }}>Changing a file's container (.mp4 to .mkv) can reset its watched state in Jellyfin, and sometimes in Plex.</p></>}
     </div>);
 }
