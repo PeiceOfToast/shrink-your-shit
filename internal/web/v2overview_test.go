@@ -278,3 +278,32 @@ func TestRemoteJobsProgressIsTheReportedOne(t *testing.T) {
 		}
 	}
 }
+
+// ui-shop QA (P3): a library whose folder is empty while its originals wait in .syp-trash has no bytes before, so
+// bytesNow (before − freed − waiting) went negative (−1894 KB seen). It is floored at 0.
+func TestOverviewBytesNowNeverNegative(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	p := filepath.Join(lib.Path, "0.mkv")
+	id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: p, SizeBefore: 1000})
+	st.Claim("w")
+	row, _ := st.BeginSwap(jobs.Original{JobID: id, Path: p, Trash: filepath.Join(lib.Path, ".syp-trash", "0.mkv")})
+	st.FinishSwap(row, time.Now().Add(7*24*time.Hour))
+	st.Complete(id, p, 400)
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/overview"})
+	var o struct {
+		Libraries []struct {
+			BytesBefore, BytesNow, WaitingToFree int64
+		}
+	}
+	if err := json.Unmarshal([]byte(body), &o); err != nil || len(o.Libraries) != 1 {
+		t.Fatalf("overview: %v %s", err, body)
+	}
+	l := o.Libraries[0]
+	if l.BytesBefore != 0 || l.WaitingToFree != 600 {
+		t.Fatalf("setup: before %d, waiting %d; want 0 and 600: %s", l.BytesBefore, l.WaitingToFree, body)
+	}
+	if l.BytesNow != 0 {
+		t.Errorf("bytesNow %d with nothing before and 600 waiting; want 0 (never negative)", l.BytesNow)
+	}
+}
