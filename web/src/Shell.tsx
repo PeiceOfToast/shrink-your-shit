@@ -89,10 +89,12 @@ export function Shell({ title, proto, children }: { title: string; proto: boolea
   }, []);
   const toggleRail = () => (keepRail(!collapsed), setCollapsed(!collapsed));
   // the summary's badges: every 30 s, and at once when a worker asks to join
-  const sum = useData<{ badges: { joinRequestsWaiting?: number } }>(() => (MOCK ? Promise.resolve(summary(mockState())) : getSummary()), [], 30000);
+  const sum = useData<{ badges: { joinRequestsWaiting?: number }; workers?: { status: string }[] | null }>(() => (MOCK ? Promise.resolve(summary(mockState())) : getSummary()), [], 30000);
   const again = useRef(sum.reload); again.current = sum.reload;
   useEffect(() => onLive((t) => { if (t === "workers.changed" || t === "resync") again.current(); }), []);
   const joins = sum.data?.badges.joinRequestsWaiting ?? 0, waiting = plural(joins, "worker", "workers") + " waiting to join";
+  // parity item 8: every worker stopped (none converting, ready or finishing a file) shows "Stopped" on Workers
+  const ws = sum.data?.workers ?? [], stopped = ws.length > 0 && !ws.some((w) => w.status === "busy" || w.status === "online" || w.status === "draining");
   return (
     // On a narrow screen the open menu's scrim is shell.css's .app.nav-open::after, so a tap on it is a click on .app
     // itself (review P2): that closes the menu. Escape closes it too.
@@ -103,9 +105,10 @@ export function Shell({ title, proto, children }: { title: string; proto: boolea
           {NAV.map(([group, items]) => [
             <div className="grp" key={group} aria-hidden="true" />, // clean pass 2 (7.1): groups by a 14 px gap, no eyebrow label
             ...items.map((n) => (
-              <Link key={n.to} to={n.to} title={n.to === "/workers" && joins ? n.label + ": " + waiting : n.label} aria-current={current === n ? "page" : undefined}>
+              <Link key={n.to} to={n.to} title={n.to === "/workers" && (joins || stopped) ? n.label + ": " + [joins && waiting, stopped && "stopped"].filter(Boolean).join(", ") : n.label} aria-current={current === n ? "page" : undefined}>
                 <Icon id={n.icon} /><span className="lbl">{n.label}</span>
                 {n.to === "/workers" && joins > 0 && <><span className="badge info" aria-hidden="true">{joins}</span><span className="sr">, {waiting}</span></>}
+                {n.to === "/workers" && stopped && <><span className="badge off" aria-hidden="true">Stopped</span><span className="sr">, stopped</span></>}
               </Link>
             )),
           ])}
