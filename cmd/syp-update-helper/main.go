@@ -311,7 +311,10 @@ func (h *helper) install(version string) error {
 	}
 	if err := os.Rename(next, h.bin); err != nil {
 		if perr := os.Rename(prev, h.bin); perr != nil { // prev still holds the current program: .older must not overwrite it
-			return errors.Join(err, perr)
+			// A copy would fail for the same reason the rename did (same folder); the running service keeps working,
+			// so say exactly which file to move back before the next restart.
+			return fmt.Errorf("could not install v%s, and could not put the current program back: move %s to %s before restarting the service: %w",
+				version, prev, h.bin, errors.Join(err, perr))
 		}
 		return errors.Join(err, restoreOlder())
 	}
