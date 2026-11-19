@@ -115,7 +115,7 @@ export function Overview() {
       {said && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{said}</span></p>}
       {v.encoderFallbacks?.map((f) => <div key={f.workerId} className="note warn"><Icon id="i-alert" /><div>
         <b>{f.worker}'s graphics encoder ({encoderName(f.encoder)}) failed {f.count === 1 ? "once" : plural(f.count, "time", "times")} today.</b>{" "}
-        {f.pausedUntil ? <>It converts on the processor until {clock(f.pausedUntil)}, which is slower. <Link to="/settings/about">Health checks</Link></> : "Those files were converted on the processor instead, which is slower."}
+        {f.pausedUntil ? <>It converts on the processor until {clock(f.pausedUntil)}, which is slower. <Link to={"/workers/" + encodeURIComponent(f.workerId) + "?tab=capabilities"}>Test the encoders</Link></> : (f.count === 1 ? "That file was" : "Those files were") + " converted on the processor instead, which is slower."}
       </div></div>)}
       <section className="headline" aria-label="Totals">
         <div><div className="big">{h.freed > 0 ? <>{bytes(h.freed)}<small>saved</small></> : "Nothing saved yet"}</div>{more && <div className="muted">{more}</div>}
