@@ -164,7 +164,7 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 				return
 			}
 			d := map[string]any{"id": strconv.FormatInt(id, 10), "state": v2State(last.To, nil, nil), "reason": reasonOf(last),
-				"events": v2Events(events), "steps": steps, "attempts": last.Attempts, "removed": true, "file": nil}
+				"warning": encoderWarning(steps), "events": v2Events(events), "steps": steps, "attempts": last.Attempts, "removed": true, "file": nil}
 			for _, e := range events { // its file as recorded when it went (ui-shop 10:54Z: not "Job 8")
 				if e.Path != "" {
 					d["file"] = map[string]any{"path": e.Path, "name": filepath.Base(e.Path), "folder": filepath.Dir(e.Path)}
@@ -183,7 +183,7 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 			return
 		}
 		d := map[string]any{"id": strconv.FormatInt(id, 10), "state": v2State(string(j.Status), steps, livePercent(id)),
-			"file": map[string]any{"path": j.Path, "bytes": j.SizeBefore}, "attempts": j.Attempts,
+			"warning": encoderWarning(steps), "file": map[string]any{"path": j.Path, "bytes": j.SizeBefore}, "attempts": j.Attempts,
 			"retryAt": nilIfEmpty(j.RetryAt), "error": nilIfEmpty(j.Error), "worker": nilIfEmpty(j.Worker),
 			"createdAt": j.Created, "updatedAt": j.Updated, "steps": steps, "events": v2Events(events), "removed": false,
 			"path": []string{}}
@@ -311,7 +311,7 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 
 // v2JobItem is a Files item in the contract's Job terms: its state (spec 7), sub-state and progress.
 func v2JobItem(store *jobs.Store, it map[string]any, row jobs.FileRow, card string) map[string]any {
-	it["origin"] = "job"
+	it["origin"], it["warning"] = "job", nil
 	// ui-shop's First/Last chip reads pin from the row; priority is the job's place among the unpinned (its
 	// library's, for a pinned one), never the reserved numbers that keep a pin
 	it["priority"], it["pin"] = row.Priority, nil
@@ -363,6 +363,8 @@ func v2JobItem(store *jobs.Store, it map[string]any, row jobs.FileRow, card stri
 		it["progress"] = v2Progress(it["state"].(string), row.JobID, pct)
 	case jobs.CardProcessed:
 		it["state"], it["subState"] = "completed", nil
+		steps, _ := store.Steps(row.JobID) // the list flags a file a graphics encoder failed on (ui-shop 11-19)
+		it["warning"] = encoderWarning(steps)
 	case jobs.CardFailed:
 		it["state"], it["subState"] = "failed", nil
 	case jobs.CardSkipped:
@@ -503,4 +505,15 @@ func convertAgainOf(store *jobs.Store, id int64, keepDays int) map[string]any {
 		a["reason"] = map[string]any{"code": c.Code, "message": c.Message, "deletedAt": nilIfEmpty(c.DeletedAt)}
 	}
 	return a
+}
+
+// encoderWarning is a job's warning when a graphics encoder fell back to the processor: the step's words (nil
+// when none). The job keeps its state; the warning only tells the person why it took longer.
+func encoderWarning(steps []jobs.Step) any {
+	for _, st := range steps {
+		if st.Step == jobs.EncoderFallbackStep {
+			return st.Words
+		}
+	}
+	return nil
 }

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/doctor"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
@@ -63,6 +64,55 @@ func systemRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		for _, l := range libs {
 			ls = append(ls, doctor.Library{ID: l.ID, Name: l.Name, Path: l.Path})
 		}
-		writeJSON(w, doctor.Health{Checks: eng.Doctor.Health(r.Context(), eng.DataDir, ls), Version: eng.Version, LogsTail: eng.Logs.Lines()})
+		checks := eng.Doctor.Health(r.Context(), eng.DataDir, ls)
+		paused, err := encoderPauseChecks(store, time.Now())
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		writeJSON(w, doctor.Health{Checks: append(checks, paused...), Version: eng.Version, LogsTail: eng.Logs.Lines()})
 	})
+}
+
+// encoderPauseChecks warns about each worker whose graphics encoder is paused after three failures in a row.
+// A pause starts at a fall-back, so one in the last hour covers every pause still on.
+func encoderPauseChecks(store *jobs.Store, now time.Time) ([]doctor.Check, error) {
+	fallbacks, err := store.EncoderFallbacksSince(now.Add(-time.Hour))
+	if err != nil {
+		return nil, err
+	}
+	var out []doctor.Check
+	for _, f := range fallbacks {
+		until, paused, err := store.EncoderPaused(f.Worker)
+		if err != nil {
+			return nil, err
+		}
+		if !paused {
+			continue
+		}
+		name := workerName(store, f.Worker)
+		out = append(out, doctor.Check{ID: "encoder:" + f.Worker, Label: "Graphics encoder paused: " + name, Status: "warn",
+			Detail: name + "'s graphics encoder failed three times in a row, so its files use the processor until " +
+				until.Local().Format("15:04") + "."})
+	}
+	return out, nil
+}
+
+// workerName is what a person calls a worker: this computer's pool (its id starts "builtin"), else a paired
+// remote worker's name, else its id.
+func workerName(store *jobs.Store, id string) string {
+	if strings.HasPrefix(id, "builtin") {
+		if cfg, err := store.WorkerConfigOf(jobs.LocalWorker); err == nil {
+			return cfg.Name
+		}
+		return "This computer"
+	}
+	if rws, err := store.RemoteWorkers(); err == nil {
+		for _, rw := range rws {
+			if rw.ID == id && rw.Name != "" {
+				return rw.Name
+			}
+		}
+	}
+	return id
 }

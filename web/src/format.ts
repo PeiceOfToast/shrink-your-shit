@@ -7,6 +7,8 @@ export function bytes(n: number): string {
   return Math.round(n / 1e3) + " KB";
 }
 export const count = (n: number) => n.toLocaleString("en-US");
+// an ffmpeg graphics encoder (hevc_qsv) by the name the Workers screen gives its type
+export const encoderName = (e: string) => ([["_qsv", "Intel Quick Sync"], ["_nvenc", "NVIDIA"], ["_amf", "AMD"], ["_vaapi", "VAAPI"], ["_videotoolbox", "Apple"]].find(([k]) => e.endsWith(k))?.[1] ?? e);
 export const clock = (t: string | Date) => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 export const clockS = (t: Date) => t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 export function elapsed(s: number): string { // 12:08, 1:02:03

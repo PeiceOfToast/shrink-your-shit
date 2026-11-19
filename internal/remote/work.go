@@ -351,6 +351,20 @@ func (c *Client) note(ctx context.Context, l *Lease, text string) {
 	c.call(ctx, "leases/"+l.ID+"/note", map[string]any{"text": text}, nil)
 }
 
+// noteFell tells the server a graphics encoder failed and the processor converts the file: the server records
+// the job's fall-back step and counts it toward pausing that encoder.
+func (c *Client) noteFell(ctx context.Context, l *Lease, encoder, reason string) {
+	text := fmt.Sprintf("%s failed (%s); converted on the processor", encoder, reason)
+	log.Printf("job %s: %s", l.Job.ID, text)
+	c.call(ctx, "leases/"+l.ID+"/note", map[string]any{"text": text,
+		"encoderFell": map[string]string{"encoder": encoder, "reason": reason}}, nil)
+}
+
+// noteWorked tells the server a graphics encoder converted a file, so its run of failures ends.
+func (c *Client) noteWorked(ctx context.Context, l *Lease) {
+	c.call(ctx, "leases/"+l.ID+"/note", map[string]any{"encoderWorked": true}, nil)
+}
+
 // copyInto writes the file at from into the existing file at to (the run's staged file, through a
 // shared folder: never a new file, so the server's identity check holds), and returns its SHA-256 and
 // size.
@@ -458,20 +472,26 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 		})
 	}
 	stderr, err := run(args)
-	if err != nil && enc != "" && cctx.Err() == nil {
+	if err == nil && enc != "" && gone == nil {
+		c.noteWorked(ctx, l) // the graphics encoder converted the file: its run of failures ends
+	}
+	if err != nil && enc != "" && cctx.Err() == nil && jobs.FallsBackToProcessor(strings.Split(stderr, "\n")) {
 		// a graphics encoder that fails converts again on the processor, as a local worker does
 		reason := err.Error()
 		if s := strings.TrimSpace(stderr); s != "" {
 			reason = strings.SplitN(s, "\n", 2)[0]
 		}
-		c.note(ctx, l, fmt.Sprintf("%s failed (%s); converted on the processor", enc, reason))
 		if e := os.Truncate(out, 0); e != nil { // the same staged file: the server checks its identity
 			return stderr, args, fmt.Errorf("clearing the partial output: %w", e)
 		}
+		failed, failedReason := enc, reason
 		enc = ""
 		report(map[string]any{"stage": "converting", "outTimeUs": 0, "encoder": enc}) // the live label names the processor now
 		args = snap.Plan.FFmpegArgs(src, out)
 		stderr, err = run(args)
+		if err == nil && gone == nil { // the processor converted it, so the graphics encoder was the fault: it counts
+			c.noteFell(ctx, l, failed, failedReason)
+		}
 	}
 	if gone != nil {
 		return stderr, args, gone
