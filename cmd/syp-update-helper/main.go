@@ -450,6 +450,25 @@ const copyingSuffix = ".copying"
 //     as previous so a roll back still reaches it.
 func repairLeftovers(bin string) error {
 	prev := bin + ".previous"
+	// A crash inside swapByRenames (bin -> .swap, previous -> bin, .swap -> previous) leaves the program in .swap.
+	// Put it back where the crash left the names: a missing bin gets it; a missing previous gets it. Both present
+	// is not a case the steps produce, so it is left alone.
+	if tmp := bin + ".swap"; exists(tmp) {
+		switch {
+		case !exists(bin):
+			if err := os.Rename(tmp, bin); err != nil {
+				return err
+			}
+			log.Printf("update leftovers: a crash left %s missing; put it back from %s", bin, tmp)
+		case !exists(prev):
+			if err := os.Rename(tmp, prev); err != nil {
+				return err
+			}
+			log.Printf("update leftovers: a crash left %s missing; kept the swapped program as %s", prev, prev)
+		default:
+			log.Printf("update leftovers: %s is left as it is: %s and %s are both there", tmp, bin, prev)
+		}
+	}
 	os.Remove(prev + copyingSuffix) // a copy that never got renamed
 	if sameProgram(prev, bin) {
 		if err := os.Remove(prev); err != nil {

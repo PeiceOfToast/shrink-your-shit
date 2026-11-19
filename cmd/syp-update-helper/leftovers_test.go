@@ -151,3 +151,43 @@ func TestRepairRemovesAPreviousThatIsACopyOfTheProgram(t *testing.T) {
 		t.Errorf("previous %q, bin %q", read(t, bin+".previous"), read(t, bin))
 	}
 }
+
+// A crash after bin -> .swap: bin is missing, and repair puts the program back at bin.
+func TestRepairPutsBackABinThatASwapLeftMissing(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "shrink-your-shit")
+	writeFile(t, bin+".swap", "current")
+	writeFile(t, bin+".previous", "prev")
+	if err := repairLeftovers(bin); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, bin) != "current" || exists(bin+".swap") || read(t, bin+".previous") != "prev" {
+		t.Errorf("bin %q, swap kept %v, previous %q", read(t, bin), exists(bin+".swap"), read(t, bin+".previous"))
+	}
+}
+
+// A crash after previous -> bin: previous is missing, and repair keeps the swapped program as previous.
+func TestRepairKeepsASwappedProgramAsThePreviousItLeftMissing(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "shrink-your-shit")
+	writeFile(t, bin, "prev")
+	writeFile(t, bin+".swap", "current")
+	if err := repairLeftovers(bin); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, bin) != "prev" || exists(bin+".swap") || read(t, bin+".previous") != "current" {
+		t.Errorf("bin %q, swap kept %v, previous %q", read(t, bin), exists(bin+".swap"), read(t, bin+".previous"))
+	}
+}
+
+// Both names there: repair does not guess, and leaves the files as they are.
+func TestRepairLeavesASwapBesideBothNamesAlone(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "shrink-your-shit")
+	writeFile(t, bin, "prev")
+	writeFile(t, bin+".swap", "current")
+	writeFile(t, bin+".previous", "older")
+	if err := repairLeftovers(bin); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, bin) != "prev" || read(t, bin+".swap") != "current" || read(t, bin+".previous") != "older" {
+		t.Errorf("bin %q, swap %q, previous %q", read(t, bin), read(t, bin+".swap"), read(t, bin+".previous"))
+	}
+}
