@@ -180,7 +180,7 @@ function AddWorker({ workers, reload }: { workers: Worker[]; reload: () => void 
       {came ? <>
         <p role="status"><Icon id="i-check-c" /> Connected: <strong>{came.name}</strong>.</p>
         <div className="row"><Link className="btn sm primary" to={"/workers/" + encodeURIComponent(came.id)}>Open {came.name}</Link><button className="btn sm ghost" type="button" onClick={() => (setOpen(false), setCame(null))}>Done</button></div></>
-      : err ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{err}</span></p> : !p ? <p className="muted">Making a pairing code...</p> : gone ? <>
+      : err ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{err}</span></p> : !p ? <p className="muted">Making a pairing code…</p> : gone ? <>
         <p>This code has expired.</p><div className="row"><button className="btn sm primary" type="button" onClick={make}>Make a new code</button></div></> : <>
         <label className="lab" htmlFor={group + "-cmd"}>Run this on the other computer:</label>
         <textarea id={group + "-cmd"} ref={cmd} className="input mono" readOnly rows={2} value={p.command} onFocus={(e) => e.currentTarget.select()} />
@@ -188,7 +188,7 @@ function AddWorker({ workers, reload }: { workers: Worker[]; reload: () => void 
           <span className="muted sm">Pairing code <strong className="mono">{p.code}</strong> · works for {left <= 1 ? "less than a minute" : left + " more minutes"}, once.</span></div>
         {local && <p className="muted sm"><Icon id="i-alert" /> This address only works on this computer. To pair another computer, open this page by its network address (for example http://192.168.1.10:8484) and make a new code.</p>}
         {p.plainHTTP && <p className="muted sm"><Icon id="i-info" /> This page uses plain http: fine on your own network. A worker outside it needs https://.</p>}
-        <p className="muted sm" aria-live="polite">Waiting for the worker to connect...</p></>}
+        <p className="muted sm" aria-live="polite">Waiting for the worker to connect…</p></>}
     </div>}
   </>;
 }
@@ -312,7 +312,7 @@ export function Workers() {
       <p className="muted" role="status">{said}</p>
       {ws.error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{ws.error.message}</span></p>}
       <JoinCards joins={ws.data?.joinRequests ?? []} workers={all} on={n > 0} reload={ws.reload} />
-      {!ws.loaded ? <div className="empty">Loading...</div> : !list.length ? <Empty icon="i-worker" text="No workers yet." /> : (
+      {!ws.loaded ? <div className="empty">Loading…</div> : !list.length ? <Empty icon="i-worker" text="No workers yet." /> : (
         <div className="wgrid">{list.map((w) => {
           const [t, cls, icon] = words(w), gone = w.status === "offline" || w.status === "stalled";
           return <article key={w.id} className={"card wcard" + (gone ? " dim" : "")}>
@@ -336,7 +336,7 @@ export function WorkerPage({ id }: { id: string }) {
   const d = useData(() => getWorker(id), [id], 15000), jobs = useData(() => listJobs("running", ""), [], 15000);
   const live = useLiveWorkers(() => (d.reload(), jobs.reload()));
   const [said, setSaid] = useState(""), [busy, setBusy] = useState(false);
-  if (!d.loaded) return <div className="empty">Loading...</div>;
+  if (!d.loaded) return <div className="empty">Loading…</div>;
   if (!d.data) return <div className="stack"><PageHead icon="i-worker" crumbs={[["Workers", "/workers"]]} title="Worker not found" /><p className="st bad"><Icon id="i-alert" /><span>{d.error?.message}</span></p></div>;
   const w = live(d.data), [t, cls, icon] = words(w);
   const rows = jobs.data && !failed(jobs.data) ? jobs.data.items.filter((j) => w.currentJobIds.includes(j.id)) : [];
@@ -361,7 +361,7 @@ export function WorkerPage({ id }: { id: string }) {
       </>}
       {tab === "capabilities" && <section className="card panel">
         <div className="hd"><h2>Encoders</h2><span className="sp" />
-          <button className="btn sm" type="button" disabled={busy} onClick={async () => { setBusy(true); const r = await act(testCapabilities(id), setSaid); setBusy(false); if (r) (setSaid("Tested again."), d.reload()); }}><Icon id="i-refresh" />{busy ? "Testing..." : "Test again"}</button></div>
+          <button className="btn sm" type="button" disabled={busy} onClick={async () => { setBusy(true); const r = await act(testCapabilities(id), setSaid); setBusy(false); if (r) (setSaid("Tested again."), d.reload()); }}><Icon id="i-refresh" />{busy ? "Testing…" : "Test again"}</button></div>
         <p className="sm muted" style={{ padding: "8px var(--pad) 0" }}>Each one was tested with a short real conversion, not guessed from the graphics card's name.</p>
         <div style={{ padding: "8px var(--pad) 0" }}><EncoderCards w={w} big reload={d.reload} /></div>
         {decoders.length > 0 && <>

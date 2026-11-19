@@ -310,6 +310,16 @@ func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.Fil
 		log.Printf("scan %s: %v", path, err)
 		return false
 	} else if own {
+		// Our own output, replaced in place: its record still says queued, at the time it had before the replace. Its
+		// time and an empty decision are refreshed. The size stays the before-size on purpose: the totals read it
+		// (BytesBefore, bytesNow). Written only when the time or the queued decision differs, so an unchanged scan
+		// writes nothing.
+		if prev != nil && (prev.ModTime != st.ModTime().UnixNano() || strings.HasPrefix(prev.Decision, jobs.DecisionQueued)) {
+			prev.ModTime, prev.Decision, prev.Reason = st.ModTime().UnixNano(), "", ""
+			if err := s.Store.PutFile(*prev); err != nil {
+				log.Printf("scan %s: %v", path, err)
+			}
+		}
 		return false
 	}
 	if s.observe(path, st, now()) || !s.ready(path, st, now()) {

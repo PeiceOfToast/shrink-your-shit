@@ -127,9 +127,9 @@ func TestConvertAgainBesideReplacesOurOutput(t *testing.T) {
 	}
 }
 
-// #400: a file the person put at our output's name, the same size as our output, is not ours. Another
-// conversion into the same name (Beside) matches the path, the size and the time, so it fails
-// "There is already a file named" and leaves the file alone; a size-only match would delete it.
+// #400: a file the person put at our output's name, the same size as our output, is not ours: a size-only match
+// must never delete it. It is not an exact match, and it sits at our recorded output name, so (decision A) it is
+// moved into .syp-trash beside it, never deleted, and the new file takes the name.
 func TestBesideKeepsSameSizeUserFile(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Beside)
@@ -140,10 +140,13 @@ func TestBesideKeepsSameSizeUserFile(t *testing.T) {
 	s.id, _ = s.store.Enqueue(jobs.Job{Library: s.dir, Path: s.src, DurationSec: 100})
 	s.content = "newer"
 	w.RunOne(context.Background())
-	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "There is already a file named") {
+	if j := s.job(); j.Status != jobs.Done {
 		t.Errorf("%s %q", j.Status, j.Error)
 	}
-	if read(out) != own {
-		t.Errorf("the person's file %q was replaced by %q", own, read(out))
+	if read(out) != "newer" {
+		t.Errorf("at the name %q, want the new file", read(out))
+	}
+	if kept := trashedBeside(t, out); len(kept) != 1 || read(kept[0]) != own {
+		t.Errorf("trash %v, want the person's file kept once", kept)
 	}
 }

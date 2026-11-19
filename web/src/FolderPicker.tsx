@@ -29,7 +29,7 @@ function segments(p: string): [string, string][] {
   return out;
 }
 
-export function Browse({ value, onPick, start, label = "Browse..." }: { value: string; onPick: (p: string) => void; start?: string; label?: string }) {
+export function Browse({ value, onPick, start, label = "Browse…" }: { value: string; onPick: (p: string) => void; start?: string; label?: string }) {
   const [open, setOpen] = useState(false), btn = useRef<HTMLButtonElement>(null);
   return <>
     <button ref={btn} className="btn browse" type="button" aria-haspopup="dialog" onClick={() => setOpen(true)}><Icon id="i-folder" />{label}</button>
@@ -74,7 +74,7 @@ function Picker({ from, onPick, onClose }: { from: string; onPick: (p: string) =
         {(cur?.dirs.length ?? 0) > 50 && <input className="input" placeholder="Filter folders" aria-label="Filter folders" value={q} onChange={(e) => setQ(e.target.value)} />}
         <div className="list" aria-live="polite">
           {err ? <p className="st bad" role="alert" style={{ whiteSpace: "normal" }}><Icon id="i-alert" /><span>{err}</span></p>
-            : !cur ? <p className="muted">Opening...</p>
+            : !cur ? <p className="muted">Opening…</p>
             : !shown.length ? <p className="muted">{cur.path === "" ? "No drives found." : "No folders inside. You can use this one."}</p>
             : <ul aria-label="Folders">{shown.map((d) => <li key={d}><button type="button" onClick={() => go(join(cur.path, d))}><Icon id="i-folder" /><span>{d}</span></button></li>)}</ul>}
         </div>

@@ -126,7 +126,7 @@ export function Shell({ title, proto, children }: { title: string; proto: boolea
           <div className="crumb" aria-label="Breadcrumb"><span className="cur">{title}</span></div>
           <div className="sp" />
           <button className="search" type="button" aria-label="Search or jump to" onClick={() => setPalette(true)}>
-            <Icon id="i-search" /><span className="txt">Search or jump to...</span><span className="k">{mac ? "⌘ K" : "Ctrl K"}</span>
+            <Icon id="i-search" /><span className="txt">Search or jump to…</span><span className="k">{mac ? "⌘ K" : "Ctrl K"}</span>
           </button>
           <ThemeMenu />
         </header>
@@ -143,5 +143,5 @@ export function Shell({ title, proto, children }: { title: string; proto: boolea
 function ConnBar() {
   const { lost, lastAt } = useLiveStatus();
   if (!lost) return null;
-  return <div className="connbar" role="status" style={{ display: "flex" }}><Icon id="i-wifi-off" /><span>Lost connection to the server. Trying again...{lastAt && " (last update " + clock(lastAt) + ")"}</span></div>;
+  return <div className="connbar" role="status" style={{ display: "flex" }}><Icon id="i-wifi-off" /><span>Lost connection to the server. Trying again…{lastAt && " (last update " + clock(lastAt) + ")"}</span></div>;
 }
