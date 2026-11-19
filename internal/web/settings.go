@@ -166,7 +166,6 @@ func settingsRoutes(api *http.ServeMux, ss *settingsStore, access *Access, eng E
 		m["integrations"] = map[string]any{ // integrations come in a later slice; empty, so the page can show them
 			"sonarr": map[string]any{"url": "", "hasKey": false}, "radarr": map[string]any{"url": "", "hasKey": false},
 			"plex": map[string]any{"url": "", "hasKey": false}, "jellyfin": map[string]any{"url": "", "hasKey": false},
-			"notifications": map[string]any{"webhookUrl": "", "onDone": false, "onFailed": true, "onNeedsAttention": true},
 		}
 		return m
 	}
