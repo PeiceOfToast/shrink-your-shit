@@ -209,7 +209,7 @@ export function BackupSettings() {
 }
 
 // Updates (SCREENS:293, About block): the #324 switch, off until the person turns it on, and the version line.
-const SENT = "Once a day it asks GitHub which version is newest. GitHub sees this app's version and your IP address, as with any web request. Nothing about your files or settings is sent. It only tells you; nothing is installed.";
+const SENT = "Once a day it asks GitHub which version is newest. GitHub sees this app's version and your IP address, as with any web request. Nothing about your files or settings is sent. Checking installs nothing.";
 const at = (t: string) => `${day(t)}, ${new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 function Updates({ version }: { version?: string }) {
   const st = useData(getSettings, []), u = useData(getUpdate, []), [busy, setBusy] = useState(false), [said, setSaid] = useState("");
@@ -231,10 +231,10 @@ function Updates({ version }: { version?: string }) {
               : d.available && d.latest ? <><span className="pill warn"><Icon id="i-download" />Version {d.latest} is available</span>{d.url && <> <a href={d.url} target="_blank" rel="noopener">What's new</a></>}</>
                 : d.error && d.checkedAt ? <span className="st warn"><Icon id="i-alert" /><span>Couldn't check for updates at {at(d.checkedAt)}.</span></span>
                   : d.checkedAt ? <span className="muted">Up to date. Checked {at(d.checkedAt)}.</span> : <span className="muted">Not checked yet.</span>}</p>
-          {d.enabled && <button className="btn sm" type="button" disabled={busy} onClick={now}><Icon id="i-refresh" />{busy ? "Checking..." : "Check now"}</button>}
+          {d.enabled && d.install.state !== "downloading" && d.install.state !== "installing" && <button className="btn sm" type="button" disabled={busy} onClick={now}><Icon id="i-refresh" />{busy ? "Checking..." : "Check now"}</button>}
         </div>}
         {said && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{said}</span></p>}
-        {d && <Install d={d} reload={u.reload} />}
+        {d && <Install d={d} reload={u.reload} check={now} />}
       </div></section>);
 }
 
@@ -245,8 +245,8 @@ const REFUSED: Record<string, string> = { job_running: "A file just started conv
   updates_off: "Update checks are off. Turn them on to update.", update_in_progress: "", install_unsupported: "" };
 const noV = (m: string) => m.replace(/\bv(?=\d)/g, ""); // design gap d: versions read as on the Version line
 const copy = (t: string) => <div className="codebox"><code>{t}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(t).catch(() => {})}><Icon id="i-copy" />Copy</button></div>;
-function Install({ d, reload }: { d: UpdateNotice; reload: () => void }) {
-  const jobs = useData(getConverting, []), [busy, setBusy] = useState(false), [said, setSaid] = useState(""), [gone, setGone] = useState(false), [late, setLate] = useState(false);
+function Install({ d, reload, check }: { d: UpdateNotice; reload: () => void; check: () => void }) {
+  const jobs = useData(getConverting, []), [busy, setBusy] = useState(false), [said, setSaid] = useState(""), [gone, setGone] = useState(false), [late, setLate] = useState(false), [noNew, setNoNew] = useState(false);
   const st = d.install.state, running = st === "waiting" || st === "downloading" || st === "installing", n = jobs.data ?? 0, to = d.latest ?? "", last = d.lastResult;
   useEffect(() => {
     if (!running && !gone) return;
@@ -254,21 +254,21 @@ function Install({ d, reload }: { d: UpdateNotice; reload: () => void }) {
     return () => clearInterval(t);
   }, [running, gone, reload]);
   const go = async (when: "now" | "after-job") => {
-    setBusy(true); setSaid(""); holdLost(120000);
-    try { const r = await installUpdate(when); if (failed(r)) { setSaid(r.error.code in REFUSED ? REFUSED[r.error.code] : r.error.message); if (r.error.code === "job_running") setLate(true); jobs.reload(); } }
+    setBusy(true); setSaid(""); setNoNew(false);
+    try { const r = await installUpdate(when); if (!failed(r)) holdLost(120000); else { setNoNew(r.error.code === "not_available"); setSaid(r.error.code in REFUSED ? REFUSED[r.error.code] : r.error.message); if (r.error.code === "job_running") setLate(true); jobs.reload(); } }
     catch (e) { if (!(e instanceof SignedOut)) throw e; }
     setBusy(false); reload();
   };
   const wait = late || n > 0, retry = !!last && !last.ok && last.to === to;
-  const spin = (t: string) => <p className="st run" role="status" style={{ margin: 0 }}><span className="spin" style={{ display: "inline-flex" }}><Icon id="i-refresh" /></span><span>{t}</span></p>;
+  const spin = (t: string, rest = "") => <p className="st run" role="status" style={{ margin: 0, alignItems: "flex-start" }}><span className="spin" style={{ display: "inline-flex", marginTop: 2 }}><Icon id="i-refresh" /></span><span>{t}{rest && <span style={{ fontWeight: 400, color: "var(--text)" }}> {rest}</span>}</span></p>;
   return (<>
     {last && !running && !gone && (last.ok
       ? <p className="st ok" style={{ margin: 0 }}><Icon id="i-check-c" /><span>{noV(last.message)}.{d.url && <> <a href={d.url} target="_blank" rel="noopener">What's new</a></>}</span></p>
       : <p className="st warn" style={{ margin: 0, alignItems: "flex-start" }}><Icon id="i-alert" /><span className="why" style={{ fontWeight: 400, color: "var(--text)" }}>{noV(last.message)}.</span></p>)}
-    {gone ? spin("Restarting... this page reconnects by itself.")
+    {gone ? spin("Restarting...", "this page reconnects by itself.")
       : st === "waiting" ? <p role="status" style={{ margin: 0 }}>Updating to {to} when the converting files finish.</p>
       : st === "downloading" ? spin(`Downloading ${to}...`)
-      : st === "installing" ? spin(`Installing ${to}. The app restarts, and this page reconnects by itself.`)
+      : st === "installing" ? spin(`Installing ${to}.`, "The app restarts, and this page reconnects by itself.")
       : st === "failed" ? <p className="st warn" style={{ margin: 0, alignItems: "flex-start" }}><Icon id="i-alert" /><span>Couldn't update to {to}: <span style={{ fontWeight: 400, color: "var(--text)" }}>{d.install.error}. Nothing changed; still on {d.current}.</span></span></p>
       : null}
     {d.available && !running && !gone && (d.method === "helper" ? <div className="stack" style={{ gap: 6 }}>
@@ -284,7 +284,7 @@ function Install({ d, reload }: { d: UpdateNotice; reload: () => void }) {
       </div>
       : d.installType === "windows" ? <p style={{ margin: 0 }}>Download the new installer from the {d.url ? <a href={d.url} target="_blank" rel="noopener">release page</a> : "release page"}.</p>
       : d.installType === "source" ? <p style={{ margin: 0 }}>Built from source: pull and build again.</p> : null)}
-    {said && <p className="st warn" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{said}</span></p>}
+    {said && <p className="st warn" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{said}{noNew && <> <button className="linkbtn" type="button" onClick={() => (setSaid(""), setNoNew(false), check())}>Check now</button></>}</span></p>}
   </>);
 }
 
