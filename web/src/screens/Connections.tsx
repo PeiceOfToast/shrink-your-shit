@@ -7,6 +7,7 @@ import { PageHead } from "../PageHead";
 import { SettingsTabs } from "../pages";
 import { useData } from "../useData";
 import { clock } from "../format";
+import { getSettings, patchSettings } from "../libraryApi";
 import { addIntegration, listIntegrations, patchIntegration, removeIntegration, testIntegration } from "../connectionsApi";
 import type { Integration, IntegrationKind, IntegrationTestResult, PathMapping } from "../types/connections";
 
@@ -146,6 +147,22 @@ function AppCard({ kind, it, reload, said }: { kind: IntegrationKind; it?: Integ
     </section>);
 }
 
+// Updates (mockups/settings-integrations.html): the #324 switch, off until the person turns it on.
+function Updates() {
+  const st = useData(getSettings, []), [busy, setBusy] = useState(false), [said, setSaid] = useState(""), on = !!st.data?.checkForUpdates;
+  const set = async (v: boolean) => { setBusy(true); setSaid(""); const r = await patchSettings({ checkForUpdates: v }); setBusy(false);
+    if (failed(r)) setSaid(r.error.message); else st.reload(); };
+  return (
+    <section className="card" aria-labelledby="upd-h"><div className="hd"><h2 id="upd-h">Updates</h2></div>
+      <div className="bd stack">
+        <label className="row nw"><input type="checkbox" role="switch" className="switch" checked={on} disabled={!st.data || busy} aria-describedby="upd-hint" onChange={(e) => set(e.target.checked)} />
+          <span><strong>Check for updates: {on ? "on" : "off"}</strong></span></label>
+        <div><span className="hint" id="upd-hint">Once a day, asks GitHub whether a newer version exists. It only tells you; nothing is installed.</span>
+          <p className="st bad" role="status" style={{ margin: 0 }}>{said && <><Icon id="i-alert" /><span>{said}</span></>}</p></div>
+        <div className="note"><Icon id="i-shield" /><span>Shrink Your Shit sends nothing anywhere unless you turn something on here.</span></div>
+      </div></section>);
+}
+
 export function ConnectionsSettings() {
   const d = useData(listIntegrations, []), [said, setSaid] = useState("");
   const notHere = d.error && (d.error.code === "http_404" || d.error.code === "not_found");
@@ -153,6 +170,7 @@ export function ConnectionsSettings() {
     <div className="stack">
       <PageHead icon="i-settings" title="Settings" />
       <SettingsTabs at="connections" />
+      <Updates />
       <p className="muted" style={{ margin: 0 }}>Tell your media apps when a file changes, so they show the new size and codec and don't download it again.</p>
       <p className="muted" role="status" style={{ margin: 0 }}>{said}</p>
       {notHere ? <p className="muted">This server can't connect to Sonarr or Radarr yet.</p>

@@ -8,7 +8,7 @@ import { Icon } from "../Icon";
 import { PageHead } from "../PageHead";
 import { SignedOut, failed, type Answer } from "../api";
 import { bytes, plural } from "../format";
-import { getHealth, getSettings, getToken, getTrash, patchSettings, rotateToken, signOut } from "../libraryApi";
+import { checkUpdate, getHealth, getUpdate, getSettings, getToken, getTrash, patchSettings, rotateToken, signOut } from "../libraryApi";
 import { SettingsTabs } from "../pages";
 import { Link, navigate } from "../router";
 import { setRole } from "../setupApi";
@@ -207,6 +207,22 @@ export function BackupSettings() {
     </div>);
 }
 
+// The version line's update part (#324): off -> a link to the switch; on -> the last check, and Check now.
+function UpdateLine() {
+  const u = useData(getUpdate, []), [busy, setBusy] = useState(false), [said, setSaid] = useState(""), d = u.data;
+  const now = async () => { setBusy(true); setSaid(""); const r = await act(checkUpdate(), setSaid); setBusy(false); if (r) u.reload(); };
+  if (!d) return null;
+  if (!d.enabled) return <p className="muted" style={{ margin: 0 }}>Update checks are off. <Link to="/settings/connections">Turn them on</Link></p>;
+  return (
+    <div className="row" style={{ alignItems: "baseline" }}>
+      <p role="status" style={{ margin: 0 }}>{d.available && d.latest ? <><span className="pill warn"><Icon id="i-download" />Version {d.latest} is available</span>{d.url && <> <a href={d.url} target="_blank" rel="noopener">What's new</a></>}</>
+        : d.error ? <span className="st warn"><Icon id="i-alert" /><span>The last check didn't work: {d.error}</span></span>
+          : d.checkedAt ? <span className="muted">Up to date. Checked {day(d.checkedAt)}, {new Date(d.checkedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.</span> : <span className="muted">Not checked yet.</span>}</p>
+      <button className="btn sm" type="button" disabled={busy} onClick={now}><Icon id="i-refresh" />{busy ? "Checking..." : "Check now"}</button>
+      {said && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{said}</span></p>}
+    </div>);
+}
+
 // About (SCREENS V9: version, health report, licences): the old Settings > System's health checks and log lines.
 const BADGE: Record<string, [string, string]> = { ok: ["ok", "OK"], warn: ["warn", "Heads up"], bad: ["bad", "Fix this"] };
 export function AboutSettings() {
@@ -221,6 +237,7 @@ export function AboutSettings() {
             <ul className="stack" style={{ listStyle: "none", padding: 0, margin: 0 }} aria-live="polite" aria-label="Health checks">
               {h.data.checks.map((c) => { const [cls, word] = BADGE[c.status] ?? BADGE.warn; return <li key={c.id} className="row nw" style={{ alignItems: "baseline", gap: 8 }}><span className={"pill " + cls}>{word}</span><span>{c.label}{c.detail ? ". " + c.detail : ""}</span></li>; })}</ul>
             <p className="muted">Shrink Your Shit {h.data.version}</p></>}
+          <UpdateLine />
         </div></section>
       <section className="card" aria-labelledby="log-h"><div className="hd"><h2 id="log-h">Recent log lines</h2></div>
         <div className="bd"><pre className="mono sm" tabIndex={0} role="region" aria-labelledby="log-h" style={{ overflow: "auto", maxHeight: "16rem", margin: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{h.data ? (h.data.logsTail.length ? h.data.logsTail.join("\n") : "Nothing has been logged yet.") : ""}</pre></div></section>
