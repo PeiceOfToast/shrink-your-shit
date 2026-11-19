@@ -82,3 +82,46 @@ func TestWorkflowChangeDoesNotConvertAgainWhatConverted(t *testing.T) {
 		})
 	}
 }
+
+// Replace mode with the new file inside the library under a new name (a.mkv becomes a.mp4): after a workflow
+// change the new file is not queued as a new video, and the original is not converted again. The fake probe
+// reports every file as h264, so only the own-output check keeps a.mp4 from being queued (review-427 P2).
+func TestWorkflowChangeLeavesReplacedOutputInTheLibrary(t *testing.T) {
+	s, st, lib, _ := setup(t, h264Big)
+	libs, _ := st.Libraries()
+	libID := libs[0].ID
+	s.Targets = func() ([]Target, error) {
+		return []Target{{LibraryID: libID, Path: lib, Template: modeTemplate("replace", lib)}}, nil
+	}
+	a, out := filepath.Join(lib, "a.mkv"), filepath.Join(lib, "a.mp4")
+	if n := settle(s); n != 1 {
+		t.Fatalf("queued %d, want 1", n)
+	}
+	j, err := st.Claim("w")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// what the worker leaves behind: the original replaced by the smaller file under its new name
+	if err := os.Remove(a); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(out, []byte("123"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Complete(j.ID, out, 3); err != nil {
+		t.Fatal(err)
+	}
+	settle(s)
+	if _, err := st.SaveSlider(libID, 2, ""); err != nil { // forgets the library's file records
+		t.Fatal(err)
+	}
+	if n := settle(s); n != 0 {
+		t.Errorf("queued %d after the workflow change, want 0", n)
+	}
+	if got := len(jobsOf(t, st, a)); got != 1 {
+		t.Errorf("original: %d job rows, want 1", got)
+	}
+	if got := len(jobsOf(t, st, out)); got != 0 {
+		t.Errorf("our own output a.mp4: %d job rows, want 0 (not a new video)", got)
+	}
+}
