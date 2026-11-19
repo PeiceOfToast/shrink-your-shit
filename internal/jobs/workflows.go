@@ -680,10 +680,11 @@ func (s *Store) RecordEvent(kind string, data map[string]any) error {
 	return err
 }
 
-// JobEndsSince counts job history entries since at by the state they went to (done, failed, kept,
-// skipped, cancelled, ...): the summary's last 24 hours (V3c).
+// JobEndsSince counts files by the state of their latest end (done, failed, kept, skipped, cancelled) when
+// that end is at or after at: the summary's last 24 hours (V3c). A file that failed and then passed counts
+// once, as done, on the day it passed.
 func (s *Store) JobEndsSince(at string) (map[string]int, error) {
-	rows, err := s.db.Query(`SELECT COALESCE(to_status,''), COUNT(*) FROM events WHERE kind='job' AND at >= ? GROUP BY to_status`, at)
+	rows, err := s.db.Query(latestEndsSQL+`SELECT COALESCE(to_status,''), COUNT(*) FROM ends WHERE rn=1 AND at >= ? GROUP BY to_status`, at)
 	if err != nil {
 		return nil, err
 	}

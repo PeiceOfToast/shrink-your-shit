@@ -51,16 +51,25 @@ type Day struct {
 	WaitingBytes               int64 // the part of SavedBytes whose original is still kept in the trash
 }
 
-// Days are the last n days' totals, oldest first: conversions finished, files skipped (also stopped),
-// failed (also kept by a check), and the bytes freed, saved and waiting that day (NET, from t: TotalsOf's
-// per-day maps). A day before the first recorded history is Recorded false (zeroes, not estimates).
+// latestEndsSQL is every file's latest end (done, skipped, cancelled, failed, kept) with rn 1 for the newest:
+// a file is its path over all its job rows, so a requeued file that later passes has done as its latest end
+// and no failure left in the counts. The history itself stays in events; only the counts read this. Skip and
+// cancel delete the job row, so its end event names the path in its data: the file is still the same file.
+const latestEndsSQL = `WITH ends AS (SELECT e.at, e.to_status, ROW_NUMBER() OVER (PARTITION BY COALESCE(j.path, (SELECT json_extract(x.data, '$.path') FROM events x WHERE x.job_id=e.job_id AND json_extract(x.data, '$.path') IS NOT NULL ORDER BY x.seq DESC LIMIT 1), 'job:' || e.job_id) ORDER BY e.seq DESC) AS rn
+FROM events e LEFT JOIN jobs j ON j.id=e.job_id WHERE e.kind='job' AND e.to_status IN ('done','skipped','cancelled','failed','kept'))
+`
+
+// Days are the last n days' totals, oldest first: files finished, files skipped (also stopped), files failed
+// (also kept by a check), each counted once on the day of its latest end, and the bytes freed, saved and
+// waiting that day (NET, from t: TotalsOf's per-day maps). A day before the first recorded history is
+// Recorded false (zeroes, not estimates).
 func (s *Store) Days(n int, now time.Time, t Totals) ([]Day, error) {
 	var first string
 	s.db.QueryRow(`SELECT COALESCE(MIN(date(at, 'localtime')), '') FROM events WHERE kind='job'`).Scan(&first)
 	from := now.AddDate(0, 0, -(n - 1)).Format("2006-01-02")
 	by := map[string]*Day{}
-	rows, err := s.db.Query(`SELECT date(at, 'localtime') AS d, to_status, COUNT(*) FROM events
-WHERE kind='job' AND to_status IN ('done','skipped','cancelled','failed','kept') AND date(at, 'localtime') >= ? GROUP BY d, to_status`, from)
+	rows, err := s.db.Query(latestEndsSQL+`SELECT date(at, 'localtime') AS d, to_status, COUNT(*) FROM ends
+WHERE rn=1 AND date(at, 'localtime') >= ? GROUP BY d, to_status`, from)
 	if err != nil {
 		return nil, err
 	}
