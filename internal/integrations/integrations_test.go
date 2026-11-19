@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
@@ -336,5 +337,64 @@ func TestDisabledInstanceIsNotTold(t *testing.T) {
 	h.svc.Wait()
 	if steps, _ := h.st.Steps(id); len(steps) != 0 {
 		t.Fatalf("a disabled instance recorded steps: %+v", steps)
+	}
+}
+
+// A redirect is not followed, so the key never reaches the address it points at.
+func TestRedirectNeverCarriesTheKey(t *testing.T) {
+	var hits atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		io.WriteString(w, `{"version":"4.0.1"}`)
+	}))
+	t.Cleanup(other.Close)
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+r.URL.Path, http.StatusFound)
+	}))
+	t.Cleanup(first.Close)
+
+	h := newHarness(t)
+	res, err := h.svc.Test(TestIn{Kind: Sonarr, URL: strp(first.URL), APIKey: strp(goodKey)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK || !strings.Contains(res.Message, "redirect") {
+		t.Fatalf("result = %+v, want ok false with a redirect message", res)
+	}
+	if n := hits.Load(); n != 0 {
+		t.Fatalf("the redirect target got %d request(s); it must get none", n)
+	}
+	if strings.Contains(res.Message, goodKey) {
+		t.Fatal("the key appears in the message")
+	}
+}
+
+// /tv maps to /mnt/media/tv only at a path boundary: /mnt/media/tv2 is not inside it, and a series
+// folder that is a prefix of the file's folder is not its series.
+func TestPathMappingRespectsTheBoundary(t *testing.T) {
+	maps := []Mapping{{TheirPath: "/tv", OurPath: "/mnt/media/tv"}}
+	if got := toTheirs("/mnt/media/tv2/X.mkv", maps); got != "/mnt/media/tv2/X.mkv" {
+		t.Fatalf("toTheirs(/mnt/media/tv2/X.mkv) = %q, want unchanged", got)
+	}
+	if got := toTheirs("/mnt/media/tv/X.mkv", maps); got != "/tv/X.mkv" {
+		t.Fatalf("toTheirs(/mnt/media/tv/X.mkv) = %q", got)
+	}
+	if got, ok := toOurs("/tv2/X.mkv", maps); ok {
+		t.Fatalf("toOurs(/tv2/X.mkv) = %q, want no mapping", got)
+	}
+
+	arr := newFakeArr(t, "/tv/The Sho")
+	h := newHarness(t)
+	h.svc.Create(NewIntegration{Kind: Sonarr, Name: "Home", URL: arr.srv.URL, APIKey: goodKey, PathMappings: maps})
+	file := "/mnt/media/tv/The Show/s01e01.mkv"
+	id := h.job(t, file)
+	h.svc.Tell(id, file)
+	h.svc.Wait()
+	if n := len(arr.commandsSeen()); n != 0 {
+		t.Fatalf("a rescan went to a series whose folder is only a prefix of the file's (%d)", n)
+	}
+	steps, _ := h.st.Steps(id)
+	if len(steps) != 1 || steps[0].OK {
+		t.Fatalf("steps = %+v, want one not-ok step", steps)
 	}
 }

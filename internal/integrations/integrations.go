@@ -183,9 +183,13 @@ type Service struct {
 // New makes the service over st.
 func New(st *jobs.Store, o Options) *Service {
 	s := &Service{st: st, client: o.Client, now: o.Now, logf: o.Logf}
-	if s.client == nil {
-		s.client = &http.Client{Timeout: answerTimeout}
+	// The key goes only to the address saved. A redirect is not followed: it would carry the key to another host.
+	c := http.Client{Timeout: answerTimeout}
+	if o.Client != nil {
+		c = *o.Client
 	}
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	s.client = &c
 	if s.now == nil {
 		s.now = time.Now
 	}
@@ -643,6 +647,9 @@ func ok2(st int) bool { return st >= 200 && st < 300 }
 func answer(label string, st int) string {
 	if st == http.StatusUnauthorized {
 		return label + " answered 401: the API key is wrong."
+	}
+	if st >= 300 && st < 400 {
+		return label + " answered with a redirect to another address; check the address."
 	}
 	return fmt.Sprintf("%s answered %d.", label, st)
 }
