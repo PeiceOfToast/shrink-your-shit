@@ -107,10 +107,7 @@ func main() {
 			}
 			return "", fmt.Errorf("could not read the installed version: %v %s", err, out)
 		}}
-	if err := repairLeftovers(h.bin); err != nil { // a crash during an install or roll back left files in the wrong names
-		log.Printf("update leftovers: %v", err)
-	}
-	go h.readPrevious() // a helper restarted after an update still knows what its previous version is
+	h.startup() // the leftovers, and an install a crash cut short, are dealt with before the first request is taken
 
 	dir := filepath.Dir(*sock)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -318,24 +315,158 @@ func (h *helper) install(version string) error {
 			return errors.Join(err, cerr, restoreOlder())
 		}
 	}
+	// The record goes in before <bin> changes, so a crash after the swap finds it (see recoverPending).
+	// Order on the failure paths: the record goes before .new, so a crash between the two never leaves a record
+	// with no .new (recoverPending reads a missing .new as "swapped").
+	if err := writePending(h.bin+pendingSuffix, version); err != nil {
+		clearPending(h.bin)
+		os.Remove(next)
+		return errors.Join(err, os.Remove(prev), restoreOlder())
+	}
 	if err := os.Rename(next, h.bin); err != nil { // <bin> is still the current program; nothing changed
+		clearPending(h.bin)
 		os.Remove(next)
 		return errors.Join(err, os.Remove(prev), restoreOlder())
 	}
 	if h.restartHealthy() {
+		clearPending(h.bin)
 		if hadPrev {
 			os.Remove(older)
 		}
 		return nil
 	}
-	if err := os.Rename(prev, h.bin); err != nil { // rule 3: the new program goes, the previous comes back
+	return h.undoInstall(version, restoreOlder)
+}
+
+// undoInstall puts the previous program back in place of the one that did not answer (version), keeps the copy
+// before it as the previous one again, and restarts the service. The restart still happens if the copy fails.
+func (h *helper) undoInstall(version string, restoreOlder func() error) error {
+	if err := os.Rename(h.bin+".previous", h.bin); err != nil { // rule 3: the new program goes, the previous comes back
 		return fmt.Errorf("v%s did not answer, and the previous version could not be put back: %v", version, err)
 	}
+	clearPending(h.bin)
 	msg := fmt.Sprintf("v%s did not answer within %s; rolled back to the previous version", version, h.wait)
-	if err := restoreOlder(); err != nil { // and the copy before it is kept as the previous one again; the restart still happens
+	if err := restoreOlder(); err != nil {
 		msg += fmt.Sprintf(", but the version before it could not be kept as the previous one: %v", err)
 	}
 	return h.afterUndo(msg)
+}
+
+// startup fixes what a crash left behind, before the socket listens. An install a crash cut short is finished in
+// the background (it refuses other operations meanwhile, and reads the previous version when it ends); otherwise
+// the previous version is read once here, while nothing else can change the files.
+func (h *helper) startup() {
+	if err := repairLeftovers(h.bin); err != nil { // a crash during an install or roll back left files in the wrong names
+		log.Printf("update leftovers: %v", err)
+	}
+	if h.recoverPending() {
+		return
+	}
+	h.readPrevious() // a helper restarted after an update still knows what its previous version is
+}
+
+// recoverPending finishes an install a crash cut short, when the pending record is still there. It reports whether
+// it started that in the background; a failure is shown in status like any other.
+func (h *helper) recoverPending() bool {
+	b, err := os.ReadFile(h.bin + pendingSuffix)
+	if err != nil {
+		return false // none
+	}
+	want := strings.TrimSpace(string(b))
+	if !update.ValidVersion(want) {
+		log.Printf("update leftovers: %s does not name a version; removed", h.bin+pendingSuffix)
+		clearPending(h.bin)
+		return false
+	}
+	h.mu.Lock()
+	h.busy, h.state, h.err, h.done = true, "installing", "", make(chan struct{})
+	h.gen++
+	h.mu.Unlock()
+	go func() {
+		err := h.finishPending(want)
+		h.readPrevious()
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		h.busy, h.state, h.err = false, "idle", ""
+		h.gen++
+		if err != nil {
+			h.state, h.err = "failed", err.Error()
+			log.Printf("update leftovers: finishing the install of v%s failed: %v", want, err)
+		} else {
+			log.Printf("update leftovers: finished the install of v%s", want)
+		}
+		close(h.done)
+	}()
+	return true
+}
+
+// finishPending decides from the files, never by running the program (a broken new program may not run at all).
+// The rename next -> bin is the only thing that removes <bin>.new after the record is written, and the failure paths
+// clear the record before they remove .new. So a .new still there means the swap never happened.
+func (h *helper) finishPending(want string) error {
+	next := h.bin + ".new"
+	if exists(next) {
+		clearPending(h.bin)
+		if err := os.Remove(next); err != nil && !os.IsNotExist(err) {
+			log.Printf("update leftovers: could not remove %s: %v", next, err) // harmless: the next install replaces it
+		}
+		return nil
+	}
+	prev := h.bin + ".previous"
+	older := prev + ".older"
+	if h.restartHealthy() {
+		clearPending(h.bin)
+		os.Remove(older) // as install's success path does: the copy before the previous one is no longer needed
+		return nil
+	}
+	return h.undoInstall(want, func() error {
+		if !exists(older) {
+			return nil
+		}
+		return os.Rename(older, prev)
+	})
+}
+
+// pendingSuffix names <bin>.pending: the version an install is swapping in, until its new program has answered.
+const pendingSuffix = ".pending"
+
+// writePending records version at path, synced with its folder, so a crash after the swap still finds it.
+func writePending(path, version string) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(version)
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = syncDir(filepath.Dir(path))
+	}
+	if err != nil {
+		os.Remove(path)
+	}
+	return err
+}
+
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
+}
+
+// clearPending removes the record of an install. A record that is left behind is checked at the next start
+// (recoverPending), so a failure here is only logged.
+func clearPending(bin string) {
+	if err := os.Remove(bin + pendingSuffix); err != nil && !os.IsNotExist(err) {
+		log.Printf("update: could not remove %s: %v", bin+pendingSuffix, err)
+	}
 }
 
 // rollback swaps the program and the previous one, and swaps them back if the previous does not answer.
