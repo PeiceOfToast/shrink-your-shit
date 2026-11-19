@@ -19,6 +19,7 @@ let items: JobItem[] = [
   base("48222", "Wedding.2019.mp4", ".", HOME, "retry_wait", { subState: "retrying", attempts: 1, retryAt: new Date(now + 25 * 60e3).toISOString(), status: "retrying", reason: { code: "low_disk_space", message: "there is not enough free disk space next to this file: about 65.2 MB is needed to convert it safely, 592.0 KB is free" },
     detail: "there is not enough free disk space next to this file: about 65.2 MB is needed to convert it safely, 592.0 KB is free", bytes: 1.1 * GB }),
   base("48160", "Arrival.2016.1080p.BluRay.mkv", "Arrival (2016)", MOV, "completed", { beforeBytes: 11.4 * GB, afterBytes: 5.9 * GB, bytes: 5.9 * GB, codec: "HEVC", finishedAt: at(40), flow: { id: "w1", name: "Shrink videos" }, originalState: "kept", keptDaysLeft: 7, keptId: "9" }),
+  base("48165", "Severance.S02E01.1080p.WEB-DL.mkv", "Season 2", TV, "completed", { beforeBytes: 4.2 * GB, afterBytes: 1.9 * GB, bytes: 1.9 * GB, codec: "HEVC", finishedAt: at(50), flow: { id: "w1", name: "Shrink videos" } }),
   base("41002", "Alien.1979.1080p.mkv", "Alien (1979)", MOV, "completed", { beforeBytes: 9.8 * GB, afterBytes: 4.4 * GB, bytes: 4.4 * GB, codec: "HEVC", finishedAt: at(60 * 24 * 9), flow: { id: "w1", name: "Shrink videos" }, originalState: "removed" }),
   base("skip-1", "Blade.Runner.2049.2017.2160p.DV.mkv", "Blade Runner 2049 (2017)", MOV, "skipped", { reason: { code: "dolby_vision", message: "It has Dolby Vision (profile 5), which can't be kept when it is converted." }, detail: "It has Dolby Vision (profile 5), which can't be kept when it is converted.", skippedId: "1", codec: "HEVC", resolution: "2160p" }),
   base("skip-2", "Severance.S02E07.1080p.WEB-DL.mkv", "Season 2", TV, "cancelled", { jobId: "47002", // #149: a stopped job keeps its job (steps, tries)
@@ -94,6 +95,7 @@ export function mockJobLog(id: string): { state: string; steps: { name: string; 
   ] };
 }
 const FELL = "hevc_qsv failed (ffmpeg exited with code 1); converted on the processor."; // #323's step words
+const NOT_TOLD = "Sonarr didn't answer in 60 s; it will notice the file at its next scan."; // #333's media_refresh words
 export function mockJob(id: string): JobDetail | null {
   if (id === REMOVED.id) return REMOVED;
   const j = items.find((x) => x.id === id || (x.jobId === id && x.origin === "scan"));
@@ -115,10 +117,11 @@ export function mockJob(id: string): JobDetail | null {
     steps: old ? [] : [{ step: "found", at: at(300), ok: true, words: "Found in " + j.path.replace(/\/[^/]+$/, "") + "." }, { step: "checked", at: at(300), ok: true, words: "To be converted: H.264 at 12109 kbps." },
       ...(j.id === "48160" ? [{ step: "encoder_fallback", at: at(30), ok: false, words: FELL }] : []),
       ...(j.state === "completed" ? [{ step: "converted", at: at(12), ok: true, words: "Converted: HEVC · 8-bit · MKV." }, { step: "verified", at: at(11), ok: true, words: "Every check passed: the new file is complete, plays cleanly and looks like the original." }] : []),
+      ...(j.id === "48165" ? [{ step: "media_refresh", at: at(11), ok: true, words: "Sonarr rescanned Severance." }, { step: "media_refresh", at: at(10), ok: false, words: NOT_TOLD }] : []),
       ...(j.state === "failed" && j.id === "48190" ? [{ step: "converted", at: at(12), ok: false, words: "The new file is 4 s shorter than the original. The original is kept." }] : []),
       ...(j.state === "failed" && j.id === "48191" ? [{ step: "converted", at: at(12), ok: false, words: "There isn't enough free space to write the new file. About 571 MB is needed, 101 MB is free." }] : []),
       ...(j.state === "failed" && j.id === "failed-replace" ? [{ step: "found", at: at(300), ok: true, words: "Found in /media/home/Failed Saves." }, { step: "checked", at: at(100), ok: true, words: "To be converted: H.264 at 8000 kbps." }, { step: "converted", at: at(15), ok: true, words: "Converted: HEVC · 8-bit · MKV." }, { step: "verified", at: at(14), ok: true, words: "Every check passed." }, { step: "saved", at: at(13), ok: false, words: "Saving in place failed: permission denied." }] : [])],
-    warning: j.id === "48160" ? FELL : null,
+    warning: j.id === "48160" ? FELL : j.id === "48165" ? NOT_TOLD : null,
     metadata: { before: old ? null : { container: "matroska,webm", videoCodec: "h264", bitrateKbps: 12109, durationSec: 7200, sizeBytes: j.beforeBytes ?? j.bytes, streams: [{ index: 0, type: "video", codec: "h264", Width: 1920, Height: 1080 }, { index: 1, type: "audio", codec: "dts", channels: 6, channelLayout: "5.1" }] },
       after: j.state === "completed" ? { container: "matroska,webm", videoCodec: "hevc", bitrateKbps: 5300, durationSec: 7200, sizeBytes: j.afterBytes, streams: [{ index: 0, type: "video", codec: "hevc", Width: 1920, Height: 1080 }, { index: 1, type: "audio", codec: "aac", channels: 2, channelLayout: "stereo" }] } : null },
   };
