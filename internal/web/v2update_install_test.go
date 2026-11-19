@@ -315,3 +315,25 @@ func TestUpdateGetSaysWhatRollbackAndInstallNeed(t *testing.T) {
 		t.Errorf("docker: helperCommand %v, rollback %v", body["helperCommand"], rb)
 	}
 }
+
+// A failed update that the app rolled back says the rollback worked, in lastResult.rolledBack; a roll back
+// that did not get the old version back does not.
+func TestUpdateLastResultSaysTheRollbackWorked(t *testing.T) {
+	srv, u, _, _ := installServer(t, "script")
+	if _, err := update.Settle(u.dataDir, &update.Marker{Kind: "update", From: "0.1.1", To: "0.2.0"}, "0.1.1", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	_, body := getJSON(t, srv.URL+"/api/v2/update")
+	last, _ := body["lastResult"].(map[string]any)
+	if last["ok"] != false || last["rolledBack"] != true {
+		t.Errorf("after a rollback that worked: lastResult %v", body["lastResult"])
+	}
+	if _, err := update.Settle(u.dataDir, &update.Marker{Kind: "rollback", From: "0.2.0", To: "0.1.1"}, "0.2.0", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	_, body = getJSON(t, srv.URL+"/api/v2/update")
+	last, _ = body["lastResult"].(map[string]any)
+	if last["ok"] != false || last["rolledBack"] != false {
+		t.Errorf("after a roll back that failed: lastResult %v", body["lastResult"])
+	}
+}
