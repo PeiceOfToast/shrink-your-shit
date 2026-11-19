@@ -122,15 +122,32 @@ func TestRollbackExchangesInOneStep(t *testing.T) {
 	}
 }
 
-// A disk that cannot exchange refuses the roll back and changes nothing.
-func TestRollbackRefusedWhereTheDiskCannotExchange(t *testing.T) {
+// A disk that cannot exchange swaps by renames: the roll back still swaps both files.
+func TestRollbackFallsBackToRenamesWhereTheDiskCannotExchange(t *testing.T) {
 	h, _ := testHelper(t, "", func() bool { return true })
 	writeFile(t, h.bin+".previous", "prev")
-	old := exchange
-	exchange = func(a, b string) error { return syscall.EINVAL }
-	t.Cleanup(func() { exchange = old })
+	old := renameExchange
+	renameExchange = func(a, b string) error { return syscall.EINVAL }
+	t.Cleanup(func() { renameExchange = old })
 	h.handle(update.HelperRequest{Cmd: "rollback"})
-	if a := finish(t, h); a.State != "failed" || read(t, h.bin) != "old" || read(t, h.bin+".previous") != "prev" {
-		t.Errorf("after: %+v, bin %q, previous %q", a, read(t, h.bin), read(t, h.bin+".previous"))
+	if a := finish(t, h); a.State != "idle" || read(t, h.bin) != "prev" || read(t, h.bin+".previous") != "old" {
+		t.Errorf("rollback by renames: %+v, bin %q, previous %q", a, read(t, h.bin), read(t, h.bin+".previous"))
+	}
+	if exists(h.bin + ".swap") {
+		t.Error("a temp name was left behind")
+	}
+}
+
+// A previous that is a copy of the program (crash between the copy and the rename) is removed by repair.
+func TestRepairRemovesAPreviousThatIsACopyOfTheProgram(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "shrink-your-shit")
+	writeFile(t, bin, "current")
+	writeFile(t, bin+".previous", "current")
+	writeFile(t, bin+".previous.older", "older")
+	if err := repairLeftovers(bin); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, bin+".previous") != "older" || read(t, bin) != "current" {
+		t.Errorf("previous %q, bin %q", read(t, bin+".previous"), read(t, bin))
 	}
 }

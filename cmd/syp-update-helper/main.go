@@ -25,6 +25,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -374,13 +375,32 @@ func (h *helper) restartHealthy() bool {
 	}
 }
 
-// exchange swaps a and b in one step, so neither name is ever missing. Tests replace it.
+// exchange swaps a and b in one step, so neither name is ever missing. Where the disk can't do that
+// (EINVAL, ENOSYS, ENOTSUP), it swaps by renames instead, which leaves a short window with no program at
+// the name: a roll back is the person's way out of a bad update, so it must still work there.
 var exchange = func(a, b string) error {
-	err := unix.Renameat2(unix.AT_FDCWD, a, unix.AT_FDCWD, b, unix.RENAME_EXCHANGE)
+	err := renameExchange(a, b)
 	if errors.Is(err, unix.EINVAL) || errors.Is(err, unix.ENOSYS) || errors.Is(err, unix.ENOTSUP) {
-		return fmt.Errorf("this disk can't swap the programs in one step, so nothing was changed: %v", err)
+		log.Printf("swap %s and %s by renames: this disk can't exchange in one step (%v)", a, b, err)
+		return swapByRenames(a, b)
 	}
 	return err
+}
+
+// renameExchange is the one-step swap. Tests replace it to see a disk that can't do it.
+var renameExchange = func(a, b string) error {
+	return unix.Renameat2(unix.AT_FDCWD, a, unix.AT_FDCWD, b, unix.RENAME_EXCHANGE)
+}
+
+func swapByRenames(a, b string) error {
+	tmp := a + ".swap"
+	if err := os.Rename(a, tmp); err != nil {
+		return err
+	}
+	if err := os.Rename(b, a); err != nil {
+		return errors.Join(err, os.Rename(tmp, a))
+	}
+	return os.Rename(tmp, b)
 }
 
 // link makes prev a second name for the program. Tests replace it to see a disk without hard links.
@@ -422,15 +442,16 @@ func copyFile(src, dst string) error {
 const copyingSuffix = ".copying"
 
 // repairLeftovers fixes what a crash during an install left behind (the install's order: previous -> older,
-// link the program as previous, rename the new program in). Two cases:
-//   - previous is the same file as the program (the crash came between the link and the rename): previous
-//     is removed, which leaves the program as it was.
+// link or copy the program as previous, rename the new program in). Two cases:
+//   - previous is the program itself: the same file (the crash came between the link and the rename), or a
+//     copy with the same bytes (between the copy and the rename, on a disk without hard links). Either way
+//     previous is removed, so a roll back cannot "succeed" into the same version.
 //   - previous is missing but older is there: older is the version before the last install; it is put back
 //     as previous so a roll back still reaches it.
 func repairLeftovers(bin string) error {
 	prev := bin + ".previous"
 	os.Remove(prev + copyingSuffix) // a copy that never got renamed
-	if sameFile(prev, bin) {
+	if sameProgram(prev, bin) {
 		if err := os.Remove(prev); err != nil {
 			return err
 		}
@@ -445,6 +466,16 @@ func sameFile(a, b string) bool {
 	fa, err1 := os.Stat(a)
 	fb, err2 := os.Stat(b)
 	return err1 == nil && err2 == nil && os.SameFile(fa, fb)
+}
+
+// sameProgram is true when a and b are one file or two files with the same bytes.
+func sameProgram(a, b string) bool {
+	if sameFile(a, b) {
+		return true
+	}
+	ba, err1 := os.ReadFile(a)
+	bb, err2 := os.ReadFile(b)
+	return err1 == nil && err2 == nil && bytes.Equal(ba, bb)
 }
 
 func exists(p string) bool { _, err := os.Stat(p); return err == nil }
