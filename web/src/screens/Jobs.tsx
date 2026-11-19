@@ -134,6 +134,12 @@ export function Jobs() {
         <button className="btn sm ghost phone" type="button" aria-pressed={selecting} onClick={() => (setSelecting(!selecting), setSel([]))}>{selecting ? "Done" : "Select"}</button>
         <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions}</div></details>
         {sel.length > 0 && <span className="muted sm">{sel.length} selected</span>}
+        {/* parity 11-19 #2 (G4): pick a library here too; it sets the same ?libraryId= as "See its jobs", and the chip above stays */}
+        {(libs.data?.length ?? 0) > 1 && <select className="input sm lib" aria-label="Library" value={library} onChange={(e) => navigate("/jobs?tab=" + tab + (e.target.value ? "&libraryId=" + encodeURIComponent(e.target.value) : ""))}>
+          <option value="">Library: All</option>
+          {libs.data?.map((l) => <option key={l.id} value={l.id}>Library: {l.name}</option>)}
+          {library && !libs.data?.some((l) => l.id === library) && <option value={library}>Library: {library}</option>}
+        </select>}
         <input className="input find" type="search" placeholder="Search file names" aria-label="Search file names" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       <p className="muted" role="status">{said}</p>
