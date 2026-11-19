@@ -3,6 +3,7 @@
 package update
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -76,6 +77,8 @@ func TestNewer(t *testing.T) {
 		{"0.2.0", "dev", false}, // a development build never has an update
 		{"junk", "0.1.1", false},
 		{"0.2", "0.1.1", false},
+		{"0.2.0-rc1", "0.1.1", false}, // a pre-release is never offered
+		{"0.2.0", "0.1.1-qa", false},  // a build that is not x.y.z shows no notice
 	}
 	for _, c := range cases {
 		if got := newer(c.latest, c.current); got != c.want {
@@ -204,6 +207,28 @@ func TestInstallType(t *testing.T) {
 	for _, c := range cases {
 		if got := InstallType(c.current, c.goos, c.e); got != c.want {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// With checks off the background loop never asks GitHub; turned on, it does.
+func TestRunAsksNothingWhileChecksAreOff(t *testing.T) {
+	firstWait, everyWait = time.Millisecond, time.Millisecond
+	t.Cleanup(func() { firstWait, everyWait = time.Minute, time.Hour })
+	srv, n := fakeGitHub(t, http.StatusOK, releaseJSON("v0.2.0", false, false), 0)
+	var on atomic.Bool
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { Run(ctx, &Checker{Store: &memStore{}, Current: "0.1.1", URL: srv.URL}, on.Load); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+	time.Sleep(100 * time.Millisecond) // many ticks with checks off
+	if got := n.Load(); got != 0 {
+		t.Fatalf("%d requests to GitHub with checks off, want 0", got)
+	}
+	on.Store(true)
+	for deadline := time.Now().Add(5 * time.Second); n.Load() == 0; time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("no request after checks were turned on")
 		}
 	}
 }

@@ -183,17 +183,20 @@ func (c *Checker) fetch() (release, error) {
 	return release{Latest: strings.TrimPrefix(in.TagName, "v"), Notes: in.Body, URL: in.HTMLURL, PublishedAt: in.PublishedAt}, nil
 }
 
+// firstWait and everyWait pace Run; tests shorten them.
+var firstWait, everyWait = time.Minute, time.Hour
+
 // Run checks once a minute after start and then every hour, while on() says checks are on. A check is
 // made only when the last one is a day old, so GitHub is asked at most once a day. It returns when ctx ends.
 func Run(ctx context.Context, c *Checker, on func() bool) {
-	wait := time.Minute
+	wait := firstWait
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(wait):
 		}
-		wait = time.Hour
+		wait = everyWait
 		if on() {
 			c.Check(24 * time.Hour)
 		}
