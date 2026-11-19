@@ -111,10 +111,14 @@ export function Overview() {
   const on = rows.filter((w) => w.status === "busy" || w.status === "online").length, fin = rows.filter((w) => w.status === "draining").length;
   const busy = rows.some((w) => w.jobs.length > 0), failed24 = sum.data && !failed(sum.data) ? sum.data.last24h.failed : null;
   const rec = v.daily.filter((d) => d.recorded), first = rec[0]?.day, add = (f: (d: Day) => number) => rec.reduce((a, d) => a + f(d), 0);
-  const tot = { done: add((d) => d.completed), skipped: add((d) => d.skipped), failed: add((d) => d.failed), freed: add((d) => d.freedBytes), saved: add((d) => d.savedBytes ?? 0), waiting: add((d) => d.waitingBytes ?? 0) };
-  // run 2 (11-19): a kept original (headline couldFree) is in savedBytes but neither freed nor in the trash, so the
-  // freed/waiting split would call it freed; until daily[] says which part is kept, plot savedBytes as one series, "Files made smaller per day" (design 11-19, SCREENS line 36)
-  const hasSaved = rec.some((d) => d.savedBytes != null), kept = h.couldFree > 0 && hasSaved, split = !kept && hasSaved, load = rows.some((w) => w.cpuPercent != null || w.gpuPercent != null);
+  const tot = { done: add((d) => d.completed), skipped: add((d) => d.skipped), failed: add((d) => d.failed), freed: add((d) => d.freedBytes), saved: add((d) => d.savedBytes ?? 0), waiting: add((d) => d.waitingBytes ?? 0), kept: add((d) => d.couldFreeBytes ?? 0) };
+  // run 2 (11-19): a kept original (headline couldFree) is in savedBytes but neither freed nor in the trash. A server with
+  // daily couldFreeBytes (#367) says which part is kept: Freed / Waiting in the trash / Originals kept. An older one doesn't,
+  // so plot savedBytes as one series, "Files made smaller per day" (design 11-19, SCREENS line 36)
+  const hasSaved = rec.some((d) => d.savedBytes != null), three = hasSaved && rec.some((d) => d.couldFreeBytes != null), kept = !three && h.couldFree > 0 && hasSaved, split = !kept && hasSaved, load = rows.some((w) => w.cpuPercent != null || w.gpuPercent != null);
+  // design 11-19: never "0 KB" in the note; only the parts there are
+  const freedPart = Math.max(0, tot.saved - tot.waiting - tot.kept), spaceNote = [freedPart > 0 ? bytes(freedPart) + " freed" : "nothing freed yet",
+    tot.waiting > 0 && bytes(tot.waiting) + " waiting in the trash", tot.kept > 0 && bytes(tot.kept) + " in kept originals"].filter(Boolean).join(" · ");
   const workerOf = (id: string) => rows.find((w) => w.jobs.some((j) => j.jobId === id))?.name;
   const more = [h.waitingToFree > 0 && bytes(h.waitingToFree) + (h.freed > 0 ? " more" : " frees") + (h.nextFreeAt ? " by " + dayName(h.nextFreeAt.slice(0, 10)) : ""), h.couldFree > 0 && "could free " + bytes(h.couldFree) + " if you remove the originals"].filter(Boolean).join(" · ");
   return (
@@ -153,9 +157,10 @@ export function Overview() {
             {/* workshop 11-19: savedBytes and waitingBytes are dated by the day a conversion finished, freedBytes by the day an
                 original was deleted, so the split is savedBytes - waitingBytes freed + waitingBytes waiting; never freedBytes + waitingBytes.
                 An older server without savedBytes: freed per delete day only. No top tick: a bar's height adds parts kept apart */}
-            <DayBars title={kept ? "Files made smaller per day" : "Space saved per day"} days={v.daily} fmt={bytes} tick={!split} note={kept ? bytes(tot.saved) + " smaller · " + (h.freed > 0 ? bytes(h.freed) + " freed so far" : "nothing freed yet: originals are kept") : split ? bytes(tot.saved - tot.waiting) + " freed · " + bytes(tot.waiting) + " waiting in the trash" : bytes(tot.freed) + " freed"}
+            <DayBars title={kept ? "Files made smaller per day" : "Space saved per day"} days={v.daily} fmt={bytes} tick={!split} note={kept ? bytes(tot.saved) + " smaller · " + (h.freed > 0 ? bytes(h.freed) + " freed so far" : "nothing freed yet: originals are kept") : split ? spaceNote : bytes(tot.freed) + " freed"}
               extra={(d) => (split && (d.waitingBytes ?? 0) > 0 && h.nextFreeAt ? "Frees from " + dayName(h.nextFreeAt.slice(0, 10)) : null)}
-              series={split ? [{ label: "Freed", color: "var(--success)", value: (d) => Math.max(0, (d.savedBytes ?? 0) - (d.waitingBytes ?? 0)) }, { label: "Waiting in the trash", color: "var(--chart-pending)", value: (d) => d.waitingBytes ?? 0 }]
+              series={split ? [{ label: "Freed", color: "var(--success)", value: (d) => Math.max(0, (d.savedBytes ?? 0) - (d.waitingBytes ?? 0) - (d.couldFreeBytes ?? 0)) }, { label: "Waiting in the trash", color: "var(--chart-pending)", value: (d) => d.waitingBytes ?? 0 },
+                ...(tot.kept > 0 ? [{ label: "Originals kept", color: "var(--chart-muted)", value: (d: Day) => d.couldFreeBytes ?? 0 }] : [])]
                 : kept ? [{ label: "Smaller", color: "var(--success)", value: (d) => d.savedBytes ?? 0 }]
                 : [{ label: "Freed", color: "var(--success)", value: (d) => d.freedBytes }]} />
             <DayBars title="Files per day" days={v.daily} fmt={count} note={[count(tot.done) + " done", count(tot.skipped) + " skipped", count(tot.failed) + " failed"].join(" · ")}
@@ -165,8 +170,8 @@ export function Overview() {
             <span>New files, on average <b>{v.averages.fileShrinkPercent == null ? "not recorded" : Math.round(v.averages.fileShrinkPercent) + "% smaller"}</b></span>
             <span>Time per GB <b>{perGB(v.averages.secondsPerGB)}</b></span>
             <details><summary className="muted">Show as a table</summary>
-              <div className="daytbl"><table className="tbl"><thead><tr><th>Day</th><th className="num">{kept ? "Smaller" : split ? "Saved" : "Freed"}</th>{split && <th className="num">Waiting in the trash</th>}<th className="num">Done</th><th className="num">Skipped</th><th className="num">Failed</th></tr></thead>
-                <tbody>{[...v.daily].reverse().map((d) => <tr key={d.day}><td>{dayName(d.day)}</td>{d.recorded ? <><td className="num">{bytes(split || kept ? d.savedBytes ?? 0 : d.freedBytes)}</td>{split && <td className="num">{bytes(d.waitingBytes ?? 0)}</td>}<td className="num">{count(d.completed)}</td><td className="num">{count(d.skipped)}</td><td className="num">{count(d.failed)}</td></> : <td colSpan={split ? 5 : 4} className="muted">not recorded</td>}</tr>)}</tbody></table></div>
+              <div className="daytbl"><table className="tbl"><thead><tr><th>Day</th><th className="num">{kept ? "Smaller" : split ? "Saved" : "Freed"}</th>{split && <th className="num">Waiting in the trash</th>}{three && tot.kept > 0 && <th className="num">Originals kept</th>}<th className="num">Done</th><th className="num">Skipped</th><th className="num">Failed</th></tr></thead>
+                <tbody>{[...v.daily].reverse().map((d) => <tr key={d.day}><td>{dayName(d.day)}</td>{d.recorded ? <><td className="num">{bytes(split || kept ? d.savedBytes ?? 0 : d.freedBytes)}</td>{split && <td className="num">{bytes(d.waitingBytes ?? 0)}</td>}{three && tot.kept > 0 && <td className="num">{bytes(d.couldFreeBytes ?? 0)}</td>}<td className="num">{count(d.completed)}</td><td className="num">{count(d.skipped)}</td><td className="num">{count(d.failed)}</td></> : <td colSpan={(split ? 5 : 4) + (three && tot.kept > 0 ? 1 : 0)} className="muted">not recorded</td>}</tr>)}</tbody></table></div>
             </details>
           </div></>}
         {first && rec.length >= 2 && <p className="muted sm">History starts {dayName(first)}, when this install began keeping it. Earlier days are not recorded, not estimated.{MOCK || /^(Etc\/)?UTC$/.test(v.timeZone) ? "" : " Days run midnight to midnight, " + v.timeZone.split("/").pop()!.replace(/_/g, " ") + " time."}</p>}
