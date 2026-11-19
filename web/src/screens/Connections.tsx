@@ -34,7 +34,7 @@ export function testSentence(kind: IntegrationKind, r: IntegrationTestResult): s
 }
 
 function Status({ it }: { it: Integration | undefined }) {
-  if (!it) return <span className="st"><Icon id="i-x" />Not connected</span>;
+  if (!it) return <span className="st muted">Not set up</span>; // design V9e: not an error, so no icon
   if (!it.enabled) return <span className="st"><Icon id="i-pause" />Turned off</span>;
   const r = it.lastResult;
   if (!r) return <span className="st"><Icon id="i-clock" />Saved · not tested yet</span>;
@@ -160,7 +160,7 @@ export function ConnectionsSettings() {
     <div className="stack">
       <PageHead icon="i-settings" title="Settings" />
       <SettingsTabs at="connections" />
-      <p className="muted" style={{ margin: 0 }}>Tell your media apps when a file changes, so they show the new size and codec and don't download it again.</p>
+      <p className="muted" style={{ margin: 0 }}>Tell your media apps when a file changes, so they show the new file and Sonarr and Radarr don't download it again.</p>
       <p className="muted" role="status" style={{ margin: 0 }}>{said}</p>
       {notHere ? <p className="muted">This server can't connect to media apps yet.</p>
         : d.error && !d.data ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{d.error.message}</span></p>
