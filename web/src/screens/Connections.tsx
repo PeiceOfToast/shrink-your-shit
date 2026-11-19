@@ -1,0 +1,155 @@
+// Settings > Connections (SCREENS V9e, mockups/settings-connections.html): tell Sonarr and Radarr when a file changes.
+// One of each app in this version; Plex and Jellyfin come later. Contract "Sonarr / Radarr" (workshop 11-19).
+import { useState } from "react";
+import { Icon } from "../Icon";
+import { failed, type Answer } from "../api";
+import { PageHead } from "../PageHead";
+import { SettingsTabs } from "../pages";
+import { useData } from "../useData";
+import { clock } from "../format";
+import { addIntegration, listIntegrations, patchIntegration, removeIntegration, testIntegration } from "../connectionsApi";
+import type { Integration, IntegrationKind, IntegrationTestResult, PathMapping } from "../types/connections";
+
+const APP: Record<IntegrationKind, { name: string; port: number }> = { sonarr: { name: "Sonarr", port: 8989 }, radarr: { name: "Radarr", port: 7878 } };
+const dot = (s: string) => s.replace(/[.\s]+$/, "");
+
+// The test's one sentence (V9e): built from its folders when it connected; the server's own words when it didn't.
+export function testSentence(kind: IntegrationKind, r: IntegrationTestResult): string {
+  const app = APP[kind].name;
+  if (!r.ok) return dot(r.message) + ".";
+  const head = r.version ? `Connected to ${app} ${r.version}.` : `Connected to ${app}.`;
+  if (!r.folders.length) return head;
+  const more = (n: number) => (n > 1 ? ` and ${n - 1} more` : "");
+  const gone = r.folders.filter((f) => f.ourPath === null), out = r.folders.filter((f) => f.ourPath !== null && !f.inLibrary);
+  if (gone.length) return `${head} Its folder ${gone[0].theirPath}${more(gone.length)} ${gone.length > 1 ? "don't" : "doesn't"} exist here. If ${app} runs in Docker, add it under Folders.`;
+  if (out.length) return `${head} Its folder ${out[0].theirPath}${more(out.length)} ${out.length > 1 ? "aren't" : "isn't"} in any library here. Add it under Folders, unless you don't convert those files.`;
+  return `${head} ${r.folders.length === 1 ? "Its folder is" : `Its ${r.folders.length} folders are`} in your libraries.`;
+}
+
+function Status({ it }: { it: Integration | undefined }) {
+  if (!it) return <span className="st"><Icon id="i-x" />Not connected</span>;
+  if (!it.enabled) return <span className="st"><Icon id="i-pause" />Turned off</span>;
+  const r = it.lastResult;
+  if (!r) return <span className="st"><Icon id="i-clock" />Saved · not tested yet</span>;
+  if (r.ok) return <span className="st ok"><Icon id="i-check" />Connected · last told {clock(r.at)}</span>;
+  return <span className="st warn"><Icon id="i-alert" /><span>Didn't answer at {clock(r.at)}: {dot(r.message)}.</span></span>;
+}
+
+// connected but a folder is missing or outside the libraries: a warning, not a tick
+const gap = (r: IntegrationTestResult) => r.ok && r.folders.some((f) => f.ourPath === null || !f.inLibrary);
+function Result({ tone, text }: { tone: "ok" | "warn" | "bad"; text: string }) {
+  return <p className={"st " + tone} style={{ margin: 0 }}><Icon id={tone === "ok" ? "i-check" : "i-alert"} /><span>{text}</span></p>;
+}
+
+function Form({ kind, it, onDone, onCancel }: { kind: IntegrationKind; it?: Integration; onDone: (msg: string) => void; onCancel: () => void }) {
+  const app = APP[kind].name, id = "c-" + kind;
+  const [url, setUrl] = useState(it?.url ?? ""), [key, setKey] = useState(""), [changeKey, setChangeKey] = useState(!it?.hasKey);
+  const [maps, setMaps] = useState<PathMapping[]>(it?.pathMappings.length ? it.pathMappings : []);
+  const [busy, setBusy] = useState(false), [result, setResult] = useState<{ tone: "ok" | "warn" | "bad"; text: string } | null>(null), [error, setError] = useState("");
+  const rows = maps.filter((m) => m.theirPath.trim() || m.ourPath.trim()).map((m) => ({ theirPath: m.theirPath.trim(), ourPath: m.ourPath.trim() }));
+  const setMap = (i: number, p: Partial<PathMapping>) => setMaps(maps.map((m, j) => (j === i ? { ...m, ...p } : m)));
+  const run = async <T,>(p: Promise<Answer<T>>): Promise<T | null> => {
+    try { const r = await p; if (failed(r)) { setError(r.error.message); return null; } return r; } catch (_) { setError("Couldn't reach Shrink Your Shit. Try again."); return null; }
+  };
+  const test = async () => {
+    setBusy(true); setError(""); setResult(null);
+    const r = await run(it ? testIntegration({ id: it.id, url: url.trim(), ...(key && { apiKey: key }), pathMappings: rows }) : testIntegration({ kind, url: url.trim(), apiKey: key, pathMappings: rows }));
+    if (r) setResult({ tone: !r.ok ? "bad" : gap(r) ? "warn" : "ok", text: testSentence(kind, r) });
+    setBusy(false);
+  };
+  const save = async () => {
+    setBusy(true); setError(""); setResult(null);
+    const saved = await run(it ? patchIntegration(it.id, { url: url.trim(), pathMappings: rows, ...(key && { apiKey: key }) })
+      : addIntegration({ kind, name: app, url: url.trim(), apiKey: key, pathMappings: rows }));
+    if (!saved) { setBusy(false); return; }
+    const r = await run(testIntegration({ id: saved.id })); // Save runs the same test; this one sets lastResult
+    setBusy(false);
+    onDone(r?.ok ? "Saved. " + testSentence(kind, r) : `Saved, but ${app} didn't answer, so files won't be refreshed until it does.`);
+  };
+  return (
+    <form className="stack cform" onSubmit={(e) => { e.preventDefault(); save(); }} onInput={() => setResult(null)}>
+      <div className="field">
+        <label htmlFor={id + "-url"}>Address</label>
+        <input className="input mono" id={id + "-url"} type="url" inputMode="url" autoComplete="off" spellCheck={false} required value={url}
+          onChange={(e) => setUrl(e.target.value)} placeholder={`http://192.168.1.20:${APP[kind].port}`} />
+      </div>
+      <div className="field">
+        <label htmlFor={id + "-key"}>API key</label>
+        {changeKey
+          ? <input className="input mono" id={id + "-key"} type="password" autoComplete="off" required={!it} value={key} onChange={(e) => setKey(e.target.value)}
+            placeholder={it ? "Leave empty to keep the saved key." : ""} />
+          : <p className="row" style={{ margin: 0, gap: 8 }} id={id + "-key"}><span className="st ok"><Icon id="i-check" />Saved</span>
+            <button className="btn sm ghost" type="button" onClick={() => setChangeKey(true)}>Change</button></p>}
+        <span className="hint">In {app}: Settings &gt; General &gt; Security.</span>
+      </div>
+      <details className="cfold" open={maps.length > 0 || undefined}>
+        <summary><strong>Folders</strong> <span className="muted">Only needed if {app} sees your files under a different path, for example in Docker.</span></summary>
+        <div className="stack" style={{ marginTop: 8 }}>
+          {maps.map((m, i) => (
+            <div className="cmap" key={i}>
+              <label className="field"><span className="hint">{app} sees</span>
+                <input className="input mono" value={m.theirPath} onChange={(e) => setMap(i, { theirPath: e.target.value })} placeholder={kind === "sonarr" ? "/tv" : "/movies"} /></label>
+              <Icon id="i-arrow-r" />
+              <label className="field"><span className="hint">Shrink Your Shit sees</span>
+                <input className="input mono" value={m.ourPath} onChange={(e) => setMap(i, { ourPath: e.target.value })} placeholder={kind === "sonarr" ? "/mnt/media/tv" : "/mnt/media/movies"} /></label>
+              <button className="btn sm icon ghost" type="button" aria-label={"Remove folder " + (i + 1)} onClick={() => { setMaps(maps.filter((_, j) => j !== i)); setResult(null); }}><Icon id="i-x" /></button>
+            </div>))}
+          {!maps.length && <p className="hint" style={{ margin: 0 }}>With no folders here, both see the same paths.</p>}
+          <p style={{ margin: 0 }}><button className="btn sm" type="button" onClick={() => setMaps([...maps, { theirPath: "", ourPath: "" }])}><Icon id="i-plus" />Add a folder</button></p>
+        </div>
+      </details>
+      <div aria-live="polite">{result && <Result tone={result.tone} text={result.text} />}{error && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{error}</span></p>}</div>
+      <div className="row" style={{ gap: 8 }}>
+        <button className="btn" type="button" disabled={busy || !url.trim() || (!it && !key)} onClick={test}>Test</button>
+        <button className="btn primary" type="submit" disabled={busy}>{busy ? "Working…" : "Save"}</button>
+        <button className="btn ghost" type="button" onClick={onCancel} disabled={busy}>Cancel</button>
+      </div>
+    </form>);
+}
+
+function AppCard({ kind, it, reload, said }: { kind: IntegrationKind; it?: Integration; reload: () => void; said: (m: string) => void }) {
+  const app = APP[kind].name, [open, setOpen] = useState(false), [confirm, setConfirm] = useState(false), [msg, setMsg] = useState("");
+  const remove = async () => {
+    const r = await removeIntegration(it!.id);
+    if (failed(r)) { setMsg(r.error.message); return; }
+    setConfirm(false); said(app + " removed. Files won't be refreshed there any more."); reload();
+  };
+  return (
+    <section className="card" aria-labelledby={"h-" + kind}>
+      <div className="hd">
+        <h2 id={"h-" + kind}>{app}</h2>
+        <Status it={it} />
+        <span className="sp" />
+        {!open && !confirm && (it
+          ? <span className="row nw" style={{ gap: 6 }}><button className="btn sm" type="button" onClick={() => setOpen(true)}>Edit</button>
+            <button className="btn sm ghost" type="button" onClick={() => setConfirm(true)}>Remove</button></span>
+          : <button className="btn primary sm" type="button" onClick={() => setOpen(true)}>Connect</button>)}
+      </div>
+      <div className="bd stack">
+        <p className="muted" style={{ margin: 0 }}>Rescans each converted file, so it doesn't download it again.{it && <> <span className="mono">{it.url}</span></>}</p>
+        {confirm && <div className="row" role="group" aria-label={"Remove " + app} style={{ gap: 8 }}>
+          <span>Remove {app}? It won't be told about converted files.</span>
+          <button className="btn sm danger" type="button" onClick={remove}>Remove</button>
+          <button className="btn sm ghost" type="button" onClick={() => setConfirm(false)}>Cancel</button>
+          {msg && <span className="st bad"><Icon id="i-alert" />{msg}</span>}
+        </div>}
+        {open && <Form kind={kind} it={it} onCancel={() => setOpen(false)} onDone={(m) => { setOpen(false); said(m); reload(); }} />}
+      </div>
+    </section>);
+}
+
+export function ConnectionsSettings() {
+  const d = useData(listIntegrations, []), [said, setSaid] = useState("");
+  const notHere = d.error && (d.error.code === "http_404" || d.error.code === "not_found");
+  return (
+    <div className="stack">
+      <PageHead icon="i-settings" title="Settings" />
+      <SettingsTabs at="connections" />
+      <p className="muted" style={{ margin: 0 }}>Tell your media apps when a file changes, so they show the new size and codec and don't download it again.</p>
+      <p className="muted" role="status" style={{ margin: 0 }}>{said}</p>
+      {notHere ? <p className="muted">This server can't connect to Sonarr or Radarr yet.</p>
+        : d.error && !d.data ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{d.error.message}</span></p>
+          : !d.data ? <div className="empty">Loading...</div>
+            : (["sonarr", "radarr"] as const).map((k) => <AppCard key={k} kind={k} it={d.data!.find((x) => x.kind === k)} reload={d.reload} said={setSaid} />)}
+    </div>);
+}
