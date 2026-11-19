@@ -137,10 +137,7 @@ func TestWorkersOnAndOff(t *testing.T) {
 
 // Removing a worker drops its path mappings too, in the same change as its row; another worker's stay.
 func TestRemoveWorkerLeavesNoPathMappings(t *testing.T) {
-	s, err := Open(filepath.Join(t.TempDir(), "t.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := open(t) // closes the store, so Windows can remove the temp folder
 	pair := func(name string) string {
 		code, _, _ := s.NewPairing(time.Now())
 		rw, _, err := s.Pair(code, name, "1", "", "", 1, "", time.Now())
