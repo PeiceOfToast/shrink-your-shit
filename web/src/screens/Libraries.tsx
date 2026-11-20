@@ -52,8 +52,10 @@ const paused = (l: Library) => !l.enabled && !!l.scan.lastScanAt && !noWf(l);
 const shareWait = (l: Library) => l.status === "paused_share";
 const shareName = (l: Library) => l.pausedBy?.shareName ?? "the share";
 // One status pill per row (S1): accent only while something is happening; normal states are neutral; Paused warns.
-function Status({ l }: { l: Library }) {
+// folder: the list shows "Can't write" for an unwritable folder; the detail header doesn't (its Folder field says it once).
+function Status({ l, folder = true }: { l: Library; folder?: boolean }) {
   if (noWf(l)) return <span className="pill warn"><Icon id="i-alert" />No workflow</span>;
+  if (folder && !l.writable) return <span className="pill bad"><Icon id="i-alert" />Can't write</span>;
   if (l.scan.state === "scanning") return <span className="pill run"><Icon id="i-refresh" />Scanning{l.scan.progress ? " · " + count(l.scan.progress) + " found" : ""}</span>;
   if (notStarted(l)) return <span className="pill"><Icon id="i-pause" />Not started</span>;
   if (shareWait(l)) return <span className="pill warn"><Icon id="i-pause" />Share not connected yet</span>;
@@ -73,8 +75,6 @@ export async function pauseResume(ls: Library[], enabled: boolean, say: (m: stri
   say((done ? who + (enabled ? " resumed." : " paused. Files already converting will finish.") : "") + (bad.length ? " Not changed: " + bad.join(" ") : ""));
 }
 const Problem = ({ m }: { m?: string }) => (m ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{m}</span></p> : null);
-// Pass 5 PR 2: a path breaks only after a "/" or "\" (a <wbr> after each separator), so a segment moves to the next line whole
-const breakPath = (p: string) => p.split(/(?<=[\\/])/).map((s, i, a) => <span key={i} className="pathseg">{s}{i < a.length - 1 && <wbr />}</span>);
 // the muted workflow line keeps its first two parts ("Standard · Balanced"); the full summary is the tooltip
 const shortTag = (t: string) => t.split(" · ").slice(0, 2).join(" · ");
 
@@ -116,43 +116,38 @@ export function Libraries() {
     <div className="stack">
       <PageHead icon="i-library" title="Libraries" help="The folders that are watched for videos." />
       <Problem m={libs.data ? libs.error?.message : undefined} />
-      {/* one toolbar (clean pass T4): Add first, selection actions, filter on the right; on phones Add, Select and "..." */}
+      {/* one toolbar: Add, then Select; while selecting, All and the bulk actions (on phones they sit under "...") ; filter on the right */}
       <div className="ltools" role="toolbar" aria-label="Libraries">
         <Link className="btn sm primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link>
-        <span className="desk">{actions}</span>
-        <button className="btn sm ghost phone" type="button" aria-pressed={selecting} onClick={() => (setSelecting(!selecting), setSel([]))}>{selecting ? "Done" : "Select"}</button>
-        <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions}</div></details>
+        <button className="btn sm ghost" type="button" aria-pressed={selecting} onClick={() => (setSelecting(!selecting), setSel([]))}>{selecting ? "Done" : "Select"}</button>
+        {selecting && <label className="hit selall"><input type="checkbox" aria-label="Select all libraries" checked={sel.length === all.length} onChange={(e) => setSel(e.target.checked ? all.map((l) => l.id) : [])} /><span className="sm">All</span></label>}
+        {selecting && <span className="desk">{actions}</span>}
+        {selecting && <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions}</div></details>}
         {sel.length > 0 && <span className="muted sm">{sel.length} selected</span>}
         <input className="input find" type="search" placeholder="Filter libraries" aria-label="Filter libraries" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       <p className="muted" role="status">{said}</p>
       {!libs.loaded ? <div className="empty">Loading…</div> : libs.error && !libs.data ? <LoadFailed error={libs.error} reload={libs.reload} /> : all.length === 0 ? <Empty icon="i-library" text="No libraries yet. A library is a folder that is watched for videos."><Link className="btn primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link></Empty>
         : items.length === 0 ? <div className="empty">No library matches.</div> : (
+        // No table header (U3, C1): a 40 px tile, the name and its folder, one chip line of facts, and one status pill.
         <div className={"list" + (selecting ? " selecting" : "")}><table className="tbl">
-          <thead><tr>
-            <th className="selc"><label className="hit"><input type="checkbox" aria-label="Select all libraries" checked={sel.length === all.length} onChange={(e) => setSel(e.target.checked ? all.map((l) => l.id) : [])} /></label></th>
-            <th>Name</th><th data-p="2">Workflow</th><th className="num" data-p="3">Waiting</th><th data-p="4">Last scan</th><th data-p="5">Priority</th><th className="num" data-p="6">Files</th><th className="stc">Status</th>
-          </tr></thead>
           <tbody>{items.map((l) => (
             <tr key={l.id} className={sel.includes(l.id) ? "sel" : undefined}>
               <td className="selc"><label className="hit"><input type="checkbox" aria-label={"Select " + l.name} checked={sel.includes(l.id)} onChange={(e) => setSel(e.target.checked ? [...sel, l.id] : sel.filter((x) => x !== l.id))} /></label></td>
-              <td className="idc"><Link className="ttl" to={"/libraries/" + l.id}>{l.name}</Link>
-                <span className="sub mono path" title={l.paths.join(", ")}>{l.paths.map((p, i) => <span key={i}>{i > 0 && ", "}{breakPath(p)}</span>)}</span>
-                {!l.writable && <p className="st bad sm"><Icon id="i-alert" /><span>{l.unwritableMessage} <Link className="over" to="/settings/health">How to fix it</Link></span></p>}{/* p, not .sub: .sub is grey and hidden on phones (QA #439) */}
-                {noWf(l) && <span className="sub">No workflow · assign one to start it</span>}
-                {paused(l) && <span className="sub">Paused · {count(l.counts.waiting)} waiting, not converting</span>}
-                {shareWait(l) && <span className="sub">Waiting for {shareName(l)} to connect · {count(l.counts.waiting)} waiting</span>}
-                <span className="sub phone">{noWf(l) ? "No workflow yet"
-                  : paused(l) ? "Paused · " + count(l.counts.waiting) + " waiting, not converting"
-                  : shareWait(l) ? "Waiting for " + shareName(l) + " to connect · " + count(l.counts.waiting) + " waiting"
-                  : [l.workflowName, count(l.counts.waiting) + " waiting", l.scan.lastScanAt ? "scanned " + lastScan(l.scan.lastScanAt) : "not scanned yet"].join(" · ")}</span>
-                {tag(l) && <span className="sub phone" title={tag(l)}>{shortTag(tag(l))}</span>}</td>
-              <td data-p="2">{noWf(l) ? <span className="muted">No workflow</span> : <Link to={"/workflows/" + l.workflowId}>{l.workflowName}</Link>}{tag(l) && <span className="sub wftag" title={tag(l)}>{shortTag(tag(l))}</span>}</td>
-              <td className="num" data-p="3">{count(l.counts.waiting)}</td>
-              <td className="nowrap" data-p="4">{lastScan(l.scan.lastScanAt)}</td>
-              <td className="nowrap" data-p="5">{priorityWord(l.priority)}</td>
-              <td className="num" data-p="6">{count(l.counts.files)}</td>
-              <td className="stc"><Status l={l} />{l.counts.failed > 0 && <Link className="failedlink over" to={"/jobs?tab=failed&libraryId=" + encodeURIComponent(l.id)}>{count(l.counts.failed)} failed</Link>}</td>
+              <td className="tile"><span className="ltile" aria-hidden="true"><Icon id="i-library" /></span></td>
+              <td className="idc">
+                <div className="lname"><Link className="ttl" to={"/libraries/" + l.id}>{l.name}</Link><span className="lpath mono" title={l.paths.join(", ")}>{l.paths.join(", ")}</span></div>
+                <div className="chips">
+                  {noWf(l) ? <span className="mchip warnchip">No workflow</span> : <Link className="mchip" to={"/workflows/" + l.workflowId}>{l.workflowName}</Link>}
+                  {tag(l) && <span className="mchip" title={tag(l)}>{shortTag(tag(l))}</span>}
+                  <span className="mchip">{priorityWord(l.priority)} priority</span>
+                  <span className="mchip">{shareWait(l) ? "Waiting for " + shareName(l) + " to connect · " : ""}{count(l.counts.waiting)} waiting{paused(l) ? ", not converting" : ""}</span>
+                  <span className="mchip">{l.scan.lastScanAt ? "Scanned " + lastScan(l.scan.lastScanAt) : "Not scanned yet"}</span>
+                  <span className="mchip">{plural(l.counts.files, "file", "files")}</span>
+                  {l.counts.failed > 0 && <Link className="mchip errchip" to={"/jobs?tab=failed&libraryId=" + encodeURIComponent(l.id)}>{count(l.counts.failed)} failed</Link>}
+                </div>
+              </td>
+              <td className="stc"><Status l={l} /></td>
             </tr>))}
           </tbody>
         </table></div>)}
@@ -215,7 +210,8 @@ export function useFolder(start: string) {
 }
 // no_hw_encoder is about this computer's graphics card, not the folder: it isn't shown here (review 75a84d3, 1).
 const FOLDER_NOTE = (code: string) => code !== "no_hw_encoder";
-export function FolderField({ f, free }: { f: ReturnType<typeof useFolder>; free?: number | null }) {
+// warn: a saved library's unwritable folder, once, as one line under the field (U3, C13); the list shows it as "Can't write"
+export function FolderField({ f, free, warn }: { f: ReturnType<typeof useFolder>; free?: number | null; warn?: string }) {
   const r = f.report;
   return (
     <div className="field"><label htmlFor="lib-path">Folder</label>
@@ -229,6 +225,7 @@ export function FolderField({ f, free }: { f: ReturnType<typeof useFolder>; free
           : r.blockers.length ? r.blockers.map((b) => <span key={b.code} className="st bad" role="alert"><Icon id="i-alert" /><span>{b.message}</span></span>)
           : <span className="st ok"><Icon id="i-check-c" /><span>{plural(r.videoCount, "video", "videos")}, {bytes(r.totalBytes)}{free != null ? " · " + bytes(free) + " free" : ""}</span></span>}
         {r && !failed(r) && r.notes.filter((n) => FOLDER_NOTE(n.code)).map((n) => <span key={n.code} className="st warn"><Icon id="i-alert" /><span>{n.message}</span></span>)}
+        {warn && <p className="st bad" role="note"><Icon id="i-alert" /><span>{warn} <Link to="/settings/health">How to fix it</Link></span></p>}
       </div></div>
   );
 }
@@ -313,7 +310,7 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
   return (
     <div className="stack">
       <PageHead icon="i-library" crumbs={[["Libraries", "/libraries"]]} title={l ? l.name : "Add library"} help={l ? undefined : "A folder to watch for videos, and the workflow its files go through."}>
-        {v && <Status l={v} />}
+        {v && <Status l={v} folder={false} />}
         {v && v.enabled && <button className="btn" type="button" onClick={() => pauseResume([v], false, setNote).then(reload)}><Icon id="i-pause" />Pause</button>}
         {v && paused(v) && <button className="btn" type="button" onClick={() => pauseResume([v], true, setNote).then(reload)}><Icon id="i-play" />Resume</button>}
         {l && <SeeJobs id={l.id} />}
@@ -323,7 +320,6 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
       {noWfNow && <p className="muted" role="note" id="lib-nowf-hint">{NOWF_HINT}</p>}
       {v && notStarted(v) && <p className="muted" role="note">This library isn't started yet: nothing is looked for or converted until you press Scan now.</p>}
       {v && paused(v) && <p className="muted" role="note">While paused, its files wait in the queue and aren't converted. Scans add no new files. Files already converting finish.</p>}
-      {v && !v.writable && <p className="st bad" role="note"><Icon id="i-alert" /><span>{v.unwritableMessage} <Link to="/settings/health">How to fix it</Link></span></p>}
       {v && shareWait(v) && <p className="muted" role="note">Share not connected yet. Its files wait in the queue and aren't converted until {shareName(v)} connects.</p>}
       {l && v && !noWfNow && <EarlierWorkflow v={v} />}
       {l && <nav className="tabs" aria-label="Library sections">
@@ -337,7 +333,7 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
           <form className="bd stack" onSubmit={(e) => (e.preventDefault(), save())}>
             <div className="field"><label htmlFor="lib-name">Name</label>
               <input id="lib-name" className="input" required value={name} onChange={(e) => (setName(e.target.value), setTyped(true))} placeholder="Movies" /></div>
-            <FolderField f={f} free={l && !moved ? l.freeBytes : undefined} />
+            <FolderField f={f} free={l && !moved ? l.freeBytes : undefined} warn={v && !v.writable && !moved ? v.unwritableMessage || "Can't write to this folder." : undefined} />
             <div className="field"><span className="lab">File type</span><span>Video</span></div>
             <WorkflowField value={pick} onChange={setWf} workflows={workflows} self={l?.name} none={!l || noWfNow} />
             {v && <div className="field"><label htmlFor="lib-prio">Priority</label>
