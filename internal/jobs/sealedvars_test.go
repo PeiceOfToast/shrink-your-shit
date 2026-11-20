@@ -248,6 +248,115 @@ func TestAnOlderPlaintextSecretIsSealedWhenTheStoreOpens(t *testing.T) {
 	}
 }
 
+// A secret whose value is not text (an older build or another client may have sent an object) is sealed as
+// its JSON text rather than stored in the clear; the API refuses that shape now, and this is the store's
+// own side of it. A job gets the text back, which is what a secret's value is.
+func TestASecretHoldingAnObjectIsSealedToo(t *testing.T) {
+	useHome(t)
+	s := open(t)
+	f, err := s.AddWorkflow("Objs", workflow.Preset())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, _, err := s.Draft(f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const secret = "OBJSECRET-7731"
+	d.Doc.Variables = []workflow.Variable{{Name: "api_key", Type: "secret", Value: map[string]any{"k": secret}, HasValue: true}}
+	saved, err := s.SaveDraft(f.ID, d.Doc, d.Layout, d.Etag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNotStored(t, s, secret)
+	assertStoredDocsSealed(t, s, secret)
+	tm, issues := workflow.ToTemplate(saved.Doc, rules.SliderTemplate(3))
+	if len(issues) > 0 {
+		t.Fatal(issues)
+	}
+	if _, err := s.Publish(f.ID, saved.Etag, tm); err != nil {
+		t.Fatal(err)
+	}
+	lib, err := s.AddLibraryOnFlow("Movies", t.TempDir(), f.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := s.RunInfoFor(Job{LibraryID: lib.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ""
+	for _, v := range info.Variables {
+		if v.Name == "api_key" {
+			got, _ = v.Value.(string)
+		}
+	}
+	if got != `{"k":"`+secret+`"}` {
+		t.Errorf("the job's api_key is %q, want the value's JSON text", got)
+	}
+}
+
+// An object-valued secret saved before this build is sealed by the open-time pass, as a string secret is.
+func TestAnOlderObjectSecretIsSealedWhenTheStoreOpens(t *testing.T) {
+	useHome(t)
+	path := filepath.Join(t.TempDir(), "syp.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lib, f := flowWithSecret(t, s)
+	doc := workflow.Preset()
+	doc.Variables = []workflow.Variable{{Name: "api_key", Type: "secret", Value: map[string]any{"k": sealedTestSecret}, HasValue: true}}
+	raw, _ := json.Marshal(doc)
+	if _, err := s.db.Exec(`UPDATE workflow_revisions SET doc=? WHERE workflow_id=?`, string(raw), f.ID); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(storedBytes(t, s), []byte(sealedTestSecret)) {
+		t.Fatal("the test did not put a plaintext secret in the database")
+	}
+	s.Close()
+	if s, err = Open(path); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	assertStoredDocsSealed(t, s, sealedTestSecret)
+	info, err := s.RunInfoFor(Job{LibraryID: lib.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok := false
+	for _, v := range info.Variables {
+		if v.Name == "api_key" {
+			text, _ := v.Value.(string)
+			ok = text == `{"k":"`+sealedTestSecret+`"}`
+		}
+	}
+	if !ok {
+		t.Errorf("after the upgrade the job's secret is %+v", info.Variables)
+	}
+}
+
+// A draft saved with a secret the client just typed holds no copy of it in the clear; this is the save
+// path itself, before anything is published (a mutation that drops that seal leaves it in the database).
+func TestANewDraftSecretIsNeverStoredInTheClear(t *testing.T) {
+	useHome(t)
+	s := open(t)
+	f, err := s.AddWorkflow("Fresh", workflow.Preset())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, _, err := s.Draft(f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Doc.Variables = []workflow.Variable{{Name: "api_key", Type: "secret", Value: sealedTestSecret, HasValue: true}}
+	if _, err := s.SaveDraft(f.ID, d.Doc, d.Layout, d.Etag); err != nil {
+		t.Fatal(err)
+	}
+	assertNotStored(t, s, sealedTestSecret)
+	assertStoredDocsSealed(t, s, sealedTestSecret)
+}
+
 // A backup holds no secret in the clear, and restoring it keeps the secret usable here.
 func TestABackupHoldsNoSecretInTheClear(t *testing.T) {
 	useHome(t)

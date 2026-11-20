@@ -92,10 +92,34 @@ func CheckVariables(d Doc) []Issue {
 		case seen[v.Name]:
 			out = append(out, Issue{Code: "duplicate_variable", Severity: "error", Name: v.Name,
 				Message: fmt.Sprintf("Two variables are called {{%s}}. Give one of them another name.", v.Name)})
+		case !secretValueOK(v):
+			// a secret is text: only text can be sealed, and a value of another shape would be stored in the
+			// clear (W4b QA step 3). null is fine (no value); so is a stored value already sealed.
+			out = append(out, Issue{Code: "invalid_secret_value", Severity: "error", Name: v.Name,
+				Message: fmt.Sprintf("The secret %s has to be text. Send it as a string, or leave it without a value.", nameOrEmpty(v.Name))})
 		}
 		seen[v.Name] = true
 	}
 	return out
+}
+
+// secretValueOK says whether v's value is one a secret can hold: none (null), the text a person typed, or
+// the sealed form the store keeps (a JSON object of the ciphertext and its nonce, which every draft read
+// back from the database carries).
+func secretValueOK(v Variable) bool {
+	if v.Type != "secret" || v.Value == nil {
+		return true
+	}
+	if _, ok := v.Value.(string); ok {
+		return true
+	}
+	m, ok := v.Value.(map[string]any)
+	if !ok || len(m) != 2 {
+		return false
+	}
+	sealed, sok := m["sealed"].(string)
+	nonce, nok := m["nonce"].(string)
+	return sok && nok && sealed != "" && nonce != ""
 }
 
 // Masked is d with every secret's value left out: the API never sends one back. HasValue says whether

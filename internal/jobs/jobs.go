@@ -143,7 +143,7 @@ func OpenAs(path, appVersion string) (*Store, error) {
 	// leaving a plaintext secret behind is worse than refusing to start.
 	if err := sealStoredVariables(s.db); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("sealing workflow secrets: %w", err)
+		return nil, fmt.Errorf("sealing workflow secrets: %w (the data folder %s must be writable)", err, filepath.Dir(path))
 	}
 	ro, err := sql.Open("sqlite", path)
 	if err != nil {

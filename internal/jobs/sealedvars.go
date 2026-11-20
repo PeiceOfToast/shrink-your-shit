@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
@@ -64,11 +63,13 @@ func sealDocWith(doc workflow.Doc, memo map[string]sealedVar) (workflow.Doc, boo
 		}
 		plain, ok := v.Value.(string)
 		if !ok {
-			switch v.Value.(type) {
-			case map[string]any, []any: // not a value a secret has: left as it is
-				continue
+			// a secret is text, and only text can be sealed: an older build or another client may have stored
+			// another shape (an object, a number), so seal its JSON form rather than leave it in the clear
+			raw, err := json.Marshal(v.Value)
+			if err != nil {
+				return doc, false, err
 			}
-			plain = fmt.Sprint(v.Value)
+			plain = string(raw)
 		}
 		if plain == "" { // nothing to seal, and SealSecret would store an empty one as sealed
 			continue

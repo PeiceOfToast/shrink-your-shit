@@ -293,6 +293,7 @@ func TestVariableRulesAreRefused(t *testing.T) {
 		{"a capital", []workflow.Variable{{Name: "Title", Type: "string"}}, "invalid_variable_name"},
 		{"a built-in", []workflow.Variable{{Name: "title", Type: "string"}}, "builtin_variable_name"},
 		{"twice", []workflow.Variable{{Name: "mine", Type: "string"}, {Name: "mine", Type: "string"}}, "duplicate_variable"},
+		{"a secret holding an object", []workflow.Variable{{Name: "api_key", Type: "secret", Value: map[string]any{"k": "OBJSECRET"}}}, "invalid_secret_value"},
 	} {
 		doc := draft.Workflow
 		doc.Variables = c.vars
