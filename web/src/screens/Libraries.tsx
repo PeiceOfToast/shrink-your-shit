@@ -45,10 +45,14 @@ export const priorityWord = (n: number) => PRIORITIES.find(([v]) => v === n)?.[1
 // enabled is both "started" and Pause/Resume on the server: never scanned and not enabled reads as Not started.
 const notStarted = (l: Library) => !l.enabled && !l.scan.lastScanAt;
 const paused = (l: Library) => !l.enabled && !!l.scan.lastScanAt;
+// The server pauses a library whose share isn't connected (enabled stays true): it waits, it isn't converting.
+const shareWait = (l: Library) => l.status === "paused_share";
+const shareName = (l: Library) => l.pausedBy?.shareName ?? "the share";
 // One status pill per row (S1): accent only while something is happening; normal states are neutral; Paused warns.
 function Status({ l }: { l: Library }) {
   if (l.scan.state === "scanning") return <span className="pill run"><Icon id="i-refresh" />Scanning{l.scan.progress ? " · " + count(l.scan.progress) + " found" : ""}</span>;
   if (notStarted(l)) return <span className="pill"><Icon id="i-pause" />Not started</span>;
+  if (shareWait(l)) return <span className="pill warn"><Icon id="i-pause" />Share not connected yet</span>;
   if (paused(l)) return <span className="pill warn"><Icon id="i-pause" />Paused</span>;
   if (l.status === "path_missing") return <span className="pill bad"><Icon id="i-alert" />Folder missing</span>;
   if (l.counts.running) return <span className="pill run"><Icon id="i-play" />Converting {count(l.counts.running)}</span>;
@@ -126,7 +130,9 @@ export function Libraries() {
               <td className="idc"><Link className="ttl" to={"/libraries/" + l.id}>{l.name}</Link>
                 <span className="sub mono path" title={l.paths.join(", ")}>{l.paths.map((p, i) => <span key={i}>{i > 0 && ", "}{breakPath(p)}</span>)}</span>
                 {paused(l) && <span className="sub">Paused · {count(l.counts.waiting)} waiting, not converting</span>}
+                {shareWait(l) && <span className="sub">Waiting for {shareName(l)} to connect · {count(l.counts.waiting)} waiting</span>}
                 <span className="sub phone">{paused(l) ? "Paused · " + count(l.counts.waiting) + " waiting, not converting"
+                  : shareWait(l) ? "Waiting for " + shareName(l) + " to connect · " + count(l.counts.waiting) + " waiting"
                   : [l.workflowName, count(l.counts.waiting) + " waiting", l.scan.lastScanAt ? "scanned " + lastScan(l.scan.lastScanAt) : "not scanned yet"].join(" · ")}</span>
                 {tag(l) && <span className="sub phone" title={tag(l)}>{shortTag(tag(l))}</span>}</td>
               <td data-p="2"><Link to={"/workflows/" + l.workflowId}>{l.workflowName}</Link>{tag(l) && <span className="sub wftag" title={tag(l)}>{shortTag(tag(l))}</span>}</td>
@@ -298,6 +304,7 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
       {note && <p className="muted" role="status">{note}</p>}
       {v && notStarted(v) && <p className="muted" role="note">This library isn't started yet: nothing is looked for or converted until you press Scan now.</p>}
       {v && paused(v) && <p className="muted" role="note">While paused, its files wait in the queue and aren't converted. Scans add no new files. Files already converting finish.</p>}
+      {v && shareWait(v) && <p className="muted" role="note">Share not connected yet. Its files wait in the queue and aren't converted until {shareName(v)} connects.</p>}
       {l && <nav className="tabs" aria-label="Library sections">
         {[["general", "General"], ["discovery", "Discovery"], ["output", "Output"]].map(([k, t]) =>
           <Link key={k} to={"/libraries/" + l.id + (k === "general" ? "" : "?tab=" + k)} aria-current={tab === k ? "page" : undefined}>{t}</Link>)}
