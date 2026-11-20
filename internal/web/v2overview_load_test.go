@@ -11,12 +11,14 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/sysload"
 )
 
-// resetGPU empties gpuPercent's cache and restores the real nvidia-smi reading when the test ends.
+// resetGPU empties gpuPercent's cache, and the AMD and Intel readings read as not measured (this machine's
+// real GPUs must not reach the expectations), and restores the real readings when the test ends.
 func resetGPU(t *testing.T) {
 	t.Helper()
-	real := readNvidiaSMI
+	real, realOther := readNvidiaSMI, readOtherGPUs
+	readOtherGPUs = func() *float64 { return nil }
 	t.Cleanup(func() {
-		readNvidiaSMI = real
+		readNvidiaSMI, readOtherGPUs = real, realOther
 		gpuUse.mu.Lock()
 		gpuUse.ok = false
 		gpuUse.mu.Unlock()

@@ -196,7 +196,7 @@ export function SafetySettings() {
 }
 
 // Updates (SCREENS:293, About block): the #324 switch, off until the person turns it on, and the version line.
-const SENT = "Once a day it asks GitHub which version is newest. GitHub sees this app's version and your IP address, as with any web request. Nothing about your files or settings is sent. Checking installs nothing.";
+const SENT = "Once a day it asks GitHub which stable release is newest. GitHub sees this app's version and your IP address, as with any web request. Nothing about your files or settings is sent. Checking installs nothing.";
 const at = (t: string) => `${day(t)}, ${new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 function Updates({ version }: { version?: string }) {
   const st = useData(getSettings, []), u = useData(getUpdate, []), [busy, setBusy] = useState(false), [said, setSaid] = useState("");
@@ -210,7 +210,7 @@ function Updates({ version }: { version?: string }) {
         <label className="row nw"><input ref={sw} id="upd-sw" type="checkbox" role="switch" className="switch" checked={on} disabled={!st.data || busy} aria-describedby="upd-hint" onChange={(e) => set(e.target.checked)} />
           <span><strong>Check for updates</strong></span></label>
         <span className="hint" id="upd-hint">{SENT}</span>
-        <div className="note"><Icon id="i-shield" /><span>Shrink Your Shit sends nothing anywhere unless you turn something on here.</span></div>
+        <div className="note"><Icon id="i-shield" /><span>The update check is the only thing Shrink Your Shit sends over the internet without you setting it up.</span></div>
         {!d ? (version || u.error) && <p role="status" style={{ margin: 0 }}>{version && <span>Shrink Your Shit {version}. </span>}{u.error && <span className="muted">{u.error.message}</span>}</p>
           : <div className="row" style={{ alignItems: "baseline" }}>
           <p role="status" style={{ margin: 0 }}><span>Shrink Your Shit {d.current || version}. </span>

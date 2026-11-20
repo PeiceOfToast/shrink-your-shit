@@ -277,12 +277,18 @@ function StartStop({ w, onDone }: { w: Worker; onDone: (m: string) => void }) {
   return <button className="btn sm" type="button" onClick={async () => { if (w.currentJobIds.length) return setAsking(true); if (await act(workerAction(w.id, "stop"), onDone)) onDone(w.name + " stopped."); }}><Icon id="i-stop" />Stop</button>;
 }
 
-function Live({ w }: { w: Worker }) { // only the figures the server sends (null today on this engine)
+// user item 3: the GPU "—" explains itself; title for mouse, hidden text for touch and screen readers (design 02:12Z)
+const NO_GPU = "Not available: no graphics card, one that doesn't report how busy it is, or a worker on another computer. GPU use is only read on This computer.";
+export function NoGpu() { return <span title={NO_GPU}>—<span className="sr"> ({NO_GPU})</span></span>; }
+
+function Live({ w }: { w: Worker }) { // only the figures the server sends
   const l = w.live, out: string[] = [];
   if (l.cpuPercent != null) out.push("CPU " + Math.round(l.cpuPercent) + "%");
   if (l.memUsedBytes != null && l.memTotalBytes) out.push("Memory " + bytes(l.memUsedBytes) + " of " + bytes(l.memTotalBytes));
   for (const g of w.gpus) out.push("GPU · " + g.model + (g.vramBytes ? " · " + bytes(g.vramBytes) : ""));
-  return out.length ? <p className="sm">{out.join(" · ")}</p> : null;
+  const g = l.gpu[0]?.utilPercent; // workshop #443: one entry, the busiest GPU; [] when unreadable or remote
+  if (!out.length && g == null) return null; // a GPU reading shows even before the first CPU reading (review #444)
+  return <p className="sm">{out.length > 0 && out.join(" · ") + " · "}GPU {g == null ? <NoGpu /> : Math.round(g) + "%"}</p>;
 }
 
 export function Workers() {
@@ -316,11 +322,13 @@ export function Workers() {
         <div className="wgrid">{list.map((w) => {
           const [t, cls, icon] = words(w), gone = w.status === "offline" || w.status === "stalled";
           return <article key={w.id} className={"card wcard" + (gone ? " dim" : "")}>
-            <div className="hd"><h3><Link to={"/workers/" + encodeURIComponent(w.id)}>{w.name}</Link></h3><span className="sp" /><StartStop w={w} onDone={done} /></div>
+            <div className="hd"><h3><Link to={"/workers/" + encodeURIComponent(w.id)}>{w.name}</Link></h3><span className="sp" /><StartStop w={w} onDone={done} />
+              <Link className="btn icon ghost gear" to={"/workers/" + encodeURIComponent(w.id) + "?tab=limits"} aria-label={"Settings for " + w.name} title="Settings"><Icon id="i-gear" /></Link></div>
             <div className="bd stack">
               <p className="sm muted">{[w.host, OS[w.os ?? ""], w.arch, w.lastHeartbeatAt && "last heard " + ago(w.lastHeartbeatAt)].filter(Boolean).join(" · ")}</p>
               {w.tags.length > 0 && <div className="chips" aria-label="Tags">{w.tags.map((x) => <span className="mchip" key={x}>{x}</span>)}</div>}
-              <p><span className={"pill " + cls}><Icon id={icon} />{t}</span></p>
+              <p><span className={"pill " + cls}><Icon id={icon} />{t}</span> <span className="sm">{plural(w.slots.cpu.total, "file", "files")} at once · <Link to={"/workers/" + encodeURIComponent(w.id) + "?tab=limits"}>Change</Link></span></p>
+              <Live w={w} />{/* user item 3: GPU % on the Workers list too (QA #444) */}
               {w.currentJobIds.map((id) => <p key={id} className="sm">Converting <Link className="mono" to={"/jobs?tab=running&job=" + encodeURIComponent(id)}>{names[id] ?? "Job " + id}</Link></p>)}
               <div><h4 className="sm muted ec-h">Encoders</h4><EncoderCards w={w} reload={ws.reload} /></div>
             </div>

@@ -94,7 +94,7 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine, libTotals *l
 		if reachable {
 			if w, known := canWriteTimed(l.Path); known && !w {
 				writable = false
-				unwritable = "Can't write to this folder: " + l.Path + ". Change its owner/permissions."
+				unwritable = "Can't write to this folder: " + l.Path + "."
 			}
 		}
 		status := "ok"

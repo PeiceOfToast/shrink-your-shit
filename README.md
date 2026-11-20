@@ -124,7 +124,8 @@ program; point at it explicitly with `-ffmpeg` / `-ffprobe` or `SYP_FFMPEG` /
 - File permission bits are copied on Linux/macOS. Windows has no equivalent, so the
   new file just gets the folder's normal permissions.
 
-**Proxmox / Docker / a Linux server:** see [docs/proxmox.md](docs/proxmox.md). The web page
+**Proxmox / Docker / a Linux server:** see [docs/proxmox.md](docs/proxmox.md). Intel GPU % on the overview needs
+the PERFMON capability (Docker: add it to `cap_add`; the systemd service has it already). The web page
 only listens on this computer by default (`127.0.0.1`). `-addr 0.0.0.0:8484` (or `SYP_ADDR`)
 lets other machines in; they sign in with the access token.
 

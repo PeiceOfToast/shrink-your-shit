@@ -113,6 +113,9 @@ graphics in `docker-compose.yml`. The app joins the group of `/dev/dri` itself, 
 On a Proxmox LXC, pass `/dev/dri` into the container first (e.g. `dev0: /dev/dri/renderD128` in
 `/etc/pve/lxc/<id>.conf`, then restart it). Run `docker compose up -d`, then check the Workers page shows Intel.
 
+**Intel GPU % on the overview:** also add `PERFMON` to `cap_add` (uncomment `# - PERFMON` in `docker-compose.yml`).
+Without it the Intel figure stays empty. NVIDIA and AMD need nothing extra. Systemd installs get this already.
+
 ## Mounting your media into the container
 
 On the Proxmox host, add a bind mount (container id `101`, host folder `/tank/videos-copy`):

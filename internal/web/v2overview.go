@@ -4,12 +4,12 @@ package web
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
@@ -23,6 +23,10 @@ import (
 // what isn't recorded is null, or a day with recorded false.
 func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView, libTotals *libraryTotals) {
 	overviewStats := &statsCache{} // this server's store's
+	if store != nil {              // so the first page view after start is not the slow one (setup tests run with no store)
+		overviewStats.warm(store)
+		libTotals.warm(store)
+	}
 	api.HandleFunc("GET /api/v2/overview", func(w http.ResponseWriter, r *http.Request) {
 		st, err := overviewStats.get(store)
 		if err != nil {
@@ -218,27 +222,51 @@ func zoneName(now time.Time) string {
 // last scan, and the newest event (a job finishing or a skip recorded changes the totals at once; the
 // events are what the pages refresh on). Shared by the Dashboard and Libraries: one count, one answer.
 type libraryTotals struct {
-	mu   sync.Mutex
-	key  string
-	byID map[int64]jobs.LibraryTotals
+	c swrCache[map[int64]jobs.LibraryTotals]
 }
 
 func (c *libraryTotals) get(store *jobs.Store, libs []jobs.Library) (map[int64]jobs.LibraryTotals, error) {
-	_, newest, err := store.EventBounds()
+	key, build := libraryTotalsFuncs(store, libs)
+	return c.c.get(key, build)
+}
+
+// warm computes the totals once in the background, at start.
+func (c *libraryTotals) warm(store *jobs.Store) {
+	libs, err := store.Libraries()
 	if err != nil {
-		return nil, err
+		log.Printf("numbers: warming the library totals failed: %v", err)
+		return
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "%d|%d;", newest, store.SwapChanges()) // a restore writes no event
-	for _, l := range libs {
-		fmt.Fprintf(&b, "%d|%s|%s|%d;", l.ID, l.Path, l.LastScan, l.LastScanVideos)
+	key, build := libraryTotalsFuncs(store, libs)
+	c.c.warm(key, build)
+}
+
+// libraryTotalsFuncs is the key and the computation for the libraries' totals.
+func libraryTotalsFuncs(store *jobs.Store, libs []jobs.Library) (func() (string, error), func() (map[int64]jobs.LibraryTotals, string, error)) {
+	key := func() (string, error) {
+		_, newest, err := store.EventBounds()
+		if err != nil {
+			return "", err
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "%d|%d;", newest, store.SwapChanges()) // a restore writes no event
+		for _, l := range libs {
+			fmt.Fprintf(&b, "%d|%s|%s|%d;", l.ID, l.Path, l.LastScan, l.LastScanVideos)
+		}
+		return b.String(), nil
 	}
-	key := b.String()
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.byID != nil && c.key == key {
-		return c.byID, nil
+	build := func() (map[int64]jobs.LibraryTotals, string, error) {
+		k, err := key()
+		if err != nil {
+			return nil, "", err
+		}
+		out, err := libraryTotalsOf(store, libs)
+		return out, k, err
 	}
+	return key, build
+}
+
+func libraryTotalsOf(store *jobs.Store, libs []jobs.Library) (map[int64]jobs.LibraryTotals, error) {
 	out := map[int64]jobs.LibraryTotals{}
 	for _, l := range libs {
 		t, err := store.LibraryTotalsOf(l)
@@ -269,7 +297,6 @@ func (c *libraryTotals) get(store *jobs.Store, libs []jobs.Library) (map[int64]j
 			}
 		}
 	}
-	c.key, c.byID = key, out
 	return out, nil
 }
 
@@ -285,9 +312,7 @@ func strictlyInside(p, dir string) bool {
 // on 150k jobs). Its key: the newest event's seq, today's date (the 30 days move at midnight), and the
 // minute.
 type statsCache struct {
-	mu  sync.Mutex
-	key string
-	st  *stats
+	c swrCache[*stats]
 }
 
 type stats struct {
@@ -300,18 +325,39 @@ type stats struct {
 }
 
 func (c *statsCache) get(store *jobs.Store) (*stats, error) {
-	_, newest, err := store.EventBounds()
-	if err != nil {
-		return nil, err
+	key, build := statsFuncs(store)
+	return c.c.get(key, build)
+}
+
+// warm computes the sums once in the background, at start.
+func (c *statsCache) warm(store *jobs.Store) {
+	key, build := statsFuncs(store)
+	c.c.warm(key, build)
+}
+
+// statsFuncs is the key and the computation for the overview's sums.
+func statsFuncs(store *jobs.Store) (func() (string, error), func() (*stats, string, error)) {
+	key := func() (string, error) {
+		_, newest, err := store.EventBounds()
+		if err != nil {
+			return "", err
+		}
+		now := time.Now()
+		// and at least once a minute: a purge or a scan finding an original gone frees bytes without an event
+		return strconv.FormatInt(newest, 10) + "|" + strconv.FormatInt(store.SwapChanges(), 10) + "|" + now.Format("2006-01-02") + "|" + strconv.FormatInt(now.Unix()/60, 10), nil
 	}
-	now := time.Now()
-	// and at least once a minute: a purge or a scan finding an original gone frees bytes without an event
-	key := strconv.FormatInt(newest, 10) + "|" + strconv.FormatInt(store.SwapChanges(), 10) + "|" + now.Format("2006-01-02") + "|" + strconv.FormatInt(now.Unix()/60, 10)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.st != nil && c.key == key {
-		return c.st, nil
+	build := func() (*stats, string, error) {
+		k, err := key()
+		if err != nil {
+			return nil, "", err
+		}
+		st, err := takeStats(store, time.Now())
+		return st, k, err
 	}
+	return key, build
+}
+
+func takeStats(store *jobs.Store, now time.Time) (*stats, error) {
 	st := &stats{}
 	t, err := store.TotalsOf()
 	if err != nil {
@@ -327,6 +373,5 @@ func (c *statsCache) get(store *jobs.Store) (*stats, error) {
 	if st.converted, err = store.DoneCount(); err != nil {
 		return nil, err
 	}
-	c.key, c.st = key, st
 	return st, nil
 }
