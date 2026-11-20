@@ -27,6 +27,8 @@ type Stream struct {
 
 	Default bool `json:"default,omitempty"`
 	Forced  bool `json:"forced,omitempty"`
+	// HearingImpaired is the hearing_impaired disposition (SDH subtitles: sounds and speakers named).
+	HearingImpaired bool `json:"hearingImpaired,omitempty"`
 	// AttachedPic is true for cover art stored as a video stream (typical in mp4/mp3): it is not
 	// the movie, and must not be mistaken for it.
 	AttachedPic bool `json:"attachedPic,omitempty"`
@@ -319,17 +321,18 @@ func bitDepth(raw, pixFmt string) int {
 
 func parseStream(m map[string]any, position int) Stream {
 	s := Stream{
-		Index:       position,
-		Type:        str(m, "codec_type"),
-		Codec:       str(m, "codec_name"),
-		Language:    tag(m, "language"),
-		Title:       tag(m, "title"),
-		Default:     disposition(m, "default"),
-		Forced:      disposition(m, "forced"),
-		AttachedPic: disposition(m, "attached_pic"),
-		BitrateKbps: int(num(m, "bit_rate") / 1000),
-		Profile:     str(m, "profile"),
-		StartTime:   num(m, "start_time"),
+		Index:           position,
+		Type:            str(m, "codec_type"),
+		Codec:           str(m, "codec_name"),
+		Language:        tag(m, "language"),
+		Title:           tag(m, "title"),
+		Default:         disposition(m, "default"),
+		Forced:          disposition(m, "forced"),
+		HearingImpaired: disposition(m, "hearing_impaired"),
+		AttachedPic:     disposition(m, "attached_pic"),
+		BitrateKbps:     int(num(m, "bit_rate") / 1000),
+		Profile:         str(m, "profile"),
+		StartTime:       num(m, "start_time"),
 	}
 	if _, ok := m["index"]; ok {
 		s.Index = int(num(m, "index"))
