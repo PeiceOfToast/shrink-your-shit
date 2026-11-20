@@ -138,7 +138,7 @@ export function Libraries() {
               <td className="idc">
                 <div className="lname"><Link className="ttl" to={"/libraries/" + l.id}>{l.name}</Link><span className="lpath mono" title={l.paths.join(", ")}>{l.paths.join(", ")}</span></div>
                 <div className="chips">
-                  {noWf(l) ? <span className="mchip warnchip">No workflow</span> : <Link className="mchip" to={"/workflows/" + l.workflowId}>{l.workflowName}</Link>}
+                  {noWf(l) ? <span className="mchip warnchip">No workflow · assign one to start it</span> : <Link className="mchip" to={"/workflows/" + l.workflowId}>{l.workflowName}</Link>}
                   {tag(l) && <span className="mchip" title={tag(l)}>{shortTag(tag(l))}</span>}
                   <span className="mchip">{priorityWord(l.priority)} priority</span>
                   <span className="mchip">{shareWait(l) ? "Waiting for " + shareName(l) + " to connect · " : ""}{count(l.counts.waiting)} waiting{paused(l) ? ", not converting" : ""}</span>
