@@ -161,6 +161,10 @@ func previewRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 func previewTemplate(w http.ResponseWriter, store *jobs.Store, l jobs.Library, s map[string]json.RawMessage) (rules.Template, bool) {
 	if len(s) == 0 {
 		f, err := store.GetFlow(l.FlowID)
+		if errors.Is(err, jobs.ErrNotFound) { // no workflow (flowId 0): nothing saved to preview
+			noWorkflowYet(w)
+			return rules.Template{}, false
+		}
 		if err != nil {
 			serverError(w, err)
 			return rules.Template{}, false

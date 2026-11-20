@@ -220,11 +220,12 @@ VALUES(?,?,?,?,?,?,?,?)`, j.Library, j.Path, Queued, j.Reason, j.DurationSec, j.
 		return r.LastInsertId()
 	}
 	s.ensureLibraryRevision(j.LibraryID)
-	// One statement: the job is added only if its library still exists and is started, so a library
-	// removed (or a scan that started before the removal) cannot leave a job behind.
+	// One statement: the job is added only if its library still exists, is started and has a workflow, so a
+	// library removed (or a scan that started before the removal) cannot leave a job behind, and nothing is
+	// ever queued for a library with no workflow (the user's "add a library, assign its workflow later").
 	// V5b: it takes its library's priority.
 	r, err := s.db.Exec(`INSERT INTO jobs(library,library_id,path,status,reason,duration,size_before,created,updated,priority,workflow_rev)
-SELECT ?,?,?,?,?,?,?,?,?,priority,`+queuedRevSQL+` FROM libraries WHERE id=? AND started=1`,
+SELECT ?,?,?,?,?,?,?,?,?,priority,`+queuedRevSQL+` FROM libraries WHERE id=? AND started=1 AND flow_id IS NOT NULL`,
 		j.Library, j.LibraryID, j.Path, Queued, j.Reason, j.DurationSec, j.SizeBefore, now, now, j.LibraryID)
 	if err != nil {
 		return 0, err
@@ -242,7 +243,7 @@ func (s *Store) EnqueueFailed(j Job, code, msg string) (int64, error) {
 	now := s.stamp()
 	s.ensureLibraryRevision(j.LibraryID)
 	r, err := s.db.Exec(`INSERT INTO jobs(library,library_id,path,status,reason,duration,size_before,created,updated,priority,error,error_code,attempts,workflow_rev)
-SELECT ?,?,?,?,?,?,?,?,?,priority,?,?,1,`+queuedRevSQL+` FROM libraries WHERE id=? AND started=1`,
+SELECT ?,?,?,?,?,?,?,?,?,priority,?,?,1,`+queuedRevSQL+` FROM libraries WHERE id=? AND started=1 AND flow_id IS NOT NULL`,
 		j.Library, j.LibraryID, j.Path, Failed, j.Reason, j.DurationSec, j.SizeBefore, now, now, msg, code, j.LibraryID)
 	if err != nil {
 		return 0, err

@@ -124,6 +124,9 @@ func settingRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 				"Other libraries use this setting too ("+strings.Join(shared.UsedBy, ", ")+"). Change it for all of them, or give this library its own copy. Nothing was changed.",
 				map[string]any{"usedBy": shared.UsedBy})
 			return
+		case errors.Is(err, jobs.ErrNoWorkflow):
+			noWorkflowYet(w)
+			return
 		case errors.Is(err, jobs.ErrNotFound):
 			apiError(w, http.StatusNotFound, "not_found", "There is no such library.")
 			return
@@ -156,6 +159,10 @@ func settingRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			return
 		}
 		f, err := store.GetFlow(l.FlowID)
+		if errors.Is(err, jobs.ErrNotFound) { // no workflow (flowId 0): there is no setting to show
+			noWorkflowYet(w)
+			return
+		}
 		if err != nil {
 			serverError(w, err)
 			return
