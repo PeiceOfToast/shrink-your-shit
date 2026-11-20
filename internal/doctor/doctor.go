@@ -519,6 +519,10 @@ func writeProbe(dir string) error {
 	return os.Remove(name)
 }
 
+// CanWrite reports whether the program can write a file in dir: the library access check's own probe, so
+// the libraries list and the doctor agree.
+func CanWrite(dir string) bool { return writeProbe(dir) == nil }
+
 // ReadOnlyMessage is design's read-only copy (FIRST-RUN.md) followed by how to make the folder
 // writable for the user the program runs as, on this system: the Linux service runs as "syp", the
 // container as a numeric user, macOS and Windows as the person's own account.

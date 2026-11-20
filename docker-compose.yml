@@ -1,4 +1,4 @@
-# Example: copy this file, change the media path, then run `docker compose up -d`.
+# Example: copy this file, then run `docker compose up -d`. Add a media folder only if you need one (see /media below).
 # WARNING: shrink-your-shit REPLACES original files. Start with a copy of your media.
 services:
   shrink-your-shit:
@@ -6,13 +6,14 @@ services:
     # Once a release has been published (and the package made public, see docs/proxmox.md) you
     # can pull instead of building: comment out "build: ." above and use
     # image: ghcr.io/peiceoftoast/shrink-your-shit:latest
-    # user: "1000:1000"    # must be able to read AND write the media folder; change to match its owner
+    # user: "1000:1000"    # must be able to read AND write each library folder; change to match its owner
     ports:
       - "8484:8484"        # needs the access token (docker exec <name> shrink-your-shit token); no HTTPS, so never expose it to the internet
     volumes:
       - syp-config:/config              # database (a named volume, so it is writable by the program)
                                         # it also holds the key to saved share passwords: keep backups of it private
-      - /path/to/COPY-of-your-videos:/media
+      # - /path/to/COPY-of-your-videos:/media   # only if your videos are on this machine; then add /media as a library on the web page
+                                                # (network shares: add them on the Shares page, no mount here)
     # Lets the app mount NFS/SMB shares added on the Shares page. It gives the container mount rights (close to privileged);
     # if you don't use network shares, or mount them on the host, delete cap_add and security_opt.
     cap_add:

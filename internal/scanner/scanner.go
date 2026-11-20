@@ -329,8 +329,17 @@ func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.Fil
 		}
 		return false
 	}
+	// An empty file already failed stays decided while it stays empty. Checked before the still-changing step: a touch
+	// would make that step overwrite the record, and the next look would add a second failed row (review #429).
+	if prev != nil && prev.Size == 0 && st.Size() == 0 && strings.HasPrefix(prev.Decision, emptyFileDecision) {
+		return false
+	}
 	if s.observe(path, st, now()) || !s.ready(path, st, now()) {
 		s.recordSkip(path, st, rules.SkipStillChanging)
+		return false
+	}
+	if st.Size() == 0 { // nothing to read: a failed job with its plain reason, never probed or converted
+		s.failEmpty(t, path, st)
 		return false
 	}
 	pi, err := Probe(ctx, s.Store, s.Exec, s.FFprobe, path, st)
@@ -370,6 +379,26 @@ func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.Fil
 	s.Store.AddStep(id, "checked", true, "To be converted: "+why+".")
 	s.Store.PutFile(rec)
 	return true
+}
+
+// emptyFileWords is the plain reason a 0-byte video fails with. emptyFileDecision begins its file record's decision.
+const (
+	emptyFileWords    = "The file is empty (0 bytes)."
+	emptyFileDecision = "failed: "
+)
+
+// failEmpty records a 0-byte video as a failed job with its plain reason, without probing it. The job's
+// code is convert_failed: the job-code list has no code for an empty file (see the handoff).
+func (s *Scanner) failEmpty(t Target, path string, st os.FileInfo) {
+	id, err := s.Store.EnqueueFailed(jobs.Job{Library: t.Path, LibraryID: t.LibraryID, Path: path, Reason: emptyFileWords}, jobs.ReasonConvertFailed, emptyFileWords)
+	if err != nil {
+		if !errors.Is(err, jobs.ErrLibraryGone) {
+			log.Printf("enqueue %s: %v", path, err)
+		}
+		return
+	}
+	s.Store.AddStep(id, "found", true, "Found in "+t.Path+".")
+	s.Store.PutFile(jobs.File{Path: path, Size: 0, ModTime: st.ModTime().UnixNano(), Decision: emptyFileDecision + emptyFileWords})
 }
 
 // Guard is what the file guards (slice 23, SAF-4) decide about the file at path in the library at root,

@@ -611,15 +611,44 @@ func plural(n int, one, many string) string {
 	return many
 }
 
-// maxDamagedPictures is how many damaged pictures an original may have and still be converted. One broken
-// picture is a little damage (a bad macroblock in one P-frame, as in a copied file); more means the source is failing.
-const maxDamagedPictures = 3
+// maxDamagedPercent is the share of the original's pictures that may be damaged and still be converted: a file
+// that is 99% good plays through, so it converts. One broken picture of a few hundred is a little damage (a bad
+// macroblock in one P-frame, as in a copied file); more than that means the source is failing.
+const maxDamagedPercent = 1
+
+// sourceFrames is the main video stream's picture count, as duration times frame rate (0 when either is unknown).
+func sourceFrames(src media.Info) int64 {
+	for _, s := range src.Streams {
+		if s.Type == "video" && !s.AttachedPic {
+			return int64(src.DurationSec*s.FrameRate + 0.5)
+		}
+	}
+	return 0
+}
+
+// damageTolerated says whether an original's damage is little enough to convert: no damage to the file as a
+// whole (that is never tolerated, however few pictures), and the damaged pictures are at most maxDamagedPercent
+// of its frames. A file whose frame count is not known is not tolerated: there is no share to measure.
+func damageTolerated(rep sourceDamageReport, frames int64) bool {
+	if rep.FileLevel || frames <= 0 {
+		return false
+	}
+	return int64(rep.Pictures)*100 <= frames*maxDamagedPercent
+}
+
+// damagedShare says how much damage there is, for the job log: the pictures out of the frames, and the share.
+func damagedShare(pictures int, frames int64) string {
+	if frames <= 0 {
+		return fmt.Sprintf("%d damaged %s; the frame count is not known", pictures, plural(pictures, "picture", "pictures"))
+	}
+	return fmt.Sprintf("%d damaged %s of %d frames (%.2f%%)", pictures, plural(pictures, "picture", "pictures"), frames, 100*float64(pictures)/float64(frames))
+}
 
 // fileDamageRe matches ffmpeg messages that mean the file as a whole is damaged (its container or header is
 // broken, or it ends early). Any of these keeps the original, however few. "damaged" is counted here too: when
 // the message does not say which picture, the file as a whole is the safe reading. "corrupt" is not: ffmpeg's
 // corrupt lines are per picture or packet (corrupted macroblock, corrupt decoded frame, Packet corrupt).
-var fileDamageRe = regexp.MustCompile(`(?i)moov atom not found|invalid data found when processing input|truncated|unexpected end|header missing|damaged`)
+var fileDamageRe = regexp.MustCompile(`(?i)moov atom not found|invalid data found when processing input|truncated|unexpected end|file ended prematurely|header missing|damaged`)
 
 // pictureDamageRe matches ffmpeg messages about one damaged picture (a broken slice or macroblock run).
 var pictureDamageRe = regexp.MustCompile(`(?i)error while decoding|cabac decode|concealing|invalid nal|slice end not reached|overread|out of range|missing reference|reference picture missing|no frame decoded|corrupted macroblock|corrupt decoded frame|packet corrupt`)
