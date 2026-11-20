@@ -233,7 +233,10 @@ func (w *Worker) sizeRule(id int64, plan rules.Plan, newPath string, origSize in
 	newSize, orig := rules.HumanBytes(st.Size()), rules.HumanBytes(origSize)
 	if plan.KeepIfBigger {
 		w.jobf(id, ": The new file is %s, the original %s: keeping the original (this workflow keeps originals when the new file is bigger)", newSize, orig)
-		return kept("The new file, %s, is bigger than the original, %s, so the original was kept as it was.", newSize, orig)
+		// Not a failure: the workflow's own choice left the file as it is, so it ends like any other skip
+		// (Skipped, left alone until it changes or Convert again), with its own reason code.
+		return &SkippedError{Words: fmt.Sprintf("The new file (%s) was bigger than the original (%s), so the original was kept", newSize, orig),
+			Code: jobs.ReasonNewFileBigger}
 	}
 	if OutputMode(plan.Output) == Replace {
 		w.jobf(id, ": The new file is %s, the original %s: replacing anyway (this workflow replaces originals even when the new file is bigger)", newSize, orig)
