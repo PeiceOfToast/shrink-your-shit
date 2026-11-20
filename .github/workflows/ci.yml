@@ -193,6 +193,13 @@ jobs:
       - name: Intel GPU runtime files are in the x86_64 image
         run: |
           docker run --rm --entrypoint sh shrink-your-shit -c 'ls /usr/lib/x86_64-linux-gnu/libmfx-gen.so.1.2 /usr/lib/x86_64-linux-gnu/libvpl.so.2 /usr/lib/x86_64-linux-gnu/dri/iHD_drv_video.so'
+      - name: AMD VA-API driver is in the image (not tested on a real AMD card)
+        run: |
+          docker run --rm --entrypoint sh shrink-your-shit -c 'ls /usr/lib/*/dri/radeonsi_drv_video.so'
+      - name: image size, and what the AMD VA-API driver adds to it
+        run: |
+          docker image inspect -f 'image: {{.Size}} bytes' shrink-your-shit
+          docker run --rm --user 0 --entrypoint sh shrink-your-shit -c 'b=$(du -sxk / | cut -f1); apt-get remove -y -qq mesa-va-drivers >/dev/null 2>&1 && apt-get autoremove -y -qq >/dev/null 2>&1; a=$(du -sxk / | cut -f1); echo "mesa-va-drivers and what it pulled in: $(( (b - a) / 1024 )) MB"'
       - name: the image can make https calls (CA certificates are installed)
         run: |
           docker run --rm --entrypoint sh shrink-your-shit -c 'test -s /etc/ssl/certs/ca-certificates.crt' \
