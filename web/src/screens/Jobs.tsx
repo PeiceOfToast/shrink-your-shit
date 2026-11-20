@@ -189,7 +189,7 @@ export function Jobs() {
       {!current ? (page.error ? <LoadFailed error={page.error} reload={page.reload} /> : <div className="empty">Loading…</div>) : !items.length ? (q ? <div className="empty">No file matches.</div>
         : firstRun ? <Empty icon="i-jobs" text="No jobs yet. Jobs start when a library finds videos."><Link className="btn primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link></Empty>
         : <Empty icon="i-jobs" text={kept ? TRASH_EMPTY : left ? LEFT_EMPTY : { waiting: "Nothing is waiting.", running: "Nothing is converting right now.", completed: "No file is done yet.", skipped: "No file was skipped.", failed: "Nothing has failed." }[tab]} />) : (
-        <div className={"list" + (selecting ? " selecting" : "")}><table className="tbl jobs">
+        <div className={"list rows" + (selecting ? " selecting" : "")}><table className="tbl jobs">
           {/* No table header (U4, C1): a codec and resolution tile, the file and its detail, one chip line of facts, one status pill and the size change. Waiting keeps its position column. */}
           <tbody>{items.map((j) => {
             const pct = j.progress ? (j.progress.percent ?? j.progress.workflowPercent) : null;
