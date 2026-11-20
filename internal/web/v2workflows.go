@@ -300,6 +300,12 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		if !readJSON(w, r, &in) {
 			return
 		}
+		// W4a: a variable's name is the engine's to check; the editor refuses these too, so a draft
+		// saved another way can't break the built-in names.
+		if vs := workflow.CheckVariables(in.Workflow); len(vs) > 0 {
+			writeErrorWith(w, http.StatusBadRequest, vs[0].Code, vs[0].Message+" Nothing was changed.", map[string]any{"issues": vs})
+			return
+		}
 		if _, err := store.EnsureRevision(id); err != nil {
 			storeErr(w, err)
 			return

@@ -73,6 +73,9 @@ func Validate(d Doc) Result {
 		return r
 	}
 	r.AddSteps = addSteps()
+	for _, i := range CheckVariables(d) {
+		add(i)
+	}
 	defs := map[string]StepDefinition{}
 	for _, def := range Definitions() {
 		defs[def.Type] = def
