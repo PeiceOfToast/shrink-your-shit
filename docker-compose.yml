@@ -19,6 +19,7 @@ services:
     cap_add:
       - SYS_ADMIN
       - DAC_READ_SEARCH
+      # - PERFMON    # Intel GPU %: uncomment together with the /dev/dri lines below (the overview shows no Intel figure without it)
     security_opt:
       - "apparmor:unconfined"
     # environment:
