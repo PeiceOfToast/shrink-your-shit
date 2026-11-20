@@ -356,6 +356,12 @@ func parseStream(m map[string]any, position int) Stream {
 	if _, ok := m["index"]; ok {
 		s.Index = int(num(m, "index"))
 	}
+	// Every stream type states its own length (audio included: the timing check compares it), so this is not
+	// video-only.
+	s.Duration = num(m, "duration")
+	if s.Duration == 0 {
+		s.Duration = clockSeconds(tag(m, "DURATION"))
+	}
 	switch s.Type {
 	case "video":
 		s.Width, s.Height = int(num(m, "width")), int(num(m, "height"))
@@ -366,10 +372,6 @@ func parseStream(m map[string]any, position int) Stream {
 		}
 		s.VFR = avg > 0 && nominal > 0 && !s.AttachedPic && math.Abs(avg-nominal)/nominal > 0.03
 		s.Frames = int64(num(m, "nb_frames"))
-		s.Duration = num(m, "duration")
-		if s.Duration == 0 {
-			s.Duration = clockSeconds(tag(m, "DURATION"))
-		}
 		s.PixFmt = str(m, "pix_fmt")
 		s.BitDepth = bitDepth(str(m, "bits_per_raw_sample"), s.PixFmt)
 		s.ColorSpace = str(m, "color_space")

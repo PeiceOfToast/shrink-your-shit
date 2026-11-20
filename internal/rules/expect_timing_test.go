@@ -90,3 +90,14 @@ func TestCompareTimingUnknownLengthIsNotChecked(t *testing.T) {
 		t.Fatalf("a track whose length is not stated is not checked for length: %v", p)
 	}
 }
+
+// With the original track's length unknown (LengthSec 0) the length is not compared at all: a track 2 s shorter
+// than the picture passes, because nothing says how long it should be. The message "0.0 s" is never produced.
+func TestCompareTimingUnknownOriginalLengthSkipsTheCheck(t *testing.T) {
+	src := timingPicture()
+	e := DefaultExpect(src, 0)
+	e.Streams[1].LengthSec = 0
+	if p := e.Compare(audioTimed(0, 8), -1); len(p) != 0 {
+		t.Fatalf("LengthSec 0 must skip the length check, not compare with the video alone: %v", p)
+	}
+}

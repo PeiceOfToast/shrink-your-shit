@@ -323,16 +323,16 @@ func compareTiming(w StreamExpect, g media.Stream, n int, out media.Info) []stri
 		p = append(p, fmt.Sprintf("%s is out of step with the picture: it starts %s, but in the original it starts %s (more than %.1f s apart)",
 			name, offsetWords(now), offsetWords(w.OffsetSec), offsetTolSec))
 	}
-	if w.Type == "audio" && g.Duration > 0 {
+	// The length is judged against the original track only. With its length unknown nothing is compared: not
+	// the video alone, which would fail a faithful track that is shorter than the picture.
+	if w.Type == "audio" && g.Duration > 0 && w.LengthSec > 0 {
 		videoLen := main.Duration
 		if videoLen <= 0 {
 			videoLen = out.DurationSec
 		}
-		near := videoLen > 0 && math.Abs(g.Duration-videoLen) <= lengthTolSec
-		if !near && w.LengthSec > 0 && math.Abs(g.Duration-w.LengthSec) <= lengthTolSec {
-			near = true
-		}
-		if !near && (videoLen > 0 || w.LengthSec > 0) {
+		near := math.Abs(g.Duration-w.LengthSec) <= lengthTolSec ||
+			(videoLen > 0 && math.Abs(g.Duration-videoLen) <= lengthTolSec)
+		if !near {
 			p = append(p, fmt.Sprintf("%s is %.1f s long, but the video is %.1f s and the original track %.1f s (more than %.0f s apart)",
 				name, g.Duration, videoLen, w.LengthSec, lengthTolSec))
 		}
