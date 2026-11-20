@@ -328,8 +328,8 @@ const streamLines = (pr: Probe) => (pr.streams ?? []).map((x, j, all) => [x.type
 // a variable's value: "Hidden" for a secret; one value when nothing changed it; else the start, the end and the step that set it
 function varValue(v: LogVariable) {
   if (v.secret) return <span className="muted">Hidden</span>;
-  if (v.changedBy == null) return <>{val(v.end ?? v.start)}</>;
-  return <><span className="pill">Changed</span> {val(v.start)} → <strong>{val(v.end)}</strong><br /><span className="muted">Set by {stepLabel(v.changedBy)}</span></>;
+  if (v.changedBy == null) return <><span className="vh">At start and at end: </span>{val(v.end ?? v.start)}</>;
+  return <><span className="pill">Changed</span> <span className="vh">At start: </span>{val(v.start)} <span aria-hidden="true">→</span> <span className="vh">At end: </span><strong>{val(v.end)}</strong><br /><span className="muted">Set by {stepLabel(v.changedBy)}</span></>;
 }
 type Raw = { key: string; id?: string; title: string; head: ReactNode; hits: number; dflt: boolean; show: boolean; body: ReactNode };
 // E: a finished job's log (GET /log), in sections: Start, Variables, Source file, one section per step, Summary. Open by the
@@ -369,9 +369,9 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
       hits: q ? countIn(vars.map((v) => [v.name, v.start, v.end].join(" ")).join("\n").toLowerCase(), q) : 0, dflt: false, show: !errOnly,
       body: vars.length === 0 ? <p className="sm muted">No variables were set for this job.</p> : <>
         <label className="sw"><input type="checkbox" role="switch" className="switch" checked={only} onChange={(e) => setOnly(e.target.checked)} /><span className="sm">Only changed ({changed.length})</span></label>
-        {(only ? changed : vars).map((v) => <div key={v.name} className="row" style={{ gap: 8, flexWrap: "wrap", borderTop: "1px solid var(--border)", padding: "6px 0" }}>
-          <code className="sm" style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}>{"{{" + v.name + "}}"}</code>
-          <span className="sm" style={{ flex: "1 1 200px", minWidth: 0 }}>{varValue(v)}</span></div>)}</> });
+        {(only ? changed : vars).map((v) => <dl key={v.name} className="row" style={{ gap: 8, flexWrap: "wrap", borderTop: "1px solid var(--border)", padding: "6px 0", margin: 0 }}>
+          <dt style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}><code className="sm">{"{{" + v.name + "}}"}</code></dt>
+          <dd className="sm" style={{ flex: "1 1 200px", minWidth: 0, margin: 0 }}>{varValue(v)}</dd></dl>)}</> });
     if (pr) raw.push({ key: "source", title: "Source file", head: null, hits: q ? countIn((sourceLine(pr) + "\n" + streamLines(pr).join("\n")).toLowerCase(), q) : 0, dflt: false, show: !errOnly,
       body: <><p className="sm">{sourceLine(pr)}</p>{streamLines(pr).map((x, j) => <p className="sm" key={j}>{x}</p>)}</> });
   }
@@ -398,7 +398,7 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
         {flags}
         {st.check && <p className="sm">Picture check: score {st.check.score.toFixed(3)}{st.check.min != null ? " (needs " + st.check.min.toFixed(3) + ")" : ""}{st.check.passed != null ? " · " + (st.check.passed ? "passed" : "failed") : ""}</p>}
         {(st.moves ?? []).map((m, j) => <p className="sm" key={j}>{MOVE[m.action] ?? m.action} <code>{m.from}</code>{m.to && <> to <code>{m.to}</code></>}{!m.ok && <span className="muted"> · {m.error ?? "failed"}</span>}</p>)}
-        {st.outputLines > 0 && <details open={st.outcome !== "ok"}><summary className="sm">Show ffmpeg output ({st.outputLines} lines)</summary>
+        {st.outputLines > 0 && <details open={st.outcome === "failed" || st.outcome === "skipped"}><summary className="sm">Show ffmpeg output ({st.outputLines} lines)</summary>
           {st.outputLines > 200 && <p className="sm"><a href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}>Download all {st.outputLines.toLocaleString()} lines</a></p>}
           <pre className="joblog sm">{text(st.output)}</pre></details>}
         {(st.found?.length ?? 0) > 0 && <pre className="joblog sm">{st.found!.join("\n")}</pre>}
