@@ -641,7 +641,7 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
   const shown = simple ? list.filter(shapes) : list;
   const fold = (ns: Node[], what: string) => ns.length === 0 ? null : <li className="srow fold"><div className="sline"><span className="stepn" aria-hidden="true">·</span><Icon id="i-layers" />
     <div className="sp"><span className="snm">{ns.length === 1 ? "1 step " + what : ns.length + " steps " + what}</span> <span className="ssum">{ns.map((n) => n.name ?? defs.find((d) => d.type === n.type)?.name ?? n.type).join(" · ")}</span></div>
-    <Link className="btn sm ghost" to={"/workflows/" + id}>Open the steps view</Link></div></li>;
+    <Link className="btn sm ghost vlink" to={"/workflows/" + id}>Open the steps view</Link></div></li>;
   return (
     <Reg.Provider value={{ defs, words: live.stepSummaries, libs, wf: id }}>
     <OwnVars.Provider value={doc.variables ?? []}>
@@ -656,7 +656,7 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
           <span className="pill">{w.version == null || w.draftDiffers || dirty ? "Draft" : "Published"}</span>
           <span className="muted sm">{w.version == null ? "Not published yet" : "v" + w.version + " published" + (w.draftDiffers || dirty ? " · v" + (w.version + 1) + " draft" : "")}</span>
         </>}>
-        {simple ? <Link className="btn sm ghost" to={"/workflows/" + id}>All steps</Link> : <Link className="btn sm ghost" to={"/workflows/" + id + "?view=simple"}>Simple view</Link>}
+        {simple ? <Link className="btn sm ghost vlink" to={"/workflows/" + id}>All steps</Link> : <Link className="btn sm ghost vlink" to={"/workflows/" + id + "?view=simple"}>Simple view</Link>}
         <Link className="btn sm ghost" to={"/workflows/" + id + "/graph"}>Graph</Link>
         {canStack && <>
           <span className="desk">{tools}</span>
@@ -692,7 +692,7 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
           <div className="row"><button className="btn sm primary" type="button" autoFocus onClick={openAdd}><Icon id="i-plus" />Add the first step</button>
             <button className="btn sm" type="button" onClick={startShrink}>Start from Shrink videos</button></div>
         </div></div>}
-        {simple && <p className="muted sm">The steps that convert, check and save. {before.length + after.length > 0 ? "The rest of this workflow is folded; the steps view has everything." : "Questions, notes and what happens after the save go in the steps view."}</p>}
+        {simple && <p className="muted simplenote">The steps that convert, check and save. {before.length + after.length > 0 ? "The rest of this workflow is folded; the steps view has everything." : "Questions, notes and what happens after the save go in the steps view."}</p>}
         <ol className="steps">{simple && fold(before, "before converting")}{shown.map((n) => {
           const i = list.indexOf(n);
           // the server's places: no answer for a step means it's fixed. Moves stay inside the first and last steps.
