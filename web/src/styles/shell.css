@@ -590,7 +590,7 @@ nav.tabs[aria-label="Settings sections"]{background:linear-gradient(to right,var
 /* V4 Graph (SCREENS V4, mockups/workflow-graph.html): canvas + a side panel; nodes as in the mockup's .gn */
 .graphwrap{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:var(--gap);min-height:560px}
 .gcanvas{position:relative;height:min(72vh,720px);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg)}
-.gcanvas .react-flow{--xy-background-pattern-dots-color-default:var(--border-strong);--xy-edge-stroke-default:var(--text-2);--xy-minimap-background-color-default:var(--surface);--xy-attribution-background-color-default:transparent;color:var(--text)}
+.gcanvas .react-flow{--xy-background-pattern-dots-color-default:var(--border-strong);--xy-edge-stroke-default:var(--text-2);--xy-minimap-background-color-default:var(--surface);--xy-minimap-mask-background-color-default:color-mix(in srgb,var(--bg) 60%,transparent);--xy-attribution-background-color-default:transparent;color:var(--text)}
 .gcanvas .react-flow__node-step{padding:0;border:0;background:none;box-shadow:none}
 .gnode{position:relative;width:188px;background:var(--surface);border:1px solid var(--border-strong);border-left:4px solid var(--cat,var(--accent));border-radius:8px;box-shadow:0 1px 3px rgb(0 0 0/.12);font-size:13px}
 .gnode.sel{outline:2px solid var(--accent);outline-offset:2px}

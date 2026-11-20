@@ -107,11 +107,11 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
   // Esc drops a pending port from anywhere on the page, not only from the palette
   useEffect(() => { if (!pending) return; const k = (e: KeyboardEvent) => { if (e.key === "Escape") { setPending(null); setSaid("Dropped the link from that port."); } }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [pending]);
   const pendingVia = () => { const pn = pending && doc.nodes.find((n) => n.id === pending.node); return pn && !doc.edges.some((e) => e.from === pn.id && e.fromPort === pending.port) ? { after: pn, port: pending.port } : undefined; };
-  const push = (next: { doc?: WorkflowDoc; layout?: Layout }) => { setHist((h) => ({ at: h.at + 1, list: [...h.list.slice(0, h.at + 1), { doc: next.doc ?? h.list[h.at].doc, layout: next.layout ?? h.list[h.at].layout }] })); setPanel(null); setSaid(""); setBar(null); };
+  const push = (next: { doc?: WorkflowDoc; layout?: Layout }) => { window.clearTimeout(nudgeTimer.current); setHist((h) => ({ at: h.at + 1, list: [...h.list.slice(0, h.at + 1), { doc: next.doc ?? h.list[h.at].doc, layout: next.layout ?? h.list[h.at].layout }] })); setPanel(null); setSaid(""); setBar(null); };
   // the Undo offered for a delete, for 8 s, only while the delete is still the latest change
   const [bar, setBar] = useState<{ back: number; fwd: number } | null>(null);
   useEffect(() => { if (!bar) return; const t = setTimeout(() => setBar(null), 8000); return () => clearTimeout(t); }, [bar]);
-  const undoDelete = () => { if (bar) setHist((h) => (h.at === bar.fwd ? { ...h, at: bar.back } : h)); setBar(null); setSaid("Delete undone."); };
+  const undoDelete = () => { window.clearTimeout(nudgeTimer.current); if (bar) setHist((h) => (h.at === bar.fwd ? { ...h, at: bar.back } : h)); setBar(null); setSaid("Delete undone."); };
   // the server's check and step words for the document as it is now: asked 300 ms after a change of the logic
   const seen = useRef(doc);
   useEffect(() => {
