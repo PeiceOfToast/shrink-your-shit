@@ -277,6 +277,19 @@ function StartStop({ w, onDone }: { w: Worker; onDone: (m: string) => void }) {
   return <button className="btn sm" type="button" onClick={async () => { if (w.currentJobIds.length) return setAsking(true); if (await act(workerAction(w.id, "stop"), onDone)) onDone(w.name + " stopped."); }}><Icon id="i-stop" />Stop</button>;
 }
 
+// design 7.2: each worker's own switch (its row's first control). On = going; off while it finishes its file (draining),
+// with the words saying so; disabled when the worker is offline or stalled. Turning off a converting worker asks first.
+function WorkerSwitch({ w, onDone }: { w: Worker; onDone: (m: string) => void }) {
+  const [asking, setAsking] = useState(false), on = going(w), gone = w.status === "offline" || w.status === "stalled", finishing = w.status === "draining";
+  if (asking) return <StopAsk w={w} onDone={(m) => (setAsking(false), onDone(m))} onCancel={() => setAsking(false)} />;
+  const flip = async () => {
+    if (on) { if (w.currentJobIds.length) return setAsking(true); if (await act(workerAction(w.id, "stop"), onDone)) onDone(w.name + " stopped."); return; }
+    if (await act(workerAction(w.id, "start"), onDone)) onDone(w.name + " started.");
+  };
+  return <label className="sw"><input type="checkbox" role="switch" className="switch" checked={on} disabled={gone} aria-label={w.name} onChange={flip} />
+    <span className="sm">{on ? "On" : finishing ? "Finishes its file, then stops" : "Off"}</span></label>;
+}
+
 // user item 3: the GPU "—" explains itself; title for mouse, hidden text for touch and screen readers (design 02:12Z)
 const NO_GPU = "Not available: no graphics card, one that doesn't report how busy it is, or a worker on another computer. GPU use is only read on This computer.";
 export function NoGpu() { return <span title={NO_GPU}>—<span className="sr"> ({NO_GPU})</span></span>; }
@@ -322,7 +335,7 @@ export function Workers() {
         <div className="wgrid">{list.map((w) => {
           const [t, cls, icon] = words(w), gone = w.status === "offline" || w.status === "stalled";
           return <article key={w.id} className={"card wcard" + (gone ? " dim" : "")}>
-            <div className="hd"><h3><Link to={"/workers/" + encodeURIComponent(w.id)}>{w.name}</Link></h3><span className="sp" /><StartStop w={w} onDone={done} />
+            <div className="hd"><h3><Link to={"/workers/" + encodeURIComponent(w.id)}>{w.name}</Link></h3><span className="sp" /><WorkerSwitch w={w} onDone={done} />
               <Link className="btn icon ghost gear" to={"/workers/" + encodeURIComponent(w.id) + "?tab=limits"} aria-label={"Settings for " + w.name} title="Settings"><Icon id="i-gear" /></Link></div>
             <div className="bd stack">
               <p className="sm muted">{[w.host, OS[w.os ?? ""], w.arch, w.lastHeartbeatAt && "last heard " + ago(w.lastHeartbeatAt)].filter(Boolean).join(" · ")}</p>
