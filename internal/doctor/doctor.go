@@ -123,6 +123,8 @@ type Checker struct {
 	// stored run's, by encoder, for the Doctor page.
 	run    map[string]Probe
 	probes map[string]Probe
+	// decodeOK is Decodes' cache: "family codec bits" -> whether the family's hardware decoder reads it.
+	decodeOK map[string]bool
 }
 
 const toolsTTL = 10 * time.Minute
@@ -344,6 +346,68 @@ func (c *Checker) encodes(ctx context.Context, enc string, tenBit bool) bool {
 		c.run[enc] = p
 	}
 	return err == nil
+}
+
+// decodeSamples are the sources Decodes can make a sample of: the software encoder and the demuxer's name.
+var decodeSamples = map[string][2]string{"h264": {"libx264", "h264"}, "hevc": {"libx265", "hevc"}}
+
+// Decodes says whether the graphics family's hardware decoder reads codec at this bit depth here (the full
+// GPU pipeline needs it): a one-frame sample is made in software and decoded on the device. Cached.
+func (c *Checker) Decodes(ctx context.Context, fam, codec string, tenBit bool) bool {
+	key := fmt.Sprintf("%s %s %t", fam, codec, tenBit)
+	c.mu.Lock()
+	ok, seen := c.decodeOK[key]
+	c.mu.Unlock()
+	if seen {
+		return ok
+	}
+	ok = c.decodes(ctx, fam, codec, tenBit)
+	c.mu.Lock()
+	if c.decodeOK == nil {
+		c.decodeOK = map[string]bool{}
+	}
+	c.decodeOK[key] = ok
+	c.mu.Unlock()
+	return ok
+}
+
+func (c *Checker) decodes(ctx context.Context, fam, codec string, tenBit bool) bool {
+	s, known := decodeSamples[codec]
+	if !known || c.FFmpeg == "" || (fam != "qsv" && fam != "vaapi") {
+		return false
+	}
+	dir, err := os.MkdirTemp("", "decode-probe")
+	if err != nil {
+		return false
+	}
+	defer os.RemoveAll(dir)
+	sample := filepath.Join(dir, "sample."+s[1])
+	pix := "yuv420p"
+	if tenBit {
+		pix = "yuv420p10le"
+	}
+	tctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if _, err := c.Exec.Output(tctx, c.FFmpeg, "-hide_banner", "-v", "error", "-f", "lavfi", "-i",
+		"color=c=black:s=256x256:d=0.1", "-frames:v", "1", "-pix_fmt", pix, "-c:v", s[0], "-f", s[1], sample); err != nil {
+		return false
+	}
+	_, err = c.Exec.Output(tctx, c.FFmpeg, decodeArgs(fam, media.VAAPIDevice(), sample)...)
+	return err == nil
+}
+
+// decodeArgs decodes in on the family's hardware and discards the frames: the same device setup the full
+// GPU pipeline uses (rules.FFmpegArgsFullGPU), without the encode.
+func decodeArgs(fam, device, in string) []string {
+	args := []string{"-hide_banner", "-v", "error"}
+	if fam == "vaapi" {
+		args = append(args, "-init_hw_device", "vaapi=va:"+device, "-filter_hw_device", "va",
+			"-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi", "-hwaccel_device", "va")
+	} else {
+		args = append(args, "-init_hw_device", "qsv=qsv:hw",
+			"-hwaccel", "qsv", "-hwaccel_output_format", "qsv", "-hwaccel_device", "qsv")
+	}
+	return append(args, "-i", in, "-f", "null", "-")
 }
 
 // lastErrorLine is the last line of an ffmpeg failure, without the "ffmpeg: exit status 1:" prefix.

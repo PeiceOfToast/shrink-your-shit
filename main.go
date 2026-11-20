@@ -320,7 +320,7 @@ func main() {
 				Template: store.TemplateFor, Poll: 3 * time.Second,
 				DecodeCheck: *decode, MinSSIM: *minSSIM, KeepDays: keepDays, Journal: store, Sidecars: store,
 				Paused: localGate(joined, store), StallAfter: *stallAfter, // this computer's own switch, and not while joined
-				Encoder: web.LocalEncoderFor(store, chk),
+				Encoder: web.LocalEncoderFor(store, chk), GraphicsDecodes: chk.Decodes,
 				ShareDown: func(folder string, jobID int64) (worker.ShareDown, bool) {
 					return web.ShareDownFor(store, folder, jobID)
 				},
