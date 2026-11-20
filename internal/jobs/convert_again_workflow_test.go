@@ -44,6 +44,7 @@ func TestJobsStampCurrentRevisionOnUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dropLogSections(t, s)
 	l, err := s.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(4), true)
 	if err != nil {
 		t.Fatal(err)

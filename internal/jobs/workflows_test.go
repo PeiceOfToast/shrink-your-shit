@@ -231,6 +231,7 @@ func TestEventsMigrationKeepsSeq(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dropLogSections(t, s)
 	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
 	for _, q := range append(append([]string{}, rewindShareMigrations...), // back to version 21's shape, with history at seq 41 and 42
 		`DROP TRIGGER events_job_insert`, `DROP TRIGGER events_job_status`, `DROP TRIGGER events_job_removed`, `DROP TABLE events`,
@@ -288,6 +289,7 @@ func TestReasonCodesMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dropLogSections(t, s)
 	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
 	s.SetPaused(false)
 	id, _ := s.Enqueue(Job{Library: l.Path, LibraryID: l.ID, Path: filepath.Join(l.Path, "a.mkv")})

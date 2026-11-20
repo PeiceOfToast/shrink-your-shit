@@ -39,7 +39,9 @@ type Queue interface {
 	// Release puts a running job back in the queue (used on shutdown).
 	Release(id int64) error
 	// The job's log lines, steps and failure summary in the database (user review 11-13 item E).
-	AppendLogLine(id int64, step int, stream, text string) error
+	AppendLogLine(id int64, step int, section, level, stream, text string) error
+	// Get is the job as the store has it now (its final status and sizes for the summary line).
+	Get(id int64) (jobs.Job, error)
 	RecordRunStep(id int64, st jobs.RunStep) error
 	SetFailureSummary(id int64, f jobs.FailureSummary) error
 	ClearFailureSummary(id int64) error
@@ -131,9 +133,11 @@ type Worker struct {
 	// failures: the running job's path's choices for when it doesn't work (V6b; under mu)
 	failures *rules.Failures
 	// lease: the running job's lease (V7a; under mu)
-	lease  string
-	ID     string
-	Queue  Queue
+	lease string
+	ID    string
+	Queue Queue
+	// phase is the job log section the running job is in (joblog.go); the worker's own lines go there.
+	phase  string
 	Exec   media.Exec
 	FFmpeg string
 	// FFprobe checks the result before it replaces anything.
@@ -287,6 +291,8 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 		defer close(renewDone)
 		go w.renewLease(job.ID, lease, renewDone) // V7a: kept while it works, the probe and the checks too
 	}
+	w.startLines(job)
+	defer w.summaryLine(job.ID) // the job's last line: its verdict, once its outcome is recorded
 	w.jobf(job.ID, ": started")
 	// a new attempt: an earlier attempt's failure summary is not this one's (a kept attempt would show it)
 	if err := w.Queue.ClearFailureSummary(job.ID); err != nil {
@@ -466,7 +472,7 @@ func (w *Worker) jobf(id int64, format string, a ...any) {
 	msg := fmt.Sprintf(format, a...)
 	log.Printf("worker %s: job %d%s", w.ID, id, msg)
 	if w.Queue != nil { // the job's log lives in the database (user review 11-13 item E)
-		w.Queue.AppendLogLine(id, 0, "app", strings.TrimPrefix(strings.TrimPrefix(msg, ":"), " "))
+		w.Queue.AppendLogLine(id, 0, w.section(), jobs.LevelInfo, "app", strings.TrimPrefix(strings.TrimPrefix(msg, ":"), " "))
 	}
 }
 
@@ -485,7 +491,7 @@ func (w *Worker) recordEncode(id int64, args []string, started time.Time, encErr
 		if strings.HasPrefix(strings.ToLower(l), "libva info:") { // the GPU driver's chatter: kept in the log, not shown as ffmpeg's output
 			stream = "info"
 		}
-		w.Queue.AppendLogLine(id, 0, stream, l)
+		w.Queue.AppendLogLine(id, 0, secEncode, jobs.LevelInfo, stream, l)
 	}
 	outcome := "ok"
 	if terr != nil {
@@ -544,7 +550,7 @@ func (w *Worker) replaceStep(id int64, started time.Time, failed bool, result st
 	if !failed {
 		return
 	}
-	w.Queue.AppendLogLine(id, 2, "app", result)
+	w.Queue.AppendLogLine(id, 2, secReplace, jobs.LevelError, "app", result)
 	w.Queue.SetFailureSummary(id, jobs.FailureSummary{
 		Step: 2, StepCount: 3, AfterMs: tookMs,
 		ExitCode: -1, FfmpegRan: true, KeyLines: []string{result},
@@ -782,6 +788,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		log.Printf("worker %s: %s: %v", w.ID, job.Path, perr)
 		return "", kept("the original can't be read any more, so it was left as it is")
 	}
+	w.inputLines(job.ID, srcPath, before, src)
 	if err := w.preflight(srcPath, before.Size()); err != nil {
 		return "", err
 	}
@@ -968,6 +975,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	var encErr string
 	var terr error
 	decoded := int64(-1) // frames ffmpeg took from the original; -1 when a remote worker did not say
+	w.phase = secEncode
 	encStart := w.now()
 	if w.remote != nil { // V7b2: a worker on another computer converts and checks; its file comes up here
 		stopWatch := w.watchRemoteStall(job.ID, w.remote)
@@ -1067,15 +1075,15 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			}
 			w.Queue.RecordRunStep(job.ID, jobs.RunStep{Index: 1, Name: "check", StartedAt: w.now().UTC().Format(time.RFC3339),
 				Outcome: "failed", Result: reason})
-			w.Queue.AppendLogLine(job.ID, 1, "check", "Check: damage in the original, read while converting")
-			w.Queue.AppendLogLine(job.ID, 1, "check", errorsLine)
+			w.Queue.AppendLogLine(job.ID, 1, secOutput, jobs.LevelInfo, "check", "Check: damage in the original, read while converting")
+			w.Queue.AppendLogLine(job.ID, 1, secOutput, jobs.LevelInfo, "check", errorsLine)
 			for _, l := range dmg.Lines {
-				w.Queue.AppendLogLine(job.ID, 1, "check", l)
+				w.Queue.AppendLogLine(job.ID, 1, secOutput, jobs.LevelInfo, "check", l)
 			}
 			log.Printf("worker %s: %s: the original has errors: %s", w.ID, job.Path, strings.Join(dmg.Lines, " | "))
 			return "", kept(reason)
 		}
-		w.Queue.AppendLogLine(job.ID, 0, "app", fmt.Sprintf("The original has a little damage (%s, up to %d%% are tolerated); converted anyway.",
+		w.Queue.AppendLogLine(job.ID, 0, secOutput, jobs.LevelWarning, "app", fmt.Sprintf("The original has a little damage (%s, up to %d%% are tolerated); converted anyway.",
 			damagedShare(dmg.Pictures, frames), maxDamagedPercent))
 	}
 
@@ -1089,6 +1097,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	w.check = nil
 	w.verified = media.Info{} // the new file's probe is only what this check read (a failed probe leaves it empty)
+	w.phase = secOutput
 	checkStart := w.now()
 	verr := w.verify(ctx, src, exp, srcPath, tmp, before.Size())
 	w.recordCheck(job.ID, checkStart, verr)
@@ -1155,6 +1164,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 		return stage.intact()
 	}
+	w.phase = secReplace
 	placeStarted := w.now()
 	placed, err := w.installSubtitles(plan, job.ID, tmp, final)
 	if err != nil {
@@ -1585,7 +1595,7 @@ func (w *Worker) setAside(jobID int64, final string) error {
 		return refused(err)
 	}
 	w.movedAside = fmt.Sprintf("Your earlier converted file %s had been changed since it was made, so it was moved to the trash (%s) and the new file took its place.", name, filepath.Join(TrashDir, filepath.Base(dst)))
-	w.Queue.AppendLogLine(jobID, 0, "app", w.movedAside)
+	w.Queue.AppendLogLine(jobID, 0, secReplace, jobs.LevelWarning, "app", w.movedAside)
 	return nil
 }
 
@@ -1831,7 +1841,7 @@ func (w *Worker) recordCheckFailure(id int64, started time.Time, ke *KeptError, 
 			TookMs: w.now().Sub(started).Milliseconds(), Outcome: "failed", Result: ke.Reason})
 	}
 	for _, l := range detail {
-		w.Queue.AppendLogLine(id, 1, "check", l)
+		w.Queue.AppendLogLine(id, 1, secOutput, jobs.LevelInfo, "check", l)
 	}
 }
 

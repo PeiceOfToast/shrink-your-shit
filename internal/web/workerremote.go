@@ -259,7 +259,9 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 			}
 		}
 		if text != "" {
-			store.AppendLogLine(j.ID, 0, "app", "Worker: "+text) // prefixed: a worker's note can't pass for the server's line
+			// prefixed: a worker's note can't pass for the server's line. The remote worker does not say its section yet,
+			// so its notes go to encode (where most of them come).
+			store.AppendLogLine(j.ID, 0, "encode", jobs.LevelInfo, "app", "Worker: "+text)
 		}
 		writeJSON(w, map[string]any{"ok": true})
 	})

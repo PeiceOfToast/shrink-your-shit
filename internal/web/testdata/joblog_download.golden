@@ -1,0 +1,25 @@
+shrink-your-shit job log
+File:     /m/Holiday Trip 2026.mkv
+Job:      42, attempt 1
+Result:   Converted
+Took:     0:02:06   Saved: 2,512,345,678 bytes (62.6%)
+Times:    UTC
+
+== Start ==
+05:00:00.000  INFO   Job 42 started
+
+== Source file ==
+05:00:01.250  INFO   Size: 4,012,345,678 bytes (3.7 GiB)
+
+== Encode ==
+05:00:02.000  INFO   Encode started
+05:01:10.500         | frame= 100 fps=25
+
+== Output check ==
+05:02:00.000  WARN   a little damage in the output
+
+== Save the result ==
+05:02:05.000  INFO   Moved the original aside
+
+== Summary ==
+05:02:06.000  INFO   Converted. Saved 62.6% (2,512,345,678 bytes).

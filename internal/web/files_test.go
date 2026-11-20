@@ -40,7 +40,7 @@ func TestFilesView(t *testing.T) {
 	st.PutFile(jobs.File{Path: filepath.Join(m, "Old.mkv"), Size: 5, Decision: "skip: x", Reason: rules.SkipAlreadyHEVC})
 	st.PutProbe(filepath.Join(m, "Film.mkv"), 400, 1, `{"durationSec":60,"streams":[{"type":"video","codec":"hevc","Width":1920,"Height":1080}]}`)
 	st.AddStep(done, "found", true, "Found in /m.")
-	st.AppendLogLine(done, 0, "app", "12:00:00 started")
+	st.AppendLogLine(done, 0, "", jobs.LevelInfo, "app", "12:00:00 started")
 
 	get := func(q string) (map[string]any, []map[string]any) {
 		t.Helper()
