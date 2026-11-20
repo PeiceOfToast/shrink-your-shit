@@ -239,6 +239,15 @@ func TestReplaceMovesInOrderWithFailedChown(t *testing.T) {
 	}
 }
 
+// Review #491 P3: an AMF encode's quality is -qp_i (with -rc cqp), which the Settings line must name rather than
+// say "none".
+func TestEncoderLineNamesAMFsQuality(t *testing.T) {
+	got := encoderDetail([]string{"-c:v", "hevc_amf", "-rc", "cqp", "-qp_i", "24", "-qp_p", "26"})
+	if !strings.Contains(got, "hevc_amf, -qp_i 24, ") {
+		t.Errorf("encoder line %q, want the AMF quality", got)
+	}
+}
+
 // R14: when the encode fails, the temp folder still holds its partial output; the cleanup line says how many
 // bytes it held, and the folder is gone.
 func TestCleanupLineSaysBytesLeft(t *testing.T) {

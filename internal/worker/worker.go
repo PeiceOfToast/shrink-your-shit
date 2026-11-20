@@ -1971,7 +1971,8 @@ func encoderDetail(args []string) string {
 		return ""
 	}
 	quality := "none"
-	for _, f := range []string{"-global_quality", "-crf", "-cq", "-qp", "-b:v"} {
+	// -qp_i is AMF's intra quality (-rc cqp -qp_i <n> -qp_p <n>): without it an AMF job said "none".
+	for _, f := range []string{"-global_quality", "-crf", "-cq", "-qp", "-qp_i", "-b:v"} {
 		if v := argOf(f); v != "" {
 			quality = f + " " + v
 			break

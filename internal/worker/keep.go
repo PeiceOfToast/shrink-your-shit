@@ -192,7 +192,8 @@ func (w *Worker) keepAndReplace(ctx context.Context, job jobs.Job, stage *staged
 	}
 	if err != nil {
 		w.recordMove(job.ID, "move", stage.path, destPath, err)
-		w.logLine(job.ID, secReplace, jobs.LevelWarning, fmt.Sprintf("Could not move the new file into place at %s: %v. The source was put back.", destPath, err))
+		// No "put back" here: the put-back runs next and can fail, and the line below says it happened only when it did.
+		w.logLine(job.ID, secReplace, jobs.LevelWarning, fmt.Sprintf("Could not move the new file into place at %s: %v.", destPath, err))
 		putBack := os.Rename
 		if renaming { // its name was free for a moment: something put there meanwhile is not replaced
 			putBack = renameNoReplace

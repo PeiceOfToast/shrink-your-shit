@@ -6,11 +6,13 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 )
 
 // encodeInput is the -i of the scenario's last encode.
@@ -124,6 +126,52 @@ func TestConvertAgainBesideReplacesOurOutput(t *testing.T) {
 	}
 	if read(out) != "newer" || read(s.src) != "original-bytes" {
 		t.Errorf("beside %q, original %q", read(out), read(s.src))
+	}
+}
+
+// Review #491 P2: the moves are recorded and logged in the order they happened. A Convert again whose new name
+// differs moves the new file first and removes our earlier converted file after it.
+func TestConvertAgainRecordsTheMoveBeforeTheRemove(t *testing.T) {
+	dir := t.TempDir()
+	old := filepath.Join(dir, "movie.mkv")
+	if err := os.WriteFile(old, []byte("earlier"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, id := realJob(t, old, 1)
+	w := realWorker(st, media.OSExec{})
+	ost, err := os.Stat(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := SampleHash(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := jobs.Original{JobID: id, Path: old, NewBytes: ost.Size(), NewMTime: ost.ModTime().UnixNano(), NewHash: h}
+	if o.ID, err = st.BeginSwap(o); err != nil {
+		t.Fatal(err)
+	}
+	stage := &staged{dir: dir, path: filepath.Join(dir, "movie.tmp")}
+	if err := os.WriteFile(stage.path, []byte("newer"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	final := filepath.Join(dir, "movie.mp4")
+	if err := w.replaceOwnOutput(context.Background(), o, stage, final, 7, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	moves, err := st.JobMoves(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(moves) != 2 || moves[0].Action != "move" || moves[0].From != stage.path || moves[0].To != final || !moves[0].OK ||
+		moves[1].Action != "remove" || moves[1].From != old || !moves[1].OK {
+		t.Fatalf("moves %+v, want the move then the remove", moves)
+	}
+	if read(final) != "newer" {
+		t.Errorf("at the new name %q, want the new file", read(final))
+	}
+	if _, err := os.Stat(old); err == nil {
+		t.Error("our earlier converted file is still there")
 	}
 }
 
