@@ -3,6 +3,7 @@
 package jobs
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -32,25 +33,26 @@ func TestRestoredFileIsSkippedEverywhere(t *testing.T) {
 	}
 	_, err = s.Publish(w.ID, saved.Etag, tm)
 	check(err)
-	l, err := s.AddLibraryOnFlow("Movies", "/m", w.ID, true)
+	m := t.TempDir() // a real path: Windows matches files to the library by it
+	l, err := s.AddLibraryOnFlow("Movies", m, w.ID, true)
 	check(err)
 	now := time.Now()
 	since := now.Add(-48 * time.Hour).UTC().Format(time.RFC3339)
 
 	// c.mkv stays converted, so the counts are not all zero
-	check(s.PutFile(File{Path: "/m/c.mkv", Size: 500}))
-	c, err := s.Enqueue(Job{LibraryID: l.ID, Path: "/m/c.mkv", SizeBefore: 500})
+	check(s.PutFile(File{Path: filepath.Join(m, "c.mkv"), Size: 500}))
+	c, err := s.Enqueue(Job{LibraryID: l.ID, Path: filepath.Join(m, "c.mkv"), SizeBefore: 500})
 	check(err)
 	s.Claim("w")
-	check(s.Complete(c, "/m/c.mkv", 300))
+	check(s.Complete(c, filepath.Join(m, "c.mkv"), 300))
 
 	// a.mkv: converted, its original kept in the trash
-	check(s.PutFile(File{Path: "/m/a.mkv", Size: 1000}))
-	a, err := s.Enqueue(Job{LibraryID: l.ID, Path: "/m/a.mkv", SizeBefore: 1000})
+	check(s.PutFile(File{Path: filepath.Join(m, "a.mkv"), Size: 1000}))
+	a, err := s.Enqueue(Job{LibraryID: l.ID, Path: filepath.Join(m, "a.mkv"), SizeBefore: 1000})
 	check(err)
 	s.Claim("w")
-	check(s.Complete(a, "/m/a.mkv", 400))
-	ia, err := s.BeginSwap(Original{JobID: a, LibraryID: l.ID, Path: "/m/a.mkv", Trash: "/m/.syp-trash/a.mkv", NewPath: "/m/a.mkv"})
+	check(s.Complete(a, filepath.Join(m, "a.mkv"), 400))
+	ia, err := s.BeginSwap(Original{JobID: a, LibraryID: l.ID, Path: filepath.Join(m, "a.mkv"), Trash: filepath.Join(m, ".syp-trash", "a.mkv"), NewPath: filepath.Join(m, "a.mkv")})
 	check(err)
 	check(s.FinishSwap(ia, now.Add(7*24*time.Hour)))
 
@@ -58,7 +60,7 @@ func TestRestoredFileIsSkippedEverywhere(t *testing.T) {
 
 	// restored: the original is back at its name (as worker finishRestore does)
 	check(s.SetSwapState(ia, OriginalRestored))
-	check(s.PutFile(File{Path: "/m/a.mkv", Size: 1000, Decision: DecisionRestored, Reason: DecisionRestored}))
+	check(s.PutFile(File{Path: filepath.Join(m, "a.mkv"), Size: 1000, Decision: DecisionRestored, Reason: DecisionRestored}))
 
 	after := surfacesOf(t, s, l, since, now)
 	want := map[string]int{
