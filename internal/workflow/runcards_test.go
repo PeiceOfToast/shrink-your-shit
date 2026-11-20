@@ -652,10 +652,17 @@ func TestFlowCardsFB4(t *testing.T) {
 	if !hasIssue(Validate(d).Issues, "invalid_config", wait.ID) {
 		t.Error("an empty wait should be refused")
 	}
-	wait.Config = map[string]any{"until": "2 am"}
+	for _, bad := range []string{"2 am", "25:00", "2:00", "02:60", "0200"} { // review-548: refused at publish, not at run time
+		wait.Config = map[string]any{"until": bad}
+		d.Nodes[len(d.Nodes)-2] = wait
+		if !hasIssue(Validate(d).Issues, "invalid_config", wait.ID) {
+			t.Errorf("%q should be refused", bad)
+		}
+	}
+	wait.Config = map[string]any{"until": "02:00"}
 	d.Nodes[len(d.Nodes)-2] = wait
-	if !hasIssue(Validate(d).Issues, "invalid_config", wait.ID) {
-		t.Error("an unreadable time should be refused")
+	if hasIssue(Validate(d).Issues, "invalid_config", wait.ID) {
+		t.Error("02:00 is a time")
 	}
 	if a := Validate(d).AddSteps[TypeRequeue]; a.Addable {
 		t.Error("an end is placed in the graph")

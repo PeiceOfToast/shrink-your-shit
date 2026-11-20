@@ -5,6 +5,7 @@ package rules
 import (
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"strings"
 	"testing"
 	"time"
@@ -200,6 +201,24 @@ func TestRandomShareIsStablePerFile(t *testing.T) {
 	}
 	if a, _ := (Question{Kind: "random", Share: 100}).Ask(media.Info{}, Facts{Path: "/x"}); !a {
 		t.Error("100% is every file")
+	}
+	// review-548: the boundary is exact: a file whose draw equals the share answers No, one draw below answers Yes
+	draw := func(path string) int { h := fnv.New32a(); h.Write([]byte(path)); return int(h.Sum32() % 100) }
+	at, below := "", ""
+	for i := 0; i < 100000 && (at == "" || below == ""); i++ {
+		p := fmt.Sprintf("/films/draw-%d.mkv", i)
+		switch draw(p) {
+		case 30:
+			at = p
+		case 29:
+			below = p
+		}
+	}
+	if a, why := (Question{Kind: "random", Share: 30}).Ask(media.Info{}, Facts{Path: at}); a {
+		t.Errorf("a draw of 30 with a share of 30 answers No: %q", why)
+	}
+	if a, why := (Question{Kind: "random", Share: 30}).Ask(media.Info{}, Facts{Path: below}); !a {
+		t.Errorf("a draw of 29 with a share of 30 answers Yes: %q", why)
 	}
 	if !(Question{Kind: "random"}).Empty() || (Question{Kind: "random", Share: 5}).Empty() {
 		t.Error("Empty")

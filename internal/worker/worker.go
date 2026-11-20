@@ -1034,6 +1034,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if len(plan.Before) > 0 {
 		st := &flow.State{Vars: maps.Clone(facts.Vars)} // its own copy: what the cards set is told apart below
 		env := flow.Env{Log: func(l string) { w.jobNote(job.ID, secEncode, jobs.LevelInfo, "(%s): %s", job.Path, l) }, Tag: w.tagger(job.ID), Now: w.now,
+			WaitDone: job.RetryAt != "", // FB4: the queue brought the file back on schedule (a Wait's time, or Convert again later's): a Wait holds an attempt once, never again
 			Sleep: func(d time.Duration) error { // FB4: a Wait card's pause ends early when the worker is told to stop
 				select {
 				case <-time.After(d):

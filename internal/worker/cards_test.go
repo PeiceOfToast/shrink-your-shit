@@ -450,4 +450,27 @@ func TestConvertAgainLaterAndWaitUntil(t *testing.T) {
 	if len(steps) == 0 || steps[len(steps)-1].Step != "later" || !strings.Contains(steps[len(steps)-1].Words, "Waiting until 02:00") {
 		t.Errorf("timeline: %+v", steps)
 	}
+	// review2-548 P1: when the file comes back because that wait's time came, the same card lets it through and
+	// the file is converted; it is not sent to tomorrow again. The queue's way of bringing it back is RetryLater
+	// with the wait's words on the job, which the worker reads; here that return is made by hand, as the queue
+	// would at 02:00.
+	if err := s2.store.RetryNow(j2.ID); err != nil { // "Retry now": the waiting job may be taken at once
+		t.Fatal(err)
+	}
+	if j, err := s2.store.Claim("x"); err != nil || j.ID != j2.ID {
+		t.Fatalf("claim: %+v %v", j, err)
+	}
+	if err := s2.store.RetryLater(j2.ID, time.Now().Add(-time.Minute), jobs.ReasonRetryLater, flow.WaitPrefix+"02:00 as the workflow asks"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w2.RunOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if j := s2.job(); j.Status != jobs.Done {
+		t.Errorf("after the wait's time: %s %q at %q", j.Status, j.Error, j.RetryAt)
+	}
+	if !noteOnTimeline(s2, "came back as asked") {
+		steps, _ := s2.store.Steps(j2.ID)
+		t.Errorf("timeline after the wait: %+v", steps)
+	}
 }

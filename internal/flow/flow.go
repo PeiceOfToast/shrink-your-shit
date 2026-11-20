@@ -50,10 +50,18 @@ type Env struct {
 	Lookup func(which string) (vals map[string]string, words string, err error)
 	// FB2c: tags on the job record; answers with the record's tags after the change.
 	Tag func(add, remove []string) ([]string, error)
-	// FB4: how a Wait card pauses (nil: time.Sleep) and what time it is (nil: time.Now).
-	Sleep func(d time.Duration) error
-	Now   func() time.Time
+	// FB4: how a Wait card pauses (nil: time.Sleep) and what time it is (nil: time.Now). WaitDone says the
+	// queue brought the job back on schedule (a Wait's time came, or Convert again later's; the worker reads
+	// it off the job's return time), so a Wait until a time of day holds an attempt at most once and then
+	// lets it through (review2-548 P1). A fresh Retry by a person is a fresh attempt and waits again.
+	Sleep    func(d time.Duration) error
+	Now      func() time.Time
+	WaitDone bool
 }
+
+// WaitPrefix starts the words a Wait card puts on a job it sends back to the queue; the worker reads them
+// back to know the wait is done.
+const WaitPrefix = "Waiting until "
 
 // Later is the error a Wait card returns when the file should go back to the queue until a time of day
 // (FB4): the worker puts it there instead of failing the job.
@@ -122,6 +130,10 @@ func run(c rules.Card, st *State, env Env) (Note, error) {
 	switch c.Type {
 	case workflow.TypeWait:
 		if u := strings.TrimSpace(str("until", "")); u != "" {
+			if env.WaitDone { // the file came back because this wait's time came: through it goes
+				n.Words = "Waited until " + u + ": the file came back as asked"
+				return n, nil
+			}
 			now := time.Now()
 			if env.Now != nil {
 				now = env.Now()
@@ -134,7 +146,7 @@ func run(c rules.Card, st *State, env Env) (Note, error) {
 			if !at.After(now) {
 				at = at.Add(24 * time.Hour)
 			}
-			return n, &Later{At: at, Words: "Waiting until " + u + " as the workflow asks"}
+			return n, &Later{At: at, Words: WaitPrefix + u + " as the workflow asks"}
 		}
 		secs := 0
 		switch v := c.Config["seconds"].(type) {

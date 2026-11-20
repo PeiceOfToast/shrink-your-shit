@@ -393,6 +393,11 @@ func TestWaitCard(t *testing.T) {
 	if !errors.As(err, &later) || !later.At.Equal(time.Date(2026, 11, 21, 2, 0, 0, 0, time.Local)) {
 		t.Errorf("until tomorrow: %v", err)
 	}
+	done := env
+	done.WaitDone = true // the file is back because the wait's time came: the same card lets it through (review2-548 P1)
+	if notes, err := Before([]rules.Card{{NodeID: "w", Type: workflow.TypeWait, Name: "Wait", Config: map[string]any{"until": "02:00"}}}, st, done); err != nil || !strings.Contains(notes[0].Words, "came back as asked") {
+		t.Errorf("after the wait: %v %+v", err, notes)
+	}
 	if _, err := Before([]rules.Card{{NodeID: "w", Type: workflow.TypeWait, Name: "Wait", Config: map[string]any{"until": "25:99"}}}, st, env); err == nil || errors.As(err, &later) {
 		t.Errorf("a bad time: %v", err)
 	}
