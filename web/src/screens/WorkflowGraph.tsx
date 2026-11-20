@@ -13,7 +13,7 @@ import { PageHead } from "../PageHead";
 import { Link, onLeave } from "../router";
 import { useData } from "../useData";
 import { getDraft, getWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked } from "../workflowApi";
-import { takesVars, varListFor, varProblems, withOwn } from "../VarInput";
+import { OwnVars, takesVars, varListFor, varProblems, withOwn } from "../VarInput";
 import { ICON, Options, Reg } from "./WorkflowStack";
 import type { Layout, Node, PublishPreview, StepDefinition, ValidationIssue, WorkflowDoc, WorkflowRevision } from "../types/v2";
 
@@ -335,6 +335,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
       <p className="muted sm phone" role="note">Editing works best on a larger screen. Here you can look around, zoom and see each step.</p>
       <p className="muted" role="status">{said}{bar && edit && <> <button className="linkbtn" type="button" onClick={undoDelete}>Undo</button></>}</p>
       {edit && badValues.length > 0 && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{badValues.length === 1 ? "A setting has a value it can't use" : badValues.length + " settings have values they can't use"} ({[...new Set(badValues.map((i) => nameOf(i.nodeId)))].join(", ")}). Fix {badValues.length === 1 ? "it" : "them"} to save the draft or publish.</span></p>}
+      {edit && varBad.length > 0 && <p className="st bad" role="alert"><Icon id="i-alert" /><span>Fix {varBad.length === 1 ? "1 field" : varBad.length + " fields"} before publishing. <button className="linkbtn" type="button" onClick={() => (setSel(varBad[0].nodeId), setSelEdge(null))}>{varBad[0].title}</button></span></p>}
       {panel && (
         <section className="card" aria-labelledby="pub-h"><div className="hd"><h2 id="pub-h">Publish v{panel.nextNumber}</h2></div><div className="bd stack">
           {panel.changes.length ? <ul style={{ margin: 0 }}>{panel.changes.map((c) => <li key={c.nodeId + c.kind}>{c.kind === "added" ? "Added: " : c.kind === "removed" ? "Removed: " : ""}{c.summary}</li>)}</ul> : <p className="muted">No changes since the last version.</p>}
@@ -357,7 +358,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
             <Zoom />
           </ReactFlow>
         </div>
-        <aside className="card ginspect" aria-label="Selected step and problems">
+        <OwnVars.Provider value={doc.variables ?? []}><aside className="card ginspect" aria-label="Selected step and problems">
           <div className="bd stack">
             {selEdge && edit ? <div className="stack"><p>{(() => { const e = doc.edges.find((x) => x.id === selEdge); return e ? nameOf(e.from) + " → " + nameOf(e.to) : ""; })()}</p>
               <div className="row"><button className="btn sm" type="button" onClick={() => removeEdges([selEdge])}><Icon id="i-trash" />Delete this connection</button></div></div>
@@ -387,7 +388,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
                 {edit && i.code === "unconnected_port" && i.nodeId && i.port && endDef && <> <button className="btn sm" type="button" onClick={() => leaveAlone(i.nodeId!, i.port!)}>Leave the file alone here</button></>}</span></li>))}</ul>}
             {errors.length > 0 && <p className="sm muted">Publish waits until the problems are fixed.</p>}
           </div>
-        </aside>
+        </aside></OwnVars.Provider>
       </div>
     </div>);
 }
