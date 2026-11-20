@@ -114,7 +114,8 @@ export function mockJobLog(id: string): JobLog | { error: { code: string; messag
   const into = (secId: string, title: string, lines: LogLine[]) => { let s = sections.find((x) => x.id === secId); if (!s) { s = { id: secId, title, lines: [] }; sections.push(s); } s.lines.push(...lines); };
   const STEP: Record<string, number> = { encode: 0, check: 1, replace: 2 }; // the server's step index (worker.go)
   const steps = log.steps.map((st) => {
-    const { warnings, errors, ...rest } = st;
+    // only the keys v2joblog.go sends: no decision or reason text, set, moves or speeds
+    const { warnings, errors, decision, reason, set, moves, speedX, avgKbps, path, ...rest } = st;
     if (warnings?.length) into("encode", "Encode", warnings.map((t) => ln(2, STEP[st.name] ?? 0, "warning", "app", t)));
     if (errors?.length) into("check", "Check", errors.map((t) => ln(2, STEP[st.name] ?? 0, "error", "check", t)));
     return rest;
@@ -143,8 +144,9 @@ function mockJobLogRaw(id: string): JobLog | { error: { code: string; message: s
       { name: "replace", startedAt: "2026-11-11T14:02:05Z", tookMs: 500, outcome: "failed", command: null, probe: null, check: null, outputLines: 0, output: [], result: "Failed" },
     ], final: "The new file was converted, but saving it in place of the original failed." };
   }
+  // a skipped job has no run step: the server's one stand-in step, its outcome the final state (v2joblog.go importedStep)
   if (id === "48198") return { state: "complete", final: "skipped", ...runInfo("skipped"), steps: [
-    step("filter", "skipped", { tookMs: 800, decision: "Skipped: already HEVC at 1080p", reason: "The workflow converts only files that aren't HEVC yet.", result: "Skipped" }),
+    { name: "imported", startedAt: null, tookMs: null, outcome: "skipped", command: null, probe: null, check: null, outputLines: 0, output: [], result: null, found: [] },
   ] };
   const found: Record<string, string[]> = {
     // the server's own formats (worker verify.go ssimDetail/playback, worker.go encoderDetail/fileSummary, 11-18)
@@ -169,7 +171,6 @@ function mockJobLogRaw(id: string): JobLog | { error: { code: string; message: s
     step("encode", "failed", { ...conv, result: "Failed" }),
   ] };
   return { state: "complete", final: "done", ...runInfo("converted"), steps: [
-    step("audio", "ok", { tookMs: 4000, decision: "Kept English and Japanese audio; removed 2 others", reason: "They aren't in your languages.", set: [{ name: "audio_languages", value: "eng, jpn" }], result: "Done" }),
     step("encode", "ok", { ...conv, decision: "Converted the video to HEVC at Balanced quality", reason: "The file is H.264, and the workflow converts to HEVC.", speedX: 3.4, avgKbps: 2450, set: [{ name: "target_codec", value: "hevc" }, { name: "api_key" }], result: "Done · 41% smaller" }),
     step("replace", "ok", { tookMs: 1500, decision: "Saved the new file in place of the original", reason: "It is smaller and passed the picture check.", moves: [{ action: "move", from: "/media/movies/Sample (2020).mkv", to: "/media/movies/.syp-trash/Sample (2020).mkv", ok: true, error: null }, { action: "move", from: "/media/movies/Sample (2020).new.mkv", to: "/media/movies/Sample (2020).mkv", ok: true, error: null }], result: "Done" }),
   ] };

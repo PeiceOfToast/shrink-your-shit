@@ -415,10 +415,12 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
   }
   // a workflow step's section: its row sits between Source file and the encode rows, as the log reads
   stepSecs.forEach((x, k) => {
-    const sLs = errOnly ? x.lines.filter(nonInfo) : x.lines, hits = q ? countIn(sLs.map((y) => y.text).join("\n").toLowerCase(), q) : 0;
+    const sLs = errOnly ? x.lines.filter(nonInfo) : x.lines, hits = q ? countIn([...(errOnly ? [] : [x.title]), ...sLs.map((y) => y.text)].join("\n").toLowerCase(), q) : 0;
     raw.push({ key: "stepsec-" + k, title: x.title, head: lvlPills(x.lines), hits, dflt: x.title.replace(/^Step \d+: /, "") === LEFT_ALONE, show: (!errOnly || x.lines.some(nonInfo)) && (!q || hits > 0), body: linesBlock(sLs, id) });
   });
   l.steps.forEach((st, i) => {
+    // the server's stand-in for an old log (v2joblog.go importedStep) holds the same lines as the step sections: left out beside them
+    if (st.name === "imported" && stepSecs.length) return;
     const ls = ownL[i], warnN = cnt(ls, "warning"), errN = cnt(ls, "error"), flagged = warnN + errN > 0;
     // a sectioned step is searched in its lines, not its output too (the output is the same lines)
     const hitText = (errOnly ? ls.filter((y) => y.level !== "info").map((y) => y.text).join("\n") : sectioned ? [st.name, st.decision, st.reason, st.command, st.result, ls.map((y) => y.text).join("\n"), ...(st.set ?? []).map((x) => x.name + " " + (x.value ?? ""))].filter(Boolean).join("\n") : stepText(st)).toLowerCase();
