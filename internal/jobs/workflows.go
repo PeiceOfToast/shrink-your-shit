@@ -179,7 +179,9 @@ func (s *Store) ensureLibraryRevision(libraryID int64) {
 		return
 	}
 	var flow int64
-	if err := s.db.QueryRow(`SELECT flow_id FROM libraries WHERE id=?`, libraryID).Scan(&flow); err != nil {
+	// a library with no workflow (flow_id NULL) reads as 0, which has no flow to revise (an id that doesn't exist
+	// errors here and is left to the insert to refuse)
+	if err := s.db.QueryRow(`SELECT COALESCE(flow_id,0) FROM libraries WHERE id=?`, libraryID).Scan(&flow); err != nil || flow == 0 {
 		return
 	}
 	if _, err := s.EnsureRevision(flow); err != nil {

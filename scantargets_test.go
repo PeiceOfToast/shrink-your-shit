@@ -39,3 +39,32 @@ func TestScanTargetsLeaveOutSystemFolders(t *testing.T) {
 		t.Errorf("targets %+v, want only Movies", targets)
 	}
 }
+
+// A library with no workflow is never a scan target, whatever its started flag says: nothing is walked or
+// queued for it until a workflow is assigned (the user's "add a library, assign its workflow later").
+func TestScanTargetsLeaveOutLibrariesWithoutAWorkflow(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "syp.db")
+	st, err := jobs.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ok, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	later, _ := st.AddLibraryWithoutFlow("Later", t.TempDir(), false)
+	// started by hand, as no path allows any more: the missing flow is the guard, not the flag
+	raw, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`UPDATE libraries SET started=1 WHERE id=?`, later.ID); err != nil {
+		t.Fatal(err)
+	}
+	raw.Close()
+	targets, err := scanTargets(st)()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 1 || targets[0].LibraryID != ok.ID {
+		t.Errorf("targets %+v, want only Movies", targets)
+	}
+}

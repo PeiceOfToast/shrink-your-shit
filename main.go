@@ -497,6 +497,9 @@ func scanTargets(store *jobs.Store) func() ([]scanner.Target, error) {
 			}
 			f, err := store.GetFlow(l.FlowID)
 			if err != nil {
+				if l.FlowID == 0 { // no workflow: nothing is ever queued for it, so it is not walked
+					err = errors.New("it has no workflow yet")
+				}
 				log.Printf("scan: skipping library %q: %v", l.Name, err)
 				continue
 			}

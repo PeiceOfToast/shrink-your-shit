@@ -507,6 +507,32 @@ CREATE TABLE IF NOT EXISTS job_run_stats (job_id INTEGER PRIMARY KEY, passes INT
 CREATE TABLE IF NOT EXISTS job_run_moves (job_id INTEGER NOT NULL, seq INTEGER NOT NULL, action TEXT NOT NULL,
   from_path TEXT NOT NULL DEFAULT '', to_path TEXT NOT NULL DEFAULT '', ok INTEGER NOT NULL, error TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (job_id, seq));`},
+	// A library may have no workflow (the user's "add a library, assign its workflow later"): flow_id becomes
+	// nullable, and NULL is that absence (0 stays "no such flow": GetFlow refuses it as it always did). SQLite
+	// cannot drop NOT NULL in place, so the table is made again with every column and row kept.
+	{56, "library without a workflow", `
+CREATE TEMP TABLE libraries_seq AS
+  SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='libraries'), 0) AS seq;
+CREATE TABLE libraries_new (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL, path TEXT NOT NULL UNIQUE,
+  flow_id INTEGER REFERENCES flows(id),
+  started INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL,
+  last_scan TEXT NOT NULL DEFAULT '', last_scan_videos INTEGER NOT NULL DEFAULT 0,
+  override_folder TEXT NOT NULL DEFAULT '', priority INTEGER NOT NULL DEFAULT 0,
+  share_paused_id INTEGER, share_paused_since TEXT NOT NULL DEFAULT '');
+INSERT INTO libraries_new(id,name,path,flow_id,started,created,last_scan,last_scan_videos,override_folder,priority,share_paused_id,share_paused_since)
+  SELECT id,name,path,flow_id,started,created,last_scan,last_scan_videos,override_folder,priority,share_paused_id,share_paused_since FROM libraries;
+DROP TABLE libraries;
+ALTER TABLE libraries_new RENAME TO libraries;
+-- The rebuild's DROP takes the libraries row out of sqlite_sequence, so the new table's sequence is
+-- only max(id) present. A library removed before the upgrade would have its id handed to the next new
+-- library, which would inherit the removed one's retained job rows: the old high-water mark is kept.
+INSERT INTO sqlite_sequence(name, seq)
+  SELECT 'libraries', seq FROM temp.libraries_seq
+  WHERE seq > 0 AND NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name='libraries');
+UPDATE sqlite_sequence SET seq = MAX(seq, (SELECT seq FROM temp.libraries_seq)) WHERE name='libraries';
+DROP TABLE temp.libraries_seq;`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone

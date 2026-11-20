@@ -36,10 +36,11 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine, libTotals *l
 			return nil, err
 		}
 		f, ferr := store.GetFlow(l.FlowID)
-		name, policy := "", any(nil)
+		name, policy, workflowID := "", any(nil), "" // a library with no workflow says so with ""
 		var folder, problem any
 		if ferr == nil {
 			name = f.Name
+			workflowID = strconv.FormatInt(l.FlowID, 10)
 			tm := f.Template // a workflow with checks (V6a): a path that saves to a folder, if one does, else the first
 			if parts := f.Template.Parts(); len(parts) > 0 {
 				tm = parts[0]
@@ -100,6 +101,8 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine, libTotals *l
 		status := "ok"
 		pausedBy := sharePausedBy(store, l) // D4b: a share's outage; the person's own pause stays "disabled"
 		switch {
+		case l.FlowID == 0: // no workflow: it cannot run, so this wins over every other state
+			status = "no_workflow"
 		case !l.Started:
 			status = "disabled"
 		case pausedBy != nil:
@@ -111,7 +114,7 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine, libTotals *l
 		}
 		return map[string]any{
 			"id": strconv.FormatInt(l.ID, 10), "name": l.Name, "paths": []string{l.Path}, "fileType": "video",
-			"enabled": l.Started, "workflowId": strconv.FormatInt(l.FlowID, 10), "workflowName": name, "priority": l.Priority,
+			"enabled": l.Started, "workflowId": workflowID, "workflowName": name, "priority": l.Priority,
 			"scan": scan,
 			"counts": map[string]int{"files": l.LastScanVideos, "waiting": c.Waiting, "running": c.Working,
 				"completed": t.Done, "skipped": t.Skipped, "failed": cards[jobs.CardFailed]},
@@ -229,9 +232,9 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine, libTotals *l
 	})
 	api.HandleFunc("POST /api/v2/libraries", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
-			Name       string   `json:"name"`
-			Paths      []string `json:"paths"`
-			WorkflowID string   `json:"workflowId"`
+			Name       string          `json:"name"`
+			Paths      []string        `json:"paths"`
+			WorkflowID json.RawMessage `json:"workflowId"`
 		}
 		if !readJSON(w, r, &in) {
 			return
@@ -241,8 +244,14 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine, libTotals *l
 			return
 		}
 		body := map[string]any{"name": in.Name, "path": in.Paths[0]}
-		if in.WorkflowID != "" {
-			body["flowId"] = in.WorkflowID
+		// workflowId "" , null or 0 is a library saved with no workflow (the UI assigns one later); absent
+		// keeps today's (a workflow from startFrom); anything else names that workflow.
+		switch w := strings.TrimSpace(string(in.WorkflowID)); w {
+		case "":
+		case "null", `""`, "0", `"0"`:
+			body["flowId"] = "0"
+		default:
+			body["flowId"] = json.RawMessage(in.WorkflowID)
 		}
 		rec, ok := v1(w, r, "POST", "/api/libraries", body)
 		if !ok {
@@ -268,6 +277,17 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine, libTotals *l
 			if !known[k] {
 				bad(fmt.Sprintf("%q can't be changed here.", k))
 				return
+			}
+		}
+		// A library with no workflow can't be started, and nothing else in this request is changed either:
+		// checked before the changes, so the refusal's "Nothing was changed" is true.
+		if raw, ok := in["enabled"]; ok {
+			var start bool
+			if json.Unmarshal(raw, &start) == nil && start {
+				if l, err := store.GetLibrary(id); err == nil && l.FlowID == 0 {
+					apiError(w, http.StatusConflict, "no_workflow", "This library has no workflow, so it can't be started. Assign a workflow, then start it. Nothing was changed.")
+					return
+				}
 			}
 		}
 		// everything checked first, then changed
@@ -317,6 +337,10 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine, libTotals *l
 			return
 		}
 		if raw, ok := in["workflowId"]; ok {
+			// "" and null say the same as 0: removing a workflow, which PUT refuses on a library that has one
+			if w := strings.TrimSpace(string(raw)); w == "null" || w == `""` {
+				raw = json.RawMessage(`"0"`)
+			}
 			if _, ok := v1(w, r, "PUT", "/api/libraries/"+strconv.FormatInt(id, 10)+"/flow", map[string]json.RawMessage{"flowId": raw}); !ok {
 				return
 			}
