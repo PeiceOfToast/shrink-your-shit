@@ -24,7 +24,8 @@ const markerFile, resultFile = "update.json", "update-result.json"
 // updateDir (in the data folder) holds what a Windows update needs while it runs: the installers and the watcher.
 const updateDir = "update"
 
-// RolledBackDB is where RestoreDB keeps the database it replaced (the app's database is syp.db).
+// RolledBackDB is where RestoreDB keeps the database it replaced (the app's database is syp.db). One kept
+// before is never replaced: the next one is syp.db.rolled-back-2, -3 and so on.
 const RolledBackDB = "syp.db.rolled-back"
 
 // Marker is an update or roll back in progress.
@@ -37,6 +38,8 @@ type Marker struct {
 	At     time.Time `json:"at"`
 	// DataRestored: the start after it put Backup back, undoing the changes made since the update
 	DataRestored bool `json:"dataRestored,omitempty"`
+	// KeptAs: the file name the replaced (newer) database was kept as ("" = RolledBackDB)
+	KeptAs string `json:"keptAs,omitempty"`
 }
 
 // Result is how the last update or roll back ended, shown until the next one.
@@ -118,7 +121,7 @@ func Settle(dataDir string, m *Marker, version string, now time.Time) (Result, e
 		}
 	}
 	if m.DataRestored {
-		r.Message += "; changes made since the update were undone (kept in " + RolledBackDB + ")"
+		r.Message += RestoredNote(m.KeptAs)
 	}
 	if err := writeJSON(filepath.Join(dataDir, resultFile), r); err != nil {
 		return r, err
@@ -148,9 +151,31 @@ func watcherLostResult(dataDir string, m *Marker) bool {
 	return err == nil && bytes.Contains(b, []byte(unsavedNote))
 }
 
-// RestoreDB puts the backup in place of the database at db. The database it replaces is kept as
-// <db>.rolled-back, and its -wal and -shm files are removed (they belong to it, not to the backup).
-func RestoreDB(backup, db string) error {
+// RestoredNote ends a result's message when the database went back: where the newer one's work is.
+func RestoredNote(keptAs string) string {
+	if keptAs == "" {
+		keptAs = RolledBackDB
+	}
+	return "; changes made since the update were undone: jobs done on the newer version are kept in " + keptAs
+}
+
+// RestoreDB puts the backup in place of the database at db and returns where the database it replaces
+// was kept: <db>.rolled-back, or <db>.rolled-back-2, -3... when one is already there (a database kept
+// before is never replaced). Its -wal and -shm files are removed (they belong to it, not to the backup).
+func RestoreDB(backup, db string) (string, error) {
+	kept := db + ".rolled-back"
+	for n := 2; ; n++ {
+		if _, err := os.Lstat(kept); os.IsNotExist(err) {
+			break
+		} else if err != nil {
+			return "", err
+		}
+		kept = fmt.Sprintf("%s.rolled-back-%d", db, n)
+	}
+	return kept, restoreDB(backup, db, kept)
+}
+
+func restoreDB(backup, db, kept string) error {
 	in, err := os.Open(backup)
 	if err != nil {
 		return err
@@ -165,7 +190,7 @@ func RestoreDB(backup, db string) error {
 		os.Remove(tmp.Name())
 		return err
 	}
-	if err := os.Rename(db, db+".rolled-back"); err != nil && !os.IsNotExist(err) {
+	if err := os.Rename(db, kept); err != nil && !os.IsNotExist(err) {
 		os.Remove(tmp.Name())
 		return err
 	}

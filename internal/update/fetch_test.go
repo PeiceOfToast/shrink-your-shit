@@ -152,8 +152,8 @@ func TestRestoreDB(t *testing.T) {
 	os.WriteFile(db, []byte("newer"), 0o600)
 	os.WriteFile(db+"-wal", []byte("wal"), 0o600)
 	os.WriteFile(backup, []byte("older"), 0o600)
-	if err := RestoreDB(backup, db); err != nil {
-		t.Fatal(err)
+	if kept, err := RestoreDB(backup, db); err != nil || kept != db+".rolled-back" {
+		t.Fatal(kept, err)
 	}
 	if b, _ := os.ReadFile(db); string(b) != "older" {
 		t.Errorf("db = %q", b)
@@ -163,6 +163,17 @@ func TestRestoreDB(t *testing.T) {
 	}
 	if _, err := os.Stat(db + "-wal"); !os.IsNotExist(err) {
 		t.Errorf("the newer database's WAL is still there: %v", err)
+	}
+	// a second roll back keeps both newer databases: one kept before is never replaced
+	os.WriteFile(db, []byte("newer again"), 0o600)
+	if kept, err := RestoreDB(backup, db); err != nil || kept != db+".rolled-back-2" {
+		t.Fatal(kept, err)
+	}
+	if b, _ := os.ReadFile(db + ".rolled-back"); string(b) != "newer" {
+		t.Errorf("the first kept database was replaced: %q", b)
+	}
+	if b, _ := os.ReadFile(db + ".rolled-back-2"); string(b) != "newer again" {
+		t.Errorf("the second newer database was not kept: %q", b)
 	}
 }
 
@@ -175,9 +186,9 @@ func TestSettleSaysTheDatabaseWentBack(t *testing.T) {
 		want    string
 	}{
 		{Marker{Kind: "rollback", From: "9.0.1", To: "9.0.0", DataRestored: true}, "9.0.0",
-			"Rolled back from 9.0.1 to 9.0.0; changes made since the update were undone (kept in syp.db.rolled-back)"},
+			"Rolled back from 9.0.1 to 9.0.0; changes made since the update were undone: jobs done on the newer version are kept in syp.db.rolled-back"},
 		{Marker{Kind: "update", From: "9.0.0", To: "9.0.1", DataRestored: true}, "9.0.0",
-			"Update to 9.0.1 failed; rolled back to 9.0.0; changes made since the update were undone (kept in syp.db.rolled-back)"},
+			"Update to 9.0.1 failed; rolled back to 9.0.0; changes made since the update were undone: jobs done on the newer version are kept in syp.db.rolled-back"},
 	} {
 		WriteMarker(dir, c.m)
 		r, err := Settle(dir, ReadMarker(dir), c.version, testNow)
