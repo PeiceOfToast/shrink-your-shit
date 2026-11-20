@@ -209,7 +209,7 @@ export function SafetySettings() {
                 {t.files ? `Empty trash now: ${plural(t.files, "file", "files")}, ${bytes(t.bytes)}` : "Empty trash now"}</button></div>
               {purgeSaid && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{purgeSaid}</span></p>}
               {gone && <div aria-live="polite" className="stack" style={{ gap: 6 }}>
-                <p ref={freed} tabIndex={-1} className="st ok" style={{ margin: 0 }}><Icon id="i-check-c" /><span>{gone.deletedFiles ? `Freed ${bytes(gone.freedBytes)} (${plural(gone.deletedFiles, "file", "files")}).` : "Nothing was deleted."}</span></p>
+                <p ref={freed} tabIndex={-1} className={gone.deletedFiles ? "st ok" : "st warn"} style={{ margin: 0 }}><Icon id={gone.deletedFiles ? "i-check-c" : "i-alert"} /><span>{gone.deletedFiles ? `Freed ${bytes(gone.freedBytes)} (${plural(gone.deletedFiles, "file", "files")}).` : "Nothing was deleted."}</span></p>
                 {gone.skipped.map((s, i) => <p key={i} className="st warn" style={{ margin: 0 }}><Icon id="i-alert" /><span>{`${s.library} was skipped. ${s.reason}`}</span></p>)}
               </div>}
             </div>}
