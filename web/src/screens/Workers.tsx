@@ -286,9 +286,9 @@ function Live({ w }: { w: Worker }) { // only the figures the server sends
   if (l.cpuPercent != null) out.push("CPU " + Math.round(l.cpuPercent) + "%");
   if (l.memUsedBytes != null && l.memTotalBytes) out.push("Memory " + bytes(l.memUsedBytes) + " of " + bytes(l.memTotalBytes));
   for (const g of w.gpus) out.push("GPU · " + g.model + (g.vramBytes ? " · " + bytes(g.vramBytes) : ""));
-  if (!out.length) return null;
   const g = l.gpu[0]?.utilPercent; // workshop #443: one entry, the busiest GPU; [] when unreadable or remote
-  return <p className="sm">{out.join(" · ")} · GPU {g == null ? <NoGpu /> : Math.round(g) + "%"}</p>;
+  if (!out.length && g == null) return null; // a GPU reading shows even before the first CPU reading (review #444)
+  return <p className="sm">{out.length > 0 && out.join(" · ") + " · "}GPU {g == null ? <NoGpu /> : Math.round(g) + "%"}</p>;
 }
 
 export function Workers() {
