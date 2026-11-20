@@ -278,8 +278,10 @@ func LeadingUndecodable(ctx context.Context, x Exec, ffprobe, path string, n int
 	if err != nil {
 		return 0, err
 	}
+	// The first picture the decoder outputs: the undecodable leading pictures print nothing, so the window is
+	// by time, long enough to reach the first keyframe's picture in any ordinary group of pictures.
 	fr, err := x.Output(ctx, ffprobe, "-v", "error", "-select_streams", sel, "-show_frames",
-		"-read_intervals", "%+#1", "-show_entries", "frame=pts_time", "-of", "csv=p=0", path)
+		"-read_intervals", "%+10", "-show_entries", "frame=pts_time", "-of", "csv=p=0", path)
 	if err != nil {
 		return 0, err
 	}
