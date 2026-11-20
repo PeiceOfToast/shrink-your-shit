@@ -25,8 +25,9 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -
 FROM debian:trixie-slim
 # Debian 13 (trixie), not Alpine: Quick Sync on Tiger Lake and newer needs the Intel GPU runtime
 # (libmfx-gen), which Alpine does not package. The three Intel packages are amd64 only; arm64 gets ffmpeg alone.
+# ca-certificates: without it every https call (Discord, webhooks, the update check, Jellyfin/Plex) fails.
 RUN set -eux; \
-    pkgs="ffmpeg wget nfs-common cifs-utils"; \
+    pkgs="ffmpeg wget ca-certificates nfs-common cifs-utils"; \
     if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
         sed -i 's/^Components: main$/Components: main non-free/' /etc/apt/sources.list.d/debian.sources; \
         pkgs="$pkgs libvpl2 libmfx-gen1.2 intel-media-va-driver-non-free"; \
