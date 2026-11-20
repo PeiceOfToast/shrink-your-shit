@@ -8,7 +8,8 @@ import { Icon } from "../Icon";
 import { PageHead } from "../PageHead";
 import { SignedOut, failed, type Answer } from "../api";
 import { bytes, plural } from "../format";
-import { cancelUpdate, checkUpdate, getConverting, getHealth, getUpdate, installUpdate, rollbackUpdate, type UpdateNotice, getSettings, getToken, getTrash, patchSettings, rotateToken, signOut } from "../libraryApi";
+import { cancelUpdate, checkUpdate, getConverting, getHealth, getUpdate, installUpdate, purgeTrash, rollbackUpdate, type UpdateNotice, getSettings, getToken, getTrash, patchSettings, rotateToken, signOut } from "../libraryApi";
+import type { PurgeResult } from "../types/v2";
 import { SettingsTabs } from "../pages";
 import { Link, navigate } from "../router";
 import { setRole } from "../setupApi";
@@ -71,7 +72,7 @@ function ThisComputer() {
 }
 
 // A small modal confirm (the folder picker's dialog look): focus starts on the title, Tab stays inside, Escape keeps.
-function Confirm({ title, body, yes, no, busy, onYes, onNo }: { title: string; body: string; yes: string; no: string; busy: boolean; onYes: () => void; onNo: () => void }) {
+function Confirm({ title, body, yes, no, busy, danger, onYes, onNo }: { title: string; body: string; yes: string; no: string; busy: boolean; danger?: boolean; onYes: () => void; onNo: () => void }) {
   const id = useId(), box = useRef<HTMLDivElement>(null), head = useRef<HTMLHeadingElement>(null);
   useEffect(() => { head.current?.focus(); }, []);
   return (
@@ -84,7 +85,7 @@ function Confirm({ title, body, yes, no, busy, onYes, onNo }: { title: string; b
       }}>
         <h2 id={id + "-t"} ref={head} tabIndex={-1}>{title}</h2>
         <p id={id + "-b"}>{body}</p>
-        <div className="row enroll-btns"><button className="btn primary" type="button" disabled={busy} onClick={onYes}>{yes}</button>
+        <div className="row enroll-btns"><button className={danger ? "btn danger" : "btn primary"} type="button" disabled={busy} onClick={onYes}>{yes}</button>
           <button className="btn" type="button" disabled={busy} onClick={onNo}>{no}</button></div>
       </div>
     </div>);
@@ -175,6 +176,19 @@ export function SafetySettings() {
     if (!okDays) return (setBad(true), setSaid("Enter a whole number of days, from 0 to 365."));
     if (await act(patchSettings({ keepOriginalsDays: n }), (m) => (setBad(true), setSaid(m)))) (setSaid("Saved."), setDays(null), st.reload());
   };
+  // Empty trash now: deletes the kept originals before their 7 days (a confirm first; the result lists any library skipped)
+  const [ask, setAsk] = useState(false), [purging, setPurging] = useState(false), [gone, setGone] = useState<PurgeResult | null>(null), [purgeSaid, setPurgeSaid] = useState(""), purgeBtn = useRef<HTMLButtonElement>(null), freed = useRef<HTMLParagraphElement>(null);
+  // Focus moves after the commit: to the result after a purge, back to the (enabled again) button after an error
+  const [back, setBack] = useState(0);
+  useEffect(() => { if (gone) freed.current?.focus(); }, [gone]);
+  useEffect(() => { if (back) purgeBtn.current?.focus(); }, [back]);
+  const purge = async () => {
+    setPurging(true); setPurgeSaid(""); setGone(null);
+    const r = await act(purgeTrash(), setPurgeSaid);
+    setPurging(false); setAsk(false);
+    if (r) (setGone(r), tr.reload());
+    else setBack((b) => b + 1);
+  };
   const t = tr.data;
   return (
     <div className="stack">
@@ -189,9 +203,20 @@ export function SafetySettings() {
             <p className={bad ? "st bad" : "muted"} role="status">{said}</p>
             <div className="row"><button className="btn primary" type="button" disabled={days == null || Number(days) === st.data.keepOriginalsDays} onClick={save}>Save</button></div>
             {st.data.trashPath && <p><strong>Where originals are kept:</strong> {st.data.trashPath}</p>}
-            <p aria-live="polite">{!t ? (tr.error?.message ?? "") : t.files ? <><strong>Kept originals:</strong> {bytes(t.bytes)} · {plural(t.files, "file", "files")}.{t.nextDeleteAt && " The next ones go on " + day(t.nextDeleteAt) + "."}</> : "No originals are being kept right now."}</p>
+            <p id="purge-h" aria-live="polite">{!t ? (tr.error?.message ?? "") : t.files ? <><strong>Kept originals:</strong> {bytes(t.bytes)} · {plural(t.files, "file", "files")}.{t.nextDeleteAt && " The next ones go on " + day(t.nextDeleteAt) + "."}</> : "No originals are being kept right now."}</p>
+            {t && <div className="stack" style={{ gap: 6 }}>
+              <div className="row"><button ref={purgeBtn} className="btn" type="button" disabled={!t.files || purging} aria-describedby={t.files ? undefined : "purge-h"} onClick={() => (setGone(null), setPurgeSaid(""), setAsk(true))}>
+                {t.files ? `Empty trash now: ${plural(t.files, "file", "files")}, ${bytes(t.bytes)}` : "Empty trash now"}</button></div>
+              {purgeSaid && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{purgeSaid}</span></p>}
+              {gone && <div aria-live="polite" className="stack" style={{ gap: 6 }}>
+                <p ref={freed} tabIndex={-1} className={gone.deletedFiles ? "st ok" : "st warn"} style={{ margin: 0 }}><Icon id={gone.deletedFiles ? "i-check-c" : "i-alert"} /><span>{gone.deletedFiles ? `Freed ${bytes(gone.freedBytes)} (${plural(gone.deletedFiles, "file", "files")}).` : "Nothing was deleted."}</span></p>
+                {gone.skipped.map((s, i) => <p key={i} className="st warn" style={{ margin: 0 }}><Icon id="i-alert" /><span>{`${s.library} was skipped. ${s.reason}`}</span></p>)}
+              </div>}
+            </div>}
           </div>
         </section>)}
+      {ask && t && <Confirm title="Empty trash now?" body={`This deletes ${plural(t.files, "original file", "original files")} (${bytes(t.bytes)}), kept in case you need them back. It can't be undone.`}
+        yes={purging ? "Deleting…" : "Delete " + plural(t.files, "file", "files")} no="Cancel" danger busy={purging} onYes={purge} onNo={() => (setAsk(false), purgeBtn.current?.focus())} />}
     </div>);
 }
 
