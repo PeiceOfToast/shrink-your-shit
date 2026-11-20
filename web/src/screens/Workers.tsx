@@ -316,7 +316,9 @@ export function Workers() {
         <div className="wgrid">{list.map((w) => {
           const [t, cls, icon] = words(w), gone = w.status === "offline" || w.status === "stalled";
           return <article key={w.id} className={"card wcard" + (gone ? " dim" : "")}>
-            <div className="hd"><h3><Link to={"/workers/" + encodeURIComponent(w.id)}>{w.name}</Link></h3><span className="sp" /><StartStop w={w} onDone={done} /></div>
+            <div className="hd"><h3><Link to={"/workers/" + encodeURIComponent(w.id)}>{w.name}</Link></h3><span className="sp" /><StartStop w={w} onDone={done} />
+              <Link className="sm" to={"/workers/" + encodeURIComponent(w.id) + "?tab=limits"}>{plural(w.slots.cpu.total, "file", "files") + " at once"}</Link>
+              <Link className="btn icon ghost gear" to={"/workers/" + encodeURIComponent(w.id) + "?tab=limits"} aria-label={"Settings for " + w.name} title="Settings"><Icon id="i-gear" /></Link></div>
             <div className="bd stack">
               <p className="sm muted">{[w.host, OS[w.os ?? ""], w.arch, w.lastHeartbeatAt && "last heard " + ago(w.lastHeartbeatAt)].filter(Boolean).join(" · ")}</p>
               {w.tags.length > 0 && <div className="chips" aria-label="Tags">{w.tags.map((x) => <span className="mchip" key={x}>{x}</span>)}</div>}
