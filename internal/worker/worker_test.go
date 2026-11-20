@@ -619,7 +619,7 @@ func TestDecodeModes(t *testing.T) {
 	}{
 		{"auto, short file: full", "auto", 100, 1, false},
 		{"default mode is auto", "", 100, 1, false},
-		{"auto, long file: three samples", "auto", 5 * 3600, 3, true},
+		{"auto, long file: a sample every 10 minutes", "auto", 5 * 3600, 31, true}, // 0..17400 s every 600 s, plus the last at 17935 s
 		{"always: full even when long", "always", 5 * 3600, 1, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {

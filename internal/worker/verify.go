@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -217,13 +218,34 @@ func (w *Worker) decodeCheck(ctx context.Context, out media.Info, tmp string) (p
 	if w.DecodeCheck == "always" || out.DurationSec <= 0 || out.DurationSec <= limit {
 		return w.decodeRun(ctx, tmp, out, 0, 0, out.DurationSec, fps)
 	}
-	// Long file: three samples of a minute each, at the start, middle and end.
-	for _, start := range []float64{0, out.DurationSec/2 - 30, out.DurationSec - 65} {
+	// Long file: a minute of playback every playbackEvery seconds, so damage anywhere is within reach of a sample.
+	starts := playbackStarts(out.DurationSec)
+	if id := w.runningJob(); id != 0 {
+		w.jobf(id, ": Long file (%s): playing a one-minute sample every %s (%d samples)", rules.Clock(out.DurationSec),
+			waitWords(time.Duration(playbackEvery*float64(time.Second))), len(starts))
+	}
+	for _, start := range starts {
 		if _, _, err := w.decodeRun(ctx, tmp, out, start, 60, 60, fps); err != nil {
 			return 0, false, err
 		}
 	}
 	return 0, false, nil
+}
+
+// playbackEvery is how far apart a long file's playback samples start, in seconds. A variable so the real test
+// can make it short; a sample is always a minute long.
+var playbackEvery = 600.0
+
+// playbackStarts are where a long file's one-minute playback samples start: one at 0, then every playbackEvery,
+// and the last one at duration-65 (it ends 5 s before the end, as the old three-sample check did). A sample is
+// never cut short by the one after it, and none starts past the end.
+func playbackStarts(duration float64) []float64 {
+	last := math.Max(0, duration-65)
+	var starts []float64
+	for s := 0.0; s+60 <= last; s += playbackEvery {
+		starts = append(starts, s)
+	}
+	return append(starts, last)
 }
 
 // opusParserRe is the one message ffmpeg 8's demuxer prints for the last Opus packet of a good file, even

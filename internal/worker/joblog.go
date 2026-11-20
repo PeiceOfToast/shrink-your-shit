@@ -76,6 +76,13 @@ func (w *Worker) section() string {
 // setPhase moves the worker's own lines to section s (the job goroutine only; section may be read from elsewhere).
 func (w *Worker) setPhase(s string) { w.phase.Store(s) }
 
+// runningJob is the id of the job this worker is running, 0 when none is (a test calling a check directly).
+func (w *Worker) runningJob() int64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.current
+}
+
 // startLines is the job's start section: what the worker knows at the start of this attempt. Not here yet: the
 // app version and commit, why the job started, the workflow's name (the start part of the API has them as null).
 func (w *Worker) startLines(job jobs.Job) {
