@@ -19,8 +19,9 @@ import (
 // v2Overview is the Dashboard's executive overview (user review 11-12 item 5; shapes in
 // slices/v2-engine/review-items-shapes.md): space (NET) and the trash (GROSS) kept apart, the workers
 // with their files' live progress, the active jobs, each library's sizes and counts, the last 30 days,
-// and averages. Live: the page fetches it again on /api/v2/events' messages. Nothing is estimated:
-// what isn't recorded is null, or a day with recorded false.
+// and averages. Live: the page fetches it again on /api/v2/events' messages. Nothing is estimated
+// except a converting file's saving, which the person asked for (expectedSavingBytes): what isn't
+// recorded is null, or a day with recorded false.
 func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView, libTotals *libraryTotals) {
 	overviewStats := &statsCache{} // this server's store's
 	if store != nil {              // so the first page view after start is not the slow one (setup tests run with no store)
@@ -49,9 +50,10 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView, libTotals
 			serverError(w, err)
 			return
 		}
-		live := func(id int64) map[string]any {
+		live := func(id int64) (map[string]any, worker.LiveJob) {
 			j := map[string]any{"jobId": strconv.FormatInt(id, 10), "percent": nil, "fps": nil, "speed": nil, "etaS": nil}
-			if l, ok := worker.Live(id); ok {
+			l, ok := worker.Live(id)
+			if ok {
 				p := l.Progress
 				j["percent"] = p.Percent
 				if p.FPS > 0 {
@@ -64,16 +66,21 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView, libTotals
 					j["etaS"] = int(p.ETASeconds + 0.5)
 				}
 			}
-			return j
+			return j, l
 		}
 		active := []map[string]any{}
 		byWorker := map[string][]map[string]any{}
 		for _, j := range working {
-			l := live(j.ID)
+			l, lj := live(j.ID)
 			l["name"] = filepath.Base(j.Path)
 			byWorker[j.Worker] = append(byWorker[j.Worker], l)
-			act := map[string]any{"jobId": l["jobId"], "name": l["name"], "percent": l["percent"], "etaS": l["etaS"], "expectedSavingBytes": nil,
-				"library": nil}
+			saving, estimated, err := expectedSaving(store, j, lj)
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+			act := map[string]any{"jobId": l["jobId"], "name": l["name"], "percent": l["percent"], "etaS": l["etaS"],
+				"expectedSavingBytes": saving, "expectedSavingEstimated": estimated, "library": nil}
 			if j.LibraryID != 0 {
 				act["library"] = map[string]any{"id": strconv.FormatInt(j.LibraryID, 10), "name": j.LibraryName}
 			}
@@ -197,6 +204,42 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView, libTotals
 			"encoderFallbacks": encoderFallbacks,
 		})
 	})
+}
+
+// estimatedFromJobs is how many of a library's done conversions the fallback ratio averages.
+const estimatedFromJobs = 20
+
+// expectedSaving is what converting job j is expected to save: the original's size less the new file's
+// projected size, and true (it is always an estimate). The projection is the bytes written so far and
+// how far the encode is (worker.Live's ProjectedSize); until the encode has said that, the library's
+// own recent conversions say what shape its new files come out (every library's, when that library has
+// none). nil when neither can tell, so the page keeps "not known yet" rather than a made-up number.
+func expectedSaving(store *jobs.Store, j jobs.Working, l worker.LiveJob) (any, bool, error) {
+	if j.SizeBefore <= 0 {
+		return nil, false, nil
+	}
+	out, ok := l.ProjectedSize, l.ProjectedSize > 0
+	if !ok {
+		libs := []int64{0} // every library
+		if j.LibraryID != 0 {
+			libs = []int64{j.LibraryID, 0}
+		}
+		for _, lib := range libs {
+			ratio, has, err := store.OutputRatio(lib, estimatedFromJobs)
+			if err != nil {
+				return nil, false, err
+			}
+			if has {
+				out, ok = int64(float64(j.SizeBefore)*ratio), true
+				break
+			}
+		}
+	}
+	if !ok {
+		return nil, false, nil
+	}
+	// a new file bigger than its original is a negative saving: the new file is coming out bigger
+	return j.SizeBefore - out, true, nil
 }
 
 // zoneName is this server's time zone as an IANA name ("Europe/Berlin"): TZ, else where /etc/localtime

@@ -53,7 +53,7 @@ func TestJobsStampCurrentRevisionOnUpgrade(t *testing.T) {
 	if err != nil || cur == 0 {
 		t.Fatalf("current revision %d %v", cur, err)
 	}
-	for _, q := range []string{`ALTER TABLE jobs DROP COLUMN workflow_rev`, `PRAGMA user_version=50`} {
+	for _, q := range []string{`ALTER TABLE jobs DROP COLUMN subtitle_files`, `ALTER TABLE jobs DROP COLUMN workflow_rev`, `PRAGMA user_version=50`} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}
@@ -155,6 +155,38 @@ func TestWorkflowChangeMakesEarlierFilesConvertAgain(t *testing.T) {
 	}
 	if got, _ := s.LibraryAgain(l.ID, 7); got.Earlier != 1 || got.Possible != 0 {
 		t.Errorf("after the run: %+v (the gone file %d stays earlier)", got, gone)
+	}
+}
+
+// ui-shop QA of Convert again: after a library's folder is changed, the files converted under the old folder
+// are not counted or queued; only those inside the current folder are.
+func TestConvertAgainOnlyInsideTheCurrentFolder(t *testing.T) {
+	s := open(t)
+	l, _ := s.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(4), true)
+	old := convertedIn(t, s, l, "old.mkv", false)
+	moved := t.TempDir()
+	l, err := s.UpdateLibrary(l.ID, nil, &moved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inside := convertedIn(t, s, l, "inside.mkv", false)
+	if _, err := s.SetFlowTemplate(l.FlowID, rules.SliderTemplate(6)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnsureRevision(l.FlowID); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.LibraryAgain(l.ID, 7); err != nil || got.Earlier != 1 || got.Possible != 1 {
+		t.Fatalf("earlier %+v %v, want only the file in the current folder", got, err)
+	}
+	if queued, _, err := s.ConvertLibraryAgain(l.ID, 7); err != nil || queued != 1 {
+		t.Fatalf("bulk queued %d %v", queued, err)
+	}
+	if j, _ := s.Get(inside); j.Status != Queued {
+		t.Errorf("the file in the current folder is %s, not queued", j.Status)
+	}
+	if j, _ := s.Get(old); j.Status != Done {
+		t.Errorf("the file under the old folder was queued: %s", j.Status)
 	}
 }
 
