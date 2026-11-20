@@ -87,10 +87,10 @@ function Spark({ values, label, color }: { values: (number | null)[]; label: str
   const end = () => { if (cur) runs.push(cur.includes("L") ? cur : cur + "L" + cur.slice(1)); cur = ""; };
   values.forEach((v, i) => { if (v == null) end(); else cur += (cur ? "L" : "M") + x(i).toFixed(1) + "," + y(v).toFixed(1); });
   end();
-  return <svg className="spark" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={label + (values.some((v) => v == null) ? "; the days not recorded are left blank" : "")}>
+  return <svg className="spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={label + (values.some((v) => v == null) ? "; the days not recorded are left blank" : "")}>
     <line x1="0" x2={W} y1={H - 2} y2={H - 2} stroke="var(--border-strong)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
     {runs.map((d) => <path key={d} d={d} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />)}
-    {values.map((v, i) => (v == null ? <rect key={i} x={x(i) - 1} y={H - 3} width="2" height="2" fill="var(--border)" /> : null))}
+    {values.map((v, i) => (v == null ? <rect key={i} x={x(i) - 1} y={H - 3} width="2" height="2" fill="var(--border-strong)" /> : null))}
   </svg>;
 }
 
@@ -176,7 +176,7 @@ export function Overview() {
             {rec.length >= 2 && hasSaved && <div>Last 30 days: {spaceNote}</div>}
             {rec.length < 2 && <div>Charts start after two days of conversions.</div>}
           </div>
-          {rec.length >= 2 && <Spark label={"Space saved per day, last " + v.daily.length + " days"} color="var(--success)" values={v.daily.map((d) => (d.recorded ? (hasSaved ? d.savedBytes : d.freedBytes) ?? 0 : null))} />}
+          {rec.length >= 2 && <Spark label={(kept ? "Files made smaller per day" : "Space saved per day") + ", last " + v.daily.length + " days"} color="var(--success)" values={v.daily.map((d) => (d.recorded ? (hasSaved ? d.savedBytes : d.freedBytes) ?? 0 : null))} />}
         </div>
         <div className="tile">
           <span className="l">Files converted, all time</span>
@@ -188,7 +188,7 @@ export function Overview() {
           <span className="l">Right now</span>
           <span className="v">{count(v.active.length)} <small>converting now</small></span>
           {/* no daily series for a live count, so no sparkline: there is no history to draw it from */}
-          <div className="d"><div>{count(h.filesWaiting)} waiting · {on} of {rows.length} workers on</div></div>
+          <div className="d"><div>{rows.length ? <>{on} of {rows.length} workers on</> : <Link to="/workers">No workers yet</Link>}</div></div>
         </div>
       </section>
 

@@ -791,6 +791,10 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .ov .chartfoot b{color:var(--text);margin-left:6px}.ov .chartfoot details{margin-left:auto}.ov .chartfoot details[open]{flex-basis:100%;margin-left:0;min-width:0/* a flex item is as wide as its table otherwise, so .daytbl never scrolls and the page does (390 px) */}
 .ov .quiet{margin:0;display:flex;align-items:center;justify-content:center;text-align:center;min-height:160px;padding:12px;border:1px solid var(--border);border-radius:var(--radius)}.ov .quiet.short{min-height:80px}
 
+/* U6 review2: at 901-1200 px the sparkline sits under the text, full tile width, so the figure keeps the whole tile */
+@media (min-width:901px) and (max-width:1200px){
+  .ov .tile{grid-template-columns:minmax(0,1fr)}.ov .tile .spark{grid-column:1 / -1;grid-row:auto;width:100%;height:40px;align-self:auto}
+}
 @media (max-width:900px){
   .ov .tiles{grid-template-columns:minmax(0,1fr)}.ov .tile{grid-template-columns:minmax(0,1fr) 96px}.ov .tile .spark{width:96px;height:40px}
   .ov .charts{grid-template-columns:minmax(0,1fr);gap:24px}
