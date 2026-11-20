@@ -5,7 +5,7 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
-import { bytes, clock, count, elapsed, plural, stepTime } from "../format";
+import { bytes, clock, clockS, count, elapsed, plural, stepTime } from "../format";
 import { convertDoneAgain, fileJobs, findSkip, getJob, getJobLog, jobAction, listJobs, listKept, restoreKept, type JobLog, type LogStep, type LogVariable } from "../jobsApi";
 import { getWorkflow } from "../workflowApi";
 import { getHealth, getSettings } from "../libraryApi";
@@ -360,6 +360,8 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
   const old = l.start == null, when = l.steps.find((s) => s.startedAt)?.startedAt ?? null, pr = l.steps.find((s) => s.probe)?.probe ?? null;
   const vars = [...(l.variables ?? [])].sort((a, b) => a.name.localeCompare(b.name)), changed = vars.filter((v) => v.changedBy != null);
   const flagged = (st: LogStep) => (st.warnings?.length ?? 0) + (st.errors?.length ?? 0) > 0;
+  // contract L1: the sectioned log's lines (start and summary are shown from their own fields above and below)
+  const secs2 = (l.sections ?? []).filter((x) => x.lines.length > 0 && x.id !== "start" && x.id !== "summary"), sectioned = secs2.length > 0;
   const raw: Raw[] = [];
   if (!old) {
     const s = l.start!;
@@ -398,12 +400,23 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
         {flags}
         {st.check && <p className="sm">Picture check: score {st.check.score.toFixed(3)}{st.check.min != null ? " (needs " + st.check.min.toFixed(3) + ")" : ""}{st.check.passed != null ? " · " + (st.check.passed ? "passed" : "failed") : ""}</p>}
         {(st.moves ?? []).map((m, j) => <p className="sm" key={j}>{MOVE[m.action] ?? m.action} <code>{m.from}</code>{m.to && <> to <code>{m.to}</code></>}{!m.ok && <span className="muted"> · {m.error ?? "failed"}</span>}</p>)}
-        {st.outputLines > 0 && <details open={st.outcome === "failed" || st.outcome === "skipped"}><summary className="sm">Show ffmpeg output ({st.outputLines} lines)</summary>
+        {st.outputLines > 0 && !sectioned && <details open={st.outcome === "failed" || st.outcome === "skipped"}><summary className="sm">Show ffmpeg output ({st.outputLines} lines)</summary>
           {st.outputLines > 200 && <p className="sm"><a href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}>Download all {st.outputLines.toLocaleString()} lines</a></p>}
           <pre className="joblog sm">{text(st.output)}</pre></details>}
         {(st.found?.length ?? 0) > 0 && <pre className="joblog sm">{st.found!.join("\n")}</pre>}
         {st.result && <p className="sm">{st.result}</p>}
       </div> });
+  });
+  // the sectioned lines: stderr (ffmpeg) and info (GPU driver) lines are dimmed and indented; app and check lines stay normal;
+  // a warning or error keeps its icon and word whatever its stream
+  secs2.forEach((x, i) => {
+    const warnN = x.lines.filter((y) => y.level === "warning").length, errN = x.lines.filter((y) => y.level === "error").length;
+    const lines = errOnly ? x.lines.filter((y) => y.level !== "info") : x.lines;
+    raw.push({ key: "sec-" + i, title: x.title || "Other lines", hits: q ? countIn(x.lines.map((y) => y.text).join("\n").toLowerCase(), q) : 0, dflt: warnN + errN > 0, show: !errOnly || warnN + errN > 0,
+      head: <>{warnN > 0 && <span className="pill warn">{plural1(warnN, "warning", "warnings")}</span>}{errN > 0 && <span className="pill bad">{plural1(errN, "error", "errors")}</span>}</>,
+      body: <div className="joblog sm" aria-label={(x.title || "Other lines") + " lines"}>{lines.map((y, j) => {
+        const dim = y.stream === "stderr" || y.stream === "info";
+        return <div key={j} className={dim ? "muted" : undefined} style={dim ? { paddingLeft: 16 } : undefined}><span className="muted">{clockS(new Date(y.at))}</span> {y.level === "warning" && <><Icon id="i-alert" /> Warning: </>}{y.level === "error" && <><Icon id="i-x-c" /> Error: </>}{y.text}</div>; })}</div> });
   });
   if (!old && l.summary) {
     const s = l.summary;
@@ -411,6 +424,7 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
     raw.push({ key: "summary", title: "Summary", head: null, hits: 0, dflt: true, show: !errOnly, body: <>
       <p className="sm">Time taken: {stepTime(s.tookMs)}</p>
       {(s.passes != null || s.bytesWritten != null) && <p className="sm">{[s.passes != null && plural1(s.passes, "ffmpeg pass", "ffmpeg passes"), s.bytesWritten != null && bytes(s.bytesWritten) + " written"].filter(Boolean).join(" · ")}</p>}
+      {s.slowestStep != null && <p className="sm">Slowest step: {s.slowestStep.name} ({stepTime(s.slowestStep.tookMs)})</p>}
       <p className="sm">Worker: {worker ?? "—"}</p>
       <p className="sm">Result: {WORD[l.final ?? ""] ?? l.final}</p>
       {hasResult && <p className="sm"><a href="#job-result" onClick={(e) => { e.preventDefault(); document.getElementById("job-result")?.scrollIntoView({ block: "start" }); }}>Before and after: see Result</a></p>}</> });
@@ -419,7 +433,8 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
   const shown = secs.filter((s) => s.show), anyClosed = shown.some((s) => !s.open);
   const tot = shown.reduce((n, s) => n + s.hits, 0), ks = shown.filter((s) => s.hits > 0).length; // review2 #455: search and the switch must both match
   const vis = l.steps.filter((_, i) => shown.some((s) => s.key === "step-" + i)); // review2 #455: count only the sections on screen
-  const E = vis.reduce((n, st) => n + (st.errors?.length ?? 0), 0), W = vis.reduce((n, st) => n + (st.warnings?.length ?? 0), 0), K = vis.filter(flagged).length;
+  const sx = secs2.filter((_, i) => shown.some((s) => s.key === "sec-" + i)), sxl = sx.flatMap((x) => x.lines);
+  const E = vis.reduce((n, st) => n + (st.errors?.length ?? 0), 0) + sxl.filter((y) => y.level === "error").length, W = vis.reduce((n, st) => n + (st.warnings?.length ?? 0), 0) + sxl.filter((y) => y.level === "warning").length, K = vis.filter(flagged).length + sx.filter((x) => x.lines.some((y) => y.level !== "info")).length;
   const status = [q && (tot ? tot + " matches in " + ks + " step" + (ks > 1 ? "s" : "") : "No match"), errOnly && (E + W ? plural1(E, "error", "errors") + " and " + plural1(W, "warning", "warnings") + " in " + plural1(K, "section", "sections") : !q && "No errors or warnings in this log.")].filter(Boolean).join(" · ");
   return (
     <section id="job-log"><h3>Log</h3>
