@@ -78,6 +78,79 @@ func TestNothingIsQueuedForALibraryWithoutWorkflow(t *testing.T) {
 	}
 }
 
+// oldSchema56 opens a test database at version 55 (the shape before migration 56) with one flow and the
+// named libraries, whose ids are 1..n in order.
+func oldSchema56(t *testing.T, names ...string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "syp.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	// the runner's own temporary row, so steps that ask "upgraded from where" run as they would on a v55
+	if _, err := db.Exec(`CREATE TEMP TABLE migrate_from (version INTEGER NOT NULL); INSERT INTO temp.migrate_from(version) VALUES (55)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range migrations[:55] {
+		if _, err := db.Exec(m.sql); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Exec(`PRAGMA user_version=55`)
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := db.Exec(`INSERT INTO flows(name,template,created,changed) VALUES('Films','{}',?,?)`, now, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range names {
+		if _, err := db.Exec(`INSERT INTO libraries(name,path,flow_id,started,created) VALUES(?,?,1,0,?)`, n, "/lib-"+n, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// Migration 56 rebuilds libraries, and its DROP would take the id sequence with it: a library removed
+// before the upgrade must not have its id handed to the next one, which would then show the removed
+// library's kept job history (dev-review on 14a26a33).
+func TestMigration56KeepsTheIdSequence(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		remove string // what was removed before the upgrade
+		want   int64
+	}{
+		{"the highest library removed", `DELETE FROM libraries WHERE id=3`, 4},
+		{"every library removed", `DELETE FROM libraries`, 4}, // ids 1..3 existed: the next is 4, not 1
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			path := oldSchema56(t, "One", "Two", "Three") // ids 1..3, the sequence at 3
+			db, err := sql.Open("sqlite", path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(c.remove); err != nil {
+				t.Fatal(err)
+			}
+			db.Close()
+			s, err := Open(path) // migrates 56 and up
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			l, err := s.AddLibraryWithoutFlow("Next", t.TempDir(), false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if l.ID != c.want {
+				t.Errorf("a new library after the upgrade got id %d, want %d: a removed library's id must not come back", l.ID, c.want)
+			}
+		})
+	}
+}
+
 // Migration 56 makes flow_id nullable so a library can be saved with no workflow, and keeps every row as
 // it was (the table is made again: SQLite cannot drop NOT NULL in place).
 func TestMigration56KeepsEveryLibrary(t *testing.T) {

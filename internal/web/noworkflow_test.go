@@ -85,6 +85,26 @@ func TestLibraryWithoutWorkflow(t *testing.T) {
 	if b := get("/api/v2/libraries?status=disabled"); !strings.Contains(b, `"total":1`) || strings.Contains(b, `"id":"`+id+`"`) {
 		t.Errorf("?status=disabled: %s", b)
 	}
+	// the overview's own state says it too (ui-shop's dashboard badge): no_workflow wins over paused, and a
+	// stopped library that has a workflow still says paused
+	overview := func() map[string]string {
+		ov := decode[struct {
+			Libraries []struct{ ID, State string }
+		}](t, get("/api/v2/overview"))
+		states := map[string]string{}
+		for _, l := range ov.Libraries {
+			states[l.ID] = l.State
+		}
+		return states
+	}
+	if s := overview()[id]; s != "no_workflow" {
+		t.Errorf("the overview says the no-workflow library is %q, want no_workflow", s)
+	}
+	for lid, s := range overview() {
+		if lid != id && s != "paused" {
+			t.Errorf("a stopped library with a workflow is %q, want paused", s)
+		}
+	}
 
 	// assigning a workflow: taken, never started, and nothing is queued
 	flow, err := st.AddFlow("Films", rules.SliderTemplate(3))
@@ -97,6 +117,9 @@ func TestLibraryWithoutWorkflow(t *testing.T) {
 	}
 	if lib := decode[v2Library](t, get(path)); lib.WorkflowID != flowID || lib.Enabled || lib.Status != "disabled" {
 		t.Errorf("after assigning: %+v, want the workflow, enabled false, disabled", lib)
+	}
+	if s := overview()[id]; s != "paused" { // it has a workflow and is stopped now: the ordinary stopped state
+		t.Errorf("the overview says the assigned library is %q, want paused", s)
 	}
 	if l, _ := st.GetLibrary(mustID(t, id)); l.Started {
 		t.Error("assigning a workflow started it")
