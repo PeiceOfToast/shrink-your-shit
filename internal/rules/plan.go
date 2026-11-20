@@ -36,9 +36,21 @@ type Plan struct {
 	// step sections. Empty for flows that cannot say (see withStepDecisions).
 	Steps []StepDecision `json:"steps,omitempty"`
 	// OnFailure: a workflow path's failure policies (V6b); nil for a straight workflow.
-	OnFailure     *Failures `json:"onFailure,omitempty"`
-	FolderMode    string    `json:"folderMode,omitempty"`    // "next_to_library" (V5a): the library's own folder instead of OutputDir
-	Container     string    `json:"container,omitempty"`     // the new file's type (its extension, "mkv" or "mp4"); "" = the original's
+	OnFailure  *Failures `json:"onFailure,omitempty"`
+	FolderMode string    `json:"folderMode,omitempty"` // "next_to_library" (V5a): the library's own folder instead of OutputDir
+	Container  string    `json:"container,omitempty"`  // the new file's type (its extension, "mkv" or "mp4"); "" = the original's
+	// The Save the result step's {{name}} templates (W4b), as the workflow has them. The worker fills
+	// them in at run time; "" keeps today's names and titles.
+	OutputName string `json:"outputName,omitempty"`
+	SrtName    string `json:"srtName,omitempty"`
+	TrackTitle string `json:"trackTitle,omitempty"`
+	// Title and AudioTracks are what the run made of TrackTitle: the title written on every audio track
+	// of the new file, and how many it has. The worker sets them; they are not part of the intent.
+	Title       string `json:"title,omitempty"`
+	AudioTracks int    `json:"audioTracks,omitempty"`
+	// SrtNames are the .srt files this run writes, resolved beside the new file, in SubtitleFiles order
+	// (the worker sets them at run time).
+	SrtNames      []string  `json:"srtNames,omitempty"`
 	Tracks        []TrackOp `json:"tracks,omitempty"`        // audio and subtitle tracks dropped or converted (slice 25b); others copied
 	AllAudioKept  bool      `json:"allAudioKept,omitempty"`  // "my languages" matched no audio track, so all of it is kept
 	MainAudioUsed bool      `json:"mainAudioUsed,omitempty"` // Basic's stereo AAC matched no track: the main one is kept (S4)
@@ -485,12 +497,18 @@ func (p Plan) withSubtitleFiles(args []string, out string) []string {
 }
 
 // trackArgs are the ffmpeg arguments for the Plan's TrackOps: a dropped track is unmapped (-map -0:N),
-// a converted one gets its encoder and bitrate by its place among the new file's audio tracks.
+// a converted one gets its encoder and bitrate by its place among the new file's audio tracks. A
+// resolved track title (W4b) is written on every audio track of the new file.
 func (p Plan) trackArgs() []string {
-	if len(p.Tracks) == 0 {
+	if len(p.Tracks) == 0 && (p.Title == "" || p.AudioTracks == 0) {
 		return nil
 	}
 	var args []string
+	if p.Title != "" { // every audio track of the new file gets it, kept or added
+		for k := 0; k < p.AudioTracks; k++ {
+			args = append(args, "-metadata:s:a:"+strconv.Itoa(k), "title="+p.Title)
+		}
+	}
 	dropped := map[int]bool{}
 	for _, op := range p.Tracks {
 		if op.Drop && !op.Add {
@@ -707,6 +725,20 @@ type Snapshot struct {
 	// Source is the original as probed when the job was planned: the job's "before", which a replace
 	// would otherwise lose (the original's name then holds the new file). Not part of the fingerprint.
 	Source *media.Info `json:"source,omitempty"`
+	// Variables are the {{name}} values the run used (W4b): their names, what they were before the plan
+	// and after it, and the step that set a changed one. A secret has its name only.
+	Variables []RunVariable `json:"variables,omitempty"`
+}
+
+// RunVariable is one {{name}} a run used, as the job log's variables table shows it (design-joblog-vars
+// section 1): its value at the start and at the end, and the step that changed it ("" when none did).
+// A secret's values are never recorded.
+type RunVariable struct {
+	Name      string `json:"name"`
+	Start     string `json:"start,omitempty"`
+	End       string `json:"end,omitempty"`
+	ChangedBy string `json:"changedBy,omitempty"`
+	Secret    bool   `json:"secret,omitempty"`
 }
 
 // Verification are the program-wide settings that judge a result (the flags -min-ssim, -decode-check).
@@ -722,7 +754,9 @@ type Verification struct {
 func (s Snapshot) Fingerprint() string {
 	p := s.Plan
 	p.Skip, p.SkipCode, p.Reason = "", "", ""
-	p.Steps = nil // the log's words about this one file, not a setting: see Fingerprint's comment
+	p.Title, p.AudioTracks = "", 0 // the run's reading of TrackTitle for this file, not a setting
+	p.Steps = nil                  // the log's words about this one file, not a setting: see Fingerprint's comment
+	// (SrtNames is resolved after RecordPlan, so it is not in the stored snapshot this fingerprints.)
 	b, _ := json.Marshal(struct {
 		Plan                          Plan
 		Verify                        Verification
@@ -747,6 +781,7 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	pos, _ := SliderAt(s.Quality)
 	v := info.Video()
 	p.Output, p.MinSSIM, p.KeepIfBigger = s.AfterConverting, pos.MinSSIM, s.KeepIfBigger
+	p.OutputName, p.SrtName, p.TrackTitle = s.OutputName, s.SrtName, s.TrackTitle
 	if s.AfterConverting == "folder" {
 		p.OutputDir, p.FolderMode = s.OutputDir, s.FolderMode
 	}

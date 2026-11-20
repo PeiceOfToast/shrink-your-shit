@@ -29,6 +29,8 @@ type TrackOp struct {
 	// audio tracks; the original track is kept as it is.
 	Add      bool   `json:"add,omitempty"`
 	Language string `json:"language,omitempty"` // an added track's language (its source's)
+	// Kind is an extracted subtitle's kind for the .srt name's {{sub_kind}} (W4b): "forced", "sdh" or "".
+	Kind string `json:"kind,omitempty"`
 }
 
 // audioTargets are the codecs the audio choices convert to: ffmpeg encoder, codec name, kbps per channel.
@@ -351,20 +353,24 @@ func planSubtitles(choice string, langs []string, info media.Info) (ops []TrackO
 				continue
 			}
 			parts := []string{}
+			kind := ""
 			if l != "" {
 				parts = append(parts, l)
 			}
 			if s.Forced {
-				parts = append(parts, "forced")
+				kind = "forced"
 			} else if isSDH(s) {
-				parts = append(parts, "sdh")
+				kind = "sdh"
+			}
+			if kind != "" {
+				parts = append(parts, kind)
 			}
 			name := strings.Join(parts, ".")
 			used[name]++
 			if n := used[name]; n > 1 {
 				name = strings.TrimPrefix(name+"."+strconv.Itoa(n), ".")
 			}
-			ops = append(ops, TrackOp{Index: s.Index, Type: "subtitle", Drop: true, Extract: name, ToFile: true})
+			ops = append(ops, TrackOp{Index: s.Index, Type: "subtitle", Drop: true, Extract: name, ToFile: true, Language: l, Kind: kind})
 		}
 	}
 	return ops
@@ -393,6 +399,45 @@ func (p Plan) SubtitleFiles() []TrackOp {
 		}
 	}
 	return out
+}
+
+// AudioTrackCount is how many audio tracks the new file has: every one of src's kept, minus the dropped
+// ones, plus the added ones. It is the number of -metadata:s:a:N the run's track title goes on.
+func (p Plan) AudioTrackCount(src media.Info) int {
+	if len(p.Tracks) == 0 {
+		return len(src.Audio())
+	}
+	dropped := map[int]bool{}
+	for _, op := range p.Tracks {
+		if op.Drop && !op.Add {
+			dropped[op.Index] = true
+		}
+	}
+	n := 0
+	for _, idx := range p.AudioOrder {
+		if !dropped[idx] {
+			n++
+		}
+	}
+	for _, op := range p.Tracks {
+		if op.Add {
+			n++
+		}
+	}
+	return n
+}
+
+// SrtNameFor is where the plan's k-th extracted subtitle goes beside final: the name the run resolved
+// (SrtNames), or today's name when it resolved none.
+func (p Plan) SrtNameFor(final string, k int) string {
+	if k >= 0 && k < len(p.SrtNames) && p.SrtNames[k] != "" {
+		return p.SrtNames[k]
+	}
+	files := p.SubtitleFiles()
+	if k < 0 || k >= len(files) {
+		return ""
+	}
+	return SrtName(final, files[k].Extract)
 }
 
 // SrtName is the name of an extracted subtitle beside the new file final ("Movie.mkv" with part "eng":
