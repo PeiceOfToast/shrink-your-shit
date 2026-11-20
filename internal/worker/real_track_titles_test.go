@@ -52,12 +52,12 @@ func TestRealTrackTitles(t *testing.T) {
 		}
 		return strings.Join(out, " | ")
 	}
-	// the surround converted to E-AC-3 (5.1 kept): named for its new codec; the copied stereo keeps its own name
-	if info := run(t, "eac3_surround"); titles(info) != "Surround 5.1 (E-AC-3) | Japanese commentary" {
+	// the surround converted to E-AC-3 (5.1 kept): it has its own title, which ffmpeg keeps; the copied stereo keeps its own name
+	if info := run(t, "eac3_surround"); titles(info) != "Old DTS title | Japanese commentary" {
 		t.Errorf("eac3_surround: titles %q", titles(info))
 	}
-	// the surround copied, a stereo AAC added from it: the copies keep theirs, the added track is named
-	if info := run(t, "stereo_aac_surround"); titles(info) != "Old DTS title | Japanese commentary | Stereo (AAC)" {
+	// the surround copied, a stereo AAC added from it: every track made from a titled source keeps that title (the rule: the automatic name only for an untitled source)
+	if info := run(t, "stereo_aac_surround"); titles(info) != "Old DTS title | Japanese commentary | Old DTS title" {
 		t.Errorf("stereo_aac_surround: titles %q", titles(info))
 	}
 }

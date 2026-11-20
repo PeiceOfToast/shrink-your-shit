@@ -96,10 +96,38 @@ func TestTitleFromTheSourceChannels(t *testing.T) {
 		t.Errorf("Channels 0 of a 5.1 source: title %q, want %q", got, "Surround 5.1 (E-AC-3)")
 	}
 
+	// the encoded count is what the file holds, even above the source's (a 5.1 upmixed to 7.1 is 7.1)
 	p = Plan{Tracks: []TrackOp{{Index: 1, Type: "audio", Encoder: "eac3", Codec: "eac3", Kbps: 448, Channels: 8}}}
 	p.titleTracks(info)
-	if got := p.Tracks[0].Title; got != "Surround 5.1 (E-AC-3)" {
-		t.Errorf("a count above the source: title %q, want the source's %q", got, "Surround 5.1 (E-AC-3)")
+	if got := p.Tracks[0].Title; got != "Surround 7.1 (E-AC-3)" {
+		t.Errorf("a count above the source: title %q, want the encoded %q", got, "Surround 7.1 (E-AC-3)")
+	}
+
+	// a mono source upmixed to stereo is Stereo, not the source's Mono (review2 P3a)
+	mono := withAudio(media.Stream{Codec: "ac3", Channels: 1, Language: "eng"})
+	p = Plan{Tracks: []TrackOp{{Index: 1, Type: "audio", Encoder: "aac", Codec: "aac", Kbps: 128, Channels: 2}}}
+	p.titleTracks(mono)
+	if got := p.Tracks[0].Title; got != "Stereo (AAC)" {
+		t.Errorf("mono upmixed to stereo: title %q, want %q", got, "Stereo (AAC)")
+	}
+
+	// a source track with its own title keeps it: no automatic title is written (the source's is copied)
+	titledSrc := withAudio(media.Stream{Codec: "flac", Channels: 6, Language: "eng", Title: "Director's commentary"})
+	p = Plan{Tracks: []TrackOp{{Index: 1, Type: "audio", Encoder: "eac3", Codec: "eac3", Kbps: 448, Channels: 6}}}
+	p.titleTracks(titledSrc)
+	if got := p.Tracks[0].Title; got != "" {
+		t.Errorf("a titled source track: title %q, want none so the source's title stays", got)
+	}
+
+	// two converted tracks from a mono source and a 5.1 source: each named for its own encode
+	two := withAudio(media.Stream{Codec: "ac3", Channels: 1, Language: "eng"}, media.Stream{Codec: "flac", Channels: 6, Language: "jpn"})
+	p = Plan{Tracks: []TrackOp{
+		{Index: 1, Type: "audio", Encoder: "aac", Codec: "aac", Kbps: 128, Channels: 2},
+		{Index: 2, Type: "audio", Encoder: "eac3", Codec: "eac3", Kbps: 448, Channels: 6},
+	}}
+	p.titleTracks(two)
+	if p.Tracks[0].Title != "Stereo (AAC)" || p.Tracks[1].Title != "Surround 5.1 (E-AC-3)" {
+		t.Errorf("two converted tracks: titles %q and %q", p.Tracks[0].Title, p.Tracks[1].Title)
 	}
 
 	p = Plan{Tracks: []TrackOp{

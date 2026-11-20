@@ -60,17 +60,23 @@ func trackTitle(codec string, channels int) string {
 // (Channels 0) takes the source's count, and never more than the source has.
 func (p *Plan) titleTracks(info media.Info) {
 	src := map[int]int{}
+	titled := map[int]bool{} // a source track that already has its own title keeps it
 	for _, a := range info.Audio() {
 		src[a.Index] = a.Channels
+		titled[a.Index] = a.Title != ""
 	}
 	for i := range p.Tracks {
 		op := &p.Tracks[i]
 		if op.Type != "audio" || (!op.Add && (op.Drop || op.Encoder == "")) {
 			continue
 		}
-		ch := op.Channels
-		if ch == 0 || ch > src[op.Index] && src[op.Index] > 0 {
-			ch = src[op.Index]
+		if titled[op.Index] {
+			op.Title = "" // ffmpeg copies the source's title with the track
+			continue
+		}
+		ch := op.Channels // the encoded count: a mono source upmixed to stereo is stereo
+		if ch == 0 {
+			ch = src[op.Index] // no downmix: the source's own count
 		}
 		op.Title = trackTitle(op.Codec, ch)
 	}
