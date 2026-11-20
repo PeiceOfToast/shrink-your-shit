@@ -249,6 +249,10 @@ export interface Port {
   kind: "file" | "control";
   outcome: "success" | "error" | "skipped" | "branch";
 }
+// POST /workflows/{id}/validate answers two more maps (contract final, workshop 05:58Z). An absent map or an absent
+// entry means the step is fixed in place and its type can't be added here.
+export interface StepPlace { fixedPlace: boolean; fixedReason?: string }
+export interface AddStep { addable: boolean; reason?: string; after?: ID }
 export interface StepDefinition {
   type: string;
   typeVersion: number;
