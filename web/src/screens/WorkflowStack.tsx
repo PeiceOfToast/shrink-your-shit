@@ -38,8 +38,8 @@ function SrtFiles() {
   useEffect(() => { fetch("/languages.json").then((r) => r.json()).then(setList, () => {}); }, []);
   const codes = st.data && !failed(st.data) ? st.data.languages ?? [] : null;
   if (!codes) return null;
-  const name = (c: string) => list.find((l) => l[0] === c)?.[1] ?? c, c0 = codes[0] ?? "eng";
-  return (<span className="hint">
+  const name = (c: string) => list.find((l) => l[0] === c)?.[1] ?? c, c0 = codes[0] ?? "<language>";
+  return (<span className="hint" aria-live="polite">
     {codes.length ? "Saved as files: " + codes.map(name).join(", ") + ", and subtitles with no language set." : "No languages chosen, so subtitles in the main audio's language, and those with no language set, are saved as files."} <Link to="/settings/general">Change your languages</Link>
     <span style={{ display: "block" }}>For example: Movie.{c0}.srt, plus Movie.{c0}.sdh.srt or Movie.{c0}.forced.srt if the video has them.</span></span>);
 }
