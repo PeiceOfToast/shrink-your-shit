@@ -70,9 +70,9 @@ func branchTemplate(d Doc) (rules.Template, []Issue) {
 				break
 			}
 			nn := byID[next]
-			if nn.Type == TypeCheck || nn.Type == TypeEnd || nn.Type == TypeInput {
+			if IsQuestion(nn.Type) || IsEnd(nn.Type) || IsAction(nn.Type) || nn.Type == TypeInput { // review2-531 P1: every run card, or the compile recurses
 				issues = append(issues, Issue{Code: "branch_in_conversion", Severity: "error", NodeID: nn.ID,
-					Message: "'" + nodeName(nn) + "' sits among the steps that run as one conversion. Put checks before the steps that convert."})
+					Message: "'" + nodeName(nn) + "' sits among the steps that run as one conversion. Put checks and actions before the steps that convert."})
 				return nil
 			}
 			chain, cur = append(chain, nn), nn
@@ -203,7 +203,7 @@ func branchTemplate(d Doc) (rules.Template, []Issue) {
 func questionOf(n Node) rules.Question {
 	var q rules.Question
 	b, _ := json.Marshal(n.Config)
-	json.Unmarshal(b, &q)
+	json.Unmarshal(b, &q) // a value of the wrong kind is an invalid_config from checkConfig already; here it reads as unset
 	q.Kind = map[string]string{TypeCheck: "", TypeCheckName: "name", TypeCheckAge: "age", TypeCheckVariable: "variable", TypeCheckLibrary: "library", TypeCheckHardLinks: "hardlinks"}[n.Type]
 	q.Name = nodeName(n)
 	return q

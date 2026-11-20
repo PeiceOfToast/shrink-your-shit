@@ -5,6 +5,7 @@ package workflow
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -170,8 +171,17 @@ func Validate(d Doc) Result {
 		if def.AlwaysOn && !n.Enabled {
 			add(Issue{Code: "invalid_config", NodeID: n.ID, Message: def.Name + " can't be turned off."})
 		}
+		if !def.Available { // a card this build can't run yet (FB1b): a draft may hold it, Publish refuses it
+			add(Issue{Code: "not_runnable_yet", NodeID: n.ID, Message: "'" + nodeName(n) + "' can't run in this version. Remove it, or keep the workflow as a draft."})
+		}
 		for _, i := range checkConfig(n, def) {
 			add(i)
+		}
+		if n.Type == TypeCheckName && strOf(n.Config, "match", "contains") == "regex" { // review2-531 P3: a pattern that can't compile would answer No for every file
+			if _, err := regexp.Compile(strOf(n.Config, "pattern", "")); err != nil {
+				add(Issue{Code: "invalid_config", NodeID: n.ID, ConfigPath: "/pattern", Field: "pattern",
+					Message: fmt.Sprintf("In '%s', the regular expression can't be read: %v.", nodeName(n), err)})
+			}
 		}
 		r.StepSummaries[n.ID] = summary(n)
 	}
@@ -257,7 +267,7 @@ func phaseIssue(from, to Node, e Edge, defs map[string]StepDefinition) []Issue {
 	if !later || e.FromPort == "error" || e.FromPort == "skipped" { // a failure may still lead to an end (V6b)
 		return nil
 	}
-	if td.RunsAs == RunsQuestion || td.RunsAs == RunsAction || (td.RunsAs == RunsEnd && !slices.Contains(td.Phase, PhaseAfter)) {
+	if td.RunsAs == RunsQuestion || td.RunsAs == RunsAction || (td.RunsAs == RunsEnd && fd.RunsAs != RunsCommit) { // an end follows the save, or a Didn't work; never a Next inside the conversion
 		return []Issue{{Code: "wrong_phase", Severity: "error", NodeID: to.ID, EdgeID: e.ID,
 			Message: "'" + nodeName(to) + "' comes after '" + nodeName(from) + "', but it belongs before the steps that convert. Move it up, or remove the link."}}
 	}

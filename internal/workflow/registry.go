@@ -41,6 +41,10 @@ var (
 	Ends      = []string{TypeEnd, TypeFail}
 )
 
+// NotYet are the cards this build offers for drafts but can't run yet (Available false): the worker's
+// call site for them is FB1c, which empties this list. Publish refuses a workflow that uses one.
+var NotYet = map[string]bool{TypeSetVariable: true, TypeNote: true, TypeFail: true}
+
 // IsQuestion, IsAction and IsEnd say what kind of step a type is.
 func IsQuestion(typ string) bool { return slices.Contains(Questions, typ) }
 func IsAction(typ string) bool   { return slices.Contains(Actions, typ) }
@@ -180,7 +184,7 @@ func Definitions() []StepDefinition {
 	}
 	builtin := map[string]string{"kind": "builtin"}
 	def := func(d StepDefinition) StepDefinition {
-		d.TypeVersion, d.FileTypes, d.Source, d.Available = 1, []string{"video"}, builtin, true
+		d.TypeVersion, d.FileTypes, d.Source, d.Available = 1, []string{"video"}, builtin, !NotYet[d.Type]
 		if d.Requires == nil {
 			d.Requires = []string{}
 		}

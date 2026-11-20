@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/vars"
 )
 
 // Branches (V6a; slices/v2-engine/v6-plan.md). A workflow with "Check the file" steps (filter.video)
@@ -171,9 +172,13 @@ func (q Question) Ask(info media.Info, f Facts) (bool, string) {
 			ok = strings.HasSuffix(have, want)
 		case "glob":
 			ok, _ = filepath.Match(want, have)
-		case "regex":
-			if re, err := regexp.Compile(want); err == nil {
-				ok = re.MatchString(have)
+		case "regex": // the pattern keeps its case: lowering it would turn \S into \s (review2-531 P2)
+			pat := q.Pattern
+			if !q.CaseSensitive {
+				pat = "(?i)" + pat
+			}
+			if re, err := regexp.Compile(pat); err == nil {
+				ok = re.MatchString(subject)
 			}
 		default:
 			ok = strings.Contains(have, want)
@@ -205,6 +210,8 @@ func (q Question) Ask(info media.Info, f Facts) (bool, string) {
 			return q.Op == "unset", "{{" + q.Variable + "}} has no value"
 		}
 		says := "{{" + q.Variable + "}} is " + strconv.Quote(v)
+		want, _ := vars.Resolve(q.Value, f.Vars) // the value may name variables ({{library}}); review2-531 P2
+		q.Value = want
 		switch q.Op {
 		case "set":
 			return true, says

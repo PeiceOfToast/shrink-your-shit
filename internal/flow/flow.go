@@ -88,8 +88,8 @@ func nameOf(c rules.Card) string {
 
 func quote(s string) string {
 	s = strings.TrimSpace(s)
-	if len(s) > 120 {
-		s = s[:117] + "..."
+	if r := []rune(s); len(r) > 120 {
+		s = string(r[:117]) + "..."
 	}
 	return "“" + s + "”"
 }

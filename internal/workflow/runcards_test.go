@@ -15,6 +15,15 @@ func node(typ, name string, config map[string]any) Node {
 	return Node{ID: NewID(), Type: typ, TypeVersion: 1, Name: name, Enabled: true, Config: config}
 }
 
+func byID(d Doc, id string) Node {
+	for _, n := range d.Nodes {
+		if n.ID == id {
+			return n
+		}
+	}
+	return Node{}
+}
+
 func link(from, port string, to string) Edge {
 	return Edge{ID: NewID(), From: from, FromPort: port, To: to, ToPort: "in"}
 }
@@ -39,8 +48,10 @@ func runDoc() (Doc, map[string]Node) {
 func TestRunCardsCompile(t *testing.T) {
 	d, by := runDoc()
 	r := Validate(d)
-	if r.Errors() {
-		t.Fatalf("%+v", r.Issues)
+	for _, i := range r.Issues { // until FB1c the three cards are not_runnable_yet; nothing else may be wrong
+		if i.Code != "not_runnable_yet" || !NotYet[byID(d, i.NodeID).Type] {
+			t.Errorf("%+v", i)
+		}
 	}
 	tm, issues := ToTemplate(d, rules.Template{})
 	if len(issues) > 0 || tm.Branches == nil || len(*tm.Branches) != 2 {
@@ -139,6 +150,38 @@ func TestRunCardsKeepTheirPhase(t *testing.T) {
 			t.Errorf("%+v", i)
 		}
 	}
+	// the compile answers with an issue too, and never recurses (review2-531 P1): a note, a new question kind and an
+	// end between Convert video and Audio each come back as branch_in_conversion
+	for _, typ := range []string{TypeNote, TypeCheckName, TypeFail, TypeSetVariable} {
+		d := FromTemplate(rules.SliderTemplate(3), nil)
+		var conv, audio Node
+		for _, n := range d.Nodes {
+			switch n.Type {
+			case TypeConvert:
+				conv = n
+			case TypeAudio:
+				audio = n
+			}
+		}
+		mid := node(typ, "", map[string]any{"text": "x", "pattern": "x", "name": "v"})
+		d.Nodes = append(d.Nodes, mid)
+		for i := range d.Edges {
+			if d.Edges[i].From == conv.ID {
+				d.Edges[i].To = mid.ID
+			}
+		}
+		port := "success"
+		if IsQuestion(mid.Type) {
+			port = "match"
+		}
+		if !IsEnd(mid.Type) {
+			d.Edges = append(d.Edges, link(mid.ID, port, audio.ID))
+		}
+		_, issues := ToTemplate(d, rules.Template{}) // the draft shape the workflow list compiles (v2workflows workflowViewWith)
+		if !slices.ContainsFunc(issues, func(i Issue) bool { return i.Code == "branch_in_conversion" && i.NodeID == mid.ID }) {
+			t.Errorf("%s inside the conversion: %+v", typ, issues)
+		}
+	}
 	// a fail end on the conversion's error port is fine: the failure policy says stop
 	d2, conv2 := errorDoc([]Node{node(TypeFail, "", nil)})
 	tm, issues := ToTemplate(d2, rules.Template{})
@@ -154,8 +197,10 @@ func TestPublishedVariables(t *testing.T) {
 	if !slices.Contains(PublishedNames(d), "profile") {
 		t.Errorf("published: %v", PublishedNames(d))
 	}
-	if r := Validate(d); r.Errors() { // the note reads {{profile}}: known because the step before sets it
-		t.Fatalf("%+v", r.Issues)
+	for _, i := range Validate(d).Issues { // the note reads {{profile}}: known because the step before sets it
+		if i.Code == "unknown_variable" {
+			t.Fatalf("%+v", i)
+		}
 	}
 	ask := node(TypeCheckVariable, "", map[string]any{"variable": "profile", "op": "equals", "value": "remux"})
 	d.Nodes = append(d.Nodes, ask)
@@ -188,6 +233,22 @@ func TestPublishedVariables(t *testing.T) {
 	issues = CheckPublished(d)
 	if !slices.ContainsFunc(issues, func(i Issue) bool { return i.Code == "invalid_variable_name" }) {
 		t.Errorf("bad name: %+v", issues)
+	}
+}
+
+// A regular expression that can't be read is refused while editing (review2-531 P3).
+func TestBadRegexIsRefused(t *testing.T) {
+	d, by := runDoc()
+	for i := range d.Nodes {
+		if d.Nodes[i].ID == by["q"].ID {
+			d.Nodes[i].Config = map[string]any{"pattern": "(", "match": "regex"}
+		}
+	}
+	r := Validate(d)
+	if !slices.ContainsFunc(r.Issues, func(i Issue) bool {
+		return i.Code == "invalid_config" && i.NodeID == by["q"].ID && i.Field == "pattern"
+	}) {
+		t.Errorf("%+v", r.Issues)
 	}
 }
 
