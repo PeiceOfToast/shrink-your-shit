@@ -13,10 +13,11 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/sysload"
 )
 
-// gpuPercent is this computer's GPU use for the overview's workers: NVIDIA only, read from nvidia-smi
-// when it is on PATH (the busiest GPU's utilization). Anything else, or no nvidia-smi, is nil (not
-// measured). The command runs at most once every five seconds: the overview is fetched on each event.
-// The lock covers only the cache: the command runs without it, so a slow read never holds up others.
+// gpuPercent is this computer's GPU use for the overview's workers: the busiest GPU across NVIDIA
+// (nvidia-smi when it is on PATH), AMD (gpu_busy_percent) and Intel (the i915 engine counters). Nothing
+// readable is nil (not measured). The readings run at most once every five seconds: the overview is
+// fetched on each event. The lock covers only the cache: the readings run without it, so a slow read
+// never holds up others.
 func gpuPercent(now time.Time) *float64 {
 	gpuUse.mu.Lock()
 	if gpuUse.ok && now.Sub(gpuUse.at) < 5*time.Second {
@@ -25,7 +26,7 @@ func gpuPercent(now time.Time) *float64 {
 		return v
 	}
 	gpuUse.mu.Unlock()
-	v := readNvidiaSMI()
+	v := busiest(readNvidiaSMI(), readOtherGPUs())
 	gpuUse.mu.Lock()
 	gpuUse.val, gpuUse.at, gpuUse.ok = v, now, true
 	gpuUse.mu.Unlock()
@@ -40,8 +41,22 @@ var gpuUse struct {
 	ok  bool
 }
 
-// readNvidiaSMI is the reading gpuPercent caches; tests replace it.
+// readNvidiaSMI is the NVIDIA reading gpuPercent caches; tests replace it.
 var readNvidiaSMI = func() *float64 { return queryNvidiaSMI(2 * time.Second) }
+
+// readOtherGPUs is the AMD and Intel reading gpuPercent caches; tests replace it.
+var readOtherGPUs = func() *float64 { return busiest(readAMDGPU(drmDir), readIntelGPU(i915PMUDir)) }
+
+// busiest is the largest of the readings that exist, or nil when none does.
+func busiest(vs ...*float64) *float64 {
+	var best *float64
+	for _, v := range vs {
+		if v != nil && (best == nil || *v > *best) {
+			best = v
+		}
+	}
+	return best
+}
 
 // queryNvidiaSMI runs nvidia-smi and reads the busiest GPU. A command that takes longer than timeout is
 // stopped and reads as nil (not measured), so a wedged driver cannot hang the overview.
