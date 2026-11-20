@@ -1,7 +1,7 @@
 // V6 Jobs on the real /api/v2/jobs (#113), or the sample jobs with ?mock=1 (mock/jobs.ts).
 import { call, failed, MOCK, type Answer } from "./api";
 import { mockAction, mockJob, mockJobs, mockJobLog, mockConvertAgain } from "./mock/jobs";
-import type { ActionResult, JobAction, JobDetail, JobItem, JobsPage, Probe, Tab, Pin } from "./types/jobs";
+import type { ActionResult, JobAction, JobDetail, JobItem, JobsPage, Tab, Pin } from "./types/jobs";
 
 // kept (G5): only the Done rows whose original is still kept; left: the Done rows whose original is still beside or in place.
 // The server answers 400 on any other tab, and kept=1 with left=1 together, so both are sent on Done only and the page sends one at most
@@ -28,7 +28,10 @@ export async function findSkip(jobId: string): Promise<Answer<JobsPage>> {
 // E: the job's log by step (GET /log, a finished job's full record; /log/stream stays for running jobs)
 // the finished job's log (GET /log, contract v2): a step's extra fields, and the start, variables and summary, which a job
 // from before full logs doesn't have (absent, not null)
-export interface LogStep { name: string; startedAt: string | null; tookMs: number | null; outcome: string; command: string | null; probe: Probe | null; check: { score: number; min: number | null; passed: boolean | null } | null; outputLines: number; output: string | string[]; result: string | null; found?: string[]; // found: the step's check lines (stream 'check'), absent from older servers
+// a step's probe: the summary the worker stores (worker probeSummary, internal/worker/job_probe.go). Every key is always sent;
+// the zero values stand for no video stream.
+export interface LogProbe { codec: string; width: number; height: number; frameRate: number; bitDepth: number; hdr: boolean; bitrateKbps: number; durationSec: number; audioTracks: number; subtitleTracks: number }
+export interface LogStep { name: string; startedAt: string | null; tookMs: number | null; outcome: string; command: string | null; probe: LogProbe | null; check: { score: number; min: number | null; passed: boolean | null } | null; outputLines: number; output: string | string[]; result: string | null; found?: string[]; // found: the step's check lines (stream 'check'), absent from older servers
   decision?: string | null; reason?: string | null; path?: string; warnings?: string[]; errors?: string[]; set?: { name: string; value?: string }[]; // set: a secret has no value
   speedX?: number | null; avgKbps?: number | null; moves?: { action: string; from: string; to: string; ok: boolean; error?: string | null }[] }
 // the server does not send appVersion yet (v2joblog.go): a missing one is hidden

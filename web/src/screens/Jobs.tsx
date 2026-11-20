@@ -6,7 +6,7 @@ import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, clockS, count, elapsed, plural, stepTime } from "../format";
-import { type LogLine, convertDoneAgain, fileJobs, findSkip, getJob, getJobLog, jobAction, listJobs, listKept, restoreKept, type JobLog, type LogStep, type LogVariable } from "../jobsApi";
+import { type LogLine, type LogProbe, convertDoneAgain, fileJobs, findSkip, getJob, getJobLog, jobAction, listJobs, listKept, restoreKept, type JobLog, type LogStep, type LogVariable } from "../jobsApi";
 import { getWorkflow } from "../workflowApi";
 import { getHealth, getSettings } from "../libraryApi";
 import { onLive } from "../live";
@@ -331,14 +331,10 @@ const stepText = (st: LogStep) => [st.name, st.decision, st.reason, st.command, 
 const plural1 = (n: number, one: string, many: string) => n + " " + (n === 1 ? one : many);
 const val = (s?: string) => (s ? s : "—");
 const MOVE: Record<string, string> = { move: "Moved", copy: "Copied", chmod: "Changed the permissions of", chown: "Changed the owner of", remove: "Removed", write_sidecar: "Wrote" };
-// the probe summary V6b uses, as one line: "H.264 · 1920×1080 · 23.976 fps · 2 audio · 1:48:12 · 4.0 GB"
-function sourceLine(pr: Probe) {
-  const v = pr.streams?.find((x) => x.type === "video"), n = (t: string) => (pr.streams ?? []).filter((x) => x.type === t).length;
-  const hdr = v?.dolbyVision ? "Dolby Vision" : v?.colorTransfer === "smpte2084" ? "HDR10" : v?.colorTransfer === "arib-std-b67" ? "HLG" : "";
-  return [pr.videoCodec?.toUpperCase().replace("H264", "H.264"), v?.Width && v.Height ? v.Width + "×" + v.Height : "", v?.frameRate ? +v.frameRate.toFixed(3) + " fps" : "", [v?.bitDepth ? v.bitDepth + "-bit" : "", hdr].filter(Boolean).join(" "), n("audio") && n("audio") + " audio", n("subtitle") && n("subtitle") + " subtitles", pr.durationSec ? elapsed(pr.durationSec) : "", pr.sizeBytes ? bytes(pr.sizeBytes) : ""].filter(Boolean).join(" · ");
+// the probe summary, as one line from the keys the worker stores: "H.264 · 1920×1080 · 23.976 fps · 8-bit HDR · 2 audio · 1 subtitles · 1:48:12"
+function sourceLine(pr: LogProbe) {
+  return [pr.codec ? pr.codec.toUpperCase().replace("H264", "H.264") : "", pr.width && pr.height ? pr.width + "×" + pr.height : "", pr.frameRate ? +pr.frameRate.toFixed(3) + " fps" : "", [pr.bitDepth ? pr.bitDepth + "-bit" : "", pr.hdr ? "HDR" : ""].filter(Boolean).join(" "), pr.audioTracks ? pr.audioTracks + " audio" : "", pr.subtitleTracks ? pr.subtitleTracks + " subtitles" : "", pr.durationSec ? elapsed(pr.durationSec) : ""].filter(Boolean).join(" · ");
 }
-// every stream on its own line: "Audio 1 · eng · aac · 2 ch"
-const streamLines = (pr: Probe) => (pr.streams ?? []).map((x, j, all) => [x.type.charAt(0).toUpperCase() + x.type.slice(1) + " " + all.slice(0, j + 1).filter((y) => y.type === x.type).length, x.language ?? "—", x.codec, x.channels ? x.channels + " ch" : ""].filter(Boolean).join(" · "));
 // a variable's value: "Hidden" for a secret; one value when nothing changed it; else the start, the end and the step that set it
 function varValue(v: LogVariable) {
   if (v.secret) return <span className="muted">Hidden</span>;
@@ -409,9 +405,9 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
           <dd className="sm" style={{ flex: "1 1 200px", minWidth: 0, margin: 0 }}>{varValue(v)}</dd></dl>)}</> });
     const srcL = errOnly ? inputL.filter(nonInfo) : inputL;
     // a sectioned job's input lines already list the file and each stream, so the probe block shows only without them
-    const srcHits = q ? countIn([...(pr && !inputL.length && !errOnly ? [sourceLine(pr), ...streamLines(pr)] : []), ...srcL.map((y) => y.text)].join("\n").toLowerCase(), q) : 0;
+    const srcHits = q ? countIn([...(pr && !inputL.length && !errOnly ? [sourceLine(pr)] : []), ...srcL.map((y) => y.text)].join("\n").toLowerCase(), q) : 0;
     if (pr || inputL.length) raw.push({ key: "source", title: "Source file", head: lvlPills(inputL), hits: srcHits, dflt: false, show: (!errOnly || inputL.some(nonInfo)) && (!q || srcHits > 0),
-      body: errOnly ? linesBlock(srcL, id) : <>{pr && !inputL.length && <><p className="sm">{sourceLine(pr)}</p>{streamLines(pr).map((x, j) => <p className="sm" key={j}>{x}</p>)}</>}{linesBlock(inputL, id)}</> });
+      body: errOnly ? linesBlock(srcL, id) : <>{pr && !inputL.length && <p className="sm">{sourceLine(pr)}</p>}{linesBlock(inputL, id)}</> });
   }
   // a workflow step's section: its row sits between Source file and the encode rows, as the log reads
   stepSecs.forEach((x, k) => {
