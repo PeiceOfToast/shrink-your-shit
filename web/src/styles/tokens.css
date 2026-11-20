@@ -115,7 +115,6 @@
   --motion: 150ms;
 }
 :root[data-density="compact"] { --row-h: 44px; --list-row-h: 48px; --pad: 12px; --gap: 8px; }
-@media (min-width: 1100px) { :root { --page-pad: var(--s6); } }
 @media (prefers-reduced-motion: reduce) { :root { --motion: 0ms; } }
 :root[data-motion="reduced"] { --motion: 0ms; }
 
