@@ -1,0 +1,56 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Workflow editor mockup</title><link rel="stylesheet" href="mock.css">
+<style>.edtool{height:48px;display:flex;align-items:center;gap:var(--s2);padding:0 var(--s4);border-bottom:1px solid var(--border);background:var(--surface)}
+.edtool .nm{font-weight:var(--fw-strong);font-size:var(--fs-lg)}.edtool .vr{width:1px;height:24px;background:var(--border);margin:0 6px}.edtool .mid{margin:0 auto;display:flex;gap:4px}
+.steps{display:flex;flex-direction:column;gap:var(--s2);max-width:960px}
+.srow{display:grid;grid-template-columns:40px minmax(0,1fr) auto 24px;gap:var(--s3);align-items:center;min-height:var(--row-h);padding:8px var(--s4);background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)}
+.srow .tile{width:40px;height:40px;border-radius:8px;background:var(--raised);display:grid;place-items:center;font-weight:var(--fw-strong);color:var(--accent-text)}
+.srow .nm{font-weight:var(--fw-strong)}.srow .sum{color:var(--text-2)}.srow .lock{color:var(--text-2);font-size:var(--fs-sm)}.srow .chev{color:var(--text-2);font-size:20px;text-align:right}
+.frame{display:grid;grid-template-columns:240px minmax(0,1fr) 320px;height:520px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--surface)}
+.pal{border-right:1px solid var(--border);padding:12px;display:flex;flex-direction:column;gap:8px;font-size:var(--fs-sm)}.pal .find{margin:0;width:100%;height:32px}.pal h4{margin:6px 0 0;font-size:var(--fs-sm);color:var(--text-2);font-weight:var(--fw-strong)}
+.pal .it{display:flex;gap:8px;padding:8px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:var(--radius-sm);background:var(--bg)}
+.canvas{position:relative;background-color:var(--bg);background-image:radial-gradient(var(--border-strong) 1px,transparent 1px);background-size:20px 20px}
+.gn{position:absolute;width:200px;background:var(--surface);border:1px solid var(--border-strong);border-radius:8px;font-size:var(--fs-sm);overflow:hidden}
+.gn .h{height:34px;display:flex;align-items:center;padding:0 10px;font-weight:var(--fw-strong);font-size:var(--fs);color:var(--text);background:var(--accent-soft);border-bottom:1px solid var(--border)}
+.gn.out .h{background:var(--ok-soft)}.gn.chk .h{background:var(--warn-soft)}
+.gn .s{padding:6px 10px;color:var(--text-2)}.gn .p{padding:0 10px 6px;text-align:right;color:var(--text-2)}
+.gz{position:absolute;left:10px;bottom:10px;display:flex;flex-direction:column;gap:4px}.gz span{width:32px;height:32px;border:1px solid var(--border-strong);border-radius:6px;background:var(--raised);display:grid;place-items:center}
+.mini{position:absolute;right:10px;bottom:10px;width:120px;height:72px;border:1px solid var(--border-strong);border-radius:6px;background:var(--surface);opacity:.9}
+.insp{border-left:1px solid var(--border);padding:16px;display:flex;flex-direction:column;gap:12px}.insp h3{font-size:15px}.field label{display:block;font-weight:var(--fw-strong);margin-bottom:4px}.field .in{height:36px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--bg);padding:0 10px;display:flex;align-items:center}.field .hint{color:var(--text-2);font-size:var(--fs-sm);margin-top:4px}
+svg.edges{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}</style></head><body>
+<div class="app">
+ <nav class="rail"><div class="brand"><span class="logo"></span>Shrink Your Shit</div>
+  <div class="nav"><a><span class="ic"></span>Dashboard</a><a><span class="ic"></span>Jobs</a><div class="gap"></div><a class="cur"><span class="ic"></span>Workflows</a><a><span class="ic"></span>Libraries</a><div class="gap"></div><a><span class="ic"></span>Workers</a><div class="gap"></div><a><span class="ic"></span>Settings</a></div></nav>
+ <div class="main">
+  <div class="topbar"><div class="search">Search or jump to… <span class="k">Ctrl K</span></div><span class="iconbtn"></span></div>
+  <div class="edtool"><span class="note">Workflows /</span><span class="nm">Shrink videos</span><span class="pill">Published · v4</span><span class="pill ok">Check: no problems</span><div class="mid"><span class="segs"><span class="on">Steps</span><span>Graph</span><span>Variables</span></span><span class="vr"></span><button class="btn ghost">↶</button><button class="btn ghost">↷</button></div><button class="btn ghost">Rename</button><button class="btn ghost">Check</button><button class="btn">Save draft</button><button class="btn primary">Publish</button></div>
+  <div class="content">
+   <h2 style="font-size:var(--fs-lg)">Steps view (the default)</h2>
+   <div class="steps">
+    <div class="srow"><span class="tile">1</span><div><span class="nm">Library files</span> <span class="sum">Every video in the libraries that use this workflow</span></div><span class="lock">Always on</span><span class="chev">›</span></div>
+    <div class="srow"><span class="tile">2</span><div><span class="nm">Leave some files alone</span> <span class="sum">Skips Dolby Vision files, files already in this format, and AV1 or VP9 videos</span></div><span class="lock">Always on</span><span class="chev">›</span></div>
+    <div class="srow" style="outline:2px solid var(--accent);outline-offset:-2px"><span class="tile">3</span><div><span class="nm">Convert video</span> <span class="sum">HEVC · Balanced quality · same resolution</span></div><span class="lock">Always on</span><span class="chev">⌄</span></div>
+    <div class="srow"><span class="tile">4</span><div><span class="nm">Audio</span> <span class="sum">Stereo AAC, in your languages</span></div><span class="switch"><i></i></span><span class="chev">›</span></div>
+    <div class="srow"><span class="tile">5</span><div><span class="nm">Subtitles</span> <span class="sum">Keep all</span></div><span class="switch"><i></i></span><span class="chev">›</span></div>
+    <div class="srow"><span class="tile">7</span><div><span class="nm">Check the result</span> <span class="sum">The new file must play through, look like the original and hold what you chose</span></div><span class="lock">Always on</span><span class="chev">›</span></div>
+    <div class="srow"><span class="tile">8</span><div><span class="nm">Save the result</span> <span class="sum">Replace the original (kept for a while, then deleted)</span></div><span class="lock">Always on</span><span class="chev">›</span></div>
+   </div>
+
+   <h2 style="font-size:var(--fs-lg)">Graph view: one frame, canvas fills it (sketch)</h2>
+   <div class="frame">
+    <div class="pal"><div class="find">Search steps</div><h4>Files</h4><div class="it">Library files</div><div class="it">Leave some files alone</div><h4>Convert</h4><div class="it">Convert video</div><div class="it">Audio</div><div class="it">Subtitles</div><h4>Finish</h4><div class="it">Check the result</div><div class="it">Save the result</div></div>
+    <div class="canvas">
+     <svg class="edges"><g stroke="var(--text-2)" stroke-width="2" fill="none"><path d="M240,78 L240,120"/><path d="M240,180 L240,222"/><path d="M240,282 L240,324"/><path d="M340,354 L440,354 L440,120"/><path d="M340,354 C420,354 420,460 440,460" stroke="var(--error)" stroke-dasharray="5 4"/></g></svg>
+     <div class="gn" style="left:140px;top:20px"><div class="h">Library files</div><div class="s">Every video in the libraries</div><div class="p">next ●</div></div>
+     <div class="gn" style="left:140px;top:122px"><div class="h">Leave some files alone</div><div class="s">Dolby Vision, AV1, VP9</div><div class="p">convert ●</div></div>
+     <div class="gn" style="left:140px;top:224px"><div class="h">Convert video</div><div class="s">HEVC · Balanced</div><div class="p">done ●</div></div>
+     <div class="gn chk" style="left:140px;top:326px"><div class="h">Check the result</div><div class="s">plays through · looks right</div><div class="p">passed ●</div><div class="p" style="color:var(--error-text)">failed ●</div></div>
+     <div class="gn out" style="left:440px;top:90px"><div class="h">Save the result</div><div class="s">Replace the original</div></div>
+     <div class="gn" style="left:440px;top:430px;border-color:var(--error)"><div class="h" style="background:var(--bad-soft)">Keep the original</div><div class="s">the job is marked failed</div></div>
+     <div class="gz"><span>+</span><span>−</span><span>⤢</span></div><div class="mini"></div>
+    </div>
+    <div class="insp"><h3>Convert video</h3><div class="field"><label>Format</label><div class="in">HEVC</div><div class="hint">Smaller files; plays on most devices made after 2015.</div></div><div class="field"><label>Quality</label><div class="in">Balanced</div><div class="hint">Resolves to CRF 22 on the processor, 24 on a graphics card.</div></div><div class="field"><label>Resolution</label><div class="in">Same as the original</div></div><p class="note">The settings panel sits inside the editor frame; on a phone it is a full-height sheet.</p></div>
+   </div>
+  </div>
+  <p class="cap">Mockup for ui-review.md C10: a 48 px editor toolbar (name and status left, view switch and undo in the middle, Check · Save draft · Publish right, one primary); step rows with number tiles; the graph as one frame with palette, canvas and settings inside it. Sample data invented.</p>
+ </div>
+</div></body></html>
