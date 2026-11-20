@@ -342,7 +342,7 @@
       "Every subtitle track is kept as it is.",
       "Keeps subtitles in your languages (Settings > General) and those with no language set; the others are left out, even if none match.",
       "Picture subtitles are left out. Text subtitles are kept.",
-      "Text subtitles are saved next to the new file as .srt files instead of inside it; picture subtitles stay inside the file."
+      "Subtitles in your languages (Settings > General) are saved next to the new file as .srt files; other languages, and picture subtitles, stay inside the file."
      ],
      "x-enumLabels": [
       "Keep all",
