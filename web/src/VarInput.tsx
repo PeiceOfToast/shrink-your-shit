@@ -7,37 +7,30 @@ import { createContext, useContext, useEffect, useId, useRef, useState, type Cha
 import { Icon } from "./Icon";
 import { useData } from "./useData";
 import { getVariables } from "./workflowApi";
-import type { TemplateVar, VarList } from "./mock/variables";
+import { allowedIn, closest, type TemplateVar, type VarList } from "./mock/variables";
 import type { Variable } from "./types/v2";
 import "./styles/varpicker.css";
 
 const TOKEN = /\{\{([^{}]*)\}\}/g;
 const phone = () => typeof matchMedia === "function" && matchMedia("(max-width:640px)").matches;
 
-// The closest name, when one is within two edits of the typed one (for "Did you mean").
-function closest(name: string, names: string[]): string | undefined {
-  const dist = (a: string, b: string) => {
-    let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
-    for (let i = 1; i <= a.length; i++) {
-      const cur = [i];
-      for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-      prev = cur;
-    }
-    return prev[b.length];
-  };
-  let best: string | undefined, bestD = 3;
-  for (const n of names) { const d = dist(name, n); if (d < bestD) { bestD = d; best = n; } }
-  return best;
-}
-
 // The example, the empty-value notes and the errors for one value. Unknown names stay as typed in the example.
+// A name counts only in the fields it is allowed in (sub_lang, in srtName only): anywhere else it is unknown, as on the server.
 // Until the list has loaded (or when it failed) vars is null: names are not checked, only an unclosed {{ is.
-function analyse(value: string, vars: TemplateVar[] | null) {
-  const list = vars ?? [], byName = new Map(list.map((v) => [v.name, v] as const)), names = list.map((v) => v.name);
+function analyse(value: string, vars: TemplateVar[] | null, field: string) {
+  const list = (vars ?? []).filter((v) => allowedIn(v, field)), byName = new Map(list.map((v) => [v.name, v] as const)), names = list.map((v) => v.name);
   const errors: string[] = [], unknown: string[] = [], empty = new Set<string>();
   const example = value.replace(TOKEN, (all, raw: string) => {
     const name = raw.trim(), v = byName.get(name);
-    if (!v) { if (!vars) return all; unknown.push(name); const sug = closest(name, names); errors.push(`{{${name}}} isn't a variable.` + (sug ? ` Did you mean {{${sug}}}?` : "")); return all; }
+    if (!v) {
+      if (!vars) return all;
+      unknown.push(name);
+      const known = vars.find((x) => x.name === name), sug = closest(name, names);
+      errors.push(known?.secret ? `{{${name}}} is a secret, and a secret can't go in a file name, folder or title.`
+        : known ? `{{${name}}} isn't a variable for this field.`
+        : `{{${name}}} isn't a variable.` + (sug ? ` Did you mean {{${sug}}}?` : ""));
+      return all;
+    }
     if (v.value == null || v.value === "") { empty.add(name); return ""; }
     return v.value;
   });
@@ -59,7 +52,7 @@ export function varProblems(nodes: { id: string; type: string; config?: Record<s
     const props = (defs.find((d) => d.type === n.type)?.configSchema.properties ?? {}) as Record<string, { "x-variables"?: unknown; title?: unknown }>;
     for (const [k, s] of Object.entries(props)) {
       if (s["x-variables"] !== true) continue;
-      const a = analyse(String(n.config?.[k] ?? ""), vars), first = a.errors[0];
+      const a = analyse(String(n.config?.[k] ?? ""), vars, k), first = a.errors[0];
       // errors[0] is an unknown-name error whenever there is one (analyse pushes those before the brace check)
       if (first) out.push({ nodeId: n.id, field: k, title: (s.title as string) ?? k, code: a.unknown.length ? "unknown_variable" : "unclosed_brace", name: a.unknown[0] ?? "", error: first });
     }
@@ -68,16 +61,22 @@ export function varProblems(nodes: { id: string; type: string; config?: Record<s
 }
 
 // The workflow's own variables (its document's variables list). They come first in the picker, under "Your variables",
-// and join the Publish check. A name that is already a built-in keeps the built-in.
+// and join the Publish check. A name that is already a built-in keeps the built-in. A secret is listed but allowed in no
+// field (fields []): every {{name}} field makes a file name, folder or track title, and a secret never goes there.
 export const OwnVars = createContext<Variable[]>([]);
 const GROUP_LABEL: Record<string, string> = { Workflow: "Your variables" };
 // The built-ins are the server's list without the workflow's own variables: since #497 those come back in it too, group "Workflow".
 export const builtinsOf = (list: TemplateVar[]) => list.filter((v) => v.group !== "Workflow");
 export function withOwn(list: TemplateVar[], own: Variable[]): TemplateVar[] {
   const builtins = builtinsOf(list), names = new Set(builtins.map((v) => v.name));
-  const mine = own.filter((v) => !names.has(v.name)).map((v): TemplateVar => ({ name: v.name, description: v.description ?? "", group: "Workflow", value: v.value == null ? null : String(v.value), fields: null }));
+  const mine = own.filter((v) => !names.has(v.name)).map((v): TemplateVar => v.type === "secret"
+    ? { name: v.name, description: v.description ?? "", group: "Workflow", value: null, fields: [], secret: true }
+    : { name: v.name, description: v.description ?? "", group: "Workflow", value: v.value == null ? null : String(v.value), fields: null });
   return [...mine, ...builtins];
 }
+
+// "Use {{suggest}}" (W4b): every {{from}} in the field becomes {{to}}; the rest of the text stays as it is.
+export const renameIn = (text: string, from: string, to: string) => text.replace(new RegExp("\\{\\{\\s*" + from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\}\\}", "g"), "{{" + to + "}}");
 
 // The {{ being typed before the caret: where it starts and what follows it (names only, no spaces or braces).
 function typedAt(value: string, caret: number): { start: number; query: string } | null {
@@ -89,7 +88,7 @@ function typedAt(value: string, caret: number): { start: number; query: string }
 
 type Pick = { mode: "typed" | "button"; start: number; end: number; query: string; active: number };
 
-export function VarInput({ id, title, value, wf, set, description }: { id: string; title: string; value: string; wf: string; set: (v: string) => void; description?: string }) {
+export function VarInput({ id, title, value, wf, set, description, fieldKey }: { id: string; title: string; value: string; wf: string; set: (v: string) => void; description?: string; fieldKey: string }) {
   const list = useData<VarList>(() => getVariables(wf), [wf]).data;
   const own = useContext(OwnVars);
   const uid = useId(), descId = id + "-desc";
@@ -112,13 +111,13 @@ export function VarInput({ id, title, value, wf, set, description }: { id: strin
   }, [pick]);
 
   const vars = withOwn(list?.variables ?? [], own);
-  const a = analyse(value, list ? vars : null);
+  const a = analyse(value, list ? vars : null, fieldKey);
   const q = (pick?.query ?? "").toLowerCase();
   // groups keep their order (the first name of each group sets its place); within a group, "starts with" comes first
   const rank = new Map<string, number>();
   vars.forEach((v) => rank.has(v.group) || rank.set(v.group, rank.size));
   const items = vars
-    .filter((v) => !q || v.name.includes(q) || v.description.toLowerCase().includes(q))
+    .filter((v) => allowedIn(v, fieldKey) && (!q || v.name.includes(q) || v.description.toLowerCase().includes(q)))
     .sort((x, y) => rank.get(x.group)! - rank.get(y.group)! || Number(!x.name.startsWith(q)) - Number(!y.name.startsWith(q)));
   const active = pick ? Math.min(pick.active, Math.max(0, items.length - 1)) : 0;
   const optId = (i: number) => uid + "-o" + i;

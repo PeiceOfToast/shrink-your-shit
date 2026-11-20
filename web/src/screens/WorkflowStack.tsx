@@ -11,7 +11,7 @@ import { useData } from "../useData";
 import { getDraft, getLadder, getWorkflow, listTemplates, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
 import { Link, navigate, onLeave } from "../router";
 import { Browse } from "../FolderPicker";
-import { OwnVars, VarInput, builtinsOf, takesVars, varListFor, varProblems, withOwn } from "../VarInput";
+import { OwnVars, VarInput, builtinsOf, renameIn, takesVars, varListFor, varProblems, withOwn } from "../VarInput";
 import "../styles/variables.css";
 import { getSettings, listLibraries, shrunk } from "../libraryApi";
 import type { TemplateVar } from "../mock/variables";
@@ -88,7 +88,7 @@ function Field({ id, name, s, value, set, wf }: { id: string; name: string; s: J
       </div>{typeof s.description === "string" && <span className="hint">{s.description}</span>}</fieldset>);
   }
   // a text field that takes {{name}} variables (x-variables): the hint, the example and the picker
-  if (s["x-variables"] === true) return <VarInput id={fid} title={title} value={String(value ?? "")} wf={wf} set={(v) => set(v)} description={typeof s.description === "string" ? s.description : undefined} />;
+  if (s["x-variables"] === true) return <VarInput id={fid} title={title} value={String(value ?? "")} wf={wf} set={(v) => set(v)} fieldKey={name} description={typeof s.description === "string" ? s.description : undefined} />;
   const hint = typeof s.description === "string" ? <span className="hint" id={fid + "-h"}>{s.description}{s.type === "array" ? " One per line." : ""}</span> : null;
   if (s.type === "integer" || s.type === "number") // a number, saved as a number (empty: not set)
     return <div className="field"><label htmlFor={fid}>{title}</label><input id={fid} className="input" type="number" inputMode="decimal" min={s.minimum as number | undefined} step={s.type === "integer" ? 1 : "any"}
@@ -150,6 +150,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
     <div key={k} className={b.length ? "fieldbad" : undefined} data-field={k} aria-invalid={b.length ? true : undefined}>
       <Field id={n.id} name={k} s={sk} value={c[k] ?? sk.default} set={(v) => put(k, v)} wf={wf} />
       {b.map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
+      {b.filter((i) => typeof i.suggest === "string").map((i, x) => <button key={"s" + x} className="btn sm" type="button" onClick={() => put(k, renameIn(String(c[k] ?? ""), i.name ?? "", i.suggest as string))}>{"Use {{" + i.suggest + "}}"}</button>)}
     </div>); };
   // a problem in a field under 'More options' opens it by itself (review c0189fa P3), also when the problems list picks
   // this step; it isn't closed again when the last one is fixed, so the field doesn't vanish while it's being edited
@@ -232,6 +233,8 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
         {props.ifBigger && <fieldset className="field choice"><legend className="lab">{(props.ifBigger.title as string) ?? "If bigger"}</legend><div className="row">
           {labels(props.ifBigger).map(([v, l]) => <label key={String(v)} className="radio"><input type="radio" name={n.id + "-bigger"} checked={bigger === v} onChange={() => set("ifBigger", v)} /><span>{l}</span></label>)}
         </div><Hint text={hintFor(props.ifBigger, bigger)} /></fieldset>}
+        {/* W4b: the names take {{variables}} (x-variables); this branch returns before the generic field list, so list them here */}
+        {["outputName", "srtName", "trackTitle"].filter((k) => props[k]).map((k) => field(k))}
       </div>);
   }
   return (
@@ -412,10 +415,12 @@ function usedBy(nodes: Node[], defs: StepDefinition[]) {
 const NAME = /^[a-z][a-z0-9_]{0,39}$/;
 // The server's codes for a bad variable name (W4a, #497): shown on the variable's row, and a refused save names them.
 const VAR_CODES = ["invalid_variable_name", "builtin_variable_name", "duplicate_variable"];
+// W4b (#511): a field the server refused for a {{name}}: its codes open the step and mark the field (and "Use {{suggest}}").
+const FIELD_CODES = ["unknown_variable", "unclosed_variable"];
 const refusedWords = (is: ValidationIssue[]) => "Nothing was saved. Rename or remove " + [...new Set(is.map((i) => (i.name ? "{{" + i.name + "}}" : "the variable with no name")))].join(", ") + " in Variables, then save again.";
 
 function VariablesCard({ doc, defs, builtins, problems, nameIssues, edit, open }: { doc: WorkflowDoc; defs: StepDefinition[]; builtins: TemplateVar[]; problems: { nodeId: string; title: string; code: string; name: string; error: string }[]; nameIssues: ValidationIssue[]; edit: (d: WorkflowDoc, run?: string) => void; open: (nodeId: string) => void }) {
-  const [name, setName] = useState(""), [val, setVal] = useState(""), [what, setWhat] = useState(""), [err, setErr] = useState("");
+  const [name, setName] = useState(""), [val, setVal] = useState(""), [what, setWhat] = useState(""), [err, setErr] = useState(""), [secret, setSecret] = useState(false);
   const [shown, setShown] = useState(false); // closed by default; opens by itself when a field uses an unknown name or a variable name is refused
   const [editing, setEditing] = useState<number | null>(null); // the row whose description is open for editing (by index: a saved doc can repeat a name)
   const vars = doc.variables ?? [], used = usedBy(doc.nodes, defs), titleOf = (n: Node) => defs.find((d) => d.type === n.type)?.name ?? n.type;
@@ -430,8 +435,8 @@ function VariablesCard({ doc, defs, builtins, problems, nameIssues, edit, open }
       : vars.some((v) => v.name === n) ? `{{${n}}} already exists. Edit it instead.` : "";
     setErr(msg);
     if (msg) return;
-    setVars([...vars, { name: n, type: "string", value: val === "" ? undefined : val, description: what.trim() || undefined }]);
-    setName(""); setVal(""); setWhat("");
+    setVars([...vars, { name: n, type: secret ? "secret" : "string", value: val === "" ? undefined : val, description: what.trim() || undefined }]);
+    setName(""); setVal(""); setWhat(""); setSecret(false);
   };
   const remove = (n: string, at: number) => {
     const by = used.get(n) ?? [];
@@ -453,7 +458,7 @@ function VariablesCard({ doc, defs, builtins, problems, nameIssues, edit, open }
       <div className="hd"><h2 id="vars-h">Variables</h2><span className="muted sm">{used.size} used here · {vars.length} set here</span>
         <button className="btn sm ghost" type="button" aria-expanded={shown} aria-controls="vars-body" onClick={() => setShown(!shown)}>{shown ? "Hide" : "Show"}</button></div>
       <div id="vars-body" className="bd stack" hidden={!shown}>
-        {bad && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{unknown.length === 1 ? "1 field uses a name that isn't a variable" : unknown.length + " fields use a name that isn't a variable"}: {unknown.map((p, i) => <span key={i}>{i > 0 && ", "}<button className="linkbtn" type="button" onClick={() => openField(p.nodeId, p.name)}>{p.title}</button></span>)}</span></p>}
+        {bad && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{unknown.length === 1 ? "1 field uses a name it can't take" : unknown.length + " fields use a name they can't take"}: {unknown.map((p, i) => <span key={i}>{i > 0 && ", "}<button className="linkbtn" type="button" onClick={() => openField(p.nodeId, p.name)}>{p.title}</button></span>)}</span></p>}
         <p className="muted sm">Values set in Settings apply to every workflow. A value set here wins for this workflow. A value typed straight into a step wins over both.</p>
         {vars.length === 0 ? <p className="muted">No variables yet. Add one below, then use it in a field as {"{{name}}"}.</p>
           : <table className="tbl vars-tbl">
@@ -465,16 +470,24 @@ function VariablesCard({ doc, defs, builtins, problems, nameIssues, edit, open }
                   <th scope="row"><code>{"{{" + v.name + "}}"}</code>{nameIssues.filter((i) => (i.name ?? "") === v.name).map((i, k) => <span key={k} className="st bad" style={{ display: "flex", gap: 4 }}><Icon id="i-alert" /><span>{i.message}</span></span>)}{editing === i
                     ? <input className="input" autoFocus aria-label={"Description of {{" + v.name + "}}"} value={v.description ?? ""} onChange={(e) => setVars(vars.map((x, j) => (j === i ? { ...x, description: e.target.value } : x)), "desc:" + i)} />
                     : v.description && <span className="muted sm" style={{ display: "block" }}>{v.description}</span>}</th>
-                  <td data-label="Value"><input className="input" aria-label={"Value of {{" + v.name + "}}"} value={String(v.value ?? "")} onChange={(e) => setVars(vars.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)), "value:" + i)} /></td>
+                  {/* a secret's value is never sent back: a stored one shows as hidden, and an edit sends only the new string; an emptied box keeps the stored one (delete the variable to drop it) */}
+                  <td data-label="Value">{v.type === "secret"
+                    ? <input className="input" type="password" autoComplete="new-password" aria-label={"Value of {{" + v.name + "}}"} value={typeof v.value === "string" ? v.value : ""} placeholder={v.hasValue ? "Stored (hidden)" : "No value yet"} onChange={(e) => setVars(vars.map((x, j) => (j === i ? { ...x, value: e.target.value || undefined } : x)), "value:" + i)} />
+                    : <input className="input" aria-label={"Value of {{" + v.name + "}}"} value={String(v.value ?? "")} onChange={(e) => setVars(vars.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)), "value:" + i)} />}</td>
                   <td><span className="pill vars-pill-own">This workflow</span></td>
                   <td data-label="Used by">{by.length ? by.map((n, k) => <span key={n.id}>{k > 0 && ", "}<button className="linkbtn" type="button" onClick={() => openField(n.id, v.name)}>{titleOf(n)}</button></span>) : <span className="muted">Not used yet</span>}</td>
                   <td><button className="btn sm ghost" type="button" aria-expanded={editing === i} aria-label={"Edit {{" + v.name + "}} description"} onClick={() => setEditing(editing === i ? null : i)}>{editing === i ? "Done" : "Edit"}</button>{" "}<button className="btn sm ghost" type="button" aria-label={"Delete {{" + v.name + "}}"} onClick={() => remove(v.name, i)}>Delete</button></td>
                 </tr>);
             })}</tbody>
           </table>}
+        {(secret || vars.some((v) => v.type === "secret")) && <p className="muted sm" role="note">Secrets are stored encrypted on this computer. A backup opened on another computer needs them typed in again.</p>}
         <form className="row vars-add" onSubmit={add} noValidate aria-label="Add a variable">
           <div className="field"><label htmlFor="var-name">Name</label><input id="var-name" className="input" value={name} onChange={(e) => (setName(e.target.value), setErr(""))} aria-describedby={err ? "var-err" : undefined} /></div>
-          <div className="field"><label htmlFor="var-val">Value</label><input id="var-val" className="input" value={val} onChange={(e) => setVal(e.target.value)} /></div>
+          <fieldset className="field choice"><legend className="lab">Type</legend><div className="row">
+            <label className="radio"><input type="radio" name="var-type" checked={!secret} onChange={() => setSecret(false)} /><span>Text</span></label>
+            <label className="radio"><input type="radio" name="var-type" checked={secret} onChange={() => setSecret(true)} /><span>Secret</span></label>
+          </div></fieldset>
+          <div className="field"><label htmlFor="var-val">Value</label><input id="var-val" className="input" type={secret ? "password" : "text"} autoComplete={secret ? "new-password" : "off"} value={val} onChange={(e) => setVal(e.target.value)} /></div>
           <div className="field"><label htmlFor="var-what">What it's for (optional)</label><input id="var-what" className="input" value={what} onChange={(e) => setWhat(e.target.value)} /></div>
           <button className="btn" type="submit">Add variable</button>
           {err && <span id="var-err" className="st bad" role="alert"><Icon id="i-alert" /><span>{err}</span></span>}
@@ -493,6 +506,8 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
   const [panel, setPanel] = useState<PublishPreview | null>(null), [renaming, setRenaming] = useState(false);
   // the workflow's own variables the server refused on the last save (W4a): shown on their rows until the next edit
   const [refused, setRefused] = useState<ValidationIssue[]>([]);
+  // a {{name}} field the server refused (W4b): marked on its step, with "Use {{suggest}}" when the server names one
+  const [fieldRefused, setFieldRefused] = useState<ValidationIssue[]>([]);
   // W11 list side: the delete bar (Undo, 8 s), the add-step menu, and the button that opened it (focus goes back there)
   const [gone, setGone] = useState<{ text: string; at: number } | null>(null), [hold, setHold] = useState(false), [addOpen, setAddOpen] = useState(false);
   const opener = useRef<HTMLElement | null>(null);
@@ -528,7 +543,7 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
   // A run of typing in one variable's value (the same run key) writes into one history entry, so Undo takes back the whole run.
   const typing = useRef<{ run: string; at: number } | null>(null);
   const edit = (d: WorkflowDoc, run?: string) => {
-    setRefused([]);
+    setRefused([]); setFieldRefused([]);
     const t = typing.current;
     if (run && t && t.run === run && t.at === hist.at) setHist({ docs: hist.docs.map((x, i) => (i === hist.at ? d : x)), at: hist.at });
     else { typing.current = run ? { run, at: hist.at + 1 } : null; setHist({ docs: [...hist.docs.slice(0, hist.at + 1), d], at: hist.at + 1 }); }
@@ -576,23 +591,30 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
   };
   const openAdd = (e: { currentTarget: HTMLElement }) => { opener.current = e.currentTarget; setAddOpen(true); };
   const closeAdd = () => { setAddOpen(false); requestAnimationFrame(() => opener.current?.focus()); };
+  // A refused save or publish (the server's error carries its issues): a variable name shows on its row, and a {{name}}
+  // field is opened and marked. Returns the words to show, or null when the refusal is neither.
+  const takeRefusal = (err: { code: string; message: string; issues?: ValidationIssue[] }): string | null => {
+    const is = err.issues ?? [], names = is.filter((i) => VAR_CODES.includes(i.code)), fields = is.filter((i) => FIELD_CODES.includes(i.code));
+    if (names.length) setRefused(names);
+    if (fields.length) { setFieldRefused(fields); setOpen(fields[0].nodeId ?? null); }
+    return names.length ? refusedWords(names) : fields.length ? fields[0].message : null;
+  };
   const save = async () => {
+    const sent = doc;
     let r: Answer<WorkflowRevision>;
-    try { r = await saveDraft(id, doc, layout, etag); } catch (e) { if (e instanceof SignedOut) return null; throw e; }
-    if (failed(r)) {
-      // a refused variable name comes back as the error's issues (one per name), with nothing saved
-      const bad = ((r.error as { issues?: ValidationIssue[] }).issues ?? []).filter((i) => VAR_CODES.includes(i.code));
-      if (bad.length) { setRefused(bad); setSaid(refusedWords(bad)); } else setSaid(r.error.message);
-      return null;
-    }
-    setRefused([]);
-    setEtag(r.etag); setSaved(doc); setLive((l) => ({ ...l, issues: r.validation, stackable: r.stackable, stepSummaries: r.stepSummaries })); setSaid("Draft saved."); reloadMeta();
+    try { r = await saveDraft(id, sent, layout, etag); } catch (e) { if (e instanceof SignedOut) return null; throw e; }
+    if (failed(r)) { setSaid(takeRefusal(r.error) ?? r.error.message); return null; }
+    setRefused([]); setFieldRefused([]);
+    // the server's copy replaces the one sent (a secret's value is no longer in it, only hasValue), unless the page has moved on
+    setHist((h) => ({ docs: h.docs.map((x) => (x === sent ? r.workflow : x)), at: h.at }));
+    setEtag(r.etag); setSaved(r.workflow); setLive((l) => ({ ...l, issues: r.validation, stackable: r.stackable, stepSummaries: r.stepSummaries })); setSaid("Draft saved."); reloadMeta();
     return r;
   };
   const openPublish = async () => { if (dirty && !(await save())) return; const p = await act(publishPreview(id), setSaid); if (p) setPanel(p); };
   const doPublish = async () => {
-    const r = await act(publish(id, etag), setSaid);
-    if (!r) return;
+    let r: Answer<{ number: number }>;
+    try { r = await publish(id, etag); } catch (e) { if (e instanceof SignedOut) return; throw e; }
+    if (failed(r)) { setSaid(takeRefusal(r.error) ?? r.error.message); setPanel(null); return; }
     const d = await act(getDraft(id), setSaid);
     if (d) setEtag(d.etag);
     setSaved(doc); setPanel(null); setSaid("Published v" + r.number + "."); reloadMeta();
@@ -663,7 +685,7 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
           const p = live.stepPlaces?.[n.id], fixed = p ? p.fixedPlace : true;
           const mv: Move = { fixed, reason: p?.fixedReason, up: !fixed && i > 1 && i <= lastMovable, down: !fixed && i >= 1 && i < lastMovable, del: !fixed && i >= 1 && i <= lastMovable,
             act: (w) => (w === "del" ? deleteStep(n.id) : moveStep(n.id, w === "up" ? -1 : 1)) };
-          return <Step key={n.id} n={n} i={i} mv={mv} open={open === n.id} toggle={() => setOpen(open === n.id ? null : n.id)} update={update} issues={issues} />;
+          return <Step key={n.id} n={n} i={i} mv={mv} open={open === n.id} toggle={() => setOpen(open === n.id ? null : n.id)} update={update} issues={[...issues, ...fieldRefused]} />;
         })}</ol>
         {!only && <button className="btn sm ghost" type="button" onClick={openAdd}><Icon id="i-plus" />Add step</button>}
         {addOpen && <AddStepMenu wf={id} doc={doc} defs={defs} adds={live.addSteps} onAdd={addStep} onClose={closeAdd} />}
