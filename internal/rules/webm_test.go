@@ -42,6 +42,28 @@ func TestWebMSubtitles(t *testing.T) {
 		t.Errorf("expected the one webvtt subtitle to be checked: %+v", subs)
 	}
 
+	t.Run("mov_text is converted too", func(t *testing.T) {
+		// an MP4's subtitles are mov_text; copied into a WebM they failed at ffmpeg's header
+		info := probe("h264", 1280, 720, 25, 5000,
+			media.Stream{Index: 2, Type: "subtitle", Codec: "mov_text", Language: "eng", SubKind: "text"})
+		p := webm().Compile(info)
+		if p.Skip != "" {
+			t.Fatalf("WebM with a mov_text subtitle: %q", p.Skip)
+		}
+		if args := strings.Join(p.FFmpegArgs("a.mp4", "b.webm"), " "); !strings.Contains(args, "-c:s:0 webvtt") {
+			t.Errorf("the mov_text subtitle is not converted to webvtt: %s", args)
+		}
+		var subs []StreamExpect
+		for _, x := range p.Expect(info, 0).Streams {
+			if x.Type == "subtitle" {
+				subs = append(subs, x)
+			}
+		}
+		if len(subs) != 1 || subs[0].Codec != "webvtt" || !subs[0].CheckDefault {
+			t.Errorf("expected the one webvtt subtitle to be checked: %+v", subs)
+		}
+	})
+
 	t.Run("a webvtt subtitle is copied as it is", func(t *testing.T) {
 		info := probe("h264", 1280, 720, 25, 5000,
 			media.Stream{Index: 2, Type: "subtitle", Codec: "webvtt", Language: "eng", SubKind: "text"})

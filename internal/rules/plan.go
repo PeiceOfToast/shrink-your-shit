@@ -1178,11 +1178,12 @@ func textToMovText(ops []TrackOp, container string, info media.Info) (out []Trac
 	return out
 }
 
-// textToWebVTT converts the text subtitles a WebM cannot hold as they are (SRT, ASS) into its own
-// (webvtt), the same way textToMovText does for MP4, instead of the job failing when ffmpeg writes the
-// new file's header (user bug 11-20: WebM with SRT subtitles). A webvtt subtitle is copied as it is:
-// WebM holds it already. ASS loses its styling, as it does in MP4. Only tracks no other op drops, saves
-// as a file or converts.
+// textToWebVTT converts the text subtitles a WebM cannot hold as they are into its own (webvtt), the
+// same way textToMovText does for MP4, instead of the job failing when ffmpeg writes the new file's
+// header (user bug 11-20: WebM with SRT subtitles; then mov_text, the codec an MP4 holds, which a
+// hand-written name list missed). The kind is media's, so every codec ffmpeg reads as text is covered.
+// A webvtt subtitle is copied as it is: WebM holds it already. ASS loses its styling, as it does in
+// MP4. Only tracks no other op drops, saves as a file or converts.
 func textToWebVTT(ops []TrackOp, container string, info media.Info) (out []TrackOp) {
 	if container != "webm" {
 		return nil
@@ -1191,9 +1192,8 @@ func textToWebVTT(ops []TrackOp, container string, info media.Info) (out []Track
 	for _, o := range ops {
 		has[o.Index] = true
 	}
-	text := map[string]bool{"subrip": true, "srt": true, "ass": true, "ssa": true, "text": true}
 	for _, s := range info.Subtitles() {
-		if text[s.Codec] && !has[s.Index] {
+		if s.SubKind == "text" && s.Codec != "webvtt" && !has[s.Index] {
 			out = append(out, TrackOp{Index: s.Index, Type: "subtitle", Encoder: "webvtt", Codec: "webvtt"})
 		}
 	}

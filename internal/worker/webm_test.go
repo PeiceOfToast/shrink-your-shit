@@ -60,6 +60,47 @@ func TestRealWebMKeepsTextSubtitles(t *testing.T) {
 	}
 }
 
+// An MP4's subtitles are mov_text, and that is the common shape of the user's bug: a hand-written list
+// of subtitle codecs missed it, so it was copied into the WebM and the job died at ffmpeg's header.
+// Now it is converted like any other text subtitle.
+func TestRealWebMMovTextBecomesWebVTT(t *testing.T) {
+	needTools(t)
+	rules.SetAvailableFormats(map[string]bool{"libx265": true, "libvpx-vp9": true})
+	defer rules.SetAvailableFormats(nil)
+	dir := t.TempDir()
+	srt := filepath.Join(dir, "s.srt")
+	if err := os.WriteFile(srt, []byte("1\n00:00:00,500 --> 00:00:02,000\nHello there\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "m.mp4")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=3:size=320x180:rate=25",
+		"-f", "lavfi", "-i", "sine=frequency=440:duration=3", "-i", srt,
+		"-map", "0:v", "-map", "1:a", "-map", "2",
+		"-c:v", "mpeg4", "-c:a", "aac", "-c:s", "mov_text", "-metadata:s:s:0", "language=eng", src)
+	if got := probe(t, src).Subtitles(); len(got) != 1 || got[0].Codec != "mov_text" || got[0].SubKind != "text" {
+		t.Fatalf("the source's subtitles: %+v", got)
+	}
+	s := rules.DefaultSelectors(1)
+	s.Speed, s.FileType, s.Format, s.Audio, s.AfterConverting = "faster", "webm", "vp9", "stereo_opus", "beside"
+	if err := s.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	tmpl := s.Template()
+	st, id := realJob(t, src, 3)
+	w := realWorker(st, media.OSExec{})
+	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.run(t)
+	j, _ := st.Get(id)
+	if j.Status != jobs.Done {
+		t.Fatalf("%s %q", j.Status, j.Error)
+	}
+	out := probe(t, j.OutputPath)
+	subs := out.Subtitles()
+	if filepath.Ext(j.OutputPath) != ".webm" || len(subs) != 1 || subs[0].Codec != "webvtt" || subs[0].Language != "eng" {
+		t.Errorf("new file %s: %+v", j.OutputPath, out.Streams)
+	}
+}
+
 // A job whose ffmpeg stops at the new file's header says what the new type can't hold, never that the
 // file may be damaged (user bug 11-20).
 func TestHeaderRefusalIsNotDamage(t *testing.T) {
