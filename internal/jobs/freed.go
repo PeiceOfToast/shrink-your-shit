@@ -15,7 +15,9 @@ package jobs
 // by its newest conversion (checked last in each bucket: a row reaches it in one bucket at most, so
 // it costs one lookup by the jobs_path index, not four). Republishing a workflow queues every file again, and each earlier done job
 // would otherwise count the same original's saving once more (ui-shop review d10d17e, orch-lead 18:29Z).
-const newestSQL = `NOT EXISTS (SELECT 1 FROM jobs later WHERE later.path=jobs.path AND later.status='done' AND later.id>jobs.id)`
+// A later conversion that was restored does not count: the file is this one's output again (review #431).
+const newestSQL = `NOT EXISTS (SELECT 1 FROM jobs later WHERE later.path=jobs.path AND later.status='done' AND later.id>jobs.id
+  AND NOT EXISTS (SELECT 1 FROM originals ro WHERE ro.job_id=later.id AND ro.state='restored'))`
 
 // notRestoredSQL is true when the job whose id is col was not restored. A restored original is the original
 // file again, so its job counts nowhere as converted.
