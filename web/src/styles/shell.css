@@ -827,7 +827,7 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
    sticky; the frame fills the window under it with the palette (240), the canvas and the inspector (320) inside. */
 .content:has(>*>.editor),.content:has(>.editor){padding:0;gap:0}
 .editor{display:flex;flex-direction:column;height:calc(100dvh - var(--topbar-h));min-width:0;overflow:hidden} /* a fixed height: the frame takes exactly what the toolbar leaves, however it wraps */
-.edbar{position:sticky;top:var(--topbar-h);z-index:10;min-height:48px;display:flex;align-items:center;gap:8px;padding:6px var(--page-pad);border-bottom:1px solid var(--border);background:var(--surface);flex-wrap:wrap}
+.edbar{position:sticky;top:0;z-index:10;min-height:48px;display:flex;align-items:center;gap:8px;padding:6px var(--page-pad);border-bottom:1px solid var(--border);background:var(--surface);flex-wrap:wrap}
 .edbar .nm{font-weight:var(--fw-strong);font-size:var(--fs-lg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40vw}
 .edbar .mid{margin:0 auto;display:flex;gap:4px;align-items:center}
 .edbar .vr{width:1px;height:24px;background:var(--border);margin:0 6px}
@@ -851,6 +851,7 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 @media (max-width:1100px){.editor .edframe.withpal{grid-template-columns:minmax(0,1fr) 280px}.editor .edpal{display:none}} /* ui-shop review #546: two tracks once the palette hides */
 @media (max-width:900px){
   .editor{height:auto;overflow:visible}
+  .edbar{top:var(--topbar-h)} /* the page scrolls here, so the toolbar sticks under the top bar */
   .editor .edframe,.editor .edframe.withpal{grid-template-columns:minmax(0,1fr);grid-template-rows:auto;flex:none;height:auto}
   .edbar .mid .edsegs{order:-1}
   .editor .edpal{display:none} /* editing is for a larger screen; the inspector stays, under the canvas */
