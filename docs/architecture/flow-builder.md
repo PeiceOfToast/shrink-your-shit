@@ -296,12 +296,12 @@ Order: FB0 → FB1a → FB1b → FB1c → FB1d → FB2a → FB2b → FB2c → FB
 - **Engine Drop 2 (F1 to F9):** F4 (crop) and F5 (loudness) become FB5's cards once W10 lands; their engine halves stay the engine team's.
 - **Connections (media server, downloader) and Notifications:** reused through their services; the cards are per-workflow switches over the same machinery. When no workflow has the card, the global setting behaves as today.
 
-## 9. Open decisions for the user
+## 9. Decisions (answered by the user, 2026-11-20)
 
-1. **Run a command** ships behind a Safety switch, off by default (2.6). Confirm, or leave it out of v1.
-2. **Tags** live on the job record (2.3); they are shown in Jobs and can be filtered. Confirm the name "tag" (the alternative is "label").
-3. **The dropdown view** becomes the steps view filtered to the conversion cards (4.3), and the first-run wizard opens it. Confirm that the first-run wizard may show the "3 rules before converting" line, or hide questions entirely there.
-4. **Scripting cards** are left out (2.8). Confirm.
+1. **Run a command** ships behind a Safety switch, off by default (2.6). Decided: yes.
+2. **Tags** live on the job record (2.3), shown in Jobs and filterable. Decided: the word is "tag".
+3. **The dropdown view** is the steps view filtered to the conversion cards (4.3). Decided: the first-run wizard hides the before-converting questions; they show in the workflow editor only.
+4. **Scripting cards** are left out of v1 (2.8). Decided: left out.
 
 ## 10. Clean room
 
