@@ -3,16 +3,19 @@ export interface NavItem {
   to: string;
   label: string;
   icon: string;
+  planned?: boolean; // not available yet: the page says so, and the menu marks it
 }
 export const NAV: [string, NavItem[]][] = [
   ["Overview", [{ to: "/", label: "Dashboard", icon: "i-dashboard" }, { to: "/jobs", label: "Jobs", icon: "i-jobs" }]],
   ["Automation", [
     { to: "/workflows", label: "Workflows", icon: "i-workflow" },
     { to: "/libraries", label: "Libraries", icon: "i-library" },
-    { to: "/plugins", label: "Plugins", icon: "i-plugin" },
   ]],
   ["Infrastructure", [{ to: "/workers", label: "Workers", icon: "i-worker" }]],
-  ["System", [{ to: "/settings", label: "Settings", icon: "i-settings" }]],
+  ["System", [
+    { to: "/settings", label: "Settings", icon: "i-settings" },
+    { to: "/plugins", label: "Plugins", icon: "i-plugin", planned: true },
+  ]],
 ];
 export const PAGES = NAV.flatMap(([, items]) => items);
 
