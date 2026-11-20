@@ -1,0 +1,175 @@
+{
+ "screens": [
+  {
+   "id": "dashboard",
+   "file": "dashboard.html",
+   "title": "Dashboard",
+   "states": [
+    "busy",
+    "failures",
+    "empty",
+    "loading"
+   ],
+   "proposals": "C2 C3 C4 C5 C7 C12",
+   "slices": "U1 U2 U6 U7 U8 U9 U13"
+  },
+  {
+   "id": "libraries",
+   "file": "libraries.html",
+   "title": "Libraries list",
+   "states": [
+    "list",
+    "loading",
+    "empty",
+    "error"
+   ],
+   "proposals": "C1 C3 C5 C6 C7 C13",
+   "slices": "U1 U2 U3 U9"
+  },
+  {
+   "id": "library",
+   "file": "library.html",
+   "title": "Library detail",
+   "states": [
+    "general",
+    "warning",
+    "new"
+   ],
+   "proposals": "C3 C5 C13",
+   "slices": "U2 U3"
+  },
+  {
+   "id": "workflows",
+   "file": "workflows.html",
+   "title": "Workflows list",
+   "states": [
+    "list",
+    "loading",
+    "empty",
+    "error"
+   ],
+   "proposals": "C1 C5 C6 C7",
+   "slices": "U2 U5 U9"
+  },
+  {
+   "id": "workflow-stack",
+   "file": "workflow-stack.html",
+   "title": "Workflow: steps view",
+   "states": [
+    "open",
+    "closed"
+   ],
+   "proposals": "C10 C3",
+   "slices": "U11"
+  },
+  {
+   "id": "workflow-graph",
+   "file": "workflow-graph.html",
+   "title": "Workflow: graph editor",
+   "states": [
+    ""
+   ],
+   "proposals": "C10 C3",
+   "slices": "U11"
+  },
+  {
+   "id": "jobs",
+   "file": "jobs.html",
+   "title": "Jobs list",
+   "states": [
+    "done",
+    "running",
+    "waiting",
+    "failed",
+    "skipped",
+    "loading",
+    "empty",
+    "error"
+   ],
+   "proposals": "C1 C4 C6 C7",
+   "slices": "U4 U8 U9"
+  },
+  {
+   "id": "job-drawer",
+   "file": "job-drawer.html",
+   "title": "Job drawer and log",
+   "states": [
+    "done",
+    "failed",
+    "skipped"
+   ],
+   "proposals": "C8",
+   "slices": "U10"
+  },
+  {
+   "id": "workers",
+   "file": "workers.html",
+   "title": "Workers",
+   "states": [
+    "list",
+    "loading",
+    "empty",
+    "error"
+   ],
+   "proposals": "C1 C9 C7",
+   "slices": "U5 U9"
+  },
+  {
+   "id": "settings",
+   "file": "settings.html",
+   "title": "Settings",
+   "states": [
+    "general",
+    "appearance",
+    "processing",
+    "safety",
+    "health"
+   ],
+   "proposals": "C3 C5 C15",
+   "slices": "U2 U14"
+  },
+  {
+   "id": "start",
+   "file": "start.html",
+   "title": "First run",
+   "states": [
+    "step1",
+    "step2",
+    "step3"
+   ],
+   "proposals": "C11",
+   "slices": "U12"
+  },
+  {
+   "id": "signin",
+   "file": "signin.html",
+   "title": "Sign in",
+   "states": [
+    "plain",
+    "wrong"
+   ],
+   "proposals": "C11",
+   "slices": "U12"
+  },
+  {
+   "id": "components",
+   "file": "components.html",
+   "title": "Component sheet",
+   "states": [
+    ""
+   ],
+   "proposals": "C1 C3 C4 C5 C6 C7",
+   "slices": "U1 U2"
+  },
+  {
+   "id": "tokens",
+   "file": "tokens.html",
+   "title": "Token sheet",
+   "states": [
+    ""
+   ],
+   "proposals": "C3 C14",
+   "slices": "U1"
+  }
+ ]
+}
