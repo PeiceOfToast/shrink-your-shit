@@ -288,7 +288,7 @@ func tryMount(store *jobs.Store, sh jobs.Share, password string) {
 	}
 	if onWindows() {
 		if err := connectWindowsShare(sh, password); err != nil {
-			store.SetShareMountStatus(sh.ID, runtime.GOOS, "not_connected", winMountReason(err))
+			store.SetShareMountStatus(sh.ID, runtime.GOOS, "not_connected", winMountReason(addressHost(sh.Type, sh.Address), err))
 			return
 		}
 		store.SetShareMountStatus(sh.ID, runtime.GOOS, "connected", "")
@@ -359,7 +359,7 @@ func mountErrReason(err error) string {
 	}
 	switch {
 	case strings.Contains(low, "permission denied"), strings.Contains(low, "error(13)"):
-		return `{"code":"auth_failed","message":"The username or password is wrong."}`
+		return `{"code":"auth_failed","message":` + jsonStr(authRefused("that computer")) + `}`
 	case strings.Contains(low, "no such file or directory"), strings.Contains(low, "error(2)"):
 		return `{"code":"share_not_found","message":` + jsonStr(msg) + `}`
 	case strings.Contains(low, "host is down"), strings.Contains(low, "no route"), strings.Contains(low, "error(112)"), strings.Contains(low, "error(113)"):
@@ -612,19 +612,39 @@ func firstFolders(entries []os.FileInfo) ([]string, int) {
 // a Windows machine (CI runners included) runs its own SMB server on 445.
 var smbPort, nfsPort = "445", "2049"
 
+// bareComputerName says whether a server is a bare Windows computer name: no dot, and not an IP address.
+// Such a name often can't be found from Docker or Linux.
+func bareComputerName(server string) bool {
+	return !strings.Contains(server, ".") && net.ParseIP(dialHost(server)) == nil
+}
+
+// hostNotFound is the host_not_found message: the bare-name text for a bare computer name, else dotted.
+func hostNotFound(server, dotted string) string {
+	if !bareComputerName(server) {
+		return dotted
+	}
+	return "Can't find a computer called " + server + ". A Windows computer name often can't be found from here; use its IP address instead (on that PC, run ipconfig and use the IPv4 Address)."
+}
+
+// authRefused is the auth_failed message. Windows turns guest access off, so a share shared with Everyone
+// still needs a real account.
+func authRefused(server string) string {
+	return "The username or password was refused. Use an account on " + server + ": for a Windows PC, the user name and password you sign in to it with. Sharing with Everyone still needs an account, because Windows turns guest access off."
+}
+
 func smbError(err error, server, share string) map[string]any {
 	msg := err.Error()
 	low := strings.ToLower(msg)
 	var code, message string
 	switch {
 	case strings.Contains(low, "no such host"), strings.Contains(low, "nodename nor servname"):
-		code, message = "host_not_found", "Can't find a computer called "+server+". Check the name, or use its IP address."
+		code, message = "host_not_found", hostNotFound(server, "Can't find a computer called "+server+". Check the name, or use its IP address.")
 	case strings.Contains(low, "refused"), strings.Contains(low, "no route"):
 		code, message = "host_unreachable", server+" doesn't answer. Check it's on and on the same network."
 	case strings.Contains(low, "timeout"), strings.Contains(low, "timed out"):
 		code, message = "timeout", "Timed out after 10 seconds."
 	case strings.Contains(low, "logon failure"), strings.Contains(low, "logon"):
-		code, message = "auth_failed", "The username or password is wrong."
+		code, message = "auth_failed", authRefused(server)
 	case strings.Contains(low, "access denied"):
 		code, message = "access_denied", "This user can't open "+share+"."
 	case strings.Contains(low, "not found"), strings.Contains(low, "does not exist"):
