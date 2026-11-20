@@ -1,6 +1,6 @@
 // V6 Jobs sample data in the server's shapes (types/jobs.ts, from the abe2b0e captures), for ?mock=1. Actions change
 // it the way the server does: cancel and requeue move rows between tabs, retry sends a waiting retry now.
-import type { JobLog } from "../jobsApi";
+import type { JobLog, LogLine, LogSection } from "../jobsApi";
 import type { ActionResult, JobAction, JobDetail, JobItem, JobState, JobsPage, Tab } from "../types/jobs";
 
 const GB = 1e9, now = Date.now(), at = (min: number) => new Date(now - min * 60e3).toISOString();
@@ -58,8 +58,24 @@ export function mockJobs(tab: Tab, q: string, path?: string, limit = 200, librar
 const REMOVED: JobDetail = { id: "47001", state: "cancelled", removed: true, reason: { code: "removed", message: "Its library was removed, so this file wasn't converted." },
   events: [{ seq: 3, at: at(300), from: null, to: "queued", reason: null, workerId: null }, { seq: 9, at: at(200), from: "queued", to: "cancelled", reason: "removed", workerId: null }], steps: [] };
 // The sample's log by step: the steps the job went through, the failing one with its last lines
+// the sectioned log (contract L1): each line is { at, step, level, stream, text }. A skipped job has no sections. The encode
+// section has ffmpeg's stderr lines (dimmed in the UI), a libva line (stream info) and the stall warning (L2, R9: an ordinary line)
+const ln = (min: number, step: number, level: LogLine["level"], stream: LogLine["stream"], text: string): LogLine => ({ at: at(min), step, level, stream, text });
+const sectionsFor = (result: string): LogSection[] => result === "skipped" ? [] : [
+  { id: "input", title: "Input", lines: [ln(30, 0, "info", "app", "Reading the file")] },
+  { id: "encode", title: "Encode", lines: [
+    ln(29, 0, "info", "app", "Starting ffmpeg: HEVC, Balanced quality"),
+    ln(29, 0, "info", "stderr", "ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers"),
+    ln(28, 0, "info", "info", "libva info: VA-API version 1.20.0"),
+    ln(20, 0, "info", "stderr", "frame= 43200 fps=142 q=24.0 size= 2150400kB time=00:30:00.00 bitrate=9800.1kbits/s speed=3.4x"),
+    ln(14, 0, "warning", "app", "No progress for 30 s; the encode is still running"),
+    ln(13, 0, "info", "stderr", "frame= 86400 fps=141 q=24.0 size= 4300800kB time=01:00:00.00 bitrate=9800.1kbits/s speed=3.4x"),
+  ] },
+  ...(result === "converted" ? [{ id: "replace", title: "Replace", lines: [ln(1, 2, "info", "app", "Saved the new file in place of the original")] }] : []),
+];
 // the start, variables and summary of a job that ran with full logs (contract v2); result: converted | kept | failed | skipped
 const runInfo = (result: string) => ({
+  sections: sectionsFor(result),
   start: { reason: "New file found by the scan", appVersion: "1.4.0", workflow: { name: "Shrink videos", revision: 7 } },
   variables: [
     { name: "api_key", changedBy: null, secret: true },
@@ -69,11 +85,29 @@ const runInfo = (result: string) => ({
     { name: "target_codec", start: "", end: "hevc", changedBy: "encode", secret: false },
     { name: "title", start: "Sample (2020)", end: "Sample (2020)", changedBy: null, secret: false },
   ],
-  summary: { result, originalBytes: 8 * GB, finalBytes: result === "converted" ? 4.7 * GB : 0, savedPercent: result === "converted" ? 41 : 0, outputPath: "/media/movies/Sample (2020).mkv", tookMs: 912000, tempRemoved: result === "converted",
+  summary: { result, originalBytes: 8 * GB, finalBytes: result === "converted" ? 4.7 * GB : 0, savedPercent: result === "converted" ? 41 : 0, outputPath: "/media/movies/Sample (2020).mkv", tookMs: 912000, tempRemoved: result === "converted", ...(result === "converted" && { passes: 1, bytesWritten: 4.7 * GB, slowestStep: { name: "encode", tookMs: 612000 } }),
     before: { video: "H.264 1920x1080, 8.0 Mbps", audio: "2 tracks: eng, jpn", subtitles: "English, English SDH, German", durationSec: 6312.4 },
     after: result === "converted" ? { video: "HEVC 1920x1080, 2.9 Mbps", audio: "1 track: eng AAC stereo", subtitles: "German inside · English, English SDH as .srt", durationSec: 6312.4 } : undefined },
 });
+// the server keeps a step's warnings and errors only in the sections (v2joblog.go: steps have no such keys), so a job with
+// sections has none on its steps: they move into section lines. A job without sections keeps them on its steps, as before.
 export function mockJobLog(id: string): JobLog | { error: { code: string; message: string } } {
+  const log = mockJobLogRaw(id);
+  if ("error" in log || !log.sections?.length) return log;
+  const sections: LogSection[] = log.sections.map((s) => ({ ...s, lines: [...s.lines] }));
+  const into = (secId: string, title: string, lines: LogLine[]) => { let s = sections.find((x) => x.id === secId); if (!s) { s = { id: secId, title, lines: [] }; sections.push(s); } s.lines.push(...lines); };
+  const STEP: Record<string, number> = { encode: 0, check: 1, replace: 2 }; // the server's step index (worker.go)
+  const steps = log.steps.map((st) => {
+    const { warnings, errors, ...rest } = st;
+    if (warnings?.length) into("encode", "Encode", warnings.map((t) => ln(2, STEP[st.name] ?? 0, "warning", "app", t)));
+    if (errors?.length) into("check", "Check", errors.map((t) => ln(2, STEP[st.name] ?? 0, "error", "check", t)));
+    return rest;
+  });
+  // the real job 48160 has a warning in its summary section (dev-qa 11-20, qa-482 check 2): mock it the same way
+  if (id === "48160") into("summary", "Summary", [ln(0, 0, "warning", "app", "Converted. The new file is not smaller than the original.")]);
+  return { ...log, steps, sections };
+}
+function mockJobLogRaw(id: string): JobLog | { error: { code: string; message: string } } {
   const j = mockJob(id);
   if (!j) return { error: { code: "not_found", message: "There is no such job." } };
   const failed = j.state === "failed";
