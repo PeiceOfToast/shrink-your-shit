@@ -64,14 +64,14 @@ const ln = (min: number, step: number, level: LogLine["level"], stream: LogLine[
 const sectionsFor = (result: string): LogSection[] => result === "skipped" ? [] : [
   { id: "input", title: "Input", lines: [ln(30, 0, "info", "app", "Reading the file")] },
   { id: "encode", title: "Encode", lines: [
-    ln(29, 2, "info", "app", "Starting ffmpeg: HEVC, Balanced quality"),
-    ln(29, 2, "info", "stderr", "ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers"),
-    ln(28, 2, "info", "info", "libva info: VA-API version 1.20.0"),
-    ln(20, 2, "info", "stderr", "frame= 43200 fps=142 q=24.0 size= 2150400kB time=00:30:00.00 bitrate=9800.1kbits/s speed=3.4x"),
-    ln(14, 2, "warning", "app", "No progress for 30 s; the encode is still running"),
-    ln(13, 2, "info", "stderr", "frame= 86400 fps=141 q=24.0 size= 4300800kB time=01:00:00.00 bitrate=9800.1kbits/s speed=3.4x"),
+    ln(29, 0, "info", "app", "Starting ffmpeg: HEVC, Balanced quality"),
+    ln(29, 0, "info", "stderr", "ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers"),
+    ln(28, 0, "info", "info", "libva info: VA-API version 1.20.0"),
+    ln(20, 0, "info", "stderr", "frame= 43200 fps=142 q=24.0 size= 2150400kB time=00:30:00.00 bitrate=9800.1kbits/s speed=3.4x"),
+    ln(14, 0, "warning", "app", "No progress for 30 s; the encode is still running"),
+    ln(13, 0, "info", "stderr", "frame= 86400 fps=141 q=24.0 size= 4300800kB time=01:00:00.00 bitrate=9800.1kbits/s speed=3.4x"),
   ] },
-  ...(result === "converted" ? [{ id: "replace", title: "Replace", lines: [ln(1, 0, "info", "app", "Saved the new file in place of the original")] }] : []),
+  ...(result === "converted" ? [{ id: "replace", title: "Replace", lines: [ln(1, 2, "info", "app", "Saved the new file in place of the original")] }] : []),
 ];
 // the start, variables and summary of a job that ran with full logs (contract v2); result: converted | kept | failed | skipped
 const runInfo = (result: string) => ({
@@ -89,7 +89,23 @@ const runInfo = (result: string) => ({
     before: { video: "H.264 1920x1080, 8.0 Mbps", audio: "2 tracks: eng, jpn", subtitles: "English, English SDH, German", durationSec: 6312.4 },
     after: result === "converted" ? { video: "HEVC 1920x1080, 2.9 Mbps", audio: "1 track: eng AAC stereo", subtitles: "German inside · English, English SDH as .srt", durationSec: 6312.4 } : undefined },
 });
+// the server keeps a step's warnings and errors only in the sections (v2joblog.go: steps have no such keys), so a job with
+// sections has none on its steps: they move into section lines. A job without sections keeps them on its steps, as before.
 export function mockJobLog(id: string): JobLog | { error: { code: string; message: string } } {
+  const log = mockJobLogRaw(id);
+  if ("error" in log || !log.sections?.length) return log;
+  const sections: LogSection[] = log.sections.map((s) => ({ ...s, lines: [...s.lines] }));
+  const into = (secId: string, title: string, lines: LogLine[]) => { let s = sections.find((x) => x.id === secId); if (!s) { s = { id: secId, title, lines: [] }; sections.push(s); } s.lines.push(...lines); };
+  const STEP: Record<string, number> = { encode: 0, check: 1, replace: 2 }; // the server's step index (worker.go)
+  const steps = log.steps.map((st) => {
+    const { warnings, errors, ...rest } = st;
+    if (warnings?.length) into("encode", "Encode", warnings.map((t) => ln(2, STEP[st.name] ?? 0, "warning", "app", t)));
+    if (errors?.length) into("check", "Check", errors.map((t) => ln(2, STEP[st.name] ?? 0, "error", "check", t)));
+    return rest;
+  });
+  return { ...log, steps, sections };
+}
+function mockJobLogRaw(id: string): JobLog | { error: { code: string; message: string } } {
   const j = mockJob(id);
   if (!j) return { error: { code: "not_found", message: "There is no such job." } };
   const failed = j.state === "failed";
