@@ -129,7 +129,7 @@ export function Libraries() {
               <td className="selc"><label className="hit"><input type="checkbox" aria-label={"Select " + l.name} checked={sel.includes(l.id)} onChange={(e) => setSel(e.target.checked ? [...sel, l.id] : sel.filter((x) => x !== l.id))} /></label></td>
               <td className="idc"><Link className="ttl" to={"/libraries/" + l.id}>{l.name}</Link>
                 <span className="sub mono path" title={l.paths.join(", ")}>{l.paths.map((p, i) => <span key={i}>{i > 0 && ", "}{breakPath(p)}</span>)}</span>
-                {!l.writable && <p className="st bad sm"><Icon id="i-alert" /><span>{l.unwritableMessage} <Link to="/settings/health">How to fix it</Link></span></p>}{/* p, not .sub: .sub is grey and hidden on phones (QA #439) */}
+                {!l.writable && <p className="st bad sm"><Icon id="i-alert" /><span>{l.unwritableMessage} <Link className="over" to="/settings/health">How to fix it</Link></span></p>}{/* p, not .sub: .sub is grey and hidden on phones (QA #439) */}
                 {paused(l) && <span className="sub">Paused · {count(l.counts.waiting)} waiting, not converting</span>}
                 {shareWait(l) && <span className="sub">Waiting for {shareName(l)} to connect · {count(l.counts.waiting)} waiting</span>}
                 <span className="sub phone">{paused(l) ? "Paused · " + count(l.counts.waiting) + " waiting, not converting"
