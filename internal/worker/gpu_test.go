@@ -47,7 +47,7 @@ func TestGPUFailureConvertsOnTheProcessor(t *testing.T) {
 	s := newScenario(t)
 	s.failEncoder = "hevc_nvenc"
 	w := s.worker(Replace)
-	w.Encoder = func(string, *rules.HDR) (string, string) { return "hevc_nvenc", "" }
+	w.Encoder = func(string, bool, *rules.HDR) (string, string) { return "hevc_nvenc", "" }
 	if _, err := w.RunOne(context.Background()); err != nil {
 		t.Fatalf("RunOne: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestGPUFailureConvertsOnTheProcessor(t *testing.T) {
 func TestUnsupportedEncoderUsesProcessorFirst(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
-	w.Encoder = func(string, *rules.HDR) (string, string) { return "hevc_videotoolbox", "" }
+	w.Encoder = func(string, bool, *rules.HDR) (string, string) { return "hevc_videotoolbox", "" }
 	if _, err := w.RunOne(context.Background()); err != nil {
 		t.Fatalf("RunOne: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestUnsupportedEncoderUsesProcessorFirst(t *testing.T) {
 func TestCPUChoiceNeverAsksForAGraphicsEncoder(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
-	w.Encoder = func(string, *rules.HDR) (string, string) { return "", "" }
+	w.Encoder = func(string, bool, *rules.HDR) (string, string) { return "", "" }
 	if _, err := w.RunOne(context.Background()); err != nil {
 		t.Fatalf("RunOne: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestCPUChoiceNeverAsksForAGraphicsEncoder(t *testing.T) {
 func TestFormatEncoderThatDidNotPassIsLogged(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
-	w.Encoder = func(string, *rules.HDR) (string, string) {
+	w.Encoder = func(string, bool, *rules.HDR) (string, string) {
 		return "", "encoder h264_qsv didn't pass its test here; using the processor"
 	}
 	if _, err := w.RunOne(context.Background()); err != nil {

@@ -120,9 +120,11 @@ type Worker struct {
 	// are checked). A convert that fails while it does is put back in the queue, not failed (D4c).
 	ShareDown func(folder string, jobID int64) (ShareDown, bool)
 	// Encoder is the graphics encoder the local worker uses for a video codec (ffmpeg's name, e.g. libx264), or ""
-	// for the processor (or nil: the processor). A plan it can't do, and a graphics encode that fails, use the processor.
-	// note, when set, is the job-log line for a processor the worker fell back to (not set for a processor by choice).
-	Encoder func(codec string, hdr *rules.HDR) (enc, note string)
+	// for the processor (or nil: the processor). need10 is set when the new file is 10-bit (an HDR plan, or a
+	// 10-bit source, SDR or not), so that encoder's 10-bit test must have passed too. A plan it can't do, and a
+	// graphics encode that fails, use the processor. note, when set, is the job-log line for a processor the
+	// worker fell back to (not set for a processor by choice).
+	Encoder func(codec string, need10 bool, hdr *rules.HDR) (enc, note string)
 	// EncoderCandidates, when set, returns the job log's lines for the encoder choice (log-spec R5): the
 	// hardware found and one line per encoder considered, with why it was or was not used, for the plan's
 	// codec (ffmpeg's name), whether the file is 10-bit (HDR, or a 10-bit source) and its HDR data (R4's gate:
@@ -1008,13 +1010,13 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	w.setPhase(secEncode) // the encoder choice and its notes belong to encode (log-spec section 4)
 	chosenWhy := ""
 	if w.remote == nil && w.Encoder != nil {
-		need10 := plan.Video.HDR != nil || (src.Video() != nil && src.Video().BitDepth > 8)
+		need10 := tenBitSource(plan, src)
 		if w.EncoderCandidates != nil && !plan.Video.Copy { // R5: what hardware is here, and each encoder considered
 			for _, line := range w.EncoderCandidates(plan.Video.Codec, need10, plan.Video.HDR) {
 				w.logLine(job.ID, secEncode, jobs.LevelInfo, line)
 			}
 		}
-		want, note := w.Encoder(plan.Video.Codec, plan.Video.HDR)
+		want, note := w.Encoder(plan.Video.Codec, need10, plan.Video.HDR)
 		if want != "" && !plan.Video.Copy {
 			until, paused, err := w.Queue.EncoderPaused(w.ID)
 			var ok bool

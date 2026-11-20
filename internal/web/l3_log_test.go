@@ -80,26 +80,28 @@ func TestSummaryTempRemoved(t *testing.T) {
 	}
 }
 
-// R4 + R5: a graphics encoder whose test passed is still refused for an HDR file unless its own 10-bit test
-// passed, and for an HDR10 file with mastering data unless its family is proven to keep that data (a plain
-// HDR/HLG file without mastering data is not gated). An SDR 10-bit file is not refused: the gate is HDR's.
+// R4 + R5: a graphics encoder whose test passed is still refused when the new file is 10-bit (an HDR plan,
+// or a 10-bit SDR source: the check keeps the source's depth) unless its own 10-bit test passed, and for an
+// HDR10 file with mastering data unless its family is proven to keep that data (a plain HDR/HLG file without
+// mastering data is not gated).
 func TestCandidateLinesNameTheHDRGate(t *testing.T) {
 	hdr10 := &rules.HDR{Transfer: "smpte2084", Primaries: "bt2020", Matrix: "bt2020nc", MasterDisplay: "G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1)", CLL: "1000,400"}
 	hlg := &rules.HDR{Transfer: "arib-std-b67", Primaries: "bt2020", Matrix: "bt2020nc"}
 	for _, c := range []struct {
-		name   string
-		tenBit bool
-		hdr    *rules.HDR
-		want   string // "" when the encoder can do the file
+		name           string
+		need10, tenBit bool
+		hdr            *rules.HDR
+		want           string // "" when the encoder can do the file
 	}{
-		{name: "hevc_qsv", tenBit: true, hdr: hdr10},   // proven to keep HDR10's data
-		{name: "hevc_vaapi", tenBit: true, hdr: hdr10}, // proven too
-		{name: "hevc_nvenc", tenBit: true, hdr: hdr10, want: "not proven to keep HDR10's mastering data"},
-		{name: "hevc_nvenc", tenBit: true, hdr: hlg}, // no mastering data to keep
-		{name: "hevc_nvenc", tenBit: false, hdr: hdr10, want: "8-bit only"},
-		{name: "hevc_nvenc", tenBit: false}, // an 8-bit SDR file needs no 10-bit test
+		{name: "hevc_qsv", need10: true, tenBit: true, hdr: hdr10},   // proven to keep HDR10's data
+		{name: "hevc_vaapi", need10: true, tenBit: true, hdr: hdr10}, // proven too
+		{name: "hevc_nvenc", need10: true, tenBit: true, hdr: hdr10, want: "not proven to keep HDR10's mastering data"},
+		{name: "hevc_nvenc", need10: true, tenBit: true, hdr: hlg}, // no mastering data to keep
+		{name: "hevc_nvenc", need10: true, tenBit: false, hdr: hdr10, want: "8-bit only"},
+		{name: "hevc_nvenc", need10: true, tenBit: false, want: "8-bit only"}, // a 10-bit SDR source: the check keeps its depth
+		{name: "hevc_nvenc", tenBit: false},                                   // an 8-bit SDR file needs no 10-bit test
 	} {
-		got := candidateReject(c.name, c.tenBit, c.hdr)
+		got := candidateReject(c.name, c.need10, c.tenBit, c.hdr)
 		if c.want == "" {
 			if got != "" {
 				t.Errorf("%s (10-bit %v): refused, want usable: %q", c.name, c.tenBit, got)
@@ -107,7 +109,7 @@ func TestCandidateLinesNameTheHDRGate(t *testing.T) {
 			continue
 		}
 		if !strings.Contains(got, c.want) {
-			t.Errorf("%s (10-bit %v): %q, want it to say %q", c.name, c.tenBit, got, c.want)
+			t.Errorf("%s (need10 %v, 10-bit %v): %q, want it to say %q", c.name, c.need10, c.tenBit, got, c.want)
 		}
 	}
 }

@@ -24,7 +24,7 @@ func fall(t *testing.T, s *scenario, w *Worker) {
 func TestPausedGraphicsEncoderIsNotUsed(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
-	w.Encoder = func(string, *rules.HDR) (string, string) { return "hevc_nvenc", "" }
+	w.Encoder = func(string, bool, *rules.HDR) (string, string) { return "hevc_nvenc", "" }
 	for i := 0; i < 3; i++ {
 		fall(t, s, w)
 	}
@@ -47,7 +47,7 @@ func TestPausedGraphicsEncoderIsNotUsed(t *testing.T) {
 func TestGraphicsSuccessEndsARunOfFalls(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
-	w.Encoder = func(string, *rules.HDR) (string, string) { return "hevc_nvenc", "" }
+	w.Encoder = func(string, bool, *rules.HDR) (string, string) { return "hevc_nvenc", "" }
 	fall(t, s, w)
 	fall(t, s, w)
 	if _, err := w.RunOne(context.Background()); err != nil {
@@ -69,7 +69,7 @@ func TestProcessorFailureIsNotAFallBack(t *testing.T) {
 	s := newScenario(t)
 	s.failAllEncodes = true
 	w := s.worker(Replace)
-	w.Encoder = func(string, *rules.HDR) (string, string) { return "hevc_nvenc", "" }
+	w.Encoder = func(string, bool, *rules.HDR) (string, string) { return "hevc_nvenc", "" }
 	if _, err := w.RunOne(context.Background()); err == nil {
 		t.Fatal("RunOne: want the failed conversion's error")
 	}
@@ -88,5 +88,29 @@ func TestProcessorFailureIsNotAFallBack(t *testing.T) {
 	}
 	if n := logCount(t, s, "converted on the processor"); n != 0 {
 		t.Errorf("converted-on-processor line: %d, want 0", n)
+	}
+}
+
+// A 10-bit SDR source is kept at its depth, so the worker asks its encoder with need10 set even though the
+// file is not HDR: an 8-bit-only graphics encoder would be refused by the check after the whole encode.
+func TestTenBitSDRSourceAsksForATenBitEncoder(t *testing.T) {
+	s := newScenario(t)
+	s.srcSpec = spec{duration: 100, chapters: 2, streams: []map[string]any{
+		vid("h264", 640, 360, "yuv420p10le"), aud("aac", "eng", 2), sub("subrip", "eng", false), att("font.ttf")}}
+	s.outSpec = spec{duration: 100, chapters: 2, streams: []map[string]any{
+		vid("hevc", 640, 360, "yuv420p10le"), aud("aac", "eng", 2), sub("subrip", "eng", false), att("font.ttf")}}
+	w := s.worker(Replace)
+	var codec string
+	var need10 bool
+	var hdr *rules.HDR
+	w.Encoder = func(c string, n bool, h *rules.HDR) (string, string) { codec, need10, hdr = c, n, h; return "", "" }
+	if _, err := w.RunOne(context.Background()); err != nil {
+		t.Fatalf("RunOne: %v", err)
+	}
+	if j := s.job(); j.Status != jobs.Done {
+		t.Fatalf("status %s, error %q", j.Status, j.Error)
+	}
+	if codec != "libx265" || !need10 || hdr != nil {
+		t.Fatalf("encoder asked with codec %q need10 %v hdr %v, want libx265, true, nil", codec, need10, hdr)
 	}
 }

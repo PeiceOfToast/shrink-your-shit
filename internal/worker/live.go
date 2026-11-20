@@ -121,6 +121,16 @@ func codecName(c string) string {
 	return strings.ToUpper(c)
 }
 
+// tenBitSource is true when the new file is 10-bit: an HDR plan, or a source whose video is 10-bit (an SDR
+// 10-bit source is kept at its depth, so the encoder must do 10-bit too).
+func tenBitSource(plan rules.Plan, src media.Info) bool {
+	if plan.Video.HDR != nil {
+		return true
+	}
+	v := src.Video()
+	return v != nil && v.BitDepth > 8
+}
+
 // convertingTo says what the new file will be: "HEVC · 10-bit · MKV" ("repackaged as MKV" when the
 // video is copied).
 func convertingTo(plan rules.Plan, src media.Info) string {
@@ -149,7 +159,7 @@ func convertingTo(plan rules.Plan, src media.Info) string {
 		return "repackaged as " + kind
 	}
 	depth := "8-bit"
-	if v := src.Video(); plan.Video.HDR != nil || (v != nil && v.BitDepth > 8) {
+	if tenBitSource(plan, src) {
 		depth = "10-bit"
 	}
 	name := "HEVC" // a Plan from before S6 has no Format
