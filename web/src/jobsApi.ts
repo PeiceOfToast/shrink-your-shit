@@ -34,7 +34,7 @@ export interface LogProbe { codec: string; width: number; height: number; frameR
 export interface LogStep { name: string; startedAt: string | null; tookMs: number | null; outcome: string; command: string | null; probe: LogProbe | null; check: { score: number; min: number | null; passed: boolean | null } | null; outputLines: number; output: string | string[]; result: string | null; found?: string[]; // found: the step's check lines (stream 'check'), absent from older servers
   decision?: string | null; reason?: string | null; path?: string; warnings?: string[]; errors?: string[]; set?: { name: string; value?: string }[]; // set: a secret has no value
   speedX?: number | null; avgKbps?: number | null; moves?: LogMove[] }
-// one file action of the replace step, in the order the worker took them; a null path is not used by that action (write_sidecar has only "to", remove only "from")
+// one file action of the replace step, in the order the worker took them; a null path is not used by that action (remove has only "from"); write_sidecar's "from" is the staged sub.N.srt
 export interface LogMove { action: string; from: string | null; to: string | null; ok: boolean; error: string | null }
 // the server does not send appVersion yet (v2joblog.go): a missing one is hidden
 export interface LogStart { reason: string; appVersion?: string; workflow: { name: string; revision: number } }

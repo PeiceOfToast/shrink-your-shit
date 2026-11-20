@@ -332,10 +332,11 @@ const plural1 = (n: number, one: string, many: string) => n + " " + (n === 1 ? o
 const val = (s?: string) => (s ? s : "—");
 const MOVE: Record<string, string> = { move: "Moved", copy: "Copied", chmod: "Changed the permissions of", chown: "Changed the owner of", remove: "Removed", write_sidecar: "Wrote" };
 const MOVE_FAILED: Record<string, string> = { move: "move", copy: "copy", chmod: "change the permissions of", chown: "change the owner of", remove: "remove", write_sidecar: "write" };
-// one file action as words: the paths in mono. A null path is left out (write_sidecar has only "to", remove only "from"),
-// and a same-path action (chmod, chown: from equals to) shows the path once
+// one file action as words: the paths in mono. A null path is left out (remove has only "from"), a same-path action
+// (chmod, chown: from equals to) shows the path once, and write_sidecar shows only "to": its "from" is the worker's
+// staged sub.N.srt, an internal name the person never sees
 const moveLine = (m: LogMove) => {
-  const paths = m.from && m.to && m.from !== m.to ? <><code>{m.from}</code> to <code>{m.to}</code></> : <code>{m.from ?? m.to}</code>;
+  const paths = m.action === "write_sidecar" ? <code>{m.to ?? m.from}</code> : m.from && m.to && m.from !== m.to ? <><code>{m.from}</code> to <code>{m.to}</code></> : <code>{m.from ?? m.to}</code>;
   return m.ok ? <>{MOVE[m.action] ?? m.action} {paths}</>
     : <span style={{ color: "var(--error-text)" }}><Icon id="i-alert" /> Couldn't {MOVE_FAILED[m.action] ?? m.action} {paths}{m.error ? ": " + m.error : "."}</span>;
 };

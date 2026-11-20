@@ -175,7 +175,7 @@ function mockJobLogRaw(id: string): JobLog | { error: { code: string; message: s
   const moves = [
     { action: "move", from: "/media/movies/Sample (2020).mkv", to: "/media/movies/.syp-trash/Sample (2020).mkv", ok: true, error: null },
     { action: "move", from: "/media/movies/Sample (2020).new.mkv", to: "/media/movies/Sample (2020).mkv", ok: true, error: null },
-    { action: "write_sidecar", from: null, to: "/media/movies/Sample (2020).eng.srt", ok: true, error: null },
+    { action: "write_sidecar", from: "/media/movies/sub.0.srt", to: "/media/movies/Sample (2020).eng.srt", ok: true, error: null },
     ...(failedRemove ? [{ action: "remove", from: "/media/movies/.syp-trash/Sample (2020).mkv", to: null, ok: false, error: "Permission denied" }] : []),
   ];
   return { state: "complete", final: "done", ...runInfo("converted"), summary: { ...runInfo("converted").summary, tempRemoved: failedRemove ? false : true }, steps: [
