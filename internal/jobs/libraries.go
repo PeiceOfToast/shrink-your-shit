@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
 )
 
 // A library is a folder the program looks after, with exactly one flow saying what to do with its
@@ -547,6 +548,15 @@ func (s *Store) TemplateFor(j Job) (rules.Template, error) {
 	f, err := s.GetFlow(flowID)
 	if err != nil {
 		return rules.Template{}, err
+	}
+	// W1: a workflow whose typed settings name a variable is compiled from its resolved doc, so the plan
+	// the job runs is the one the variable's value makes (the stored template already is, at publish; this
+	// keeps a job on it even for a template written before the workflow's settings were resolved). A
+	// workflow with no such reference keeps its template exactly as it is.
+	if rev, ok, rerr := s.LatestRevision(flowID); rerr == nil && ok && workflow.HasRefs(rev.Doc) {
+		if t, issues := workflow.ToTemplate(rev.Doc, f.Template); len(issues) == 0 {
+			return t, nil
+		}
 	}
 	return f.Template, nil
 }

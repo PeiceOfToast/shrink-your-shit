@@ -72,6 +72,20 @@ func Validate(d Doc) Result {
 		add(Issue{Code: "unknown_schema_version", Message: fmt.Sprintf("This workflow's format (version %d) is not one this version reads.", d.SchemaVersion)})
 		return r
 	}
+	// W1: a setting that takes a typed value may hold one whole variable. It is resolved here, so the
+	// checks below read what the run will use; a setting whose reference Resolve already reported is
+	// not checked a second time as a literal (that would say the same thing twice, in other words).
+	resolved, refIssues := Resolve(d)
+	for _, i := range refIssues {
+		add(i)
+	}
+	badRef := map[[2]string]bool{}
+	for _, i := range refIssues {
+		if i.NodeID != "" && i.Field != "" {
+			badRef[[2]string{i.NodeID, i.Field}] = true
+		}
+	}
+	d = resolved
 	r.AddSteps = addSteps()
 	for _, i := range CheckVariables(d) {
 		add(i)
@@ -106,7 +120,7 @@ func Validate(d Doc) Result {
 		if def.AlwaysOn && !n.Enabled {
 			add(Issue{Code: "invalid_config", NodeID: n.ID, Message: def.Name + " can't be turned off."})
 		}
-		for _, i := range checkConfig(n, def) {
+		for _, i := range checkConfig(n, def, badRef) {
 			add(i)
 		}
 		r.StepSummaries[n.ID] = summary(n)
@@ -182,7 +196,7 @@ func Validate(d Doc) Result {
 // array's items, and required keys without a default (ui-shop 12:32Z: a minimum of 0 wasn't enforced).
 // Each problem names the step and the setting. A key the schema doesn't know is kept and warned about
 // (research: never drop it silently).
-func checkConfig(n Node, def StepDefinition) []Issue {
+func checkConfig(n Node, def StepDefinition, badRef map[[2]string]bool) []Issue {
 	var out []Issue
 	if def.ReadOnly { // kept as it is: nothing to check against a form
 		return nil
@@ -213,6 +227,9 @@ func checkConfig(n Node, def StepDefinition) []Issue {
 			out = append(out, Issue{Code: "unknown_config_key", Severity: "warning", NodeID: n.ID, ConfigPath: "/" + k, Field: k,
 				Message: fmt.Sprintf("In '%s', %q is not a setting of this step; it is kept but not used.", step, k)})
 			continue
+		}
+		if badRef[[2]string{n.ID, k}] {
+			continue // Resolve said what is wrong with the reference this setting holds
 		}
 		if msg := valueProblem(p, v, titleOf(p, k)); msg != "" {
 			bad(k, msg)
