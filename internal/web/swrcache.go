@@ -37,6 +37,9 @@ type swrCache[T any] struct {
 var (
 	swrSlow   = 250 * time.Millisecond // a compute this slow or slower is recomputed in the background
 	swrMinGap = 10 * time.Second       // the least time between two background computes
+	// swrWarm off skips the start-up compute. The package tests turn it off: a warm compute still reading when a
+	// test closes its store leaves SQLite files behind and fails the test's TempDir cleanup (CI on #421).
+	swrWarm = true
 )
 
 // get returns the value for the current key. key is cheap; build computes the value and the key it is for.
@@ -65,6 +68,9 @@ func (c *swrCache[T]) get(key func() (string, error), build func() (T, string, e
 
 // warm computes the value once in the background, at start, so the first page view is not the slow one.
 func (c *swrCache[T]) warm(key func() (string, error), build func() (T, string, error)) {
+	if !swrWarm {
+		return
+	}
 	go func() {
 		k, err := key()
 		if err == nil {
