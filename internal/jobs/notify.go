@@ -54,7 +54,7 @@ func (s *Store) LatestStepRow() (int64, error) {
 
 // Batch is what a batch summary reports: the work finished since a time, and what is still waiting.
 type Batch struct {
-	Converted int64 // done since the time
+	Converted int64 // done since the time (a restored file is not converted)
 	Failed    int64 // failed since the time
 	Saved     int64 // bytes smaller, for the files done since the time
 	Waiting   int64 // converted files whose original is still there to be freed (now, not since)
@@ -65,9 +65,9 @@ type Batch struct {
 func (s *Store) BatchSince(since string) (Batch, error) {
 	var b Batch
 	err := s.db.QueryRow(`SELECT
-  COALESCE(SUM(CASE WHEN status='done' AND updated>=? THEN 1 ELSE 0 END),0),
+  COALESCE(SUM(CASE WHEN `+convertedNow("jobs")+` AND updated>=? THEN 1 ELSE 0 END),0),
   COALESCE(SUM(CASE WHEN status='failed' AND updated>=? THEN 1 ELSE 0 END),0),
-  COALESCE(SUM(CASE WHEN status='done' AND updated>=? THEN size_before-size_after ELSE 0 END),0),
+  COALESCE(SUM(CASE WHEN `+convertedNow("jobs")+` AND updated>=? THEN size_before-size_after ELSE 0 END),0),
   COALESCE(SUM(CASE WHEN status='done' AND `+leftSQL+` THEN 1 ELSE 0 END),0),
   COALESCE(SUM(CASE WHEN status IN ('queued','running') THEN 1 ELSE 0 END),0)
 FROM jobs`, since, since, since).Scan(&b.Converted, &b.Failed, &b.Saved, &b.Waiting, &b.Active)

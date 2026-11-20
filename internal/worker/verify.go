@@ -383,10 +383,14 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 		frame = 1 / sMain.FrameRate
 	}
 	var done []placeScore // the places measured so far, for the job log
+	// A file has one alignment, so the one that passes a place is tried first on the others (P3): the
+	// extra tries only ever pay off once, and each one is a seek and decode of both files.
+	nudges := []float64{0, -frame, frame}
 	for _, seg := range segs {
 		best := -1.0
 		var bestFrames []frameScore // the best alignment's frames: the worst of them are the job log's evidence
-		for _, nudge := range []float64{0, -frame, frame} {
+		passed := nudges[0]
+		for _, nudge := range nudges {
 			score, frames, err := w.ssimSegment(ctx, srcPath, tmp, sv, ov, seg, sMain.StartTime, oMain.StartTime+nudge, scaleTo(sMain, oMain))
 			if err != nil {
 				return err
@@ -395,6 +399,7 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 				best, bestFrames = score, frames
 			}
 			if best >= threshold {
+				passed = nudge
 				break
 			}
 		}
@@ -405,6 +410,15 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 				best, rules.Clock(seg.start), threshold).(*KeptError)
 			ke.Detail = ssimDetail(src.DurationSec, segs, done, bestFrames, sMain.FrameRate, threshold)
 			return ke
+		}
+		if passed != nudges[0] {
+			order := []float64{passed}
+			for _, n := range nudges {
+				if n != passed {
+					order = append(order, n)
+				}
+			}
+			nudges = order
 		}
 	}
 	return nil

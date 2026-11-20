@@ -1125,6 +1125,15 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if err := keepOwner(tmp, before); err != nil {
 		w.jobf(job.ID, ": could not keep the owner: %v", err)
 	}
+	// On disk before any rename (R1): after a power cut the name never points at data that wasn't written.
+	if err := syncFile(tmp); err != nil {
+		return "", retryable(failed("The new file could not be saved to disk, so your original was kept as it was. Press Retry.", fmt.Errorf("sync the new file: %w", err)), retryGeneral)
+	}
+	for k := range plan.SubtitleFiles() {
+		if err := syncFile(rules.StagedSrt(tmp, k)); err != nil {
+			return "", retryable(failed("A subtitle file could not be saved to disk, so your original was kept as it was. Press Retry.", fmt.Errorf("sync a subtitle file: %w", err)), retryGeneral)
+		}
+	}
 	final = newName
 	// Rename is atomic on one filesystem: the original is only replaced by a complete file. Right
 	// before each try, the original must still be the file we read and the temp file still the one
@@ -1168,9 +1177,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	removePlaced := func() { // the swap did not happen: the .srt files we put beside it go again
 		w.removeSidecars(job.ID, placed)
 	}
-	swapped := func() { // the swap is done: the .srt files stay; their record goes
-		if w.Sidecars != nil && len(placed) > 0 {
-			w.Sidecars.DropSidecars(job.ID)
+	swapped := func() { // the swap is done: the .srt files stay, the job keeps their names; their record goes
+		if w.Sidecars != nil {
+			w.Sidecars.FinishSidecars(job.ID)
 		}
 	}
 	days := 0
@@ -1233,7 +1242,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 // (jobs.Store), so a crash in between leaves nothing of ours behind (RecoverSidecars).
 type SidecarJournal interface {
 	AddSidecars([]jobs.Sidecar) error
-	DropSidecars(jobID int64) error
+	FinishSidecars(jobID int64) error
 	DropSidecar(jobID int64, path string) error
 	Sidecars() ([]jobs.Sidecar, error)
 }
@@ -1584,6 +1593,7 @@ func (w *Worker) setAside(jobID int64, final string) error {
 	if err := os.Rename(final, dst); err != nil {
 		return refused(err)
 	}
+	syncDirs(final, dst)
 	w.movedAside = fmt.Sprintf("Your earlier converted file %s had been changed since it was made, so it was moved to the trash (%s) and the new file took its place.", name, filepath.Join(TrashDir, filepath.Base(dst)))
 	w.Queue.AppendLogLine(jobID, 0, "app", w.movedAside)
 	return nil
@@ -1657,6 +1667,7 @@ func renameRetry(ctx context.Context, rename func(a, b string) error, a, b strin
 			}
 		}
 		if err = rename(a, b); err == nil {
+			syncDirs(a, b)
 			return nil
 		}
 		var k *KeptError

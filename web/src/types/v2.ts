@@ -144,6 +144,8 @@ export interface Settings { firstRunDone: boolean; firstRunStep: number; intakeP
 // GET /api/v2/trash (contract update 01:33Z; workshop branch v2-trash-settings): originals replaced and kept in the
 // trash until their date. Later embedded as Summary.bytes.trash.
 export interface Trash { bytes: number; files: number; nextDeleteAt: Time | null; lastDeleteAt: Time | null }
+// POST /api/v2/trash/purge {libraryId?}: a library whose folder isn't mounted is skipped, never reported as "deleted 0".
+export interface PurgeResult { deletedFiles: number; freedBytes: number; skipped: { library: string; reason: string }[] }
 export interface Workflow { // GET /workflows (contract: Workflows, revisions and the graph)
   id: ID;
   name: string;
@@ -247,6 +249,10 @@ export interface Port {
   kind: "file" | "control";
   outcome: "success" | "error" | "skipped" | "branch";
 }
+// POST /workflows/{id}/validate answers two more maps (contract final, workshop 05:58Z). An absent map or an absent
+// entry means the step is fixed in place and its type can't be added here.
+export interface StepPlace { fixedPlace: boolean; fixedReason?: string }
+export interface AddStep { addable: boolean; reason?: string; after?: ID }
 export interface StepDefinition {
   type: string;
   typeVersion: number;
