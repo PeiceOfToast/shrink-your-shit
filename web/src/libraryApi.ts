@@ -185,13 +185,13 @@ export async function getTrash(): Promise<Answer<Trash>> {
 }
 
 // POST /api/v2/trash/purge (omit libraryId = all libraries). Mock: empties the mock trash; ?purgeskip=1 leaves one
-// library's 3 files behind as skipped (its folder isn't mounted).
+// library's 3 files behind as skipped, with the server's reason text (#458).
 export async function purgeTrash(libraryId?: string): Promise<Answer<PurgeResult>> {
   if (!MOCK) return call("POST", "/api/v2/trash/purge", libraryId ? { libraryId } : {});
   const s = mock.mockState(), t = s.trash, skip = new URLSearchParams(location.search).has("purgeskip");
   const left = skip ? { files: 3, bytes: 2e9 } : { files: 0, bytes: 0 };
   s.trash = { ...t, files: left.files, bytes: left.bytes, nextDeleteAt: left.files ? t.nextDeleteAt : null, lastDeleteAt: new Date().toISOString() };
-  return M({ deletedFiles: t.files - left.files, freedBytes: t.bytes - left.bytes, skipped: skip ? [{ library: "Archive disk", reason: "its folder isn't mounted" }] : [] });
+  return M({ deletedFiles: t.files - left.files, freedBytes: t.bytes - left.bytes, skipped: skip ? [{ library: "Archive disk", reason: "Its share isn't connected, so nothing in it was touched." }] : [] });
 }
 
 // G1 (one UI): remove a library: DELETE /api/libraries/{id}. The server stops watching the folder, takes its waiting

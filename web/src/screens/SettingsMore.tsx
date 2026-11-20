@@ -207,12 +207,12 @@ export function SafetySettings() {
               {purgeSaid && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{purgeSaid}</span></p>}
               {gone && <div aria-live="polite" className="stack" style={{ gap: 6 }}>
                 <p className="st ok" style={{ margin: 0 }}><Icon id="i-check-c" /><span>{`Freed ${bytes(gone.freedBytes)} (${plural(gone.deletedFiles, "file", "files")}).`}</span></p>
-                {gone.skipped.map((s, i) => <p key={i} className="st warn" style={{ margin: 0 }}><Icon id="i-alert" /><span>{`${s.library} was skipped: ${s.reason}`}</span></p>)}
+                {gone.skipped.map((s, i) => <p key={i} className="st warn" style={{ margin: 0 }}><Icon id="i-alert" /><span>{`${s.library} was skipped. ${s.reason}`}</span></p>)}
               </div>}
             </div>}
           </div>
         </section>)}
-      {ask && <Confirm title="Empty trash now?" body="These are the original files kept for 7 days in case you need them back. Deleting them can't be undone."
+      {ask && <Confirm title="Empty trash now?" body="These are the original files kept in case you need them back. Deleting them now can't be undone."
         yes="Delete" no="Cancel" danger busy={purging} onYes={purge} onNo={() => (setAsk(false), purgeBtn.current?.focus())} />}
     </div>);
 }
