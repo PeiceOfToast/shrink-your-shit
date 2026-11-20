@@ -3,6 +3,7 @@
 package rules
 
 import (
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -41,11 +42,11 @@ func TestFFmpegArgsFullGPUGoldens(t *testing.T) {
 		{"qsv plain", gpuPlan(22, nil), "hevc_qsv",
 			head + qsvDev + tail + "-c:v:0 hevc_qsv -global_quality 22 " + staleVideoArgs + " out.mkv"},
 		{"qsv downscale", gpuPlan(22, func(v *VideoEncode) { v.Height = 1080 }), "hevc_qsv",
-			head + qsvDev + tail + "-c:v:0 hevc_qsv -global_quality 22 -filter:v:0 scale_qsv=w=trunc(1080*a/2)*2:h=1080 " + staleVideoArgs + " out.mkv"},
+			head + qsvDev + tail + "-c:v:0 hevc_qsv -global_quality 22 -filter:v:0 scale_qsv=w=trunc(1080*a/2+0.5)*2:h=1080 " + staleVideoArgs + " out.mkv"},
 		{"qsv HDR", gpuPlan(22, func(v *VideoEncode) { v.HDR = hdr }), "hevc_qsv",
 			head + qsvDev + tail + "-c:v:0 hevc_qsv -global_quality 22" + hdrFlags + " " + staleVideoArgs + " out.mkv"},
 		{"qsv HDR downscale", gpuPlan(22, func(v *VideoEncode) { v.HDR = hdr; v.Height = 1080 }), "hevc_qsv",
-			head + qsvDev + tail + "-c:v:0 hevc_qsv -global_quality 22" + hdrFlags + " -filter:v:0 scale_qsv=w=trunc(1080*a/2)*2:h=1080 " + staleVideoArgs + " out.mkv"},
+			head + qsvDev + tail + "-c:v:0 hevc_qsv -global_quality 22" + hdrFlags + " -filter:v:0 scale_qsv=w=trunc(1080*a/2+0.5)*2:h=1080 " + staleVideoArgs + " out.mkv"},
 		{"vaapi plain", gpuPlan(22, nil), "hevc_vaapi",
 			head + vaDev + tail + "-c:v:0 hevc_vaapi -rc_mode CQP -qp 22 " + staleVideoArgs + " out.mkv"},
 		{"vaapi downscale", gpuPlan(22, func(v *VideoEncode) { v.Height = 1080 }), "hevc_vaapi",
@@ -163,5 +164,26 @@ func TestFFmpegArgsFullGPUFollowThePlansDepth(t *testing.T) {
 		if got != "" || !strings.Contains(note, "10-bit") || !strings.Contains(note, enc) {
 			t.Errorf("%s without its 10-bit test: got %q note %q, want the processor with a 10-bit note", enc, got, note)
 		}
+	}
+}
+
+// The QSV scale's width expression is evaluated by ffmpeg with a = iw/ih. It must give the width the plan says
+// (ScaledWidth, round half up), or the encode lands a pixel off the planned size (852 for a plan of 854).
+func TestQSVScaleWidthIsThePlannedWidth(t *testing.T) {
+	cases := []struct{ w, h, height int }{
+		{1920, 1080, 480}, {1920, 1080, 720}, {1920, 1080, 576}, {1920, 1080, 360},
+		{1440, 1080, 720}, {1920, 800, 480}, {1280, 534, 360}, {3840, 1606, 1080},
+	}
+	for _, c := range cases {
+		// ffmpeg's expression, evaluated the way it is written: trunc(H*a/2+0.5)*2 with a = w/h
+		a := float64(c.w) / float64(c.h)
+		ffmpeg := int(math.Trunc(float64(c.height)*a/2+0.5)) * 2
+		if planned := ScaledWidth(c.w, c.h, c.height); ffmpeg != planned {
+			t.Errorf("%dx%d to %d: the QSV expression gives %d but the plan says %d", c.w, c.h, c.height, ffmpeg, planned)
+		}
+	}
+	want := "scale_qsv=w=trunc(480*a/2+0.5)*2:h=480"
+	if got := gpuScale("qsv", 480, false); got != want {
+		t.Errorf("qsv scale: got %s want %s", got, want)
 	}
 }
