@@ -112,7 +112,13 @@ func sectionsJSON(lines []jobs.LogLine) []map[string]any {
 func streamLines(lines []jobs.LogLine) []map[string]any {
 	out := make([]map[string]any, 0, len(lines))
 	for _, l := range lines {
-		out = append(out, map[string]any{"at": l.At, "section": l.Section, "step": l.Step, "level": levelOf(l), "stream": l.Stream, "text": l.Text})
+		m := map[string]any{"at": l.At, "section": l.Section, "step": l.Step, "level": levelOf(l), "stream": l.Stream, "text": l.Text}
+		if n, label, ok := parseStepSection(l.Section); ok { // contract: the stored name never goes on the wire
+			m["section"] = "step"
+			m["sectionStep"] = n
+			m["sectionTitle"] = fmt.Sprintf("Step %d: %s", n, label)
+		}
+		out = append(out, m)
 	}
 	return out
 }
@@ -207,9 +213,21 @@ func summaryJSON(store *jobs.Store, j jobs.Job, lines []jobs.LogLine) map[string
 			}
 		}
 	}
+	// tempRemoved: true only if nothing was left behind (log-spec R14). A job that recorded no file actions
+	// (one from before this) has no answer: null.
+	var tempRemoved any
+	if moves, err := store.JobMoves(j.ID); err == nil && len(moves) > 0 {
+		clean := true
+		for _, m := range moves {
+			if m.Action == "remove" && !m.OK {
+				clean = false
+			}
+		}
+		tempRemoved = clean
+	}
 	return map[string]any{"result": result, "originalBytes": j.SizeBefore, "finalBytes": finalBytes,
 		"savedPercent": percent, "outputPath": nilIfEmpty(j.OutputPath), "tookMs": jobTookMs(lines),
-		"before": nil, "after": nil, "steps": nil, "tempRemoved": nil,
+		"before": nil, "after": nil, "steps": nil, "tempRemoved": tempRemoved,
 		"passes": passes, "bytesWritten": bytesWritten, "slowestStep": slowest}
 }
 

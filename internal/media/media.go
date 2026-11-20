@@ -405,9 +405,18 @@ type Progress struct {
 // only, so a stall can still be told from a slow encode). It returns what ffmpeg printed on stderr (at the error
 // level the args ask for), which includes decode errors in the source.
 func Transcode(ctx context.Context, x Exec, ffmpeg string, args []string, durationSec float64, onProgress func(Progress)) (string, error) {
+	return TranscodeLines(ctx, x, ffmpeg, args, durationSec, onProgress, nil)
+}
+
+// TranscodeLines is Transcode with onLine called for every line ffmpeg prints, progress line or not (the
+// job log's quiet warning counts them). onLine may be nil.
+func TranscodeLines(ctx context.Context, x Exec, ffmpeg string, args []string, durationSec float64, onProgress func(Progress), onLine func()) (string, error) {
 	p := Progress{ETASeconds: -1, Frame: -1}
 	var etas []float64 // the last 5 raw times left: the raw one jumps with every change of speed (research 3.4)
 	return x.Stream(ctx, func(line string) {
+		if onLine != nil {
+			onLine()
+		}
 		k, v, _ := strings.Cut(line, "=")
 		switch k {
 		case "frame":

@@ -401,7 +401,7 @@ func TestOrphanedOriginalsAreANote(t *testing.T) {
 		}
 	}
 	want := []string{
-		"2 original files (4.0 MB) from an earlier setup are still in the hidden folder " + filepath.Join(real, ".syp-trash") + ". They are not among the originals kept by shrink-your-shit and will not be deleted automatically. Move them back or delete them yourself; we won't touch them.",
+		"2 original files (4.2 MB) from an earlier setup are still in the hidden folder " + filepath.Join(real, ".syp-trash") + ". They are not among the originals kept by shrink-your-shit and will not be deleted automatically. Move them back or delete them yourself; we won't touch them.",
 		"1 original file (1.0 MB) from an earlier setup is still in the hidden folder " + filepath.Join(real, "Shows", ".syp-trash") + ". It is not one of the originals kept by shrink-your-shit and will not be deleted automatically. Move it back or delete it yourself; we won't touch it.",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {

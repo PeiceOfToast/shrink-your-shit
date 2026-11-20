@@ -364,9 +364,10 @@ func Clock(sec float64) string {
 	return fmt.Sprintf("%d:%02d:%02d", t/3600, t%3600/60, t%60)
 }
 
-// HumanBytes formats a size for messages (1.5 GB).
+// HumanBytes formats a size for messages (1.5 GB). Decimals, as drives and ffmpeg report them: 1.5 GB is
+// 1,500,000,000 bytes, not the 1.5 GiB of a binary unit.
 func HumanBytes(n int64) string {
-	const unit = 1024
+	const unit = 1000
 	if n < unit {
 		return fmt.Sprintf("%d B", n)
 	}

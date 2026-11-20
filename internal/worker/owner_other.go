@@ -7,4 +7,4 @@ package worker
 import "os"
 
 // keepOwner: Windows gives a new file the folder's inherited permissions and owner; there is nothing to copy.
-func keepOwner(string, os.FileInfo) error { return nil }
+func keepOwner(string, os.FileInfo) (ownerOutcome, error) { return ownerNothing, nil }

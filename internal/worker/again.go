@@ -71,11 +71,24 @@ func (w *Worker) replaceOwnOutput(ctx context.Context, o jobs.Original, stage *s
 		err = moveIntoPlace(ctx, stage.path, final, ours)
 	} else {
 		err = moveNoClobber(ctx, stage.path, final, ours, rules.NameTaken)
-		if err == nil && isConvertedFile(old, o) {
-			if rerr := os.Remove(old); rerr != nil {
+	}
+	if err == nil {
+		// The move happened first, so it is recorded and logged first: our earlier file only goes after it,
+		// when the name changed and it was left where it was (log-spec: moves in the order they happened).
+		w.recordMove(o.JobID, "move", stage.path, final, nil)
+		w.logLine(o.JobID, secReplace, jobs.LevelInfo, "Moved the new file into place: "+final)
+		if final != old && isConvertedFile(old, o) {
+			rerr := os.Remove(old)
+			w.recordMove(o.JobID, "remove", old, "", rerr)
+			if rerr != nil {
+				w.logLine(o.JobID, secReplace, jobs.LevelWarning, fmt.Sprintf("Could not remove our earlier converted file at %s: %v. It can be deleted by hand.", old, rerr))
 				log.Printf("convert again: our earlier file %s: %v", old, rerr)
+			} else {
+				w.logLine(o.JobID, secReplace, jobs.LevelInfo, "Removed our earlier converted file at "+old+"; the source stays in the kept original (trash).")
 			}
 		}
+	} else {
+		w.recordMove(o.JobID, "move", stage.path, final, err)
 	}
 	if err != nil {
 		var f *FailedError

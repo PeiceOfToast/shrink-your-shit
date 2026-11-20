@@ -501,6 +501,12 @@ ALTER TABLE job_log_lines ADD COLUMN level TEXT NOT NULL DEFAULT 'info';`},
 	// no row did not record them (one from before this, or one run on another computer): read as null.
 	{54, "job run counters", `
 CREATE TABLE IF NOT EXISTS job_run_stats (job_id INTEGER PRIMARY KEY, passes INTEGER NOT NULL, bytes_written INTEGER NOT NULL);`},
+	// What the replace step did to files on disk, in order (log-spec R14, design's replace step moves[]): the
+	// action, the paths, and whether it worked. A job with no rows recorded none (one from before this).
+	{55, "job file actions", `
+CREATE TABLE IF NOT EXISTS job_run_moves (job_id INTEGER NOT NULL, seq INTEGER NOT NULL, action TEXT NOT NULL,
+  from_path TEXT NOT NULL DEFAULT '', to_path TEXT NOT NULL DEFAULT '', ok INTEGER NOT NULL, error TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (job_id, seq));`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone

@@ -331,6 +331,47 @@ func TestRecoveryChecksTheOriginalsTime(t *testing.T) {
 	}
 }
 
+// Review #491 P2: the warning for a failed second move says what happened, not what is about to be tried. With
+// the name taken by a folder the new file cannot be moved, and the put-back fails too: no line may say the
+// source was put back (the failure says it is still in the trash).
+func TestAFailedPutBackIsNotSaidToHaveHappened(t *testing.T) {
+	s := newScenario(t)
+	swapHook = func(at string) error {
+		if at == "original moved" { // the name is taken by a folder meanwhile
+			if err := os.MkdirAll(filepath.Join(s.src, "x"), 0o755); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	defer func() { swapHook = nil }()
+	s.keeping(7).RunOne(context.Background()) // the failure is the job's, recorded below
+	if j := s.job(); j.Status != jobs.Failed {
+		t.Fatalf("status %s, want failed", j.Status)
+	}
+	f, err := s.store.FailureOf(s.id)
+	if err != nil || f == nil {
+		t.Fatalf("failure summary: %+v, %v", f, err)
+	}
+	if !strings.Contains(strings.Join(f.KeyLines, "\n"), "putting the original back failed") {
+		t.Errorf("the failure does not say the put-back failed: %q", f.KeyLines)
+	}
+	lines, err := s.store.LogLines(s.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range lines {
+		// "is put back at the next start" is the truth about the trash; "was put back" / "Put the source back"
+		// would claim the attempt worked.
+		if strings.Contains(l.Text, "source was put back") || strings.Contains(l.Text, "Put the source back") {
+			t.Errorf("a line says the source was put back, but it was not: %q", l.Text)
+		}
+	}
+	if read(s.trash()) != "original-bytes" {
+		t.Error("the original must still be in the trash")
+	}
+}
+
 // The converted file at the name edited the same way: not taken for the checked new file.
 func TestRecoveryChecksTheNewFilesTime(t *testing.T) {
 	s := big(t)
