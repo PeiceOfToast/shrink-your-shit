@@ -25,6 +25,7 @@ import (
 
 // Engine is what the API needs from the running scanner and worker. Nil functions do nothing.
 type Engine struct {
+	Healthy      func()                // /healthz answered "ok" (settles an update in progress)
 	ScanNow      func()                // start a scan pass now
 	NextScan     func() time.Time      // when the next regular pass starts
 	ScanEvery    time.Duration         // how often a pass starts (the -scan-every flag)
