@@ -279,6 +279,81 @@ func TestRemoteJobsProgressIsTheReportedOne(t *testing.T) {
 	}
 }
 
+// User add-on (11-20): a converting file's expected saving, an estimate the person asked for. The
+// encode's own projection when it can tell (the bytes written and how far in), else the library's
+// recent conversions, else every library's; null when nothing has been converted; negative when the
+// new file is projected bigger than the original.
+func TestOverviewExpectedSaving(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	older, _ := st.AddLibrary("Older", t.TempDir(), rules.SliderTemplate(3), true)
+	convert := func(l jobs.Library, after int64) {
+		id, _ := st.Enqueue(jobs.Job{Library: l.Path, LibraryID: l.ID, Path: filepath.Join(l.Path, "done.mkv"), SizeBefore: 1000})
+		st.Claim("w")
+		st.Complete(id, filepath.Join(l.Path, "done.mkv"), after)
+	}
+	convert(lib, 400)   // Movies' conversions come out at 40%
+	convert(older, 500) // Older's at 50%
+	run, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "run.mkv"), SizeBefore: 1000})
+	old, _ := st.Enqueue(jobs.Job{Library: older.Path, LibraryID: older.ID, Path: filepath.Join(older.Path, "old.mkv"), SizeBefore: 1000})
+	st.Claim("w")
+	st.Claim("w")
+	type estimate struct {
+		Name                    string
+		ExpectedSavingBytes     *int64
+		ExpectedSavingEstimated bool
+	}
+	read := func() map[string]estimate {
+		_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/overview"})
+		var o struct{ Active []estimate }
+		if err := json.Unmarshal([]byte(body), &o); err != nil {
+			t.Fatal(err)
+		}
+		m := map[string]estimate{}
+		for _, a := range o.Active {
+			m[a.Name] = a
+		}
+		return m
+	}
+	// no running encode of ours has said anything yet: each library's own conversions shape the guess
+	if m := read(); m["run.mkv"].ExpectedSavingBytes == nil || *m["run.mkv"].ExpectedSavingBytes != 600 ||
+		m["old.mkv"].ExpectedSavingBytes == nil || *m["old.mkv"].ExpectedSavingBytes != 500 ||
+		!m["run.mkv"].ExpectedSavingEstimated || !m["old.mkv"].ExpectedSavingEstimated {
+		t.Errorf("the fallback: %+v", m)
+	}
+	// the encode's own numbers take over while it runs; a new file bigger than the original is negative
+	worker.SetLiveForTest(run, worker.LiveJob{ProjectedSize: 900})
+	defer worker.DropLiveForTest(run)
+	worker.SetLiveForTest(old, worker.LiveJob{ProjectedSize: 1200})
+	defer worker.DropLiveForTest(old)
+	if m := read(); m["run.mkv"].ExpectedSavingBytes == nil || *m["run.mkv"].ExpectedSavingBytes != 100 ||
+		m["old.mkv"].ExpectedSavingBytes == nil || *m["old.mkv"].ExpectedSavingBytes != -200 {
+		t.Errorf("the projection: %+v", m)
+	}
+}
+
+// Nothing has been converted yet: there is nothing to project from, so the saving stays null (the page
+// keeps "not known yet") rather than a made-up number.
+func TestOverviewExpectedSavingUnknown(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "run.mkv"), SizeBefore: 1000})
+	st.Claim("w")
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/overview"})
+	var o struct {
+		Active []struct {
+			ExpectedSavingBytes     *int64
+			ExpectedSavingEstimated bool
+		}
+	}
+	if err := json.Unmarshal([]byte(body), &o); err != nil {
+		t.Fatal(err)
+	}
+	if len(o.Active) != 1 || o.Active[0].ExpectedSavingBytes != nil || o.Active[0].ExpectedSavingEstimated {
+		t.Errorf("no history: %s", body)
+	}
+}
+
 // ui-shop QA (P3): a library whose folder is empty while its originals wait in .syp-trash has no bytes before, so
 // bytesNow (before − freed − waiting) went negative (−1894 KB seen). It is floored at 0.
 func TestOverviewBytesNowNeverNegative(t *testing.T) {
