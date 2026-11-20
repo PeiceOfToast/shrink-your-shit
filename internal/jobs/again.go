@@ -213,26 +213,32 @@ func addRefused(gs []AgainGroup, code, msg string) []AgainGroup {
 
 // LibraryAgain is library id's earlier files and what Convert again can do for them (ErrNotFound: no such
 // library). A file is earlier when its newest converted job ran a workflow other than the library's current one.
+// Only files inside the library's current folder count: after its folder is changed, the jobs under the old
+// folder are not this library's files any more, so they are never counted or queued.
 func (s *Store) LibraryAgain(id int64, keepDays int) (AgainLibrary, error) {
-	if _, err := s.GetLibrary(id); err != nil {
+	lib, err := s.GetLibrary(id)
+	if err != nil {
 		return AgainLibrary{}, err
 	}
 	cur, err := s.currentRevision(id)
 	if err != nil || cur == 0 { // no revision yet: nothing ran with an earlier one
 		return AgainLibrary{}, err
 	}
-	rows, err := s.db.Query(`SELECT id FROM jobs WHERE library_id=? AND `+convertedNow("jobs")+` AND `+newestSQL+` AND workflow_rev<>? ORDER BY id`, id, cur)
+	rows, err := s.db.Query(`SELECT id, path FROM jobs WHERE library_id=? AND `+convertedNow("jobs")+` AND `+newestSQL+` AND workflow_rev<>? ORDER BY id`, id, cur)
 	if err != nil {
 		return AgainLibrary{}, err
 	}
 	var jobIDs []int64
 	for rows.Next() {
 		var jid int64
-		if err := rows.Scan(&jid); err != nil {
+		var path string
+		if err := rows.Scan(&jid, &path); err != nil {
 			rows.Close()
 			return AgainLibrary{}, err
 		}
-		jobIDs = append(jobIDs, jid)
+		if Within(path, lib.Path) {
+			jobIDs = append(jobIDs, jid)
+		}
 	}
 	rows.Close()
 	var a AgainLibrary
