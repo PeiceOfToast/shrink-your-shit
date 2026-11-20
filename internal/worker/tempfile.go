@@ -81,9 +81,9 @@ func removeLeftoverTemps(src string) error {
 	if err != nil {
 		return fmt.Errorf("looking for old temp files: %w", err)
 	}
-	// our one temp file: new.<the original's type>, or new.mkv / new.mp4 when the flow changes the type
+	// our one temp file: new.<the original's type>, or new.mkv / new.mp4 / new.mov / new.m4v when the flow changes the type
 	isStaged := func(name string) bool {
-		return name == "new"+filepath.Ext(src) || name == "new.mkv" || name == "new.mp4"
+		return name == "new"+filepath.Ext(src) || name == "new.mkv" || name == "new.mp4" || name == "new.mov" || name == "new.m4v"
 	}
 	for _, p := range old {
 		fi, err := os.Lstat(p)

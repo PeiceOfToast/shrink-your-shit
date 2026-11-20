@@ -4,11 +4,13 @@ package worker
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
@@ -112,5 +114,70 @@ func TestTenBitSDRSourceAsksForATenBitEncoder(t *testing.T) {
 	}
 	if codec != "libx265" || !need10 || hdr != nil {
 		t.Fatalf("encoder asked with codec %q need10 %v hdr %v, want libx265, true, nil", codec, need10, hdr)
+	}
+}
+
+// The rule reads the source's depth, not the target's: a 10-bit SDR source made into H.264 still asks the
+// encoder with need10 set, because the card must not be the one dropping the depth (its H.264 has no 10-bit).
+// A card whose H.264 encoder is 8-bit only is refused, and the processor's libx264 converts the file at its
+// 10 bits, keeping the source's depth whatever the target; the file is replaced and the log says 10-bit.
+// Reading the target instead (EncodeTenBit, false for H.264) would pass every other test and hand the file
+// to that encoder, silently making it 8-bit on the card — the #498 downgrade.
+func TestTenBitSDRSourceToH264UsesTheProcessor(t *testing.T) {
+	rules.SetAvailableFormats(map[string]bool{"libx264": true}) // an ffmpeg with libx264; HEVC is always offered
+	defer rules.SetAvailableFormats(nil)
+	s := newScenario(t)
+	s.srcSpec = spec{duration: 100, chapters: 2, streams: []map[string]any{
+		vid("hevc", 640, 360, "yuv420p10le"), aud("aac", "eng", 2), sub("subrip", "eng", false), att("font.ttf")}}
+	s.outSpec = spec{duration: 100, chapters: 2, streams: []map[string]any{ // what libx264 writes from a 10-bit source
+		vid("h264", 640, 360, "yuv420p10le"), aud("aac", "eng", 2), sub("subrip", "eng", false), att("font.ttf")}}
+	w := s.worker(Replace)
+	sel := rules.DefaultSelectors(3)
+	sel.Format = "h264"
+	tmpl := sel.Template()
+	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	p := tmpl.Compile(must(media.ParseProbe([]byte(s.srcSpec.json()))))
+	if p.Skip != "" || !p.Video.TenBit || p.EncodeTenBit() || !tenBitSource(p) {
+		t.Fatalf("the case does not take the path it is about: skip %q, tenBit %v, encodeTenBit %v, tenBitSource %v",
+			p.Skip, p.Video.TenBit, p.EncodeTenBit(), tenBitSource(p))
+	}
+	var asked bool
+	var need10 bool
+	w.Encoder = func(c string, n bool, h *rules.HDR) (string, string) {
+		if c != "libx264" {
+			return "", ""
+		}
+		asked, need10 = true, n
+		if n { // this card's H.264 encoder takes 8-bit frames only
+			return "", "h264_nvenc can't do a 10-bit file"
+		}
+		return "h264_nvenc", ""
+	}
+	w.RunOne(context.Background())
+	if !asked || !need10 {
+		t.Fatalf("encoder asked %v with need10 %v, want libx264 with need10 true", asked, need10)
+	}
+	if enc := encodeCalls(s); len(enc) != 1 || !strings.Contains(enc[0], "libx264") || strings.Contains(enc[0], "h264_nvenc") {
+		t.Fatalf("encodes, want the processor's libx264 only:\n%s", strings.Join(enc, "\n"))
+	}
+	if b, _ := os.ReadFile(s.src); string(b) != "new" { // libx264 keeps the 10 bits, so the file is replaced
+		t.Errorf("the original should be replaced by the converted file, has %q", b)
+	}
+	if j := s.job(); j.Status != jobs.Done {
+		t.Errorf("status %s (error %q), want done", j.Status, j.Error)
+	}
+	var converted string
+	if steps, err := s.store.Steps(s.id); err != nil {
+		t.Fatal(err)
+	} else {
+		for _, st := range steps {
+			if st.Step == "converted" {
+				converted = st.Words
+			}
+		}
+	}
+	// The depth is the one the encoder that ran made: the processor's libx264 kept 10 bits, so the line says so.
+	if !strings.Contains(converted, "· 10-bit ·") {
+		t.Errorf("the converted step says %q, want it to name 10-bit", converted)
 	}
 }

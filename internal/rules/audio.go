@@ -3,6 +3,7 @@
 package rules
 
 import (
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -31,6 +32,55 @@ type TrackOp struct {
 	Language string `json:"language,omitempty"` // an added track's language (its source's)
 	// Kind is an extracted subtitle's kind for the .srt name's {{sub_kind}} (W4b): "forced", "sdh" or "".
 	Kind string `json:"kind,omitempty"`
+	// Title: the name the track has in players ("Stereo (AAC)"), on the tracks the plan makes (converted or
+	// added). Left out of the fingerprint (Snapshot.Fingerprint): a name is not a setting.
+	Title string `json:"title,omitempty"`
+}
+
+// trackTitle names an audio track made with codec (ffprobe's name) and channels: the layout, then the codec in
+// brackets. "" when the count or the codec is unknown.
+func trackTitle(codec string, channels int) string {
+	if channels <= 0 || codec == "" {
+		return ""
+	}
+	layouts := map[int]string{1: "Mono", 2: "Stereo", 6: "Surround 5.1", 8: "Surround 7.1"}
+	names := map[string]string{"aac": "AAC", "eac3": "E-AC-3", "ac3": "AC-3", "opus": "Opus"}
+	layout, ok := layouts[channels]
+	if !ok {
+		layout = fmt.Sprintf("%d channels", channels)
+	}
+	name, ok := names[codec]
+	if !ok {
+		name = codec
+	}
+	return layout + " (" + name + ")"
+}
+
+// titleTracks names the audio tracks the plan makes (converted or added). A track that keeps its channels
+// (Channels 0) takes the source's count. A converted track of a titled source keeps that title (ffmpeg copies
+// it); an added track is a new track, so it gets its own name.
+func (p *Plan) titleTracks(info media.Info) {
+	src := map[int]int{}
+	titled := map[int]bool{} // a source track that already has its own title keeps it
+	for _, a := range info.Audio() {
+		src[a.Index] = a.Channels
+		titled[a.Index] = a.Title != ""
+	}
+	for i := range p.Tracks {
+		op := &p.Tracks[i]
+		if op.Type != "audio" || (!op.Add && (op.Drop || op.Encoder == "")) {
+			continue
+		}
+		if titled[op.Index] && !op.Add {
+			op.Title = "" // ffmpeg copies the source's title with the track
+			continue
+		}
+		ch := op.Channels // the encoded count: a mono source upmixed to stereo is stereo
+		if ch == 0 {
+			ch = src[op.Index] // no downmix: the source's own count
+		}
+		op.Title = trackTitle(op.Codec, ch)
+	}
 }
 
 // audioTargets are the codecs the audio choices convert to: ffmpeg encoder, codec name, kbps per channel.
