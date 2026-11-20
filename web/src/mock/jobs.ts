@@ -135,13 +135,13 @@ function mockJobLogRaw(id: string): JobLog | { error: { code: string; message: s
   if (id === "no-log") return { state: "none", steps: [], final: null };
   if (id === "old-log-imported") {
     const lines = Array.from({ length: 250 }, (_, i) => "line " + (i + 1) + ": FFMPEG frame output for this old job");
-    return { state: "complete", steps: [{ name: "imported", startedAt: null, tookMs: null, outcome: "done", command: null, probe: null, check: null, outputLines: 250, output: lines.slice(-200), result: "Done" }], final: "done" };
+    return { state: "complete", steps: [{ name: "imported", startedAt: null, tookMs: null, outcome: "done", command: null, probe: null, check: null, outputLines: 250, output: lines.slice(-200), result: "Done", found: [] }], final: "done" };
   }
   if (id === "failed-replace") {
     return { state: "complete", ...runInfo("failed"), steps: [
-      { name: "encode", startedAt: "2026-11-11T14:00:00Z", tookMs: 120000, outcome: "ok", command: "ffmpeg -i in.mkv -c:v libx265 -crf 22 out.mkv", probe: { videoCodec: "h264", bitrateKbps: 8000, durationSec: 3600, sizeBytes: 3 * GB, streams: [{ index: 0, type: "video", codec: "h264", Width: 1920, Height: 1080 }] }, check: { score: 0.967, min: 0.95, passed: true }, outputLines: 10, output: ["[hevc @ 0x55d1] output file #0 does not contain any stream"], result: "Done" },
-      { name: "check", startedAt: "2026-11-11T14:02:00Z", tookMs: 5000, outcome: "ok", command: null, probe: null, check: { score: 0.967, min: 0.95, passed: true }, outputLines: 0, output: [], result: "Passed" },
-      { name: "replace", startedAt: "2026-11-11T14:02:05Z", tookMs: 500, outcome: "failed", command: null, probe: null, check: null, outputLines: 0, output: [], result: "Failed" },
+      { name: "encode", startedAt: "2026-11-11T14:00:00Z", tookMs: 120000, outcome: "ok", command: "ffmpeg -i in.mkv -c:v libx265 -crf 22 out.mkv", probe: { videoCodec: "h264", bitrateKbps: 8000, durationSec: 3600, sizeBytes: 3 * GB, streams: [{ index: 0, type: "video", codec: "h264", Width: 1920, Height: 1080 }] }, check: { score: 0.967, min: 0.95, passed: true }, outputLines: 10, output: ["[hevc @ 0x55d1] output file #0 does not contain any stream"], result: "Done", found: [] },
+      { name: "check", startedAt: "2026-11-11T14:02:00Z", tookMs: 5000, outcome: "ok", command: null, probe: null, check: { score: 0.967, min: 0.95, passed: true }, outputLines: 0, output: [], result: "Passed", found: [] },
+      { name: "replace", startedAt: "2026-11-11T14:02:05Z", tookMs: 500, outcome: "failed", command: null, probe: null, check: null, outputLines: 0, output: [], result: "Failed", found: [] },
     ], final: "The new file was converted, but saving it in place of the original failed." };
   }
   // a skipped job has no run step: the server's one stand-in step, its outcome the final state (v2joblog.go importedStep)
