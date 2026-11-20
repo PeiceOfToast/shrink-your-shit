@@ -12,7 +12,7 @@ export interface Overview {
   trash: { bytes: number; files: number; nextDeleteAt: string | null };
   workers: { id: string; name: string; kind: string; status: WorkerStatus; slots: { cpu?: { used: number; total: number }; used?: number; total?: number }; jobs: OverviewJob[]; cpuPercent: number | null; gpuPercent: number | null }[];
   active: { jobId: string; library: { id: string; name: string } | null; name: string; percent: number | null; etaS: number | null; expectedSavingBytes: number | null; expectedSavingEstimated?: boolean }[];
-  libraries: { id: string; name: string; state: "active" | "paused" | "paused_share"; bytesBefore: number; bytesNow: number; saved: number; savedPercent: number | null; waitingToFree: number; couldFree: number; grew?: number;
+  libraries: { id: string; name: string; state: "active" | "paused" | "paused_share" | "no_workflow"; bytesBefore: number; bytesNow: number; saved: number; savedPercent: number | null; waitingToFree: number; couldFree: number; grew?: number;
     counts: { done: number; waiting: number; skipped: number; failed: number } }[];
   daily: { day: string; recorded: boolean; completed: number; skipped: number; failed: number; freedBytes: number; savedBytes?: number; waitingBytes?: number; couldFreeBytes?: number }[];
   // workshop #309 (11-19): savedBytes = NET saving of conversions finished that day; waitingBytes = the part of it whose
@@ -44,7 +44,7 @@ function sample(): Overview {
     active: sum.activeJobs.map((j) => ({ jobId: j.id, library: j.library, name: j.file.name, percent: j.progress?.percent ?? null, etaS: j.progress?.etaS ?? null, expectedSavingBytes: j.expectedSavingBytes ?? null, expectedSavingEstimated: j.expectedSavingEstimated ?? false })),
     libraries: s.libraries.map((l) => {
       const now = l.counts.files * 1.4 * GB, saved = l.bytes.freed;
-      return { id: l.id, name: l.name, state: l.status === "paused_share" ? "paused_share" : l.enabled ? "active" : "paused", bytesBefore: now + saved + l.bytes.waitingToFree, bytesNow: now, saved, savedPercent: saved > 0 ? Math.round((saved / (now + saved + l.bytes.waitingToFree)) * 1000) / 10 : null,
+      return { id: l.id, name: l.name, state: l.status === "paused_share" ? "paused_share" : l.status === "no_workflow" ? "no_workflow" : l.enabled ? "active" : "paused", bytesBefore: now + saved + l.bytes.waitingToFree, bytesNow: now, saved, savedPercent: saved > 0 ? Math.round((saved / (now + saved + l.bytes.waitingToFree)) * 1000) / 10 : null,
         waitingToFree: l.bytes.waitingToFree, couldFree: 0, grew: l.bytes.grew ?? 0, counts: { done: l.counts.completed, waiting: l.counts.waiting, skipped: l.counts.skipped, failed: l.counts.failed } };
     }),
     daily: days.map((day, i) => i < 6 ? { day, recorded: false, completed: 0, skipped: 0, failed: 0, freedBytes: 0 }

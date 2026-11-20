@@ -43,13 +43,16 @@ async function act<T>(f: () => Promise<Answer<T>>, onError: (m: string) => void)
 export const PRIORITIES: [number, string][] = [[10, "High"], [0, "Normal"], [-10, "Low"]];
 export const priorityWord = (n: number) => PRIORITIES.find(([v]) => v === n)?.[1] ?? "Custom (" + n + ")";
 // enabled is both "started" and Pause/Resume on the server: never scanned and not enabled reads as Not started.
-const notStarted = (l: Library) => !l.enabled && !l.scan.lastScanAt;
-const paused = (l: Library) => !l.enabled && !!l.scan.lastScanAt;
+// no_workflow (the server's status): a library with no workflow can't be started, and it wins over every other status.
+const noWf = (l: Library) => l.status === "no_workflow";
+const notStarted = (l: Library) => !l.enabled && !l.scan.lastScanAt && !noWf(l);
+const paused = (l: Library) => !l.enabled && !!l.scan.lastScanAt && !noWf(l);
 // The server pauses a library whose share isn't connected (enabled stays true): it waits, it isn't converting.
 const shareWait = (l: Library) => l.status === "paused_share";
 const shareName = (l: Library) => l.pausedBy?.shareName ?? "the share";
 // One status pill per row (S1): accent only while something is happening; normal states are neutral; Paused warns.
 function Status({ l }: { l: Library }) {
+  if (noWf(l)) return <span className="pill warn"><Icon id="i-alert" />No workflow</span>;
   if (l.scan.state === "scanning") return <span className="pill run"><Icon id="i-refresh" />Scanning{l.scan.progress ? " · " + count(l.scan.progress) + " found" : ""}</span>;
   if (notStarted(l)) return <span className="pill"><Icon id="i-pause" />Not started</span>;
   if (shareWait(l)) return <span className="pill warn"><Icon id="i-pause" />Share not connected yet</span>;
@@ -61,7 +64,10 @@ function Status({ l }: { l: Library }) {
 // Pause/Resume's words (design SCREENS V5): Pause confirms nothing, Resume undoes it.
 export async function pauseResume(ls: Library[], enabled: boolean, say: (m: string) => void) {
   const bad: string[] = [];
-  for (const l of ls) await act(() => patchLibraryV2(l.id, { enabled }), (m) => bad.push(l.name + ": " + m));
+  for (const l of ls) {
+    if (noWf(l)) { bad.push(l.name + ": no workflow."); continue; } // can't be started: say so rather than send a 409
+    await act(() => patchLibraryV2(l.id, { enabled }), (m) => bad.push(l.name + ": " + m));
+  }
   const done = ls.length - bad.length, who = ls.length === 1 ? ls[0].name : plural(done, "library", "libraries");
   say((done ? who + (enabled ? " resumed." : " paused. Files already converting will finish.") : "") + (bad.length ? " Not changed: " + bad.join(" ") : ""));
 }
@@ -96,7 +102,7 @@ export function Libraries() {
   const needSel = none ? "Select libraries first" : undefined;
   const pr = async (enabled: boolean) => { setSaid(""); await pauseResume(picked.filter((l) => l.enabled !== enabled && !notStarted(l)), enabled, setSaid); setSel([]); libs.reload(); };
   // design (SCREENS V5): only the action that applies; both only when the selection mixes paused and watching libraries
-  const canPause = picked.some((l) => l.enabled), canResume = picked.some(paused);
+  const canPause = picked.some((l) => l.enabled), canResume = picked.some((l) => paused(l) || noWf(l)); // a no-workflow one is named as not changed
   const actions = <>
     <button className="btn sm ghost" type="button" disabled={none} title={needSel} onClick={scan}><Icon id="i-refresh" />Scan now</button>
     {canPause && <button className="btn sm ghost" type="button" onClick={() => pr(false)}><Icon id="i-pause" />Pause</button>}
@@ -130,13 +136,15 @@ export function Libraries() {
               <td className="idc"><Link className="ttl" to={"/libraries/" + l.id}>{l.name}</Link>
                 <span className="sub mono path" title={l.paths.join(", ")}>{l.paths.map((p, i) => <span key={i}>{i > 0 && ", "}{breakPath(p)}</span>)}</span>
                 {!l.writable && <p className="st bad sm"><Icon id="i-alert" /><span>{l.unwritableMessage} <Link className="over" to="/settings/health">How to fix it</Link></span></p>}{/* p, not .sub: .sub is grey and hidden on phones (QA #439) */}
+                {noWf(l) && <span className="sub">No workflow · assign one to start it</span>}
                 {paused(l) && <span className="sub">Paused · {count(l.counts.waiting)} waiting, not converting</span>}
                 {shareWait(l) && <span className="sub">Waiting for {shareName(l)} to connect · {count(l.counts.waiting)} waiting</span>}
-                <span className="sub phone">{paused(l) ? "Paused · " + count(l.counts.waiting) + " waiting, not converting"
+                <span className="sub phone">{noWf(l) ? "No workflow yet"
+                  : paused(l) ? "Paused · " + count(l.counts.waiting) + " waiting, not converting"
                   : shareWait(l) ? "Waiting for " + shareName(l) + " to connect · " + count(l.counts.waiting) + " waiting"
                   : [l.workflowName, count(l.counts.waiting) + " waiting", l.scan.lastScanAt ? "scanned " + lastScan(l.scan.lastScanAt) : "not scanned yet"].join(" · ")}</span>
                 {tag(l) && <span className="sub phone" title={tag(l)}>{shortTag(tag(l))}</span>}</td>
-              <td data-p="2"><Link to={"/workflows/" + l.workflowId}>{l.workflowName}</Link>{tag(l) && <span className="sub wftag" title={tag(l)}>{shortTag(tag(l))}</span>}</td>
+              <td data-p="2">{noWf(l) ? <span className="muted">No workflow</span> : <Link to={"/workflows/" + l.workflowId}>{l.workflowName}</Link>}{tag(l) && <span className="sub wftag" title={tag(l)}>{shortTag(tag(l))}</span>}</td>
               <td className="num" data-p="3">{count(l.counts.waiting)}</td>
               <td className="nowrap" data-p="4">{lastScan(l.scan.lastScanAt)}</td>
               <td className="nowrap" data-p="5">{priorityWord(l.priority)}</td>
@@ -249,20 +257,24 @@ export function FirstFive({ f, scanned = false }: { f: ReturnType<typeof useFold
 }
 
 // The Workflow select. A workflow that can't be used yet (on the mock: never published, 87faa4b) is listed but disabled.
-export function WorkflowField({ value, onChange, workflows, self }: { value: string; onChange: (id: string) => void; workflows?: WorkflowChoice[]; self?: string }) {
+// none: "No workflow yet" (flowId "0") is offered: a new library, or one that already has no workflow. Never for one that has one.
+export function WorkflowField({ value, onChange, workflows, self, none }: { value: string; onChange: (id: string) => void; workflows?: WorkflowChoice[]; self?: string; none?: boolean }) {
   if (!workflows) return <div className="field"><span className="lab">Workflow</span><span className="muted">Loading…</span></div>;
   const others = (workflows.find((w) => w.id === value)?.usedBy ?? []).filter((n) => n !== self);
+  const hint = value === "0" ? "The library won't start until you assign a workflow." : !workflows.some((w) => w.usable) ? "Publish a workflow before a library can use it." : others.length ? "Used by " + names(others) + "." : "No other library uses it.";
   return (
     <div className="field"><label htmlFor="lib-wf">Workflow</label>
-      {workflows.length === 0 ? <span>No workflows yet. <Link to="/workflows">Make one in Workflows</Link>, then come back.</span> : <>
+      {workflows.length === 0 && !none ? <span>No workflows yet. <Link to="/workflows">Make one in Workflows</Link>, then come back.</span> : <>
         <div className="row" style={{ gap: 8 }}>
           <select id="lib-wf" className="input" value={value} onChange={(e) => onChange(e.target.value)} aria-describedby="lib-wf-hint" style={{ flex: 1 }}>
             {!value && <option value="">Choose a workflow</option>}
+            {none && <option value="0">No workflow yet</option>}
             {workflows.map((w) => <option key={w.id} value={w.id} disabled={!w.usable}>{w.name}{w.usable ? "" : " (not published yet)"}</option>)}
           </select>
-          {value && <Link className="btn sm ghost" to={"/workflows/" + value}>Edit this workflow</Link>}
+          {value && value !== "0" && <Link className="btn sm ghost" to={"/workflows/" + value}>Edit this workflow</Link>}
         </div>
-        <span id="lib-wf-hint" className="hint">{!workflows.some((w) => w.usable) ? "Publish a workflow before a library can use it." : others.length ? "Used by " + names(others) + "." : "No other library uses it."}</span>
+        <span id="lib-wf-hint" className="hint">{hint}</span>
+        {workflows.length === 0 && <span className="hint">No workflows yet. <Link to="/workflows">Make one in Workflows</Link>.</span>}
       </>}
     </div>
   );
@@ -278,16 +290,18 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
   const name = typed ? typedName : suggestName(f.checked, taken);
   const [wf, setWf] = useState(l?.flowId ?? "");
   const [error, setError] = useState(""), [said, setSaid] = useState(""), [busy, setBusy] = useState(false);
-  const pick = wf || (!l && workflows?.find((w) => w.usable)?.id) || ""; // a new library starts on the first usable one
+  const noWfNow = v?.status === "no_workflow"; // a library with no workflow yet: its select shows "No workflow yet" until one is chosen
+  const cur = l ? (noWfNow ? "0" : l.flowId) : "";
+  const pick = wf || (!l && workflows?.find((w) => w.usable)?.id) || (noWfNow ? "0" : "") || ""; // a new library starts on the first usable one
   const moved = !!l && f.checked !== l.path;
   const prioChanged = !!v && priority !== v.priority;
-  const changed = !l || name !== l.name || moved || pick !== l.flowId || prioChanged;
+  const changed = !l || name !== l.name || moved || pick !== cur || prioChanged;
   const save = async () => {
     setSaid(""); setError(""); setBusy(true);
     try {
       if (!l) { const r = await act(() => addLibrary(name, f.checked, pick), setError); if (r) navigate("/libraries/" + r.id); return; }
       if (name !== l.name || moved) { if (!(await act(() => patchLibrary(l.id, { ...(name !== l.name && { name }), ...(moved && { path: f.checked }) }), setError))) return; }
-      if (pick !== l.flowId) { if (!(await act(() => setLibraryWorkflow(l.id, pick), setError))) return; }
+      if (pick !== cur) { if (!(await act(() => setLibraryWorkflow(l.id, pick), setError))) return; }
       if (prioChanged) { if (!(await act(() => patchLibraryV2(l.id, { priority }), setError))) return; setPrio(null); }
       setSaid("Saved."); reload();
     } finally { setBusy(false); }
@@ -300,14 +314,15 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
         {v && v.enabled && <button className="btn" type="button" onClick={() => pauseResume([v], false, setNote).then(reload)}><Icon id="i-pause" />Pause</button>}
         {v && paused(v) && <button className="btn" type="button" onClick={() => pauseResume([v], true, setNote).then(reload)}><Icon id="i-play" />Resume</button>}
         {l && <SeeJobs id={l.id} />}
-        {l && <button className="btn" type="button" disabled={v?.scan.state === "scanning"} onClick={scan}><Icon id="i-refresh" />{v?.scan.state === "scanning" ? "Scanning…" : "Scan now"}</button>}
+        {l && <button className="btn" type="button" disabled={noWfNow || v?.scan.state === "scanning"} aria-describedby={noWfNow ? "lib-nowf-hint" : undefined} onClick={scan}><Icon id="i-refresh" />{v?.scan.state === "scanning" ? "Scanning…" : "Scan now"}</button>}
       </PageHead>
       {note && <p className="muted" role="status">{note}</p>}
+      {noWfNow && <p className="muted" role="note" id="lib-nowf-hint">Assign a workflow to start this library.</p>}
       {v && notStarted(v) && <p className="muted" role="note">This library isn't started yet: nothing is looked for or converted until you press Scan now.</p>}
       {v && paused(v) && <p className="muted" role="note">While paused, its files wait in the queue and aren't converted. Scans add no new files. Files already converting finish.</p>}
       {v && !v.writable && <p className="st bad" role="note"><Icon id="i-alert" /><span>{v.unwritableMessage} <Link to="/settings/health">How to fix it</Link></span></p>}
       {v && shareWait(v) && <p className="muted" role="note">Share not connected yet. Its files wait in the queue and aren't converted until {shareName(v)} connects.</p>}
-      {l && v && <EarlierWorkflow v={v} />}
+      {l && v && !noWfNow && <EarlierWorkflow v={v} />}
       {l && <nav className="tabs" aria-label="Library sections">
         {[["general", "General"], ["discovery", "Discovery"], ["output", "Output"]].map(([k, t]) =>
           <Link key={k} to={"/libraries/" + l.id + (k === "general" ? "" : "?tab=" + k)} aria-current={tab === k ? "page" : undefined}>{t}</Link>)}
@@ -321,7 +336,7 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
               <input id="lib-name" className="input" required value={name} onChange={(e) => (setName(e.target.value), setTyped(true))} placeholder="Movies" /></div>
             <FolderField f={f} free={l && !moved ? l.freeBytes : undefined} />
             <div className="field"><span className="lab">File type</span><span>Video</span></div>
-            <WorkflowField value={pick} onChange={setWf} workflows={workflows} self={l?.name} />
+            <WorkflowField value={pick} onChange={setWf} workflows={workflows} self={l?.name} none={!l || noWfNow} />
             {v && <div className="field"><label htmlFor="lib-prio">Priority</label>
               <select id="lib-prio" className="input" value={priority} onChange={(e) => setPrio(Number(e.target.value))} aria-describedby="lib-prio-h">
                 {PRIORITIES.map(([n, w]) => <option key={n} value={n}>{w}</option>)}
@@ -457,6 +472,7 @@ function Output({ v, reload }: { v: Library; reload: () => void }) {
     try { if (await act(() => patchLibraryV2(v.id, { overrideFolder: to }), setError)) { setSaid(to ? "Saved. New files for " + v.name + " go to " + to + "." : "Saved. " + v.name + " uses the workflow's folder again."); if (!to) setDir(""); reload(); } }
     finally { setBusy(false); }
   };
+  if (v.status === "no_workflow") return <section className="card" aria-labelledby="out-h"><div className="hd"><h2 id="out-h">Where results go</h2></div><div className="bd"><p className="muted">A workflow sets where results go. Assign one to this library first.</p></div></section>;
   return (
     <section className="card" aria-labelledby="out-h">
       <div className="hd"><h2 id="out-h">Where results go</h2></div>
