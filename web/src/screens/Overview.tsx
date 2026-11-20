@@ -56,16 +56,16 @@ function DayBars({ title, note, days, series, fmt, tick = true, extra, quiet }: 
       : <ul className="legend ph" aria-hidden="true"><li>&nbsp;</li></ul>/* design 11-19: keeps side-by-side baselines level; hidden when the charts stack */}
     <svg ref={ref} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={title + ", last " + n + " days" + (notRec ? "; the first " + notRec + " not recorded" : "") + ". The table below has every day."} className="daychart">
       {[0, 0.5, 1].map((f) => <line key={f} x1="0" x2={W} y1={base - y(max * f)} y2={base - y(max * f)} stroke={f ? "var(--border)" : "var(--border-strong)"} strokeWidth="1" vectorEffect="non-scaling-stroke" />)}
-      {tick && <text x="0" y={top - 4} fill="var(--text-2)" fontSize="12">{fmt(max)}</text>}
+      {tick && <text x="0" y={top - 4} fill="var(--text-2)" style={{ fontSize: "var(--fs-sm)" }}>{fmt(max)}</text>}
       {at != null && <rect x={at * bw} y={top} width={bw} height={base - top} fill="var(--raised)" />}
       {days.map((dd, i) => { const x = i * bw + (bw - barW) / 2;
         if (!dd.recorded) return <rect key={dd.day} x={x} y={base - 2} width={barW} height={2} fill="var(--border)" />;
         let yy = base; const parts = series.map((s) => ({ s, h: y(s.value(dd)) })).filter((p) => p.h > 0);
         return <g key={dd.day}>{parts.map((p, k) => { const last = k === parts.length - 1, gap = k ? 2 : 0, h = Math.max(1, p.h - gap); yy -= p.h;
           return last ? <path key={k} d={roundTop(x, yy, barW, h)} fill={p.s.color} /> : <rect key={k} x={x} y={yy} width={barW} height={h} fill={p.s.color} />; })}</g>; })}
-      <text x="0" y={H - 4} fill="var(--text-2)" fontSize="12">{dayName(days[0].day)}</text>
-      {W >= 480 && <text x={W / 2} y={H - 4} fill="var(--text-2)" fontSize="12" textAnchor="middle">{dayName(days[Math.floor(n / 2)].day)}</text>}
-      <text x={W} y={H - 4} fill="var(--text-2)" fontSize="12" textAnchor="end">{dayName(days[n - 1].day)}</text>
+      <text x="0" y={H - 4} fill="var(--text-2)" style={{ fontSize: "var(--fs-sm)" }}>{dayName(days[0].day)}</text>
+      {W >= 480 && <text x={W / 2} y={H - 4} fill="var(--text-2)" style={{ fontSize: "var(--fs-sm)" }} textAnchor="middle">{dayName(days[Math.floor(n / 2)].day)}</text>}
+      <text x={W} y={H - 4} fill="var(--text-2)" style={{ fontSize: "var(--fs-sm)" }} textAnchor="end">{dayName(days[n - 1].day)}</text>
       {days.map((dd, i) => <rect key={dd.day} x={i * bw} y="0" width={bw} height={H} fill="transparent" onMouseEnter={() => setAt(i)} />)}
     </svg>
     {d && <div className="tip" style={{ left: `clamp(80px, ${((at! + 0.5) / n) * 100}%, calc(100% - 80px))` }}>

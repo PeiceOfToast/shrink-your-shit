@@ -8,7 +8,7 @@ a{color:var(--accent-text)}
 h1,h2,h3,h4{margin:0;line-height:1.25}
 h1{font-size:var(--fs-xl)} h2{font-size:var(--fs-lg)} h3{font-size:calc(15px*var(--font-scale))}
 p{margin:0 0 8px}
-code,.mono{font-family:var(--mono);font-size:.92em}
+code,.mono{font-family:var(--mono);font-size:max(.92em,var(--fs-sm))}
 .muted{color:var(--text-2)} .sm{font-size:var(--fs-sm)}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
@@ -37,7 +37,7 @@ code,.mono{font-family:var(--mono);font-size:.92em}
 .rail .foot button{width:100%;justify-content:flex-start}
 .rail-collapsed .lbl,.rail-collapsed .grp,.rail-collapsed .brand span.t{display:none}
 .rail-collapsed .nav a{justify-content:center;padding:0}
-.rail-collapsed .badge{position:absolute;top:4px;right:6px;margin:0;min-width:16px;height:16px;font-size:var(--fs-sm);padding:0 3px}
+.rail-collapsed .badge{position:absolute;top:4px;right:6px;margin:0;min-width:16px;min-height:16px;font-size:var(--fs-sm);padding:0 3px}
 .badge.off{background:var(--raised);color:var(--text-2);box-shadow:inset 0 0 0 1px var(--border-strong);font-weight:500}
 .rail-collapsed .badge.off{min-width:8px;height:8px;padding:0;font-size:0;top:8px;right:10px;background:var(--text-2)} /* no room for the word: a grey dot */
 .rail-collapsed .brand{justify-content:center;padding:0}
