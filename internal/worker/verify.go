@@ -70,7 +70,7 @@ type KeptError struct {
 func (e *KeptError) Error() string { return "kept original: " + e.Reason }
 
 // pictureTooDifferent begins the picture check's refusal.
-const pictureTooDifferent = "the picture of the new file is too different from the original"
+const pictureTooDifferent = jobs.PictureTooDifferentWords
 
 func kept(format string, a ...any) error {
 	return &KeptError{Code: jobs.ReasonKeptOriginal, Reason: fmt.Sprintf(format, a...)}

@@ -236,3 +236,28 @@ func TestEncoderFamilyAndProductName(t *testing.T) {
 		t.Errorf("hint missing capitalised product name: %q", hint)
 	}
 }
+
+// The check_failed hint is about quality only for the picture-similarity refusal. A size or stream miss (job 48)
+// and a check that could not run get the neutral hint, not "Pick a higher quality".
+func TestCheckFailedHintMatchesTheRefusal(t *testing.T) {
+	for _, c := range []struct {
+		stored  string
+		quality bool
+	}{
+		{"kept original: " + PictureTooDifferentWords + " (similarity 0.912 at 00:01:02, 0.95 is required)", true},
+		{"kept original: video #1: the picture size was planned as 854x480 but is 852x480 in the new file", false},
+		{"kept original: the new file has no video", false},
+		{"kept original: the picture comparison at 00:01:02 gave no result", false},
+	} {
+		msg, hint := FailureWords("check_failed", FailureFacts{Stored: c.stored})
+		if got := strings.Contains(hint, "Pick a higher quality"); got != c.quality {
+			t.Errorf("%q: quality hint %v, want %v (hint %q)", c.stored, got, c.quality, hint)
+		}
+		if c.quality != strings.Contains(msg, "picture check") {
+			t.Errorf("%q: message %q", c.stored, msg)
+		}
+		if hint == "" {
+			t.Errorf("%q: no hint", c.stored)
+		}
+	}
+}
