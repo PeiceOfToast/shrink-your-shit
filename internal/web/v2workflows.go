@@ -15,6 +15,7 @@ import (
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
 )
 
@@ -41,6 +42,63 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			return
 		}
 		writeJSON(w, t)
+	})
+	// Empty trash now: the scheduled purge's own code, now, for every library or one (libraryId). A library whose
+	// share is not connected is reported in skipped and nothing in it is touched.
+	api.HandleFunc("POST /api/v2/trash/purge", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			LibraryID int64 `json:"libraryId"`
+		}
+		if r.ContentLength != 0 && !readJSON(w, r, &req) {
+			return
+		}
+		set, err := LoadSettings(store)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		libs, err := store.Libraries()
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		if req.LibraryID != 0 {
+			libs = slices.DeleteFunc(libs, func(l jobs.Library) bool { return l.ID != req.LibraryID })
+			if len(libs) == 0 {
+				apiError(w, http.StatusNotFound, "library_not_found", "There is no library with that id. Nothing was changed.")
+				return
+			}
+		}
+		waiting, err := WaitingMounts(store)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		type skip struct {
+			Library string `json:"library"`
+			Reason  string `json:"reason"`
+		}
+		skipped := []skip{}
+		unmounted := map[int64]bool{}
+		for _, l := range libs {
+			if Waits(l.Path, waiting) {
+				unmounted[l.ID] = true
+				skipped = append(skipped, skip{Library: l.Name, Reason: "Its share isn't connected, so nothing in it was touched."})
+			}
+		}
+		rep := worker.Purge(store, set.KeepOriginalsDays, time.Now(), func(p string) bool { return Waits(p, waiting) }, req.LibraryID)
+		for _, said := range rep.Said {
+			log.Printf("empty trash: %s", said)
+		}
+		for _, l := range libs {
+			if unmounted[l.ID] {
+				log.Printf("empty trash: library %s: skipped, its share isn't connected", l.Name)
+				continue
+			}
+			c := rep.Libraries[l.ID]
+			log.Printf("empty trash: library %s: deleted %d kept original(s), freed %d bytes", l.Name, c.Deleted, c.FreedBytes)
+		}
+		writeJSON(w, map[string]any{"deletedFiles": rep.Deleted, "freedBytes": rep.FreedBytes, "skipped": skipped})
 	})
 	// v1's settings, unchanged (first-run progress among them): the same handlers answer both paths
 	settingsV1 := func(w http.ResponseWriter, r *http.Request) {
