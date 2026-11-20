@@ -120,10 +120,9 @@ func TestRestoredOriginalCountsNowhere(t *testing.T) {
 	}
 }
 
-// A file converted twice whose newer conversion was restored is the original file again: it is Skipped, and
-// the older conversion does not count as done either, on every surface (was review #431 P2, reversed: a restored
-// file is never Done).
-func TestRestoringTheNewerConversionSkipsTheFile(t *testing.T) {
+// A file converted twice whose newer conversion was restored keeps the older conversion as done: the older
+// output still stands in the library (review #431 P2). The restored newer job is skipped, never done.
+func TestRestoringTheNewerConversionKeepsTheOlderOne(t *testing.T) {
 	s := open(t)
 	check := func(err error) {
 		t.Helper()
@@ -170,8 +169,8 @@ func TestRestoringTheNewerConversionSkipsTheFile(t *testing.T) {
 	check(s.SetSwapState(i2, OriginalRestored))
 	after := countsOf(t, s, l, w.ID, since, now)
 
-	if n := after["done count"]; n != 0 {
-		t.Errorf("done count after restoring the newer conversion = %v, want 0 (the file is skipped, not done)", n)
+	if n := after["done count"]; n != 1 {
+		t.Errorf("done count after restoring the newer conversion = %v, want 1 (the older conversion)", n)
 	}
 	if reflect.DeepEqual(after, first) {
 		t.Error("restoring the newer conversion changed no count: the test would prove nothing")
