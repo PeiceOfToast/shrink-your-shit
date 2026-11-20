@@ -58,10 +58,16 @@ export function mockJobs(tab: Tab, q: string, path?: string, limit = 200, librar
 const REMOVED: JobDetail = { id: "47001", state: "cancelled", removed: true, reason: { code: "removed", message: "Its library was removed, so this file wasn't converted." },
   events: [{ seq: 3, at: at(300), from: null, to: "queued", reason: null, workerId: null }, { seq: 9, at: at(200), from: "queued", to: "cancelled", reason: "removed", workerId: null }], steps: [] };
 // The sample's log by step: the steps the job went through, the failing one with its last lines
-// the sectioned log (contract L1): each line is { at, step, level, stream, text }. A skipped job has no sections. The encode
+// the sectioned log (contract L1): each line is { at, step, level, stream, text }. The encode
 // section has ffmpeg's stderr lines (dimmed in the UI), a libva line (stream info) and the stall warning (L2, R9: an ordinary line)
 const ln = (min: number, step: number, level: LogLine["level"], stream: LogLine["stream"], text: string): LogLine => ({ at: at(min), step, level, stream, text });
-const sectionsFor = (result: string): LogSection[] => result === "skipped" ? [] : [
+// a workflow step's own section (L2, joblog.go writeStepSections): id "step", its title "Step N: Label" and its number.
+// A skipped file has one step, "Leave the file alone", and the steps that ran say what they decided.
+const stepSecs = (result: string): LogSection[] => result === "skipped"
+  ? [{ id: "step", title: "Step 1: Leave the file alone", step: 1, lines: [ln(30, 0, "info", "app", "Skipped: already HEVC at 1080p")] }]
+  : [{ id: "step", title: "Step 1: Convert video", step: 1, lines: [ln(31, 0, "info", "app", "Convert video: H.264 becomes HEVC at CRF 23.")] },
+     { id: "step", title: "Step 2: Audio", step: 2, lines: [ln(31, 0, "info", "app", "Kept English and Japanese audio; removed 2 others.")] }];
+const sectionsFor = (result: string): LogSection[] => [
   // the input lines as the worker writes them (joblog.go inputLines): the file, its size, container and length, one line per stream, chapters
   { id: "input", title: "Input", lines: [
     ln(31, 0, "info", "app", "Source /media/shows/Example.S01E01.mkv"),
@@ -72,14 +78,15 @@ const sectionsFor = (result: string): LogSection[] => result === "skipped" ? [] 
     ln(31, 0, "info", "app", "#2 audio · jpn · AAC stereo · 192 kbps"),
     ln(31, 0, "info", "app", "Chapters 12, attachments 0"),
   ] },
-  { id: "encode", title: "Encode", lines: [
+  ...stepSecs(result),
+  ...(result === "skipped" ? [] : [{ id: "encode", title: "Encode", lines: [
     ln(29, 0, "info", "app", "Starting ffmpeg: HEVC, Balanced quality"),
     ln(29, 0, "info", "stderr", "ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers"),
     ln(28, 0, "info", "info", "libva info: VA-API version 1.20.0"),
     ln(20, 0, "info", "stderr", "frame= 43200 fps=142 q=24.0 size= 2150400kB time=00:30:00.00 bitrate=9800.1kbits/s speed=3.4x"),
     ln(14, 0, "warning", "app", "No progress for 30 s; the encode is still running"),
     ln(13, 0, "info", "stderr", "frame= 86400 fps=141 q=24.0 size= 4300800kB time=01:00:00.00 bitrate=9800.1kbits/s speed=3.4x"),
-  ] },
+  ] }]),
   ...(result === "converted" ? [{ id: "replace", title: "Replace", lines: [ln(1, 2, "info", "app", "Saved the new file in place of the original")] }] : []),
 ];
 // the start, variables and summary of a job that ran with full logs (contract v2); result: converted | kept | failed | skipped
@@ -107,7 +114,8 @@ export function mockJobLog(id: string): JobLog | { error: { code: string; messag
   const into = (secId: string, title: string, lines: LogLine[]) => { let s = sections.find((x) => x.id === secId); if (!s) { s = { id: secId, title, lines: [] }; sections.push(s); } s.lines.push(...lines); };
   const STEP: Record<string, number> = { encode: 0, check: 1, replace: 2 }; // the server's step index (worker.go)
   const steps = log.steps.map((st) => {
-    const { warnings, errors, ...rest } = st;
+    // only the keys v2joblog.go sends: no decision or reason text, set, moves or speeds
+    const { warnings, errors, decision, reason, set, moves, speedX, avgKbps, path, ...rest } = st;
     if (warnings?.length) into("encode", "Encode", warnings.map((t) => ln(2, STEP[st.name] ?? 0, "warning", "app", t)));
     if (errors?.length) into("check", "Check", errors.map((t) => ln(2, STEP[st.name] ?? 0, "error", "check", t)));
     return rest;
@@ -122,22 +130,23 @@ function mockJobLogRaw(id: string): JobLog | { error: { code: string; message: s
   const failed = j.state === "failed";
   const f48190 = id === "48190", f48191 = id === "48191";
   const out = f48190 ? ["[hevc @ 0x55d1] Error while decoding stream #0:0: Invalid data found when processing input", "Conversion failed!"] : [];
-  const step = (name: string, outcome: string, extra: Record<string, unknown>) => ({ name, startedAt: at(300), tookMs: outcome === "ok" ? 120000 : outcome === "failed" && f48191 ? 0 : 252000, outcome, command: null, probe: null, check: null, outputLines: 0, output: [], result: outcome === "ok" ? "Done" : "Failed", ...extra });
+  const step = (name: string, outcome: string, extra: Record<string, unknown>) => ({ name, startedAt: at(300), tookMs: outcome === "ok" ? 120000 : outcome === "failed" && f48191 ? 0 : 252000, outcome, command: null, probe: null, check: null, outputLines: 0, output: [], result: outcome === "ok" ? "Done" : "Failed", found: [], ...extra });
   const conv: Record<string, unknown> = f48191 ? {} : { command: "ffmpeg -i in.mkv -c:v libx265 -crf 23 out.mkv", probe: { videoCodec: "h264", bitrateKbps: 12109, durationSec: 7200, sizeBytes: j.file?.bytes ?? 0, streams: [{ index: 0, type: "video", codec: "h264", Width: 1920, Height: 1080 }] }, check: failed ? { score: 0.912, min: 0.95, passed: false } : { score: 0.973, min: 0.95, passed: true }, outputLines: f48190 ? 2 : 184, output: out };
   if (id === "no-log") return { state: "none", steps: [], final: null };
   if (id === "old-log-imported") {
     const lines = Array.from({ length: 250 }, (_, i) => "line " + (i + 1) + ": FFMPEG frame output for this old job");
-    return { state: "complete", steps: [{ name: "imported", startedAt: null, tookMs: null, outcome: "done", command: null, probe: null, check: null, outputLines: 250, output: lines.slice(-200), result: "Done" }], final: "done" };
+    return { state: "complete", steps: [{ name: "imported", startedAt: null, tookMs: null, outcome: "done", command: null, probe: null, check: null, outputLines: 250, output: lines.slice(-200), result: "Done", found: [] }], final: "done" };
   }
   if (id === "failed-replace") {
     return { state: "complete", ...runInfo("failed"), steps: [
-      { name: "encode", startedAt: "2026-11-11T14:00:00Z", tookMs: 120000, outcome: "ok", command: "ffmpeg -i in.mkv -c:v libx265 -crf 22 out.mkv", probe: { videoCodec: "h264", bitrateKbps: 8000, durationSec: 3600, sizeBytes: 3 * GB, streams: [{ index: 0, type: "video", codec: "h264", Width: 1920, Height: 1080 }] }, check: { score: 0.967, min: 0.95, passed: true }, outputLines: 10, output: ["[hevc @ 0x55d1] output file #0 does not contain any stream"], result: "Done" },
-      { name: "check", startedAt: "2026-11-11T14:02:00Z", tookMs: 5000, outcome: "ok", command: null, probe: null, check: { score: 0.967, min: 0.95, passed: true }, outputLines: 0, output: [], result: "Passed" },
-      { name: "replace", startedAt: "2026-11-11T14:02:05Z", tookMs: 500, outcome: "failed", command: null, probe: null, check: null, outputLines: 0, output: [], result: "Failed" },
+      { name: "encode", startedAt: "2026-11-11T14:00:00Z", tookMs: 120000, outcome: "ok", command: "ffmpeg -i in.mkv -c:v libx265 -crf 22 out.mkv", probe: { videoCodec: "h264", bitrateKbps: 8000, durationSec: 3600, sizeBytes: 3 * GB, streams: [{ index: 0, type: "video", codec: "h264", Width: 1920, Height: 1080 }] }, check: { score: 0.967, min: 0.95, passed: true }, outputLines: 10, output: ["[hevc @ 0x55d1] output file #0 does not contain any stream"], result: "Done", found: [] },
+      { name: "check", startedAt: "2026-11-11T14:02:00Z", tookMs: 5000, outcome: "ok", command: null, probe: null, check: { score: 0.967, min: 0.95, passed: true }, outputLines: 0, output: [], result: "Passed", found: [] },
+      { name: "replace", startedAt: "2026-11-11T14:02:05Z", tookMs: 500, outcome: "failed", command: null, probe: null, check: null, outputLines: 0, output: [], result: "Failed", found: [] },
     ], final: "The new file was converted, but saving it in place of the original failed." };
   }
+  // a skipped job has no run step: the server's one stand-in step, its outcome the final state (v2joblog.go importedStep)
   if (id === "48198") return { state: "complete", final: "skipped", ...runInfo("skipped"), steps: [
-    step("filter", "skipped", { tookMs: 800, decision: "Skipped: already HEVC at 1080p", reason: "The workflow converts only files that aren't HEVC yet.", result: "Skipped" }),
+    { name: "imported", startedAt: null, tookMs: null, outcome: "skipped", command: null, probe: null, check: null, outputLines: 0, output: [], result: null, found: [] },
   ] };
   const found: Record<string, string[]> = {
     // the server's own formats (worker verify.go ssimDetail/playback, worker.go encoderDetail/fileSummary, 11-18)
@@ -162,7 +171,6 @@ function mockJobLogRaw(id: string): JobLog | { error: { code: string; message: s
     step("encode", "failed", { ...conv, result: "Failed" }),
   ] };
   return { state: "complete", final: "done", ...runInfo("converted"), steps: [
-    step("audio", "ok", { tookMs: 4000, decision: "Kept English and Japanese audio; removed 2 others", reason: "They aren't in your languages.", set: [{ name: "audio_languages", value: "eng, jpn" }], result: "Done" }),
     step("encode", "ok", { ...conv, decision: "Converted the video to HEVC at Balanced quality", reason: "The file is H.264, and the workflow converts to HEVC.", speedX: 3.4, avgKbps: 2450, set: [{ name: "target_codec", value: "hevc" }, { name: "api_key" }], result: "Done · 41% smaller" }),
     step("replace", "ok", { tookMs: 1500, decision: "Saved the new file in place of the original", reason: "It is smaller and passed the picture check.", moves: [{ action: "move", from: "/media/movies/Sample (2020).mkv", to: "/media/movies/.syp-trash/Sample (2020).mkv", ok: true, error: null }, { action: "move", from: "/media/movies/Sample (2020).new.mkv", to: "/media/movies/Sample (2020).mkv", ok: true, error: null }], result: "Done" }),
   ] };
