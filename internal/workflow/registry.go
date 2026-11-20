@@ -31,13 +31,20 @@ const (
 	TypeSetVariable    = "action.set_variable" // sets a {{name}} for the steps after it
 	TypeNote           = "action.note"         // writes a line into the job log
 	TypeFail           = "flow.fail"           // ends the run as failed, the original untouched
+	// FB2a (section 2.6): actions on the saved result.
+	TypeMediaServer = "action.media_server" // asks the connected media server(s) to look at the folder
+	TypeDownloader  = "action.downloader"   // asks the connected downloader(s) to re-read the file
+	TypeNotify      = "action.notify"       // sends a message to a notification target
+	TypeSidecar     = "action.sidecar"      // writes a text file next to the new file
+	TypeChecksum    = "action.checksum"     // computes a checksum of the new file
+	TypeCopy        = "action.copy"         // copies the new file to another folder
 )
 
 // Questions are the step types that answer Yes or No (RunsQuestion); Actions the ones that do one thing
 // before the conversion (RunsAction); Ends the ones that end a run.
 var (
 	Questions = []string{TypeCheck, TypeCheckName, TypeCheckAge, TypeCheckVariable, TypeCheckLibrary, TypeCheckHardLinks}
-	Actions   = []string{TypeSetVariable, TypeNote}
+	Actions   = []string{TypeSetVariable, TypeNote, TypeMediaServer, TypeDownloader, TypeNotify, TypeSidecar, TypeChecksum, TypeCopy}
 	Ends      = []string{TypeEnd, TypeFail}
 )
 
@@ -374,6 +381,52 @@ func Definitions() []StepDefinition {
 			ConfigSchema: object(map[string]any{
 				"text": templated(described(map[string]any{"type": "string", "title": "Note", "maxLength": 1000}, "Variables are filled in, like {{title}} or {{resolution}}.")),
 			}, []string{"text"})}),
+		// FB2a actions after the save: each on the new file in place; one that doesn't work ends the job "done, with a
+		// warning", never undoing the save.
+		def(StepDefinition{Type: TypeMediaServer, RunsAs: RunsAction, Phase: []string{PhaseAfter}, Category: "flow", Name: "Tell the media server", Icon: "tell", TypeLabel: "After",
+			Description: "Asks the media servers connected in Settings > Connections to look at the folder, so the new file shows up at once.",
+			Inputs:      []Port{in}, Outputs: []Port{success, errPort}, SideEffects: "none",
+			ConfigSchema: object(map[string]any{
+				"which": withDefault(hinted(enum([]any{"all", "plex", "jellyfin"}, []string{"Every connected media server", "Plex only", "Jellyfin only"}), []string{"Each one that is connected and on.", "Only the Plex connections.", "Only the Jellyfin connections."}), "all", "Which", ""),
+			}, nil)}),
+		def(StepDefinition{Type: TypeDownloader, RunsAs: RunsAction, Phase: []string{PhaseAfter}, Category: "flow", Name: "Tell the downloader", Icon: "tell", TypeLabel: "After",
+			Description: "Asks the downloaders connected in Settings > Connections to re-read the file, so they know its new size and format.",
+			Inputs:      []Port{in}, Outputs: []Port{success, errPort}, SideEffects: "none",
+			ConfigSchema: object(map[string]any{
+				"which": withDefault(hinted(enum([]any{"all", "sonarr", "radarr"}, []string{"Every connected downloader", "Sonarr only", "Radarr only"}), []string{"Each one that is connected and on.", "Only the Sonarr connections.", "Only the Radarr connections."}), "all", "Which", ""),
+			}, nil)}),
+		def(StepDefinition{Type: TypeNotify, RunsAs: RunsAction, Phase: []string{PhaseAfter}, Category: "flow", Name: "Send a notification", Icon: "bell", TypeLabel: "After",
+			Description: "Sends a message to one of the targets in Settings > Notifications, or to every one that is on. Variables are filled in.",
+			Inputs:      []Port{in}, Outputs: []Port{success, errPort}, SideEffects: "none",
+			ConfigSchema: object(map[string]any{
+				"target": map[string]any{"type": "string", "title": "Send to", "default": "", "maxLength": 200, "description": "A target's name, as in Settings > Notifications. Leave empty for every target that is on."},
+				"kind":   withDefault(enum([]any{"info", "good", "warning", "bad"}, []string{"Information", "Good news", "Warning", "Bad news"}), "good", "Kind", "segmented"),
+				"text":   templated(described(map[string]any{"type": "string", "title": "Message", "maxLength": 1000, "x-placeholder": "{{title}} is done: {{saved_percent}}% smaller"}, "Variables are filled in, like {{title}} or {{saved_percent}}.")),
+			}, []string{"text"})}),
+		def(StepDefinition{Type: TypeSidecar, RunsAs: RunsAction, Phase: []string{PhaseAfter}, Category: "flow", Name: "Write a file beside the result", Icon: "note", TypeLabel: "After",
+			Description: "Writes a text file next to the new file: a note, a .nfo, anything your other tools read. Variables are filled in.",
+			Inputs:      []Port{in}, Outputs: []Port{success, errPort}, SideEffects: "writes_staging",
+			ConfigSchema: object(map[string]any{
+				"name":     templated(described(map[string]any{"type": "string", "title": "File name", "maxLength": 200, "x-placeholder": "{{title}}.txt"}, "Next to the new file. Variables are filled in, like {{title}}.")),
+				"text":     templated(described(map[string]any{"type": "string", "title": "Contents", "maxLength": 20000}, "Variables are filled in, like {{title}} or {{new_size_bytes}}.")),
+				"ifExists": withDefault(hinted(enum([]any{"keep", "replace"}, []string{"Keep the file that is there", "Replace it"}), []string{"A file with that name is left as it is; the step says so.", "The file is written over."}), "keep", "If the file exists", "segmented"),
+			}, []string{"name", "text"})}),
+		def(StepDefinition{Type: TypeChecksum, RunsAs: RunsAction, Phase: []string{PhaseAfter}, Category: "flow", Name: "Checksum the result", Icon: "shield", TypeLabel: "After",
+			Description: "Computes a checksum of the new file and sets {{checksum}} for the steps after it.",
+			Inputs:      []Port{in}, Outputs: []Port{success, errPort}, SideEffects: "none",
+			Publishes: []Published{{Name: "checksum", Type: "string", Words: "The new file's checksum, in hex"}, {Name: "checksum_kind", Type: "string", Words: "Which checksum (sha256, sha1 or md5)"}},
+			ConfigSchema: object(map[string]any{
+				"kind": withDefault(enum([]any{"sha256", "sha1", "md5"}, []string{"SHA-256", "SHA-1", "MD5"}), "sha256", "Checksum", "segmented"),
+			}, nil)}),
+		def(StepDefinition{Type: TypeCopy, RunsAs: RunsAction, Phase: []string{PhaseAfter}, Category: "flow", Name: "Copy the result to a folder", Icon: "copy", TypeLabel: "After",
+			Description: "Copies the new file to another folder (the same sub-folders as in its library) and sets {{copy_path}}.",
+			Inputs:      []Port{in}, Outputs: []Port{success, errPort}, SideEffects: "writes_staging",
+			Publishes: []Published{{Name: "copy_path", Type: "string", Words: "Where the copy was written"}},
+			ConfigSchema: object(map[string]any{
+				"folder":   templated(described(map[string]any{"type": "string", "title": "Folder", "x-placeholder": "/backup/converted", "x-ui": map[string]any{"widget": "folder"}}, "The copy goes here, in the same sub-folders. Variables are filled in, like {{library}}.")),
+				"name":     templated(described(map[string]any{"type": "string", "title": "File name", "maxLength": 200}, "Leave empty to keep the new file's name. Variables are filled in, like {{title}}.")),
+				"ifExists": withDefault(hinted(enum([]any{"keep", "replace"}, []string{"Keep the file that is there", "Replace it"}), []string{"A file with that name is left as it is; the step says so.", "The file is written over."}), "keep", "If the file exists", "segmented"),
+			}, []string{"folder"})}),
 		def(StepDefinition{Type: TypeFail, RunsAs: RunsEnd, Category: "flow", Name: "Stop as failed", Icon: "stop", TypeLabel: "End",
 			Description: "The run ends as failed with the reason below, and the original is left as it is.",
 			Inputs:      []Port{in}, Outputs: []Port{}, SideEffects: "none",
@@ -389,8 +442,10 @@ func Definitions() []StepDefinition {
 // (before) or an action after the save; the rest have one phase each.
 func phaseOf(runsAs string) []string {
 	switch runsAs {
-	case RunsInput, RunsQuestion, RunsAction:
+	case RunsInput, RunsQuestion:
 		return []string{PhaseBefore}
+	case RunsAction:
+		return []string{PhaseBefore, PhaseAfter}
 	case RunsPlan:
 		return []string{PhaseConvert}
 	case RunsVerify:
@@ -398,7 +453,7 @@ func phaseOf(runsAs string) []string {
 	case RunsCommit:
 		return []string{PhaseSave}
 	case RunsEnd:
-		return []string{PhaseBefore, PhaseAfter}
+		return []string{PhaseBefore}
 	}
 	return []string{}
 }
@@ -414,7 +469,7 @@ func fileOnOf(d StepDefinition) map[string]string {
 			out[p.Name] = FileOriginal
 		case d.RunsAs == RunsPlan || d.RunsAs == RunsVerify:
 			out[p.Name] = FileStaged
-		case d.RunsAs == RunsCommit:
+		case d.RunsAs == RunsCommit, d.RunsAs == RunsAction && len(d.Phase) == 1 && d.Phase[0] == PhaseAfter:
 			out[p.Name] = FileSaved
 		default:
 			out[p.Name] = FileOriginal

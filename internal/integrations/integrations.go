@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -554,6 +555,40 @@ func (s *Service) Tell(jobID int64, from, finalPath string) {
 			s.tellOne(jobID, rec, from, finalPath)
 		}()
 	}
+}
+
+// TellKinds is Tell for the enabled instances of the given kinds only (FB2a: a workflow's "Tell the media
+// server" / "Tell the downloader" card). It answers in words, which instances were told, or an error when
+// none of them is connected and on, which the card reports as a warning.
+func (s *Service) TellKinds(jobID int64, from, finalPath string, want []Kind) (string, error) {
+	if from != "" && from != finalPath {
+		if _, err := os.Stat(from); err == nil {
+			from = "" // the original is still there: nothing was replaced (as Tell)
+		}
+	}
+	s.mu.Lock()
+	f, err := s.load()
+	s.mu.Unlock()
+	if err != nil {
+		return "", err
+	}
+	var names []string
+	for _, r := range f.Items {
+		if !r.Enabled || !slices.Contains(want, r.Kind) {
+			continue
+		}
+		rec := r
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.tellOne(jobID, rec, from, finalPath)
+		}()
+		names = append(names, rec.Name)
+	}
+	if len(names) == 0 {
+		return "", errors.New("none of these is connected and on in Settings > Connections")
+	}
+	return "Told " + strings.Join(names, ", "), nil
 }
 
 // Wait returns once the background tells started so far have finished (tests use it).

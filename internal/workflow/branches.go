@@ -4,6 +4,7 @@ package workflow
 
 import (
 	"encoding/json"
+	"slices"
 	"strconv"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -70,12 +71,34 @@ func branchTemplate(d Doc) (rules.Template, []Issue) {
 				break
 			}
 			nn := byID[next]
+			if cur.Type == TypeCommit { // FB2a: after the save come actions on the saved result, nothing else
+				break
+			}
 			if IsQuestion(nn.Type) || IsEnd(nn.Type) || IsAction(nn.Type) || nn.Type == TypeInput { // review2-531 P1: every run card, or the compile recurses
 				issues = append(issues, Issue{Code: "branch_in_conversion", Severity: "error", NodeID: nn.ID,
 					Message: "'" + nodeName(nn) + "' sits among the steps that run as one conversion. Put checks and actions before the steps that convert."})
 				return nil
 			}
 			chain, cur = append(chain, nn), nn
+		}
+		// FB2a: the actions after the save, in order; a step that isn't one is wrong_phase (Validate names it too)
+		var after []rules.Card
+		for id := out[[2]string{chain[len(chain)-1].ID, "success"}]; id != ""; {
+			an, ok := byID[id]
+			if !ok || !IsAction(an.Type) || !slices.Contains(definitionPhase(an.Type), PhaseAfter) {
+				issues = append(issues, Issue{Code: "wrong_phase", Severity: "error", NodeID: id,
+					Message: "'" + nodeName(an) + "' can't follow 'Save the result'. After the save come only steps that act on the saved file."})
+				return nil
+			}
+			if an.Enabled {
+				after = append(after, rules.Card{NodeID: an.ID, Type: an.Type, Name: nodeName(an), Config: clone(an.Config)})
+			}
+			if out[[2]string{an.ID, "error"}] != "" {
+				issues = append(issues, Issue{Code: "not_runnable_yet", Severity: "error", NodeID: an.ID, Port: "error",
+					Message: "Steps after '" + portLabel(an, "error") + "' come in a later update. For now, remove that link: a step after the save that doesn't work leaves the job done, with a warning."})
+				return nil
+			}
+			id = out[[2]string{an.ID, "success"}]
 		}
 		if chain[len(chain)-1].Type != TypeCommit {
 			last := chain[len(chain)-1]
@@ -103,7 +126,10 @@ func branchTemplate(d Doc) (rules.Template, []Issue) {
 		for _, c := range chain {
 			ids = append(ids, c.ID)
 		}
-		b := &rules.Branch{Then: &t, Path: append(clone(path), ids...)}
+		for _, c := range after {
+			ids = append(ids, c.NodeID)
+		}
+		b := &rules.Branch{Then: &t, Path: append(clone(path), ids...), After: after}
 		var fs rules.Failures
 		for _, c := range chain { // what the run does when it doesn't work (V6b)
 			if c.Type != TypeConvert && c.Type != TypeVerify {
@@ -152,6 +178,11 @@ func branchTemplate(d Doc) (rules.Template, []Issue) {
 				walk(next, append(clone(checks), rules.BranchCheck{NodeID: n.ID, Port: port, Check: c}), before, append(clone(path), n.ID), seen)
 			}
 		case IsAction(n.Type):
+			if !slices.Contains(definitionPhase(n.Type), PhaseBefore) { // FB2a: an action on the saved result can't run before the save
+				issues = append(issues, Issue{Code: "wrong_phase", Severity: "error", NodeID: n.ID,
+					Message: "'" + nodeName(n) + "' belongs after the file is saved. Put it after 'Save the result'."})
+				return
+			}
 			next := out[[2]string{n.ID, "success"}]
 			if next == "" {
 				issues = append(issues, Issue{Code: "unconnected_port", Severity: "error", NodeID: n.ID, Port: "success",
@@ -199,6 +230,14 @@ func branchTemplate(d Doc) (rules.Template, []Issue) {
 		return rules.Template{}, issues
 	}
 	return rules.Template{Kind: rules.KindBranches, CompilerVersion: rules.CompilerVersion, Branches: &branches}, nil
+}
+
+// definitionPhase is the phases a step type may sit in ("" for a type the registry lacks).
+func definitionPhase(typ string) []string {
+	if d, ok := Definition(typ); ok {
+		return d.Phase
+	}
+	return nil
 }
 
 // questionOf is a question step's config as the question the run asks, with its kind from its type

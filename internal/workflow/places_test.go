@@ -2,7 +2,10 @@
 
 package workflow
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 // W11 engine half: what the editor may do with a step's place, and which step types it may add, come
 // with the check, so the page doesn't copy the compile rules. Until W10 the steps that convert keep
@@ -28,6 +31,10 @@ func TestValidateSaysWhereEachStepAndTypeStands(t *testing.T) {
 		switch {
 		case !ok:
 			t.Errorf("%s: no add rule", def.Type)
+		case IsAction(def.Type) && !slices.Contains(def.Phase, PhaseBefore): // FB2a: an action on the saved result goes after the save
+			if !a.Addable || a.After != d.Nodes[len(d.Nodes)-1].ID || a.Reason != "" || d.Nodes[len(d.Nodes)-1].Type != TypeCommit {
+				t.Errorf("%s: %+v (want addable after Save the result)", def.Type, a)
+			}
 		case IsQuestion(def.Type) || IsAction(def.Type):
 			if !a.Addable || a.After != d.Nodes[0].ID || a.Reason != "" {
 				t.Errorf("%s: %+v (want addable after Library files)", def.Type, a)

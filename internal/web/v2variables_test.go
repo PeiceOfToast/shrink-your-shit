@@ -394,13 +394,17 @@ func TestVariablesPublishedByASetStep(t *testing.T) {
 	doc := d.Doc
 	doc.Nodes = append(doc.Nodes,
 		workflow.Node{ID: "set1", Type: workflow.TypeSetVariable, TypeVersion: 1, Name: "Pick a profile", Enabled: true, Config: map[string]any{"name": "profile", "value": "remux"}},
-		workflow.Node{ID: "set2", Type: workflow.TypeSetVariable, TypeVersion: 1, Enabled: true, Config: map[string]any{"name": "Bad Name"}})
+		workflow.Node{ID: "set2", Type: workflow.TypeSetVariable, TypeVersion: 1, Enabled: true, Config: map[string]any{"name": "Bad Name"}},
+		workflow.Node{ID: "sum", Type: workflow.TypeChecksum, TypeVersion: 1, Enabled: true, Config: map[string]any{}})
 	if _, err := st.SaveDraft(lib.FlowID, doc, d.Layout, d.Etag); err != nil {
 		t.Fatal(err)
 	}
 	code, got := getVars(t, srv, lib.FlowID)
 	if code != http.StatusOK {
 		t.Fatalf("GET variables: %d", code)
+	}
+	if v := got.find(t, "checksum"); v.Group != "Set by a step" || v.Value != nil || !strings.Contains(v.Description, "Checksum the result") { // FB2a: a card's published name
+		t.Errorf("checksum: %+v", v)
 	}
 	if v := got.find(t, "profile"); v.Group != "Set by a step" || v.Value != nil || !strings.Contains(v.Description, "Pick a profile") || !strings.Contains(v.Description, "remux") {
 		t.Errorf("profile: %+v", v)

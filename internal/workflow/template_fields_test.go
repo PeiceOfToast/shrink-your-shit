@@ -38,6 +38,12 @@ func TestTemplatedFieldsAndTheirHelpText(t *testing.T) {
 		"check.variable/value":      "{{resolution}}",
 		"action.set_variable/value": "{{title}}",
 		"action.note/text":          "{{title}}",
+		// FB2a: the after-save cards
+		"action.notify/text":  "{{saved_percent}}",
+		"action.sidecar/name": "{{title}}",
+		"action.sidecar/text": "{{new_size_bytes}}",
+		"action.copy/folder":  "{{library}}",
+		"action.copy/name":    "{{title}}",
 	}
 	if len(got) != len(want) {
 		t.Errorf("fields with x-variables: %v, want %d", templatedFields(), len(want))

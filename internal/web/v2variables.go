@@ -83,6 +83,15 @@ func publishedVariables(store *jobs.Store, flowID int64) []published {
 	var out []published
 	seen := map[string]bool{}
 	for _, n := range doc.Nodes {
+		if def, ok := workflow.Definition(n.Type); ok { // FB2a: what a card publishes (the checksum, the copy's path)
+			for _, p := range def.Publishes {
+				if seen[p.Name] {
+					continue
+				}
+				seen[p.Name] = true
+				out = append(out, published{p.Name, p.Words + " (set by the step “" + def.Name + "”)"})
+			}
+		}
 		if n.Type != workflow.TypeSetVariable {
 			continue
 		}

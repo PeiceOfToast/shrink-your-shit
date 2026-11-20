@@ -47,24 +47,37 @@ func stepPlace(n Node) StepPlace {
 }
 
 // addSteps is the add-step menu's rule: a question or an action (FB1b) goes before the steps that
-// convert, after the last such step already there (or the input); an end is placed in the graph only;
+// convert, after the last such step already there (or the input); an action on the saved result (FB2a)
+// goes after the save, behind the last such action already there; an end is placed in the graph only;
 // the steps that convert can't be added until W10. after is the node the editor inserts behind.
 func addSteps(d Doc) map[string]AddStep {
-	after := ""
+	after, afterSave := "", ""
 	if order, ok := mainPath(d); ok {
 		for _, n := range order {
-			if n.Type == TypeInput || IsQuestion(n.Type) || IsAction(n.Type) {
+			switch {
+			case n.Type == TypeCommit:
+				afterSave = n.ID
+			case afterSave != "" && IsAction(n.Type):
+				afterSave = n.ID
+			case n.Type == TypeInput || IsQuestion(n.Type) || IsAction(n.Type):
 				after = n.ID
 			}
 		}
 	}
 	out := map[string]AddStep{}
 	for _, def := range Definitions() {
+		afterOnly := IsAction(def.Type) && !slices.Contains(def.Phase, PhaseBefore)
 		switch {
 		case def.ReadOnly:
 			out[def.Type] = AddStep{Addable: false, Reason: "Only an earlier install's workflow has this step."}
 		case IsEnd(def.Type): // an end has no Next, so the steps view can't chain it; the graph puts it on a No or a Didn't work
 			out[def.Type] = AddStep{Addable: false, Reason: "Goes on a question's No, or on a step's Didn't work, in the graph."}
+		case afterOnly:
+			if afterSave == "" {
+				out[def.Type] = AddStep{Addable: false, Reason: "This workflow has no 'Save the result' step to add it after."}
+			} else {
+				out[def.Type] = AddStep{Addable: true, After: afterSave}
+			}
 		case IsQuestion(def.Type) || IsAction(def.Type):
 			if after == "" {
 				out[def.Type] = AddStep{Addable: false, Reason: "This workflow has no Library files step to add it after."}
@@ -293,22 +306,47 @@ func Validate(d Doc) Result {
 	return r
 }
 
-// phaseIssue says when an edge runs a step in a phase it can't sit in (FB1b): a question, an action
-// or an end after a step that converts, checks or saves. The before phase is the only one with run
-// cards in this version; the after phase opens in FB2. The compile refuses the same shapes with
-// branch_in_conversion; this names the step while editing, before a compile is tried.
+// phaseIssue says when an edge would run a step in a phase it can't sit in (FB1b, FB2a): a step that belongs
+// before the conversion after a step that converts, checks or saves; a step that belongs after the save before
+// the conversion or inside it. A failure port (error, skipped) may still lead to an end (V6b). The compile
+// refuses the same shapes; this names the step while editing, before a compile is tried.
 func phaseIssue(from, to Node, e Edge, defs map[string]StepDefinition) []Issue {
 	fd, td := defs[from.Type], defs[to.Type]
-	if fd.RunsAs == "" || td.RunsAs == "" {
+	if fd.RunsAs == "" || td.RunsAs == "" || e.FromPort == "error" || e.FromPort == "skipped" {
 		return nil
 	}
-	later := fd.RunsAs == RunsPlan || fd.RunsAs == RunsVerify || fd.RunsAs == RunsCommit
-	if !later || e.FromPort == "error" || e.FromPort == "skipped" { // a failure may still lead to an end (V6b)
-		return nil
+	bad := func(msg string) []Issue {
+		return []Issue{{Code: "wrong_phase", Severity: "error", NodeID: to.ID, EdgeID: e.ID, Message: "'" + nodeName(to) + "' " + msg}}
 	}
-	if td.RunsAs == RunsQuestion || td.RunsAs == RunsAction || (td.RunsAs == RunsEnd && fd.RunsAs != RunsCommit) { // an end follows the save, or a Didn't work; never a Next inside the conversion
-		return []Issue{{Code: "wrong_phase", Severity: "error", NodeID: to.ID, EdgeID: e.ID,
-			Message: "'" + nodeName(to) + "' comes after '" + nodeName(from) + "', but it belongs before the steps that convert. Move it up, or remove the link."}}
+	afterOnly := func(d StepDefinition) bool {
+		return d.RunsAs == RunsAction && !slices.Contains(d.Phase, PhaseBefore)
+	}
+	afterOK := func(d StepDefinition) bool { // may sit after the save
+		return d.RunsAs == RunsAction && slices.Contains(d.Phase, PhaseAfter)
+	}
+	switch fd.RunsAs {
+	case RunsPlan, RunsVerify: // inside the conversion: nothing but its own steps follow on Next
+		if td.RunsAs == RunsQuestion || td.RunsAs == RunsAction || td.RunsAs == RunsEnd {
+			if afterOnly(td) {
+				return bad("comes after '" + nodeName(from) + "', but it belongs after the file is saved. Put it after 'Save the result'.")
+			}
+			return bad("comes after '" + nodeName(from) + "', but it belongs before the steps that convert. Move it up, or remove the link.")
+		}
+	case RunsCommit: // after the save: only the steps that act on the saved file
+		if td.RunsAs != RunsEnd && !afterOK(td) {
+			return bad("can't follow 'Save the result'. After the save come only steps that act on the saved file.")
+		}
+	case RunsAction: // an after-only step is followed only by after steps; a before step is never followed by an after-only one
+		if afterOnly(fd) && !afterOK(td) {
+			return bad("can't follow '" + nodeName(from) + "'. After the save come only steps that act on the saved file.")
+		}
+		if !afterOnly(fd) && afterOnly(td) {
+			return bad("belongs after the file is saved. Put it after 'Save the result'.")
+		}
+	case RunsInput, RunsQuestion:
+		if afterOnly(td) {
+			return bad("belongs after the file is saved. Put it after 'Save the result'.")
+		}
 	}
 	return nil
 }
@@ -562,6 +600,23 @@ func summary(n Node) string {
 		return strOf(c, "reason", "Left alone by this workflow.")
 	case TypeFail:
 		return "Failed: " + strOf(c, "reason", "Stopped by this workflow.")
+	// FB2a: the cards after the save
+	case TypeMediaServer:
+		return "Tells " + map[string]string{"plex": "Plex", "jellyfin": "Jellyfin"}[strOf(c, "which", "all")] + map[bool]string{true: "every connected media server", false: ""}[strOf(c, "which", "all") == "all"]
+	case TypeDownloader:
+		return "Tells " + map[string]string{"sonarr": "Sonarr", "radarr": "Radarr"}[strOf(c, "which", "all")] + map[bool]string{true: "every connected downloader", false: ""}[strOf(c, "which", "all") == "all"]
+	case TypeNotify:
+		to := strOf(c, "target", "")
+		if to == "" {
+			to = "every target that is on"
+		}
+		return "To " + to + ": “" + strOf(c, "text", "") + "”"
+	case TypeSidecar:
+		return "Writes " + strOf(c, "name", "") + " beside the new file"
+	case TypeChecksum:
+		return strings.ToUpper(strOf(c, "kind", "sha256")) + " of the new file, as {{checksum}}"
+	case TypeCopy:
+		return "A copy in " + strOf(c, "folder", "") + ", as {{copy_path}}"
 	}
 	return ""
 }

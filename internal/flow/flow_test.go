@@ -3,6 +3,10 @@
 package flow
 
 import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -51,4 +55,87 @@ func TestBeforeStopsAtTheFirstFailure(t *testing.T) {
 	if _, err := Before([]rules.Card{{NodeID: "z", Type: "action.later"}}, st, Env{}); err == nil || !strings.Contains(err.Error(), "can't run") {
 		t.Errorf("%v", err)
 	}
+}
+
+// FB2a: the after-save cards act on the saved file. A checksum is published for the cards after it, a sidecar
+// is written beside the file with the variables filled in, a copy keeps the library's sub-folders, the
+// connections and the targets are told through the env and answer in words, and one card that doesn't
+// work is a warning while every card after it still runs.
+func TestAfterCardsActOnTheSavedFile(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Films", "Harrow Lane (2019)")
+	os.MkdirAll(dir, 0o755)
+	final := filepath.Join(dir, "Harrow Lane (2019).mkv")
+	os.WriteFile(final, []byte("hello"), 0o644)
+	backup := filepath.Join(t.TempDir(), "backup")
+	var told, sent []string
+	env := Env{
+		TellMediaServer: func(which string) (string, error) { told = append(told, "media:"+which); return "Told Plex", nil },
+		TellDownloader:  func(string) (string, error) { return "", errors.New("none of these is connected and on") },
+		Notify: func(target, kind, text string) (string, error) {
+			sent = append(sent, target+"|"+kind+"|"+text)
+			return "Sent to phone", nil
+		},
+	}
+	cards := []rules.Card{
+		{NodeID: "sum", Type: workflow.TypeChecksum, Name: "Checksum the result", Config: map[string]any{"kind": "sha256"}},
+		{NodeID: "side", Type: workflow.TypeSidecar, Name: "Write a file beside the result", Config: map[string]any{"name": "{{title}}.sha256", "text": "{{checksum}}  {{title}}.mkv"}},
+		{NodeID: "dl", Type: workflow.TypeDownloader, Name: "Tell the downloader", Config: map[string]any{}},
+		{NodeID: "copy", Type: workflow.TypeCopy, Name: "Copy the result to a folder", Config: map[string]any{"folder": backup, "name": "{{title}} ({{checksum_kind}})"}},
+		{NodeID: "ms", Type: workflow.TypeMediaServer, Name: "Tell the media server", Config: map[string]any{"which": "plex"}},
+		{NodeID: "say", Type: workflow.TypeNotify, Name: "Send a notification", Config: map[string]any{"target": "t1", "kind": "good", "text": "{{title}} done, copy at {{copy_path}}"}},
+	}
+	st := &State{Vars: map[string]string{"title": "Harrow Lane (2019)"}, Final: final, Original: final, LibraryRoot: filepath.Join(root, "Films")}
+	notes, warnings := After(cards, st, env)
+	if len(notes) != 6 {
+		t.Fatalf("%d notes, want one per card: %+v", len(notes), notes)
+	}
+	const sum = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824" // sha256("hello")
+	if st.Vars["checksum"] != sum || st.Vars["checksum_kind"] != "sha256" || notes[0].Words != "SHA256 "+sum {
+		t.Errorf("checksum: %q %q %q", st.Vars["checksum"], st.Vars["checksum_kind"], notes[0].Words)
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "Harrow Lane (2019).sha256")); err != nil || string(b) != sum+"  Harrow Lane (2019).mkv" {
+		t.Errorf("sidecar: %q %v", b, err)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "Tell the downloader didn't work: none of these is connected") || !notes[2].Failed {
+		t.Errorf("the downloader card should be the one warning: %v %+v", warnings, notes[2])
+	}
+	want := filepath.Join(backup, "Harrow Lane (2019)", "Harrow Lane (2019) (sha256).mkv")
+	if b, err := os.ReadFile(want); err != nil || string(b) != "hello" || st.Vars["copy_path"] != want {
+		t.Errorf("copy: %q %v, copy_path %q", b, err, st.Vars["copy_path"])
+	}
+	if fmt.Sprint(told) != "[media:plex]" || notes[4].Words != "Told Plex" {
+		t.Errorf("media server: %v %+v", told, notes[4])
+	}
+	if fmt.Sprint(sent) != "[t1|good|Harrow Lane (2019) done, copy at "+want+"]" || notes[5].Words != "Sent to phone" {
+		t.Errorf("notify: %v %+v", sent, notes[5])
+	}
+	for i, n := range notes {
+		if i != 2 && n.Failed {
+			t.Errorf("note %d failed: %+v", i, n)
+		}
+	}
+
+	// a second run: the sidecar and the copy are left as they are (ifExists keep), and say so; replace writes over
+	os.WriteFile(final, []byte("hello again"), 0o644)
+	notes, warnings = After(cards[:2], st, env)
+	if len(warnings) != 0 || !strings.HasPrefix(notes[1].Words, "Left ") {
+		t.Errorf("keep: %v %+v", warnings, notes[1])
+	}
+	replace := rules.Card{NodeID: "side", Type: workflow.TypeSidecar, Name: "Write", Config: map[string]any{"name": "{{title}}.sha256", "text": "{{checksum}}", "ifExists": "replace"}}
+	After([]rules.Card{replace}, st, env)
+	if b, _ := os.ReadFile(filepath.Join(dir, "Harrow Lane (2019).sha256")); string(b) != st.Vars["checksum"] || string(b) == sum {
+		t.Errorf("replace: %q", b)
+	}
+
+	// without a saved file, an env or an absolute folder every card says so and nothing is written
+	notes, warnings = After(cards, &State{}, Env{})
+	if len(warnings) != 6 {
+		t.Errorf("no file, no env: %v", warnings)
+	}
+	_, warnings = After([]rules.Card{{NodeID: "c", Type: workflow.TypeCopy, Name: "Copy", Config: map[string]any{"folder": "relative/{{missing}}"}}}, st, env)
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "relative") {
+		t.Errorf("relative folder: %v", warnings)
+	}
+	_ = notes
 }

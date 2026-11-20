@@ -7,7 +7,16 @@
 package flow
 
 import (
+	"crypto/md5"
+	"crypto/sha1"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"hash"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -18,11 +27,20 @@ import (
 // State is one run's state as the cards see it.
 type State struct {
 	Vars map[string]string // the built-ins, the workflow's own variables, and what cards set (vars.Resolve's values)
+	// After the save (FB2a): the new file in place, the original's path, and the library's root folder (a
+	// copy keeps the file's sub-folders under it).
+	Final       string
+	Original    string
+	LibraryRoot string
 }
 
 // Env is what actions may touch; the worker fills it. A nil function means the action can't run here.
 type Env struct {
 	Log func(line string) // a line into the job log (Add a note)
+	// FB2a: the connections and the notification targets. Each answers in words, or with an error.
+	TellMediaServer func(which string) (string, error) // "all" | plex | jellyfin
+	TellDownloader  func(which string) (string, error) // "all" | sonarr | radarr
+	Notify          func(target, kind, text string) (string, error)
 }
 
 // Note is what one card did, in words, for the job log's timeline.
@@ -31,6 +49,7 @@ type Note struct {
 	Name   string
 	Words  string
 	Empty  []string // the {{name}} references that had no value
+	Failed bool     // the card didn't work; Words says why (After only: Before stops at the first one)
 }
 
 // Before runs the path's actions before the conversion, in order. The first action that doesn't work
@@ -50,10 +69,145 @@ func Before(cards []rules.Card, st *State, env Env) ([]Note, error) {
 	return out, nil
 }
 
+// After runs the path's actions on the saved result, in order. One that doesn't work is a warning on the
+// job, never a failure: the save is done and stays done, and every card still runs (section 1.5).
+func After(cards []rules.Card, st *State, env Env) (notes []Note, warnings []string) {
+	if st.Vars == nil {
+		st.Vars = map[string]string{}
+	}
+	for _, c := range cards {
+		n, err := run(c, st, env)
+		if err != nil {
+			n.Words, n.Failed = nameOf(c)+" didn't work: "+err.Error(), true
+			warnings = append(warnings, n.Words)
+		}
+		notes = append(notes, n)
+	}
+	return notes, warnings
+}
+
 // run does one card.
 func run(c rules.Card, st *State, env Env) (Note, error) {
 	n := Note{NodeID: c.NodeID, Name: nameOf(c)}
+	str := func(k, def string) string {
+		if v, ok := c.Config[k].(string); ok && v != "" {
+			return v
+		}
+		return def
+	}
 	switch c.Type {
+	case workflow.TypeMediaServer:
+		if env.TellMediaServer == nil {
+			return n, errors.New("no media server can be told from here")
+		}
+		words, err := env.TellMediaServer(str("which", "all"))
+		n.Words = words
+		return n, err
+	case workflow.TypeDownloader:
+		if env.TellDownloader == nil {
+			return n, errors.New("no downloader can be told from here")
+		}
+		words, err := env.TellDownloader(str("which", "all"))
+		n.Words = words
+		return n, err
+	case workflow.TypeNotify:
+		if env.Notify == nil {
+			return n, errors.New("no notification target can be reached from here")
+		}
+		text, empty := vars.Resolve(str("text", ""), st.Vars)
+		words, err := env.Notify(str("target", ""), str("kind", "good"), text)
+		n.Words, n.Empty = words, empty
+		return n, err
+	case workflow.TypeSidecar:
+		if st.Final == "" {
+			return n, errors.New("there is no saved file yet")
+		}
+		name, empty := vars.Resolve(str("name", ""), st.Vars)
+		name = vars.CleanPiece(strings.TrimSpace(name))
+		if name == "" || name == "." || name == ".." {
+			return n, errors.New("the file name came out empty")
+		}
+		path := filepath.Join(filepath.Dir(st.Final), name)
+		if _, err := os.Lstat(path); err == nil && str("ifExists", "keep") == "keep" {
+			n.Words = "Left " + path + " as it is: a file with that name is there"
+			return n, nil
+		}
+		text, more := vars.Resolve(str("text", ""), st.Vars)
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			return n, err
+		}
+		n.Words, n.Empty = "Wrote "+path, append(empty, more...)
+		return n, nil
+	case workflow.TypeChecksum:
+		if st.Final == "" {
+			return n, errors.New("there is no saved file yet")
+		}
+		kind := str("kind", "sha256")
+		var h hash.Hash
+		switch kind {
+		case "sha1":
+			h = sha1.New()
+		case "md5":
+			h = md5.New()
+		default:
+			kind, h = "sha256", sha256.New()
+		}
+		f, err := os.Open(st.Final)
+		if err != nil {
+			return n, err
+		}
+		defer f.Close()
+		if _, err := io.Copy(h, f); err != nil {
+			return n, err
+		}
+		sum := hex.EncodeToString(h.Sum(nil))
+		st.Vars["checksum"], st.Vars["checksum_kind"] = sum, kind
+		n.Words = strings.ToUpper(kind) + " " + sum
+		return n, nil
+	case workflow.TypeCopy:
+		if st.Final == "" {
+			return n, errors.New("there is no saved file yet")
+		}
+		folder, empty := vars.Resolve(str("folder", ""), st.Vars)
+		folder = strings.TrimSpace(folder)
+		if !filepath.IsAbs(folder) {
+			return n, errors.New("the folder came out relative: " + quote(folder))
+		}
+		sub := "" // the file's sub-folders inside its library, kept under the copy's folder
+		if st.LibraryRoot != "" {
+			if rel, err := filepath.Rel(st.LibraryRoot, filepath.Dir(st.Final)); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+				sub = rel
+			}
+		}
+		name := filepath.Base(st.Final)
+		if t := str("name", ""); t != "" {
+			resolved, more := vars.Resolve(t, st.Vars)
+			empty = append(empty, more...)
+			if nm := vars.CleanPiece(strings.TrimSpace(resolved)); nm != "" {
+				name = nm
+				if filepath.Ext(name) == "" {
+					name += filepath.Ext(st.Final)
+				}
+			}
+		}
+		dst := filepath.Join(folder, sub, name)
+		if dst == st.Final {
+			return n, errors.New("the copy would be the saved file itself")
+		}
+		if _, err := os.Lstat(dst); err == nil && str("ifExists", "keep") == "keep" {
+			st.Vars["copy_path"] = dst
+			n.Words = "Left " + dst + " as it is: a file with that name is there"
+			return n, nil
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return n, err
+		}
+		if err := copyFile(st.Final, dst); err != nil {
+			return n, err
+		}
+		st.Vars["copy_path"] = dst
+		n.Words, n.Empty = "Copied to "+dst, empty
+		return n, nil
 	case workflow.TypeSetVariable:
 		name, _ := c.Config["name"].(string)
 		if !workflow.NamePattern.MatchString(name) || workflow.BuiltinName(name) {
@@ -92,4 +246,29 @@ func quote(s string) string {
 		s = string(r[:117]) + "..."
 	}
 	return "“" + s + "”"
+}
+
+// copyFile writes src's bytes to a temporary name beside dst and renames it into place, so a reader never
+// sees a half-written copy.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	tmp := dst + ".part"
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := out.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, dst)
 }

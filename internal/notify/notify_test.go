@@ -532,3 +532,39 @@ func TestCertificateFailureSaysSo(t *testing.T) {
 		t.Errorf("result %+v, want message %q", res, want)
 	}
 }
+
+// FB2a: a workflow's "Send a notification" card sends to one target by id, or to every target that is on,
+// whatever their event flags say; an unknown or turned-off target is an error in words.
+func TestSendToIgnoresTheEventFlags(t *testing.T) {
+	_, svc, _, _ := fixture(t)
+	start(t, svc)
+	r := newRx(t, 200)
+	off := false
+	tg := mustCreate(t, svc, NewTarget{Name: "hook", Kind: "webhook", URL: r.srv.URL + "/hook/tok", Events: &EventsPatch{FileFinished: &off, JobFailed: &off}})
+	words, err := svc.SendTo(tg.ID, "warning", "Harrow Lane is done")
+	if err != nil || words != "Sent to hook" {
+		t.Fatalf("%q %v", words, err)
+	}
+	if words, err := svc.SendTo("", "good", "to everyone"); err != nil || words != "Sent to hook" {
+		t.Fatalf("every target: %q %v", words, err)
+	}
+	if words, err := svc.SendTo("HOOK", "info", "by name"); err != nil || words != "Sent to hook" { // the card names the target as Settings shows it
+		t.Errorf("by name: %q %v", words, err)
+	}
+	svc.Idle()
+	if got := r.events(); fmt.Sprint(sorted(got)) != "[workflow.good workflow.info workflow.warning]" { // delivery is in the background: order is not promised
+		t.Fatalf("events %v", got)
+	}
+	if _, err := svc.SendTo("nope", "good", "x"); err == nil || !strings.Contains(err.Error(), "no notification target is called") {
+		t.Errorf("unknown target: %v", err)
+	}
+	if _, err := svc.Update(tg.ID, TargetPatch{Enabled: &off}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SendTo(tg.ID, "good", "x"); err == nil || !strings.Contains(err.Error(), "is off") {
+		t.Errorf("a target that is off: %v", err)
+	}
+	if _, err := svc.SendTo("", "good", "x"); err == nil || !strings.Contains(err.Error(), "no notification target is on") {
+		t.Errorf("nothing on: %v", err)
+	}
+}
