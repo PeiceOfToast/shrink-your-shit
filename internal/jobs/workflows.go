@@ -789,3 +789,48 @@ func (s *Store) CorruptFlowForTest(id int64) error {
 	_, err := s.db.Exec(`UPDATE flows SET template='not json' WHERE id=?`, id)
 	return err
 }
+
+// RunInfo is what a job's workflow says about the run (W4b, design-joblog-vars section 2): the
+// library's name, the workflow's name and its newest published revision number, and the workflow's
+// own variables as published. Whatever cannot be read stays empty: its names then have no value.
+type RunInfo struct {
+	Library   string
+	Workflow  string
+	Revision  int
+	Variables []workflow.Variable
+}
+
+// RunInfoFor reads the RunInfo of job j. A library that is gone (or a job made before libraries were
+// records) is not an error: the values it would have filled are simply empty.
+func (s *Store) RunInfoFor(j Job) (RunInfo, error) {
+	var out RunInfo
+	var flowID int64
+	var err error
+	if j.LibraryID > 0 {
+		err = s.db.QueryRow(`SELECT name, flow_id FROM libraries WHERE id=?`, j.LibraryID).Scan(&out.Library, &flowID)
+	} else {
+		err = s.db.QueryRow(`SELECT name, flow_id FROM libraries WHERE path=?`, j.Library).Scan(&out.Library, &flowID)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return out, nil
+	}
+	if err != nil {
+		return out, err
+	}
+	if flowID > 0 {
+		if f, ferr := s.GetFlow(flowID); ferr == nil {
+			out.Workflow = f.Name
+		}
+		rev, ok, rerr := s.LatestRevision(flowID)
+		if rerr != nil {
+			return out, rerr
+		}
+		if ok {
+			if rev.Number != nil {
+				out.Revision = *rev.Number
+			}
+			out.Variables = rev.Doc.Variables
+		}
+	}
+	return out, nil
+}
