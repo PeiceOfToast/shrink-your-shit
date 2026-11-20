@@ -209,7 +209,7 @@ export function Jobs() {
                   {j.worker && <span className="mchip">{j.worker === "builtin" ? "This computer" : j.worker}</span>}
                   {tab === "completed" && j.finishedAt && <span className="mchip">Finished {clock(j.finishedAt)}</span>}
                 </div>
-                {pct != null && <span className="uline" aria-hidden="true"><i style={{ width: pct + "%" }} /></span>}
+                {pct != null && <span className="uline" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)} aria-label={j.progress?.stage || "Progress"}><i style={{ width: pct + "%" }} /></span>}
               </td>
               <td className="stc"><Pill j={j} /></td>
               <td className="sizec sm nowrap">{j.state === "completed" ? saved(j.beforeBytes, j.afterBytes) : bytes(j.bytes)}</td>
