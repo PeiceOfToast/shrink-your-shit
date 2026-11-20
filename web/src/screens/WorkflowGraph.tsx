@@ -22,14 +22,14 @@ const CAT: Record<string, string> = { input: "var(--cat-input)", filter: "var(--
 const PALETTE_TYPE = "application/x-syp-step"; // the drag data of a palette step (its type)
 const W = 188, H = (outs: number) => 34 + 24 + Math.max(outs, 1) * 22 + 8; // node size for layout (matches .gnode)
 
-type Data = { node: Node; def?: StepDefinition; summary: string; issues: ValidationIssue[]; edit?: boolean; linked: string[]; pickPort?: (id: string, port: string, label: string, step: string) => void };
+type Data = { node: Node; def?: StepDefinition; summary: string; issues: ValidationIssue[]; edit?: boolean; linked: string[]; tight?: boolean; pickPort?: (id: string, port: string, label: string, step: string) => void };
 type GNodeT = RFNode<Data, "step">;
 // item 7: a port that isn't a success port and has no connection says so on the step: the original file is kept there
 // each unlinked port says its own name in words; the error port keeps the spec's "Didn't work" line
 const notLinked = (p: { name: string; label: string; outcome: string }) => (p.outcome === "error" ? "Didn't work" : p.label) + ": not linked. The original file is kept.";
 
 function GNode({ data, selected }: NodeProps<GNodeT>) {
-  const { node, def, summary, issues, linked, pickPort } = data, errs = issues.filter((i) => i.severity === "error").length;
+  const { node, def, summary, issues, linked, tight, pickPort } = data, errs = issues.filter((i) => i.severity === "error").length;
   return (
     <div className={"gnode" + (node.enabled ? "" : " off") + (selected ? " sel" : "")} style={{ ["--cat" as string]: CAT[def?.category ?? ""] ?? "var(--accent)" }}
       aria-label={(node.name ?? def?.name ?? node.type) + (issues.length ? ", " + issues.length + (issues.length === 1 ? " problem" : " problems") : "")}>
@@ -41,8 +41,8 @@ function GNode({ data, selected }: NodeProps<GNodeT>) {
         <div key={p.name} className={"gport " + p.outcome}><span>{p.label}</span>
           {p.outcome !== "success" && !linked.includes(p.name) && !issues.some((i) => i.code === "unconnected_port" && i.port === p.name) &&
             (data.edit
-              ? <button type="button" className="gpill" aria-label={notLinked(p)} title={notLinked(p)} onClick={(e) => (e.stopPropagation(), pickPort?.(node.id, p.name, p.label, node.name ?? def?.name ?? node.type))}>Not linked: keeps the original</button>
-              : <span className="gpill" title={notLinked(p)}>Not linked: keeps the original</span>)}
+              ? <button type="button" className={"gpill" + (tight ? " inrow" : "")} aria-label={notLinked(p)} title={notLinked(p)} onClick={(e) => (e.stopPropagation(), pickPort?.(node.id, p.name, p.label, node.name ?? def?.name ?? node.type))}>{tight ? "not linked" : "Not linked: keeps the original"}</button>
+              : <span className={"gpill" + (tight ? " inrow" : "")} title={notLinked(p)}>{tight ? "not linked" : "Not linked: keeps the original"}</span>)}
           <Handle type="source" position={Position.Right} id={p.name} isConnectable={!!data.edit} /></div>))}
     </div>);
 }
@@ -165,6 +165,13 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
   const { nodes, edges } = useMemo(() => {
     const issues = checked.issues ?? [], title = (n?: Node) => (n ? n.name ?? defs.find((x) => x.type === n.type)?.name ?? n.type : "");
     const free = (n: Node, def?: StepDefinition) => (def?.outputs ?? []).filter((p) => p.outcome !== "success" && !doc.edges.some((e) => e.from === n.id && e.fromPort === p.name) && !issues.some((i) => i.nodeId === n.id && i.code === "unconnected_port" && i.port === p.name));
+    // a "Not linked" pill sits to the right of its step; when another step's box would cover it, the pill moves into the port row
+    const at = (id: string) => layout.nodes[id] ?? { x: 0, y: 0 }, outsOf = (n: Node) => defs.find((x) => x.type === n.type)?.outputs?.length ?? 1;
+    const tightPill = (n: Node) => {
+      if (!free(n, defs.find((x) => x.type === n.type)).length) return false;
+      const p = at(n.id), left = p.x + W + 28, right = left + pillWidth() + 7;
+      return doc.nodes.some((m) => { const q = at(m.id); return m.id !== n.id && q.x < right && q.x + W > left && q.y < p.y + H(outsOf(n)) && q.y + H(outsOf(m)) > p.y; });
+    };
     // review bf13684 P2: every step and connection has a name in words for a screen reader
     const nodes: GNodeT[] = doc.nodes.map((n) => {
       const mine = issues.filter((i) => i.nodeId === n.id), summary = checked.stepSummaries?.[n.id] ?? "";
@@ -172,7 +179,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
       return { id: n.id, type: "step", position: layout.nodes[n.id] ?? { x: 0, y: 0 }, draggable: edit, connectable: edit, deletable: edit && def?.category !== "input", selected: n.id === sel, zIndex: free(n, def).length ? 2 : undefined,
         initialWidth: W, initialHeight: H(def?.outputs?.length ?? 1), measured: dims[n.id], // review f03fcad: the minimap only draws nodes with a size
         ariaLabel: [title(n) + (n.enabled ? "" : " (off)"), summary, ...mine.map((i) => (i.severity === "error" ? "Problem: " : "Warning: ") + i.message), ...free(n, def).map((p) => notLinked(p))].filter(Boolean).join(". "),
-        data: { node: n, def, summary, issues: mine, edit, linked: doc.edges.filter((e) => e.from === n.id).map((e) => e.fromPort), pickPort: (id: string, port: string, label: string, step: string) => (setSel(id), setSelEdge(null), setPending({ node: id, port, label, step }), setSaid("Pick a step to add after " + step + " › " + label + ". Esc to cancel."), searchRef.current?.focus()) } };
+        data: { node: n, def, summary, issues: mine, edit, linked: doc.edges.filter((e) => e.from === n.id).map((e) => e.fromPort), tight: tightPill(n), pickPort: (id: string, port: string, label: string, step: string) => (window.clearTimeout(nudgeTimer.current), setSel(id), setSelEdge(null), setPending({ node: id, port, label, step }), setSaid("Pick a step to add after " + step + " › " + label + ". Esc to cancel."), searchRef.current?.focus()) } };
     });
     const edges: RFEdge[] = doc.edges.map((e) => {
       const from = doc.nodes.find((n) => n.id === e.from), outs = defs.find((x) => x.type === from?.type)?.outputs ?? [], port = outs.find((p) => p.name === e.fromPort);
