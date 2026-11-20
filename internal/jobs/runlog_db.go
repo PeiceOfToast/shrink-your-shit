@@ -35,10 +35,19 @@ const maxLogText = 2000
 
 var ansiSeq = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
 
-// CleanLogText makes text one plain line for the log: no ANSI colour codes, no line breaks, and at most 2,000
-// characters. A longer text is cut and ends with "… (cut, N chars)", N being its full length.
+// base64Run matches a run long enough to be a blob rather than a word (R13): 200 or more base64 characters
+// in a row. Punctuation that words and paths have (dots, dashes, underscores, colons, spaces) breaks a run,
+// so a path or a command line is left as it is.
+var base64Run = regexp.MustCompile(`[A-Za-z0-9+/]{200,}={0,2}`)
+
+// CleanLogText makes text one plain line for the log: no ANSI colour codes, no line breaks, no base64 blobs
+// and at most 2,000 characters. A blob becomes "… (base64 data, N chars)"; a longer text is cut and ends with
+// "… (cut, N chars)", N being its full length.
 func CleanLogText(text string) string {
 	text = ansiSeq.ReplaceAllString(text, "")
+	text = base64Run.ReplaceAllStringFunc(text, func(s string) string {
+		return fmt.Sprintf("… (base64 data, %d chars)", len(s))
+	})
 	text = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ").Replace(text)
 	runes := []rune(text)
 	if len(runes) <= maxLogText {
@@ -168,6 +177,26 @@ FROM job_run_steps WHERE job_id=? ORDER BY idx`, id)
 	return out, rows.Err()
 }
 
+// RecordJobStats records job id's run counters (replacing an earlier record): the ffmpeg runs it needed and
+// the bytes it wrote (temp files and the final one).
+func (s *Store) RecordJobStats(id int64, passes int, bytesWritten int64) error {
+	_, err := s.db.Exec(`INSERT OR REPLACE INTO job_run_stats(job_id, passes, bytes_written) VALUES(?,?,?)`, id, passes, bytesWritten)
+	return err
+}
+
+// JobStats is job id's run counters; ok false when the job recorded none (a job from before L2, or one run on
+// another computer), so the summary reads them as null.
+func (s *Store) JobStats(id int64) (passes int, bytesWritten int64, ok bool, err error) {
+	err = s.db.QueryRow(`SELECT passes, bytes_written FROM job_run_stats WHERE job_id=?`, id).Scan(&passes, &bytesWritten)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, false, nil
+	}
+	if err != nil {
+		return 0, 0, false, err
+	}
+	return passes, bytesWritten, true, nil
+}
+
 // SetFailureSummary records why job id failed (replacing an earlier one). At most 20 key lines are kept.
 func (s *Store) SetFailureSummary(id int64, f FailureSummary) error {
 	lines := f.KeyLines
@@ -279,7 +308,7 @@ func (s *Store) LogLinesAfter(id, after int64, limit int) ([]LogLine, error) {
 // RemoveJobLogs deletes the log lines and steps of jobs that are gone (their rows were removed).
 func (s *Store) RemoveJobLogs(ids []int64) error {
 	for _, id := range ids {
-		for _, q := range []string{`DELETE FROM job_log_lines WHERE job_id=?`, `DELETE FROM job_run_steps WHERE job_id=?`, `DELETE FROM job_failures WHERE job_id=?`} {
+		for _, q := range []string{`DELETE FROM job_log_lines WHERE job_id=?`, `DELETE FROM job_run_steps WHERE job_id=?`, `DELETE FROM job_failures WHERE job_id=?`, `DELETE FROM job_run_stats WHERE job_id=?`} {
 			if _, err := s.db.Exec(q, id); err != nil {
 				return err
 			}
@@ -314,6 +343,7 @@ func (s *Store) PruneJobLogs(before time.Time) (int64, error) {
 		}
 		k, _ := r.RowsAffected()
 		n += k
+		// the run counters stay: they are the job's summary, not its log
 		if _, err := s.db.Exec(`DELETE FROM job_run_steps WHERE job_id=?`, id); err != nil {
 			return n, err
 		}

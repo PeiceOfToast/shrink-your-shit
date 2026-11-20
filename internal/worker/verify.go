@@ -286,6 +286,7 @@ func (w *Worker) decodeRun(ctx context.Context, tmp string, out media.Info, star
 	dctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	progress, raw, err := w.Exec.Capture(dctx, w.FFmpeg, args...)
+	w.addPass() // the playback run is one of the job's ffmpeg runs (L2)
 	if v := out.Video(); v != nil {
 		if st, ok := media.InputStreamStats(string(raw), 0, v.Index); ok {
 			packets, counted = st.Packets, true
@@ -615,6 +616,7 @@ func (w *Worker) ssimSegment(ctx context.Context, srcPath, tmp string, sv, ov in
 	sctx, cancel := context.WithTimeout(ctx, sampleTimeout)
 	defer cancel()
 	stdout, stderr, err := w.Exec.Capture(sctx, w.FFmpeg, args...)
+	w.addPass() // each picture comparison is one of the job's ffmpeg runs (L2)
 	if err != nil {
 		return 0, nil, checkFailed(sctx, fmt.Sprintf("the picture comparison at %s", rules.Clock(seg.start)), err)
 	}
