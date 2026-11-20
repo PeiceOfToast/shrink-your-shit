@@ -4,8 +4,8 @@ True for: `dev` at commit `294e3d88` (2026-11-20). This is a map, not the territ
 arrow cites a file so it can be checked, and anything not confirmed in the code is marked
 **UNVERIFIED**. Line numbers drift; search for the named function if a line has moved.
 
-Companion: `foundation-review.md` in this folder (coming in a separate pull request: why the job pipeline keeps needing fixes, and
-what to change). The older [docs/ARCHITECTURE.md](../ARCHITECTURE.md) still describes the app as it was
+Companion: [foundation-review.md](foundation-review.md) in this folder: why the job pipeline keeps needing fixes, and
+what to change. Parts of this map come from a second, independent review. The older [docs/ARCHITECTURE.md](../ARCHITECTURE.md) still describes the app as it was
 after PR #4 in places (an embedded plain HTML page, "remote workers would implement `Queue`"); where the
 two disagree, this map is the newer reading.
 
@@ -252,12 +252,23 @@ streams, length). Then it picks one of three ways to encode:
 
 All three are built by one function with branches, `Plan.ffmpegArgs` (`plan.go:342-443`). If an encode
 fails, the worker steps down a ladder: full GPU → hybrid → processor (`worker.go:1172-1201`), deciding
-from ffmpeg's error text (`worker.go:2180-2199`, `jobs/failure_codes.go:37-50`). Three graphics failures
+from ffmpeg's error text: `FallsBackToProcessor` (`jobs/encoderhealth.go:33`) asks `classifyKeyLines`, a table of
+phrases (`jobs/failure_codes.go:33-54`). Three graphics failures
 in a row pause that encoder for an hour (`jobs/encoderhealth.go:19-20`).
 
 While ffmpeg runs, only a forward-moving position counts as progress. A stall is 10 minutes without one
 (`worker.go:229`), or 1 hour once the position has reached the end, because ffmpeg goes quiet while it
 finishes an MP4 (`worker.go:235`, `:728-733`).
+
+**What differs per encoder path:**
+
+| Path | Arguments built by | Decode | 10-bit and pixel format | Scale filter | Known gaps |
+|---|---|---|---|---|---|
+| Processor (libx265, libx264, libsvtav1, libvpx-vp9) | `ffmpegArgs` with no card (`plan.go:370-384`) | software | HDR adds 10-bit format and profile; 10-bit SDR adds nothing (the encoder keeps the depth) | `scale=-2:H` | none known |
+| Hybrid (NVENC, QSV, VAAPI, AMF) | `FFmpegArgsWith` (`plan.go:304`) | software | `-profile main10` and `-pix_fmt p010le`, except VAAPI, which uploads `format=nv12` or `p010` frames | `scale=-2:H` before the upload | VAAPI, NVENC and AMF 10-bit are **UNVERIFIED** on real cards; HDR on NVENC and AMF goes to the processor (`encoder.go:14`) |
+| Full GPU (QSV, VAAPI) | `FFmpegArgsFullGPU` (`plan.go:319`) | on the card | whatever depth the card decodes | `scale_qsv=w=trunc(H*a/2)*2:h=H` or `scale_vaapi=w=-2` (`plan.go:460-471`) | QSV rounds the width down, the prediction rounds to nearest: 1920x1080 to 480 lines is 852 vs 854, and the check refuses the file (job 48) |
+| Video copy (repackage only) | `ffmpegArgs` with `Video.Copy` (`plan.go:363`) | none | none | none | no picture comparison |
+| Remote worker | `encoderArgs` (`work.go:507`): hybrid only, own fall-back (`work.go:478-495`) | software on the worker | as hybrid | as hybrid | checked on the worker's copy; the server re-checks shape and samples |
 
 After the encode the new file is checked against the Expect and, picture by picture, against the original
 (SSIM, `verify.go:442`). If it passes, it is swapped in; if not, the job ends as **kept** and the original
@@ -297,7 +308,7 @@ and reports. The server checks the upload's hash, verifies it and replaces the o
 
 Remote workers build their ffmpeg arguments with the same `rules.Plan` methods, but the **run loop,
 fall-back and 10-bit decision are separate copies** (`internal/remote/work.go:478-518`), and they never
-use the full GPU path (`work.go:524`). See foundation-review.md, cause 2.
+use the full GPU path (`work.go:524`). See foundation-review.md, cause 4.
 
 ---
 
@@ -415,7 +426,19 @@ encoder capabilities (`doctor/doctor.go:113-127`, re-tested at boot), the scanne
 (`scanner.go:68-71`), remote runs by lease (`web/workerremote.go:31`, leases expire), discovered servers
 (`discover.go:69-75`), overview, preview, free-space and GPU-load caches.
 
-**Copies of the same fact** that can disagree are listed in foundation-review.md, cause 3.
+**Which copy is the truth.** Where the same fact is kept in more than one place (foundation-review.md, cause 3):
+
+| Fact | Source of truth | Copies that can drift |
+|---|---|---|
+| What a file *is* | the `probes` row at (path, size, mtime), gated by `ProbeVersion` | `jobs.duration` and `size_before` (copied at enqueue), `files.codec`, the snapshot's source |
+| Whether a file should convert | the scanner's compile at scan time, stored as text in `files.decision` | the worker compiles again from the *current* workflow; the preview compiles a third time |
+| How a file is converted | the worker's plan at run time (`RecordPlan`) | the Expect in the same snapshot, made before the encoder is chosen |
+| What the new file must look like | the snapshot's Expect | what the encoder really produces (width rounding, depth, container names) |
+| Job status | `jobs.status` through `Store.transition` | `events`, `job_steps`, the live registry, `files.decision`; bulk updates skip `transition` |
+| A computer's encoders | the doctor's last test (memory) and `encoder_tests` | `workers.capabilities` for remote workers |
+| Space saved and to free | SQL over `jobs`, `originals` and the scanner's marks (`freed.go:40-74`) | `files.size` meaning "size before", the gone/changed marks, the live estimate |
+| The workflow | `flows.template` for the engine, `workflow_revisions` for the editor | kept equal by `ToTemplate` at publish |
+| Whether a job is still running | `jobs.lease_expires`, renewed by progress and a timer | the worker's `current` field, the remote judging state |
 
 ---
 
