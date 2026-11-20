@@ -5,10 +5,27 @@ package jobs
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 )
+
+// revOfFlowSQL is the id of a flow's newest published workflow revision (0: none yet) for the flow id in %s.
+// It is the revision a job queued now runs with, and what a job records as workflow_rev.
+const revOfFlowSQL = `COALESCE((SELECT r.id FROM workflow_revisions r WHERE r.workflow_id=%s AND r.status='published' ORDER BY r.number DESC LIMIT 1),0)`
+
+var (
+	queuedRevSQL = fmt.Sprintf(revOfFlowSQL, "libraries.flow_id")                                        // in an INSERT ... SELECT FROM libraries
+	jobRevSQL    = fmt.Sprintf(revOfFlowSQL, "(SELECT flow_id FROM libraries WHERE id=jobs.library_id)") // the job's own library's
+)
+
+// currentRevision is library id's current workflow revision (0: none yet).
+func (s *Store) currentRevision(id int64) (int64, error) {
+	var cur int64
+	err := s.db.QueryRow(`SELECT `+fmt.Sprintf(revOfFlowSQL, "(SELECT flow_id FROM libraries WHERE id=?)"), id).Scan(&cur)
+	return cur, err
+}
 
 // Convert again (design 11:45Z, SCREENS V6 job drawer): a done job runs again, always from its
 // original, never from our own output, with its library's workflow as it is now. A file that replaced
@@ -31,9 +48,10 @@ type AgainCheck struct {
 
 // Codes of a refused Convert again.
 const (
-	AgainNotDone      = "not_done"      // only a converted file can be converted again
-	AgainOriginalGone = "original_gone" // its original no longer exists
-	AgainBusy         = "original_busy" // its original is being moved, or needs the person's attention
+	AgainNotDone      = "not_done"         // only a converted file can be converted again
+	AgainOriginalGone = "original_gone"    // its original no longer exists
+	AgainBusy         = "original_busy"    // its original is being moved, or needs the person's attention
+	AgainCurrent      = "current_workflow" // it was converted with the library's current workflow already
 )
 
 // ConvertAgainCheck says whether done job id can be converted again (ErrNotFound: no such job). keepDays
@@ -77,6 +95,13 @@ func (s *Store) convertAgainCheck(id int64) (AgainCheck, error) {
 	}
 	if j.Status != Done {
 		return AgainCheck{Code: AgainNotDone, Message: "Only a converted file can be converted again."}, nil
+	}
+	var ran, cur int64
+	if err := s.db.QueryRow(`SELECT workflow_rev, `+jobRevSQL+` FROM jobs WHERE id=?`, id).Scan(&ran, &cur); err != nil {
+		return AgainCheck{}, err
+	}
+	if cur > 0 && ran == cur { // the library's workflow hasn't changed since: nothing to gain
+		return AgainCheck{Code: AgainCurrent, Message: "Already converted with this workflow."}, nil
 	}
 	gone := AgainCheck{Code: AgainOriginalGone, Message: "Can't convert again: the original is no longer there."}
 	o, err := scanOriginal(s.db.QueryRow(`SELECT `+originalCols+` FROM originals WHERE job_id=? ORDER BY id DESC LIMIT 1`, id))
@@ -134,7 +159,8 @@ func (s *Store) ConvertAgain(id int64) error {
 	if !c.Possible {
 		return AgainError{c}
 	}
-	r, err := s.db.Exec(`UPDATE jobs SET status=?, progress=0, error='', error_code='', worker='', attempts=0, retry_at='', fallback='', again_from=?, updated=? WHERE id=? AND status=?`,
+	// a fresh run: it runs with the library's workflow as it is now, so it records that revision
+	r, err := s.db.Exec(`UPDATE jobs SET status=?, progress=0, error='', error_code='', worker='', attempts=0, retry_at='', fallback='', again_from=?, updated=?, workflow_rev=`+jobRevSQL+` WHERE id=? AND status=?`,
 		Queued, c.originalID, s.stamp(), id, Done)
 	if err != nil {
 		return err
@@ -158,4 +184,103 @@ func (s *Store) AgainFrom(id int64) int64 {
 func (s *Store) Reconverted(id int64, newPath string, newBytes, newMTime int64, newHash string, deleteOn time.Time) error {
 	return s.setOriginal(id, `new_path=?, new_bytes=?, new_mtime=?, new_hash=?, kept_at=?, delete_on=?`,
 		newPath, newBytes, newMTime, newHash, s.stamp(), deleteOn.UTC().Format(time.RFC3339))
+}
+
+// AgainLibrary is a library's Convert again for the files converted with an earlier workflow: Earlier counts
+// them, Possible those that can run again, and NotPossible the rest grouped by code (first one's words).
+type AgainLibrary struct {
+	Earlier, Possible int
+	NotPossible       []AgainGroup
+	ids               []int64 // the possible ones, in id order
+}
+
+// AgainGroup is the files refused for one code.
+type AgainGroup struct {
+	Code, Message string
+	Count         int
+}
+
+// addRefused counts one more file refused for code, keeping the groups in the order they first came.
+func addRefused(gs []AgainGroup, code, msg string) []AgainGroup {
+	for i := range gs {
+		if gs[i].Code == code {
+			gs[i].Count++
+			return gs
+		}
+	}
+	return append(gs, AgainGroup{Code: code, Message: msg, Count: 1})
+}
+
+// LibraryAgain is library id's earlier files and what Convert again can do for them (ErrNotFound: no such
+// library). A file is earlier when its newest converted job ran a workflow other than the library's current one.
+// Only files inside the library's current folder count: after its folder is changed, the jobs under the old
+// folder are not this library's files any more, so they are never counted or queued.
+func (s *Store) LibraryAgain(id int64, keepDays int) (AgainLibrary, error) {
+	lib, err := s.GetLibrary(id)
+	if err != nil {
+		return AgainLibrary{}, err
+	}
+	cur, err := s.currentRevision(id)
+	if err != nil || cur == 0 { // no revision yet: nothing ran with an earlier one
+		return AgainLibrary{}, err
+	}
+	rows, err := s.db.Query(`SELECT id, path FROM jobs WHERE library_id=? AND `+convertedNow("jobs")+` AND `+newestSQL+` AND workflow_rev<>? ORDER BY id`, id, cur)
+	if err != nil {
+		return AgainLibrary{}, err
+	}
+	var jobIDs []int64
+	for rows.Next() {
+		var jid int64
+		var path string
+		if err := rows.Scan(&jid, &path); err != nil {
+			rows.Close()
+			return AgainLibrary{}, err
+		}
+		if Within(path, lib.Path) {
+			jobIDs = append(jobIDs, jid)
+		}
+	}
+	rows.Close()
+	var a AgainLibrary
+	for _, jid := range jobIDs {
+		c, err := s.ConvertAgainCheck(jid, keepDays)
+		if err != nil {
+			return AgainLibrary{}, err
+		}
+		a.Earlier++
+		if c.Possible {
+			a.Possible++
+			a.ids = append(a.ids, jid)
+		} else {
+			a.NotPossible = addRefused(a.NotPossible, c.Code, c.Message)
+		}
+	}
+	return a, nil
+}
+
+// ConvertLibraryAgain queues Convert again for every possible earlier file of library id (the same queue as
+// ConvertAgain) and says how many it queued and which it refused. Once queued a file is no longer converted, so
+// a second call queues nothing new.
+func (s *Store) ConvertLibraryAgain(id int64, keepDays int) (queued int, notPossible []AgainGroup, err error) {
+	a, err := s.LibraryAgain(id, keepDays)
+	if err != nil {
+		return 0, nil, err
+	}
+	notPossible = a.NotPossible
+	for _, jid := range a.ids {
+		err := s.ConvertAgain(jid)
+		var ae AgainError
+		switch {
+		case errors.As(err, &ae): // it changed since the summary: refused, as the per-file action would
+			notPossible = addRefused(notPossible, ae.Code, ae.Message)
+		case err != nil:
+			return queued, notPossible, err
+		default:
+			queued++
+		}
+	}
+	if notPossible == nil {
+		notPossible = []AgainGroup{}
+	}
+	return queued, notPossible, nil
 }

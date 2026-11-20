@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -215,7 +216,7 @@ func main() {
 			log.Printf("purge: %v", err)
 			return
 		}
-		for _, said := range worker.Purge(store, keepDays(), time.Now(), func(p string) bool { return web.Waits(p, waiting) }) {
+		for _, said := range worker.Purge(store, keepDays(), time.Now(), func(p string) bool { return web.Waits(p, waiting) }, 0).Said {
 			log.Printf("purge: %s", said)
 		}
 	}
@@ -357,7 +358,24 @@ func main() {
 	notifier := notify.New(store, notify.Options{Logf: log.Printf, // news to a webhook or Discord; never blocks a job
 		FailureText: func(id int64) string { return web.FailureSentence(store, id) }})
 	go notifier.Run(ctx.Done())
+	// The update (or roll back) is settled once /healthz has answered "ok", as the update helper and the
+	// Windows watcher see it: a new version that stops before that leaves the marker, so the program put
+	// back still finds it (user item 9). settleAfter is the fallback when nothing asks.
+	var settleOnce sync.Once
+	settleUpdate := func() {
+		if pending == nil {
+			return
+		}
+		settleOnce.Do(func() {
+			if r, err := update.Settle(*data, pending, version, time.Now().UTC()); err != nil {
+				log.Printf("update: %v", err)
+			} else {
+				log.Printf("update: %s", r.Message)
+			}
+		})
+	}
 	srv := &http.Server{Addr: *addr, Handler: web.Handler(store, access, web.Engine{
+		Healthy:      settleUpdate,
 		Transport:    web.Transport{TrustedProxies: proxies},
 		Notify:       notifier,
 		Integrations: integ,
@@ -394,12 +412,8 @@ func main() {
 	go web.RemountShares(store) // saved shares come back after a restart (app mode only)
 	go web.WatchShares(store)   // a library whose share stops answering pauses until it does (app mode only)
 	ln, err := net.Listen("tcp", *addr)
-	if err == nil && pending != nil { // serving now: the update (or roll back) is settled
-		if r, err := update.Settle(*data, pending, version, time.Now().UTC()); err != nil {
-			log.Printf("update: %v", err)
-		} else {
-			log.Printf("update: %s", r.Message)
-		}
+	if err == nil && pending != nil { // fallback when nothing asks /healthz (the helper and the Windows watcher do)
+		time.AfterFunc(settleAfter, settleUpdate)
 	}
 	if err == nil {
 		err = srv.Serve(ln)
@@ -413,21 +427,43 @@ func main() {
 	<-workerDone // let an interrupted job go back in the queue before closing the database
 }
 
-// openStore opens the database. A program rolled back past a database upgrade finds a database it
-// refuses (ErrNewerDatabase): then the copy the app made before the update (pending's backup) goes back.
+// settleAfter settles an update when nothing has asked /healthz by then: longer than the helper's and
+// the watcher's 2-minute wait for health, so a version they put back is not settled first.
+const settleAfter = 3 * time.Minute
+
+// openStore opens the database. A program put back after a newer version upgraded the database (a
+// failed update, a roll back, an older Docker image) finds a database it refuses (ErrNewerDatabase):
+// then the copy made before that upgrade, <db>.bak-v<this program's schema version>, goes back, with
+// or without an update marker (user item 9). The newer database is kept beside it, never deleted.
+// With no such copy it stops with the same error as before: nothing is written.
 func openStore(dbPath, version string, pending *update.Marker) (*jobs.Store, error) {
 	store, err := jobs.OpenAs(dbPath, version)
-	if !errors.Is(err, jobs.ErrNewerDatabase) || pending == nil || pending.Backup == "" {
+	if !errors.Is(err, jobs.ErrNewerDatabase) {
 		return store, err
 	}
-	if err := update.RestoreDB(pending.Backup, dbPath); err != nil {
-		return nil, fmt.Errorf("update: could not put the database back from %s: %v", pending.Backup, err)
+	backup := fmt.Sprintf("%s.bak-v%d", dbPath, jobs.SchemaVersion())
+	if _, serr := os.Stat(backup); serr != nil {
+		return nil, fmt.Errorf("%w; no copy from before that upgrade (%s) to put back", err, filepath.Base(backup))
 	}
-	log.Printf("update: the database was put back from %s (the newer one is kept as %s.rolled-back)", pending.Backup, dbPath)
-	// the result says so; saved now, so a start that stops before it is settled still says so next time
-	pending.DataRestored = true
-	if err := update.WriteMarker(filepath.Dir(dbPath), *pending); err != nil {
-		log.Printf("update: %v", err)
+	kept, rerr := update.RestoreDB(backup, dbPath)
+	if rerr != nil {
+		return nil, fmt.Errorf("update: could not put the database back from %s: %v", backup, rerr)
+	}
+	keptAs := filepath.Base(kept)
+	log.Printf("update: this program found a database from a newer version and put back the copy from before that upgrade (%s); jobs done on the newer version are kept in %s", filepath.Base(backup), keptAs)
+	dataDir := filepath.Dir(dbPath)
+	if pending != nil {
+		// the result says so; saved now, so a start that stops before it is settled still says so next time
+		pending.DataRestored, pending.KeptAs = true, keptAs
+		if err := update.WriteMarker(dataDir, *pending); err != nil {
+			log.Printf("update: %v", err)
+		}
+	} else { // no update in progress (settled, or a program put back by hand): the result says so
+		r := update.Result{Kind: "update", To: version, RolledBack: true, DataRestored: true, At: time.Now().UTC(),
+			Message: "A newer version had upgraded the database; this version put back the copy from before that upgrade" + update.RestoredNote(keptAs)}
+		if err := update.WriteResult(dataDir, r); err != nil {
+			log.Printf("update: %v", err)
+		}
 	}
 	return jobs.OpenAs(dbPath, version)
 }

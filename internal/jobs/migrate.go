@@ -3,6 +3,7 @@
 package jobs
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -481,6 +482,16 @@ CREATE INDEX IF NOT EXISTS jobs_newest ON jobs(path, library_id, id);`},
 	// (bytesNow, waitingToFree). Set and cleared by the scanner; history (saved totals) is not changed.
 	{50, "output gone", `
 ALTER TABLE jobs ADD COLUMN output_gone_at TEXT NOT NULL DEFAULT '';`},
+	// The workflow revision a job ran with (Convert again after a workflow change): stamped with its library's
+	// current one, so nothing counts as earlier until a workflow changes. 0 where a flow has no revision yet;
+	// EnsureRevision stamps those when it writes the flow's first one.
+	{51, "job workflow revision", `
+ALTER TABLE jobs ADD COLUMN workflow_rev INTEGER NOT NULL DEFAULT 0;
+UPDATE jobs SET workflow_rev = ` + fmt.Sprintf(revOfFlowSQL, "(SELECT flow_id FROM libraries WHERE id=jobs.library_id)") + `;`},
+	// The .srt files a job saved beside its new file, as a JSON list of names (the job page lists them;
+	// user item 4, 11-20). '' for older jobs: not known, shown as none.
+	{52, "job subtitle files", `
+ALTER TABLE jobs ADD COLUMN subtitle_files TEXT NOT NULL DEFAULT '';`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone
@@ -500,6 +511,15 @@ func legacyReasonCode(text, state string) string {
 const keepBackups = 3
 
 func latestVersion() int { return migrations[len(migrations)-1].version }
+
+// SchemaVersion is the database version this program writes: its pre-upgrade backup is <db>.bak-v<SchemaVersion>.
+func SchemaVersion() int { return latestVersion() }
+
+// Healthy reports whether the database answers a query (for the health check; ctx bounds the wait).
+func (s *Store) Healthy(ctx context.Context) error {
+	var one int
+	return s.db.QueryRowContext(ctx, `SELECT 1`).Scan(&one)
+}
 
 func (s *Store) userVersion() (int, error) {
 	var v int

@@ -27,12 +27,7 @@ var v2Tabs = map[string]string{"waiting": jobs.CardUnprocessed, "running": jobs.
 // states, a job's detail with its steps and history, and bulk actions. They read S5's Files list and
 // the job records; nothing about how jobs run changed.
 func v2Jobs(api *http.ServeMux, store *jobs.Store) {
-	keepDays := func() int {
-		if s, err := LoadSettings(store); err == nil {
-			return s.KeepOriginalsDays
-		}
-		return 7
-	}
+	keepDays := func() int { return keepOriginalsDays(store) }
 	api.HandleFunc("GET /api/v2/jobs", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		tab := q.Get("tab")
@@ -216,6 +211,10 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 			"retryAt": nilIfEmpty(j.RetryAt), "error": nilIfEmpty(j.Error), "worker": nilIfEmpty(j.Worker),
 			"createdAt": j.Created, "updatedAt": j.Updated, "steps": steps, "events": v2Events(events), "removed": false,
 			"path": []string{}}
+		if d["subtitleFiles"], err = store.SubtitleFiles(id); err != nil { // the .srt files saved beside the new file
+			serverError(w, err)
+			return
+		}
 		if route, err := store.Route(id); err == nil && route != nil { // V6a: the nodes the file went along
 			d["path"] = route
 		}
@@ -557,4 +556,12 @@ func jobWarning(steps []jobs.Step) any {
 		}
 	}
 	return nil
+}
+
+// keepOriginalsDays is the keep-originals setting now (7 if the settings can't be read).
+func keepOriginalsDays(store *jobs.Store) int {
+	if s, err := LoadSettings(store); err == nil {
+		return s.KeepOriginalsDays
+	}
+	return 7
 }

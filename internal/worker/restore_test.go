@@ -405,7 +405,7 @@ func TestRecoveryAfterALinkWithoutUnlink(t *testing.T) {
 }
 
 // purgeAll is Purge with nothing waiting: every kept original is judged.
-func purgeAll(st Store, days int, now time.Time) []string { return Purge(st, days, now, nil) }
+func purgeAll(st Store, days int, now time.Time) []string { return Purge(st, days, now, nil, 0).Said }
 
 // A kept original is left alone while its share is not connected, however old it is, and purged once it is.
 func TestPurgeLeavesAKeptOriginalAloneWhileItsShareWaits(t *testing.T) {
@@ -413,10 +413,10 @@ func TestPurgeLeavesAKeptOriginalAloneWhileItsShareWaits(t *testing.T) {
 	kept, _ := time.Parse(time.RFC3339, o.KeptAt)
 	later := kept.Add(30 * 24 * time.Hour)
 	waiting := func(string) bool { return true }
-	if said := Purge(s.store, 7, later, waiting); len(said) != 0 || read(s.trash()) != "original-bytes" {
+	if said := Purge(s.store, 7, later, waiting, 0).Said; len(said) != 0 || read(s.trash()) != "original-bytes" {
 		t.Fatalf("while the share waits: %q, %q", said, read(s.trash()))
 	}
-	if said := Purge(s.store, 7, later, func(string) bool { return false }); len(said) != 1 {
+	if said := Purge(s.store, 7, later, func(string) bool { return false }, 0).Said; len(said) != 1 {
 		t.Errorf("once the share answers: %q; want the original purged", said)
 	}
 }

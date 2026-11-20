@@ -855,7 +855,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if plan.HDRNote != "" { // what the HDR conversion does not keep (S3)
 		w.jobf(job.ID, " (%s): %s", job.Path, plan.HDRNote)
 	}
-	exp := plan.Expect(src, packets)
+	exp := plan.Expect(src, expectedPackets(src, packets))
 	if exp.DurationSec <= 0 {
 		exp.DurationSec = job.DurationSec
 	}
@@ -967,6 +967,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	defer dropLive(job.ID)
 	var encErr string
 	var terr error
+	decoded := int64(-1) // frames ffmpeg took from the original; -1 when a remote worker did not say
 	encStart := w.now()
 	if w.remote != nil { // V7b2: a worker on another computer converts and checks; its file comes up here
 		stopWatch := w.watchRemoteStall(job.ID, w.remote)
@@ -981,7 +982,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			return "", terr
 		}
 	} else {
-		encErr, terr = w.encodeLocal(ctx, job, args)
+		encErr, decoded, terr = w.encodeLocal(ctx, job, args)
 		if gpu != "" && w.gpuFailed(ctx, terr, encErr) { // a graphics encoder that fails converts again on the processor
 			w.recordEncode(job.ID, args, encStart, encErr, terr, probeSummary(src))
 			reason := firstLines(encErr, 1)
@@ -998,7 +999,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 				setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWords(plan),
 					Decoder: decoderWords(src), Progress: media.Progress{ETASeconds: -1}})
 				encStart = w.now()
-				encErr, terr = w.encodeLocal(ctx, job, args)
+				encErr, decoded, terr = w.encodeLocal(ctx, job, args)
 			}
 		}
 	}
@@ -1039,8 +1040,24 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	// Errors ffmpeg reported while reading the original mean it is damaged: converting it would bake
 	// the damage in and delete the only copy that might still be repaired or fetched again.
-	if dmg := sourceDamage(encErr); dmg.Found() {
-		frames := sourceFrames(src)
+	frames, exact := sourceFrameCount(src)
+	lost := frames
+	if !exact {
+		lost = 0 // a count from the container's duration is not evidence of lost frames: unknown is not damage
+	}
+	if lost > 0 && decoded >= 0 && decoded < frames && src.MainVideoOrdinal() >= 0 {
+		// Pictures before the first keyframe of a stream that starts mid-group-of-pictures cannot be decoded in any
+		// file: they are not lost frames. They count as accounted for; damage after the first keyframe still counts.
+		lctx, lcancel := context.WithTimeout(ctx, quickTimeout)
+		lead, lerr := media.LeadingUndecodable(lctx, w.Exec, w.FFprobe, srcPath, src.MainVideoOrdinal())
+		lcancel()
+		if lerr != nil {
+			log.Printf("worker %s: %s: reading the first keyframe: %v", w.ID, job.Path, lerr) // unknown: counts stay strict
+		} else {
+			decoded += lead
+		}
+	}
+	if dmg := withLostFrames(sourceDamage(encErr), lost, decoded); dmg.Found() {
 		if !damageTolerated(dmg, frames) {
 			// The check step records the refusal (its Result is the kept reason), then the lines the UI shows.
 			const reason = "the original file has errors, so it was not converted (converting would keep the damage)"
@@ -1108,6 +1125,15 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if err := keepOwner(tmp, before); err != nil {
 		w.jobf(job.ID, ": could not keep the owner: %v", err)
 	}
+	// On disk before any rename (R1): after a power cut the name never points at data that wasn't written.
+	if err := syncFile(tmp); err != nil {
+		return "", retryable(failed("The new file could not be saved to disk, so your original was kept as it was. Press Retry.", fmt.Errorf("sync the new file: %w", err)), retryGeneral)
+	}
+	for k := range plan.SubtitleFiles() {
+		if err := syncFile(rules.StagedSrt(tmp, k)); err != nil {
+			return "", retryable(failed("A subtitle file could not be saved to disk, so your original was kept as it was. Press Retry.", fmt.Errorf("sync a subtitle file: %w", err)), retryGeneral)
+		}
+	}
 	final = newName
 	// Rename is atomic on one filesystem: the original is only replaced by a complete file. Right
 	// before each try, the original must still be the file we read and the temp file still the one
@@ -1151,9 +1177,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	removePlaced := func() { // the swap did not happen: the .srt files we put beside it go again
 		w.removeSidecars(job.ID, placed)
 	}
-	swapped := func() { // the swap is done: the .srt files stay; their record goes
-		if w.Sidecars != nil && len(placed) > 0 {
-			w.Sidecars.DropSidecars(job.ID)
+	swapped := func() { // the swap is done: the .srt files stay, the job keeps their names; their record goes
+		if w.Sidecars != nil {
+			w.Sidecars.FinishSidecars(job.ID)
 		}
 	}
 	days := 0
@@ -1216,7 +1242,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 // (jobs.Store), so a crash in between leaves nothing of ours behind (RecoverSidecars).
 type SidecarJournal interface {
 	AddSidecars([]jobs.Sidecar) error
-	DropSidecars(jobID int64) error
+	FinishSidecars(jobID int64) error
 	DropSidecar(jobID int64, path string) error
 	Sidecars() ([]jobs.Sidecar, error)
 }
@@ -1567,6 +1593,7 @@ func (w *Worker) setAside(jobID int64, final string) error {
 	if err := os.Rename(final, dst); err != nil {
 		return refused(err)
 	}
+	syncDirs(final, dst)
 	w.movedAside = fmt.Sprintf("Your earlier converted file %s had been changed since it was made, so it was moved to the trash (%s) and the new file took its place.", name, filepath.Join(TrashDir, filepath.Base(dst)))
 	w.Queue.AppendLogLine(jobID, 0, "app", w.movedAside)
 	return nil
@@ -1640,6 +1667,7 @@ func renameRetry(ctx context.Context, rename func(a, b string) error, a, b strin
 			}
 		}
 		if err = rename(a, b); err == nil {
+			syncDirs(a, b)
 			return nil
 		}
 		var k *KeptError
@@ -1887,13 +1915,15 @@ func (w *Worker) gpuFailed(ctx context.Context, err error, stderr string) bool {
 }
 
 // encodeLocal runs ffmpeg for the local worker's job: its progress, stall watch and live figures.
-func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (string, error) {
+func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (string, int64, error) {
 	var encErr string
 	var terr error
+	frames := int64(-1) // the last frame count ffmpeg reported
 	stopWatch := w.watchStall(job.ID)
 	var tenths progressLines
 	at := -1.0 // the furthest position ffmpeg has reached
 	encErr, terr = media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
+		frames = p.Frame
 		// only a position further on is progress: a stuck ffmpeg can keep reporting the same one (a
 		// damaged file, 21 min on a test run, never stopped), which mustn't hold off the stall stop
 		if p.OutTimeUS > at {
@@ -1910,5 +1940,5 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 		}
 	})
 	stopWatch()
-	return encErr, terr
+	return encErr, frames, terr
 }

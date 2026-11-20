@@ -4,6 +4,7 @@
 package web
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,9 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/notify"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/web/next"
 )
+
+// healthzWait bounds the health check's database query (a check that waits longer is "busy", still ok).
+const healthzWait = 2 * time.Second
 
 // Handler returns the HTTP handler: pages, assets under /assets and /healthz (all public), and JSON
 // under /api, guarded by access.
@@ -67,10 +71,24 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	}
 	v2Integrations(api, svc)
 	v2Backups(api, store, ss) // item 5: /api/v2/backups
-	// For health checks: answers without signing in and says nothing else.
+	// For health checks: answers without signing in and says nothing else. "ok" needs the database to
+	// answer one query (user item 9: an update whose program is up but can't reach its data is not
+	// healthy). A database busy past healthzWait (one connection, held by a long write) is still "ok":
+	// busy is alive, and a health check must not flap under load.
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		ctx, cancel := context.WithTimeout(r.Context(), healthzWait)
+		err := store.Healthy(ctx)
+		cancel()
+		if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte("database not answering\n"))
+			return
+		}
 		w.Write([]byte("ok\n"))
+		if eng.Healthy != nil {
+			eng.Healthy()
+		}
 	})
 	// One UI (user decision 2026-11-12, manager row qitem-20261112190001): the single-page app is the whole interface,
 	// at /. Method-less "/" so the more specific /api/, /api/worker/v1/ and /healthz keep answering for themselves: the

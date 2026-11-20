@@ -98,6 +98,8 @@ Write-Host $ver
 Step 'ffmpeg can encode HEVC'
 $enc = & (Join-Path $app 'ffmpeg\ffmpeg.exe') -hide_banner -encoders 2>&1 | Out-String
 if ($enc -notmatch 'libx265') { Fail 'downloaded ffmpeg has no libx265' }
+# AMD cards encode through AMF on Windows (user item 8); the encoder must be in the build (no AMD card here to run it)
+if ($enc -notmatch 'hevc_amf') { Fail 'downloaded ffmpeg has no hevc_amf (AMD)' }
 
 Step 'real conversion'
 $video = Join-Path $Library 'movie.mp4'
