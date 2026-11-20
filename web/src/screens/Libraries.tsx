@@ -130,7 +130,7 @@ export function Libraries() {
       {!libs.loaded ? <div className="empty">Loading…</div> : libs.error && !libs.data ? <LoadFailed error={libs.error} reload={libs.reload} /> : all.length === 0 ? <Empty icon="i-library" text="No libraries yet. A library is a folder that is watched for videos."><Link className="btn primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link></Empty>
         : items.length === 0 ? <div className="empty">No library matches.</div> : (
         // No table header (U3, C1): a 40 px tile, the name and its folder, one chip line of facts, and one status pill.
-        <div className={"list" + (selecting ? " selecting" : "")}><table className="tbl">
+        <div className={"list rows" + (selecting ? " selecting" : "")}><table className="tbl">
           <tbody>{items.map((l) => (
             <tr key={l.id} className={sel.includes(l.id) ? "sel" : undefined}>
               <td className="selc"><label className="hit"><input type="checkbox" aria-label={"Select " + l.name} checked={sel.includes(l.id)} onChange={(e) => setSel(e.target.checked ? [...sel, l.id] : sel.filter((x) => x !== l.id))} /></label></td>
