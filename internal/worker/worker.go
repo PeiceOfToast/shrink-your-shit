@@ -522,6 +522,21 @@ func (e *FailedError) Unwrap() error { return e.Err }
 
 func failed(plain string, err error) error { return &FailedError{plain, err} }
 
+// unreadableSecretWords is what the job says when its workflow's secret was sealed on another computer: the
+// secret is named, because entering it again on this one is the fix, and nothing was converted.
+func unreadableSecretWords(names []string) string {
+	quoted := make([]string, len(names))
+	for i, n := range names {
+		quoted[i] = "“" + n + "”"
+	}
+	what, it := "The workflow secret "+strings.Join(quoted, ", "), "it"
+	if len(names) > 1 {
+		what, it = "The workflow secrets "+strings.Join(quoted, ", "), "them"
+	}
+	return what + " can't be opened on this computer (it was sealed on another one), so converting did not start. " +
+		"Your original was not touched. Enter " + it + " again in the workflow, then press Retry."
+}
+
 // jobf logs a line about job id, to the program's log and to the job's own run log (S5).
 func (w *Worker) jobf(id int64, format string, a ...any) {
 	msg := fmt.Sprintf(format, a...)
@@ -989,6 +1004,12 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// encodes the plan it is given.
 	vals, vtable, err := w.runValues(job, src, plan)
 	if err != nil {
+		// a secret sealed on another computer can't be opened here (a restored backup): the job stops,
+		// naming it, rather than run with it silently empty
+		var unreadable *jobs.SecretUnreadableError
+		if errors.As(err, &unreadable) {
+			return "", retryable(failed(unreadableSecretWords(unreadable.Names), err), retryGeneral)
+		}
 		return "", retryable(failed("This library's setting could not be read, so converting did not start. Your original was not touched. Open the library and save its setting again, then press Retry.", err), retryGeneral)
 	}
 	var vEmpty []string
@@ -1003,6 +1024,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	outName, empty := vars.OutputName(plan.OutputName, ext, vals)
 	vEmpty = append(vEmpty, empty...)
+	if nameTooLong(outName) { // the final rename would refuse it, after the conversion (review2-504 P3)
+		return "", failed(tooLongWords("Output file name", outName), errors.New("the output file name is too long"))
+	}
 	exp := plan.Expect(src, expectedPackets(src, packets))
 	if exp.DurationSec <= 0 {
 		exp.DurationSec = job.DurationSec
@@ -1045,6 +1069,11 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		} else if strings.Contains(dir, "{{") { // W4b: the folder as a template, filled in for this file
 			d, empty := vars.Folder(dir, vals)
 			vEmpty = append(vEmpty, empty...)
+			for _, piece := range strings.Split(filepath.ToSlash(d), "/") {
+				if nameTooLong(piece) {
+					return "", failed(tooLongWords("Folder", piece), errors.New("the folder for new files has a piece that is too long"))
+				}
+			}
 			if !filepath.IsAbs(d) {
 				return "", failed(fmt.Sprintf("The folder for new files came out as %q, which isn't a full path, so nothing was converted. Your original was not touched. Check the folder in the workflow's Save the result step, then press Retry.", d), errors.New("folder for new files: its template did not make a full path"))
 			}
@@ -1069,6 +1098,11 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// and the job log's variables section, now that every field the run uses is filled in.
 	plan.SrtNames, empty = vars.SrtNames(newName, plan.SrtName, subtitlesOf(plan), vals)
 	vEmpty = append(vEmpty, empty...)
+	for _, n := range plan.SrtNames {
+		if base := filepath.Base(n); nameTooLong(base) { // as with the new file's name: the write would refuse it
+			return "", failed(tooLongWords("Subtitle file name", base), errors.New("a subtitle file name is too long"))
+		}
+	}
 	w.variableLines(job.ID, vtable, distinctNames(vEmpty))
 	if keepsOriginal(plan) { // the name is taken already: no point converting (checked again at the end)
 		if OutputMode(plan.Output) == Folder || OutputMode(plan.Output) == Beside { // beside too (Convert again, design 11:45Z)
@@ -1750,6 +1784,20 @@ func (w *Worker) moveIntoFolder(ctx context.Context, jobID int64, tmp, final str
 // moveBeside is moveIntoFolder for the new file next to the original (slice 18, Convert again).
 func (w *Worker) moveBeside(ctx context.Context, jobID int64, tmp, final string, stillOK func() error) error {
 	return w.moveOverOwn(ctx, jobID, tmp, final, stillOK, besideTaken)
+}
+
+// maxNameLen is the longest name this worker makes from a {{name}} template: ext4 refuses a piece over
+// 255 bytes and Windows one over 255 characters, and 200 bytes fits both (a UTF-8 byte is at least one
+// UTF-16 unit), so a name this long is one both hold.
+const maxNameLen = 200
+
+// nameTooLong reports a name the final rename would refuse after the conversion had run (review2-504 P3).
+func nameTooLong(name string) bool { return len(name) > maxNameLen }
+
+// tooLongWords says which setting made a name too long, in plain words, before anything is converted.
+func tooLongWords(field, name string) string {
+	return fmt.Sprintf("The name from “%s” would be %d characters long, and a file name can be at most %d, so nothing was converted. Nothing was changed. Shorten that setting in the workflow's Save the result step, then press Retry.",
+		field, len(name), maxNameLen)
 }
 
 // takenWords is the failure for a file we didn't make at the new file's name.

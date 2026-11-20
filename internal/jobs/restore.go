@@ -13,6 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
 )
 
 // MaxBackupBytes is the largest backup that can be previewed or restored. A variable so tests can lower it.
@@ -197,6 +199,11 @@ func (s *Store) RestoreBackup(path string) (BackupContents, error) {
 	}); err != nil {
 		return BackupContents{}, err
 	}
+	// a backup made before secrets were stored sealed holds them in the clear: seal them in this transaction
+	// too, so the restored database leaves no plaintext behind (and a failure here changes nothing)
+	if err := sealStoredVariables(tx); err != nil {
+		return BackupContents{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return BackupContents{}, err
 	}
@@ -264,6 +271,21 @@ func (sc *backupScan) sealed(ct, nonce []byte) {
 	}
 }
 
+// workflowDoc checks a stored workflow doc's sealed secret values: they live inside the doc's JSON rather
+// than in columns, so the preview opens them one by one.
+func (sc *backupScan) workflowDoc(v any) {
+	s, _ := v.(string)
+	var doc workflow.Doc
+	if json.Unmarshal([]byte(s), &doc) != nil {
+		return
+	}
+	for _, v := range doc.Variables {
+		if ct, nonce, ok := sealedOf(v.Value); ok {
+			sc.sealed(ct, nonce)
+		}
+	}
+}
+
 // blob reads a []byte column or field as the backup holds it: base64 text, or nothing.
 func blob(v any) []byte {
 	s, _ := v.(string)
@@ -285,6 +307,8 @@ func (sc *backupScan) add(table string, row map[string]any) error {
 		sc.sealed(blob(row["encrypted_password"]), blob(row["auth_nonce"]))
 	case "jobs":
 		sc.c.Jobs++
+	case "workflow_revisions":
+		sc.workflowDoc(row["doc"])
 	case "app_meta":
 		key, _ := row["key"].(string)
 		value, _ := row["value"].(string)
