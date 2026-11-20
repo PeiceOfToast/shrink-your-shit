@@ -248,7 +248,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
                 <div className="field"><label htmlFor={"gn-" + picked.id}>Name</label>
                   <input id={"gn-" + picked.id} className="input" value={picked.name ?? ""} placeholder={pickedDef.name} onChange={(e) => setNode({ ...picked, name: e.target.value || undefined })} /></div>
                 {!pickedDef.alwaysOn && <label className="row nw"><input type="checkbox" role="switch" className="switch" checked={picked.enabled} onChange={(e) => setNode({ ...picked, enabled: e.target.checked })} /><span>On</span></label>}
-                <Reg.Provider value={{ defs, words: checked.stepSummaries ?? {}, libs: [] }}>
+                <Reg.Provider value={{ defs, words: checked.stepSummaries ?? {}, libs: [], wf: "" }}>
                   <Options n={picked} issues={issues} set={(k, v) => setNode({ ...picked, config: { ...picked.config, [k]: v } })} />
                 </Reg.Provider>
               </form>}

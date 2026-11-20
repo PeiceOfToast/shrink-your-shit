@@ -11,13 +11,15 @@ import { useData } from "../useData";
 import { getDraft, getLadder, getWorkflow, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
 import { Link, onLeave } from "../router";
 import { Browse } from "../FolderPicker";
+import { VarInput } from "../VarInput";
 import { listLibraries, shrunk } from "../libraryApi";
 import type { JSONSchema, Node, PublishPreview, StepDefinition, ValidationIssue, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
 
 // The step definitions and the server's words for each step of the document being edited.
 // libs: the folders of the libraries that use this workflow, for "Next to each library" (V5a).
-export const Reg = createContext<{ defs: StepDefinition[]; words: Record<string, string>; libs: string[] }>({ defs: [], words: {}, libs: [] });
-function useReg() { const r = useContext(Reg); return { stepDef: (t: string) => r.defs.find((d) => d.type === t), summary: (n: Node) => r.words[n.id] ?? "", libs: r.libs }; }
+// wf: the workflow being edited, for its variable list (the {{name}} fields).
+export const Reg = createContext<{ defs: StepDefinition[]; words: Record<string, string>; libs: string[]; wf: string }>({ defs: [], words: {}, libs: [], wf: "" });
+function useReg() { const r = useContext(Reg); return { stepDef: (t: string) => r.defs.find((d) => d.type === t), summary: (n: Node) => r.words[n.id] ?? "", libs: r.libs, wf: r.wf }; }
 
 // The server's icon keys (registry) -> design's sprite.
 export const ICON: Record<string, string> = { folder: "i-folder", filter: "i-shield", video: "i-video", audio: "i-audio", subtitles: "i-subtitle", file: "i-file", check: "i-checks", save: "i-save", cond: "i-cond", history: "i-history", branch: "i-branch", stop: "i-stop" }; // branch, stop: V6a check + end
@@ -33,7 +35,7 @@ const hintFor = (s: JSONSchema, v: unknown) => { const e = (s.enum as unknown[])
 const Hint = ({ text }: { text: string }) => (text ? <span className="hint" aria-live="polite">{text}</span> : null);
 
 // One option from the step's configSchema, as a native labelled control (design review rule 1).
-function Field({ id, name, s, value, set }: { id: string; name: string; s: JSONSchema; value: unknown; set: (v: unknown) => void }) {
+function Field({ id, name, s, value, set, wf }: { id: string; name: string; s: JSONSchema; value: unknown; set: (v: unknown) => void; wf: string }) {
   // The schema's title; without one (V1's "ignore" has none), the key in plain form.
   const title = (s.title as string) ?? name.charAt(0).toUpperCase() + name.slice(1).replace(/([A-Z])/g, " $1").toLowerCase(), fid = id + "-" + name;
   if (widget(s) === "slider") {
@@ -71,6 +73,8 @@ function Field({ id, name, s, value, set }: { id: string; name: string; s: JSONS
         {labels(items).map(([v, l]) => <label key={String(v)} className="row nw"><input type="checkbox" checked={on.includes(v)} onChange={(e) => set(e.target.checked ? [...on, v] : on.filter((x) => x !== v))} /><span>{l}</span></label>)}
       </div>{typeof s.description === "string" && <span className="hint">{s.description}</span>}</fieldset>);
   }
+  // a text field that takes {{name}} variables (x-variables): the hint, the example and the picker
+  if (s["x-variables"] === true) return <VarInput id={fid} title={title} value={String(value ?? "")} wf={wf} set={(v) => set(v)} />;
   const hint = typeof s.description === "string" ? <span className="hint" id={fid + "-h"}>{s.description}{s.type === "array" ? " One per line." : ""}</span> : null;
   if (s.type === "integer" || s.type === "number") // a number, saved as a number (empty: not set)
     return <div className="field"><label htmlFor={fid}>{title}</label><input id={fid} className="input" type="number" inputMode="decimal" min={s.minimum as number | undefined} step={s.type === "integer" ? 1 : "any"}
@@ -106,7 +110,7 @@ function convertField(k: string, s: JSONSchema, c: Record<string, unknown>, l: L
 }
 
 export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown, more?: Record<string, unknown>) => void; issues: ValidationIssue[] }) {
-  const { stepDef, libs } = useReg(), def = stepDef(n.type)!, props = Object.fromEntries(Object.entries((def.configSchema.properties ?? {}) as Props).filter(([, s]) => !s.readOnly)) as Props, c = n.config;
+  const { stepDef, libs, wf } = useReg(), def = stepDef(n.type)!, props = Object.fromEntries(Object.entries((def.configSchema.properties ?? {}) as Props).filter(([, s]) => !s.readOnly)) as Props, c = n.config;
   const lad = useData(getLadder, []).data, conv = (k: string) => (n.type === "video.convert" ? convertField(k, props[k], c, lad) : props[k]);
   const keys = Object.keys(props).filter((k) => !(MORE[n.type] ?? []).includes(k)), more = (MORE[n.type] ?? []).filter((k) => props[k] && conv(k));
   // #165: a setting's own problems (invalid_config, keyed on the step + field) show at that field, which is marked
@@ -130,7 +134,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
   };
   const field = (k: string) => { const b = bad(k), sk = conv(k); if (!sk) return null; return (
     <div key={k} className={b.length ? "fieldbad" : undefined} data-field={k} aria-invalid={b.length ? true : undefined}>
-      <Field id={n.id} name={k} s={sk} value={c[k] ?? sk.default} set={(v) => put(k, v)} />
+      <Field id={n.id} name={k} s={sk} value={c[k] ?? sk.default} set={(v) => put(k, v)} wf={wf} />
       {b.map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
     </div>); };
   // a problem in a field under 'More options' opens it by itself (review c0189fa P3), also when the problems list picks
@@ -356,7 +360,7 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
   </>;
   const canStack = live.stackable;
   return (
-    <Reg.Provider value={{ defs, words: live.stepSummaries, libs }}>
+    <Reg.Provider value={{ defs, words: live.stepSummaries, libs, wf: id }}>
     <div className="stack">
       {/* the workflow's header row (clean pass W2) */}
       <PageHead icon="i-workflow" crumbs={[["Workflows", "/workflows"]]}

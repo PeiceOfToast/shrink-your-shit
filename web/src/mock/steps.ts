@@ -70,6 +70,9 @@ export const STEP_DEFS: StepDefinition[] = [
 // The server's own words (#114: titles, descriptions, option hints, placeholders), as a 4df3345 server sends them, so the
 // mock shows what the real page shows.
 for (const d of STEP_DEFS) { const r = (REGISTRY as unknown as Record<string, Pick<StepDefinition, "name" | "description" | "configSchema">>)[d.type]; if (r) Object.assign(d, r); }
+// The string fields that take {{name}} variables (x-variables). The v1 contract names four (output file name, .srt name, track
+// title, move-to folder); this registry has only the move-to folder, so only that one is marked here.
+{ const f = (STEP_DEFS.find((d) => d.type === "output.commit")?.configSchema.properties as Record<string, JSONSchema> | undefined)?.folder; if (f) f["x-variables"] = true; }
 export const stepDef = (type: string) => STEP_DEFS.find((d) => d.type === type);
 
 // GET /api/v2/bitrate-ladder as A-API-SHAPE gives it: the registry's ladder in kbps, the slider table (CRF and the
