@@ -40,6 +40,27 @@ func TestAMDBusyFromSysfs(t *testing.T) {
 	}
 }
 
+// A card whose busy file cannot be read, or holds no number, is skipped: the busiest readable card still counts,
+// and only when no card is readable is the reading nil.
+func TestAMDSkipsUnreadableCards(t *testing.T) {
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{
+		"card0/device/gpu_busy_percent": "30\n",
+		"card1/device/gpu_busy_percent": "not a number\n",
+	})
+	if err := os.MkdirAll(filepath.Join(dir, "card2", "device", "gpu_busy_percent"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if v := readAMDGPU(dir); v == nil || *v != 30 {
+		t.Fatalf("AMD reading %v with two unreadable cards and one at 30, want 30", v)
+	}
+	bad := t.TempDir()
+	writeTree(t, bad, map[string]string{"card0/device/gpu_busy_percent": "garbage\n"})
+	if v := readAMDGPU(bad); v != nil {
+		t.Fatalf("AMD reading %v with only an unparsable card, want nil", *v)
+	}
+}
+
 // The i915 PMU's busy events are the engines; the perf type, CPU and each config come from its files.
 func TestIntelEnginesFromPMU(t *testing.T) {
 	dir := t.TempDir()
