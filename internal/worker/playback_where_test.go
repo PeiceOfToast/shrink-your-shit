@@ -68,7 +68,7 @@ func (s stubExec) Capture(context.Context, string, ...string) ([]byte, []byte, e
 // A sampled playback test that reports frame=0 played nothing: the original is kept, not passed.
 func TestSampledZeroFrameIsKept(t *testing.T) {
 	w := &Worker{Exec: stubExec{progress: "out_time_us=0\nframe=0\nprogress=end\n"}, FFmpeg: "ffmpeg"}
-	err := w.decodeRun(context.Background(), "x.mkv", media.Info{}, 5, 3, 10, 25)
+	_, _, err := w.decodeRun(context.Background(), "x.mkv", media.Info{}, 5, 3, 10, 25)
 	var k *KeptError
 	if !errors.As(err, &k) {
 		t.Fatalf("decodeRun returned %v, want a *KeptError", err)

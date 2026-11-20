@@ -23,11 +23,11 @@ func TestDecodeRun24fpsAACNoFalseAlarm(t *testing.T) {
 		"-c:v", "libx264", "-c:a", "aac", p)
 	st, _ := realJob(t, p, 10)
 	w := realWorker(st, media.OSExec{})
-	if err := w.decodeRun(context.Background(), p, probeFile(t, p), 0, 0, 10, 24); err != nil {
+	if _, _, err := w.decodeRun(context.Background(), p, probeFile(t, p), 0, 0, 10, 24); err != nil {
 		t.Fatalf("playback check false alarm: %v", err)
 	}
 	// The sampled path (a 5 s sample from 2 s) has the same false alarm without -copyts.
-	if err := w.decodeRun(context.Background(), p, probeFile(t, p), 2, 5, 5, 24); err != nil {
+	if _, _, err := w.decodeRun(context.Background(), p, probeFile(t, p), 2, 5, 5, 24); err != nil {
 		t.Fatalf("playback check false alarm on the sampled path: %v", err)
 	}
 }
@@ -43,7 +43,7 @@ func TestDecodeRunSampleStartingAfterItsLengthPlays(t *testing.T) {
 	st, _ := realJob(t, p, 10)
 	rec := &recordExec{Exec: media.OSExec{}}
 	w := realWorker(st, rec)
-	if err := w.decodeRun(context.Background(), p, probeFile(t, p), 5, 3, 10, 24); err != nil {
+	if _, _, err := w.decodeRun(context.Background(), p, probeFile(t, p), 5, 3, 10, 24); err != nil {
 		t.Fatalf("sample 5 s + 3 s: %v", err)
 	}
 	frame, ok := progressFrame(rec.progress)
@@ -120,10 +120,10 @@ func TestRealDamagedAudioIsKept(t *testing.T) {
 
 	st, _ := realJob(t, clean, 10)
 	w := realWorker(st, media.OSExec{})
-	if err := w.decodeRun(context.Background(), clean, probeFile(t, clean), 0, 0, 10, 24); err != nil {
+	if _, _, err := w.decodeRun(context.Background(), clean, probeFile(t, clean), 0, 0, 10, 24); err != nil {
 		t.Fatalf("the undamaged file was kept: %v", err)
 	}
-	err := w.decodeRun(context.Background(), damaged, probeFile(t, damaged), 0, 0, 10, 24)
+	_, _, err := w.decodeRun(context.Background(), damaged, probeFile(t, damaged), 0, 0, 10, 24)
 	var k *KeptError
 	if !errors.As(err, &k) {
 		t.Fatalf("damaged audio: %v, want the original kept", err)
