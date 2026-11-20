@@ -25,7 +25,7 @@ function library(id: ID, name: string, path: string, freed: number, waitingToFre
     discovery: { subfolders: true, settleSeconds: 15, followLinks: false, include: [], exclude: [] },
     status: "ok",
     writable: !(unwritable && id === "l2"),
-    unwritableMessage: unwritable && id === "l2" ? "Can't write to this folder: " + path + ". Change its owner/permissions." : "",
+    unwritableMessage: unwritable && id === "l2" ? "Can't write to this folder: " + path + "." : "",
   };
 }
 function worker(id: ID, name: string, status: Worker["status"], cpu: [number, number], gpu: [number, number], since: number, jobs: ID[]): Worker {
