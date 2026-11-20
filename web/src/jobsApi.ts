@@ -39,7 +39,8 @@ export interface LogSide { video?: string; audio?: string; subtitles?: string; d
 export interface LogSummary { result: string; originalBytes: number; finalBytes: number; savedPercent: number; outputPath: string; tookMs: number; tempRemoved: boolean; before?: LogSide; after?: LogSide; passes?: number | null; bytesWritten?: number | null; slowestStep?: { name: string; tookMs: number } | null }
 // contract L1: a line's level and stream (app = our words, stderr = ffmpeg, info = GPU driver chatter, check = the picture and decode checks)
 export interface LogLine { at: string; step: number; level: "info" | "warning" | "error"; stream: "app" | "stderr" | "info" | "check"; text: string }
-export interface LogSection { id: string; title: string; lines: LogLine[] }
+// step: a workflow step's section only (id "step"), its number; absent on the others
+export interface LogSection { id: string; title: string; lines: LogLine[]; step?: number }
 export interface JobLog { state: string; steps: LogStep[]; final: string | null; start?: LogStart | null; variables?: LogVariable[]; summary?: LogSummary | null; sections?: LogSection[] }
 export async function getJobLog(id: string): Promise<Answer<JobLog>> {
   if (MOCK) return mockJobLog(id);

@@ -303,6 +303,7 @@ const logLineEl = (y: LogLine, j: number) => {
   return <div key={j} className={dim ? "muted" : undefined} style={dim ? { paddingLeft: 16 } : undefined}>{y.at && <span className="muted">{clockS(new Date(y.at))} </span>}{y.level === "warning" && <><Icon id="i-alert" /> Warning: </>}{y.level === "error" && <><Icon id="i-x-c" /> Error: </>}{y.text}</div>;
 };
 const cnt = (ls: LogLine[], level: string) => ls.filter((y) => y.level === level).length;
+const LEFT_ALONE = "Leave the file alone"; // rules.StepLeftAlone: the step that skipped the file (its section opens)
 const lvlPills = (ls: LogLine[]) => <>{cnt(ls, "warning") > 0 && <span className="pill warn">{plural1(cnt(ls, "warning"), "warning", "warnings")}</span>}{cnt(ls, "error") > 0 && <span className="pill bad">{plural1(cnt(ls, "error"), "error", "errors")}</span>}</>;
 // a row's lines: the newest 200 when there are more, with the link to the whole log
 const linesBlock = (ls: LogLine[], id: string) => {
@@ -380,8 +381,11 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
   // the start and summary sections' lines: shown in their own rows, and counted like any other line
   const edgeL = (sec: string) => (l.sections ?? []).filter((x) => x.id === sec).flatMap((x) => x.lines);
   const startL = edgeL("start"), summL = edgeL("summary"), inputL = edgeL("input");
+  // a workflow step's own section (L2): "Step N: Label", its number beside it. Its lines are its own row, not Other lines.
+  // The wire has no step outcome; the one step that skips a file is the server's "Leave the file alone" (rules.StepLeftAlone)
+  const stepSecs = (l.sections ?? []).filter((x) => x.id === "step");
   const nonInfo = (y: LogLine) => y.level !== "info";
-  secs2.filter((x) => x.id !== "input").forEach((x) => x.lines.forEach((y) => {
+  secs2.filter((x) => x.id !== "input" && x.id !== "step").forEach((x) => x.lines.forEach((y) => {
     const name = y.stream === "check" ? "check" : ROW[x.id];
     if (name && l.steps.some((st) => st.name === name)) { if (!own.has(name)) own.set(name, []); own.get(name)!.push(y); } else other.push(y);
   }));
@@ -409,6 +413,11 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
     if (pr || inputL.length) raw.push({ key: "source", title: "Source file", head: lvlPills(inputL), hits: srcHits, dflt: false, show: (!errOnly || inputL.some(nonInfo)) && (!q || srcHits > 0),
       body: errOnly ? linesBlock(srcL, id) : <>{pr && !inputL.length && <><p className="sm">{sourceLine(pr)}</p>{streamLines(pr).map((x, j) => <p className="sm" key={j}>{x}</p>)}</>}{linesBlock(inputL, id)}</> });
   }
+  // a workflow step's section: its row sits between Source file and the encode rows, as the log reads
+  stepSecs.forEach((x, k) => {
+    const sLs = errOnly ? x.lines.filter(nonInfo) : x.lines, hits = q ? countIn(sLs.map((y) => y.text).join("\n").toLowerCase(), q) : 0;
+    raw.push({ key: "stepsec-" + k, title: x.title, head: lvlPills(x.lines), hits, dflt: x.title.replace(/^Step \d+: /, "") === LEFT_ALONE, show: (!errOnly || x.lines.some(nonInfo)) && (!q || hits > 0), body: linesBlock(sLs, id) });
+  });
   l.steps.forEach((st, i) => {
     const ls = ownL[i], warnN = cnt(ls, "warning"), errN = cnt(ls, "error"), flagged = warnN + errN > 0;
     // a sectioned step is searched in its lines, not its output too (the output is the same lines)
@@ -460,7 +469,7 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
   const secs = raw.map((r) => ({ ...r, open: errOnly || (r.key in qOpen ? qOpen[r.key] : (!!q && r.hits > 0) || (r.key in open ? open[r.key] : r.dflt)) })); // design 04:37Z: search only adds open sections
   const shown = secs.filter((s) => s.show), anyClosed = shown.some((s) => !s.open);
   const tot = shown.reduce((n, s) => n + s.hits, 0), ks = shown.filter((s) => s.hits > 0).length; // review2 #455: search and the switch must both match
-  const visL = [...l.steps.map((_, i) => ownL[i]).filter((_, i) => shown.some((s) => s.key === "step-" + i)), ...(shown.some((s) => s.key === "other") ? [other] : []), ...(shown.some((s) => s.key === "start") ? [startL] : []), ...(shown.some((s) => s.key === "summary") ? [summL] : []), ...(shown.some((s) => s.key === "source") ? [inputL] : [])];
+  const visL = [...stepSecs.filter((_, k) => shown.some((s) => s.key === "stepsec-" + k)).map((x) => x.lines), ...l.steps.map((_, i) => ownL[i]).filter((_, i) => shown.some((s) => s.key === "step-" + i)), ...(shown.some((s) => s.key === "other") ? [other] : []), ...(shown.some((s) => s.key === "start") ? [startL] : []), ...(shown.some((s) => s.key === "summary") ? [summL] : []), ...(shown.some((s) => s.key === "source") ? [inputL] : [])];
   const E = visL.reduce((n, ls) => n + cnt(ls, "error"), 0), W = visL.reduce((n, ls) => n + cnt(ls, "warning"), 0), K = visL.filter((ls) => ls.some((y) => y.level !== "info")).length;
   const status = [q && (tot ? plural1(tot, "match", "matches") + " in " + plural1(ks, "section", "sections") : "No match"), errOnly && (E + W ? plural1(E, "error", "errors") + " and " + plural1(W, "warning", "warnings") + " in " + plural1(K, "section", "sections") : !q && "No errors or warnings in this log.")].filter(Boolean).join(" · ");
   return (

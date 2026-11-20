@@ -58,10 +58,16 @@ export function mockJobs(tab: Tab, q: string, path?: string, limit = 200, librar
 const REMOVED: JobDetail = { id: "47001", state: "cancelled", removed: true, reason: { code: "removed", message: "Its library was removed, so this file wasn't converted." },
   events: [{ seq: 3, at: at(300), from: null, to: "queued", reason: null, workerId: null }, { seq: 9, at: at(200), from: "queued", to: "cancelled", reason: "removed", workerId: null }], steps: [] };
 // The sample's log by step: the steps the job went through, the failing one with its last lines
-// the sectioned log (contract L1): each line is { at, step, level, stream, text }. A skipped job has no sections. The encode
+// the sectioned log (contract L1): each line is { at, step, level, stream, text }. The encode
 // section has ffmpeg's stderr lines (dimmed in the UI), a libva line (stream info) and the stall warning (L2, R9: an ordinary line)
 const ln = (min: number, step: number, level: LogLine["level"], stream: LogLine["stream"], text: string): LogLine => ({ at: at(min), step, level, stream, text });
-const sectionsFor = (result: string): LogSection[] => result === "skipped" ? [] : [
+// a workflow step's own section (L2, joblog.go writeStepSections): id "step", its title "Step N: Label" and its number.
+// A skipped file has one step, "Leave the file alone", and the steps that ran say what they decided.
+const stepSecs = (result: string): LogSection[] => result === "skipped"
+  ? [{ id: "step", title: "Step 1: Leave the file alone", step: 1, lines: [ln(30, 0, "info", "app", "Skipped: already HEVC at 1080p")] }]
+  : [{ id: "step", title: "Step 1: Convert video", step: 1, lines: [ln(31, 0, "info", "app", "Convert video: H.264 becomes HEVC at CRF 23.")] },
+     { id: "step", title: "Step 2: Audio", step: 2, lines: [ln(31, 0, "info", "app", "Kept English and Japanese audio; removed 2 others.")] }];
+const sectionsFor = (result: string): LogSection[] => [
   // the input lines as the worker writes them (joblog.go inputLines): the file, its size, container and length, one line per stream, chapters
   { id: "input", title: "Input", lines: [
     ln(31, 0, "info", "app", "Source /media/shows/Example.S01E01.mkv"),
@@ -72,14 +78,15 @@ const sectionsFor = (result: string): LogSection[] => result === "skipped" ? [] 
     ln(31, 0, "info", "app", "#2 audio · jpn · AAC stereo · 192 kbps"),
     ln(31, 0, "info", "app", "Chapters 12, attachments 0"),
   ] },
-  { id: "encode", title: "Encode", lines: [
+  ...stepSecs(result),
+  ...(result === "skipped" ? [] : [{ id: "encode", title: "Encode", lines: [
     ln(29, 0, "info", "app", "Starting ffmpeg: HEVC, Balanced quality"),
     ln(29, 0, "info", "stderr", "ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers"),
     ln(28, 0, "info", "info", "libva info: VA-API version 1.20.0"),
     ln(20, 0, "info", "stderr", "frame= 43200 fps=142 q=24.0 size= 2150400kB time=00:30:00.00 bitrate=9800.1kbits/s speed=3.4x"),
     ln(14, 0, "warning", "app", "No progress for 30 s; the encode is still running"),
     ln(13, 0, "info", "stderr", "frame= 86400 fps=141 q=24.0 size= 4300800kB time=01:00:00.00 bitrate=9800.1kbits/s speed=3.4x"),
-  ] },
+  ] }]),
   ...(result === "converted" ? [{ id: "replace", title: "Replace", lines: [ln(1, 2, "info", "app", "Saved the new file in place of the original")] }] : []),
 ];
 // the start, variables and summary of a job that ran with full logs (contract v2); result: converted | kept | failed | skipped
