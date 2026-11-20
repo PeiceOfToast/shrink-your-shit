@@ -266,3 +266,67 @@ func TestATooLongOutputNameStopsBeforeTheConversion(t *testing.T) {
 		t.Error("a file at the too-long name exists")
 	}
 }
+
+// The cap covers each piece of the move-to folder too (review2-511 P3a, M6): a folder template that
+// resolves to a piece the filesystem would refuse stops before the folder is made or anything is
+// converted.
+func TestATooLongFolderPieceStopsBeforeTheConversion(t *testing.T) {
+	title := strings.Repeat("m", 220) // a long original's name fills the {{title}} piece
+	s := newScenarioNamed(t, title+".mkv")
+	moveRoot := t.TempDir()
+	w := selectorsWorker(s, func(sel *rules.Selectors) {
+		sel.AfterConverting, sel.OutputDir = "folder", filepath.Join(moveRoot, "{{title}}")
+	})
+	w.RunOne(context.Background()) // the failure is the job's, checked below
+	j := s.job()
+	if j.Status != jobs.Failed || !strings.Contains(j.Error, "The name from “Folder” would be 220 characters long") ||
+		!strings.Contains(j.Error, "Nothing was changed.") {
+		t.Fatalf("status %s, error %q", j.Status, j.Error)
+	}
+	if n := len(encodeCalls(s)); n != 0 {
+		t.Errorf("%d encode(s) ran before the folder was checked", n)
+	}
+	if read(s.src) != "original-bytes" {
+		t.Errorf("the original is %q", read(s.src))
+	}
+	if _, err := os.Stat(filepath.Join(moveRoot, title)); err == nil {
+		t.Error("a folder at the too-long piece was made")
+	}
+}
+
+// And the .srt names (review2-511 P3a, M7): a template that resolves past the cap stops before the
+// conversion, naming that setting rather than failing on the write.
+func TestATooLongSrtNameStopsBeforeTheConversion(t *testing.T) {
+	s := newScenario(t)
+	s.srcSpec.streams = []map[string]any{vid("h264", 640, 360, "yuv420p"), aud("aac", "eng", 2),
+		sub("subrip", "eng", false), att("font.ttf")}
+	out := goodOutput()
+	out.streams = append(out.streams[:2], out.streams[3]) // no subtitle inside the new file
+	s.outSpec = out
+	w := selectorsWorker(s, func(sel *rules.Selectors) {
+		sel.AfterConverting, sel.Subtitles = "beside", "srt"
+		sel.SrtName = strings.Repeat("s", 210) // ".srt" makes it 214
+	})
+	w.RunOne(context.Background()) // the failure is the job's, checked below
+	j := s.job()
+	if j.Status != jobs.Failed || !strings.Contains(j.Error, "The name from “Subtitle file name” would be 214 characters long") ||
+		!strings.Contains(j.Error, "Nothing was changed.") {
+		t.Fatalf("status %s, error %q", j.Status, j.Error)
+	}
+	if n := len(encodeCalls(s)); n != 0 {
+		t.Errorf("%d encode(s) ran before the .srt name was checked", n)
+	}
+	if read(s.src) != "original-bytes" {
+		t.Errorf("the original is %q", read(s.src))
+	}
+}
+
+// The cap's edge: 200 bytes is allowed, 201 is not (review2-511 P3a asked for the boundary).
+func TestNameLengthBoundary(t *testing.T) {
+	if nameTooLong(strings.Repeat("x", maxNameLen)) {
+		t.Errorf("%d bytes must be allowed", maxNameLen)
+	}
+	if !nameTooLong(strings.Repeat("x", maxNameLen+1)) {
+		t.Errorf("%d bytes must be refused", maxNameLen+1)
+	}
+}
