@@ -204,7 +204,7 @@ jobs:
         run: |
           docker run --rm --entrypoint sh shrink-your-shit -c 'test -s /etc/ssl/certs/ca-certificates.crt' \
             || { echo "no CA bundle in the image: every https call would fail"; exit 1; }
-          docker run --rm --entrypoint run-as-syp shrink-your-shit wget -q -O /dev/null https://api.github.com/ \
+          docker run --rm --entrypoint run-as-syp shrink-your-shit wget -nv --tries=3 --waitretry=5 -O /dev/null https://deb.debian.org/debian/ \
             || { echo "an https GET from the image failed"; exit 1; }
       - name: the app runs with the /dev/dri groups (render group is automatic)
         run: |
