@@ -455,13 +455,14 @@ func withOutput(args []string, out string) []string {
 
 // gpuScale is the scale filter of the full graphics pipeline (frames stay on the device): QSV's keeps the frames'
 // format; VAAPI's also sets it, p010 for HDR or a 10-bit source and nv12 otherwise. scale_qsv refuses w=-2 ("Size
-// values less than -1 are not acceptable"), so QSV's width is an expression: trunc(H*a/2+0.5)*2 keeps the aspect ratio,
-// rounds half up and is even, the same width ScaledWidth plans (a plan of 854 must not encode as 852).
+// values less than -1 are not acceptable"), so QSV's width is an expression: trunc(H*iw/ih/2+0.5)*2 keeps the
+// aspect ratio, rounds half up and is even, the same width ScaledWidth plans (a plan of 854 must not encode as 852).
+// H*iw is multiplied first: iw/ih rounded early lands an exact .5 tie a pixel low (328x1280 at 480: 122, not 124).
 func gpuScale(fam string, h int, tenBit bool) string {
 	size := "w=-2:h=" + strconv.Itoa(h)
 	if fam != "vaapi" {
 		hs := strconv.Itoa(h)
-		return "scale_qsv=w=trunc(" + hs + "*a/2+0.5)*2:h=" + hs
+		return "scale_qsv=w=trunc(" + hs + "*iw/ih/2+0.5)*2:h=" + hs
 	}
 	format := "nv12"
 	if tenBit {
