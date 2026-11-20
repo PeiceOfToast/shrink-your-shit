@@ -785,15 +785,21 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if err := w.preflight(srcPath, before.Size()); err != nil {
 		return "", err
 	}
+	// The original's picture count: the container's own count when it states one exactly (an mp4's nb_frames, an
+	// mkv's DURATION tag), which the probe has read already; only when it does not is every packet counted, which
+	// reads the whole file (P2: the encode reads it all again anyway, so that second read is only for files that
+	// cannot say their count). expectedPackets prefers the exact count, so what the checks expect is unchanged.
 	var packets int64
-	if ord := src.MainVideoOrdinal(); ord >= 0 {
-		cctx, ccancel := context.WithTimeout(ctx, countTimeout)
-		n, cerr := media.CountVideoPackets(cctx, w.Exec, w.FFprobe, srcPath, ord)
-		ccancel()
-		if cerr != nil {
-			return "", checkFailed(cctx, "counting the original's video frames", cerr)
+	if frames, exact := sourceFrameCount(src); !exact || frames <= 0 {
+		if ord := src.MainVideoOrdinal(); ord >= 0 {
+			cctx, ccancel := context.WithTimeout(ctx, countTimeout)
+			n, cerr := media.CountVideoPackets(cctx, w.Exec, w.FFprobe, srcPath, ord)
+			ccancel()
+			if cerr != nil {
+				return "", checkFailed(cctx, "counting the original's video frames", cerr)
+			}
+			packets = n
 		}
-		packets = n
 	}
 	// The Plan for this file, from its library's flow and the probe just taken: what to run, and what
 	// the result must look like. Whether to convert it was the scanner's decision (as before Plans);
