@@ -199,10 +199,10 @@ export function Overview() {
                 <td className="idc">
                   <div className="lname"><Link className="ttl" to={"/jobs?tab=running&job=" + encodeURIComponent(a.jobId)}>{a.name}</Link></div>
                   <div className="chips">{a.library && <span className="mchip">{a.library.name}</span>}{w && <span className="mchip">{w}</span>}</div>
-                  <div className="sub phone">{p != null && <>{p}% · </>}<span>Step: {a.stage ? stepLabel(a.stage) : "not known yet"}</span> · <span>Speed: {a.speed != null ? Math.round(a.speed * 10) / 10 + "×" : "not known yet"}</span> · <span>Time left: {left(a.etaS)}</span></div>
+                  <div className="sub">{p != null && <>{p}% · </>}<span>Step: {a.stage ? stepLabel(a.stage) : "not known yet"}</span> · <span>Speed: {a.speed != null ? Math.round(a.speed * 10) / 10 + "×" : "not known yet"}</span> · <span>Time left: {left(a.etaS)}</span></div>
                   {p != null && <span className="uline" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={p} aria-label={a.name}><i style={{ width: p + "%" }} /></span>}
                 </td>
-                <td className="sizec sm nowrap" data-l="Expected saving">{a.expectedSavingBytes == null ? "not known yet" : a.expectedSavingBytes < 0 ? "none (about " + bytes(-a.expectedSavingBytes) + " bigger so far)" : "about " + bytes(a.expectedSavingBytes) + " saving expected"}</td>
+                <td className="sizec sm nowrap" data-l="Expected saving">{a.expectedSavingBytes == null ? "Saving: not known yet" : a.expectedSavingBytes < 0 ? "none (about " + bytes(-a.expectedSavingBytes) + " bigger so far)" : "about " + bytes(a.expectedSavingBytes) + " saving expected"}</td>
               </tr>; })}</tbody></table></div>)}
         {v.active.some((a) => a.expectedSavingEstimated) && <p className="muted">Savings are estimated from the size so far; the final number shows when a file is done.</p>}
       </section>
@@ -217,10 +217,10 @@ export function Overview() {
                 <td className="idc">
                   <div className="lname"><Link className="ttl" to={"/libraries/" + l.id}>{l.name}</Link></div>
                   <div className="chips">{(["Done", "Waiting", "Skipped", "Failed"] as const).map((k, i) => <span key={k} className="mchip">{k} {count([l.counts.done, l.counts.waiting, l.counts.skipped, l.counts.failed][i])}</span>)}</div>
-                  {(facts.length > 0 || (l.saved === 0 && l.couldFree > 0)) && <div className="sub phone">{facts.join(" · ")}{l.saved === 0 && l.couldFree > 0 && <>{facts.length > 0 && " · "}<Link className="ul" to={"/jobs?tab=completed&left=1&libraryId=" + encodeURIComponent(String(l.id))}>{"could free " + bytes(l.couldFree) + " by removing the originals"}</Link></>}</div>}
+                  {(facts.length > 0 || (l.saved === 0 && l.couldFree > 0)) && <div className="sub">{facts.join(" · ")}{l.saved === 0 && l.couldFree > 0 && <>{facts.length > 0 && " · "}<Link className="ul" to={"/jobs?tab=completed&left=1&libraryId=" + encodeURIComponent(String(l.id))}>{"could free " + bytes(l.couldFree) + " by removing the originals"}</Link></>}</div>}
                 </td>
-                <td className="sizec sm nowrap" data-l="Saved">{l.saved > 0 ? <><b>{bytes(l.saved)}</b>{l.savedPercent != null && " · " + pctTxt(l.savedPercent)}</> : l.waitingToFree > 0 ? <><b>{bytes(l.waitingToFree)} smaller</b></> : "nothing yet"}
-                  <span className="sub">of {bytes(l.bytesNow)} now</span>
+                <td className="sizec sm nowrap" data-l="Saved">{l.saved > 0 ? <><b>{bytes(l.saved)}</b> saved{l.savedPercent != null && " · " + pctTxt(l.savedPercent)}</> : l.waitingToFree > 0 ? <><b>{bytes(l.waitingToFree)} smaller</b></> : "Nothing saved yet"}
+                  <span className="sub">Size now: {bytes(l.bytesNow)}</span>
                   <span className="savebar" role="img" aria-label={share == null ? "No size yet" : "Saved " + share.toFixed(1) + "% of saved plus size now"}><i style={{ width: (share ?? 0) + "%" }} /></span></td>
                 <td className="stc">{l.state === "no_workflow" ? <span className="pill warn">No workflow</span> : l.state === "paused" ? <span className="pill warn">Paused</span> : l.state === "paused_share" ? <span className="pill warn">Share not connected yet</span> : <span className="pill">Watching</span>}</td>
               </tr>; })}</tbody></table></div>

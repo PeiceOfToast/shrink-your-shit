@@ -779,7 +779,6 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .ov .savebar{display:block;width:120px;max-width:100%;height:4px;margin:6px 0 0 auto;border-radius:2px;background:var(--border-strong)}
 .ov .savebar i{display:block;height:100%;border-radius:2px;background:var(--text)}
 .ov .libhelp{margin-top:8px}.ov .libhelp p{margin:4px 0 0}
-.ov .sub.phone{display:block} /* U7 fix: the live line and the library facts show at every width (they were hidden above phone width) */
 .ov .ovt .prog{flex-direction:row;align-items:center;gap:8px;min-width:160px}.ov .ovt .prog .bar{flex:1 1 120px}
 .ov .fname{display:block;overflow-wrap:anywhere}
 /* pass 1 (row e8c7e61d): the day charts lead the page, two side by side; dataviz marks (see DayBars) */
@@ -796,7 +795,7 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .ov .chartfoot b{color:var(--text);margin-left:6px}.ov .chartfoot details{margin-left:auto}.ov .chartfoot details[open]{flex-basis:100%;margin-left:0;min-width:0/* a flex item is as wide as its table otherwise, so .daytbl never scrolls and the page does (390 px) */}
 .ov .quiet{margin:0;display:flex;align-items:center;justify-content:center;text-align:center;min-height:160px;padding:12px;border:1px solid var(--border);border-radius:var(--radius)}.ov .quiet.short{min-height:80px}
 
-/* U6 review2: at 901-1200 px the sparkline sits under the text, full tile width, so the figure keeps the whole tile */
+/* U6 review2: at 901-1280 px the sparkline sits under the text, full tile width, so the figure keeps the whole tile */
 @media (min-width:901px) and (max-width:1280px){
   .ov .tiles .tile{grid-template-columns:minmax(0,1fr)}.ov .tiles .tile .spark{grid-column:1 / -1;grid-row:auto;width:100%;height:40px;align-self:auto}
 }
