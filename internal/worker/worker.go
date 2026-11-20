@@ -230,8 +230,8 @@ const DefaultStallAfter = 10 * time.Minute
 // is stopped like any stall, so a hung write still ends.
 const DefaultFinishAfter = time.Hour
 
-// finishTolerance is how many seconds short of the file's length a position may be and still count as the end:
-// the last progress report can stop a little short of it.
+// finishTolerance is how many seconds either side of the file's length a position may be and still count as the
+// end: the last progress report can stop a little short of it, and out_time can run a little past it.
 const finishTolerance = 2.0
 
 // stallWarnAfter is how long the media position may stay put before the job log warns about it (log-spec R9);
@@ -729,9 +729,11 @@ func (w *Worker) stallLimit(after time.Duration, finishing bool) time.Duration {
 }
 
 // reachedEnd says a position (out_time, µs) is the file's length: every frame is written and the encode is
-// finishing. A length we don't know (0) never is.
+// finishing. Only a position near the length is: one well past it is a stuck encode, not a finish. A length we
+// don't know (0) never is.
 func reachedEnd(outUS, durationSec float64) bool {
-	return durationSec > 0 && outUS >= (durationSec-finishTolerance)*1e6
+	d := outUS - durationSec*1e6
+	return durationSec > 0 && d >= -finishTolerance*1e6 && d <= finishTolerance*1e6
 }
 
 // watchStall stops job id (stopStall) if its encode reports no progress for stallAfter (stallLimit once it is

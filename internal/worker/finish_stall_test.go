@@ -103,4 +103,10 @@ func TestRemotePositionAtTheLengthIsFinishing(t *testing.T) {
 	if unknown.finishing() {
 		t.Error("an unknown length is never the finish")
 	}
+	// a stuck encode that reports a position well past a 2 s file's end is not finishing (it gets the stall allowance)
+	past := NewRemoteJob("lease")
+	past.Converting(5e6, now, 2)
+	if past.finishing() {
+		t.Error("a position well past the length is not the finish")
+	}
 }
