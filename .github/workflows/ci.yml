@@ -29,8 +29,9 @@ jobs:
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # The ffmpeg install alone has taken up to 9 minutes on a slow runner, so 15 cancelled the tests mid-run.
-    timeout-minutes: 30
+    # The ffmpeg install alone has taken over 14 minutes on a slow runner, so 15 cancelled the tests mid-run.
+    # 45 leaves room for that install plus go test's own 15-minute timeout, so the test's timeout always fires first.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -56,16 +57,14 @@ jobs:
         env:
           SYP_REQUIRE_FFMPEG: "1"
         run: |
-          # go test's own timeout ends before the job's, so a hung test fails with every goroutine's stack in
-          # the printed log instead of the job being cancelled with nothing shown.
-          go test -count=1 -timeout 15m -v ./... > test.log 2>&1 || { cat test.log; exit 1; }
+          # The output streams into this step's log as it runs, so even a cancelled job shows where it was.
+          # go test's own timeout ends before the job's, so a hung test fails with every goroutine's stack.
+          set -o pipefail
+          go test -count=1 -timeout 15m -v ./... 2>&1 | tee test.log
           grep -E '^(ok|FAIL)[[:space:]]' test.log
           echo "Real-ffmpeg tests:"
           grep -E '^[[:space:]]*--- (PASS|FAIL|SKIP): TestReal' test.log
           if grep -qE '^[[:space:]]*--- SKIP: TestReal' test.log; then echo "a real-ffmpeg test was skipped"; exit 1; fi
-      - name: Show the test log after a cancel
-        if: cancelled() && runner.os == 'Linux'
-        run: tail -n 300 test.log || true
       # Windows and macOS: no ffmpeg on the runner, so the real tests skip there (fake runner only).
       - name: Test
         if: runner.os != 'Linux'
