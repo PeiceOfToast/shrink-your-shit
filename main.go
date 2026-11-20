@@ -210,7 +210,12 @@ func main() {
 	}
 	purge := func() {
 		sweepLogs()
-		for _, said := range worker.Purge(store, keepDays(), time.Now()) {
+		waiting, err := web.WaitingMounts(store) // a kept original on a share that isn't connected is left alone
+		if err != nil {
+			log.Printf("purge: %v", err)
+			return
+		}
+		for _, said := range worker.Purge(store, keepDays(), time.Now(), func(p string) bool { return web.Waits(p, waiting) }) {
 			log.Printf("purge: %s", said)
 		}
 	}
@@ -240,7 +245,11 @@ func main() {
 	})
 
 	x := media.OSExec{}
-	chk := &doctor.Checker{Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath, KnownOriginals: store.KnownOriginals, JobOutput: store.OutputOfJob}
+	chk := &doctor.Checker{Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath, KnownOriginals: store.KnownOriginals, JobOutput: store.OutputOfJob,
+		WaitsForShare: func(p string) bool { // a library on a share that isn't connected: not checked until it is
+			waiting, err := web.WaitingMounts(store)
+			return err != nil || web.Waits(p, waiting)
+		}}
 	chk.OnTested = func(at time.Time, rs []doctor.EncoderResult) { // Q1: this computer's test run is kept in the database
 		rows := make([]jobs.EncoderTest, 0, len(rs))
 		for _, r := range rs {
@@ -431,9 +440,17 @@ func scanTargets(store *jobs.Store) func() ([]scanner.Target, error) {
 		if err != nil {
 			return nil, err
 		}
+		waiting, err := web.WaitingMounts(store)
+		if err != nil {
+			return nil, err
+		}
 		var out []scanner.Target
 		for _, l := range libs {
 			if !l.Started {
+				continue
+			}
+			if web.Waits(l.Path, waiting) { // on a share that isn't connected yet: an empty mount point is not an emptied folder
+				log.Printf("scan: %q is on a share that isn't connected yet: not scanned until it is", l.Name)
 				continue
 			}
 			if jobs.SystemFolder(l.Path) { // made before slice 23's guard: never scanned
