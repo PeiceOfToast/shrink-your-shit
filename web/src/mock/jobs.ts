@@ -128,7 +128,7 @@ export function mockJob(id: string): JobDetail | null {
     // contract 088aa569: every file converted so far is on its library's current workflow, so Convert again is refused
     ...(j.state === "completed" ? { convertAgain: { possible: false, reason: { code: "current_workflow", message: "Already converted with this workflow.", deletedAt: null } } } : {}),
     // the one done job with saved .srt files (the drawer's "Subtitles saved as files" line)
-    ...(j.id === "48165" ? { subtitleFiles: ["Severance.S02E01.1080p.WEB-DL.eng.srt", "Severance.S02E01.1080p.WEB-DL.eng.sdh.srt"] } : {}),
+    ...(j.id === "48165" ? { subtitleFiles: ["Severance.S02E01.1080p.WEB-DL.eng.srt", "Severance.S02E01.Goodbye.Mrs.Selvig.1080p.ATVP.WEB-DL.DDP5.1.Atmos.H.264-FLUX.eng.sdh.srt"] } : {}),
     warning: j.id === "48160" ? FELL : j.id === "48165" ? NOT_TOLD : null,
     metadata: { before: old ? null : { container: "matroska,webm", videoCodec: "h264", bitrateKbps: 12109, durationSec: 7200, sizeBytes: j.beforeBytes ?? j.bytes, streams: [{ index: 0, type: "video", codec: "h264", Width: 1920, Height: 1080 }, { index: 1, type: "audio", codec: "dts", channels: 6, channelLayout: "5.1" }] },
       after: j.state === "completed" ? { container: "matroska,webm", videoCodec: "hevc", bitrateKbps: 5300, durationSec: 7200, sizeBytes: j.afterBytes, streams: [{ index: 0, type: "video", codec: "hevc", Width: 1920, Height: 1080 }, { index: 1, type: "audio", codec: "aac", channels: 2, channelLayout: "stereo" }] } : null },
