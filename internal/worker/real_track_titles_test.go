@@ -56,8 +56,8 @@ func TestRealTrackTitles(t *testing.T) {
 	if info := run(t, "eac3_surround"); titles(info) != "Old DTS title | Japanese commentary" {
 		t.Errorf("eac3_surround: titles %q", titles(info))
 	}
-	// the surround copied, a stereo AAC added from it: every track made from a titled source keeps that title (the rule: the automatic name only for an untitled source)
-	if info := run(t, "stereo_aac_surround"); titles(info) != "Old DTS title | Japanese commentary | Old DTS title" {
+	// the surround copied, a stereo AAC added from it: an added track is a new track, so it gets its automatic name (not the source's)
+	if info := run(t, "stereo_aac_surround"); titles(info) != "Old DTS title | Japanese commentary | Stereo (AAC)" {
 		t.Errorf("stereo_aac_surround: titles %q", titles(info))
 	}
 }

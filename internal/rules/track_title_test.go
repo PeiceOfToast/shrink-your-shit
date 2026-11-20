@@ -140,6 +140,23 @@ func TestTitleFromTheSourceChannels(t *testing.T) {
 	}
 }
 
+// An added track is a new track: from a titled source it gets the automatic name, not the source's (two tracks
+// with one name would be wrong). A converted track of the same source keeps the source title (no name written).
+func TestAddedTrackFromATitledSourceGetsItsName(t *testing.T) {
+	titledSrc := withAudio(media.Stream{Codec: "dts", Channels: 6, Language: "eng", Title: "Old DTS title"})
+	p := Plan{AudioOrder: []int{1}, Tracks: []TrackOp{
+		{Index: 1, Type: "audio", Encoder: "aac", Codec: "aac", Kbps: 128, Channels: 2, Add: true},
+		{Index: 1, Type: "audio", Encoder: "eac3", Codec: "eac3", Kbps: 448, Channels: 6},
+	}}
+	p.titleTracks(titledSrc)
+	if got := p.Tracks[0].Title; got != "Stereo (AAC)" {
+		t.Errorf("an added track from a titled source: title %q, want %q", got, "Stereo (AAC)")
+	}
+	if got := p.Tracks[1].Title; got != "" {
+		t.Errorf("a converted track of a titled source: title %q, want none", got)
+	}
+}
+
 // The titles are not part of the fingerprint: a converted file is not queued again for them, and the plan keeps them.
 func TestTitlesLeaveTheFingerprint(t *testing.T) {
 	plain := Plan{AudioOrder: []int{1}, Tracks: []TrackOp{{Index: 1, Type: "audio", Encoder: "aac", Codec: "aac", Kbps: 128, Channels: 2}}}

@@ -57,7 +57,8 @@ func trackTitle(codec string, channels int) string {
 }
 
 // titleTracks names the audio tracks the plan makes (converted or added). A track that keeps its channels
-// (Channels 0) takes the source's count, and never more than the source has.
+// (Channels 0) takes the source's count. A converted track of a titled source keeps that title (ffmpeg copies
+// it); an added track is a new track, so it gets its own name.
 func (p *Plan) titleTracks(info media.Info) {
 	src := map[int]int{}
 	titled := map[int]bool{} // a source track that already has its own title keeps it
@@ -70,7 +71,7 @@ func (p *Plan) titleTracks(info media.Info) {
 		if op.Type != "audio" || (!op.Add && (op.Drop || op.Encoder == "")) {
 			continue
 		}
-		if titled[op.Index] {
+		if titled[op.Index] && !op.Add {
 			op.Title = "" // ffmpeg copies the source's title with the track
 			continue
 		}
