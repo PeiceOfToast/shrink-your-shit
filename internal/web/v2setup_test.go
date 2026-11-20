@@ -27,6 +27,7 @@ import (
 // changed per test.
 func TestMain(m *testing.M) {
 	remote.JoinEvery = time.Millisecond
+	swrWarm = false // a start-up compute can outlive its test's store (see swrWarm)
 	os.Exit(m.Run())
 }
 

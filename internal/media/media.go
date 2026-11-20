@@ -264,6 +264,56 @@ func CountVideoPackets(ctx context.Context, x Exec, ffprobe, path string, n int)
 	return c, nil
 }
 
+// maxLeadingPackets bounds how far LeadingUndecodable reads: a stream's first keyframe comes within one group of pictures.
+const maxLeadingPackets = 1000
+
+// LeadingUndecodable counts the packets of the n-th video stream that the decoder did not show: they come before
+// the stream's first keyframe and their presentation time is earlier than the first picture the decoder outputs.
+// A leading picture that decodes (an open group of pictures) is shown, so it is not credited. Any probe error or
+// missing time gives no credit: the strict count stands.
+func LeadingUndecodable(ctx context.Context, x Exec, ffprobe, path string, n int) (int64, error) {
+	sel := fmt.Sprintf("v:%d", n)
+	pk, err := x.Output(ctx, ffprobe, "-v", "error", "-select_streams", sel,
+		"-read_intervals", fmt.Sprintf("%%+#%d", maxLeadingPackets), "-show_entries", "packet=flags,pts_time", "-of", "csv=p=0", path)
+	if err != nil {
+		return 0, err
+	}
+	// The first picture the decoder outputs: the undecodable leading pictures print nothing, so the window is
+	// by time, long enough to reach the first keyframe's picture in any ordinary group of pictures.
+	fr, err := x.Output(ctx, ffprobe, "-v", "error", "-select_streams", sel, "-show_frames",
+		"-read_intervals", "%+10", "-show_entries", "frame=pts_time", "-of", "csv=p=0", path)
+	if err != nil {
+		return 0, err
+	}
+	first, ok := csvTime(strings.SplitN(string(fr), "\n", 2)[0])
+	if !ok { // no picture was output: nothing can be credited
+		return 0, nil
+	}
+	var lead int64
+	for _, line := range strings.Split(string(pk), "\n") {
+		// ffprobe's field order is not the order asked for, so tell the two fields apart by content:
+		// the time parses as a number, the flags do not (they are K, _ and similar).
+		a, b, _ := strings.Cut(strings.TrimSpace(line), ",")
+		pts, flags := a, b
+		if _, ok := csvTime(b); ok {
+			pts, flags = b, a
+		}
+		if strings.HasPrefix(flags, "K") { // flags: K marks a keyframe
+			return lead, nil
+		}
+		if t, ok := csvTime(pts); ok && t < first {
+			lead++
+		}
+	}
+	return 0, nil
+}
+
+// csvTime reads one pts_time field (seconds, a trailing comma allowed); N/A or junk is not a time.
+func csvTime(s string) (float64, bool) {
+	t, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(s), ",")), 64)
+	return t, err == nil
+}
+
 // ParseProbe turns ffprobe JSON into Info. It errors if there is no video stream. Missing or odd
 // fields are tolerated (they stay zero); garbage input returns an error and never panics.
 func ParseProbe(data []byte) (Info, error) {
@@ -336,6 +386,7 @@ func ParseProgress(line string, durationSec float64) (float64, bool) {
 // said yet). ETASeconds is the time left at that speed, -1 while unknown.
 type Progress struct {
 	OutTimeUS   float64 // where ffmpeg is in the source (out_time_us): it moving is what progress means
+	Frame       int64   // frames ffmpeg has taken through its decoder and filters (frame=); -1 until it says
 	Percent     float64
 	FPS         float64
 	BitrateKbps float64
@@ -348,11 +399,15 @@ type Progress struct {
 // only, so a stall can still be told from a slow encode). It returns what ffmpeg printed on stderr (at the error
 // level the args ask for), which includes decode errors in the source.
 func Transcode(ctx context.Context, x Exec, ffmpeg string, args []string, durationSec float64, onProgress func(Progress)) (string, error) {
-	p := Progress{ETASeconds: -1}
+	p := Progress{ETASeconds: -1, Frame: -1}
 	var etas []float64 // the last 5 raw times left: the raw one jumps with every change of speed (research 3.4)
 	return x.Stream(ctx, func(line string) {
 		k, v, _ := strings.Cut(line, "=")
 		switch k {
+		case "frame":
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				p.Frame = n
+			}
 		case "fps":
 			p.FPS, _ = strconv.ParseFloat(v, 64)
 		case "bitrate": // "4074.8kbits/s", or "N/A"

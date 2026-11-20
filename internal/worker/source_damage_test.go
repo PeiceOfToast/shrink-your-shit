@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 )
 
 // logHas reports whether the job log has a line on the given step and stream containing text.
@@ -164,5 +165,91 @@ func TestCorruptLinesCountAsPictures(t *testing.T) {
 	s.run(Replace)
 	if j := s.job(); j.Status != jobs.Done {
 		t.Fatalf("one corrupted macroblock: status %s (error %q), want done", j.Status, j.Error)
+	}
+}
+
+// Frames that never come out of the decoder count as damaged pictures, against the same 1% limit. -1 means the
+// conversion did not say how many it decoded (a remote worker): nothing is added then.
+func TestWithLostFrames(t *testing.T) {
+	cases := []struct {
+		name            string
+		rep             sourceDamageReport
+		frames, decoded int64
+		wantPictures    int
+		wantTolerated   bool
+	}{
+		{"30 of 500 lost with no message: kept", sourceDamageReport{}, 500, 470, 30, false},
+		{"2 of 500 lost: converts", sourceDamageReport{}, 500, 498, 2, true},
+		{"all decoded: unchanged", sourceDamageReport{Pictures: 1}, 500, 500, 1, true},
+		{"count not reported: unchanged", sourceDamageReport{Pictures: 1}, 500, -1, 1, true},
+		{"frames not known: unchanged", sourceDamageReport{Pictures: 1}, 0, 470, 1, false},
+		{"the named picture and the 2 lost frames are the same: 2 of 500", sourceDamageReport{Pictures: 1}, 500, 498, 2, true},
+		{"CI real ffmpeg 8: 4 named lines, 2 lost, same pictures: 4 of 500 converts", sourceDamageReport{Pictures: 4}, 500, 498, 4, true},
+		{"edit-list mp4: 240 presented, 240 decoded: nothing lost", sourceDamageReport{}, 240, 240, 0, true},
+	}
+	for _, c := range cases {
+		got := withLostFrames(c.rep, c.frames, c.decoded)
+		if got.Pictures != c.wantPictures {
+			t.Errorf("%s: pictures %d, want %d", c.name, got.Pictures, c.wantPictures)
+		}
+		if tol := damageTolerated(got, c.frames); tol != c.wantTolerated {
+			t.Errorf("%s: tolerated %v, want %v", c.name, tol, c.wantTolerated)
+		}
+	}
+}
+
+// The frames the lost-frame count is measured against come from the video stream: what it states, else its own
+// duration. Only the container's duration is a guess (audio can run past the video), so it is not exact.
+func TestSourceFrameCount(t *testing.T) {
+	video := func(s media.Stream, container float64) media.Info {
+		s.Type, s.FrameRate = "video", 25
+		return media.Info{DurationSec: container, Streams: []media.Stream{{Type: "audio"}, s}}
+	}
+	cases := []struct {
+		name      string
+		src       media.Info
+		want      int64
+		wantExact bool
+	}{
+		{"mp4 states the frame count", video(media.Stream{Frames: 250}, 11), 250, true},
+		{"mkv states the stream duration", video(media.Stream{Duration: 10}, 11), 250, true},
+		// An mp4 edit list trims 10 frames: the count stays 250, but ffmpeg outputs the 9.6 s (240) presented.
+		{"edit list: the presented duration, not the trimmed count", video(media.Stream{Frames: 250, Duration: 9.6}, 10.6), 240, true},
+		{"neither: the container's 11 s is a guess", video(media.Stream{}, 11), 275, false},
+	}
+	for _, c := range cases {
+		got, exact := sourceFrameCount(c.src)
+		if got != c.want || exact != c.wantExact {
+			t.Errorf("%s: frames %d exact %v, want %d exact %v", c.name, got, exact, c.want, c.wantExact)
+		}
+	}
+	if sourceFrames(video(media.Stream{Frames: 250}, 11)) != 250 {
+		t.Error("sourceFrames must report the stream's count")
+	}
+}
+
+// The converted file must match the frames ffmpeg presents. An edit-list mp4 counts 250 packets for a clip that
+// presents 240 (9.6 s at 25 fps), so 240 is expected; a clip with nothing trimmed, or without a stated duration,
+// keeps the packet count.
+func TestExpectedPackets(t *testing.T) {
+	video := func(s media.Stream, container float64) media.Info {
+		s.Type, s.FrameRate = "video", 25
+		return media.Info{DurationSec: container, Streams: []media.Stream{{Type: "audio"}, s}}
+	}
+	cases := []struct {
+		name    string
+		src     media.Info
+		counted int64
+		want    int64
+	}{
+		{"edit list: 250 packets, 240 presented", video(media.Stream{Frames: 250, Duration: 9.6}, 10.6), 250, 240},
+		{"nothing trimmed: the count stands", video(media.Stream{Frames: 250, Duration: 10}, 11), 250, 250},
+		{"no stated duration: the packet count", video(media.Stream{Frames: 250}, 11), 250, 250},
+		{"container guess only: the packet count", video(media.Stream{}, 11), 250, 250},
+	}
+	for _, c := range cases {
+		if got := expectedPackets(c.src, c.counted); got != c.want {
+			t.Errorf("%s: expected %d, want %d", c.name, got, c.want)
+		}
 	}
 }

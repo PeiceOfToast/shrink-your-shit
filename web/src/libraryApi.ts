@@ -190,3 +190,20 @@ export async function removeLibrary(id: string): Promise<Answer<unknown>> {
   if (MOCK) return { error: { code: "not_available", message: "The sample install can't remove a library." } };
   return call("DELETE", "/api/libraries/" + enc(id));
 }
+
+// Contract 088aa569 (user item 2, manager GO 06c88492): files converted with an EARLIER workflow than the library's
+// current one. GET counts them (possible / not possible with the per-file reasons); POST queues the possible ones. Files
+// on the current workflow are never counted. Nothing is queued without the user's click. Mock: Movies has 14, 2 can't; Home videos 3, none can.
+export interface NotPossible { code: string; message: string; count: number }
+export interface EarlierWorkflow { earlier: number; possible: number; notPossible: NotPossible[] }
+let mockEarlierDone = false;
+const gone = (count: number): NotPossible => ({ code: "original_deleted", message: "The original was deleted after its keep time.", count });
+const mockEarlier = (id: string): EarlierWorkflow => id === "l3" ? { earlier: 3, possible: 0, notPossible: [gone(3)] } // none can be converted
+  : id !== "l1" || mockEarlierDone ? { earlier: 0, possible: 0, notPossible: [] } : { earlier: 14, possible: 12, notPossible: [gone(2)] };
+export const getEarlierWorkflow = (id: string): Promise<Answer<EarlierWorkflow>> =>
+  MOCK ? M(mockEarlier(id)) : call("GET", "/api/v2/libraries/" + enc(id) + "/convert-again");
+export const convertEarlierAgain = (id: string): Promise<Answer<{ queued: number; notPossible: NotPossible[] }>> => {
+  if (!MOCK) return call("POST", "/api/v2/libraries/" + enc(id) + "/convert-again", {});
+  const e = mockEarlier(id); mockEarlierDone = true;
+  return M({ queued: e.possible, notPossible: e.notPossible });
+};
