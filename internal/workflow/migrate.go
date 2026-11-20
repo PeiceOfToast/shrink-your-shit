@@ -10,7 +10,9 @@ import (
 // A stored workflow is upgraded when it is read, not when it is saved: a revision keeps the bytes it was
 // published with, and Load gives the rest of the app this build's shape. Each upgrade moves one version
 // forward (From to From+1) and runs in order. A version that has no upgrade path stays as it was, and
-// Validate refuses it as it always has. A version newer than this build's is never touched.
+// Validate refuses it as it always has. A version newer than this build's is never touched, its nodes
+// included. A current document's node is upgraded by its own typeVersion, so a step type that moved on is
+// upgraded even when the document is current.
 
 // DocMigration upgrades a whole stored document from version From to From+1. It runs on the raw JSON
 // object, before the Doc struct is read, so a field the struct no longer has can still be moved.
@@ -56,6 +58,9 @@ func load(raw []byte, current int, docs []DocMigration, configs map[string][]Con
 	if err := json.Unmarshal(b, &d); err != nil {
 		return Doc{}, err
 	}
+	if storedVersion(m) > current {
+		return d, nil // a newer document is read as stored, its nodes included
+	}
 	typeVersions := map[string]int{}
 	for _, def := range defs {
 		typeVersions[def.Type] = def.TypeVersion
@@ -74,10 +79,7 @@ func load(raw []byte, current int, docs []DocMigration, configs map[string][]Con
 // upgradeDoc moves m from its stored schemaVersion to current, one step at a time. A missing step leaves m
 // as it was (schemaVersion unchanged), which Validate then refuses.
 func upgradeDoc(m map[string]any, current int, steps []DocMigration) error {
-	v := 0
-	if f, ok := m["schemaVersion"].(float64); ok {
-		v = int(f)
-	}
+	v := storedVersion(m)
 	if v >= current {
 		return nil
 	}
@@ -93,6 +95,14 @@ func upgradeDoc(m map[string]any, current int, steps []DocMigration) error {
 		m["schemaVersion"] = float64(v)
 	}
 	return nil
+}
+
+// storedVersion is the document's schemaVersion as stored (0 when it has none).
+func storedVersion(m map[string]any) int {
+	if f, ok := m["schemaVersion"].(float64); ok {
+		return int(f)
+	}
+	return 0
 }
 
 // upgradeNode moves n's config from its stored typeVersion to want, one step at a time. A missing step

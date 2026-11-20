@@ -149,3 +149,24 @@ func TestLoadRunsTheChainOnAStoredDocument(t *testing.T) {
 		t.Fatalf("doc version %d, node %+v: want version 3 and both config steps", d.SchemaVersion, n)
 	}
 }
+
+// A newer document is read as stored, its nodes included; a current document's older node is upgraded.
+func TestNodesFollowTheDocumentVersion(t *testing.T) {
+	defs := []StepDefinition{{Type: "x", TypeVersion: 3}}
+	steps := map[string][]ConfigMigration{"x": sampleConfigSteps()}
+	node := `"nodes":[{"id":"a","type":"x","typeVersion":1,"config":{"old":7},"enabled":true}],"edges":[],"variables":[]`
+	d, err := load([]byte(`{"schemaVersion":4,`+node+`}`), 3, nil, steps, defs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := d.Nodes[0]; n.TypeVersion != 1 || n.Config["old"] != float64(7) {
+		t.Fatalf("a newer document's node was upgraded: %+v", n)
+	}
+	d, err = load([]byte(`{"schemaVersion":3,`+node+`}`), 3, nil, steps, defs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := d.Nodes[0]; n.TypeVersion != 3 || n.Config["units"] != "percent" {
+		t.Fatalf("a current document's older node was not upgraded: %+v", n)
+	}
+}
