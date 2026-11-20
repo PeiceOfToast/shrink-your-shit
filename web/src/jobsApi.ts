@@ -26,8 +26,15 @@ export async function findSkip(jobId: string): Promise<Answer<JobsPage>> {
   }
 }
 // E: the job's log by step (GET /log, a finished job's full record; /log/stream stays for running jobs)
-export interface LogStep { name: string; startedAt: string | null; tookMs: number | null; outcome: string; command: string | null; probe: Probe | null; check: { score: number; min: number | null; passed: boolean | null } | null; outputLines: number; output: string | string[]; result: string | null; found?: string[] } // found: the step's check lines (stream 'check'), absent from older servers
-export interface JobLog { state: string; steps: LogStep[]; final: string | null }
+// the finished job's log (GET /log, contract v2): a step's extra fields, and the start, variables and summary, which a job
+// from before full logs doesn't have (absent, not null)
+export interface LogStep { name: string; startedAt: string | null; tookMs: number | null; outcome: string; command: string | null; probe: Probe | null; check: { score: number; min: number | null; passed: boolean | null } | null; outputLines: number; output: string | string[]; result: string | null; found?: string[]; // found: the step's check lines (stream 'check'), absent from older servers
+  decision?: string | null; reason?: string | null; path?: string; warnings?: string[]; errors?: string[]; set?: { name: string; value?: string }[]; // set: a secret has no value
+  speedX?: number | null; avgKbps?: number | null; moves?: { action: string; from: string; to: string; ok: boolean; error?: string | null }[] }
+export interface LogStart { reason: string; appVersion: string; workflow: { name: string; revision: number } }
+export interface LogVariable { name: string; start?: string; end?: string; changedBy: string | null; secret: boolean } // a secret has no start or end
+export interface LogSummary { result: string; originalBytes: number; finalBytes: number; savedPercent: number; outputPath: string; tookMs: number; tempRemoved: boolean }
+export interface JobLog { state: string; steps: LogStep[]; final: string | null; start?: LogStart | null; variables?: LogVariable[]; summary?: LogSummary | null }
 export async function getJobLog(id: string): Promise<Answer<JobLog>> {
   if (MOCK) return mockJobLog(id);
   return call("GET", "/api/v2/jobs/" + encodeURIComponent(id) + "/log");

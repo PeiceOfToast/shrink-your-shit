@@ -572,6 +572,11 @@ label.chk{cursor:pointer}
 @media (pointer:coarse){.wcard dd a{display:flex;align-items:center;min-height:44px}}
 .mchip.prio{margin-left:6px;vertical-align:middle}
 .joblog{max-height:320px;overflow:auto;margin:0;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font:var(--fs-sm)/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
+/* the finished job's log tools: the search takes a whole row on a phone; from 641px they share one row */
+.joblog-tools{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:8px 0}
+.joblog-tools .joblog-q{flex:1 1 100%;min-width:0}
+.joblog-tools .joblog-end{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}
+@media (min-width:641px){.joblog-tools .joblog-q{flex:1 1 240px}}
 /* Share setup / remove text: keep its line breaks (compose YAML, commands), wrap long values inside the box, Copy under it */
 .codebox{display:flex;flex-direction:column;align-items:flex-start;gap:6px}
 .codebox code{display:block;box-sizing:border-box;width:100%;overflow:auto;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font:var(--fs-sm)/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
