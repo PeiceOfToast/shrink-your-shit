@@ -433,7 +433,8 @@ label.chk{cursor:pointer}
 @media (max-width:599px){ /* U3: on a phone the status pill moves to a third line under the chips, under the tile's column */
   .list.rows .tbl tr{flex-wrap:wrap;row-gap:6px}
   .list.rows .tbl td.stc{flex:0 0 100%;padding:0 0 0 48px}
-  .list.rows .tbl.wflist td.stc{flex:1 1 auto} /* Workflows: the check pill, switch and menu share one line */
+  .list.rows .tbl.wflist tr{flex-wrap:nowrap}
+  .list.rows .tbl.wflist td.stc{flex:none;padding:0} /* Workflows keeps one line: name, check pill, switch, menu (as before U5) */
   .list .tbl.jobs td.sizec{flex:0 0 100%;padding:0 0 0 48px;text-align:left;width:auto}
 }
 @media (min-width:901px){.list.rows .tbl.jobs td.selc{display:table-cell}} /* desktop Jobs keeps its row checkboxes; the Libraries rule hides them */
