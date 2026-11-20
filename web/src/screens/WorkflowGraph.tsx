@@ -327,13 +327,13 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
     <div className="editor graphpage">
       {/* FB6 (flow-builder.md 4.1, ui-review C10): the editor is a workspace: a 48 px toolbar, then a frame that fills
           the rest of the window with the palette, the canvas and the inspector inside it. One primary: Publish. */}
-      <div className="edtool" role="toolbar" aria-label={"Editing " + name}>
+      <div className="edbar" role="toolbar" aria-label={"Editing " + name}>
         <span className="muted nowrap"><Link to="/workflows">Workflows</Link> /</span><span className="nm">{name}</span>
         <span className="pill">{ver == null || dirty ? "Draft" : "Published"}</span>
-        <span className="muted sm nowrap desk">{ver == null ? "Not published yet" : "v" + ver + " published" + (dirty ? " · draft" : "")}</span>
+        <span className="muted nowrap desk edver">{ver == null ? "Not published yet" : "v" + ver + " published" + (dirty ? " · draft" : "")}</span>
         {checked.issues && <span className={"pill " + (errors.length ? "bad" : probs ? "warn" : "ok")}><Icon id={probs ? "i-alert" : "i-check-c"} />{probs ? (probs === 1 ? "1 problem" : probs + " problems") : "No problems"}</span>}
         <div className="mid">
-          <div className="segs" role="group" aria-label="View">
+          <div className="edsegs" role="group" aria-label="View">
             {checked.stackable ? <Link to={"/workflows/" + id} aria-pressed="false">Steps</Link> : <span title="This workflow has more than one path, so it is edited here">Steps</span>}
             <button type="button" aria-pressed="true">Graph</button>
           </div>
@@ -346,7 +346,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
           <button className="btn sm primary" type="button" disabled={badValues.length > 0 || varBad.length > 0} title={badValues.length ? "Fix the settings marked in red first" : varBad.length ? "Fix the variable names first" : undefined} onClick={openPublish}>Publish</button>
         </>}
       </div>
-      <div className="edsaid">
+      <div className="edstatus">
       <p className="muted sm phone" role="note">Editing works best on a larger screen. Here you can look around, zoom and see each step.</p>
       <p className="muted" role="status">{said}{bar && edit && <> <button className="linkbtn" type="button" onClick={undoDelete}>Undo</button></>}</p>
       {edit && badValues.length > 0 && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{badValues.length === 1 ? "A setting has a value it can't use" : badValues.length + " settings have values they can't use"} ({[...new Set(badValues.map((i) => nameOf(i.nodeId)))].join(", ")}). Fix {badValues.length === 1 ? "it" : "them"} to save the draft or publish.</span></p>}
@@ -361,7 +361,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
           <div className="row"><button className="btn primary" type="button" disabled={(panel.validation ?? []).some((v) => v.severity === "error")} onClick={doPublish}>Publish v{panel.nextNumber}</button>
             <button className="btn ghost" type="button" onClick={() => setPanel(null)}>Cancel</button></div>
         </div></section>)}
-      <div className={"frame" + (edit ? " withpal" : "")}>
+      <div className={"edframe" + (edit ? " withpal" : "")}>
         {edit && <Palette defs={defs} onAdd={addFromPalette} dragType={dragType} onDrag={dragging} searchRef={searchRef} />}
         <div className="gcanvas" aria-label={"The steps of " + name + " as a graph"} onDragOver={edit ? onDragOver : undefined} onDragLeave={edit ? (e: DragEvent) => { if (!e.currentTarget.contains(e.relatedTarget as HTMLElement | null)) (setGhost(null), setPointer(null)); } : undefined} onDrop={edit ? onDrop : undefined} onBlur={() => (nudgeRun.current = null)}>
           {ghost && <div className="gdrop" aria-hidden="true" style={{ left: ghost.x, top: ghost.y, width: W * rf.getZoom(), height: 72 * rf.getZoom() }} />}
@@ -374,7 +374,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
             <Zoom />
           </ReactFlow>
         </div>
-        <OwnVars.Provider value={doc.variables ?? []}><aside className="insp ginspect" aria-label="Selected step and problems">
+        <OwnVars.Provider value={doc.variables ?? []}><aside className="edinsp ginspect" aria-label="Selected step and problems">
           <div className="stack">
             {selEdge && edit ? <div className="stack"><p>{(() => { const e = doc.edges.find((x) => x.id === selEdge); return e ? nameOf(e.from) + " → " + nameOf(e.to) : ""; })()}</p>
               <div className="row"><button className="btn sm" type="button" onClick={() => removeEdges([selEdge])}><Icon id="i-trash" />Delete this connection</button></div></div>
@@ -418,7 +418,7 @@ function Palette({ defs, onAdd, dragType, onDrag, searchRef }: { defs: StepDefin
   const shown = defs.filter((d) => d.category !== "input" && !d.readOnly && !d.deprecated && (!q || (d.name + " " + d.description + " " + d.typeLabel).toLowerCase().includes(q.toLowerCase())));
   const cats = Object.keys(CAT_NAME).filter((c) => shown.some((d) => d.category === c));
   return (
-    <aside className="pal gpal" aria-label="Steps you can add">
+    <aside className="edpal gpal" aria-label="Steps you can add">
       <div className="stack">
         <input ref={searchRef} className="input" type="search" placeholder="Search steps" aria-label="Search steps" value={q} onChange={(e) => setQ(e.target.value)} />
         {!cats.length && <p className="muted sm">No step matches.</p>}
