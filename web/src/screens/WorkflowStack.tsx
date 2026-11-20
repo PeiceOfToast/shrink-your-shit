@@ -273,8 +273,8 @@ function Step({ n, i, mv, open, toggle, update, issues, otherwise }: { n: Node; 
         <div className="sp" title={(n.name ?? def.name) + ": " + summary(n)}><span className="snm" id={n.id + "-name"}>{n.name ?? def.name}</span> <span className="ssum">{summary(n)}</span></div>
         {mine.length > 0 && <span className="pill bad"><Icon id="i-alert" />{mine.length === 1 ? "1 problem" : mine.length + " problems"}</span>}
         {end ? <span className="muted sm nowrap">{end === "first" ? "Always first" : "Always last"}</span>
-          : otherwise ? <label className="row nw sm otherwise"><span className="muted nowrap">Otherwise</span>
-              <select className="input sm" aria-label={"What happens when " + nm + " answers No"} value={otherwise.kind === "none" ? "leave" : otherwise.kind}
+          : otherwise ? <label className="row nw otherwise"><span className="muted nowrap">Otherwise</span>
+              <select className="input" aria-label={"Otherwise: what happens when " + nm + " answers No"} value={otherwise.kind === "none" ? "leave" : otherwise.kind}
                 onChange={(e) => otherwise.set(e.target.value as "leave" | "fail" | "other")}>
                 {OTHERWISE.filter(([k]) => k !== "other" || otherwise.kind === "other").map(([k, l]) => <option key={k} value={k}>{l}</option>)}
                 {otherwise.kind !== "other" && <option value="other">another path (open the graph)</option>}
