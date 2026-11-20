@@ -41,7 +41,7 @@ export interface JobDetail {
   file?: { path: string; bytes: number }; attempts?: number; retryAt?: Time | null; error?: string | null; worker?: string | null;
   createdAt?: Time; updatedAt?: Time; library?: { id: ID; name: string }; workflow?: { id: ID; revisionId: ID; version: number };
   metadata?: { before: Probe | null; after: Probe | null };
-  subtitleFiles?: string[]; // the .srt base names saved beside the new file; omitted when none (workshop, #462)
+  subtitleFiles?: string[]; // the .srt base names saved beside the new file; [] when none (workshop, #462)
   // #163: a Done job converts again from its original, when the server says it can; else why not (its own words)
   convertAgain?: { possible: boolean; reason: { code: string; message: string; deletedAt: Time | null } | null };
   warning?: string | null; // the words of an encoder_fallback step (#323), else of a media_refresh step that warned (#333); the state stays
