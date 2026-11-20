@@ -409,10 +409,17 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
   const edit = (d: WorkflowDoc) => (setHist({ docs: [...hist.docs.slice(0, hist.at + 1), d], at: hist.at + 1 }), setChecked(false), setPanel(null), setSaid(""), setGone(null));
   const update = (n: Node) => edit({ ...doc, nodes: doc.nodes.map((x) => (x.id === n.id ? n : x)) });
   // "Start from Shrink videos": the template's whole document as one edit, so Undo (the note below) takes it back
+  const starting = useRef(false); // a second click while the first is loading does nothing
   const startShrink = async () => {
-    const t = (await act(listTemplates(), setSaid))?.find((x) => x.id === "shrink_videos")?.workflow;
-    if (!t) return setSaid("The Shrink videos template isn't available right now.");
-    edit(t); setGone({ text: "Started from Shrink videos. Change any step as you like.", at: hist.at + 1 });
+    if (starting.current) return;
+    starting.current = true;
+    try {
+      const list = await act(listTemplates(), setSaid); // on a failure act has already said the server's message
+      if (!list) return;
+      const t = list.find((x) => x.id === "shrink_videos")?.workflow;
+      if (!t) return setSaid("The Shrink videos template isn't available right now.");
+      edit(t); setGone({ text: "Started from Shrink videos. Change any step as you like.", at: hist.at + 1 });
+    } finally { starting.current = false; }
   };
   const defOf = (t: string) => defs.find((d) => d.type === t);
   const nameOf = (x: Node) => x.name ?? defOf(x.type)?.name ?? x.type;

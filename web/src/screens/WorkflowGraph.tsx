@@ -40,7 +40,9 @@ function GNode({ data, selected }: NodeProps<GNodeT>) {
       {(def?.outputs ?? []).map((p) => (
         <div key={p.name} className={"gport " + p.outcome}><span>{p.label}</span>
           {p.outcome !== "success" && !linked.includes(p.name) && !issues.some((i) => i.code === "unconnected_port" && i.port === p.name) &&
-            <button type="button" className="gpill" aria-label={notLinked(p)} title={notLinked(p)} onClick={(e) => (e.stopPropagation(), pickPort?.(node.id, p.name, p.label, node.name ?? def?.name ?? node.type))}>Not linked: keeps the original</button>}
+            (data.edit
+              ? <button type="button" className="gpill" aria-label={notLinked(p)} title={notLinked(p)} onClick={(e) => (e.stopPropagation(), pickPort?.(node.id, p.name, p.label, node.name ?? def?.name ?? node.type))}>Not linked: keeps the original</button>
+              : <span className="gpill" title={notLinked(p)}>Not linked: keeps the original</span>)}
           <Handle type="source" position={Position.Right} id={p.name} isConnectable={!!data.edit} /></div>))}
     </div>);
 }
@@ -102,6 +104,8 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
   // item 7 (#467 follow-up): a click on an unlinked port's pill makes the next added step link from that port
   const [pending, setPending] = useState<{ node: string; port: string; label: string; step: string } | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  // Esc drops a pending port from anywhere on the page, not only from the palette
+  useEffect(() => { if (!pending) return; const k = (e: KeyboardEvent) => { if (e.key === "Escape") { setPending(null); setSaid("Dropped the link from that port."); } }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [pending]);
   const pendingVia = () => { const pn = pending && doc.nodes.find((n) => n.id === pending.node); return pn && !doc.edges.some((e) => e.from === pn.id && e.fromPort === pending.port) ? { after: pn, port: pending.port } : undefined; };
   const push = (next: { doc?: WorkflowDoc; layout?: Layout }) => { setHist((h) => ({ at: h.at + 1, list: [...h.list.slice(0, h.at + 1), { doc: next.doc ?? h.list[h.at].doc, layout: next.layout ?? h.list[h.at].layout }] })); setPanel(null); setSaid(""); setBar(null); };
   // the Undo offered for a delete, for 8 s, only while the delete is still the latest change
@@ -165,10 +169,10 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
     const nodes: GNodeT[] = doc.nodes.map((n) => {
       const mine = issues.filter((i) => i.nodeId === n.id), summary = checked.stepSummaries?.[n.id] ?? "";
       const def = defs.find((x) => x.type === n.type);
-      return { id: n.id, type: "step", position: layout.nodes[n.id] ?? { x: 0, y: 0 }, draggable: edit, connectable: edit, deletable: edit && def?.category !== "input", selected: n.id === sel,
+      return { id: n.id, type: "step", position: layout.nodes[n.id] ?? { x: 0, y: 0 }, draggable: edit, connectable: edit, deletable: edit && def?.category !== "input", selected: n.id === sel, zIndex: free(n, def).length ? 2 : undefined,
         initialWidth: W, initialHeight: H(def?.outputs?.length ?? 1), measured: dims[n.id], // review f03fcad: the minimap only draws nodes with a size
         ariaLabel: [title(n) + (n.enabled ? "" : " (off)"), summary, ...mine.map((i) => (i.severity === "error" ? "Problem: " : "Warning: ") + i.message), ...free(n, def).map((p) => notLinked(p))].filter(Boolean).join(". "),
-        data: { node: n, def, summary, issues: mine, edit, linked: doc.edges.filter((e) => e.from === n.id).map((e) => e.fromPort), pickPort: (id: string, port: string, label: string, step: string) => (setSel(id), setSelEdge(null), setPending({ node: id, port, label, step }), setSaid("Next step links from " + label + " of " + step + "."), searchRef.current?.focus()) } };
+        data: { node: n, def, summary, issues: mine, edit, linked: doc.edges.filter((e) => e.from === n.id).map((e) => e.fromPort), pickPort: (id: string, port: string, label: string, step: string) => (setSel(id), setSelEdge(null), setPending({ node: id, port, label, step }), setSaid("Pick a step to add after " + step + " › " + label + ". Esc to cancel."), searchRef.current?.focus()) } };
     });
     const edges: RFEdge[] = doc.edges.map((e) => {
       const from = doc.nodes.find((n) => n.id === e.from), outs = defs.find((x) => x.type === from?.type)?.outputs ?? [], port = outs.find((p) => p.name === e.fromPort);
@@ -262,7 +266,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
   };
   const clip = useRef<Node | null>(null), pastes = useRef(0);
   // selecting another step, an edge or the empty canvas drops a pending port (keeps it only for the same step)
-  const unpend = (keep: string | null) => { if (pending && pending.node !== keep) { setPending(null); setSaid((s) => (s.startsWith("Next step links from") ? "" : s)); } };
+  const unpend = (keep: string | null) => { if (pending && pending.node !== keep) { setPending(null); setSaid((s) => (s.startsWith("Pick a step to add after") ? "" : s)); } };
   const removeEdges = (ids: string[]) => { if (ids.length) push({ doc: { ...doc, edges: doc.edges.filter((e) => !ids.includes(e.id)) } }); setSelEdge(null); };
   const onNodesChange = (ch: NodeChange<GNodeT>[]) => {
     // a click, or Enter / Space on a focused step (React Flow selects it), opens its panel (review bf13684 P2)
@@ -331,8 +335,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
             <button className="btn ghost" type="button" onClick={() => setPanel(null)}>Cancel</button></div>
         </div></section>)}
       <div className={"graphwrap" + (edit ? " withpal" : "")}>
-        {edit && <Palette defs={defs} onAdd={addFromPalette} dragType={dragType} onDrag={dragging} searchRef={searchRef}
-          onEsc={() => { if (pending) { setPending(null); setSaid("Dropped the link from that port."); } }} />}
+        {edit && <Palette defs={defs} onAdd={addFromPalette} dragType={dragType} onDrag={dragging} searchRef={searchRef} />}
         <div className="gcanvas" aria-label={"The steps of " + name + " as a graph"} onDragOver={edit ? onDragOver : undefined} onDragLeave={edit ? (e: DragEvent) => { if (!e.currentTarget.contains(e.relatedTarget as HTMLElement | null)) (setGhost(null), setPointer(null)); } : undefined} onDrop={edit ? onDrop : undefined} onBlur={() => (nudgeRun.current = null)}>
           {ghost && <div className="gdrop" aria-hidden="true" style={{ left: ghost.x, top: ghost.y, width: W * rf.getZoom(), height: 72 * rf.getZoom() }} />}
           {pointer && dragType && <div className="gghost" aria-hidden="true" style={{ left: pointer.x + 12, top: pointer.y + 12 }}>{defs.find((x) => x.type === dragType)?.name}</div>}
@@ -380,13 +383,13 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
 // The palette (SCREENS V4): search, then the step types by category; double-click or Enter adds one at the view's
 // centre. The library trigger and migration-only types aren't offered; categories with nothing to add aren't shown.
 const CAT_NAME: Record<string, string> = { filter: "Checks", video: "Video", audio: "Audio", subtitles: "Subtitles", container: "File type", verify: "Check the result", output: "Save", flow: "Flow" };
-function Palette({ defs, onAdd, dragType, onDrag, searchRef, onEsc }: { defs: StepDefinition[]; onAdd: (d: StepDefinition) => void; dragType: string | null; onDrag: (t: string | null) => void; searchRef: RefObject<HTMLInputElement | null>; onEsc: () => void }) {
+function Palette({ defs, onAdd, dragType, onDrag, searchRef }: { defs: StepDefinition[]; onAdd: (d: StepDefinition) => void; dragType: string | null; onDrag: (t: string | null) => void; searchRef: RefObject<HTMLInputElement | null> }) {
   // the step list's "Add step" lands here with ?add=<type> (its conditions do): the search starts on that step's name
   const [q, setQ] = useState(() => defs.find((x) => x.type === new URLSearchParams(window.location.search).get("add"))?.name ?? "");
   const shown = defs.filter((d) => d.category !== "input" && !d.readOnly && !d.deprecated && (!q || (d.name + " " + d.description + " " + d.typeLabel).toLowerCase().includes(q.toLowerCase())));
   const cats = Object.keys(CAT_NAME).filter((c) => shown.some((d) => d.category === c));
   return (
-    <aside className="card gpal" aria-label="Steps you can add" onKeyDown={(e) => e.key === "Escape" && onEsc()}>
+    <aside className="card gpal" aria-label="Steps you can add">
       <div className="bd stack">
         <input ref={searchRef} className="input" type="search" placeholder="Search steps" aria-label="Search steps" value={q} onChange={(e) => setQ(e.target.value)} />
         {!cats.length && <p className="muted sm">No step matches.</p>}
