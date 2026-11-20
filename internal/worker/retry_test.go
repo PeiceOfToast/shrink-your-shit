@@ -158,8 +158,8 @@ func TestLastingFailuresAreNotTriedAgain(t *testing.T) {
 		"picture too different": func(s *scenario) { // (a result not smaller is kept now: always standardize)
 			s.ssimStderr = "[Parsed_ssim_0] SSIM Y:0.50 U:0.50 V:0.50 All:0.500000 (3.0)"
 		},
-		"damaged original": func(s *scenario) { // more than maxDamagedPictures: kept
-			s.encodeStderr = strings.Repeat("[h264 @ 0x1] error while decoding MB 1 2\n", 5)
+		"damaged original": func(s *scenario) { // more than maxDamagedPercent of its 2500 frames: kept
+			s.encodeStderr = strings.Repeat("[h264 @ 0x1] error while decoding MB 1 2\n", 50)
 		},
 		"converter error": func(s *scenario) { s.encodeErr = errors.New("ffmpeg: exit status 187: Invalid data found") },
 	}

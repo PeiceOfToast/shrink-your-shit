@@ -52,23 +52,23 @@ func TestOriginalWithAFewDamagedPicturesConverts(t *testing.T) {
 	if j := s.job(); j.Status != jobs.Done {
 		t.Fatalf("status %s (error %q), want done", j.Status, j.Error)
 	}
-	if !s.logHas(0, "app", "(2 damaged pictures, up to 3 are tolerated); converted anyway.") {
+	if !s.logHas(0, "app", "(2 damaged pictures of 2500 frames (0.08%), up to 1% are tolerated); converted anyway.") {
 		t.Error("want the tolerated line on the encode step")
 	}
 }
 
-// Five separate damaged pictures are more than the limit: the original is kept, and the check step records the
-// refusal with its reason, the count, and the first damage lines.
+// Fifty damaged pictures of 2500 frames (2%) are more than the limit: the original is kept, and the check step
+// records the refusal with its reason, the count and share, and the first damage lines.
 func TestOriginalWithManyDamagedPicturesIsKept(t *testing.T) {
 	s := newScenario(t)
-	s.encodeStderr = strings.Repeat("[h264 @ 0x55] error while decoding MB 1 2, bytestream -5\n", 5)
+	s.encodeStderr = strings.Repeat("[h264 @ 0x55] error while decoding MB 1 2, bytestream -5\n", 50)
 	s.run(Replace)
 	s.assertKept("the original file has errors")
 	st := s.checkStep()
 	if st.Outcome != "failed" || !strings.Contains(st.Result, "the original file has errors") {
 		t.Errorf("check step %+v, want failed with the kept reason", st)
 	}
-	for _, want := range []string{"Check: damage in the original, read while converting", "Errors: 5 damaged pictures; up to 3 are tolerated", "error while decoding MB 1 2"} {
+	for _, want := range []string{"Check: damage in the original, read while converting", "Errors: 50 damaged pictures of 2500 frames (2.00%); up to 1% are tolerated", "error while decoding MB 1 2"} {
 		if !s.logHas(1, "check", want) {
 			t.Errorf("check log lacks %q", want)
 		}
@@ -78,11 +78,51 @@ func TestOriginalWithManyDamagedPicturesIsKept(t *testing.T) {
 // Damage a picture cannot be decoded for (a missing reference) counts as a damaged picture too.
 func TestMissingReferencesCountAsDamagedPictures(t *testing.T) {
 	s := newScenario(t)
-	s.encodeStderr = strings.Repeat("[h264 @ 0x55] reference picture missing during reorder\n", 4)
+	s.encodeStderr = strings.Repeat("[h264 @ 0x55] reference picture missing during reorder\n", 30)
 	s.run(Replace)
 	s.assertKept("the original file has errors")
-	if !s.logHas(1, "check", "Errors: 4 damaged pictures; up to 3 are tolerated") {
-		t.Error("four missing-reference lines should be four damaged pictures")
+	if !s.logHas(1, "check", "Errors: 30 damaged pictures of 2500 frames (1.20%); up to 1% are tolerated") {
+		t.Error("thirty missing-reference lines should be thirty damaged pictures")
+	}
+}
+
+// The share limit is 1% of the frames, inclusive: 0.5% and exactly 1% convert, one picture more than 1% does not,
+// and so does damage to the file as a whole at any share. The frame count is 2500 (100 s at 25 fps).
+func TestDamageShareLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		stderr   string
+		tolerant bool
+	}{
+		{"0.5% converts", strings.Repeat("[h264 @ 0x1] error while decoding MB 1 2\n", 12), true},
+		{"exactly 1% converts", strings.Repeat("[h264 @ 0x1] error while decoding MB 1 2\n", 25), true},
+		{"just over 1% is kept", strings.Repeat("[h264 @ 0x1] error while decoding MB 1 2\n", 26), false},
+		{"2% is kept", strings.Repeat("[h264 @ 0x1] error while decoding MB 1 2\n", 50), false},
+		{"stops early after a few damaged pictures is kept", "[h264 @ 0x1] error while decoding MB 1 2\n[matroska,webm @ 0x1] Truncated: unexpected end of file", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newScenario(t)
+			s.encodeStderr = tc.stderr
+			s.run(Replace)
+			if j := s.job(); (j.Status == jobs.Done) != tc.tolerant {
+				t.Fatalf("status %s (error %q), tolerant %v", j.Status, j.Error, tc.tolerant)
+			}
+		})
+	}
+}
+
+// damageTolerated at its edges, without a run: a file whose frame count is unknown is not tolerated, since there
+// is no share to measure.
+func TestDamageToleratedEdges(t *testing.T) {
+	few := sourceDamageReport{Pictures: 1}
+	if damageTolerated(few, 0) {
+		t.Error("unknown frame count: must not be tolerated")
+	}
+	if damageTolerated(sourceDamageReport{Pictures: 1, FileLevel: true}, 2500) {
+		t.Error("file-level damage: must not be tolerated, however few pictures")
+	}
+	if !damageTolerated(sourceDamageReport{}, 2500) {
+		t.Error("no damage: tolerated")
 	}
 }
 
