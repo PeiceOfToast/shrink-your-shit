@@ -31,7 +31,8 @@ export async function findSkip(jobId: string): Promise<Answer<JobsPage>> {
 export interface LogStep { name: string; startedAt: string | null; tookMs: number | null; outcome: string; command: string | null; probe: Probe | null; check: { score: number; min: number | null; passed: boolean | null } | null; outputLines: number; output: string | string[]; result: string | null; found?: string[]; // found: the step's check lines (stream 'check'), absent from older servers
   decision?: string | null; reason?: string | null; path?: string; warnings?: string[]; errors?: string[]; set?: { name: string; value?: string }[]; // set: a secret has no value
   speedX?: number | null; avgKbps?: number | null; moves?: { action: string; from: string; to: string; ok: boolean; error?: string | null }[] }
-export interface LogStart { reason: string; appVersion: string; workflow: { name: string; revision: number } }
+// the server does not send appVersion yet (v2joblog.go): a missing one is hidden
+export interface LogStart { reason: string; appVersion?: string; workflow: { name: string; revision: number } }
 export interface LogVariable { name: string; start?: string; end?: string; changedBy: string | null; secret: boolean } // a secret has no start or end
 export interface LogSide { video?: string; audio?: string; subtitles?: string; durationSec?: number }
 // contract L2 (slices/contract-joblog-l1-l2.md): passes, bytesWritten and slowestStep are null when not recorded, and absent in L1

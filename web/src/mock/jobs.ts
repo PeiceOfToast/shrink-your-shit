@@ -62,7 +62,16 @@ const REMOVED: JobDetail = { id: "47001", state: "cancelled", removed: true, rea
 // section has ffmpeg's stderr lines (dimmed in the UI), a libva line (stream info) and the stall warning (L2, R9: an ordinary line)
 const ln = (min: number, step: number, level: LogLine["level"], stream: LogLine["stream"], text: string): LogLine => ({ at: at(min), step, level, stream, text });
 const sectionsFor = (result: string): LogSection[] => result === "skipped" ? [] : [
-  { id: "input", title: "Input", lines: [ln(30, 0, "info", "app", "Reading the file")] },
+  // the input lines as the worker writes them (joblog.go inputLines): the file, its size, container and length, one line per stream, chapters
+  { id: "input", title: "Input", lines: [
+    ln(31, 0, "info", "app", "Source /media/shows/Example.S01E01.mkv"),
+    ln(31, 0, "info", "app", "Size 3,221,225,472 bytes (3.0 GiB), modified 2026-11-10T08:00:00Z"),
+    ln(31, 0, "info", "app", "Container matroska,webm, length 01:45:12, overall 8.0 Mbps"),
+    ln(31, 0, "info", "app", "#0 video · H.264 · 1920x1080 · SDR"),
+    ln(31, 0, "info", "app", "#1 audio · eng · AC-3 5.1 · 640 kbps · default"),
+    ln(31, 0, "info", "app", "#2 audio · jpn · AAC stereo · 192 kbps"),
+    ln(31, 0, "info", "app", "Chapters 12, attachments 0"),
+  ] },
   { id: "encode", title: "Encode", lines: [
     ln(29, 0, "info", "app", "Starting ffmpeg: HEVC, Balanced quality"),
     ln(29, 0, "info", "stderr", "ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers"),
@@ -76,7 +85,7 @@ const sectionsFor = (result: string): LogSection[] => result === "skipped" ? [] 
 // the start, variables and summary of a job that ran with full logs (contract v2); result: converted | kept | failed | skipped
 const runInfo = (result: string) => ({
   sections: sectionsFor(result),
-  start: { reason: "New file found by the scan", appVersion: "1.4.0", workflow: { name: "Shrink videos", revision: 7 } },
+  start: { reason: "New file found by the scan", workflow: { name: "Shrink videos", revision: 7 } },
   variables: [
     { name: "api_key", changedBy: null, secret: true },
     { name: "audio_languages", start: "", end: result === "converted" ? "eng, jpn" : "", changedBy: result === "converted" ? "audio" : null, secret: false },
