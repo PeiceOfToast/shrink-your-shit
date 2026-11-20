@@ -788,10 +788,15 @@ func (s *Store) SetLibraryFlow(libraryID, flowID int64) (Library, error) {
 	return s.GetLibrary(libraryID)
 }
 
-// forgetFiles drops the scanner's records of the files under dir, so the next scan probes them again.
+// forgetFiles drops the scanner's records of the files under dir, so the next scan probes them again. A file
+// whose newest job is done keeps its record: it converted fine, so a workflow change does not convert it
+// again (and the unchanged record keeps the scanner from queuing it). Failed and skipped files lose theirs and
+// are decided again with the new workflow.
 func forgetFiles(q execer, dir string) error {
 	prefix := strings.TrimSuffix(dir, string(filepath.Separator)) + string(filepath.Separator)
-	_, err := q.Exec(`DELETE FROM files WHERE substr(path, 1, length(?)) = ?`, prefix, prefix)
+	_, err := q.Exec(`DELETE FROM files WHERE substr(path, 1, length(?)) = ? AND NOT EXISTS (
+  SELECT 1 FROM jobs j WHERE j.path=files.path AND j.status='done'
+  AND j.id=(SELECT MAX(k.id) FROM jobs k WHERE k.path=files.path AND k.library_id=j.library_id))`, prefix, prefix)
 	return err
 }
 

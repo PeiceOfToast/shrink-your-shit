@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver, no cgo
@@ -102,6 +103,8 @@ type Store struct {
 
 	removeMu sync.Mutex     // held by Claim and StartLibrary while they look at removing
 	removing map[int64]bool // libraries being removed (BeginRemove): process-local, never stored
+
+	swapChanges atomic.Int64 // bumped by each change of an original's state (SwapChanges)
 }
 
 // Open opens (creating if needed) the database at path and brings its schema up to date
@@ -195,6 +198,23 @@ VALUES(?,?,?,?,?,?,?,?)`, j.Library, j.Path, Queued, j.Reason, j.DurationSec, j.
 	r, err := s.db.Exec(`INSERT INTO jobs(library,library_id,path,status,reason,duration,size_before,created,updated,priority)
 SELECT ?,?,?,?,?,?,?,?,?,priority FROM libraries WHERE id=? AND started=1`,
 		j.Library, j.LibraryID, j.Path, Queued, j.Reason, j.DurationSec, j.SizeBefore, now, now, j.LibraryID)
+	if err != nil {
+		return 0, err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return 0, ErrLibraryGone
+	}
+	return r.LastInsertId()
+}
+
+// EnqueueFailed adds a job that has already failed, with its code and plain words: a file that can't be
+// converted at all (an empty video) is recorded without being queued or probed. One statement, gated on the
+// library as Enqueue is, so a library removed meanwhile leaves no row.
+func (s *Store) EnqueueFailed(j Job, code, msg string) (int64, error) {
+	now := s.stamp()
+	r, err := s.db.Exec(`INSERT INTO jobs(library,library_id,path,status,reason,duration,size_before,created,updated,priority,error,error_code,attempts)
+SELECT ?,?,?,?,?,?,?,?,?,priority,?,?,1 FROM libraries WHERE id=? AND started=1`,
+		j.Library, j.LibraryID, j.Path, Failed, j.Reason, j.DurationSec, j.SizeBefore, now, now, msg, code, j.LibraryID)
 	if err != nil {
 		return 0, err
 	}

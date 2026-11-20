@@ -229,7 +229,7 @@ func (c *libraryTotals) get(store *jobs.Store, libs []jobs.Library) (map[int64]j
 		return nil, err
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d;", newest)
+	fmt.Fprintf(&b, "%d|%d;", newest, store.SwapChanges()) // a restore writes no event
 	for _, l := range libs {
 		fmt.Fprintf(&b, "%d|%s|%s|%d;", l.ID, l.Path, l.LastScan, l.LastScanVideos)
 	}
@@ -306,7 +306,7 @@ func (c *statsCache) get(store *jobs.Store) (*stats, error) {
 	}
 	now := time.Now()
 	// and at least once a minute: a purge or a scan finding an original gone frees bytes without an event
-	key := strconv.FormatInt(newest, 10) + "|" + now.Format("2006-01-02") + "|" + strconv.FormatInt(now.Unix()/60, 10)
+	key := strconv.FormatInt(newest, 10) + "|" + strconv.FormatInt(store.SwapChanges(), 10) + "|" + now.Format("2006-01-02") + "|" + strconv.FormatInt(now.Unix()/60, 10)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.st != nil && c.key == key {
