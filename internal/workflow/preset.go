@@ -58,13 +58,39 @@ func Preset() Doc {
 	d := FromTemplate(rules.Template{Kind: rules.KindSelectors, Selectors: ptr(rules.DefaultSelectors(3))}, nil)
 	for i := range d.Nodes {
 		if d.Nodes[i].Type == TypeCommit {
-			d.Nodes[i].Config = map[string]any{"policy": "separate_folder", "folderMode": "next_to_library"}
+			d.Nodes[i].Config = map[string]any{"policy": "separate_folder", "folderMode": "next_to_library", "ifBigger": "keep"}
 		}
 	}
 	return d
 }
 
+// FillCommitDefaults writes "ifBigger": "replace" into a stored Save the result step that has none (R8): a
+// workflow saved before the choice existed replaces the original as it always did, and reads back saying so.
+// A new workflow's step always has the field (Preset writes "keep"), so this only ever changes old ones.
+func FillCommitDefaults(d *Doc) {
+	for i := range d.Nodes {
+		c := &d.Nodes[i]
+		if c.Type != TypeCommit {
+			continue
+		}
+		if _, ok := c.Config["ifBigger"]; !ok {
+			if c.Config == nil {
+				c.Config = map[string]any{}
+			}
+			c.Config["ifBigger"] = "replace"
+		}
+	}
+}
+
 func commitConfig(s rules.Selectors) map[string]any {
+	c := commitPolicyConfig(s)
+	if s.KeepIfBigger {
+		c["ifBigger"] = "keep"
+	}
+	return c
+}
+
+func commitPolicyConfig(s rules.Selectors) map[string]any {
 	switch s.AfterConverting {
 	case "folder":
 		if s.FolderMode == rules.NextToLibrary {
@@ -182,6 +208,13 @@ func selectorsOf(order []Node) (rules.Selectors, []Issue) {
 		s.FileType = "keep"
 	}
 	commit := by[TypeCommit]
+	switch strOf(commit.Config, "ifBigger", "replace") { // R8: absent is replace (old workflows)
+	case "keep":
+		s.KeepIfBigger = true
+	case "replace":
+	default:
+		return s, []Issue{{Code: "invalid_config", Severity: "error", NodeID: commit.ID, ConfigPath: "/ifBigger", Field: "ifBigger", Message: "Choose what to do when the new file is bigger."}}
+	}
 	switch strOf(commit.Config, "policy", "separate_folder") {
 	case "replace":
 		s.AfterConverting = "replace"

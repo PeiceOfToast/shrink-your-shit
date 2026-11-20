@@ -32,6 +32,9 @@ type Selectors struct {
 	FileType        string `json:"fileType"`            // mkv | mp4 | webm | keep (AvailableFileTypes)
 	AfterConverting string `json:"afterConverting"`     // replace | beside | folder (S6: with OutputDir)
 	OutputDir       string `json:"outputDir,omitempty"` // folder: where the new files go (design E)
+	// KeepIfBigger (R8, "Save the result"): a new file bigger than its original is not saved; the original
+	// stays. False (the default for flows without a workflow, and a workflow's "replace") saves it anyway.
+	KeepIfBigger bool `json:"keepIfBigger,omitempty"`
 	// FolderMode is "next_to_library" (V5a, output-first: each library's own folder beside it, or its
 	// override; OutputDir unused) or "" (one folder for all: OutputDir).
 	FolderMode string   `json:"folderMode,omitempty"`

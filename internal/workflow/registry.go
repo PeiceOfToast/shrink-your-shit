@@ -195,6 +195,12 @@ func Definitions() []StepDefinition {
 					"Pick a folder next to each library, or one folder for all of them. Your originals stay where they are."),
 				"folder": map[string]any{"type": "string", "title": "Folder", "description": "New files go to this folder, in the same sub-folders.",
 					"x-placeholder": "/media/movies (shrunk)", "x-ui": map[string]any{"widget": "folder"}},
+				// R8: checked after "Check the result" passes, before anything is moved. A new file bigger than its original is
+				// not saved when "keep"; "replace" saves it anyway. An absent value reads as replace (old workflows).
+				"ifBigger": withDefault(hinted(enum([]any{"keep", "replace"}, []string{"Keep the original", "Replace anyway"}), []string{
+					"The new file is thrown away and the original stays exactly as it is. Applies to every choice above.",
+					"The new file is saved even though it is bigger. The original is kept for 7 days (Settings > Safety), then deleted."}),
+					"keep", "If the new file is bigger than the original", ""),
 			}, []string{"policy"})}),
 		def(StepDefinition{Type: TypeLegacy, Category: "video", Name: "Earlier install's settings", Icon: "history", TypeLabel: "Video",
 			Description: "The settings this workflow had before workflows existed. They run exactly as before; to change them, start from the Shrink videos steps.",
