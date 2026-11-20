@@ -86,6 +86,33 @@ func TestFinishStopsAtItsOwnLimit(t *testing.T) {
 	s.assertOriginalSafe()
 }
 
+// reachedEnd's window is finishTolerance either side of the length (2 s): both edges are pinned, so narrowing the
+// tolerance or dropping either side fails here.
+func TestReachedEndEdges(t *testing.T) {
+	cases := []struct {
+		name string
+		outS float64 // out_time, seconds
+		durS float64 // the file's length, seconds (0: unknown)
+		want bool
+	}{
+		{"at the length", 100, 100, true},
+		{"2 s short, the edge", 98, 100, true},
+		{"inside the short edge", 98.5, 100, true},
+		{"just outside short", 97.9, 100, false},
+		{"2 s past, the edge", 102, 100, true},
+		{"just outside past", 102.1, 100, false},
+		{"far past (a stuck encode)", 105, 100, false},
+		{"far short (the middle)", 5, 100, false},
+		{"length unknown", 100, 0, false},
+		{"length unknown at 0", 0, 0, false},
+	}
+	for _, c := range cases {
+		if got := reachedEnd(c.outS*1e6, c.durS); got != c.want {
+			t.Errorf("%s: reachedEnd(%gs of %gs) = %v, want %v", c.name, c.outS, c.durS, got, c.want)
+		}
+	}
+}
+
 // The remote worker's position counts as the finish only at the file's length, and only when the length is known.
 func TestRemotePositionAtTheLengthIsFinishing(t *testing.T) {
 	now := time.Now()
