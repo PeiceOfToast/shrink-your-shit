@@ -616,6 +616,8 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
             <tr><th>Audio</th>{before && <td>{before.audio}</td>}<td>{after?.audio ?? "—"}</td></tr>
             <tr><th>Bitrate</th>{before && <td>{before.bitrate}</td>}<td>{after?.bitrate ?? "—"}</td></tr>
             <tr><th>Size</th>{before && <td>{before.size}</td>}<td>{after?.size ?? "—"}</td></tr>{subsRow && <tr><th>Subtitles</th>{before && <td>{sumS?.before?.subtitles ?? "—"}</td>}<td>{sumS?.after?.subtitles ?? "—"}</td></tr>}{lenRow && <tr><th>Length</th>{before && <td>{lenText(sumS?.before)}</td>}<td>{lenText(sumS?.after)}</td></tr>}</tbody></table></section>}
+          {/* a done job's .srt files saved beside the new file: one line, then each name; no field, no line */}
+          {state === "completed" && !!j?.subtitleFiles?.length && <section><h3>Subtitles saved as files</h3>{j.subtitleFiles.map((n) => <div key={n} style={{ overflowWrap: "anywhere" }}><code>{n}</code></div>)}</section>}
         </div>
       </aside>
     </div>
