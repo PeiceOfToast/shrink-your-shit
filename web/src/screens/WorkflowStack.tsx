@@ -322,9 +322,10 @@ function usedBy(nodes: Node[], defs: StepDefinition[]) {
 // The workflow's own variables: a table (name, value, where it comes from, the steps that use it), an add form, and a
 // box for fields that use a name that isn't a variable. Changes go through edit(), so undo and Save draft cover them.
 const NAME = /^[a-z][a-z0-9_]{0,39}$/;
-function VariablesCard({ doc, defs, builtins, problems, edit, open }: { doc: WorkflowDoc; defs: StepDefinition[]; builtins: TemplateVar[]; problems: { nodeId: string; title: string; code: string; error: string }[]; edit: (d: WorkflowDoc, run?: string) => void; open: (nodeId: string) => void }) {
+function VariablesCard({ doc, defs, builtins, problems, edit, open }: { doc: WorkflowDoc; defs: StepDefinition[]; builtins: TemplateVar[]; problems: { nodeId: string; title: string; code: string; name: string; error: string }[]; edit: (d: WorkflowDoc, run?: string) => void; open: (nodeId: string) => void }) {
   const [name, setName] = useState(""), [val, setVal] = useState(""), [what, setWhat] = useState(""), [err, setErr] = useState("");
   const [shown, setShown] = useState(false); // closed by default; opens by itself when a field uses an unknown name
+  const [editing, setEditing] = useState<string | null>(null); // the row whose description is open for editing
   const vars = doc.variables ?? [], used = usedBy(doc.nodes, defs), titleOf = (n: Node) => defs.find((d) => d.type === n.type)?.name ?? n.type;
   const unknown = problems.filter((p) => p.code === "unknown_variable"), bad = unknown.length > 0;
   useEffect(() => { if (bad) setShown(true); }, [bad]);
@@ -345,12 +346,13 @@ function VariablesCard({ doc, defs, builtins, problems, edit, open }: { doc: Wor
     if (by.length && !window.confirm(`${by.map(titleOf).join(" and ")} use {{${n}}}. Delete it anyway? Those fields will show an error until you change them.`)) return;
     setVars(vars.filter((v) => v.name !== n));
   };
-  // Used by: open the step's options and focus the field that uses the variable
-  const openField = (n: Node, name: string) => {
-    open(n.id);
+  // Used by, and the warning box: open the step's options and focus the field that uses the variable ({{ name }} counts too)
+  const openField = (nodeId: string, name: string) => {
+    open(nodeId);
+    const uses = new RegExp("\\{\\{\\s*" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\}\\}");
     setTimeout(() => {
-      const ins = [...document.querySelectorAll<HTMLInputElement>(`#${CSS.escape(n.id)}-opts input[role=combobox]`)];
-      (ins.find((i) => i.value.includes("{{" + name + "}}")) ?? ins[0])?.focus();
+      const ins = [...document.querySelectorAll<HTMLInputElement>(`#${CSS.escape(nodeId)}-opts input[role=combobox]`)];
+      (ins.find((i) => uses.test(i.value)) ?? ins[0])?.focus();
     }, 0);
   };
   return (
@@ -358,7 +360,7 @@ function VariablesCard({ doc, defs, builtins, problems, edit, open }: { doc: Wor
       <div className="hd"><h2 id="vars-h">Variables</h2><span className="muted sm">{used.size} used here · {vars.length} set here</span>
         <button className="btn sm ghost" type="button" aria-expanded={shown} aria-controls="vars-body" onClick={() => setShown(!shown)}>{shown ? "Hide" : "Show"}</button></div>
       <div id="vars-body" className="bd stack" hidden={!shown}>
-        {bad && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{unknown.length === 1 ? "1 field uses a name that isn't a variable" : unknown.length + " fields use a name that isn't a variable"}: {unknown.map((p, i) => <span key={i}>{i > 0 && ", "}<button className="linkbtn" type="button" onClick={() => open(p.nodeId)}>{p.title}</button></span>)}</span></p>}
+        {bad && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{unknown.length === 1 ? "1 field uses a name that isn't a variable" : unknown.length + " fields use a name that isn't a variable"}: {unknown.map((p, i) => <span key={i}>{i > 0 && ", "}<button className="linkbtn" type="button" onClick={() => openField(p.nodeId, p.name)}>{p.title}</button></span>)}</span></p>}
         <p className="muted sm">Values set in Settings apply to every workflow. A value set here wins for this workflow. A value typed straight into a step wins over both.</p>
         {vars.length === 0 ? <p className="muted">No variables yet. Add one below, then use it in a field as {"{{name}}"}.</p>
           : <table className="tbl vars-tbl">
@@ -367,11 +369,13 @@ function VariablesCard({ doc, defs, builtins, problems, edit, open }: { doc: Wor
               const by = used.get(v.name) ?? [];
               return (
                 <tr key={v.name}>
-                  <th scope="row"><code>{"{{" + v.name + "}}"}</code>{v.description && <span className="muted sm" style={{ display: "block" }}>{v.description}</span>}</th>
+                  <th scope="row"><code>{"{{" + v.name + "}}"}</code>{editing === v.name
+                    ? <input className="input" aria-label={"Description of {{" + v.name + "}}"} value={v.description ?? ""} onChange={(e) => setVars(vars.map((x) => (x.name === v.name ? { ...x, description: e.target.value } : x)), "desc:" + v.name)} />
+                    : v.description && <span className="muted sm" style={{ display: "block" }}>{v.description}</span>}</th>
                   <td data-label="Value"><input className="input" aria-label={"Value of {{" + v.name + "}}"} value={String(v.value ?? "")} onChange={(e) => setVars(vars.map((x) => (x.name === v.name ? { ...x, value: e.target.value } : x)), "value:" + v.name)} /></td>
                   <td><span className="pill vars-pill-own">This workflow</span></td>
-                  <td data-label="Used by">{by.length ? by.map((n, i) => <span key={n.id}>{i > 0 && ", "}<button className="linkbtn" type="button" onClick={() => openField(n, v.name)}>{titleOf(n)}</button></span>) : <span className="muted">Not used yet</span>}</td>
-                  <td><button className="btn sm ghost" type="button" aria-label={"Delete {{" + v.name + "}}"} onClick={() => remove(v.name)}>Delete</button></td>
+                  <td data-label="Used by">{by.length ? by.map((n, i) => <span key={n.id}>{i > 0 && ", "}<button className="linkbtn" type="button" onClick={() => openField(n.id, v.name)}>{titleOf(n)}</button></span>) : <span className="muted">Not used yet</span>}</td>
+                  <td><button className="btn sm ghost" type="button" aria-expanded={editing === v.name} aria-label={"Edit {{" + v.name + "}} description"} onClick={() => setEditing(editing === v.name ? null : v.name)}>{editing === v.name ? "Done" : "Edit"}</button>{" "}<button className="btn sm ghost" type="button" aria-label={"Delete {{" + v.name + "}}"} onClick={() => remove(v.name)}>Delete</button></td>
                 </tr>);
             })}</tbody>
           </table>}
