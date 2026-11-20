@@ -1,18 +1,18 @@
 // V3b Stack view (spec 5.7; DESIGN/v2 SCREENS V3, mockups/workflow-stack.html and -readonly.html) on the real /api/v2
 // (#109: step definitions, the draft, validate, publish), or the mock with ?mock=1 (mock/steps.ts mirrors V1). The step
-// words and problems come from the server's validate, asked again shortly after each change. Not here: drag to reorder and "+ Add step"
-// (V1 runs the preset's chain in its order), Test run (V5), History, Export, Open graph (V4).
+// words and problems come from the server's validate, asked again shortly after each change. Not here: drag to reorder
+// (W11's handle, behind a flag) and the graph's keyboard moves, Test run (V5), History, Export, Open graph (V4).
 import { PageHead } from "../PageHead";
-import { Component, createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { Component, Fragment, createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
-import { order } from "../mock/steps"; // the steps in running order: a property of the document, not data
+import { deleteNode, groupOf, insertAfter, moveNode, newNode, order } from "../stepEdits"; // the steps in running order: a property of the document, not data
 import { useData } from "../useData";
 import { getDraft, getLadder, getWorkflow, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
-import { Link, onLeave } from "../router";
+import { Link, navigate, onLeave } from "../router";
 import { Browse } from "../FolderPicker";
 import { listLibraries, shrunk } from "../libraryApi";
-import type { JSONSchema, Node, PublishPreview, StepDefinition, ValidationIssue, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
+import type { AddStep, ID, JSONSchema, Node, PublishPreview, StepDefinition, ValidationIssue, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
 
 // The step definitions and the server's words for each step of the document being edited.
 // libs: the folders of the libraries that use this workflow, for "Next to each library" (V5a).
@@ -224,7 +224,11 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
 
 // One row of the step list (clean pass W1): number, icon, name and summary, the switch or "Always on", the chevron.
 // Its options open under the row; on phones as a full-screen sheet with a back button (M5).
-function Step({ n, i, open, toggle, update, issues }: { n: Node; i: number; open: boolean; toggle: () => void; update: (n: Node) => void; issues: ValidationIssue[] }) {
+// W11: a step the server marks fixed (or any step, when the server sends no places) can't move or be deleted: a lock,
+// "Set place", and its More menu greyed out with the line below. The first and last steps have no menu.
+const FIXED_LINE = "The steps that convert run in a set order for now, so they can't be moved or deleted. To skip this step, turn it off.";
+type Move = { fixed: boolean; reason?: string; up: boolean; down: boolean; del: boolean; act: (w: "up" | "down" | "del") => void };
+function Step({ n, i, mv, open, toggle, update, issues }: { n: Node; i: number; mv: Move; open: boolean; toggle: () => void; update: (n: Node) => void; issues: ValidationIssue[] }) {
   const { stepDef, summary } = useReg(), def = stepDef(n.type), mine = issues.filter((x) => x.nodeId === n.id);
   const back = useRef<HTMLButtonElement>(null);
   useEffect(() => { if (open && matchMedia("(max-width:640px)").matches) back.current?.focus(); }, [open]);
@@ -237,14 +241,25 @@ function Step({ n, i, open, toggle, update, issues }: { n: Node; i: number; open
         <div className="sm muted">Its settings are kept as they are. {def ? def.description : "This version of the page doesn't know this step, so it only shows it."}</div></div>
       <span className="muted sm">Read-only</span></div></li>);
   const hasOptions = Object.values((def.configSchema.properties ?? {}) as Props).some((s) => !s.readOnly);
+  const end = n.type === "input.library" ? "first" : n.type === "output.commit" ? "last" : undefined, nm = n.name ?? def.name;
   return (
     <li className={"srow" + (open ? " open" : "")} aria-labelledby={n.id + "-name"}>
       <div className="sline">
-        <span className="stepn">{i + 1}</span><span className="sic"><Icon id={ICON[def.icon] ?? "i-box"} /></span>
+        <span className="stepn">{i + 1}</span>{!end && mv.fixed && <span className="lock" aria-hidden="true"><Icon id="i-lock" /></span>}<span className="sic"><Icon id={ICON[def.icon] ?? "i-box"} /></span>
         <div className="sp" title={(n.name ?? def.name) + ": " + summary(n)}><span className="snm" id={n.id + "-name"}>{n.name ?? def.name}</span> <span className="ssum">{summary(n)}</span></div>
         {mine.length > 0 && <span className="pill bad"><Icon id="i-alert" />{mine.length === 1 ? "1 problem" : mine.length + " problems"}</span>}
-        {def.alwaysOn ? <span className="muted sm nowrap">Always on</span>
-          : <input type="checkbox" role="switch" className="switch" aria-label={(def.name) + " on"} checked={n.enabled} onChange={(e) => update({ ...n, enabled: e.target.checked })} />}
+        {end ? <span className="muted sm nowrap">{end === "first" ? "Always first" : "Always last"}</span>
+          : def.alwaysOn ? <span className="muted sm nowrap">Always on</span>
+          : <>{mv.fixed && <span className="muted sm nowrap" title={mv.reason ?? FIXED_LINE}>Set place</span>}
+            <input type="checkbox" role="switch" className="switch" aria-label={(def.name) + " on"} checked={n.enabled} onChange={(e) => update({ ...n, enabled: e.target.checked })} /></>}
+        {!end && <details className="menu">
+          <summary className="btn icon ghost" id={n.id + "-more"} aria-label={"More for " + nm}><Icon id="i-more" /></summary>
+          <div className="pop" role="menu">
+            <button className="it" type="button" role="menuitem" aria-disabled={mv.up ? undefined : true} onClick={(e) => { (e.currentTarget.closest("details") as HTMLDetailsElement).open = false; if (mv.up) mv.act("up"); }}>Move up</button>
+            <button className="it" type="button" role="menuitem" aria-disabled={mv.down ? undefined : true} onClick={(e) => { (e.currentTarget.closest("details") as HTMLDetailsElement).open = false; if (mv.down) mv.act("down"); }}>Move down</button>
+            <button className="it" type="button" role="menuitem" aria-disabled={mv.del ? undefined : true} onClick={(e) => { (e.currentTarget.closest("details") as HTMLDetailsElement).open = false; if (mv.del) mv.act("del"); }}>Delete</button>
+            {mv.fixed && <><hr /><p className="hd" style={{ whiteSpace: "normal", maxWidth: 260 }}>{mv.reason ?? FIXED_LINE}</p></>}
+          </div></details>}
         {hasOptions ? <button className="btn icon ghost" type="button" aria-expanded={open} aria-controls={n.id + "-opts"} aria-label={"Options for " + def.name} onClick={toggle}><Icon id={open ? "i-chev-d" : "i-chev-r"} /></button>
           : <span className="chev-sp" />}
       </div>
@@ -284,6 +299,55 @@ export function WorkflowStack({ id }: { id: string }) {
   return <Guard><StackPage id={id} /></Guard>;
 }
 
+// W11, list side: the add-step menu. Every step type, grouped by kind. The server's addSteps says which can be added and
+// where; with no map, everything is off except what the workflow already has, and conditions open the graph instead.
+const CAT_VAR: Record<string, string> = { input: "input", filter: "condition", flow: "logic", video: "video", audio: "audio", subtitles: "subtitle", container: "files", verify: "inspect", output: "output" };
+function AddStepMenu({ wf, doc, defs, adds, onAdd, onClose }: { wf: string; doc: WorkflowDoc; defs: StepDefinition[]; adds?: Record<string, AddStep>; onAdd: (d: StepDefinition, after?: ID) => void; onClose: () => void }) {
+  const [q, setQ] = useState(""), [sel, setSel] = useState<string | null>(null);
+  const have = new Set(doc.nodes.map((n) => n.type));
+  const nameOf = (x?: ID) => { const n = doc.nodes.find((y) => y.id === x); return n ? (n.name ?? defs.find((d) => d.type === n.type)?.name ?? n.type) : "the step before"; };
+  const rows = defs
+    .filter((d) => !d.readOnly && !d.deprecated && (d.name + " " + d.description).toLowerCase().includes(q.trim().toLowerCase()))
+    .map((d) => {
+      const cond = d.outputs.some((o) => o.outcome === "branch"), a = adds?.[d.type];
+      const on = cond || (!have.has(d.type) && !!a?.addable);
+      const line = cond ? "Splits files by a rule. Opens the graph." : have.has(d.type) ? "Already in this workflow" : a?.addable ? "Goes after " + nameOf(a.after) : a?.reason || "Not available here yet.";
+      return { d, g: groupOf(d), on, line, after: a?.after };
+    })
+    .sort((x, y) => x.g.index - y.g.index); // stable: the registry's order inside a group
+  const on = rows.filter((r) => r.on).map((r) => r.d.type);
+  const cur = sel && on.includes(sel) ? sel : on[0] ?? null;
+  const pick = (r: (typeof rows)[number]) => { if (r.on) onAdd(r.d, r.after); };
+  const key = (e: { key: string; preventDefault: () => void }) => {
+    if (e.key === "Escape") return onClose();
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (on.length) { const i = cur ? on.indexOf(cur) : -1; setSel(on[(i + (e.key === "ArrowDown" ? 1 : -1) + on.length) % on.length]); }
+    }
+    if (e.key === "Enter") { e.preventDefault(); const r = rows.find((x) => x.d.type === cur); if (r) pick(r); }
+  };
+  return (
+    <section className="card" aria-label="Add a step"><div className="bd stack">
+      <label className="sr" htmlFor={wf + "-addq"}>Search steps</label>
+      <input id={wf + "-addq"} className="input" type="text" role="combobox" aria-expanded="true" aria-controls={wf + "-addlist"} aria-autocomplete="list"
+        aria-activedescendant={cur ? "add-" + cur : undefined} placeholder="Search steps" value={q} autoFocus
+        onChange={(e) => { setQ(e.target.value); setSel(null); }} onKeyDown={key} />
+      <ul id={wf + "-addlist"} role="listbox" aria-label="Steps you can add" style={{ listStyle: "none", margin: 0, padding: 0, maxHeight: 360, overflowY: "auto" }}>
+        {rows.length === 0 && <li role="presentation" className="muted sm">No step matches “{q}”.</li>}
+        {rows.map((r, k) => (
+          <Fragment key={r.d.type}>
+            {(k === 0 || rows[k - 1].g.title !== r.g.title) && <li role="presentation" className="addgrp">{r.g.title}</li>}
+            <li role="option" id={"add-" + r.d.type} aria-selected={r.d.type === cur} aria-disabled={r.on ? undefined : true}
+              className={"addrow" + (r.on ? "" : " off")} onClick={() => pick(r)} onMouseEnter={() => r.on && setSel(r.d.type)}>
+              <span className="addsq" style={{ background: "var(--cat-" + (CAT_VAR[r.d.category] ?? "files") + ")" }} aria-hidden="true" />
+              <span className="sp"><span className="snm">{r.d.name}</span> <span className="sm muted addline">{r.line}</span></span>
+            </li>
+          </Fragment>))}
+      </ul>
+      <div className="row" style={{ justifyContent: "flex-end" }}><button className="btn sm ghost" type="button" onClick={onClose}>Close</button></div>
+    </div></section>);
+}
+
 async function act<T>(p: Promise<Answer<T>>, say: (m: string) => void): Promise<T | null> {
   try { const r = await p; if (failed(r)) return (say(r.error.message), null); return r; } catch (e) { if (e instanceof SignedOut) return null; throw e; }
 }
@@ -304,11 +368,14 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
   // ?step=<node id>: that step starts open (the library's Output tab links here)
   const [open, setOpen] = useState<string | null>(() => new URLSearchParams(location.search).get("step")), [said, setSaid] = useState(""), [checked, setChecked] = useState(false);
   const [panel, setPanel] = useState<PublishPreview | null>(null), [renaming, setRenaming] = useState(false);
+  // W11 list side: the delete bar (Undo, 8 s), the add-step menu, and the button that opened it (focus goes back there)
+  const [gone, setGone] = useState<{ text: string; at: number } | null>(null), [hold, setHold] = useState(false), [addOpen, setAddOpen] = useState(false);
+  const opener = useRef<HTMLElement | null>(null);
   const doc = hist.docs[hist.at], dirty = doc !== saved;
   const all = useData(listLibraries, []), libs = (all.data ?? []).filter((l) => l.flowId === id).map((l) => l.path);
   // The server's words and problems for the document as it is now (nothing saved): asked 300 ms after a change.
   const ask = async (d: WorkflowDoc) => { const r = await act(validateDoc(id, d), setSaid); if (r) setLive(r); return r; };
-  const seen = useRef(first.workflow);
+  const seen = useRef<WorkflowDoc | null>(null); // null: the first check runs on load, so the list has the server's places and add rules
   useEffect(() => {
     if (doc === seen.current) return;
     seen.current = doc;
@@ -330,12 +397,37 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
-  const edit = (d: WorkflowDoc) => (setHist({ docs: [...hist.docs.slice(0, hist.at + 1), d], at: hist.at + 1 }), setChecked(false), setPanel(null), setSaid(""));
+  const edit = (d: WorkflowDoc) => (setHist({ docs: [...hist.docs.slice(0, hist.at + 1), d], at: hist.at + 1 }), setChecked(false), setPanel(null), setSaid(""), setGone(null));
   const update = (n: Node) => edit({ ...doc, nodes: doc.nodes.map((x) => (x.id === n.id ? n : x)) });
+  const defOf = (t: string) => defs.find((d) => d.type === t);
+  const nameOf = (x: Node) => x.name ?? defOf(x.type)?.name ?? x.type;
+  // the delete bar stays 8 s, and longer while it has focus or the pointer is on it
+  useEffect(() => { if (!gone || hold) return; const t = setTimeout(() => setGone(null), 8000); return () => clearTimeout(t); }, [gone, hold]);
+  const moveStep = (nid: ID, dir: -1 | 1) => {
+    const d = moveNode(doc, nid, dir), now = order(d), k = now.findIndex((x) => x.id === nid);
+    edit(d); setSaid(`Moved ${nameOf(now[k])} to step ${k + 1} of ${now.length}.`);
+  };
+  const deleteStep = (nid: ID) => {
+    const before = order(doc), i = before.findIndex((x) => x.id === nid), prev = before[i - 1], nxt = before[i + 1], gone0 = before[i];
+    edit(deleteNode(doc, nid));
+    setGone({ text: prev && nxt ? `Deleted ${nameOf(gone0)}. ${nameOf(prev)} now goes straight to ${nameOf(nxt)}.` : `Deleted ${nameOf(gone0)}.`, at: hist.at + 1 });
+    // focus goes to the next row's More button, or the previous row's when it was the last (never the input or the save row)
+    const to = [nxt, prev].find((x) => x && x.type !== "input.library" && x.type !== "output.commit");
+    if (to) requestAnimationFrame(() => document.getElementById(to.id + "-more")?.focus());
+  };
+  const undoGone = () => { if (gone) setHist({ ...hist, at: gone.at - 1 }); setGone(null); };
+  const addStep = (d: StepDefinition, after?: ID) => {
+    if (d.outputs.some((o) => o.outcome === "branch")) { navigate(`/workflows/${id}/graph?add=${encodeURIComponent(d.type)}`); return; }
+    const nid = "n" + Math.random().toString(36).slice(2, 8), next = insertAfter(doc, after, newNode(d, nid)), now = order(next);
+    edit(next); setOpen(nid); setAddOpen(false);
+    setSaid(`Added ${d.name} as step ${now.findIndex((x) => x.id === nid) + 1} of ${now.length}.`);
+  };
+  const openAdd = (e: { currentTarget: HTMLElement }) => { opener.current = e.currentTarget; setAddOpen(true); };
+  const closeAdd = () => { setAddOpen(false); requestAnimationFrame(() => opener.current?.focus()); };
   const save = async () => {
     const r = await act(saveDraft(id, doc, layout, etag), setSaid);
     if (!r) return null;
-    setEtag(r.etag); setSaved(doc); setLive({ issues: r.validation, stackable: r.stackable, stepSummaries: r.stepSummaries }); setSaid("Draft saved."); reloadMeta();
+    setEtag(r.etag); setSaved(doc); setLive((l) => ({ ...l, issues: r.validation, stackable: r.stackable, stepSummaries: r.stepSummaries })); setSaid("Draft saved."); reloadMeta();
     return r;
   };
   const openPublish = async () => { if (dirty && !(await save())) return; const p = await act(publishPreview(id), setSaid); if (p) setPanel(p); };
@@ -355,6 +447,7 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
     <button className="btn sm" type="button" disabled={!dirty} onClick={save}><Icon id="i-save" />Save draft</button>
   </>;
   const canStack = live.stackable;
+  const list = order(doc), total = list.length, tailOut = list[total - 1]?.type === "output.commit", lastMovable = total - 1 - (tailOut ? 1 : 0), only = total <= 1;
   return (
     <Reg.Provider value={{ defs, words: live.stepSummaries, libs }}>
     <div className="stack">
@@ -393,9 +486,24 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
             <button className="btn ghost" type="button" onClick={() => setPanel(null)}>Cancel</button></div>
         </div></section>)}
 
-      {canStack ? <ol className="steps">{order(doc).map((n, i) => (
-        <Step key={n.id} n={n} i={i} open={open === n.id} toggle={() => setOpen(open === n.id ? null : n.id)} update={update} issues={issues} />))}</ol>
-        : <ReadOnly doc={doc} id={id} />}
+      {canStack ? <>
+        {only && <div className="note"><Icon id="i-info" /><div className="stack" style={{ gap: 6 }}>
+          <strong>This workflow has no steps yet</strong>
+          <span>Every workflow starts with Library files: the videos from the libraries that use it. Add what should happen to them next.</span>
+          <div className="row"><button className="btn sm primary" type="button" autoFocus onClick={openAdd}><Icon id="i-plus" />Add the first step</button></div>
+        </div></div>}
+        <ol className="steps">{list.map((n, i) => {
+          // the server's places: no answer for a step means it's fixed. Moves stay inside the first and last steps.
+          const p = live.stepPlaces?.[n.id], fixed = p ? p.fixedPlace : true;
+          const mv: Move = { fixed, reason: p?.fixedReason, up: !fixed && i > 1 && i <= lastMovable, down: !fixed && i >= 1 && i < lastMovable, del: !fixed && i >= 1 && i <= lastMovable,
+            act: (w) => (w === "del" ? deleteStep(n.id) : moveStep(n.id, w === "up" ? -1 : 1)) };
+          return <Step key={n.id} n={n} i={i} mv={mv} open={open === n.id} toggle={() => setOpen(open === n.id ? null : n.id)} update={update} issues={issues} />;
+        })}</ol>
+        {!only && <button className="btn sm ghost" type="button" onClick={openAdd}><Icon id="i-plus" />Add step</button>}
+        {addOpen && <AddStepMenu wf={id} doc={doc} defs={defs} adds={live.addSteps} onAdd={addStep} onClose={closeAdd} />}
+        {gone && hist.at === gone.at && <div className="note" role="status" aria-live="polite" onPointerEnter={() => setHold(true)} onPointerLeave={() => setHold(false)} onFocus={() => setHold(true)} onBlur={() => setHold(false)}>
+          <Icon id="i-undo" /><span className="sp">{gone.text}</span><button className="btn sm ghost" type="button" onClick={undoGone}>Undo</button></div>}
+      </> : <ReadOnly doc={doc} id={id} />}
     </div>
     </Reg.Provider>);
 }
