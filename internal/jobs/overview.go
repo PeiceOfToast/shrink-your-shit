@@ -78,14 +78,16 @@ type Day struct {
 // a file counts once, on the day of its latest end. A still_changing look is not a skip (the file may still be
 // downloading), so it is no end. Same-second ties go to the job event.
 // restoredFlagSQL is 1 for a job event whose job was restored, else 0. A restored original is the original file
-// again: its done end counts as skipped (reason 'restored'), never as done, so it is the file's latest end.
+// again: its done end counts as skipped (reason 'restored'), never as done. When an older conversion of the same
+// file still stands (the newer one was restored), the restored end is dropped, so the older done stays the
+// file's latest end (review #431).
 var restoredFlagSQL = `CASE WHEN ` + notRestoredSQL("e.job_id") + ` THEN 0 ELSE 1 END`
 
 var latestEndsSQL = `WITH ends AS (SELECT at, CASE WHEN to_status='done' AND rs=1 THEN 'skipped' ELSE to_status END AS to_status, ROW_NUMBER() OVER (PARTITION BY pkey ORDER BY at DESC, seq DESC) AS rn FROM (
 SELECT e.at, e.to_status, e.seq, COALESCE(j.path, (SELECT json_extract(x.data, '$.path') FROM events x WHERE x.job_id=e.job_id AND json_extract(x.data, '$.path') IS NOT NULL ORDER BY x.seq DESC LIMIT 1), 'job:' || e.job_id) AS pkey, ` + restoredFlagSQL + ` AS rs
 FROM events e LEFT JOIN jobs j ON j.id=e.job_id WHERE e.kind='job' AND e.to_status IN ('done','skipped','cancelled','failed','kept')
 UNION ALL
-SELECT decided_at, 'skipped', 0, path, 0 FROM files WHERE ((decision LIKE 'skip: %' AND reason<>'still_changing') OR reason='unreadable') AND decided_at IS NOT NULL))
+SELECT decided_at, 'skipped', 0, path, 0 FROM files WHERE ((decision LIKE 'skip: %' AND reason<>'still_changing') OR reason='unreadable') AND decided_at IS NOT NULL) WHERE rs=0 OR NOT EXISTS (SELECT 1 FROM jobs j2 WHERE j2.path=pkey AND ` + convertedNow("j2") + `))
 `
 
 // Days are the last n days' totals, oldest first: files finished, files skipped (also stopped), files failed

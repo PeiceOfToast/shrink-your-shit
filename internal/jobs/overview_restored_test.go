@@ -172,7 +172,15 @@ func TestRestoringTheNewerConversionKeepsTheOlderOne(t *testing.T) {
 	if n := after["done count"]; n != 1 {
 		t.Errorf("done count after restoring the newer conversion = %v, want 1 (the older conversion)", n)
 	}
-	if reflect.DeepEqual(after, first) {
-		t.Error("restoring the newer conversion changed no count: the test would prove nothing")
+	for k := range first {
+		if !reflect.DeepEqual(after[k], first[k]) {
+			t.Errorf("%s after restoring the newer conversion = %+v, want %+v (as after the older one)", k, after[k], first[k])
+		}
+	}
+	// The file counts once, as the older conversion: the restored newer end is no skip of its own.
+	ends, err := s.JobEndsSince(since)
+	check(err)
+	if ends["skipped"] != 0 || ends["done"] != 1 {
+		t.Errorf("ends after restoring the newer conversion = %v, want done 1 and no skipped", ends)
 	}
 }
