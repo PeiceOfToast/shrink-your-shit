@@ -395,11 +395,13 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 }
 
 // gpuScale is the scale filter of the full graphics pipeline (frames stay on the device): QSV's keeps the frames'
-// format; VAAPI's also sets it, p010 for HDR and nv12 otherwise.
+// format; VAAPI's also sets it, p010 for HDR and nv12 otherwise. scale_qsv refuses w=-2 ("Size values less than
+// -1 are not acceptable"), so QSV's width is an expression: trunc(H*a/2)*2 keeps the aspect ratio and is even.
 func gpuScale(fam string, h int, hdr bool) string {
 	size := "w=-2:h=" + strconv.Itoa(h)
 	if fam != "vaapi" {
-		return "scale_qsv=" + size
+		hs := strconv.Itoa(h)
+		return "scale_qsv=w=trunc(" + hs + "*a/2)*2:h=" + hs
 	}
 	format := "nv12"
 	if hdr {
