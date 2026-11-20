@@ -105,11 +105,18 @@ export function VarInput({ id, title, value, wf, set }: { id: string; title: str
       setPick((p) => p && { ...p, active: Math.max(0, Math.min(items.length - 1, active + (e.key === "ArrowDown" ? 1 : -1))) });
       return true;
     }
-    if ((e.key === "Enter" || e.key === "Tab") && pick && items[active]) { e.preventDefault(); insert(items[active].name); return true; }
+    if ((e.key === "Enter" || (e.key === "Tab" && pick?.mode === "typed")) && pick && items[active]) { e.preventDefault(); insert(items[active].name); return true; }
     if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); return true; }
     return false;
   };
   const onFieldKey = (e: KeyboardEvent<HTMLInputElement>) => { if (pick?.mode === "typed") listKeys(e); };
+  // on a phone the sheet is modal: Tab moves between its search box and Close, and never leaves the sheet
+  const trap = (e: KeyboardEvent<HTMLDivElement>) => {
+    const close = e.currentTarget.querySelector<HTMLButtonElement>(".vp-close");
+    if (e.key !== "Tab" || !search.current || !close) return;
+    e.preventDefault();
+    (document.activeElement === search.current ? close : search.current).focus();
+  };
   const onFieldChange = (e: ChangeEvent<HTMLInputElement>) => {
     const nv = e.target.value, caret = e.target.selectionStart ?? nv.length, t = typedAt(nv, caret);
     set(nv);
@@ -155,7 +162,7 @@ export function VarInput({ id, title, value, wf, set }: { id: string; title: str
         <div aria-live="polite">{a.errors.map((m) => <span key={m} className="hint vp-err" style={{ color: "var(--error-text)" }}><Icon id="i-alert" />{m}</span>)}</div>
       </div>
       {pick && list && (
-        <div className={"vp " + (phoneSheet ? "vp-sheet" : "vp-pop")}>
+        <div className={"vp " + (phoneSheet ? "vp-sheet" : "vp-pop")} onKeyDown={phoneSheet ? trap : undefined}>
           {pick.mode === "button" && (
             <div className="vp-search">
               <input ref={search} className="input" role="combobox" aria-label="Search variables" aria-expanded aria-controls={uid + "-list"} autoComplete="off"
