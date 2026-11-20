@@ -50,13 +50,15 @@ type Env struct {
 	Lookup func(which string) (vals map[string]string, words string, err error)
 	// FB2c: tags on the job record; answers with the record's tags after the change.
 	Tag func(add, remove []string) ([]string, error)
-	// FB4: how a Wait card pauses (nil: time.Sleep) and what time it is (nil: time.Now). WaitDone says the
-	// queue brought the job back on schedule (a Wait's time came, or Convert again later's; the worker reads
-	// it off the job's return time), so a Wait until a time of day holds an attempt at most once and then
-	// lets it through (review2-548 P1). A fresh Retry by a person is a fresh attempt and waits again.
-	Sleep    func(d time.Duration) error
-	Now      func() time.Time
-	WaitDone bool
+	// FB4: how a Wait card pauses (nil: time.Sleep) and what time it is (nil: time.Now). ReturnedAt is when the
+	// queue was asked to bring the job back (its return time, read off the job after the claim; zero when it
+	// came another way): a Wait until a time of day whose own time that is lets the file through, so it holds
+	// an attempt at most once (review2-548 P1); a return from Convert again later is not its time, so it still
+	// holds. Retried says a person pressed Retry on the job: a waiting file is wanted now, and goes through.
+	Sleep      func(d time.Duration) error
+	Now        func() time.Time
+	ReturnedAt time.Time
+	Retried    bool
 }
 
 // WaitPrefix starts the words a Wait card puts on a job it sends back to the queue; the worker reads them
@@ -130,10 +132,6 @@ func run(c rules.Card, st *State, env Env) (Note, error) {
 	switch c.Type {
 	case workflow.TypeWait:
 		if u := strings.TrimSpace(str("until", "")); u != "" {
-			if env.WaitDone { // the file came back because this wait's time came: through it goes
-				n.Words = "Waited until " + u + ": the file came back as asked"
-				return n, nil
-			}
 			now := time.Now()
 			if env.Now != nil {
 				now = env.Now()
@@ -142,10 +140,15 @@ func run(c rules.Card, st *State, env Env) (Note, error) {
 			if err != nil {
 				return n, errors.New("the time must read like 02:00")
 			}
-			at := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, now.Location())
-			if !at.After(now) {
-				at = at.Add(24 * time.Hour)
+			if env.Retried { // a person pressed Retry: they want the file now
+				n.Words = "Not waiting until " + u + ": the file was retried by hand"
+				return n, nil
 			}
+			if r := env.ReturnedAt; !r.IsZero() && r.In(now.Location()).Format("15:04") == u { // this wait's own time came
+				n.Words = "Waited until " + u + ": the file came back as asked"
+				return n, nil
+			}
+			at := NextTimeOfDay(now, t.Hour(), t.Minute())
 			return n, &Later{At: at, Words: WaitPrefix + u + " as the workflow asks"}
 		}
 		secs := 0
@@ -511,4 +514,16 @@ func quoteOr(s, empty string) string {
 		return empty
 	}
 	return quote(s)
+}
+
+// NextTimeOfDay is the next HH:MM after now in now's location: today's if still ahead, else tomorrow's by
+// calendar date, so a clock change keeps the wall-clock time (review-548: +24h drifted an hour across one).
+func NextTimeOfDay(now time.Time, hour, minute int) time.Time {
+	loc := now.Location()
+	at := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, loc)
+	if !at.After(now) {
+		d := now.AddDate(0, 0, 1)
+		at = time.Date(d.Year(), d.Month(), d.Day(), hour, minute, 0, 0, loc)
+	}
+	return at
 }

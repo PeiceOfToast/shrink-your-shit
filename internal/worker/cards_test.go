@@ -454,15 +454,26 @@ func TestConvertAgainLaterAndWaitUntil(t *testing.T) {
 	// the file is converted; it is not sent to tomorrow again. The queue's way of bringing it back is RetryLater
 	// with the wait's words on the job, which the worker reads; here that return is made by hand, as the queue
 	// would at 02:00.
-	if err := s2.store.RetryNow(j2.ID); err != nil { // "Retry now": the waiting job may be taken at once
-		t.Fatal(err)
+	backAt := func(at time.Time) { // the queue brings the file back at that time, as RetryLater had asked
+		if err := s2.store.RetryNow(j2.ID); err != nil {
+			t.Fatal(err)
+		}
+		if j, err := s2.store.Claim("x"); err != nil || j.ID != j2.ID {
+			t.Fatalf("claim: %+v %v", j, err)
+		}
+		if err := s2.store.RetryLater(j2.ID, at, jobs.ReasonRetryLater, flow.WaitPrefix+"02:00 as the workflow asks"); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if j, err := s2.store.Claim("x"); err != nil || j.ID != j2.ID {
-		t.Fatalf("claim: %+v %v", j, err)
+	// back at another time (as Convert again later would bring it): the Wait still holds it (review-548 item 5)
+	backAt(time.Now().Add(-time.Minute))
+	w2.RunOne(context.Background())
+	if j := s2.job(); j.Status != jobs.Queued || !strings.HasPrefix(j.Error, flow.WaitPrefix) {
+		t.Errorf("back at another time: %s %q", j.Status, j.Error)
 	}
-	if err := s2.store.RetryLater(j2.ID, time.Now().Add(-time.Minute), jobs.ReasonRetryLater, flow.WaitPrefix+"02:00 as the workflow asks"); err != nil {
-		t.Fatal(err)
-	}
+	// back at its own time: through it goes and the file is converted
+	y := time.Now().AddDate(0, 0, -1)
+	backAt(time.Date(y.Year(), y.Month(), y.Day(), 2, 0, 0, 0, time.Local))
 	if _, err := w2.RunOne(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -472,5 +483,23 @@ func TestConvertAgainLaterAndWaitUntil(t *testing.T) {
 	if !noteOnTimeline(s2, "came back as asked") {
 		steps, _ := s2.store.Steps(j2.ID)
 		t.Errorf("timeline after the wait: %+v", steps)
+	}
+	// a person's Retry now on a waiting file: wanted now, converted (review-548 item 6)
+	s5 := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
+	w5 := s5.worker(Beside)
+	w5.Template = func(jobs.Job) (rules.Template, error) { return tm2, nil }
+	w5.RunOne(context.Background())
+	if j := s5.job(); j.Status != jobs.Queued {
+		t.Fatalf("first run: %s", j.Status)
+	}
+	if err := s5.store.RetryNow(s5.id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w5.RunOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if j := s5.job(); j.Status != jobs.Done || !noteOnTimeline(s5, "retried by hand") {
+		steps, _ := s5.store.Steps(s5.id)
+		t.Errorf("retried by hand: %s %q %+v", j.Status, j.Error, steps)
 	}
 }

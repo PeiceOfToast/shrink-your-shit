@@ -393,10 +393,21 @@ func TestWaitCard(t *testing.T) {
 	if !errors.As(err, &later) || !later.At.Equal(time.Date(2026, 11, 21, 2, 0, 0, 0, time.Local)) {
 		t.Errorf("until tomorrow: %v", err)
 	}
-	done := env
-	done.WaitDone = true // the file is back because the wait's time came: the same card lets it through (review2-548 P1)
-	if notes, err := Before([]rules.Card{{NodeID: "w", Type: workflow.TypeWait, Name: "Wait", Config: map[string]any{"until": "02:00"}}}, st, done); err != nil || !strings.Contains(notes[0].Words, "came back as asked") {
+	wait := rules.Card{NodeID: "w", Type: workflow.TypeWait, Name: "Wait", Config: map[string]any{"until": "02:00"}}
+	own := env
+	own.ReturnedAt = time.Date(2026, 11, 21, 2, 0, 0, 0, time.Local) // the file is back because this wait's time came: through it goes (review2-548 P1)
+	if notes, err := Before([]rules.Card{wait}, st, own); err != nil || !strings.Contains(notes[0].Words, "came back as asked") {
 		t.Errorf("after the wait: %v %+v", err, notes)
+	}
+	other := env
+	other.ReturnedAt = time.Date(2026, 11, 21, 1, 30, 0, 0, time.Local) // back from Convert again later: not this wait's time, so it still holds (review-548 item 5)
+	if _, err := Before([]rules.Card{wait}, st, other); !errors.As(err, &later) {
+		t.Errorf("another return time: %v", err)
+	}
+	retried := env
+	retried.Retried = true // a person pressed Retry on the waiting file: wanted now (review-548 item 6)
+	if notes, err := Before([]rules.Card{wait}, st, retried); err != nil || !strings.Contains(notes[0].Words, "retried by hand") {
+		t.Errorf("retried: %v %+v", err, notes)
 	}
 	if _, err := Before([]rules.Card{{NodeID: "w", Type: workflow.TypeWait, Name: "Wait", Config: map[string]any{"until": "25:99"}}}, st, env); err == nil || errors.As(err, &later) {
 		t.Errorf("a bad time: %v", err)
@@ -407,5 +418,32 @@ func TestWaitCard(t *testing.T) {
 	cut := Env{Sleep: func(time.Duration) error { return errors.New("the wait was cut short") }}
 	if _, err := Before([]rules.Card{{NodeID: "w", Type: workflow.TypeWait, Name: "Wait", Config: map[string]any{"seconds": float64(5)}}}, st, cut); err == nil || !strings.Contains(err.Error(), "cut short") {
 		t.Errorf("cut short: %v", err)
+	}
+}
+
+// review-548 item 4: the next time of day is by calendar date in the location, so a clock change keeps the
+// wall-clock time: across the spring and autumn changes in Europe/London, "until 02:30" is 02:30 local the next
+// day, not an hour early or late.
+func TestNextTimeOfDayAcrossClockChanges(t *testing.T) {
+	london, err := time.LoadLocation("Europe/London")
+	if err != nil {
+		t.Skip(err)
+	}
+	for _, eve := range []time.Time{time.Date(2026, 3, 28, 22, 0, 0, 0, london), time.Date(2026, 10, 24, 22, 0, 0, 0, london)} {
+		at := NextTimeOfDay(eve, 2, 30)
+		if at.Hour() != 2 || at.Minute() != 30 || at.Day() != eve.Day()+1 || at.Location() != london {
+			t.Errorf("from %s: %s", eve, at)
+		}
+		env := Env{Now: func() time.Time { return eve }}
+		_, err := Before([]rules.Card{{NodeID: "w", Type: workflow.TypeWait, Name: "Wait", Config: map[string]any{"until": "02:30"}}}, &State{Vars: map[string]string{}}, env)
+		var later *Later
+		if !errors.As(err, &later) || later.At.In(london).Format("2006-01-02 15:04") != eve.AddDate(0, 0, 1).Format("2006-01-02")+" 02:30" {
+			t.Errorf("the card from %s: %v", eve, err)
+		}
+	}
+	// still ahead today: today's
+	now := time.Date(2026, 3, 29, 1, 0, 0, 0, london)
+	if at := NextTimeOfDay(now, 2, 30); at.Day() != 29 || at.Hour() != 2 || at.Minute() != 30 {
+		t.Errorf("later today: %s", at)
 	}
 }
