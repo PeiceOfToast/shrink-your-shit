@@ -364,6 +364,10 @@ func TestTagCard(t *testing.T) {
 	if _, err := Before([]rules.Card{empty}, st, env); err == nil || !strings.Contains(err.Error(), "nothing to add or remove") {
 		t.Errorf("nothing: %v", err)
 	}
+	onlyMissing := rules.Card{NodeID: "t", Type: workflow.TypeTag, Name: "Tag", Config: map[string]any{"add": "{{missing}}"}}
+	if _, err := Before([]rules.Card{onlyMissing}, st, env); err == nil || !strings.Contains(err.Error(), "{{missing}} had no value") { // review2-542 P3d
+		t.Errorf("only a missing variable: %v", err)
+	}
 	if _, warnings := After([]rules.Card{card}, st, env); len(warnings) != 0 || st.Vars["tags"] != "converted, remux" {
 		t.Errorf("after the save too: %v", warnings)
 	}

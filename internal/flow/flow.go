@@ -114,6 +114,9 @@ func run(c rules.Card, st *State, env Env) (Note, error) {
 		add, remove := rules.CleanTags(addText), rules.CleanTags(removeText)
 		n.Empty = append(empty, more...)
 		if len(add) == 0 && len(remove) == 0 {
+			if len(n.Empty) > 0 { // review2-542 P3d: say which name was empty
+				return n, errors.New("nothing to add or remove: {{" + strings.Join(n.Empty, "}}, {{") + "}} had no value")
+			}
 			return n, errors.New("nothing to add or remove")
 		}
 		if env.Tag == nil { // review-542: a store without tags yet: say so and go on, the run is not the card's to stop

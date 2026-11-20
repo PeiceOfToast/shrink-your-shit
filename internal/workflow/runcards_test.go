@@ -569,4 +569,27 @@ func TestTagCards(t *testing.T) {
 	if !Validate(d).Errors() {
 		t.Error("an empty tag question should be refused")
 	}
+	// review2-542 P2: a Tag card with nothing to add or remove (or only separators) is refused at publish, naming
+	// the field, and its summary never reads "Adds "
+	ask.Config = map[string]any{"tags": "remux"}
+	d.Nodes[len(d.Nodes)-2] = ask
+	for _, cfg := range []map[string]any{{}, {"add": " , "}, {"add": "", "remove": ", ,"}} {
+		tag.Config = cfg
+		d.Nodes[len(d.Nodes)-4] = tag
+		r := Validate(d)
+		if !hasIssue(r.Issues, "invalid_config", tag.ID) {
+			t.Errorf("%v: an empty Tag card should be refused: %+v", cfg, r.Issues)
+		}
+		if s := r.StepSummaries[tag.ID]; strings.HasPrefix(s, "Adds ") {
+			t.Errorf("%v: summary %q", cfg, s)
+		}
+	}
+	// review2-542 P3a: the limits the description names are the ones the code keeps
+	if rules.MaxTags != 20 || rules.MaxTagLen != 40 {
+		t.Errorf("limits: %d tags of %d", rules.MaxTags, rules.MaxTagLen)
+	}
+	def, _ := Definition(TypeTag)
+	if !strings.Contains(def.Description, "40 characters") || !strings.Contains(def.Description, "at most 20 tags") {
+		t.Errorf("the description names other limits: %q", def.Description)
+	}
 }

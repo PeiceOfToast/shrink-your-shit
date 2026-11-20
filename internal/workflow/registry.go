@@ -389,7 +389,7 @@ func Definitions() []StepDefinition {
 				"value": templated(described(map[string]any{"type": "string", "title": "Value", "maxLength": 1000, "x-placeholder": "{{title}} ({{resolution}})"}, "A value, or a template of other variables, like {{title}} ({{resolution}}).")),
 			}, []string{"name"})}),
 		def(StepDefinition{Type: TypeTag, RunsAs: RunsAction, Category: "flow", Name: "Tag the file", Icon: "tag", TypeLabel: "Action",
-			Description: "Adds or removes tags on the file's record. Jobs shows them, and a 'Has a tag' step can ask about them later. Variables are filled in. Sets {{tags}} to what the record carries after this step. A tag is cut at 40 characters; a record carries at most 20 tags, so adds past that are left off (the log says so).",
+			Description: "Adds or removes tags on the file's record. Jobs shows them, and a 'Has a tag' step can ask about them on a later run. Variables are filled in. Sets {{tags}} to what the record carries after this step. A tag is cut at 40 characters; a record carries at most 20 tags, so adds past that are left off (the log says so).",
 			Inputs:      []Port{in}, Outputs: []Port{success}, SideEffects: "none",
 			Publishes: []Published{{Name: "tags", Type: "string", Words: "The file's tags after this step, separated by commas"}},
 			ConfigSchema: object(map[string]any{

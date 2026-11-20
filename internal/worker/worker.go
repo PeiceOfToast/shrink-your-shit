@@ -2417,12 +2417,16 @@ func (w *Worker) tagger(id int64) func(add, remove []string) ([]string, error) {
 	return func(add, remove []string) ([]string, error) { return t.SetJobTags(id, add, remove) }
 }
 
-// jobTags are the record's tags for the facts, empty when the store has none.
+// jobTags are the record's tags for the facts, empty when the store has none. A read that fails is said in
+// the job log (review2-542 P3b), since a tag question would otherwise answer No for every file in silence.
 func (w *Worker) jobTags(id int64) []string {
 	if t, ok := w.Queue.(JobTagger); ok {
-		if tags, err := t.JobTags(id); err == nil {
-			return tags
+		tags, err := t.JobTags(id)
+		if err != nil {
+			w.jobNote(id, secEncode, jobs.LevelWarning, "the file's tags could not be read (%v); a tag question answers as if there were none", err)
+			return nil
 		}
+		return tags
 	}
 	return nil
 }

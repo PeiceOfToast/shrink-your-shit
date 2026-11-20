@@ -250,6 +250,9 @@ func Validate(d Doc) Result {
 		for _, i := range checkConfig(n, def) {
 			add(i)
 		}
+		if n.Type == TypeTag && len(rules.CleanTags(strOf(n.Config, "add", ""))) == 0 && len(rules.CleanTags(strOf(n.Config, "remove", ""))) == 0 { // review2-542 P2: an empty card would fail every job
+			add(Issue{Code: "invalid_config", NodeID: n.ID, ConfigPath: "/add", Field: "add", Message: "In '" + nodeName(n) + "', name a tag to add or one to remove."})
+		}
 		if n.Type == TypeCheckName && strOf(n.Config, "match", "contains") == "regex" { // review2-531 P3: a pattern that can't compile would answer No for every file
 			if _, err := regexp.Compile(strOf(n.Config, "pattern", "")); err != nil {
 				add(Issue{Code: "invalid_config", NodeID: n.ID, ConfigPath: "/pattern", Field: "pattern",
@@ -616,15 +619,16 @@ func summary(n Node) string {
 	case TypeCheckTag:
 		return "Only if the file has " + map[string]string{"all": "all of", "none": "none of"}[strOf(c, "tagOp", "any")] + map[bool]string{true: "any of", false: ""}[strOf(c, "tagOp", "any") == "any" || strOf(c, "tagOp", "") == ""] + " the tags " + strOf(c, "tags", "")
 	case TypeTag:
-		add, remove := strOf(c, "add", ""), strOf(c, "remove", "")
+		add, remove := strings.Join(rules.CleanTags(strOf(c, "add", "")), ", "), strings.Join(rules.CleanTags(strOf(c, "remove", "")), ", ")
 		switch {
 		case add != "" && remove != "":
 			return "Adds " + add + "; removes " + remove
 		case remove != "":
 			return "Removes " + remove
-		default:
+		case add != "":
 			return "Adds " + add
 		}
+		return "Nothing to add or remove yet"
 	case TypeSetVariable:
 		return "Set {{" + strOf(c, "name", "") + "}} = “" + strOf(c, "value", "") + "”"
 	case TypeNote:
