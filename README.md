@@ -25,7 +25,7 @@ catches a damaged download, not a compromised release), installs ffmpeg if you d
 sets the program up as a service that starts on boot, starts it, and prints the web address.
 Run the same line again later to upgrade; your settings are kept. It uses `sudo` on Linux
 and tells you when it does; on macOS it installs for your user only (no sudo).
-The app can check GitHub once a day for a newer release and show a notice. That check is off until you turn it on in Settings; with it off, the app sends nothing anywhere.
+The app can check GitHub once a day for a newer release and show a notice. The check is on by default; turn it off in Settings and the app sends nothing anywhere. Only stable releases are offered.
 
 Point it at your videos, and (on a server you will open from another computer) let the
 network in. Other machines then sign in with an access token; the installer ends by printing an

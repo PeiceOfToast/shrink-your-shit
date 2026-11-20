@@ -41,7 +41,7 @@ func updateServer(t *testing.T, latest string) (srv *httptest.Server, ss *settin
 	if err != nil {
 		t.Fatal(err)
 	}
-	on := true // checks start off; these tests turn them on as the person would
+	on := true // set explicitly, so these tests do not depend on the default
 	s.CheckForUpdates = &on
 	if err := ss.save(s); err != nil {
 		t.Fatal(err)
@@ -169,12 +169,38 @@ func TestUpdateOffMakesNoRequest(t *testing.T) {
 	}
 }
 
-// Checks are off until the person turns them on: on a fresh install, and for settings saved before the switch existed.
-func TestUpdateChecksStartOff(t *testing.T) {
-	if defaultSettings().UpdateChecks() {
-		t.Error("a fresh install has update checks on; they must start off")
+// Checks are on unless the person turns them off: a fresh install, settings with no checkForUpdates, and an
+// explicit null all read as on. Only an explicit false is off.
+func TestUpdateChecksStartOn(t *testing.T) {
+	if !defaultSettings().UpdateChecks() {
+		t.Error("a fresh install has update checks off; they must start on")
 	}
-	if (Settings{}).UpdateChecks() {
-		t.Error("settings saved without checkForUpdates read as on; they must read as off")
+	if !(Settings{}).UpdateChecks() {
+		t.Error("settings with no checkForUpdates read as off; they must read as on")
+	}
+	off, on := false, true
+	if (Settings{CheckForUpdates: &off}).UpdateChecks() {
+		t.Error("an explicit false must stay off")
+	}
+	if !(Settings{CheckForUpdates: &on}).UpdateChecks() {
+		t.Error("an explicit true must be on")
+	}
+}
+
+// A fresh install's settings page says checks are on, and GET does not need a saved value to say so.
+func TestFreshInstallShowsChecksOn(t *testing.T) {
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	a, _, _ := OpenAccess(t.TempDir(), false)
+	mux := http.NewServeMux()
+	settingsRoutes(mux, &settingsStore{store: st}, a, Engine{Version: "0.1.1"})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	_, settings := getJSON(t, srv.URL+"/api/settings")
+	if settings["checkForUpdates"] != true {
+		t.Errorf("fresh install: checkForUpdates %v, want true", settings["checkForUpdates"])
 	}
 }

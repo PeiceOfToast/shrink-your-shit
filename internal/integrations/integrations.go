@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -718,6 +719,10 @@ func unreached(ki kindInfo, base string, err error, tail string) string {
 	host := "the server"
 	if u != nil && u.Host != "" {
 		host = u.Host
+	}
+	var ce *tls.CertificateVerificationError
+	if errors.As(err, &ce) {
+		return fmt.Sprintf("Could not make a secure connection to %s (certificate check failed)%s.", host, tail)
 	}
 	return fmt.Sprintf("Could not reach %s%s.", host, tail)
 }

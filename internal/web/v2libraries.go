@@ -88,6 +88,15 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine, libTotals *l
 				scan["nextScanAt"] = t.UTC().Format(time.RFC3339)
 			}
 		}
+		reachable := freeBytes(l.Path) != nil // time-limited: a hung network mount can't stall the list
+		writable, unwritable := true, ""
+		// time-limited and cached like freeBytes: a slow folder can't stall the list, and an unanswered one is not "read-only"
+		if reachable {
+			if w, known := canWriteTimed(l.Path); known && !w {
+				writable = false
+				unwritable = "Can't write to this folder: " + l.Path + ". Change its owner/permissions."
+			}
+		}
 		status := "ok"
 		pausedBy := sharePausedBy(store, l) // D4b: a share's outage; the person's own pause stays "disabled"
 		switch {
@@ -95,7 +104,7 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine, libTotals *l
 			status = "disabled"
 		case pausedBy != nil:
 			status = "paused_share"
-		case freeBytes(l.Path) == nil: // time-limited: a hung network mount can't stall the list
+		case !reachable:
 			status = "path_missing"
 		case isScanning:
 			status = "scanning"
@@ -113,6 +122,9 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine, libTotals *l
 			"discovery": map[string]any{"subfolders": true, "settleSeconds": int(eng.Settle.Seconds()), "followLinks": false,
 				"include": []string{}, "exclude": []string{}, "scanEverySeconds": int(every.Seconds())},
 			"status": status, "pausedBy": pausedBy,
+			// writable is false when the app can't write the folder (the doctor's access check); unwritableMessage
+			// says so for the Libraries screen, and is "" when writable.
+			"writable": writable, "unwritableMessage": unwritable,
 		}, nil
 	}
 	one := func(w http.ResponseWriter, id int64, code int) {

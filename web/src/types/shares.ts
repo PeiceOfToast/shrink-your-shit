@@ -41,7 +41,7 @@ export interface ShareTestResult {
   address?: string;
   code?: string;
   message?: string;
-  folders?: string[];
+  folders?: string[] | null; // null from a share with no folders (bug 11-19 23:00Z)
   moreFolders?: number;
   portOnly?: boolean;
   shares?: string[];

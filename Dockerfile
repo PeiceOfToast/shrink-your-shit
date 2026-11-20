@@ -25,8 +25,9 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -
 FROM debian:trixie-slim
 # Debian 13 (trixie), not Alpine: Quick Sync on Tiger Lake and newer needs the Intel GPU runtime
 # (libmfx-gen), which Alpine does not package. The three Intel packages are amd64 only; arm64 gets ffmpeg alone.
+# ca-certificates: without it every https call (Discord, webhooks, the update check, Jellyfin/Plex) fails.
 RUN set -eux; \
-    pkgs="ffmpeg wget nfs-common cifs-utils"; \
+    pkgs="ffmpeg wget ca-certificates nfs-common cifs-utils"; \
     if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
         sed -i 's/^Components: main$/Components: main non-free/' /etc/apt/sources.list.d/debian.sources; \
         pkgs="$pkgs libvpl2 libmfx-gen1.2 intel-media-va-driver-non-free"; \
@@ -35,8 +36,8 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends $pkgs; \
     rm -rf /var/lib/apt/lists/*; \
     useradd -u 1000 -m syp; \
-    mkdir -p /config /media /mnt /var/lib/syp/shares; \
-    chown syp /config /media
+    mkdir -p /config /mnt /var/lib/syp/shares; \
+    chown syp /config
 COPY --from=build /out/shrink-your-shit /usr/local/lib/shrink-your-shit/shrink-your-shit
 # docker exec runs as root; this wrapper runs the app as syp so token/doctor/restore see what the app sees
 # and never leave root-owned files in /config.
@@ -49,7 +50,8 @@ COPY run-as-syp.sh /usr/local/bin/run-as-syp
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh /usr/local/bin/run-as-syp
 
-# /config holds the database, /media is the library folder. The web UI must listen on
+# /config holds the database. Libraries are added on the web page (a mounted folder or a network share);
+# the image adds none by itself, so no media folder is needed. The web UI must listen on
 # all addresses inside the container; publish the port only to machines you trust.
 # The container starts as root only so the entrypoint can run the network-share helper; the app
 # then runs as syp (uid 1000). Do not set USER here.
@@ -58,7 +60,6 @@ RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh /usr/local/bin/run-as-syp
 ENV SYP_DATA=/config \
     HOME=/config \
     SYP_INSTALL=docker \
-    SYP_LIBRARIES=/media \
     SYP_ADDR=0.0.0.0:8484
 VOLUME ["/config"]
 EXPOSE 8484

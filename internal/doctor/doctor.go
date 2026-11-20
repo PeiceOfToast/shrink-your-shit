@@ -100,6 +100,9 @@ type Checker struct {
 	// KnownOriginals are the kept originals the database knows (jobs.Store.KnownOriginals); nil: the
 	// check for orphaned ones is skipped (no database at hand).
 	KnownOriginals func() (map[string]bool, error)
+	// WaitsForShare reports a library folder on a saved share that is not connected yet: its orphans are not
+	// listed until it is (nil: every library is checked).
+	WaitsForShare func(path string) bool
 	// JobOutput is jobs.Store.OutputOfJob: it tells a file Convert again moved aside from a real orphan
 	// (nil: every orphan gets the orphan wording).
 	JobOutput func(id int64) (string, bool, error)
@@ -473,7 +476,7 @@ func (c *Checker) Folder(ctx context.Context, path string) (r FolderReport) {
 	}
 	// Messages here are shown as they are in first-run: plain words only (DESIGN/ACCEPTANCE.md COPY-1,
 	// FIRST-RUN.md "States and errors"). The health report's details may be technical.
-	if c.KnownOriginals != nil {
+	if c.KnownOriginals != nil && (c.WaitsForShare == nil || !c.WaitsForShare(path)) {
 		if known, err := c.KnownOriginals(); err == nil {
 			var moved []string
 			for _, o := range OrphanedOriginals(path, known, c.JobOutput) {
@@ -515,6 +518,10 @@ func writeProbe(dir string) error {
 	f.Close()
 	return os.Remove(name)
 }
+
+// CanWrite reports whether the program can write a file in dir: the library access check's own probe, so
+// the libraries list and the doctor agree.
+func CanWrite(dir string) bool { return writeProbe(dir) == nil }
 
 // ReadOnlyMessage is design's read-only copy (FIRST-RUN.md) followed by how to make the folder
 // writable for the user the program runs as, on this system: the Linux service runs as "syp", the

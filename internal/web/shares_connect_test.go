@@ -50,7 +50,7 @@ func TestWinMountReasonCodes(t *testing.T) {
 			Code    string `json:"code"`
 			Message string `json:"message"`
 		}
-		reason := winMountReason(&winError{Code: c.code, Words: "system words"})
+		reason := winMountReason("nas.example.com", &winError{Code: c.code, Words: "system words"})
 		if err := json.Unmarshal([]byte(reason), &r); err != nil {
 			t.Fatalf("error %d: reason is not JSON: %v", c.code, err)
 		}
@@ -62,6 +62,37 @@ func TestWinMountReasonCodes(t *testing.T) {
 		}
 		if c.want == "mount_failed" && !strings.Contains(r.Message, "system words") {
 			t.Errorf("error %d: the system's words are missing: %q", c.code, r.Message)
+		}
+	}
+}
+
+// The Windows connect reasons for a bare computer name and a dotted name: the bare name gets the IP-address
+// hint, the dotted name keeps its text, and a refused logon names the server.
+func TestWinMountReasonMessages(t *testing.T) {
+	cases := []struct {
+		name, server string
+		code         uint32
+		want         string
+	}{
+		{"bare name not found", "DESKTOP-ABC123", 53,
+			"Can't find a computer called DESKTOP-ABC123. A Windows computer name often can't be found from here; use its IP address instead (on that PC, run ipconfig and use the IPv4 Address)."},
+		{"dotted name not found", "nas.example.com", 53, "The server could not be found on the network."},
+		{"IP address not found", "192.168.1.20", 53, "The server could not be found on the network."},
+		{"bare name refused", "DESKTOP-ABC123", 1326,
+			"The username or password was refused. Use an account on DESKTOP-ABC123: for a Windows PC, the user name and password you sign in to it with. Sharing with Everyone still needs an account, because Windows turns guest access off."},
+		{"dotted name refused", "nas.example.com", 86,
+			"The username or password was refused. Use an account on nas.example.com: for a Windows PC, the user name and password you sign in to it with. Sharing with Everyone still needs an account, because Windows turns guest access off."},
+	}
+	for _, c := range cases {
+		var r struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(winMountReason(c.server, &winError{Code: c.code, Words: "system words"})), &r); err != nil {
+			t.Fatalf("%s: reason is not JSON: %v", c.name, err)
+		}
+		if r.Message != c.want {
+			t.Errorf("%s: message\n got %q\nwant %q", c.name, r.Message, c.want)
 		}
 	}
 }

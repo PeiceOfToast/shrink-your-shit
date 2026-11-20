@@ -98,8 +98,13 @@ func (s *Store) setOriginal(id int64, set string, args ...any) error {
 	if n, _ := res.RowsAffected(); n != 1 {
 		return ErrNotFound
 	}
+	s.swapChanges.Add(1)
 	return nil
 }
+
+// SwapChanges counts this process's changes of an original's state (a restore, a purge...). They write
+// no event, yet a restored file stops counting as converted, so the overview's caches key on this too.
+func (s *Store) SwapChanges() int64 { return s.swapChanges.Load() }
 
 const originalCols = `id,job_id,COALESCE(library_id,0),path,trash,staged,original_bytes,original_mtime,original_hash,new_bytes,new_mtime,new_hash,state,started,COALESCE(kept_at,''),COALESCE(delete_on,''),aside,new_path`
 
