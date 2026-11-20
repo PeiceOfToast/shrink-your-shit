@@ -213,3 +213,78 @@ func TestV2TemplatesPublishCheckAndSecrets(t *testing.T) {
 		t.Errorf("title's fields %v, api_key's value %v; want no fields, and no value for the secret", byName["title"].Fields, byName["api_key"].Value)
 	}
 }
+
+// A secret in a {{name}} field is refused at Publish (ui-shop row 99dc819c), with the shape the other
+// template refusals use. A draft still saves it, with the issue its save-time check reports, like
+// every other {{name}} problem — so the secret must not reach a run.
+func TestASecretInATemplateStopsPublish(t *testing.T) {
+	srv, _, _, _ := libServer(t, false)
+	_, body := post(t, srv, "POST", "/api/v2/workflows", `{"name":"Secret name"}`)
+	id := decode[map[string]any](t, body)["id"].(string)
+
+	getDraft := func() v2Rev {
+		t.Helper()
+		code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/workflows/" + id + "/draft"})
+		if code != 200 {
+			t.Fatalf("draft: %d %s", code, body)
+		}
+		return decode[v2Rev](t, body)
+	}
+	put := func(d v2Rev) (int, string) {
+		t.Helper()
+		b, _ := json.Marshal(map[string]any{"workflow": d.Workflow, "layout": d.Layout})
+		req, _ := http.NewRequest("PUT", srv.URL+"/api/v2/workflows/"+id+"/draft", strings.NewReader(string(b)))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("If-Match", d.Etag)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var sb strings.Builder
+		buf := make([]byte, 1<<16)
+		for {
+			n, err := res.Body.Read(buf)
+			sb.Write(buf[:n])
+			if err != nil {
+				break
+			}
+		}
+		return res.StatusCode, sb.String()
+	}
+
+	d := getDraft()
+	d.Workflow.Variables = []workflow.Variable{{Name: "api_key", Type: "secret", Value: "s3cret"}}
+	for i := range d.Workflow.Nodes {
+		if d.Workflow.Nodes[i].Type == workflow.TypeCommit {
+			d.Workflow.Nodes[i].Config["outputName"] = "{{api_key}}.mkv"
+		}
+	}
+	// the draft saves, as a draft with any other template problem does
+	if code, body := put(d); code != 200 {
+		t.Fatalf("put: %d %s", code, body)
+	}
+	// the check the page runs while saving says what is wrong...
+	b, _ := json.Marshal(map[string]any{"workflow": getDraft().Workflow})
+	code, body := post(t, srv, "POST", "/api/v2/workflows/"+id+"/validate", string(b))
+	if code != 200 {
+		t.Fatalf("validate: %d %s", code, body)
+	}
+	vs := decode[struct{ Issues []workflow.Issue }](t, body).Issues
+	if len(vs) != 1 || vs[0].Code != "unknown_variable" || vs[0].Field != "outputName" || vs[0].Name != "api_key" ||
+		!strings.Contains(vs[0].Message, "is a secret") {
+		t.Errorf("the save-time check: %+v", vs)
+	}
+	// ...and Publish refuses it, with the code, field, name and no suggestion
+	code, body = post(t, srv, "POST", "/api/v2/workflows/"+id+"/publish", `{"etag":"`+getDraft().Etag+`"}`)
+	e := decode[struct {
+		Error struct {
+			Code, Message, Field string
+			Name, Suggest        any
+		}
+	}](t, body).Error
+	if code != 400 || e.Code != "unknown_variable" || e.Field != "outputName" || e.Name != "api_key" || e.Suggest != nil ||
+		e.Message != "{{api_key}} is a secret, and a secret can't go in a file name, folder or title. Nothing was changed." {
+		t.Errorf("publish: %d %+v", code, e)
+	}
+}

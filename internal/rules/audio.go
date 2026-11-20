@@ -150,6 +150,21 @@ const SmallKeptNote = "Small stereo track kept as it is: converting would not ma
 // StyledSubsNote is the job log's line when an ASS/SSA subtitle became plain text for MP4 (design, 02:49Z).
 const StyledSubsNote = "Styled subtitles (ASS) became plain text: MP4 can't keep their styling."
 
+// StyledSubsWebMNote is the same line for a WebM, which holds no styled subtitles either.
+const StyledSubsWebMNote = "Styled subtitles (ASS) became plain text: WebM can't keep their styling."
+
+// BitmapSubsNote is the job log's line when picture subtitles were left out because WebM can't hold them
+// (user bug 11-20): how many, once per file.
+func BitmapSubsNote(n int) string {
+	switch n {
+	case 0:
+		return ""
+	case 1:
+		return "1 picture subtitle was left out: WebM can't hold it."
+	}
+	return fmt.Sprintf("%d picture subtitles were left out: WebM can't hold them.", n)
+}
+
 // mp4Audio are the audio codecs an MP4 file can hold; any other kept track is made E-AC-3 there.
 var mp4Audio = map[string]bool{"aac": true, "ac3": true, "eac3": true, "mp3": true, "alac": true, "opus": true, "flac": true}
 
