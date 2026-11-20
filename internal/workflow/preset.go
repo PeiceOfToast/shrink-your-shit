@@ -87,6 +87,16 @@ func commitConfig(s rules.Selectors) map[string]any {
 	if s.KeepIfBigger {
 		c["ifBigger"] = "keep"
 	}
+	// W4b: only when set, so a workflow saved without them reads back exactly as it was.
+	if s.OutputName != "" {
+		c["outputName"] = s.OutputName
+	}
+	if s.SrtName != "" {
+		c["srtName"] = s.SrtName
+	}
+	if s.TrackTitle != "" {
+		c["trackTitle"] = s.TrackTitle
+	}
 	return c
 }
 
@@ -230,6 +240,9 @@ func selectorsOf(order []Node) (rules.Selectors, []Issue) {
 	default:
 		return s, []Issue{{Code: "invalid_config", Severity: "error", NodeID: commit.ID, ConfigPath: "/policy", Message: "Choose how to save the result."}}
 	}
+	s.OutputName = strOf(commit.Config, "outputName", "")
+	s.SrtName = strOf(commit.Config, "srtName", "")
+	s.TrackTitle = strOf(commit.Config, "trackTitle", "")
 	if err := s.Validate(); err != nil {
 		msg := strings.TrimSuffix(err.Error(), " Nothing was changed.")
 		i := Issue{Code: "invalid_config", Severity: "error", NodeID: by[nodeForMessage(msg)].ID, Message: msg}

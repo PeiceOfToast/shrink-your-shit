@@ -35,6 +35,12 @@ type Selectors struct {
 	// KeepIfBigger (R8, "Save the result"): a new file bigger than its original is not saved; the original
 	// stays. False (the default for flows without a workflow, and a workflow's "replace") saves it anyway.
 	KeepIfBigger bool `json:"keepIfBigger,omitempty"`
+	// OutputName, SrtName and TrackTitle are the Save the result step's {{name}} templates (W4b): the new
+	// file's name, the .srt files' names and the new file's audio track titles. "" is today's behaviour
+	// (the names the plan already gives, and every track's own title).
+	OutputName string `json:"outputName,omitempty"`
+	SrtName    string `json:"srtName,omitempty"`
+	TrackTitle string `json:"trackTitle,omitempty"`
 	// FolderMode is "next_to_library" (V5a, output-first: each library's own folder beside it, or its
 	// override; OutputDir unused) or "" (one folder for all: OutputDir).
 	FolderMode string   `json:"folderMode,omitempty"`
@@ -158,7 +164,9 @@ func (s Selectors) Validate() error {
 	switch {
 	case s.AfterConverting == "folder" && s.FolderMode != "" && s.FolderMode != NextToLibrary:
 		return invalid("folderMode", s.FolderMode)
-	case s.AfterConverting == "folder" && s.FolderMode == "" && (strings.TrimSpace(s.OutputDir) == "" || !filepath.IsAbs(s.OutputDir)):
+	case s.AfterConverting == "folder" && s.FolderMode == "" && (strings.TrimSpace(s.OutputDir) == "" ||
+		!filepath.IsAbs(s.OutputDir) && !strings.Contains(s.OutputDir, "{{")):
+		// A folder with variables is checked when the run fills it in: it must then be a full path.
 		return &SelectorError{"output_dir_needed", "Choose the folder for new files (a full path). Nothing was changed."}
 	}
 	switch { // choices that can't go together (design E, 21:22Z; the page moves the other field first)

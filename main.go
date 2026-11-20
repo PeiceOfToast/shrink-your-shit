@@ -317,7 +317,7 @@ func main() {
 				id = fmt.Sprintf("builtin-%d", n)
 			}
 			return &worker.Worker{ID: id, Queue: store, Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath,
-				Template: store.TemplateFor, Poll: 3 * time.Second,
+				Template: store.TemplateFor, RunInfo: store.RunInfoFor, Poll: 3 * time.Second,
 				DecodeCheck: *decode, MinSSIM: *minSSIM, KeepDays: keepDays, Journal: store, Sidecars: store,
 				Paused: localGate(joined, store), StallAfter: *stallAfter, // this computer's own switch, and not while joined
 				Encoder:           web.LocalEncoderFor(store, chk),
