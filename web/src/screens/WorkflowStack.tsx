@@ -6,7 +6,7 @@ import { PageHead } from "../PageHead";
 import { Component, Fragment, createContext, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
-import { deleteNode, groupOf, insertAfter, moveNode, newNode, order } from "../stepEdits"; // the steps in running order: a property of the document, not data
+import { deleteNode, groupOf, insertAfter, insertQuestion, isQuestion, moveNode, newNode, order, otherwiseOf, setOtherwise, type Otherwise } from "../stepEdits"; // the steps in running order: a property of the document, not data
 import { useData } from "../useData";
 import { getDraft, getLadder, getWorkflow, listTemplates, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
 import { Link, navigate, onLeave } from "../router";
@@ -24,7 +24,7 @@ export const Reg = createContext<{ defs: StepDefinition[]; words: Record<string,
 function useReg() { const r = useContext(Reg); return { stepDef: (t: string) => r.defs.find((d) => d.type === t), summary: (n: Node) => r.words[n.id] ?? "", libs: r.libs, wf: r.wf }; }
 
 // The server's icon keys (registry) -> design's sprite.
-export const ICON: Record<string, string> = { folder: "i-folder", filter: "i-shield", video: "i-video", audio: "i-audio", subtitles: "i-subtitle", file: "i-file", check: "i-checks", save: "i-save", cond: "i-cond", history: "i-history", branch: "i-branch", stop: "i-stop" }; // branch, stop: V6a check + end
+export const ICON: Record<string, string> = { folder: "i-folder", filter: "i-shield", video: "i-video", audio: "i-audio", subtitles: "i-subtitle", file: "i-file", check: "i-checks", save: "i-save", cond: "i-cond", history: "i-history", branch: "i-branch", stop: "i-stop", variable: "i-tag", note: "i-text" }; // branch, stop: V6a check + end; variable, note: FB1d cards
 // The words around each option come from the server's step definitions (#114: title, description, x-enumHints for
 // each choice, x-placeholder); the page adds none of its own.
 const MORE: Record<string, string[]> = { "video.convert": ["format", "resolution", "maxBitrate", "speed"] };
@@ -249,7 +249,10 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
 // "Set place", and its More menu greyed out with the line below. The first and last steps have no menu.
 const FIXED_LINE = "The steps that convert run in a set order for now, so they can't be moved or deleted. To skip this step, turn it off.";
 type Move = { fixed: boolean; reason?: string; up: boolean; down: boolean; del: boolean; act: (w: "up" | "down" | "del") => void };
-function Step({ n, i, mv, open, toggle, update, issues }: { n: Node; i: number; mv: Move; open: boolean; toggle: () => void; update: (n: Node) => void; issues: ValidationIssue[] }) {
+// FB1d: a question's row says what its No does: one of the ends, or another path the graph shows.
+type Else = { kind: Otherwise; set: (k: "leave" | "fail" | "other") => void };
+const OTHERWISE: [Otherwise, string][] = [["leave", "leave the file alone"], ["fail", "stop as failed"], ["other", "another path (in the graph)"]];
+function Step({ n, i, mv, open, toggle, update, issues, otherwise }: { n: Node; i: number; mv: Move; open: boolean; toggle: () => void; update: (n: Node) => void; issues: ValidationIssue[]; otherwise?: Else }) {
   const { stepDef, summary } = useReg(), def = stepDef(n.type), mine = issues.filter((x) => x.nodeId === n.id);
   const back = useRef<HTMLButtonElement>(null);
   useEffect(() => { if (open && matchMedia("(max-width:640px)").matches) back.current?.focus(); }, [open]);
@@ -270,6 +273,12 @@ function Step({ n, i, mv, open, toggle, update, issues }: { n: Node; i: number; 
         <div className="sp" title={(n.name ?? def.name) + ": " + summary(n)}><span className="snm" id={n.id + "-name"}>{n.name ?? def.name}</span> <span className="ssum">{summary(n)}</span></div>
         {mine.length > 0 && <span className="pill bad"><Icon id="i-alert" />{mine.length === 1 ? "1 problem" : mine.length + " problems"}</span>}
         {end ? <span className="muted sm nowrap">{end === "first" ? "Always first" : "Always last"}</span>
+          : otherwise ? <label className="row nw sm otherwise"><span className="muted nowrap">Otherwise</span>
+              <select className="input sm" aria-label={"What happens when " + nm + " answers No"} value={otherwise.kind === "none" ? "leave" : otherwise.kind}
+                onChange={(e) => otherwise.set(e.target.value as "leave" | "fail" | "other")}>
+                {OTHERWISE.filter(([k]) => k !== "other" || otherwise.kind === "other").map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                {otherwise.kind !== "other" && <option value="other">another path (open the graph)</option>}
+              </select></label>
           : def.alwaysOn ? <span className="muted sm nowrap">Always on</span>
           : <>{mv.fixed && <span className="muted sm nowrap" title={mv.reason ?? FIXED_LINE}>Set place</span>}
             <input type="checkbox" role="switch" className="switch" aria-label={(def.name) + " on"} checked={n.enabled} onChange={(e) => update({ ...n, enabled: e.target.checked })} /></>}
@@ -330,9 +339,10 @@ function AddStepMenu({ wf, doc, defs, adds, onAdd, onClose }: { wf: string; doc:
   const rows = defs
     .filter((d) => !d.readOnly && !d.deprecated && (d.name + " " + d.description).toLowerCase().includes(q.trim().toLowerCase()))
     .map((d) => {
-      const cond = d.outputs.some((o) => o.outcome === "branch"), a = adds?.[d.type];
-      const on = cond || (!have.has(d.type) && !!a?.addable);
-      const line = cond ? "Splits files by a rule. Opens the graph." : have.has(d.type) ? "Already in this workflow" : a?.addable ? "Goes after " + nameOf(a.after) : a?.reason || "Not available here yet.";
+      const cond = d.outputs.some((o) => o.outcome === "branch"), a = adds?.[d.type], again = cond || d.category === "flow"; // a question or an action may appear more than once
+      const on = cond ? !!a?.addable || !adds : (again || !have.has(d.type)) && !!a?.addable;
+      const line = cond ? (a?.addable ? "Only if it answers Yes; otherwise the file is left alone. Goes after " + nameOf(a.after) : "Splits files by a rule. Opens the graph.")
+        : have.has(d.type) && !again ? "Already in this workflow" : a?.addable ? "Goes after " + nameOf(a.after) : a?.reason || "Not available here yet.";
       return { d, g: groupOf(d), on, line, after: a?.after };
     })
     .sort((x, y) => x.g.index - y.g.index); // stable: the registry's order inside a group
@@ -565,11 +575,20 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
     if (to) requestAnimationFrame(() => document.getElementById(to.id + "-more")?.focus());
   };
   const undoGone = () => { if (gone) setHist({ ...hist, at: gone.at - 1 }); setGone(null); };
+  const endDef = defs.find((x) => x.type === "flow.end"), failDef = defs.find((x) => x.type === "flow.fail");
+  const setElse = (q: Node, k: "leave" | "fail" | "other") => {
+    if (k === "other") { navigate(`/workflows/${id}/graph?node=${encodeURIComponent(q.id)}`); return; }
+    const def = k === "leave" ? endDef : failDef;
+    if (!def) return setSaid("This server has no such step.");
+    const next = setOtherwise(doc, q, def);
+    if (next !== doc) { edit(next); setSaid(`${nameOf(q)}: when the answer is No, ${k === "leave" ? "the file is left alone" : "the run stops as failed"}.`); }
+  };
   const addStep = (d: StepDefinition, after?: ID) => {
-    if (d.outputs.some((o) => o.outcome === "branch")) { navigate(`/workflows/${id}/graph?add=${encodeURIComponent(d.type)}`); return; }
+    const question = d.outputs.some((o) => o.outcome === "branch");
+    if (question && (!live.addSteps?.[d.type]?.addable || !endDef)) { navigate(`/workflows/${id}/graph?add=${encodeURIComponent(d.type)}`); return; }
     // a draft with no Library files step gets one first (the page adds it itself), so the chain has a start and the new step shows
     const inDef = defs.find((x) => x.type === "input.library"), start = inDef && !doc.nodes.some((n) => n.type === "input.library") ? { ...doc, nodes: [...doc.nodes, newNode(inDef, "n" + Math.random().toString(36).slice(2, 8))] } : doc;
-    const nid = "n" + Math.random().toString(36).slice(2, 8), next = insertAfter(start, after, newNode(d, nid)), now = order(next);
+    const nid = "n" + Math.random().toString(36).slice(2, 8), next = question ? insertQuestion(start, after, newNode(d, nid), endDef!) : insertAfter(start, after, newNode(d, nid)), now = order(next);
     edit(next); setOpen(nid); setAddOpen(false);
     requestAnimationFrame(() => document.getElementById(nid + "-more")?.focus()); // focus lands on the new step's row, not the body
     setSaid(`Added ${d.name} as step ${now.findIndex((x) => x.id === nid) + 1} of ${now.length}.`);
@@ -663,7 +682,8 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
           const p = live.stepPlaces?.[n.id], fixed = p ? p.fixedPlace : true;
           const mv: Move = { fixed, reason: p?.fixedReason, up: !fixed && i > 1 && i <= lastMovable, down: !fixed && i >= 1 && i < lastMovable, del: !fixed && i >= 1 && i <= lastMovable,
             act: (w) => (w === "del" ? deleteStep(n.id) : moveStep(n.id, w === "up" ? -1 : 1)) };
-          return <Step key={n.id} n={n} i={i} mv={mv} open={open === n.id} toggle={() => setOpen(open === n.id ? null : n.id)} update={update} issues={issues} />;
+          const otherwise: Else | undefined = isQuestion(n) ? { kind: otherwiseOf(doc, n).kind, set: (k) => setElse(n, k) } : undefined;
+          return <Step key={n.id} n={n} i={i} mv={mv} open={open === n.id} toggle={() => setOpen(open === n.id ? null : n.id)} update={update} issues={issues} otherwise={otherwise} />;
         })}</ol>
         {!only && <button className="btn sm ghost" type="button" onClick={openAdd}><Icon id="i-plus" />Add step</button>}
         {addOpen && <AddStepMenu wf={id} doc={doc} defs={defs} adds={live.addSteps} onAdd={addStep} onClose={closeAdd} />}
