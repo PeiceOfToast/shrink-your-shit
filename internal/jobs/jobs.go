@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver, no cgo
@@ -103,6 +104,8 @@ type Store struct {
 
 	removeMu sync.Mutex     // held by Claim and StartLibrary while they look at removing
 	removing map[int64]bool // libraries being removed (BeginRemove): process-local, never stored
+
+	swapChanges atomic.Int64 // bumped by each change of an original's state (SwapChanges)
 }
 
 // Open opens (creating if needed) the database at path and brings its schema up to date

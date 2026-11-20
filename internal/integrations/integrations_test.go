@@ -401,3 +401,18 @@ func TestPathMappingRespectsTheBoundary(t *testing.T) {
 		t.Fatalf("steps = %+v, want none (the instance does not have the file)", steps)
 	}
 }
+
+// A certificate the machine can't check is named as that, not as "Could not reach".
+func TestCertificateFailureSaysSo(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	t.Cleanup(srv.Close)
+	h := newHarness(t)
+	res, err := h.svc.Test(TestIn{Kind: Sonarr, URL: strp(srv.URL), APIKey: strp("k")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Could not make a secure connection to " + strings.TrimPrefix(srv.URL, "https://") + " (certificate check failed)."
+	if res.OK || res.Message != want {
+		t.Fatalf("result = %+v, want %q", res, want)
+	}
+}

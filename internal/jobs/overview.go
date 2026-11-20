@@ -40,7 +40,7 @@ FROM files WHERE path >= ? AND path < ?`, lo, hi).Scan(&t.BytesBefore, &t.Videos
 	if err := s.reader().QueryRow(`SELECT COALESCE(SUM(`+leftNowSQL+`),0) FROM jobs WHERE library_id=?`, lo, hi, lo, hi, l.ID).Scan(&t.LeftNowBytes); err != nil {
 		return t, err
 	}
-	err := s.reader().QueryRow(`SELECT COUNT(DISTINCT path) FROM jobs WHERE library_id=? AND status=?`, l.ID, Done).Scan(&t.Done)
+	err := s.reader().QueryRow(`SELECT COUNT(DISTINCT path) FROM jobs WHERE library_id=? AND `+convertedNow("jobs")+` AND `+newestSQL, l.ID).Scan(&t.Done)
 	return t, err
 }
 
@@ -77,11 +77,15 @@ type Day struct {
 // A scan's skip (a file decision 'skip: ...', or unreadable, dated decided_at) is an end too, so the newest of the two wins:
 // a file counts once, on the day of its latest end. A still_changing look is not a skip (the file may still be
 // downloading), so it is no end. Same-second ties go to the job event.
-const latestEndsSQL = `WITH ends AS (SELECT at, to_status, ROW_NUMBER() OVER (PARTITION BY pkey ORDER BY at DESC, seq DESC) AS rn FROM (
-SELECT e.at, e.to_status, e.seq, COALESCE(j.path, (SELECT json_extract(x.data, '$.path') FROM events x WHERE x.job_id=e.job_id AND json_extract(x.data, '$.path') IS NOT NULL ORDER BY x.seq DESC LIMIT 1), 'job:' || e.job_id) AS pkey
+// restoredFlagSQL is 1 for a job event whose job was restored, else 0. Restored ends are dropped before the
+// numbering, so a file whose newer conversion was restored has its older end as its latest (review #431).
+var restoredFlagSQL = `CASE WHEN ` + notRestoredSQL("e.job_id") + ` THEN 0 ELSE 1 END`
+
+var latestEndsSQL = `WITH ends AS (SELECT at, to_status, rs, ROW_NUMBER() OVER (PARTITION BY pkey ORDER BY at DESC, seq DESC) AS rn FROM (
+SELECT e.at, e.to_status, e.seq, COALESCE(j.path, (SELECT json_extract(x.data, '$.path') FROM events x WHERE x.job_id=e.job_id AND json_extract(x.data, '$.path') IS NOT NULL ORDER BY x.seq DESC LIMIT 1), 'job:' || e.job_id) AS pkey, ` + restoredFlagSQL + ` AS rs
 FROM events e LEFT JOIN jobs j ON j.id=e.job_id WHERE e.kind='job' AND e.to_status IN ('done','skipped','cancelled','failed','kept')
 UNION ALL
-SELECT decided_at, 'skipped', 0, path FROM files WHERE ((decision LIKE 'skip: %' AND reason<>'still_changing') OR reason='unreadable') AND decided_at IS NOT NULL))
+SELECT decided_at, 'skipped', 0, path, 0 FROM files WHERE ((decision LIKE 'skip: %' AND reason<>'still_changing') OR reason='unreadable') AND decided_at IS NOT NULL) WHERE rs=0)
 `
 
 // Days are the last n days' totals, oldest first: files finished, files skipped (also stopped), files failed
@@ -94,7 +98,7 @@ func (s *Store) Days(n int, now time.Time, t Totals) ([]Day, error) {
 	from := now.AddDate(0, 0, -(n - 1)).Format("2006-01-02")
 	by := map[string]*Day{}
 	rows, err := s.reader().Query(latestEndsSQL+`SELECT date(at, 'localtime') AS d, to_status, COUNT(*) FROM ends
-WHERE rn=1 AND date(at, 'localtime') >= ? GROUP BY d, to_status`, from)
+WHERE rn=1 AND rs=0 AND date(at, 'localtime') >= ? GROUP BY d, to_status`, from)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +211,7 @@ FROM jobs GROUP BY library_id, d`, Running, Queued, Failed, Kept)
 func (s *Store) savedByDay(t *Totals) error {
 	rows, err := s.reader().Query(`SELECT (SELECT date(e.at, 'localtime') FROM events e WHERE e.kind='job' AND e.job_id=jobs.id AND e.to_status=? ORDER BY e.seq DESC LIMIT 1) AS d,
   COALESCE(SUM(`+savedSQL+`),0), COALESCE(SUM(`+waitingSQL+`),0), COALESCE(SUM(`+couldFreeSQL+`),0)
-FROM jobs WHERE status=? AND size_after>0 AND `+newestSQL+` GROUP BY d`, Done, Done)
+FROM jobs WHERE `+convertedNow("jobs")+` AND size_after>0 AND `+newestSQL+` GROUP BY d`, Done)
 	if err != nil {
 		return err
 	}
@@ -231,7 +235,7 @@ FROM jobs WHERE status=? AND size_after>0 AND `+newestSQL+` GROUP BY d`, Done, D
 // whose start was recorded); ok false when there are none.
 func (s *Store) Averages() (savingPercent float64, savingOK bool, secondsPerGB float64, timeOK bool, err error) {
 	var before, after int64
-	if err = s.reader().QueryRow(`SELECT COALESCE(SUM(size_before),0), COALESCE(SUM(size_after),0) FROM jobs WHERE status=? AND size_before>0 AND size_after>0`, Done).
+	if err = s.reader().QueryRow(`SELECT COALESCE(SUM(size_before),0), COALESCE(SUM(size_after),0) FROM jobs WHERE `+convertedNow("jobs")+` AND size_before>0 AND size_after>0`).
 		Scan(&before, &after); err != nil {
 		return
 	}
@@ -241,7 +245,7 @@ func (s *Store) Averages() (savingPercent float64, savingOK bool, secondsPerGB f
 	var secs float64
 	var timedBytes int64
 	if err = s.reader().QueryRow(`SELECT COALESCE(SUM((julianday(updated)-julianday(started))*86400),0), COALESCE(SUM(size_before),0)
-FROM jobs WHERE status=? AND started<>'' AND size_before>0`, Done).Scan(&secs, &timedBytes); err != nil {
+FROM jobs WHERE `+convertedNow("jobs")+` AND started<>'' AND size_before>0`).Scan(&secs, &timedBytes); err != nil {
 		return
 	}
 	if timedBytes > 0 && secs > 0 {
@@ -254,6 +258,6 @@ FROM jobs WHERE status=? AND started<>'' AND size_before>0`, Done).Scan(&secs, &
 // libraries were records).
 func (s *Store) DoneCount() (int, error) {
 	var n int
-	err := s.reader().QueryRow(`SELECT COUNT(DISTINCT path) FROM jobs WHERE status=?`, Done).Scan(&n)
+	err := s.reader().QueryRow(`SELECT COUNT(DISTINCT path) FROM jobs WHERE ` + convertedNow("jobs") + ` AND ` + newestSQL).Scan(&n)
 	return n, err
 }

@@ -193,6 +193,12 @@ jobs:
       - name: Intel GPU runtime files are in the x86_64 image
         run: |
           docker run --rm --entrypoint sh shrink-your-shit -c 'ls /usr/lib/x86_64-linux-gnu/libmfx-gen.so.1.2 /usr/lib/x86_64-linux-gnu/libvpl.so.2 /usr/lib/x86_64-linux-gnu/dri/iHD_drv_video.so'
+      - name: the image can make https calls (CA certificates are installed)
+        run: |
+          docker run --rm --entrypoint sh shrink-your-shit -c 'test -s /etc/ssl/certs/ca-certificates.crt' \
+            || { echo "no CA bundle in the image: every https call would fail"; exit 1; }
+          docker run --rm --entrypoint run-as-syp shrink-your-shit wget -q -O /dev/null https://api.github.com/ \
+            || { echo "an https GET from the image failed"; exit 1; }
       - name: the app runs with the /dev/dri groups (render group is automatic)
         run: |
           # A fake device folder: run-as-syp must add its group, the one Docker added, and syp's own.

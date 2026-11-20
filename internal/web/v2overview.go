@@ -249,7 +249,7 @@ func libraryTotalsFuncs(store *jobs.Store, libs []jobs.Library) (func() (string,
 			return "", err
 		}
 		var b strings.Builder
-		fmt.Fprintf(&b, "%d;", newest)
+		fmt.Fprintf(&b, "%d|%d;", newest, store.SwapChanges()) // a restore writes no event
 		for _, l := range libs {
 			fmt.Fprintf(&b, "%d|%s|%s|%d;", l.ID, l.Path, l.LastScan, l.LastScanVideos)
 		}
@@ -344,7 +344,7 @@ func statsFuncs(store *jobs.Store) (func() (string, error), func() (*stats, stri
 		}
 		now := time.Now()
 		// and at least once a minute: a purge or a scan finding an original gone frees bytes without an event
-		return strconv.FormatInt(newest, 10) + "|" + now.Format("2006-01-02") + "|" + strconv.FormatInt(now.Unix()/60, 10), nil
+		return strconv.FormatInt(newest, 10) + "|" + strconv.FormatInt(store.SwapChanges(), 10) + "|" + now.Format("2006-01-02") + "|" + strconv.FormatInt(now.Unix()/60, 10), nil
 	}
 	build := func() (*stats, string, error) {
 		k, err := key()
