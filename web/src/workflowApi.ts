@@ -8,6 +8,8 @@ import type { AddStep, Layout, PublishPreview, StepDefinition, StepPlace, Templa
 
 const enc = encodeURIComponent, base = (id: string) => "/api/v2/workflows/" + enc(id);
 const no = (code: string, message: string) => ({ error: { code, message } });
+// The server's refusal of a save or publish (W4b, #511): the first problem's code, message, field, name and suggest, and every issue.
+const refusal = (is: ValidationIssue[]) => ({ error: { ...is[0], field: is[0].configPath?.slice(1), issues: is } });
 type Items<T> = { items: T[] };
 const items = async <T,>(p: Promise<Answer<Items<T>>>): Promise<Answer<T[]>> => { const r = await p; return failed(r) ? r : r.items; };
 
@@ -61,7 +63,7 @@ export async function getDraft(id: string): Promise<Answer<WorkflowRevision>> {
 export async function saveDraft(id: string, workflow: WorkflowDoc, layout: Layout, etag: string): Promise<Answer<WorkflowRevision>> {
   if (MOCK) {
     const r = mock.saveDraft(id, workflow, etag);
-    if (r.refused) { const e = { error: { code: r.refused[0].code, message: r.refused[0].message, issues: r.refused } }; return e; } // the server's refusal: its issues ride along
+    if (r.refused) return refusal(r.refused); // the server's refusal: its issues ride along
     return r.draft ?? no("stale_draft", r.error ?? "");
   }
   return call("PUT", base(id) + "/draft", { workflow, layout }, { "If-Match": etag });
@@ -78,7 +80,7 @@ export async function publishPreview(id: string): Promise<Answer<PublishPreview>
 }
 // POST /workflows/{id}/publish {etag}: the published revision (its number is the new version).
 export async function publish(id: string, etag: string): Promise<Answer<{ number: number }>> {
-  if (MOCK) { const r = mock.publish(id, etag); return r.version != null ? { number: r.version } : no("stale_draft", r.error ?? ""); }
+  if (MOCK) { const r = mock.publish(id, etag); if (r.refused) return refusal(r.refused); return r.version != null ? { number: r.version } : no("stale_draft", r.error ?? ""); }
   const r = await call<WorkflowRevision>("POST", base(id) + "/publish", { etag });
   return failed(r) ? r : { number: r.number ?? 0 };
 }

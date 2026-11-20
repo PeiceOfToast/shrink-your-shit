@@ -1,10 +1,10 @@
 // The Stack view's server side, mocked from V1 as built (origin/v2-workflows internal/workflow: registry.go for the
 // step definitions and their configSchema, validate.go for the step summaries; "Next to each library" runs since V5a #133).
-import REGISTRY from "./registry-4df3345.json";
+import REGISTRY from "./registry-a699472.json";
 import type { AddStep, Edge, ID, JSONSchema, Node, Port, PublishPreview, StepDefinition, StepPlace, ValidationIssue, WorkflowDoc, WorkflowRevision } from "../types/v2";
 import type { Ladder } from "../workflowApi";
 import { groupOf, order } from "../stepEdits";
-import { mockVariables } from "./variables";
+import { allowedIn, closest, mockVariables } from "./variables";
 
 const inPort: Port = { name: "in", label: "In", kind: "file", outcome: "success" };
 const success: Port = { name: "success", label: "Next", kind: "file", outcome: "success" };
@@ -69,12 +69,9 @@ export const STEP_DEFS: StepDefinition[] = [
   def({ type: "filter.video", category: "filter", name: "Only some videos", icon: "cond", typeLabel: "Condition", description: "Sends matching videos one way and the rest another.",
     outputs: [{ name: "match", label: "Matches", kind: "file", outcome: "branch" }, { name: "else", label: "Doesn't match", kind: "file", outcome: "branch" }], alwaysOn: false, sideEffects: "none" }),
 ];
-// The server's own words (#114: titles, descriptions, option hints, placeholders), as a 4df3345 server sends them, so the
-// mock shows what the real page shows.
+// The server's own words (#114: titles, descriptions, option hints, placeholders), as a699472 server sends them, so the
+// mock shows what the real page shows. The x-variables flags (output.commit's folder, outputName, srtName, trackTitle) come with them.
 for (const d of STEP_DEFS) { const r = (REGISTRY as unknown as Record<string, Pick<StepDefinition, "name" | "description" | "configSchema">>)[d.type]; if (r) Object.assign(d, r); }
-// The string fields that take {{name}} variables (x-variables). The v1 contract names four (output file name, .srt name, track
-// title, move-to folder); this registry has only the move-to folder, so only that one is marked here.
-{ const f = (STEP_DEFS.find((d) => d.type === "output.commit")?.configSchema.properties as Record<string, JSONSchema> | undefined)?.folder; if (f) f["x-variables"] = true; }
 export const stepDef = (type: string) => STEP_DEFS.find((d) => d.type === type);
 
 // GET /api/v2/bitrate-ladder as A-API-SHAPE gives it: the registry's ladder in kbps, the slider table (CRF and the
@@ -190,6 +187,32 @@ export function checkVariables(d: WorkflowDoc): ValidationIssue[] {
     else if (BUILTIN_NAMES.has(v.name)) out.push({ code: "builtin_variable_name", severity: "error", name: v.name, message: `{{${v.name}}} is set by the server already, so a variable can't use that name.` });
     else if (seen.has(v.name)) out.push({ code: "duplicate_variable", severity: "error", name: v.name, message: `Two variables are called {{${v.name}}}. Give one of them another name.` });
     seen.add(v.name);
+  }
+  return out;
+}
+
+// W4b (#511): a {{name}} in a field that takes variables must name a variable allowed in that field, and its {{ must close.
+// Secrets are never allowed (they never go in a file name, folder or title). The server's refusal of a save or publish.
+export function checkTemplates(d: WorkflowDoc): ValidationIssue[] {
+  const builtin = mockVariables().variables, own = (d.variables ?? []).filter((x) => /^[a-z][a-z0-9_]{0,39}$/.test(x.name));
+  const secrets = own.filter((x) => x.type === "secret").map((x) => x.name), plain = own.filter((x) => x.type !== "secret").map((x) => x.name);
+  const out: ValidationIssue[] = [];
+  for (const n of d.nodes) {
+    const props = ((REGISTRY as unknown as Record<string, { configSchema: { properties?: Record<string, JSONSchema> } }>)[n.type]?.configSchema.properties ?? {});
+    for (const [k, s] of Object.entries(props)) {
+      if (s["x-variables"] !== true) continue;
+      const value = String(n.config?.[k] ?? ""), names = [...builtin.filter((x) => allowedIn(x, k)).map((x) => x.name), ...plain];
+      const at = { nodeId: n.id, configPath: "/" + k, field: k, severity: "error" as const };
+      for (const m of value.matchAll(/\{\{([^{}]*)\}\}/g)) {
+        const name = m[1].trim();
+        if (names.includes(name)) continue;
+        if (secrets.includes(name)) { out.push({ ...at, code: "unknown_variable", name, suggest: null, message: `{{${name}}} is a secret, and a secret can't go in a file name, folder or title. Nothing was changed.` }); continue; }
+        const sug = closest(name, names) ?? null;
+        out.push({ ...at, code: "unknown_variable", name, suggest: sug, message: `{{${name}}} isn't a variable for this field. Nothing was changed.` });
+      }
+      const open = value.lastIndexOf("{{");
+      if (open >= 0 && value.indexOf("}}", open) < 0) out.push({ ...at, code: "unclosed_variable", suggest: null, message: "A {{ in this field is missing its }}. Nothing was changed." });
+    }
   }
   return out;
 }

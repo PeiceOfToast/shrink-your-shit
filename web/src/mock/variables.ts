@@ -7,6 +7,23 @@ export interface TemplateVar { name: string; description: string; group: string;
 export interface VarList { sample: { path: string; builtIn: boolean }; variables: TemplateVar[] }
 
 const v = (name: string, group: string, description: string, value: string | null): TemplateVar => ({ name, description, group, value, fields: null });
+// The names a field may use: its fields list, or every field when the list is null (the server's contract, #511).
+export const allowedIn = (x: TemplateVar, field: string) => x.fields == null || x.fields.includes(field);
+// The closest name, when one is within two edits of the typed one (for "Did you mean" and the Use button).
+export function closest(name: string, names: string[]): string | undefined {
+  const dist = (a: string, b: string) => {
+    let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+    for (let i = 1; i <= a.length; i++) {
+      const cur = [i];
+      for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = cur;
+    }
+    return prev[b.length];
+  };
+  let best: string | undefined, bestD = 3;
+  for (const n of names) { const d = dist(name, n); if (d < bestD) { bestD = d; best = n; } }
+  return best;
+}
 
 // own: the workflow's own variables (its draft's list). The server lists them last, group "Workflow"; a secret's value is never sent.
 export function mockVariables(own: Variable[] = []): VarList {
@@ -42,6 +59,8 @@ function builtIns(): TemplateVar[] {
       v("audio_codecs", "Audio", "The audio codecs", "aac, ac3"),
       v("audio_channels", "Audio", "The channel counts", "2, 6"),
       v("subtitle_languages", "Subtitles", "The subtitle languages", "English, English SDH, German"),
+      { ...v("sub_lang", "Subtitles", "The language of the subtitle being saved", "English"), fields: ["srtName"] }, // W4b: only in the subtitle file's name
+      { ...v("sub_kind", "Subtitles", "The kind of the subtitle being saved, such as SDH", "SDH"), fields: ["srtName"] },
       v("workflow", "Run", "The workflow's name", "Shrink videos"),
       v("workflow_revision", "Run", "The workflow's revision number", "3"),
       v("worker", "Run", "The worker that ran the job", null),

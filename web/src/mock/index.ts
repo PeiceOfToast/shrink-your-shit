@@ -4,7 +4,7 @@
 import { useSyncExternalStore } from "react";
 import type { ActivityEvent, Capability, FoundServer, ID, JoinRequest, JoinState, RoleBody, Setup, Job, JobState, Library, PublishPreview, Settings, Summary, Template, Trash, ValidationIssue, Worker, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
 import type { FirstFiles, FolderReport, Issue, LibraryItem } from "../types/v1";
-import { branchedDoc, checkVariables, emptyDoc, legacyDoc, presetDoc, preview, revision, summary as stepSummary } from "./steps";
+import { branchedDoc, checkTemplates, checkVariables, emptyDoc, legacyDoc, presetDoc, preview, revision, summary as stepSummary } from "./steps";
 
 const now = Date.now(), ago = (min: number) => new Date(now - min * 60e3).toISOString();
 const GB = 1e9;
@@ -285,15 +285,27 @@ export function getPublished(id: ID): WorkflowDoc | null { // the published docu
 export function getDraft(id: ID): WorkflowRevision | null {
   return slot(id)?.d.draft ?? null;
 }
+// A secret's value lives apart from the draft (the server keeps it encrypted; the draft carries only hasValue). Keyed by
+// workflow and variable name. A variable with no value key keeps the stored one; a string replaces it.
+const secrets: Record<ID, Record<string, string>> = {};
+function keepSecrets(id: ID, doc: WorkflowDoc): WorkflowDoc {
+  const kept = (secrets[id] ??= {});
+  return { ...doc, variables: (doc.variables ?? []).map((v) => {
+    if (v.type !== "secret") return v;
+    const { value, ...rest } = v;
+    if (typeof value === "string") kept[v.name] = value;
+    return { ...rest, hasValue: kept[v.name] != null };
+  }) };
+}
 // PUT draft with If-Match: a stale etag is refused (409 stale_draft).
 export function saveDraft(id: ID, doc: WorkflowDoc, etag: string): { draft?: WorkflowRevision; error?: string; refused?: ValidationIssue[] } {
   const x = slot(id);
   if (!x) return { error: "That workflow is gone." };
-  // a bad variable name is refused before anything else (the server checks it first), and nothing is saved
-  const refused = checkVariables(doc);
+  // a bad variable name, or a {{name}} the field can't take, is refused before anything else, and nothing is saved
+  const refused = [...checkVariables(doc), ...checkTemplates(doc)];
   if (refused.length) return { refused };
   if (x.d.draft.etag !== etag) return { error: "This draft was changed somewhere else. Reload to see it. Nothing was saved." };
-  const draft = revision(id, structuredClone(doc), null);
+  const draft = revision(id, keepSecrets(id, doc), null);
   x.d.draft = draft;
   const errors = draft.validation.filter((v) => v.severity === "error").length;
   const commit = doc.nodes.find((n) => n.type === "output.commit");
@@ -309,10 +321,12 @@ export function publishPreview(id: ID): PublishPreview | null {
   return x && preview(x.d.draft.workflow, x.d.published, (x.w.version ?? 0) + 1, x.w.libraries);
 }
 // POST publish {etag}: 400 has_errors while the draft has errors. Running jobs keep the revision they started with.
-export function publish(id: ID, etag: string): { version?: number; error?: string } {
+export function publish(id: ID, etag: string): { version?: number; error?: string; refused?: ValidationIssue[] } {
   const x = slot(id);
   if (!x) return { error: "That workflow is gone." };
   if (x.d.draft.etag !== etag) return { error: "Save the draft first." };
+  const refused = checkTemplates(x.d.draft.workflow); // the server checks the stored draft's {{name}} fields again before it publishes
+  if (refused.length) return { refused };
   if (x.d.draft.validation.some((v) => v.severity === "error")) return { error: "Fix the problems first. Nothing was published." };
   const version = (x.w.version ?? 0) + 1;
   x.d.published = structuredClone(x.d.draft.workflow);
