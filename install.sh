@@ -575,6 +575,8 @@ RestartSec=5
 Nice=10
 IOSchedulingClass=idle
 NoNewPrivileges=true
+# Intel GPU %: the busy counters need CAP_PERFMON. Ambient, so it reaches the app as User=syp and nothing else.
+AmbientCapabilities=CAP_PERFMON
 
 [Install]
 WantedBy=multi-user.target
