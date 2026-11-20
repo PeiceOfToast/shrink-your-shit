@@ -3,6 +3,7 @@
 package rules
 
 import (
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -31,6 +32,48 @@ type TrackOp struct {
 	Language string `json:"language,omitempty"` // an added track's language (its source's)
 	// Kind is an extracted subtitle's kind for the .srt name's {{sub_kind}} (W4b): "forced", "sdh" or "".
 	Kind string `json:"kind,omitempty"`
+	// Title: the name the track has in players ("Stereo (AAC)"), on the tracks the plan makes (converted or
+	// added). Left out of the fingerprint (Snapshot.Fingerprint): a name is not a setting.
+	Title string `json:"title,omitempty"`
+}
+
+// trackTitle names an audio track made with codec (ffprobe's name) and channels: the layout, then the codec in
+// brackets. "" when the count or the codec is unknown.
+func trackTitle(codec string, channels int) string {
+	if channels <= 0 || codec == "" {
+		return ""
+	}
+	layouts := map[int]string{1: "Mono", 2: "Stereo", 6: "Surround 5.1", 8: "Surround 7.1"}
+	names := map[string]string{"aac": "AAC", "eac3": "E-AC-3", "ac3": "AC-3", "opus": "Opus"}
+	layout, ok := layouts[channels]
+	if !ok {
+		layout = fmt.Sprintf("%d channels", channels)
+	}
+	name, ok := names[codec]
+	if !ok {
+		name = codec
+	}
+	return layout + " (" + name + ")"
+}
+
+// titleTracks names the audio tracks the plan makes (converted or added). A track that keeps its channels
+// (Channels 0) takes the source's count, and never more than the source has.
+func (p *Plan) titleTracks(info media.Info) {
+	src := map[int]int{}
+	for _, a := range info.Audio() {
+		src[a.Index] = a.Channels
+	}
+	for i := range p.Tracks {
+		op := &p.Tracks[i]
+		if op.Type != "audio" || (!op.Add && (op.Drop || op.Encoder == "")) {
+			continue
+		}
+		ch := op.Channels
+		if ch == 0 || ch > src[op.Index] && src[op.Index] > 0 {
+			ch = src[op.Index]
+		}
+		op.Title = trackTitle(op.Codec, ch)
+	}
 }
 
 // audioTargets are the codecs the audio choices convert to: ffmpeg encoder, codec name, kbps per channel.

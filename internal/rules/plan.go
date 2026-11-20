@@ -469,7 +469,11 @@ func (p Plan) trackArgs() []string {
 		return nil
 	}
 	var args []string
-	if p.Title != "" { // every audio track of the new file gets it, kept or added
+	// Title precedence, one rule: the workflow's title (on every audio track, kept or added) first; else each
+	// track's own (TrackOp.Title: a converted or added track's automatic name; a titled source's kept title is
+	// copied by ffmpeg). The per-track title is written only when there is no workflow title, so no track gets two.
+	perTrack := p.Title == ""
+	if p.Title != "" {
 		for k := 0; k < p.AudioTracks; k++ {
 			args = append(args, "-metadata:s:a:"+strconv.Itoa(k), "title="+p.Title)
 		}
@@ -494,6 +498,9 @@ func (p Plan) trackArgs() []string {
 				if op.Channels > 0 { // a downmix (S4's stereo AAC): never more channels than the track has
 					args = append(args, "-ac:"+a, strconv.Itoa(op.Channels))
 				}
+				if op.Title != "" && perTrack { // over the source's title, which ffmpeg copies with the track
+					args = append(args, "-metadata:s:"+a, "title="+op.Title)
+				}
 			}
 		}
 		k++
@@ -503,6 +510,9 @@ func (p Plan) trackArgs() []string {
 		if op.Add {
 			a := "a:" + strconv.Itoa(k)
 			args = append(args, "-map", "0:"+strconv.Itoa(op.Index), "-c:"+a, op.Encoder, "-b:"+a, strconv.Itoa(op.Kbps)+"k", "-ac:"+a, strconv.Itoa(op.Channels))
+			if op.Title != "" && perTrack {
+				args = append(args, "-metadata:s:"+a, "title="+op.Title)
+			}
 			k++
 		}
 	}
@@ -721,6 +731,10 @@ func (s Snapshot) Fingerprint() string {
 	p.Skip, p.SkipCode, p.Reason = "", "", ""
 	p.Title, p.AudioTracks = "", 0 // the run's reading of TrackTitle for this file, not a setting
 	p.Steps = nil                  // the log's words about this one file, not a setting: see Fingerprint's comment
+	p.Tracks = append([]TrackOp(nil), p.Tracks...) // a copy, so the track titles leave the fingerprint and the plan keeps them
+	for i := range p.Tracks {
+		p.Tracks[i].Title = ""
+	}
 	// (SrtNames is resolved after RecordPlan, so it is not in the stored snapshot this fingerprints.)
 	b, _ := json.Marshal(struct {
 		Plan                          Plan
@@ -896,6 +910,7 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 		for _, t := range info.Subtitles() {
 			p.SubtitleOrder = append(p.SubtitleOrder, t.Index)
 		}
+		p.titleTracks(info)
 	}
 	if why := tracksNotKept(p.remaining(info), p.Container); why != "" {
 		p.Skip, p.SkipCode = why, SkipCannotKeepTrack
