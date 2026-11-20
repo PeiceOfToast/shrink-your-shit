@@ -417,6 +417,11 @@ func (x positionExec) Stream(ctx context.Context, onLine func(string), name stri
 		onLine("out_time_us=" + strconv.FormatInt(5_000_000+i*x.step, 10))
 		onLine("progress=continue")
 	}
+	if x.step != 0 { // an encode that ends has decoded the whole 100 s at 25 fps; a short count would read as lost frames
+		onLine("frame=2500")
+		onLine("out_time_us=100000000")
+		onLine("progress=continue")
+	}
 	return x.FakeExec.Stream(ctx, onLine, name, args...) // then the new file, as the fake makes it
 }
 

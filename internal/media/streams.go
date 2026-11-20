@@ -37,6 +37,10 @@ type Stream struct {
 	Width, Height int
 	// FrameRate is the average frame rate in frames per second.
 	FrameRate float64 `json:"frameRate,omitempty"`
+	// Frames is the stream's frame count as the container states it (mp4 does; 0 when not stated).
+	Frames int64 `json:"frames,omitempty"`
+	// Duration is the stream's own length in seconds, not the container's (mkv states it in a tag; 0 when not stated).
+	Duration float64 `json:"duration,omitempty"`
 	// VFR is true when the average frame rate clearly differs from the nominal one. That is
 	// reliable for mp4/mov; for mkv ffprobe reports the nominal rate as the average, so a variable
 	// frame rate mkv is NOT detected here (it needs a scan of packet timestamps). Untested on real
@@ -244,6 +248,21 @@ func str(m map[string]any, key string) string {
 	return ""
 }
 
+// clockSeconds reads "HH:MM:SS.fraction" (mkv's DURATION tag); 0 when it is not that.
+func clockSeconds(s string) float64 {
+	p := strings.Split(strings.TrimSpace(s), ":")
+	if len(p) != 3 {
+		return 0
+	}
+	h, e1 := strconv.ParseFloat(p[0], 64)
+	m, e2 := strconv.ParseFloat(p[1], 64)
+	sec, e3 := strconv.ParseFloat(p[2], 64)
+	if e1 != nil || e2 != nil || e3 != nil {
+		return 0
+	}
+	return h*3600 + m*60 + sec
+}
+
 func num(m map[string]any, key string) float64 {
 	switch v := m[key].(type) {
 	case float64:
@@ -346,6 +365,11 @@ func parseStream(m map[string]any, position int) Stream {
 			s.FrameRate = nominal
 		}
 		s.VFR = avg > 0 && nominal > 0 && !s.AttachedPic && math.Abs(avg-nominal)/nominal > 0.03
+		s.Frames = int64(num(m, "nb_frames"))
+		s.Duration = num(m, "duration")
+		if s.Duration == 0 {
+			s.Duration = clockSeconds(tag(m, "DURATION"))
+		}
 		s.PixFmt = str(m, "pix_fmt")
 		s.BitDepth = bitDepth(str(m, "bits_per_raw_sample"), s.PixFmt)
 		s.ColorSpace = str(m, "color_space")
