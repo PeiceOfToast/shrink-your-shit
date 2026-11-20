@@ -280,13 +280,14 @@ function StartStop({ w, onDone }: { w: Worker; onDone: (m: string) => void }) {
 // design 7.2: each worker's own switch (its row's first control). On = going; off while it finishes its file (draining),
 // with the words saying so; disabled when the worker is offline or stalled. Turning off a converting worker asks first.
 function WorkerSwitch({ w, onDone }: { w: Worker; onDone: (m: string) => void }) {
-  const [asking, setAsking] = useState(false), on = going(w), gone = w.status === "offline" || w.status === "stalled", finishing = w.status === "draining";
+  const [asking, setAsking] = useState(false), [busy, setBusy] = useState(false), on = going(w), gone = w.status === "offline" || w.status === "stalled", finishing = w.status === "draining";
   if (asking) return <StopAsk w={w} onDone={(m) => (setAsking(false), onDone(m))} onCancel={() => setAsking(false)} />;
   const flip = async () => {
-    if (on) { if (w.currentJobIds.length) return setAsking(true); if (await act(workerAction(w.id, "stop"), onDone)) onDone(w.name + " stopped."); return; }
-    if (await act(workerAction(w.id, "start"), onDone)) onDone(w.name + " started.");
+    if (on && w.currentJobIds.length) return setAsking(true);
+    setBusy(true); // one call at a time: a quick double flip must not send it twice
+    try { if (await act(workerAction(w.id, on ? "stop" : "start"), onDone)) onDone(w.name + (on ? " stopped." : " started.")); } finally { setBusy(false); }
   };
-  return <label className="sw"><input type="checkbox" role="switch" className="switch" checked={on} disabled={gone} aria-label={w.name} onChange={flip} />
+  return <label className="sw"><input type="checkbox" role="switch" className="switch" checked={on} disabled={gone || busy} aria-label={w.name} onChange={flip} />
     <span className="sm">{on ? "On" : finishing ? "Stopping after its current files" : "Off"}</span></label>;
 }
 
