@@ -437,6 +437,7 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 	if p.Video.Tag != "" {
 		args = append(args, "-tag:"+v, p.Video.Tag)
 	}
+	args = append(args, staleStatArgs(v)...) // the video is re-encoded: its source statistics are stale (F9)
 	args = withOutput(args, out)
 	return p.withSubtitleFiles(args, out)
 }
@@ -508,6 +509,21 @@ func (p Plan) withSubtitleFiles(args []string, out string) []string {
 	return args
 }
 
+// staleStats are the per-track statistics a source file may carry (MKV writers put them on each stream). They
+// describe the stream as it was, so a re-encoded stream must not keep them (F9).
+var staleStats = []string{"BPS", "NUMBER_OF_BYTES", "NUMBER_OF_FRAMES", "DURATION", "_STATISTICS_TAGS",
+	"_STATISTICS_WRITING_APP", "_STATISTICS_WRITING_DATE_UTC"}
+
+// staleStatArgs clear staleStats on the output stream spec ("v:0", "a:1"): -metadata with an empty value
+// deletes the tag, and a tag the source doesn't have is no change. Their -eng variants too.
+func staleStatArgs(spec string) []string {
+	var args []string
+	for _, k := range staleStats {
+		args = append(args, "-metadata:s:"+spec, k+"=", "-metadata:s:"+spec, k+"-eng=")
+	}
+	return args
+}
+
 // trackArgs are the ffmpeg arguments for the Plan's TrackOps: a dropped track is unmapped (-map -0:N),
 // a converted one gets its encoder and bitrate by its place among the new file's audio tracks. A
 // resolved track title (W4b) is written on every audio track of the new file.
@@ -548,6 +564,7 @@ func (p Plan) trackArgs() []string {
 				if op.Title != "" && perTrack { // over the source's title, which ffmpeg copies with the track
 					args = append(args, "-metadata:s:"+a, "title="+op.Title)
 				}
+				args = append(args, staleStatArgs(a)...) // re-encoded: the source's statistics are stale (F9)
 			}
 		}
 		k++
@@ -560,6 +577,7 @@ func (p Plan) trackArgs() []string {
 			if op.Title != "" && perTrack {
 				args = append(args, "-metadata:s:"+a, "title="+op.Title)
 			}
+			args = append(args, staleStatArgs(a)...) // a re-encode of another track: that track's statistics are stale (F9)
 			k++
 		}
 	}
