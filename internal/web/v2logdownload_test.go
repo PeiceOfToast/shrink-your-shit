@@ -3,6 +3,7 @@
 package web
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -50,6 +51,7 @@ func TestJobLogDownloadGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	want = bytes.ReplaceAll(want, []byte("\r\n"), []byte("\n")) // a Windows checkout may turn the file's line endings into CRLF
 	if got != string(want) {
 		t.Fatalf("download differs from %s:\n%s", path, got)
 	}
