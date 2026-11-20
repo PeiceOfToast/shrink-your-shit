@@ -721,7 +721,7 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .ov .tip span{display:flex;align-items:center}.ov .tip em{font-style:normal;margin-left:auto;padding-left:16px;font-variant-numeric:tabular-nums;font-weight:var(--fw-strong)}
 .ov .chartfoot{display:flex;flex-wrap:wrap;gap:8px 32px;align-items:baseline;margin-top:12px;color:var(--text-2);font-size:var(--fs-sm)}
 .ov .chartfoot b{color:var(--text);margin-left:6px}.ov .chartfoot details{margin-left:auto}.ov .chartfoot details[open]{flex-basis:100%;margin-left:0;min-width:0/* a flex item is as wide as its table otherwise, so .daytbl never scrolls and the page does (390 px) */}
-.ov .nochart{position:relative}.ov .nochart p{position:absolute;left:0;right:0;top:calc(50% + 14px);transform:translateY(-50%);text-align:center;margin:0}.ov .nochart p span{background:var(--bg);padding:2px 12px;box-decoration-break:clone;-webkit-box-decoration-break:clone}
+.ov .quiet{margin:0;display:flex;align-items:center;justify-content:center;text-align:center;min-height:160px;padding:12px;border:1px solid var(--border);border-radius:var(--radius)}.ov .quiet.short{min-height:80px}
 
 @media (max-width:900px){
   .ov .headline{grid-template-columns:minmax(0,1fr);gap:8px}.ov .big{font-size:36px}.ov .stats{gap:20px}

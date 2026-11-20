@@ -97,6 +97,34 @@ func (s *Store) LeftOriginals(libraryIDs []int64) ([]LeftOriginal, error) {
 	return out, nil
 }
 
+// GoneLeftOriginals are the originals of the given libraries, left where they were, that a scan has marked gone:
+// a scan that finds the file again clears the mark (SetOriginalBack).
+func (s *Store) GoneLeftOriginals(libraryIDs []int64) ([]LeftOriginal, error) {
+	var out []LeftOriginal
+	for _, id := range libraryIDs {
+		rows, err := s.db.Query(`SELECT id, path, size_before, original_disk FROM jobs WHERE library_id=? AND status='done' AND original_gone_at<>'' AND original_changed=0 AND `+leftSQL, id)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var o LeftOriginal
+			if err := rows.Scan(&o.JobID, &o.Path, &o.Size, &o.Disk); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out = append(out, o)
+		}
+		rows.Close()
+	}
+	return out, nil
+}
+
+// SetOriginalBack clears job id's original-gone mark: the original is back where it was.
+func (s *Store) SetOriginalBack(id int64) error {
+	_, err := s.db.Exec(`UPDATE jobs SET original_gone_at='' WHERE id=? AND original_gone_at<>''`, id)
+	return err
+}
+
 // SetOriginalGone records that job id's original, left where it was, is gone (now).
 func (s *Store) SetOriginalGone(id int64) error {
 	_, err := s.db.Exec(`UPDATE jobs SET original_gone_at=? WHERE id=? AND original_gone_at=''`, s.stamp(), id)
