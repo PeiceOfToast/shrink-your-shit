@@ -160,12 +160,12 @@ func TestCrashDuringRestoreRecovers(t *testing.T) {
 func TestPurgeBoundaryAndOnlyKnownFiles(t *testing.T) {
 	s, o := keptOne(t)
 	kept, _ := time.Parse(time.RFC3339, o.KeptAt)
-	if said := Purge(s.store, 7, kept.Add(7*24*time.Hour-time.Second)); len(said) != 0 || read(s.trash()) != "original-bytes" {
+	if said := purgeAll(s.store, 7, kept.Add(7*24*time.Hour-time.Second)); len(said) != 0 || read(s.trash()) != "original-bytes" {
 		t.Fatalf("a second early: %q, %q", said, read(s.trash()))
 	}
 	stranger := filepath.Join(s.dir, TrashDir, "not-ours.mkv")
 	os.WriteFile(stranger, []byte("x"), 0o644)
-	said := Purge(s.store, 7, kept.Add(7*24*time.Hour+time.Second))
+	said := purgeAll(s.store, 7, kept.Add(7*24*time.Hour+time.Second))
 	if !strings.HasPrefix(read(s.trash()), "<") || len(said) != 1 || !strings.Contains(said[0], "deleted 1") {
 		t.Errorf("a second late: %q, %q", said, read(s.trash()))
 	}
@@ -186,7 +186,7 @@ func TestKeptRemovedOutsideIsPurgedWhenFound(t *testing.T) {
 	s, o := keptOne(t)
 	found := time.Now() // when the pass finds it: a purge dated later reads as not recorded (#163 QA)
 	os.Remove(s.trash())
-	if said := Purge(s.store, 7, found); len(said) != 1 || !strings.Contains(said[0], "removed outside Shrink Your Shit") {
+	if said := purgeAll(s.store, 7, found); len(said) != 1 || !strings.Contains(said[0], "removed outside Shrink Your Shit") {
 		t.Fatalf("said %q", said)
 	}
 	r, _ := s.store.OriginalByID(o.ID)
@@ -206,7 +206,7 @@ func TestKeptWithItsFolderGoneIsNotMarked(t *testing.T) {
 	s, o := keptOne(t)
 	kept, _ := time.Parse(time.RFC3339, o.KeptAt)
 	os.RemoveAll(filepath.Dir(s.trash()))
-	said := Purge(s.store, 7, kept.Add(24*time.Hour))
+	said := purgeAll(s.store, 7, kept.Add(24*time.Hour))
 	if r, _ := s.store.OriginalByID(o.ID); r.State != jobs.OriginalKept {
 		t.Errorf("row %s", r.State)
 	}
@@ -221,10 +221,10 @@ func TestPurgeUsesTheSettingNow(t *testing.T) {
 	s, o := keptOne(t)
 	kept, _ := time.Parse(time.RFC3339, o.KeptAt)
 	three := kept.Add(3 * 24 * time.Hour)
-	if Purge(s.store, 7, three); read(s.trash()) != "original-bytes" {
+	if purgeAll(s.store, 7, three); read(s.trash()) != "original-bytes" {
 		t.Fatal("7 days: kept after 3")
 	}
-	Purge(s.store, 2, three) // the setting lowered to 2 days
+	purgeAll(s.store, 2, three) // the setting lowered to 2 days
 	if !strings.HasPrefix(read(s.trash()), "<") {
 		t.Error("2 days: deleted after 3")
 	}
@@ -238,7 +238,7 @@ func TestPurgeLeavesAReplacedTrashFile(t *testing.T) {
 	s, o := keptOne(t)
 	os.WriteFile(s.trash(), []byte("not the original at all"), 0o644)
 	kept, _ := time.Parse(time.RFC3339, o.KeptAt)
-	said := Purge(s.store, 1, kept.Add(48*time.Hour))
+	said := purgeAll(s.store, 1, kept.Add(48*time.Hour))
 	if read(s.trash()) != "not the original at all" || len(said) != 1 || !strings.Contains(said[0], "left alone") {
 		t.Errorf("%q %q", said, read(s.trash()))
 	}
@@ -276,7 +276,7 @@ func TestPurgeLeavesASameSizeSameTimeReplacement(t *testing.T) {
 	os.WriteFile(s.trash(), []byte("OTHER-content!"), 0o644) // 14 bytes, like "original-bytes"
 	os.Chtimes(s.trash(), st.ModTime(), st.ModTime())
 	kept, _ := time.Parse(time.RFC3339, o.KeptAt)
-	said := Purge(s.store, 1, kept.Add(48*time.Hour))
+	said := purgeAll(s.store, 1, kept.Add(48*time.Hour))
 	if read(s.trash()) != "OTHER-content!" || len(said) != 1 || !strings.Contains(said[0], "left alone") {
 		t.Errorf("%q %q", said, read(s.trash()))
 	}
@@ -401,5 +401,22 @@ func TestRecoveryAfterALinkWithoutUnlink(t *testing.T) {
 	}
 	if r, _ := s.store.OriginalByID(o.ID); r.State != jobs.OriginalRestored {
 		t.Errorf("row %s", r.State)
+	}
+}
+
+// purgeAll is Purge with nothing waiting: every kept original is judged.
+func purgeAll(st Store, days int, now time.Time) []string { return Purge(st, days, now, nil) }
+
+// A kept original is left alone while its share is not connected, however old it is, and purged once it is.
+func TestPurgeLeavesAKeptOriginalAloneWhileItsShareWaits(t *testing.T) {
+	s, o := keptOne(t)
+	kept, _ := time.Parse(time.RFC3339, o.KeptAt)
+	later := kept.Add(30 * 24 * time.Hour)
+	waiting := func(string) bool { return true }
+	if said := Purge(s.store, 7, later, waiting); len(said) != 0 || read(s.trash()) != "original-bytes" {
+		t.Fatalf("while the share waits: %q, %q", said, read(s.trash()))
+	}
+	if said := Purge(s.store, 7, later, func(string) bool { return false }); len(said) != 1 {
+		t.Errorf("once the share answers: %q; want the original purged", said)
 	}
 }

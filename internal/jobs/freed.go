@@ -15,7 +15,21 @@ package jobs
 // by its newest conversion (checked last in each bucket: a row reaches it in one bucket at most, so
 // it costs one lookup by the jobs_path index, not four). Republishing a workflow queues every file again, and each earlier done job
 // would otherwise count the same original's saving once more (ui-shop review d10d17e, orch-lead 18:29Z).
-const newestSQL = `NOT EXISTS (SELECT 1 FROM jobs later WHERE later.path=jobs.path AND later.status='done' AND later.id>jobs.id)`
+// A later conversion that was restored does not count: the file is this one's output again (review #431).
+const newestSQL = `NOT EXISTS (SELECT 1 FROM jobs later WHERE later.path=jobs.path AND later.status='done' AND later.id>jobs.id
+  AND NOT EXISTS (SELECT 1 FROM originals ro WHERE ro.job_id=later.id AND ro.state='restored'))`
+
+// notRestoredSQL is true when the job whose id is col was not restored. A restored original is the original
+// file again, so its job counts nowhere as converted.
+func notRestoredSQL(col string) string {
+	return `NOT EXISTS (SELECT 1 FROM originals o WHERE o.job_id=` + col + ` AND o.state='restored')`
+}
+
+// convertedNow is true for a done job (table alias t) that was not restored: the one condition every converted
+// count and saving reads (the overview, library Done, daily bars, per-workflow counts).
+func convertedNow(t string) string {
+	return t + `.status='done' AND ` + notRestoredSQL(t+`.id`)
+}
 
 // leftSQL is true for a done job (of table jobs) that left its original where it was.
 const leftSQL = `(output_path<>'' AND output_path<>path AND NOT EXISTS (SELECT 1 FROM originals o WHERE o.job_id=jobs.id))`
@@ -23,30 +37,30 @@ const leftSQL = `(output_path<>'' AND output_path<>path AND NOT EXISTS (SELECT 1
 const keptNowSQL = `EXISTS (SELECT 1 FROM originals o WHERE o.job_id=jobs.id AND o.state='kept')`
 
 // freedSQL, waitingSQL and couldFreeSQL are a jobs row's freed, waiting and could-free bytes (NULL: none).
-const (
-	freedSQL   = `CASE WHEN status='done' AND size_after>0 AND ((` + replacedSQL + ` AND NOT ` + keptNowSQL + `) OR (` + leftSQL + ` AND original_gone_at<>'' AND original_changed=0)) AND ` + newestSQL + ` THEN ` + savedSQL + ` END`
-	waitingSQL = `CASE WHEN status='done' AND size_after>0 AND ` + replacedSQL + ` AND ` + keptNowSQL + ` AND output_gone_at='' AND ` + newestSQL + ` THEN ` + savedSQL + ` END`
+var (
+	freedSQL   = `CASE WHEN ` + convertedNow("jobs") + ` AND size_after>0 AND ((` + replacedSQL + ` AND NOT ` + keptNowSQL + `) OR (` + leftSQL + ` AND original_gone_at<>'' AND original_changed=0)) AND ` + newestSQL + ` THEN ` + savedSQL + ` END`
+	waitingSQL = `CASE WHEN ` + convertedNow("jobs") + ` AND size_after>0 AND ` + replacedSQL + ` AND ` + keptNowSQL + ` AND output_gone_at='' AND ` + newestSQL + ` THEN ` + savedSQL + ` END`
 	// goneSQL is what a replaced file's bytes still counted in the overview's bytesNow once its output is gone
 	// from the library (the original's size, less the saving already freed, plus the growth that bytesNow adds
 	// back): the file is no longer there.
-	goneSQL      = `CASE WHEN status='done' AND size_after>0 AND ` + replacedSQL + ` AND output_gone_at<>'' AND ` + newestSQL + ` THEN size_before-COALESCE(` + freedSQL + `,0)+COALESCE(` + grewSQL + `,0) END`
-	couldFreeSQL = `CASE WHEN status='done' AND size_after>0 AND ` + leftSQL + ` AND original_gone_at='' AND original_changed=0 AND ` + newestSQL + ` THEN ` + savedSQL + ` END`
+	goneSQL      = `CASE WHEN ` + convertedNow("jobs") + ` AND size_after>0 AND ` + replacedSQL + ` AND output_gone_at<>'' AND ` + newestSQL + ` THEN size_before-COALESCE(` + freedSQL + `,0)+COALESCE(` + grewSQL + `,0) END`
+	couldFreeSQL = `CASE WHEN ` + convertedNow("jobs") + ` AND size_after>0 AND ` + leftSQL + ` AND original_gone_at='' AND original_changed=0 AND ` + newestSQL + ` THEN ` + savedSQL + ` END`
 	// savedSQL is one file's saving, never below 0: a new file bigger than its original (kept by design,
 	// always-standardize 11-07) saves nothing, and its growth counts in grewSQL instead, so a total never
 	// hides it nor goes negative (orch-lead 18:15Z)
 	savedSQL = `MAX(size_before-size_after, 0)`
 	// grewSQL is how much bigger a done job's new file is than its original (NULL: not bigger)
-	grewSQL = `CASE WHEN status='done' AND size_after>size_before AND size_before>0 AND ` + newestSQL + ` THEN size_after-size_before END`
+	grewSQL = `CASE WHEN ` + convertedNow("jobs") + ` AND size_after>size_before AND size_before>0 AND ` + newestSQL + ` THEN size_after-size_before END`
 	// grewNowSQL is the growth bytesNow adds: only a replaced file's, since the new file then stands where the
 	// library's record (the original's size) is. A left output is not in the library's bytes, so it adds none (#403).
-	grewNowSQL = `CASE WHEN status='done' AND size_after>size_before AND size_before>0 AND ` + replacedSQL + ` AND ` + newestSQL + ` THEN size_after-size_before END`
+	grewNowSQL = `CASE WHEN ` + convertedNow("jobs") + ` AND size_after>size_before AND size_before>0 AND ` + replacedSQL + ` AND ` + newestSQL + ` THEN size_after-size_before END`
 	// leftNowSQL is what a left job adds to its library's bytesNow, on top of the recorded bytes (LibraryTotalsOf
 	// binds the library's path range for leftInSQL, twice). The original's record stays in the library's bytes
 	// until it is gone, so while it is there the new file adds its size if it is in the library and not gone.
 	// Once the original is gone, freedSQL has already taken the saving off (original less new, never below 0):
 	// the file's bytes left are the growth, if the new file is bigger, and the library holds nothing of it when
 	// the new file is not in it, so that saving is taken back off.
-	leftNowSQL = `CASE WHEN ` + leftSQL + ` AND status='done' AND size_after>0 AND ` + newestSQL + ` THEN
+	leftNowSQL = `CASE WHEN ` + leftSQL + ` AND ` + convertedNow("jobs") + ` AND size_after>0 AND ` + newestSQL + ` THEN
   CASE WHEN original_gone_at<>'' AND original_changed=0 THEN
     CASE WHEN ` + leftInSQL + ` THEN MAX(size_after-size_before,0) ELSE -MIN(size_before,size_after) END
   ELSE
@@ -80,7 +94,7 @@ type LeftOriginal struct {
 func (s *Store) LeftOriginals(libraryIDs []int64) ([]LeftOriginal, error) {
 	var out []LeftOriginal
 	for _, id := range libraryIDs {
-		rows, err := s.db.Query(`SELECT id, path, size_before, original_disk FROM jobs WHERE library_id=? AND status='done' AND original_gone_at='' AND original_changed=0 AND `+leftSQL, id)
+		rows, err := s.db.Query(`SELECT id, path, size_before, original_disk FROM jobs WHERE library_id=? AND `+convertedNow("jobs")+` AND original_gone_at='' AND original_changed=0 AND `+leftSQL, id)
 		if err != nil {
 			return nil, err
 		}
@@ -97,6 +111,34 @@ func (s *Store) LeftOriginals(libraryIDs []int64) ([]LeftOriginal, error) {
 	return out, nil
 }
 
+// GoneLeftOriginals are the originals of the given libraries, left where they were, that a scan has marked gone:
+// a scan that finds the file again clears the mark (SetOriginalBack).
+func (s *Store) GoneLeftOriginals(libraryIDs []int64) ([]LeftOriginal, error) {
+	var out []LeftOriginal
+	for _, id := range libraryIDs {
+		rows, err := s.db.Query(`SELECT id, path, size_before, original_disk FROM jobs WHERE library_id=? AND status='done' AND original_gone_at<>'' AND original_changed=0 AND `+leftSQL, id)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var o LeftOriginal
+			if err := rows.Scan(&o.JobID, &o.Path, &o.Size, &o.Disk); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out = append(out, o)
+		}
+		rows.Close()
+	}
+	return out, nil
+}
+
+// SetOriginalBack clears job id's original-gone mark: the original is back where it was.
+func (s *Store) SetOriginalBack(id int64) error {
+	_, err := s.db.Exec(`UPDATE jobs SET original_gone_at='' WHERE id=? AND original_gone_at<>''`, id)
+	return err
+}
+
 // SetOriginalGone records that job id's original, left where it was, is gone (now).
 func (s *Store) SetOriginalGone(id int64) error {
 	_, err := s.db.Exec(`UPDATE jobs SET original_gone_at=? WHERE id=? AND original_gone_at=''`, s.stamp(), id)
@@ -108,7 +150,7 @@ func (s *Store) SetOriginalGone(id int64) error {
 func (s *Store) ReplacedOutputs(libraryIDs []int64) ([]LeftOriginal, error) {
 	var out []LeftOriginal
 	for _, id := range libraryIDs {
-		rows, err := s.db.Query(`SELECT id, output_path, size_after, original_disk, output_gone_at FROM jobs WHERE library_id=? AND status='done' AND output_path<>'' AND size_after>0 AND `+replacedSQL+` AND `+newestSQL, id)
+		rows, err := s.db.Query(`SELECT id, output_path, size_after, original_disk, output_gone_at FROM jobs WHERE library_id=? AND `+convertedNow("jobs")+` AND output_path<>'' AND size_after>0 AND `+replacedSQL+` AND `+newestSQL, id)
 		if err != nil {
 			return nil, err
 		}
@@ -138,7 +180,7 @@ func (s *Store) LeftOutputs(libraryIDs []int64) ([]LeftOriginal, error) {
 			return nil, err
 		}
 		lo, hi := pathRange(l.Path)
-		rows, err := s.db.Query(`SELECT id, output_path, size_after, original_disk, output_gone_at FROM jobs WHERE library_id=? AND status='done' AND size_after>0 AND `+leftSQL+` AND `+newestSQL+` AND output_path>=? AND output_path<?`, id, lo, hi)
+		rows, err := s.db.Query(`SELECT id, output_path, size_after, original_disk, output_gone_at FROM jobs WHERE library_id=? AND `+convertedNow("jobs")+` AND size_after>0 AND `+leftSQL+` AND `+newestSQL+` AND output_path>=? AND output_path<?`, id, lo, hi)
 		if err != nil {
 			return nil, err
 		}
