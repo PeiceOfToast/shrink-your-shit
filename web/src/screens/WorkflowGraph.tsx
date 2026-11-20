@@ -336,7 +336,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
         <div className="gcanvas" aria-label={"The steps of " + name + " as a graph"} onDragOver={edit ? onDragOver : undefined} onDragLeave={edit ? (e: DragEvent) => { if (!e.currentTarget.contains(e.relatedTarget as HTMLElement | null)) (setGhost(null), setPointer(null)); } : undefined} onDrop={edit ? onDrop : undefined} onBlur={() => (nudgeRun.current = null)}>
           {ghost && <div className="gdrop" aria-hidden="true" style={{ left: ghost.x, top: ghost.y, width: W * rf.getZoom(), height: 72 * rf.getZoom() }} />}
           {pointer && dragType && <div className="gghost" aria-hidden="true" style={{ left: pointer.x + 12, top: pointer.y + 12 }}>{defs.find((x) => x.type === dragType)?.name}</div>}
-          <ReactFlow nodes={shown} edges={edges} nodeTypes={nodeTypes} fitView minZoom={0.2} maxZoom={2} nodesDraggable={edit} nodesConnectable={edit} elementsSelectable
+          <ReactFlow nodes={shown} edges={edges} nodeTypes={nodeTypes} onInit={frame} minZoom={0.2} maxZoom={2} nodesDraggable={edit} nodesConnectable={edit} elementsSelectable
             onConnect={connect} isValidConnection={valid} onNodesChange={onNodesChange} onDelete={({ nodes: ns, edges: es }) => (ns.length ? removeNodes(ns.map((n) => n.id)) : removeEdges(es.map((e) => e.id)))} deleteKeyCode={edit ? ["Delete", "Backspace"] : null}
             onNodeClick={(_, n) => (setSel(n.id), setSelEdge(null), unpend(n.id))} onEdgeClick={(_, e) => (setSelEdge(e.id), setSel(null), unpend(null))} onPaneClick={() => (setSel(null), setSelEdge(null), unpend(null))}>
             <Background gap={20} />
@@ -413,6 +413,20 @@ function useMedia(q: string) {
   return m;
 }
 
+// The opening view and Fit never go below 75%. When the whole graph would fit smaller, it opens at 75% with the library
+// files step (the start; else the top-left-most step) at the top-left, and the person pans from there. Manual zoom keeps 20%.
+const FLOOR = 0.75;
+type Flow = { getNodes(): { position: { x: number; y: number }; measured?: { width?: number; height?: number }; initialHeight?: number; data: unknown }[]; fitView(o: { padding: number }): unknown; setViewport(v: { x: number; y: number; zoom: number }): unknown };
+function frame(rf: Flow) {
+  const nodes = rf.getNodes(), box = document.querySelector(".gcanvas")?.getBoundingClientRect();
+  if (!nodes.length || !box) return;
+  const left = Math.min(...nodes.map((n) => n.position.x)), top = Math.min(...nodes.map((n) => n.position.y));
+  const right = Math.max(...nodes.map((n) => n.position.x + (n.measured?.width ?? W))), bottom = Math.max(...nodes.map((n) => n.position.y + (n.measured?.height ?? n.initialHeight ?? 100)));
+  if (Math.min(box.width / ((right - left) * 1.15), box.height / ((bottom - top) * 1.15)) >= FLOOR) { rf.fitView({ padding: 0.15 }); return; } // fitView's own fit: padding 0.15 adds 15% to the size
+  const start = nodes.find((n) => (n.data as { node?: Node }).node?.type === "input.library") ?? nodes.reduce((a, c) => (c.position.y < a.position.y || (c.position.y === a.position.y && c.position.x < a.position.x) ? c : a));
+  rf.setViewport({ x: 24 - start.position.x * FLOOR, y: 24 - start.position.y * FLOOR, zoom: FLOOR });
+}
+
 // Toolbar zoom (SCREENS V4: Fit, Zoom -, %, +).
 function Zoom() {
   const rf = useReactFlow(), { zoom } = useViewport();
@@ -421,6 +435,6 @@ function Zoom() {
       <button className="btn sm icon ghost" type="button" aria-label="Zoom out" onClick={() => rf.zoomOut()}><Icon id="i-minus" /></button>
       <span className="sm" aria-live="polite">{Math.round(zoom * 100)}%</span>
       <button className="btn sm icon ghost" type="button" aria-label="Zoom in" onClick={() => rf.zoomIn()}><Icon id="i-plus" /></button>
-      <button className="btn sm ghost" type="button" onClick={() => rf.fitView({ padding: 0.15 })}>Fit</button>
+      <button className="btn sm ghost" type="button" onClick={() => frame(rf)}>Fit</button>
     </div>);
 }
