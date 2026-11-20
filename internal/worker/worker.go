@@ -28,6 +28,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/scanner"
 )
 
 // Queue is everything a worker needs from the job store.
@@ -85,6 +86,8 @@ type Queue interface {
 	AddStep(id int64, step string, ok bool, words string) error
 	// PutProbe stores a file's probe (JSON) for its size and time: the new file's, for the Files view.
 	PutProbe(path string, size, mtime int64, info string) error
+	// GetProbe returns the stored probe (JSON) of path if it was taken at this size and modification time.
+	GetProbe(path string, size, mtime int64) (string, bool)
 	// RecordJobStats stores the running job's run counters (the L2 summary's passes and bytesWritten).
 	RecordJobStats(id int64, passes int, bytesWritten int64) error
 	// RecordJobMove adds one file action the replace step took, in order (the replace step's moves[]).
@@ -820,8 +823,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}()
 
 	// What the source looks like (and so what the new file must look like).
+	// The scanner probed this file when it queued the job; the same size and time hit its cache (one probe per version).
 	pctx, pcancel := context.WithTimeout(ctx, quickTimeout)
-	src, perr := media.Probe(pctx, w.Exec, w.FFprobe, srcPath)
+	src, perr := w.probeSource(pctx, srcPath)
 	pcancel()
 	if perr != nil {
 		if errors.Is(pctx.Err(), context.DeadlineExceeded) {
@@ -2125,4 +2129,14 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 	w.addPass()       // an ffmpeg run the job needed, whatever came of it (a retry is another)
 	w.addBytes(wrote) // what this attempt wrote
 	return encErr, frames, terr
+}
+
+// probeSource is ffprobe's view of the original, from the scanner's probe cache when the file has the same size and
+// modification time now (a fresh stat, not the one from the scan).
+func (w *Worker) probeSource(ctx context.Context, path string) (media.Info, error) {
+	st, err := os.Stat(path)
+	if err != nil {
+		return media.Info{}, err
+	}
+	return scanner.Probe(ctx, w.Queue, w.Exec, w.FFprobe, path, st)
 }

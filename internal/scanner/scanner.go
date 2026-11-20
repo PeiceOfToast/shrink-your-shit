@@ -431,12 +431,18 @@ func Guard(root, path string, lst fs.FileInfo) (code string, ignore bool) {
 	return "", false
 }
 
-// Probe is ffprobe's view of path, from the store's probe cache when the file has the same size and
+// ProbeCache is the store's probe cache: what ffprobe said about a path at a size and modification time.
+type ProbeCache interface {
+	GetProbe(path string, size, mtime int64) (string, bool)
+	PutProbe(path string, size, mtime int64, info string) error
+}
+
+// Probe is ffprobe's view of path, from the probe cache when the file has the same size and
 // modification time as when it was last probed. Only reads the file.
-func Probe(ctx context.Context, store *jobs.Store, x media.Exec, ffprobe, path string, st os.FileInfo) (media.Info, error) {
+func Probe(ctx context.Context, cache ProbeCache, x media.Exec, ffprobe, path string, st os.FileInfo) (media.Info, error) {
 	size, mtime := st.Size(), st.ModTime().UnixNano()
 	var info media.Info
-	if b, ok := store.GetProbe(path, size, mtime); ok && json.Unmarshal([]byte(b), &info) == nil && info.Probe >= media.ProbeVersion {
+	if b, ok := cache.GetProbe(path, size, mtime); ok && json.Unmarshal([]byte(b), &info) == nil && info.Probe >= media.ProbeVersion {
 		return info, nil // (an older probe misses what this version reads, e.g. S3's HDR side data)
 	}
 	info, err := media.Probe(ctx, x, ffprobe, path)
@@ -444,7 +450,7 @@ func Probe(ctx context.Context, store *jobs.Store, x media.Exec, ffprobe, path s
 		return info, err
 	}
 	if b, err := json.Marshal(info); err == nil {
-		if err := store.PutProbe(path, size, mtime, string(b)); err != nil {
+		if err := cache.PutProbe(path, size, mtime, string(b)); err != nil {
 			log.Printf("probe cache %s: %v", path, err) // the probe is still good; it is just taken again next time
 		}
 	}
