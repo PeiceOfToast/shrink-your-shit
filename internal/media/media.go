@@ -267,27 +267,43 @@ func CountVideoPackets(ctx context.Context, x Exec, ffprobe, path string, n int)
 // maxLeadingPackets bounds how far LeadingUndecodable reads: a stream's first keyframe comes within one group of pictures.
 const maxLeadingPackets = 1000
 
-// LeadingUndecodable counts the packets of the n-th video stream that come before its first keyframe. A stream cut
-// in the middle of a group of pictures starts with pictures no decoder can show, so they are not lost frames.
-// It reads at most maxLeadingPackets packets and returns 0 when none of them is a keyframe.
+// LeadingUndecodable counts the packets of the n-th video stream that the decoder did not show: they come before
+// the stream's first keyframe and their presentation time is earlier than the first picture the decoder outputs.
+// A leading picture that decodes (an open group of pictures) is shown, so it is not credited. Any probe error or
+// missing time gives no credit: the strict count stands.
 func LeadingUndecodable(ctx context.Context, x Exec, ffprobe, path string, n int) (int64, error) {
-	out, err := x.Output(ctx, ffprobe, "-v", "error", "-select_streams", fmt.Sprintf("v:%d", n),
-		"-read_intervals", fmt.Sprintf("%%+#%d", maxLeadingPackets), "-show_entries", "packet=flags", "-of", "csv=p=0", path)
+	sel := fmt.Sprintf("v:%d", n)
+	pk, err := x.Output(ctx, ffprobe, "-v", "error", "-select_streams", sel,
+		"-read_intervals", fmt.Sprintf("%%+#%d", maxLeadingPackets), "-show_entries", "packet=flags,pts_time", "-of", "csv=p=0", path)
 	if err != nil {
 		return 0, err
 	}
+	fr, err := x.Output(ctx, ffprobe, "-v", "error", "-select_streams", sel, "-show_frames",
+		"-read_intervals", "%+#1", "-show_entries", "frame=pts_time", "-of", "csv=p=0", path)
+	if err != nil {
+		return 0, err
+	}
+	first, ok := csvTime(strings.SplitN(string(fr), "\n", 2)[0])
+	if !ok { // no picture was output: nothing can be credited
+		return 0, nil
+	}
 	var lead int64
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if strings.HasPrefix(line, "K") { // flags: K marks a keyframe
+	for _, line := range strings.Split(string(pk), "\n") {
+		flags, pts, _ := strings.Cut(strings.TrimSpace(line), ",")
+		if strings.HasPrefix(flags, "K") { // flags: K marks a keyframe
 			return lead, nil
 		}
-		lead++
+		if t, ok := csvTime(pts); ok && t < first {
+			lead++
+		}
 	}
 	return 0, nil
+}
+
+// csvTime reads one pts_time field (seconds, a trailing comma allowed); N/A or junk is not a time.
+func csvTime(s string) (float64, bool) {
+	t, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(s), ",")), 64)
+	return t, err == nil
 }
 
 // ParseProbe turns ffprobe JSON into Info. It errors if there is no video stream. Missing or odd

@@ -110,13 +110,35 @@ func TestCountVideoPacketsWithSideData(t *testing.T) {
 	}
 }
 
-// A stream cut mid-group-of-pictures starts with pictures before its first keyframe: they are counted, and a
-// stream that starts on a keyframe, or has none in what was read, counts none.
-func TestLeadingUndecodableCountsPicturesBeforeTheFirstKeyframe(t *testing.T) {
-	for out, want := range map[string]int64{"__\n__\nK_\n__\n": 2, "K__\n__\n": 0, "__\n__\n": 0, "": 0} {
-		x := &FakeExec{Out: []byte(out)}
-		if n, err := LeadingUndecodable(context.Background(), x, "ffprobe", "/x.ts", 0); err != nil || n != want {
-			t.Errorf("%q: %d %v, want %d", out, n, err, want)
+// LeadingUndecodable credits only the packets before the first keyframe that the decoder did not show: a
+// presentation time earlier than the first output picture. A stream cut mid-group-of-pictures has such packets; an
+// open group whose leading pictures decode shows them, so none is credited (dev-review of #435: a later loss must
+// still count). Missing times and probe errors credit nothing.
+func TestLeadingUndecodableCreditsOnlyPicturesTheDecoderSkipped(t *testing.T) {
+	probe := func(packets, firstFrame string) *FakeExec {
+		return &FakeExec{Handler: func(_ string, args []string) (string, string, error) {
+			for _, a := range args {
+				if a == "frame=pts_time" {
+					return firstFrame, "", nil
+				}
+			}
+			return packets, "", nil
+		}}
+	}
+	cases := []struct {
+		name, packets, first string
+		want                 int64
+	}{
+		{"cut mid-GOP: the two leading pictures are not shown", "__,0.000000\n__,0.040000\nK__,0.120000\n__,0.080000\n", "0.120000\n", 2},
+		{"open GOP: the leading pictures decode and are shown", "__,0.000000\n__,0.040000\nK__,0.120000\n", "0.000000\n", 0},
+		{"a leading picture with no time is not credited", "__,N/A\n__,0.040000\nK__,0.120000\n", "0.120000\n", 1},
+		{"no keyframe in what was read", "__,0.000000\n__,0.040000\n", "0.120000\n", 0},
+		{"no picture was output", "__,0.000000\nK__,0.120000\n", "", 0},
+		{"a stream that starts on a keyframe", "K__,0.000000\n__,0.040000\n", "0.000000\n", 0},
+	}
+	for _, c := range cases {
+		if n, err := LeadingUndecodable(context.Background(), probe(c.packets, c.first), "ffprobe", "/x.ts", 0); err != nil || n != c.want {
+			t.Errorf("%s: %d %v, want %d", c.name, n, err, c.want)
 		}
 	}
 	if _, err := LeadingUndecodable(context.Background(), &FakeExec{Err: context.Canceled}, "ffprobe", "/x.ts", 0); err == nil {
