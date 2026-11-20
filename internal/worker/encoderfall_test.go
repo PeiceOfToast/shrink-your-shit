@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
 // fall records a graphics-encoder failure for the scenario's job on its worker, as a fall-back does.
@@ -23,7 +24,7 @@ func fall(t *testing.T, s *scenario, w *Worker) {
 func TestPausedGraphicsEncoderIsNotUsed(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
-	w.Encoder = func(string) (string, string) { return "hevc_nvenc", "" }
+	w.Encoder = func(string, *rules.HDR) (string, string) { return "hevc_nvenc", "" }
 	for i := 0; i < 3; i++ {
 		fall(t, s, w)
 	}
@@ -46,7 +47,7 @@ func TestPausedGraphicsEncoderIsNotUsed(t *testing.T) {
 func TestGraphicsSuccessEndsARunOfFalls(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
-	w.Encoder = func(string) (string, string) { return "hevc_nvenc", "" }
+	w.Encoder = func(string, *rules.HDR) (string, string) { return "hevc_nvenc", "" }
 	fall(t, s, w)
 	fall(t, s, w)
 	if _, err := w.RunOne(context.Background()); err != nil {
@@ -68,7 +69,7 @@ func TestProcessorFailureIsNotAFallBack(t *testing.T) {
 	s := newScenario(t)
 	s.failAllEncodes = true
 	w := s.worker(Replace)
-	w.Encoder = func(string) (string, string) { return "hevc_nvenc", "" }
+	w.Encoder = func(string, *rules.HDR) (string, string) { return "hevc_nvenc", "" }
 	if _, err := w.RunOne(context.Background()); err == nil {
 		t.Fatal("RunOne: want the failed conversion's error")
 	}

@@ -497,6 +497,10 @@ ALTER TABLE jobs ADD COLUMN subtitle_files TEXT NOT NULL DEFAULT '';`},
 	{53, "job log sections and levels", `
 ALTER TABLE job_log_lines ADD COLUMN section TEXT NOT NULL DEFAULT '';
 ALTER TABLE job_log_lines ADD COLUMN level TEXT NOT NULL DEFAULT 'info';`},
+	// A job's run counters (log-spec L2 summary): the ffmpeg runs it needed and the bytes it wrote. A job with
+	// no row did not record them (one from before this, or one run on another computer): read as null.
+	{54, "job run counters", `
+CREATE TABLE IF NOT EXISTS job_run_stats (job_id INTEGER PRIMARY KEY, passes INTEGER NOT NULL, bytes_written INTEGER NOT NULL);`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone

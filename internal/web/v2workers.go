@@ -600,10 +600,15 @@ func capabilities(t doctor.Tools, ok bool) []map[string]any {
 	}
 	for _, e := range t.Hardware {
 		detail := "8-bit only: HDR files are converted on the processor."
-		if slices.Contains(t.Hardware10, e) {
-			detail = "10-bit too (HDR)."
+		tenBit := slices.Contains(t.Hardware10, e)
+		switch {
+		case tenBit && rules.HDRCarrier(e):
+			detail = "10-bit too (HDR), with its mastering data."
+		case tenBit:
+			detail = "10-bit too, but HDR files with mastering data are converted on the processor."
 		}
 		add("encoder", e, encoderLabels[e], "gpu", "passed", detail)
+		out[len(out)-1]["tenBit"] = tenBit
 		annotate(e, "gpu")
 	}
 	for _, e := range t.HardwareListed {
@@ -1105,12 +1110,12 @@ func (v *workerView) offlineCount() int {
 // processor). It is the main encoder's family in that codec's format, and only if that encoder passed its test
 // here. note is the job-log line when the format's encoder did not pass (the processor is used then); it is
 // empty for the processor by choice. The worker asks at each job's start.
-func LocalEncoderFor(store *jobs.Store, chk *doctor.Checker) func(codec string) (enc, note string) {
-	return func(codec string) (string, string) {
+func LocalEncoderFor(store *jobs.Store, chk *doctor.Checker) func(codec string, hdr *rules.HDR) (enc, note string) {
+	return func(codec string, hdr *rules.HDR) (string, string) {
 		cfg, _ := store.WorkerConfigOf(jobs.LocalWorker)
 		v := &workerView{store: store, eng: Engine{Doctor: chk}}
 		t, ok := v.tools()
 		caps := capabilities(t, ok)
-		return rules.EncoderFor(codec, primaryEncoder(cfg.PrimaryEncoder, caps), passedGPU(caps))
+		return rules.EncoderFor(codec, primaryEncoder(cfg.PrimaryEncoder, caps), hdr, caps)
 	}
 }

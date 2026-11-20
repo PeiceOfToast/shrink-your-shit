@@ -77,7 +77,8 @@ func TestV2Workers(t *testing.T) {
 	tests := map[string]string{}
 	for _, c := range wk.Capabilities {
 		tests[c.Key] = c.Slot + "/" + c.Test
-		if c.Key == "encoder:hevc_nvenc" && c.Detail != "10-bit too (HDR)." {
+		// NVENC is not proven to keep HDR10 mastering data (rules.HDRCarrier), so its HDR files go to the processor.
+		if c.Key == "encoder:hevc_nvenc" && c.Detail != "10-bit too, but HDR files with mastering data are converted on the processor." {
 			t.Errorf("nvenc detail %q", c.Detail)
 		}
 	}
