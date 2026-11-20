@@ -211,15 +211,24 @@ func flowRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng En
 			return
 		}
 		fid, err := strconv.ParseInt(strings.Trim(string(in.FlowID), `"`), 10, 64) // the page sends it as a string
-		if err != nil || fid <= 0 {
+		if err != nil || fid < 0 {
 			apiError(w, http.StatusBadRequest, "invalid_flow", "flowId must be a flow's id.")
 			return
 		}
-		if _, err := store.GetLibrary(libID); err != nil {
+		l, err := store.GetLibrary(libID)
+		if err != nil {
 			apiError(w, http.StatusNotFound, "not_found", "There is no such library.")
 			return
 		}
-		if l, err := store.GetLibrary(libID); err == nil && folderRefused(w, store, fid, l) {
+		if fid == 0 { // removing a workflow is out of scope: only assigning one is offered here
+			if l.FlowID != 0 {
+				apiError(w, http.StatusBadRequest, "workflow_required", "Removing a library's workflow isn't possible yet. Nothing was changed.")
+				return
+			}
+			writeJSON(w, map[string]bool{"ok": true}) // it already has none
+			return
+		}
+		if folderRefused(w, store, fid, l) {
 			return
 		}
 		if _, err := store.SetLibraryFlow(libID, fid); err != nil {

@@ -18,12 +18,13 @@ import (
 // The job log's sections (log-spec section 4), in the order a job writes them. Worker.phase is the section the
 // job's own lines (jobf) go to; the job moves it on as it goes.
 const (
-	secStart   = "start"
-	secInput   = "input"
-	secEncode  = "encode"
-	secOutput  = "output"
-	secReplace = "replace"
-	secSummary = "summary"
+	secStart     = "start"
+	secVariables = "variables"
+	secInput     = "input"
+	secEncode    = "encode"
+	secOutput    = "output"
+	secReplace   = "replace"
+	secSummary   = "summary"
 )
 
 // logLine writes a line of job id's log, in section at level, from the worker's own words (step 0, as jobf does).

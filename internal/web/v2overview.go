@@ -137,6 +137,8 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView, libTotals
 			state := "active"
 			pausedBy := sharePausedBy(store, l) // D4b
 			switch {
+			case l.FlowID == 0: // no workflow: it cannot run, so this wins over paused, as the library item's status does
+				state = "no_workflow"
 			case !l.Started:
 				state = "paused"
 			case pausedBy != nil:

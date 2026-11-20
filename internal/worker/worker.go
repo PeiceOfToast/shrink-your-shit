@@ -29,6 +29,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/scanner"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/vars"
 )
 
 // Queue is everything a worker needs from the job store.
@@ -164,9 +165,12 @@ type Worker struct {
 	// Template returns the template of a job's library's flow, compiled per file into the job's Plan.
 	// Nil: a legacy template from Rule and Mode for every job.
 	Template func(jobs.Job) (rules.Template, error)
-	Rule     rules.Rule
-	Mode     OutputMode
-	Poll     time.Duration
+	// RunInfo returns what a job's workflow says about it (its library's name, its name and revision and
+	// its own variables) for the {{name}} values (W4b). Nil: the names have no value from it.
+	RunInfo func(jobs.Job) (jobs.RunInfo, error)
+	Rule    rules.Rule
+	Mode    OutputMode
+	Poll    time.Duration
 	// OnDone is called after a job succeeds with the final path (optional).
 	OnDone func(job jobs.Job, finalPath string)
 
@@ -929,13 +933,32 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if plan.HDRNote != "" { // what the HDR conversion does not keep (S3)
 		stepNote(rules.StepConvertVideo, plan.HDRNote)
 	}
+	// W4b: the values the Save the result step's {{name}} fields take, and its track title. The title
+	// goes on every audio track of the new file, so it is resolved before the snapshot: a remote worker
+	// encodes the plan it is given.
+	vals, vtable, err := w.runValues(job, src, plan)
+	if err != nil {
+		return "", retryable(failed("This library's setting could not be read, so converting did not start. Your original was not touched. Open the library and save its setting again, then press Retry.", err), retryGeneral)
+	}
+	var vEmpty []string
+	if plan.TrackTitle != "" {
+		title, empty := vars.Resolve(plan.TrackTitle, vals)
+		plan.Title, vEmpty = strings.TrimSpace(title), append(vEmpty, empty...)
+		plan.AudioTracks = plan.AudioTrackCount(src)
+	}
+	ext := filepath.Ext(job.Path)
+	if plan.Container != "" {
+		ext = "." + plan.Container
+	}
+	outName, empty := vars.OutputName(plan.OutputName, ext, vals)
+	vEmpty = append(vEmpty, empty...)
 	exp := plan.Expect(src, expectedPackets(src, packets))
 	if exp.DurationSec <= 0 {
 		exp.DurationSec = job.DurationSec
 	}
 	// The job keeps what it is about to do and how the result will be judged. If that cannot be
 	// recorded, it does not start: nothing has been written yet.
-	snap := rules.Snapshot{Plan: plan, Expect: exp, Verify: w.verification(exp), Source: &src}
+	snap := rules.Snapshot{Plan: plan, Expect: exp, Verify: w.verification(exp), Source: &src, Variables: vtable}
 	b, err := json.Marshal(snap)
 	if err == nil {
 		err = w.Queue.RecordPlan(job.ID, string(b), snap.Fingerprint())
@@ -944,16 +967,19 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		return "", retryable(failed("What this conversion will do could not be recorded, so it did not start. Your original was not touched. Press Retry.", err), retryGeneral)
 	}
 
-	ext := filepath.Ext(job.Path)
-	if plan.Container != "" {
-		ext = "." + plan.Container
-	}
 	// Where the new file goes: beside the original, at its name, or, in replace mode with another file
-	// type, at its name with the new extension (25a-2).
+	// type, at its name with the new extension (25a-2). A name the Save the result step's template made
+	// (W4b) takes the place of that name, in the same folder; "" is today's name.
 	newName := rules.ReplaceName(job.Path, ext)
+	if outName != "" {
+		newName = filepath.Join(filepath.Dir(job.Path), outName)
+	}
 	switch OutputMode(plan.Output) {
 	case Beside:
 		newName = BesidePathAs(job.Path, ext)
+		if outName != "" {
+			newName = filepath.Join(filepath.Dir(job.Path), outName)
+		}
 	case Folder:
 		dir := plan.OutputDir
 		if plan.FolderMode == rules.NextToLibrary { // V5a: the library's own folder beside it, or its override
@@ -965,8 +991,19 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 				return "", failed(problem.Message+" Your original was not touched.", errors.New(problem.Code))
 			}
 			dir = d
+		} else if strings.Contains(dir, "{{") { // W4b: the folder as a template, filled in for this file
+			d, empty := vars.Folder(dir, vals)
+			vEmpty = append(vEmpty, empty...)
+			if !filepath.IsAbs(d) {
+				return "", failed(fmt.Sprintf("The folder for new files came out as %q, which isn't a full path, so nothing was converted. Your original was not touched. Check the folder in the workflow's Save the result step, then press Retry.", d), errors.New("folder for new files: its template did not make a full path"))
+			}
+			dir = d
 		}
-		newName = FolderPath(dir, job.Library, job.Path, ext)
+		name := strings.TrimSuffix(filepath.Base(job.Path), filepath.Ext(job.Path)) + ext
+		if outName != "" {
+			name = outName
+		}
+		newName = FolderPathAs(dir, job.Library, job.Path, name)
 		if err := os.MkdirAll(filepath.Dir(newName), 0o755); err != nil {
 			return "", failed("The folder for new files can't be written to, so nothing was converted. Your original was not touched. Check the flow's folder, then press Retry.", err)
 		}
@@ -977,6 +1014,11 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			return "", err
 		}
 	}
+	// W4b: the .srt files' names, resolved beside the new file (an empty template keeps today's names),
+	// and the job log's variables section, now that every field the run uses is filled in.
+	plan.SrtNames, empty = vars.SrtNames(newName, plan.SrtName, subtitlesOf(plan), vals)
+	vEmpty = append(vEmpty, empty...)
+	w.variableLines(job.ID, vtable, distinctNames(vEmpty))
 	if keepsOriginal(plan) { // the name is taken already: no point converting (checked again at the end)
 		if OutputMode(plan.Output) == Folder || OutputMode(plan.Output) == Beside { // beside too (Convert again, design 11:45Z)
 			// our own earlier output may be there (the original changed and is converted again): it is
@@ -994,8 +1036,8 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	// Subtitles saved as .srt files go beside the new file and never over another file: a name taken
 	// already stops the job before anything is converted (checked again when they are put in place).
-	for _, o := range plan.SubtitleFiles() {
-		if name := rules.SrtName(newName, o.Extract); exists(name) {
+	for k := range plan.SubtitleFiles() {
+		if name := plan.SrtNameFor(newName, k); exists(name) {
 			return "", failed(srtTaken(name), fs.ErrExist)
 		}
 	}
@@ -1391,7 +1433,7 @@ func (w *Worker) installSubtitles(plan rules.Plan, jobID int64, tmp, final strin
 		return nil, err
 	}
 	var recs []jobs.Sidecar
-	for k, o := range files {
+	for k := range files {
 		staged := rules.StagedSrt(tmp, k)
 		st, err := os.Stat(staged)
 		if err != nil {
@@ -1402,7 +1444,7 @@ func (w *Worker) installSubtitles(plan rules.Plan, jobID int64, tmp, final strin
 		if err != nil {
 			return nil, err
 		}
-		recs = append(recs, jobs.Sidecar{JobID: jobID, Path: rules.SrtName(final, o.Extract), Bytes: st.Size(),
+		recs = append(recs, jobs.Sidecar{JobID: jobID, Path: plan.SrtNameFor(final, k), Bytes: st.Size(),
 			MTime: st.ModTime().UnixNano(), Hash: h, VideoPath: final, VideoBytes: vst.Size(), VideoHash: vhash})
 	}
 	if w.Sidecars != nil {
@@ -1843,11 +1885,28 @@ func keepsOriginal(plan rules.Plan) bool {
 // FolderPath is where "Save to another folder" (S6) puts the new file of src (in library lib): the same
 // sub-folders under dir, the same name with ext.
 func FolderPath(dir, lib, src, ext string) string {
-	name := strings.TrimSuffix(filepath.Base(src), filepath.Ext(src)) + ext
+	return FolderPathAs(dir, lib, src, strings.TrimSuffix(filepath.Base(src), filepath.Ext(src))+ext)
+}
+
+// FolderPathAs is FolderPath with the new file's own name (W4b: the Save the result step's template).
+func FolderPathAs(dir, lib, src, name string) string {
 	if rel, err := filepath.Rel(lib, filepath.Dir(src)); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return filepath.Join(dir, rel, name)
 	}
 	return filepath.Join(dir, name)
+}
+
+// distinctNames is names without repeats, in their first order (the job log's empty variables line).
+func distinctNames(names []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, n := range names {
+		if n != "" && !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // applyFailure does what the path chose for when its step (f) doesn't work (V6b): try again later, leave
