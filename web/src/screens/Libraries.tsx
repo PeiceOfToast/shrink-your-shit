@@ -330,7 +330,7 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
         {[["general", "General"], ["discovery", "Discovery"], ["output", "Output"]].map(([k, t]) =>
           <Link key={k} to={"/libraries/" + l.id + (k === "general" ? "" : "?tab=" + k)} aria-current={tab === k ? "page" : undefined}>{t}</Link>)}
       </nav>}
-      {tab === "discovery" ? <Discovery every={v?.discovery.scanEverySeconds} /> : tab === "output" ? (v ? <Output v={v} reload={reload} /> : <div className="empty">Loading…</div>) :
+      {tab === "discovery" ? <Discovery every={v?.discovery.scanEverySeconds} /> : tab === "output" ? (v ? (v.status === "no_workflow" ? <NoWorkflowOutput /> : <Output v={v} reload={reload} />) : <div className="empty">Loading…</div>) :
       <div className="grid cols2">
         <section className="card" aria-labelledby="gen-h">
           <div className="hd"><h2 id="gen-h">Library</h2></div>
@@ -463,6 +463,8 @@ const POLICY: Record<string, string> = {
   beside: "Put the new file next to the original. Both stay; nothing is deleted.",
   separate_folder: "Save to a separate folder. Originals are left in place, so no space is freed until you remove them.",
 };
+// No workflow: nothing sets where results go yet, so Output (which reads v.output and the workflow) never mounts (review2 #509).
+const NoWorkflowOutput = () => <section className="card" aria-labelledby="out-h"><div className="hd"><h2 id="out-h">Where results go</h2></div><div className="bd"><p className="muted">A workflow sets where results go. Assign one to this library first.</p></div></section>;
 function Output({ v, reload }: { v: Library; reload: () => void }) {
   const o = v.output, [dir, setDir] = useState(o.overrideFolder ?? ""), [said, setSaid] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false);
   // design (SCREENS V5, "Own folder with a One-folder-for-all workflow"): the library's own folder only applies with Next
@@ -475,7 +477,6 @@ function Output({ v, reload }: { v: Library; reload: () => void }) {
     try { if (await act(() => patchLibraryV2(v.id, { overrideFolder: to }), setError)) { setSaid(to ? "Saved. New files for " + v.name + " go to " + to + "." : "Saved. " + v.name + " uses the workflow's folder again."); if (!to) setDir(""); reload(); } }
     finally { setBusy(false); }
   };
-  if (v.status === "no_workflow") return <section className="card" aria-labelledby="out-h"><div className="hd"><h2 id="out-h">Where results go</h2></div><div className="bd"><p className="muted">A workflow sets where results go. Assign one to this library first.</p></div></section>;
   return (
     <section className="card" aria-labelledby="out-h">
       <div className="hd"><h2 id="out-h">Where results go</h2></div>
