@@ -69,7 +69,7 @@ const runInfo = (result: string) => ({
     { name: "target_codec", start: "", end: "hevc", changedBy: "encode", secret: false },
     { name: "title", start: "Sample (2020)", end: "Sample (2020)", changedBy: null, secret: false },
   ],
-  summary: { result, originalBytes: 8 * GB, finalBytes: result === "converted" ? 4.7 * GB : 0, savedPercent: result === "converted" ? 41 : 0, outputPath: "/media/movies/Sample (2020).mkv", tookMs: 912000, tempRemoved: result === "converted",
+  summary: { result, originalBytes: 8 * GB, finalBytes: result === "converted" ? 4.7 * GB : 0, savedPercent: result === "converted" ? 41 : 0, outputPath: "/media/movies/Sample (2020).mkv", tookMs: 912000, tempRemoved: result === "converted", passes: result === "converted" ? 1 : 0, bytesWritten: result === "converted" ? 4.7 * GB : 0,
     before: { video: "H.264 1920x1080, 8.0 Mbps", audio: "2 tracks: eng, jpn", subtitles: "English, English SDH, German", durationSec: 6312.4 },
     after: result === "converted" ? { video: "HEVC 1920x1080, 2.9 Mbps", audio: "1 track: eng AAC stereo", subtitles: "German inside · English, English SDH as .srt", durationSec: 6312.4 } : undefined },
 });

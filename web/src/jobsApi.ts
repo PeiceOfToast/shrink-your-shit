@@ -34,7 +34,7 @@ export interface LogStep { name: string; startedAt: string | null; tookMs: numbe
 export interface LogStart { reason: string; appVersion: string; workflow: { name: string; revision: number } }
 export interface LogVariable { name: string; start?: string; end?: string; changedBy: string | null; secret: boolean } // a secret has no start or end
 export interface LogSide { video?: string; audio?: string; subtitles?: string; durationSec?: number }
-export interface LogSummary { result: string; originalBytes: number; finalBytes: number; savedPercent: number; outputPath: string; tookMs: number; tempRemoved: boolean; before?: LogSide; after?: LogSide }
+export interface LogSummary { result: string; originalBytes: number; finalBytes: number; savedPercent: number; outputPath: string; tookMs: number; tempRemoved: boolean; before?: LogSide; after?: LogSide; passes?: number; bytesWritten?: number /* NEW (log spec R-section 4, workshop PR 1): shown only when the server sends them */ }
 export interface JobLog { state: string; steps: LogStep[]; final: string | null; start?: LogStart | null; variables?: LogVariable[]; summary?: LogSummary | null }
 export async function getJobLog(id: string): Promise<Answer<JobLog>> {
   if (MOCK) return mockJobLog(id);
