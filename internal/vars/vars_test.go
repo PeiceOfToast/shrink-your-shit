@@ -198,8 +198,9 @@ func TestValues(t *testing.T) {
 		OutputPath: "/out/Movie.mkv", NewSize: 1250,
 		Variables: []Own{{Name: "keep_audio", Type: "boolean", Value: true}, {Name: "api_key", Type: "secret", Value: "s3cret"}}}
 	got := v.Values()
-	want := map[string]string{"file_name": "Movie (2019).mkv", "title": "Movie (2019)", "ext": "mkv", "folder": "/media",
-		"path": filepath.Join("/media", "Movie (2019).mkv"), "library": "Films", "library_root": "/media",
+	want := map[string]string{"file_name": "Movie (2019).mkv", "title": "Movie (2019)", "ext": "mkv",
+		"folder": filepath.Dir(filepath.Join("/media", "Movie (2019).mkv")), // the source's own separator, so Windows agrees
+		"path":   filepath.Join("/media", "Movie (2019).mkv"), "library": "Films", "library_root": "/media",
 		"size_bytes": "2000", "container": "mkv", "video_codec": "h264", "width": "1920", "height": "1080",
 		"resolution": "1080p", "hdr": "no", "duration": "1:45:12", "bitrate_kbps": "8000",
 		"audio_languages": "eng, jpn", "audio_codecs": "ac3, aac", "audio_channels": "6, 2",
