@@ -193,16 +193,16 @@ func Definitions() []StepDefinition {
 					"Each library gets a folder beside it, e.g. /media/movies (shrunk). Same disk, and it works when one workflow serves several libraries.",
 					"Every converted file goes into the folder below, in the same sub-folders as in its library."}), "next_to_library", "Where new files go", ""),
 					"Pick a folder next to each library, or one folder for all of them. Your originals stay where they are."),
-				"folder": map[string]any{"type": "string", "title": "Folder", "description": "New files go to this folder, in the same sub-folders. You can use variables, like {{library}}.",
-					"x-placeholder": "/media/movies (shrunk)", "x-ui": map[string]any{"widget": "folder"}},
+				"folder": templated(map[string]any{"type": "string", "title": "Folder", "description": "New files go to this folder, in the same sub-folders. You can use variables, like {{library}}.",
+					"x-placeholder": "/media/movies (shrunk)", "x-ui": map[string]any{"widget": "folder"}}),
 				// W4b: names from {{name}} variables. Empty keeps today's names, so nothing changes for a
 				// workflow saved before these fields existed.
-				"outputName": described(map[string]any{"type": "string", "title": "Output file name", "maxLength": 200},
-					"Leave empty to keep the original's name. You can use variables, like {{title}} (smaller)."),
-				"srtName": described(map[string]any{"type": "string", "title": "Subtitle file name", "maxLength": 200},
-					"Leave empty to keep today's names. You can use variables, like {{title}}.{{sub_lang}}{{sub_kind}}.srt."),
-				"trackTitle": described(map[string]any{"type": "string", "title": "Audio track title", "maxLength": 200},
-					"Leave empty to keep each track's own title. You can use variables, like {{title}} ({{resolution}})."),
+				"outputName": templated(described(map[string]any{"type": "string", "title": "Output file name", "maxLength": 200},
+					"Leave empty to keep the original's name. You can use variables, like {{title}} (smaller).")),
+				"srtName": templated(described(map[string]any{"type": "string", "title": "Subtitle file name", "maxLength": 200},
+					"Leave empty to keep today's names. You can use variables, like {{title}}.{{sub_lang}}{{sub_kind}}.srt.")),
+				"trackTitle": templated(described(map[string]any{"type": "string", "title": "Audio track title", "maxLength": 200},
+					"Leave empty to keep each track's own title. You can use variables, like {{title}} ({{resolution}}).")),
 				// R8: checked after "Check the result" passes, before anything is moved. A new file bigger than its original is
 				// not saved when "keep"; "replace" saves it anyway. An absent value reads as replace (old workflows).
 				"ifBigger": withDefault(hinted(enum([]any{"keep", "replace"}, []string{"Keep the original", "Replace anyway"}), []string{
@@ -245,6 +245,14 @@ func hinted(s map[string]any, hints []string) map[string]any {
 
 func described(s map[string]any, d string) map[string]any {
 	s["description"] = d
+	return s
+}
+
+// templated marks a string field that takes {{name}} variables ("x-variables": true, design-joblog-vars
+// section 3): the editor shows the variable picker there, and the publish check reads the same flag, so
+// the fields that take variables and the fields that are checked are one list.
+func templated(s map[string]any) map[string]any {
+	s["x-variables"] = true
 	return s
 }
 

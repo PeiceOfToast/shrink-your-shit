@@ -239,3 +239,30 @@ func logTexts(t *testing.T, s *scenario) []string {
 	}
 	return out
 }
+
+// A name the filesystem would refuse is refused before the conversion, naming the setting that made it
+// (review2-504 P3: it used to convert, then fail at the final rename with "could not be put in place",
+// which Retry could never fix).
+func TestATooLongOutputNameStopsBeforeTheConversion(t *testing.T) {
+	s := newScenario(t)
+	long := strings.Repeat("a", 250) + ".mkv" // more than any of the two filesystems' limits
+	w := selectorsWorker(s, func(sel *rules.Selectors) {
+		sel.AfterConverting = "beside"
+		sel.OutputName = strings.Repeat("a", 250)
+	})
+	w.RunOne(context.Background()) // the failure is the job's, checked below
+	j := s.job()
+	if j.Status != jobs.Failed || !strings.Contains(j.Error, "The name from “Output file name” would be 254 characters long") ||
+		!strings.Contains(j.Error, "Nothing was changed.") {
+		t.Fatalf("status %s, error %q", j.Status, j.Error)
+	}
+	if n := len(encodeCalls(s)); n != 0 {
+		t.Errorf("%d encode(s) ran before the name was checked", n)
+	}
+	if read(s.src) != "original-bytes" {
+		t.Errorf("the original is %q", read(s.src))
+	}
+	if _, err := os.Stat(filepath.Join(s.dir, long)); err == nil {
+		t.Error("a file at the too-long name exists")
+	}
+}

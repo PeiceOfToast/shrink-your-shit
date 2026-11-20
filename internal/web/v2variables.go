@@ -45,11 +45,12 @@ func v2WorkflowVariables(api *http.ServeMux, store *jobs.Store) {
 		values := sample.values(store, f)
 		items := []map[string]any{}
 		for _, b := range workflow.Builtins {
-			if b.FieldOnly { // the .srt name takes it and nothing else does, so it is not offered on its own
-				continue
+			var fields any // the settings a field-only name belongs to (the .srt name's own two); null otherwise
+			if len(b.Fields) > 0 {
+				fields = b.Fields
 			}
 			items = append(items, map[string]any{"name": b.Name, "description": b.Description,
-				"group": b.Group, "value": valueOrNil(values, b.Name), "fields": nil})
+				"group": b.Group, "value": valueOrNil(values, b.Name), "fields": fields})
 		}
 		for _, v := range ownVariables(store, id) {
 			items = append(items, map[string]any{"name": v.Name, "description": v.Description,
