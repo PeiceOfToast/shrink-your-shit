@@ -369,7 +369,7 @@ function EarlierWorkflow({ v }: { v: Library }) {
   if (!n.possible) return <><p className="muted" role="note">{plural(n.earlier, "file was", "files were")} converted with an earlier workflow. {n.notPossible.every((x) => x.code === "original_deleted")
     ? (n.earlier === 1 ? "Its original was deleted, so it can't" : "Their originals were deleted, so they can't") + " be converted again." : "They can't be converted again: " + n.notPossible.map((x) => x.message).join(" ")}</p>{done}</>;
   return <div className="stack">
-    <p className="muted" role="note">{plural(n.earlier, "file was", "files were")} converted with an earlier workflow. <button ref={opener} className="btn sm ghost" type="button" aria-expanded={ask} onClick={() => (setErr(""), setAsk(!ask))}>Convert them again…</button></p>
+    <p className="muted" role="note">{plural(n.earlier, "file was", "files were")} converted with an earlier workflow. <button ref={opener} className="linkbtn" style={{ color: "var(--accent-text)" }} type="button" aria-expanded={ask} onClick={() => (setErr(""), setAsk(!ask))}>Convert them again…</button></p>
     {ask && <div role="alertdialog" aria-labelledby="ea-q" aria-describedby="ea-d" className="stack" onKeyDown={(k) => k.key === "Escape" && (k.stopPropagation(), back())}
       style={{ padding: 12, border: "1px solid var(--border-strong)", borderRadius: "var(--radius)", background: "var(--raised)" }}>
       <strong id="ea-q">Convert {plural(n.possible, "file", "files")} again{wfName}?</strong>
