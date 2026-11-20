@@ -293,6 +293,10 @@ func (p Plan) ffmpegArgs(in, out, gpu string) []string {
 	args = append(args, "-i", in,
 		"-map", "0", "-map", "-0:d",
 		"-c", "copy",
+		// ffmpeg holds a stream's packets to keep the output interleaved and stops at its small default
+		// cap (R6: "Too many packets buffered for output stream"); a sparse stream — a subtitle cue
+		// near the end, an attachment — can fall that far behind on a file it would otherwise write.
+		"-max_muxing_queue_size", "4096",
 	)
 	if p.Video.Copy { // repackaged: the video as it is (the global -c copy), audio as planned
 		args = append(args, p.trackArgs()...)
