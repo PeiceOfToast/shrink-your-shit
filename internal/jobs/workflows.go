@@ -429,7 +429,7 @@ func (s *Store) WorkflowRunsSince(flowID int64, since string) (WorkflowRuns, err
 	var last sql.NullString
 	err := s.db.QueryRow(`SELECT
   COALESCE(SUM(j.status IN ('queued','running')),0),
-  COALESCE(SUM(`+convertedNow("j")+` AND j.updated>=? AND `+newestJobOf("j")+`),0),
+  COALESCE(SUM(`+convertedNow("j")+` AND j.updated>=? AND `+newestConvertedOf("j")+`),0),
   COALESCE(SUM(j.status IN ('failed','kept') AND j.updated>=? AND `+newestJobOf("j")+`),0),
   MAX(CASE WHEN j.status IN ('done','failed','kept') THEN j.updated END)
 FROM jobs j JOIN libraries l ON l.id=j.library_id WHERE l.flow_id=?`, since, since, flowID).Scan(&r.Active, &r.Completed, &r.Failed, &last)

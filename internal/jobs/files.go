@@ -85,6 +85,12 @@ func newestJobOf(t string) string {
 	return t + `.id IN (SELECT MAX(id) FROM jobs GROUP BY path, library_id)`
 }
 
+// newestConvertedOf is newestJobOf with restored conversions left out: when the newer conversion was
+// restored, the older one is the file again and is its newest (review #431).
+func newestConvertedOf(t string) string {
+	return t + `.id IN (SELECT MAX(id) FROM jobs WHERE status<>'done' OR ` + notRestoredSQL("jobs.id") + ` GROUP BY path, library_id)`
+}
+
 // jobWhere is each job card's condition.
 var jobWhere = map[string]string{
 	CardUnprocessed: "j.status='queued'",
