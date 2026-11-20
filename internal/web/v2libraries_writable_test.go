@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A library the app can't write to says so on the libraries API: writable false, with the message the Libraries
@@ -67,5 +68,35 @@ func TestV2LibraryWritableField(t *testing.T) {
 	}
 	if w, msg := get(); !w || strings.TrimSpace(msg) != "" {
 		t.Errorf("writable again: writable %v, message %q", w, msg)
+	}
+}
+
+// While a folder's first write probe is still running (a slow or hung mount), the list does not call the folder
+// read-only: writable stays true and there is no message until the probe answers.
+func TestV2LibraryUnansweredWriteProbeIsNotReadOnly(t *testing.T) {
+	srv, _, _, _ := libServer(t, false)
+	block := make(chan struct{})
+	oldCheck, oldWait := writeCheck, writeTimeout
+	writeCheck = func(string) bool { <-block; return false }
+	writeTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { close(block); writeCheck, writeTimeout = oldCheck, oldWait })
+
+	dir := filepath.Join(t.TempDir(), "slow")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	code, body, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/libraries", body: `{"name":"Slow","paths":[` + strconv.Quote(dir) + `]}`, ctype: "application/json"})
+	if code != 201 {
+		t.Fatalf("add %d %s", code, body)
+	}
+	id := decode[v2Library](t, body).ID
+	for _, path := range []string{"/api/v2/libraries/" + id, "/api/v2/libraries"} {
+		code, body, _ := do(t, nil, srv, call{method: "GET", path: path})
+		if code != 200 {
+			t.Fatalf("GET %s: %d %s", path, code, body)
+		}
+		if strings.Contains(body, "Can't write to this folder") || strings.Contains(body, `"writable":false`) {
+			t.Errorf("GET %s while the probe is still running reports the folder read-only: %s", path, body)
+		}
 	}
 }
