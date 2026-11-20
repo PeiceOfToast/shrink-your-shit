@@ -182,8 +182,20 @@ func TestV2Workflows(t *testing.T) {
 	cyc := d3.Workflow
 	cyc.Edges = append(cyc.Edges, workflow.Edge{ID: workflow.NewID(), From: cyc.Nodes[5].ID, FromPort: "success", To: cyc.Nodes[2].ID, ToPort: "in"})
 	vb, _ := json.Marshal(map[string]any{"workflow": cyc})
-	if _, body := send("POST", "/api/v2/workflows/"+id+"/validate", string(vb), ""); !strings.Contains(body, "cycle_without_loop") || !strings.Contains(body, `"stackable":false`) {
-		t.Errorf("validate %s", body)
+	_, vbody := send("POST", "/api/v2/workflows/"+id+"/validate", string(vb), "")
+	if !strings.Contains(vbody, "cycle_without_loop") || !strings.Contains(vbody, `"stackable":false`) {
+		t.Errorf("validate %s", vbody)
+	}
+	// W11 engine half: the editor's per-step place and per-type add rules travel with the check
+	v := decode[map[string]any](t, vbody)
+	places, _ := v["stepPlaces"].(map[string]any)
+	adds, _ := v["addSteps"].(map[string]any)
+	first, _ := places[cyc.Nodes[0].ID].(map[string]any)
+	convert, _ := adds[workflow.TypeConvert].(map[string]any)
+	if len(places) != len(cyc.Nodes) || len(adds) == 0 ||
+		first["fixedPlace"] != true || first["fixedReason"] != "The steps that convert run in a set order for now, so they can't be moved or deleted. To skip this step, turn it off." ||
+		convert["addable"] != false || convert["reason"] != "Can't run among the steps that convert yet." || convert["after"] != "" {
+		t.Errorf("validate places %v adds %v", places, adds)
 	}
 
 	// meta, filters, sort and paging (the list convention)
