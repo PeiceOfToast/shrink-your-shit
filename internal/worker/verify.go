@@ -616,14 +616,28 @@ func plural(n int, one, many string) string {
 // macroblock in one P-frame, as in a copied file); more than that means the source is failing.
 const maxDamagedPercent = 1
 
-// sourceFrames is the main video stream's picture count, as duration times frame rate (0 when either is unknown).
-func sourceFrames(src media.Info) int64 {
+// sourceFrameCount is the main video stream's picture count: what the stream states, else its own duration times
+// its frame rate. exact is false when only the container's duration was there: audio or subtitles may run past
+// the video, so that count can be too high and must not decide anything on its own.
+func sourceFrameCount(src media.Info) (frames int64, exact bool) {
 	for _, s := range src.Streams {
 		if s.Type == "video" && !s.AttachedPic {
-			return int64(src.DurationSec*s.FrameRate + 0.5)
+			switch {
+			case s.Frames > 0:
+				return s.Frames, true
+			case s.Duration > 0:
+				return int64(s.Duration*s.FrameRate + 0.5), true
+			}
+			return int64(src.DurationSec*s.FrameRate + 0.5), false
 		}
 	}
-	return 0
+	return 0, false
+}
+
+// sourceFrames is the main video stream's picture count (0 when unknown); see sourceFrameCount.
+func sourceFrames(src media.Info) int64 {
+	n, _ := sourceFrameCount(src)
+	return n
 }
 
 // damageTolerated says whether an original's damage is little enough to convert: no damage to the file as a

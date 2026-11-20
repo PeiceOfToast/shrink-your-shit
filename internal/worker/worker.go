@@ -1035,8 +1035,12 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	// Errors ffmpeg reported while reading the original mean it is damaged: converting it would bake
 	// the damage in and delete the only copy that might still be repaired or fetched again.
-	frames := sourceFrames(src)
-	if dmg := withLostFrames(sourceDamage(encErr), frames, decoded); dmg.Found() {
+	frames, exact := sourceFrameCount(src)
+	lost := frames
+	if !exact {
+		lost = 0 // a count from the container's duration is not evidence of lost frames: unknown is not damage
+	}
+	if dmg := withLostFrames(sourceDamage(encErr), lost, decoded); dmg.Found() {
 		if !damageTolerated(dmg, frames) {
 			// The check step records the refusal (its Result is the kept reason), then the lines the UI shows.
 			const reason = "the original file has errors, so it was not converted (converting would keep the damage)"

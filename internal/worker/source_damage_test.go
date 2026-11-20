@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 )
 
 // logHas reports whether the job log has a line on the given step and stream containing text.
@@ -192,5 +193,33 @@ func TestWithLostFrames(t *testing.T) {
 		if tol := damageTolerated(got, c.frames); tol != c.wantTolerated {
 			t.Errorf("%s: tolerated %v, want %v", c.name, tol, c.wantTolerated)
 		}
+	}
+}
+
+// The frames the lost-frame count is measured against come from the video stream: what it states, else its own
+// duration. Only the container's duration is a guess (audio can run past the video), so it is not exact.
+func TestSourceFrameCount(t *testing.T) {
+	video := func(s media.Stream, container float64) media.Info {
+		s.Type, s.FrameRate = "video", 25
+		return media.Info{DurationSec: container, Streams: []media.Stream{{Type: "audio"}, s}}
+	}
+	cases := []struct {
+		name      string
+		src       media.Info
+		want      int64
+		wantExact bool
+	}{
+		{"mp4 states the frame count", video(media.Stream{Frames: 250}, 11), 250, true},
+		{"mkv states the stream duration", video(media.Stream{Duration: 10}, 11), 250, true},
+		{"neither: the container's 11 s is a guess", video(media.Stream{}, 11), 275, false},
+	}
+	for _, c := range cases {
+		got, exact := sourceFrameCount(c.src)
+		if got != c.want || exact != c.wantExact {
+			t.Errorf("%s: frames %d exact %v, want %d exact %v", c.name, got, exact, c.want, c.wantExact)
+		}
+	}
+	if sourceFrames(video(media.Stream{Frames: 250}, 11)) != 250 {
+		t.Error("sourceFrames must report the stream's count")
 	}
 }

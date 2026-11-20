@@ -527,3 +527,22 @@ func TestRealLostFramesOriginalIsKept(t *testing.T) {
 		t.Fatalf("an original that loses frames silently must be kept, not converted: %s %q", j.Status, j.Error)
 	}
 }
+
+// A clean clip whose audio runs past its video (10 s picture, 11 s sound) is not damaged: its frames are all there,
+// and the container's longer duration must not make them look lost.
+func TestRealCleanClipWithLongerAudioConverts(t *testing.T) {
+	needTools(t)
+	for _, ext := range []string{"mkv", "mp4"} {
+		t.Run(ext, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "clip."+ext)
+			runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25:duration=10",
+				"-f", "lavfi", "-i", "sine=duration=11", "-c:v", "libx264", "-b:v", "2M", "-c:a", "aac", path)
+			st, id := realJob(t, path, 11)
+			realWorker(st, media.OSExec{}).run(t)
+			if j, _ := st.Get(id); j.Status != jobs.Done {
+				t.Fatalf("a clean clip with longer audio must convert: %s %q", j.Status, j.Error)
+			}
+		})
+	}
+}
