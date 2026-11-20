@@ -4,20 +4,27 @@ package rules
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 )
 
-// W4b: the audio track title is written only when the workflow's field is set; every default gives
-// today's arguments byte for byte.
+// W4b: the workflow's audio track title is the only change it makes: with it set, every audio track gets it and
+// nothing else changes. The automatic names of converted or added tracks (F6, TestTitlePrecedence) are cleared
+// here, so "today" is the arguments with no track titles at all.
 func TestTrackTitleArgs(t *testing.T) {
 	info := h264(1920, 1080, 8000,
 		media.Stream{Index: 1, Type: "audio", Codec: "ac3", Channels: 6, Language: "eng"},
 		media.Stream{Index: 2, Type: "audio", Codec: "aac", Channels: 2, Language: "jpn"})
 	p := DefaultSelectors(3).Template().Compile(info)
-	today := strings.Join(p.FFmpegArgs("i", "o"), " ")
+	untitled := p
+	untitled.Tracks = slices.Clone(p.Tracks)
+	for i := range untitled.Tracks {
+		untitled.Tracks[i].Title = ""
+	}
+	today := strings.Join(untitled.FFmpegArgs("i", "o"), " ")
 	if strings.Contains(today, "title=") {
 		t.Errorf("no title is set, but: %s", today)
 	}

@@ -729,8 +729,8 @@ type Verification struct {
 func (s Snapshot) Fingerprint() string {
 	p := s.Plan
 	p.Skip, p.SkipCode, p.Reason = "", "", ""
-	p.Title, p.AudioTracks = "", 0 // the run's reading of TrackTitle for this file, not a setting
-	p.Steps = nil                  // the log's words about this one file, not a setting: see Fingerprint's comment
+	p.Title, p.AudioTracks = "", 0                 // the run's reading of TrackTitle for this file, not a setting
+	p.Steps = nil                                  // the log's words about this one file, not a setting: see Fingerprint's comment
 	p.Tracks = append([]TrackOp(nil), p.Tracks...) // a copy, so the track titles leave the fingerprint and the plan keeps them
 	for i := range p.Tracks {
 		p.Tracks[i].Title = ""
