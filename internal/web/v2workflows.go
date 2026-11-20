@@ -108,7 +108,8 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 	api.HandleFunc("GET /api/v2/templates", func(w http.ResponseWriter, r *http.Request) {
 		items := []map[string]any{{"id": "shrink_videos", "name": "Shrink videos", "fileType": "video",
 			"description": "Converts videos to a smaller format, keeping the picture and the sound you choose.",
-			"steps":       stepNames(workflow.Preset()), "changesOriginals": false}}
+			"steps":       stepNames(workflow.Preset()), "changesOriginals": false,
+			"workflow": workflow.Preset()}} // the whole document, as PUT .../draft takes it ("Start from Shrink videos")
 		writeJSON(w, map[string]any{"items": items, "total": len(items)})
 	})
 
