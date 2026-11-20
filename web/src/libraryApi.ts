@@ -54,7 +54,7 @@ export async function scanLibrary(id: string): Promise<Answer<unknown>> {
 }
 
 export async function getSettings(): Promise<Answer<FirstRunSettings>> {
-  if (MOCK) { const s = mock.mockState().settings; return { firstRunDone: s.firstRunDone, firstRunStep: s.firstRunStep, firstRunLibrary: s.firstRunLibrary ?? null, scanEvery: s.scanEvery, scanEverySource: s.scanEverySource, scanEveryMin: 15, scanEveryMax: 86400, languages: s.languages ?? ["eng"], keepOriginalsDays: s.keepOriginalsDays ?? 7, logKeepDays: s.logKeepDays ?? 30, trashPath: "Kept next to each file, in a folder called .syp-trash", authRequired: true, checkForUpdates: !!s.checkForUpdates }; }
+  if (MOCK) { const s = mock.mockState().settings; return { firstRunDone: s.firstRunDone, firstRunStep: s.firstRunStep, firstRunLibrary: s.firstRunLibrary ?? null, scanEvery: s.scanEvery, scanEverySource: s.scanEverySource, scanEveryMin: 15, scanEveryMax: 86400, languages: s.languages ?? ["eng"], keepOriginalsDays: s.keepOriginalsDays ?? 7, logKeepDays: s.logKeepDays ?? 30, trashPath: "Kept next to each file, in a folder called .syp-trash", authRequired: true, checkForUpdates: s.checkForUpdates !== false }; }
   return call("GET", "/api/v2/settings"); // #111: v1's settings at the v2 path
 }
 // #324 update notice: GET is the last check, kept (asks GitHub for nothing); POST check asks now (409 updates_off when off).
@@ -72,7 +72,7 @@ let mockInstall: UpdateNotice["install"]["state"] | null = null; // set by a moc
 let mockRolled = false; // set by a mock Roll back click: the sample then runs the previous version
 // ?upd=can|jobs|waiting|downloading|installing|failed|done|rolledback|docker|commands|macos|windows|source picks the update block.
 const upd = () => new URLSearchParams(location.search).get("upd") ?? "";
-const mockUpdate = (): UpdateNotice => { const on = !!mock.mockState().settings.checkForUpdates, q = new URLSearchParams(location.search), u = upd();
+const mockUpdate = (): UpdateNotice => { const on = mock.mockState().settings.checkForUpdates !== false, q = new URLSearchParams(location.search), u = upd();
   const up = q.has("update") || (!!u && u !== "done"), it = u === "docker" ? "docker" : u === "windows" ? "windows" : u === "source" ? "source" : "script";
   const st = mockInstall ?? (["waiting", "downloading", "installing", "failed"].includes(u) ? u as UpdateNotice["install"]["state"] : "idle");
   const cmd = "curl -fsSL https://raw.githubusercontent.com/PeiceOfToast/shrink-your-shit/main/install.sh | sh", helper = it === "script" && !["docker", "commands", "macos"].includes(u);

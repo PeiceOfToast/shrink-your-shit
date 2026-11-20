@@ -160,6 +160,7 @@ table.tbl{width:100%;border-collapse:collapse}
 .tbl td .sub{display:block;color:var(--text-2);font-size:var(--fs-sm)}
 .tbl a{font-weight:600;text-decoration:none}
 .tbl a:hover{text-decoration:underline}
+.tbl p.st a{color:var(--accent-text);text-decoration:underline} /* a link in a status line reads as a link (QA #439) */
 .tbl a.ul{text-decoration:underline}
 .tools{display:flex;gap:var(--gap);align-items:center;flex-wrap:wrap;padding:10px var(--pad);border-bottom:1px solid var(--border)}
 .bar{height:6px;border-radius:3px;background:var(--raised);overflow:hidden;min-width:70px}
