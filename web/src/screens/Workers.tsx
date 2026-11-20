@@ -280,14 +280,16 @@ function StartStop({ w, onDone }: { w: Worker; onDone: (m: string) => void }) {
 // design 7.2: each worker's own switch (its row's first control). On = going; off while it finishes its file (draining),
 // with the words saying so; disabled when the worker is offline or stalled. Turning off a converting worker asks first.
 function WorkerSwitch({ w, onDone }: { w: Worker; onDone: (m: string) => void }) {
-  const [asking, setAsking] = useState(false), [busy, setBusy] = useState(false), on = going(w), gone = w.status === "offline" || w.status === "stalled", finishing = w.status === "draining";
+  const [asking, setAsking] = useState(false), [busy, setBusy] = useState(false), [want, setWant] = useState<boolean | null>(null), on = going(w), gone = w.status === "offline" || w.status === "stalled", finishing = w.status === "draining";
+  // review2 #451: the switch shows what was asked until the server says so (a reload or heartbeat changes on), or the call fails
+  useEffect(() => setWant(null), [on]);
   if (asking) return <StopAsk w={w} onDone={(m) => (setAsking(false), onDone(m))} onCancel={() => setAsking(false)} />;
   const flip = async () => {
     if (on && w.currentJobIds.length) return setAsking(true);
-    setBusy(true); // one call at a time: a quick double flip must not send it twice
-    try { if (await act(workerAction(w.id, on ? "stop" : "start"), onDone)) onDone(w.name + (on ? " stopped." : " started.")); } finally { setBusy(false); }
+    setBusy(true); setWant(!on); // one call at a time: a quick double flip must not send it twice
+    try { if (await act(workerAction(w.id, on ? "stop" : "start"), onDone)) onDone(w.name + (on ? " stopped." : " started.")); else setWant(null); } finally { setBusy(false); }
   };
-  return <label className="sw"><input type="checkbox" role="switch" className="switch" checked={on} disabled={gone || busy} aria-label={w.name} onChange={flip} />
+  return <label className="sw"><input type="checkbox" role="switch" className="switch" checked={want ?? on} disabled={gone || busy} aria-label={w.name} onChange={flip} />
     <span className="sm">{on ? "On" : finishing ? "Stopping after its current files" : "Off"}</span></label>;
 }
 
