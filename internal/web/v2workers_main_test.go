@@ -96,7 +96,7 @@ func localWorkerServer(t *testing.T, chk *doctor.Checker) (*jobs.Store, *httptes
 func TestLocalEncoderForUsesTheMainFamilyPerFormat(t *testing.T) {
 	chk := fakeGraphics(t, "hevc_qsv", "h264_qsv")
 	st, srv := localWorkerServer(t, chk)
-	enc := func(codec string) string { e, _ := LocalEncoderFor(st, chk)(codec); return e }
+	enc := func(codec string) string { e, _ := LocalEncoderFor(st, chk)(codec, nil); return e }
 
 	if got := enc("libx265"); got != "hevc_qsv" {
 		t.Errorf("HEVC plan, main hevc_qsv: %q", got)
@@ -137,7 +137,7 @@ func TestLocalEncoderForUsesTheMainFamilyPerFormat(t *testing.T) {
 func TestLocalEncoderForLogsAFormatThatDidNotPass(t *testing.T) {
 	chk := fakeGraphicsPassing(t, []string{"hevc_qsv", "h264_qsv"}, "hevc_qsv")
 	st, srv := localWorkerServer(t, chk)
-	enc := LocalEncoderFor(st, chk)
+	enc := func(codec string) (string, string) { return LocalEncoderFor(st, chk)(codec, nil) }
 
 	if e, note := enc("libx264"); e != "" || note != "encoder h264_qsv didn't pass its test here; using the processor" {
 		t.Errorf("H.264 plan, h264_qsv failed: enc %q, note %q", e, note)
