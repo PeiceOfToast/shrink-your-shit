@@ -1003,7 +1003,14 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		stepNote(rules.StepAudio, rules.FoldedNote)
 	}
 	if plan.StyledSubsPlain { // design, 02:49Z: once per file
-		stepNote(rules.StepSubtitles, rules.StyledSubsNote)
+		note := rules.StyledSubsNote
+		if plan.Container == "webm" {
+			note = rules.StyledSubsWebMNote
+		}
+		stepNote(rules.StepSubtitles, note)
+	}
+	if plan.BitmapSubsDropped > 0 { // user bug 11-20: WebM can't hold picture subtitles, so they are left out
+		stepNote(rules.StepSubtitles, rules.BitmapSubsNote(plan.BitmapSubsDropped))
 	}
 	if plan.HDRNote != "" { // what the HDR conversion does not keep (S3)
 		stepNote(rules.StepConvertVideo, plan.HDRNote)
@@ -1275,6 +1282,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 		if errors.Is(terr, syscall.ENOSPC) || strings.Contains(encErr+terr.Error(), "No space left on device") {
 			return "", retryable(failed(diskFull, terr), retrySpace)
+		}
+		if words := headerWords(encErr); words != "" { // the new file's type can't hold a track: not damage
+			return "", failed(words, fmt.Errorf("%w: %s", terr, firstLines(encErr, 3)))
 		}
 		ferr := failed("Converting stopped with an error. Your original was not touched. Press Retry; if it keeps failing, the file may be damaged.", fmt.Errorf("%w: %s", terr, firstLines(encErr, 3)))
 		if killedBySignal(terr) { // stopped by the system (out of memory...), not a problem of the file
@@ -1748,6 +1758,29 @@ var readSourceState = media.FileState
 
 // goneWords: the original was moved or deleted while it was converted. A failure, never a damaged file.
 const goneWords = "The file was moved or deleted while it was being converted."
+
+// headerWords is the message for ffmpeg stopping before it wrote the new file's header: its type can't
+// hold a track as the plan maps it in (user bug 11-20). ffmpeg's own sentence about what is supported,
+// when it gives one, else plain words. "" when the error is not a header refusal, so a damaged file is
+// never called a file type's limit.
+func headerWords(encErr string) string {
+	if !strings.Contains(encErr, "Could not write header") {
+		return ""
+	}
+	why := ""
+	for _, line := range strings.Split(encErr, "\n") {
+		if !strings.Contains(line, "supported for") {
+			continue
+		}
+		if i := strings.Index(line, "] "); i >= 0 { // "[webm @ 0x...] Only VP8 ... are supported for WebM."
+			why = strings.TrimSpace(line[i+2:])
+		}
+	}
+	if why == "" {
+		return "ffmpeg couldn't write the new file. Your original was not touched."
+	}
+	return "ffmpeg couldn't write the new file: " + why + " Your original was not touched."
+}
 
 // sourceGone says whether nothing is at the original's path any more. Only a missing name counts: a
 // different file put in its place is a change (kept), and any other error proves nothing about the file.
