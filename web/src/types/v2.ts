@@ -164,7 +164,8 @@ export interface Workflow { // GET /workflows (contract: Workflows, revisions an
   changesOriginals: boolean;
   createdAt: Time; changedAt: Time;
 }
-export interface Template { id: ID; name: string; fileType: FileType; description: string; steps: string[]; changesOriginals: boolean } // GET /templates
+// GET /templates: workflow (#468) is the whole document in the draft PUT's shape; "Start from Shrink videos" fills an empty workflow with it
+export interface Template { id: ID; name: string; fileType: FileType; description: string; steps: string[]; changesOriginals: boolean; workflow?: WorkflowDoc }
 
 // Workflows, revisions and the graph (contract v2): the draft the Stack view edits.
 export interface WorkflowRevision {

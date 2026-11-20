@@ -8,7 +8,7 @@ import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
 import { deleteNode, groupOf, insertAfter, moveNode, newNode, order } from "../stepEdits"; // the steps in running order: a property of the document, not data
 import { useData } from "../useData";
-import { getDraft, getLadder, getWorkflow, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
+import { getDraft, getLadder, getWorkflow, listTemplates, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
 import { Link, navigate, onLeave } from "../router";
 import { Browse } from "../FolderPicker";
 import { listLibraries, shrunk } from "../libraryApi";
@@ -408,6 +408,12 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
   }, [dirty]);
   const edit = (d: WorkflowDoc) => (setHist({ docs: [...hist.docs.slice(0, hist.at + 1), d], at: hist.at + 1 }), setChecked(false), setPanel(null), setSaid(""), setGone(null));
   const update = (n: Node) => edit({ ...doc, nodes: doc.nodes.map((x) => (x.id === n.id ? n : x)) });
+  // "Start from Shrink videos": the template's whole document as one edit, so Undo (the note below) takes it back
+  const startShrink = async () => {
+    const t = (await act(listTemplates(), setSaid))?.find((x) => x.id === "shrink_videos")?.workflow;
+    if (!t) return setSaid("The Shrink videos template isn't available right now.");
+    edit(t); setGone({ text: "Started from Shrink videos. Change any step as you like.", at: hist.at + 1 });
+  };
   const defOf = (t: string) => defs.find((d) => d.type === t);
   const nameOf = (x: Node) => x.name ?? defOf(x.type)?.name ?? x.type;
   // the delete bar stays 8 s, and longer while it has focus or the pointer is on it
@@ -502,7 +508,8 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
         {only && <div className="note"><Icon id="i-info" /><div className="stack" style={{ gap: 6 }}>
           <strong>This workflow has no steps yet</strong>
           <span>Every workflow starts with Library files: the videos from the libraries that use it. Add what should happen to them next.</span>
-          <div className="row"><button className="btn sm primary" type="button" autoFocus onClick={openAdd}><Icon id="i-plus" />Add the first step</button></div>
+          <div className="row"><button className="btn sm primary" type="button" autoFocus onClick={openAdd}><Icon id="i-plus" />Add the first step</button>
+            <button className="btn sm" type="button" onClick={startShrink}>Start from Shrink videos</button></div>
         </div></div>}
         <ol className="steps">{list.map((n, i) => {
           // the server's places: no answer for a step means it's fixed. Moves stay inside the first and last steps.
