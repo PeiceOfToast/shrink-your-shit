@@ -616,14 +616,40 @@ func plural(n int, one, many string) string {
 // macroblock in one P-frame, as in a copied file); more than that means the source is failing.
 const maxDamagedPercent = 1
 
-// sourceFrames is the main video stream's picture count, as duration times frame rate (0 when either is unknown).
-func sourceFrames(src media.Info) int64 {
+// sourceFrameCount is the main video stream's picture count as ffmpeg outputs it: the stream's own duration times
+// its frame rate, else the count the stream states. The duration comes first because an mp4 edit list (a trimmed
+// start) keeps the trimmed frames in the stream's count but not in its duration, and ffmpeg outputs only the
+// duration's frames. exact is false when only the container's duration was there: audio or subtitles may run past
+// the video, so that count can be too high and must not decide anything on its own.
+func sourceFrameCount(src media.Info) (frames int64, exact bool) {
 	for _, s := range src.Streams {
 		if s.Type == "video" && !s.AttachedPic {
-			return int64(src.DurationSec*s.FrameRate + 0.5)
+			switch {
+			case s.Duration > 0:
+				return int64(s.Duration*s.FrameRate + 0.5), true
+			case s.Frames > 0:
+				return s.Frames, true
+			}
+			return int64(src.DurationSec*s.FrameRate + 0.5), false
 		}
 	}
-	return 0
+	return 0, false
+}
+
+// sourceFrames is the main video stream's picture count (0 when unknown); see sourceFrameCount.
+func sourceFrames(src media.Info) int64 {
+	n, _ := sourceFrameCount(src)
+	return n
+}
+
+// expectedPackets is the main video frame count the converted file must match. counted is the original's packet
+// count, which for an mp4 edit list includes the trimmed frames ffmpeg never outputs; when the presented count is
+// exact, that is the number to expect.
+func expectedPackets(src media.Info, counted int64) int64 {
+	if n, exact := sourceFrameCount(src); exact && n > 0 {
+		return n
+	}
+	return counted
 }
 
 // damageTolerated says whether an original's damage is little enough to convert: no damage to the file as a
@@ -634,6 +660,27 @@ func damageTolerated(rep sourceDamageReport, frames int64) bool {
 		return false
 	}
 	return int64(rep.Pictures)*100 <= frames*maxDamagedPercent
+}
+
+// withLostFrames counts frames that never came out of the decoder as damaged pictures. A stretch can lose frames
+// with no decoder message (the 300000-byte wreck in the real tests: 470 of 500 decoded, no error line). decoded is
+// the frame count the conversion reported; -1 means it did not say (a remote worker), and then nothing is added.
+func withLostFrames(rep sourceDamageReport, frames, decoded int64) sourceDamageReport {
+	if frames <= 0 || decoded < 0 || decoded >= frames {
+		return rep
+	}
+	lost := frames - decoded
+	// The pictures ffmpeg names and the frames it drops are usually the same ones (the QA wreck had 54 named vs 53
+	// lost), so the larger count is the damage, not their sum.
+	if int(lost) > rep.Pictures {
+		rep.Pictures = int(lost)
+	}
+	line := fmt.Sprintf("%d of %d frames were not decoded, and ffmpeg printed no message for them", lost, frames)
+	if len(rep.Lines) > 0 {
+		line = fmt.Sprintf("%d of %d frames were not decoded", lost, frames)
+	}
+	rep.Lines = append(rep.Lines, line)
+	return rep
 }
 
 // damagedShare says how much damage there is, for the job log: the pictures out of the frames, and the share.
