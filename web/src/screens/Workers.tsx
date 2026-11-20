@@ -328,6 +328,7 @@ export function Workers() {
               <p className="sm muted">{[w.host, OS[w.os ?? ""], w.arch, w.lastHeartbeatAt && "last heard " + ago(w.lastHeartbeatAt)].filter(Boolean).join(" · ")}</p>
               {w.tags.length > 0 && <div className="chips" aria-label="Tags">{w.tags.map((x) => <span className="mchip" key={x}>{x}</span>)}</div>}
               <p><span className={"pill " + cls}><Icon id={icon} />{t}</span> <span className="sm">{plural(w.slots.cpu.total, "file", "files")} at once · <Link to={"/workers/" + encodeURIComponent(w.id) + "?tab=limits"}>Change</Link></span></p>
+              <Live w={w} />{/* user item 3: GPU % on the Workers list too (QA #444) */}
               {w.currentJobIds.map((id) => <p key={id} className="sm">Converting <Link className="mono" to={"/jobs?tab=running&job=" + encodeURIComponent(id)}>{names[id] ?? "Job " + id}</Link></p>)}
               <div><h4 className="sm muted ec-h">Encoders</h4><EncoderCards w={w} reload={ws.reload} /></div>
             </div>
