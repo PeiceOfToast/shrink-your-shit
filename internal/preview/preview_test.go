@@ -416,9 +416,11 @@ func TestSampleSaysWhichSubtitlesStayInside(t *testing.T) {
 		st, _ := os.Stat(filepath.Join(dir, name))
 		sel := rules.DefaultSelectors(3)
 		sel.Subtitles = subtitles
-		return strings.Join(p.Sample(context.Background(), dir, filepath.Join(dir, name), st, sel.Template()).Lines, "|")
+		tp := sel.Template()
+		tp.Languages = "eng" // the fixtures' audio has no language: srt writes only these
+		return strings.Join(p.Sample(context.Background(), dir, filepath.Join(dir, name), st, tp).Lines, "|")
 	}
-	stay := "Picture subtitles stay inside the file; only text subtitles are saved as .srt files."
+	stay := "Only text subtitles in your languages are saved as .srt files; the others stay inside the file."
 	if s := sample("subs.mkv", "srt"); !strings.Contains(s, "Subtitles: 2 subtitles kept, 1 saved as separate .srt files|"+stay) {
 		t.Errorf("srt with pictures: %q", s)
 	}

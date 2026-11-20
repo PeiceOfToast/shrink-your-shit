@@ -213,6 +213,7 @@ func TestOverviewTimings(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw.Exec(`DROP INDEX IF EXISTS jobs_done_path`)
+	raw.Exec(`ALTER TABLE jobs DROP COLUMN workflow_rev`) // step 51 runs again on the reopen
 	raw.Exec(`PRAGMA user_version = 50`)
 	raw.Close()
 	start := time.Now()

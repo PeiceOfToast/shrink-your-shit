@@ -370,6 +370,46 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine, libTotals *l
 			one(w, id, http.StatusOK)
 		}
 	})
+
+	// Convert again for the files converted with an earlier workflow: the summary, and the queueing the person
+	// confirms. Both use the per-file checks, so the bulk and the per-file action can't disagree.
+	api.HandleFunc("GET /api/v2/libraries/{id}/convert-again", func(w http.ResponseWriter, r *http.Request) {
+		id, ok := libID(w, r)
+		if !ok {
+			return
+		}
+		a, err := store.LibraryAgain(id, keepOriginalsDays(store))
+		if err != nil {
+			storeErr(w, err)
+			return
+		}
+		writeJSON(w, map[string]any{"earlier": a.Earlier, "possible": a.Possible, "notPossible": againGroupsJSON(a.NotPossible)})
+	})
+	api.HandleFunc("POST /api/v2/libraries/{id}/convert-again", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{}
+		if !readJSON(w, r, &in) {
+			return
+		}
+		id, ok := libID(w, r)
+		if !ok {
+			return
+		}
+		queued, refused, err := store.ConvertLibraryAgain(id, keepOriginalsDays(store))
+		if err != nil {
+			storeErr(w, err)
+			return
+		}
+		writeJSON(w, map[string]any{"queued": queued, "notPossible": againGroupsJSON(refused)})
+	})
+}
+
+// againGroupsJSON is the files a bulk Convert again refused, grouped by code ([] when none).
+func againGroupsJSON(gs []jobs.AgainGroup) []map[string]any {
+	out := []map[string]any{}
+	for _, g := range gs {
+		out = append(out, map[string]any{"code": g.Code, "message": g.Message, "count": g.Count})
+	}
+	return out
 }
 
 // scheduleLabel says how often libraries are looked at, in words.
