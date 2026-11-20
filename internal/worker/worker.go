@@ -120,7 +120,7 @@ type Worker struct {
 	// Encoder is the graphics encoder the local worker uses for a video codec (ffmpeg's name, e.g. libx264), or ""
 	// for the processor (or nil: the processor). A plan it can't do, and a graphics encode that fails, use the processor.
 	// note, when set, is the job-log line for a processor the worker fell back to (not set for a processor by choice).
-	Encoder func(codec string) (enc, note string)
+	Encoder func(codec string, hdr *rules.HDR) (enc, note string)
 	// verified is the probe of the new file the last check passed (S5: stored for its final path).
 	verified media.Info
 	// movedAside is the trash sentence for our earlier output this job moved aside (Convert again). The job's kept
@@ -980,7 +980,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	args := plan.FFmpegArgs(srcPath, tmp)
 	w.setPhase(secEncode) // the encoder choice and its notes belong to encode (log-spec section 4)
 	if w.remote == nil && w.Encoder != nil {
-		want, note := w.Encoder(plan.Video.Codec)
+		want, note := w.Encoder(plan.Video.Codec, plan.Video.HDR)
 		if want != "" && !plan.Video.Copy {
 			until, paused, err := w.Queue.EncoderPaused(w.ID)
 			var ok bool
