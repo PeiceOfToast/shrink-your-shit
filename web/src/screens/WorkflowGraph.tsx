@@ -204,15 +204,17 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
   // with their connections, copy/paste a step (its settings, not its connections)
   const rf = useReactFlow();
   const centre = () => { const box = document.querySelector(".gcanvas")?.getBoundingClientRect(); return box ? rf.screenToFlowPosition({ x: box.left + box.width / 2 - W / 2, y: box.top + box.height / 2 - 40 }) : { x: 0, y: 0 }; };
+  // a new Save step keeps the original when the new file is bigger (W8); a stored one without the field reads as replace
+  const startConfig = (d: StepDefinition): Record<string, unknown> => (d.type === "output.commit" ? { ifBigger: "keep" } : {});
   const addNode = (d: StepDefinition, base?: Node, at?: { x: number; y: number }) => {
-    const n: Node = base ? { ...structuredClone(base), id: newId() } : { id: newId(), type: d.type, typeVersion: d.typeVersion, config: {}, enabled: true };
+    const n: Node = base ? { ...structuredClone(base), id: newId() } : { id: newId(), type: d.type, typeVersion: d.typeVersion, config: startConfig(d), enabled: true };
     const p = at ?? centre();
     push({ doc: { ...doc, nodes: [...doc.nodes, n] }, layout: { ...layout, nodes: { ...layout.nodes, [n.id]: { x: Math.round(p.x), y: Math.round(p.y) } } } });
     setSel(n.id); setSelEdge(null); setSaid("Added " + (n.name ?? d.name) + ". Connect it from a port of another step.");
   };
   // item 4: a step dropped on a connection goes between its two ends; one added below the selected step links from its success port when that is free
   const insertStep = (d: StepDefinition, p: { x: number; y: number }, via?: { edge?: WorkflowDoc["edges"][number]; after?: Node; port?: string }) => {
-    const n: Node = { id: newId(), type: d.type, typeVersion: d.typeVersion, config: {}, enabled: true };
+    const n: Node = { id: newId(), type: d.type, typeVersion: d.typeVersion, config: startConfig(d), enabled: true };
     const inPort = d.inputs?.[0]?.name, canGoOn = !!inPort && (d.outputs ?? []).some((o) => o.name === "success");
     let edges = doc.edges, said = "Added " + d.name + ". Connect it from a port of another step.";
     if (via?.edge && canGoOn) {
