@@ -160,27 +160,36 @@ func (w *Worker) verify(ctx context.Context, src media.Info, exp rules.Expect, s
 		return kept("the new file cannot be read")
 	}
 	w.verified = out // the new file's probe, kept for the Files view once it is in place (S5)
-	outPackets := int64(-1)
-	if exp.VideoPackets > 0 {
-		ord := out.MainVideoOrdinal()
-		if ord < 0 {
-			return kept("the new file has no video")
-		}
-		cctx, ccancel := context.WithTimeout(ctx, countTimeout)
-		outPackets, err = media.CountVideoPackets(cctx, w.Exec, w.FFprobe, tmp, ord)
-		ccancel()
-		if err != nil {
-			return checkFailed(cctx, "counting the new file's video frames", err)
-		}
+	if exp.VideoPackets > 0 && out.MainVideoOrdinal() < 0 {
+		return kept("the new file has no video")
 	}
-	if problems := exp.Compare(out, outPackets); len(problems) > 0 {
+	// The shape is checked before the playback run, as before: a wrong file is refused without playing it.
+	// The frame count is the exception: it is known only after playback has read the file (P1), so it is
+	// checked below, after the run has reported what it read.
+	if problems := exp.Compare(out, -1); len(problems) > 0 {
 		return kept("%s", strings.Join(problems, "; "))
+	}
+	packets, counted, err := w.decodeCheck(ctx, out, tmp)
+	if err != nil {
+		return err
+	}
+	if exp.VideoPackets > 0 {
+		outPackets := packets
+		if !counted { // the run did not report a whole count (a sampled playback test): read the file
+			cctx, ccancel := context.WithTimeout(ctx, countTimeout)
+			outPackets, err = media.CountVideoPackets(cctx, w.Exec, w.FFprobe, tmp, out.MainVideoOrdinal())
+			ccancel()
+			if err != nil {
+				return checkFailed(cctx, "counting the new file's video frames", err)
+			}
+		}
+		// Only the frame count can be added here: the rest of the shape passed above.
+		if problems := exp.Compare(out, outPackets); len(problems) > 0 {
+			return kept("%s", strings.Join(problems, "; "))
+		}
 	}
 	// No size check: a checked conversion is kept even if it is not smaller ("always standardize",
 	// USER-REVIEW 2026-11-07). Its before and after sizes are recorded on the job and in the log.
-	if err := w.decodeCheck(ctx, out, tmp); err != nil {
-		return err
-	}
 	if exp.VideoCopied { // repackaged (S4): the video is the same bytes, so there is no picture to compare
 		return nil
 	}
@@ -193,9 +202,10 @@ func (w *Worker) verify(ctx context.Context, src media.Info, exp rules.Expect, s
 // ---- playback test ----
 
 // decodeCheck plays the new file's video and audio through ffmpeg's decoders to nowhere: any error means a
-// damaged file.
+// damaged file. It returns the video packet count the run itself reported, counted false when only samples
+// were played: a sample reads part of the file, so what it read is not the whole file's count (P1).
 // There is no way to turn it off: the floor is not removable (only "always" vs the default "auto").
-func (w *Worker) decodeCheck(ctx context.Context, out media.Info, tmp string) error {
+func (w *Worker) decodeCheck(ctx context.Context, out media.Info, tmp string) (packets int64, counted bool, err error) {
 	limit := w.FullDecodeMaxSec
 	if limit <= 0 {
 		limit = DefaultFullDecodeMaxSec
@@ -209,11 +219,11 @@ func (w *Worker) decodeCheck(ctx context.Context, out media.Info, tmp string) er
 	}
 	// Long file: three samples of a minute each, at the start, middle and end.
 	for _, start := range []float64{0, out.DurationSec/2 - 30, out.DurationSec - 65} {
-		if err := w.decodeRun(ctx, tmp, out, start, 60, 60, fps); err != nil {
-			return err
+		if _, _, err := w.decodeRun(ctx, tmp, out, start, 60, 60, fps); err != nil {
+			return 0, false, err
 		}
 	}
-	return nil
+	return 0, false, nil
 }
 
 // opusParserRe is the one message ffmpeg 8's demuxer prints for the last Opus packet of a good file, even
@@ -227,8 +237,37 @@ var (
 	numRe  = regexp.MustCompile(`[0-9]+`)
 )
 
-func (w *Worker) decodeRun(ctx context.Context, tmp string, out media.Info, start, length, playSec, fps float64) error {
-	args := []string{"-v", "error", "-xerror", "-nostdin", "-progress", "pipe:1"}
+// logLevelRe finds the level ffmpeg puts in front of each log line when asked for it (-loglevel
+// level+verbose): "[error] " at the start, or after the log context, which can be more than one part
+// ("[vist#0:0/h264 @ 0x...] [dec:h264 @ 0x...] [error] ...").
+var logLevelRe = regexp.MustCompile(`^(?:\[[^\]]*\] )*\[(quiet|panic|fatal|error|warning|info|verbose|debug|trace)\] `)
+
+// errorLines keeps only the error-level lines of a run logged with -loglevel level+verbose, with the level
+// marker removed: the text then reads as -v error writes it, which is what the playback check judges. A line
+// with no marker is kept as it is (a test runner answers with plain error text).
+func errorLines(raw []byte) string {
+	var kept []string
+	for _, l := range strings.Split(string(raw), "\n") {
+		m := logLevelRe.FindStringSubmatchIndex(l)
+		if m == nil {
+			kept = append(kept, l)
+			continue
+		}
+		switch l[m[2]:m[3]] {
+		case "panic", "fatal", "error":
+			kept = append(kept, l[:m[2]-1]+l[m[1]:]) // drop the marker and its space
+		}
+	}
+	return strings.Join(kept, "\n")
+}
+
+// decodeRun plays the file (all of it, or a sample) and returns the video packet count its own end-of-run
+// report states, counted false when there is no such report.
+func (w *Worker) decodeRun(ctx context.Context, tmp string, out media.Info, start, length, playSec, fps float64) (packets int64, counted bool, err error) {
+	// level+verbose: the report that says how many packets the run read is printed only at the verbose
+	// level (P1); its level markers let it be told from the errors, which the playback check is about.
+	// -nostats: the periodic progress lines would only pad the error output.
+	args := []string{"-loglevel", "level+verbose", "-nostats", "-xerror", "-nostdin", "-progress", "pipe:1"}
 	// -ss and -t go before -i as input options. With -copyts an output -t is an absolute end time, so a
 	// sample starting at 5 s with length 3 played nothing.
 	if length > 0 {
@@ -247,14 +286,19 @@ func (w *Worker) decodeRun(ctx context.Context, tmp string, out media.Info, star
 	dctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	progress, raw, err := w.Exec.Capture(dctx, w.FFmpeg, args...)
+	if v := out.Video(); v != nil {
+		if st, ok := media.InputStreamStats(string(raw), 0, v.Index); ok {
+			packets, counted = st.Packets, true
+		}
+	}
 	// The null muxer's dts warnings on an audio stream are timing, not decode errors (R2); video ones still count.
-	stderr, dropped := dropAudioTiming(string(raw))
+	stderr, dropped := dropAudioTiming(errorLines(raw))
 	if dropped > 0 {
 		log.Printf("playback test of %s: %d audio timestamp warnings from the muxer are not decode errors", tmp, dropped)
 	}
 	text := strings.TrimSpace(opusParserRe.ReplaceAllString(stderr, ""))
 	if errors.Is(dctx.Err(), context.DeadlineExceeded) {
-		return checkFailed(dctx, "the playback test of the new file", err)
+		return 0, false, checkFailed(dctx, "the playback test of the new file", err)
 	}
 	if err != nil || text != "" {
 		if text == "" {
@@ -267,13 +311,13 @@ func (w *Worker) decodeRun(ctx context.Context, tmp string, out media.Info, star
 				ke.Reason = audioReason(tracks, other)
 			}
 		}
-		return err
+		return 0, false, err
 	}
 	// A sample that played no frames proves nothing: keep the original rather than pass it silently.
 	if frame, ok := progressFrame(progress); length > 0 && (!ok || frame == 0) {
-		return playedNothingKept(progress, start, length, fps)
+		return 0, false, playedNothingKept(progress, start, length, fps)
 	}
-	return nil
+	return packets, counted, nil
 }
 
 // playedNothingKept is the refusal for a sampled playback test that decoded no frames.

@@ -37,7 +37,7 @@ func twoAudio() media.Info {
 func TestDecodeRunMapsAudio(t *testing.T) {
 	x := &argsExec{}
 	w := &Worker{Exec: x, FFmpeg: "ffmpeg"}
-	if err := w.decodeRun(context.Background(), "x.mkv", twoAudio(), 0, 0, 10, 24); err != nil {
+	if _, _, err := w.decodeRun(context.Background(), "x.mkv", twoAudio(), 0, 0, 10, 24); err != nil {
 		t.Fatalf("clean run: %v", err)
 	}
 	i := slices.Index(x.args, "-map")
@@ -76,7 +76,7 @@ func TestAudioErrorsAreAttributed(t *testing.T) {
 func TestAudioDamageKeepsWithTrackNamed(t *testing.T) {
 	x := &argsExec{stderr: "[aac @ 0x1] TYPE_FIL: Input buffer exhausted\n"}
 	w := &Worker{Exec: x, FFmpeg: "ffmpeg"}
-	err := w.decodeRun(context.Background(), "x.mkv", twoAudio(), 0, 0, 10, 24)
+	_, _, err := w.decodeRun(context.Background(), "x.mkv", twoAudio(), 0, 0, 10, 24)
 	var k *KeptError
 	if !errors.As(err, &k) {
 		t.Fatalf("decodeRun returned %v, want a *KeptError", err)

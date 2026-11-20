@@ -3,6 +3,7 @@
 import { call, failed, MOCK, type Answer } from "./api";
 import * as mock from "./mock";
 import { STEP_DEFS, addStepsOf, mockLadder, stackable, stepPlacesOf, summary, validate as checkDoc } from "./mock/steps";
+import { mockVariables, type VarList } from "./mock/variables";
 import type { AddStep, Layout, PublishPreview, StepDefinition, StepPlace, Template, ValidationIssue, Workflow, WorkflowDoc, WorkflowRevision } from "./types/v2";
 
 const enc = encodeURIComponent, base = (id: string) => "/api/v2/workflows/" + enc(id);
@@ -90,6 +91,11 @@ export interface Ladder {
   factors: { fps60: number; hdr: number };
 }
 let ladder: Promise<Answer<Ladder>> | null = null; // one fetch per page load: the ladder is fixed for a server's life
+// GET /api/v2/workflow/variables?workflow=<id>: the names the {{name}} fields take, with the sample file's values (the server
+// builds the list; the page checks names itself)
+export async function getVariables(workflowId: string): Promise<Answer<VarList>> {
+  return MOCK ? mockVariables() : call("GET", "/api/v2/workflow/variables?workflow=" + enc(workflowId));
+}
 export function getLadder(): Promise<Answer<Ladder>> {
   if (MOCK) return Promise.resolve({ ...mockLadder() }); // the sample's ladder, shaped as the engine's
   return (ladder ??= call<Ladder>("GET", "/api/v2/bitrate-ladder").then((r) => (failed(r) && (ladder = null), r)));

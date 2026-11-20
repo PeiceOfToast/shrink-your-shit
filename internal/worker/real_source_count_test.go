@@ -34,8 +34,10 @@ func (c *countReadsExec) Output(ctx context.Context, name string, args ...string
 }
 
 // P2: a real file whose container states its picture count (ffmpeg's mkv writes a DURATION tag) is converted
-// without reading the original a second time to count it: the one packet count is the new file's, the check's
-// number being the probe's own (see TestSourceCountIsNotReadAgainWhenTheContainerStatesIt for the fallback).
+// without reading the original a second time to count it, the check's number being the probe's own (see
+// TestSourceCountIsNotReadAgainWhenTheContainerStatesIt for the fallback). Since P1 the new file's count comes
+// from the playback run too (P1), so on this short sample nothing is counted at all: a second count read here
+// means the playback run's report was not used.
 func TestRealSourceCountIsNotReadAgain(t *testing.T) {
 	needTools(t)
 	dir := t.TempDir()
@@ -53,7 +55,12 @@ func TestRealSourceCountIsNotReadAgain(t *testing.T) {
 	if j, _ := st.Get(id); j.Status != jobs.Done {
 		t.Fatalf("%s %q", j.Status, j.Error)
 	}
-	if len(rec.counted) != 1 || rec.counted[0] == src {
-		t.Errorf("files read to count their packets: %v; want only the new file, never %s", rec.counted, src)
+	for _, f := range rec.counted {
+		if f == src {
+			t.Errorf("the original was read again to count its packets: %v", rec.counted)
+		}
+	}
+	if len(rec.counted) != 0 {
+		t.Errorf("files read to count their packets: %v; want none (the playback run's report gives the new file's count)", rec.counted)
 	}
 }
