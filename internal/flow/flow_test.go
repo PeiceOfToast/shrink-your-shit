@@ -430,7 +430,7 @@ func TestNextTimeOfDayAcrossClockChanges(t *testing.T) {
 		t.Skip(err)
 	}
 	for _, eve := range []time.Time{time.Date(2026, 3, 28, 22, 0, 0, 0, london), time.Date(2026, 10, 24, 22, 0, 0, 0, london)} {
-		at := NextTimeOfDay(eve, 2, 30)
+		at := nextTimeOfDay(eve, 2, 30)
 		if at.Hour() != 2 || at.Minute() != 30 || at.Day() != eve.Day()+1 || at.Location() != london {
 			t.Errorf("from %s: %s", eve, at)
 		}
@@ -443,7 +443,31 @@ func TestNextTimeOfDayAcrossClockChanges(t *testing.T) {
 	}
 	// still ahead today: today's
 	now := time.Date(2026, 3, 29, 1, 0, 0, 0, london)
-	if at := NextTimeOfDay(now, 2, 30); at.Day() != 29 || at.Hour() != 2 || at.Minute() != 30 {
+	if at := nextTimeOfDay(now, 2, 30); at.Day() != 29 || at.Hour() != 2 || at.Minute() != 30 {
 		t.Errorf("later today: %s", at)
+	}
+}
+
+// review2-548 P3a: a Wait whose time falls inside the spring-forward gap (02:00 in Berlin on 2026-03-29) is queued
+// to the clock's normalised time (03:00) and recognises that return as its own, so the file is not held another day.
+func TestWaitInsideTheSpringGapRecognisesItsReturn(t *testing.T) {
+	berlin, err := time.LoadLocation("Europe/Berlin")
+	if err != nil {
+		t.Skip(err)
+	}
+	eve := time.Date(2026, 3, 28, 22, 0, 0, 0, berlin)
+	card := rules.Card{NodeID: "w", Type: workflow.TypeWait, Name: "Wait", Config: map[string]any{"until": "02:00"}}
+	_, err = Before([]rules.Card{card}, &State{Vars: map[string]string{}}, Env{Now: func() time.Time { return eve }})
+	var later *Later
+	if !errors.As(err, &later) || later.At.In(berlin).Format("2006-01-02 15:04") != "2026-03-29 03:00" {
+		t.Fatalf("queued to the normalised clock: %v", err)
+	}
+	back := later.At
+	notes, err := Before([]rules.Card{card}, &State{Vars: map[string]string{}}, Env{Now: func() time.Time { return back.Add(time.Second) }, ReturnedAt: back})
+	if err != nil || !strings.Contains(notes[0].Words, "came back as asked") {
+		t.Errorf("its own return on that night: %v %+v", err, notes)
+	}
+	if isOwnTime(time.Date(2026, 3, 29, 3, 30, 0, 0, berlin), 2, 0) || !isOwnTime(time.Date(2026, 3, 30, 2, 0, 0, 0, berlin), 2, 0) {
+		t.Error("isOwnTime")
 	}
 }
