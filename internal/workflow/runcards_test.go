@@ -76,10 +76,15 @@ func TestRunCardsCompile(t *testing.T) {
 func TestRunCardsCanBeAdded(t *testing.T) {
 	d, by := runDoc()
 	r := Validate(d)
-	for _, typ := range append(append(slices.Clone(Questions), Actions...), Ends...) {
+	for _, typ := range append(slices.Clone(Questions), Actions...) {
 		a := r.AddSteps[typ]
 		if !a.Addable || a.After != by["note"].ID {
 			t.Errorf("%s: %+v (want addable after the note)", typ, a)
+		}
+	}
+	for _, typ := range Ends { // an end has no Next: the graph places it
+		if a := r.AddSteps[typ]; a.Addable || !strings.Contains(a.Reason, "graph") {
+			t.Errorf("%s: %+v", typ, a)
 		}
 	}
 	for _, typ := range PresetOrder[1:] {

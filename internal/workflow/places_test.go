@@ -28,9 +28,13 @@ func TestValidateSaysWhereEachStepAndTypeStands(t *testing.T) {
 		switch {
 		case !ok:
 			t.Errorf("%s: no add rule", def.Type)
-		case IsQuestion(def.Type) || IsAction(def.Type) || IsEnd(def.Type):
+		case IsQuestion(def.Type) || IsAction(def.Type):
 			if !a.Addable || a.After != d.Nodes[0].ID || a.Reason != "" {
 				t.Errorf("%s: %+v (want addable after Library files)", def.Type, a)
+			}
+		case IsEnd(def.Type):
+			if a.Addable || a.Reason == "" {
+				t.Errorf("%s: %+v (an end is placed in the graph)", def.Type, a)
 			}
 		case def.ReadOnly:
 			if a.Addable || a.Reason == "" {

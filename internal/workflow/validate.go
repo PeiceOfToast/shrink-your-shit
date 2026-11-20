@@ -45,9 +45,9 @@ func stepPlace(n Node) StepPlace {
 	return StepPlace{FixedPlace: true, FixedReason: "The steps that convert run in a set order for now, so they can't be moved or deleted. To skip this step, turn it off."}
 }
 
-// addSteps is the add-step menu's rule: a question, an action or an end (FB1b) goes before the steps
-// that convert, after the last such step already there (or the input); the steps that convert can't be
-// added until W10. after is the node the editor inserts behind.
+// addSteps is the add-step menu's rule: a question or an action (FB1b) goes before the steps that
+// convert, after the last such step already there (or the input); an end is placed in the graph only;
+// the steps that convert can't be added until W10. after is the node the editor inserts behind.
 func addSteps(d Doc) map[string]AddStep {
 	after := ""
 	if order, ok := mainPath(d); ok {
@@ -62,7 +62,9 @@ func addSteps(d Doc) map[string]AddStep {
 		switch {
 		case def.ReadOnly:
 			out[def.Type] = AddStep{Addable: false, Reason: "Only an earlier install's workflow has this step."}
-		case IsQuestion(def.Type) || IsAction(def.Type) || IsEnd(def.Type):
+		case IsEnd(def.Type): // an end has no Next, so the steps view can't chain it; the graph puts it on a No or a Didn't work
+			out[def.Type] = AddStep{Addable: false, Reason: "Goes on a question's No, or on a step's Didn't work, in the graph."}
+		case IsQuestion(def.Type) || IsAction(def.Type):
 			if after == "" {
 				out[def.Type] = AddStep{Addable: false, Reason: "This workflow has no Library files step to add it after."}
 			} else {
