@@ -424,7 +424,7 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
         <div className="joblog-end">
           <button className="btn sm ghost" type="button" onClick={copyAll}><Icon id="i-copy" />Copy log</button>
           {!MOCK && <a className="btn sm" href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}><Icon id="i-download" />Download the full log</a>}
-          <button className="btn sm ghost" type="button" onClick={() => setOpen(Object.fromEntries(shown.map((s) => [s.key, anyClosed])))}>{anyClosed ? "Open all" : "Close all"}</button>
+          {!errOnly && <button className="btn sm ghost" type="button" onClick={() => setOpen(Object.fromEntries(shown.map((s) => [s.key, anyClosed])))}>{anyClosed ? "Open all" : "Close all"}</button>}
         </div>
       </div>
       <p className="sm muted" role="status" style={{ margin: status ? "0 0 6px" : 0 }}>{status}</p>
