@@ -128,12 +128,15 @@ func run(c rules.Card, st *State, env Env) (Note, error) {
 			return n, errors.New("the file name came out empty")
 		}
 		path := filepath.Join(filepath.Dir(st.Final), name)
+		if what := protected(path, st); what != "" { // review2-538 P2: beside the result, never over it
+			return n, errors.New("it would write over " + what)
+		}
 		if _, err := os.Lstat(path); err == nil && str("ifExists", "keep") == "keep" {
 			n.Words = "Left " + path + " as it is: a file with that name is there"
 			return n, nil
 		}
 		text, more := vars.Resolve(str("text", ""), st.Vars)
-		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		if err := writeWhole(path, []byte(text)); err != nil {
 			return n, err
 		}
 		n.Words, n.Empty = "Wrote "+path, append(empty, more...)
@@ -191,8 +194,8 @@ func run(c rules.Card, st *State, env Env) (Note, error) {
 			}
 		}
 		dst := filepath.Join(folder, sub, name)
-		if dst == st.Final {
-			return n, errors.New("the copy would be the saved file itself")
+		if what := protected(dst, st); what != "" { // review2-538 P2: a copy never lands on the saved file or the original
+			return n, errors.New("the copy would write over " + what)
 		}
 		if _, err := os.Lstat(dst); err == nil && str("ifExists", "keep") == "keep" {
 			st.Vars["copy_path"] = dst
@@ -271,4 +274,41 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return os.Rename(tmp, dst)
+}
+
+// protected names what a card must never write over: the saved file ("the new file") or the original
+// ("the original"), by path or, when both exist, by identity. "" when path is neither.
+func protected(path string, st *State) string {
+	same := func(a, b string) bool {
+		if b == "" {
+			return false
+		}
+		if filepath.Clean(a) == filepath.Clean(b) {
+			return true
+		}
+		fa, errA := os.Stat(a)
+		fb, errB := os.Stat(b)
+		return errA == nil && errB == nil && os.SameFile(fa, fb)
+	}
+	switch {
+	case same(path, st.Final):
+		return "the new file"
+	case same(path, st.Original):
+		return "the original"
+	}
+	return ""
+}
+
+// writeWhole writes b to a temporary name beside path and renames it into place, so a reader never sees a
+// half-written file (review2-538 P3a).
+func writeWhole(path string, b []byte) error {
+	tmp := path + ".part"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
 }

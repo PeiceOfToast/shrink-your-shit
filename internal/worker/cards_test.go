@@ -207,6 +207,27 @@ func TestAfterCardsRunOnTheSavedFile(t *testing.T) {
 		t.Errorf("the media server card should be a warning step: %+v", steps)
 	}
 
+	// a media-server card alone: the downloaders are still told the global way, the media servers are not (per kind)
+	s3 := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
+	tm3 := cardsTemplate()
+	(*tm3.Branches)[0].After = []rules.Card{{NodeID: "ms", Type: workflow.TypeMediaServer, Name: "Tell the media server", Config: map[string]any{}}}
+	w3 := s3.worker(Beside)
+	w3.Template = func(jobs.Job) (rules.Template, error) { return tm3, nil }
+	var told3 []string
+	w3.OnDone = func(jobs.Job, string) { told3 = append(told3, "global") }
+	w3.Cards = func(jobs.Job, string) flow.Env {
+		return flow.Env{
+			TellMediaServer: func(which string) (string, error) { told3 = append(told3, "media:"+which); return "Told Plex", nil },
+			TellDownloader: func(which string) (string, error) {
+				told3 = append(told3, "downloader:"+which)
+				return "Told Sonarr", nil
+			},
+		}
+	}
+	w3.RunOne(context.Background())
+	if j := s3.job(); j.Status != jobs.Done || strings.Join(told3, " ") != "downloader:all media:all" {
+		t.Errorf("per-kind tell: %s %v", j.Status, told3)
+	}
 	// without a tell card the global tell runs as it always has
 	s2 := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
 	tm2 := cardsTemplate()

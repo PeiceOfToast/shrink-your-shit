@@ -518,12 +518,27 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 	w.mu.Lock()
 	after, cardVars := w.after, w.cardVars
 	w.mu.Unlock()
-	hasTell := false // a tell card makes the connections per workflow; without one the global tell runs as it always has (flow-builder.md section 10)
+	// A tell card makes that kind of connection per workflow; the other kind is still told as it always has been
+	// (flow-builder.md section 10; review2-538 P3b: per kind, not per path). Without any tell card the global
+	// tell runs unchanged.
+	hasMedia, hasDownloader := false, false
 	for _, c := range after {
-		hasTell = hasTell || c.Type == workflow.TypeMediaServer || c.Type == workflow.TypeDownloader
+		hasMedia = hasMedia || c.Type == workflow.TypeMediaServer
+		hasDownloader = hasDownloader || c.Type == workflow.TypeDownloader
 	}
-	if !hasTell && w.OnDone != nil {
-		w.OnDone(job, final)
+	switch {
+	case !hasMedia && !hasDownloader:
+		if w.OnDone != nil {
+			w.OnDone(job, final)
+		}
+	case w.Cards != nil:
+		e := w.Cards(job, final)
+		if !hasMedia && e.TellMediaServer != nil {
+			e.TellMediaServer("all") // "none connected" is not news here: the global tell never said so either
+		}
+		if !hasDownloader && e.TellDownloader != nil {
+			e.TellDownloader("all")
+		}
 	}
 	if len(after) > 0 { // FB2a: the path's cards on the saved result; one that doesn't work is a warning, never a failure
 		st := &flow.State{Vars: maps.Clone(cardVars), Final: final, Original: job.Path, LibraryRoot: job.Library}

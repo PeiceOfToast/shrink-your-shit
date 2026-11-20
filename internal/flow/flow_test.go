@@ -128,6 +128,32 @@ func TestAfterCardsActOnTheSavedFile(t *testing.T) {
 		t.Errorf("replace: %q", b)
 	}
 
+	// review2-538 P2: with "Replace it", a sidecar or a copy aimed at the saved file or the original is refused
+	// and both files keep their bytes; a name that resolves to the original's name is the common case
+	os.WriteFile(final, []byte("THE ENCODE"), 0o644)
+	original := filepath.Join(dir, "Harrow Lane (2019).original.mkv")
+	os.WriteFile(original, []byte("THE ORIGINAL"), 0o644)
+	st.Original, st.Vars["file_name"] = original, filepath.Base(original)
+	for _, c := range []rules.Card{
+		{NodeID: "s1", Type: workflow.TypeSidecar, Name: "Sidecar", Config: map[string]any{"name": "{{file_name}}", "text": "a note", "ifExists": "replace"}},
+		{NodeID: "s2", Type: workflow.TypeSidecar, Name: "Sidecar", Config: map[string]any{"name": "{{title}}.mkv", "text": "a note", "ifExists": "replace"}},
+		{NodeID: "c1", Type: workflow.TypeCopy, Name: "Copy", Config: map[string]any{"folder": st.LibraryRoot, "name": "{{file_name}}", "ifExists": "replace"}}, // the library's sub-folder lands it beside the original
+		{NodeID: "c2", Type: workflow.TypeCopy, Name: "Copy", Config: map[string]any{"folder": st.LibraryRoot, "name": "{{title}}", "ifExists": "replace"}},
+	} {
+		notes, warnings := After([]rules.Card{c}, st, env)
+		if len(warnings) != 1 || !strings.Contains(warnings[0], "write over the") || !notes[0].Failed {
+			t.Errorf("%s onto a protected file: %v %+v", c.NodeID, warnings, notes)
+		}
+	}
+	if b, _ := os.ReadFile(final); string(b) != "THE ENCODE" {
+		t.Errorf("the saved file was written over: %q", b)
+	}
+	if b, _ := os.ReadFile(original); string(b) != "THE ORIGINAL" {
+		t.Errorf("the original was written over: %q", b)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "Harrow Lane (2019).mkv.part")); err == nil {
+		t.Error("a .part file was left behind")
+	}
 	// without a saved file, an env or an absolute folder every card says so and nothing is written
 	notes, warnings = After(cards, &State{}, Env{})
 	if len(warnings) != 6 {
