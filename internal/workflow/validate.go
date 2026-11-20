@@ -11,12 +11,44 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
-// Result is a Doc checked: its issues, whether the stack can show it without loss, and each node's
-// summary in plain words.
+// Result is a Doc checked: its issues, whether the stack can show it without loss, each node's
+// summary in plain words, and what the editor may do with each step's place and each step type.
 type Result struct {
-	Issues        []Issue           `json:"issues"`
-	Stackable     bool              `json:"stackable"`
-	StepSummaries map[string]string `json:"stepSummaries"`
+	Issues        []Issue              `json:"issues"`
+	Stackable     bool                 `json:"stackable"`
+	StepSummaries map[string]string    `json:"stepSummaries"`
+	StepPlaces    map[string]StepPlace `json:"stepPlaces"` // one entry per node in the doc
+	AddSteps      map[string]AddStep   `json:"addSteps"`   // one entry per type in Definitions()
+}
+
+// StepPlace is what the editor may do with a step's place. W11 sends it; W10 (the step editor) makes
+// moving and deleting real.
+type StepPlace struct {
+	FixedPlace  bool   `json:"fixedPlace"`
+	FixedReason string `json:"fixedReason"` // why, when FixedPlace; "" when the step may move or be removed
+}
+
+// AddStep is what the add-step menu offers for a step type in this workflow.
+type AddStep struct {
+	Addable bool   `json:"addable"`
+	Reason  string `json:"reason"` // why not, when !Addable
+	After   string `json:"after"`  // the node it would be added after, when Addable
+}
+
+// stepPlace is the editor's rule for a step now. W10 (moving and deleting steps) replaces this with
+// the real rules; until then every step's place is set.
+func stepPlace() StepPlace {
+	return StepPlace{FixedPlace: true, FixedReason: "This step's place is set: steps can't be moved or removed in this version."}
+}
+
+// addSteps is the add-step menu's rule now. W10 replaces this with the compile rules; until then a
+// workflow takes no new steps.
+func addSteps() map[string]AddStep {
+	out := map[string]AddStep{}
+	for _, def := range Definitions() {
+		out[def.Type] = AddStep{Addable: false, Reason: "Can't run among the steps that convert yet."}
+	}
+	return out
 }
 
 // Errors reports whether any issue blocks Publish.
@@ -29,7 +61,7 @@ func (r Result) Errors() bool {
 // this version can run it. A node's unwired "error" port means stop: the job fails and the original
 // stays, as the engine has always done.
 func Validate(d Doc) Result {
-	r := Result{Issues: []Issue{}, StepSummaries: map[string]string{}}
+	r := Result{Issues: []Issue{}, StepSummaries: map[string]string{}, StepPlaces: map[string]StepPlace{}, AddSteps: map[string]AddStep{}}
 	add := func(i Issue) {
 		if i.Severity == "" {
 			i.Severity = "error"
@@ -40,6 +72,7 @@ func Validate(d Doc) Result {
 		add(Issue{Code: "unknown_schema_version", Message: fmt.Sprintf("This workflow's format (version %d) is not one this version reads.", d.SchemaVersion)})
 		return r
 	}
+	r.AddSteps = addSteps()
 	defs := map[string]StepDefinition{}
 	for _, def := range Definitions() {
 		defs[def.Type] = def
@@ -52,6 +85,7 @@ func Validate(d Doc) Result {
 			continue
 		}
 		byID[n.ID] = n
+		r.StepPlaces[n.ID] = stepPlace()
 		def, ok := defs[n.Type]
 		if !ok {
 			add(Issue{Code: "unknown_node_type", NodeID: n.ID, Message: fmt.Sprintf("%q is not a step this version has.", n.Type)})
