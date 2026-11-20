@@ -41,8 +41,8 @@ function GNode({ data, selected }: NodeProps<GNodeT>) {
         <div key={p.name} className={"gport " + p.outcome}><span>{p.label}</span>
           {p.outcome !== "success" && !linked.includes(p.name) && !issues.some((i) => i.code === "unconnected_port" && i.port === p.name) &&
             (data.edit
-              ? <button type="button" className={"gpill" + (tight ? " inrow" : "")} aria-label={notLinked(p)} title={notLinked(p)} onClick={(e) => (e.stopPropagation(), pickPort?.(node.id, p.name, p.label, node.name ?? def?.name ?? node.type))}>{tight ? "not linked" : "Not linked: keeps the original"}</button>
-              : <span className={"gpill" + (tight ? " inrow" : "")} title={notLinked(p)}>{tight ? "not linked" : "Not linked: keeps the original"}</span>)}
+              ? <button type="button" className={"gpill" + (tight ? " inrow" : "")} aria-label={notLinked(p)} title={notLinked(p)} onClick={(e) => (e.stopPropagation(), pickPort?.(node.id, p.name, p.label, node.name ?? def?.name ?? node.type))}>{tight ? "Not linked" : "Not linked: keeps the original"}</button>
+              : <span className={"gpill" + (tight ? " inrow" : "")} title={notLinked(p)}>{tight ? "Not linked" : "Not linked: keeps the original"}</span>)}
           <Handle type="source" position={Position.Right} id={p.name} isConnectable={!!data.edit} /></div>))}
     </div>);
 }
