@@ -413,7 +413,11 @@ func (x positionExec) Stream(ctx context.Context, onLine func(string), name stri
 			return "", ctx.Err()
 		case <-time.After(10 * time.Millisecond):
 		}
-		onLine("frame=" + strconv.FormatInt(i, 10)) // the rest of a progress block
+		frame := i
+		if x.step == 0 { // stuck: no frame moves either (a frame count that goes on is an encode that is alive)
+			frame = 0
+		}
+		onLine("frame=" + strconv.FormatInt(frame, 10)) // the rest of a progress block
 		onLine("out_time_us=" + strconv.FormatInt(5_000_000+i*x.step, 10))
 		onLine("progress=continue")
 	}

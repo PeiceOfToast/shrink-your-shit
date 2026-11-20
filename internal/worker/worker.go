@@ -2261,16 +2261,21 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 	moved := w.now() // when it last moved (a warning says so after stallWarnAfter, R9)
 	stalled := false // the warning has been written; one line says when it moves again
 	encErr, terr = media.TranscodeLines(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
+		// the encode is alive while any of three moves: its position, the frame count, or the bytes written.
+		// out_time follows the most-behind stream, so it freezes in a subtitle gap while frames still go on
+		// (bug 2). A stuck ffmpeg moves none of them, and the stall stop still ends it.
+		posMoved := p.OutTimeUS > at // a position further on: one that repeats is not progress
+		alive := posMoved || p.Frame > frames || p.TotalSize > wrote
 		frames = p.Frame
 		if p.TotalSize > wrote {
 			wrote = p.TotalSize
 		}
-		// only a position further on is progress: a stuck ffmpeg can keep reporting the same one (a
-		// damaged file, 21 min on a test run, never stopped), which mustn't hold off the stall stop
-		if p.OutTimeUS > at {
+		if posMoved {
 			at = p.OutTimeUS
-			w.progressAt.Store(time.Now().UnixNano())
 			w.finishing.Store(reachedEnd(p.OutTimeUS, job.DurationSec))
+		}
+		if alive {
+			w.progressAt.Store(time.Now().UnixNano())
 			moved = w.now()
 			if stalled { // R9: the log says it is moving again
 				stalled = false
