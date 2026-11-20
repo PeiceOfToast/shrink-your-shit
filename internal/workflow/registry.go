@@ -269,8 +269,9 @@ func Definitions() []StepDefinition {
 					"The new file is used even though it is bigger. If it replaces the original, the original is kept for the days set in Settings > Safety, then deleted."}),
 					"keep", "If the new file is bigger than the original", ""),
 			}, []string{"policy"})}),
-		def(StepDefinition{Type: TypeLegacy, RunsAs: RunsPlan, Category: "video",
-			FileOn:      map[string]string{"success": FileSaved, "skipped": FileOriginal, "error": FileOriginal}, // it converts, checks and saves as one run Name: "Earlier install's settings", Icon: "history", TypeLabel: "Video",
+		// the earlier install's step converts, checks and saves as one run, so its Next carries the file saved
+		def(StepDefinition{Type: TypeLegacy, RunsAs: RunsPlan, Category: "video", Name: "Earlier install's settings", Icon: "history", TypeLabel: "Video",
+			FileOn:      map[string]string{"success": FileSaved, "skipped": FileOriginal, "error": FileOriginal},
 			Description: "The settings this workflow had before workflows existed. They run exactly as before; to change them, start from the Shrink videos steps.",
 			Inputs:      []Port{in}, Outputs: []Port{success, skipped, errPort}, AlwaysOn: true, SideEffects: "commits", Deprecated: true, ReadOnly: true,
 			ConfigSchema: object(nil, nil)}), // its config (the template) is kept as it is: no form

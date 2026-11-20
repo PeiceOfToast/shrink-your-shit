@@ -54,6 +54,9 @@ func TestEveryCardKeepsTheContract(t *testing.T) {
 		if !d.Available {
 			t.Errorf("%s: offered but not available in this build", d.Type)
 		}
+		if d.Name == "" || d.TypeLabel == "" || d.Icon == "" || d.Description == "" {
+			t.Errorf("%s: a step with no name, label, icon or description: %+v", d.Type, d)
+		}
 		if d.Publishes == nil || d.Reads == nil || d.FileOn == nil { // the API sends [] and {}, never null
 			t.Errorf("%s: a nil list in the contract", d.Type)
 		}
