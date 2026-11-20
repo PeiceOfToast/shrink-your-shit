@@ -4,7 +4,7 @@
 import { useSyncExternalStore } from "react";
 import type { ActivityEvent, Capability, FoundServer, ID, JoinRequest, JoinState, RoleBody, Setup, Job, JobState, Library, PublishPreview, Settings, Summary, Template, Trash, Worker, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
 import type { FirstFiles, FolderReport, Issue, LibraryItem } from "../types/v1";
-import { branchedDoc, legacyDoc, presetDoc, preview, revision, summary as stepSummary } from "./steps";
+import { branchedDoc, emptyDoc, legacyDoc, presetDoc, preview, revision, summary as stepSummary } from "./steps";
 
 const now = Date.now(), ago = (min: number) => new Date(now - min * 60e3).toISOString();
 const GB = 1e9;
@@ -125,6 +125,7 @@ function running(): State {
         libraries: [{ id: "l3", name: "Home videos" }], changesOriginals: true, lastRun: { at: ago(60 * 26), completed: 14, failed: 0, skipped: 0 }, summaryTag: "HEVC · Better quality · All audio · MKV · Replaces originals" }),
       workflow("w3", "Audio and subtitles only", "Leaves the picture alone", { status: "disabled", lastRun: { at: ago(60 * 24 * 9), completed: 0, failed: 0, skipped: 0 },summaryTag: "Audio and subtitles · MKV" }),
       workflow("w4", "Old settings", "Carried over from an earlier install", { summaryTag: "Settings from an earlier install" }),
+      workflow("w5", "New workflow", "No steps yet", { summaryTag: "Library files only" }), // the empty state (review2 gap 2)
     ],
     trash: { bytes: 120 * GB, files: 14, nextDeleteAt: ago(-60 * 24), lastDeleteAt: ago(-60 * 24 * 7) },
     mode: shareMode as "app" | "manual" | "docker",
@@ -269,8 +270,8 @@ function slot(id: ID) {
   const w = state.wf.find((x) => x.id === id);
   if (!w) return null;
   if (!drafts[id]) {
-    const published = w.version == null ? null : id === "w2" ? branchedDoc() : id === "w4" ? legacyDoc() : presetDoc();
-    drafts[id] = { published, draft: revision(id, structuredClone(published ?? presetDoc()), null) };
+    const published = w.version == null ? null : id === "w2" ? branchedDoc() : id === "w4" ? legacyDoc() : id === "w5" ? emptyDoc() : presetDoc();
+    drafts[id] = { published, draft: revision(id, structuredClone(published ?? (id === "w5" ? emptyDoc() : presetDoc())), null) };
   }
   return { w, d: drafts[id] };
 }
