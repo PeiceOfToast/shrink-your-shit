@@ -120,8 +120,9 @@ func TestFormatEncoderThatDidNotPassIsLogged(t *testing.T) {
 	}
 }
 
-// A graphics failure converts again on the processor only when the encoder or ffmpeg failed. A stop (the stall
-// stop, a cancel, a lost lease), a full disk and a damaged source do not.
+// A graphics failure converts again on the processor only when the encoder or ffmpeg failed, off the full GPU
+// pipeline. On the full rung any decode-side failure steps down too (the card may not read this file), but a
+// stop (the stall stop, a cancel, a lost lease), a full disk, a missing source or an unwritable output do not.
 func TestGPUFailureOnlyRetriesAnEncoderError(t *testing.T) {
 	w := &Worker{}
 	ffErr := errors.New("ffmpeg exited 1")
@@ -132,22 +133,29 @@ func TestGPUFailureOnlyRetriesAnEncoderError(t *testing.T) {
 		ctx    context.Context
 		err    error
 		stop   stopKind
+		full   bool
 		stderr string
 		want   bool
 	}{
-		{"ffmpeg error", context.Background(), ffErr, stopNone, "something went wrong", true},
-		{"encoder missing", context.Background(), ffErr, stopNone, "Unknown encoder 'h264_qsv'", true},
-		{"no error", context.Background(), nil, stopNone, "", false},
-		{"cancelled", cancelled, ffErr, stopNone, "", false},
-		{"cancel error", context.Background(), context.Canceled, stopNone, "", false},
-		{"stall stop", context.Background(), ffErr, stopStall, "", false},
-		{"lease lost", context.Background(), errLeaseLost, stopNone, "", false},
-		{"disk full", context.Background(), ffErr, stopNone, "No space left on device", false},
-		{"damaged source", context.Background(), ffErr, stopNone, "Invalid data found when processing input", false},
+		{"ffmpeg error", context.Background(), ffErr, stopNone, false, "something went wrong", true},
+		{"encoder missing", context.Background(), ffErr, stopNone, false, "Unknown encoder 'h264_qsv'", true},
+		{"no error", context.Background(), nil, stopNone, false, "", false},
+		{"cancelled", cancelled, ffErr, stopNone, false, "", false},
+		{"cancel error", context.Background(), context.Canceled, stopNone, false, "", false},
+		{"stall stop", context.Background(), ffErr, stopStall, false, "", false},
+		{"lease lost", context.Background(), errLeaseLost, stopNone, false, "", false},
+		{"disk full", context.Background(), ffErr, stopNone, false, "No space left on device", false},
+		{"damaged source", context.Background(), ffErr, stopNone, false, "Invalid data found when processing input", false},
+		{"full: decode error steps down", context.Background(), ffErr, stopNone, true, "[hevc_qsv @ 0x1] Error while decoding stream #0:0: Function not implemented", true},
+		{"full: invalid data steps down", context.Background(), ffErr, stopNone, true, "Invalid data found when processing input", true},
+		{"full: disk full stops", context.Background(), ffErr, stopNone, true, "No space left on device", false},
+		{"full: missing source stops", context.Background(), ffErr, stopNone, true, "No such file or directory", false},
+		{"full: stall stop stops", context.Background(), ffErr, stopStall, true, "Error while decoding stream", false},
+		{"full: cancelled stops", cancelled, ffErr, stopNone, true, "Error while decoding stream", false},
 	}
 	for _, c := range cases {
 		w.stopped = c.stop
-		if got := w.gpuFailed(c.ctx, c.err, c.stderr); got != c.want {
+		if got := w.gpuFailed(c.ctx, c.err, c.stderr, c.full); got != c.want {
 			t.Errorf("%s: %v, want %v", c.name, got, c.want)
 		}
 	}

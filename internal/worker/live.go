@@ -192,8 +192,12 @@ var graphicsNames = map[string]string{"hevc_nvenc": "NVIDIA NVENC (graphics)", "
 // encoderNames are ffmpeg's software encoders as people name them (S5 proposal).
 var encoderNames = map[string]string{"libx265": "x265", "libx264": "x264", "libsvtav1": "SVT-AV1", "libvpx-vp9": "VP9"}
 
-func decoderWords(src media.Info) string {
+// decoderWords names who decodes: the graphics card on the full GPU pipeline, else the processor.
+func decoderWords(src media.Info, full bool) string {
 	if v := src.Video(); v != nil {
+		if full {
+			return codecName(v.Codec) + " (graphics)"
+		}
 		return codecName(v.Codec) + " (processor)"
 	}
 	return ""
