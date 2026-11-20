@@ -264,6 +264,32 @@ func CountVideoPackets(ctx context.Context, x Exec, ffprobe, path string, n int)
 	return c, nil
 }
 
+// maxLeadingPackets bounds how far LeadingUndecodable reads: a stream's first keyframe comes within one group of pictures.
+const maxLeadingPackets = 1000
+
+// LeadingUndecodable counts the packets of the n-th video stream that come before its first keyframe. A stream cut
+// in the middle of a group of pictures starts with pictures no decoder can show, so they are not lost frames.
+// It reads at most maxLeadingPackets packets and returns 0 when none of them is a keyframe.
+func LeadingUndecodable(ctx context.Context, x Exec, ffprobe, path string, n int) (int64, error) {
+	out, err := x.Output(ctx, ffprobe, "-v", "error", "-select_streams", fmt.Sprintf("v:%d", n),
+		"-read_intervals", fmt.Sprintf("%%+#%d", maxLeadingPackets), "-show_entries", "packet=flags", "-of", "csv=p=0", path)
+	if err != nil {
+		return 0, err
+	}
+	var lead int64
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "K") { // flags: K marks a keyframe
+			return lead, nil
+		}
+		lead++
+	}
+	return 0, nil
+}
+
 // ParseProbe turns ffprobe JSON into Info. It errors if there is no video stream. Missing or odd
 // fields are tolerated (they stay zero); garbage input returns an error and never panics.
 func ParseProbe(data []byte) (Info, error) {

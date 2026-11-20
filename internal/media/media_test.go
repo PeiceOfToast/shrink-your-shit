@@ -110,6 +110,20 @@ func TestCountVideoPacketsWithSideData(t *testing.T) {
 	}
 }
 
+// A stream cut mid-group-of-pictures starts with pictures before its first keyframe: they are counted, and a
+// stream that starts on a keyframe, or has none in what was read, counts none.
+func TestLeadingUndecodableCountsPicturesBeforeTheFirstKeyframe(t *testing.T) {
+	for out, want := range map[string]int64{"__\n__\nK_\n__\n": 2, "K__\n__\n": 0, "__\n__\n": 0, "": 0} {
+		x := &FakeExec{Out: []byte(out)}
+		if n, err := LeadingUndecodable(context.Background(), x, "ffprobe", "/x.ts", 0); err != nil || n != want {
+			t.Errorf("%q: %d %v, want %d", out, n, err, want)
+		}
+	}
+	if _, err := LeadingUndecodable(context.Background(), &FakeExec{Err: context.Canceled}, "ffprobe", "/x.ts", 0); err == nil {
+		t.Error("a failed probe is an error, not zero")
+	}
+}
+
 // A phone video's Display Matrix (#81): its rotation is read; ±90/270 is a quarter turn.
 func TestDisplayMatrixRotation(t *testing.T) {
 	i, err := ParseProbe([]byte(`{"streams":[{"codec_type":"video","codec_name":"h264","width":640,"height":360,

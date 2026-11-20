@@ -1045,6 +1045,18 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if !exact {
 		lost = 0 // a count from the container's duration is not evidence of lost frames: unknown is not damage
 	}
+	if lost > 0 && decoded >= 0 && decoded < frames && src.MainVideoOrdinal() >= 0 {
+		// Pictures before the first keyframe of a stream that starts mid-group-of-pictures cannot be decoded in any
+		// file: they are not lost frames. They count as accounted for; damage after the first keyframe still counts.
+		lctx, lcancel := context.WithTimeout(ctx, quickTimeout)
+		lead, lerr := media.LeadingUndecodable(lctx, w.Exec, w.FFprobe, srcPath, src.MainVideoOrdinal())
+		lcancel()
+		if lerr != nil {
+			log.Printf("worker %s: %s: reading the first keyframe: %v", w.ID, job.Path, lerr) // unknown: counts stay strict
+		} else {
+			decoded += lead
+		}
+	}
 	if dmg := withLostFrames(sourceDamage(encErr), lost, decoded); dmg.Found() {
 		if !damageTolerated(dmg, frames) {
 			// The check step records the refusal (its Result is the kept reason), then the lines the UI shows.
