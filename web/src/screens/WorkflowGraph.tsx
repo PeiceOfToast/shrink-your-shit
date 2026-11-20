@@ -9,7 +9,6 @@ import dagre from "@dagrejs/dagre";
 import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent, type RefObject } from "react";
 import { SignedOut, failed, type Answer } from "../api";
 import { Icon } from "../Icon";
-import { PageHead } from "../PageHead";
 import { Link, onLeave } from "../router";
 import { useData } from "../useData";
 import { getDraft, getWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked } from "../workflowApi";
@@ -21,7 +20,7 @@ import type { Layout, Node, PublishPreview, StepDefinition, ValidationIssue, Wor
 const CAT: Record<string, string> = { input: "var(--cat-input)", filter: "var(--cat-condition)", video: "var(--cat-video)", audio: "var(--cat-audio)", subtitles: "var(--cat-subtitle)",
   container: "var(--cat-files)", verify: "var(--cat-inspect)", output: "var(--cat-output)", flow: "var(--cat-logic)" };
 const PALETTE_TYPE = "application/x-syp-step"; // the drag data of a palette step (its type)
-const W = 188, H = (outs: number) => 34 + 24 + Math.max(outs, 1) * 22 + 8; // node size for layout (matches .gnode)
+const W = 200, H = (outs: number) => 34 + 24 + Math.max(outs, 1) * 22 + 8; // node size for layout (matches .gnode; FB6: 200 wide)
 
 type Data = { node: Node; def?: StepDefinition; summary: string; issues: ValidationIssue[]; edit?: boolean; linked: string[]; tight?: boolean; pickPort?: (id: string, port: string, label: string, step: string) => void };
 type GNodeT = RFNode<Data, "step">;
@@ -323,23 +322,38 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
   const picked = doc.nodes.find((n) => n.id === sel), pickedDef = picked && defs.find((x) => x.type === picked.type);
   const nameOf = (nid?: string) => { const t = doc.nodes.find((n) => n.id === nid); return t ? t.name ?? defs.find((x) => x.type === t.type)?.name ?? t.type : ""; };
   const shown = nodes.map((n) => (drag[n.id] ? { ...n, position: drag[n.id] } : n));
+  const probs = issues.length;
   return (
-    <div className="stack graphpage">
-      <PageHead icon="i-workflow" crumbs={[["Workflows", "/workflows"], [name, "/workflows/" + id]]} title="Graph"
-        after={<><span className="pill">{dirty || (ver != null && false) ? "Draft" : ver == null ? "Draft" : "Published"}</span><span className="muted sm">{ver == null ? "Not published yet" : "v" + ver + " published"}{dirty ? " · unsaved changes" : ""}</span></>}>
-        {checked.stackable && <Link className="btn sm ghost" to={"/workflows/" + id}>Step list</Link>}
+    <div className="editor graphpage">
+      {/* FB6 (flow-builder.md 4.1, ui-review C10): the editor is a workspace: a 48 px toolbar, then a frame that fills
+          the rest of the window with the palette, the canvas and the inspector inside it. One primary: Publish. */}
+      <div className="edtool" role="toolbar" aria-label={"Editing " + name}>
+        <span className="muted nowrap"><Link to="/workflows">Workflows</Link> /</span><span className="nm">{name}</span>
+        <span className="pill">{ver == null || dirty ? "Draft" : "Published"}</span>
+        <span className="muted sm nowrap desk">{ver == null ? "Not published yet" : "v" + ver + " published" + (dirty ? " · draft" : "")}</span>
+        {checked.issues && <span className={"pill " + (errors.length ? "bad" : probs ? "warn" : "ok")}><Icon id={probs ? "i-alert" : "i-check-c"} />{probs ? (probs === 1 ? "1 problem" : probs + " problems") : "No problems"}</span>}
+        <div className="mid">
+          <div className="segs" role="group" aria-label="View">
+            {checked.stackable ? <Link to={"/workflows/" + id} aria-pressed="false">Steps</Link> : <span title="This workflow has more than one path, so it is edited here">Steps</span>}
+            <button type="button" aria-pressed="true">Graph</button>
+          </div>
+          {edit && <><span className="vr" aria-hidden="true" />
+            <button className="btn sm icon ghost" type="button" title="Undo" aria-label="Undo" disabled={hist.at === 0} onClick={() => (setBar(null), setHist({ ...hist, at: hist.at - 1 }))}><Icon id="i-undo" /></button>
+            <button className="btn sm icon ghost" type="button" title="Redo" aria-label="Redo" disabled={hist.at === hist.list.length - 1} onClick={() => (setBar(null), setHist({ ...hist, at: hist.at + 1 }))}><Icon id="i-redo" /></button></>}
+        </div>
         {edit && <>
-          <button className="btn sm icon ghost" type="button" title="Undo" aria-label="Undo" disabled={hist.at === 0} onClick={() => (setBar(null), setHist({ ...hist, at: hist.at - 1 }))}><Icon id="i-undo" /></button>
-          <button className="btn sm icon ghost" type="button" title="Redo" aria-label="Redo" disabled={hist.at === hist.list.length - 1} onClick={() => (setBar(null), setHist({ ...hist, at: hist.at + 1 }))}><Icon id="i-redo" /></button>
-          <button className="btn sm" type="button" disabled={!dirty || badValues.length > 0} title={badValues.length ? "Fix the settings marked in red first" : undefined} onClick={save}>Save draft</button>
-          <button className="btn sm primary" type="button" disabled={badValues.length > 0 || varBad.length > 0} title={badValues.length ? "Fix the settings marked in red first" : varBad.length ? "Fix the variable names first" : undefined} onClick={openPublish}>Publish</button></>}
-      </PageHead>
+          <button className="btn sm" type="button" disabled={!dirty || badValues.length > 0} title={badValues.length ? "Fix the settings marked in red first" : undefined} onClick={save}><Icon id="i-save" />Save draft</button>
+          <button className="btn sm primary" type="button" disabled={badValues.length > 0 || varBad.length > 0} title={badValues.length ? "Fix the settings marked in red first" : varBad.length ? "Fix the variable names first" : undefined} onClick={openPublish}>Publish</button>
+        </>}
+      </div>
+      <div className="edsaid">
       <p className="muted sm phone" role="note">Editing works best on a larger screen. Here you can look around, zoom and see each step.</p>
       <p className="muted" role="status">{said}{bar && edit && <> <button className="linkbtn" type="button" onClick={undoDelete}>Undo</button></>}</p>
       {edit && badValues.length > 0 && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{badValues.length === 1 ? "A setting has a value it can't use" : badValues.length + " settings have values they can't use"} ({[...new Set(badValues.map((i) => nameOf(i.nodeId)))].join(", ")}). Fix {badValues.length === 1 ? "it" : "them"} to save the draft or publish.</span></p>}
       {edit && varBad.length > 0 && <p className="st bad" role="alert"><Icon id="i-alert" /><span>Fix {varBad.length === 1 ? "1 field" : varBad.length + " fields"} before publishing. <button className="linkbtn" type="button" onClick={() => (setSel(varBad[0].nodeId), setSelEdge(null))}>{varBad[0].title}</button></span></p>}
+      </div>
       {panel && (
-        <section className="card" aria-labelledby="pub-h"><div className="hd"><h2 id="pub-h">Publish v{panel.nextNumber}</h2></div><div className="bd stack">
+        <section className="card edpanel" aria-labelledby="pub-h"><div className="hd"><h2 id="pub-h">Publish v{panel.nextNumber}</h2></div><div className="bd stack">
           {panel.changes.length ? <ul style={{ margin: 0 }}>{panel.changes.map((c) => <li key={c.nodeId + c.kind}>{c.kind === "added" ? "Added: " : c.kind === "removed" ? "Removed: " : ""}{c.summary}</li>)}</ul> : <p className="muted">No changes since the last version.</p>}
           <p>{panel.libraries.length ? "Used by " + panel.libraries.map((l) => l.name).join(", ") + "." : "No library uses it yet."}{panel.nextNumber > 1 && " Files already converting finish with v" + (panel.nextNumber - 1) + ". Files still waiting use v" + panel.nextNumber + " when they start."}</p>
           {panel.changesOriginals && <span className="st warn"><Icon id="i-alert" /><span>This version replaces original files.</span></span>}
@@ -347,7 +361,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
           <div className="row"><button className="btn primary" type="button" disabled={(panel.validation ?? []).some((v) => v.severity === "error")} onClick={doPublish}>Publish v{panel.nextNumber}</button>
             <button className="btn ghost" type="button" onClick={() => setPanel(null)}>Cancel</button></div>
         </div></section>)}
-      <div className={"graphwrap" + (edit ? " withpal" : "")}>
+      <div className={"frame" + (edit ? " withpal" : "")}>
         {edit && <Palette defs={defs} onAdd={addFromPalette} dragType={dragType} onDrag={dragging} searchRef={searchRef} />}
         <div className="gcanvas" aria-label={"The steps of " + name + " as a graph"} onDragOver={edit ? onDragOver : undefined} onDragLeave={edit ? (e: DragEvent) => { if (!e.currentTarget.contains(e.relatedTarget as HTMLElement | null)) (setGhost(null), setPointer(null)); } : undefined} onDrop={edit ? onDrop : undefined} onBlur={() => (nudgeRun.current = null)}>
           {ghost && <div className="gdrop" aria-hidden="true" style={{ left: ghost.x, top: ghost.y, width: W * rf.getZoom(), height: 72 * rf.getZoom() }} />}
@@ -360,8 +374,8 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
             <Zoom />
           </ReactFlow>
         </div>
-        <OwnVars.Provider value={doc.variables ?? []}><aside className="card ginspect" aria-label="Selected step and problems">
-          <div className="bd stack">
+        <OwnVars.Provider value={doc.variables ?? []}><aside className="insp ginspect" aria-label="Selected step and problems">
+          <div className="stack">
             {selEdge && edit ? <div className="stack"><p>{(() => { const e = doc.edges.find((x) => x.id === selEdge); return e ? nameOf(e.from) + " → " + nameOf(e.to) : ""; })()}</p>
               <div className="row"><button className="btn sm" type="button" onClick={() => removeEdges([selEdge])}><Icon id="i-trash" />Delete this connection</button></div></div>
             : picked ? <div className="stack">
@@ -404,8 +418,8 @@ function Palette({ defs, onAdd, dragType, onDrag, searchRef }: { defs: StepDefin
   const shown = defs.filter((d) => d.category !== "input" && !d.readOnly && !d.deprecated && (!q || (d.name + " " + d.description + " " + d.typeLabel).toLowerCase().includes(q.toLowerCase())));
   const cats = Object.keys(CAT_NAME).filter((c) => shown.some((d) => d.category === c));
   return (
-    <aside className="card gpal" aria-label="Steps you can add">
-      <div className="bd stack">
+    <aside className="pal gpal" aria-label="Steps you can add">
+      <div className="stack">
         <input ref={searchRef} className="input" type="search" placeholder="Search steps" aria-label="Search steps" value={q} onChange={(e) => setQ(e.target.value)} />
         {!cats.length && <p className="muted sm">No step matches.</p>}
         {cats.map((c) => (
