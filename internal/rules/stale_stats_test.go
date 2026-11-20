@@ -17,17 +17,23 @@ func TestStaleStatsClearedOnReencodedStreamsOnly(t *testing.T) {
 			{Index: 1, Type: "audio", Encoder: "aac", Kbps: 128, Channels: 2}, // converted: re-encoded
 			{Index: 2, Type: "audio"}, // copied: kept as it is
 			{Index: 1, Type: "audio", Encoder: "aac", Kbps: 128, Channels: 2, Add: true}, // added from track 1: a re-encode too
+			{Index: 3, Type: "subtitle", Encoder: "srt"},                                 // converted subtitle: re-encoded, so cleared
+			{Index: 4, Type: "subtitle"},                                                 // copied subtitle: kept
 		},
+		SubtitleOrder: []int{3, 4},
 	}
 	args := strings.Join(p.FFmpegArgs("i", "o"), " ")
 	for _, want := range []string{"-metadata:s:v:0 BPS= ", "-metadata:s:v:0 NUMBER_OF_BYTES= ", "-metadata:s:v:0 BPS-eng= ",
-		"-metadata:s:a:0 BPS= ", "-metadata:s:a:0 _STATISTICS_TAGS= ", "-metadata:s:a:2 BPS= "} {
+		"-metadata:s:a:0 BPS= ", "-metadata:s:a:0 _STATISTICS_TAGS= ", "-metadata:s:a:2 BPS= ", "-metadata:s:s:0 BPS= "} {
 		if !strings.Contains(args+" ", want) {
 			t.Errorf("re-encoded stream: %q missing from %s", want, args)
 		}
 	}
 	if strings.Contains(args, "-metadata:s:a:1 BPS") {
 		t.Errorf("a copied audio stream must keep its statistics: %s", args)
+	}
+	if strings.Contains(args, "-metadata:s:s:1 BPS") {
+		t.Errorf("a copied subtitle stream must keep its statistics: %s", args)
 	}
 
 	// a copied video (repackaged): its statistics are left alone, the converted audio's are still cleared

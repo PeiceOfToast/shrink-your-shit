@@ -510,7 +510,8 @@ func (p Plan) withSubtitleFiles(args []string, out string) []string {
 }
 
 // staleStats are the per-track statistics a source file may carry (MKV writers put them on each stream). They
-// describe the stream as it was, so a re-encoded stream must not keep them (F9).
+// describe the stream as it was, so a re-encoded stream must not keep them (F9). DURATION is cleared too: ffmpeg
+// writes the real length into the new stream itself, and the copied source's DURATION must not survive beside it.
 var staleStats = []string{"BPS", "NUMBER_OF_BYTES", "NUMBER_OF_FRAMES", "DURATION", "_STATISTICS_TAGS",
 	"_STATISTICS_WRITING_APP", "_STATISTICS_WRITING_DATE_UTC"}
 
@@ -590,6 +591,7 @@ func (p Plan) trackArgs() []string {
 		for _, op := range p.Tracks {
 			if op.Index == idx && op.Encoder != "" {
 				args = append(args, "-c:s:"+strconv.Itoa(k), op.Encoder)
+				args = append(args, staleStatArgs("s:"+strconv.Itoa(k))...) // a converted subtitle is re-encoded too (F9)
 			}
 		}
 		k++

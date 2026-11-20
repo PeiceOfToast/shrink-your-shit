@@ -13,9 +13,6 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 )
 
-// todayArgs are the ffmpeg arguments the program ran before Plans (media.HEVCArgs, removed): a
-// legacy flow must keep producing exactly these, except R6's -max_muxing_queue_size, which only
-// lets ffmpeg write a file it used to stop on.
 // todayArgs is the legacy video encode's arguments. F9 adds the stale-statistics clearing (staleVideoArgs) to every
 // re-encode, the one change to these arguments on purpose; the decisions and the rest are as before.
 func todayArgs(in, out, crf, preset string) string {
