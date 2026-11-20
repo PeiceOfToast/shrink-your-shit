@@ -24,7 +24,8 @@ export const getSummary = (): Promise<Answer<RealSummary>> => call("GET", "/api/
 export async function scanAllLibraries(): Promise<Answer<unknown>> {
   const r = await call<{ items: { id: string }[] }>("GET", "/api/libraries");
   if (failed(r)) return r;
-  for (const l of r.items) { const x = await call("POST", "/api/libraries/" + encodeURIComponent(l.id) + "/scan"); if (failed(x)) return x; }
+  // A library with no workflow answers 409 no_workflow (#510): skip it and scan the rest.
+  for (const l of r.items) { const x = await call("POST", "/api/libraries/" + encodeURIComponent(l.id) + "/scan"); if (failed(x) && x.error.code !== "no_workflow") return x; }
   return {};
 }
 
