@@ -138,6 +138,13 @@ func OpenAs(path, appVersion string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	// W4b QA step 3: a draft or revision saved before secret values were sealed holds one in the clear, and
+	// it is sealed here once, before anything reads the database. A store that cannot do it does not open:
+	// leaving a plaintext secret behind is worse than refusing to start.
+	if err := sealStoredVariables(s.db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("sealing workflow secrets: %w", err)
+	}
 	ro, err := sql.Open("sqlite", path)
 	if err != nil {
 		db.Close()

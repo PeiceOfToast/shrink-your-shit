@@ -508,6 +508,21 @@ func (e *FailedError) Unwrap() error { return e.Err }
 
 func failed(plain string, err error) error { return &FailedError{plain, err} }
 
+// unreadableSecretWords is what the job says when its workflow's secret was sealed on another computer: the
+// secret is named, because entering it again on this one is the fix, and nothing was converted.
+func unreadableSecretWords(names []string) string {
+	quoted := make([]string, len(names))
+	for i, n := range names {
+		quoted[i] = "“" + n + "”"
+	}
+	what, it := "The workflow secret "+strings.Join(quoted, ", "), "it"
+	if len(names) > 1 {
+		what, it = "The workflow secrets "+strings.Join(quoted, ", "), "them"
+	}
+	return what + " can't be opened on this computer (it was sealed on another one), so converting did not start. " +
+		"Your original was not touched. Enter " + it + " again in the workflow, then press Retry."
+}
+
 // jobf logs a line about job id, to the program's log and to the job's own run log (S5).
 func (w *Worker) jobf(id int64, format string, a ...any) {
 	msg := fmt.Sprintf(format, a...)
@@ -938,6 +953,12 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// encodes the plan it is given.
 	vals, vtable, err := w.runValues(job, src, plan)
 	if err != nil {
+		// a secret sealed on another computer can't be opened here (a restored backup): the job stops,
+		// naming it, rather than run with it silently empty
+		var unreadable *jobs.SecretUnreadableError
+		if errors.As(err, &unreadable) {
+			return "", retryable(failed(unreadableSecretWords(unreadable.Names), err), retryGeneral)
+		}
 		return "", retryable(failed("This library's setting could not be read, so converting did not start. Your original was not touched. Open the library and save its setting again, then press Retry.", err), retryGeneral)
 	}
 	var vEmpty []string

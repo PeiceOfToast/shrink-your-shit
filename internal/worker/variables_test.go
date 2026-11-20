@@ -226,6 +226,89 @@ func TestTemplatedSrtNameTakenStopsTheJob(t *testing.T) {
 	}
 }
 
+// useTestHome points this computer's share key at a temp folder: a secret variable's value is stored sealed,
+// and a test must not write a key into the real home.
+func useTestHome(t *testing.T) {
+	t.Helper()
+	home := filepath.Join(t.TempDir(), "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("APPDATA", home)
+}
+
+// A workflow's secret is stored sealed and still resolves for a job through the store's RunInfo: the run
+// finishes, and the log says the secret is hidden without ever writing its value.
+func TestAWorkflowSecretResolvesInAJobAndStaysOutOfItsLog(t *testing.T) {
+	useTestHome(t)
+	const secret = "w4b-job-secret-77"
+	s := newScenario(t)
+	f, err := s.store.AddWorkflow("Sealed", workflow.Preset())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, _, err := s.store.Draft(f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Doc.Variables = []workflow.Variable{{Name: "api_key", Type: "secret", Value: secret, HasValue: true}}
+	saved, err := s.store.SaveDraft(f.ID, d.Doc, d.Layout, d.Etag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm, issues := workflow.ToTemplate(saved.Doc, rules.SliderTemplate(3))
+	if len(issues) > 0 {
+		t.Fatal(issues)
+	}
+	if _, err := s.store.Publish(f.ID, saved.Etag, tm); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.store.AddLibraryOnFlow("Movies", s.dir, f.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	w := selectorsWorker(s, func(sel *rules.Selectors) { sel.AfterConverting = "beside" })
+	w.RunInfo = s.store.RunInfoFor
+	if _, err := w.RunOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if j := s.job(); j.Status != jobs.Done {
+		t.Fatalf("status %s, error %q", j.Status, j.Error)
+	}
+	log := strings.Join(logTexts(t, s), "\n")
+	if !strings.Contains(log, "{{api_key}} = Hidden") {
+		t.Errorf("the log does not name the hidden secret:\n%s", log)
+	}
+	if strings.Contains(log, secret) {
+		t.Errorf("the secret's value was written to the log:\n%s", log)
+	}
+}
+
+// A workflow's secret that this computer can't open (it was sealed with another machine's share key, as a
+// restored backup's was) stops the job before anything is converted, naming it: the run never goes on with
+// the secret silently empty.
+func TestAnUnopenableSecretStopsTheJob(t *testing.T) {
+	s := newScenario(t)
+	w := selectorsWorker(s, func(sel *rules.Selectors) { sel.AfterConverting = "beside" })
+	w.RunInfo = func(jobs.Job) (jobs.RunInfo, error) {
+		return jobs.RunInfo{}, &jobs.SecretUnreadableError{Names: []string{"api_key"}}
+	}
+	w.RunOne(context.Background()) // the failure is the job's, checked below
+	j := s.job()
+	// like the other unreadable-setting failures it waits for a retry (the person can enter the secret in
+	// the meantime), and the job says why meanwhile
+	if j.Status != jobs.Queued || !strings.Contains(j.Error, "The workflow secret “api_key” can't be opened on this computer") ||
+		!strings.Contains(j.Error, "Enter it again in the workflow, then press Retry.") {
+		t.Fatalf("status %s, error %q", j.Status, j.Error)
+	}
+	if n := len(encodeCalls(s)); n != 0 {
+		t.Errorf("%d encode(s) ran before the secret was checked", n)
+	}
+	if read(s.src) != "original-bytes" {
+		t.Errorf("the original is %q", read(s.src))
+	}
+}
+
 // logTexts are the job's log lines as text.
 func logTexts(t *testing.T, s *scenario) []string {
 	t.Helper()

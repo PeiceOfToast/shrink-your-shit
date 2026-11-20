@@ -5,6 +5,7 @@ package web
 import (
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -93,7 +94,16 @@ func TestV2TemplatesPublishCheckAndSecrets(t *testing.T) {
 	if v := d.Workflow.Variables[1]; v.Value != "high" {
 		t.Errorf("a plain variable's value: %+v", v)
 	}
-	// 3. saved back as received (no value), the secret keeps the stored one
+	// 3. saved back as received (no value), the secret keeps the stored one. It is stored sealed (W4b QA
+	// step 3), so the check is that the stored value is the same sealed one, and never the plain text.
+	first, _, err := st.Draft(fid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept := first.Doc.Variables[0].Value
+	if kept == "s3cret" || kept == nil {
+		t.Fatalf("the stored secret is %v, want a sealed value", kept)
+	}
 	if code, body := put(d); code != 200 {
 		t.Fatalf("put back: %d %s", code, body)
 	}
@@ -101,7 +111,7 @@ func TestV2TemplatesPublishCheckAndSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v := cur.Doc.Variables[0]; v.Value != "s3cret" {
+	if v := cur.Doc.Variables[0]; !reflect.DeepEqual(v.Value, kept) {
 		t.Errorf("the stored secret is %v, want the value the page never saw kept", v.Value)
 	}
 	if v := cur.Doc.Variables[1]; v.Value != "medium" && v.Value != "high" {
