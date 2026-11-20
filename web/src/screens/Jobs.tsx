@@ -411,7 +411,7 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
       <p className="sm">Result: {WORD[l.final ?? ""] ?? l.final}</p>
       {hasResult && <p className="sm"><a href="#job-result" onClick={(e) => { e.preventDefault(); document.getElementById("job-result")?.scrollIntoView({ block: "start" }); }}>Before and after: see Result</a></p>}</> });
   }
-  const secs = raw.map((r) => ({ ...r, open: errOnly || (q ? r.hits > 0 : r.key in open ? open[r.key] : r.dflt) })); // while searching, only sections with a match are open
+  const secs = raw.map((r) => ({ ...r, open: errOnly || (!!q && r.hits > 0) || (r.key in open ? open[r.key] : r.dflt) })); // design 04:37Z: search only adds open sections
   const shown = secs.filter((s) => s.show), anyClosed = shown.some((s) => !s.open);
   const tot = secs.reduce((n, s) => n + s.hits, 0), ks = secs.filter((s) => s.hits > 0).length;
   const E = l.steps.reduce((n, st) => n + (st.errors?.length ?? 0), 0), W = l.steps.reduce((n, st) => n + (st.warnings?.length ?? 0), 0), K = l.steps.filter(flagged).length;
@@ -432,7 +432,7 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
       {old && <p className="sm muted">This job ran before full logs were kept, so only its steps are shown.</p>}
       {shown.map((s) => (
         <details key={s.key} id={s.id} open={s.open} className="stepd" style={{ borderTop: "1px solid var(--border)", padding: "8px 0" }}
-          onToggle={(e) => { const o = e.currentTarget.open; setOpen((p) => (p[s.key] === o ? p : { ...p, [s.key]: o })); }}>
+          onToggle={(e) => { const o = e.currentTarget.open; if (o !== s.open) setOpen((p) => ({ ...p, [s.key]: o })); }}>{/* only the person's clicks are kept, so clearing a search leaves sections as they left them */}
           <summary className="row nw" style={{ gap: 8, flexWrap: "wrap", cursor: "pointer" }}><strong>{s.title}</strong>{s.head}</summary>
           <div className="stack" style={{ gap: 6, paddingTop: 6 }}>{s.body}</div>
         </details>))}
