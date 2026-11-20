@@ -103,6 +103,12 @@ export const installUpdate = (when: "now" | "after-job"): Promise<Answer<UpdateN
   if (when === "now" && upd() === "jobs") return M({ error: { code: "job_running", message: "a job is running; use after-job" } });
   return M((mockInstall = when === "now" ? "downloading" : "waiting", mockUpdate()));
 };
+// POST cancel: 200 with the status body; 409 update_in_progress (the update has started) / nothing_to_cancel.
+export const cancelUpdate = (): Promise<Answer<UpdateNotice>> => {
+  if (!MOCK) return call("POST", "/api/v2/update/cancel", {});
+  if (new URLSearchParams(location.search).has("cancellate")) return M({ error: { code: "update_in_progress", message: "the update has started; it can't be cancelled now" } });
+  return M((mockInstall = "idle", mockUpdate()));
+};
 // POST rollback: 202 with the status body; 409 install_unsupported / update_in_progress / no_previous, 500 server_error.
 export const rollbackUpdate = (): Promise<Answer<UpdateNotice>> => {
   if (!MOCK) return call("POST", "/api/v2/update/rollback", {});
