@@ -204,8 +204,9 @@ export function Overview() {
                 <td className="full"><Link className="mono fname" to={"/jobs?tab=running&job=" + encodeURIComponent(a.jobId)}>{a.name}</Link><span className="sub">{[a.library?.name, workerOf(a.jobId)].filter(Boolean).join(" · ")}</span></td>
                 <td className="full"><Bar p={pct(a.percent)} label={a.name} /></td>
                 <td className="num" data-l="Time left">{left(a.etaS)}</td>
-                <td className="num" data-l="Expected saving">{a.expectedSavingBytes == null ? "not known yet" : a.expectedSavingBytes < 0 ? "may get bigger (about +" + bytes(-a.expectedSavingBytes) + ")" : a.expectedSavingEstimated ? <span title="Estimated from the size so far; the final number shows when it's done.">about {bytes(a.expectedSavingBytes)}<span className="sr"> Estimated from the size so far; the final number shows when it's done.</span></span> : "about " + bytes(a.expectedSavingBytes)}</td>
+                <td className="num" data-l="Expected saving">{a.expectedSavingBytes == null ? "not known yet" : a.expectedSavingBytes < 0 ? "none (about " + bytes(-a.expectedSavingBytes) + " bigger so far)" : "about " + bytes(a.expectedSavingBytes)}</td>
               </tr>; })}</tbody></table>)}
+        {v.active.some((a) => a.expectedSavingEstimated) && <p className="muted">Savings are estimated from the size so far; the final number shows when a file is done.</p>}
       </section>
 
       <section className="sec" aria-labelledby="ov-l"><h2 id="ov-l">Libraries <Link className="more" to="/libraries">Libraries page</Link></h2>
