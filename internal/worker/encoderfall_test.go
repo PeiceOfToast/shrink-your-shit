@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
@@ -113,4 +114,52 @@ func TestTenBitSDRSourceAsksForATenBitEncoder(t *testing.T) {
 	if codec != "libx265" || !need10 || hdr != nil {
 		t.Fatalf("encoder asked with codec %q need10 %v hdr %v, want libx265, true, nil", codec, need10, hdr)
 	}
+}
+
+// The rule reads the source's depth, not the target's: a 10-bit SDR source made into H.264 still asks the
+// encoder with need10 set, because H.264's output is 8-bit here but the card must not be the one dropping the
+// depth. A card whose H.264 encoder is 8-bit only is refused, the processor's libx264 makes the attempt, and
+// the depth check then keeps the original rather than replace it with an 8-bit file. Reading the target
+// instead (EncodeTenBit, false for H.264) would pass every other test and hand the file to that encoder,
+// silently making it 8-bit on the card — the #498 downgrade.
+func TestTenBitSDRSourceToH264UsesTheProcessor(t *testing.T) {
+	rules.SetAvailableFormats(map[string]bool{"libx264": true}) // an ffmpeg with libx264; HEVC is always offered
+	defer rules.SetAvailableFormats(nil)
+	s := newScenario(t)
+	s.srcSpec = spec{duration: 100, chapters: 2, streams: []map[string]any{
+		vid("hevc", 640, 360, "yuv420p10le"), aud("aac", "eng", 2), sub("subrip", "eng", false), att("font.ttf")}}
+	s.outSpec = spec{duration: 100, chapters: 2, streams: []map[string]any{
+		vid("h264", 640, 360, "yuv420p"), aud("aac", "eng", 2), sub("subrip", "eng", false), att("font.ttf")}}
+	w := s.worker(Replace)
+	sel := rules.DefaultSelectors(3)
+	sel.Format = "h264"
+	tmpl := sel.Template()
+	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	p := tmpl.Compile(must(media.ParseProbe([]byte(s.srcSpec.json()))))
+	if p.Skip != "" || !p.Video.TenBit || p.EncodeTenBit() || !tenBitSource(p) {
+		t.Fatalf("the case does not take the path it is about: skip %q, tenBit %v, encodeTenBit %v, tenBitSource %v",
+			p.Skip, p.Video.TenBit, p.EncodeTenBit(), tenBitSource(p))
+	}
+	var asked bool
+	var need10 bool
+	w.Encoder = func(c string, n bool, h *rules.HDR) (string, string) {
+		if c != "libx264" {
+			return "", ""
+		}
+		asked, need10 = true, n
+		if n { // this card's H.264 encoder takes 8-bit frames only
+			return "", "h264_nvenc can't do a 10-bit file"
+		}
+		return "h264_nvenc", ""
+	}
+	w.RunOne(context.Background()) // the kept original is the job's outcome, checked below
+	if !asked || !need10 {
+		t.Fatalf("encoder asked %v with need10 %v, want libx264 with need10 true", asked, need10)
+	}
+	if enc := encodeCalls(s); len(enc) != 1 || !strings.Contains(enc[0], "libx264") || strings.Contains(enc[0], "h264_nvenc") {
+		t.Fatalf("encodes, want the processor's libx264 only:\n%s", strings.Join(enc, "\n"))
+	}
+	// H.264's output here is 8-bit, and the depth check will not downgrade the file: the original is kept
+	// rather than replaced by it. That is what a card encode would have done silently to it.
+	s.assertKept("the colour depth is 10-bit in the original but 8-bit in the new file")
 }
