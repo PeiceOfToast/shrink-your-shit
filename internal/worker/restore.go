@@ -25,6 +25,7 @@ type Store interface {
 	SetRestoring(id int64, aside string) error
 	SetKeptGone(id int64, at time.Time) error
 	PutFile(f jobs.File) error
+	ActivePaths() (map[string]bool, error)
 }
 
 // RestoreError is a restore that was refused: Code for the API, Message in plain words (what
@@ -221,18 +222,42 @@ func recoverRestores(st Store, say func(string, ...any)) {
 	}
 }
 
+// PurgeCount is what a purge deleted from one library.
+type PurgeCount struct {
+	Deleted    int
+	FreedBytes int64
+}
+
+// PurgeReport is what a purge did: the totals, each library's share of them (by library ID; 0 for originals
+// with no library), and the lines for the log.
+type PurgeReport struct {
+	Deleted    int
+	FreedBytes int64
+	Libraries  map[int64]PurgeCount
+	Said       []string
+}
+
 // Purge deletes kept originals whose time is up: kept for days or more (the setting now, so a lower
-// setting applies at the next purge). Only the recorded file is deleted, and only if its size is the
-// recorded one; anything else in .syp-trash is never touched. A library's record being deleted does
-// not matter. Returns what it did, for the log.
-func Purge(st Store, days int, now time.Time, waiting func(path string) bool) []string {
+// setting applies at the next purge). libraryID 0 judges every library; otherwise only that library's
+// originals. The scheduled purge and "Empty trash now" both come here. Only the recorded file is deleted,
+// and only if its size is the recorded one; anything else in .syp-trash is never touched. A library's record
+// being deleted does not matter. An original whose file a queued or running job uses is kept.
+func Purge(st Store, days int, now time.Time, waiting func(path string) bool, libraryID int64) PurgeReport {
+	rep := PurgeReport{Libraries: map[int64]PurgeCount{}}
 	rows, err := st.Originals(jobs.OriginalKept)
 	if err != nil {
-		return []string{"cannot read the kept originals: " + err.Error()}
+		rep.Said = []string{"cannot read the kept originals: " + err.Error()}
+		return rep
 	}
-	var said []string
-	purged := 0
+	active, err := st.ActivePaths()
+	if err != nil {
+		rep.Said = []string{"cannot read the active jobs: " + err.Error()}
+		return rep
+	}
 	for _, o := range rows {
+		if libraryID != 0 && o.LibraryID != libraryID {
+			continue
+		}
 		if waiting != nil && waiting(o.Path) { // on a share that isn't connected: its .syp-trash isn't there to see
 			continue
 		}
@@ -246,36 +271,45 @@ func Purge(st Store, days int, now time.Time, waiting func(path string) bool) []
 		if errors.Is(err, fs.ErrNotExist) {
 			if _, serr := os.Stat(filepath.Dir(o.Trash)); serr == nil {
 				if err := st.SetKeptGone(o.ID, now); err != nil {
-					said = append(said, fmt.Sprintf("%s: %v", o.Path, err))
+					rep.Said = append(rep.Said, fmt.Sprintf("%s: %v", o.Path, err))
 				} else {
-					said = append(said, fmt.Sprintf("%s: its kept original %s was removed outside Shrink Your Shit", o.Path, o.Trash))
+					rep.Said = append(rep.Said, fmt.Sprintf("%s: its kept original %s was removed outside Shrink Your Shit", o.Path, o.Trash))
 				}
 			} else {
-				said = append(said, fmt.Sprintf("%s: its .syp-trash folder isn't there (disk not mounted?); left as kept", o.Path))
+				rep.Said = append(rep.Said, fmt.Sprintf("%s: its .syp-trash folder isn't there (disk not mounted?); left as kept", o.Path))
 			}
 			continue
 		}
 		if now.Before(due) {
 			continue
 		}
+		if active[o.Path] {
+			rep.Said = append(rep.Said, fmt.Sprintf("%s: a queued or running job uses this file, so its kept original was left", o.Path))
+			continue
+		}
 		switch {
 		case err != nil || !fi.Mode().IsRegular() || !isOriginal(o.Trash, o):
 			// size, time and sampled hash: anything else at that name is not ours to delete
 			st.SetSwapState(o.ID, jobs.SwapAttention)
-			said = append(said, fmt.Sprintf("%s: the file in %s is not the kept original (it was changed or replaced), so it was left alone", o.Path, o.Trash))
+			rep.Said = append(rep.Said, fmt.Sprintf("%s: the file in %s is not the kept original (it was changed or replaced), so it was left alone", o.Path, o.Trash))
 			continue
 		default:
 			if err := os.Remove(o.Trash); err != nil {
-				said = append(said, fmt.Sprintf("%s: could not delete its kept original: %v", o.Path, err))
+				rep.Said = append(rep.Said, fmt.Sprintf("%s: could not delete its kept original: %v", o.Path, err))
 				continue
 			}
 		}
 		st.SetSwapState(o.ID, jobs.OriginalPurged)
 		removeIfEmpty(filepath.Dir(o.Trash))
-		purged++
+		rep.Deleted++
+		rep.FreedBytes += o.Bytes
+		c := rep.Libraries[o.LibraryID]
+		c.Deleted++
+		c.FreedBytes += o.Bytes
+		rep.Libraries[o.LibraryID] = c
 	}
-	if purged > 0 {
-		said = append(said, fmt.Sprintf("deleted %d kept original(s) older than %d day(s)", purged, days))
+	if rep.Deleted > 0 {
+		rep.Said = append(rep.Said, fmt.Sprintf("deleted %d kept original(s) older than %d day(s)", rep.Deleted, days))
 	}
-	return said
+	return rep
 }

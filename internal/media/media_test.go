@@ -74,6 +74,17 @@ func TestTranscodeReportsProgress(t *testing.T) {
 	}
 }
 
+// total_size is the new file's bytes written so far (the Dashboard's saving estimate reads it); ffmpeg
+// says N/A for it sometimes, which is 0, unknown.
+func TestTranscodeReportsTotalSize(t *testing.T) {
+	f := &FakeExec{Lines: []string{"total_size=1048576", "out_time_us=30000000", "total_size=N/A", "out_time_us=60000000"}}
+	var got []int64
+	Transcode(context.Background(), f, "ffmpeg", nil, 60, func(p Progress) { got = append(got, p.TotalSize) })
+	if len(got) != 2 || got[0] != 1048576 || got[1] != 0 {
+		t.Errorf("%v", got)
+	}
+}
+
 // A real -progress block (S5): fps, bitrate and speed come with the percent, and the ETA is the
 // source time left at that speed; "N/A" reads as unknown.
 func TestTranscodeProgressFields(t *testing.T) {

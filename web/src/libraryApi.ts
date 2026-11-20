@@ -3,7 +3,7 @@
 import { call, MOCK, failed, type Answer } from "./api";
 import * as mock from "./mock";
 import type { FirstFiles, FirstRunSettings, FolderReport, LibraryItem, WorkerV1 } from "./types/v1";
-import type { Library, Trash, Workflow } from "./types/v2";
+import type { Library, PurgeResult, Trash, Workflow } from "./types/v2";
 import * as wf from "./workflowApi";
 
 // A workflow a library can use: a never-published one can't be chosen (87faa4b), on the server and the mock.
@@ -188,6 +188,16 @@ export const getHealth = (): Promise<Answer<Health>> => (MOCK ? M({ version: "2.
 
 export async function getTrash(): Promise<Answer<Trash>> {
   return MOCK ? mock.mockState().trash : call("GET", "/api/v2/trash");
+}
+
+// POST /api/v2/trash/purge (omit libraryId = all libraries). Mock: empties the mock trash; ?purgeskip=1 leaves one
+// library's 3 files behind as skipped, with the server's reason text (#458).
+export async function purgeTrash(libraryId?: string): Promise<Answer<PurgeResult>> {
+  if (!MOCK) return call("POST", "/api/v2/trash/purge", libraryId ? { libraryId } : {});
+  const s = mock.mockState(), t = s.trash, skip = new URLSearchParams(location.search).has("purgeskip");
+  const left = skip ? { files: 3, bytes: 2e9 } : { files: 0, bytes: 0 };
+  s.trash = { ...t, files: left.files, bytes: left.bytes, nextDeleteAt: left.files ? t.nextDeleteAt : null, lastDeleteAt: new Date().toISOString() };
+  return M({ deletedFiles: t.files - left.files, freedBytes: t.bytes - left.bytes, skipped: skip ? [{ library: "Archive disk", reason: "Its share isn't connected, so nothing in it was touched." }] : [] });
 }
 
 // G1 (one UI): remove a library: DELETE /api/libraries/{id}. The server stops watching the folder, takes its waiting

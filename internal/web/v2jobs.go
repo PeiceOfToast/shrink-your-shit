@@ -211,6 +211,10 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 			"retryAt": nilIfEmpty(j.RetryAt), "error": nilIfEmpty(j.Error), "worker": nilIfEmpty(j.Worker),
 			"createdAt": j.Created, "updatedAt": j.Updated, "steps": steps, "events": v2Events(events), "removed": false,
 			"path": []string{}}
+		if d["subtitleFiles"], err = store.SubtitleFiles(id); err != nil { // the .srt files saved beside the new file
+			serverError(w, err)
+			return
+		}
 		if route, err := store.Route(id); err == nil && route != nil { // V6a: the nodes the file went along
 			d["path"] = route
 		}

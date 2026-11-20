@@ -76,7 +76,7 @@ func TestMigration48AddsDecidedAtAndKeepsRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range []string{`ALTER TABLE files DROP COLUMN decided_at`, `ALTER TABLE jobs DROP COLUMN workflow_rev`, `ALTER TABLE jobs DROP COLUMN output_gone_at`, `DROP INDEX IF EXISTS jobs_newest`, `PRAGMA user_version=47`} {
+	for _, q := range []string{`ALTER TABLE files DROP COLUMN decided_at`, `ALTER TABLE jobs DROP COLUMN subtitle_files`, `ALTER TABLE jobs DROP COLUMN workflow_rev`, `ALTER TABLE jobs DROP COLUMN output_gone_at`, `DROP INDEX IF EXISTS jobs_newest`, `PRAGMA user_version=47`} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}
@@ -115,7 +115,8 @@ func TestMigration48AddsDecidedAtAndKeepsRows(t *testing.T) {
 // rewindDecidedAt takes away migration 48's column, for tests that set user_version below it (it runs again on the next open).
 func rewindDecidedAt(s *Store) {
 	s.db.Exec(`ALTER TABLE files DROP COLUMN decided_at`)
-	s.db.Exec(`ALTER TABLE jobs DROP COLUMN workflow_rev`) // migration 51's column, which rewinds past 50 must also take away
+	s.db.Exec(`ALTER TABLE jobs DROP COLUMN workflow_rev`)   // migration 51's column, which rewinds past 50 must also take away
+	s.db.Exec(`ALTER TABLE jobs DROP COLUMN subtitle_files`) // and migration 52's
 	s.db.Exec(`ALTER TABLE jobs DROP COLUMN output_gone_at`)
 }
 

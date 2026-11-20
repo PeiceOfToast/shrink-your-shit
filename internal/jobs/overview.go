@@ -77,15 +77,17 @@ type Day struct {
 // A scan's skip (a file decision 'skip: ...', or unreadable, dated decided_at) is an end too, so the newest of the two wins:
 // a file counts once, on the day of its latest end. A still_changing look is not a skip (the file may still be
 // downloading), so it is no end. Same-second ties go to the job event.
-// restoredFlagSQL is 1 for a job event whose job was restored, else 0. Restored ends are dropped before the
-// numbering, so a file whose newer conversion was restored has its older end as its latest (review #431).
+// restoredFlagSQL is 1 for a job event whose job was restored, else 0. A restored original is the original file
+// again: its done end counts as skipped (reason 'restored'), never as done. When an older conversion of the same
+// file still stands (the newer one was restored), the restored end is dropped, so the older done stays the
+// file's latest end (review #431).
 var restoredFlagSQL = `CASE WHEN ` + notRestoredSQL("e.job_id") + ` THEN 0 ELSE 1 END`
 
-var latestEndsSQL = `WITH ends AS (SELECT at, to_status, rs, ROW_NUMBER() OVER (PARTITION BY pkey ORDER BY at DESC, seq DESC) AS rn FROM (
+var latestEndsSQL = `WITH ends AS (SELECT at, CASE WHEN to_status='done' AND rs=1 THEN 'skipped' ELSE to_status END AS to_status, ROW_NUMBER() OVER (PARTITION BY pkey ORDER BY at DESC, seq DESC) AS rn FROM (
 SELECT e.at, e.to_status, e.seq, COALESCE(j.path, (SELECT json_extract(x.data, '$.path') FROM events x WHERE x.job_id=e.job_id AND json_extract(x.data, '$.path') IS NOT NULL ORDER BY x.seq DESC LIMIT 1), 'job:' || e.job_id) AS pkey, ` + restoredFlagSQL + ` AS rs
 FROM events e LEFT JOIN jobs j ON j.id=e.job_id WHERE e.kind='job' AND e.to_status IN ('done','skipped','cancelled','failed','kept')
 UNION ALL
-SELECT decided_at, 'skipped', 0, path, 0 FROM files WHERE ((decision LIKE 'skip: %' AND reason<>'still_changing') OR reason='unreadable') AND decided_at IS NOT NULL) WHERE rs=0)
+SELECT decided_at, 'skipped', 0, path, 0 FROM files WHERE ((decision LIKE 'skip: %' AND reason<>'still_changing') OR reason='unreadable') AND decided_at IS NOT NULL) WHERE rs=0 OR NOT EXISTS (SELECT 1 FROM jobs j2 WHERE j2.path=pkey AND ` + convertedNow("j2") + `))
 `
 
 // Days are the last n days' totals, oldest first: files finished, files skipped (also stopped), files failed
@@ -98,7 +100,7 @@ func (s *Store) Days(n int, now time.Time, t Totals) ([]Day, error) {
 	from := now.AddDate(0, 0, -(n - 1)).Format("2006-01-02")
 	by := map[string]*Day{}
 	rows, err := s.reader().Query(latestEndsSQL+`SELECT date(at, 'localtime') AS d, to_status, COUNT(*) FROM ends
-WHERE rn=1 AND rs=0 AND date(at, 'localtime') >= ? GROUP BY d, to_status`, from)
+WHERE rn=1 AND date(at, 'localtime') >= ? GROUP BY d, to_status`, from)
 	if err != nil {
 		return nil, err
 	}
@@ -252,6 +254,25 @@ FROM jobs WHERE `+convertedNow("jobs")+` AND started<>'' AND size_before>0`).Sca
 		secondsPerGB, timeOK = secs/(float64(timedBytes)/1e9), true
 	}
 	return
+}
+
+// OutputRatio is how big a new file comes out against its original, on average, over the last n done
+// conversions of library id: the bytes of the new files over the bytes of their originals, so a big file
+// weighs more than a small one. id 0 is every library. ok is false when nothing has been converted: there
+// is no ratio to project from.
+func (s *Store) OutputRatio(libraryID int64, n int) (ratio float64, ok bool, err error) {
+	where, args := "", []any{}
+	if libraryID != 0 {
+		where, args = " AND library_id=?", []any{libraryID}
+	}
+	var before, after int64
+	err = s.reader().QueryRow(`SELECT COALESCE(SUM(size_before),0), COALESCE(SUM(size_after),0) FROM (
+  SELECT size_before, size_after FROM jobs WHERE `+convertedNow("jobs")+` AND size_before>0 AND size_after>0`+where+` ORDER BY id DESC LIMIT ?)`,
+		append(args, n)...).Scan(&before, &after)
+	if err != nil || before == 0 {
+		return 0, false, err
+	}
+	return float64(after) / float64(before), true, nil
 }
 
 // DoneCount is how many files were converted: a file converted twice counts once (also by jobs made before
