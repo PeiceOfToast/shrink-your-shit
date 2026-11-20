@@ -371,7 +371,10 @@ func main() {
 			}
 			return all
 		}
-		return flow.Env{
+		env := flow.Env{
+			Lookup: func(which string) (map[string]string, string, error) {
+				return integ.Lookup(job.Path, kinds(which, integrations.Sonarr, integrations.Radarr))
+			},
 			TellMediaServer: func(which string) (string, error) {
 				return integ.TellKinds(job.ID, job.Path, final, kinds(which, integrations.Plex, integrations.Jellyfin))
 			},
@@ -380,6 +383,10 @@ func main() {
 			},
 			Notify: notifier.SendTo,
 		}
+		if s, err := web.LoadSettings(store); err == nil && s.WorkflowsMayRunCommands { // FB2b: the Safety switch, read per job
+			env.Exec = flow.RunProgram
+		}
+		return env
 	}
 	go notifier.Run(ctx.Done())
 	// The update (or roll back) is settled once /healthz has answered "ok", as the update helper and the

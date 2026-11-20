@@ -43,8 +43,20 @@ func newFakeArr(t *testing.T, seriesPath string) *fakeArr {
 		case r.Method == "GET" && r.URL.Path == "/api/v3/rootfolder":
 			io.WriteString(w, `[{"path":"/tv"},{"path":"/nowhere/at/all"}]`)
 		case r.Method == "GET" && r.URL.Path == "/api/v3/series":
-			b, _ := json.Marshal([]map[string]any{{"id": 7, "title": "The Show", "path": f.seriesPath}})
+			b, _ := json.Marshal([]map[string]any{{"id": 7, "title": "The Show", "year": 2019, "path": f.seriesPath, "originalLanguage": map[string]any{"name": "English"}}})
 			w.Write(b)
+		case r.Method == "GET" && r.URL.Path == "/api/v3/movie": // FB2b: the same fake serves a film under /films
+			b, _ := json.Marshal([]map[string]any{{"id": 3, "title": "The Film", "year": 2021, "path": "/films/The Film (2021)", "originalLanguage": map[string]any{"name": "French"}}})
+			w.Write(b)
+		case r.Method == "GET" && r.URL.Path == "/api/v3/episodefile": // FB2b: the show's one file
+			b, _ := json.Marshal([]map[string]any{{"id": 70, "seriesId": 7, "seasonNumber": 1, "path": f.seriesPath + "/s01e01.mkv"}})
+			w.Write(b)
+		case r.Method == "GET" && r.URL.Path == "/api/v3/episode":
+			if r.URL.Query().Get("episodeFileId") != "70" {
+				io.WriteString(w, `[]`)
+				return
+			}
+			io.WriteString(w, `[{"id":700,"episodeNumber":1,"seasonNumber":1}]`)
 		case r.Method == "POST" && r.URL.Path == "/api/v3/command":
 			var c map[string]any
 			json.NewDecoder(r.Body).Decode(&c)
@@ -440,5 +452,32 @@ func TestTellKindsTellsOnlyThoseKinds(t *testing.T) {
 	h.svc.Wait()
 	if steps, _ := h.st.Steps(id); len(steps) == 0 {
 		t.Fatal("the downloader was not told")
+	}
+}
+
+// FB2b: "Ask the downloader for details" reads the show (title, year, language) and the episode's numbers from
+// Sonarr, a film from Radarr; a file no instance owns leaves every value empty and says so; only the kinds
+// asked for are asked.
+func TestLookupAnswersFromTheInstanceThatOwnsTheFile(t *testing.T) {
+	arr := newFakeArr(t, "/tv/The Show")
+	h := newHarness(t)
+	h.svc.Create(NewIntegration{Kind: Sonarr, URL: arr.srv.URL, APIKey: goodKey, Name: "TV box",
+		PathMappings: []Mapping{{TheirPath: "/tv", OurPath: "/mnt/media/tv"}}})
+	h.svc.Create(NewIntegration{Kind: Radarr, URL: arr.srv.URL, APIKey: goodKey, Name: "Film box",
+		PathMappings: []Mapping{{TheirPath: "/films", OurPath: "/mnt/media/films"}}})
+	vals, words, err := h.svc.Lookup("/mnt/media/tv/The Show/s01e01.mkv", []Kind{Sonarr, Radarr})
+	if err != nil || vals["title_clean"] != "The Show" || vals["year"] != "2019" || vals["season"] != "1" || vals["episode"] != "1" || vals["original_language"] != "English" || words != "Sonarr: The Show (2019) S01E01" {
+		t.Errorf("episode: %v %q %v", vals, words, err)
+	}
+	vals, words, err = h.svc.Lookup("/mnt/media/films/The Film (2021)/The Film.mkv", []Kind{Sonarr, Radarr})
+	if err != nil || vals["title_clean"] != "The Film" || vals["year"] != "2021" || vals["season"] != "" || vals["original_language"] != "French" || words != "Radarr: The Film (2021)" {
+		t.Errorf("film: %v %q %v", vals, words, err)
+	}
+	vals, words, err = h.svc.Lookup("/mnt/media/films/The Film (2021)/The Film.mkv", []Kind{Sonarr})
+	if err != nil || vals["title_clean"] != "" || !strings.Contains(words, "No connected downloader knows") {
+		t.Errorf("only Sonarr asked: %v %q %v", vals, words, err)
+	}
+	if _, _, err := h.svc.Lookup("/mnt/media/x.mkv", []Kind{Plex}); err == nil {
+		t.Error("no downloader of that kind: want an error")
 	}
 }

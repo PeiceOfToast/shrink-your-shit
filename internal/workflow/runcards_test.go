@@ -456,3 +456,63 @@ func hasIssue(issues []Issue, code, nodeID string) bool {
 	}
 	return false
 }
+
+// FB2b: Run a command sits after the save and is refused by the policy until the Safety switch is on (the draft
+// keeps it; the issue names the switch); Ask the downloader sits before the conversion and publishes its names.
+func TestCommandNeedsTheSafetySwitch(t *testing.T) {
+	d, by := runDoc()
+	save := d.Nodes[len(d.Nodes)-1]
+	cmd := node(TypeCommand, "", map[string]any{"program": "/usr/local/bin/after", "arguments": `"{{output_path}}" {{command_output}}`})
+	look := node(TypeLookupDownloader, "", map[string]any{})
+	d.Nodes = append(d.Nodes, cmd, look)
+	d.Edges = append(d.Edges, link(save.ID, "success", cmd.ID))
+	for i, e := range d.Edges { // the lookup goes between the note and the conversion
+		if e.From == by["note"].ID {
+			d.Edges[i].To = look.ID
+		}
+	}
+	d.Edges = append(d.Edges, link(look.ID, "success", by["conv"].ID))
+	if r := Validate(d); r.Errors() {
+		t.Fatalf("allowed: %+v", r.Issues)
+	}
+	r := ValidateWith(d, Policy{})
+	if !hasIssue(r.Issues, "commands_off", cmd.ID) || !r.Errors() {
+		t.Errorf("off: %+v", r.Issues)
+	}
+	for _, i := range r.Issues {
+		if i.Code == "commands_off" && !strings.Contains(i.Message, "Settings > Safety") {
+			t.Errorf("the issue should name the switch: %q", i.Message)
+		}
+	}
+	if r := ValidateWith(d, Policy{CommandsAllowed: true}); r.Errors() {
+		t.Errorf("on: %+v", r.Issues)
+	}
+	tm, issues := ToTemplate(d, rules.Template{})
+	if len(issues) > 0 {
+		t.Fatalf("%v", issues)
+	}
+	yes := (*tm.Branches)[0]
+	if len(yes.After) != 1 || yes.After[0].Type != TypeCommand || len(yes.Before) != 3 || yes.Before[2].Type != TypeLookupDownloader {
+		t.Errorf("places: after %+v, before %+v", yes.After, yes.Before)
+	}
+	for _, name := range []string{"title_clean", "year", "season", "episode", "original_language", "command_output"} {
+		if !slices.Contains(PublishedNames(d), name) {
+			t.Errorf("%s is not published", name)
+		}
+	}
+	// the lookup can't sit after the save; the command can't sit before the conversion
+	d2, _ := runDoc()
+	save2 := d2.Nodes[len(d2.Nodes)-1]
+	late := node(TypeLookupDownloader, "", map[string]any{})
+	d2.Nodes = append(d2.Nodes, late)
+	d2.Edges = append(d2.Edges, link(save2.ID, "success", late.ID))
+	if !hasIssue(Validate(d2).Issues, "wrong_phase", late.ID) {
+		t.Errorf("a late lookup: %+v", Validate(d2).Issues)
+	}
+	if a := Validate(d).AddSteps[TypeCommand]; !a.Addable || a.After != cmd.ID {
+		t.Errorf("add rule for a command: %+v", a)
+	}
+	if a := Validate(d).AddSteps[TypeLookupDownloader]; !a.Addable || a.After != look.ID {
+		t.Errorf("add rule for a lookup: %+v", a)
+	}
+}

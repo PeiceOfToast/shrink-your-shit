@@ -44,6 +44,8 @@ func TestTemplatedFieldsAndTheirHelpText(t *testing.T) {
 		"action.sidecar/text": "{{new_size_bytes}}",
 		"action.copy/folder":  "{{library}}",
 		"action.copy/name":    "{{title}}",
+		// FB2b
+		"action.command/arguments": "{{output_path}}",
 	}
 	if len(got) != len(want) {
 		t.Errorf("fields with x-variables: %v, want %d", templatedFields(), len(want))

@@ -10,6 +10,7 @@ import { SignedOut, failed, type Answer } from "../api";
 import { bytes, plural } from "../format";
 import { cancelUpdate, checkUpdate, getConverting, getHealth, getUpdate, installUpdate, purgeTrash, rollbackUpdate, type UpdateNotice, getSettings, getToken, getTrash, patchSettings, rotateToken, signOut } from "../libraryApi";
 import type { PurgeResult } from "../types/v2";
+import type { FirstRunSettings } from "../types/v1";
 import { SettingsTabs } from "../pages";
 import { Link, navigate } from "../router";
 import { setRole } from "../setupApi";
@@ -215,9 +216,27 @@ export function SafetySettings() {
             </div>}
           </div>
         </section>)}
+      {st.data && <Commands settings={st} />}
       {ask && t && <Confirm title="Empty trash now?" body={`This deletes ${plural(t.files, "original file", "original files")} (${bytes(t.bytes)}), kept in case you need them back. It can't be undone.`}
         yes={purging ? "Deleting…" : "Delete " + plural(t.files, "file", "files")} no="Cancel" danger busy={purging} onYes={purge} onNo={() => (setAsk(false), purgeBtn.current?.focus())} />}
     </div>);
+}
+
+// Workflows may run commands (flow builder FB2b, the user's decision): the switch behind a workflow's "Run a command" step. Off
+// by default; off, such a workflow can't be published and a published one's step reports that it can't run.
+function Commands({ settings }: { settings: ReturnType<typeof useData<FirstRunSettings>> }) {
+  const [busy, setBusy] = useState(false), [said, setSaid] = useState("");
+  const on = !!settings.data?.workflowsMayRunCommands;
+  const set = async (v: boolean) => { setBusy(true); setSaid(""); const r = await act(patchSettings({ workflowsMayRunCommands: v }), setSaid); setBusy(false); if (r) settings.reload(); };
+  return (
+    <section className="card" aria-labelledby="cmd-h"><div className="hd"><h2 id="cmd-h">Workflows and programs</h2></div>
+      <div className="bd stack">
+        <label className="row nw"><input id="cmd-sw" type="checkbox" role="switch" className="switch" checked={on} disabled={busy} aria-describedby="cmd-hint" onChange={(e) => set(e.target.checked)} />
+          <span><strong>Workflows may run commands</strong></span></label>
+        <span className="hint" id="cmd-hint">A workflow's "Run a command" step starts a program of yours after a file is saved, with the file's path and variables as arguments. The program runs as this app's user, with everything it can reach, so this stays off until you turn it on.</span>
+        {!on && <div className="note"><Icon id="i-shield" /><span>Off: a workflow with a "Run a command" step can't be published, and a published one's step says it can't run.</span></div>}
+        {said && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{said}</span></p>}
+      </div></section>);
 }
 
 // Updates (SCREENS:293, About block): the #324 switch, off until the person turns it on, and the version line.

@@ -18,6 +18,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/vars"
@@ -41,7 +43,14 @@ type Env struct {
 	TellMediaServer func(which string) (string, error) // "all" | plex | jellyfin
 	TellDownloader  func(which string) (string, error) // "all" | sonarr | radarr
 	Notify          func(target, kind, text string) (string, error)
+	// FB2b: a program run on the saved result (nil when "Workflows may run commands" is off in Settings > Safety),
+	// and the downloaders' answer about a file (the values to publish, and words for the log).
+	Exec   func(program string, args []string, dir string, timeout time.Duration, onLine func(string)) (output string, err error)
+	Lookup func(which string) (vals map[string]string, words string, err error)
 }
+
+// MaxOutput is how much of a program's output {{command_output}} keeps.
+const MaxOutput = 4000
 
 // Note is what one card did, in words, for the job log's timeline.
 type Note struct {
@@ -96,6 +105,60 @@ func run(c rules.Card, st *State, env Env) (Note, error) {
 		return def
 	}
 	switch c.Type {
+	case workflow.TypeLookupDownloader:
+		if env.Lookup == nil {
+			return n, errors.New("no downloader can be asked from here")
+		}
+		vals, words, err := env.Lookup(str("which", "all"))
+		if err != nil {
+			return n, err
+		}
+		for _, k := range []string{"title_clean", "year", "season", "episode", "original_language"} {
+			st.Vars[k] = vals[k] // every name is set, empty when the downloader has no such thing
+		}
+		n.Words = words
+		return n, nil
+	case workflow.TypeCommand:
+		if env.Exec == nil {
+			return n, errors.New("running commands is off: turn on \"Workflows may run commands\" in Settings > Safety")
+		}
+		program := strings.TrimSpace(str("program", ""))
+		if program == "" {
+			return n, errors.New("no program is named")
+		}
+		argText, empty := vars.Resolve(str("arguments", ""), st.Vars)
+		args, err := SplitArgs(argText)
+		if err != nil {
+			return n, err
+		}
+		timeout := 60 * time.Second
+		if v, ok := c.Config["timeoutSec"].(float64); ok && v >= 1 && v <= 3600 {
+			timeout = time.Duration(v) * time.Second
+		} else if v, ok := c.Config["timeoutSec"].(int); ok && v >= 1 && v <= 3600 {
+			timeout = time.Duration(v) * time.Second
+		}
+		dir := ""
+		if st.Final != "" {
+			dir = filepath.Dir(st.Final)
+		}
+		onLine := func(string) {}
+		if env.Log != nil {
+			onLine = func(l string) { env.Log(program + ": " + l) }
+		}
+		out, err := env.Exec(program, args, dir, timeout, onLine)
+		if len(out) > MaxOutput {
+			out = out[:MaxOutput]
+			for !utf8.ValidString(out) { // never a cut rune
+				out = out[:len(out)-1]
+			}
+		}
+		st.Vars["command_output"] = strings.TrimSpace(out)
+		n.Empty = empty
+		if err != nil {
+			return n, err
+		}
+		n.Words = "Ran " + program + " (exit 0)"
+		return n, nil
 	case workflow.TypeMediaServer:
 		if env.TellMediaServer == nil {
 			return n, errors.New("no media server can be told from here")
@@ -311,4 +374,47 @@ func writeWhole(path string, b []byte) error {
 		return err
 	}
 	return nil
+}
+
+// SplitArgs splits a card's arguments on spaces, keeping what is inside double quotes as one argument
+// (a backslash before a quote keeps the quote). No shell is involved, so nothing else is special.
+func SplitArgs(s string) ([]string, error) {
+	var out []string
+	var cur strings.Builder
+	in, has := false, false
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case ch == '\\' && i+1 < len(s) && s[i+1] == '"':
+			cur.WriteByte('"')
+			i++
+			has = true
+		case ch == '"':
+			in, has = !in, true
+		case !in && (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'):
+			if has {
+				out = append(out, cur.String())
+				cur.Reset()
+				has = false
+			}
+		default:
+			cur.WriteByte(ch)
+			has = true
+		}
+	}
+	if in {
+		return nil, errors.New("the arguments have a double quote that is never closed")
+	}
+	if has {
+		out = append(out, cur.String())
+	}
+	return out, nil
+}
+
+// quoteOr quotes s, or says what an empty one is.
+func quoteOr(s, empty string) string {
+	if s == "" {
+		return empty
+	}
+	return quote(s)
 }

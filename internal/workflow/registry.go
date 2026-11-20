@@ -38,13 +38,16 @@ const (
 	TypeSidecar     = "action.sidecar"      // writes a text file next to the new file
 	TypeChecksum    = "action.checksum"     // computes a checksum of the new file
 	TypeCopy        = "action.copy"         // copies the new file to another folder
+	// FB2b
+	TypeCommand          = "action.command"           // runs a program on the saved result; behind the Safety switch
+	TypeLookupDownloader = "action.lookup_downloader" // asks the connected downloader what this file is
 )
 
 // Questions are the step types that answer Yes or No (RunsQuestion); Actions the ones that do one thing
 // before the conversion (RunsAction); Ends the ones that end a run.
 var (
 	Questions = []string{TypeCheck, TypeCheckName, TypeCheckAge, TypeCheckVariable, TypeCheckLibrary, TypeCheckHardLinks}
-	Actions   = []string{TypeSetVariable, TypeNote, TypeMediaServer, TypeDownloader, TypeNotify, TypeSidecar, TypeChecksum, TypeCopy}
+	Actions   = []string{TypeSetVariable, TypeNote, TypeLookupDownloader, TypeMediaServer, TypeDownloader, TypeNotify, TypeSidecar, TypeChecksum, TypeCopy, TypeCommand}
 	Ends      = []string{TypeEnd, TypeFail}
 )
 
@@ -427,6 +430,23 @@ func Definitions() []StepDefinition {
 				"name":     templated(described(map[string]any{"type": "string", "title": "File name", "maxLength": 200}, "Leave empty to keep the new file's name. Variables are filled in, like {{title}}.")),
 				"ifExists": withDefault(hinted(enum([]any{"keep", "replace"}, []string{"Keep the file that is there", "Replace it"}), []string{"A file with that name is left as it is; the step says so.", "The file is written over."}), "keep", "If the file exists", "segmented"),
 			}, []string{"folder"})}),
+		def(StepDefinition{Type: TypeCommand, RunsAs: RunsAction, Phase: []string{PhaseAfter}, Category: "flow", Name: "Run a command", Icon: "terminal", TypeLabel: "After",
+			Description: "Runs a program of yours with the new file's path and variables as arguments. The program's output goes to the job log and into {{command_output}}; an exit code other than 0 is a warning. Off until \"Workflows may run commands\" is on in Settings > Safety, because the program runs as this app's user.",
+			Inputs:      []Port{in}, Outputs: []Port{success, errPort}, SideEffects: "runs_program",
+			Publishes: []Published{{Name: "command_output", Type: "string", Words: "What the program printed (the first 4,000 characters)"}},
+			ConfigSchema: object(map[string]any{
+				"program":    described(map[string]any{"type": "string", "title": "Program", "maxLength": 1000, "x-placeholder": "/usr/local/bin/after-convert"}, "The program's path, or its name when it is on the PATH. It is started directly: no shell, so nothing is expanded."),
+				"arguments":  templated(described(map[string]any{"type": "string", "title": "Arguments", "maxLength": 4000, "x-placeholder": "\"{{output_path}}\" {{saved_percent}}"}, "Separated by spaces; put double quotes around one with a space in it. Variables are filled in, like {{output_path}} or {{title}}.")),
+				"timeoutSec": withDefault(described(map[string]any{"type": "integer", "title": "Give up after (seconds)", "minimum": 1, "maximum": 3600}, "The program is stopped after this long."), 60, "Give up after (seconds)", ""),
+			}, []string{"program"})}),
+		def(StepDefinition{Type: TypeLookupDownloader, RunsAs: RunsAction, Phase: []string{PhaseBefore}, Category: "flow", Name: "Ask the downloader for details", Icon: "tell", TypeLabel: "Action",
+			Description: "Asks the downloaders connected in Settings > Connections what this file is, and sets {{title_clean}}, {{year}}, {{season}}, {{episode}} and {{original_language}} for the steps after it. A file no downloader knows leaves them empty.",
+			Inputs:      []Port{in}, Outputs: []Port{success}, SideEffects: "none",
+			Publishes: []Published{{Name: "title_clean", Type: "string", Words: "The show's or film's title, as the downloader has it"}, {Name: "year", Type: "string", Words: "Its year"},
+				{Name: "season", Type: "string", Words: "The season number (an episode only)"}, {Name: "episode", Type: "string", Words: "The episode number (an episode only)"}, {Name: "original_language", Type: "string", Words: "Its original language, as the downloader names it"}},
+			ConfigSchema: object(map[string]any{
+				"which": withDefault(hinted(enum([]any{"all", "sonarr", "radarr"}, []string{"Every connected downloader", "Sonarr only", "Radarr only"}), []string{"The first one that knows the file answers.", "Only the Sonarr connections.", "Only the Radarr connections."}), "all", "Which", ""),
+			}, nil)}),
 		def(StepDefinition{Type: TypeFail, RunsAs: RunsEnd, Category: "flow", Name: "Stop as failed", Icon: "stop", TypeLabel: "End",
 			Description: "The run ends as failed with the reason below, and the original is left as it is.",
 			Inputs:      []Port{in}, Outputs: []Port{}, SideEffects: "none",

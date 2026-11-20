@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/flow"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
@@ -239,5 +240,68 @@ func TestAfterCardsRunOnTheSavedFile(t *testing.T) {
 	w2.RunOne(context.Background())
 	if j := s2.job(); j.Status != jobs.Done || !told {
 		t.Errorf("%s: global tell ran %v", j.Status, told)
+	}
+}
+
+// FB2b: the lookup card runs before the conversion through what main wires in, and what it sets names the new
+// file; the command card runs after the save with the saved file's path, and its output is published to the
+// cards after it.
+func TestLookupAndCommandCardsAreWired(t *testing.T) {
+	s := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
+	tm := cardsTemplate()
+	(*tm.Branches)[0].Before = append([]rules.Card{{NodeID: "look", Type: workflow.TypeLookupDownloader, Name: "Ask the downloader for details", Config: map[string]any{}}}, (*tm.Branches)[0].Before...)
+	(*tm.Branches)[0].Before[1].Config["value"] = "{{title_clean}} {{year}}" // the variable the name template uses comes from the lookup
+	(*tm.Branches)[0].After = []rules.Card{
+		{NodeID: "cmd", Type: workflow.TypeCommand, Name: "Run a command", Config: map[string]any{"program": "after", "arguments": `"{{output_path}}"`}},
+		{NodeID: "note", Type: workflow.TypeNote, Name: "Add a note to the log", Config: map[string]any{"text": "the program said {{command_output}}"}},
+	}
+	w := s.worker(Beside)
+	w.Template = func(jobs.Job) (rules.Template, error) { return tm, nil }
+	var ran []string
+	w.Cards = func(jobs.Job, string) flow.Env {
+		return flow.Env{
+			Lookup: func(string) (map[string]string, string, error) {
+				return map[string]string{"title_clean": "Harrow Lane", "year": "2019", "season": "", "episode": "", "original_language": "English"}, "Radarr: Harrow Lane (2019)", nil
+			},
+			Exec: func(program string, args []string, dir string, timeout time.Duration, onLine func(string)) (string, error) {
+				ran = append(ran, program+" "+strings.Join(args, " "))
+				return "ok from the program\n", nil
+			},
+		}
+	}
+	if _, err := w.RunOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	j := s.job()
+	if j.Status != jobs.Done || !strings.HasSuffix(j.OutputPath, "Harrow.Lane.2019.Remux.Harrow Lane 2019.mkv") {
+		t.Fatalf("%s %q %q", j.Status, j.Error, j.OutputPath)
+	}
+	if len(ran) != 1 || ran[0] != "after "+j.OutputPath {
+		t.Errorf("command: %v", ran)
+	}
+	if !noteOnTimeline(s, "Radarr: Harrow Lane (2019)") || !noteOnTimeline(s, "Note: “the program said ok from the program”") || !noteOnTimeline(s, "Ran after (exit 0)") {
+		steps, _ := s.store.Steps(j.ID)
+		t.Errorf("timeline: %+v", steps)
+	}
+	// the switch off: no Exec, the card is a warning, the job stays done
+	s2 := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
+	w2 := s2.worker(Beside)
+	w2.Template = func(jobs.Job) (rules.Template, error) { return tm, nil }
+	w2.Cards = func(jobs.Job, string) flow.Env { // the downloader answers, but no Exec: the switch is off
+		return flow.Env{Lookup: func(string) (map[string]string, string, error) {
+			return map[string]string{"title_clean": "Harrow Lane", "year": "2019"}, "Radarr: Harrow Lane (2019)", nil
+		}}
+	}
+	w2.RunOne(context.Background())
+	j2 := s2.job()
+	steps, _ := s2.store.Steps(j2.ID)
+	warned := false
+	for _, st := range steps {
+		if st.Step == "after" && !st.OK && strings.Contains(st.Words, "Settings > Safety") {
+			warned = true
+		}
+	}
+	if j2.Status != jobs.Done || !warned {
+		t.Errorf("switch off: %s, warned %v: %+v", j2.Status, warned, steps)
 	}
 }

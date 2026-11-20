@@ -551,7 +551,7 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 		env := flow.Env{Log: func(l string) { w.jobNote(job.ID, secReplace, jobs.LevelInfo, "(%s): %s", job.Path, l) }}
 		if w.Cards != nil {
 			e := w.Cards(job, final)
-			env.TellMediaServer, env.TellDownloader, env.Notify = e.TellMediaServer, e.TellDownloader, e.Notify
+			env.TellMediaServer, env.TellDownloader, env.Notify, env.Exec = e.TellMediaServer, e.TellDownloader, e.Notify, e.Exec
 		}
 		notes, warnings := flow.After(after, st, env)
 		for _, n := range notes {
@@ -1023,7 +1023,11 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	var published map[string]string
 	if len(plan.Before) > 0 {
 		st := &flow.State{Vars: maps.Clone(facts.Vars)} // its own copy: what the cards set is told apart below
-		notes, berr := flow.Before(plan.Before, st, flow.Env{Log: func(l string) { w.jobNote(job.ID, secEncode, jobs.LevelInfo, "(%s): %s", job.Path, l) }})
+		env := flow.Env{Log: func(l string) { w.jobNote(job.ID, secEncode, jobs.LevelInfo, "(%s): %s", job.Path, l) }}
+		if w.Cards != nil { // FB2b: the downloaders answer before the conversion
+			env.Lookup = w.Cards(job, "").Lookup
+		}
+		notes, berr := flow.Before(plan.Before, st, env)
 		for _, n := range notes {
 			w.Queue.AddDecision(job.ID, n.NodeID, "", n.Name+" → "+n.Words)
 		}

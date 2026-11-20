@@ -14,6 +14,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/update"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
 )
 
 // Settings are the global settings (UI-API-CONTRACT.md "Settings and first-run"). This slice stores
@@ -51,6 +52,10 @@ type Settings struct {
 	// BackupKeep is how many automatic backups (before an update or a migration) are kept, 1 to 50; manual
 	// ones stay until deleted (UI-API-CONTRACT-v2.md "Backup").
 	BackupKeep int `json:"backupKeep"`
+	// WorkflowsMayRunCommands is the Safety switch for a workflow's "Run a command" card (FB2b): off by default,
+	// because the program runs as this app's user. Off, such a workflow can't be published and a published one's
+	// card reports that it can't run.
+	WorkflowsMayRunCommands bool `json:"workflowsMayRunCommands"`
 }
 
 // UpdateChecks is whether the app may ask GitHub for a newer release: on unless the person turned it off.
@@ -125,6 +130,20 @@ type settingsStore struct {
 
 // LoadSettings reads the settings (and makes them, the first time), for the program outside the web
 // page: the worker reads keepOriginalsDays from it.
+// Policy is what the saved settings let a workflow do (FB2b).
+func (s Settings) Policy() workflow.Policy {
+	return workflow.Policy{CommandsAllowed: s.WorkflowsMayRunCommands}
+}
+
+// policyFor reads the live policy; when the settings can't be read, nothing extra is allowed.
+func policyFor(store *jobs.Store) workflow.Policy {
+	s, err := LoadSettings(store)
+	if err != nil {
+		return workflow.Policy{}
+	}
+	return s.Policy()
+}
+
 func LoadSettings(store *jobs.Store) (Settings, error) {
 	ss := &settingsStore{store: store}
 	return ss.load()
