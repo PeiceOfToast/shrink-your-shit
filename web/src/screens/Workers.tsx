@@ -281,7 +281,7 @@ function StartStop({ w, onDone }: { w: Worker; onDone: (m: string) => void }) {
 const NO_GPU = "Not available: no graphics card, one that doesn't report how busy it is, or a worker on another computer. GPU use is only read on This computer.";
 export function NoGpu() { return <span title={NO_GPU}>—<span className="sr"> ({NO_GPU})</span></span>; }
 // manager 11-20 (row 9631ec0a): the reading is the whole chip, so another VM or program on it shows too.
-const GPU_ALL = "Whole graphics chip, including other programs using it.";
+const GPU_ALL = "How busy the whole graphics card is, including other programs using it.";
 export function GpuPct({ n }: { n: number }) { return <span title={GPU_ALL}>{Math.round(n)}%<span className="sr"> ({GPU_ALL})</span></span>; }
 
 function Live({ w }: { w: Worker }) { // only the figures the server sends
