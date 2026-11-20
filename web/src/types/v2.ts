@@ -230,10 +230,12 @@ export interface ValidationIssue {
     | "dangling_edge" | "unknown_port" | "port_type_mismatch"
     | "not_runnable_yet" | "unknown_schema_version" | "duplicate_id" // the last three: added in V1 (Built in V1)
     | "unconnected_port" | "port_used_twice" | "empty_check" | "branch_in_conversion" | "path_without_save" | "fallback_loop" // V6a/V6b
+    | "invalid_variable_name" | "builtin_variable_name" | "duplicate_variable" // W4a (#497): the workflow's own variables
     | (string & {}); // a newer server's code: show its message
   severity: "error" | "warning";
   message: string;
   nodeId?: ID; edgeId?: ID; port?: string; configPath?: string; field?: string; // field: #165, the setting's key (invalid_config)
+  name?: string; // the variable a variables problem is about (the W4a codes)
 }
 // GET /workflows/{id}/publish-preview (V1 also returns validation).
 export interface PublishPreview {
