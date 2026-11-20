@@ -65,7 +65,7 @@ func EncoderFor(codec, main string, hdr *HDR, caps []map[string]any) (enc, note 
 		return "", fmt.Sprintf("HDR needs a 10-bit encoder: %s didn't pass its 10-bit test here; using the processor", want)
 	}
 	if (hdr.MasterDisplay != "" || hdr.CLL != "") && !HDRCarrier(want) {
-		return "", fmt.Sprintf("HDR10 with mastering data: using the processor, %s isn't proven to keep that data here", want)
+		return "", fmt.Sprintf("HDR10 with mastering data: using the processor, %s isn't on the list of encoders proven to keep that data", want)
 	}
 	return want, ""
 }
