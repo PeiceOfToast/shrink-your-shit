@@ -110,6 +110,44 @@ func TestCountVideoPacketsWithSideData(t *testing.T) {
 	}
 }
 
+// LeadingUndecodable credits only the packets before the first keyframe that the decoder did not show: a
+// presentation time earlier than the first output picture. A stream cut mid-group-of-pictures has such packets; an
+// open group whose leading pictures decode shows them, so none is credited (dev-review of #435: a later loss must
+// still count). Missing times and probe errors credit nothing.
+func TestLeadingUndecodableCreditsOnlyPicturesTheDecoderSkipped(t *testing.T) {
+	probe := func(packets, firstFrame string) *FakeExec {
+		return &FakeExec{Handler: func(_ string, args []string) (string, string, error) {
+			for _, a := range args {
+				if a == "frame=pts_time" {
+					return firstFrame, "", nil
+				}
+			}
+			return packets, "", nil
+		}}
+	}
+	cases := []struct {
+		name, packets, first string
+		want                 int64
+	}{
+		// ffprobe prints each packet as pts_time,flags (the order it actually gives, not the order asked for)
+		{"cut mid-GOP: the two leading pictures are not shown", "0.000000,___\n0.040000,___\n0.120000,K__\n0.080000,___\n", "0.120000\n", 2},
+		{"open GOP: the leading pictures decode and are shown", "0.000000,___\n0.040000,___\n0.120000,K__\n", "0.000000\n", 0},
+		{"a leading picture with no time is not credited", "N/A,___\n0.040000,___\n0.120000,K__\n", "0.120000\n", 1},
+		{"no keyframe in what was read", "0.000000,___\n0.040000,___\n", "0.120000\n", 0},
+		{"no picture was output", "0.000000,___\n0.120000,K__\n", "", 0},
+		{"a stream that starts on a keyframe", "0.000000,K__\n0.040000,___\n", "0.000000\n", 0},
+		{"flags printed first are read the same", "___,0.000000\n___,0.040000\nK__,0.120000\n", "0.120000\n", 2},
+	}
+	for _, c := range cases {
+		if n, err := LeadingUndecodable(context.Background(), probe(c.packets, c.first), "ffprobe", "/x.ts", 0); err != nil || n != c.want {
+			t.Errorf("%s: %d %v, want %d", c.name, n, err, c.want)
+		}
+	}
+	if _, err := LeadingUndecodable(context.Background(), &FakeExec{Err: context.Canceled}, "ffprobe", "/x.ts", 0); err == nil {
+		t.Error("a failed probe is an error, not zero")
+	}
+}
+
 // A phone video's Display Matrix (#81): its rotation is read; ±90/270 is a quarter turn.
 func TestDisplayMatrixRotation(t *testing.T) {
 	i, err := ParseProbe([]byte(`{"streams":[{"codec_type":"video","codec_name":"h264","width":640,"height":360,
