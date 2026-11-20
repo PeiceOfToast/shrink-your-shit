@@ -41,11 +41,12 @@ type Plan struct {
 	// Before: the path's actions before the conversion (FB1b), run by the worker in order; Fail: the path
 	// ends the job as failed with Skip's words, the original untouched ("Stop as failed"). Both omitted for
 	// every workflow saved before FB1b, so its Plans and fingerprints are unchanged.
-	Before     []Card `json:"before,omitempty"`
-	Fail       bool   `json:"fail,omitempty"`
-	After      []Card `json:"after,omitempty"`      // FB2a: the actions on the saved result
-	FolderMode string `json:"folderMode,omitempty"` // "next_to_library" (V5a): the library's own folder instead of OutputDir
-	Container  string `json:"container,omitempty"`  // the new file's type (its extension, "mkv" or "mp4"); "" = the original's
+	Before     []Card   `json:"before,omitempty"`
+	Fail       bool     `json:"fail,omitempty"`
+	Requeue    *Requeue `json:"requeue,omitempty"`    // FB4: "Convert again later" with Skip's words
+	After      []Card   `json:"after,omitempty"`      // FB2a: the actions on the saved result
+	FolderMode string   `json:"folderMode,omitempty"` // "next_to_library" (V5a): the library's own folder instead of OutputDir
+	Container  string   `json:"container,omitempty"`  // the new file's type (its extension, "mkv" or "mp4"); "" = the original's
 	// The Save the result step's {{name}} templates (W4b), as the workflow has them. The worker fills
 	// them in at run time; "" keeps today's names and titles.
 	OutputName string `json:"outputName,omitempty"`
@@ -188,7 +189,9 @@ func (t Template) CompileWith(info media.Info, f Facts) (p Plan) {
 		case !ok:
 			p = Plan{Kind: KindBranches, Skip: "no path of its workflow fits it", SkipCode: SkipSettingCannotRun}
 		case b.Then == nil:
-			if b.Fail {
+			if b.Requeue != nil { // FB4: back in the queue for a while
+				p = Plan{Kind: KindBranches, Skip: failWords(b.End), SkipCode: SkipLeftByWorkflow, Requeue: b.Requeue}
+			} else if b.Fail {
 				p = Plan{Kind: KindBranches, Skip: failWords(b.End), SkipCode: SkipLeftByWorkflow, Fail: true}
 			} else {
 				p = Plan{Kind: KindBranches, Skip: skipWords(b.End), SkipCode: SkipLeftByWorkflow}

@@ -178,3 +178,30 @@ func TestTagQuestionAndTagHelpers(t *testing.T) {
 		t.Errorf("adds past the cap: %d tags, %d left off", len(got), left)
 	}
 }
+
+// FB4: a random share answers the same for the same file every time, about the share of files overall; 100
+// is every file, 0 nothing to ask.
+func TestRandomShareIsStablePerFile(t *testing.T) {
+	q := Question{Kind: "random", Share: 30}
+	yes := 0
+	for i := 0; i < 1000; i++ {
+		f := Facts{Path: fmt.Sprintf("/films/film-%d.mkv", i)}
+		a, _ := q.Ask(media.Info{}, f)
+		b, _ := q.Ask(media.Info{}, f)
+		if a != b {
+			t.Fatalf("file %d answered differently twice", i)
+		}
+		if a {
+			yes++
+		}
+	}
+	if yes < 220 || yes > 380 {
+		t.Errorf("30%% of 1000 files: %d said Yes", yes)
+	}
+	if a, _ := (Question{Kind: "random", Share: 100}).Ask(media.Info{}, Facts{Path: "/x"}); !a {
+		t.Error("100% is every file")
+	}
+	if !(Question{Kind: "random"}).Empty() || (Question{Kind: "random", Share: 5}).Empty() {
+		t.Error("Empty")
+	}
+}

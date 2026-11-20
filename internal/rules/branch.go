@@ -3,6 +3,8 @@
 package rules
 
 import (
+	"fmt"
+	"hash/fnv"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -134,7 +136,7 @@ type Facts struct {
 // fields, as before) or one of the other kinds. A stored BranchCheck from before FB1b reads as Kind "".
 type Question struct {
 	VideoCheck
-	Kind string `json:"kind,omitempty"` // "" (the file's facts) | name | age | variable | library | hardlinks | tag
+	Kind string `json:"kind,omitempty"` // "" (the file's facts) | name | age | variable | library | hardlinks | tag | random
 	// name: the file's name or path matches a pattern
 	Pattern       string `json:"pattern,omitempty"`
 	Match         string `json:"match,omitempty"` // contains | starts | ends | glob | regex
@@ -149,6 +151,8 @@ type Question struct {
 	Value    string `json:"value,omitempty"`
 	// library: the file comes from one of these libraries (ids)
 	Libraries []string `json:"libraries,omitempty"`
+	// random: this share of files (percent) answers Yes, the same answer for the same file every time (FB4)
+	Share int `json:"share,omitempty"`
 	// tag: the file's record carries any / all / none of these tags (FB2c)
 	Tags  string `json:"tags,omitempty"`  // comma-separated, as typed
 	TagOp string `json:"tagOp,omitempty"` // any | all | none (default any)
@@ -244,6 +248,17 @@ func (q Question) Ask(info media.Info, f Facts) (bool, string) {
 		return slices.Contains(q.Libraries, f.LibraryID), "the library is " + cmpOr(f.Library, "unknown")
 	case "hardlinks":
 		return f.HardLinks, yesNo(f.HardLinks, "the file shares its data with another name", "the file has one name")
+	case "random":
+		if q.Share <= 0 {
+			return false, "no share of files is chosen"
+		}
+		if q.Share >= 100 {
+			return true, "every file"
+		}
+		h := fnv.New32a()
+		h.Write([]byte(f.Path))
+		n := int(h.Sum32() % 100)
+		return n < q.Share, fmt.Sprintf("this file's draw is %d of 100 and the share is %d%%", n, q.Share)
 	case "tag":
 		want, have := CleanTags(q.Tags), CleanTags(strings.Join(f.Tags, ","))
 		hit := 0
@@ -280,6 +295,8 @@ func (q Question) Empty() bool {
 		return len(q.Libraries) == 0
 	case "tag":
 		return len(CleanTags(q.Tags)) == 0
+	case "random":
+		return q.Share <= 0
 	}
 	return false
 }
@@ -320,8 +337,17 @@ type Branch struct {
 	// failed with End's words ("Stop as failed"), the original untouched.
 	Before []Card `json:"before,omitempty"`
 	Fail   bool   `json:"fail,omitempty"`
+	// FB4: "Convert again later": the path puts the file back in the queue for AfterSec seconds, at most
+	// MaxTries times in all (then it fails with End's words).
+	Requeue *Requeue `json:"requeue,omitempty"`
 	// FB2a: the actions on the saved result, in order; a failure leaves the job done, with a warning.
 	After []Card `json:"after,omitempty"`
+}
+
+// Requeue is what "Convert again later" asks of the queue (FB4).
+type Requeue struct {
+	AfterSec int `json:"afterSec"`
+	MaxTries int `json:"maxTries"`
 }
 
 // SkipLeftByWorkflow is a file a workflow's "Leave the file alone" step ended (V6a).
@@ -442,6 +468,8 @@ func (f *Failures) For(check bool) *Failure {
 func CompileBranch(b Branch, info media.Info, languages string) Plan {
 	var p Plan
 	switch {
+	case b.Then == nil && b.Requeue != nil:
+		p = Plan{Kind: KindBranches, Skip: failWords(b.End), SkipCode: SkipLeftByWorkflow, Requeue: b.Requeue}
 	case b.Then == nil && b.Fail:
 		p = Plan{Kind: KindBranches, Skip: failWords(b.End), SkipCode: SkipLeftByWorkflow, Fail: true}
 	case b.Then == nil:

@@ -44,14 +44,18 @@ const (
 	// FB2c: tags on the job record (user decision 2: the word is "tag")
 	TypeCheckTag = "check.tag"  // the file's record carries any / all / none of the chosen tags
 	TypeTag      = "action.tag" // adds or removes tags on the file's record
+	// FB4: the remaining flow cards
+	TypeCheckRandom = "check.random" // a chosen share of files answers Yes
+	TypeWait        = "action.wait"  // pauses the run for a while, or puts the file back in the queue until a time of day
+	TypeRequeue     = "flow.requeue" // the file goes back to the queue for later, at most so many times
 )
 
 // Questions are the step types that answer Yes or No (RunsQuestion); Actions the ones that do one thing
 // before the conversion (RunsAction); Ends the ones that end a run.
 var (
-	Questions = []string{TypeCheck, TypeCheckName, TypeCheckAge, TypeCheckVariable, TypeCheckLibrary, TypeCheckHardLinks, TypeCheckTag}
-	Actions   = []string{TypeSetVariable, TypeNote, TypeTag, TypeLookupDownloader, TypeMediaServer, TypeDownloader, TypeNotify, TypeSidecar, TypeChecksum, TypeCopy, TypeCommand}
-	Ends      = []string{TypeEnd, TypeFail}
+	Questions = []string{TypeCheck, TypeCheckName, TypeCheckAge, TypeCheckVariable, TypeCheckLibrary, TypeCheckHardLinks, TypeCheckTag, TypeCheckRandom}
+	Actions   = []string{TypeSetVariable, TypeNote, TypeTag, TypeWait, TypeLookupDownloader, TypeMediaServer, TypeDownloader, TypeNotify, TypeSidecar, TypeChecksum, TypeCopy, TypeCommand}
+	Ends      = []string{TypeEnd, TypeFail, TypeRequeue}
 )
 
 // NotYet are the cards this build offers for drafts but can't run yet (Available false): Publish refuses
@@ -377,6 +381,12 @@ func Definitions() []StepDefinition {
 				"tags":  described(map[string]any{"type": "string", "title": "Tags", "maxLength": 1000, "x-placeholder": "remux, needs-review"}, "One or more, separated by commas. Case doesn't matter."),
 				"tagOp": withDefault(hinted(enum([]any{"any", "all", "none"}, []string{"Any of them", "All of them", "None of them"}), []string{"Yes when the file has at least one.", "Yes only when it has every one.", "Yes when it has none of them."}), "any", "Yes when the file has", "segmented"),
 			}, []string{"tags"})}),
+		def(StepDefinition{Type: TypeCheckRandom, RunsAs: RunsQuestion, AlwaysOn: true, Category: "filter", Name: "A share of files", Icon: "branch", TypeLabel: "Check",
+			Description: "Sends a chosen share of files down Yes, for trying a setting on some of them. The same file gets the same answer every time.",
+			Inputs:      []Port{in}, Outputs: []Port{yesPort, noPort}, SideEffects: "none",
+			ConfigSchema: object(map[string]any{
+				"share": withDefault(described(map[string]any{"type": "integer", "title": "Share of files (%)", "minimum": 1, "maximum": 99}, "Out of every 100 files, about this many answer Yes."), 10, "Share of files (%)", ""),
+			}, []string{"share"})}),
 		def(StepDefinition{Type: TypeCheckHardLinks, RunsAs: RunsQuestion, AlwaysOn: true, Category: "filter", Name: "Shares its data with another file", Icon: "branch", TypeLabel: "Check",
 			Description: "Yes when the original has another name on the same disk (a hard link), so converting it would free no space.",
 			Inputs:      []Port{in}, Outputs: []Port{yesPort, noPort}, SideEffects: "none"}),
@@ -395,6 +405,13 @@ func Definitions() []StepDefinition {
 			ConfigSchema: object(map[string]any{
 				"add":    templated(described(map[string]any{"type": "string", "title": "Add", "maxLength": 1000, "x-placeholder": "converted, {{profile}}"}, "One or more, separated by commas. Variables are filled in, like {{profile}}.")),
 				"remove": templated(described(map[string]any{"type": "string", "title": "Remove", "maxLength": 1000, "x-placeholder": "needs-review"}, "Tags to take off, separated by commas, like needs-review.")),
+			}, nil)}),
+		def(StepDefinition{Type: TypeWait, RunsAs: RunsAction, Phase: []string{PhaseBefore}, Category: "flow", Name: "Wait", Icon: "clock", TypeLabel: "Action",
+			Description: "Pauses before the conversion: for a number of seconds (the worker waits), or until a time of day (the file goes back to the queue until then, so the worker is free).",
+			Inputs:      []Port{in}, Outputs: []Port{success}, SideEffects: "none",
+			ConfigSchema: object(map[string]any{
+				"seconds": described(map[string]any{"type": "integer", "title": "Wait for (seconds)", "minimum": 1, "maximum": 3600}, "Up to an hour. Leave empty when waiting until a time of day."),
+				"until":   described(map[string]any{"type": "string", "title": "Or until", "maxLength": 5, "x-placeholder": "02:00"}, "A time of day, like 02:00 (this computer's clock). The file waits in the queue until then."),
 			}, nil)}),
 		def(StepDefinition{Type: TypeNote, RunsAs: RunsAction, Category: "flow", Name: "Add a note to the log", Icon: "note", TypeLabel: "Action",
 			Description: "Writes a line into the job log at this point. Variables are filled in.",
@@ -464,6 +481,14 @@ func Definitions() []StepDefinition {
 				{Name: "season", Type: "string", Words: "The season number (an episode only)"}, {Name: "episode", Type: "string", Words: "The episode number (an episode only)"}, {Name: "original_language", Type: "string", Words: "Its original language, as the downloader names it"}},
 			ConfigSchema: object(map[string]any{
 				"which": withDefault(hinted(enum([]any{"all", "sonarr", "radarr"}, []string{"Every connected downloader", "Sonarr only", "Radarr only"}), []string{"The first one that knows the file answers.", "Only the Sonarr connections.", "Only the Radarr connections."}), "all", "Which", ""),
+			}, nil)}),
+		def(StepDefinition{Type: TypeRequeue, RunsAs: RunsEnd, Category: "flow", Name: "Convert again later", Icon: "redo", TypeLabel: "End",
+			Description: "The file goes back to the queue and is tried again after a while, at most so many times; then it stops as failed with the reason below. For files another program hasn't finished with.",
+			Inputs:      []Port{in}, Outputs: []Port{}, SideEffects: "none",
+			ConfigSchema: object(map[string]any{
+				"afterMin": withDefault(described(map[string]any{"type": "integer", "title": "Try again after (minutes)", "minimum": 1, "maximum": 10080}, "Up to a week."), 60, "Try again after (minutes)", ""),
+				"maxTries": withDefault(described(map[string]any{"type": "integer", "title": "At most (tries)", "minimum": 1, "maximum": 100}, "Counting every try of this file."), 5, "At most (tries)", ""),
+				"reason":   described(map[string]any{"type": "string", "title": "When the tries are used up", "maxLength": 200, "x-placeholder": "The download never finished"}, "The job's failure words after the last try."),
 			}, nil)}),
 		def(StepDefinition{Type: TypeFail, RunsAs: RunsEnd, Category: "flow", Name: "Stop as failed", Icon: "stop", TypeLabel: "End",
 			Description: "The run ends as failed with the reason below, and the original is left as it is.",

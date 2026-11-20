@@ -50,7 +50,19 @@ type Env struct {
 	Lookup func(which string) (vals map[string]string, words string, err error)
 	// FB2c: tags on the job record; answers with the record's tags after the change.
 	Tag func(add, remove []string) ([]string, error)
+	// FB4: how a Wait card pauses (nil: time.Sleep) and what time it is (nil: time.Now).
+	Sleep func(d time.Duration) error
+	Now   func() time.Time
 }
+
+// Later is the error a Wait card returns when the file should go back to the queue until a time of day
+// (FB4): the worker puts it there instead of failing the job.
+type Later struct {
+	At    time.Time
+	Words string
+}
+
+func (l *Later) Error() string { return l.Words }
 
 // MaxOutput is how much of a program's output {{command_output}} keeps.
 const MaxOutput = 4000
@@ -108,6 +120,41 @@ func run(c rules.Card, st *State, env Env) (Note, error) {
 		return def
 	}
 	switch c.Type {
+	case workflow.TypeWait:
+		if u := strings.TrimSpace(str("until", "")); u != "" {
+			now := time.Now()
+			if env.Now != nil {
+				now = env.Now()
+			}
+			t, err := time.ParseInLocation("15:04", u, now.Location())
+			if err != nil {
+				return n, errors.New("the time must read like 02:00")
+			}
+			at := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, now.Location())
+			if !at.After(now) {
+				at = at.Add(24 * time.Hour)
+			}
+			return n, &Later{At: at, Words: "Waiting until " + u + " as the workflow asks"}
+		}
+		secs := 0
+		switch v := c.Config["seconds"].(type) {
+		case float64:
+			secs = int(v)
+		case int:
+			secs = v
+		}
+		if secs < 1 || secs > 3600 {
+			return n, errors.New("the wait must be 1 to 3600 seconds, or a time of day")
+		}
+		sleep := func(d time.Duration) error { time.Sleep(d); return nil }
+		if env.Sleep != nil {
+			sleep = env.Sleep
+		}
+		if err := sleep(time.Duration(secs) * time.Second); err != nil {
+			return n, err
+		}
+		n.Words = "Waited " + strconv.Itoa(secs) + " seconds"
+		return n, nil
 	case workflow.TypeTag:
 		addText, empty := vars.Resolve(str("add", ""), st.Vars)
 		removeText, more := vars.Resolve(str("remove", ""), st.Vars)

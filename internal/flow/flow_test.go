@@ -372,3 +372,35 @@ func TestTagCard(t *testing.T) {
 		t.Errorf("after the save too: %v", warnings)
 	}
 }
+
+// FB4: Wait pauses for its seconds through the env's sleep (cut short with the sleep's error), or asks for the
+// file back at a time of day: today when that is still ahead, else tomorrow; a time it can't read is an error.
+func TestWaitCard(t *testing.T) {
+	var slept time.Duration
+	now := time.Date(2026, 11, 20, 22, 0, 0, 0, time.Local)
+	env := Env{Sleep: func(d time.Duration) error { slept = d; return nil }, Now: func() time.Time { return now }}
+	st := &State{Vars: map[string]string{}}
+	notes, err := Before([]rules.Card{{NodeID: "w", Type: workflow.TypeWait, Name: "Wait", Config: map[string]any{"seconds": float64(90)}}}, st, env)
+	if err != nil || slept != 90*time.Second || notes[0].Words != "Waited 90 seconds" {
+		t.Errorf("seconds: %v %s %+v", err, slept, notes)
+	}
+	_, err = Before([]rules.Card{{NodeID: "w", Type: workflow.TypeWait, Name: "Wait", Config: map[string]any{"until": "23:30"}}}, st, env)
+	var later *Later
+	if !errors.As(err, &later) || !later.At.Equal(time.Date(2026, 11, 20, 23, 30, 0, 0, time.Local)) {
+		t.Errorf("until later today: %v", err)
+	}
+	_, err = Before([]rules.Card{{NodeID: "w", Type: workflow.TypeWait, Name: "Wait", Config: map[string]any{"until": "02:00"}}}, st, env)
+	if !errors.As(err, &later) || !later.At.Equal(time.Date(2026, 11, 21, 2, 0, 0, 0, time.Local)) {
+		t.Errorf("until tomorrow: %v", err)
+	}
+	if _, err := Before([]rules.Card{{NodeID: "w", Type: workflow.TypeWait, Name: "Wait", Config: map[string]any{"until": "25:99"}}}, st, env); err == nil || errors.As(err, &later) {
+		t.Errorf("a bad time: %v", err)
+	}
+	if _, err := Before([]rules.Card{{NodeID: "w", Type: workflow.TypeWait, Name: "Wait", Config: map[string]any{}}}, st, env); err == nil {
+		t.Error("nothing set: want an error")
+	}
+	cut := Env{Sleep: func(time.Duration) error { return errors.New("the wait was cut short") }}
+	if _, err := Before([]rules.Card{{NodeID: "w", Type: workflow.TypeWait, Name: "Wait", Config: map[string]any{"seconds": float64(5)}}}, st, cut); err == nil || !strings.Contains(err.Error(), "cut short") {
+		t.Errorf("cut short: %v", err)
+	}
+}
