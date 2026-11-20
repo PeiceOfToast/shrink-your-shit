@@ -42,7 +42,7 @@
   --accent: #365FE2;
   --accent-2: #7454C8;
   --on-accent: #FFFFFF;       /* 5.4:1 */
-  --accent-text: var(--accent);
+  --accent-text: #2B50C8;     /* darker than --accent: 4.5:1+ on the blue pill tint (#365FE2 was 4.16:1) */
   --success: #16835A;         /* fills, icons, bars */
   --warning: #A9650D;
   --error: #B72F43;
@@ -60,7 +60,7 @@
     color-scheme: light;
     --bg: #F5F7FB; --sidebar: #E9EEF5; --surface: #FFFFFF; --raised: #EAF1FC;
     --text: #172033; --text-2: #5A687B; --border: #CCD5E1; --border-strong: #7D8BA0;
-    --accent: #365FE2; --accent-2: #7454C8; --on-accent: #FFFFFF; --accent-text: #365FE2;
+    --accent: #365FE2; --accent-2: #7454C8; --on-accent: #FFFFFF; --accent-text: #2B50C8;
     --success: #16835A; --warning: #A9650D; --error: #B72F43;
     --success-text: #13704D; --warning-text: #8A5208; --error-text: #B72F43; --focus: var(--accent);
     --chart-muted: #7D8BA0; --chart-pending: #6FB19A;
