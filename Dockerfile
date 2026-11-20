@@ -24,7 +24,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -
 
 FROM debian:trixie-slim
 # Debian 13 (trixie), not Alpine: Quick Sync on Tiger Lake and newer needs the Intel GPU runtime
-# (libmfx-gen), which Alpine does not package. The three Intel packages are amd64 only; arm64 gets ffmpeg alone.
+# (libmfx-gen), which Alpine does not package. The three Intel packages are amd64 only; arm64 gets the rest, AMD driver included.
 # ca-certificates: without it every https call (Discord, webhooks, the update check, Jellyfin/Plex) fails.
 # mesa-va-drivers: the VA-API driver for AMD cards (radeonsi), so hevc_vaapi works on a Radeon (user item 8).
 RUN set -eux; \
