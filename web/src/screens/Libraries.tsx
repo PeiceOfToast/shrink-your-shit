@@ -109,7 +109,7 @@ export function Libraries() {
   const actions = <>
     <button className="btn sm ghost" type="button" disabled={none || allNoWf} title={allNoWf ? NOWF_HINT : needSel} onClick={scan}><Icon id="i-refresh" />Scan now</button>
     {canPause && <button className="btn sm ghost" type="button" onClick={() => pr(false)}><Icon id="i-pause" />Pause</button>}
-    {canResume && <button className="btn sm ghost" type="button" onClick={() => pr(true)}><Icon id="i-play" />Resume</button>}
+    {canResume && <button className="btn sm ghost" type="button" disabled={allNoWf} title={allNoWf ? NOWF_HINT : undefined} onClick={() => pr(true)}><Icon id="i-play" />Resume</button>}
     <button className="btn sm ghost" type="button" disabled={none} title={needSel} onClick={access}><Icon id="i-shield" />Check folder access</button>
   </>;
   return (
