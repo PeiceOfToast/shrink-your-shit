@@ -230,6 +230,8 @@ function Updates({ version }: { version?: string }) {
 // Roll back (#336) shows only when the helper keeps a previous version, and works with update checks off.
 const REFUSED: Record<string, string> = { job_running: "A file just started converting.", not_available: "There's no newer version now.",
   updates_off: "Update checks are off. Turn them on to update.", update_in_progress: "", install_unsupported: "", no_previous: "There's no earlier version kept to go back to." };
+// design #456: our words for the cancel 409s; the card reloads after, since the state has moved on
+const CANCEL_REFUSED: Record<string, string> = { update_in_progress: "The update has already started, so it can't be cancelled now.", nothing_to_cancel: "There's no update waiting to start." };
 const noV = (m: string) => m.replace(/\bv(?=\d)/g, ""); // design gap d: versions read as on the Version line
 // plain http has no clipboard API (the user's http://IP:8484), or it can be refused: then copy the old way, as Workers does
 async function copyText(t: string): Promise<boolean> {
@@ -260,7 +262,7 @@ function Install({ d, reload, check }: { d: UpdateNotice; reload: () => void; ch
   }, [running, gone, rolling, reload]);
   const cancel = async () => {
     setBusy(true); setSaid(""); setNoNew(false); setRbFail(""); setCancelled(false);
-    try { const r = await cancelUpdate(); if (!failed(r)) setCancelled(true); else setSaid(r.error.message); }
+    try { const r = await cancelUpdate(); if (!failed(r)) setCancelled(true); else setSaid(CANCEL_REFUSED[r.error.code] ?? r.error.message); }
     catch (e) { if (!(e instanceof SignedOut)) throw e; }
     setBusy(false); setCancelAsk(false); reload();
   };
@@ -310,7 +312,7 @@ function Install({ d, reload, check }: { d: UpdateNotice; reload: () => void; ch
     {said && <p className="st warn" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{said}{noNew && <> <button className="linkbtn" type="button" onClick={() => (setSaid(""), setNoNew(false), check())}>Check now</button></>}</span></p>}
     {cancelled && <p className="st ok" role="status" style={{ margin: 0 }}><Icon id="i-check-c" /><span>Update cancelled.</span></p>}
     {cancelAsk && <Confirm title={`Cancel the update to ${to}?`} yes="Cancel update" no="Keep waiting" busy={busy} onYes={cancel}
-      onNo={() => (setCancelAsk(false), cancelBtn.current?.focus())} body="Nothing is installed, and paused workers start again." />}
+      onNo={() => (setCancelAsk(false), cancelBtn.current?.focus())} body="Nothing is installed, and workers start again if the update paused them." />}
     {d.method === "helper" && st === "idle" && d.rollback.available && !gone && !rolling &&
       <div><button className="btn" type="button" disabled={busy} onClick={() => setAsk(true)}>{prev ? `Roll back to ${prev}` : "Roll back"}</button></div>}
     {ask && <Confirm title={`Go back to ${prevName}?`} yes="Roll back" no="Cancel" busy={busy} onYes={back} onNo={() => setAsk(false)}
