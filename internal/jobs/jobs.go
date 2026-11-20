@@ -219,11 +219,12 @@ VALUES(?,?,?,?,?,?,?,?)`, j.Library, j.Path, Queued, j.Reason, j.DurationSec, j.
 		}
 		return r.LastInsertId()
 	}
+	s.ensureLibraryRevision(j.LibraryID)
 	// One statement: the job is added only if its library still exists and is started, so a library
 	// removed (or a scan that started before the removal) cannot leave a job behind.
 	// V5b: it takes its library's priority.
-	r, err := s.db.Exec(`INSERT INTO jobs(library,library_id,path,status,reason,duration,size_before,created,updated,priority)
-SELECT ?,?,?,?,?,?,?,?,?,priority FROM libraries WHERE id=? AND started=1`,
+	r, err := s.db.Exec(`INSERT INTO jobs(library,library_id,path,status,reason,duration,size_before,created,updated,priority,workflow_rev)
+SELECT ?,?,?,?,?,?,?,?,?,priority,`+queuedRevSQL+` FROM libraries WHERE id=? AND started=1`,
 		j.Library, j.LibraryID, j.Path, Queued, j.Reason, j.DurationSec, j.SizeBefore, now, now, j.LibraryID)
 	if err != nil {
 		return 0, err
@@ -239,8 +240,9 @@ SELECT ?,?,?,?,?,?,?,?,?,priority FROM libraries WHERE id=? AND started=1`,
 // library as Enqueue is, so a library removed meanwhile leaves no row.
 func (s *Store) EnqueueFailed(j Job, code, msg string) (int64, error) {
 	now := s.stamp()
-	r, err := s.db.Exec(`INSERT INTO jobs(library,library_id,path,status,reason,duration,size_before,created,updated,priority,error,error_code,attempts)
-SELECT ?,?,?,?,?,?,?,?,?,priority,?,?,1 FROM libraries WHERE id=? AND started=1`,
+	s.ensureLibraryRevision(j.LibraryID)
+	r, err := s.db.Exec(`INSERT INTO jobs(library,library_id,path,status,reason,duration,size_before,created,updated,priority,error,error_code,attempts,workflow_rev)
+SELECT ?,?,?,?,?,?,?,?,?,priority,?,?,1,`+queuedRevSQL+` FROM libraries WHERE id=? AND started=1`,
 		j.Library, j.LibraryID, j.Path, Failed, j.Reason, j.DurationSec, j.SizeBefore, now, now, msg, code, j.LibraryID)
 	if err != nil {
 		return 0, err
