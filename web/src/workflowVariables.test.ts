@@ -62,7 +62,12 @@ describe("secrets", () => {
 
   it("a secret is never offered in the picker, and a {{name}} to it is refused as a secret", () => {
     const list = input.withOwn(vars.mockVariables().variables, [{ name: "tmdb_key", type: "secret", value: "abc123" }]);
-    expect(list.some((v) => v.name === "tmdb_key")).toBe(false);
+    // listed (so the page can name the reason) but allowed in no field, so the picker never offers it
+    for (const f of ["folder", "outputName", "srtName", "trackTitle"]) expect(list.filter((v) => vars.allowedIn(v, f)).some((v) => v.name === "tmdb_key")).toBe(false);
+    const defs = [{ type: "output.commit", configSchema: (REGISTRY as Record<string, { configSchema: object }>)["output.commit"].configSchema }];
+    const page = input.varProblems([{ id: "o1", type: "output.commit", config: { outputName: "{{tmdb_key}}" } }], defs as never, list);
+    expect(page[0]).toMatchObject({ field: "outputName", code: "unknown_variable", name: "tmdb_key" });
+    expect(page[0].error).toContain("is a secret");
     const { etag, doc } = draft("w2");
     doc.variables = [{ name: "tmdb_key", type: "secret", value: "abc123" }];
     outputNode(doc).config = { ...outputNode(doc).config, outputName: "{{tmdb_key}}" };
@@ -88,6 +93,7 @@ describe("picker", () => {
     const nodes = [{ id: "o1", type: "output.commit", config: { outputName: "{{sub_lang}}", srtName: "{{sub_lang}}" } }];
     const problems = input.varProblems(nodes, defs as never, input.withOwn(vars.mockVariables().variables, []));
     expect(problems.map((p) => [p.field, p.code])).toEqual([["outputName", "unknown_variable"]]);
+    expect(problems[0].error).toBe("{{sub_lang}} isn't a variable for this field.");
   });
 
   it("Use {{suggest}} replaces every use of the name in the field", () => {

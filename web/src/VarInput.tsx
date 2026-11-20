@@ -22,7 +22,15 @@ function analyse(value: string, vars: TemplateVar[] | null, field: string) {
   const errors: string[] = [], unknown: string[] = [], empty = new Set<string>();
   const example = value.replace(TOKEN, (all, raw: string) => {
     const name = raw.trim(), v = byName.get(name);
-    if (!v) { if (!vars) return all; unknown.push(name); const sug = closest(name, names); errors.push(`{{${name}}} isn't a variable.` + (sug ? ` Did you mean {{${sug}}}?` : "")); return all; }
+    if (!v) {
+      if (!vars) return all;
+      unknown.push(name);
+      const known = vars.find((x) => x.name === name), sug = closest(name, names);
+      errors.push(known?.secret ? `{{${name}}} is a secret, and a secret can't go in a file name, folder or title.`
+        : known ? `{{${name}}} isn't a variable for this field.`
+        : `{{${name}}} isn't a variable.` + (sug ? ` Did you mean {{${sug}}}?` : ""));
+      return all;
+    }
     if (v.value == null || v.value === "") { empty.add(name); return ""; }
     return v.value;
   });
@@ -53,15 +61,17 @@ export function varProblems(nodes: { id: string; type: string; config?: Record<s
 }
 
 // The workflow's own variables (its document's variables list). They come first in the picker, under "Your variables",
-// and join the Publish check. A name that is already a built-in keeps the built-in. A secret is never offered: every
-// {{name}} field makes a file name, folder or track title, and a secret never goes there.
+// and join the Publish check. A name that is already a built-in keeps the built-in. A secret is listed but allowed in no
+// field (fields []): every {{name}} field makes a file name, folder or track title, and a secret never goes there.
 export const OwnVars = createContext<Variable[]>([]);
 const GROUP_LABEL: Record<string, string> = { Workflow: "Your variables" };
 // The built-ins are the server's list without the workflow's own variables: since #497 those come back in it too, group "Workflow".
 export const builtinsOf = (list: TemplateVar[]) => list.filter((v) => v.group !== "Workflow");
 export function withOwn(list: TemplateVar[], own: Variable[]): TemplateVar[] {
   const builtins = builtinsOf(list), names = new Set(builtins.map((v) => v.name));
-  const mine = own.filter((v) => v.type !== "secret" && !names.has(v.name)).map((v): TemplateVar => ({ name: v.name, description: v.description ?? "", group: "Workflow", value: v.value == null ? null : String(v.value), fields: null }));
+  const mine = own.filter((v) => !names.has(v.name)).map((v): TemplateVar => v.type === "secret"
+    ? { name: v.name, description: v.description ?? "", group: "Workflow", value: null, fields: [], secret: true }
+    : { name: v.name, description: v.description ?? "", group: "Workflow", value: v.value == null ? null : String(v.value), fields: null });
   return [...mine, ...builtins];
 }
 

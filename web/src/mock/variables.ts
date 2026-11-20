@@ -3,7 +3,8 @@
 // value here shows as empty in the example, as the page does for a file that has none.
 import type { Variable } from "../types/v2";
 
-export interface TemplateVar { name: string; description: string; group: string; value: string | null; fields: string[] | null }
+// secret: a workflow's own secret. It is listed with fields [] (allowed in no field), so the page can say why it is refused.
+export interface TemplateVar { name: string; description: string; group: string; value: string | null; fields: string[] | null; secret?: boolean }
 export interface VarList { sample: { path: string; builtIn: boolean }; variables: TemplateVar[] }
 
 const v = (name: string, group: string, description: string, value: string | null): TemplateVar => ({ name, description, group, value, fields: null });
