@@ -1,0 +1,36 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dashboard mockup</title><link rel="stylesheet" href="mock.css"></head><body>
+<div class="app">
+ <nav class="rail"><div class="brand"><span class="logo"></span>Shrink Your Shit</div>
+  <div class="nav"><a class="cur"><span class="ic"></span>Dashboard</a><a><span class="ic"></span>Jobs</a><div class="gap"></div><a><span class="ic"></span>Workflows</a><a><span class="ic"></span>Libraries</a><div class="gap"></div><a><span class="ic"></span>Workers</a><div class="gap"></div><a><span class="ic"></span>Settings</a></div></nav>
+ <div class="main">
+  <div class="topbar"><div class="search">Search or jump to… <span class="k">Ctrl K</span></div><span class="iconbtn"></span></div>
+  <div class="content">
+   <div class="pagehead"><span class="tile">▦</span><div><h1>Dashboard</h1></div><span class="sp"></span><span class="switch"><i></i><b style="color:var(--text)">Workers on</b> · 1 of 1</span><button class="btn ghost">⟳ Scan all libraries</button></div>
+
+   <div class="tiles">
+    <div class="tile-card"><span class="l">Space saved</span><span class="v ok">1.2 TB</span><span class="d">38 GB per day · 3 MB waiting in the trash · 2 MB in originals left in place</span>
+     <svg viewBox="0 0 120 56" preserveAspectRatio="none"><polyline fill="none" stroke="var(--success)" stroke-width="2" points="0,50 12,48 24,44 36,45 48,38 60,36 72,30 84,28 96,20 108,14 120,8"/></svg></div>
+    <div class="tile-card"><span class="l">Files converted</span><span class="v">1,284</span><span class="d">70 per day · 5 done, 1 skipped, 2 failed today</span>
+     <svg viewBox="0 0 120 56" preserveAspectRatio="none"><g fill="var(--success)"><rect x="2" y="40" width="7" height="16"/><rect x="13" y="34" width="7" height="22"/><rect x="24" y="30" width="7" height="26"/><rect x="35" y="36" width="7" height="20"/><rect x="46" y="26" width="7" height="30"/><rect x="57" y="22" width="7" height="34"/><rect x="68" y="28" width="7" height="28"/><rect x="79" y="18" width="7" height="38"/><rect x="90" y="14" width="7" height="42"/><rect x="101" y="10" width="7" height="46"/><rect x="112" y="6" width="7" height="50"/></g><g fill="var(--error)"><rect x="101" y="4" width="7" height="6"/><rect x="112" y="0" width="7" height="6"/></g></svg></div>
+    <div class="tile-card"><span class="l">Right now</span><span class="v">2 <small style="font-size:var(--fs-lg);font-weight:400;color:var(--text-2)">converting</small></span><span class="d">640 waiting · <b style="color:var(--error-text)">2 failed</b> in 24 h · 1 worker on</span>
+     <span class="seg"><span class="on">Week</span><span>Month</span></span></div>
+   </div>
+
+   <section class="sec"><h2>Converting now <span class="more">All jobs</span></h2>
+    <div class="list">
+     <div class="rowc"><span class="tile"><b>HEVC</b>1080p</span><div><span class="ttl">Arrival.2016.1080p.BluRay.mkv</span><div class="chips"><span class="chip">Movies</span><span class="chip">Shrink videos</span><span class="chip">This computer</span></div><div class="subvals"><span>Step<b>Convert video</b></span><span>Speed<b>2.7×</b></span><span>Time left<b>12 min</b></span><span>Bitrate<b>5,400 kbps</b></span></div></div><div class="rail"><span class="pill run">Running · 48%</span><span class="t">started 2:12 AM</span></div><div class="under"><i style="width:48%"></i></div></div>
+     <div class="rowc"><span class="tile"><b>H.264</b>2160p</span><div><span class="ttl">Dune.Part.Two.2024.2160p.REMUX.mkv</span><div class="chips"><span class="chip">Movies</span><span class="chip">Shrink videos</span><span class="chip">This computer</span></div><div class="subvals"><span>Step<b>Checking the picture</b></span><span>Speed<b>—</b></span><span>Time left<b>about 1 min</b></span></div></div><div class="rail"><span class="pill run">Checking · 92%</span><span class="t">started 1:40 AM</span></div><div class="under"><i style="width:92%"></i></div></div>
+    </div></section>
+
+   <section class="sec"><h2>Libraries <span class="more">Libraries page</span></h2>
+    <div class="list">
+     <div class="rowc"><span class="tile folder">▭</span><div><span class="ttl">Movies</span><div class="chips"><span class="chip">Shrink videos</span><span class="chip">640 waiting</span><span class="chip">scanned 1:30 AM</span><span class="chip">1,600 files</span></div><div class="bar"><i style="width:62%"></i></div></div><div class="rail"><span class="fact ok">820 GB saved</span><span class="t">62% of 1.3 TB · <a>1 failed</a></span></div></div>
+     <div class="rowc"><span class="tile folder">▭</span><div><span class="ttl">TV Shows</span><div class="chips"><span class="chip">Shrink videos</span><span class="chip">360 waiting</span><span class="chip">scanned 1:30 AM</span><span class="chip">900 files</span></div><div class="bar"><i style="width:35%"></i></div></div><div class="rail"><span class="fact ok">310 GB saved</span><span class="t">35% of 880 GB</span></div></div>
+     <div class="rowc"><span class="tile folder">▭</span><div><span class="ttl">Home videos</span><div class="chips"><span class="chip">Home videos - my rules</span><span class="chip">120 waiting</span><span class="chip">scanned 1:30 AM</span></div><div class="bar"><i style="width:8%"></i></div></div><div class="rail"><span class="pill warn">Can't write to this folder</span><span class="t">nothing saved yet</span></div></div>
+    </div></section>
+
+   <section class="sec"><details class="fold"><summary>▸ Last 30 days: space saved per day, files per day (the two charts, unchanged)</summary><p class="note">Charts and their legend open here. On a phone this is the only way to reach them.</p></details></section>
+  </div>
+  <p class="cap">Mockup for ui-review.md C2/C3/C4/C5: stat tiles replace the headline band; live rows use the row grammar with labelled sub-values and a progress underline; libraries show a saved-share bar; charts fold. Sample data invented.</p>
+ </div>
+</div></body></html>
