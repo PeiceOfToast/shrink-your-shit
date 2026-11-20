@@ -1006,7 +1006,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		w.jobf(job.ID, ": %s", note)
 	}
 	setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWordsUsed(plan, gpu),
-		Decoder: decoderWords(src), Progress: media.Progress{ETASeconds: -1}})
+		Decoder: decoderWords(src, full), Progress: media.Progress{ETASeconds: -1}})
 	defer dropLive(job.ID)
 	var encErr string
 	var terr error
@@ -1028,7 +1028,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		encErr, decoded, terr = w.encodeLocal(ctx, job, args)
 		// A failed graphics encode steps down a rung at a time: the full GPU pipeline to the processor decoding
 		// for the same encoder (no count toward the pause), then to the processor, which counts (EncoderFell).
-		for gpu != "" && w.gpuFailed(ctx, terr, encErr) {
+		for gpu != "" && w.gpuFailed(ctx, terr, encErr, full) {
 			w.recordEncode(job.ID, args, encStart, encErr, terr, probeSummary(src))
 			reason := firstLines(encErr, 1)
 			if reason == "" {
@@ -1045,7 +1045,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 				args, _ = plan.FFmpegArgsWith(srcPath, tmp, gpu)
 				w.jobf(job.ID, ": full GPU pipeline failed (%s); the processor decodes for %s", shortReason(reason), gpu)
 				setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWordsUsed(plan, gpu),
-					Decoder: decoderWords(src), Progress: media.Progress{ETASeconds: -1}})
+					Decoder: decoderWords(src, false), Progress: media.Progress{ETASeconds: -1}})
 				encStart = w.now()
 				encErr, decoded, terr = w.encodeLocal(ctx, job, args)
 				continue
@@ -1053,7 +1053,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			fell, fellReason = true, shortReason(reason)
 			args = plan.FFmpegArgs(srcPath, tmp)
 			setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWords(plan),
-				Decoder: decoderWords(src), Progress: media.Progress{ETASeconds: -1}})
+				Decoder: decoderWords(src, false), Progress: media.Progress{ETASeconds: -1}})
 			encStart = w.now()
 			encErr, decoded, terr = w.encodeLocal(ctx, job, args)
 			break
@@ -1983,17 +1983,30 @@ func (w *Worker) graphicsArgs(ctx context.Context, job jobs.Job, plan rules.Plan
 	return args, false, ok
 }
 
-// gpuFailed says whether a graphics encode that ended with err should convert again on the processor: only an
-// encoder or ffmpeg failure (jobs.FallsBackToProcessor), never a stop (cancel, shutdown, the stall stop), a lost
-// lease, a full disk, or a damaged or missing source.
-func (w *Worker) gpuFailed(ctx context.Context, err error, stderr string) bool {
+// gpuFailed says whether a graphics encode that ended with err should convert again on the processor. Off the full
+// GPU pipeline, only an encoder or ffmpeg failure (jobs.FallsBackToProcessor). On the full rung the graphics card
+// also decodes, and a decode error there can be the card's, not the file's (a profile or chroma layout it cannot
+// read), so any failure steps down except a stop (cancel, shutdown, the stall stop), a lost lease, a full disk, a
+// missing source or an unwritable output, which the processor would hit too.
+func (w *Worker) gpuFailed(ctx context.Context, err error, stderr string, full bool) bool {
 	if err == nil || ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, errLeaseLost) {
 		return false
 	}
 	w.mu.Lock()
 	stalled := w.stopped == stopStall
 	w.mu.Unlock()
-	return !stalled && jobs.FallsBackToProcessor(strings.Split(stderr, "\n"))
+	if stalled {
+		return false
+	}
+	lines := strings.Split(stderr, "\n")
+	if full {
+		switch jobs.FailureCode(jobs.ReasonConvertFailed, lines) {
+		case "no_space", "source_missing", "output_not_writable":
+			return false
+		}
+		return true
+	}
+	return jobs.FallsBackToProcessor(lines)
 }
 
 // encodeLocal runs ffmpeg for the local worker's job: its progress, stall watch and live figures.

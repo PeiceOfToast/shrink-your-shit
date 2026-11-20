@@ -361,7 +361,10 @@ func (c *Checker) Decodes(ctx context.Context, fam, codec string, tenBit bool) b
 	if seen {
 		return ok
 	}
-	ok = c.decodes(ctx, fam, codec, tenBit)
+	ok, cacheable := c.decodes(ctx, fam, codec, tenBit)
+	if !cacheable {
+		return ok // a cancel or the timeout says nothing about the device: ask again next time
+	}
 	c.mu.Lock()
 	if c.decodeOK == nil {
 		c.decodeOK = map[string]bool{}
@@ -371,14 +374,16 @@ func (c *Checker) Decodes(ctx context.Context, fam, codec string, tenBit bool) b
 	return ok
 }
 
-func (c *Checker) decodes(ctx context.Context, fam, codec string, tenBit bool) bool {
+// decodes makes the sample and decodes it on the family's hardware. cacheable is false when the answer may be
+// transient: the context was cancelled or the probe timed out, so a false says nothing about the device.
+func (c *Checker) decodes(ctx context.Context, fam, codec string, tenBit bool) (ok, cacheable bool) {
 	s, known := decodeSamples[codec]
 	if !known || c.FFmpeg == "" || (fam != "qsv" && fam != "vaapi") {
-		return false
+		return false, true
 	}
 	dir, err := os.MkdirTemp("", "decode-probe")
 	if err != nil {
-		return false
+		return false, false
 	}
 	defer os.RemoveAll(dir)
 	sample := filepath.Join(dir, "sample."+s[1])
@@ -388,12 +393,15 @@ func (c *Checker) decodes(ctx context.Context, fam, codec string, tenBit bool) b
 	}
 	tctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	interrupted := func() bool { return ctx.Err() != nil || tctx.Err() != nil }
 	if _, err := c.Exec.Output(tctx, c.FFmpeg, "-hide_banner", "-v", "error", "-f", "lavfi", "-i",
 		"color=c=black:s=256x256:d=0.1", "-frames:v", "1", "-pix_fmt", pix, "-c:v", s[0], "-f", s[1], sample); err != nil {
-		return false
+		return false, !interrupted()
 	}
-	_, err = c.Exec.Output(tctx, c.FFmpeg, decodeArgs(fam, media.VAAPIDevice(), sample)...)
-	return err == nil
+	if _, err := c.Exec.Output(tctx, c.FFmpeg, decodeArgs(fam, media.VAAPIDevice(), sample)...); err != nil {
+		return false, !interrupted()
+	}
+	return true, true
 }
 
 // decodeArgs decodes in on the family's hardware and discards the frames: the same device setup the full

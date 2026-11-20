@@ -57,3 +57,32 @@ func TestDecodesCachesAndSkipsWhatItCannotSample(t *testing.T) {
 		t.Errorf("decode runs %d, want 2 (vaapi hevc 10-bit probed once)", decodes)
 	}
 }
+
+// A probe cut short by a cancel says nothing about the device, so it is not cached: the next ask runs the probe
+// again and gets the device's answer.
+func TestDecodesDoesNotCacheACancelledProbe(t *testing.T) {
+	var decodes int
+	failing := true
+	x := &media.FakeExec{Handler: func(name string, args []string) (string, string, error) {
+		if strings.Contains(strings.Join(args, " "), "-hwaccel") {
+			decodes++
+			if failing {
+				return "", "interrupted", errors.New("signal: killed")
+			}
+		}
+		return "", "", nil
+	}}
+	c := &Checker{Exec: x, FFmpeg: "/usr/bin/ffmpeg"}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if c.Decodes(cancelled, "qsv", "h264", false) {
+		t.Fatal("a cancelled probe must say no for this ask")
+	}
+	failing = false
+	if !c.Decodes(context.Background(), "qsv", "h264", false) {
+		t.Error("the next ask must probe again and find the device decodes, not reuse the cancelled no")
+	}
+	if decodes != 2 {
+		t.Errorf("decode runs %d, want 2 (the cancelled probe was not cached)", decodes)
+	}
+}
