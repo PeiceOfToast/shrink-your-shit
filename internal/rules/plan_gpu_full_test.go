@@ -3,6 +3,7 @@
 package rules
 
 import (
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -41,11 +42,11 @@ func TestFFmpegArgsFullGPUGoldens(t *testing.T) {
 		{"qsv plain", gpuPlan(22, nil), "hevc_qsv",
 			head + qsvDev + tail + "-c:v:0 hevc_qsv -global_quality 22 " + staleVideoArgs + " out.mkv"},
 		{"qsv downscale", gpuPlan(22, func(v *VideoEncode) { v.Height = 1080 }), "hevc_qsv",
-			head + qsvDev + tail + "-c:v:0 hevc_qsv -global_quality 22 -filter:v:0 scale_qsv=w=trunc(1080*a/2)*2:h=1080 " + staleVideoArgs + " out.mkv"},
+			head + qsvDev + tail + "-c:v:0 hevc_qsv -global_quality 22 -filter:v:0 scale_qsv=w=trunc(1080*iw/ih/2+0.5)*2:h=1080 " + staleVideoArgs + " out.mkv"},
 		{"qsv HDR", gpuPlan(22, func(v *VideoEncode) { v.HDR = hdr }), "hevc_qsv",
 			head + qsvDev + tail + "-c:v:0 hevc_qsv -global_quality 22" + hdrFlags + " " + staleVideoArgs + " out.mkv"},
 		{"qsv HDR downscale", gpuPlan(22, func(v *VideoEncode) { v.HDR = hdr; v.Height = 1080 }), "hevc_qsv",
-			head + qsvDev + tail + "-c:v:0 hevc_qsv -global_quality 22" + hdrFlags + " -filter:v:0 scale_qsv=w=trunc(1080*a/2)*2:h=1080 " + staleVideoArgs + " out.mkv"},
+			head + qsvDev + tail + "-c:v:0 hevc_qsv -global_quality 22" + hdrFlags + " -filter:v:0 scale_qsv=w=trunc(1080*iw/ih/2+0.5)*2:h=1080 " + staleVideoArgs + " out.mkv"},
 		{"vaapi plain", gpuPlan(22, nil), "hevc_vaapi",
 			head + vaDev + tail + "-c:v:0 hevc_vaapi -rc_mode CQP -qp 22 " + staleVideoArgs + " out.mkv"},
 		{"vaapi downscale", gpuPlan(22, func(v *VideoEncode) { v.Height = 1080 }), "hevc_vaapi",
@@ -163,5 +164,61 @@ func TestFFmpegArgsFullGPUFollowThePlansDepth(t *testing.T) {
 		if got != "" || !strings.Contains(note, "10-bit") || !strings.Contains(note, enc) {
 			t.Errorf("%s without its 10-bit test: got %q note %q, want the processor with a 10-bit note", enc, got, note)
 		}
+	}
+}
+
+// The QSV scale's width expression is trunc(H*iw/ih/2+0.5)*2, which ffmpeg evaluates with H*iw first (an exact
+// product), then /ih. It must give the width the plan says (ScaledWidth, round half up), or the encode lands a pixel
+// off the planned size (852 for a plan of 854). The a = iw/ih form rounds early and gives 122 for 328x1280 at 480.
+func TestQSVScaleWidthIsThePlannedWidth(t *testing.T) {
+	cases := []struct{ w, h, height int }{
+		{1920, 1080, 480}, {1920, 1080, 720}, {1920, 1080, 576}, {1920, 1080, 360},
+		{1440, 1080, 720}, {1920, 800, 480}, {1280, 534, 360}, {3840, 1606, 1080},
+		{328, 1280, 480}, {808, 768, 480},
+	}
+	check := func(w, h, height int) {
+		ffmpeg := int(math.Trunc(float64(height*w)/float64(h)/2+0.5)) * 2
+		if planned := ScaledWidth(w, h, height); ffmpeg != planned {
+			t.Errorf("%dx%d to %d: the QSV expression gives %d but the plan says %d", w, h, height, ffmpeg, planned)
+		}
+	}
+	for _, c := range cases {
+		check(c.w, c.h, c.height)
+	}
+	// a sweep over every source width and common shapes and targets, so a rounding edge anywhere shows up
+	for w := 2; w <= 3840; w++ {
+		for _, h := range []int{240, 480, 534, 576, 720, 800, 1080, 1280, 1606, 2160} {
+			for _, height := range []int{240, 360, 480, 576, 720, 1080} {
+				check(w, h, height)
+			}
+		}
+	}
+	want := "scale_qsv=w=trunc(480*iw/ih/2+0.5)*2:h=480"
+	if got := gpuScale("qsv", 480, false); got != want {
+		t.Errorf("qsv scale: got %s want %s", got, want)
+	}
+}
+
+// The QSV width for 808x768 at 480 is 506 (the plan's width): the expression must agree with it.
+func TestQSVScaleWidthForSquarishShape(t *testing.T) {
+	if got := ScaledWidth(808, 768, 480); got != 506 {
+		t.Fatalf("ScaledWidth(808,768,480) = %d, want 506", got)
+	}
+	if ffmpeg := int(math.Trunc(float64(480*808)/float64(768)/2+0.5)) * 2; ffmpeg != 506 {
+		t.Errorf("the QSV expression gives %d, want 506", ffmpeg)
+	}
+}
+
+// Plan.Expect marks the picture as planned only when the plan resized it, so a miss reads as a planned-size miss.
+func TestExpectMarksPlannedSizeOnlyWhenResized(t *testing.T) {
+	s := DefaultSelectors(3)
+	s.Resolution = "480"
+	big := h264(1920, 1080, 3000)
+	if e := s.Template().Compile(big).Expect(big, 0); !e.Streams[0].PlannedSize || e.Streams[0].Height != 480 {
+		t.Errorf("resized 1920x1080: PlannedSize %v, height %d; want true and 480", e.Streams[0].PlannedSize, e.Streams[0].Height)
+	}
+	small := h264(640, 360, 3000) // under the cap: not resized
+	if e := s.Template().Compile(small).Expect(small, 0); e.Streams[0].PlannedSize {
+		t.Errorf("unresized 640x360: PlannedSize set, want unset")
 	}
 }

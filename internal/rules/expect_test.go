@@ -126,3 +126,17 @@ func TestSameLanguage(t *testing.T) {
 		}
 	}
 }
+
+// A planned resize that misses says the planned size (854 planned, 852 written); a stream the plan did not resize keeps
+// the original wording.
+func TestCompareNamesThePlannedSizeWhenTheResizeMisses(t *testing.T) {
+	got := media.Stream{Type: "video", Codec: "hevc", Width: 852, Height: 480}
+	planned := compareStream(StreamExpect{Type: "video", Codec: "hevc", Width: 854, Height: 480, PlannedSize: true}, got, 1)
+	if len(planned) != 1 || planned[0] != "video #1: the picture size was planned as 854x480 but is 852x480 in the new file" {
+		t.Errorf("planned resize: %q", planned)
+	}
+	kept := compareStream(StreamExpect{Type: "video", Codec: "hevc", Width: 1920, Height: 1080}, got, 1)
+	if len(kept) != 1 || kept[0] != "video #1: the picture size is 1920x1080 in the original but 852x480 in the new file" {
+		t.Errorf("unplanned size: %q", kept)
+	}
+}

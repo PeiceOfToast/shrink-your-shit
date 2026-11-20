@@ -24,10 +24,12 @@ type StreamExpect struct {
 	// to SRT) must keep it; other tracks are copied with their flags as they are.
 	Default      bool
 	CheckDefault bool
-	Width        int    // video
-	Height       int    // video
-	BitDepth     int    // video
-	Filename     string // attachment
+	Width        int // video
+	Height       int // video
+	// PlannedSize is set when the plan scaled the picture: Width x Height is then the planned size, and a miss says so.
+	PlannedSize bool
+	BitDepth    int    // video
+	Filename    string // attachment
 	// Timing, from the source (R3). TimingKnown is set for a stream kept from the source; a stream made from
 	// another has no source timing and is not checked. OffsetSec is how long after the main video the stream
 	// starts; LengthSec is the stream's own length (0 when not stated).
@@ -267,7 +269,12 @@ func compareStream(w StreamExpect, g media.Stream, n int) []string {
 	switch w.Type {
 	case "video":
 		if w.Width > 0 && (g.Width != w.Width || g.Height != w.Height) {
-			differ("the picture size", fmt.Sprintf("%dx%d", w.Width, w.Height), fmt.Sprintf("%dx%d", g.Width, g.Height))
+			if w.PlannedSize { // the plan resized it: the miss is against the planned size, not the original
+				p = append(p, fmt.Sprintf("%s: the picture size was planned as %dx%d but is %dx%d in the new file",
+					name, w.Width, w.Height, g.Width, g.Height))
+			} else {
+				differ("the picture size", fmt.Sprintf("%dx%d", w.Width, w.Height), fmt.Sprintf("%dx%d", g.Width, g.Height))
+			}
 		}
 		if w.BitDepth > 0 && g.BitDepth != w.BitDepth {
 			differ("the colour depth", fmt.Sprintf("%d-bit", w.BitDepth), fmt.Sprintf("%d-bit", g.BitDepth))
