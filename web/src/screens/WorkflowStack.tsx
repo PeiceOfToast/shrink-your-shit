@@ -283,9 +283,9 @@ function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline }: { n
                 {otherwise.kind !== "other" && <option value="other">another path (open the graph)</option>}
               </select></label>
           : def.alwaysOn ? <span className="muted sm nowrap">Always on</span>
-          : <>{mv.fixed && <span className="muted sm nowrap" title={mv.reason ?? FIXED_LINE}>Set place</span>}
+          : <>{mv.fixed && !inline && <span className="muted sm nowrap" title={mv.reason ?? FIXED_LINE}>Set place</span>}
             <input type="checkbox" role="switch" className="switch" aria-label={(def.name) + " on"} checked={n.enabled} onChange={(e) => update({ ...n, enabled: e.target.checked })} /></>}
-        {!end && <details className="menu">
+        {!end && !inline && <details className="menu">
           <summary className="btn icon ghost" id={n.id + "-more"} aria-label={"More for " + nm}><Icon id="i-more" /></summary>
           <div className="pop" role="menu">
             <button className="it" type="button" role="menuitem" aria-disabled={mv.up ? undefined : true} onClick={(e) => { (e.currentTarget.closest("details") as HTMLDetailsElement).open = false; if (mv.up) mv.act("up"); }}>Move up</button>
@@ -697,7 +697,7 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
           const i = list.indexOf(n);
           // the server's places: no answer for a step means it's fixed. Moves stay inside the first and last steps.
           const p = live.stepPlaces?.[n.id], fixed = p ? p.fixedPlace : true;
-          const mv: Move = { fixed: fixed || simple, reason: p?.fixedReason, up: !fixed && !simple && i > 1 && i <= lastMovable, down: !fixed && !simple && i >= 1 && i < lastMovable, del: !fixed && !simple && i >= 1 && i <= lastMovable,
+          const mv: Move = { fixed, reason: p?.fixedReason, up: !fixed && !simple && i > 1 && i <= lastMovable, down: !fixed && !simple && i >= 1 && i < lastMovable, del: !fixed && !simple && i >= 1 && i <= lastMovable, // the simple view shows no place badge or menu: moving and deleting live in the steps view (ui-shop review #543)
             act: (w) => (w === "del" ? deleteStep(n.id) : moveStep(n.id, w === "up" ? -1 : 1)) };
           const otherwise: Else | undefined = isQuestion(n) ? { kind: otherwiseOf(doc, n).kind, set: (k) => setElse(n, k) } : undefined;
           return <Step key={n.id} n={n} i={i} mv={mv} open={open === n.id} toggle={() => setOpen(open === n.id ? null : n.id)} update={update} issues={issues} otherwise={otherwise} inline={simple} />;
