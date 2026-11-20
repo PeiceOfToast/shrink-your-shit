@@ -369,7 +369,7 @@ label.chk{cursor:pointer}
 .list.rows .tbl td.selc{display:none;padding-right:0}
 .list.rows.selecting .tbl td.selc{display:table-cell}
 .list.rows .tbl td.tile{width:40px;padding:6px 0 6px 12px}
-.ltile{width:40px;height:40px;border-radius:var(--radius-sm);background:var(--raised);color:var(--accent-text);display:grid;place-items:center;flex:none}
+.ltile{min-width:40px;height:40px;padding:0 4px;border-radius:var(--radius-sm);background:var(--raised);color:var(--accent-text);display:grid;place-items:center;flex:none}
 .ltile .ic{width:20px;height:20px}
 .lname{display:flex;align-items:baseline;gap:8px;min-width:0}
 .lname .ttl{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -380,6 +380,15 @@ label.chk{cursor:pointer}
 .list.rows .mchip.errchip{background:var(--bad-soft);color:var(--error-text);font-weight:600}
 .list.rows .tbl td.stc{width:1%}
 .selall{display:inline-flex;align-items:center;gap:4px;min-height:32px}
+/* Jobs (U4, C1): the size change is the right-hand fact; the 3 px underline runs along a live row's bottom edge */
+.list .tbl.jobs tr{position:relative}
+/* a long reason line is capped, or its nowrap text sets the name column wider than the screen at larger text sizes */
+.list .tbl.jobs .lpath{max-width:30em}
+.list .tbl td.sizec{width:1%;text-align:right;color:var(--text-2)}
+.uline{position:absolute;left:0;right:0;bottom:0;height:3px}
+.uline i{display:block;height:100%;background:var(--accent)}
+.ltile.codec{font-size:var(--fs-sm);line-height:1.15;text-align:center;font-variant-numeric:tabular-nums}
+.ltile.codec b{font-weight:var(--fw-strong)}
 .tbl td .failedlink{display:block;margin-top:2px;font-size:var(--fs-sm);font-weight:600;color:var(--error-text)} /* Libraries: "2 failed" under the Status chip */
 .ltools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-height:36px}
 .ltools .btn.sm{min-height:32px}
@@ -411,7 +420,7 @@ label.chk{cursor:pointer}
   .list .tbl tr::after{content:"\203A";position:absolute;right:6px;top:50%;transform:translateY(-50%);color:var(--text-2);font-size:20px;line-height:1}
   .list .tbl td{display:none;height:auto;padding:0;border:0;background:none!important}
   .list .tbl td.idc{display:block;flex:1;min-width:0}
-  .list .tbl td.stc,.list .tbl td.actc,.list .tbl td.posc{display:block;flex:none}
+  .list .tbl td.stc,.list .tbl td.actc,.list .tbl td.posc,.list .tbl td.sizec{display:block;flex:none}
   .list .tbl td.posc{min-width:20px}
   .list.selecting .tbl td.selc{display:block;flex:none}
   .list .tbl td.idc .sub:not(.phone){display:none}   /* phone rows: the title and one muted line */
@@ -420,12 +429,14 @@ label.chk{cursor:pointer}
   .list .tbl td.selc,.list .tbl td.actc,.list .tbl .over{position:relative;z-index:1}
   .list .tbl td.selc input{width:22px;height:22px}
   .list.rows .tbl td.tile{display:block;flex:none;width:auto;padding:0}
-  .list.rows .tbl td.tile .ltile{width:40px;height:40px}
+  .list.rows .tbl td.tile .ltile{min-width:40px;height:40px}
 }
 @media (max-width:599px){ /* U3: on a phone the status pill moves to a third line under the chips, under the tile's column */
   .list.rows .tbl tr{flex-wrap:wrap;row-gap:6px}
   .list.rows .tbl td.stc{flex:0 0 100%;padding:0 0 0 48px}
+  .list .tbl.jobs td.sizec{flex:0 0 100%;padding:0 0 0 48px;text-align:left;width:auto}
 }
+@media (min-width:901px){.list.rows .tbl.jobs td.selc{display:table-cell}} /* desktop Jobs keeps its row checkboxes; the Libraries rule hides them */
 .pagehead .btn.help{width:24px;min-height:24px;height:24px}.pagehead .btn.help .ic{width:16px;height:16px}
 /* the favourite star: a fixed 32 px column, the icon centred, colour only (no pressed box), so names line up (design, step 2) */
 .tbl .btn.star{width:32px;min-width:32px;flex:none;justify-content:center;border-color:transparent;background:none}
