@@ -323,8 +323,8 @@ func TestRestoreThroughTheAPI(t *testing.T) {
 		t.Errorf("at the name: %q", b)
 	}
 	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/activity/done"})
-	if !strings.Contains(body, `"originalState":"restored"`) {
-		t.Errorf("%s", body)
+	if strings.Contains(body, `"originalState":"restored"`) {
+		t.Errorf("a restored file is on the Done list: %s", body)
 	}
 	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/activity/kept"})
 	if !strings.Contains(body, `"count":0`) {

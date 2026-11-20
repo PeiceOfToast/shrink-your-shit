@@ -488,6 +488,10 @@ ALTER TABLE jobs ADD COLUMN output_gone_at TEXT NOT NULL DEFAULT '';`},
 	{51, "job workflow revision", `
 ALTER TABLE jobs ADD COLUMN workflow_rev INTEGER NOT NULL DEFAULT 0;
 UPDATE jobs SET workflow_rev = ` + fmt.Sprintf(revOfFlowSQL, "(SELECT flow_id FROM libraries WHERE id=jobs.library_id)") + `;`},
+	// The .srt files a job saved beside its new file, as a JSON list of names (the job page lists them;
+	// user item 4, 11-20). '' for older jobs: not known, shown as none.
+	{52, "job subtitle files", `
+ALTER TABLE jobs ADD COLUMN subtitle_files TEXT NOT NULL DEFAULT '';`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone

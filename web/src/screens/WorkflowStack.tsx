@@ -11,7 +11,7 @@ import { useData } from "../useData";
 import { getDraft, getLadder, getWorkflow, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
 import { Link, navigate, onLeave } from "../router";
 import { Browse } from "../FolderPicker";
-import { listLibraries, shrunk } from "../libraryApi";
+import { getSettings, listLibraries, shrunk } from "../libraryApi";
 import type { AddStep, ID, JSONSchema, Node, PublishPreview, StepDefinition, ValidationIssue, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
 
 // The step definitions and the server's words for each step of the document being edited.
@@ -31,6 +31,18 @@ const widget = (s: JSONSchema) => ((s["x-ui"] as { widget?: string } | undefined
 // The hint for the chosen value (x-enumHints follows enum's order).
 const hintFor = (s: JSONSchema, v: unknown) => { const e = (s.enum as unknown[]) ?? [], h = (s["x-enumHints"] as string[]) ?? []; return h[e.indexOf(v)] ?? ""; };
 const Hint = ({ text }: { text: string }) => (text ? <span className="hint" aria-live="polite">{text}</span> : null);
+
+// User bug 11-20 (row cd65bf29): "Save as separate .srt files" says which languages become files; the others stay inside.
+function SrtFiles() {
+  const st = useData(getSettings, []), [list, setList] = useState<[string, string][]>([]);
+  useEffect(() => { fetch("/languages.json").then((r) => r.json()).then(setList, () => {}); }, []);
+  const codes = st.data && !failed(st.data) ? st.data.languages ?? [] : null;
+  if (!codes) return null;
+  const name = (c: string) => list.find((l) => l[0] === c)?.[1] ?? c, c0 = codes[0] ?? "eng";
+  return (<span className="hint">
+    {codes.length ? "Saved as files: " + codes.map(name).join(", ") + ", and subtitles with no language set." : "No languages chosen, so subtitles in the main audio's language, and those with no language set, are saved as files."} <Link to="/settings/general">Change your languages</Link>
+    <span style={{ display: "block" }}>For example: Movie.{c0}.srt, plus Movie.{c0}.sdh.srt or Movie.{c0}.forced.srt if the video has them.</span></span>);
+}
 
 // One option from the step's configSchema, as a native labelled control (design review rule 1).
 function Field({ id, name, s, value, set }: { id: string; name: string; s: JSONSchema; value: unknown; set: (v: unknown) => void }) {
@@ -57,11 +69,11 @@ function Field({ id, name, s, value, set }: { id: string; name: string; s: JSONS
       <fieldset className="field choice"><legend className="lab">{title}</legend><div className="row">
         {labels(s).map(([v, l]) => (
           <label key={String(v)} className="radio"><input type="radio" name={fid} checked={value === v} disabled={!!avail && !avail.includes(v)} onChange={() => set(v)} /><span>{l}</span></label>))}
-      </div><Hint text={hintFor(s, value)} />{typeof s.description === "string" && <span className="hint">{s.description}</span>}</fieldset>);
+      </div><Hint text={hintFor(s, value)} />{name === "subtitles" && value === "srt" && <SrtFiles />}{typeof s.description === "string" && <span className="hint">{s.description}</span>}</fieldset>);
   }
   if (s.enum)
     return <div className="field"><label htmlFor={fid}>{title}</label><select id={fid} className="input" value={String(value)} onChange={(e) => set(labels(s).find((o) => String(o[0]) === e.target.value)?.[0])}>
-      {labels(s).map(([v, l]) => <option key={String(v)} value={String(v)}>{l}</option>)}</select><Hint text={hintFor(s, value)} />{typeof s.description === "string" && <span className="hint">{s.description}</span>}</div>;
+      {labels(s).map(([v, l]) => <option key={String(v)} value={String(v)}>{l}</option>)}</select><Hint text={hintFor(s, value)} />{name === "subtitles" && value === "srt" && <SrtFiles />}{typeof s.description === "string" && <span className="hint">{s.description}</span>}</div>;
   // a list of choices (V6a check: "Video format is one of"): a checkbox per choice
   const items = s.items as JSONSchema | undefined;
   if (s.type === "array" && items?.enum) {
