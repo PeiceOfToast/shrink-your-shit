@@ -347,6 +347,9 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 func v2JobItem(store *jobs.Store, it map[string]any, row jobs.FileRow, card string) map[string]any {
 	it["origin"], it["warning"] = "job", nil
 	it["tags"] = row.Tags // FB2c: what a workflow's "Tag the file" step set; [] for most jobs
+	if row.Tags == nil {
+		it["tags"] = []string{} // never null, whatever row made it here
+	}
 	// ui-shop's First/Last chip reads pin from the row; priority is the job's place among the unpinned (its
 	// library's, for a pinned one), never the reserved numbers that keep a pin
 	it["priority"], it["pin"] = row.Priority, nil

@@ -7,11 +7,14 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
 // FB2c (migration 57): a job's record carries tags. A new job has none; SetJobTags removes, then adds,
-// each trimmed, the same tag in another case taken once, cut to MaxTagLen, at most MaxTags kept; the
-// job and the list row read them back; a job that isn't there is ErrNotFound.
+// each trimmed, a comma a separator and never part of a tag, the same tag in another case taken once, cut
+// to MaxTagLen, at most MaxTags kept; the job and the list row read them back; a job that isn't there is
+// ErrNotFound; the activity lists read tags too, and a skipped row carries an empty list, never nil.
 func TestJobTags(t *testing.T) {
 	s := open(t)
 	id, err := s.Enqueue(Job{Library: "/media", Path: "/media/a.mkv", DurationSec: 10, SizeBefore: 100})
@@ -34,13 +37,6 @@ func TestJobTags(t *testing.T) {
 	}
 	if got, _ = s.SetJobTags(id, []string{"a,b"}, []string{"converted"}); !reflect.DeepEqual(got, []string{"remux", "a", "b"}) { // a comma is a separator, never part of a tag
 		t.Fatalf("commas: %v", got)
-	}
-	if ws, _ := s.WorkingJobs(); ws != nil { // the activity lists read tags too
-		for _, w := range ws {
-			if w.Tags == nil {
-				t.Errorf("a working job without tags: %+v", w.Job)
-			}
-		}
 	}
 	long := strings.Repeat("x", MaxTagLen+5)
 	got, _ = s.SetJobTags(id, []string{long}, nil)
@@ -66,5 +62,29 @@ func TestJobTags(t *testing.T) {
 	}
 	if _, err := s.JobTags(id + 99); !errors.Is(err, ErrNotFound) {
 		t.Errorf("no such job: %v", err)
+	}
+
+	// the activity lists read tags too (a running job shows the tags set on it), and a skipped row carries an
+	// empty list, never nil (review2-545: the API sends an array on every tab)
+	j, err := s.Claim("w1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetJobTags(j.ID, []string{"running-tag"}, []string{"remux"}) // the record is at the cap: one off, one on
+	ws, err := s.WorkingJobs()
+	if err != nil || len(ws) != 1 || !rules.HasTag(ws[0].Tags, "running-tag") {
+		t.Errorf("working jobs' tags: %+v %v", ws, err)
+	}
+	if err := s.Skip(j.ID, "already in this format", "already_hevc"); err != nil {
+		t.Fatal(err)
+	}
+	skipped, _, _, err := s.FileList(FileFilter{Show: CardSkipped, Limit: 10})
+	if err != nil || len(skipped) == 0 {
+		t.Fatalf("skipped rows: %v %v", skipped, err)
+	}
+	for _, r := range skipped {
+		if r.Tags == nil {
+			t.Errorf("a skipped row with nil tags: %+v", r)
+		}
 	}
 }

@@ -199,6 +199,7 @@ func (s *Store) FileList(f FileFilter) (rows []FileRow, total int, counts map[st
 		defer r.Close()
 		for r.Next() {
 			var row FileRow
+			row.Tags = []string{} // a skipped row carries no tags, and the API always sends an array (review2-545)
 			if err := r.Scan(&row.SkipID, &row.Path, &row.SizeBefore, &row.Decision, &row.Reason, &row.JobID); err != nil {
 				return nil, 0, nil, err
 			}
