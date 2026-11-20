@@ -99,6 +99,7 @@ func TestDamageShareLimit(t *testing.T) {
 		{"just over 1% is kept", strings.Repeat("[h264 @ 0x1] error while decoding MB 1 2\n", 26), false},
 		{"2% is kept", strings.Repeat("[h264 @ 0x1] error while decoding MB 1 2\n", 50), false},
 		{"stops early after a few damaged pictures is kept", "[h264 @ 0x1] error while decoding MB 1 2\n[matroska,webm @ 0x1] Truncated: unexpected end of file", false},
+		{"ffmpeg's file ended prematurely is kept", "[h264 @ 0x1] error while decoding MB 1 2\n[matroska,webm @ 0x1] File ended prematurely", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newScenario(t)

@@ -648,7 +648,7 @@ func damagedShare(pictures int, frames int64) string {
 // broken, or it ends early). Any of these keeps the original, however few. "damaged" is counted here too: when
 // the message does not say which picture, the file as a whole is the safe reading. "corrupt" is not: ffmpeg's
 // corrupt lines are per picture or packet (corrupted macroblock, corrupt decoded frame, Packet corrupt).
-var fileDamageRe = regexp.MustCompile(`(?i)moov atom not found|invalid data found when processing input|truncated|unexpected end|header missing|damaged`)
+var fileDamageRe = regexp.MustCompile(`(?i)moov atom not found|invalid data found when processing input|truncated|unexpected end|file ended prematurely|header missing|damaged`)
 
 // pictureDamageRe matches ffmpeg messages about one damaged picture (a broken slice or macroblock run).
 var pictureDamageRe = regexp.MustCompile(`(?i)error while decoding|cabac decode|concealing|invalid nal|slice end not reached|overread|out of range|missing reference|reference picture missing|no frame decoded|corrupted macroblock|corrupt decoded frame|packet corrupt`)
