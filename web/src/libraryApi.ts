@@ -91,7 +91,7 @@ const mockUpdate = (): UpdateNotice => { const on = mock.mockState().settings.ch
   // after a mock Roll back the sample runs 1.9.0, with nothing older kept
   return !mockRolled ? d : { ...d, current: "1.9.0", latest: on ? "2.0.0" : null, available: on, install: { state: "idle", error: null },
     rollback: { available: false, version: null, dataRestored: false },
-    lastResult: { ok: true, from: "2.0.0", to: "1.9.0", message: "Rolled back from 2.0.0 to 1.9.0" + (u === "done" ? "; changes made since the update were undone (kept in syp.db.rolled-back)" : ""), dataRestored: u === "done", rolledBack: true } }; };
+    lastResult: { ok: true, from: "2.0.0", to: "1.9.0", message: "Rolled back from 2.0.0 to 1.9.0" + (u === "done" ? "; changes made since the update were undone: jobs done on the newer version are kept in syp.db.rolled-back" : ""), dataRestored: u === "done", rolledBack: true } }; };
 export const getUpdate = (): Promise<Answer<UpdateNotice>> => (!MOCK ? call("GET", "/api/v2/update")
   : new URLSearchParams(location.search).has("updatefail") ? M({ error: { code: "internal", message: "Couldn't load the update status." } }) : M(mockUpdate()));
 export const checkUpdate = (): Promise<Answer<UpdateNotice>> => (MOCK ? M((mockChecked = Date.now(), mockUpdate())) : call("POST", "/api/v2/update/check"));
@@ -102,6 +102,12 @@ export const installUpdate = (when: "now" | "after-job"): Promise<Answer<UpdateN
   if (refuse) return M({ error: { code: refuse, message: refuse } });
   if (when === "now" && upd() === "jobs") return M({ error: { code: "job_running", message: "a job is running; use after-job" } });
   return M((mockInstall = when === "now" ? "downloading" : "waiting", mockUpdate()));
+};
+// POST cancel: 200 with the status body; 409 update_in_progress (the update has started) / nothing_to_cancel.
+export const cancelUpdate = (): Promise<Answer<UpdateNotice>> => {
+  if (!MOCK) return call("POST", "/api/v2/update/cancel", {});
+  if (new URLSearchParams(location.search).has("cancellate")) return M({ error: { code: "update_in_progress", message: "the update has started; it can't be cancelled now" } });
+  return M((mockInstall = "idle", mockUpdate()));
 };
 // POST rollback: 202 with the status body; 409 install_unsupported / update_in_progress / no_previous, 500 server_error.
 export const rollbackUpdate = (): Promise<Answer<UpdateNotice>> => {

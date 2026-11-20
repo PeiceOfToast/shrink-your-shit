@@ -8,7 +8,7 @@ import { Icon } from "../Icon";
 import { PageHead } from "../PageHead";
 import { SignedOut, failed, type Answer } from "../api";
 import { bytes, plural } from "../format";
-import { checkUpdate, getConverting, getHealth, getUpdate, installUpdate, purgeTrash, rollbackUpdate, type UpdateNotice, getSettings, getToken, getTrash, patchSettings, rotateToken, signOut } from "../libraryApi";
+import { cancelUpdate, checkUpdate, getConverting, getHealth, getUpdate, installUpdate, purgeTrash, rollbackUpdate, type UpdateNotice, getSettings, getToken, getTrash, patchSettings, rotateToken, signOut } from "../libraryApi";
 import type { PurgeResult } from "../types/v2";
 import { SettingsTabs } from "../pages";
 import { Link, navigate } from "../router";
@@ -136,7 +136,7 @@ function Languages({ start, saved }: { start: string[]; saved: () => void }) {
                 <span>{l[1]}</span>{l[2] && l[2] !== l[1] && <span className="muted">{l[2]}</span>}
               </button>)}</div>}
           </div>
-          <span className="hint" id="lang-h2">Audio and subtitles in these languages are kept when a library uses "Keep only my languages". Tracks with no language set are always kept.</span></div>
+          <span className="hint" id="lang-h2">Audio and subtitles in these languages are kept by "Keep only my languages". "Save as separate .srt files" saves subtitles in these languages as files. Tracks with no language set are always kept.</span></div>
         <p className={bad ? "st bad" : "muted"} role="status">{said}</p>
         <div className="row"><button className="btn primary" type="button" disabled={!dirty} onClick={save}>Save</button></div>
       </div>
@@ -255,6 +255,8 @@ function Updates({ version }: { version?: string }) {
 // Roll back (#336) shows only when the helper keeps a previous version, and works with update checks off.
 const REFUSED: Record<string, string> = { job_running: "A file just started converting.", not_available: "There's no newer version now.",
   updates_off: "Update checks are off. Turn them on to update.", update_in_progress: "", install_unsupported: "", no_previous: "There's no earlier version kept to go back to." };
+// design #456: our words for the cancel 409s; the card reloads after, since the state has moved on
+const CANCEL_REFUSED: Record<string, string> = { update_in_progress: "The update has already started, so it can't be cancelled now.", nothing_to_cancel: "There's no update waiting to start." };
 const noV = (m: string) => m.replace(/\bv(?=\d)/g, ""); // design gap d: versions read as on the Version line
 // plain http has no clipboard API (the user's http://IP:8484), or it can be refused: then copy the old way, as Workers does
 async function copyText(t: string): Promise<boolean> {
@@ -271,6 +273,8 @@ function Install({ d, reload, check }: { d: UpdateNotice; reload: () => void; ch
   const jobs = useData(getConverting, []), [busy, setBusy] = useState(false), [said, setSaid] = useState(""), [gone, setGone] = useState(false), [late, setLate] = useState(false), [noNew, setNoNew] = useState(false), [rbFail, setRbFail] = useState("");
   // rolling: what the page saw when Roll back was accepted; it waits until the version or the last result changes
   const [ask, setAsk] = useState(false), [rolling, setRolling] = useState<{ from: string; msg: string } | null>(null);
+  // cancelling a waiting update: the confirm, the result line, and the button the dialog gives focus back to
+  const [cancelAsk, setCancelAsk] = useState(false), [cancelled, setCancelled] = useState(false), cancelBtn = useRef<HTMLButtonElement>(null);
   const st = d.install.state, running = st === "waiting" || st === "downloading" || st === "installing", n = jobs.data ?? 0, to = d.latest ?? "", last = d.lastResult;
   useEffect(() => { if (rolling && (d.current !== rolling.from || (d.lastResult?.message ?? "") !== rolling.msg)) setRolling(null); }, [d, rolling]);
   useEffect(() => setRbFail(""), [d.current]); // a late restart clears an old roll back failure
@@ -281,8 +285,14 @@ function Install({ d, reload, check }: { d: UpdateNotice; reload: () => void; ch
     const t = setInterval(async () => { const r = await getUpdate().catch(() => null); if (!r || failed(r)) setGone(r?.error.code === "offline" || !r); else { setGone(false); reload(); } }, 3000);
     return () => clearInterval(t);
   }, [running, gone, rolling, reload]);
+  const cancel = async () => {
+    setBusy(true); setSaid(""); setNoNew(false); setRbFail(""); setCancelled(false);
+    try { const r = await cancelUpdate(); if (!failed(r)) setCancelled(true); else setSaid(CANCEL_REFUSED[r.error.code] ?? r.error.message); }
+    catch (e) { if (!(e instanceof SignedOut)) throw e; }
+    setBusy(false); setCancelAsk(false); reload();
+  };
   const go = async (when: "now" | "after-job") => {
-    setBusy(true); setSaid(""); setNoNew(false); setRbFail("");
+    setBusy(true); setSaid(""); setNoNew(false); setRbFail(""); setCancelled(false);
     try { const r = await installUpdate(when); if (!failed(r)) holdLost(120000); else { setNoNew(r.error.code === "not_available"); setSaid(r.error.code in REFUSED ? REFUSED[r.error.code] : r.error.message); if (r.error.code === "job_running") setLate(true); jobs.reload(); } }
     catch (e) { if (!(e instanceof SignedOut)) throw e; }
     setBusy(false); reload();
@@ -300,7 +310,8 @@ function Install({ d, reload, check }: { d: UpdateNotice; reload: () => void; ch
       ? <p className="st ok" style={{ margin: 0 }}><Icon id="i-check-c" /><span>{noV(last.message)}.{d.url && !last.rolledBack && <> <a href={d.url} target="_blank" rel="noopener">What's new</a></>}</span></p>
       : <p className="st warn" style={{ margin: 0, alignItems: "flex-start" }}><Icon id="i-alert" /><span className="why" style={{ fontWeight: 400, color: "var(--text)" }}>{noV(last.message)}.</span></p>)}
     {gone || rolling ? spin("Restarting…", "this page reconnects by itself.")
-      : st === "waiting" ? <p role="status" style={{ margin: 0 }}>Updating to {to} when the converting files finish.</p>
+      : st === "waiting" ? <div className="stack" style={{ gap: 6 }}><p role="status" style={{ margin: 0 }}>Updating to {to} when the converting files finish.</p>
+        <div><button ref={cancelBtn} className="btn" type="button" disabled={busy} onClick={() => setCancelAsk(true)}>Cancel update</button></div></div>
       : st === "downloading" ? spin(`Downloading ${to}…`)
       : st === "installing" ? spin(`Installing ${to}.`, "The app restarts, and this page reconnects by itself.")
       : st === "failed" ? <p className="st warn" style={{ margin: 0, alignItems: "flex-start" }}><Icon id="i-alert" /><span>Couldn't update to {to}: <span style={{ fontWeight: 400, color: "var(--text)" }}>{d.install.error}. Nothing changed; still on {d.current}.</span></span></p>
@@ -324,6 +335,9 @@ function Install({ d, reload, check }: { d: UpdateNotice; reload: () => void; ch
       : d.installType === "source" ? <p style={{ margin: 0 }}>Built from source: pull and build again.</p> : null)}
     {rbFail && <p className="st warn" role="alert" style={{ margin: 0, alignItems: "flex-start" }}><Icon id="i-alert" /><span>Couldn't roll back: <span style={{ fontWeight: 400, color: "var(--text)" }}>{rbFail}</span></span></p>}
     {said && <p className="st warn" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{said}{noNew && <> <button className="linkbtn" type="button" onClick={() => (setSaid(""), setNoNew(false), check())}>Check now</button></>}</span></p>}
+    {cancelled && <p className="st ok" role="status" style={{ margin: 0 }}><Icon id="i-check-c" /><span>Update cancelled.</span></p>}
+    {cancelAsk && <Confirm title={`Cancel the update to ${to}?`} yes="Cancel update" no="Keep waiting" busy={busy} onYes={cancel}
+      onNo={() => (setCancelAsk(false), cancelBtn.current?.focus())} body="Nothing is installed, and workers start again if the update paused them." />}
     {d.method === "helper" && st === "idle" && d.rollback.available && !gone && !rolling &&
       <div><button className="btn" type="button" disabled={busy} onClick={() => setAsk(true)}>{prev ? `Roll back to ${prev}` : "Roll back"}</button></div>}
     {ask && <Confirm title={`Go back to ${prevName}?`} yes="Roll back" no="Cancel" busy={busy} onYes={back} onNo={() => setAsk(false)}

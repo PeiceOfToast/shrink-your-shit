@@ -219,11 +219,12 @@ VALUES(?,?,?,?,?,?,?,?)`, j.Library, j.Path, Queued, j.Reason, j.DurationSec, j.
 		}
 		return r.LastInsertId()
 	}
+	s.ensureLibraryRevision(j.LibraryID)
 	// One statement: the job is added only if its library still exists and is started, so a library
 	// removed (or a scan that started before the removal) cannot leave a job behind.
 	// V5b: it takes its library's priority.
-	r, err := s.db.Exec(`INSERT INTO jobs(library,library_id,path,status,reason,duration,size_before,created,updated,priority)
-SELECT ?,?,?,?,?,?,?,?,?,priority FROM libraries WHERE id=? AND started=1`,
+	r, err := s.db.Exec(`INSERT INTO jobs(library,library_id,path,status,reason,duration,size_before,created,updated,priority,workflow_rev)
+SELECT ?,?,?,?,?,?,?,?,?,priority,`+queuedRevSQL+` FROM libraries WHERE id=? AND started=1`,
 		j.Library, j.LibraryID, j.Path, Queued, j.Reason, j.DurationSec, j.SizeBefore, now, now, j.LibraryID)
 	if err != nil {
 		return 0, err
@@ -239,8 +240,9 @@ SELECT ?,?,?,?,?,?,?,?,?,priority FROM libraries WHERE id=? AND started=1`,
 // library as Enqueue is, so a library removed meanwhile leaves no row.
 func (s *Store) EnqueueFailed(j Job, code, msg string) (int64, error) {
 	now := s.stamp()
-	r, err := s.db.Exec(`INSERT INTO jobs(library,library_id,path,status,reason,duration,size_before,created,updated,priority,error,error_code,attempts)
-SELECT ?,?,?,?,?,?,?,?,?,priority,?,?,1 FROM libraries WHERE id=? AND started=1`,
+	s.ensureLibraryRevision(j.LibraryID)
+	r, err := s.db.Exec(`INSERT INTO jobs(library,library_id,path,status,reason,duration,size_before,created,updated,priority,error,error_code,attempts,workflow_rev)
+SELECT ?,?,?,?,?,?,?,?,?,priority,?,?,1,`+queuedRevSQL+` FROM libraries WHERE id=? AND started=1`,
 		j.Library, j.LibraryID, j.Path, Failed, j.Reason, j.DurationSec, j.SizeBefore, now, now, msg, code, j.LibraryID)
 	if err != nil {
 		return 0, err
@@ -292,6 +294,9 @@ func (s *Store) transition(id int64, to Status, set string, args ...any) error {
 	}
 	if !CanTransition(j.Status, to) {
 		return fmt.Errorf("job %d: cannot go from %s to %s", id, j.Status, to)
+	}
+	if to == Queued { // a job queued again (retry, fallback) runs with the library's current workflow
+		set += `, workflow_rev=` + jobRevSQL
 	}
 	q := `UPDATE jobs SET status=?, updated=?` + set + ` WHERE id=? AND status=?`
 	a := append([]any{to, s.stamp()}, args...)
@@ -426,7 +431,7 @@ func (s *Store) RequeueRunning() (int64, error) {
 	if err := s.finishRequestedStops(); err != nil {
 		return 0, err
 	}
-	r, err := s.db.Exec(`UPDATE jobs SET status=?, progress=0, worker='', updated=? WHERE status=?`,
+	r, err := s.db.Exec(`UPDATE jobs SET status=?, progress=0, worker='', updated=?, workflow_rev=`+jobRevSQL+` WHERE status=?`,
 		Queued, s.stamp(), Running)
 	if err != nil {
 		return 0, err
@@ -701,7 +706,7 @@ func (s *Store) RequeueExpiredLeases(wait time.Duration) (int, error) {
 			counted, retryAt = 1, now.Add(wait).Format(time.RFC3339)
 		}
 		r, err := s.db.Exec(`UPDATE jobs SET status=?, updated=?, progress=0, worker='', error=?, error_code=?, attempts=attempts+?, retry_at=?,
-  lease_id='', lease_expires='' WHERE id=? AND status=? AND lease_expires<>'' AND lease_expires<?`,
+  lease_id='', lease_expires='', workflow_rev=`+jobRevSQL+` WHERE id=? AND status=? AND lease_expires<>'' AND lease_expires<?`,
 			Queued, s.stamp(), words, ReasonWorkerLost, counted, retryAt, l.id, Running, now.Format(leaseTime))
 		if err != nil {
 			return n, err

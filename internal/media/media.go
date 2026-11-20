@@ -200,7 +200,8 @@ type Info struct {
 // 2 (S3): the first frame's HDR side data, the Dolby Vision profile and tag, mastering display and CLL.
 // 3 (review 7ab8f72): the Dolby Vision compatibility id (DVCompat).
 // 4 (the S3/#81 merge): the Display Matrix rotation too (probes cached by an S3 build lack it).
-const ProbeVersion = 4
+// 5 (#450): the hearing_impaired disposition, so SDH .srt files are named .sdh on upgraded installs too.
+const ProbeVersion = 5
 
 // Probe runs ffprobe on path. For a video that may carry HDR or Dolby Vision (HEVC, AV1, or PQ/HLG) it
 // also reads the main video's first frame: in TS files and raw streams, the Dolby Vision RPU, the

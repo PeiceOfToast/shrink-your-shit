@@ -293,3 +293,22 @@ func (s *Store) KnownOriginals() (map[string]bool, error) {
 	}
 	return known, rows.Err()
 }
+
+// ActivePaths are the library files a queued or running job works on. A kept original of one of them is
+// not purged (the trash is never emptied under a job that may still use it).
+func (s *Store) ActivePaths() (map[string]bool, error) {
+	rows, err := s.db.Query(`SELECT DISTINCT path FROM jobs WHERE status IN (?,?)`, Queued, Running)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out[p] = true
+	}
+	return out, rows.Err()
+}
