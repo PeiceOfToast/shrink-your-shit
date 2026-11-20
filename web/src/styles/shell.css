@@ -367,7 +367,7 @@ label.chk{cursor:pointer}
 .list.rows .tbl td.selc{display:none;padding-right:0}
 .list.rows.selecting .tbl td.selc{display:table-cell}
 .list.rows .tbl td.tile{width:40px;padding:6px 0 6px 12px}
-.ltile{width:40px;height:40px;border-radius:var(--radius-sm);background:var(--raised);color:var(--accent-text);display:grid;place-items:center;flex:none}
+.ltile{min-width:40px;height:40px;padding:0 4px;border-radius:var(--radius-sm);background:var(--raised);color:var(--accent-text);display:grid;place-items:center;flex:none}
 .ltile .ic{width:20px;height:20px}
 .lname{display:flex;align-items:baseline;gap:8px;min-width:0}
 .lname .ttl{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -425,7 +425,7 @@ label.chk{cursor:pointer}
   .list .tbl td.selc,.list .tbl td.actc,.list .tbl .over{position:relative;z-index:1}
   .list .tbl td.selc input{width:22px;height:22px}
   .list.rows .tbl td.tile{display:block;flex:none;width:auto;padding:0}
-  .list.rows .tbl td.tile .ltile{width:40px;height:40px}
+  .list.rows .tbl td.tile .ltile{min-width:40px;height:40px}
 }
 @media (max-width:599px){ /* U3: on a phone the status pill moves to a third line under the chips, under the tile's column */
   .list.rows .tbl tr{flex-wrap:wrap;row-gap:6px}
