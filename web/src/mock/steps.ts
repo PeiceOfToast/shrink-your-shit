@@ -218,7 +218,8 @@ export function checkTemplates(d: WorkflowDoc): ValidationIssue[] {
 }
 
 export function validate(d: WorkflowDoc): ValidationIssue[] {
-  const issues: ValidationIssue[] = checkVariables(d);
+  // W4b: a {{name}} problem is a validation issue too, so a saved draft and the Check carry it (#511); the refusal's "Nothing was changed." is for publish only
+  const issues: ValidationIssue[] = [...checkVariables(d), ...checkTemplates(d).map((i) => ({ ...i, message: i.message.replace(/ ?Nothing was changed\./, "") }))];
   for (const n of d.nodes.filter((x) => x.type === "output.commit")) {
     const c = n.config, policy = str(c, "policy", "separate_folder");
     if (policy !== "separate_folder") continue;

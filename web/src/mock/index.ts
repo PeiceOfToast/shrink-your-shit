@@ -301,11 +301,12 @@ function keepSecrets(id: ID, doc: WorkflowDoc): WorkflowDoc {
 export function saveDraft(id: ID, doc: WorkflowDoc, etag: string): { draft?: WorkflowRevision; error?: string; refused?: ValidationIssue[] } {
   const x = slot(id);
   if (!x) return { error: "That workflow is gone." };
-  // a bad variable name, or a {{name}} the field can't take, is refused before anything else, and nothing is saved
-  const refused = [...checkVariables(doc), ...checkTemplates(doc)];
+  // a bad variable name is refused before anything else, and nothing is saved (400)
+  const refused = checkVariables(doc);
   if (refused.length) return { refused };
   if (x.d.draft.etag !== etag) return { error: "This draft was changed somewhere else. Reload to see it. Nothing was saved." };
   const draft = revision(id, keepSecrets(id, doc), null);
+  // a {{name}} problem is saved with the draft as a validation issue (200, via validate); only publish refuses it
   x.d.draft = draft;
   const errors = draft.validation.filter((v) => v.severity === "error").length;
   const commit = doc.nodes.find((n) => n.type === "output.commit");

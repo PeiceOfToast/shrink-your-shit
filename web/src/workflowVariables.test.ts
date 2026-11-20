@@ -71,9 +71,13 @@ describe("secrets", () => {
     const { etag, doc } = draft("w2");
     doc.variables = [{ name: "tmdb_key", type: "secret", value: "abc123" }];
     outputNode(doc).config = { ...outputNode(doc).config, outputName: "{{tmdb_key}}" };
+    // a draft save keeps it as a problem (200); publish is the step that refuses it
     const r = mock.saveDraft("w2", doc, etag);
-    expect(r.refused?.[0]).toMatchObject({ code: "unknown_variable", name: "tmdb_key", suggest: null });
-    expect(r.refused?.[0].message).toContain("is a secret");
+    expect(r.refused).toBeUndefined();
+    expect(r.draft!.validation.find((v) => v.name === "tmdb_key")).toMatchObject({ code: "unknown_variable", suggest: null });
+    expect(r.draft!.validation.find((v) => v.name === "tmdb_key")!.message).toContain("is a secret");
+    const p = mock.publish("w2", r.draft!.etag);
+    expect(p.refused?.[0]).toMatchObject({ code: "unknown_variable", name: "tmdb_key" });
   });
 });
 
@@ -102,24 +106,40 @@ describe("picker", () => {
 });
 
 describe("refused saves", () => {
-  it("a 400 unknown_variable lands on the field, with its suggestion and 'Nothing was changed.'", async () => {
+  it("a draft save with {{titel}} is saved (200) with the problem on its field", async () => {
     const { etag, layout, doc } = draft("w2");
     const out = outputNode(doc);
     out.config = { ...out.config, outputName: "{{titel}}" };
     const r = mock.saveDraft("w2", doc, etag);
+    expect(r.refused).toBeUndefined();
+    expect(r.draft!.validation).toContainEqual(expect.objectContaining({ code: "unknown_variable", severity: "error", nodeId: out.id, configPath: "/outputName", name: "titel", suggest: "title" }));
+    expect(r.draft!.validation.find((v) => v.name === "titel")!.message).not.toContain("Nothing was changed.");
+    // the page's own call: a 200, so no error
+    const answer = await api.saveDraft("w2", doc, layout, r.draft!.etag);
+    expect("error" in answer).toBe(false);
+  });
+
+  it("a publish 400 unknown_variable lands on the field, with its suggestion and 'Nothing was changed.'", async () => {
+    const { etag, doc } = draft("w2");
+    const out = outputNode(doc);
+    out.config = { ...out.config, outputName: "{{titel}}" };
+    const saved = mock.saveDraft("w2", doc, etag);
+    const r = mock.publish("w2", saved.draft!.etag);
     expect(r.refused?.[0]).toMatchObject({ code: "unknown_variable", nodeId: out.id, configPath: "/outputName", name: "titel", suggest: "title" });
     expect(r.refused?.[0].message).toContain("Nothing was changed.");
     // the page's own call: the error carries the field and the suggestion beside the issues
-    const answer = await api.saveDraft("w2", doc, layout, etag);
+    const answer = await api.publish("w2", saved.draft!.etag);
     expect(answer).toMatchObject({ error: { code: "unknown_variable", field: "outputName", name: "titel", suggest: "title" } });
     expect((answer as unknown as { error: { issues: unknown[] } }).error.issues).toHaveLength(1);
   });
 
-  it("an unclosed {{ in a field is refused on that field", () => {
+  it("an unclosed {{ in a field is saved with the problem on that field, and publish refuses it", () => {
     const { etag, doc } = draft("w2");
     const out = outputNode(doc);
     out.config = { ...out.config, outputName: "{{title" };
     const r = mock.saveDraft("w2", doc, etag);
-    expect(r.refused?.[0]).toMatchObject({ code: "unclosed_variable", nodeId: out.id, configPath: "/outputName" });
+    expect(r.refused).toBeUndefined();
+    expect(r.draft!.validation).toContainEqual(expect.objectContaining({ code: "unclosed_variable", nodeId: out.id, configPath: "/outputName" }));
+    expect(mock.publish("w2", r.draft!.etag).refused?.[0]).toMatchObject({ code: "unclosed_variable", configPath: "/outputName" });
   });
 });
