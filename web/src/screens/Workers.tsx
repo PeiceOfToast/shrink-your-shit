@@ -277,12 +277,18 @@ function StartStop({ w, onDone }: { w: Worker; onDone: (m: string) => void }) {
   return <button className="btn sm" type="button" onClick={async () => { if (w.currentJobIds.length) return setAsking(true); if (await act(workerAction(w.id, "stop"), onDone)) onDone(w.name + " stopped."); }}><Icon id="i-stop" />Stop</button>;
 }
 
-function Live({ w }: { w: Worker }) { // only the figures the server sends (null today on this engine)
+// user item 3: the GPU "—" explains itself; title for mouse, hidden text for touch and screen readers (design 02:12Z)
+const NO_GPU = "Not available: no graphics card, one that doesn't report how busy it is, or a worker on another computer. GPU use is only read on This computer.";
+export function NoGpu() { return <span title={NO_GPU}>—<span className="sr"> ({NO_GPU})</span></span>; }
+
+function Live({ w }: { w: Worker }) { // only the figures the server sends
   const l = w.live, out: string[] = [];
   if (l.cpuPercent != null) out.push("CPU " + Math.round(l.cpuPercent) + "%");
   if (l.memUsedBytes != null && l.memTotalBytes) out.push("Memory " + bytes(l.memUsedBytes) + " of " + bytes(l.memTotalBytes));
   for (const g of w.gpus) out.push("GPU · " + g.model + (g.vramBytes ? " · " + bytes(g.vramBytes) : ""));
-  return out.length ? <p className="sm">{out.join(" · ")}</p> : null;
+  if (!out.length) return null;
+  const g = l.gpu[0]?.utilPercent; // workshop #443: one entry, the busiest GPU; [] when unreadable or remote
+  return <p className="sm">{out.join(" · ")} · GPU {g == null ? <NoGpu /> : Math.round(g) + "%"}</p>;
 }
 
 export function Workers() {

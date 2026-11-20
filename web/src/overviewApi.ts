@@ -40,7 +40,7 @@ function sample(): Overview {
       filesConverted: tot((l) => l.counts.completed), filesWaiting: tot((l) => l.counts.waiting) },
     trash: { bytes: s.trash.bytes, files: s.trash.files, nextDeleteAt: s.trash.nextDeleteAt },
     workers: s.workers.map((w) => ({ id: w.id, name: w.name, kind: w.id === "local" ? "builtin" : "remote", status: w.status, slots: w.slots,
-      jobs: jobs.filter((j) => w.currentJobIds.includes(j.jobId)), cpuPercent: w.status === "busy" ? 40 + w.name.length * 3 : null, gpuPercent: w.id === "local" ? 22 : null })),
+      jobs: jobs.filter((j) => w.currentJobIds.includes(j.jobId)), cpuPercent: w.status === "busy" ? 40 + w.name.length * 3 : null, gpuPercent: w.id === "this" ? 22 : null })),
     active: sum.activeJobs.map((j) => ({ jobId: j.id, library: j.library, name: j.file.name, percent: j.progress?.percent ?? null, etaS: j.progress?.etaS ?? null, expectedSavingBytes: null })),
     libraries: s.libraries.map((l) => {
       const now = l.counts.files * 1.4 * GB, saved = l.bytes.freed;
