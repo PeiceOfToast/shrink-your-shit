@@ -15,15 +15,17 @@ import (
 )
 
 // outFrozenExec keeps out_time on one position for every report (a subtitle gap: out_time follows the
-// most-behind stream and freezes while the encode goes on). frames and sizes say whether frame= and total_size=
-// grow with each report. Each report takes a little real time (for the stall stop) and advances the fake clock by
-// tick (for the 30 s warning). With ticks 0 it reports until the stall stop cancels it.
+// most-behind stream and freezes while the encode goes on). frames says whether frame= grows with each report;
+// sizeStep is how far total_size= grows per report (0: no total_size=). Each report takes a little real time (for
+// the stall stop) and advances the fake clock by tick (for the 30 s warning). With ticks 0 it reports until the
+// stall stop cancels it.
 type outFrozenExec struct {
 	*media.FakeExec
-	clock         *fakeClockAt
-	tick          time.Duration
-	ticks         int
-	frames, sizes bool
+	clock    *fakeClockAt
+	tick     time.Duration
+	ticks    int
+	frames   bool
+	sizeStep int64
 }
 
 func (x *outFrozenExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
@@ -39,8 +41,8 @@ func (x *outFrozenExec) Stream(ctx context.Context, onLine func(string), name st
 		if x.frames {
 			onLine(fmt.Sprintf("frame=%d", i))
 		}
-		if x.sizes {
-			onLine(fmt.Sprintf("total_size=%d", 1000*(i+1)))
+		if x.sizeStep > 0 {
+			onLine(fmt.Sprintf("total_size=%d", x.sizeStep*int64(i+1)))
 		}
 		onLine("out_time_us=5000000")
 		onLine("progress=continue")
@@ -67,20 +69,22 @@ func encodeLines(t *testing.T, s *scenario) (warn int, stopped bool) {
 	return warn, stopped
 }
 
-// Bug 2: out_time frozen for longer than StallAfter, with frame= (or total_size=) still growing, is an encode that
-// is alive: not stopped, and no "has not moved" warning, though the fake clock runs past 30 s without out_time moving.
+// Bug 2: out_time frozen for longer than StallAfter, with frame= (or total_size=) still growing within twice the
+// source's size, is an encode that is alive: not stopped, and no "has not moved" warning, though the fake clock runs
+// past 30 s without out_time moving. The scenario's source is 14 bytes, so the bytes grow 1 a report (20 reports, 20 bytes).
 func TestFrozenOutTimeIsAliveWhileFramesOrBytesGrow(t *testing.T) {
 	for _, c := range []struct {
-		name          string
-		frames, sizes bool
-	}{{"frames grow", true, false}, {"bytes grow", false, true}, {"both grow", true, true}} {
+		name     string
+		frames   bool
+		sizeStep int64
+	}{{"frames grow", true, 0}, {"bytes grow", false, 1}, {"both grow", true, 1}} {
 		t.Run(c.name, func(t *testing.T) {
 			s := newScenario(t)
 			clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
 			w := s.worker(Replace)
 			w.Now = clock.now
 			w.StallAfter = 300 * time.Millisecond // real time: the encode below runs ~600 ms, twice this
-			w.Exec = &outFrozenExec{FakeExec: s.exec, clock: clock, tick: 10 * time.Second, ticks: 30, frames: c.frames, sizes: c.sizes}
+			w.Exec = &outFrozenExec{FakeExec: s.exec, clock: clock, tick: 10 * time.Second, ticks: 20, frames: c.frames, sizeStep: c.sizeStep}
 			if _, err := w.RunOne(context.Background()); err != nil {
 				t.Fatal(err)
 			}
@@ -103,6 +107,28 @@ func TestFullyFrozenEncodeIsStillStopped(t *testing.T) {
 	w.Now = clock.now
 	w.StallAfter = 300 * time.Millisecond
 	w.Exec = &outFrozenExec{FakeExec: s.exec, clock: clock, tick: 10 * time.Second}
+	done := make(chan struct{})
+	go func() { w.RunOne(context.Background()); close(done) }()
+	waitDone(t, done)
+	j := s.job()
+	if j.Status != jobs.Failed || !strings.Contains(j.Error, "no progress for 300ms") {
+		t.Fatalf("status %s %q, want failed with no progress for 300ms", j.Status, j.Error)
+	}
+	if warn, _ := encodeLines(t, s); warn != 1 {
+		t.Fatalf("%d 'has not moved' warnings, want 1", warn)
+	}
+	s.assertOriginalSafe()
+}
+
+// Bug 2, the bound: frames still growing with out_time frozen is stopped once total_size passes twice the source's
+// size (a runaway output is not progress); the stall stop applies, and the warning is written.
+func TestFrozenOutTimeStopsPastTheOutputBound(t *testing.T) {
+	s := newScenario(t)
+	clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
+	w := s.worker(Replace)
+	w.Now = clock.now
+	w.StallAfter = 300 * time.Millisecond
+	w.Exec = &outFrozenExec{FakeExec: s.exec, clock: clock, tick: 10 * time.Second, frames: true, sizeStep: 1000}
 	done := make(chan struct{})
 	go func() { w.RunOne(context.Background()); close(done) }()
 	waitDone(t, done)
