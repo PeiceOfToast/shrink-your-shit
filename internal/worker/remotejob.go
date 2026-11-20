@@ -57,16 +57,25 @@ type RemoteJob struct {
 	judging bool
 	pos     float64   // the furthest position (out_time, µs) it reported
 	movedAt time.Time // when that position last moved on (or the encode started)
+	finish  bool      // that position is the file's length: the worker is finishing the file (its own allowance)
 }
 
-// Converting records the remote worker's encode at position pos (out_time, µs): the first report starts
-// the stall clock, and only a position further on moves it.
-func (r *RemoteJob) Converting(pos float64, now time.Time) {
+// Converting records the remote worker's encode at position pos (out_time, µs) in a file durationSec long: the
+// first report starts the stall clock, and only a position further on moves it.
+func (r *RemoteJob) Converting(pos float64, now time.Time, durationSec float64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !r.judging || pos > r.pos {
 		r.judging, r.pos, r.movedAt = true, pos, now
+		r.finish = reachedEnd(pos, durationSec)
 	}
+}
+
+// finishing says the encode's position is the file's length (see reachedEnd).
+func (r *RemoteJob) finishing() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.finish
 }
 
 // SetEncoder puts the encoder the remote worker converts with ("" for the processor) on the job's live row, in
