@@ -261,10 +261,12 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
     setSel(null);
   };
   const clip = useRef<Node | null>(null), pastes = useRef(0);
+  // selecting another step, an edge or the empty canvas drops a pending port (keeps it only for the same step)
+  const unpend = (keep: string | null) => { if (pending && pending.node !== keep) { setPending(null); setSaid((s) => (s.startsWith("Next step links from") ? "" : s)); } };
   const removeEdges = (ids: string[]) => { if (ids.length) push({ doc: { ...doc, edges: doc.edges.filter((e) => !ids.includes(e.id)) } }); setSelEdge(null); };
   const onNodesChange = (ch: NodeChange<GNodeT>[]) => {
     // a click, or Enter / Space on a focused step (React Flow selects it), opens its panel (review bf13684 P2)
-    for (const c of ch) if (c.type === "select") { if (c.selected) (setSel(c.id), setSelEdge(null)); else setSel((s) => (s === c.id ? null : s)); }
+    for (const c of ch) if (c.type === "select") { if (c.selected) (setSel(c.id), setSelEdge(null), unpend(c.id)); else setSel((s) => (s === c.id ? null : s)); }
     const sized = ch.filter((c) => c.type === "dimensions" && c.dimensions) as { id: string; dimensions: { width: number; height: number } }[];
     if (sized.length) setDims((d) => ({ ...d, ...Object.fromEntries(sized.map((c) => [c.id, c.dimensions])) }));
     const moved = ch.filter((c): c is NodeChange<GNodeT> & { type: "position" } => c.type === "position" && !!(c as { position?: unknown }).position && (c as { dragging?: boolean }).dragging === false);
@@ -336,7 +338,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
           {pointer && dragType && <div className="gghost" aria-hidden="true" style={{ left: pointer.x + 12, top: pointer.y + 12 }}>{defs.find((x) => x.type === dragType)?.name}</div>}
           <ReactFlow nodes={shown} edges={edges} nodeTypes={nodeTypes} fitView minZoom={0.2} maxZoom={2} nodesDraggable={edit} nodesConnectable={edit} elementsSelectable
             onConnect={connect} isValidConnection={valid} onNodesChange={onNodesChange} onDelete={({ nodes: ns, edges: es }) => (ns.length ? removeNodes(ns.map((n) => n.id)) : removeEdges(es.map((e) => e.id)))} deleteKeyCode={edit ? ["Delete", "Backspace"] : null}
-            onNodeClick={(_, n) => (setSel(n.id), setSelEdge(null))} onEdgeClick={(_, e) => (setSelEdge(e.id), setSel(null))} onPaneClick={() => (setSel(null), setSelEdge(null))}>
+            onNodeClick={(_, n) => (setSel(n.id), setSelEdge(null), unpend(n.id))} onEdgeClick={(_, e) => (setSelEdge(e.id), setSel(null), unpend(null))} onPaneClick={() => (setSel(null), setSelEdge(null), unpend(null))}>
             <Background gap={20} />
             <MiniMap pannable zoomable ariaLabel="Overview of the graph" nodeColor="var(--border-strong)" nodeStrokeColor="var(--text-2)" nodeBorderRadius={4} />
             <Zoom />
