@@ -230,9 +230,27 @@ func TestCoverArtListedFirst(t *testing.T) {
 	if v := i.Video(); v == nil || v.Codec != "h264" {
 		t.Errorf("Video() must skip a leading cover: %+v", v)
 	}
-	// The headline field keeps its old meaning ("first video stream"): this slice changes no behaviour.
-	if i.VideoCodec != "mjpeg" {
-		t.Errorf("VideoCodec semantics changed: %q", i.VideoCodec)
+	// R5: the headline codec and bitrate skip the cover too, so a cover-led file is not judged
+	// "mjpeg / no bitrate" and wrongly skipped or converted. The h264 stream says 5 Mb/s.
+	if i.VideoCodec != "h264" || i.BitrateKbps != 5000 {
+		t.Errorf("headline must skip a leading cover: %q, %d kbps", i.VideoCodec, i.BitrateKbps)
+	}
+	if len(i.ByType("video")) != 2 || !i.Streams[0].AttachedPic { // the cover is still a stream of its own
+		t.Errorf("cover kept: %+v", i.Streams)
+	}
+}
+
+// A file whose only video stream is cover art has no main picture: it keeps the old reading (the
+// cover's codec) rather than becoming unreadable here (R5).
+func TestCoverArtOnlyKeepsTheOldReading(t *testing.T) {
+	data := []byte(`{"streams":[{"codec_type":"video","codec_name":"mjpeg","width":64,"height":64,"bit_rate":"12000",
+		"disposition":{"attached_pic":1}}],"format":{"format_name":"mp4","duration":"10.0","size":"1000"}}`)
+	i, err := ParseProbe(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i.VideoCodec != "mjpeg" || i.BitrateKbps != 12 || i.Video() != nil {
+		t.Errorf("cover-only file: %q, %d kbps, Video() %+v", i.VideoCodec, i.BitrateKbps, i.Video())
 	}
 }
 
@@ -340,6 +358,41 @@ func ffmpeg(t *testing.T, args ...string) {
 	}
 }
 
+// R5 with real ffmpeg: a file carrying cover art as an attached_pic video stream is judged by its real
+// video, never by the picture. ffmpeg's own mp4 muxer always writes the main video first (checked: mp4,
+// mov and mkv inputs; a remux keeps that order), so the leading-cover order itself is covered by the
+// crafted fixture in TestCoverArtListedFirst; this test proves the attached-pic file reads end to end.
+func TestRealCoverArtIsJudgedByItsVideo(t *testing.T) {
+	needFFmpeg(t)
+	dir := t.TempDir()
+	cover := filepath.Join(dir, "cover.png")
+	ffmpeg(t, "-f", "lavfi", "-i", "color=c=red:s=64x64:d=1", "-frames:v", "1", cover)
+	movie := filepath.Join(dir, "movie.mp4")
+	ffmpeg(t, "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=25:duration=2", "-c:v", "libx264", "-b:v", "1M", "-pix_fmt", "yuv420p", movie)
+	with := filepath.Join(dir, "with-cover.mp4")
+	ffmpeg(t, "-i", cover, "-i", movie, "-map", "0", "-map", "1", "-c:v:0", "mjpeg", "-c:v:1", "copy",
+		"-disposition:v:0", "attached_pic", with)
+	info, err := Probe(context.Background(), OSExec{}, "ffprobe", with)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pics := 0
+	for _, s := range info.ByType("video") {
+		if s.AttachedPic {
+			pics++
+		}
+	}
+	if len(info.ByType("video")) != 2 || pics != 1 {
+		t.Fatalf("want the movie and one cover: %+v", info.Streams)
+	}
+	if info.VideoCodec != "h264" || info.BitrateKbps == 0 {
+		t.Errorf("judged by the cover: %q, %d kbps", info.VideoCodec, info.BitrateKbps)
+	}
+	if v := info.Video(); v == nil || v.Codec != "h264" {
+		t.Errorf("main picture %+v", v)
+	}
+}
+
 func TestRealFFprobeOnGeneratedFiles(t *testing.T) {
 	needFFmpeg(t)
 	dir := t.TempDir()
@@ -413,7 +466,8 @@ func TestRealFFprobeOnNonVideoAndMissingFile(t *testing.T) {
 
 // legacyHeadline is the probe parser as it was before the per-stream model (copied from slice 8's
 // media.go). The new parser must give identical Container/VideoCodec/BitrateKbps/DurationSec/SizeBytes
-// for every file, so that nothing converted today changes.
+// for every file whose first video stream is the picture, so that nothing converted today changes
+// (R5 changes only a file that leads with cover art).
 func legacyHeadline(data []byte) (Info, bool) {
 	var p struct {
 		Streams []struct {
@@ -464,6 +518,9 @@ func TestHeadlineFieldsUnchangedOnEveryFixture(t *testing.T) {
 		data, _ := os.ReadFile(f)
 		old, oldOK := legacyHeadline(data)
 		got, err := ParseProbe(data)
+		// R5 changes exactly one file's headline on purpose: one that leads with cover art (checked in
+		// TestCoverArtListedFirst); its other fields are still held to the old parser's answers.
+		coverLed := err == nil && len(got.Streams) > 0 && got.Streams[0].Type == "video" && got.Streams[0].AttachedPic
 		if oldOK != (err == nil) {
 			// the new parser may accept a file the old one could not read (numeric bit_rate), never the reverse
 			if oldOK && err != nil {
@@ -474,8 +531,8 @@ func TestHeadlineFieldsUnchangedOnEveryFixture(t *testing.T) {
 		if !oldOK {
 			continue
 		}
-		if got.Container != old.Container || got.VideoCodec != old.VideoCodec || got.BitrateKbps != old.BitrateKbps ||
-			got.DurationSec != old.DurationSec || got.SizeBytes != old.SizeBytes {
+		if got.Container != old.Container || got.DurationSec != old.DurationSec || got.SizeBytes != old.SizeBytes ||
+			(!coverLed && (got.VideoCodec != old.VideoCodec || got.BitrateKbps != old.BitrateKbps)) {
 			t.Errorf("%s: headline fields changed\n old %+v\n new %+v", f, old, got)
 		}
 	}

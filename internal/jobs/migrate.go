@@ -482,6 +482,21 @@ CREATE INDEX IF NOT EXISTS jobs_newest ON jobs(path, library_id, id);`},
 	// (bytesNow, waitingToFree). Set and cleared by the scanner; history (saved totals) is not changed.
 	{50, "output gone", `
 ALTER TABLE jobs ADD COLUMN output_gone_at TEXT NOT NULL DEFAULT '';`},
+	// The workflow revision a job ran with (Convert again after a workflow change): stamped with its library's
+	// current one, so nothing counts as earlier until a workflow changes. 0 where a flow has no revision yet;
+	// EnsureRevision stamps those when it writes the flow's first one.
+	{51, "job workflow revision", `
+ALTER TABLE jobs ADD COLUMN workflow_rev INTEGER NOT NULL DEFAULT 0;
+UPDATE jobs SET workflow_rev = ` + fmt.Sprintf(revOfFlowSQL, "(SELECT flow_id FROM libraries WHERE id=jobs.library_id)") + `;`},
+	// The .srt files a job saved beside its new file, as a JSON list of names (the job page lists them;
+	// user item 4, 11-20). '' for older jobs: not known, shown as none.
+	{52, "job subtitle files", `
+ALTER TABLE jobs ADD COLUMN subtitle_files TEXT NOT NULL DEFAULT '';`},
+	// Per-file job log (log-spec section 2): each line says its section (start, input, encode, output, replace,
+	// summary) and its level. Lines written before this read as "" and info.
+	{53, "job log sections and levels", `
+ALTER TABLE job_log_lines ADD COLUMN section TEXT NOT NULL DEFAULT '';
+ALTER TABLE job_log_lines ADD COLUMN level TEXT NOT NULL DEFAULT 'info';`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone

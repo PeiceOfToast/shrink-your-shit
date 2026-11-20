@@ -20,11 +20,11 @@ func TestJobLogStepsCarryWhatTheCheckFound(t *testing.T) {
 	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
 	id, _ := st.Enqueue(jobs.Job{Library: "/m", LibraryID: l.ID, Path: "/m/a.mkv"})
 	st.Claim("t")
-	st.AppendLogLine(id, 0, "app", "started")
+	st.AppendLogLine(id, 0, "", jobs.LevelInfo, "app", "started")
 	st.RecordRunStep(id, jobs.RunStep{Index: 0, Name: "encode", Outcome: "ok"})
 	st.RecordRunStep(id, jobs.RunStep{Index: 1, Name: "check", Outcome: "failed", Result: "the new file does not look like the original"})
-	st.AppendLogLine(id, 1, "check", "Check: playback test, 10 s sample from 0:00:00")
-	st.AppendLogLine(id, 1, "check", "Where: playback reached frame 42")
+	st.AppendLogLine(id, 1, "", jobs.LevelInfo, "check", "Check: playback test, 10 s sample from 0:00:00")
+	st.AppendLogLine(id, 1, "", jobs.LevelInfo, "check", "Where: playback reached frame 42")
 	st.Keep(id, jobs.ReasonKeptOriginal, "the new file does not look like the original")
 	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10) + "/log"})
 	var r struct {
@@ -58,7 +58,7 @@ func TestFailedJobKeepsItsOutputAndFoundIsEmpty(t *testing.T) {
 	id, _ := st.Enqueue(jobs.Job{Library: "/m", LibraryID: l.ID, Path: "/m/a.mkv"})
 	st.Claim("t")
 	st.RecordRunStep(id, jobs.RunStep{Index: 0, Name: "encode", Outcome: "failed", Command: "ffmpeg -i in.mkv out.mkv"})
-	st.AppendLogLine(id, 0, "stderr", "Invalid data found when processing input")
+	st.AppendLogLine(id, 0, "", jobs.LevelInfo, "stderr", "Invalid data found when processing input")
 	st.SetFailureSummary(id, jobs.FailureSummary{Step: 0, StepCount: 1, ExitCode: 1, KeyLines: []string{"Invalid data found when processing input"}})
 	st.Fail(id, "convert_failed", "Converting stopped with an error.")
 	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10) + "/log"})
@@ -85,7 +85,7 @@ func TestImportedStepFoundIsEmpty(t *testing.T) {
 	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
 	id, _ := st.Enqueue(jobs.Job{Library: "/m", LibraryID: l.ID, Path: "/m/a.mkv"})
 	st.Claim("t")
-	st.AppendLogLine(id, 0, "app", "line 1")
+	st.AppendLogLine(id, 0, "", jobs.LevelInfo, "app", "line 1")
 	st.Complete(id, "/m/a.hevc.mkv", 100)
 	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10) + "/log"})
 	if !strings.Contains(body, `"name":"imported"`) || !strings.Contains(body, `"found":[]`) {
@@ -102,10 +102,10 @@ func TestJobLogFoundOnlyThisAttempt(t *testing.T) {
 	st.Claim("t")
 	st.RecordRunStep(id, jobs.RunStep{Index: 0, Name: "encode", Outcome: "ok"})
 	st.RecordRunStep(id, jobs.RunStep{Index: 1, Name: "check", Outcome: "failed", StartedAt: time.Now().UTC().Format(time.RFC3339)})
-	st.AppendLogLine(id, 1, "check", "OLD")
+	st.AppendLogLine(id, 1, "", jobs.LevelInfo, "check", "OLD")
 	time.Sleep(1100 * time.Millisecond) // stamps are whole seconds; the retry's check starts in a later one
 	st.RecordRunStep(id, jobs.RunStep{Index: 1, Name: "check", Outcome: "ok", StartedAt: time.Now().UTC().Format(time.RFC3339)})
-	st.AppendLogLine(id, 1, "check", "NEW")
+	st.AppendLogLine(id, 1, "", jobs.LevelInfo, "check", "NEW")
 	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10) + "/log"})
 	var r struct {
 		Steps []map[string]any

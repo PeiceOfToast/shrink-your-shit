@@ -210,7 +210,9 @@ func TestSubtitlesToSrt(t *testing.T) {
 		media.Stream{Index: 5, Type: "subtitle", Codec: "hdmv_pgs_subtitle", SubKind: "bitmap", Language: "ger"})
 	s := DefaultSelectors(3)
 	s.Subtitles = "srt"
-	p := s.Template().Compile(info)
+	tp := s.Template()
+	tp.Languages = "eng,fra"
+	p := tp.Compile(info)
 	// native paths on every OS (Windows CI): the staged files and the names beside the new file
 	m := filepath.Join(string(filepath.Separator)+"m", "Movie.hevc.mkv")
 	var names []string
@@ -233,6 +235,61 @@ func TestSubtitlesToSrt(t *testing.T) {
 	}
 }
 
+// The Arcane case (user bug 11-20): "Save as separate .srt files" with Languages=eng writes only the
+// English ones (the second as .sdh) and the untagged one; every other language stays inside the file.
+func TestSrtOnlyYourLanguages(t *testing.T) {
+	sub := func(i int, lang, title string, hi bool) media.Stream {
+		return media.Stream{Index: i, Type: "subtitle", Codec: "subrip", SubKind: "text", Language: lang, Title: title, HearingImpaired: hi}
+	}
+	streams := []media.Stream{{Index: 1, Type: "audio", Codec: "eac3", Language: "eng", Default: true}}
+	streams = append(streams, sub(2, "eng", "English", false), sub(3, "eng", "English [SDH]", false))
+	for i, l := range []string{"ara", "cze", "dan", "ger", "gre", "spa", "fin", "fre", "heb", "hun", "ita", "jpn", "kor", "nob", "dut", "pol", "por", "rum", "rus", "swe", "tha", "tur", "ukr", "vie"} {
+		streams = append(streams, sub(4+i, l, "", false))
+	}
+	streams = append(streams, sub(40, "chi", "Simplified", false), sub(41, "chi", "Traditional", false), sub(42, "", "", false))
+	info := h264(1920, 1080, 8000, streams...)
+	names := func(langs string, mod func([]media.Stream)) string {
+		in := info
+		in.Streams = append([]media.Stream(nil), info.Streams...)
+		if mod != nil {
+			mod(in.Streams)
+		}
+		s := DefaultSelectors(3)
+		s.Subtitles = "srt"
+		tp := s.Template()
+		tp.Languages = langs
+		var out []string
+		for _, o := range tp.Compile(in).SubtitleFiles() {
+			out = append(out, filepath.Base(SrtName("Movie.mkv", o.Extract)))
+		}
+		return strings.Join(out, " ")
+	}
+	if got := names("eng", nil); got != "Movie.eng.srt Movie.eng.sdh.srt Movie.srt" {
+		t.Errorf("eng: %s", got)
+	}
+	// no languages chosen: the main audio's language
+	if got := names("", nil); got != "Movie.eng.srt Movie.eng.sdh.srt Movie.srt" {
+		t.Errorf("none chosen: %s", got)
+	}
+	// the disposition alone marks SDH; a second plain track in the same language is .2
+	if got := names("chi", func(s []media.Stream) { s[len(s)-2].HearingImpaired = true }); got != "Movie.chi.srt Movie.chi.sdh.srt Movie.srt" {
+		t.Errorf("chi sdh: %s", got)
+	}
+	if got := names("chi", nil); got != "Movie.chi.srt Movie.chi.2.srt Movie.srt" {
+		t.Errorf("chi: %s", got)
+	}
+	// the other languages stay inside: not dropped
+	s := DefaultSelectors(3)
+	s.Subtitles = "srt"
+	tp := s.Template()
+	tp.Languages = "eng"
+	for _, o := range tp.Compile(info).Tracks {
+		if o.Type == "subtitle" && o.Drop && o.Index != 2 && o.Index != 3 && o.Index != 42 {
+			t.Errorf("subtitle %d dropped", o.Index)
+		}
+	}
+}
+
 // A subtitle of no known kind (TTML: ffmpeg has no decoder for it) stays inside in "Save as separate .srt
 // files" and is kept by "Text subtitles only": it is copied, never converted (a conversion would fail).
 func TestUnknownKindSubtitleIsCopied(t *testing.T) {
@@ -242,7 +299,9 @@ func TestUnknownKindSubtitleIsCopied(t *testing.T) {
 	for _, choice := range []string{"srt", "text_only"} {
 		s := DefaultSelectors(3)
 		s.Subtitles = choice
-		p := s.Template().Compile(info)
+		tp := s.Template()
+		tp.Languages = "eng"
+		p := tp.Compile(info)
 		for _, o := range p.Tracks {
 			if o.Index == 1 {
 				t.Errorf("%s: the TTML subtitle has an op %+v", choice, o)

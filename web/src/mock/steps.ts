@@ -1,8 +1,9 @@
 // The Stack view's server side, mocked from V1 as built (origin/v2-workflows internal/workflow: registry.go for the
 // step definitions and their configSchema, validate.go for the step summaries; "Next to each library" runs since V5a #133).
 import REGISTRY from "./registry-4df3345.json";
-import type { Edge, JSONSchema, Node, Port, PublishPreview, StepDefinition, ValidationIssue, WorkflowDoc, WorkflowRevision } from "../types/v2";
+import type { AddStep, Edge, ID, JSONSchema, Node, Port, PublishPreview, StepDefinition, StepPlace, ValidationIssue, WorkflowDoc, WorkflowRevision } from "../types/v2";
 import type { Ladder } from "../workflowApi";
+import { groupOf, order } from "../stepEdits";
 
 const inPort: Port = { name: "in", label: "In", kind: "file", outcome: "success" };
 const success: Port = { name: "success", label: "Next", kind: "file", outcome: "success" };
@@ -146,18 +147,36 @@ export function legacyDoc(): WorkflowDoc {
   return chain(["input.library", "video.legacy_settings"], { "video.legacy_settings": { template: { quality: 2, audio: "keep_all" } } });
 }
 
-// The order the stack shows: the chain of success edges from the input (contract "Stack ⇄ graph").
-export function order(d: WorkflowDoc): Node[] {
-  const out: Node[] = [];
-  let n = d.nodes.find((x) => x.type === "input.library");
-  while (n && !out.includes(n)) {
-    out.push(n);
-    const e = d.edges.find((x) => x.from === n!.id && x.fromPort === "success");
-    n = e && d.nodes.find((x) => x.id === e.to);
+// W11 part (review2 gap 2): a new workflow with only its Library files step, for the empty state
+export function emptyDoc(): WorkflowDoc {
+  return chain(["input.library"], {});
+}
+
+export { order }; // the running order: the chain of success edges (stepEdits.ts)
+export const stackable = (d: WorkflowDoc) => order(d).length === d.nodes.length && d.edges.every((e) => e.fromPort === "success");
+
+// W11 (validate's stepPlaces and addSteps, contract final 05:58Z). Mock: every step is fixed in place unless ?movable=1
+// (the server marks movable steps once W10 lands); each step type either can be added after a step, or is refused.
+const MOVABLE: string[] = ["filter.video_skips", "filter.video", "audio.tracks", "subtitles.tracks", "container.output"];
+export function stepPlacesOf(d: WorkflowDoc): Record<ID, StepPlace> {
+  const movable = new URLSearchParams(location.search).has("movable");
+  return Object.fromEntries(d.nodes.map((n) => [n.id, { fixedPlace: !(movable && MOVABLE.includes(n.type)) }]));
+}
+export function addStepsOf(d: WorkflowDoc): Record<string, AddStep> {
+  const ids = order(d).map((n) => n.id), out: Record<string, AddStep> = {};
+  for (const s of STEP_DEFS) {
+    if (s.readOnly || s.deprecated) continue;
+    if (s.type === "container.output") { out[s.type] = { addable: false, reason: "Can't run among the steps that convert yet." }; continue; }
+    // after the last step of the list whose group comes first (an add lands in the group's place)
+    let after: ID | undefined;
+    for (const id of ids) {
+      const n = d.nodes.find((x) => x.id === id)!, def = STEP_DEFS.find((x) => x.type === n.type);
+      if (def && def.type !== "output.commit" && groupOf(def).index <= groupOf(s).index) after = id; // the save stays last: an add never lands after it
+    }
+    out[s.type] = { addable: true, after: after ?? ids[0] };
   }
   return out;
 }
-export const stackable = (d: WorkflowDoc) => order(d).length === d.nodes.length && d.edges.every((e) => e.fromPort === "success");
 
 export function validate(d: WorkflowDoc): ValidationIssue[] {
   const issues: ValidationIssue[] = [];

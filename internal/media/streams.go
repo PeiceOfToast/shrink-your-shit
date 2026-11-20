@@ -27,6 +27,8 @@ type Stream struct {
 
 	Default bool `json:"default,omitempty"`
 	Forced  bool `json:"forced,omitempty"`
+	// HearingImpaired is the hearing_impaired disposition (SDH subtitles: sounds and speakers named).
+	HearingImpaired bool `json:"hearingImpaired,omitempty"`
 	// AttachedPic is true for cover art stored as a video stream (typical in mp4/mp3): it is not
 	// the movie, and must not be mistaken for it.
 	AttachedPic bool `json:"attachedPic,omitempty"`
@@ -181,13 +183,23 @@ var bitmapSubCodecs = map[string]bool{
 	"dvb_teletext": true,
 }
 
+// MainVideoIndex is the position in Streams of the main picture: the first video stream that is not
+// cover art, or -1 when there is none. Video, MainVideoOrdinal, the headline ParseProbe reads and the
+// worker's picture count all take "the film" from here, so they cannot drift apart.
+func (i Info) MainVideoIndex() int {
+	for k := range i.Streams {
+		if i.Streams[k].Type == "video" && !i.Streams[k].AttachedPic {
+			return k
+		}
+	}
+	return -1
+}
+
 // Video returns the main video stream: the first video stream that is not cover art. It is nil
 // when there is none. (Info.VideoCodec keeps its older meaning, "the first video stream".)
 func (i Info) Video() *Stream {
-	for k := range i.Streams {
-		if i.Streams[k].Type == "video" && !i.Streams[k].AttachedPic {
-			return &i.Streams[k]
-		}
+	if k := i.MainVideoIndex(); k >= 0 {
+		return &i.Streams[k]
 	}
 	return nil
 }
@@ -338,17 +350,18 @@ func bitDepth(raw, pixFmt string) int {
 
 func parseStream(m map[string]any, position int) Stream {
 	s := Stream{
-		Index:       position,
-		Type:        str(m, "codec_type"),
-		Codec:       str(m, "codec_name"),
-		Language:    tag(m, "language"),
-		Title:       tag(m, "title"),
-		Default:     disposition(m, "default"),
-		Forced:      disposition(m, "forced"),
-		AttachedPic: disposition(m, "attached_pic"),
-		BitrateKbps: int(num(m, "bit_rate") / 1000),
-		Profile:     str(m, "profile"),
-		StartTime:   num(m, "start_time"),
+		Index:           position,
+		Type:            str(m, "codec_type"),
+		Codec:           str(m, "codec_name"),
+		Language:        tag(m, "language"),
+		Title:           tag(m, "title"),
+		Default:         disposition(m, "default"),
+		Forced:          disposition(m, "forced"),
+		HearingImpaired: disposition(m, "hearing_impaired"),
+		AttachedPic:     disposition(m, "attached_pic"),
+		BitrateKbps:     int(num(m, "bit_rate") / 1000),
+		Profile:         str(m, "profile"),
+		StartTime:       num(m, "start_time"),
 	}
 	if _, ok := m["index"]; ok {
 		s.Index = int(num(m, "index"))
@@ -399,17 +412,17 @@ func parseStream(m map[string]any, position int) Stream {
 // MainVideoOrdinal is the position of the main video stream among the file's video streams (the N
 // in ffmpeg's "0:v:N"), or -1 if there is none.
 func (i Info) MainVideoOrdinal() int {
-	n := 0
-	for k := range i.Streams {
-		if i.Streams[k].Type != "video" {
-			continue
-		}
-		if !i.Streams[k].AttachedPic {
-			return n
-		}
-		n++
+	k := i.MainVideoIndex()
+	if k < 0 {
+		return -1
 	}
-	return -1
+	n := 0
+	for _, s := range i.Streams[:k] {
+		if s.Type == "video" {
+			n++
+		}
+	}
+	return n
 }
 
 // Lossless reports whether an audio stream is stored without loss (TrueHD/MLP, FLAC, ALAC, PCM, DTS-HD

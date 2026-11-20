@@ -311,7 +311,7 @@ func TestSrtFlowStepSaysPicturesStayInside(t *testing.T) {
 	sel.Subtitles = "srt"
 	for _, s := range flowSteps(sel.Template()) {
 		if s["kind"] == "subtitles" {
-			if want := "Picture subtitles stay inside the file; only text subtitles are saved as .srt files; an existing file is never replaced"; s["detail"] != want {
+			if want := "Only text subtitles in your languages are saved as .srt files; the others stay inside the file; an existing file is never replaced"; s["detail"] != want {
 				t.Errorf("detail %q", s["detail"])
 			}
 			return

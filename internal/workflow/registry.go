@@ -103,7 +103,7 @@ func Definitions() []StepDefinition {
 	audio["x-available"] = audioAvailable
 	subtitles := hinted(enum(anys(rules.AvailableSubtitles), []string{"Keep all", "Keep only my languages", "Keep only text subtitles", "Save as separate .srt files"}), []string{
 		"Every subtitle track is kept as it is.", "Keeps subtitles in your languages (Settings > General) and those with no language set; the others are left out, even if none match.",
-		"Picture subtitles are left out. Text subtitles are kept.", "Text subtitles are saved next to the new file as .srt files instead of inside it; picture subtitles stay inside the file."})
+		"Picture subtitles are left out. Text subtitles are kept.", "Subtitles in your languages (Settings > General) are saved next to the new file as .srt files; other languages, and picture subtitles, stay inside the file."})
 	subtitles["description"] = "Subtitle pictures are never burned into the video."
 	subtitles["x-available"] = []string{"keep_all", "my_languages", "text_only"}
 	if rules.HasEncoder("srt") {

@@ -200,7 +200,7 @@ type DoneItem struct {
 // DoneItems lists done jobs, newest first, with what happened to their original; and how many there are.
 func (s *Store) DoneItems(limit, offset int) ([]DoneItem, int, error) {
 	var total int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM jobs WHERE status=?`, Done).Scan(&total); err != nil {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM jobs WHERE ` + convertedNow("jobs")).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	// beside: another output name and no swap (a replace that changed the file type has one, 25a-2)
@@ -209,7 +209,7 @@ func (s *Store) DoneItems(limit, offset int) ([]DoneItem, int, error) {
   COALESCE(o.id,0), COALESCE(o.state,''), COALESCE(o.kept_at,''), COALESCE(o.new_path,'')
 FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id
   LEFT JOIN originals o ON o.id=(SELECT MAX(id) FROM originals WHERE job_id=j.id AND state IN (?,?,?))
-WHERE j.status=? ORDER BY j.id DESC LIMIT ? OFFSET ?`, OriginalKept, OriginalRestored, OriginalPurged, Done, limit, offset)
+WHERE `+convertedNow("j")+` ORDER BY j.id DESC LIMIT ? OFFSET ?`, OriginalKept, OriginalRestored, OriginalPurged, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -292,4 +292,23 @@ func (s *Store) KnownOriginals() (map[string]bool, error) {
 		known[filepath.Clean(t)] = true
 	}
 	return known, rows.Err()
+}
+
+// ActivePaths are the library files a queued or running job works on. A kept original of one of them is
+// not purged (the trash is never emptied under a job that may still use it).
+func (s *Store) ActivePaths() (map[string]bool, error) {
+	rows, err := s.db.Query(`SELECT DISTINCT path FROM jobs WHERE status IN (?,?)`, Queued, Running)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out[p] = true
+	}
+	return out, rows.Err()
 }

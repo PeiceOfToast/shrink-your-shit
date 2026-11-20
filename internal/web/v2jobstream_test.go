@@ -176,14 +176,14 @@ func TestV2JobLogStream(t *testing.T) {
 	srv, st, lib := streamServer(t)
 	id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "a.mkv")})
 	st.Claim("w")
-	st.AppendLogLine(id, 0, "app", "probing") // the log lives in the database; its cursor is the line's seq
+	st.AppendLogLine(id, 0, "", jobs.LevelInfo, "app", "probing") // the log lives in the database; its cursor is the line's seq
 	path := "/api/v2/jobs/" + strconv.FormatInt(id, 10) + "/log/stream"
 	c := streamAt(t, srv.URL, path, "")
 	m := until(t, c, "job.log")
 	if !strings.Contains(m.data, `probing\n"`) || m.id != "1" || !strings.Contains(m.data, `"next":1`) {
 		t.Fatalf("first %+v", m)
 	}
-	st.AppendLogLine(id, 0, "app", "converting")
+	st.AppendLogLine(id, 0, "", jobs.LevelInfo, "app", "converting")
 	if m := until(t, c, "job.log"); !strings.Contains(m.data, `converting\n"`) || m.id != "2" {
 		t.Errorf("as it is written %+v", m)
 	}
@@ -218,7 +218,7 @@ func TestV2JobEventStream(t *testing.T) {
 	if m := until(t, c, "job.step"); !strings.Contains(m.data, `"words":"To be converted."`) {
 		t.Errorf("step %+v", m)
 	}
-	st.AppendLogLine(id, 0, "app", "converting")
+	st.AppendLogLine(id, 0, "", jobs.LevelInfo, "app", "converting")
 	if m := until(t, c, "job.log"); !strings.Contains(m.data, `converting\n"`) || m.id != "" {
 		t.Errorf("log %+v", m)
 	}

@@ -4,7 +4,7 @@
 import { useSyncExternalStore } from "react";
 import type { ActivityEvent, Capability, FoundServer, ID, JoinRequest, JoinState, RoleBody, Setup, Job, JobState, Library, PublishPreview, Settings, Summary, Template, Trash, Worker, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
 import type { FirstFiles, FolderReport, Issue, LibraryItem } from "../types/v1";
-import { branchedDoc, legacyDoc, presetDoc, preview, revision, summary as stepSummary } from "./steps";
+import { branchedDoc, emptyDoc, legacyDoc, presetDoc, preview, revision, summary as stepSummary } from "./steps";
 
 const now = Date.now(), ago = (min: number) => new Date(now - min * 60e3).toISOString();
 const GB = 1e9;
@@ -65,7 +65,7 @@ function workflow(id: ID, name: string, description: string, extra: Partial<Work
 // GET /templates: the V1 server has only the Start Simple preset; more come with the engine (review P3).
 export const TEMPLATES: Template[] = [
   { id: "shrink_videos", name: "Shrink videos", fileType: "video", description: "Converts to HEVC and keeps your languages", changesOriginals: false,
-    steps: ["Leave some files alone", "Convert video", "Audio", "Subtitles", "File type", "Check the result", "Save the result"] },
+    steps: ["Leave some files alone", "Convert video", "Audio", "Subtitles", "File type", "Check the result", "Save the result"], workflow: presetDoc() },
 ];
 const MOVIES: [ID, string] = ["l1", "Movies"], TV: [ID, string] = ["l2", "TV Shows"], HOME: [ID, string] = ["l3", "Home videos"];
 
@@ -103,9 +103,9 @@ function running(): State {
     libraries: [{ ...library("l1", "Movies", "/media/movies", 8.1 * GB, 780 * GB, 1600), bytes: { freed: 8.1 * GB, waitingToFree: 780 * GB, grew: 1.1 * GB }, ...(shareOff && { status: "paused_share" as const, pausedBy: { shareId: "s1", shareName: "Media share", since: ago(30), use: "folder" as const } }) }, library("l2", "TV Shows", "/media/tv", 0, 410 * GB, 900), { ...library("l3", "Home videos", "/media/home", 28.3 * GB, 10 * GB, 300), workflowId: "w2", workflowName: "Home videos - my rules" }],
     workers: [tested(worker("this", "This computer", "busy", [1, 2], [0, 1], 120, ["j-48213"]), true), tested(worker("nas", "NAS box", "busy", [1, 1], [0, 0], 300, ["j-48214"]), false), worker("laptop", "Laptop", "offline", [0, 1], [0, 0], 22, [])].map((w) => (workersOff ? { ...w, status: "offline" as const } : w)),
     jobs: [
-      job("j-48213", "Dune.Part.Two.2024.2160p.REMUX.mkv", MOVIES, "running", { subState: "converting", worker: { id: "this", name: "This computer" }, currentStep: step(3, "Convert video"), startedAt: ago(12),
+      job("j-48213", "Dune.Part.Two.2024.2160p.REMUX.mkv", MOVIES, "running", { subState: "converting", worker: { id: "this", name: "This computer" }, currentStep: step(3, "Convert video"), startedAt: ago(12), expectedSavingBytes: 1.2 * GB, expectedSavingEstimated: true,
         progress: { stage: "Converting video", percent: 62, workflowPercent: 55, elapsedS: 728, speed: 1.7, etaS: 450, fps: 41, bitrateKbps: 9800 } }),
-      job("j-48214", "The.Bear.S03E04.1080p.WEB-DL.mkv", TV, "running", { subState: "converting", worker: { id: "nas", name: "NAS box" }, currentStep: step(3, "Convert video"), startedAt: ago(4),
+      job("j-48214", "The.Bear.S03E04.1080p.WEB-DL.mkv", TV, "running", { subState: "converting", worker: { id: "nas", name: "NAS box" }, currentStep: step(3, "Convert video"), startedAt: ago(4), expectedSavingBytes: -200e6, expectedSavingEstimated: true,
         progress: { stage: "Converting video", percent: 18, workflowPercent: 30, elapsedS: 222, speed: 0.4, etaS: null, fps: 9, bitrateKbps: 4100 } }),
       job("j-48190", "Wedding.Raw.2018.mov", HOME, "failed", { endedAt: ago(11), currentStep: step(3, "Convert video"), reason: { code: "encoder_failed", message: "The encoder ran out of graphics memory." } }),
       job("j-48161", "Arrival.2016.1080p.BluRay.mkv", MOVIES, "failed", { endedAt: ago(102), currentStep: step(4, "Check the result"), reason: { code: "check_failed", message: "The new file is 4 s shorter than the original. The original is kept." } }),
@@ -125,6 +125,7 @@ function running(): State {
         libraries: [{ id: "l3", name: "Home videos" }], changesOriginals: true, lastRun: { at: ago(60 * 26), completed: 14, failed: 0, skipped: 0 }, summaryTag: "HEVC · Better quality · All audio · MKV · Replaces originals" }),
       workflow("w3", "Audio and subtitles only", "Leaves the picture alone", { status: "disabled", lastRun: { at: ago(60 * 24 * 9), completed: 0, failed: 0, skipped: 0 },summaryTag: "Audio and subtitles · MKV" }),
       workflow("w4", "Old settings", "Carried over from an earlier install", { summaryTag: "Settings from an earlier install" }),
+      workflow("w5", "New workflow", "No steps yet", { summaryTag: "Library files only" }), // the empty state (review2 gap 2)
     ],
     trash: { bytes: 120 * GB, files: 14, nextDeleteAt: ago(-60 * 24), lastDeleteAt: ago(-60 * 24 * 7) },
     mode: shareMode as "app" | "manual" | "docker",
@@ -269,8 +270,8 @@ function slot(id: ID) {
   const w = state.wf.find((x) => x.id === id);
   if (!w) return null;
   if (!drafts[id]) {
-    const published = w.version == null ? null : id === "w2" ? branchedDoc() : id === "w4" ? legacyDoc() : presetDoc();
-    drafts[id] = { published, draft: revision(id, structuredClone(published ?? presetDoc()), null) };
+    const published = w.version == null ? null : id === "w2" ? branchedDoc() : id === "w4" ? legacyDoc() : id === "w5" ? emptyDoc() : presetDoc();
+    drafts[id] = { published, draft: revision(id, structuredClone(published ?? (id === "w5" ? emptyDoc() : presetDoc())), null) };
   }
   return { w, d: drafts[id] };
 }

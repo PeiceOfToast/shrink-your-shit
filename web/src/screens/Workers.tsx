@@ -277,9 +277,31 @@ function StartStop({ w, onDone }: { w: Worker; onDone: (m: string) => void }) {
   return <button className="btn sm" type="button" onClick={async () => { if (w.currentJobIds.length) return setAsking(true); if (await act(workerAction(w.id, "stop"), onDone)) onDone(w.name + " stopped."); }}><Icon id="i-stop" />Stop</button>;
 }
 
+// design 7.2: each worker's own switch (its row's first control). On = going; off while it finishes its file (draining),
+// with the words saying so; disabled when the worker is offline or stalled. Turning off a converting worker asks first.
+function WorkerSwitch({ w, onDone }: { w: Worker; onDone: (m: string) => void }) {
+  const [asking, setAsking] = useState(false), [busy, setBusy] = useState(false), [want, setWant] = useState<boolean | null>(null), on = going(w), gone = w.status === "offline" || w.status === "stalled", finishing = w.status === "draining";
+  // review2 #451: the switch shows what was asked until the server says so (a reload or heartbeat changes on), or the call fails
+  useEffect(() => setWant(null), [on]);
+  if (asking) return <StopAsk w={w} onDone={(m) => (setAsking(false), onDone(m))} onCancel={() => setAsking(false)} />;
+  const shown = want ?? on; // review #451: decide and label from what the switch shows, not the last server state
+  const flip = async () => {
+    if (shown && w.currentJobIds.length) return setAsking(true);
+    setBusy(true); setWant(!shown); // one call at a time: a quick double flip must not send it twice
+    let ok = false;
+    try { ok = !!(await act(workerAction(w.id, shown ? "stop" : "start"), onDone)); if (ok) onDone(w.name + (shown ? " stopped." : " started.")); }
+    finally { if (!ok) setWant(null); setBusy(false); }
+  };
+  return <label className="sw"><input type="checkbox" role="switch" className="switch" checked={shown} disabled={gone || busy} aria-label={w.name} onChange={flip} />
+    <span className="sm">{shown ? "On" : finishing && want === null ? "Stopping after its current files" : "Off"}</span></label>;
+}
+
 // user item 3: the GPU "—" explains itself; title for mouse, hidden text for touch and screen readers (design 02:12Z)
 const NO_GPU = "Not available: no graphics card, one that doesn't report how busy it is, or a worker on another computer. GPU use is only read on This computer.";
 export function NoGpu() { return <span title={NO_GPU}>—<span className="sr"> ({NO_GPU})</span></span>; }
+// manager 11-20 (row 9631ec0a): the reading is the whole chip, so another VM or program on it shows too.
+const GPU_ALL = "How busy the whole graphics card is, including other programs using it.";
+export function GpuPct({ n }: { n: number }) { return <span title={GPU_ALL}>{Math.round(n)}%<span className="sr"> ({GPU_ALL})</span></span>; }
 
 function Live({ w }: { w: Worker }) { // only the figures the server sends
   const l = w.live, out: string[] = [];
@@ -288,7 +310,7 @@ function Live({ w }: { w: Worker }) { // only the figures the server sends
   for (const g of w.gpus) out.push("GPU · " + g.model + (g.vramBytes ? " · " + bytes(g.vramBytes) : ""));
   const g = l.gpu[0]?.utilPercent; // workshop #443: one entry, the busiest GPU; [] when unreadable or remote
   if (!out.length && g == null) return null; // a GPU reading shows even before the first CPU reading (review #444)
-  return <p className="sm">{out.length > 0 && out.join(" · ") + " · "}GPU {g == null ? <NoGpu /> : Math.round(g) + "%"}</p>;
+  return <p className="sm">{out.length > 0 && out.join(" · ") + " · "}GPU {g == null ? <NoGpu /> : <GpuPct n={g} />}</p>;
 }
 
 export function Workers() {
@@ -322,7 +344,7 @@ export function Workers() {
         <div className="wgrid">{list.map((w) => {
           const [t, cls, icon] = words(w), gone = w.status === "offline" || w.status === "stalled";
           return <article key={w.id} className={"card wcard" + (gone ? " dim" : "")}>
-            <div className="hd"><h3><Link to={"/workers/" + encodeURIComponent(w.id)}>{w.name}</Link></h3><span className="sp" /><StartStop w={w} onDone={done} />
+            <div className="hd"><h3><Link to={"/workers/" + encodeURIComponent(w.id)}>{w.name}</Link></h3><span className="sp" /><WorkerSwitch w={w} onDone={done} />
               <Link className="btn icon ghost gear" to={"/workers/" + encodeURIComponent(w.id) + "?tab=limits"} aria-label={"Settings for " + w.name} title="Settings"><Icon id="i-gear" /></Link></div>
             <div className="bd stack">
               <p className="sm muted">{[w.host, OS[w.os ?? ""], w.arch, w.lastHeartbeatAt && "last heard " + ago(w.lastHeartbeatAt)].filter(Boolean).join(" · ")}</p>

@@ -30,6 +30,9 @@ func countsOf(t *testing.T, s *Store, l Library, flowID int64, since string, now
 	lib.Skipped = 0
 	days, err := s.Days(7, now, tot)
 	check(err)
+	for i := range days {
+		days[i].Skipped = 0
+	}
 	done, err := s.DoneCount()
 	check(err)
 	sp, sok, spg, tok, err := s.Averages()
@@ -41,6 +44,7 @@ func countsOf(t *testing.T, s *Store, l Library, flowID int64, since string, now
 	check(err)
 	ends, err := s.JobEndsSince(since)
 	check(err)
+	delete(ends, "skipped")
 	return map[string]any{
 		"overview totals": tot,
 		"library totals":  lib,
@@ -116,8 +120,8 @@ func TestRestoredOriginalCountsNowhere(t *testing.T) {
 	}
 }
 
-// A file converted twice whose newer conversion was restored is the older conversion's output again: it
-// counts as that older conversion did before the newer one, not as nothing (review #431 P2).
+// A file converted twice whose newer conversion was restored keeps the older conversion as done: the older
+// output still stands in the library (review #431 P2). The restored newer job is skipped, never done.
 func TestRestoringTheNewerConversionKeepsTheOlderOne(t *testing.T) {
 	s := open(t)
 	check := func(err error) {
@@ -166,11 +170,17 @@ func TestRestoringTheNewerConversionKeepsTheOlderOne(t *testing.T) {
 	after := countsOf(t, s, l, w.ID, since, now)
 
 	if n := after["done count"]; n != 1 {
-		t.Errorf("done count after restoring the newer conversion = %v, want 1 (the older conversion is the file now)", n)
+		t.Errorf("done count after restoring the newer conversion = %v, want 1 (the older conversion)", n)
 	}
 	for k := range first {
 		if !reflect.DeepEqual(after[k], first[k]) {
 			t.Errorf("%s after restoring the newer conversion = %+v, want %+v (as after the older one)", k, after[k], first[k])
 		}
+	}
+	// The file counts once, as the older conversion: the restored newer end is no skip of its own.
+	ends, err := s.JobEndsSince(since)
+	check(err)
+	if ends["skipped"] != 0 || ends["done"] != 1 {
+		t.Errorf("ends after restoring the newer conversion = %v, want done 1 and no skipped", ends)
 	}
 }

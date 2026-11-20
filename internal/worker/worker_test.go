@@ -113,6 +113,7 @@ type scenario struct {
 	ssimStderr             string
 	ssimStats              string // the ssim filter's per-frame lines (stdout)
 	ssimErr                error
+	ssim                   func(args []string) (stdout, stderr string, err error) // if set, the picture comparison's answer per call (else ssimStats, ssimStderr, ssimErr)
 	freeBytes              uint64
 	freeErr                error
 	onEncode               func() // runs while "encoding", e.g. to modify the source
@@ -236,6 +237,9 @@ func (s *scenario) handle(name string, args []string) (string, string, error) {
 			s.mu.Unlock()
 			if after != nil {
 				after()
+			}
+			if s.ssim != nil {
+				return s.ssim(args)
 			}
 			return s.ssimStats, s.ssimStderr, s.ssimErr
 		}

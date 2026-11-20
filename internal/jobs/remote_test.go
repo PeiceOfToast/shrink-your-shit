@@ -18,6 +18,7 @@ func TestUpgradeFrom34AddsRemoteWorkers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dropLogSections(t, s)
 	for _, q := range append(rewind35, `PRAGMA user_version=34`) {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
@@ -43,7 +44,7 @@ func TestUpgradeFrom34AddsRemoteWorkers(t *testing.T) {
 }
 
 // rewind35 takes away what migrations 35 (remote workers), 36 (workers on and off) and 41 (library share pause) added.
-var rewind35 = append(append([]string{`ALTER TABLE files DROP COLUMN decided_at`, `ALTER TABLE jobs DROP COLUMN output_gone_at`, `DROP INDEX IF EXISTS jobs_newest`, `ALTER TABLE shares DROP COLUMN mount_point`, `ALTER TABLE workers DROP COLUMN primary_encoder`, `ALTER TABLE workers DROP COLUMN os`, `ALTER TABLE workers DROP COLUMN arch`}, rewindShareMigrations...), `DROP TABLE worker_paths`, `ALTER TABLE workers DROP COLUMN enabled`, `DROP INDEX workers_token`, `DROP TABLE worker_pairings`, `ALTER TABLE workers DROP COLUMN kind`, `ALTER TABLE workers DROP COLUMN token_hash`,
+var rewind35 = append(append([]string{`ALTER TABLE files DROP COLUMN decided_at`, `ALTER TABLE jobs DROP COLUMN subtitle_files`, `ALTER TABLE jobs DROP COLUMN workflow_rev`, `ALTER TABLE jobs DROP COLUMN output_gone_at`, `DROP INDEX IF EXISTS jobs_newest`, `ALTER TABLE shares DROP COLUMN mount_point`, `ALTER TABLE workers DROP COLUMN primary_encoder`, `ALTER TABLE workers DROP COLUMN os`, `ALTER TABLE workers DROP COLUMN arch`}, rewindShareMigrations...), `DROP TABLE worker_paths`, `ALTER TABLE workers DROP COLUMN enabled`, `DROP INDEX workers_token`, `DROP TABLE worker_pairings`, `ALTER TABLE workers DROP COLUMN kind`, `ALTER TABLE workers DROP COLUMN token_hash`,
 	`ALTER TABLE workers DROP COLUMN version`, `ALTER TABLE workers DROP COLUMN api_level`, `ALTER TABLE workers DROP COLUMN last_seen`,
 	`ALTER TABLE workers DROP COLUMN capabilities`)
 
@@ -76,6 +77,7 @@ func TestWorkersOnAndOff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dropLogSections(t, s)
 	if !s.Paused() || s.WorkerEnabled(LocalWorker) { // a new install starts stopped (S2), carried to the local worker
 		t.Fatalf("new install: paused %v, local on %v", s.Paused(), s.WorkerEnabled(LocalWorker))
 	}
@@ -122,7 +124,7 @@ func TestWorkersOnAndOff(t *testing.T) {
 	// an install paused before this version: every worker off
 	s, _ = Open(p)
 	s.SetPaused(true)
-	for _, q := range append(append([]string{`ALTER TABLE shares DROP COLUMN mount_point`, `INSERT INTO app_meta(key, value) VALUES ('paused', '1')`, `UPDATE workers SET enabled=1`}, rewindShareMigrations...), `ALTER TABLE workers DROP COLUMN enabled`, `ALTER TABLE workers DROP COLUMN primary_encoder`, `ALTER TABLE workers DROP COLUMN os`, `ALTER TABLE workers DROP COLUMN arch`, `DROP TABLE worker_paths`, `ALTER TABLE files DROP COLUMN decided_at`, `ALTER TABLE jobs DROP COLUMN output_gone_at`, `DROP INDEX IF EXISTS jobs_newest`, `PRAGMA user_version=35`) {
+	for _, q := range append(append([]string{`ALTER TABLE shares DROP COLUMN mount_point`, `INSERT INTO app_meta(key, value) VALUES ('paused', '1')`, `UPDATE workers SET enabled=1`}, rewindShareMigrations...), `ALTER TABLE workers DROP COLUMN enabled`, `ALTER TABLE workers DROP COLUMN primary_encoder`, `ALTER TABLE workers DROP COLUMN os`, `ALTER TABLE workers DROP COLUMN arch`, `DROP TABLE worker_paths`, `ALTER TABLE files DROP COLUMN decided_at`, `ALTER TABLE jobs DROP COLUMN subtitle_files`, `ALTER TABLE jobs DROP COLUMN workflow_rev`, `ALTER TABLE jobs DROP COLUMN output_gone_at`, `DROP INDEX IF EXISTS jobs_newest`, `PRAGMA user_version=35`) {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}

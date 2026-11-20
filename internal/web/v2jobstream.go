@@ -160,15 +160,15 @@ func jobStream(w http.ResponseWriter, r *http.Request, store *jobs.Store, id, lo
 				stepsSent = len(steps)
 			}
 			for { // the log, in ReadMax pieces, until it is all sent
-				text, next, err := logText(store, id, logAt)
-				if err != nil || text == "" {
+				lines, next, err := logBatch(store, id, logAt)
+				if err != nil || len(lines) == 0 {
 					break
 				}
 				logID := next
 				if all {
 					logID = -1 // the job stream's ids are its changes' seq
 				}
-				send(w, logID, "job.log", map[string]any{"type": "job.log", "jobId": jobID, "text": text, "next": next})
+				send(w, logID, "job.log", map[string]any{"type": "job.log", "jobId": jobID, "text": logTextOf(lines), "next": next, "lines": streamLines(lines)})
 				logAt = next
 			}
 			flusher.Flush()

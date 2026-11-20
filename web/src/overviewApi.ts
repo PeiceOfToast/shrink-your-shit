@@ -11,7 +11,7 @@ export interface Overview {
   headline: { freed: number; waitingToFree: number; nextFreeAt: string | null; couldFree: number; grew?: number; filesConverted: number; filesWaiting: number };
   trash: { bytes: number; files: number; nextDeleteAt: string | null };
   workers: { id: string; name: string; kind: string; status: WorkerStatus; slots: { cpu?: { used: number; total: number }; used?: number; total?: number }; jobs: OverviewJob[]; cpuPercent: number | null; gpuPercent: number | null }[];
-  active: { jobId: string; library: { id: string; name: string } | null; name: string; percent: number | null; etaS: number | null; expectedSavingBytes: number | null }[];
+  active: { jobId: string; library: { id: string; name: string } | null; name: string; percent: number | null; etaS: number | null; expectedSavingBytes: number | null; expectedSavingEstimated?: boolean }[];
   libraries: { id: string; name: string; state: "active" | "paused" | "paused_share"; bytesBefore: number; bytesNow: number; saved: number; savedPercent: number | null; waitingToFree: number; couldFree: number; grew?: number;
     counts: { done: number; waiting: number; skipped: number; failed: number } }[];
   daily: { day: string; recorded: boolean; completed: number; skipped: number; failed: number; freedBytes: number; savedBytes?: number; waitingBytes?: number; couldFreeBytes?: number }[];
@@ -41,7 +41,7 @@ function sample(): Overview {
     trash: { bytes: s.trash.bytes, files: s.trash.files, nextDeleteAt: s.trash.nextDeleteAt },
     workers: s.workers.map((w) => ({ id: w.id, name: w.name, kind: w.id === "local" ? "builtin" : "remote", status: w.status, slots: w.slots,
       jobs: jobs.filter((j) => w.currentJobIds.includes(j.jobId)), cpuPercent: w.live.cpuPercent, gpuPercent: w.live.gpu[0]?.utilPercent ?? null })),
-    active: sum.activeJobs.map((j) => ({ jobId: j.id, library: j.library, name: j.file.name, percent: j.progress?.percent ?? null, etaS: j.progress?.etaS ?? null, expectedSavingBytes: null })),
+    active: sum.activeJobs.map((j) => ({ jobId: j.id, library: j.library, name: j.file.name, percent: j.progress?.percent ?? null, etaS: j.progress?.etaS ?? null, expectedSavingBytes: j.expectedSavingBytes ?? null, expectedSavingEstimated: j.expectedSavingEstimated ?? false })),
     libraries: s.libraries.map((l) => {
       const now = l.counts.files * 1.4 * GB, saved = l.bytes.freed;
       return { id: l.id, name: l.name, state: l.status === "paused_share" ? "paused_share" : l.enabled ? "active" : "paused", bytesBefore: now + saved + l.bytes.waitingToFree, bytesNow: now, saved, savedPercent: saved > 0 ? Math.round((saved / (now + saved + l.bytes.waitingToFree)) * 1000) / 10 : null,

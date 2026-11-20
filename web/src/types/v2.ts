@@ -38,6 +38,9 @@ export interface Job {
   attempts: number; maxAttempts: number; retryAt: Time | null;
   reason: { code: string; message: string } | null;
   originalUntouched: boolean | null;
+  // A running job's expected saving, from its size so far: null = no history yet; negative = the file may grow.
+  expectedSavingBytes?: number | null;
+  expectedSavingEstimated?: boolean;
   sizes: { before: number; after: number | null; saved: number | null };
   output: { path: string | null; policy: CommitPolicy; committedAt: Time | null };
   originalState: "untouched" | "kept" | "restored" | "deleted" | "left_in_place" | "kept_beside" | null;
@@ -144,6 +147,8 @@ export interface Settings { firstRunDone: boolean; firstRunStep: number; intakeP
 // GET /api/v2/trash (contract update 01:33Z; workshop branch v2-trash-settings): originals replaced and kept in the
 // trash until their date. Later embedded as Summary.bytes.trash.
 export interface Trash { bytes: number; files: number; nextDeleteAt: Time | null; lastDeleteAt: Time | null }
+// POST /api/v2/trash/purge {libraryId?}: a library whose folder isn't mounted is skipped, never reported as "deleted 0".
+export interface PurgeResult { deletedFiles: number; freedBytes: number; skipped: { library: string; reason: string }[] }
 export interface Workflow { // GET /workflows (contract: Workflows, revisions and the graph)
   id: ID;
   name: string;
@@ -164,7 +169,8 @@ export interface Workflow { // GET /workflows (contract: Workflows, revisions an
   changesOriginals: boolean;
   createdAt: Time; changedAt: Time;
 }
-export interface Template { id: ID; name: string; fileType: FileType; description: string; steps: string[]; changesOriginals: boolean } // GET /templates
+// GET /templates: workflow (#468) is the whole document in the draft PUT's shape; "Start from Shrink videos" fills an empty workflow with it
+export interface Template { id: ID; name: string; fileType: FileType; description: string; steps: string[]; changesOriginals: boolean; workflow?: WorkflowDoc }
 
 // Workflows, revisions and the graph (contract v2): the draft the Stack view edits.
 export interface WorkflowRevision {
@@ -247,6 +253,10 @@ export interface Port {
   kind: "file" | "control";
   outcome: "success" | "error" | "skipped" | "branch";
 }
+// POST /workflows/{id}/validate answers two more maps (contract final, workshop 05:58Z). An absent map or an absent
+// entry means the step is fixed in place and its type can't be added here.
+export interface StepPlace { fixedPlace: boolean; fixedReason?: string }
+export interface AddStep { addable: boolean; reason?: string; after?: ID }
 export interface StepDefinition {
   type: string;
   typeVersion: number;

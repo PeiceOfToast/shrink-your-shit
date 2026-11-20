@@ -382,6 +382,7 @@ func TestMigration7BackfillsSkipReasons(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dropLogSections(t, s)
 	// back to version 6: as an install from before 21b left it
 	for _, q := range append(append([]string{}, rewindShareMigrations...), `DROP TRIGGER events_job_removed`, // first: since 32 it reads jobs.attempts
 		`DROP INDEX files_reason`, `DROP INDEX jobs_output`, `ALTER TABLE files DROP COLUMN reason`,
@@ -397,7 +398,7 @@ func TestMigration7BackfillsSkipReasons(t *testing.T) {
 		`DROP TRIGGER events_job_insert`, `DROP TRIGGER events_job_status`, `DROP INDEX jobs_claim`, `DROP TABLE events`, `ALTER TABLE jobs DROP COLUMN priority`, // and 21
 		`ALTER TABLE jobs DROP COLUMN error_code`,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                // and 23
 		`DROP TABLE workers`, `ALTER TABLE shares DROP COLUMN mount_point`, `ALTER TABLE libraries DROP COLUMN override_folder`, `ALTER TABLE libraries DROP COLUMN priority`, `ALTER TABLE jobs DROP COLUMN original_gone_at`, `ALTER TABLE jobs DROP COLUMN original_changed`, `ALTER TABLE jobs DROP COLUMN original_disk`, `ALTER TABLE jobs DROP COLUMN route`, `ALTER TABLE job_steps DROP COLUMN node_id`, `ALTER TABLE job_steps DROP COLUMN port`, `ALTER TABLE jobs DROP COLUMN fallback`, `ALTER TABLE jobs DROP COLUMN lease_id`, `ALTER TABLE jobs DROP COLUMN lease_expires`, `ALTER TABLE files DROP COLUMN job_id`, `ALTER TABLE jobs DROP COLUMN again_from`, `DROP TABLE worker_pairings`, `DROP TABLE IF EXISTS worker_paths`, // and 24-27
-		`ALTER TABLE files DROP COLUMN decided_at`, `ALTER TABLE jobs DROP COLUMN output_gone_at`, `DROP INDEX IF EXISTS jobs_newest`, `PRAGMA user_version=6`) {
+		`ALTER TABLE files DROP COLUMN decided_at`, `ALTER TABLE jobs DROP COLUMN subtitle_files`, `ALTER TABLE jobs DROP COLUMN workflow_rev`, `ALTER TABLE jobs DROP COLUMN output_gone_at`, `DROP INDEX IF EXISTS jobs_newest`, `PRAGMA user_version=6`) {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}
@@ -470,6 +471,7 @@ func TestAlwaysStandardizeMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dropLogSections(t, s)
 	s.SetPaused(false) // claims below (S2: a new database starts with its worker stopped)
 	kept := map[string]string{
 		"/m/less.mkv":    "the new file (1.0 MB) saves less than the required 20% of the original (1.1 MB)",
@@ -541,6 +543,7 @@ func TestWorkersStartStoppedMigration(t *testing.T) {
 	upgrade := func(paused string) *Store {
 		path := filepath.Join(t.TempDir(), "syp.db")
 		s, _ := Open(path) // no libraries and no jobs: an existing install is told by its version, not its rows
+		dropLogSections(t, s)
 		s.SetMeta("paused", paused)
 		s.db.Exec(`DELETE FROM app_meta WHERE key='stopped_by_update'`)
 		rewind15(s) // migration 15's columns go, so it can run again
@@ -596,6 +599,7 @@ func TestExistingBasicFlowsMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dropLogSections(t, s)
 	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
 	s.db.Exec(`UPDATE flows SET template=json_remove(template, '$.params.audio')`) // as before S4
 	s.db.Exec(`DELETE FROM app_meta WHERE key='basic_changed_by_update'`)
@@ -634,6 +638,7 @@ func TestHDR10KeptMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dropLogSections(t, s)
 	skip, conv := rules.DefaultSelectors(3), rules.DefaultSelectors(3)
 	skip.Speed, conv.Speed = "slower", "slower" // not the slider's values, so they are saved as Standard flows
 	a, _ := s.AddLibrary("Skips HDR", "/a", skip.Template(), true)
@@ -680,6 +685,7 @@ func TestStandardReworkMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dropLogSections(t, s)
 	type was struct{ audio, cap string }
 	old := map[string]was{"/a": {"keep_all", "none"}, "/b": {"my_languages", "10"}, "/c": {"aac", "4"}, "/d": {"lossless_only", "40"}, "/e": {"stereo_aac", "low"}}
 	ids := map[string]int64{}
@@ -728,6 +734,7 @@ func TestStandardReworkOpusMP4(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dropLogSections(t, s)
 	sel := rules.DefaultSelectors(3)
 	sel.Speed = "slower"
 	l, _ := s.AddLibrary("M", "/m", sel.Template(), true)
@@ -759,6 +766,7 @@ func TestBitrateMeaningsMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dropLogSections(t, s)
 	quality := rules.DefaultSelectors(3)
 	quality.MaxBitrate = "medium"
 	vbr := rules.DefaultSelectors(3)
@@ -769,7 +777,7 @@ func TestBitrateMeaningsMigration(t *testing.T) {
 		l, _ := s.AddLibrary("/"+name, "/"+name, sel.Template(), true)
 		ids[name] = l.FlowID
 	}
-	for _, q := range append([]string{`ALTER TABLE files DROP COLUMN decided_at`, `ALTER TABLE jobs DROP COLUMN output_gone_at`, `DROP INDEX IF EXISTS jobs_newest`, `ALTER TABLE shares DROP COLUMN mount_point`, `ALTER TABLE workers DROP COLUMN primary_encoder`, `ALTER TABLE workers DROP COLUMN os`, `ALTER TABLE workers DROP COLUMN arch`}, rewindShareMigrations...) { // 42 and 41 run again on the next open
+	for _, q := range append([]string{`ALTER TABLE files DROP COLUMN decided_at`, `ALTER TABLE jobs DROP COLUMN subtitle_files`, `ALTER TABLE jobs DROP COLUMN workflow_rev`, `ALTER TABLE jobs DROP COLUMN output_gone_at`, `DROP INDEX IF EXISTS jobs_newest`, `ALTER TABLE shares DROP COLUMN mount_point`, `ALTER TABLE workers DROP COLUMN primary_encoder`, `ALTER TABLE workers DROP COLUMN os`, `ALTER TABLE workers DROP COLUMN arch`}, rewindShareMigrations...) { // 42 and 41 run again on the next open
 		s.db.Exec(q)
 	}
 	s.db.Exec(`PRAGMA user_version = 37`) // migration 38 runs on the next open
@@ -806,5 +814,17 @@ func TestBitrateMeaningsMigration(t *testing.T) {
 	}
 	if f, _ := s.GetFlow(ids["quality"]); len(f.Template.Selectors.Notices) != 0 || f.Template.Selectors.RateControl != "quality_legacy" {
 		t.Errorf("after the publish: %+v", f.Template.Selectors)
+	}
+}
+
+// dropLogSections takes migration 53's columns (job log sections and levels) off a database just opened at the
+// latest version, so a test can rewind it to an older one and let the upgrade run step 53 again. Like the rewinds
+// above it is for tests only.
+func dropLogSections(t *testing.T, s *Store) {
+	t.Helper()
+	for _, q := range []string{`ALTER TABLE job_log_lines DROP COLUMN level`, `ALTER TABLE job_log_lines DROP COLUMN section`} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatal(q, err)
+		}
 	}
 }

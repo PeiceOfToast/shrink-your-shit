@@ -1,0 +1,48 @@
+[h264 @ 0x27c6a2c0] Reinit context to 320x240, pix_fmt: yuv420p
+Input #0, matroska,webm, from 'sample.mkv':
+  Metadata:
+    ENCODER         : Lavf61.1.100
+  Duration: 00:00:03.02, start: -0.023000, bitrate: 776 kb/s
+  Stream #0:0: Video: h264 (Constrained Baseline), 1 reference frame, yuv420p(progressive, left), 320x240 [SAR 1:1 DAR 4:3], 25 fps, 25 tbr, 1k tbn
+      Metadata:
+        ENCODER         : Lavc61.3.100 libx264
+        DURATION        : 00:00:03.000000000
+  Stream #0:1(eng): Audio: aac (LC), 44100 Hz, mono, fltp, delay 1024
+      Metadata:
+        ENCODER         : Lavc61.3.100 aac
+        DURATION        : 00:00:03.023000000
+[out#0/matroska @ 0x27ca78c0] Adding streams from explicit maps...
+[vost#0:0/copy @ 0x27ca65c0] Created video stream from input stream 0:0
+[aost#0:1/copy @ 0x27c9dd40] Created audio stream from input stream 0:1
+Stream mapping:
+  Stream #0:0 -> #0:0 (copy)
+  Stream #0:1 -> #0:1 (copy)
+Output #0, matroska, to 'copy.mkv':
+  Metadata:
+    encoder         : Lavf61.1.100
+  Stream #0:0: Video: h264 (Constrained Baseline), 1 reference frame (H264 / 0x34363248), yuv420p(progressive, left), 320x240 [SAR 1:1 DAR 4:3], q=2-31, 25 fps, 25 tbr, 1k tbn
+      Metadata:
+        ENCODER         : Lavc61.3.100 libx264
+        DURATION        : 00:00:03.000000000
+  Stream #0:1(eng): Audio: aac (LC) ([255][0][0][0] / 0x00FF), 44100 Hz, mono, fltp, delay 1024
+      Metadata:
+        ENCODER         : Lavc61.3.100 aac
+        DURATION        : 00:00:03.023000000
+[out#0/matroska @ 0x27ca78c0] Starting thread...
+[in#0/matroska,webm @ 0x27c66bc0] Starting thread...
+[in#0/matroska,webm @ 0x27c66bc0] EOF while reading input
+[in#0/matroska,webm @ 0x27c66bc0] Terminating thread with return code 0 (success)
+[out#0/matroska @ 0x27ca78c0] All streams finished
+[out#0/matroska @ 0x27ca78c0] Terminating thread with return code 0 (success)
+[AVIOContext @ 0x27c6d340] Statistics: 294127 bytes written, 2 seeks, 3 writeouts
+[out#0/matroska @ 0x27ca78c0] Output file #0 (copy.mkv):
+[out#0/matroska @ 0x27ca78c0]   Output stream #0:0 (video): 75 packets muxed (264876 bytes); 
+[out#0/matroska @ 0x27ca78c0]   Output stream #0:1 (audio): 131 packets muxed (26311 bytes); 
+[out#0/matroska @ 0x27ca78c0]   Total: 206 packets (291187 bytes) muxed
+[out#0/matroska @ 0x27ca78c0] video:259KiB audio:26KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: 0.767548%
+size=     287KiB time=00:00:03.02 bitrate= 776.5kbits/s speed=1.21e+03x    
+[in#0/matroska,webm @ 0x27c66bc0] Input file #0 (sample.mkv):
+[in#0/matroska,webm @ 0x27c66bc0]   Input stream #0:0 (video): 75 packets read (264876 bytes); 
+[in#0/matroska,webm @ 0x27c66bc0]   Input stream #0:1 (audio): 131 packets read (26311 bytes); 
+[in#0/matroska,webm @ 0x27c66bc0]   Total: 206 packets (291187 bytes) demuxed
+[AVIOContext @ 0x27c6fac0] Statistics: 293411 bytes read, 0 seeks

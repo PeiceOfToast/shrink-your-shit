@@ -512,6 +512,43 @@ func TestRealMP4KeepsTextSubtitles(t *testing.T) {
 	}
 }
 
+// R6: a subtitle stream with one cue at 0 s and one at the end converts, and both cues come through.
+// A stream this sparse is what makes ffmpeg's muxing queue stop a file it would otherwise write.
+func TestRealSparseSubtitlesConvert(t *testing.T) {
+	needTools(t)
+	dir := t.TempDir()
+	srt := filepath.Join(dir, "s.srt")
+	os.WriteFile(srt, []byte("1\n00:00:00,000 --> 00:00:01,000\nAt the start\n\n2\n00:00:04,000 --> 00:00:05,000\nAt the end\n"), 0o644)
+	src := filepath.Join(dir, "sparse.mkv")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=5:size=640x360:rate=25", "-f", "lavfi", "-i", "sine=frequency=440:duration=5",
+		"-i", srt, "-map", "0", "-map", "1", "-map", "2", "-c:v", "mpeg2video", "-b:v", "3000k", "-c:a", "aac", "-c:s", "srt",
+		"-metadata:s:s:0", "language=eng", src)
+	s := rules.DefaultSelectors(3)
+	s.Speed, s.AfterConverting = "faster", "beside"
+	tmpl := s.Template()
+	st, id := realJob(t, src, 5)
+	w := realWorker(st, media.OSExec{})
+	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.run(t)
+	j, _ := st.Get(id)
+	if j.Status != jobs.Done {
+		t.Fatalf("%s %q", j.Status, j.Error)
+	}
+	out := probe(t, j.OutputPath)
+	if subs := out.Subtitles(); len(subs) != 1 || subs[0].Codec != "subrip" || subs[0].Language != "eng" {
+		t.Fatalf("new file %s: %+v", j.OutputPath, out.Streams)
+	}
+	back := filepath.Join(dir, "back.srt")
+	runFFmpeg(t, "-i", j.OutputPath, "-map", "0:s:0", back)
+	b, err := os.ReadFile(back)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "At the start") || !strings.Contains(string(b), "At the end") {
+		t.Errorf("the new file's subtitles lost a cue:\n%s", b)
+	}
+}
+
 // dropSubtitleExec runs real ffmpeg but makes the encode lose the second subtitle track.
 type dropSubtitleExec struct{ media.OSExec }
 

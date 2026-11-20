@@ -2,11 +2,11 @@
 // (#113) with live updates from /api/v2/events (#118/#120/#122), or the sample jobs with ?mock=1. The server lists one
 // tab at a time (Waiting, Running, Done, Skipped, Failed); All and Paused tabs and the codec/step/worker filters come
 // when it has them. Not here yet: the output path (v2 sends it in convertAgain.outputPath; the drawer does not show it).
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, count, elapsed, plural, stepTime } from "../format";
-import { convertDoneAgain, fileJobs, findSkip, getJob, getJobLog, jobAction, listJobs, listKept, restoreKept, type JobLog } from "../jobsApi";
+import { convertDoneAgain, fileJobs, findSkip, getJob, getJobLog, jobAction, listJobs, listKept, restoreKept, type JobLog, type LogStep, type LogVariable } from "../jobsApi";
 import { getWorkflow } from "../workflowApi";
 import { getHealth, getSettings } from "../libraryApi";
 import { onLive } from "../live";
@@ -221,7 +221,7 @@ export function Jobs() {
 const text = (o: string | string[]) => Array.isArray(o) ? o.join("\n") : o;
 // map server step labels to person-facing names (workshop #217: encode, check)
 // The check step is named by what it checked (its found Check line); an older log without one is "Checking the new file".
-const stepLabel = (s: string, found?: string[], scored = false) => s === "check" ? checkLabel(found, scored) : ({ encode: "Converting video", imported: "Older log, not split into steps", replace: "Save the result" } as Record<string, string>)[s] ?? s;
+const stepLabel = (s: string, found?: string[], scored = false) => s === "check" ? checkLabel(found, scored) : ({ encode: "Converting video", imported: "Older log, not split into steps", replace: "Save the result", audio: "Audio", filter: "Filter" } as Record<string, string>)[s] ?? s;
 const checkLabel = (found?: string[], scored = false) => {
   const c = (found ?? []).find((l) => l.startsWith("Check: ")) ?? "";
   return /^Check: picture/.test(c) ? "Checking the picture" : /^Check: playback/.test(c) ? "Checking playback" : /^Check: damage/.test(c) ? "Checking the original for damage" : scored ? "Checking the picture" : "Checking the new file"; // a remote worker records the picture score with no Check: line
@@ -310,14 +310,38 @@ const copyLogText = async (t: string, say: (s: string) => void) => {
   }
   say(ok ? "Log copied." : "Couldn't copy; use Download.");
 };
-// count of q in a step's searchable text (case-insensitive)
-const matches = (st: { name: string; command: string | null; output: string | string[]; result: string | null; found?: string[] }, q: string) => [st.name, st.command ?? "", text(st.output), (st.found ?? []).join("\n"), st.result ?? ""].join("\n").toLowerCase().split(q.toLowerCase()).length - 1;
-// E: a finished job's log by step (GET /log), SCREENS V6b: each step a row that opens; the failed step open; inside a step
-// its command, its source, its picture check, its ffmpeg output (last 200 lines on a failure, the rest by download), its
-// result; the log's last line is the job's final line.
-function StepLog({ d, id, worker, failedIdx, kept }: { d: { loaded: boolean; data?: JobLog; error?: { message: string } }; id: string; worker: string | null; failedIdx: number | null; kept: boolean }) {
-  const keep = useData(getSettings, []), [q, setQ] = useState(""), [copied, setCopied] = useState("");
-  useEffect(() => setCopied(""), [id]);
+// count of q in a string (case-insensitive); a step's searchable text: its name, decision, reason, command, output,
+// check lines, result, warnings, errors and the variables it set
+const countIn = (s: string, q: string) => s.split(q.toLowerCase()).length - 1;
+const stepText = (st: LogStep) => [st.name, st.decision, st.reason, st.command, text(st.output), (st.found ?? []).join("\n"), st.result, ...(st.warnings ?? []), ...(st.errors ?? []), ...(st.set ?? []).map((x) => x.name + " " + (x.value ?? ""))].filter(Boolean).join("\n").toLowerCase();
+const plural1 = (n: number, one: string, many: string) => n + " " + (n === 1 ? one : many);
+const val = (s?: string) => (s ? s : "—");
+const MOVE: Record<string, string> = { move: "Moved", copy: "Copied", chmod: "Changed the permissions of", chown: "Changed the owner of", remove: "Removed", write_sidecar: "Wrote" };
+// the probe summary V6b uses, as one line: "H.264 · 1920×1080 · 23.976 fps · 2 audio · 1:48:12 · 4.0 GB"
+function sourceLine(pr: Probe) {
+  const v = pr.streams?.find((x) => x.type === "video"), n = (t: string) => (pr.streams ?? []).filter((x) => x.type === t).length;
+  const hdr = v?.dolbyVision ? "Dolby Vision" : v?.colorTransfer === "smpte2084" ? "HDR10" : v?.colorTransfer === "arib-std-b67" ? "HLG" : "";
+  return [pr.videoCodec?.toUpperCase().replace("H264", "H.264"), v?.Width && v.Height ? v.Width + "×" + v.Height : "", v?.frameRate ? +v.frameRate.toFixed(3) + " fps" : "", [v?.bitDepth ? v.bitDepth + "-bit" : "", hdr].filter(Boolean).join(" "), n("audio") && n("audio") + " audio", n("subtitle") && n("subtitle") + " subtitles", pr.durationSec ? elapsed(pr.durationSec) : "", pr.sizeBytes ? bytes(pr.sizeBytes) : ""].filter(Boolean).join(" · ");
+}
+// every stream on its own line: "Audio 1 · eng · aac · 2 ch"
+const streamLines = (pr: Probe) => (pr.streams ?? []).map((x, j, all) => [x.type.charAt(0).toUpperCase() + x.type.slice(1) + " " + all.slice(0, j + 1).filter((y) => y.type === x.type).length, x.language ?? "—", x.codec, x.channels ? x.channels + " ch" : ""].filter(Boolean).join(" · "));
+// a variable's value: "Hidden" for a secret; one value when nothing changed it; else the start, the end and the step that set it
+function varValue(v: LogVariable) {
+  if (v.secret) return <span className="muted">Hidden</span>;
+  if (v.changedBy == null) return <><span className="sr">At start and at end: </span>{val(v.end ?? v.start)}</>;
+  return <><span className="pill">Changed</span> <span className="sr">At start: </span>{val(v.start)} <span aria-hidden="true">→</span> <span className="sr">At end: </span><strong>{val(v.end)}</strong><br /><span className="muted">Set by {stepLabel(v.changedBy)}</span></>;
+}
+type Raw = { key: string; id?: string; title: string; head: ReactNode; hits: number; dflt: boolean; show: boolean; body: ReactNode };
+// E: a finished job's log (GET /log), in sections: Start, Variables, Source file, one section per step, Summary. Open by the
+// design's rules (a failed or skipped step, the picture check when the original was kept, the Summary); search opens the
+// sections with a match; "Errors and warnings only" shows just the flagged steps. A job from before full logs had no
+// start, variables or summary: only its steps show, with one line saying so. Running jobs use JobLog.
+function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: boolean; data?: JobLog; error?: { message: string } }; id: string; worker: string | null; failedIdx: number | null; kept: boolean; hasResult: boolean }) {
+  const keep = useData(getSettings, []), [q, setQ] = useState(""), [copied, setCopied] = useState(""), [errOnly, setErrOnly] = useState(false), [only, setOnly] = useState(false), [open, setOpen] = useState<Record<string, boolean>>({});
+  // qOpen: clicks made during the current search; they win while it lasts and are dropped when the query changes
+  const [qOpen, setQOpen] = useState<Record<string, boolean>>({});
+  useEffect(() => { setCopied(""); setOpen({}); }, [id]);
+  useEffect(() => setQOpen({}), [q, id]);
   // a finished job's whole log is on the server (the steps here keep only the last 200 lines of a failure)
   const copyAll = () => MOCK ? copyLogText((d.data?.steps ?? []).map((st) => [st.name, st.command, text(st.output), st.result].filter(Boolean).join("\n")).join("\n"), setCopied)
     : fetch("/api/v2/jobs/" + encodeURIComponent(id) + "/log/download", { credentials: "same-origin" }).then((r) => (r.ok ? r.text() : Promise.reject())).then((t) => copyLogText(t, setCopied), () => setCopied("Couldn't copy; use Download."));
@@ -332,40 +356,91 @@ function StepLog({ d, id, worker, failedIdx, kept }: { d: { loaded: boolean; dat
   };
   // an empty steps array (whatever the state) means the job ran before logs existed: same message as none
   if (!l.steps.length) return <section id="job-log"><h3>Log</h3><p className="sm muted">{note.none}</p></section>;
+  if (note[l.state]) return <section id="job-log"><h3>Log</h3><p className="sm muted">{note[l.state]}</p></section>;
+  const old = l.start == null, when = l.steps.find((s) => s.startedAt)?.startedAt ?? null, pr = l.steps.find((s) => s.probe)?.probe ?? null;
+  const vars = [...(l.variables ?? [])].sort((a, b) => a.name.localeCompare(b.name)), changed = vars.filter((v) => v.changedBy != null);
+  const flagged = (st: LogStep) => (st.warnings?.length ?? 0) + (st.errors?.length ?? 0) > 0;
+  const raw: Raw[] = [];
+  if (!old) {
+    const s = l.start!;
+    raw.push({ key: "start", title: "Start", head: when ? <span className="sm muted">{clock(when)}</span> : null, hits: q ? countIn([s.reason, s.workflow.name, worker ?? ""].join("\n").toLowerCase(), q) : 0, dflt: false, show: !errOnly,
+      body: <><p className="sm">{s.reason}</p><p className="sm">Worker: {worker ?? "—"}</p><p className="sm">Workflow: {s.workflow.name}, revision {s.workflow.revision}</p><p className="sm">App version {s.appVersion}</p></> });
+    raw.push({ key: "variables", title: "Variables", head: changed.length ? <span className="sm muted">{changed.length} changed</span> : null,
+      hits: q ? countIn(vars.map((v) => [v.name, v.start, v.end].join(" ")).join("\n").toLowerCase(), q) : 0, dflt: false, show: !errOnly,
+      body: vars.length === 0 ? <p className="sm muted">No variables were set for this job.</p> : <>
+        <label className="sw"><input type="checkbox" role="switch" className="switch" checked={only} onChange={(e) => setOnly(e.target.checked)} /><span className="sm">Only changed ({changed.length})</span></label>
+        {(only ? changed : vars).map((v) => <dl key={v.name} className="row" style={{ gap: 8, flexWrap: "wrap", borderTop: "1px solid var(--border)", padding: "6px 0", margin: 0 }}>
+          <dt style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}><code className="sm">{"{{" + v.name + "}}"}</code></dt>
+          <dd className="sm" style={{ flex: "1 1 200px", minWidth: 0, margin: 0 }}>{varValue(v)}</dd></dl>)}</> });
+    if (pr) raw.push({ key: "source", title: "Source file", head: null, hits: q ? countIn((sourceLine(pr) + "\n" + streamLines(pr).join("\n")).toLowerCase(), q) : 0, dflt: false, show: !errOnly,
+      body: <><p className="sm">{sourceLine(pr)}</p>{streamLines(pr).map((x, j) => <p className="sm" key={j}>{x}</p>)}</> });
+  }
+  l.steps.forEach((st, i) => {
+    const warn = st.warnings ?? [], errs = st.errors ?? [], hit = q ? countIn(errOnly ? [...warn, ...errs].join("\n").toLowerCase() : stepText(st), q) : 0;
+    const took = st.tookMs != null ? "Took " + stepTime(st.tookMs) : "";
+    const progress = st.speedX != null || st.avgKbps != null ? [took + (st.speedX != null ? (took ? " at " : "") + st.speedX + "× speed" : ""), st.avgKbps != null ? "average " + st.avgKbps.toLocaleString() + " kbps" : ""].filter(Boolean).join(", ") : "";
+    const flags = <>
+      {warn.length > 0 && <div className="stack" style={{ gap: 4 }}>{warn.map((w, j) => <p className="sm" key={j}><Icon id="i-alert" /> Warning: {w}</p>)}</div>}
+      {errs.length > 0 && <div className="stack" style={{ gap: 4 }}>{errs.map((w, j) => <p className="sm" key={j}><Icon id="i-x-c" /> Error: {w}</p>)}</div>}</>;
+    const pill = ["ok", "done", "completed"].includes(st.outcome) ? <span className="pill ok">Done</span> : st.outcome === "failed" ? (kept ? <span className="pill warn">Original kept</span> : <span className="pill bad">Failed</span>) : st.outcome === "skipped" ? <span className="pill">Skipped</span> : null;
+    raw.push({ key: "step-" + i, id: "job-step-" + (i + 1), title: stepLabel(st.name, st.found, st.check != null), hits: hit, dflt: st.outcome === "failed" || st.outcome === "skipped" || i === failedIdx || (kept && st.check != null), show: !errOnly || (flagged(st) && (!q || hit > 0)),
+      head: <>
+        {st.startedAt && st.tookMs != null && <span className="sm muted">{clock(st.startedAt)} · took {stepTime(st.tookMs)}</span>}{pill}
+        {warn.length > 0 && <span className="pill warn">{plural1(warn.length, "warning", "warnings")}</span>}{errs.length > 0 && <span className="pill bad">{plural1(errs.length, "error", "errors")}</span>}
+        {st.outcome === "skipped" && st.decision && <span className="sm muted">{st.decision}</span>}</>,
+      body: errOnly ? flags : <div className="stack" style={{ gap: 6 }}>
+        {(st.decision || st.reason) && <p className="sm">{st.decision} {st.reason && <span className="muted">{st.reason}</span>}</p>}
+        {(st.set ?? []).map((x) => <p className="sm" key={x.name}>Set <code>{"{{" + x.name + "}}"}</code> = {x.value ?? <span className="muted">Hidden</span>}</p>)}
+        {st.command && <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">Command</span><button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(st.command ?? "").catch(() => {})}><Icon id="i-copy" />Copy</button></div>
+          <pre className="joblog sm">{st.command}</pre></div>}
+        {old && st.probe && <p className="sm">Source: {sourceLine(st.probe)}</p>}
+        {progress && <p className="sm">{progress}</p>}
+        {flags}
+        {st.check && <p className="sm">Picture check: score {st.check.score.toFixed(3)}{st.check.min != null ? " (needs " + st.check.min.toFixed(3) + ")" : ""}{st.check.passed != null ? " · " + (st.check.passed ? "passed" : "failed") : ""}</p>}
+        {(st.moves ?? []).map((m, j) => <p className="sm" key={j}>{MOVE[m.action] ?? m.action} <code>{m.from}</code>{m.to && <> to <code>{m.to}</code></>}{!m.ok && <span className="muted"> · {m.error ?? "failed"}</span>}</p>)}
+        {st.outputLines > 0 && <details open={st.outcome === "failed" || st.outcome === "skipped"}><summary className="sm">Show ffmpeg output ({st.outputLines} lines)</summary>
+          {st.outputLines > 200 && <p className="sm"><a href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}>Download all {st.outputLines.toLocaleString()} lines</a></p>}
+          <pre className="joblog sm">{text(st.output)}</pre></details>}
+        {(st.found?.length ?? 0) > 0 && <pre className="joblog sm">{st.found!.join("\n")}</pre>}
+        {st.result && <p className="sm">{st.result}</p>}
+      </div> });
+  });
+  if (!old && l.summary) {
+    const s = l.summary;
+    // the before and after sizes live in the drawer's Result table, so the summary doesn't repeat them
+    raw.push({ key: "summary", title: "Summary", head: null, hits: 0, dflt: true, show: !errOnly, body: <>
+      <p className="sm">Time taken: {stepTime(s.tookMs)}</p>
+      <p className="sm">Worker: {worker ?? "—"}</p>
+      <p className="sm">Result: {WORD[l.final ?? ""] ?? l.final}</p>
+      {hasResult && <p className="sm"><a href="#job-result" onClick={(e) => { e.preventDefault(); document.getElementById("job-result")?.scrollIntoView({ block: "start" }); }}>Before and after: see Result</a></p>}</> });
+  }
+  const secs = raw.map((r) => ({ ...r, open: errOnly || (r.key in qOpen ? qOpen[r.key] : (!!q && r.hits > 0) || (r.key in open ? open[r.key] : r.dflt)) })); // design 04:37Z: search only adds open sections
+  const shown = secs.filter((s) => s.show), anyClosed = shown.some((s) => !s.open);
+  const tot = shown.reduce((n, s) => n + s.hits, 0), ks = shown.filter((s) => s.hits > 0).length; // review2 #455: search and the switch must both match
+  const vis = l.steps.filter((_, i) => shown.some((s) => s.key === "step-" + i)); // review2 #455: count only the sections on screen
+  const E = vis.reduce((n, st) => n + (st.errors?.length ?? 0), 0), W = vis.reduce((n, st) => n + (st.warnings?.length ?? 0), 0), K = vis.filter(flagged).length;
+  const status = [q && (tot ? tot + " matches in " + ks + " step" + (ks > 1 ? "s" : "") : "No match"), errOnly && (E + W ? plural1(E, "error", "errors") + " and " + plural1(W, "warning", "warnings") + " in " + plural1(K, "section", "sections") : !q && "No errors or warnings in this log.")].filter(Boolean).join(" · ");
   return (
     <section id="job-log"><h3>Log</h3>
-      {note[l.state] ? <p className="sm muted">{note[l.state]}</p> : <>
-      {/* V6b Search: every step's command, output and result; the steps with matches open and are counted */}
-      <div className="row" style={{ gap: 6, margin: "8px 0", flexWrap: "wrap" }}>
-        <input className="input sm" type="search" placeholder="Search the log" aria-label="Search the log" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
-        <button className="btn sm ghost" type="button" onClick={copyAll}><Icon id="i-copy" />Copy log</button>
-        {!MOCK && <a className="btn sm" href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}><Icon id="i-download" />Download the full log</a>}
-        {q && <span className="sm muted" role="status">{(() => { const ns = l.steps.map((st) => matches(st, q)), t = ns.reduce((x, y) => x + y, 0), k = ns.filter((x) => x > 0).length; return t ? t + " matches in " + k + " step" + (k > 1 ? "s" : "") : "No match"; })()}</span>}
+      <div className="joblog-tools">
+        <input className="input sm joblog-q" type="search" placeholder="Search the log" aria-label="Search the log" value={q} onChange={(e) => setQ(e.target.value)} />
+        <label className="sw"><input type="checkbox" role="switch" className="switch" checked={errOnly} onChange={(e) => setErrOnly(e.target.checked)} /><span className="sm">Errors and warnings only</span></label>
+        <div className="joblog-end">
+          <button className="btn sm ghost" type="button" onClick={copyAll}><Icon id="i-copy" />Copy log</button>
+          {!MOCK && <a className="btn sm" href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}><Icon id="i-download" />Download the full log</a>}
+          {!errOnly && <button className="btn sm ghost" type="button" onClick={() => { const all = Object.fromEntries(shown.map((s) => [s.key, anyClosed])); setOpen(all); if (q) setQOpen(all); }}>{anyClosed ? "Open all" : "Close all"}</button>}
+        </div>
       </div>
-      <p className="sm muted" role="status" style={{ margin: copied ? "0 0 6px" : 0 }}>{copied}</p>
-      {l.steps.map((st, i) => {
-        const hit = q ? matches(st, q) : 0;
-        const pr = st.probe as Probe | null, v = pr?.streams?.find((x) => x.type === "video"), n = (t: string) => (pr?.streams ?? []).filter((x) => x.type === t).length;
-        const hdr = v?.dolbyVision ? "Dolby Vision" : v?.colorTransfer === "smpte2084" ? "HDR10" : v?.colorTransfer === "arib-std-b67" ? "HLG" : "";
-        const sum = pr && [pr.videoCodec?.toUpperCase().replace("H264", "H.264"), v?.Width && v.Height ? v.Width + "×" + v.Height : "", v?.frameRate ? +v.frameRate.toFixed(3) + " fps" : "", [v?.bitDepth ? v.bitDepth + "-bit" : "", hdr].filter(Boolean).join(" "), n("audio") && n("audio") + " audio", n("subtitle") && n("subtitle") + " subtitles", pr.durationSec ? elapsed(pr.durationSec) : "", pr.sizeBytes ? bytes(pr.sizeBytes) : ""].filter(Boolean).join(" · ");
-        return (
-          <details key={i} id={"job-step-" + (i + 1)} open={q ? hit > 0 : st.outcome !== "ok" || i === failedIdx} className="stepd" style={{ borderTop: "1px solid var(--border)", padding: "8px 0" }}>
-            <summary className="row nw" style={{ gap: 8, flexWrap: "wrap", cursor: "pointer" }}><strong>{stepLabel(st.name, st.found, st.check != null)}</strong>{st.startedAt && st.tookMs != null && <span className="sm muted">{clock(st.startedAt)} · took {stepTime(st.tookMs)}</span>}
-              {["ok", "done", "completed"].includes(st.outcome) ? <span className="pill ok">Done</span> : st.outcome === "failed" ? (kept ? <span className="pill warn">Original kept</span> : <span className="pill bad">Failed</span>) : null}{hit > 0 && <span className="pill">{hit} match{hit > 1 ? "es" : ""}</span>}</summary>
-            <div className="stack" style={{ gap: 6, paddingTop: 6 }}>
-              {st.command && <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">Command</span><button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(st.command ?? "").catch(() => {})}><Icon id="i-copy" />Copy</button></div>
-                <pre className="joblog sm">{st.command}</pre></div>}
-              {sum && <p className="sm">Source: {sum}</p>}
-              {st.check && <p className="sm">Picture check: score {st.check.score.toFixed(3)}{st.check.min != null ? " (needs " + st.check.min.toFixed(3) + ")" : ""}{st.check.passed != null ? " · " + (st.check.passed ? "passed" : "failed") : ""}</p>}
-              {st.outputLines > 0 && <details open={st.outcome !== "ok"}><summary className="sm">Show ffmpeg output ({st.outputLines} lines)</summary>
-                {st.outputLines > 200 && <p className="sm"><a href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}>Download all {st.outputLines.toLocaleString()} lines</a></p>}
-                <pre className="joblog sm">{text(st.output)}</pre></details>}
-              {(st.found?.length ?? 0) > 0 && <pre className="joblog sm">{st.found!.join("\n")}</pre>}
-              {st.result && <p className="sm">{st.result}</p>}
-            </div>
-          </details>);
-      })}
-      {(l.final != null && WORD[l.final]) && <p className="sm" style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>{WORD[l.final]}</p>}</>}
+      <p className="sm muted" role="status" style={{ margin: status ? "0 0 6px" : 0 }}>{status}</p>
+      <p className="sm" role="status" style={{ margin: copied ? "0 0 6px" : 0 }}>{copied}</p>
+      {old && <p className="sm muted">This job ran before full logs were kept, so only its steps are shown.</p>}
+      {shown.map((s) => (
+        <details key={s.key} id={s.id} open={s.open} className="stepd" style={{ borderTop: "1px solid var(--border)", padding: "8px 0" }}
+          onToggle={(e) => { const o = e.currentTarget.open; if (o === s.open) return; setOpen((p) => ({ ...p, [s.key]: o })); if (q) setQOpen((p) => ({ ...p, [s.key]: o })); }}>{/* only the person's clicks are kept, so clearing a search leaves sections as they left them */}
+          <summary className="row nw" style={{ gap: 8, flexWrap: "wrap", cursor: "pointer" }}><strong>{s.title}</strong>{s.head}</summary>
+          <div className="stack" style={{ gap: 6, paddingTop: 6 }}>{s.body}</div>
+        </details>))}
+      {(!l.summary && l.final != null && WORD[l.final]) && <p className="sm" style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>{WORD[l.final]}</p>}
     </section>);
 }
 
@@ -473,6 +548,9 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   const reason = j?.reason?.message ?? (row ? reasonText(row) : "");
   // one fetch of the log for the step list and What the check found; fetched again when the job stops running
   const log = useData(() => (scan || active ? Promise.resolve(null as unknown as JobLog) : getJobLog(id)), [id, scan, active]);
+  // the Result table also takes the log's subtitles and length (contract v2 summary before/after); a row shows only with data
+  const sumS = log.data?.summary, subsRow = !!(sumS?.before?.subtitles || sumS?.after?.subtitles), lenRow = sumS?.before?.durationSec != null || sumS?.after?.durationSec != null;
+  const showResult = !!(before || after || subsRow || lenRow), lenText = (x?: { durationSec?: number }) => (x?.durationSec != null ? elapsed(x.durationSec) : "—");
   const found = (log.data?.steps ?? []).filter((st) => (st.found?.length ?? 0) > 0);
   const kept0 = !!state && keptOrig({ state, reason: j?.reason ?? own?.reason });
   return (
@@ -531,13 +609,15 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {/* review db7b1f1 P2: the scan sentence only for a file a scan left out; a cancelled file whose job the server
               doesn't send yet claims nothing about scans or steps */}
           {scan && <section><h3>Timeline</h3><p className="muted">{state === "cancelled" ? "Cancelled." : "This file was left out when its library was scanned, so it has no job and no steps."}</p></section>}
-          {!scan && (active ? <JobLog id={id} name={name} /> : <StepLog d={log} id={id} worker={j?.worker ?? null} failedIdx={j?.failure?.stepIndex ?? null} kept={kept0} />)}
+          {!scan && (active ? <JobLog id={id} name={name} /> : <StepLog d={log} id={id} worker={j?.worker ?? null} failedIdx={j?.failure?.stepIndex ?? null} kept={kept0} hasResult={showResult} />)}
           {/* #148: before is the original; null for an older job that replaced a file of the same name: said so, never blank */}
-          {(before || after) && <section><h3>Result</h3><table className="tbl kvt"><thead><tr><th /><th>Before</th><th>After</th></tr></thead><tbody>
-            <tr><th>Video</th>{before ? <td>{before.video}</td> : <td rowSpan={4} className="muted">Not recorded for this job</td>}<td>{after?.video ?? "—"}</td></tr>
+          {showResult && <section id="job-result"><h3>Result</h3><table className="tbl kvt"><thead><tr><th /><th>Before</th><th>After</th></tr></thead><tbody>
+            <tr><th>Video</th>{before ? <td>{before.video}</td> : <td rowSpan={4 + (subsRow ? 1 : 0) + (lenRow ? 1 : 0)} className="muted">Not recorded for this job</td>}<td>{after?.video ?? "—"}</td></tr>
             <tr><th>Audio</th>{before && <td>{before.audio}</td>}<td>{after?.audio ?? "—"}</td></tr>
             <tr><th>Bitrate</th>{before && <td>{before.bitrate}</td>}<td>{after?.bitrate ?? "—"}</td></tr>
-            <tr><th>Size</th>{before && <td>{before.size}</td>}<td>{after?.size ?? "—"}</td></tr></tbody></table></section>}
+            <tr><th>Size</th>{before && <td>{before.size}</td>}<td>{after?.size ?? "—"}</td></tr>{subsRow && <tr><th>Subtitles</th>{before && <td>{sumS?.before?.subtitles ?? "—"}</td>}<td>{sumS?.after?.subtitles ?? "—"}</td></tr>}{lenRow && <tr><th>Length</th>{before && <td>{lenText(sumS?.before)}</td>}<td>{lenText(sumS?.after)}</td></tr>}</tbody></table></section>}
+          {/* a done job's .srt files saved beside the new file: one line, then each name; no field, no line */}
+          {state === "completed" && !!j?.subtitleFiles?.length && <section><h3>Subtitles saved as files</h3>{j.subtitleFiles.map((n) => <div key={n} style={{ overflowWrap: "anywhere" }}><code>{n}</code></div>)}</section>}
         </div>
       </aside>
     </div>

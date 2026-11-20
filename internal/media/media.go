@@ -200,7 +200,9 @@ type Info struct {
 // 2 (S3): the first frame's HDR side data, the Dolby Vision profile and tag, mastering display and CLL.
 // 3 (review 7ab8f72): the Dolby Vision compatibility id (DVCompat).
 // 4 (the S3/#81 merge): the Display Matrix rotation too (probes cached by an S3 build lack it).
-const ProbeVersion = 4
+// 5 (#450): the hearing_impaired disposition, so SDH .srt files are named .sdh on upgraded installs too.
+// 6 (R5): the headline codec and bitrate are the main picture's, not a cover image's.
+const ProbeVersion = 6
 
 // Probe runs ffprobe on path. For a video that may carry HDR or Dolby Vision (HEVC, AV1, or PQ/HLG) it
 // also reads the main video's first frame: in TS files and raw streams, the Dolby Vision RPU, the
@@ -337,21 +339,23 @@ func ParseProbe(data []byte) (Info, error) {
 	for i, raw := range p.Streams {
 		info.Streams = append(info.Streams, parseStream(raw, i))
 	}
-	found := false
-	streamRate := 0
-	// The headline codec/bitrate come from the first video stream in the file, exactly as before
-	// the per-stream model existed (so nothing that is converted today changes).
-	for i, st := range info.Streams {
-		if st.Type == "video" {
-			info.VideoCodec = st.Codec
-			streamRate = int(num(p.Streams[i], "bit_rate"))
-			found = true
-			break
+	// The headline codec and bitrate are the main picture's, not cover art's (R5): a cover image is a
+	// video stream with attached_pic, and judging a file by it said "mjpeg / no bitrate". A file whose
+	// only video stream is a cover keeps the first video stream's reading: there is no main picture.
+	main := info.MainVideoIndex()
+	if main < 0 {
+		for i, st := range info.Streams {
+			if st.Type == "video" {
+				main = i
+				break
+			}
 		}
 	}
-	if !found {
+	if main < 0 {
 		return Info{}, fmt.Errorf("no video stream")
 	}
+	info.VideoCodec = info.Streams[main].Codec
+	streamRate := int(num(p.Streams[main], "bit_rate"))
 	info.DurationSec, _ = strconv.ParseFloat(p.Format.Duration, 64)
 	info.SizeBytes, _ = strconv.ParseInt(p.Format.Size, 10, 64)
 	// Prefer the video stream's own bitrate; fall back to the whole file's.
@@ -392,6 +396,7 @@ type Progress struct {
 	BitrateKbps float64
 	Speed       float64
 	ETASeconds  float64
+	TotalSize   int64 // bytes of the new file written so far (total_size=); 0 when ffmpeg says N/A
 }
 
 // Transcode runs ffmpeg and reports each progress point through onProgress (on every out_time_us line,
@@ -414,6 +419,8 @@ func Transcode(ctx context.Context, x Exec, ffmpeg string, args []string, durati
 			p.BitrateKbps, _ = strconv.ParseFloat(strings.TrimSuffix(v, "kbits/s"), 64)
 		case "speed": // "1.25x", or "N/A"
 			p.Speed, _ = strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(v, "x")), 64)
+		case "total_size": // "123456", or "N/A": the bytes of the new file ffmpeg has written so far
+			p.TotalSize, _ = strconv.ParseInt(strings.TrimSpace(v), 10, 64)
 		}
 		if k != "out_time_us" {
 			return
