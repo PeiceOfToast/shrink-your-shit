@@ -212,7 +212,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
       </div>);
   }
   if (n.type === "output.commit") {
-    const policy = (c.policy as string) ?? "separate_folder", mode = (c.folderMode as string) ?? "next_to_library";
+    const policy = (c.policy as string) ?? "separate_folder", mode = (c.folderMode as string) ?? "next_to_library", bigger = (c.ifBigger as string) ?? "replace"; // an absent ifBigger reads as replace (preset.go)
     return (
       <div className="stack">
         <fieldset className="field choice stack"><legend className="lab">Save the result</legend>
@@ -229,6 +229,9 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
           {mode === "next_to_library" && libs.length > 0 && <ul className="mono sm" style={{ listStyle: "none", margin: "6px 0 0", padding: 0 }} aria-label="Where each library's new files go">
             {libs.map((p) => <li key={p} style={{ overflowWrap: "anywhere" }}>{p} → {shrunk(p)}</li>)}</ul>}</fieldset>)}
         {policy === "separate_folder" && mode === "one_folder" && <>{field("folder")}<div className="row"><Browse value={String(c.folder ?? "")} onPick={(p) => set("folder", p)} /></div>{problem("/folder")}</>}
+        {props.ifBigger && <fieldset className="field choice"><legend className="lab">{(props.ifBigger.title as string) ?? "If bigger"}</legend><div className="row">
+          {labels(props.ifBigger).map(([v, l]) => <label key={String(v)} className="radio"><input type="radio" name={n.id + "-bigger"} checked={bigger === v} onChange={() => set("ifBigger", v)} /><span>{l}</span></label>)}
+        </div><Hint text={hintFor(props.ifBigger, bigger)} /></fieldset>}
       </div>);
   }
   return (
