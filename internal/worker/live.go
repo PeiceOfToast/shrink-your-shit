@@ -25,7 +25,8 @@ type LiveJob struct {
 	Progress     media.Progress
 	// ProjectedSize is the size the new file is heading for, from the bytes written so far and how
 	// far the encode is (smoothed over the last samples): the Dashboard's saving estimate. 0 while
-	// the encode is too early in, or when ffmpeg doesn't say the size (a remote worker).
+	// the encode is too early in or the new file too small (see minEstimatePercent and
+	// minEstimateBytes), and when ffmpeg doesn't say the size (a remote worker).
 	ProjectedSize int64
 	projected     []float64 // the last raw projections, newest last: the average is ProjectedSize
 }
@@ -45,6 +46,12 @@ func setLive(id int64, j LiveJob) {
 // rest of the new file that projecting from them is noise.
 const minEstimatePercent = 3
 
+// minEstimateBytes: matroska writes in ~512 KiB clusters and its index at the end, so a small new
+// file lags behind the encode by a share of its own size; projecting from it would claim far too
+// much saved (QA #459: 99% claimed on a file that saved 16%). From 16 MiB, that lag is a few
+// percent, and a smaller new file only ever falls back to the library's ratio.
+const minEstimateBytes = 16 << 20
+
 func updateLive(id int64, p media.Progress) {
 	live.Lock()
 	defer live.Unlock()
@@ -53,7 +60,7 @@ func updateLive(id int64, p media.Progress) {
 		return
 	}
 	j.Progress = p
-	if p.Percent >= minEstimatePercent && p.TotalSize > 0 {
+	if p.Percent >= minEstimatePercent && p.TotalSize >= minEstimateBytes {
 		// what the new file would weigh if the rest goes as this much has
 		j.projected = append(j.projected, float64(p.TotalSize)*100/p.Percent)
 		if len(j.projected) > 5 {

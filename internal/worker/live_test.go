@@ -9,7 +9,8 @@ import (
 
 // The Dashboard's saving estimate: a running encode's projected output size is the bytes written so far
 // and how far in the encode is, averaged over its last samples so it doesn't jump; nothing before 3%,
-// and nothing when ffmpeg doesn't say the size (a remote worker's report has none).
+// nothing while the new file is under 16 MiB (the muxer's lag would inflate the saving, QA #459), and
+// nothing when ffmpeg doesn't say the size (a remote worker's report has none).
 func TestLiveProjectsTheNewFilesSize(t *testing.T) {
 	const id = int64(12345)
 	SetLiveForTest(id, LiveJob{})
@@ -19,20 +20,24 @@ func TestLiveProjectsTheNewFilesSize(t *testing.T) {
 	if p := projected(); p != 0 {
 		t.Errorf("1%% in: projected %d, want none", p)
 	}
-	updateLive(id, media.Progress{Percent: 10, TotalSize: 10 << 20}) // 10 MiB at 10%: 100 MiB
-	if p := projected(); p != 100<<20 {
-		t.Errorf("10%%: projected %d, want %d", p, int64(100<<20))
+	updateLive(id, media.Progress{Percent: 20, TotalSize: 10 << 20}) // under 16 MiB: the muxer lags
+	if p := projected(); p != 0 {
+		t.Errorf("a small new file: projected %d, want none", p)
 	}
-	updateLive(id, media.Progress{Percent: 20, TotalSize: 30 << 20}) // 30 MiB at 20%: 150 MiB; the average of the two is 125
-	if p := projected(); p != 125<<20 {
-		t.Errorf("20%%: projected %d, want %d (smoothed)", p, int64(125<<20))
+	updateLive(id, media.Progress{Percent: 20, TotalSize: 20 << 20}) // 20 MiB at 20%: 100 MiB
+	if p := projected(); p != 100<<20 {
+		t.Errorf("20%%: projected %d, want %d", p, int64(100<<20))
+	}
+	updateLive(id, media.Progress{Percent: 25, TotalSize: 30 << 20}) // 30 MiB at 25%: 120 MiB; the average of the two is 110
+	if p := projected(); p != 110<<20 {
+		t.Errorf("25%%: projected %d, want %d (smoothed)", p, int64(110<<20))
 	}
 	updateLive(id, media.Progress{Percent: 30, TotalSize: 0}) // total_size=N/A: the last answer stands
-	if p := projected(); p != 125<<20 {
+	if p := projected(); p != 110<<20 {
 		t.Errorf("no size: projected %d, want the last answer", p)
 	}
 	updateLive(id, media.Progress{Percent: 0, TotalSize: 0})
-	if j, _ := Live(id); j.ProjectedSize != 125<<20 || j.Progress.Percent != 0 {
+	if j, _ := Live(id); j.ProjectedSize != 110<<20 || j.Progress.Percent != 0 {
 		t.Errorf("a report with no percent leaves the estimate: %+v", j)
 	}
 }

@@ -238,7 +238,7 @@ func expectedSaving(store *jobs.Store, j jobs.Working, l worker.LiveJob) (any, b
 	if !ok {
 		return nil, false, nil
 	}
-	// a new file bigger than its original is a negative saving: said plainly ("may get bigger")
+	// a new file bigger than its original is a negative saving: the new file is coming out bigger
 	return j.SizeBefore - out, true, nil
 }
 
