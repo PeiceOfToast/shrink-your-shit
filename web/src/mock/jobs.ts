@@ -130,7 +130,7 @@ function mockJobLogRaw(id: string): JobLog | { error: { code: string; message: s
   const failed = j.state === "failed";
   const f48190 = id === "48190", f48191 = id === "48191";
   const out = f48190 ? ["[hevc @ 0x55d1] Error while decoding stream #0:0: Invalid data found when processing input", "Conversion failed!"] : [];
-  const step = (name: string, outcome: string, extra: Record<string, unknown>) => ({ name, startedAt: at(300), tookMs: outcome === "ok" ? 120000 : outcome === "failed" && f48191 ? 0 : 252000, outcome, command: null, probe: null, check: null, outputLines: 0, output: [], result: outcome === "ok" ? "Done" : "Failed", ...extra });
+  const step = (name: string, outcome: string, extra: Record<string, unknown>) => ({ name, startedAt: at(300), tookMs: outcome === "ok" ? 120000 : outcome === "failed" && f48191 ? 0 : 252000, outcome, command: null, probe: null, check: null, outputLines: 0, output: [], result: outcome === "ok" ? "Done" : "Failed", found: [], ...extra });
   const conv: Record<string, unknown> = f48191 ? {} : { command: "ffmpeg -i in.mkv -c:v libx265 -crf 23 out.mkv", probe: { videoCodec: "h264", bitrateKbps: 12109, durationSec: 7200, sizeBytes: j.file?.bytes ?? 0, streams: [{ index: 0, type: "video", codec: "h264", Width: 1920, Height: 1080 }] }, check: failed ? { score: 0.912, min: 0.95, passed: false } : { score: 0.973, min: 0.95, passed: true }, outputLines: f48190 ? 2 : 184, output: out };
   if (id === "no-log") return { state: "none", steps: [], final: null };
   if (id === "old-log-imported") {
