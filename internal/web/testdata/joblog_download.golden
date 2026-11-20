@@ -11,6 +11,15 @@ Times:    UTC
 == Source file ==
 05:00:01.250  INFO   Size: 4,012,345,678 bytes (3.7 GiB)
 
+== Step 1: Convert video ==
+05:00:01.500  INFO   Convert video: H.264 becomes HEVC at CRF 23.
+
+== Step 2: Audio ==
+05:00:01.600  INFO   Keep 2 tracks as they are.
+
+== Step 3: Audio (2) ==
+05:00:01.700  INFO   Convert 1 to AAC.
+
 == Encode ==
 05:00:02.000  INFO   Encode started
 05:01:10.500         | frame= 100 fps=25

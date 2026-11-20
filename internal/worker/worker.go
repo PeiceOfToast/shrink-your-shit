@@ -85,6 +85,8 @@ type Queue interface {
 	AddStep(id int64, step string, ok bool, words string) error
 	// PutProbe stores a file's probe (JSON) for its size and time: the new file's, for the Files view.
 	PutProbe(path string, size, mtime int64, info string) error
+	// RecordJobStats stores the running job's run counters (the L2 summary's passes and bytesWritten).
+	RecordJobStats(id int64, passes int, bytesWritten int64) error
 }
 
 // OutputMode says what happens to the result.
@@ -176,6 +178,9 @@ type Worker struct {
 	cancelJob  context.CancelFunc // stops only the running job
 	stopped    stopKind           // why the running job was stopped (stopNone: it was not)
 	progressAt atomic.Int64       // UnixNano of the running encode's last progress (stall watchdog)
+	// the running job's run counters (log-spec L2 summary): the ffmpeg runs it needed and the bytes it wrote.
+	passes, bytesWritten atomic.Int64
+	statsCounting        atomic.Bool // false: this job's counters are not recorded (a remote job, whose runs are not all here)
 	// Sidecars records .srt files before they are put beside a new file (slice 25b); nil: not recorded
 	// (they are still only removed while they are ours).
 	Sidecars SidecarJournal
@@ -193,6 +198,10 @@ const (
 
 // DefaultStallAfter is how long an encode may go without progress before the watchdog stops it.
 const DefaultStallAfter = 10 * time.Minute
+
+// stallWarnAfter is how long the media position may stay put before the job log warns about it (log-spec R9);
+// the job itself is stopped only at StallAfter (ten minutes by default).
+const stallWarnAfter = 30 * time.Second
 
 // RequeueJob stops job id if this worker is running it and puts it back in the queue, as a pause does:
 // the original is left untouched and the temp files removed (its library is being removed, which then
@@ -293,7 +302,9 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 		go w.renewLease(job.ID, lease, renewDone) // V7a: kept while it works, the probe and the checks too
 	}
 	w.startLines(job)
-	defer w.summaryLine(job.ID) // the job's last line: its verdict, once its outcome is recorded
+	w.resetStats(w.remote != nil) // this job's run counters (log-spec L2 summary)
+	defer w.recordStats(job.ID)   // and stored once its outcome is recorded
+	defer w.summaryLine(job.ID)   // the job's last line: its verdict, once its outcome is recorded
 	w.jobf(job.ID, ": started")
 	// a new attempt: an earlier attempt's failure summary is not this one's (a kept attempt would show it)
 	if err := w.Queue.ClearFailureSummary(job.ID); err != nil {
@@ -830,6 +841,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		if again != nil {
 			return "", againLeftAlone()
 		}
+		w.writeStepSections(job.ID, []rules.StepDecision{{Label: rules.StepLeftAlone, Outcome: "skipped", Decision: words}})
 		return "", &SkippedError{Words: words, Code: code}
 	}
 	// Any skip of the Plan made now (the flow changed since the job was queued: an HDR file with a
@@ -840,6 +852,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		return "", againLeftAlone()
 	}
 	if plan.Skip != "" {
+		w.writeStepSections(job.ID, plan.Steps) // the step that left it alone still says so (L2, R4)
 		code := plan.SkipCode
 		if code == "" {
 			code = rules.SkipSettingCannotRun
@@ -849,25 +862,36 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if plan.Video.Codec == "" {
 		return "", failed("This library's setting can't convert this file, so it was left as it is.", fmt.Errorf("its library's flow cannot convert it: %s", plan.Skip))
 	}
+	// The workflow's own decisions, one section per step, before the encode (L2, log-spec R3/R4). A step
+	// that did nothing still has its section. The notes below are the steps' further words, so they go
+	// there too; a note whose step the flow does not have (a legacy flow has video only) goes to encode.
+	stepSec := w.writeStepSections(job.ID, plan.Steps)
+	stepNote := func(label, text string) {
+		sec := stepSec[label]
+		if sec == "" {
+			sec = secEncode
+		}
+		w.jobNote(job.ID, sec, jobs.LevelInfo, "(%s): %s", job.Path, text)
+	}
 	// What the conversion will do, logged only now that it runs (review 48f07eb: a skipped Plan
 	// converts nothing, so its notes would be untrue).
 	if plan.MainAudioUsed { // Basic's stereo AAC found no track in the person's languages (S4)
-		w.jobf(job.ID, " (%s): %s", job.Path, rules.NoAudioInMyLanguageMain)
+		stepNote(rules.StepAudio, rules.NoAudioInMyLanguageMain)
 	}
 	if plan.TypeNote != "" { // "keep" made this MP4 an MKV (review 4ac9c0d)
-		w.jobf(job.ID, " (%s): %s", job.Path, plan.TypeNote)
+		stepNote(rules.StepFileType, plan.TypeNote)
 	}
 	if plan.SmallKept { // design, 02:26Z: once per file
-		w.jobf(job.ID, " (%s): %s", job.Path, rules.SmallKeptNote)
+		stepNote(rules.StepAudio, rules.SmallKeptNote)
 	}
 	if plan.AudioFolded { // design, 01:52Z: once per file
-		w.jobf(job.ID, " (%s): %s", job.Path, rules.FoldedNote)
+		stepNote(rules.StepAudio, rules.FoldedNote)
 	}
 	if plan.StyledSubsPlain { // design, 02:49Z: once per file
-		w.jobf(job.ID, " (%s): %s", job.Path, rules.StyledSubsNote)
+		stepNote(rules.StepSubtitles, rules.StyledSubsNote)
 	}
 	if plan.HDRNote != "" { // what the HDR conversion does not keep (S3)
-		w.jobf(job.ID, " (%s): %s", job.Path, plan.HDRNote)
+		stepNote(rules.StepConvertVideo, plan.HDRNote)
 	}
 	exp := plan.Expect(src, expectedPackets(src, packets))
 	if exp.DurationSec <= 0 {
@@ -1291,6 +1315,7 @@ func (w *Worker) installSubtitles(plan rules.Plan, jobID int64, tmp, final strin
 		if err != nil {
 			return nil, err
 		}
+		w.addBytes(st.Size())      // a .srt file the job wrote is bytes written too (L2)
 		h, err := fullHash(staged) // .srt files are small: their whole content identifies them
 		if err != nil {
 			return nil, err
@@ -1936,16 +1961,31 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 	var encErr string
 	var terr error
 	frames := int64(-1) // the last frame count ffmpeg reported
+	wrote := int64(0)   // the most bytes it reported writing in this attempt (the run counters, L2)
 	stopWatch := w.watchStall(job.ID)
 	var tenths progressLines
-	at := -1.0 // the furthest position ffmpeg has reached
+	at := -1.0       // the furthest position ffmpeg has reached
+	moved := w.now() // when it last moved (a warning says so after stallWarnAfter, R9)
+	stalled := false // the warning has been written; one line says when it moves again
 	encErr, terr = media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
 		frames = p.Frame
+		if p.TotalSize > wrote {
+			wrote = p.TotalSize
+		}
 		// only a position further on is progress: a stuck ffmpeg can keep reporting the same one (a
 		// damaged file, 21 min on a test run, never stopped), which mustn't hold off the stall stop
 		if p.OutTimeUS > at {
 			at = p.OutTimeUS
 			w.progressAt.Store(time.Now().UnixNano())
+			moved = w.now()
+			if stalled { // R9: the log says it is moving again
+				stalled = false
+				w.logLine(job.ID, secEncode, jobs.LevelInfo, "The conversion is moving again.")
+			}
+		} else if !stalled && w.now().Sub(moved) >= stallWarnAfter { // R9: frozen media time, an ordinary warning
+			stalled = true
+			w.logLine(job.ID, secEncode, jobs.LevelWarning,
+				fmt.Sprintf("The conversion has not moved for %s: ffmpeg may be stuck, or the file may be slow to read.", stallWarnAfter))
 		}
 		if job.DurationSec <= 0 {
 			return // no length: no percent to show
@@ -1957,5 +1997,7 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 		}
 	})
 	stopWatch()
+	w.addPass()       // an ffmpeg run the job needed, whatever came of it (a retry is another)
+	w.addBytes(wrote) // what this attempt wrote
 	return encErr, frames, terr
 }

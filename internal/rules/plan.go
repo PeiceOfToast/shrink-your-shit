@@ -29,6 +29,9 @@ type Plan struct {
 	// check's answer in words. Empty for a straight workflow (its Plans and fingerprints are unchanged).
 	Path      []string   `json:"path,omitempty"`
 	Decisions []Decision `json:"decisions,omitempty"`
+	// Steps are the workflow's own decisions for this file, in run order (L2): one per step, the job log's
+	// step sections. Empty for flows that cannot say (see withStepDecisions).
+	Steps []StepDecision `json:"steps,omitempty"`
 	// OnFailure: a workflow path's failure policies (V6b); nil for a straight workflow.
 	OnFailure     *Failures `json:"onFailure,omitempty"`
 	FolderMode    string    `json:"folderMode,omitempty"`    // "next_to_library" (V5a): the library's own folder instead of OutputDir
@@ -134,11 +137,11 @@ func (h HDR) x265Params() string {
 
 // Compile makes the Plan for one file. Skip says whether it should be converted (the scanner's
 // decision); Video, Output and the thresholds say how. A template that cannot run yields a Plan
-// with Skip set and no Video codec.
-func (t Template) Compile(info media.Info) Plan {
+// with Skip set and no Video codec, and every Plan ends with its Steps (steps.go).
+func (t Template) Compile(info media.Info) (p Plan) {
+	defer func() { p = withStepDecisions(p, info) }()
 	if t.Branches != nil { // V6a: the path the file's answers lead down
 		b, ds, ok := route(*t.Branches, info)
-		var p Plan
 		switch {
 		case !ok:
 			p = Plan{Kind: KindBranches, Skip: "no path of its workflow fits it", SkipCode: SkipSettingCannotRun}
@@ -149,10 +152,13 @@ func (t Template) Compile(info media.Info) Plan {
 			then.Languages = t.Languages
 			p = then.Compile(info)
 		}
+		if len(p.Steps) > 0 && ok && b.Then != nil { // the checks' answers came before the path's own steps
+			p.Steps = append(checkSteps(ds), p.Steps...)
+		}
 		p.Path, p.Decisions, p.OnFailure = b.Path, ds, b.OnFailure
 		return p
 	}
-	p := Plan{Kind: t.Kind, CompilerVersion: t.CompilerVersion}
+	p = Plan{Kind: t.Kind, CompilerVersion: t.CompilerVersion}
 	var r Rule
 	switch t.Kind {
 	case KindLegacy:
@@ -643,6 +649,7 @@ type Verification struct {
 func (s Snapshot) Fingerprint() string {
 	p := s.Plan
 	p.Skip, p.SkipCode, p.Reason = "", "", ""
+	p.Steps = nil // the log's words about this one file, not a setting: see Fingerprint's comment
 	b, _ := json.Marshal(struct {
 		Plan                          Plan
 		Verify                        Verification

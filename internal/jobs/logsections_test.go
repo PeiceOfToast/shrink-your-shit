@@ -27,9 +27,26 @@ func TestCleanLogTextCutsLongLines(t *testing.T) {
 	if !strings.HasSuffix(got, "… (cut, 5000 chars)") {
 		t.Fatalf("no cut note at the end: %q", got[len(got)-40:])
 	}
-	exact := strings.Repeat("a", 2000)
+	exact := strings.Repeat("é", 2000) // not base64, so only the length is at stake
 	if CleanLogText(exact) != exact {
 		t.Fatal("a line of exactly 2,000 characters must not be cut")
+	}
+}
+
+// log-spec R13: no picture or other blob in the log. A run of 200+ base64 characters is replaced by a note
+// saying how much was left out; a path or a command line, where a dot or a space breaks the run, is kept.
+func TestCleanLogTextLeavesOutBase64(t *testing.T) {
+	blob := strings.Repeat("QUJDREVGR0hJSktMTU5PUA+/", 20) // 480 base64 characters
+	got := CleanLogText("data:image/png;base64," + blob + " (a thumbnail)")
+	if strings.Contains(got, "QUJD") {
+		t.Fatalf("the blob is still there: %q", got)
+	}
+	if !strings.Contains(got, "… (base64 data, 480 chars)") {
+		t.Fatalf("no note where the blob was: %q", got)
+	}
+	path := "/media/movies/Some very long film (2026) - 2160p HDR/Some very long film (2026) - 2160p HDR.mkv"
+	if CleanLogText(path) != path {
+		t.Fatalf("a path was changed: %q", CleanLogText(path))
 	}
 }
 

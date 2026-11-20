@@ -4,6 +4,7 @@ package worker
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"runtime"
 	"strings"
@@ -30,6 +31,38 @@ func (w *Worker) logLine(id int64, section, level, text string) {
 	if w.Queue != nil {
 		w.Queue.AppendLogLine(id, 0, section, level, "app", text)
 	}
+}
+
+// jobNote writes one of the worker's notes about job id to the program's log and to the job's log in section.
+func (w *Worker) jobNote(id int64, section, level, format string, a ...any) {
+	msg := fmt.Sprintf(format, a...)
+	log.Printf("worker %s: job %d: %s", w.ID, id, msg)
+	w.logLine(id, section, level, msg)
+}
+
+// stepSectionName is a workflow step's log section ("Step 2: Audio"): "step:<n>:<label>", n from 1. The web
+// reads the number and label back from it (v2logdownload.go).
+func stepSectionName(n int, label string) string { return fmt.Sprintf("step:%d:%s", n, label) }
+
+// writeStepSections writes the plan's decisions as the log's step sections, in run order, and returns each
+// step label's section (the first, if a label repeats). Two steps with one name are numbered (R12): the second
+// is "Audio (2)".
+func (w *Worker) writeStepSections(id int64, steps []rules.StepDecision) map[string]string {
+	sections := map[string]string{}
+	seen := map[string]int{}
+	for i, st := range steps {
+		label := st.Label
+		seen[st.Label]++
+		if n := seen[st.Label]; n > 1 {
+			label = fmt.Sprintf("%s (%d)", st.Label, n)
+		}
+		sec := stepSectionName(i+1, label)
+		if _, ok := sections[st.Label]; !ok {
+			sections[st.Label] = sec
+		}
+		w.logLine(id, sec, jobs.LevelInfo, st.Decision)
+	}
+	return sections
 }
 
 // section is the section the worker's own lines of the running job go to. Read from the watchers' goroutines too.
@@ -154,6 +187,48 @@ func bitrateText(kbps int) string {
 		return fmt.Sprintf("%.1f Mbps", float64(kbps)/1000)
 	}
 	return fmt.Sprintf("%d kbps", kbps)
+}
+
+// resetStats starts a job's run counters (the L2 summary's passes and bytesWritten). A job on another computer
+// counts nothing here: its runs are not all on this one, so its summary reads them as null.
+func (w *Worker) resetStats(remote bool) {
+	w.passes.Store(0)
+	w.bytesWritten.Store(0)
+	w.statsCounting.Store(!remote)
+}
+
+// addPass counts one ffmpeg run of the running job: its encode, a retry, a check.
+func (w *Worker) addPass() {
+	if w.statsCounting.Load() {
+		w.passes.Add(1)
+	}
+}
+
+// addBytes counts bytes the running job wrote: a temp file's, the final one's, a .srt file's.
+func (w *Worker) addBytes(n int64) {
+	if n > 0 && w.statsCounting.Load() {
+		w.bytesWritten.Add(n)
+	}
+}
+
+// recordStats stores the running job's counters once its outcome is recorded; a job that gave its lease back
+// (another worker has it) records nothing.
+func (w *Worker) recordStats(id int64) {
+	if !w.statsCounting.Load() || w.Queue == nil {
+		return
+	}
+	j, err := w.Queue.Get(id)
+	if err != nil {
+		return
+	}
+	switch j.Status {
+	case jobs.Done, jobs.Failed, jobs.Kept:
+	default:
+		return
+	}
+	if err := w.Queue.RecordJobStats(id, int(w.passes.Load()), w.bytesWritten.Load()); err != nil {
+		log.Printf("worker %s: job %d: recording its run counters: %v", w.ID, id, err)
+	}
 }
 
 // summaryLine writes the job's last line: its verdict in words, the same verdict as summary.result (R1). A job
