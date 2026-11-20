@@ -14,6 +14,7 @@ Contents:
 5. [Migration plan](#5-migration-plan)
 6. [What not to rewrite](#6-what-not-to-rewrite)
 7. [What the test matrix should show](#7-what-the-test-matrix-should-show)
+8. [Corrections](#8-corrections)
 
 ---
 
@@ -218,19 +219,26 @@ rule like 10-bit, becomes one edit.
   revision the job was queued under. `jobs.workflow_rev` is re-stamped to the current revision on restart
   (`internal/jobs/jobs.go:435`) and on Convert again (`internal/jobs/again.go:163`), so it records the
   revision that *ran*, mostly; it is read only by Convert again and the log (`internal/jobs/again.go:100,227`).
-- **Some probe readers ignore the file version.** The probe cache is keyed by path, size and mtime
-  (`jobs.go:198-205`), but after a replace, the new file's probe is stored under the same path as the
-  original's (`worker.go:486-488`), and `LatestProbe` returns the newest row for a path whatever its size
-  and time (`jobs.go:503-508`). This is intended for the Files view, but a reader that wants the
-  *original's* facts can get the output's.
+- **Some probe readers show a probe for a different version of the file.** The probe cache has one row
+  per path: `path` is the primary key (`internal/jobs/migrate.go:84`) and `PutProbe` replaces the row
+  (`jobs.go:205`). After an in-place replace, the new file's probe overwrites the original's
+  (`worker.go:486-488`). `LatestProbe` (`jobs.go:504`) returns that row without checking that its size
+  matches the file being described, so a restored original can show the new file's facts.
 - **Sizes**: `size_before` is taken at scan time (`scanner.go:365`) and never updated; the swap records
   `original_bytes` separately (`internal/worker/keep.go:151`); `size_after` becomes 0 if the final file
-  can't be stat'ed (`worker.go:481-484`), which silently drops the job out of the totals.
-- **Totals** are summed by the same SQL in three places (`internal/jobs/activity.go:26`, `internal/jobs/libraries.go:574`,
-  `internal/jobs/overview.go:158`) and cached for up to about a minute (`internal/web/v2overview.go:269,354`).
+  can't be stat'ed after the replace (`worker.go:481-484`), which silently drops the job out of the
+  totals, though the size measured before the move is still known.
+- **Totals**: the three screens (`internal/jobs/activity.go:26`, `internal/jobs/libraries.go:574`,
+  `internal/jobs/overview.go:158`) already share one set of expressions (`internal/jobs/freed.go:40-56`) and
+  are cached for up to about a minute (`internal/web/v2overview.go:269,354`). Two other totals write their
+  own arithmetic: the notification batch (`internal/jobs/notify.go:70`) doesn't clamp at 0 or keep only the
+  newest conversion of a file, and the hourly throughput (`internal/jobs/workflows.go:770`) counts the whole
+  original when `size_after` is 0.
 - **Bulk state changes skip the state machine**: `RequeueRunning` (`jobs.go:431-440`), Convert again
   (`internal/jobs/again.go:163`) and others update `status` directly instead of through `transition`
-  (`jobs.go:291`).
+  (`jobs.go:291`). The `events_job_status` trigger (`internal/jobs/migrate.go:309`) still records every
+  change; what is skipped is the check. The table of allowed moves (`jobs.go:39-45`) no longer matches the
+  code: it says a done job never moves, but Convert again moves it to queued.
 
 **Bugs from this cause:** bec80900 and ba702fad (MKV track statistics copied onto re-encoded streams),
 eda8fce9, a81ea49e, 37b12950, c3168239 (which conversion and which workflow revision a record keeps),
@@ -241,10 +249,13 @@ scanner probed separately until #502).
 - One **job snapshot**: the worker's plan, the Expect (or, after cause 1, the rules), the source probe and
   the workflow revision, written once (`RecordPlan`, `jobs.go:373`, already stores most of this) and read
   by everything after: log, UI, totals, Convert again.
-- **Probes keyed by (path, size, mtime)** for all readers; the Files view asks for "the current file".
-- `size_after` from the measured output; a failed stat fails the step instead of writing 0.
-- **One totals query** used by all three screens.
-- All status changes through `transition`, including the bulk ones.
+- **A probe is used only for the file version it describes**: readers check its size against the file;
+  the Files view asks for "the current file".
+- `size_after` from the measured output; if the stat fails after the replace, use the size measured
+  before the move instead of 0. Failing the job then would be wrong: the new file is already in place.
+- **One saved-bytes rule** for every total, including the notification batch and the hourly throughput.
+- All status changes checked against one table of allowed moves, including the bulk ones, and the table
+  matches the code.
 
 ### Cause 4: local and remote run loops are copies
 
@@ -333,7 +344,7 @@ already converted.
 
 ```mermaid
 flowchart LR
-  P["Probe the source<br/>(cached by path+size+mtime)"] --> PL["Plan: intent only<br/>(target codec, max height, tracks)"]
+  P["Probe the source<br/>(cached per path, used only if the size matches)"] --> PL["Plan: intent only<br/>(target codec, max height, tracks)"]
   PL --> SN[("Job snapshot<br/>plan + rules + source probe + revision")]
   SN --> AR["Attempt runner<br/>(shared local/remote)"]
   EP["Encoder profiles<br/>one per family"] --> AR
@@ -343,7 +354,7 @@ flowchart LR
   M --> RU["Check rules<br/>(invariants, not predictions)"]
   RU -- pass --> SV["Save + record measured facts"]
   RU -- fail --> K["Keep the original, with the rule that failed"]
-  SV --> DB[("jobs: one source for sizes<br/>one totals query")]
+  SV --> DB[("jobs: one source for sizes<br/>one saved-bytes rule")]
 ```
 
 **One contract: plan → encode → measure → verify.**
@@ -360,8 +371,8 @@ flowchart LR
 pixel formats, quality arguments, rounding, failure patterns. Used by the plan, the doctor, the rules and
 the log.
 
-**One source of truth for stats.** Sizes come from the measured files and live on the job row; totals come
-from one query; probes are per file version.
+**One source of truth for stats.** Sizes come from the measured files and live on the job row; totals use
+one saved-bytes rule; a probe is used only for the file version it describes.
 
 ---
 
@@ -373,15 +384,15 @@ M ≈ 150-500, L ≈ over 500.
 | # | Slice | Size | Fixes | Depends on | What proves it |
 |---|---|---|---|---|---|
 | 1 | Make the prediction match QSV (or compare width with a ±2 tolerance) and fix the "in the original" wording | S | job 48 now | none | 1920x1080 → 480 lines on QSV passes; a test per family for that size; the message names the original's real size |
-| 2 | Store the lowest SSIM score, not the last; fail the step when the output can't be stat'ed instead of writing `size_after` 0 | S | cause 1, 3 | none | a test with samples 0.99, 0.91, 0.98 stores 0.91; a failed stat ends the job failed, and totals are unchanged |
+| 2 | Store the lowest SSIM score, not the last; if the output can't be stat'ed after the replace, record the size measured before the move instead of 0 | S | cause 1, 3 | none | a test with samples 0.99, 0.91, 0.98 stores 0.91; a failed stat completes the job with the measured size, and the totals count it |
 | 3 | Check rules: shape tolerance, even dimensions, max height, depth the ran encoder can produce, codec from the plan. Keep Expect for stream lists and length for now | M | cause 1 | none | job 48 and the #498/#507 cases become table rows that pass; a file with the wrong shape or codec still fails |
 | 4 | Record the measured output (probe) on the job and show it in the log instead of the predicted values | S | cause 1 (a24894e7 class) | 3 | the log of an 8-bit encode of a 10-bit source says 8-bit; the job API returns the measured size and depth |
 | 5 | Encoder profiles: move `gpuScale`, pixel formats, 10-bit rules and failure patterns into one profile per family; the plan and doctor read it | L (split per family) | cause 2 | 3 helps | the existing argument tests pass unchanged as golden tests (byte-identical arguments) |
 | 6 | One "is this a 10-bit job" function, used by plan, live, bitrate, rules and the remote worker | S | cause 2, 4 | can come before 5 | one table test over HDR, 10-bit SDR and 8-bit sources; a grep finds no other depth test in those packages |
-| 7 | Probe readers by (path, size, mtime); the Files view asks for the current file | S | cause 3 | none | a test replaces a file and reads the original's probe by its size and mtime, not the new file's |
-| 8 | One totals query for the three screens | S-M | cause 3 | none | the three screens return equal totals on a test database with kept, restored and grown files |
+| 7 | Probe readers show a stored probe only when its size matches the file; otherwise none | S | cause 3 | none | a test replaces a file in place, restores the original, and sees no probe instead of the new file's |
+| 8 | The notification batch and hourly throughput use the saved-bytes rule the three screens already share | S | cause 3 | none | on a test database with grown, size-0 and converted-again files, both totals follow the screens' rule |
 | 9 | The worker compiles from the revision stored on the job, or records the revision it ran and shows it | S | cause 3 | decision: user | a test edits the workflow while a job is queued and checks which revision ran |
-| 10 | Bulk status changes through `transition` | S | cause 3 | none | a test of restart and Convert again sees each change in `events`; no direct `UPDATE jobs SET status` left outside `transition` |
+| 10 | Bulk status changes checked against the table of allowed moves, and the table matches the code (done → queued for Convert again) | S | cause 3 | none | a test drives each bulk change and a move outside the table is refused; no unchecked `UPDATE jobs SET status` left |
 | 11 | Shared attempt runner for local and remote | M-L | cause 4 | 5, 6 | the remote tests and the local fall-back tests run against the same runner; one real remote run per family available |
 | 12 | Liveness from output growth, `total_size` and `progress=end`; timer only as a last resort | M | cause 5 | measure first: what ffmpeg prints during the MP4 rewrite | a long MP4 with fast start finishes without the 1-hour window; a frozen ffmpeg is still caught |
 | 13 | Frame count and damage from ffmpeg's report (`InputStreamStats`), with the expressions kept as a fall-back; detect variable frame rate | S-M | cause 5 | none | the damage test files from 11-18 to 11-20 give the same verdicts; a variable-frame-rate test file counts right |
@@ -433,3 +444,16 @@ show the following; each row either confirms a cause or is evidence against this
 | MP4 outputs with text subtitles | converted to `mov_text`; the prediction skips one check only for that case (`plan.go:718-720`) | 1: a per-container exception inside the prediction |
 | Long encodes to MP4 on the GPU | the finishing pause while ffmpeg rewrites for fast start | 5 |
 
+---
+
+## 8. Corrections
+
+Found while writing the slice specs from this review (2026-11-20). The text above is corrected; the
+earlier wording is kept here.
+
+| Where | Earlier wording | Correction |
+|---|---|---|
+| Cause 3, slice 2 | "a failed stat fails the step instead of writing 0" | The stat happens after the original has been replaced, so failing the job then would be wrong. Record the size measured before the move. |
+| Cause 3, slice 7 | "The probe cache is keyed by path, size and mtime"; "probe readers by (path, size, mtime)" | The cache has one row per path (`migrate.go:84`), so the original's probe is gone after a replace and can't be looked up by size. Readers should show the stored probe only when its size matches. |
+| Cause 3, slice 8 | "Totals are summed by the same SQL in three places"; "one totals query for the three screens" (S-M) | The three screens already share `freed.go`. The drift is in the notification batch and the hourly throughput. Size S. |
+| Cause 3, slice 10 | proof: "sees each change in `events`" | The `events_job_status` trigger already records every change. The gap is the missing check and an out-of-date table of allowed moves. |
