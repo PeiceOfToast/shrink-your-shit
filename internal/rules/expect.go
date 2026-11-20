@@ -28,6 +28,12 @@ type StreamExpect struct {
 	Height       int    // video
 	BitDepth     int    // video
 	Filename     string // attachment
+	// Timing, from the source (R3). TimingKnown is set for a stream kept from the source; a stream made from
+	// another has no source timing and is not checked. OffsetSec is how long after the main video the stream
+	// starts; LengthSec is the stream's own length (0 when not stated).
+	TimingKnown bool
+	OffsetSec   float64
+	LengthSec   float64
 }
 
 // Expect is what the new file must look like before it may replace the original. verify compares the
@@ -77,11 +83,16 @@ func DefaultExpect(src media.Info, packets int64) Expect {
 		PacketsTol:   0.01,
 	}
 	firstVideo := true
+	mainStart := 0.0
+	if v := src.Video(); v != nil {
+		mainStart = v.StartTime
+	}
 	for _, s := range src.Streams {
 		if s.Type == "data" {
 			continue
 		}
-		x := StreamExpect{Type: s.Type, Codec: s.Codec, Language: s.Language}
+		x := StreamExpect{Type: s.Type, Codec: s.Codec, Language: s.Language,
+			TimingKnown: true, OffsetSec: s.StartTime - mainStart, LengthSec: s.Duration}
 		switch s.Type {
 		case "video":
 			x.Width, x.Height, x.BitDepth = s.Width, s.Height, s.BitDepth
@@ -195,6 +206,7 @@ func (e Expect) Compare(out media.Info, outPackets int64) []string {
 		}
 		for i, w := range want {
 			problems = append(problems, compareStream(w, got[i], i+1)...)
+			problems = append(problems, compareTiming(w, got[i], i+1, out)...)
 		}
 	}
 	// Anything that is not one of the four known types must not appear from nowhere.
@@ -286,6 +298,57 @@ func compareStream(w StreamExpect, g media.Stream, n int) []string {
 		}
 	}
 	return p
+}
+
+// The timing tolerances (R3): a kept audio or subtitle stream may start this many seconds away from where the
+// source had it, relative to the main video; an audio track may differ this much in length from the picture
+// or from its source track.
+const (
+	offsetTolSec = 0.1
+	lengthTolSec = 1.0
+)
+
+// compareTiming checks a kept stream's timing against the source: where it starts after the main video, and,
+// for audio, how long it is. A stream with no source timing (made from another track) is not checked, and
+// neither is a length nothing is known about.
+func compareTiming(w StreamExpect, g media.Stream, n int, out media.Info) []string {
+	main := out.Video()
+	if !w.TimingKnown || main == nil || (w.Type != "audio" && w.Type != "subtitle") {
+		return nil
+	}
+	var p []string
+	name := describe(w, n)
+	now := g.StartTime - main.StartTime
+	if math.Abs(now-w.OffsetSec) > offsetTolSec {
+		p = append(p, fmt.Sprintf("%s is out of step with the picture: it starts %s, but in the original it starts %s (more than %.1f s apart)",
+			name, offsetWords(now), offsetWords(w.OffsetSec), offsetTolSec))
+	}
+	if w.Type == "audio" && g.Duration > 0 {
+		videoLen := main.Duration
+		if videoLen <= 0 {
+			videoLen = out.DurationSec
+		}
+		near := videoLen > 0 && math.Abs(g.Duration-videoLen) <= lengthTolSec
+		if !near && w.LengthSec > 0 && math.Abs(g.Duration-w.LengthSec) <= lengthTolSec {
+			near = true
+		}
+		if !near && (videoLen > 0 || w.LengthSec > 0) {
+			p = append(p, fmt.Sprintf("%s is %.1f s long, but the video is %.1f s and the original track %.1f s (more than %.0f s apart)",
+				name, g.Duration, videoLen, w.LengthSec, lengthTolSec))
+		}
+	}
+	return p
+}
+
+// offsetWords is a start offset in plain words: "0.50 s after the video", "0.10 s before the video".
+func offsetWords(sec float64) string {
+	switch {
+	case math.Abs(sec) < 0.005:
+		return "with the video"
+	case sec < 0:
+		return fmt.Sprintf("%.2f s before the video", -sec)
+	}
+	return fmt.Sprintf("%.2f s after the video", sec)
 }
 
 func quoteLang(l string) string {
