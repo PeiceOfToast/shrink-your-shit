@@ -126,10 +126,14 @@ func run(c rules.Card, st *State, env Env) (Note, error) {
 		if program == "" {
 			return n, errors.New("no program is named")
 		}
-		argText, empty := vars.Resolve(str("arguments", ""), st.Vars)
-		args, err := SplitArgs(argText)
+		parts, err := SplitArgs(str("arguments", "")) // review2-539 P2b: split as written, then fill each in: a value never breaks out of its argument
 		if err != nil {
 			return n, err
+		}
+		var args, empty []string
+		for _, part := range parts {
+			v, more := vars.Resolve(part, st.Vars)
+			args, empty = append(args, v), append(empty, more...)
 		}
 		timeout := 60 * time.Second
 		if v, ok := c.Config["timeoutSec"].(float64); ok && v >= 1 && v <= 3600 {

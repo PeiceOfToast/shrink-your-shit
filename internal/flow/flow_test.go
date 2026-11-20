@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -270,6 +271,40 @@ func TestRunProgram(t *testing.T) {
 	if _, err := RunProgram(self, []string{"-flow.helper", "sleep"}, "", 300*time.Millisecond, nil); err == nil || !strings.Contains(err.Error(), "stopped after") {
 		t.Errorf("timeout: %v", err)
 	}
+	// review2-539 P2a: a program that exits 0 but leaves a child holding its output is finished, near the timeout,
+	// never "stopped"; the worker's loop is not held for as long as the child lives
+	began := time.Now()
+	out, err = RunProgram(self, []string{"-flow.helper", "spawn-sleep"}, "", 500*time.Millisecond, nil)
+	if took := time.Since(began); err != nil || !strings.Contains(out, "spawned") || took > 5*time.Second {
+		t.Errorf("a child left behind: %q %v after %s", out, err, took)
+	}
+	// and one that exits 3 the same way keeps its exit code
+	if _, err := RunProgram(self, []string{"-flow.helper", "spawn-sleep", "3"}, "", 500*time.Millisecond, nil); err == nil || !strings.Contains(err.Error(), "exited with code 3") {
+		t.Errorf("a child left behind, exit 3: %v", err)
+	}
+	// review2-539 P3a: the log takes the first MaxLogLines lines and says so once; the output value is still capped
+	var logged []string
+	out, err = RunProgram(self, []string{"-flow.helper", "many", "300"}, "", 10*time.Second, func(l string) { logged = append(logged, l) })
+	if err != nil || len(logged) != MaxLogLines+1 || logged[MaxLogLines] != "… more output not shown in the log" || len(out) > MaxOutput+2048 {
+		t.Errorf("many lines: %d logged, last %q, %d bytes, %v", len(logged), logged[len(logged)-1], len(out), err)
+	}
+}
+
+// review2-539 P2b: a file name with a double quote, a space, $(…) or a backtick stays one argument, exactly as
+// the author quoted the placeholder; no value can add or split arguments.
+func TestCommandArgumentsFromHostileNames(t *testing.T) {
+	var got []string
+	env := Env{Exec: func(program string, args []string, dir string, timeout time.Duration, onLine func(string)) (string, error) {
+		got = args
+		return "", nil
+	}}
+	for _, name := range []string{`Movie" --output=/etc/passwd --quiet=".mkv`, "My Film (2019).mkv", "$(id).mkv", "a`b`.mkv", `C:\\Films\\Movie.mkv`} {
+		st := &State{Vars: map[string]string{"output_path": "/m/" + name, "title": "x y"}, Final: "/m/" + name}
+		card := rules.Card{NodeID: "c", Type: workflow.TypeCommand, Name: "Run", Config: map[string]any{"program": "p", "arguments": `"{{output_path}}" --title={{title}} {{output_path}}`}}
+		if _, warnings := After([]rules.Card{card}, st, env); len(warnings) != 0 || len(got) != 3 || got[0] != "/m/"+name || got[1] != "--title=x y" || got[2] != "/m/"+name {
+			t.Errorf("%q: args %q %v", name, got, warnings)
+		}
+	}
 }
 
 // TestMain lets the test binary stand in for a program (-flow.helper echo|exit|sleep ...).
@@ -286,6 +321,20 @@ func TestMain(m *testing.M) {
 			os.Exit(code)
 		case "sleep":
 			time.Sleep(10 * time.Second)
+		case "spawn-sleep": // a child that inherits this program's output and outlives it
+			child := exec.Command(os.Args[0], "-flow.helper", "sleep")
+			child.Stdout, child.Stderr = os.Stdout, os.Stderr
+			child.Start()
+			fmt.Println("spawned")
+			if len(os.Args) > 3 {
+				code, _ := strconv.Atoi(os.Args[3])
+				os.Exit(code)
+			}
+		case "many":
+			n, _ := strconv.Atoi(os.Args[3])
+			for i := 0; i < n; i++ {
+				fmt.Println("line", i, strings.Repeat("x", 40))
+			}
 		}
 		os.Exit(0)
 	}

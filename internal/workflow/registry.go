@@ -436,7 +436,7 @@ func Definitions() []StepDefinition {
 			Publishes: []Published{{Name: "command_output", Type: "string", Words: "What the program printed (the first 4,000 characters)"}},
 			ConfigSchema: object(map[string]any{
 				"program":    described(map[string]any{"type": "string", "title": "Program", "maxLength": 1000, "x-placeholder": "/usr/local/bin/after-convert"}, "The program's path, or its name when it is on the PATH. It is started directly: no shell, so nothing is expanded."),
-				"arguments":  templated(described(map[string]any{"type": "string", "title": "Arguments", "maxLength": 4000, "x-placeholder": "\"{{output_path}}\" {{saved_percent}}"}, "Separated by spaces; put double quotes around one with a space in it. Variables are filled in, like {{output_path}} or {{title}}.")),
+				"arguments":  templated(described(map[string]any{"type": "string", "title": "Arguments", "maxLength": 4000, "x-placeholder": "\"{{output_path}}\" {{saved_percent}}"}, "Separated by spaces; put double quotes around one with a space in it. Variables are filled in after the split, so a value with spaces or quotes stays one argument, like {{output_path}} or {{title}}.")),
 				"timeoutSec": withDefault(described(map[string]any{"type": "integer", "title": "Give up after (seconds)", "minimum": 1, "maximum": 3600}, "The program is stopped after this long."), 60, "Give up after (seconds)", ""),
 			}, []string{"program"})}),
 		def(StepDefinition{Type: TypeLookupDownloader, RunsAs: RunsAction, Phase: []string{PhaseBefore}, Category: "flow", Name: "Ask the downloader for details", Icon: "tell", TypeLabel: "Action",

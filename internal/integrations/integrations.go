@@ -592,6 +592,9 @@ func (s *Service) TellKinds(jobID int64, from, finalPath string, want []Kind) (s
 	return "Told " + strings.Join(names, ", "), nil
 }
 
+// lookupBudget is how long one "Ask the downloader for details" may spend across every instance it asks.
+const lookupBudget = 2 * time.Minute
+
 // Lookup asks the enabled instances of the given kinds what file is (FB2b: "Ask the downloader for
 // details"): the first that owns it answers with title_clean, year, season, episode (an episode only) and
 // original_language, plus words for the log. An instance that doesn't own the file is passed over; when none
@@ -605,9 +608,13 @@ func (s *Service) Lookup(file string, want []Kind) (map[string]string, string, e
 		return empty, "", err
 	}
 	asked := 0
+	start := s.now()
 	for _, r := range f.Items {
 		if !r.Enabled || !slices.Contains(want, r.Kind) || (r.Kind != Sonarr && r.Kind != Radarr) {
 			continue
+		}
+		if s.now().Sub(start) > lookupBudget { // review2-539 P3c: one card can't hold a job for every slow instance in turn
+			return empty, "", fmt.Errorf("the downloaders took longer than %s to answer", lookupBudget)
 		}
 		asked++
 		ki := kinds[r.Kind]
