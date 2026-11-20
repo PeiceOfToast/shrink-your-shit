@@ -74,7 +74,11 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView, libTotals
 			l, lj := live(j.ID)
 			l["name"] = filepath.Base(j.Path)
 			byWorker[j.Worker] = append(byWorker[j.Worker], l)
-			saving, estimated := expectedSaving(j, lj, st.ratioOf)
+			saving, estimated, err := expectedSaving(store, j, lj)
+			if err != nil {
+				serverError(w, err)
+				return
+			}
 			act := map[string]any{"jobId": l["jobId"], "name": l["name"], "percent": l["percent"], "etaS": l["etaS"],
 				"expectedSavingBytes": saving, "expectedSavingEstimated": estimated, "library": nil}
 			if j.LibraryID != 0 {
@@ -210,48 +214,32 @@ const estimatedFromJobs = 20
 // how far the encode is (worker.Live's ProjectedSize); until the encode has said that, the library's
 // own recent conversions say what shape its new files come out (every library's, when that library has
 // none). nil when neither can tell, so the page keeps "not known yet" rather than a made-up number.
-func expectedSaving(j jobs.Working, l worker.LiveJob, ratios map[int64]float64) (any, bool) {
+func expectedSaving(store *jobs.Store, j jobs.Working, l worker.LiveJob) (any, bool, error) {
 	if j.SizeBefore <= 0 {
-		return nil, false
+		return nil, false, nil
 	}
 	out, ok := l.ProjectedSize, l.ProjectedSize > 0
 	if !ok {
-		ratio, has := ratios[j.LibraryID]
-		if !has {
-			ratio, has = ratios[0]
+		libs := []int64{0} // every library
+		if j.LibraryID != 0 {
+			libs = []int64{j.LibraryID, 0}
 		}
-		out, ok = int64(float64(j.SizeBefore)*ratio), has
+		for _, lib := range libs {
+			ratio, has, err := store.OutputRatio(lib, estimatedFromJobs)
+			if err != nil {
+				return nil, false, err
+			}
+			if has {
+				out, ok = int64(float64(j.SizeBefore)*ratio), true
+				break
+			}
+		}
 	}
 	if !ok {
-		return nil, false
+		return nil, false, nil
 	}
 	// a new file bigger than its original is a negative saving: said plainly ("may get bigger")
-	return j.SizeBefore - out, true
-}
-
-// ratiosOf is each library's output/input byte ratio from its last estimatedFromJobs done conversions,
-// and every library's under 0: what a converting file is projected to come out at before its encode
-// can say. Computed with the other sums (an event changes it): never on each poll of a running file.
-func ratiosOf(store *jobs.Store) (map[int64]float64, error) {
-	libs, err := store.Libraries()
-	if err != nil {
-		return nil, err
-	}
-	ids := []int64{0}
-	for _, l := range libs {
-		ids = append(ids, l.ID)
-	}
-	out := map[int64]float64{}
-	for _, id := range ids {
-		r, ok, err := store.OutputRatio(id, estimatedFromJobs)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			out[id] = r
-		}
-	}
-	return out, nil
+	return j.SizeBefore - out, true, nil
 }
 
 // zoneName is this server's time zone as an IANA name ("Europe/Berlin"): TZ, else where /etc/localtime
@@ -377,7 +365,6 @@ type stats struct {
 	saving, perGB    float64
 	savingOK, timeOK bool
 	converted        int
-	ratioOf          map[int64]float64 // each library's output/input ratio; 0: every library's (see ratiosOf)
 }
 
 func (c *statsCache) get(store *jobs.Store) (*stats, error) {
@@ -427,9 +414,6 @@ func takeStats(store *jobs.Store, now time.Time) (*stats, error) {
 		return nil, err
 	}
 	if st.converted, err = store.DoneCount(); err != nil {
-		return nil, err
-	}
-	if st.ratioOf, err = ratiosOf(store); err != nil {
 		return nil, err
 	}
 	return st, nil
