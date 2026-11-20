@@ -3,6 +3,7 @@
 package jobs
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -47,5 +48,30 @@ func TestRunInfoFor(t *testing.T) {
 	gone, err := s.RunInfoFor(Job{LibraryID: l.ID, Library: l.Path})
 	if err != nil || gone.Library != "" || gone.Workflow != "" || gone.Revision != 0 {
 		t.Errorf("a removed library: %+v, %v", gone, err)
+	}
+}
+
+// A job keeps the folder name it was made with, which need not be the one the library is stored under (a
+// link, macOS's /var for /private/var, a Windows short name): the path lookup compares the real folder.
+func TestRunInfoFindsTheLibraryUnderAnotherNameForItsFolder(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "movies-link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks are not available here: %v", err)
+	}
+	s := open(t)
+	l, err := s.AddLibrary("Movies", real, rules.SliderTemplate(3), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l.Path == link {
+		t.Fatalf("the library stored the link's own name (%q), so the test proves nothing", l.Path)
+	}
+	info, err := s.RunInfoFor(Job{Library: link})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Library != "Movies" || info.Workflow == "" {
+		t.Errorf("by the folder's other name: %+v", info)
 	}
 }

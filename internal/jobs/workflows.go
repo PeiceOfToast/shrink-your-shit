@@ -823,7 +823,9 @@ func (s *Store) RunInfoFor(j Job) (RunInfo, error) {
 	if j.LibraryID > 0 {
 		err = s.db.QueryRow(`SELECT name, flow_id FROM libraries WHERE id=?`, j.LibraryID).Scan(&out.Library, &flowID)
 	} else {
-		err = s.db.QueryRow(`SELECT name, flow_id FROM libraries WHERE path=?`, j.Library).Scan(&out.Library, &flowID)
+		// the job's path may be another name for the library's folder (a link, macOS's /var, a Windows
+		// short name): every comparison of library folders uses the canonical form (libraries.go)
+		err = s.db.QueryRow(`SELECT name, flow_id FROM libraries WHERE path=?`, canonical(j.Library)).Scan(&out.Library, &flowID)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, nil
