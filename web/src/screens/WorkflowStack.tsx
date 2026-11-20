@@ -8,7 +8,7 @@ import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
 import { deleteNode, groupOf, insertAfter, moveNode, newNode, order } from "../stepEdits"; // the steps in running order: a property of the document, not data
 import { useData } from "../useData";
-import { getDraft, getLadder, getWorkflow, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
+import { getDraft, getLadder, getWorkflow, listTemplates, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
 import { Link, navigate, onLeave } from "../router";
 import { Browse } from "../FolderPicker";
 import { VarInput, takesVars, varListFor, varProblems } from "../VarInput";
@@ -334,8 +334,17 @@ function AddStepMenu({ wf, doc, defs, adds, onAdd, onClose }: { wf: string; doc:
   const on = rows.filter((r) => r.on).map((r) => r.d.type);
   const cur = sel && on.includes(sel) ? sel : on[0] ?? null;
   const pick = (r: (typeof rows)[number]) => { if (r.on) onAdd(r.d, r.after); };
-  const key = (e: { key: string; preventDefault: () => void }) => {
+  // on a phone the menu is a bottom sheet: Tab stays inside it, and Escape (from anywhere in it) closes it
+  const sheet = useRef<HTMLElement>(null);
+  const trap = (e: { key: string; shiftKey: boolean; preventDefault: () => void }) => {
     if (e.key === "Escape") return onClose();
+    if (e.key !== "Tab" || !window.matchMedia("(max-width: 640px)").matches || !sheet.current) return;
+    const f = [...sheet.current.querySelectorAll<HTMLElement>("input, button")].filter((x) => !(x as HTMLButtonElement).disabled), first = f[0], last = f[f.length - 1];
+    if (!first) return;
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  };
+  const key = (e: { key: string; preventDefault: () => void }) => {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       if (on.length) { const i = cur ? on.indexOf(cur) : -1; setSel(on[(i + (e.key === "ArrowDown" ? 1 : -1) + on.length) % on.length]); }
@@ -343,7 +352,7 @@ function AddStepMenu({ wf, doc, defs, adds, onAdd, onClose }: { wf: string; doc:
     if (e.key === "Enter") { e.preventDefault(); const r = rows.find((x) => x.d.type === cur); if (r) pick(r); }
   };
   return (
-    <section className="card" aria-label="Add a step"><div className="bd stack">
+    <section ref={sheet} className="card addsheet" aria-label="Add a step" onKeyDown={trap}><div className="bd stack">
       <label className="sr" htmlFor={wf + "-addq"}>Search steps</label>
       <input id={wf + "-addq"} className="input" type="text" role="combobox" aria-expanded="true" aria-controls={wf + "-addlist"} aria-autocomplete="list"
         aria-activedescendant={cur ? "add-" + cur : undefined} placeholder="Search steps" value={q} autoFocus
@@ -417,6 +426,19 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
   }, [dirty]);
   const edit = (d: WorkflowDoc) => (setHist({ docs: [...hist.docs.slice(0, hist.at + 1), d], at: hist.at + 1 }), setChecked(false), setPanel(null), setSaid(""), setGone(null));
   const update = (n: Node) => edit({ ...doc, nodes: doc.nodes.map((x) => (x.id === n.id ? n : x)) });
+  // "Start from Shrink videos": the template's whole document as one edit, so Undo (the note below) takes it back
+  const starting = useRef(false); // a second click while the first is loading does nothing
+  const startShrink = async () => {
+    if (starting.current) return;
+    starting.current = true;
+    try {
+      const list = await act(listTemplates(), setSaid); // on a failure act has already said the server's message
+      if (!list) return;
+      const t = list.find((x) => x.id === "shrink_videos")?.workflow;
+      if (!t) return setSaid("The Shrink videos template isn't available right now.");
+      edit(t); setGone({ text: "Started from Shrink videos. Change any step as you like.", at: hist.at + 1 });
+    } finally { starting.current = false; }
+  };
   const defOf = (t: string) => defs.find((d) => d.type === t);
   const nameOf = (x: Node) => x.name ?? defOf(x.type)?.name ?? x.type;
   // the delete bar stays 8 s, and longer while it has focus or the pointer is on it
@@ -512,7 +534,8 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
         {only && <div className="note"><Icon id="i-info" /><div className="stack" style={{ gap: 6 }}>
           <strong>This workflow has no steps yet</strong>
           <span>Every workflow starts with Library files: the videos from the libraries that use it. Add what should happen to them next.</span>
-          <div className="row"><button className="btn sm primary" type="button" autoFocus onClick={openAdd}><Icon id="i-plus" />Add the first step</button></div>
+          <div className="row"><button className="btn sm primary" type="button" autoFocus onClick={openAdd}><Icon id="i-plus" />Add the first step</button>
+            <button className="btn sm" type="button" onClick={startShrink}>Start from Shrink videos</button></div>
         </div></div>}
         <ol className="steps">{list.map((n, i) => {
           // the server's places: no answer for a step means it's fixed. Moves stay inside the first and last steps.

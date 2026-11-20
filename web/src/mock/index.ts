@@ -65,7 +65,7 @@ function workflow(id: ID, name: string, description: string, extra: Partial<Work
 // GET /templates: the V1 server has only the Start Simple preset; more come with the engine (review P3).
 export const TEMPLATES: Template[] = [
   { id: "shrink_videos", name: "Shrink videos", fileType: "video", description: "Converts to HEVC and keeps your languages", changesOriginals: false,
-    steps: ["Leave some files alone", "Convert video", "Audio", "Subtitles", "File type", "Check the result", "Save the result"] },
+    steps: ["Leave some files alone", "Convert video", "Audio", "Subtitles", "File type", "Check the result", "Save the result"], workflow: presetDoc() },
 ];
 const MOVIES: [ID, string] = ["l1", "Movies"], TV: [ID, string] = ["l2", "TV Shows"], HOME: [ID, string] = ["l3", "Home videos"];
 
