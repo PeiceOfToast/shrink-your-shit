@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"os"
 	"path/filepath"
 	"strings"
@@ -282,11 +283,10 @@ func tagsOf(raw string) []string {
 	return out
 }
 
-// Tag limits (FB2c): a tag is a short word or phrase; a record carries a handful. The same numbers as
-// rules.MaxTagLen and rules.MaxTags; the store is the floor, so nothing else can store more.
+// MaxTagLen and MaxTags are rules' limits: the store is the floor, so nothing can store more.
 const (
-	MaxTagLen = 40
-	MaxTags   = 20
+	MaxTagLen = rules.MaxTagLen
+	MaxTags   = rules.MaxTags
 )
 
 // JobTags are the record's tags.
@@ -301,39 +301,15 @@ func (s *Store) JobTags(id int64) ([]string, error) {
 	return tagsOf(raw), nil
 }
 
-// SetJobTags takes remove off the record's tags and puts add on (each trimmed, cut to MaxTagLen, the
-// same tag in another case taken once, at most MaxTags kept, in order), and answers with the result.
+// SetJobTags takes remove off the record's tags and puts add on, with rules.ApplyTags (a comma is a separator,
+// never part of a tag; trimmed, cut to MaxTagLen, the same tag in another case once, at most MaxTags kept in
+// order), and answers with the result.
 func (s *Store) SetJobTags(id int64, add, remove []string) ([]string, error) {
 	have, err := s.JobTags(id)
 	if err != nil {
 		return nil, err
 	}
-	hasTag := func(tags []string, t string) bool {
-		for _, x := range tags {
-			if strings.EqualFold(x, t) {
-				return true
-			}
-		}
-		return false
-	}
-	clean := func(t string) string {
-		t = strings.Join(strings.Fields(t), " ")
-		if r := []rune(t); len(r) > MaxTagLen {
-			t = string(r[:MaxTagLen])
-		}
-		return t
-	}
-	out := []string{}
-	for _, t := range have {
-		if t = clean(t); t != "" && !hasTag(remove, t) && !hasTag(out, t) {
-			out = append(out, t)
-		}
-	}
-	for _, t := range add {
-		if t = clean(t); t != "" && !hasTag(out, t) && len(out) < MaxTags {
-			out = append(out, t)
-		}
-	}
+	out := rules.ApplyTags(have, add, remove)
 	b, _ := json.Marshal(out)
 	res, err := s.db.Exec(`UPDATE jobs SET tags=?, updated=? WHERE id=?`, string(b), s.stamp(), id)
 	if err != nil {

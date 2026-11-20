@@ -32,6 +32,16 @@ func TestJobTags(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(got, []string{"remux", "converted"}) {
 		t.Fatalf("remove then add: %v %v", got, err)
 	}
+	if got, _ = s.SetJobTags(id, []string{"a,b"}, []string{"converted"}); !reflect.DeepEqual(got, []string{"remux", "a", "b"}) { // a comma is a separator, never part of a tag
+		t.Fatalf("commas: %v", got)
+	}
+	if ws, _ := s.WorkingJobs(); ws != nil { // the activity lists read tags too
+		for _, w := range ws {
+			if w.Tags == nil {
+				t.Errorf("a working job without tags: %+v", w.Job)
+			}
+		}
+	}
 	long := strings.Repeat("x", MaxTagLen+5)
 	got, _ = s.SetJobTags(id, []string{long}, nil)
 	if got[len(got)-1] != strings.Repeat("x", MaxTagLen) {
