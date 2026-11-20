@@ -47,6 +47,11 @@ function analyse(value: string, vars: TemplateVar[] | null) {
 
 // The problems of every {{name}} field in a workflow, for the Publish gate. Only once the list has loaded (no names
 // are checked before, so nothing is blocked by a missing list).
+// Does any step take {{name}} variables? Only then the editor asks for the variable list (a server without them gets no request).
+export const takesVars = (defs: { configSchema: { properties?: Record<string, unknown> } }[]) =>
+  defs.some((d) => Object.values(d.configSchema.properties ?? {}).some((s) => (s as { "x-variables"?: unknown })["x-variables"] === true));
+const noVars: VarList = { sample: { path: "", builtIn: true }, variables: [] };
+export const varListFor = (wf: string, on: boolean) => (on ? getVariables(wf) : Promise.resolve(noVars));
 export function varProblems(nodes: { id: string; type: string; config?: Record<string, unknown> }[], defs: { type: string; configSchema: { properties?: Record<string, unknown> } }[], vars: TemplateVar[]) {
   const out: { nodeId: string; field: string; title: string; error: string }[] = [];
   for (const n of nodes) {

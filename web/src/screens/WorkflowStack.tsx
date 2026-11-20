@@ -8,10 +8,10 @@ import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
 import { order } from "../mock/steps"; // the steps in running order: a property of the document, not data
 import { useData } from "../useData";
-import { getDraft, getLadder, getVariables, getWorkflow, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
+import { getDraft, getLadder, getWorkflow, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
 import { Link, onLeave } from "../router";
 import { Browse } from "../FolderPicker";
-import { VarInput, varProblems } from "../VarInput";
+import { VarInput, takesVars, varListFor, varProblems } from "../VarInput";
 import { listLibraries, shrunk } from "../libraryApi";
 import type { JSONSchema, Node, PublishPreview, StepDefinition, ValidationIssue, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
 
@@ -311,7 +311,7 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
   const doc = hist.docs[hist.at], dirty = doc !== saved;
   const all = useData(listLibraries, []), libs = (all.data ?? []).filter((l) => l.flowId === id).map((l) => l.path);
   // {{name}} fields with a bad name (or an unclosed {{): Publish waits for them, once the variable list has loaded
-  const vl = useData(() => getVariables(id), [id]).data, varBad = vl ? varProblems(doc.nodes, defs, vl.variables) : [];
+  const tv = takesVars(defs), vl = useData(() => varListFor(id, tv), [id, tv]).data, varBad = vl ? varProblems(doc.nodes, defs, vl.variables) : [];
   // The server's words and problems for the document as it is now (nothing saved): asked 300 ms after a change.
   const ask = async (d: WorkflowDoc) => { const r = await act(validateDoc(id, d), setSaid); if (r) setLive(r); return r; };
   const seen = useRef(first.workflow);
