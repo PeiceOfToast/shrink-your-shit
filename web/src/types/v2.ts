@@ -144,6 +144,8 @@ export interface Settings { firstRunDone: boolean; firstRunStep: number; intakeP
 // GET /api/v2/trash (contract update 01:33Z; workshop branch v2-trash-settings): originals replaced and kept in the
 // trash until their date. Later embedded as Summary.bytes.trash.
 export interface Trash { bytes: number; files: number; nextDeleteAt: Time | null; lastDeleteAt: Time | null }
+// POST /api/v2/trash/purge {libraryId?}: a library whose folder isn't mounted is skipped, never reported as "deleted 0".
+export interface PurgeResult { deletedFiles: number; freedBytes: number; skipped: { library: string; reason: string }[] }
 export interface Workflow { // GET /workflows (contract: Workflows, revisions and the graph)
   id: ID;
   name: string;
