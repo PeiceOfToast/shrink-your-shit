@@ -129,12 +129,14 @@ func TestLeadingUndecodableCreditsOnlyPicturesTheDecoderSkipped(t *testing.T) {
 		name, packets, first string
 		want                 int64
 	}{
-		{"cut mid-GOP: the two leading pictures are not shown", "__,0.000000\n__,0.040000\nK__,0.120000\n__,0.080000\n", "0.120000\n", 2},
-		{"open GOP: the leading pictures decode and are shown", "__,0.000000\n__,0.040000\nK__,0.120000\n", "0.000000\n", 0},
-		{"a leading picture with no time is not credited", "__,N/A\n__,0.040000\nK__,0.120000\n", "0.120000\n", 1},
-		{"no keyframe in what was read", "__,0.000000\n__,0.040000\n", "0.120000\n", 0},
-		{"no picture was output", "__,0.000000\nK__,0.120000\n", "", 0},
-		{"a stream that starts on a keyframe", "K__,0.000000\n__,0.040000\n", "0.000000\n", 0},
+		// ffprobe prints each packet as pts_time,flags (the order it actually gives, not the order asked for)
+		{"cut mid-GOP: the two leading pictures are not shown", "0.000000,___\n0.040000,___\n0.120000,K__\n0.080000,___\n", "0.120000\n", 2},
+		{"open GOP: the leading pictures decode and are shown", "0.000000,___\n0.040000,___\n0.120000,K__\n", "0.000000\n", 0},
+		{"a leading picture with no time is not credited", "N/A,___\n0.040000,___\n0.120000,K__\n", "0.120000\n", 1},
+		{"no keyframe in what was read", "0.000000,___\n0.040000,___\n", "0.120000\n", 0},
+		{"no picture was output", "0.000000,___\n0.120000,K__\n", "", 0},
+		{"a stream that starts on a keyframe", "0.000000,K__\n0.040000,___\n", "0.000000\n", 0},
+		{"flags printed first are read the same", "___,0.000000\n___,0.040000\nK__,0.120000\n", "0.120000\n", 2},
 	}
 	for _, c := range cases {
 		if n, err := LeadingUndecodable(context.Background(), probe(c.packets, c.first), "ffprobe", "/x.ts", 0); err != nil || n != c.want {

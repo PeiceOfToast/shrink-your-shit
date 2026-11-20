@@ -291,7 +291,13 @@ func LeadingUndecodable(ctx context.Context, x Exec, ffprobe, path string, n int
 	}
 	var lead int64
 	for _, line := range strings.Split(string(pk), "\n") {
-		flags, pts, _ := strings.Cut(strings.TrimSpace(line), ",")
+		// ffprobe's field order is not the order asked for, so tell the two fields apart by content:
+		// the time parses as a number, the flags do not (they are K, _ and similar).
+		a, b, _ := strings.Cut(strings.TrimSpace(line), ",")
+		pts, flags := a, b
+		if _, ok := csvTime(b); ok {
+			pts, flags = b, a
+		}
 		if strings.HasPrefix(flags, "K") { // flags: K marks a keyframe
 			return lead, nil
 		}
