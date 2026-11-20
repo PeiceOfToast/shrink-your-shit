@@ -616,17 +616,19 @@ func plural(n int, one, many string) string {
 // macroblock in one P-frame, as in a copied file); more than that means the source is failing.
 const maxDamagedPercent = 1
 
-// sourceFrameCount is the main video stream's picture count: what the stream states, else its own duration times
-// its frame rate. exact is false when only the container's duration was there: audio or subtitles may run past
+// sourceFrameCount is the main video stream's picture count as ffmpeg outputs it: the stream's own duration times
+// its frame rate, else the count the stream states. The duration comes first because an mp4 edit list (a trimmed
+// start) keeps the trimmed frames in the stream's count but not in its duration, and ffmpeg outputs only the
+// duration's frames. exact is false when only the container's duration was there: audio or subtitles may run past
 // the video, so that count can be too high and must not decide anything on its own.
 func sourceFrameCount(src media.Info) (frames int64, exact bool) {
 	for _, s := range src.Streams {
 		if s.Type == "video" && !s.AttachedPic {
 			switch {
-			case s.Frames > 0:
-				return s.Frames, true
 			case s.Duration > 0:
 				return int64(s.Duration*s.FrameRate + 0.5), true
+			case s.Frames > 0:
+				return s.Frames, true
 			}
 			return int64(src.DurationSec*s.FrameRate + 0.5), false
 		}
@@ -638,6 +640,16 @@ func sourceFrameCount(src media.Info) (frames int64, exact bool) {
 func sourceFrames(src media.Info) int64 {
 	n, _ := sourceFrameCount(src)
 	return n
+}
+
+// expectedPackets is the main video frame count the converted file must match. counted is the original's packet
+// count, which for an mp4 edit list includes the trimmed frames ffmpeg never outputs; when the presented count is
+// exact, that is the number to expect.
+func expectedPackets(src media.Info, counted int64) int64 {
+	if n, exact := sourceFrameCount(src); exact && n > 0 {
+		return n
+	}
+	return counted
 }
 
 // damageTolerated says whether an original's damage is little enough to convert: no damage to the file as a

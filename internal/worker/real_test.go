@@ -530,6 +530,23 @@ func TestRealLostFramesOriginalIsKept(t *testing.T) {
 
 // A clean clip whose audio runs past its video (10 s picture, 11 s sound) is not damaged: its frames are all there,
 // and the container's longer duration must not make them look lost.
+// An mp4 edit list (a trimmed start, made with -ss and -c copy) is clean: ffmpeg outputs only the presented
+// frames, which are fewer than the stream's count, so the trimmed frames are not lost data and it converts.
+func TestRealEditListMP4Converts(t *testing.T) {
+	needTools(t)
+	dir := t.TempDir()
+	clean := filepath.Join(dir, "clean.mp4")
+	path := filepath.Join(dir, "edit-list.mp4")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25:duration=10",
+		"-f", "lavfi", "-i", "sine=duration=11", "-c:v", "libx264", "-b:v", "2M", "-c:a", "aac", clean)
+	runFFmpeg(t, "-ss", "0.4", "-i", clean, "-c", "copy", path)
+	st, id := realJob(t, path, 9.6)
+	realWorker(st, media.OSExec{}).run(t)
+	if j, _ := st.Get(id); j.Status != jobs.Done {
+		t.Fatalf("a clean edit-list mp4 must convert: %s %q", j.Status, j.Error)
+	}
+}
+
 func TestRealCleanClipWithLongerAudioConverts(t *testing.T) {
 	needTools(t)
 	for _, ext := range []string{"mkv", "mp4"} {

@@ -855,7 +855,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if plan.HDRNote != "" { // what the HDR conversion does not keep (S3)
 		w.jobf(job.ID, " (%s): %s", job.Path, plan.HDRNote)
 	}
-	exp := plan.Expect(src, packets)
+	exp := plan.Expect(src, expectedPackets(src, packets))
 	if exp.DurationSec <= 0 {
 		exp.DurationSec = job.DurationSec
 	}

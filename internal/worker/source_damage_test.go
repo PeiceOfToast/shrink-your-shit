@@ -184,6 +184,7 @@ func TestWithLostFrames(t *testing.T) {
 		{"count not reported: unchanged", sourceDamageReport{Pictures: 1}, 500, -1, 1, true},
 		{"frames not known: unchanged", sourceDamageReport{Pictures: 1}, 0, 470, 1, false},
 		{"lost frames add to the decoder's pictures: 1+2 of 500 is 0.6%", sourceDamageReport{Pictures: 1}, 500, 498, 3, true},
+		{"edit-list mp4: 240 presented, 240 decoded: nothing lost", sourceDamageReport{}, 240, 240, 0, true},
 	}
 	for _, c := range cases {
 		got := withLostFrames(c.rep, c.frames, c.decoded)
@@ -211,6 +212,8 @@ func TestSourceFrameCount(t *testing.T) {
 	}{
 		{"mp4 states the frame count", video(media.Stream{Frames: 250}, 11), 250, true},
 		{"mkv states the stream duration", video(media.Stream{Duration: 10}, 11), 250, true},
+		// An mp4 edit list trims 10 frames: the count stays 250, but ffmpeg outputs the 9.6 s (240) presented.
+		{"edit list: the presented duration, not the trimmed count", video(media.Stream{Frames: 250, Duration: 9.6}, 10.6), 240, true},
 		{"neither: the container's 11 s is a guess", video(media.Stream{}, 11), 275, false},
 	}
 	for _, c := range cases {
@@ -221,5 +224,31 @@ func TestSourceFrameCount(t *testing.T) {
 	}
 	if sourceFrames(video(media.Stream{Frames: 250}, 11)) != 250 {
 		t.Error("sourceFrames must report the stream's count")
+	}
+}
+
+// The converted file must match the frames ffmpeg presents. An edit-list mp4 counts 250 packets for a clip that
+// presents 240 (9.6 s at 25 fps), so 240 is expected; a clip with nothing trimmed, or without a stated duration,
+// keeps the packet count.
+func TestExpectedPackets(t *testing.T) {
+	video := func(s media.Stream, container float64) media.Info {
+		s.Type, s.FrameRate = "video", 25
+		return media.Info{DurationSec: container, Streams: []media.Stream{{Type: "audio"}, s}}
+	}
+	cases := []struct {
+		name    string
+		src     media.Info
+		counted int64
+		want    int64
+	}{
+		{"edit list: 250 packets, 240 presented", video(media.Stream{Frames: 250, Duration: 9.6}, 10.6), 250, 240},
+		{"nothing trimmed: the count stands", video(media.Stream{Frames: 250, Duration: 10}, 11), 250, 250},
+		{"no stated duration: the packet count", video(media.Stream{Frames: 250}, 11), 250, 250},
+		{"container guess only: the packet count", video(media.Stream{}, 11), 250, 250},
+	}
+	for _, c := range cases {
+		if got := expectedPackets(c.src, c.counted); got != c.want {
+			t.Errorf("%s: expected %d, want %d", c.name, got, c.want)
+		}
 	}
 }
