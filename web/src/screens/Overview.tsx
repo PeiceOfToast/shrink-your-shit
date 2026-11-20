@@ -204,7 +204,7 @@ export function Overview() {
                 <td className="full"><Link className="mono fname" to={"/jobs?tab=running&job=" + encodeURIComponent(a.jobId)}>{a.name}</Link><span className="sub">{[a.library?.name, workerOf(a.jobId)].filter(Boolean).join(" · ")}</span></td>
                 <td className="full"><Bar p={pct(a.percent)} label={a.name} /></td>
                 <td className="num" data-l="Time left">{left(a.etaS)}</td>
-                <td className="num" data-l="Expected saving">{a.expectedSavingBytes == null ? "not known yet" : "about " + bytes(a.expectedSavingBytes)}</td>
+                <td className="num" data-l="Expected saving">{a.expectedSavingBytes == null ? "not known yet" : a.expectedSavingBytes < 0 ? "about " + bytes(-a.expectedSavingBytes) + " bigger" : "about " + bytes(a.expectedSavingBytes)}</td>
               </tr>; })}</tbody></table>)}
       </section>
 
