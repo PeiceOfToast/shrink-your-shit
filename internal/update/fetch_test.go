@@ -162,7 +162,10 @@ func TestRestoreDB(t *testing.T) {
 		t.Errorf("the newer database was not kept: %q", b)
 	}
 	if _, err := os.Stat(db + "-wal"); !os.IsNotExist(err) {
-		t.Errorf("the newer database's WAL is still there: %v", err)
+		t.Errorf("the newer database's WAL is still beside the restored one: %v", err)
+	}
+	if b, _ := os.ReadFile(db + ".rolled-back-wal"); string(b) != "wal" {
+		t.Errorf("the newer database's WAL did not go with it: %q", b)
 	}
 	// a second roll back keeps both newer databases: one kept before is never replaced
 	os.WriteFile(db, []byte("newer again"), 0o600)

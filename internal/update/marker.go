@@ -161,14 +161,17 @@ func RestoredNote(keptAs string) string {
 
 // RestoreDB puts the backup in place of the database at db and returns where the database it replaces
 // was kept: <db>.rolled-back, or <db>.rolled-back-2, -3... when one is already there (a database kept
-// before is never replaced). Its -wal and -shm files are removed (they belong to it, not to the backup).
+// before is never replaced). Its -wal file goes with it (it holds commits not yet in the main file, which
+// SQLite reads back from <kept>-wal); its -shm file is removed (SQLite rebuilds it).
 func RestoreDB(backup, db string) (string, error) {
 	kept := db + ".rolled-back"
 	for n := 2; ; n++ {
-		if _, err := os.Lstat(kept); os.IsNotExist(err) {
-			break
-		} else if err != nil {
+		free, err := absent(kept, kept+"-wal")
+		if err != nil {
 			return "", err
+		}
+		if free {
+			break
 		}
 		kept = fmt.Sprintf("%s.rolled-back-%d", db, n)
 	}
@@ -194,13 +197,27 @@ func restoreDB(backup, db, kept string) error {
 		os.Remove(tmp.Name())
 		return err
 	}
-	for _, s := range []string{"-wal", "-shm"} {
-		if err := os.Remove(db + s); err != nil && !os.IsNotExist(err) {
-			os.Remove(tmp.Name())
-			return err
-		}
+	if err := os.Rename(db+"-wal", kept+"-wal"); err != nil && !os.IsNotExist(err) {
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := os.Remove(db + "-shm"); err != nil && !os.IsNotExist(err) {
+		os.Remove(tmp.Name())
+		return err
 	}
 	return os.Rename(tmp.Name(), db)
+}
+
+// absent reports whether none of the paths exists.
+func absent(paths ...string) (bool, error) {
+	for _, p := range paths {
+		if _, err := os.Lstat(p); err == nil {
+			return false, nil
+		} else if !os.IsNotExist(err) {
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 func writeJSON(path string, v any) error {
