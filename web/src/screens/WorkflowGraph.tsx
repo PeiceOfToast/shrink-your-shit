@@ -47,15 +47,38 @@ function GNode({ data, selected }: NodeProps<GNodeT>) {
 const nodeTypes = { step: GNode };
 
 // Positions: the layout's, else dagre for the nodes it doesn't place (left to right, like the step list reads).
+let pillPx: number | undefined; // the "Not linked" pill's width, measured once with the page's own CSS (170 until it can be)
+const pillWidth = () => {
+  if (pillPx === undefined && typeof document !== "undefined") {
+    const host = document.createElement("div"), b = document.createElement("button");
+    host.className = "gnode"; host.style.cssText = "position:absolute;visibility:hidden;left:-9999px;top:0";
+    b.type = "button"; b.className = "gpill"; b.textContent = "Not linked: keeps the original";
+    host.appendChild(b); document.body.appendChild(host);
+    const w = b.getBoundingClientRect().width; host.remove();
+    if (w > 0) pillPx = w;
+  }
+  return pillPx ?? 170;
+};
+
+// Auto-placed steps only (a saved position stays where the person put it). dagre's gap between columns is RANKSEP; a
+// column with a step that shows a "Not linked" pill also needs room for the pill, its 28px connector, the 7px inset and
+// 16px of air. The extra goes after that column, so every later column moves right by it.
+const RANKSEP = 70;
 function place(doc: WorkflowRevision, defs: StepDefinition[]) {
   const pos = doc.layout?.nodes ?? {}, missing = doc.workflow.nodes.filter((n) => !pos[n.id]);
   if (!missing.length) return pos;
-  const g = new dagre.graphlib.Graph(); g.setGraph({ rankdir: "LR", nodesep: 28, ranksep: 70 }); g.setDefaultEdgeLabel(() => ({}));
+  const g = new dagre.graphlib.Graph(); g.setGraph({ rankdir: "LR", nodesep: 28, ranksep: RANKSEP }); g.setDefaultEdgeLabel(() => ({}));
   for (const n of doc.workflow.nodes) g.setNode(n.id, { width: W, height: H(defs.find((d) => d.type === n.type)?.outputs?.length ?? 1) });
   for (const e of doc.workflow.edges) g.setEdge(e.from, e.to);
   dagre.layout(g);
+  const hasPill = (n: Node) => (defs.find((d) => d.type === n.type)?.outputs ?? []).some((p) => p.outcome !== "success" && !doc.workflow.edges.some((e) => e.from === n.id && e.fromPort === p.name));
+  const extra = new Map<number, number>(); // column x -> the extra gap after it
+  const need = pillWidth() + 28 + 7 + 16 - RANKSEP;
+  for (const n of doc.workflow.nodes) if (need > 0 && hasPill(n)) { const x = g.node(n.id).x; extra.set(x, Math.max(extra.get(x) ?? 0, need)); }
+  const cols = [...new Set(doc.workflow.nodes.map((n) => g.node(n.id).x))];
+  const shift = (x: number) => cols.filter((c) => c < x).reduce((sum, c) => sum + (extra.get(c) ?? 0), 0);
   const out = { ...pos };
-  for (const n of missing) { const p = g.node(n.id); out[n.id] = { x: Math.round(p.x - W / 2), y: Math.round(p.y - p.height / 2) }; }
+  for (const n of missing) { const p = g.node(n.id); out[n.id] = { x: Math.round(p.x - W / 2 + shift(p.x)), y: Math.round(p.y - p.height / 2) }; }
   return out;
 }
 
