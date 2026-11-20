@@ -29,8 +29,7 @@ export function PluginsPlanned() {
   return (
     <div className="stack">
       <PageHead icon="i-plugin" title="Plugins" help="Planned. Not available yet." />
-      <p>Plugins are planned, not available yet. When they arrive, they will let you add your own steps to a workflow, such as a custom ffmpeg command, or a script that runs before or after each file.</p>
-      <p className="muted">There is nothing to install or update here yet.</p>
+      <p>Plugins aren't available yet. When they arrive, they'll let you add your own steps to a workflow, such as a custom ffmpeg command or a script that runs before or after each file.</p>
       <p className="muted">Ideas for plugins are welcome on <a href="https://github.com/PeiceOfToast/shrink-your-shit/issues" target="_blank" rel="noopener">GitHub issues</a>.</p>
     </div>
   );
