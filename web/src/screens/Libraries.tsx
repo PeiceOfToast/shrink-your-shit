@@ -129,6 +129,7 @@ export function Libraries() {
               <td className="selc"><label className="hit"><input type="checkbox" aria-label={"Select " + l.name} checked={sel.includes(l.id)} onChange={(e) => setSel(e.target.checked ? [...sel, l.id] : sel.filter((x) => x !== l.id))} /></label></td>
               <td className="idc"><Link className="ttl" to={"/libraries/" + l.id}>{l.name}</Link>
                 <span className="sub mono path" title={l.paths.join(", ")}>{l.paths.map((p, i) => <span key={i}>{i > 0 && ", "}{breakPath(p)}</span>)}</span>
+                {!l.writable && <span className="sub st bad"><Icon id="i-alert" /><span>{l.unwritableMessage}</span></span>}
                 {paused(l) && <span className="sub">Paused · {count(l.counts.waiting)} waiting, not converting</span>}
                 {shareWait(l) && <span className="sub">Waiting for {shareName(l)} to connect · {count(l.counts.waiting)} waiting</span>}
                 <span className="sub phone">{paused(l) ? "Paused · " + count(l.counts.waiting) + " waiting, not converting"
@@ -304,6 +305,7 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
       {note && <p className="muted" role="status">{note}</p>}
       {v && notStarted(v) && <p className="muted" role="note">This library isn't started yet: nothing is looked for or converted until you press Scan now.</p>}
       {v && paused(v) && <p className="muted" role="note">While paused, its files wait in the queue and aren't converted. Scans add no new files. Files already converting finish.</p>}
+      {v && !v.writable && <p className="st bad" role="note"><Icon id="i-alert" /><span>{v.unwritableMessage}</span></p>}
       {v && shareWait(v) && <p className="muted" role="note">Share not connected yet. Its files wait in the queue and aren't converted until {shareName(v)} connects.</p>}
       {l && <nav className="tabs" aria-label="Library sections">
         {[["general", "General"], ["discovery", "Discovery"], ["output", "Output"]].map(([k, t]) =>
