@@ -417,7 +417,7 @@ const refusedWords = (is: ValidationIssue[]) => "Nothing was saved. Rename or re
 function VariablesCard({ doc, defs, builtins, problems, nameIssues, edit, open }: { doc: WorkflowDoc; defs: StepDefinition[]; builtins: TemplateVar[]; problems: { nodeId: string; title: string; code: string; name: string; error: string }[]; nameIssues: ValidationIssue[]; edit: (d: WorkflowDoc, run?: string) => void; open: (nodeId: string) => void }) {
   const [name, setName] = useState(""), [val, setVal] = useState(""), [what, setWhat] = useState(""), [err, setErr] = useState("");
   const [shown, setShown] = useState(false); // closed by default; opens by itself when a field uses an unknown name or a variable name is refused
-  const [editing, setEditing] = useState<string | null>(null); // the row whose description is open for editing
+  const [editing, setEditing] = useState<number | null>(null); // the row whose description is open for editing (by index: a saved doc can repeat a name)
   const vars = doc.variables ?? [], used = usedBy(doc.nodes, defs), titleOf = (n: Node) => defs.find((d) => d.type === n.type)?.name ?? n.type;
   const unknown = problems.filter((p) => p.code === "unknown_variable"), bad = unknown.length > 0;
   useEffect(() => { if (bad || nameIssues.length > 0) setShown(true); }, [bad, nameIssues.length]);
@@ -433,10 +433,11 @@ function VariablesCard({ doc, defs, builtins, problems, nameIssues, edit, open }
     setVars([...vars, { name: n, type: "string", value: val === "" ? undefined : val, description: what.trim() || undefined }]);
     setName(""); setVal(""); setWhat("");
   };
-  const remove = (n: string) => {
+  const remove = (n: string, at: number) => {
     const by = used.get(n) ?? [];
     if (by.length && !window.confirm(`${by.map(titleOf).join(" and ")} use {{${n}}}. Delete it anyway? Those fields will show an error until you change them.`)) return;
-    setVars(vars.filter((v) => v.name !== n));
+    setVars(vars.filter((_, j) => j !== at));
+    setEditing(null); // indexes after the deleted row shift
   };
   // Used by, and the warning box: open the step's options and focus the field that uses the variable ({{ name }} counts too)
   const openField = (nodeId: string, name: string) => {
@@ -457,17 +458,17 @@ function VariablesCard({ doc, defs, builtins, problems, nameIssues, edit, open }
         {vars.length === 0 ? <p className="muted">No variables yet. Add one below, then use it in a field as {"{{name}}"}.</p>
           : <table className="tbl vars-tbl">
             <thead><tr><th scope="col">Name</th><th scope="col">Value</th><th scope="col">Comes from</th><th scope="col">Used by</th><th scope="col"><span className="sr">Action</span></th></tr></thead>
-            <tbody>{vars.map((v) => {
+            <tbody>{vars.map((v, i) => {
               const by = used.get(v.name) ?? [];
               return (
-                <tr key={v.name}>
-                  <th scope="row"><code>{"{{" + v.name + "}}"}</code>{nameIssues.filter((i) => (i.name ?? "") === v.name).map((i, k) => <span key={k} className="st bad" style={{ display: "flex", gap: 4 }}><Icon id="i-alert" /><span>{i.message}</span></span>)}{editing === v.name
-                    ? <input className="input" autoFocus aria-label={"Description of {{" + v.name + "}}"} value={v.description ?? ""} onChange={(e) => setVars(vars.map((x) => (x.name === v.name ? { ...x, description: e.target.value } : x)), "desc:" + v.name)} />
+                <tr key={i}>
+                  <th scope="row"><code>{"{{" + v.name + "}}"}</code>{nameIssues.filter((i) => (i.name ?? "") === v.name).map((i, k) => <span key={k} className="st bad" style={{ display: "flex", gap: 4 }}><Icon id="i-alert" /><span>{i.message}</span></span>)}{editing === i
+                    ? <input className="input" autoFocus aria-label={"Description of {{" + v.name + "}}"} value={v.description ?? ""} onChange={(e) => setVars(vars.map((x, j) => (j === i ? { ...x, description: e.target.value } : x)), "desc:" + i)} />
                     : v.description && <span className="muted sm" style={{ display: "block" }}>{v.description}</span>}</th>
-                  <td data-label="Value"><input className="input" aria-label={"Value of {{" + v.name + "}}"} value={String(v.value ?? "")} onChange={(e) => setVars(vars.map((x) => (x.name === v.name ? { ...x, value: e.target.value } : x)), "value:" + v.name)} /></td>
+                  <td data-label="Value"><input className="input" aria-label={"Value of {{" + v.name + "}}"} value={String(v.value ?? "")} onChange={(e) => setVars(vars.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)), "value:" + i)} /></td>
                   <td><span className="pill vars-pill-own">This workflow</span></td>
-                  <td data-label="Used by">{by.length ? by.map((n, i) => <span key={n.id}>{i > 0 && ", "}<button className="linkbtn" type="button" onClick={() => openField(n.id, v.name)}>{titleOf(n)}</button></span>) : <span className="muted">Not used yet</span>}</td>
-                  <td><button className="btn sm ghost" type="button" aria-expanded={editing === v.name} aria-label={"Edit {{" + v.name + "}} description"} onClick={() => setEditing(editing === v.name ? null : v.name)}>{editing === v.name ? "Done" : "Edit"}</button>{" "}<button className="btn sm ghost" type="button" aria-label={"Delete {{" + v.name + "}}"} onClick={() => remove(v.name)}>Delete</button></td>
+                  <td data-label="Used by">{by.length ? by.map((n, k) => <span key={n.id}>{k > 0 && ", "}<button className="linkbtn" type="button" onClick={() => openField(n.id, v.name)}>{titleOf(n)}</button></span>) : <span className="muted">Not used yet</span>}</td>
+                  <td><button className="btn sm ghost" type="button" aria-expanded={editing === i} aria-label={"Edit {{" + v.name + "}} description"} onClick={() => setEditing(editing === i ? null : i)}>{editing === i ? "Done" : "Edit"}</button>{" "}<button className="btn sm ghost" type="button" aria-label={"Delete {{" + v.name + "}}"} onClick={() => remove(v.name, i)}>Delete</button></td>
                 </tr>);
             })}</tbody>
           </table>}
