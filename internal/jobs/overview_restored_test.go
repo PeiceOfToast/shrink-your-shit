@@ -30,6 +30,9 @@ func countsOf(t *testing.T, s *Store, l Library, flowID int64, since string, now
 	lib.Skipped = 0
 	days, err := s.Days(7, now, tot)
 	check(err)
+	for i := range days {
+		days[i].Skipped = 0
+	}
 	done, err := s.DoneCount()
 	check(err)
 	sp, sok, spg, tok, err := s.Averages()
@@ -41,6 +44,7 @@ func countsOf(t *testing.T, s *Store, l Library, flowID int64, since string, now
 	check(err)
 	ends, err := s.JobEndsSince(since)
 	check(err)
+	delete(ends, "skipped")
 	return map[string]any{
 		"overview totals": tot,
 		"library totals":  lib,
@@ -116,9 +120,10 @@ func TestRestoredOriginalCountsNowhere(t *testing.T) {
 	}
 }
 
-// A file converted twice whose newer conversion was restored is the older conversion's output again: it
-// counts as that older conversion did before the newer one, not as nothing (review #431 P2).
-func TestRestoringTheNewerConversionKeepsTheOlderOne(t *testing.T) {
+// A file converted twice whose newer conversion was restored is the original file again: it is Skipped, and
+// the older conversion does not count as done either, on every surface (was review #431 P2, reversed: a restored
+// file is never Done).
+func TestRestoringTheNewerConversionSkipsTheFile(t *testing.T) {
 	s := open(t)
 	check := func(err error) {
 		t.Helper()
@@ -165,12 +170,10 @@ func TestRestoringTheNewerConversionKeepsTheOlderOne(t *testing.T) {
 	check(s.SetSwapState(i2, OriginalRestored))
 	after := countsOf(t, s, l, w.ID, since, now)
 
-	if n := after["done count"]; n != 1 {
-		t.Errorf("done count after restoring the newer conversion = %v, want 1 (the older conversion is the file now)", n)
+	if n := after["done count"]; n != 0 {
+		t.Errorf("done count after restoring the newer conversion = %v, want 0 (the file is skipped, not done)", n)
 	}
-	for k := range first {
-		if !reflect.DeepEqual(after[k], first[k]) {
-			t.Errorf("%s after restoring the newer conversion = %+v, want %+v (as after the older one)", k, after[k], first[k])
-		}
+	if reflect.DeepEqual(after, first) {
+		t.Error("restoring the newer conversion changed no count: the test would prove nothing")
 	}
 }

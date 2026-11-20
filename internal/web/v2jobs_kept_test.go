@@ -102,11 +102,11 @@ func TestV2JobsKeptFilterOnTheCompletedTab(t *testing.T) {
 	if _, total, names := get("tab=completed&kept=1&limit=2&offset=2"); total != 3 || len(names) != 1 {
 		t.Errorf("kept=1 page 2 of 2: total %d, %d names %v, want total 3 and one row", total, len(names), names)
 	}
-	if _, total, _ := get("tab=completed&kept=0"); total != 6 {
-		t.Errorf("kept=0: total %d, want every done file (6)", total)
+	if _, total, _ := get("tab=completed&kept=0"); total != 5 {
+		t.Errorf("kept=0: total %d, want every done file but the restored one (5)", total)
 	}
-	if _, total, _ := get("tab=completed"); total != 6 {
-		t.Errorf("no kept param: total %d, want 6", total)
+	if _, total, _ := get("tab=completed"); total != 5 {
+		t.Errorf("no kept param: total %d, want 5 (restored.mkv is skipped, not done)", total)
 	}
 	for _, tab := range []string{"waiting", "failed", "skipped", "running"} {
 		if code, _, _ := get("tab=" + tab + "&kept=1"); code != 400 {
