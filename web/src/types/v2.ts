@@ -281,6 +281,15 @@ export interface StepDefinition {
   source: { kind: "builtin" } | { kind: "plugin"; pluginId: ID; pluginVersion: string };
   deprecated?: boolean;
   readOnly?: boolean; // migration-only types (video.legacy_settings): kept as they are, never edited (workshop #109)
+  // The card contract (docs/architecture/flow-builder.md section 1; FB1a): what the step does, where it may sit in a
+  // run, what it publishes and needs, the file's state on each output port, and whether this build runs it. Optional
+  // until every server sends them.
+  runsAs?: "input" | "question" | "action" | "plan" | "verify" | "commit" | "end";
+  phase?: ("before" | "convert" | "check" | "save" | "after")[];
+  publishes?: { name: string; type: "string" | "number" | "bool" | "list"; words: string }[];
+  reads?: string[];
+  fileOn?: Record<string, "original" | "staged" | "saved" | "none">;
+  available?: boolean;
 }
 
 // Enrollment (ONE-COMMAND-SETUP.md section 11; workshop 00:42Z): GET /api/v2/setup, /setup/servers, POST /setup/role
