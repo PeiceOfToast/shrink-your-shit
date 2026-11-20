@@ -197,7 +197,7 @@ export function Jobs() {
             <tr key={j.id} className={sel.includes(j.id) ? "sel" : undefined}>
               <td className="selc"><label className="hit"><input type="checkbox" aria-label={"Select " + j.name} checked={sel.includes(j.id)} onChange={(e) => setSel(e.target.checked ? [...sel, j.id] : sel.filter((x) => x !== j.id))} /></label></td>
               {tab === "waiting" && <td className="posc" title={j.position != null ? "Place " + j.position + " in the queue" : "Not taken now"}>{j.position ?? "—"}</td>}
-              <td className="tile"><span className="ltile codec" aria-hidden="true">{tileOf(j)}</span></td>
+              <td className="tile"><span className="ltile codec">{tileOf(j)}</span></td>
               <td className="idc">
                 <div className="lname"><a className="ttl" href={"/jobs?tab=" + tab + "&job=" + encodeURIComponent(key(j))} data-job={key(j)} title={j.path}
                   onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); go(tab, key(j)); } }}><FileName n={j.name} /></a>
