@@ -1168,9 +1168,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	removePlaced := func() { // the swap did not happen: the .srt files we put beside it go again
 		w.removeSidecars(job.ID, placed)
 	}
-	swapped := func() { // the swap is done: the .srt files stay; their record goes
-		if w.Sidecars != nil && len(placed) > 0 {
-			w.Sidecars.DropSidecars(job.ID)
+	swapped := func() { // the swap is done: the .srt files stay, the job keeps their names; their record goes
+		if w.Sidecars != nil {
+			w.Sidecars.FinishSidecars(job.ID)
 		}
 	}
 	days := 0
@@ -1233,7 +1233,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 // (jobs.Store), so a crash in between leaves nothing of ours behind (RecoverSidecars).
 type SidecarJournal interface {
 	AddSidecars([]jobs.Sidecar) error
-	DropSidecars(jobID int64) error
+	FinishSidecars(jobID int64) error
 	DropSidecar(jobID int64, path string) error
 	Sidecars() ([]jobs.Sidecar, error)
 }
