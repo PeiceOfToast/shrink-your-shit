@@ -1,15 +1,27 @@
 // The variable list for the workflow editor's {{name}} fields (?mock=1). Names and groups are the contract's flat list
 // (slices/design-joblog-vars.md section 2); the values are for the sample file Movie (2019).mkv. A run-time name with no
 // value here shows as empty in the example, as the page does for a file that has none.
+import type { Variable } from "../types/v2";
+
 export interface TemplateVar { name: string; description: string; group: string; value: string | null; fields: string[] | null }
 export interface VarList { sample: { path: string; builtIn: boolean }; variables: TemplateVar[] }
 
 const v = (name: string, group: string, description: string, value: string | null): TemplateVar => ({ name, description, group, value, fields: null });
 
-export function mockVariables(): VarList {
+// own: the workflow's own variables (its draft's list). The server lists them last, group "Workflow"; a secret's value is never sent.
+export function mockVariables(own: Variable[] = []): VarList {
   return {
-    sample: { path: "/media/Movie (2019).mkv", builtIn: false },
+    sample: { path: "/media/Movie (2019).mkv", builtIn: true },
     variables: [
+      ...builtIns(),
+      ...own.map((x) => v(x.name, "Workflow", x.description ?? "", x.type === "secret" || x.value == null ? null : String(x.value))),
+    ],
+  };
+}
+
+// The engine's built-in names, as the server lists them (the field-only ones are left off the list; checkVariables still refuses them).
+function builtIns(): TemplateVar[] {
+  return [
       v("title", "File", "The file name without its extension", "Movie (2019)"),
       v("file_name", "File", "The file name with its extension", "Movie (2019).mkv"),
       v("ext", "File", "The file's extension", "mkv"),
@@ -38,6 +50,5 @@ export function mockVariables(): VarList {
       v("output_path", "Run", "Where the new file was saved", null),
       v("new_size_bytes", "Run", "The new file's size in bytes", null),
       v("saved_percent", "Run", "How much smaller the new file is", null),
-    ],
-  };
+  ];
 }

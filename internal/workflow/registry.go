@@ -187,7 +187,7 @@ func Definitions() []StepDefinition {
 				"policy": withDefault(hinted(enum([]any{"separate_folder", "replace", "beside"},
 					[]string{"Save to a separate folder", "Replace the original", "Put the new file next to the original"}), []string{
 					"New files go to the folder below, in the same sub-folders. Your originals aren't changed, so no space is freed until you remove them yourself.",
-					"The original is kept for 7 days (Settings > Safety), then deleted. This frees space. You can get an original back from its job.",
+					"The original is kept for the days set in Settings > Safety, then deleted. This frees space. You can get an original back from its job.",
 					"Both stay. Nothing is deleted."}), "separate_folder", "Save the result", ""),
 				"folderMode": described(withDefault(hinted(enum([]any{"next_to_library", "one_folder"}, []string{"Next to each library", "One folder for all"}), []string{
 					"Each library gets a folder beside it, e.g. /media/movies (shrunk). Same disk, and it works when one workflow serves several libraries.",
@@ -207,7 +207,7 @@ func Definitions() []StepDefinition {
 				// not saved when "keep"; "replace" saves it anyway. An absent value reads as replace (old workflows).
 				"ifBigger": withDefault(hinted(enum([]any{"keep", "replace"}, []string{"Keep the original", "Replace anyway"}), []string{
 					"The new file is thrown away and the original stays exactly as it is. Applies to every choice above.",
-					"The new file is saved even though it is bigger. The original is kept for 7 days (Settings > Safety), then deleted."}),
+					"The new file is used even though it is bigger. If it replaces the original, the original is kept for the days set in Settings > Safety, then deleted."}),
 					"keep", "If the new file is bigger than the original", ""),
 			}, []string{"policy"})}),
 		def(StepDefinition{Type: TypeLegacy, Category: "video", Name: "Earlier install's settings", Icon: "history", TypeLabel: "Video",
