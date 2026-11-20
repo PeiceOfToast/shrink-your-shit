@@ -237,8 +237,25 @@ func (s *staged) intact() error {
 	return nil
 }
 
-// remove deletes the staging folder and whatever is left in it.
-func (s *staged) remove() { os.RemoveAll(s.dir) }
+// remove deletes the staging folder and whatever is left in it. It returns the bytes its files held before
+// the removal (log-spec R14: the job log says what the cleanup held) and an error if the folder is still there.
+func (s *staged) remove() (int64, error) {
+	var bytes int64
+	if entries, err := os.ReadDir(s.dir); err == nil {
+		for _, e := range entries {
+			if fi, err := e.Info(); err == nil && fi.Mode().IsRegular() {
+				bytes += fi.Size()
+			}
+		}
+	}
+	err := os.RemoveAll(s.dir)
+	if err == nil {
+		if _, lerr := os.Lstat(s.dir); lerr == nil {
+			err = fmt.Errorf("%s is still there", s.dir)
+		}
+	}
+	return bytes, err
+}
 
 // sweepOne removes the staging folder p if it holds nothing but our temp file and extracted subtitles
 // (else it is left alone, and logged); true when it was removed.

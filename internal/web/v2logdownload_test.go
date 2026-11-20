@@ -4,6 +4,7 @@ package web
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -17,15 +18,17 @@ func sampleJob() (jobs.Job, []jobs.LogLine) {
 		SizeBefore: 4012345678, SizeAfter: 1500000000, OutputPath: "/m/Holiday Trip 2026.mkv"}
 	lines := []jobs.LogLine{
 		{Seq: 1, At: "2026-11-20T05:00:00.000Z", Section: "start", Level: jobs.LevelInfo, Stream: "app", Text: "Job 42 started"},
-		{Seq: 2, At: "2026-11-20T05:00:01.250Z", Section: "input", Level: jobs.LevelInfo, Stream: "app", Text: "Size: 4,012,345,678 bytes (3.7 GiB)"},
+		{Seq: 2, At: "2026-11-20T05:00:01.250Z", Section: "input", Level: jobs.LevelInfo, Stream: "app", Text: "Size: 4,012,345,678 bytes (4.0 GB)"},
 		{Seq: 3, At: "2026-11-20T05:00:01.500Z", Section: "step:1:Convert video", Level: jobs.LevelInfo, Stream: "app", Text: "Convert video: H.264 becomes HEVC at CRF 23."},
 		{Seq: 4, At: "2026-11-20T05:00:01.600Z", Section: "step:2:Audio", Level: jobs.LevelInfo, Stream: "app", Text: "Keep 2 tracks as they are."},
 		{Seq: 5, At: "2026-11-20T05:00:01.700Z", Section: "step:3:Audio (2)", Level: jobs.LevelInfo, Stream: "app", Text: "Convert 1 to AAC."},
 		{Seq: 6, At: "2026-11-20T05:00:02.000Z", Section: "encode", Level: jobs.LevelInfo, Stream: "app", Text: "Encode started"},
 		{Seq: 7, At: "2026-11-20T05:01:10.500Z", Section: "encode", Level: jobs.LevelInfo, Stream: "stderr", Text: "frame= 100 fps=25"},
-		{Seq: 8, At: "2026-11-20T05:02:00.000Z", Section: "output", Level: jobs.LevelWarning, Stream: "app", Text: "a little damage in the output"},
-		{Seq: 9, At: "2026-11-20T05:02:05.000Z", Section: "replace", Level: jobs.LevelInfo, Stream: "app", Text: "Moved the original aside"},
-		{Seq: 10, At: "2026-11-20T05:02:06.000Z", Section: "summary", Level: jobs.LevelInfo, Stream: "app", Text: "Converted. Saved 62.6% (2,512,345,678 bytes)."},
+		{Seq: 8, At: "2026-11-20T05:01:10.600Z", Section: "encode", Level: jobs.LevelInfo, Stream: "stderr", Text: "[h264 @ 0x55] Last message repeated 3 times (harmless: ffmpeg repeats its last message here instead of printing it again)"},
+		{Seq: 9, At: "2026-11-20T05:02:00.000Z", Section: "output", Level: jobs.LevelWarning, Stream: "app", Text: "a little damage in the output"},
+		{Seq: 10, At: "2026-11-20T05:02:05.000Z", Section: "replace", Level: jobs.LevelInfo, Stream: "app", Text: "Moved the original aside"},
+		{Seq: 11, At: "2026-11-20T05:02:05.500Z", Section: "replace", Level: jobs.LevelInfo, Stream: "app", Text: "Removed the temp folder /m/.Holiday Trip 2026.123.syp-tmp (0 bytes left in it)."},
+		{Seq: 12, At: "2026-11-20T05:02:06.000Z", Section: "summary", Level: jobs.LevelInfo, Stream: "app", Text: "Converted. Saved 62.6% (2,512,345,678 bytes)."},
 	}
 	return j, lines
 }
@@ -198,13 +201,28 @@ func TestSectionKeysAndWorkflowNameAreContractV2(t *testing.T) {
 }
 
 // The job.log event gives section, step and level on every line; a line without a level reads as info.
+// Contract "L2 addition: step sections": a step line is section "step" plus sectionStep and sectionTitle; the
+// stored form (step:<n>:<label>) never goes on the wire.
 func TestStreamLinesCarryFields(t *testing.T) {
-	out := streamLines([]jobs.LogLine{{At: "2026-11-20T05:00:00.000Z", Section: "start", Step: 0, Stream: "app", Text: "x"}})
-	if len(out) != 1 {
+	out := streamLines([]jobs.LogLine{
+		{At: "2026-11-20T05:00:00.000Z", Section: "start", Step: 0, Stream: "app", Text: "x"},
+		{At: "2026-11-20T05:00:01.000Z", Section: "step:2:Audio", Step: 0, Stream: "app", Text: "y"},
+	})
+	if len(out) != 2 {
 		t.Fatalf("%d lines", len(out))
 	}
 	l := out[0]
 	if l["section"] != "start" || l["level"] != jobs.LevelInfo || l["text"] != "x" {
 		t.Fatalf("line %v", l)
+	}
+	if _, ok := l["sectionStep"]; ok {
+		t.Errorf("an ordinary line has sectionStep: %v", l)
+	}
+	step := out[1]
+	if step["section"] != "step" || step["sectionStep"] != 2 || step["sectionTitle"] != "Step 2: Audio" {
+		t.Fatalf("step line %v", step)
+	}
+	if b, _ := json.Marshal(out); bytes.Contains(b, []byte("step:")) {
+		t.Fatalf("the stored section name is on the wire: %s", b)
 	}
 }

@@ -87,6 +87,8 @@ type Queue interface {
 	PutProbe(path string, size, mtime int64, info string) error
 	// RecordJobStats stores the running job's run counters (the L2 summary's passes and bytesWritten).
 	RecordJobStats(id int64, passes int, bytesWritten int64) error
+	// RecordJobMove adds one file action the replace step took, in order (the replace step's moves[]).
+	RecordJobMove(id int64, m jobs.Move) error
 }
 
 // OutputMode says what happens to the result.
@@ -121,6 +123,12 @@ type Worker struct {
 	// for the processor (or nil: the processor). A plan it can't do, and a graphics encode that fails, use the processor.
 	// note, when set, is the job-log line for a processor the worker fell back to (not set for a processor by choice).
 	Encoder func(codec string, hdr *rules.HDR) (enc, note string)
+	// EncoderCandidates, when set, returns the job log's lines for the encoder choice (log-spec R5): the
+	// hardware found and one line per encoder considered, with why it was or was not used, for the plan's
+	// codec (ffmpeg's name), whether the file is 10-bit (HDR, or a 10-bit source) and its HDR data (R4's gate:
+	// a 10-bit test, and a family proven to keep HDR10's mastering data). The worker writes them and then the
+	// chosen encoder's line, in section encode.
+	EncoderCandidates func(codec string, need10 bool, hdr *rules.HDR) []string
 	// verified is the probe of the new file the last check passed (S5: stored for its final path).
 	verified media.Info
 	// movedAside is the trash sentence for our earlier output this job moved aside (Convert again). The job's kept
@@ -181,6 +189,11 @@ type Worker struct {
 	// the running job's run counters (log-spec L2 summary): the ffmpeg runs it needed and the bytes it wrote.
 	passes, bytesWritten atomic.Int64
 	statsCounting        atomic.Bool // false: this job's counters are not recorded (a remote job, whose runs are not all here)
+	// the running local encode's silence (log-spec R9's quiet warning): when ffmpeg last printed anything, read
+	// by the stall watcher; quietOn is false outside a local encode, quietWarned says the warning is written.
+	lastOutput  atomic.Int64
+	quietOn     atomic.Bool
+	quietWarned atomic.Bool
 	// Sidecars records .srt files before they are put beside a new file (slice 25b); nil: not recorded
 	// (they are still only removed while they are ours).
 	Sidecars SidecarJournal
@@ -202,6 +215,10 @@ const DefaultStallAfter = 10 * time.Minute
 // stallWarnAfter is how long the media position may stay put before the job log warns about it (log-spec R9);
 // the job itself is stopped only at StallAfter (ten minutes by default).
 const stallWarnAfter = 30 * time.Second
+
+// quietAfter is how long ffmpeg may print nothing before the job log says the conversion is still running
+// (log-spec R9's quiet warning). Unlike the stall warning it says nothing about the media position.
+const quietAfter = 60 * time.Second
 
 // RequeueJob stops job id if this worker is running it and puts it back in the queue, as a pause does:
 // the original is left untouched and the temp files removed (its library is being removed, which then
@@ -503,7 +520,7 @@ func (w *Worker) recordEncode(id int64, args []string, started time.Time, encErr
 		if strings.HasPrefix(strings.ToLower(l), "libva info:") { // the GPU driver's chatter: kept in the log, not shown as ffmpeg's output
 			stream = "info"
 		}
-		w.Queue.AppendLogLine(id, 0, secEncode, jobs.LevelInfo, stream, l)
+		w.Queue.AppendLogLine(id, 0, secEncode, jobs.LevelInfo, stream, jobs.BenignText(l)) // R8: a known harmless line says so
 	}
 	outcome := "ok"
 	if terr != nil {
@@ -516,7 +533,7 @@ func (w *Worker) recordEncode(id int64, args []string, started time.Time, encErr
 	}
 	var keys []string
 	for _, l := range lines {
-		if jobs.InfoLine(l) {
+		if jobs.InfoLine(l) || jobs.BenignNote(l) != "" { // R8: a harmless line is not a failure's reason
 			continue
 		}
 		if strings.Contains(strings.ToLower(l), "error") || strings.Contains(strings.ToLower(l), "invalid") {
@@ -684,6 +701,7 @@ func (w *Worker) watchStall(id int64) func() {
 					w.stop(id, stopStall)
 					return
 				}
+				w.quietCheck(id, w.now()) // R9: ffmpeg printing nothing for a minute
 			}
 		}
 	}()
@@ -784,9 +802,18 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	var stage *staged
 	defer func() {
-		if stage != nil {
-			stage.remove() // after a successful move only the empty folder is left
+		if stage == nil {
+			return
 		}
+		left, rerr := stage.remove() // after a successful move only the empty folder is left
+		w.recordMove(job.ID, "remove", stage.dir, "", rerr)
+		if rerr == nil {
+			w.logLine(job.ID, secReplace, jobs.LevelInfo, fmt.Sprintf("Removed the temp folder %s (%s bytes left in it).",
+				stage.dir, rules.GroupDigits(left)))
+			return
+		}
+		w.logLine(job.ID, secReplace, jobs.LevelWarning, fmt.Sprintf("Could not remove the temp folder %s: %v. It may still hold %s bytes; delete it to free the space.",
+			stage.dir, rerr, rules.GroupDigits(left)))
 	}()
 
 	// What the source looks like (and so what the new file must look like).
@@ -979,7 +1006,14 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	fellReason := ""
 	args := plan.FFmpegArgs(srcPath, tmp)
 	w.setPhase(secEncode) // the encoder choice and its notes belong to encode (log-spec section 4)
+	chosenWhy := ""
 	if w.remote == nil && w.Encoder != nil {
+		need10 := plan.Video.HDR != nil || (src.Video() != nil && src.Video().BitDepth > 8)
+		if w.EncoderCandidates != nil && !plan.Video.Copy { // R5: what hardware is here, and each encoder considered
+			for _, line := range w.EncoderCandidates(plan.Video.Codec, need10, plan.Video.HDR) {
+				w.logLine(job.ID, secEncode, jobs.LevelInfo, line)
+			}
+		}
 		want, note := w.Encoder(plan.Video.Codec, plan.Video.HDR)
 		if want != "" && !plan.Video.Copy {
 			until, paused, err := w.Queue.EncoderPaused(w.ID)
@@ -990,13 +1024,21 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			default:
 				if args, ok = plan.FFmpegArgsWith(srcPath, tmp, want); ok {
 					gpu = want
+					chosenWhy = want + " passed its test on this computer and can do this file"
 				} else {
 					w.jobf(job.ID, ": encoder %s can't do this file; using the processor", want)
 				}
 			}
 		} else if note != "" && !plan.Video.Copy {
-			w.jobf(job.ID, ": %s", note)
+			w.jobf(job.ID, ": %s", note) // why the processor: the Chosen line below follows it, without repeating it
 		}
+	}
+	if !plan.Video.Copy && w.remote == nil { // R5's last line: the encoder the real encode uses, why, and its settings
+		line := "Chosen: " + encoderWordsUsed(plan, gpu)
+		if chosenWhy != "" {
+			line += " — " + chosenWhy
+		}
+		w.logLine(job.ID, secEncode, jobs.LevelInfo, line+". Settings: "+encoderDetail(args))
 	}
 	if note := vbrAverageNote(plan.Video); note != "" {
 		w.jobf(job.ID, ": %s", note)
@@ -1049,7 +1091,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		return "", failed(goneWords, errors.Join(terr, errors.New("the original is no longer at its path")))
 	}
 	if fell && terr == nil { // the processor converted the file, so the graphics encoder was the fault: it counts
-		w.jobf(job.ID, ": %s failed (%s); converted on the processor", gpu, fellReason)
+		w.jobNote(job.ID, secEncode, jobs.LevelWarning, "%s failed (%s); converted on the processor", gpu, fellReason)
 		if paused, err := w.Queue.EncoderFell(job.ID, w.ID, gpu, fellReason); err != nil {
 			w.jobf(job.ID, ": could not record the fall-back: %v", err)
 		} else if paused {
@@ -1158,16 +1200,26 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		return "", err
 	}
 	if err := os.Chmod(tmp, before.Mode().Perm()); err != nil {
+		w.recordMove(job.ID, "chmod", tmp, tmp, err)
+		w.logLine(job.ID, secReplace, jobs.LevelWarning, fmt.Sprintf("Could not give the new file the source's permissions (%04o): %v. Your original was not touched.",
+			before.Mode().Perm(), err))
 		return "", fmt.Errorf("temp file permissions: %w", err)
 	}
+	w.recordMove(job.ID, "chmod", tmp, tmp, nil)
+	w.logLine(job.ID, secReplace, jobs.LevelInfo, fmt.Sprintf("Gave the new file the source's permissions (%04o).", before.Mode().Perm()))
 	// Its modification time and owner too (slice 23), where the system allows: media servers and
 	// backups key on the time, and the file stays the user's. Set before the swap, so the identity the
 	// swap records is the one the file keeps.
 	if err := os.Chtimes(tmp, time.Now(), before.ModTime()); err != nil {
 		w.jobf(job.ID, ": could not keep the modification time: %v", err)
 	}
-	if err := keepOwner(tmp, before); err != nil {
-		w.jobf(job.ID, ": could not keep the owner: %v", err)
+	if outcome, oerr := setOwner(tmp, before); outcome != ownerNothing { // R14: the log says what the owner came to
+		level := jobs.LevelInfo
+		if outcome != ownerKept {
+			level = jobs.LevelWarning
+		}
+		w.logLine(job.ID, secReplace, level, ownerWords(outcome, oerr))
+		w.recordMove(job.ID, "chown", tmp, tmp, oerr)
 	}
 	// On disk before any rename (R1): after a power cut the name never points at data that wasn't written.
 	if err := syncFile(tmp); err != nil {
@@ -1267,6 +1319,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 	}
 	if err := move(ctx, tmp, final, stillOK); err != nil {
+		w.recordMove(job.ID, "move", tmp, final, err)
 		removePlaced()
 		var f *FailedError
 		if errors.As(err, &f) {
@@ -1278,6 +1331,8 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 		return "", w.placeError(job.ID, placeStarted, final, retryable(failed("The new file could not be put in place, so your original was kept as it was. Press Retry.", fmt.Errorf("move result into place: %w", err)), retryGeneral)) // busy or locked
 	}
+	w.recordMove(job.ID, "move", tmp, final, nil)
+	w.logLine(job.ID, secReplace, jobs.LevelInfo, "Moved the new file into place: "+final)
 	swapped()
 	w.replaceStep(job.ID, placeStarted, false, "")
 	return final, nil
@@ -1342,6 +1397,7 @@ func (w *Worker) installSubtitles(plan rules.Plan, jobID int64, tmp, final strin
 			err = nil
 		}
 		if err != nil {
+			w.recordMove(jobID, "write_sidecar", rules.StagedSrt(tmp, k), c.Path, err)
 			if w.Sidecars != nil { // this one and the rest were never put there: their names are not ours
 				for _, u := range recs[k:] {
 					w.Sidecars.DropSidecar(jobID, u.Path)
@@ -1353,6 +1409,8 @@ func (w *Worker) installSubtitles(plan rules.Plan, jobID int64, tmp, final strin
 			}
 			return nil, retryable(failed("A subtitle file could not be put next to the new file, so nothing was changed. Press Retry.", err), retryGeneral)
 		}
+		w.recordMove(jobID, "write_sidecar", rules.StagedSrt(tmp, k), c.Path, nil)
+		w.logLine(jobID, secReplace, jobs.LevelInfo, "Wrote the subtitle file "+c.Path+" next to the new file.")
 		placed = append(placed, c)
 	}
 	return placed, nil
@@ -1365,9 +1423,12 @@ func (w *Worker) installSubtitles(plan rules.Plan, jobID int64, tmp, final strin
 func (w *Worker) removeSidecars(jobID int64, list []jobs.Sidecar) {
 	for _, c := range list {
 		if _, err := removeIfOurs(c); err != nil {
-			w.jobf(jobID, ": could not remove %s (it is kept on record and tried again): %v", c.Path, err)
+			w.recordMove(jobID, "remove", c.Path, "", err)
+			w.jobNote(jobID, secReplace, jobs.LevelWarning, "Could not remove the subtitle file %s we had put there: %v. It is kept on record and removed at the next start; delete it by hand if it stays.", c.Path, err)
 			continue
 		}
+		w.recordMove(jobID, "remove", c.Path, "", nil)
+		w.logLine(jobID, secReplace, jobs.LevelInfo, "Removed the subtitle file "+c.Path+" we had put there, because the new file was not put in place.")
 		if w.Sidecars != nil {
 			w.Sidecars.DropSidecar(jobID, c.Path)
 		}
@@ -1593,7 +1654,12 @@ func (w *Worker) moveOverOwn(ctx context.Context, jobID int64, tmp, final string
 		}
 		if lst, err := os.Lstat(final); err == nil {
 			if w.ownOutput(final, lst) {
-				return os.Remove(final) // the older generation: the original is still in the library
+				rerr := os.Remove(final) // the older generation: the original is still in the library
+				w.recordMove(jobID, "remove", final, "", rerr)
+				if rerr == nil {
+					w.logLine(jobID, secReplace, jobs.LevelInfo, "Removed our earlier converted file at "+final+"; the source is still in the library.")
+				}
+				return rerr
 			}
 			if w.setAsideable(final, lst) {
 				return w.setAside(jobID, final)
@@ -1637,8 +1703,10 @@ func (w *Worker) setAside(jobID int64, final string) error {
 		return refused(err)
 	}
 	if err := os.Rename(final, dst); err != nil {
+		w.recordMove(jobID, "move", final, dst, err)
 		return refused(err)
 	}
+	w.recordMove(jobID, "move", final, dst, nil)
 	syncDirs(final, dst)
 	w.movedAside = fmt.Sprintf("Your earlier converted file %s had been changed since it was made, so it was moved to the trash (%s) and the new file took its place.", name, filepath.Join(TrashDir, filepath.Base(dst)))
 	w.Queue.AppendLogLine(jobID, 0, secReplace, jobs.LevelWarning, "app", w.movedAside)
@@ -1903,7 +1971,8 @@ func encoderDetail(args []string) string {
 		return ""
 	}
 	quality := "none"
-	for _, f := range []string{"-global_quality", "-crf", "-cq", "-qp", "-b:v"} {
+	// -qp_i is AMF's intra quality (-rc cqp -qp_i <n> -qp_p <n>): without it an AMF job said "none".
+	for _, f := range []string{"-global_quality", "-crf", "-cq", "-qp", "-qp_i", "-b:v"} {
 		if v := argOf(f); v != "" {
 			quality = f + " " + v
 			break
@@ -1967,11 +2036,14 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 	frames := int64(-1) // the last frame count ffmpeg reported
 	wrote := int64(0)   // the most bytes it reported writing in this attempt (the run counters, L2)
 	stopWatch := w.watchStall(job.ID)
+	w.quietOn.Store(true) // R9's quiet warning: the stall watcher checks it with this clock
+	w.outputSeen(w.now())
+	defer w.quietOn.Store(false)
 	var tenths progressLines
 	at := -1.0       // the furthest position ffmpeg has reached
 	moved := w.now() // when it last moved (a warning says so after stallWarnAfter, R9)
 	stalled := false // the warning has been written; one line says when it moves again
-	encErr, terr = media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
+	encErr, terr = media.TranscodeLines(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
 		frames = p.Frame
 		if p.TotalSize > wrote {
 			wrote = p.TotalSize
@@ -1999,7 +2071,7 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 		if line := tenths.next(p); line != "" {
 			w.jobf(job.ID, ": %s", line)
 		}
-	})
+	}, func() { w.outputSeen(w.now()) })
 	stopWatch()
 	w.addPass()       // an ffmpeg run the job needed, whatever came of it (a retry is another)
 	w.addBytes(wrote) // what this attempt wrote

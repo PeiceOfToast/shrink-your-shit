@@ -180,6 +180,18 @@ func (c *Checker) tested(ctx context.Context, maxAge time.Duration) (Tools, map[
 	}
 }
 
+// Probes is the last test run's results by encoder (a copy): what failed and ffmpeg's last error line for it.
+// Empty when no test ran. The job log's encoder choice quotes a failed test's reason from it (log-spec R5).
+func (c *Checker) Probes() map[string]Probe {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make(map[string]Probe, len(c.probes))
+	for k, v := range c.probes {
+		out[k] = v
+	}
+	return out
+}
+
 // Probe is one encoder's test encode: how long it took, and ffmpeg's last error line when it failed.
 type Probe struct {
 	OK   bool
