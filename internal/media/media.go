@@ -403,6 +403,7 @@ type Progress struct {
 	BitrateKbps float64
 	Speed       float64
 	ETASeconds  float64
+	TotalSize   int64 // bytes of the new file written so far (total_size=); 0 when ffmpeg says N/A
 }
 
 // Transcode runs ffmpeg and reports each progress point through onProgress (on every out_time_us line,
@@ -425,6 +426,8 @@ func Transcode(ctx context.Context, x Exec, ffmpeg string, args []string, durati
 			p.BitrateKbps, _ = strconv.ParseFloat(strings.TrimSuffix(v, "kbits/s"), 64)
 		case "speed": // "1.25x", or "N/A"
 			p.Speed, _ = strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(v, "x")), 64)
+		case "total_size": // "123456", or "N/A": the bytes of the new file ffmpeg has written so far
+			p.TotalSize, _ = strconv.ParseInt(strings.TrimSpace(v), 10, 64)
 		}
 		if k != "out_time_us" {
 			return
