@@ -342,21 +342,14 @@ func ParseProbe(data []byte) (Info, error) {
 	// The headline codec and bitrate are the main picture's, not cover art's (R5): a cover image is a
 	// video stream with attached_pic, and judging a file by it said "mjpeg / no bitrate". A file whose
 	// only video stream is a cover keeps the first video stream's reading: there is no main picture.
-	main, first := -1, -1
-	for i, st := range info.Streams {
-		if st.Type != "video" {
-			continue
-		}
-		if first < 0 {
-			first = i
-		}
-		if !st.AttachedPic {
-			main = i
-			break
-		}
-	}
+	main := info.MainVideoIndex()
 	if main < 0 {
-		main = first
+		for i, st := range info.Streams {
+			if st.Type == "video" {
+				main = i
+				break
+			}
+		}
 	}
 	if main < 0 {
 		return Info{}, fmt.Errorf("no video stream")
