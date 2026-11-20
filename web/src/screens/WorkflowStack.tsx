@@ -3,7 +3,7 @@
 // words and problems come from the server's validate, asked again shortly after each change. Not here: drag to reorder
 // (W11's handle, behind a flag) and the graph's keyboard moves, Test run (V5), History, Export, Open graph (V4).
 import { PageHead } from "../PageHead";
-import { Component, Fragment, createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { Component, Fragment, createContext, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
 import { deleteNode, groupOf, insertAfter, moveNode, newNode, order } from "../stepEdits"; // the steps in running order: a property of the document, not data
@@ -11,9 +11,11 @@ import { useData } from "../useData";
 import { getDraft, getLadder, getWorkflow, listTemplates, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
 import { Link, navigate, onLeave } from "../router";
 import { Browse } from "../FolderPicker";
-import { VarInput, takesVars, varListFor, varProblems } from "../VarInput";
+import { OwnVars, VarInput, takesVars, varListFor, varProblems, withOwn } from "../VarInput";
+import "../styles/variables.css";
 import { getSettings, listLibraries, shrunk } from "../libraryApi";
-import type { AddStep, ID, JSONSchema, Node, PublishPreview, StepDefinition, ValidationIssue, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
+import type { TemplateVar } from "../mock/variables";
+import type { AddStep, ID, JSONSchema, Node, PublishPreview, StepDefinition, ValidationIssue, Variable, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
 
 // The step definitions and the server's words for each step of the document being edited.
 // libs: the folders of the libraries that use this workflow, for "Next to each library" (V5a).
@@ -385,7 +387,95 @@ function StackPage({ id }: { id: string }) {
   return <Editor id={id} w={meta.data} defs={defs.data} first={draft.data} reloadMeta={meta.reload} />;
 }
 
-function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; defs: StepDefinition[]; first: WorkflowRevision; reloadMeta: () => void }) {
+// The {{name}} references in a workflow's fields: name -> the steps that use it ("Used by", and the delete warning).
+function usedBy(nodes: Node[], defs: StepDefinition[]) {
+  const out = new Map<string, Node[]>();
+  for (const n of nodes) {
+    const props = (defs.find((d) => d.type === n.type)?.configSchema.properties ?? {}) as Record<string, { "x-variables"?: unknown }>;
+    for (const [k, s] of Object.entries(props)) {
+      if (s["x-variables"] !== true) continue;
+      for (const m of String(n.config?.[k] ?? "").matchAll(/\{\{\s*([^{}]*?)\s*\}\}/g)) {
+        const list = out.get(m[1]) ?? [];
+        if (!list.includes(n)) list.push(n);
+        out.set(m[1], list);
+      }
+    }
+  }
+  return out;
+}
+
+// The workflow's own variables: a table (name, value, where it comes from, the steps that use it), an add form, and a
+// box for fields that use a name that isn't a variable. Changes go through edit(), so undo and Save draft cover them.
+const NAME = /^[a-z][a-z0-9_]{0,39}$/;
+function VariablesCard({ doc, defs, builtins, problems, edit, open }: { doc: WorkflowDoc; defs: StepDefinition[]; builtins: TemplateVar[]; problems: { nodeId: string; title: string; code: string; name: string; error: string }[]; edit: (d: WorkflowDoc, run?: string) => void; open: (nodeId: string) => void }) {
+  const [name, setName] = useState(""), [val, setVal] = useState(""), [what, setWhat] = useState(""), [err, setErr] = useState("");
+  const [shown, setShown] = useState(false); // closed by default; opens by itself when a field uses an unknown name
+  const [editing, setEditing] = useState<string | null>(null); // the row whose description is open for editing
+  const vars = doc.variables ?? [], used = usedBy(doc.nodes, defs), titleOf = (n: Node) => defs.find((d) => d.type === n.type)?.name ?? n.type;
+  const unknown = problems.filter((p) => p.code === "unknown_variable"), bad = unknown.length > 0;
+  useEffect(() => { if (bad) setShown(true); }, [bad]);
+  const setVars = (list: Variable[], run?: string) => edit({ ...doc, variables: list }, run);
+  const add = (e: FormEvent) => {
+    e.preventDefault();
+    const n = name.trim(), b = builtins.find((v) => v.name === n);
+    const msg = !NAME.test(n) ? "Use lowercase letters, numbers and _, starting with a letter."
+      : b ? `{{${n}}} is already a built-in variable (${b.description.charAt(0).toLowerCase() + b.description.slice(1)}). Pick another name.`
+      : vars.some((v) => v.name === n) ? `{{${n}}} already exists. Edit it instead.` : "";
+    setErr(msg);
+    if (msg) return;
+    setVars([...vars, { name: n, type: "string", value: val === "" ? undefined : val, description: what.trim() || undefined }]);
+    setName(""); setVal(""); setWhat("");
+  };
+  const remove = (n: string) => {
+    const by = used.get(n) ?? [];
+    if (by.length && !window.confirm(`${by.map(titleOf).join(" and ")} use {{${n}}}. Delete it anyway? Those fields will show an error until you change them.`)) return;
+    setVars(vars.filter((v) => v.name !== n));
+  };
+  // Used by, and the warning box: open the step's options and focus the field that uses the variable ({{ name }} counts too)
+  const openField = (nodeId: string, name: string) => {
+    open(nodeId);
+    const uses = new RegExp("\\{\\{\\s*" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\}\\}");
+    setTimeout(() => {
+      const ins = [...document.querySelectorAll<HTMLInputElement>(`#${CSS.escape(nodeId)}-opts input[role=combobox]`)];
+      (ins.find((i) => uses.test(i.value)) ?? ins[0])?.focus();
+    }, 0);
+  };
+  return (
+    <section className="card" aria-labelledby="vars-h">
+      <div className="hd"><h2 id="vars-h">Variables</h2><span className="muted sm">{used.size} used here · {vars.length} set here</span>
+        <button className="btn sm ghost" type="button" aria-expanded={shown} aria-controls="vars-body" onClick={() => setShown(!shown)}>{shown ? "Hide" : "Show"}</button></div>
+      <div id="vars-body" className="bd stack" hidden={!shown}>
+        {bad && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{unknown.length === 1 ? "1 field uses a name that isn't a variable" : unknown.length + " fields use a name that isn't a variable"}: {unknown.map((p, i) => <span key={i}>{i > 0 && ", "}<button className="linkbtn" type="button" onClick={() => openField(p.nodeId, p.name)}>{p.title}</button></span>)}</span></p>}
+        <p className="muted sm">Values set in Settings apply to every workflow. A value set here wins for this workflow. A value typed straight into a step wins over both.</p>
+        {vars.length === 0 ? <p className="muted">No variables yet. Add one below, then use it in a field as {"{{name}}"}.</p>
+          : <table className="tbl vars-tbl">
+            <thead><tr><th scope="col">Name</th><th scope="col">Value</th><th scope="col">Comes from</th><th scope="col">Used by</th><th scope="col"><span className="sr">Action</span></th></tr></thead>
+            <tbody>{vars.map((v) => {
+              const by = used.get(v.name) ?? [];
+              return (
+                <tr key={v.name}>
+                  <th scope="row"><code>{"{{" + v.name + "}}"}</code>{editing === v.name
+                    ? <input className="input" autoFocus aria-label={"Description of {{" + v.name + "}}"} value={v.description ?? ""} onChange={(e) => setVars(vars.map((x) => (x.name === v.name ? { ...x, description: e.target.value } : x)), "desc:" + v.name)} />
+                    : v.description && <span className="muted sm" style={{ display: "block" }}>{v.description}</span>}</th>
+                  <td data-label="Value"><input className="input" aria-label={"Value of {{" + v.name + "}}"} value={String(v.value ?? "")} onChange={(e) => setVars(vars.map((x) => (x.name === v.name ? { ...x, value: e.target.value } : x)), "value:" + v.name)} /></td>
+                  <td><span className="pill vars-pill-own">This workflow</span></td>
+                  <td data-label="Used by">{by.length ? by.map((n, i) => <span key={n.id}>{i > 0 && ", "}<button className="linkbtn" type="button" onClick={() => openField(n.id, v.name)}>{titleOf(n)}</button></span>) : <span className="muted">Not used yet</span>}</td>
+                  <td><button className="btn sm ghost" type="button" aria-expanded={editing === v.name} aria-label={"Edit {{" + v.name + "}} description"} onClick={() => setEditing(editing === v.name ? null : v.name)}>{editing === v.name ? "Done" : "Edit"}</button>{" "}<button className="btn sm ghost" type="button" aria-label={"Delete {{" + v.name + "}}"} onClick={() => remove(v.name)}>Delete</button></td>
+                </tr>);
+            })}</tbody>
+          </table>}
+        <form className="row vars-add" onSubmit={add} noValidate aria-label="Add a variable">
+          <div className="field"><label htmlFor="var-name">Name</label><input id="var-name" className="input" value={name} onChange={(e) => (setName(e.target.value), setErr(""))} aria-describedby={err ? "var-err" : undefined} /></div>
+          <div className="field"><label htmlFor="var-val">Value</label><input id="var-val" className="input" value={val} onChange={(e) => setVal(e.target.value)} /></div>
+          <div className="field"><label htmlFor="var-what">What it's for (optional)</label><input id="var-what" className="input" value={what} onChange={(e) => setWhat(e.target.value)} /></div>
+          <button className="btn" type="submit">Add variable</button>
+          {err && <span id="var-err" className="st bad" role="alert"><Icon id="i-alert" /><span>{err}</span></span>}
+        </form>
+      </div>
+    </section>);
+}
+
+function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; defs: StepDefinition[]; first: WorkflowRevision; reloadMeta: () => void }) {
   const [etag, setEtag] = useState(first.etag), layout = first.layout;
   const [hist, setHist] = useState<{ docs: WorkflowDoc[]; at: number }>({ docs: [first.workflow], at: 0 });
   const [saved, setSaved] = useState(first.workflow);
@@ -399,7 +489,7 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
   const doc = hist.docs[hist.at], dirty = doc !== saved;
   const all = useData(listLibraries, []), libs = (all.data ?? []).filter((l) => l.flowId === id).map((l) => l.path);
   // {{name}} fields with a bad name (or an unclosed {{): Publish waits for them, once the variable list has loaded
-  const tv = takesVars(defs), vl = useData(() => varListFor(id, tv), [id, tv]).data, varBad = vl ? varProblems(doc.nodes, defs, vl.variables) : [];
+  const tv = takesVars(defs), vl = useData(() => varListFor(id, tv), [id, tv]).data, varBad = vl ? varProblems(doc.nodes, defs, withOwn(vl.variables, doc.variables ?? [])) : [];
   // The server's words and problems for the document as it is now (nothing saved): asked 300 ms after a change.
   const ask = async (d: WorkflowDoc) => { const r = await act(validateDoc(id, d), setSaid); if (r) setLive(r); return r; };
   const seen = useRef<WorkflowDoc | null>(null); // null: the first check runs on load, so the list has the server's places and add rules
@@ -424,7 +514,14 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
-  const edit = (d: WorkflowDoc) => (setHist({ docs: [...hist.docs.slice(0, hist.at + 1), d], at: hist.at + 1 }), setChecked(false), setPanel(null), setSaid(""), setGone(null));
+  // A run of typing in one variable's value (the same run key) writes into one history entry, so Undo takes back the whole run.
+  const typing = useRef<{ run: string; at: number } | null>(null);
+  const edit = (d: WorkflowDoc, run?: string) => {
+    const t = typing.current;
+    if (run && t && t.run === run && t.at === hist.at) setHist({ docs: hist.docs.map((x, i) => (i === hist.at ? d : x)), at: hist.at });
+    else { typing.current = run ? { run, at: hist.at + 1 } : null; setHist({ docs: [...hist.docs.slice(0, hist.at + 1), d], at: hist.at + 1 }); }
+    setChecked(false); setPanel(null); setSaid(""); setGone(null);
+  };
   const update = (n: Node) => edit({ ...doc, nodes: doc.nodes.map((x) => (x.id === n.id ? n : x)) });
   // "Start from Shrink videos": the template's whole document as one edit, so Undo (the note below) takes it back
   const starting = useRef(false); // a second click while the first is loading does nothing
@@ -493,6 +590,7 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
   const list = order(doc), total = list.length, tailOut = list[total - 1]?.type === "output.commit", lastMovable = total - 1 - (tailOut ? 1 : 0), only = total <= 1;
   return (
     <Reg.Provider value={{ defs, words: live.stepSummaries, libs, wf: id }}>
+    <OwnVars.Provider value={doc.variables ?? []}>
     <div className="stack">
       {/* the workflow's header row (clean pass W2) */}
       <PageHead icon="i-workflow" crumbs={[["Workflows", "/workflows"]]}
@@ -531,6 +629,8 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
         </div></section>)}
 
       {canStack ? <>
+        {/* no field takes variables yet (the server marks none): show the card only if the draft already has some, so they can still be seen and deleted */}
+        {(tv || (doc.variables ?? []).length > 0) && <VariablesCard doc={doc} defs={defs} builtins={vl?.variables ?? []} problems={varBad} edit={edit} open={(n) => setOpen(n)} />}
         {only && <div className="note"><Icon id="i-info" /><div className="stack" style={{ gap: 6 }}>
           <strong>This workflow has no steps yet</strong>
           <span>Every workflow starts with Library files: the videos from the libraries that use it. Add what should happen to them next.</span>
@@ -552,5 +652,6 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
           <Icon id="i-undo" /><span className="sp">{gone.text}</span><button className="btn sm ghost" type="button" onClick={undoGone}>Undo</button></div>}
       </> : <ReadOnly doc={doc} id={id} />}
     </div>
+    </OwnVars.Provider>
     </Reg.Provider>);
 }
