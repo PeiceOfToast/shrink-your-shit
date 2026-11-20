@@ -6,7 +6,7 @@ import { Empty, LoadFailed, PageHead } from "../PageHead";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
-import { addLibrary, checkFolder, firstFiles, getLibraryV2, getSettings, listLibraries, listLibrariesV2, listWorkflows, patchLibrary, patchLibraryV2, removeLibrary, scanLibrary, setLibraryWorkflow, type WorkflowChoice } from "../libraryApi";
+import { addLibrary, checkFolder, convertEarlierAgain, getEarlierWorkflow, firstFiles, getLibraryV2, getSettings, listLibraries, listLibrariesV2, listWorkflows, patchLibrary, patchLibraryV2, removeLibrary, scanLibrary, setLibraryWorkflow, type WorkflowChoice } from "../libraryApi";
 import { listJobs } from "../jobsApi";
 import { Link, navigate, useSearch } from "../router";
 import { Browse } from "../FolderPicker";
@@ -305,6 +305,7 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
       {v && notStarted(v) && <p className="muted" role="note">This library isn't started yet: nothing is looked for or converted until you press Scan now.</p>}
       {v && paused(v) && <p className="muted" role="note">While paused, its files wait in the queue and aren't converted. Scans add no new files. Files already converting finish.</p>}
       {v && shareWait(v) && <p className="muted" role="note">Share not connected yet. Its files wait in the queue and aren't converted until {shareName(v)} connects.</p>}
+      {l && <EarlierWorkflow id={l.id} />}
       {l && <nav className="tabs" aria-label="Library sections">
         {[["general", "General"], ["discovery", "Discovery"], ["output", "Output"]].map(([k, t]) =>
           <Link key={k} to={"/libraries/" + l.id + (k === "general" ? "" : "?tab=" + k)} aria-current={tab === k ? "page" : undefined}>{t}</Link>)}
@@ -343,6 +344,40 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
 // Remove a library (one-UI gap G1; design SCREENS, 19:08Z): at the bottom of the General tab. The question says only
 // what applies (waiting files, the file being converted, converted files); Keep it has the focus and Escape. After:
 // the Libraries list, with the line saying nothing in the folder changed. A 409 (busy) keeps the question, in its words.
+// Contract 088aa569: a quiet line, never a popup, when files were converted with an earlier workflow; the dialog shows
+// what the server counted (possible / not possible with reasons) and only its button queues them.
+function EarlierWorkflow({ id }: { id: string }) {
+  const e = useData(() => getEarlierWorkflow(id), [id]), opener = useRef<HTMLButtonElement>(null);
+  const [ask, setAsk] = useState(false), [busy, setBusy] = useState(false), [err, setErr] = useState(""), [said, setSaid] = useState("");
+  const n = e.data && !failed(e.data) ? e.data : null; // an error (an older server) shows nothing: there is nothing to offer
+  const back = () => (setAsk(false), opener.current?.focus());
+  const go = async () => {
+    setErr(""); setBusy(true);
+    try {
+      const r = await act(() => convertEarlierAgain(id), setErr);
+      if (!r) return;
+      setAsk(false);
+      setSaid([plural(r.queued, "file", "files") + " put back in the queue.", ...r.notPossible.map((x) => "Not " + plural(x.count, "file", "files") + ": " + x.message)].join(" "));
+      e.reload();
+    } finally { setBusy(false); }
+  };
+  if (!n?.possible) return said ? <p className="muted" role="status">{said}</p> : null;
+  return <div className="stack">
+    <p className="muted" role="note">{plural(n.earlier, "file was", "files were")} converted with an earlier workflow. <button ref={opener} className="btn sm ghost" type="button" aria-expanded={ask} onClick={() => (setErr(""), setAsk(!ask))}>Convert them again…</button></p>
+    {ask && <div role="alertdialog" aria-labelledby="ea-q" aria-describedby="ea-d" className="stack" onKeyDown={(k) => k.key === "Escape" && (k.stopPropagation(), back())}
+      style={{ padding: 12, border: "1px solid var(--border-strong)", borderRadius: "var(--radius)", background: "var(--raised)" }}>
+      <strong id="ea-q">Convert {plural(n.possible, "file", "files")} again?</strong>
+      <div id="ea-d"><p style={{ margin: "0 0 6px" }}>Each starts from its original with this library's current workflow, never from the new file. The earlier new file is replaced once the new one passes its check.</p>
+        {n.notPossible.length > 0 && <ul style={{ margin: 0, paddingLeft: 18 }}>
+          {n.notPossible.map((x) => <li key={x.code}>{plural(x.count, "file", "files")} can't: {x.message}</li>)}
+        </ul>}</div>
+      {err && <p className="st bad" role="alert" style={{ whiteSpace: "normal" }}><Icon id="i-alert" /><span>{err}</span></p>}
+      <div className="row"><button className="btn primary" type="button" autoFocus disabled={busy} onClick={go}>Convert {plural(n.possible, "file", "files")} again</button>
+        <button className="btn ghost" type="button" onClick={back}>Cancel</button></div>
+    </div>}
+  </div>;
+}
+
 function RemoveSection({ l, v }: { l: LibraryItem; v: Library }) {
   const [ask, setAsk] = useState(false), [err, setErr] = useState(""), [busy, setBusy] = useState(false), opener = useRef<HTMLButtonElement>(null);
   const back = () => (setAsk(false), opener.current?.focus()); // Escape and Keep it: the focus goes back to the button that opened the question (review d2e81ef P3)
