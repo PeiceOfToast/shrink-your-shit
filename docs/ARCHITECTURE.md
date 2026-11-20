@@ -36,8 +36,9 @@ rule the scanner matches with and the CRF, preset and output mode the worker use
 
 - A library added on the web page (`POST /api/libraries`) gets a slider flow at the chosen position
   and starts **not started**: nothing is scanned or queued until `POST /api/libraries/{id}/scan`.
-- `-library`/`SYP_LIBRARIES` (and Docker's `/media`) add a library only when no library has that
-  folder. What it gets depends on the install, decided once by migration 3 (`app_meta` `install`):
+- `-library`/`SYP_LIBRARIES` add a library only when no library has that folder. The Docker image no
+  longer sets one: mount a folder and add it on the web page, or set `SYP_LIBRARIES` yourself.
+  What it gets depends on the install, decided once by migration 3 (`app_meta` `install`):
   - **fresh install** (a new database): the library is **not started** and gets a slider flow
     (Balanced) named after it; first-run shows it pre-filled and nothing is converted before Start
     (DESIGN/FIRST-RUN.md). The global `-crf`/`-preset`/... flags do not apply.
@@ -77,7 +78,7 @@ rule the scanner matches with and the CRF, preset and output mode the worker use
   only if all of it is valid. Read-only fields (`authRequired`, `trashPath`, `updateAvailable`) are
   ignored in a PATCH; `integrations` is refused until its slice. When settings are first created they
   follow the install kind (migration 3): a fresh install starts at Basic with first-run to do, even
-  with libraries from `-library` or Docker's `/media`; an upgrade starts at Standard with first-run
+  with libraries from `-library` or `SYP_LIBRARIES`; an upgrade starts at Standard with first-run
   done (DESIGN/FIRST-RUN.md, D13). This slice stores
   `parallelJobs`, `quietHours`, `lowPriority`, `scanSchedule`, `queueOrder` and `keepOriginalsDays`;
   later slices use them.

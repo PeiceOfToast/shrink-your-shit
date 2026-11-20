@@ -21,6 +21,10 @@ func TestV2LibraryWritableField(t *testing.T) {
 		t.Skip("root can write a read-only folder; run the test as another user")
 	}
 	srv, _, _, _ := libServer(t, false)
+	// this test flips the folder's mode and reads it back, so it must not see a cached answer
+	oldTTL := writeTTL
+	writeTTL = 0
+	t.Cleanup(func() { writeTTL = oldTTL })
 	dir := filepath.Join(t.TempDir(), "movies")
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatal(err)

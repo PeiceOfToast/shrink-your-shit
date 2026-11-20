@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shrink-your-shit/shrink-your-shit/internal/doctor"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 )
 
@@ -91,9 +90,12 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine, libTotals *l
 		}
 		reachable := freeBytes(l.Path) != nil // time-limited: a hung network mount can't stall the list
 		writable, unwritable := true, ""
-		if reachable && !doctor.CanWrite(l.Path) {
-			writable = false
-			unwritable = "Can't write to this folder: " + l.Path + ". Change its owner/permissions."
+		// time-limited and cached like freeBytes: a slow folder can't stall the list, and an unanswered one is not "read-only"
+		if reachable {
+			if w, known := canWriteTimed(l.Path); known && !w {
+				writable = false
+				unwritable = "Can't write to this folder: " + l.Path + ". Change its owner/permissions."
+			}
 		}
 		status := "ok"
 		pausedBy := sharePausedBy(store, l) // D4b: a share's outage; the person's own pause stays "disabled"
