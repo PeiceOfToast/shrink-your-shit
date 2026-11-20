@@ -499,7 +499,8 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
         </div></section>)}
 
       {canStack ? <>
-        <VariablesCard doc={doc} defs={defs} builtins={vl?.variables ?? []} problems={varBad} edit={edit} open={(n) => setOpen(n)} />
+        {/* no field takes variables yet (the server marks none): show the card only if the draft already has some, so they can still be seen and deleted */}
+        {(tv || (doc.variables ?? []).length > 0) && <VariablesCard doc={doc} defs={defs} builtins={vl?.variables ?? []} problems={varBad} edit={edit} open={(n) => setOpen(n)} />}
         <ol className="steps">{order(doc).map((n, i) => (
           <Step key={n.id} n={n} i={i} open={open === n.id} toggle={() => setOpen(open === n.id ? null : n.id)} update={update} issues={issues} />))}</ol></>
         : <ReadOnly doc={doc} id={id} />}
