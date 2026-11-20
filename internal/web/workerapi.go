@@ -382,7 +382,7 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine, joins
 		if rj := runs.get(lease); rj != nil { // the stall stop (orch-lead 19:13Z): only "converting" with a position counts
 			switch {
 			case in.Stage == "converting" && in.OutTimeUs != nil:
-				rj.Converting(*in.OutTimeUs, time.Now())
+				rj.Converting(*in.OutTimeUs, time.Now(), j.DurationSec)
 				rj.SetEncoder(in.Encoder)
 			case in.Stage != "converting":
 				rj.EncodeEnded()
