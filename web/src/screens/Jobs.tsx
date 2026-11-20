@@ -328,8 +328,8 @@ const streamLines = (pr: Probe) => (pr.streams ?? []).map((x, j, all) => [x.type
 // a variable's value: "Hidden" for a secret; one value when nothing changed it; else the start, the end and the step that set it
 function varValue(v: LogVariable) {
   if (v.secret) return <span className="muted">Hidden</span>;
-  if (v.changedBy == null) return <><span className="vh">At start and at end: </span>{val(v.end ?? v.start)}</>;
-  return <><span className="pill">Changed</span> <span className="vh">At start: </span>{val(v.start)} <span aria-hidden="true">→</span> <span className="vh">At end: </span><strong>{val(v.end)}</strong><br /><span className="muted">Set by {stepLabel(v.changedBy)}</span></>;
+  if (v.changedBy == null) return <><span className="sr">At start and at end: </span>{val(v.end ?? v.start)}</>;
+  return <><span className="pill">Changed</span> <span className="sr">At start: </span>{val(v.start)} <span aria-hidden="true">→</span> <span className="sr">At end: </span><strong>{val(v.end)}</strong><br /><span className="muted">Set by {stepLabel(v.changedBy)}</span></>;
 }
 type Raw = { key: string; id?: string; title: string; head: ReactNode; hits: number; dflt: boolean; show: boolean; body: ReactNode };
 // E: a finished job's log (GET /log), in sections: Start, Variables, Source file, one section per step, Summary. Open by the

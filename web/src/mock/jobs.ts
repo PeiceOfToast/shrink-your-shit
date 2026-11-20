@@ -63,7 +63,7 @@ const runInfo = (result: string) => ({
   start: { reason: "New file found by the scan", appVersion: "1.4.0", workflow: { name: "Shrink videos", revision: 7 } },
   variables: [
     { name: "api_key", changedBy: null, secret: true },
-    { name: "audio_languages", start: "", end: "eng, jpn", changedBy: result === "converted" ? "audio" : null, secret: false },
+    { name: "audio_languages", start: "", end: result === "converted" ? "eng, jpn" : "", changedBy: result === "converted" ? "audio" : null, secret: false },
     { name: "file_name", start: "Sample.2020.mkv", end: "Sample.2020.mkv", changedBy: null, secret: false },
     { name: "resolution", start: "1080p", end: "1080p", changedBy: null, secret: false },
     { name: "target_codec", start: "", end: "hevc", changedBy: "encode", secret: false },
