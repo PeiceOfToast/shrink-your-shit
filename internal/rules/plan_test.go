@@ -14,10 +14,11 @@ import (
 )
 
 // todayArgs are the ffmpeg arguments the program ran before Plans (media.HEVCArgs, removed): a
-// legacy flow must keep producing exactly these.
+// legacy flow must keep producing exactly these, except R6's -max_muxing_queue_size, which only
+// lets ffmpeg write a file it used to stop on.
 func todayArgs(in, out, crf, preset string) string {
 	return "-y -nostdin -v error -progress pipe:1 -nostats -i " + in +
-		" -map 0 -map -0:d -c copy -c:v:0 libx265 -crf " + crf + " -preset " + preset + " -tag:v:0 hvc1 " + out
+		" -map 0 -map -0:d -c copy -max_muxing_queue_size 4096 -c:v:0 libx265 -crf " + crf + " -preset " + preset + " -tag:v:0 hvc1 " + out
 }
 
 // probeSet is every probe in internal/media/testdata plus synthetic files around the default rule's
