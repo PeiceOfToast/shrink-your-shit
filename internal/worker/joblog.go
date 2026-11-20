@@ -32,18 +32,21 @@ func (w *Worker) logLine(id int64, section, level, text string) {
 	}
 }
 
-// section is the section the worker's own lines of the running job go to.
+// section is the section the worker's own lines of the running job go to. Read from the watchers' goroutines too.
 func (w *Worker) section() string {
-	if w.phase == "" {
-		return secStart
+	if s, _ := w.phase.Load().(string); s != "" {
+		return s
 	}
-	return w.phase
+	return secStart
 }
+
+// setPhase moves the worker's own lines to section s (the job goroutine only; section may be read from elsewhere).
+func (w *Worker) setPhase(s string) { w.phase.Store(s) }
 
 // startLines is the job's start section: what the worker knows at the start of this attempt. Not here yet: the
 // app version and commit, why the job started, the workflow's name (the start part of the API has them as null).
 func (w *Worker) startLines(job jobs.Job) {
-	w.phase = secStart
+	w.setPhase(secStart)
 	w.logLine(job.ID, secStart, jobs.LevelInfo, fmt.Sprintf("Attempt %d on worker %s (%s/%s)", job.Attempts+1, w.ID, runtime.GOOS, runtime.GOARCH))
 	w.logLine(job.ID, secStart, jobs.LevelInfo, "ffmpeg at "+w.FFmpeg)
 	if job.Library != "" {
@@ -54,7 +57,7 @@ func (w *Worker) startLines(job jobs.Job) {
 // inputLines is the job's input section: the source file (its size in bytes and in words, R2), its container,
 // length and overall bitrate, one line per stream (R7), and the chapter and attachment counts.
 func (w *Worker) inputLines(id int64, path string, fi os.FileInfo, src media.Info) {
-	w.phase = secInput
+	w.setPhase(secInput)
 	w.logLine(id, secInput, jobs.LevelInfo, "Source "+path)
 	w.logLine(id, secInput, jobs.LevelInfo, fmt.Sprintf("Size %s bytes (%s), modified %s",
 		rules.GroupDigits(fi.Size()), rules.HumanBytes(fi.Size()), fi.ModTime().UTC().Format(time.RFC3339)))

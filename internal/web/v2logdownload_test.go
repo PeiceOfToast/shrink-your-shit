@@ -74,7 +74,7 @@ func TestSectionsInOrder(t *testing.T) {
 	lines = append([]jobs.LogLine{{Seq: 0, At: "2026-11-20T04:59:00.000Z", Section: "", Level: jobs.LevelInfo, Text: "old"}}, lines...)
 	var names []string
 	for _, s := range sectionsJSON(lines) {
-		names = append(names, s["name"].(string))
+		names = append(names, s["id"].(string))
 	}
 	want := []string{"start", "input", "encode", "output", "replace", "summary", ""}
 	if len(names) != len(want) {
@@ -84,6 +84,44 @@ func TestSectionsInOrder(t *testing.T) {
 		if names[i] != want[i] {
 			t.Fatalf("sections %v, want %v", names, want)
 		}
+	}
+}
+
+// Contract v2 (slices/design-joblog-vars.md section 1): each section is {id, title, lines}; the viewer reads id and
+// title, so name and heading must not appear. start.workflow carries "name" (null: not stored yet) and revision.
+func TestSectionKeysAndWorkflowNameAreContractV2(t *testing.T) {
+	_, lines := sampleJob()
+	secs := sectionsJSON(lines)
+	if len(secs) == 0 {
+		t.Fatal("no sections")
+	}
+	for _, s := range secs {
+		for _, k := range []string{"id", "title", "lines"} {
+			if _, ok := s[k]; !ok {
+				t.Fatalf("section %v lacks %q", s, k)
+			}
+		}
+		if _, ok := s["name"]; ok {
+			t.Fatalf("section still has name: %v", s)
+		}
+		if _, ok := s["heading"]; ok {
+			t.Fatalf("section still has heading: %v", s)
+		}
+	}
+	if secs[0]["id"] != "start" || secs[0]["title"] != "Start" {
+		t.Fatalf("first section %v", secs[0])
+	}
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	wf, ok := startJSON(st, 0, jobs.Job{}, lines)["workflow"].(map[string]any)
+	if !ok {
+		t.Fatal("start has no workflow object")
+	}
+	if v, ok := wf["name"]; !ok || v != nil {
+		t.Fatalf("workflow.name = %v (present %v), want null", v, ok)
 	}
 }
 

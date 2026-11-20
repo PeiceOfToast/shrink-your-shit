@@ -58,7 +58,7 @@ func sectionsJSON(lines []jobs.LogLine) []map[string]any {
 		for _, l := range sec.lines {
 			ls = append(ls, map[string]any{"at": l.At, "step": l.Step, "level": levelOf(l), "stream": l.Stream, "text": l.Text})
 		}
-		out = append(out, map[string]any{"name": sec.name, "heading": sec.heading, "lines": ls})
+		out = append(out, map[string]any{"id": sec.name, "title": sec.heading, "lines": ls}) // contract v2: id and title
 	}
 	return out
 }
@@ -121,8 +121,8 @@ func jobTookMs(lines []jobs.LogLine) int64 {
 	return b.Sub(a).Milliseconds()
 }
 
-// startJSON is the start object of GET /log. Only what the store keeps is filled: the app version, commit, ffmpeg
-// and the reason the job started are not stored yet, so they are null (listed in the L1 PR).
+// startJSON is the start object of GET /log. Only what the store keeps is filled: the app version, commit, ffmpeg,
+// the reason the job started and the workflow's name are not stored yet, so they are null (listed in the L1 PR).
 func startJSON(store *jobs.Store, id int64, j jobs.Job, lines []jobs.LogLine) map[string]any {
 	rev, _ := store.JobWorkflowRev(id)
 	var revision, started any
@@ -133,7 +133,7 @@ func startJSON(store *jobs.Store, id int64, j jobs.Job, lines []jobs.LogLine) ma
 		started = lines[0].At
 	}
 	return map[string]any{"startedAt": started, "worker": nilIfEmpty(j.Worker), "library": nilIfEmpty(j.Library),
-		"attempt": j.Attempts + 1, "workflow": map[string]any{"revision": revision},
+		"attempt": j.Attempts + 1, "workflow": map[string]any{"name": nil, "revision": revision},
 		"appVersion": nil, "commit": nil, "ffmpeg": nil, "reason": nil}
 }
 

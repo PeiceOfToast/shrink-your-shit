@@ -136,8 +136,9 @@ type Worker struct {
 	lease string
 	ID    string
 	Queue Queue
-	// phase is the job log section the running job is in (joblog.go); the worker's own lines go there.
-	phase  string
+	// phase is the job log section the running job is in (joblog.go); the worker's own lines go there. It is read
+	// by the stall and lease watchers on other goroutines, so it is an atomic value (setPhase, section).
+	phase  atomic.Value
 	Exec   media.Exec
 	FFmpeg string
 	// FFprobe checks the result before it replaces anything.
@@ -947,6 +948,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	fell := false // the graphics encoder failed and the processor is retrying the file
 	fellReason := ""
 	args := plan.FFmpegArgs(srcPath, tmp)
+	w.setPhase(secEncode) // the encoder choice and its notes belong to encode (log-spec section 4)
 	if w.remote == nil && w.Encoder != nil {
 		want, note := w.Encoder(plan.Video.Codec)
 		if want != "" && !plan.Video.Copy {
@@ -975,7 +977,6 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	var encErr string
 	var terr error
 	decoded := int64(-1) // frames ffmpeg took from the original; -1 when a remote worker did not say
-	w.phase = secEncode
 	encStart := w.now()
 	if w.remote != nil { // V7b2: a worker on another computer converts and checks; its file comes up here
 		stopWatch := w.watchRemoteStall(job.ID, w.remote)
@@ -1097,7 +1098,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	w.check = nil
 	w.verified = media.Info{} // the new file's probe is only what this check read (a failed probe leaves it empty)
-	w.phase = secOutput
+	w.setPhase(secOutput)
 	checkStart := w.now()
 	verr := w.verify(ctx, src, exp, srcPath, tmp, before.Size())
 	w.recordCheck(job.ID, checkStart, verr)
@@ -1164,7 +1165,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 		return stage.intact()
 	}
-	w.phase = secReplace
+	w.setPhase(secReplace)
 	placeStarted := w.now()
 	placed, err := w.installSubtitles(plan, job.ID, tmp, final)
 	if err != nil {
