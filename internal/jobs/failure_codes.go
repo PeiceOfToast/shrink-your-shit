@@ -9,6 +9,9 @@ import (
 	"strings"
 )
 
+// PictureTooDifferentWords begins the picture check's refusal in a kept job's stored reason (the worker writes it).
+const PictureTooDifferentWords = "the picture of the new file is too different from the original"
+
 // FailureCode is a failed job's code in design's V6b table (user review 11-13 item E): the stored error code mapped
 // onto those names. A generic failure is told apart by its ffmpeg key lines: a missing encoder, a damaged source, a
 // missing source, a write refused or a full disk. Codes that fit no row (cannot_read, retry_later, removed) stay as they are.
@@ -131,8 +134,12 @@ func FailureWords(code string, f FailureFacts) (message, hint string) {
 	case "source_missing":
 		return "Couldn't read " + f.Path + ": the file is missing.", "Check that the file is still there, then Retry."
 	case "check_failed":
-		return "The new file didn't pass the picture check. The original is untouched.",
-			"Pick a higher quality on the Convert step, or lower the check on the workflow."
+		// only the picture-similarity refusal is about quality; a size, stream or could-not-run refusal is not
+		if strings.Contains(f.Stored, PictureTooDifferentWords) {
+			return "The new file didn't pass the picture check. The original is untouched.",
+				"Pick a higher quality on the Convert step, or lower the check on the workflow."
+		}
+		return "The new file didn't pass a check. The original is untouched.", "Check the workflow's Convert step, then Retry."
 	case "worker_lost":
 		return "The worker stopped answering during the conversion.", "Check that the worker is running. The file can be retried on any worker."
 	case "stalled":
