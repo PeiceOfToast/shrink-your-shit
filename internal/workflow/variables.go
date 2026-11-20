@@ -187,10 +187,17 @@ func builtinFor(name, field string) (Builtin, bool) {
 // CheckTemplates checks every field that takes {{name}} variables ("x-variables": true in its step's
 // definition): each name must be one this workflow has, and every {{ must be closed. Publish refuses
 // these, so a run never gets a template that would quietly come out wrong: an unknown name becomes
-// nothing, and an unclosed {{ makes the rest of the text plain, as typed.
+// nothing, and an unclosed {{ makes the rest of the text plain, as typed. A secret is refused too: it
+// fills text at run time, but a secret never goes in a file name, folder or title, where it would be
+// read by whoever sees the name.
 func CheckTemplates(d Doc) []Issue {
 	own := make([]string, 0, len(d.Variables))
+	secrets := map[string]bool{}
 	for _, v := range d.Variables {
+		if v.Type == "secret" {
+			secrets[v.Name] = true // never a name a template may use, so not one to suggest either
+			continue
+		}
 		own = append(own, v.Name)
 	}
 	defs := map[string]StepDefinition{}
@@ -215,15 +222,22 @@ func CheckTemplates(d Doc) []Issue {
 				continue
 			}
 			t, _ := n.Config[k].(string)
-			out = append(out, checkTemplate(n, k, titleOf(p, k), t, own)...)
+			out = append(out, checkTemplate(n, k, titleOf(p, k), t, own, secrets)...)
 		}
 	}
 	return out
 }
 
-// checkTemplate is one template field checked: its unknown names (with a suggested one, when a known
-// name is close) and an unclosed {{.
-func checkTemplate(n Node, field, title, t string, own []string) []Issue {
+// secretTemplateIssue is the refusal of one secret named in a template field (the message publish
+// finishes with "Nothing was changed.", as it does for every template problem).
+func secretTemplateIssue(n Node, field, name string) Issue {
+	return Issue{Code: "unknown_variable", Severity: "error", NodeID: n.ID, ConfigPath: "/" + field, Field: field, Name: name,
+		Message: fmt.Sprintf("{{%s}} is a secret, and a secret can't go in a file name, folder or title.", name)}
+}
+
+// checkTemplate is one template field checked: its secret names, its unknown names (with a suggested
+// one, when a known name is close) and an unclosed {{.
+func checkTemplate(n Node, field, title, t string, own []string, secrets map[string]bool) []Issue {
 	if t == "" {
 		return nil
 	}
@@ -238,6 +252,13 @@ func checkTemplate(n Node, field, title, t string, own []string) []Issue {
 	var out []Issue
 	seen := map[string]bool{}
 	for _, r := range refs {
+		if secrets[r.Name] {
+			if !seen[r.Name] {
+				seen[r.Name] = true
+				out = append(out, secretTemplateIssue(n, field, r.Name))
+			}
+			continue
+		}
 		if _, ok := builtinFor(r.Name, field); ok || slices.Contains(own, r.Name) || seen[r.Name] {
 			continue
 		}
