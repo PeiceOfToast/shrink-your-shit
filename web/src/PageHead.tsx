@@ -15,14 +15,14 @@ export function SampleData() {
   );
 }
 
-export function PageHead({ icon, title, help, crumbs, after, children }: { icon?: string; title: ReactNode; help?: string; crumbs?: [string, string][]; after?: ReactNode; children?: ReactNode }) {
+export function PageHead({ icon, title, sub, help, crumbs, after, children }: { icon?: string; title: ReactNode; sub?: ReactNode; help?: string; crumbs?: [string, string][]; after?: ReactNode; children?: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
     <>
       <div className="pagehead">
-        {icon && <Icon id={icon} />}
+        {icon && <span className="ptile"><Icon id={icon} /></span>}
         {crumbs?.map(([label, to]) => <Fragment key={to}><Link className="crumbl" to={to}>{label}</Link><span className="slash" aria-hidden="true">/</span></Fragment>)}
-        <h1>{title}</h1>
+        {sub ? <div className="tt"><h1>{title}</h1><span className="sub">{sub}</span></div> : <h1>{title}</h1>}
         <SampleData />
         {help && <button className="btn icon ghost help" type="button" title={help} aria-expanded={open} aria-label="About this page" onClick={() => setOpen(!open)}><Icon id="i-info" /></button>}
         {after}
