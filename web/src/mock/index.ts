@@ -2,9 +2,9 @@
 // screens offer, really applied to that state. Every screen using it shows the Prototype banner. ?mock=fresh shows a
 // new install (no libraries yet) for review. When a contract endpoint lands, its function here becomes the fetch.
 import { useSyncExternalStore } from "react";
-import type { ActivityEvent, Capability, FoundServer, ID, JoinRequest, JoinState, RoleBody, Setup, Job, JobState, Library, PublishPreview, Settings, Summary, Template, Trash, Worker, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
+import type { ActivityEvent, Capability, FoundServer, ID, JoinRequest, JoinState, RoleBody, Setup, Job, JobState, Library, PublishPreview, Settings, Summary, Template, Trash, ValidationIssue, Worker, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
 import type { FirstFiles, FolderReport, Issue, LibraryItem } from "../types/v1";
-import { branchedDoc, emptyDoc, legacyDoc, presetDoc, preview, revision, summary as stepSummary } from "./steps";
+import { branchedDoc, checkVariables, emptyDoc, legacyDoc, presetDoc, preview, revision, summary as stepSummary } from "./steps";
 
 const now = Date.now(), ago = (min: number) => new Date(now - min * 60e3).toISOString();
 const GB = 1e9;
@@ -271,7 +271,11 @@ function slot(id: ID) {
   if (!w) return null;
   if (!drafts[id]) {
     const published = w.version == null ? null : id === "w2" ? branchedDoc() : id === "w4" ? legacyDoc() : id === "w5" ? emptyDoc() : presetDoc();
-    drafts[id] = { published, draft: revision(id, structuredClone(published ?? (id === "w5" ? emptyDoc() : presetDoc())), null) };
+    const start = structuredClone(published ?? (id === "w5" ? emptyDoc() : presetDoc()));
+    // Fixture for the W4a codes: w1 (a stack workflow)'s draft (not its published copy) has own variables with a bad name, a built-in name and a duplicate
+    if (id === "w1") start.variables = [{ name: "lang", type: "string", value: "fr", description: "Preferred language" }, { name: "Bad-Name", type: "string", value: "x" },
+      { name: "title", type: "string", value: "Mine" }, { name: "lang", type: "string", value: "de", description: "A second one" }];
+    drafts[id] = { published, draft: revision(id, start, null) };
   }
   return { w, d: drafts[id] };
 }
@@ -282,9 +286,12 @@ export function getDraft(id: ID): WorkflowRevision | null {
   return slot(id)?.d.draft ?? null;
 }
 // PUT draft with If-Match: a stale etag is refused (409 stale_draft).
-export function saveDraft(id: ID, doc: WorkflowDoc, etag: string): { draft?: WorkflowRevision; error?: string } {
+export function saveDraft(id: ID, doc: WorkflowDoc, etag: string): { draft?: WorkflowRevision; error?: string; refused?: ValidationIssue[] } {
   const x = slot(id);
   if (!x) return { error: "That workflow is gone." };
+  // a bad variable name is refused before anything else (the server checks it first), and nothing is saved
+  const refused = checkVariables(doc);
+  if (refused.length) return { refused };
   if (x.d.draft.etag !== etag) return { error: "This draft was changed somewhere else. Reload to see it. Nothing was saved." };
   const draft = revision(id, structuredClone(doc), null);
   x.d.draft = draft;

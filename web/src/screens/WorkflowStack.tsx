@@ -11,7 +11,7 @@ import { useData } from "../useData";
 import { getDraft, getLadder, getWorkflow, listTemplates, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
 import { Link, navigate, onLeave } from "../router";
 import { Browse } from "../FolderPicker";
-import { OwnVars, VarInput, takesVars, varListFor, varProblems, withOwn } from "../VarInput";
+import { OwnVars, VarInput, builtinsOf, takesVars, varListFor, varProblems, withOwn } from "../VarInput";
 import "../styles/variables.css";
 import { getSettings, listLibraries, shrunk } from "../libraryApi";
 import type { TemplateVar } from "../mock/variables";
@@ -410,13 +410,17 @@ function usedBy(nodes: Node[], defs: StepDefinition[]) {
 // The workflow's own variables: a table (name, value, where it comes from, the steps that use it), an add form, and a
 // box for fields that use a name that isn't a variable. Changes go through edit(), so undo and Save draft cover them.
 const NAME = /^[a-z][a-z0-9_]{0,39}$/;
-function VariablesCard({ doc, defs, builtins, problems, edit, open }: { doc: WorkflowDoc; defs: StepDefinition[]; builtins: TemplateVar[]; problems: { nodeId: string; title: string; code: string; name: string; error: string }[]; edit: (d: WorkflowDoc, run?: string) => void; open: (nodeId: string) => void }) {
+// The server's codes for a bad variable name (W4a, #497): shown on the variable's row, and a refused save names them.
+const VAR_CODES = ["invalid_variable_name", "builtin_variable_name", "duplicate_variable"];
+const refusedWords = (is: ValidationIssue[]) => "Nothing was saved. Rename or remove " + [...new Set(is.map((i) => (i.name ? "{{" + i.name + "}}" : "the variable with no name")))].join(", ") + " in Variables, then save again.";
+
+function VariablesCard({ doc, defs, builtins, problems, nameIssues, edit, open }: { doc: WorkflowDoc; defs: StepDefinition[]; builtins: TemplateVar[]; problems: { nodeId: string; title: string; code: string; name: string; error: string }[]; nameIssues: ValidationIssue[]; edit: (d: WorkflowDoc, run?: string) => void; open: (nodeId: string) => void }) {
   const [name, setName] = useState(""), [val, setVal] = useState(""), [what, setWhat] = useState(""), [err, setErr] = useState("");
-  const [shown, setShown] = useState(false); // closed by default; opens by itself when a field uses an unknown name
+  const [shown, setShown] = useState(false); // closed by default; opens by itself when a field uses an unknown name or a variable name is refused
   const [editing, setEditing] = useState<string | null>(null); // the row whose description is open for editing
   const vars = doc.variables ?? [], used = usedBy(doc.nodes, defs), titleOf = (n: Node) => defs.find((d) => d.type === n.type)?.name ?? n.type;
   const unknown = problems.filter((p) => p.code === "unknown_variable"), bad = unknown.length > 0;
-  useEffect(() => { if (bad) setShown(true); }, [bad]);
+  useEffect(() => { if (bad || nameIssues.length > 0) setShown(true); }, [bad, nameIssues.length]);
   const setVars = (list: Variable[], run?: string) => edit({ ...doc, variables: list }, run);
   const add = (e: FormEvent) => {
     e.preventDefault();
@@ -457,7 +461,7 @@ function VariablesCard({ doc, defs, builtins, problems, edit, open }: { doc: Wor
               const by = used.get(v.name) ?? [];
               return (
                 <tr key={v.name}>
-                  <th scope="row"><code>{"{{" + v.name + "}}"}</code>{editing === v.name
+                  <th scope="row"><code>{"{{" + v.name + "}}"}</code>{nameIssues.filter((i) => (i.name ?? "") === v.name).map((i, k) => <span key={k} className="st bad" style={{ display: "flex", gap: 4 }}><Icon id="i-alert" /><span>{i.message}</span></span>)}{editing === v.name
                     ? <input className="input" autoFocus aria-label={"Description of {{" + v.name + "}}"} value={v.description ?? ""} onChange={(e) => setVars(vars.map((x) => (x.name === v.name ? { ...x, description: e.target.value } : x)), "desc:" + v.name)} />
                     : v.description && <span className="muted sm" style={{ display: "block" }}>{v.description}</span>}</th>
                   <td data-label="Value"><input className="input" aria-label={"Value of {{" + v.name + "}}"} value={String(v.value ?? "")} onChange={(e) => setVars(vars.map((x) => (x.name === v.name ? { ...x, value: e.target.value } : x)), "value:" + v.name)} /></td>
@@ -486,13 +490,16 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
   // ?step=<node id>: that step starts open (the library's Output tab links here)
   const [open, setOpen] = useState<string | null>(() => new URLSearchParams(location.search).get("step")), [said, setSaid] = useState(""), [checked, setChecked] = useState(false);
   const [panel, setPanel] = useState<PublishPreview | null>(null), [renaming, setRenaming] = useState(false);
+  // the workflow's own variables the server refused on the last save (W4a): shown on their rows until the next edit
+  const [refused, setRefused] = useState<ValidationIssue[]>([]);
   // W11 list side: the delete bar (Undo, 8 s), the add-step menu, and the button that opened it (focus goes back there)
   const [gone, setGone] = useState<{ text: string; at: number } | null>(null), [hold, setHold] = useState(false), [addOpen, setAddOpen] = useState(false);
   const opener = useRef<HTMLElement | null>(null);
   const doc = hist.docs[hist.at], dirty = doc !== saved;
   const all = useData(listLibraries, []), libs = (all.data ?? []).filter((l) => l.flowId === id).map((l) => l.path);
   // {{name}} fields with a bad name (or an unclosed {{): Publish waits for them, once the variable list has loaded
-  const tv = takesVars(defs), vl = useData(() => varListFor(id, tv), [id, tv]).data, varBad = vl ? varProblems(doc.nodes, defs, withOwn(vl.variables, doc.variables ?? [])) : [];
+  // the list is needed for the picker (a step takes variables) and for the Variables card's add form (it shows with own variables too)
+  const tv = takesVars(defs), needVars = tv || (doc.variables ?? []).length > 0, vl = useData(() => varListFor(id, needVars), [id, needVars]).data, varBad = vl ? varProblems(doc.nodes, defs, withOwn(vl.variables, doc.variables ?? [])) : [];
   // The server's words and problems for the document as it is now (nothing saved): asked 300 ms after a change.
   const ask = async (d: WorkflowDoc) => { const r = await act(validateDoc(id, d), setSaid); if (r) setLive(r); return r; };
   const seen = useRef<WorkflowDoc | null>(null); // null: the first check runs on load, so the list has the server's places and add rules
@@ -520,6 +527,7 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
   // A run of typing in one variable's value (the same run key) writes into one history entry, so Undo takes back the whole run.
   const typing = useRef<{ run: string; at: number } | null>(null);
   const edit = (d: WorkflowDoc, run?: string) => {
+    setRefused([]);
     const t = typing.current;
     if (run && t && t.run === run && t.at === hist.at) setHist({ docs: hist.docs.map((x, i) => (i === hist.at ? d : x)), at: hist.at });
     else { typing.current = run ? { run, at: hist.at + 1 } : null; setHist({ docs: [...hist.docs.slice(0, hist.at + 1), d], at: hist.at + 1 }); }
@@ -568,8 +576,15 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
   const openAdd = (e: { currentTarget: HTMLElement }) => { opener.current = e.currentTarget; setAddOpen(true); };
   const closeAdd = () => { setAddOpen(false); requestAnimationFrame(() => opener.current?.focus()); };
   const save = async () => {
-    const r = await act(saveDraft(id, doc, layout, etag), setSaid);
-    if (!r) return null;
+    let r: Answer<WorkflowRevision>;
+    try { r = await saveDraft(id, doc, layout, etag); } catch (e) { if (e instanceof SignedOut) return null; throw e; }
+    if (failed(r)) {
+      // a refused variable name comes back as the error's issues (one per name), with nothing saved
+      const bad = ((r.error as { issues?: ValidationIssue[] }).issues ?? []).filter((i) => VAR_CODES.includes(i.code));
+      if (bad.length) { setRefused(bad); setSaid(refusedWords(bad)); } else setSaid(r.error.message);
+      return null;
+    }
+    setRefused([]);
     setEtag(r.etag); setSaved(doc); setLive((l) => ({ ...l, issues: r.validation, stackable: r.stackable, stepSummaries: r.stepSummaries })); setSaid("Draft saved."); reloadMeta();
     return r;
   };
@@ -583,6 +598,8 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
   };
   const rename = async (v: string) => { if (await act(patchWorkflow(id, { name: v }), setSaid)) reloadMeta(); setRenaming(false); };
   const issues = checked || !dirty ? live.issues : [];
+  // the variable problems to show on their rows: the last refused save's, else the server's live check of the document
+  const nameIssues = refused.length ? refused : issues.filter((i) => VAR_CODES.includes(i.code));
   const tools = <>
     <button className="btn sm icon ghost" type="button" title="Undo" aria-label="Undo" disabled={hist.at === 0} onClick={() => setHist({ ...hist, at: hist.at - 1 })}><Icon id="i-undo" /></button>
     <button className="btn sm icon ghost" type="button" title="Redo" aria-label="Redo" disabled={hist.at === hist.docs.length - 1} onClick={() => setHist({ ...hist, at: hist.at + 1 })}><Icon id="i-redo" /></button>
@@ -633,7 +650,7 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
 
       {canStack ? <>
         {/* no field takes variables yet (the server marks none): show the card only if the draft already has some, so they can still be seen and deleted */}
-        {(tv || (doc.variables ?? []).length > 0) && <VariablesCard doc={doc} defs={defs} builtins={vl?.variables ?? []} problems={varBad} edit={edit} open={(n) => setOpen(n)} />}
+        {(tv || (doc.variables ?? []).length > 0) && <VariablesCard doc={doc} defs={defs} builtins={builtinsOf(vl?.variables ?? [])} problems={varBad} nameIssues={nameIssues} edit={edit} open={(n) => setOpen(n)} />}
         {only && <div className="note"><Icon id="i-info" /><div className="stack" style={{ gap: 6 }}>
           <strong>This workflow has no steps yet</strong>
           <span>Every workflow starts with Library files: the videos from the libraries that use it. Add what should happen to them next.</span>

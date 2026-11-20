@@ -4,6 +4,7 @@ import REGISTRY from "./registry-4df3345.json";
 import type { AddStep, Edge, ID, JSONSchema, Node, Port, PublishPreview, StepDefinition, StepPlace, ValidationIssue, WorkflowDoc, WorkflowRevision } from "../types/v2";
 import type { Ladder } from "../workflowApi";
 import { groupOf, order } from "../stepEdits";
+import { mockVariables } from "./variables";
 
 const inPort: Port = { name: "in", label: "In", kind: "file", outcome: "success" };
 const success: Port = { name: "success", label: "Next", kind: "file", outcome: "success" };
@@ -178,8 +179,23 @@ export function addStepsOf(d: WorkflowDoc): Record<string, AddStep> {
   return out;
 }
 
+// The server's CheckVariables (W4a, #497), for the mock: a name a person may type, no built-in name, no two the same.
+// Its messages are the server's. The built-ins are the mock's list (no own variables in it) plus the two field-only ones.
+const BUILTIN_NAMES = new Set([...mockVariables().variables.map((v) => v.name), "sub_lang", "sub_kind"]);
+export function checkVariables(d: WorkflowDoc): ValidationIssue[] {
+  const out: ValidationIssue[] = [], seen = new Set<string>();
+  for (const v of d.variables ?? []) {
+    const named = v.name.trim() ? "“" + v.name + "”" : "A variable's empty name";
+    if (!/^[a-z][a-z0-9_]{0,39}$/.test(v.name)) out.push({ code: "invalid_variable_name", severity: "error", name: v.name || undefined, message: `${named} can't be a variable name: use lowercase letters, numbers and _, starting with a letter, up to 40 characters.` });
+    else if (BUILTIN_NAMES.has(v.name)) out.push({ code: "builtin_variable_name", severity: "error", name: v.name, message: `{{${v.name}}} is set by the server already, so a variable can't use that name.` });
+    else if (seen.has(v.name)) out.push({ code: "duplicate_variable", severity: "error", name: v.name, message: `Two variables are called {{${v.name}}}. Give one of them another name.` });
+    seen.add(v.name);
+  }
+  return out;
+}
+
 export function validate(d: WorkflowDoc): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
+  const issues: ValidationIssue[] = checkVariables(d);
   for (const n of d.nodes.filter((x) => x.type === "output.commit")) {
     const c = n.config, policy = str(c, "policy", "separate_folder");
     if (policy !== "separate_folder") continue;

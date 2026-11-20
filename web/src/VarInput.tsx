@@ -71,8 +71,10 @@ export function varProblems(nodes: { id: string; type: string; config?: Record<s
 // and join the Publish check. A name that is already a built-in keeps the built-in.
 export const OwnVars = createContext<Variable[]>([]);
 const GROUP_LABEL: Record<string, string> = { Workflow: "Your variables" };
-export function withOwn(builtins: TemplateVar[], own: Variable[]): TemplateVar[] {
-  const names = new Set(builtins.map((v) => v.name));
+// The built-ins are the server's list without the workflow's own variables: since #497 those come back in it too, group "Workflow".
+export const builtinsOf = (list: TemplateVar[]) => list.filter((v) => v.group !== "Workflow");
+export function withOwn(list: TemplateVar[], own: Variable[]): TemplateVar[] {
+  const builtins = builtinsOf(list), names = new Set(builtins.map((v) => v.name));
   const mine = own.filter((v) => !names.has(v.name)).map((v): TemplateVar => ({ name: v.name, description: v.description ?? "", group: "Workflow", value: v.value == null ? null : String(v.value), fields: null }));
   return [...mine, ...builtins];
 }

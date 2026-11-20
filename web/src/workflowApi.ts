@@ -59,7 +59,11 @@ export async function getDraft(id: string): Promise<Answer<WorkflowRevision>> {
 }
 // PUT /workflows/{id}/draft with If-Match: a draft changed elsewhere answers 409 stale_draft.
 export async function saveDraft(id: string, workflow: WorkflowDoc, layout: Layout, etag: string): Promise<Answer<WorkflowRevision>> {
-  if (MOCK) { const r = mock.saveDraft(id, workflow, etag); return r.draft ?? no("stale_draft", r.error ?? ""); }
+  if (MOCK) {
+    const r = mock.saveDraft(id, workflow, etag);
+    if (r.refused) { const e = { error: { code: r.refused[0].code, message: r.refused[0].message, issues: r.refused } }; return e; } // the server's refusal: its issues ride along
+    return r.draft ?? no("stale_draft", r.error ?? "");
+  }
   return call("PUT", base(id) + "/draft", { workflow, layout }, { "If-Match": etag });
 }
 // POST /workflows/{id}/validate: nothing saved; the server's problems, step words and whether the list can show it.
@@ -94,7 +98,7 @@ let ladder: Promise<Answer<Ladder>> | null = null; // one fetch per page load: t
 // GET /api/v2/workflow/variables?workflow=<id>: the names the {{name}} fields take, with the sample file's values (the server
 // builds the list; the page checks names itself)
 export async function getVariables(workflowId: string): Promise<Answer<VarList>> {
-  return MOCK ? mockVariables() : call("GET", "/api/v2/workflow/variables?workflow=" + enc(workflowId));
+  return MOCK ? mockVariables(mock.getDraft(workflowId)?.workflow.variables ?? []) : call("GET", "/api/v2/workflow/variables?workflow=" + enc(workflowId));
 }
 export function getLadder(): Promise<Answer<Ladder>> {
   if (MOCK) return Promise.resolve({ ...mockLadder() }); // the sample's ladder, shaped as the engine's
