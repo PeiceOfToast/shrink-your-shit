@@ -76,9 +76,9 @@ function Confirm({ title, body, yes, no, busy, danger, onYes, onNo }: { title: s
   const id = useId(), box = useRef<HTMLDivElement>(null), head = useRef<HTMLHeadingElement>(null);
   useEffect(() => { head.current?.focus(); }, []);
   return (
-    <div className="fpick small" onMouseDown={(e) => e.target === e.currentTarget && onNo()}>
+    <div className="fpick small" onMouseDown={(e) => e.target === e.currentTarget && !busy && onNo()}>
       <div ref={box} className="dlg" role="dialog" aria-modal="true" aria-labelledby={id + "-t"} aria-describedby={id + "-b"} onKeyDown={(e) => {
-        if (e.key === "Escape") return (e.stopPropagation(), onNo());
+        if (e.key === "Escape") return (e.stopPropagation(), !busy && onNo());
         if (e.key !== "Tab") return;
         const f = [...box.current!.querySelectorAll<HTMLElement>("button:not(:disabled)")], i = f.indexOf(document.activeElement as HTMLElement), last = f.length - 1;
         if (e.shiftKey ? i <= 0 : i === -1 || i === last) { e.preventDefault(); (e.shiftKey ? f[last] : f[0])?.focus(); }
@@ -176,7 +176,7 @@ export function SafetySettings() {
     if (!okDays) return (setBad(true), setSaid("Enter a whole number of days, from 0 to 365."));
     if (await act(patchSettings({ keepOriginalsDays: n }), (m) => (setBad(true), setSaid(m)))) (setSaid("Saved."), setDays(null), st.reload());
   };
-  // Empty trash now: deletes the kept originals before their 7 days (a confirm first; the result lists any library skipped)
+  // Empty trash now: deletes the kept originals before their keep time is up (a confirm first; the result lists any library skipped)
   const [ask, setAsk] = useState(false), [purging, setPurging] = useState(false), [gone, setGone] = useState<PurgeResult | null>(null), [purgeSaid, setPurgeSaid] = useState(""), purgeBtn = useRef<HTMLButtonElement>(null), freed = useRef<HTMLParagraphElement>(null);
   // Focus moves after the commit: to the result after a purge, back to the (enabled again) button after an error
   const [back, setBack] = useState(0);
