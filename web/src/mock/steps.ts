@@ -137,7 +137,7 @@ export const presetDoc = () => chain(PRESET);
 export function branchedDoc(): WorkflowDoc {
   const d = chain(["input.library", "filter.video", "video.convert", "verify.output", "output.commit"], { "output.commit": { policy: "replace" }, "video.convert": { ...defaults("video.convert"), quality: 4 } });
   d.edges = d.edges.filter((e) => e.from !== "n2");
-  d.nodes.push({ id: "n6", type: "output.commit", typeVersion: 1, enabled: true, name: "Keep as it is", config: { policy: "beside" } });
+  d.nodes.push({ id: "n6", type: "output.commit", typeVersion: 1, enabled: true, name: "Keep as it is", config: { policy: "beside", ifBigger: "keep" } });
   d.edges.push({ id: "e10", from: "n2", fromPort: "match", to: "n3", toPort: "in", label: "Over 10 Mbps" }, { id: "e11", from: "n2", fromPort: "else", to: "n6", toPort: "in", label: "The rest" });
   return d;
 }

@@ -437,6 +437,22 @@
       "One folder for all"
      ]
     },
+    "ifBigger": {
+     "default": "keep",
+     "enum": [
+      "keep",
+      "replace"
+     ],
+     "title": "If the new file is bigger than the original",
+     "x-enumHints": [
+      "The new file is thrown away and the original stays exactly as it is. Applies to every choice above.",
+      "The new file is saved even though it is bigger. The original is kept for 7 days (Settings > Safety), then deleted."
+     ],
+     "x-enumLabels": [
+      "Keep the original",
+      "Replace anyway"
+     ]
+    },
     "policy": {
      "default": "separate_folder",
      "enum": [
