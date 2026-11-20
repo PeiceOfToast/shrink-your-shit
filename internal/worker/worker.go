@@ -1125,6 +1125,10 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			return "", kept("a subtitle could not be saved as a separate file")
 		}
 	}
+	// R8: a new file bigger than its original is kept when the workflow says so, before anything moves.
+	if err := w.sizeRule(job.ID, plan, tmp, before.Size()); err != nil {
+		return "", err
+	}
 	// The original's permissions, only now that the file has been checked.
 	if err := stage.intact(); err != nil {
 		return "", err

@@ -85,6 +85,7 @@ func scanRevision(r interface{ Scan(...any) error }) (Revision, error) {
 	if err := json.Unmarshal([]byte(doc), &v.Doc); err != nil {
 		return v, err
 	}
+	workflow.FillCommitDefaults(&v.Doc) // R8: an old workflow's Save the result reads back as "replace anyway"
 	json.Unmarshal([]byte(layout), &v.Layout)
 	normalLayout(&v.Layout)
 	return v, nil

@@ -217,6 +217,30 @@ func (w *Worker) keepAndReplace(ctx context.Context, job jobs.Job, stage *staged
 	return hook("done")
 }
 
+// sizeRule is the "If the new file is bigger than the original" choice of Save the result (R8). It runs after the
+// checks pass and before anything is moved. A new file no bigger than its original goes on as before. A bigger one
+// is kept (the original stays, the job is kept with the sizes as its reason) when the flow keeps; otherwise it is
+// saved anyway, and the log says so. The log line is written only for a bigger file.
+func (w *Worker) sizeRule(id int64, plan rules.Plan, newPath string, origSize int64) error {
+	st, err := os.Stat(newPath)
+	if err != nil {
+		return fmt.Errorf("the new file: %w", err)
+	}
+	if st.Size() <= origSize {
+		return nil
+	}
+	w.setPhase(secReplace)
+	newSize, orig := rules.HumanBytes(st.Size()), rules.HumanBytes(origSize)
+	if plan.KeepIfBigger {
+		w.jobf(id, ": The new file is %s, the original %s: keeping the original (this workflow keeps originals when the new file is bigger)", newSize, orig)
+		return kept("The new file, %s, is bigger than the original, %s, so the original was kept as it was.", newSize, orig)
+	}
+	if OutputMode(plan.Output) == Replace {
+		w.jobf(id, ": The new file is %s, the original %s: replacing anyway (this workflow replaces originals even when the new file is bigger)", newSize, orig)
+	}
+	return nil
+}
+
 func (w *Worker) now() time.Time {
 	if w.Now != nil {
 		return w.Now()

@@ -25,6 +25,9 @@ type Plan struct {
 	Video       VideoEncode `json:"video"`
 	Output      string      `json:"output"`              // replace | beside
 	OutputDir   string      `json:"outputDir,omitempty"` // "folder" (S6): the new files go here, in the library\'s sub-folders
+	// KeepIfBigger (R8): a new file bigger than its original is not saved; the original is kept (any output).
+	// False replaces anyway, as before. Omitted when false, so existing Plans and fingerprints are unchanged.
+	KeepIfBigger bool `json:"keepIfBigger,omitempty"`
 	// Path and Decisions: a workflow with checks (V6a): the node ids the file went along, and each
 	// check's answer in words. Empty for a straight workflow (its Plans and fingerprints are unchanged).
 	Path      []string   `json:"path,omitempty"`
@@ -666,7 +669,7 @@ func (s Snapshot) Fingerprint() string {
 func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basic bool) Plan {
 	pos, _ := SliderAt(s.Quality)
 	v := info.Video()
-	p.Output, p.MinSSIM = s.AfterConverting, pos.MinSSIM
+	p.Output, p.MinSSIM, p.KeepIfBigger = s.AfterConverting, pos.MinSSIM, s.KeepIfBigger
 	if s.AfterConverting == "folder" {
 		p.OutputDir, p.FolderMode = s.OutputDir, s.FolderMode
 	}
