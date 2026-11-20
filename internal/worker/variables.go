@@ -4,7 +4,9 @@ package worker
 
 import (
 	"fmt"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
@@ -19,7 +21,9 @@ import (
 
 // runValues are the values a job's templates resolve with, and the variables table its log shows. It
 // needs the probe and the plan (the target codec), so it runs once the plan is known.
-func (w *Worker) runValues(job jobs.Job, src media.Info, plan rules.Plan) (map[string]string, []rules.RunVariable, error) {
+// published are the names the path's cards set before the conversion (FB1c): they join the values,
+// and the table, as values set at the start.
+func (w *Worker) runValues(job jobs.Job, src media.Info, plan rules.Plan, published map[string]string) (map[string]string, []rules.RunVariable, error) {
 	info, err := w.runInfo(job)
 	if err != nil {
 		return nil, nil, err
@@ -28,7 +32,29 @@ func (w *Worker) runValues(job jobs.Job, src media.Info, plan rules.Plan) (map[s
 		Info: &src, Workflow: info.Workflow, Revision: info.Revision, Worker: w.ID, Variables: ownValues(info)}
 	after := before
 	after.TargetCodec = targetCodec(plan, src)
-	return after.Values(), variableTable(before.Values(), after.Values(), info), nil
+	start, end := before.Values(), after.Values()
+	for k, v := range published {
+		start[k], end[k] = v, v
+	}
+	return end, variableTable(start, end, info), nil
+}
+
+// runFacts are what the path's questions beyond the probe ask about (FB1c, rules.Facts): the run's
+// values so far, the file's path and library, whether it shares its data with another name, and when
+// it was last changed. A workflow that can't be read gives empty facts, not an error: a question then
+// answers No and says why.
+func (w *Worker) runFacts(job jobs.Job, src media.Info, st os.FileInfo) rules.Facts {
+	info, _ := w.runInfo(job)
+	source := vars.Source{Path: job.Path, Library: info.Library, LibraryRoot: job.Library, SizeBytes: job.SizeBefore,
+		Info: &src, Workflow: info.Workflow, Revision: info.Revision, Worker: w.ID, Variables: ownValues(info)}
+	f := rules.Facts{Vars: source.Values(), Path: job.Path, Library: info.Library}
+	if job.LibraryID > 0 {
+		f.LibraryID = strconv.FormatInt(job.LibraryID, 10)
+	}
+	if st != nil {
+		f.ModTime, f.HardLinks = st.ModTime(), media.LinkCount(job.Path, st) > 1
+	}
+	return f
 }
 
 // runInfo is what the job's workflow says about it (its library, name, revision and own variables).

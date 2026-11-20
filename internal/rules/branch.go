@@ -354,6 +354,10 @@ func codecWords(c string) string {
 // reason's own full stop, as every place that shows them adds one (V6 review: "left alone..").
 func skipWords(s string) string { return lowerFirst(strings.TrimRight(strings.TrimSpace(s), ".")) }
 
+// failWords are a "Stop as failed" reason as the job's failure words (FB1b): a sentence of its own,
+// so its first letter stays; the worker adds the full stop and "The original is untouched."
+func failWords(s string) string { return strings.TrimRight(strings.TrimSpace(s), ".") }
+
 func lowerFirst(s string) string {
 	if s == "" {
 		return s
@@ -414,7 +418,7 @@ func CompileBranch(b Branch, info media.Info, languages string) Plan {
 	var p Plan
 	switch {
 	case b.Then == nil && b.Fail:
-		p = Plan{Kind: KindBranches, Skip: skipWords(b.End), SkipCode: SkipLeftByWorkflow, Fail: true}
+		p = Plan{Kind: KindBranches, Skip: failWords(b.End), SkipCode: SkipLeftByWorkflow, Fail: true}
 	case b.Then == nil:
 		p = Plan{Kind: KindBranches, Skip: skipWords(b.End), SkipCode: SkipLeftByWorkflow}
 	default:

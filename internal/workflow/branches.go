@@ -158,10 +158,13 @@ func branchTemplate(d Doc) (rules.Template, []Issue) {
 					Message: "'" + nodeName(n) + "' has nothing connected to " + portLabel(n, "success") + ". Connect a step, or leave the file alone there."})
 				return
 			}
-			card := rules.Card{NodeID: n.ID, Type: n.Type, Name: nodeName(n), Config: clone(n.Config)}
 			seen := clone(onPath)
 			seen[id] = true
-			walk(next, checks, append(clone(before), card), append(clone(path), n.ID), seen)
+			cards := before
+			if n.Enabled { // a card turned off is passed over: the path goes on without it
+				cards = append(clone(before), rules.Card{NodeID: n.ID, Type: n.Type, Name: nodeName(n), Config: clone(n.Config)})
+			}
+			walk(next, checks, cards, append(clone(path), n.ID), seen)
 		case n.Type == TypeEnd:
 			reason, _ := n.Config["reason"].(string)
 			if reason == "" {
