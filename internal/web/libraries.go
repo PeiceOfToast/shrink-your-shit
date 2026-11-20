@@ -179,6 +179,8 @@ func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			apiError(w, http.StatusConflict, "path_taken", "Another library already uses this folder.")
 		case errors.Is(err, jobs.ErrSystemFolder):
 			apiError(w, http.StatusBadRequest, "system_folder", jobs.ErrSystemFolder.Error())
+		case errors.Is(err, jobs.ErrNoWorkflow):
+			apiError(w, http.StatusConflict, "no_workflow", "This library has no workflow, so it can't be started. Assign a workflow, then start it. Nothing was changed.")
 		case errors.Is(err, jobs.ErrLibraryBusy):
 			apiError(w, http.StatusConflict, "busy", "This library is being removed. Nothing was changed.")
 		default:
@@ -213,17 +215,22 @@ func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			return
 		}
 		var flowID int64
+		noFlow := false // flowId 0: a library saved with no workflow (the UI assigns one later)
 		if len(in.FlowID) > 0 && string(in.FlowID) != "null" {
 			id, err := strconv.ParseInt(strings.Trim(string(in.FlowID), `"`), 10, 64)
-			if err != nil || id <= 0 {
+			if err != nil || id < 0 {
 				apiError(w, http.StatusBadRequest, "invalid_flow", "flowId must be a flow's id.")
 				return
 			}
-			if _, err := store.GetFlow(id); err != nil {
-				apiError(w, http.StatusBadRequest, "invalid_flow", "There is no such flow.")
-				return
+			if id == 0 {
+				noFlow = true
+			} else {
+				if _, err := store.GetFlow(id); err != nil {
+					apiError(w, http.StatusBadRequest, "invalid_flow", "There is no such flow.")
+					return
+				}
+				flowID = id
 			}
-			flowID = id
 		}
 		name := strings.TrimSpace(in.Name)
 		if name == "" {
@@ -249,9 +256,12 @@ func libraryRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		if folderRefused(w, store, flowID, jobs.Library{Name: name, Path: path}) {
 			return
 		}
-		if flowID > 0 {
+		switch {
+		case noFlow:
+			l, err = store.AddLibraryWithoutFlow(name, path, false) // not started, no workflow: nothing scanned or queued
+		case flowID > 0:
 			l, err = store.AddLibraryOnFlow(name, path, flowID, false)
-		} else {
+		default:
 			l, err = store.AddLibrary(name, path, rules.SliderTemplate(pos), false) // not started: nothing scanned or queued
 		}
 		if err != nil {
@@ -480,6 +490,12 @@ func fsDirs(w http.ResponseWriter, r *http.Request) {
 		parent = "" // from a drive root, up is the drive list
 	}
 	writeJSON(w, map[string]any{"path": p, "parent": parent, "dirs": dirs})
+}
+
+// noWorkflowYet answers a request that needs the library's workflow when it has none (it was saved with
+// flowId 0 and none assigned yet). The start paths say it with the longer sentence, above.
+func noWorkflowYet(w http.ResponseWriter) {
+	apiError(w, http.StatusConflict, "no_workflow", "This library has no workflow yet. Assign a workflow first.")
 }
 
 // readJSON decodes a small JSON body; a bad one is answered with 400 and false.

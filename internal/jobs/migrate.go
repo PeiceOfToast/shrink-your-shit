@@ -507,6 +507,22 @@ CREATE TABLE IF NOT EXISTS job_run_stats (job_id INTEGER PRIMARY KEY, passes INT
 CREATE TABLE IF NOT EXISTS job_run_moves (job_id INTEGER NOT NULL, seq INTEGER NOT NULL, action TEXT NOT NULL,
   from_path TEXT NOT NULL DEFAULT '', to_path TEXT NOT NULL DEFAULT '', ok INTEGER NOT NULL, error TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (job_id, seq));`},
+	// A library may have no workflow (the user's "add a library, assign its workflow later"): flow_id becomes
+	// nullable, and NULL is that absence (0 stays "no such flow": GetFlow refuses it as it always did). SQLite
+	// cannot drop NOT NULL in place, so the table is made again with every column and row kept.
+	{56, "library without a workflow", `
+CREATE TABLE libraries_new (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL, path TEXT NOT NULL UNIQUE,
+  flow_id INTEGER REFERENCES flows(id),
+  started INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL,
+  last_scan TEXT NOT NULL DEFAULT '', last_scan_videos INTEGER NOT NULL DEFAULT 0,
+  override_folder TEXT NOT NULL DEFAULT '', priority INTEGER NOT NULL DEFAULT 0,
+  share_paused_id INTEGER, share_paused_since TEXT NOT NULL DEFAULT '');
+INSERT INTO libraries_new(id,name,path,flow_id,started,created,last_scan,last_scan_videos,override_folder,priority,share_paused_id,share_paused_since)
+  SELECT id,name,path,flow_id,started,created,last_scan,last_scan_videos,override_folder,priority,share_paused_id,share_paused_since FROM libraries;
+DROP TABLE libraries;
+ALTER TABLE libraries_new RENAME TO libraries;`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone
