@@ -3,6 +3,7 @@
 package jobs
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -506,6 +507,15 @@ func legacyReasonCode(text, state string) string {
 const keepBackups = 3
 
 func latestVersion() int { return migrations[len(migrations)-1].version }
+
+// SchemaVersion is the database version this program writes: its pre-upgrade backup is <db>.bak-v<SchemaVersion>.
+func SchemaVersion() int { return latestVersion() }
+
+// Healthy reports whether the database answers a query (for the health check; ctx bounds the wait).
+func (s *Store) Healthy(ctx context.Context) error {
+	var one int
+	return s.db.QueryRowContext(ctx, `SELECT 1`).Scan(&one)
+}
 
 func (s *Store) userVersion() (int, error) {
 	var v int

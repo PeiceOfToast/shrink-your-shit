@@ -261,7 +261,7 @@ func TestUpdateLastResultSaysTheDatabaseWentBack(t *testing.T) {
 	}
 	_, body := getJSON(t, srv.URL+"/api/v2/update")
 	last, _ := body["lastResult"].(map[string]any)
-	if last["dataRestored"] != true || last["message"] != "Rolled back from 0.2.0 to 0.1.1; changes made since the update were undone (kept in syp.db.rolled-back)" {
+	if last["dataRestored"] != true || last["message"] != "Rolled back from 0.2.0 to 0.1.1; changes made since the update were undone: jobs done on the newer version are kept in syp.db.rolled-back" {
 		t.Errorf("lastResult %v", body["lastResult"])
 	}
 }
