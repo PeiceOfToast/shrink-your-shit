@@ -270,16 +270,27 @@ func TestRealLongFilesPassTheDefaultPictureCheckInEveryContainer(t *testing.T) {
 	}
 }
 
-// An original that is itself damaged must not be converted (and so replaced).
+// wreckStretches overwrites size bytes at each of n evenly spaced places in data. Each stretch is a few damaged
+// pictures to ffmpeg's decoder, so the count of damaged pictures grows with n.
+func wreckStretches(data []byte, n, size int) {
+	for s := 0; s < n; s++ {
+		start := len(data)*s/n + len(data)/(2*n)
+		for i := start; i < start+size && i < len(data); i++ {
+			data[i] = byte(i * 7)
+		}
+	}
+}
+
+// An original with more than 1% of its pictures damaged must not be converted (and so replaced). The damage is
+// spread over 20 stretches (about 14 damaged pictures of 500: 2.8%). One stretch of 20000 bytes is a single damaged
+// picture, which is under 1%: TestRealLightlyDamagedOriginalIsConverted covers that case.
 func TestRealDamagedOriginalIsKeptNotConverted(t *testing.T) {
 	needTools(t)
 	dir := t.TempDir()
 	ts := filepath.Join(dir, "clip.ts")
 	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25:duration=20", "-c:v", "libx264", "-b:v", "2M", "-f", "mpegts", ts)
 	data, _ := os.ReadFile(ts)
-	for i := len(data) / 3; i < len(data)/3+20000 && i < len(data); i++ { // wreck a stretch in the middle
-		data[i] = byte(i * 7)
-	}
+	wreckStretches(data, 20, 2000)
 	os.WriteFile(ts, data, 0o644)
 	orig, _ := os.ReadFile(ts)
 	st, id := realJob(t, ts, 20)
@@ -293,6 +304,24 @@ func TestRealDamagedOriginalIsKeptNotConverted(t *testing.T) {
 	}
 	if tempLeft(ts) {
 		t.Error("temp file left")
+	}
+}
+
+// An original with under 1% damaged pictures plays through, so it converts: the damage does not stop a good file.
+func TestRealLightlyDamagedOriginalIsConverted(t *testing.T) {
+	needTools(t)
+	dir := t.TempDir()
+	ts := filepath.Join(dir, "clip.ts")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25:duration=20", "-c:v", "libx264", "-b:v", "2M", "-f", "mpegts", ts)
+	data, _ := os.ReadFile(ts)
+	for i := len(data) / 3; i < len(data)/3+20000 && i < len(data); i++ { // one stretch: one damaged picture
+		data[i] = byte(i * 7)
+	}
+	os.WriteFile(ts, data, 0o644)
+	st, id := realJob(t, ts, 20)
+	realWorker(st, media.OSExec{}).run(t)
+	if j, _ := st.Get(id); j.Status != jobs.Done {
+		t.Fatalf("a file with under 1%% damage plays through and must convert: %s %q", j.Status, j.Error)
 	}
 }
 

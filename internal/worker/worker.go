@@ -1040,12 +1040,13 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// Errors ffmpeg reported while reading the original mean it is damaged: converting it would bake
 	// the damage in and delete the only copy that might still be repaired or fetched again.
 	if dmg := sourceDamage(encErr); dmg.Found() {
-		if dmg.FileLevel || dmg.Pictures > maxDamagedPictures {
+		frames := sourceFrames(src)
+		if !damageTolerated(dmg, frames) {
 			// The check step records the refusal (its Result is the kept reason), then the lines the UI shows.
 			const reason = "the original file has errors, so it was not converted (converting would keep the damage)"
 			errorsLine := "Errors: the file as a whole is damaged; that is never tolerated"
 			if !dmg.FileLevel {
-				errorsLine = fmt.Sprintf("Errors: %d damaged %s; up to %d are tolerated", dmg.Pictures, plural(dmg.Pictures, "picture", "pictures"), maxDamagedPictures)
+				errorsLine = fmt.Sprintf("Errors: %s; up to %d%% are tolerated", damagedShare(dmg.Pictures, frames), maxDamagedPercent)
 			}
 			w.Queue.RecordRunStep(job.ID, jobs.RunStep{Index: 1, Name: "check", StartedAt: w.now().UTC().Format(time.RFC3339),
 				Outcome: "failed", Result: reason})
@@ -1057,8 +1058,8 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			log.Printf("worker %s: %s: the original has errors: %s", w.ID, job.Path, strings.Join(dmg.Lines, " | "))
 			return "", kept(reason)
 		}
-		w.Queue.AppendLogLine(job.ID, 0, "app", fmt.Sprintf("The original has a little damage (%d damaged %s, up to %d are tolerated); converted anyway.",
-			dmg.Pictures, plural(dmg.Pictures, "picture", "pictures"), maxDamagedPictures))
+		w.Queue.AppendLogLine(job.ID, 0, "app", fmt.Sprintf("The original has a little damage (%s, up to %d%% are tolerated); converted anyway.",
+			damagedShare(dmg.Pictures, frames), maxDamagedPercent))
 	}
 
 	// If the source changed while we encoded, the new file is stale: say so first (otherwise the

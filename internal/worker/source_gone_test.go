@@ -11,12 +11,9 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 )
 
-// manyDamaged is ffmpeg's stderr for an original with more damaged pictures than are tolerated.
-const manyDamaged = "[h264 @ 0x55] error while decoding MB 41 22, bytestream -5\n" +
-	"[h264 @ 0x55] error while decoding MB 3 7, bytestream -5\n" +
-	"[h264 @ 0x55] error while decoding MB 9 9, bytestream -5\n" +
-	"[h264 @ 0x55] error while decoding MB 1 1, bytestream -5\n" +
-	"[h264 @ 0x55] error while decoding MB 2 2, bytestream -5"
+// manyDamaged is ffmpeg's stderr for an original with more damaged pictures than are tolerated:
+// 50 of the scenario's 2500 frames (2%), over the 1% limit.
+var manyDamaged = strings.Repeat("[h264 @ 0x55] error while decoding MB 41 22, bytestream -5\n", 50)
 
 // dirNames is what is in the folder the original was in, sorted as ReadDir gives it.
 func dirNames(t *testing.T, path string) []string {

@@ -45,17 +45,16 @@ type Settings struct {
 	// ScanEvery is how often libraries are looked at, in seconds, once someone has changed it here (0:
 	// not changed: the -scan-every flag is used; design 01:41Z, a saved value wins).
 	ScanEvery int `json:"scanEvery"`
-	// CheckForUpdates is whether the app asks GitHub once a day whether a newer release exists. Off until the
-	// person turns it on (nil is off): the page promises nothing is sent anywhere unless they turn it on.
-	// syp-manager 11-19 02:50Z, for the user until morning.
+	// CheckForUpdates is whether the app asks GitHub once a day whether a newer release exists. On unless the
+	// person turned it off (nil is on; an explicit false is off). With it off, nothing is sent anywhere.
 	CheckForUpdates *bool `json:"checkForUpdates"`
 	// BackupKeep is how many automatic backups (before an update or a migration) are kept, 1 to 50; manual
 	// ones stay until deleted (UI-API-CONTRACT-v2.md "Backup").
 	BackupKeep int `json:"backupKeep"`
 }
 
-// UpdateChecks is whether the app may ask GitHub for a newer release: only once the person turned it on.
-func (s Settings) UpdateChecks() bool { return s.CheckForUpdates != nil && *s.CheckForUpdates }
+// UpdateChecks is whether the app may ask GitHub for a newer release: on unless the person turned it off.
+func (s Settings) UpdateChecks() bool { return s.CheckForUpdates == nil || *s.CheckForUpdates }
 
 // QuietHours: both "HH:MM", or both "".
 type QuietHours struct {
@@ -72,9 +71,8 @@ type FirstRunLibrary struct {
 const settingsKey = "settings"
 
 func defaultSettings() Settings {
-	off := false
 	return Settings{OldControlLevel: "basic", FirstRunStep: 1, KeepOriginalsDays: 7, LogKeepDays: 30, ParallelJobs: 1,
-		LowPriority: true, ScanSchedule: "02:00", QueueOrder: "newest", Languages: []string{}, CheckForUpdates: &off, BackupKeep: 10}
+		LowPriority: true, ScanSchedule: "02:00", QueueOrder: "newest", Languages: []string{}, BackupKeep: 10}
 }
 
 var hhmm = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
