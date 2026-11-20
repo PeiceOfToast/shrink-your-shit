@@ -135,7 +135,7 @@ function Languages({ start, saved }: { start: string[]; saved: () => void }) {
                 <span>{l[1]}</span>{l[2] && l[2] !== l[1] && <span className="muted">{l[2]}</span>}
               </button>)}</div>}
           </div>
-          <span className="hint" id="lang-h2">Audio and subtitles in these languages are kept when a library uses "Keep only my languages". With "Save as separate .srt files", only subtitles in these languages are saved as files. Tracks with no language set are always kept.</span></div>
+          <span className="hint" id="lang-h2">Audio and subtitles in these languages are kept by "Keep only my languages". "Save as separate .srt files" saves subtitles in these languages as files. Tracks with no language set are always kept.</span></div>
         <p className={bad ? "st bad" : "muted"} role="status">{said}</p>
         <div className="row"><button className="btn primary" type="button" disabled={!dirty} onClick={save}>Save</button></div>
       </div>
