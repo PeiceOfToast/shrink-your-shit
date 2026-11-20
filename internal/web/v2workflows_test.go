@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -84,6 +85,13 @@ func TestV2Workflows(t *testing.T) {
 	}
 	if _, body := get("/api/v2/templates"); !strings.Contains(body, `"shrink_videos"`) {
 		t.Errorf("templates: %s", body)
+	} else { // "Start from Shrink videos": the whole preset, in the shape PUT .../draft takes, valid as it is
+		tpl := decode[struct {
+			Items []struct{ Workflow workflow.Doc }
+		}](t, body)
+		if doc := tpl.Items[0].Workflow; !slices.Equal(stepTypes(doc), workflow.PresetOrder) || workflow.Validate(doc).Errors() {
+			t.Errorf("template workflow: %+v %+v", stepTypes(doc), workflow.Validate(doc).Issues)
+		}
 	}
 
 	// a flow from before: published, version 1, the preset's steps, used by the library

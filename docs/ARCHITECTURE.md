@@ -150,8 +150,10 @@ A **selectors** flow (`internal/rules/selectors.go`, slice 25a) stores the Stand
     bitrate is copied. `lossless_only` converts only lossless tracks (TrueHD, DTS-HD MA, FLAC, ALAC,
     PCM), to E-AC-3. No downmix.
   - Subtitles `my_languages` follow the same language rule. `text_only` drops picture subtitles.
-  - Subtitles `srt` save text subtitles beside the new file as `<new name>.<lang>[.forced][.n].srt`,
-    written by the same ffmpeg run into the staging folder. They are checked to exist, recorded first
+  - Subtitles `srt` save the text subtitles in the user's languages (none set: the main audio track's
+    language; untagged ones too) beside the new file as `<new name>.<lang>[.forced|.sdh][.n].srt`. SDH comes
+    from the hearing_impaired disposition, else a title with "SDH", "CC" or "hearing"; forced wins. Text
+    subtitles in other languages stay inside. They are written by the same ffmpeg run into the staging folder. They are checked to exist, recorded first
     (`sidecars`, migration 10: path, size, time and full SHA-256, and the new video's size and sample hash), put in
     place with `renameNoReplace` before the swap, and removed again only while still exactly ours if the
     swap does not happen. `RecoverSidecars` at start ends a crash in between: the new video in place

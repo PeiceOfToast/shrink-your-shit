@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,6 +46,7 @@ func TestV2ConvertAgain(t *testing.T) {
 	st.Claim("w")
 	out := filepath.Join(lib.Path+" (shrunk)", "a.mkv")
 	st.Complete(id, out, 4)
+	changeWorkflow(t, st, lib, 4) // the run finished under the old workflow: earlier now
 	// orch-lead 17:12Z: what the run did, for the button's words; a folder for new files names that file
 	if a := detail(id); !a.Possible || a.Reason != nil || str(a.Policy) != "separate_folder" || str(a.OutputPath) != out || a.KeptUntil != nil {
 		t.Errorf("done: %+v", a)
@@ -70,6 +72,7 @@ func TestV2ConvertAgain(t *testing.T) {
 	deleteOn := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
 	st.FinishSwap(row, deleteOn)
 	st.Complete(other, b, 3)
+	changeWorkflow(t, st, lib, 5)
 	// replaced, its original kept: until when (the purge's date: kept plus the setting now, not the date
 	// recorded when it was kept), and no other file (the new one has the file's own name)
 	kept, _ := st.OriginalByID(row)
@@ -77,6 +80,7 @@ func TestV2ConvertAgain(t *testing.T) {
 	if a := detail(other); str(a.Policy) != "replace" || str(a.KeptUntil) != purgeDay.UTC().Format(time.RFC3339) || a.OutputPath != nil {
 		t.Errorf("kept: %+v", a)
 	}
+	changeWorkflow(t, st, lib, 6)
 	st.SetSwapState(row, jobs.OriginalPurged)
 	a := detail(other)
 	at, _ := time.Parse(time.RFC3339, againDeletedAt(a.Reason))
@@ -96,6 +100,7 @@ func TestV2ConvertAgain(t *testing.T) {
 	}
 	next := filepath.Join(lib.Path, "c.shrunk.mkv")
 	st.Complete(third, next, 3)
+	changeWorkflow(t, st, lib, 7)
 	if a := detail(third); !a.Possible || str(a.Policy) != "beside" || str(a.OutputPath) != next || a.KeptUntil != nil {
 		t.Errorf("beside: %+v", a)
 	}
@@ -118,4 +123,109 @@ func againDeletedAt(r *againReason) string {
 		return ""
 	}
 	return *r.DeletedAt
+}
+
+// A file converted with the library's current workflow is current: its detail refuses convert again with
+// current_workflow. After the workflow changes, the older file is earlier and offered; the file converted
+// after the change stays current, and a bulk POST queues only the older one, once.
+func TestV2ConvertAgainCurrentWorkflow(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	convert := func(name string) int64 {
+		t.Helper()
+		p := filepath.Join(lib.Path, name)
+		os.WriteFile(p, []byte("original"), 0o644)
+		id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: p})
+		if j, _ := st.Claim("w"); j.ID != id {
+			t.Fatalf("claimed %d", j.ID)
+		}
+		if err := st.Complete(id, filepath.Join(lib.Path, "new-"+name), 4); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	libPath := "/api/v2/libraries/" + strconv.FormatInt(lib.ID, 10) + "/convert-again"
+	type group struct {
+		Code, Message string
+		Count         int
+	}
+	type libAgain struct {
+		Earlier, Possible int
+		NotPossible       []group
+	}
+	libGET := func() libAgain {
+		t.Helper()
+		code, body, _ := do(t, nil, srv, call{method: "GET", path: libPath})
+		var a libAgain
+		if code != 200 {
+			t.Fatalf("GET %d %s", code, body)
+		}
+		json.Unmarshal([]byte(body), &a)
+		return a
+	}
+
+	old := convert("old.mkv")
+	code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(old, 10)})
+	var d struct {
+		ConvertAgain struct {
+			Possible bool
+			Reason   *againReason
+		}
+	}
+	json.Unmarshal([]byte(body), &d)
+	if code != 200 || d.ConvertAgain.Possible || d.ConvertAgain.Reason == nil ||
+		d.ConvertAgain.Reason.Code != jobs.AgainCurrent || d.ConvertAgain.Reason.Message != "Already converted with this workflow." ||
+		d.ConvertAgain.Reason.DeletedAt != nil {
+		t.Errorf("detail of a current file: %d %+v", code, d.ConvertAgain)
+	}
+	if code, body, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/jobs/" + strconv.FormatInt(old, 10) + "/convert-again", body: `{}`, ctype: "application/json"}); code != 409 || errCode(body) != jobs.AgainCurrent {
+		t.Errorf("POST of a current file: %d %s", code, body)
+	}
+	if a := libGET(); a.Earlier != 0 || a.Possible != 0 || len(a.NotPossible) != 0 {
+		t.Errorf("nothing earlier yet: %+v", a)
+	}
+
+	if _, err := st.SetFlowTemplate(lib.FlowID, rules.SliderTemplate(5)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.EnsureRevision(lib.FlowID); err != nil {
+		t.Fatal(err)
+	}
+	if a := libGET(); a.Earlier != 1 || a.Possible != 1 || len(a.NotPossible) != 0 {
+		t.Errorf("after a workflow change: %+v", a)
+	}
+	fresh := convert("fresh.mkv") // converted with the new workflow: current
+	if a := libGET(); a.Earlier != 1 || a.Possible != 1 {
+		t.Errorf("a file converted after the change is counted: %+v", a)
+	}
+
+	code, body, _ = do(t, nil, srv, call{method: "POST", path: libPath, body: `{}`, ctype: "application/json"})
+	var q struct {
+		Queued      int
+		NotPossible []group
+	}
+	json.Unmarshal([]byte(body), &q)
+	if code != 200 || q.Queued != 1 || len(q.NotPossible) != 0 {
+		t.Fatalf("bulk POST: %d %s", code, body)
+	}
+	if j, _ := st.Get(old); j.Status != jobs.Queued {
+		t.Errorf("the earlier file is %s, not queued", j.Status)
+	}
+	if j, _ := st.Get(fresh); j.Status != jobs.Done {
+		t.Errorf("the current-workflow file was touched: %s", j.Status)
+	}
+	if code, body, _ := do(t, nil, srv, call{method: "POST", path: libPath, body: `{}`, ctype: "application/json"}); code != 200 || !strings.Contains(body, `"queued":0`) {
+		t.Errorf("second bulk POST: %d %s", code, body)
+	}
+}
+
+// changeWorkflow makes a new workflow revision of lib's flow: the jobs stamped before it are earlier, not current.
+func changeWorkflow(t *testing.T, st *jobs.Store, lib jobs.Library, n int) {
+	t.Helper()
+	if _, err := st.SetFlowTemplate(lib.FlowID, rules.SliderTemplate(n)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.EnsureRevision(lib.FlowID); err != nil {
+		t.Fatal(err)
+	}
 }

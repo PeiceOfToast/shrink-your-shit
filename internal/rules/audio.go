@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 )
@@ -58,8 +59,8 @@ func AutoAudioKbps(target string, channels int) int {
 const NoAudioInMyLanguages = "None of the audio is in your languages, so all audio tracks are kept."
 
 // SubtitlesStayInside is said when "Save as separate .srt files" leaves subtitles inside the new file:
-// pictures (PGS, VobSub) and formats ffmpeg cannot turn into text (TTML) (design's words).
-const SubtitlesStayInside = "Picture subtitles stay inside the file; only text subtitles are saved as .srt files."
+// other languages, pictures (PGS, VobSub) and formats ffmpeg cannot turn into text (TTML).
+const SubtitlesStayInside = "Only text subtitles in your languages are saved as .srt files; the others stay inside the file."
 
 // LanguagesNeeded is the 400 for "my languages" before any language is chosen (design's words).
 const LanguagesNeeded = "Choose your languages first, in Settings > General."
@@ -324,18 +325,39 @@ func planSubtitles(choice string, langs []string, info media.Info) (ops []TrackO
 			}
 		}
 	case "srt":
-		// text subtitles become name.<lang>[.forced].srt beside the new file; picture ones stay inside
+		// Text subtitles in your languages (or with no language) become name.<lang>[.forced|.sdh].srt
+		// beside the new file; the others, and picture ones, stay inside. With no languages chosen,
+		// "yours" is the main audio's language (default disposition, else the first audio track).
+		want := map[string]bool{}
+		for _, l := range langs {
+			want[CanonLang(l)] = true
+		}
+		if len(want) == 0 {
+			if audio := info.Audio(); len(audio) > 0 {
+				main := audio[0]
+				for _, a := range audio {
+					if a.Default {
+						main = a
+						break
+					}
+				}
+				want[CanonLang(main.Language)] = true
+			}
+		}
 		used := map[string]int{}
 		for _, s := range subs {
-			if s.SubKind != "text" {
+			l := CanonLang(s.Language)
+			if s.SubKind != "text" || l != "" && !want[l] {
 				continue
 			}
-			var parts []string
-			if l := CanonLang(s.Language); l != "" {
+			parts := []string{}
+			if l != "" {
 				parts = append(parts, l)
 			}
 			if s.Forced {
 				parts = append(parts, "forced")
+			} else if isSDH(s) {
+				parts = append(parts, "sdh")
 			}
 			name := strings.Join(parts, ".")
 			used[name]++
@@ -346,6 +368,20 @@ func planSubtitles(choice string, langs []string, info media.Info) (ops []TrackO
 		}
 	}
 	return ops
+}
+
+// isSDH: a subtitle for the hearing impaired, by disposition or by a title naming SDH, CC or "hearing".
+func isSDH(s media.Stream) bool {
+	if s.HearingImpaired {
+		return true
+	}
+	t := strings.ToLower(s.Title)
+	for _, w := range strings.FieldsFunc(t, func(r rune) bool { return !unicode.IsLetter(r) }) {
+		if w == "sdh" || w == "cc" {
+			return true
+		}
+	}
+	return strings.Contains(t, "hearing")
 }
 
 // SubtitleFiles are the Plan's subtitles saved as .srt files, in the order ffmpeg writes them.

@@ -95,7 +95,7 @@ func newestConvertedOf(t string) string {
 var jobWhere = map[string]string{
 	CardUnprocessed: "j.status='queued'",
 	CardProcessing:  "j.status='running'",
-	CardProcessed:   "j.status='done'",
+	CardProcessed:   convertedNow("j"), // a restored original is skipped, never done
 	CardFailed:      "j.status IN ('failed','kept') AND " + newestJobOf("j"),
 }
 

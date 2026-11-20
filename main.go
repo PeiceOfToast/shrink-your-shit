@@ -216,7 +216,7 @@ func main() {
 			log.Printf("purge: %v", err)
 			return
 		}
-		for _, said := range worker.Purge(store, keepDays(), time.Now(), func(p string) bool { return web.Waits(p, waiting) }) {
+		for _, said := range worker.Purge(store, keepDays(), time.Now(), func(p string) bool { return web.Waits(p, waiting) }, 0).Said {
 			log.Printf("purge: %s", said)
 		}
 	}

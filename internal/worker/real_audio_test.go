@@ -99,6 +99,7 @@ func TestRealSubtitlesAsSrtFiles(t *testing.T) {
 	s := rules.DefaultSelectors(3)
 	s.Subtitles, s.Audio = "srt", "aac"
 	tmpl := s.Template()
+	tmpl.Languages = "eng,fra" // both tracks are in the user's languages, so both become .srt files
 	run := func() jobs.Job {
 		st, id := realJob(t, src, 5)
 		w := realWorker(st, media.OSExec{})
