@@ -123,6 +123,9 @@ type Worker struct {
 	// for the processor (or nil: the processor). A plan it can't do, and a graphics encode that fails, use the processor.
 	// note, when set, is the job-log line for a processor the worker fell back to (not set for a processor by choice).
 	Encoder func(codec string, hdr *rules.HDR) (enc, note string)
+	// GraphicsDecodes says whether a graphics family (qsv, vaapi) decodes codec at that bit depth here: the
+	// full GPU pipeline needs it (nil: the processor decodes). Set from the doctor's probe.
+	GraphicsDecodes func(ctx context.Context, fam, codec string, tenBit bool) bool
 	// EncoderCandidates, when set, returns the job log's lines for the encoder choice (log-spec R5): the
 	// hardware found and one line per encoder considered, with why it was or was not used, for the plan's
 	// codec (ffmpeg's name), whether the file is 10-bit (HDR, or a 10-bit source) and its HDR data (R4's gate:
@@ -1002,6 +1005,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// The local worker encodes with its graphics encoder for this plan's format when it can do this plan; else,
 	// and for a remote worker, the processor (its own arguments are FFmpegArgs, unchanged).
 	gpu := ""
+	full := false // gpu runs the full GPU pipeline (decode and encode on the graphics card)
 	fell := false // the graphics encoder failed and the processor is retrying the file
 	fellReason := ""
 	args := plan.FFmpegArgs(srcPath, tmp)
@@ -1022,7 +1026,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			case err == nil && paused:
 				w.jobf(job.ID, ": %s is paused until %s after three failures in a row; using the processor", want, until.Local().Format("15:04"))
 			default:
-				if args, ok = plan.FFmpegArgsWith(srcPath, tmp, want); ok {
+				if args, full, ok = w.graphicsArgs(ctx, job, plan, src, srcPath, tmp, want); ok {
 					gpu = want
 					chosenWhy = want + " passed its test on this computer and can do this file"
 				} else {
@@ -1044,7 +1048,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		w.jobf(job.ID, ": %s", note)
 	}
 	setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWordsUsed(plan, gpu),
-		Decoder: decoderWords(src), Progress: media.Progress{ETASeconds: -1}})
+		Decoder: decoderWords(src, full), Progress: media.Progress{ETASeconds: -1}})
 	defer dropLive(job.ID)
 	var encErr string
 	var terr error
@@ -1064,7 +1068,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 	} else {
 		encErr, decoded, terr = w.encodeLocal(ctx, job, args)
-		if gpu != "" && w.gpuFailed(ctx, terr, encErr) { // a graphics encoder that fails converts again on the processor
+		// A failed graphics encode steps down a rung at a time: the full GPU pipeline to the processor decoding
+		// for the same encoder (no count toward the pause), then to the processor, which counts (EncoderFell).
+		for gpu != "" && w.gpuFailed(ctx, terr, encErr, full) {
 			w.recordEncode(job.ID, args, encStart, encErr, terr, probeSummary(src))
 			reason := firstLines(encErr, 1)
 			if reason == "" {
@@ -1074,14 +1080,25 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			// write into the same file, not a new one that may get another inode.
 			if err := os.Truncate(tmp, 0); err != nil {
 				encErr, terr = "", fmt.Errorf("clearing the partial output: %w", err)
-			} else {
-				fell, fellReason = true, shortReason(reason)
-				args = plan.FFmpegArgs(srcPath, tmp)
-				setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWords(plan),
-					Decoder: decoderWords(src), Progress: media.Progress{ETASeconds: -1}})
+				break
+			}
+			if full {
+				full = false
+				args, _ = plan.FFmpegArgsWith(srcPath, tmp, gpu)
+				w.jobf(job.ID, ": full GPU pipeline failed (%s); the processor decodes for %s", shortReason(reason), gpu)
+				setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWordsUsed(plan, gpu),
+					Decoder: decoderWords(src, false), Progress: media.Progress{ETASeconds: -1}})
 				encStart = w.now()
 				encErr, decoded, terr = w.encodeLocal(ctx, job, args)
+				continue
 			}
+			fell, fellReason = true, shortReason(reason)
+			args = plan.FFmpegArgs(srcPath, tmp)
+			setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWords(plan),
+				Decoder: decoderWords(src, false), Progress: media.Progress{ETASeconds: -1}})
+			encStart = w.now()
+			encErr, decoded, terr = w.encodeLocal(ctx, job, args)
+			break
 		}
 	}
 	w.recordEncode(job.ID, args, encStart, encErr, terr, probeSummary(src))
@@ -2016,17 +2033,49 @@ func shortReason(reason string) string {
 	return reason
 }
 
-// gpuFailed says whether a graphics encode that ended with err should convert again on the processor: only an
-// encoder or ffmpeg failure (jobs.FallsBackToProcessor), never a stop (cancel, shutdown, the stall stop), a lost
-// lease, a full disk, or a damaged or missing source.
-func (w *Worker) gpuFailed(ctx context.Context, err error, stderr string) bool {
+// graphicsArgs picks the pipeline for the graphics encoder want: the full GPU pipeline when its family decodes
+// the source here (full is true), else the processor decodes and the encoder encodes. ok is false when neither
+// can do this plan. The job log says which, and why the full pipeline is not used.
+func (w *Worker) graphicsArgs(ctx context.Context, job jobs.Job, plan rules.Plan, src media.Info, srcPath, tmp, want string) (args []string, full, ok bool) {
+	fam := rules.GraphicsFamily(want)
+	if v := src.Video(); v != nil && w.GraphicsDecodes != nil && (fam == "qsv" || fam == "vaapi") {
+		if w.GraphicsDecodes(ctx, fam, v.Codec, plan.Video.HDR != nil || v.BitDepth > 8) {
+			if args, full = plan.FFmpegArgsFullGPU(srcPath, tmp, want); full {
+				w.jobf(job.ID, ": decoding and encoding on the graphics card (full GPU pipeline)")
+				return args, true, true
+			}
+		} else {
+			w.jobf(job.ID, ": %s can't decode %s here; the processor decodes", fam, codecName(v.Codec))
+		}
+	}
+	args, ok = plan.FFmpegArgsWith(srcPath, tmp, want)
+	return args, false, ok
+}
+
+// gpuFailed says whether a graphics encode that ended with err should convert again on the processor. Off the full
+// GPU pipeline, only an encoder or ffmpeg failure (jobs.FallsBackToProcessor). On the full rung the graphics card
+// also decodes, and a decode error there can be the card's, not the file's (a profile or chroma layout it cannot
+// read), so any failure steps down except a stop (cancel, shutdown, the stall stop), a lost lease, a full disk, a
+// missing source or an unwritable output, which the processor would hit too.
+func (w *Worker) gpuFailed(ctx context.Context, err error, stderr string, full bool) bool {
 	if err == nil || ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, errLeaseLost) {
 		return false
 	}
 	w.mu.Lock()
 	stalled := w.stopped == stopStall
 	w.mu.Unlock()
-	return !stalled && jobs.FallsBackToProcessor(strings.Split(stderr, "\n"))
+	if stalled {
+		return false
+	}
+	lines := strings.Split(stderr, "\n")
+	if full {
+		switch jobs.FailureCode(jobs.ReasonConvertFailed, lines) {
+		case "no_space", "source_missing", "output_not_writable":
+			return false
+		}
+		return true
+	}
+	return jobs.FallsBackToProcessor(lines)
 }
 
 // encodeLocal runs ffmpeg for the local worker's job: its progress, stall watch and live figures.

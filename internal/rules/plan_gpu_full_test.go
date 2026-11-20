@@ -111,3 +111,25 @@ func TestFFmpegArgsProcessorGolden(t *testing.T) {
 		t.Errorf("processor:\n got %s\nwant %s", got, want)
 	}
 }
+
+// The same family's H.264 encoder takes the full pipeline too (the P3 on #493): the device and the scale are the
+// family's, and only the encoder name changes.
+func TestFFmpegArgsFullGPUH264Family(t *testing.T) {
+	for _, c := range []struct{ enc, want string }{
+		{"h264_qsv", "-hwaccel qsv -hwaccel_output_format qsv -hwaccel_device qsv -i in.mkv"},
+		{"h264_vaapi", "-hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device va -i in.mkv"},
+	} {
+		p := gpuPlan(22, func(v *VideoEncode) { v.Codec = "libx264"; v.Height = 1080 })
+		args, ok := p.FFmpegArgsFullGPU("in.mkv", "out.mkv", c.enc)
+		got := strings.Join(args, " ")
+		if !ok || !strings.Contains(got, c.want) || !strings.Contains(got, "-c:v:0 h264_") || strings.Contains(got, "hwupload") {
+			t.Errorf("%s: ok %v, args %s", c.enc, ok, got)
+		}
+	}
+}
+
+// A 10-bit SDR plan must get no full-GPU args. Owned by dev-build2's row (EncoderFor asks for the 10-bit test only
+// with HDR); A2 goes through EncoderFor's choice and adds no rule of its own. Unskip when that row lands.
+func TestFFmpegArgsFullGPUTenBitSDRGetsNoFullPipeline(t *testing.T) {
+	t.Skip("owned by qitem-20261120115513-b621ab34e91ffa42 (rules.EncoderFor: 10-bit SDR needs the 10-bit test)")
+}
