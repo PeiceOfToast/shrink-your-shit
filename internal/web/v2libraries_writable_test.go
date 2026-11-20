@@ -30,6 +30,12 @@ func TestV2LibraryWritableField(t *testing.T) {
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// the app keeps the resolved path (on macOS the temp folder is under /var, a link to /private/var)
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir = resolved
 	// add while the folder is writable, then make it read-only
 	code, body, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/libraries", body: `{"name":"Movies","paths":[` + strconv.Quote(dir) + `]}`, ctype: "application/json"})
 	if code != 201 {

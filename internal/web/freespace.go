@@ -75,8 +75,9 @@ func (c *timedCache[T]) get(path string, read func() T, ttl, wait time.Duration)
 
 // freeBytes is path's free space, or nil when it isn't known in time.
 func freeBytes(path string) *uint64 {
+	read := diskFree // read the hook here, not in the reading goroutine (tests swap it)
 	b, _ := freeCache.get(path, func() *uint64 {
-		n, err := diskFree(path)
+		n, err := read(path)
 		if err != nil {
 			return nil
 		}
@@ -88,5 +89,6 @@ func freeBytes(path string) *uint64 {
 // canWriteTimed says whether the app can write to path. known is false when no answer is in yet (the first read
 // is still running): the caller shows nothing then, so an unanswered folder is not reported as read-only.
 func canWriteTimed(path string) (writable, known bool) {
-	return writeCache.get(path, func() bool { return writeCheck(path) }, writeTTL, writeTimeout)
+	check := writeCheck // read the hook here, not in the probe goroutine (tests swap it)
+	return writeCache.get(path, func() bool { return check(path) }, writeTTL, writeTimeout)
 }
