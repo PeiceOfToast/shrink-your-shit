@@ -56,18 +56,46 @@ type RemoteJob struct {
 	// worker's "converting" (with its position) and its next stage, and only for a worker that sends one
 	judging bool
 	pos     float64   // the furthest position (out_time, µs) it reported
+	frames  int64     // the most frames it reported (-1 when it sends none: an older worker)
+	wrote   int64     // the most bytes it reported written (0 when it sends none)
 	movedAt time.Time // when that position last moved on (or the encode started)
 	finish  bool      // that position is the file's length: the worker is finishing the file (its own allowance)
 }
 
 // Converting records the remote worker's encode at position pos (out_time, µs) in a file durationSec long: the
-// first report starts the stall clock, and only a position further on moves it.
+// first report starts the stall clock, and only a position further on moves it. A worker that sends no frames
+// or bytes is judged by its position alone.
 func (r *RemoteJob) Converting(pos float64, now time.Time, durationSec float64) {
+	r.ConvertingFrames(pos, -1, 0, 0, now, durationSec)
+}
+
+// ConvertingFrames is Converting with what else the worker reports: frame (-1 when none) and wrote, the bytes
+// of the new file so far, judged against sizeBefore, the source's size. Like a local encode (encodeLocal): a
+// position further on is progress; so is a frame or byte count that grows while the output stays within twice
+// the source. Runaway output past that is not progress.
+func (r *RemoteJob) ConvertingFrames(pos float64, frame, wrote, sizeBefore int64, now time.Time, durationSec float64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if !r.judging || pos > r.pos {
-		r.judging, r.pos, r.movedAt = true, pos, now
+	if !r.judging {
+		r.judging, r.pos, r.frames, r.wrote, r.movedAt = true, pos, frame, wrote, now
 		r.finish = reachedEnd(pos, durationSec)
+		return
+	}
+	posMoved := pos > r.pos
+	outputOK := sizeBefore > 0 && wrote <= 2*sizeBefore
+	grew := frame > r.frames || wrote > r.wrote
+	if frame > r.frames {
+		r.frames = frame
+	}
+	if wrote > r.wrote {
+		r.wrote = wrote
+	}
+	if posMoved {
+		r.pos = pos
+		r.finish = reachedEnd(pos, durationSec)
+	}
+	if posMoved || (outputOK && grew) {
+		r.movedAt = now
 	}
 }
 
