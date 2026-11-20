@@ -72,10 +72,21 @@ func (w *Worker) replaceOwnOutput(ctx context.Context, o jobs.Original, stage *s
 	} else {
 		err = moveNoClobber(ctx, stage.path, final, ours, rules.NameTaken)
 		if err == nil && isConvertedFile(old, o) {
-			if rerr := os.Remove(old); rerr != nil {
+			rerr := os.Remove(old)
+			w.recordMove(o.JobID, "remove", old, "", rerr)
+			if rerr != nil {
+				w.logLine(o.JobID, secReplace, jobs.LevelWarning, fmt.Sprintf("Could not remove our earlier converted file at %s: %v. It can be deleted by hand.", old, rerr))
 				log.Printf("convert again: our earlier file %s: %v", old, rerr)
+			} else {
+				w.logLine(o.JobID, secReplace, jobs.LevelInfo, "Removed our earlier converted file at "+old+"; the source stays in the kept original (trash).")
 			}
 		}
+	}
+	if err == nil {
+		w.recordMove(o.JobID, "move", stage.path, final, nil)
+		w.logLine(o.JobID, secReplace, jobs.LevelInfo, "Moved the new file into place: "+final)
+	} else {
+		w.recordMove(o.JobID, "move", stage.path, final, err)
 	}
 	if err != nil {
 		var f *FailedError

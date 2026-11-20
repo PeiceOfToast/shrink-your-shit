@@ -204,11 +204,46 @@ func (w *Worker) addPass() {
 	}
 }
 
-// addBytes counts bytes the running job wrote: a temp file's, the final one's, a .srt file's.
+// addBytes counts bytes the running job wrote: a temp file's, a .srt file's. The final file is the encode's
+// temp file renamed, so it is counted once, through the encode.
 func (w *Worker) addBytes(n int64) {
 	if n > 0 && w.statsCounting.Load() {
 		w.bytesWritten.Add(n)
 	}
+}
+
+// recordMove keeps one file action of the running job's replace step, in order (the replace step's moves[]):
+// the chmod, the owner, each rename, each sidecar and each removal, with its error when it failed.
+func (w *Worker) recordMove(id int64, action, from, to string, err error) {
+	if w.Queue == nil {
+		return
+	}
+	m := jobs.Move{Action: action, From: from, To: to, OK: err == nil}
+	if err != nil {
+		m.Error = err.Error()
+	}
+	if rerr := w.Queue.RecordJobMove(id, m); rerr != nil {
+		log.Printf("worker %s: job %d: recording a file action: %v", w.ID, id, rerr)
+	}
+}
+
+// outputSeen notes that ffmpeg printed a line just now: the quiet warning starts counting again (R9).
+func (w *Worker) outputSeen(now time.Time) {
+	w.lastOutput.Store(now.UnixNano())
+	w.quietWarned.Store(false)
+}
+
+// quietCheck writes the quiet warning once per silence: ffmpeg has printed nothing for quietAfter, so the log
+// says it is still running (log-spec R9). The stall watcher calls it; nothing happens outside a local encode.
+func (w *Worker) quietCheck(id int64, now time.Time) {
+	if !w.quietOn.Load() || w.quietWarned.Load() {
+		return
+	}
+	if now.Sub(time.Unix(0, w.lastOutput.Load())) < quietAfter {
+		return
+	}
+	w.quietWarned.Store(true)
+	w.logLine(id, secEncode, jobs.LevelWarning, fmt.Sprintf("Still running, no output for %d s.", int(quietAfter/time.Second)))
 }
 
 // recordStats stores the running job's counters once its outcome is recorded; a job that gave its lease back

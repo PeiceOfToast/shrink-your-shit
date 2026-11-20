@@ -1119,3 +1119,97 @@ func LocalEncoderFor(store *jobs.Store, chk *doctor.Checker) func(codec string, 
 		return rules.EncoderFor(codec, primaryEncoder(cfg.PrimaryEncoder, caps), hdr, caps)
 	}
 }
+
+// LocalEncoderCandidates is the job log's lines for the encoder choice (log-spec R5), for the plan's codec
+// (ffmpeg's name), whether the file is 10-bit, and its HDR data: the hardware found, then one line per
+// graphics encoder of that format, with why it was or was not used, including R4's gate (a passed 10-bit
+// test, and a family proven to keep HDR10's mastering data). A failed test quotes ffmpeg's last error line
+// from the test. The worker writes these before the chosen encoder's line.
+func LocalEncoderCandidates(store *jobs.Store, chk *doctor.Checker) func(codec string, need10 bool, hdr *rules.HDR) []string {
+	return func(codec string, need10 bool, hdr *rules.HDR) []string {
+		v := &workerView{store: store, eng: Engine{Doctor: chk}}
+		t, ok := v.tools()
+		if !ok {
+			return []string{"Hardware found: the encoder test has not finished yet; the processor does the encoding."}
+		}
+		caps := capabilities(t, ok)
+		format := encoderFormat(codec)
+		if format == "" { // VideoFormats' names are libx265/libx264/libsvtav1/libvpx-vp9
+			return nil
+		}
+		var here []string
+		for _, c := range caps {
+			if name, _ := c["key"].(string); c["kind"] == "encoder" && c["slot"] == "gpu" && c["test"] != "not_present" {
+				here = append(here, strings.TrimPrefix(name, "encoder:"))
+			}
+		}
+		out := []string{}
+		if len(here) == 0 {
+			out = append(out, "Hardware found: no graphics encoder on this computer; the processor does the encoding.")
+		} else {
+			out = append(out, "Hardware found: "+strings.Join(here, ", ")+".")
+		}
+		probes := chk.Probes()
+		tried := 0
+		for _, c := range caps {
+			name, _ := c["key"].(string)
+			name = strings.TrimPrefix(name, "encoder:")
+			if c["kind"] != "encoder" || c["slot"] != "gpu" || c["format"] != format {
+				continue
+			}
+			tried++
+			test, _ := c["test"].(string)
+			switch test {
+			case "passed":
+				tenBit, _ := c["tenBit"].(bool)
+				if why := candidateReject(name, tenBit, hdr); why != "" {
+					out = append(out, name+": "+why+".")
+				} else if need10 && !tenBit { // SDR 10-bit: used (the gate is HDR's), but say what its depth means
+					out = append(out, name+": passed its test here, but it is 8-bit only and this file is 10-bit.")
+				} else {
+					out = append(out, name+": passed its test here.")
+				}
+			case "not_present":
+				out = append(out, name+": not tried: no card for it in this computer.")
+			case "unsupported":
+				out = append(out, name+": not tried: this graphics card does not support it.")
+			default: // failed: R5 wants the last error line of the test
+				line := name + ": failed its test here"
+				if p, ok := probes[name]; ok && p.Err != "" {
+					line += ": " + testWords(p.Err)
+				}
+				out = append(out, line+".")
+			}
+		}
+		if tried == 0 {
+			out = append(out, "No graphics encoder for "+format+" is listed here; the processor encodes it.")
+		}
+		return out
+	}
+}
+
+// candidateReject says why graphics encoder name, whose test passed, was not used for this file, in words; ""
+// when the worker's gate (rules.EncoderFor) lets it encode the file. R4's gate: an HDR file needs the encoder's
+// 10-bit test, and one carrying HDR10's mastering data needs a family proven to keep it (rules.HDRCarrier). An
+// SDR 10-bit file is not refused here, as the gate does not refuse it.
+func candidateReject(name string, tenBit bool, hdr *rules.HDR) string {
+	switch {
+	case hdr != nil && !tenBit:
+		return "passed its test, but it is 8-bit only and HDR needs a 10-bit encoder, so it was not used for it"
+	case hdr != nil && (hdr.MasterDisplay != "" || hdr.CLL != "") && !rules.HDRCarrier(name):
+		return "passed its tests, but it is not proven to keep HDR10's mastering data, so it was not used for it"
+	}
+	return ""
+}
+
+// testWords is a test's last error line for the job log, one line and at most 200 characters.
+func testWords(err string) string {
+	line := strings.TrimSpace(strings.Split(err, "\n")[0])
+	if r := []rune(line); len(r) > 200 {
+		line = string(r[:200]) + "…"
+	}
+	if line == "" {
+		return "the test encode did not run"
+	}
+	return line
+}

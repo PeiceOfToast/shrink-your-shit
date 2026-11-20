@@ -197,6 +197,49 @@ func (s *Store) JobStats(id int64) (passes int, bytesWritten int64, ok bool, err
 	return passes, bytesWritten, true, nil
 }
 
+// Move is one file action the replace step took (design's moves[]): what it did, to which file, and whether
+// it worked (error is its words when it did not).
+type Move struct {
+	Action string // move | copy | chmod | chown | remove | write_sidecar
+	From   string
+	To     string
+	OK     bool
+	Error  string
+}
+
+// RecordJobMove adds one file action to job id's replace step, after those recorded before it (log-spec R14).
+func (s *Store) RecordJobMove(id int64, m Move) error {
+	ok := 0
+	if m.OK {
+		ok = 1
+	}
+	_, err := s.db.Exec(`INSERT INTO job_run_moves(job_id, seq, action, from_path, to_path, ok, error)
+SELECT ?, COALESCE(MAX(seq),0)+1, ?, ?, ?, ?, ? FROM job_run_moves WHERE job_id=?`,
+		id, m.Action, m.From, m.To, ok, CleanLogText(m.Error), id)
+	return err
+}
+
+// JobMoves is job id's file actions, in the order the replace step took them (none for a job that recorded
+// none: one from before this, or one that never reached the replace).
+func (s *Store) JobMoves(id int64) ([]Move, error) {
+	rows, err := s.db.Query(`SELECT action, from_path, to_path, ok, error FROM job_run_moves WHERE job_id=? ORDER BY seq`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Move{}
+	for rows.Next() {
+		var m Move
+		var ok int
+		if err := rows.Scan(&m.Action, &m.From, &m.To, &ok, &m.Error); err != nil {
+			return nil, err
+		}
+		m.OK = ok != 0
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 // SetFailureSummary records why job id failed (replacing an earlier one). At most 20 key lines are kept.
 func (s *Store) SetFailureSummary(id int64, f FailureSummary) error {
 	lines := f.KeyLines
@@ -308,7 +351,7 @@ func (s *Store) LogLinesAfter(id, after int64, limit int) ([]LogLine, error) {
 // RemoveJobLogs deletes the log lines and steps of jobs that are gone (their rows were removed).
 func (s *Store) RemoveJobLogs(ids []int64) error {
 	for _, id := range ids {
-		for _, q := range []string{`DELETE FROM job_log_lines WHERE job_id=?`, `DELETE FROM job_run_steps WHERE job_id=?`, `DELETE FROM job_failures WHERE job_id=?`, `DELETE FROM job_run_stats WHERE job_id=?`} {
+		for _, q := range []string{`DELETE FROM job_log_lines WHERE job_id=?`, `DELETE FROM job_run_steps WHERE job_id=?`, `DELETE FROM job_failures WHERE job_id=?`, `DELETE FROM job_run_stats WHERE job_id=?`, `DELETE FROM job_run_moves WHERE job_id=?`} {
 			if _, err := s.db.Exec(q, id); err != nil {
 				return err
 			}
@@ -345,6 +388,9 @@ func (s *Store) PruneJobLogs(before time.Time) (int64, error) {
 		n += k
 		// the run counters stay: they are the job's summary, not its log
 		if _, err := s.db.Exec(`DELETE FROM job_run_steps WHERE job_id=?`, id); err != nil {
+			return n, err
+		}
+		if _, err := s.db.Exec(`DELETE FROM job_run_moves WHERE job_id=?`, id); err != nil {
 			return n, err
 		}
 	}

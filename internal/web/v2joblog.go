@@ -34,6 +34,7 @@ func v2JobLog(api *http.ServeMux, store *jobs.Store) {
 		if f, err := store.FailureOf(id); err == nil && f != nil {
 			failed = f.Step
 		}
+		moves, _ := store.JobMoves(id) // the replace step's file actions, in order (design's moves[])
 		out := []map[string]any{}
 		for _, st := range steps {
 			m := map[string]any{"name": st.Name, "startedAt": st.StartedAt, "tookMs": st.TookMs, "outcome": st.Outcome,
@@ -44,6 +45,9 @@ func v2JobLog(api *http.ServeMux, store *jobs.Store) {
 			}
 			if st.CheckScore != nil {
 				m["check"] = map[string]any{"score": *st.CheckScore, "min": st.CheckMin, "passed": st.CheckPassed}
+			}
+			if st.Name == "replace" && len(moves) > 0 {
+				m["moves"] = movesJSON(moves)
 			}
 			if st.Index == failed { // the last 200 lines of the failed step: the output that says where it stopped
 				var mine []string
@@ -99,6 +103,17 @@ func checkFound(lines []jobs.LogLine, step int, startedAt string) []string {
 		if l.Step == step && l.Stream == "check" && atOnOrAfter(l.At, startedAt) {
 			out = append(out, l.Text)
 		}
+	}
+	return out
+}
+
+// movesJSON is the replace step's file actions in design's shape: what was done, to which file, and whether it
+// worked, in the order the worker did them.
+func movesJSON(moves []jobs.Move) []map[string]any {
+	out := make([]map[string]any, 0, len(moves))
+	for _, m := range moves {
+		out = append(out, map[string]any{"action": m.Action, "from": nilIfEmpty(m.From), "to": nilIfEmpty(m.To),
+			"ok": m.OK, "error": nilIfEmpty(m.Error)})
 	}
 	return out
 }

@@ -105,7 +105,7 @@ func TestCompareExplainsEverythingInPlainWords(t *testing.T) {
 }
 
 func TestHumanBytesAndClock(t *testing.T) {
-	for in, want := range map[int64]string{0: "0 B", 1023: "1023 B", 1024: "1.0 KB", 1536: "1.5 KB", 5 << 20: "5.0 MB", 3 << 30: "3.0 GB"} {
+	for in, want := range map[int64]string{0: "0 B", 999: "999 B", 1000: "1.0 KB", 1536: "1.5 KB", 5_000_000: "5.0 MB", 3_000_000_000: "3.0 GB"} {
 		if got := HumanBytes(in); got != want {
 			t.Errorf("HumanBytes(%d)=%q want %q", in, got, want)
 		}

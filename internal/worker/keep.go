@@ -168,31 +168,42 @@ func (w *Worker) keepAndReplace(ctx context.Context, job jobs.Job, stage *staged
 	}
 	// 1. The original into the trash, if it is still the file that was read.
 	if err := moveIntoPlace(ctx, job.Path, o.Trash, stillOK); err != nil {
+		w.recordMove(job.ID, "move", job.Path, o.Trash, err)
+		w.logLine(job.ID, secReplace, jobs.LevelWarning, fmt.Sprintf("Could not move the source to the kept original (trash) at %s: %v. Nothing was changed.", o.Trash, err))
 		var k *KeptError
 		if errors.As(err, &k) {
 			return undo(err)
 		}
 		return undo(fmt.Errorf("move the original into %s: %w", TrashDir, err))
 	}
+	w.recordMove(job.ID, "move", job.Path, o.Trash, nil)
+	w.logLine(job.ID, secReplace, jobs.LevelInfo, "Moved the source to the kept original (trash): "+o.Trash)
 	if err := hook("original moved"); err != nil {
 		return err
 	}
 	// 2. The new file to the original's name (or its new name: never over another file). If that
 	// fails, the original goes back.
+	destPath := job.Path
 	if renaming {
+		destPath = dest
 		err = moveNoClobber(ctx, stage.path, dest, stage.intact, rules.NameTaken)
 	} else {
 		err = moveIntoPlace(ctx, stage.path, job.Path, stage.intact)
 	}
 	if err != nil {
+		w.recordMove(job.ID, "move", stage.path, destPath, err)
+		w.logLine(job.ID, secReplace, jobs.LevelWarning, fmt.Sprintf("Could not move the new file into place at %s: %v. The source was put back.", destPath, err))
 		putBack := os.Rename
 		if renaming { // its name was free for a moment: something put there meanwhile is not replaced
 			putBack = renameNoReplace
 		}
 		if rerr := putBack(o.Trash, job.Path); rerr != nil {
+			w.recordMove(job.ID, "move", o.Trash, job.Path, rerr)
 			// Leave the row "moving": the next start puts the original back.
 			return fmt.Errorf("the new file could not be moved into place (%v), and putting the original back failed (%v); it is in %s and is put back at the next start", err, rerr, o.Trash)
 		}
+		w.recordMove(job.ID, "move", o.Trash, job.Path, nil)
+		w.logLine(job.ID, secReplace, jobs.LevelInfo, "Put the source back: "+job.Path)
 		var k *KeptError
 		var f *FailedError
 		if errors.As(err, &k) || errors.As(err, &f) {
@@ -200,6 +211,8 @@ func (w *Worker) keepAndReplace(ctx context.Context, job jobs.Job, stage *staged
 		}
 		return undo(fmt.Errorf("move result into place: %w", err))
 	}
+	w.recordMove(job.ID, "move", stage.path, destPath, nil)
+	w.logLine(job.ID, secReplace, jobs.LevelInfo, "Moved the new file into place: "+destPath)
 	if err := hook("new file in place"); err != nil {
 		return err
 	}
@@ -209,9 +222,16 @@ func (w *Worker) keepAndReplace(ctx context.Context, job jobs.Job, stage *staged
 		return hook("done")
 	}
 	if days == 0 { // kept only because the name changed: deleted now (or by the next purge)
-		if isOriginal(o.Trash, o) && os.Remove(o.Trash) == nil {
-			w.Journal.SetSwapState(id, jobs.OriginalPurged)
-			removeIfEmpty(dir)
+		if isOriginal(o.Trash, o) {
+			if rerr := os.Remove(o.Trash); rerr == nil {
+				w.recordMove(job.ID, "remove", o.Trash, "", nil)
+				w.logLine(job.ID, secReplace, jobs.LevelInfo, "Deleted the source's kept copy (trash) at "+o.Trash+": the file only changed its name.")
+				w.Journal.SetSwapState(id, jobs.OriginalPurged)
+				removeIfEmpty(dir)
+			} else {
+				w.recordMove(job.ID, "remove", o.Trash, "", rerr)
+				w.logLine(job.ID, secReplace, jobs.LevelWarning, fmt.Sprintf("Could not delete the source's kept copy (trash) at %s: %v. It is deleted at the next start's cleanup.", o.Trash, rerr))
+			}
 		}
 	}
 	return hook("done")

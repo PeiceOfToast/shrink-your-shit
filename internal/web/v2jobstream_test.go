@@ -139,7 +139,7 @@ func TestV2ActivityFeed(t *testing.T) {
 		t.Fatalf("feed %d %q", feed.Total, got)
 	}
 	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/v2/activity?before=" + feed.Items[2].ID})
-	if !strings.Contains(body, `"text":"Converted Done.mkv: 2.0 GB to 1.0 GB."`) || strings.Contains(body, "Failed.mkv") {
+	if !strings.Contains(body, `"text":"Converted Done.mkv: 2.1 GB to 1.1 GB."`) || strings.Contains(body, "Failed.mkv") {
 		t.Errorf("the next page %s", body)
 	}
 }
