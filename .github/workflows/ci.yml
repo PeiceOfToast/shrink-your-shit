@@ -8,6 +8,13 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same pull request cancels its older, now-pointless run. Pushes to dev and main are never
+# cancelled, so every merged commit keeps its own result.
+# (A push gets a group of its own commit: a shared group would still drop a waiting run when a third one queued.)
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('ci-pr-{0}', github.event.pull_request.number) || format('ci-push-{0}', github.sha) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # Linux jobs run on ubuntu-latest (the distro ffmpeg); the real ffmpeg 8 job stays on ubuntu-24.04 with its pinned static build.
 jobs:
   # Code the tests do not look at: Go formatting. (The name keeps "UI JavaScript" in case it is a required
