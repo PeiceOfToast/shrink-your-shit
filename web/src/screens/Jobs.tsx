@@ -338,7 +338,10 @@ type Raw = { key: string; id?: string; title: string; head: ReactNode; hits: num
 // start, variables or summary: only its steps show, with one line saying so. Running jobs use JobLog.
 function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: boolean; data?: JobLog; error?: { message: string } }; id: string; worker: string | null; failedIdx: number | null; kept: boolean; hasResult: boolean }) {
   const keep = useData(getSettings, []), [q, setQ] = useState(""), [copied, setCopied] = useState(""), [errOnly, setErrOnly] = useState(false), [only, setOnly] = useState(false), [open, setOpen] = useState<Record<string, boolean>>({});
+  // qOpen: clicks made during the current search; they win while it lasts and are dropped when the query changes
+  const [qOpen, setQOpen] = useState<Record<string, boolean>>({});
   useEffect(() => { setCopied(""); setOpen({}); }, [id]);
+  useEffect(() => setQOpen({}), [q, id]);
   // a finished job's whole log is on the server (the steps here keep only the last 200 lines of a failure)
   const copyAll = () => MOCK ? copyLogText((d.data?.steps ?? []).map((st) => [st.name, st.command, text(st.output), st.result].filter(Boolean).join("\n")).join("\n"), setCopied)
     : fetch("/api/v2/jobs/" + encodeURIComponent(id) + "/log/download", { credentials: "same-origin" }).then((r) => (r.ok ? r.text() : Promise.reject())).then((t) => copyLogText(t, setCopied), () => setCopied("Couldn't copy; use Download."));
@@ -373,14 +376,14 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
       body: <><p className="sm">{sourceLine(pr)}</p>{streamLines(pr).map((x, j) => <p className="sm" key={j}>{x}</p>)}</> });
   }
   l.steps.forEach((st, i) => {
-    const warn = st.warnings ?? [], errs = st.errors ?? [], hit = q ? countIn(stepText(st), q) : 0;
+    const warn = st.warnings ?? [], errs = st.errors ?? [], hit = q ? countIn(errOnly ? [...warn, ...errs].join("\n").toLowerCase() : stepText(st), q) : 0;
     const took = st.tookMs != null ? "Took " + stepTime(st.tookMs) : "";
     const progress = st.speedX != null || st.avgKbps != null ? [took + (st.speedX != null ? (took ? " at " : "") + st.speedX + "× speed" : ""), st.avgKbps != null ? "average " + st.avgKbps.toLocaleString() + " kbps" : ""].filter(Boolean).join(", ") : "";
     const flags = <>
       {warn.length > 0 && <div className="stack" style={{ gap: 4 }}>{warn.map((w, j) => <p className="sm" key={j}><Icon id="i-alert" /> Warning: {w}</p>)}</div>}
       {errs.length > 0 && <div className="stack" style={{ gap: 4 }}>{errs.map((w, j) => <p className="sm" key={j}><Icon id="i-x-c" /> Error: {w}</p>)}</div>}</>;
     const pill = ["ok", "done", "completed"].includes(st.outcome) ? <span className="pill ok">Done</span> : st.outcome === "failed" ? (kept ? <span className="pill warn">Original kept</span> : <span className="pill bad">Failed</span>) : st.outcome === "skipped" ? <span className="pill">Skipped</span> : null;
-    raw.push({ key: "step-" + i, id: "job-step-" + (i + 1), title: stepLabel(st.name, st.found, st.check != null), hits: hit, dflt: st.outcome === "failed" || st.outcome === "skipped" || i === failedIdx || (kept && st.check != null), show: !errOnly || flagged(st),
+    raw.push({ key: "step-" + i, id: "job-step-" + (i + 1), title: stepLabel(st.name, st.found, st.check != null), hits: hit, dflt: st.outcome === "failed" || st.outcome === "skipped" || i === failedIdx || (kept && st.check != null), show: !errOnly || (flagged(st) && (!q || hit > 0)),
       head: <>
         {st.startedAt && st.tookMs != null && <span className="sm muted">{clock(st.startedAt)} · took {stepTime(st.tookMs)}</span>}{pill}
         {warn.length > 0 && <span className="pill warn">{plural1(warn.length, "warning", "warnings")}</span>}{errs.length > 0 && <span className="pill bad">{plural1(errs.length, "error", "errors")}</span>}
@@ -411,9 +414,9 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
       <p className="sm">Result: {WORD[l.final ?? ""] ?? l.final}</p>
       {hasResult && <p className="sm"><a href="#job-result" onClick={(e) => { e.preventDefault(); document.getElementById("job-result")?.scrollIntoView({ block: "start" }); }}>Before and after: see Result</a></p>}</> });
   }
-  const secs = raw.map((r) => ({ ...r, open: errOnly || (!!q && r.hits > 0) || (r.key in open ? open[r.key] : r.dflt) })); // design 04:37Z: search only adds open sections
+  const secs = raw.map((r) => ({ ...r, open: errOnly || (r.key in qOpen ? qOpen[r.key] : (!!q && r.hits > 0) || (r.key in open ? open[r.key] : r.dflt)) })); // design 04:37Z: search only adds open sections
   const shown = secs.filter((s) => s.show), anyClosed = shown.some((s) => !s.open);
-  const tot = secs.reduce((n, s) => n + s.hits, 0), ks = secs.filter((s) => s.hits > 0).length;
+  const tot = shown.reduce((n, s) => n + s.hits, 0), ks = shown.filter((s) => s.hits > 0).length; // review2 #455: search and the switch must both match
   const E = l.steps.reduce((n, st) => n + (st.errors?.length ?? 0), 0), W = l.steps.reduce((n, st) => n + (st.warnings?.length ?? 0), 0), K = l.steps.filter(flagged).length;
   const status = [q && (tot ? tot + " matches in " + ks + " step" + (ks > 1 ? "s" : "") : "No match"), errOnly && (E + W ? plural1(E, "error", "errors") + " and " + plural1(W, "warning", "warnings") + " in " + plural1(K, "section", "sections") : "No errors or warnings in this log.")].filter(Boolean).join(" · ");
   return (
@@ -432,7 +435,7 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
       {old && <p className="sm muted">This job ran before full logs were kept, so only its steps are shown.</p>}
       {shown.map((s) => (
         <details key={s.key} id={s.id} open={s.open} className="stepd" style={{ borderTop: "1px solid var(--border)", padding: "8px 0" }}
-          onToggle={(e) => { const o = e.currentTarget.open; if (o !== s.open) setOpen((p) => ({ ...p, [s.key]: o })); }}>{/* only the person's clicks are kept, so clearing a search leaves sections as they left them */}
+          onToggle={(e) => { const o = e.currentTarget.open; if (o === s.open) return; setOpen((p) => ({ ...p, [s.key]: o })); if (q) setQOpen((p) => ({ ...p, [s.key]: o })); }}>{/* only the person's clicks are kept, so clearing a search leaves sections as they left them */}
           <summary className="row nw" style={{ gap: 8, flexWrap: "wrap", cursor: "pointer" }}><strong>{s.title}</strong>{s.head}</summary>
           <div className="stack" style={{ gap: 6, paddingTop: 6 }}>{s.body}</div>
         </details>))}
