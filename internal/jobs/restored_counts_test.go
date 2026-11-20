@@ -66,7 +66,9 @@ func TestRestoredFileIsSkippedEverywhere(t *testing.T) {
 		"done count":          -1, // the overview's converted number
 		"library done":        -1,
 		"done list":           -1, // /api/activity/done total
-		"jobs skipped":        +1, // the Jobs tab Skipped count
+		"batch converted":     -1,
+		"batch saved":         -600, // a.mkv's 1000-400 bytes are no saving once the original is back
+		"jobs skipped":        +1,   // the Jobs tab Skipped count
 		"library skipped":     +1,
 		"daily skipped":       +1,
 		"summary skipped 48h": +1,
@@ -108,7 +110,11 @@ func surfacesOf(t *testing.T, s *Store, l Library, since string, now time.Time) 
 	check(err)
 	_, doneTotal, err := s.DoneItems(50, 0)
 	check(err)
+	batch, err := s.BatchSince(since)
+	check(err)
 	return map[string]int{
+		"batch converted":     int(batch.Converted), // the notify batch summary
+		"batch saved":         int(batch.Saved),
 		"jobs done":           doneCards,
 		"done count":          done,
 		"library done":        lib.Done,
