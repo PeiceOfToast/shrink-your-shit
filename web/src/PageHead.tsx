@@ -22,7 +22,7 @@ export function PageHead({ icon, title, sub, help, crumbs, after, children }: { 
       <div className="pagehead">
         {icon && <span className="ptile"><Icon id={icon} /></span>}
         {crumbs?.map(([label, to]) => <Fragment key={to}><Link className="crumbl" to={to}>{label}</Link><span className="slash" aria-hidden="true">/</span></Fragment>)}
-        {sub ? <span className="tt"><h1>{title}</h1><span className="sub">{sub}</span></span> : <h1>{title}</h1>}
+        {sub ? <div className="tt"><h1>{title}</h1><span className="sub">{sub}</span></div> : <h1>{title}</h1>}
         <SampleData />
         {help && <button className="btn icon ghost help" type="button" title={help} aria-expanded={open} aria-label="About this page" onClick={() => setOpen(!open)}><Icon id="i-info" /></button>}
         {after}

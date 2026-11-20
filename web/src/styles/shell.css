@@ -75,7 +75,6 @@ body.conn-lost .stale{color:var(--text-2)}
 .content{padding:var(--pad) var(--page-pad) 48px;display:flex;flex-direction:column;gap:calc(var(--gap)*1.4);min-width:0}
 .content.flush{padding:0;gap:0}
 .pagehead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:56px}
-.pagehead>.ic{width:16px;height:16px;color:var(--text-2);flex:none}
 .pagehead .ptile{width:32px;height:32px;border-radius:var(--radius-sm);background:var(--raised);color:var(--accent-text);display:grid;place-items:center;flex:none}
 .pagehead .ptile .ic{width:18px;height:18px}
 .pagehead .tt{display:flex;flex-direction:column;gap:2px;min-width:0}
