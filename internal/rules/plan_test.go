@@ -13,12 +13,11 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 )
 
-// todayArgs are the ffmpeg arguments the program ran before Plans (media.HEVCArgs, removed): a
-// legacy flow must keep producing exactly these, except R6's -max_muxing_queue_size, which only
-// lets ffmpeg write a file it used to stop on.
+// todayArgs is the legacy video encode's arguments. F9 adds the stale-statistics clearing (staleVideoArgs) to every
+// re-encode, the one change to these arguments on purpose; the decisions and the rest are as before.
 func todayArgs(in, out, crf, preset string) string {
 	return "-y -nostdin -v error -progress pipe:1 -nostats -i " + in +
-		" -map 0 -map -0:d -c copy -max_muxing_queue_size 4096 -c:v:0 libx265 -crf " + crf + " -preset " + preset + " -tag:v:0 hvc1 " + out
+		" -map 0 -map -0:d -c copy -max_muxing_queue_size 4096 -c:v:0 libx265 -crf " + crf + " -preset " + preset + " -tag:v:0 hvc1 " + staleVideoArgs + " " + out
 }
 
 // probeSet is every probe in internal/media/testdata plus synthetic files around the default rule's
@@ -267,7 +266,7 @@ func TestPlanCarriesABitrateCap(t *testing.T) {
 	p := LegacyTemplate(Default(), "replace").Compile(media.Info{VideoCodec: "h264", BitrateKbps: 8000})
 	p.Video.MaxRateKbps = 6000
 	got := strings.Join(p.FFmpegArgs("a.mkv", "b.mkv"), " ")
-	if !strings.Contains(got, "-crf 26 -preset medium -maxrate:v:0 6000k -bufsize:v:0 12000k -tag:v:0 hvc1 b.mkv") {
+	if !strings.Contains(got, "-crf 26 -preset medium -maxrate:v:0 6000k -bufsize:v:0 12000k -tag:v:0 hvc1 "+staleVideoArgs+" b.mkv") {
 		t.Errorf("%s", got)
 	}
 }

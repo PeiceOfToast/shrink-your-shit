@@ -39,21 +39,21 @@ func TestFFmpegArgsFullGPUGoldens(t *testing.T) {
 		want string
 	}{
 		{"qsv plain", gpuPlan(22, nil), "hevc_qsv",
-			head + qsvDev + tail + "-c:v:0 hevc_qsv -global_quality 22 out.mkv"},
+			head + qsvDev + tail + "-c:v:0 hevc_qsv -global_quality 22 " + staleVideoArgs + " out.mkv"},
 		{"qsv downscale", gpuPlan(22, func(v *VideoEncode) { v.Height = 1080 }), "hevc_qsv",
-			head + qsvDev + tail + "-c:v:0 hevc_qsv -global_quality 22 -filter:v:0 scale_qsv=w=trunc(1080*a/2)*2:h=1080 out.mkv"},
+			head + qsvDev + tail + "-c:v:0 hevc_qsv -global_quality 22 -filter:v:0 scale_qsv=w=trunc(1080*a/2)*2:h=1080 " + staleVideoArgs + " out.mkv"},
 		{"qsv HDR", gpuPlan(22, func(v *VideoEncode) { v.HDR = hdr }), "hevc_qsv",
-			head + qsvDev + tail + "-c:v:0 hevc_qsv -global_quality 22" + hdrFlags + " out.mkv"},
+			head + qsvDev + tail + "-c:v:0 hevc_qsv -global_quality 22" + hdrFlags + " " + staleVideoArgs + " out.mkv"},
 		{"qsv HDR downscale", gpuPlan(22, func(v *VideoEncode) { v.HDR = hdr; v.Height = 1080 }), "hevc_qsv",
-			head + qsvDev + tail + "-c:v:0 hevc_qsv -global_quality 22" + hdrFlags + " -filter:v:0 scale_qsv=w=trunc(1080*a/2)*2:h=1080 out.mkv"},
+			head + qsvDev + tail + "-c:v:0 hevc_qsv -global_quality 22" + hdrFlags + " -filter:v:0 scale_qsv=w=trunc(1080*a/2)*2:h=1080 " + staleVideoArgs + " out.mkv"},
 		{"vaapi plain", gpuPlan(22, nil), "hevc_vaapi",
-			head + vaDev + tail + "-c:v:0 hevc_vaapi -rc_mode CQP -qp 22 out.mkv"},
+			head + vaDev + tail + "-c:v:0 hevc_vaapi -rc_mode CQP -qp 22 " + staleVideoArgs + " out.mkv"},
 		{"vaapi downscale", gpuPlan(22, func(v *VideoEncode) { v.Height = 1080 }), "hevc_vaapi",
-			head + vaDev + tail + "-c:v:0 hevc_vaapi -rc_mode CQP -qp 22 -filter:v:0 scale_vaapi=w=-2:h=1080:format=nv12 out.mkv"},
+			head + vaDev + tail + "-c:v:0 hevc_vaapi -rc_mode CQP -qp 22 -filter:v:0 scale_vaapi=w=-2:h=1080:format=nv12 " + staleVideoArgs + " out.mkv"},
 		{"vaapi HDR", gpuPlan(22, func(v *VideoEncode) { v.HDR = hdr }), "hevc_vaapi",
-			head + vaDev + tail + "-c:v:0 hevc_vaapi -rc_mode CQP -qp 22" + hdrFlags + " out.mkv"},
+			head + vaDev + tail + "-c:v:0 hevc_vaapi -rc_mode CQP -qp 22" + hdrFlags + " " + staleVideoArgs + " out.mkv"},
 		{"vaapi HDR downscale", gpuPlan(22, func(v *VideoEncode) { v.HDR = hdr; v.Height = 1080 }), "hevc_vaapi",
-			head + vaDev + tail + "-c:v:0 hevc_vaapi -rc_mode CQP -qp 22" + hdrFlags + " -filter:v:0 scale_vaapi=w=-2:h=1080:format=p010 out.mkv"},
+			head + vaDev + tail + "-c:v:0 hevc_vaapi -rc_mode CQP -qp 22" + hdrFlags + " -filter:v:0 scale_vaapi=w=-2:h=1080:format=p010 " + staleVideoArgs + " out.mkv"},
 	}
 	for _, c := range cases {
 		if got := fullArgs(t, c.p, c.enc); got != c.want {
@@ -106,7 +106,7 @@ func TestFFmpegArgsFullGPUFallsBackWhenFFmpegArgsWithDoes(t *testing.T) {
 func TestFFmpegArgsProcessorGolden(t *testing.T) {
 	p := gpuPlan(22, func(v *VideoEncode) { v.Height = 720 })
 	want := "-y -nostdin -v error -progress pipe:1 -nostats -i in.mkv -map 0 -map -0:d -c copy -max_muxing_queue_size 4096 " +
-		"-c:v:0 libx265 -crf 22 -preset medium -filter:v:0 scale=-2:720 out.mkv"
+		"-c:v:0 libx265 -crf 22 -preset medium -filter:v:0 scale=-2:720 " + staleVideoArgs + " out.mkv"
 	if got := strings.Join(p.FFmpegArgs("in.mkv", "out.mkv"), " "); got != want {
 		t.Errorf("processor:\n got %s\nwant %s", got, want)
 	}
