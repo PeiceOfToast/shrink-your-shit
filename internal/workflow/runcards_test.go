@@ -197,8 +197,8 @@ func TestPublishedVariables(t *testing.T) {
 	if !slices.Contains(PublishedNames(d), "profile") {
 		t.Errorf("published: %v", PublishedNames(d))
 	}
-	for _, i := range Validate(d).Issues { // the note reads {{profile}}: known because the step before sets it
-		if i.Code == "unknown_variable" {
+	for _, i := range Validate(d).Issues { // the note reads {{profile}}: known because the step before sets it; only the gate may object
+		if i.Code != "not_runnable_yet" || !NotYet[byID(d, i.NodeID).Type] {
 			t.Fatalf("%+v", i)
 		}
 	}

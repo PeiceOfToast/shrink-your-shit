@@ -210,7 +210,10 @@ func (q Question) Ask(info media.Info, f Facts) (bool, string) {
 			return q.Op == "unset", "{{" + q.Variable + "}} has no value"
 		}
 		says := "{{" + q.Variable + "}} is " + strconv.Quote(v)
-		want, _ := vars.Resolve(q.Value, f.Vars) // the value may name variables ({{library}}); review2-531 P2
+		want, empty := vars.Resolve(q.Value, f.Vars)            // the value may name variables ({{library}}); review2-531 P2
+		if len(empty) > 0 && q.Op != "set" && q.Op != "unset" { // a value with an empty name in it matches nothing (review2-531 P3a)
+			return false, says + ", and the value's {{" + empty[0] + "}} has no value"
+		}
 		q.Value = want
 		switch q.Op {
 		case "set":

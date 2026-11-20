@@ -51,6 +51,7 @@ func TestQuestionsAsk(t *testing.T) {
 		{"name: regex sensitive", Question{Kind: "name", Pattern: `^harrow`, Match: "regex", CaseSensitive: true}, false},
 		{"variable: value names a variable", Question{Kind: "variable", Variable: "profile", Op: "equals", Value: "{{profile}}"}, true},
 		{"variable: value names another", Question{Kind: "variable", Variable: "profile", Op: "contains", Value: "{{score}}"}, false},
+		{"variable: value names an empty one", Question{Kind: "variable", Variable: "profile", Op: "contains", Value: "{{missing}}"}, false}, // review2-531 P3a: not "contains the empty string"
 		{"path: contains", Question{Kind: "name", Pattern: "/media/movies/", Match: "contains", Where: "path"}, true},
 		{"age: older", Question{Kind: "age", OlderDays: 20}, true},
 		{"age: not that old", Question{Kind: "age", OlderDays: 60}, false},
