@@ -105,7 +105,7 @@ func TestResolveRefusesWhatDoesNotFit(t *testing.T) {
 		names string // a name the message must hold
 	}{
 		{"a name the workflow doesn't have", []Variable{{Name: "quality", Type: "number", Value: float64(2)}},
-			TypeConvert, "quality", "{{qualit}}", "missing_variable", "Did you mean {{quality}}?"},
+			TypeConvert, "quality", "{{qualit}}", "unknown_variable", "Did you mean {{quality}}?"},
 		{"text into a number", []Variable{{Name: "t", Type: "string", Value: "fast"}},
 			TypeConvert, "quality", "{{t}}", "variable_wrong_type", "not a choice"},
 		{"text around a reference", []Variable{{Name: "q", Type: "number", Value: float64(2)}},
@@ -115,7 +115,7 @@ func TestResolveRefusesWhatDoesNotFit(t *testing.T) {
 		{"an unclosed reference", []Variable{{Name: "q", Type: "number", Value: float64(2)}},
 			TypeConvert, "quality", "{{q", "variable_ref_not_whole", "one whole variable"},
 		{"a secret", []Variable{{Name: "api_key", Type: "secret", Value: "s3cret"}},
-			TypeConvert, "quality", "{{api_key}}", "variable_wrong_type", "is a secret"},
+			TypeConvert, "quality", "{{api_key}}", "variable_wrong_type", "is a secret, and a secret can't set this setting"},
 		{"a variable with no value", []Variable{{Name: "q", Type: "number"}},
 			TypeConvert, "quality", "{{q}}", "variable_wrong_type", "has no value yet"},
 		{"below the setting's least", []Variable{{Name: "max", Type: "number", Value: float64(50)}},

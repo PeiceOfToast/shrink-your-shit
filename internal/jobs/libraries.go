@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -554,9 +555,12 @@ func (s *Store) TemplateFor(j Job) (rules.Template, error) {
 	// keeps a job on it even for a template written before the workflow's settings were resolved). A
 	// workflow with no such reference keeps its template exactly as it is.
 	if rev, ok, rerr := s.LatestRevision(flowID); rerr == nil && ok && workflow.HasRefs(rev.Doc) {
-		if t, issues := workflow.ToTemplate(rev.Doc, f.Template); len(issues) == 0 {
+		t, issues := workflow.ToTemplate(rev.Doc, f.Template)
+		if len(issues) == 0 {
 			return t, nil
 		}
+		// publish refuses these, so this is a defect; the job still runs what was published, and says so
+		log.Printf("workflow %d: its published settings no longer resolve (%s); job %d runs the stored template", flowID, issues[0].Message, j.ID)
 	}
 	return f.Template, nil
 }

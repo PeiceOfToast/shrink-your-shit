@@ -98,17 +98,15 @@ func Resolve(d Doc) (Doc, []Issue) {
 			v, known := own[name]
 			switch {
 			case !known:
-				msg := "{{" + name + "}} is not a variable of this workflow. Add that variable, or fix the name."
-				i := Issue{Code: "missing_variable", Severity: "error", NodeID: n.ID, ConfigPath: "/" + k, Field: k, Name: name,
-					Message: "In “" + title + "”, " + msg}
+				i := Issue{Code: "unknown_variable", Severity: "error", NodeID: n.ID, ConfigPath: "/" + k, Field: k, Name: name,
+					Message: "In “" + title + "”, {{" + name + "}} is not a variable of this workflow. Add that variable, or fix the name."}
 				if s := closestName(name, names); s != "" {
 					i.Suggest = s
 					i.Message = "In “" + title + "”, {{" + name + "}} is not a variable of this workflow. Did you mean {{" + s + "}}?"
 				}
 				issues = append(issues, i)
 			case v.Type == "secret":
-				bad("variable_wrong_type", "{{"+name+"}} is a secret, and a secret only fills a field that takes text: "+
-					"it can't be written here.")
+				bad("variable_wrong_type", "{{"+name+"}} is a secret, and a secret can't set this setting.")
 			case v.Value == nil:
 				bad("variable_wrong_type", "{{"+name+"}} has no value yet, so this setting would have nothing. Give it a value, or remove the variable.")
 			default:
