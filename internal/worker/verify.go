@@ -670,8 +670,16 @@ func withLostFrames(rep sourceDamageReport, frames, decoded int64) sourceDamageR
 		return rep
 	}
 	lost := frames - decoded
-	rep.Pictures += int(lost)
-	rep.Lines = append(rep.Lines, fmt.Sprintf("%d of %d frames were not decoded, and ffmpeg printed no message for them", lost, frames))
+	// The pictures ffmpeg names and the frames it drops are usually the same ones (the QA wreck had 54 named vs 53
+	// lost), so the larger count is the damage, not their sum.
+	if int(lost) > rep.Pictures {
+		rep.Pictures = int(lost)
+	}
+	line := fmt.Sprintf("%d of %d frames were not decoded, and ffmpeg printed no message for them", lost, frames)
+	if len(rep.Lines) > 0 {
+		line = fmt.Sprintf("%d of %d frames were not decoded", lost, frames)
+	}
+	rep.Lines = append(rep.Lines, line)
 	return rep
 }
 

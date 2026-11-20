@@ -183,7 +183,8 @@ func TestWithLostFrames(t *testing.T) {
 		{"all decoded: unchanged", sourceDamageReport{Pictures: 1}, 500, 500, 1, true},
 		{"count not reported: unchanged", sourceDamageReport{Pictures: 1}, 500, -1, 1, true},
 		{"frames not known: unchanged", sourceDamageReport{Pictures: 1}, 0, 470, 1, false},
-		{"lost frames add to the decoder's pictures: 1+2 of 500 is 0.6%", sourceDamageReport{Pictures: 1}, 500, 498, 3, true},
+		{"the named picture and the 2 lost frames are the same: 2 of 500", sourceDamageReport{Pictures: 1}, 500, 498, 2, true},
+		{"CI real ffmpeg 8: 4 named lines, 2 lost, same pictures: 4 of 500 converts", sourceDamageReport{Pictures: 4}, 500, 498, 4, true},
 		{"edit-list mp4: 240 presented, 240 decoded: nothing lost", sourceDamageReport{}, 240, 240, 0, true},
 	}
 	for _, c := range cases {
