@@ -13,6 +13,7 @@ import { PageHead } from "../PageHead";
 import { Link, onLeave } from "../router";
 import { useData } from "../useData";
 import { getDraft, getWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked } from "../workflowApi";
+import { takesVars, varListFor, varProblems } from "../VarInput";
 import { ICON, Options, Reg } from "./WorkflowStack";
 import type { Layout, Node, PublishPreview, StepDefinition, ValidationIssue, WorkflowDoc, WorkflowRevision } from "../types/v2";
 
@@ -315,6 +316,8 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
 
   const issues = checked.issues ?? [], errors = issues.filter((i) => i.severity === "error");
   const badValues = issues.filter((i) => i.code === "invalid_config"); // #165: blocks Save draft and Publish until fixed
+  // {{name}} fields with a name that isn't a variable (or an unclosed {{): Publish waits for them, once the list has loaded
+  const tv = takesVars(defs), vl = useData(() => varListFor(id, tv), [id, tv]).data, varBad = vl ? varProblems(doc.nodes, defs, vl.variables) : [];
   const picked = doc.nodes.find((n) => n.id === sel), pickedDef = picked && defs.find((x) => x.type === picked.type);
   const nameOf = (nid?: string) => { const t = doc.nodes.find((n) => n.id === nid); return t ? t.name ?? defs.find((x) => x.type === t.type)?.name ?? t.type : ""; };
   const shown = nodes.map((n) => (drag[n.id] ? { ...n, position: drag[n.id] } : n));
@@ -327,7 +330,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
           <button className="btn sm icon ghost" type="button" title="Undo" aria-label="Undo" disabled={hist.at === 0} onClick={() => (setBar(null), setHist({ ...hist, at: hist.at - 1 }))}><Icon id="i-undo" /></button>
           <button className="btn sm icon ghost" type="button" title="Redo" aria-label="Redo" disabled={hist.at === hist.list.length - 1} onClick={() => (setBar(null), setHist({ ...hist, at: hist.at + 1 }))}><Icon id="i-redo" /></button>
           <button className="btn sm" type="button" disabled={!dirty || badValues.length > 0} title={badValues.length ? "Fix the settings marked in red first" : undefined} onClick={save}>Save draft</button>
-          <button className="btn sm primary" type="button" disabled={badValues.length > 0} title={badValues.length ? "Fix the settings marked in red first" : undefined} onClick={openPublish}>Publish</button></>}
+          <button className="btn sm primary" type="button" disabled={badValues.length > 0 || varBad.length > 0} title={badValues.length ? "Fix the settings marked in red first" : varBad.length ? "Fix the variable names first" : undefined} onClick={openPublish}>Publish</button></>}
       </PageHead>
       <p className="muted sm phone" role="note">Editing works best on a larger screen. Here you can look around, zoom and see each step.</p>
       <p className="muted" role="status">{said}{bar && edit && <> <button className="linkbtn" type="button" onClick={undoDelete}>Undo</button></>}</p>
@@ -371,7 +374,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
                 <div className="field"><label htmlFor={"gn-" + picked.id}>Name</label>
                   <input id={"gn-" + picked.id} className="input" value={picked.name ?? ""} placeholder={pickedDef.name} onChange={(e) => setNode({ ...picked, name: e.target.value || undefined })} /></div>
                 {!pickedDef.alwaysOn && <label className="row nw"><input type="checkbox" role="switch" className="switch" checked={picked.enabled} onChange={(e) => setNode({ ...picked, enabled: e.target.checked })} /><span>On</span></label>}
-                <Reg.Provider value={{ defs, words: checked.stepSummaries ?? {}, libs: [] }}>
+                <Reg.Provider value={{ defs, words: checked.stepSummaries ?? {}, libs: [], wf: id }}>
                   <Options n={picked} issues={issues} set={(k, v) => setNode({ ...picked, config: { ...picked.config, [k]: v } })} />
                 </Reg.Provider>
               </form>}

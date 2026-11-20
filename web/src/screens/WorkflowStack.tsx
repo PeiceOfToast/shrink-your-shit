@@ -11,13 +11,15 @@ import { useData } from "../useData";
 import { getDraft, getLadder, getWorkflow, listTemplates, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
 import { Link, navigate, onLeave } from "../router";
 import { Browse } from "../FolderPicker";
+import { VarInput, takesVars, varListFor, varProblems } from "../VarInput";
 import { getSettings, listLibraries, shrunk } from "../libraryApi";
 import type { AddStep, ID, JSONSchema, Node, PublishPreview, StepDefinition, ValidationIssue, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
 
 // The step definitions and the server's words for each step of the document being edited.
 // libs: the folders of the libraries that use this workflow, for "Next to each library" (V5a).
-export const Reg = createContext<{ defs: StepDefinition[]; words: Record<string, string>; libs: string[] }>({ defs: [], words: {}, libs: [] });
-function useReg() { const r = useContext(Reg); return { stepDef: (t: string) => r.defs.find((d) => d.type === t), summary: (n: Node) => r.words[n.id] ?? "", libs: r.libs }; }
+// wf: the workflow being edited, for its variable list (the {{name}} fields).
+export const Reg = createContext<{ defs: StepDefinition[]; words: Record<string, string>; libs: string[]; wf: string }>({ defs: [], words: {}, libs: [], wf: "" });
+function useReg() { const r = useContext(Reg); return { stepDef: (t: string) => r.defs.find((d) => d.type === t), summary: (n: Node) => r.words[n.id] ?? "", libs: r.libs, wf: r.wf }; }
 
 // The server's icon keys (registry) -> design's sprite.
 export const ICON: Record<string, string> = { folder: "i-folder", filter: "i-shield", video: "i-video", audio: "i-audio", subtitles: "i-subtitle", file: "i-file", check: "i-checks", save: "i-save", cond: "i-cond", history: "i-history", branch: "i-branch", stop: "i-stop" }; // branch, stop: V6a check + end
@@ -45,7 +47,7 @@ function SrtFiles() {
 }
 
 // One option from the step's configSchema, as a native labelled control (design review rule 1).
-function Field({ id, name, s, value, set }: { id: string; name: string; s: JSONSchema; value: unknown; set: (v: unknown) => void }) {
+function Field({ id, name, s, value, set, wf }: { id: string; name: string; s: JSONSchema; value: unknown; set: (v: unknown) => void; wf: string }) {
   // The schema's title; without one (V1's "ignore" has none), the key in plain form.
   const title = (s.title as string) ?? name.charAt(0).toUpperCase() + name.slice(1).replace(/([A-Z])/g, " $1").toLowerCase(), fid = id + "-" + name;
   if (widget(s) === "slider") {
@@ -83,6 +85,8 @@ function Field({ id, name, s, value, set }: { id: string; name: string; s: JSONS
         {labels(items).map(([v, l]) => <label key={String(v)} className="row nw"><input type="checkbox" checked={on.includes(v)} onChange={(e) => set(e.target.checked ? [...on, v] : on.filter((x) => x !== v))} /><span>{l}</span></label>)}
       </div>{typeof s.description === "string" && <span className="hint">{s.description}</span>}</fieldset>);
   }
+  // a text field that takes {{name}} variables (x-variables): the hint, the example and the picker
+  if (s["x-variables"] === true) return <VarInput id={fid} title={title} value={String(value ?? "")} wf={wf} set={(v) => set(v)} description={typeof s.description === "string" ? s.description : undefined} />;
   const hint = typeof s.description === "string" ? <span className="hint" id={fid + "-h"}>{s.description}{s.type === "array" ? " One per line." : ""}</span> : null;
   if (s.type === "integer" || s.type === "number") // a number, saved as a number (empty: not set)
     return <div className="field"><label htmlFor={fid}>{title}</label><input id={fid} className="input" type="number" inputMode="decimal" min={s.minimum as number | undefined} step={s.type === "integer" ? 1 : "any"}
@@ -118,7 +122,7 @@ function convertField(k: string, s: JSONSchema, c: Record<string, unknown>, l: L
 }
 
 export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown, more?: Record<string, unknown>) => void; issues: ValidationIssue[] }) {
-  const { stepDef, libs } = useReg(), def = stepDef(n.type)!, props = Object.fromEntries(Object.entries((def.configSchema.properties ?? {}) as Props).filter(([, s]) => !s.readOnly)) as Props, c = n.config;
+  const { stepDef, libs, wf } = useReg(), def = stepDef(n.type)!, props = Object.fromEntries(Object.entries((def.configSchema.properties ?? {}) as Props).filter(([, s]) => !s.readOnly)) as Props, c = n.config;
   const lad = useData(getLadder, []).data, conv = (k: string) => (n.type === "video.convert" ? convertField(k, props[k], c, lad) : props[k]);
   const keys = Object.keys(props).filter((k) => !(MORE[n.type] ?? []).includes(k)), more = (MORE[n.type] ?? []).filter((k) => props[k] && conv(k));
   // #165: a setting's own problems (invalid_config, keyed on the step + field) show at that field, which is marked
@@ -142,7 +146,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
   };
   const field = (k: string) => { const b = bad(k), sk = conv(k); if (!sk) return null; return (
     <div key={k} className={b.length ? "fieldbad" : undefined} data-field={k} aria-invalid={b.length ? true : undefined}>
-      <Field id={n.id} name={k} s={sk} value={c[k] ?? sk.default} set={(v) => put(k, v)} />
+      <Field id={n.id} name={k} s={sk} value={c[k] ?? sk.default} set={(v) => put(k, v)} wf={wf} />
       {b.map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
     </div>); };
   // a problem in a field under 'More options' opens it by itself (review c0189fa P3), also when the problems list picks
@@ -394,6 +398,8 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
   const opener = useRef<HTMLElement | null>(null);
   const doc = hist.docs[hist.at], dirty = doc !== saved;
   const all = useData(listLibraries, []), libs = (all.data ?? []).filter((l) => l.flowId === id).map((l) => l.path);
+  // {{name}} fields with a bad name (or an unclosed {{): Publish waits for them, once the variable list has loaded
+  const tv = takesVars(defs), vl = useData(() => varListFor(id, tv), [id, tv]).data, varBad = vl ? varProblems(doc.nodes, defs, vl.variables) : [];
   // The server's words and problems for the document as it is now (nothing saved): asked 300 ms after a change.
   const ask = async (d: WorkflowDoc) => { const r = await act(validateDoc(id, d), setSaid); if (r) setLive(r); return r; };
   const seen = useRef<WorkflowDoc | null>(null); // null: the first check runs on load, so the list has the server's places and add rules
@@ -486,7 +492,7 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
   const canStack = live.stackable;
   const list = order(doc), total = list.length, tailOut = list[total - 1]?.type === "output.commit", lastMovable = total - 1 - (tailOut ? 1 : 0), only = total <= 1;
   return (
-    <Reg.Provider value={{ defs, words: live.stepSummaries, libs }}>
+    <Reg.Provider value={{ defs, words: live.stepSummaries, libs, wf: id }}>
     <div className="stack">
       {/* the workflow's header row (clean pass W2) */}
       <PageHead icon="i-workflow" crumbs={[["Workflows", "/workflows"]]}
@@ -502,11 +508,12 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
         {canStack && <>
           <span className="desk">{tools}</span>
           <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{tools}</div></details>
-          <button className="btn sm primary" type="button" onClick={openPublish}>Publish</button>
+          <button className="btn sm primary" type="button" disabled={varBad.length > 0} title={varBad.length ? "Fix the variable names first" : undefined} onClick={openPublish}>Publish</button>
         </>}
       </PageHead>
       {canStack && (checked || !dirty) && (issues.length === 0 ? <p className="st ok checkline"><Icon id="i-check-c" /><span>Check: no problems</span></p>
         : <p className="st bad checkline"><Icon id="i-alert" /><span>Check: {issues.length === 1 ? "1 problem" : issues.length + " problems"}. Publish waits until {issues.length === 1 ? "it's" : "they're"} fixed. <button className="linkbtn" type="button" onClick={() => setOpen(issues[0].nodeId ?? null)}>Show</button></span></p>)}
+      {canStack && varBad.length > 0 && <p className="st bad" role="alert"><Icon id="i-alert" /><span>Fix {varBad.length === 1 ? "1 field" : varBad.length + " fields"} before publishing. <button className="linkbtn" type="button" onClick={() => setOpen(varBad[0].nodeId)}>{varBad[0].title}</button></span></p>}
       <p className="muted" role="status">{said}</p>
 
       {panel && (
