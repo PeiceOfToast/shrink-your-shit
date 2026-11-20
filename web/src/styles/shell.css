@@ -762,14 +762,14 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .fieldbad>.field .input,.fieldbad>.field select,.fieldbad>fieldset{border-color:var(--error);box-shadow:0 0 0 1px var(--error)} /* #165: a setting with a value it cannot use */
 /* user item 5 (design 7.3): the Dashboard as an overview: stat tiles with sparklines (U6), flat sections, two small day charts */
 .ov .tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s4)}
-.ov .tile{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:var(--s4);display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto auto;gap:4px var(--s3);align-content:start;min-width:0}
-.ov .tile .l{grid-column:1;color:var(--text-2);font-size:var(--fs-sm);font-weight:var(--fw-strong)}
-.ov .tile .v{grid-column:1;font-size:var(--fs-display);font-weight:var(--fw-strong);line-height:1.1;letter-spacing:-.01em;overflow-wrap:anywhere}
-.ov .tile .v small{font-size:var(--fs-lg);font-weight:400;color:var(--text-2);letter-spacing:0;margin-left:6px}
-.ov .tile .v.ok{color:var(--success-text)}
-.ov .tile .d{grid-column:1;color:var(--text-2);font-size:var(--fs-sm);overflow-wrap:anywhere}
-.ov .tile .d a{color:var(--text)}.ov .tile .d a.bad{color:var(--error-text)}
-.ov .tile .spark{grid-column:2;grid-row:1/4;width:128px;height:56px;align-self:end;overflow:visible}
+.ov .tiles .tile{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:var(--s4);display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto auto;gap:4px var(--s3);align-content:start;min-width:0}
+.ov .tiles .tile .l{grid-column:1;color:var(--text-2);font-size:var(--fs-sm);font-weight:var(--fw-strong)}
+.ov .tiles .tile .v{grid-column:1;font-size:var(--fs-display);font-weight:var(--fw-strong);line-height:1.1;letter-spacing:-.01em;overflow-wrap:anywhere}
+.ov .tiles .tile .v small{font-size:var(--fs-lg);font-weight:400;color:var(--text-2);letter-spacing:0;margin-left:6px}
+.ov .tiles .tile .v.ok{color:var(--success-text)}
+.ov .tiles .tile .d{grid-column:1;color:var(--text-2);font-size:var(--fs-sm);overflow-wrap:anywhere}
+.ov .tiles .tile .d a{color:var(--text)}.ov .tiles .tile .d a.bad{color:var(--error-text)}
+.ov .tiles .tile .spark{grid-column:2;grid-row:1/4;width:128px;height:56px;align-self:end;overflow:visible}
 .ov .sec>h2{font-size:var(--fs-lg);font-weight:var(--fw-strong);margin:0 0 10px;display:flex;align-items:baseline;gap:12px}
 .ov .sec>h2 .more{margin-left:auto;font-size:var(--fs);font-weight:400;color:var(--text-2)}
 .ov .sec+.sec{margin-top:20px}
@@ -779,6 +779,7 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .ov .savebar{display:block;width:120px;max-width:100%;height:4px;margin:6px 0 0 auto;border-radius:2px;background:var(--border-strong)}
 .ov .savebar i{display:block;height:100%;border-radius:2px;background:var(--text)}
 .ov .libhelp{margin-top:8px}.ov .libhelp p{margin:4px 0 0}
+.ov .sub.phone{display:block} /* U7 fix: the live line and the library facts show at every width (they were hidden above phone width) */
 .ov .ovt .prog{flex-direction:row;align-items:center;gap:8px;min-width:160px}.ov .ovt .prog .bar{flex:1 1 120px}
 .ov .fname{display:block;overflow-wrap:anywhere}
 /* pass 1 (row e8c7e61d): the day charts lead the page, two side by side; dataviz marks (see DayBars) */
@@ -797,10 +798,10 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 
 /* U6 review2: at 901-1200 px the sparkline sits under the text, full tile width, so the figure keeps the whole tile */
 @media (min-width:901px) and (max-width:1280px){
-  .ov .tile{grid-template-columns:minmax(0,1fr)}.ov .tile .spark{grid-column:1 / -1;grid-row:auto;width:100%;height:40px;align-self:auto}
+  .ov .tiles .tile{grid-template-columns:minmax(0,1fr)}.ov .tiles .tile .spark{grid-column:1 / -1;grid-row:auto;width:100%;height:40px;align-self:auto}
 }
 @media (max-width:900px){
-  .ov .tiles{grid-template-columns:minmax(0,1fr)}.ov .tile{grid-template-columns:minmax(0,1fr) 96px}.ov .tile .spark{width:96px;height:40px}
+  .ov .tiles{grid-template-columns:minmax(0,1fr)}.ov .tiles .tile{grid-template-columns:minmax(0,1fr) 96px}.ov .tiles .tile .spark{width:96px;height:40px}
   .ov .charts{grid-template-columns:minmax(0,1fr);gap:24px}
   .ov .legend.ph{display:none}
   .ov .ovt,.ov .ovt tbody{display:block}.ov .ovt thead{display:none}
@@ -813,7 +814,7 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 }
 /* overview at phone widths (m7, overview-mock): the day table scrolls in its own box; links and the failed count are 44 px targets on touch */
 .ov .daytbl{overflow-x:auto;max-width:100%}.ov .daytbl td,.ov .daytbl th{white-space:nowrap}/* it scrolls now, so "567 MB" stays on one line */
-@media (pointer:coarse){.ov .sec>h2 .more,.ov .tile .d a,.ov a.fname,.ov td.nm a,.ov details>summary{display:inline-flex;align-items:center;min-height:44px}}
+@media (pointer:coarse){.ov .sec>h2 .more,.ov .tiles .tile .d a,.ov a.fname,.ov td.nm a,.ov details>summary{display:inline-flex;align-items:center;min-height:44px}}
 .ov .kv{grid-template-columns:auto minmax(0,1fr)} /* the 30-day totals keep label and figure on one line on phones */
 /* Settings > Connections (V9e): a folder row is "<app> sees" -> "Shrink Your Shit sees" x; at phone widths the two fields stack */
 .cfold>summary{cursor:pointer;overflow-wrap:anywhere}

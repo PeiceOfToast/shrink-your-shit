@@ -458,9 +458,12 @@ func livePercent(id int64) *float64 {
 
 // v2Progress is truthful progress (spec 7): the step's own percent, and the whole job's from the
 // steps done (probing 0-5, converting 5-85, checking 90, saving 97), never ffmpeg's as the job's.
+// jobStage names a job's step as the progress object and the Dashboard's Converting now rows show it.
+var jobStage = map[string]string{"preparing": "Looking at the file", "running": "Converting video",
+	"validating": "Checking the result", "committing": "Saving the result"}
+
 func v2Progress(state string, id int64, pct *float64) map[string]any {
-	p := map[string]any{"stage": map[string]string{"preparing": "Looking at the file", "running": "Converting video",
-		"validating": "Checking the result", "committing": "Saving the result"}[state], "percent": nil, "workflowPercent": 0,
+	p := map[string]any{"stage": jobStage[state], "percent": nil, "workflowPercent": 0,
 		"elapsedS": nil, "speed": nil, "etaS": nil, "fps": nil, "bitrateKbps": nil}
 	switch state {
 	case "preparing":

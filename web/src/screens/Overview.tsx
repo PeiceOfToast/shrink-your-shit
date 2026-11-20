@@ -202,7 +202,7 @@ export function Overview() {
                   <div className="sub phone">{p != null && <>{p}% · </>}<span>Step: {a.stage ? stepLabel(a.stage) : "not known yet"}</span> · <span>Speed: {a.speed != null ? Math.round(a.speed * 10) / 10 + "×" : "not known yet"}</span> · <span>Time left: {left(a.etaS)}</span></div>
                   {p != null && <span className="uline" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={p} aria-label={a.name}><i style={{ width: p + "%" }} /></span>}
                 </td>
-                <td className="sizec sm nowrap" data-l="Expected saving">{a.expectedSavingBytes == null ? "not known yet" : a.expectedSavingBytes < 0 ? "none (about " + bytes(-a.expectedSavingBytes) + " bigger so far)" : "about " + bytes(a.expectedSavingBytes)}</td>
+                <td className="sizec sm nowrap" data-l="Expected saving">{a.expectedSavingBytes == null ? "not known yet" : a.expectedSavingBytes < 0 ? "none (about " + bytes(-a.expectedSavingBytes) + " bigger so far)" : "about " + bytes(a.expectedSavingBytes) + " saving expected"}</td>
               </tr>; })}</tbody></table></div>)}
         {v.active.some((a) => a.expectedSavingEstimated) && <p className="muted">Savings are estimated from the size so far; the final number shows when a file is done.</p>}
       </section>
@@ -224,7 +224,7 @@ export function Overview() {
                   <span className="savebar" role="img" aria-label={share == null ? "No size yet" : "Saved " + share.toFixed(1) + "% of saved plus size now"}><i style={{ width: (share ?? 0) + "%" }} /></span></td>
                 <td className="stc">{l.state === "no_workflow" ? <span className="pill warn">No workflow</span> : l.state === "paused" ? <span className="pill warn">Paused</span> : l.state === "paused_share" ? <span className="pill warn">Share not connected yet</span> : <span className="pill">Watching</span>}</td>
               </tr>; })}</tbody></table></div>
-          <details className="libhelp"><summary aria-label="About Saved and Size now">?</summary>
+          <details className="libhelp"><summary>What Saved and Size now mean</summary>
             <p className="muted sm">Saved is space already freed. A replaced original waits in the trash until its date: it no longer counts in Size now, but it isn't freed yet, which is the 'frees from' figure. Sizes are updated when a library is scanned.</p></details></>}
       </section>
 
