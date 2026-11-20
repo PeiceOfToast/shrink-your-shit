@@ -287,7 +287,7 @@ function WorkerSwitch({ w, onDone }: { w: Worker; onDone: (m: string) => void })
     if (await act(workerAction(w.id, "start"), onDone)) onDone(w.name + " started.");
   };
   return <label className="sw"><input type="checkbox" role="switch" className="switch" checked={on} disabled={gone} aria-label={w.name} onChange={flip} />
-    <span className="sm">{on ? "On" : finishing ? "Finishes its file, then stops" : "Off"}</span></label>;
+    <span className="sm">{on ? "On" : finishing ? "Stopping after its current files" : "Off"}</span></label>;
 }
 
 // user item 3: the GPU "—" explains itself; title for mouse, hidden text for touch and screen readers (design 02:12Z)
