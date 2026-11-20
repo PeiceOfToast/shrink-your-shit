@@ -97,6 +97,28 @@ func TestTemplatedFolder(t *testing.T) {
 	}
 }
 
+// A folder template that does not resolve to a full path stops the job with a plain message before anything
+// is made: a value is one path piece, so the title cannot make it absolute, and this template's own "/small"
+// leaves it relative. Without the check the run would create "small" beside the daemon's working directory.
+func TestRelativeFolderTemplateStopsTheJob(t *testing.T) {
+	s := newScenario(t)
+	w := selectorsWorker(s, func(sel *rules.Selectors) {
+		sel.AfterConverting, sel.OutputDir = "folder", "{{title}}/small"
+	})
+	w.RunInfo = func(jobs.Job) (jobs.RunInfo, error) { return jobs.RunInfo{Library: "Films"}, nil }
+	w.RunOne(context.Background()) // the failure is the job's, checked below
+	j := s.job()
+	if j.Status != jobs.Failed || !strings.Contains(j.Error, `came out as "movie/small", which isn't a full path`) {
+		t.Fatalf("status %s, error %q", j.Status, j.Error)
+	}
+	if read(s.src) != "original-bytes" {
+		t.Errorf("the original %q", read(s.src))
+	}
+	if _, err := os.Stat(filepath.Join(s.dir, "small")); err == nil {
+		t.Error("a folder was made")
+	}
+}
+
 // The never-overwrite checks run on the path the template resolved to: a stranger's file at that name
 // stops the job before anything is converted, and nothing is touched.
 func TestResolvedNameTakenStopsTheJob(t *testing.T) {

@@ -187,6 +187,13 @@ func TestSrtNamesTemplate(t *testing.T) {
 	if got[0] != filepath.Join(dir, "Movie.srt") || !reflect.DeepEqual(empty, []string{"titel"}) {
 		t.Errorf("empty name: %v %v", got, empty)
 	}
+	// the final names are what the numbering compares: the second "eng" cannot take ".2" while the "eng.2"
+	// subtitle has that name of its own, so it takes ".3" and every subtitle keeps a path of its own
+	got, empty = SrtNames(final, "{{title}}.{{sub_lang}}", []Subtitle{{Lang: "eng"}, {Lang: "eng"}, {Lang: "eng.2"}}, map[string]string{"title": "Movie"})
+	want = []string{filepath.Join(dir, "Movie.eng.srt"), filepath.Join(dir, "Movie.eng.3.srt"), filepath.Join(dir, "Movie.eng.2.srt")}
+	if empty != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("a number in a language tag: %v %v, want %v", got, empty, want)
+	}
 	// a name Windows refuses keeps today's name, checked before the first dot as OutputName checks it
 	for _, refused := range []string{"CON", "NUL", "con.eng", "LPT1.movie"} {
 		got, empty := SrtNames(final, "{{title}}", subs[:1], map[string]string{"title": refused})

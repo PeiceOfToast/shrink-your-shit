@@ -198,7 +198,7 @@ func Definitions() []StepDefinition {
 				// W4b: names from {{name}} variables. Empty keeps today's names, so nothing changes for a
 				// workflow saved before these fields existed.
 				"outputName": described(map[string]any{"type": "string", "title": "Output file name", "maxLength": 200},
-					"Leave empty to keep the original's name. You can use variables, like {{title}}.{{ext}}."),
+					"Leave empty to keep the original's name. You can use variables, like {{title}} (smaller)."),
 				"srtName": described(map[string]any{"type": "string", "title": "Subtitle file name", "maxLength": 200},
 					"Leave empty to keep today's names. You can use variables, like {{title}}.{{sub_lang}}{{sub_kind}}.srt."),
 				"trackTitle": described(map[string]any{"type": "string", "title": "Audio track title", "maxLength": 200},

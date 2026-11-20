@@ -267,7 +267,7 @@ func SrtNames(final, tpl string, subs []Subtitle, vals map[string]string) ([]str
 			empty = append(empty, n)
 		}
 	}
-	used := map[string]int{}
+	names := make([]string, len(subs))
 	for k, s := range subs {
 		name := defaultSrtName(base, s.Part)
 		if strings.TrimSpace(tpl) != "" {
@@ -285,14 +285,36 @@ func SrtNames(final, tpl string, subs []Subtitle, vals map[string]string) ([]str
 				}
 			}
 		}
-		used[name]++
-		if n := used[name]; n > 1 {
-			ext := filepath.Ext(name)
-			name = strings.TrimSuffix(name, ext) + "." + strconv.Itoa(n) + ext
+		names[k] = name
+	}
+	// The FINAL names are compared: a number a copy takes must not be a name another subtitle resolved to
+	// (subs eng, eng and eng.2 with {{title}}.{{sub_lang}}), or one of them would be lost.
+	own := make(map[string]bool, len(names))
+	for _, n := range names {
+		own[n] = true
+	}
+	used := map[string]bool{}
+	for k, name := range names {
+		if used[name] {
+			name = numberedName(name, used, own)
 		}
+		used[name] = true
 		out[k] = filepath.Join(dir, name)
 	}
 	return out, empty
+}
+
+// numberedName is name with the first free ".2", ".3", ... before its extension: the names already taken
+// (used) and the ones a subtitle resolved to itself (own) are skipped.
+func numberedName(name string, used, own map[string]bool) string {
+	ext := filepath.Ext(name)
+	stem := strings.TrimSuffix(name, ext)
+	for n := 2; ; n++ {
+		c := stem + "." + strconv.Itoa(n) + ext
+		if !used[c] && !own[c] {
+			return c
+		}
+	}
 }
 
 // defaultSrtName is today's name for an extracted subtitle: "Movie.srt", "Movie.eng.srt".
