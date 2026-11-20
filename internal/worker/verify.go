@@ -636,6 +636,19 @@ func damageTolerated(rep sourceDamageReport, frames int64) bool {
 	return int64(rep.Pictures)*100 <= frames*maxDamagedPercent
 }
 
+// withLostFrames counts frames that never came out of the decoder as damaged pictures. A stretch can lose frames
+// with no decoder message (the 300000-byte wreck in the real tests: 470 of 500 decoded, no error line). decoded is
+// the frame count the conversion reported; -1 means it did not say (a remote worker), and then nothing is added.
+func withLostFrames(rep sourceDamageReport, frames, decoded int64) sourceDamageReport {
+	if frames <= 0 || decoded < 0 || decoded >= frames {
+		return rep
+	}
+	lost := frames - decoded
+	rep.Pictures += int(lost)
+	rep.Lines = append(rep.Lines, fmt.Sprintf("%d of %d frames were not decoded, and ffmpeg printed no message for them", lost, frames))
+	return rep
+}
+
 // damagedShare says how much damage there is, for the job log: the pictures out of the frames, and the share.
 func damagedShare(pictures int, frames int64) string {
 	if frames <= 0 {

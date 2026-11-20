@@ -508,3 +508,22 @@ func TestRealRotatedHEVCRepackaged(t *testing.T) {
 		t.Errorf("new file %+v: want the coded 640x360 with its rotation kept", v)
 	}
 }
+
+// A stretch can lose frames without a decoder message (470 of 500 decode here, with no error line for the lost 30):
+// the lost frames are damage too, so the original is kept.
+func TestRealLostFramesOriginalIsKept(t *testing.T) {
+	needTools(t)
+	dir := t.TempDir()
+	ts := filepath.Join(dir, "clip.ts")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25:duration=20", "-c:v", "libx264", "-b:v", "2M", "-f", "mpegts", ts)
+	data, _ := os.ReadFile(ts)
+	for i := len(data) / 3; i < len(data)/3+300000 && i < len(data); i++ {
+		data[i] = byte(i * 7)
+	}
+	os.WriteFile(ts, data, 0o644)
+	st, id := realJob(t, ts, 20)
+	realWorker(st, media.OSExec{}).run(t)
+	if j, _ := st.Get(id); j.Status != jobs.Kept || !strings.Contains(j.Error, "the original file has errors") {
+		t.Fatalf("an original that loses frames silently must be kept, not converted: %s %q", j.Status, j.Error)
+	}
+}

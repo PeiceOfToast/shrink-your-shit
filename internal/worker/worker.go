@@ -967,6 +967,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	defer dropLive(job.ID)
 	var encErr string
 	var terr error
+	decoded := int64(-1) // frames ffmpeg took from the original; -1 when a remote worker did not say
 	encStart := w.now()
 	if w.remote != nil { // V7b2: a worker on another computer converts and checks; its file comes up here
 		stopWatch := w.watchRemoteStall(job.ID, w.remote)
@@ -981,7 +982,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			return "", terr
 		}
 	} else {
-		encErr, terr = w.encodeLocal(ctx, job, args)
+		encErr, decoded, terr = w.encodeLocal(ctx, job, args)
 		if gpu != "" && w.gpuFailed(ctx, terr, encErr) { // a graphics encoder that fails converts again on the processor
 			w.recordEncode(job.ID, args, encStart, encErr, terr, probeSummary(src))
 			reason := firstLines(encErr, 1)
@@ -998,7 +999,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 				setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWords(plan),
 					Decoder: decoderWords(src), Progress: media.Progress{ETASeconds: -1}})
 				encStart = w.now()
-				encErr, terr = w.encodeLocal(ctx, job, args)
+				encErr, decoded, terr = w.encodeLocal(ctx, job, args)
 			}
 		}
 	}
@@ -1034,8 +1035,8 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	// Errors ffmpeg reported while reading the original mean it is damaged: converting it would bake
 	// the damage in and delete the only copy that might still be repaired or fetched again.
-	if dmg := sourceDamage(encErr); dmg.Found() {
-		frames := sourceFrames(src)
+	frames := sourceFrames(src)
+	if dmg := withLostFrames(sourceDamage(encErr), frames, decoded); dmg.Found() {
 		if !damageTolerated(dmg, frames) {
 			// The check step records the refusal (its Result is the kept reason), then the lines the UI shows.
 			const reason = "the original file has errors, so it was not converted (converting would keep the damage)"
@@ -1869,13 +1870,15 @@ func (w *Worker) gpuFailed(ctx context.Context, err error, stderr string) bool {
 }
 
 // encodeLocal runs ffmpeg for the local worker's job: its progress, stall watch and live figures.
-func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (string, error) {
+func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (string, int64, error) {
 	var encErr string
 	var terr error
+	frames := int64(-1) // the last frame count ffmpeg reported
 	stopWatch := w.watchStall(job.ID)
 	var tenths progressLines
 	at := -1.0 // the furthest position ffmpeg has reached
 	encErr, terr = media.Transcode(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
+		frames = p.Frame
 		// only a position further on is progress: a stuck ffmpeg can keep reporting the same one (a
 		// damaged file, 21 min on a test run, never stopped), which mustn't hold off the stall stop
 		if p.OutTimeUS > at {
@@ -1892,5 +1895,5 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 		}
 	})
 	stopWatch()
-	return encErr, terr
+	return encErr, frames, terr
 }

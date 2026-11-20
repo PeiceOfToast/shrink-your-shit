@@ -336,6 +336,7 @@ func ParseProgress(line string, durationSec float64) (float64, bool) {
 // said yet). ETASeconds is the time left at that speed, -1 while unknown.
 type Progress struct {
 	OutTimeUS   float64 // where ffmpeg is in the source (out_time_us): it moving is what progress means
+	Frame       int64   // frames ffmpeg has taken through its decoder and filters (frame=); -1 until it says
 	Percent     float64
 	FPS         float64
 	BitrateKbps float64
@@ -348,11 +349,15 @@ type Progress struct {
 // only, so a stall can still be told from a slow encode). It returns what ffmpeg printed on stderr (at the error
 // level the args ask for), which includes decode errors in the source.
 func Transcode(ctx context.Context, x Exec, ffmpeg string, args []string, durationSec float64, onProgress func(Progress)) (string, error) {
-	p := Progress{ETASeconds: -1}
+	p := Progress{ETASeconds: -1, Frame: -1}
 	var etas []float64 // the last 5 raw times left: the raw one jumps with every change of speed (research 3.4)
 	return x.Stream(ctx, func(line string) {
 		k, v, _ := strings.Cut(line, "=")
 		switch k {
+		case "frame":
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				p.Frame = n
+			}
 		case "fps":
 			p.FPS, _ = strconv.ParseFloat(v, 64)
 		case "bitrate": // "4074.8kbits/s", or "N/A"

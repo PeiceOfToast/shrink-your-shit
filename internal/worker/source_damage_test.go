@@ -166,3 +166,31 @@ func TestCorruptLinesCountAsPictures(t *testing.T) {
 		t.Fatalf("one corrupted macroblock: status %s (error %q), want done", j.Status, j.Error)
 	}
 }
+
+// Frames that never come out of the decoder count as damaged pictures, against the same 1% limit. -1 means the
+// conversion did not say how many it decoded (a remote worker): nothing is added then.
+func TestWithLostFrames(t *testing.T) {
+	cases := []struct {
+		name            string
+		rep             sourceDamageReport
+		frames, decoded int64
+		wantPictures    int
+		wantTolerated   bool
+	}{
+		{"30 of 500 lost with no message: kept", sourceDamageReport{}, 500, 470, 30, false},
+		{"2 of 500 lost: converts", sourceDamageReport{}, 500, 498, 2, true},
+		{"all decoded: unchanged", sourceDamageReport{Pictures: 1}, 500, 500, 1, true},
+		{"count not reported: unchanged", sourceDamageReport{Pictures: 1}, 500, -1, 1, true},
+		{"frames not known: unchanged", sourceDamageReport{Pictures: 1}, 0, 470, 1, false},
+		{"lost frames add to the decoder's pictures: 1+2 of 500 is 0.6%", sourceDamageReport{Pictures: 1}, 500, 498, 3, true},
+	}
+	for _, c := range cases {
+		got := withLostFrames(c.rep, c.frames, c.decoded)
+		if got.Pictures != c.wantPictures {
+			t.Errorf("%s: pictures %d, want %d", c.name, got.Pictures, c.wantPictures)
+		}
+		if tol := damageTolerated(got, c.frames); tol != c.wantTolerated {
+			t.Errorf("%s: tolerated %v, want %v", c.name, tol, c.wantTolerated)
+		}
+	}
+}
