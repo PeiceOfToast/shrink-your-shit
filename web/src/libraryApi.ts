@@ -49,7 +49,7 @@ export const patchLibrary = (id: string, patch: { name?: string; path?: string }
 export const setLibraryWorkflow = (id: string, flowId: string): Promise<Answer<LibraryItem>> =>
   MOCK ? M(mock.setLibraryWorkflow(id, flowId)) : call("PUT", "/api/libraries/" + enc(id) + "/flow", { flowId });
 export async function scanLibrary(id: string): Promise<Answer<unknown>> {
-  if (MOCK) return (mock.scanLibrary(id), {});
+  if (MOCK) return mock.scanLibrary(id);
   return call("POST", "/api/libraries/" + enc(id) + "/scan");
 }
 

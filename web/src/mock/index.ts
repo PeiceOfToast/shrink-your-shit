@@ -408,12 +408,17 @@ function outputInside(flowId: ID, path: string, name = ""): Issue | null {
 }
 const linkWorkflows = (s: State) => { s.wf = s.wf.map((w) => ({ ...w, libraries: s.libraries.filter((l) => l.workflowId === w.id).map((l) => ({ id: l.id, name: l.name })) })); };
 // POST /api/libraries {name, path, flowId}: 201 with the library, not started (nothing scanned or queued).
+const NO_WORKFLOW = "This library has no workflow, so it can't be started. Assign a workflow, then start it. Nothing was changed.";
+// flowId "0" = no workflow yet (workshop's shape): the library is kept, never started, and has no output setting.
 export function addLibrary(name: string, path: string, flowId: ID): Answer<LibraryItem> {
   if (!name.trim()) return { error: { code: "invalid_name", message: "Give the library a name." } };
-  const e = pathError(path) ?? workflowError(flowId) ?? outputInside(flowId, path, name.trim());
+  const none = flowId === "0";
+  const e = pathError(path) ?? (none ? null : workflowError(flowId) ?? outputInside(flowId, path, name.trim()));
   if (e) return { error: e };
   const l = library("l" + Date.now().toString(36), name.trim(), trim(path), 0, 0, 0);
-  l.workflowId = flowId; l.workflowName = state.wf.find((w) => w.id === flowId)!.name; l.enabled = false;
+  if (none) Object.assign(l, { workflowId: "", workflowName: "", status: "no_workflow", output: { policy: null, folder: null, overrideFolder: null, problem: null } });
+  else { l.workflowId = flowId; l.workflowName = state.wf.find((w) => w.id === flowId)!.name; }
+  l.enabled = false;
   l.counts = { files: 0, waiting: 0, running: 0, completed: 0, skipped: 0, failed: 0 };
   l.scan = { ...l.scan, lastScanAt: null, nextScanAt: null };
   change((s) => { s.libraries = [...s.libraries, l]; linkWorkflows(s); s.settings = { ...s.settings, firstRunLibrary: null }; log("library.scanned", "Added the library " + l.name, { libraryId: l.id }); });
@@ -438,7 +443,12 @@ export function patchLibrary(id: ID, patch: { name?: string; path?: string }): A
 export function setLibraryWorkflow(id: ID, flowId: ID): Answer<LibraryItem> {
   const e = workflowError(flowId);
   if (e) return { error: e };
-  change((s) => { const x = s.libraries.find((y) => y.id === id); if (x) (x.workflowId = flowId), (x.workflowName = s.wf.find((w) => w.id === flowId)!.name); linkWorkflows(s); });
+  change((s) => {
+    const x = s.libraries.find((y) => y.id === id);
+    if (x) (x.workflowId = flowId), (x.workflowName = s.wf.find((w) => w.id === flowId)!.name);
+    if (x && x.status === "no_workflow") Object.assign(x, { status: "disabled", output: { policy: "separate_folder", folder: x.paths[0] + " (shrunk)", overrideFolder: null, problem: null } }); // assigned: still not started
+    linkWorkflows(s);
+  });
   return libraryItem(state.libraries.find((x) => x.id === id)!);
 }
 // POST /api/libraries/{id}/scan: starts the library if it wasn't, and looks for files now.
@@ -450,6 +460,7 @@ export function getLibrary(id: ID): Answer<Library> {
 export function patchLibraryV2(id: ID, p: { enabled?: boolean; priority?: number; overrideFolder?: string | null }): Answer<Library> {
   const l = state.libraries.find((x) => x.id === id);
   if (!l) return { error: { code: "not_found", message: "There is no such library." } };
+  if (p.enabled && l.status === "no_workflow") return { error: { code: "no_workflow", message: NO_WORKFLOW } };
   if (p.priority !== undefined && (!Number.isInteger(p.priority) || p.priority < -1000 || p.priority > 1000)) return { error: { code: "invalid_setting", message: "priority is a whole number from -1000 to 1000. Nothing was changed." } };
   const dir = typeof p.overrideFolder === "string" ? trim(p.overrideFolder) : "";
   if (dir && !dir.startsWith("/")) return { error: { code: "invalid_setting", message: "Enter the folder's full path. Nothing was changed." } };
@@ -461,7 +472,8 @@ export function patchLibraryV2(id: ID, p: { enabled?: boolean; priority?: number
   });
   return getLibrary(id);
 }
-export function scanLibrary(id: ID) {
+export function scanLibrary(id: ID): Answer<object> {
+  if (state.libraries.find((x) => x.id === id)?.status === "no_workflow") return { error: { code: "no_workflow", message: NO_WORKFLOW } };
   change((s) => { const l = s.libraries.find((x) => x.id === id); if (l) (l.enabled = true), (l.status = "scanning"), (l.scan = { ...l.scan, state: "scanning", progress: 0 }); });
   setTimeout(() => change((s) => {
     const l = s.libraries.find((x) => x.id === id);
@@ -472,6 +484,7 @@ export function scanLibrary(id: ID) {
     if (found) l.counts = { ...l.counts, files: found, waiting: found };
     log("library.scanned", "Scanned " + l.name + ": " + (found ? found.toLocaleString("en-US") + " videos found" : "no new files"), { libraryId: id });
   }), 1500);
+  return {};
 }
 // PATCH /settings
 // PATCH settings; scanEvery as the server (#136): 15 s (the settle time) to a day, then it is "saved".

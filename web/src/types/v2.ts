@@ -102,7 +102,7 @@ export interface Library {
     problem: { code: string; message: string } | null; // no_default_folder, inside_library...: show the message
   };
   discovery: { subfolders: boolean; settleSeconds: number; followLinks: boolean; include: string[]; exclude: string[]; scanEverySeconds?: number }; // V5b: the effective interval
-  status: "ok" | "scanning" | "path_missing" | "not_readable" | "disabled" | "paused_share";
+  status: "ok" | "scanning" | "path_missing" | "not_readable" | "disabled" | "paused_share" | "no_workflow"; // no_workflow wins; it can't be started (409)
   // paused_share: the library waits for its share to connect. enabled stays true; pausedBy names the share.
   pausedBy?: { shareId: string; shareName: string; since: string; use: "folder" } | null;
   // false when the app can't write the library's folder; unwritableMessage is the server's sentence then, else "" (workshop #433)
