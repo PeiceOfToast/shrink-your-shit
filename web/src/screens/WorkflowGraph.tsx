@@ -22,13 +22,14 @@ const CAT: Record<string, string> = { input: "var(--cat-input)", filter: "var(--
 const PALETTE_TYPE = "application/x-syp-step"; // the drag data of a palette step (its type)
 const W = 188, H = (outs: number) => 34 + 24 + Math.max(outs, 1) * 22 + 8; // node size for layout (matches .gnode)
 
-type Data = { node: Node; def?: StepDefinition; summary: string; issues: ValidationIssue[]; edit?: boolean; linked: string[] };
+type Data = { node: Node; def?: StepDefinition; summary: string; issues: ValidationIssue[]; edit?: boolean; linked: string[]; selectNode?: (id: string) => void };
 type GNodeT = RFNode<Data, "step">;
 // item 7: a port that isn't a success port and has no connection says so on the step: the original file is kept there
-const NOT_LINKED = "Didn't work: not linked. The original file is kept.";
+// each unlinked port says its own name in words; the error port keeps the spec's "Didn't work" line
+const notLinked = (p: { name: string; label: string; outcome: string }) => (p.outcome === "error" ? "Didn't work" : p.label) + ": not linked. The original file is kept.";
 
 function GNode({ data, selected }: NodeProps<GNodeT>) {
-  const { node, def, summary, issues, linked } = data, errs = issues.filter((i) => i.severity === "error").length;
+  const { node, def, summary, issues, linked, selectNode } = data, errs = issues.filter((i) => i.severity === "error").length;
   return (
     <div className={"gnode" + (node.enabled ? "" : " off") + (selected ? " sel" : "")} style={{ ["--cat" as string]: CAT[def?.category ?? ""] ?? "var(--accent)" }}
       aria-label={(node.name ?? def?.name ?? node.type) + (issues.length ? ", " + issues.length + (issues.length === 1 ? " problem" : " problems") : "")}>
@@ -38,7 +39,8 @@ function GNode({ data, selected }: NodeProps<GNodeT>) {
       <div className="gsum" title={summary}>{summary || def?.typeLabel || ""}</div>
       {(def?.outputs ?? []).map((p) => (
         <div key={p.name} className={"gport " + p.outcome}><span>{p.label}</span>
-          {p.outcome !== "success" && !linked.includes(p.name) && <span className="gpill" aria-hidden="true">Not linked</span>}
+          {p.outcome !== "success" && !linked.includes(p.name) && !issues.some((i) => i.code === "unconnected_port" && i.port === p.name) &&
+            <button type="button" className="gpill" aria-label={notLinked(p)} title={notLinked(p)} onClick={(e) => (e.stopPropagation(), selectNode?.(node.id))}>Not linked: keeps the original</button>}
           <Handle type="source" position={Position.Right} id={p.name} isConnectable={!!data.edit} /></div>))}
     </div>);
 }
@@ -137,8 +139,8 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
       const def = defs.find((x) => x.type === n.type);
       return { id: n.id, type: "step", position: layout.nodes[n.id] ?? { x: 0, y: 0 }, draggable: edit, connectable: edit, deletable: edit && def?.category !== "input", selected: n.id === sel,
         initialWidth: W, initialHeight: H(def?.outputs?.length ?? 1), measured: dims[n.id], // review f03fcad: the minimap only draws nodes with a size
-        ariaLabel: [title(n) + (n.enabled ? "" : " (off)"), summary, ...mine.map((i) => (i.severity === "error" ? "Problem: " : "Warning: ") + i.message), ...free(n, def).map(() => NOT_LINKED)].filter(Boolean).join(". "),
-        data: { node: n, def, summary, issues: mine, edit, linked: doc.edges.filter((e) => e.from === n.id).map((e) => e.fromPort) } };
+        ariaLabel: [title(n) + (n.enabled ? "" : " (off)"), summary, ...mine.map((i) => (i.severity === "error" ? "Problem: " : "Warning: ") + i.message), ...free(n, def).map((p) => notLinked(p))].filter(Boolean).join(". "),
+        data: { node: n, def, summary, issues: mine, edit, linked: doc.edges.filter((e) => e.from === n.id).map((e) => e.fromPort), selectNode: (id: string) => (setSel(id), setSelEdge(null)) } };
     });
     const edges: RFEdge[] = doc.edges.map((e) => {
       const from = doc.nodes.find((n) => n.id === e.from), outs = defs.find((x) => x.type === from?.type)?.outputs ?? [], port = outs.find((p) => p.name === e.fromPort);
@@ -192,17 +194,22 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
     insertStep(d, { x: p.x, y: p.y + H(defs.find((x) => x.type === a.type)?.outputs?.length ?? 1) + 40 }, { after: a });
   };
   const nudgeTimer = useRef<number>(0);
+  const nudgeRun = useRef<{ id: string; at: number } | null>(null); // the history entry the current run of arrow presses writes into
   const nudge = (id: string, dx: number, dy: number) => {
-    const p = layout.nodes[id] ?? { x: 0, y: 0 };
-    push({ layout: { ...layout, nodes: { ...layout.nodes, [id]: { x: p.x + dx, y: p.y + dy } } } });
+    const p = layout.nodes[id] ?? { x: 0, y: 0 }, next = { ...layout, nodes: { ...layout.nodes, [id]: { x: p.x + dx, y: p.y + dy } } };
+    const run = nudgeRun.current;
+    if (run && run.id === id && run.at === hist.at) setHist((h) => ({ ...h, list: h.list.map((e, i) => (i === h.at ? { ...e, layout: next } : e)) }));
+    else { push({ layout: next }); nudgeRun.current = { id, at: hist.at + 1 }; }
     window.clearTimeout(nudgeTimer.current); nudgeTimer.current = window.setTimeout(() => setSaid("Moved " + nameOf(id) + "."), 1000); // said once the arrows pause
   };
   // a palette step dragged onto the canvas: a dashed box follows the pointer (16 px grid, in screen pixels)
   const [ghost, setGhost] = useState<{ x: number; y: number } | null>(null);
+  const [pointer, setPointer] = useState<{ x: number; y: number } | null>(null), [dragType, setDragType] = useState<string | null>(null);
+  const dragging = (t: string | null) => { setDragType(t); if (!t) { setGhost(null); setPointer(null); } };
   const snap = (v: number) => Math.round(v / 16) * 16;
-  const onDragOver = (e: DragEvent) => { if (!e.dataTransfer.types.includes(PALETTE_TYPE)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setGhost({ x: snap(e.clientX - W / 2), y: snap(e.clientY - 40) }); };
+  const onDragOver = (e: DragEvent) => { if (!e.dataTransfer.types.includes(PALETTE_TYPE)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setGhost({ x: snap(e.clientX - W / 2), y: snap(e.clientY - 40) }); setPointer({ x: e.clientX, y: e.clientY }); };
   const onDrop = (e: DragEvent) => {
-    setGhost(null); const type = e.dataTransfer.getData(PALETTE_TYPE); if (!type) return;
+    setGhost(null); setPointer(null); const type = e.dataTransfer.getData(PALETTE_TYPE); if (!type) return;
     e.preventDefault(); const d = defs.find((x) => x.type === type); if (!d) return;
     const hit = (document.elementFromPoint(e.clientX, e.clientY) as Element | null)?.closest(".react-flow__edge"), edge = hit?.getAttribute("data-id") ? doc.edges.find((x) => x.id === hit.getAttribute("data-id")) : undefined;
     const f = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
@@ -292,9 +299,10 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
             <button className="btn ghost" type="button" onClick={() => setPanel(null)}>Cancel</button></div>
         </div></section>)}
       <div className={"graphwrap" + (edit ? " withpal" : "")}>
-        {edit && <Palette defs={defs} onAdd={addFromPalette} />}
-        <div className="gcanvas" aria-label={"The steps of " + name + " as a graph"} onDragOver={edit ? onDragOver : undefined} onDragLeave={edit ? () => setGhost(null) : undefined} onDrop={edit ? onDrop : undefined}>
+        {edit && <Palette defs={defs} onAdd={addFromPalette} dragType={dragType} onDrag={dragging} />}
+        <div className="gcanvas" aria-label={"The steps of " + name + " as a graph"} onDragOver={edit ? onDragOver : undefined} onDragLeave={edit ? (e: DragEvent) => { if (!e.currentTarget.contains(e.relatedTarget as HTMLElement | null)) (setGhost(null), setPointer(null)); } : undefined} onDrop={edit ? onDrop : undefined} onBlur={() => (nudgeRun.current = null)}>
           {ghost && <div className="gdrop" aria-hidden="true" style={{ left: ghost.x, top: ghost.y, width: W, height: 72 }} />}
+          {pointer && dragType && <div className="gghost" aria-hidden="true" style={{ left: pointer.x + 12, top: pointer.y + 12 }}>{defs.find((x) => x.type === dragType)?.name}</div>}
           <ReactFlow nodes={shown} edges={edges} nodeTypes={nodeTypes} fitView minZoom={0.2} maxZoom={2} nodesDraggable={edit} nodesConnectable={edit} elementsSelectable
             onConnect={connect} isValidConnection={valid} onNodesChange={onNodesChange} onDelete={({ nodes: ns, edges: es }) => (ns.length ? removeNodes(ns.map((n) => n.id)) : removeEdges(es.map((e) => e.id)))} deleteKeyCode={edit ? ["Delete", "Backspace"] : null}
             onNodeClick={(_, n) => (setSel(n.id), setSelEdge(null))} onEdgeClick={(_, e) => (setSelEdge(e.id), setSel(null))} onPaneClick={() => (setSel(null), setSelEdge(null))}>
@@ -339,7 +347,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
 // The palette (SCREENS V4): search, then the step types by category; double-click or Enter adds one at the view's
 // centre. The library trigger and migration-only types aren't offered; categories with nothing to add aren't shown.
 const CAT_NAME: Record<string, string> = { filter: "Checks", video: "Video", audio: "Audio", subtitles: "Subtitles", container: "File type", verify: "Check the result", output: "Save", flow: "Flow" };
-function Palette({ defs, onAdd }: { defs: StepDefinition[]; onAdd: (d: StepDefinition) => void }) {
+function Palette({ defs, onAdd, dragType, onDrag }: { defs: StepDefinition[]; onAdd: (d: StepDefinition) => void; dragType: string | null; onDrag: (t: string | null) => void }) {
   // the step list's "Add step" lands here with ?add=<type> (its conditions do): the search starts on that step's name
   const [q, setQ] = useState(() => defs.find((x) => x.type === new URLSearchParams(window.location.search).get("add"))?.name ?? "");
   const shown = defs.filter((d) => d.category !== "input" && !d.readOnly && !d.deprecated && (!q || (d.name + " " + d.description + " " + d.typeLabel).toLowerCase().includes(q.toLowerCase())));
@@ -352,8 +360,8 @@ function Palette({ defs, onAdd }: { defs: StepDefinition[]; onAdd: (d: StepDefin
         {cats.map((c) => (
           <details key={c} open className="gfold"><summary className="lab">{CAT_NAME[c]}</summary>
             <ul className="gpl">{shown.filter((d) => d.category === c).map((d) => (
-              <li key={d.type}><button type="button" className="gpi" draggable style={{ ["--cat" as string]: CAT[d.category] }} title={d.description + " Drag it onto the canvas, or double-click or press Enter to add it."}
-                onDragStart={(e) => { e.dataTransfer.setData(PALETTE_TYPE, d.type); e.dataTransfer.effectAllowed = "copy"; }}
+              <li key={d.type}><button type="button" className={"gpi" + (dragType === d.type ? " dragging" : "")} draggable style={{ ["--cat" as string]: CAT[d.category] }} title={d.description + " Drag it onto the canvas, or double-click or press Enter to add it."}
+                onDragStart={(e) => { e.dataTransfer.setData(PALETTE_TYPE, d.type); e.dataTransfer.effectAllowed = "copy"; onDrag(d.type); }} onDragEnd={() => onDrag(null)}
                 onDoubleClick={() => onAdd(d)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), onAdd(d))} aria-label={"Add " + d.name + ": " + d.description}>
                 <Icon id={ICON[d.icon] ?? "i-workflow"} /><span className="sp"><strong>{d.name}</strong><small>{d.description}</small></span><span className="tt">{d.typeLabel}</span></button></li>))}</ul>
           </details>))}
