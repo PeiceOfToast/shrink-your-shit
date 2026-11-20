@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -361,7 +362,7 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 	)
 	if p.Video.Copy { // repackaged: the video as it is (the global -c copy), audio as planned
 		args = append(args, p.trackArgs()...)
-		args = append(args, out)
+		args = withOutput(args, out)
 		return p.withSubtitleFiles(args, out)
 	}
 	kbps := strconv.Itoa(p.Video.TargetKbps) + "k"
@@ -436,8 +437,19 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 	if p.Video.Tag != "" {
 		args = append(args, "-tag:"+v, p.Video.Tag)
 	}
-	args = append(args, out)
+	args = withOutput(args, out)
 	return p.withSubtitleFiles(args, out)
+}
+
+// withOutput ends the arguments with the output file. An MP4-family file (MP4, M4V, MOV) gets its index at the
+// front (+faststart), so a player can start it before the whole file is downloaded; MKV and WebM have no such
+// step. out's extension is the new file's type: the staged file keeps it.
+func withOutput(args []string, out string) []string {
+	switch strings.ToLower(filepath.Ext(out)) {
+	case ".mp4", ".m4v", ".mov":
+		args = append(args, "-movflags", "+faststart")
+	}
+	return append(args, out)
 }
 
 // gpuScale is the scale filter of the full graphics pipeline (frames stay on the device): QSV's keeps the frames'

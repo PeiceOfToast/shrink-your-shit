@@ -25,6 +25,12 @@ import (
 // stallServer is a server whose remote runs are stopped after stall without the encode moving on.
 func stallServer(t *testing.T, stall time.Duration) (*httptest.Server, *jobs.Store, string) {
 	t.Helper()
+	return stallServerFinish(t, stall, 0)
+}
+
+// stallServerFinish is stallServer with the finishing allowance set (0: the default).
+func stallServerFinish(t *testing.T, stall, finish time.Duration) (*httptest.Server, *jobs.Store, string) {
+	t.Helper()
 	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -37,7 +43,7 @@ func stallServer(t *testing.T, stall time.Duration) (*httptest.Server, *jobs.Sto
 	srv := httptest.NewServer(web.Handler(st, access, web.Engine{DataDir: t.TempDir(),
 		RunRemote: func(job jobs.Job, id string, rj *worker.RemoteJob) {
 			w := &worker.Worker{ID: id, Queue: st, Exec: media.OSExec{}, FFmpeg: "ffmpeg", FFprobe: "ffprobe", Template: st.TemplateFor,
-				KeepDays: func() int { return 7 }, Journal: st, Sidecars: st, StallAfter: stall}
+				KeepDays: func() int { return 7 }, Journal: st, Sidecars: st, StallAfter: stall, FinishAfter: finish}
 			w.RunRemote(ctx, job, rj)
 		}}))
 	t.Cleanup(srv.Close)
@@ -110,6 +116,49 @@ func TestRemoteEncodeRepeatingOnePositionIsStopped(t *testing.T) {
 	}
 	if j.Status != jobs.Failed || !strings.Contains(j.Error, "Stopped: no progress for 300ms") || !strings.Contains(j.Error, "original is untouched") {
 		t.Errorf("%s %q", j.Status, j.Error)
+	}
+}
+
+// finishEncode reports the encode at the file's length (the 2 s remote job's), then prints nothing: the finishing
+// step (a +faststart rewrite) has no progress line. It ends when the stop cancels it.
+type finishEncode struct{ media.OSExec }
+
+func (finishEncode) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
+	if name != "ffmpeg" || !slices.Contains(args, "libx265") {
+		return media.OSExec{}.Stream(ctx, onLine, name, args...)
+	}
+	onLine("out_time_us=2000000")
+	onLine("progress=continue")
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-time.After(3 * time.Second):
+		return "", nil
+	}
+}
+
+// Row 7b1c88f0 (review2 P3b): a remote encode silent at the file's length gets the finishing allowance, and is
+// stopped at FinishAfter like any stall. Mutation: watchRemoteStall with finishing forced false fails this.
+func TestRemoteFinishStopsAtItsOwnLimit(t *testing.T) {
+	needFFmpeg(t)
+	oldPoll, oldEvery := PlanPoll, ProgressEvery
+	PlanPoll, ProgressEvery = 50*time.Millisecond, 20*time.Millisecond
+	defer func() { PlanPoll, ProgressEvery = oldPoll, oldEvery }()
+	srv, st, lib := stallServerFinish(t, 300*time.Millisecond, time.Second)
+	id := remoteJob(t, st, lib)
+	c := pairClient(t, srv, st)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go c.Work(ctx, Converter{Exec: finishEncode{}, FFmpeg: "ffmpeg", FFprobe: "ffprobe", Work: t.TempDir(),
+		FreeSpace: func(string) (uint64, error) { return 1 << 40, nil }})
+	var j jobs.Job
+	for end := time.Now().Add(20 * time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
+		if j, _ = st.Get(id); j.Status != jobs.Queued && j.Status != jobs.Running {
+			break
+		}
+	}
+	if j.Status != jobs.Failed || !strings.Contains(j.Error, "no progress for 1s") {
+		t.Errorf("silent at the length past FinishAfter: %s %q", j.Status, j.Error)
 	}
 }
 

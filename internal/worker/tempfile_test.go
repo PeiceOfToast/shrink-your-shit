@@ -163,6 +163,27 @@ func TestLeftoverCleanupRemovesOnlyRecognisedStagingFolders(t *testing.T) {
 	}
 }
 
+// A MP4 or MOV staging file (the +faststart rewrite's new.mov / new.m4v, row 7b1c88f0 P3c) is ours too: a folder
+// holding only one of them is removed. Mutation: dropping the new.mov/new.m4v names from isStaged fails this.
+func TestLeftoverCleanupRemovesMovAndM4vStaging(t *testing.T) {
+	s := newScenario(t)
+	mov := filepath.Join(s.dir, ".movie.666.syp-tmp")
+	m4v := filepath.Join(s.dir, ".movie.777.syp-tmp")
+	os.MkdirAll(mov, 0o700)
+	os.MkdirAll(m4v, 0o700)
+	os.WriteFile(filepath.Join(mov, "new.mov"), []byte("half-written"), 0o600)
+	os.WriteFile(filepath.Join(m4v, "new.m4v"), []byte("half-written"), 0o600)
+	s.run(Replace)
+	if j := s.job(); j.Status != jobs.Done {
+		t.Errorf("%s %q", j.Status, j.Error)
+	}
+	for _, gone := range []string{mov, m4v} {
+		if _, err := os.Lstat(gone); err == nil {
+			t.Errorf("%s holds only our staging file and should have been removed", filepath.Base(gone))
+		}
+	}
+}
+
 // A leftover that cannot be removed stops the job before ffmpeg runs.
 func TestUnremovableTempStopsBeforeEncoding(t *testing.T) {
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
