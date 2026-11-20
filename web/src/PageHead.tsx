@@ -1,6 +1,6 @@
 // One header row per page (DESIGN-DIRECTION-clean.md P1, P2): icon, title, the Sample data pill on pages that show
 // sample data (it replaced the full-width prototype bar), an optional "?" with the old subtitle, actions on the right.
-import { createContext, Fragment, useContext, useState, type ReactNode } from "react";
+import { Component, createContext, Fragment, useContext, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { Link } from "./router";
 
@@ -43,4 +43,16 @@ export function Empty({ icon, text, children }: { icon: string; text: ReactNode;
 // a failed refresh over data keeps the data and a red line above it instead.
 export function LoadFailed({ error, reload }: { error?: { message: string }; reload: () => unknown }) {
   return <div className="empty1" role="alert"><Icon id="i-alert" /><p>{error?.message || "Couldn't load this."}</p><button className="btn primary" type="button" onClick={() => reload()}>Try again</button></div>;
+}
+
+// A page that fails to draw shows a message and a Reload, not a blank app (bug 11-19 23:00Z: one crash unmounted
+// everything). The Shell keys it by the address, so moving to another page starts clean.
+export class ScreenGuard extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() {
+    return this.state.failed
+      ? <div className="empty1" role="alert"><Icon id="i-alert" /><p>This page hit a problem and can't be shown. Nothing was changed.</p><button className="btn primary" type="button" onClick={() => location.reload()}>Reload</button></div>
+      : this.props.children;
+  }
 }

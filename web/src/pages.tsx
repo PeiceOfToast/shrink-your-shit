@@ -12,7 +12,6 @@ const WHAT: Record<string, string> = {
   "/jobs": "The queue, running jobs and history, with each job's log.",
   "/workflows": "What happens to each file: a simple stack, or a graph for more control.",
   "/libraries": "The folders that are watched, and the workflow each one uses.",
-  "/plugins": "Installing and updating plugins.",
   "/workers": "The computers that convert files, and starting and stopping them.",
 };
 
@@ -21,6 +20,17 @@ export function Coming({ item }: { item: NavItem }) {
     <div className="stack">
       <PageHead icon={item.icon} title={item.label} help={WHAT[item.to]} />
       <Empty icon={item.icon} text={item.label + " comes in a later step."}><Link className="btn" to="/">Go to the Dashboard</Link></Empty>
+    </div>
+  );
+}
+
+// Plugins are planned: say so, and offer nothing that looks like it works (no list, no buttons, no sign-up).
+export function PluginsPlanned() {
+  return (
+    <div className="stack">
+      <PageHead icon="i-plugin" title="Plugins" help="Planned. Not available yet." />
+      <p>Plugins aren't available yet. When they arrive, they'll let you add your own steps to a workflow, such as a custom ffmpeg command or a script that runs before or after each file.</p>
+      <p className="muted">Ideas for plugins are welcome on <a href="https://github.com/PeiceOfToast/shrink-your-shit/issues" target="_blank" rel="noopener">GitHub issues</a>.</p>
     </div>
   );
 }
