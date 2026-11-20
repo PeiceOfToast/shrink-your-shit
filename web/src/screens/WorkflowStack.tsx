@@ -455,7 +455,7 @@ function VariablesCard({ doc, defs, builtins, problems, edit, open }: { doc: Wor
               return (
                 <tr key={v.name}>
                   <th scope="row"><code>{"{{" + v.name + "}}"}</code>{editing === v.name
-                    ? <input className="input" aria-label={"Description of {{" + v.name + "}}"} value={v.description ?? ""} onChange={(e) => setVars(vars.map((x) => (x.name === v.name ? { ...x, description: e.target.value } : x)), "desc:" + v.name)} />
+                    ? <input className="input" autoFocus aria-label={"Description of {{" + v.name + "}}"} value={v.description ?? ""} onChange={(e) => setVars(vars.map((x) => (x.name === v.name ? { ...x, description: e.target.value } : x)), "desc:" + v.name)} />
                     : v.description && <span className="muted sm" style={{ display: "block" }}>{v.description}</span>}</th>
                   <td data-label="Value"><input className="input" aria-label={"Value of {{" + v.name + "}}"} value={String(v.value ?? "")} onChange={(e) => setVars(vars.map((x) => (x.name === v.name ? { ...x, value: e.target.value } : x)), "value:" + v.name)} /></td>
                   <td><span className="pill vars-pill-own">This workflow</span></td>
