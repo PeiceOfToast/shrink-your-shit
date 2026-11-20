@@ -163,7 +163,7 @@ export function addStepsOf(d: WorkflowDoc): Record<string, AddStep> {
     let after: ID | undefined;
     for (const id of ids) {
       const n = d.nodes.find((x) => x.id === id)!, def = STEP_DEFS.find((x) => x.type === n.type);
-      if (def && groupOf(def).index <= groupOf(s).index) after = id;
+      if (def && def.type !== "output.commit" && groupOf(def).index <= groupOf(s).index) after = id; // the save stays last: an add never lands after it
     }
     out[s.type] = { addable: true, after: after ?? ids[0] };
   }
