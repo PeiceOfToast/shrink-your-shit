@@ -295,6 +295,9 @@ func (s *Store) transition(id int64, to Status, set string, args ...any) error {
 	if !CanTransition(j.Status, to) {
 		return fmt.Errorf("job %d: cannot go from %s to %s", id, j.Status, to)
 	}
+	if to == Queued { // a job queued again (retry, fallback) runs with the library's current workflow
+		set += `, workflow_rev=` + jobRevSQL
+	}
 	q := `UPDATE jobs SET status=?, updated=?` + set + ` WHERE id=? AND status=?`
 	a := append([]any{to, s.stamp()}, args...)
 	a = append(a, id, j.Status)
@@ -428,7 +431,7 @@ func (s *Store) RequeueRunning() (int64, error) {
 	if err := s.finishRequestedStops(); err != nil {
 		return 0, err
 	}
-	r, err := s.db.Exec(`UPDATE jobs SET status=?, progress=0, worker='', updated=? WHERE status=?`,
+	r, err := s.db.Exec(`UPDATE jobs SET status=?, progress=0, worker='', updated=?, workflow_rev=`+jobRevSQL+` WHERE status=?`,
 		Queued, s.stamp(), Running)
 	if err != nil {
 		return 0, err
@@ -703,7 +706,7 @@ func (s *Store) RequeueExpiredLeases(wait time.Duration) (int, error) {
 			counted, retryAt = 1, now.Add(wait).Format(time.RFC3339)
 		}
 		r, err := s.db.Exec(`UPDATE jobs SET status=?, updated=?, progress=0, worker='', error=?, error_code=?, attempts=attempts+?, retry_at=?,
-  lease_id='', lease_expires='' WHERE id=? AND status=? AND lease_expires<>'' AND lease_expires<?`,
+  lease_id='', lease_expires='', workflow_rev=`+jobRevSQL+` WHERE id=? AND status=? AND lease_expires<>'' AND lease_expires<?`,
 			Queued, s.stamp(), words, ReasonWorkerLost, counted, retryAt, l.id, Running, now.Format(leaseTime))
 		if err != nil {
 			return n, err

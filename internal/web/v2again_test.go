@@ -46,6 +46,7 @@ func TestV2ConvertAgain(t *testing.T) {
 	st.Claim("w")
 	out := filepath.Join(lib.Path+" (shrunk)", "a.mkv")
 	st.Complete(id, out, 4)
+	changeWorkflow(t, st, lib, 4) // the run finished under the old workflow: earlier now
 	// orch-lead 17:12Z: what the run did, for the button's words; a folder for new files names that file
 	if a := detail(id); !a.Possible || a.Reason != nil || str(a.Policy) != "separate_folder" || str(a.OutputPath) != out || a.KeptUntil != nil {
 		t.Errorf("done: %+v", a)
@@ -71,6 +72,7 @@ func TestV2ConvertAgain(t *testing.T) {
 	deleteOn := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
 	st.FinishSwap(row, deleteOn)
 	st.Complete(other, b, 3)
+	changeWorkflow(t, st, lib, 5)
 	// replaced, its original kept: until when (the purge's date: kept plus the setting now, not the date
 	// recorded when it was kept), and no other file (the new one has the file's own name)
 	kept, _ := st.OriginalByID(row)
@@ -78,6 +80,7 @@ func TestV2ConvertAgain(t *testing.T) {
 	if a := detail(other); str(a.Policy) != "replace" || str(a.KeptUntil) != purgeDay.UTC().Format(time.RFC3339) || a.OutputPath != nil {
 		t.Errorf("kept: %+v", a)
 	}
+	changeWorkflow(t, st, lib, 6)
 	st.SetSwapState(row, jobs.OriginalPurged)
 	a := detail(other)
 	at, _ := time.Parse(time.RFC3339, againDeletedAt(a.Reason))
@@ -97,6 +100,7 @@ func TestV2ConvertAgain(t *testing.T) {
 	}
 	next := filepath.Join(lib.Path, "c.shrunk.mkv")
 	st.Complete(third, next, 3)
+	changeWorkflow(t, st, lib, 7)
 	if a := detail(third); !a.Possible || str(a.Policy) != "beside" || str(a.OutputPath) != next || a.KeptUntil != nil {
 		t.Errorf("beside: %+v", a)
 	}
@@ -212,5 +216,16 @@ func TestV2ConvertAgainCurrentWorkflow(t *testing.T) {
 	}
 	if code, body, _ := do(t, nil, srv, call{method: "POST", path: libPath, body: `{}`, ctype: "application/json"}); code != 200 || !strings.Contains(body, `"queued":0`) {
 		t.Errorf("second bulk POST: %d %s", code, body)
+	}
+}
+
+// changeWorkflow makes a new workflow revision of lib's flow: the jobs stamped before it are earlier, not current.
+func changeWorkflow(t *testing.T, st *jobs.Store, lib jobs.Library, n int) {
+	t.Helper()
+	if _, err := st.SetFlowTemplate(lib.FlowID, rules.SliderTemplate(n)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.EnsureRevision(lib.FlowID); err != nil {
+		t.Fatal(err)
 	}
 }
