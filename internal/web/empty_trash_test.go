@@ -70,8 +70,8 @@ func TestEmptyTrashSkipsAnUnmountedShare(t *testing.T) {
 	}
 	t.Cleanup(func() { st.Close() })
 	st.SetPaused(false)
-	// keepOriginalsDays 0: a kept original is due at once
-	st.SetMeta("settings", `{"firstRunDone":true,"firstRunStep":5,"keepOriginalsDays":0,"parallelJobs":1,"lowPriority":true,"scanSchedule":"02:00","queueOrder":"newest","languages":[]}`)
+	// keepOriginalsDays 7 and originals kept just now: Empty trash now deletes them anyway (that is its point)
+	st.SetMeta("settings", `{"firstRunDone":true,"firstRunStep":5,"keepOriginalsDays":7,"parallelJobs":1,"lowPriority":true,"scanSchedule":"02:00","queueOrder":"newest","languages":[]}`)
 
 	mnt := filepath.Join(t.TempDir(), "mnt")
 	if err := os.MkdirAll(filepath.Join(mnt, "movies"), 0o755); err != nil {
