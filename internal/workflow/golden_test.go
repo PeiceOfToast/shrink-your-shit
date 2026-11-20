@@ -79,6 +79,7 @@ func goldenDocs() map[string]Doc {
 		"flow-end":                flowEndDoc(),
 		"on-error":                onErrorDoc(),
 		"secret-sealed":           secretDoc(),
+		"variable-options":        variableOptionsDoc(),
 		"legacy-quality":          legacyRateDoc("quality_legacy", map[string]any{"maxBitrate": "medium"}),
 		"legacy-vbr":              legacyRateDoc("vbr_legacy", map[string]any{"maxBitrate": "medium", "vbrMaxKbps": 3000}),
 	}
@@ -106,6 +107,13 @@ func onErrorDoc() Doc {
 func secretDoc() Doc {
 	d := Preset()
 	d.Variables = []Variable{{Name: "api_token", Type: "secret", Value: sealedFixture(goldenSecretPlain), HasValue: true}}
+	return d
+}
+
+// variableOptionsDoc is a workflow with a variable that has a value and options, as the editor stores a choice.
+func variableOptionsDoc() Doc {
+	d := Preset()
+	d.Variables = []Variable{{Name: "resolution_pick", Type: "text", Value: "1080p", HasValue: true, Options: []string{"4K", "1080p"}, Description: "Which size to keep."}}
 	return d
 }
 

@@ -5,6 +5,7 @@ package workflow
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -168,5 +169,22 @@ func TestNodesFollowTheDocumentVersion(t *testing.T) {
 	}
 	if n := d.Nodes[0]; n.TypeVersion != 3 || n.Config["units"] != "percent" {
 		t.Fatalf("a current document's older node was not upgraded: %+v", n)
+	}
+}
+
+// A document this build can't read says which way: older than it can upgrade, or newer than it reads.
+func TestUnreadableVersionSaysWhichWay(t *testing.T) {
+	msg := func(v int) string {
+		r := Validate(Doc{SchemaVersion: v})
+		if len(r.Issues) != 1 {
+			t.Fatalf("version %d: issues %+v", v, r.Issues)
+		}
+		return r.Issues[0].Message
+	}
+	if m := msg(SchemaVersion + 1); !strings.Contains(m, "newer than this version reads") {
+		t.Errorf("newer: %q", m)
+	}
+	if m := msg(SchemaVersion - 1); !strings.Contains(m, "older than this version can upgrade") {
+		t.Errorf("older: %q", m)
 	}
 }
