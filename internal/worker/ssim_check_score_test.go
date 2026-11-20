@@ -4,6 +4,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -54,5 +55,26 @@ func TestSSIMCheckFailingPlaceStoresItsScoreAndKeeps(t *testing.T) {
 	}
 	if !strings.Contains(k.Reason, "similarity 0.850") {
 		t.Fatalf("reason %q, want the failing place's similarity", k.Reason)
+	}
+}
+
+// A place that errors after a passing place keeps the lowest passing score: the job still shows 0.99 passed.
+func TestSSIMCheckErrorKeepsTheLowestScore(t *testing.T) {
+	w := &Worker{
+		MinSSIM:    0.90,
+		filterMemo: map[string]bool{"ssim": true},
+		scorePlace: func(_ context.Context, _, _ string, _, _ int, seg segment, _, _ float64, _ string) (float64, []frameScore, error) {
+			if seg.start == 25 {
+				return 0, nil, errors.New("ffmpeg died")
+			}
+			return 0.99, nil, nil
+		},
+	}
+	err := w.ssimCheck(context.Background(), fakeInfo(), fakeInfo(), "src", "tmp", 0)
+	if err == nil || !strings.Contains(err.Error(), "ffmpeg died") {
+		t.Fatalf("ssimCheck returned %v, want the place's error", err)
+	}
+	if w.check == nil || w.check.Score != 0.99 || !w.check.Passed {
+		t.Fatalf("check %+v, want score 0.99 passed", w.check)
 	}
 }

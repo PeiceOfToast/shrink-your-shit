@@ -502,6 +502,7 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 		}
 		if lowest == nil || best < lowest.Score { // all passed: the job's check step shows the lowest place
 			lowest = &CheckScore{Score: best, Min: threshold, Passed: true}
+			w.check = lowest // kept even if a later place returns an error (the job still shows its score)
 		}
 		if passed != nudges[0] {
 			order := []float64{passed}
