@@ -114,6 +114,8 @@ func TestOutputName(t *testing.T) {
 		{"{{title}}", map[string]string{"title": " / "}, "", []string{"title"}},
 		{"{{title}}", map[string]string{"title": "."}, "", []string{"title"}},
 		{"{{title}}", map[string]string{"title": ".."}, "", []string{"title"}},
+		{".", vals, "", nil},  // a template of nothing but a dot is no name either
+		{"..", vals, "", nil}, // nor "..", which would name "..mkv"
 		{"{{title}}", map[string]string{"title": "  Movie.  "}, "Movie.mkv", nil},
 		{"{{title}}", map[string]string{"title": "CON"}, "", nil}, // Windows refuses it: today's name
 		{"sub/{{title}}", vals, "subMovie.mkv", nil},              // the literal text is one piece too
@@ -127,8 +129,9 @@ func TestOutputName(t *testing.T) {
 }
 
 func TestFolder(t *testing.T) {
-	vals := map[string]string{"library_root": "/media/films", "title": "Movie"}
-	if got, empty := Folder("/srv/converted", vals); got != "/srv/converted" || empty != nil {
+	vals := map[string]string{"library_root": filepath.Join("media", "films"), "title": "Movie"}
+	plain := filepath.Join("srv", "converted")
+	if got, empty := Folder(plain, vals); got != plain || empty != nil {
 		t.Errorf("plain folder: %q %v", got, empty)
 	}
 	// a value is one path piece, so a path in one loses its separators (the folder field itself is the path)
@@ -184,6 +187,13 @@ func TestSrtNamesTemplate(t *testing.T) {
 	if got[0] != filepath.Join(dir, "Movie.srt") || !reflect.DeepEqual(empty, []string{"titel"}) {
 		t.Errorf("empty name: %v %v", got, empty)
 	}
+	// a name Windows refuses keeps today's name, checked before the first dot as OutputName checks it
+	for _, refused := range []string{"CON", "NUL", "con.eng", "LPT1.movie"} {
+		got, empty := SrtNames(final, "{{title}}", subs[:1], map[string]string{"title": refused})
+		if want := rules.SrtName(final, "eng"); got[0] != want || empty != nil {
+			t.Errorf("a refused name %q: %v %v, want today's %q", refused, got, empty, want)
+		}
+	}
 }
 
 func TestValues(t *testing.T) {
@@ -193,19 +203,21 @@ func TestValues(t *testing.T) {
 		{Index: 2, Type: "audio", Codec: "aac", Language: "jpn", Channels: 2},
 		{Index: 3, Type: "subtitle", Codec: "subrip", Language: "eng"},
 	}}
-	v := Source{Path: filepath.Join("/media", "Movie (2019).mkv"), Library: "Films", LibraryRoot: "/media",
+	root, src := filepath.Join("media"), filepath.Join("media", "Movie (2019).mkv")
+	out := filepath.Join("out", "Movie.mkv")
+	v := Source{Path: src, Library: "Films", LibraryRoot: root,
 		Info: info, Workflow: "Shrink videos", Revision: 7, Worker: "castle", TargetCodec: "hevc",
-		OutputPath: "/out/Movie.mkv", NewSize: 1250,
+		OutputPath: out, NewSize: 1250,
 		Variables: []Own{{Name: "keep_audio", Type: "boolean", Value: true}, {Name: "api_key", Type: "secret", Value: "s3cret"}}}
 	got := v.Values()
 	want := map[string]string{"file_name": "Movie (2019).mkv", "title": "Movie (2019)", "ext": "mkv",
-		"folder": filepath.Dir(filepath.Join("/media", "Movie (2019).mkv")), // the source's own separator, so Windows agrees
-		"path":   filepath.Join("/media", "Movie (2019).mkv"), "library": "Films", "library_root": "/media",
+		"folder": filepath.Dir(src), // the source's own separator, so Windows agrees
+		"path":   src, "library": "Films", "library_root": root,
 		"size_bytes": "2000", "container": "mkv", "video_codec": "h264", "width": "1920", "height": "1080",
 		"resolution": "1080p", "hdr": "no", "duration": "1:45:12", "bitrate_kbps": "8000",
 		"audio_languages": "eng, jpn", "audio_codecs": "ac3, aac", "audio_channels": "6, 2",
 		"subtitle_languages": "eng", "workflow": "Shrink videos", "workflow_revision": "7", "worker": "castle",
-		"target_codec": "hevc", "output_path": "/out/Movie.mkv", "new_size_bytes": "1250", "saved_percent": "37.5",
+		"target_codec": "hevc", "output_path": out, "new_size_bytes": "1250", "saved_percent": "37.5",
 		"keep_audio": "true"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("values:\n got %v\nwant %v", got, want)
@@ -220,8 +232,9 @@ func TestValues(t *testing.T) {
 }
 
 func TestEndValues(t *testing.T) {
-	got := EndValues("/out/Movie.mkv", 2000, 1250)
-	want := map[string]string{"output_path": "/out/Movie.mkv", "new_size_bytes": "1250", "saved_percent": "37.5"}
+	out := filepath.Join("out", "Movie.mkv")
+	got := EndValues(out, 2000, 1250)
+	want := map[string]string{"output_path": out, "new_size_bytes": "1250", "saved_percent": "37.5"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("%v, want %v", got, want)
 	}

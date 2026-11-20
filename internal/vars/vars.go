@@ -250,7 +250,8 @@ type Subtitle struct {
 // SrtNames is where each extracted subtitle's file goes beside final, in order: the .srt name template
 // filled in, or (an empty one) today's name, final's base plus "." plus the part plus ".srt". Each value
 // is made safe for a file name, a name that does not end in .srt gets it, and two that come out the same
-// get ".2", ".3" before it (as today's do). The names that came out empty are returned with them.
+// get ".2", ".3" before it (as today's do). A name Windows refuses ("CON.srt", checked as OutputName
+// checks it) and the names that came out empty keep today's name; the empty ones are returned too.
 func SrtNames(final, tpl string, subs []Subtitle, vals map[string]string) ([]string, []string) {
 	dir := filepath.Dir(final)
 	base := strings.TrimSuffix(filepath.Base(final), filepath.Ext(final))
@@ -277,7 +278,7 @@ func SrtNames(final, tpl string, subs []Subtitle, vals map[string]string) ([]str
 			v["sub_lang"], v["sub_kind"] = s.Lang, s.Kind
 			r, e := resolve(tpl, v, cleanValue)
 			report(e)
-			if r = CleanPiece(r); r != "" && r != "." && r != ".." {
+			if r = CleanPiece(r); r != "" && r != "." && r != ".." && !Reserved(strings.SplitN(r, ".", 2)[0]) {
 				name = r
 				if !strings.HasSuffix(strings.ToLower(name), ".srt") {
 					name += ".srt"

@@ -719,7 +719,9 @@ type Verification struct {
 func (s Snapshot) Fingerprint() string {
 	p := s.Plan
 	p.Skip, p.SkipCode, p.Reason = "", "", ""
-	p.Steps = nil // the log's words about this one file, not a setting: see Fingerprint's comment
+	p.Title, p.AudioTracks = "", 0 // the run's reading of TrackTitle for this file, not a setting
+	p.Steps = nil                  // the log's words about this one file, not a setting: see Fingerprint's comment
+	// (SrtNames is resolved after RecordPlan, so it is not in the stored snapshot this fingerprints.)
 	b, _ := json.Marshal(struct {
 		Plan                          Plan
 		Verify                        Verification

@@ -232,6 +232,13 @@ func TestSnapshotFingerprint(t *testing.T) {
 	if b := snap(base, other, verify).Fingerprint(); a != b || len(a) != 16 {
 		t.Errorf("the same settings on two files: %s %s", a, b)
 	}
+	// the track title and the number of tracks the run made for this file are not settings: equal either way
+	s := snap(base, info, verify)
+	titled := s
+	titled.Plan.Title, titled.Plan.AudioTracks = "Movie (2019)", 3
+	if titled.Fingerprint() != s.Fingerprint() {
+		t.Error("the resolved track title is in the fingerprint")
+	}
 	// two legacy flows with the same encoder but another eligibility rule must differ
 	for name, r := range map[string]Rule{
 		"other source codec": {FromCodec: "mpeg2video", MinBitrateKbps: 4000, CRF: 26, Preset: "medium"},
