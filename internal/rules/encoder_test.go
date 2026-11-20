@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 )
 
 // gpuCaps is a worker's capability list: each named graphics encoder passed its test, and those in tenBit also
@@ -31,7 +33,7 @@ func hdrSource(withMeta bool) *HDR {
 
 func TestHDRWithMasteringGPUWhenBothTestsPassAndTheFamilyIsProven(t *testing.T) {
 	for _, enc := range []string{"hevc_qsv", "hevc_vaapi"} {
-		got, note := EncoderFor("libx265", enc, hdrSource(true), gpuCaps([]string{enc}, enc))
+		got, note := EncoderFor("libx265", enc, false, hdrSource(true), gpuCaps([]string{enc}, enc))
 		if got != enc || note != "" {
 			t.Fatalf("%s with both tests passed: got %q note %q, want the GPU", enc, got, note)
 		}
@@ -39,14 +41,14 @@ func TestHDRWithMasteringGPUWhenBothTestsPassAndTheFamilyIsProven(t *testing.T) 
 }
 
 func TestHDRPicksTheProcessorWhenThe10BitTestFailed(t *testing.T) {
-	got, note := EncoderFor("libx265", "hevc_qsv", hdrSource(true), gpuCaps([]string{"hevc_qsv"}))
+	got, note := EncoderFor("libx265", "hevc_qsv", false, hdrSource(true), gpuCaps([]string{"hevc_qsv"}))
 	if got != "" || !strings.Contains(note, "10-bit") || !strings.Contains(note, "hevc_qsv") {
 		t.Fatalf("8-bit-only encoder for HDR: got %q note %q, want the processor with a 10-bit note", got, note)
 	}
 }
 
 func TestHDRWithMasteringPicksTheProcessorForAnUnprovenFamily(t *testing.T) {
-	got, note := EncoderFor("libx265", "hevc_nvenc", hdrSource(true), gpuCaps([]string{"hevc_nvenc"}, "hevc_nvenc"))
+	got, note := EncoderFor("libx265", "hevc_nvenc", false, hdrSource(true), gpuCaps([]string{"hevc_nvenc"}, "hevc_nvenc"))
 	if got != "" || !strings.Contains(note, "mastering data") || !strings.Contains(note, "hevc_nvenc") {
 		t.Fatalf("nvenc with mastering data: got %q note %q, want the processor with the mastering note", got, note)
 	}
@@ -54,14 +56,14 @@ func TestHDRWithMasteringPicksTheProcessorForAnUnprovenFamily(t *testing.T) {
 
 // HLG and HDR10 without static metadata have nothing a family must carry, so a 10-bit GPU is used.
 func TestHDRWithoutStaticMetadataUsesAnyTenBitGPU(t *testing.T) {
-	got, note := EncoderFor("libx265", "hevc_nvenc", hdrSource(false), gpuCaps([]string{"hevc_nvenc"}, "hevc_nvenc"))
+	got, note := EncoderFor("libx265", "hevc_nvenc", false, hdrSource(false), gpuCaps([]string{"hevc_nvenc"}, "hevc_nvenc"))
 	if got != "hevc_nvenc" || note != "" {
 		t.Fatalf("HDR with no mastering data on a 10-bit nvenc: got %q note %q, want the GPU", got, note)
 	}
 }
 
 func TestHDRGPUNeedsItsOwnTestToHavePassed(t *testing.T) {
-	got, note := EncoderFor("libx265", "hevc_qsv", hdrSource(true), gpuCaps(nil))
+	got, note := EncoderFor("libx265", "hevc_qsv", false, hdrSource(true), gpuCaps(nil))
 	if got != "" || !strings.Contains(note, "didn't pass its test") {
 		t.Fatalf("no passing encoder: got %q note %q", got, note)
 	}
@@ -86,15 +88,47 @@ func TestSDRPlansPickTheSameEncoderAsBefore(t *testing.T) {
 					if slices.Contains(passed, want) {
 						exp = want
 					}
-					got, _ := EncoderFor(codec, main, nil, gpuCaps(passed, tenBit...))
+					got, _ := EncoderFor(codec, main, false, nil, gpuCaps(passed, tenBit...))
 					if got != exp {
 						t.Fatalf("SDR %s on %s (passed %v, 10-bit %v): got %q, want %q", codec, main, passed, tenBit, got, exp)
 					}
 				}
 			}
 		}
-		if got, note := EncoderFor(codec, "cpu", nil, gpuCaps([]string{"hevc_qsv"}, "hevc_qsv")); got != "" || note != "" {
+		if got, note := EncoderFor(codec, "cpu", false, nil, gpuCaps([]string{"hevc_qsv"}, "hevc_qsv")); got != "" || note != "" {
 			t.Fatalf("cpu main: got %q note %q, want the processor by choice", got, note)
 		}
+	}
+}
+
+// A 10-bit source is kept at its depth whether or not it is HDR, so a graphics encoder that passed only the
+// 8-bit test is not used: it would be refused by the output check after the whole encode was wasted.
+func TestTenBitSDRSourcePicksTheProcessorOnAn8BitOnlyEncoder(t *testing.T) {
+	for _, codec := range []string{"libx265", "libx264", "libsvtav1"} {
+		for _, fam := range []string{"nvenc", "qsv", "vaapi", "amf"} {
+			main := formatPrefix[codec] + "_" + fam
+			want := GraphicsEncoder(codec, main)
+			if want == "" {
+				continue // no graphics encoder for this format and family
+			}
+			got, note := EncoderFor(codec, main, true, nil, gpuCaps([]string{want}))
+			if got != "" || !strings.Contains(note, "this file is 10-bit") || !strings.Contains(note, want) {
+				t.Errorf("%s on %s, 10-bit SDR, 8-bit test only: got %q note %q, want the processor with the 10-bit note", codec, main, got, note)
+			}
+			if got, note := EncoderFor(codec, main, true, nil, gpuCaps([]string{want}, want)); got != want || note != "" {
+				t.Errorf("%s on %s, 10-bit SDR, both tests passed: got %q note %q, want %s", codec, main, got, note, want)
+			}
+		}
+	}
+}
+
+// What the gate above avoids: the output check refuses an 8-bit result for a 10-bit SDR source, so the job
+// would end checked-and-kept after the encode.
+func TestAnEightBitOutputOfATenBitSDRSourceIsRefused(t *testing.T) {
+	src := media.Info{Container: "matroska,webm", Streams: []media.Stream{{Type: "video", Codec: "h264", BitDepth: 10}}}
+	out := media.Info{Container: "matroska,webm", Streams: []media.Stream{{Type: "video", Codec: "hevc", BitDepth: 8}}}
+	p := DefaultExpect(src, 0).Compare(out, 0)
+	if len(p) != 1 || !strings.Contains(p[0], "10-bit") {
+		t.Fatalf("8-bit output of a 10-bit SDR source: problems %v, want the colour depth alone", p)
 	}
 }

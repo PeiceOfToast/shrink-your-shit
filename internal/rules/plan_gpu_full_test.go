@@ -128,8 +128,27 @@ func TestFFmpegArgsFullGPUH264Family(t *testing.T) {
 	}
 }
 
-// A 10-bit SDR plan must get no full-GPU args. Owned by dev-build2's row (EncoderFor asks for the 10-bit test only
-// with HDR); A2 goes through EncoderFor's choice and adds no rule of its own. Unskip when that row lands.
-func TestFFmpegArgsFullGPUTenBitSDRGetsNoFullPipeline(t *testing.T) {
-	t.Skip("owned by qitem-20261120115513-b621ab34e91ffa42 (rules.EncoderFor: 10-bit SDR needs the 10-bit test)")
+// A 10-bit SDR source's Plan has no HDR, so its full-GPU args carry no 10-bit flags: the frames' depth comes
+// from the decoder, and what keeps an 8-bit-only card off such a file is EncoderFor's 10-bit test (need10, set
+// from the source's depth), not a rule of the args. A2 added no rule here; this is the one EncoderFor owns.
+func TestFFmpegArgsFullGPUTenBitSDRIsPlannedAsSDR(t *testing.T) {
+	p := gpuPlan(22, func(v *VideoEncode) { v.Height = 1080 })
+	for _, enc := range []string{"hevc_qsv", "hevc_vaapi"} {
+		args, ok := p.FFmpegArgsFullGPU("in.mkv", "out.mkv", enc)
+		if !ok {
+			t.Fatalf("%s: not a full pipeline", enc)
+		}
+		for _, flag := range []string{"-profile:v:0", "-pix_fmt:v:0", "-color_primaries:v:0", "-color_trc:v:0", "-colorspace:v:0"} {
+			if hasFlag(args, flag) {
+				t.Errorf("%s: a 10-bit SDR plan has no HDR, but the args carry %s: %v", enc, flag, args)
+			}
+		}
+	}
+	// the gate: a 10-bit source needs the encoder's 10-bit test, so an 8-bit-only card writes no full-pipeline args at all
+	for _, enc := range []string{"hevc_qsv", "hevc_vaapi"} {
+		got, note := EncoderFor("libx265", enc, true, nil, gpuCaps([]string{enc}))
+		if got != "" || !strings.Contains(note, "10-bit") || !strings.Contains(note, enc) {
+			t.Errorf("%s without its 10-bit test: got %q note %q, want the processor with a 10-bit note", enc, got, note)
+		}
+	}
 }

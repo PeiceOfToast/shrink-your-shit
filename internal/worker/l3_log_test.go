@@ -66,7 +66,7 @@ func TestEncoderCandidatesInTheEncodeSection(t *testing.T) {
 		gotCodec, gotNeed10, gotHDR = codec, need10, hdr != nil
 		return candidates
 	}
-	w.Encoder = func(string, *rules.HDR) (string, string) {
+	w.Encoder = func(string, bool, *rules.HDR) (string, string) {
 		return "", "No graphics encoder passed its test on this computer, so the processor does the encoding"
 	}
 	if _, err := w.RunOne(context.Background()); err != nil {

@@ -63,7 +63,7 @@ func TestRetestChangesTheConversionEncoderThroughTheRealPath(t *testing.T) {
 		return d
 	}
 	conversion := func() string {
-		enc, _ := LocalEncoderFor(st, chk)("libx265", nil)
+		enc, _ := LocalEncoderFor(st, chk)("libx265", false, nil)
 		return enc
 	}
 

@@ -123,9 +123,11 @@ type Worker struct {
 	// are checked). A convert that fails while it does is put back in the queue, not failed (D4c).
 	ShareDown func(folder string, jobID int64) (ShareDown, bool)
 	// Encoder is the graphics encoder the local worker uses for a video codec (ffmpeg's name, e.g. libx264), or ""
-	// for the processor (or nil: the processor). A plan it can't do, and a graphics encode that fails, use the processor.
-	// note, when set, is the job-log line for a processor the worker fell back to (not set for a processor by choice).
-	Encoder func(codec string, hdr *rules.HDR) (enc, note string)
+	// for the processor (or nil: the processor). need10 is set when the new file is 10-bit (an HDR plan, or a
+	// 10-bit source, SDR or not), so that encoder's 10-bit test must have passed too. A plan it can't do, and a
+	// graphics encode that fails, use the processor. note, when set, is the job-log line for a processor the
+	// worker fell back to (not set for a processor by choice).
+	Encoder func(codec string, need10 bool, hdr *rules.HDR) (enc, note string)
 	// GraphicsDecodes says whether a graphics family (qsv, vaapi) decodes codec at that bit depth here: the
 	// full GPU pipeline needs it (nil: the processor decodes). Set from the doctor's probe.
 	GraphicsDecodes func(ctx context.Context, fam, codec string, tenBit bool) bool
@@ -1016,13 +1018,13 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	w.setPhase(secEncode) // the encoder choice and its notes belong to encode (log-spec section 4)
 	chosenWhy := ""
 	if w.remote == nil && w.Encoder != nil {
-		need10 := plan.Video.HDR != nil || (src.Video() != nil && src.Video().BitDepth > 8)
+		need10 := tenBitSource(plan, src)
 		if w.EncoderCandidates != nil && !plan.Video.Copy { // R5: what hardware is here, and each encoder considered
 			for _, line := range w.EncoderCandidates(plan.Video.Codec, need10, plan.Video.HDR) {
 				w.logLine(job.ID, secEncode, jobs.LevelInfo, line)
 			}
 		}
-		want, note := w.Encoder(plan.Video.Codec, plan.Video.HDR)
+		want, note := w.Encoder(plan.Video.Codec, need10, plan.Video.HDR)
 		if want != "" && !plan.Video.Copy {
 			until, paused, err := w.Queue.EncoderPaused(w.ID)
 			var ok bool
@@ -2043,7 +2045,7 @@ func shortReason(reason string) string {
 func (w *Worker) graphicsArgs(ctx context.Context, job jobs.Job, plan rules.Plan, src media.Info, srcPath, tmp, want string) (args []string, full, ok bool) {
 	fam := rules.GraphicsFamily(want)
 	if v := src.Video(); v != nil && w.GraphicsDecodes != nil && (fam == "qsv" || fam == "vaapi") {
-		if w.GraphicsDecodes(ctx, fam, v.Codec, plan.Video.HDR != nil || v.BitDepth > 8) {
+		if w.GraphicsDecodes(ctx, fam, v.Codec, tenBitSource(plan, src)) { // one rule for 10-bit, here and at the encoder
 			if args, full = plan.FFmpegArgsFullGPU(srcPath, tmp, want); full {
 				w.jobf(job.ID, ": decoding and encoding on the graphics card (full GPU pipeline)")
 				return args, true, true

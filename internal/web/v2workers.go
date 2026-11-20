@@ -1108,15 +1108,16 @@ func (v *workerView) offlineCount() int {
 
 // LocalEncoderFor is the graphics encoder the local worker uses for a plan whose video is codec ("" for the
 // processor). It is the main encoder's family in that codec's format, and only if that encoder passed its test
-// here. note is the job-log line when the format's encoder did not pass (the processor is used then); it is
-// empty for the processor by choice. The worker asks at each job's start.
-func LocalEncoderFor(store *jobs.Store, chk *doctor.Checker) func(codec string, hdr *rules.HDR) (enc, note string) {
-	return func(codec string, hdr *rules.HDR) (string, string) {
+// here; need10 also needs its 10-bit test (an HDR plan, or a 10-bit source). note is the job-log line when a
+// test says no (the processor is used then); it is empty for the processor by choice. The worker asks at each
+// job's start.
+func LocalEncoderFor(store *jobs.Store, chk *doctor.Checker) func(codec string, need10 bool, hdr *rules.HDR) (enc, note string) {
+	return func(codec string, need10 bool, hdr *rules.HDR) (string, string) {
 		cfg, _ := store.WorkerConfigOf(jobs.LocalWorker)
 		v := &workerView{store: store, eng: Engine{Doctor: chk}}
 		t, ok := v.tools()
 		caps := capabilities(t, ok)
-		return rules.EncoderFor(codec, primaryEncoder(cfg.PrimaryEncoder, caps), hdr, caps)
+		return rules.EncoderFor(codec, primaryEncoder(cfg.PrimaryEncoder, caps), need10, hdr, caps)
 	}
 }
 
@@ -1162,10 +1163,8 @@ func LocalEncoderCandidates(store *jobs.Store, chk *doctor.Checker) func(codec s
 			switch test {
 			case "passed":
 				tenBit, _ := c["tenBit"].(bool)
-				if why := candidateReject(name, tenBit, hdr); why != "" {
+				if why := candidateReject(name, need10, tenBit, hdr); why != "" {
 					out = append(out, name+": "+why+".")
-				} else if need10 && !tenBit { // SDR 10-bit: used (the gate is HDR's), but say what its depth means
-					out = append(out, name+": passed its test here, but it is 8-bit only and this file is 10-bit.")
 				} else {
 					out = append(out, name+": passed its test here.")
 				}
@@ -1189,13 +1188,15 @@ func LocalEncoderCandidates(store *jobs.Store, chk *doctor.Checker) func(codec s
 }
 
 // candidateReject says why graphics encoder name, whose test passed, was not used for this file, in words; ""
-// when the worker's gate (rules.EncoderFor) lets it encode the file. R4's gate: an HDR file needs the encoder's
-// 10-bit test, and one carrying HDR10's mastering data needs a family proven to keep it (rules.HDRCarrier). An
-// SDR 10-bit file is not refused here, as the gate does not refuse it.
-func candidateReject(name string, tenBit bool, hdr *rules.HDR) string {
+// when the worker's gate (rules.EncoderFor) lets it encode the file. The gate needs the encoder's 10-bit test
+// whenever the new file is 10-bit (an HDR plan, or a 10-bit SDR source: the check keeps the source's depth),
+// and one carrying HDR10's mastering data needs a family proven to keep it (rules.HDRCarrier).
+func candidateReject(name string, need10, tenBit bool, hdr *rules.HDR) string {
 	switch {
-	case hdr != nil && !tenBit:
+	case need10 && !tenBit && hdr != nil:
 		return "passed its test, but it is 8-bit only and HDR needs a 10-bit encoder, so it was not used for it"
+	case need10 && !tenBit:
+		return "passed its test, but it is 8-bit only and this file is 10-bit, so it was not used for it"
 	case hdr != nil && (hdr.MasterDisplay != "" || hdr.CLL != "") && !rules.HDRCarrier(name):
 		return "passed its tests, but it is not proven to keep HDR10's mastering data, so it was not used for it"
 	}

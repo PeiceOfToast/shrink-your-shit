@@ -15,6 +15,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
@@ -126,6 +127,26 @@ func TestRemoteWorkerUsesItsMainEncoderForTheFormat(t *testing.T) {
 	}
 	if len(notes) != 0 || !slices.Equal(encs, []string{"h264_qsv"}) {
 		t.Errorf("notes %q, encoders %q: want no note and h264_qsv reported", notes, encs)
+	}
+}
+
+// A server's 10-bit SDR source needs this worker's 10-bit test too, not only an HDR one: an 8-bit-only encoder
+// is not used, so the processor with the job-log note (its 8-bit file would be refused after the whole encode).
+func TestRemoteWorkerTenBitSDRSourceFallsBackToTheProcessor(t *testing.T) {
+	plan := rules.Plan{Video: rules.VideoEncode{Codec: "libx264", CRF: 20, Preset: "medium"}}
+	source := &media.Info{Streams: []media.Stream{{Type: "video", Codec: "h264", BitDepth: 10}}} // SDR: no HDR plan
+	caps := []map[string]any{encoderCap("h264_qsv", "passed")}
+	args, enc, note := encoderArgs(plan, ptr("hevc_qsv"), caps, source, "/in.mkv", "/out.mkv")
+	if enc != "" || !slices.Contains(args, "libx264") || slices.Contains(args, "h264_qsv") {
+		t.Errorf("args %v, encoder %q: want the processor", args, enc)
+	}
+	if want := "this file is 10-bit: h264_qsv didn't pass its 10-bit test here; using the processor"; note != want {
+		t.Errorf("note %q, want %q", note, want)
+	}
+	// The same source with a passed 10-bit test uses the graphics encoder.
+	caps[0]["tenBit"] = true
+	if _, enc, note := encoderArgs(plan, ptr("hevc_qsv"), caps, source, "/in.mkv", "/out.mkv"); enc != "h264_qsv" || note != "" {
+		t.Errorf("both tests passed: encoder %q note %q, want h264_qsv", enc, note)
 	}
 }
 

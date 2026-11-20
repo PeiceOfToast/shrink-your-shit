@@ -446,7 +446,7 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 	report := func(body map[string]any) error {
 		return c.call(cctx, "leases/"+l.ID+"/progress", body, nil)
 	}
-	args, enc, note := encoderArgs(snap.Plan, l.Primary, c.Caps, src, out)
+	args, enc, note := encoderArgs(snap.Plan, l.Primary, c.Caps, snap.Source, src, out)
 	if note != "" {
 		c.note(ctx, l, note)
 	}
@@ -504,12 +504,20 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 // this worker's own test passed it (rules.EncoderFor, as the local worker picks), else the processor. enc is the
 // graphics encoder used ("" for the processor); note is for the job log when the processor is used because of
 // one ("" for the processor by choice, and for a server that sends no main encoder).
-func encoderArgs(plan rules.Plan, main *string, caps []map[string]any, src, out string) (args []string, enc, note string) {
+func encoderArgs(plan rules.Plan, main *string, caps []map[string]any, source *media.Info, src, out string) (args []string, enc, note string) {
 	if main == nil || plan.Video.Copy {
 		return plan.FFmpegArgs(src, out), "", ""
 	}
+	// The snapshot's source is the server's probe of the original: a 10-bit SDR file needs a 10-bit encoder
+	// too, not only an HDR one. Nil (an older server, or a plan sent without it): HDR decides alone.
+	need10 := plan.Video.HDR != nil
+	if source != nil {
+		if v := source.Video(); v != nil && v.BitDepth > 8 {
+			need10 = true
+		}
+	}
 	var want string
-	want, note = rules.EncoderFor(plan.Video.Codec, *main, plan.Video.HDR, caps)
+	want, note = rules.EncoderFor(plan.Video.Codec, *main, need10, plan.Video.HDR, caps)
 	if want == "" {
 		return plan.FFmpegArgs(src, out), "", note
 	}

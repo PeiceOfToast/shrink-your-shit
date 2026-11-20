@@ -28,7 +28,7 @@ func TestFullGPUPipelineWhenTheFamilyDecodes(t *testing.T) {
 	w := s.worker(Replace)
 	var asked string
 	w.GraphicsDecodes = decodeHook(true, &asked)
-	w.Encoder = func(string, *rules.HDR) (string, string) { return "hevc_qsv", "" }
+	w.Encoder = func(string, bool, *rules.HDR) (string, string) { return "hevc_qsv", "" }
 	if _, err := w.RunOne(context.Background()); err != nil {
 		t.Fatalf("RunOne: %v", err)
 	}
@@ -47,6 +47,34 @@ func TestFullGPUPipelineWhenTheFamilyDecodes(t *testing.T) {
 	}
 }
 
+// A 10-bit SDR source asks the card for a 10-bit decode on the full rung too: the same need10 rule as the
+// encoder's choice, so the pipeline that runs is one the output check will accept (a 10-bit source is kept at
+// its depth).
+func TestFullGPUAsksForATenBitDecodeOnATenBitSource(t *testing.T) {
+	s := newScenario(t)
+	s.srcSpec = spec{duration: 100, chapters: 2, streams: []map[string]any{
+		vid("h264", 640, 360, "yuv420p10le"), aud("aac", "eng", 2)}}
+	s.outSpec = spec{duration: 100, chapters: 2, streams: []map[string]any{
+		vid("hevc", 640, 360, "yuv420p10le"), aud("aac", "eng", 2)}}
+	w := s.worker(Replace)
+	var asked string
+	w.GraphicsDecodes = decodeHook(true, &asked)
+	w.Encoder = func(string, bool, *rules.HDR) (string, string) { return "hevc_qsv", "" }
+	if _, err := w.RunOne(context.Background()); err != nil {
+		t.Fatalf("RunOne: %v", err)
+	}
+	if j := s.job(); j.Status != jobs.Done {
+		t.Fatalf("status %s, error %q", j.Status, j.Error)
+	}
+	if asked != "qsv h264 10-bit" {
+		t.Errorf("decode probe asked %q, want qsv h264 10-bit", asked)
+	}
+	enc := encodeCalls(s)
+	if len(enc) != 1 || !strings.Contains(enc[0], "-hwaccel qsv") {
+		t.Fatalf("encodes, want one full GPU encode:\n%s", strings.Join(enc, "\n"))
+	}
+}
+
 // Forced unsupported codec: the family does not decode H.264 here, so the processor decodes and the graphics
 // encoder encodes (no full pipeline), and the log says why.
 func TestUnsupportedDecodeKeepsTheProcessorDecoding(t *testing.T) {
@@ -54,7 +82,7 @@ func TestUnsupportedDecodeKeepsTheProcessorDecoding(t *testing.T) {
 	w := s.worker(Replace)
 	var asked string
 	w.GraphicsDecodes = decodeHook(false, &asked)
-	w.Encoder = func(string, *rules.HDR) (string, string) { return "hevc_qsv", "" }
+	w.Encoder = func(string, bool, *rules.HDR) (string, string) { return "hevc_qsv", "" }
 	if _, err := w.RunOne(context.Background()); err != nil {
 		t.Fatalf("RunOne: %v", err)
 	}
@@ -81,7 +109,7 @@ func TestFullGPUDecodeErrorStepsDown(t *testing.T) {
 	w := s.worker(Replace)
 	var asked string
 	w.GraphicsDecodes = decodeHook(true, &asked)
-	w.Encoder = func(string, *rules.HDR) (string, string) { return "hevc_qsv", "" }
+	w.Encoder = func(string, bool, *rules.HDR) (string, string) { return "hevc_qsv", "" }
 	if _, err := w.RunOne(context.Background()); err != nil {
 		t.Fatalf("RunOne: %v", err)
 	}
@@ -106,7 +134,7 @@ func TestFullGPUFailureStepsDownWithoutCountingPause(t *testing.T) {
 	w := s.worker(Replace)
 	var asked string
 	w.GraphicsDecodes = decodeHook(true, &asked)
-	w.Encoder = func(string, *rules.HDR) (string, string) { return "hevc_qsv", "" }
+	w.Encoder = func(string, bool, *rules.HDR) (string, string) { return "hevc_qsv", "" }
 	if _, err := w.RunOne(context.Background()); err != nil {
 		t.Fatalf("RunOne: %v", err)
 	}
