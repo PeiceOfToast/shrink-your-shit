@@ -34,16 +34,16 @@ function closest(name: string, names: string[]): string | undefined {
 // Until the list has loaded (or when it failed) vars is null: names are not checked, only an unclosed {{ is.
 function analyse(value: string, vars: TemplateVar[] | null) {
   const list = vars ?? [], byName = new Map(list.map((v) => [v.name, v] as const)), names = list.map((v) => v.name);
-  const errors: string[] = [], empty = new Set<string>();
+  const errors: string[] = [], unknown: string[] = [], empty = new Set<string>();
   const example = value.replace(TOKEN, (all, raw: string) => {
     const name = raw.trim(), v = byName.get(name);
-    if (!v) { if (!vars) return all; const sug = closest(name, names); errors.push(`{{${name}}} isn't a variable.` + (sug ? ` Did you mean {{${sug}}}?` : "")); return all; }
+    if (!v) { if (!vars) return all; unknown.push(name); const sug = closest(name, names); errors.push(`{{${name}}} isn't a variable.` + (sug ? ` Did you mean {{${sug}}}?` : "")); return all; }
     if (v.value == null || v.value === "") { empty.add(name); return ""; }
     return v.value;
   });
   const open = value.lastIndexOf("{{");
   if (open >= 0 && value.indexOf("}}", open) < 0) errors.push("A {{ is missing its }}.");
-  return { example, errors, empty: [...empty] };
+  return { example, errors, empty: [...empty], unknown };
 }
 
 // The problems of every {{name}} field in a workflow, for the Publish gate. Only once the list has loaded (no names
@@ -54,13 +54,14 @@ export const takesVars = (defs: { configSchema: { properties?: Record<string, un
 const noVars: VarList = { sample: { path: "", builtIn: true }, variables: [] };
 export const varListFor = (wf: string, on: boolean) => (on ? getVariables(wf) : Promise.resolve(noVars));
 export function varProblems(nodes: { id: string; type: string; config?: Record<string, unknown> }[], defs: { type: string; configSchema: { properties?: Record<string, unknown> } }[], vars: TemplateVar[]) {
-  const out: { nodeId: string; field: string; title: string; error: string }[] = [];
+  const out: { nodeId: string; field: string; title: string; code: "unknown_variable" | "unclosed_brace"; error: string }[] = [];
   for (const n of nodes) {
     const props = (defs.find((d) => d.type === n.type)?.configSchema.properties ?? {}) as Record<string, { "x-variables"?: unknown; title?: unknown }>;
     for (const [k, s] of Object.entries(props)) {
       if (s["x-variables"] !== true) continue;
-      const first = analyse(String(n.config?.[k] ?? ""), vars).errors[0];
-      if (first) out.push({ nodeId: n.id, field: k, title: (s.title as string) ?? k, error: first });
+      const a = analyse(String(n.config?.[k] ?? ""), vars), first = a.errors[0];
+      // errors[0] is an unknown-name error whenever there is one (analyse pushes those before the brace check)
+      if (first) out.push({ nodeId: n.id, field: k, title: (s.title as string) ?? k, code: a.unknown.length ? "unknown_variable" : "unclosed_brace", error: first });
     }
   }
   return out;

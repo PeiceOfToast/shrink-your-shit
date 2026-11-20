@@ -322,13 +322,13 @@ function usedBy(nodes: Node[], defs: StepDefinition[]) {
 // The workflow's own variables: a table (name, value, where it comes from, the steps that use it), an add form, and a
 // box for fields that use a name that isn't a variable. Changes go through edit(), so undo and Save draft cover them.
 const NAME = /^[a-z][a-z0-9_]{0,39}$/;
-function VariablesCard({ doc, defs, builtins, problems, edit, open }: { doc: WorkflowDoc; defs: StepDefinition[]; builtins: TemplateVar[]; problems: { nodeId: string; title: string; error: string }[]; edit: (d: WorkflowDoc) => void; open: (nodeId: string) => void }) {
+function VariablesCard({ doc, defs, builtins, problems, edit, open }: { doc: WorkflowDoc; defs: StepDefinition[]; builtins: TemplateVar[]; problems: { nodeId: string; title: string; code: string; error: string }[]; edit: (d: WorkflowDoc, run?: string) => void; open: (nodeId: string) => void }) {
   const [name, setName] = useState(""), [val, setVal] = useState(""), [what, setWhat] = useState(""), [err, setErr] = useState("");
   const [shown, setShown] = useState(false); // closed by default; opens by itself when a field uses an unknown name
   const vars = doc.variables ?? [], used = usedBy(doc.nodes, defs), titleOf = (n: Node) => defs.find((d) => d.type === n.type)?.name ?? n.type;
-  const unknown = problems.filter((p) => p.error.includes("isn't a variable")), bad = unknown.length > 0;
+  const unknown = problems.filter((p) => p.code === "unknown_variable"), bad = unknown.length > 0;
   useEffect(() => { if (bad) setShown(true); }, [bad]);
-  const setVars = (list: Variable[]) => edit({ ...doc, variables: list });
+  const setVars = (list: Variable[], run?: string) => edit({ ...doc, variables: list }, run);
   const add = (e: FormEvent) => {
     e.preventDefault();
     const n = name.trim(), b = builtins.find((v) => v.name === n);
@@ -368,7 +368,7 @@ function VariablesCard({ doc, defs, builtins, problems, edit, open }: { doc: Wor
               return (
                 <tr key={v.name}>
                   <th scope="row"><code>{"{{" + v.name + "}}"}</code>{v.description && <span className="muted sm" style={{ display: "block" }}>{v.description}</span>}</th>
-                  <td data-label="Value"><input className="input" aria-label={"Value of {{" + v.name + "}}"} value={String(v.value ?? "")} onChange={(e) => setVars(vars.map((x) => (x.name === v.name ? { ...x, value: e.target.value } : x)))} /></td>
+                  <td data-label="Value"><input className="input" aria-label={"Value of {{" + v.name + "}}"} value={String(v.value ?? "")} onChange={(e) => setVars(vars.map((x) => (x.name === v.name ? { ...x, value: e.target.value } : x)), "value:" + v.name)} /></td>
                   <td><span className="pill vars-pill-own">This workflow</span></td>
                   <td data-label="Used by">{by.length ? by.map((n, i) => <span key={n.id}>{i > 0 && ", "}<button className="linkbtn" type="button" onClick={() => openField(n, v.name)}>{titleOf(n)}</button></span>) : <span className="muted">Not used yet</span>}</td>
                   <td><button className="btn sm ghost" type="button" aria-label={"Delete {{" + v.name + "}}"} onClick={() => remove(v.name)}>Delete</button></td>
@@ -422,7 +422,14 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
-  const edit = (d: WorkflowDoc) => (setHist({ docs: [...hist.docs.slice(0, hist.at + 1), d], at: hist.at + 1 }), setChecked(false), setPanel(null), setSaid(""));
+  // A run of typing in one variable's value (the same run key) writes into one history entry, so Undo takes back the whole run.
+  const typing = useRef<{ run: string; at: number } | null>(null);
+  const edit = (d: WorkflowDoc, run?: string) => {
+    const t = typing.current;
+    if (run && t && t.run === run && t.at === hist.at) setHist({ docs: hist.docs.map((x, i) => (i === hist.at ? d : x)), at: hist.at });
+    else { typing.current = run ? { run, at: hist.at + 1 } : null; setHist({ docs: [...hist.docs.slice(0, hist.at + 1), d], at: hist.at + 1 }); }
+    setChecked(false); setPanel(null); setSaid("");
+  };
   const update = (n: Node) => edit({ ...doc, nodes: doc.nodes.map((x) => (x.id === n.id ? n : x)) });
   const save = async () => {
     const r = await act(saveDraft(id, doc, layout, etag), setSaid);
