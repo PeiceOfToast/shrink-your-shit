@@ -166,4 +166,15 @@ func TestTagQuestionAndTagHelpers(t *testing.T) {
 	if got := ApplyTags(nil, nil, []string{"x"}); got == nil || len(got) != 0 {
 		t.Errorf("ApplyTags of nothing: %#v", got)
 	}
+	// review-542: the cap is on the adds only; a record past it keeps every tag it was not asked to drop
+	var have []string
+	for i := 0; i < 23; i++ {
+		have = append(have, fmt.Sprintf("h%d", i))
+	}
+	if got := ApplyTags(have, nil, []string{"h3"}); len(got) != 22 || HasTag(got, "h3") || !HasTag(got, "h22") {
+		t.Errorf("remove-only on 23 tags: %d left, %v", len(got), got)
+	}
+	if got, left := ApplyTagsCounted(have, []string{"new1", "new2"}, nil); len(got) != 23 || left != 2 {
+		t.Errorf("adds past the cap: %d tags, %d left off", len(got), left)
+	}
 }

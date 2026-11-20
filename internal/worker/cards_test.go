@@ -360,4 +360,21 @@ func TestTagCardsReadAndWriteTheRecord(t *testing.T) {
 	if j := s2.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "Not a remux") {
 		t.Errorf("no tags in the store: %s %q", j.Status, j.Error)
 	}
+	// review-542: a Tag card on a path without a tag question, on a store without tags: the card says so and the
+	// file is converted all the same
+	s4 := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
+	tm4 := cardsTemplate()
+	(*tm4.Branches)[0].Before = append([]rules.Card{{NodeID: "tag", Type: workflow.TypeTag, Name: "Tag the file", Config: map[string]any{"add": "converting"}}}, (*tm4.Branches)[0].Before...)
+	w4 := s4.worker(Beside)
+	w4.Template = func(jobs.Job) (rules.Template, error) { return tm4, nil }
+	if _, err := w4.RunOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if j := s4.job(); j.Status != jobs.Done {
+		t.Errorf("a Tag card without a store must not fail the job: %s %q", j.Status, j.Error)
+	}
+	if !noteOnTimeline(s4, "Tags not kept") {
+		steps, _ := s4.store.Steps(s4.id)
+		t.Errorf("timeline: %+v", steps)
+	}
 }

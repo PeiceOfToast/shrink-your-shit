@@ -17,6 +17,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -108,22 +109,29 @@ func run(c rules.Card, st *State, env Env) (Note, error) {
 	}
 	switch c.Type {
 	case workflow.TypeTag:
-		if env.Tag == nil {
-			return n, errors.New("the file's record can't be tagged from here")
-		}
 		addText, empty := vars.Resolve(str("add", ""), st.Vars)
 		removeText, more := vars.Resolve(str("remove", ""), st.Vars)
 		add, remove := rules.CleanTags(addText), rules.CleanTags(removeText)
+		n.Empty = append(empty, more...)
 		if len(add) == 0 && len(remove) == 0 {
 			return n, errors.New("nothing to add or remove")
+		}
+		if env.Tag == nil { // review-542: a store without tags yet: say so and go on, the run is not the card's to stop
+			n.Words = "Tags not kept: this install's records have no tags yet, so nothing changed"
+			if env.Log != nil {
+				env.Log(nameOf(c) + ": " + n.Words)
+			}
+			return n, nil
 		}
 		tags, err := env.Tag(add, remove)
 		if err != nil {
 			return n, err
 		}
 		st.Vars["tags"] = strings.Join(tags, ", ")
-		n.Empty = append(empty, more...)
 		n.Words = "Tags: " + quoteOr(strings.Join(tags, ", "), "none")
+		if _, leftOff := rules.ApplyTagsCounted(tags, add, nil); leftOff > 0 { // what the store could not take
+			n.Words += " (" + strconv.Itoa(leftOff) + " left off: a record carries at most " + strconv.Itoa(rules.MaxTags) + ")"
+		}
 		return n, nil
 	case workflow.TypeLookupDownloader:
 		if env.Lookup == nil {

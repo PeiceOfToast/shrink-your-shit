@@ -284,65 +284,6 @@ func (q Question) Empty() bool {
 	return false
 }
 
-// Tag limits (FB2c): a tag is a short word or phrase; a record carries a handful.
-const (
-	MaxTagLen = 40
-	MaxTags   = 20
-)
-
-// CleanTags reads tags as typed (comma-separated): trimmed, inner spaces kept, cut to MaxTagLen, the same
-// tag in another case taken once, at most MaxTags. Order is as typed.
-func CleanTags(s string) []string {
-	var out []string
-	for _, t := range strings.Split(s, ",") {
-		t = strings.Join(strings.Fields(t), " ")
-		if t == "" {
-			continue
-		}
-		if r := []rune(t); len(r) > MaxTagLen {
-			t = string(r[:MaxTagLen])
-		}
-		if HasTag(out, t) {
-			continue
-		}
-		out = append(out, t)
-		if len(out) == MaxTags {
-			break
-		}
-	}
-	return out
-}
-
-// HasTag says whether tags carries t, whatever the case.
-func HasTag(tags []string, t string) bool {
-	for _, x := range tags {
-		if strings.EqualFold(x, t) {
-			return true
-		}
-	}
-	return false
-}
-
-// ApplyTags is what "Tag the file" does to a record's tags: removes first, then adds, each cleaned, the
-// result capped at MaxTags (a tag past the cap is left off, in order).
-func ApplyTags(have []string, add, remove []string) []string {
-	var out []string
-	for _, t := range CleanTags(strings.Join(have, ",")) {
-		if !HasTag(remove, t) {
-			out = append(out, t)
-		}
-	}
-	for _, t := range add {
-		if !HasTag(out, t) && len(out) < MaxTags {
-			out = append(out, t)
-		}
-	}
-	if out == nil {
-		out = []string{}
-	}
-	return out
-}
-
 // Card is a step carried to the run as it was saved (FB1b): a before- or after-action the run engine
 // executes, with its config and its own name for the job log.
 type Card struct {

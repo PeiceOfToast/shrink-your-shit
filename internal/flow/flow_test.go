@@ -355,8 +355,10 @@ func TestTagCard(t *testing.T) {
 	if err != nil || st.Vars["tags"] != "converted, remux" || notes[0].Words != "Tags: “converted, remux”" {
 		t.Errorf("%v %+v %q", err, notes, st.Vars["tags"])
 	}
-	if _, err := Before([]rules.Card{card}, st, Env{}); err == nil || !strings.Contains(err.Error(), "can't be tagged from here") {
-		t.Errorf("no store: %v", err)
+	var logged []string
+	notes, err = Before([]rules.Card{card}, st, Env{Log: func(l string) { logged = append(logged, l) }})
+	if err != nil || !strings.Contains(notes[0].Words, "Tags not kept") || len(logged) != 1 { // review-542: no store yet: say so, go on
+		t.Errorf("no store: %v %+v %v", err, notes, logged)
 	}
 	empty := rules.Card{NodeID: "t", Type: workflow.TypeTag, Name: "Tag", Config: map[string]any{"add": " , "}}
 	if _, err := Before([]rules.Card{empty}, st, env); err == nil || !strings.Contains(err.Error(), "nothing to add or remove") {
