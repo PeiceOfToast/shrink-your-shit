@@ -311,14 +311,15 @@ func (p Plan) FFmpegArgsFullGPU(in, out, enc string) ([]string, bool) {
 	return p.ffmpegArgs(in, out, enc, true), true
 }
 
-// tenBitTargets are the codecs whose 10-bit output this program makes when the source is 10-bit: HEVC (main10) and
-// AV1 (its profile 0 covers p010). H.264 and VP9 have no 10-bit path here, so those targets stay 8-bit whatever the
-// source.
+// tenBitTargets are the targets a graphics encoder keeps 10-bit when the source is 10-bit: HEVC (main10) and AV1
+// (its profile 0 covers p010). These cards have no 10-bit H.264 or VP9, so those targets are 8-bit on a card. The
+// processor's libx264 and libvpx-vp9 keep the source's depth whatever the target, so it is not these that decide
+// the "converting to" line: convertingTo names the depth of the encoder that runs.
 var tenBitTargets = map[string]bool{"libx265": true, "libsvtav1": true}
 
-// EncodeTenBit says whether the new video is 10-bit: HDR (S3), or a 10-bit source kept at its depth by a target
-// whose encoder has one (tenBitTargets). It is what the arguments' 10-bit flags and the "converting to" line read,
-// so a 10-bit source made into H.264 is named 8-bit, as it comes out.
+// EncodeTenBit says whether a graphics encoder makes a 10-bit video: HDR (S3), or a 10-bit source kept at its depth
+// by a target whose card encoder has one (tenBitTargets). It is a card's arguments' 10-bit flags and its "converting
+// to" line that read it; on the processor libx264 and libvpx-vp9 keep 10 bits too, which convertingTo names.
 func (p Plan) EncodeTenBit() bool {
 	return p.Video.HDR != nil || (p.Video.TenBit && tenBitTargets[p.Video.Codec])
 }

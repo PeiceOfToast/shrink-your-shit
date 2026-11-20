@@ -43,7 +43,8 @@ func TestLiveProjectsTheNewFilesSize(t *testing.T) {
 }
 
 // Review 32a307d (P3): the processing card's "converting to" names the format the plan makes, not
-// always HEVC; the depth follows HDR or the source, as each encoder keeps the source's depth.
+// always HEVC; the depth is the one the encoder that runs makes (review2 507): the processor keeps the
+// source's depth on every target, a card only where it has a 10-bit one.
 func TestConvertingToNamesTheFormat(t *testing.T) {
 	src := func(depth int) media.Info {
 		return media.Info{Container: "matroska,webm", Streams: []media.Stream{{Type: "video", Codec: "h264", BitDepth: depth}}}
@@ -51,18 +52,21 @@ func TestConvertingToNamesTheFormat(t *testing.T) {
 	for _, c := range []struct {
 		video rules.VideoEncode
 		depth int
+		gpu   string // the graphics encoder that runs; "" is the processor
 		want  string
 	}{
-		{rules.VideoEncode{Codec: "libx265"}, 8, "HEVC · 8-bit · MKV"},
-		{rules.VideoEncode{Codec: "libx264", Format: "h264"}, 8, "H.264 · 8-bit · MKV"},
-		{rules.VideoEncode{Codec: "libsvtav1", Format: "av1", TenBit: true}, 10, "AV1 · 10-bit · MKV"},
-		{rules.VideoEncode{Codec: "libx264", Format: "h264", TenBit: true}, 10, "H.264 · 8-bit · MKV"}, // H.264 has no 10-bit here
-		{rules.VideoEncode{Codec: "libvpx-vp9", Format: "vp9"}, 8, "VP9 · 8-bit · MKV"},
-		{rules.VideoEncode{Codec: "libx265", Format: "hevc", HDR: &rules.HDR{}}, 8, "HEVC · 10-bit · MKV"},
-		{rules.VideoEncode{Copy: true}, 8, "repackaged as MKV"},
+		{rules.VideoEncode{Codec: "libx265"}, 8, "", "HEVC · 8-bit · MKV"},
+		{rules.VideoEncode{Codec: "libx264", Format: "h264"}, 8, "", "H.264 · 8-bit · MKV"},
+		{rules.VideoEncode{Codec: "libsvtav1", Format: "av1", TenBit: true}, 10, "", "AV1 · 10-bit · MKV"},
+		{rules.VideoEncode{Codec: "libx264", Format: "h264", TenBit: true}, 10, "", "H.264 · 10-bit · MKV"}, // the processor keeps 10 bits
+		{rules.VideoEncode{Codec: "libx265", Format: "hevc", TenBit: true}, 10, "hevc_nvenc", "HEVC · 10-bit · MKV"},
+		{rules.VideoEncode{Codec: "libx264", Format: "h264", TenBit: true}, 10, "h264_nvenc", "H.264 · 8-bit · MKV"}, // no 10-bit H.264 on the card
+		{rules.VideoEncode{Codec: "libvpx-vp9", Format: "vp9"}, 8, "", "VP9 · 8-bit · MKV"},
+		{rules.VideoEncode{Codec: "libx265", Format: "hevc", HDR: &rules.HDR{}}, 8, "", "HEVC · 10-bit · MKV"},
+		{rules.VideoEncode{Copy: true}, 8, "", "repackaged as MKV"},
 	} {
-		if got := convertingTo(rules.Plan{Video: c.video}, src(c.depth)); got != c.want {
-			t.Errorf("%+v: %q, want %q", c.video, got, c.want)
+		if got := convertingTo(rules.Plan{Video: c.video}, src(c.depth), c.gpu); got != c.want {
+			t.Errorf("%+v on %q: %q, want %q", c.video, c.gpu, got, c.want)
 		}
 	}
 }
@@ -105,7 +109,7 @@ func TestConvertingToNamesTheFileType(t *testing.T) {
 		{"", mp4, "VP9 · 8-bit · MP4"},
 		{"", mkv, "VP9 · 8-bit · MKV"},
 	} {
-		if got := convertingTo(rules.Plan{Container: c.container, Video: vp9}, c.src); got != c.want {
+		if got := convertingTo(rules.Plan{Container: c.container, Video: vp9}, c.src, ""); got != c.want {
 			t.Errorf("%q from %s%s: %q, want %q", c.container, c.src.Container, c.src.Ext, got, c.want)
 		}
 	}
