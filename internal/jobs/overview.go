@@ -254,6 +254,25 @@ FROM jobs WHERE `+convertedNow("jobs")+` AND started<>'' AND size_before>0`).Sca
 	return
 }
 
+// OutputRatio is how big a new file comes out against its original, on average, over the last n done
+// conversions of library id: the bytes of the new files over the bytes of their originals, so a big file
+// weighs more than a small one. id 0 is every library. ok is false when nothing has been converted: there
+// is no ratio to project from.
+func (s *Store) OutputRatio(libraryID int64, n int) (ratio float64, ok bool, err error) {
+	where, args := "", []any{}
+	if libraryID != 0 {
+		where, args = " AND library_id=?", []any{libraryID}
+	}
+	var before, after int64
+	err = s.reader().QueryRow(`SELECT COALESCE(SUM(size_before),0), COALESCE(SUM(size_after),0) FROM (
+  SELECT size_before, size_after FROM jobs WHERE `+convertedNow("jobs")+` AND size_before>0 AND size_after>0`+where+` ORDER BY id DESC LIMIT ?)`,
+		append(args, n)...).Scan(&before, &after)
+	if err != nil || before == 0 {
+		return 0, false, err
+	}
+	return float64(after) / float64(before), true, nil
+}
+
 // DoneCount is how many files were converted: a file converted twice counts once (also by jobs made before
 // libraries were records).
 func (s *Store) DoneCount() (int, error) {

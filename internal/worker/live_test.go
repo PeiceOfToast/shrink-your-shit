@@ -7,6 +7,36 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
+// The Dashboard's saving estimate: a running encode's projected output size is the bytes written so far
+// and how far in the encode is, averaged over its last samples so it doesn't jump; nothing before 3%,
+// and nothing when ffmpeg doesn't say the size (a remote worker's report has none).
+func TestLiveProjectsTheNewFilesSize(t *testing.T) {
+	const id = int64(12345)
+	SetLiveForTest(id, LiveJob{})
+	defer DropLiveForTest(id)
+	projected := func() int64 { j, _ := Live(id); return j.ProjectedSize }
+	updateLive(id, media.Progress{Percent: 1, TotalSize: 1 << 20})
+	if p := projected(); p != 0 {
+		t.Errorf("1%% in: projected %d, want none", p)
+	}
+	updateLive(id, media.Progress{Percent: 10, TotalSize: 10 << 20}) // 10 MiB at 10%: 100 MiB
+	if p := projected(); p != 100<<20 {
+		t.Errorf("10%%: projected %d, want %d", p, int64(100<<20))
+	}
+	updateLive(id, media.Progress{Percent: 20, TotalSize: 30 << 20}) // 30 MiB at 20%: 150 MiB; the average of the two is 125
+	if p := projected(); p != 125<<20 {
+		t.Errorf("20%%: projected %d, want %d (smoothed)", p, int64(125<<20))
+	}
+	updateLive(id, media.Progress{Percent: 30, TotalSize: 0}) // total_size=N/A: the last answer stands
+	if p := projected(); p != 125<<20 {
+		t.Errorf("no size: projected %d, want the last answer", p)
+	}
+	updateLive(id, media.Progress{Percent: 0, TotalSize: 0})
+	if j, _ := Live(id); j.ProjectedSize != 125<<20 || j.Progress.Percent != 0 {
+		t.Errorf("a report with no percent leaves the estimate: %+v", j)
+	}
+}
+
 // Review 32a307d (P3): the processing card's "converting to" names the format the plan makes, not
 // always HEVC; the depth follows HDR or the source, as each encoder keeps the source's depth.
 func TestConvertingToNamesTheFormat(t *testing.T) {

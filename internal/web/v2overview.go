@@ -19,8 +19,9 @@ import (
 // v2Overview is the Dashboard's executive overview (user review 11-12 item 5; shapes in
 // slices/v2-engine/review-items-shapes.md): space (NET) and the trash (GROSS) kept apart, the workers
 // with their files' live progress, the active jobs, each library's sizes and counts, the last 30 days,
-// and averages. Live: the page fetches it again on /api/v2/events' messages. Nothing is estimated:
-// what isn't recorded is null, or a day with recorded false.
+// and averages. Live: the page fetches it again on /api/v2/events' messages. Nothing is estimated
+// except a converting file's saving, which the person asked for (expectedSavingBytes): what isn't
+// recorded is null, or a day with recorded false.
 func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView, libTotals *libraryTotals) {
 	overviewStats := &statsCache{} // this server's store's
 	if store != nil {              // so the first page view after start is not the slow one (setup tests run with no store)
@@ -49,9 +50,10 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView, libTotals
 			serverError(w, err)
 			return
 		}
-		live := func(id int64) map[string]any {
+		live := func(id int64) (map[string]any, worker.LiveJob) {
 			j := map[string]any{"jobId": strconv.FormatInt(id, 10), "percent": nil, "fps": nil, "speed": nil, "etaS": nil}
-			if l, ok := worker.Live(id); ok {
+			l, ok := worker.Live(id)
+			if ok {
 				p := l.Progress
 				j["percent"] = p.Percent
 				if p.FPS > 0 {
@@ -64,16 +66,17 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView, libTotals
 					j["etaS"] = int(p.ETASeconds + 0.5)
 				}
 			}
-			return j
+			return j, l
 		}
 		active := []map[string]any{}
 		byWorker := map[string][]map[string]any{}
 		for _, j := range working {
-			l := live(j.ID)
+			l, lj := live(j.ID)
 			l["name"] = filepath.Base(j.Path)
 			byWorker[j.Worker] = append(byWorker[j.Worker], l)
-			act := map[string]any{"jobId": l["jobId"], "name": l["name"], "percent": l["percent"], "etaS": l["etaS"], "expectedSavingBytes": nil,
-				"library": nil}
+			saving, estimated := expectedSaving(j, lj, st.ratioOf)
+			act := map[string]any{"jobId": l["jobId"], "name": l["name"], "percent": l["percent"], "etaS": l["etaS"],
+				"expectedSavingBytes": saving, "expectedSavingEstimated": estimated, "library": nil}
 			if j.LibraryID != 0 {
 				act["library"] = map[string]any{"id": strconv.FormatInt(j.LibraryID, 10), "name": j.LibraryName}
 			}
@@ -199,6 +202,58 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView, libTotals
 	})
 }
 
+// estimatedFromJobs is how many of a library's done conversions the fallback ratio averages.
+const estimatedFromJobs = 20
+
+// expectedSaving is what converting job j is expected to save: the original's size less the new file's
+// projected size, and true (it is always an estimate). The projection is the bytes written so far and
+// how far the encode is (worker.Live's ProjectedSize); until the encode has said that, the library's
+// own recent conversions say what shape its new files come out (every library's, when that library has
+// none). nil when neither can tell, so the page keeps "not known yet" rather than a made-up number.
+func expectedSaving(j jobs.Working, l worker.LiveJob, ratios map[int64]float64) (any, bool) {
+	if j.SizeBefore <= 0 {
+		return nil, false
+	}
+	out, ok := l.ProjectedSize, l.ProjectedSize > 0
+	if !ok {
+		ratio, has := ratios[j.LibraryID]
+		if !has {
+			ratio, has = ratios[0]
+		}
+		out, ok = int64(float64(j.SizeBefore)*ratio), has
+	}
+	if !ok {
+		return nil, false
+	}
+	// a new file bigger than its original is a negative saving: said plainly ("may get bigger")
+	return j.SizeBefore - out, true
+}
+
+// ratiosOf is each library's output/input byte ratio from its last estimatedFromJobs done conversions,
+// and every library's under 0: what a converting file is projected to come out at before its encode
+// can say. Computed with the other sums (an event changes it): never on each poll of a running file.
+func ratiosOf(store *jobs.Store) (map[int64]float64, error) {
+	libs, err := store.Libraries()
+	if err != nil {
+		return nil, err
+	}
+	ids := []int64{0}
+	for _, l := range libs {
+		ids = append(ids, l.ID)
+	}
+	out := map[int64]float64{}
+	for _, id := range ids {
+		r, ok, err := store.OutputRatio(id, estimatedFromJobs)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out[id] = r
+		}
+	}
+	return out, nil
+}
+
 // zoneName is this server's time zone as an IANA name ("Europe/Berlin"): TZ, else where /etc/localtime
 // links to, else Go's name, else the abbreviation (review ab99630 P3-1: not "CET").
 func zoneName(now time.Time) string {
@@ -322,6 +377,7 @@ type stats struct {
 	saving, perGB    float64
 	savingOK, timeOK bool
 	converted        int
+	ratioOf          map[int64]float64 // each library's output/input ratio; 0: every library's (see ratiosOf)
 }
 
 func (c *statsCache) get(store *jobs.Store) (*stats, error) {
@@ -371,6 +427,9 @@ func takeStats(store *jobs.Store, now time.Time) (*stats, error) {
 		return nil, err
 	}
 	if st.converted, err = store.DoneCount(); err != nil {
+		return nil, err
+	}
+	if st.ratioOf, err = ratiosOf(store); err != nil {
 		return nil, err
 	}
 	return st, nil
