@@ -411,7 +411,7 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
       <p className="sm">Result: {WORD[l.final ?? ""] ?? l.final}</p>
       {hasResult && <p className="sm"><a href="#job-result" onClick={(e) => { e.preventDefault(); document.getElementById("job-result")?.scrollIntoView({ block: "start" }); }}>Before and after: see Result</a></p>}</> });
   }
-  const secs = raw.map((r) => ({ ...r, open: errOnly || r.hits > 0 || (r.key in open ? open[r.key] : r.dflt) }));
+  const secs = raw.map((r) => ({ ...r, open: errOnly || (q ? r.hits > 0 : r.key in open ? open[r.key] : r.dflt) })); // while searching, only sections with a match are open
   const shown = secs.filter((s) => s.show), anyClosed = shown.some((s) => !s.open);
   const tot = secs.reduce((n, s) => n + s.hits, 0), ks = secs.filter((s) => s.hits > 0).length;
   const E = l.steps.reduce((n, st) => n + (st.errors?.length ?? 0), 0), W = l.steps.reduce((n, st) => n + (st.warnings?.length ?? 0), 0), K = l.steps.filter(flagged).length;
