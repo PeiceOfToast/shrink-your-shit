@@ -39,7 +39,7 @@ func (e *winError) Error() string {
 }
 
 // winMountReason is the reason the page shows for a failed Windows connect: the same JSON as mountErrReason.
-func winMountReason(err error) string {
+func winMountReason(server string, err error) string {
 	var we *winError
 	if !errors.As(err, &we) {
 		return mountErrReason(err)
@@ -47,11 +47,11 @@ func winMountReason(err error) string {
 	code, msg := "mount_failed", "Windows could not connect the share. "+we.Words
 	switch we.Code {
 	case 53:
-		code, msg = "host_not_found", "The server could not be found on the network."
+		code, msg = "host_not_found", hostNotFound(server, "The server could not be found on the network.")
 	case 67:
 		code, msg = "share_not_found", "The server has no share with that name."
 	case 1326, 86:
-		code, msg = "auth_failed", "The user name or password was refused."
+		code, msg = "auth_failed", authRefused(server)
 	case 5:
 		code, msg = "access_denied", "Windows refused access to the share."
 	case 1231, 64:
