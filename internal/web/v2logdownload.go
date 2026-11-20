@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,31 +22,70 @@ var logSectionNames = []struct{ name, heading string }{
 	{"replace", "Save the result"}, {"summary", "Summary"}, {"", "Other lines"},
 }
 
-// logSection is one section of a job's log: its name, its heading and its lines, in order.
+// logSection is one section of a job's log: its name, its heading and its lines, in order. A workflow step's
+// section has its number (design-joblog-vars section 1: {"id":"step","step":2,"title":"Step 2: Audio"}).
 type logSection struct {
 	name, heading string
+	step          int
 	lines         []jobs.LogLine
 }
 
-// logSectionLines groups a job's lines by section, in logSectionNames order. A section with no lines is left out, and
-// a line whose section is not one of those goes to "" (Other lines).
+// stepSectionPrefix is the section name a workflow step's lines are in: "step:<n>:<label>" (worker/joblog.go).
+const stepSectionPrefix = "step:"
+
+// parseStepSection reads a step section's number and label from its name.
+func parseStepSection(name string) (n int, label string, ok bool) {
+	rest, found := strings.CutPrefix(name, stepSectionPrefix)
+	if !found {
+		return 0, "", false
+	}
+	num, label, found := strings.Cut(rest, ":")
+	if !found {
+		return 0, "", false
+	}
+	n, err := strconv.Atoi(num)
+	if err != nil || n <= 0 || label == "" {
+		return 0, "", false
+	}
+	return n, label, true
+}
+
+// logSectionLines groups a job's lines by section, in logSectionNames order, with the workflow's step sections
+// between the input and the encode. A section with no lines is left out, and a line whose section is not one of
+// those goes to "" (Other lines).
 func logSectionLines(lines []jobs.LogLine) []logSection {
 	known := map[string]bool{}
 	for _, s := range logSectionNames {
 		known[s.name] = true
 	}
 	by := map[string][]jobs.LogLine{}
+	var stepNames []string
 	for _, l := range lines {
 		name := l.Section
-		if !known[name] {
+		if _, _, step := parseStepSection(name); step {
+			if _, seen := by[name]; !seen {
+				stepNames = append(stepNames, name)
+			}
+		} else if !known[name] {
 			name = ""
 		}
 		by[name] = append(by[name], l)
 	}
+	sort.Slice(stepNames, func(i, j int) bool {
+		a, _, _ := parseStepSection(stepNames[i])
+		b, _, _ := parseStepSection(stepNames[j])
+		return a < b
+	})
 	var out []logSection
 	for _, s := range logSectionNames {
 		if ls := by[s.name]; len(ls) > 0 {
 			out = append(out, logSection{name: s.name, heading: s.heading, lines: ls})
+		}
+		if s.name == "input" {
+			for _, name := range stepNames {
+				n, label, _ := parseStepSection(name)
+				out = append(out, logSection{name: "step", heading: fmt.Sprintf("Step %d: %s", n, label), step: n, lines: by[name]})
+			}
 		}
 	}
 	return out
@@ -58,7 +99,11 @@ func sectionsJSON(lines []jobs.LogLine) []map[string]any {
 		for _, l := range sec.lines {
 			ls = append(ls, map[string]any{"at": l.At, "step": l.Step, "level": levelOf(l), "stream": l.Stream, "text": l.Text})
 		}
-		out = append(out, map[string]any{"id": sec.name, "title": sec.heading, "lines": ls}) // contract v2: id and title
+		m := map[string]any{"id": sec.name, "title": sec.heading, "lines": ls} // contract v2: id and title
+		if sec.step > 0 {
+			m["step"] = sec.step // design-joblog-vars section 1: the step's number beside its title
+		}
+		out = append(out, m)
 	}
 	return out
 }
@@ -138,8 +183,10 @@ func startJSON(store *jobs.Store, id int64, j jobs.Job, lines []jobs.LogLine) ma
 }
 
 // summaryJSON is the summary object of GET /log: null while the job has no final result. The fields the store
-// cannot fill yet (before and after, the steps, tempRemoved) are null.
-func summaryJSON(j jobs.Job, lines []jobs.LogLine) map[string]any {
+// cannot fill yet (before and after, the steps, tempRemoved) are null. From L2 the summary also has passes,
+// bytesWritten and slowestStep: null when the job recorded none (one from before L2, or one run on another
+// computer), and slowestStep also when the job recorded no steps.
+func summaryJSON(store *jobs.Store, j jobs.Job, lines []jobs.LogLine) map[string]any {
 	result := verdictOf(j.Status)
 	if result == "" {
 		return nil
@@ -151,9 +198,33 @@ func summaryJSON(j jobs.Job, lines []jobs.LogLine) map[string]any {
 	if _, pct, ok := savedOf(j); ok {
 		percent = pct
 	}
+	var passes, bytesWritten, slowest any
+	if n, written, ok, err := store.JobStats(j.ID); err == nil && ok { // no counters: an older job
+		passes, bytesWritten = n, written
+		if steps, err := store.RunSteps(j.ID); err == nil {
+			if st, ok := slowestStep(steps); ok {
+				slowest = map[string]any{"name": st.Name, "tookMs": st.TookMs}
+			}
+		}
+	}
 	return map[string]any{"result": result, "originalBytes": j.SizeBefore, "finalBytes": finalBytes,
 		"savedPercent": percent, "outputPath": nilIfEmpty(j.OutputPath), "tookMs": jobTookMs(lines),
-		"before": nil, "after": nil, "steps": nil, "tempRemoved": nil}
+		"before": nil, "after": nil, "steps": nil, "tempRemoved": nil,
+		"passes": passes, "bytesWritten": bytesWritten, "slowestStep": slowest}
+}
+
+// slowestStep is the job's step that took longest (ok false: it recorded none).
+func slowestStep(steps []jobs.RunStep) (jobs.RunStep, bool) {
+	if len(steps) == 0 {
+		return jobs.RunStep{}, false
+	}
+	out := steps[0]
+	for _, st := range steps[1:] {
+		if st.TookMs > out.TookMs {
+			out = st
+		}
+	}
+	return out, true
 }
 
 // savedOf is the bytes a converted job saved and the share of the original that is, when it made the file smaller.
