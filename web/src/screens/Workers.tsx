@@ -284,13 +284,16 @@ function WorkerSwitch({ w, onDone }: { w: Worker; onDone: (m: string) => void })
   // review2 #451: the switch shows what was asked until the server says so (a reload or heartbeat changes on), or the call fails
   useEffect(() => setWant(null), [on]);
   if (asking) return <StopAsk w={w} onDone={(m) => (setAsking(false), onDone(m))} onCancel={() => setAsking(false)} />;
+  const shown = want ?? on; // review #451: decide and label from what the switch shows, not the last server state
   const flip = async () => {
-    if (on && w.currentJobIds.length) return setAsking(true);
-    setBusy(true); setWant(!on); // one call at a time: a quick double flip must not send it twice
-    try { if (await act(workerAction(w.id, on ? "stop" : "start"), onDone)) onDone(w.name + (on ? " stopped." : " started.")); else setWant(null); } finally { setBusy(false); }
+    if (shown && w.currentJobIds.length) return setAsking(true);
+    setBusy(true); setWant(!shown); // one call at a time: a quick double flip must not send it twice
+    let ok = false;
+    try { ok = !!(await act(workerAction(w.id, shown ? "stop" : "start"), onDone)); if (ok) onDone(w.name + (shown ? " stopped." : " started.")); }
+    finally { if (!ok) setWant(null); setBusy(false); }
   };
-  return <label className="sw"><input type="checkbox" role="switch" className="switch" checked={want ?? on} disabled={gone || busy} aria-label={w.name} onChange={flip} />
-    <span className="sm">{on ? "On" : finishing ? "Stopping after its current files" : "Off"}</span></label>;
+  return <label className="sw"><input type="checkbox" role="switch" className="switch" checked={shown} disabled={gone || busy} aria-label={w.name} onChange={flip} />
+    <span className="sm">{shown ? "On" : finishing && want === null ? "Stopping after its current files" : "Off"}</span></label>;
 }
 
 // user item 3: the GPU "—" explains itself; title for mouse, hidden text for touch and screen readers (design 02:12Z)
