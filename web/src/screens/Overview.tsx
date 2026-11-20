@@ -16,7 +16,7 @@ import { useData } from "../useData";
 import { allWorkers, listWorkers } from "../workersApi";
 import { getOverview, type Overview as O, type OverviewJob } from "../overviewApi";
 import { mockState, scanAll, summary } from "../mock";
-import { NoGpu, WorkersSwitch } from "./Workers";
+import { GpuPct, NoGpu, WorkersSwitch } from "./Workers";
 import type { JobProgressEvent } from "../types/jobs";
 
 const STATE: Record<string, [string, string]> = { busy: ["Converting", "run"], online: ["Ready", ""], draining: ["Finishing", "warn"], paused: ["Off", ""], offline: ["Offline", "bad"], stalled: ["Not responding", "bad"] };
@@ -193,7 +193,7 @@ export function Overview() {
                 <td className="nm"><b>{w.name}</b> <span className={"pill " + cls}>{t}</span> <Link className="btn icon ghost gear" to={"/workers/" + encodeURIComponent(w.id) + "?tab=limits"} aria-label={"Settings for " + w.name} title="Settings"><Icon id="i-gear" /></Link></td>
                 <td className="num" data-l="Speed">{js.map((j) => [j.fps != null && Math.round(j.fps) + " fps", j.speed != null && j.speed.toFixed(1) + "× realtime"].filter(Boolean).join(" · ")).filter(Boolean).join(", ") || (js.length ? "not known yet" : "")}</td>
                 <td className="num" data-l="Slots">{sl.used} of {sl.total}</td>
-                {load && <td className="num" data-l="CPU · GPU">{w.cpuPercent == null && w.gpuPercent == null ? "Not measured yet" : <>{w.cpuPercent == null ? "—" : Math.round(w.cpuPercent) + "%"} · {w.gpuPercent == null ? <NoGpu /> : Math.round(w.gpuPercent) + "%"}</>}</td>}
+                {load && <td className="num" data-l="CPU · GPU">{w.cpuPercent == null && w.gpuPercent == null ? "Not measured yet" : <>{w.cpuPercent == null ? "—" : Math.round(w.cpuPercent) + "%"} · {w.gpuPercent == null ? <NoGpu /> : <GpuPct n={w.gpuPercent} />}</>}</td>}
               </tr>; })}</tbody></table>)}
       </section>
       <section className="sec" aria-labelledby="ov-j"><h2 id="ov-j">Converting now <Link className="more" to="/jobs?tab=running">All jobs</Link></h2>

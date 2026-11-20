@@ -153,14 +153,37 @@ func (s *Store) EnsureRevision(flowID int64) (Revision, error) {
 	if ok {
 		layout = latest.Layout
 	}
-	if _, err := s.insertPublished(s.db, flowID, doc, layout, templateHash(f.Template)); err != nil {
+	rid, err := s.insertPublished(s.db, flowID, doc, layout, templateHash(f.Template))
+	if err != nil {
 		if v, ok2, err2 := s.LatestRevision(flowID); err2 == nil && ok2 && v.TemplateHash == templateHash(f.Template) {
 			return v, nil // another caller made it at the same moment
 		}
 		return Revision{}, err
 	}
+	if !ok { // the flow's first revision: the jobs queued before it (workflow_rev 0) ran with this one
+		if _, err := s.db.Exec(`UPDATE jobs SET workflow_rev=? WHERE workflow_rev=0 AND library_id IN (SELECT id FROM libraries WHERE flow_id=?)`, rid, flowID); err != nil {
+			return Revision{}, err
+		}
+	}
 	v, _, err := s.LatestRevision(flowID)
 	return v, err
+}
+
+// ensureLibraryRevision makes sure library libraryID's flow has its current revision before a job is queued
+// under it, so the job records the workflow it will run with (workflow_rev). A library that doesn't exist is left
+// to the insert to refuse; a failure is logged, and the job keeps 0 until a revision is written (EnsureRevision
+// stamps those).
+func (s *Store) ensureLibraryRevision(libraryID int64) {
+	if libraryID == 0 {
+		return
+	}
+	var flow int64
+	if err := s.db.QueryRow(`SELECT flow_id FROM libraries WHERE id=?`, libraryID).Scan(&flow); err != nil {
+		return
+	}
+	if _, err := s.EnsureRevision(flow); err != nil {
+		log.Printf("library %d: its workflow's revision could not be written (its jobs record none until it is): %v", libraryID, err)
+	}
 }
 
 // EnsureRevisions runs EnsureRevision for every flow (when the store opens: migration 20's revision 1).
