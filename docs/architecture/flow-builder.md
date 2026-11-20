@@ -284,6 +284,37 @@ Small PRs, one each, to dev. Each: tests, the clean-room grep in the PR descript
 
 Order: FB0 → FB1a → FB1b → FB1c → FB1d → FB2a → FB2b → FB2c → FB3 → FB6 → FB4 → FB5.
 
+### 7.1 What landed, and where the build differs from the plan (2026-11-20, 23:00Z)
+
+Built as a stack of pull requests to `dev`, one slice each, merged bottom-up only on a reviewer's approval
+with green CI: FB1a merged; FB1b #531; FB1c #536; FB1d #537; FB2a #538; FB2b #539; FB2c #542 with the
+jobs `tags` column as its own PR #545 off `dev` (the engine team's choice); FB3 #543; FB6 #546; FB4a #548.
+
+Where the build differs from the sections above, the build is right and the text here is the plan:
+
+- **Phases.** Set a variable, Add a note and Tag the file may sit before the conversion *or* after the
+  save (both phases); the other actions are one or the other. An end may follow the save. A question
+  never sits after the save.
+- **Tags.** A comma is a separator and never part of a tag; a tag is at most 40 characters, a record
+  carries at most 20, the same tag in another case counts once. One cleaning (`rules.CleanTags`,
+  `rules.ApplyTags`) serves the store and the cards.
+- **Run a command.** The arguments are split as the author wrote them and each piece is filled in
+  afterwards, so a value never adds or splits an argument; the wait is bounded by the timeout even when
+  the program leaves a child behind; the job log takes the first 200 lines. Off until "Workflows may
+  run commands" in Settings > Safety (decision 1); off, publish is refused with the switch named.
+- **After the save.** A sidecar or a copy never writes over the saved file or the original. The global
+  "tell the connections" stays per kind: a workflow with only a media-server card still tells the
+  downloaders the way it always has.
+- **FB4** is split: Convert again later, A share of files and Wait are FB4a; Hand to another workflow
+  (the loop check across published workflows needs the store at validation) and Compare the result (a
+  question after the check needs the compile to branch inside the conversion) wait for FB4b.
+- **The simple view** is `/workflows/{id}?view=simple`, the steps view with a filter: the conversion's
+  cards with their forms on the page, the rest folded into one row each side. The library page opens it;
+  the first-run wizard keeps making its workflow from the preset and shows no questions (decision 3).
+- **The editor shell** (FB6) covers the graph: a 48 px toolbar, a frame as tall as the window, the palette
+  and the inspector inside it, 200 px node cards. The steps view keeps its page head for now.
+- A step's required settings come first in its form (the server's object keys are alphabetical).
+
 ## 8. Overlap with queued work
 
 - **W4 (variables panel and picker), W4a/W4b (merged):** reused as they are. Cards publish into the same namespace; the picker lists published names with "set by <card>" once FB1b lands (one list from the server, `GET /workflow/variables`).
