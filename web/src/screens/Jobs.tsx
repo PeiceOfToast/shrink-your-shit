@@ -539,7 +539,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
             <tr><th>Bitrate</th>{before && <td>{before.bitrate}</td>}<td>{after?.bitrate ?? "—"}</td></tr>
             <tr><th>Size</th>{before && <td>{before.size}</td>}<td>{after?.size ?? "—"}</td></tr></tbody></table></section>}
           {/* a done job's .srt files saved beside the new file: one line, then each name; no field, no line */}
-          {state === "completed" && !!j?.subtitleFiles?.length && <section><p>Subtitles saved as files:</p>{j.subtitleFiles.map((n) => <div key={n}><code>{n}</code></div>)}</section>}
+          {state === "completed" && !!j?.subtitleFiles?.length && <section><h3>Subtitles saved as files</h3>{j.subtitleFiles.map((n) => <div key={n}><code>{n}</code></div>)}</section>}
         </div>
       </aside>
     </div>
