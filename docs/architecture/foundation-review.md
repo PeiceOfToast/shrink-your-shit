@@ -3,7 +3,8 @@
 True for: `dev` at commit `294e3d88` (2026-11-20). Read-only review: no code was changed. Citations are
 repo-relative `file:line` at that commit (lines drift; search for the named function if one moved).
 Anything not confirmed in the code is marked **UNVERIFIED**. The [app map](app-map.md) has the whole app;
-this document looks only at the path a file takes from scan to saved result.
+this document looks only at the path a file takes from scan to saved result. Parts of this review come from
+a second, independent review.
 
 Contents:
 1. [Summary](#1-summary)
@@ -12,6 +13,7 @@ Contents:
 4. [Target design](#4-target-design)
 5. [Migration plan](#5-migration-plan)
 6. [What not to rewrite](#6-what-not-to-rewrite)
+7. [What the test matrix should show](#7-what-the-test-matrix-should-show)
 
 ---
 
@@ -21,34 +23,40 @@ Contents:
 `internal/worker/verify.go`, `internal/rules/plan.go`). Is that bad luck, or is something in the
 structure producing the bugs?
 
-**The answer: the structure produces them, through five causes.** None of them needs a rewrite; each has a
+**The answer: the structure produces them, through six causes.** None of them needs a rewrite; each has a
 small, local fix.
 
-1. **The plan predicts the new file exactly, and the check compares the file with that prediction.** When
-   the prediction and what ffmpeg actually did differ by a little, the check cannot tell "a bit different
-   from the guess" from "broken", so a good file is refused. A fresh example: QSV rounds a scaled width
-   down to 852 while the prediction rounds to the nearest even number, 854, so every 640x360 file scaled
-   to 480 lines is refused, and the message says the *original* was 854 wide, which it never was.
+1. **The plan predicts the new file exactly, before it knows which encoder will run, and the check compares
+   the file with that prediction.** When the prediction and what the encoder actually did differ by a
+   little, the check cannot tell "a bit different from the guess" from "broken", so a good file is refused.
+   A fresh example: QSV rounds a scaled width down to 852 while the prediction rounds to the nearest even
+   number, 854, so a 1920x1080 file scaled to 480 lines on QSV is refused, and the message says the
+   *original* was 854 wide, which it never was.
 2. **What each graphics card family needs is spread over many places**, so one change (for example
    "10-bit SDR needs a 10-bit encoder") has to be made in five to six files, and missing one is a bug.
 3. **The same fact is stored in more than one place** (the plan is compiled three times; probes are keyed
    by path only; sizes and totals are worked out several ways), and the copies drift.
 4. **Remote workers run a copy of the local run loop** (fall-back steps, stall watch, 10-bit test), so
    every fix there is made twice or only once.
-5. **Timers stand in for signals.** A stall is "no progress line for 10 minutes", which forced a 1-hour
-   exception for MP4 finishing, and a frame count is duration times frame rate, which is wrong for
-   variable-frame-rate files.
+5. **Timers and text matching stand in for signals.** A stall is "no progress line for 10 minutes", which
+   forced a 1-hour exception for MP4 finishing. ffmpeg's own end-of-run report is already parsed, but only
+   for the playback check, because the encode runs with errors-only logging.
+6. **One verdict covers three different situations**: the new file is broken, it differs from the
+   prediction, or a check could not run. All three end as "kept" with the same code, so job 48 was told
+   to "Pick a higher quality", which would not have helped.
 
 **What I recommend:** keep the architecture (one process, SQLite, the scanner/worker split, ffmpeg as a
-subprocess, the swap journal) and make five targeted changes, smallest first: check the new file
+subprocess, the swap journal) and make six targeted changes, smallest first: check the new file
 against rules and record what was measured instead of predicting it; put each encoder family's knowledge
 in one place; keep one plan snapshot per job and key probes by file version; share one run loop between
-local and remote workers; judge liveness by output written. Section 5 sizes them; the first two remove
+local and remote workers; judge liveness by ffmpeg's own signals; give each kind of refusal its own code. Section 5 sizes them; the first two remove
 the largest share of recent bugs.
 
 **How sure:** the causes rest on code I read (cited) and on 62 fix commits since 2026-11-13 that touch the
 pipeline packages, which I sorted by hand. The sorting is a judgment (several commits fit two causes), so
-read the counts as a ranking, not a measurement.
+read the counts as a ranking, not a measurement. The figures anyone can reproduce: `dev` has 617 non-merge
+commits since 2026-11-13 (`git log --no-merges --since=2026-11-13 294e3d88 | grep -c ^commit`), and 47 of
+them change `internal/worker/worker.go` (the same command with `-- internal/worker/worker.go`).
 
 ---
 
@@ -91,6 +99,9 @@ the new file and compares it field by field with the Expect, then decodes sample
 with the original (SSIM). If everything passes, the new file replaces the original. Totals are not
 stored; they are summed from the job rows when a screen asks.
 
+The [app map](app-map.md) has two tables this review leans on: what differs per encoder path (section 5)
+and which copy of each fact is the truth (section 9).
+
 A remote worker gets plan #2 from the server, but makes its own encoder decision and fall-back, and
 skips nothing the server then repeats except the picture comparison, which it does itself.
 
@@ -101,8 +112,10 @@ skips nothing the server then repeats except the picture comparison, which it do
 Ranked by the number of fix commits each cause produced (62 fix commits from 2026-11-13 to 2026-11-20
 touching `internal/{worker,rules,remote,media,scanner}` or the job parts of `internal/jobs` and
 `internal/web`; sorted by hand, overlaps allowed). For scale: of 621 non-merge commits in that week, 184
-(30%) are fixes; most of the rest of the fixes are UI, install, shares and updater work outside this
-pipeline.
+(30%) are fixes by subject keywords; most of the rest of the fixes are UI, install, shares and updater
+work outside this pipeline. *Correction:* that 621 used a slightly different date cut; the reproducible
+figure is 617 non-merge commits since 2026-11-13 (section 1). The counts below are hand-sorted, not
+reproducible by a script.
 
 | # | Cause | Fix commits | Examples |
 |---|---|---|---|
@@ -110,9 +123,10 @@ pipeline.
 | 2 | Encoder knowledge is scattered | ~14 | fall-back ladder, HDR GPU choice, VA-API device, fall-back counting |
 | 3 | State is copied and the copies drift | ~12 | stale track statistics, converted files' records, workflow revision stamps, probe cache |
 | 4 | Local and remote run loops are copies | ~9 | lease through finish, late remote report, remote 10-bit test |
-| 5 | Timers stand in for signals | ~6 | MP4 finishing stall, sample gap, stall warning |
+| 5 | Timers and text matching stand in for signals | ~6 | MP4 finishing stall, sample gap, stall warning |
+| 6 | One verdict for three situations | ~5 | job 48's hint, bigger file "failed", kept job with a failure summary |
 
-### Cause 1: the plan predicts the output, and the check compares against the prediction
+### Cause 1: the plan predicts the output before the encoder is chosen, and the check compares against the prediction
 
 **What happens.** `Plan.Expect` (`internal/rules/plan.go:~600-730`) writes down the exact output: the
 codec, the picture size (computed by `ScaledWidth`, `plan.go:1059-1065`), the bit depth (copied from the
@@ -121,14 +135,18 @@ source, `internal/rules/expect.go:98`), the stream list and the length. `compare
 ffmpeg and the encoder will do, so every encoder detail must be modelled twice, and any gap refuses a good
 file.
 
+**The order makes it worse.** The worker computes the Expect at `worker.go:1006` and only then chooses
+the encoder (`worker.go:1113-1145`). The prediction cannot know whether QSV, VAAPI or the processor will
+run, so it cannot know how that encoder rounds a width or which depth it can keep.
+
 **Evidence: job 48 (found on a test server, 2026-11-20).**
-- `ScaledWidth` rounds to the *nearest* even width: 640x360 → 480 lines gives **854**
+- `ScaledWidth` rounds to the *nearest* even width: 1920x1080 → 480 lines gives **854**
   (`plan.go:1059-1065`).
 - QSV's full-GPU filter rounds *down*: `scale_qsv=w=trunc(H*a/2)*2` gives **852**
   (`plan.go:460-465`). That filter came from commit 0def124b ("QSV full-GPU scale takes an expression
   width (w=-2 is refused)"), which did not change the prediction.
 - `expect.go:269` refuses the file. Its message (`expect.go:262`) reads "the picture size is 854x480 in
-  the original but 852x480 in the new file", but 854x480 is the *prediction*: the original is 640x360.
+  the original but 852x480 in the new file", but 854x480 is the *prediction*: the original is 1920x1080.
   The words point the reader at the wrong cause.
 
 **Other bugs from the same cause:**
@@ -175,8 +193,8 @@ with the original and "the rule" with the rule.
 - "is this a 10-bit job" is answered in five places: `plan.go:166`, `plan.go:336` (`EncodeTenBit`),
   `internal/worker/live.go:127`, `internal/rules/bitrate.go:164`, `expect.go:98`, and differently on remote
   workers (`internal/remote/work.go:513-518`);
-- whether a failure was the card's: substrings of ffmpeg's error text (`worker.go:2180-2199`,
-  `internal/jobs/failure_codes.go:37-50`).
+- whether a failure was the card's: `FallsBackToProcessor` (`internal/jobs/encoderhealth.go:33`) asks
+  `classifyKeyLines`, which matches phrases in ffmpeg's error text (`internal/jobs/failure_codes.go:33-54`).
 
 **Bugs from this cause:** 86aab6a2 and ddd0659a (the full-GPU ladder), a7187734 (HDR: card or processor),
 38048495 (counting a fall-back), 0c2c3d75 (staged file on fall-back), 32fcd26a and 2c49df83 (which render
@@ -200,7 +218,8 @@ rule like 10-bit, becomes one edit.
   revision the job was queued under. `jobs.workflow_rev` is re-stamped to the current revision on restart
   (`internal/jobs/jobs.go:435`) and on Convert again (`internal/jobs/again.go:163`), so it records the
   revision that *ran*, mostly; it is read only by Convert again and the log (`internal/jobs/again.go:100,227`).
-- **Probes are keyed by path.** After a replace, the new file's probe is stored under the same path as the
+- **Some probe readers ignore the file version.** The probe cache is keyed by path, size and mtime
+  (`jobs.go:198-205`), but after a replace, the new file's probe is stored under the same path as the
   original's (`worker.go:486-488`), and `LatestProbe` returns the newest row for a path whatever its size
   and time (`jobs.go:503-508`). This is intended for the Files view, but a reader that wants the
   *original's* facts can get the output's.
@@ -247,7 +266,7 @@ around them is a second copy:
 step down) used by both. The local pool and the remote client differ only in how they get the source and
 deliver the result.
 
-### Cause 5: timers stand in for signals
+### Cause 5: timers and text matching stand in for signals
 
 **What happens.**
 - Progress counts only `out_time_us` lines from `-progress` (`internal/media/media.go:413-459`).
@@ -255,18 +274,46 @@ deliver the result.
   it rewrites an MP4 for fast start, a second rule allows 1 hour once the position is within 2 seconds of
   the end (`worker.go:235-239`, `:728-733`; 55c41c83, 950e20be, 68fda339). Whether ffmpeg prints anything
   at all during that rewrite (for example `total_size`) is **UNVERIFIED**.
-- The frame count is the duration times the frame rate and is called exact (`verify.go:724-728`); it is
-  wrong for variable-frame-rate files, which aren't detected.
+- The frame count is the duration times the frame rate and is called exact (`verify.go:724-728`); for
+  variable-frame-rate files that is plausibly wrong, **UNVERIFIED** (no such file was tested).
+- **ffmpeg's own report is already parsed, but not used for the encode.** `media.InputStreamStats`
+  (`internal/media/stats.go:32`) reads the packets, frames and decode errors ffmpeg reports at the end of a
+  run. Only the playback check uses it (`verify.go:319`), because the encode runs with `-v error`
+  (`plan.go:345`), which hides that report. Damage and lost frames are worked out instead from regular
+  expressions over the error text (`verify.go:703-803`).
 - Bitrate ladders and quality steps are fixed tables described as untuned (`internal/rules/bitrate.go:20-80`,
   `internal/rules/flow.go:64-79`).
 
 **Bugs from this cause:** 55c41c83, 950e20be, 68fda339 (MP4 finishing), 26b44723 (sample gap),
 0fe750d7 (stall warning), 56a86fbb.
 
-**Structural fix.** Judge liveness by evidence the process is working: the process is alive and the temp
-output file is still growing or being written (size and mtime), plus `total_size` from `-progress`. Keep a
-long timer only as a last resort. Count frames from the stream (`nb_frames`, or a packet count, which
-`CountVideoPackets` already does) instead of multiplying.
+**Structural fix.** Run the encode with ffmpeg's verbose level so its end-of-run report is available, and
+read decoded frames and decode errors from `InputStreamStats` instead of regular expressions (keep the
+expressions only as a fall-back). Judge liveness by evidence the process is working: the process is alive
+and the temp output is still growing, plus `total_size` and `progress=end` from `-progress`. Keep a long
+timer only as a last resort. Count frames from the stream instead of multiplying.
+
+### Cause 6: one verdict for three different situations
+
+**What happens.** Every refusal is a `KeptError` with the one code `kept_original` (`verify.go:75-77`):
+- the new file differs from the prediction (job 48);
+- the new file is damaged;
+- a check could not run: a timeout or a tool crash is also `kept`, marked retryable (`verify.go:55-62`).
+
+The Jobs page maps `kept_original` to `check_failed` (`internal/jobs/failure_codes.go:25-26`), whose hint is
+"Pick a higher quality on the Convert step, or lower the check on the workflow"
+(`failure_codes.go:133-135`). For job 48 that advice is wrong: no quality setting changes how QSV rounds.
+The workflow's failure policy is chosen the same way for every `KeptError` (`worker.go:434-436`), and the
+VBR wording is patched in after the fact (`worker.go:1299-1303`). A bigger file is a separate
+`SkippedError` (`keep.go:259`).
+
+**Bugs from this cause:** job 48's hint; #495 (a bigger file must end "skipped", not "failed"); de2f6647
+(a kept job must not get a failure summary); a6772799 (a new attempt clears the earlier failure; a picture
+refusal says where).
+
+**Structural fix.** Typed verdicts from the check: *differs* (field, rule, measured value), *damaged*
+(where, evidence), *could not check* (which check, why), *source damaged*, *bigger*. Each gets its own reason
+code, sentence, retry rule and workflow outcome. "Kept" stays the job status; the code says why.
 
 ### Outside the pipeline (noted, not reviewed)
 
@@ -306,8 +353,8 @@ flowchart LR
 - The **attempt runner** picks an encoder from the profiles, runs it, and steps down on a card failure the
   profile recognises. Local and remote workers share it.
 - **Measure** the new file: probe, decode, picture comparison. These are facts and are stored.
-- **Verify** = the rules applied to the measured facts. A failed rule names the rule and the measured value
-  ("852x480: the shape is within 0.3% of the original's").
+- **Verify** = the rules applied to the measured facts. The result is a typed verdict (cause 6). A failed
+  rule names the rule and the measured value.
 
 **One encoder abstraction.** A profile per family: capabilities (codecs, depths, full GPU or not), filters,
 pixel formats, quality arguments, rounding, failure patterns. Used by the plan, the doctor, the rules and
@@ -323,24 +370,26 @@ from one query; probes are per file version.
 Small slices, each its own pull request, each shippable alone. Sizes: S ≈ under 150 changed lines,
 M ≈ 150-500, L ≈ over 500.
 
-| # | Slice | Size | Fixes | Depends on |
-|---|---|---|---|---|
-| 1 | Make the prediction match QSV (or compare width with a ±2 tolerance) and fix the "in the original" wording | S | job 48 now | none |
-| 2 | Store the lowest SSIM score, not the last; fail the step when the output can't be stat'ed instead of writing `size_after` 0 | S | cause 1, 3 | none |
-| 3 | Check rules: shape tolerance, even dimensions, max height, depth the ran encoder can produce, codec from the plan. Keep Expect for stream lists and length for now | M | cause 1 | none |
-| 4 | Record the measured output (probe) on the job and show it in the log instead of the predicted values | S | cause 1 (a24894e7 class) | 3 |
-| 5 | Encoder profiles: move `gpuScale`, pixel formats, 10-bit rules and failure patterns into one profile per family; the plan and doctor read it | L (split per family) | cause 2 | 3 helps |
-| 6 | One "is this a 10-bit job" function, used by plan, live, bitrate, rules and the remote worker | S | cause 2, 4 | can come before 5 |
-| 7 | Probe readers by (path, size, mtime); the Files view asks for the current file | S | cause 3 | none |
-| 8 | One totals query for the three screens | S-M | cause 3 | none |
-| 9 | The worker compiles from the revision stored on the job, or records the revision it ran and shows it | S | cause 3 | decision: user |
-| 10 | Bulk status changes through `transition` | S | cause 3 | none |
-| 11 | Shared attempt runner for local and remote | M-L | cause 4 | 5, 6 |
-| 12 | Liveness from output growth + `total_size`; timer only as a last resort | M | cause 5 | measure first: what ffmpeg prints during the MP4 rewrite |
-| 13 | Frame count from the stream, VFR detected | S | cause 5 | none |
+| # | Slice | Size | Fixes | Depends on | What proves it |
+|---|---|---|---|---|---|
+| 1 | Make the prediction match QSV (or compare width with a ±2 tolerance) and fix the "in the original" wording | S | job 48 now | none | 1920x1080 → 480 lines on QSV passes; a test per family for that size; the message names the original's real size |
+| 2 | Store the lowest SSIM score, not the last; fail the step when the output can't be stat'ed instead of writing `size_after` 0 | S | cause 1, 3 | none | a test with samples 0.99, 0.91, 0.98 stores 0.91; a failed stat ends the job failed, and totals are unchanged |
+| 3 | Check rules: shape tolerance, even dimensions, max height, depth the ran encoder can produce, codec from the plan. Keep Expect for stream lists and length for now | M | cause 1 | none | job 48 and the #498/#507 cases become table rows that pass; a file with the wrong shape or codec still fails |
+| 4 | Record the measured output (probe) on the job and show it in the log instead of the predicted values | S | cause 1 (a24894e7 class) | 3 | the log of an 8-bit encode of a 10-bit source says 8-bit; the job API returns the measured size and depth |
+| 5 | Encoder profiles: move `gpuScale`, pixel formats, 10-bit rules and failure patterns into one profile per family; the plan and doctor read it | L (split per family) | cause 2 | 3 helps | the existing argument tests pass unchanged as golden tests (byte-identical arguments) |
+| 6 | One "is this a 10-bit job" function, used by plan, live, bitrate, rules and the remote worker | S | cause 2, 4 | can come before 5 | one table test over HDR, 10-bit SDR and 8-bit sources; a grep finds no other depth test in those packages |
+| 7 | Probe readers by (path, size, mtime); the Files view asks for the current file | S | cause 3 | none | a test replaces a file and reads the original's probe by its size and mtime, not the new file's |
+| 8 | One totals query for the three screens | S-M | cause 3 | none | the three screens return equal totals on a test database with kept, restored and grown files |
+| 9 | The worker compiles from the revision stored on the job, or records the revision it ran and shows it | S | cause 3 | decision: user | a test edits the workflow while a job is queued and checks which revision ran |
+| 10 | Bulk status changes through `transition` | S | cause 3 | none | a test of restart and Convert again sees each change in `events`; no direct `UPDATE jobs SET status` left outside `transition` |
+| 11 | Shared attempt runner for local and remote | M-L | cause 4 | 5, 6 | the remote tests and the local fall-back tests run against the same runner; one real remote run per family available |
+| 12 | Liveness from output growth, `total_size` and `progress=end`; timer only as a last resort | M | cause 5 | measure first: what ffmpeg prints during the MP4 rewrite | a long MP4 with fast start finishes without the 1-hour window; a frozen ffmpeg is still caught |
+| 13 | Frame count and damage from ffmpeg's report (`InputStreamStats`), with the expressions kept as a fall-back; detect variable frame rate | S-M | cause 5 | none | the damage test files from 11-18 to 11-20 give the same verdicts; a variable-frame-rate test file counts right |
+| 14 | Typed verdicts: differs, damaged, could not check, source damaged, bigger; each with its own code, words and retry rule | M | cause 6 | 3 | every existing kept test asserts a kind; job 48's words no longer suggest a higher quality |
 
 Slices 1, 2, 6, 7 and 10 are each small and independent. Slices 3 and 5 remove the largest share of the
-recent bugs. Slice 9 changes behaviour users can notice (a queued job runs with the settings it was queued
+recent bugs. Slices 13 and 14 were added after a second, independent review; the slice numbers before them
+are unchanged so references stay valid. Slice 9 changes behaviour users can notice (a queued job runs with the settings it was queued
 with), so it needs the user's choice.
 
 ---
@@ -363,5 +412,24 @@ with), so it needs the user's choice.
 - **The picture comparison itself** (SSIM samples, `verify.go:442`). The measurement is right; what goes
   wrong is comparing other facts with predictions.
 
-A rewrite would throw away the parts above that work and would recreate the five causes unless the
+A rewrite would throw away the parts above that work and would recreate the six causes unless the
 contract in section 4 is adopted anyway. The slices get there one pull request at a time.
+
+---
+
+## 7. What the test matrix should show
+
+A test matrix of real encodes (formats, resolutions, quality levels, GPU and processor) is being run
+separately. Its findings had not landed when this was written. If the causes above are right, it should
+show the following; each row either confirms a cause or is evidence against this review.
+
+| Case | Prediction | Cause |
+|---|---|---|
+| 1920x1080, 1280x720 or 3840x2160 to 480 lines on QSV, full GPU | kept: "854x480 … 852x480" | 1 |
+| The same sizes to 480 lines on the processor | pass: `scale=-2:480` rounds like the prediction | 1 (the asymmetry) |
+| H.264 kept as H.264, nothing scaled, no bitrate cap | the video is copied, not encoded (`plan.go:897`) | rule in the compiler, not the encoder (2) |
+| VP9 with a bitrate level | the cap rewrites `-b:v` (`plan.go:1297-1312`); outcome **UNVERIFIED** | 2: an encoder special case in the generic builder |
+| High quality levels | some new files are bigger and end skipped (`new_file_bigger`) | 6: the one verdict that already has its own kind |
+| MP4 outputs with text subtitles | converted to `mov_text`; the prediction skips one check only for that case (`plan.go:718-720`) | 1: a per-container exception inside the prediction |
+| Long encodes to MP4 on the GPU | the finishing pause while ffmpeg rewrites for fast start | 5 |
+
