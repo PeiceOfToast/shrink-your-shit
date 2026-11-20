@@ -108,6 +108,7 @@ export function Shell({ title, proto, children }: { title: string; proto: boolea
             ...items.map((n) => (
               <Link key={n.to} to={n.to} title={n.to === "/workers" && (joins || off) ? n.label + ": " + [joins && waiting, off].filter(Boolean).join(", ") : n.label} aria-current={current === n ? "page" : undefined}>
                 <Icon id={n.icon} /><span className="lbl">{n.label}</span>
+                {n.planned && <span className="lbl muted sm">Planned</span>}
                 {n.to === "/workers" && joins > 0 && <><span className="badge info" aria-hidden="true">{joins}</span><span className="sr">, {waiting}</span></>}
                 {n.to === "/workers" && off && <><span className="badge off" aria-hidden="true">{offWord}</span><span className="sr">, {off}</span></>}
               </Link>
