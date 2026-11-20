@@ -8,10 +8,10 @@ import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
 import { order } from "../mock/steps"; // the steps in running order: a property of the document, not data
 import { useData } from "../useData";
-import { getDraft, getLadder, getWorkflow, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
+import { getDraft, getLadder, getVariables, getWorkflow, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
 import { Link, onLeave } from "../router";
 import { Browse } from "../FolderPicker";
-import { VarInput } from "../VarInput";
+import { VarInput, varProblems } from "../VarInput";
 import { listLibraries, shrunk } from "../libraryApi";
 import type { JSONSchema, Node, PublishPreview, StepDefinition, ValidationIssue, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
 
@@ -74,7 +74,7 @@ function Field({ id, name, s, value, set, wf }: { id: string; name: string; s: J
       </div>{typeof s.description === "string" && <span className="hint">{s.description}</span>}</fieldset>);
   }
   // a text field that takes {{name}} variables (x-variables): the hint, the example and the picker
-  if (s["x-variables"] === true) return <VarInput id={fid} title={title} value={String(value ?? "")} wf={wf} set={(v) => set(v)} />;
+  if (s["x-variables"] === true) return <VarInput id={fid} title={title} value={String(value ?? "")} wf={wf} set={(v) => set(v)} description={typeof s.description === "string" ? s.description : undefined} />;
   const hint = typeof s.description === "string" ? <span className="hint" id={fid + "-h"}>{s.description}{s.type === "array" ? " One per line." : ""}</span> : null;
   if (s.type === "integer" || s.type === "number") // a number, saved as a number (empty: not set)
     return <div className="field"><label htmlFor={fid}>{title}</label><input id={fid} className="input" type="number" inputMode="decimal" min={s.minimum as number | undefined} step={s.type === "integer" ? 1 : "any"}
@@ -310,6 +310,8 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
   const [panel, setPanel] = useState<PublishPreview | null>(null), [renaming, setRenaming] = useState(false);
   const doc = hist.docs[hist.at], dirty = doc !== saved;
   const all = useData(listLibraries, []), libs = (all.data ?? []).filter((l) => l.flowId === id).map((l) => l.path);
+  // {{name}} fields with a bad name (or an unclosed {{): Publish waits for them, once the variable list has loaded
+  const vl = useData(() => getVariables(id), [id]).data, varBad = vl ? varProblems(doc.nodes, defs, vl.variables) : [];
   // The server's words and problems for the document as it is now (nothing saved): asked 300 ms after a change.
   const ask = async (d: WorkflowDoc) => { const r = await act(validateDoc(id, d), setSaid); if (r) setLive(r); return r; };
   const seen = useRef(first.workflow);
@@ -376,11 +378,12 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
         {canStack && <>
           <span className="desk">{tools}</span>
           <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{tools}</div></details>
-          <button className="btn sm primary" type="button" onClick={openPublish}>Publish</button>
+          <button className="btn sm primary" type="button" disabled={varBad.length > 0} title={varBad.length ? "Fix the variable names first" : undefined} onClick={openPublish}>Publish</button>
         </>}
       </PageHead>
       {canStack && (checked || !dirty) && (issues.length === 0 ? <p className="st ok checkline"><Icon id="i-check-c" /><span>Check: no problems</span></p>
         : <p className="st bad checkline"><Icon id="i-alert" /><span>Check: {issues.length === 1 ? "1 problem" : issues.length + " problems"}. Publish waits until {issues.length === 1 ? "it's" : "they're"} fixed. <button className="linkbtn" type="button" onClick={() => setOpen(issues[0].nodeId ?? null)}>Show</button></span></p>)}
+      {canStack && varBad.length > 0 && <p className="st bad" role="alert"><Icon id="i-alert" /><span>Fix {varBad.length === 1 ? "1 field" : varBad.length + " fields"} before publishing. <button className="linkbtn" type="button" onClick={() => setOpen(varBad[0].nodeId)}>{varBad[0].title}</button></span></p>}
       <p className="muted" role="status">{said}</p>
 
       {panel && (

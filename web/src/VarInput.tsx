@@ -30,18 +30,34 @@ function closest(name: string, names: string[]): string | undefined {
 }
 
 // The example, the empty-value notes and the errors for one value. Unknown names stay as typed in the example.
-function analyse(value: string, vars: TemplateVar[]) {
-  const byName = new Map(vars.map((v) => [v.name, v] as const)), names = vars.map((v) => v.name);
+// Until the list has loaded (or when it failed) vars is null: names are not checked, only an unclosed {{ is.
+function analyse(value: string, vars: TemplateVar[] | null) {
+  const list = vars ?? [], byName = new Map(list.map((v) => [v.name, v] as const)), names = list.map((v) => v.name);
   const errors: string[] = [], empty = new Set<string>();
   const example = value.replace(TOKEN, (all, raw: string) => {
     const name = raw.trim(), v = byName.get(name);
-    if (!v) { const sug = closest(name, names); errors.push(`{{${name}}} isn't a variable.` + (sug ? ` Did you mean {{${sug}}}?` : "")); return all; }
+    if (!v) { if (!vars) return all; const sug = closest(name, names); errors.push(`{{${name}}} isn't a variable.` + (sug ? ` Did you mean {{${sug}}}?` : "")); return all; }
     if (v.value == null || v.value === "") { empty.add(name); return ""; }
     return v.value;
   });
   const open = value.lastIndexOf("{{");
   if (open >= 0 && value.indexOf("}}", open) < 0) errors.push("A {{ is missing its }}.");
   return { example, errors, empty: [...empty] };
+}
+
+// The problems of every {{name}} field in a workflow, for the Publish gate. Only once the list has loaded (no names
+// are checked before, so nothing is blocked by a missing list).
+export function varProblems(nodes: { id: string; type: string; config?: Record<string, unknown> }[], defs: { type: string; configSchema: { properties?: Record<string, unknown> } }[], vars: TemplateVar[]) {
+  const out: { nodeId: string; field: string; title: string; error: string }[] = [];
+  for (const n of nodes) {
+    const props = (defs.find((d) => d.type === n.type)?.configSchema.properties ?? {}) as Record<string, { "x-variables"?: unknown; title?: unknown }>;
+    for (const [k, s] of Object.entries(props)) {
+      if (s["x-variables"] !== true) continue;
+      const first = analyse(String(n.config?.[k] ?? ""), vars).errors[0];
+      if (first) out.push({ nodeId: n.id, field: k, title: (s.title as string) ?? k, error: first });
+    }
+  }
+  return out;
 }
 
 // The {{ being typed before the caret: where it starts and what follows it (names only, no spaces or braces).
@@ -54,7 +70,7 @@ function typedAt(value: string, caret: number): { start: number; query: string }
 
 type Pick = { mode: "typed" | "button"; start: number; end: number; query: string; active: number };
 
-export function VarInput({ id, title, value, wf, set }: { id: string; title: string; value: string; wf: string; set: (v: string) => void }) {
+export function VarInput({ id, title, value, wf, set, description }: { id: string; title: string; value: string; wf: string; set: (v: string) => void; description?: string }) {
   const list = useData<VarList>(() => getVariables(wf), [wf]).data;
   const uid = useId(), descId = id + "-desc";
   const [pick, setPick] = useState<Pick | null>(null);
@@ -76,11 +92,14 @@ export function VarInput({ id, title, value, wf, set }: { id: string; title: str
   }, [pick]);
 
   const vars = list?.variables ?? [];
-  const a = analyse(value, vars);
+  const a = analyse(value, list ? vars : null);
   const q = (pick?.query ?? "").toLowerCase();
+  // groups keep their order (the first name of each group sets its place); within a group, "starts with" comes first
+  const rank = new Map<string, number>();
+  vars.forEach((v) => rank.has(v.group) || rank.set(v.group, rank.size));
   const items = vars
     .filter((v) => !q || v.name.includes(q) || v.description.toLowerCase().includes(q))
-    .sort((x, y) => Number(!x.name.startsWith(q)) - Number(!y.name.startsWith(q)));
+    .sort((x, y) => rank.get(x.group)! - rank.get(y.group)! || Number(!x.name.startsWith(q)) - Number(!y.name.startsWith(q)));
   const active = pick ? Math.min(pick.active, Math.max(0, items.length - 1)) : 0;
   const optId = (i: number) => uid + "-o" + i;
   const sample = list ? (list.sample.builtIn ? "a sample file" : list.sample.path.split("/").pop()) : "";
@@ -120,11 +139,14 @@ export function VarInput({ id, title, value, wf, set }: { id: string; title: str
   const onFieldChange = (e: ChangeEvent<HTMLInputElement>) => {
     const nv = e.target.value, caret = e.target.selectionStart ?? nv.length, t = typedAt(nv, caret);
     set(nv);
+    // typing moves the caret, so an open popover (from the button) closes rather than insert at a stale position
     if (t && list) setPick({ mode: "typed", start: t.start, end: caret, query: t.query, active: 0 });
-    else if (pick?.mode === "typed") setPick(null);
+    else if (pick) setPick(null);
   };
   const openFromButton = () => {
     const end = field.current?.selectionStart ?? value.length;
+    // on a phone the sheet covers the bottom 60%: bring the field to the top first so the sheet never covers it
+    if (phone()) field.current?.scrollIntoView({ block: "start" });
     setPick({ mode: "button", start: end, end: field.current?.selectionEnd ?? end, query: "", active: 0 });
     setOpenKey((k) => k + 1);
   };
@@ -145,7 +167,8 @@ export function VarInput({ id, title, value, wf, set }: { id: string; title: str
   });
 
   return (
-    <div className="field vp-wrap" ref={wrap}>
+    // Tab out of the popover (or a click elsewhere) closes it, so the insert position can't go stale
+    <div className="field vp-wrap" ref={wrap} onBlur={(e) => !wrap.current?.contains(e.relatedTarget as Node) && setPick(null)}>
       <div className="vp-head">
         <label htmlFor={id}>{title}</label>
         <button ref={btn} className="btn sm ghost" type="button" disabled={!list} aria-expanded={pick?.mode === "button"} aria-controls={uid + "-list"} onClick={openFromButton}>
@@ -157,12 +180,19 @@ export function VarInput({ id, title, value, wf, set }: { id: string; title: str
         aria-describedby={descId} onChange={onFieldChange} onKeyDown={onFieldKey} />
       <div id={descId} className="vp-desc-block">
         <span className="hint">{"You can use variables, like {{title}}."}</span>
+        {description && <span className="hint">{description}</span>}
         {list && <span className="hint vp-ex">{`Example with ${sample}: ${a.example}`}</span>}
         {a.empty.map((n) => <span key={n} className="hint">{`{{${n}}} is empty for this file.`}</span>)}
-        <div aria-live="polite">{a.errors.map((m) => <span key={m} className="hint vp-err" style={{ color: "var(--error-text)" }}><Icon id="i-alert" />{m}</span>)}</div>
+        <div aria-live="polite">{(pick?.mode === "typed" ? a.errors.filter((m) => !m.startsWith("A {{ is missing")) : a.errors).map((m, i) => <span key={i}className="hint vp-err" style={{ color: "var(--error-text)" }}><Icon id="i-alert" />{m}</span>)}</div>
       </div>
+      {/* always mounted, so the count is announced as it changes (the popover itself comes and goes) */}
+      <div className="sr" role="status">{pick && list ? count : ""}</div>
       {pick && list && (
-        <div className={"vp " + (phoneSheet ? "vp-sheet" : "vp-pop")} onKeyDown={phoneSheet ? trap : undefined}>
+        <div className={"vp " + (phoneSheet ? "vp-sheet" : "vp-pop")} onKeyDown={(e) => {
+          // Escape anywhere inside closes and returns focus to the origin (the search box or the Close button)
+          if (e.key === "Escape") return (e.preventDefault(), e.stopPropagation(), close());
+          if (phoneSheet) trap(e);
+        }}>
           {pick.mode === "button" && (
             <div className="vp-search">
               <input ref={search} className="input" role="combobox" aria-label="Search variables" aria-expanded aria-controls={uid + "-list"} autoComplete="off"
@@ -170,7 +200,7 @@ export function VarInput({ id, title, value, wf, set }: { id: string; title: str
                 onChange={(e) => setPick((p) => p && { ...p, query: e.target.value, active: 0 })} onKeyDown={(e) => listKeys(e)} />
               <button className="btn sm ghost vp-close" type="button" onClick={close}>Close</button>
             </div>)}
-          <div className="vp-count" role="status">{count}</div>
+          <div className="vp-count" aria-hidden="true">{count}</div>
           {items.length > 0
             ? <ul id={uid + "-list"} role="listbox" aria-label="Variables" className="vp-list">{rows}</ul>
             : <p className="hint vp-none" id={uid + "-list"}>{`No variable matches "${pick.query}".`}</p>}
