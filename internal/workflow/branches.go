@@ -47,6 +47,11 @@ func branchTemplate(d Doc) (rules.Template, []Issue) {
 	// result", with what it does when it doesn't work (V6b). nil: an issue was added.
 	var segment func(n Node, path []string, fallbacks map[string]bool) *rules.Branch
 	segment = func(n Node, path []string, fallbacks map[string]bool) *rules.Branch {
+		if IsQuestion(n.Type) || IsEnd(n.Type) || n.Type == TypeInput || IsAction(n.Type) {
+			issues = append(issues, Issue{Code: "fallback_must_convert", Severity: "error", NodeID: n.ID,
+				Message: "'" + nodeName(n) + "' can't be where a conversion falls back to. Fall back to steps that convert, or leave the file alone."})
+			return nil
+		}
 		if fallbacks[n.ID] {
 			issues = append(issues, Issue{Code: "fallback_loop", Severity: "error", NodeID: n.ID,
 				Message: "Falling back from '" + nodeName(n) + "' leads back to it. Let the last other path stop or leave the file alone."})
@@ -120,18 +125,17 @@ func branchTemplate(d Doc) (rules.Template, []Issue) {
 		}
 		return b
 	}
-	var walk func(id string, checks []rules.BranchCheck, path []string, onPath map[string]bool)
-	walk = func(id string, checks []rules.BranchCheck, path []string, onPath map[string]bool) {
+	// walk follows every path from the input: questions add to checks, actions to before, and each path
+	// ends in a conversion (segment), "Leave the file alone" or "Stop as failed".
+	var walk func(id string, checks []rules.BranchCheck, before []rules.Card, path []string, onPath map[string]bool)
+	walk = func(id string, checks []rules.BranchCheck, before []rules.Card, path []string, onPath map[string]bool) {
 		n, ok := byID[id]
 		if !ok || onPath[id] { // a cycle: Validate names it (cycle_without_loop)
 			return
 		}
-		switch n.Type {
-		case TypeCheck:
-			var c rules.VideoCheck
-			b, _ := json.Marshal(n.Config)
-			json.Unmarshal(b, &c)
-			c.Name = nodeName(n)
+		switch {
+		case IsQuestion(n.Type):
+			c := questionOf(n)
 			if c.Empty() {
 				issues = append(issues, Issue{Code: "empty_check", Severity: "error", NodeID: n.ID,
 					Message: "'" + c.Name + "' has no condition, so every file would answer Yes. Set at least one."})
@@ -145,15 +149,32 @@ func branchTemplate(d Doc) (rules.Template, []Issue) {
 				}
 				seen := clone(onPath)
 				seen[id] = true
-				walk(next, append(clone(checks), rules.BranchCheck{NodeID: n.ID, Port: port, Check: c}), append(clone(path), n.ID), seen)
+				walk(next, append(clone(checks), rules.BranchCheck{NodeID: n.ID, Port: port, Check: c}), before, append(clone(path), n.ID), seen)
 			}
-		case TypeEnd:
+		case IsAction(n.Type):
+			next := out[[2]string{n.ID, "success"}]
+			if next == "" {
+				issues = append(issues, Issue{Code: "unconnected_port", Severity: "error", NodeID: n.ID, Port: "success",
+					Message: "'" + nodeName(n) + "' has nothing connected to " + portLabel(n, "success") + ". Connect a step, or leave the file alone there."})
+				return
+			}
+			card := rules.Card{NodeID: n.ID, Type: n.Type, Name: nodeName(n), Config: clone(n.Config)}
+			seen := clone(onPath)
+			seen[id] = true
+			walk(next, checks, append(clone(before), card), append(clone(path), n.ID), seen)
+		case n.Type == TypeEnd:
 			reason, _ := n.Config["reason"].(string)
 			if reason == "" {
 				reason = "Left alone by this workflow"
 			}
-			branches = append(branches, rules.Branch{Checks: checks, End: reason, Path: append(clone(path), n.ID)})
-		case TypeInput:
+			branches = append(branches, rules.Branch{Checks: checks, Before: before, End: reason, Path: append(clone(path), n.ID)})
+		case n.Type == TypeFail:
+			reason, _ := n.Config["reason"].(string)
+			if reason == "" {
+				reason = "Stopped by this workflow"
+			}
+			branches = append(branches, rules.Branch{Checks: checks, Before: before, End: reason, Fail: true, Path: append(clone(path), n.ID)})
+		case n.Type == TypeInput:
 			next := out[[2]string{n.ID, "success"}]
 			if next == "" {
 				issues = append(issues, Issue{Code: "unconnected_port", Severity: "error", NodeID: n.ID, Port: "success",
@@ -162,19 +183,30 @@ func branchTemplate(d Doc) (rules.Template, []Issue) {
 			}
 			seen := clone(onPath)
 			seen[id] = true
-			walk(next, checks, append(clone(path), n.ID), seen)
+			walk(next, checks, before, append(clone(path), n.ID), seen)
 		default: // the steps that convert, then check and save: one straight run
 			if b := segment(n, path, map[string]bool{}); b != nil {
-				b.Checks = checks
+				b.Checks, b.Before = checks, before
 				branches = append(branches, *b)
 			}
 		}
 	}
-	walk(start, nil, nil, map[string]bool{})
+	walk(start, nil, nil, nil, map[string]bool{})
 	if len(issues) > 0 {
 		return rules.Template{}, issues
 	}
 	return rules.Template{Kind: rules.KindBranches, CompilerVersion: rules.CompilerVersion, Branches: &branches}, nil
+}
+
+// questionOf is a question step's config as the question the run asks, with its kind from its type
+// and the step's own name for the timeline.
+func questionOf(n Node) rules.Question {
+	var q rules.Question
+	b, _ := json.Marshal(n.Config)
+	json.Unmarshal(b, &q)
+	q.Kind = map[string]string{TypeCheck: "", TypeCheckName: "name", TypeCheckAge: "age", TypeCheckVariable: "variable", TypeCheckLibrary: "library", TypeCheckHardLinks: "hardlinks"}[n.Type]
+	q.Name = nodeName(n)
+	return q
 }
 
 // chainEdges link nodes in order, success to in.
@@ -243,7 +275,10 @@ func failureOf(c Node, out map[[2]string]string, byID map[string]Node, issues *[
 				f.SkipWords = r
 			}
 			return f
-		case t.Type == TypeCheck || t.Type == TypeInput:
+		case t.Type == TypeFail:
+			f.Action = "stop"
+			return f
+		case IsQuestion(t.Type) || IsAction(t.Type) || t.Type == TypeInput:
 			add("fallback_must_convert", "When '"+f.Name+"' doesn't work, the file can go to other steps that convert, or be left alone; not to a check.")
 			return nil
 		}

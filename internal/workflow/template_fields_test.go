@@ -8,7 +8,7 @@ import (
 )
 
 // templatedFields are the (step type, setting) pairs that take {{name}} variables, in the order the
-// registry lists them: exactly the design's four (design-joblog-vars section 3).
+// registry lists them: the design's four (design-joblog-vars section 3) and FB1b's three run-card fields.
 func templatedFields() []string {
 	var out []string
 	for _, def := range Definitions() {
@@ -22,8 +22,8 @@ func templatedFields() []string {
 	return out
 }
 
-// The flag the editor reads must be on exactly the four fields that take variables, and each one's
-// help text must show an example (review2-504 P3b: the description had no test).
+// The flag the editor reads must be on exactly the fields that take variables, and each one's help
+// text must show an example (review2-504 P3b: the description had no test).
 func TestTemplatedFieldsAndTheirHelpText(t *testing.T) {
 	got := map[string]bool{}
 	for _, f := range templatedFields() {
@@ -34,6 +34,10 @@ func TestTemplatedFieldsAndTheirHelpText(t *testing.T) {
 		"output.commit/outputName": "{{title}}",
 		"output.commit/srtName":    "{{sub_lang}}",
 		"output.commit/trackTitle": "{{resolution}}",
+		// FB1b: the run cards' templated fields
+		"check.variable/value":      "{{resolution}}",
+		"action.set_variable/value": "{{title}}",
+		"action.note/text":          "{{title}}",
 	}
 	if len(got) != len(want) {
 		t.Errorf("fields with x-variables: %v, want %d", templatedFields(), len(want))
@@ -52,7 +56,7 @@ func TestTemplatedFieldsAndTheirHelpText(t *testing.T) {
 				continue // extras are caught by the count above
 			}
 			if !isTemplated {
-				t.Errorf("%s/%s takes variables but is not one of the four", def.Type, k)
+				t.Errorf("%s/%s takes variables but is not in the list", def.Type, k)
 				continue
 			}
 			if d, _ := p["description"].(string); !strings.Contains(d, example) {

@@ -5,8 +5,8 @@ package workflow
 import "testing"
 
 // W11 engine half: what the editor may do with a step's place, and which step types it may add, come
-// with the check, so the page doesn't copy the compile rules. Until W10 every place is fixed and no
-// type can be added.
+// with the check, so the page doesn't copy the compile rules. Until W10 the steps that convert keep
+// their place and can't be added; a question, an action or an end (FB1b) goes before them.
 func TestValidateSaysWhereEachStepAndTypeStands(t *testing.T) {
 	d := Preset()
 	r := Validate(d)
@@ -25,8 +25,21 @@ func TestValidateSaysWhereEachStepAndTypeStands(t *testing.T) {
 	}
 	for _, def := range defs {
 		a, ok := r.AddSteps[def.Type]
-		if !ok || a.Addable || a.Reason != "Can't run among the steps that convert yet." || a.After != "" {
-			t.Errorf("%s: %+v", def.Type, a)
+		switch {
+		case !ok:
+			t.Errorf("%s: no add rule", def.Type)
+		case IsQuestion(def.Type) || IsAction(def.Type) || IsEnd(def.Type):
+			if !a.Addable || a.After != d.Nodes[0].ID || a.Reason != "" {
+				t.Errorf("%s: %+v (want addable after Library files)", def.Type, a)
+			}
+		case def.ReadOnly:
+			if a.Addable || a.Reason == "" {
+				t.Errorf("%s: %+v", def.Type, a)
+			}
+		default:
+			if a.Addable || a.Reason != "Can't run among the steps that convert yet." || a.After != "" {
+				t.Errorf("%s: %+v", def.Type, a)
+			}
 		}
 	}
 

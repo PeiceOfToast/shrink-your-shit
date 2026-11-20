@@ -37,9 +37,14 @@ type Plan struct {
 	// step sections. Empty for flows that cannot say (see withStepDecisions).
 	Steps []StepDecision `json:"steps,omitempty"`
 	// OnFailure: a workflow path's failure policies (V6b); nil for a straight workflow.
-	OnFailure  *Failures `json:"onFailure,omitempty"`
-	FolderMode string    `json:"folderMode,omitempty"` // "next_to_library" (V5a): the library's own folder instead of OutputDir
-	Container  string    `json:"container,omitempty"`  // the new file's type (its extension, "mkv" or "mp4"); "" = the original's
+	OnFailure *Failures `json:"onFailure,omitempty"`
+	// Before: the path's actions before the conversion (FB1b), run by the worker in order; Fail: the path
+	// ends the job as failed with Skip's words, the original untouched ("Stop as failed"). Both omitted for
+	// every workflow saved before FB1b, so its Plans and fingerprints are unchanged.
+	Before     []Card `json:"before,omitempty"`
+	Fail       bool   `json:"fail,omitempty"`
+	FolderMode string `json:"folderMode,omitempty"` // "next_to_library" (V5a): the library's own folder instead of OutputDir
+	Container  string `json:"container,omitempty"`  // the new file's type (its extension, "mkv" or "mp4"); "" = the original's
 	// The Save the result step's {{name}} templates (W4b), as the workflow has them. The worker fills
 	// them in at run time; "" keeps today's names and titles.
 	OutputName string `json:"outputName,omitempty"`
@@ -158,7 +163,11 @@ func (h HDR) x265Params() string {
 // Compile makes the Plan for one file. Skip says whether it should be converted (the scanner's
 // decision); Video, Output and the thresholds say how. A template that cannot run yields a Plan
 // with Skip set and no Video codec, and every Plan ends with its Steps (steps.go).
-func (t Template) Compile(info media.Info) (p Plan) {
+func (t Template) Compile(info media.Info) (p Plan) { return t.CompileWith(info, Facts{}) }
+
+// CompileWith is Compile with the run's facts (FB1b): what a question beyond the probe asks about. The
+// worker gives them; a caller without them gets every variable question answered No.
+func (t Template) CompileWith(info media.Info, f Facts) (p Plan) {
 	defer func() {
 		// The plan carries the source's bit depth: a 10-bit (or deeper) first video stream keeps its depth
 		// through the encode where the target's encoder has one (VideoEncode.TenBit). A copied video is the
@@ -169,12 +178,12 @@ func (t Template) Compile(info media.Info) (p Plan) {
 		p = withStepDecisions(p, info)
 	}()
 	if t.Branches != nil { // V6a: the path the file's answers lead down
-		b, ds, ok := route(*t.Branches, info)
+		b, ds, ok := route(*t.Branches, info, f)
 		switch {
 		case !ok:
 			p = Plan{Kind: KindBranches, Skip: "no path of its workflow fits it", SkipCode: SkipSettingCannotRun}
 		case b.Then == nil:
-			p = Plan{Kind: KindBranches, Skip: skipWords(b.End), SkipCode: SkipLeftByWorkflow}
+			p = Plan{Kind: KindBranches, Skip: skipWords(b.End), SkipCode: SkipLeftByWorkflow, Fail: b.Fail}
 		default:
 			then := *b.Then
 			then.Languages = t.Languages
@@ -183,7 +192,7 @@ func (t Template) Compile(info media.Info) (p Plan) {
 		if len(p.Steps) > 0 && ok && b.Then != nil { // the checks' answers came before the path's own steps
 			p.Steps = append(checkSteps(ds), p.Steps...)
 		}
-		p.Path, p.Decisions, p.OnFailure = b.Path, ds, b.OnFailure
+		p.Path, p.Decisions, p.OnFailure, p.Before = b.Path, ds, b.OnFailure, b.Before
 		return p
 	}
 	p = Plan{Kind: t.Kind, CompilerVersion: t.CompilerVersion}
