@@ -622,16 +622,15 @@ const maxDamagedPercent = 1
 // duration's frames. exact is false when only the container's duration was there: audio or subtitles may run past
 // the video, so that count can be too high and must not decide anything on its own.
 func sourceFrameCount(src media.Info) (frames int64, exact bool) {
-	for _, s := range src.Streams {
-		if s.Type == "video" && !s.AttachedPic {
-			switch {
-			case s.Duration > 0:
-				return int64(s.Duration*s.FrameRate + 0.5), true
-			case s.Frames > 0:
-				return s.Frames, true
-			}
-			return int64(src.DurationSec*s.FrameRate + 0.5), false
+	if k := src.MainVideoIndex(); k >= 0 {
+		s := src.Streams[k]
+		switch {
+		case s.Duration > 0:
+			return int64(s.Duration*s.FrameRate + 0.5), true
+		case s.Frames > 0:
+			return s.Frames, true
 		}
+		return int64(src.DurationSec*s.FrameRate + 0.5), false
 	}
 	return 0, false
 }
