@@ -128,21 +128,34 @@ func TestFFmpegArgsFullGPUH264Family(t *testing.T) {
 	}
 }
 
-// A 10-bit SDR source's Plan has no HDR, so its full-GPU args carry no 10-bit flags: the frames' depth comes
-// from the decoder, and what keeps an 8-bit-only card off such a file is EncoderFor's 10-bit test (need10, set
-// from the source's depth), not a rule of the args. A2 added no rule here; this is the one EncoderFor owns.
-func TestFFmpegArgsFullGPUTenBitSDRIsPlannedAsSDR(t *testing.T) {
-	p := gpuPlan(22, func(v *VideoEncode) { v.Height = 1080 })
+// The full-GPU args ask for 10-bit exactly when the Plan says the new video is 10-bit (EncodeTenBit): main10 for
+// HEVC, and VAAPI's scale filter makes p010 frames. A Plan without it (an 8-bit source) carries neither, as before.
+func TestFFmpegArgsFullGPUFollowThePlansDepth(t *testing.T) {
+	plain := gpuPlan(22, func(v *VideoEncode) { v.Height = 1080 })
+	ten := gpuPlan(22, func(v *VideoEncode) { v.Height = 1080; v.TenBit = true })
 	for _, enc := range []string{"hevc_qsv", "hevc_vaapi"} {
-		args, ok := p.FFmpegArgsFullGPU("in.mkv", "out.mkv", enc)
+		args, ok := plain.FFmpegArgsFullGPU("in.mkv", "out.mkv", enc)
 		if !ok {
 			t.Fatalf("%s: not a full pipeline", enc)
 		}
 		for _, flag := range []string{"-profile:v:0", "-pix_fmt:v:0", "-color_primaries:v:0", "-color_trc:v:0", "-colorspace:v:0"} {
 			if hasFlag(args, flag) {
-				t.Errorf("%s: a 10-bit SDR plan has no HDR, but the args carry %s: %v", enc, flag, args)
+				t.Errorf("%s: an 8-bit plan carries no 10-bit flag, but has %s: %v", enc, flag, args)
 			}
 		}
+		args, ok = ten.FFmpegArgsFullGPU("in.mkv", "out.mkv", enc)
+		if !ok || !has(args, "-profile:v:0", "main10") || hasFlag(args, "-pix_fmt:v:0") {
+			t.Errorf("%s: a 10-bit SDR plan asks for main10 and takes its frames from the decoder: %v", enc, args)
+		}
+		for _, flag := range []string{"-color_primaries:v:0", "-color_trc:v:0", "-colorspace:v:0"} { // depth, not colour: SDR stays SDR
+			if hasFlag(args, flag) {
+				t.Errorf("%s: a 10-bit SDR plan writes no colour tags, but has %s: %v", enc, flag, args)
+			}
+		}
+	}
+	args, _ := ten.FFmpegArgsFullGPU("in.mkv", "out.mkv", "hevc_vaapi")
+	if !has(args, "-filter:v:0", "scale_vaapi=w=-2:h=1080:format=p010") {
+		t.Errorf("vaapi 10-bit downscale must keep p010 through its scale: %v", args)
 	}
 	// the gate: a 10-bit source needs the encoder's 10-bit test, so an 8-bit-only card writes no full-pipeline args at all
 	for _, enc := range []string{"hevc_qsv", "hevc_vaapi"} {

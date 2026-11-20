@@ -1060,7 +1060,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	w.setPhase(secEncode) // the encoder choice and its notes belong to encode (log-spec section 4)
 	chosenWhy := ""
 	if w.remote == nil && w.Encoder != nil {
-		need10 := tenBitSource(plan, src)
+		need10 := tenBitSource(plan)
 		if w.EncoderCandidates != nil && !plan.Video.Copy { // R5: what hardware is here, and each encoder considered
 			for _, line := range w.EncoderCandidates(plan.Video.Codec, need10, plan.Video.HDR) {
 				w.logLine(job.ID, secEncode, jobs.LevelInfo, line)
@@ -1095,7 +1095,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if note := vbrAverageNote(plan.Video); note != "" {
 		w.jobf(job.ID, ": %s", note)
 	}
-	setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWordsUsed(plan, gpu),
+	setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src, gpu), Encoder: encoderWordsUsed(plan, gpu),
 		Decoder: decoderWords(src, full), Progress: media.Progress{ETASeconds: -1}})
 	defer dropLive(job.ID)
 	var encErr string
@@ -1134,7 +1134,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 				full = false
 				args, _ = plan.FFmpegArgsWith(srcPath, tmp, gpu)
 				w.jobf(job.ID, ": full GPU pipeline failed (%s); the processor decodes for %s", shortReason(reason), gpu)
-				setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWordsUsed(plan, gpu),
+				setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src, gpu), Encoder: encoderWordsUsed(plan, gpu),
 					Decoder: decoderWords(src, false), Progress: media.Progress{ETASeconds: -1}})
 				encStart = w.now()
 				encErr, decoded, terr = w.encodeLocal(ctx, job, args)
@@ -1142,7 +1142,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			}
 			fell, fellReason = true, shortReason(reason)
 			args = plan.FFmpegArgs(srcPath, tmp)
-			setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src), Encoder: encoderWords(plan),
+			setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src, ""), Encoder: encoderWords(plan),
 				Decoder: decoderWords(src, false), Progress: media.Progress{ETASeconds: -1}})
 			encStart = w.now()
 			encErr, decoded, terr = w.encodeLocal(ctx, job, args)
@@ -1169,7 +1169,11 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 	}
 	if terr == nil {
-		w.Queue.AddStep(job.ID, "converted", true, "Converted: "+convertingTo(plan, src)+".")
+		ranOn := gpu // the encoder that made the new file
+		if fell {
+			ranOn = "" // the processor converted it after the card failed
+		}
+		w.Queue.AddStep(job.ID, "converted", true, "Converted: "+convertingTo(plan, src, ranOn)+".")
 	}
 	if terr != nil {
 		if errors.Is(terr, context.Canceled) || ctx.Err() != nil {
@@ -2104,7 +2108,7 @@ func shortReason(reason string) string {
 func (w *Worker) graphicsArgs(ctx context.Context, job jobs.Job, plan rules.Plan, src media.Info, srcPath, tmp, want string) (args []string, full, ok bool) {
 	fam := rules.GraphicsFamily(want)
 	if v := src.Video(); v != nil && w.GraphicsDecodes != nil && (fam == "qsv" || fam == "vaapi") {
-		if w.GraphicsDecodes(ctx, fam, v.Codec, tenBitSource(plan, src)) { // one rule for 10-bit, here and at the encoder
+		if w.GraphicsDecodes(ctx, fam, v.Codec, tenBitSource(plan)) { // one rule for 10-bit, here and at the encoder
 			if args, full = plan.FFmpegArgsFullGPU(srcPath, tmp, want); full {
 				w.jobf(job.ID, ": decoding and encoding on the graphics card (full GPU pipeline)")
 				return args, true, true
