@@ -319,10 +319,9 @@ export function Workers() {
             <div className="hd"><h3><Link to={"/workers/" + encodeURIComponent(w.id)}>{w.name}</Link></h3><span className="sp" /><StartStop w={w} onDone={done} />
               <Link className="btn icon ghost gear" to={"/workers/" + encodeURIComponent(w.id) + "?tab=limits"} aria-label={"Settings for " + w.name} title="Settings"><Icon id="i-gear" /></Link></div>
             <div className="bd stack">
-              <Link className="sm" to={"/workers/" + encodeURIComponent(w.id) + "?tab=limits"}>{plural(w.slots.cpu.total, "file", "files") + " at once"}</Link>
               <p className="sm muted">{[w.host, OS[w.os ?? ""], w.arch, w.lastHeartbeatAt && "last heard " + ago(w.lastHeartbeatAt)].filter(Boolean).join(" · ")}</p>
               {w.tags.length > 0 && <div className="chips" aria-label="Tags">{w.tags.map((x) => <span className="mchip" key={x}>{x}</span>)}</div>}
-              <p><span className={"pill " + cls}><Icon id={icon} />{t}</span></p>
+              <p><span className={"pill " + cls}><Icon id={icon} />{t}</span> <span className="sm">{plural(w.slots.cpu.total, "file", "files")} at once · <Link to={"/workers/" + encodeURIComponent(w.id) + "?tab=limits"}>Change</Link></span></p>
               {w.currentJobIds.map((id) => <p key={id} className="sm">Converting <Link className="mono" to={"/jobs?tab=running&job=" + encodeURIComponent(id)}>{names[id] ?? "Job " + id}</Link></p>)}
               <div><h4 className="sm muted ec-h">Encoders</h4><EncoderCards w={w} reload={ws.reload} /></div>
             </div>
