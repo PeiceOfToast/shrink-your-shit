@@ -185,8 +185,8 @@ export function Overview() {
         <div className="tile">
           <span className="l">Right now</span>
           <span className="v">{count(v.active.length)} <small>converting now</small></span>
-          {/* no daily series for a live count, so no sparkline */}
-          <div className="d"><div>Live count. There is no daily history for it, so no chart.</div></div>
+          {/* no daily series for a live count, so no sparkline: there is no history to draw it from */}
+          <div className="d"><div>{count(h.filesWaiting)} waiting · {on} of {rows.length} workers on</div></div>
         </div>
       </section>
 
