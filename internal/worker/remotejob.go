@@ -194,7 +194,7 @@ func (w *Worker) RunRemote(ctx context.Context, job jobs.Job, rj *RemoteJob) err
 }
 
 // remoteDecodeFull: a remote worker's file is decoded completely here only when it is this short;
-// longer, three samples (it decoded the whole file itself).
+// longer, one-minute samples (it decoded the whole file itself).
 const remoteDecodeFull = 120
 
 // CheckResult runs the checks a local conversion's result gets (its shape, a decode, the picture check

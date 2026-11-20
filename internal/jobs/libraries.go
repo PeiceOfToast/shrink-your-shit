@@ -55,8 +55,11 @@ var ErrNotFound = errors.New("not found")
 // ErrPathTaken: another library already has this folder.
 var ErrPathTaken = errors.New("another library already uses this folder")
 
-// ErrLibraryGone: a job was not added because its library was removed or is not started.
-var ErrLibraryGone = errors.New("its library was removed or is not started")
+// ErrLibraryGone: a job was not added because its library was removed, has no workflow, or is not started.
+var ErrLibraryGone = errors.New("its library was removed, has no workflow, or is not started")
+
+// ErrNoWorkflow: a library with no workflow cannot be started, and nothing is ever queued for it.
+var ErrNoWorkflow = errors.New("the library has no workflow")
 
 // RealPath is a library folder as stored: absolute, cleaned and with links resolved, so the scanner
 // (which does not follow a link at the top of a folder tree) walks the real folder, and two names
@@ -111,7 +114,8 @@ func Within(p, dir string) bool {
 	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
-const libCols = `id,name,path,flow_id,started,created,last_scan,last_scan_videos,override_folder,priority,COALESCE(share_paused_id,0),share_paused_since`
+// libCols reads a library; flow_id is NULL for a library with no workflow, read as 0 (GetFlow(0) refuses it).
+const libCols = `id,name,path,COALESCE(flow_id,0),started,created,last_scan,last_scan_videos,override_folder,priority,COALESCE(share_paused_id,0),share_paused_since`
 
 func scanLibrary(r interface{ Scan(...any) error }) (Library, error) {
 	var l Library
@@ -223,7 +227,14 @@ func (s *Store) pathTaken(q execer, path string, except int64) error {
 // AddLibrary adds a library with its own new flow made from t. The flow is named after the library
 // (a clash adds " 2", " 3"...), once; it is never renamed automatically afterwards.
 func (s *Store) AddLibrary(name, path string, t rules.Template, started bool) (Library, error) {
-	return s.addLibrary(name, path, name, t, 0, started)
+	return s.addLibrary(name, path, name, t, 0, started, false)
+}
+
+// AddLibraryWithoutFlow adds a library with no workflow yet: a workflow is assigned to it later, and until
+// then it cannot be started and nothing is ever queued for it (the user's "add a library, assign its
+// workflow later").
+func (s *Store) AddLibraryWithoutFlow(name, path string, started bool) (Library, error) {
+	return s.addLibrary(name, path, "", rules.Template{}, 0, started, true)
 }
 
 // AddLibraryOnFlow adds a library that uses the existing flow flowID (ErrNotFound if there is none).
@@ -234,11 +245,12 @@ func (s *Store) AddLibraryOnFlow(name, path string, flowID int64, started bool) 
 	if _, err := s.GetFlow(flowID); err != nil {
 		return Library{}, err
 	}
-	return s.addLibrary(name, path, "", rules.Template{}, flowID, started)
+	return s.addLibrary(name, path, "", rules.Template{}, flowID, started, false)
 }
 
-// addLibrary adds a library on flowID, or (0) on a new flow made from t and named after flowBase.
-func (s *Store) addLibrary(name, path, flowBase string, t rules.Template, flowID int64, started bool) (Library, error) {
+// addLibrary adds a library on flowID, or (0) on a new flow made from t and named after flowBase; noFlow
+// stores no workflow at all (flow_id NULL).
+func (s *Store) addLibrary(name, path, flowBase string, t rules.Template, flowID int64, started, noFlow bool) (Library, error) {
 	path = canonical(path)
 	if SystemFolder(path) {
 		return Library{}, ErrSystemFolder
@@ -251,7 +263,11 @@ func (s *Store) addLibrary(name, path, flowBase string, t rules.Template, flowID
 	if err := s.pathTaken(tx, path, 0); err != nil {
 		return Library{}, err
 	}
-	if flowID == 0 {
+	var fid any = flowID // NULL for a library with no workflow
+	switch {
+	case noFlow:
+		fid = nil
+	case flowID == 0:
 		flowName, err := uniqueFlowName(tx, flowBase)
 		if err != nil {
 			return Library{}, err
@@ -259,9 +275,10 @@ func (s *Store) addLibrary(name, path, flowBase string, t rules.Template, flowID
 		if flowID, err = s.addFlow(tx, flowName, t); err != nil {
 			return Library{}, err
 		}
+		fid = flowID
 	}
 	r, err := tx.Exec(`INSERT INTO libraries(name,path,flow_id,started,created) VALUES(?,?,?,?,?)`,
-		name, path, flowID, started, s.stamp())
+		name, path, fid, started, s.stamp())
 	if err != nil {
 		return Library{}, err
 	}
@@ -339,7 +356,7 @@ func (s *Store) EnsureLibraries(paths []string, legacy rules.Template) (added in
 				flowBase = name + " - Legacy"
 			}
 		}
-		if _, err := s.addLibrary(name, p, flowBase, t, 0, started); err != nil {
+		if _, err := s.addLibrary(name, p, flowBase, t, 0, started, false); err != nil {
 			return added, skipped, err
 		}
 		added++
@@ -436,8 +453,14 @@ func (s *Store) StartLibrary(id int64) error {
 		return ErrLibraryBusy // being removed (BeginRemove)
 	}
 	var p string // a library made at a system folder before slice 23 is not started
-	if err := s.db.QueryRow(`SELECT path FROM libraries WHERE id=?`, id).Scan(&p); err == nil && SystemFolder(p) {
-		return ErrSystemFolder
+	var noFlow bool
+	if err := s.db.QueryRow(`SELECT path, flow_id IS NULL FROM libraries WHERE id=?`, id).Scan(&p, &noFlow); err == nil {
+		if SystemFolder(p) {
+			return ErrSystemFolder
+		}
+		if noFlow { // nothing is ever queued without a workflow, so it cannot run
+			return ErrNoWorkflow
+		}
 	}
 	r, err := s.db.Exec(`UPDATE libraries SET started=1 WHERE id=?`, id)
 	if err != nil {
@@ -511,9 +534,9 @@ func (s *Store) TemplateFor(j Job) (rules.Template, error) {
 	var flowID int64
 	var err error
 	if j.LibraryID > 0 {
-		err = s.db.QueryRow(`SELECT flow_id FROM libraries WHERE id=?`, j.LibraryID).Scan(&flowID)
+		err = s.db.QueryRow(`SELECT COALESCE(flow_id,0) FROM libraries WHERE id=?`, j.LibraryID).Scan(&flowID)
 	} else {
-		err = s.db.QueryRow(`SELECT flow_id FROM libraries WHERE path=?`, j.Library).Scan(&flowID)
+		err = s.db.QueryRow(`SELECT COALESCE(flow_id,0) FROM libraries WHERE path=?`, j.Library).Scan(&flowID)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return rules.Template{}, fmt.Errorf("its library no longer exists: %w", ErrLibraryGone)
@@ -839,6 +862,9 @@ func (s *Store) SaveTemplate(libraryID int64, t rules.Template, choice string) (
 	l, err := scanLibrary(tx.QueryRow(`SELECT `+libCols+` FROM libraries WHERE id=?`, libraryID))
 	if err != nil {
 		return Library{}, err
+	}
+	if l.FlowID == 0 { // no workflow to save a setting on: assign one first
+		return Library{}, ErrNoWorkflow
 	}
 	f, err := s.flowIn(tx, l.FlowID)
 	if err != nil {

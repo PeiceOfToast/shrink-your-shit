@@ -277,7 +277,8 @@ the result and the original was deliberately left alone, with the reason in the 
    is not smaller is kept all the same ("always standardize"); its before and after sizes are on the
    job and in the log. Then the **playback test** (`-decode-check auto|always`; there is no "off":
    the new file's video through ffmpeg's decoder with `-xerror`, completely up to 3 hours long, else
-   three one-minute samples; any decode error fails), then the **picture comparison** (SSIM on three
+   a one-minute sample every 10 minutes from the start to the end (a 4-hour file: 25 samples); any
+   decode error fails), then the **picture comparison** (SSIM on three
    10-second samples at the start, middle and end; the worst must reach `-min-ssim`, default 0.95 and
    at least 0.90, an untuned starting value). Both files are read from 12 s before the sample
    with their real timestamps kept, put on one timeline by subtracting each file's video start time

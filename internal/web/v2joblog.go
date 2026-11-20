@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/vars"
 )
 
 // v2JobLog is a job's log from the database (user review 11-13 item E): GET /api/v2/jobs/{id}/log (its steps,
@@ -35,6 +38,8 @@ func v2JobLog(api *http.ServeMux, store *jobs.Store) {
 			failed = f.Step
 		}
 		moves, _ := store.JobMoves(id) // the replace step's file actions, in order (design's moves[])
+		j, _ := store.Get(id)
+		table := runVariables(j) // design-joblog-vars section 1: the run's values and who set them
 		out := []map[string]any{}
 		for _, st := range steps {
 			m := map[string]any{"name": st.Name, "startedAt": st.StartedAt, "tookMs": st.TookMs, "outcome": st.Outcome,
@@ -48,6 +53,9 @@ func v2JobLog(api *http.ServeMux, store *jobs.Store) {
 			}
 			if st.Name == "replace" && len(moves) > 0 {
 				m["moves"] = movesJSON(moves)
+			}
+			if set := stepSet(st.Name, table); len(set) > 0 {
+				m["set"] = set
 			}
 			if st.Index == failed { // the last 200 lines of the failed step: the output that says where it stopped
 				var mine []string
@@ -67,9 +75,9 @@ func v2JobLog(api *http.ServeMux, store *jobs.Store) {
 		if len(steps) == 0 && len(lines) > 0 {
 			out = append(out, importedStep(lines, final))
 		}
-		j, _ := store.Get(id)
 		writeJSON(w, map[string]any{"state": logState(store, id, j.Status, ""), "steps": out, "final": nilIfEmpty(final),
-			"start": startJSON(store, id, j, lines), "sections": sectionsJSON(lines), "summary": summaryJSON(store, j, lines)})
+			"start": startJSON(store, id, j, lines), "variables": variablesJSON(table), "sections": sectionsJSON(lines),
+			"summary": summaryJSON(store, j, lines)})
 	})
 	api.HandleFunc("GET /api/v2/jobs/{id}/log/download", func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
@@ -114,6 +122,61 @@ func movesJSON(moves []jobs.Move) []map[string]any {
 	for _, m := range moves {
 		out = append(out, map[string]any{"action": m.Action, "from": nilIfEmpty(m.From), "to": nilIfEmpty(m.To),
 			"ok": m.OK, "error": nilIfEmpty(m.Error)})
+	}
+	return out
+}
+
+// runVariables is the log's variables table (design-joblog-vars section 1): the values the worker recorded
+// when the job ran, plus the ones only a finished run knows (where the file was saved, its size and how much
+// was saved), which the replace step set. Sorted by name.
+func runVariables(j jobs.Job) []rules.RunVariable {
+	var snap rules.Snapshot
+	_ = json.Unmarshal([]byte(j.Plan), &snap)
+	out := append([]rules.RunVariable(nil), snap.Variables...)
+	for n, v := range vars.EndValues(j.OutputPath, j.SizeBefore, j.SizeAfter) {
+		found := false
+		for k := range out {
+			if out[k].Name == n {
+				out[k].Start, out[k].End, out[k].ChangedBy = "", v, "replace"
+				found = true
+			}
+		}
+		if !found {
+			out = append(out, rules.RunVariable{Name: n, End: v, ChangedBy: "replace"})
+		}
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].Name < out[b].Name })
+	return out
+}
+
+// variablesJSON is the variables table as the log's page reads it (design-joblog-vars section 1): start is
+// the value the run began with ("" when it had none), end is null when no end was recorded, and a secret has
+// no start or end at all — absent, not null, since its value is never recorded.
+func variablesJSON(table []rules.RunVariable) []map[string]any {
+	out := make([]map[string]any, 0, len(table))
+	for _, v := range table {
+		item := map[string]any{"name": v.Name, "changedBy": nilIfEmpty(v.ChangedBy), "secret": v.Secret}
+		if !v.Secret {
+			item["start"], item["end"] = v.Start, nilIfEmpty(v.End)
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+// stepSet is what a step of that name set: the encode makes the target codec; the replace saves the file.
+// A secret's value is never here.
+func stepSet(step string, table []rules.RunVariable) []map[string]any {
+	var out []map[string]any
+	for _, v := range table {
+		if v.Secret || v.ChangedBy != step {
+			continue
+		}
+		item := map[string]any{"name": v.Name}
+		if v.End != "" {
+			item["value"] = v.End
+		}
+		out = append(out, item)
 	}
 	return out
 }

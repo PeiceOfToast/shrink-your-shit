@@ -317,7 +317,7 @@ func main() {
 				id = fmt.Sprintf("builtin-%d", n)
 			}
 			return &worker.Worker{ID: id, Queue: store, Exec: x, FFmpeg: ffmpegPath, FFprobe: ffprobePath,
-				Template: store.TemplateFor, Poll: 3 * time.Second,
+				Template: store.TemplateFor, RunInfo: store.RunInfoFor, Poll: 3 * time.Second,
 				DecodeCheck: *decode, MinSSIM: *minSSIM, KeepDays: keepDays, Journal: store, Sidecars: store,
 				Paused: localGate(joined, store), StallAfter: *stallAfter, // this computer's own switch, and not while joined
 				Encoder:           web.LocalEncoderFor(store, chk),
@@ -497,6 +497,9 @@ func scanTargets(store *jobs.Store) func() ([]scanner.Target, error) {
 			}
 			f, err := store.GetFlow(l.FlowID)
 			if err != nil {
+				if l.FlowID == 0 { // no workflow: nothing is ever queued for it, so it is not walked
+					err = errors.New("it has no workflow yet")
+				}
 				log.Printf("scan: skipping library %q: %v", l.Name, err)
 				continue
 			}
