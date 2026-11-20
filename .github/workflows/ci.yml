@@ -36,7 +36,9 @@ jobs:
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    # The ffmpeg install alone has taken over 14 minutes on a slow runner, so 15 cancelled the tests mid-run.
+    # 45 leaves room for that install plus go test's own 15-minute timeout, so the test's timeout always fires first.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -62,7 +64,10 @@ jobs:
         env:
           SYP_REQUIRE_FFMPEG: "1"
         run: |
-          go test -count=1 -v ./... > test.log 2>&1 || { cat test.log; exit 1; }
+          # The output streams into this step's log as it runs, so even a cancelled job shows where it was.
+          # go test's own timeout ends before the job's, so a hung test fails with every goroutine's stack.
+          set -o pipefail
+          go test -count=1 -timeout 15m -v ./... 2>&1 | tee test.log
           grep -E '^(ok|FAIL)[[:space:]]' test.log
           echo "Real-ffmpeg tests:"
           grep -E '^[[:space:]]*--- (PASS|FAIL|SKIP): TestReal' test.log
