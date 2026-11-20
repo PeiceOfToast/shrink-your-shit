@@ -52,6 +52,36 @@ func mountPointFor(sh jobs.Share) string {
 	return shareRoot + "/" + sanitiseName(sh.Name, sh.ID)
 }
 
+// WaitingMounts lists the mount points of the saved shares that do not answer now. A library folder inside one of
+// them is on a share that is not connected yet: the scanner, purge and doctor leave it alone, since an empty mount
+// point reads as an emptied folder. Nothing is listed where shares are not watched.
+func WaitingMounts(store *jobs.Store) ([]string, error) {
+	if !shareWatched() {
+		return nil, nil
+	}
+	shares, err := store.LoadShares()
+	if err != nil {
+		return nil, err
+	}
+	var waiting []string
+	for _, sh := range shares {
+		if mp := mountPointFor(sh); !shareAnswers(mp) {
+			waiting = append(waiting, mp)
+		}
+	}
+	return waiting, nil
+}
+
+// Waits reports whether path is inside one of the mounts (a list from WaitingMounts).
+func Waits(path string, mounts []string) bool {
+	for _, m := range mounts {
+		if path == m || jobs.Within(path, m) {
+			return true
+		}
+	}
+	return false
+}
+
 // shareWatched is whether shares are checked here: Linux and Windows, in every mode. The helper mounts them in app mode;
 // in manual and docker mode the person mounts them, and a share waits for that (waiting_setup) until it answers.
 func shareWatched() bool { return runtime.GOOS == "linux" || runtime.GOOS == "windows" }

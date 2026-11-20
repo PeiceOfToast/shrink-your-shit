@@ -915,6 +915,44 @@ func TestMountErrReasonMapping(t *testing.T) {
 	}
 }
 
+// The Test button's messages (smbError) and the Linux connect reason (mountErrReason) for a refused logon,
+// and smbError's host_not_found text for a bare computer name and a dotted one.
+func TestSMBHintMessages(t *testing.T) {
+	bareHost := "Can't find a computer called DESKTOP-ABC123. A Windows computer name often can't be found from here; use its IP address instead (on that PC, run ipconfig and use the IPv4 Address)."
+	dottedHost := "Can't find a computer called nas.example.com. Check the name, or use its IP address."
+	refused := func(server string) string {
+		return "The username or password was refused. Use an account on " + server + ": for a Windows PC, the user name and password you sign in to it with. Sharing with Everyone still needs an account, because Windows turns guest access off."
+	}
+	noSuchHost := fmt.Errorf("dial tcp: lookup DESKTOP-ABC123: no such host")
+	noSuchDotted := fmt.Errorf("dial tcp: lookup nas.example.com: no such host")
+	logon := fmt.Errorf("NT_STATUS_LOGON_FAILURE")
+
+	cases := []struct {
+		name, code, want string
+		got              map[string]any
+	}{
+		{"Test: bare name", "host_not_found", bareHost, smbError(noSuchHost, "DESKTOP-ABC123", "movies")},
+		{"Test: dotted name", "host_not_found", dottedHost, smbError(noSuchDotted, "nas.example.com", "movies")},
+		{"Test: logon refused", "auth_failed", refused("nas.example.com"), smbError(logon, "nas.example.com", "movies")},
+	}
+	for _, c := range cases {
+		if c.got["code"] != c.code || c.got["message"] != c.want {
+			t.Errorf("%s: got code %v message %q\nwant code %s message %q", c.name, c.got["code"], c.got["message"], c.code, c.want)
+		}
+	}
+
+	var r struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(mountErrReason(fmt.Errorf("mount error(13): Permission denied"))), &r); err != nil {
+		t.Fatalf("reason is not JSON: %v", err)
+	}
+	if r.Code != "auth_failed" || r.Message != refused("that computer") {
+		t.Errorf("Linux connect: got code %s message %q", r.Code, r.Message)
+	}
+}
+
 // detectMode: app when the helper socket answers, manual when it does not.
 func TestDetectModeAppAndManualBySocket(t *testing.T) {
 	t.Setenv("container", "")
@@ -1293,5 +1331,41 @@ func TestNFSRuleHostsMatchHelperTable(t *testing.T) {
 		if nfsRule.MatchString(h + ":/export") {
 			t.Errorf("%q accepted by the web rule", h)
 		}
+	}
+}
+
+// A share with no folders must send "folders":[] (not null): null blanked the Shares page after a successful Test.
+func TestShareTestFoldersIsAListWhenEmpty(t *testing.T) {
+	read := func(dir string) []os.FileInfo {
+		f, err := os.Open(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		infos, err := f.Readdir(-1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return infos
+	}
+	empty := t.TempDir()
+	if err := os.WriteFile(filepath.Join(empty, "a.mkv"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, entries := range [][]os.FileInfo{nil, read(empty)} {
+		folders, more := firstFolders(entries)
+		b, _ := json.Marshal(map[string]any{"folders": folders, "moreFolders": more})
+		if string(b) != `{"folders":[],"moreFolders":0}` {
+			t.Fatalf("got %s", b)
+		}
+	}
+	full := t.TempDir()
+	for _, n := range []string{"a", "b", "c", "d", "e"} {
+		if err := os.Mkdir(filepath.Join(full, n), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if folders, more := firstFolders(read(full)); len(folders) != 3 || more != 2 {
+		t.Fatalf("got %v and %d more, want 3 and 2 more", folders, more)
 	}
 }

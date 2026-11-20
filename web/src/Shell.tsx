@@ -1,7 +1,7 @@
 // The shell (spec 2; DESIGN/v2 IA.md and mockups/shell.html): the grouped rail, the top bar and the page.
 // Nav badges: Workers shows the join requests waiting (ONE-COMMAND-SETUP.md section 9). Not here yet, until their data
 // exists: the other badges, the activity link, the "New" menu and the connection-lost bar.
-import { SampleDataPage } from "./PageHead";
+import { SampleDataPage, ScreenGuard } from "./PageHead";
 import { onLive, useLiveStatus } from "./live";
 import { MOCK } from "./api";
 import { getSummary } from "./dashApi";
@@ -132,7 +132,7 @@ export function Shell({ title, proto, children }: { title: string; proto: boolea
         </header>
         <ConnBar />
         {/* the prototype bar became the Sample data pill in each page's header (DESIGN-DIRECTION-clean.md P2) */}
-        <main className="content" id="main"><SampleDataPage.Provider value={proto}>{children}</SampleDataPage.Provider></main>
+        <main className="content" id="main"><SampleDataPage.Provider value={proto}><ScreenGuard key={path}>{children}</ScreenGuard></SampleDataPage.Provider></main>
       </div>
       {palette && <Palette onClose={() => setPalette(false)} />}
     </div>
