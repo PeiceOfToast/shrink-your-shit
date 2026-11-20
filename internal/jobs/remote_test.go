@@ -18,6 +18,7 @@ func TestUpgradeFrom34AddsRemoteWorkers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dropLogSections(t, s)
 	for _, q := range append(rewind35, `PRAGMA user_version=34`) {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
@@ -76,6 +77,7 @@ func TestWorkersOnAndOff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dropLogSections(t, s)
 	if !s.Paused() || s.WorkerEnabled(LocalWorker) { // a new install starts stopped (S2), carried to the local worker
 		t.Fatalf("new install: paused %v, local on %v", s.Paused(), s.WorkerEnabled(LocalWorker))
 	}

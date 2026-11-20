@@ -329,7 +329,7 @@ func TestFailureSummaryInTheAPI(t *testing.T) {
 	f1, _ := st.Enqueue(jobs.Job{Library: "/m", LibraryID: l.ID, Path: "/m/broken.mkv"})
 	st.Claim("t")
 	st.RecordRunStep(f1, jobs.RunStep{Index: 0, Name: "encode", Outcome: "failed", Command: "ffmpeg -i x"})
-	st.AppendLogLine(f1, 0, "stderr", "Invalid data found when processing input")
+	st.AppendLogLine(f1, 0, "", jobs.LevelInfo, "stderr", "Invalid data found when processing input")
 	st.SetFailureSummary(f1, jobs.FailureSummary{Step: 0, StepCount: 1, AfterMs: 4000, MediaTime: "00:41:12", ExitCode: 1,
 		KeyLines: []string{"a", "b", "c", "d", "e", "f", "Invalid data found when processing input"}})
 	st.Fail(f1, "convert_failed", "Converting stopped with an error.")
@@ -392,10 +392,10 @@ func TestJobLogEndpoint(t *testing.T) {
 	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
 	id, _ := st.Enqueue(jobs.Job{Library: "/m", LibraryID: l.ID, Path: "/m/a.mkv"})
 	st.Claim("t")
-	st.AppendLogLine(id, 0, "app", "started")
+	st.AppendLogLine(id, 0, "", jobs.LevelInfo, "app", "started")
 	st.RecordRunStep(id, jobs.RunStep{Index: 0, Name: "encode", StartedAt: "t0", TookMs: 1500, Outcome: "failed",
 		Command: "ffmpeg -i in.mkv out.mkv", Probe: `{"codec":"h264"}`, OutputLines: 1})
-	st.AppendLogLine(id, 0, "stderr", "Invalid data found when processing input")
+	st.AppendLogLine(id, 0, "", jobs.LevelInfo, "stderr", "Invalid data found when processing input")
 	st.SetFailureSummary(id, jobs.FailureSummary{Step: 0, StepCount: 1, ExitCode: 1, KeyLines: []string{"Invalid data found when processing input"}})
 	st.Fail(id, "convert_failed", "Converting stopped with an error.")
 	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10) + "/log"})
@@ -503,7 +503,7 @@ func TestJobLogImportedLinesShowAsOneStep(t *testing.T) {
 	id, _ := st.Enqueue(jobs.Job{Library: "/m", LibraryID: l.ID, Path: "/m/a.mkv"})
 	st.Claim("t")
 	for i := 0; i < 250; i++ {
-		st.AppendLogLine(id, 0, "app", "line "+strconv.Itoa(i))
+		st.AppendLogLine(id, 0, "", jobs.LevelInfo, "app", "line "+strconv.Itoa(i))
 	}
 	st.Complete(id, "/m/a.hevc.mkv", 100)
 	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10) + "/log"})
