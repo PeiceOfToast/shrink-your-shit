@@ -41,7 +41,7 @@ type Series = { label: string; color: string; value: (d: Day) => number };
 function DayBars({ title, note, days, series, fmt, tick = true, extra, quiet }: { title: string; note: ReactNode; days: Day[]; series: Series[]; fmt: (n: number) => string; tick?: boolean; extra?: (d: Day) => string | null; quiet: string }) {
   const [at, setAt] = useState<number | null>(null), ref = useRef<SVGSVGElement>(null), [W, setW] = useState(600);
   const n = days.length, sum = (d: Day) => series.reduce((a, x) => a + x.value(d), 0), allZero = days.every((x) => !x.recorded || sum(x) === 0);
-  // the viewBox is the measured width in px, so a label's font-size is its real size (12 px at any width) and the plot is 122 px tall
+  // the viewBox is the measured width in px, so a label's font-size is its real size (the small text size at any width) and the plot is 122 px tall
   const H = 160, top = 16, base = H - 22, bw = W / n, barW = Math.min(16, bw * 0.7);
   useLayoutEffect(() => { const el = ref.current; if (!el) return; const fit = () => setW(el.clientWidth || 600); fit(); const ro = new ResizeObserver(fit); ro.observe(el); return () => ro.disconnect(); }, [allZero]);
   const max = Math.max(1, ...days.filter((d) => d.recorded).map(sum));
