@@ -280,6 +280,9 @@ function StartStop({ w, onDone }: { w: Worker; onDone: (m: string) => void }) {
 // user item 3: the GPU "—" explains itself; title for mouse, hidden text for touch and screen readers (design 02:12Z)
 const NO_GPU = "Not available: no graphics card, one that doesn't report how busy it is, or a worker on another computer. GPU use is only read on This computer.";
 export function NoGpu() { return <span title={NO_GPU}>—<span className="sr"> ({NO_GPU})</span></span>; }
+// manager 11-20 (row 9631ec0a): the reading is the whole chip, so another VM or program on it shows too.
+const GPU_ALL = "How busy the whole graphics card is, including other programs using it.";
+export function GpuPct({ n }: { n: number }) { return <span title={GPU_ALL}>{Math.round(n)}%<span className="sr"> ({GPU_ALL})</span></span>; }
 
 function Live({ w }: { w: Worker }) { // only the figures the server sends
   const l = w.live, out: string[] = [];
@@ -288,7 +291,7 @@ function Live({ w }: { w: Worker }) { // only the figures the server sends
   for (const g of w.gpus) out.push("GPU · " + g.model + (g.vramBytes ? " · " + bytes(g.vramBytes) : ""));
   const g = l.gpu[0]?.utilPercent; // workshop #443: one entry, the busiest GPU; [] when unreadable or remote
   if (!out.length && g == null) return null; // a GPU reading shows even before the first CPU reading (review #444)
-  return <p className="sm">{out.length > 0 && out.join(" · ") + " · "}GPU {g == null ? <NoGpu /> : Math.round(g) + "%"}</p>;
+  return <p className="sm">{out.length > 0 && out.join(" · ") + " · "}GPU {g == null ? <NoGpu /> : <GpuPct n={g} />}</p>;
 }
 
 export function Workers() {
