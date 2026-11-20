@@ -11,7 +11,7 @@ import { listJobs } from "../jobsApi";
 import { Link, navigate, useSearch } from "../router";
 import { Browse } from "../FolderPicker";
 import { onLive } from "../live";
-import { getPublishedDoc, listWorkflows as listWorkflowDocs } from "../workflowApi";
+import { getPublishedDoc, getWorkflow, listWorkflows as listWorkflowDocs } from "../workflowApi";
 import { bytes, clock, count, duration, plural } from "../format";
 import { useData } from "../useData";
 import type { FirstFiles, FolderReport, LibraryItem } from "../types/v1";
@@ -305,7 +305,7 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
       {v && notStarted(v) && <p className="muted" role="note">This library isn't started yet: nothing is looked for or converted until you press Scan now.</p>}
       {v && paused(v) && <p className="muted" role="note">While paused, its files wait in the queue and aren't converted. Scans add no new files. Files already converting finish.</p>}
       {v && shareWait(v) && <p className="muted" role="note">Share not connected yet. Its files wait in the queue and aren't converted until {shareName(v)} connects.</p>}
-      {l && <EarlierWorkflow id={l.id} />}
+      {l && v && <EarlierWorkflow v={v} />}
       {l && <nav className="tabs" aria-label="Library sections">
         {[["general", "General"], ["discovery", "Discovery"], ["output", "Output"]].map(([k, t]) =>
           <Link key={k} to={"/libraries/" + l.id + (k === "general" ? "" : "?tab=" + k)} aria-current={tab === k ? "page" : undefined}>{t}</Link>)}
@@ -346,9 +346,11 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
 // the Libraries list, with the line saying nothing in the folder changed. A 409 (busy) keeps the question, in its words.
 // Contract 088aa569: a quiet line, never a popup, when files were converted with an earlier workflow; the dialog shows
 // what the server counted (possible / not possible with reasons) and only its button queues them.
-function EarlierWorkflow({ id }: { id: string }) {
-  const e = useData(() => getEarlierWorkflow(id), [id]), opener = useRef<HTMLButtonElement>(null);
+function EarlierWorkflow({ v }: { v: Library }) {
+  const id = v.id, e = useData(() => getEarlierWorkflow(id), [id]), opener = useRef<HTMLButtonElement>(null), status = useRef<HTMLParagraphElement>(null);
   const [ask, setAsk] = useState(false), [busy, setBusy] = useState(false), [err, setErr] = useState(""), [said, setSaid] = useState("");
+  const wf = useData(() => (ask ? getWorkflow(v.workflowId) : Promise.resolve(null)), [ask, v.workflowId]); // the title names it when known (design 02:49Z)
+  const wfName = wf.data && !failed(wf.data) ? " with " + wf.data.name + (wf.data.version ? " v" + wf.data.version : "") : "";
   const n = e.data && !failed(e.data) ? e.data : null; // an error (an older server) shows nothing: there is nothing to offer
   const back = () => (setAsk(false), opener.current?.focus());
   const go = async () => {
@@ -356,18 +358,22 @@ function EarlierWorkflow({ id }: { id: string }) {
     try {
       const r = await act(() => convertEarlierAgain(id), setErr);
       if (!r) return;
-      setAsk(false);
-      setSaid([plural(r.queued, "file", "files") + " put back in the queue.", ...r.notPossible.map((x) => "Not " + plural(x.count, "file", "files") + ": " + x.message)].join(" "));
+      setAsk(false); setTimeout(() => status.current?.focus()); // the button may be gone once the GET is re-read (review #445)
+      setSaid([plural(r.queued, "file", "files") + " put back in the queue.", ...r.notPossible.map((x) => x.count + (x.count === 1 ? " wasn't: " : " weren't: ") + x.message)].join(" "));
       e.reload();
     } finally { setBusy(false); }
   };
-  if (!n?.possible) return said ? <p className="muted" role="status">{said}</p> : null;
+  const done = <p ref={status} tabIndex={-1} className="muted" role="status" style={said ? { margin: 0 } : { display: "contents" }}>{said}</p>; // always present so it is announced
+  if (!n?.earlier) return done;
+  // none can be converted: say why, with no link (design 02:49Z); the sentence assumes deleted originals, else the server's words
+  if (!n.possible) return <><p className="muted" role="note">{plural(n.earlier, "file was", "files were")} converted with an earlier workflow. {n.notPossible.every((x) => x.code === "original_deleted")
+    ? (n.earlier === 1 ? "Its original was deleted, so it can't" : "Their originals were deleted, so they can't") + " be converted again." : "They can't be converted again: " + n.notPossible.map((x) => x.message).join(" ")}</p>{done}</>;
   return <div className="stack">
     <p className="muted" role="note">{plural(n.earlier, "file was", "files were")} converted with an earlier workflow. <button ref={opener} className="btn sm ghost" type="button" aria-expanded={ask} onClick={() => (setErr(""), setAsk(!ask))}>Convert them again…</button></p>
     {ask && <div role="alertdialog" aria-labelledby="ea-q" aria-describedby="ea-d" className="stack" onKeyDown={(k) => k.key === "Escape" && (k.stopPropagation(), back())}
       style={{ padding: 12, border: "1px solid var(--border-strong)", borderRadius: "var(--radius)", background: "var(--raised)" }}>
-      <strong id="ea-q">Convert {plural(n.possible, "file", "files")} again?</strong>
-      <div id="ea-d"><p style={{ margin: "0 0 6px" }}>Each starts from its original with this library's current workflow, never from the new file. The earlier new file is replaced once the new one passes its check.</p>
+      <strong id="ea-q">Convert {plural(n.possible, "file", "files")} again{wfName}?</strong>
+      <div id="ea-d"><p style={{ margin: "0 0 6px" }}>Each starts from its original with this library's current workflow, never from the new file. The earlier new file is replaced once the new one passes its check.{v.output.policy === "replace" && " The originals come from the trash, and each one's days in the trash start again."}</p>
         {n.notPossible.length > 0 && <ul style={{ margin: 0, paddingLeft: 18 }}>
           {n.notPossible.map((x) => <li key={x.code}>{plural(x.count, "file", "files")} can't: {x.message}</li>)}
         </ul>}</div>
@@ -375,6 +381,7 @@ function EarlierWorkflow({ id }: { id: string }) {
       <div className="row"><button className="btn primary" type="button" autoFocus disabled={busy} onClick={go}>Convert {plural(n.possible, "file", "files")} again</button>
         <button className="btn ghost" type="button" onClick={back}>Cancel</button></div>
     </div>}
+    {done}
   </div>;
 }
 
