@@ -118,6 +118,7 @@ type Issue struct {
 	Port       string `json:"port,omitempty"`
 	ConfigPath string `json:"configPath,omitempty"`
 	Field      string `json:"field,omitempty"` // the setting a config problem is about (its key)
+	Name       string `json:"name,omitempty"`  // the variable a variables problem is about
 }
 
 // LogicHash identifies a Doc's logic: equal Docs (whatever their layout) hash alike.

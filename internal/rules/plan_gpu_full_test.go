@@ -111,3 +111,44 @@ func TestFFmpegArgsProcessorGolden(t *testing.T) {
 		t.Errorf("processor:\n got %s\nwant %s", got, want)
 	}
 }
+
+// The same family's H.264 encoder takes the full pipeline too (the P3 on #493): the device and the scale are the
+// family's, and only the encoder name changes.
+func TestFFmpegArgsFullGPUH264Family(t *testing.T) {
+	for _, c := range []struct{ enc, want string }{
+		{"h264_qsv", "-hwaccel qsv -hwaccel_output_format qsv -hwaccel_device qsv -i in.mkv"},
+		{"h264_vaapi", "-hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device va -i in.mkv"},
+	} {
+		p := gpuPlan(22, func(v *VideoEncode) { v.Codec = "libx264"; v.Height = 1080 })
+		args, ok := p.FFmpegArgsFullGPU("in.mkv", "out.mkv", c.enc)
+		got := strings.Join(args, " ")
+		if !ok || !strings.Contains(got, c.want) || !strings.Contains(got, "-c:v:0 h264_") || strings.Contains(got, "hwupload") {
+			t.Errorf("%s: ok %v, args %s", c.enc, ok, got)
+		}
+	}
+}
+
+// A 10-bit SDR source's Plan has no HDR, so its full-GPU args carry no 10-bit flags: the frames' depth comes
+// from the decoder, and what keeps an 8-bit-only card off such a file is EncoderFor's 10-bit test (need10, set
+// from the source's depth), not a rule of the args. A2 added no rule here; this is the one EncoderFor owns.
+func TestFFmpegArgsFullGPUTenBitSDRIsPlannedAsSDR(t *testing.T) {
+	p := gpuPlan(22, func(v *VideoEncode) { v.Height = 1080 })
+	for _, enc := range []string{"hevc_qsv", "hevc_vaapi"} {
+		args, ok := p.FFmpegArgsFullGPU("in.mkv", "out.mkv", enc)
+		if !ok {
+			t.Fatalf("%s: not a full pipeline", enc)
+		}
+		for _, flag := range []string{"-profile:v:0", "-pix_fmt:v:0", "-color_primaries:v:0", "-color_trc:v:0", "-colorspace:v:0"} {
+			if hasFlag(args, flag) {
+				t.Errorf("%s: a 10-bit SDR plan has no HDR, but the args carry %s: %v", enc, flag, args)
+			}
+		}
+	}
+	// the gate: a 10-bit source needs the encoder's 10-bit test, so an 8-bit-only card writes no full-pipeline args at all
+	for _, enc := range []string{"hevc_qsv", "hevc_vaapi"} {
+		got, note := EncoderFor("libx265", enc, true, nil, gpuCaps([]string{enc}))
+		if got != "" || !strings.Contains(note, "10-bit") || !strings.Contains(note, enc) {
+			t.Errorf("%s without its 10-bit test: got %q note %q, want the processor with a 10-bit note", enc, got, note)
+		}
+	}
+}

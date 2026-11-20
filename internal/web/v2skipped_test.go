@@ -127,3 +127,44 @@ func TestRemovedJobKeepsItsFile(t *testing.T) {
 		}
 	}
 }
+
+// R8 fix: a file kept because the new file was bigger is a skipped file with its own reason, not a failed job
+// with check_failed; it stays linked to its job like any other skip.
+func TestBiggerNewFileIsSkipped(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	p := filepath.Join(lib.Path, "a.mkv")
+	id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: p})
+	st.Claim("w")
+	words := "The new file (" + rules.HumanBytes(8000) + ") was bigger than the original (" + rules.HumanBytes(2900) + "), so the original was kept"
+	if err := st.Skip(id, words, jobs.ReasonNewFileBigger); err != nil {
+		t.Fatal(err)
+	}
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs?tab=skipped"})
+	var l struct {
+		Items []struct {
+			Name   string
+			State  string
+			JobID  *string
+			Reason struct{ Code, Message string }
+		}
+	}
+	if err := json.Unmarshal([]byte(body), &l); err != nil {
+		t.Fatal(err)
+	}
+	if len(l.Items) != 1 {
+		t.Fatalf("skipped: %s", body)
+	}
+	it := l.Items[0]
+	if it.State != "skipped" || it.Name != "a.mkv" || it.Reason.Code != jobs.ReasonNewFileBigger || it.Reason.Message != words+"." { // the API adds the sentence's period
+		t.Errorf("skipped item %+v: want state skipped and reason new_file_bigger", it)
+	}
+	if it.JobID == nil || *it.JobID != strconv.FormatInt(id, 10) {
+		t.Errorf("jobId %v, want %d", it.JobID, id)
+	}
+	// Not a failed job: the Failed tab has nothing, so it cannot read as check_failed.
+	_, failed, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs?tab=failed"})
+	if strings.Contains(failed, jobs.ReasonNewFileBigger) || strings.Contains(failed, "a.mkv") {
+		t.Errorf("the file is in the failed tab: %s", failed)
+	}
+}

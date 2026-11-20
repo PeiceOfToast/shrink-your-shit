@@ -15,8 +15,9 @@ import (
 )
 
 // R8, real: a tiny, heavily compressed source converted at the highest quality comes out bigger. With "keep" the
-// original stays byte-identical in its folder, nothing else is left beside it, and the job is kept with a reason
-// that says why. (If the size check is removed, the original is replaced and this test fails.)
+// original stays byte-identical in its folder, nothing else is left beside it, and the file ends skipped with
+// reason new_file_bigger and a sentence that says why, not failed. (If the size check is removed, the original is
+// replaced and this test fails.)
 func TestRealBiggerNewFileKeepsTheOriginal(t *testing.T) {
 	needTools(t)
 	dir := t.TempDir()
@@ -37,12 +38,19 @@ func TestRealBiggerNewFileKeepsTheOriginal(t *testing.T) {
 	w.KeepDays, w.Journal = func() int { return 7 }, st
 	w.run(t)
 
-	j, err := st.Get(id)
+	if _, err := st.Get(id); err == nil {
+		t.Fatal("the job record is still there; want it gone (skipped)")
+	}
+	skipped, total, err := st.SkippedFiles([]string{jobs.ReasonNewFileBigger}, 10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if j.Status != jobs.Kept || !strings.Contains(j.Error, "bigger") {
-		t.Fatalf("status %s, reason %q: want kept because the new file is bigger", j.Status, j.Error)
+	if total != 1 || len(skipped) != 1 || skipped[0].Path != src {
+		t.Fatalf("skipped files: %+v (total %d), want the original", skipped, total)
+	}
+	if skipped[0].Reason != jobs.ReasonNewFileBigger || !strings.Contains(skipped[0].Decision, "was bigger than the original") ||
+		!strings.Contains(skipped[0].Decision, "so the original was kept") {
+		t.Errorf("skipped: reason %q, decision %q; want new_file_bigger with both sizes", skipped[0].Reason, skipped[0].Decision)
 	}
 	after, err := os.ReadFile(src)
 	if err != nil {
