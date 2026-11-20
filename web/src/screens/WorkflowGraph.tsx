@@ -363,6 +363,8 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
               <p className="muted sm">{pickedDef?.typeLabel}{!picked.enabled && " · Off"}</p>
               {checked.stepSummaries?.[picked.id] && <p>{checked.stepSummaries[picked.id]}</p>}
               {pickedDef?.description && <p className="sm">{pickedDef.description}</p>}
+              {/* the same full sentence as the pill's title, readable without hover (touch has no title tooltip): the same rule as the canvas's free() */}
+              {(pickedDef?.outputs ?? []).filter((p) => p.outcome !== "success" && !doc.edges.some((e) => e.from === picked.id && e.fromPort === p.name) && !issues.some((i) => i.nodeId === picked.id && i.code === "unconnected_port" && i.port === p.name)).map((p) => <p key={p.name} className="muted sm">{notLinked(p)}</p>)}
               {edit && pickedDef?.category !== "input" && <div className="row"><button className="btn sm" type="button" onClick={() => removeNodes([picked.id])}><Icon id="i-trash" />Delete this step</button></div>}
               {/* step 2b (SCREENS V4 Inspector): the step's own form, the same as the step list's (schema-driven), with the server's problems inline */}
               {edit && pickedDef && !pickedDef.readOnly && <form className="stack ginform" onSubmit={(e) => e.preventDefault()} aria-label={"Settings of " + (picked.name ?? pickedDef.name)}>
