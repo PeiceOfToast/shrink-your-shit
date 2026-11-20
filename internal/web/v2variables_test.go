@@ -99,11 +99,9 @@ func TestVariablesBuiltInSample(t *testing.T) {
 	if v := got.find(t, "title"); v.Group != "File" || v.Description != "The file name without its extension" || v.Fields != nil {
 		t.Errorf("title: %+v", v)
 	}
-	for _, name := range []string{"sub_lang", "sub_kind"} { // field-only: not offered until the .srt name takes variables
-		for _, v := range got.Variables {
-			if v.Name == name {
-				t.Errorf("%s is listed; it is a field-only name", name)
-			}
+	for _, name := range []string{"sub_lang", "sub_kind"} { // the .srt name's own two: offered with the setting they belong to
+		if v := got.find(t, name); v.Group != "Subtitles" || len(v.Fields) != 1 || v.Fields[0] != "srtName" || v.Value != nil {
+			t.Errorf("%s: %+v; want the Subtitles group, fields [srtName], and no value for the built-in sample", name, v)
 		}
 	}
 
