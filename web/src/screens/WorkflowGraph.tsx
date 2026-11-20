@@ -13,7 +13,7 @@ import { PageHead } from "../PageHead";
 import { Link, onLeave } from "../router";
 import { useData } from "../useData";
 import { getDraft, getWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked } from "../workflowApi";
-import { takesVars, varListFor, varProblems } from "../VarInput";
+import { takesVars, varListFor, varProblems, withOwn } from "../VarInput";
 import { ICON, Options, Reg } from "./WorkflowStack";
 import type { Layout, Node, PublishPreview, StepDefinition, ValidationIssue, WorkflowDoc, WorkflowRevision } from "../types/v2";
 
@@ -198,7 +198,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
   const issues = checked.issues ?? [], errors = issues.filter((i) => i.severity === "error");
   const badValues = issues.filter((i) => i.code === "invalid_config"); // #165: blocks Save draft and Publish until fixed
   // {{name}} fields with a name that isn't a variable (or an unclosed {{): Publish waits for them, once the list has loaded
-  const tv = takesVars(defs), vl = useData(() => varListFor(id, tv), [id, tv]).data, varBad = vl ? varProblems(doc.nodes, defs, vl.variables) : [];
+  const tv = takesVars(defs), vl = useData(() => varListFor(id, tv), [id, tv]).data, varBad = vl ? varProblems(doc.nodes, defs, withOwn(vl.variables, doc.variables ?? [])) : [];
   const picked = doc.nodes.find((n) => n.id === sel), pickedDef = picked && defs.find((x) => x.type === picked.type);
   const nameOf = (nid?: string) => { const t = doc.nodes.find((n) => n.id === nid); return t ? t.name ?? defs.find((x) => x.type === t.type)?.name ?? t.type : ""; };
   const shown = nodes.map((n) => (drag[n.id] ? { ...n, position: drag[n.id] } : n));
