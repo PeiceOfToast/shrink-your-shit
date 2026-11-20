@@ -38,6 +38,9 @@ export interface Job {
   attempts: number; maxAttempts: number; retryAt: Time | null;
   reason: { code: string; message: string } | null;
   originalUntouched: boolean | null;
+  // A running job's expected saving, from its size so far: null = no history yet; negative = the file may grow.
+  expectedSavingBytes?: number | null;
+  expectedSavingEstimated?: boolean;
   sizes: { before: number; after: number | null; saved: number | null };
   output: { path: string | null; policy: CommitPolicy; committedAt: Time | null };
   originalState: "untouched" | "kept" | "restored" | "deleted" | "left_in_place" | "kept_beside" | null;
