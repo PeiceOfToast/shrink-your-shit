@@ -102,6 +102,9 @@ export interface Library {
   status: "ok" | "scanning" | "path_missing" | "not_readable" | "disabled" | "paused_share";
   // paused_share: the library waits for its share to connect. enabled stays true; pausedBy names the share.
   pausedBy?: { shareId: string; shareName: string; since: string; use: "folder" } | null;
+  // false when the app can't write the library's folder; unwritableMessage is the server's sentence then, else "" (workshop #433)
+  writable: boolean;
+  unwritableMessage: string;
 }
 
 export interface Summary { // GET /summary

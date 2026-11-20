@@ -6,12 +6,12 @@ import { Empty, LoadFailed, PageHead } from "../PageHead";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
-import { addLibrary, checkFolder, firstFiles, getLibraryV2, getSettings, listLibraries, listLibrariesV2, listWorkflows, patchLibrary, patchLibraryV2, removeLibrary, scanLibrary, setLibraryWorkflow, type WorkflowChoice } from "../libraryApi";
+import { addLibrary, checkFolder, convertEarlierAgain, getEarlierWorkflow, firstFiles, getLibraryV2, getSettings, listLibraries, listLibrariesV2, listWorkflows, patchLibrary, patchLibraryV2, removeLibrary, scanLibrary, setLibraryWorkflow, type WorkflowChoice } from "../libraryApi";
 import { listJobs } from "../jobsApi";
 import { Link, navigate, useSearch } from "../router";
 import { Browse } from "../FolderPicker";
 import { onLive } from "../live";
-import { getPublishedDoc, listWorkflows as listWorkflowDocs } from "../workflowApi";
+import { getPublishedDoc, getWorkflow, listWorkflows as listWorkflowDocs } from "../workflowApi";
 import { bytes, clock, count, duration, plural } from "../format";
 import { useData } from "../useData";
 import type { FirstFiles, FolderReport, LibraryItem } from "../types/v1";
@@ -129,6 +129,7 @@ export function Libraries() {
               <td className="selc"><label className="hit"><input type="checkbox" aria-label={"Select " + l.name} checked={sel.includes(l.id)} onChange={(e) => setSel(e.target.checked ? [...sel, l.id] : sel.filter((x) => x !== l.id))} /></label></td>
               <td className="idc"><Link className="ttl" to={"/libraries/" + l.id}>{l.name}</Link>
                 <span className="sub mono path" title={l.paths.join(", ")}>{l.paths.map((p, i) => <span key={i}>{i > 0 && ", "}{breakPath(p)}</span>)}</span>
+                {!l.writable && <p className="st bad sm"><Icon id="i-alert" /><span>{l.unwritableMessage} <Link className="over" to="/settings/health">How to fix it</Link></span></p>}{/* p, not .sub: .sub is grey and hidden on phones (QA #439) */}
                 {paused(l) && <span className="sub">Paused · {count(l.counts.waiting)} waiting, not converting</span>}
                 {shareWait(l) && <span className="sub">Waiting for {shareName(l)} to connect · {count(l.counts.waiting)} waiting</span>}
                 <span className="sub phone">{paused(l) ? "Paused · " + count(l.counts.waiting) + " waiting, not converting"
@@ -304,7 +305,9 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
       {note && <p className="muted" role="status">{note}</p>}
       {v && notStarted(v) && <p className="muted" role="note">This library isn't started yet: nothing is looked for or converted until you press Scan now.</p>}
       {v && paused(v) && <p className="muted" role="note">While paused, its files wait in the queue and aren't converted. Scans add no new files. Files already converting finish.</p>}
+      {v && !v.writable && <p className="st bad" role="note"><Icon id="i-alert" /><span>{v.unwritableMessage} <Link to="/settings/health">How to fix it</Link></span></p>}
       {v && shareWait(v) && <p className="muted" role="note">Share not connected yet. Its files wait in the queue and aren't converted until {shareName(v)} connects.</p>}
+      {l && v && <EarlierWorkflow v={v} />}
       {l && <nav className="tabs" aria-label="Library sections">
         {[["general", "General"], ["discovery", "Discovery"], ["output", "Output"]].map(([k, t]) =>
           <Link key={k} to={"/libraries/" + l.id + (k === "general" ? "" : "?tab=" + k)} aria-current={tab === k ? "page" : undefined}>{t}</Link>)}
@@ -343,6 +346,47 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
 // Remove a library (one-UI gap G1; design SCREENS, 19:08Z): at the bottom of the General tab. The question says only
 // what applies (waiting files, the file being converted, converted files); Keep it has the focus and Escape. After:
 // the Libraries list, with the line saying nothing in the folder changed. A 409 (busy) keeps the question, in its words.
+// Contract 088aa569: a quiet line, never a popup, when files were converted with an earlier workflow; the dialog shows
+// what the server counted (possible / not possible with reasons) and only its button queues them.
+function EarlierWorkflow({ v }: { v: Library }) {
+  const id = v.id, e = useData(() => getEarlierWorkflow(id), [id]), opener = useRef<HTMLButtonElement>(null), status = useRef<HTMLParagraphElement>(null);
+  const [ask, setAsk] = useState(false), [busy, setBusy] = useState(false), [err, setErr] = useState(""), [said, setSaid] = useState("");
+  const wf = useData(() => (ask ? getWorkflow(v.workflowId) : Promise.resolve(null)), [ask, v.workflowId]); // the title names it when known (design 02:49Z)
+  const wfName = wf.data && !failed(wf.data) ? " with " + wf.data.name + (wf.data.version ? " v" + wf.data.version : "") : "";
+  const n = e.data && !failed(e.data) ? e.data : null; // an error (an older server) shows nothing: there is nothing to offer
+  const back = () => (setAsk(false), opener.current?.focus());
+  const go = async () => {
+    setErr(""); setBusy(true);
+    try {
+      const r = await act(() => convertEarlierAgain(id), setErr);
+      if (!r) return;
+      setAsk(false); setTimeout(() => status.current?.focus()); // the button may be gone once the GET is re-read (review #445)
+      setSaid([plural(r.queued, "file", "files") + " put back in the queue.", ...r.notPossible.map((x) => x.count + (x.count === 1 ? " wasn't: " : " weren't: ") + x.message)].join(" "));
+      e.reload();
+    } finally { setBusy(false); }
+  };
+  const done = <p ref={status} tabIndex={-1} className="muted" role="status" style={said ? { margin: 0 } : { display: "contents" }}>{said}</p>; // always present so it is announced
+  if (!n?.earlier) return done;
+  // none can be converted: say why, with no link (design 02:49Z); the sentence assumes deleted originals, else the server's words
+  if (!n.possible) return <><p className="muted" role="note">{plural(n.earlier, "file was", "files were")} converted with an earlier workflow. {n.notPossible.every((x) => x.code === "original_deleted")
+    ? (n.earlier === 1 ? "Its original was deleted, so it can't" : "Their originals were deleted, so they can't") + " be converted again." : "They can't be converted again: " + n.notPossible.map((x) => x.message).join(" ")}</p>{done}</>;
+  return <div className="stack">
+    <p className="muted" role="note">{plural(n.earlier, "file was", "files were")} converted with an earlier workflow. <button ref={opener} className="linkbtn" style={{ color: "var(--accent-text)" }} type="button" aria-expanded={ask} onClick={() => (setErr(""), setAsk(!ask))}>Convert them again…</button></p>
+    {ask && <div role="alertdialog" aria-labelledby="ea-q" aria-describedby="ea-d" className="stack" onKeyDown={(k) => k.key === "Escape" && (k.stopPropagation(), back())}
+      style={{ padding: 12, border: "1px solid var(--border-strong)", borderRadius: "var(--radius)", background: "var(--raised)" }}>
+      <strong id="ea-q">Convert {plural(n.possible, "file", "files")} again{wfName}?</strong>
+      <div id="ea-d"><p style={{ margin: "0 0 6px" }}>Each starts from its original with this library's current workflow, never from the new file. The earlier new file is replaced once the new one passes its check.{v.output.policy === "replace" && " The originals come from the trash, and each one's days in the trash start again."}</p>
+        {n.notPossible.length > 0 && <ul style={{ margin: 0, paddingLeft: 18 }}>
+          {n.notPossible.map((x) => <li key={x.code}>{plural(x.count, "file", "files")} can't: {x.message}</li>)}
+        </ul>}</div>
+      {err && <p className="st bad" role="alert" style={{ whiteSpace: "normal" }}><Icon id="i-alert" /><span>{err}</span></p>}
+      <div className="row"><button className="btn primary" type="button" autoFocus disabled={busy} onClick={go}>Convert {plural(n.possible, "file", "files")} again</button>
+        <button className="btn ghost" type="button" onClick={back}>Cancel</button></div>
+    </div>}
+    {done}
+  </div>;
+}
+
 function RemoveSection({ l, v }: { l: LibraryItem; v: Library }) {
   const [ask, setAsk] = useState(false), [err, setErr] = useState(""), [busy, setBusy] = useState(false), opener = useRef<HTMLButtonElement>(null);
   const back = () => (setAsk(false), opener.current?.focus()); // Escape and Keep it: the focus goes back to the button that opened the question (review d2e81ef P3)
