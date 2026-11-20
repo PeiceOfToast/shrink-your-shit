@@ -397,7 +397,7 @@ export function WorkerPage({ id }: { id: string }) {
         <div style={{ padding: "8px var(--pad) 0" }}><EncoderCards w={w} big reload={d.reload} /></div>
         {decoders.length > 0 && <>
           <h3 className="ec-h" style={{ margin: "16px var(--pad) 6px" }}>Decoders</h3>
-          <div className="list"><table className="tbl">
+          <div className="list rows"><table className="tbl">
             <thead><tr><th>Format</th><th>How</th><th className="stc">Result</th><th data-p="3">When</th></tr></thead>
             <tbody>{decoders.map((c) => <tr key={c.key}><td className="idc"><span className="ttl">{FORMAT(c.key) || c.label}</span><span className="sub">{c.label}</span><span className="sub phone">{[c.label, c.test === "failed" && c.detail].filter(Boolean).join(" · ")}</span></td><td>{how(c)}</td>
               <td className="stc"><span className={"pill " + (c.test === "passed" ? "ok" : c.test === "failed" ? "" : "")} title={c.detail}>{c.test === "passed" ? "Works" : c.test === "failed" ? "Doesn't work here" : "Not tested"}</span></td>
