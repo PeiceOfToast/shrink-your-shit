@@ -5,7 +5,10 @@ package workflow
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/vars"
 )
 
 // The names {{name}} in a step's fields take: the built-ins the engine sets for every file (design-
@@ -23,8 +26,9 @@ type Builtin struct {
 	Group       string // File, Library, Video, Audio, Subtitles, Run
 	Description string
 	// FieldOnly: the name exists in one field only (the .srt name), so it is not offered as a
-	// variable of its own until that field takes variables.
+	// variable of its own until that field takes variables. Fields are the settings it belongs to.
 	FieldOnly bool
+	Fields    []string
 }
 
 // Builtins are every built-in name, in the design's groups and order.
@@ -57,8 +61,8 @@ var Builtins = []Builtin{
 	{Name: "output_path", Group: "Run", Description: "Where the new file was saved"},
 	{Name: "new_size_bytes", Group: "Run", Description: "The new file's size in bytes"},
 	{Name: "saved_percent", Group: "Run", Description: "How much smaller the new file is"},
-	{Name: "sub_lang", Group: "Subtitles", Description: "The subtitle's language, in the .srt name", FieldOnly: true},
-	{Name: "sub_kind", Group: "Subtitles", Description: "The subtitle's kind (.forced or .sdh), in the .srt name", FieldOnly: true},
+	{Name: "sub_lang", Group: "Subtitles", Description: "The subtitle's language, in the .srt name", FieldOnly: true, Fields: []string{"srtName"}},
+	{Name: "sub_kind", Group: "Subtitles", Description: "The subtitle's kind (.forced or .sdh), in the .srt name", FieldOnly: true, Fields: []string{"srtName"}},
 }
 
 // BuiltinName reports whether name is a built-in (a name the engine sets, so a workflow can't).
@@ -88,10 +92,205 @@ func CheckVariables(d Doc) []Issue {
 		case seen[v.Name]:
 			out = append(out, Issue{Code: "duplicate_variable", Severity: "error", Name: v.Name,
 				Message: fmt.Sprintf("Two variables are called {{%s}}. Give one of them another name.", v.Name)})
+		case !secretValueOK(v):
+			// a secret is text: only text can be sealed, and a value of another shape would be stored in the
+			// clear (W4b QA step 3). null is fine (no value); so is a stored value already sealed.
+			out = append(out, Issue{Code: "invalid_secret_value", Severity: "error", Name: v.Name,
+				Message: fmt.Sprintf("The secret %s has to be text. Send it as a string, or leave it without a value.", nameOrEmpty(v.Name))})
 		}
 		seen[v.Name] = true
 	}
 	return out
+}
+
+// secretValueOK says whether v's value is one a secret can hold: none (null), the text a person typed, or
+// the sealed form the store keeps (a JSON object of the ciphertext and its nonce, which every draft read
+// back from the database carries).
+func secretValueOK(v Variable) bool {
+	if v.Type != "secret" || v.Value == nil {
+		return true
+	}
+	if _, ok := v.Value.(string); ok {
+		return true
+	}
+	m, ok := v.Value.(map[string]any)
+	if !ok || len(m) != 2 {
+		return false
+	}
+	sealed, sok := m["sealed"].(string)
+	nonce, nok := m["nonce"].(string)
+	return sok && nok && sealed != "" && nonce != ""
+}
+
+// Masked is d with every secret's value left out: the API never sends one back. HasValue says whether
+// one is stored, so the editor can show that it is set without holding it.
+func Masked(d Doc) Doc {
+	if len(d.Variables) == 0 {
+		return d
+	}
+	out := d
+	out.Variables = make([]Variable, len(d.Variables))
+	copy(out.Variables, d.Variables)
+	for i := range out.Variables {
+		v := &out.Variables[i]
+		if v.Type != "secret" {
+			continue
+		}
+		v.HasValue = v.HasValue || v.Value != nil
+		v.Value = nil
+	}
+	return out
+}
+
+// KeepSecretValues is in with every secret that was sent with no value keeping the one stored has for
+// it: the page is never told a secret, so saving the draft back must not erase what it could not show.
+// A value that is sent replaces the stored one, and a secret with neither stays without.
+func KeepSecretValues(in, stored Doc) Doc {
+	have := map[string]any{}
+	for _, v := range stored.Variables {
+		if v.Type == "secret" && v.Value != nil {
+			have[v.Name] = v.Value
+		}
+	}
+	if len(have) == 0 || len(in.Variables) == 0 {
+		return in
+	}
+	out := in
+	out.Variables = make([]Variable, len(in.Variables))
+	copy(out.Variables, in.Variables)
+	for i := range out.Variables {
+		v := &out.Variables[i]
+		if v.Type != "secret" || v.Value != nil {
+			continue
+		}
+		if val, ok := have[v.Name]; ok {
+			v.Value = val
+		}
+	}
+	return out
+}
+
+// builtinFor says whether name is a built-in that exists in that setting (a field-only name exists in
+// its own settings only).
+func builtinFor(name, field string) (Builtin, bool) {
+	for _, b := range Builtins {
+		if b.Name == name {
+			if len(b.Fields) > 0 && !slices.Contains(b.Fields, field) {
+				return b, false // a field-only name, in another field
+			}
+			return b, true
+		}
+	}
+	return Builtin{}, false
+}
+
+// CheckTemplates checks every field that takes {{name}} variables ("x-variables": true in its step's
+// definition): each name must be one this workflow has, and every {{ must be closed. Publish refuses
+// these, so a run never gets a template that would quietly come out wrong: an unknown name becomes
+// nothing, and an unclosed {{ makes the rest of the text plain, as typed.
+func CheckTemplates(d Doc) []Issue {
+	own := make([]string, 0, len(d.Variables))
+	for _, v := range d.Variables {
+		own = append(own, v.Name)
+	}
+	defs := map[string]StepDefinition{}
+	for _, def := range Definitions() {
+		defs[def.Type] = def
+	}
+	var out []Issue
+	for _, n := range d.Nodes {
+		def, ok := defs[n.Type]
+		if !ok {
+			continue // unknown_node_type says it already
+		}
+		props, _ := def.ConfigSchema["properties"].(map[string]any)
+		keys := make([]string, 0, len(props))
+		for k := range props {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys) // one order, whichever order the map answers in
+		for _, k := range keys {
+			p, _ := props[k].(map[string]any)
+			if p["x-variables"] != true {
+				continue
+			}
+			t, _ := n.Config[k].(string)
+			out = append(out, checkTemplate(n, k, titleOf(p, k), t, own)...)
+		}
+	}
+	return out
+}
+
+// checkTemplate is one template field checked: its unknown names (with a suggested one, when a known
+// name is close) and an unclosed {{.
+func checkTemplate(n Node, field, title, t string, own []string) []Issue {
+	if t == "" {
+		return nil
+	}
+	refs, unclosed := vars.Refs(t)
+	known := append([]string{}, own...)
+	for _, b := range Builtins {
+		if len(b.Fields) == 0 || slices.Contains(b.Fields, field) {
+			known = append(known, b.Name)
+		}
+	}
+	slices.Sort(known)
+	var out []Issue
+	seen := map[string]bool{}
+	for _, r := range refs {
+		if _, ok := builtinFor(r.Name, field); ok || slices.Contains(own, r.Name) || seen[r.Name] {
+			continue
+		}
+		seen[r.Name] = true
+		i := Issue{Code: "unknown_variable", Severity: "error", NodeID: n.ID, ConfigPath: "/" + field, Field: field, Name: r.Name,
+			Message: fmt.Sprintf("In “%s”, {{%s}} is not a variable of this workflow, so it would come out as nothing. ", title, r.Name)}
+		if s := closestName(r.Name, known); s != "" {
+			i.Suggest = s
+			i.Message += fmt.Sprintf("Did you mean {{%s}}?", s)
+		} else {
+			i.Message += "Add that variable to the workflow, or fix the name."
+		}
+		out = append(out, i)
+	}
+	if unclosed {
+		out = append(out, Issue{Code: "unclosed_variable", Severity: "error", NodeID: n.ID, ConfigPath: "/" + field, Field: field,
+			Message: fmt.Sprintf("In “%s”, a {{ has no }} after it, so the rest of it would come out word for word. Add the }}, or remove the {{.", title)})
+	}
+	return out
+}
+
+// closestName is the known name nearest to name (at most two letters apart), or "" when none is: a
+// typo's likely meaning, never a guess far off.
+func closestName(name string, known []string) string {
+	best, bestD := "", 3
+	for _, k := range known {
+		if d := editDistance(name, k); d < bestD {
+			best, bestD = k, d
+		}
+	}
+	return best
+}
+
+// editDistance is the Levenshtein distance between a and b.
+func editDistance(a, b string) int {
+	ar, br := []rune(a), []rune(b)
+	prev := make([]int, len(br)+1)
+	cur := make([]int, len(br)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(ar); i++ {
+		cur[0] = i
+		for j := 1; j <= len(br); j++ {
+			cost := 1
+			if ar[i-1] == br[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev, cur = cur, prev
+	}
+	return prev[len(br)]
 }
 
 // nameOrEmpty is a name for a message: the name in quotes, or "A variable" when it is empty.

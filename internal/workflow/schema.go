@@ -117,8 +117,9 @@ type Issue struct {
 	EdgeID     string `json:"edgeId,omitempty"`
 	Port       string `json:"port,omitempty"`
 	ConfigPath string `json:"configPath,omitempty"`
-	Field      string `json:"field,omitempty"` // the setting a config problem is about (its key)
-	Name       string `json:"name,omitempty"`  // the variable a variables problem is about
+	Field      string `json:"field,omitempty"`   // the setting a config problem is about (its key)
+	Name       string `json:"name,omitempty"`    // the variable a variables problem is about
+	Suggest    string `json:"suggest,omitempty"` // a known name the person may have meant (a template's unknown name)
 }
 
 // LogicHash identifies a Doc's logic: equal Docs (whatever their layout) hash alike.

@@ -61,3 +61,42 @@ func TestRealTemplatedNames(t *testing.T) {
 		t.Error("temp left")
 	}
 }
+
+// The move-to folder and the track title are templates too (W4b): on a real file the new file lands
+// in the folder the template made, and ffprobe reads the resolved title back off its audio track.
+func TestRealTemplatedFolderAndTrackTitle(t *testing.T) {
+	needTools(t)
+	dir := t.TempDir()
+	src := filepath.Join(dir, "Movie.mkv")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=5:size=1280x720:rate=25", "-f", "lavfi", "-i", "sine=duration=5",
+		"-c:v", "libx264", "-b:v", "5000k", "-c:a", "aac", "-b:a", "96k", "-metadata:s:a:0", "language=eng", src)
+	before, _ := os.ReadFile(src)
+	s := rules.DefaultSelectors(3)
+	s.AfterConverting, s.FolderMode, s.Audio = "folder", "", "aac"
+	s.OutputDir = filepath.Join(t.TempDir(), "{{title}}") // one folder for all, filled in for this file
+	s.OutputName, s.TrackTitle = "{{title}}-{{resolution}}", "{{title}} ({{resolution}})"
+	tmpl := s.Template()
+	st, id := realJob(t, src, 5)
+	w := realWorker(st, media.OSExec{})
+	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	if err := w.run(t); err != nil {
+		t.Fatal(err)
+	}
+	j, _ := st.Get(id)
+	if j.Status != jobs.Done {
+		t.Fatalf("%s %q", j.Status, j.Error)
+	}
+	out := filepath.Join(filepath.Dir(s.OutputDir), "Movie", "Movie-720p.mkv") // the folder came from the probe
+	if _, err := os.Stat(out); err != nil {
+		t.Fatalf("the new file is not where the templates put it: %v", err)
+	}
+	if a := probe(t, out).Audio(); len(a) != 1 || a[0].Title != "Movie (720p)" {
+		t.Errorf("the track title: %+v", a)
+	}
+	if b, _ := os.ReadFile(src); string(b) != string(before) {
+		t.Error("the original must stay as it was")
+	}
+	if tempLeft(src) {
+		t.Error("temp left")
+	}
+}

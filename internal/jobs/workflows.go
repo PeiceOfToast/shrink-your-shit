@@ -211,6 +211,10 @@ func (s *Store) EnsureRevisions() error {
 }
 
 func (s *Store) insertPublished(q execer, flowID int64, doc workflow.Doc, layout workflow.Layout, tHash string) (int64, error) {
+	doc, err := sealDoc(doc) // a revision's secret values are stored sealed (W4b QA step 3)
+	if err != nil {
+		return 0, err
+	}
 	now := s.stamp()
 	r, err := q.Exec(`INSERT INTO workflow_revisions(workflow_id,number,status,doc,layout,logic_hash,template_hash,etag,created,published)
 VALUES(?, (SELECT COALESCE(MAX(number),0)+1 FROM workflow_revisions WHERE workflow_id=?), 'published', ?,?,?,?,?,?,?)`,
@@ -248,6 +252,10 @@ func (s *Store) SaveDraft(flowID int64, doc workflow.Doc, layout workflow.Layout
 	}
 	if ifEtag != cur.Etag {
 		return Revision{}, ErrStaleDraft
+	}
+	doc, err = sealDoc(doc) // a draft's secret values are stored sealed (W4b QA step 3); the hash is of what is stored
+	if err != nil {
+		return Revision{}, err
 	}
 	normalLayout(&layout)
 	etag, now := workflow.NewID(), s.stamp()
@@ -355,6 +363,10 @@ func (s *Store) RevisionByID(flowID, revID int64) (Revision, error) {
 // template is the engine's default until it is published; the old pages don't list it meanwhile.
 func (s *Store) AddWorkflow(name string, doc workflow.Doc) (Flow, error) {
 	if err := s.nameFree(s.db, name, 0); err != nil {
+		return Flow{}, err
+	}
+	doc, err := sealDoc(doc) // a new workflow's draft holds its secret values sealed too
+	if err != nil {
 		return Flow{}, err
 	}
 	tx, err := s.db.Begin()
@@ -811,7 +823,9 @@ func (s *Store) RunInfoFor(j Job) (RunInfo, error) {
 	if j.LibraryID > 0 {
 		err = s.db.QueryRow(`SELECT name, flow_id FROM libraries WHERE id=?`, j.LibraryID).Scan(&out.Library, &flowID)
 	} else {
-		err = s.db.QueryRow(`SELECT name, flow_id FROM libraries WHERE path=?`, j.Library).Scan(&out.Library, &flowID)
+		// the job's path may be another name for the library's folder (a link, macOS's /var, a Windows
+		// short name): every comparison of library folders uses the canonical form (libraries.go)
+		err = s.db.QueryRow(`SELECT name, flow_id FROM libraries WHERE path=?`, canonical(j.Library)).Scan(&out.Library, &flowID)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, nil
@@ -831,7 +845,13 @@ func (s *Store) RunInfoFor(j Job) (RunInfo, error) {
 			if rev.Number != nil {
 				out.Revision = *rev.Number
 			}
-			out.Variables = rev.Doc.Variables
+			// the one place a stored secret is opened: a job resolves its workflow's variables here, and a
+			// secret this computer can't open must stop it, never run as an empty string
+			vars, unreadable := openVariables(rev.Doc)
+			if len(unreadable) > 0 {
+				return out, &SecretUnreadableError{Names: unreadable}
+			}
+			out.Variables = vars
 		}
 	}
 	return out, nil

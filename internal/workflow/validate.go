@@ -76,6 +76,9 @@ func Validate(d Doc) Result {
 	for _, i := range CheckVariables(d) {
 		add(i)
 	}
+	for _, i := range CheckTemplates(d) {
+		add(i)
+	}
 	defs := map[string]StepDefinition{}
 	for _, def := range Definitions() {
 		defs[def.Type] = def

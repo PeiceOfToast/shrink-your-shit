@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
 )
 
 // useHome points this test's share key folder at its own temp dir (HOME on Linux and macOS, APPDATA on Windows).
@@ -62,6 +64,20 @@ func TestPreviewWarnsWhenAStoredSecretWontOpenHere(t *testing.T) {
 			doc, _ := json.Marshal(map[string]any{"items": []map[string]any{{"id": "i1", "kind": "sonarr",
 				"name": "Sonarr", "url": "http://sonarr.local", "sealed": ct, "nonce": nonce}}})
 			if err := s.SetMeta("integrations", string(doc)); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"workflow secret", func(t *testing.T, s *Store) {
+			f, err := s.AddWorkflow("Sealed", workflow.Preset())
+			if err != nil {
+				t.Fatal(err)
+			}
+			d, _, err := s.Draft(f.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d.Doc.Variables = []workflow.Variable{{Name: "api_key", Type: "secret", Value: "api-key-123", HasValue: true}}
+			if _, err := s.SaveDraft(f.ID, d.Doc, d.Layout, d.Etag); err != nil {
 				t.Fatal(err)
 			}
 		}},
