@@ -329,14 +329,14 @@ const streamLines = (pr: Probe) => (pr.streams ?? []).map((x, j, all) => [x.type
 function varValue(v: LogVariable) {
   if (v.secret) return <span className="muted">Hidden</span>;
   if (v.changedBy == null) return <>{val(v.end ?? v.start)}</>;
-  return <><span className="pill warn">Changed</span> {val(v.start)} → <strong>{val(v.end)}</strong><br /><span className="muted">Set by {stepLabel(v.changedBy)}</span></>;
+  return <><span className="pill">Changed</span> {val(v.start)} → <strong>{val(v.end)}</strong><br /><span className="muted">Set by {stepLabel(v.changedBy)}</span></>;
 }
 type Raw = { key: string; id?: string; title: string; head: ReactNode; hits: number; dflt: boolean; show: boolean; body: ReactNode };
 // E: a finished job's log (GET /log), in sections: Start, Variables, Source file, one section per step, Summary. Open by the
 // design's rules (a failed or skipped step, the picture check when the original was kept, the Summary); search opens the
 // sections with a match; "Errors and warnings only" shows just the flagged steps. A job from before full logs had no
 // start, variables or summary: only its steps show, with one line saying so. Running jobs use JobLog.
-function StepLog({ d, id, worker, failedIdx, kept }: { d: { loaded: boolean; data?: JobLog; error?: { message: string } }; id: string; worker: string | null; failedIdx: number | null; kept: boolean }) {
+function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: boolean; data?: JobLog; error?: { message: string } }; id: string; worker: string | null; failedIdx: number | null; kept: boolean; hasResult: boolean }) {
   const keep = useData(getSettings, []), [q, setQ] = useState(""), [copied, setCopied] = useState(""), [errOnly, setErrOnly] = useState(false), [only, setOnly] = useState(false), [open, setOpen] = useState<Record<string, boolean>>({});
   useEffect(() => { setCopied(""); setOpen({}); }, [id]);
   // a finished job's whole log is on the server (the steps here keep only the last 200 lines of a failure)
@@ -365,7 +365,7 @@ function StepLog({ d, id, worker, failedIdx, kept }: { d: { loaded: boolean; dat
     raw.push({ key: "variables", title: "Variables", head: changed.length ? <span className="sm muted">{changed.length} changed</span> : null,
       hits: q ? countIn(vars.map((v) => [v.name, v.start, v.end].join(" ")).join("\n").toLowerCase(), q) : 0, dflt: false, show: !errOnly,
       body: vars.length === 0 ? <p className="sm muted">No variables were set for this job.</p> : <>
-        <label className="row sm" style={{ gap: 6 }}><input type="checkbox" role="switch" checked={only} onChange={(e) => setOnly(e.target.checked)} />Only changed ({changed.length})</label>
+        <label className="sw"><input type="checkbox" role="switch" className="switch" checked={only} onChange={(e) => setOnly(e.target.checked)} /><span className="sm">Only changed ({changed.length})</span></label>
         {(only ? changed : vars).map((v) => <div key={v.name} className="row" style={{ gap: 8, flexWrap: "wrap", borderTop: "1px solid var(--border)", padding: "6px 0" }}>
           <code className="sm" style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}>{"{{" + v.name + "}}"}</code>
           <span className="sm" style={{ flex: "1 1 200px", minWidth: 0 }}>{varValue(v)}</span></div>)}</> });
@@ -390,6 +390,7 @@ function StepLog({ d, id, worker, failedIdx, kept }: { d: { loaded: boolean; dat
         {(st.set ?? []).map((x) => <p className="sm" key={x.name}>Set <code>{"{{" + x.name + "}}"}</code> = {x.value ?? <span className="muted">Hidden</span>}</p>)}
         {st.command && <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">Command</span><button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(st.command ?? "").catch(() => {})}><Icon id="i-copy" />Copy</button></div>
           <pre className="joblog sm">{st.command}</pre></div>}
+        {old && st.probe && <p className="sm">Source: {sourceLine(st.probe)}</p>}
         {progress && <p className="sm">{progress}</p>}
         {flags}
         {st.check && <p className="sm">Picture check: score {st.check.score.toFixed(3)}{st.check.min != null ? " (needs " + st.check.min.toFixed(3) + ")" : ""}{st.check.passed != null ? " · " + (st.check.passed ? "passed" : "failed") : ""}</p>}
@@ -408,9 +409,9 @@ function StepLog({ d, id, worker, failedIdx, kept }: { d: { loaded: boolean; dat
       <p className="sm">Time taken {stepTime(s.tookMs)}</p>
       <p className="sm">Worker: {worker ?? "—"}</p>
       <p className="sm">Result: {WORD[l.final ?? ""] ?? l.final}</p>
-      <p className="sm muted">Before and after: see Result, above the log.</p></> });
+      {hasResult && <p className="sm"><a href="#job-result" onClick={(e) => { e.preventDefault(); document.getElementById("job-result")?.scrollIntoView({ block: "start" }); }}>Before and after: see Result</a></p>}</> });
   }
-  const secs = raw.map((r) => ({ ...r, open: errOnly || (!!q && r.hits > 0) || (r.key in open ? open[r.key] : r.dflt) }));
+  const secs = raw.map((r) => ({ ...r, open: errOnly || r.hits > 0 || (r.key in open ? open[r.key] : r.dflt) }));
   const shown = secs.filter((s) => s.show), anyClosed = shown.some((s) => !s.open);
   const tot = secs.reduce((n, s) => n + s.hits, 0), ks = secs.filter((s) => s.hits > 0).length;
   const E = l.steps.reduce((n, st) => n + (st.errors?.length ?? 0), 0), W = l.steps.reduce((n, st) => n + (st.warnings?.length ?? 0), 0), K = l.steps.filter(flagged).length;
@@ -419,11 +420,11 @@ function StepLog({ d, id, worker, failedIdx, kept }: { d: { loaded: boolean; dat
     <section id="job-log"><h3>Log</h3>
       <div className="joblog-tools">
         <input className="input sm joblog-q" type="search" placeholder="Search the log" aria-label="Search the log" value={q} onChange={(e) => setQ(e.target.value)} />
-        <label className="row sm" style={{ gap: 6 }}><input type="checkbox" role="switch" checked={errOnly} onChange={(e) => setErrOnly(e.target.checked)} />Errors and warnings only</label>
+        <label className="sw"><input type="checkbox" role="switch" className="switch" checked={errOnly} onChange={(e) => setErrOnly(e.target.checked)} /><span className="sm">Errors and warnings only</span></label>
         <div className="joblog-end">
-          <button className="btn sm ghost" type="button" onClick={() => setOpen(Object.fromEntries(shown.map((s) => [s.key, anyClosed])))}>{anyClosed ? "Open all" : "Close all"}</button>
           <button className="btn sm ghost" type="button" onClick={copyAll}><Icon id="i-copy" />Copy log</button>
           {!MOCK && <a className="btn sm" href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}><Icon id="i-download" />Download the full log</a>}
+          <button className="btn sm ghost" type="button" onClick={() => setOpen(Object.fromEntries(shown.map((s) => [s.key, anyClosed])))}>{anyClosed ? "Open all" : "Close all"}</button>
         </div>
       </div>
       <p className="sm muted" role="status" style={{ margin: status ? "0 0 6px" : 0 }}>{status}</p>
@@ -543,6 +544,9 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   const reason = j?.reason?.message ?? (row ? reasonText(row) : "");
   // one fetch of the log for the step list and What the check found; fetched again when the job stops running
   const log = useData(() => (scan || active ? Promise.resolve(null as unknown as JobLog) : getJobLog(id)), [id, scan, active]);
+  // the Result table also takes the log's subtitles and length (contract v2 summary before/after); a row shows only with data
+  const sumS = log.data?.summary, subsRow = !!(sumS?.before?.subtitles || sumS?.after?.subtitles), lenRow = sumS?.before?.durationSec != null || sumS?.after?.durationSec != null;
+  const showResult = !!(before || after || subsRow || lenRow), lenText = (x?: { durationSec?: number }) => (x?.durationSec != null ? elapsed(x.durationSec) : "—");
   const found = (log.data?.steps ?? []).filter((st) => (st.found?.length ?? 0) > 0);
   const kept0 = !!state && keptOrig({ state, reason: j?.reason ?? own?.reason });
   return (
@@ -601,13 +605,13 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {/* review db7b1f1 P2: the scan sentence only for a file a scan left out; a cancelled file whose job the server
               doesn't send yet claims nothing about scans or steps */}
           {scan && <section><h3>Timeline</h3><p className="muted">{state === "cancelled" ? "Cancelled." : "This file was left out when its library was scanned, so it has no job and no steps."}</p></section>}
-          {!scan && (active ? <JobLog id={id} name={name} /> : <StepLog d={log} id={id} worker={j?.worker ?? null} failedIdx={j?.failure?.stepIndex ?? null} kept={kept0} />)}
+          {!scan && (active ? <JobLog id={id} name={name} /> : <StepLog d={log} id={id} worker={j?.worker ?? null} failedIdx={j?.failure?.stepIndex ?? null} kept={kept0} hasResult={showResult} />)}
           {/* #148: before is the original; null for an older job that replaced a file of the same name: said so, never blank */}
-          {(before || after) && <section><h3>Result</h3><table className="tbl kvt"><thead><tr><th /><th>Before</th><th>After</th></tr></thead><tbody>
-            <tr><th>Video</th>{before ? <td>{before.video}</td> : <td rowSpan={4} className="muted">Not recorded for this job</td>}<td>{after?.video ?? "—"}</td></tr>
+          {showResult && <section id="job-result"><h3>Result</h3><table className="tbl kvt"><thead><tr><th /><th>Before</th><th>After</th></tr></thead><tbody>
+            <tr><th>Video</th>{before ? <td>{before.video}</td> : <td rowSpan={4 + (subsRow ? 1 : 0) + (lenRow ? 1 : 0)} className="muted">Not recorded for this job</td>}<td>{after?.video ?? "—"}</td></tr>
             <tr><th>Audio</th>{before && <td>{before.audio}</td>}<td>{after?.audio ?? "—"}</td></tr>
             <tr><th>Bitrate</th>{before && <td>{before.bitrate}</td>}<td>{after?.bitrate ?? "—"}</td></tr>
-            <tr><th>Size</th>{before && <td>{before.size}</td>}<td>{after?.size ?? "—"}</td></tr></tbody></table></section>}
+            <tr><th>Size</th>{before && <td>{before.size}</td>}<td>{after?.size ?? "—"}</td></tr>{subsRow && <tr><th>Subtitles</th>{before && <td>{sumS?.before?.subtitles ?? "—"}</td>}<td>{sumS?.after?.subtitles ?? "—"}</td></tr>}{lenRow && <tr><th>Length</th>{before && <td>{lenText(sumS?.before)}</td>}<td>{lenText(sumS?.after)}</td></tr>}</tbody></table></section>}
         </div>
       </aside>
     </div>

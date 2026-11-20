@@ -35,6 +35,7 @@ let items: JobItem[] = [
   base("48196", "Concert.2022.1080p.mkv", "Concert (2022)", HOME, "failed", { detail: "Kept the original: the new file didn't play to the end.", reason: { code: "kept_original", message: "Kept the original: the new file didn't play to the end." } }),
   base("48197", "Old.Tape.1998.avi", "Old Tapes", HOME, "failed", { detail: "Kept the original: the original is damaged in 7 places.", reason: { code: "kept_original", message: "Kept the original: the original is damaged in 7 places." } }),
   base("48198", "Lecture.2020.mkv", "Lecture (2020)", HOME, "completed", {}),
+  base("48199", "Old.Movie.2018.mkv", "Old Movie (2018)", HOME, "completed", {}),
   base("failed-replace", "Replace.Fail.mkv", "Failed Saves", HOME, "failed", { detail: "The new file was converted, but saving it in place of the original failed.", reason: { code: "stalled", message: "The new file was converted, but saving it in place of the original failed." } }),
 ];
 // ?jobs=many: 450 more waiting files, to show the list past its first 200 (Show more)
@@ -68,7 +69,9 @@ const runInfo = (result: string) => ({
     { name: "target_codec", start: "", end: "hevc", changedBy: "encode", secret: false },
     { name: "title", start: "Sample (2020)", end: "Sample (2020)", changedBy: null, secret: false },
   ],
-  summary: { result, originalBytes: 8 * GB, finalBytes: result === "converted" ? 4.7 * GB : 0, savedPercent: result === "converted" ? 41 : 0, outputPath: "/media/movies/Sample (2020).mkv", tookMs: 912000, tempRemoved: result === "converted" },
+  summary: { result, originalBytes: 8 * GB, finalBytes: result === "converted" ? 4.7 * GB : 0, savedPercent: result === "converted" ? 41 : 0, outputPath: "/media/movies/Sample (2020).mkv", tookMs: 912000, tempRemoved: result === "converted",
+    before: { video: "H.264 1920x1080, 8.0 Mbps", audio: "2 tracks: eng, jpn", subtitles: "3: eng, eng SDH, ger", durationSec: 6312.4 },
+    after: result === "converted" ? { video: "HEVC 1920x1080, 2.9 Mbps", audio: "1 track: eng AAC stereo", subtitles: "inside: ger; as .srt: eng, eng SDH", durationSec: 6312.4 } : undefined },
 });
 export function mockJobLog(id: string): JobLog | { error: { code: string; message: string } } {
   const j = mockJob(id);
@@ -106,6 +109,8 @@ export function mockJobLog(id: string): JobLog | { error: { code: string; messag
     "48197": ["Check: damage in the original, read while converting", "Errors: 7 damaged pictures; up to 3 are tolerated",
       "[h264 @ 0x55e0] error while decoding MB 41 22, bytestream -7", "[h264 @ 0x55e0] concealing 812 DC, 812 AC, 812 MV errors in P frame"],
   };
+  // a job from before full logs: no start, variables or summary, so only its steps show (with the muted line)
+  if (id === "48199") return { state: "complete", final: "done", steps: [step("encode", "ok", { ...conv, result: "Done · 41% smaller" })] };
   if (found[id]) return { state: "complete", final: j.reason?.message ?? null, ...runInfo("kept"), steps: [
     step("encode", "ok", { ...conv, check: null, result: "Done", decision: "Converted the video to HEVC", reason: "The file is H.264, and the workflow converts to HEVC.", warnings: ["The hardware encoder stopped once and was restarted."], speedX: 2.1, avgKbps: 3100 }),
     step("check", "failed", { found: found[id], result: j.reason?.message ?? "Failed", errors: [j.reason?.message ?? "The picture check failed."] }),
