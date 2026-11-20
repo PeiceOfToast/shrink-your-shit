@@ -36,6 +36,7 @@ func TestRestoredFileIsSkippedEverywhere(t *testing.T) {
 	m := t.TempDir() // a real path: Windows matches files to the library by it
 	l, err := s.AddLibraryOnFlow("Movies", m, w.ID, true)
 	check(err)
+	m = l.Path // the stored path: symlinks and Windows short names (RUNNER~1) resolved
 	now := time.Now()
 	since := now.Add(-48 * time.Hour).UTC().Format(time.RFC3339)
 
