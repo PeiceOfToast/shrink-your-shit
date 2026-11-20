@@ -188,7 +188,7 @@ export function VarInput({ id, title, value, wf, set, description }: { id: strin
         {description && <span className="hint">{description}</span>}
         {list && <span className="hint vp-ex">{`Example with ${sample}: ${a.example}`}</span>}
         {a.empty.map((n) => <span key={n} className="hint">{`{{${n}}} is empty for this file.`}</span>)}
-        <div aria-live="polite">{(pick?.mode === "typed" ? a.errors.filter((m) => !m.startsWith("A {{ is missing")) : a.errors).map((m, i) => <span key={i}className="hint vp-err" style={{ color: "var(--error-text)" }}><Icon id="i-alert" />{m}</span>)}</div>
+        <div aria-live="polite">{(pick?.mode === "typed" ? a.errors.filter((m) => !m.startsWith("A {{ is missing")) : a.errors).map((m, i) => <span key={i} className="hint vp-err" style={{ color: "var(--error-text)" }}><Icon id="i-alert" />{m}</span>)}</div>
       </div>
       {/* always mounted, so the count is announced as it changes (the popover itself comes and goes) */}
       <div className="sr" role="status">{pick && list ? count : ""}</div>

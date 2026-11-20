@@ -93,8 +93,13 @@ export interface Ladder {
 let ladder: Promise<Answer<Ladder>> | null = null; // one fetch per page load: the ladder is fixed for a server's life
 // GET /api/v2/workflow/variables?workflow=<id>: the names the {{name}} fields take, with the sample file's values (the server
 // builds the list; the page checks names itself)
-export async function getVariables(workflowId: string): Promise<Answer<VarList>> {
-  return MOCK ? mockVariables() : call("GET", "/api/v2/workflow/variables?workflow=" + enc(workflowId));
+// One request per workflow id, shared by every editor and field that asks (like getLadder); a failed answer is not kept.
+const variables = new Map<string, Promise<Answer<VarList>>>();
+export function getVariables(workflowId: string): Promise<Answer<VarList>> {
+  if (MOCK) return Promise.resolve(mockVariables());
+  let p = variables.get(workflowId);
+  if (!p) variables.set(workflowId, (p = call<VarList>("GET", "/api/v2/workflow/variables?workflow=" + enc(workflowId)).then((r) => (failed(r) && variables.delete(workflowId), r))));
+  return p;
 }
 export function getLadder(): Promise<Answer<Ladder>> {
   if (MOCK) return Promise.resolve({ ...mockLadder() }); // the sample's ladder, shaped as the engine's

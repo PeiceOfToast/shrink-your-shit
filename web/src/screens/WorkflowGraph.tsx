@@ -216,6 +216,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
       <p className="muted sm phone" role="note">Editing works best on a larger screen. Here you can look around, zoom and see each step.</p>
       <p className="muted" role="status">{said}</p>
       {edit && badValues.length > 0 && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{badValues.length === 1 ? "A setting has a value it can't use" : badValues.length + " settings have values they can't use"} ({[...new Set(badValues.map((i) => nameOf(i.nodeId)))].join(", ")}). Fix {badValues.length === 1 ? "it" : "them"} to save the draft or publish.</span></p>}
+      {edit && varBad.length > 0 && <p className="st bad" role="alert"><Icon id="i-alert" /><span>Fix {varBad.length === 1 ? "1 field" : varBad.length + " fields"} before publishing. <button className="linkbtn" type="button" onClick={() => setSel(varBad[0].nodeId)}>{varBad[0].title}</button></span></p>}
       {panel && (
         <section className="card" aria-labelledby="pub-h"><div className="hd"><h2 id="pub-h">Publish v{panel.nextNumber}</h2></div><div className="bd stack">
           {panel.changes.length ? <ul style={{ margin: 0 }}>{panel.changes.map((c) => <li key={c.nodeId + c.kind}>{c.kind === "added" ? "Added: " : c.kind === "removed" ? "Removed: " : ""}{c.summary}</li>)}</ul> : <p className="muted">No changes since the last version.</p>}
