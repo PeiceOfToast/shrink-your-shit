@@ -13,6 +13,7 @@ const workersOff = new URLSearchParams(location.search).has("workersoffline"); /
 const shareMode = new URLSearchParams(location.search).get("sharemode") || "app";
 const shareReason = new URLSearchParams(location.search).get("sharereason") === "unprivileged";
 const shareOff = new URLSearchParams(location.search).has("shareoff"); // one library waits for its share to connect
+const unwritable = new URLSearchParams(location.search).has("unwritable"); // TV Shows: the app can't write its folder
 
 function library(id: ID, name: string, path: string, freed: number, waitingToFree: number, files: number): Library {
   return {
@@ -23,14 +24,17 @@ function library(id: ID, name: string, path: string, freed: number, waitingToFre
     output: { policy: "separate_folder", folder: path + " (shrunk)", overrideFolder: null, problem: null },
     discovery: { subfolders: true, settleSeconds: 15, followLinks: false, include: [], exclude: [] },
     status: "ok",
+    writable: !(unwritable && id === "l2"),
+    unwritableMessage: unwritable && id === "l2" ? "Can't write to this folder: " + path + "." : "",
   };
 }
+// live: This computer reports CPU and its busiest GPU; the NAS (remote) sends no GPU (#443)
 function worker(id: ID, name: string, status: Worker["status"], cpu: [number, number], gpu: [number, number], since: number, jobs: ID[]): Worker {
   return {
     id, name, kind: id === "this" ? "local" : "remote", host: name.toLowerCase().replace(/\s+/g, "-"), os: "linux", arch: "amd64", appVersion: "2.0.0",
     status, statusSince: ago(since), lastHeartbeatAt: status === "offline" ? ago(since) : ago(0),
     slots: { cpu: { used: cpu[0], total: cpu[1] }, gpu: { used: gpu[0], total: gpu[1] } },
-    live: { cpuPercent: null, memUsedBytes: null, memTotalBytes: null, gpu: [] }, gpus: [], ffmpeg: null, capabilities: [],
+    live: id === "this" ? { cpuPercent: 13, memUsedBytes: null, memTotalBytes: null, gpu: [{ index: 0, utilPercent: 22, vramUsedBytes: null }] } : id === "nas" ? { cpuPercent: 40, memUsedBytes: null, memTotalBytes: null, gpu: [] } : { cpuPercent: null, memUsedBytes: null, memTotalBytes: null, gpu: [] }, gpus: [], ffmpeg: null, capabilities: [],
     currentJobIds: jobs, tags: [], pool: null, schedule: null, pathMappings: [],
   };
 }

@@ -148,7 +148,7 @@ func (v *workerView) local(ctx context.Context) (map[string]any, error) {
 		"appVersion": v.eng.Version, "status": status, "statusSince": since.UTC().Format(time.RFC3339),
 		"lastHeartbeatAt": time.Now().UTC().Format(time.RFC3339), // in this program: answering is its heartbeat
 		"slots":           v.slots(cfg, s, len(working), t),
-		"live":            liveLoad(v.meter.Sample()), // V7d: this computer, measured as remote workers measure theirs
+		"live":            liveLoad(v.meter.Sample(), gpuPercent(time.Now())), // V7d: this computer, measured as remote workers measure theirs
 		"update":          nil,
 		"gpus":            gpus, "ffmpeg": ff, "capabilities": caps, "currentJobIds": ids,
 		"tags": cfg.Tags, "pool": cfg.Pool, "schedule": schedule, "pathMappings": []any{},
@@ -160,9 +160,15 @@ func (v *workerView) local(ctx context.Context) (map[string]any, error) {
 // this long shows offline; it heartbeats every 10 s, beside its work (V7d).
 var RemoteOfflineAfter = 30 * time.Second
 
-// liveLoad is a load as the contract's live figures (nil: not measured; GPU load isn't yet).
-func liveLoad(l sysload.Load) map[string]any {
-	return map[string]any{"cpuPercent": l.CPUPercent, "memUsedBytes": l.MemUsedBytes, "memTotalBytes": l.MemTotalBytes, "gpu": []any{}}
+// liveLoad is a load as the contract's live figures (nil: not measured). gpu is the busiest GPU's use
+// (gpuPercent): one entry when it was read, none when nothing could be read (no GPU, an unreadable one, or a
+// remote worker, which doesn't report its GPU). VRAM isn't read: vramUsedBytes is null.
+func liveLoad(l sysload.Load, gpu *float64) map[string]any {
+	g := []any{}
+	if gpu != nil {
+		g = append(g, map[string]any{"index": 0, "utilPercent": *gpu, "vramUsedBytes": nil})
+	}
+	return map[string]any{"cpuPercent": l.CPUPercent, "memUsedBytes": l.MemUsedBytes, "memTotalBytes": l.MemTotalBytes, "gpu": g}
 }
 
 // remote is a paired worker on another computer in the contract's shape (V7b1): what it reported, its
@@ -264,7 +270,7 @@ func (v *workerView) remoteWith(rw jobs.RemoteWorker, working []jobs.Working) (m
 		"appVersion": rw.Version, "status": status, "statusSince": since, "lastHeartbeatAt": nilIfEmpty(rw.LastSeen), "update": update,
 		"holdingBack": holding,
 		"slots":       map[string]any{"cpu": map[string]any{"total": 1, "used": len(ids)}, "gpu": nil},
-		"live":        liveLoad(load),
+		"live":        liveLoad(load, nil), // a remote doesn't report its GPU use
 		"gpus":        []any{}, "ffmpeg": nil, "capabilities": caps, "currentJobIds": ids,
 		"tags": []string{}, "pool": nil, "schedule": nil, "pathMappings": mappings,
 		"primaryEncoder": main,
