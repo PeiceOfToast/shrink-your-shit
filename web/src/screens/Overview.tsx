@@ -83,8 +83,10 @@ function Spark({ values, label, color }: { values: (number | null)[]; label: str
   const x = (i: number) => (n > 1 ? (i * W) / (n - 1) : W / 2), y = (v: number) => H - 6 - ((H - 12) * v) / max;
   const runs: string[] = [];
   let cur = "";
-  values.forEach((v, i) => { if (v == null) { if (cur) runs.push(cur); cur = ""; } else { cur += (cur ? "L" : "M") + x(i).toFixed(1) + "," + y(v).toFixed(1); } });
-  if (cur) runs.push(cur);
+  // a run of one point gets a zero-length segment ("M p L p"), so the round cap draws a dot instead of nothing
+  const end = () => { if (cur) runs.push(cur.includes("L") ? cur : cur + "L" + cur.slice(1)); cur = ""; };
+  values.forEach((v, i) => { if (v == null) end(); else cur += (cur ? "L" : "M") + x(i).toFixed(1) + "," + y(v).toFixed(1); });
+  end();
   return <svg className="spark" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={label + (values.some((v) => v == null) ? "; the days not recorded are left blank" : "")}>
     <line x1="0" x2={W} y1={H - 2} y2={H - 2} stroke="var(--border-strong)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
     {runs.map((d) => <path key={d} d={d} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />)}
