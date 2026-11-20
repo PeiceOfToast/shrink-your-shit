@@ -817,3 +817,7 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
    under the name, so the question's words stay */
 .sline .otherwise{gap:6px;flex:none}.sline .otherwise select.input{width:auto;min-height:30px;padding:0 6px;font-size:var(--fs)}/* ui-shop review #537: never under the 12.5 px floor */
 @media (max-width:640px){.sline{flex-wrap:wrap}.sline .otherwise{flex-basis:100%;order:9;padding-left:30px}.sline .otherwise select.input{flex:1;min-height:36px}}
+/* FB3, the simple view: a folded row for what the view leaves out, and forms that sit open on the page */
+.srow.fold .sline{background:var(--bg);color:var(--text-2)}.srow.fold .snm{font-weight:var(--fw-strong)}
+.sopts.inline{border-top:1px dashed var(--border)}
+@media (max-width:640px){.sopts.inline{position:static;inset:auto;z-index:auto;overflow:visible;border-top:1px dashed var(--border);background:var(--raised);padding:var(--pad)}}
