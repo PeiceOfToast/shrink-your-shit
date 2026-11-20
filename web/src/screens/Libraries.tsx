@@ -45,6 +45,7 @@ export const priorityWord = (n: number) => PRIORITIES.find(([v]) => v === n)?.[1
 // enabled is both "started" and Pause/Resume on the server: never scanned and not enabled reads as Not started.
 // no_workflow (the server's status): a library with no workflow can't be started, and it wins over every other status.
 const noWf = (l: Library) => l.status === "no_workflow";
+const NOWF_HINT = "Assign a workflow to start this library.";
 const notStarted = (l: Library) => !l.enabled && !l.scan.lastScanAt && !noWf(l);
 const paused = (l: Library) => !l.enabled && !!l.scan.lastScanAt && !noWf(l);
 // The server pauses a library whose share isn't connected (enabled stays true): it waits, it isn't converting.
@@ -91,8 +92,9 @@ export function Libraries() {
   const picked = all.filter((l) => sel.includes(l.id)), none = picked.length === 0;
   const scan = async () => {
     setSaid("");
-    for (const l of picked) await act(() => scanLibrary(l.id), (m) => setSaid(l.name + ": " + m));
-    setSaid((s) => s || "Scanning " + plural(picked.length, "library", "libraries") + "."); libs.reload();
+    const go = picked.filter((l) => !noWf(l)), skip = picked.filter(noWf).map((l) => l.name + ": " + NOWF_HINT);
+    for (const l of go) await act(() => scanLibrary(l.id), (m) => setSaid(l.name + ": " + m));
+    setSaid((s) => [s || (go.length ? "Scanning " + plural(go.length, "library", "libraries") + "." : ""), ...skip].filter(Boolean).join(" ")); libs.reload();
   };
   const access = async () => {
     const bad: string[] = [];
@@ -100,11 +102,12 @@ export function Libraries() {
     setSaid(bad.length ? bad.join(" ") : picked.length === 1 ? "The folder of " + picked[0].name + " is fine." : "All " + picked.length + " folders are fine.");
   };
   const needSel = none ? "Select libraries first" : undefined;
+  const allNoWf = !none && picked.every(noWf); // a library with no workflow can't be scanned (409)
   const pr = async (enabled: boolean) => { setSaid(""); await pauseResume(picked.filter((l) => l.enabled !== enabled && !notStarted(l)), enabled, setSaid); setSel([]); libs.reload(); };
   // design (SCREENS V5): only the action that applies; both only when the selection mixes paused and watching libraries
   const canPause = picked.some((l) => l.enabled), canResume = picked.some((l) => paused(l) || noWf(l)); // a no-workflow one is named as not changed
   const actions = <>
-    <button className="btn sm ghost" type="button" disabled={none} title={needSel} onClick={scan}><Icon id="i-refresh" />Scan now</button>
+    <button className="btn sm ghost" type="button" disabled={none || allNoWf} title={allNoWf ? NOWF_HINT : needSel} onClick={scan}><Icon id="i-refresh" />Scan now</button>
     {canPause && <button className="btn sm ghost" type="button" onClick={() => pr(false)}><Icon id="i-pause" />Pause</button>}
     {canResume && <button className="btn sm ghost" type="button" onClick={() => pr(true)}><Icon id="i-play" />Resume</button>}
     <button className="btn sm ghost" type="button" disabled={none} title={needSel} onClick={access}><Icon id="i-shield" />Check folder access</button>
@@ -317,7 +320,7 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
         {l && <button className="btn" type="button" disabled={noWfNow || v?.scan.state === "scanning"} aria-describedby={noWfNow ? "lib-nowf-hint" : undefined} onClick={scan}><Icon id="i-refresh" />{v?.scan.state === "scanning" ? "Scanning…" : "Scan now"}</button>}
       </PageHead>
       {note && <p className="muted" role="status">{note}</p>}
-      {noWfNow && <p className="muted" role="note" id="lib-nowf-hint">Assign a workflow to start this library.</p>}
+      {noWfNow && <p className="muted" role="note" id="lib-nowf-hint">{NOWF_HINT}</p>}
       {v && notStarted(v) && <p className="muted" role="note">This library isn't started yet: nothing is looked for or converted until you press Scan now.</p>}
       {v && paused(v) && <p className="muted" role="note">While paused, its files wait in the queue and aren't converted. Scans add no new files. Files already converting finish.</p>}
       {v && !v.writable && <p className="st bad" role="note"><Icon id="i-alert" /><span>{v.unwritableMessage} <Link to="/settings/health">How to fix it</Link></span></p>}
