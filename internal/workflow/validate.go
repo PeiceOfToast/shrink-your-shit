@@ -38,7 +38,7 @@ type AddStep struct {
 // stepPlace is the editor's rule for a step now. W10 (moving and deleting steps) replaces this with
 // the real rules; until then every step's place is set.
 func stepPlace() StepPlace {
-	return StepPlace{FixedPlace: true, FixedReason: "This step's place is set: steps can't be moved or removed in this version."}
+	return StepPlace{FixedPlace: true, FixedReason: "The steps that convert run in a set order for now, so they can't be moved or deleted. To skip this step, turn it off."}
 }
 
 // addSteps is the add-step menu's rule now. W10 replaces this with the compile rules; until then a

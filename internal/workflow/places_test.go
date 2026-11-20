@@ -15,7 +15,7 @@ func TestValidateSaysWhereEachStepAndTypeStands(t *testing.T) {
 	}
 	for _, n := range d.Nodes {
 		p, ok := r.StepPlaces[n.ID]
-		if !ok || !p.FixedPlace || p.FixedReason != "This step's place is set: steps can't be moved or removed in this version." {
+		if !ok || !p.FixedPlace || p.FixedReason != "The steps that convert run in a set order for now, so they can't be moved or deleted. To skip this step, turn it off." {
 			t.Errorf("%s: %+v", n.ID, p)
 		}
 	}

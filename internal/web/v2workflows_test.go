@@ -185,7 +185,7 @@ func TestV2Workflows(t *testing.T) {
 	first, _ := places[cyc.Nodes[0].ID].(map[string]any)
 	convert, _ := adds[workflow.TypeConvert].(map[string]any)
 	if len(places) != len(cyc.Nodes) || len(adds) == 0 ||
-		first["fixedPlace"] != true || first["fixedReason"] != "This step's place is set: steps can't be moved or removed in this version." ||
+		first["fixedPlace"] != true || first["fixedReason"] != "The steps that convert run in a set order for now, so they can't be moved or deleted. To skip this step, turn it off." ||
 		convert["addable"] != false || convert["reason"] != "Can't run among the steps that convert yet." || convert["after"] != "" {
 		t.Errorf("validate places %v adds %v", places, adds)
 	}
