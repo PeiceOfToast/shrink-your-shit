@@ -278,18 +278,30 @@ var vaapiDevice = media.VAAPIDevice
 // those, or the Plan can't use one: the arguments are the processor's either way.
 func (p Plan) FFmpegArgsWith(in, out, enc string) ([]string, bool) {
 	if enc == "" || enc == "cpu" {
-		return p.ffmpegArgs(in, out, ""), true
+		return p.ffmpegArgs(in, out, "", false), true
 	}
 	prefix, ok := formatPrefix[p.Video.Codec]
 	if !ok || !graphicsEncoders[enc] || !strings.HasPrefix(enc, prefix+"_") || p.Video.Copy ||
 		(p.Video.HDR != nil && p.Video.Codec != "libx265") {
-		return p.ffmpegArgs(in, out, ""), false
+		return p.ffmpegArgs(in, out, "", false), false
 	}
-	return p.ffmpegArgs(in, out, enc), true
+	return p.ffmpegArgs(in, out, enc, false), true
 }
 
-// ffmpegArgs builds the arguments; gpu is a graphics encoder's name, or "" for the processor's.
-func (p Plan) ffmpegArgs(in, out, gpu string) []string {
+// FFmpegArgsFullGPU is FFmpegArgsWith for the full graphics pipeline: the source is decoded on enc's family and
+// its frames stay on the device through the scale to the encoder. Only QSV and VAAPI have one; for any other
+// encoder, or when FFmpegArgsWith wouldn't use enc, ok is false and the arguments are FFmpegArgsWith's.
+func (p Plan) FFmpegArgsFullGPU(in, out, enc string) ([]string, bool) {
+	args, ok := p.FFmpegArgsWith(in, out, enc)
+	if fam := GraphicsFamily(enc); !ok || (fam != "qsv" && fam != "vaapi") {
+		return args, false
+	}
+	return p.ffmpegArgs(in, out, enc, true), true
+}
+
+// ffmpegArgs builds the arguments; gpu is a graphics encoder's name, or "" for the processor's. full is the full
+// graphics pipeline (FFmpegArgsFullGPU): the decode and the scale stay on the device, with no upload.
+func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 	v := "v:" + strconv.Itoa(p.Video.Index)
 	fam := GraphicsFamily(gpu) // "" for the processor
 	args := []string{"-y", "-nostdin", "-v", "error", "-progress", "pipe:1", "-nostats"}
@@ -298,6 +310,9 @@ func (p Plan) ffmpegArgs(in, out, gpu string) []string {
 		args = append(args, "-init_hw_device", "qsv=qsv:hw")
 	case "vaapi":
 		args = append(args, "-init_hw_device", "vaapi=va:"+vaapiDevice(), "-filter_hw_device", "va")
+	}
+	if full { // the device decodes too, so the frames never come down to software
+		args = append(args, "-hwaccel", fam, "-hwaccel_output_format", fam, "-hwaccel_device", map[string]string{"qsv": "qsv", "vaapi": "va"}[fam])
 	}
 	args = append(args, "-i", in,
 		"-map", "0", "-map", "-0:d",
@@ -340,16 +355,20 @@ func (p Plan) ffmpegArgs(in, out, gpu string) []string {
 		} else {
 			args = append(args, "-profile:"+v, "main10",
 				"-color_primaries:"+v, h.Primaries, "-color_trc:"+v, h.Transfer, "-colorspace:"+v, h.Matrix)
-			if fam != "vaapi" { // VAAPI's frames are made p010 by its filter instead
+			if fam != "vaapi" && !full { // VAAPI's frames are made p010 by its filter instead; the full path's come from the decoder
 				args = append(args, "-pix_fmt:"+v, "p010le")
 			}
 		}
 	}
 	var vf []string
 	if p.Video.Height > 0 {
-		vf = append(vf, "scale=-2:"+strconv.Itoa(p.Video.Height))
+		if full {
+			vf = append(vf, gpuScale(fam, p.Video.Height, p.Video.HDR != nil))
+		} else {
+			vf = append(vf, "scale=-2:"+strconv.Itoa(p.Video.Height))
+		}
 	}
-	if fam == "vaapi" { // software frames go up to the device last, after any scale
+	if fam == "vaapi" && !full { // software frames go up to the device last, after any scale
 		format := "nv12"
 		if p.Video.HDR != nil {
 			format = "p010"
@@ -373,6 +392,22 @@ func (p Plan) ffmpegArgs(in, out, gpu string) []string {
 	}
 	args = append(args, out)
 	return p.withSubtitleFiles(args, out)
+}
+
+// gpuScale is the scale filter of the full graphics pipeline (frames stay on the device): QSV's keeps the frames'
+// format; VAAPI's also sets it, p010 for HDR and nv12 otherwise. scale_qsv refuses w=-2 ("Size values less than
+// -1 are not acceptable"), so QSV's width is an expression: trunc(H*a/2)*2 keeps the aspect ratio and is even.
+func gpuScale(fam string, h int, hdr bool) string {
+	size := "w=-2:h=" + strconv.Itoa(h)
+	if fam != "vaapi" {
+		hs := strconv.Itoa(h)
+		return "scale_qsv=w=trunc(" + hs + "*a/2)*2:h=" + hs
+	}
+	format := "nv12"
+	if hdr {
+		format = "p010"
+	}
+	return "scale_vaapi=" + size + ":format=" + format
 }
 
 // gpuQuality is a graphics family's constant-quality arguments at crf, in its encoders' names. The same
