@@ -514,3 +514,21 @@ func TestFailureTextIsWordsNotCodeOrPath(t *testing.T) {
 		t.Fatalf("failure message: %v", r.bodies)
 	}
 }
+
+// A server whose certificate the machine can't check (the image once had no CA bundle) is not
+// "unreachable": the words say the secure connection failed, still naming the host only.
+func TestCertificateFailureSaysSo(t *testing.T) {
+	_, svc, _, _ := fixture(t)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	t.Cleanup(srv.Close)
+	host := strings.TrimPrefix(srv.URL, "https://")
+	tg := mustCreate(t, svc, NewTarget{Name: "hook", Kind: "webhook", URL: srv.URL + "/hook/SECRETTOKEN9921"})
+	res, err := svc.Test(tg.ID, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Could not make a secure connection to " + host + " (certificate check failed)."
+	if res.OK || res.Message != want {
+		t.Errorf("result %+v, want message %q", res, want)
+	}
+}

@@ -75,6 +75,7 @@ export async function testShare(input: ShareTestInput): Promise<Answer<ShareTest
     if (input.address.includes("bad") || input.address.includes("fail")) return { ok: false, code: "auth_failed", message: "The username or password is wrong." };
     if (input.address.includes("notfound") || input.address.includes("missing")) return { ok: false, code: "share_not_found", message: "The server doesn't serve a folder with that name.", shares: ["Movies", "Public", "Media"] };
     if (input.address.includes("nfs") || input.type === "nfs") return { ok: true, address: input.address, portOnly: true, folders: [], moreFolders: 0 };
+    if (input.address.includes("empty")) return { ok: true, address: input.address, folders: null, moreFolders: 0, portOnly: false }; // the real shape from a share with no folders
     return { ok: true, address: input.address, folders: ["Movies", "TV", "Music"], moreFolders: 4, portOnly: false };
   }
   return call("POST", "/api/v2/shares/test", input);

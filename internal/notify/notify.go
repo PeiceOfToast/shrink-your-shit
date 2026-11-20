@@ -9,6 +9,7 @@ package notify
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -559,6 +560,10 @@ func (s *Service) post(kind, addr string, m message) Result {
 	resp, err := s.opt.Client.Do(req)
 	if err != nil {
 		// the client's error text carries the whole address, so only the host and port are named
+		var ce *tls.CertificateVerificationError
+		if errors.As(err, &ce) {
+			return Result{OK: false, Message: fmt.Sprintf("Could not make a secure connection to %s (certificate check failed).", host)}
+		}
 		return Result{OK: false, Message: fmt.Sprintf("Could not reach %s.", host)}
 	}
 	io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))

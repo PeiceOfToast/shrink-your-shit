@@ -174,10 +174,17 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 		})
 		s.setScanning(t.LibraryID, 0, true)
 		if ctx.Err() == nil && t.LibraryID > 0 { // a whole walk: the card's count and time
-			if err := s.Store.SetLibraryScanned(t.LibraryID, videos); err != nil {
-				log.Printf("scan: %s: %v", lib, err)
+			// A folder that had videos at the last walk and is now empty is a bare mount point, not a library the
+			// person emptied: it records no count and sets no gone marks, until a walk finds videos again. A folder
+			// that still holds other files (a deleted video, say) is recorded as it is.
+			if prev, err := s.Store.GetLibrary(t.LibraryID); err == nil && videos == 0 && prev.LastScanVideos > 0 && folderEmpty(t.Path) {
+				log.Printf("scan: %s: the folder is empty, though the last scan found %d videos: not recorded, the next scan tries again", lib, prev.LastScanVideos)
+			} else {
+				if err := s.Store.SetLibraryScanned(t.LibraryID, videos); err != nil {
+					log.Printf("scan: %s: %v", lib, err)
+				}
+				walked = append(walked, t.LibraryID)
 			}
-			walked = append(walked, t.LibraryID)
 		}
 	}
 	if ctx.Err() == nil {
@@ -574,7 +581,25 @@ func (s *Scanner) markOutputsGone(walked []int64, sizes map[string]int64) {
 // size: it is a new file, converted on its own), whose saving no longer counts (V5c, design call 3).
 // Only in the libraries walked whole (a paused one isn't), and gone only when the file is really not
 // there: a folder that couldn't be read hides its files from a walk without deleting them.
+// folderEmpty reports whether dir has no entries at all. An unreadable or missing folder is not empty here.
+func folderEmpty(dir string) bool {
+	es, err := os.ReadDir(dir)
+	return err == nil && len(es) == 0
+}
+
 func (s *Scanner) markOriginalsGone(walked []int64, sizes map[string]int64) {
+	// an original marked gone that this walk found again: the mark clears, as a converted file's does
+	back, err := s.Store.GoneLeftOriginals(walked)
+	if err != nil {
+		log.Printf("scan: originals gone: %v", err)
+	}
+	for _, o := range back {
+		if _, seen := sizes[o.Path]; seen {
+			if err := s.Store.SetOriginalBack(o.JobID); err != nil {
+				log.Printf("scan: %s: %v", o.Path, err)
+			}
+		}
+	}
 	left, err := s.Store.LeftOriginals(walked)
 	if err != nil {
 		log.Printf("scan: originals left in place: %v", err)

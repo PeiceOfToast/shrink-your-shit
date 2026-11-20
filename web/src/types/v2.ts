@@ -99,7 +99,9 @@ export interface Library {
     problem: { code: string; message: string } | null; // no_default_folder, inside_library...: show the message
   };
   discovery: { subfolders: boolean; settleSeconds: number; followLinks: boolean; include: string[]; exclude: string[]; scanEverySeconds?: number }; // V5b: the effective interval
-  status: "ok" | "scanning" | "path_missing" | "not_readable" | "disabled";
+  status: "ok" | "scanning" | "path_missing" | "not_readable" | "disabled" | "paused_share";
+  // paused_share: the library waits for its share to connect. enabled stays true; pausedBy names the share.
+  pausedBy?: { shareId: string; shareName: string; since: string; use: "folder" } | null;
 }
 
 export interface Summary { // GET /summary
