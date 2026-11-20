@@ -47,6 +47,8 @@ type Env struct {
 	// and the downloaders' answer about a file (the values to publish, and words for the log).
 	Exec   func(program string, args []string, dir string, timeout time.Duration, onLine func(string)) (output string, err error)
 	Lookup func(which string) (vals map[string]string, words string, err error)
+	// FB2c: tags on the job record; answers with the record's tags after the change.
+	Tag func(add, remove []string) ([]string, error)
 }
 
 // MaxOutput is how much of a program's output {{command_output}} keeps.
@@ -105,6 +107,24 @@ func run(c rules.Card, st *State, env Env) (Note, error) {
 		return def
 	}
 	switch c.Type {
+	case workflow.TypeTag:
+		if env.Tag == nil {
+			return n, errors.New("the file's record can't be tagged from here")
+		}
+		addText, empty := vars.Resolve(str("add", ""), st.Vars)
+		removeText, more := vars.Resolve(str("remove", ""), st.Vars)
+		add, remove := rules.CleanTags(addText), rules.CleanTags(removeText)
+		if len(add) == 0 && len(remove) == 0 {
+			return n, errors.New("nothing to add or remove")
+		}
+		tags, err := env.Tag(add, remove)
+		if err != nil {
+			return n, err
+		}
+		st.Vars["tags"] = strings.Join(tags, ", ")
+		n.Empty = append(empty, more...)
+		n.Words = "Tags: " + quoteOr(strings.Join(tags, ", "), "none")
+		return n, nil
 	case workflow.TypeLookupDownloader:
 		if env.Lookup == nil {
 			return n, errors.New("no downloader can be asked from here")

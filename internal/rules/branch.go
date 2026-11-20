@@ -125,6 +125,7 @@ type Facts struct {
 	Library   string            `json:"library,omitempty"`   // the library's name
 	LibraryID string            `json:"libraryId,omitempty"` // the library's id, as the question's config stores it
 	HardLinks bool              `json:"hardLinks,omitempty"` // the original shares its data with another name
+	Tags      []string          `json:"tags,omitempty"`      // the job record's tags (FB2c)
 	ModTime   time.Time         `json:"modTime,omitempty"`   // when the original was last changed
 	Now       time.Time         `json:"-"`                   // the time to measure age from (zero: time.Now)
 }
@@ -133,7 +134,7 @@ type Facts struct {
 // fields, as before) or one of the other kinds. A stored BranchCheck from before FB1b reads as Kind "".
 type Question struct {
 	VideoCheck
-	Kind string `json:"kind,omitempty"` // "" (the file's facts) | name | age | variable | library | hardlinks
+	Kind string `json:"kind,omitempty"` // "" (the file's facts) | name | age | variable | library | hardlinks | tag
 	// name: the file's name or path matches a pattern
 	Pattern       string `json:"pattern,omitempty"`
 	Match         string `json:"match,omitempty"` // contains | starts | ends | glob | regex
@@ -148,6 +149,9 @@ type Question struct {
 	Value    string `json:"value,omitempty"`
 	// library: the file comes from one of these libraries (ids)
 	Libraries []string `json:"libraries,omitempty"`
+	// tag: the file's record carries any / all / none of these tags (FB2c)
+	Tags  string `json:"tags,omitempty"`  // comma-separated, as typed
+	TagOp string `json:"tagOp,omitempty"` // any | all | none (default any)
 }
 
 // Ask is the question's answer for a file, with what decided it in words.
@@ -240,6 +244,23 @@ func (q Question) Ask(info media.Info, f Facts) (bool, string) {
 		return slices.Contains(q.Libraries, f.LibraryID), "the library is " + cmpOr(f.Library, "unknown")
 	case "hardlinks":
 		return f.HardLinks, yesNo(f.HardLinks, "the file shares its data with another name", "the file has one name")
+	case "tag":
+		want, have := CleanTags(q.Tags), CleanTags(strings.Join(f.Tags, ","))
+		hit := 0
+		for _, t := range want {
+			if HasTag(have, t) {
+				hit++
+			}
+		}
+		says := "the file's tags are " + cmpOr(strings.Join(have, ", "), "none")
+		switch q.TagOp {
+		case "all":
+			return len(want) > 0 && hit == len(want), says
+		case "none":
+			return hit == 0, says
+		default:
+			return hit > 0, says
+		}
 	}
 	return false, "a question this version can't ask"
 }
@@ -257,8 +278,69 @@ func (q Question) Empty() bool {
 		return q.Variable == ""
 	case "library":
 		return len(q.Libraries) == 0
+	case "tag":
+		return len(CleanTags(q.Tags)) == 0
 	}
 	return false
+}
+
+// Tag limits (FB2c): a tag is a short word or phrase; a record carries a handful.
+const (
+	MaxTagLen = 40
+	MaxTags   = 20
+)
+
+// CleanTags reads tags as typed (comma-separated): trimmed, inner spaces kept, cut to MaxTagLen, the same
+// tag in another case taken once, at most MaxTags. Order is as typed.
+func CleanTags(s string) []string {
+	var out []string
+	for _, t := range strings.Split(s, ",") {
+		t = strings.Join(strings.Fields(t), " ")
+		if t == "" {
+			continue
+		}
+		if r := []rune(t); len(r) > MaxTagLen {
+			t = string(r[:MaxTagLen])
+		}
+		if HasTag(out, t) {
+			continue
+		}
+		out = append(out, t)
+		if len(out) == MaxTags {
+			break
+		}
+	}
+	return out
+}
+
+// HasTag says whether tags carries t, whatever the case.
+func HasTag(tags []string, t string) bool {
+	for _, x := range tags {
+		if strings.EqualFold(x, t) {
+			return true
+		}
+	}
+	return false
+}
+
+// ApplyTags is what "Tag the file" does to a record's tags: removes first, then adds, each cleaned, the
+// result capped at MaxTags (a tag past the cap is left off, in order).
+func ApplyTags(have []string, add, remove []string) []string {
+	var out []string
+	for _, t := range CleanTags(strings.Join(have, ",")) {
+		if !HasTag(remove, t) {
+			out = append(out, t)
+		}
+	}
+	for _, t := range add {
+		if !HasTag(out, t) && len(out) < MaxTags {
+			out = append(out, t)
+		}
+	}
+	if out == nil {
+		out = []string{}
+	}
+	return out
 }
 
 // Card is a step carried to the run as it was saved (FB1b): a before- or after-action the run engine

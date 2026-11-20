@@ -613,6 +613,18 @@ func summary(n Node) string {
 		return "Only if the file is from one of " + strconv.Itoa(len(listOf(c, "libraries"))) + " libraries"
 	case TypeCheckHardLinks:
 		return "Only if the file shares its data with another name"
+	case TypeCheckTag:
+		return "Only if the file has " + map[string]string{"all": "all of", "none": "none of"}[strOf(c, "tagOp", "any")] + map[bool]string{true: "any of", false: ""}[strOf(c, "tagOp", "any") == "any" || strOf(c, "tagOp", "") == ""] + " the tags " + strOf(c, "tags", "")
+	case TypeTag:
+		add, remove := strOf(c, "add", ""), strOf(c, "remove", "")
+		switch {
+		case add != "" && remove != "":
+			return "Adds " + add + "; removes " + remove
+		case remove != "":
+			return "Removes " + remove
+		default:
+			return "Adds " + add
+		}
 	case TypeSetVariable:
 		return "Set {{" + strOf(c, "name", "") + "}} = “" + strOf(c, "value", "") + "”"
 	case TypeNote:

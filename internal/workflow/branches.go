@@ -246,7 +246,7 @@ func questionOf(n Node) rules.Question {
 	var q rules.Question
 	b, _ := json.Marshal(n.Config)
 	json.Unmarshal(b, &q) // a value of the wrong kind is an invalid_config from checkConfig already; here it reads as unset
-	q.Kind = map[string]string{TypeCheck: "", TypeCheckName: "name", TypeCheckAge: "age", TypeCheckVariable: "variable", TypeCheckLibrary: "library", TypeCheckHardLinks: "hardlinks"}[n.Type]
+	q.Kind = map[string]string{TypeCheck: "", TypeCheckName: "name", TypeCheckAge: "age", TypeCheckVariable: "variable", TypeCheckLibrary: "library", TypeCheckHardLinks: "hardlinks", TypeCheckTag: "tag"}[n.Type]
 	q.Name = nodeName(n)
 	return q
 }

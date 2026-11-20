@@ -340,3 +340,29 @@ func TestMain(m *testing.M) {
 	}
 	os.Exit(m.Run())
 }
+
+// FB2c: Tag the file resolves its lists, hands them to the store through the env, publishes {{tags}} as the record
+// has them after, and says so; without a store it says it can't tag from here; nothing to do is an error too.
+func TestTagCard(t *testing.T) {
+	have := []string{"needs review"}
+	env := Env{Tag: func(add, remove []string) ([]string, error) {
+		have = rules.ApplyTags(have, add, remove)
+		return have, nil
+	}}
+	st := &State{Vars: map[string]string{"profile": "remux"}}
+	card := rules.Card{NodeID: "t", Type: workflow.TypeTag, Name: "Tag the file", Config: map[string]any{"add": "converted, {{profile}}", "remove": "needs review"}}
+	notes, err := Before([]rules.Card{card}, st, env)
+	if err != nil || st.Vars["tags"] != "converted, remux" || notes[0].Words != "Tags: “converted, remux”" {
+		t.Errorf("%v %+v %q", err, notes, st.Vars["tags"])
+	}
+	if _, err := Before([]rules.Card{card}, st, Env{}); err == nil || !strings.Contains(err.Error(), "can't be tagged from here") {
+		t.Errorf("no store: %v", err)
+	}
+	empty := rules.Card{NodeID: "t", Type: workflow.TypeTag, Name: "Tag", Config: map[string]any{"add": " , "}}
+	if _, err := Before([]rules.Card{empty}, st, env); err == nil || !strings.Contains(err.Error(), "nothing to add or remove") {
+		t.Errorf("nothing: %v", err)
+	}
+	if _, warnings := After([]rules.Card{card}, st, env); len(warnings) != 0 || st.Vars["tags"] != "converted, remux" {
+		t.Errorf("after the save too: %v", warnings)
+	}
+}

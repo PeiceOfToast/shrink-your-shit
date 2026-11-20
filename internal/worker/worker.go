@@ -548,7 +548,7 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 		for k, v := range vars.EndValues(final, job.SizeBefore, size) {
 			st.Vars[k] = v
 		}
-		env := flow.Env{Log: func(l string) { w.jobNote(job.ID, secReplace, jobs.LevelInfo, "(%s): %s", job.Path, l) }}
+		env := flow.Env{Log: func(l string) { w.jobNote(job.ID, secReplace, jobs.LevelInfo, "(%s): %s", job.Path, l) }, Tag: w.tagger(job.ID)}
 		if w.Cards != nil {
 			e := w.Cards(job, final)
 			env.TellMediaServer, env.TellDownloader, env.Notify, env.Exec = e.TellMediaServer, e.TellDownloader, e.Notify, e.Exec
@@ -1023,7 +1023,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	var published map[string]string
 	if len(plan.Before) > 0 {
 		st := &flow.State{Vars: maps.Clone(facts.Vars)} // its own copy: what the cards set is told apart below
-		env := flow.Env{Log: func(l string) { w.jobNote(job.ID, secEncode, jobs.LevelInfo, "(%s): %s", job.Path, l) }}
+		env := flow.Env{Log: func(l string) { w.jobNote(job.ID, secEncode, jobs.LevelInfo, "(%s): %s", job.Path, l) }, Tag: w.tagger(job.ID)}
 		if w.Cards != nil { // FB2b: the downloaders answer before the conversion
 			env.Lookup = w.Cards(job, "").Lookup
 		}
@@ -2398,4 +2398,31 @@ func (w *Worker) probeSource(ctx context.Context, path string) (media.Info, erro
 		return media.Info{}, err
 	}
 	return scanner.Probe(ctx, w.Queue, w.Exec, w.FFprobe, path, st)
+}
+
+// JobTagger is what a store offers once jobs carry tags (FB2c; the column is the store's slice): the
+// record's tags, and a change to them that answers with the result. A Queue without it leaves the
+// "Tag the file" card reporting that it can't tag from here, and "Has a tag" answering as if none.
+type JobTagger interface {
+	JobTags(id int64) ([]string, error)
+	SetJobTags(id int64, add, remove []string) ([]string, error)
+}
+
+// tagger is Env.Tag for job id, or nil when the store has no tags yet.
+func (w *Worker) tagger(id int64) func(add, remove []string) ([]string, error) {
+	t, ok := w.Queue.(JobTagger)
+	if !ok {
+		return nil
+	}
+	return func(add, remove []string) ([]string, error) { return t.SetJobTags(id, add, remove) }
+}
+
+// jobTags are the record's tags for the facts, empty when the store has none.
+func (w *Worker) jobTags(id int64) []string {
+	if t, ok := w.Queue.(JobTagger); ok {
+		if tags, err := t.JobTags(id); err == nil {
+			return tags
+		}
+	}
+	return nil
 }

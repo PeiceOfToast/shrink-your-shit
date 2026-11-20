@@ -305,3 +305,59 @@ func TestLookupAndCommandCardsAreWired(t *testing.T) {
 		t.Errorf("switch off: %s, warned %v: %+v", j2.Status, warned, steps)
 	}
 }
+
+// taggingStore is the scenario's store plus the tags a store offers once jobs carry them (FB2c): the worker
+// reaches them through the JobTagger interface, so the card works as soon as the column exists.
+type taggingStore struct {
+	*jobs.Store
+	tags map[int64][]string
+}
+
+func (s *taggingStore) JobTags(id int64) ([]string, error) { return s.tags[id], nil }
+func (s *taggingStore) SetJobTags(id int64, add, remove []string) ([]string, error) {
+	s.tags[id] = rules.ApplyTags(s.tags[id], add, remove)
+	return s.tags[id], nil
+}
+
+// FB2c: the record's tags route the file (Has a tag), a Tag the file card before the conversion changes them and
+// publishes {{tags}} for the name, and one after the save changes them again; a store without tags leaves the
+// card a failure before the conversion (nothing was encoded) and a warning after.
+func TestTagCardsReadAndWriteTheRecord(t *testing.T) {
+	s := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
+	store := &taggingStore{Store: s.store, tags: map[int64][]string{s.id: {"needs review"}}}
+	tm := cardsTemplate()
+	q := rules.Question{Kind: "tag", Tags: "needs review"}
+	q.Name = "Needs review?"
+	(*tm.Branches)[0].Checks = []rules.BranchCheck{{NodeID: "q", Port: "match", Check: q}}
+	(*tm.Branches)[1].Checks = []rules.BranchCheck{{NodeID: "q", Port: "else", Check: q}}
+	(*tm.Branches)[0].Before = []rules.Card{
+		{NodeID: "tag", Type: workflow.TypeTag, Name: "Tag the file", Config: map[string]any{"add": "converting", "remove": "needs review"}},
+		{NodeID: "set", Type: workflow.TypeSetVariable, Name: "Set a variable", Config: map[string]any{"name": "profile", "value": "{{tags}}"}},
+	}
+	(*tm.Branches)[0].After = []rules.Card{{NodeID: "tag2", Type: workflow.TypeTag, Name: "Tag the file", Config: map[string]any{"add": "converted", "remove": "converting"}}}
+	w := s.worker(Beside)
+	w.Queue = store
+	w.Template = func(jobs.Job) (rules.Template, error) { return tm, nil }
+	if _, err := w.RunOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	j := s.job()
+	if j.Status != jobs.Done || !strings.HasSuffix(j.OutputPath, "Harrow.Lane.2019.Remux.converting.mkv") {
+		t.Fatalf("%s %q %q", j.Status, j.Error, j.OutputPath)
+	}
+	if got := strings.Join(store.tags[s.id], ","); got != "converted" {
+		t.Errorf("the record's tags after: %q", got)
+	}
+	if !noteOnTimeline(s, "Tags: “converting”") || !noteOnTimeline(s, "Tags: “converted”") {
+		steps, _ := s.store.Steps(j.ID)
+		t.Errorf("timeline: %+v", steps)
+	}
+	// the same workflow on a store without tags: the question answers No (no tags), the file stops as failed
+	s2 := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
+	w2 := s2.worker(Beside)
+	w2.Template = func(jobs.Job) (rules.Template, error) { return tm, nil }
+	w2.RunOne(context.Background())
+	if j := s2.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "Not a remux") {
+		t.Errorf("no tags in the store: %s %q", j.Status, j.Error)
+	}
+}
