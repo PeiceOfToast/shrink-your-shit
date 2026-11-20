@@ -66,7 +66,7 @@ func TestV2LibraryWritableField(t *testing.T) {
 	if w {
 		t.Fatal("read-only folder: writable true, want false")
 	}
-	if want := "Can't write to this folder: " + dir + ". Change its owner/permissions."; msg != want {
+	if want := "Can't write to this folder: " + dir + "."; msg != want {
 		t.Errorf("message %q, want %q", msg, want)
 	}
 	if err := os.Chmod(dir, 0o755); err != nil {
