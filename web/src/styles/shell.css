@@ -364,6 +364,7 @@ label.chk{cursor:pointer}
 /* U3 (C1): a library row has no table header: a 40 px tile, the name with its folder, one chip line of facts, and one
    status pill. The row stays 64 px or less at 1440. Checkboxes show only while selecting. */
 .list.rows .tbl td{height:auto;padding:6px 12px}
+.list.rows .tbl thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap} /* rows: the header is for screen readers only */
 .list.rows .tbl td.selc{display:none;padding-right:0}
 .list.rows.selecting .tbl td.selc{display:table-cell}
 .list.rows .tbl td.tile{width:40px;padding:6px 0 6px 12px}

@@ -149,7 +149,7 @@ export function Workflows() {
                       style={w.favourite ? { color: "var(--warning-text)" } : undefined}><Icon id="i-star" /></button>
                     <span><Link className="ttl" to={"/workflows/" + w.id}>{w.name}</Link><span className="sub runs"><Runs r={w.lastRun} /></span>{w.description && <span className="sub" title={w.description}>{w.description}</span>}
                       <span className="sub phone">{used} · {version}</span></span></span></td>
-                  <td data-p="2">{w.libraries.length ? used : <span className="muted">None</span>}</td>
+                  <td data-p="2">{w.libraries.length ? used : <span className="muted">{used}</span>}</td>
                   <td className="nowrap" data-p="3">{version}</td>
                   {hasTags && <td data-p="6"><span className="chips">{w.tags.map((t) => <span className="mchip" key={t}>{t}</span>)}</span></td>}
                   <td className="stc">{problems ? <span className={"pill " + (w.validation.errors ? "bad" : "warn")}><Icon id="i-alert" />{plural(problems, "problem", "problems")}</span>
