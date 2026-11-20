@@ -383,9 +383,7 @@ func main() {
 			},
 			Notify: notifier.SendTo,
 		}
-		if s, err := web.LoadSettings(store); err == nil && s.WorkflowsMayRunCommands { // FB2b: the Safety switch, read per job
-			env.Exec = flow.RunProgram
-		}
+		env.Exec = web.CommandRunner(store) // FB2b: the Safety switch, read per job; nil makes the card refuse
 		return env
 	}
 	go notifier.Run(ctx.Done())

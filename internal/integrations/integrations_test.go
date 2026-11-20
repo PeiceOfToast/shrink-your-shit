@@ -462,22 +462,22 @@ func TestLookupAnswersFromTheInstanceThatOwnsTheFile(t *testing.T) {
 	arr := newFakeArr(t, "/tv/The Show")
 	h := newHarness(t)
 	h.svc.Create(NewIntegration{Kind: Sonarr, URL: arr.srv.URL, APIKey: goodKey, Name: "TV box",
-		PathMappings: []Mapping{{TheirPath: "/tv", OurPath: "/mnt/media/tv"}}})
+		PathMappings: []Mapping{{TheirPath: "/tv", OurPath: "/data/tv"}}})
 	h.svc.Create(NewIntegration{Kind: Radarr, URL: arr.srv.URL, APIKey: goodKey, Name: "Film box",
-		PathMappings: []Mapping{{TheirPath: "/films", OurPath: "/mnt/media/films"}}})
-	vals, words, err := h.svc.Lookup("/mnt/media/tv/The Show/s01e01.mkv", []Kind{Sonarr, Radarr})
+		PathMappings: []Mapping{{TheirPath: "/films", OurPath: "/data/films"}}})
+	vals, words, err := h.svc.Lookup("/data/tv/The Show/s01e01.mkv", []Kind{Sonarr, Radarr})
 	if err != nil || vals["title_clean"] != "The Show" || vals["year"] != "2019" || vals["season"] != "1" || vals["episode"] != "1" || vals["original_language"] != "English" || words != "Sonarr: The Show (2019) S01E01" {
 		t.Errorf("episode: %v %q %v", vals, words, err)
 	}
-	vals, words, err = h.svc.Lookup("/mnt/media/films/The Film (2021)/The Film.mkv", []Kind{Sonarr, Radarr})
+	vals, words, err = h.svc.Lookup("/data/films/The Film (2021)/The Film.mkv", []Kind{Sonarr, Radarr})
 	if err != nil || vals["title_clean"] != "The Film" || vals["year"] != "2021" || vals["season"] != "" || vals["original_language"] != "French" || words != "Radarr: The Film (2021)" {
 		t.Errorf("film: %v %q %v", vals, words, err)
 	}
-	vals, words, err = h.svc.Lookup("/mnt/media/films/The Film (2021)/The Film.mkv", []Kind{Sonarr})
+	vals, words, err = h.svc.Lookup("/data/films/The Film (2021)/The Film.mkv", []Kind{Sonarr})
 	if err != nil || vals["title_clean"] != "" || !strings.Contains(words, "No connected downloader knows") {
 		t.Errorf("only Sonarr asked: %v %q %v", vals, words, err)
 	}
-	if _, _, err := h.svc.Lookup("/mnt/media/x.mkv", []Kind{Plex}); err == nil {
+	if _, _, err := h.svc.Lookup("/data/x.mkv", []Kind{Plex}); err == nil {
 		t.Error("no downloader of that kind: want an error")
 	}
 }

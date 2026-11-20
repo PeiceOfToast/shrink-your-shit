@@ -689,7 +689,9 @@ func (s *Service) lookupOne(ki kindInfo, r record, key, file string) (vals map[s
 		SeasonNumber int    `json:"seasonNumber"`
 		Path         string `json:"path"`
 	}
-	json.Unmarshal(body, &files)
+	if err := json.Unmarshal(body, &files); err != nil { // review-539 nit: an unreadable list is said, not skipped silently
+		return vals, words + " (the episode list could not be read)", true, nil
+	}
 	for _, ef := range files {
 		if norm(ef.Path) != norm(file) {
 			continue
