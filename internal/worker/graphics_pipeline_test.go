@@ -73,6 +73,11 @@ func TestFullGPUAsksForATenBitDecodeOnATenBitSource(t *testing.T) {
 	if len(enc) != 1 || !strings.Contains(enc[0], "-hwaccel qsv") {
 		t.Fatalf("encodes, want one full GPU encode:\n%s", strings.Join(enc, "\n"))
 	}
+	// the source's depth reaches the arguments too: main10, and no -pix_fmt (the full pipeline's frames come
+	// from the decoder)
+	if !strings.Contains(enc[0], "-profile:v:0 main10") || strings.Contains(enc[0], "-pix_fmt:v:0") {
+		t.Errorf("a 10-bit source's full-GPU encode must ask for main10 and take its frames from the decoder:\n%s", enc[0])
+	}
 }
 
 // Forced unsupported codec: the family does not decode H.264 here, so the processor decodes and the graphics

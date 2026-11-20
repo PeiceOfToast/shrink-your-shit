@@ -106,6 +106,10 @@ type VideoEncode struct {
 	Copy bool `json:"copy,omitempty"`
 	// HDR: an HDR10 or HLG source is encoded 10-bit with its HDR set from the probe (S3); nil = SDR.
 	HDR *HDR `json:"hdr,omitempty"`
+	// TenBit: the source's first video stream is 10-bit (or deeper) with no HDR, and the encode asks for
+	// 10-bit the same way HDR's does (main10 and p010 frames) without HDR's colour tags: an SDR file stays
+	// SDR. Compile sets it from the probe; false is every 8-bit source, whose arguments do not change.
+	TenBit bool `json:"tenBit,omitempty"`
 	// Format is the video format made (S6: h264, av1, vp9); "" is HEVC, as every Plan before S6.
 	Format string `json:"format,omitempty"`
 	// Extra are the encoder's own arguments (S6: SVT-AV1's tune, VP9's constant quality and speed).
@@ -142,7 +146,15 @@ func (h HDR) x265Params() string {
 // decision); Video, Output and the thresholds say how. A template that cannot run yields a Plan
 // with Skip set and no Video codec, and every Plan ends with its Steps (steps.go).
 func (t Template) Compile(info media.Info) (p Plan) {
-	defer func() { p = withStepDecisions(p, info) }()
+	defer func() {
+		// The plan carries the source's bit depth: a 10-bit (or deeper) first video stream keeps its depth
+		// through the encode where the target's encoder has one (VideoEncode.TenBit). A copied video is the
+		// same bytes, so it is not marked.
+		if v := info.Video(); v != nil && v.BitDepth > 8 && p.Video.Codec != "" && !p.Video.Copy {
+			p.Video.TenBit = true
+		}
+		p = withStepDecisions(p, info)
+	}()
 	if t.Branches != nil { // V6a: the path the file's answers lead down
 		b, ds, ok := route(*t.Branches, info)
 		switch {
@@ -299,6 +311,18 @@ func (p Plan) FFmpegArgsFullGPU(in, out, enc string) ([]string, bool) {
 	return p.ffmpegArgs(in, out, enc, true), true
 }
 
+// tenBitTargets are the codecs whose 10-bit output this program makes when the source is 10-bit: HEVC (main10) and
+// AV1 (its profile 0 covers p010). H.264 and VP9 have no 10-bit path here, so those targets stay 8-bit whatever the
+// source.
+var tenBitTargets = map[string]bool{"libx265": true, "libsvtav1": true}
+
+// EncodeTenBit says whether the new video is 10-bit: HDR (S3), or a 10-bit source kept at its depth by a target
+// whose encoder has one (tenBitTargets). It is what the arguments' 10-bit flags and the "converting to" line read,
+// so a 10-bit source made into H.264 is named 8-bit, as it comes out.
+func (p Plan) EncodeTenBit() bool {
+	return p.Video.HDR != nil || (p.Video.TenBit && tenBitTargets[p.Video.Codec])
+}
+
 // ffmpegArgs builds the arguments; gpu is a graphics encoder's name, or "" for the processor's. full is the full
 // graphics pipeline (FFmpegArgsFullGPU): the decode and the scale stay on the device, with no upload.
 func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
@@ -347,6 +371,7 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 	} else {
 		args = append(args, withoutSoftwareParams(extraArgs(p.Video))...)
 	}
+	ten10 := p.EncodeTenBit()       // HDR (S3), or a 10-bit source kept at its depth by the target's encoder
 	if h := p.Video.HDR; h != nil { // 10-bit main10 with the HDR written explicitly (S3)
 		if gpu == "" {
 			args = append(args, "-pix_fmt:"+v, "yuv420p10le", "-profile:"+v, "main10",
@@ -359,18 +384,26 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 				args = append(args, "-pix_fmt:"+v, "p010le")
 			}
 		}
+	} else if ten10 && gpu != "" { // a 10-bit SDR source keeps its depth on a graphics encoder: main10 and p010
+		// (the processor's encoder already keeps the source's depth on its own, and its arguments are today's).
+		if strings.HasPrefix(gpu, "hevc_") { // HEVC's name for the 10-bit profile; AV1's profile 0 already covers p010
+			args = append(args, "-profile:"+v, "main10")
+		}
+		if fam != "vaapi" && !full { // VAAPI's frames are made p010 by its filter instead; the full path's come from the decoder
+			args = append(args, "-pix_fmt:"+v, "p010le")
+		}
 	}
 	var vf []string
 	if p.Video.Height > 0 {
 		if full {
-			vf = append(vf, gpuScale(fam, p.Video.Height, p.Video.HDR != nil))
+			vf = append(vf, gpuScale(fam, p.Video.Height, ten10))
 		} else {
 			vf = append(vf, "scale=-2:"+strconv.Itoa(p.Video.Height))
 		}
 	}
 	if fam == "vaapi" && !full { // software frames go up to the device last, after any scale
 		format := "nv12"
-		if p.Video.HDR != nil {
+		if ten10 {
 			format = "p010"
 		}
 		vf = append(vf, "format="+format, "hwupload")
@@ -395,16 +428,17 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 }
 
 // gpuScale is the scale filter of the full graphics pipeline (frames stay on the device): QSV's keeps the frames'
-// format; VAAPI's also sets it, p010 for HDR and nv12 otherwise. scale_qsv refuses w=-2 ("Size values less than
-// -1 are not acceptable"), so QSV's width is an expression: trunc(H*a/2)*2 keeps the aspect ratio and is even.
-func gpuScale(fam string, h int, hdr bool) string {
+// format; VAAPI's also sets it, p010 for HDR or a 10-bit source and nv12 otherwise. scale_qsv refuses w=-2 ("Size
+// values less than -1 are not acceptable"), so QSV's width is an expression: trunc(H*a/2)*2 keeps the aspect ratio
+// and is even.
+func gpuScale(fam string, h int, tenBit bool) string {
 	size := "w=-2:h=" + strconv.Itoa(h)
 	if fam != "vaapi" {
 		hs := strconv.Itoa(h)
 		return "scale_qsv=w=trunc(" + hs + "*a/2)*2:h=" + hs
 	}
 	format := "nv12"
-	if hdr {
+	if tenBit {
 		format = "p010"
 	}
 	return "scale_vaapi=" + size + ":format=" + format

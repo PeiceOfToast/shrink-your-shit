@@ -55,7 +55,8 @@ func TestConvertingToNamesTheFormat(t *testing.T) {
 	}{
 		{rules.VideoEncode{Codec: "libx265"}, 8, "HEVC · 8-bit · MKV"},
 		{rules.VideoEncode{Codec: "libx264", Format: "h264"}, 8, "H.264 · 8-bit · MKV"},
-		{rules.VideoEncode{Codec: "libsvtav1", Format: "av1"}, 10, "AV1 · 10-bit · MKV"},
+		{rules.VideoEncode{Codec: "libsvtav1", Format: "av1", TenBit: true}, 10, "AV1 · 10-bit · MKV"},
+		{rules.VideoEncode{Codec: "libx264", Format: "h264", TenBit: true}, 10, "H.264 · 8-bit · MKV"}, // H.264 has no 10-bit here
 		{rules.VideoEncode{Codec: "libvpx-vp9", Format: "vp9"}, 8, "VP9 · 8-bit · MKV"},
 		{rules.VideoEncode{Codec: "libx265", Format: "hevc", HDR: &rules.HDR{}}, 8, "HEVC · 10-bit · MKV"},
 		{rules.VideoEncode{Copy: true}, 8, "repackaged as MKV"},
