@@ -377,8 +377,8 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
     const took = st.tookMs != null ? "Took " + stepTime(st.tookMs) : "";
     const progress = st.speedX != null || st.avgKbps != null ? [took + (st.speedX != null ? (took ? " at " : "") + st.speedX + "× speed" : ""), st.avgKbps != null ? "average " + st.avgKbps.toLocaleString() + " kbps" : ""].filter(Boolean).join(", ") : "";
     const flags = <>
-      {warn.length > 0 && <div className="stack" style={{ gap: 4 }}><span className="sm">Warnings ({warn.length})</span>{warn.map((w, j) => <p className="sm" key={j}><Icon id="i-alert" /> Warning: {w}</p>)}</div>}
-      {errs.length > 0 && <div className="stack" style={{ gap: 4 }}><span className="sm">Errors ({errs.length})</span>{errs.map((w, j) => <p className="sm" key={j}><Icon id="i-x-c" /> Error: {w}</p>)}</div>}</>;
+      {warn.length > 0 && <div className="stack" style={{ gap: 4 }}>{warn.map((w, j) => <p className="sm" key={j}><Icon id="i-alert" /> Warning: {w}</p>)}</div>}
+      {errs.length > 0 && <div className="stack" style={{ gap: 4 }}>{errs.map((w, j) => <p className="sm" key={j}><Icon id="i-x-c" /> Error: {w}</p>)}</div>}</>;
     const pill = ["ok", "done", "completed"].includes(st.outcome) ? <span className="pill ok">Done</span> : st.outcome === "failed" ? (kept ? <span className="pill warn">Original kept</span> : <span className="pill bad">Failed</span>) : st.outcome === "skipped" ? <span className="pill">Skipped</span> : null;
     raw.push({ key: "step-" + i, id: "job-step-" + (i + 1), title: stepLabel(st.name, st.found, st.check != null), hits: hit, dflt: st.outcome === "failed" || st.outcome === "skipped" || i === failedIdx || (kept && st.check != null), show: !errOnly || flagged(st),
       head: <>
@@ -406,7 +406,7 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
     const s = l.summary;
     // the before and after sizes live in the drawer's Result table, so the summary doesn't repeat them
     raw.push({ key: "summary", title: "Summary", head: null, hits: 0, dflt: true, show: !errOnly, body: <>
-      <p className="sm">Time taken {stepTime(s.tookMs)}</p>
+      <p className="sm">Time taken: {stepTime(s.tookMs)}</p>
       <p className="sm">Worker: {worker ?? "—"}</p>
       <p className="sm">Result: {WORD[l.final ?? ""] ?? l.final}</p>
       {hasResult && <p className="sm"><a href="#job-result" onClick={(e) => { e.preventDefault(); document.getElementById("job-result")?.scrollIntoView({ block: "start" }); }}>Before and after: see Result</a></p>}</> });

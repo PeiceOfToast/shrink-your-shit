@@ -577,6 +577,8 @@ label.chk{cursor:pointer}
 .joblog-tools .joblog-q{flex:1 1 100%;min-width:0}
 .joblog-tools .joblog-end{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}
 @media (min-width:641px){.joblog-tools .joblog-q{flex:1 1 240px}}
+/* design #455: at phone width the switch shares its row with Copy log and Open all; its words wrap first */
+@media (max-width:640px){.joblog-tools>.sw{flex:1 1 0;min-width:0}}
 /* Share setup / remove text: keep its line breaks (compose YAML, commands), wrap long values inside the box, Copy under it */
 .codebox{display:flex;flex-direction:column;align-items:flex-start;gap:6px}
 .codebox code{display:block;box-sizing:border-box;width:100%;overflow:auto;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font:var(--fs-sm)/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
