@@ -12,6 +12,7 @@ import { getDraft, getLadder, getWorkflow, patchWorkflow, publish, publishPrevie
 import { Link, onLeave } from "../router";
 import { Browse } from "../FolderPicker";
 import { OwnVars, VarInput, takesVars, varListFor, varProblems, withOwn } from "../VarInput";
+import "../styles/variables.css";
 import { listLibraries, shrunk } from "../libraryApi";
 import type { TemplateVar } from "../mock/variables";
 import type { JSONSchema, Node, PublishPreview, StepDefinition, ValidationIssue, Variable, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
@@ -322,9 +323,11 @@ function usedBy(nodes: Node[], defs: StepDefinition[]) {
 // box for fields that use a name that isn't a variable. Changes go through edit(), so undo and Save draft cover them.
 const NAME = /^[a-z][a-z0-9_]{0,39}$/;
 function VariablesCard({ doc, defs, builtins, problems, edit, open }: { doc: WorkflowDoc; defs: StepDefinition[]; builtins: TemplateVar[]; problems: { nodeId: string; title: string; error: string }[]; edit: (d: WorkflowDoc) => void; open: (nodeId: string) => void }) {
-  const [name, setName] = useState(""), [val, setVal] = useState(""), [err, setErr] = useState("");
+  const [name, setName] = useState(""), [val, setVal] = useState(""), [what, setWhat] = useState(""), [err, setErr] = useState("");
+  const [shown, setShown] = useState(false); // closed by default; opens by itself when a field uses an unknown name
   const vars = doc.variables ?? [], used = usedBy(doc.nodes, defs), titleOf = (n: Node) => defs.find((d) => d.type === n.type)?.name ?? n.type;
-  const unknown = problems.filter((p) => p.error.includes("isn't a variable"));
+  const unknown = problems.filter((p) => p.error.includes("isn't a variable")), bad = unknown.length > 0;
+  useEffect(() => { if (bad) setShown(true); }, [bad]);
   const setVars = (list: Variable[]) => edit({ ...doc, variables: list });
   const add = (e: FormEvent) => {
     e.preventDefault();
@@ -334,34 +337,48 @@ function VariablesCard({ doc, defs, builtins, problems, edit, open }: { doc: Wor
       : vars.some((v) => v.name === n) ? `{{${n}}} already exists. Edit it instead.` : "";
     setErr(msg);
     if (msg) return;
-    setVars([...vars, { name: n, type: "string", value: val === "" ? undefined : val }]);
-    setName(""); setVal("");
+    setVars([...vars, { name: n, type: "string", value: val === "" ? undefined : val, description: what.trim() || undefined }]);
+    setName(""); setVal(""); setWhat("");
   };
   const remove = (n: string) => {
     const by = used.get(n) ?? [];
     if (by.length && !window.confirm(`${by.map(titleOf).join(" and ")} use {{${n}}}. Delete it anyway? Those fields will show an error until you change them.`)) return;
     setVars(vars.filter((v) => v.name !== n));
   };
+  // Used by: open the step's options and focus the field that uses the variable
+  const openField = (n: Node, name: string) => {
+    open(n.id);
+    setTimeout(() => {
+      const ins = [...document.querySelectorAll<HTMLInputElement>(`#${CSS.escape(n.id)}-opts input[role=combobox]`)];
+      (ins.find((i) => i.value.includes("{{" + name + "}}")) ?? ins[0])?.focus();
+    }, 0);
+  };
   return (
     <section className="card" aria-labelledby="vars-h">
-      <div className="hd"><h2 id="vars-h">Variables</h2><span className="muted sm">{used.size} used here · {vars.length} set here</span></div>
-      <div className="bd stack">
-        {unknown.length > 0 && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{unknown.length === 1 ? "1 field uses a name that isn't a variable" : unknown.length + " fields use a name that isn't a variable"}. <button className="linkbtn" type="button" onClick={() => open(unknown[0].nodeId)}>{unknown[0].title}</button></span></p>}
+      <div className="hd"><h2 id="vars-h">Variables</h2><span className="muted sm">{used.size} used here · {vars.length} set here</span>
+        <button className="btn sm ghost" type="button" aria-expanded={shown} aria-controls="vars-body" onClick={() => setShown(!shown)}>{shown ? "Hide" : "Show"}</button></div>
+      <div id="vars-body" className="bd stack" hidden={!shown}>
+        {bad && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{unknown.length === 1 ? "1 field uses a name that isn't a variable" : unknown.length + " fields use a name that isn't a variable"}: {unknown.map((p, i) => <span key={i}>{i > 0 && ", "}<button className="linkbtn" type="button" onClick={() => open(p.nodeId)}>{p.title}</button></span>)}</span></p>}
+        <p className="muted sm">Values set in Settings apply to every workflow. A value set here wins for this workflow. A value typed straight into a step wins over both.</p>
         {vars.length === 0 ? <p className="muted">No variables yet. Add one below, then use it in a field as {"{{name}}"}.</p>
-          : <table>
+          : <table className="tbl vars-tbl">
             <thead><tr><th scope="col">Name</th><th scope="col">Value</th><th scope="col">Comes from</th><th scope="col">Used by</th><th scope="col"><span className="sr">Action</span></th></tr></thead>
-            <tbody>{vars.map((v) => (
-              <tr key={v.name}>
-                <th scope="row"><code>{"{{" + v.name + "}}"}</code></th>
-                <td><input className="input" aria-label={"Value of {{" + v.name + "}}"} value={String(v.value ?? "")} onChange={(e) => setVars(vars.map((x) => (x.name === v.name ? { ...x, value: e.target.value } : x)))} /></td>
-                <td><span className="pill">Set here</span></td>
-                <td>{(used.get(v.name) ?? []).length ? used.get(v.name)!.map((n, i) => <span key={n.id}>{i > 0 && ", "}<button className="linkbtn" type="button" onClick={() => open(n.id)}>{titleOf(n)}</button></span>) : <span className="muted">Not used</span>}</td>
-                <td><button className="btn sm ghost" type="button" aria-label={"Delete {{" + v.name + "}}"} onClick={() => remove(v.name)}>Delete</button></td>
-              </tr>))}</tbody>
+            <tbody>{vars.map((v) => {
+              const by = used.get(v.name) ?? [];
+              return (
+                <tr key={v.name}>
+                  <th scope="row"><code>{"{{" + v.name + "}}"}</code>{v.description && <span className="muted sm" style={{ display: "block" }}>{v.description}</span>}</th>
+                  <td data-label="Value"><input className="input" aria-label={"Value of {{" + v.name + "}}"} value={String(v.value ?? "")} onChange={(e) => setVars(vars.map((x) => (x.name === v.name ? { ...x, value: e.target.value } : x)))} /></td>
+                  <td><span className="pill vars-pill-own">This workflow</span></td>
+                  <td data-label="Used by">{by.length ? by.map((n, i) => <span key={n.id}>{i > 0 && ", "}<button className="linkbtn" type="button" onClick={() => openField(n, v.name)}>{titleOf(n)}</button></span>) : <span className="muted">Not used yet</span>}</td>
+                  <td><button className="btn sm ghost" type="button" aria-label={"Delete {{" + v.name + "}}"} onClick={() => remove(v.name)}>Delete</button></td>
+                </tr>);
+            })}</tbody>
           </table>}
-        <form className="row" onSubmit={add} noValidate aria-label="Add a variable">
+        <form className="row vars-add" onSubmit={add} noValidate aria-label="Add a variable">
           <div className="field"><label htmlFor="var-name">Name</label><input id="var-name" className="input" value={name} onChange={(e) => (setName(e.target.value), setErr(""))} aria-describedby={err ? "var-err" : undefined} /></div>
           <div className="field"><label htmlFor="var-val">Value</label><input id="var-val" className="input" value={val} onChange={(e) => setVal(e.target.value)} /></div>
+          <div className="field"><label htmlFor="var-what">What it's for (optional)</label><input id="var-what" className="input" value={what} onChange={(e) => setWhat(e.target.value)} /></div>
           <button className="btn" type="submit">Add variable</button>
           {err && <span id="var-err" className="st bad" role="alert"><Icon id="i-alert" /><span>{err}</span></span>}
         </form>
