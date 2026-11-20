@@ -536,7 +536,7 @@ func (s *Store) TemplateFor(j Job) (rules.Template, error) {
 	if j.LibraryID > 0 {
 		err = s.db.QueryRow(`SELECT COALESCE(flow_id,0) FROM libraries WHERE id=?`, j.LibraryID).Scan(&flowID)
 	} else {
-		err = s.db.QueryRow(`SELECT COALESCE(flow_id,0) FROM libraries WHERE path=?`, j.Library).Scan(&flowID)
+		err = s.db.QueryRow(`SELECT COALESCE(flow_id,0) FROM libraries WHERE path=?`, canonical(j.Library)).Scan(&flowID)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return rules.Template{}, fmt.Errorf("its library no longer exists: %w", ErrLibraryGone)

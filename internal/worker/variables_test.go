@@ -226,6 +226,89 @@ func TestTemplatedSrtNameTakenStopsTheJob(t *testing.T) {
 	}
 }
 
+// useTestHome points this computer's share key at a temp folder: a secret variable's value is stored sealed,
+// and a test must not write a key into the real home.
+func useTestHome(t *testing.T) {
+	t.Helper()
+	home := filepath.Join(t.TempDir(), "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("APPDATA", home)
+}
+
+// A workflow's secret is stored sealed and still resolves for a job through the store's RunInfo: the run
+// finishes, and the log says the secret is hidden without ever writing its value.
+func TestAWorkflowSecretResolvesInAJobAndStaysOutOfItsLog(t *testing.T) {
+	useTestHome(t)
+	const secret = "w4b-job-secret-77"
+	s := newScenario(t)
+	f, err := s.store.AddWorkflow("Sealed", workflow.Preset())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, _, err := s.store.Draft(f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Doc.Variables = []workflow.Variable{{Name: "api_key", Type: "secret", Value: secret, HasValue: true}}
+	saved, err := s.store.SaveDraft(f.ID, d.Doc, d.Layout, d.Etag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm, issues := workflow.ToTemplate(saved.Doc, rules.SliderTemplate(3))
+	if len(issues) > 0 {
+		t.Fatal(issues)
+	}
+	if _, err := s.store.Publish(f.ID, saved.Etag, tm); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.store.AddLibraryOnFlow("Movies", s.dir, f.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	w := selectorsWorker(s, func(sel *rules.Selectors) { sel.AfterConverting = "beside" })
+	w.RunInfo = s.store.RunInfoFor
+	if _, err := w.RunOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if j := s.job(); j.Status != jobs.Done {
+		t.Fatalf("status %s, error %q", j.Status, j.Error)
+	}
+	log := strings.Join(logTexts(t, s), "\n")
+	if !strings.Contains(log, "{{api_key}} = Hidden") {
+		t.Errorf("the log does not name the hidden secret:\n%s", log)
+	}
+	if strings.Contains(log, secret) {
+		t.Errorf("the secret's value was written to the log:\n%s", log)
+	}
+}
+
+// A workflow's secret that this computer can't open (it was sealed with another machine's share key, as a
+// restored backup's was) stops the job before anything is converted, naming it: the run never goes on with
+// the secret silently empty.
+func TestAnUnopenableSecretStopsTheJob(t *testing.T) {
+	s := newScenario(t)
+	w := selectorsWorker(s, func(sel *rules.Selectors) { sel.AfterConverting = "beside" })
+	w.RunInfo = func(jobs.Job) (jobs.RunInfo, error) {
+		return jobs.RunInfo{}, &jobs.SecretUnreadableError{Names: []string{"api_key"}}
+	}
+	w.RunOne(context.Background()) // the failure is the job's, checked below
+	j := s.job()
+	// like the other unreadable-setting failures it waits for a retry (the person can enter the secret in
+	// the meantime), and the job says why meanwhile
+	if j.Status != jobs.Queued || !strings.Contains(j.Error, "The workflow secret “api_key” can't be opened on this computer") ||
+		!strings.Contains(j.Error, "Enter it again in the workflow, then press Retry.") {
+		t.Fatalf("status %s, error %q", j.Status, j.Error)
+	}
+	if n := len(encodeCalls(s)); n != 0 {
+		t.Errorf("%d encode(s) ran before the secret was checked", n)
+	}
+	if read(s.src) != "original-bytes" {
+		t.Errorf("the original is %q", read(s.src))
+	}
+}
+
 // logTexts are the job's log lines as text.
 func logTexts(t *testing.T, s *scenario) []string {
 	t.Helper()
@@ -238,4 +321,95 @@ func logTexts(t *testing.T, s *scenario) []string {
 		out[k] = l.Text
 	}
 	return out
+}
+
+// A name the filesystem would refuse is refused before the conversion, naming the setting that made it
+// (review2-504 P3: it used to convert, then fail at the final rename with "could not be put in place",
+// which Retry could never fix).
+func TestATooLongOutputNameStopsBeforeTheConversion(t *testing.T) {
+	s := newScenario(t)
+	long := strings.Repeat("a", 250) + ".mkv" // more than any of the two filesystems' limits
+	w := selectorsWorker(s, func(sel *rules.Selectors) {
+		sel.AfterConverting = "beside"
+		sel.OutputName = strings.Repeat("a", 250)
+	})
+	w.RunOne(context.Background()) // the failure is the job's, checked below
+	j := s.job()
+	if j.Status != jobs.Failed || !strings.Contains(j.Error, "The name from “Output file name” would be 254 characters long") ||
+		!strings.Contains(j.Error, "Nothing was changed.") {
+		t.Fatalf("status %s, error %q", j.Status, j.Error)
+	}
+	if n := len(encodeCalls(s)); n != 0 {
+		t.Errorf("%d encode(s) ran before the name was checked", n)
+	}
+	if read(s.src) != "original-bytes" {
+		t.Errorf("the original is %q", read(s.src))
+	}
+	if _, err := os.Stat(filepath.Join(s.dir, long)); err == nil {
+		t.Error("a file at the too-long name exists")
+	}
+}
+
+// The cap covers each piece of the move-to folder too (review2-511 P3a, M6): a folder template that
+// resolves to a piece the filesystem would refuse stops before the folder is made or anything is
+// converted.
+func TestATooLongFolderPieceStopsBeforeTheConversion(t *testing.T) {
+	title := strings.Repeat("m", 220) // a long original's name fills the {{title}} piece
+	s := newScenarioNamed(t, title+".mkv")
+	moveRoot := t.TempDir()
+	w := selectorsWorker(s, func(sel *rules.Selectors) {
+		sel.AfterConverting, sel.OutputDir = "folder", filepath.Join(moveRoot, "{{title}}")
+	})
+	w.RunOne(context.Background()) // the failure is the job's, checked below
+	j := s.job()
+	if j.Status != jobs.Failed || !strings.Contains(j.Error, "The name from “Folder” would be 220 characters long") ||
+		!strings.Contains(j.Error, "Nothing was changed.") {
+		t.Fatalf("status %s, error %q", j.Status, j.Error)
+	}
+	if n := len(encodeCalls(s)); n != 0 {
+		t.Errorf("%d encode(s) ran before the folder was checked", n)
+	}
+	if read(s.src) != "original-bytes" {
+		t.Errorf("the original is %q", read(s.src))
+	}
+	if _, err := os.Stat(filepath.Join(moveRoot, title)); err == nil {
+		t.Error("a folder at the too-long piece was made")
+	}
+}
+
+// And the .srt names (review2-511 P3a, M7): a template that resolves past the cap stops before the
+// conversion, naming that setting rather than failing on the write.
+func TestATooLongSrtNameStopsBeforeTheConversion(t *testing.T) {
+	s := newScenario(t)
+	s.srcSpec.streams = []map[string]any{vid("h264", 640, 360, "yuv420p"), aud("aac", "eng", 2),
+		sub("subrip", "eng", false), att("font.ttf")}
+	out := goodOutput()
+	out.streams = append(out.streams[:2], out.streams[3]) // no subtitle inside the new file
+	s.outSpec = out
+	w := selectorsWorker(s, func(sel *rules.Selectors) {
+		sel.AfterConverting, sel.Subtitles = "beside", "srt"
+		sel.SrtName = strings.Repeat("s", 210) // ".srt" makes it 214
+	})
+	w.RunOne(context.Background()) // the failure is the job's, checked below
+	j := s.job()
+	if j.Status != jobs.Failed || !strings.Contains(j.Error, "The name from “Subtitle file name” would be 214 characters long") ||
+		!strings.Contains(j.Error, "Nothing was changed.") {
+		t.Fatalf("status %s, error %q", j.Status, j.Error)
+	}
+	if n := len(encodeCalls(s)); n != 0 {
+		t.Errorf("%d encode(s) ran before the .srt name was checked", n)
+	}
+	if read(s.src) != "original-bytes" {
+		t.Errorf("the original is %q", read(s.src))
+	}
+}
+
+// The cap's edge: 200 bytes is allowed, 201 is not (review2-511 P3a asked for the boundary).
+func TestNameLengthBoundary(t *testing.T) {
+	if nameTooLong(strings.Repeat("x", maxNameLen)) {
+		t.Errorf("%d bytes must be allowed", maxNameLen)
+	}
+	if !nameTooLong(strings.Repeat("x", maxNameLen+1)) {
+		t.Errorf("%d bytes must be refused", maxNameLen+1)
+	}
 }

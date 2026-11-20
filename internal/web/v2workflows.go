@@ -300,6 +300,10 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		if !readJSON(w, r, &in) {
 			return
 		}
+		// a secret is never sent to the page, so a secret saved back without a value keeps the stored one
+		if cur, _, err := store.Draft(id); err == nil {
+			in.Workflow = workflow.KeepSecretValues(in.Workflow, cur.Doc)
+		}
 		// W4a: a variable's name is the engine's to check; the editor refuses these too, so a draft
 		// saved another way can't break the built-in names.
 		if vs := workflow.CheckVariables(in.Workflow); len(vs) > 0 {
@@ -378,8 +382,19 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			return
 		}
 		if res := workflow.Validate(d.Doc); res.Errors() {
-			writeErrorWith(w, http.StatusBadRequest, "has_errors", "This workflow has problems to fix before it can be published. Nothing was changed.",
-				map[string]any{"issues": res.Issues})
+			// A {{name}} template problem names its setting in the error itself (the page keys on the code and
+			// shows the field); every other problem keeps the general answer, with all the issues listed.
+			code, message := "has_errors", "This workflow has problems to fix before it can be published. Nothing was changed."
+			more := map[string]any{"issues": res.Issues}
+			for _, i := range res.Issues {
+				if i.Code != "unknown_variable" && i.Code != "unclosed_variable" {
+					continue
+				}
+				code, message = i.Code, i.Message+" Nothing was changed."
+				more["field"], more["name"], more["suggest"] = i.Field, nilIfEmpty(i.Name), nilIfEmpty(i.Suggest)
+				break
+			}
+			writeErrorWith(w, http.StatusBadRequest, code, message, more)
 			return
 		}
 		f, err := store.GetFlow(id)
@@ -465,6 +480,11 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 	api.HandleFunc("POST /api/v2/workflows/{id}/revisions/{rev}/restore", func(w http.ResponseWriter, r *http.Request) {
 		id, v, ok := revision(w, r)
 		if !ok {
+			return
+		}
+		// the same check a draft PUT makes: a revision is copied into the draft, and its variables must pass too
+		if vs := workflow.CheckVariables(v.Doc); len(vs) > 0 {
+			writeErrorWith(w, http.StatusBadRequest, vs[0].Code, vs[0].Message+" Nothing was changed.", map[string]any{"issues": vs})
 			return
 		}
 		cur, _, err := store.Draft(id)
@@ -565,7 +585,7 @@ func revisionView(r jobs.Revision) map[string]any {
 		id = strconv.FormatInt(r.ID, 10)
 	}
 	return map[string]any{"id": id, "workflowId": strconv.FormatInt(r.WorkflowID, 10), "number": r.Number, "status": r.Status,
-		"workflow": r.Doc, "layout": r.Layout, "logicHash": r.LogicHash, "stackable": res.Stackable,
+		"workflow": workflow.Masked(r.Doc), "layout": r.Layout, "logicHash": r.LogicHash, "stackable": res.Stackable,
 		"stepSummaries": res.StepSummaries, "validation": res.Issues, "etag": r.Etag, "createdAt": r.Created, "publishedAt": r.Published}
 }
 

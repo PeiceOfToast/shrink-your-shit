@@ -218,8 +218,8 @@ func OutputName(tpl, ext string, vals map[string]string) (string, []string) {
 	}
 	s, empty := resolve(tpl, vals, cleanValue) // each value is one piece: no separators, no dot at its end
 	s = CleanPiece(s)
-	if s == "" || s == "." || s == ".." {
-		return "", empty
+	if s == "" || s == "." || s == ".." { // "." and ".." are unreachable here (CleanPiece trims dots): kept so a
+		return "", empty // later CleanPiece that stops trimming them still can't name a file "." or ".."
 	}
 	if !strings.EqualFold(filepath.Ext(s), ext) {
 		s += ext
@@ -278,7 +278,10 @@ func SrtNames(final, tpl string, subs []Subtitle, vals map[string]string) ([]str
 			v["sub_lang"], v["sub_kind"] = s.Lang, s.Kind
 			r, e := resolve(tpl, v, cleanValue)
 			report(e)
-			if r = CleanPiece(r); r != "" && r != "." && r != ".." && !Reserved(strings.SplitN(r, ".", 2)[0]) {
+			r = CleanPiece(r)
+			// "." and ".." can't be reached (CleanPiece trims dots); they stay for the case that changes, since "."
+			// would become "..srt" once the suffix is added
+			if r != "" && r != "." && r != ".." && !Reserved(strings.SplitN(r, ".", 2)[0]) {
 				name = r
 				if !strings.HasSuffix(strings.ToLower(name), ".srt") {
 					name += ".srt"

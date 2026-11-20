@@ -50,7 +50,54 @@ type StepDefinition struct {
 	// ReadOnly: made only by migration (an earlier install's settings): not offered in the palette, and
 	// the UI shows it as a card "kept as it is", with no form (lead 02:26Z).
 	ReadOnly bool `json:"readOnly"`
+	// The card contract (docs/architecture/flow-builder.md, section 1): what the step does, where it may sit
+	// in a run, what it publishes and needs, what state the file is in on each output, and whether this
+	// build runs it. Both editors and the run engine read these; validation's phase rules build on them.
+	RunsAs    string            `json:"runsAs"`    // RunsInput | RunsQuestion | RunsAction | RunsPlan | RunsVerify | RunsCommit | RunsEnd
+	Phase     []string          `json:"phase"`     // the phases it may sit in: PhaseBefore ... PhaseAfter
+	Publishes []Published       `json:"publishes"` // the {{name}} variables it sets for later steps
+	Reads     []string          `json:"reads"`     // the {{name}} variables it must have
+	FileOn    map[string]string `json:"fileOn"`    // per output port: FileOriginal | FileStaged | FileSaved | FileNone
+	Available bool              `json:"available"` // this build runs it; false: it can be drafted, not published
 }
+
+// Published is a variable a step sets for the steps after it.
+type Published struct {
+	Name  string `json:"name"`  // a NamePattern name, never a built-in
+	Type  string `json:"type"`  // string | number | bool | list
+	Words string `json:"words"` // what it holds, for the variable picker
+}
+
+// The kinds of step (RunsAs).
+const (
+	RunsInput    = "input"    // where files come from
+	RunsQuestion = "question" // answers Yes or No; changes nothing
+	RunsAction   = "action"   // does one thing: a variable, a note, a name, a folder, a message to another program
+	RunsPlan     = "plan"     // shapes the one conversion
+	RunsVerify   = "verify"   // checks the result against the original
+	RunsCommit   = "commit"   // saves the result and decides the original's fate
+	RunsEnd      = "end"      // ends the run with a verdict
+)
+
+// The phases of a run, in order (Phase).
+const (
+	PhaseBefore  = "before"  // on the original: questions and actions that change no file
+	PhaseConvert = "convert" // the one conversion: plan steps, contiguous
+	PhaseCheck   = "check"   // the result checked against the original
+	PhaseSave    = "save"    // the result saved
+	PhaseAfter   = "after"   // on the saved result: actions and messages; a failure never undoes the save
+)
+
+// Phases are the phases in run order.
+var Phases = []string{PhaseBefore, PhaseConvert, PhaseCheck, PhaseSave, PhaseAfter}
+
+// What state the file is in on an output port (FileOn).
+const (
+	FileOriginal = "original" // the original, untouched
+	FileStaged   = "staged"   // a new file in the staging folder; the original untouched
+	FileSaved    = "saved"    // the new file in place; the original's fate decided
+	FileNone     = "none"     // no file goes this way (an end's words, a control port)
+)
 
 // Port is a named input or output.
 type Port struct {
@@ -111,27 +158,39 @@ func Definitions() []StepDefinition {
 	}
 	builtin := map[string]string{"kind": "builtin"}
 	def := func(d StepDefinition) StepDefinition {
-		d.TypeVersion, d.FileTypes, d.Source = 1, []string{"video"}, builtin
+		d.TypeVersion, d.FileTypes, d.Source, d.Available = 1, []string{"video"}, builtin, true
 		if d.Requires == nil {
 			d.Requires = []string{}
 		}
 		if d.ConfigSchema == nil {
 			d.ConfigSchema = object(nil, nil)
 		}
+		if d.Publishes == nil {
+			d.Publishes = []Published{}
+		}
+		if d.Reads == nil {
+			d.Reads = []string{}
+		}
+		if d.Phase == nil {
+			d.Phase = phaseOf(d.RunsAs)
+		}
+		if d.FileOn == nil {
+			d.FileOn = fileOnOf(d)
+		}
 		return d
 	}
 	return []StepDefinition{
-		def(StepDefinition{Type: TypeInput, Category: "input", Name: "Library files", Icon: "folder", TypeLabel: "Input",
+		def(StepDefinition{Type: TypeInput, RunsAs: RunsInput, Category: "input", Name: "Library files", Icon: "folder", TypeLabel: "Input",
 			Description: "Every video in the libraries that use this workflow.", Outputs: []Port{success}, AlwaysOn: true,
 			ConfigSchema: object(map[string]any{"ignore": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
 				"default": []any{}, "title": "Exclude patterns", "description": "Folders, files or patterns in the library that are left out."}}, nil),
 			SideEffects: "none"}),
-		def(StepDefinition{Type: TypeSkips, Category: "filter", Name: "Leave some files alone", Icon: "filter", TypeLabel: "Filter",
+		def(StepDefinition{Type: TypeSkips, RunsAs: RunsPlan, Category: "filter", Name: "Leave some files alone", Icon: "filter", TypeLabel: "Filter",
 			Description: "Skips Dolby Vision files, files already in this format, and AV1 or VP9 videos.",
 			Inputs:      []Port{in}, Outputs: []Port{success, skipped}, AlwaysOn: true, RunsWith: encodeSegment, SideEffects: "none",
 			ConfigSchema: object(map[string]any{"includeDolbyVision": map[string]any{"type": "boolean", "default": false,
 				"title": "Include Dolby Vision files", "description": "Off: Dolby Vision files are left as they are. On: they become HDR10 and the Dolby Vision layer is removed. Some Dolby Vision files (profile 5) are always left alone, because converting them would show wrong colours."}}, nil)}),
-		def(StepDefinition{Type: TypeConvert, Category: "video", Name: "Convert video", Icon: "video", TypeLabel: "Video",
+		def(StepDefinition{Type: TypeConvert, RunsAs: RunsPlan, Category: "video", Name: "Convert video", Icon: "video", TypeLabel: "Video",
 			Description: "Makes the video smaller at the quality you choose.", Inputs: []Port{in},
 			Outputs: []Port{success, skipped, errPort}, AlwaysOn: true, RunsWith: encodeSegment, SideEffects: "writes_staging",
 			Requires: []string{}, RequiresByConfig: map[string]map[string][]string{"format": {"hevc": {"encoder:libx265"},
@@ -155,7 +214,7 @@ func Definitions() []StepDefinition {
 				"vbrMaxKbps": described(map[string]any{"type": "integer", "minimum": 100, "maximum": 500000, "title": "Max bitrate (kbps)"},
 					"The most data each second may use with VBR. A file never gets more than it has now."),
 			}, []string{"quality", "format", "resolution", "maxBitrate", "speed"})}),
-		def(StepDefinition{Type: TypeAudio, Category: "audio", Name: "Audio", Icon: "audio", TypeLabel: "Audio",
+		def(StepDefinition{Type: TypeAudio, RunsAs: RunsPlan, Category: "audio", Name: "Audio", Icon: "audio", TypeLabel: "Audio",
 			Description: "Which sound tracks the new file has.", Inputs: []Port{in}, Outputs: []Port{success}, RunsWith: encodeSegment,
 			SideEffects: "none", ConfigSchema: object(map[string]any{
 				"audio": withDefault(audio, "stereo_aac", "Audio", ""),
@@ -163,12 +222,12 @@ func Definitions() []StepDefinition {
 					// design's words (02:38Z), true to planAudio: with none matching, a stereo choice keeps the main track only
 					"description": "Keeps only tracks in your languages (Settings > General). Tracks with no language set are always kept. If none match, a stereo choice keeps the main track; the other choices keep all tracks."},
 			}, []string{"audio", "onlyMyLanguages"})}),
-		def(StepDefinition{Type: TypeSubtitles, Category: "subtitles", Name: "Subtitles", Icon: "subtitles", TypeLabel: "Subtitles",
+		def(StepDefinition{Type: TypeSubtitles, RunsAs: RunsPlan, Category: "subtitles", Name: "Subtitles", Icon: "subtitles", TypeLabel: "Subtitles",
 			Description: "Which subtitles the new file keeps.", Inputs: []Port{in}, Outputs: []Port{success}, RunsWith: encodeSegment,
 			SideEffects: "none", ConfigSchema: object(map[string]any{
 				"subtitles": withDefault(subtitles, "keep_all", "Subtitles", ""),
 			}, []string{"subtitles"})}),
-		def(StepDefinition{Type: TypeContainer, Category: "container", Name: "File type", Icon: "file", TypeLabel: "Container",
+		def(StepDefinition{Type: TypeContainer, RunsAs: RunsPlan, Category: "container", Name: "File type", Icon: "file", TypeLabel: "Container",
 			Description: "The new file's type.", Inputs: []Port{in}, Outputs: []Port{success}, RunsWith: encodeSegment, SideEffects: "none",
 			ConfigSchema: object(map[string]any{
 				"fileType": withDefault(hinted(enum([]any{"mkv", "mp4", "webm", "keep"}, []string{"MKV", "MP4", "WebM", "Keep as is"}), []string{
@@ -177,10 +236,10 @@ func Definitions() []StepDefinition {
 					"For web browsers. Only with AV1 or VP9 video and Opus audio.",
 					"Each file keeps its current type. A file whose type can't hold the chosen video or audio becomes MKV."}), "mkv", "File type", "segmented"),
 			}, []string{"fileType"})}),
-		def(StepDefinition{Type: TypeVerify, Category: "verify", Name: "Check the result", Icon: "check", TypeLabel: "Check",
+		def(StepDefinition{Type: TypeVerify, RunsAs: RunsVerify, Category: "verify", Name: "Check the result", Icon: "check", TypeLabel: "Check",
 			Description: "The new file must play through, look like the original and hold what you chose. If not, the original stays.",
 			Inputs:      []Port{in}, Outputs: []Port{success, errPort}, AlwaysOn: true, SideEffects: "none"}),
-		def(StepDefinition{Type: TypeCommit, Category: "output", Name: "Save the result", Icon: "save", TypeLabel: "Output",
+		def(StepDefinition{Type: TypeCommit, RunsAs: RunsCommit, Category: "output", Name: "Save the result", Icon: "save", TypeLabel: "Output",
 			Description: "Where the new file goes, and what happens to the original.", Inputs: []Port{in},
 			Outputs: []Port{success, errPort}, AlwaysOn: true, SideEffects: "commits",
 			ConfigSchema: object(map[string]any{
@@ -193,16 +252,16 @@ func Definitions() []StepDefinition {
 					"Each library gets a folder beside it, e.g. /media/movies (shrunk). Same disk, and it works when one workflow serves several libraries.",
 					"Every converted file goes into the folder below, in the same sub-folders as in its library."}), "next_to_library", "Where new files go", ""),
 					"Pick a folder next to each library, or one folder for all of them. Your originals stay where they are."),
-				"folder": map[string]any{"type": "string", "title": "Folder", "description": "New files go to this folder, in the same sub-folders. You can use variables, like {{library}}.",
-					"x-placeholder": "/media/movies (shrunk)", "x-ui": map[string]any{"widget": "folder"}},
+				"folder": templated(map[string]any{"type": "string", "title": "Folder", "description": "New files go to this folder, in the same sub-folders. You can use variables, like {{library}}.",
+					"x-placeholder": "/media/movies (shrunk)", "x-ui": map[string]any{"widget": "folder"}}),
 				// W4b: names from {{name}} variables. Empty keeps today's names, so nothing changes for a
 				// workflow saved before these fields existed.
-				"outputName": described(map[string]any{"type": "string", "title": "Output file name", "maxLength": 200},
-					"Leave empty to keep the original's name. You can use variables, like {{title}} (smaller)."),
-				"srtName": described(map[string]any{"type": "string", "title": "Subtitle file name", "maxLength": 200},
-					"Leave empty to keep today's names. You can use variables, like {{title}}.{{sub_lang}}{{sub_kind}}.srt."),
-				"trackTitle": described(map[string]any{"type": "string", "title": "Audio track title", "maxLength": 200},
-					"Leave empty to keep each track's own title. You can use variables, like {{title}} ({{resolution}})."),
+				"outputName": templated(described(map[string]any{"type": "string", "title": "Output file name", "maxLength": 200},
+					"Leave empty to keep the original's name. You can use variables, like {{title}} (smaller).")),
+				"srtName": templated(described(map[string]any{"type": "string", "title": "Subtitle file name", "maxLength": 200},
+					"Leave empty to keep today's names. You can use variables, like {{title}}.{{sub_lang}}{{sub_kind}}.srt.")),
+				"trackTitle": templated(described(map[string]any{"type": "string", "title": "Audio track title", "maxLength": 200},
+					"Leave empty to keep each track's own title. You can use variables, like {{title}} ({{resolution}}).")),
 				// R8: checked after "Check the result" passes, before anything is moved. A new file bigger than its original is
 				// not saved when "keep"; "replace" saves it anyway. An absent value reads as replace (old workflows).
 				"ifBigger": withDefault(hinted(enum([]any{"keep", "replace"}, []string{"Keep the original", "Replace anyway"}), []string{
@@ -210,12 +269,14 @@ func Definitions() []StepDefinition {
 					"The new file is used even though it is bigger. If it replaces the original, the original is kept for the days set in Settings > Safety, then deleted."}),
 					"keep", "If the new file is bigger than the original", ""),
 			}, []string{"policy"})}),
-		def(StepDefinition{Type: TypeLegacy, Category: "video", Name: "Earlier install's settings", Icon: "history", TypeLabel: "Video",
+		// the earlier install's step converts, checks and saves as one run, so its Next carries the file saved
+		def(StepDefinition{Type: TypeLegacy, RunsAs: RunsPlan, Category: "video", Name: "Earlier install's settings", Icon: "history", TypeLabel: "Video",
+			FileOn:      map[string]string{"success": FileSaved, "skipped": FileOriginal, "error": FileOriginal},
 			Description: "The settings this workflow had before workflows existed. They run exactly as before; to change them, start from the Shrink videos steps.",
 			Inputs:      []Port{in}, Outputs: []Port{success, skipped, errPort}, AlwaysOn: true, SideEffects: "commits", Deprecated: true, ReadOnly: true,
 			ConfigSchema: object(nil, nil)}), // its config (the template) is kept as it is: no form
 		// V6a: branches. Each output port has its own words (ui-shop 02:05Z): the UI never makes them up.
-		def(StepDefinition{Type: TypeCheck, Category: "filter", Name: "Check the file", Icon: "branch", TypeLabel: "Check",
+		def(StepDefinition{Type: TypeCheck, RunsAs: RunsQuestion, Category: "filter", Name: "Check the file", Icon: "branch", TypeLabel: "Check",
 			Description: "Sends each file one of two ways, by what it is. Every condition you set must hold for Yes.",
 			Inputs:      []Port{in}, Outputs: []Port{yesPort, noPort}, SideEffects: "none",
 			ConfigSchema: object(map[string]any{
@@ -230,11 +291,49 @@ func Definitions() []StepDefinition {
 				"container": described(map[string]any{"type": "array", "title": "File type is one of", "items": enum([]any{"mkv", "mp4", "avi", "mov", "webm", "ts", "m2ts", "wmv", "flv", "mpg"},
 					[]string{"MKV", "MP4", "AVI", "MOV", "WebM", "TS", "M2TS", "WMV", "FLV", "MPG"})}, "Leave empty for any."),
 			}, nil)}),
-		def(StepDefinition{Type: TypeEnd, Category: "flow", Name: "Leave the file alone", Icon: "stop", TypeLabel: "End",
+		def(StepDefinition{Type: TypeEnd, RunsAs: RunsEnd, Category: "flow", Name: "Leave the file alone", Icon: "stop", TypeLabel: "End",
 			Description: "The file is left as it is, and the reason below shows in its history.",
 			Inputs:      []Port{in}, Outputs: []Port{}, SideEffects: "none",
 			ConfigSchema: object(map[string]any{"reason": withDefault(map[string]any{"type": "string", "maxLength": 200}, "Left alone by this workflow.", "Reason shown", "")}, nil)}),
 	}
+}
+
+// phaseOf is where a kind of step sits unless its entry says otherwise: an end may follow a question
+// (before) or an action after the save; the rest have one phase each.
+func phaseOf(runsAs string) []string {
+	switch runsAs {
+	case RunsInput, RunsQuestion, RunsAction:
+		return []string{PhaseBefore}
+	case RunsPlan:
+		return []string{PhaseConvert}
+	case RunsVerify:
+		return []string{PhaseCheck}
+	case RunsCommit:
+		return []string{PhaseSave}
+	case RunsEnd:
+		return []string{PhaseBefore, PhaseAfter}
+	}
+	return []string{}
+}
+
+// fileOnOf is the file's state on each output port unless the entry says otherwise: a plan step's
+// Next carries the new file (staged), a save's carries it saved, a question's or a before-action's
+// the original; "skipped" and "error" always leave the original as it is.
+func fileOnOf(d StepDefinition) map[string]string {
+	out := map[string]string{}
+	for _, p := range d.Outputs {
+		switch {
+		case p.Name == "skipped" || p.Name == "error":
+			out[p.Name] = FileOriginal
+		case d.RunsAs == RunsPlan || d.RunsAs == RunsVerify:
+			out[p.Name] = FileStaged
+		case d.RunsAs == RunsCommit:
+			out[p.Name] = FileSaved
+		default:
+			out[p.Name] = FileOriginal
+		}
+	}
+	return out
 }
 
 // hinted adds a hint per choice (shown when it is chosen), beside x-enumLabels.
@@ -245,6 +344,14 @@ func hinted(s map[string]any, hints []string) map[string]any {
 
 func described(s map[string]any, d string) map[string]any {
 	s["description"] = d
+	return s
+}
+
+// templated marks a string field that takes {{name}} variables ("x-variables": true, design-joblog-vars
+// section 3): the editor shows the variable picker there, and the publish check reads the same flag, so
+// the fields that take variables and the fields that are checked are one list.
+func templated(s map[string]any) map[string]any {
+	s["x-variables"] = true
 	return s
 }
 

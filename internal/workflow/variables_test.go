@@ -40,6 +40,39 @@ func TestCheckVariables(t *testing.T) {
 	}
 }
 
+// A secret holds text (or nothing, or the sealed form the store keeps): a value of another shape would be
+// stored in the clear, so it is refused wherever a variable is checked (W4b QA step 3).
+func TestCheckVariablesRefusesASecretThatIsNotText(t *testing.T) {
+	for _, c := range []struct {
+		why string
+		v   Variable
+	}{
+		{"an object", Variable{Name: "api_key", Type: "secret", Value: map[string]any{"k": "OBJSECRET"}}},
+		{"a list", Variable{Name: "api_key", Type: "secret", Value: []any{"a", "b"}}},
+		{"a number", Variable{Name: "api_key", Type: "secret", Value: 7}},
+		{"an object beside a sealed value", Variable{Name: "api_key", Type: "secret", Value: map[string]any{"sealed": "AAAA", "nonce": "BBBB", "k": "x"}}},
+	} {
+		got := CheckVariables(Doc{Variables: []Variable{c.v}})
+		if len(got) != 1 || got[0].Code != "invalid_secret_value" || got[0].Name != "api_key" || got[0].Severity != "error" {
+			t.Errorf("%s: got %+v, want one invalid_secret_value about api_key", c.why, got)
+		}
+	}
+	for _, c := range []struct {
+		why string
+		v   Variable
+	}{
+		{"text", Variable{Name: "api_key", Type: "secret", Value: "s3cret"}},
+		{"no value", Variable{Name: "api_key", Type: "secret"}},
+		{"null", Variable{Name: "api_key", Type: "secret", Value: nil, HasValue: true}},
+		{"the store's sealed form", Variable{Name: "api_key", Type: "secret", Value: map[string]any{"sealed": "AAAA", "nonce": "BBBB"}}},
+		{"text on a plain variable", Variable{Name: "studio", Type: "string", Value: "Mine"}},
+	} {
+		if got := CheckVariables(Doc{Variables: []Variable{c.v}}); len(got) != 0 {
+			t.Errorf("%s was refused: %+v", c.why, got)
+		}
+	}
+}
+
 // Validate carries the variable checks, so Publish's gate and the Validate endpoint refuse them too.
 func TestValidateRefusesABuiltInVariableName(t *testing.T) {
 	d := Preset()
