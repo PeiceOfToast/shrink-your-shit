@@ -82,7 +82,7 @@ function EncoderCards({ w, big, reload }: { w: Worker; big?: boolean; reload?: (
         <label className="ec-t"><input type="radio" name={"primary-" + w.id + (big ? "-big" : "")} checked={c === cur} disabled={!c.lit} onChange={() => pick(c)} />
           <b>{c.name}</b>{c.lit && <span className="ec-ok">Works</span>}{c === cur && <span className="ec-ok">{c.lit ? "· " : ""}Used first</span>}</label>
         {!c.lit && <span>{c.why}</span>}
-        <span className="ec-f">{c.formats.map(([f, on]) => <span key={f} className={on ? "on" : ""}>{f}{!on && <span className="sr"> (no)</span>}</span>)}</span>
+        <span className="ec-f">{c.formats.map(([f, on]) => <span key={f} className={on ? "on" : ""}>{f}{!on && <span> (no)</span>}</span>)}</span>
         {big && c.detail && <span className="mono">{c.detail}</span>}
         {big && c.at && <span className="ec-meta">Tested {new Date(c.at).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}
       </li>))}</ul>
