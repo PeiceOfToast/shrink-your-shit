@@ -6,7 +6,7 @@ import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, clockS, count, elapsed, plural, stepTime } from "../format";
-import { type LogLine, type LogProbe, convertDoneAgain, fileJobs, findSkip, getJob, getJobLog, jobAction, listJobs, listKept, restoreKept, type JobLog, type LogStep, type LogVariable } from "../jobsApi";
+import { type LogLine, type LogProbe, convertDoneAgain, fileJobs, findSkip, getJob, getJobLog, jobAction, listJobs, listKept, restoreKept, type JobLog, type LogMove, type LogStep, type LogVariable } from "../jobsApi";
 import { getWorkflow } from "../workflowApi";
 import { getHealth, getSettings } from "../libraryApi";
 import { onLive } from "../live";
@@ -331,6 +331,14 @@ const stepText = (st: LogStep) => [st.name, st.decision, st.reason, st.command, 
 const plural1 = (n: number, one: string, many: string) => n + " " + (n === 1 ? one : many);
 const val = (s?: string) => (s ? s : "—");
 const MOVE: Record<string, string> = { move: "Moved", copy: "Copied", chmod: "Changed the permissions of", chown: "Changed the owner of", remove: "Removed", write_sidecar: "Wrote" };
+const MOVE_FAILED: Record<string, string> = { move: "move", copy: "copy", chmod: "change the permissions of", chown: "change the owner of", remove: "remove", write_sidecar: "write" };
+// one file action as words: the paths in mono. A null path is left out (write_sidecar has only "to", remove only "from"),
+// and a same-path action (chmod, chown: from equals to) shows the path once
+const moveLine = (m: LogMove) => {
+  const paths = m.from && m.to && m.from !== m.to ? <><code>{m.from}</code> to <code>{m.to}</code></> : <code>{m.from ?? m.to}</code>;
+  return m.ok ? <>{MOVE[m.action] ?? m.action} {paths}</>
+    : <span style={{ color: "var(--error-text)" }}><Icon id="i-alert" /> Couldn't {MOVE_FAILED[m.action] ?? m.action} {paths}{m.error ? ": " + m.error : "."}</span>;
+};
 // the probe summary, as one line from the keys the worker stores: "H.264 · 1920×1080 · 23.976 fps · 8-bit HDR · 2 audio · 1 subtitles · 1:48:12"
 function sourceLine(pr: LogProbe) {
   return [pr.codec ? pr.codec.toUpperCase().replace("H264", "H.264") : "", pr.width && pr.height ? pr.width + "×" + pr.height : "", pr.frameRate ? +pr.frameRate.toFixed(3) + " fps" : "", [pr.bitDepth ? pr.bitDepth + "-bit" : "", pr.hdr ? "HDR" : ""].filter(Boolean).join(" "), pr.audioTracks ? pr.audioTracks + " audio" : "", pr.subtitleTracks ? pr.subtitleTracks + " subtitles" : "", pr.durationSec ? elapsed(pr.durationSec) : ""].filter(Boolean).join(" · ");
@@ -439,7 +447,7 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
         {progress && <p className="sm">{progress}</p>}
         {ls.length > 0 && linesBlock(ls, id)}
         {st.check && <p className="sm">Picture check: score {st.check.score.toFixed(3)}{st.check.min != null ? " (needs " + st.check.min.toFixed(3) + ")" : ""}{st.check.passed != null ? " · " + (st.check.passed ? "passed" : "failed") : ""}</p>}
-        {(st.moves ?? []).map((m, j) => <p className="sm" key={j}>{MOVE[m.action] ?? m.action} <code>{m.from}</code>{m.to && <> to <code>{m.to}</code></>}{!m.ok && <span className="muted"> · {m.error ?? "failed"}</span>}</p>)}
+        {(st.moves ?? []).map((m, j) => <p className="sm" key={j}>{moveLine(m)}</p>)}
         {st.outputLines > 0 && !sectioned && <details open={st.outcome === "failed" || st.outcome === "skipped"}><summary className="sm">Show ffmpeg output ({st.outputLines} lines)</summary>
           {st.outputLines > 200 && <p className="sm"><a href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}>Download all {st.outputLines.toLocaleString()} lines</a></p>}
           <pre className="joblog sm">{text(st.output)}</pre></details>}

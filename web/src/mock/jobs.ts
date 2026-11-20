@@ -114,8 +114,8 @@ export function mockJobLog(id: string): JobLog | { error: { code: string; messag
   const into = (secId: string, title: string, lines: LogLine[]) => { let s = sections.find((x) => x.id === secId); if (!s) { s = { id: secId, title, lines: [] }; sections.push(s); } s.lines.push(...lines); };
   const STEP: Record<string, number> = { encode: 0, check: 1, replace: 2 }; // the server's step index (worker.go)
   const steps = log.steps.map((st) => {
-    // only the keys v2joblog.go sends: no decision or reason text, set, moves or speeds
-    const { warnings, errors, decision, reason, set, moves, speedX, avgKbps, path, ...rest } = st;
+    // only the keys v2joblog.go sends: no decision or reason text, set or speeds (moves is sent, so it stays)
+    const { warnings, errors, decision, reason, set, speedX, avgKbps, path, ...rest } = st;
     if (warnings?.length) into("encode", "Encode", warnings.map((t) => ln(2, STEP[st.name] ?? 0, "warning", "app", t)));
     if (errors?.length) into("check", "Check", errors.map((t) => ln(2, STEP[st.name] ?? 0, "error", "check", t)));
     return rest;
@@ -170,9 +170,17 @@ function mockJobLogRaw(id: string): JobLog | { error: { code: string; message: s
   if (failed) return { state: "complete", final: f48191 ? "kept" : "done", ...runInfo("failed"), steps: [
     step("encode", "failed", { ...conv, result: "Failed" }),
   ] };
-  return { state: "complete", final: "done", ...runInfo("converted"), steps: [
+  // the server's replace moves, in order: the original to the trash, the new file into its place, a sidecar; 48166 also has a failed remove
+  const failedRemove = id === "48166";
+  const moves = [
+    { action: "move", from: "/media/movies/Sample (2020).mkv", to: "/media/movies/.syp-trash/Sample (2020).mkv", ok: true, error: null },
+    { action: "move", from: "/media/movies/Sample (2020).new.mkv", to: "/media/movies/Sample (2020).mkv", ok: true, error: null },
+    { action: "write_sidecar", from: null, to: "/media/movies/Sample (2020).eng.srt", ok: true, error: null },
+    ...(failedRemove ? [{ action: "remove", from: "/media/movies/.syp-trash/Sample (2020).mkv", to: null, ok: false, error: "Permission denied" }] : []),
+  ];
+  return { state: "complete", final: "done", ...runInfo("converted"), summary: { ...runInfo("converted").summary, tempRemoved: failedRemove ? false : true }, steps: [
     step("encode", "ok", { ...conv, decision: "Converted the video to HEVC at Balanced quality", reason: "The file is H.264, and the workflow converts to HEVC.", speedX: 3.4, avgKbps: 2450, set: [{ name: "target_codec", value: "hevc" }, { name: "api_key" }], result: "Done · 41% smaller" }),
-    step("replace", "ok", { tookMs: 1500, decision: "Saved the new file in place of the original", reason: "It is smaller and passed the picture check.", moves: [{ action: "move", from: "/media/movies/Sample (2020).mkv", to: "/media/movies/.syp-trash/Sample (2020).mkv", ok: true, error: null }, { action: "move", from: "/media/movies/Sample (2020).new.mkv", to: "/media/movies/Sample (2020).mkv", ok: true, error: null }], result: "Done" }),
+    step("replace", "ok", { tookMs: 1500, decision: "Saved the new file in place of the original", reason: "It is smaller and passed the picture check.", moves, result: "Done" }),
   ] };
 }
 const FELL = "Intel Quick Sync (hevc_qsv) failed: ffmpeg exited with code 1. Converted on the processor instead."; // #323's step words
