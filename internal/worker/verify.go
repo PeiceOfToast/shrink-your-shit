@@ -467,6 +467,11 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 		frame = 1 / sMain.FrameRate
 	}
 	var done []placeScore // the places measured so far, for the job log
+	var lowest *CheckScore
+	score := w.ssimSegment
+	if w.scorePlace != nil { // a test's fake scorer
+		score = w.scorePlace
+	}
 	// A file has one alignment, so the one that passes a place is tried first on the others (P3): the
 	// extra tries only ever pay off once, and each one is a seek and decode of both files.
 	nudges := []float64{0, -frame, frame}
@@ -475,12 +480,12 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 		var bestFrames []frameScore // the best alignment's frames: the worst of them are the job log's evidence
 		passed := nudges[0]
 		for _, nudge := range nudges {
-			score, frames, err := w.ssimSegment(ctx, srcPath, tmp, sv, ov, seg, sMain.StartTime, oMain.StartTime+nudge, scaleTo(sMain, oMain))
+			s, frames, err := score(ctx, srcPath, tmp, sv, ov, seg, sMain.StartTime, oMain.StartTime+nudge, scaleTo(sMain, oMain))
 			if err != nil {
 				return err
 			}
-			if score > best {
-				best, bestFrames = score, frames
+			if s > best {
+				best, bestFrames = s, frames
 			}
 			if best >= threshold {
 				passed = nudge
@@ -488,12 +493,15 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 			}
 		}
 		done = append(done, placeScore{at: seg.start, score: best})
-		w.check = &CheckScore{Score: best, Min: threshold, Passed: best >= threshold} // the score that decided it (the job's check step)
-		if best < threshold {                                                         // one place that is too different is enough
+		if best < threshold { // one place that is too different is enough, and its score is the one the job shows
+			w.check = &CheckScore{Score: best, Min: threshold, Passed: false}
 			ke := kept(pictureTooDifferent+" (similarity %.3f at %s, %.2f is required)",
 				best, rules.Clock(seg.start), threshold).(*KeptError)
 			ke.Detail = ssimDetail(src.DurationSec, segs, done, bestFrames, sMain.FrameRate, threshold)
 			return ke
+		}
+		if lowest == nil || best < lowest.Score { // all passed: the job's check step shows the lowest place
+			lowest = &CheckScore{Score: best, Min: threshold, Passed: true}
 		}
 		if passed != nudges[0] {
 			order := []float64{passed}
@@ -505,8 +513,12 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 			nudges = order
 		}
 	}
+	w.check = lowest
 	return nil
 }
+
+// scoreFunc measures one place's similarity; ssimSegment is the real one (Worker.scorePlace swaps it in tests).
+type scoreFunc func(ctx context.Context, srcPath, tmp string, sv, ov int, seg segment, srcStart, outStart float64, scale string) (float64, []frameScore, error)
 
 // placeScore is one place's picture similarity as it was measured.
 type placeScore struct{ at, score float64 }
