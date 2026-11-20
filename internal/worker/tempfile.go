@@ -10,7 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -307,3 +309,70 @@ func SweepNextTo(paths []string) []string {
 }
 
 var digits = regexp.MustCompile(`^[0-9]+$`)
+
+// Durability (R1). A rename is atomic, but without a sync a power cut can leave the new name pointing at
+// data that never reached the disk (an empty or torn file on XFS, ZFS, SMB or NFS). So the new file is synced
+// once its checks pass, before the first rename, and each folder a rename touched is synced after it. The swap
+// journal needs nothing here: it is a SQLite commit, and SQLite syncs every commit (synchronous=FULL).
+
+// syncFile flushes the file at p to disk. A file system that can't sync (it says the call is not
+// supported) is not an error: there is nothing more we can do there.
+var syncFile = func(p string) error {
+	flag := os.O_RDONLY // enough for fsync on Linux and macOS, and works on a read-only file
+	if runtime.GOOS == "windows" {
+		flag = os.O_RDWR // FlushFileBuffers needs write access
+	}
+	f, err := os.OpenFile(p, flag, 0)
+	if err != nil {
+		if runtime.GOOS == "windows" && errors.Is(err, fs.ErrPermission) {
+			return nil // a read-only file; NTFS keeps its own journal
+		}
+		return err
+	}
+	err = f.Sync()
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if syncUnsupported(err) {
+		return nil
+	}
+	return err
+}
+
+// syncDir flushes a folder's entries to disk, so a rename in it survives a power cut. Windows can't
+// open a folder for this, so it is skipped there.
+var syncDir = func(dir string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	f, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	err = f.Sync()
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if syncUnsupported(err) {
+		return nil
+	}
+	return err
+}
+
+// syncDirs syncs the folder of b and, when it is another one, the folder of a, after a renamed to b.
+// The rename has happened, so a failure is only logged.
+func syncDirs(a, b string) {
+	dirs := []string{filepath.Dir(b)}
+	if d := filepath.Dir(a); d != dirs[0] {
+		dirs = append(dirs, d)
+	}
+	for _, d := range dirs {
+		if err := syncDir(d); err != nil {
+			log.Printf("sync folder %s: %v", d, err)
+		}
+	}
+}
+
+func syncUnsupported(err error) bool {
+	return errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOTSUP) || errors.Is(err, errors.ErrUnsupported)
+}
