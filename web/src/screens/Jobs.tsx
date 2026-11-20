@@ -404,9 +404,10 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
           <dt style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}><code className="sm">{"{{" + v.name + "}}"}</code></dt>
           <dd className="sm" style={{ flex: "1 1 200px", minWidth: 0, margin: 0 }}>{varValue(v)}</dd></dl>)}</> });
     const srcL = errOnly ? inputL.filter(nonInfo) : inputL;
-    const srcHits = q ? countIn([...(pr && !errOnly ? [sourceLine(pr), ...streamLines(pr)] : []), ...srcL.map((y) => y.text)].join("\n").toLowerCase(), q) : 0;
+    // a sectioned job's input lines already list the file and each stream, so the probe block shows only without them
+    const srcHits = q ? countIn([...(pr && !inputL.length && !errOnly ? [sourceLine(pr), ...streamLines(pr)] : []), ...srcL.map((y) => y.text)].join("\n").toLowerCase(), q) : 0;
     if (pr || inputL.length) raw.push({ key: "source", title: "Source file", head: lvlPills(inputL), hits: srcHits, dflt: false, show: (!errOnly || inputL.some(nonInfo)) && (!q || srcHits > 0),
-      body: errOnly ? linesBlock(srcL, id) : <>{pr && <><p className="sm">{sourceLine(pr)}</p>{streamLines(pr).map((x, j) => <p className="sm" key={j}>{x}</p>)}</>}{linesBlock(inputL, id)}</> });
+      body: errOnly ? linesBlock(srcL, id) : <>{pr && !inputL.length && <><p className="sm">{sourceLine(pr)}</p>{streamLines(pr).map((x, j) => <p className="sm" key={j}>{x}</p>)}</>}{linesBlock(inputL, id)}</> });
   }
   l.steps.forEach((st, i) => {
     const ls = ownL[i], warnN = cnt(ls, "warning"), errN = cnt(ls, "error"), flagged = warnN + errN > 0;
