@@ -44,7 +44,10 @@ func (w *Worker) runValues(job jobs.Job, src media.Info, plan rules.Plan, publis
 // it was last changed. A workflow that can't be read gives empty facts, not an error: a question then
 // answers No and says why.
 func (w *Worker) runFacts(job jobs.Job, src media.Info, st os.FileInfo) rules.Facts {
-	info, _ := w.runInfo(job)
+	info, err := w.runInfo(job)
+	if err != nil { // review2-536 P3a: the facts route the file, so say when they come from nothing
+		w.jobNote(job.ID, secEncode, jobs.LevelWarning, "(%s): the workflow's details could not be read (%v); its questions answer from the file alone", job.Path, err)
+	}
 	source := vars.Source{Path: job.Path, Library: info.Library, LibraryRoot: job.Library, SizeBytes: job.SizeBefore,
 		Info: &src, Workflow: info.Workflow, Revision: info.Revision, Worker: w.ID, Variables: ownValues(info)}
 	f := rules.Facts{Vars: source.Values(), Path: job.Path, Library: info.Library}
