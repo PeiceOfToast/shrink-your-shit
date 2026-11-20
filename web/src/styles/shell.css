@@ -379,7 +379,7 @@ label.chk{cursor:pointer}
 .list.rows .tbl td.stc{width:1%}
 .selall{display:inline-flex;align-items:center;gap:4px;min-height:32px}
 /* Jobs (U4, C1): the size change is the right-hand fact; the 3 px underline runs along a live row's bottom edge */
-.list .tbl td.idc{position:relative}
+.list .tbl.jobs td.idc{position:relative}
 .list .tbl td.sizec{width:1%;text-align:right;color:var(--text-2)}
 .uline{position:absolute;left:0;right:0;bottom:0;height:3px}
 .uline i{display:block;height:100%;background:var(--accent)}
