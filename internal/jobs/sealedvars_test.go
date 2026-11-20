@@ -223,6 +223,11 @@ func TestAnOlderPlaintextSecretIsSealedWhenTheStoreOpens(t *testing.T) {
 	if _, err := s.db.Exec(`UPDATE workflow_revisions SET doc=? WHERE workflow_id=?`, string(raw), f.ID); err != nil {
 		t.Fatal(err)
 	}
+	// and a draft holding the same doc: the pass seals one plaintext to one form, so the two stay equal
+	if _, err := s.db.Exec(`INSERT INTO workflow_revisions(workflow_id,number,status,doc,layout,logic_hash,etag,created) VALUES(?,NULL,'draft',?,?,?,?,?)`,
+		f.ID, string(raw), "{}", "x", "etag-old-draft", "2020-01-01T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
 	if !bytes.Contains(storedBytes(t, s), []byte(sealedTestSecret)) {
 		t.Fatal("the test did not put a plaintext secret in the database")
 	}
@@ -233,6 +238,24 @@ func TestAnOlderPlaintextSecretIsSealedWhenTheStoreOpens(t *testing.T) {
 	}
 	defer s.Close()
 	assertStoredDocsSealed(t, s, sealedTestSecret)
+	// the memoised seal: docs that were equal are still equal after the pass
+	rows, err := s.db.Query(`SELECT status, logic_hash FROM workflow_revisions WHERE workflow_id=? ORDER BY id`, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hashes := map[string]string{}
+	for rows.Next() {
+		var status, hash string
+		if err := rows.Scan(&status, &hash); err != nil {
+			t.Fatal(err)
+		}
+		hashes[status] = hash
+	}
+	rows.Close()
+	if hashes["draft"] == "" || hashes["published"] == "" || hashes["draft"] != hashes["published"] {
+		t.Errorf("after the pass the draft hashes %q and the published revision %q, want one form",
+			hashes["draft"], hashes["published"])
+	}
 	info, err := s.RunInfoFor(Job{LibraryID: lib.ID})
 	if err != nil {
 		t.Fatal(err)
@@ -248,13 +271,17 @@ func TestAnOlderPlaintextSecretIsSealedWhenTheStoreOpens(t *testing.T) {
 	}
 }
 
-// A secret whose value is not text (an older build or another client may have sent an object) is sealed as
-// its JSON text rather than stored in the clear; the API refuses that shape now, and this is the store's
-// own side of it. A job gets the text back, which is what a secret's value is.
-func TestASecretHoldingAnObjectIsSealedToo(t *testing.T) {
+// A draft the open-time pass sealed hashes the same when the page saves it back unchanged: the pass writes
+// the sealed value as a struct and the page's save marshals it as JSON again, so the two forms must come out
+// byte for byte (nonce first), or a no-op save would look like a change (draftDiffers).
+func TestAPassSealedDraftHashesTheSameAfterAnUnchangedSave(t *testing.T) {
 	useHome(t)
-	s := open(t)
-	f, err := s.AddWorkflow("Objs", workflow.Preset())
+	path := filepath.Join(t.TempDir(), "syp.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.AddWorkflow("Sealed", workflow.Preset())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,77 +289,141 @@ func TestASecretHoldingAnObjectIsSealedToo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const secret = "OBJSECRET-7731"
-	d.Doc.Variables = []workflow.Variable{{Name: "api_key", Type: "secret", Value: map[string]any{"k": secret}, HasValue: true}}
-	saved, err := s.SaveDraft(f.ID, d.Doc, d.Layout, d.Etag)
-	if err != nil {
+	d.Doc.Variables = []workflow.Variable{{Name: "api_key", Type: "secret", Value: sealedTestSecret, HasValue: true}}
+	raw, _ := json.Marshal(d.Doc)
+	if _, err := s.db.Exec(`UPDATE workflow_revisions SET doc=? WHERE workflow_id=? AND status='draft'`, string(raw), f.ID); err != nil {
 		t.Fatal(err)
-	}
-	assertNotStored(t, s, secret)
-	assertStoredDocsSealed(t, s, secret)
-	tm, issues := workflow.ToTemplate(saved.Doc, rules.SliderTemplate(3))
-	if len(issues) > 0 {
-		t.Fatal(issues)
-	}
-	if _, err := s.Publish(f.ID, saved.Etag, tm); err != nil {
-		t.Fatal(err)
-	}
-	lib, err := s.AddLibraryOnFlow("Movies", t.TempDir(), f.ID, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	info, err := s.RunInfoFor(Job{LibraryID: lib.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := ""
-	for _, v := range info.Variables {
-		if v.Name == "api_key" {
-			got, _ = v.Value.(string)
-		}
-	}
-	if got != `{"k":"`+secret+`"}` {
-		t.Errorf("the job's api_key is %q, want the value's JSON text", got)
-	}
-}
-
-// An object-valued secret saved before this build is sealed by the open-time pass, as a string secret is.
-func TestAnOlderObjectSecretIsSealedWhenTheStoreOpens(t *testing.T) {
-	useHome(t)
-	path := filepath.Join(t.TempDir(), "syp.db")
-	s, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	lib, f := flowWithSecret(t, s)
-	doc := workflow.Preset()
-	doc.Variables = []workflow.Variable{{Name: "api_key", Type: "secret", Value: map[string]any{"k": sealedTestSecret}, HasValue: true}}
-	raw, _ := json.Marshal(doc)
-	if _, err := s.db.Exec(`UPDATE workflow_revisions SET doc=? WHERE workflow_id=?`, string(raw), f.ID); err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Contains(storedBytes(t, s), []byte(sealedTestSecret)) {
-		t.Fatal("the test did not put a plaintext secret in the database")
 	}
 	s.Close()
-	if s, err = Open(path); err != nil {
+	if s, err = Open(path); err != nil { // the open-time pass seals the draft and writes its hash
 		t.Fatal(err)
 	}
 	defer s.Close()
-	assertStoredDocsSealed(t, s, sealedTestSecret)
-	info, err := s.RunInfoFor(Job{LibraryID: lib.ID})
+	sealed, _, err := s.Draft(f.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ok := false
-	for _, v := range info.Variables {
-		if v.Name == "api_key" {
-			text, _ := v.Value.(string)
-			ok = text == `{"k":"`+sealedTestSecret+`"}`
-		}
+	if _, _, ok := sealedOf(sealed.Doc.Variables[0].Value); !ok {
+		t.Fatalf("the pass did not seal the draft: %+v", sealed.Doc.Variables[0])
 	}
-	if !ok {
-		t.Errorf("after the upgrade the job's secret is %+v", info.Variables)
+	sent := workflow.KeepSecretValues(workflow.Masked(sealed.Doc), sealed.Doc)
+	saved, err := s.SaveDraft(f.ID, sent, sealed.Layout, sealed.Etag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.LogicHash != sealed.LogicHash {
+		t.Errorf("the unchanged save-back hashes %s, the pass wrote %s", saved.LogicHash, sealed.LogicHash)
+	}
+}
+
+// A secret whose value is not text (an older build or another client may have sent an object) is sealed as
+// its JSON text rather than stored in the clear; the API refuses that shape now, and this is the store's
+// own side of it. A job gets the text back, which is what a secret's value is.
+func TestASecretHoldingAnObjectIsSealedToo(t *testing.T) {
+	for _, c := range []struct {
+		why    string
+		value  any
+		secret string
+		text   string
+	}{
+		{"an object", map[string]any{"k": "OBJSECRET-7731"}, "OBJSECRET-7731", `{"k":"OBJSECRET-7731"}`},
+		{"a list", []any{"ARRSECRET-4420", 2}, "ARRSECRET-4420", `["ARRSECRET-4420",2]`},
+	} {
+		t.Run(c.why, func(t *testing.T) {
+			useHome(t)
+			s := open(t)
+			f, err := s.AddWorkflow("Objs", workflow.Preset())
+			if err != nil {
+				t.Fatal(err)
+			}
+			d, _, err := s.Draft(f.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d.Doc.Variables = []workflow.Variable{{Name: "api_key", Type: "secret", Value: c.value, HasValue: true}}
+			saved, err := s.SaveDraft(f.ID, d.Doc, d.Layout, d.Etag)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertNotStored(t, s, c.secret)
+			assertStoredDocsSealed(t, s, c.secret)
+			tm, issues := workflow.ToTemplate(saved.Doc, rules.SliderTemplate(3))
+			if len(issues) > 0 {
+				t.Fatal(issues)
+			}
+			if _, err := s.Publish(f.ID, saved.Etag, tm); err != nil {
+				t.Fatal(err)
+			}
+			lib, err := s.AddLibraryOnFlow("Movies", t.TempDir(), f.ID, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			info, err := s.RunInfoFor(Job{LibraryID: lib.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := ""
+			for _, v := range info.Variables {
+				if v.Name == "api_key" {
+					got, _ = v.Value.(string)
+				}
+			}
+			if got != c.text {
+				t.Errorf("the job's api_key is %q, want the value's JSON text", got)
+			}
+		})
+	}
+}
+
+// An object- or list-valued secret saved before this build is sealed by the open-time pass, as a string
+// secret is.
+func TestAnOlderObjectSecretIsSealedWhenTheStoreOpens(t *testing.T) {
+	for _, c := range []struct {
+		why   string
+		value any
+		text  string
+	}{
+		{"an object", map[string]any{"k": sealedTestSecret}, `{"k":"` + sealedTestSecret + `"}`},
+		{"a list", []any{sealedTestSecret}, `["` + sealedTestSecret + `"]`},
+	} {
+		t.Run(c.why, func(t *testing.T) {
+			useHome(t)
+			path := filepath.Join(t.TempDir(), "syp.db")
+			s, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lib, f := flowWithSecret(t, s)
+			doc := workflow.Preset()
+			doc.Variables = []workflow.Variable{{Name: "api_key", Type: "secret", Value: c.value, HasValue: true}}
+			raw, _ := json.Marshal(doc)
+			if _, err := s.db.Exec(`UPDATE workflow_revisions SET doc=? WHERE workflow_id=?`, string(raw), f.ID); err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Contains(storedBytes(t, s), []byte(sealedTestSecret)) {
+				t.Fatal("the test did not put a plaintext secret in the database")
+			}
+			s.Close()
+			if s, err = Open(path); err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			assertStoredDocsSealed(t, s, sealedTestSecret)
+			info, err := s.RunInfoFor(Job{LibraryID: lib.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ok := false
+			for _, v := range info.Variables {
+				if v.Name == "api_key" {
+					text, _ := v.Value.(string)
+					ok = text == c.text
+				}
+			}
+			if !ok {
+				t.Errorf("after the upgrade the job's secret is %+v", info.Variables)
+			}
+		})
 	}
 }
 

@@ -17,9 +17,12 @@ import (
 
 // sealedVar is a secret variable's value as the database holds it, sealed with this computer's share key.
 // It is the value a client would see only if it were not masked: the API never sends a secret's value.
+// The fields are declared in key order (nonce before sealed), because a doc read back from the database
+// holds a map and its JSON comes out sorted: this way a doc written just after sealing marshals to the
+// same bytes as the same doc read back, so its logic hash does not change across a save (draftDiffers).
 type sealedVar struct {
-	Sealed []byte `json:"sealed"`
 	Nonce  []byte `json:"nonce"`
+	Sealed []byte `json:"sealed"`
 }
 
 // sealedOf reads v as a sealed secret's value. A map is what a doc read back from the database has (a

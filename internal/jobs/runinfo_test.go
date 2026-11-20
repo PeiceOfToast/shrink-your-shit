@@ -75,3 +75,24 @@ func TestRunInfoFindsTheLibraryUnderAnotherNameForItsFolder(t *testing.T) {
 		t.Errorf("by the folder's other name: %+v", info)
 	}
 }
+
+// TemplateFor takes the same path, so such a job compiles the library's flow rather than "its library no
+// longer exists".
+func TestTemplateForFindsTheLibraryUnderAnotherNameForItsFolder(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "movies-link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks are not available here: %v", err)
+	}
+	s := open(t)
+	if _, err := s.AddLibrary("Movies", real, rules.SliderTemplate(3), false); err != nil {
+		t.Fatal(err)
+	}
+	tm, err := s.TemplateFor(Job{Library: link})
+	if err != nil {
+		t.Fatalf("TemplateFor by the folder's other name: %v", err)
+	}
+	if tm.Kind == "" {
+		t.Errorf("the template is empty: %+v", tm)
+	}
+}
