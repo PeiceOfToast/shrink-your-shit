@@ -103,6 +103,8 @@ export function mockJobLog(id: string): JobLog | { error: { code: string; messag
     if (errors?.length) into("check", "Check", errors.map((t) => ln(2, STEP[st.name] ?? 0, "error", "check", t)));
     return rest;
   });
+  // the real job 48160 has a warning in its summary section (dev-qa 11-20, qa-482 check 2): mock it the same way
+  if (id === "48160") into("summary", "Summary", [ln(0, 0, "warning", "app", "Converted. The new file is not smaller than the original.")]);
   return { ...log, steps, sections };
 }
 function mockJobLogRaw(id: string): JobLog | { error: { code: string; message: string } } {

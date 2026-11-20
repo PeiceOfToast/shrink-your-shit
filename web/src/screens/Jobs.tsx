@@ -303,6 +303,7 @@ const logLineEl = (y: LogLine, j: number) => {
   return <div key={j} className={dim ? "muted" : undefined} style={dim ? { paddingLeft: 16 } : undefined}>{y.at && <span className="muted">{clockS(new Date(y.at))} </span>}{y.level === "warning" && <><Icon id="i-alert" /> Warning: </>}{y.level === "error" && <><Icon id="i-x-c" /> Error: </>}{y.text}</div>;
 };
 const cnt = (ls: LogLine[], level: string) => ls.filter((y) => y.level === level).length;
+const lvlPills = (ls: LogLine[]) => <>{cnt(ls, "warning") > 0 && <span className="pill warn">{plural1(cnt(ls, "warning"), "warning", "warnings")}</span>}{cnt(ls, "error") > 0 && <span className="pill bad">{plural1(cnt(ls, "error"), "error", "errors")}</span>}</>;
 // a row's lines: the newest 200 when there are more, with the link to the whole log
 const linesBlock = (ls: LogLine[], label: string, id: string) => {
   const cap = 200, n = ls.length;
@@ -376,6 +377,9 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
   const ROW: Record<string, string> = { encode: "encode", output: "check", replace: "replace" };
   const own = new Map<string, LogLine[]>(), other: LogLine[] = [];
   const secs2 = (l.sections ?? []).filter((x) => x.id !== "start" && x.id !== "summary"), sectioned = secs2.some((x) => x.lines.length > 0);
+  // the start and summary sections' lines: shown in their own rows, and counted like any other line
+  const edgeL = (sec: string) => (l.sections ?? []).filter((x) => x.id === sec).flatMap((x) => x.lines);
+  const startL = edgeL("start"), summL = edgeL("summary");
   secs2.forEach((x) => x.lines.forEach((y) => {
     const name = y.stream === "check" ? "check" : ROW[x.id];
     if (name && l.steps.some((st) => st.name === name)) { if (!own.has(name)) own.set(name, []); own.get(name)!.push(y); } else other.push(y);
@@ -388,8 +392,8 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
   const raw: Raw[] = [];
   if (!old) {
     const s = l.start!;
-    raw.push({ key: "start", title: "Start", head: when ? <span className="sm muted">{clock(when)}</span> : null, hits: q ? countIn([s.reason, s.workflow.name, worker ?? ""].join("\n").toLowerCase(), q) : 0, dflt: false, show: !errOnly,
-      body: <><p className="sm">{s.reason}</p><p className="sm">Worker: {worker ?? "—"}</p><p className="sm">Workflow: {s.workflow.name}, revision {s.workflow.revision}</p><p className="sm">App version {s.appVersion}</p></> });
+    raw.push({ key: "start", title: "Start", head: <>{when && <span className="sm muted">{clock(when)}</span>}{lvlPills(startL)}</>, hits: q ? countIn((errOnly ? startL.filter((y) => y.level !== "info").map((y) => y.text) : [s.reason, s.workflow.name, worker ?? "", ...startL.map((y) => y.text)]).join("\n").toLowerCase(), q) : 0, dflt: false, show: !errOnly || startL.some((y) => y.level !== "info"),
+      body: errOnly ? linesBlock(startL.filter((y) => y.level !== "info"), "Start", id) : <><p className="sm">{s.reason}</p><p className="sm">Worker: {worker ?? "—"}</p><p className="sm">Workflow: {s.workflow.name}, revision {s.workflow.revision}</p><p className="sm">App version {s.appVersion}</p>{linesBlock(startL, "Start", id)}</> });
     raw.push({ key: "variables", title: "Variables", head: changed.length ? <span className="sm muted">{changed.length} changed</span> : null,
       hits: q ? countIn(vars.map((v) => [v.name, v.start, v.end].join(" ")).join("\n").toLowerCase(), q) : 0, dflt: false, show: !errOnly,
       body: vars.length === 0 ? <p className="sm muted">No variables were set for this job.</p> : <>
@@ -438,18 +442,18 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
   if (!old && l.summary) {
     const s = l.summary;
     // the before and after sizes live in the drawer's Result table, so the summary doesn't repeat them
-    raw.push({ key: "summary", title: "Summary", head: null, hits: 0, dflt: true, show: !errOnly, body: <>
+    raw.push({ key: "summary", title: "Summary", head: lvlPills(summL), hits: q ? countIn((errOnly ? summL.filter((y) => y.level !== "info") : summL).map((y) => y.text).join("\n").toLowerCase(), q) : 0, dflt: true, show: !errOnly || summL.some((y) => y.level !== "info"), body: errOnly ? linesBlock(summL.filter((y) => y.level !== "info"), "Summary", id) : <>
       <p className="sm">Time taken: {stepTime(s.tookMs)}</p>
       {(s.passes != null || s.bytesWritten != null) && <p className="sm">{[s.passes != null && plural1(s.passes, "ffmpeg pass", "ffmpeg passes"), s.bytesWritten != null && bytes(s.bytesWritten) + " written"].filter(Boolean).join(" · ")}</p>}
       {s.slowestStep != null && <p className="sm">Slowest step: {stepLabel(s.slowestStep.name)} ({stepTime(s.slowestStep.tookMs)})</p>}
       <p className="sm">Worker: {worker ?? "—"}</p>
       <p className="sm">Result: {WORD[l.final ?? ""] ?? l.final}</p>
-      {hasResult && <p className="sm"><a href="#job-result" onClick={(e) => { e.preventDefault(); document.getElementById("job-result")?.scrollIntoView({ block: "start" }); }}>Before and after: see Result</a></p>}</> });
+      {hasResult && <p className="sm"><a href="#job-result" onClick={(e) => { e.preventDefault(); document.getElementById("job-result")?.scrollIntoView({ block: "start" }); }}>Before and after: see Result</a></p>}{linesBlock(summL, "Summary", id)}</> });
   }
   const secs = raw.map((r) => ({ ...r, open: errOnly || (r.key in qOpen ? qOpen[r.key] : (!!q && r.hits > 0) || (r.key in open ? open[r.key] : r.dflt)) })); // design 04:37Z: search only adds open sections
   const shown = secs.filter((s) => s.show), anyClosed = shown.some((s) => !s.open);
   const tot = shown.reduce((n, s) => n + s.hits, 0), ks = shown.filter((s) => s.hits > 0).length; // review2 #455: search and the switch must both match
-  const visL = [...l.steps.map((_, i) => ownL[i]).filter((_, i) => shown.some((s) => s.key === "step-" + i)), ...(shown.some((s) => s.key === "other") ? [other] : [])];
+  const visL = [...l.steps.map((_, i) => ownL[i]).filter((_, i) => shown.some((s) => s.key === "step-" + i)), ...(shown.some((s) => s.key === "other") ? [other] : []), ...(shown.some((s) => s.key === "start") ? [startL] : []), ...(shown.some((s) => s.key === "summary") ? [summL] : [])];
   const E = visL.reduce((n, ls) => n + cnt(ls, "error"), 0), W = visL.reduce((n, ls) => n + cnt(ls, "warning"), 0), K = visL.filter((ls) => ls.some((y) => y.level !== "info")).length;
   const status = [q && (tot ? tot + " matches in " + ks + " step" + (ks > 1 ? "s" : "") : "No match"), errOnly && (E + W ? plural1(E, "error", "errors") + " and " + plural1(W, "warning", "warnings") + " in " + plural1(K, "section", "sections") : !q && "No errors or warnings in this log.")].filter(Boolean).join(" · ");
   return (
