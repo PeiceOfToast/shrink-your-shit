@@ -19,11 +19,11 @@ func TestJobLogInSQLite(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if err := s.AppendLogLine(7, 0, "app", "started"); err != nil {
+	if err := s.AppendLogLine(7, 0, "", LevelInfo, "app", "started"); err != nil {
 		t.Fatal(err)
 	}
-	s.AppendLogLine(7, 1, "stderr", "frame 1")
-	s.AppendLogLine(8, 0, "app", "another job")
+	s.AppendLogLine(7, 1, "", LevelInfo, "stderr", "frame 1")
+	s.AppendLogLine(8, 0, "", LevelInfo, "app", "another job")
 	lines, _ := s.LogLines(7)
 	if len(lines) != 2 || lines[0].Seq != 1 || lines[1].Seq != 2 || lines[1].Text != "frame 1" || lines[1].Step != 1 || lines[1].Stream != "stderr" {
 		t.Fatalf("lines %+v", lines)
@@ -111,12 +111,12 @@ func TestPruneJobLogs(t *testing.T) {
 	l, _ := s.AddLibrary("m", t.TempDir(), rules.SliderTemplate(3), true)
 	old, _ := s.Enqueue(Job{Library: "m", LibraryID: l.ID, Path: "/m/old.mkv"})
 	s.Claim("t")
-	s.AppendLogLine(old, 0, "app", "a line")
+	s.AppendLogLine(old, 0, "", LevelInfo, "app", "a line")
 	s.RecordRunStep(old, RunStep{Index: 0, Name: "encode", Outcome: "ok"})
 	s.Complete(old, "/m/old.mkv", 1)
 	running, _ := s.Enqueue(Job{Library: "m", LibraryID: l.ID, Path: "/m/run.mkv"})
 	s.Claim("t")
-	s.AppendLogLine(running, 0, "app", "still going")
+	s.AppendLogLine(running, 0, "", LevelInfo, "app", "still going")
 	// the cutoff is the future: the finished job is past it, the running one is never pruned
 	n, err := s.PruneJobLogs(time.Now().Add(time.Hour))
 	if err != nil || n != 1 {

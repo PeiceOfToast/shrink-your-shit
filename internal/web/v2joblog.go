@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 )
@@ -65,7 +64,8 @@ func v2JobLog(api *http.ServeMux, store *jobs.Store) {
 			out = append(out, importedStep(lines, final))
 		}
 		j, _ := store.Get(id)
-		writeJSON(w, map[string]any{"state": logState(store, id, j.Status, ""), "steps": out, "final": nilIfEmpty(final)})
+		writeJSON(w, map[string]any{"state": logState(store, id, j.Status, ""), "steps": out, "final": nilIfEmpty(final),
+			"start": startJSON(store, id, j, lines), "sections": sectionsJSON(lines), "summary": summaryJSON(j, lines)})
 	})
 	api.HandleFunc("GET /api/v2/jobs/{id}/log/download", func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
@@ -78,24 +78,25 @@ func v2JobLog(api *http.ServeMux, store *jobs.Store) {
 			serverError(w, err)
 			return
 		}
-		var b strings.Builder
-		for _, l := range lines {
-			fmt.Fprintf(&b, "%s %s\n", l.At, l.Text)
+		j, jerr := store.Get(id)
+		if jerr != nil && len(lines) == 0 { // no job and no log: nothing to download
+			apiError(w, http.StatusNotFound, "not_found", "There is no such job.")
+			return
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="job-%d.log"`, id))
-		w.Write([]byte(b.String()))
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, logFileName(id, j.Path)))
+		w.Write([]byte(jobLogText(j, id, lines)))
 	})
 }
 
 // checkFound is what a step's check wrote to the log in this attempt, in order (its "check" lines): the drawer's
 // "What the check found" for a kept job, which has no failure output. A retry keeps the earlier attempt's lines
 // under the same step index, so only lines from the step's current start on count (both are RFC 3339 UTC, so they
-// compare as text). [] when there are none, never null.
+// compare as times). [] when there are none, never null.
 func checkFound(lines []jobs.LogLine, step int, startedAt string) []string {
 	out := []string{}
 	for _, l := range lines {
-		if l.Step == step && l.Stream == "check" && l.At >= startedAt {
+		if l.Step == step && l.Stream == "check" && atOnOrAfter(l.At, startedAt) {
 			out = append(out, l.Text)
 		}
 	}

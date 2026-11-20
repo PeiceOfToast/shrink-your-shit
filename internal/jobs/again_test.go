@@ -17,6 +17,7 @@ func TestUpgradeFrom33AddsAgainFrom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dropLogSections(t, s)
 	id, _ := s.Enqueue(Job{Library: "/m", Path: "/m/a.mkv"})
 	for _, q := range append(rewind35, `ALTER TABLE jobs DROP COLUMN again_from`, `PRAGMA user_version=33`) {
 		if _, err := s.db.Exec(q); err != nil {

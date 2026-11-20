@@ -39,7 +39,9 @@ type Queue interface {
 	// Release puts a running job back in the queue (used on shutdown).
 	Release(id int64) error
 	// The job's log lines, steps and failure summary in the database (user review 11-13 item E).
-	AppendLogLine(id int64, step int, stream, text string) error
+	AppendLogLine(id int64, step int, section, level, stream, text string) error
+	// Get is the job as the store has it now (its final status and sizes for the summary line).
+	Get(id int64) (jobs.Job, error)
 	RecordRunStep(id int64, st jobs.RunStep) error
 	SetFailureSummary(id int64, f jobs.FailureSummary) error
 	ClearFailureSummary(id int64) error
@@ -131,9 +133,12 @@ type Worker struct {
 	// failures: the running job's path's choices for when it doesn't work (V6b; under mu)
 	failures *rules.Failures
 	// lease: the running job's lease (V7a; under mu)
-	lease  string
-	ID     string
-	Queue  Queue
+	lease string
+	ID    string
+	Queue Queue
+	// phase is the job log section the running job is in (joblog.go); the worker's own lines go there. It is read
+	// by the stall and lease watchers on other goroutines, so it is an atomic value (setPhase, section).
+	phase  atomic.Value
 	Exec   media.Exec
 	FFmpeg string
 	// FFprobe checks the result before it replaces anything.
@@ -287,6 +292,8 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 		defer close(renewDone)
 		go w.renewLease(job.ID, lease, renewDone) // V7a: kept while it works, the probe and the checks too
 	}
+	w.startLines(job)
+	defer w.summaryLine(job.ID) // the job's last line: its verdict, once its outcome is recorded
 	w.jobf(job.ID, ": started")
 	// a new attempt: an earlier attempt's failure summary is not this one's (a kept attempt would show it)
 	if err := w.Queue.ClearFailureSummary(job.ID); err != nil {
@@ -466,7 +473,7 @@ func (w *Worker) jobf(id int64, format string, a ...any) {
 	msg := fmt.Sprintf(format, a...)
 	log.Printf("worker %s: job %d%s", w.ID, id, msg)
 	if w.Queue != nil { // the job's log lives in the database (user review 11-13 item E)
-		w.Queue.AppendLogLine(id, 0, "app", strings.TrimPrefix(strings.TrimPrefix(msg, ":"), " "))
+		w.Queue.AppendLogLine(id, 0, w.section(), jobs.LevelInfo, "app", strings.TrimPrefix(strings.TrimPrefix(msg, ":"), " "))
 	}
 }
 
@@ -485,7 +492,7 @@ func (w *Worker) recordEncode(id int64, args []string, started time.Time, encErr
 		if strings.HasPrefix(strings.ToLower(l), "libva info:") { // the GPU driver's chatter: kept in the log, not shown as ffmpeg's output
 			stream = "info"
 		}
-		w.Queue.AppendLogLine(id, 0, stream, l)
+		w.Queue.AppendLogLine(id, 0, secEncode, jobs.LevelInfo, stream, l)
 	}
 	outcome := "ok"
 	if terr != nil {
@@ -544,7 +551,7 @@ func (w *Worker) replaceStep(id int64, started time.Time, failed bool, result st
 	if !failed {
 		return
 	}
-	w.Queue.AppendLogLine(id, 2, "app", result)
+	w.Queue.AppendLogLine(id, 2, secReplace, jobs.LevelError, "app", result)
 	w.Queue.SetFailureSummary(id, jobs.FailureSummary{
 		Step: 2, StepCount: 3, AfterMs: tookMs,
 		ExitCode: -1, FfmpegRan: true, KeyLines: []string{result},
@@ -782,18 +789,25 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		log.Printf("worker %s: %s: %v", w.ID, job.Path, perr)
 		return "", kept("the original can't be read any more, so it was left as it is")
 	}
+	w.inputLines(job.ID, srcPath, before, src)
 	if err := w.preflight(srcPath, before.Size()); err != nil {
 		return "", err
 	}
+	// The original's picture count: the container's own count when it states one exactly (an mp4's nb_frames, an
+	// mkv's DURATION tag), which the probe has read already; only when it does not is every packet counted, which
+	// reads the whole file (P2: the encode reads it all again anyway, so that second read is only for files that
+	// cannot say their count). expectedPackets prefers the exact count, so what the checks expect is unchanged.
 	var packets int64
-	if ord := src.MainVideoOrdinal(); ord >= 0 {
-		cctx, ccancel := context.WithTimeout(ctx, countTimeout)
-		n, cerr := media.CountVideoPackets(cctx, w.Exec, w.FFprobe, srcPath, ord)
-		ccancel()
-		if cerr != nil {
-			return "", checkFailed(cctx, "counting the original's video frames", cerr)
+	if frames, exact := sourceFrameCount(src); !exact || frames <= 0 {
+		if ord := src.MainVideoOrdinal(); ord >= 0 {
+			cctx, ccancel := context.WithTimeout(ctx, countTimeout)
+			n, cerr := media.CountVideoPackets(cctx, w.Exec, w.FFprobe, srcPath, ord)
+			ccancel()
+			if cerr != nil {
+				return "", checkFailed(cctx, "counting the original's video frames", cerr)
+			}
+			packets = n
 		}
-		packets = n
 	}
 	// The Plan for this file, from its library's flow and the probe just taken: what to run, and what
 	// the result must look like. Whether to convert it was the scanner's decision (as before Plans);
@@ -940,6 +954,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	fell := false // the graphics encoder failed and the processor is retrying the file
 	fellReason := ""
 	args := plan.FFmpegArgs(srcPath, tmp)
+	w.setPhase(secEncode) // the encoder choice and its notes belong to encode (log-spec section 4)
 	if w.remote == nil && w.Encoder != nil {
 		want, note := w.Encoder(plan.Video.Codec)
 		if want != "" && !plan.Video.Copy {
@@ -1067,15 +1082,15 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			}
 			w.Queue.RecordRunStep(job.ID, jobs.RunStep{Index: 1, Name: "check", StartedAt: w.now().UTC().Format(time.RFC3339),
 				Outcome: "failed", Result: reason})
-			w.Queue.AppendLogLine(job.ID, 1, "check", "Check: damage in the original, read while converting")
-			w.Queue.AppendLogLine(job.ID, 1, "check", errorsLine)
+			w.Queue.AppendLogLine(job.ID, 1, secOutput, jobs.LevelInfo, "check", "Check: damage in the original, read while converting")
+			w.Queue.AppendLogLine(job.ID, 1, secOutput, jobs.LevelInfo, "check", errorsLine)
 			for _, l := range dmg.Lines {
-				w.Queue.AppendLogLine(job.ID, 1, "check", l)
+				w.Queue.AppendLogLine(job.ID, 1, secOutput, jobs.LevelInfo, "check", l)
 			}
 			log.Printf("worker %s: %s: the original has errors: %s", w.ID, job.Path, strings.Join(dmg.Lines, " | "))
 			return "", kept(reason)
 		}
-		w.Queue.AppendLogLine(job.ID, 0, "app", fmt.Sprintf("The original has a little damage (%s, up to %d%% are tolerated); converted anyway.",
+		w.Queue.AppendLogLine(job.ID, 0, secOutput, jobs.LevelWarning, "app", fmt.Sprintf("The original has a little damage (%s, up to %d%% are tolerated); converted anyway.",
 			damagedShare(dmg.Pictures, frames), maxDamagedPercent))
 	}
 
@@ -1089,6 +1104,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	w.check = nil
 	w.verified = media.Info{} // the new file's probe is only what this check read (a failed probe leaves it empty)
+	w.setPhase(secOutput)
 	checkStart := w.now()
 	verr := w.verify(ctx, src, exp, srcPath, tmp, before.Size())
 	w.recordCheck(job.ID, checkStart, verr)
@@ -1164,6 +1180,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 		return stage.intact()
 	}
+	w.setPhase(secReplace)
 	placeStarted := w.now()
 	placed, err := w.installSubtitles(plan, job.ID, tmp, final)
 	if err != nil {
@@ -1595,7 +1612,7 @@ func (w *Worker) setAside(jobID int64, final string) error {
 	}
 	syncDirs(final, dst)
 	w.movedAside = fmt.Sprintf("Your earlier converted file %s had been changed since it was made, so it was moved to the trash (%s) and the new file took its place.", name, filepath.Join(TrashDir, filepath.Base(dst)))
-	w.Queue.AppendLogLine(jobID, 0, "app", w.movedAside)
+	w.Queue.AppendLogLine(jobID, 0, secReplace, jobs.LevelWarning, "app", w.movedAside)
 	return nil
 }
 
@@ -1842,7 +1859,7 @@ func (w *Worker) recordCheckFailure(id int64, started time.Time, ke *KeptError, 
 			TookMs: w.now().Sub(started).Milliseconds(), Outcome: "failed", Result: ke.Reason})
 	}
 	for _, l := range detail {
-		w.Queue.AppendLogLine(id, 1, "check", l)
+		w.Queue.AppendLogLine(id, 1, secOutput, jobs.LevelInfo, "check", l)
 	}
 }
 

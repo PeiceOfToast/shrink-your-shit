@@ -192,24 +192,24 @@ func (w *Worker) verify(ctx context.Context, src media.Info, exp rules.Expect, s
 
 // ---- playback test ----
 
-// decodeCheck plays the new file through ffmpeg's decoder to nowhere: any error means a damaged file.
+// decodeCheck plays the new file's video and audio through ffmpeg's decoders to nowhere: any error means a
+// damaged file.
 // There is no way to turn it off: the floor is not removable (only "always" vs the default "auto").
 func (w *Worker) decodeCheck(ctx context.Context, out media.Info, tmp string) error {
 	limit := w.FullDecodeMaxSec
 	if limit <= 0 {
 		limit = DefaultFullDecodeMaxSec
 	}
-	ord := out.MainVideoOrdinal()
 	var fps float64 // the frame rate turns ffmpeg's frame count into a position for the job log
 	if v := out.Video(); v != nil {
 		fps = v.FrameRate
 	}
 	if w.DecodeCheck == "always" || out.DurationSec <= 0 || out.DurationSec <= limit {
-		return w.decodeRun(ctx, tmp, ord, 0, 0, out.DurationSec, fps)
+		return w.decodeRun(ctx, tmp, out, 0, 0, out.DurationSec, fps)
 	}
 	// Long file: three samples of a minute each, at the start, middle and end.
 	for _, start := range []float64{0, out.DurationSec/2 - 30, out.DurationSec - 65} {
-		if err := w.decodeRun(ctx, tmp, ord, start, 60, 60, fps); err != nil {
+		if err := w.decodeRun(ctx, tmp, out, start, 60, 60, fps); err != nil {
 			return err
 		}
 	}
@@ -227,7 +227,7 @@ var (
 	numRe  = regexp.MustCompile(`[0-9]+`)
 )
 
-func (w *Worker) decodeRun(ctx context.Context, tmp string, videoOrd int, start, length, playSec, fps float64) error {
+func (w *Worker) decodeRun(ctx context.Context, tmp string, out media.Info, start, length, playSec, fps float64) error {
 	args := []string{"-v", "error", "-xerror", "-nostdin", "-progress", "pipe:1"}
 	// -ss and -t go before -i as input options. With -copyts an output -t is an absolute end time, so a
 	// sample starting at 5 s with length 3 played nothing.
@@ -237,17 +237,22 @@ func (w *Worker) decodeRun(ctx context.Context, tmp string, videoOrd int, start,
 	// -copyts: keep the file's own timestamps. Without it ffmpeg shifts AAC's priming (about -21 ms) into
 	// the video, and the null muxer then reports false "non monotonically increasing dts" errors.
 	args = append(args, "-copyts", "-i", tmp)
-	// Only the video is played: it is the part this program re-encoded. The audio and subtitles are
+	// The video and the audio are played: both are what this program wrote. Subtitles and attachments are
 	// copied bit for bit from the original, so any oddity in them was already in the original.
-	args = append(args, "-map", fmt.Sprintf("0:v:%d", videoOrd), "-f", "null", "-")
+	args = append(args, "-map", fmt.Sprintf("0:v:%d", out.MainVideoOrdinal()), "-map", "0:a?", "-f", "null", "-")
 	timeout := sampleTimeout
 	if length == 0 {
 		timeout = fullDecodeTimeout(playSec)
 	}
 	dctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	progress, stderr, err := w.Exec.Capture(dctx, w.FFmpeg, args...)
-	text := strings.TrimSpace(opusParserRe.ReplaceAllString(string(stderr), ""))
+	progress, raw, err := w.Exec.Capture(dctx, w.FFmpeg, args...)
+	// The null muxer's dts warnings on an audio stream are timing, not decode errors (R2); video ones still count.
+	stderr, dropped := dropAudioTiming(string(raw))
+	if dropped > 0 {
+		log.Printf("playback test of %s: %d audio timestamp warnings from the muxer are not decode errors", tmp, dropped)
+	}
+	text := strings.TrimSpace(opusParserRe.ReplaceAllString(stderr, ""))
 	if errors.Is(dctx.Err(), context.DeadlineExceeded) {
 		return checkFailed(dctx, "the playback test of the new file", err)
 	}
@@ -256,7 +261,13 @@ func (w *Worker) decodeRun(ctx context.Context, tmp string, videoOrd int, start,
 			text = err.Error()
 		}
 		log.Printf("playback test of %s: %s", tmp, firstLines(text, 3))
-		return playbackKept(progress, string(stderr), start, length, playSec, fps)
+		err := playbackKept(progress, stderr, start, length, playSec, fps)
+		if ke, ok := err.(*KeptError); ok {
+			if tracks, other := audioErrors(text, out); len(tracks) > 0 {
+				ke.Reason = audioReason(tracks, other)
+			}
+		}
+		return err
 	}
 	// A sample that played no frames proves nothing: keep the original rather than pass it silently.
 	if frame, ok := progressFrame(progress); length > 0 && (!ok || frame == 0) {
@@ -383,10 +394,14 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 		frame = 1 / sMain.FrameRate
 	}
 	var done []placeScore // the places measured so far, for the job log
+	// A file has one alignment, so the one that passes a place is tried first on the others (P3): the
+	// extra tries only ever pay off once, and each one is a seek and decode of both files.
+	nudges := []float64{0, -frame, frame}
 	for _, seg := range segs {
 		best := -1.0
 		var bestFrames []frameScore // the best alignment's frames: the worst of them are the job log's evidence
-		for _, nudge := range []float64{0, -frame, frame} {
+		passed := nudges[0]
+		for _, nudge := range nudges {
 			score, frames, err := w.ssimSegment(ctx, srcPath, tmp, sv, ov, seg, sMain.StartTime, oMain.StartTime+nudge, scaleTo(sMain, oMain))
 			if err != nil {
 				return err
@@ -395,6 +410,7 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 				best, bestFrames = score, frames
 			}
 			if best >= threshold {
+				passed = nudge
 				break
 			}
 		}
@@ -405,6 +421,15 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 				best, rules.Clock(seg.start), threshold).(*KeptError)
 			ke.Detail = ssimDetail(src.DurationSec, segs, done, bestFrames, sMain.FrameRate, threshold)
 			return ke
+		}
+		if passed != nudges[0] {
+			order := []float64{passed}
+			for _, n := range nudges {
+				if n != passed {
+					order = append(order, n)
+				}
+			}
+			nudges = order
 		}
 	}
 	return nil
@@ -622,16 +647,15 @@ const maxDamagedPercent = 1
 // duration's frames. exact is false when only the container's duration was there: audio or subtitles may run past
 // the video, so that count can be too high and must not decide anything on its own.
 func sourceFrameCount(src media.Info) (frames int64, exact bool) {
-	for _, s := range src.Streams {
-		if s.Type == "video" && !s.AttachedPic {
-			switch {
-			case s.Duration > 0:
-				return int64(s.Duration*s.FrameRate + 0.5), true
-			case s.Frames > 0:
-				return s.Frames, true
-			}
-			return int64(src.DurationSec*s.FrameRate + 0.5), false
+	if k := src.MainVideoIndex(); k >= 0 {
+		s := src.Streams[k]
+		switch {
+		case s.Duration > 0:
+			return int64(s.Duration*s.FrameRate + 0.5), true
+		case s.Frames > 0:
+			return s.Frames, true
 		}
+		return int64(src.DurationSec*s.FrameRate + 0.5), false
 	}
 	return 0, false
 }

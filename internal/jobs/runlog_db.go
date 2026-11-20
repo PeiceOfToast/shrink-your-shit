@@ -6,11 +6,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // User review 11-13 item E: a job's log lines, steps and failure summary live in SQLite (migration 39), so the
@@ -20,13 +23,41 @@ import (
 // maxKeyLines is how many ffmpeg error lines the database keeps for a failure (the API shows up to 5).
 const maxKeyLines = 20
 
-// LogLine is one line of a job's log: its step (the index in RunSteps), a stream (app, stdout, stderr) and its text.
+// Log levels: what a line is for the reader (the drawer and the download show them).
+const (
+	LevelInfo    = "info"
+	LevelWarning = "warning"
+	LevelError   = "error"
+)
+
+// maxLogText is the longest text a log line keeps, in characters; a longer one is cut.
+const maxLogText = 2000
+
+var ansiSeq = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+
+// CleanLogText makes text one plain line for the log: no ANSI colour codes, no line breaks, and at most 2,000
+// characters. A longer text is cut and ends with "… (cut, N chars)", N being its full length.
+func CleanLogText(text string) string {
+	text = ansiSeq.ReplaceAllString(text, "")
+	text = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ").Replace(text)
+	runes := []rune(text)
+	if len(runes) <= maxLogText {
+		return text
+	}
+	suffix := fmt.Sprintf("… (cut, %d chars)", len(runes))
+	return string(runes[:maxLogText-utf8.RuneCountInString(suffix)]) + suffix
+}
+
+// LogLine is one line of a job's log: its step (the index in RunSteps), its section (start, input, encode, output,
+// replace, summary; "" for lines written before sections), its level, a stream (app, stdout, stderr) and its text.
 type LogLine struct {
-	Seq    int64
-	At     string
-	Step   int
-	Stream string
-	Text   string
+	Seq     int64
+	At      string
+	Step    int
+	Section string
+	Level   string
+	Stream  string
+	Text    string
 }
 
 // RunStep is one step of a job's run: when it started, how long it took, what it ran and what came of it.
@@ -55,16 +86,34 @@ type FailureSummary struct {
 	KeyLines        []string
 }
 
-// AppendLogLine adds a line to job id's log, in order, at step (its index in RunSteps; 0 before any step).
-func (s *Store) AppendLogLine(id int64, step int, stream, text string) error {
-	_, err := s.db.Exec(`INSERT INTO job_log_lines(job_id, seq, ts, step, stream, text)
-SELECT ?, COALESCE(MAX(seq),0)+1, ?, ?, ?, ? FROM job_log_lines WHERE job_id=?`, id, s.stamp(), step, stream, text, id)
+// logTimeFormat is a log line's time: UTC to the millisecond, so lines written in the same second keep their order
+// and the download can show HH:MM:SS.mmm (log-spec section 2). Lines written before this have whole seconds.
+const logTimeFormat = "2006-01-02T15:04:05.000Z07:00"
+
+// AppendLogLine adds a line to job id's log, in order, at step (its index in RunSteps; 0 before any step), in
+// section, at level (info unless warning or error). The text is cleaned by CleanLogText.
+func (s *Store) AppendLogLine(id int64, step int, section, level, stream, text string) error {
+	if level != LevelWarning && level != LevelError {
+		level = LevelInfo
+	}
+	_, err := s.db.Exec(`INSERT INTO job_log_lines(job_id, seq, ts, step, section, level, stream, text)
+SELECT ?, COALESCE(MAX(seq),0)+1, ?, ?, ?, ?, ?, ? FROM job_log_lines WHERE job_id=?`, id, s.now().UTC().Format(logTimeFormat), step, section, level, stream, CleanLogText(text), id)
 	return err
 }
 
+// JobWorkflowRev is the workflow revision job id ran with (0: none recorded).
+func (s *Store) JobWorkflowRev(id int64) (int64, error) {
+	var rev int64
+	err := s.db.QueryRow(`SELECT workflow_rev FROM jobs WHERE id=?`, id).Scan(&rev)
+	return rev, err
+}
+
+// logLineCols selects a log line's columns, in LogLine's order.
+const logLineCols = `SELECT seq, ts, step, section, level, stream, text FROM job_log_lines`
+
 // LogLines is job id's log lines, oldest first.
 func (s *Store) LogLines(id int64) ([]LogLine, error) {
-	rows, err := s.db.Query(`SELECT seq, ts, step, stream, text FROM job_log_lines WHERE job_id=? ORDER BY seq`, id)
+	rows, err := s.db.Query(logLineCols+` WHERE job_id=? ORDER BY seq`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +121,7 @@ func (s *Store) LogLines(id int64) ([]LogLine, error) {
 	out := []LogLine{}
 	for rows.Next() {
 		var l LogLine
-		if err := rows.Scan(&l.Seq, &l.At, &l.Step, &l.Stream, &l.Text); err != nil {
+		if err := rows.Scan(&l.Seq, &l.At, &l.Step, &l.Section, &l.Level, &l.Stream, &l.Text); err != nil {
 			return nil, err
 		}
 		out = append(out, l)
@@ -193,7 +242,7 @@ func (s *Store) ImportRunLogs(dir string) (int, error) {
 		}
 		for _, line := range strings.Split(strings.TrimRight(string(b), "\n"), "\n") {
 			if _, err := tx.Exec(`INSERT INTO job_log_lines(job_id, seq, ts, step, stream, text)
-SELECT ?, COALESCE(MAX(seq),0)+1, ?, 0, 'app', ? FROM job_log_lines WHERE job_id=?`, id, s.stamp(), line, id); err != nil {
+SELECT ?, COALESCE(MAX(seq),0)+1, ?, 0, 'app', ? FROM job_log_lines WHERE job_id=?`, id, s.stamp(), CleanLogText(line), id); err != nil {
 				tx.Rollback()
 				return imported, err
 			}
@@ -211,7 +260,7 @@ SELECT ?, COALESCE(MAX(seq),0)+1, ?, 0, 'app', ? FROM job_log_lines WHERE job_id
 
 // LogLinesAfter is job id's log lines after sequence number after, at most limit of them: a reader's next piece.
 func (s *Store) LogLinesAfter(id, after int64, limit int) ([]LogLine, error) {
-	rows, err := s.db.Query(`SELECT seq, ts, step, stream, text FROM job_log_lines WHERE job_id=? AND seq>? ORDER BY seq LIMIT ?`, id, after, limit)
+	rows, err := s.db.Query(logLineCols+` WHERE job_id=? AND seq>? ORDER BY seq LIMIT ?`, id, after, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +268,7 @@ func (s *Store) LogLinesAfter(id, after int64, limit int) ([]LogLine, error) {
 	out := []LogLine{}
 	for rows.Next() {
 		var l LogLine
-		if err := rows.Scan(&l.Seq, &l.At, &l.Step, &l.Stream, &l.Text); err != nil {
+		if err := rows.Scan(&l.Seq, &l.At, &l.Step, &l.Section, &l.Level, &l.Stream, &l.Text); err != nil {
 			return nil, err
 		}
 		out = append(out, l)

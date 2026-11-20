@@ -1,6 +1,7 @@
 // V6 Jobs sample data in the server's shapes (types/jobs.ts, from the abe2b0e captures), for ?mock=1. Actions change
 // it the way the server does: cancel and requeue move rows between tabs, retry sends a waiting retry now.
-import type { ActionResult, JobAction, JobDetail, JobItem, JobState, JobsPage, Probe, Tab } from "../types/jobs";
+import type { JobLog } from "../jobsApi";
+import type { ActionResult, JobAction, JobDetail, JobItem, JobState, JobsPage, Tab } from "../types/jobs";
 
 const GB = 1e9, now = Date.now(), at = (min: number) => new Date(now - min * 60e3).toISOString();
 const MOV = ["Movies", "l1"] as const, TV = ["TV Shows", "l2"] as const, HOME = ["Home videos", "l3"] as const; // ids as in the mock library list
@@ -33,6 +34,8 @@ let items: JobItem[] = [
   base("48195", "Holiday.2021.1080p.mkv", "Holiday (2021)", HOME, "failed", { detail: "Kept the original: the picture changed too much (0.912, 0.95 required).", reason: { code: "kept_original", message: "Kept the original: the picture changed too much (0.912, 0.95 required)." } }),
   base("48196", "Concert.2022.1080p.mkv", "Concert (2022)", HOME, "failed", { detail: "Kept the original: the new file didn't play to the end.", reason: { code: "kept_original", message: "Kept the original: the new file didn't play to the end." } }),
   base("48197", "Old.Tape.1998.avi", "Old Tapes", HOME, "failed", { detail: "Kept the original: the original is damaged in 7 places.", reason: { code: "kept_original", message: "Kept the original: the original is damaged in 7 places." } }),
+  base("48198", "Lecture.2020.mkv", "Lecture (2020)", HOME, "completed", {}),
+  base("48199", "Old.Movie.2018.mkv", "Old Movie (2018)", HOME, "completed", {}),
   base("failed-replace", "Replace.Fail.mkv", "Failed Saves", HOME, "failed", { detail: "The new file was converted, but saving it in place of the original failed.", reason: { code: "stalled", message: "The new file was converted, but saving it in place of the original failed." } }),
 ];
 // ?jobs=many: 450 more waiting files, to show the list past its first 200 (Show more)
@@ -55,7 +58,22 @@ export function mockJobs(tab: Tab, q: string, path?: string, limit = 200, librar
 const REMOVED: JobDetail = { id: "47001", state: "cancelled", removed: true, reason: { code: "removed", message: "Its library was removed, so this file wasn't converted." },
   events: [{ seq: 3, at: at(300), from: null, to: "queued", reason: null, workerId: null }, { seq: 9, at: at(200), from: "queued", to: "cancelled", reason: "removed", workerId: null }], steps: [] };
 // The sample's log by step: the steps the job went through, the failing one with its last lines
-export function mockJobLog(id: string): { state: string; steps: { name: string; startedAt: string | null; tookMs: number | null; outcome: string; command: string | null; probe: Probe | null; check: { score: number; min: number | null; passed: boolean | null } | null; outputLines: number; output: string | string[]; result: string | null; found?: string[] }[]; final: string | null } | { error: { code: string; message: string } } {
+// the start, variables and summary of a job that ran with full logs (contract v2); result: converted | kept | failed | skipped
+const runInfo = (result: string) => ({
+  start: { reason: "New file found by the scan", appVersion: "1.4.0", workflow: { name: "Shrink videos", revision: 7 } },
+  variables: [
+    { name: "api_key", changedBy: null, secret: true },
+    { name: "audio_languages", start: "", end: result === "converted" ? "eng, jpn" : "", changedBy: result === "converted" ? "audio" : null, secret: false },
+    { name: "file_name", start: "Sample.2020.mkv", end: "Sample.2020.mkv", changedBy: null, secret: false },
+    { name: "resolution", start: "1080p", end: "1080p", changedBy: null, secret: false },
+    { name: "target_codec", start: "", end: "hevc", changedBy: "encode", secret: false },
+    { name: "title", start: "Sample (2020)", end: "Sample (2020)", changedBy: null, secret: false },
+  ],
+  summary: { result, originalBytes: 8 * GB, finalBytes: result === "converted" ? 4.7 * GB : 0, savedPercent: result === "converted" ? 41 : 0, outputPath: "/media/movies/Sample (2020).mkv", tookMs: 912000, tempRemoved: result === "converted",
+    before: { video: "H.264 1920x1080, 8.0 Mbps", audio: "2 tracks: eng, jpn", subtitles: "English, English SDH, German", durationSec: 6312.4 },
+    after: result === "converted" ? { video: "HEVC 1920x1080, 2.9 Mbps", audio: "1 track: eng AAC stereo", subtitles: "German inside · English, English SDH as .srt", durationSec: 6312.4 } : undefined },
+});
+export function mockJobLog(id: string): JobLog | { error: { code: string; message: string } } {
   const j = mockJob(id);
   if (!j) return { error: { code: "not_found", message: "There is no such job." } };
   const failed = j.state === "failed";
@@ -69,12 +87,15 @@ export function mockJobLog(id: string): { state: string; steps: { name: string; 
     return { state: "complete", steps: [{ name: "imported", startedAt: null, tookMs: null, outcome: "done", command: null, probe: null, check: null, outputLines: 250, output: lines.slice(-200), result: "Done" }], final: "done" };
   }
   if (id === "failed-replace") {
-    return { state: "complete", steps: [
+    return { state: "complete", ...runInfo("failed"), steps: [
       { name: "encode", startedAt: "2026-11-11T14:00:00Z", tookMs: 120000, outcome: "ok", command: "ffmpeg -i in.mkv -c:v libx265 -crf 22 out.mkv", probe: { videoCodec: "h264", bitrateKbps: 8000, durationSec: 3600, sizeBytes: 3 * GB, streams: [{ index: 0, type: "video", codec: "h264", Width: 1920, Height: 1080 }] }, check: { score: 0.967, min: 0.95, passed: true }, outputLines: 10, output: ["[hevc @ 0x55d1] output file #0 does not contain any stream"], result: "Done" },
       { name: "check", startedAt: "2026-11-11T14:02:00Z", tookMs: 5000, outcome: "ok", command: null, probe: null, check: { score: 0.967, min: 0.95, passed: true }, outputLines: 0, output: [], result: "Passed" },
       { name: "replace", startedAt: "2026-11-11T14:02:05Z", tookMs: 500, outcome: "failed", command: null, probe: null, check: null, outputLines: 0, output: [], result: "Failed" },
     ], final: "The new file was converted, but saving it in place of the original failed." };
   }
+  if (id === "48198") return { state: "complete", final: "skipped", ...runInfo("skipped"), steps: [
+    step("filter", "skipped", { tookMs: 800, decision: "Skipped: already HEVC at 1080p", reason: "The workflow converts only files that aren't HEVC yet.", result: "Skipped" }),
+  ] };
   const found: Record<string, string[]> = {
     // the server's own formats (worker verify.go ssimDetail/playback, worker.go encoderDetail/fileSummary, 11-18)
     "48195": ["Check: picture comparison (SSIM) at 5 places, 10 s each: 0:01:00, 0:24:00, 0:48:00, 1:12:00, 1:36:00",
@@ -88,12 +109,19 @@ export function mockJobLog(id: string): { state: string; steps: { name: string; 
     "48197": ["Check: damage in the original, read while converting", "Errors: 7 damaged pictures; up to 3 are tolerated",
       "[h264 @ 0x55e0] error while decoding MB 41 22, bytestream -7", "[h264 @ 0x55e0] concealing 812 DC, 812 AC, 812 MV errors in P frame"],
   };
-  if (found[id]) return { state: "complete", final: j.reason?.message ?? null, steps: [
-    step("encode", "ok", { ...conv, check: null, result: "Done" }),
-    step("check", "failed", { found: found[id], result: j.reason?.message ?? "Failed" }),
+  // a job from before full logs: no start, variables or summary, so only its steps show (with the muted line)
+  if (id === "48199") return { state: "complete", final: "done", steps: [step("encode", "ok", { ...conv, result: "Done · 41% smaller" })] };
+  if (found[id]) return { state: "complete", final: j.reason?.message ?? null, ...runInfo("kept"), steps: [
+    step("encode", "ok", { ...conv, check: null, result: "Done", decision: "Converted the video to HEVC", reason: "The file is H.264, and the workflow converts to HEVC.", warnings: ["The hardware encoder stopped once and was restarted."], speedX: 2.1, avgKbps: 3100 }),
+    step("check", "failed", { found: found[id], result: j.reason?.message ?? "Failed", errors: [j.reason?.message ?? "The picture check failed."] }),
   ] };
-  return { state: "complete", final: f48191 ? "kept" : "done", steps: [
-    step("encode", f48190 ? "failed" : f48191 ? "failed" : "ok", { ...conv, result: failed ? "Failed" : "Done · 41% smaller" }),
+  if (failed) return { state: "complete", final: f48191 ? "kept" : "done", ...runInfo("failed"), steps: [
+    step("encode", "failed", { ...conv, result: "Failed" }),
+  ] };
+  return { state: "complete", final: "done", ...runInfo("converted"), steps: [
+    step("audio", "ok", { tookMs: 4000, decision: "Kept English and Japanese audio; removed 2 others", reason: "They aren't in your languages.", set: [{ name: "audio_languages", value: "eng, jpn" }], result: "Done" }),
+    step("encode", "ok", { ...conv, decision: "Converted the video to HEVC at Balanced quality", reason: "The file is H.264, and the workflow converts to HEVC.", speedX: 3.4, avgKbps: 2450, set: [{ name: "target_codec", value: "hevc" }, { name: "api_key" }], result: "Done · 41% smaller" }),
+    step("replace", "ok", { tookMs: 1500, decision: "Saved the new file in place of the original", reason: "It is smaller and passed the picture check.", moves: [{ action: "move", from: "/media/movies/Sample (2020).mkv", to: "/media/movies/.syp-trash/Sample (2020).mkv", ok: true, error: null }, { action: "move", from: "/media/movies/Sample (2020).new.mkv", to: "/media/movies/Sample (2020).mkv", ok: true, error: null }], result: "Done" }),
   ] };
 }
 const FELL = "Intel Quick Sync (hevc_qsv) failed: ffmpeg exited with code 1. Converted on the processor instead."; // #323's step words
