@@ -454,6 +454,7 @@ label.chk{cursor:pointer}
 .srow{border-bottom:1px solid var(--border)}.srow:last-child{border-bottom:0}
 .lock{display:inline-flex;width:20px;justify-content:center;color:var(--text-2)}
 .addgrp{padding:10px 10px 2px;font-size:var(--fs-sm);color:var(--text-2)}
+@media (max-width:640px){.addsheet{position:fixed;left:0;right:0;bottom:0;z-index:20;margin:0;max-height:80vh;overflow:auto;border-radius:12px 12px 0 0;box-shadow:0 -4px 16px rgb(0 0 0/.2)}}
 .addrow{display:flex;align-items:center;gap:10px;min-height:44px;padding:6px 10px;border-radius:6px;cursor:pointer}
 .addrow[aria-selected=true]{background:var(--surface)}
 .addrow.off{color:var(--text-2);cursor:default}
@@ -698,6 +699,8 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .gpi .ic{width:16px;height:16px;flex:none;margin-top:2px;color:var(--cat,var(--accent))}
 .gpi small{display:block;color:var(--text-2);font-size:11.5px}
 .gpi .tt{margin-left:auto;font-size:11px;color:var(--text-2);border:1px solid var(--border-strong);border-radius:4px;padding:0 5px;white-space:nowrap}
+.gnode .gpill{margin-left:6px;font-size:10.5px;color:var(--text-2);border:1px dashed var(--border-strong);border-radius:4px;padding:0 4px;white-space:nowrap}
+.gdrop{position:fixed;z-index:5;pointer-events:none;border:2px dashed var(--accent);border-radius:8px;background:color-mix(in srgb,var(--accent) 8%,transparent)}
 @media (max-width:1280px){.graphwrap.withpal{grid-template-columns:220px minmax(0,1fr)}.graphwrap.withpal .ginspect{grid-column:1/-1}}
 .ginspect .ginform .input,.ginspect .ginform select{width:100%;max-width:100%;min-width:0} /* review 13f1c75 P3: no cut-off selects in the narrow panel */
 @media (pointer:coarse){.gfold>summary{min-height:44px;display:flex;align-items:center}.gpi{min-height:44px}}

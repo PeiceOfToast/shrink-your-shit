@@ -318,8 +318,17 @@ function AddStepMenu({ wf, doc, defs, adds, onAdd, onClose }: { wf: string; doc:
   const on = rows.filter((r) => r.on).map((r) => r.d.type);
   const cur = sel && on.includes(sel) ? sel : on[0] ?? null;
   const pick = (r: (typeof rows)[number]) => { if (r.on) onAdd(r.d, r.after); };
-  const key = (e: { key: string; preventDefault: () => void }) => {
+  // on a phone the menu is a bottom sheet: Tab stays inside it, and Escape (from anywhere in it) closes it
+  const sheet = useRef<HTMLElement>(null);
+  const trap = (e: { key: string; shiftKey: boolean; preventDefault: () => void }) => {
     if (e.key === "Escape") return onClose();
+    if (e.key !== "Tab" || !window.matchMedia("(max-width: 640px)").matches || !sheet.current) return;
+    const f = [...sheet.current.querySelectorAll<HTMLElement>("input, button")].filter((x) => !(x as HTMLButtonElement).disabled), first = f[0], last = f[f.length - 1];
+    if (!first) return;
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  };
+  const key = (e: { key: string; preventDefault: () => void }) => {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       if (on.length) { const i = cur ? on.indexOf(cur) : -1; setSel(on[(i + (e.key === "ArrowDown" ? 1 : -1) + on.length) % on.length]); }
@@ -327,7 +336,7 @@ function AddStepMenu({ wf, doc, defs, adds, onAdd, onClose }: { wf: string; doc:
     if (e.key === "Enter") { e.preventDefault(); const r = rows.find((x) => x.d.type === cur); if (r) pick(r); }
   };
   return (
-    <section className="card" aria-label="Add a step"><div className="bd stack">
+    <section ref={sheet} className="card addsheet" aria-label="Add a step" onKeyDown={trap}><div className="bd stack">
       <label className="sr" htmlFor={wf + "-addq"}>Search steps</label>
       <input id={wf + "-addq"} className="input" type="text" role="combobox" aria-expanded="true" aria-controls={wf + "-addlist"} aria-autocomplete="list"
         aria-activedescendant={cur ? "add-" + cur : undefined} placeholder="Search steps" value={q} autoFocus

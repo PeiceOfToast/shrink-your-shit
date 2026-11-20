@@ -6,7 +6,7 @@
 import "@xyflow/react/dist/style.css";
 import { Background, Handle, MiniMap, Position, ReactFlow, ReactFlowProvider, useReactFlow, useViewport, type Connection, type Edge as RFEdge, type Node as RFNode, type NodeChange, type NodeProps } from "@xyflow/react";
 import dagre from "@dagrejs/dagre";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { SignedOut, failed, type Answer } from "../api";
 import { Icon } from "../Icon";
 import { PageHead } from "../PageHead";
@@ -19,13 +19,16 @@ import type { Layout, Node, PublishPreview, StepDefinition, ValidationIssue, Wor
 // The step categories' colour stripes (tokens.css --cat-*).
 const CAT: Record<string, string> = { input: "var(--cat-input)", filter: "var(--cat-condition)", video: "var(--cat-video)", audio: "var(--cat-audio)", subtitles: "var(--cat-subtitle)",
   container: "var(--cat-files)", verify: "var(--cat-inspect)", output: "var(--cat-output)", flow: "var(--cat-logic)" };
+const PALETTE_TYPE = "application/x-syp-step"; // the drag data of a palette step (its type)
 const W = 188, H = (outs: number) => 34 + 24 + Math.max(outs, 1) * 22 + 8; // node size for layout (matches .gnode)
 
-type Data = { node: Node; def?: StepDefinition; summary: string; issues: ValidationIssue[]; edit?: boolean };
+type Data = { node: Node; def?: StepDefinition; summary: string; issues: ValidationIssue[]; edit?: boolean; linked: string[] };
 type GNodeT = RFNode<Data, "step">;
+// item 7: a port that isn't a success port and has no connection says so on the step: the original file is kept there
+const NOT_LINKED = "Didn't work: not linked. The original file is kept.";
 
 function GNode({ data, selected }: NodeProps<GNodeT>) {
-  const { node, def, summary, issues } = data, errs = issues.filter((i) => i.severity === "error").length;
+  const { node, def, summary, issues, linked } = data, errs = issues.filter((i) => i.severity === "error").length;
   return (
     <div className={"gnode" + (node.enabled ? "" : " off") + (selected ? " sel" : "")} style={{ ["--cat" as string]: CAT[def?.category ?? ""] ?? "var(--accent)" }}
       aria-label={(node.name ?? def?.name ?? node.type) + (issues.length ? ", " + issues.length + (issues.length === 1 ? " problem" : " problems") : "")}>
@@ -35,6 +38,7 @@ function GNode({ data, selected }: NodeProps<GNodeT>) {
       <div className="gsum" title={summary}>{summary || def?.typeLabel || ""}</div>
       {(def?.outputs ?? []).map((p) => (
         <div key={p.name} className={"gport " + p.outcome}><span>{p.label}</span>
+          {p.outcome !== "success" && !linked.includes(p.name) && <span className="gpill" aria-hidden="true">Not linked</span>}
           <Handle type="source" position={Position.Right} id={p.name} isConnectable={!!data.edit} /></div>))}
     </div>);
 }
@@ -70,7 +74,11 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
   const [dims, setDims] = useState<Record<string, { width: number; height: number }>>({});
   const [sel, setSel] = useState<string | null>(null), [selEdge, setSelEdge] = useState<string | null>(null), [said, setSaid] = useState(""), [panel, setPanel] = useState<PublishPreview | null>(null), [ver, setVer] = useState(published);
   const dirty = cur !== saved;
-  const push = (next: { doc?: WorkflowDoc; layout?: Layout }) => { setHist((h) => ({ at: h.at + 1, list: [...h.list.slice(0, h.at + 1), { doc: next.doc ?? h.list[h.at].doc, layout: next.layout ?? h.list[h.at].layout }] })); setPanel(null); setSaid(""); };
+  const push = (next: { doc?: WorkflowDoc; layout?: Layout }) => { setHist((h) => ({ at: h.at + 1, list: [...h.list.slice(0, h.at + 1), { doc: next.doc ?? h.list[h.at].doc, layout: next.layout ?? h.list[h.at].layout }] })); setPanel(null); setSaid(""); setBar(null); };
+  // the Undo offered for a delete, for 8 s, only while the delete is still the latest change
+  const [bar, setBar] = useState<{ back: number; fwd: number } | null>(null);
+  useEffect(() => { if (!bar) return; const t = setTimeout(() => setBar(null), 8000); return () => clearTimeout(t); }, [bar]);
+  const undoDelete = () => { if (bar) setHist((h) => (h.at === bar.fwd ? { ...h, at: bar.back } : h)); setBar(null); setSaid("Delete undone."); };
   // the server's check and step words for the document as it is now: asked 300 ms after a change of the logic
   const seen = useRef(doc);
   useEffect(() => {
@@ -85,7 +93,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
     return () => onLeave(null);
   }, [id]);
   // the keyboard handler reads the page as it is NOW (filled in each render, below addNode)
-  const keys = useRef<{ sel: string | null; doc: WorkflowDoc; layout: Layout; addNode: (d: StepDefinition, base?: Node, at?: { x: number; y: number }) => void }>({ sel, doc, layout, addNode: () => {} });
+  const keys = useRef<{ sel: string | null; doc: WorkflowDoc; layout: Layout; addNode: (d: StepDefinition, base?: Node, at?: { x: number; y: number }) => void; nudge: (id: string, dx: number, dy: number) => void }>({ sel, doc, layout, addNode: () => {}, nudge: () => {} });
   useEffect(() => { // review f03fcad P3: Ctrl+Z undo, Ctrl+Shift+Z or Ctrl+Y redo (not while typing in a field)
     if (!edit) return;
     const key = (e: KeyboardEvent) => {
@@ -105,18 +113,32 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [edit]);
+  // item 5: the arrow keys move the selected step, 16 px (64 px with Shift); the window's capture phase keeps React Flow's own nudge from moving it too
+  useEffect(() => {
+    if (!edit) return;
+    const arrow = (e: KeyboardEvent) => {
+      const k = keys.current, t = e.target as HTMLElement | null;
+      if (!k.sel || !t?.closest?.(".gcanvas") || t.closest("input, textarea, select, [contenteditable]")) return;
+      const dx = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0, dy = e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0;
+      if (!dx && !dy) return;
+      e.preventDefault(); e.stopPropagation(); const s = e.shiftKey ? 64 : 16; k.nudge(k.sel, dx * s, dy * s);
+    };
+    window.addEventListener("keydown", arrow, true);
+    return () => window.removeEventListener("keydown", arrow, true);
+  }, [edit]);
   useEffect(() => { if (!dirty) return; const warn = (e: BeforeUnloadEvent) => e.preventDefault(); window.addEventListener("beforeunload", warn); return () => window.removeEventListener("beforeunload", warn); }, [dirty]);
 
   const { nodes, edges } = useMemo(() => {
     const issues = checked.issues ?? [], title = (n?: Node) => (n ? n.name ?? defs.find((x) => x.type === n.type)?.name ?? n.type : "");
+    const free = (n: Node, def?: StepDefinition) => (def?.outputs ?? []).filter((p) => p.outcome !== "success" && !doc.edges.some((e) => e.from === n.id && e.fromPort === p.name));
     // review bf13684 P2: every step and connection has a name in words for a screen reader
     const nodes: GNodeT[] = doc.nodes.map((n) => {
       const mine = issues.filter((i) => i.nodeId === n.id), summary = checked.stepSummaries?.[n.id] ?? "";
       const def = defs.find((x) => x.type === n.type);
       return { id: n.id, type: "step", position: layout.nodes[n.id] ?? { x: 0, y: 0 }, draggable: edit, connectable: edit, deletable: edit && def?.category !== "input", selected: n.id === sel,
         initialWidth: W, initialHeight: H(def?.outputs?.length ?? 1), measured: dims[n.id], // review f03fcad: the minimap only draws nodes with a size
-        ariaLabel: [title(n) + (n.enabled ? "" : " (off)"), summary, ...mine.map((i) => (i.severity === "error" ? "Problem: " : "Warning: ") + i.message)].filter(Boolean).join(". "),
-        data: { node: n, def: defs.find((x) => x.type === n.type), summary, issues: mine, edit } };
+        ariaLabel: [title(n) + (n.enabled ? "" : " (off)"), summary, ...mine.map((i) => (i.severity === "error" ? "Problem: " : "Warning: ") + i.message), ...free(n, def).map(() => NOT_LINKED)].filter(Boolean).join(". "),
+        data: { node: n, def, summary, issues: mine, edit, linked: doc.edges.filter((e) => e.from === n.id).map((e) => e.fromPort) } };
     });
     const edges: RFEdge[] = doc.edges.map((e) => {
       const from = doc.nodes.find((n) => n.id === e.from), outs = defs.find((x) => x.type === from?.type)?.outputs ?? [], port = outs.find((p) => p.name === e.fromPort);
@@ -146,12 +168,59 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
     push({ doc: { ...doc, nodes: [...doc.nodes, n] }, layout: { ...layout, nodes: { ...layout.nodes, [n.id]: { x: Math.round(p.x), y: Math.round(p.y) } } } });
     setSel(n.id); setSelEdge(null); setSaid("Added " + (n.name ?? d.name) + ". Connect it from a port of another step.");
   };
-  keys.current = { sel, doc, layout, addNode };
+  // item 4: a step dropped on a connection goes between its two ends; one added below the selected step links from its success port when that is free
+  const insertStep = (d: StepDefinition, p: { x: number; y: number }, via?: { edge?: WorkflowDoc["edges"][number]; after?: Node }) => {
+    const n: Node = { id: newId(), type: d.type, typeVersion: d.typeVersion, config: {}, enabled: true };
+    const inPort = d.inputs?.[0]?.name, canGoOn = !!inPort && (d.outputs ?? []).some((o) => o.name === "success");
+    let edges = doc.edges, said = "Added " + d.name + ". Connect it from a port of another step.";
+    if (via?.edge && canGoOn) {
+      const e = via.edge;
+      edges = [...edges.filter((x) => x.id !== e.id), { id: newId(), from: e.from, fromPort: e.fromPort, to: n.id, toPort: inPort! }, { id: newId(), from: n.id, fromPort: "success", to: e.to, toPort: e.toPort }];
+      said = "Added " + d.name + " between " + nameOf(e.from) + " and " + nameOf(e.to) + ".";
+    } else if (via?.after && canGoOn && !doc.edges.some((x) => x.from === via.after!.id && x.fromPort === "success")) {
+      edges = [...edges, { id: newId(), from: via.after.id, fromPort: "success", to: n.id, toPort: inPort! }];
+      said = "Added " + d.name + " after " + nameOf(via.after.id) + ".";
+    }
+    push({ doc: { ...doc, nodes: [...doc.nodes, n], edges }, layout: { ...layout, nodes: { ...layout.nodes, [n.id]: { x: Math.round(p.x), y: Math.round(p.y) } } } });
+    setSel(n.id); setSelEdge(null); setSaid(said);
+  };
+  // the palette's add: below the selected step, else at the view's centre
+  const addFromPalette = (d: StepDefinition) => {
+    const a = doc.nodes.find((n) => n.id === sel);
+    if (!a) return insertStep(d, centre());
+    const p = layout.nodes[a.id] ?? { x: 0, y: 0 };
+    insertStep(d, { x: p.x, y: p.y + H(defs.find((x) => x.type === a.type)?.outputs?.length ?? 1) + 40 }, { after: a });
+  };
+  const nudgeTimer = useRef<number>(0);
+  const nudge = (id: string, dx: number, dy: number) => {
+    const p = layout.nodes[id] ?? { x: 0, y: 0 };
+    push({ layout: { ...layout, nodes: { ...layout.nodes, [id]: { x: p.x + dx, y: p.y + dy } } } });
+    window.clearTimeout(nudgeTimer.current); nudgeTimer.current = window.setTimeout(() => setSaid("Moved " + nameOf(id) + "."), 1000); // said once the arrows pause
+  };
+  // a palette step dragged onto the canvas: a dashed box follows the pointer (16 px grid, in screen pixels)
+  const [ghost, setGhost] = useState<{ x: number; y: number } | null>(null);
+  const snap = (v: number) => Math.round(v / 16) * 16;
+  const onDragOver = (e: DragEvent) => { if (!e.dataTransfer.types.includes(PALETTE_TYPE)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setGhost({ x: snap(e.clientX - W / 2), y: snap(e.clientY - 40) }); };
+  const onDrop = (e: DragEvent) => {
+    setGhost(null); const type = e.dataTransfer.getData(PALETTE_TYPE); if (!type) return;
+    e.preventDefault(); const d = defs.find((x) => x.type === type); if (!d) return;
+    const hit = (document.elementFromPoint(e.clientX, e.clientY) as Element | null)?.closest(".react-flow__edge"), edge = hit?.getAttribute("data-id") ? doc.edges.find((x) => x.id === hit.getAttribute("data-id")) : undefined;
+    const f = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    insertStep(d, { x: snap(f.x - W / 2), y: snap(f.y - 40) }, edge ? { edge } : undefined);
+  };
+  keys.current = { sel, doc, layout, addNode, nudge };
   const removeNodes = (ids: string[]) => {
     const gone = ids.filter((i) => defs.find((x) => x.type === doc.nodes.find((n) => n.id === i)?.type)?.category !== "input");
     if (!gone.length) return;
     const nodes = { ...layout.nodes }; for (const i of gone) delete nodes[i];
-    push({ doc: { ...doc, nodes: doc.nodes.filter((n) => !gone.includes(n.id)), edges: doc.edges.filter((e) => !gone.includes(e.from) && !gone.includes(e.to)) }, layout: { ...layout, nodes } });
+    // item 6: one step with one link in and one success link out: the gap closes (the step before goes to the step after)
+    const one = gone.length === 1 ? gone[0] : undefined, ins = one ? doc.edges.filter((e) => e.to === one) : [], outs = one ? doc.edges.filter((e) => e.from === one && e.fromPort === "success") : [];
+    let edges = doc.edges.filter((e) => !gone.includes(e.from) && !gone.includes(e.to)), text = one ? "Deleted " + nameOf(one) + "." : "Deleted " + gone.length + " steps.";
+    const joins = ins.length === 1 && outs.length === 1 && outs[0].to !== one && ins[0].from !== one;
+    if (joins) { edges = [...edges, { id: newId(), from: ins[0].from, fromPort: ins[0].fromPort, to: outs[0].to, toPort: outs[0].toPort }]; text = "Deleted " + nameOf(one) + ". " + nameOf(ins[0].from) + " now goes to " + nameOf(outs[0].to) + "."; }
+    const before = hist.at;
+    push({ doc: { ...doc, nodes: doc.nodes.filter((n) => !gone.includes(n.id)), edges }, layout: { ...layout, nodes } });
+    setBar({ back: before, fwd: before + 1 }); setSaid(text);
     setSel(null);
   };
   const clip = useRef<Node | null>(null), pastes = useRef(0);
@@ -211,7 +280,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
           <button className="btn sm primary" type="button" disabled={badValues.length > 0} title={badValues.length ? "Fix the settings marked in red first" : undefined} onClick={openPublish}>Publish</button></>}
       </PageHead>
       <p className="muted sm phone" role="note">Editing works best on a larger screen. Here you can look around, zoom and see each step.</p>
-      <p className="muted" role="status">{said}</p>
+      <p className="muted" role="status">{said}{bar && edit && <> <button className="linkbtn" type="button" onClick={undoDelete}>Undo</button></>}</p>
       {edit && badValues.length > 0 && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{badValues.length === 1 ? "A setting has a value it can't use" : badValues.length + " settings have values they can't use"} ({[...new Set(badValues.map((i) => nameOf(i.nodeId)))].join(", ")}). Fix {badValues.length === 1 ? "it" : "them"} to save the draft or publish.</span></p>}
       {panel && (
         <section className="card" aria-labelledby="pub-h"><div className="hd"><h2 id="pub-h">Publish v{panel.nextNumber}</h2></div><div className="bd stack">
@@ -223,8 +292,9 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
             <button className="btn ghost" type="button" onClick={() => setPanel(null)}>Cancel</button></div>
         </div></section>)}
       <div className={"graphwrap" + (edit ? " withpal" : "")}>
-        {edit && <Palette defs={defs} onAdd={(d) => addNode(d)} />}
-        <div className="gcanvas" aria-label={"The steps of " + name + " as a graph"}>
+        {edit && <Palette defs={defs} onAdd={addFromPalette} />}
+        <div className="gcanvas" aria-label={"The steps of " + name + " as a graph"} onDragOver={edit ? onDragOver : undefined} onDragLeave={edit ? () => setGhost(null) : undefined} onDrop={edit ? onDrop : undefined}>
+          {ghost && <div className="gdrop" aria-hidden="true" style={{ left: ghost.x, top: ghost.y, width: W, height: 72 }} />}
           <ReactFlow nodes={shown} edges={edges} nodeTypes={nodeTypes} fitView minZoom={0.2} maxZoom={2} nodesDraggable={edit} nodesConnectable={edit} elementsSelectable
             onConnect={connect} isValidConnection={valid} onNodesChange={onNodesChange} onDelete={({ nodes: ns, edges: es }) => (ns.length ? removeNodes(ns.map((n) => n.id)) : removeEdges(es.map((e) => e.id)))} deleteKeyCode={edit ? ["Delete", "Backspace"] : null}
             onNodeClick={(_, n) => (setSel(n.id), setSelEdge(null))} onEdgeClick={(_, e) => (setSelEdge(e.id), setSel(null))} onPaneClick={() => (setSel(null), setSelEdge(null))}>
@@ -270,7 +340,8 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
 // centre. The library trigger and migration-only types aren't offered; categories with nothing to add aren't shown.
 const CAT_NAME: Record<string, string> = { filter: "Checks", video: "Video", audio: "Audio", subtitles: "Subtitles", container: "File type", verify: "Check the result", output: "Save", flow: "Flow" };
 function Palette({ defs, onAdd }: { defs: StepDefinition[]; onAdd: (d: StepDefinition) => void }) {
-  const [q, setQ] = useState("");
+  // the step list's "Add step" lands here with ?add=<type> (its conditions do): the search starts on that step's name
+  const [q, setQ] = useState(() => defs.find((x) => x.type === new URLSearchParams(window.location.search).get("add"))?.name ?? "");
   const shown = defs.filter((d) => d.category !== "input" && !d.readOnly && !d.deprecated && (!q || (d.name + " " + d.description + " " + d.typeLabel).toLowerCase().includes(q.toLowerCase())));
   const cats = Object.keys(CAT_NAME).filter((c) => shown.some((d) => d.category === c));
   return (
@@ -281,11 +352,12 @@ function Palette({ defs, onAdd }: { defs: StepDefinition[]; onAdd: (d: StepDefin
         {cats.map((c) => (
           <details key={c} open className="gfold"><summary className="lab">{CAT_NAME[c]}</summary>
             <ul className="gpl">{shown.filter((d) => d.category === c).map((d) => (
-              <li key={d.type}><button type="button" className="gpi" style={{ ["--cat" as string]: CAT[d.category] }} title={d.description + " Double-click or press Enter to add it."}
+              <li key={d.type}><button type="button" className="gpi" draggable style={{ ["--cat" as string]: CAT[d.category] }} title={d.description + " Drag it onto the canvas, or double-click or press Enter to add it."}
+                onDragStart={(e) => { e.dataTransfer.setData(PALETTE_TYPE, d.type); e.dataTransfer.effectAllowed = "copy"; }}
                 onDoubleClick={() => onAdd(d)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), onAdd(d))} aria-label={"Add " + d.name + ": " + d.description}>
                 <Icon id={ICON[d.icon] ?? "i-workflow"} /><span className="sp"><strong>{d.name}</strong><small>{d.description}</small></span><span className="tt">{d.typeLabel}</span></button></li>))}</ul>
           </details>))}
-        <p className="hint">Double-click a step (or Enter) to add it at the centre of the view, then connect it.</p>
+        <p className="hint">Drag a step onto the canvas, or double-click it (or press Enter) to add it below the selected step. Dropped on a connection, it goes between its two steps.</p>
       </div>
     </aside>);
 }
