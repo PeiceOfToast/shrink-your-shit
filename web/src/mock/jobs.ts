@@ -76,7 +76,7 @@ const sectionsFor = (result: string): LogSection[] => result === "skipped" ? [] 
 // the start, variables and summary of a job that ran with full logs (contract v2); result: converted | kept | failed | skipped
 const runInfo = (result: string) => ({
   sections: sectionsFor(result),
-  start: { reason: "New file found by the scan", appVersion: "1.4.0", workflow: { name: "Shrink videos", revision: 7 } },
+  start: { reason: "New file found by the scan", workflow: { name: "Shrink videos", revision: 7 } },
   variables: [
     { name: "api_key", changedBy: null, secret: true },
     { name: "audio_languages", start: "", end: result === "converted" ? "eng, jpn" : "", changedBy: result === "converted" ? "audio" : null, secret: false },
