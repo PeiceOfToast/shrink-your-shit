@@ -418,8 +418,11 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
   const undoGone = () => { if (gone) setHist({ ...hist, at: gone.at - 1 }); setGone(null); };
   const addStep = (d: StepDefinition, after?: ID) => {
     if (d.outputs.some((o) => o.outcome === "branch")) { navigate(`/workflows/${id}/graph?add=${encodeURIComponent(d.type)}`); return; }
-    const nid = "n" + Math.random().toString(36).slice(2, 8), next = insertAfter(doc, after, newNode(d, nid)), now = order(next);
+    // a draft with no Library files step gets one first (the page adds it itself), so the chain has a start and the new step shows
+    const inDef = defs.find((x) => x.type === "input.library"), start = inDef && !doc.nodes.some((n) => n.type === "input.library") ? { ...doc, nodes: [...doc.nodes, newNode(inDef, "n" + Math.random().toString(36).slice(2, 8))] } : doc;
+    const nid = "n" + Math.random().toString(36).slice(2, 8), next = insertAfter(start, after, newNode(d, nid)), now = order(next);
     edit(next); setOpen(nid); setAddOpen(false);
+    requestAnimationFrame(() => document.getElementById(nid + "-more")?.focus()); // focus lands on the new step's row, not the body
     setSaid(`Added ${d.name} as step ${now.findIndex((x) => x.id === nid) + 1} of ${now.length}.`);
   };
   const openAdd = (e: { currentTarget: HTMLElement }) => { opener.current = e.currentTarget; setAddOpen(true); };
@@ -501,7 +504,9 @@ function Editor({ id, w, defs, first, reloadMeta }: { id: string; w: Workflow; d
         })}</ol>
         {!only && <button className="btn sm ghost" type="button" onClick={openAdd}><Icon id="i-plus" />Add step</button>}
         {addOpen && <AddStepMenu wf={id} doc={doc} defs={defs} adds={live.addSteps} onAdd={addStep} onClose={closeAdd} />}
-        {gone && hist.at === gone.at && <div className="note" role="status" aria-live="polite" onPointerEnter={() => setHold(true)} onPointerLeave={() => setHold(false)} onFocus={() => setHold(true)} onBlur={() => setHold(false)}>
+        {/* one status region, always mounted: a delete fills its text, so screen readers announce it */}
+        <p className="sr" role="status" aria-live="polite">{gone && hist.at === gone.at ? gone.text : ""}</p>
+        {gone && hist.at === gone.at && <div className="note" onPointerEnter={() => setHold(true)} onPointerLeave={() => setHold(false)} onFocus={() => setHold(true)} onBlur={() => setHold(false)}>
           <Icon id="i-undo" /><span className="sp">{gone.text}</span><button className="btn sm ghost" type="button" onClick={undoGone}>Undo</button></div>}
       </> : <ReadOnly doc={doc} id={id} />}
     </div>

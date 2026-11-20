@@ -52,9 +52,12 @@ export function deleteNode(d: WorkflowDoc, id: ID): WorkflowDoc {
 }
 
 // Add a step after the given step (or after the input when none is named) and link it into the chain.
+// An add never lands after the save step: a missing or save step as the anchor puts the new step just before it.
 export function insertAfter(d: WorkflowDoc, afterId: ID | undefined, node: Node): WorkflowDoc {
-  const ids = order(d).map((n) => n.id), at = Math.max(0, afterId == null ? 0 : ids.indexOf(afterId));
-  ids.splice(at + 1, 0, node.id);
+  const ids = order(d).map((n) => n.id), save = ids.findIndex((id) => d.nodes.find((n) => n.id === id)?.type === "output.commit");
+  let at = afterId == null ? 0 : ids.indexOf(afterId);
+  if (afterId != null && (at < 0 || ids[at] === ids[save])) at = (save >= 0 ? save : ids.length) - 1;
+  ids.splice(Math.max(0, at) + 1, 0, node.id);
   return relink({ ...d, nodes: [...d.nodes, node] }, ids);
 }
 

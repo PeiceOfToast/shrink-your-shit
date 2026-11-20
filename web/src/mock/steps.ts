@@ -144,6 +144,11 @@ export function legacyDoc(): WorkflowDoc {
   return chain(["input.library", "video.legacy_settings"], { "video.legacy_settings": { template: { quality: 2, audio: "keep_all" } } });
 }
 
+// W11 part (review2 gap 2): a new workflow with only its Library files step, for the empty state
+export function emptyDoc(): WorkflowDoc {
+  return chain(["input.library"], {});
+}
+
 export { order }; // the running order: the chain of success edges (stepEdits.ts)
 export const stackable = (d: WorkflowDoc) => order(d).length === d.nodes.length && d.edges.every((e) => e.fromPort === "success");
 
