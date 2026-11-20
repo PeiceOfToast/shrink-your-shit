@@ -238,12 +238,18 @@ var playbackEvery = 600.0
 
 // playbackStarts are where a long file's one-minute playback samples start: one at 0, then every playbackEvery,
 // and the last one at duration-65 (it ends 5 s before the end, as the old three-sample check did). A sample is
-// never cut short by the one after it, and none starts past the end.
+// never cut short by the one after it, and none starts past the end. The stretch left unplayed between two
+// samples is at most playbackEvery-60: when the gap before the last sample is bigger, one sample goes in its middle.
 func playbackStarts(duration float64) []float64 {
 	last := math.Max(0, duration-65)
 	var starts []float64
 	for s := 0.0; s+60 <= last; s += playbackEvery {
 		starts = append(starts, s)
+	}
+	if n := len(starts); n > 0 {
+		if gap := last - (starts[n-1] + 60); gap > math.Max(60, playbackEvery-60) {
+			starts = append(starts, starts[n-1]+60+(gap-60)/2)
+		}
 	}
 	return append(starts, last)
 }

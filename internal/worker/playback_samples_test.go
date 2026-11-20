@@ -23,27 +23,39 @@ func TestPlaybackStartsCoverALongFile(t *testing.T) {
 		{10 * 3600, 61},
 	}
 	for _, c := range cases {
-		starts := playbackStarts(c.duration)
-		if len(starts) != c.count {
-			t.Errorf("duration %.0f s: %d samples, want %d", c.duration, len(starts), c.count)
-		}
-		if starts[0] != 0 {
-			t.Errorf("duration %.0f s: first sample starts at %.0f, want 0", c.duration, starts[0])
-		}
-		last := starts[len(starts)-1]
-		if last+60 > c.duration || last+60 < c.duration-10 {
-			t.Errorf("duration %.0f s: last sample ends at %.0f, want near the end", c.duration, last+60)
-		}
-		for i := 1; i < len(starts); i++ {
-			prevEnd := starts[i-1] + 60
-			switch {
-			case starts[i] <= starts[i-1]:
-				t.Errorf("duration %.0f s: samples %d and %d are not in order or repeat (%.0f, %.0f)", c.duration, i-1, i, starts[i-1], starts[i])
-			case starts[i] < prevEnd:
-				t.Errorf("duration %.0f s: sample %d starts at %.0f, before sample %d ends at %.0f", c.duration, i, starts[i], i-1, prevEnd)
-			case starts[i]-prevEnd > 600:
-				t.Errorf("duration %.0f s: %.0f s unchecked between samples %d and %d", c.duration, starts[i]-prevEnd, i-1, i)
-			}
+		checkPlaybackStarts(t, c.duration, c.count)
+	}
+	// every whole second from just over 3 h to 10 h: the gap before the last sample can be any length up to 599 s
+	for d := 3*3600 + 60.0; d <= 10*3600; d++ {
+		checkPlaybackStarts(t, d, -1)
+	}
+}
+
+// checkPlaybackStarts checks one duration's samples: the count when count >= 0, the first at 0, the last
+// near the end, sorted with no overlaps, and no unplayed stretch longer than playbackEvery-60 (540 s), the
+// one before the last sample included.
+func checkPlaybackStarts(t *testing.T, duration float64, count int) {
+	t.Helper()
+	starts := playbackStarts(duration)
+	if count >= 0 && len(starts) != count {
+		t.Errorf("duration %.0f s: %d samples, want %d", duration, len(starts), count)
+	}
+	if starts[0] != 0 {
+		t.Errorf("duration %.0f s: first sample starts at %.0f, want 0", duration, starts[0])
+	}
+	last := starts[len(starts)-1]
+	if last+60 > duration || last+60 < duration-10 {
+		t.Errorf("duration %.0f s: last sample ends at %.0f, want near the end", duration, last+60)
+	}
+	for i := 1; i < len(starts); i++ {
+		prevEnd := starts[i-1] + 60
+		switch {
+		case starts[i] <= starts[i-1]:
+			t.Errorf("duration %.0f s: samples %d and %d are not in order or repeat (%.0f, %.0f)", duration, i-1, i, starts[i-1], starts[i])
+		case starts[i] < prevEnd:
+			t.Errorf("duration %.0f s: sample %d starts at %.0f, before sample %d ends at %.0f", duration, i, starts[i], i-1, prevEnd)
+		case starts[i]-prevEnd > playbackEvery-60:
+			t.Errorf("duration %.0f s: %.0f s unchecked between samples %d and %d", duration, starts[i]-prevEnd, i-1, i)
 		}
 	}
 }
