@@ -417,8 +417,9 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
   const secs = raw.map((r) => ({ ...r, open: errOnly || (r.key in qOpen ? qOpen[r.key] : (!!q && r.hits > 0) || (r.key in open ? open[r.key] : r.dflt)) })); // design 04:37Z: search only adds open sections
   const shown = secs.filter((s) => s.show), anyClosed = shown.some((s) => !s.open);
   const tot = shown.reduce((n, s) => n + s.hits, 0), ks = shown.filter((s) => s.hits > 0).length; // review2 #455: search and the switch must both match
-  const E = l.steps.reduce((n, st) => n + (st.errors?.length ?? 0), 0), W = l.steps.reduce((n, st) => n + (st.warnings?.length ?? 0), 0), K = l.steps.filter(flagged).length;
-  const status = [q && (tot ? tot + " matches in " + ks + " step" + (ks > 1 ? "s" : "") : "No match"), errOnly && (E + W ? plural1(E, "error", "errors") + " and " + plural1(W, "warning", "warnings") + " in " + plural1(K, "section", "sections") : "No errors or warnings in this log.")].filter(Boolean).join(" · ");
+  const vis = l.steps.filter((_, i) => shown.some((s) => s.key === "step-" + i)); // review2 #455: count only the sections on screen
+  const E = vis.reduce((n, st) => n + (st.errors?.length ?? 0), 0), W = vis.reduce((n, st) => n + (st.warnings?.length ?? 0), 0), K = vis.filter(flagged).length;
+  const status = [q && (tot ? tot + " matches in " + ks + " step" + (ks > 1 ? "s" : "") : "No match"), errOnly && (E + W ? plural1(E, "error", "errors") + " and " + plural1(W, "warning", "warnings") + " in " + plural1(K, "section", "sections") : !q && "No errors or warnings in this log.")].filter(Boolean).join(" · ");
   return (
     <section id="job-log"><h3>Log</h3>
       <div className="joblog-tools">
