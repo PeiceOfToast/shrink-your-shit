@@ -130,7 +130,7 @@ export function Jobs() {
   const items = (rows?.items ?? []).map((j) => (live[j.id] && RUNS.includes(j.state) ? { ...j, progress: live[j.id] } : j)), counts = page.data?.counts;
   const firstRun = noLibs && !kept && !left && !!counts && TABS.every(([t]) => !counts[t]); // every tab empty: no bulk actions to offer
   shown.current = { tab, rows: new Map((current?.items ?? []).map((j) => [j.jobId ?? j.id, j.state])) };
-  const picked = items.filter((j) => sel.includes(j.id)), none = !picked.length;
+  const picked = items.filter((j) => sel.includes(j.id)), none = !picked.length || busy;
   const run = async (a: JobAction) => {
     if (a === "cancel" && !window.confirm("Cancel " + plural(picked.length, "file", "files") + "? The files stay as they are. Nothing is deleted.")) return;
     const r = await act(jobAction(a, picked.map((j) => j.id), a === "reprioritize" ? prio : undefined), setSaid);
