@@ -59,6 +59,8 @@ func branchTemplate(d Doc) (rules.Template, []Issue) {
 			return nil
 		}
 		chain := []Node{n}
+		var beforeSave []rules.Card // FB4b-3: the questions between the check and the save
+		var checkIDs []string       // their node ids, for the path
 		for cur := n; ; {
 			for _, port := range []string{"skipped", "error"} {
 				if out[[2]string{cur.ID, port}] != "" && !(port == "error" && (cur.Type == TypeConvert || cur.Type == TypeVerify)) {
@@ -73,6 +75,18 @@ func branchTemplate(d Doc) (rules.Template, []Issue) {
 			nn := byID[next]
 			if cur.Type == TypeCommit { // FB2a: after the save come actions on the saved result, nothing else
 				break
+			}
+			if cur.Type == TypeVerify && IsQuestion(nn.Type) && slices.Contains(definitionPhase(nn.Type), PhaseCheck) {
+				// FB4b-3: questions about the checked result, before the save: a tree down to the save, an end or nothing
+				cards, saveID, ok := checkTree(nn, out, byID, &issues, &checkIDs)
+				if !ok {
+					return nil
+				}
+				beforeSave = cards
+				if saveID == "" { // no outcome saves: the path ends at the check (path_without_save below)
+					break
+				}
+				nn = byID[saveID]
 			}
 			if IsQuestion(nn.Type) || IsEnd(nn.Type) || IsAction(nn.Type) || nn.Type == TypeInput { // review2-531 P1: every run card, or the compile recurses
 				issues = append(issues, Issue{Code: "branch_in_conversion", Severity: "error", NodeID: nn.ID,
@@ -166,10 +180,13 @@ func branchTemplate(d Doc) (rules.Template, []Issue) {
 		}
 		ids := []string{}
 		for _, c := range chain {
+			if c.Type == TypeCommit {
+				ids = append(ids, checkIDs...) // the questions sit between the check and the save
+			}
 			ids = append(ids, c.ID)
 		}
 		ids = append(ids, afterIDs...)
-		b := &rules.Branch{Then: &t, Path: append(clone(path), ids...), After: after}
+		b := &rules.Branch{Then: &t, Path: append(clone(path), ids...), BeforeSave: beforeSave, After: after}
 		var fs rules.Failures
 		for _, c := range chain { // what the run does when it doesn't work (V6b)
 			if c.Type != TypeConvert && c.Type != TypeVerify {
@@ -293,6 +310,70 @@ func definitionPhase(typ string) []string {
 		return d.Phase
 	}
 	return nil
+}
+
+// checkTree reads the questions between 'Check the result' and 'Save the result' (FB4b-3), from the first one
+// (q), as the cards the worker asks once the result is checked: each question with the cards on its Yes and
+// its No, down to a leaf. A leaf is the save (a card of the Save the result step's type: the path goes on),
+// "Leave the file alone" or "Stop as failed" (the original is kept, the new file thrown away), or nothing on
+// the port (the original is kept too: an outcome with no link keeps the original). Every outcome that saves
+// must reach the same Save the result step, since the path compiles as one conversion; a question turned off
+// is passed over (its Yes goes on). saveID is that step, "" when no outcome saves; ok is false on an issue.
+func checkTree(q Node, out map[[2]string]string, byID map[string]Node, issues *[]Issue, ids *[]string) (cards []rules.Card, saveID string, ok bool) {
+	var walk func(id string, onPath map[string]bool) ([]rules.Card, bool)
+	walk = func(id string, onPath map[string]bool) ([]rules.Card, bool) {
+		if id == "" {
+			return nil, true // nothing on the port: the original is kept
+		}
+		n, found := byID[id]
+		if !found || onPath[id] { // a loop: Validate names it (cycle_without_loop)
+			return nil, false
+		}
+		switch {
+		case n.Type == TypeCommit:
+			if saveID != "" && saveID != id {
+				*issues = append(*issues, Issue{Code: "two_saves", Severity: "error", NodeID: id,
+					Message: "Every outcome of '" + nodeName(q) + "' that saves must lead to the same 'Save the result' step. Link them to one."})
+				return nil, false
+			}
+			saveID = id
+			return []rules.Card{{NodeID: id, Type: TypeCommit, Name: nodeName(n)}}, true
+		case n.Type == TypeEnd || n.Type == TypeFail:
+			*ids = append(*ids, id)
+			reason, _ := n.Config["reason"].(string)
+			if reason == "" {
+				reason = "Left alone by this workflow"
+				if n.Type == TypeFail {
+					reason = "Stopped by this workflow"
+				}
+			}
+			return []rules.Card{{NodeID: id, Type: n.Type, Name: nodeName(n), Config: map[string]any{"reason": reason}}}, true
+		case IsQuestion(n.Type) && slices.Contains(definitionPhase(n.Type), PhaseCheck):
+			*ids = append(*ids, id)
+			qn := questionOf(n)
+			if qn.Empty() {
+				*issues = append(*issues, Issue{Code: "empty_check", Severity: "error", NodeID: id,
+					Message: "'" + qn.Name + "' has no comparison, so every file would answer No. Choose one."})
+				return nil, false
+			}
+			seen := clone(onPath)
+			seen[id] = true
+			yes, ok1 := walk(out[[2]string{id, "match"}], seen)
+			no, ok2 := walk(out[[2]string{id, "else"}], seen)
+			if !ok1 || !ok2 {
+				return nil, false
+			}
+			if !n.Enabled { // a question turned off is passed over: its Yes goes on
+				return yes, true
+			}
+			return []rules.Card{{NodeID: id, Type: n.Type, Name: qn.Name, Config: clone(n.Config), Check: &qn, Yes: yes, No: no}}, true
+		}
+		*issues = append(*issues, Issue{Code: "wrong_phase", Severity: "error", NodeID: id,
+			Message: "'" + nodeName(n) + "' can't come between 'Check the result' and 'Save the result'. There come only 'Compare the result', the save, 'Leave the file alone' or 'Stop as failed'."})
+		return nil, false
+	}
+	cards, ok = walk(q.ID, map[string]bool{})
+	return cards, saveID, ok
 }
 
 // questionOf is a question step's config as the question the run asks, with its kind from its type

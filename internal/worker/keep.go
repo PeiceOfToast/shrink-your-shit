@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/flow"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
@@ -263,6 +264,41 @@ func (w *Worker) sizeRule(id int64, plan rules.Plan, newPath string, origSize in
 		w.jobf(id, ": The new file is %s, the original %s: replacing anyway (this workflow replaces originals even when the new file is bigger)", newSize, orig)
 	}
 	return nil
+}
+
+// compareRule asks the path's "Compare the result" questions (FB4b-3) with the measured result: the sizes,
+// and the running times the probes read. Each answer goes on the timeline. Nil: the path goes on to the save.
+func (w *Worker) compareRule(job jobs.Job, cards []rules.Card, newPath string, origSize int64, origDuration float64) error {
+	st, err := os.Stat(newPath)
+	if err != nil {
+		return fmt.Errorf("the new file: %w", err)
+	}
+	res := &flow.State{Result: rules.Result{SizeBefore: origSize, SizeAfter: st.Size(), DurationBefore: origDuration, DurationAfter: w.verified.DurationSec}}
+	v, notes := flow.BeforeSave(cards, res)
+	for _, n := range notes {
+		w.Queue.AddDecision(job.ID, n.NodeID, "", n.Name+" → "+n.Words)
+	}
+	if v.Save {
+		return nil
+	}
+	w.setPhase(secReplace)
+	why := ""
+	if len(notes) > 0 {
+		why = notes[len(notes)-1].Words
+	}
+	if v.Fail {
+		w.Queue.AddStep(job.ID, "failed", false, v.Words+" ("+why+").")
+		return failed(v.Words+" ("+why+"). The original is untouched.", errors.New("stopped by its workflow after the check: "+v.Words))
+	}
+	reason := v.Words
+	if reason == "" {
+		reason = "Left alone by this workflow"
+	}
+	words := fmt.Sprintf("%s: the new file was compared with the original (%s), so the original was kept", reason, why)
+	w.jobf(job.ID, ": %s (this workflow's Compare the result step decided)", words)
+	// Not a failure: the workflow's own choice left the file as it is, so it ends like a bigger file the Save step
+	// keeps (Skipped, left alone until it changes or Convert again), with its own reason code.
+	return &SkippedError{Words: words, Code: rules.SkipResultNotWanted}
 }
 
 func (w *Worker) now() time.Time {

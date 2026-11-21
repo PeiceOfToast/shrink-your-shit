@@ -208,7 +208,8 @@ func TestKeepHandoffsAndTheHopBound(t *testing.T) {
 
 func strconvItoa(n int) string { return fmt.Sprint(n) }
 
-// FB4b: "Compare the result" answers from the two sizes, in words.
+// FB4b: "Compare the result" answers from the measured result, in words: the two sizes, or (FB4b-3) the
+// two running times, within so many seconds.
 func TestAskResult(t *testing.T) {
 	for _, c := range []struct {
 		test          string
@@ -229,11 +230,30 @@ func TestAskResult(t *testing.T) {
 		{"", 0, 1000, 500, false, "no comparison is chosen"},
 	} {
 		q := Question{Kind: "result", Test: c.test, Percent: c.pct}
-		if got, words := q.AskResult(c.before, c.after); got != c.want || words != c.words {
+		if got, words := q.AskResult(Result{SizeBefore: c.before, SizeAfter: c.after}); got != c.want || words != c.words {
 			t.Errorf("%s %d %d→%d: %v %q, want %v %q", c.test, c.pct, c.before, c.after, got, words, c.want, c.words)
 		}
 	}
-	if !(Question{Kind: "result", Test: "saved_at_least"}).Empty() || (Question{Kind: "result", Test: "bigger"}).Empty() || !(Question{Kind: "result"}).Empty() {
-		t.Error("Empty: a percent test without a percent, and no test at all, are empty; bigger is not")
+	for _, c := range []struct {
+		seconds       float64
+		before, after float64
+		want          bool
+		words         string
+	}{
+		{2, 6312, 6311.5, true, "running time 1:45:12 against the original's 1:45:12, 0.5 seconds off, asked for within 2 seconds"},
+		{2, 6312, 6314, true, "running time 1:45:14 against the original's 1:45:12, 2 seconds off, asked for within 2 seconds"}, // exactly the bound is within it
+		{1, 6312, 6314, false, "running time 1:45:14 against the original's 1:45:12, 2 seconds off, asked for within 1 second"},
+		{5, 6312, 6298, false, "running time 1:44:58 against the original's 1:45:12, 14 seconds off, asked for within 5 seconds"},
+		{5, 6312, 0, false, "the running times aren't known"},
+		{5, 0, 6312, false, "the running times aren't known"},
+	} {
+		q := Question{Kind: "result", Test: "runtime_within", Seconds: c.seconds}
+		if got, words := q.AskResult(Result{SizeBefore: 1000, SizeAfter: 500, DurationBefore: c.before, DurationAfter: c.after}); got != c.want || words != c.words {
+			t.Errorf("within %v, %v→%v: %v %q, want %v %q", c.seconds, c.before, c.after, got, words, c.want, c.words)
+		}
+	}
+	if !(Question{Kind: "result", Test: "saved_at_least"}).Empty() || (Question{Kind: "result", Test: "bigger"}).Empty() || !(Question{Kind: "result"}).Empty() ||
+		!(Question{Kind: "result", Test: "runtime_within"}).Empty() || (Question{Kind: "result", Test: "runtime_within", Seconds: 0.5}).Empty() {
+		t.Error("Empty: a percent test without a percent, a running-time test without its seconds, and no test at all, are empty; bigger is not")
 	}
 }

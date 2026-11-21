@@ -504,3 +504,37 @@ func TestCompareTheResultBranchesTheAfterCards(t *testing.T) {
 		t.Errorf("unknown sizes: %+v", notes[0])
 	}
 }
+
+// FB4b-3: the questions between the check and the save decide whether the path goes on to the save, keeps
+// the original ("Leave the file alone", or a port with nothing on it) or fails; each answer is a note.
+func TestBeforeSaveDecides(t *testing.T) {
+	q := rules.Question{Kind: "result", Test: "saved_at_least", Percent: 30}
+	within := rules.Question{Kind: "result", Test: "runtime_within", Seconds: 1}
+	cards := []rules.Card{{NodeID: "q", Type: workflow.TypeCheckResult, Name: "Worth it?", Check: &q,
+		Yes: []rules.Card{{NodeID: "save", Type: workflow.TypeCommit, Name: "Save the result"}},
+		No: []rules.Card{{NodeID: "q2", Type: workflow.TypeCheckResult, Name: "Same length?", Check: &within,
+			Yes: []rules.Card{{NodeID: "leave", Type: workflow.TypeEnd, Name: "Leave the file alone", Config: map[string]any{"reason": "Not worth it"}}}}}}}
+	st := &State{Result: rules.Result{SizeBefore: 1000, SizeAfter: 600, DurationBefore: 100, DurationAfter: 100.4}}
+	v, notes := BeforeSave(cards, st)
+	if !v.Save || v.NodeID != "save" || len(notes) != 1 || notes[0].Words != "Yes (40.0% saved, asked for at least 30%)" {
+		t.Fatalf("saves: %+v %+v", v, notes)
+	}
+	st.Result.SizeAfter = 900
+	v, notes = BeforeSave(cards, st)
+	if v.Save || v.Fail || v.NodeID != "leave" || v.Words != "Not worth it" || len(notes) != 2 || notes[1].Words != "Yes (running time 0:01:40 against the original's 0:01:40, 0.4 seconds off, asked for within 1 second)" {
+		t.Fatalf("kept by the end: %+v %+v", v, notes)
+	}
+	st.Result.DurationAfter = 103
+	if v, notes = BeforeSave(cards, st); v.Save || v.Fail || v.NodeID != "" || len(notes) != 2 || !strings.HasPrefix(notes[1].Words, "No (") {
+		t.Fatalf("kept by nothing on the port: %+v %+v", v, notes)
+	}
+	cards[0].No = []rules.Card{{NodeID: "stop", Type: workflow.TypeFail, Name: "Stop as failed", Config: map[string]any{"reason": "Too little saved"}}}
+	if v, _ = BeforeSave(cards, st); !v.Fail || v.Save || v.Words != "Too little saved" || v.NodeID != "stop" {
+		t.Fatalf("fails: %+v", v)
+	}
+	// the sizes come from the values when the worker left them 0 (the after phase sets both)
+	st2 := &State{Vars: map[string]string{"size_bytes": "1000", "new_size_bytes": "500"}}
+	if v, _ := BeforeSave(cards, st2); !v.Save {
+		t.Errorf("sizes from the values: %+v", v)
+	}
+}
