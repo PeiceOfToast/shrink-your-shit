@@ -21,7 +21,10 @@ func TestProfileForLookup(t *testing.T) {
 	if p, ok := ProfileFor("hevc_qsv"); !ok || p.Family != "qsv" {
 		t.Errorf("ProfileFor(hevc_qsv) = %+v, %v; want qsv", p, ok)
 	}
-	for _, enc := range []string{"h264_vaapi", "hevc_amf", "hevc_videotoolbox", "libx265", "hevc_bogus", "nvenc"} {
+	if p, ok := ProfileFor("h264_amf"); !ok || p.Family != "amf" {
+		t.Errorf("ProfileFor(h264_amf) = %+v, %v; want amf", p, ok)
+	}
+	for _, enc := range []string{"h264_vaapi", "hevc_videotoolbox", "libx265", "hevc_bogus", "nvenc"} {
 		if p, ok := ProfileFor(enc); ok {
 			t.Errorf("ProfileFor(%q) = %+v; want no profile", enc, p)
 		}
