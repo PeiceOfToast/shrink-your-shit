@@ -774,6 +774,28 @@ func sourceReport(src media.Info, log string) (st media.StreamStats, have bool) 
 	return st, true
 }
 
+// lostCountVFRGap is how far the report's count must be from duration × rate before a VFR-marked original's
+// short count is taken as its variable rate rather than as lost frames. It sits between the damaged .ts the real
+// tests keep (6% short) and the VFR mkv (a third short).
+const lostCountVFRGap = 0.10
+
+// lostFramesExcused says whether a VFR original's short count is explained by its rate, so the frames the decode
+// did not take are not damage. The probe's own mark (average and nominal rate more than 1% apart) only says the
+// rate varies; a steady file can lose frames and still be marked, since a 2% mismatch is enough. What excuses the
+// shortfall is the encode's report putting the count far from duration × rate (the VFR mkv: a third fewer). A
+// small shortfall on a marked file is still lost frames (review-588 round 1), and a file whose rates match never
+// gets its shortfall excused.
+func lostFramesExcused(src media.Info, st media.StreamStats, haveReport bool, expected int64) bool {
+	v := src.Video()
+	if v == nil || !v.VFR {
+		return false
+	}
+	if !haveReport || st.Frames <= 0 || expected <= 0 {
+		return true // no usable count: the rate × duration guess is no evidence against a variable rate
+	}
+	return math.Abs(float64(st.Frames-expected)) > lostCountVFRGap*float64(expected)
+}
+
 // sourceVFR says whether the original's video looks variable frame rate (slice 13): the probe's own mark
 // (average and nominal rates more than 1% apart), or, when the encode reported it, a decoded count more
 // than 1% away from duration × rate. The second catches an mkv, where ffprobe reports the nominal rate as

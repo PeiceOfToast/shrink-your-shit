@@ -1581,7 +1581,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	probeVFR := src.Video() != nil && src.Video().VFR
 	if probeVFR { // a variable-rate original's rate says nothing about how many frames it should have (slice 13)
 		if haveReport {
-			w.jobf(job.ID, ": the original is variable frame rate; the %d frames the conversion decoded are the frame count it is checked against", stats.Frames)
+			w.jobf(job.ID, ": the original is variable frame rate; ffmpeg decoded %d frames from it, and that is the count the new file is checked against", stats.Frames)
 		} else {
 			w.jobf(job.ID, ": the original is variable frame rate and the conversion did not report its frame count, so the frame count is not checked")
 		}
@@ -1599,8 +1599,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// A count from the container's duration is a guess, and a variable-rate original's rate says nothing about how
 	// many frames it should have: neither is evidence of lost frames. A steady-rate stream whose decode took fewer
 	// frames than its rate × duration says did lose them, even though the count test marks it variable rate too
-	// (a damaged .ts: probeVFR false, 470 of 500 decoded, kept as damaged like it was before slice 13).
-	if !exact || probeVFR {
+	// (a damaged .ts: probeVFR false, 470 of 500 decoded, kept as damaged like it was before slice 13). A small
+	// shortfall on a variable-rate marked file is still lost frames (review-588 round 1).
+	if !exact || lostFramesExcused(src, stats, haveReport, expected) {
 		lost = 0
 	}
 	if lost > 0 && decodedFrames >= 0 && decodedFrames < expected && src.MainVideoOrdinal() >= 0 {

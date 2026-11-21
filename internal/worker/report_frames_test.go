@@ -174,13 +174,13 @@ func TestEncodeReportKeepsFramesTheStreamLost(t *testing.T) {
 }
 
 // A variable-rate original is not kept for the frames its rate × duration guesses: its report's decoded count
-// is short of that guess by design, and with no decode errors that is no damage.
+// is far short of that guess by design (a third), and with no decode errors that is no damage.
 func TestAVFRSourceIsNotKeptForItsShortCount(t *testing.T) {
 	s := newScenario(t)
-	s.srcSpec.streams[0]["duration"] = "110.000000" // 110 s × 20 (the average rate) = 2200 guessed, 2000 decoded
+	s.srcSpec.streams[0]["duration"] = "130.000000" // 130 s × 20 (the average rate) = 2600 guessed, 2000 decoded
 	s.srcSpec.streams[0]["r_frame_rate"] = "30/1"
 	s.srcSpec.streams[0]["avg_frame_rate"] = "20/1" // more than 1% apart: the probe marks it VFR
-	s.srcPackets, s.outPackets = 2200, 2000
+	s.srcPackets, s.outPackets = 2600, 2000
 	s.encodeStderr = inputReport(2000, 2000, 0)
 	s.run(Replace)
 	if j := s.job(); j.Status != jobs.Done {
@@ -188,6 +188,28 @@ func TestAVFRSourceIsNotKeptForItsShortCount(t *testing.T) {
 	}
 	if !s.logHas(0, "app", "variable frame rate") {
 		t.Error("want the variable frame rate line in the job log")
+	}
+}
+
+// A probe mismatch of 1% to 3% on its own does not explain a short count: a steady file can lose frames and be
+// marked variable rate anyway, so its lost frames still keep it (review-588 round 1). On the first head this
+// converted, because the mark alone dropped the evidence.
+func TestASmallRateMismatchDoesNotDropLostFrames(t *testing.T) {
+	s := newScenario(t)
+	s.srcSpec.streams[0]["duration"] = "100.000000" // 100 s × 25.5 (the average rate) = 2550
+	s.srcSpec.streams[0]["r_frame_rate"] = "25/1"
+	s.srcSpec.streams[0]["avg_frame_rate"] = "255/10" // 2% apart: the probe marks it VFR
+	s.srcPackets, s.outPackets = 2550, 2500
+	s.encodeStderr = inputReport(2500, 2500, 0) // 50 frames the decode did not take, no error text
+	s.run(Replace)
+	s.assertKept("the original file has errors")
+	for _, want := range []string{
+		"50 of 2550 frames were not decoded",
+		"Errors: 50 damaged pictures of 2500 frames (2.00%); up to 1% are tolerated",
+	} {
+		if !s.logHas(1, "check", want) {
+			t.Errorf("check log lacks %q:\n%s", want, logTextOf(s.store, s.id))
+		}
 	}
 }
 
