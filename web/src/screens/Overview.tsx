@@ -92,7 +92,15 @@ function Spark({ values, label, color }: { values: (number | null)[]; label: str
   </svg>;
 }
 
+// U13: phone width (599 px and below) gets a 2 x 2 tile grid and a closed "Last 30 days" disclosure; desktop renders as before
+function usePhone() {
+  const q = "(max-width:599px)", [m, setM] = useState(() => matchMedia(q).matches);
+  useEffect(() => { const l = matchMedia(q), f = () => setM(l.matches); l.addEventListener("change", f); return () => l.removeEventListener("change", f); }, []);
+  return m;
+}
+
 export function Overview() {
+  const phone = usePhone(), Disc = phone ? "details" : Fragment; // the 30-day block is a closed disclosure on a phone, a plain block (no wrapper) elsewhere
   // the sample install never calls the server (a 401 there would send the page to Sign in)
   // review 61dc891 P2-2: the workers (count, switch and rows) come from GET /api/v2/workers, the Workers page's source,
   // which has remote workers too; the overview's own worker entries add their files' progress
@@ -171,7 +179,7 @@ export function Overview() {
             {noLibs && h.freed <= 0 && <div><Link to="/libraries/new">Add a library</Link> to start.</div>}
             {/* design SCREENS V2 Space rules: neutral, on its own line, only when > 0; never added to or taken from the figures */}
             {(h.grew ?? 0) > 0 && <div>{bytes(h.grew!)} added by files that came out bigger</div>}
-            {rec.length >= 2 && hasSaved && <div>Last 30 days: {spaceNote}</div>}
+            {rec.length >= 2 && hasSaved && <div className={split ? "hide-phone" : undefined}>Last 30 days: {spaceNote}</div>}
             {rec.length < 2 && <div>Charts start after two days of conversions.</div>}
           </div>
           {rec.length >= 2 && <Spark label={(kept ? "Files made smaller per day" : "Space saved per day") + ", last " + v.daily.length + " days"} color="var(--success)" values={v.daily.map((d) => (d.recorded ? (hasSaved ? d.savedBytes : d.freedBytes) ?? 0 : null))} />}
@@ -182,11 +190,22 @@ export function Overview() {
           <div className="d"><div>{count(h.filesWaiting)} waiting{failed24 != null && <> · <Link to="/jobs?tab=failed" className={failed24 > 0 ? "bad" : undefined}>{count(failed24)} failed in 24 h</Link></>}</div></div>
           {rec.length >= 2 && <Spark label={"Files converted per day, last " + v.daily.length + " days"} color="var(--accent)" values={v.daily.map((d) => (d.recorded ? d.completed : null))} />}
         </div>
-        <div className="tile">
+        <div className="tile rt-desk">
           <span className="l">Right now</span>
           <span className="v">{count(v.active.length)} <small>converting now</small></span>
           {/* no daily series for a live count, so no sparkline: there is no history to draw it from */}
           <div className="d"><div>{rows.length ? <>{on} of {rows.length} workers on</> : <Link to="/workers">No workers yet</Link>}</div></div>
+        </div>
+        {/* U13: on a phone the third tile splits in two, so the tiles stay 2 x 2 (CSS shows these and hides "Right now") */}
+        <div className="tile rt-ph">
+          <span className="l">Converting now</span>
+          <span className="v">{count(v.active.length)} <small>now</small></span>
+          <div className="d"><div>{rows.length ? null : <Link to="/workers">No workers yet</Link>}</div></div>
+        </div>
+        <div className="tile rt-ph">
+          <span className="l">Workers on</span>
+          <span className="v">{on} <small>of {rows.length}</small></span>
+          <div className="d"><div>{rows.length ? null : <Link to="/workers">No workers yet</Link>}</div></div>
         </div>
       </section>
 
@@ -219,9 +238,9 @@ export function Overview() {
                   <div className="chips">{(["Done", "Waiting", "Skipped", "Failed"] as const).map((k, i) => <span key={k} className="mchip">{k} {count([l.counts.done, l.counts.waiting, l.counts.skipped, l.counts.failed][i])}</span>)}</div>
                   {(facts.length > 0 || (l.saved === 0 && l.couldFree > 0)) && <div className="sub libfacts">{facts.join(" · ")}{l.saved === 0 && l.couldFree > 0 && <>{facts.length > 0 && " · "}<Link className="ul over" to={"/jobs?tab=completed&left=1&libraryId=" + encodeURIComponent(String(l.id))}>{"could free " + bytes(l.couldFree) + " by removing the originals"}</Link></>}</div>}
                 </td>
-                <td className="sizec sm nowrap" data-l="Saved">{l.saved > 0 ? <><b className="gain">{bytes(l.saved)}</b> saved{l.savedPercent != null && " · " + pctTxt(l.savedPercent)}</> : l.waitingToFree > 0 ? <><b>{bytes(l.waitingToFree)} smaller</b></> : "Nothing saved yet"}
+                <td className="sizec sm nowrap" data-l="Saved">{l.saved > 0 ? <><b className="gain">{bytes(l.saved)}</b> saved{l.savedPercent != null && " · " + pctTxt(l.savedPercent)}</> : l.waitingToFree > 0 ? <><b className="hide-phone">{bytes(l.waitingToFree)} smaller</b></> : "Nothing saved yet"}
                   <span className="sub">Size now: {bytes(l.bytesNow)}</span>
-                  <span className="savebar" role="img" aria-label={share == null ? "No size yet" : "Saved " + share.toFixed(1) + "% of saved plus size now"}><i style={{ width: (share ?? 0) + "%" }} /></span></td>
+                  <span className="savebar hide-phone" role="img" aria-label={share == null ? "No size yet" : "Saved " + share.toFixed(1) + "% of saved plus size now"}><i style={{ width: (share ?? 0) + "%" }} /></span></td>
                 <td className="stc">{l.state === "no_workflow" ? <span className="pill warn">No workflow</span> : l.state === "paused" ? <span className="pill warn">Paused</span> : l.state === "paused_share" ? <span className="pill warn">Share not connected yet</span> : <span className="pill">Watching</span>}</td>
               </tr>; })}</tbody></table></div>
           <details className="libhelp"><summary>What Saved and Size now mean</summary>
@@ -241,7 +260,7 @@ export function Overview() {
       </section>
 
 
-      <section className="sec" aria-labelledby="ov-a"><h2 id="ov-a">Last 30 days</h2>
+      <section className="sec" aria-labelledby="ov-a"><Disc {...(phone ? { className: "lastdays" } : {})}>{phone ? <summary><h2 id="ov-a">Last 30 days</h2></summary> : <h2 id="ov-a">Last 30 days</h2>}
         {rec.length < 2 ? <><p className="muted quiet short">Charts start after two days of conversions. So far: {count(h.filesConverted)} {h.filesConverted === 1 ? "file" : "files"} converted.</p>{hasAvg && <div className="chartfoot">{avgLine}</div>}</> : <>
           <div className="charts">
             {/* workshop 11-19: savedBytes and waitingBytes are dated by the day a conversion finished, freedBytes by the day an
@@ -265,7 +284,7 @@ export function Overview() {
           </div></>}
         {first && rec.length >= 2 && v.daily.length > 0 && first > v.daily[0].day && <p className="muted sm">Recorded from {dayName(first)}.</p>}
         {rec.length >= 2 && !(MOCK || /^(Etc\/)?UTC$/.test(v.timeZone)) && <p className="muted sm">Days run midnight to midnight, {v.timeZone.split("/").pop()!.replace(/_/g, " ")} time.</p>}
-      </section>
+      </Disc></section>
     </div>
   );
 }
