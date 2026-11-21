@@ -202,6 +202,11 @@ type Worker struct {
 	Journal  Journal
 	Now      func() time.Time // nil: time.Now
 
+	// scorePlace, when set, replaces ssimSegment as the per-place scorer (tests fake the scores with it).
+	scorePlace scoreFunc
+	// statFinal, when set, replaces os.Stat for the new file after it is put in place (tests fail it or zero it).
+	statFinal func(string) (os.FileInfo, error)
+
 	mu         sync.Mutex
 	filterMemo map[string]bool
 	current    int64              // the running job's id (0: none)
@@ -486,10 +491,14 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 		}
 		return true, err
 	}
-	st, _ := os.Stat(final)
-	var size int64
-	if st != nil {
-		size = st.Size()
+	stat := os.Stat
+	if w.statFinal != nil { // a test's fake stat
+		stat = w.statFinal
+	}
+	st, _ := stat(final)
+	size, note := newFileSize(st, w.verified.SizeBytes)
+	if note != "" {
+		w.jobf(job.ID, "%s", note)
 	}
 	if st != nil && w.verified.Video() != nil { // the new file's codec, size and length for the Files view (S5)
 		if b, err := json.Marshal(w.verified); err == nil {
@@ -2197,6 +2206,22 @@ func ffmpegExit(err error) (ran bool, exit int) {
 type CheckScore struct {
 	Score, Min float64
 	Passed     bool
+}
+
+// newFileSize is the new file's size for the job's record. st is the stat taken after the file was put in
+// place. A failed stat, or one that reports 0 bytes for a file that was verified, uses the size measured before
+// the move, and note says so for the job log.
+func newFileSize(st os.FileInfo, measured int64) (size int64, note string) {
+	if st != nil && st.Size() > 0 {
+		return st.Size(), ""
+	}
+	if measured > 0 {
+		if st == nil {
+			return measured, fmt.Sprintf("Couldn't read the new file's size after it was put in place; using the size measured before the move (%d bytes).", measured)
+		}
+		return measured, fmt.Sprintf("The new file reported 0 bytes after it was put in place; using the size measured before the move (%d bytes).", measured)
+	}
+	return 0, "Couldn't read the new file's size after it was put in place; size unknown."
 }
 
 // recordCheck keeps the job's check step: the picture score, when the check ran (w.check, set by the picture comparison).
