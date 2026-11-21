@@ -19,26 +19,26 @@ import (
 // setting that starts with a template has no fixed root.
 func TestFixedPrefixOfATemplatedFolder(t *testing.T) {
 	for in, want := range map[string]string{
-		"/srv/out":                 "/srv/out",
-		"/srv/out/{{sub}}":         "/srv/out",
-		"/srv/out/{{a}}/{{b}}":     "/srv/out",
-		"/srv/out/films-{{year}}":  "/srv/out",
-		"/srv/{{sub}}/out":         "/srv",
+		"/data/out":                 "/data/out",
+		"/data/out/{{sub}}":         "/data/out",
+		"/data/out/{{a}}/{{b}}":     "/data/out",
+		"/data/out/films-{{year}}":  "/data/out",
+		"/data/{{sub}}/out":         "/srv",
 		"/{{sub}}":                 "",
 		"{{sub}}/out":              "",
-		"/srv/out/{{sub}}/":        "/srv/out",
+		"/data/out/{{sub}}/":        "/data/out",
 		`C:\out\{{sub}}`:           `C:\out`,
-		"/srv/out/{{file.name}}.d": "/srv/out",
-		"/srv/out/{{unclosed":      "/srv/out",
+		"/data/out/{{file.name}}.d": "/data/out",
+		"/data/out/{{unclosed":      "/data/out",
 		"/other/{{x}}/../../lib":   "/lib", // review-592: cleaned first (and refused before it gets here: hasDotDot)
-		"/srv/out/{{sub}}/../keep": "/srv/out/keep",
-		"/srv/out/sub/../{{sub}}":  "/srv/out",
+		"/data/out/{{sub}}/../keep": "/data/out/keep",
+		"/data/out/sub/../{{sub}}":  "/data/out",
 	} {
 		if got := fixedPrefix(in); got != want {
 			t.Errorf("%q: %q, want %q", in, got, want)
 		}
 	}
-	for in, want := range map[string]bool{"/srv/lib/{{a}}/../..": true, "/srv/out/{{sub}}/../keep": true, `C:\out\..\{{sub}}`: true, "/srv/out/{{sub}}/keep": false, "/srv/out/..x/{{sub}}": false, "/srv/out/{{sub}}": false} {
+	for in, want := range map[string]bool{"/data/lib/{{a}}/../..": true, "/data/out/{{sub}}/../keep": true, `C:\out\..\{{sub}}`: true, "/data/out/{{sub}}/keep": false, "/data/out/..x/{{sub}}": false, "/data/out/{{sub}}": false} {
 		if got := hasDotDot(in); got != want {
 			t.Errorf("hasDotDot(%q) = %v", in, got)
 		}
