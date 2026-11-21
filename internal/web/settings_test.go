@@ -112,6 +112,33 @@ func TestPatchSettings(t *testing.T) {
 	}
 }
 
+// The Workers page's "Graphics jobs don't wait for processor jobs" is one setting: off on a fresh install and
+// on an install whose settings were stored before the field existed, and it round-trips through the API.
+func TestGPUJobsSeparateSetting(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/settings"})
+	if v := settingsOf(t, body)["gpuJobsSeparate"]; v != false {
+		t.Errorf("a fresh install: gpuJobsSeparate = %v, want false", v)
+	}
+	st.SetMeta("settings", `{"firstRunDone":true,"firstRunStep":5,"keepOriginalsDays":7,"parallelJobs":1,"lowPriority":true,"scanSchedule":"02:00","queueOrder":"newest","languages":[]}`)
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/settings"})
+	if v := settingsOf(t, body)["gpuJobsSeparate"]; v != false {
+		t.Errorf("settings stored before the field: gpuJobsSeparate = %v, want false", v)
+	}
+	code, body := post(t, srv, "PATCH", "/api/settings", `{"gpuJobsSeparate":true}`)
+	if code != 200 || settingsOf(t, body)["gpuJobsSeparate"] != true {
+		t.Fatalf("turning it on: %d %s", code, body)
+	}
+	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/settings"})
+	if v := settingsOf(t, body)["gpuJobsSeparate"]; v != true {
+		t.Errorf("stored on: gpuJobsSeparate = %v", v)
+	}
+	code, body = post(t, srv, "PATCH", "/api/settings", `{"gpuJobsSeparate":false}`)
+	if code != 200 || settingsOf(t, body)["gpuJobsSeparate"] != false {
+		t.Fatalf("turning it off: %d %s", code, body)
+	}
+}
+
 func TestSettingsAndFlowsNeedSignIn(t *testing.T) {
 	srv, _, a, _ := libServer(t, true)
 	for _, k := range []call{

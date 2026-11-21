@@ -329,6 +329,13 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine, joins
 			serverError(w, err)
 			return
 		}
+		// The claim keeps the queue row's earlier words so a hand-back can put them back (slice 18); this
+		// attempt starts here, so they go now (a remote job never hands back).
+		if j.Error != "" || j.ErrorCode != "" {
+			if err := store.SetError(j.ID, "", ""); err != nil {
+				log.Printf("remote worker %s: job %d: clearing its earlier words: %v", wk.ID, j.ID, err)
+			}
+		}
 		lease, _ := store.LeaseOf(j.ID)
 		_, expires, _ := store.LeaseHeld(lease, wk.ID)
 		if eng.RunRemote != nil { // V7b2: the server runs the job; its plan is ready at leases/{lease}/plan

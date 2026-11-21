@@ -129,6 +129,7 @@ type scenario struct {
 	calls    []string
 	exec     *media.FakeExec
 	moreSrcs map[string]bool // other originals in the queue (probed like src)
+	srcSpecs map[string]spec // an original's own streams, when they differ from srcSpec
 	srtBytes int             // the size the fake encoder gives an extracted .srt (0: a few bytes)
 }
 
@@ -223,7 +224,11 @@ func (s *scenario) handle(name string, args []string) (string, string, error) {
 			if s.srcProbeFails {
 				return "", "", errors.New("ffprobe: moov atom not found")
 			}
-			return s.srcSpec.json(), "", nil
+			spec := s.srcSpec
+			if alt, ok := s.srcSpecs[last]; ok { // this original's own streams (a 10-bit one, for instance)
+				spec = alt
+			}
+			return spec.json(), "", nil
 		}
 		if s.outProbeRaw != "" {
 			return s.outProbeRaw, "", nil

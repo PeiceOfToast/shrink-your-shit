@@ -35,12 +35,17 @@ type Settings struct {
 	FirstRunLibrary   *FirstRunLibrary `json:"firstRunLibrary"`
 	KeepOriginalsDays int              `json:"keepOriginalsDays"`
 	// LogKeepDays is how long a finished job's log is kept (user review 11-13 item E): 7, 30, 90, or 0 for forever.
-	LogKeepDays  int        `json:"logKeepDays"`
-	ParallelJobs int        `json:"parallelJobs"`
-	QuietHours   QuietHours `json:"quietHours"`
-	LowPriority  bool       `json:"lowPriority"`
-	ScanSchedule string     `json:"scanSchedule"` // "HH:MM", or "" for none
-	QueueOrder   string     `json:"queueOrder"`   // newest|oldest|largest|smallest
+	LogKeepDays  int `json:"logKeepDays"`
+	ParallelJobs int `json:"parallelJobs"`
+	// GPUJobsSeparate is "Graphics jobs don't wait for processor jobs" (Workers page): a job that converts on
+	// the graphics card takes a graphics slot only, not a Files-at-once place, so it starts while processor
+	// jobs fill Files at once. Off when it was never set (an install that had the setting not at all), and off
+	// by default: every file counts toward Files at once.
+	GPUJobsSeparate bool       `json:"gpuJobsSeparate"`
+	QuietHours      QuietHours `json:"quietHours"`
+	LowPriority     bool       `json:"lowPriority"`
+	ScanSchedule    string     `json:"scanSchedule"` // "HH:MM", or "" for none
+	QueueOrder      string     `json:"queueOrder"`   // newest|oldest|largest|smallest
 	// Languages are the person's languages for "Keep only my languages" (slice 25b): ISO 639-2 codes,
 	// stored in one form (rules.CanonLang); two-letter codes and the 639-2/T forms are accepted.
 	Languages []string `json:"languages"`
