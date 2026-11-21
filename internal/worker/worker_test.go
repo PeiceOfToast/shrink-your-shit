@@ -582,7 +582,7 @@ func TestRecordingStartingMidStreamWithAShortRestIsStillKept(t *testing.T) {
 	s.srcSpec.streams, s.outSpec.streams = s.srcSpec.streams[:1], s.outSpec.streams[:1] // picture only
 	s.srcFirstPacket, s.srcFirstFrame = "0.000000,___\n", "4.000000\n"
 	s.run(Replace)
-	s.assertKept("long but the original")
+	s.assertKept("long but the original", "check_differs")
 }
 
 func TestPreflightRunsBeforeAnyEncoding(t *testing.T) {
