@@ -28,7 +28,7 @@ code,.mono{font-family:var(--mono);font-size:max(.92em,var(--fs-sm))}
 .grp{height:14px}
 .nav a{position:relative;display:flex;align-items:center;gap:10px;min-height:40px;padding:0 12px;border-radius:var(--radius-sm);color:var(--text);text-decoration:none}
 .nav a:hover{background:color-mix(in srgb,var(--raised) 60%,transparent)}
-.nav a[aria-current=page]{background:var(--raised);font-weight:var(--fw-strong)}
+.nav a[aria-current=page]{background:var(--accent-soft);font-weight:var(--fw-strong)}
 .nav a[aria-current=page]::before{content:"";position:absolute;left:-8px;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:var(--accent)}
 .badge{margin-left:auto;min-width:20px;min-height:20px;padding:0 6px;border-radius:10px;font-size:var(--fs-sm);font-weight:var(--fw-strong);display:inline-grid;place-items:center;background:var(--error);color:var(--on-accent)}
 .badge.warn{background:var(--warning);color:var(--on-accent)}
@@ -128,9 +128,10 @@ textarea.input{min-height:72px;font-family:var(--mono);font-size:var(--fs-sm)}
 .pill{display:inline-flex;align-items:center;gap:4px;height:var(--chip-h);padding:0 8px;border-radius:calc(var(--chip-h)/2);background:var(--raised);color:var(--text-2);font-size:var(--fs-sm);font-weight:500;white-space:nowrap;flex:none}
 .pill .ic{width:12px;height:12px}
 .pill.run{background:var(--accent-soft);color:var(--accent-text)}
-.pill.ok{background:var(--ok-soft);color:var(--success-text)}
+.pill.ok{background:var(--raised);color:var(--success-text)} /* U8: Done is success text on a neutral pill, not a success fill */
 .pill.bad{background:var(--bad-soft);color:var(--error-text)}
 .pill.warn,.pill.sample{background:var(--warn-soft);color:var(--warning-text)}
+.gain{color:var(--success-text)} /* U8: a saved figure is success text, never a fill */
 .st.ok{color:var(--success-text)}.st.run{color:var(--accent-text)}.st.bad{color:var(--error-text)}.st.warn{color:var(--warning-text)}.st.wait{color:var(--text-2)}
 .st .ic{width:16px;height:16px}
 .st:has(>.fail){align-items:flex-start}.st:has(>.fail)>.ic{margin-top:2px}.st .fail{white-space:normal}.st .why{font-weight:400;color:var(--text)}
