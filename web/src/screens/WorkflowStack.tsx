@@ -356,16 +356,18 @@ function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline }: { n
         {mine.length > 0 && <span className="pill bad"><Icon id="i-alert" />{mine.length === 1 ? "1 problem" : mine.length + " problems"}</span>}
         {end ? <span className="muted sm nowrap">{end === "first" ? "Always first" : "Always last"}</span>
           : otherwise && afterOnly(def) ? <label className="row nw otherwise"><span className="muted nowrap">Otherwise</span>
-              <select className="input" aria-label={"Otherwise: what happens when " + nm + " answers No"} value={otherwise.kind === "other" ? "other" : "none"}
+              {/* ui-shop review #582: a No that holds anything but nothing (a fail or a hand-over the graph built, another chain) reads
+                  "another path", never "nothing more"; "leave" means the same as nothing after the save */}
+              <select className="input" aria-label={"Otherwise: what happens when " + nm + " answers No"} value={otherwise.kind === "none" || otherwise.kind === "leave" ? "none" : "other"}
                 onChange={(e) => otherwise.set(e.target.value as ElseKind)}>
-                {OTHERWISE_AFTER.filter(([k]) => k !== "other" || otherwise.kind === "other").map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-                {otherwise.kind !== "other" && <option value="other">another path (open the graph)</option>}
+                {OTHERWISE_AFTER.filter(([k]) => k !== "other" || (otherwise.kind !== "none" && otherwise.kind !== "leave")).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                {(otherwise.kind === "none" || otherwise.kind === "leave") && <option value="other">another path (in the graph)</option>}
               </select></label>
           : otherwise ? <label className="row nw otherwise"><span className="muted nowrap">Otherwise</span>
               <select className="input" aria-label={"Otherwise: what happens when " + nm + " answers No"} value={otherwise.kind === "none" ? "leave" : otherwise.kind}
                 onChange={(e) => otherwise.set(e.target.value as ElseKind)}>
                 {OTHERWISE.filter(([k]) => k !== "other" || otherwise.kind === "other").map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-                {otherwise.kind !== "other" && <option value="other">another path (open the graph)</option>}
+                {otherwise.kind !== "other" && <option value="other">another path (in the graph)</option>}
               </select></label>
           : def.alwaysOn ? <span className="muted sm nowrap">Always on</span>
           : <>{mv.fixed && !inline && <span className="muted sm nowrap" title={mv.reason ?? FIXED_LINE}>Set place</span>}
