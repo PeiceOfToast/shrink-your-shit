@@ -390,6 +390,7 @@ label.chk{cursor:pointer}
 .list .tbl.jobs tr{position:relative}
 /* a long reason line is capped, or its nowrap text sets the name column wider than the screen at larger text sizes */
 .list .tbl.jobs .lpath{max-width:30em}
+.list .tbl td.sizec{width:1%;text-align:right;color:var(--text-2)}
 .uline{position:absolute;left:0;right:0;bottom:0;height:3px}
 .uline i{display:block;height:100%;background:var(--accent)}
 .ltile.codec{font-size:var(--fs-sm);line-height:1.15;text-align:center;font-variant-numeric:tabular-nums}
@@ -425,6 +426,7 @@ label.chk{cursor:pointer}
   .list .tbl tr::after{content:"\203A";position:absolute;right:6px;top:50%;transform:translateY(-50%);color:var(--text-2);font-size:20px;line-height:1}
   .list .tbl td{display:none;height:auto;padding:0;border:0;background:none!important}
   .list .tbl td.idc{display:block;flex:1;min-width:0}
+  .list .tbl td.stc,.list .tbl td.actc,.list .tbl td.posc,.list .tbl td.sizec{display:block;flex:none}
   .list .tbl td.posc{min-width:20px}
   .list.selecting .tbl td.selc{display:block;flex:none}
   .list .tbl td.idc .sub:not(.phone):not(.runs):not(.live):not(.libfacts){display:none}   /* phone rows: the title and one muted line; Workflows' Recent runs line stays */
@@ -443,6 +445,7 @@ label.chk{cursor:pointer}
   .list.rows .tbl.wflist td{padding:0} /* keep after the td.stc indent above: same weight, wins on order */
   .list.rows .tbl.wflist td.stc{flex:none} /* Workflows keeps one line: name, check pill, switch, menu (as before U5) */
   .list.rows .tbl.wflist td.idc .row>span:last-child{min-width:0}
+  .list .tbl.jobs td.sizec{flex:0 0 100%;padding:0 0 0 48px;text-align:left;width:auto}
 }
 @media (min-width:901px){.list.rows .tbl.jobs td.selc{display:table-cell}} /* desktop Jobs keeps its row checkboxes; the Libraries rule hides them */
 .pagehead .btn.help{width:24px;min-height:24px;height:24px}.pagehead .btn.help .ic{width:16px;height:16px}
@@ -785,6 +788,7 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .ov .libhelp{margin-top:8px}.ov .libhelp p{margin:4px 0 0}
 .ov .ovt .prog{flex-direction:row;align-items:center;gap:8px;min-width:160px}.ov .ovt .prog .bar{flex:1 1 120px}
 .ov .fname{display:block;overflow-wrap:anywhere}
+@media (min-width:901px){.ov .list .tbl td.sizec{min-width:9rem}} /* the saving cell keeps its width without nowrap (Dashboard only; Jobs keeps its own) */
 /* pass 1 (row e8c7e61d): the day charts lead the page, two side by side; dataviz marks (see DayBars) */
 .ov .charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:32px}
 .ov .dchart{margin:0;position:relative;min-width:0}
