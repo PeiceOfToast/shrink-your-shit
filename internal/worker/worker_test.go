@@ -947,6 +947,28 @@ func TestBenignMessagesDoNotRefuseAGoodFile(t *testing.T) {
 	}
 }
 
+// #588 QA case 2: x265's own info lines (the banner, CPU caps, thread pool: 23 of them on a normal file)
+// bury the lines that matter in the visible job log; they stay out of it, and an x265 warning stays visible.
+func TestX265InfoLinesStayOutOfTheVisibleLog(t *testing.T) {
+	s := newScenario(t)
+	s.encodeStderr = strings.Join([]string{
+		"x265 [info]: HEVC encoder version 4.1",
+		"x265 [info]: using cpu capabilities: MMX2 SSE2Fast LZCNT SSSE3 SSE4.2 AVX FMA3 BMI2 AVX2",
+		"x265 [info]: frame I: 5, Avg QP:22.01  kb/s: 1123.45",
+		"x265 [warning]: halving the quality when psy-rd is enabled for 444 input",
+	}, "\n")
+	s.run(Replace)
+	if j := s.job(); j.Status != jobs.Done {
+		t.Fatalf("status %s %q, want done", j.Status, j.Error)
+	}
+	if l := findLine(t, s.store, s.id, "encode", "x265 [info]"); l != nil {
+		t.Errorf("x265's info line is in the visible log: %+v", *l)
+	}
+	if l := findLine(t, s.store, s.id, "encode", "x265 [warning]"); l == nil {
+		t.Error("x265's warning line is missing from the visible log")
+	}
+}
+
 func TestSourceDamageClassifier(t *testing.T) {
 	if sourceDamage("").Found() || sourceDamage("\n  \n").Found() {
 		t.Error("nothing printed means nothing wrong")
