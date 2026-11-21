@@ -215,13 +215,20 @@ func TestFinishingFileGrowingPastFinishAfterHitsTheCeiling(t *testing.T) {
 	if n := logCount(t, s, "the finishing step has run for more than 3s; stopping it"); n == 0 {
 		t.Errorf("no finishing-step stop (status %s %q)", j.Status, j.Error)
 	}
+	// the card says what happened: the finish ran long, though the file was growing (not "no progress")
+	if want := "the finishing step ran for more than 3s though the new file was still growing"; !strings.Contains(j.Error, want) {
+		t.Errorf("the card says %q, want it to contain %q", j.Error, want)
+	}
 }
 
-// After progress=end nothing is judged: the encode hangs for 30 s of stall clock, past both allowances, and no
-// watchdog stop is written.
-func TestEndedEncodeIsNotJudged(t *testing.T) {
+// After progress=end no stall is judged: the encode hangs for 30 s of stall clock with no progress, and it is not
+// stopped for no progress. FinishAfter still bounds the wait for ffmpeg to exit: the hang is stopped as the finish.
+func TestEndedEncodeIsBoundedByFinishAfterOnly(t *testing.T) {
 	s, _ := runGrowingWith(t, growRun{hang: true, atEnd: true, ended: true, finishAfter: 3 * time.Second})
-	if n := logCount(t, s, "stopping it"); n != 0 {
-		t.Errorf("%d watchdog stop lines after progress=end, want 0", n)
+	if n := logCount(t, s, "no progress"); n != 0 {
+		t.Errorf("%d no-progress stop lines after progress=end, want 0", n)
+	}
+	if n := logCount(t, s, "the finishing step has run for more than 3s; stopping it"); n == 0 {
+		t.Errorf("no FinishAfter stop after progress=end: a hung exit is unbounded")
 	}
 }

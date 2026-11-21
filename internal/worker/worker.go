@@ -250,6 +250,7 @@ type Worker struct {
 	// the running local encode's output against its source at the last report: past twice the source (overSize), with the
 	// two sizes, so a stall stop can say why it stopped (stopOver: the stop that fired was for that size).
 	overSize, stopOver atomic.Bool
+	finishStop         atomic.Bool // the stop that fired was the finishing step's ceiling (FinishAfter): its own words
 	outBytes, srcBytes atomic.Int64
 	diskBytes          atomic.Int64 // the running encode's temp file on disk at the watchdog's last check: its growth is progress
 	// the running job's run counters (log-spec L2 summary): the ffmpeg runs it needed and the bytes it wrote.
@@ -469,6 +470,9 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 		case stopUser:
 			return true, w.Queue.UserStopped(job.ID)
 		case stopStall:
+			if w.finishStop.Load() {
+				return true, w.Queue.Fail(job.ID, jobs.ReasonStalled, fmt.Sprintf("Stopped: the finishing step ran for more than %s though the new file was still growing. The original is untouched; press Retry to try again.", w.stalledLimit()))
+			}
 			if w.stopOver.Load() {
 				return true, w.Queue.Fail(job.ID, jobs.ReasonStalled, "Stopped: the new file is more than twice the original's size and its position has stopped moving. The original is untouched; press Retry to try again.")
 			}
@@ -926,6 +930,7 @@ func (w *Worker) watchStall(job jobs.Job, out string) func() {
 	w.positionAt.Store(now.UnixNano())
 	w.finishing.Store(false)
 	w.overSize.Store(false)
+	w.finishStop.Store(false)
 	w.diskBytes.Store(0)
 	w.ended.Store(false)
 	w.srcBytes.Store(job.SizeBefore)
@@ -933,12 +938,14 @@ func (w *Worker) watchStall(job jobs.Job, out string) func() {
 	done := make(chan struct{})
 	stopFinish := func(limit time.Duration) { // the finish itself ran past FinishAfter, though its file may still be growing
 		w.stopOver.Store(false)
+		w.finishStop.Store(true)
 		w.stalledFor.Store(int64(limit))
 		w.jobf(id, ": the finishing step has run for more than %s; stopping it", limit)
 		w.stop(id, stopStall)
 	}
 	stopFor := func(limit time.Duration) {
 		w.stalledFor.Store(int64(limit))
+		w.finishStop.Store(false)
 		if w.overSize.Load() { // past twice the source: the new file cannot save space, so say that, not "no progress"
 			w.stopOver.Store(true)
 			// the size is ffmpeg's count or the temp file's on disk, whichever is larger: a silent encode reports 0
@@ -952,6 +959,7 @@ func (w *Worker) watchStall(job jobs.Job, out string) func() {
 	}
 	stopCeiling := func(limit time.Duration) { // frames still grow, so the log says the position is what stopped it
 		w.stopOver.Store(false)
+		w.finishStop.Store(false)
 		w.stalledFor.Store(int64(limit))
 		w.jobf(id, ": its position has not moved for %s, though it is still writing; stopping it", limit)
 		w.stop(id, stopStall)
@@ -979,7 +987,11 @@ func (w *Worker) watchStall(job jobs.Job, out string) func() {
 						w.overSize.Store(true)
 					}
 				}
-				if w.ended.Load() { // progress=end: the file is written and ffmpeg is exiting; nothing is judged
+				if w.ended.Load() { // progress=end: the file is written and ffmpeg is exiting, so no stall is judged; FinishAfter still bounds the exit
+					if now.Sub(time.Unix(0, w.positionAt.Load())) >= w.finishAfter() {
+						stopFinish(w.finishAfter())
+						return
+					}
 					w.quietCheck(id, now)
 					continue
 				}
@@ -1022,6 +1034,7 @@ func (w *Worker) tempSize(path string) (int64, bool) {
 // while the worker says it is converting.
 func (w *Worker) watchRemoteStall(id int64, rj *RemoteJob) func() {
 	w.stopOver.Store(false) // a stop from an earlier local encode on this worker is not this stop's reason
+	w.finishStop.Store(false)
 	after := w.stallAfter()
 	done := make(chan struct{})
 	go func() {
@@ -1036,16 +1049,19 @@ func (w *Worker) watchRemoteStall(id int64, rj *RemoteJob) func() {
 				switch kind {
 				case stallNoProgress:
 					w.stalledFor.Store(int64(limit))
+					w.finishStop.Store(false)
 					w.jobf(id, ": the remote encode made no progress for %s, stopping it", limit)
 					w.stop(id, stopStall)
 					return
 				case stallPosition:
 					w.stalledFor.Store(int64(limit))
+					w.finishStop.Store(false)
 					w.jobf(id, ": the remote encode's position has not moved for %s, though it is still writing; stopping it", limit)
 					w.stop(id, stopStall)
 					return
 				case stallFinish:
 					w.stalledFor.Store(int64(limit))
+					w.finishStop.Store(true)
 					w.jobf(id, ": the remote finishing step has run for more than %s; stopping it", limit)
 					w.stop(id, stopStall)
 					return
