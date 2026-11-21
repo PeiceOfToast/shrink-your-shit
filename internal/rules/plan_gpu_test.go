@@ -32,10 +32,10 @@ func TestFFmpegArgsWithCRFPerEncoder(t *testing.T) {
 		enc  string
 		want []string
 	}{
-		{"hevc_nvenc", []string{"-c:v:0", "hevc_nvenc", "-rc", "vbr", "-cq", "22"}},
-		{"hevc_qsv", []string{"-c:v:0", "hevc_qsv", "-global_quality", "22"}},
-		{"hevc_vaapi", []string{"-c:v:0", "hevc_vaapi", "-rc_mode", "CQP", "-qp", "22"}},
-		{"hevc_amf", []string{"-c:v:0", "hevc_amf", "-rc", "cqp", "-qp_i", "22", "-qp_p", "22"}},
+		{"hevc_nvenc", []string{"-c:v:0", "hevc_nvenc", "-rc:v:0", "vbr", "-cq:v:0", "22"}},
+		{"hevc_qsv", []string{"-c:v:0", "hevc_qsv", "-global_quality:v:0", "22"}},
+		{"hevc_vaapi", []string{"-c:v:0", "hevc_vaapi", "-rc_mode:v:0", "CQP", "-qp:v:0", "22"}},
+		{"hevc_amf", []string{"-c:v:0", "hevc_amf", "-rc:v:0", "cqp", "-qp_i:v:0", "22", "-qp_p:v:0", "22"}},
 	}
 	for _, c := range cases {
 		args, ok := gpuPlan(22, nil).FFmpegArgsWith("in.mkv", "out.mkv", c.enc)

@@ -25,7 +25,7 @@ func TestJobUsesItsLibrarysFlow(t *testing.T) {
 		return rules.LegacyTemplate(rules.Rule{FromCodec: "h264", CRF: 21, Preset: "slow"}, "beside"), 0, nil
 	}
 	w.RunOne(context.Background())
-	if s.count("-crf 21 -preset slow") != 1 {
+	if s.count("-crf:v:0 21 -preset:v:0 slow") != 1 {
 		t.Errorf("the encode must use the flow's crf and preset:\n%s", strings.Join(s.calls, "\n"))
 	}
 	if b, _ := os.ReadFile(BesidePath(s.src)); string(b) != "new" {
@@ -44,7 +44,7 @@ func TestJobUsesItsLibrarysFlow(t *testing.T) {
 	if j := s2.job(); j.Status != jobs.Done || j.SizeAfter != 12 || j.SizeBefore != 14 {
 		t.Errorf("a small saving is kept: %s %d -> %d %q", j.Status, j.SizeBefore, j.SizeAfter, j.Error)
 	}
-	if s2.count("-crf 26 -preset medium") != 1 { // 27 at 1080p, one lower for this 360p source
+	if s2.count("-crf:v:0 26 -preset:v:0 medium") != 1 { // 27 at 1080p, one lower for this 360p source
 		t.Errorf("Smallest encodes a 360p file at crf 26, medium:\n%s", strings.Join(s2.calls, "\n"))
 	}
 }
@@ -121,7 +121,7 @@ func TestJobRecordsItsPlan(t *testing.T) {
 	if j.PlanPrint != snap.Fingerprint() {
 		t.Errorf("fingerprint %q, want %q", j.PlanPrint, snap.Fingerprint())
 	}
-	if s.count("-crf 20 -preset medium") != 1 { // Better quality: 21 at 1080p, 20 for this 360p source
+	if s.count("-crf:v:0 20 -preset:v:0 medium") != 1 { // Better quality: 21 at 1080p, 20 for this 360p source
 		t.Errorf("the encode must run the recorded plan:\n%s", strings.Join(s.calls, "\n"))
 	}
 }

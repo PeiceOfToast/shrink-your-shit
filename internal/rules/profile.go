@@ -10,8 +10,9 @@ import "strconv"
 // slice 5); a family without one here is still built by the switches in plan.go.
 type EncoderProfile struct {
 	Family string
-	// quality is the family's constant-quality arguments for a CRF; nil when the profile does not set it.
-	quality func(crf int) []string
+	// quality is the family's constant-quality arguments for a CRF, on the video stream spec (e.g. "v:0"): encoder-wide,
+	// such an option would reach the audio encoder too, and libopus refuses one ("Quality-based encoding not supported").
+	quality func(spec string, crf int) []string
 	// PixFmt10 is the pixel format 10-bit frames are sent as ("" when the profile does not set one: the family's
 	// upload makes them instead).
 	PixFmt10 string
@@ -67,13 +68,15 @@ func vaapiFormat(tenBit bool) string {
 var profiles = map[string]EncoderProfile{
 	"": {Family: ""},
 	"nvenc": {
-		Family:   "nvenc",
-		quality:  func(crf int) []string { return []string{"-rc", "vbr", "-cq", strconv.Itoa(crf)} },
+		Family: "nvenc",
+		quality: func(spec string, crf int) []string {
+			return []string{"-rc:" + spec, "vbr", "-cq:" + spec, strconv.Itoa(crf)}
+		},
 		PixFmt10: "p010le",
 	},
 	"qsv": {
 		Family:     "qsv",
-		quality:    func(crf int) []string { return []string{"-global_quality", strconv.Itoa(crf)} },
+		quality:    func(spec string, crf int) []string { return []string{"-global_quality:" + spec, strconv.Itoa(crf)} },
 		PixFmt10:   "p010le",
 		setup:      func(string) []string { return []string{"-init_hw_device", "qsv=qsv:hw"} },
 		fullDecode: []string{"-hwaccel", "qsv", "-hwaccel_output_format", "qsv", "-hwaccel_device", "qsv"},
@@ -88,8 +91,8 @@ var profiles = map[string]EncoderProfile{
 	},
 	"vaapi": {
 		Family: "vaapi",
-		quality: func(crf int) []string {
-			return []string{"-rc_mode", "CQP", "-qp", strconv.Itoa(crf)}
+		quality: func(spec string, crf int) []string {
+			return []string{"-rc_mode:" + spec, "CQP", "-qp:" + spec, strconv.Itoa(crf)}
 		},
 		setup: func(device string) []string {
 			return []string{"-init_hw_device", "vaapi=va:" + device, "-filter_hw_device", "va"}
@@ -107,8 +110,8 @@ var profiles = map[string]EncoderProfile{
 	},
 	"amf": {
 		Family: "amf",
-		quality: func(crf int) []string {
-			return []string{"-rc", "cqp", "-qp_i", strconv.Itoa(crf), "-qp_p", strconv.Itoa(crf)}
+		quality: func(spec string, crf int) []string {
+			return []string{"-rc:" + spec, "cqp", "-qp_i:" + spec, strconv.Itoa(crf), "-qp_p:" + spec, strconv.Itoa(crf)}
 		},
 		PixFmt10: "p010le",
 	},

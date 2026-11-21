@@ -4,6 +4,7 @@ package rules
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -20,7 +21,7 @@ func TestBitrateLevelAndVBR(t *testing.T) {
 	// HEVC (the default) is 60% of the H.264 figure: 720p Medium is 2400 kbps, the peak 1.5x that
 	p := s.Template().Compile(h264(1920, 1080, 8000))
 	args := strings.Join(p.FFmpegArgs("in.mkv", "out.mkv"), " ")
-	if p.Video.TargetKbps != 2400 || p.Video.MaxRateKbps != 3600 || !strings.Contains(args, "-b:v:0 2400k") || strings.Contains(args, "-crf 23") ||
+	if p.Video.TargetKbps != 2400 || p.Video.MaxRateKbps != 3600 || !strings.Contains(args, "-b:v:0 2400k") || strings.Contains(args, "-crf:v:0 23") ||
 		!strings.Contains(args, "-maxrate:v:0 3600k -bufsize:v:0 7200k") {
 		t.Errorf("720p Medium level, HEVC: %+v\n%s", p.Video, args)
 	}
@@ -84,7 +85,7 @@ func TestLegacyBitrateMeaningsKeepTheirFiles(t *testing.T) {
 	}
 	p := s.Template().Compile(h264(1920, 1080, 8000))
 	args := strings.Join(p.FFmpegArgs("in.mkv", "out.mkv"), " ")
-	if p.Video.TargetKbps != 2500 || p.Video.MaxRateKbps != 3000 || !strings.Contains(args, "-b:v:0 2500k") || strings.Contains(args, "-crf 23") ||
+	if p.Video.TargetKbps != 2500 || p.Video.MaxRateKbps != 3000 || !strings.Contains(args, "-b:v:0 2500k") || strings.Contains(args, "-crf:v:0 23") ||
 		!strings.Contains(args, "-maxrate:v:0 3000k -bufsize:v:0 6000k") {
 		t.Errorf("720p Medium vbr_legacy, 3 Mbps limit: %+v\n%s", p.Video, args)
 	}
@@ -92,7 +93,7 @@ func TestLegacyBitrateMeaningsKeepTheirFiles(t *testing.T) {
 	q := s
 	q.RateControl, q.VBRMaxKbps = "quality_legacy", 0
 	if p := q.Template().Compile(h264(1920, 1080, 8000)); p.Video.TargetKbps != 0 || p.Video.MaxRateKbps != 2500 ||
-		!slices.Contains(p.FFmpegArgs("in.mkv", "out.mkv"), "-crf") {
+		!slices.Contains(p.FFmpegArgs("in.mkv", "out.mkv"), "-crf:v:0") {
 		t.Errorf("quality_legacy: %+v", p.Video)
 	}
 	// VP9's constant quality (-b:v 0) gives way to the target
@@ -116,6 +117,50 @@ func TestVP9QualityWithALevel(t *testing.T) {
 	s.MaxBitrate, s.RateControl = "none", ""
 	if args := strings.Join(s.Template().Compile(h264(1280, 720, 8000)).FFmpegArgs("in.mkv", "out.webm"), " "); !strings.Contains(args, "-b:v 0") || strings.Contains(args, "-maxrate") {
 		t.Errorf("no level: %s", args)
+	}
+}
+
+// A9 (decided 11-21): VP9 with a target bitrate is constrained quality, not a bare -b:v target, which overshoots
+// (libvpx sat near 36.6 Mbit/s on the A9 clip). It takes the CRF the quality path would use for the same job, with
+// the target as the cap, and no -maxrate.
+func TestVP9TargetIsConstrainedQuality(t *testing.T) {
+	SetAvailableFormats(map[string]bool{"libx265": true, "libvpx-vp9": true})
+	defer SetAvailableFormats(nil)
+	s := DefaultSelectors(3)
+	s.Format, s.FileType, s.Audio, s.Resolution, s.MaxBitrate, s.RateControl = "vp9", "webm", "stereo_opus", "720", "medium", "level"
+	p := s.Template().Compile(h264(1920, 1080, 8000))
+	if p.Video.TargetKbps == 0 {
+		t.Fatalf("no target: %+v", p.Video)
+	}
+	// the quality path's CRF for the same job: the same selectors with no level
+	q := s
+	q.MaxBitrate, q.RateControl = "none", ""
+	crf := s.Template().Compile(h264(1920, 1080, 8000)).Video.CRF
+	if qp := q.Template().Compile(h264(1920, 1080, 8000)); qp.Video.CRF != crf {
+		t.Fatalf("quality CRF %d, target job CRF %d", qp.Video.CRF, crf)
+	}
+	args := strings.Join(p.FFmpegArgs("in.mkv", "out.webm"), " ")
+	want := "-c:v:0 libvpx-vp9 -crf:v:0 " + strconv.Itoa(crf) + " -b:v:0 " + strconv.Itoa(p.Video.TargetKbps) + "k"
+	if !strings.Contains(args, want) || strings.Contains(args, "-b:v 0") || strings.Contains(args, "-maxrate") {
+		t.Errorf("want %q with no -maxrate or -b:v 0: %s", want, args)
+	}
+}
+
+// A9 follow-up (#610 review2 P3): a software VP9 target job keeps its MaxRateKbps for the remux, but no -maxrate is
+// passed, so the step sentence names the target only and makes no peak claim.
+func TestVP9TargetSentenceMakesNoPeakClaim(t *testing.T) {
+	SetAvailableFormats(map[string]bool{"libx265": true, "libvpx-vp9": true})
+	defer SetAvailableFormats(nil)
+	s := DefaultSelectors(3)
+	s.Format, s.FileType, s.Audio, s.Resolution, s.MaxBitrate, s.RateControl = "vp9", "webm", "stereo_opus", "720", "medium", "level"
+	info := h264(1920, 1080, 8000)
+	p := s.Template().Compile(info)
+	if p.Video.MaxRateKbps == 0 || !p.Video.IsVP9Target() {
+		t.Fatalf("want a VP9 target with a remux peak: %+v", p.Video)
+	}
+	d := videoDecision(p, info).Decision
+	if strings.Contains(d, "peaks") || !strings.Contains(d, "at about "+strconv.Itoa(p.Video.TargetKbps)+" kbps") {
+		t.Errorf("step sentence: %q", d)
 	}
 }
 
