@@ -84,14 +84,22 @@ func videoDecision(p Plan, info media.Info) StepDecision {
 	if v := info.Video(); v != nil && v.BitrateKbps > 0 {
 		d += " at " + strconv.Itoa(v.BitrateKbps) + " kbps"
 	}
-	d += " becomes " + VideoFormats[target].Name + " at CRF " + strconv.Itoa(p.Video.CRF)
+	d += " becomes " + VideoFormats[target].Name
+	if p.Video.TargetKbps > 0 { // level: the encode aims at a bitrate (-b:v), so the sentence names it, not a CRF
+		d += " at about " + strconv.Itoa(p.Video.TargetKbps) + " kbps"
+		if p.Video.MaxRateKbps > 0 {
+			d += ", peaks up to " + strconv.Itoa(p.Video.MaxRateKbps) + " kbps"
+		}
+	} else {
+		d += " at CRF " + strconv.Itoa(p.Video.CRF)
+	}
 	if p.Video.Height > 0 {
 		d += fmt.Sprintf(", scaled down to %dp", p.Video.Height)
 	}
 	switch {
 	case p.Video.PeakLimitKbps > 0 && p.Video.TargetKbps == 0: // VBR: the person's max is named, not only the figure it aims at
 		d += fmt.Sprintf(", VBR, aims for about %d kbps, never above %d kbps", p.Video.MaxRateKbps, p.Video.PeakLimitKbps)
-	case p.Video.MaxRateKbps > 0:
+	case p.Video.MaxRateKbps > 0 && p.Video.TargetKbps == 0: // quality with a cap; a level has already named its peak
 		d += fmt.Sprintf(", and never above %d kbps", p.Video.MaxRateKbps)
 	}
 	return StepDecision{Label: StepConvertVideo, Outcome: "ran", Decision: d + "."}

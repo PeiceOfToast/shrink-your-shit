@@ -2466,6 +2466,12 @@ func encoderDetail(args []string) string {
 			break
 		}
 	}
+	// the cap and buffer, when the encode uses them (the plan's -maxrate:v/-bufsize:v), so the log shows the whole rate control
+	for _, f := range []string{"-maxrate", "-bufsize"} {
+		if v := argOf(f); v != "" {
+			quality += ", " + f + " " + v
+		}
+	}
 	hw := argOf("-init_hw_device")
 	if hw == "" {
 		hw = argOf("-hwaccel")
