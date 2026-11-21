@@ -242,7 +242,7 @@ const DefaultFinishAfter = time.Hour
 // end: the last progress report can stop a little short of it, and out_time can run a little past it.
 const finishTolerance = 2.0
 
-// stallWarnAfter is how long the media position may stay put before the job log warns about it (log-spec R9);
+// stallWarnAfter is how long an encode may go without moving (position, frames or bytes) before the job log warns (R9);
 // the job itself is stopped only at StallAfter (ten minutes by default).
 const stallWarnAfter = 30 * time.Second
 
@@ -2321,16 +2321,22 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 	moved := w.now() // when it last moved (a warning says so after stallWarnAfter, R9)
 	stalled := false // the warning has been written; one line says when it moves again
 	encErr, terr = media.TranscodeLines(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
+		// the encode is alive while its position moves, or while its frame count or bytes written grow and the output
+		// stays within twice the source's size (a runaway output past that is not progress). out_time follows the
+		// most-behind stream, so it freezes in a subtitle gap while frames still go on (bug 2).
+		posMoved := p.OutTimeUS > at // a position further on: one that repeats is not progress
+		outputOK := job.SizeBefore > 0 && p.TotalSize <= 2*job.SizeBefore
+		alive := posMoved || (outputOK && (p.Frame > frames || p.TotalSize > wrote))
 		frames = p.Frame
 		if p.TotalSize > wrote {
 			wrote = p.TotalSize
 		}
-		// only a position further on is progress: a stuck ffmpeg can keep reporting the same one (a
-		// damaged file, 21 min on a test run, never stopped), which mustn't hold off the stall stop
-		if p.OutTimeUS > at {
+		if posMoved {
 			at = p.OutTimeUS
-			w.progressAt.Store(time.Now().UnixNano())
 			w.finishing.Store(reachedEnd(p.OutTimeUS, job.DurationSec))
+		}
+		if alive {
+			w.progressAt.Store(time.Now().UnixNano())
 			moved = w.now()
 			if stalled { // R9: the log says it is moving again
 				stalled = false
