@@ -34,13 +34,14 @@ type RemotePlan struct {
 // RemoteResult is a remote worker's answer: its checked file is in the plan's Stage (its extracted
 // subtitles at their staged names), or why it didn't work.
 type RemoteResult struct {
-	Stderr  string               // what its ffmpeg said (damage in the original shows there)
-	Command []string             // the ffmpeg arguments it ran: the job log records these, not the server's plan
-	Kept    string               // its checks said no: the original is kept, as a local check would
-	Err     error                // it failed to convert
-	Code    string               // its failure's code when it is not the general one (slice 15: settings_rejected); "" from an older worker
-	Steps   []jobs.RunStep       // the run steps (encode, probe, check) with the remote's own timings
-	Failure *jobs.FailureSummary // the remote's failure summary (exit code, key lines, etc.)
+	Stderr   string               // what its ffmpeg said (damage in the original shows there)
+	Command  []string             // the ffmpeg arguments it ran: the job log records these, not the server's plan
+	Kept     string               // its checks said no: the original is kept, as a local check would
+	KeptCode string               // the code of that refusal (slice 14); empty from an older worker: kept_original
+	Err      error                // it failed to convert
+	Code     string               // its failure's code when it is not the general one (slice 15: settings_rejected); "" from an older worker
+	Steps    []jobs.RunStep       // the run steps (encode, probe, check) with the remote's own timings
+	Failure  *jobs.FailureSummary // the remote's failure summary (exit code, key lines, etc.)
 }
 
 // remoteFailure is a remote worker's conversion failure with the code its result carried: "" from an
@@ -198,6 +199,10 @@ func (r *RemoteJob) Deliver(res RemoteResult) bool {
 	}
 }
 
+// Answer is the channel the run takes a delivered answer from. The run reads it itself; a test of the report path
+// reads what a report delivered, in place of the run.
+func (r *RemoteJob) Answer() <-chan RemoteResult { return r.result }
+
 // RemoteCheckEvery is how often a run waiting for its remote worker checks that the lease still holds.
 var RemoteCheckEvery = 5 * time.Second
 
@@ -223,13 +228,25 @@ func (r *RemoteJob) convert(ctx context.Context, w *Worker, job jobs.Job, snap r
 		case res := <-r.result:
 			switch {
 			case res.Kept != "":
-				return res.Stderr, res.Command, kept("%s", res.Kept)
+				return res.Stderr, res.Command, keptRemote(res.KeptCode, res.Kept)
 			case res.Err != nil:
 				return res.Stderr, res.Command, &remoteFailure{code: res.Code, err: res.Err}
 			}
 			return res.Stderr, res.Command, nil // the upload is in tmp already
 		}
 	}
+}
+
+// keptRemote is a refusal a remote worker reported: its code when it is one a remote check can give, else
+// kept_original (an older worker sends its words only). A remote worker's "source missing" or "source damaged" is
+// not trusted: its share mount can be the thing that is missing, not the file.
+func keptRemote(code, reason string) error {
+	switch code {
+	case jobs.ReasonCheckDiffers, jobs.ReasonOutputDamaged, jobs.ReasonCheckNotRun:
+	default:
+		code = jobs.ReasonKeptOriginal
+	}
+	return keptCoded(code, "%s", reason)
 }
 
 // RunRemote runs job, leased by a remote worker as rj.Lease, on this server until it ends: the lease

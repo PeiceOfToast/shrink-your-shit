@@ -80,6 +80,7 @@ type Job struct {
 	Attempts    int      `json:"attempts"`          // tries finished (failed, kept, or waiting to be tried again: DD-2)
 	RetryAt     string   `json:"retryAt,omitempty"` // a queued job waiting to be tried again: not before then (RFC3339)
 	Tags        []string `json:"tags"`              // the record's tags (migration 57; FB2c): what a workflow's "Tag the file" step set
+	ErrorCode   string   `json:"-"`                 // the stored reason code (error_code): read by the code, not sent
 }
 
 // File is what the scanner last saw for a path, so unchanged files are not re-probed.
@@ -263,13 +264,13 @@ SELECT ?,?,?,?,?,?,?,?,?,priority,?,?,1,`+queuedRevSQL+` FROM libraries WHERE id
 	return r.LastInsertId()
 }
 
-const cols = `id,library,COALESCE(library_id,0),path,status,progress,reason,error,worker,duration,size_before,size_after,output_path,COALESCE(plan,''),COALESCE(plan_fingerprint,''),created,updated,attempts,retry_at,COALESCE(tags,'[]')`
+const cols = `id,library,COALESCE(library_id,0),path,status,progress,reason,error,worker,duration,size_before,size_after,output_path,COALESCE(plan,''),COALESCE(plan_fingerprint,''),created,updated,attempts,retry_at,COALESCE(tags,'[]'),error_code`
 
 func scan(r interface{ Scan(...any) error }) (Job, error) {
 	var j Job
 	var tags string
 	err := r.Scan(&j.ID, &j.Library, &j.LibraryID, &j.Path, &j.Status, &j.Progress, &j.Reason, &j.Error, &j.Worker,
-		&j.DurationSec, &j.SizeBefore, &j.SizeAfter, &j.OutputPath, &j.Plan, &j.PlanPrint, &j.Created, &j.Updated, &j.Attempts, &j.RetryAt, &tags)
+		&j.DurationSec, &j.SizeBefore, &j.SizeAfter, &j.OutputPath, &j.Plan, &j.PlanPrint, &j.Created, &j.Updated, &j.Attempts, &j.RetryAt, &tags, &j.ErrorCode)
 	j.Tags = tagsOf(tags)
 	return j, err
 }

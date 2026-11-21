@@ -128,7 +128,7 @@ func (w *Worker) keepAndReplace(ctx context.Context, job jobs.Job, stage *staged
 			// (jobs.DeniedFolder), not a safety check that said no (manager's job 7).
 			return err
 		}
-		return kept("the folder that keeps originals couldn't be made here, so the original was left as it is. Check that shrink-your-shit may write in this folder")
+		return keptUnwritable("the folder that keeps originals couldn't be made here, so the original was left as it is. Check that shrink-your-shit may write in this folder")
 	}
 	hash, err := SampleHash(job.Path)
 	if err != nil {
@@ -137,7 +137,7 @@ func (w *Worker) keepAndReplace(ctx context.Context, job jobs.Job, stage *staged
 	trash, err := trashPath(dir, filepath.Base(job.Path), job.ID)
 	if err != nil {
 		log.Printf("folder for kept originals %s: %v", dir, err)
-		return kept("the folder that keeps originals couldn't be used, so the original was left as it is. Check that shrink-your-shit may write in this folder")
+		return keptUnwritable("the folder that keeps originals couldn't be used, so the original was left as it is. Check that shrink-your-shit may write in this folder")
 	}
 	nst, err := os.Stat(stage.path)
 	if err != nil {

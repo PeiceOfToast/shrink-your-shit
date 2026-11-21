@@ -64,7 +64,7 @@ func TestOriginalWithManyDamagedPicturesIsKept(t *testing.T) {
 	s := newScenario(t)
 	s.encodeStderr = strings.Repeat("[h264 @ 0x55] error while decoding MB 1 2, bytestream -5\n", 50)
 	s.run(Replace)
-	s.assertKept("the original file has errors")
+	s.assertKept("the original file has errors", "source_damaged")
 	st := s.checkStep()
 	if st.Outcome != "failed" || !strings.Contains(st.Result, "the original file has errors") {
 		t.Errorf("check step %+v, want failed with the kept reason", st)
@@ -81,7 +81,7 @@ func TestMissingReferencesCountAsDamagedPictures(t *testing.T) {
 	s := newScenario(t)
 	s.encodeStderr = strings.Repeat("[h264 @ 0x55] reference picture missing during reorder\n", 30)
 	s.run(Replace)
-	s.assertKept("the original file has errors")
+	s.assertKept("the original file has errors", "source_damaged")
 	if !s.logHas(1, "check", "Errors: 30 damaged pictures of 2500 frames (1.20%); up to 1% are tolerated") {
 		t.Error("thirty missing-reference lines should be thirty damaged pictures")
 	}
@@ -134,7 +134,7 @@ func TestMoovAtomMissingIsKeptWhateverElse(t *testing.T) {
 	s := newScenario(t)
 	s.encodeStderr = "[mov,mp4 @ 0x1] moov atom not found"
 	s.run(Replace)
-	s.assertKept("the original file has errors")
+	s.assertKept("the original file has errors", "source_damaged")
 	if st := s.checkStep(); st.Outcome != "failed" {
 		t.Errorf("check step %+v, want failed", st)
 	}

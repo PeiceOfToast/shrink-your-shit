@@ -364,24 +364,28 @@ func v2JobItem(store *jobs.Store, it map[string]any, row jobs.FileRow, card stri
 	}
 	// reason: {code, message} | null, as every v2 reason (v1's item keeps the skip code as a string):
 	// a skip's code and words, or a failure's, kept original's or retry's (ui-shop 23:27Z)
+	status := jobs.Status(row.Status)
 	switch {
 	case card == jobs.CardSkipped:
 		it["reason"] = map[string]string{"code": row.Reason, "message": it["detail"].(string)}
 	case row.ErrorCode != "" && (card == jobs.CardFailed || card == jobs.CardUnprocessed && row.RetryAt != ""):
-		msg := row.Error // a retry keeps its own words; a failure gets design's sentence (11-13 E)
-		if card == jobs.CardFailed {
+		code, msg := failureCode(store, row.JobID, row.ErrorCode), row.Error // a retry keeps its own words
+		switch status {
+		case jobs.Failed: // design's code and sentence, as the detail shows a failed job (11-13 E)
 			msg = failureMessage(store, row.JobID, row.ErrorCode, row.Path, row.OutputPath, row.Error)
+		case jobs.Kept: // a kept job reads as its detail does: the stored code and words
+			code = row.ErrorCode
 		}
-		it["reason"] = map[string]string{"code": failureCode(store, row.JobID, row.ErrorCode), "message": msg}
+		it["reason"] = map[string]string{"code": code, "message": msg}
 	default:
 		it["reason"] = nil
 	}
 	// user review 11-13 item E: why a failed job failed, and whether its log is in the database
-	it["failure"], it["logState"] = nil, logState(store, row.JobID, jobs.Status(row.Status), row.ErrorCode)
+	it["failure"], it["logState"] = nil, logState(store, row.JobID, status, row.ErrorCode)
 	if jobs.Status(row.Status) == jobs.Kept { // the new file was refused and the original stayed: "Original kept"
 		it["newFileRefused"] = true
 	}
-	if card == jobs.CardFailed {
+	if card == jobs.CardFailed && status == jobs.Failed { // the failure panel is for a failed job, as the detail's is
 		it["failure"] = failureView(store, row.JobID, row.ErrorCode, row.Path, row.OutputPath, row.Error)
 	}
 	switch card {

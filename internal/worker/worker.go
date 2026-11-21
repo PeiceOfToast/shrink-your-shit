@@ -1048,7 +1048,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			return "", checkFailed(pctx, "reading the original", perr)
 		}
 		log.Printf("worker %s: %s: %v", w.ID, job.Path, perr)
-		return "", kept("the original can't be read any more, so it was left as it is")
+		return "", keptSourceMissing("the original can't be read any more, so it was left as it is")
 	}
 	w.inputLines(job.ID, srcPath, before, src)
 	if err := w.preflight(srcPath, before.Size()); err != nil {
@@ -1683,7 +1683,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 				w.Queue.AppendLogLine(job.ID, 1, secOutput, jobs.LevelInfo, "check", l)
 			}
 			log.Printf("worker %s: %s: the original has errors: %s", w.ID, job.Path, strings.Join(dmg.Lines, " | "))
-			return "", kept(reason)
+			return "", keptSourceDamaged("%s", reason)
 		}
 		w.Queue.AppendLogLine(job.ID, 0, secOutput, jobs.LevelWarning, "app", fmt.Sprintf("The original has a little damage (%s, up to %d%% are tolerated); converted anyway.",
 			damagedShare(dmg.Pictures, frames), maxDamagedPercent))
@@ -2146,16 +2146,16 @@ func sourceUnchanged(path string, before os.FileInfo, beforeState media.State) e
 		return failed(goneWords, err)
 	}
 	if err != nil || !os.SameFile(now, before) || now.Size() != before.Size() || !now.ModTime().Equal(before.ModTime()) {
-		return retryable(kept("the original file changed while it was being converted, so the new file is out of date"), retryGeneral) // still being written
+		return retryable(keptNotRun("the original file changed while it was being converted, so the new file is out of date"), retryGeneral) // still being written
 	}
 	// media.FileState too: on Windows it carries the change time, which the Stat above does not (an edit
 	// that keeps the size and puts the modification time back); unreadable now counts as changed
 	if st, err := readSourceState(path, now); err != nil || !st.Same(beforeState) {
-		return retryable(kept("the original file changed while it was being converted, so the new file is out of date"), retryGeneral) // still being written
+		return retryable(keptNotRun("the original file changed while it was being converted, so the new file is out of date"), retryGeneral) // still being written
 	}
 	if b, ok := media.ChangeTime(before); ok {
 		if n, ok := media.ChangeTime(now); !ok || !n.Equal(b) {
-			return retryable(kept("the original file changed while it was being converted, so the new file is out of date"), retryGeneral) // still being written
+			return retryable(keptNotRun("the original file changed while it was being converted, so the new file is out of date"), retryGeneral) // still being written
 		}
 	}
 	if media.LinkCount(path, now) > 1 { // another name appeared while converting (Windows has no ctime to see it)
