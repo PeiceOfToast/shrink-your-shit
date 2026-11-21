@@ -184,6 +184,71 @@ func builtinFor(name, field string) (Builtin, bool) {
 	return Builtin{}, false
 }
 
+// PublishedNames are the {{name}} variables the steps of d set for the steps after them (FB1b): a
+// "Set a variable" step's name, and every card's declared Publishes.
+func PublishedNames(d Doc) []string {
+	var out []string
+	for _, n := range d.Nodes {
+		if n.Type == TypeSetVariable {
+			if name, _ := n.Config["name"].(string); name != "" {
+				out = append(out, name)
+			}
+		}
+		if def, ok := Definition(n.Type); ok {
+			for _, p := range def.Publishes {
+				out = append(out, p.Name)
+			}
+		}
+	}
+	return out
+}
+
+// CheckPublished checks the names steps set and read (FB1b): a "Set a variable" name follows the
+// pattern and is not one the server sets; a "Check a variable" reads a name this workflow has.
+func CheckPublished(d Doc) []Issue {
+	var out []Issue
+	known := append(PublishedNames(d), builtinNames()...)
+	for _, v := range d.Variables {
+		known = append(known, v.Name)
+	}
+	for _, n := range d.Nodes {
+		switch n.Type {
+		case TypeSetVariable:
+			name, _ := n.Config["name"].(string)
+			switch {
+			case !NamePattern.MatchString(name):
+				out = append(out, Issue{Code: "invalid_variable_name", Severity: "error", NodeID: n.ID, ConfigPath: "/name", Field: "name", Name: name,
+					Message: fmt.Sprintf("In '%s', %s can't be a variable name: use lowercase letters, numbers and _, starting with a letter, up to 40 characters.", nodeName(n), nameOrEmpty(name))})
+			case BuiltinName(name):
+				out = append(out, Issue{Code: "builtin_variable_name", Severity: "error", NodeID: n.ID, ConfigPath: "/name", Field: "name", Name: name,
+					Message: fmt.Sprintf("In '%s', {{%s}} is set by the server already, so a step can't set it.", nodeName(n), name)})
+			}
+		case TypeCheckVariable:
+			name, _ := n.Config["variable"].(string)
+			if name != "" && !slices.Contains(known, name) {
+				i := Issue{Code: "unknown_variable", Severity: "error", NodeID: n.ID, ConfigPath: "/variable", Field: "variable", Name: name,
+					Message: fmt.Sprintf("In '%s', {{%s}} is not a variable of this workflow, so the question would always answer No. ", nodeName(n), name)}
+				if s := closestName(name, known); s != "" {
+					i.Suggest = s
+					i.Message += fmt.Sprintf("Did you mean {{%s}}?", s)
+				} else {
+					i.Message += "Set it with a step before, add it to the workflow, or fix the name."
+				}
+				out = append(out, i)
+			}
+		}
+	}
+	return out
+}
+
+func builtinNames() []string {
+	out := make([]string, 0, len(Builtins))
+	for _, b := range Builtins {
+		out = append(out, b.Name)
+	}
+	return out
+}
+
 // CheckTemplates checks every field that takes {{name}} variables ("x-variables": true in its step's
 // definition): each name must be one this workflow has, and every {{ must be closed. Publish refuses
 // these, so a run never gets a template that would quietly come out wrong: an unknown name becomes
@@ -200,6 +265,7 @@ func CheckTemplates(d Doc) []Issue {
 		}
 		own = append(own, v.Name)
 	}
+	own = append(own, PublishedNames(d)...) // FB1b: what a step before may have set
 	defs := map[string]StepDefinition{}
 	for _, def := range Definitions() {
 		defs[def.Type] = def

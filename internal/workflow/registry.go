@@ -22,7 +22,33 @@ const (
 	TypeLegacy    = "video.legacy_settings"
 	TypeCheck     = "filter.video" // V6a: "Check the file", a branch
 	TypeEnd       = "flow.end"     // V6a: "Leave the file alone", an end with the person's words
+	// FB1b (docs/architecture/flow-builder.md section 2): the first questions, actions and ends.
+	TypeCheckName      = "check.name"          // the file's name or path matches a pattern
+	TypeCheckAge       = "check.age"           // the original was last changed N days ago
+	TypeCheckVariable  = "check.variable"      // a {{name}} is set / equals / contains / more / less
+	TypeCheckLibrary   = "check.library"       // the file comes from one of the chosen libraries
+	TypeCheckHardLinks = "check.hardlinks"     // the original shares its data with another name
+	TypeSetVariable    = "action.set_variable" // sets a {{name}} for the steps after it
+	TypeNote           = "action.note"         // writes a line into the job log
+	TypeFail           = "flow.fail"           // ends the run as failed, the original untouched
 )
+
+// Questions are the step types that answer Yes or No (RunsQuestion); Actions the ones that do one thing
+// before the conversion (RunsAction); Ends the ones that end a run.
+var (
+	Questions = []string{TypeCheck, TypeCheckName, TypeCheckAge, TypeCheckVariable, TypeCheckLibrary, TypeCheckHardLinks}
+	Actions   = []string{TypeSetVariable, TypeNote}
+	Ends      = []string{TypeEnd, TypeFail}
+)
+
+// NotYet are the cards this build offers for drafts but can't run yet (Available false): the worker's
+// call site for them is FB1c, which empties this list. Publish refuses a workflow that uses one.
+var NotYet = map[string]bool{TypeSetVariable: true, TypeNote: true, TypeFail: true}
+
+// IsQuestion, IsAction and IsEnd say what kind of step a type is.
+func IsQuestion(typ string) bool { return slices.Contains(Questions, typ) }
+func IsAction(typ string) bool   { return slices.Contains(Actions, typ) }
+func IsEnd(typ string) bool      { return slices.Contains(Ends, typ) }
 
 // PresetOrder is the Shrink videos preset's chain (design SCREENS V3, steps 1-8).
 var PresetOrder = []string{TypeInput, TypeSkips, TypeConvert, TypeAudio, TypeSubtitles, TypeContainer, TypeVerify, TypeCommit}
@@ -158,7 +184,7 @@ func Definitions() []StepDefinition {
 	}
 	builtin := map[string]string{"kind": "builtin"}
 	def := func(d StepDefinition) StepDefinition {
-		d.TypeVersion, d.FileTypes, d.Source, d.Available = 1, []string{"video"}, builtin, true
+		d.TypeVersion, d.FileTypes, d.Source, d.Available = 1, []string{"video"}, builtin, !NotYet[d.Type]
 		if d.Requires == nil {
 			d.Requires = []string{}
 		}
@@ -290,7 +316,67 @@ func Definitions() []StepDefinition {
 				"size":           described(map[string]any{"type": "integer", "minimum": 0, "title": "File is at least (MB)"}, "0 for any."),
 				"container": described(map[string]any{"type": "array", "title": "File type is one of", "items": enum([]any{"mkv", "mp4", "avi", "mov", "webm", "ts", "m2ts", "wmv", "flv", "mpg"},
 					[]string{"MKV", "MP4", "AVI", "MOV", "WebM", "TS", "M2TS", "WMV", "FLV", "MPG"})}, "Leave empty for any."),
+				// FB1b: seven more facts
+				"bitDepth":         withDefault(enum([]any{0, 8, 10, 12}, []string{"Any", "8-bit", "10-bit", "12-bit"}), 0, "Bit depth", "segmented"),
+				"audioCodec":       described(map[string]any{"type": "array", "title": "Some audio track is one of", "items": enum([]any{"aac", "ac3", "eac3", "dts", "truehd", "flac", "opus", "mp3", "pcm_s16le", "vorbis"}, []string{"AAC", "AC-3", "E-AC-3", "DTS", "TrueHD", "FLAC", "Opus", "MP3", "PCM", "Vorbis"})}, "Leave empty for any."),
+				"minChannels":      described(withDefault(enum([]any{0, 2, 6, 8}, []string{"Any", "Stereo or more", "5.1 or more", "7.1"}), 0, "Audio channels", ""), "Some audio track has at least this many."),
+				"audioLanguage":    described(map[string]any{"type": "array", "title": "Some audio track is in", "items": map[string]any{"type": "string", "maxLength": 3}}, "Language codes such as eng, deu, jpn. Leave empty for any."),
+				"subtitleLanguage": described(map[string]any{"type": "array", "title": "Some subtitle track is in", "items": map[string]any{"type": "string", "maxLength": 3}}, "Language codes such as eng, deu, jpn. Leave empty for any."),
+				"minMinutes":       described(map[string]any{"type": "integer", "minimum": 0, "maximum": 100000, "title": "Running time is at least (minutes)"}, "0 for any."),
+				"chapters":         withDefault(enum([]any{"", "yes", "no"}, []string{"Either", "Has chapters", "No chapters"}), "", "Chapters", "segmented"),
 			}, nil)}),
+		// FB1b questions: each sends the file one of two ways; every condition set must hold for Yes.
+		def(StepDefinition{Type: TypeCheckName, RunsAs: RunsQuestion, Category: "filter", Name: "Check the file name", Icon: "branch", TypeLabel: "Check",
+			Description: "Sends each file one of two ways, by its name or its path.",
+			Inputs:      []Port{in}, Outputs: []Port{yesPort, noPort}, SideEffects: "none",
+			ConfigSchema: object(map[string]any{
+				"where":         withDefault(hinted(enum([]any{"name", "path"}, []string{"The file name", "The whole path"}), []string{"The name with its extension, without its folders.", "The folders and the name."}), "name", "Look at", "segmented"),
+				"match":         withDefault(hinted(enum([]any{"contains", "starts", "ends", "glob", "regex"}, []string{"Contains", "Starts with", "Ends with", "Matches a pattern", "Matches a regular expression"}), []string{"The text appears anywhere.", "The text is at the start.", "The text is at the end.", "A pattern with * and ?, like *.1080p.*", "A regular expression, for people who know them."}), "contains", "How", ""),
+				"pattern":       map[string]any{"type": "string", "title": "Text or pattern", "maxLength": 300, "x-placeholder": "Remux"},
+				"caseSensitive": map[string]any{"type": "boolean", "default": false, "title": "Match upper and lower case exactly"},
+			}, []string{"pattern"})}),
+		def(StepDefinition{Type: TypeCheckAge, RunsAs: RunsQuestion, Category: "filter", Name: "Check the file's age", Icon: "branch", TypeLabel: "Check",
+			Description: "Sends each file one of two ways, by when it was last changed.",
+			Inputs:      []Port{in}, Outputs: []Port{yesPort, noPort}, SideEffects: "none",
+			ConfigSchema: object(map[string]any{
+				"olderDays":   described(map[string]any{"type": "integer", "minimum": 0, "maximum": 36500, "default": 0, "title": "Last changed at least this many days ago"}, "0 for any."),
+				"youngerDays": described(map[string]any{"type": "integer", "minimum": 0, "maximum": 36500, "default": 0, "title": "Last changed at most this many days ago"}, "0 for any."),
+			}, nil)}),
+		def(StepDefinition{Type: TypeCheckVariable, RunsAs: RunsQuestion, Category: "filter", Name: "Check a variable", Icon: "branch", TypeLabel: "Check",
+			Description: "Sends each file one of two ways, by a variable's value: one the server sets, one of this workflow's, or one a step before set.",
+			Inputs:      []Port{in}, Outputs: []Port{yesPort, noPort}, SideEffects: "none",
+			ConfigSchema: object(map[string]any{
+				"variable": map[string]any{"type": "string", "title": "Variable", "maxLength": 40, "x-placeholder": "resolution", "x-variableName": true},
+				"op":       withDefault(enum([]any{"set", "unset", "equals", "contains", "more", "less"}, []string{"Has a value", "Has no value", "Equals", "Contains", "Is more than", "Is less than"}), "equals", "Test", ""),
+				"value":    templated(described(map[string]any{"type": "string", "title": "Value", "maxLength": 300}, "A value, or a variable like {{resolution}}.")),
+			}, []string{"variable"})}),
+		def(StepDefinition{Type: TypeCheckLibrary, RunsAs: RunsQuestion, Category: "filter", Name: "From this library", Icon: "branch", TypeLabel: "Check",
+			Description: "Sends each file one of two ways, by the library it came from.",
+			Inputs:      []Port{in}, Outputs: []Port{yesPort, noPort}, SideEffects: "none",
+			ConfigSchema: object(map[string]any{
+				"libraries": map[string]any{"type": "array", "title": "Libraries", "items": map[string]any{"type": "string"}, "x-ui": map[string]any{"widget": "libraries"}},
+			}, []string{"libraries"})}),
+		def(StepDefinition{Type: TypeCheckHardLinks, RunsAs: RunsQuestion, Category: "filter", Name: "Shares its data with another file", Icon: "branch", TypeLabel: "Check",
+			Description: "Yes when the original has another name on the same disk (a hard link), so converting it would free no space.",
+			Inputs:      []Port{in}, Outputs: []Port{yesPort, noPort}, SideEffects: "none"}),
+		// FB1b actions: one thing each, before the conversion; the file is not touched.
+		def(StepDefinition{Type: TypeSetVariable, RunsAs: RunsAction, Category: "flow", Name: "Set a variable", Icon: "variable", TypeLabel: "Action",
+			Description: "Sets a {{name}} the steps after it can read: a value, or a template of other variables.",
+			Inputs:      []Port{in}, Outputs: []Port{success}, SideEffects: "none",
+			ConfigSchema: object(map[string]any{
+				"name":  map[string]any{"type": "string", "title": "Name", "maxLength": 40, "x-placeholder": "profile", "x-variableName": true},
+				"value": templated(described(map[string]any{"type": "string", "title": "Value", "maxLength": 1000, "x-placeholder": "{{title}} ({{resolution}})"}, "A value, or a template of other variables, like {{title}} ({{resolution}}).")),
+			}, []string{"name"})}),
+		def(StepDefinition{Type: TypeNote, RunsAs: RunsAction, Category: "flow", Name: "Add a note to the log", Icon: "note", TypeLabel: "Action",
+			Description: "Writes a line into the job log at this point. Variables are filled in.",
+			Inputs:      []Port{in}, Outputs: []Port{success}, SideEffects: "none",
+			ConfigSchema: object(map[string]any{
+				"text": templated(described(map[string]any{"type": "string", "title": "Note", "maxLength": 1000}, "Variables are filled in, like {{title}} or {{resolution}}.")),
+			}, []string{"text"})}),
+		def(StepDefinition{Type: TypeFail, RunsAs: RunsEnd, Category: "flow", Name: "Stop as failed", Icon: "stop", TypeLabel: "End",
+			Description: "The run ends as failed with the reason below, and the original is left as it is.",
+			Inputs:      []Port{in}, Outputs: []Port{}, SideEffects: "none",
+			ConfigSchema: object(map[string]any{"reason": withDefault(map[string]any{"type": "string", "maxLength": 200}, "Stopped by this workflow.", "Reason shown", "")}, nil)}),
 		def(StepDefinition{Type: TypeEnd, RunsAs: RunsEnd, Category: "flow", Name: "Leave the file alone", Icon: "stop", TypeLabel: "End",
 			Description: "The file is left as it is, and the reason below shows in its history.",
 			Inputs:      []Port{in}, Outputs: []Port{}, SideEffects: "none",

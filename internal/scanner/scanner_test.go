@@ -730,7 +730,7 @@ func TestBranchesAtScan(t *testing.T) {
 	probe := `{"streams":[{"codec_type":"video","codec_name":"h264","width":3840,"height":2160,"bit_rate":"30000000"}],"format":{"duration":"60","size":"5"}}`
 	s, st, lib, f := setup(t, probe)
 	slider := rules.SliderTemplate(3)
-	check := rules.VideoCheck{Name: "Is it 4K?", Resolution: 2160}
+	check := rules.Question{VideoCheck: rules.VideoCheck{Name: "Is it 4K?", Resolution: 2160}}
 	tm := rules.Template{Kind: rules.KindBranches, Branches: &[]rules.Branch{
 		{Checks: []rules.BranchCheck{{NodeID: "c1", Port: "match", Check: check}}, Then: &slider, Path: []string{"in", "c1", "convert", "save"}},
 		{Checks: []rules.BranchCheck{{NodeID: "c1", Port: "else", Check: check}}, End: "Not 4K: left for later.", Path: []string{"in", "c1", "end"}},

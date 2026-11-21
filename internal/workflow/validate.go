@@ -5,7 +5,9 @@ package workflow
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -35,20 +37,80 @@ type AddStep struct {
 	After   string `json:"after"`  // the node it would be added after, when Addable
 }
 
-// stepPlace is the editor's rule for a step now. W10 (moving and deleting steps) replaces this with
-// the real rules; until then every step's place is set.
-func stepPlace() StepPlace {
+// stepPlace is the editor's rule for a step: the steps that convert keep their order until W10; a
+// question, an action or an end (FB1b) can be moved and removed.
+func stepPlace(n Node) StepPlace {
+	if IsQuestion(n.Type) || IsAction(n.Type) || IsEnd(n.Type) {
+		return StepPlace{}
+	}
 	return StepPlace{FixedPlace: true, FixedReason: "The steps that convert run in a set order for now, so they can't be moved or deleted. To skip this step, turn it off."}
 }
 
-// addSteps is the add-step menu's rule now. W10 replaces this with the compile rules; until then a
-// workflow takes no new steps.
-func addSteps() map[string]AddStep {
+// addSteps is the add-step menu's rule: a question or an action (FB1b) goes before the steps that
+// convert, after the last such step already there (or the input); an end is placed in the graph only;
+// the steps that convert can't be added until W10. after is the node the editor inserts behind.
+func addSteps(d Doc) map[string]AddStep {
+	after := ""
+	if order, ok := mainPath(d); ok {
+		for _, n := range order {
+			if n.Type == TypeInput || IsQuestion(n.Type) || IsAction(n.Type) {
+				after = n.ID
+			}
+		}
+	}
 	out := map[string]AddStep{}
 	for _, def := range Definitions() {
-		out[def.Type] = AddStep{Addable: false, Reason: "Can't run among the steps that convert yet."}
+		switch {
+		case def.ReadOnly:
+			out[def.Type] = AddStep{Addable: false, Reason: "Only an earlier install's workflow has this step."}
+		case IsEnd(def.Type): // an end has no Next, so the steps view can't chain it; the graph puts it on a No or a Didn't work
+			out[def.Type] = AddStep{Addable: false, Reason: "Goes on a question's No, or on a step's Didn't work, in the graph."}
+		case IsQuestion(def.Type) || IsAction(def.Type):
+			if after == "" {
+				out[def.Type] = AddStep{Addable: false, Reason: "This workflow has no Library files step to add it after."}
+			} else {
+				out[def.Type] = AddStep{Addable: true, After: after}
+			}
+		default:
+			out[def.Type] = AddStep{Addable: false, Reason: "Can't run among the steps that convert yet."}
+		}
 	}
 	return out
+}
+
+// mainPath is the chain from the input along Next and Yes ports (the steps view's rows; FB1b): ok is
+// false when there is no input or the chain loops.
+func mainPath(d Doc) ([]Node, bool) {
+	byID := map[string]Node{}
+	for _, n := range d.Nodes {
+		byID[n.ID] = n
+	}
+	next := map[string]string{}
+	for _, e := range d.Edges {
+		if e.FromPort == "success" || e.FromPort == "match" {
+			next[e.From] = e.To
+		}
+	}
+	start := ""
+	for _, n := range d.Nodes {
+		if n.Type == TypeInput {
+			start = n.ID
+		}
+	}
+	if start == "" {
+		return nil, false
+	}
+	var order []Node
+	seen := map[string]bool{}
+	for id := start; id != ""; id = next[id] {
+		n, ok := byID[id]
+		if !ok || seen[id] {
+			return nil, false
+		}
+		seen[id] = true
+		order = append(order, n)
+	}
+	return order, true
 }
 
 // Errors reports whether any issue blocks Publish.
@@ -72,11 +134,14 @@ func Validate(d Doc) Result {
 		add(Issue{Code: "unknown_schema_version", Message: fmt.Sprintf("This workflow's format (version %d) is not one this version reads.", d.SchemaVersion)})
 		return r
 	}
-	r.AddSteps = addSteps()
+	r.AddSteps = addSteps(d)
 	for _, i := range CheckVariables(d) {
 		add(i)
 	}
 	for _, i := range CheckTemplates(d) {
+		add(i)
+	}
+	for _, i := range CheckPublished(d) {
 		add(i)
 	}
 	defs := map[string]StepDefinition{}
@@ -91,7 +156,7 @@ func Validate(d Doc) Result {
 			continue
 		}
 		byID[n.ID] = n
-		r.StepPlaces[n.ID] = stepPlace()
+		r.StepPlaces[n.ID] = stepPlace(n)
 		def, ok := defs[n.Type]
 		if !ok {
 			add(Issue{Code: "unknown_node_type", NodeID: n.ID, Message: fmt.Sprintf("%q is not a step this version has.", n.Type)})
@@ -106,8 +171,17 @@ func Validate(d Doc) Result {
 		if def.AlwaysOn && !n.Enabled {
 			add(Issue{Code: "invalid_config", NodeID: n.ID, Message: def.Name + " can't be turned off."})
 		}
+		if !def.Available { // a card this build can't run yet (FB1b): a draft may hold it, Publish refuses it
+			add(Issue{Code: "not_runnable_yet", NodeID: n.ID, Message: "'" + nodeName(n) + "' can't run in this version. Remove it, or keep the workflow as a draft."})
+		}
 		for _, i := range checkConfig(n, def) {
 			add(i)
+		}
+		if n.Type == TypeCheckName && strOf(n.Config, "match", "contains") == "regex" { // review2-531 P3: a pattern that can't compile would answer No for every file
+			if _, err := regexp.Compile(strOf(n.Config, "pattern", "")); err != nil {
+				add(Issue{Code: "invalid_config", NodeID: n.ID, ConfigPath: "/pattern", Field: "pattern",
+					Message: fmt.Sprintf("In '%s', the regular expression can't be read: %v.", nodeName(n), err)})
+			}
 		}
 		r.StepSummaries[n.ID] = summary(n)
 	}
@@ -134,6 +208,9 @@ func Validate(d Doc) Result {
 			continue
 		}
 		out[e.From] = append(out[e.From], e.To)
+		for _, i := range phaseIssue(from, to, e, defs) {
+			add(i)
+		}
 	}
 	// reachable from the trigger, and no cycle (loop nodes come later)
 	for _, n := range d.Nodes {
@@ -175,6 +252,26 @@ func Validate(d Doc) Result {
 		}
 	}
 	return r
+}
+
+// phaseIssue says when an edge runs a step in a phase it can't sit in (FB1b): a question, an action
+// or an end after a step that converts, checks or saves. The before phase is the only one with run
+// cards in this version; the after phase opens in FB2. The compile refuses the same shapes with
+// branch_in_conversion; this names the step while editing, before a compile is tried.
+func phaseIssue(from, to Node, e Edge, defs map[string]StepDefinition) []Issue {
+	fd, td := defs[from.Type], defs[to.Type]
+	if fd.RunsAs == "" || td.RunsAs == "" {
+		return nil
+	}
+	later := fd.RunsAs == RunsPlan || fd.RunsAs == RunsVerify || fd.RunsAs == RunsCommit
+	if !later || e.FromPort == "error" || e.FromPort == "skipped" { // a failure may still lead to an end (V6b)
+		return nil
+	}
+	if td.RunsAs == RunsQuestion || td.RunsAs == RunsAction || (td.RunsAs == RunsEnd && fd.RunsAs != RunsCommit) { // an end follows the save, or a Didn't work; never a Next inside the conversion
+		return []Issue{{Code: "wrong_phase", Severity: "error", NodeID: to.ID, EdgeID: e.ID,
+			Message: "'" + nodeName(to) + "' comes after '" + nodeName(from) + "', but it belongs before the steps that convert. Move it up, or remove the link."}}
+	}
+	return nil
 }
 
 // checkConfig checks n's config against its definition's schema, the one the registry serves: types
@@ -393,8 +490,122 @@ func summary(n Node) string {
 		return "Save next to each library · originals untouched"
 	case TypeLegacy:
 		return "Settings from an earlier install, run exactly as before"
+	case TypeCheck:
+		return "Only if " + questionWords(n)
+	case TypeCheckName:
+		how := map[string]string{"contains": "contains", "starts": "starts with", "ends": "ends with", "glob": "matches", "regex": "matches the expression"}[strOf(c, "match", "contains")]
+		what := map[string]string{"name": "the file name", "path": "the path"}[strOf(c, "where", "name")]
+		return "Only if " + what + " " + how + " “" + strOf(c, "pattern", "") + "”"
+	case TypeCheckAge:
+		o, y := intOf(c, "olderDays", 0), intOf(c, "youngerDays", 0)
+		switch {
+		case o > 0 && y > 0:
+			return "Only if last changed " + strconv.Itoa(o) + " to " + strconv.Itoa(y) + " days ago"
+		case o > 0:
+			return "Only if last changed at least " + strconv.Itoa(o) + " days ago"
+		case y > 0:
+			return "Only if last changed in the last " + strconv.Itoa(y) + " days"
+		}
+		return "Only if (no age set)"
+	case TypeCheckVariable:
+		op := map[string]string{"set": "has a value", "unset": "has no value", "equals": "is “" + strOf(c, "value", "") + "”", "contains": "contains “" + strOf(c, "value", "") + "”",
+			"more": "is more than " + strOf(c, "value", ""), "less": "is less than " + strOf(c, "value", "")}[strOf(c, "op", "equals")]
+		return "Only if {{" + strOf(c, "variable", "") + "}} " + op
+	case TypeCheckLibrary:
+		return "Only if the file is from one of " + strconv.Itoa(len(listOf(c, "libraries"))) + " libraries"
+	case TypeCheckHardLinks:
+		return "Only if the file shares its data with another name"
+	case TypeSetVariable:
+		return "Set {{" + strOf(c, "name", "") + "}} = “" + strOf(c, "value", "") + "”"
+	case TypeNote:
+		return "Note: “" + strOf(c, "text", "") + "”"
+	case TypeEnd:
+		return strOf(c, "reason", "Left alone by this workflow.")
+	case TypeFail:
+		return "Failed: " + strOf(c, "reason", "Stopped by this workflow.")
 	}
 	return ""
+}
+
+// questionWords are a "Check the file" step's conditions in plain words, for its summary.
+func questionWords(n Node) string {
+	c := n.Config
+	var parts []string
+	if l := listOf(c, "codec"); len(l) > 0 {
+		parts = append(parts, "the video is "+strings.Join(l, " or "))
+	}
+	if v := intOf(c, "minBitrateKbps", 0); v > 0 {
+		parts = append(parts, "the bitrate is at least "+strconv.Itoa(v)+" kbps")
+	}
+	if v := intOf(c, "resolution", 0); v > 0 {
+		parts = append(parts, "the resolution is at least "+strconv.Itoa(v)+"p")
+	}
+	if v := strOf(c, "hdr", ""); v != "" {
+		parts = append(parts, map[string]string{"yes": "it is HDR", "no": "it is not HDR"}[v])
+	}
+	if v := strOf(c, "dolbyVision", ""); v != "" {
+		parts = append(parts, map[string]string{"yes": "it is Dolby Vision", "no": "it is not Dolby Vision"}[v])
+	}
+	if v := intOf(c, "fps", 0); v > 0 {
+		parts = append(parts, "the frame rate is at least "+strconv.Itoa(v))
+	}
+	if v := intOf(c, "size", 0); v > 0 {
+		parts = append(parts, "the file is at least "+strconv.Itoa(v)+" MB")
+	}
+	if l := listOf(c, "container"); len(l) > 0 {
+		parts = append(parts, "the file type is "+strings.Join(upper(l), " or "))
+	}
+	if v := intOf(c, "bitDepth", 0); v > 0 {
+		parts = append(parts, "the picture is "+strconv.Itoa(v)+"-bit")
+	}
+	if l := listOf(c, "audioCodec"); len(l) > 0 {
+		parts = append(parts, "some audio is "+strings.Join(upper(l), " or "))
+	}
+	if v := intOf(c, "minChannels", 0); v > 0 {
+		parts = append(parts, "some audio has at least "+strconv.Itoa(v)+" channels")
+	}
+	if l := listOf(c, "audioLanguage"); len(l) > 0 {
+		parts = append(parts, "some audio is in "+strings.Join(l, " or "))
+	}
+	if l := listOf(c, "subtitleLanguage"); len(l) > 0 {
+		parts = append(parts, "some subtitle is in "+strings.Join(l, " or "))
+	}
+	if v := intOf(c, "minMinutes", 0); v > 0 {
+		parts = append(parts, "it runs at least "+strconv.Itoa(v)+" min")
+	}
+	if v := strOf(c, "chapters", ""); v != "" {
+		parts = append(parts, map[string]string{"yes": "it has chapters", "no": "it has no chapters"}[v])
+	}
+	if len(parts) == 0 {
+		return "(no condition set)"
+	}
+	return strings.Join(parts, " and ")
+}
+
+// upper is each of l in upper case (codec and file type names).
+func upper(l []string) []string {
+	out := make([]string, len(l))
+	for i, s := range l {
+		out[i] = strings.ToUpper(s)
+	}
+	return out
+}
+
+// listOf is a config list as strings (a Doc made here holds []string; one read from JSON holds []any).
+func listOf(m map[string]any, k string) []string {
+	switch v := m[k].(type) {
+	case []string:
+		return v
+	case []any:
+		var out []string
+		for _, x := range v {
+			if s, ok := x.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // qualityWords is a slider position in the step summary: "Balanced quality" (design SCREENS V3), but a
