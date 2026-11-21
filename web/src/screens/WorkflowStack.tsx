@@ -3,7 +3,7 @@
 // words and problems come from the server's validate, asked again shortly after each change. Not here: drag to reorder
 // (W11's handle, behind a flag) and the graph's keyboard moves, Test run (V5), History, Export, Open graph (V4).
 import { PageHead } from "../PageHead";
-import { Component, Fragment, createContext, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { Component, Fragment, createContext, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
 import { deleteNode, groupOf, insertAfter, insertQuestion, isQuestion, moveNode, newNode, order, otherwiseOf, setOtherwise, type Otherwise } from "../stepEdits"; // the steps in running order: a property of the document, not data
@@ -55,15 +55,17 @@ function SrtFiles() {
 // other problem. The flow builder owns this screen (manager, 02:10Z).
 const isRef = (v: unknown) => typeof v === "string" && /^\{\{[a-z][a-z0-9_]*\}\}$/.test(v);
 const refName = (v: unknown) => (isRef(v) ? (v as string).slice(2, -2) : "");
-function RefPick({ fid, title, value, wf, set, back }: { fid: string; title: string; value: unknown; wf: string; set: (v: unknown) => void; back: () => void }) {
+function RefPick({ fid, title, value, wf, set, back, selectRef }: { fid: string; title: string; value: unknown; wf: string; set: (v: unknown) => void; back: () => void; selectRef: RefObject<HTMLSelectElement | null> }) {
   const vl = useData(() => varListFor(wf, true), [wf]).data, own = useContext(OwnVars);
-  const vars = vl ? withOwn(vl.variables, own) : [], groups = [...new Set(vars.map((v) => v.group))];
+  const vars = vl ? withOwn(vl.variables, own) : [], groups = [...new Set(vars.map((v) => v.group))], cur = refName(value);
+  const known = vars.some((v) => v.name === cur);
   return (
     <div className="field">
       <label htmlFor={fid}>{title}</label>
       <div className="row nw" style={{ gap: 8 }}>
-        <select id={fid} className="input" value={refName(value)} aria-describedby={fid + "-ref"} onChange={(e) => set(e.target.value ? "{{" + e.target.value + "}}" : "")}>
+        <select ref={selectRef} id={fid} className="input" value={cur} aria-describedby={fid + "-ref"} onChange={(e) => { const next = e.target.value ? "{{" + e.target.value + "}}" : ""; if (next !== value) set(next); }}>
           <option value="">Choose a variable…</option>
+          {cur && !known && <option value={cur}>{"{{" + cur + "}}"} · not a variable here</option>}
           {groups.map((g) => <optgroup key={g} label={g}>{vars.filter((v) => v.group === g).map((v) => <option key={v.name} value={v.name}>{"{{" + v.name + "}}"}{v.value != null && v.value !== "" ? " · " + v.value : ""}</option>)}</optgroup>)}
         </select>
         <button className="btn sm ghost nowrap" type="button" onClick={back}>Type a value instead</button>
@@ -76,11 +78,22 @@ function Field(props: { id: string; name: string; s: JSONSchema; value: unknown;
   const { id, name, s, value, set, wf } = props;
   const title = (s.title as string) ?? name.charAt(0).toUpperCase() + name.slice(1).replace(/([A-Z])/g, " $1").toLowerCase(), fid = id + "-" + name;
   const [refMode, setRefMode] = useState(false), typed = s["x-variableRef"] === true;
-  if (typed && (refMode || isRef(value))) return <RefPick fid={fid} title={title} value={value} wf={wf} set={set} back={() => { setRefMode(false); set(s.default); }} />;
+  // ui-shop review #559: the typed value is kept across a round trip (F1), nothing is written when nothing changes (F2),
+  // and focus follows the mode switch (F3): the picker after "Use a variable", the control (or the link) after "Type a value instead"
+  const typedValue = useRef<unknown>(undefined), pick = useRef<HTMLSelectElement>(null), link = useRef<HTMLButtonElement>(null);
+  const [focusTyped, setFocusTyped] = useState(0);
+  useEffect(() => { if (refMode) pick.current?.focus(); }, [refMode]);
+  useEffect(() => { if (focusTyped) (document.getElementById(fid) as HTMLElement | null ?? link.current)?.focus(); }, [focusTyped, fid]);
+  const inRef = typed && (refMode || isRef(value));
+  if (inRef) return <RefPick fid={fid} title={title} value={value} wf={wf} set={set} selectRef={pick} back={() => {
+    const restore = typedValue.current !== undefined ? typedValue.current : s.default;
+    setRefMode(false); setFocusTyped((n) => n + 1);
+    if (isRef(value) || value === "") { if (restore !== value) set(restore); } // a plain value already there is left as it is
+  }} />;
   return (
     <>
       <Control {...props} />
-      {typed && <button className="linkbtn sm" type="button" onClick={() => { setRefMode(true); set(""); }} aria-label={"Use a variable for " + title}>Use a variable</button>}
+      {typed && <button ref={link} className="linkbtn sm" type="button" onClick={() => { typedValue.current = value; setRefMode(true); }} aria-label={"Use a variable for " + title}>Use a variable</button>}
     </>);
 }
 
