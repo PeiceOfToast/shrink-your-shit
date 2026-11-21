@@ -5,6 +5,7 @@ package jobs
 import (
 	"database/sql"
 	"errors"
+	"log"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
@@ -32,6 +33,10 @@ func (s *Store) WithHandoffs(t rules.Template) rules.Template {
 	return rules.WithHandoffs(t, s.handoffLookup())
 }
 
+// handoffLookup reads a hand-over's target as it would run now (the scope rule, review-579): a target
+// whose typed settings name a variable is compiled from its published document with the server's global
+// values as they are now, the way TemplateFor does for the target's own jobs; a file.* or source.* value
+// stays a reference (there is no file here). A target without such a reference is its template as published.
 func (s *Store) handoffLookup() rules.HandoffLookup {
 	return func(id int64) (rules.Template, string, bool) {
 		var status string
@@ -41,6 +46,16 @@ func (s *Store) handoffLookup() rules.HandoffLookup {
 		f, err := s.GetFlow(id)
 		if err != nil {
 			return rules.Template{}, "", false
+		}
+		if rev, ok, rerr := s.LatestRevision(id); rerr == nil && ok && workflow.HasRefs(rev.Doc) {
+			sc := workflow.Scopes{LeaveFile: true}
+			if g, gerr := s.GlobalVariables(); gerr == nil {
+				sc.Global = workflow.VariableMap(g)
+			}
+			if t, issues := workflow.ToTemplateWith(rev.Doc, f.Template, sc); len(issues) == 0 {
+				return t, f.Name, true
+			}
+			log.Printf("workflow %d: its published settings no longer resolve; a hand-over to it runs the stored template", id)
 		}
 		return f.Template, f.Name, true
 	}

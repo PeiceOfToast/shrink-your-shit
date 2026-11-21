@@ -336,9 +336,11 @@ func ValidateWith(d Doc, s Scopes) Result {
 				add(Issue{Code: "invalid_config", NodeID: n.ID, ConfigPath: "/until", Field: "until", Message: "In '" + nodeName(n) + "', the time must read like 02:00."})
 			}
 		}
-		if n.Type == TypeGoto { // FB4b: a workflow to hand to, by id; the policy checks it is there and published (above)
-			if id, err := strconv.ParseInt(strOf(n.Config, "workflow", ""), 10, 64); err != nil || id <= 0 {
-				add(Issue{Code: "invalid_config", NodeID: n.ID, ConfigPath: "/workflow", Field: "workflow", Message: "In '" + nodeName(n) + "', choose the workflow to hand the file to."})
+		if n.Type == TypeGoto { // FB4b: a workflow to hand to, by id; the policy checks it is there and published (above). An empty one is checkConfig's "needs a value" already.
+			if v := strOf(n.Config, "workflow", ""); v != "" {
+				if id, err := strconv.ParseInt(v, 10, 64); err != nil || id <= 0 {
+					add(Issue{Code: "invalid_config", NodeID: n.ID, ConfigPath: "/workflow", Field: "workflow", Message: "In '" + nodeName(n) + "', choose the workflow to hand the file to."})
+				}
 			}
 		}
 		if n.Type == TypeCheckName && strOf(n.Config, "match", "contains") == "regex" { // review2-531 P3: a pattern that can't compile would answer No for every file

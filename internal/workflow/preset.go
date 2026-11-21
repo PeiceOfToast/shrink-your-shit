@@ -153,7 +153,11 @@ func ToTemplateWith(d Doc, current rules.Template, sc Scopes) (rules.Template, [
 	d = resolved
 	order, ok := straightChain(d)
 	if !ok || hasOnError(d) || hasRunCards(d) { // V6a: checks; V6b: a step's own failure choice; FB1b: actions and ends on the chain
-		return branchTemplate(d)
+		t, issues := branchTemplate(d)
+		if len(issues) == 0 { // FB4b: a hand-over's other workflow lives in the template the store read for the run, never in this document
+			t = rules.KeepHandoffs(t, current)
+		}
+		return t, issues
 	}
 	types := make([]string, len(order))
 	for i, n := range order {

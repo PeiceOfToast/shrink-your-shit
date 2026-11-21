@@ -121,3 +121,35 @@ func handoffDecisions(ds []Decision, hops []Handoff) []Decision {
 	}
 	return append(out, ds[at:]...)
 }
+
+// KeepHandoffs is fresh, a template compiled again from its workflow's document (a file's typed settings
+// resolved: W2), with its hand-over paths taken from expanded, the same workflow as the store read it for
+// the run (WithHandoffs). A path that hands the file on is the same path in both; the other workflow's
+// part lives only in expanded, so it is carried over. A hand-over expanded has no copy of (expanded was
+// never expanded, or the path is new) stays as it is.
+func KeepHandoffs(fresh, expanded Template) Template {
+	if fresh.Branches == nil || expanded.Branches == nil {
+		return fresh
+	}
+	byNode := map[string][]Branch{} // the expanded paths of each hand-over step, in order
+	for _, b := range *expanded.Branches {
+		if len(b.Handoffs) > 0 {
+			byNode[b.Handoffs[0].NodeID] = append(byNode[b.Handoffs[0].NodeID], b)
+		}
+	}
+	out := make([]Branch, 0, len(*fresh.Branches))
+	for _, b := range *fresh.Branches {
+		if b.Goto == 0 {
+			out = append(out, b)
+			continue
+		}
+		if exp, ok := byNode[b.GotoNode]; ok {
+			out = append(out, exp...)
+		} else {
+			out = append(out, b)
+		}
+	}
+	nt := fresh
+	nt.Branches = &out
+	return nt
+}

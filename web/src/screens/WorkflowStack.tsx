@@ -110,7 +110,7 @@ function WorkflowPick({ fid, title, value, set, wf, description }: { fid: string
     <div className="field"><label htmlFor={fid}>{title}</label>
       <select id={fid} className="input" value={value} onChange={(e) => set(e.target.value)} aria-describedby={fid + "-h"}>
         <option value="">Choose a workflow…</option>
-        {value && !known && <option value={value}>{all.data && !failed(all.data) ? "A workflow that isn't published, or isn't there" : "Workflow " + value}</option>}
+        {value && !known && <option value={value}>{value === wf ? "This workflow" : all.data && !failed(all.data) ? "A workflow that isn't published, or isn't there" : "Workflow " + value}</option>}
         {list.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
       </select>
       <span className="hint" id={fid + "-h"}>{list.length === 0 ? "No other workflow is published yet: publish one first, then choose it here." : description ?? ""}</span>
@@ -661,12 +661,19 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
   };
   const undoGone = () => { if (gone) setHist({ ...hist, at: gone.at - 1 }); setGone(null); };
   const endDef = defs.find((x) => x.type === "flow.end"), failDef = defs.find((x) => x.type === "flow.fail"), gotoDef = defs.find((x) => x.type === "flow.goto");
+  // ui-shop review #579: a hand-over's picked workflow is remembered through a switch of Otherwise and back, so an
+  // accidental change doesn't empty the picker (the end step is rebuilt from its defaults by setOtherwise)
+  const lastGoto = useRef<Record<ID, Record<string, unknown>>>({});
   const setElse = (q: Node, k: ElseKind) => {
     if (k === "other") { navigate(`/workflows/${id}/graph?node=${encodeURIComponent(q.id)}`); return; }
     const def = k === "leave" ? endDef : k === "fail" ? failDef : gotoDef;
     if (!def) return setSaid("This server has no such step.");
-    const next = setOtherwise(doc, q, def);
-    if (next !== doc) { edit(next); setSaid(`${nameOf(q)}: when the answer is No, ${k === "leave" ? "the file is left alone" : k === "fail" ? "the run stops as failed" : "the file is handed to another workflow: choose which, under the step"}.`); }
+    const cur = otherwiseOf(doc, q);
+    if (cur.kind === "goto" && cur.node && Object.keys(cur.node.config).length > 0) lastGoto.current[q.id] = cur.node.config;
+    let next = setOtherwise(doc, q, def);
+    const remembered = lastGoto.current[q.id], made = k === "goto" && next !== doc ? otherwiseOf(next, q).node : undefined;
+    if (made && remembered && Object.keys(made.config).length === 0) next = { ...next, nodes: next.nodes.map((n) => (n.id === made.id ? { ...n, config: { ...remembered } } : n)) };
+    if (next !== doc) { edit(next); setSaid(`${nameOf(q)}: when the answer is No, ${k === "leave" ? "the file is left alone" : k === "fail" ? "the run stops as failed" : made && remembered ? "the file is handed to another workflow, the one picked before" : "the file is handed to another workflow: choose which, under the step"}.`); }
   };
   const addStep = (d: StepDefinition, after?: ID) => {
     const question = d.outputs.some((o) => o.outcome === "branch");

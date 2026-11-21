@@ -3,6 +3,7 @@
 package rules
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -118,3 +119,51 @@ func TestWithHandoffs(t *testing.T) {
 		t.Errorf("nil lookup: %+v", g)
 	}
 }
+
+// review-579: a template compiled again from its document (a file's typed settings resolved) keeps the
+// hand-over paths the store expanded for the run; a hand-over the expanded template has no copy of stays as
+// it is. And the hop bound is pinned: a file may be handed on 8 times, not 9.
+func TestKeepHandoffsAndTheHopBound(t *testing.T) {
+	plain := SliderTemplate(2)
+	fresh := Template{Kind: KindBranches, Branches: &[]Branch{
+		{Goto: 2, GotoNode: "g1", Path: []string{"in", "g1"}},
+		{Goto: 3, GotoNode: "g2", Path: []string{"in", "g2"}},
+		{Then: &plain, Path: []string{"in", "conv"}},
+	}}
+	look := func(id int64) (Template, string, bool) {
+		if id == 2 {
+			return plain, "Plain", true
+		}
+		return Template{}, "", false
+	}
+	expanded := WithHandoffs(fresh, look)
+	kept := KeepHandoffs(fresh, expanded)
+	if len(*kept.Branches) != 3 || (*kept.Branches)[0].Goto != 0 || (*kept.Branches)[0].Then == nil || (*kept.Branches)[0].Handoffs[0].Name != "Plain" ||
+		(*kept.Branches)[1].Goto != 3 || (*kept.Branches)[2].Then == nil {
+		t.Errorf("kept: %+v", *kept.Branches)
+	}
+	if k := KeepHandoffs(fresh, plain); k.Branches != fresh.Branches { // nothing expanded: unchanged
+		t.Error("a straight expanded template changes nothing")
+	}
+	// the hop bound: workflow i hands to i+1; the last one converts
+	chain := func(hops int) HandoffLookup {
+		return func(id int64) (Template, string, bool) {
+			if int(id) > hops {
+				return plain, "Last", true
+			}
+			return Template{Kind: KindBranches, Branches: &[]Branch{{Goto: id + 1, GotoNode: "g", Path: []string{"in", "g"}}}}, "W" + strconvItoa(int(id)), true
+		}
+	}
+	first := Template{Kind: KindBranches, Branches: &[]Branch{{Goto: 1, GotoNode: "g0", Path: []string{"in", "g0"}}}}
+	film := media.Info{SizeBytes: 1 << 30, Ext: ".mkv", DurationSec: 100, VideoCodec: "h264", Streams: []media.Stream{{Type: "video", Codec: "h264", Width: 1920, Height: 1080}}}
+	// first → W1 → … → W7 → Last: 8 hand-overs in all
+	if p := WithHandoffs(first, chain(7)).CompileWith(film, Facts{}); p.Skip != "" || len(p.Decisions) != MaxHandoffs {
+		t.Errorf("8 hand-overs should pass: skip %q, %d decisions", p.Skip, len(p.Decisions))
+	}
+	// one more, and the run stops as failed and says so
+	if p := WithHandoffs(first, chain(8)).CompileWith(film, Facts{}); !p.Fail || !strings.Contains(p.Skip, "more than 8 times") {
+		t.Errorf("9 hand-overs should fail: %+v", p)
+	}
+}
+
+func strconvItoa(n int) string { return fmt.Sprint(n) }
