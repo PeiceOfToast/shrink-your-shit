@@ -64,6 +64,17 @@ func TestV2Overview(t *testing.T) {
 		len(o.Workers) != 1 || len(o.Workers[0].Jobs) != 1 {
 		t.Errorf("active, workers %s", body)
 	}
+	var raw struct {
+		Active []map[string]any `json:"active"`
+	}
+	if err := json.Unmarshal([]byte(body), &raw); err != nil || len(raw.Active) != 1 {
+		t.Fatalf("active %s", body)
+	}
+	for _, k := range []string{"speed", "fps", "stage"} {
+		if _, ok := raw.Active[0][k]; !ok {
+			t.Errorf("active entry has no %q key: %s", k, body)
+		}
+	}
 	if len(o.Libraries) != 1 {
 		t.Fatalf("%s", body)
 	}

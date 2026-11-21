@@ -225,8 +225,8 @@ func Definitions() []StepDefinition {
 		def(StepDefinition{Type: TypeSkips, RunsAs: RunsPlan, Category: "filter", Name: "Leave some files alone", Icon: "filter", TypeLabel: "Filter",
 			Description: "Skips Dolby Vision files, files already in this format, and AV1 or VP9 videos.",
 			Inputs:      []Port{in}, Outputs: []Port{success, skipped}, AlwaysOn: true, RunsWith: encodeSegment, SideEffects: "none",
-			ConfigSchema: object(map[string]any{"includeDolbyVision": map[string]any{"type": "boolean", "default": false,
-				"title": "Include Dolby Vision files", "description": "Off: Dolby Vision files are left as they are. On: they become HDR10 and the Dolby Vision layer is removed. Some Dolby Vision files (profile 5) are always left alone, because converting them would show wrong colours."}}, nil)}),
+			ConfigSchema: object(map[string]any{"includeDolbyVision": typedRef(map[string]any{"type": "boolean", "default": false,
+				"title": "Include Dolby Vision files", "description": "Off: Dolby Vision files are left as they are. On: they become HDR10 and the Dolby Vision layer is removed. Some Dolby Vision files (profile 5) are always left alone, because converting them would show wrong colours."})}, nil)}),
 		def(StepDefinition{Type: TypeConvert, RunsAs: RunsPlan, Category: "video", Name: "Convert video", Icon: "video", TypeLabel: "Video",
 			Description: "Makes the video smaller at the quality you choose.", Inputs: []Port{in},
 			Outputs: []Port{success, skipped, errPort}, AlwaysOn: true, RunsWith: encodeSegment, SideEffects: "writes_staging",
@@ -236,42 +236,42 @@ func Definitions() []StepDefinition {
 				// the slider and More options write this; forms skip readOnly settings, so it is not a field
 				"kind": withDefault(map[string]any{"enum": []any{"slider", "selectors"}, "x-enumLabels": []string{"Slider", "Custom settings"},
 					"readOnly": true}, "slider", "Kind", ""),
-				"quality": withDefault(quality, 3, "Quality", "slider"),
-				"format":  withDefault(formats, "hevc", "Video format", "segmented"),
-				"resolution": described(withDefault(enum([]any{"keep", "1080", "720", "480"}, []string{"Keep as is", "At most 1080p", "At most 720p", "At most 480p"}), "keep", "Resolution", ""),
-					"Videos are only ever made smaller, never stretched."),
-				"maxBitrate": bitrate(described(withDefault(enum([]any{"none", "high", "medium", "low"}, []string{"No limit", "High", "Medium", "Low"}), "none", "Bitrate level", ""),
-					"Caps how much data each second of video may use. A file never gets more than it has now. Quality still sets the picture; the cap only matters in busy scenes.")),
-				"speed": described(withDefault(enum([]any{"faster", "normal", "slower"}, []string{"Faster, larger files", "Normal", "Slower, smaller files"}), "normal", "Speed", ""),
-					"Slower takes about twice as long."),
+				"quality": typedRef(withDefault(quality, 3, "Quality", "slider")),
+				"format":  typedRef(withDefault(formats, "hevc", "Video format", "segmented")),
+				"resolution": typedRef(described(withDefault(enum([]any{"keep", "1080", "720", "480"}, []string{"Keep as is", "At most 1080p", "At most 720p", "At most 480p"}), "keep", "Resolution", ""),
+					"Videos are only ever made smaller, never stretched.")),
+				"maxBitrate": typedRef(bitrate(described(withDefault(enum([]any{"none", "high", "medium", "low"}, []string{"No limit", "High", "Medium", "Low"}), "none", "Bitrate level", ""),
+					"Caps how much data each second of video may use. A file never gets more than it has now. Quality still sets the picture; the cap only matters in busy scenes."))),
+				"speed": typedRef(described(withDefault(enum([]any{"faster", "normal", "slower"}, []string{"Faster, larger files", "Normal", "Slower, smaller files"}), "normal", "Speed", ""),
+					"Slower takes about twice as long.")),
 				// user review 11-13 item A: a level is the average (its peak 1.5x); VBR is CRF 23 under the max, no level
 				// the two *_legacy values are flows saved before item A: they keep their files until edited
-				"rateControl": described(withDefault(enum([]any{"quality", "level", "vbr", "quality_legacy", "vbr_legacy"}, []string{"Quality", "Bitrate level", "VBR with a max", "Quality with a level (earlier)", "VBR (earlier)"}), "quality", "Rate control", "segmented"),
-					"Bitrate level aims at the level's bitrate for the new file's height. VBR with a max keeps the quality steady and never goes above your limit. Quality has no bitrate cap."),
-				"vbrMaxKbps": described(map[string]any{"type": "integer", "minimum": 100, "maximum": 500000, "title": "Max bitrate (kbps)"},
-					"The most data each second may use with VBR. A file never gets more than it has now."),
+				"rateControl": typedRef(described(withDefault(enum([]any{"quality", "level", "vbr", "quality_legacy", "vbr_legacy"}, []string{"Quality", "Bitrate level", "VBR with a max", "Quality with a level (earlier)", "VBR (earlier)"}), "quality", "Rate control", "segmented"),
+					"Bitrate level aims at the level's bitrate for the new file's height. VBR with a max keeps the quality steady and never goes above your limit. Quality has no bitrate cap.")),
+				"vbrMaxKbps": typedRef(described(map[string]any{"type": "integer", "minimum": 100, "maximum": 500000, "title": "Max bitrate (kbps)"},
+					"The most data each second may use with VBR. A file never gets more than it has now.")),
 			}, []string{"quality", "format", "resolution", "maxBitrate", "speed"})}),
 		def(StepDefinition{Type: TypeAudio, RunsAs: RunsPlan, Category: "audio", Name: "Audio", Icon: "audio", TypeLabel: "Audio",
 			Description: "Which sound tracks the new file has.", Inputs: []Port{in}, Outputs: []Port{success}, RunsWith: encodeSegment,
 			SideEffects: "none", ConfigSchema: object(map[string]any{
-				"audio": withDefault(audio, "stereo_aac", "Audio", ""),
-				"onlyMyLanguages": map[string]any{"type": "boolean", "default": true, "title": "Only my languages",
+				"audio": typedRef(withDefault(audio, "stereo_aac", "Audio", "")),
+				"onlyMyLanguages": typedRef(map[string]any{"type": "boolean", "default": true, "title": "Only my languages",
 					// design's words (02:38Z), true to planAudio: with none matching, a stereo choice keeps the main track only
-					"description": "Keeps only tracks in your languages (Settings > General). Tracks with no language set are always kept. If none match, a stereo choice keeps the main track; the other choices keep all tracks."},
+					"description": "Keeps only tracks in your languages (Settings > General). Tracks with no language set are always kept. If none match, a stereo choice keeps the main track; the other choices keep all tracks."}),
 			}, []string{"audio", "onlyMyLanguages"})}),
 		def(StepDefinition{Type: TypeSubtitles, RunsAs: RunsPlan, Category: "subtitles", Name: "Subtitles", Icon: "subtitles", TypeLabel: "Subtitles",
 			Description: "Which subtitles the new file keeps.", Inputs: []Port{in}, Outputs: []Port{success}, RunsWith: encodeSegment,
 			SideEffects: "none", ConfigSchema: object(map[string]any{
-				"subtitles": withDefault(subtitles, "keep_all", "Subtitles", ""),
+				"subtitles": typedRef(withDefault(subtitles, "keep_all", "Subtitles", "")),
 			}, []string{"subtitles"})}),
 		def(StepDefinition{Type: TypeContainer, RunsAs: RunsPlan, Category: "container", Name: "File type", Icon: "file", TypeLabel: "Container",
 			Description: "The new file's type.", Inputs: []Port{in}, Outputs: []Port{success}, RunsWith: encodeSegment, SideEffects: "none",
 			ConfigSchema: object(map[string]any{
-				"fileType": withDefault(hinted(enum([]any{"mkv", "mp4", "webm", "keep"}, []string{"MKV", "MP4", "WebM", "Keep as is"}), []string{
+				"fileType": typedRef(withDefault(hinted(enum([]any{"mkv", "mp4", "webm", "keep"}, []string{"MKV", "MP4", "WebM", "Keep as is"}), []string{
 					"Holds every kind of track; the usual choice for Plex and Jellyfin.",
 					"Best for phones, browsers and Apple TV. Files with picture subtitles are left alone (the reason is in Jobs) unless the Subtitles step leaves those out. Styled subtitles become plain text. Surround formats MP4 can't hold become E-AC-3.",
 					"For web browsers. Only with AV1 or VP9 video and Opus audio.",
-					"Each file keeps its current type. A file whose type can't hold the chosen video or audio becomes MKV."}), "mkv", "File type", "segmented"),
+					"Each file keeps its current type. A file whose type can't hold the chosen video or audio becomes MKV."}), "mkv", "File type", "segmented")),
 			}, []string{"fileType"})}),
 		def(StepDefinition{Type: TypeVerify, RunsAs: RunsVerify, Category: "verify", Name: "Check the result", Icon: "check", TypeLabel: "Check",
 			Description: "The new file must play through, look like the original and hold what you chose. If not, the original stays.",
@@ -280,15 +280,15 @@ func Definitions() []StepDefinition {
 			Description: "Where the new file goes, and what happens to the original.", Inputs: []Port{in},
 			Outputs: []Port{success, errPort}, AlwaysOn: true, SideEffects: "commits",
 			ConfigSchema: object(map[string]any{
-				"policy": withDefault(hinted(enum([]any{"separate_folder", "replace", "beside"},
+				"policy": typedRef(withDefault(hinted(enum([]any{"separate_folder", "replace", "beside"},
 					[]string{"Save to a separate folder", "Replace the original", "Put the new file next to the original"}), []string{
 					"New files go to the folder below, in the same sub-folders. Your originals aren't changed, so no space is freed until you remove them yourself.",
 					"The original is kept for the days set in Settings > Safety, then deleted. This frees space. You can get an original back from its job.",
-					"Both stay. Nothing is deleted."}), "separate_folder", "Save the result", ""),
-				"folderMode": described(withDefault(hinted(enum([]any{"next_to_library", "one_folder"}, []string{"Next to each library", "One folder for all"}), []string{
+					"Both stay. Nothing is deleted."}), "separate_folder", "Save the result", "")),
+				"folderMode": typedRef(described(withDefault(hinted(enum([]any{"next_to_library", "one_folder"}, []string{"Next to each library", "One folder for all"}), []string{
 					"Each library gets a folder beside it, e.g. /media/movies (shrunk). Same disk, and it works when one workflow serves several libraries.",
 					"Every converted file goes into the folder below, in the same sub-folders as in its library."}), "next_to_library", "Where new files go", ""),
-					"Pick a folder next to each library, or one folder for all of them. Your originals stay where they are."),
+					"Pick a folder next to each library, or one folder for all of them. Your originals stay where they are.")),
 				"folder": templated(map[string]any{"type": "string", "title": "Folder", "description": "New files go to this folder, in the same sub-folders. You can use variables, like {{library}}.",
 					"x-placeholder": "/media/movies (shrunk)", "x-ui": map[string]any{"widget": "folder"}}),
 				// W4b: names from {{name}} variables. Empty keeps today's names, so nothing changes for a
@@ -301,10 +301,10 @@ func Definitions() []StepDefinition {
 					"Leave empty to keep each track's own title. You can use variables, like {{title}} ({{resolution}}).")),
 				// R8: checked after "Check the result" passes, before anything is moved. A new file bigger than its original is
 				// not saved when "keep"; "replace" saves it anyway. An absent value reads as replace (old workflows).
-				"ifBigger": withDefault(hinted(enum([]any{"keep", "replace"}, []string{"Keep the original", "Replace anyway"}), []string{
+				"ifBigger": typedRef(withDefault(hinted(enum([]any{"keep", "replace"}, []string{"Keep the original", "Replace anyway"}), []string{
 					"The new file is thrown away and the original stays exactly as it is. Applies to every choice above.",
 					"The new file is used even though it is bigger. If it replaces the original, the original is kept for the days set in Settings > Safety, then deleted."}),
-					"keep", "If the new file is bigger than the original", ""),
+					"keep", "If the new file is bigger than the original", "")),
 			}, []string{"policy"})}),
 		// the earlier install's step converts, checks and saves as one run, so its Next carries the file saved
 		def(StepDefinition{Type: TypeLegacy, RunsAs: RunsPlan, Category: "video", Name: "Earlier install's settings", Icon: "history", TypeLabel: "Video",
@@ -319,12 +319,12 @@ func Definitions() []StepDefinition {
 			ConfigSchema: object(map[string]any{
 				"codec": described(map[string]any{"type": "array", "title": "Video format is one of", "items": enum([]any{"hevc", "h264", "av1", "vp9", "mpeg4", "mpeg2video", "vc1", "wmv3"},
 					[]string{"HEVC", "H.264", "AV1", "VP9", "MPEG-4", "MPEG-2", "VC-1", "WMV"})}, "Leave empty for any."),
-				"minBitrateKbps": described(map[string]any{"type": "integer", "minimum": 0, "title": "Bitrate is at least (kbps)"}, "0 for any."),
-				"resolution":     withDefault(enum([]any{0, 720, 1080, 2160}, []string{"Any", "At least 720p", "At least 1080p", "4K (2160p)"}), 0, "Resolution", ""),
-				"hdr":            withDefault(enum([]any{"", "yes", "no"}, []string{"Either", "HDR", "Not HDR"}), "", "HDR", "segmented"),
-				"dolbyVision":    withDefault(enum([]any{"", "yes", "no"}, []string{"Either", "Dolby Vision", "Not Dolby Vision"}), "", "Dolby Vision", "segmented"),
-				"fps":            described(map[string]any{"type": "number", "minimum": 0, "maximum": 1000, "title": "Frame rate is at least (fps)"}, "0 for any."),
-				"size":           described(map[string]any{"type": "integer", "minimum": 0, "title": "File is at least (MB)"}, "0 for any."),
+				"minBitrateKbps": typedRef(described(map[string]any{"type": "integer", "minimum": 0, "title": "Bitrate is at least (kbps)"}, "0 for any.")),
+				"resolution":     typedRef(withDefault(enum([]any{0, 720, 1080, 2160}, []string{"Any", "At least 720p", "At least 1080p", "4K (2160p)"}), 0, "Resolution", "")),
+				"hdr":            typedRef(withDefault(enum([]any{"", "yes", "no"}, []string{"Either", "HDR", "Not HDR"}), "", "HDR", "segmented")),
+				"dolbyVision":    typedRef(withDefault(enum([]any{"", "yes", "no"}, []string{"Either", "Dolby Vision", "Not Dolby Vision"}), "", "Dolby Vision", "segmented")),
+				"fps":            typedRef(described(map[string]any{"type": "number", "minimum": 0, "maximum": 1000, "title": "Frame rate is at least (fps)"}, "0 for any.")),
+				"size":           typedRef(described(map[string]any{"type": "integer", "minimum": 0, "title": "File is at least (MB)"}, "0 for any.")),
 				"container": described(map[string]any{"type": "array", "title": "File type is one of", "items": enum([]any{"mkv", "mp4", "avi", "mov", "webm", "ts", "m2ts", "wmv", "flv", "mpg"},
 					[]string{"MKV", "MP4", "AVI", "MOV", "WebM", "TS", "M2TS", "WMV", "FLV", "MPG"})}, "Leave empty for any."),
 				// FB1b: seven more facts
@@ -514,6 +514,15 @@ func described(s map[string]any, d string) map[string]any {
 // the fields that take variables and the fields that are checked are one list.
 func templated(s map[string]any) map[string]any {
 	s["x-variables"] = true
+	return s
+}
+
+// typedRef marks a setting that takes a number or a choice (not text) and may hold one whole variable
+// reference, {{name}} (W1, workflow-architecture.md 2.2 rule 3): the value it resolves to is checked
+// against the setting's own schema. A reference with text around it is refused, and so is one to a
+// secret: a secret only fills a field that takes text.
+func typedRef(s map[string]any) map[string]any {
+	s["x-variableRef"] = true
 	return s
 }
 

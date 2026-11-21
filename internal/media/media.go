@@ -390,7 +390,7 @@ func ParseProgress(line string, durationSec float64) (float64, bool) {
 // the source's length done, and the latest fps, bitrate and speed (0 when ffmpeg says N/A or has not
 // said yet). ETASeconds is the time left at that speed, -1 while unknown.
 type Progress struct {
-	OutTimeUS   float64 // where ffmpeg is in the source (out_time_us): it moving is what progress means
+	OutTimeUS   float64 // where ffmpeg is in the source (out_time_us); it can freeze while frames and bytes go on
 	Frame       int64   // frames ffmpeg has taken through its decoder and filters (frame=); -1 until it says
 	Percent     float64
 	FPS         float64

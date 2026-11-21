@@ -132,6 +132,21 @@ func TestLocalEncoderForUsesTheMainFamilyPerFormat(t *testing.T) {
 	}
 }
 
+// Before this computer has ever finished its test, the processor takes the file and the job log says why: a
+// processor chosen with no reason while a card exists is what the user saw (bug 11-20).
+func TestLocalEncoderForSaysWhyTheProcessorBeforeTheTest(t *testing.T) {
+	chk := fakeGraphics(t, "hevc_qsv") // never asked: nothing has been tested yet
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	enc, note := LocalEncoderFor(st, chk)("libx265", false, nil)
+	if enc != "" || note != "the encoder test here has not finished yet; using the processor" {
+		t.Errorf("enc %q, note %q", enc, note)
+	}
+}
+
 // The main encoder is a graphics one, but this plan's format encoder did not pass: the processor, and the reason
 // for the job log. A main cpu gives no reason, and neither does a plan with no graphics encoder at all.
 func TestLocalEncoderForLogsAFormatThatDidNotPass(t *testing.T) {

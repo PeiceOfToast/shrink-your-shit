@@ -59,15 +59,17 @@ async function act<T>(p: Promise<Answer<T>>, say: (m: string) => void): Promise<
   try { const r = await p; if (failed(r)) return (say(r.error.message), null); return r; } catch (e) { if (e instanceof SignedOut) return null; throw e; }
 }
 
+// U4 (C1): the detail line under the name: the live percent and stage, the trash note, or the reason. The size change is the right rail.
 function Detail({ j }: { j: JobItem }) {
   if (j.progress) {
     const p = j.progress, pct = p.percent ?? p.workflowPercent;
-    return <div className="prog"><div className="row nw"><div className="bar" role="progressbar" aria-label={p.stage} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)}><i style={{ width: pct + "%" }} /></div><span className="sm">{Math.round(pct)}%</span></div>
-      <span className="sm muted">{[p.stage, p.fps != null && p.fps + " fps", elapsed(p.elapsedS), p.etaS ? "about " + elapsed(p.etaS) + " left" : ""].filter(Boolean).join(" · ")}</span></div>;
+    return <>{Math.round(pct)}% · {[p.stage, p.fps != null && p.fps + " fps", elapsed(p.elapsedS), p.etaS ? "about " + elapsed(p.etaS) + " left" : ""].filter(Boolean).join(" · ")}</>;
   }
-  if (j.state === "completed") return <span className="sm">{saved(j.beforeBytes, j.afterBytes)}{j.originalState === "kept" && j.keptDaysLeft != null && <span className="muted"> · {j.keptDaysLeft > 0 ? "original in the trash " + plural(j.keptDaysLeft, "more day", "more days") : "original in the trash, deleted today"}</span>}</span>;
-  return <span className="sm muted clamp2" title={reasonText(j)}>{reasonText(j)}</span>;
+  if (j.state === "completed" && j.originalState === "kept" && j.keptDaysLeft != null) return <>{j.keptDaysLeft > 0 ? "original in the trash " + plural(j.keptDaysLeft, "more day", "more days") : "original in the trash, deleted today"}</>;
+  return <>{reasonText(j)}</>;
 }
+// U4 (C1): the tile names the codec and resolution the file has; with one missing it shows the other, with neither the file icon
+const tileOf = (j: JobItem) => j.codec || j.resolution ? <>{j.codec && <b>{j.codec}</b>}{j.resolution && <span>{j.resolution}</span>}</> : <Icon id="i-file" />;
 
 const RUNS: JobState[] = ["preparing", "running", "validating", "committing"]; // live progress only for a running row
 // The drawer opens by job: a skipped row with a job behind it (#149: a workflow's skip after it failed, or one the user
@@ -165,13 +167,16 @@ export function Jobs() {
       </div>
       <div className="ltools" role="toolbar" aria-label="Jobs">
         {!firstRun && <>
-          <span className="desk">{actions}</span>
-          <button className="btn sm ghost phone" type="button" aria-pressed={selecting} onClick={() => (setSelecting(!selecting), setSel([]))}>{selecting ? "Done" : "Select"}</button>
-          <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions}</div></details>
+          <button className="btn sm ghost" type="button" aria-pressed={selecting} onClick={() => (selecting && setSel([]), setSelecting(!selecting))}>{selecting ? "Done" : "Select"}</button>
+          {(selecting || sel.length > 0) && <label className="hit selall"><input type="checkbox" aria-label="Select all files" checked={items.length > 0 && sel.length === items.length} onChange={(e) => setSel(e.target.checked ? items.map((j) => j.id) : [])} /><span className="sm">All</span></label>}
+          {(selecting || sel.length > 0) && <span className="desk">{actions}</span>}
+          {selecting && <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions}</div></details>}
         </>}
         {sel.length > 0 && <span className="muted sm">{sel.length} selected</span>}
         {/* parity 11-19 #2 (G4): pick a library here too; it sets the same ?libraryId= as "See its jobs", and the chip above stays */}
-        <span className="filt">{tab === "completed" && <button className="btn sm trash" type="button" aria-pressed={kept} onClick={() => navigate(query("completed", library, kept ? "" : "kept"))}>{TRASH_WORDS}</button>}{tab === "completed" && <button className="btn sm left-in-place" type="button" aria-pressed={left} onClick={() => navigate(query("completed", library, left ? "" : "left"))}>{LEFT_WORDS}</button>}
+        <span className="filt">{tab === "completed" && <span className="seg" role="group" aria-label="Original file">
+          <button type="button" aria-pressed={kept} onClick={() => navigate(query("completed", library, kept ? "" : "kept"))}>{TRASH_WORDS}</button>
+          <button type="button" aria-pressed={left} onClick={() => navigate(query("completed", library, left ? "" : "left"))}>{LEFT_WORDS}</button></span>}
         {(libs.data?.length ?? 0) > 1 && <select className="input sm lib" aria-label="Library" value={library} onChange={(e) => navigate(query(tab, e.target.value))}>
           <option value="">Library: All</option>
           {libs.data?.map((l) => <option key={l.id} value={l.id}>Library: {l.name}</option>)}
@@ -184,26 +189,31 @@ export function Jobs() {
       {!current ? (page.error ? <LoadFailed error={page.error} reload={page.reload} /> : <div className="empty">Loading…</div>) : !items.length ? (q ? <div className="empty">No file matches.</div>
         : firstRun ? <Empty icon="i-jobs" text="No jobs yet. Jobs start when a library finds videos."><Link className="btn primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link></Empty>
         : <Empty icon="i-jobs" text={kept ? TRASH_EMPTY : left ? LEFT_EMPTY : { waiting: "Nothing is waiting.", running: "Nothing is converting right now.", completed: "No file is done yet.", skipped: "No file was skipped.", failed: "Nothing has failed." }[tab]} />) : (
-        <div className={"list" + (selecting ? " selecting" : "")}><table className="tbl jobs">
-          <thead><tr>
-            <th className="selc"><label className="hit"><input type="checkbox" aria-label="Select all" checked={sel.length === items.length} onChange={(e) => setSel(e.target.checked ? items.map((j) => j.id) : [])} /></label></th>
-            {tab === "waiting" && <th className="posc" title="Place in the queue: 1 is converted next">#</th>}
-            <th>File</th><th className="stc">Status</th><th data-p="2">Details</th><th data-p="3">Worker</th><th data-p="4">{tab === "completed" ? "Finished" : "Size"}</th>
-          </tr></thead>
-          <tbody>{items.map((j) => (
+        <div className={"list rows" + (selecting ? " selecting" : "")}><table className="tbl jobs">
+          {/* No table header (U4, C1): a codec and resolution tile, the file and its detail, one chip line of facts, one status pill and the size change. Waiting keeps its position column. */}
+          <tbody>{items.map((j) => {
+            const pct = j.progress ? (j.progress.percent ?? j.progress.workflowPercent) : null;
+            return (
             <tr key={j.id} className={sel.includes(j.id) ? "sel" : undefined}>
               <td className="selc"><label className="hit"><input type="checkbox" aria-label={"Select " + j.name} checked={sel.includes(j.id)} onChange={(e) => setSel(e.target.checked ? [...sel, j.id] : sel.filter((x) => x !== j.id))} /></label></td>
               {tab === "waiting" && <td className="posc" title={j.position != null ? "Place " + j.position + " in the queue" : "Not taken now"}>{j.position ?? "—"}</td>}
-              <td className="idc"><a className="ttl" href={"/jobs?tab=" + tab + "&job=" + encodeURIComponent(key(j))} data-job={key(j)} title={j.path}
-                onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); go(tab, key(j)); } }}><FileName n={j.name} /></a>
-                {j.pin && <span className="mchip prio">{j.pin === "first" ? "First" : "Last"}</span>}
-                <span className="sub">{[j.library, j.folder !== "." && j.folder, [j.codec, j.resolution].filter(Boolean).join(" ")].filter(Boolean).join(" · ")}</span>
-                <span className="sub phone">{j.progress ? Math.round(j.progress.percent ?? j.progress.workflowPercent) + "% · " + j.progress.stage : j.state === "completed" ? saved(j.beforeBytes, j.afterBytes) : reasonText(j) || j.library}</span></td>
+              <td className="tile"><span className="ltile codec">{tileOf(j)}</span></td>
+              <td className="idc">
+                <div className="lname"><a className="ttl" href={"/jobs?tab=" + tab + "&job=" + encodeURIComponent(key(j))} data-job={key(j)} title={j.path}
+                  onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); go(tab, key(j)); } }}><FileName n={j.name} /></a>
+                  <span className="lpath sm" title={reasonText(j) || undefined}><Detail j={j} /></span></div>
+                <div className="chips">
+                  <span className="mchip">{j.library}</span>
+                  {j.folder !== "." && <span className="mchip">{j.folder}</span>}
+                  {j.pin && <span className="mchip prio">{j.pin === "first" ? "First" : "Last"}</span>}
+                  {j.worker && <span className="mchip">{j.worker === "builtin" ? "This computer" : j.worker}</span>}
+                  {tab === "completed" && j.finishedAt && <span className="mchip">Finished {clock(j.finishedAt)}</span>}
+                </div>
+                {pct != null && <span className="uline" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)} aria-label={j.progress?.stage || "Progress"}><i style={{ width: pct + "%" }} /></span>}
+              </td>
               <td className="stc"><Pill j={j} /></td>
-              <td data-p="2"><Detail j={j} /></td>
-              <td data-p="3" className="sm">{j.worker === "builtin" ? "This computer" : j.worker ?? ""}</td>
-              <td data-p="4" className="sm nowrap">{tab === "completed" && j.finishedAt ? clock(j.finishedAt) : bytes(j.bytes)}</td>
-            </tr>))}
+              <td className="sizec sm nowrap">{j.state === "completed" ? <span className={j.beforeBytes && j.afterBytes != null && j.afterBytes < j.beforeBytes ? "gain" : undefined}>{saved(j.beforeBytes, j.afterBytes)}</span> : bytes(j.bytes)}</td>
+            </tr>);})}
           </tbody>
         </table></div>)}
       {current && current.total > items.length && <p className="row muted sm" style={{ gap: 8, justifyContent: "center" }}>Showing {items.length.toLocaleString()} of {current.total.toLocaleString()}

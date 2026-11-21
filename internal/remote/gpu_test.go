@@ -52,6 +52,8 @@ type recorder struct {
 	notes    []string
 	encoders []string
 	worked   int // the structured "a graphics encoder converted a file" notes it was sent
+	// converting is each converting report as the server received it
+	converting []map[string]any
 }
 
 func recordingServer(t *testing.T) (*httptest.Server, *recorder) {
@@ -74,6 +76,7 @@ func recordingServer(t *testing.T) (*httptest.Server, *recorder) {
 		case strings.HasSuffix(r.URL.Path, "/progress") && in["stage"] == "converting":
 			enc, _ := in["encoder"].(string)
 			rec.encoders = append(rec.encoders, enc)
+			rec.converting = append(rec.converting, in)
 		}
 		w.Write([]byte(`{"ok":true}`))
 	}))

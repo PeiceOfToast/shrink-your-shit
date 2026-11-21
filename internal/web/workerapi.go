@@ -364,6 +364,8 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine, joins
 			Percent   float64
 			Stage     string
 			OutTimeUs *float64 // where its encode is: a worker that sends it is judged for the stall stop
+			Frame     *int64   `json:"frame"`     // frames so far, when it sends them (an older worker doesn't)
+			TotalSize *int64   `json:"totalSize"` // bytes of the new file so far, when it sends them
 			Encoder   string   // the graphics encoder it converts with ("" = the processor): the live label says it
 		}
 		if !readJSON(w, r, &in) {
@@ -382,7 +384,14 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine, joins
 		if rj := runs.get(lease); rj != nil { // the stall stop (orch-lead 19:13Z): only "converting" with a position counts
 			switch {
 			case in.Stage == "converting" && in.OutTimeUs != nil:
-				rj.Converting(*in.OutTimeUs, time.Now(), j.DurationSec)
+				frame, wrote := int64(-1), int64(0) // not sent: judged by position alone, as before
+				if in.Frame != nil {
+					frame = *in.Frame
+				}
+				if in.TotalSize != nil {
+					wrote = *in.TotalSize
+				}
+				rj.ConvertingFrames(*in.OutTimeUs, frame, wrote, j.SizeBefore, time.Now(), j.DurationSec)
 				rj.SetEncoder(in.Encoder)
 			case in.Stage != "converting":
 				rj.EncodeEnded()

@@ -387,7 +387,9 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			code, message := "has_errors", "This workflow has problems to fix before it can be published. Nothing was changed."
 			more := map[string]any{"issues": res.Issues}
 			for _, i := range res.Issues {
-				if i.Code != "unknown_variable" && i.Code != "unclosed_variable" {
+				switch i.Code {
+				case "unknown_variable", "unclosed_variable", "variable_wrong_type", "variable_ref_not_whole":
+				default:
 					continue
 				}
 				code, message = i.Code, i.Message+" Nothing was changed."
@@ -608,6 +610,7 @@ func stepNames(d workflow.Doc) []string {
 }
 
 func commitPolicy(d workflow.Doc) string {
+	d, _ = workflow.Resolve(d) // W1: the policy may be a whole {{name}}, and the page's warning must read its value
 	for _, n := range d.Nodes {
 		if n.Type == workflow.TypeCommit {
 			if p, ok := n.Config["policy"].(string); ok {
