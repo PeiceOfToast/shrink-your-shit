@@ -103,6 +103,24 @@ func TestWebMSubtitles(t *testing.T) {
 		}
 	})
 
+	t.Run("each kept subtitle keeps its source disposition", func(t *testing.T) {
+		// WebM is not told the source's default flag: the first subtitle is not default, the second is
+		// default and forced, so the new file must say so for each subtitle by its position in the output.
+		info := probe("h264", 1280, 720, 25, 5000,
+			media.Stream{Index: 2, Type: "subtitle", Codec: "subrip", Language: "eng", SubKind: "text"},
+			media.Stream{Index: 3, Type: "subtitle", Codec: "subrip", Language: "eng", SubKind: "text", Default: true, Forced: true})
+		p := webm().Compile(info)
+		if p.Skip != "" {
+			t.Fatalf("WebM with two text subtitles: %q", p.Skip)
+		}
+		args := " " + strings.Join(p.FFmpegArgs("a.mkv", "b.webm"), " ") + " "
+		for _, want := range []string{" -disposition:s:0 0 ", " -disposition:s:1 default+forced "} {
+			if !strings.Contains(args, want) {
+				t.Errorf("missing %q: %s", want, args)
+			}
+		}
+	})
+
 	t.Run("MP4 and MKV are as they were", func(t *testing.T) {
 		srt := media.Stream{Index: 2, Type: "subtitle", Codec: "subrip", Language: "eng", SubKind: "text"}
 		mp4 := standard(func(s *Selectors) { s.FileType = "mp4" }).Compile(probe("h264", 1280, 720, 25, 5000, srt))
@@ -110,7 +128,7 @@ func TestWebMSubtitles(t *testing.T) {
 			t.Errorf("MP4: %s", args)
 		}
 		mkv := standard(func(s *Selectors) { s.FileType = "mkv" }).Compile(probe("h264", 1280, 720, 25, 5000, srt))
-		if args := strings.Join(mkv.FFmpegArgs("a.mkv", "b.mkv"), " "); strings.Contains(args, "-c:s") || mkv.BitmapSubsDropped != 0 {
+		if args := strings.Join(mkv.FFmpegArgs("a.mkv", "b.mkv"), " "); strings.Contains(args, "-c:s") || strings.Contains(args, "-disposition") || mkv.BitmapSubsDropped != 0 {
 			t.Errorf("MKV: %s", args)
 		}
 	})

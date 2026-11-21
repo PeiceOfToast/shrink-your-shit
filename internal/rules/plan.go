@@ -79,6 +79,11 @@ type Plan struct {
 	MinSSIM           float64 `json:"minSSIM,omitempty"`       // picture threshold; 0 = the program's -min-ssim
 	Kind              string  `json:"kind"`                    // the template kind it was compiled from
 	CompilerVersion   int     `json:"compilerVersion"`
+
+	// SubDispositions (A11): for a WebM, each subtitle the new file keeps, in output order, as the -disposition
+	// its source had ("default+forced", or "0" for none). ffmpeg does not carry the flags into WebM, so the
+	// default flag would land on whichever subtitle ffmpeg picks. Empty for every other container.
+	SubDispositions []string `json:"subDispositions,omitempty"`
 }
 
 // Skip codes: why a file is not converted, as the Preview counts them (UI-API-CONTRACT.md, the open
@@ -409,6 +414,7 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 	)
 	if p.Video.Copy { // repackaged: the video as it is (the global -c copy), audio as planned
 		args = append(args, p.trackArgs()...)
+		args = append(args, p.subtitleDispositionArgs()...)
 		args = withOutput(args, out)
 		return p.withSubtitleFiles(args, out)
 	}
@@ -474,6 +480,7 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 		args = append(args, "-filter:"+v, strings.Join(vf, ","))
 	}
 	args = append(args, p.trackArgs()...)
+	args = append(args, p.subtitleDispositionArgs()...)
 	if p.Video.MaxRateKbps > 0 && !vp9Capped(p.Video) && !vp9Target(p.Video) { // VP9's cap is its -b:v (extraArgs, vp9Target)
 		k := strconv.Itoa(p.Video.MaxRateKbps) + "k"
 		buf := 2 * p.Video.MaxRateKbps
@@ -1035,6 +1042,9 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	bitmapDrops, bitmapDropped := bitmapOutOfWebM(p.Tracks, p.Container, info)
 	p.Tracks = append(p.Tracks, bitmapDrops...)
 	p.BitmapSubsDropped = bitmapDropped
+	if p.Container == "webm" {
+		p.SubDispositions = webmSubDispositions(p.Tracks, info)
+	}
 	for _, o := range append(movText, webvtt...) {
 		for _, st := range info.Subtitles() {
 			if st.Index == o.Index && (st.Codec == "ass" || st.Codec == "ssa") {
@@ -1259,6 +1269,48 @@ func textToWebVTT(ops []TrackOp, container string, info media.Info) (out []Track
 		}
 	}
 	return out
+}
+
+// webmSubDispositions is each subtitle the new file keeps, in source order (the output's order), as its
+// source -disposition: a subtitle that is dropped (picture, or saved as a file) is not in the new file.
+func webmSubDispositions(ops []TrackOp, info media.Info) []string {
+	dropped := map[int]bool{}
+	for _, o := range ops {
+		if o.Drop && !o.Add {
+			dropped[o.Index] = true
+		}
+	}
+	var out []string
+	for _, s := range info.Subtitles() {
+		if dropped[s.Index] {
+			continue
+		}
+		var flags []string
+		if s.Default {
+			flags = append(flags, "default")
+		}
+		if s.Forced {
+			flags = append(flags, "forced")
+		}
+		if s.HearingImpaired {
+			flags = append(flags, "hearing_impaired")
+		}
+		if len(flags) == 0 {
+			flags = []string{"0"} // "0" clears the flags ffmpeg would otherwise give the first subtitle
+		}
+		out = append(out, strings.Join(flags, "+"))
+	}
+	return out
+}
+
+// subtitleDispositionArgs sets each kept subtitle's -disposition from its source (A11); none for a container
+// other than WebM, where SubDispositions is empty.
+func (p Plan) subtitleDispositionArgs() []string {
+	var args []string
+	for k, d := range p.SubDispositions {
+		args = append(args, "-disposition:s:"+strconv.Itoa(k), d)
+	}
+	return args
 }
 
 // bitmapOutOfWebM drops the picture subtitles (PGS, VobSub, DVB) a WebM cannot hold at all, and says how
