@@ -90,6 +90,16 @@ func TestAttemptLadder(t *testing.T) {
 			wantRuns: 1, wantEnc: enc, wantErr: true, wantFails: 0,
 		},
 		{
+			name:     "hybrid lost lease does not step",
+			outcomes: []outcome{{unknownEnc, errLeaseLost}},
+			wantRuns: 1, wantEnc: enc, wantErr: true, wantFails: 0,
+		},
+		{
+			name: "full pipeline lost lease does not step", full: true,
+			outcomes: []outcome{{decodeLine, errLeaseLost}},
+			wantRuns: 1, wantEnc: enc, wantFull: true, wantErr: true, wantFails: 0,
+		},
+		{
 			name:     "stopped does not step",
 			outcomes: []outcome{{unknownEnc, fullErr}},
 			stopped:  true,
