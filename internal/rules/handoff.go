@@ -92,7 +92,8 @@ func expandHandoffs(t Template, look HandoffLookup, depth int) Template {
 	return nt
 }
 
-// handoffFailed is path b as "Stop as failed" with why, when the hand-over can't happen.
+// handoffFailed is path b as "Stop as failed" with why, when the hand-over can't happen. GotoNode stays,
+// so a template compiled again per file finds this path (KeepHandoffs; review2-579 P3-1).
 func handoffFailed(b Branch, why string) Branch {
 	b.Goto, b.Then, b.Requeue, b.Fail = 0, nil, nil, true
 	b.End = "Hand to another workflow: " + why
@@ -138,10 +139,13 @@ func KeepHandoffs(fresh, expanded Template) Template {
 	if fresh.Branches == nil || expanded.Branches == nil {
 		return fresh
 	}
-	byNode := map[string][]Branch{} // the expanded paths of each hand-over step, in order
+	byNode := map[string][]Branch{} // the expanded paths of each hand-over step, in order: the other workflow's, or the one failed path
 	for _, b := range *expanded.Branches {
-		if len(b.Handoffs) > 0 {
+		switch {
+		case len(b.Handoffs) > 0:
 			byNode[b.Handoffs[0].NodeID] = append(byNode[b.Handoffs[0].NodeID], b)
+		case b.GotoNode != "" && b.Goto == 0: // a hand-over that can't happen, as "Stop as failed" (review2-579 P3-1)
+			byNode[b.GotoNode] = append(byNode[b.GotoNode], b)
 		}
 	}
 	out := make([]Branch, 0, len(*fresh.Branches))

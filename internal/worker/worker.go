@@ -612,16 +612,26 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 }
 
 // FailedError is a failed conversion: Plain is what the person sees (COPY-1/COPY-2: what happened,
-// what was not touched, what to do), Err the technical cause, for the log.
+// what was not touched, what to do), Err the technical cause, for the log. Code is the job's stored
+// reason when it is not the general one (slice 15's settings_rejected); "" is convert_failed.
 type FailedError struct {
 	Plain string
 	Err   error
+	Code  string
 }
 
 func (e *FailedError) Error() string { return e.Plain + " (" + e.Err.Error() + ")" }
 func (e *FailedError) Unwrap() error { return e.Err }
 
-func failed(plain string, err error) error { return &FailedError{plain, err} }
+func failed(plain string, err error) error { return &FailedError{Plain: plain, Err: err} }
+
+// failedWithCode is failed with the job's stored reason when code is not empty.
+func failedWithCode(code, plain string, err error) error {
+	if code == "" {
+		return failed(plain, err)
+	}
+	return &FailedError{Plain: plain, Err: err, Code: code}
+}
 
 // unreadableSecretWords is what the job says when its workflow's secret was sealed on another computer: the
 // secret is named, because entering it again on this one is the fix, and nothing was converted.
@@ -786,6 +796,8 @@ func reasonCode(err error) string {
 		return jobs.ReasonDiskFull
 	case errors.As(err, &fe) && fe.Plain == cannotRead:
 		return jobs.ReasonCannotRead
+	case errors.As(err, &fe) && fe.Code != "":
+		return fe.Code
 	case errors.As(err, &fe):
 		return jobs.ReasonConvertFailed
 	case errors.Is(err, syscall.ENOSPC):
@@ -1529,7 +1541,17 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			return "", retryable(failed(diskFull, terr), retrySpace)
 		}
 		if words := headerWords(encErr); words != "" { // the new file's type can't hold a track: not damage
-			return "", failed(words, fmt.Errorf("%w: %s", terr, firstLines(encErr, 3)))
+			// Slice 15: when ffmpeg also says what the type supports, the workflow's settings are the
+			// problem — settings_rejected, which never falls back or counts against the encoder. A
+			// remote worker's result carries the code; an older worker's carries none, so its failure
+			// keeps today's.
+			code := ""
+			if rc, ok := remoteFailureCode(terr); ok {
+				code = rc
+			} else if _, ok := jobs.HeaderSupport(encErr); ok {
+				code = jobs.ReasonSettingsRejected
+			}
+			return "", failedWithCode(code, words, fmt.Errorf("%w: %s", terr, firstLines(encErr, 3)))
 		}
 		ferr := failed("Converting stopped with an error. Your original was not touched. Press Retry; if it keeps failing, the file may be damaged.", fmt.Errorf("%w: %s", terr, firstLines(encErr, 3)))
 		if killedBySignal(terr) { // stopped by the system (out of memory...), not a problem of the file
@@ -2009,22 +2031,13 @@ const goneWords = "The file was moved or deleted while it was being converted."
 // when it gives one, else plain words. "" when the error is not a header refusal, so a damaged file is
 // never called a file type's limit.
 func headerWords(encErr string) string {
-	if !strings.Contains(encErr, "Could not write header") {
-		return ""
+	if why, ok := jobs.HeaderSupport(encErr); ok {
+		return "ffmpeg couldn't write the new file: " + why + " Your original was not touched."
 	}
-	why := ""
-	for _, line := range strings.Split(encErr, "\n") {
-		if !strings.Contains(line, "supported for") {
-			continue
-		}
-		if i := strings.Index(line, "] "); i >= 0 { // "[webm @ 0x...] Only VP8 ... are supported for WebM."
-			why = strings.TrimSpace(line[i+2:])
-		}
-	}
-	if why == "" {
+	if strings.Contains(encErr, "Could not write header") {
 		return "ffmpeg couldn't write the new file. Your original was not touched."
 	}
-	return "ffmpeg couldn't write the new file: " + why + " Your original was not touched."
+	return ""
 }
 
 // sourceGone says whether nothing is at the original's path any more. Only a missing name counts: a
@@ -2466,6 +2479,12 @@ func encoderDetail(args []string) string {
 			break
 		}
 	}
+	// the cap and buffer, when the encode uses them (the plan's -maxrate:v/-bufsize:v), so the log shows the whole rate control
+	for _, f := range []string{"-maxrate", "-bufsize"} {
+		if v := argOf(f); v != "" {
+			quality += ", " + f + " " + v
+		}
+	}
 	hw := argOf("-init_hw_device")
 	if hw == "" {
 		hw = argOf("-hwaccel")
@@ -2542,7 +2561,7 @@ func (w *Worker) gpuFailed(ctx context.Context, err error, stderr string, full b
 	lines := strings.Split(stderr, "\n")
 	if full {
 		switch jobs.FailureCode(jobs.ReasonConvertFailed, lines) {
-		case "no_space", "source_missing", "output_not_writable":
+		case "no_space", "source_missing", "output_not_writable", "settings_rejected":
 			return false
 		}
 		return true

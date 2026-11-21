@@ -169,7 +169,7 @@ func previewTemplate(w http.ResponseWriter, store *jobs.Store, l jobs.Library, s
 			serverError(w, err)
 			return rules.Template{}, false
 		}
-		return f.Template, true
+		return store.WithHandoffs(f.Template), true // FB4b: a file this setting hands to another workflow previews as that workflow converts it (review2-579 P3-3)
 	}
 	if q, audio, basic := readBasic(s); basic { // a Basic setting (S4)
 		if _, ok := rules.SliderAt(q); !ok {

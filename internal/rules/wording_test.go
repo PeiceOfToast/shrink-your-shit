@@ -26,3 +26,31 @@ func TestSummaryTagNamesTheCodec(t *testing.T) {
 		t.Errorf("tag %q, want H.264 named", tag)
 	}
 }
+
+// Wording (slice 16): a level step names the bitrate it aims at and its peak, not the CRF it does not use.
+func TestLevelStepNamesTheBitrate(t *testing.T) {
+	p := Plan{Video: VideoEncode{CRF: 23, TargetKbps: 1800, MaxRateKbps: 2700}}
+	d := videoDecision(p, media.Info{}).Decision
+	if want := "at about 1800 kbps, peaks up to 2700 kbps."; !strings.HasSuffix(d, want) {
+		t.Errorf("level step %q, want it to end %q", d, want)
+	}
+	if strings.Contains(d, "CRF") {
+		t.Errorf("level step %q says CRF, but the encode runs -b:v", d)
+	}
+}
+
+// Wording (slice 16): a quality step still says the CRF it runs.
+func TestQualityStepNamesTheCRF(t *testing.T) {
+	p := Plan{Video: VideoEncode{CRF: 23}}
+	if d := videoDecision(p, media.Info{}).Decision; !strings.Contains(d, "at CRF 23.") {
+		t.Errorf("quality step %q, want it to say at CRF 23", d)
+	}
+}
+
+// Wording (slice 16, review 581): a quality step with a cap says the cap, after the CRF it runs.
+func TestQualityCapStepNamesTheCap(t *testing.T) {
+	p := Plan{Video: VideoEncode{CRF: 23, MaxRateKbps: 6000}}
+	if want := ", and never above 6000 kbps."; !strings.HasSuffix(videoDecision(p, media.Info{}).Decision, want) {
+		t.Errorf("capped quality step %q, want it to end %q", videoDecision(p, media.Info{}).Decision, want)
+	}
+}
