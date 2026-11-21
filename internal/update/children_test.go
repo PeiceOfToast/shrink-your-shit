@@ -14,11 +14,12 @@ import (
 func TestOwnChildrenPicksOnlyTheAppsOwn(t *testing.T) {
 	app := time.Date(2026, 11, 21, 3, 0, 0, 0, time.UTC)
 	cands := []childCandidate{
-		{pid: 10, created: app.Add(time.Minute)},    // the app's child
-		{pid: 11, created: app.Add(-time.Hour)},     // older than the app: a reused PID, spared
-		{pid: 12, created: app},                     // created with the app: the app's
-		{pid: 13, err: errors.New("access denied")}, // creation time unknown: spared
-		{pid: 14, created: app.Add(time.Minute)},    // the watcher, kept
+		{pid: 10, created: app.Add(time.Minute)},                                   // the app's child
+		{pid: 11, created: app.Add(-time.Hour)},                                    // older than the app: a reused PID, spared
+		{pid: 12, created: app},                                                    // created with the app: the app's
+		{pid: 13, err: errors.New("access denied")},                                // creation time unknown: spared
+		{pid: 14, created: app.Add(time.Minute)},                                   // the watcher, kept
+		{pid: 15, created: app.Add(time.Minute), err: errors.New("access denied")}, // created after the app, time unknown: spared
 	}
 	got := ownChildren(cands, app, 14)
 	if want := []int{10, 12}; !reflect.DeepEqual(got, want) {
