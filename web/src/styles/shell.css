@@ -781,6 +781,7 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .ov .libhelp{margin-top:8px}.ov .libhelp p{margin:4px 0 0}
 .ov .ovt .prog{flex-direction:row;align-items:center;gap:8px;min-width:160px}.ov .ovt .prog .bar{flex:1 1 120px}
 .ov .fname{display:block;overflow-wrap:anywhere}
+@media (min-width:901px){.ov .list .tbl td.sizec{min-width:9rem}} /* the saving cell keeps its width without nowrap (Dashboard only; Jobs keeps its own) */
 /* pass 1 (row e8c7e61d): the day charts lead the page, two side by side; dataviz marks (see DayBars) */
 .ov .charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:32px}
 .ov .dchart{margin:0;position:relative;min-width:0}
