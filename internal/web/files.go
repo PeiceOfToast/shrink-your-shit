@@ -231,6 +231,23 @@ func fileItem(store *jobs.Store, libs []jobs.Library, row jobs.FileRow, card str
 	return it
 }
 
+// fixedPrefix is the part of a folder setting that is known before a job fills its {{name}} variables
+// (W3, from ui-shop's QA of #587): the folders before the first one that holds a template. A save or
+// publish checks and makes only that part; the rest is made by the job, with the values it has. A
+// setting with no template is itself. A setting whose first folder is already templated is "" (not a
+// full path, so the check refuses it: a fixed root is needed to know where the files will go).
+func fixedPrefix(dir string) string {
+	i := strings.Index(dir, "{{")
+	if i < 0 {
+		return dir
+	}
+	cut := strings.LastIndexAny(dir[:i], `/\`)
+	if cut <= 0 {
+		return ""
+	}
+	return dir[:cut]
+}
+
 // outputBlockers says why dir can't be a flow's folder for new files (S6, "Save to another folder";
 // contract 21:10Z item 5): not_writable, low_space (under 10 GB free), inside_library (inside any
 // library, so new files would be converted again; or a library inside it; V5a: every library, not only
@@ -238,6 +255,7 @@ func fileItem(store *jobs.Store, libs []jobs.Library, row jobs.FileRow, card str
 func outputBlockers(store *jobs.Store, except int64, dir string, moreLibraries ...string) []map[string]string {
 	out := []map[string]string{}
 	add := func(code, msg string) { out = append(out, map[string]string{"code": code, "message": msg}) }
+	dir = fixedPrefix(dir) // a templated folder: the part before its first {{name}} is what can be checked and made now
 	if !filepath.IsAbs(dir) {
 		add("not_writable", "Enter the folder's full path.")
 		return out
