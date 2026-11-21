@@ -121,6 +121,22 @@ func TestWebMSubtitles(t *testing.T) {
 		}
 	})
 
+	t.Run("a dropped picture subtitle before a kept default one", func(t *testing.T) {
+		// The picture subtitle is left out, so the text one is output subtitle 0: its default flag must land there,
+		// and no flags may be written for a subtitle that is not in the new file.
+		info := probe("h264", 1280, 720, 25, 5000,
+			media.Stream{Index: 2, Type: "subtitle", Codec: "hdmv_pgs_subtitle", SubKind: "bitmap"},
+			media.Stream{Index: 3, Type: "subtitle", Codec: "subrip", Language: "eng", SubKind: "text", Default: true})
+		p := webm().Compile(info)
+		if p.Skip != "" {
+			t.Fatalf("WebM with a picture and a text subtitle: %q", p.Skip)
+		}
+		args := " " + strings.Join(p.FFmpegArgs("a.mkv", "b.webm"), " ") + " "
+		if !strings.Contains(args, " -disposition:s:0 default ") || strings.Contains(args, " -disposition:s:1 ") {
+			t.Errorf("the default flag is not on output subtitle 0 alone: %s", args)
+		}
+	})
+
 	t.Run("MP4 and MKV are as they were", func(t *testing.T) {
 		srt := media.Stream{Index: 2, Type: "subtitle", Codec: "subrip", Language: "eng", SubKind: "text"}
 		mp4 := standard(func(s *Selectors) { s.FileType = "mp4" }).Compile(probe("h264", 1280, 720, 25, 5000, srt))
