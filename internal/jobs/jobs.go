@@ -519,7 +519,7 @@ func (s *Store) Retry(id int64) error {
 	if j.Status == Done { // Done -> Queued exists for Convert again only; a done job's own way back is that
 		return fmt.Errorf("job %d: cannot go from %s to %s", id, j.Status, Queued)
 	}
-	return s.transition(id, Queued, `, progress=0, error='', error_code='', worker='', attempts=0, retry_at='', fallback=''`) // a fresh start: the first path again (V6b)
+	return s.transition(id, Queued, `, progress=0, error='', error_code='', worker='', attempts=0, retry_at='', fallback='', output_info=NULL`) // a fresh start: the first path again (V6b), without the last run's measured probe (#608)
 }
 
 // Release puts a running job back in the queue (the worker was told to stop).

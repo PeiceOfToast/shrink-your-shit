@@ -4,6 +4,7 @@ package web
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -84,5 +85,37 @@ func TestV2JobDetailAfterIsTheMeasuredProbe(t *testing.T) {
 	}
 	if codec, _, _ := after(id2); codec != "av1" {
 		t.Errorf("an old job's metadata.after %q, want today's fallback (av1)", codec)
+	}
+
+	// #608 follow-up: a job going back for a fresh run (Convert again) keeps no earlier run's probe, so the
+	// detail falls back to today's read of the probes table, as it always did for a job without one
+	in := filepath.Join(lib.Path, "in", "again.mkv")
+	if err := os.MkdirAll(filepath.Dir(in), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(in, []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// no library: its workflow revision is 0, so "already converted with this workflow" can't refuse the run
+	id3, err := st.Enqueue(jobs.Job{Path: in, SizeBefore: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Claim("w"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetOutputInfo(id3, `{"videoCodec":"hevc"}`); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(lib.Path, "out", "again.mkv")
+	st.PutProbe(out, 400, 1, `{"videoCodec":"av1"}`)
+	if err := st.Complete(id3, out, 400); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ConvertAgain(id3); err != nil {
+		t.Fatalf("Convert again: %v", err)
+	}
+	if codec, _, _ := after(id3); codec != "av1" {
+		t.Errorf("a converting-again job's metadata.after %q, want the probes table's (av1), not the last run's", codec)
 	}
 }
