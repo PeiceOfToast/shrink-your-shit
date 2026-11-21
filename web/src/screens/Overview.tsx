@@ -109,10 +109,12 @@ export function Overview() {
   useEffect(() => {
     let t: ReturnType<typeof setTimeout> | undefined, clear = false;
     return onLive((type, data) => {
-      // CT 124 flicker (manager row 11-18): a progress event's unknown (null) figure never hides one already known, and the
-      // 5 s worker.heartbeat refreshes the figures without dropping the live progress; a job or library change does drop it
+      // CT 124 flicker (manager row 11-18): within one step, a progress event's unknown (null) figure never hides one already known, and the
+      // 5 s worker.heartbeat refreshes the figures without dropping the live progress; a job or library change does drop it.
+      // A new step (e.g. "Checking the result") takes its figures as sent, nulls included, so the last converting speed and time left go
       if (type === "job.progress") { const e = data as JobProgressEvent, p = { percent: e.progress.percent, fps: e.progress.fps, speed: e.progress.speed, etaS: e.progress.etaS, stage: e.progress.stage };
-        setLive((m) => ({ ...m, [e.jobId]: { ...m[e.jobId], ...Object.fromEntries(Object.entries(p).filter(([, x]) => x != null)) } })); return; }
+        setLive((m) => { const newStep = p.stage != null && p.stage !== m[e.jobId]?.stage;
+          return { ...m, [e.jobId]: { ...m[e.jobId], ...(newStep ? p : Object.fromEntries(Object.entries(p).filter(([, x]) => x != null))) } }; }); return; }
       if (type === "job.state" || type === "library.changed" || type === "resync" || type.startsWith("processing.") || type.startsWith("worker.")) {
         clear ||= type !== "worker.heartbeat"; clearTimeout(t);
         t = setTimeout(() => { reload.current(); if (clear) setLive({}); clear = false; }, 400); }
