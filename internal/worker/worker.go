@@ -923,8 +923,9 @@ func (w *Worker) watchStall(job jobs.Job, out string) func() {
 		w.stalledFor.Store(int64(limit))
 		if w.overSize.Load() { // past twice the source: the new file cannot save space, so say that, not "no progress"
 			w.stopOver.Store(true)
+			// the size is ffmpeg's count or the temp file's on disk, whichever is larger: a silent encode reports 0
 			w.jobf(id, ": the new file is more than twice the original's size (%s, original %s), and its position has not moved for %s; stopping it",
-				rules.HumanBytes(w.outBytes.Load()), rules.HumanBytes(w.srcBytes.Load()), limit)
+				rules.HumanBytes(max(w.outBytes.Load(), w.diskBytes.Load())), rules.HumanBytes(w.srcBytes.Load()), limit)
 		} else {
 			w.stopOver.Store(false)
 			w.jobf(id, ": no progress for %s, stopping it", limit)

@@ -227,4 +227,7 @@ func TestSilentEncodeGrowingPastTwiceTheSourceIsStopped(t *testing.T) {
 	if n := logCount(t, s, "more than twice the original's size"); n == 0 {
 		t.Errorf("no over-size stop for a silent runaway (err %v)", err)
 	}
+	if n := logCount(t, s, "size (0 B, original"); n != 0 {
+		t.Errorf("the over-size line names 0 B for a file that grew to 3000 bytes")
+	}
 }
