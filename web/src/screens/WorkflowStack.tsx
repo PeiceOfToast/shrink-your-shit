@@ -190,7 +190,9 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
         <details ref={moreRef} onToggle={(e) => (e.currentTarget.open ? !sel && custom() : sel && goBack())}><summary className="btn sm" style={{ display: "inline-flex" }}>More options</summary>
           <div className="grid cols2" style={{ marginTop: 12 }}>
             {field("format")}{field("resolution")}{field("speed")}
-            {q && sel && field("quality")}
+            {(q || vbr) && sel && <div className="stack">
+              <fieldset disabled={vbr} style={{ border: 0, padding: 0, margin: 0, minWidth: 0, opacity: vbr ? 0.5 : 1 }}>{field("quality")}</fieldset>
+              {vbr && <p className="hint">VBR sizes the file by bitrate, so Quality isn't used.</p>}</div>}
             {av1 && sel && <p className="hint" role="status">AV1 can only use Quality only. Pick HEVC or H.264 to set a bitrate.</p>}
             <fieldset className="field choice stack"><legend className="lab">Bitrate</legend>
               <label className="radio" style={{ alignItems: "flex-start" }}><input type="radio" name={n.id + "-rc"} checked={rc === "level"} disabled={av1} onChange={() => put("rateControl", "level")} />
