@@ -440,9 +440,9 @@ function GpuSwitch({ onSaved, onErr }: { onSaved: (m: string) => void; onErr: (m
   // not disabled while saving: a disabled control drops keyboard focus, so a second Space would do nothing
   const set = async (v: boolean) => {
     if (busy) return;
-    setBusy(true); onErr("");
+    setBusy(true); onErr(""); setSaved(v);
     const r = await act(patchSettings({ gpuJobsSeparate: v }), onErr);
-    if (r) { setSaved(v); await st.reload(); setSaved(null); onSaved(gpuSaved(v)); }
+    if (r) { onSaved(gpuSaved(v)); st.reload(); } else setSaved(null);
     setBusy(false);
   };
   return (
