@@ -882,6 +882,7 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .editor{display:flex;flex-direction:column;height:calc(100dvh - var(--topbar-h));min-width:0;overflow:hidden} /* a fixed height: the frame takes exactly what the toolbar leaves, however it wraps */
 .edbar{position:sticky;top:0;z-index:10;min-height:48px;display:flex;align-items:center;gap:8px;padding:6px var(--page-pad);border-bottom:1px solid var(--border);background:var(--surface);flex-wrap:wrap}
 .edbar .nm{font-weight:var(--fw-strong);font-size:var(--fs-lg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40vw}
+.edbar h1.nm{margin:0;line-height:1.3} /* U11 (ui-shop review #600): the name is the page's h1 in both views, styled as the toolbar's name */
 .edbar .mid{margin:0 auto;display:flex;gap:4px;align-items:center}
 .edbar .vr{width:1px;height:24px;background:var(--border);margin:0 6px}
 .edbar .pill .ic{width:12px;height:12px;margin-right:4px}

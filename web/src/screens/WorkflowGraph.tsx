@@ -328,7 +328,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
       {/* FB6 (flow-builder.md 4.1, ui-review C10): the editor is a workspace: a 48 px toolbar, then a frame that fills
           the rest of the window with the palette, the canvas and the inspector inside it. One primary: Publish. */}
       <div className="edbar" role="toolbar" aria-label={"Editing " + name}>
-        <span className="muted nowrap"><Link to="/workflows">Workflows</Link> /</span><span className="nm">{name}</span>
+        <span className="muted nowrap"><Link to="/workflows">Workflows</Link> /</span><h1 className="nm">{name}</h1>
         <span className="pill">{ver == null || dirty ? "Draft" : "Published"}</span>
         <span className="muted nowrap desk edver">{ver == null ? "Not published yet" : "v" + ver + " published" + (dirty ? " · draft" : "")}</span>
         {checked.issues && <span className={"pill " + (errors.length ? "bad" : probs ? "warn" : "ok")}><Icon id={probs ? "i-alert" : "i-check-c"} />{probs ? (probs === 1 ? "1 problem" : probs + " problems") : "No problems"}</span>}
