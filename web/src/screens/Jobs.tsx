@@ -9,7 +9,7 @@ import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, clockS, count, elapsed, plural, stepTime } from "../format";
 import { type LogLine, type LogProbe, convertDoneAgain, fileJobs, findSkip, getJob, getJobLog, jobAction, listJobs, listKept, restoreKept, type JobLog, type LogMove, type LogStep, type LogVariable } from "../jobsApi";
 import { getWorkflow } from "../workflowApi";
-import { whyHeading } from "../jobResult";
+import { stoppedTitle, whyHeading } from "../jobResult";
 import { getHealth, getSettings } from "../libraryApi";
 import { onLive } from "../live";
 import { FileName } from "../FileName";
@@ -50,7 +50,7 @@ const libPaused = (j: PillJob) => j.state === "queued" && j.subState === "librar
 const keptOrig = (j: PillJob) => j.state === "failed" && (j.newFileRefused === true || j.reason?.code === "kept_original" || j.reason?.code === "check_failed");
 const words = (j: PillJob) => (libPaused(j) ? "Library paused" : keptOrig(j) ? "Original kept" : fell(j) ? "Done, with a warning" : j.state === "retry_wait" && j.retryAt ? "Retry at " + clock(j.retryAt) : WORD[j.state]);
 function Pill({ j }: { j: PillJob }) {
-  return <span className={"pill " + (libPaused(j) || fell(j) ? "warn" : keptOrig(j) ? "" : PILL[j.state] ?? "")} title={keptOrig(j) ? j.reason?.message ?? undefined : j.reason?.code === "workflow_stopped" ? "Stopped by its workflow: " + (j.reason.message ?? "") : undefined}><Icon id={libPaused(j) ? "i-pause" : keptOrig(j) ? "i-info" : fell(j) ? "i-alert" : ICON[j.state] ?? "i-play"} />{words(j)}</span>;
+  return <span className={"pill " + (libPaused(j) || fell(j) ? "warn" : keptOrig(j) ? "" : PILL[j.state] ?? "")} title={keptOrig(j) ? j.reason?.message ?? undefined : j.reason?.code === "workflow_stopped" ? stoppedTitle(j.reason.message ?? "") : undefined}><Icon id={libPaused(j) ? "i-pause" : keptOrig(j) ? "i-info" : fell(j) ? "i-alert" : ICON[j.state] ?? "i-play"} />{words(j)}</span>;
 }
 const reasonText = (j: JobItem) => j.reason?.message ?? j.detail ?? ""; // #130: every row's reason is {code, message}
 const saved = (b?: number, a?: number) => {

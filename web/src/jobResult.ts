@@ -13,3 +13,8 @@ export const queuedLine = (w: { version: number; queuedVersion?: number } | null
 // withFailure: the job has a failure block (the step, the ffmpeg lines); without one the plain "Why" section shows.
 export const whyHeading = (code: string, withFailure: boolean): string =>
   code === "workflow_stopped" ? "Stopped by its workflow" : withFailure ? "Why it failed" : "Why";
+
+// The list pill's hover for a workflow's own stop. The server's message usually starts "Stopped by this workflow: ",
+// so it is shown as it is rather than with the prefix doubled.
+export const stoppedTitle = (message: string): string =>
+  /^stopped by/i.test(message) ? message : "Stopped by its workflow: " + message;
