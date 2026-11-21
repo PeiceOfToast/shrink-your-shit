@@ -502,13 +502,10 @@ func gpuQuality(fam string, crf int) []string {
 	if p, ok := profiles[fam]; ok && p.quality != nil {
 		return p.quality(crf)
 	}
-	n := strconv.Itoa(crf)
-	switch fam {
-	case "vaapi":
-		return []string{"-rc_mode", "CQP", "-qp", n}
-	default: // amf
-		return []string{"-rc", "cqp", "-qp_i", n, "-qp_p", n}
+	if fam == "vaapi" {
+		return []string{"-rc_mode", "CQP", "-qp", strconv.Itoa(crf)}
 	}
+	return nil
 }
 
 // withoutSoftwareParams drops a software encoder's own parameter options and their values (libx265's, SVT-AV1's,

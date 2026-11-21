@@ -55,10 +55,17 @@ var profiles = map[string]EncoderProfile{
 			return "scale_qsv=w=trunc(" + hs + "*iw/ih/2+0.5)*2:h=" + hs
 		},
 	},
+	"amf": {
+		Family: "amf",
+		quality: func(crf int) []string {
+			return []string{"-rc", "cqp", "-qp_i", strconv.Itoa(crf), "-qp_p", strconv.Itoa(crf)}
+		},
+		PixFmt10: "p010le",
+	},
 }
 
 // ProfileFor is the profile of enc: "" or "cpu" for the processor, or a graphics encoder's name (hevc_nvenc). ok is
-// false for an encoder with no profile, which includes a family the profiles do not have yet (qsv, vaapi, amf) and
+// false for an encoder with no profile, which includes a family the profiles do not have yet (vaapi) and
 // an unknown encoder such as hevc_videotoolbox.
 func ProfileFor(enc string) (EncoderProfile, bool) {
 	if enc == "cpu" {
