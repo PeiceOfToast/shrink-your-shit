@@ -6,9 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
@@ -164,4 +167,176 @@ func TestAfterCardsActOnTheSavedFile(t *testing.T) {
 		t.Errorf("relative folder: %v", warnings)
 	}
 	_ = notes
+}
+
+func TestSplitArgs(t *testing.T) {
+	got, err := SplitArgs(`"/m/My Film.mkv" 42  a\"b "" x`)
+	if err != nil || fmt.Sprint(got) != `[/m/My Film.mkv 42 a"b  x]` || len(got) != 5 {
+		t.Errorf("%q %v", got, err)
+	}
+	if _, err := SplitArgs(`"open`); err == nil {
+		t.Error("an unclosed quote: want an error")
+	}
+	if got, _ := SplitArgs("  "); len(got) != 0 {
+		t.Errorf("blank: %q", got)
+	}
+}
+
+// FB2b: Run a command resolves its arguments, runs in the saved file's folder with the timeout from its config,
+// publishes what the program printed (cut to MaxOutput), logs each line, and reports an exit code as a warning;
+// with no Exec (the Safety switch off) it says so. Ask the downloader sets every name, empty when unknown.
+func TestCommandAndLookupCards(t *testing.T) {
+	final := filepath.Join(t.TempDir(), "Film.mkv")
+	os.WriteFile(final, []byte("x"), 0o644)
+	var got struct {
+		program, dir string
+		args         []string
+		timeout      time.Duration
+	}
+	var logged []string
+	env := Env{
+		Log: func(l string) { logged = append(logged, l) },
+		Exec: func(program string, args []string, dir string, timeout time.Duration, onLine func(string)) (string, error) {
+			got.program, got.args, got.dir, got.timeout = program, args, dir, timeout
+			onLine("line one")
+			if program == "fails" {
+				return "bad\n", errors.New("fails exited with code 3")
+			}
+			return "line one\n" + strings.Repeat("y", MaxOutput+50), nil
+		},
+		Lookup: func(which string) (map[string]string, string, error) {
+			if which == "radarr" {
+				return map[string]string{"title_clean": "", "year": "", "season": "", "episode": "", "original_language": ""}, "No connected downloader knows this file", nil
+			}
+			return map[string]string{"title_clean": "The Show", "year": "2019", "season": "1", "episode": "2", "original_language": "English"}, "Sonarr: The Show (2019) S01E02", nil
+		},
+	}
+	st := &State{Vars: map[string]string{"title": "My Film", "output_path": final}, Final: final}
+	cmd := rules.Card{NodeID: "c", Type: workflow.TypeCommand, Name: "Run a command", Config: map[string]any{"program": "/usr/local/bin/after", "arguments": `"{{output_path}}" {{title}} --n=2`, "timeoutSec": float64(5)}}
+	notes, warnings := After([]rules.Card{cmd}, st, env)
+	if len(warnings) != 0 || got.program != "/usr/local/bin/after" || fmt.Sprint(got.args) != "["+final+" My Film --n=2]" || got.dir != filepath.Dir(final) || got.timeout != 5*time.Second {
+		t.Errorf("run: %+v %v %+v", got, warnings, notes)
+	}
+	if out := st.Vars["command_output"]; !strings.HasPrefix(out, "line one\n") || len(out) > MaxOutput || notes[0].Words != "Ran /usr/local/bin/after (exit 0)" {
+		t.Errorf("output: %d %q", len(out), notes[0].Words)
+	}
+	if fmt.Sprint(logged) != "[/usr/local/bin/after: line one]" {
+		t.Errorf("log: %v", logged)
+	}
+	bad := rules.Card{NodeID: "c", Type: workflow.TypeCommand, Name: "Run a command", Config: map[string]any{"program": "fails"}}
+	if _, warnings := After([]rules.Card{bad}, st, env); len(warnings) != 1 || !strings.Contains(warnings[0], "Run a command didn't work: fails exited with code 3") || st.Vars["command_output"] != "bad" {
+		t.Errorf("exit code: %v %q", warnings, st.Vars["command_output"])
+	}
+	if _, warnings := After([]rules.Card{cmd}, st, Env{}); len(warnings) != 1 || !strings.Contains(warnings[0], "Settings > Safety") {
+		t.Errorf("switch off: %v", warnings)
+	}
+	if _, warnings := After([]rules.Card{{NodeID: "c", Type: workflow.TypeCommand, Name: "Run", Config: map[string]any{"program": "x", "arguments": `"open`}}}, st, env); len(warnings) != 1 || !strings.Contains(warnings[0], "never closed") {
+		t.Errorf("bad quoting: %v", warnings)
+	}
+
+	look := rules.Card{NodeID: "l", Type: workflow.TypeLookupDownloader, Name: "Ask the downloader for details", Config: map[string]any{}}
+	st2 := &State{Vars: map[string]string{}}
+	notes, err := Before([]rules.Card{look}, st2, env)
+	if err != nil || st2.Vars["title_clean"] != "The Show" || st2.Vars["episode"] != "2" || notes[0].Words != "Sonarr: The Show (2019) S01E02" {
+		t.Errorf("lookup: %v %+v %v", st2.Vars, notes, err)
+	}
+	look.Config = map[string]any{"which": "radarr"}
+	if _, err := Before([]rules.Card{look}, st2, env); err != nil || st2.Vars["title_clean"] != "" || st2.Vars["year"] != "" {
+		t.Errorf("unknown file: %v %v", st2.Vars, err)
+	}
+	if _, err := Before([]rules.Card{look}, st2, Env{}); err == nil {
+		t.Error("no lookup from here: want an error")
+	}
+}
+
+// RunProgram with a real program: this test binary as a helper (see TestMain), its output line by line, the exit
+// code as an error, a program that isn't there, and the timeout.
+func TestRunProgram(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Skip(err)
+	}
+	var lines []string
+	out, err := RunProgram(self, []string{"-flow.helper", "echo", "one", "two words"}, t.TempDir(), 10*time.Second, func(l string) { lines = append(lines, l) })
+	if err != nil || out != "one\ntwo words\n" || fmt.Sprint(lines) != "[one two words]" {
+		t.Errorf("echo: %q %v %v", out, err, lines)
+	}
+	out, err = RunProgram(self, []string{"-flow.helper", "exit", "3"}, "", 10*time.Second, nil)
+	if err == nil || !strings.Contains(err.Error(), "exited with code 3") || out != "exiting 3\n" {
+		t.Errorf("exit: %q %v", out, err)
+	}
+	if _, err := RunProgram(filepath.Join(t.TempDir(), "no-such-program"), nil, "", time.Second, nil); err == nil || !strings.Contains(err.Error(), "could not start") {
+		t.Errorf("missing: %v", err)
+	}
+	if _, err := RunProgram(self, []string{"-flow.helper", "sleep"}, "", 300*time.Millisecond, nil); err == nil || !strings.Contains(err.Error(), "stopped after") {
+		t.Errorf("timeout: %v", err)
+	}
+	// review2-539 P2a: a program that exits 0 but leaves a child holding its output is finished, near the timeout,
+	// never "stopped"; the worker's loop is not held for as long as the child lives
+	began := time.Now()
+	out, err = RunProgram(self, []string{"-flow.helper", "spawn-sleep"}, "", 500*time.Millisecond, nil)
+	if took := time.Since(began); err != nil || !strings.Contains(out, "spawned") || took > 5*time.Second {
+		t.Errorf("a child left behind: %q %v after %s", out, err, took)
+	}
+	// and one that exits 3 the same way keeps its exit code
+	if _, err := RunProgram(self, []string{"-flow.helper", "spawn-sleep", "3"}, "", 500*time.Millisecond, nil); err == nil || !strings.Contains(err.Error(), "exited with code 3") {
+		t.Errorf("a child left behind, exit 3: %v", err)
+	}
+	// review2-539 P3a: the log takes the first MaxLogLines lines and says so once; the output value is still capped
+	var logged []string
+	out, err = RunProgram(self, []string{"-flow.helper", "many", "300"}, "", 10*time.Second, func(l string) { logged = append(logged, l) })
+	if err != nil || len(logged) != MaxLogLines+1 || logged[MaxLogLines] != "… more output not shown in the log" || len(out) > MaxOutput+2048 {
+		t.Errorf("many lines: %d logged, last %q, %d bytes, %v", len(logged), logged[len(logged)-1], len(out), err)
+	}
+}
+
+// review2-539 P2b: a file name with a double quote, a space, $(…) or a backtick stays one argument, exactly as
+// the author quoted the placeholder; no value can add or split arguments.
+func TestCommandArgumentsFromHostileNames(t *testing.T) {
+	var got []string
+	env := Env{Exec: func(program string, args []string, dir string, timeout time.Duration, onLine func(string)) (string, error) {
+		got = args
+		return "", nil
+	}}
+	for _, name := range []string{`Movie" --output=/etc/passwd --quiet=".mkv`, "My Film (2019).mkv", "$(id).mkv", "a`b`.mkv", `C:\\Films\\Movie.mkv`} {
+		st := &State{Vars: map[string]string{"output_path": "/m/" + name, "title": "x y"}, Final: "/m/" + name}
+		card := rules.Card{NodeID: "c", Type: workflow.TypeCommand, Name: "Run", Config: map[string]any{"program": "p", "arguments": `"{{output_path}}" --title={{title}} {{output_path}}`}}
+		if _, warnings := After([]rules.Card{card}, st, env); len(warnings) != 0 || len(got) != 3 || got[0] != "/m/"+name || got[1] != "--title=x y" || got[2] != "/m/"+name {
+			t.Errorf("%q: args %q %v", name, got, warnings)
+		}
+	}
+}
+
+// TestMain lets the test binary stand in for a program (-flow.helper echo|exit|sleep ...).
+func TestMain(m *testing.M) {
+	if len(os.Args) > 2 && os.Args[1] == "-flow.helper" {
+		switch os.Args[2] {
+		case "echo":
+			for _, a := range os.Args[3:] {
+				fmt.Println(a)
+			}
+		case "exit":
+			code, _ := strconv.Atoi(os.Args[3])
+			fmt.Println("exiting", code)
+			os.Exit(code)
+		case "sleep":
+			time.Sleep(10 * time.Second)
+		case "spawn-sleep": // a child that inherits this program's output and outlives it
+			child := exec.Command(os.Args[0], "-flow.helper", "sleep")
+			child.Stdout, child.Stderr = os.Stdout, os.Stderr
+			child.Start()
+			fmt.Println("spawned")
+			if len(os.Args) > 3 {
+				code, _ := strconv.Atoi(os.Args[3])
+				os.Exit(code)
+			}
+		case "many":
+			n, _ := strconv.Atoi(os.Args[3])
+			for i := 0; i < n; i++ {
+				fmt.Println("line", i, strings.Repeat("x", 40))
+			}
+		}
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
 }

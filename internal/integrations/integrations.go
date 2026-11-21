@@ -21,6 +21,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -589,6 +590,124 @@ func (s *Service) TellKinds(jobID int64, from, finalPath string, want []Kind) (s
 		return "", errors.New("none of these is connected and on in Settings > Connections")
 	}
 	return "Told " + strings.Join(names, ", "), nil
+}
+
+// lookupBudget is how long one "Ask the downloader for details" may spend across every instance it asks.
+const lookupBudget = 2 * time.Minute
+
+// Lookup asks the enabled instances of the given kinds what file is (FB2b: "Ask the downloader for
+// details"): the first that owns it answers with title_clean, year, season, episode (an episode only) and
+// original_language, plus words for the log. An instance that doesn't own the file is passed over; when none
+// does, every value is empty and the words say so. Only an instance that can't be reached is an error.
+func (s *Service) Lookup(file string, want []Kind) (map[string]string, string, error) {
+	empty := map[string]string{"title_clean": "", "year": "", "season": "", "episode": "", "original_language": ""}
+	s.mu.Lock()
+	f, err := s.load()
+	s.mu.Unlock()
+	if err != nil {
+		return empty, "", err
+	}
+	asked := 0
+	start := s.now()
+	for _, r := range f.Items {
+		if !r.Enabled || !slices.Contains(want, r.Kind) || (r.Kind != Sonarr && r.Kind != Radarr) {
+			continue
+		}
+		if s.now().Sub(start) > lookupBudget { // review2-539 P3c: one card can't hold a job for every slow instance in turn
+			return empty, "", fmt.Errorf("the downloaders took longer than %s to answer", lookupBudget)
+		}
+		asked++
+		ki := kinds[r.Kind]
+		key, err := jobs.OpenSecret(r.Sealed, r.Nonce)
+		if err != nil {
+			return empty, "", errors.New(ki.label + "'s key can't be read; enter it again in Settings")
+		}
+		vals, words, owns, err := s.lookupOne(ki, r, key, toTheirs(file, r.Mappings))
+		if err != nil {
+			return empty, "", err
+		}
+		if owns {
+			return vals, words, nil
+		}
+	}
+	if asked == 0 {
+		return empty, "", errors.New("none of these is connected and on in Settings > Connections")
+	}
+	return empty, "No connected downloader knows this file", nil
+}
+
+// lookupOne is one instance's answer. For a show the episode file is found by its path and its episode
+// numbers read; for a film the movie record holds everything.
+func (s *Service) lookupOne(ki kindInfo, r record, key, file string) (vals map[string]string, words string, owns bool, err error) {
+	st, body, err := s.do(ki, "GET", r.URL, key, ki.listPath, nil)
+	if err != nil {
+		return nil, "", false, errors.New(strings.TrimSuffix(unreached(ki, r.URL, err, ""), "."))
+	}
+	if !ok2(st) {
+		return nil, "", false, errors.New(strings.TrimSuffix(answer(ki, st), "."))
+	}
+	var items []struct {
+		ID               int64  `json:"id"`
+		Title            string `json:"title"`
+		Year             int    `json:"year"`
+		Path             string `json:"path"`
+		OriginalLanguage struct {
+			Name string `json:"name"`
+		} `json:"originalLanguage"`
+	}
+	if err := json.Unmarshal(body, &items); err != nil {
+		return nil, "", false, errors.New(ki.label + " sent something the app doesn't understand")
+	}
+	best, bestLen := -1, -1
+	for i, it := range items {
+		if _, ok := under(file, it.Path); ok && len(norm(it.Path)) > bestLen {
+			best, bestLen = i, len(norm(it.Path))
+		}
+	}
+	if best < 0 {
+		return nil, "", false, nil
+	}
+	it := items[best]
+	vals = map[string]string{"title_clean": it.Title, "year": "", "season": "", "episode": "", "original_language": it.OriginalLanguage.Name}
+	if it.Year > 0 {
+		vals["year"] = strconv.Itoa(it.Year)
+	}
+	words = ki.label + ": " + it.Title
+	if it.Year > 0 {
+		words += " (" + vals["year"] + ")"
+	}
+	if r.Kind != Sonarr {
+		return vals, words, true, nil
+	}
+	// the episode: its file by path, then its numbers
+	st, body, err = s.do(ki, "GET", r.URL, key, "/api/v3/episodefile?seriesId="+strconv.FormatInt(it.ID, 10), nil)
+	if err != nil || !ok2(st) {
+		return vals, words + " (the episode could not be read)", true, nil
+	}
+	var files []struct {
+		ID           int64  `json:"id"`
+		SeasonNumber int    `json:"seasonNumber"`
+		Path         string `json:"path"`
+	}
+	if err := json.Unmarshal(body, &files); err != nil { // review-539 nit: an unreadable list is said, not skipped silently
+		return vals, words + " (the episode list could not be read)", true, nil
+	}
+	for _, ef := range files {
+		if norm(ef.Path) != norm(file) {
+			continue
+		}
+		vals["season"] = strconv.Itoa(ef.SeasonNumber)
+		st, body, err = s.do(ki, "GET", r.URL, key, "/api/v3/episode?seriesId="+strconv.FormatInt(it.ID, 10)+"&episodeFileId="+strconv.FormatInt(ef.ID, 10), nil)
+		var eps []struct {
+			EpisodeNumber int `json:"episodeNumber"`
+		}
+		if err == nil && ok2(st) && json.Unmarshal(body, &eps) == nil && len(eps) > 0 {
+			vals["episode"] = strconv.Itoa(eps[0].EpisodeNumber)
+			words += fmt.Sprintf(" S%02dE%02d", ef.SeasonNumber, eps[0].EpisodeNumber)
+		}
+		break
+	}
+	return vals, words, true, nil
 }
 
 // Wait returns once the background tells started so far have finished (tests use it).

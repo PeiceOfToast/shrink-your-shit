@@ -24,7 +24,7 @@ export const Reg = createContext<{ defs: StepDefinition[]; words: Record<string,
 function useReg() { const r = useContext(Reg); return { stepDef: (t: string) => r.defs.find((d) => d.type === t), summary: (n: Node) => r.words[n.id] ?? "", libs: r.libs, wf: r.wf }; }
 
 // The server's icon keys (registry) -> design's sprite.
-export const ICON: Record<string, string> = { folder: "i-folder", filter: "i-shield", video: "i-video", audio: "i-audio", subtitles: "i-subtitle", file: "i-file", check: "i-checks", save: "i-save", cond: "i-cond", history: "i-history", branch: "i-branch", stop: "i-stop", variable: "i-tag", note: "i-text", tell: "i-link", bell: "i-info", shield: "i-shield", copy: "i-copy" }; // branch, stop: V6a check + end; variable, note: FB1d cards; tell, bell, shield, copy: FB2a after cards
+export const ICON: Record<string, string> = { folder: "i-folder", filter: "i-shield", video: "i-video", audio: "i-audio", subtitles: "i-subtitle", file: "i-file", check: "i-checks", save: "i-save", cond: "i-cond", history: "i-history", branch: "i-branch", stop: "i-stop", variable: "i-tag", note: "i-text", tell: "i-link", bell: "i-info", shield: "i-shield", copy: "i-copy", terminal: "i-terminal" }; // branch, stop: V6a check + end; variable, note: FB1d cards; tell, bell, shield, copy: FB2a after cards
 // The words around each option come from the server's step definitions (#114: title, description, x-enumHints for
 // each choice, x-placeholder); the page adds none of its own.
 const MORE: Record<string, string[]> = { "video.convert": ["format", "resolution", "maxBitrate", "speed"] };
@@ -126,7 +126,9 @@ function convertField(k: string, s: JSONSchema, c: Record<string, unknown>, l: L
 export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown, more?: Record<string, unknown>) => void; issues: ValidationIssue[] }) {
   const { stepDef, libs, wf } = useReg(), def = stepDef(n.type)!, props = Object.fromEntries(Object.entries((def.configSchema.properties ?? {}) as Props).filter(([, s]) => !s.readOnly)) as Props, c = n.config;
   const lad = useData(getLadder, []).data, conv = (k: string) => (n.type === "video.convert" ? convertField(k, props[k], c, lad) : props[k]);
-  const keys = Object.keys(props).filter((k) => !(MORE[n.type] ?? []).includes(k)), more = (MORE[n.type] ?? []).filter((k) => props[k] && conv(k));
+  // FB2b: a step's required settings come first, in the order the schema requires them (the server's object keys are alphabetical)
+  const req = (def.configSchema.required as string[] | undefined) ?? [], rank = (k: string) => (req.includes(k) ? req.indexOf(k) : req.length);
+  const keys = Object.keys(props).filter((k) => !(MORE[n.type] ?? []).includes(k)).sort((a, b) => rank(a) - rank(b)), more = (MORE[n.type] ?? []).filter((k) => props[k] && conv(k));
   // #165: a setting's own problems (invalid_config, keyed on the step + field) show at that field, which is marked
   const bad = (k: string) => issues.filter((i) => i.nodeId === n.id && (i.field === k || i.configPath === "/" + k) && i.code !== "unconnected_port");
   // one edit writes its switches in the same update (A-API-SHAPE, engine #211): an old flow takes the new meaning on any

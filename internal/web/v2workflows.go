@@ -286,7 +286,7 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			storeErr(w, err)
 			return
 		}
-		writeJSON(w, revisionView(d))
+		writeJSON(w, revisionView(policyFor(store), d))
 	})
 	api.HandleFunc("PUT /api/v2/workflows/{id}/draft", func(w http.ResponseWriter, r *http.Request) {
 		id, ok := wfID(w, r)
@@ -319,7 +319,7 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			storeErr(w, err)
 			return
 		}
-		writeJSON(w, revisionView(d))
+		writeJSON(w, revisionView(policyFor(store), d))
 	})
 	api.HandleFunc("POST /api/v2/workflows/{id}/validate", func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := wfID(w, r); !ok {
@@ -329,7 +329,7 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		if !readJSON(w, r, &in) {
 			return
 		}
-		writeJSON(w, workflow.Validate(in.Workflow))
+		writeJSON(w, workflow.ValidateWith(in.Workflow, policyFor(store))) // FB2b: the Safety switch counts here
 	})
 	api.HandleFunc("GET /api/v2/workflows/{id}/publish-preview", func(w http.ResponseWriter, r *http.Request) {
 		id, ok := wfID(w, r)
@@ -361,7 +361,7 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			return
 		}
 		writeJSON(w, map[string]any{"nextNumber": next, "changes": changes, "libraries": v["libraries"],
-			"changesOriginals": commitPolicy(d.Doc) == "replace", "validation": workflow.Validate(d.Doc).Issues})
+			"changesOriginals": commitPolicy(d.Doc) == "replace", "validation": workflow.ValidateWith(d.Doc, policyFor(store)).Issues})
 	})
 	api.HandleFunc("POST /api/v2/workflows/{id}/publish", func(w http.ResponseWriter, r *http.Request) {
 		id, ok := wfID(w, r)
@@ -381,9 +381,9 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			storeErr(w, jobs.ErrStaleDraft)
 			return
 		}
-		if res := workflow.Validate(d.Doc); res.Errors() {
-			// A {{name}} problem names its setting in the error itself (the page keys on the code and shows
-			// the field); every other problem keeps the general answer, with all the issues listed.
+		if res := workflow.ValidateWith(d.Doc, policyFor(store)); res.Errors() { // FB2b: Run a command needs the Safety switch
+			// A {{name}} template problem names its setting in the error itself (the page keys on the code and
+			// shows the field); every other problem keeps the general answer, with all the issues listed.
 			code, message := "has_errors", "This workflow has problems to fix before it can be published. Nothing was changed."
 			more := map[string]any{"issues": res.Issues}
 			for _, i := range res.Issues {
@@ -431,7 +431,7 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		if eng.ScanNow != nil {
 			eng.ScanNow() // its libraries' files are looked at again, as after the old Save (review acace8e)
 		}
-		writeJSON(w, revisionView(v))
+		writeJSON(w, revisionView(policyFor(store), v))
 	})
 	api.HandleFunc("GET /api/v2/workflows/{id}/revisions", func(w http.ResponseWriter, r *http.Request) {
 		id, ok := wfID(w, r)
@@ -476,7 +476,7 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 	}
 	api.HandleFunc("GET /api/v2/workflows/{id}/revisions/{rev}", func(w http.ResponseWriter, r *http.Request) {
 		if _, v, ok := revision(w, r); ok {
-			writeJSON(w, revisionView(v))
+			writeJSON(w, revisionView(policyFor(store), v))
 		}
 	})
 	api.HandleFunc("POST /api/v2/workflows/{id}/revisions/{rev}/restore", func(w http.ResponseWriter, r *http.Request) {
@@ -499,7 +499,7 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			storeErr(w, err)
 			return
 		}
-		writeJSON(w, revisionView(d))
+		writeJSON(w, revisionView(policyFor(store), d))
 	})
 }
 
@@ -543,7 +543,7 @@ func workflowViewWith(store *jobs.Store, id int64, libs []jobs.Library) (map[str
 		return nil, err
 	}
 	shown := draft.Doc // the draft, or the published revision when there's none (Draft makes it from that)
-	res := workflow.Validate(shown)
+	res := workflow.ValidateWith(shown, policyFor(store))
 	errs, warns := 0, 0
 	for _, i := range res.Issues {
 		if i.Severity == "error" {
@@ -580,8 +580,8 @@ func workflowViewWith(store *jobs.Store, id int64, libs []jobs.Library) (map[str
 }
 
 // revisionView is a revision as the contract's WorkflowRevision.
-func revisionView(r jobs.Revision) map[string]any {
-	res := workflow.Validate(r.Doc)
+func revisionView(p workflow.Policy, r jobs.Revision) map[string]any {
+	res := workflow.ValidateWith(r.Doc, p) // FB2b: the Safety switch counts in what the editor shows
 	id := any(nil)
 	if r.ID != 0 {
 		id = strconv.FormatInt(r.ID, 10)

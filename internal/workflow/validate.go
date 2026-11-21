@@ -174,6 +174,27 @@ func (r Result) Errors() bool {
 // node types, ports and config values, edges between existing ports, always-on steps on, and whether
 // this version can run it. A node's unwired "error" port means stop: the job fails and the original
 // stays, as the engine has always done.
+// Policy is what this install allows a workflow to do (FB2b): the Safety switch for Run a command.
+// Validate alone assumes everything is allowed; the server passes the live policy to ValidateWith.
+type Policy struct {
+	CommandsAllowed bool
+}
+
+// ValidateWith is Validate under a policy: a card the policy forbids is an error naming the switch, so
+// the draft is kept but can't be published until the switch is on.
+func ValidateWith(d Doc, p Policy) Result {
+	r := Validate(d)
+	if !p.CommandsAllowed {
+		for _, n := range d.Nodes {
+			if n.Type == TypeCommand {
+				r.Issues = append(r.Issues, Issue{Code: "commands_off", Severity: "error", NodeID: n.ID,
+					Message: "'" + nodeName(n) + "' can't run until \"Workflows may run commands\" is on in Settings > Safety."})
+			}
+		}
+	}
+	return r
+}
+
 func Validate(d Doc) Result {
 	r := Result{Issues: []Issue{}, StepSummaries: map[string]string{}, StepPlaces: map[string]StepPlace{}, AddSteps: map[string]AddStep{}}
 	add := func(i Issue) {
@@ -638,6 +659,10 @@ func summary(n Node) string {
 		return strings.ToUpper(strOf(c, "kind", "sha256")) + " of the new file, as {{checksum}}"
 	case TypeCopy:
 		return "A copy in " + strOf(c, "folder", "") + ", as {{copy_path}}"
+	case TypeCommand:
+		return "Runs " + strOf(c, "program", "") + " " + strOf(c, "arguments", "")
+	case TypeLookupDownloader:
+		return "Sets {{title_clean}}, {{year}}, {{season}}, {{episode}}, {{original_language}}"
 	}
 	return ""
 }
