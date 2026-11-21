@@ -74,13 +74,15 @@ body.conn-lost .connbar{display:flex}
 body.conn-lost .stale{color:var(--text-2)}
 .content{padding:var(--pad) var(--page-pad) 48px;display:flex;flex-direction:column;gap:calc(var(--gap)*1.4);min-width:0}
 .content.flush{padding:0;gap:0}
-.pagehead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:36px}
-.pagehead>.ic{width:16px;height:16px;color:var(--text-2);flex:none}
+.pagehead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:56px}
+.pagehead .ptile{width:32px;height:32px;border-radius:var(--radius-sm);background:var(--raised);color:var(--accent-text);display:grid;place-items:center;flex:none}
+.pagehead .ptile .ic{width:18px;height:18px}
+.pagehead .tt{display:flex;flex-direction:column;gap:2px;min-width:0}
 .pagehead h1{font-size:var(--fs-xl);font-weight:var(--fw-strong);min-width:0;overflow-wrap:anywhere}
 .pagehead .crumbl{font-size:var(--fs-xl);color:var(--text-2);text-decoration:none}.pagehead .crumbl:hover{text-decoration:underline}
 .pagehead .slash{color:var(--text-2);font-size:var(--fs-xl)}
 .pagehelp{margin:-6px 0 0}
-.pagehead .sub{color:var(--text-2);margin-top:2px}
+.pagehead .sub{color:var(--text-2);font-size:var(--fs-sm);font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* controls */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:0 14px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);font:inherit;font-weight:500;cursor:pointer;text-decoration:none;white-space:nowrap}
