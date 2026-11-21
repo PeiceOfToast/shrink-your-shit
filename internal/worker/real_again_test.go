@@ -26,7 +26,7 @@ func TestRealConvertAgainFromTheKeptOriginal(t *testing.T) {
 	tmpl := sel.Template()
 	st, id := realJob(t, src, 4)
 	w := realWorker(st, media.OSExec{})
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.KeepDays, w.Journal = func() int { return 7 }, st
 	if err := w.run(t); err != nil {
 		t.Fatal(err)

@@ -135,7 +135,7 @@ func TestTenBitSDRSourceToH264UsesTheProcessor(t *testing.T) {
 	sel := rules.DefaultSelectors(3)
 	sel.Format = "h264"
 	tmpl := sel.Template()
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	p := tmpl.Compile(must(media.ParseProbe([]byte(s.srcSpec.json()))))
 	if p.Skip != "" || !p.Video.TenBit || p.EncodeTenBit() || !rules.NeedsTenBit(p, nil) {
 		t.Fatalf("the case does not take the path it is about: skip %q, tenBit %v, encodeTenBit %v, needsTenBit %v",

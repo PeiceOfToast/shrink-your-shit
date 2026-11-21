@@ -394,7 +394,7 @@ func TestRealSliderBalanced(t *testing.T) {
 		}
 		st, id := realJob(t, path, 2)
 		w := realWorker(st, media.OSExec{})
-		w.Template = func(jobs.Job) (rules.Template, error) { return balanced, nil }
+		w.Template = func(jobs.Job) (rules.Template, int64, error) { return balanced, 0, nil }
 		if err := w.run(t); err != nil {
 			t.Fatal(err)
 		}
@@ -471,7 +471,7 @@ func TestRealRotatedVideoCappedUpright(t *testing.T) {
 	tmpl := s.Template()
 	st, id := realJob(t, src, 3)
 	w := realWorker(st, media.OSExec{})
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	if err := w.run(t); err != nil {
 		t.Fatal(err)
 	}
@@ -495,7 +495,7 @@ func TestRealRotatedHEVCRepackaged(t *testing.T) {
 	st, id := realJob(t, src, 3)
 	w := realWorker(st, media.OSExec{})
 	tmpl := rules.BasicTemplate(3, "keep_all")
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.KeepDays, w.Journal = func() int { return 7 }, st
 	if err := w.run(t); err != nil {
 		t.Fatal(err)

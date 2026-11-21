@@ -21,8 +21,8 @@ import (
 func TestJobUsesItsLibrarysFlow(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
-	w.Template = func(j jobs.Job) (rules.Template, error) {
-		return rules.LegacyTemplate(rules.Rule{FromCodec: "h264", CRF: 21, Preset: "slow"}, "beside"), nil
+	w.Template = func(j jobs.Job) (rules.Template, int64, error) {
+		return rules.LegacyTemplate(rules.Rule{FromCodec: "h264", CRF: 21, Preset: "slow"}, "beside"), 0, nil
 	}
 	w.RunOne(context.Background())
 	if s.count("-crf 21 -preset slow") != 1 {
@@ -39,7 +39,7 @@ func TestJobUsesItsLibrarysFlow(t *testing.T) {
 	s2 := newScenario(t)
 	s2.content = "0123456789ab"
 	w2 := s2.worker(Replace)
-	w2.Template = func(j jobs.Job) (rules.Template, error) { return rules.SliderTemplate(1), nil }
+	w2.Template = func(j jobs.Job) (rules.Template, int64, error) { return rules.SliderTemplate(1), 0, nil }
 	w2.RunOne(context.Background())
 	if j := s2.job(); j.Status != jobs.Done || j.SizeAfter != 12 || j.SizeBefore != 14 {
 		t.Errorf("a small saving is kept: %s %d -> %d %q", j.Status, j.SizeBefore, j.SizeAfter, j.Error)
@@ -52,8 +52,8 @@ func TestJobUsesItsLibrarysFlow(t *testing.T) {
 func TestJobOfARemovedLibraryFails(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
-	w.Template = func(jobs.Job) (rules.Template, error) {
-		return rules.Template{}, fmt.Errorf("its library no longer exists: %w", jobs.ErrLibraryGone) // as the store says it
+	w.Template = func(jobs.Job) (rules.Template, int64, error) {
+		return rules.Template{}, 0, fmt.Errorf("its library no longer exists: %w", jobs.ErrLibraryGone) // as the store says it
 	}
 	w.RunOne(context.Background())
 	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "setting could not be read") {
@@ -104,7 +104,7 @@ func TestRequeueJobPutsTheRunningJobBack(t *testing.T) {
 func TestJobRecordsItsPlan(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
-	w.Template = func(jobs.Job) (rules.Template, error) { return rules.SliderTemplate(4), nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return rules.SliderTemplate(4), 0, nil }
 	w.RunOne(context.Background())
 	j := s.job()
 	var snap rules.Snapshot
@@ -134,8 +134,8 @@ func TestAFailureAtTheOutputPathKeepsTheVariables(t *testing.T) {
 	w := s.worker(Folder)
 	sel := rules.DefaultSelectors(3)
 	sel.AfterConverting, sel.OutputDir = "folder", "{{title}}" // not a full path: the folder check stops the job
-	w.Template = func(jobs.Job) (rules.Template, error) {
-		return rules.Template{Kind: rules.KindSelectors, Selectors: &sel, CompilerVersion: rules.CompilerVersion}, nil
+	w.Template = func(jobs.Job) (rules.Template, int64, error) {
+		return rules.Template{Kind: rules.KindSelectors, Selectors: &sel, CompilerVersion: rules.CompilerVersion}, 0, nil
 	}
 	w.RunOne(context.Background())
 	j := s.job()

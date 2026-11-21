@@ -597,9 +597,9 @@ func (r *recQueue) Progress(id int64, p float64) error {
 	return r.Queue.Progress(id, p)
 }
 
-func (r *recQueue) RecordRunRevision(id int64, tmpl rules.Template) error {
+func (r *recQueue) RecordRunRevision(id, revID int64, tmpl rules.Template) error {
 	r.runs = append(r.runs, id)
-	return r.Queue.RecordRunRevision(id, tmpl)
+	return r.Queue.RecordRunRevision(id, revID, tmpl)
 }
 
 func TestProgressReported(t *testing.T) {
@@ -1199,7 +1199,7 @@ func TestBasicRepackagesHEVC(t *testing.T) {
 	s.outSpec.streams = []map[string]any{vid("hevc", 640, 360, "yuv420p"), aud("aac", "eng", 2), sub("subrip", "eng", false), att("font.ttf")}
 	w := s.worker(Replace)
 	tmpl := rules.BasicTemplate(3, "")
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.RunOne(context.Background())
 	if j := s.job(); j.Status != jobs.Done {
 		t.Fatalf("%s %q", j.Status, j.Error)
@@ -1257,7 +1257,7 @@ func TestQueuedDolbyVisionIsSkippedNotEncoded(t *testing.T) {
 			if plan := tmpl.Compile(must(media.ParseProbe([]byte(s.srcSpec.json())))); c.codec == "av1" && plan.SkipCode != rules.SkipModernFormat || c.legacy && plan.SkipCode == c.code {
 				t.Fatalf("the case does not take the path it is about: %q", plan.SkipCode)
 			}
-			w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+			w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 			w.RunOne(context.Background())
 			if s.count("libx265") != 0 {
 				t.Fatalf("encoded:\n%s", strings.Join(s.calls, "\n"))
@@ -1339,7 +1339,7 @@ func TestQueuedHDRToH264IsSkipped(t *testing.T) {
 	sel := rules.DefaultSelectors(3)
 	sel.Format = "h264"
 	tmpl := sel.Template()
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.RunOne(context.Background())
 	if s.count("libx264") != 0 {
 		t.Fatalf("encoded:\n%s", strings.Join(s.calls, "\n"))
@@ -1366,7 +1366,7 @@ func TestSkippedPlanLogsNoActionNotes(t *testing.T) {
 	if p := tmpl.Compile(must(media.ParseProbe([]byte(s.srcSpec.json())))); !p.AudioFolded || p.Skip == "" {
 		t.Fatalf("the case does not take the path it is about: folded %v, skip %q", p.AudioFolded, p.Skip)
 	}
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.RunOne(context.Background())
 	if s.count("libx265") != 0 {
 		t.Fatalf("encoded:\n%s", strings.Join(s.calls, "\n"))
@@ -1391,7 +1391,7 @@ func TestStyledSubtitlesNote(t *testing.T) {
 	sel := rules.DefaultSelectors(3)
 	sel.FileType, sel.AfterConverting = "mp4", "beside"
 	tmpl := sel.Template()
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.RunOne(context.Background())
 	text := logTextOf(s.store, s.id)
 	if strings.Count(text, rules.StyledSubsNote) != 1 {

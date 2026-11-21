@@ -19,7 +19,7 @@ func TestCheckStepAndProbeAreInTheLog(t *testing.T) {
 	s := newScenario(t)
 	s.ssimStderr = "[Parsed_ssim_0] SSIM Y:0.80 U:0.80 V:0.80 All:0.800000 (7.0)"
 	w := s.worker(Replace)
-	w.Template = func(jobs.Job) (rules.Template, error) { return rules.SliderTemplate(3), nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return rules.SliderTemplate(3), 0, nil }
 	w.RunOne(context.Background())
 	steps, _ := s.store.RunSteps(s.id)
 	var check, encode *jobs.RunStep

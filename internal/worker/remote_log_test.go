@@ -17,7 +17,7 @@ import (
 func TestRemoteJobRecordsTheCommandItRan(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
-	w.Template = func(jobs.Job) (rules.Template, error) { return rules.SliderTemplate(3), nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return rules.SliderTemplate(3), 0, nil }
 	job, err := s.store.Claim("remote-worker")
 	if err != nil {
 		t.Fatal(err)

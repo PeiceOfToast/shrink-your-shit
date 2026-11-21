@@ -34,7 +34,7 @@ func TestRealBiggerNewFileKeepsTheOriginal(t *testing.T) {
 	tmpl := sel.Template()
 	st, id := realJob(t, src, 3)
 	w := realWorker(st, media.OSExec{})
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.KeepDays, w.Journal = func() int { return 7 }, st
 	w.run(t)
 

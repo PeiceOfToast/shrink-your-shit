@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
 )
 
 // Foundation slice 9: a job records the workflow revision it was queued under (queued_rev) and the one it
@@ -31,7 +32,7 @@ func startStamped(t *testing.T, template int) (*Store, int64, int64) {
 	if _, err := s.Claim("w"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RecordRunRevision(id, rules.SliderTemplate(template)); err != nil {
+	if err := s.RecordRunRevision(id, 0, rules.SliderTemplate(template)); err != nil {
 		t.Fatal(err)
 	}
 	b, ok, err := s.LatestRevision(l.FlowID)
@@ -73,11 +74,11 @@ func TestAJobRecordsTheRevisionItRanWith(t *testing.T) {
 	if _, err := s.Claim("w"); err != nil {
 		t.Fatal(err)
 	}
-	tmpl, err := s.TemplateFor(Job{Library: l.Path, LibraryID: l.ID, Path: path})
+	tmpl, rev, err := s.TemplateFor(Job{Library: l.Path, LibraryID: l.ID, Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RecordRunRevision(id, tmpl); err != nil {
+	if err := s.RecordRunRevision(id, rev, tmpl); err != nil {
 		t.Fatal(err)
 	}
 	ran, queued, err := s.JobRevisions(id)
@@ -117,7 +118,7 @@ func TestRecordedRunRevisionWritesARevisionForASaveWithoutOne(t *testing.T) {
 	if _, err := s.SetFlowTemplate(lFlowOf(t, s, id), rules.SliderTemplate(6)); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RecordRunRevision(id, rules.SliderTemplate(6)); err != nil {
+	if err := s.RecordRunRevision(id, 0, rules.SliderTemplate(6)); err != nil {
 		t.Fatal(err)
 	}
 	ran, queued, err := s.JobRevisions(id)
@@ -148,6 +149,65 @@ func lFlowOf(t *testing.T, s *Store, id int64) int64 {
 		t.Fatal(err)
 	}
 	return l.FlowID
+}
+
+// A workflow whose typed settings name a global is compiled from its published document with the values
+// as they are now: that document's revision is what the job runs with, recorded when the template is read.
+// A publish while the job waits moves the record to the revision the settings came from, and the template
+// itself cannot name it — it matches no stored revision (review-593 findings 2 and 3).
+func TestARefsWorkflowRecordsTheRevisionItsSettingsCameFrom(t *testing.T) {
+	useHome(t)
+	s := open(t)
+	f := globalFlow(t, s, "Global", "{{q}}")
+	lib, err := s.AddLibraryOnFlow("Movies", t.TempDir(), f.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetGlobalVariables([]workflow.Variable{{Name: "q", Type: "number", Value: float64(2)}}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(lib.Path, "a.mkv")
+	id, err := s.Enqueue(Job{Library: lib.Path, LibraryID: lib.ID, Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	one, ok, err := s.LatestRevision(f.ID)
+	if err != nil || !ok || one.Number == nil || *one.Number != 1 {
+		t.Fatalf("the queued revision %+v %v %v", one, ok, err)
+	}
+	// version 2 is published while the job waits
+	d, _, err := s.Draft(f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := s.SaveDraft(f.ID, d.Doc, d.Layout, d.Etag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	two, err := s.Publish(f.ID, saved.Etag, rules.SliderTemplate(3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if two.Number == nil || *two.Number != 2 || !workflow.HasRefs(two.Doc) {
+		t.Fatalf("revision 2 is %+v, want a published one whose document names the global", two)
+	}
+	if _, err := s.Claim("w"); err != nil {
+		t.Fatal(err)
+	}
+	tmpl, rev, err := s.TemplateFor(Job{Library: lib.Path, LibraryID: lib.ID, Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rev != two.ID {
+		t.Fatalf("the template came from revision %d, want %d: a settings-compiled template matches no stored revision", rev, two.ID)
+	}
+	if err := s.RecordRunRevision(id, rev, tmpl); err != nil {
+		t.Fatal(err)
+	}
+	ran, queued, err := s.JobRevisions(id)
+	if err != nil || ran != two.ID || queued != one.ID {
+		t.Errorf("ran %d, queued %d; want %d (version 2) and %d (version 1) (%v)", ran, queued, two.ID, one.ID, err)
+	}
 }
 
 // A way back to the queue (a retry, a crashed process, a lost lease, a release) keeps the revision the job

@@ -147,7 +147,7 @@ func TestV2JobRevisionIsWhenItStarted(t *testing.T) {
 	}
 	st.Claim("w")
 	// the worker records the revision it read (version 2); it was queued under version 1
-	if err := st.RecordRunRevision(id, rules.SliderTemplate(4)); err != nil {
+	if err := st.RecordRunRevision(id, 0, rules.SliderTemplate(4)); err != nil {
 		t.Fatal(err)
 	}
 	if _, body, _ := do(t, nil, srv, call{method: "GET", path: path}); !strings.Contains(body, `"version":2`) || !strings.Contains(body, `"queuedVersion":1`) {
@@ -164,6 +164,32 @@ func TestV2JobRevisionIsWhenItStarted(t *testing.T) {
 	}
 }
 
+// A job waiting to retry is queued: its last run is in its history, but its next start records the newest
+// revision, so that is what it shows — not the one that run had (review-593 finding 1).
+func TestV2JobWaitingToRetryShowsTheNextRunsRevision(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	st.SetPaused(false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "a.mkv"), SizeBefore: 1000})
+	st.Claim("w")
+	if err := st.RecordRunRevision(id, 0, rules.SliderTemplate(3)); err != nil { // it ran with version 1
+		t.Fatal(err)
+	}
+	if err := st.RetryLater(id, time.Now().Add(time.Hour), jobs.ReasonLowDiskSpace, "not enough free disk space"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SetFlowTemplate(lib.FlowID, rules.SliderTemplate(4)); err != nil { // version 2 while it waits
+		t.Fatal(err)
+	}
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10)})
+	if !strings.Contains(body, `"state":"retry_wait"`) || !strings.Contains(body, `"version":2`) {
+		t.Errorf("waiting to retry: its next start runs the newest published: %s", body)
+	}
+	if strings.Contains(body, `"queuedVersion"`) {
+		t.Errorf("a waiting job has not started: it has no ran-and-queued difference to show: %s", body)
+	}
+}
+
 // A job that ran with the revision it was queued under has no queued version to show.
 func TestV2JobDetailHasNoQueuedVersionWhenItRanAsQueued(t *testing.T) {
 	srv, st, _, _ := libServer(t, false)
@@ -171,7 +197,7 @@ func TestV2JobDetailHasNoQueuedVersionWhenItRanAsQueued(t *testing.T) {
 	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
 	id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "a.mkv"), SizeBefore: 1000})
 	st.Claim("w")
-	if err := st.RecordRunRevision(id, rules.SliderTemplate(3)); err != nil {
+	if err := st.RecordRunRevision(id, 0, rules.SliderTemplate(3)); err != nil {
 		t.Fatal(err)
 	}
 	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs/" + strconv.FormatInt(id, 10)})

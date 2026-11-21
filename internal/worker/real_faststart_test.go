@@ -49,7 +49,7 @@ func TestRealConvertedMP4IndexComesFirst(t *testing.T) {
 	s := rules.DefaultSelectors(3)
 	s.FileType, s.AfterConverting, s.Subtitles = "mp4", "beside", "keep_all" // beside: the original stays, so no journal is needed
 	tmpl := s.Template()
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	if err := w.run(t); err != nil {
 		t.Fatal(err)
 	}

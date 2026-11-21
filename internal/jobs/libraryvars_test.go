@@ -23,7 +23,7 @@ func TestTemplateForReadsTheLibrarysValuesAsTheyAreNow(t *testing.T) {
 	s := open(t)
 	lib, _ := qualityFlow(t, s, []workflow.Variable{{Name: "q", Type: "number", Value: float64(1), TemplateParam: true}},
 		"{{q}}", rules.SliderTemplate(1))
-	got, err := s.TemplateFor(Job{LibraryID: lib.ID})
+	got, _, err := s.TemplateFor(Job{LibraryID: lib.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestTemplateForReadsTheLibrarysValuesAsTheyAreNow(t *testing.T) {
 	if err := s.SetLibraryVariables(lib.ID, []workflow.Variable{{Name: "q", Value: float64(4)}}); err != nil {
 		t.Fatal(err)
 	}
-	got, err = s.TemplateFor(Job{LibraryID: lib.ID})
+	got, _, err = s.TemplateFor(Job{LibraryID: lib.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestAWorkflowsOwnValueWinsWhereTheLibraryMayNotChangeIt(t *testing.T) {
 	if err := s.SetLibraryVariables(lib.ID, []workflow.Variable{{Name: "q", Value: float64(4)}}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.TemplateFor(Job{LibraryID: lib.ID})
+	got, _, err := s.TemplateFor(Job{LibraryID: lib.ID})
 	if err != nil {
 		t.Fatal(err)
 	}

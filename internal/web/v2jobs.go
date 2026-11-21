@@ -266,13 +266,9 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 		if lib, err := store.GetLibrary(j.LibraryID); err == nil {
 			d["library"] = map[string]any{"id": strconv.FormatInt(lib.ID, 10), "name": lib.Name}
 			// the revision it ran with (foundation slice 9): the one the worker recorded when it read the
-			// workflow. A waiting job that never started runs the newest published at its next start.
+			// workflow. A queued job runs the newest published at its next start, even one waiting to retry
+			// whose last run is in its history: its next start records the newest too (review-593 finding 1).
 			started := j.Status != jobs.Queued
-			for _, e := range events {
-				if e.To == string(jobs.Running) {
-					started = true
-				}
-			}
 			if !started {
 				if _, err := store.EnsureRevision(lib.FlowID); err == nil { // an old Save's template counts too
 					if rev, ok, err := store.RevisionAt(lib.FlowID, time.Now().UTC().Format(time.RFC3339)); err == nil && ok {

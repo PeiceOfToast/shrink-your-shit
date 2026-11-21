@@ -24,7 +24,7 @@ func selectorsWorker(s *scenario, change func(*rules.Selectors)) *Worker {
 	change(&sel)
 	tmpl := sel.Template()
 	w := s.worker(Replace)
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	return w
 }
 
