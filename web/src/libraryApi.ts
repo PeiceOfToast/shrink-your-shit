@@ -19,7 +19,8 @@ export async function listLibraries(): Promise<Answer<LibraryItem[]>> {
 }
 // V5b (#135): the contract's Library. enabled is Pause/Resume (the same flag as "started"); priority 10/0/-10 is
 // High/Normal/Low; overrideFolder null goes back to the workflow's folder.
-export type LibraryPatch = { enabled?: boolean; priority?: number; overrideFolder?: string | null };
+// W3: variables replaces the library's own values (the whole list); [] clears them all.
+export type LibraryPatch = { enabled?: boolean; priority?: number; overrideFolder?: string | null; variables?: { name: string; value: unknown }[] };
 export async function listLibrariesV2(): Promise<Answer<Library[]>> {
   if (MOCK) return structuredClone(mock.mockState().libraries);
   const r = await call<{ items: Library[] }>("GET", "/api/v2/libraries");
