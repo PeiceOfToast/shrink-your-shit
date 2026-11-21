@@ -210,6 +210,11 @@ type Worker struct {
 	Journal  Journal
 	Now      func() time.Time // nil: time.Now
 
+	// scorePlace, when set, replaces ssimSegment as the per-place scorer (tests fake the scores with it).
+	scorePlace scoreFunc
+	// statFinal, when set, replaces os.Stat for the new file after it is put in place (tests fail it or zero it).
+	statFinal func(string) (os.FileInfo, error)
+
 	mu         sync.Mutex
 	filterMemo map[string]bool
 	current    int64              // the running job's id (0: none)
@@ -254,7 +259,7 @@ const DefaultFinishAfter = time.Hour
 // end: the last progress report can stop a little short of it, and out_time can run a little past it.
 const finishTolerance = 2.0
 
-// stallWarnAfter is how long the media position may stay put before the job log warns about it (log-spec R9);
+// stallWarnAfter is how long an encode may go without moving (position, frames or bytes) before the job log warns (R9);
 // the job itself is stopped only at StallAfter (ten minutes by default).
 const stallWarnAfter = 30 * time.Second
 
@@ -499,10 +504,14 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 		}
 		return true, err
 	}
-	st, _ := os.Stat(final)
-	var size int64
-	if st != nil {
-		size = st.Size()
+	stat := os.Stat
+	if w.statFinal != nil { // a test's fake stat
+		stat = w.statFinal
+	}
+	st, _ := stat(final)
+	size, note := newFileSize(st, w.verified.SizeBytes)
+	if note != "" {
+		w.jobf(job.ID, "%s", note)
 	}
 	if st != nil && w.verified.Video() != nil { // the new file's codec, size and length for the Files view (S5)
 		if b, err := json.Marshal(w.verified); err == nil {
@@ -1285,7 +1294,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	w.setPhase(secEncode) // the encoder choice and its notes belong to encode (log-spec section 4)
 	chosenWhy := ""
 	if w.remote == nil && w.Encoder != nil {
-		need10 := tenBitSource(plan)
+		need10 := rules.NeedsTenBit(plan, &src)
 		if w.EncoderCandidates != nil && !plan.Video.Copy { // R5: what hardware is here, and each encoder considered
 			for _, line := range w.EncoderCandidates(plan.Video.Codec, need10, plan.Video.HDR) {
 				w.logLine(job.ID, secEncode, jobs.LevelInfo, line)
@@ -2292,6 +2301,22 @@ type CheckScore struct {
 	Passed     bool
 }
 
+// newFileSize is the new file's size for the job's record. st is the stat taken after the file was put in
+// place. A failed stat, or one that reports 0 bytes for a file that was verified, uses the size measured before
+// the move, and note says so for the job log.
+func newFileSize(st os.FileInfo, measured int64) (size int64, note string) {
+	if st != nil && st.Size() > 0 {
+		return st.Size(), ""
+	}
+	if measured > 0 {
+		if st == nil {
+			return measured, fmt.Sprintf("Couldn't read the new file's size after it was put in place; using the size measured before the move (%d bytes).", measured)
+		}
+		return measured, fmt.Sprintf("The new file reported 0 bytes after it was put in place; using the size measured before the move (%d bytes).", measured)
+	}
+	return 0, "Couldn't read the new file's size after it was put in place; size unknown."
+}
+
 // recordCheck keeps the job's check step: the picture score, when the check ran (w.check, set by the picture comparison).
 func (w *Worker) recordCheck(id int64, started time.Time, verr error) {
 	if w.Queue == nil || w.check == nil {
@@ -2390,7 +2415,7 @@ func shortReason(reason string) string {
 func (w *Worker) graphicsArgs(ctx context.Context, job jobs.Job, plan rules.Plan, src media.Info, srcPath, tmp, want string) (args []string, full, ok bool) {
 	fam := rules.GraphicsFamily(want)
 	if v := src.Video(); v != nil && w.GraphicsDecodes != nil && (fam == "qsv" || fam == "vaapi") {
-		if w.GraphicsDecodes(ctx, fam, v.Codec, tenBitSource(plan)) { // one rule for 10-bit, here and at the encoder
+		if w.GraphicsDecodes(ctx, fam, v.Codec, rules.NeedsTenBit(plan, &src)) { // one rule for 10-bit, here and at the encoder
 			if args, full = plan.FFmpegArgsFullGPU(srcPath, tmp, want); full {
 				w.jobf(job.ID, ": decoding and encoding on the graphics card (full GPU pipeline)")
 				return args, true, true
@@ -2444,16 +2469,22 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 	moved := w.now() // when it last moved (a warning says so after stallWarnAfter, R9)
 	stalled := false // the warning has been written; one line says when it moves again
 	encErr, terr = media.TranscodeLines(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
+		// the encode is alive while its position moves, or while its frame count or bytes written grow and the output
+		// stays within twice the source's size (a runaway output past that is not progress). out_time follows the
+		// most-behind stream, so it freezes in a subtitle gap while frames still go on (bug 2).
+		posMoved := p.OutTimeUS > at // a position further on: one that repeats is not progress
+		outputOK := job.SizeBefore > 0 && p.TotalSize <= 2*job.SizeBefore
+		alive := posMoved || (outputOK && (p.Frame > frames || p.TotalSize > wrote))
 		frames = p.Frame
 		if p.TotalSize > wrote {
 			wrote = p.TotalSize
 		}
-		// only a position further on is progress: a stuck ffmpeg can keep reporting the same one (a
-		// damaged file, 21 min on a test run, never stopped), which mustn't hold off the stall stop
-		if p.OutTimeUS > at {
+		if posMoved {
 			at = p.OutTimeUS
-			w.progressAt.Store(time.Now().UnixNano())
 			w.finishing.Store(reachedEnd(p.OutTimeUS, job.DurationSec))
+		}
+		if alive {
+			w.progressAt.Store(time.Now().UnixNano())
 			moved = w.now()
 			if stalled { // R9: the log says it is moving again
 				stalled = false

@@ -413,7 +413,11 @@ func (x positionExec) Stream(ctx context.Context, onLine func(string), name stri
 			return "", ctx.Err()
 		case <-time.After(10 * time.Millisecond):
 		}
-		onLine("frame=" + strconv.FormatInt(i, 10)) // the rest of a progress block
+		frame := i
+		if x.step == 0 { // stuck: no frame moves either (a frame count that goes on is an encode that is alive)
+			frame = 0
+		}
+		onLine("frame=" + strconv.FormatInt(frame, 10)) // the rest of a progress block
 		onLine("out_time_us=" + strconv.FormatInt(5_000_000+i*x.step, 10))
 		onLine("progress=continue")
 	}
@@ -425,9 +429,9 @@ func (x positionExec) Stream(ctx context.Context, onLine func(string), name stri
 	return x.FakeExec.Stream(ctx, onLine, name, args...) // then the new file, as the fake makes it
 }
 
-// Row 17:40Z: an ffmpeg that keeps reporting the same position is stuck, and the stall stop ends it;
-// one that moves on slowly, for longer than StallAfter in all, is not stopped.
-func TestStallStopCountsOnlyAPositionFurtherOn(t *testing.T) {
+// Row 17:40Z: an ffmpeg whose position, frames and bytes all hold still is stuck, and the stall stop ends it;
+// one whose position moves on slowly, for longer than StallAfter in all, is not stopped.
+func TestStallStopWaitsForAMovingEncode(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
 	w.StallAfter = 2 * time.Second

@@ -351,6 +351,7 @@ func (p Plan) FFmpegArgsFullGPU(in, out, enc string) ([]string, bool) {
 // the "converting to" line: convertingTo names the depth of the encoder that runs.
 var tenBitTargets = map[string]bool{"libx265": true, "libsvtav1": true}
 
+// EncodeTenBit answers a different question from NeedsTenBit: whether the target's encoder arguments make 10 bits.
 // EncodeTenBit says whether a graphics encoder makes a 10-bit video: HDR (S3), or a 10-bit source kept at its depth
 // by a target whose card encoder has one (tenBitTargets). It is a card's arguments' 10-bit flags and its "converting
 // to" line that read it; on the processor libx264 and libvpx-vp9 keep 10 bits too, which convertingTo names.
