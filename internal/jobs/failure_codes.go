@@ -37,10 +37,12 @@ func FailureCode(errorCode string, keyLines []string) string {
 	return errorCode
 }
 
-// optionRejectionPhrases are ffmpeg's lines when it or an encoder refuses an option it was given: libopus turning
-// down -global_quality (real ffmpeg 7.0.2), and an option name ffmpeg does not know (-cq on a build without that
-// encoder). An encoder option that cannot be used is the workflow's settings' fault (A10).
-var optionRejectionPhrases = []string{"quality-based encoding not supported", "unrecognized option", "error splitting the argument list"}
+// optionRejectionPhrases is the line an encoder prints when it refuses an option that reached it: libopus turning
+// down a -global_quality (real ffmpeg 7.0.2). The workflow's settings are then the fault (A10). A name ffmpeg
+// does not know at all ("Unrecognized option 'cq'." / "Error splitting the argument list: Option not found") is
+// a different thing: this build has no encoder owning the option, so it stays ffmpeg_error and the job falls
+// back to the processor (review #609).
+var optionRejectionPhrases = []string{"quality-based encoding not supported"}
 
 // encoderUnavailablePhrases are the phrases that say an encoder can't be used here: the generic ones, then each
 // graphics family's own (rules.UnavailablePhrases).
@@ -49,8 +51,8 @@ func encoderUnavailablePhrases() []string {
 		"error initializing output stream", "no device", "device not available", "encoder not available"}, rules.UnavailablePhrases()...)
 }
 
-// OptionRejectedLine says whether a line is ffmpeg or an encoder refusing an option. Such a line is one of a
-// failure's key lines even when it never says "error": the worker keeps "error" lines, and libopus's refusal
+// OptionRejectedLine says whether a line is an encoder refusing an option. Such a line is one of a failure's key
+// lines even when it never says "error": the worker keeps "error" lines, and libopus's refusal
 // ("Quality-based encoding not supported") would otherwise be lost, taking the settings' fault with it (A10).
 func OptionRejectedLine(l string) bool {
 	return containsAny(strings.ToLower(l), optionRejectionPhrases)
@@ -75,9 +77,9 @@ func classifyKeyLines(lines []string) string {
 		// in. Both lines are needed: a bare "Could not write header" stays ffmpeg_error (slice 15).
 		return "settings_rejected"
 	case containsAny(text, optionRejectionPhrases):
-		// A10: ffmpeg refused an encoder option itself (a quality setting that reached the audio encoder, a flag
-		// no encoder knows). The workflow's settings are the fault: it is not the card's, and the processor would
-		// stop on the same option.
+		// A10: an encoder refused a quality setting that reached it (libopus and -global_quality). The workflow's
+		// settings are the fault: it is not the card's, and the processor would stop on the same option. An
+		// unknown option name is not this case (review #609): it is the build's, and ffmpeg_error falls back.
 		return "settings_rejected"
 	case containsAny(text, encoderUnavailablePhrases()):
 		return "encoder_unavailable"
