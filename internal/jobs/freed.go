@@ -49,6 +49,10 @@ var (
 	// always-standardize 11-07) saves nothing, and its growth counts in grewSQL instead, so a total never
 	// hides it nor goes negative (orch-lead 18:15Z)
 	savedSQL = `MAX(size_before-size_after, 0)`
+	// savedNowSQL is one file's saving on a total that counts each file once: its newest conversion, not
+	// restored, new size known and above 0, never below 0. The notification batch, the hourly throughput and
+	// the overview's saved-by-day all read this one (foundation slice 8).
+	savedNowSQL = `CASE WHEN ` + convertedNow("jobs") + ` AND size_after>0 AND ` + newestSQL + ` THEN ` + savedSQL + ` END`
 	// grewSQL is how much bigger a done job's new file is than its original (NULL: not bigger)
 	grewSQL = `CASE WHEN ` + convertedNow("jobs") + ` AND size_after>size_before AND size_before>0 AND ` + newestSQL + ` THEN size_after-size_before END`
 	// grewNowSQL is the growth bytesNow adds: only a replaced file's, since the new file then stands where the

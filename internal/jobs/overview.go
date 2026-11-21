@@ -212,7 +212,7 @@ FROM jobs GROUP BY library_id, d`, Running, Queued, Failed, Kept)
 // 'done' event (the same day the events table gives it), and the rows are the newest conversion per file.
 func (s *Store) savedByDay(t *Totals) error {
 	rows, err := s.reader().Query(`SELECT (SELECT date(e.at, 'localtime') FROM events e WHERE e.kind='job' AND e.job_id=jobs.id AND e.to_status=? ORDER BY e.seq DESC LIMIT 1) AS d,
-  COALESCE(SUM(`+savedSQL+`),0), COALESCE(SUM(`+waitingSQL+`),0), COALESCE(SUM(`+couldFreeSQL+`),0)
+  COALESCE(SUM(`+savedNowSQL+`),0), COALESCE(SUM(`+waitingSQL+`),0), COALESCE(SUM(`+couldFreeSQL+`),0)
 FROM jobs WHERE `+convertedNow("jobs")+` AND size_after>0 AND `+newestSQL+` GROUP BY d`, Done)
 	if err != nil {
 		return err
