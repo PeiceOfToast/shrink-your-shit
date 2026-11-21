@@ -403,7 +403,16 @@ func (s *Store) transition(id int64, to Status, set string, args ...any) error {
 
 // Claim hands the oldest queued job to worker and marks it running.
 // The claim is one statement, so several workers (parallelJobs) never take the same job.
-func (s *Store) Claim(worker string) (Job, error) {
+func (s *Store) Claim(worker string) (Job, error) { return s.claim(worker, nil) }
+
+// ClaimExcept claims the next job for worker, skipping the ids in except: the jobs this worker handed back to
+// the queue because it could not run them now (a graphics job's worker looking past processor jobs). Every
+// other job keeps its place in the queue's order, and a skipped one is taken by the next worker that claims.
+func (s *Store) ClaimExcept(worker string, except []int64) (Job, error) {
+	return s.claim(worker, except)
+}
+
+func (s *Store) claim(worker string, except []int64) (Job, error) {
 	now := s.stamp()
 	var id int64
 	// One statement, so a pause or a stop request set before it is always seen: no job is taken by a
@@ -416,6 +425,10 @@ func (s *Store) Claim(worker string) (Job, error) {
 	for lib := range s.removing {
 		skip += " AND (library_id IS NULL OR library_id != ?)" // a job made before libraries belongs to none
 		args = append(args, lib)
+	}
+	for _, id := range except {
+		skip += " AND id != ?"
+		args = append(args, id)
 	}
 	// A job waiting to be tried again (DD-2) is not taken before its time.
 	args = append(args, now, worker) // workerRecordSQL's own argument comes last

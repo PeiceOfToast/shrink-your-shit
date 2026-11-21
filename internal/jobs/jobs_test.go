@@ -261,6 +261,22 @@ func TestClaimIsAtomic(t *testing.T) {
 	}
 }
 
+// ClaimExcept takes the next job in the queue's order, skipping the ids it is told to (the jobs a worker
+// handed back looking past them for a graphics job, slice 18). A skipped job keeps its place: the next
+// worker takes it first.
+func TestClaimExceptSkipsTheJobsHandedBack(t *testing.T) {
+	s := open(t)
+	a, _ := s.Enqueue(Job{Library: "/m", Path: "/m/a.mkv"})
+	b, _ := s.Enqueue(Job{Library: "/m", Path: "/m/b.mkv"})
+	c, _ := s.Enqueue(Job{Library: "/m", Path: "/m/c.mkv"})
+	if j, err := s.ClaimExcept("w", []int64{a, b}); err != nil || j.ID != c {
+		t.Fatalf("claimed %d %v, want the third job %d", j.ID, err, c)
+	}
+	if j, err := s.Claim("w2"); err != nil || j.ID != a {
+		t.Fatalf("the next claim %d %v, want the skipped first job %d", j.ID, err, a)
+	}
+}
+
 func TestPausedAndUserStopped(t *testing.T) {
 	s := open(t)
 	if s.Paused() {

@@ -76,7 +76,11 @@ var gpuRunning = worker.GPURunning
 // slots are the local worker's slots: processor (parallelJobs) and graphics. A graphics slot is in use
 // while a job encodes on the card, as the worker counts it (it read 0 always before: user bug 11-20).
 func (v *workerView) slots(cfg jobs.WorkerConfig, s Settings, working int, t doctor.Tools) map[string]any {
-	return map[string]any{"cpu": map[string]int{"used": working, "total": s.ParallelJobs}, "gpu": map[string]int{"used": gpuRunning(), "total": gpuSlotLimit(cfg, t)}}
+	gpu := gpuRunning()
+	if s.GPUJobsSeparate { // a job on the card is not a processor place: the two counts are told apart
+		working = max(working-gpu, 0)
+	}
+	return map[string]any{"cpu": map[string]int{"used": working, "total": s.ParallelJobs}, "gpu": map[string]int{"used": gpu, "total": gpuSlotLimit(cfg, t)}}
 }
 
 // gpuSlotLimit is how many graphics slots the local worker has: the person's setting (Workers page),

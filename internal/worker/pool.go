@@ -15,8 +15,11 @@ import (
 // Pause all, Stop this file and a removed library's stop go to every worker.
 type Pool struct {
 	New   func(n int) *Worker // the n-th worker (1, 2, ...)
-	Size  func() int          // how many should run now (clamped to 1..MaxParallel)
+	Size  func() int          // how many should run now (clamped to 1..Cap)
 	Every time.Duration       // how often Size is read again (0: 2 s)
+	// Cap is the most workers the pool runs (0: MaxParallel). The graphics jobs setting adds the card's slots
+	// to Size, so the pool may run a slot's worth beside parallelJobs.
+	Cap int
 
 	mu      sync.Mutex
 	workers []*member
@@ -55,7 +58,11 @@ func (p *Pool) Run(ctx context.Context) {
 }
 
 func (p *Pool) resize(ctx context.Context) {
-	want := min(max(p.Size(), 1), MaxParallel)
+	limit := p.Cap
+	if limit <= 0 {
+		limit = MaxParallel
+	}
+	want := min(max(p.Size(), 1), limit)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	// workers asked to retire earlier and since finished leave the list

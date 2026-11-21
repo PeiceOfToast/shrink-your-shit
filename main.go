@@ -313,7 +313,11 @@ func main() {
 	// taking work and survives a restart.
 	integ := integrations.New(store, integrations.Options{Logf: log.Printf}) // Sonarr and Radarr: told after a replace
 	var cardEnv func(job jobs.Job, final string) flow.Env                    // FB2a: filled once the notifier exists below; read per job
+	gpuSlots := web.LocalGPUSlots(store, chk)
 	pool := &worker.Pool{
+		// The graphics jobs setting adds the card's slots to the pool, one worker each: they plan what they take,
+		// and a processor job they take goes straight back to the queue (worker.Worker.FilePlaces).
+		Cap: worker.MaxParallel + 8,
 		New: func(n int) *worker.Worker {
 			id := "builtin"
 			if n > 1 {
@@ -325,8 +329,14 @@ func main() {
 				Paused: localGate(joined, store), StallAfter: *stallAfter, // this computer's own switch, and not while joined
 				Encoder:           web.LocalEncoderFor(store, chk),
 				EncoderCandidates: web.LocalEncoderCandidates(store, chk),
-				GPUSlots:          web.LocalGPUSlots(store, chk),
-				GraphicsDecodes:   chk.Decodes,
+				GPUSlots:          gpuSlots,
+				FilePlaces: func() int {
+					if s, err := web.LoadSettings(store); err == nil && s.GPUJobsSeparate {
+						return s.ParallelJobs
+					}
+					return 0
+				},
+				GraphicsDecodes: chk.Decodes,
 				ShareDown: func(folder string, jobID int64) (worker.ShareDown, bool) {
 					return web.ShareDownFor(store, folder, jobID)
 				},
@@ -334,10 +344,11 @@ func main() {
 				Cards:  func(job jobs.Job, final string) flow.Env { return cardEnv(job, final) }}
 		},
 		Size: func() int {
-			if s, err := web.LoadSettings(store); err == nil {
-				return s.ParallelJobs
+			s, err := web.LoadSettings(store)
+			if err != nil {
+				return 1
 			}
-			return 1
+			return poolSize(s, gpuSlots())
 		},
 	}
 	if store.Paused() {
@@ -556,6 +567,16 @@ func scanTargets(store *jobs.Store) func() ([]scanner.Target, error) {
 		}
 		return out, nil
 	}
+}
+
+// poolSize is how many workers this program runs: Files at once. With "Graphics jobs don't wait for processor
+// jobs" on, each of the card's slots gets a worker too, so a graphics job starts while every Files at once
+// place is taken; it takes no place, so the processor jobs are still exactly ParallelJobs.
+func poolSize(s web.Settings, gpuSlots int) int {
+	if s.GPUJobsSeparate {
+		return s.ParallelJobs + gpuSlots
+	}
+	return s.ParallelJobs
 }
 
 // portOf is the port of a listen address ("127.0.0.1:8484" -> 8484); 0 when there is none.
