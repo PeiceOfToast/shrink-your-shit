@@ -462,6 +462,12 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 			}
 			last = time.Now()
 			body := map[string]any{"stage": "converting", "outTimeUs": p.OutTimeUS, "encoder": enc}
+			if p.Frame >= 0 { // frames and bytes keep an encode alive when its position is frozen (the server judges them)
+				body["frame"] = p.Frame
+			}
+			if p.TotalSize > 0 {
+				body["totalSize"] = p.TotalSize
+			}
 			if l.Job.DurationSec > 0 {
 				body["percent"] = p.Percent // a length we don't know has no percent
 			}

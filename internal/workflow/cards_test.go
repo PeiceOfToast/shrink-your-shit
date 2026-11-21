@@ -4,7 +4,10 @@ package workflow
 
 import (
 	"slices"
+	"strings"
 	"testing"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
 // The card contract (docs/architecture/flow-builder.md, section 1): every step the registry offers says
@@ -51,14 +54,46 @@ func TestEveryCardKeepsTheContract(t *testing.T) {
 				t.Errorf("%s: reads %q", d.Type, name)
 			}
 		}
-		if !d.Available {
-			t.Errorf("%s: offered but not available in this build", d.Type)
+		if d.Available == NotYet[d.Type] {
+			t.Errorf("%s: available %v, but NotYet says %v", d.Type, d.Available, NotYet[d.Type])
 		}
 		if d.Name == "" || d.TypeLabel == "" || d.Icon == "" || d.Description == "" {
 			t.Errorf("%s: a step with no name, label, icon or description: %+v", d.Type, d)
 		}
 		if d.Publishes == nil || d.Reads == nil || d.FileOn == nil { // the API sends [] and {}, never null
 			t.Errorf("%s: a nil list in the contract", d.Type)
+		}
+	}
+}
+
+// A card this build can't run yet can be saved in a draft, and Publish refuses the workflow naming it (FB1b).
+func TestNotYetCardsRefusePublish(t *testing.T) {
+	for typ := range NotYet {
+		d := Preset()
+		n := Node{ID: NewID(), Type: typ, TypeVersion: 1, Enabled: true, Config: map[string]any{"name": "profile", "text": "hello", "reason": "no"}}
+		if IsEnd(typ) { // an end hangs off a question's No
+			q := Node{ID: NewID(), Type: TypeCheckName, TypeVersion: 1, Enabled: true, Config: map[string]any{"pattern": "x"}}
+			first := d.Edges[0]
+			d.Nodes = append(d.Nodes, q, n)
+			d.Edges = append(d.Edges[1:], Edge{ID: NewID(), From: first.From, FromPort: "success", To: q.ID, ToPort: "in"},
+				Edge{ID: NewID(), From: q.ID, FromPort: "match", To: first.To, ToPort: "in"}, Edge{ID: NewID(), From: q.ID, FromPort: "else", To: n.ID, ToPort: "in"})
+		} else {
+			first := d.Edges[0]
+			d.Nodes = append(d.Nodes, n)
+			d.Edges = append(d.Edges[1:], Edge{ID: NewID(), From: first.From, FromPort: "success", To: n.ID, ToPort: "in"}, Edge{ID: NewID(), From: n.ID, FromPort: "success", To: first.To, ToPort: "in"})
+		}
+		r := Validate(d)
+		var hit []Issue
+		for _, i := range r.Issues {
+			if i.Code == "not_runnable_yet" && i.NodeID == n.ID {
+				hit = append(hit, i)
+			}
+		}
+		if len(hit) != 1 || !r.Errors() || !strings.Contains(hit[0].Message, "can't run in this version") {
+			t.Errorf("%s: %+v", typ, r.Issues)
+		}
+		if _, issues := ToTemplate(d, rules.Template{}); len(issues) != 0 { // the compile itself is ready for FB1c
+			t.Errorf("%s: compile %+v", typ, issues)
 		}
 	}
 }

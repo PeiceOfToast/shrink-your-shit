@@ -366,6 +366,7 @@ label.chk{cursor:pointer}
 /* U3 (C1): a library row has no table header: a 40 px tile, the name with its folder, one chip line of facts, and one
    status pill. The row stays 64 px or less at 1440. Checkboxes show only while selecting. */
 .list.rows .tbl td{height:auto;padding:6px 12px}
+.list.rows .tbl thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap} /* rows: the header is for screen readers only */
 .list.rows .tbl td.selc{display:none;padding-right:0}
 .list.rows.selecting .tbl td.selc{display:table-cell}
 .list.rows .tbl td.tile{width:40px;padding:6px 0 6px 12px}
@@ -423,23 +424,29 @@ label.chk{cursor:pointer}
   .list .tbl td.stc,.list .tbl td.actc,.list .tbl td.posc,.list .tbl td.sizec{display:block;flex:none}
   .list .tbl td.posc{min-width:20px}
   .list.selecting .tbl td.selc{display:block;flex:none}
-  .list .tbl td.idc .sub:not(.phone){display:none}   /* phone rows: the title and one muted line */
+  .list .tbl td.idc .sub:not(.phone):not(.runs){display:none}   /* phone rows: the title and one muted line; Workflows' Recent runs line stays */
   .list .tbl .desk{display:none}
   .list .tbl .ttl::before{content:"";position:absolute;inset:0}   /* the whole row opens it */
   .list .tbl td.selc,.list .tbl td.actc,.list .tbl .over{position:relative;z-index:1}
   .list .tbl td.selc input{width:22px;height:22px}
   .list.rows .tbl td.tile{display:block;flex:none;width:auto;padding:0}
   .list.rows .tbl td.tile .ltile{min-width:40px;height:40px}
+  .list.rows .tbl td.stc{width:auto} /* the desktop 1% width would let the pill spill over the switch and menu */
 }
 @media (max-width:599px){ /* U3: on a phone the status pill moves to a third line under the chips, under the tile's column */
   .list.rows .tbl tr{flex-wrap:wrap;row-gap:6px}
   .list.rows .tbl td.stc{flex:0 0 100%;padding:0 0 0 48px}
+  .list.rows .tbl.wflist tr{flex-wrap:nowrap}
+  .list.rows .tbl.wflist td{padding:0} /* keep after the td.stc indent above: same weight, wins on order */
+  .list.rows .tbl.wflist td.stc{flex:none} /* Workflows keeps one line: name, check pill, switch, menu (as before U5) */
+  .list.rows .tbl.wflist td.idc .row>span:last-child{min-width:0}
   .list .tbl.jobs td.sizec{flex:0 0 100%;padding:0 0 0 48px;text-align:left;width:auto}
 }
 @media (min-width:901px){.list.rows .tbl.jobs td.selc{display:table-cell}} /* desktop Jobs keeps its row checkboxes; the Libraries rule hides them */
 .pagehead .btn.help{width:24px;min-height:24px;height:24px}.pagehead .btn.help .ic{width:16px;height:16px}
 /* the favourite star: a fixed 32 px column, the icon centred, colour only (no pressed box), so names line up (design, step 2) */
-.tbl .btn.star{width:32px;min-width:32px;flex:none;justify-content:center;border-color:transparent;background:none}
+.tbl .btn.star{width:24px;min-width:24px;height:24px;min-height:24px;flex:none;justify-content:center;border-color:transparent;background:none;padding:0}
+.tbl .btn.star .ic{width:24px;height:24px}
 .tbl .btn.star:hover{background:var(--raised)}
 
 /* clean pass step 3 (DESIGN-DIRECTION-clean.md D1-D3): even KPI tiles, status in the header, panels as flat lists */
@@ -564,7 +571,7 @@ label.chk{cursor:pointer}
 .hit{display:inline-flex;align-items:center;position:relative;cursor:pointer}
 @media (pointer:coarse){
   .hit::before,.tbl .btn.star::before{content:"";position:absolute;left:50%;top:50%;width:44px;height:44px;transform:translate(-50%,-50%)}
-  .tbl .btn.star{position:relative;width:32px;min-width:32px;height:32px;min-height:32px}
+  .tbl .btn.star{position:relative;width:24px;min-width:24px;height:24px;min-height:24px}
   .hit input[type=checkbox]:not(.switch){width:20px;height:20px}
   .hit input.switch{width:38px;height:22px;border-radius:11px}.hit input.switch::after{width:14px;height:14px}.hit input.switch:checked::after{left:19px}
 }
@@ -593,15 +600,16 @@ label.chk{cursor:pointer}
 
 /* V7 Workers: cards, one column on phones */
 .wgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(340px,100%),1fr));gap:var(--gap)}
+.wgrid>.wcard:only-child{grid-column:1/-1} /* U5: one worker fills the content width */
 .wcard>.hd h2 a{color:var(--text);text-decoration:none}.wcard>.hd h2 a:hover{text-decoration:underline}
 .wcard.dim .bd,.wcard.dim h2 a,.wcard.dim h3 a{color:var(--text-2)}
 .btn.icon.gear{width:44px;height:44px;min-width:44px;min-height:44px} /* the worker settings link: a 44 px tap target at every width */
 .wcard dd a{display:block}
-/* Encoder cards (SCREENS V7, 11-13): lit = its test passed; dim (dashed, grey) = not there or failed. Words, not colour alone */
+/* Encoder cards (SCREENS V7, 11-13): lit = its test passed; dim (grey, with "(no)") = not there or failed. Words, not colour alone */
 .ec-h{margin:0 0 6px;font-weight:var(--fw-strong)}
 .ec-grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:8px}
 .ec-grid.big{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
-.ec{min-width:0;display:flex;flex-direction:column;gap:2px;padding:8px 10px;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--text-2);font-size:var(--fs-sm);overflow-wrap:anywhere}
+.ec{min-width:0;display:flex;flex-direction:column;gap:2px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-2);font-size:var(--fs-sm);overflow-wrap:anywhere}
 .ec.lit{color:var(--text);border:1px solid var(--accent);background:var(--surface)}
 .ec-lg{padding:12px 14px;font-size:var(--fs)}
 .ec-t{display:flex;align-items:center;flex-wrap:wrap;gap:4px 6px}
@@ -609,7 +617,7 @@ label.chk{cursor:pointer}
 .ec-ok{color:var(--success-text);font-weight:var(--fw-strong)}
 .ec-t input{margin:0;accent-color:var(--accent)}.ec.primary{box-shadow:inset 0 0 0 1px var(--accent)}.ec-wrap p{margin:6px 0 0}.ec-wrap p:empty{margin:0}
 /* formats on every tile (user bug 11-14): lit when tested, dim otherwise, like the Processor card */
-.ec-f{display:flex;flex-wrap:wrap;gap:2px 8px}.ec-f>span{color:var(--text-2);text-decoration:line-through}.ec-f>span.on{color:var(--text);text-decoration:none;font-weight:var(--fw-strong)}
+.ec-f{display:flex;flex-wrap:wrap;gap:2px 8px}.ec-f>span{color:var(--text-2)}.ec-f>span.on{color:var(--text);font-weight:var(--fw-strong)}
 .ec-meta{color:var(--text-2);margin-top:4px}
 @media (max-width:479px){.ec-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.ec-grid.big{grid-template-columns:minmax(0,1fr)}}
 @media (pointer:coarse){.wcard dd a{display:flex;align-items:center;min-height:44px}}
@@ -754,15 +762,16 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .ginspect .ginform .input,.ginspect .ginform select{width:100%;max-width:100%;min-width:0} /* review 13f1c75 P3: no cut-off selects in the narrow panel */
 @media (pointer:coarse){.gfold>summary{min-height:44px;display:flex;align-items:center}.gpi{min-height:44px}}
 .fieldbad>.field .input,.fieldbad>.field select,.fieldbad>fieldset{border-color:var(--error);box-shadow:0 0 0 1px var(--error)} /* #165: a setting with a value it cannot use */
-/* user item 5 (design 7.3): the Dashboard as an overview: a headline band, flat sections, two small day charts */
-.ov .headline{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;align-items:end;padding:8px 0 16px;border-bottom:1px solid var(--border)}
-.ov .big{font-size:var(--fs-display);line-height:1.05;font-weight:var(--fw-strong);letter-spacing:-.02em;margin-bottom:8px}
-.ov .big small{font-size:var(--fs-lg);font-weight:400;color:var(--text-2);letter-spacing:0;margin-left:6px}
-.ov .stats{display:flex;gap:32px;flex-wrap:wrap}
-.ov .stats div{display:flex;flex-direction:column;gap:2px}
-.ov .stats b{font-size:var(--fs-xl);font-weight:var(--fw-strong)}
-.ov .stats span{color:var(--text-2);font-size:var(--fs-sm)}
-.ov .stats a{color:var(--text);text-decoration:none}.ov .stats a.bad b{color:var(--error-text)}
+/* user item 5 (design 7.3): the Dashboard as an overview: stat tiles with sparklines (U6), flat sections, two small day charts */
+.ov .tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s4)}
+.ov .tile{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:var(--s4);display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto auto;gap:4px var(--s3);align-content:start;min-width:0}
+.ov .tile .l{grid-column:1;color:var(--text-2);font-size:var(--fs-sm);font-weight:var(--fw-strong)}
+.ov .tile .v{grid-column:1;font-size:var(--fs-display);font-weight:var(--fw-strong);line-height:1.1;letter-spacing:-.01em;overflow-wrap:anywhere}
+.ov .tile .v small{font-size:var(--fs-lg);font-weight:400;color:var(--text-2);letter-spacing:0;margin-left:6px}
+.ov .tile .v.ok{color:var(--success-text)}
+.ov .tile .d{grid-column:1;color:var(--text-2);font-size:var(--fs-sm);overflow-wrap:anywhere}
+.ov .tile .d a{color:var(--text)}.ov .tile .d a.bad{color:var(--error-text)}
+.ov .tile .spark{grid-column:2;grid-row:1/4;width:128px;height:56px;align-self:end;overflow:visible}
 .ov .sec>h2{font-size:var(--fs-lg);font-weight:var(--fw-strong);margin:0 0 10px;display:flex;align-items:baseline;gap:12px}
 .ov .sec>h2 .more{margin-left:auto;font-size:var(--fs);font-weight:400;color:var(--text-2)}
 .ov .sec+.sec{margin-top:20px}
@@ -784,8 +793,12 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .ov .chartfoot b{color:var(--text);margin-left:6px}.ov .chartfoot details{margin-left:auto}.ov .chartfoot details[open]{flex-basis:100%;margin-left:0;min-width:0/* a flex item is as wide as its table otherwise, so .daytbl never scrolls and the page does (390 px) */}
 .ov .quiet{margin:0;display:flex;align-items:center;justify-content:center;text-align:center;min-height:160px;padding:12px;border:1px solid var(--border);border-radius:var(--radius)}.ov .quiet.short{min-height:80px}
 
+/* U6 review2: at 901-1200 px the sparkline sits under the text, full tile width, so the figure keeps the whole tile */
+@media (min-width:901px) and (max-width:1280px){
+  .ov .tile{grid-template-columns:minmax(0,1fr)}.ov .tile .spark{grid-column:1 / -1;grid-row:auto;width:100%;height:40px;align-self:auto}
+}
 @media (max-width:900px){
-  .ov .headline{grid-template-columns:minmax(0,1fr);gap:8px}.ov .stats{gap:20px}
+  .ov .tiles{grid-template-columns:minmax(0,1fr)}.ov .tile{grid-template-columns:minmax(0,1fr) 96px}.ov .tile .spark{width:96px;height:40px}
   .ov .charts{grid-template-columns:minmax(0,1fr);gap:24px}
   .ov .legend.ph{display:none}
   .ov .ovt,.ov .ovt tbody{display:block}.ov .ovt thead{display:none}
@@ -797,9 +810,8 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 }
 /* overview at phone widths (m7, overview-mock): the day table scrolls in its own box; links and the failed count are 44 px targets on touch */
 .ov .daytbl{overflow-x:auto;max-width:100%}.ov .daytbl td,.ov .daytbl th{white-space:nowrap}/* it scrolls now, so "567 MB" stays on one line */
-@media (pointer:coarse){.ov .sec>h2 .more,.ov .stats a,.ov a.fname,.ov td.nm a,.ov details>summary{display:inline-flex;align-items:center;min-height:44px}}
+@media (pointer:coarse){.ov .sec>h2 .more,.ov .tile .d a,.ov a.fname,.ov td.nm a,.ov details>summary{display:inline-flex;align-items:center;min-height:44px}}
 .ov .kv{grid-template-columns:auto minmax(0,1fr)} /* the 30-day totals keep label and figure on one line on phones */
-@media (max-width:640px){.ov .stats{gap:12px 20px}.ov .stats div{min-width:calc(50% - 10px)}} /* review a7d25ec P3: the four headline figures sit two by two on a phone */
 /* Settings > Connections (V9e): a folder row is "<app> sees" -> "Shrink Your Shit sees" x; at phone widths the two fields stack */
 .cfold>summary{cursor:pointer;overflow-wrap:anywhere}
 .cmap{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr) auto;gap:8px;align-items:end}

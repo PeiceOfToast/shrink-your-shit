@@ -145,7 +145,7 @@ func ToTemplate(d Doc, current rules.Template) (rules.Template, []Issue) {
 	}
 	d = resolved
 	order, ok := straightChain(d)
-	if !ok || hasOnError(d) { // V6a: a workflow with checks; V6b: or a step's own choice for when it doesn't work
+	if !ok || hasOnError(d) || hasRunCards(d) { // V6a: checks; V6b: a step's own failure choice; FB1b: actions and ends on the chain
 		return branchTemplate(d)
 	}
 	types := make([]string, len(order))
@@ -382,6 +382,17 @@ func orEmpty(s []string) []string {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// hasRunCards reports whether d has a step the run engine executes outside the conversion (FB1b: a
+// question, an action or an end), so it compiles as paths even when it is one chain.
+func hasRunCards(d Doc) bool {
+	for _, n := range d.Nodes {
+		if IsQuestion(n.Type) || IsAction(n.Type) || IsEnd(n.Type) {
+			return true
+		}
+	}
+	return false
+}
 
 // hasOnError reports whether a step of d has its own choice for when it doesn't work (V6b).
 func hasOnError(d Doc) bool {
