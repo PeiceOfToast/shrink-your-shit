@@ -191,6 +191,33 @@ func TestV2WorkerGraphicsSlotsHoldTheJobCount(t *testing.T) {
 	}
 }
 
+// With "Graphics jobs don't wait for processor jobs" on, a job on the card is not a processor place: the
+// Workers view's processor used count leaves it out. Off (today), every running job counts as before.
+func TestV2WorkerSlotsTellGraphicsJobsApartWhenTheSettingIsOn(t *testing.T) {
+	old := gpuRunning
+	gpuRunning = func() int { return 1 }
+	defer func() { gpuRunning = old }()
+
+	v := &workerView{}
+	one := 1
+	tools := doctor.Tools{Hardware: []string{"hevc_nvenc"}}
+	for _, c := range []struct {
+		name     string
+		s        Settings
+		cpu, gpu int
+	}{
+		{"off", Settings{ParallelJobs: 2}, 2, 1},
+		{"on", Settings{ParallelJobs: 2, GPUJobsSeparate: true}, 1, 1},
+	} {
+		slots := v.slots(jobs.WorkerConfig{GPUSlots: &one}, c.s, 2, tools)
+		cpu, _ := slots["cpu"].(map[string]int)
+		gpu, _ := slots["gpu"].(map[string]int)
+		if cpu["used"] != c.cpu || gpu["used"] != c.gpu || cpu["total"] != 2 || gpu["total"] != 1 {
+			t.Errorf("%s: %v, want processor used %d and graphics used %d", c.name, slots, c.cpu, c.gpu)
+		}
+	}
+}
+
 // The live stream says the worker is there every few seconds (worker.heartbeat, no id).
 func TestV2WorkerHeartbeat(t *testing.T) {
 	old := eventHeartbeat

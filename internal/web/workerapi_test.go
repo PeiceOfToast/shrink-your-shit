@@ -172,6 +172,39 @@ func TestRemoteWorkerPairingAndLeases(t *testing.T) {
 	}
 }
 
+// Slice 18: a remote lease on a queued row that still carries an earlier failure's words and code starts with
+// both clear. The claim keeps them (a hand-back puts them back), and this attempt starts here (a remote job
+// never hands back). Mutation: with the SetError call in the lease handler removed, both stay on the row.
+func TestRemoteLeaseStartsWithoutTheEarlierWords(t *testing.T) {
+	srv, st, _, _ := libServer(t, true)
+	code, _, _ := st.NewPairing(time.Now())
+	w, token, err := st.Pair(code, "Desktop", "test", "", "", WorkerAPILevel, "", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "a.mkv"), SizeBefore: 1000})
+	if err := st.SetError(id, "The disk was full when it last ran.", "disk_full"); err != nil {
+		t.Fatal(err)
+	}
+	c, b := workerCall(t, srv, "lease", token, `{"slots":1}`, WorkerAPILevel)
+	var l struct{ Lease struct{ ID string } }
+	json.Unmarshal([]byte(b), &l)
+	if c != 200 || l.Lease.ID == "" {
+		t.Fatalf("lease %d %s", c, b)
+	}
+	j, err := st.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j.Status != jobs.Running || j.Worker != w.ID {
+		t.Errorf("leased job %s on %q, want running on %s", j.Status, j.Worker, w.ID)
+	}
+	if j.Error != "" || j.ErrorCode != "" {
+		t.Errorf("the lease starts with the row's earlier words %q %q, want both clear", j.Error, j.ErrorCode)
+	}
+}
+
 // The worker API itself refuses a public peer on plain HTTP, also one that forges X-Forwarded-Proto.
 func TestWorkerAPIRefusesPlainHTTPFromOutside(t *testing.T) {
 	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))

@@ -39,6 +39,9 @@ import (
 // Queue is everything a worker needs from the job store.
 type Queue interface {
 	Claim(worker string) (jobs.Job, error)
+	// ClaimExcept claims the next job for worker, skipping the ids in except: jobs it handed back because it
+	// could not run them now. Every other job keeps its place in the queue's order.
+	ClaimExcept(worker string, except []int64) (jobs.Job, error)
 	Progress(id int64, pct float64) error
 	Complete(id int64, outputPath string, sizeAfter int64) error
 	Fail(id int64, code, msg string) error
@@ -55,6 +58,12 @@ type Queue interface {
 	RecordRunRevision(id, revID int64, tmpl rules.Template) error
 	SetFailureSummary(id int64, f jobs.FailureSummary) error
 	ClearFailureSummary(id int64) error
+	// SetError stores the job's plain words and code without moving it: an attempt clears the words its queue
+	// row carried (the claim keeps them), and a hand-back puts them back.
+	SetError(id int64, msg, code string) error
+	// FailureOf is a job's earlier attempt's failure summary (nil when it has none): a job handed back to the
+	// queue before it started keeps it.
+	FailureOf(id int64) (*jobs.FailureSummary, error)
 	// UserStopped turns a job the person stopped into a file skipped as user_stopped.
 	UserStopped(id int64) error
 	// StopRequested reports whether "Stop this file" was asked for a running job (checked before the swap).
@@ -158,6 +167,11 @@ type Worker struct {
 	// waiting keeps the limit it read when it started waiting. 0: the processor does the encoding. nil
 	// (a test's worker): no limit, every graphics job runs. All of the program's workers share the one card.
 	GPUSlots func() int
+	// FilePlaces is how many Files-at-once places this computer's jobs take for a conversion on the processor
+	// ("Graphics jobs don't wait for processor jobs", Workers page), read at each job's encode: a job on the
+	// card holds none, so it runs beside the processor jobs. 0 or nil: no such places — the pool's own workers
+	// are the limit, exactly as before. All of the program's workers share them.
+	FilePlaces func() int
 	// verified is the probe of the new file the last check passed (S5: stored for its final path).
 	verified media.Info
 	// movedAside is the trash sentence for our earlier output this job moved aside (Convert again). The job's kept
@@ -229,6 +243,8 @@ type Worker struct {
 	// the job and retry clock: a test that freezes Now (fixed retry times) must not freeze the watchdog, or a
 	// hung encode is never stopped.
 	stallClock func() time.Time
+	// sizeOnDisk, when set, replaces the stat of the running encode's temp file (tests fake the growth with it).
+	sizeOnDisk func(path string) (int64, error)
 
 	// scorePlace, when set, replaces ssimSegment as the per-place scorer (tests fake the scores with it).
 	scorePlace scoreFunc
@@ -240,14 +256,18 @@ type Worker struct {
 	current    int64              // the running job's id (0: none)
 	cancelJob  context.CancelFunc // stops only the running job
 	stopped    stopKind           // why the running job was stopped (stopNone: it was not)
-	progressAt atomic.Int64       // UnixNano of the running encode's last progress (stall watchdog)
-	finishing  atomic.Bool        // the position is at the file's length: the stall watchdog gives the finishing allowance
-	stalledFor atomic.Int64       // the limit (ns) the watchdog last stopped an encode at: the message says it
-	positionAt atomic.Int64       // UnixNano of the running encode's last forward move of out_time (the frozen-position ceiling)
+	// refused are the jobs this worker handed back to the queue because every Files at once place was busy: it
+	// claims past them while they still are, so a graphics job behind them is found (under mu).
+	refused    []int64
+	progressAt atomic.Int64 // UnixNano of the running encode's last progress (stall watchdog)
+	finishing  atomic.Bool  // the position is at the file's length: the stall watchdog gives the finishing allowance
+	stalledFor atomic.Int64 // the limit (ns) the watchdog last stopped an encode at: the message says it
+	positionAt atomic.Int64 // UnixNano of the running encode's last forward move of out_time (the frozen-position ceiling)
 	// the running local encode's output against its source at the last report: past twice the source (overSize), with the
 	// two sizes, so a stall stop can say why it stopped (stopOver: the stop that fired was for that size).
 	overSize, stopOver atomic.Bool
 	outBytes, srcBytes atomic.Int64
+	diskBytes          atomic.Int64 // the running encode's temp file on disk at the watchdog's last check: its growth is progress
 	// the running job's run counters (log-spec L2 summary): the ffmpeg runs it needed and the bytes it wrote.
 	passes, bytesWritten atomic.Int64
 	statsCounting        atomic.Bool // false: this job's counters are not recorded (a remote job, whose runs are not all here)
@@ -383,13 +403,34 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 		w.mu.Unlock()
 		return false, nil
 	}
-	job, err := w.Queue.Claim(w.ID)
+	// While every Files at once place is busy this worker claims past the jobs it already handed back (they
+	// would convert on the processor), so a graphics job behind them is found. The queue's own order is not
+	// changed: every other job is taken in the same order as before.
+	limit := w.filePlaceLimit()
+	var except []int64
+	if limit > 0 && filePlacesBusy(limit) {
+		if len(w.refused) >= maxSkipAhead {
+			w.mu.Unlock()
+			return false, nil // looked far enough ahead; a place frees or the queue moves on
+		}
+		except = append(except, w.refused...)
+	}
+	var job jobs.Job
+	var err error
+	if len(except) == 0 {
+		job, err = w.Queue.Claim(w.ID)
+	} else {
+		job, err = w.Queue.ClaimExcept(w.ID, except)
+	}
 	if err != nil {
 		w.mu.Unlock()
 		if errors.Is(err, jobs.ErrNoJob) {
 			return false, nil
 		}
 		return false, err
+	}
+	if len(except) == 0 {
+		w.refused = w.refused[:0] // the head was taken: whatever was handed back is claimable again, in its place
 	}
 	jobCtx, cancel := context.WithCancel(ctx)
 	w.current, w.cancelJob, w.stopped = job.ID, cancel, stopNone
@@ -414,6 +455,19 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 	defer w.recordStats(job.ID)   // and stored once its outcome is recorded
 	defer w.summaryLine(job.ID)   // the job's last line: its verdict, once its outcome is recorded
 	w.jobf(job.ID, ": started")
+	// A job handed back before it started keeps its earlier attempt's failure summary and the plain words its
+	// queue row carried (it was waiting to be tried again); only an attempt that starts clears them. Saved
+	// here, restored on the hand-back below.
+	var prevFailure *jobs.FailureSummary
+	if w.filePlaceLimit() > 0 {
+		prevFailure, _ = w.Queue.FailureOf(job.ID)
+	}
+	prevError, prevCode := job.Error, job.ErrorCode // the claim leaves them on the row (jobs.Store.claim)
+	if prevError != "" || prevCode != "" {
+		if err := w.Queue.SetError(job.ID, "", ""); err != nil {
+			log.Printf("worker %s: job %d: clearing its earlier words: %v", w.ID, job.ID, err)
+		}
+	}
 	// a new attempt: an earlier attempt's failure summary is not this one's (a kept attempt would show it)
 	if err := w.Queue.ClearFailureSummary(job.ID); err != nil {
 		log.Printf("clear failure summary of job %d: %v", job.ID, err)
@@ -455,6 +509,28 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 	if err != nil && stopped == stopUser {
 		w.jobf(job.ID, ": stopped by the person, original untouched")
 		return true, w.Queue.UserStopped(job.ID)
+	}
+	// Not started at all: it would convert on the processor and every Files at once place is in use, so the
+	// worker handed it back after planning it (it was there for a graphics job). Its earlier attempt's failure
+	// summary and words are put back, and this worker does not plan it again while the places are still full.
+	// A hand-back writes this attempt's start and plan lines first (the log reads as several attempts that never
+	// happened); it happens at most maxSkipAhead times per worker per full-places stretch.
+	if errors.Is(err, errNoFilePlace) && stopped == stopNone && ctx.Err() == nil {
+		if prevFailure != nil {
+			if serr := w.Queue.SetFailureSummary(job.ID, *prevFailure); serr != nil {
+				log.Printf("worker %s: job %d: putting its failure summary back: %v", w.ID, job.ID, serr)
+			}
+		}
+		if prevError != "" || prevCode != "" {
+			if serr := w.Queue.SetError(job.ID, prevError, prevCode); serr != nil {
+				log.Printf("worker %s: job %d: putting its earlier words back: %v", w.ID, job.ID, serr)
+			}
+		}
+		w.mu.Lock()
+		w.refused = append(w.refused, job.ID)
+		w.mu.Unlock()
+		w.jobf(job.ID, ": not started: it would convert on the processor and every Files at once place is in use; another worker runs it when one frees")
+		return false, w.Queue.Release(job.ID)
 	}
 	// A stop that came after the new file was in place changes nothing: the job is done (below).
 	if err != nil && stopped != stopNone && ctx.Err() == nil {
@@ -905,20 +981,24 @@ func reachedEnd(outUS, durationSec float64) bool {
 
 // watchStall stops job id (stopStall) if its encode reports no progress for stallAfter (stallLimit once it is
 // finishing). The returned func ends the watch. Checks after the encode have their own time limits (slice 10).
-func (w *Worker) watchStall(id int64) func() {
+func (w *Worker) watchStall(job jobs.Job, out string) func() {
+	id := job.ID
 	now := w.stallNow()
 	w.progressAt.Store(now.UnixNano())
 	w.positionAt.Store(now.UnixNano())
 	w.finishing.Store(false)
 	w.overSize.Store(false)
+	w.diskBytes.Store(0)
+	w.srcBytes.Store(job.SizeBefore)
 	after := w.stallAfter()
 	done := make(chan struct{})
 	stopFor := func(limit time.Duration) {
 		w.stalledFor.Store(int64(limit))
 		if w.overSize.Load() { // past twice the source: the new file cannot save space, so say that, not "no progress"
 			w.stopOver.Store(true)
+			// the size is ffmpeg's count or the temp file's on disk, whichever is larger: a silent encode reports 0
 			w.jobf(id, ": the new file is more than twice the original's size (%s, original %s), and its position has not moved for %s; stopping it",
-				rules.HumanBytes(w.outBytes.Load()), rules.HumanBytes(w.srcBytes.Load()), limit)
+				rules.HumanBytes(max(w.outBytes.Load(), w.diskBytes.Load())), rules.HumanBytes(w.srcBytes.Load()), limit)
 		} else {
 			w.stopOver.Store(false)
 			w.jobf(id, ": no progress for %s, stopping it", limit)
@@ -934,12 +1014,26 @@ func (w *Worker) watchStall(id int64) func() {
 	go func() {
 		t := time.NewTicker(max(after/20, 10*time.Millisecond))
 		defer t.Stop()
+		// the temp file's size at the last check. Growth counts only past this peak: a file that shrinks and regrows
+		// below its old size is not seen as growth until it passes the peak (a known limit, accepted; see the review).
+		var seen int64
 		for {
 			select {
 			case <-done:
 				return
 			case <-t.C:
 				now := w.stallNow() // the watchdog's clock: tests move it by hand, production's is the wall clock
+				// one stat a tick: a temp file that grew since the last check is the encode writing, alive while the
+				// output stays within twice the source; past that it is not progress, and the stop says why
+				if n, ok := w.tempSize(out); ok && n > seen {
+					seen = n
+					w.diskBytes.Store(n)
+					if outputWithin(job.SizeBefore, n) {
+						w.progressAt.Store(now.UnixNano())
+					} else if job.SizeBefore > 0 { // an unknown source size is no bound, so it is not "over twice"
+						w.overSize.Store(true)
+					}
+				}
 				finishing := w.finishing.Load()
 				limit := w.stallLimit(after, finishing)
 				if now.Sub(time.Unix(0, w.progressAt.Load())) >= limit {
@@ -956,6 +1050,19 @@ func (w *Worker) watchStall(id int64) func() {
 		}
 	}()
 	return func() { close(done) }
+}
+
+// tempSize is the temp file's size on disk, false when it cannot be read (sizeOnDisk replaces the stat in tests).
+func (w *Worker) tempSize(path string) (int64, bool) {
+	if w.sizeOnDisk != nil {
+		n, err := w.sizeOnDisk(path)
+		return n, err == nil
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0, false
+	}
+	return fi.Size(), true
 }
 
 // watchRemoteStall is watchStall for a remote worker's encode: the worker reports its position, and the
@@ -1468,10 +1575,12 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	gpu := ""
 	full := false        // gpu runs the full GPU pipeline (decode and encode on the graphics card)
 	var gpuSlot *GPUSlot // the card's place this job holds while its graphics encode runs
+	var place *filePlace // the Files at once place this job holds while it converts on the processor
 	defer func() {
 		if gpuSlot != nil {
 			gpuSlot.Release()
 		}
+		place.Release()
 	}()
 	args := plan.FFmpegArgs(srcPath, tmp)
 	w.setPhase(secEncode) // the encoder choice and its notes belong to encode (log-spec section 4)
@@ -1519,6 +1628,18 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	if !plan.Video.Copy && w.remote == nil { // R5's last line: the encoder the real encode uses, why, and its settings
 		w.logLine(job.ID, secEncode, jobs.LevelInfo, ChosenLine(plan, gpu, args, chosenWhy))
+	}
+	// "Graphics jobs don't wait for processor jobs" (Workers page): a job that converts on the processor takes
+	// one of the Files at once places, held until it ends; one on the card takes none, so it runs beside the
+	// processor jobs. With every place in use this job is handed back to the queue rather than waiting here,
+	// which is how the worker added for the card finds the graphics job behind it. The queue's order does not
+	// change: the next worker with a free place takes this job first.
+	if gpu == "" {
+		if limit := w.filePlaceLimit(); limit > 0 {
+			if place = tryFilePlace(limit); place == nil {
+				return "", errNoFilePlace
+			}
+		}
 	}
 	// The new file's rules, now that the encoder that runs is known: the main video by the plan's format,
 	// its height and width (±2 px) and the depth that encoder makes; every other stream as today.
@@ -1569,9 +1690,22 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	} else {
 		// The local ladder (attempt.go): a graphics rung that fails steps down, and the card's slot is given up when
 		// the processor takes over. Each run keeps its own start time for the record of the rung.
+		needPlace := false // the card failed: the processor's rung is next, and it takes a Files at once place then
 		run := func(ctx context.Context, rargs []string) (string, error) {
+			if needPlace { // a graphics job that fell back waits for a place first, so it is never a third processor job
+				needPlace = false
+				p, perr := w.takeFilePlace(ctx, job)
+				if perr != nil {
+					return "", perr
+				}
+				if place == nil {
+					place = p
+				} else {
+					p.Release()
+				}
+			}
 			encStart = w.now()
-			_, raw, frames, err := w.encodeRun(ctx, job, rargs)
+			_, raw, frames, err := w.encodeRun(ctx, job, rargs, tmp)
 			decoded = frames
 			return raw, err
 		}
@@ -1579,6 +1713,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			OnRung: func(r Rung) {
 				if r.Encoder == "" && gpuSlot != nil { // the processor converts from here: the card is free for another job
 					gpuSlot.Release()
+				}
+				if r.Encoder == "" && place == nil {
+					needPlace = true
 				}
 				enc, conv := encoderWordsUsed(plan, r.Encoder), convertingTo(plan, src, r.Encoder)
 				if r.Encoder == "" {
@@ -2800,19 +2937,21 @@ func (w *Worker) stalled() bool {
 // encodeRun is encodeLocal with the encode's log split in two: the raw log, where ffmpeg's end-of-run
 // report says what it read and decoded (slice 13), and the error lines alone, which every other reader of
 // the log expects (as -v error wrote it).
-func (w *Worker) encodeRun(ctx context.Context, job jobs.Job, args []string) (errText, raw string, frames int64, err error) {
+func (w *Worker) encodeRun(ctx context.Context, job jobs.Job, args []string, out string) (errText, raw string, frames int64, err error) {
 	w.recordEncodeStart(job.ID, args, w.now())
-	raw, frames, err = w.encodeLocal(ctx, job, args)
+	raw, frames, err = w.encodeLocal(ctx, job, args, out)
 	return media.ErrorLines([]byte(raw)), raw, frames, err
 }
 
 // encodeLocal runs ffmpeg for the local worker's job: its progress, stall watch and live figures.
-func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (string, int64, error) {
+func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string, out string) (string, int64, error) {
 	var encErr string
 	var terr error
 	frames := int64(-1) // the last frame count ffmpeg reported
 	wrote := int64(0)   // the most bytes it reported writing in this attempt (the run counters, L2)
-	stopWatch := w.watchStall(job.ID)
+	// out is the staged temp file the encode writes: the watchdog stats it, not the last argument, which is a
+	// subtitle file when the plan extracts subtitles to .srt (rules.Plan.withSubtitleFiles appends them)
+	stopWatch := w.watchStall(job, out)
 	w.quietOn.Store(true) // R9's quiet warning: the stall watcher checks it with this clock
 	w.outputSeen(w.stallNow())
 	defer w.quietOn.Store(false)
@@ -2823,11 +2962,14 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 	encErr, terr = media.TranscodeLines(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
 		// the encode is alive while its position moves, or while its frame count or bytes written grow and the output
 		// stays within twice the source's size (a runaway output past that is not progress). out_time follows the
-		// most-behind stream, so it freezes in a subtitle gap while frames still go on (bug 2).
+		// most-behind stream, so it freezes in a subtitle gap while frames still go on (bug 2). The output's size is the
+		// larger of ffmpeg's total_size and the temp file's size on disk (the watchdog's check): a faststart rewrite or
+		// a frozen progress block still shows the file growing.
 		posMoved := p.OutTimeUS > at // a position further on: one that repeats is not progress
-		outputOK := outputWithin(job.SizeBefore, p.TotalSize)
+		total := max(p.TotalSize, w.diskBytes.Load())
+		outputOK := outputWithin(job.SizeBefore, total)
 		w.overSize.Store(job.SizeBefore > 0 && !outputOK) // an unknown source size is not "over twice": there is no bound
-		w.outBytes.Store(p.TotalSize)
+		w.outBytes.Store(total)
 		w.srcBytes.Store(job.SizeBefore)
 		alive := posMoved || (outputOK && (p.Frame > frames || p.TotalSize > wrote))
 		frames = p.Frame

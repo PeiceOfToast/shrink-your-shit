@@ -129,6 +129,7 @@ type scenario struct {
 	calls    []string
 	exec     *media.FakeExec
 	moreSrcs map[string]bool // other originals in the queue (probed like src)
+	srcSpecs map[string]spec // an original's own streams, when they differ from srcSpec
 	srtBytes int             // the size the fake encoder gives an extracted .srt (0: a few bytes)
 }
 
@@ -223,7 +224,11 @@ func (s *scenario) handle(name string, args []string) (string, string, error) {
 			if s.srcProbeFails {
 				return "", "", errors.New("ffprobe: moov atom not found")
 			}
-			return s.srcSpec.json(), "", nil
+			spec := s.srcSpec
+			if alt, ok := s.srcSpecs[last]; ok { // this original's own streams (a 10-bit one, for instance)
+				spec = alt
+			}
+			return spec.json(), "", nil
 		}
 		if s.outProbeRaw != "" {
 			return s.outProbeRaw, "", nil
@@ -944,6 +949,28 @@ func TestBenignMessagesDoNotRefuseAGoodFile(t *testing.T) {
 	s.run(Replace)
 	if j := s.job(); j.Status != jobs.Done {
 		t.Errorf("harmless start-of-stream messages must not refuse a good file: %+v", j)
+	}
+}
+
+// #588 QA case 2: x265's own info lines (the banner, CPU caps, thread pool: 23 of them on a normal file)
+// bury the lines that matter in the visible job log; they stay out of it, and an x265 warning stays visible.
+func TestX265InfoLinesStayOutOfTheVisibleLog(t *testing.T) {
+	s := newScenario(t)
+	s.encodeStderr = strings.Join([]string{
+		"x265 [info]: HEVC encoder version 4.1",
+		"x265 [info]: using cpu capabilities: MMX2 SSE2Fast LZCNT SSSE3 SSE4.2 AVX FMA3 BMI2 AVX2",
+		"x265 [info]: frame I: 5, Avg QP:22.01  kb/s: 1123.45",
+		"x265 [warning]: halving the quality when psy-rd is enabled for 444 input",
+	}, "\n")
+	s.run(Replace)
+	if j := s.job(); j.Status != jobs.Done {
+		t.Fatalf("status %s %q, want done", j.Status, j.Error)
+	}
+	if l := findLine(t, s.store, s.id, "encode", "x265 [info]"); l != nil {
+		t.Errorf("x265's info line is in the visible log: %+v", *l)
+	}
+	if l := findLine(t, s.store, s.id, "encode", "x265 [warning]"); l == nil {
+		t.Error("x265's warning line is missing from the visible log")
 	}
 }
 

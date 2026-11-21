@@ -261,6 +261,43 @@ func TestClaimIsAtomic(t *testing.T) {
 	}
 }
 
+// ClaimExcept takes the next job in the queue's order, skipping the ids it is told to (the jobs a worker
+// handed back looking past them for a graphics job, slice 18). A skipped job keeps its place: the next
+// worker takes it first.
+func TestClaimExceptSkipsTheJobsHandedBack(t *testing.T) {
+	s := open(t)
+	a, _ := s.Enqueue(Job{Library: "/m", Path: "/m/a.mkv"})
+	b, _ := s.Enqueue(Job{Library: "/m", Path: "/m/b.mkv"})
+	c, _ := s.Enqueue(Job{Library: "/m", Path: "/m/c.mkv"})
+	if j, err := s.ClaimExcept("w", []int64{a, b}); err != nil || j.ID != c {
+		t.Fatalf("claimed %d %v, want the third job %d", j.ID, err, c)
+	}
+	if j, err := s.Claim("w2"); err != nil || j.ID != a {
+		t.Fatalf("the next claim %d %v, want the skipped first job %d", j.ID, err, a)
+	}
+}
+
+// Slice 18: the claim leaves the queue row's error and error_code as they were. The attempt clears them when it
+// starts (worker.runClaimed, and the remote API's lease), so a job this claim hands back can put its earlier
+// words back. The old claim cleared them itself, and this is what catches that.
+func TestClaimKeepsTheRowsWords(t *testing.T) {
+	s := open(t)
+	id, _ := s.Enqueue(Job{Library: "/m", Path: "/m/a.mkv"})
+	if err := s.SetError(id, "The disk was full when it last ran.", "disk_full"); err != nil {
+		t.Fatal(err)
+	}
+	j, err := s.Claim("w")
+	if err != nil || j.ID != id {
+		t.Fatalf("claimed %d %v, want %d", j.ID, err, id)
+	}
+	if j.Status != Running || j.Error != "The disk was full when it last ran." || j.ErrorCode != "disk_full" {
+		t.Errorf("claimed %s %q %q, want the row's own words kept", j.Status, j.Error, j.ErrorCode)
+	}
+	if got, _ := s.Get(id); got.Error != j.Error || got.ErrorCode != j.ErrorCode {
+		t.Errorf("read back %q %q, want the words the claim returned", got.Error, got.ErrorCode)
+	}
+}
+
 func TestPausedAndUserStopped(t *testing.T) {
 	s := open(t)
 	if s.Paused() {

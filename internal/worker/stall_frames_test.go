@@ -77,7 +77,7 @@ func encodeLines(t *testing.T, s *scenario) (warn int, stopped bool) {
 // Bug 2: out_time frozen for longer than StallAfter, with frame= (or total_size=) still growing within twice the
 // source's size, is an encode that is alive: not stopped, and no "has not moved" warning, though the fake clock runs
 // past 30 s without out_time moving. The scenario's source is 14 bytes, so the bytes stay within the bound for 28
-// reports; 24 reports, each moving the worker's clock 1.5 s, stay inside the 2 s stall allowance at every report
+// reports; 24 reports, each moving the stall clock 1.5 s, stay inside the 2 s stall allowance at every report
 // and run 36 s in all. The clock moves only with the reports, so a report delayed by load cannot stop it; the
 // ceiling is out of the way (its own test covers it).
 func TestFrozenOutTimeIsAliveWhileFramesOrBytesGrow(t *testing.T) {
@@ -170,7 +170,7 @@ func TestFrozenOutTimeStopsPastTheOutputBound(t *testing.T) {
 // The time ceiling: frames keep growing within the size bound, so the encode is alive at every report, but out_time
 // has not moved for longer than FrozenPositionFactor x StallAfter (2 x 1 s here). It is stopped at the ceiling. The
 // encode would report 100 times, so without the ceiling it would finish: the test fails if the ceiling is removed.
-// Each report moves the worker's clock 500 ms, inside the 1 s StallAfter, so the plain stall stop cannot be what
+// Each report moves the stall clock 500 ms, inside the 1 s StallAfter, so the plain stall stop cannot be what
 // ends it.
 func TestFrozenPositionCeilingStopsAliveEncode(t *testing.T) {
 	s := newScenario(t)
