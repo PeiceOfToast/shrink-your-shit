@@ -25,6 +25,8 @@ type growingExec struct {
 	clock *fakeClockAt
 	grow  []int64
 	hang  bool
+	atEnd bool // the progress block reports the file's length: the finishing step
+	ended bool // progress=end after the growth, as the muxer's last report
 
 	mu    sync.Mutex
 	size  int64    // the fake temp file's size, read by the watchdog's stat
@@ -54,13 +56,20 @@ func (x *growingExec) Stream(ctx context.Context, onLine func(string), name stri
 		x.clock.add(growStep)
 		onLine("frame=100")
 		onLine("total_size=10")
-		onLine("out_time_us=5000000")
+		out := "out_time_us=5000000"
+		if x.atEnd {
+			out = "out_time_us=100000000"
+		}
+		onLine(out)
 		onLine("progress=continue")
+	}
+	if x.ended {
+		onLine("progress=end")
 	}
 	if !x.hang {
 		return x.FakeExec.Stream(ctx, onLine, name, args...)
 	}
-	for range 400 { // a hung encode: the clock runs on until the watchdog stops it
+	for range 60 { // a hung encode: the clock runs on until the watchdog stops it (30 s of stall clock)
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
@@ -75,12 +84,28 @@ func (x *growingExec) Stream(ctx context.Context, onLine func(string), name stri
 // and the job when it has ended. The source is 14 bytes, so the output may reach 28 bytes (twice the source).
 func runGrowing(t *testing.T, grow []int64, hang bool) (*scenario, jobs.Job) {
 	t.Helper()
+	return runGrowingWith(t, growRun{grow: grow, hang: hang})
+}
+
+// growRun is one fake encode for runGrowingWith: the growth, whether it hangs after it, whether its progress is at
+// the file's length (the finishing step) and has ended, and FinishAfter (0: the default).
+type growRun struct {
+	grow        []int64
+	hang        bool
+	atEnd       bool
+	ended       bool
+	finishAfter time.Duration
+}
+
+func runGrowingWith(t *testing.T, r growRun) (*scenario, jobs.Job) {
+	t.Helper()
 	clock := &fakeClockAt{t: time.Date(2026, 11, 21, 5, 0, 0, 0, time.UTC)}
 	s := newScenario(t)
-	x := &growingExec{FakeExec: s.exec, clock: clock, grow: grow, hang: hang}
+	x := &growingExec{FakeExec: s.exec, clock: clock, grow: r.grow, hang: r.hang, atEnd: r.atEnd, ended: r.ended}
 	w := s.worker(Replace)
 	w.stallClock = clock.now
 	w.StallAfter = 2 * time.Second
+	w.FinishAfter = r.finishAfter
 	w.FrozenPositionFactor = 1000
 	w.sizeOnDisk = x.onDisk
 	w.Exec = x
@@ -143,5 +168,60 @@ func TestGrowthPastTwiceTheSourceIsStopped(t *testing.T) {
 	}
 	if n := logCount(t, s, "more than twice the original's size"); n == 0 {
 		t.Errorf("no over-size stop (status %s %q)", j.Status, j.Error)
+	}
+}
+
+// ones is n growth steps of one byte: 24 is within the 28-byte bound for a 14-byte source, 28 reaches it.
+func ones(n int) []int64 {
+	g := make([]int64, n)
+	for i := range g {
+		g[i] = 1
+	}
+	return g
+}
+
+// In the finishing step (the position at the file's length) a growing file is alive, not stopped at StallAfter. This
+// also holds before FinishAfter: the growth lasts 12 s of stall clock, well past the 2 s stall allowance.
+func TestFinishingFileThatGrowsIsNotStopped(t *testing.T) {
+	s, j := runGrowingWith(t, growRun{grow: ones(24), atEnd: true, finishAfter: time.Minute})
+	if j.Status != jobs.Done {
+		t.Fatalf("a finishing encode whose file grew was stopped: %s %q", j.Status, j.Error)
+	}
+	if n := logCount(t, s, "stopping it"); n != 0 {
+		t.Errorf("%d stop lines for a finish that grew, want 0", n)
+	}
+}
+
+// In the finishing step a file that stops growing is stopped at StallAfter, not at FinishAfter: the growth ends at
+// 12 s, the encode hangs, and the stop comes two seconds of stall clock later. Before the change FinishAfter (a minute
+// here) was the allowance, so this encode ran on.
+func TestFinishingFileThatStopsGrowingIsStoppedAtStallAfter(t *testing.T) {
+	s, j := runGrowingWith(t, growRun{grow: ones(24), hang: true, atEnd: true, finishAfter: time.Minute})
+	if j.Status == jobs.Done {
+		t.Fatalf("a hung finish whose file stopped growing finished: %q", j.Error)
+	}
+	if n := logCount(t, s, "no progress for 2s"); n == 0 {
+		t.Errorf("no stall stop at StallAfter (status %s %q)", j.Status, j.Error)
+	}
+}
+
+// FinishAfter bounds the finishing step even while its file grows: the position has not moved for 3 s of stall clock
+// (the growth runs 14 s), so the finishing-step stop fires.
+func TestFinishingFileGrowingPastFinishAfterHitsTheCeiling(t *testing.T) {
+	s, j := runGrowingWith(t, growRun{grow: ones(28), atEnd: true, finishAfter: 3 * time.Second})
+	if j.Status == jobs.Done {
+		t.Fatalf("a finish that ran past FinishAfter finished: %q", j.Error)
+	}
+	if n := logCount(t, s, "the finishing step has run for more than 3s; stopping it"); n == 0 {
+		t.Errorf("no finishing-step stop (status %s %q)", j.Status, j.Error)
+	}
+}
+
+// After progress=end nothing is judged: the encode hangs for 30 s of stall clock, past both allowances, and no
+// watchdog stop is written.
+func TestEndedEncodeIsNotJudged(t *testing.T) {
+	s, _ := runGrowingWith(t, growRun{hang: true, atEnd: true, ended: true, finishAfter: 3 * time.Second})
+	if n := logCount(t, s, "stopping it"); n != 0 {
+		t.Errorf("%d watchdog stop lines after progress=end, want 0", n)
 	}
 }

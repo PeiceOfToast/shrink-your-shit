@@ -59,9 +59,10 @@ func runClock(t *testing.T, w *Worker, x finishExec) chan struct{} {
 	return done
 }
 
-// Silence once the position is at the file's length gets the finishing allowance, not the stall one: a silent
-// finish longer than StallAfter but within FinishAfter is not stopped.
-func TestSilentFinishGetsItsOwnAllowance(t *testing.T) {
+// A silent finish whose file does not grow is judged by StallAfter, not FinishAfter: silent for 1 s of a 5 s
+// FinishAfter, with StallAfter at 300 ms, it is stopped as a stall. (A growing file keeps a finish alive; see
+// growing_temp_test.go.)
+func TestSilentFinishStopsAtStallAfter(t *testing.T) {
 	s := newScenario(t)
 	clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
 	w := s.worker(Replace)
@@ -71,12 +72,12 @@ func TestSilentFinishGetsItsOwnAllowance(t *testing.T) {
 	x := finishExec{FakeExec: s.exec, reported: make(chan struct{}), release: make(chan struct{})}
 	w.Exec = x
 	done := runClock(t, w, x)
-	clock.add(time.Second) // silent, but well inside FinishAfter
-	close(x.release)
+	clock.add(time.Second)
 	waitDone(t, done)
-	if j := s.job(); j.Status != jobs.Done {
-		t.Errorf("a silent finish within its allowance: %s %q", j.Status, j.Error)
+	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "no progress for 300ms") {
+		t.Errorf("a silent finish that did not grow: %s %q", j.Status, j.Error)
 	}
+	s.assertOriginalSafe()
 }
 
 // Silence before the file's length keeps the stall allowance: an ffmpeg stuck at 5 s of 100 s is stopped at
@@ -95,25 +96,6 @@ func TestSilenceBeforeTheEndStillStops(t *testing.T) {
 	waitDone(t, done)
 	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "no progress for 300ms") {
 		t.Errorf("stuck before the end: %s %q", j.Status, j.Error)
-	}
-	s.assertOriginalSafe()
-}
-
-// The finishing allowance is bounded: a finish silent for longer than FinishAfter is stopped like any stall.
-func TestFinishStopsAtItsOwnLimit(t *testing.T) {
-	s := newScenario(t)
-	clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
-	w := s.worker(Replace)
-	w.stallClock = clock.now
-	w.StallAfter = 300 * time.Millisecond
-	w.FinishAfter = time.Second
-	x := finishExec{FakeExec: s.exec, reported: make(chan struct{})} // no release: the stop ends it
-	w.Exec = x
-	done := runClock(t, w, x)
-	clock.add(3 * time.Second) // silent past FinishAfter
-	waitDone(t, done)
-	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "no progress for 1s") {
-		t.Errorf("silent past FinishAfter: %s %q", j.Status, j.Error)
 	}
 	s.assertOriginalSafe()
 }

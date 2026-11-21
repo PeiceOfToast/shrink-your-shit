@@ -88,7 +88,10 @@ type RemoteJob struct {
 	wrote   int64     // the most bytes it reported written (0 when it sends none)
 	movedAt time.Time // when that position last moved on (or the encode started)
 	posAt   time.Time // when out_time last moved forward (or the encode started): the frozen-position ceiling's clock, which frames and bytes do not move
-	finish  bool      // that position is the file's length: the worker is finishing the file (its own allowance)
+	finish  bool      // that position is the file's length: the worker is finishing the file (its finishing step)
+	// output: the worker reports the new file's size (outputBytes), so its finishing step is judged by that growth
+	// (slice 12b). A worker that does not report it keeps the FinishAfter allowance for the whole finish.
+	output bool
 }
 
 // Converting records the remote worker's encode at position pos (out_time, µs) in a file durationSec long: the
@@ -127,6 +130,20 @@ func (r *RemoteJob) ConvertingFrames(pos float64, frame, wrote, sizeBefore int64
 	if posMoved || (outputOK && grew) {
 		r.movedAt = now
 	}
+}
+
+// SendsOutput records that the worker reports the new file's size while it runs.
+func (r *RemoteJob) SendsOutput() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.output = true
+}
+
+// outputJudged says the worker reports the new file's size, so the growth of that file is its progress.
+func (r *RemoteJob) outputJudged() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.output
 }
 
 // finishing says the encode's position is the file's length (see reachedEnd).
