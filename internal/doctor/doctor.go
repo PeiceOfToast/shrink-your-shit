@@ -77,7 +77,8 @@ var hardwareEncoders = []string{
 	"hevc_videotoolbox", "h264_videotoolbox", "av1_videotoolbox",
 }
 
-// has10Bit says whether enc gets the 10-bit test: HEVC and AV1 only (H.264 has no 10-bit profile here).
+// has10Bit says whether enc gets the 10-bit test: HEVC and AV1 only (H.264 has no 10-bit profile here). It asks
+// about the encoder, not the job: that is rules.NeedsTenBit.
 func has10Bit(enc string) bool {
 	return strings.HasPrefix(enc, "hevc_") || strings.HasPrefix(enc, "av1_")
 }
