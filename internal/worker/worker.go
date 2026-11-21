@@ -196,6 +196,9 @@ type Worker struct {
 	StallAfter time.Duration
 	// FinishAfter: the same, once the position is at the file's length (the finishing step; 0: DefaultFinishAfter).
 	FinishAfter time.Duration
+	// FrozenPositionFactor: the multiple of StallAfter that out_time may stay frozen while frames or bytes grow
+	// (0: frozenPositionFactor).
+	FrozenPositionFactor int
 	// KeepDays is how many days a replaced original is kept in .syp-trash (keep.go); 0 or nil: it is
 	// deleted by the rename, as before slice 17. Journal records those swaps (needed when keeping).
 	KeepDays func() int
@@ -215,6 +218,7 @@ type Worker struct {
 	progressAt atomic.Int64       // UnixNano of the running encode's last progress (stall watchdog)
 	finishing  atomic.Bool        // the position is at the file's length: the stall watchdog gives the finishing allowance
 	stalledFor atomic.Int64       // the limit (ns) the watchdog last stopped an encode at: the message says it
+	positionAt atomic.Int64       // UnixNano of the running encode's last forward move of out_time (the frozen-position ceiling)
 	// the running job's run counters (log-spec L2 summary): the ffmpeg runs it needed and the bytes it wrote.
 	passes, bytesWritten atomic.Int64
 	statsCounting        atomic.Bool // false: this job's counters are not recorded (a remote job, whose runs are not all here)
@@ -254,6 +258,25 @@ const finishTolerance = 2.0
 // stallWarnAfter is how long an encode may go without moving (position, frames or bytes) before the job log warns (R9);
 // the job itself is stopped only at StallAfter (ten minutes by default).
 const stallWarnAfter = 30 * time.Second
+
+// frozenPositionFactor: an encode whose out_time has not moved for this many StallAfter is stopped even while its
+// frames or bytes still grow (the size bound does not catch a slow runaway). A subtitle gap freezes out_time for
+// minutes (195 s seen), so with the default 10 min StallAfter a frozen position gets 30 min.
+const frozenPositionFactor = 3
+
+// frozenFactor is the ceiling's multiple of StallAfter (Worker.FrozenPositionFactor, or the default).
+func (w *Worker) frozenFactor() time.Duration {
+	if w.FrozenPositionFactor > 0 {
+		return time.Duration(w.FrozenPositionFactor)
+	}
+	return frozenPositionFactor
+}
+
+// outputWithin says a converting output of total bytes is within twice its source's size. A source of unknown
+// size (0) has no bound, so its bytes never count as progress.
+func outputWithin(sizeBefore, total int64) bool {
+	return sizeBefore > 0 && total <= 2*sizeBefore
+}
 
 // quietAfter is how long ffmpeg may print nothing before the job log says the conversion is still running
 // (log-spec R9's quiet warning). Unlike the stall warning it says nothing about the media position.
@@ -776,9 +799,15 @@ func reachedEnd(outUS, durationSec float64) bool {
 // finishing). The returned func ends the watch. Checks after the encode have their own time limits (slice 10).
 func (w *Worker) watchStall(id int64) func() {
 	w.progressAt.Store(time.Now().UnixNano())
+	w.positionAt.Store(time.Now().UnixNano())
 	w.finishing.Store(false)
 	after := w.stallAfter()
 	done := make(chan struct{})
+	stopFor := func(limit time.Duration) {
+		w.stalledFor.Store(int64(limit))
+		w.jobf(id, ": no progress for %s, stopping it", limit)
+		w.stop(id, stopStall)
+	}
 	go func() {
 		t := time.NewTicker(max(after/20, 10*time.Millisecond))
 		defer t.Stop()
@@ -787,11 +816,15 @@ func (w *Worker) watchStall(id int64) func() {
 			case <-done:
 				return
 			case <-t.C:
-				limit := w.stallLimit(after, w.finishing.Load())
+				finishing := w.finishing.Load()
+				limit := w.stallLimit(after, finishing)
 				if time.Since(time.Unix(0, w.progressAt.Load())) >= limit {
-					w.stalledFor.Store(int64(limit))
-					w.jobf(id, ": no progress for %s, stopping it", limit)
-					w.stop(id, stopStall)
+					stopFor(limit)
+					return
+				}
+				ceiling := w.stallLimit(w.frozenFactor()*after, finishing)
+				if time.Since(time.Unix(0, w.positionAt.Load())) >= ceiling {
+					stopFor(ceiling) // frames or bytes still grow, but out_time has not moved for the ceiling
 					return
 				}
 				w.quietCheck(id, w.now()) // R9: ffmpeg printing nothing for a minute
@@ -2380,7 +2413,7 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 		// stays within twice the source's size (a runaway output past that is not progress). out_time follows the
 		// most-behind stream, so it freezes in a subtitle gap while frames still go on (bug 2).
 		posMoved := p.OutTimeUS > at // a position further on: one that repeats is not progress
-		outputOK := job.SizeBefore > 0 && p.TotalSize <= 2*job.SizeBefore
+		outputOK := outputWithin(job.SizeBefore, p.TotalSize)
 		alive := posMoved || (outputOK && (p.Frame > frames || p.TotalSize > wrote))
 		frames = p.Frame
 		if p.TotalSize > wrote {
@@ -2388,6 +2421,7 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 		}
 		if posMoved {
 			at = p.OutTimeUS
+			w.positionAt.Store(time.Now().UnixNano())
 			w.finishing.Store(reachedEnd(p.OutTimeUS, job.DurationSec))
 		}
 		if alive {
