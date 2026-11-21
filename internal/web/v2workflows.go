@@ -305,6 +305,11 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		if !readJSON(w, r, &in) {
 			return
 		}
+		// no If-Match: the page never sent the draft's version to save over, so nothing is written
+		if r.Header.Get("If-Match") == "" {
+			apiError(w, http.StatusPreconditionRequired, "if_match_required", "Reload this workflow and try again.")
+			return
+		}
 		// a secret is never sent to the page, so a secret saved back without a value keeps the stored one
 		if cur, _, err := store.Draft(id); err == nil {
 			in.Workflow = workflow.KeepSecretValues(in.Workflow, cur.Doc)
