@@ -26,17 +26,38 @@ func open(t *testing.T) *Store {
 }
 
 func TestCanTransition(t *testing.T) {
+	// The moves the code makes (slice 10): Done -> Queued is Convert again only, which moves along that
+	// edge itself (moveAlong); the shared map must keep refusing it to every generic move.
 	ok := [][2]Status{{Queued, Running}, {Running, Done}, {Running, Failed}, {Running, Queued}, {Failed, Queued}, {Running, Kept}, {Kept, Queued}}
 	for _, c := range ok {
 		if !CanTransition(c[0], c[1]) {
 			t.Errorf("%s -> %s should be allowed", c[0], c[1])
 		}
 	}
-	bad := [][2]Status{{Queued, Done}, {Queued, Failed}, {Done, Queued}, {Done, Running}, {Failed, Done}, {Failed, Running}, {Queued, Kept}, {Kept, Done}, {Kept, Running}, {Done, Kept}}
+	bad := [][2]Status{{Queued, Done}, {Queued, Failed}, {Done, Running}, {Done, Queued}, {Failed, Done}, {Failed, Running}, {Queued, Kept}, {Kept, Done}, {Kept, Running}, {Done, Kept}}
 	for _, c := range bad {
 		if CanTransition(c[0], c[1]) {
 			t.Errorf("%s -> %s should be rejected", c[0], c[1])
 		}
+	}
+}
+
+// moveWhere refuses a move the state machine forbids, and the refused move changes no row (slice 10).
+func TestMoveWhereRefusesAnIllegalMove(t *testing.T) {
+	s := open(t)
+	id, err := s.Enqueue(Job{Library: "/lib", Path: "/lib/a.mkv", Reason: "r", SizeBefore: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.moveWhere(s.db, Queued, Done, `, progress=100`, nil, `id=?`, id); err == nil {
+		t.Fatal("queued -> done must be refused")
+	}
+	j, err := s.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j.Status != Queued || j.Progress != 0 {
+		t.Errorf("the refused move changed the row: status %s, progress %v", j.Status, j.Progress)
 	}
 }
 

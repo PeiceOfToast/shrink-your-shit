@@ -159,16 +159,13 @@ func (s *Store) OriginalOfJob(jobID int64) (Original, error) {
 // e5047e5); its new file is at new_path.
 func (s *Store) CompleteKeptJobs() (int64, error) {
 	const row = `FROM originals o WHERE o.job_id=jobs.id AND o.state IN (?,?) ORDER BY o.id DESC LIMIT 1`
-	r, err := s.db.Exec(`UPDATE jobs SET status=?, progress=100, updated=?,
+	return s.moveWhere(s.db, Running, Done,
+		`, progress=100,
   output_path=(SELECT CASE o.new_path WHEN '' THEN o.path ELSE o.new_path END `+row+`),
   size_after=(SELECT o.new_bytes `+row+`),
-  output_mtime=(SELECT o.new_mtime `+row+`)
-WHERE status=? AND EXISTS (SELECT 1 FROM originals o WHERE o.job_id=jobs.id AND o.state IN (?,?))`,
-		Done, s.stamp(), OriginalKept, OriginalPurged, OriginalKept, OriginalPurged, OriginalKept, OriginalPurged, Running, OriginalKept, OriginalPurged)
-	if err != nil {
-		return 0, err
-	}
-	return r.RowsAffected()
+  output_mtime=(SELECT o.new_mtime `+row+`)`,
+		[]any{OriginalKept, OriginalPurged, OriginalKept, OriginalPurged, OriginalKept, OriginalPurged},
+		`EXISTS (SELECT 1 FROM originals o WHERE o.job_id=jobs.id AND o.state IN (?,?))`, OriginalKept, OriginalPurged)
 }
 
 // DecisionRestored is a file record's decision once its original was put back (slice 18): the

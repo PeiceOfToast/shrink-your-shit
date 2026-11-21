@@ -42,7 +42,7 @@ var allowed = map[Status][]Status{
 	Running: {Done, Failed, Kept, Queued}, // Queued: worker went away, put it back
 	Failed:  {Queued},
 	Kept:    {Queued},
-	Done:    {},
+	Done:    {}, // Convert again's Done -> Queued is its own edge (moveAlong), not one the generic moves get
 }
 
 // CanTransition reports whether from -> to is legal.
@@ -344,6 +344,38 @@ func (s *Store) List(limit int) ([]Job, error) {
 	return out, rows.Err()
 }
 
+// moveWhere moves jobs from one status to another, setting set (an optional ", col=?" fragment list)
+// in the same update, and refuses a move the state machine doesn't allow. It always writes
+// status=? and updated=?, and only changes rows still in status from and matching where; where is
+// parenthesised, and its args follow set's. It returns how many jobs moved.
+func (s *Store) moveWhere(x execer, from, to Status, set string, setArgs []any, where string, whereArgs ...any) (int64, error) {
+	if !CanTransition(from, to) {
+		return 0, fmt.Errorf("cannot go from %s to %s", from, to)
+	}
+	return s.moveRows(x, from, to, set, setArgs, where, whereArgs...)
+}
+
+// moveAlong moves jobs along one edge the shared state machine does not allow. Convert again's
+// Done -> Queued is the only one: every generic move (Release, RetryLater, FallBack) must keep refusing a
+// finished job, or one that finishes between a list of running jobs and the release is converted twice
+// (review-583, finding 1).
+func (s *Store) moveAlong(x execer, from, to Status, set string, setArgs []any, where string, whereArgs ...any) (int64, error) {
+	return s.moveRows(x, from, to, set, setArgs, where, whereArgs...)
+}
+
+// moveRows updates the rows matching from and where; it does not judge the edge: its callers do.
+func (s *Store) moveRows(x execer, from, to Status, set string, setArgs []any, where string, whereArgs ...any) (int64, error) {
+	q := `UPDATE jobs SET status=?, updated=?` + set + ` WHERE status=? AND (` + where + `)`
+	a := append([]any{to, s.stamp()}, setArgs...)
+	a = append(a, from)
+	a = append(a, whereArgs...)
+	res, err := x.Exec(q, a...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // transition moves a job to a new status, rejecting illegal moves.
 // extra is an optional "col=?" fragment list applied in the same update.
 func (s *Store) transition(id int64, to Status, set string, args ...any) error {
@@ -357,21 +389,18 @@ func (s *Store) transition(id int64, to Status, set string, args ...any) error {
 	if to == Queued { // a job queued again (retry, fallback) runs with the library's current workflow
 		set += `, workflow_rev=` + jobRevSQL
 	}
-	q := `UPDATE jobs SET status=?, updated=?` + set + ` WHERE id=? AND status=?`
-	a := append([]any{to, s.stamp()}, args...)
-	a = append(a, id, j.Status)
-	res, err := s.db.Exec(q, a...)
+	n, err := s.moveWhere(s.db, j.Status, to, set, args, `id=?`, id)
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n != 1 {
+	if n != 1 {
 		return fmt.Errorf("job %d changed under us", id)
 	}
 	return nil
 }
 
 // Claim hands the oldest queued job to worker and marks it running.
-// One statement, so several workers (parallelJobs) never take the same job.
+// The claim is one statement, so several workers (parallelJobs) never take the same job.
 func (s *Store) Claim(worker string) (Job, error) {
 	now := s.stamp()
 	var id int64
@@ -381,23 +410,28 @@ func (s *Store) Claim(worker string) (Job, error) {
 	// returns no claim for that library can start.
 	s.removeMu.Lock()
 	lease := NewLeaseID()
-	skip, args := "", []any{Running, now, worker, now, lease, s.leaseUntil(), Queued}
+	skip, args := "", []any{Queued}
 	for lib := range s.removing {
 		skip += " AND (library_id IS NULL OR library_id != ?)" // a job made before libraries belongs to none
 		args = append(args, lib)
 	}
 	// A job waiting to be tried again (DD-2) is not taken before its time.
-	args = append(args, now)
-	err := s.db.QueryRow(`UPDATE jobs SET status=?, updated=?, worker=?, progress=0, error='', error_code='', started=?, lease_id=?, lease_expires=?
-WHERE id=(SELECT id FROM jobs WHERE status=? AND stop_requested=0`+skip+` AND (retry_at='' OR retry_at<=?) AND `+libraryOnSQL+`
-  ORDER BY priority DESC, id LIMIT 1) AND status=?
-AND EXISTS (SELECT 1 FROM workers WHERE enabled=1 AND id=`+workerRecordSQL+`) RETURNING id`,
-		append(args, Queued, worker)...).Scan(&id)
+	args = append(args, now, worker) // workerRecordSQL's own argument comes last
+	n, err := s.moveWhere(s.db, Queued, Running,
+		`, worker=?, progress=0, error='', error_code='', started=?, lease_id=?, lease_expires=?`,
+		[]any{worker, now, lease, s.leaseUntil()},
+		`id=(SELECT id FROM jobs WHERE status=? AND stop_requested=0`+skip+` AND (retry_at='' OR retry_at<=?) AND `+libraryOnSQL+`
+  ORDER BY priority DESC, id LIMIT 1) AND EXISTS (SELECT 1 FROM workers WHERE enabled=1 AND id=`+workerRecordSQL+`)`,
+		args...)
 	s.removeMu.Unlock()
-	if errors.Is(err, sql.ErrNoRows) {
+	if err != nil {
+		return Job{}, err
+	}
+	if n == 0 {
 		return Job{}, ErrNoJob
 	}
-	if err != nil {
+	// The claim above is one statement; this reads back the row that claim took (its lease is unique).
+	if err := s.db.QueryRow(`SELECT id FROM jobs WHERE lease_id=?`, lease).Scan(&id); err != nil {
 		return Job{}, err
 	}
 	return s.Get(id)
@@ -476,6 +510,13 @@ func (s *Store) Keep(id int64, code, reason string) error {
 
 // Retry puts a failed or kept job back in the queue: a fresh start (no tries counted, no wait).
 func (s *Store) Retry(id int64) error {
+	j, err := s.Get(id)
+	if err != nil {
+		return err
+	}
+	if j.Status == Done { // Done -> Queued exists for Convert again only; a done job's own way back is that
+		return fmt.Errorf("job %d: cannot go from %s to %s", id, j.Status, Queued)
+	}
 	return s.transition(id, Queued, `, progress=0, error='', error_code='', worker='', attempts=0, retry_at='', fallback=''`) // a fresh start: the first path again (V6b)
 }
 
@@ -490,12 +531,7 @@ func (s *Store) RequeueRunning() (int64, error) {
 	if err := s.finishRequestedStops(); err != nil {
 		return 0, err
 	}
-	r, err := s.db.Exec(`UPDATE jobs SET status=?, progress=0, worker='', updated=?, workflow_rev=`+jobRevSQL+` WHERE status=?`,
-		Queued, s.stamp(), Running)
-	if err != nil {
-		return 0, err
-	}
-	return r.RowsAffected()
+	return s.moveWhere(s.db, Running, Queued, `, progress=0, worker='', workflow_rev=`+jobRevSQL, nil, `1=1`)
 }
 
 // Step is one line of a job's step summary (S5): found, checked, converted, verified, kept, replaced.
@@ -768,13 +804,14 @@ func (s *Store) RequeueExpiredLeases(wait time.Duration) (int, error) {
 		if lost+1 >= MaxLostInARow {
 			counted, retryAt = 1, now.Add(wait).Format(time.RFC3339)
 		}
-		r, err := s.db.Exec(`UPDATE jobs SET status=?, updated=?, progress=0, worker='', error=?, error_code=?, attempts=attempts+?, retry_at=?,
-  lease_id='', lease_expires='', workflow_rev=`+jobRevSQL+` WHERE id=? AND status=? AND lease_expires<>'' AND lease_expires<?`,
-			Queued, s.stamp(), words, ReasonWorkerLost, counted, retryAt, l.id, Running, now.Format(leaseTime))
+		k, err := s.moveWhere(s.db, Running, Queued,
+			`, progress=0, worker='', error=?, error_code=?, attempts=attempts+?, retry_at=?, lease_id='', lease_expires='', workflow_rev=`+jobRevSQL,
+			[]any{words, ReasonWorkerLost, counted, retryAt},
+			`id=? AND lease_expires<>'' AND lease_expires<?`, l.id, now.Format(leaseTime))
 		if err != nil {
 			return n, err
 		}
-		if k, _ := r.RowsAffected(); k == 1 {
+		if k == 1 {
 			s.AddStep(l.id, "lease", false, words)
 			n++
 		}
