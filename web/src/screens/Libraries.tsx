@@ -5,6 +5,7 @@
 import { Empty, LoadFailed, PageHead } from "../PageHead";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
+import { Skeleton } from "../Skeleton";
 import { SignedOut, failed, type Answer } from "../api";
 import { addLibrary, checkFolder, convertEarlierAgain, getEarlierWorkflow, firstFiles, getLibraryV2, getSettings, listLibraries, listLibrariesV2, listWorkflows, patchLibrary, patchLibraryV2, removeLibrary, scanLibrary, setLibraryWorkflow, type WorkflowChoice } from "../libraryApi";
 import { listJobs } from "../jobsApi";
@@ -127,7 +128,7 @@ export function Libraries() {
         <input className="input find" type="search" placeholder="Filter libraries" aria-label="Filter libraries" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       <p className="muted" role="status">{said}</p>
-      {!libs.loaded ? <div className="empty">Loading…</div> : libs.error && !libs.data ? <LoadFailed error={libs.error} reload={libs.reload} /> : all.length === 0 ? <Empty icon="i-library" text="No libraries yet. A library is a folder that is watched for videos."><Link className="btn primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link></Empty>
+      {!libs.loaded ? <Skeleton rows={4} /> : libs.error && !libs.data ? <LoadFailed error={libs.error} reload={libs.reload} /> : all.length === 0 ? <Empty icon="i-library" text="No libraries yet. A library is a folder that is watched for videos."><Link className="btn primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link></Empty>
         : items.length === 0 ? <div className="empty">No library matches.</div> : (
         // No table header (U3, C1): a 40 px tile, the name and its folder, one chip line of facts, and one status pill.
         <div className={"list rows" + (selecting ? " selecting" : "")}><table className="tbl">

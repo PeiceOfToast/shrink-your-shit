@@ -28,7 +28,7 @@ code,.mono{font-family:var(--mono);font-size:max(.92em,var(--fs-sm))}
 .grp{height:14px}
 .nav a{position:relative;display:flex;align-items:center;gap:10px;min-height:40px;padding:0 12px;border-radius:var(--radius-sm);color:var(--text);text-decoration:none}
 .nav a:hover{background:color-mix(in srgb,var(--raised) 60%,transparent)}
-.nav a[aria-current=page]{background:var(--raised);font-weight:var(--fw-strong)}
+.nav a[aria-current=page]{background:var(--accent-soft);font-weight:var(--fw-strong)}
 .nav a[aria-current=page]::before{content:"";position:absolute;left:-8px;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:var(--accent)}
 .badge{margin-left:auto;min-width:20px;min-height:20px;padding:0 6px;border-radius:10px;font-size:var(--fs-sm);font-weight:var(--fw-strong);display:inline-grid;place-items:center;background:var(--error);color:var(--on-accent)}
 .badge.warn{background:var(--warning);color:var(--on-accent)}
@@ -97,6 +97,10 @@ body.conn-lost .stale{color:var(--text-2)}
 .btn.sm.icon{width:30px}
 .btn[aria-pressed=true]{background:var(--raised);border-color:var(--accent)}
 .input,select.input,textarea.input{width:100%;min-height:36px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);font:inherit}
+/* #564: a disabled fieldset mutes its own selects and the slider's chosen word (scoped; not a global :disabled rule) */
+fieldset:disabled .input,fieldset:disabled select.input{color:var(--text-2)}
+.slider-on{color:var(--text)}
+fieldset:disabled .slider-on{color:var(--text-2)}
 textarea.input{min-height:72px;font-family:var(--mono);font-size:var(--fs-sm)}
 .field{display:flex;flex-direction:column;gap:4px;min-width:0}
 .field>label,.lab{font-weight:600}
@@ -128,9 +132,10 @@ textarea.input{min-height:72px;font-family:var(--mono);font-size:var(--fs-sm)}
 .pill{display:inline-flex;align-items:center;gap:4px;height:var(--chip-h);padding:0 8px;border-radius:calc(var(--chip-h)/2);background:var(--raised);color:var(--text-2);font-size:var(--fs-sm);font-weight:500;white-space:nowrap;flex:none}
 .pill .ic{width:12px;height:12px}
 .pill.run{background:var(--accent-soft);color:var(--accent-text)}
-.pill.ok{background:var(--ok-soft);color:var(--success-text)}
+.pill.ok{background:var(--raised);color:var(--success-text)} /* U8: Done is success text on a neutral pill, not a success fill */
 .pill.bad{background:var(--bad-soft);color:var(--error-text)}
 .pill.warn,.pill.sample{background:var(--warn-soft);color:var(--warning-text)}
+.gain{color:var(--success-text)} /* U8: a saved figure is success text, never a fill */
 .st.ok{color:var(--success-text)}.st.run{color:var(--accent-text)}.st.bad{color:var(--error-text)}.st.warn{color:var(--warning-text)}.st.wait{color:var(--text-2)}
 .st .ic{width:16px;height:16px}
 .st:has(>.fail){align-items:flex-start}.st:has(>.fail)>.ic{margin-top:2px}.st .fail{white-space:normal}.st .why{font-weight:400;color:var(--text)}
@@ -823,6 +828,19 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .cmap{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr) auto;gap:8px;align-items:end}
 .cmap>.ic{margin-bottom:10px;color:var(--text-2)}
 @media (max-width:640px){.cmap{grid-template-columns:minmax(0,1fr) auto}.cmap>.ic{display:none}.cmap>.field:nth-of-type(2){grid-column:1}.cmap>button{grid-column:2;grid-row:1}}
+
+/* U9 (C7): a first load draws the page's shape in --raised blocks on the card. Static: no shimmer to stop under reduced motion */
+.skel .skel-b{display:block;height:12px;border-radius:4px;background:var(--raised);margin:8px 0}
+.skel .skel-w25{width:25%}
+.skel .skel-w40{width:40%}
+.skel .skel-w60{width:60%}
+.skel .skel-big{height:28px;width:55%;margin:6px 0}
+.skel .skel-pill{width:72px;height:22px;border-radius:999px;margin:0}
+.skel .skel-tile{background:var(--raised)}
+/* U9: header placeholders where the Dashboard and Workers switch and the Scan button sit (PageHead, outside .skel) */
+.skel-ph{display:inline-block;height:22px;border-radius:4px;background:var(--raised);vertical-align:middle;flex:none}
+.skel-ph.skel-sw{width:200px;height:44px;border-radius:11px}
+.skel-ph.skel-btn{width:150px;height:30px}
 /* FB1d: a question row's "Otherwise" choice sits where other rows have their switch; on a phone it takes its own line
    under the name, so the question's words stay */
 .sline .otherwise{gap:6px;flex:none}.sline .otherwise select.input{width:auto;min-height:30px;padding:0 6px;font-size:var(--fs)}/* ui-shop review #537: never under the 12.5 px floor */

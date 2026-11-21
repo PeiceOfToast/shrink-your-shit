@@ -148,7 +148,8 @@ func fileItem(store *jobs.Store, libs []jobs.Library, row jobs.FileRow, card str
 	if card == jobs.CardProcessed && row.SizeAfter > 0 {
 		it["bytes"] = row.SizeAfter
 	}
-	if raw, ok := store.LatestProbe(probed); ok {
+	size, _ := it["bytes"].(int64) // the size the card shows: a probe of another size is another version of the file
+	if raw, ok := store.ProbeOfSize(probed, size); ok {
 		var info media.Info
 		if json.Unmarshal([]byte(raw), &info) == nil {
 			if v := info.Video(); v != nil {
@@ -245,7 +246,11 @@ func outputBlockers(store *jobs.Store, except int64, dir string, moreLibraries .
 	}
 	for _, lp := range append(moreLibraries, otherLibraries(store, except)...) { // moreLibraries: one being added or moved
 		if outputInside(dir, lp) {
-			add("inside_library", "This folder is inside the library, so new files would be converted again. Pick a folder outside "+lp+".")
+			if inside(resolved(lp), real) { // the folder holds the library (outputInside also catches the reverse)
+				add("inside_library", "This folder contains the library. Choose a folder outside it, or the new files would be scanned and converted again.")
+			} else {
+				add("inside_library", "This folder is inside the library, so new files would be converted again. Pick a folder outside "+lp+".")
+			}
 			break
 		}
 	}

@@ -185,13 +185,17 @@ func librariesOf(store *jobs.Store, flowID int64) []jobs.Library {
 }
 
 // probeOf is the sample as it was when the job was planned (the job's own "before" probe, which a
-// replace keeps), else the newest stored probe of its path.
+// replace keeps), else the stored probe of its path at the size the job started from. After a replace at the
+// same name the path holds the new file, so there is no fallback then (as in v2jobs).
 func probeOf(store *jobs.Store, j jobs.Job) *media.Info {
 	var snap rules.Snapshot
 	if json.Unmarshal([]byte(j.Plan), &snap) == nil && snap.Source != nil {
 		return snap.Source
 	}
-	if raw, ok := store.LatestProbe(j.Path); ok {
+	if j.OutputPath == j.Path {
+		return nil
+	}
+	if raw, ok := store.ProbeOfSize(j.Path, j.SizeBefore); ok {
 		var info media.Info
 		if json.Unmarshal([]byte(raw), &info) == nil {
 			return &info

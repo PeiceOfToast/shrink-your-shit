@@ -365,13 +365,16 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 	v := "v:" + strconv.Itoa(p.Video.Index)
 	fam := GraphicsFamily(gpu) // "" for the processor
 	args := []string{"-y", "-nostdin", "-v", "error", "-progress", "pipe:1", "-nostats"}
-	switch fam { // a hardware device is set up before the input
-	case "qsv":
-		args = append(args, "-init_hw_device", "qsv=qsv:hw")
+	if p, ok := profiles[fam]; ok { // a hardware device is set up before the input (the family's profile)
+		args = append(args, p.Setup(vaapiDevice())...)
+	}
+	switch fam {
 	case "vaapi":
 		args = append(args, "-init_hw_device", "vaapi=va:"+vaapiDevice(), "-filter_hw_device", "va")
 	}
-	if full { // the device decodes too, so the frames never come down to software
+	if p, ok := profiles[fam]; full && ok && p.FullDecode() != nil { // the device decodes too, so the frames never come down to software
+		args = append(args, p.FullDecode()...)
+	} else if full {
 		args = append(args, "-hwaccel", fam, "-hwaccel_output_format", fam, "-hwaccel_device", map[string]string{"qsv": "qsv", "vaapi": "va"}[fam])
 	}
 	args = append(args, "-i", in,
@@ -417,7 +420,7 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 			args = append(args, "-profile:"+v, "main10",
 				"-color_primaries:"+v, h.Primaries, "-color_trc:"+v, h.Transfer, "-colorspace:"+v, h.Matrix)
 			if fam != "vaapi" && !full { // VAAPI's frames are made p010 by its filter instead; the full path's come from the decoder
-				args = append(args, "-pix_fmt:"+v, "p010le")
+				args = append(args, "-pix_fmt:"+v, pixFmt10(fam))
 			}
 		}
 	} else if ten10 && gpu != "" { // a 10-bit SDR source keeps its depth on a graphics encoder: main10 and p010
@@ -426,7 +429,7 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 			args = append(args, "-profile:"+v, "main10")
 		}
 		if fam != "vaapi" && !full { // VAAPI's frames are made p010 by its filter instead; the full path's come from the decoder
-			args = append(args, "-pix_fmt:"+v, "p010le")
+			args = append(args, "-pix_fmt:"+v, pixFmt10(fam))
 		}
 	}
 	var vf []string
@@ -481,6 +484,9 @@ func withOutput(args []string, out string) []string {
 // aspect ratio, rounds half up and is even, the same width ScaledWidth plans (a plan of 854 must not encode as 852).
 // H*iw is multiplied first: iw/ih rounded early lands an exact .5 tie a pixel low (328x1280 at 480: 122, not 124).
 func gpuScale(fam string, h int, tenBit bool) string {
+	if p, ok := profiles[fam]; ok && p.scale != nil {
+		return p.scale(h, tenBit)
+	}
 	size := "w=-2:h=" + strconv.Itoa(h)
 	if fam != "vaapi" {
 		hs := strconv.Itoa(h)
@@ -496,17 +502,13 @@ func gpuScale(fam string, h int, tenBit bool) string {
 // gpuQuality is a graphics family's constant-quality arguments at crf, in its encoders' names. The same
 // family's H.264 and AV1 encoders take the same options as its HEVC one.
 func gpuQuality(fam string, crf int) []string {
-	n := strconv.Itoa(crf)
-	switch fam {
-	case "nvenc":
-		return []string{"-rc", "vbr", "-cq", n}
-	case "qsv":
-		return []string{"-global_quality", n}
-	case "vaapi":
-		return []string{"-rc_mode", "CQP", "-qp", n}
-	default: // amf
-		return []string{"-rc", "cqp", "-qp_i", n, "-qp_p", n}
+	if p, ok := profiles[fam]; ok && p.quality != nil {
+		return p.quality(crf)
 	}
+	if fam == "vaapi" {
+		return []string{"-rc_mode", "CQP", "-qp", strconv.Itoa(crf)}
+	}
+	return nil
 }
 
 // withoutSoftwareParams drops a software encoder's own parameter options and their values (libx265's, SVT-AV1's,
@@ -643,30 +645,18 @@ func (p Plan) Expect(src media.Info, packets int64) Expect {
 			n++
 		}
 	}
-	// A phone video's Display Matrix: ffmpeg encodes the picture upright, so a ±90° file's new picture
-	// has width and height swapped (before any scaling, which applies to the upright picture).
-	// (Not when the video is copied: it keeps its coded size and its Display Matrix.)
-	if vs := src.ByType("video"); !p.Video.Copy && p.Video.Index < len(vs) && vs[p.Video.Index].Quarter() {
+	// The picture the plan makes (plannedPicture): a phone video's Display Matrix means ffmpeg encodes
+	// the upright picture, so a ±90° file's new picture has width and height swapped, and a scaled plan's
+	// is the new height with the original's shape. (Not when the video is copied: it keeps its coded size
+	// and its Display Matrix.) The check's main-video rules read the same function.
+	if w, h, scaled := p.plannedPicture(src); w > 0 {
 		n := 0
 		for k := range e.Streams {
 			if e.Streams[k].Type != "video" {
 				continue
 			}
 			if n == p.Video.Index {
-				e.Streams[k].Width, e.Streams[k].Height = e.Streams[k].Height, e.Streams[k].Width
-			}
-			n++
-		}
-	}
-	if p.Video.Height > 0 { // scaled down: the encoded stream's picture size is the new one
-		n := 0
-		for k := range e.Streams {
-			if e.Streams[k].Type != "video" {
-				continue
-			}
-			if n == p.Video.Index {
-				e.Streams[k].Width, e.Streams[k].Height = ScaledWidth(e.Streams[k].Width, e.Streams[k].Height, p.Video.Height), p.Video.Height
-				e.Streams[k].PlannedSize = true
+				e.Streams[k].Width, e.Streams[k].Height, e.Streams[k].PlannedSize = w, h, scaled
 			}
 			n++
 		}

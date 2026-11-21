@@ -145,7 +145,8 @@ type Worker struct {
 	// chosen encoder's line, in section encode.
 	EncoderCandidates func(codec string, need10 bool, hdr *rules.HDR) []string
 	// GPUSlots is how many of this computer's graphics card's slots the person let it have (Workers page),
-	// read for every job, so a changed limit is followed at once. 0: the processor does the encoding. nil
+	// read each time a job asks for a place, so a changed limit applies to the next job that asks; a job already
+	// waiting keeps the limit it read when it started waiting. 0: the processor does the encoding. nil
 	// (a test's worker): no limit, every graphics job runs. All of the program's workers share the one card.
 	GPUSlots func() int
 	// verified is the probe of the new file the last check passed (S5: stored for its final path).
@@ -204,6 +205,9 @@ type Worker struct {
 	StallAfter time.Duration
 	// FinishAfter: the same, once the position is at the file's length (the finishing step; 0: DefaultFinishAfter).
 	FinishAfter time.Duration
+	// FrozenPositionFactor: the multiple of StallAfter that out_time may stay frozen while frames or bytes grow
+	// (0: frozenPositionFactor).
+	FrozenPositionFactor int
 	// KeepDays is how many days a replaced original is kept in .syp-trash (keep.go); 0 or nil: it is
 	// deleted by the rename, as before slice 17. Journal records those swaps (needed when keeping).
 	KeepDays func() int
@@ -223,6 +227,7 @@ type Worker struct {
 	progressAt atomic.Int64       // UnixNano of the running encode's last progress (stall watchdog)
 	finishing  atomic.Bool        // the position is at the file's length: the stall watchdog gives the finishing allowance
 	stalledFor atomic.Int64       // the limit (ns) the watchdog last stopped an encode at: the message says it
+	positionAt atomic.Int64       // UnixNano of the running encode's last forward move of out_time (the frozen-position ceiling)
 	// the running job's run counters (log-spec L2 summary): the ffmpeg runs it needed and the bytes it wrote.
 	passes, bytesWritten atomic.Int64
 	statsCounting        atomic.Bool // false: this job's counters are not recorded (a remote job, whose runs are not all here)
@@ -262,6 +267,25 @@ const finishTolerance = 2.0
 // stallWarnAfter is how long an encode may go without moving (position, frames or bytes) before the job log warns (R9);
 // the job itself is stopped only at StallAfter (ten minutes by default).
 const stallWarnAfter = 30 * time.Second
+
+// frozenPositionFactor: an encode whose out_time has not moved for this many StallAfter is stopped even while its
+// frames or bytes still grow (the size bound does not catch a slow runaway). A subtitle gap freezes out_time for
+// minutes (195 s seen), so with the default 10 min StallAfter a frozen position gets 30 min.
+const frozenPositionFactor = 3
+
+// frozenFactor is the ceiling's multiple of StallAfter (Worker.FrozenPositionFactor, or the default).
+func (w *Worker) frozenFactor() time.Duration {
+	if w.FrozenPositionFactor > 0 {
+		return time.Duration(w.FrozenPositionFactor)
+	}
+	return frozenPositionFactor
+}
+
+// outputWithin says a converting output of total bytes is within twice its source's size. A source of unknown
+// size (0) has no bound, so its bytes never count as progress.
+func outputWithin(sizeBefore, total int64) bool {
+	return sizeBefore > 0 && total <= 2*sizeBefore
+}
 
 // quietAfter is how long ffmpeg may print nothing before the job log says the conversion is still running
 // (log-spec R9's quiet warning). Unlike the stall warning it says nothing about the media position.
@@ -836,9 +860,20 @@ func reachedEnd(outUS, durationSec float64) bool {
 // finishing). The returned func ends the watch. Checks after the encode have their own time limits (slice 10).
 func (w *Worker) watchStall(id int64) func() {
 	w.progressAt.Store(time.Now().UnixNano())
+	w.positionAt.Store(time.Now().UnixNano())
 	w.finishing.Store(false)
 	after := w.stallAfter()
 	done := make(chan struct{})
+	stopFor := func(limit time.Duration) {
+		w.stalledFor.Store(int64(limit))
+		w.jobf(id, ": no progress for %s, stopping it", limit)
+		w.stop(id, stopStall)
+	}
+	stopCeiling := func(limit time.Duration) { // frames still grow, so the log says the position is what stopped it
+		w.stalledFor.Store(int64(limit))
+		w.jobf(id, ": its position has not moved for %s, though it is still writing; stopping it", limit)
+		w.stop(id, stopStall)
+	}
 	go func() {
 		t := time.NewTicker(max(after/20, 10*time.Millisecond))
 		defer t.Stop()
@@ -847,11 +882,15 @@ func (w *Worker) watchStall(id int64) func() {
 			case <-done:
 				return
 			case <-t.C:
-				limit := w.stallLimit(after, w.finishing.Load())
+				finishing := w.finishing.Load()
+				limit := w.stallLimit(after, finishing)
 				if time.Since(time.Unix(0, w.progressAt.Load())) >= limit {
-					w.stalledFor.Store(int64(limit))
-					w.jobf(id, ": no progress for %s, stopping it", limit)
-					w.stop(id, stopStall)
+					stopFor(limit)
+					return
+				}
+				ceiling := w.stallLimit(w.frozenFactor()*after, finishing)
+				if time.Since(time.Unix(0, w.positionAt.Load())) >= ceiling {
+					stopCeiling(ceiling) // frames or bytes still grow, but out_time has not moved for the ceiling
 					return
 				}
 				w.quietCheck(id, w.now()) // R9: ffmpeg printing nothing for a minute
@@ -879,6 +918,14 @@ func (w *Worker) watchRemoteStall(id int64, rj *RemoteJob) func() {
 				if still, judging := rj.stillFor(now); judging && still >= limit {
 					w.stalledFor.Store(int64(limit))
 					w.jobf(id, ": the remote encode made no progress for %s, stopping it", limit)
+					w.stop(id, stopStall)
+					return
+				}
+				// the frozen-position ceiling: frames or bytes may still grow, but out_time must move within it
+				ceiling := w.stallLimit(w.frozenFactor()*after, rj.finishing())
+				if still, judging := rj.posStillFor(now); judging && still >= ceiling {
+					w.stalledFor.Store(int64(ceiling))
+					w.jobf(id, ": the remote encode's position has not moved for %s, though it is still writing; stopping it", ceiling)
 					w.stop(id, stopStall)
 					return
 				}
@@ -1174,8 +1221,11 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if exp.DurationSec <= 0 {
 		exp.DurationSec = job.DurationSec
 	}
-	// The job keeps what it is about to do and how the result will be judged. If that cannot be
-	// recorded, it does not start: nothing has been written yet.
+	// The job keeps what it is about to do and how the result will be judged, recorded here so its log
+	// can show the variables even when a check below stops it (an output path it can't use, a card's
+	// slot it waits for). If that cannot be recorded, it does not start: nothing has been written yet.
+	// The main video's rules are filled in and the snapshot recorded again once the encoder that runs is
+	// known: a card and the processor can make different pictures from the same plan (slice 3).
 	snap := rules.Snapshot{Plan: plan, Expect: exp, Verify: w.verification(exp), Source: &src, Variables: vtable}
 	b, err := json.Marshal(snap)
 	if err == nil {
@@ -1337,6 +1387,19 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 		w.logLine(job.ID, secEncode, jobs.LevelInfo, line+". Settings: "+encoderDetail(args))
 	}
+	// The new file's rules, now that the encoder that runs is known: the main video by the plan's format,
+	// its height and width (±2 px) and the depth that encoder makes; every other stream as today.
+	exp.MainVideo = plan.MainVideoRules(src, gpu)
+	// The job keeps what it is about to do and how the result will be judged, now with the main video's
+	// rules. If that cannot be recorded, it does not start: your original has not been touched.
+	snap = rules.Snapshot{Plan: plan, Expect: exp, Verify: w.verification(exp), Source: &src, Variables: vtable}
+	b, err = json.Marshal(snap)
+	if err == nil {
+		err = w.Queue.RecordPlan(job.ID, string(b), snap.Fingerprint())
+	}
+	if err != nil {
+		return "", retryable(failed("What this conversion will do could not be recorded, so it did not start. Your original was not touched. Press Retry.", err), retryGeneral)
+	}
 	if note := vbrAverageNote(plan.Video); note != "" {
 		w.jobf(job.ID, ": %s", note)
 	}
@@ -1400,6 +1463,26 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			gpuSlot.Release()
 		}
 	}
+	// The encoder that made the file: the card, unless it failed and the processor retried, or a remote
+	// worker's own choice, named in the arguments it reported.
+	ranOn := gpu
+	if fell {
+		ranOn = "" // the processor converted it after the card failed
+	}
+	if w.remote != nil {
+		ranOn = rules.GraphicsEncoderIn(args, plan.Video.Index)
+	}
+	if m := plan.MainVideoRules(src, ranOn); terr == nil && m != nil && (exp.MainVideo == nil || *m != *exp.MainVideo) {
+		// Another encoder made the file than the one chosen here (a fall-back, or a remote worker's own):
+		// judge it by the picture that encoder makes, and keep the record saying what it was judged by.
+		exp.MainVideo = m
+		snap.Expect = exp
+		if b, jerr := json.Marshal(snap); jerr == nil {
+			if rerr := w.Queue.RecordPlan(job.ID, string(b), snap.Fingerprint()); rerr != nil {
+				w.jobf(job.ID, ": the plan could not be recorded with the encoder that ran: %v", rerr)
+			}
+		}
+	}
 	w.recordEncode(job.ID, args, encStart, encErr, terr, probeSummary(src))
 	// Moved or deleted while converting: ffmpeg's read errors then say nothing about the file, so it is
 	// neither damaged nor the encoder's fault. Checked before the errors are read as damage.
@@ -1420,10 +1503,6 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 	}
 	if terr == nil {
-		ranOn := gpu // the encoder that made the new file
-		if fell {
-			ranOn = "" // the processor converted it after the card failed
-		}
 		w.Queue.AddStep(job.ID, "converted", true, "Converted: "+convertingTo(plan, src, ranOn)+".")
 	}
 	if terr != nil {
@@ -2473,7 +2552,7 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 		// stays within twice the source's size (a runaway output past that is not progress). out_time follows the
 		// most-behind stream, so it freezes in a subtitle gap while frames still go on (bug 2).
 		posMoved := p.OutTimeUS > at // a position further on: one that repeats is not progress
-		outputOK := job.SizeBefore > 0 && p.TotalSize <= 2*job.SizeBefore
+		outputOK := outputWithin(job.SizeBefore, p.TotalSize)
 		alive := posMoved || (outputOK && (p.Frame > frames || p.TotalSize > wrote))
 		frames = p.Frame
 		if p.TotalSize > wrote {
@@ -2481,6 +2560,7 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 		}
 		if posMoved {
 			at = p.OutTimeUS
+			w.positionAt.Store(time.Now().UnixNano())
 			w.finishing.Store(reachedEnd(p.OutTimeUS, job.DurationSec))
 		}
 		if alive {

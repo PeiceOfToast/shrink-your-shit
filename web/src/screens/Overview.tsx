@@ -4,6 +4,7 @@
 // moves the bars in place; a job, library or worker change refetches. Every number comes from the server.
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
+import { Skeleton } from "../Skeleton";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, count, encoderName, plural } from "../format";
 import { getSummary, scanAllLibraries } from "../dashApi";
@@ -118,7 +119,7 @@ export function Overview() {
     });
   }, []);
   const act = async (p: Promise<Answer<unknown>>) => { try { const r = await p; setSaid(failed(r) ? r.error.message : ""); } catch (e) { if (!(e instanceof SignedOut)) throw e; } o.reload(); wl.reload(); };
-  if (!o.data) return <div className="stack"><PageHead icon="i-dashboard" title="Dashboard" />{o.error ? <LoadFailed error={o.error} reload={o.reload} /> : <div className="empty">Loading…</div>}</div>;
+  if (!o.data) return <div className="stack ov"><PageHead icon="i-dashboard" title="Dashboard">{!o.error && <><span className="skel-ph skel-sw" aria-hidden="true" /><span className="skel-ph skel-btn" aria-hidden="true" /></>}</PageHead>{o.error ?<LoadFailed error={o.error} reload={o.reload} /> : <Skeleton tiles={3} rows={3} />}</div>;
   const v = o.data, h = v.headline, noLibs = v.libraries.length === 0, job = (j: OverviewJob) => ({ ...j, ...live[j.jobId] });
   // one row per worker of GET /api/v2/workers; its files' progress from the overview (or, for a worker the overview
   // doesn't list, from Converting now by job id)
@@ -218,7 +219,7 @@ export function Overview() {
                   <div className="chips">{(["Done", "Waiting", "Skipped", "Failed"] as const).map((k, i) => <span key={k} className="mchip">{k} {count([l.counts.done, l.counts.waiting, l.counts.skipped, l.counts.failed][i])}</span>)}</div>
                   {(facts.length > 0 || (l.saved === 0 && l.couldFree > 0)) && <div className="sub libfacts">{facts.join(" · ")}{l.saved === 0 && l.couldFree > 0 && <>{facts.length > 0 && " · "}<Link className="ul over" to={"/jobs?tab=completed&left=1&libraryId=" + encodeURIComponent(String(l.id))}>{"could free " + bytes(l.couldFree) + " by removing the originals"}</Link></>}</div>}
                 </td>
-                <td className="sizec sm nowrap" data-l="Saved">{l.saved > 0 ? <><b>{bytes(l.saved)}</b> saved{l.savedPercent != null && " · " + pctTxt(l.savedPercent)}</> : l.waitingToFree > 0 ? <><b>{bytes(l.waitingToFree)} smaller</b></> : "Nothing saved yet"}
+                <td className="sizec sm nowrap" data-l="Saved">{l.saved > 0 ? <><b className="gain">{bytes(l.saved)}</b> saved{l.savedPercent != null && " · " + pctTxt(l.savedPercent)}</> : l.waitingToFree > 0 ? <><b>{bytes(l.waitingToFree)} smaller</b></> : "Nothing saved yet"}
                   <span className="sub">Size now: {bytes(l.bytesNow)}</span>
                   <span className="savebar" role="img" aria-label={share == null ? "No size yet" : "Saved " + share.toFixed(1) + "% of saved plus size now"}><i style={{ width: (share ?? 0) + "%" }} /></span></td>
                 <td className="stc">{l.state === "no_workflow" ? <span className="pill warn">No workflow</span> : l.state === "paused" ? <span className="pill warn">Paused</span> : l.state === "paused_share" ? <span className="pill warn">Share not connected yet</span> : <span className="pill">Watching</span>}</td>

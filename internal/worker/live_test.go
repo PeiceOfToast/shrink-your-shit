@@ -114,3 +114,18 @@ func TestConvertingToNamesTheFileType(t *testing.T) {
 		}
 	}
 }
+
+// Wording (test matrix item 5): a graphics encode's encoder label always names its codec.
+func TestGraphicsEncoderLabelNamesTheCodec(t *testing.T) {
+	for _, c := range []struct {
+		codec, want string
+	}{
+		{"libx265", "Intel Quick Sync (graphics), HEVC"},
+		{"libx264", "Intel Quick Sync (graphics), H.264"},
+	} {
+		plan := rules.Plan{Video: rules.VideoEncode{Codec: c.codec}}
+		if got := encoderWordsUsed(plan, "hevc_qsv"); got != c.want {
+			t.Errorf("%s: %q, want %q", c.codec, got, c.want)
+		}
+	}
+}

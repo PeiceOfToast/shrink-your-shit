@@ -111,7 +111,7 @@ function Control({ id, name, s, value, set, wf }: { id: string; name: string; s:
         <strong className="slnow phone" aria-hidden="true">{opts[i][1]}</strong>
         <input id={fid} type="range" min={0} max={opts.length - 1} step={1} value={i} aria-valuetext={`${i + 1} of ${opts.length}, ${opts[i][1]}`} onChange={(e) => set(opts[Number(e.target.value)][0])} />
         <div className="row sm muted hide-sm" style={{ justifyContent: "space-between", flexWrap: "nowrap", gap: 2 }} aria-hidden="true">
-          {opts.map((o, k) => (k === i ? <strong key={k} style={{ color: "var(--text)" }}>{o[1]}</strong> : <span key={k}>{o[1]}</span>))}</div>
+          {opts.map((o, k) => (k === i ? <strong key={k} className="slider-on">{o[1]}</strong> : <span key={k}>{o[1]}</span>))}</div>
         {/* phones (design, step 4): the chosen name above, only the two ends under the slider */}
         <div className="row sm muted phone slends" aria-hidden="true"><span>{opts[0][1]}</span><span>{opts[opts.length - 1][1]}</span></div>
         <Hint text={hintFor(s, value)} />
@@ -245,7 +245,9 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
         <details ref={moreRef} onToggle={(e) => { if (byPage.current) { byPage.current = false; return; } if (e.currentTarget.open) { if (!sel) custom(); } else if (sel) goBack(); }}><summary className="btn sm" style={{ display: "inline-flex" }}>More options</summary>
           <div className="grid cols2" style={{ marginTop: 12 }}>
             {field("format")}{field("resolution")}{field("speed")}
-            {q && sel && field("quality")}
+            {(q || vbr) && sel && <div className="stack">
+              <fieldset disabled={vbr} aria-describedby={vbr ? n.id + "-vbrq" : undefined} style={{ border: 0, padding: 0, margin: 0, minWidth: 0, color: vbr ? "var(--text-2)" : undefined }}>{field("quality")}</fieldset>
+              {vbr && <p className="hint" id={n.id + "-vbrq"}>VBR sizes the file by bitrate, so Quality isn't used.</p>}</div>}
             {av1 && sel && <p className="hint" role="status">AV1 can only use Quality only. Pick HEVC or H.264 to set a bitrate.</p>}
             <fieldset className="field choice stack"><legend className="lab">Bitrate</legend>
               <label className="radio" style={{ alignItems: "flex-start" }}><input type="radio" name={n.id + "-rc"} checked={rc === "level"} disabled={av1} onChange={() => put("rateControl", "level")} />
@@ -258,8 +260,8 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
                 <span><strong>As set up before 13 Nov</strong><span className="hint" style={{ display: "block" }}>Makes the same files as before.</span></span></label>}
             </fieldset>
             {/* shortcut: the level and limit of an old flow show as fields, not as plain text; upgrade when design asks for the plain text */}
-            <fieldset disabled={vbr || q} style={{ border: 0, padding: 0, margin: 0, minWidth: 0, opacity: vbr || q ? 0.5 : 1 }}>{field("maxBitrate")}
-              {vbr && <span className="hint">Not used with VBR.</span>}{q && <span className="hint">Not used with Quality only.</span>}
+            <fieldset disabled={vbr || q} aria-describedby={vbr ? n.id + "-mbv" : q ? n.id + "-mbq" : undefined} style={{ border: 0, padding: 0, margin: 0, minWidth: 0, color: vbr || q ? "var(--text-2)" : undefined }}>{field("maxBitrate")}
+              {vbr && <span className="hint" id={n.id + "-mbv"}>Not used with VBR.</span>}{q && <span className="hint" id={n.id + "-mbq"}>Not used with Quality only.</span>}
               {!vbr && !q && lad && <p className="hint">Raised by {Math.round((lad.factors.fps60 - 1) * 100)}% for 60 fps files and by {Math.round((lad.factors.hdr - 1) * 100)}% for HDR. A file never gets more bitrate than it has now.</p>}</fieldset>
             {vbr && field("vbrMaxKbps")}
           </div>

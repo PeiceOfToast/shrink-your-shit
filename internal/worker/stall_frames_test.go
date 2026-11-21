@@ -26,17 +26,22 @@ type outFrozenExec struct {
 	ticks    int
 	frames   bool
 	sizeStep int64
+	gap      time.Duration // real time per report (0: 50 ms)
 }
 
 func (x *outFrozenExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
 	if name != "ffmpeg" || !slices.Contains(args, "libx265") {
 		return x.FakeExec.Stream(ctx, onLine, name, args...)
 	}
+	gap := x.gap
+	if gap == 0 {
+		gap = 50 * time.Millisecond
+	}
 	for i := 0; x.ticks == 0 || i < x.ticks; i++ {
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
-		case <-time.After(20 * time.Millisecond):
+		case <-time.After(gap):
 		}
 		if x.frames {
 			onLine(fmt.Sprintf("frame=%d", i))
@@ -71,7 +76,9 @@ func encodeLines(t *testing.T, s *scenario) (warn int, stopped bool) {
 
 // Bug 2: out_time frozen for longer than StallAfter, with frame= (or total_size=) still growing within twice the
 // source's size, is an encode that is alive: not stopped, and no "has not moved" warning, though the fake clock runs
-// past 30 s without out_time moving. The scenario's source is 14 bytes, so the bytes grow 1 a report (20 reports, 20 bytes).
+// past 30 s without out_time moving. The scenario's source is 14 bytes, so the bytes stay within the bound for 28
+// reports; 24 reports 100 ms apart (about 2.4 s real, past the 2 s StallAfter) keep them there. The ceiling is out
+// of the way (its own test covers it), and a 100 ms report gap sits 20 times inside the stall allowance.
 func TestFrozenOutTimeIsAliveWhileFramesOrBytesGrow(t *testing.T) {
 	for _, c := range []struct {
 		name     string
@@ -83,8 +90,9 @@ func TestFrozenOutTimeIsAliveWhileFramesOrBytesGrow(t *testing.T) {
 			clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
 			w := s.worker(Replace)
 			w.Now = clock.now
-			w.StallAfter = 300 * time.Millisecond // real time: the encode below runs ~600 ms, twice this
-			w.Exec = &outFrozenExec{FakeExec: s.exec, clock: clock, tick: 10 * time.Second, ticks: 20, frames: c.frames, sizeStep: c.sizeStep}
+			w.StallAfter = 2 * time.Second // real time: a report can come late under load
+			w.FrozenPositionFactor = 1000  // the ceiling has its own test; out of the way here
+			w.Exec = &outFrozenExec{FakeExec: s.exec, clock: clock, tick: 10 * time.Second, ticks: 24, frames: c.frames, sizeStep: c.sizeStep, gap: 100 * time.Millisecond}
 			if _, err := w.RunOne(context.Background()); err != nil {
 				t.Fatal(err)
 			}
@@ -140,4 +148,54 @@ func TestFrozenOutTimeStopsPastTheOutputBound(t *testing.T) {
 		t.Fatalf("%d 'has not moved' warnings, want 1", warn)
 	}
 	s.assertOriginalSafe()
+}
+
+// The time ceiling: frames keep growing within the size bound, so the encode is alive at every report, but out_time
+// has not moved for longer than FrozenPositionFactor x StallAfter (2 x 1 s here). It is stopped at the ceiling. The
+// encode runs 5 s, so without the ceiling it would finish: the test fails if the ceiling is removed. Reports are 50 ms
+// apart, far inside the 1 s StallAfter, so the plain stall stop cannot be what ends it.
+func TestFrozenPositionCeilingStopsAliveEncode(t *testing.T) {
+	s := newScenario(t)
+	clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
+	w := s.worker(Replace)
+	w.Now = clock.now
+	w.StallAfter = time.Second
+	w.FrozenPositionFactor = 2
+	w.Exec = &outFrozenExec{FakeExec: s.exec, clock: clock, tick: time.Second, ticks: 100, frames: true}
+	done := make(chan struct{})
+	go func() { w.RunOne(context.Background()); close(done) }()
+	waitDone(t, done)
+	j := s.job()
+	if j.Status != jobs.Failed || !strings.Contains(j.Error, "no progress for 2s") {
+		t.Fatalf("status %s %q, want failed with no progress for 2s (the frozen-position ceiling)", j.Status, j.Error)
+	}
+	s.assertOriginalSafe()
+}
+
+// The ceiling's default must sit well above the real subtitle gap (195 s seen).
+func TestDefaultFrozenPositionCeilingClearsASubtitleGap(t *testing.T) {
+	if got := frozenPositionFactor * DefaultStallAfter; got < 3*195*time.Second {
+		t.Fatalf("default frozen-position ceiling %s, want well above the 195 s subtitle gap", got)
+	}
+}
+
+// The size bound is twice the source, and a source of unknown size has none: pins the factor and SizeBefore == 0.
+func TestOutputWithinTwiceTheSource(t *testing.T) {
+	for _, c := range []struct {
+		name          string
+		before, total int64
+		want          bool
+	}{
+		{"unknown source size", 0, 0, false},
+		{"unknown source size, bytes written", 0, 10, false},
+		{"empty output", 14, 0, true},
+		{"at twice the source", 14, 28, true},
+		{"one byte past twice", 14, 29, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := outputWithin(c.before, c.total); got != c.want {
+				t.Fatalf("outputWithin(%d, %d) = %v, want %v", c.before, c.total, got, c.want)
+			}
+		})
+	}
 }

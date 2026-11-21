@@ -3,7 +3,9 @@
 package workflow
 
 import (
+	"math"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/vars"
@@ -110,7 +112,13 @@ func Resolve(d Doc) (Doc, []Issue) {
 			case v.Value == nil:
 				bad("variable_wrong_type", "{{"+name+"}} has no value yet, so this setting would have nothing. Give it a value, or remove the variable.")
 			default:
-				if msg := valueProblem(p, v.Value, title); msg != "" {
+				// W1 fix: a value typed into a variable is text ("4"), and Quality's choices are the
+				// numbers 1-5; a setting that wants a number takes exactly a number written as text.
+				val := v.Value
+				if n, ok := numberFor(p, val); ok {
+					val = n
+				}
+				if msg := valueProblem(p, val, title); msg != "" {
 					bad("variable_wrong_type", "{{"+name+"}} doesn't fit: "+msg)
 					continue
 				}
@@ -124,7 +132,7 @@ func Resolve(d Doc) (Doc, []Issue) {
 				for ck, cv := range out.Nodes[i].Config {
 					cfg[ck] = cv
 				}
-				cfg[k] = v.Value
+				cfg[k] = val
 				out.Nodes[i].Config = cfg
 			}
 		}
@@ -133,6 +141,36 @@ func Resolve(d Doc) (Doc, []Issue) {
 		return d, issues
 	}
 	return *out, issues
+}
+
+// numberFor is v as a number when the setting wants one and v is text that is exactly a number: the
+// value a person typed into a variable's form, which a choice or a number setting here takes (W1 fix,
+// found on the live server: Quality set to {{level}}, level "4"). The setting wants a number when its
+// schema says integer or number, or its choices are numbers. Anything else keeps v as it is: text for
+// a text setting, and "abc" or "4.5" for a whole number — those are still what valueProblem refuses.
+func numberFor(p map[string]any, v any) (any, bool) {
+	s, ok := v.(string)
+	if !ok {
+		return v, false
+	}
+	s = strings.TrimSpace(s)
+	whole := false
+	switch t, _ := p["type"].(string); t {
+	case "integer":
+		whole = true
+	case "number":
+	default:
+		// no number type: a choice, when its choices are numbers
+		enum, ok := p["enum"].([]any)
+		if !ok || !slices.ContainsFunc(enum, func(e any) bool { _, isNum := num(e); return isNum }) {
+			return v, false
+		}
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || whole && f != math.Trunc(f) {
+		return v, false
+	}
+	return f, true
 }
 
 // wholeRef reads a typed setting's value as one whole reference: its name, and whether the value is

@@ -21,6 +21,7 @@ import (
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/scanner"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
@@ -292,7 +293,8 @@ func (c *Checker) Retest(ctx context.Context) Tools {
 // stale result is refreshed in the background, one refresh at a time: a page that only shows the graphics
 // card never waits for the hardware test's encodes (S2, ui-shop's 1.5 s stop answer).
 //
-// While a check holds the lock its answer is the last complete result, not "nothing": a caller that takes
+// While a check holds the lock its answer is the last complete result, not "nothing", and a Retest that has
+// cleared the hardware result answers the same way until its test stores a new one: a caller that takes
 // "nothing" for an empty capability list would pick the processor on a computer whose card passed (user
 // bug 11-20: Quick Sync passed, card idle, "Chosen: x265 (processor)" with no reason).
 func (c *Checker) ToolsNow() (Tools, bool) {
@@ -306,6 +308,10 @@ func (c *Checker) ToolsNow() (Tools, bool) {
 	stale := !ok || time.Since(c.hwAt) >= toolsTTL || time.Since(c.toolsAt) >= toolsTTL
 	if ok {
 		t = c.tools.withEncoders(*c.hw, c.hwAt)
+	} else if k := c.known.Load(); k != nil {
+		// A Retest cleared the hardware result while its test runs: until the new result is stored, the
+		// last complete one stands (the same answer a caller gets while the lock is held).
+		t, ok = *k, true
 	}
 	start := stale && !c.refreshing
 	if start {
@@ -449,8 +455,9 @@ func decodeArgs(fam, device, in string) []string {
 		args = append(args, "-init_hw_device", "vaapi=va:"+device, "-filter_hw_device", "va",
 			"-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi", "-hwaccel_device", "va")
 	} else {
-		args = append(args, "-init_hw_device", "qsv=qsv:hw",
-			"-hwaccel", "qsv", "-hwaccel_output_format", "qsv", "-hwaccel_device", "qsv")
+		p, _ := rules.ProfileFor("hevc_" + fam) // QSV: the profile's set-up and full-pipeline decode
+		args = append(args, p.Setup(device)...)
+		args = append(args, p.FullDecode()...)
 	}
 	return append(args, "-i", in, "-f", "null", "-")
 }
@@ -480,7 +487,8 @@ func encodeArgs(enc string, tenBit bool, device string) []string {
 	case strings.HasSuffix(enc, "_vaapi"):
 		args = append(args, "-init_hw_device", "vaapi=va:"+device, "-filter_hw_device", "va")
 	case strings.HasSuffix(enc, "_qsv"):
-		args = append(args, "-init_hw_device", "qsv=qsv:hw")
+		p, _ := rules.ProfileFor(enc)
+		args = append(args, p.Setup(device)...)
 	}
 	args = append(args, "-f", "lavfi", "-i", "color=c=black:s=256x256:d=0.1", "-frames:v", "1")
 	switch {

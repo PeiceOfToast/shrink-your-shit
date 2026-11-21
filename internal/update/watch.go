@@ -38,9 +38,11 @@ type Watcher struct {
 	Wait, Poll         time.Duration
 
 	StopApp func(pid int) error
+	// AppStarted is when the app started. It is read before StopApp, while the app's PID is still its own.
+	AppStarted func(pid int) (time.Time, error)
 	// StopChildren ends the processes the app started (an ffprobe it left running), except keep, the watcher
 	// itself. Those children keep the app's PID as their parent after it ends, so they are found after StopApp.
-	StopChildren func(pid, keep int) error
+	StopChildren func(pid, keep int, started time.Time) error
 	RunSetup     func(setup string) error
 	Healthy      func(url string) bool
 	Logf         func(format string, args ...any)
@@ -54,10 +56,13 @@ const unsavedNote = "could not be saved"
 func (w *Watcher) Watch() error {
 	defer os.Remove(w.NewSetup)
 	defer os.Remove(w.OldSetup)
+	started, startErr := w.AppStarted(w.PID)
 	if err := w.StopApp(w.PID); err != nil {
 		return w.fail(fmt.Sprintf("Update to %s not started: the running program could not be stopped (%v)", w.To, err))
 	}
-	if err := w.StopChildren(w.PID, os.Getpid()); err != nil {
+	if startErr != nil {
+		w.logf("the app's start time could not be read, so its child processes were left running: %v", startErr)
+	} else if err := w.StopChildren(w.PID, os.Getpid(), started); err != nil {
 		w.logf("the app's child processes could not all be stopped, so the installer may find files in use: %v", err)
 	}
 	err := w.RunSetup(w.NewSetup)
@@ -124,7 +129,7 @@ func (w *Watcher) logf(format string, args ...any) {
 // It returns the exit status.
 func RunWatcher(args []string) int {
 	fs := flag.NewFlagSet("update-watch", flag.ContinueOnError)
-	w := Watcher{StopApp: stopProcess, StopChildren: stopChildren, RunSetup: runSetup, Healthy: healthy}
+	w := Watcher{StopApp: stopProcess, AppStarted: appStarted, StopChildren: stopChildren, RunSetup: runSetup, Healthy: healthy}
 	fs.IntVar(&w.PID, "pid", 0, "the app's process")
 	fs.StringVar(&w.From, "from", "", "the running version")
 	fs.StringVar(&w.To, "to", "", "the version asked for")
