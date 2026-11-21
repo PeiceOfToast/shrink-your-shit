@@ -275,6 +275,8 @@ func TestDefaultStandardIsNotBasic(t *testing.T) {
 func TestLevelTagAndFitsBasic(t *testing.T) {
 	capped := DefaultSelectors(1)
 	capped.Resolution, capped.MaxBitrate, capped.Audio = "1080", "medium", "my_languages"
+	vbr := DefaultSelectors(3) // VBR: the peak is the person's own figure, no target
+	vbr.RateControl, vbr.VBRMaxKbps = "vbr", 4000
 	for _, c := range []struct {
 		t          Template
 		level, tag string
@@ -282,6 +284,7 @@ func TestLevelTagAndFitsBasic(t *testing.T) {
 		{SliderTemplate(1), "basic", "Basic · Smallest file"},
 		{DefaultSelectors(3).Template(), "standard", "Standard · Balanced · same resolution · no bitrate limit · Stereo AAC"},
 		{capped.Template(), "standard", "Standard · Smallest file · at most 1080p · Medium bitrate · As it is"},
+		{vbr.Template(), "standard", "Standard · Balanced · same resolution · VBR up to 4000 kbps · Stereo AAC"},
 		{LegacyTemplate(Default(), "replace"), "earlier", "Earlier install"},
 		{Template{Kind: KindCustom}, "advanced", "Advanced · Custom"},
 	} {
