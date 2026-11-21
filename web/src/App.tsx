@@ -20,7 +20,7 @@ import { WorkflowStack } from "./screens/WorkflowStack";
 import { WorkflowGraph } from "./screens/WorkflowGraph";
 import { Link, navigate, usePath } from "./router";
 import { SampleDataPage, ScreenGuard } from "./PageHead";
-import { Shell, ThemeMenu } from "./Shell";
+import { ConnBar, Shell, ThemeMenu } from "./Shell";
 import { Icon } from "./Icon";
 import { WorkerHome } from "./screens/Enroll";
 import { ConnectionsSettings } from "./screens/Connections";
@@ -67,6 +67,7 @@ export function App() {
     <>
       <div dangerouslySetInnerHTML={{ __html: sprite }} />
       <header className="topbar"><Link className="brand" to="/"><span className="logo"><Icon id="i-layers" /></span><span className="t">Shrink Your Shit</span></Link><div className="sp" /><ThemeMenu /></header>
+      <ConnBar />
       <main className="content bare" id="main"><SampleDataPage.Provider value={!real && start}><ScreenGuard key={path}>{start ? <Start /> : <SignIn />}</ScreenGuard></SampleDataPage.Provider></main>
     </>
   );

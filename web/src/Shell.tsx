@@ -141,7 +141,7 @@ export function Shell({ title, proto, children }: { title: string; proto: boolea
 }
 
 // The connection-lost bar (spec 12): shown while the live stream (Jobs) has been down for 3 s; it goes when it is back.
-function ConnBar() {
+export function ConnBar() {
   const { lost, lastAt } = useLiveStatus();
   if (!lost) return null;
   return <div className="connbar" role="status" style={{ display: "flex" }}><Icon id="i-wifi-off" /><span>Lost connection to the server. Trying again…{lastAt && " (last update " + clock(lastAt) + ")"}</span></div>;
