@@ -41,7 +41,7 @@ const sig = (rows: Row[]) => JSON.stringify(rows.map(toVar));
 const shownValue = (r: Row) => (r.text === "" ? "No value" : r.type === "bool" ? (r.text === "yes" ? "Yes" : "No") : r.text);
 
 // A refused save names its rows: each issue goes to the row whose name it carries (the second of two duplicates).
-type Field = "name" | "kind" | "value";
+type Field = "name" | "kind" | "value" | "options";
 type Issues = Record<string, { msg: string; field: Field }>;
 const FIELD: Record<string, Field> = { invalid_variable_type: "kind", variable_wrong_type: "value" };
 function mapIssues(issues: VarIssue[], rows: Row[]) {
@@ -94,19 +94,31 @@ function VariablesCard({ items, reload, said }: { items: WorkflowVar[]; reload: 
     setPhase(null); setLoose(""); clearIssue(key);
   };
   const changeKind = (r: Row, type: VarKind) => touch(r.key, { type, text: type === "bool" || type === "enum" ? "" : r.text });
-  const editRow = (r: Row) => { setAsking(null); setEdit({ key: r.key }); };
-  const addRow = () => { const r = fresh(); setRows((rs) => [...rs, r]); setAsking(null); setPhase(null); setEdit({ key: r.key }); };
+  const editRow = (r: Row) => { setAsking(null); setEdit({ key: r.key }); setFocusId(`${r.key}-name`); };
+  const addRow = () => { const r = fresh(); setRows((rs) => [...rs, r]); setAsking(null); setPhase(null); setEdit({ key: r.key }); setFocusId(`${r.key}-name`); };
+  // Done closes the form and returns focus to the row's Edit button; no choices keeps it open with an error.
+  const done = (key: string) => {
+    const r = rows.find((x) => x.key === key);
+    if (r && r.type === "enum" && !r.options.split(",").some((s) => s.trim())) {
+      setIssues((i) => ({ ...i, [key]: { msg: "Give it at least one choice.", field: "options" } }));
+      setFocusId(`${key}-options`);
+      return;
+    }
+    setEdit(null); setFocusId(`${key}-edit`);
+  };
   const cancelEdit = () => {
     if (!edit) return;
     const { key } = edit, was = saved.find((s) => s.key === key);
     if (was) setRows((rs) => rs.map((r) => (r.key === key ? was : r)));
     else setRows((rs) => rs.filter((r) => r.key !== key)); // a row added here and never saved
     clearIssue(key); setEdit(null); setPhase(null);
+    setFocusId(was ? `${key}-edit` : "add-var");
   };
   const remove = (key: string) => {
     setRows((rs) => rs.filter((r) => r.key !== key));
     if (edit?.key === key) setEdit(null);
     setAsking(null); setPhase(null); setLoose(""); clearIssue(key);
+    setFocusId("add-var");
   };
 
   const send = async (preview: boolean) => {
@@ -125,7 +137,7 @@ function VariablesCard({ items, reload, said }: { items: WorkflowVar[]; reload: 
     }
     if (preview) { setPhase(r.affects); return; }
     setPhase(null); setEdit(null);
-    said(`Saved ${plural(r.total, "variable", "variables")}.`);
+    said("Saved.");
     await reload();
   };
 
@@ -138,12 +150,12 @@ function VariablesCard({ items, reload, said }: { items: WorkflowVar[]; reload: 
           {rows.map((r) => (
             <li key={r.key}>
               {edit?.key === r.key
-                ? <VarForm r={r} issues={issues} onChange={(p) => touch(r.key, p)} onKind={(t) => changeKind(r, t)} onDone={() => setEdit(null)} onCancel={cancelEdit} />
-                : <VarLine r={r} issue={issues[r.key]} asking={asking === r.key} onEdit={() => editRow(r)} onAsk={() => setAsking(r.key)} onRemove={() => remove(r.key)} onKeep={() => setAsking(null)} />}
+                ? <VarForm r={r} issues={issues} onChange={(p) => touch(r.key, p)} onKind={(t) => changeKind(r, t)} onDone={() => done(r.key)} onCancel={cancelEdit} />
+                : <VarLine r={r} issue={issues[r.key]} asking={asking === r.key} onEdit={() => editRow(r)} onAsk={() => setAsking(r.key)} onRemove={() => remove(r.key)} onKeep={() => { setAsking(null); setFocusId(`${r.key}-edit`); }} />}
             </li>))}
         </ul>
         <div className="row" style={{ gap: 8 }}>
-          <button className="btn" type="button" onClick={addRow} disabled={busy}>Add a variable</button>
+          <button id="add-var" className="btn" type="button" onClick={addRow} disabled={busy}>Add a variable</button>
         </div>
         <span className="hint">A library's own value wins, then the workflow's, then this one.</span>
         {loose && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{loose}</span></p>}
@@ -177,7 +189,7 @@ function VarLine({ r, issue, asking, onEdit, onAsk, onRemove, onKeep }: {
       {r.description.trim() && <span className="muted">{r.description}</span>}
       {issue && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{issue.msg}</span></p>}
       <div className="row" style={{ gap: 8 }}>
-        <button className="btn sm ghost" type="button" onClick={onEdit} aria-label={`Edit ${label}`}>Edit</button>
+        <button id={`${r.key}-edit`} className="btn sm ghost" type="button" onClick={onEdit} aria-label={`Edit ${label}`}>Edit</button>
         <button className="btn sm ghost" type="button" onClick={onAsk} aria-label={`Remove ${label}`}>Remove</button>
       </div>
       {asking && (
@@ -231,8 +243,15 @@ function VarForm({ r, issues, onChange, onKind, onDone, onCancel }: {
       {r.type === "enum" && (
         <div className="field">
           <label htmlFor={`${id}-options`}>Choices</label>
-          <input className="input" id={`${id}-options`} style={{ maxWidth: 320 }} value={r.options} placeholder="low, medium, high" onChange={(e) => onChange({ options: e.target.value })} />
+          <input className="input" id={`${id}-options`} style={{ maxWidth: 320 }} value={r.options} placeholder="low, medium, high"
+            aria-invalid={bad?.field === "options" || undefined} aria-describedby={desc("options", `${id}-options-hint`)}
+            onChange={(e) => {
+              // a value that is no longer one of the choices is cleared, as a kind change clears it
+              const list = e.target.value.split(",").map((s) => s.trim()).filter(Boolean);
+              onChange({ options: e.target.value, ...(list.includes(r.text) ? {} : { text: "" }) });
+            }} />
           <span className="hint" id={`${id}-options-hint`}>Separate the choices with commas.</span>
+          {err("options")}
         </div>)}
       <div className="field">
         <label htmlFor={`${id}-desc`}>Description (optional)</label>
