@@ -162,6 +162,12 @@ func TestAResolveReadThatFailsNeverRunsTheStoredTemplate(t *testing.T) {
 	}
 	w.RunOne(context.Background())
 	s.wantRetry(1, 5*time.Minute, "could not be read")
+	// #561 review 2b: the settings line the person reads names no raw error text
+	for _, line := range logTexts(t, s) {
+		if strings.Contains(line, "The workflow's settings were not filled") && strings.Contains(line, "database is locked") {
+			t.Errorf("the settings line shows the raw read error: %q", line)
+		}
+	}
 	if n := s.count("libx265"); n != 0 {
 		t.Fatalf("%d encode(s) ran with the stored template's placeholder", n)
 	}

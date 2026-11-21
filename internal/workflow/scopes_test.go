@@ -3,6 +3,7 @@
 package workflow
 
 import (
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -132,8 +133,11 @@ func TestTheFilesOwnValuesFillTheSettings(t *testing.T) {
 			t.Errorf("%s: used %+v, want one from %s", c.ref, used, c.origin)
 		}
 	}
-	fv := FileValues("/videos/Cat.mkv", src, 0)
-	if fv["file.name"] != "Cat.mkv" || fv["file.folder"] != "/videos" || fv["file.size"] != int64(2048) ||
+	// the folder comes back in this OS's own form (P2-2: Windows builds "\\videos"), so the
+	// expectation is built the same way rather than as a POSIX literal
+	cat := filepath.Join("/videos", "Cat.mkv")
+	fv := FileValues(cat, src, 0)
+	if fv["file.name"] != "Cat.mkv" || fv["file.folder"] != filepath.Dir(cat) || fv["file.size"] != int64(2048) ||
 		fv["source.codec"] != "hevc" || fv["source.height"] != 1080 || fv["source.bit_depth"] != 10 || fv["source.hdr"] != false {
 		t.Errorf("FileValues %v", fv)
 	}

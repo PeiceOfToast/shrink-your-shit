@@ -56,10 +56,14 @@ func (w *Worker) resolveForFile(job jobs.Job, src media.Info, tmpl rules.Templat
 		// convert with a value nobody chose. A read that may pass is tried again; the next try resolves.
 		var unreadable *jobs.SecretUnreadableError
 		if errors.As(err, &unreadable) {
+			// #561 review 2a: a secret sealed on another computer stays unreadable until someone
+			// re-enters it, so a retry can't pass; the job stops in its plain words, the original untouched.
 			record("its workflow's secret can't be opened on this computer.")
-			return tmpl, nil, retryable(failed(unreadableSecretWords(unreadable.Names), err), retryGeneral)
+			return tmpl, nil, failed(unreadableSecretWords(unreadable.Names), err)
 		}
-		record("its workflow could not be read (" + err.Error() + ").")
+		// #561 review 2b: the raw error stays out of the job log's words (it can carry SQLite text);
+		// failed(..., err) keeps it in the program log.
+		record("its workflow could not be read.")
 		return tmpl, nil, retryable(failed("This library's setting could not be read, so converting did not start. Your original was not touched. It is tried again shortly.", err), retryGeneral)
 	}
 	if !workflow.HasRefs(info.Doc) {

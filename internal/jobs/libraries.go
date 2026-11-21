@@ -593,7 +593,7 @@ func (e *SettingsUnresolvedError) Problem() string {
 
 // PlainWords is what the job says: the workflow, what no longer resolves, and that nothing was touched.
 func (e *SettingsUnresolvedError) PlainWords() string {
-	return fmt.Sprintf("The workflow “%s” can't run: %s Your original was not touched. Fix the variable or the workflow's setting, then press Retry.", e.Workflow, e.Problem())
+	return fmt.Sprintf("The workflow “%s” can't run: %s Your original was not touched; press Retry once it is fixed.", e.Workflow, e.Problem())
 }
 
 // LibraryCounts are a library's job figures for its card.
