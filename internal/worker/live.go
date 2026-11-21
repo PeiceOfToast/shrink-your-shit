@@ -177,14 +177,15 @@ func encoderWordsUsed(plan rules.Plan, gpu string) string {
 	if gpu == "" || plan.Video.Copy || !ok {
 		return encoderWords(plan)
 	}
-	if plan.Video.Codec == "libx265" {
+	name, ok := formatWords[plan.Video.Codec]
+	if !ok {
 		return label
 	}
-	return label + ", " + formatWords[plan.Video.Codec]
+	return label + ", " + name // the codec always named: "Intel Quick Sync (graphics), H.264"
 }
 
-// formatWords are the non-HEVC graphics formats as people name them.
-var formatWords = map[string]string{"libx264": "H.264", "libsvtav1": "AV1"}
+// formatWords are the graphics formats as people name them, by their software encoder.
+var formatWords = map[string]string{"libx265": "HEVC", "libx264": "H.264", "libsvtav1": "AV1"}
 
 // graphicsNames are the graphics families as people name them, by their HEVC encoder.
 var graphicsNames = map[string]string{"hevc_nvenc": "NVIDIA NVENC (graphics)", "hevc_qsv": "Intel Quick Sync (graphics)",
