@@ -516,3 +516,80 @@ func TestCommandNeedsTheSafetySwitch(t *testing.T) {
 		t.Errorf("add rule for a lookup: %+v", a)
 	}
 }
+
+// FB2c: Has a tag is a question (before the conversion) and Tag the file an action that may sit on either side of
+// the save; both have summaries, the action publishes {{tags}}, and a tag question with nothing to ask is caught.
+func TestTagCards(t *testing.T) {
+	d, by := runDoc()
+	save := d.Nodes[len(d.Nodes)-1]
+	tag := node(TypeTag, "", map[string]any{"add": "converted, {{profile}}", "remove": "needs review"})
+	late := node(TypeTag, "", map[string]any{"add": "done"})
+	ask := node(TypeCheckTag, "", map[string]any{"tags": "remux, needs review", "tagOp": "all"})
+	leave := node(TypeEnd, "", map[string]any{"reason": "Not tagged."})
+	d.Nodes = append(d.Nodes, tag, late, ask, leave)
+	for i, e := range d.Edges { // input → ask → (yes) q …; note → tag → conv; save → late
+		if e.From == by["input"].ID {
+			d.Edges[i].To = ask.ID
+		}
+		if e.From == by["note"].ID {
+			d.Edges[i].To = tag.ID
+		}
+	}
+	d.Edges = append(d.Edges, link(ask.ID, "match", by["q"].ID), link(ask.ID, "else", leave.ID), link(tag.ID, "success", by["conv"].ID), link(save.ID, "success", late.ID))
+	r := Validate(d)
+	if r.Errors() {
+		t.Fatalf("%+v", r.Issues)
+	}
+	if s := r.StepSummaries[ask.ID]; s != "Only if the file has all of the tags remux, needs review" {
+		t.Errorf("ask summary: %q", s)
+	}
+	if s := r.StepSummaries[tag.ID]; s != "Adds converted, {{profile}}; removes needs review" {
+		t.Errorf("tag summary: %q", s)
+	}
+	if s := r.StepSummaries[late.ID]; s != "Adds done" {
+		t.Errorf("late summary: %q", s)
+	}
+	if !slices.Contains(PublishedNames(d), "tags") {
+		t.Error("tags is not published")
+	}
+	tm, issues := ToTemplate(d, rules.Template{})
+	if len(issues) > 0 {
+		t.Fatalf("%v", issues)
+	}
+	yes := (*tm.Branches)[0]
+	if len(yes.Checks) != 2 || yes.Checks[0].Check.Kind != "tag" || yes.Checks[0].Check.TagOp != "all" || yes.Checks[0].Check.Tags != "remux, needs review" {
+		t.Errorf("checks: %+v", yes.Checks)
+	}
+	if len(yes.Before) != 3 || yes.Before[2].Type != TypeTag || len(yes.After) != 1 || yes.After[0].Type != TypeTag {
+		t.Errorf("cards: before %+v after %+v", yes.Before, yes.After)
+	}
+	// a tag question with nothing to ask
+	ask.Config = map[string]any{"tags": " , "}
+	d.Nodes[len(d.Nodes)-2] = ask
+	if !Validate(d).Errors() {
+		t.Error("an empty tag question should be refused")
+	}
+	// review2-542 P2: a Tag card with nothing to add or remove (or only separators) is refused at publish, naming
+	// the field, and its summary never reads "Adds "
+	ask.Config = map[string]any{"tags": "remux"}
+	d.Nodes[len(d.Nodes)-2] = ask
+	for _, cfg := range []map[string]any{{}, {"add": " , "}, {"add": "", "remove": ", ,"}} {
+		tag.Config = cfg
+		d.Nodes[len(d.Nodes)-4] = tag
+		r := Validate(d)
+		if !hasIssue(r.Issues, "invalid_config", tag.ID) {
+			t.Errorf("%v: an empty Tag card should be refused: %+v", cfg, r.Issues)
+		}
+		if s := r.StepSummaries[tag.ID]; strings.HasPrefix(s, "Adds ") {
+			t.Errorf("%v: summary %q", cfg, s)
+		}
+	}
+	// review2-542 P3a: the limits the description names are the ones the code keeps
+	if rules.MaxTags != 20 || rules.MaxTagLen != 40 {
+		t.Errorf("limits: %d tags of %d", rules.MaxTags, rules.MaxTagLen)
+	}
+	def, _ := Definition(TypeTag)
+	if !strings.Contains(def.Description, "40 characters") || !strings.Contains(def.Description, "at most 20 tags") {
+		t.Errorf("the description names other limits: %q", def.Description)
+	}
+}

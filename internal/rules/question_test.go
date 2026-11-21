@@ -4,6 +4,7 @@ package rules
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -123,5 +124,57 @@ func TestQuestionEmpty(t *testing.T) {
 		if q.Empty() {
 			t.Errorf("%+v should not be empty", q)
 		}
+	}
+}
+
+// FB2c: a tag question reads the record's tags whatever their case; any / all / none; CleanTags and ApplyTags
+// keep tags short, unique and few.
+func TestTagQuestionAndTagHelpers(t *testing.T) {
+	f := Facts{Tags: []string{"Remux", "needs review"}}
+	for _, c := range []struct {
+		q    Question
+		want bool
+	}{
+		{Question{Kind: "tag", Tags: "remux"}, true},
+		{Question{Kind: "tag", Tags: "remux, other", TagOp: "any"}, true},
+		{Question{Kind: "tag", Tags: "remux, other", TagOp: "all"}, false},
+		{Question{Kind: "tag", Tags: "REMUX, Needs Review", TagOp: "all"}, true},
+		{Question{Kind: "tag", Tags: "other", TagOp: "none"}, true},
+		{Question{Kind: "tag", Tags: "remux", TagOp: "none"}, false},
+		{Question{Kind: "tag", Tags: ""}, false},
+	} {
+		if yes, why := c.q.Ask(media.Info{}, f); yes != c.want || why == "" {
+			t.Errorf("%+v: %v %q", c.q, yes, why)
+		}
+	}
+	if !(Question{Kind: "tag", Tags: " , "}).Empty() || (Question{Kind: "tag", Tags: "x"}).Empty() {
+		t.Error("Empty")
+	}
+	if got := CleanTags(" a ,b  c, A, , " + strings.Repeat("y", MaxTagLen+3)); fmt.Sprint(got) != "[a b c "+strings.Repeat("y", MaxTagLen)+"]" {
+		t.Errorf("CleanTags: %q", got)
+	}
+	var many []string
+	for i := 0; i < MaxTags+3; i++ {
+		many = append(many, fmt.Sprintf("t%d", i))
+	}
+	if got := CleanTags(strings.Join(many, ",")); len(got) != MaxTags {
+		t.Errorf("the cap: %d", len(got))
+	}
+	if got := ApplyTags([]string{"remux", "Needs review"}, []string{"converted", "REMUX"}, []string{"needs review"}); fmt.Sprint(got) != "[remux converted]" {
+		t.Errorf("ApplyTags: %q", got)
+	}
+	if got := ApplyTags(nil, nil, []string{"x"}); got == nil || len(got) != 0 {
+		t.Errorf("ApplyTags of nothing: %#v", got)
+	}
+	// review-542: the cap is on the adds only; a record past it keeps every tag it was not asked to drop
+	var have []string
+	for i := 0; i < 23; i++ {
+		have = append(have, fmt.Sprintf("h%d", i))
+	}
+	if got := ApplyTags(have, nil, []string{"h3"}); len(got) != 22 || HasTag(got, "h3") || !HasTag(got, "h22") {
+		t.Errorf("remove-only on 23 tags: %d left, %v", len(got), got)
+	}
+	if got, left := ApplyTagsCounted(have, []string{"new1", "new2"}, nil); len(got) != 23 || left != 2 {
+		t.Errorf("adds past the cap: %d tags, %d left off", len(got), left)
 	}
 }

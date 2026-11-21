@@ -17,6 +17,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -47,6 +48,8 @@ type Env struct {
 	// and the downloaders' answer about a file (the values to publish, and words for the log).
 	Exec   func(program string, args []string, dir string, timeout time.Duration, onLine func(string)) (output string, err error)
 	Lookup func(which string) (vals map[string]string, words string, err error)
+	// FB2c: tags on the job record; answers with the record's tags after the change.
+	Tag func(add, remove []string) ([]string, error)
 }
 
 // MaxOutput is how much of a program's output {{command_output}} keeps.
@@ -105,6 +108,34 @@ func run(c rules.Card, st *State, env Env) (Note, error) {
 		return def
 	}
 	switch c.Type {
+	case workflow.TypeTag:
+		addText, empty := vars.Resolve(str("add", ""), st.Vars)
+		removeText, more := vars.Resolve(str("remove", ""), st.Vars)
+		add, remove := rules.CleanTags(addText), rules.CleanTags(removeText)
+		n.Empty = append(empty, more...)
+		if len(add) == 0 && len(remove) == 0 {
+			if len(n.Empty) > 0 { // review2-542 P3d: say which name was empty
+				return n, errors.New("nothing to add or remove: {{" + strings.Join(n.Empty, "}}, {{") + "}} had no value")
+			}
+			return n, errors.New("nothing to add or remove")
+		}
+		if env.Tag == nil { // review-542: a store without tags yet: say so and go on, the run is not the card's to stop
+			n.Words = "Tags not kept: this install's records have no tags yet, so nothing changed"
+			if env.Log != nil {
+				env.Log(nameOf(c) + ": " + n.Words)
+			}
+			return n, nil
+		}
+		tags, err := env.Tag(add, remove)
+		if err != nil {
+			return n, err
+		}
+		st.Vars["tags"] = strings.Join(tags, ", ")
+		n.Words = "Tags: " + quoteOr(strings.Join(tags, ", "), "none")
+		if _, leftOff := rules.ApplyTagsCounted(tags, add, nil); leftOff > 0 { // what the store could not take
+			n.Words += " (" + strconv.Itoa(leftOff) + " left off: a record carries at most " + strconv.Itoa(rules.MaxTags) + ")"
+		}
+		return n, nil
 	case workflow.TypeLookupDownloader:
 		if env.Lookup == nil {
 			return n, errors.New("no downloader can be asked from here")

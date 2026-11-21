@@ -41,13 +41,16 @@ const (
 	// FB2b
 	TypeCommand          = "action.command"           // runs a program on the saved result; behind the Safety switch
 	TypeLookupDownloader = "action.lookup_downloader" // asks the connected downloader what this file is
+	// FB2c: tags on the job record (user decision 2: the word is "tag")
+	TypeCheckTag = "check.tag"  // the file's record carries any / all / none of the chosen tags
+	TypeTag      = "action.tag" // adds or removes tags on the file's record
 )
 
 // Questions are the step types that answer Yes or No (RunsQuestion); Actions the ones that do one thing
 // before the conversion (RunsAction); Ends the ones that end a run.
 var (
-	Questions = []string{TypeCheck, TypeCheckName, TypeCheckAge, TypeCheckVariable, TypeCheckLibrary, TypeCheckHardLinks}
-	Actions   = []string{TypeSetVariable, TypeNote, TypeLookupDownloader, TypeMediaServer, TypeDownloader, TypeNotify, TypeSidecar, TypeChecksum, TypeCopy, TypeCommand}
+	Questions = []string{TypeCheck, TypeCheckName, TypeCheckAge, TypeCheckVariable, TypeCheckLibrary, TypeCheckHardLinks, TypeCheckTag}
+	Actions   = []string{TypeSetVariable, TypeNote, TypeTag, TypeLookupDownloader, TypeMediaServer, TypeDownloader, TypeNotify, TypeSidecar, TypeChecksum, TypeCopy, TypeCommand}
 	Ends      = []string{TypeEnd, TypeFail}
 )
 
@@ -367,6 +370,13 @@ func Definitions() []StepDefinition {
 			ConfigSchema: object(map[string]any{
 				"libraries": map[string]any{"type": "array", "title": "Libraries", "items": map[string]any{"type": "string"}, "x-ui": map[string]any{"widget": "libraries"}},
 			}, []string{"libraries"})}),
+		def(StepDefinition{Type: TypeCheckTag, RunsAs: RunsQuestion, AlwaysOn: true, Category: "filter", Name: "Has a tag", Icon: "branch", TypeLabel: "Check",
+			Description: "Sends each file one of two ways, by the tags on its record (a 'Tag the file' step sets them; Jobs shows them).",
+			Inputs:      []Port{in}, Outputs: []Port{yesPort, noPort}, SideEffects: "none",
+			ConfigSchema: object(map[string]any{
+				"tags":  described(map[string]any{"type": "string", "title": "Tags", "maxLength": 1000, "x-placeholder": "remux, needs-review"}, "One or more, separated by commas. Case doesn't matter."),
+				"tagOp": withDefault(hinted(enum([]any{"any", "all", "none"}, []string{"Any of them", "All of them", "None of them"}), []string{"Yes when the file has at least one.", "Yes only when it has every one.", "Yes when it has none of them."}), "any", "Yes when the file has", "segmented"),
+			}, []string{"tags"})}),
 		def(StepDefinition{Type: TypeCheckHardLinks, RunsAs: RunsQuestion, AlwaysOn: true, Category: "filter", Name: "Shares its data with another file", Icon: "branch", TypeLabel: "Check",
 			Description: "Yes when the original has another name on the same disk (a hard link), so converting it would free no space.",
 			Inputs:      []Port{in}, Outputs: []Port{yesPort, noPort}, SideEffects: "none"}),
@@ -378,6 +388,14 @@ func Definitions() []StepDefinition {
 				"name":  map[string]any{"type": "string", "title": "Name", "maxLength": 40, "x-placeholder": "profile", "x-variableName": true},
 				"value": templated(described(map[string]any{"type": "string", "title": "Value", "maxLength": 1000, "x-placeholder": "{{title}} ({{resolution}})"}, "A value, or a template of other variables, like {{title}} ({{resolution}}).")),
 			}, []string{"name"})}),
+		def(StepDefinition{Type: TypeTag, RunsAs: RunsAction, Category: "flow", Name: "Tag the file", Icon: "tag", TypeLabel: "Action",
+			Description: "Adds or removes tags on the file's record. Jobs shows them, and a 'Has a tag' step can ask about them on a later run. Variables are filled in. Sets {{tags}} to what the record carries after this step. A tag is cut at 40 characters; a record carries at most 20 tags, so adds past that are left off (the log says so).",
+			Inputs:      []Port{in}, Outputs: []Port{success}, SideEffects: "none",
+			Publishes: []Published{{Name: "tags", Type: "string", Words: "The file's tags after this step, separated by commas"}},
+			ConfigSchema: object(map[string]any{
+				"add":    templated(described(map[string]any{"type": "string", "title": "Add", "maxLength": 1000, "x-placeholder": "converted, {{profile}}"}, "One or more, separated by commas. Variables are filled in, like {{profile}}.")),
+				"remove": templated(described(map[string]any{"type": "string", "title": "Remove", "maxLength": 1000, "x-placeholder": "needs-review"}, "Tags to take off, separated by commas, like needs-review.")),
+			}, nil)}),
 		def(StepDefinition{Type: TypeNote, RunsAs: RunsAction, Category: "flow", Name: "Add a note to the log", Icon: "note", TypeLabel: "Action",
 			Description: "Writes a line into the job log at this point. Variables are filled in.",
 			Inputs:      []Port{in}, Outputs: []Port{success}, SideEffects: "none",

@@ -14,7 +14,10 @@ const (
 // CleanTags reads tags as typed (comma-separated; a comma is a separator and never part of a tag): trimmed,
 // inner spaces kept, cut to MaxTagLen, the same tag in another case taken once, at most MaxTags. Order is as
 // typed.
-func CleanTags(s string) []string {
+func CleanTags(s string) []string { return cleanTags(s, MaxTags) }
+
+// cleanTags is CleanTags with its own cap (0: none).
+func cleanTags(s string, cap int) []string {
 	var out []string
 	for _, t := range strings.Split(s, ",") {
 		t = strings.Join(strings.Fields(t), " ")
@@ -28,7 +31,7 @@ func CleanTags(s string) []string {
 			continue
 		}
 		out = append(out, t)
-		if len(out) == MaxTags {
+		if cap > 0 && len(out) == cap {
 			break
 		}
 	}
@@ -46,19 +49,32 @@ func HasTag(tags []string, t string) bool {
 }
 
 // ApplyTags is what "Tag the file" does to a record's tags: removes first, then adds, each cleaned (commas
-// split), the result capped at MaxTags (a tag past the cap is left off, in order). Never nil.
+// split). The cap applies to the adds only: what the record already carries is kept whole, so a remove-only
+// write never drops a tag it wasn't asked to (review-542). Never nil. LeftOff says how many adds did not
+// fit.
 func ApplyTags(have []string, add, remove []string) []string {
-	out := []string{}
-	removed := CleanTags(strings.Join(remove, ","))
-	for _, t := range CleanTags(strings.Join(have, ",")) {
+	out, _ := ApplyTagsCounted(have, add, remove)
+	return out
+}
+
+// ApplyTagsCounted is ApplyTags that also says how many of the adds were left off at the cap.
+func ApplyTagsCounted(have []string, add, remove []string) (out []string, leftOff int) {
+	out = []string{}
+	removed := cleanTags(strings.Join(remove, ","), 0)
+	for _, t := range cleanTags(strings.Join(have, ","), 0) {
 		if !HasTag(removed, t) {
 			out = append(out, t)
 		}
 	}
-	for _, t := range CleanTags(strings.Join(add, ",")) {
-		if !HasTag(out, t) && len(out) < MaxTags {
-			out = append(out, t)
+	for _, t := range cleanTags(strings.Join(add, ","), 0) {
+		if HasTag(out, t) {
+			continue
 		}
+		if len(out) >= MaxTags {
+			leftOff++
+			continue
+		}
+		out = append(out, t)
 	}
-	return out
+	return out, leftOff
 }

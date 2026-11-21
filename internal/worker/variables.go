@@ -50,7 +50,7 @@ func (w *Worker) runFacts(job jobs.Job, src media.Info, st os.FileInfo) rules.Fa
 	}
 	source := vars.Source{Path: job.Path, Library: info.Library, LibraryRoot: job.Library, SizeBytes: job.SizeBefore,
 		Info: &src, Workflow: info.Workflow, Revision: info.Revision, Worker: w.ID, Variables: ownValues(info)}
-	f := rules.Facts{Vars: source.Values(), Path: job.Path, Library: info.Library}
+	f := rules.Facts{Vars: source.Values(), Path: job.Path, Library: info.Library, Tags: w.jobTags(job.ID)} // FB2c: the record's tags, once the store has them
 	if job.LibraryID > 0 {
 		f.LibraryID = strconv.FormatInt(job.LibraryID, 10)
 	}
