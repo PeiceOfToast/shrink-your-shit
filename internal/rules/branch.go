@@ -342,6 +342,11 @@ type Branch struct {
 	Requeue *Requeue `json:"requeue,omitempty"`
 	// FB2a: the actions on the saved result, in order; a failure leaves the job done, with a warning.
 	After []Card `json:"after,omitempty"`
+	// FB4b: "Hand to another workflow": the path ends by sending the file to workflow Goto (handoff.go), from
+	// the step GotoNode; Handoffs are the hand-overs an expanded path went through, for the timeline.
+	Goto     int64     `json:"goto,omitempty"`
+	GotoNode string    `json:"gotoNode,omitempty"`
+	Handoffs []Handoff `json:"handoffs,omitempty"`
 }
 
 // Requeue is what "Convert again later" asks of the queue (FB4).
@@ -472,6 +477,8 @@ func CompileBranch(b Branch, info media.Info, languages string) Plan {
 		p = Plan{Kind: KindBranches, Skip: failWords(b.End), SkipCode: SkipLeftByWorkflow, Requeue: b.Requeue}
 	case b.Then == nil && b.Fail:
 		p = Plan{Kind: KindBranches, Skip: failWords(b.End), SkipCode: SkipLeftByWorkflow, Fail: true}
+	case b.Then == nil && b.Goto != 0: // FB4b: not expanded by the store (a preview): the file goes on elsewhere
+		p = Plan{Kind: KindBranches, Skip: "handed to another workflow", SkipCode: SkipHandedToWorkflow}
 	case b.Then == nil:
 		p = Plan{Kind: KindBranches, Skip: skipWords(b.End), SkipCode: SkipLeftByWorkflow}
 	default:

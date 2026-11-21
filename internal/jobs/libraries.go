@@ -557,12 +557,12 @@ func (s *Store) TemplateFor(j Job) (rules.Template, error) {
 	if rev, ok, rerr := s.LatestRevision(flowID); rerr == nil && ok && workflow.HasRefs(rev.Doc) {
 		t, issues := workflow.ToTemplate(rev.Doc, f.Template)
 		if len(issues) == 0 {
-			return t, nil
+			return s.WithHandoffs(t), nil
 		}
 		// publish refuses these, so this is a defect; the job still runs what was published, and says so
 		log.Printf("workflow %d: its published settings no longer resolve (%s); job %d runs the stored template", flowID, issues[0].Message, j.ID)
 	}
-	return f.Template, nil
+	return s.WithHandoffs(f.Template), nil // FB4b: a path that hands the file to another workflow runs that workflow's paths
 }
 
 // LibraryCounts are a library's job figures for its card.

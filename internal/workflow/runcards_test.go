@@ -668,3 +668,83 @@ func TestFlowCardsFB4(t *testing.T) {
 		t.Error("an end is placed in the graph")
 	}
 }
+
+// FB4b: "Hand to another workflow" compiles to a path that names the workflow; the policy's view of the
+// other workflows refuses a hand-over to this workflow, to one that isn't there, to one never published,
+// and to one that leads back here; with a good target the step's summary names it.
+func TestHandToAnotherWorkflow(t *testing.T) {
+	d, by := runDoc()
+	goTo := node(TypeGoto, "", map[string]any{"workflow": "7"})
+	d.Nodes = append(d.Nodes, goTo)
+	for i, e := range d.Edges { // the No path hands the file on instead of failing
+		if e.From == by["q"].ID && e.FromPort == "else" {
+			d.Edges[i].To = goTo.ID
+		}
+	}
+	d.Nodes = slices.DeleteFunc(d.Nodes, func(n Node) bool { return n.ID == by["fail"].ID })
+	r := Validate(d)
+	if r.Errors() {
+		t.Fatalf("%+v", r.Issues)
+	}
+	if r.StepSummaries[goTo.ID] != "Hands the file to another workflow" {
+		t.Errorf("summary %q", r.StepSummaries[goTo.ID])
+	}
+	if a := r.AddSteps[TypeGoto]; a.Addable {
+		t.Error("an end is placed in the graph")
+	}
+	tm, issues := ToTemplate(d, rules.Template{})
+	if len(issues) > 0 {
+		t.Fatalf("%v", issues)
+	}
+	var hand *rules.Branch
+	for i := range *tm.Branches {
+		if b := &(*tm.Branches)[i]; b.Goto != 0 {
+			hand = b
+		}
+	}
+	if hand == nil || hand.Goto != 7 || hand.GotoNode != goTo.ID || hand.Then != nil || hand.Fail || len(hand.Checks) != 1 || hand.Checks[0].Port != "else" || hand.Path[len(hand.Path)-1] != goTo.ID {
+		t.Fatalf("the hand-over path: %+v", hand)
+	}
+	// no workflow chosen
+	goTo.Config = map[string]any{}
+	d.Nodes[len(d.Nodes)-1] = goTo
+	if !hasIssue(Validate(d).Issues, "invalid_config", goTo.ID) {
+		t.Error("a hand-over without a workflow is refused")
+	}
+	goTo.Config = map[string]any{"workflow": "7"}
+	d.Nodes[len(d.Nodes)-1] = goTo
+	// the other workflows, as the store would tell them: 7 is published and hands to 8; 8 hands back to 5 (this one); 9 is a draft
+	others := map[int64]OtherWorkflow{7: {Name: "Big films", Published: true, HandsTo: []int64{8}}, 8: {Name: "Back", Published: true, HandsTo: []int64{5}}, 9: {Name: "Draft", Published: false}}
+	look := func(id int64) (OtherWorkflow, bool) { o, ok := others[id]; return o, ok }
+	code := func(self int64, target string) (string, string) {
+		goTo.Config = map[string]any{"workflow": target}
+		d.Nodes[len(d.Nodes)-1] = goTo
+		res := ValidateWith(d, Policy{CommandsAllowed: true, Workflows: look, SelfID: self})
+		for _, i := range res.Issues {
+			if i.NodeID == goTo.ID {
+				return i.Code, i.Message
+			}
+		}
+		return "", res.StepSummaries[goTo.ID]
+	}
+	for _, c := range []struct {
+		self                int64
+		target, code, words string
+	}{
+		{7, "7", "handoff_loop", "hands the file back to this workflow"},
+		{5, "7", "handoff_loop", "leads back to this workflow through 'Big films'"},
+		{6, "7", "", "Hands the file to Big films"},
+		{5, "9", "handoff_unpublished", "'Draft', which hasn't been published yet"},
+		{5, "42", "invalid_config", "isn't there any more"},
+	} {
+		if got, words := code(c.self, c.target); got != c.code || !strings.Contains(words, c.words) {
+			t.Errorf("self %d → %s: %q %q, want %q with %q", c.self, c.target, got, words, c.code, c.words)
+		}
+	}
+	// no lookup (Validate alone, or a policy without one): the target is not checked
+	goTo.Config = map[string]any{"workflow": "42"}
+	d.Nodes[len(d.Nodes)-1] = goTo
+	if res := ValidateWith(d, Policy{CommandsAllowed: true}); res.Errors() {
+		t.Errorf("without a lookup: %+v", res.Issues)
+	}
+}

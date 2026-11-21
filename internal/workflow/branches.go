@@ -208,6 +208,9 @@ func branchTemplate(d Doc) (rules.Template, []Issue) {
 				reason = "Stopped by this workflow"
 			}
 			branches = append(branches, rules.Branch{Checks: checks, Before: before, End: reason, Fail: true, Path: append(clone(path), n.ID)})
+		case n.Type == TypeGoto: // FB4b: the file goes on to another workflow; the store fills in its paths (rules.WithHandoffs)
+			id, _ := strconv.ParseInt(strOf(n.Config, "workflow", ""), 10, 64)
+			branches = append(branches, rules.Branch{Checks: checks, Before: before, Path: append(clone(path), n.ID), Goto: id, GotoNode: n.ID})
 		case n.Type == TypeRequeue: // FB4
 			reason, _ := n.Config["reason"].(string)
 			if reason == "" {

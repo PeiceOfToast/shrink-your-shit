@@ -322,14 +322,15 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		writeJSON(w, revisionView(policyFor(store), d))
 	})
 	api.HandleFunc("POST /api/v2/workflows/{id}/validate", func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := wfID(w, r); !ok {
+		id, ok := wfID(w, r)
+		if !ok {
 			return
 		}
 		var in struct{ Workflow workflow.Doc }
 		if !readJSON(w, r, &in) {
 			return
 		}
-		writeJSON(w, workflow.ValidateWith(in.Workflow, policyFor(store))) // FB2b: the Safety switch counts here
+		writeJSON(w, workflow.ValidateWith(in.Workflow, policyForWorkflow(store, id))) // FB2b: the Safety switch counts here
 	})
 	api.HandleFunc("GET /api/v2/workflows/{id}/publish-preview", func(w http.ResponseWriter, r *http.Request) {
 		id, ok := wfID(w, r)
@@ -361,7 +362,7 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			return
 		}
 		writeJSON(w, map[string]any{"nextNumber": next, "changes": changes, "libraries": v["libraries"],
-			"changesOriginals": commitPolicy(d.Doc) == "replace", "validation": workflow.ValidateWith(d.Doc, policyFor(store)).Issues})
+			"changesOriginals": commitPolicy(d.Doc) == "replace", "validation": workflow.ValidateWith(d.Doc, policyForWorkflow(store, id)).Issues})
 	})
 	api.HandleFunc("POST /api/v2/workflows/{id}/publish", func(w http.ResponseWriter, r *http.Request) {
 		id, ok := wfID(w, r)
@@ -381,7 +382,7 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			storeErr(w, jobs.ErrStaleDraft)
 			return
 		}
-		if res := workflow.ValidateWith(d.Doc, policyFor(store)); res.Errors() { // FB2b: Run a command needs the Safety switch
+		if res := workflow.ValidateWith(d.Doc, policyForWorkflow(store, id)); res.Errors() { // FB2b: Run a command needs the Safety switch; FB4b: a hand-over must lead somewhere
 			// A {{name}} template problem names its setting in the error itself (the page keys on the code and
 			// shows the field); every other problem keeps the general answer, with all the issues listed.
 			code, message := "has_errors", "This workflow has problems to fix before it can be published. Nothing was changed."
@@ -543,7 +544,7 @@ func workflowViewWith(store *jobs.Store, id int64, libs []jobs.Library) (map[str
 		return nil, err
 	}
 	shown := draft.Doc // the draft, or the published revision when there's none (Draft makes it from that)
-	res := workflow.ValidateWith(shown, policyFor(store))
+	res := workflow.ValidateWith(shown, policyForWorkflow(store, id))
 	errs, warns := 0, 0
 	for _, i := range res.Issues {
 		if i.Severity == "error" {
@@ -581,6 +582,7 @@ func workflowViewWith(store *jobs.Store, id int64, libs []jobs.Library) (map[str
 
 // revisionView is a revision as the contract's WorkflowRevision.
 func revisionView(p workflow.Policy, r jobs.Revision) map[string]any {
+	p.SelfID = r.WorkflowID                // FB4b: a hand-over back to this workflow is refused
 	res := workflow.ValidateWith(r.Doc, p) // FB2b: the Safety switch counts in what the editor shows
 	id := any(nil)
 	if r.ID != 0 {

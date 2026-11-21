@@ -193,6 +193,8 @@ func (t Template) CompileWith(info media.Info, f Facts) (p Plan) {
 				p = Plan{Kind: KindBranches, Skip: failWords(b.End), SkipCode: SkipLeftByWorkflow, Requeue: b.Requeue}
 			} else if b.Fail {
 				p = Plan{Kind: KindBranches, Skip: failWords(b.End), SkipCode: SkipLeftByWorkflow, Fail: true}
+			} else if b.Goto != 0 { // FB4b: not expanded by the store (a preview): the file goes on elsewhere
+				p = Plan{Kind: KindBranches, Skip: "handed to another workflow", SkipCode: SkipHandedToWorkflow}
 			} else {
 				p = Plan{Kind: KindBranches, Skip: skipWords(b.End), SkipCode: SkipLeftByWorkflow}
 			}
@@ -201,6 +203,7 @@ func (t Template) CompileWith(info media.Info, f Facts) (p Plan) {
 			then.Languages = t.Languages
 			p = then.Compile(info)
 		}
+		ds = handoffDecisions(ds, b.Handoffs)        // FB4b: each hand-over in its place among the answers
 		if len(p.Steps) > 0 && ok && b.Then != nil { // the checks' answers came before the path's own steps
 			p.Steps = append(checkSteps(ds), p.Steps...)
 		}

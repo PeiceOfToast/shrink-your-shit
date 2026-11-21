@@ -5,7 +5,7 @@ import type { Edge, ID, Node, StepDefinition, WorkflowDoc } from "./types/v2";
 
 // A question answers Yes or No (its outputs are match and else); an end has no outputs.
 export const isQuestion = (n: Node) => n.type === "filter.video" || n.type.startsWith("check.");
-export const isEnd = (n: Node) => n.type === "flow.end" || n.type === "flow.fail";
+export const isEnd = (n: Node) => n.type === "flow.end" || n.type === "flow.fail" || n.type === "flow.requeue" || n.type === "flow.goto";
 // The port the main path leaves a step by.
 export const mainPort = (n: Node) => (isQuestion(n) ? "match" : "success");
 
@@ -30,13 +30,14 @@ export function order(d: WorkflowDoc): Node[] {
   return out;
 }
 
-// What a question's No leads to: one of the ends, or something else (the graph shows it).
-export type Otherwise = "leave" | "fail" | "other" | "none";
+// What a question's No leads to: one of the ends (leave, fail, or a hand-over to another workflow: FB4b), or
+// something else (the graph shows it).
+export type Otherwise = "leave" | "fail" | "goto" | "other" | "none";
 export function otherwiseOf(d: WorkflowDoc, q: Node): { kind: Otherwise; node?: Node } {
   const e = d.edges.find((x) => x.from === q.id && x.fromPort === "else"), n = e && d.nodes.find((x) => x.id === e.to);
   if (!e) return { kind: "none" };
   if (!n) return { kind: "other" };
-  return { kind: n.type === "flow.end" ? "leave" : n.type === "flow.fail" ? "fail" : "other", node: n };
+  return { kind: n.type === "flow.end" ? "leave" : n.type === "flow.fail" ? "fail" : n.type === "flow.goto" ? "goto" : "other", node: n };
 }
 
 // Set a question's No to an end of the given kind: the end there already is replaced (its words kept when the kind

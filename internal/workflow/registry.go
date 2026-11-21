@@ -48,6 +48,7 @@ const (
 	TypeCheckRandom = "check.random" // a chosen share of files answers Yes
 	TypeWait        = "action.wait"  // pauses the run for a while, or puts the file back in the queue until a time of day
 	TypeRequeue     = "flow.requeue" // the file goes back to the queue for later, at most so many times
+	TypeGoto        = "flow.goto"    // the file continues in another published workflow (FB4b)
 )
 
 // Questions are the step types that answer Yes or No (RunsQuestion); Actions the ones that do one thing
@@ -55,7 +56,7 @@ const (
 var (
 	Questions = []string{TypeCheck, TypeCheckName, TypeCheckAge, TypeCheckVariable, TypeCheckLibrary, TypeCheckHardLinks, TypeCheckTag, TypeCheckRandom}
 	Actions   = []string{TypeSetVariable, TypeNote, TypeTag, TypeWait, TypeLookupDownloader, TypeMediaServer, TypeDownloader, TypeNotify, TypeSidecar, TypeChecksum, TypeCopy, TypeCommand}
-	Ends      = []string{TypeEnd, TypeFail, TypeRequeue}
+	Ends      = []string{TypeEnd, TypeFail, TypeRequeue, TypeGoto}
 )
 
 // NotYet are the cards this build offers for drafts but can't run yet (Available false): Publish refuses
@@ -490,6 +491,12 @@ func Definitions() []StepDefinition {
 				"maxTries": withDefault(described(map[string]any{"type": "integer", "title": "At most (tries)", "minimum": 1, "maximum": 100}, "Counting every try of this file."), 5, "At most (tries)", ""),
 				"reason":   described(map[string]any{"type": "string", "title": "When the tries are used up", "maxLength": 200, "x-placeholder": "The download never finished"}, "The job's failure words after the last try."),
 			}, nil)}),
+		def(StepDefinition{Type: TypeGoto, RunsAs: RunsEnd, Category: "flow", Name: "Hand to another workflow", Icon: "workflow", TypeLabel: "End",
+			Description: "The file goes on to another published workflow, from its start: that workflow's own questions, steps and Save the result apply to it. A workflow can't hand files back to this one, and the other workflow must be published.",
+			Inputs:      []Port{in}, Outputs: []Port{}, SideEffects: "none",
+			ConfigSchema: object(map[string]any{
+				"workflow": described(map[string]any{"type": "string", "title": "Workflow", "maxLength": 20, "x-ui": map[string]any{"widget": "workflow"}}, "A published workflow other than this one."),
+			}, []string{"workflow"})}),
 		def(StepDefinition{Type: TypeFail, RunsAs: RunsEnd, Category: "flow", Name: "Stop as failed", Icon: "stop", TypeLabel: "End",
 			Description: "The run ends as failed with the reason below, and the original is left as it is.",
 			Inputs:      []Port{in}, Outputs: []Port{}, SideEffects: "none",

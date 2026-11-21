@@ -523,7 +523,7 @@ func scanTargets(store *jobs.Store) func() ([]scanner.Target, error) {
 				log.Printf("scan: skipping library %q: %v", l.Name, jobs.ErrSystemFolder)
 				continue
 			}
-			f, err := store.GetFlow(l.FlowID)
+			f, err := store.GetRunFlow(l.FlowID) // FB4b: with its hand-overs to other workflows filled in
 			if err != nil {
 				if l.FlowID == 0 { // no workflow: nothing is ever queued for it, so it is not walked
 					err = errors.New("it has no workflow yet")
