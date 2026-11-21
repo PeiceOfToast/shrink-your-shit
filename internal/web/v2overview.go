@@ -82,9 +82,8 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView, libTotals
 			act := map[string]any{"jobId": l["jobId"], "name": l["name"], "percent": l["percent"], "etaS": l["etaS"],
 				"speed": l["speed"], "fps": l["fps"], "stage": nil,
 				"expectedSavingBytes": saving, "expectedSavingEstimated": estimated, "library": nil}
-			if _, ok := worker.Live(j.ID); ok { // a job with a live encoder is in its converting step
-				act["stage"] = jobStage["running"]
-			}
+			steps, _ := store.Steps(j.ID) // staged as the jobs list and the live events stage it
+			act["stage"] = jobStage[v2State(string(jobs.Running), steps, livePercent(j.ID))]
 			if j.LibraryID != 0 {
 				act["library"] = map[string]any{"id": strconv.FormatInt(j.LibraryID, 10), "name": j.LibraryName}
 			}

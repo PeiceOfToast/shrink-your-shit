@@ -17,7 +17,6 @@ import { allWorkers, listWorkers } from "../workersApi";
 import { getOverview, type Overview as O, type OverviewJob } from "../overviewApi";
 import { mockState, scanAll, summary } from "../mock";
 import { GpuPct, NoGpu, WorkersSwitch } from "./Workers";
-import { stepLabel } from "./Jobs";
 import type { JobProgressEvent } from "../types/jobs";
 
 const STATE: Record<string, [string, string]> = { busy: ["Converting", "run"], online: ["Ready", ""], draining: ["Finishing", "warn"], paused: ["Off", ""], offline: ["Offline", "bad"], stalled: ["Not responding", "bad"] };
@@ -199,10 +198,10 @@ export function Overview() {
                 <td className="idc">
                   <div className="lname"><Link className="ttl" to={"/jobs?tab=running&job=" + encodeURIComponent(a.jobId)}>{a.name}</Link></div>
                   <div className="chips">{a.library && <span className="mchip">{a.library.name}</span>}{w && <span className="mchip">{w}</span>}</div>
-                  <div className="sub live">{p != null && <>{p}% · </>}<span>Step: {a.stage ? stepLabel(a.stage) : "not known yet"}</span> · <span>Speed: {a.speed != null ? Math.round(a.speed * 10) / 10 + "×" : "not known yet"}</span> · <span>Time left: {left(a.etaS)}</span></div>
+                  <div className="sub live">{p != null && <>{p}% · </>}<span>Step: {a.stage ?? "not known yet"}</span> · <span>Speed: {a.speed != null ? Math.round(a.speed * 10) / 10 + "×" : "not known yet"}</span> · <span>Time left: {left(a.etaS)}</span></div>
                   {p != null && <span className="uline" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={p} aria-label={a.name}><i style={{ width: p + "%" }} /></span>}
                 </td>
-                <td className="sizec sm nowrap" data-l="Expected saving">{a.expectedSavingBytes == null ? "Saving: not known yet" : a.expectedSavingBytes < 0 ? "none (about " + bytes(-a.expectedSavingBytes) + " bigger so far)" : "about " + bytes(a.expectedSavingBytes) + " saving expected"}</td>
+                <td className="sizec sm nowrap" data-l="Expected saving">{a.expectedSavingBytes == null ? "Saving: not known yet" : a.expectedSavingBytes < 0 ? "Saving: none (about " + bytes(-a.expectedSavingBytes) + " bigger so far)" : "about " + bytes(a.expectedSavingBytes) + " saving expected"}</td>
               </tr>; })}</tbody></table></div>)}
         {v.active.some((a) => a.expectedSavingEstimated) && <p className="muted">Savings are estimated from the size so far; the final number shows when a file is done.</p>}
       </section>
