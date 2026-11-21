@@ -135,7 +135,7 @@ func TestFrozenOutTimeStopsPastTheOutputBound(t *testing.T) {
 	clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
 	w := s.worker(Replace)
 	w.Now = clock.now
-	w.StallAfter = 300 * time.Millisecond
+	w.StallAfter = 2 * time.Second // real time, as in TestFullyFrozenEncodeIsStillStopped: the reports must beat the stop under load
 	w.Exec = &outFrozenExec{FakeExec: s.exec, clock: clock, tick: 10 * time.Second, frames: true, sizeStep: 1000}
 	done := make(chan struct{})
 	go func() { w.RunOne(context.Background()); close(done) }()
