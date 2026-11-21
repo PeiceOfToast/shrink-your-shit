@@ -35,6 +35,10 @@ type Stream struct {
 
 	// Video
 	Width, Height int
+	// SquarePixels is true when ffprobe reports a sample aspect ratio of exactly 1:1. Anamorphic sources (4:3 in a
+	// 16:9 picture, say) and unknown ones (0:1) are false: only a source known to be square gets its scaled picture
+	// set to 1:1 (setsar), because that would squash an anamorphic one.
+	SquarePixels bool `json:"squarePixels,omitempty"`
 	// FrameRate is the average frame rate in frames per second.
 	FrameRate float64 `json:"frameRate,omitempty"`
 	// NominalFrameRate is the rate the stream declares (r_frame_rate), which is the average for every stream
@@ -389,6 +393,7 @@ func parseStream(m map[string]any, position int) Stream {
 		s.VFR = avg > 0 && nominal > 0 && !s.AttachedPic && math.Abs(avg-nominal)/nominal > 0.01
 		s.Frames = int64(num(m, "nb_frames"))
 		s.PixFmt = str(m, "pix_fmt")
+		s.SquarePixels = str(m, "sample_aspect_ratio") == "1:1"
 		s.BitDepth = bitDepth(str(m, "bits_per_raw_sample"), s.PixFmt)
 		s.ColorSpace = str(m, "color_space")
 		s.ColorTransfer = str(m, "color_transfer")
