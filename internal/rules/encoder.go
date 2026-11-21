@@ -8,13 +8,12 @@ import (
 	"strings"
 )
 
-// hdrCarriers are the graphics families whose output keeps an HDR10 source's static metadata (mastering display
-// and light level) when the frames are encoded from the source. Checked on CT 117 with ffmpeg 6.1.1: QSV and
-// VAAPI kept both. nvenc and amf are not proven, so an HDR10 file with that metadata goes to the processor there.
-var hdrCarriers = map[string]bool{"qsv": true, "vaapi": true}
-
-// HDRCarrier says whether the graphics encoder enc is proven to keep HDR10's static metadata (hdrCarriers).
-func HDRCarrier(enc string) bool { return hdrCarriers[GraphicsFamily(enc)] }
+// HDRCarrier says whether the graphics encoder enc is proven to keep HDR10's static metadata: its profile says so
+// (carriesHDR). An encoder with no profile is not.
+func HDRCarrier(enc string) bool {
+	p, _ := ProfileFor(enc)
+	return p.carriesHDR
+}
 
 // PassedGraphics is the graphics encoders whose capability test passed on a worker, in the doctor's order. caps
 // is the worker's capability list (its own, or the one it reported).

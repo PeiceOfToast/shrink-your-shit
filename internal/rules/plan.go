@@ -365,10 +365,6 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 	if p, ok := profiles[fam]; ok { // a hardware device is set up before the input (the family's profile)
 		args = append(args, p.Setup(vaapiDevice())...)
 	}
-	switch fam {
-	case "vaapi":
-		args = append(args, "-init_hw_device", "vaapi=va:"+vaapiDevice(), "-filter_hw_device", "va")
-	}
 	if p, ok := profiles[fam]; full && ok && p.FullDecode() != nil { // the device decodes too, so the frames never come down to software
 		args = append(args, p.FullDecode()...)
 	} else if full {
@@ -416,7 +412,7 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 		} else {
 			args = append(args, "-profile:"+v, "main10",
 				"-color_primaries:"+v, h.Primaries, "-color_trc:"+v, h.Transfer, "-colorspace:"+v, h.Matrix)
-			if fam != "vaapi" && !full { // VAAPI's frames are made p010 by its filter instead; the full path's come from the decoder
+			if profiles[fam].PixFmt10 != "" && !full { // a family whose upload makes its p010 frames sets none; the full path's come from the decoder
 				args = append(args, "-pix_fmt:"+v, pixFmt10(fam))
 			}
 		}
@@ -425,7 +421,7 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 		if strings.HasPrefix(gpu, "hevc_") { // HEVC's name for the 10-bit profile; AV1's profile 0 already covers p010
 			args = append(args, "-profile:"+v, "main10")
 		}
-		if fam != "vaapi" && !full { // VAAPI's frames are made p010 by its filter instead; the full path's come from the decoder
+		if profiles[fam].PixFmt10 != "" && !full { // a family whose upload makes its p010 frames sets none; the full path's come from the decoder
 			args = append(args, "-pix_fmt:"+v, pixFmt10(fam))
 		}
 	}
@@ -437,12 +433,8 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 			vf = append(vf, "scale=-2:"+strconv.Itoa(p.Video.Height))
 		}
 	}
-	if fam == "vaapi" && !full { // software frames go up to the device last, after any scale
-		format := "nv12"
-		if ten10 {
-			format = "p010"
-		}
-		vf = append(vf, "format="+format, "hwupload")
+	if up := profiles[fam].Upload(ten10); up != nil && !full { // software frames go up to the device last, after any scale
+		vf = append(vf, up...)
 	}
 	if len(vf) > 0 {
 		args = append(args, "-filter:"+v, strings.Join(vf, ","))

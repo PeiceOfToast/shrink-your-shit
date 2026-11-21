@@ -451,14 +451,9 @@ func (c *Checker) decodes(ctx context.Context, fam, codec string, tenBit bool) (
 // GPU pipeline uses (rules.FFmpegArgsFullGPU), without the encode.
 func decodeArgs(fam, device, in string) []string {
 	args := []string{"-hide_banner", "-v", "error"}
-	if fam == "vaapi" {
-		args = append(args, "-init_hw_device", "vaapi=va:"+device, "-filter_hw_device", "va",
-			"-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi", "-hwaccel_device", "va")
-	} else {
-		p, _ := rules.ProfileFor("hevc_" + fam) // QSV: the profile's set-up and full-pipeline decode
-		args = append(args, p.Setup(device)...)
-		args = append(args, p.FullDecode()...)
-	}
+	p, _ := rules.ProfileFor("hevc_" + fam) // the family's set-up and full-pipeline decode (QSV, VAAPI)
+	args = append(args, p.Setup(device)...)
+	args = append(args, p.FullDecode()...)
 	return append(args, "-i", in, "-f", "null", "-")
 }
 
@@ -483,19 +478,12 @@ func lastErrorLine(err error) string {
 // the others take software frames as they are. 10-bit asks for Main10 from p010 frames.
 func encodeArgs(enc string, tenBit bool, device string) []string {
 	args := []string{"-hide_banner", "-v", "error"}
-	switch {
-	case strings.HasSuffix(enc, "_vaapi"):
-		args = append(args, "-init_hw_device", "vaapi=va:"+device, "-filter_hw_device", "va")
-	case strings.HasSuffix(enc, "_qsv"):
-		p, _ := rules.ProfileFor(enc)
-		args = append(args, p.Setup(device)...)
-	}
+	p, _ := rules.ProfileFor(enc) // the family's set-up: VAAPI opens its device, QSV its own
+	args = append(args, p.Setup(device)...)
 	args = append(args, "-f", "lavfi", "-i", "color=c=black:s=256x256:d=0.1", "-frames:v", "1")
-	switch {
-	case strings.HasSuffix(enc, "_vaapi") && tenBit:
-		args = append(args, "-vf", "format=p010,hwupload")
-	case strings.HasSuffix(enc, "_vaapi"):
-		args = append(args, "-vf", "format=nv12,hwupload")
+	switch up := p.Upload(tenBit); {
+	case up != nil: // software frames uploaded to the device (VAAPI)
+		args = append(args, "-vf", strings.Join(up, ","))
 	case tenBit:
 		args = append(args, "-pix_fmt", "p010le")
 	}
