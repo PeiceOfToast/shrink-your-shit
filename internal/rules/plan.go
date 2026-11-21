@@ -383,7 +383,10 @@ func (p Plan) EncodeTenBit() bool {
 func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 	v := "v:" + strconv.Itoa(p.Video.Index)
 	fam := GraphicsFamily(gpu) // "" for the processor
-	args := []string{"-y", "-nostdin", "-v", "error", "-progress", "pipe:1", "-nostats"}
+	// level+verbose: the end-of-run report says how many packets the run read and how many frames it
+	// decoded (and how many decode errors it saw), which the checks use; each line carries its level, so
+	// the error-line readers keep only the errors (media.ErrorLines), as -v error gave them.
+	args := []string{"-y", "-nostdin", "-loglevel", "level+verbose", "-progress", "pipe:1", "-nostats"}
 	device := "" // only VAAPI's set-up names a render node, so the node is looked up for VAAPI alone
 	if fam == "vaapi" {
 		device = vaapiDevice()

@@ -16,7 +16,7 @@ import (
 // todayArgs is the legacy video encode's arguments. F9 adds the stale-statistics clearing (staleVideoArgs) to every
 // re-encode, the one change to these arguments on purpose; the decisions and the rest are as before.
 func todayArgs(in, out, crf, preset string) string {
-	return "-y -nostdin -v error -progress pipe:1 -nostats -i " + in +
+	return "-y -nostdin -loglevel level+verbose -progress pipe:1 -nostats -i " + in +
 		" -map 0 -map -0:d -c copy -max_muxing_queue_size 4096 -c:v:0 libx265 -crf " + crf + " -preset " + preset + " -tag:v:0 hvc1 " + staleVideoArgs + " " + out
 }
 

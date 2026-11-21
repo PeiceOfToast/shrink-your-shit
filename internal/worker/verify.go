@@ -294,30 +294,6 @@ var (
 	numRe  = regexp.MustCompile(`[0-9]+`)
 )
 
-// logLevelRe finds the level ffmpeg puts in front of each log line when asked for it (-loglevel
-// level+verbose): "[error] " at the start, or after the log context, which can be more than one part
-// ("[vist#0:0/h264 @ 0x...] [dec:h264 @ 0x...] [error] ...").
-var logLevelRe = regexp.MustCompile(`^(?:\[[^\]]*\] )*\[(quiet|panic|fatal|error|warning|info|verbose|debug|trace)\] `)
-
-// errorLines keeps only the error-level lines of a run logged with -loglevel level+verbose, with the level
-// marker removed: the text then reads as -v error writes it, which is what the playback check judges. A line
-// with no marker is kept as it is (a test runner answers with plain error text).
-func errorLines(raw []byte) string {
-	var kept []string
-	for _, l := range strings.Split(string(raw), "\n") {
-		m := logLevelRe.FindStringSubmatchIndex(l)
-		if m == nil {
-			kept = append(kept, l)
-			continue
-		}
-		switch l[m[2]:m[3]] {
-		case "panic", "fatal", "error":
-			kept = append(kept, l[:m[2]-1]+l[m[1]:]) // drop the marker and its space
-		}
-	}
-	return strings.Join(kept, "\n")
-}
-
 // decodeRun plays the file (all of it, or a sample) and returns the video packet count its own end-of-run
 // report states, counted false when there is no such report.
 func (w *Worker) decodeRun(ctx context.Context, tmp string, out media.Info, start, length, playSec, fps float64) (packets int64, counted bool, err error) {
@@ -350,7 +326,7 @@ func (w *Worker) decodeRun(ctx context.Context, tmp string, out media.Info, star
 		}
 	}
 	// The null muxer's dts warnings on an audio stream are timing, not decode errors (R2); video ones still count.
-	stderr, dropped := dropAudioTiming(errorLines(raw))
+	stderr, dropped := dropAudioTiming(media.ErrorLines(raw))
 	if dropped > 0 {
 		log.Printf("playback test of %s: %d audio timestamp warnings from the muxer are not decode errors", tmp, dropped)
 	}
@@ -782,6 +758,50 @@ func sourceFrames(src media.Info) int64 {
 	return n
 }
 
+// sourceReport reads the encode's end-of-run report for the original's main video stream (slice 13): the
+// pictures it decoded from it and the decode errors it counted. have is false when the log has no such line
+// (a remote worker sends its error lines only, an older ffmpeg at -v error, or a copied stream, whose
+// report stops at the bytes read).
+func sourceReport(src media.Info, log string) (st media.StreamStats, have bool) {
+	k := src.MainVideoIndex()
+	if k < 0 {
+		return media.StreamStats{}, false
+	}
+	st, ok := media.InputStreamStats(log, 0, src.Streams[k].Index)
+	if !ok || st.Frames < 0 {
+		return media.StreamStats{}, false
+	}
+	return st, true
+}
+
+// sourceVFR says whether the original's video looks variable frame rate (slice 13): the probe's own mark
+// (average and nominal rates more than 1% apart), or, when the encode reported it, a decoded count more
+// than 1% away from duration × rate. The second catches an mkv, where ffprobe reports the nominal rate as
+// the average, so the first cannot see it.
+func sourceVFR(src media.Info, st media.StreamStats, haveReport bool) bool {
+	if v := src.Video(); v != nil && v.VFR {
+		return true
+	}
+	if !haveReport {
+		return false
+	}
+	want, _ := sourceFrameCount(src)
+	return want > 0 && math.Abs(float64(st.Frames-want)) > 0.01*float64(want)
+}
+
+// checkedFrames is the main video frame count the new file is checked against (slice 13). The encode's own
+// report decoded exactly, so it is the count when there is one; a VFR original's duration × rate guess is
+// not, so without a report its frame check is skipped (0) rather than judge the new file against it.
+func checkedFrames(guess int64, st media.StreamStats, haveReport, vfr bool) int64 {
+	if haveReport && st.Frames > 0 {
+		return st.Frames
+	}
+	if vfr {
+		return 0
+	}
+	return guess
+}
+
 // expectedPackets is the main video frame count the converted file must match. counted is the original's packet
 // count, which for an mp4 edit list includes the trimmed frames ffmpeg never outputs; when the presented count is
 // exact, that is the number to expect.
@@ -820,6 +840,23 @@ func withLostFrames(rep sourceDamageReport, frames, decoded int64) sourceDamageR
 		line = fmt.Sprintf("%d of %d frames were not decoded", lost, frames)
 	}
 	rep.Lines = append(rep.Lines, line)
+	return rep
+}
+
+// damagedPictures is the damage the original shows when the encode reported it (slice 13). Its decode-error
+// count is the damaged-picture count; frames the decode did not take (the probe counted them, and the report's
+// decoded count is short of them) stay evidence too, so a stretch that lost frames without a message is still
+// refused. The text expressions' damage stays as the floor (file-level damage is kept by sourceDamage).
+func damagedPictures(rep sourceDamageReport, st media.StreamStats, lost, expected, decoded int64) sourceDamageReport {
+	if lost > 0 && decoded >= 0 && decoded < expected {
+		rep = withLostFrames(rep, expected, decoded)
+	}
+	if n := int(st.DecodeErrors); n > rep.Pictures {
+		rep.Pictures = n
+	}
+	if rep.Pictures > 0 && len(rep.Lines) == 0 {
+		rep.Lines = []string{fmt.Sprintf("%d decode errors in the original's video, as ffmpeg counted them", rep.Pictures)}
+	}
 	return rep
 }
 

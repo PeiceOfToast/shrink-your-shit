@@ -473,7 +473,7 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 	var last time.Time
 	var gone error
 	run := func(args []string) (string, error) {
-		return media.Transcode(cctx, cv.Exec, cv.FFmpeg, args, l.Job.DurationSec, func(p media.Progress) {
+		stderr, err := media.Transcode(cctx, cv.Exec, cv.FFmpeg, args, l.Job.DurationSec, func(p media.Progress) {
 			if time.Since(last) < ProgressEvery {
 				return
 			}
@@ -493,6 +493,9 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 				cancel() // the job went back to the queue: stop converting it
 			}
 		})
+		// The encode logs at level+verbose (its end-of-run report): the server judges the text it
+		// receives as errors, as it did at -v error, and so does the fall-back decision below.
+		return media.ErrorLines([]byte(stderr)), err
 	}
 	stderr, err := run(args)
 	if err == nil && enc != "" && gone == nil {
