@@ -168,3 +168,30 @@ func TestBiggerNewFileIsSkipped(t *testing.T) {
 		t.Errorf("the file is in the failed tab: %s", failed)
 	}
 }
+
+// review2-545: every row of the Skipped tab sends "tags" as an array (a worker's skip with a job, and a scan's skip
+// without one), never null.
+func TestSkippedTabSendsTagsAsArrays(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	id, _ := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "a.mkv")})
+	st.Claim("w")
+	if err := st.Skip(id, "Left alone by this workflow.", rules.SkipLeftByWorkflow); err != nil {
+		t.Fatal(err)
+	}
+	st.PutFile(jobs.File{Path: filepath.Join(lib.Path, "b.mkv"), Decision: "skip: " + rules.SkipWords[rules.SkipModernFormat], Reason: rules.SkipModernFormat})
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/jobs?tab=skipped"})
+	var l struct{ Items []struct{ Tags *[]string } }
+	json.Unmarshal([]byte(body), &l)
+	if len(l.Items) != 2 {
+		t.Fatalf("%s", body)
+	}
+	for i, it := range l.Items {
+		if it.Tags == nil {
+			t.Errorf("item %d: tags is null: %s", i, body)
+		}
+	}
+	if strings.Contains(body, `"tags":null`) {
+		t.Errorf("a null tags: %s", body)
+	}
+}
