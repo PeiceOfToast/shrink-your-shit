@@ -119,7 +119,7 @@ export function Overview() {
     });
   }, []);
   const act = async (p: Promise<Answer<unknown>>) => { try { const r = await p; setSaid(failed(r) ? r.error.message : ""); } catch (e) { if (!(e instanceof SignedOut)) throw e; } o.reload(); wl.reload(); };
-  if (!o.data) return <div className="stack"><PageHead icon="i-dashboard" title="Dashboard">{!o.error && <><span className="skel-ph skel-sw skel-sw-s" aria-hidden="true" /><span className="skel-ph skel-btn" aria-hidden="true" /></>}</PageHead>{o.error ?<LoadFailed error={o.error} reload={o.reload} /> : <Skeleton tiles={3} rows={3} />}</div>;
+  if (!o.data) return <div className="stack ov"><PageHead icon="i-dashboard" title="Dashboard">{!o.error && <><span className="skel-ph skel-sw skel-sw-s" aria-hidden="true" /><span className="skel-ph skel-btn" aria-hidden="true" /></>}</PageHead>{o.error ?<LoadFailed error={o.error} reload={o.reload} /> : <Skeleton tiles={3} rows={3} />}</div>;
   const v = o.data, h = v.headline, noLibs = v.libraries.length === 0, job = (j: OverviewJob) => ({ ...j, ...live[j.jobId] });
   // one row per worker of GET /api/v2/workers; its files' progress from the overview (or, for a worker the overview
   // doesn't list, from Converting now by job id)
