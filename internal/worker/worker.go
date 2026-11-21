@@ -143,7 +143,8 @@ type Worker struct {
 	// chosen encoder's line, in section encode.
 	EncoderCandidates func(codec string, need10 bool, hdr *rules.HDR) []string
 	// GPUSlots is how many of this computer's graphics card's slots the person let it have (Workers page),
-	// read for every job, so a changed limit is followed at once. 0: the processor does the encoding. nil
+	// read each time a job asks for a place, so a changed limit applies to the next job that asks; a job already
+	// waiting keeps the limit it read when it started waiting. 0: the processor does the encoding. nil
 	// (a test's worker): no limit, every graphics job runs. All of the program's workers share the one card.
 	GPUSlots func() int
 	// verified is the probe of the new file the last check passed (S5: stored for its final path).
