@@ -526,8 +526,8 @@ func TestCompareBeforeTheSaveKeepsTheOriginal(t *testing.T) {
 	s := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
 	before, _ := os.ReadFile(s.src)
 	w := s.worker(Beside)
-	w.Template = func(jobs.Job) (rules.Template, error) {
-		return compareTemplate(q, rules.Card{NodeID: "leave", Type: workflow.TypeEnd, Name: "Leave the file alone", Config: map[string]any{"reason": "Not worth it"}}), nil
+	w.Template = func(jobs.Job) (rules.Template, int64, error) {
+		return compareTemplate(q, rules.Card{NodeID: "leave", Type: workflow.TypeEnd, Name: "Leave the file alone", Config: map[string]any{"reason": "Not worth it"}}), 0, nil
 	}
 	if _, err := w.RunOne(context.Background()); err != nil {
 		t.Fatal(err)
@@ -556,8 +556,8 @@ func TestCompareBeforeTheSaveKeepsTheOriginal(t *testing.T) {
 	q.Percent = 50
 	s2 := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
 	w2 := s2.worker(Beside)
-	w2.Template = func(jobs.Job) (rules.Template, error) {
-		return compareTemplate(q, rules.Card{NodeID: "leave", Type: workflow.TypeEnd, Name: "Leave the file alone"}), nil
+	w2.Template = func(jobs.Job) (rules.Template, int64, error) {
+		return compareTemplate(q, rules.Card{NodeID: "leave", Type: workflow.TypeEnd, Name: "Leave the file alone"}), 0, nil
 	}
 	if _, err := w2.RunOne(context.Background()); err != nil {
 		t.Fatal(err)
@@ -575,8 +575,8 @@ func TestCompareBeforeTheSaveRunningTimeAndStop(t *testing.T) {
 	s.outSpec.duration = 101
 	before, _ := os.Stat(s.src)
 	w := s.worker(Beside)
-	w.Template = func(jobs.Job) (rules.Template, error) {
-		return compareTemplate(q, rules.Card{NodeID: "stop", Type: workflow.TypeFail, Name: "Stop as failed", Config: map[string]any{"reason": "The length changed"}}), nil
+	w.Template = func(jobs.Job) (rules.Template, int64, error) {
+		return compareTemplate(q, rules.Card{NodeID: "stop", Type: workflow.TypeFail, Name: "Stop as failed", Config: map[string]any{"reason": "The length changed"}}), 0, nil
 	}
 	w.RunOne(context.Background())
 	j := s.job()
@@ -593,8 +593,8 @@ func TestCompareBeforeTheSaveRunningTimeAndStop(t *testing.T) {
 	s2 := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
 	s2.outSpec.duration = 101
 	w2 := s2.worker(Beside)
-	w2.Template = func(jobs.Job) (rules.Template, error) {
-		return compareTemplate(q, rules.Card{NodeID: "stop", Type: workflow.TypeFail, Name: "Stop as failed"}), nil
+	w2.Template = func(jobs.Job) (rules.Template, int64, error) {
+		return compareTemplate(q, rules.Card{NodeID: "stop", Type: workflow.TypeFail, Name: "Stop as failed"}), 0, nil
 	}
 	if _, err := w2.RunOne(context.Background()); err != nil {
 		t.Fatal(err)
