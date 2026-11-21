@@ -238,6 +238,14 @@ type Worker struct {
 	Journal  Journal
 	Now      func() time.Time // nil: time.Now
 
+	// stallClock, when set, replaces time.Now for the stall watchdog only: its checks, its progress, position
+	// and last-output stamps, the quiet check and the frozen-media warning. It is separate from Now, which is
+	// the job and retry clock: a test that freezes Now (fixed retry times) must not freeze the watchdog, or a
+	// hung encode is never stopped.
+	stallClock func() time.Time
+	// sizeOnDisk, when set, replaces the stat of the running encode's temp file (tests fake the growth with it).
+	sizeOnDisk func(path string) (int64, error)
+
 	// scorePlace, when set, replaces ssimSegment as the per-place scorer (tests fake the scores with it).
 	scorePlace scoreFunc
 	// statFinal, when set, replaces os.Stat for the new file after it is put in place (tests fail it or zero it).
@@ -259,6 +267,7 @@ type Worker struct {
 	// two sizes, so a stall stop can say why it stopped (stopOver: the stop that fired was for that size).
 	overSize, stopOver atomic.Bool
 	outBytes, srcBytes atomic.Int64
+	diskBytes          atomic.Int64 // the running encode's temp file on disk at the watchdog's last check: its growth is progress
 	// the running job's run counters (log-spec L2 summary): the ffmpeg runs it needed and the bytes it wrote.
 	passes, bytesWritten atomic.Int64
 	statsCounting        atomic.Bool // false: this job's counters are not recorded (a remote job, whose runs are not all here)
@@ -972,19 +981,24 @@ func reachedEnd(outUS, durationSec float64) bool {
 
 // watchStall stops job id (stopStall) if its encode reports no progress for stallAfter (stallLimit once it is
 // finishing). The returned func ends the watch. Checks after the encode have their own time limits (slice 10).
-func (w *Worker) watchStall(id int64) func() {
-	w.progressAt.Store(time.Now().UnixNano())
-	w.positionAt.Store(time.Now().UnixNano())
+func (w *Worker) watchStall(job jobs.Job, out string) func() {
+	id := job.ID
+	now := w.stallNow()
+	w.progressAt.Store(now.UnixNano())
+	w.positionAt.Store(now.UnixNano())
 	w.finishing.Store(false)
 	w.overSize.Store(false)
+	w.diskBytes.Store(0)
+	w.srcBytes.Store(job.SizeBefore)
 	after := w.stallAfter()
 	done := make(chan struct{})
 	stopFor := func(limit time.Duration) {
 		w.stalledFor.Store(int64(limit))
 		if w.overSize.Load() { // past twice the source: the new file cannot save space, so say that, not "no progress"
 			w.stopOver.Store(true)
+			// the size is ffmpeg's count or the temp file's on disk, whichever is larger: a silent encode reports 0
 			w.jobf(id, ": the new file is more than twice the original's size (%s, original %s), and its position has not moved for %s; stopping it",
-				rules.HumanBytes(w.outBytes.Load()), rules.HumanBytes(w.srcBytes.Load()), limit)
+				rules.HumanBytes(max(w.outBytes.Load(), w.diskBytes.Load())), rules.HumanBytes(w.srcBytes.Load()), limit)
 		} else {
 			w.stopOver.Store(false)
 			w.jobf(id, ": no progress for %s, stopping it", limit)
@@ -1000,27 +1014,55 @@ func (w *Worker) watchStall(id int64) func() {
 	go func() {
 		t := time.NewTicker(max(after/20, 10*time.Millisecond))
 		defer t.Stop()
+		// the temp file's size at the last check. Growth counts only past this peak: a file that shrinks and regrows
+		// below its old size is not seen as growth until it passes the peak (a known limit, accepted; see the review).
+		var seen int64
 		for {
 			select {
 			case <-done:
 				return
 			case <-t.C:
+				now := w.stallNow() // the watchdog's clock: tests move it by hand, production's is the wall clock
+				// one stat a tick: a temp file that grew since the last check is the encode writing, alive while the
+				// output stays within twice the source; past that it is not progress, and the stop says why
+				if n, ok := w.tempSize(out); ok && n > seen {
+					seen = n
+					w.diskBytes.Store(n)
+					if outputWithin(job.SizeBefore, n) {
+						w.progressAt.Store(now.UnixNano())
+					} else if job.SizeBefore > 0 { // an unknown source size is no bound, so it is not "over twice"
+						w.overSize.Store(true)
+					}
+				}
 				finishing := w.finishing.Load()
 				limit := w.stallLimit(after, finishing)
-				if time.Since(time.Unix(0, w.progressAt.Load())) >= limit {
+				if now.Sub(time.Unix(0, w.progressAt.Load())) >= limit {
 					stopFor(limit)
 					return
 				}
 				ceiling := w.stallLimit(w.frozenFactor()*after, finishing)
-				if time.Since(time.Unix(0, w.positionAt.Load())) >= ceiling {
+				if now.Sub(time.Unix(0, w.positionAt.Load())) >= ceiling {
 					stopCeiling(ceiling) // frames or bytes still grow, but out_time has not moved for the ceiling
 					return
 				}
-				w.quietCheck(id, w.now()) // R9: ffmpeg printing nothing for a minute
+				w.quietCheck(id, now) // R9: ffmpeg printing nothing for a minute
 			}
 		}
 	}()
 	return func() { close(done) }
+}
+
+// tempSize is the temp file's size on disk, false when it cannot be read (sizeOnDisk replaces the stat in tests).
+func (w *Worker) tempSize(path string) (int64, bool) {
+	if w.sizeOnDisk != nil {
+		n, err := w.sizeOnDisk(path)
+		return n, err == nil
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0, false
+	}
+	return fi.Size(), true
 }
 
 // watchRemoteStall is watchStall for a remote worker's encode: the worker reports its position, and the
@@ -1556,6 +1598,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			switch {
 			case err == nil && paused:
 				w.jobf(job.ID, ": %s is paused until %s after three failures in a row; using the processor", want, until.Local().Format("15:04"))
+				chosenWhy = want + " is paused after three failures in a row"
 			default:
 				if gargs, gfull, ok := w.graphicsArgs(ctx, job, plan, src, srcPath, tmp, want); ok {
 					// The card's slots come first (user bug 11-20): a job waits while they are all in
@@ -1571,9 +1614,12 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 						args, full = gargs, gfull
 						gpu = want
 						chosenWhy = want + " passed its test on this computer and can do this file"
+					} else {
+						chosenWhy = want + " passed its test on this computer, but the graphics slots are set to 0"
 					}
 				} else {
 					w.jobf(job.ID, ": encoder %s can't do this file; using the processor", want)
+					chosenWhy = want + " can't do this file"
 				}
 			}
 		} else if note != "" && !plan.Video.Copy {
@@ -1581,11 +1627,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 	}
 	if !plan.Video.Copy && w.remote == nil { // R5's last line: the encoder the real encode uses, why, and its settings
-		line := "Chosen: " + encoderWordsUsed(plan, gpu)
-		if chosenWhy != "" {
-			line += " — " + chosenWhy
-		}
-		w.logLine(job.ID, secEncode, jobs.LevelInfo, line+". Settings: "+encoderDetail(args))
+		w.logLine(job.ID, secEncode, jobs.LevelInfo, ChosenLine(plan, gpu, args, chosenWhy))
 	}
 	// "Graphics jobs don't wait for processor jobs" (Workers page): a job that converts on the processor takes
 	// one of the Files at once places, held until it ends; one on the card takes none, so it runs beside the
@@ -1663,7 +1705,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 				}
 			}
 			encStart = w.now()
-			_, raw, frames, err := w.encodeRun(ctx, job, rargs)
+			_, raw, frames, err := w.encodeRun(ctx, job, rargs, tmp)
 			decoded = frames
 			return raw, err
 		}
@@ -2895,34 +2937,39 @@ func (w *Worker) stalled() bool {
 // encodeRun is encodeLocal with the encode's log split in two: the raw log, where ffmpeg's end-of-run
 // report says what it read and decoded (slice 13), and the error lines alone, which every other reader of
 // the log expects (as -v error wrote it).
-func (w *Worker) encodeRun(ctx context.Context, job jobs.Job, args []string) (errText, raw string, frames int64, err error) {
+func (w *Worker) encodeRun(ctx context.Context, job jobs.Job, args []string, out string) (errText, raw string, frames int64, err error) {
 	w.recordEncodeStart(job.ID, args, w.now())
-	raw, frames, err = w.encodeLocal(ctx, job, args)
+	raw, frames, err = w.encodeLocal(ctx, job, args, out)
 	return media.ErrorLines([]byte(raw)), raw, frames, err
 }
 
 // encodeLocal runs ffmpeg for the local worker's job: its progress, stall watch and live figures.
-func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (string, int64, error) {
+func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string, out string) (string, int64, error) {
 	var encErr string
 	var terr error
 	frames := int64(-1) // the last frame count ffmpeg reported
 	wrote := int64(0)   // the most bytes it reported writing in this attempt (the run counters, L2)
-	stopWatch := w.watchStall(job.ID)
+	// out is the staged temp file the encode writes: the watchdog stats it, not the last argument, which is a
+	// subtitle file when the plan extracts subtitles to .srt (rules.Plan.withSubtitleFiles appends them)
+	stopWatch := w.watchStall(job, out)
 	w.quietOn.Store(true) // R9's quiet warning: the stall watcher checks it with this clock
-	w.outputSeen(w.now())
+	w.outputSeen(w.stallNow())
 	defer w.quietOn.Store(false)
 	var tenths progressLines
-	at := -1.0       // the furthest position ffmpeg has reached
-	moved := w.now() // when it last moved (a warning says so after stallWarnAfter, R9)
-	stalled := false // the warning has been written; one line says when it moves again
+	at := -1.0            // the furthest position ffmpeg has reached
+	moved := w.stallNow() // when it last moved (a warning says so after stallWarnAfter, R9)
+	stalled := false      // the warning has been written; one line says when it moves again
 	encErr, terr = media.TranscodeLines(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
 		// the encode is alive while its position moves, or while its frame count or bytes written grow and the output
 		// stays within twice the source's size (a runaway output past that is not progress). out_time follows the
-		// most-behind stream, so it freezes in a subtitle gap while frames still go on (bug 2).
+		// most-behind stream, so it freezes in a subtitle gap while frames still go on (bug 2). The output's size is the
+		// larger of ffmpeg's total_size and the temp file's size on disk (the watchdog's check): a faststart rewrite or
+		// a frozen progress block still shows the file growing.
 		posMoved := p.OutTimeUS > at // a position further on: one that repeats is not progress
-		outputOK := outputWithin(job.SizeBefore, p.TotalSize)
+		total := max(p.TotalSize, w.diskBytes.Load())
+		outputOK := outputWithin(job.SizeBefore, total)
 		w.overSize.Store(job.SizeBefore > 0 && !outputOK) // an unknown source size is not "over twice": there is no bound
-		w.outBytes.Store(p.TotalSize)
+		w.outBytes.Store(total)
 		w.srcBytes.Store(job.SizeBefore)
 		alive := posMoved || (outputOK && (p.Frame > frames || p.TotalSize > wrote))
 		frames = p.Frame
@@ -2931,17 +2978,17 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 		}
 		if posMoved {
 			at = p.OutTimeUS
-			w.positionAt.Store(time.Now().UnixNano())
+			w.positionAt.Store(w.stallNow().UnixNano())
 			w.finishing.Store(reachedEnd(p.OutTimeUS, job.DurationSec))
 		}
 		if alive {
-			w.progressAt.Store(time.Now().UnixNano())
-			moved = w.now()
+			w.progressAt.Store(w.stallNow().UnixNano())
+			moved = w.stallNow()
 			if stalled { // R9: the log says it is moving again
 				stalled = false
 				w.logLine(job.ID, secEncode, jobs.LevelInfo, "The conversion is moving again.")
 			}
-		} else if !stalled && w.now().Sub(moved) >= stallWarnAfter { // R9: frozen media time, an ordinary warning
+		} else if !stalled && w.stallNow().Sub(moved) >= stallWarnAfter { // R9: frozen media time, an ordinary warning
 			stalled = true
 			w.logLine(job.ID, secEncode, jobs.LevelWarning,
 				fmt.Sprintf("The conversion has not moved for %s: ffmpeg may be stuck, or the file may be slow to read.", stallWarnAfter))
@@ -2954,7 +3001,7 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 		if line := tenths.next(p); line != "" {
 			w.jobf(job.ID, ": %s", line)
 		}
-	}, func() { w.outputSeen(w.now()) })
+	}, func() { w.outputSeen(w.stallNow()) })
 	stopWatch()
 	w.addPass()       // an ffmpeg run the job needed, whatever came of it (a retry is another)
 	w.addBytes(wrote) // what this attempt wrote

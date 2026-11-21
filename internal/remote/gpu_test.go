@@ -128,8 +128,9 @@ func TestRemoteWorkerUsesItsMainEncoderForTheFormat(t *testing.T) {
 	if len(x.calls) != 1 || !slices.Contains(x.calls[0], "h264_qsv") || slices.Contains(x.calls[0], "libx264") {
 		t.Errorf("ffmpeg args %v: want h264_qsv", x.calls)
 	}
-	if len(notes) != 0 || !slices.Equal(encs, []string{"h264_qsv"}) {
-		t.Errorf("notes %q, encoders %q: want no note and h264_qsv reported", notes, encs)
+	chosen := "Chosen: Intel Quick Sync (graphics), H.264 — h264_qsv passed its test on this computer and can do this file. Settings: Encoder: h264_qsv"
+	if len(notes) != 1 || !strings.HasPrefix(notes[0], chosen) || !slices.Equal(encs, []string{"h264_qsv"}) {
+		t.Errorf("notes %q, encoders %q: want only the Chosen line and h264_qsv reported", notes, encs)
 	}
 }
 
@@ -164,31 +165,32 @@ func TestRemoteWorkerNotPassedFallsBackToTheProcessor(t *testing.T) {
 		t.Errorf("ffmpeg args %v: want the processor", x.calls)
 	}
 	want := "encoder h264_qsv didn't pass its test here; using the processor"
-	if !slices.Equal(notes, []string{want}) || !slices.Equal(encs, []string{""}) {
-		t.Errorf("notes %q, encoders %q: want %q and the processor reported", notes, encs, want)
+	chosen := "Chosen: x264 (processor). Settings: Encoder: libx264" // the note above said why; not repeated
+	if len(notes) != 2 || notes[0] != want || !strings.HasPrefix(notes[1], chosen) || !slices.Equal(encs, []string{""}) {
+		t.Errorf("notes %q, encoders %q: want %q, then the Chosen line, and the processor reported", notes, encs, want)
 	}
 }
 
-// A main encoder of cpu is the processor, with no note.
+// A main encoder of cpu is the processor, with no reason note: only the Chosen line.
 func TestRemoteWorkerCPUMainIsTheProcessorWithNoNote(t *testing.T) {
 	x := &recordExec{}
 	notes, _, err := convertH264(t, ptr("cpu"), []map[string]any{encoderCap("h264_qsv", "passed")}, x, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(x.calls) != 1 || !slices.Contains(x.calls[0], "libx264") || len(notes) != 0 {
+	if len(x.calls) != 1 || !slices.Contains(x.calls[0], "libx264") || len(notes) != 1 || !strings.HasPrefix(notes[0], "Chosen: x264 (processor). Settings: Encoder: libx264") {
 		t.Errorf("cpu: args %v, notes %q", x.calls, notes)
 	}
 }
 
-// An older server that sends no main encoder: the processor, with no note.
+// An older server that sends no main encoder: the processor, with no reason note: only the Chosen line.
 func TestRemoteWorkerWithoutAMainEncoderIsTheProcessor(t *testing.T) {
 	x := &recordExec{}
 	notes, _, err := convertH264(t, nil, []map[string]any{encoderCap("h264_qsv", "passed")}, x, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(x.calls) != 1 || !slices.Contains(x.calls[0], "libx264") || len(notes) != 0 {
+	if len(x.calls) != 1 || !slices.Contains(x.calls[0], "libx264") || len(notes) != 1 || !strings.HasPrefix(notes[0], "Chosen: x264 (processor). Settings: Encoder: libx264") {
 		t.Errorf("no main: args %v, notes %q", x.calls, notes)
 	}
 }
@@ -204,8 +206,11 @@ func TestRemoteWorkerGPUFailureConvertsOnTheProcessor(t *testing.T) {
 	if len(x.calls) != 2 || !slices.Contains(x.calls[1], "libx264") {
 		t.Fatalf("ffmpeg calls %v: want h264_qsv then the processor", x.calls)
 	}
-	if len(notes) != 1 || !strings.Contains(notes[0], "h264_qsv failed (Device creation failed); converted on the processor") {
-		t.Errorf("notes %q", notes)
+	// The job log: the Chosen line before the encode (the graphics encoder), then the step-down line.
+	chosen := "Chosen: Intel Quick Sync (graphics), H.264 — h264_qsv passed its test on this computer and can do this file. Settings: Encoder: h264_qsv"
+	fell := "h264_qsv failed (Device creation failed); converted on the processor"
+	if len(notes) != 2 || !strings.HasPrefix(notes[0], chosen) || notes[1] != fell {
+		t.Errorf("notes %q, want the Chosen line then %q", notes, fell)
 	}
 	if len(encs) < 1 || encs[len(encs)-1] != "" {
 		t.Errorf("encoders %q: want the processor last", encs)

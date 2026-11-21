@@ -122,7 +122,7 @@ func TestStallWarningAfterFrozenMediaTime(t *testing.T) {
 	s := newScenario(t)
 	clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
 	w := s.worker(Replace)
-	w.Now = clock.now
+	w.stallClock = clock.now
 	w.Exec = &frozenThenMovingExec{FakeExec: s.exec, clock: clock}
 	w.RunOne(context.Background())
 	lines, _ := s.store.LogLines(s.id)

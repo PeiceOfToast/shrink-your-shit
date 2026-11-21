@@ -461,9 +461,10 @@ func (c *Client) download(ctx context.Context, l *Lease, to string) error {
 	}
 }
 
-// convert runs the plan's ffmpeg, reporting progress (which renews the lease).
-// It also returns the ffmpeg arguments that ran (the processor's after a graphics encoder fell back), so the
-// job log records the command that was executed.
+// convert runs the plan's ffmpeg, reporting progress (which renews the lease). Its rungs are worker.Attempt's: the
+// graphics encoder first (encoderArgs), then the processor when the graphics encoder fails in a way the processor can
+// fix. It also returns the ffmpeg arguments that ran (the processor's after a graphics encoder fell back), so the job
+// log records the command that was executed.
 func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules.Snapshot, src, out string) (string, []string, error) {
 	cctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -477,18 +478,27 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 	if note != "" {
 		c.note(ctx, l, note)
 	}
+	if !snap.Plan.Video.Copy { // the same Chosen line the local worker logs (a copy is not encoded, so no line)
+		why := "" // the processor was chosen: the note above says why, and this line does not repeat it (as local)
+		if enc != "" {
+			why = enc + " passed its test on this computer and can do this file"
+		}
+		c.note(ctx, l, worker.ChosenLine(snap.Plan, enc, args, why))
+	}
 	if e := report(map[string]any{"stage": "converting", "outTimeUs": 0, "encoder": enc}); leaseGone(e) {
 		return "", args, e
 	}
 	var last time.Time
 	var gone error
-	run := func(args []string) (string, error) {
-		stderr, err := media.Transcode(cctx, cv.Exec, cv.FFmpeg, args, l.Job.DurationSec, func(p media.Progress) {
+	label := enc // the encoder of the rung running now: the live label in each progress report
+	run := func(_ context.Context, rargs []string) (string, error) {
+		// The raw log: worker.Attempt reads its error lines once (media.ErrorLines), as the local worker does.
+		return media.Transcode(cctx, cv.Exec, cv.FFmpeg, rargs, l.Job.DurationSec, func(p media.Progress) {
 			if time.Since(last) < ProgressEvery {
 				return
 			}
 			last = time.Now()
-			body := map[string]any{"stage": "converting", "outTimeUs": p.OutTimeUS, "encoder": enc}
+			body := map[string]any{"stage": "converting", "outTimeUs": p.OutTimeUS, "encoder": label}
 			if p.Frame >= 0 { // frames and bytes keep an encode alive when its position is frozen (the server judges them)
 				body["frame"] = p.Frame
 			}
@@ -503,30 +513,24 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 				cancel() // the job went back to the queue: stop converting it
 			}
 		})
-		// The encode logs at level+verbose (its end-of-run report): the server judges the text it
-		// receives as errors, as it did at -v error, and so does the fall-back decision below.
-		return media.ErrorLines([]byte(stderr)), err
 	}
-	stderr, err := run(args)
-	if err == nil && enc != "" && gone == nil {
-		c.noteWorked(ctx, l) // the graphics encoder converted the file: its run of failures ends
-	}
-	if err != nil && enc != "" && cctx.Err() == nil && jobs.FallsBackToProcessor(strings.Split(stderr, "\n")) {
-		// a graphics encoder that fails converts again on the processor, as a local worker does
-		reason := err.Error()
-		if s := strings.TrimSpace(stderr); s != "" {
-			reason = strings.SplitN(s, "\n", 2)[0]
-		}
-		if e := os.Truncate(out, 0); e != nil { // the same staged file: the server checks its identity
-			return stderr, args, fmt.Errorf("clearing the partial output: %w", e)
-		}
-		failed, failedReason := enc, reason
-		enc = ""
-		report(map[string]any{"stage": "converting", "outTimeUs": 0, "encoder": enc}) // the live label names the processor now
-		args = snap.Plan.FFmpegArgs(src, out)
-		stderr, err = run(args)
-		if err == nil && gone == nil { // the processor converted it, so the graphics encoder was the fault: it counts
-			c.noteFell(ctx, l, failed, failedReason)
+	failed := "" // the graphics encoder that failed, for the server's note when the processor converts the file
+	res := worker.Attempt(cctx, worker.AttemptInput{Plan: snap.Plan, SrcPath: src, Tmp: out,
+		First: worker.Rung{Args: args, Encoder: enc}}, run, worker.AttemptHooks{
+		OnRung: func(r worker.Rung) {
+			label = r.Encoder // the live label names the processor now
+			report(map[string]any{"stage": "converting", "outTimeUs": 0, "encoder": label})
+		},
+		Failed:  func(r worker.Rung, _ string, _ error) { failed = r.Encoder },
+		Stopped: func() bool { return gone != nil },
+	})
+	args = res.Args
+	stderr, err := res.Errors, res.Err
+	if err == nil && gone == nil {
+		if res.Fell {
+			c.noteFell(ctx, l, failed, res.FellReason) // the processor converted it, so the graphics encoder was the fault
+		} else if res.Encoder != "" {
+			c.noteWorked(ctx, l) // the graphics encoder converted the file: its run of failures ends
 		}
 	}
 	if gone != nil {

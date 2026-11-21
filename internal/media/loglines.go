@@ -12,14 +12,23 @@ import (
 // ("[vist#0:0/h264 @ 0x...] [dec:h264 @ 0x...] [error] ...").
 var logLevelRe = regexp.MustCompile(`^(?:\[[^\]]*\] )*\[(quiet|panic|fatal|error|warning|info|verbose|debug|trace)\] `)
 
+// x265InfoRe finds a line from x265's own log at info level. x265 writes those straight to stderr, without
+// ffmpeg's level marker, so the no-marker rule below would keep them: they are not errors (the banner, CPU
+// caps, the frame summary) and stay out of the job log. Its [warning] and [error] lines are kept.
+var x265InfoRe = regexp.MustCompile(`(?i)^x265 \[info\]`)
+
 // ErrorLines keeps only the error-level lines of a run logged with -loglevel level+verbose, with the level
 // marker removed: the text then reads as -v error writes it, which is what the job's checks judge. A line
-// with no marker is kept as it is (a test runner, a driver's chatter, or an older ffmpeg's plain error text).
+// with no marker is kept as it is (a test runner, a driver's chatter, or an older ffmpeg's plain error text),
+// except x265's own [info] lines, which say nothing (x265InfoRe).
 func ErrorLines(raw []byte) string {
 	var kept []string
 	for _, l := range strings.Split(string(raw), "\n") {
 		m := logLevelRe.FindStringSubmatchIndex(l)
 		if m == nil {
+			if x265InfoRe.MatchString(l) {
+				continue
+			}
 			kept = append(kept, l)
 			continue
 		}
