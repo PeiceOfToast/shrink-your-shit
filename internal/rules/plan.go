@@ -45,6 +45,7 @@ type Plan struct {
 	Before     []Card   `json:"before,omitempty"`
 	Fail       bool     `json:"fail,omitempty"`
 	Requeue    *Requeue `json:"requeue,omitempty"`    // FB4: "Convert again later" with Skip's words
+	BeforeSave []Card   `json:"beforeSave,omitempty"` // FB4b-3: the questions about the checked result, before the save
 	After      []Card   `json:"after,omitempty"`      // FB2a: the actions on the saved result
 	FolderMode string   `json:"folderMode,omitempty"` // "next_to_library" (V5a): the library's own folder instead of OutputDir
 	Container  string   `json:"container,omitempty"`  // the new file's type (its extension, "mkv" or "mp4"); "" = the original's
@@ -208,7 +209,7 @@ func (t Template) CompileWith(info media.Info, f Facts) (p Plan) {
 		if len(p.Steps) > 0 && ok && b.Then != nil { // the checks' answers came before the path's own steps
 			p.Steps = append(checkSteps(ds), p.Steps...)
 		}
-		p.Path, p.Decisions, p.OnFailure, p.Before, p.After = b.Path, ds, b.OnFailure, b.Before, b.After
+		p.Path, p.Decisions, p.OnFailure, p.Before, p.BeforeSave, p.After = b.Path, ds, b.OnFailure, b.Before, b.BeforeSave, b.After
 		return p
 	}
 	p = Plan{Kind: t.Kind, CompilerVersion: t.CompilerVersion}

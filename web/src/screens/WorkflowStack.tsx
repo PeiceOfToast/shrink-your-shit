@@ -5,7 +5,7 @@
 import { Component, Fragment, createContext, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
-import { afterOnly, deleteNode, groupOf, insertAfter, insertAfterSave, insertQuestion, isQuestion, moveNode, newNode, order, otherwiseOf, setOtherwise, type Otherwise } from "../stepEdits"; // the steps in running order: a property of the document, not data
+import { afterOnly, beforeSave, deleteNode, groupOf, insertAfter, insertAfterSave, insertQuestion, isQuestion, moveNode, newNode, order, otherwiseOf, setOtherwise, type Otherwise } from "../stepEdits"; // the steps in running order: a property of the document, not data
 import { useData } from "../useData";
 import { getDraft, getLadder, getWorkflow, listTemplates, listWorkflows, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
 import { Link, navigate, onLeave } from "../router";
@@ -343,10 +343,13 @@ type Move = { fixed: boolean; reason?: string; up: boolean; down: boolean; del: 
 // FB1d: a question's row says what its No does: one of the ends, or another path the graph shows. FB4b: "hand to
 // another workflow" is an end with a setting, so the row shows the workflow picker under it (node: that end).
 type ElseKind = "leave" | "fail" | "goto" | "other" | "none";
-type Else = { kind: Otherwise; set: (k: ElseKind) => void; node?: Node; update?: (n: Node) => void };
+type Else = { kind: Otherwise; set: (k: ElseKind) => void; node?: Node; update?: (n: Node) => void; check?: boolean };
 const OTHERWISE: [Otherwise, string][] = [["leave", "leave the file alone"], ["fail", "stop as failed"], ["goto", "hand to another workflow"], ["other", "another path (in the graph)"]];
 // FB4b: after the save nothing ends the run, so a question there offers only "nothing more" or the graph
 const OTHERWISE_AFTER: [Otherwise, string][] = [["none", "nothing more"], ["other", "another path (in the graph)"]];
+// FB4b-3: between the check and the save a No keeps the original (the new file is thrown away) or stops the run;
+// a hand-over makes no sense there, since the conversion is done
+const OTHERWISE_CHECK: [Otherwise, string][] = [["leave", "leave the file alone"], ["fail", "stop as failed"], ["other", "another path (in the graph)"]];
 function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline }: { n: Node; i: number; mv: Move; open: boolean; toggle: () => void; update: (n: Node) => void; issues: ValidationIssue[]; otherwise?: Else; inline?: boolean }) {
   const { stepDef, summary, wf } = useReg(), def = stepDef(n.type), mine = issues.filter((x) => x.nodeId === n.id);
   if (inline) open = true; // FB3, the simple view: every form is on the page, nothing folds
@@ -369,6 +372,13 @@ function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline }: { n
         <div className="sp" title={(n.name ?? def.name) + ": " + summary(n)}><span className="snm" id={n.id + "-name"}>{n.name ?? def.name}</span> <span className="ssum">{summary(n)}</span></div>
         {mine.length > 0 && <span className="pill bad"><Icon id="i-alert" />{mine.length === 1 ? "1 problem" : mine.length + " problems"}</span>}
         {end ? <span className="muted sm nowrap">{end === "first" ? "Always first" : "Always last"}</span>
+          : otherwise && otherwise.check ? <label className="row nw otherwise"><span className="muted nowrap">Otherwise</span>
+              {/* FB4b-3: a question before the save: nothing on its No keeps the original, so it reads "leave the file alone" */}
+              <select className="input" aria-label={"Otherwise: what happens when " + nm + " answers No"} value={otherwise.kind === "none" ? "leave" : otherwise.kind}
+                onChange={(e) => otherwise.set(e.target.value as ElseKind)}>
+                {OTHERWISE_CHECK.filter(([k]) => k !== "other" || otherwise.kind === "other").map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                {otherwise.kind !== "other" && <option value="other">another path (in the graph)</option>}
+              </select></label>
           : otherwise && afterOnly(def) ? <label className="row nw otherwise"><span className="muted nowrap">Otherwise</span>
               {/* ui-shop review #582: a No that holds anything but nothing (a fail or a hand-over the graph built, another chain) reads
                   "another path", never "nothing more"; "leave" means the same as nothing after the save */}
@@ -450,7 +460,7 @@ function AddStepMenu({ wf, doc, defs, adds, onAdd, onClose }: { wf: string; doc:
     .map((d) => {
       const cond = d.outputs.some((o) => o.outcome === "branch"), a = adds?.[d.type], again = cond || d.category === "flow"; // a question or an action may appear more than once
       const on = cond ? !!a?.addable || !adds : (again || !have.has(d.type)) && !!a?.addable;
-      const line = cond ? (a?.addable ? (afterOnly(d) ? "Only if it answers Yes; otherwise nothing more happens. Goes after " : "Only if it answers Yes; otherwise the file is left alone. Goes after ") + nameOf(a.after) : "Splits files by a rule. Opens the graph.")
+      const line = cond ? (a?.addable ? (afterOnly(d) ? "Only if it answers Yes; otherwise nothing more happens. Goes after " : "Only if it answers Yes; otherwise the file is left alone. Goes after ") + nameOf(a.after) + (afterOnly(d) && d.phase?.includes("check") ? ". Move it above 'Save the result' to keep the original when it answers No" : "") : "Splits files by a rule. Opens the graph.")
         : have.has(d.type) && !again ? "Already in this workflow" : a?.addable ? "Goes after " + nameOf(a.after) : a?.reason || "Not available here yet.";
       return { d, g: groupOf(d), on, line, after: a?.after };
     })
@@ -827,7 +837,7 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
           const mv: Move = { fixed, reason: p?.fixedReason, up: !fixed && !simple && i > 1 && i <= lastMovable, down: !fixed && !simple && i >= 1 && i < lastMovable, del: !fixed && !simple && i >= 1 && i <= lastMovable, // the simple view shows no place badge or menu: moving and deleting live in the steps view (ui-shop review #543)
             act: (w) => (w === "del" ? deleteStep(n.id) : moveStep(n.id, w === "up" ? -1 : 1)) };
           const ow = isQuestion(n) ? otherwiseOf(doc, n) : undefined;
-          const otherwise: Else | undefined = ow ? { kind: ow.kind, set: (k) => setElse(n, k), node: ow.node, update } : undefined;
+          const otherwise: Else | undefined = ow ? { kind: ow.kind, set: (k) => setElse(n, k), node: ow.node, update, check: beforeSave(doc, n, defs.find((d) => d.type === n.type)) } : undefined;
           return <Step key={n.id} n={n} i={i} mv={mv} open={open === n.id} toggle={() => setOpen(open === n.id ? null : n.id)} update={update} issues={issues} otherwise={otherwise} inline={simple} />;
         })}{simple && fold(after, "after the file is saved")}</ol>
         {!only && !simple && <button className="btn sm ghost" type="button" onClick={openAdd}><Icon id="i-plus" />Add step</button>}

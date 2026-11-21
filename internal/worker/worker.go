@@ -591,6 +591,7 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 		for k, v := range vars.EndValues(final, job.SizeBefore, size) {
 			st.Vars[k] = v
 		}
+		st.Result = rules.Result{SizeBefore: job.SizeBefore, SizeAfter: size, DurationBefore: job.DurationSec, DurationAfter: w.verified.DurationSec}
 		env := flow.Env{Log: func(l string) { w.jobNote(job.ID, secReplace, jobs.LevelInfo, "(%s): %s", job.Path, l) }, Tag: w.tagger(job.ID)}
 		if w.Cards != nil {
 			e := w.Cards(job, final)
@@ -1718,6 +1719,14 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	for k := range plan.SubtitleFiles() { // each subtitle that was to be saved as a file was saved
 		if st, err := os.Lstat(rules.StagedSrt(tmp, k)); err != nil || !st.Mode().IsRegular() || st.Size() == 0 {
 			return "", kept("a subtitle could not be saved as a separate file")
+		}
+	}
+	// FB4b-3: the path's questions about the checked result, before anything moves. An outcome that leads to
+	// "Leave the file alone" (or nowhere) keeps the original: the workflow's own choice, so the file ends skipped
+	// with its own reason, like the size rule below; "Stop as failed" fails the job with its words.
+	if len(plan.BeforeSave) > 0 {
+		if err := w.compareRule(job, plan.BeforeSave, tmp, before.Size(), src.DurationSec); err != nil {
+			return "", err
 		}
 	}
 	// R8: a new file bigger than its original is kept when the workflow says so, before anything moves.

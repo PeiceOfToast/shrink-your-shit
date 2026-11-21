@@ -342,8 +342,13 @@ func ValidateWith(d Doc, s Scopes) Result {
 				add(Issue{Code: "invalid_config", NodeID: n.ID, ConfigPath: "/until", Field: "until", Message: "In '" + nodeName(n) + "', the time must read like 02:00."})
 			}
 		}
-		if n.Type == TypeCheckResult && strOf(n.Config, "test", "saved_at_least") != "bigger" && intOf(n.Config, "percent", 0) <= 0 { // FB4b: the percent tests need their percent
-			add(Issue{Code: "invalid_config", NodeID: n.ID, ConfigPath: "/percent", Field: "percent", Message: "In '" + nodeName(n) + "', set the percent of the original's size to compare with."})
+		if n.Type == TypeCheckResult { // FB4b: the percent tests need their percent; the running-time test its seconds
+			switch test := strOf(n.Config, "test", "saved_at_least"); {
+			case test == "runtime_within" && questionOf(n).Seconds <= 0:
+				add(Issue{Code: "invalid_config", NodeID: n.ID, ConfigPath: "/seconds", Field: "seconds", Message: "In '" + nodeName(n) + "', set how many seconds the running time may be off by."})
+			case test != "bigger" && test != "runtime_within" && intOf(n.Config, "percent", 0) <= 0:
+				add(Issue{Code: "invalid_config", NodeID: n.ID, ConfigPath: "/percent", Field: "percent", Message: "In '" + nodeName(n) + "', set the percent of the original's size to compare with."})
+			}
 		}
 		if n.Type == TypeGoto { // FB4b: a workflow to hand to, by id. A missing key is checkConfig's "needs a value"; an empty or unreadable one (review2-579: the picker's placeholder picked again) is refused here, so it never fails every file at run time.
 			if v, present := n.Config["workflow"]; present {
@@ -494,11 +499,24 @@ func phaseIssue(from, to Node, e Edge, defs map[string]StepDefinition, afterSave
 	afterOK := func(d StepDefinition) bool { // may sit after the save
 		return card(d) && slices.Contains(d.Phase, PhaseAfter)
 	}
+	checkOK := func(d StepDefinition) bool { // may sit between the check and the save (FB4b-3)
+		return d.RunsAs == RunsQuestion && slices.Contains(d.Phase, PhaseCheck)
+	}
+	// where an after-only step belongs, in words: one that may also sit after the check says so
+	belongs := func(d StepDefinition) string {
+		if checkOK(d) {
+			return "belongs after the file is checked. Put it between 'Check the result' and 'Save the result', or after the save."
+		}
+		return "belongs after the file is saved. Put it after 'Save the result'."
+	}
 	switch fd.RunsAs {
 	case RunsPlan, RunsVerify: // inside the conversion: nothing but its own steps follow on Next
+		if fd.RunsAs == RunsVerify && checkOK(td) { // FB4b-3: a question about the checked result, before the save
+			return nil
+		}
 		if td.RunsAs == RunsQuestion || td.RunsAs == RunsAction || td.RunsAs == RunsEnd {
 			if afterOnly(td) {
-				return bad("comes after '" + nodeName(from) + "', but it belongs after the file is saved. Put it after 'Save the result'.")
+				return bad("comes after '" + nodeName(from) + "', but it " + belongs(td))
 			}
 			return bad("comes after '" + nodeName(from) + "', but it belongs before the steps that convert. Move it up, or remove the link.")
 		}
@@ -507,16 +525,22 @@ func phaseIssue(from, to Node, e Edge, defs map[string]StepDefinition, afterSave
 			return bad("can't follow 'Save the result'. After the save come only steps that act on the saved file.")
 		}
 	case RunsAction, RunsQuestion: // after the save, only after steps follow; before it, an after-only step never does
+		if !afterSave && checkOK(fd) && (afterOnly(fd) || e.FromPort == "else") { // FB4b-3: between the check and the save
+			if td.RunsAs == RunsCommit || to.Type == TypeEnd || to.Type == TypeFail || checkOK(td) {
+				return nil
+			}
+			return bad("can't come between 'Check the result' and 'Save the result'. There come only 'Compare the result', the save, 'Leave the file alone' or 'Stop as failed'.")
+		}
 		if afterSave || afterOnly(fd) {
 			if !afterOK(td) {
 				return bad("can't follow '" + nodeName(from) + "'. After the save come only steps that act on the saved file.")
 			}
 		} else if afterOnly(td) {
-			return bad("belongs after the file is saved. Put it after 'Save the result'.")
+			return bad(belongs(td))
 		}
 	case RunsInput:
 		if afterOnly(td) {
-			return bad("belongs after the file is saved. Put it after 'Save the result'.")
+			return bad(belongs(td))
 		}
 	}
 	return nil
@@ -808,6 +832,8 @@ func summary(n Node) string {
 			return "Only if less than " + strconv.Itoa(intOf(c, "percent", 10)) + "% was saved"
 		case "bigger":
 			return "Only if the new file is bigger"
+		case "runtime_within":
+			return "Only if the running time is within " + strconv.FormatFloat(questionOf(n).Seconds, 'f', -1, 64) + " seconds of the original's"
 		}
 		return "Only if at least " + strconv.Itoa(intOf(c, "percent", 10)) + "% was saved"
 	case TypeWait:

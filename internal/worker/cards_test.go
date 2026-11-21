@@ -3,6 +3,7 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -503,5 +504,102 @@ func TestConvertAgainLaterAndWaitUntil(t *testing.T) {
 	if j := s5.job(); j.Status != jobs.Done || !noteOnTimeline(s5, "retried by hand") {
 		steps, _ := s5.store.Steps(s5.id)
 		t.Errorf("retried by hand: %s %q %+v", j.Status, j.Error, steps)
+	}
+}
+
+// compareTemplate is cardsTemplate with "Compare the result" between the check and the save on the Yes path:
+// the save on its Yes, the given end on its No.
+func compareTemplate(q rules.Question, no rules.Card) rules.Template {
+	tm := cardsTemplate()
+	(*tm.Branches)[0].BeforeSave = []rules.Card{{NodeID: "cmp", Type: workflow.TypeCheckResult, Name: "Worth it?", Check: &q,
+		Yes: []rules.Card{{NodeID: "save", Type: workflow.TypeCommit, Name: "Save the result"}}, No: []rules.Card{no}}}
+	(*tm.Branches)[0].Path = []string{"in", "q", "set", "note", "conv", "verify", "cmp", "save"}
+	return tm
+}
+
+// FB4b-3: a "Compare the result" before the save that answers No and leads to "Leave the file alone" keeps the
+// original: the file ends skipped with its own reason and words (not failed, like a bigger file the Save step
+// keeps), nothing is left beside the original, the answer is on the timeline; a Yes saves as before.
+func TestCompareBeforeTheSaveKeepsTheOriginal(t *testing.T) {
+	// the fake conversion writes 3 bytes for a 14-byte original: 78.6% saved
+	q := rules.Question{Kind: "result", Test: "saved_at_least", Percent: 90}
+	s := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
+	before, _ := os.ReadFile(s.src)
+	w := s.worker(Beside)
+	w.Template = func(jobs.Job) (rules.Template, error) {
+		return compareTemplate(q, rules.Card{NodeID: "leave", Type: workflow.TypeEnd, Name: "Leave the file alone", Config: map[string]any{"reason": "Not worth it"}}), nil
+	}
+	if _, err := w.RunOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.store.Get(s.id); err == nil {
+		t.Fatal("the job record is still there; want it gone (skipped)")
+	}
+	rec, _ := s.store.GetFile(s.src)
+	if rec == nil || rec.Reason != rules.SkipResultNotWanted || !strings.Contains(rec.Decision, "Not worth it: the new file was compared with the original (No (78.6% saved, asked for at least 90%)), so the original was kept") {
+		t.Errorf("skipped: %+v", rec)
+	}
+	if !noteOnTimeline(s, "Worth it? → No (78.6% saved, asked for at least 90%)") {
+		steps, _ := s.store.Steps(s.id)
+		t.Errorf("timeline: %+v", steps)
+	}
+	after, _ := os.ReadFile(s.src)
+	if !bytes.Equal(before, after) {
+		t.Error("the original changed")
+	}
+	entries, _ := os.ReadDir(s.dir)
+	if len(entries) != 1 {
+		t.Errorf("left in the folder: %d entries, want only the original", len(entries))
+	}
+	s.assertOriginalSafe()
+	// Yes: saved as before, the answer on the timeline
+	q.Percent = 50
+	s2 := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
+	w2 := s2.worker(Beside)
+	w2.Template = func(jobs.Job) (rules.Template, error) {
+		return compareTemplate(q, rules.Card{NodeID: "leave", Type: workflow.TypeEnd, Name: "Leave the file alone"}), nil
+	}
+	if _, err := w2.RunOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if j := s2.job(); j.Status != jobs.Done || !noteOnTimeline(s2, "Worth it? → Yes (78.6% saved, asked for at least 50%)") {
+		t.Errorf("yes: %s %q", j.Status, j.Error)
+	}
+}
+
+// FB4b-3: the running-time test reads the probes' lengths (a second off on a 100-second file passes the check's
+// own 2% bound), and "Stop as failed" on its No fails the job with the end's words, the original untouched.
+func TestCompareBeforeTheSaveRunningTimeAndStop(t *testing.T) {
+	q := rules.Question{Kind: "result", Test: "runtime_within", Seconds: 0.5}
+	s := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
+	s.outSpec.duration = 101
+	before, _ := os.Stat(s.src)
+	w := s.worker(Beside)
+	w.Template = func(jobs.Job) (rules.Template, error) {
+		return compareTemplate(q, rules.Card{NodeID: "stop", Type: workflow.TypeFail, Name: "Stop as failed", Config: map[string]any{"reason": "The length changed"}}), nil
+	}
+	w.RunOne(context.Background())
+	j := s.job()
+	if j.Status != jobs.Failed || !strings.Contains(j.Error, "The length changed (No (running time 0:01:41 against the original's 0:01:40, 1 second off, asked for within 0.5 seconds))") || !strings.Contains(j.Error, "original is untouched") {
+		t.Errorf("%s %q", j.Status, j.Error)
+	}
+	after, _ := os.Stat(s.src)
+	if after.Size() != before.Size() || !after.ModTime().Equal(before.ModTime()) {
+		t.Error("the original changed")
+	}
+	s.assertOriginalSafe()
+	// within 2 seconds: saved
+	q.Seconds = 2
+	s2 := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
+	s2.outSpec.duration = 101
+	w2 := s2.worker(Beside)
+	w2.Template = func(jobs.Job) (rules.Template, error) {
+		return compareTemplate(q, rules.Card{NodeID: "stop", Type: workflow.TypeFail, Name: "Stop as failed"}), nil
+	}
+	if _, err := w2.RunOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if j := s2.job(); j.Status != jobs.Done || !noteOnTimeline(s2, "Worth it? → Yes (running time 0:01:41 against the original's 0:01:40, 1 second off, asked for within 2 seconds)") {
+		t.Errorf("within: %s %q", j.Status, j.Error)
 	}
 }
