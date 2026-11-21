@@ -25,6 +25,7 @@ import { Icon } from "./Icon";
 import { WorkerHome } from "./screens/Enroll";
 import { ConnectionsSettings } from "./screens/Connections";
 import { NotificationsSettings } from "./screens/Notifications";
+import { VariablesSettings } from "./screens/Variables";
 import { getSetup } from "./setupApi";
 import { useData } from "./useData";
 
@@ -34,14 +35,14 @@ export function App() {
   const p0 = raw.length > 1 ? raw.replace(/\/+$/, "") : raw; // "/settings/" is "/settings"
   const path = p0 === "/settings/integrations" ? "/settings/connections" : p0; // the tab's old address (V9e)
   useEffect(() => { if (p0 !== path) navigate(path, true); }, [p0, path]);
-  const settings = ["/settings", "/settings/general", "/settings/shares", "/settings/appearance", "/settings/processing", "/settings/safety", "/settings/connections", "/settings/notifications", "/settings/backup", "/settings/health", "/settings/about"].includes(path); // the tabs built so far
+  const settings = ["/settings", "/settings/general", "/settings/shares", "/settings/appearance", "/settings/processing", "/settings/safety", "/settings/connections", "/settings/notifications", "/settings/variables", "/settings/backup", "/settings/health", "/settings/about"].includes(path); // the tabs built so far
   // Other pages' deeper paths (/workflows/42/graph) are their future routes; Settings' sub-pages are known, so any
   // other /settings/... is not found.
   const item = path.startsWith("/settings/") && !settings ? undefined : itemFor(path);
   const start = path === "/start", signin = path === "/signin"; // not in the menu (IA.md)
   // Sample data pill: built screens on the mock only; a page not built yet says so in its empty state (design, 00:02Z).
   // Screens on the real server (no Sample data pill): Dashboard, Libraries, first run, Workflows, the step list, Jobs.
-  const real = !MOCK && (start || signin || path === "/libraries" || path.startsWith("/libraries/") || path === "/workflows" || /^\/workflows\/[^/]+(\/graph)?$/.test(path) || path === "/jobs" || path === "/" || path === "/workers" || /^\/workers\/[^/]+$/.test(path));
+  const real = !MOCK && (start || signin || path === "/libraries" || path.startsWith("/libraries/") || path === "/workflows" || /^\/workflows\/[^/]+(\/graph)?$/.test(path) || path === "/jobs" || path === "/" || path === "/settings/variables" || path === "/workers" || /^\/workers\/[^/]+$/.test(path));
   const title = settings ? "Settings" : start ? "Set up" : signin ? "Sign in" : item ? item.label : "Page not found";
   // A computer that joined another server shows only its worker page, at every address but Settings (Change role).
   const su = useData(getSetup, []), joined = su.data?.role === "worker" && (!su.data.join || su.data.join.state === "allowed");
@@ -75,7 +76,7 @@ export function App() {
     <>
       <div dangerouslySetInnerHTML={{ __html: sprite }} />
       <Shell title={title} proto={!real && (start || path === "/" || path === "/libraries" || path.startsWith("/libraries/") || path === "/workflows" || /^\/workflows\/[^/]+(\/graph)?$/.test(path) || path === "/jobs" || path === "/workers" || /^\/workers\/[^/]+$/.test(path))}>
-        {settings ? (path === "/settings/shares" ? <SharesSettings /> : path === "/settings/processing" ? <ProcessingSettings /> : path === "/settings/appearance" ? <AppearanceSettings /> : path === "/settings/safety" ? <SafetySettings /> : path === "/settings/connections" ? <ConnectionsSettings /> : path === "/settings/notifications" ? <NotificationsSettings /> :path === "/settings/backup" ? <BackupSettings /> : path === "/settings/health" ? <HealthSettings /> : path === "/settings/about" ? <AboutSettings /> : <GeneralSettings />) : path === "/" ? <Dashboard /> : start ? <Start /> : path === "/jobs" ? <Jobs /> : path === "/workers" ? <Workers /> : /^\/workers\/[^/]+$/.test(path) ? <WorkerPage key={path} id={decodeURIComponent(path.split("/")[2])} /> : signin ? <SignIn /> : path === "/libraries" ? <Libraries /> : /^\/libraries\/[^/]+$/.test(path) ? <LibraryPage key={path} id={path.split("/")[2]} />: path === "/workflows" ? <Workflows /> : /^\/workflows\/[^/]+\/graph$/.test(path) ? <WorkflowGraph key={path} id={path.split("/")[2]} /> : /^\/workflows\/[^/]+$/.test(path) ? <WorkflowStack key={path} id={path.split("/")[2]} /> : path === "/plugins" ? <PluginsPlanned /> : item ? <Coming item={item} /> : <NotFound />}
+        {settings ? (path === "/settings/shares" ? <SharesSettings /> : path === "/settings/processing" ? <ProcessingSettings /> : path === "/settings/appearance" ? <AppearanceSettings /> : path === "/settings/safety" ? <SafetySettings /> : path === "/settings/connections" ? <ConnectionsSettings /> : path === "/settings/notifications" ? <NotificationsSettings /> : path === "/settings/variables" ? <VariablesSettings /> :path === "/settings/backup" ? <BackupSettings /> : path === "/settings/health" ? <HealthSettings /> : path === "/settings/about" ? <AboutSettings /> : <GeneralSettings />) : path === "/" ? <Dashboard /> : start ? <Start /> : path === "/jobs" ? <Jobs /> : path === "/workers" ? <Workers /> : /^\/workers\/[^/]+$/.test(path) ? <WorkerPage key={path} id={decodeURIComponent(path.split("/")[2])} /> : signin ? <SignIn /> : path === "/libraries" ? <Libraries /> : /^\/libraries\/[^/]+$/.test(path) ? <LibraryPage key={path} id={path.split("/")[2]} />: path === "/workflows" ? <Workflows /> : /^\/workflows\/[^/]+\/graph$/.test(path) ? <WorkflowGraph key={path} id={path.split("/")[2]} /> : /^\/workflows\/[^/]+$/.test(path) ? <WorkflowStack key={path} id={path.split("/")[2]} /> : path === "/plugins" ? <PluginsPlanned /> : item ? <Coming item={item} /> : <NotFound />}
       </Shell>
     </>
   );
