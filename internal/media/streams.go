@@ -37,11 +37,16 @@ type Stream struct {
 	Width, Height int
 	// FrameRate is the average frame rate in frames per second.
 	FrameRate float64 `json:"frameRate,omitempty"`
+	// NominalFrameRate is the rate the stream declares (r_frame_rate), which is the average for every stream
+	// whose frames are actually spaced that way. Kept beside it because VFR hides the difference (mkv), and
+	// through the probe cache: an entry written before this field existed reads 0, and callers fall back to
+	// FrameRate.
+	NominalFrameRate float64 `json:"nominalFrameRate,omitempty"`
 	// Frames is the stream's frame count as the container states it (mp4 does; 0 when not stated).
 	Frames int64 `json:"frames,omitempty"`
 	// Duration is the stream's own length in seconds, not the container's (mkv states it in a tag; 0 when not stated).
 	Duration float64 `json:"duration,omitempty"`
-	// VFR is true when the average frame rate clearly differs from the nominal one. That is
+	// VFR is true when the average frame rate differs from the nominal one by more than 1%. That is
 	// reliable for mp4/mov; for mkv ffprobe reports the nominal rate as the average, so a variable
 	// frame rate mkv is NOT detected here (it needs a scan of packet timestamps). Untested on real
 	// interlaced broadcast captures, where the nominal rate may be the field rate: before using VFR
@@ -377,10 +382,11 @@ func parseStream(m map[string]any, position int) Stream {
 		s.Width, s.Height = int(num(m, "width")), int(num(m, "height"))
 		avg, nominal := fraction(str(m, "avg_frame_rate")), fraction(str(m, "r_frame_rate"))
 		s.FrameRate = avg
+		s.NominalFrameRate = nominal
 		if s.FrameRate == 0 {
 			s.FrameRate = nominal
 		}
-		s.VFR = avg > 0 && nominal > 0 && !s.AttachedPic && math.Abs(avg-nominal)/nominal > 0.03
+		s.VFR = avg > 0 && nominal > 0 && !s.AttachedPic && math.Abs(avg-nominal)/nominal > 0.01
 		s.Frames = int64(num(m, "nb_frames"))
 		s.PixFmt = str(m, "pix_fmt")
 		s.BitDepth = bitDepth(str(m, "bits_per_raw_sample"), s.PixFmt)

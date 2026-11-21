@@ -1438,6 +1438,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		Decoder: decoderWords(src, full), Progress: media.Progress{ETASeconds: -1}})
 	defer dropLive(job.ID)
 	var encErr string
+	var encLog string // the encode's log as ffmpeg wrote it: its end-of-run report lives here (slice 13)
 	var terr error
 	decoded := int64(-1) // frames ffmpeg took from the original; -1 when a remote worker did not say
 	encStart := w.now()
@@ -1454,7 +1455,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			return "", terr
 		}
 	} else {
-		encErr, decoded, terr = w.encodeLocal(ctx, job, args)
+		encErr, encLog, decoded, terr = w.encodeRun(ctx, job, args)
 		// A failed graphics encode steps down a rung at a time: the full GPU pipeline to the processor decoding
 		// for the same encoder (no count toward the pause), then to the processor, which counts (EncoderFell).
 		for gpu != "" && w.gpuFailed(ctx, terr, encErr, full) {
@@ -1476,7 +1477,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 				setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src, gpu), Encoder: encoderWordsUsed(plan, gpu),
 					Decoder: decoderWords(src, false), Progress: media.Progress{ETASeconds: -1}})
 				encStart = w.now()
-				encErr, decoded, terr = w.encodeLocal(ctx, job, args)
+				encErr, encLog, decoded, terr = w.encodeRun(ctx, job, args)
 				continue
 			}
 			if gpuSlot != nil { // the processor converts from here: the card is free for another job
@@ -1487,7 +1488,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src, ""), Encoder: encoderWords(plan),
 				Decoder: decoderWords(src, false), Progress: media.Progress{ETASeconds: -1}})
 			encStart = w.now()
-			encErr, decoded, terr = w.encodeLocal(ctx, job, args)
+			encErr, encLog, decoded, terr = w.encodeRun(ctx, job, args)
 			break
 		}
 		if gpuSlot != nil { // the graphics encode has ended: the card's place is free for the next job
@@ -1503,14 +1504,48 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if w.remote != nil {
 		ranOn = rules.GraphicsEncoderIn(args, plan.Video.Index)
 	}
-	if m := plan.MainVideoRules(src, ranOn); terr == nil && m != nil && (exp.MainVideo == nil || *m != *exp.MainVideo) {
-		// Another encoder made the file than the one chosen here (a fall-back, or a remote worker's own):
-		// judge it by the picture that encoder makes, and keep the record saying what it was judged by.
-		exp.MainVideo = m
-		snap.Expect = exp
-		if b, jerr := json.Marshal(snap); jerr == nil {
-			if rerr := w.Queue.RecordPlan(job.ID, string(b), snap.Fingerprint()); rerr != nil {
-				w.jobf(job.ID, ": the plan could not be recorded with the encoder that ran: %v", rerr)
+	// Slice 13: the original's own report, from the encode that just ran it: the pictures it decoded and the
+	// decode errors it counted. A remote worker's report carries only its error lines, so there is none there.
+	stats, haveReport := sourceReport(src, encLog)
+	// A report that read every packet it decoded can still be short of duration × rate: a demuxer silently
+	// skipped packets (a real loss), or the declared rate is not the stream's real one (a VFR original, which
+	// ffmpeg 8's probe cannot mark in an mkv). The counts cannot tell those apart, the frames' spacing can
+	// (review-588 round 3): a silent skip leaves the interval between the frames that remain, a variable rate
+	// does not. Asked only for that short count; a probe error or too little to judge counts it as loss.
+	shortGuess, shortExact := sourceFrameCount(src)
+	short := haveReport && shortExact && stats.Frames > 0 && stats.Packets <= stats.Frames && stats.Frames < shortGuess
+	followsRate := true
+	if short {
+		tctx, tcancel := context.WithTimeout(ctx, timingTimeout)
+		atRate, terr := media.FramesFollowNominalRate(tctx, w.Exec, w.FFprobe, srcPath, src.MainVideoOrdinal(), nominalFrameRate(src))
+		tcancel()
+		if terr != nil {
+			log.Printf("worker %s: %s: reading the frames' spacing: %v", w.ID, job.Path, terr) // unknown: counts as loss
+		} else {
+			followsRate = atRate
+		}
+	}
+	vfr := sourceVFR(src, followsRate, short)
+	if terr == nil {
+		changed := false
+		if m := plan.MainVideoRules(src, ranOn); m != nil && (exp.MainVideo == nil || *m != *exp.MainVideo) {
+			// Another encoder made the file than the one chosen here (a fall-back, or a remote worker's own):
+			// judge it by the picture that encoder makes, and keep the record saying what it was judged by.
+			exp.MainVideo = m
+			changed = true
+		}
+		if n := checkedFrames(exp.VideoPackets, stats, haveReport, vfr); n != exp.VideoPackets {
+			// The report decoded exactly, so it is the count the new file is checked against (a VFR original's
+			// duration × rate guess is not; without a report its frame check is skipped).
+			exp.VideoPackets = n
+			changed = true
+		}
+		if changed {
+			snap.Expect = exp
+			if b, jerr := json.Marshal(snap); jerr == nil {
+				if rerr := w.Queue.RecordPlan(job.ID, string(b), snap.Fingerprint()); rerr != nil {
+					w.jobf(job.ID, ": the plan could not be recorded with the encoder that ran: %v", rerr)
+				}
 			}
 		}
 	}
@@ -1564,12 +1599,42 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	// Errors ffmpeg reported while reading the original mean it is damaged: converting it would bake
 	// the damage in and delete the only copy that might still be repaired or fetched again.
-	frames, exact := sourceFrameCount(src)
-	lost := frames
-	if !exact {
-		lost = 0 // a count from the container's duration is not evidence of lost frames: unknown is not damage
+	probeVFR := src.Video() != nil && src.Video().VFR
+	expected, exact := sourceFrameCount(src) // the probe's picture count
+	decodedFrames := decoded                 // what the encode decoded (the probe's count when it reported none)
+	if haveReport {
+		decodedFrames = stats.Frames // the report's own count, even zero: nothing decoded is total loss
 	}
-	if lost > 0 && decoded >= 0 && decoded < frames && src.MainVideoOrdinal() >= 0 {
+	// The damage share's denominator: the probe's picture count, or the report's decoded count when that is
+	// larger. The frames the decode did not take are counted as damage, so shrinking the denominator by them
+	// would count them twice (review-588 round 2: 5 pictures of 500 is 1% and converts, of 498 it is not).
+	frames := expected
+	if haveReport && stats.Frames > frames {
+		frames = stats.Frames
+	}
+	// Frames the decode did not take. The report's read/decoded counts decide whether there is a loss at all: a
+	// stream whose decode took every packet it read lost nothing, whatever its rates say (the VFR mkv: 180 read,
+	// 180 decoded; the probe cannot mark it on ffmpeg 8). When packets went unread or undecoded the shortfall
+	// against duration × rate is lost frames (a damaged .ts: reads 472 of 500 and decodes 470, so 30 are gone,
+	// review-588 round 2; an edit-list mp4 reads 250 packets and decodes the 240 it presents, which is not loss).
+	// A report that read exactly what it decoded can still be short: the packets a demuxer skipped were never
+	// read (review-588 round 3). That counts when the frames keep the nominal interval (short && followsRate,
+	// decided above), and is the rate, not a loss, when they do not.
+	// Without a report the duration × rate guess decides, and it is no count for a variable-rate original.
+	base := expected // the frames the stream had
+	lost := expected
+	if haveReport {
+		lost = 0
+		if stats.Packets > stats.Frames || (short && followsRate) {
+			lost = expected - stats.Frames
+			if lost < 0 {
+				lost = 0
+			}
+		}
+	} else if !exact || probeVFR {
+		lost = 0
+	}
+	if lost > 0 && decodedFrames >= 0 && decodedFrames < base && src.MainVideoOrdinal() >= 0 {
 		// Pictures before the first keyframe of a stream that starts mid-group-of-pictures cannot be decoded in any
 		// file: they are not lost frames. They count as accounted for; damage after the first keyframe still counts.
 		lctx, lcancel := context.WithTimeout(ctx, quickTimeout)
@@ -1578,10 +1643,31 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		if lerr != nil {
 			log.Printf("worker %s: %s: reading the first keyframe: %v", w.ID, job.Path, lerr) // unknown: counts stay strict
 		} else {
-			decoded += lead
+			decodedFrames += lead
+			if haveReport { // the report's short count is these pictures; the guess path leaves it alone as before
+				lost -= lead
+				if lost < 0 {
+					lost = 0
+				}
+			}
 		}
 	}
-	if dmg := withLostFrames(sourceDamage(encErr), lost, decoded); dmg.Found() {
+	// A variable-rate original's short count is its rate, not lost frames. Said only when nothing was lost: the
+	// count-based mark also fits a damaged steady file, which the lost-frames line below describes instead.
+	if vfr && lost == 0 {
+		if haveReport {
+			w.jobf(job.ID, ": the original is variable frame rate; ffmpeg decoded %d frames from it, and that is the count the new file is checked against", stats.Frames)
+		} else {
+			w.jobf(job.ID, ": the original is variable frame rate and the conversion did not report its frame count, so the frame count is not checked")
+		}
+	}
+	var dmg sourceDamageReport
+	if haveReport {
+		dmg = damagedPictures(sourceDamage(encErr), stats, lost, base, decodedFrames)
+	} else {
+		dmg = withLostFrames(sourceDamage(encErr), lost, decoded) // today's path, unchanged
+	}
+	if dmg.Found() {
 		if !damageTolerated(dmg, frames) {
 			// The check step records the refusal (its Result is the kept reason), then the lines the UI shows.
 			const reason = "the original file has errors, so it was not converted (converting would keep the damage)"
@@ -2570,6 +2656,14 @@ func (w *Worker) gpuFailed(ctx context.Context, err error, stderr string, full b
 		return true
 	}
 	return jobs.FallsBackToProcessor(lines)
+}
+
+// encodeRun is encodeLocal with the encode's log split in two: the raw log, where ffmpeg's end-of-run
+// report says what it read and decoded (slice 13), and the error lines alone, which every other reader of
+// the log expects (as -v error wrote it).
+func (w *Worker) encodeRun(ctx context.Context, job jobs.Job, args []string) (errText, raw string, frames int64, err error) {
+	raw, frames, err = w.encodeLocal(ctx, job, args)
+	return media.ErrorLines([]byte(raw)), raw, frames, err
 }
 
 // encodeLocal runs ffmpeg for the local worker's job: its progress, stall watch and live figures.

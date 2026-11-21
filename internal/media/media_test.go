@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -118,6 +119,60 @@ func TestCountVideoPacketsWithSideData(t *testing.T) {
 	}
 	if _, err := CountVideoPackets(context.Background(), &FakeExec{Out: []byte(",75\n")}, "ffprobe", "/x.mkv", 0); err == nil {
 		t.Error("no count in the first field is an error")
+	}
+}
+
+// FramesFollowNominalRate reads the gaps between a stream's frames: a demuxer that silently skipped packets
+// leaves doubled gaps among frames that keep the declared interval, while a variable-rate stream's frames sit
+// elsewhere. No rate, too little to judge, or a failed probe count as following, so the caller counts the
+// shortfall (review-588 round 3).
+func TestFramesFollowNominalRateTellsAHoleFromAVariableRate(t *testing.T) {
+	const step = 0.04 // 25 fps
+	ts := func(n int, gap func(i int) float64) string {
+		var b strings.Builder
+		at := 0.0
+		for i := 0; i < n; i++ {
+			fmt.Fprintf(&b, "%.6f\n", at)
+			at += gap(i)
+		}
+		return b.String()
+	}
+	steadyWithHoles := ts(400, func(i int) float64 {
+		if i%25 == 24 {
+			return 2 * step // the frame that would have been here was skipped
+		}
+		return step
+	})
+	variable := ts(400, func(i int) float64 {
+		if i%2 == 0 {
+			return step
+		}
+		return 2 * step // an mkv whose frames alternate, like the round-1 sample
+	})
+	probe := func(stdout string, err error) *FakeExec {
+		return &FakeExec{Handler: func(_ string, _ []string) (string, string, error) { return stdout, "", err }}
+	}
+	cases := []struct {
+		name    string
+		x       *FakeExec
+		nominal float64
+		want    bool
+	}{
+		{"frames at the declared interval", probe(ts(400, func(int) float64 { return step }), nil), 25, true},
+		{"a silent skip keeps the interval between the frames that remain", probe(steadyWithHoles, nil), 25, true},
+		{"a variable rate does not", probe(variable, nil), 25, false},
+		{"no declared rate", probe(steadyWithHoles, nil), 0, true},
+		{"one frame is nothing to judge", probe("0.000000\n", nil), 25, true},
+		{"no times at all", probe("N/A\nN/A\n", nil), 25, true},
+	}
+	for _, c := range cases {
+		got, err := FramesFollowNominalRate(context.Background(), c.x, "ffprobe", "/x.ts", 0, c.nominal)
+		if err != nil || got != c.want {
+			t.Errorf("%s: %v %v, want %v", c.name, got, err, c.want)
+		}
+	}
+	if _, err := FramesFollowNominalRate(context.Background(), &FakeExec{Err: context.Canceled}, "ffprobe", "/x.ts", 0, 25); err == nil {
+		t.Error("a failed probe is an error, not an answer")
 	}
 }
 

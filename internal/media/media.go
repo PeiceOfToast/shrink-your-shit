@@ -13,6 +13,7 @@ import (
 	"math"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -102,23 +103,102 @@ func (h *headBuffer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// maxReportBytes bounds what Stream keeps of ffmpeg's end-of-run input stream report lines, apart from
+// the error lines: they come last, so a noisy run must not crowd them out of the error lines' budget.
+const maxReportBytes = 64 << 10
+
+// keepBuffer is what Stream keeps of a program's stderr: its error lines, its unmarked lines (a run at
+// -v error prints the whole message with no level marker), and ffmpeg's end-of-run "Input stream #..."
+// report, which is at [verbose] level. Everything else (the info lines a level+verbose run starts with)
+// is dropped as it arrives, so however much a run prints, the errors and the report are still there
+// (review-588 round 1: a noisy or damaged file's report was being cut off after 256 KiB).
+type keepBuffer struct {
+	lines, reports, part []byte
+	max, maxReports      int
+	over                 bool // this line is longer than can be kept: drop its rest
+}
+
+func (k *keepBuffer) Write(p []byte) (int, error) {
+	n := len(p)
+	for {
+		i := bytes.IndexByte(p, '\n')
+		if i < 0 {
+			if !k.over {
+				k.part = append(k.part, p...)
+			}
+			break
+		}
+		if !k.over {
+			k.part = append(k.part, p[:i]...)
+		}
+		k.line(k.part)
+		k.part, k.over = k.part[:0], false
+		p = p[i+1:]
+	}
+	if len(k.part) > k.max {
+		k.part, k.over = k.part[:k.max], true // the line's start is what says what it is
+	}
+	return n, nil
+}
+
+// line keeps l if it is a report line, an error line, or a line with no level marker at all.
+func (k *keepBuffer) line(l []byte) {
+	switch {
+	case bytes.Contains(l, []byte("Input stream #")):
+		k.reports = appendCapped(k.reports, l, k.maxReports)
+	case keepStderrLine(string(l)):
+		k.lines = appendCapped(k.lines, l, k.max)
+	}
+}
+
+func (k *keepBuffer) flush() {
+	if len(k.part) > 0 {
+		k.line(k.part)
+		k.part = nil
+	}
+}
+
+func keepStderrLine(s string) bool {
+	m := logLevelRe.FindStringSubmatchIndex(s)
+	if m == nil {
+		return true // no marker: a run at -v error, or a program that does not prefix its levels
+	}
+	switch s[m[2]:m[3]] {
+	case "panic", "fatal", "error":
+		return true
+	}
+	return false
+}
+
+func appendCapped(buf, l []byte, max int) []byte {
+	if room := max - len(buf); room > 1 { // one byte of it is the line end
+		if len(l) > room-1 {
+			l = l[:room-1]
+		}
+		buf = append(append(buf, l...), '\n')
+	}
+	return buf
+}
+
 func (OSExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
 	cmd := command(ctx, name, args...)
 	// lines go through a writer, not a read loop: Wait (with WaitDelay) then ends a stopped run even when
 	// something it started still holds its output open (QA finding B)
 	lines := &lineWriter{onLine: onLine}
 	var last strings.Builder
-	head := headBuffer{max: maxStderrBytes}
-	cmd.Stdout, cmd.Stderr = lines, io.MultiWriter(&tail{b: &last, max: 2000}, &head)
+	keep := &keepBuffer{max: maxStderrBytes, maxReports: maxReportBytes}
+	cmd.Stdout, cmd.Stderr = lines, io.MultiWriter(&tail{b: &last, max: 2000}, keep)
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("%s: %w", name, err)
 	}
 	err := cmd.Wait()
 	lines.flush()
+	keep.flush()
+	stderr := string(keep.lines) + string(keep.reports)
 	if err != nil {
-		return string(head.buf), fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(last.String()))
+		return stderr, fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(last.String()))
 	}
-	return string(head.buf), nil
+	return stderr, nil
 }
 
 // StopWaitDelay is how long a stopped program's output may stay open, held by something it started,
@@ -203,7 +283,8 @@ type Info struct {
 // 5 (#450): the hearing_impaired disposition, so SDH .srt files are named .sdh on upgraded installs too.
 // 6 (R5): the headline codec and bitrate are the main picture's, not a cover image's.
 // 7 (R3): every stream's own duration (audio too), which the A/V length check reads; cached probes lack audio durations.
-const ProbeVersion = 7
+// 8 (slice 13): VFR is marked when the average and nominal rates differ by more than 1% (3% before).
+const ProbeVersion = 8
 
 // Probe runs ffprobe on path. For a video that may carry HDR or Dolby Vision (HEVC, AV1, or PQ/HLG) it
 // also reads the main video's first frame: in TS files and raw streams, the Dolby Vision RPU, the
@@ -309,6 +390,48 @@ func LeadingUndecodable(ctx context.Context, x Exec, ffprobe, path string, n int
 		}
 	}
 	return 0, nil
+}
+
+// timingPackets bounds how many packets FramesFollowNominalRate reads: the share is a sample, and a few
+// thousand gaps carry it.
+const timingPackets = 4000
+
+// FramesFollowNominalRate says whether the n-th video stream's frames are spaced at its declared (nominal)
+// frame interval: more than two thirds of the gaps between consecutive frames are within 10% of 1/nominal.
+//
+// It tells the two streams whose report reads exactly what it decodes yet comes up short of duration × rate
+// apart (review-588 round 3). A demuxer that silently skipped packets leaves gaps where packets are missing
+// and keeps the interval between the frames that remain, so the share stays high: those frames are lost. A
+// variable-rate stream's declared rate is not its real one, so most of its frames sit elsewhere: nothing is
+// lost, its count for the encoding is simply shorter. Steadiness is also true when there is too little to
+// judge (probe error, fewer than two frames, no nominal rate): the caller counts the shortfall, and a false
+// refusal is cheaper than a lost original.
+func FramesFollowNominalRate(ctx context.Context, x Exec, ffprobe, path string, n int, nominal float64) (bool, error) {
+	if nominal <= 0 {
+		return true, nil
+	}
+	out, err := x.Output(ctx, ffprobe, "-v", "error", "-select_streams", fmt.Sprintf("v:%d", n),
+		"-read_intervals", fmt.Sprintf("%%+#%d", timingPackets), "-show_entries", "packet=pts_time", "-of", "csv=p=0", path)
+	if err != nil {
+		return false, err
+	}
+	ts := make([]float64, 0, 1024)
+	for _, line := range strings.Split(string(out), "\n") {
+		if t, ok := csvTime(line); ok {
+			ts = append(ts, t)
+		}
+	}
+	if len(ts) < 2 {
+		return true, nil
+	}
+	sort.Float64s(ts)
+	step, at := 1/nominal, 0
+	for i := 1; i < len(ts); i++ {
+		if d := ts[i] - ts[i-1]; d > 0 && math.Abs(d-step) <= 0.1*step {
+			at++
+		}
+	}
+	return at*3 >= (len(ts)-1)*2, nil
 }
 
 // csvTime reads one pts_time field (seconds, a trailing comma allowed); N/A or junk is not a time.
