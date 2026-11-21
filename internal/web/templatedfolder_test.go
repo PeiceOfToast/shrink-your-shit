@@ -27,7 +27,7 @@ func TestFixedPrefixOfATemplatedFolder(t *testing.T) {
 		"/{{sub}}":                  "",
 		"{{sub}}/out":               "",
 		"/data/out/{{sub}}/":        "/data/out",
-		`C:\out\{{sub}}`:            "C:/out",
+		`C:\out\{{sub}}`:            filepath.ToSlash(`C:\out`), // a Windows path: Clean touches it only on Windows
 		"/data/out/{{file.name}}.d": "/data/out",
 		"/data/out/{{unclosed":      "/data/out",
 		"/other/{{x}}/../../lib":    "/lib", // review-592: cleaned first (and refused before it gets here: hasDotDot)
