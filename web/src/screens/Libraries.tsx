@@ -525,19 +525,22 @@ const sortedJSON = (l: { name: string; value: unknown }[]) => JSON.stringify([..
 function LibraryVars({ v, reload }: { v: Library; reload: () => void }) {
   const noWf = v.status === "no_workflow";
   const pub = useData(() => (noWf ? Promise.resolve(null) : getPublishedDoc(v.workflowId)), [v.workflowId, noWf]);
-  const head = <div className="hd"><h2 id="lv-h">Settings this library can change</h2></div>;
+  // the status lives here, not in the form: a save's reload remounts the form (keyed on the saved values), and "Saved." must survive it
+  const [said, setSaid] = useState("");
+  useEffect(() => setSaid(""), [v.workflowId]);
+  const head =<div className="hd"><h2 id="lv-h">Settings this library can change</h2></div>;
   if (noWf) return <section className="card" aria-labelledby="lv-h">{head}<div className="bd"><p className="muted">Pick a workflow first.</p></div></section>;
   if (!pub.loaded) return <section className="card" aria-labelledby="lv-h">{head}<div className="bd"><p className="muted">Loading…</p></div></section>;
   if (pub.error && !pub.data) return <section className="card" aria-labelledby="lv-h">{head}<div className="bd"><p className="st bad" role="alert"><Icon id="i-alert" /><span>{pub.error.message}</span></p></div></section>;
   const vars = (pub.data?.variables ?? []).filter((x) => x.templateParam && x.type !== "secret"); // the server refuses a library value for a secret
   if (!vars.length) return <section className="card" aria-labelledby="lv-h">{head}<div className="bd"><p className="muted">This library's workflow has nothing a library can change.</p></div></section>;
   // keyed by the saved values: a successful save remounts from the list the server answered with
-  return <LibraryVarsForm key={v.workflowId + sortedJSON(v.variables)} v={v} vars={vars} reload={reload} />;
+  return <LibraryVarsForm key={v.workflowId + sortedJSON(v.variables)} v={v} vars={vars} reload={reload} said={said} setSaid={setSaid} />;
 }
 
-function LibraryVarsForm({ v, vars, reload }: { v: Library; vars: Variable[]; reload: () => void }) {
+function LibraryVarsForm({ v, vars, reload, said, setSaid }: { v: Library; vars: Variable[]; reload: () => void; said: string; setSaid: (s: string) => void }) {
   const [draft, setDraft] = useState<Record<string, Draft>>(() => Object.fromEntries(vars.map((x) => [x.name, draftOf(v.variables.find((o) => o.name === x.name)?.value)])));
-  const [errs, setErrs] = useState<Record<string, string>>({}), [error, setError] = useState(""), [said, setSaid] = useState(""), [busy, setBusy] = useState(false);
+  const [errs, setErrs] = useState<Record<string, string>>({}), [error, setError] = useState(""), [busy, setBusy] = useState(false);
   const set = (name: string, d: Draft) => setDraft((all) => ({ ...all, [name]: d }));
   const toSend = vars.flatMap((x) => { const val = valueOf(x, draft[x.name] ?? null); return val === null ? [] : [{ name: x.name, value: val }]; });
   const changed = sortedJSON(toSend) !== sortedJSON(v.variables.map((o) => ({ name: o.name, value: o.value })));
@@ -589,7 +592,8 @@ function LibraryVarsForm({ v, vars, reload }: { v: Library; vars: Variable[]; re
               {input}
               <span className="hint" id={hint}>Workflow's value: {WORKFLOW_VALUE(x)}.{x.type === "bool" || x.type === "enum" ? "" : " Leave it empty to use the workflow's value."}</span>
               {errs[x.name] && <p className="st bad" id={err} role="alert"><Icon id="i-alert" /><span>{errs[x.name]}</span></p>}
-              <div><button className="btn sm" type="button" disabled={busy || d === null} aria-label={"Use the workflow's value for {{" + x.name + "}}"} onClick={() => set(x.name, null)}>Use the workflow's value</button></div>
+              {/* aria-disabled, not disabled: a disabled button drops focus to the page; clicks are ignored while it is disabled */}
+              <div><button className="btn sm" type="button" aria-disabled={busy || d === null} aria-label={"Use the workflow's value for {{" + x.name + "}}"} onClick={() => { if (!busy && d !== null) set(x.name, null); }}>Use the workflow's value</button></div>
             </div>
           );
         })}
