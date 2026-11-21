@@ -1504,7 +1504,25 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// Slice 13: the original's own report, from the encode that just ran it: the pictures it decoded and the
 	// decode errors it counted. A remote worker's report carries only its error lines, so there is none there.
 	stats, haveReport := sourceReport(src, encLog)
-	vfr := sourceVFR(src, stats, haveReport)
+	// A report that read every packet it decoded can still be short of duration × rate: a demuxer silently
+	// skipped packets (a real loss), or the declared rate is not the stream's real one (a VFR original, which
+	// ffmpeg 8's probe cannot mark in an mkv). The counts cannot tell those apart, the frames' spacing can
+	// (review-588 round 3): a silent skip leaves the interval between the frames that remain, a variable rate
+	// does not. Asked only for that short count; a probe error or too little to judge counts it as loss.
+	shortGuess, shortExact := sourceFrameCount(src)
+	short := haveReport && shortExact && stats.Frames > 0 && stats.Packets <= stats.Frames && stats.Frames < shortGuess
+	followsRate := true
+	if short {
+		tctx, tcancel := context.WithTimeout(ctx, timingTimeout)
+		atRate, terr := media.FramesFollowNominalRate(tctx, w.Exec, w.FFprobe, srcPath, src.MainVideoOrdinal(), nominalFrameRate(src))
+		tcancel()
+		if terr != nil {
+			log.Printf("worker %s: %s: reading the frames' spacing: %v", w.ID, job.Path, terr) // unknown: counts as loss
+		} else {
+			followsRate = atRate
+		}
+	}
+	vfr := sourceVFR(src, followsRate, short)
 	if terr == nil {
 		changed := false
 		if m := plan.MainVideoRules(src, ranOn); m != nil && (exp.MainVideo == nil || *m != *exp.MainVideo) {
@@ -1596,12 +1614,15 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// 180 decoded; the probe cannot mark it on ffmpeg 8). When packets went unread or undecoded the shortfall
 	// against duration × rate is lost frames (a damaged .ts: reads 472 of 500 and decodes 470, so 30 are gone,
 	// review-588 round 2; an edit-list mp4 reads 250 packets and decodes the 240 it presents, which is not loss).
+	// A report that read exactly what it decoded can still be short: the packets a demuxer skipped were never
+	// read (review-588 round 3). That counts when the frames keep the nominal interval (short && followsRate,
+	// decided above), and is the rate, not a loss, when they do not.
 	// Without a report the duration × rate guess decides, and it is no count for a variable-rate original.
 	base := expected // the frames the stream had
 	lost := expected
 	if haveReport {
 		lost = 0
-		if stats.Packets > stats.Frames {
+		if stats.Packets > stats.Frames || (short && followsRate) {
 			lost = expected - stats.Frames
 			if lost < 0 {
 				lost = 0

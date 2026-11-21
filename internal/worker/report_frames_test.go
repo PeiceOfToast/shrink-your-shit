@@ -50,25 +50,24 @@ func TestSourceReportFromTheEncodesLog(t *testing.T) {
 	}
 }
 
-// VFR is marked from the probe's own rates, or from a report that decoded more than 1% away from duration × rate.
-func TestSourceVFROnlyWhenTheRatesOrTheCountDisagree(t *testing.T) {
+// VFR is marked from the probe's own rates, or from a report's short count whose frames do not follow the
+// stream's nominal interval. A short count from frames that do keep it is a silent skip: loss, not a rate.
+func TestSourceVFRWhenTheProbeMarkedItOrTheShortCountIsNotLoss(t *testing.T) {
 	cfr := media.Info{DurationSec: 100, Streams: []media.Stream{{Index: 0, Type: "video", FrameRate: 25}}}
 	vfrProbe := media.Info{DurationSec: 100, Streams: []media.Stream{{Index: 0, Type: "video", FrameRate: 25, VFR: true}}}
 	for _, c := range []struct {
-		name string
-		src  media.Info
-		st   media.StreamStats
-		have bool
-		want bool
+		name           string
+		src            media.Info
+		short, follows bool
+		want           bool
 	}{
-		{"probe mark, no report", vfrProbe, media.StreamStats{}, false, true},
-		{"report 10% short of duration × rate", cfr, media.StreamStats{Frames: 2250}, true, true},
-		{"report 10% over duration × rate", cfr, media.StreamStats{Frames: 2750}, true, true},
-		{"report within 1%", cfr, media.StreamStats{Frames: 2520}, true, false},
-		{"steady rate, no report", cfr, media.StreamStats{}, false, false},
-		{"no video", media.Info{}, media.StreamStats{Frames: 10}, true, false},
+		{"probe mark", vfrProbe, false, true, true},
+		{"short count, frames off the nominal rate", cfr, true, false, true},
+		{"short count, frames keep the nominal rate (a silent skip)", cfr, true, true, false},
+		{"not short", cfr, false, true, false},
+		{"no video", media.Info{}, false, true, false},
 	} {
-		if got := sourceVFR(c.src, c.st, c.have); got != c.want {
+		if got := sourceVFR(c.src, c.follows, c.short); got != c.want {
 			t.Errorf("%s: VFR %v, want %v", c.name, got, c.want)
 		}
 	}
@@ -175,22 +174,45 @@ func TestEncodeReportKeepsFramesTheStreamLost(t *testing.T) {
 }
 
 // An mkv whose header states a steady rate and a duration its timestamps do not keep: the probe's average and
-// nominal rate can agree (ffmpeg 8: they do), so the probe cannot mark it VFR; the stream read exactly what it
-// decoded, so no frames were lost and it converts (review-588 round 2, F1). On the first head it was kept for
-// the 89 frames its duration × rate guessed and the rate-based excuse never ran.
-func TestAShortSteadyLookingOriginalThatReadWhatItDecodedIsNotKept(t *testing.T) {
+// nominal rate agree (ffmpeg 8: they do), so the probe cannot mark it VFR; the stream read exactly what it
+// decoded, so no packets were skipped. Only the frames' spacing says it: they do not sit at the declared
+// interval, so the short count is its rate, not loss, and it converts (review-588 rounds 2 and 3).
+func TestAnOriginalWhoseFramesDoNotFollowItsRateIsNotKept(t *testing.T) {
 	s := newScenario(t)
 	s.srcSpec.streams[0]["duration"] = "130.000000" // 130 s × 20 = 2600 guessed, 2000 decoded
 	s.srcSpec.streams[0]["r_frame_rate"] = "20/1"
 	s.srcSpec.streams[0]["avg_frame_rate"] = "20/1" // equal: the probe sees a steady rate
 	s.srcPackets, s.outPackets = 2600, 2000
-	s.encodeStderr = inputReport(2000, 2000, 0) // read 2000 packets, decoded 2000: nothing lost
+	s.encodeStderr = inputReport(2000, 2000, 0) // read 2000 packets, decoded 2000: nothing skipped
+	s.srcPts = ptsLines(2000, 0.065)            // 0.05 s is the nominal interval; these frames are not at it
 	s.run(Replace)
 	if j := s.job(); j.Status != jobs.Done {
-		t.Fatalf("status %s (error %q), want done: a stream that read what it decoded lost no frames", j.Status, j.Error)
+		t.Fatalf("status %s (error %q), want done: the frames do not follow the rate, so the short count is not loss", j.Status, j.Error)
 	}
 	if !s.logHas(0, "app", "variable frame rate") {
 		t.Error("want the variable frame rate line in the job log")
+	}
+}
+
+// A demuxer that silently skipped packets: the encode reads exactly what it decodes (2400 of the 2500 frames
+// 100 s × 25 has), no error is printed, the output keeps the full length, and the probe's rates agree. Every
+// count says "fine" — but the remaining frames still sit at the 25 fps interval, with gaps where the skipped
+// ones were, so 100 frames are lost: 4%, over tolerance, and the original is kept (review-588 round 3).
+func TestASilentlySkippedStreamIsKept(t *testing.T) {
+	s := newScenario(t)
+	s.srcSpec.streams[0]["duration"] = "100.000000" // 100 s × 25 = 2500
+	s.srcPackets, s.outPackets = 2500, 2400
+	s.encodeStderr = inputReport(2400, 2400, 0) // read 2400, decoded 2400: the 100 were never read
+	s.srcPts = ptsSkipped(2400, 25, 0.04)       // the frames that remain keep the 25 fps interval
+	s.run(Replace)
+	s.assertKept("the original file has errors")
+	for _, want := range []string{
+		"100 of 2500 frames were not decoded",
+		"Errors: 100 damaged pictures of 2500 frames (4.00%); up to 1% are tolerated",
+	} {
+		if !s.logHas(1, "check", want) {
+			t.Errorf("check log lacks %q:\n%s", want, logTextOf(s.store, s.id))
+		}
 	}
 }
 
@@ -220,6 +242,7 @@ func TestAVFRSourceIsNotKeptForItsShortCount(t *testing.T) {
 	s.srcSpec.streams[0]["avg_frame_rate"] = "20/1" // more than 1% apart: the probe marks it VFR
 	s.srcPackets, s.outPackets = 2600, 2000
 	s.encodeStderr = inputReport(2000, 2000, 0)
+	s.srcPts = ptsLines(2000, 0.07) // the frames are not at the 30 fps interval either
 	s.run(Replace)
 	if j := s.job(); j.Status != jobs.Done {
 		t.Fatalf("status %s (error %q), want done: a VFR original's short count is not damage", j.Status, j.Error)

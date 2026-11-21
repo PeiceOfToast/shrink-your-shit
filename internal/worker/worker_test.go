@@ -100,6 +100,7 @@ type scenario struct {
 	outProbeRaw            string // if set, the new file's ffprobe answer is exactly this (to test garbage)
 	srcProbeFails          bool
 	srcPackets, outPackets int
+	srcPts                 string // the original's packet timestamps (ffprobe csv); "" is a steady 25 fps
 	content                string // what the fake encoder writes
 	encodeErr              error
 	failAllEncodes         bool                                  // every encode fails, the processor's retry too
@@ -167,6 +168,26 @@ func (s *scenario) has(args []string, want string) bool {
 	return false
 }
 
+// ptsLines is ffprobe's packet=pts_time answer for n frames spaced step seconds apart.
+func ptsLines(n int, step float64) string {
+	return ptsSkipped(n, 0, step)
+}
+
+// ptsSkipped spaces n frames step seconds apart with every every-th one missing, so its gap is doubled: what
+// a demuxer that silently skipped packets leaves behind (every 0: nothing missing).
+func ptsSkipped(n, every int, step float64) string {
+	var b strings.Builder
+	at := 0.0
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&b, "%.6f\n", at)
+		at += step
+		if every > 0 && i%every == every-1 {
+			at += step
+		}
+	}
+	return b.String()
+}
+
 func (s *scenario) handle(name string, args []string) (string, string, error) {
 	s.mu.Lock()
 	s.calls = append(s.calls, name+" "+strings.Join(args, " "))
@@ -180,6 +201,12 @@ func (s *scenario) handle(name string, args []string) (string, string, error) {
 				return fmt.Sprint(s.srcPackets), "", nil
 			}
 			return fmt.Sprint(s.outPackets), "", nil
+		}
+		if isSrc && s.has(args, "packet=pts_time") { // the frames' spacing (FramesFollowNominalRate)
+			if s.srcPts != "" {
+				return s.srcPts, "", nil
+			}
+			return ptsLines(s.srcPackets, 0.04), "", nil // a steady 25 fps
 		}
 		if isSrc {
 			if s.srcProbeFails {

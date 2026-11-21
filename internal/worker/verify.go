@@ -37,6 +37,7 @@ const (
 var (
 	quickTimeout  = 60 * time.Second // ffprobe of one file, listing filters
 	countTimeout  = 30 * time.Minute // reading every packet of a very large file
+	timingTimeout = 5 * time.Minute  // the first few thousand packets' timestamps, to read a stream's frame spacing
 	sampleTimeout = 10 * time.Minute // one sampled playback or picture comparison
 	// a full playback gets 10 minutes plus twice the file's length, but never more than 6 hours
 	fullDecodeBase, fullDecodeCap = 10 * time.Minute, 6 * time.Hour
@@ -775,18 +776,29 @@ func sourceReport(src media.Info, log string) (st media.StreamStats, have bool) 
 }
 
 // sourceVFR says whether the original's video looks variable frame rate (slice 13): the probe's own mark
-// (average and nominal rates more than 1% apart), or, when the encode reported it, a decoded count more
-// than 1% away from duration × rate. The second catches an mkv, where ffprobe reports the nominal rate as
-// the average, so the first cannot see it.
-func sourceVFR(src media.Info, st media.StreamStats, haveReport bool) bool {
+// (average and nominal rates more than 1% apart), or a report that decoded short of duration × rate from a
+// stream whose frames do not follow its nominal interval.
+//
+// The second catches an mkv, where ffprobe reports the nominal rate as the average, so the first cannot see
+// it — and only the frames' own spacing separates it from packets a demuxer silently skipped: those frames
+// keep the interval, so their short count is loss, not a rate (review-588 round 3).
+func sourceVFR(src media.Info, framesFollowRate, reportedShort bool) bool {
 	if v := src.Video(); v != nil && v.VFR {
 		return true
 	}
-	if !haveReport {
-		return false
+	return reportedShort && !framesFollowRate
+}
+
+// nominalFrameRate is the main video stream's declared frame rate, or its average when it declares none (0
+// when there is no video): the interval FramesFollowNominalRate measures the frames' spacing against.
+func nominalFrameRate(src media.Info) float64 {
+	if k := src.MainVideoIndex(); k >= 0 {
+		if n := src.Streams[k].NominalFrameRate; n > 0 {
+			return n
+		}
+		return src.Streams[k].FrameRate
 	}
-	want, _ := sourceFrameCount(src)
-	return want > 0 && math.Abs(float64(st.Frames-want)) > 0.01*float64(want)
+	return 0
 }
 
 // checkedFrames is the main video frame count the new file is checked against (slice 13). The encode's own

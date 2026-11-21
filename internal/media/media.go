@@ -13,6 +13,7 @@ import (
 	"math"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -389,6 +390,48 @@ func LeadingUndecodable(ctx context.Context, x Exec, ffprobe, path string, n int
 		}
 	}
 	return 0, nil
+}
+
+// timingPackets bounds how many packets FramesFollowNominalRate reads: the share is a sample, and a few
+// thousand gaps carry it.
+const timingPackets = 4000
+
+// FramesFollowNominalRate says whether the n-th video stream's frames are spaced at its declared (nominal)
+// frame interval: more than two thirds of the gaps between consecutive frames are within 10% of 1/nominal.
+//
+// It tells the two streams whose report reads exactly what it decodes yet comes up short of duration × rate
+// apart (review-588 round 3). A demuxer that silently skipped packets leaves gaps where packets are missing
+// and keeps the interval between the frames that remain, so the share stays high: those frames are lost. A
+// variable-rate stream's declared rate is not its real one, so most of its frames sit elsewhere: nothing is
+// lost, its count for the encoding is simply shorter. Steadiness is also true when there is too little to
+// judge (probe error, fewer than two frames, no nominal rate): the caller counts the shortfall, and a false
+// refusal is cheaper than a lost original.
+func FramesFollowNominalRate(ctx context.Context, x Exec, ffprobe, path string, n int, nominal float64) (bool, error) {
+	if nominal <= 0 {
+		return true, nil
+	}
+	out, err := x.Output(ctx, ffprobe, "-v", "error", "-select_streams", fmt.Sprintf("v:%d", n),
+		"-read_intervals", fmt.Sprintf("%%+#%d", timingPackets), "-show_entries", "packet=pts_time", "-of", "csv=p=0", path)
+	if err != nil {
+		return false, err
+	}
+	ts := make([]float64, 0, 1024)
+	for _, line := range strings.Split(string(out), "\n") {
+		if t, ok := csvTime(line); ok {
+			ts = append(ts, t)
+		}
+	}
+	if len(ts) < 2 {
+		return true, nil
+	}
+	sort.Float64s(ts)
+	step, at := 1/nominal, 0
+	for i := 1; i < len(ts); i++ {
+		if d := ts[i] - ts[i-1]; d > 0 && math.Abs(d-step) <= 0.1*step {
+			at++
+		}
+	}
+	return at*3 >= (len(ts)-1)*2, nil
 }
 
 // csvTime reads one pts_time field (seconds, a trailing comma allowed); N/A or junk is not a time.
