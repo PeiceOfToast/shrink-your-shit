@@ -156,6 +156,71 @@ func TestResolveRefusesWhatDoesNotFit(t *testing.T) {
 	}
 }
 
+// W1 fix (found on the live server): a variable's value is the text a person typed, and Quality's
+// choices are the numbers 1-5, so {{level}} with "4" has to fill it. A setting that wants a number
+// takes a number written as text, and the plan is the one the number typed straight in makes.
+func TestANumericTextVariableFillsANumberSetting(t *testing.T) {
+	ref := qualityDoc([]Variable{{Name: "level", Type: "string", Value: "4"}}, "{{level}}")
+	got, issues := Resolve(ref)
+	if len(issues) != 0 {
+		t.Fatalf("issues %+v, want none", issues)
+	}
+	if v := configOf(t, &got, TypeConvert)["quality"]; !reflect.DeepEqual(v, float64(4)) {
+		t.Errorf("quality %#v, want the number 4", v)
+	}
+	if r := Validate(ref); r.Errors() {
+		t.Errorf("Validate refused it: %+v", r.Issues)
+	}
+	tm, is := ToTemplate(ref, rules.Template{})
+	if len(is) > 0 {
+		t.Fatalf("%+v", is)
+	}
+	literal, is := ToTemplate(qualityDoc(nil, 4), rules.Template{})
+	if len(is) > 0 {
+		t.Fatalf("%+v", is)
+	}
+	for i, info := range files() {
+		if f, w := (rules.Snapshot{Plan: tm.Compile(info)}).Fingerprint(), (rules.Snapshot{Plan: literal.Compile(info)}).Fingerprint(); f != w {
+			t.Errorf("file %d: the plan of {{level}} \"4\" is %s, the literal 4's is %s", i, f, w)
+		}
+	}
+
+	// a whole number setting takes one only whole, and text that isn't a number is still refused
+	for _, bad := range []string{"4.5", "abc"} {
+		d := qualityDoc([]Variable{{Name: "level", Type: "string", Value: bad}}, "{{level}}")
+		_, issues := Resolve(d)
+		if len(issues) != 1 || issues[0].Code != "variable_wrong_type" {
+			t.Errorf("%q for Quality: %+v, want one variable_wrong_type", bad, issues)
+		}
+	}
+
+	// a number setting takes a decimal written as text
+	filter := docWith([]Variable{{Name: "rate", Type: "string", Value: "23.976"}}, nil)
+	filter.Nodes = append(filter.Nodes, Node{ID: "f1", Type: TypeCheck, TypeVersion: 1, Enabled: true,
+		Config: map[string]any{"fps": "{{rate}}"}})
+	if got, issues := Resolve(filter); len(issues) != 0 {
+		t.Errorf("a decimal for fps: %+v", issues)
+	} else if v := configOf(t, &got, TypeCheck)["fps"]; !reflect.DeepEqual(v, float64(23.976)) {
+		t.Errorf("fps %#v, want 23.976", v)
+	}
+
+	// and a choice variable whose options are text fills Quality too
+	choice := mustResolve(t, qualityDoc([]Variable{{Name: "level", Type: "enum", Options: []string{"1", "2", "3", "4", "5"}, Value: "4"}}, "{{level}}"))
+	if v := configOf(t, &choice, TypeConvert)["quality"]; !reflect.DeepEqual(v, float64(4)) {
+		t.Errorf("a choice variable's quality is %#v, want the number 4", v)
+	}
+}
+
+// mustResolve is Resolve for a doc that has no issues.
+func mustResolve(t *testing.T, d Doc) Doc {
+	t.Helper()
+	got, issues := Resolve(d)
+	if len(issues) > 0 {
+		t.Fatalf("%+v", issues)
+	}
+	return got
+}
+
 // A workflow with no references is untouched: same doc, same logic hash, and the same plan fingerprint
 // for every file as the build before W1 (the fingerprints were taken from a699472c, with the preset and
 // a variable nothing uses).
