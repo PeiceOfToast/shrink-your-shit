@@ -134,7 +134,7 @@ func TestEncodeReportIsTheDamage(t *testing.T) {
 	s := newScenario(t)
 	s.encodeStderr = inputReport(2500, 2500, 40)
 	s.run(Replace)
-	s.assertKept("the original file has errors")
+	s.assertKept("the original file has errors", "source_damaged")
 	for _, want := range []string{
 		"Errors: 40 damaged pictures of 2500 frames (1.60%); up to 1% are tolerated",
 		"40 decode errors in the original's video, as ffmpeg counted them",
@@ -150,7 +150,7 @@ func TestNoReportKeepsTheOldFrameCheck(t *testing.T) {
 	s := newScenario(t)
 	s.srcPackets, s.outPackets = 2500, 2400 // no report line, no damage text: today's count decides
 	s.run(Replace)
-	s.assertKept("the new file has 2400 video frames but the original has 2500")
+	s.assertKept("the new file has 2400 video frames but the original has 2500", "check_differs")
 }
 
 // A steady-rate original whose decode took fewer frames than it read did lose them: the report's packets and
@@ -162,7 +162,7 @@ func TestEncodeReportKeepsFramesTheStreamLost(t *testing.T) {
 	s.srcPackets, s.outPackets = 2500, 2450
 	s.encodeStderr = inputReport(2500, 2450, 0)
 	s.run(Replace)
-	s.assertKept("the original file has errors")
+	s.assertKept("the original file has errors", "source_damaged")
 	for _, want := range []string{
 		"50 of 2500 frames were not decoded",
 		"Errors: 50 damaged pictures of 2500 frames (2.00%); up to 1% are tolerated",
@@ -205,7 +205,7 @@ func TestASilentlySkippedStreamIsKept(t *testing.T) {
 	s.encodeStderr = inputReport(2400, 2400, 0) // read 2400, decoded 2400: the 100 were never read
 	s.srcPts = ptsSkipped(2400, 25, 0.04)       // the frames that remain keep the 25 fps interval
 	s.run(Replace)
-	s.assertKept("the original file has errors")
+	s.assertKept("the original file has errors", "source_damaged")
 	for _, want := range []string{
 		"100 of 2500 frames were not decoded",
 		"Errors: 100 damaged pictures of 2500 frames (4.00%); up to 1% are tolerated",
@@ -263,7 +263,7 @@ func TestASmallRateMismatchDoesNotDropLostFrames(t *testing.T) {
 	s.srcPackets, s.outPackets = 2550, 2500
 	s.encodeStderr = inputReport(2550, 2500, 0) // 50 packets read and not decoded, no error text
 	s.run(Replace)
-	s.assertKept("the original file has errors")
+	s.assertKept("the original file has errors", "source_damaged")
 	for _, want := range []string{
 		"50 of 2550 frames were not decoded",
 		"Errors: 50 damaged pictures of 2550 frames (1.96%); up to 1% are tolerated",

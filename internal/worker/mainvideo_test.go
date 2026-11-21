@@ -77,9 +77,9 @@ func TestCheckJudgesTheDepthOfTheEncoderThatRan(t *testing.T) {
 		{name: "the card makes 8 bits", gpu: "h264_qsv", pix: "yuv420p", done: true},
 		{name: "the processor makes 10 bits", gpu: "", pix: "yuv420p10le", done: true},
 		{name: "the card's 10-bit file is not what it makes", gpu: "h264_qsv", pix: "yuv420p10le",
-			words: "the colour depth is 10-bit; h264_qsv makes 8-bit for this file"},
+			words: "the colour depth is 10-bit, but h264_qsv makes 8-bit for this file"},
 		{name: "the processor's 8-bit file is not what it makes", gpu: "", pix: "yuv420p",
-			words: "the colour depth is 8-bit; the processor makes 10-bit for this file"},
+			words: "the colour depth is 8-bit, but the processor makes 10-bit for this file"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			s := newScenario(t)

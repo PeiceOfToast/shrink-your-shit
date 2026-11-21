@@ -25,6 +25,7 @@ export interface JobItem {
   pin?: Pin | null;          // #143: a single file put first or last (Jobs' Change priority); wins over library priority
   position?: number | null; // #134, Waiting tab: place in the queue (1: taken next); null when it isn't taken now
   reason?: Reason | null; skippedId?: ID; // #130: {code, message} on every row (code for icon/colour; show the message)
+  newFileRefused?: boolean; // a check refused the new file, so the original was kept: a failed job that reads "Original kept" (dev 6ca34b87)
   // running
   progress?: Progress; worker?: string; convertingTo?: string; encoder?: string; decoder?: string; percent?: number; etaSeconds?: number; fps?: number; bitrateKbps?: number;
   // done
@@ -45,6 +46,7 @@ export interface JobDetail {
   // #163: a Done job converts again from its original, when the server says it can; else why not (its own words)
   convertAgain?: { possible: boolean; reason: { code: string; message: string; deletedAt: Time | null } | null };
   warning?: string | null; // the words of an encoder_fallback step (#323), else of a media_refresh step that warned (#333); the state stays
+  newFileRefused?: boolean; // as on the list item: the original was kept because a check refused the new file
 }
 export interface Probe { container?: string; videoCodec?: string; bitrateKbps?: number; durationSec?: number; sizeBytes?: number;
   // frameRate, bitDepth, colorTransfer, dolbyVision: the scan's video stream fields (workshop, 11-13 01:24Z)

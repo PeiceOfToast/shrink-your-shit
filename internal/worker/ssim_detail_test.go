@@ -58,7 +58,7 @@ func TestSSIMRefusalLogsItsEvidence(t *testing.T) {
 	s.ssimStderr = "[Parsed_ssim_0] SSIM Y:0.50 U:0.50 V:0.50 All:0.500000 (3.0)"
 	s.ssimStats = "n:1 Y:0.5 U:0.5 V:0.5 All:0.500000 (3.0)\nn:2 Y:0.2 U:0.2 V:0.2 All:0.200000 (1.0)\n"
 	s.run(Replace)
-	s.assertKept("too different")
+	s.assertKept("too different", "kept_original")
 	lines, _ := s.store.LogLines(s.id)
 	var check []string
 	for _, l := range lines {
@@ -82,7 +82,7 @@ func TestKeptAttemptClearsAnEarlierFailure(t *testing.T) {
 	}
 	s.ssimStderr = "[Parsed_ssim_0] SSIM Y:0.50 U:0.50 V:0.50 All:0.500000 (3.0)"
 	s.run(Replace)
-	s.assertKept("too different")
+	s.assertKept("too different", "kept_original")
 	if f, err := s.store.FailureOf(s.id); err != nil || f != nil {
 		t.Errorf("kept attempt shows an earlier failure %+v (err %v)", f, err)
 	}

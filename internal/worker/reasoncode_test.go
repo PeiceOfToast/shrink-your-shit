@@ -39,3 +39,13 @@ func TestEveryReasonCodeIsAKnownOne(t *testing.T) {
 		t.Error("stalled is not listed")
 	}
 }
+
+// Each reason a kept original can have is a known code (slice 14): the new three, and the two source codes a
+// refusal of the original now stores, so they show as they do for a failed job.
+func TestRefusalCodesAreKnownOnes(t *testing.T) {
+	for _, code := range []string{"check_differs", "output_damaged", "check_not_run", "source_damaged", "source_missing"} {
+		if !slices.Contains(jobs.JobReasonCodes, code) {
+			t.Errorf("%s is not in JobReasonCodes", code)
+		}
+	}
+}

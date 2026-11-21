@@ -272,18 +272,19 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 			return
 		}
 		var in struct {
-			OK      bool
-			SHA256  string
-			Bytes   int64
-			Subs    map[string]string // index -> sha256
-			Kept    string            // its checks said no (the words)
-			Message string            // it failed: why
-			Stderr  string
-			Code    string   // its failure's code, when not the general one (slice 15); "" from an older worker
-			Args    []string // the ffmpeg arguments it ran
-			Steps   []jobs.RunStep
-			Failure *jobs.FailureSummary
-			Info    *media.Info // its probe of the new file it made (foundation slice 4); nil from an older worker
+			OK       bool
+			SHA256   string
+			Bytes    int64
+			Subs     map[string]string // index -> sha256
+			Kept     string            // its checks said no (the words)
+			KeptCode string            `json:"kept_code"` // the code of that refusal (slice 14); absent from an older worker
+			Message  string            // it failed: why
+			Stderr   string
+			Code     string   // its failure's code, when not the general one (slice 15); "" from an older worker
+			Args     []string // the ffmpeg arguments it ran
+			Steps    []jobs.RunStep
+			Failure  *jobs.FailureSummary
+			Info     *media.Info // its probe of the new file it made (foundation slice 4); nil from an older worker
 		}
 		if !readJSON(w, r, &in) {
 			return
@@ -302,6 +303,7 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 		switch {
 		case in.Kept != "":
 			res.Kept = in.Kept
+			res.KeptCode = in.KeptCode
 		case !in.OK:
 			msg := in.Message
 			if msg == "" {

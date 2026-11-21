@@ -241,7 +241,7 @@ func (c *Client) workOne(ctx context.Context, cv Converter) (did bool, err error
 	if err != nil {
 		var k *worker.KeptError
 		if errors.As(err, &k) {
-			body := map[string]any{"kept": k.Reason, "stderr": stderr, "steps": steps, "args": ran}
+			body := map[string]any{"kept": k.Reason, "kept_code": k.Code, "stderr": stderr, "steps": steps, "args": ran}
 			// the probe the check read: the job's output_info (foundation slice 4). A worker built before
 			// that field sends none, and the server's own check measures the uploaded file instead.
 			if info.Video() != nil {

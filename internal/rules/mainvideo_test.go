@@ -58,7 +58,7 @@ func TestMainVideoIsJudgedByItsRules(t *testing.T) {
 			out: mainVideoOutput(mainVideoSource(1920, 1080, 8), "hevc", 854, 480, 8), pass: true},
 		{name: "640x480 fails when 854x480 was planned", src: mainVideoSource(1920, 1080, 8), plan: scale, gpu: card,
 			out:   mainVideoOutput(mainVideoSource(1920, 1080, 8), "hevc", 640, 480, 8),
-			words: []string{"the picture size changed to 640x480; the plan makes it 480 lines high with the original's shape (854x480, ±2)"}},
+			words: []string{"the picture size changed to 640x480, but the plan makes it 480 lines high with the original's shape (854x480, ±2)"}},
 		{name: "855x480 is odd and fails", src: mainVideoSource(1920, 1080, 8), plan: scale, gpu: card,
 			out:   mainVideoOutput(mainVideoSource(1920, 1080, 8), "hevc", 855, 480, 8),
 			words: []string{"855x480", "an even width"}},
@@ -67,21 +67,21 @@ func TestMainVideoIsJudgedByItsRules(t *testing.T) {
 			words: []string{"the picture size changed to 854x482", "480 lines high"}},
 		{name: "h264 for an HEVC plan fails", src: mainVideoSource(1920, 1080, 8), plan: hevc8, gpu: "",
 			out:   mainVideoOutput(mainVideoSource(1920, 1080, 8), "h264", 1920, 1080, 8),
-			words: []string{"the video format is h264; the plan makes hevc"}},
+			words: []string{"the video format is h264, but the plan makes hevc"}},
 
 		// #498 and #507: 10-bit SDR source, HEVC on a card. The card makes main10; an 8-bit file is wrong.
 		{name: "10-bit SDR on a card: 10-bit passes", src: mainVideoSource(1920, 1080, 10), plan: hevc10, gpu: card,
 			out: mainVideoOutput(mainVideoSource(1920, 1080, 10), "hevc", 1920, 1080, 10), pass: true},
 		{name: "10-bit SDR on a card: 8-bit fails", src: mainVideoSource(1920, 1080, 10), plan: hevc10, gpu: card,
 			out:   mainVideoOutput(mainVideoSource(1920, 1080, 10), "hevc", 1920, 1080, 8),
-			words: []string{"the colour depth is 8-bit; hevc_qsv makes 10-bit for this file"}},
+			words: []string{"the colour depth is 8-bit, but hevc_qsv makes 10-bit for this file"}},
 
 		// The same 10-bit source to H.264: the processor keeps its depth, the card makes 8 bits.
 		{name: "10-bit source on the processor to H.264: 10-bit expected", src: mainVideoSource(1920, 1080, 10), plan: h264Ten, gpu: "",
 			out: mainVideoOutput(mainVideoSource(1920, 1080, 10), "h264", 1920, 1080, 10), pass: true},
 		{name: "10-bit source on the processor to H.264: 8-bit fails", src: mainVideoSource(1920, 1080, 10), plan: h264Ten, gpu: "",
 			out:   mainVideoOutput(mainVideoSource(1920, 1080, 10), "h264", 1920, 1080, 8),
-			words: []string{"the colour depth is 8-bit; the processor makes 10-bit for this file"}},
+			words: []string{"the colour depth is 8-bit, but the processor makes 10-bit for this file"}},
 		{name: "10-bit source to H.264 on a card: 8-bit is right", src: mainVideoSource(1920, 1080, 10), plan: h264Ten, gpu: "h264_qsv",
 			out: mainVideoOutput(mainVideoSource(1920, 1080, 10), "h264", 1920, 1080, 8), pass: true},
 
@@ -90,21 +90,21 @@ func TestMainVideoIsJudgedByItsRules(t *testing.T) {
 			out: mainVideoOutput(mainVideoSource(1920, 1080, 8), "hevc", 1920, 1080, 8), pass: true},
 		{name: "8-bit source: 10-bit fails", src: mainVideoSource(1920, 1080, 8), plan: hevc8, gpu: card,
 			out:   mainVideoOutput(mainVideoSource(1920, 1080, 8), "hevc", 1920, 1080, 10),
-			words: []string{"the colour depth is 10-bit; hevc_qsv makes 8-bit"}},
+			words: []string{"the colour depth is 10-bit, but hevc_qsv makes 8-bit"}},
 
 		// Unscaled: the source's own size, exactly (a 1088 picture is another picture).
 		{name: "unscaled 1920x1080 passes", src: mainVideoSource(1920, 1080, 8), plan: hevc8, gpu: "",
 			out: mainVideoOutput(mainVideoSource(1920, 1080, 8), "hevc", 1920, 1080, 8), pass: true},
 		{name: "unscaled 1920x1080 made 1920x1088 fails", src: mainVideoSource(1920, 1080, 8), plan: hevc8, gpu: "",
 			out:   mainVideoOutput(mainVideoSource(1920, 1080, 8), "hevc", 1920, 1088, 8),
-			words: []string{"the picture size changed to 1920x1088; the plan makes it 1080 lines high"}},
+			words: []string{"the picture size changed to 1920x1088, but the plan makes it 1080 lines high"}},
 
 		// A rotated phone video: ffmpeg encodes the upright picture, so 1920x1080 coded ±90° is 1080x1920.
 		{name: "rotated phone video: the swapped size passes", src: rotatedSource(), plan: hevc8, gpu: "",
 			out: mainVideoOutput(rotatedSource(), "hevc", 1080, 1920, 8), pass: true},
 		{name: "rotated phone video: the coded size fails", src: rotatedSource(), plan: hevc8, gpu: "",
 			out:   mainVideoOutput(rotatedSource(), "hevc", 1920, 1080, 8),
-			words: []string{"the picture size changed to 1920x1080; the plan makes it 1920 lines high with the original's shape (1080x1920, ±2)"}},
+			words: []string{"the picture size changed to 1920x1080, but the plan makes it 1920 lines high with the original's shape (1080x1920, ±2)"}},
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
