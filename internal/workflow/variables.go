@@ -338,6 +338,11 @@ func checkTemplate(n Node, field, title, t string, own []string, secrets map[str
 			continue
 		}
 		seen[r.Name] = true
+		if _, reserved := ReservedNames[r.Name]; reserved { // W2 (#596 review): the file's own values fill a whole setting, never text; at run time the name would come out as nothing
+			out = append(out, Issue{Code: "unknown_variable", Severity: "error", NodeID: n.ID, ConfigPath: "/" + field, Field: field, Name: r.Name,
+				Message: fmt.Sprintf("In “%s”, {{%s}} is one of the file's own values, which can fill a whole setting but not text, so here it would come out as nothing. Remove it, or give the whole setting to it.", title, r.Name)})
+			continue
+		}
 		i := Issue{Code: "unknown_variable", Severity: "error", NodeID: n.ID, ConfigPath: "/" + field, Field: field, Name: r.Name,
 			Message: fmt.Sprintf("In “%s”, {{%s}} is not a variable of this workflow, so it would come out as nothing. ", title, r.Name)}
 		if s := closestName(r.Name, known); s != "" {

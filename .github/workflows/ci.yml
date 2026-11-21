@@ -142,6 +142,9 @@ jobs:
       - name: typecheck
         working-directory: web
         run: npm run typecheck
+      - name: tests (node --test; the typed-setting picker's fit table)
+        working-directory: web
+        run: npm test
       - name: build (into internal/web/next/dist)
         working-directory: web
         run: npm run build

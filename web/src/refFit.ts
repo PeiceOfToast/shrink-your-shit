@@ -26,10 +26,12 @@ export type RefVar = { type?: string; value: string | null; file?: boolean };
 // - a variable with no value yet is refused (a file value's is simply not known here, and passes on kind);
 // - a number setting, or a choice of numbers, takes a number or text that reads as one (whole, for integer);
 // - a yes/no setting takes yes/no; a text setting takes text (a number or yes/no won't do);
-// - a choice setting takes a value that is one of its choices, when the value is known.
+// - a choice setting takes a value that is one of its choices, when the value is known;
+// - a list or group setting (array, object) never takes a variable.
 export function refProblem(s: JSONSchema, v: RefVar): string {
   const kind = kindOf(v.type);
   if (!kind) return "a secret can't set this";
+  if (s.type === "array" || s.type === "object") return "a list setting can't take a variable"; // typeMatches refuses a scalar there
   if (v.value == null && !v.file) return "has no value yet";
   const choices = s.enum as unknown[] | undefined;
   const numeric = s.type === "integer" || s.type === "number" || (!!choices?.length && choices.some((c) => typeof c === "number"));
@@ -45,7 +47,8 @@ export function refProblem(s: JSONSchema, v: RefVar): string {
   if (!numeric) {
     if (s.type === "boolean" && kind !== "boolean") return kindWords(v.type) + " won't fit here";
     if (s.type === "string" && kind !== "string") return kindWords(v.type) + " won't fit here";
-    if (!s.type && choices?.length && kind === "boolean" && !choices.some((c) => typeof c === "boolean")) return "yes or no won't fit here";
+    // a choice of text takes text: the server compares a number with a text choice as different values (sameValue)
+    if (!s.type && choices?.length && kind !== "string" && !choices.some((c) => typeof c === (kind === "boolean" ? "boolean" : "number"))) return kindWords(v.type) + " won't fit here";
   }
   if (choices?.length && v.value != null && !choices.some((c) => (typeof c === "number" ? c === value : typeof c === "boolean" ? String(c) === v.value : c === v.value))) return "isn't one of the choices";
   return "";
