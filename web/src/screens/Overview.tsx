@@ -28,9 +28,6 @@ const left = (s: number | null) => (s == null ? "not known yet" : s < 90 ? "unde
 const perGB = (s: number | null) => (s == null ? "not recorded" : s < 60 ? Math.round(s) + " s" : Math.floor(s / 60) + " min" + (Math.round(s % 60) ? " " + Math.round(s % 60) + " s" : ""));
 const dayName = (d: string) => new Date(d + "T12:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" }).replace(" ", "\u00a0"); // "Nov 20" never splits
 
-function Bar({ p, label }: { p: number | null; label?: string }) {
-  return <div className="prog"><div className="bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={p ?? undefined} aria-label={label ?? (p == null ? "Progress not known" : p + "%")}><i style={{ width: (p ?? 0) + "%" }} /></div><span className="num">{p == null ? "" : p + "%"}</span></div>;
-}
 
 type Day = O["daily"][number];
 type Series = { label: string; color: string; value: (d: Day) => number };
@@ -106,14 +103,14 @@ export function Overview() {
   const hideHealth = () => { setHidKey(failKey); try { localStorage.setItem(HEALTH_HIDDEN, failKey); } catch { /* hidden for this visit only */ }
     const h = document.querySelector<HTMLElement>(".pagehead h1"); if (h) { h.tabIndex = -1; h.focus(); } }; // the button goes away: focus the heading, as Workers does
   const o = useData(getOverview, [], 15000), sum = useData<{ last24h: { failed: number } }>(() => (MOCK ? Promise.resolve(summary(mockState())) : getSummary()), [], 30000);
-  const [live, setLive] = useState<Record<string, Partial<OverviewJob>>>({}), [said, setSaid] = useState("");
+  const [live, setLive] = useState<Record<string, Partial<OverviewJob> & { stage?: string }>>({}), [said, setSaid] = useState("");
   const reload = useRef(o.reload); reload.current = () => (o.reload(), wl.reload());
   useEffect(() => {
     let t: ReturnType<typeof setTimeout> | undefined, clear = false;
     return onLive((type, data) => {
       // CT 124 flicker (manager row 11-18): a progress event's unknown (null) figure never hides one already known, and the
       // 5 s worker.heartbeat refreshes the figures without dropping the live progress; a job or library change does drop it
-      if (type === "job.progress") { const e = data as JobProgressEvent, p = { percent: e.progress.percent, fps: e.progress.fps, speed: e.progress.speed, etaS: e.progress.etaS };
+      if (type === "job.progress") { const e = data as JobProgressEvent, p = { percent: e.progress.percent, fps: e.progress.fps, speed: e.progress.speed, etaS: e.progress.etaS, stage: e.progress.stage };
         setLive((m) => ({ ...m, [e.jobId]: { ...m[e.jobId], ...Object.fromEntries(Object.entries(p).filter(([, x]) => x != null)) } })); return; }
       if (type === "job.state" || type === "library.changed" || type === "resync" || type.startsWith("processing.") || type.startsWith("worker.")) {
         clear ||= type !== "worker.heartbeat"; clearTimeout(t);
@@ -194,29 +191,40 @@ export function Overview() {
 
       <section className="sec" aria-labelledby="ov-j"><h2 id="ov-j">Converting now <Link className="more" to="/jobs?tab=running">All jobs</Link></h2>
         {!v.active.length ? <p className="muted">{on > 0 ? "Nothing is converting." : "Nothing is converting. Turn workers on to start."}</p> : (
-          <table className="tbl ovt"><thead><tr><th>File</th><th>Progress</th><th className="num">Time left</th><th className="num">Expected saving</th></tr></thead>
-            <tbody>{v.active.map((a0) => { const a = { ...a0, ...live[a0.jobId] };
+          // U7: the Jobs running row (U4's list grammar): a tile, the name, the facts, a 3 px progress underline, the expected saving on the right
+          <div className="list rows"><table className="tbl jobs"><tbody>{v.active.map((a0) => { const a = { ...a0, ...live[a0.jobId] }, p = pct(a.percent), w = workerOf(a.jobId);
               return <tr key={a.jobId}>
-                <td className="full"><Link className="mono fname" to={"/jobs?tab=running&job=" + encodeURIComponent(a.jobId)}>{a.name}</Link><span className="sub">{[a.library?.name, workerOf(a.jobId)].filter(Boolean).join(" · ")}</span></td>
-                <td className="full"><Bar p={pct(a.percent)} label={a.name} /></td>
-                <td className="num" data-l="Time left">{left(a.etaS)}</td>
-                <td className="num" data-l="Expected saving">{a.expectedSavingBytes == null ? "not known yet" : a.expectedSavingBytes < 0 ? "none (about " + bytes(-a.expectedSavingBytes) + " bigger so far)" : "about " + bytes(a.expectedSavingBytes)}</td>
-              </tr>; })}</tbody></table>)}
+                <td className="tile"><span className="ltile codec"><Icon id="i-file" /></span></td>
+                <td className="idc">
+                  <div className="lname"><Link className="ttl" to={"/jobs?tab=running&job=" + encodeURIComponent(a.jobId)}>{a.name}</Link></div>
+                  <div className="chips">{a.library && <span className="mchip">{a.library.name}</span>}{w && <span className="mchip">{w}</span>}</div>
+                  <div className="sub live">{p != null && <>{p}% · </>}<span>Step: {a.stage ?? "not known yet"}</span> · <span>Speed: {a.speed != null ? Math.round(a.speed * 10) / 10 + "×" : "not known yet"}</span> · <span>Time left: {left(a.etaS)}</span></div>
+                  {p != null && <span className="uline" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={p} aria-label={a.name}><i style={{ width: p + "%" }} /></span>}
+                </td>
+                <td className="sizec sm" data-l="Expected saving">{a.expectedSavingBytes == null ? "Saving: not known yet" : a.expectedSavingBytes < 0 ? "Saving: none, about " + bytes(-a.expectedSavingBytes) + " bigger so far" : "about " + bytes(a.expectedSavingBytes) + " saving expected"}</td>
+              </tr>; })}</tbody></table></div>)}
         {v.active.some((a) => a.expectedSavingEstimated) && <p className="muted">Savings are estimated from the size so far; the final number shows when a file is done.</p>}
       </section>
 
       <section className="sec" aria-labelledby="ov-l"><h2 id="ov-l">Libraries <Link className="more" to="/libraries">Libraries page</Link></h2>
         {!v.libraries.length ? <p className="muted">No libraries yet. <Link to="/libraries">Add one</Link>.</p> : <>
-          <table className="tbl ovt"><thead><tr><th>Library</th><th className="num">Size before</th><th className="num">Size now</th><th className="num">Saved</th><th className="num">Done · Waiting · Skipped · Failed</th><th>Status</th></tr></thead>
-            <tbody>{v.libraries.map((l) => <tr key={l.id}>
-              <td className="nm"><Link to={"/libraries/" + l.id}><b>{l.name}</b></Link></td>
-              <td className="num" data-l="Before">{bytes(l.bytesBefore)}</td>
-              <td className="num" data-l="Now">{bytes(l.bytesNow)}</td>
-              <td className="num" data-l="Saved">{l.saved > 0 ? <><b>{bytes(l.saved)}</b>{l.savedPercent != null && " · " + pctTxt(l.savedPercent)}</> : l.waitingToFree > 0 ? <><b>{bytes(l.waitingToFree)} smaller</b>{h.nextFreeAt && " · frees from " + dayName(h.nextFreeAt.slice(0, 10))}</> : "nothing yet"}{(l.grew ?? 0) > 0 && <span className="sub">{bytes(l.grew!)} added by bigger files</span>}{l.saved > 0 && l.waitingToFree > 0 && <span className="sub">{bytes(l.waitingToFree)} more{h.nextFreeAt ? ", frees from " + dayName(h.nextFreeAt.slice(0, 10)) : ""}</span>}{l.saved === 0 && l.couldFree > 0 && <span className="sub"><Link className="ul" to={"/jobs?tab=completed&left=1&libraryId=" + encodeURIComponent(String(l.id))}>{"could free " + bytes(l.couldFree) + " by removing the originals"}</Link></span>}</td>
-              <td className="num full" data-l="Done · Waiting · Skipped · Failed">{[l.counts.done, l.counts.waiting, l.counts.skipped, l.counts.failed].map(count).join(" · ")}</td>
-              <td>{l.state === "no_workflow" ? <span className="pill warn">No workflow</span> : l.state === "paused" ? <span className="pill warn">Paused</span> : l.state === "paused_share" ? <span className="pill warn">Share not connected yet</span> : <span className="pill">Watching</span>}</td>
-            </tr>)}</tbody></table>
-          <p className="muted sm">Saved is space already freed. A replaced original waits in the trash until its date: it no longer counts in Size now, but it isn't freed yet, which is the 'frees from' figure. Sizes are updated when a library is scanned.</p></>}
+          {/* U7: one row per library; the bar is saved ÷ (saved + size now), the figures are the Libraries page's own */}
+          <div className="list rows"><table className="tbl jobs"><tbody>{v.libraries.map((l) => { const share = l.saved + l.bytesNow > 0 ? (100 * l.saved) / (l.saved + l.bytesNow) : null;
+              const frees = h.nextFreeAt ? ", frees from " + dayName(h.nextFreeAt.slice(0, 10)) : "";
+              const facts = [l.saved === 0 && l.waitingToFree > 0 ? bytes(l.waitingToFree) + " smaller" + frees : null, l.saved > 0 && l.waitingToFree > 0 ? bytes(l.waitingToFree) + " more" + frees : null, (l.grew ?? 0) > 0 ? bytes(l.grew!) + " added by bigger files" : null].filter(Boolean);
+              return <tr key={l.id}>
+                <td className="idc">
+                  <div className="lname"><Link className="ttl" to={"/libraries/" + l.id}>{l.name}</Link></div>
+                  <div className="chips">{(["Done", "Waiting", "Skipped", "Failed"] as const).map((k, i) => <span key={k} className="mchip">{k} {count([l.counts.done, l.counts.waiting, l.counts.skipped, l.counts.failed][i])}</span>)}</div>
+                  {(facts.length > 0 || (l.saved === 0 && l.couldFree > 0)) && <div className="sub libfacts">{facts.join(" · ")}{l.saved === 0 && l.couldFree > 0 && <>{facts.length > 0 && " · "}<Link className="ul over" to={"/jobs?tab=completed&left=1&libraryId=" + encodeURIComponent(String(l.id))}>{"could free " + bytes(l.couldFree) + " by removing the originals"}</Link></>}</div>}
+                </td>
+                <td className="sizec sm nowrap" data-l="Saved">{l.saved > 0 ? <><b>{bytes(l.saved)}</b> saved{l.savedPercent != null && " · " + pctTxt(l.savedPercent)}</> : l.waitingToFree > 0 ? <><b>{bytes(l.waitingToFree)} smaller</b></> : "Nothing saved yet"}
+                  <span className="sub">Size now: {bytes(l.bytesNow)}</span>
+                  <span className="savebar" role="img" aria-label={share == null ? "No size yet" : "Saved " + share.toFixed(1) + "% of saved plus size now"}><i style={{ width: (share ?? 0) + "%" }} /></span></td>
+                <td className="stc">{l.state === "no_workflow" ? <span className="pill warn">No workflow</span> : l.state === "paused" ? <span className="pill warn">Paused</span> : l.state === "paused_share" ? <span className="pill warn">Share not connected yet</span> : <span className="pill">Watching</span>}</td>
+              </tr>; })}</tbody></table></div>
+          <details className="libhelp"><summary>What Saved and Size now mean</summary>
+            <p className="muted sm">Saved is space already freed. A replaced original waits in the trash until its date: it no longer counts in Size now, but it isn't freed yet, which is the 'frees from' figure. Sizes are updated when a library is scanned.</p></details></>}
       </section>
 
       <section className="sec" aria-labelledby="ov-w"><h2 id="ov-w">Workers <Link className="more" to="/workers">Workers page</Link></h2>
