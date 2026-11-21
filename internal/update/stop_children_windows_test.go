@@ -34,11 +34,15 @@ func TestSleepHelper(t *testing.T) {
 // The app's children are ended; the process to keep (the watcher, the app's own child too) is not. Both
 // are children of this test process, which stands in for the app.
 func TestStopChildrenSparesTheKeptProcess(t *testing.T) {
+	started, err := appStarted(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
 	child := startSleeper(t)
 	kept := startSleeper(t)
 	done := make(chan error, 1)
 	go func() { done <- child.Wait() }()
-	if err := stopChildren(os.Getpid(), kept.Process.Pid); err != nil {
+	if err := stopChildren(os.Getpid(), kept.Process.Pid, started); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -53,5 +57,22 @@ func TestStopChildrenSparesTheKeptProcess(t *testing.T) {
 	defer windows.CloseHandle(h)
 	if st, err := windows.WaitForSingleObject(h, 0); err != nil || st != uint32(windows.WAIT_TIMEOUT) {
 		t.Errorf("the kept process ended: status %v, err %v", st, err)
+	}
+}
+
+// A process that names the app as its parent but was created before the app (a reused PID) is not the app's
+// child: it is not ended. The app here is "started" an hour from now, so this child is older than it.
+func TestStopChildrenSparesAChildOlderThanTheApp(t *testing.T) {
+	child := startSleeper(t)
+	if err := stopChildren(os.Getpid(), 0, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(child.Process.Pid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(h)
+	if st, err := windows.WaitForSingleObject(h, 0); err != nil || st != uint32(windows.WAIT_TIMEOUT) {
+		t.Errorf("a child older than the app was ended: status %v, err %v", st, err)
 	}
 }

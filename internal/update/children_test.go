@@ -6,7 +6,25 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 )
+
+// Only the children the app started are picked: created no earlier than the app, not the keep process, and with a
+// creation time that could be read. An older process that names the app as parent (a reused PID) is not picked.
+func TestOwnChildrenPicksOnlyTheAppsOwn(t *testing.T) {
+	app := time.Date(2026, 11, 21, 3, 0, 0, 0, time.UTC)
+	cands := []childCandidate{
+		{pid: 10, created: app.Add(time.Minute)},    // the app's child
+		{pid: 11, created: app.Add(-time.Hour)},     // older than the app: a reused PID, spared
+		{pid: 12, created: app},                     // created with the app: the app's
+		{pid: 13, err: errors.New("access denied")}, // creation time unknown: spared
+		{pid: 14, created: app.Add(time.Minute)},    // the watcher, kept
+	}
+	got := ownChildren(cands, app, 14)
+	if want := []int{10, 12}; !reflect.DeepEqual(got, want) {
+		t.Errorf("ownChildren = %v, want %v", got, want)
+	}
+}
 
 // A walk that fails partway still ends the children it already found, then reports the walk error.
 func TestEndChildrenStopsTheFoundOnesWhenTheWalkFails(t *testing.T) {
