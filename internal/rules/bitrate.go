@@ -160,6 +160,8 @@ type Shape struct {
 }
 
 // ShapeOf is v's shape at its own size.
+// ShapeOf describes the source for the rough-picture warning. It is a different question from NeedsTenBit (which
+// says whether the job needs a 10-bit encoder).
 func ShapeOf(v *media.Stream) Shape {
 	return Shape{Row: HeightRow(v.Width, v.Height), HDR: v.IsHDR() || v.BitDepth > 8, HighFPS: v.FrameRate >= 48}
 }

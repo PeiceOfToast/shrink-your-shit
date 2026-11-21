@@ -1201,7 +1201,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	w.setPhase(secEncode) // the encoder choice and its notes belong to encode (log-spec section 4)
 	chosenWhy := ""
 	if w.remote == nil && w.Encoder != nil {
-		need10 := tenBitSource(plan)
+		need10 := rules.NeedsTenBit(plan, &src)
 		if w.EncoderCandidates != nil && !plan.Video.Copy { // R5: what hardware is here, and each encoder considered
 			for _, line := range w.EncoderCandidates(plan.Video.Codec, need10, plan.Video.HDR) {
 				w.logLine(job.ID, secEncode, jobs.LevelInfo, line)
@@ -2322,7 +2322,7 @@ func shortReason(reason string) string {
 func (w *Worker) graphicsArgs(ctx context.Context, job jobs.Job, plan rules.Plan, src media.Info, srcPath, tmp, want string) (args []string, full, ok bool) {
 	fam := rules.GraphicsFamily(want)
 	if v := src.Video(); v != nil && w.GraphicsDecodes != nil && (fam == "qsv" || fam == "vaapi") {
-		if w.GraphicsDecodes(ctx, fam, v.Codec, tenBitSource(plan)) { // one rule for 10-bit, here and at the encoder
+		if w.GraphicsDecodes(ctx, fam, v.Codec, rules.NeedsTenBit(plan, &src)) { // one rule for 10-bit, here and at the encoder
 			if args, full = plan.FFmpegArgsFullGPU(srcPath, tmp, want); full {
 				w.jobf(job.ID, ": decoding and encoding on the graphics card (full GPU pipeline)")
 				return args, true, true
