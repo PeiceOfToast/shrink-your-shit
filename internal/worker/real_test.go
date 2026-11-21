@@ -308,21 +308,55 @@ func TestRealDamagedOriginalIsKeptNotConverted(t *testing.T) {
 }
 
 // An original with under 1% damaged pictures plays through, so it converts: the damage does not stop a good file.
+//
+// The stretch goes near the end of the stream, where a broken picture cannot desync the rest of it. A stretch in
+// the middle did: the decoder printed errors until the next keyframe, and how many depended on the encoder and its
+// threading (CI's counted 6+ of 500 from 20000 bytes and kept the file, while the same fixture here counted one).
+// Even at the end the count varies, so the stretch is the first of a few that leaves the file damaged but under
+// tolerance; if none does, that is said here, not below as if the rule were wrong. decodedDamage counts the way
+// the worker does.
 func TestRealLightlyDamagedOriginalIsConverted(t *testing.T) {
 	needTools(t)
 	dir := t.TempDir()
 	ts := filepath.Join(dir, "clip.ts")
 	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25:duration=20", "-c:v", "libx264", "-b:v", "2M", "-f", "mpegts", ts)
-	data, _ := os.ReadFile(ts)
-	for i := len(data) / 3; i < len(data)/3+20000 && i < len(data); i++ { // one stretch: one damaged picture
-		data[i] = byte(i * 7)
+	clean, _ := os.ReadFile(ts)
+	var n int
+	for _, r := range []struct{ size, gap int }{{2000, 1000}, {4000, 1000}, {6000, 2000}, {8000, 3000}, {1000, 500}} {
+		data := append([]byte(nil), clean...)
+		for i, hi := len(data)-r.gap-r.size, len(data)-r.gap; i < hi; i++ {
+			data[i] = byte(i * 7)
+		}
+		os.WriteFile(ts, data, 0o644)
+		if n = decodedDamage(t, ts); n >= 1 && int64(n)*100 <= 500*maxDamagedPercent {
+			break
+		}
 	}
-	os.WriteFile(ts, data, 0o644)
+	if n < 1 || int64(n)*100 > 500*maxDamagedPercent {
+		t.Fatalf("no stretch left the file lightly damaged (%d pictures of 500): the fixture cannot be the test's case", n)
+	}
 	st, id := realJob(t, ts, 20)
 	realWorker(st, media.OSExec{}).run(t)
 	if j, _ := st.Get(id); j.Status != jobs.Done {
 		t.Fatalf("a file with under 1%% damage plays through and must convert: %s %q", j.Status, j.Error)
 	}
+}
+
+// decodedDamage decodes path and counts the damaged pictures the way the worker does (the decoder's own
+// messages and the report's decode errors).
+func decodedDamage(t *testing.T, path string) int {
+	t.Helper()
+	cmd := exec.Command("ffmpeg", "-nostdin", "-loglevel", "level+verbose", "-nostats", "-i", path, "-f", "null", "-")
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("decoding %s: %v\n%s", path, err, stderr.String())
+	}
+	rep := sourceDamage(stderr.String())
+	if st, ok := media.InputStreamStats(stderr.String(), 0, 0); ok && int(st.DecodeErrors) > rep.Pictures {
+		rep.Pictures = int(st.DecodeErrors)
+	}
+	return rep.Pictures
 }
 
 // A broadcast recording that begins in the middle of a group of pictures prints harmless messages at

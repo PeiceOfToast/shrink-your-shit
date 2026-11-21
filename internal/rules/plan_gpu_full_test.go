@@ -27,7 +27,7 @@ func TestFFmpegArgsFullGPUGoldens(t *testing.T) {
 	defer func() { vaapiDevice = old }()
 
 	hdr := &HDR{Transfer: "smpte2084", Primaries: "bt2020", Matrix: "bt2020nc"}
-	const head = "-y -nostdin -v error -progress pipe:1 -nostats "
+	const head = "-y -nostdin -loglevel level+verbose -progress pipe:1 -nostats "
 	const tail = " -map 0 -map -0:d -c copy -max_muxing_queue_size 4096 "
 	qsvDev := "-init_hw_device qsv=qsv:hw -hwaccel qsv -hwaccel_output_format qsv -hwaccel_device qsv -i in.mkv"
 	vaDev := "-init_hw_device vaapi=va:/dev/dri/renderD129 -filter_hw_device va -hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device va -i in.mkv"
@@ -106,7 +106,7 @@ func TestFFmpegArgsFullGPUFallsBackWhenFFmpegArgsWithDoes(t *testing.T) {
 // The processor's arguments are unchanged by the full pipeline: this is FFmpegArgs for the common plan.
 func TestFFmpegArgsProcessorGolden(t *testing.T) {
 	p := gpuPlan(22, func(v *VideoEncode) { v.Height = 720 })
-	want := "-y -nostdin -v error -progress pipe:1 -nostats -i in.mkv -map 0 -map -0:d -c copy -max_muxing_queue_size 4096 " +
+	want := "-y -nostdin -loglevel level+verbose -progress pipe:1 -nostats -i in.mkv -map 0 -map -0:d -c copy -max_muxing_queue_size 4096 " +
 		"-c:v:0 libx265 -crf 22 -preset medium -filter:v:0 scale=-2:720 " + staleVideoArgs + " out.mkv"
 	if got := strings.Join(p.FFmpegArgs("in.mkv", "out.mkv"), " "); got != want {
 		t.Errorf("processor:\n got %s\nwant %s", got, want)

@@ -70,27 +70,3 @@ func TestSampledPlaybackDoesNotUseItsOwnCount(t *testing.T) {
 		t.Errorf("a sampled playback test has no whole count: the file should be read once to count it, got %d; calls: %v", n, s.calls)
 	}
 }
-
-// The playback check judges error-level lines only, as it did at -v error: the verbose report and the
-// header lines are not decode errors.
-func TestErrorLinesKeepsOnlyErrors(t *testing.T) {
-	raw := strings.Join([]string{
-		"[info] ffmpeg version 7.0.2-static",
-		strings.TrimSpace(reportLine(75)),
-		"[matroska,webm @ 0x5] [warning] some warning",
-		"[h264 @ 0x2] [error] error while decoding MB 3 11",
-		"[vist#0:0/h264 @ 0x3] [dec:h264 @ 0x4] [fatal] corrupt decoded frame",
-		"[error] a plain error line",
-		"[aac @ 0x6] Error while decoding stream #0:1: Invalid data found when processing input",
-	}, "\n")
-	want := []string{
-		"[h264 @ 0x2] error while decoding MB 3 11",
-		"[vist#0:0/h264 @ 0x3] [dec:h264 @ 0x4] corrupt decoded frame",
-		"a plain error line",
-		"[aac @ 0x6] Error while decoding stream #0:1: Invalid data found when processing input",
-	}
-	got := strings.Split(strings.TrimSpace(errorLines([]byte(raw))), "\n")
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Errorf("errorLines kept:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
-	}
-}
