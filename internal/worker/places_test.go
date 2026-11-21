@@ -199,16 +199,31 @@ func (c *counter) counts() (processor, onCard int) {
 // Slice 18, the setting on: two processor jobs fill Files at once, a third processor job waits in the queue,
 // and the graphics job behind it starts on the card. The worker added for the card hands the third job back
 // (it would convert on the processor, and every place is in use) and takes the graphics job past it; the two
-// processor jobs keep converting, so no third processor encode runs.
+// processor jobs keep converting, so no third processor encode runs. A handed-back job that was waiting to be
+// tried again keeps its earlier failure's summary, words and try count.
 func TestGraphicsJobStartsBesideBusyFilesAtOnce(t *testing.T) {
 	s := newScenario(t)
 	ids := s.mixedQueue("p2.mkv", "p3.mkv", "graphics.mkv")
+	// The job this test hands back has failed once already and is waiting to be tried again: the claim keeps
+	// its words on the row for the hand-back to put back.
+	prev := jobs.FailureSummary{Step: 0, StepCount: 1, ExitCode: 1, FfmpegRan: true, KeyLines: []string{"Invalid data found when processing input"}}
+	if err := s.store.SetFailureSummary(ids[2], prev); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.SetError(ids[2], "The disk was full when it last ran.", "disk_full"); err != nil {
+		t.Fatal(err)
+	}
 	c := &counter{}
 	s.hang = c.hang(s)
 	var size atomic.Int64
 	size.Store(2)
 	_, stop := startPool(t, s, &size, 2)
-	defer stop()
+	stopped := false
+	defer func() {
+		if !stopped { // a fatal above still ends the pool, and the workers with it
+			stop()
+		}
+	}()
 	waitFor(t, func() bool { p, _ := c.counts(); return p == 2 }, "the two processor jobs converting")
 	size.Store(3) // the worker added for the card's slot
 	waitFor(t, func() bool { _, g := c.counts(); return g == 1 }, "the graphics job converting")
@@ -218,13 +233,31 @@ func TestGraphicsJobStartsBesideBusyFilesAtOnce(t *testing.T) {
 	if j, _ := s.store.Get(ids[3]); j.Status != jobs.Running {
 		t.Errorf("the graphics job is %s, want running", j.Status)
 	}
-	if j, _ := s.store.Get(ids[2]); j.Status != jobs.Queued {
-		t.Errorf("the third processor job is %s, want queued (handed back, first in the queue)", j.Status)
+	// The hand-back restores the words before it writes its note, so the note proves the assertions below are
+	// about what the hand-back kept, not about the seeded row still waiting in the queue.
+	waitForLog(t, s, ids[2], "not started: it would convert on the processor")
+	waitFor(t, func() bool {
+		j, _ := s.store.Get(ids[2])
+		return j.Status == jobs.Queued && j.Error == "The disk was full when it last ran." && j.ErrorCode == "disk_full"
+	}, "the third processor job handed back with the words it was waiting with")
+	j, _ := s.store.Get(ids[2])
+	if j.Attempts != 0 {
+		t.Errorf("the handed-back job counts %d tries, want 0: a hand-back is not a try", j.Attempts)
+	}
+	if got, err := s.store.FailureOf(ids[2]); err != nil || got == nil ||
+		got.ExitCode != prev.ExitCode || len(got.KeyLines) != 1 || got.KeyLines[0] != prev.KeyLines[0] {
+		t.Errorf("the handed-back job's failure summary: %+v (err %v), want %+v", got, err, prev)
 	}
 	if n := FilePlacesInUse(); n != 2 {
 		t.Errorf("Files at once places in use: %d, want the two processor jobs", n)
 	}
-	waitForLog(t, s, ids[2], "not started: it would convert on the processor")
+	// Every encode is cancelled by the stop, so every place must be back: a job's place is released on every
+	// way out of process, and one missed Release would show here (or, before, only in a later test).
+	stop()
+	stopped = true
+	if n := FilePlacesInUse(); n != 0 {
+		t.Errorf("Files at once places in use after every job ended: %d, want 0 (a place was not given back)", n)
+	}
 }
 
 // Slice 18, the setting off (today): the same queue and the same extra worker, and the graphics job still

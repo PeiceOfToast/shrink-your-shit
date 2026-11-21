@@ -16,7 +16,10 @@ var errNoFilePlace = errors.New("every Files at once place is busy")
 
 // maxSkipAhead is how many jobs a worker hands back while looking past them for a graphics job; past it the
 // worker waits for a place to free instead. Bounded so a long queue of processor jobs is not planned again
-// and again by every worker beside them.
+// and again by every worker beside them. The limit is also the known starvation bound: a graphics job more
+// than this many processor jobs deep is not reached while every place stays busy; it waits until one frees,
+// and then the queue's order runs it. Each hand-back plans the job first and writes its start and plan lines
+// into the job's log before the "not started" note (see the hand-back in runClaimed).
 const maxSkipAhead = 16
 
 // filePlaces are the program's Files-at-once places: how many of its jobs may convert on the processor at

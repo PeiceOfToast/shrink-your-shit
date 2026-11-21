@@ -317,7 +317,7 @@ func main() {
 	pool := &worker.Pool{
 		// The graphics jobs setting adds the card's slots to the pool, one worker each: they plan what they take,
 		// and a processor job they take goes straight back to the queue (worker.Worker.FilePlaces).
-		Cap: worker.MaxParallel + 8,
+		Cap: poolCap,
 		New: func(n int) *worker.Worker {
 			id := "builtin"
 			if n > 1 {
@@ -348,7 +348,7 @@ func main() {
 			if err != nil {
 				return 1
 			}
-			return poolSize(s, gpuSlots())
+			return poolSize(s, gpuSlots)
 		},
 	}
 	if store.Paused() {
@@ -569,12 +569,18 @@ func scanTargets(store *jobs.Store) func() ([]scanner.Target, error) {
 	}
 }
 
+// poolCap is the most workers the pool can need: Files at once plus the card's slots, one worker each. It is
+// derived from both clamps (ParallelJobs tops out at MaxParallel, a worker's graphics slots at MaxGPUSlots),
+// so a raised limit moves the cap with it instead of silently clamping the pool.
+const poolCap = worker.MaxParallel + worker.MaxGPUSlots
+
 // poolSize is how many workers this program runs: Files at once. With "Graphics jobs don't wait for processor
 // jobs" on, each of the card's slots gets a worker too, so a graphics job starts while every Files at once
-// place is taken; it takes no place, so the processor jobs are still exactly ParallelJobs.
-func poolSize(s web.Settings, gpuSlots int) int {
+// place is taken; it takes no place, so the processor jobs are still exactly ParallelJobs. gpuSlots is only
+// read when the setting is on: with it off a Size change must not wake the doctor's tools read.
+func poolSize(s web.Settings, gpuSlots func() int) int {
 	if s.GPUJobsSeparate {
-		return s.ParallelJobs + gpuSlots
+		return s.ParallelJobs + gpuSlots()
 	}
 	return s.ParallelJobs
 }

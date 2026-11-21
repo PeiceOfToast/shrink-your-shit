@@ -35,6 +35,11 @@ type member struct {
 // MaxParallel caps parallelJobs: each conversion uses every core already.
 const MaxParallel = 8
 
+// MaxGPUSlots caps a worker's graphics slots (the Workers page's setting, and the validation in web). The
+// pool's cap is MaxParallel + MaxGPUSlots: with the graphics jobs setting on, each of the card's slots gets a
+// worker beside the Files at once ones (main.poolCap).
+const MaxGPUSlots = 8
+
 // Run keeps the pool at its size until ctx ends, then waits for the workers.
 func (p *Pool) Run(ctx context.Context) {
 	every := p.Every

@@ -432,8 +432,11 @@ func (s *Store) claim(worker string, except []int64) (Job, error) {
 	}
 	// A job waiting to be tried again (DD-2) is not taken before its time.
 	args = append(args, now, worker) // workerRecordSQL's own argument comes last
+	// error and error_code stay on the row until the attempt starts (worker.runClaimed, and the remote API's
+	// claim, clear them with Store.SetError): a job this claim hands back (a graphics job's worker looking for
+	// one, slice 18) then puts its earlier words back.
 	n, err := s.moveWhere(s.db, Queued, Running,
-		`, worker=?, progress=0, error='', error_code='', started=?, lease_id=?, lease_expires=?`,
+		`, worker=?, progress=0, started=?, lease_id=?, lease_expires=?`,
 		[]any{worker, now, lease, s.leaseUntil()},
 		`id=(SELECT id FROM jobs WHERE status=? AND stop_requested=0`+skip+` AND (retry_at='' OR retry_at<=?) AND `+libraryOnSQL+`
   ORDER BY priority DESC, id LIMIT 1) AND EXISTS (SELECT 1 FROM workers WHERE enabled=1 AND id=`+workerRecordSQL+`)`,
@@ -535,9 +538,18 @@ func (s *Store) Retry(id int64) error {
 	return s.transition(id, Queued, `, progress=0, error='', error_code='', worker='', attempts=0, retry_at='', fallback='', output_info=NULL`) // a fresh start: the first path again (V6b), without the last run's measured probe (#608)
 }
 
-// Release puts a running job back in the queue (the worker was told to stop).
+// Release puts a running job back in the queue (the worker was told to stop, or handed it back for a place).
+// The row's error words and code stay with it: a job waiting to be tried again keeps its reason while it
+// waits (a hand-back of a retried job must not lose it).
 func (s *Store) Release(id int64) error {
 	return s.transition(id, Queued, `, progress=0, worker=''`)
+}
+
+// SetError stores job id's plain words and code without moving it: an attempt clears the words the queue row
+// carried when it starts, and a hand-back puts them back (worker.runClaimed).
+func (s *Store) SetError(id int64, msg, code string) error {
+	_, err := s.db.Exec(`UPDATE jobs SET error=?, error_code=? WHERE id=?`, msg, code, id)
+	return err
 }
 
 // RequeueRunning puts jobs left "running" by a crashed process back in the queue.

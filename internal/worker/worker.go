@@ -58,6 +58,9 @@ type Queue interface {
 	RecordRunRevision(id, revID int64, tmpl rules.Template) error
 	SetFailureSummary(id int64, f jobs.FailureSummary) error
 	ClearFailureSummary(id int64) error
+	// SetError stores the job's plain words and code without moving it: an attempt clears the words its queue
+	// row carried (the claim keeps them), and a hand-back puts them back.
+	SetError(id int64, msg, code string) error
 	// FailureOf is a job's earlier attempt's failure summary (nil when it has none): a job handed back to the
 	// queue before it started keeps it.
 	FailureOf(id int64) (*jobs.FailureSummary, error)
@@ -443,11 +446,18 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 	defer w.recordStats(job.ID)   // and stored once its outcome is recorded
 	defer w.summaryLine(job.ID)   // the job's last line: its verdict, once its outcome is recorded
 	w.jobf(job.ID, ": started")
-	// A job handed back before it started keeps its earlier attempt's failure summary; only an attempt that
-	// starts clears it. Saved here, restored on the hand-back below.
+	// A job handed back before it started keeps its earlier attempt's failure summary and the plain words its
+	// queue row carried (it was waiting to be tried again); only an attempt that starts clears them. Saved
+	// here, restored on the hand-back below.
 	var prevFailure *jobs.FailureSummary
 	if w.filePlaceLimit() > 0 {
 		prevFailure, _ = w.Queue.FailureOf(job.ID)
+	}
+	prevError, prevCode := job.Error, job.ErrorCode // the claim leaves them on the row (jobs.Store.claim)
+	if prevError != "" || prevCode != "" {
+		if err := w.Queue.SetError(job.ID, "", ""); err != nil {
+			log.Printf("worker %s: job %d: clearing its earlier words: %v", w.ID, job.ID, err)
+		}
 	}
 	// a new attempt: an earlier attempt's failure summary is not this one's (a kept attempt would show it)
 	if err := w.Queue.ClearFailureSummary(job.ID); err != nil {
@@ -493,11 +503,18 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 	}
 	// Not started at all: it would convert on the processor and every Files at once place is in use, so the
 	// worker handed it back after planning it (it was there for a graphics job). Its earlier attempt's failure
-	// summary is put back, and this worker does not plan it again while the places are still full.
+	// summary and words are put back, and this worker does not plan it again while the places are still full.
+	// A hand-back writes this attempt's start and plan lines first (the log reads as several attempts that never
+	// happened); it happens at most maxSkipAhead times per worker per full-places stretch.
 	if errors.Is(err, errNoFilePlace) && stopped == stopNone && ctx.Err() == nil {
 		if prevFailure != nil {
 			if serr := w.Queue.SetFailureSummary(job.ID, *prevFailure); serr != nil {
 				log.Printf("worker %s: job %d: putting its failure summary back: %v", w.ID, job.ID, serr)
+			}
+		}
+		if prevError != "" || prevCode != "" {
+			if serr := w.Queue.SetError(job.ID, prevError, prevCode); serr != nil {
+				log.Printf("worker %s: job %d: putting its earlier words back: %v", w.ID, job.ID, serr)
 			}
 		}
 		w.mu.Lock()

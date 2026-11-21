@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
@@ -842,12 +843,13 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 		}
 		bad := func(msg string) { apiError(w, http.StatusBadRequest, "invalid_setting", msg+" Nothing was changed.") }
 		var cpu, gpu *int
+		gpuWords := fmt.Sprintf("Graphics slots are a whole number from 0 to %d.", worker.MaxGPUSlots)
 		if in.Slots != nil {
 			for _, f := range []struct {
 				raw  json.RawMessage
 				to   **int
 				what string
-			}{{in.Slots.CPU, &cpu, "Processor slots are a whole number from 1 to 8."}, {in.Slots.GPU, &gpu, "Graphics slots are a whole number from 0 to 8."}} {
+			}{{in.Slots.CPU, &cpu, "Processor slots are a whole number from 1 to 8."}, {in.Slots.GPU, &gpu, gpuWords}} {
 				if len(f.raw) == 0 || string(f.raw) == "null" {
 					continue
 				}
@@ -868,8 +870,8 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 			cfg.Name = name
 		}
 		if gpu != nil {
-			if n := *gpu; n < 0 || n > 8 {
-				bad("Graphics slots are a whole number from 0 to 8.")
+			if n := *gpu; n < 0 || n > worker.MaxGPUSlots {
+				bad(gpuWords)
 				return
 			}
 			cfg.GPUSlots = gpu
