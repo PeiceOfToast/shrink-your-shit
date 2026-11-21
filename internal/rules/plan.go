@@ -414,7 +414,7 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 			args = append(args, "-profile:"+v, "main10",
 				"-color_primaries:"+v, h.Primaries, "-color_trc:"+v, h.Transfer, "-colorspace:"+v, h.Matrix)
 			if fam != "vaapi" && !full { // VAAPI's frames are made p010 by its filter instead; the full path's come from the decoder
-				args = append(args, "-pix_fmt:"+v, "p010le")
+				args = append(args, "-pix_fmt:"+v, pixFmt10(fam))
 			}
 		}
 	} else if ten10 && gpu != "" { // a 10-bit SDR source keeps its depth on a graphics encoder: main10 and p010
@@ -423,7 +423,7 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 			args = append(args, "-profile:"+v, "main10")
 		}
 		if fam != "vaapi" && !full { // VAAPI's frames are made p010 by its filter instead; the full path's come from the decoder
-			args = append(args, "-pix_fmt:"+v, "p010le")
+			args = append(args, "-pix_fmt:"+v, pixFmt10(fam))
 		}
 	}
 	var vf []string
@@ -493,10 +493,11 @@ func gpuScale(fam string, h int, tenBit bool) string {
 // gpuQuality is a graphics family's constant-quality arguments at crf, in its encoders' names. The same
 // family's H.264 and AV1 encoders take the same options as its HEVC one.
 func gpuQuality(fam string, crf int) []string {
+	if p, ok := profiles[fam]; ok && p.quality != nil {
+		return p.quality(crf)
+	}
 	n := strconv.Itoa(crf)
 	switch fam {
-	case "nvenc":
-		return []string{"-rc", "vbr", "-cq", n}
 	case "qsv":
 		return []string{"-global_quality", n}
 	case "vaapi":
