@@ -227,7 +227,10 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 			d["reason"] = reasonOf(events[n-1])
 			storedCode = events[n-1].Reason
 		}
-		d["logState"] = logState(store, id, j.Status, storedCode)                    // user review 11-13 item E
+		d["logState"] = logState(store, id, j.Status, storedCode) // user review 11-13 item E
+		if j.Status == jobs.Kept {                                // the new file was refused and the original stayed
+			d["newFileRefused"] = true
+		}
 		if m, ok := d["reason"].(map[string]string); ok && j.Status == jobs.Failed { // design's code and sentence, as the list shows them
 			stored := m["code"]
 			m["code"], m["message"] = failureCode(store, id, stored), failureMessage(store, id, stored, j.Path, j.OutputPath, m["message"])
@@ -379,6 +382,9 @@ func v2JobItem(store *jobs.Store, it map[string]any, row jobs.FileRow, card stri
 	}
 	// user review 11-13 item E: why a failed job failed, and whether its log is in the database
 	it["failure"], it["logState"] = nil, logState(store, row.JobID, status, row.ErrorCode)
+	if jobs.Status(row.Status) == jobs.Kept { // the new file was refused and the original stayed: "Original kept"
+		it["newFileRefused"] = true
+	}
 	if card == jobs.CardFailed && status == jobs.Failed { // the failure panel is for a failed job, as the detail's is
 		it["failure"] = failureView(store, row.JobID, row.ErrorCode, row.Path, row.OutputPath, row.Error)
 	}

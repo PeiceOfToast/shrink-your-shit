@@ -798,12 +798,19 @@ func TestCompareTheResultAfterTheSave(t *testing.T) {
 	if yes.Path[len(yes.Path)-1] != tagBig.ID || !slices.Contains(yes.Path, noteNo.ID) {
 		t.Errorf("path %v", yes.Path)
 	}
-	// the question turned off: its Yes goes on as if it weren't there
+	// the question turned off: its Yes goes on as if it weren't there, and the route leaves it out (review2-582 P3-1)
 	cmp.Enabled = false
 	d.Nodes[len(d.Nodes)-5] = cmp
-	if tm2, _ := ToTemplate(d, rules.Template{}); len((*tm2.Branches)[0].After) != 1 || (*tm2.Branches)[0].After[0].Type != TypeTag {
-		t.Errorf("off: %+v", (*tm2.Branches)[0].After)
+	if tm2, _ := ToTemplate(d, rules.Template{}); len((*tm2.Branches)[0].After) != 1 || (*tm2.Branches)[0].After[0].Type != TypeTag || slices.Contains((*tm2.Branches)[0].Path, cmp.ID) || !slices.Contains((*tm2.Branches)[0].Path, tagYes.ID) {
+		t.Errorf("off: %+v path %v", (*tm2.Branches)[0].After, (*tm2.Branches)[0].Path)
 	}
+	tagYes.Enabled = false // an action turned off after the save: out of the route too
+	d.Nodes[len(d.Nodes)-4] = tagYes
+	if tm3, _ := ToTemplate(d, rules.Template{}); slices.Contains((*tm3.Branches)[0].Path, tagYes.ID) {
+		t.Errorf("a disabled after action is on the route: %v", (*tm3.Branches)[0].Path)
+	}
+	tagYes.Enabled = true
+	d.Nodes[len(d.Nodes)-4] = tagYes
 	cmp.Enabled = true
 	d.Nodes[len(d.Nodes)-5] = cmp
 	// the percent tests need their percent; "bigger" doesn't

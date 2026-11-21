@@ -392,3 +392,18 @@ func percentText(p float64) string {
 	}
 	return s
 }
+
+// HasDotDot reports whether a folder path has a segment that acts as ".." (either separator): one that
+// ends in ".." once trailing spaces are trimmed, or one made only of dots and spaces with two or more dots
+// (Windows trims trailing dots and spaces when it makes a folder, so ".. " and "..." are ".." there). The
+// publish check refuses a templated folder setting with one (internal/web, review-592); the worker refuses
+// a filled-in run folder with one, for settings saved before that check (review-592 follow-up). "..x",
+// ".x" and "a.b" are ordinary names.
+func HasDotDot(dir string) bool {
+	for _, seg := range strings.FieldsFunc(dir, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if strings.HasSuffix(strings.TrimRight(seg, " "), "..") || strings.TrimRight(seg, " .") == "" && strings.Count(seg, ".") >= 2 {
+			return true
+		}
+	}
+	return false
+}

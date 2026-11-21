@@ -54,14 +54,14 @@ export const takesVars = (defs: { configSchema: { properties?: Record<string, un
 const noVars: VarList = { sample: { path: "", builtIn: true }, variables: [] };
 export const varListFor = (wf: string, on: boolean) => (on ? getVariables(wf) : Promise.resolve(noVars));
 export function varProblems(nodes: { id: string; type: string; config?: Record<string, unknown> }[], defs: { type: string; configSchema: { properties?: Record<string, unknown> } }[], vars: TemplateVar[]) {
-  const out: { nodeId: string; field: string; title: string; code: "unknown_variable" | "unclosed_brace"; name: string; error: string }[] = [];
+  const out: { nodeId: string; field: string; title: string; code: "unknown_variable" | "unclosed_variable"; name: string; error: string }[] = [];
   for (const n of nodes) {
     const props = (defs.find((d) => d.type === n.type)?.configSchema.properties ?? {}) as Record<string, { "x-variables"?: unknown; title?: unknown }>;
     for (const [k, s] of Object.entries(props)) {
       if (s["x-variables"] !== true) continue;
       const a = analyse(String(n.config?.[k] ?? ""), vars), first = a.errors[0];
       // errors[0] is an unknown-name error whenever there is one (analyse pushes those before the brace check)
-      if (first) out.push({ nodeId: n.id, field: k, title: (s.title as string) ?? k, code: a.unknown.length ? "unknown_variable" : "unclosed_brace", name: a.unknown[0] ?? "", error: first });
+      if (first) out.push({ nodeId: n.id, field: k, title: (s.title as string) ?? k, code: a.unknown.length ? "unknown_variable" : "unclosed_variable", name: a.unknown[0] ?? "", error: first });
     }
   }
   return out;
@@ -70,11 +70,15 @@ export function varProblems(nodes: { id: string; type: string; config?: Record<s
 // The workflow's own variables (its document's variables list). They come first in the picker, under "Your variables",
 // and join the Publish check. A name that is already a built-in keeps the built-in.
 export const OwnVars = createContext<Variable[]>([]);
-const GROUP_LABEL: Record<string, string> = { Workflow: "Your variables" };
+const GROUP_LABEL: Record<string, string> = { Workflow: "Your variables", Server: "Server-wide variables" };
 // The built-ins are the server's list without the workflow's own variables: since #497 those come back in it too, group "Workflow".
-export const builtinsOf = (list: TemplateVar[]) => list.filter((v) => v.group !== "Workflow");
+// A whole-field-only name (the file's own values) is for the typed-setting picker, never for text (W2 contract 09:33Z).
+export const builtinsOf = (list: TemplateVar[]) => list.filter((v) => v.group !== "Workflow" && !v.wholeFieldOnly);
 export function withOwn(list: TemplateVar[], own: Variable[]): TemplateVar[] {
-  const builtins = builtinsOf(list), names = new Set(builtins.map((v) => v.name));
+  // W2: a server-wide variable ("Server") never hides the workflow's own of the same name, which wins at run time; the
+  // Server entry of a name the workflow owns is left out, so the name is listed once (review-591)
+  const ownNames = new Set(own.map((v) => v.name));
+  const builtins = builtinsOf(list).filter((v) => !(v.group === "Server" && ownNames.has(v.name))), names = new Set(builtins.filter((v) => v.group !== "Server").map((v) => v.name));
   const mine = own.filter((v) => !names.has(v.name)).map((v): TemplateVar => ({ name: v.name, description: v.description ?? "", group: "Workflow", value: v.value == null ? null : String(v.value), fields: null }));
   return [...mine, ...builtins];
 }

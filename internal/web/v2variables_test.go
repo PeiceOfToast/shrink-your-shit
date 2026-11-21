@@ -25,6 +25,8 @@ type varItem struct {
 	Name, Description, Group string
 	Value                    *string
 	Fields                   []string
+	Type                     string
+	WholeFieldOnly           bool
 }
 
 type varList struct {
@@ -413,5 +415,89 @@ func TestVariablesPublishedByASetStep(t *testing.T) {
 		if v.Name == "Bad Name" {
 			t.Errorf("a name a step may not set is listed: %+v", v)
 		}
+	}
+}
+
+// W2 (ui-shop's QA of #586): a server-wide variable is listed for the editor (group "Server", before the
+// workflow's own) and a folder template that names it passes publish-preview and publish. On a build
+// that doesn't know the globals, publish-preview says unknown_variable.
+func TestAServerVariableIsListedAndUsable(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	if _, err := st.SetGlobalVariables([]workflow.Variable{{Name: "qa_sub", Type: "string", Value: "alpha", Description: "The sub-folder"}}); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.AddWorkflow("Globals", workflow.Preset())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, _, err := st.Draft(f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Doc.Variables = []workflow.Variable{{Name: "mine", Type: "string", Value: "own"}}
+	for i := range d.Doc.Nodes {
+		if d.Doc.Nodes[i].Type == workflow.TypeCommit {
+			d.Doc.Nodes[i].Config["policy"], d.Doc.Nodes[i].Config["folderMode"], d.Doc.Nodes[i].Config["folder"] = "separate_folder", "one_folder", t.TempDir()+"/{{qa_sub}}"
+		}
+	}
+	saved, err := st.SaveDraft(f.ID, d.Doc, d.Layout, d.Etag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, got := getVars(t, srv, f.ID)
+	if code != http.StatusOK {
+		t.Fatalf("GET variables: %d", code)
+	}
+	g := got.find(t, "qa_sub")
+	if g.Group != "Server" || g.str(t) != "alpha" || g.Description != "The sub-folder" || g.Type != "string" || g.WholeFieldOnly {
+		t.Errorf("qa_sub: %+v", g)
+	}
+	// the typed-setting picker's contract (09:33Z): the file's own values as "File values", a whole field only,
+	// each with its type; type on the Server and Workflow items too; neither key on a built-in
+	if fv := got.find(t, "file.size"); fv.Group != "File values" || !fv.WholeFieldOnly || fv.Type != "number" || fv.Value != nil || fv.Description == "" {
+		t.Errorf("file.size: %+v", fv)
+	}
+	if hdr := got.find(t, "source.hdr"); hdr.Type != "boolean" || !hdr.WholeFieldOnly {
+		t.Errorf("source.hdr: %+v", hdr)
+	}
+	if own := got.find(t, "mine"); own.Type != "string" || own.WholeFieldOnly {
+		t.Errorf("mine: %+v", own)
+	}
+	if b := got.find(t, "title"); b.Type != "" || b.WholeFieldOnly {
+		t.Errorf("a built-in carries neither key: %+v", b)
+	}
+	iFile := -1
+	for i, v := range got.Variables {
+		if v.Name == "file.size" {
+			iFile = i
+		}
+	}
+	iMine := -1
+	for i, v := range got.Variables {
+		if v.Name == "mine" {
+			iMine = i
+		}
+	}
+	if iFile < 0 || iFile > iMine {
+		t.Errorf("file values come before the workflow's own: %d %d", iFile, iMine)
+	}
+	iG, iOwn := -1, -1
+	for i, v := range got.Variables {
+		switch v.Name {
+		case "qa_sub":
+			iG = i
+		case "mine":
+			iOwn = i
+		}
+	}
+	if iG < 0 || iOwn < 0 || iG > iOwn {
+		t.Errorf("the server's come before the workflow's own: %d %d", iG, iOwn)
+	}
+	id := strconv.FormatInt(f.ID, 10)
+	if code, body := post(t, srv, "GET", "/api/v2/workflows/"+id+"/publish-preview", ""); code != 200 || strings.Contains(body, "unknown_variable") {
+		t.Fatalf("publish-preview with a global in a folder: %d %s", code, body)
+	}
+	if code, body := post(t, srv, "POST", "/api/v2/workflows/"+id+"/publish", `{"etag":"`+saved.Etag+`"}`); code != 200 {
+		t.Fatalf("publish: %d %s", code, body)
 	}
 }

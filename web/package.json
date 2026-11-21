@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types src/refFit.test.ts",
     "build": "tsc --noEmit && vite build && node -e \"require('fs').writeFileSync('../internal/web/next/dist/.keep', '')\""
   },
   "dependencies": {

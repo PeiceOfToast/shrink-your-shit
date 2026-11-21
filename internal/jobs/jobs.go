@@ -359,8 +359,12 @@ func (s *Store) moveWhere(x execer, from, to Status, set string, setArgs []any, 
 // moveAlong moves jobs along one edge the shared state machine does not allow. Convert again's
 // Done -> Queued is the only one: every generic move (Release, RetryLater, FallBack) must keep refusing a
 // finished job, or one that finishes between a list of running jobs and the release is converted twice
-// (review-583, finding 1).
+// (review-583, finding 1). Any other edge is refused too, so this cannot become a second, unchecked way
+// to move a job (design-583 P3).
 func (s *Store) moveAlong(x execer, from, to Status, set string, setArgs []any, where string, whereArgs ...any) (int64, error) {
+	if from != Done || to != Queued {
+		return 0, fmt.Errorf("cannot go from %s to %s", from, to)
+	}
 	return s.moveRows(x, from, to, set, setArgs, where, whereArgs...)
 }
 

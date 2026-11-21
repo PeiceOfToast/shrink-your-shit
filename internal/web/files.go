@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/preview"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/vars"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
 
@@ -231,6 +233,40 @@ func fileItem(store *jobs.Store, libs []jobs.Library, row jobs.FileRow, card str
 	return it
 }
 
+// templateRe is a {{name}} in a folder setting.
+var templateRe = regexp.MustCompile(`\{\{[^}]*\}\}`)
+
+// hasDotDot reports whether a folder setting has a segment that acts as ".." (either separator) once its
+// {{name}}s are taken out: a {{name}} that comes out empty at run time would let it climb past the folder
+// the publish check looked at (review-592 rounds 3 and 4: "..", "{{a}}..", "..{{a}}"). On Windows a
+// segment of dots and spaces, like ".. " or "...", is trimmed to ".." when the folder is made, so any
+// segment made only of dots and spaces with two or more dots counts, and so does one that ends in ".."
+// (Windows trims trailing dots, so "x.." is "x" there, and "x{{a}}.." is "x.." when a is empty)
+// (review2-592 P3-1). "..x" and "{{a}}x" are ordinary names.
+func hasDotDot(dir string) bool {
+	return vars.HasDotDot(templateRe.ReplaceAllString(dir, "")) // the worker refuses a filled-in run folder by the same rule
+}
+
+// fixedPrefix is the part of a folder setting that is known before a job fills its {{name}} variables
+// (W3, from ui-shop's QA of #587): the folders before the first one that holds a template. A save or
+// publish checks and makes only that part; the rest is made by the job, with the values it has. A
+// setting with no template is itself. A setting whose first folder is already templated is "" (not a
+// full path, so the check refuses it: a fixed root is needed to know where the files will go).
+func fixedPrefix(dir string) string {
+	if strings.Contains(dir, "{{") { // review-592: a ".." after the template must not slip past the checks: clean the whole text first, as the job's Join will
+		dir = filepath.Clean(dir)
+	}
+	i := strings.Index(dir, "{{")
+	if i < 0 {
+		return dir
+	}
+	cut := strings.LastIndexAny(dir[:i], `/\`)
+	if cut <= 0 {
+		return ""
+	}
+	return dir[:cut]
+}
+
 // outputBlockers says why dir can't be a flow's folder for new files (S6, "Save to another folder";
 // contract 21:10Z item 5): not_writable, low_space (under 10 GB free), inside_library (inside any
 // library, so new files would be converted again; or a library inside it; V5a: every library, not only
@@ -238,6 +274,11 @@ func fileItem(store *jobs.Store, libs []jobs.Library, row jobs.FileRow, card str
 func outputBlockers(store *jobs.Store, except int64, dir string, moreLibraries ...string) []map[string]string {
 	out := []map[string]string{}
 	add := func(code, msg string) { out = append(out, map[string]string{"code": code, "message": msg}) }
+	if strings.Contains(dir, "{{") && hasDotDot(dir) { // review-592 round 3: an empty value would let ".." climb out of the checked part
+		add("not_writable", "A folder with a {{name}} can't use '..'. Write the folder out in full.")
+		return out
+	}
+	dir = fixedPrefix(dir) // a templated folder: the part before its first {{name}} is what can be checked and made now
 	if !filepath.IsAbs(dir) {
 		add("not_writable", "Enter the folder's full path.")
 		return out

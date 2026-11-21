@@ -3,7 +3,9 @@
 // value here shows as empty in the example, as the page does for a file that has none.
 import type { Variable } from "../types/v2";
 
-export interface TemplateVar { name: string; description: string; group: string; value: string | null; fields: string[] | null }
+// type: the variable doc's word (string | number | bool | boolean | enum | path | secret) on Server, Workflow and File
+// values items; wholeFieldOnly: a whole field only, never inside text (the file's own values). Both absent on a built-in.
+export interface TemplateVar { name: string; description: string; group: string; value: string | null; fields: string[] | null; type?: string; wholeFieldOnly?: boolean }
 export interface VarList { sample: { path: string; builtIn: boolean }; variables: TemplateVar[] }
 
 const v = (name: string, group: string, description: string, value: string | null): TemplateVar => ({ name, description, group, value, fields: null });
@@ -14,7 +16,13 @@ export function mockVariables(own: Variable[] = []): VarList {
     sample: { path: "/media/Movie (2019).mkv", builtIn: true },
     variables: [
       ...builtIns(),
-      ...own.map((x) => v(x.name, "Workflow", x.description ?? "", x.type === "secret" || x.value == null ? null : String(x.value))),
+      // W2: the server's variables and the file's own values, with the typed-setting picker's keys (ui-shop review #596)
+      { ...v("house_quality", "Server", "The quality every library starts from", "3"), type: "number" },
+      { ...v("keep_hdr", "Server", "Whether HDR is kept", "true"), type: "bool" },
+      { ...v("label", "Server", "A word for file names", "shrunk"), type: "string" },
+      { ...v("file.size", "File values", "The file's size in bytes", "4215883110"), type: "number", wholeFieldOnly: true },
+      { ...v("source.hdr", "File values", "Whether the video is HDR", null), type: "boolean", wholeFieldOnly: true },
+      ...own.map((x) => ({ ...v(x.name, "Workflow", x.description ?? "", x.type === "secret" || x.value == null ? null : String(x.value)), type: x.type })),
     ],
   };
 }
