@@ -18,6 +18,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/preview"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/vars"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
 
@@ -243,13 +244,7 @@ var templateRe = regexp.MustCompile(`\{\{[^}]*\}\}`)
 // (Windows trims trailing dots, so "x.." is "x" there, and "x{{a}}.." is "x.." when a is empty)
 // (review2-592 P3-1). "..x" and "{{a}}x" are ordinary names.
 func hasDotDot(dir string) bool {
-	bare := templateRe.ReplaceAllString(dir, "")
-	for _, seg := range strings.FieldsFunc(bare, func(r rune) bool { return r == '/' || r == '\\' }) {
-		if strings.HasSuffix(strings.TrimRight(seg, " "), "..") || strings.TrimRight(seg, " .") == "" && strings.Count(seg, ".") >= 2 {
-			return true
-		}
-	}
-	return false
+	return vars.HasDotDot(templateRe.ReplaceAllString(dir, "")) // the worker refuses a filled-in run folder by the same rule
 }
 
 // fixedPrefix is the part of a folder setting that is known before a job fills its {{name}} variables

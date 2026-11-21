@@ -1298,6 +1298,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			if !filepath.IsAbs(d) {
 				return "", failed(fmt.Sprintf("The folder for new files came out as %q, which isn't a full path, so nothing was converted. Your original was not touched. Check the folder in the workflow's Save the result step, then press Retry.", d), errors.New("folder for new files: its template did not make a full path"))
 			}
+			if vars.HasDotDot(d) { // review-592 follow-up: a setting saved before publish refused '..' beside a template could still climb out once filled in
+				return "", failed(fmt.Sprintf("The folder for new files came out as %q, which has a '..' in it, so nothing was converted. Your original was not touched. Write the folder out in full in the workflow's Save the result step, then press Retry.", d), errors.New("folder for new files: its template made a '..' segment"))
+			}
 			dir = d
 		}
 		name := strings.TrimSuffix(filepath.Base(job.Path), filepath.Ext(job.Path)) + ext
