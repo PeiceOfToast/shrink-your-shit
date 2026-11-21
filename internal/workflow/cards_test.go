@@ -68,6 +68,8 @@ func TestEveryCardKeepsTheContract(t *testing.T) {
 
 // A card this build can't run yet can be saved in a draft, and Publish refuses the workflow naming it (FB1b).
 func TestNotYetCardsRefusePublish(t *testing.T) {
+	NotYet = map[string]bool{TypeSetVariable: true, TypeNote: true, TypeFail: true} // as FB1b shipped them
+	defer func() { NotYet = map[string]bool{} }()
 	for typ := range NotYet {
 		d := Preset()
 		n := Node{ID: NewID(), Type: typ, TypeVersion: 1, Enabled: true, Config: map[string]any{"name": "profile", "text": "hello", "reason": "no"}}

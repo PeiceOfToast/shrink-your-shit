@@ -15,6 +15,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +26,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/flow"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -85,6 +87,8 @@ type Queue interface {
 	Skip(id int64, words, code string) error
 	// AddStep adds a line to a job's step summary (S5): converted, verified, kept, replaced.
 	AddStep(id int64, step string, ok bool, words string) error
+	// AddDecision records a check's answer, or a card's words (FB1c), on the timeline with its node.
+	AddDecision(id int64, nodeID, port, words string) error
 	// PutProbe stores a file's probe (JSON) for its size and time: the new file's, for the Files view.
 	PutProbe(path string, size, mtime int64, info string) error
 	// GetProbe returns the stored probe (JSON) of path if it was taken at this size and modification time.
@@ -933,7 +937,8 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// The Plan for this file, from its library's flow and the probe just taken: what to run, and what
 	// the result must look like. Whether to convert it was the scanner's decision (as before Plans);
 	// only a flow that cannot say how to convert stops the job here.
-	plan := tmpl.Compile(src)
+	facts := w.runFacts(job, src, before) // FB1c: what the path's questions beyond the probe ask about
+	plan := tmpl.CompileWith(src, facts)
 	if fb, err := w.Queue.FallbackOf(job.ID); err == nil && fb != "" { // V6b: it falls back to another path
 		var b rules.Branch
 		if json.Unmarshal([]byte(fb), &b) == nil {
@@ -960,6 +965,31 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// for what is queued are unchanged.
 	if plan.Skip != "" && again != nil { // the done job stays done: its file and kept original as they are
 		return "", againLeftAlone()
+	}
+	// FB1c: the path's cards before its end (Set a variable, Add a note), in order, whether the path converts,
+	// leaves the file alone or stops as failed, so a note can say why. Each one is a step of the timeline; the
+	// first that doesn't work fails the job, the original untouched; what they set joins the run's values.
+	var published map[string]string
+	if len(plan.Before) > 0 {
+		st := &flow.State{Vars: maps.Clone(facts.Vars)} // its own copy: what the cards set is told apart below
+		notes, berr := flow.Before(plan.Before, st, flow.Env{Log: func(l string) { w.jobNote(job.ID, secEncode, jobs.LevelInfo, "(%s): %s", job.Path, l) }})
+		for _, n := range notes {
+			w.Queue.AddDecision(job.ID, n.NodeID, "", n.Name+" → "+n.Words)
+		}
+		if berr != nil {
+			w.Queue.AddStep(job.ID, "failed", false, berr.Error()+".")
+			return "", failed(berr.Error()+". The original is untouched.", berr)
+		}
+		published = map[string]string{}
+		for k, v := range st.Vars {
+			if facts.Vars[k] != v {
+				published[k] = v
+			}
+		}
+	}
+	if plan.Skip != "" && plan.Fail { // FB1c: the path ended in "Stop as failed": the job fails with its words, the original untouched
+		w.Queue.AddStep(job.ID, "failed", false, plan.Skip+".")
+		return "", failed(plan.Skip+". The original is untouched.", errors.New("stopped by its workflow: "+plan.Skip))
 	}
 	if plan.Skip != "" {
 		w.writeStepSections(job.ID, plan.Steps) // the step that left it alone still says so (L2, R4)
@@ -1013,7 +1043,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// W4b: the values the Save the result step's {{name}} fields take, and its track title. The title
 	// goes on every audio track of the new file, so it is resolved before the snapshot: a remote worker
 	// encodes the plan it is given.
-	vals, vtable, err := w.runValues(job, src, plan)
+	vals, vtable, err := w.runValues(job, src, plan, published)
 	if err != nil {
 		// a secret sealed on another computer can't be opened here (a restored backup): the job stops,
 		// naming it, rather than run with it silently empty

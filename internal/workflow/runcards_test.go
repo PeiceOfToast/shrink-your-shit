@@ -15,15 +15,6 @@ func node(typ, name string, config map[string]any) Node {
 	return Node{ID: NewID(), Type: typ, TypeVersion: 1, Name: name, Enabled: true, Config: config}
 }
 
-func byID(d Doc, id string) Node {
-	for _, n := range d.Nodes {
-		if n.ID == id {
-			return n
-		}
-	}
-	return Node{}
-}
-
 func link(from, port string, to string) Edge {
 	return Edge{ID: NewID(), From: from, FromPort: port, To: to, ToPort: "in"}
 }
@@ -48,10 +39,8 @@ func runDoc() (Doc, map[string]Node) {
 func TestRunCardsCompile(t *testing.T) {
 	d, by := runDoc()
 	r := Validate(d)
-	for _, i := range r.Issues { // until FB1c the three cards are not_runnable_yet; nothing else may be wrong
-		if i.Code != "not_runnable_yet" || !NotYet[byID(d, i.NodeID).Type] {
-			t.Errorf("%+v", i)
-		}
+	if r.Errors() { // FB1c: every card the registry offers runs, so the document publishes
+		t.Fatalf("%+v", r.Issues)
 	}
 	tm, issues := ToTemplate(d, rules.Template{})
 	if len(issues) > 0 || tm.Branches == nil || len(*tm.Branches) != 2 {
@@ -80,6 +69,73 @@ func TestRunCardsCompile(t *testing.T) {
 	// Compile without facts still routes by the file's facts (an old caller)
 	if p := tm.Compile(info); !p.Fail {
 		t.Errorf("no facts: %+v", p)
+	}
+}
+
+// A run card on a conversion step's skipped or error (Didn't work) port is refused at publish, except an end on
+// Convert video's or Check the result's error port, which becomes the path's failure policy (stop / skip).
+func TestRunCardsOnFailurePortsAreRefused(t *testing.T) {
+	for _, port := range []string{"skipped", "error"} {
+		for _, typ := range []string{TypeNote, TypeSetVariable, TypeCheckName, TypeFail, TypeEnd} {
+			d := FromTemplate(rules.SliderTemplate(3), nil)
+			var conv Node
+			for _, n := range d.Nodes {
+				if n.Type == TypeConvert {
+					conv = n
+				}
+			}
+			card := node(typ, "", map[string]any{"text": "x", "name": "v", "pattern": "x", "reason": "no"})
+			d.Nodes = append(d.Nodes, card)
+			d.Edges = append(d.Edges, link(conv.ID, port, card.ID))
+			if IsQuestion(typ) { // its answers must lead somewhere
+				end := node(TypeEnd, "", nil)
+				d.Nodes = append(d.Nodes, end)
+				d.Edges = append(d.Edges, link(card.ID, "match", end.ID), link(card.ID, "else", end.ID))
+			}
+			tm, issues := ToTemplate(d, rules.Template{})
+			allowed := port == "error" && IsEnd(typ)
+			switch {
+			case allowed && len(issues) > 0:
+				t.Errorf("%s on %s: %+v (an end there is the failure policy)", typ, port, issues)
+			case allowed:
+				f := (*tm.Branches)[0].OnFailure.Convert
+				want := map[string]string{TypeFail: "stop", TypeEnd: "skip"}[typ]
+				if f == nil || f.Action != want {
+					t.Errorf("%s on %s: policy %+v, want %s", typ, port, f, want)
+				}
+			case !allowed:
+				if !slices.ContainsFunc(issues, func(i Issue) bool { return i.Code == "not_runnable_yet" || i.Code == "fallback_must_convert" }) {
+					t.Errorf("%s on %s: not refused: %+v", typ, port, issues)
+				}
+				if r := Validate(d); !r.Errors() {
+					t.Errorf("%s on %s: publish would be allowed", typ, port)
+				}
+			}
+		}
+	}
+}
+
+// An action turned off is passed over (the path goes on without it); a question can't be turned off.
+func TestRunCardsTurnedOff(t *testing.T) {
+	d, by := runDoc()
+	for i := range d.Nodes {
+		if d.Nodes[i].ID == by["note"].ID {
+			d.Nodes[i].Enabled = false
+		}
+	}
+	tm, issues := ToTemplate(d, rules.Template{})
+	if len(issues) > 0 || len((*tm.Branches)[0].Before) != 1 || (*tm.Branches)[0].Before[0].Type != TypeSetVariable {
+		t.Errorf("%+v %v", (*tm.Branches)[0].Before, issues)
+	}
+	for i := range d.Nodes {
+		if d.Nodes[i].ID == by["q"].ID {
+			d.Nodes[i].Enabled = false
+		}
+	}
+	if r := Validate(d); !slices.ContainsFunc(r.Issues, func(i Issue) bool {
+		return i.Code == "invalid_config" && i.NodeID == by["q"].ID && strings.Contains(i.Message, "can't be turned off")
+	}) {
+		t.Errorf("%+v", r.Issues)
 	}
 }
 
@@ -197,10 +253,8 @@ func TestPublishedVariables(t *testing.T) {
 	if !slices.Contains(PublishedNames(d), "profile") {
 		t.Errorf("published: %v", PublishedNames(d))
 	}
-	for _, i := range Validate(d).Issues { // the note reads {{profile}}: known because the step before sets it; only the gate may object
-		if i.Code != "not_runnable_yet" || !NotYet[byID(d, i.NodeID).Type] {
-			t.Fatalf("%+v", i)
-		}
+	for _, i := range Validate(d).Issues { // the note reads {{profile}}: known because the step before sets it; nothing may object (the gate is empty since FB1c)
+		t.Fatalf("%+v", i)
 	}
 	ask := node(TypeCheckVariable, "", map[string]any{"variable": "profile", "op": "equals", "value": "remux"})
 	d.Nodes = append(d.Nodes, ask)

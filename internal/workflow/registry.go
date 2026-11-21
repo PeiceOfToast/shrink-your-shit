@@ -41,9 +41,10 @@ var (
 	Ends      = []string{TypeEnd, TypeFail}
 )
 
-// NotYet are the cards this build offers for drafts but can't run yet (Available false): the worker's
-// call site for them is FB1c, which empties this list. Publish refuses a workflow that uses one.
-var NotYet = map[string]bool{TypeSetVariable: true, TypeNote: true, TypeFail: true}
+// NotYet are the cards this build offers for drafts but can't run yet (Available false): Publish refuses
+// a workflow that uses one. Empty since FB1c, which made the worker run every card the registry offers;
+// a later slice that adds a card before its engine half lists it here.
+var NotYet = map[string]bool{}
 
 // IsQuestion, IsAction and IsEnd say what kind of step a type is.
 func IsQuestion(typ string) bool { return slices.Contains(Questions, typ) }
@@ -302,7 +303,7 @@ func Definitions() []StepDefinition {
 			Inputs:      []Port{in}, Outputs: []Port{success, skipped, errPort}, AlwaysOn: true, SideEffects: "commits", Deprecated: true, ReadOnly: true,
 			ConfigSchema: object(nil, nil)}), // its config (the template) is kept as it is: no form
 		// V6a: branches. Each output port has its own words (ui-shop 02:05Z): the UI never makes them up.
-		def(StepDefinition{Type: TypeCheck, RunsAs: RunsQuestion, Category: "filter", Name: "Check the file", Icon: "branch", TypeLabel: "Check",
+		def(StepDefinition{Type: TypeCheck, RunsAs: RunsQuestion, AlwaysOn: true, Category: "filter", Name: "Check the file", Icon: "branch", TypeLabel: "Check",
 			Description: "Sends each file one of two ways, by what it is. Every condition you set must hold for Yes.",
 			Inputs:      []Port{in}, Outputs: []Port{yesPort, noPort}, SideEffects: "none",
 			ConfigSchema: object(map[string]any{
@@ -326,7 +327,7 @@ func Definitions() []StepDefinition {
 				"chapters":         withDefault(enum([]any{"", "yes", "no"}, []string{"Either", "Has chapters", "No chapters"}), "", "Chapters", "segmented"),
 			}, nil)}),
 		// FB1b questions: each sends the file one of two ways; every condition set must hold for Yes.
-		def(StepDefinition{Type: TypeCheckName, RunsAs: RunsQuestion, Category: "filter", Name: "Check the file name", Icon: "branch", TypeLabel: "Check",
+		def(StepDefinition{Type: TypeCheckName, RunsAs: RunsQuestion, AlwaysOn: true, Category: "filter", Name: "Check the file name", Icon: "branch", TypeLabel: "Check",
 			Description: "Sends each file one of two ways, by its name or its path.",
 			Inputs:      []Port{in}, Outputs: []Port{yesPort, noPort}, SideEffects: "none",
 			ConfigSchema: object(map[string]any{
@@ -335,14 +336,14 @@ func Definitions() []StepDefinition {
 				"pattern":       map[string]any{"type": "string", "title": "Text or pattern", "maxLength": 300, "x-placeholder": "Remux"},
 				"caseSensitive": map[string]any{"type": "boolean", "default": false, "title": "Match upper and lower case exactly"},
 			}, []string{"pattern"})}),
-		def(StepDefinition{Type: TypeCheckAge, RunsAs: RunsQuestion, Category: "filter", Name: "Check the file's age", Icon: "branch", TypeLabel: "Check",
+		def(StepDefinition{Type: TypeCheckAge, RunsAs: RunsQuestion, AlwaysOn: true, Category: "filter", Name: "Check the file's age", Icon: "branch", TypeLabel: "Check",
 			Description: "Sends each file one of two ways, by when it was last changed.",
 			Inputs:      []Port{in}, Outputs: []Port{yesPort, noPort}, SideEffects: "none",
 			ConfigSchema: object(map[string]any{
 				"olderDays":   described(map[string]any{"type": "integer", "minimum": 0, "maximum": 36500, "default": 0, "title": "Last changed at least this many days ago"}, "0 for any."),
 				"youngerDays": described(map[string]any{"type": "integer", "minimum": 0, "maximum": 36500, "default": 0, "title": "Last changed at most this many days ago"}, "0 for any."),
 			}, nil)}),
-		def(StepDefinition{Type: TypeCheckVariable, RunsAs: RunsQuestion, Category: "filter", Name: "Check a variable", Icon: "branch", TypeLabel: "Check",
+		def(StepDefinition{Type: TypeCheckVariable, RunsAs: RunsQuestion, AlwaysOn: true, Category: "filter", Name: "Check a variable", Icon: "branch", TypeLabel: "Check",
 			Description: "Sends each file one of two ways, by a variable's value: one the server sets, one of this workflow's, or one a step before set.",
 			Inputs:      []Port{in}, Outputs: []Port{yesPort, noPort}, SideEffects: "none",
 			ConfigSchema: object(map[string]any{
@@ -350,13 +351,13 @@ func Definitions() []StepDefinition {
 				"op":       withDefault(enum([]any{"set", "unset", "equals", "contains", "more", "less"}, []string{"Has a value", "Has no value", "Equals", "Contains", "Is more than", "Is less than"}), "equals", "Test", ""),
 				"value":    templated(described(map[string]any{"type": "string", "title": "Value", "maxLength": 300}, "A value, or a variable like {{resolution}}.")),
 			}, []string{"variable"})}),
-		def(StepDefinition{Type: TypeCheckLibrary, RunsAs: RunsQuestion, Category: "filter", Name: "From this library", Icon: "branch", TypeLabel: "Check",
+		def(StepDefinition{Type: TypeCheckLibrary, RunsAs: RunsQuestion, AlwaysOn: true, Category: "filter", Name: "From this library", Icon: "branch", TypeLabel: "Check",
 			Description: "Sends each file one of two ways, by the library it came from.",
 			Inputs:      []Port{in}, Outputs: []Port{yesPort, noPort}, SideEffects: "none",
 			ConfigSchema: object(map[string]any{
 				"libraries": map[string]any{"type": "array", "title": "Libraries", "items": map[string]any{"type": "string"}, "x-ui": map[string]any{"widget": "libraries"}},
 			}, []string{"libraries"})}),
-		def(StepDefinition{Type: TypeCheckHardLinks, RunsAs: RunsQuestion, Category: "filter", Name: "Shares its data with another file", Icon: "branch", TypeLabel: "Check",
+		def(StepDefinition{Type: TypeCheckHardLinks, RunsAs: RunsQuestion, AlwaysOn: true, Category: "filter", Name: "Shares its data with another file", Icon: "branch", TypeLabel: "Check",
 			Description: "Yes when the original has another name on the same disk (a hard link), so converting it would free no space.",
 			Inputs:      []Port{in}, Outputs: []Port{yesPort, noPort}, SideEffects: "none"}),
 		// FB1b actions: one thing each, before the conversion; the file is not touched.
