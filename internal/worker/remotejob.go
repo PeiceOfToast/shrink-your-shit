@@ -199,6 +199,10 @@ func (r *RemoteJob) Deliver(res RemoteResult) bool {
 	}
 }
 
+// Answer is the channel the run takes a delivered answer from. The run reads it itself; a test of the report path
+// reads what a report delivered, in place of the run.
+func (r *RemoteJob) Answer() <-chan RemoteResult { return r.result }
+
 // RemoteCheckEvery is how often a run waiting for its remote worker checks that the lease still holds.
 var RemoteCheckEvery = 5 * time.Second
 
@@ -234,7 +238,8 @@ func (r *RemoteJob) convert(ctx context.Context, w *Worker, job jobs.Job, snap r
 }
 
 // keptRemote is a refusal a remote worker reported: its code when it is one a remote check can give, else
-// kept_original (an older worker sends its words only).
+// kept_original (an older worker sends its words only). A remote worker's "source missing" or "source damaged" is
+// not trusted: its share mount can be the thing that is missing, not the file.
 func keptRemote(code, reason string) error {
 	switch code {
 	case jobs.ReasonCheckDiffers, jobs.ReasonOutputDamaged, jobs.ReasonCheckNotRun:

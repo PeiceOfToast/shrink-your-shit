@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -198,12 +199,14 @@ func TestReasonConditionMatchesFailureCode(t *testing.T) {
 	defer s.Close()
 	s.SetPaused(false)
 	l, _ := s.AddLibrary("m", t.TempDir(), rules.SliderTemplate(3), true)
+	seeded := map[string]string{} // path -> the code it was stored with
 	for i, c := range []struct {
 		code  string
 		lines []string
 	}{
 		{ReasonDiskFull, nil}, {ReasonCannotWrite, nil}, {ReasonKeptOriginal, nil}, {ReasonStalled, nil}, {ReasonWorkerLost, nil},
 		{ReasonSettingsRejected, nil},
+		{ReasonCheckDiffers, nil}, {ReasonOutputDamaged, nil}, {ReasonCheckNotRun, nil}, {ReasonSourceMissing, nil}, {ReasonSourceDamaged, nil},
 		{ReasonConvertFailed, []string{"[AVEncoder @ 0x1] Unknown encoder 'h264_qsv'"}},
 		{ReasonConvertFailed, []string{"/mnt/out/Movie.mkv: Permission denied"}},
 		{ReasonConvertFailed, []string{"/media/Movie.mkv: No such file or directory"}},
@@ -215,15 +218,23 @@ func TestReasonConditionMatchesFailureCode(t *testing.T) {
 		{ReasonConvertFailed, []string{"Conversion failed!"}},
 		{ReasonConvertFailed, nil},
 	} {
-		id, _ := s.Enqueue(Job{Library: "m", LibraryID: l.ID, Path: fmt.Sprintf("/m/%d.mkv", i)})
+		path := fmt.Sprintf("/m/%d.mkv", i)
+		seeded[path] = c.code
+		id, _ := s.Enqueue(Job{Library: "m", LibraryID: l.ID, Path: path})
 		s.Claim("t")
 		if len(c.lines) > 0 {
 			s.SetFailureSummary(id, FailureSummary{ExitCode: 1, KeyLines: c.lines})
 		}
-		s.Fail(id, c.code, "x")
+		switch c.code { // the refusals of the original are kept jobs; the rest failed
+		case ReasonKeptOriginal, ReasonCheckDiffers, ReasonOutputDamaged, ReasonCheckNotRun, ReasonSourceMissing, ReasonSourceDamaged:
+			s.Keep(id, c.code, "x")
+		default:
+			s.Fail(id, c.code, "x")
+		}
 	}
-	for _, want := range []string{"no_space", "output_not_writable", "check_failed", "stalled", "worker_lost",
-		"settings_rejected", "encoder_unavailable", "source_missing", "source_damaged", "ffmpeg_error"} {
+	for _, want := range []string{"no_space", "output_not_writable", "check_failed", "kept_original", "stalled", "worker_lost",
+		"settings_rejected", "encoder_unavailable", "source_missing", "source_damaged", "ffmpeg_error",
+		"check_differs", "output_damaged", "check_not_run"} {
 		cond, args, ok := ReasonCondition(want)
 		if !ok {
 			t.Fatalf("no condition for %s", want)
@@ -238,14 +249,23 @@ func TestReasonConditionMatchesFailureCode(t *testing.T) {
 			rows.Scan(&path, &code, &raw)
 			var lines []string
 			json.Unmarshal([]byte(raw), &lines)
-			if FailureCode(code, lines) != want {
-				t.Errorf("%s selected %s (%s), which is %s", want, path, code, FailureCode(code, lines))
+			shown := FailureCode(code, lines)
+			if want == ReasonKeptOriginal { // a kept job lists under its stored code, as its detail shows it
+				shown = code
+			}
+			if shown != want {
+				t.Errorf("%s selected %s (%s), which is %s", want, path, code, shown)
 			}
 			got = append(got, path)
 		}
 		rows.Close()
 		if len(got) == 0 {
 			t.Errorf("%s selected nothing", want)
+		}
+		for path, code := range seeded { // every job stored under the code is selected, even one with no key lines
+			if code == want && !slices.Contains(got, path) {
+				t.Errorf("%s did not select %s, stored as %s", want, path, code)
+			}
 		}
 	}
 }

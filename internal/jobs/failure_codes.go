@@ -331,7 +331,7 @@ var classifierOrder = []classifier{
 // classifyKeyLines would give it. ok is false for a code no failure has. Its args go in order.
 func ReasonCondition(code string) (cond string, args []any, ok bool) {
 	stored := map[string][]string{"no_space": {ReasonDiskFull, ReasonLowDiskSpace}, "output_not_writable": {ReasonCannotWrite},
-		"check_failed": {ReasonKeptOriginal}, "stalled": {ReasonStalled}, "worker_lost": {ReasonWorkerLost},
+		"check_failed": {ReasonKeptOriginal}, "kept_original": {ReasonKeptOriginal}, "stalled": {ReasonStalled}, "worker_lost": {ReasonWorkerLost},
 		"settings_rejected": {ReasonSettingsRejected}, "check_differs": {ReasonCheckDiffers}, "output_damaged": {ReasonOutputDamaged}, "check_not_run": {ReasonCheckNotRun}}
 	if codes, found := stored[code]; found {
 		marks := strings.Repeat(",?", len(codes)-1)
