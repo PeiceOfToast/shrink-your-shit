@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
 // PictureTooDifferentWords begins the picture check's refusal in a kept job's stored reason (the worker writes it).
@@ -33,14 +35,28 @@ func FailureCode(errorCode string, keyLines []string) string {
 	return errorCode
 }
 
+// encoderUnavailablePhrases are the phrases that say an encoder can't be used here: the generic ones, then each
+// graphics family's own (rules.UnavailablePhrases).
+func encoderUnavailablePhrases() []string {
+	return append([]string{"unknown encoder", "encoder not found", "error while opening encoder", "could not open encoder",
+		"error initializing output stream", "no device", "device not available", "encoder not available"}, rules.UnavailablePhrases()...)
+}
+
+// containsAny says whether text (lower case) has any of the phrases.
+func containsAny(text string, phrases []string) bool {
+	for _, p := range phrases {
+		if strings.Contains(text, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // classifyKeyLines is the code of a generic ffmpeg failure, from the lines ffmpeg printed (lower case match).
 func classifyKeyLines(lines []string) string {
 	text := strings.ToLower(strings.Join(lines, "\n"))
 	switch {
-	case strings.Contains(text, "unknown encoder"), strings.Contains(text, "encoder not found"),
-		strings.Contains(text, "error while opening encoder"), strings.Contains(text, "could not open encoder"),
-		strings.Contains(text, "error creating a mfx session"), strings.Contains(text, "error initializing output stream"),
-		strings.Contains(text, "no device"), strings.Contains(text, "device not available"), strings.Contains(text, "encoder not available"):
+	case containsAny(text, encoderUnavailablePhrases()):
 		return "encoder_unavailable"
 	case strings.Contains(text, "no space left on device"):
 		return "no_space"
@@ -254,8 +270,7 @@ var classifierOrder = []struct {
 	code     string
 	patterns []string
 }{
-	{"encoder_unavailable", []string{"unknown encoder", "encoder not found", "error while opening encoder", "could not open encoder",
-		"error creating a mfx session", "error initializing output stream", "no device", "device not available", "encoder not available"}},
+	{"encoder_unavailable", encoderUnavailablePhrases()},
 	{"no_space", []string{"no space left on device"}},
 	{"output_not_writable", []string{"permission denied", "read-only file system", "access is denied"}},
 	{"source_missing", []string{"no such file or directory"}},
