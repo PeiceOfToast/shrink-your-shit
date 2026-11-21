@@ -87,3 +87,26 @@ func TestFrozenPositionCeilingSaysThePositionStopped(t *testing.T) {
 		t.Error("no log line says the ceiling stopped an encode whose position had not moved for 2s")
 	}
 }
+
+// A local encode that stopped past twice the source leaves stopOver set on the worker. A remote stall that follows on
+// the same worker must not inherit it: its failure is the plain "no progress" stop, not the size wording (#606 a).
+func TestRemoteStallDoesNotInheritAnEarlierSizeStop(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w := &Worker{ID: "t", StallAfter: 40 * time.Millisecond}
+	w.current = 7
+	w.cancelJob = cancel
+	w.stopOver.Store(true) // left by the earlier local stop
+	rj := NewRemoteJob("lease")
+	rj.ConvertingFrames(1e6, 0, 0, 14, time.Now(), 100) // no frames, bytes or position move: a plain stall
+	stopWatch := w.watchRemoteStall(7, rj)
+	defer stopWatch()
+	select {
+	case <-ctx.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("a remote encode that made no progress was not stopped")
+	}
+	if w.stopOver.Load() {
+		t.Error("the remote stall stopped with the earlier size flag still set: its failure would read as the size stop")
+	}
+}

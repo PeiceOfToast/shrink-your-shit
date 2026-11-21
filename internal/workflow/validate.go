@@ -833,7 +833,11 @@ func summary(n Node) string {
 		case "bigger":
 			return "Only if the new file is bigger"
 		case "runtime_within":
-			return "Only if the running time is within " + strconv.FormatFloat(questionOf(n).Seconds, 'f', -1, 64) + " seconds of the original's"
+			secs := questionOf(n).Seconds
+			if secs <= 0 { // unset: the schema's default, as percent's summary does
+				secs = 2
+			}
+			return "Only if the running time is within " + strconv.FormatFloat(secs, 'f', -1, 64) + " seconds of the original's"
 		}
 		return "Only if at least " + strconv.Itoa(intOf(c, "percent", 10)) + "% was saved"
 	case TypeWait:
