@@ -1081,8 +1081,19 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if exp.DurationSec <= 0 {
 		exp.DurationSec = job.DurationSec
 	}
-	// The main video's rules are filled in below, and the snapshot recorded, once the encoder that runs is
+	// The job keeps what it is about to do and how the result will be judged, recorded here so its log
+	// can show the variables even when a check below stops it (an output path it can't use, a card's
+	// slot it waits for). If that cannot be recorded, it does not start: nothing has been written yet.
+	// The main video's rules are filled in and the snapshot recorded again once the encoder that runs is
 	// known: a card and the processor can make different pictures from the same plan (slice 3).
+	snap := rules.Snapshot{Plan: plan, Expect: exp, Verify: w.verification(exp), Source: &src, Variables: vtable}
+	b, err := json.Marshal(snap)
+	if err == nil {
+		err = w.Queue.RecordPlan(job.ID, string(b), snap.Fingerprint())
+	}
+	if err != nil {
+		return "", retryable(failed("What this conversion will do could not be recorded, so it did not start. Your original was not touched. Press Retry.", err), retryGeneral)
+	}
 
 	// Where the new file goes: beside the original, at its name, or, in replace mode with another file
 	// type, at its name with the new extension (25a-2). A name the Save the result step's template made
@@ -1239,10 +1250,10 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// The new file's rules, now that the encoder that runs is known: the main video by the plan's format,
 	// its height and width (±2 px) and the depth that encoder makes; every other stream as today.
 	exp.MainVideo = plan.MainVideoRules(src, gpu)
-	// The job keeps what it is about to do and how the result will be judged. If that cannot be
-	// recorded, it does not start: your original has not been touched.
-	snap := rules.Snapshot{Plan: plan, Expect: exp, Verify: w.verification(exp), Source: &src, Variables: vtable}
-	b, err := json.Marshal(snap)
+	// The job keeps what it is about to do and how the result will be judged, now with the main video's
+	// rules. If that cannot be recorded, it does not start: your original has not been touched.
+	snap = rules.Snapshot{Plan: plan, Expect: exp, Verify: w.verification(exp), Source: &src, Variables: vtable}
+	b, err = json.Marshal(snap)
 	if err == nil {
 		err = w.Queue.RecordPlan(job.ID, string(b), snap.Fingerprint())
 	}
