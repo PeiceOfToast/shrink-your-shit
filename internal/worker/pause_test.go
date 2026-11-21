@@ -92,7 +92,7 @@ func TestStopFileRecordsUserStopped(t *testing.T) {
 }
 
 // The watchdog: an encode that reports no progress for StallAfter is stopped and fails with a plain
-// reason; the original is untouched. The worker's clock is moved by the test, so the stop is not a real-time
+// reason; the original is untouched. The stall clock is moved by the test, so the stop is not a real-time
 // margin: no report will ever move it, and the test is the only one that does.
 func TestStallWatchdogFailsAStuckEncode(t *testing.T) {
 	s := newScenario(t)

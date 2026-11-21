@@ -229,6 +229,8 @@ type Worker struct {
 	// the job and retry clock: a test that freezes Now (fixed retry times) must not freeze the watchdog, or a
 	// hung encode is never stopped.
 	stallClock func() time.Time
+	// sizeOnDisk, when set, replaces the stat of the running encode's temp file (tests fake the growth with it).
+	sizeOnDisk func(path string) (int64, error)
 
 	// scorePlace, when set, replaces ssimSegment as the per-place scorer (tests fake the scores with it).
 	scorePlace scoreFunc
@@ -248,6 +250,7 @@ type Worker struct {
 	// two sizes, so a stall stop can say why it stopped (stopOver: the stop that fired was for that size).
 	overSize, stopOver atomic.Bool
 	outBytes, srcBytes atomic.Int64
+	diskBytes          atomic.Int64 // the running encode's temp file on disk at the watchdog's last check: its growth is progress
 	// the running job's run counters (log-spec L2 summary): the ffmpeg runs it needed and the bytes it wrote.
 	passes, bytesWritten atomic.Int64
 	statsCounting        atomic.Bool // false: this job's counters are not recorded (a remote job, whose runs are not all here)
@@ -905,12 +908,15 @@ func reachedEnd(outUS, durationSec float64) bool {
 
 // watchStall stops job id (stopStall) if its encode reports no progress for stallAfter (stallLimit once it is
 // finishing). The returned func ends the watch. Checks after the encode have their own time limits (slice 10).
-func (w *Worker) watchStall(id int64) func() {
+func (w *Worker) watchStall(job jobs.Job, out string) func() {
+	id := job.ID
 	now := w.stallNow()
 	w.progressAt.Store(now.UnixNano())
 	w.positionAt.Store(now.UnixNano())
 	w.finishing.Store(false)
 	w.overSize.Store(false)
+	w.diskBytes.Store(0)
+	w.srcBytes.Store(job.SizeBefore)
 	after := w.stallAfter()
 	done := make(chan struct{})
 	stopFor := func(limit time.Duration) {
@@ -934,12 +940,24 @@ func (w *Worker) watchStall(id int64) func() {
 	go func() {
 		t := time.NewTicker(max(after/20, 10*time.Millisecond))
 		defer t.Stop()
+		var seen int64 // the temp file's size at the last check
 		for {
 			select {
 			case <-done:
 				return
 			case <-t.C:
 				now := w.stallNow() // the watchdog's clock: tests move it by hand, production's is the wall clock
+				// one stat a tick: a temp file that grew since the last check is the encode writing, alive while the
+				// output stays within twice the source; past that it is not progress, and the stop says why
+				if n, ok := w.tempSize(out); ok && n > seen {
+					seen = n
+					w.diskBytes.Store(n)
+					if outputWithin(job.SizeBefore, n) {
+						w.progressAt.Store(now.UnixNano())
+					} else {
+						w.overSize.Store(true)
+					}
+				}
 				finishing := w.finishing.Load()
 				limit := w.stallLimit(after, finishing)
 				if now.Sub(time.Unix(0, w.progressAt.Load())) >= limit {
@@ -956,6 +974,19 @@ func (w *Worker) watchStall(id int64) func() {
 		}
 	}()
 	return func() { close(done) }
+}
+
+// tempSize is the temp file's size on disk, false when it cannot be read (sizeOnDisk replaces the stat in tests).
+func (w *Worker) tempSize(path string) (int64, bool) {
+	if w.sizeOnDisk != nil {
+		n, err := w.sizeOnDisk(path)
+		return n, err == nil
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0, false
+	}
+	return fi.Size(), true
 }
 
 // watchRemoteStall is watchStall for a remote worker's encode: the worker reports its position, and the
@@ -2814,9 +2845,10 @@ func (w *Worker) encodeRun(ctx context.Context, job jobs.Job, args []string) (er
 func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (string, int64, error) {
 	var encErr string
 	var terr error
-	frames := int64(-1) // the last frame count ffmpeg reported
-	wrote := int64(0)   // the most bytes it reported writing in this attempt (the run counters, L2)
-	stopWatch := w.watchStall(job.ID)
+	frames := int64(-1)      // the last frame count ffmpeg reported
+	wrote := int64(0)        // the most bytes it reported writing in this attempt (the run counters, L2)
+	out := args[len(args)-1] // the output (the temp file) is the last argument (rules.Plan.FFmpegArgs)
+	stopWatch := w.watchStall(job, out)
 	w.quietOn.Store(true) // R9's quiet warning: the stall watcher checks it with this clock
 	w.outputSeen(w.stallNow())
 	defer w.quietOn.Store(false)
@@ -2827,11 +2859,14 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 	encErr, terr = media.TranscodeLines(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
 		// the encode is alive while its position moves, or while its frame count or bytes written grow and the output
 		// stays within twice the source's size (a runaway output past that is not progress). out_time follows the
-		// most-behind stream, so it freezes in a subtitle gap while frames still go on (bug 2).
+		// most-behind stream, so it freezes in a subtitle gap while frames still go on (bug 2). The output's size is the
+		// larger of ffmpeg's total_size and the temp file's size on disk (the watchdog's check): a faststart rewrite or
+		// a frozen progress block still shows the file growing.
 		posMoved := p.OutTimeUS > at // a position further on: one that repeats is not progress
-		outputOK := outputWithin(job.SizeBefore, p.TotalSize)
+		total := max(p.TotalSize, w.diskBytes.Load())
+		outputOK := outputWithin(job.SizeBefore, total)
 		w.overSize.Store(job.SizeBefore > 0 && !outputOK) // an unknown source size is not "over twice": there is no bound
-		w.outBytes.Store(p.TotalSize)
+		w.outBytes.Store(total)
 		w.srcBytes.Store(job.SizeBefore)
 		alive := posMoved || (outputOK && (p.Frame > frames || p.TotalSize > wrote))
 		frames = p.Frame
