@@ -20,7 +20,7 @@ func TestBitrateLevelAndVBR(t *testing.T) {
 	// HEVC (the default) is 60% of the H.264 figure: 720p Medium is 2400 kbps, the peak 1.5x that
 	p := s.Template().Compile(h264(1920, 1080, 8000))
 	args := strings.Join(p.FFmpegArgs("in.mkv", "out.mkv"), " ")
-	if p.Video.TargetKbps != 2400 || p.Video.MaxRateKbps != 3600 || !strings.Contains(args, "-b:v:0 2400k") || strings.Contains(args, "-crf 23") ||
+	if p.Video.TargetKbps != 2400 || p.Video.MaxRateKbps != 3600 || !strings.Contains(args, "-b:v:0 2400k") || strings.Contains(args, "-crf:v:0 23") ||
 		!strings.Contains(args, "-maxrate:v:0 3600k -bufsize:v:0 7200k") {
 		t.Errorf("720p Medium level, HEVC: %+v\n%s", p.Video, args)
 	}
@@ -84,7 +84,7 @@ func TestLegacyBitrateMeaningsKeepTheirFiles(t *testing.T) {
 	}
 	p := s.Template().Compile(h264(1920, 1080, 8000))
 	args := strings.Join(p.FFmpegArgs("in.mkv", "out.mkv"), " ")
-	if p.Video.TargetKbps != 2500 || p.Video.MaxRateKbps != 3000 || !strings.Contains(args, "-b:v:0 2500k") || strings.Contains(args, "-crf 23") ||
+	if p.Video.TargetKbps != 2500 || p.Video.MaxRateKbps != 3000 || !strings.Contains(args, "-b:v:0 2500k") || strings.Contains(args, "-crf:v:0 23") ||
 		!strings.Contains(args, "-maxrate:v:0 3000k -bufsize:v:0 6000k") {
 		t.Errorf("720p Medium vbr_legacy, 3 Mbps limit: %+v\n%s", p.Video, args)
 	}
@@ -92,7 +92,7 @@ func TestLegacyBitrateMeaningsKeepTheirFiles(t *testing.T) {
 	q := s
 	q.RateControl, q.VBRMaxKbps = "quality_legacy", 0
 	if p := q.Template().Compile(h264(1920, 1080, 8000)); p.Video.TargetKbps != 0 || p.Video.MaxRateKbps != 2500 ||
-		!slices.Contains(p.FFmpegArgs("in.mkv", "out.mkv"), "-crf") {
+		!slices.Contains(p.FFmpegArgs("in.mkv", "out.mkv"), "-crf:v:0") {
 		t.Errorf("quality_legacy: %+v", p.Video)
 	}
 	// VP9's constant quality (-b:v 0) gives way to the target

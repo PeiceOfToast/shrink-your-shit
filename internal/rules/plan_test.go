@@ -17,7 +17,7 @@ import (
 // re-encode, the one change to these arguments on purpose; the decisions and the rest are as before.
 func todayArgs(in, out, crf, preset string) string {
 	return "-y -nostdin -loglevel level+verbose -progress pipe:1 -nostats -i " + in +
-		" -map 0 -map -0:d -c copy -max_muxing_queue_size 4096 -c:v:0 libx265 -crf " + crf + " -preset " + preset + " -tag:v:0 hvc1 " + staleVideoArgs + " " + out
+		" -map 0 -map -0:d -c copy -max_muxing_queue_size 4096 -c:v:0 libx265 -crf:v:0 " + crf + " -preset:v:0 " + preset + " -tag:v:0 hvc1 " + staleVideoArgs + " " + out
 }
 
 // probeSet is every probe in internal/media/testdata plus synthetic files around the default rule's
@@ -266,7 +266,7 @@ func TestPlanCarriesABitrateCap(t *testing.T) {
 	p := LegacyTemplate(Default(), "replace").Compile(media.Info{VideoCodec: "h264", BitrateKbps: 8000})
 	p.Video.MaxRateKbps = 6000
 	got := strings.Join(p.FFmpegArgs("a.mkv", "b.mkv"), " ")
-	if !strings.Contains(got, "-crf 26 -preset medium -maxrate:v:0 6000k -bufsize:v:0 12000k -tag:v:0 hvc1 "+staleVideoArgs+" b.mkv") {
+	if !strings.Contains(got, "-crf:v:0 26 -preset:v:0 medium -maxrate:v:0 6000k -bufsize:v:0 12000k -tag:v:0 hvc1 "+staleVideoArgs+" b.mkv") {
 		t.Errorf("%s", got)
 	}
 }

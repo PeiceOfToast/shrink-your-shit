@@ -37,11 +37,23 @@ func FailureCode(errorCode string, keyLines []string) string {
 	return errorCode
 }
 
+// optionRejectionPhrases are ffmpeg's lines when it or an encoder refuses an option it was given: libopus turning
+// down -global_quality (real ffmpeg 7.0.2), and an option name ffmpeg does not know (-cq on a build without that
+// encoder). An encoder option that cannot be used is the workflow's settings' fault (A10).
+var optionRejectionPhrases = []string{"quality-based encoding not supported", "unrecognized option", "error splitting the argument list"}
+
 // encoderUnavailablePhrases are the phrases that say an encoder can't be used here: the generic ones, then each
 // graphics family's own (rules.UnavailablePhrases).
 func encoderUnavailablePhrases() []string {
 	return append([]string{"unknown encoder", "encoder not found", "error while opening encoder", "could not open encoder",
 		"error initializing output stream", "no device", "device not available", "encoder not available"}, rules.UnavailablePhrases()...)
+}
+
+// OptionRejectedLine says whether a line is ffmpeg or an encoder refusing an option. Such a line is one of a
+// failure's key lines even when it never says "error": the worker keeps "error" lines, and libopus's refusal
+// ("Quality-based encoding not supported") would otherwise be lost, taking the settings' fault with it (A10).
+func OptionRejectedLine(l string) bool {
+	return containsAny(strings.ToLower(l), optionRejectionPhrases)
 }
 
 // containsAny says whether text (lower case) has any of the phrases.
@@ -61,6 +73,11 @@ func classifyKeyLines(lines []string) string {
 	case strings.Contains(text, "could not write header") && strings.Contains(text, "supported for"):
 		// s4: ffmpeg stopped at the new file's header because its type can't hold a track the plan maps
 		// in. Both lines are needed: a bare "Could not write header" stays ffmpeg_error (slice 15).
+		return "settings_rejected"
+	case containsAny(text, optionRejectionPhrases):
+		// A10: ffmpeg refused an encoder option itself (a quality setting that reached the audio encoder, a flag
+		// no encoder knows). The workflow's settings are the fault: it is not the card's, and the processor would
+		// stop on the same option.
 		return "settings_rejected"
 	case containsAny(text, encoderUnavailablePhrases()):
 		return "encoder_unavailable"
@@ -179,6 +196,11 @@ func FailureWords(code string, f FailureFacts) (message, hint string) {
 	case "settings_rejected":
 		// slice 15: the worker's own sentence is headerWords' ("ffmpeg couldn't write the new file: …
 		// Your original was not touched."), which it stored as the job's words
+		if containsAny(strings.ToLower(strings.Join(f.KeyLines, "\n")), optionRejectionPhrases) {
+			// A10: an encoder option the workflow sets cannot be used for this file (a quality setting that reached
+			// the audio encoder, say), not a track the new file's type cannot hold
+			return f.Stored, "Change the workflow: one of its encoder settings can't be used for this file. Retrying gives the same result."
+		}
 		if f.Stored != "" {
 			return f.Stored, "Change the workflow: this file type can't hold a track the way the workflow maps it. Retrying gives the same result."
 		}
@@ -318,6 +340,7 @@ type classifier struct {
 // classifierOrder is classifyKeyLines' precedence: the first code whose lines match is the failure's.
 var classifierOrder = []classifier{
 	{code: "settings_rejected", all: []string{"could not write header", "supported for"}},
+	{code: "settings_rejected", patterns: optionRejectionPhrases},
 	{code: "encoder_unavailable", patterns: encoderUnavailablePhrases()},
 	{code: "no_space", patterns: []string{"no space left on device"}},
 	{code: "output_not_writable", patterns: []string{"permission denied", "read-only file system", "access is denied"}},

@@ -663,6 +663,17 @@ func (w *Worker) jobf(id int64, format string, a ...any) {
 	}
 }
 
+// recordEncodeStart puts the encode step's command in the database as the attempt starts, so the job's page
+// shows the command that is running, not the one that just failed: after a fall-back the step named the failed
+// graphics encode until the retry ended (A10). recordEncode replaces it with the outcome when the attempt ends.
+func (w *Worker) recordEncodeStart(id int64, args []string, started time.Time) {
+	if w.Queue == nil {
+		return
+	}
+	w.Queue.RecordRunStep(id, jobs.RunStep{Index: 0, Name: "encode", StartedAt: started.UTC().Format(time.RFC3339),
+		Command: "ffmpeg " + strings.Join(args, " ")})
+}
+
 // recordEncode keeps the encode step in the database: its command, how long it took, the ffmpeg lines it wrote
 // and, when it failed, the failure summary (the last error lines of ffmpeg, or the last lines if none report one).
 func (w *Worker) recordEncode(id int64, args []string, started time.Time, encErr string, terr error, probe string) {
@@ -694,7 +705,7 @@ func (w *Worker) recordEncode(id int64, args []string, started time.Time, encErr
 		if jobs.InfoLine(l) || jobs.BenignNote(l) != "" { // R8: a harmless line is not a failure's reason
 			continue
 		}
-		if strings.Contains(strings.ToLower(l), "error") || strings.Contains(strings.ToLower(l), "invalid") {
+		if strings.Contains(strings.ToLower(l), "error") || strings.Contains(strings.ToLower(l), "invalid") || jobs.OptionRejectedLine(l) {
 			keys = append(keys, l)
 		}
 	}
@@ -2683,6 +2694,7 @@ func (w *Worker) gpuFailed(ctx context.Context, err error, stderr string, full b
 // report says what it read and decoded (slice 13), and the error lines alone, which every other reader of
 // the log expects (as -v error wrote it).
 func (w *Worker) encodeRun(ctx context.Context, job jobs.Job, args []string) (errText, raw string, frames int64, err error) {
+	w.recordEncodeStart(job.ID, args, w.now())
 	raw, frames, err = w.encodeLocal(ctx, job, args)
 	return media.ErrorLines([]byte(raw)), raw, frames, err
 }

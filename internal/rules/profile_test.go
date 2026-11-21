@@ -37,8 +37,8 @@ func TestProfileForLookup(t *testing.T) {
 // nvenc's profile gives the quality and the 10-bit pixel format the plan used before the move.
 func TestNvencProfileMatchesTheSwitches(t *testing.T) {
 	p, _ := ProfileFor("hevc_nvenc")
-	if got := p.quality(22); !reflect.DeepEqual(got, []string{"-rc", "vbr", "-cq", "22"}) {
-		t.Errorf("quality(22) = %v", got)
+	if got := p.quality("v:0", 22); !reflect.DeepEqual(got, []string{"-rc:v:0", "vbr", "-cq:v:0", "22"}) {
+		t.Errorf("quality(v:0, 22) = %v", got)
 	}
 	if p.PixFmt10 != "p010le" {
 		t.Errorf("PixFmt10 = %q", p.PixFmt10)
