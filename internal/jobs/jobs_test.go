@@ -26,14 +26,15 @@ func open(t *testing.T) *Store {
 }
 
 func TestCanTransition(t *testing.T) {
-	// The moves the code makes (slice 10): Done -> Queued is Convert again, which the old map denied.
-	ok := [][2]Status{{Queued, Running}, {Running, Done}, {Running, Failed}, {Running, Queued}, {Failed, Queued}, {Running, Kept}, {Kept, Queued}, {Done, Queued}}
+	// The moves the code makes (slice 10): Done -> Queued is Convert again only, which moves along that
+	// edge itself (moveAlong); the shared map must keep refusing it to every generic move.
+	ok := [][2]Status{{Queued, Running}, {Running, Done}, {Running, Failed}, {Running, Queued}, {Failed, Queued}, {Running, Kept}, {Kept, Queued}}
 	for _, c := range ok {
 		if !CanTransition(c[0], c[1]) {
 			t.Errorf("%s -> %s should be allowed", c[0], c[1])
 		}
 	}
-	bad := [][2]Status{{Queued, Done}, {Queued, Failed}, {Done, Running}, {Failed, Done}, {Failed, Running}, {Queued, Kept}, {Kept, Done}, {Kept, Running}, {Done, Kept}}
+	bad := [][2]Status{{Queued, Done}, {Queued, Failed}, {Done, Running}, {Done, Queued}, {Failed, Done}, {Failed, Running}, {Queued, Kept}, {Kept, Done}, {Kept, Running}, {Done, Kept}}
 	for _, c := range bad {
 		if CanTransition(c[0], c[1]) {
 			t.Errorf("%s -> %s should be rejected", c[0], c[1])

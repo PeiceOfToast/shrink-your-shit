@@ -160,7 +160,7 @@ func (s *Store) ConvertAgain(id int64) error {
 		return AgainError{c}
 	}
 	// a fresh run: it runs with the library's workflow as it is now, so it records that revision
-	n, err := s.moveWhere(s.db, Done, Queued,
+	n, err := s.moveAlong(s.db, Done, Queued,
 		`, progress=0, error='', error_code='', worker='', attempts=0, retry_at='', fallback='', again_from=?, workflow_rev=`+jobRevSQL,
 		[]any{c.originalID}, `id=?`, id)
 	if err != nil {

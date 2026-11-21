@@ -42,7 +42,7 @@ var allowed = map[Status][]Status{
 	Running: {Done, Failed, Kept, Queued}, // Queued: worker went away, put it back
 	Failed:  {Queued},
 	Kept:    {Queued},
-	Done:    {Queued}, // Convert again only
+	Done:    {}, // Convert again's Done -> Queued is its own edge (moveAlong), not one the generic moves get
 }
 
 // CanTransition reports whether from -> to is legal.
@@ -352,6 +352,19 @@ func (s *Store) moveWhere(x execer, from, to Status, set string, setArgs []any, 
 	if !CanTransition(from, to) {
 		return 0, fmt.Errorf("cannot go from %s to %s", from, to)
 	}
+	return s.moveRows(x, from, to, set, setArgs, where, whereArgs...)
+}
+
+// moveAlong moves jobs along one edge the shared state machine does not allow. Convert again's
+// Done -> Queued is the only one: every generic move (Release, RetryLater, FallBack) must keep refusing a
+// finished job, or one that finishes between a list of running jobs and the release is converted twice
+// (review-583, finding 1).
+func (s *Store) moveAlong(x execer, from, to Status, set string, setArgs []any, where string, whereArgs ...any) (int64, error) {
+	return s.moveRows(x, from, to, set, setArgs, where, whereArgs...)
+}
+
+// moveRows updates the rows matching from and where; it does not judge the edge: its callers do.
+func (s *Store) moveRows(x execer, from, to Status, set string, setArgs []any, where string, whereArgs ...any) (int64, error) {
 	q := `UPDATE jobs SET status=?, updated=?` + set + ` WHERE status=? AND (` + where + `)`
 	a := append([]any{to, s.stamp()}, setArgs...)
 	a = append(a, from)
