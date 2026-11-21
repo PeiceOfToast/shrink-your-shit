@@ -15,7 +15,7 @@ import (
 
 // finishExec reports the encode at the file's length (scenarioDuration, 100 s), or at 5 s of it with stuck: the
 // finishing step (a +faststart rewrite) then prints nothing. reported is closed once that report has reached the
-// worker; the test then moves the worker's clock, so the silence is measured rather than waited for. Closing
+// worker; the test then moves the stall clock, so the silence is measured rather than waited for. Closing
 // release lets the encode finish as the fake makes it; with no release it waits for the stall stop.
 type finishExec struct {
 	*media.FakeExec
