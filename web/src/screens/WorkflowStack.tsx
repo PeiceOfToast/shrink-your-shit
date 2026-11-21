@@ -12,7 +12,7 @@ import { getDraft, getLadder, getWorkflow, listTemplates, listWorkflows, patchWo
 import { Link, navigate, onLeave } from "../router";
 import { Browse } from "../FolderPicker";
 import { OwnVars, VarInput, builtinsOf, takesVars, varListFor, varProblems, withOwn } from "../VarInput";
-import { kindWords, refFits } from "../refFit";
+import { refProblem } from "../refFit";
 import "../styles/variables.css";
 import { getSettings, listLibraries, shrunk } from "../libraryApi";
 import type { TemplateVar } from "../mock/variables";
@@ -56,7 +56,7 @@ function SrtFiles() {
 // other problem. The flow builder owns this screen (manager, 02:10Z).
 const isRef = (v: unknown) => typeof v === "string" && /^\{\{[a-z][a-z0-9_]*\}\}$/.test(v);
 const refName = (v: unknown) => (isRef(v) ? (v as string).slice(2, -2) : "");
-type RefEntry = { name: string; value: string | null; type?: string; fits: boolean; secret: boolean };
+type RefEntry = { name: string; value: string | null; type?: string; problem: string };
 function RefPick({ fid, title, value, set, back, selectRef, none, s, wf }: { fid: string; title: string; value: unknown; set: (v: unknown) => void; back: () => void; selectRef: RefObject<HTMLSelectElement | null>; none: unknown; s: JSONSchema; wf: string }) {
   // W1 (#521), W2 (contract 09:33Z): a typed setting takes one whole {{name}}: the workflow's own variable (which wins a
   // shared name), a server-wide one, or one of the file's own values. The built-ins fill text fields only (ui-shop
@@ -64,14 +64,16 @@ function RefPick({ fid, title, value, set, back, selectRef, none, s, wf }: { fid
   // (variable_wrong_type comes back on the field). A secret never sets one, so it is listed but can't be chosen.
   const own = useContext(OwnVars), cur = refName(value);
   const list = useData(() => varListFor(wf, true), [wf]).data, served = list && !failed(list) ? list.variables : [];
-  const entry = (name: string, type: string | undefined, value: string | null): RefEntry => ({ name, type, value, secret: type === "secret", fits: type !== "secret" && refFits(s, type) });
+  // ui-shop review #596: the fit follows the value too (text that reads as a number fills a number setting; a
+  // fraction doesn't fill a whole-number one; no value yet is refused), the way the server checks on save
+  const entry = (name: string, type: string | undefined, value: string | null, file = false): RefEntry => ({ name, type, value, problem: refProblem(s, { type, value, file }) });
   const mine = own.map((v) => entry(v.name, v.type, v.type === "secret" ? null : v.hasValue === false || v.value == null ? null : String(v.value)));
   const ownNames = new Set(mine.map((v) => v.name));
   const server = served.filter((v) => v.group === "Server" && !ownNames.has(v.name)).map((v) => entry(v.name, v.type, v.value));
-  const file = served.filter((v) => v.wholeFieldOnly).map((v) => entry(v.name, v.type, v.value));
+  const file = served.filter((v) => v.wholeFieldOnly).map((v) => entry(v.name, v.type, v.value, true));
   const known = [...mine, ...server, ...file].some((v) => v.name === cur);
-  const label = (v: RefEntry) => "{{" + v.name + "}}" + (v.secret ? " · a secret can't set this" : !v.fits ? " · " + kindWords(v.type) + " won't fit here" : v.value != null && v.value !== "" ? " · " + v.value : "");
-  const group = (name: string, vars: RefEntry[]) => vars.length > 0 && <optgroup label={name}>{vars.map((v) => <option key={v.name} value={v.name} disabled={v.secret || !v.fits}>{label(v)}</option>)}</optgroup>;
+  const label = (v: RefEntry) => "{{" + v.name + "}}" + (v.problem ? " · " + v.problem : v.value != null && v.value !== "" ? " · " + v.value : "");
+  const group = (name: string, vars: RefEntry[]) => vars.length > 0 && <optgroup label={name}>{vars.map((v) => <option key={v.name} value={v.name} disabled={v.problem !== ""}>{label(v)}</option>)}</optgroup>;
   return (
     <div className="field">
       <label htmlFor={fid}>{title}</label>
@@ -85,7 +87,7 @@ function RefPick({ fid, title, value, set, back, selectRef, none, s, wf }: { fid
         </select>
         <button className="btn sm ghost nowrap" type="button" onClick={back}>Type a value instead</button>
       </div>
-      <span className="hint" id={fid + "-ref"}>{mine.length === 0 && server.length === 0 ? "This workflow has no variables yet: add one in Variables above or in Settings, or pick one of the file's own values." : "The variable's value must fit the setting; a kind that won't is greyed. A secret can't be used here."}</span>
+      <span className="hint" id={fid + "-ref"}>{mine.length === 0 && server.length === 0 ? "This workflow has no variables yet: add one in Variables above or in Settings, or pick one of the file's own values." : "The variable's value must fit the setting; one that won't is greyed and says why. A file value is checked once the job has the file."}</span>
     </div>);
 }
 

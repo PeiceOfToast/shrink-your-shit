@@ -16,7 +16,13 @@ export function mockVariables(own: Variable[] = []): VarList {
     sample: { path: "/media/Movie (2019).mkv", builtIn: true },
     variables: [
       ...builtIns(),
-      ...own.map((x) => v(x.name, "Workflow", x.description ?? "", x.type === "secret" || x.value == null ? null : String(x.value))),
+      // W2: the server's variables and the file's own values, with the typed-setting picker's keys (ui-shop review #596)
+      { ...v("house_quality", "Server", "The quality every library starts from", "3"), type: "number" },
+      { ...v("keep_hdr", "Server", "Whether HDR is kept", "true"), type: "bool" },
+      { ...v("label", "Server", "A word for file names", "shrunk"), type: "string" },
+      { ...v("file.size", "File values", "The file's size in bytes", "4215883110"), type: "number", wholeFieldOnly: true },
+      { ...v("source.hdr", "File values", "Whether the video is HDR", null), type: "boolean", wholeFieldOnly: true },
+      ...own.map((x) => ({ ...v(x.name, "Workflow", x.description ?? "", x.type === "secret" || x.value == null ? null : String(x.value)), type: x.type })),
     ],
   };
 }
