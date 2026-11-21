@@ -66,7 +66,7 @@ function Choice<T extends string | number>({ legend, name, value, options, onPic
 // Settings > Appearance (DESIGN/v2/THEMES.md): changes show at once and are kept on Save; leaving with unsaved
 // changes asks. The advanced theme editor (custom colours, presets, import/export) comes later.
 // Settings' tabs (SCREENS V9); the others come with their settings.
-export function SettingsTabs({ at }: { at: "general" | "shares" | "appearance" | "processing" | "safety" | "connections" | "notifications" | "backup" | "health" | "about" }) {
+export function SettingsTabs({ at }: { at: "general" | "shares" | "appearance" | "processing" | "safety" | "connections" | "notifications" | "variables" | "backup" | "health" | "about" }) {
   const tab = (k: typeof at, label: string) => <Link to={"/settings/" + k} aria-current={at === k ? "page" : undefined}>{label}</Link>;
   // the shares tab shows only when the server has the shares API (404 = not built yet)
   const [shares, setShares] = useState(true);
@@ -76,7 +76,7 @@ export function SettingsTabs({ at }: { at: "general" | "shares" | "appearance" |
   useEffect(() => { const n = nav.current, a = n?.querySelector<HTMLElement>("[aria-current=page]"); if (n && a) n.scrollLeft += a.getBoundingClientRect().left - n.getBoundingClientRect().left - (n.clientWidth - a.offsetWidth) / 2; }, [at, shares]);
   return (
     <nav className="tabs" ref={nav} aria-label="Settings sections">
-      {tab("general", "General")}{shares && tab("shares", "Network shares")}{tab("appearance", "Appearance")}{tab("processing", "Processing")}{tab("safety", "Safety")}{tab("connections", "Connections")}{tab("notifications", "Notifications")}{tab("backup", "Backup")}{tab("health", "Health")}{tab("about", "About")}
+      {tab("general", "General")}{shares && tab("shares", "Network shares")}{tab("appearance", "Appearance")}{tab("processing", "Processing")}{tab("safety", "Safety")}{tab("connections", "Connections")}{tab("notifications", "Notifications")}{tab("variables", "Variables")}{tab("backup", "Backup")}{tab("health", "Health")}{tab("about", "About")}
     </nav>);
 }
 
