@@ -774,28 +774,6 @@ func sourceReport(src media.Info, log string) (st media.StreamStats, have bool) 
 	return st, true
 }
 
-// lostCountVFRGap is how far the report's count must be from duration × rate before a VFR-marked original's
-// short count is taken as its variable rate rather than as lost frames. It sits between the damaged .ts the real
-// tests keep (6% short) and the VFR mkv (a third short).
-const lostCountVFRGap = 0.10
-
-// lostFramesExcused says whether a VFR original's short count is explained by its rate, so the frames the decode
-// did not take are not damage. The probe's own mark (average and nominal rate more than 1% apart) only says the
-// rate varies; a steady file can lose frames and still be marked, since a 2% mismatch is enough. What excuses the
-// shortfall is the encode's report putting the count far from duration × rate (the VFR mkv: a third fewer). A
-// small shortfall on a marked file is still lost frames (review-588 round 1), and a file whose rates match never
-// gets its shortfall excused.
-func lostFramesExcused(src media.Info, st media.StreamStats, haveReport bool, expected int64) bool {
-	v := src.Video()
-	if v == nil || !v.VFR {
-		return false
-	}
-	if !haveReport || st.Frames <= 0 || expected <= 0 {
-		return true // no usable count: the rate × duration guess is no evidence against a variable rate
-	}
-	return math.Abs(float64(st.Frames-expected)) > lostCountVFRGap*float64(expected)
-}
-
 // sourceVFR says whether the original's video looks variable frame rate (slice 13): the probe's own mark
 // (average and nominal rates more than 1% apart), or, when the encode reported it, a decoded count more
 // than 1% away from duration × rate. The second catches an mkv, where ffprobe reports the nominal rate as
@@ -866,12 +844,14 @@ func withLostFrames(rep sourceDamageReport, frames, decoded int64) sourceDamageR
 }
 
 // damagedPictures is the damage the original shows when the encode reported it (slice 13). Its decode-error
-// count is the damaged-picture count; frames the decode did not take (the probe counted them, and the report's
-// decoded count is short of them) stay evidence too, so a stretch that lost frames without a message is still
-// refused. The text expressions' damage stays as the floor (file-level damage is kept by sourceDamage).
-func damagedPictures(rep sourceDamageReport, st media.StreamStats, lost, expected, decoded int64) sourceDamageReport {
-	if lost > 0 && decoded >= 0 && decoded < expected {
-		rep = withLostFrames(rep, expected, decoded)
+// count is the damaged-picture count; frames the decode did not take (the report read more packets than it
+// decoded) stay evidence too, so a stretch that lost frames without a message is still refused. base is the
+// frames the stream should have had (duration × rate); decoded is what the decoder produced, with any leading
+// undecodable pictures credited. The text expressions' damage stays as the floor (file-level damage is kept by
+// sourceDamage).
+func damagedPictures(rep sourceDamageReport, st media.StreamStats, lost, base, decoded int64) sourceDamageReport {
+	if lost > 0 && decoded >= 0 && decoded < base {
+		rep = withLostFrames(rep, base, decoded)
 	}
 	if n := int(st.DecodeErrors); n > rep.Pictures {
 		rep.Pictures = n

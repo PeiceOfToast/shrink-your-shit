@@ -1579,32 +1579,38 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// Errors ffmpeg reported while reading the original mean it is damaged: converting it would bake
 	// the damage in and delete the only copy that might still be repaired or fetched again.
 	probeVFR := src.Video() != nil && src.Video().VFR
-	if probeVFR { // a variable-rate original's rate says nothing about how many frames it should have (slice 13)
-		if haveReport {
-			w.jobf(job.ID, ": the original is variable frame rate; ffmpeg decoded %d frames from it, and that is the count the new file is checked against", stats.Frames)
-		} else {
-			w.jobf(job.ID, ": the original is variable frame rate and the conversion did not report its frame count, so the frame count is not checked")
-		}
-	}
-	expected, exact := sourceFrameCount(src) // the probe's picture count: evidence of frames the encode did not take
+	expected, exact := sourceFrameCount(src) // the probe's picture count
 	decodedFrames := decoded                 // what the encode decoded (the probe's count when it reported none)
-	if haveReport && stats.Frames > 0 {
-		decodedFrames = stats.Frames
+	if haveReport {
+		decodedFrames = stats.Frames // the report's own count, even zero: nothing decoded is total loss
 	}
-	frames := expected // the damage share's denominator: the encode's own decoded count when there is one (slice 13)
-	if haveReport && stats.Frames > 0 {
+	// The damage share's denominator: the probe's picture count, or the report's decoded count when that is
+	// larger. The frames the decode did not take are counted as damage, so shrinking the denominator by them
+	// would count them twice (review-588 round 2: 5 pictures of 500 is 1% and converts, of 498 it is not).
+	frames := expected
+	if haveReport && stats.Frames > frames {
 		frames = stats.Frames
 	}
+	// Frames the decode did not take. The report's read/decoded counts decide whether there is a loss at all: a
+	// stream whose decode took every packet it read lost nothing, whatever its rates say (the VFR mkv: 180 read,
+	// 180 decoded; the probe cannot mark it on ffmpeg 8). When packets went unread or undecoded the shortfall
+	// against duration × rate is lost frames (a damaged .ts: reads 472 of 500 and decodes 470, so 30 are gone,
+	// review-588 round 2; an edit-list mp4 reads 250 packets and decodes the 240 it presents, which is not loss).
+	// Without a report the duration × rate guess decides, and it is no count for a variable-rate original.
+	base := expected // the frames the stream had
 	lost := expected
-	// A count from the container's duration is a guess, and a variable-rate original's rate says nothing about how
-	// many frames it should have: neither is evidence of lost frames. A steady-rate stream whose decode took fewer
-	// frames than its rate × duration says did lose them, even though the count test marks it variable rate too
-	// (a damaged .ts: probeVFR false, 470 of 500 decoded, kept as damaged like it was before slice 13). A small
-	// shortfall on a variable-rate marked file is still lost frames (review-588 round 1).
-	if !exact || lostFramesExcused(src, stats, haveReport, expected) {
+	if haveReport {
+		lost = 0
+		if stats.Packets > stats.Frames {
+			lost = expected - stats.Frames
+			if lost < 0 {
+				lost = 0
+			}
+		}
+	} else if !exact || probeVFR {
 		lost = 0
 	}
-	if lost > 0 && decodedFrames >= 0 && decodedFrames < expected && src.MainVideoOrdinal() >= 0 {
+	if lost > 0 && decodedFrames >= 0 && decodedFrames < base && src.MainVideoOrdinal() >= 0 {
 		// Pictures before the first keyframe of a stream that starts mid-group-of-pictures cannot be decoded in any
 		// file: they are not lost frames. They count as accounted for; damage after the first keyframe still counts.
 		lctx, lcancel := context.WithTimeout(ctx, quickTimeout)
@@ -1614,11 +1620,26 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			log.Printf("worker %s: %s: reading the first keyframe: %v", w.ID, job.Path, lerr) // unknown: counts stay strict
 		} else {
 			decodedFrames += lead
+			if haveReport { // the report's short count is these pictures; the guess path leaves it alone as before
+				lost -= lead
+				if lost < 0 {
+					lost = 0
+				}
+			}
+		}
+	}
+	// A variable-rate original's short count is its rate, not lost frames. Said only when nothing was lost: the
+	// count-based mark also fits a damaged steady file, which the lost-frames line below describes instead.
+	if vfr && lost == 0 {
+		if haveReport {
+			w.jobf(job.ID, ": the original is variable frame rate; ffmpeg decoded %d frames from it, and that is the count the new file is checked against", stats.Frames)
+		} else {
+			w.jobf(job.ID, ": the original is variable frame rate and the conversion did not report its frame count, so the frame count is not checked")
 		}
 	}
 	var dmg sourceDamageReport
 	if haveReport {
-		dmg = damagedPictures(sourceDamage(encErr), stats, lost, expected, decodedFrames)
+		dmg = damagedPictures(sourceDamage(encErr), stats, lost, base, decodedFrames)
 	} else {
 		dmg = withLostFrames(sourceDamage(encErr), lost, decoded) // today's path, unchanged
 	}

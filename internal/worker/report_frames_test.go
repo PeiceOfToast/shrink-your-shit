@@ -106,7 +106,7 @@ func TestDamagedPicturesUsesTheReportsCount(t *testing.T) {
 		t.Errorf("report case: %+v, want 40 pictures and one line saying so", rep)
 	}
 	// 30 frames of 500 lost with no message: still damage, with the old line.
-	rep = damagedPictures(sourceDamageReport{}, media.StreamStats{Frames: 470}, 500, 500, 470)
+	rep = damagedPictures(sourceDamageReport{}, media.StreamStats{Packets: 500, Frames: 470}, 30, 500, 470)
 	if rep.Pictures != 30 || !strings.Contains(strings.Join(rep.Lines, "\n"), "30 of 500 frames were not decoded") {
 		t.Errorf("lost-frames case: %+v, want 30 pictures and the old lost-frames line", rep)
 	}
@@ -154,22 +154,60 @@ func TestNoReportKeepsTheOldFrameCheck(t *testing.T) {
 	s.assertKept("the new file has 2400 video frames but the original has 2500")
 }
 
-// A steady-rate original whose decode took fewer frames than its rate × duration did lose them: the report's
-// count is the evidence, so it is kept as damaged (a damaged .ts: 470 of 500 decoded, no message).
+// A steady-rate original whose decode took fewer frames than it read did lose them: the report's packets and
+// decoded counts are the evidence, so it is kept as damaged (a damaged .ts: 500 packets read, 470 decoded, no
+// message). The damage share is of the frames the stream had, not of the decoded count (review-588 round 2).
 func TestEncodeReportKeepsFramesTheStreamLost(t *testing.T) {
 	s := newScenario(t)
 	s.srcSpec.streams[0]["duration"] = "100.000000" // the stream states its own count: 100 s × 25 fps = 2500
 	s.srcPackets, s.outPackets = 2500, 2450
-	s.encodeStderr = inputReport(2450, 2450, 0)
+	s.encodeStderr = inputReport(2500, 2450, 0)
 	s.run(Replace)
 	s.assertKept("the original file has errors")
 	for _, want := range []string{
 		"50 of 2500 frames were not decoded",
-		"Errors: 50 damaged pictures of 2450 frames (2.04%); up to 1% are tolerated",
+		"Errors: 50 damaged pictures of 2500 frames (2.00%); up to 1% are tolerated",
 	} {
 		if !s.logHas(1, "check", want) {
 			t.Errorf("check log lacks %q:\n%s", want, logTextOf(s.store, s.id))
 		}
+	}
+}
+
+// An mkv whose header states a steady rate and a duration its timestamps do not keep: the probe's average and
+// nominal rate can agree (ffmpeg 8: they do), so the probe cannot mark it VFR; the stream read exactly what it
+// decoded, so no frames were lost and it converts (review-588 round 2, F1). On the first head it was kept for
+// the 89 frames its duration × rate guessed and the rate-based excuse never ran.
+func TestAShortSteadyLookingOriginalThatReadWhatItDecodedIsNotKept(t *testing.T) {
+	s := newScenario(t)
+	s.srcSpec.streams[0]["duration"] = "130.000000" // 130 s × 20 = 2600 guessed, 2000 decoded
+	s.srcSpec.streams[0]["r_frame_rate"] = "20/1"
+	s.srcSpec.streams[0]["avg_frame_rate"] = "20/1" // equal: the probe sees a steady rate
+	s.srcPackets, s.outPackets = 2600, 2000
+	s.encodeStderr = inputReport(2000, 2000, 0) // read 2000 packets, decoded 2000: nothing lost
+	s.run(Replace)
+	if j := s.job(); j.Status != jobs.Done {
+		t.Fatalf("status %s (error %q), want done: a stream that read what it decoded lost no frames", j.Status, j.Error)
+	}
+	if !s.logHas(0, "app", "variable frame rate") {
+		t.Error("want the variable frame rate line in the job log")
+	}
+}
+
+// Five damaged pictures of the 500 frames the stream had, which read 500 packets and decoded 498: exactly 1%,
+// so it converts. The lost frames are among the five, so the share is of the frames the stream had, not of the
+// 498 decoded (review-588 round 2, F2: shrinking it counted the lost frames twice).
+func TestLightlyDamagedOriginalWithLostFramesConverts(t *testing.T) {
+	s := newScenario(t)
+	s.srcSpec.streams[0]["duration"] = "20.000000" // 20 s × 25 = 500
+	s.srcPackets, s.outPackets = 500, 498
+	s.encodeStderr = inputReport(500, 498, 0) + strings.Repeat("[h264 @ 0x1] error while decoding MB 1 2\n", 5)
+	s.run(Replace)
+	if j := s.job(); j.Status != jobs.Done {
+		t.Fatalf("status %s (error %q), want done: 5 pictures of 500 frames is 1%%", j.Status, j.Error)
+	}
+	if !s.logHas(0, "app", "5 damaged pictures of 500 frames (1.00%)") {
+		t.Errorf("want the damage share of the 500 frames the stream had:\n%s", logTextOf(s.store, s.id))
 	}
 }
 
@@ -200,12 +238,12 @@ func TestASmallRateMismatchDoesNotDropLostFrames(t *testing.T) {
 	s.srcSpec.streams[0]["r_frame_rate"] = "25/1"
 	s.srcSpec.streams[0]["avg_frame_rate"] = "255/10" // 2% apart: the probe marks it VFR
 	s.srcPackets, s.outPackets = 2550, 2500
-	s.encodeStderr = inputReport(2500, 2500, 0) // 50 frames the decode did not take, no error text
+	s.encodeStderr = inputReport(2550, 2500, 0) // 50 packets read and not decoded, no error text
 	s.run(Replace)
 	s.assertKept("the original file has errors")
 	for _, want := range []string{
 		"50 of 2550 frames were not decoded",
-		"Errors: 50 damaged pictures of 2500 frames (2.00%); up to 1% are tolerated",
+		"Errors: 50 damaged pictures of 2550 frames (1.96%); up to 1% are tolerated",
 	} {
 		if !s.logHas(1, "check", want) {
 			t.Errorf("check log lacks %q:\n%s", want, logTextOf(s.store, s.id))
