@@ -3,8 +3,10 @@
 package jobs
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // Foundation slice 4 (migration 60): a database from before it opens, its jobs have no output_info, and
@@ -69,6 +71,84 @@ func TestRewindDecidedAtTakesOutputInfoAway(t *testing.T) {
 		t.Fatalf("opening at 59 after the rewind: %v", err) // migration 60 runs again
 	}
 	defer s.Close()
+}
+
+// #608 follow-up: Retry and Convert again are fresh runs on the same job row, so the probe the last run took
+// goes with the other per-run fields. A retried job that fails must not show the previous file's info, and the
+// detail then falls back to today's read of the probes table (internal/web's test).
+func TestRetryAndConvertAgainClearOutputInfo(t *testing.T) {
+	const probe = `{"videoCodec":"hevc"}`
+	t.Run("Retry", func(t *testing.T) {
+		s := open(t)
+		id, err := s.Enqueue(Job{Path: filepath.Join(t.TempDir(), "kept.mkv"), SizeBefore: 1000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Claim("w"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetOutputInfo(id, probe); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Keep(id, "pictures_differ", "the picture check refused the new file"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Retry(id); err != nil {
+			t.Fatal(err)
+		}
+		if raw, ok := s.OutputInfo(id); ok {
+			t.Errorf("a retried job still shows the last run's probe %q", raw)
+		}
+	})
+	t.Run("RetryLater", func(t *testing.T) {
+		s := open(t)
+		id, err := s.Enqueue(Job{Path: filepath.Join(t.TempDir(), "later.mkv"), SizeBefore: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Claim("w"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetOutputInfo(id, probe); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.RetryLater(id, time.Now().Add(time.Minute), "replace_failed", "later"); err != nil {
+			t.Fatal(err)
+		}
+		if raw, ok := s.OutputInfo(id); ok {
+			t.Errorf("a job waiting to retry still shows the last run's probe %q", raw)
+		}
+	})
+	t.Run("Convert again", func(t *testing.T) {
+		s := open(t)
+		dir := t.TempDir()
+		in := filepath.Join(dir, "in", "a.mkv")
+		if err := os.MkdirAll(filepath.Dir(in), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(in, []byte("original"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		id, err := s.Enqueue(Job{Path: in, SizeBefore: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Claim("w"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetOutputInfo(id, probe); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Complete(id, filepath.Join(dir, "out", "a.mkv"), 40); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.ConvertAgain(id); err != nil {
+			t.Fatal(err)
+		}
+		if raw, ok := s.OutputInfo(id); ok {
+			t.Errorf("a converting-again job still shows the last run's probe %q", raw)
+		}
+	})
 }
 
 // SetStepWords replaces the latest step of that name (a retry adds another converted step) and leaves the

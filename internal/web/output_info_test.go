@@ -4,9 +4,11 @@ package web
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -84,5 +86,64 @@ func TestV2JobDetailAfterIsTheMeasuredProbe(t *testing.T) {
 	}
 	if codec, _, _ := after(id2); codec != "av1" {
 		t.Errorf("an old job's metadata.after %q, want today's fallback (av1)", codec)
+	}
+
+	// #611: a job put back in the queue has no new file yet, so it shows no measured info. First the way back
+	// from a running job — RetryLater, after a failure the replace hit, with the check's probe already stored
+	wait := filepath.Join(lib.Path, "wait", "later.mkv")
+	if err := os.MkdirAll(filepath.Dir(wait), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(wait, []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	id3, err := st.Enqueue(jobs.Job{Path: wait, SizeBefore: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Claim("w"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetOutputInfo(id3, `{"videoCodec":"hevc"}`); err != nil {
+		t.Fatal(err)
+	}
+	st.PutProbe(wait, 400, 1, `{"videoCodec":"av1"}`)
+	if err := st.RetryLater(id3, time.Now().Add(time.Minute), "replace_failed", "later"); err != nil {
+		t.Fatal(err)
+	}
+	if codec, depths, _ := after(id3); codec != "" || depths != nil {
+		t.Errorf("a job waiting to retry shows metadata.after %q %v, want none: its last run put nothing in place", codec, depths)
+	}
+
+	// then Convert again: neither the last run's stored probe nor the probes table's read at its old output
+	// (which Convert again leaves in place) is the new run's
+	in := filepath.Join(lib.Path, "in", "again.mkv")
+	if err := os.MkdirAll(filepath.Dir(in), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(in, []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// no library: its workflow revision is 0, so "already converted with this workflow" can't refuse the run
+	id4, err := st.Enqueue(jobs.Job{Path: in, SizeBefore: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Claim("w"); err != nil { // the waiting job's time has not come: this takes id4
+		t.Fatal(err)
+	}
+	if err := st.SetOutputInfo(id4, `{"videoCodec":"hevc"}`); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(lib.Path, "out", "again.mkv")
+	st.PutProbe(out, 400, 1, `{"videoCodec":"av1"}`)
+	if err := st.Complete(id4, out, 400); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ConvertAgain(id4); err != nil {
+		t.Fatalf("Convert again: %v", err)
+	}
+	if codec, depths, _ := after(id4); codec != "" || depths != nil {
+		t.Errorf("a converting-again job's metadata.after %q %v, want none: its new file has not been made yet", codec, depths)
 	}
 }

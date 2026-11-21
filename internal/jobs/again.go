@@ -160,9 +160,10 @@ func (s *Store) ConvertAgain(id int64) error {
 		return AgainError{c}
 	}
 	// a fresh run: it runs with the library's workflow as it is now, so it records that revision, and it is
-	// queued under it too (the workflow has not changed since unless someone saves it before it starts)
+	// queued under it too (the workflow has not changed since unless someone saves it before it starts); the
+	// last run's measured probe goes with the other per-run fields (#608)
 	n, err := s.moveAlong(s.db, Done, Queued,
-		`, progress=0, error='', error_code='', worker='', attempts=0, retry_at='', fallback='', again_from=?, workflow_rev=`+jobRevSQL+`, queued_rev=`+jobRevSQL,
+		`, progress=0, error='', error_code='', worker='', attempts=0, retry_at='', fallback='', output_info=NULL, again_from=?, workflow_rev=`+jobRevSQL+`, queued_rev=`+jobRevSQL,
 		[]any{c.originalID}, `id=?`, id)
 	if err != nil {
 		return err

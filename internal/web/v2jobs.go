@@ -259,13 +259,17 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 				meta["before"] = json.RawMessage(raw)
 			}
 		}
-		if raw, ok := store.OutputInfo(id); ok {
-			// what the new file turned out to be, as the job's own check probed it (foundation slice 4):
-			// kept too, whose temp file the probes table never saw
-			meta["after"] = json.RawMessage(raw)
-		} else if j.OutputPath != "" { // a job from before that, or one whose check read no file
-			if raw, ok := store.ProbeOfSize(j.OutputPath, j.SizeAfter); ok {
+		// only a finished job has a new file to describe (#611): a queued, running or failed one has none yet,
+		// whichever path put it back in the queue — and its old output_path/size_after are the previous run's
+		if j.Status == jobs.Done || j.Status == jobs.Kept {
+			if raw, ok := store.OutputInfo(id); ok {
+				// what the new file turned out to be, as the job's own check probed it (foundation slice 4):
+				// kept too, whose temp file the probes table never saw
 				meta["after"] = json.RawMessage(raw)
+			} else if j.OutputPath != "" { // a job from before that, or one whose check read no file
+				if raw, ok := store.ProbeOfSize(j.OutputPath, j.SizeAfter); ok {
+					meta["after"] = json.RawMessage(raw)
+				}
 			}
 		}
 		d["metadata"] = meta
