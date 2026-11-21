@@ -143,6 +143,10 @@ type Worker struct {
 	// a 10-bit test, and a family proven to keep HDR10's mastering data). The worker writes them and then the
 	// chosen encoder's line, in section encode.
 	EncoderCandidates func(codec string, need10 bool, hdr *rules.HDR) []string
+	// GPUSlots is how many of this computer's graphics card's slots the person let it have (Workers page),
+	// read for every job, so a changed limit is followed at once. 0: the processor does the encoding. nil
+	// (a test's worker): no limit, every graphics job runs. All of the program's workers share the one card.
+	GPUSlots func() int
 	// verified is the probe of the new file the last check passed (S5: stored for its final path).
 	verified media.Info
 	// movedAside is the trash sentence for our earlier output this job moved aside (Convert again). The job's kept
@@ -1083,7 +1087,14 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		stepNote(rules.StepAudio, rules.FoldedNote)
 	}
 	if plan.StyledSubsPlain { // design, 02:49Z: once per file
-		stepNote(rules.StepSubtitles, rules.StyledSubsNote)
+		note := rules.StyledSubsNote
+		if plan.Container == "webm" {
+			note = rules.StyledSubsWebMNote
+		}
+		stepNote(rules.StepSubtitles, note)
+	}
+	if plan.BitmapSubsDropped > 0 { // user bug 11-20: WebM can't hold picture subtitles, so they are left out
+		stepNote(rules.StepSubtitles, rules.BitmapSubsNote(plan.BitmapSubsDropped))
 	}
 	if plan.HDRNote != "" { // what the HDR conversion does not keep (S3)
 		stepNote(rules.StepConvertVideo, plan.HDRNote)
@@ -1235,6 +1246,12 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	full := false // gpu runs the full GPU pipeline (decode and encode on the graphics card)
 	fell := false // the graphics encoder failed and the processor is retrying the file
 	fellReason := ""
+	var gpuSlot *GPUSlot // the card's place this job holds while its graphics encode runs
+	defer func() {
+		if gpuSlot != nil {
+			gpuSlot.Release()
+		}
+	}()
 	args := plan.FFmpegArgs(srcPath, tmp)
 	w.setPhase(secEncode) // the encoder choice and its notes belong to encode (log-spec section 4)
 	chosenWhy := ""
@@ -1248,14 +1265,25 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		want, note := w.Encoder(plan.Video.Codec, need10, plan.Video.HDR)
 		if want != "" && !plan.Video.Copy {
 			until, paused, err := w.Queue.EncoderPaused(w.ID)
-			var ok bool
 			switch {
 			case err == nil && paused:
 				w.jobf(job.ID, ": %s is paused until %s after three failures in a row; using the processor", want, until.Local().Format("15:04"))
 			default:
-				if args, full, ok = w.graphicsArgs(ctx, job, plan, src, srcPath, tmp, want); ok {
-					gpu = want
-					chosenWhy = want + " passed its test on this computer and can do this file"
+				if gargs, gfull, ok := w.graphicsArgs(ctx, job, plan, src, srcPath, tmp, want); ok {
+					// The card's slots come first (user bug 11-20): a job waits while they are all in
+					// use, so no two graphics jobs run on it at once beyond the limit. With none (the
+					// limit at 0), the processor does the encoding, as it does for any plan the card
+					// can't do.
+					slot, serr := w.takeGPUSlot(ctx, job)
+					if serr != nil { // stopped while it waited
+						return "", serr
+					}
+					if slot != nil {
+						gpuSlot = slot
+						args, full = gargs, gfull
+						gpu = want
+						chosenWhy = want + " passed its test on this computer and can do this file"
+					}
 				} else {
 					w.jobf(job.ID, ": encoder %s can't do this file; using the processor", want)
 				}
@@ -1319,6 +1347,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 				encErr, decoded, terr = w.encodeLocal(ctx, job, args)
 				continue
 			}
+			if gpuSlot != nil { // the processor converts from here: the card is free for another job
+				gpuSlot.Release()
+			}
 			fell, fellReason = true, shortReason(reason)
 			args = plan.FFmpegArgs(srcPath, tmp)
 			setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src, ""), Encoder: encoderWords(plan),
@@ -1326,6 +1357,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			encStart = w.now()
 			encErr, decoded, terr = w.encodeLocal(ctx, job, args)
 			break
+		}
+		if gpuSlot != nil { // the graphics encode has ended: the card's place is free for the next job
+			gpuSlot.Release()
 		}
 	}
 	w.recordEncode(job.ID, args, encStart, encErr, terr, probeSummary(src))
@@ -1360,6 +1394,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 		if errors.Is(terr, syscall.ENOSPC) || strings.Contains(encErr+terr.Error(), "No space left on device") {
 			return "", retryable(failed(diskFull, terr), retrySpace)
+		}
+		if words := headerWords(encErr); words != "" { // the new file's type can't hold a track: not damage
+			return "", failed(words, fmt.Errorf("%w: %s", terr, firstLines(encErr, 3)))
 		}
 		ferr := failed("Converting stopped with an error. Your original was not touched. Press Retry; if it keeps failing, the file may be damaged.", fmt.Errorf("%w: %s", terr, firstLines(encErr, 3)))
 		if killedBySignal(terr) { // stopped by the system (out of memory...), not a problem of the file
@@ -1833,6 +1870,29 @@ var readSourceState = media.FileState
 
 // goneWords: the original was moved or deleted while it was converted. A failure, never a damaged file.
 const goneWords = "The file was moved or deleted while it was being converted."
+
+// headerWords is the message for ffmpeg stopping before it wrote the new file's header: its type can't
+// hold a track as the plan maps it in (user bug 11-20). ffmpeg's own sentence about what is supported,
+// when it gives one, else plain words. "" when the error is not a header refusal, so a damaged file is
+// never called a file type's limit.
+func headerWords(encErr string) string {
+	if !strings.Contains(encErr, "Could not write header") {
+		return ""
+	}
+	why := ""
+	for _, line := range strings.Split(encErr, "\n") {
+		if !strings.Contains(line, "supported for") {
+			continue
+		}
+		if i := strings.Index(line, "] "); i >= 0 { // "[webm @ 0x...] Only VP8 ... are supported for WebM."
+			why = strings.TrimSpace(line[i+2:])
+		}
+	}
+	if why == "" {
+		return "ffmpeg couldn't write the new file. Your original was not touched."
+	}
+	return "ffmpeg couldn't write the new file: " + why + " Your original was not touched."
+}
 
 // sourceGone says whether nothing is at the original's path any more. Only a missing name counts: a
 // different file put in its place is a change (kept), and any other error proves nothing about the file.

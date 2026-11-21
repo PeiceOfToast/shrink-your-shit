@@ -53,18 +53,20 @@ FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id WHERE j.status=? ORDER BY
 	out := []Working{}
 	for rows.Next() {
 		var w Working
+		var tags string
 		j := &w.Job
 		if err := rows.Scan(&j.ID, &j.Library, &j.LibraryID, &j.Path, &j.Status, &j.Progress, &j.Reason, &j.Error, &j.Worker,
-			&j.DurationSec, &j.SizeBefore, &j.SizeAfter, &j.OutputPath, &j.Plan, &j.PlanPrint, &j.Created, &j.Updated, &j.Attempts, &j.RetryAt, &w.LibraryName, &w.Started); err != nil {
+			&j.DurationSec, &j.SizeBefore, &j.SizeAfter, &j.OutputPath, &j.Plan, &j.PlanPrint, &j.Created, &j.Updated, &j.Attempts, &j.RetryAt, &tags, &w.LibraryName, &w.Started); err != nil {
 			return nil, err
 		}
+		j.Tags = tagsOf(tags)
 		out = append(out, w)
 	}
 	return out, rows.Err()
 }
 
 // prefixedCols is cols for the jobs table under the alias j.
-const prefixedCols = `j.id,j.library,COALESCE(j.library_id,0),j.path,j.status,j.progress,j.reason,j.error,j.worker,j.duration,j.size_before,j.size_after,j.output_path,COALESCE(j.plan,''),COALESCE(j.plan_fingerprint,''),j.created,j.updated,j.attempts,j.retry_at`
+const prefixedCols = `j.id,j.library,COALESCE(j.library_id,0),j.path,j.status,j.progress,j.reason,j.error,j.worker,j.duration,j.size_before,j.size_after,j.output_path,COALESCE(j.plan,''),COALESCE(j.plan_fingerprint,''),j.created,j.updated,j.attempts,j.retry_at,COALESCE(j.tags,'[]')`
 
 // LibraryQueue is how many files of a library wait.
 type LibraryQueue struct {
@@ -104,11 +106,13 @@ FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id WHERE j.status=? AND j.re
 	out := []Working{}
 	for rows.Next() {
 		var w Working
+		var tags string
 		j := &w.Job
 		if err := rows.Scan(&j.ID, &j.Library, &j.LibraryID, &j.Path, &j.Status, &j.Progress, &j.Reason, &j.Error, &j.Worker,
-			&j.DurationSec, &j.SizeBefore, &j.SizeAfter, &j.OutputPath, &j.Plan, &j.PlanPrint, &j.Created, &j.Updated, &j.Attempts, &j.RetryAt, &w.LibraryName, &w.Started); err != nil {
+			&j.DurationSec, &j.SizeBefore, &j.SizeAfter, &j.OutputPath, &j.Plan, &j.PlanPrint, &j.Created, &j.Updated, &j.Attempts, &j.RetryAt, &tags, &w.LibraryName, &w.Started); err != nil {
 			return nil, err
 		}
+		j.Tags = tagsOf(tags)
 		out = append(out, w)
 	}
 	return out, rows.Err()
@@ -130,9 +134,10 @@ FROM jobs j LEFT JOIN libraries l ON l.id=j.library_id WHERE j.status IN (?,?) A
 	out := []Working{}
 	for rows.Next() {
 		var w Working
+		var tags string
 		j := &w.Job
 		if err := rows.Scan(&j.ID, &j.Library, &j.LibraryID, &j.Path, &j.Status, &j.Progress, &j.Reason, &j.Error, &j.Worker,
-			&j.DurationSec, &j.SizeBefore, &j.SizeAfter, &j.OutputPath, &j.Plan, &j.PlanPrint, &j.Created, &j.Updated, &j.Attempts, &j.RetryAt, &w.LibraryName, &w.Started); err != nil {
+			&j.DurationSec, &j.SizeBefore, &j.SizeAfter, &j.OutputPath, &j.Plan, &j.PlanPrint, &j.Created, &j.Updated, &j.Attempts, &j.RetryAt, &tags, &w.LibraryName, &w.Started); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, w)
