@@ -32,6 +32,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/scanner"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/vars"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
 )
 
 // Queue is everything a worker needs from the job store.
@@ -160,6 +161,9 @@ type Worker struct {
 	remote *RemoteJob
 	// failures: the running job's path's choices for when it doesn't work (V6b; under mu)
 	failures *rules.Failures
+	// after and cardVars: the path's after-save cards and the run's values (FB2a), set by process for runClaimed.
+	after    []rules.Card
+	cardVars map[string]string
 	// lease: the running job's lease (V7a; under mu)
 	lease string
 	ID    string
@@ -182,6 +186,9 @@ type Worker struct {
 	Poll    time.Duration
 	// OnDone is called after a job succeeds with the final path (optional).
 	OnDone func(job jobs.Job, finalPath string)
+	// Cards is what a workflow's after-save cards may touch (FB2a): the connections and the notification
+	// targets, wired by main. Nil functions mean the card reports that it can't run here.
+	Cards func(job jobs.Job, finalPath string) flow.Env
 
 	// Safety checks (see verify.go). Zero values mean the defaults.
 	DecodeCheck string  // "auto" (default), "always" or "off"
@@ -545,8 +552,55 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 	if err := w.Queue.Complete(job.ID, final, size); err != nil {
 		return true, err
 	}
-	if w.OnDone != nil {
-		w.OnDone(job, final)
+	w.mu.Lock()
+	after, cardVars := w.after, w.cardVars
+	w.mu.Unlock()
+	// A tell card makes that kind of connection per workflow; the other kind is still told as it always has been
+	// (flow-builder.md section 10; review2-538 P3b: per kind, not per path). Without any tell card the global
+	// tell runs unchanged.
+	hasMedia, hasDownloader := false, false
+	for _, c := range after {
+		hasMedia = hasMedia || c.Type == workflow.TypeMediaServer
+		hasDownloader = hasDownloader || c.Type == workflow.TypeDownloader
+	}
+	switch {
+	case !hasMedia && !hasDownloader:
+		if w.OnDone != nil {
+			w.OnDone(job, final)
+		}
+	case w.Cards != nil:
+		e := w.Cards(job, final)
+		if !hasMedia && e.TellMediaServer != nil {
+			e.TellMediaServer("all") // "none connected" is not news here: the global tell never said so either
+		}
+		if !hasDownloader && e.TellDownloader != nil {
+			e.TellDownloader("all")
+		}
+	}
+	if len(after) > 0 { // FB2a: the path's cards on the saved result; one that doesn't work is a warning, never a failure
+		st := &flow.State{Vars: maps.Clone(cardVars), Final: final, Original: job.Path, LibraryRoot: job.Library}
+		if st.Vars == nil {
+			st.Vars = map[string]string{}
+		}
+		for k, v := range vars.EndValues(final, job.SizeBefore, size) {
+			st.Vars[k] = v
+		}
+		env := flow.Env{Log: func(l string) { w.jobNote(job.ID, secReplace, jobs.LevelInfo, "(%s): %s", job.Path, l) }}
+		if w.Cards != nil {
+			e := w.Cards(job, final)
+			env.TellMediaServer, env.TellDownloader, env.Notify = e.TellMediaServer, e.TellDownloader, e.Notify
+		}
+		notes, warnings := flow.After(after, st, env)
+		for _, n := range notes {
+			if n.Failed {
+				w.Queue.AddStep(job.ID, "after", false, n.Words)
+			} else {
+				w.Queue.AddDecision(job.ID, n.NodeID, "", n.Name+" → "+n.Words)
+			}
+		}
+		for _, msg := range warnings {
+			w.jobNote(job.ID, secReplace, jobs.LevelWarning, "(%s): %s", job.Path, msg)
+		}
 	}
 	return true, nil
 }
@@ -991,6 +1045,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	w.mu.Lock()
 	w.failures = plan.OnFailure // what this path does when it doesn't work (RunOne reads it)
 	w.planOutput = OutputMode(plan.Output)
+	w.after, w.cardVars = plan.After, nil // FB2a: the after-save cards (runClaimed runs them); the values follow below
 	w.mu.Unlock()
 	// Dolby Vision the flow leaves alone is never encoded, whatever was decided when the job was queued
 	// (review a09f6f5: a job queued before migration 17 or a setting change). Only these skips: the
@@ -1087,6 +1142,11 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// goes on every audio track of the new file, so it is resolved before the snapshot: a remote worker
 	// encodes the plan it is given.
 	vals, vtable, err := w.runValues(job, src, plan, published)
+	if err == nil {
+		w.mu.Lock()
+		w.cardVars = vals // the after-save cards resolve their {{name}}s with the run's values (FB2a)
+		w.mu.Unlock()
+	}
 	if err != nil {
 		// a secret sealed on another computer can't be opened here (a restored backup): the job stops,
 		// naming it, rather than run with it silently empty

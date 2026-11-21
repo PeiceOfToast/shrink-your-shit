@@ -416,3 +416,29 @@ func TestCertificateFailureSaysSo(t *testing.T) {
 		t.Fatalf("result = %+v, want %q", res, want)
 	}
 }
+
+// FB2a: a workflow's tell card tells only the kinds it names, says whom it told, and says when none of
+// them is connected and on.
+func TestTellKindsTellsOnlyThoseKinds(t *testing.T) {
+	arr := newFakeArr(t, "/tv/The Show")
+	h := newHarness(t)
+	h.svc.Create(NewIntegration{Kind: Sonarr, URL: arr.srv.URL, APIKey: goodKey, Name: "TV box",
+		PathMappings: []Mapping{{TheirPath: "/tv", OurPath: "/mnt/media/tv"}}})
+	file := "/mnt/media/tv/The Show/s01e01.mkv"
+	id := h.job(t, file)
+	if words, err := h.svc.TellKinds(id, "", file, []Kind{Plex, Jellyfin}); err == nil || !strings.Contains(err.Error(), "none of these is connected") {
+		t.Fatalf("media servers: %q %v", words, err)
+	}
+	h.svc.Wait()
+	if steps, _ := h.st.Steps(id); len(steps) != 0 {
+		t.Fatalf("a kind that wasn't asked for was told: %+v", steps)
+	}
+	words, err := h.svc.TellKinds(id, "", file, []Kind{Sonarr, Radarr})
+	if err != nil || words != "Told TV box" {
+		t.Fatalf("downloaders: %q %v", words, err)
+	}
+	h.svc.Wait()
+	if steps, _ := h.st.Steps(id); len(steps) == 0 {
+		t.Fatal("the downloader was not told")
+	}
+}

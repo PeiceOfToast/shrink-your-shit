@@ -43,6 +43,7 @@ type Plan struct {
 	// every workflow saved before FB1b, so its Plans and fingerprints are unchanged.
 	Before     []Card `json:"before,omitempty"`
 	Fail       bool   `json:"fail,omitempty"`
+	After      []Card `json:"after,omitempty"`      // FB2a: the actions on the saved result
 	FolderMode string `json:"folderMode,omitempty"` // "next_to_library" (V5a): the library's own folder instead of OutputDir
 	Container  string `json:"container,omitempty"`  // the new file's type (its extension, "mkv" or "mp4"); "" = the original's
 	// The Save the result step's {{name}} templates (W4b), as the workflow has them. The worker fills
@@ -200,7 +201,7 @@ func (t Template) CompileWith(info media.Info, f Facts) (p Plan) {
 		if len(p.Steps) > 0 && ok && b.Then != nil { // the checks' answers came before the path's own steps
 			p.Steps = append(checkSteps(ds), p.Steps...)
 		}
-		p.Path, p.Decisions, p.OnFailure, p.Before = b.Path, ds, b.OnFailure, b.Before
+		p.Path, p.Decisions, p.OnFailure, p.Before, p.After = b.Path, ds, b.OnFailure, b.Before, b.After
 		return p
 	}
 	p = Plan{Kind: t.Kind, CompilerVersion: t.CompilerVersion}

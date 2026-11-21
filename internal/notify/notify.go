@@ -449,6 +449,47 @@ func (s *Service) notifyAll(flag, path, text, event string) {
 	}
 }
 
+// SendTo queues text for the target whose name (or id) is who, or for every enabled target when who is ""
+// (FB2a: a workflow's "Send a notification" card). The targets' event flags are not consulted: the workflow
+// asked. It answers in words (who was sent to) or an error when the target is unknown or off; delivery
+// itself stays in the background with its retries, as every send does.
+func (s *Service) SendTo(who, kind, text string) (string, error) {
+	s.mu.Lock()
+	f, err := s.load()
+	s.mu.Unlock()
+	if err != nil {
+		return "", err
+	}
+	event := "workflow." + kind
+	switch kind {
+	case "info", "good", "warning", "bad":
+	default:
+		event = "workflow.good"
+	}
+	who = strings.TrimSpace(who)
+	var names []string
+	for _, r := range f.Targets {
+		if who != "" && r.ID != who && !strings.EqualFold(r.Name, who) {
+			continue
+		}
+		if !r.Enabled {
+			if who != "" {
+				return "", fmt.Errorf("the target %q is off", r.Name)
+			}
+			continue
+		}
+		s.deliver(r.ID, message{Event: event, Text: text})
+		names = append(names, r.Name)
+	}
+	if len(names) == 0 {
+		if who != "" {
+			return "", fmt.Errorf("no notification target is called %q", who)
+		}
+		return "", errors.New("no notification target is on")
+	}
+	return "Sent to " + strings.Join(names, ", "), nil
+}
+
 func wants(e Events, flag string) bool {
 	switch flag {
 	case "jobFailed":

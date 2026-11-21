@@ -143,11 +143,25 @@ func TestRunCardsTurnedOff(t *testing.T) {
 func TestRunCardsCanBeAdded(t *testing.T) {
 	d, by := runDoc()
 	r := Validate(d)
+	save := d.Nodes[len(d.Nodes)-1]
 	for _, typ := range append(slices.Clone(Questions), Actions...) {
 		a := r.AddSteps[typ]
+		if !slices.Contains(definitionPhase(typ), PhaseBefore) { // FB2a: an action on the saved result goes after the save
+			if !a.Addable || a.After != save.ID {
+				t.Errorf("%s: %+v (want addable after the save)", typ, a)
+			}
+			continue
+		}
 		if !a.Addable || a.After != by["note"].ID {
 			t.Errorf("%s: %+v (want addable after the note)", typ, a)
 		}
+	}
+	// with a checksum behind the save, the next after card goes behind the checksum
+	sum := node(TypeChecksum, "", map[string]any{})
+	d.Nodes = append(d.Nodes, sum)
+	d.Edges = append(d.Edges, link(save.ID, "success", sum.ID))
+	if a := Validate(d).AddSteps[TypeCopy]; !a.Addable || a.After != sum.ID {
+		t.Errorf("copy after the checksum: %+v", a)
 	}
 	for _, typ := range Ends { // an end has no Next: the graph places it
 		if a := r.AddSteps[typ]; a.Addable || !strings.Contains(a.Reason, "graph") {
@@ -339,4 +353,106 @@ func TestRunCardSummaries(t *testing.T) {
 	if yes, _ := q.Ask(media.Info{Streams: []media.Stream{{Type: "video", Width: 1920, Height: 1080, BitDepth: 10}, {Type: "subtitle", Language: "eng"}}}, rules.Facts{}); !yes {
 		t.Error("ten-bit with an English subtitle should answer Yes")
 	}
+}
+
+// FB2a: the actions after the save compile into the path's After list in order (a turned-off one left
+// out), an after-only action before the conversion or a before-only one after the save is wrong_phase, and
+// the checksum's published names are known to the cards after it.
+func TestAfterCardsCompile(t *testing.T) {
+	d, by := runDoc()
+	save := d.Nodes[len(d.Nodes)-1]
+	if save.Type != TypeCommit {
+		t.Fatalf("the last node is %s, want the save", save.Type)
+	}
+	sum := node(TypeChecksum, "", map[string]any{"kind": "sha1"})
+	side := node(TypeSidecar, "", map[string]any{"name": "{{title}}.sha1", "text": "{{checksum}}"})
+	off := node(TypeNotify, "", map[string]any{"text": "{{title}} done"})
+	off.Enabled = false
+	copyTo := node(TypeCopy, "", map[string]any{"folder": "/backup/{{library}}"})
+	d.Nodes = append(d.Nodes, sum, side, off, copyTo)
+	d.Edges = append(d.Edges, link(save.ID, "success", sum.ID), link(sum.ID, "success", side.ID), link(side.ID, "success", off.ID), link(off.ID, "success", copyTo.ID))
+	if r := Validate(d); r.Errors() {
+		t.Fatalf("%+v", r.Issues)
+	}
+	tm, issues := ToTemplate(d, rules.Template{})
+	if len(issues) > 0 || tm.Branches == nil {
+		t.Fatalf("%+v %v", tm, issues)
+	}
+	yes := (*tm.Branches)[0]
+	if len(yes.After) != 3 || yes.After[0].Type != TypeChecksum || yes.After[1].Type != TypeSidecar || yes.After[2].Type != TypeCopy || yes.After[1].Config["text"] != "{{checksum}}" {
+		t.Errorf("after cards: %+v", yes.After)
+	}
+	if yes.Path[len(yes.Path)-1] != copyTo.ID || len(yes.Before) != 2 {
+		t.Errorf("path %v, before %d", yes.Path, len(yes.Before))
+	}
+	for _, c := range yes.After {
+		if c.Name == "" {
+			t.Errorf("a card without a name: %+v", c)
+		}
+	}
+	// the plan carries them, and a plan without any is unchanged on the wire
+	plan := tm.CompileWith(media.Info{SizeBytes: 1 << 30, Ext: ".mkv", DurationSec: 100, Streams: []media.Stream{{Type: "video", Codec: "h264", Width: 1920, Height: 1080}}}, rules.Facts{Path: "/films/Harrow.Lane.Remux.mkv"})
+	if len(plan.After) != 3 {
+		t.Errorf("plan.After: %+v", plan.After)
+	}
+
+	// an after-only card before the conversion: wrong_phase names it, and the compile refuses too
+	d2, by2 := runDoc()
+	early := node(TypeChecksum, "", map[string]any{})
+	d2.Nodes = append(d2.Nodes, early)
+	for i, e := range d2.Edges {
+		if e.From == by2["note"].ID {
+			d2.Edges[i].To = early.ID
+		}
+	}
+	d2.Edges = append(d2.Edges, link(early.ID, "success", by2["conv"].ID))
+	if !hasIssue(Validate(d2).Issues, "wrong_phase", early.ID) {
+		t.Errorf("an early checksum: %+v", Validate(d2).Issues)
+	}
+	if _, is := ToTemplate(d2, rules.Template{}); !hasIssue(is, "wrong_phase", early.ID) {
+		t.Errorf("compile of an early checksum: %+v", is)
+	}
+	// a question after the save: wrong_phase too (a variable or a note may sit on either side: both phases)
+	d3, _ := runDoc()
+	save3 := d3.Nodes[len(d3.Nodes)-1]
+	late := node(TypeCheckName, "", map[string]any{"pattern": "x", "match": "contains"})
+	fail3 := node(TypeFail, "", map[string]any{"reason": "no"})
+	d3.Nodes = append(d3.Nodes, late, fail3)
+	d3.Edges = append(d3.Edges, link(save3.ID, "success", late.ID), link(late.ID, "match", fail3.ID), link(late.ID, "else", fail3.ID))
+	if !hasIssue(Validate(d3).Issues, "wrong_phase", late.ID) {
+		t.Errorf("a late question: %+v", Validate(d3).Issues)
+	}
+	if _, is := ToTemplate(d3, rules.Template{}); !hasIssue(is, "wrong_phase", late.ID) {
+		t.Errorf("compile of a late question: %+v", is)
+	}
+	d5, _ := runDoc() // and a note after the save is fine, and runs there
+	save5 := d5.Nodes[len(d5.Nodes)-1]
+	note5 := node(TypeNote, "", map[string]any{"text": "{{title}} is saved"})
+	d5.Nodes = append(d5.Nodes, note5)
+	d5.Edges = append(d5.Edges, link(save5.ID, "success", note5.ID))
+	if r := Validate(d5); r.Errors() {
+		t.Errorf("a late note: %+v", r.Issues)
+	}
+	if tm5, is := ToTemplate(d5, rules.Template{}); len(is) > 0 || len((*tm5.Branches)[0].After) != 1 {
+		t.Errorf("compile of a late note: %+v %+v", is, tm5.Branches)
+	}
+	// an after card's error port leads nowhere yet
+	d4, _ := runDoc()
+	save4 := d4.Nodes[len(d4.Nodes)-1]
+	s4, n4 := node(TypeChecksum, "", map[string]any{}), node(TypeNotify, "", map[string]any{"text": "x"})
+	d4.Nodes = append(d4.Nodes, s4, n4)
+	d4.Edges = append(d4.Edges, link(save4.ID, "success", s4.ID), link(s4.ID, "error", n4.ID))
+	if _, is := ToTemplate(d4, rules.Template{}); !hasIssue(is, "not_runnable_yet", s4.ID) {
+		t.Errorf("an after card's error port: %+v", is)
+	}
+	_ = by
+}
+
+func hasIssue(issues []Issue, code, nodeID string) bool {
+	for _, i := range issues {
+		if i.Code == code && i.NodeID == nodeID {
+			return true
+		}
+	}
+	return false
 }

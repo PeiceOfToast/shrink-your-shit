@@ -5,9 +5,11 @@ package worker
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/flow"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
@@ -148,4 +150,94 @@ func TestCardFailureStopsTheRun(t *testing.T) {
 		t.Error("nothing should have been encoded")
 	}
 	s.assertOriginalSafe()
+}
+
+// FB2a: the after-save cards run once the result is in place: the checksum of the new file is published,
+// the sidecar beside it carries it, the notification goes through what main wires in, a card that doesn't
+// work is a warning on the timeline while the job stays done, and a tell card replaces the global tell.
+func TestAfterCardsRunOnTheSavedFile(t *testing.T) {
+	s := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
+	tm := cardsTemplate()
+	(*tm.Branches)[0].After = []rules.Card{
+		{NodeID: "sum", Type: workflow.TypeChecksum, Name: "Checksum the result", Config: map[string]any{"kind": "md5"}},
+		{NodeID: "side", Type: workflow.TypeSidecar, Name: "Write a file beside the result", Config: map[string]any{"name": "{{title}}.{{profile}}.md5", "text": "{{checksum}} {{saved_percent}}"}},
+		{NodeID: "say", Type: workflow.TypeNotify, Name: "Send a notification", Config: map[string]any{"text": "{{title}} saved {{saved_percent}}%"}},
+		{NodeID: "ms", Type: workflow.TypeMediaServer, Name: "Tell the media server", Config: map[string]any{}},
+	}
+	w := s.worker(Beside)
+	w.Template = func(jobs.Job) (rules.Template, error) { return tm, nil }
+	globalTold, sent := false, ""
+	w.OnDone = func(jobs.Job, string) { globalTold = true }
+	w.Cards = func(jobs.Job, string) flow.Env {
+		return flow.Env{Notify: func(target, kind, text string) (string, error) { sent = text; return "Sent to phone", nil }}
+	}
+	if _, err := w.RunOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	j := s.job()
+	if j.Status != jobs.Done {
+		t.Fatalf("%s %q", j.Status, j.Error)
+	}
+	b, err := os.ReadFile(filepath.Join(filepath.Dir(j.OutputPath), "Harrow.Lane.2019.Remux.remux.md5"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum, _, _ := strings.Cut(string(b), " ")
+	if len(sum) != 32 {
+		t.Errorf("sidecar: %q", b)
+	}
+	if !strings.HasPrefix(sent, "Harrow.Lane.2019.Remux saved ") || strings.Contains(sent, "{{") {
+		t.Errorf("notification: %q", sent)
+	}
+	if globalTold {
+		t.Error("the path has a tell card, so the global tell must not run as well")
+	}
+	if !noteOnTimeline(s, "Checksum the result → MD5 "+sum) || !noteOnTimeline(s, "Send a notification → Sent to phone") {
+		steps, _ := s.store.Steps(j.ID)
+		t.Errorf("timeline: %+v", steps)
+	}
+	steps, _ := s.store.Steps(j.ID)
+	warned := false
+	for _, st := range steps {
+		if st.Step == "after" && !st.OK && strings.Contains(st.Words, "Tell the media server didn't work") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Errorf("the media server card should be a warning step: %+v", steps)
+	}
+
+	// a media-server card alone: the downloaders are still told the global way, the media servers are not (per kind)
+	s3 := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
+	tm3 := cardsTemplate()
+	(*tm3.Branches)[0].After = []rules.Card{{NodeID: "ms", Type: workflow.TypeMediaServer, Name: "Tell the media server", Config: map[string]any{}}}
+	w3 := s3.worker(Beside)
+	w3.Template = func(jobs.Job) (rules.Template, error) { return tm3, nil }
+	var told3 []string
+	w3.OnDone = func(jobs.Job, string) { told3 = append(told3, "global") }
+	w3.Cards = func(jobs.Job, string) flow.Env {
+		return flow.Env{
+			TellMediaServer: func(which string) (string, error) { told3 = append(told3, "media:"+which); return "Told Plex", nil },
+			TellDownloader: func(which string) (string, error) {
+				told3 = append(told3, "downloader:"+which)
+				return "Told Sonarr", nil
+			},
+		}
+	}
+	w3.RunOne(context.Background())
+	if j := s3.job(); j.Status != jobs.Done || strings.Join(told3, " ") != "downloader:all media:all" {
+		t.Errorf("per-kind tell: %s %v", j.Status, told3)
+	}
+	// without a tell card the global tell runs as it always has
+	s2 := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
+	tm2 := cardsTemplate()
+	(*tm2.Branches)[0].After = []rules.Card{{NodeID: "sum", Type: workflow.TypeChecksum, Name: "Checksum the result", Config: map[string]any{}}}
+	w2 := s2.worker(Beside)
+	w2.Template = func(jobs.Job) (rules.Template, error) { return tm2, nil }
+	told := false
+	w2.OnDone = func(jobs.Job, string) { told = true }
+	w2.RunOne(context.Background())
+	if j := s2.job(); j.Status != jobs.Done || !told {
+		t.Errorf("%s: global tell ran %v", j.Status, told)
+	}
 }

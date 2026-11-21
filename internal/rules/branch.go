@@ -297,6 +297,8 @@ type Branch struct {
 	// failed with End's words ("Stop as failed"), the original untouched.
 	Before []Card `json:"before,omitempty"`
 	Fail   bool   `json:"fail,omitempty"`
+	// FB2a: the actions on the saved result, in order; a failure leaves the job done, with a warning.
+	After []Card `json:"after,omitempty"`
 }
 
 // SkipLeftByWorkflow is a file a workflow's "Leave the file alone" step ended (V6a).
@@ -426,6 +428,6 @@ func CompileBranch(b Branch, info media.Info, languages string) Plan {
 		then.Languages = languages
 		p = then.Compile(info)
 	}
-	p.Path, p.OnFailure, p.Before = b.Path, b.OnFailure, b.Before
+	p.Path, p.OnFailure, p.Before, p.After = b.Path, b.OnFailure, b.Before, b.After
 	return p
 }
