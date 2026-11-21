@@ -72,7 +72,8 @@ export function varProblems(nodes: { id: string; type: string; config?: Record<s
 export const OwnVars = createContext<Variable[]>([]);
 const GROUP_LABEL: Record<string, string> = { Workflow: "Your variables", Server: "Server-wide variables" };
 // The built-ins are the server's list without the workflow's own variables: since #497 those come back in it too, group "Workflow".
-export const builtinsOf = (list: TemplateVar[]) => list.filter((v) => v.group !== "Workflow");
+// A whole-field-only name (the file's own values) is for the typed-setting picker, never for text (W2 contract 09:33Z).
+export const builtinsOf = (list: TemplateVar[]) => list.filter((v) => v.group !== "Workflow" && !v.wholeFieldOnly);
 export function withOwn(list: TemplateVar[], own: Variable[]): TemplateVar[] {
   // W2: a server-wide variable ("Server") never hides the workflow's own of the same name, which wins at run time; the
   // Server entry of a name the workflow owns is left out, so the name is listed once (review-591)

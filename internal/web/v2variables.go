@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strconv"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
@@ -55,12 +56,28 @@ func v2WorkflowVariables(api *http.ServeMux, store *jobs.Store) {
 		if g, err := store.GlobalVariables(); err == nil { // W2: the server's variables, before the workflow's own (which win a shared name)
 			for _, v := range g {
 				items = append(items, map[string]any{"name": v.Name, "description": v.Description,
-					"group": "Server", "value": ownValue(v), "fields": nil})
+					"group": "Server", "value": ownValue(v), "fields": nil, "type": v.Type})
 			}
+		}
+		// W2 typed-setting picker (contract from orch-lead@workshop, 09:33Z): the file's own values, a whole
+		// field only, never inside text; the sample file's value when the sample has one. Type is the
+		// variable doc's word for it.
+		fileVals := map[string]any{}
+		if sample.info != nil {
+			fileVals = workflow.FileValues(sample.path, *sample.info, sample.job.SizeBefore)
+		}
+		for _, name := range sortedReserved() {
+			r := workflow.ReservedNames[name]
+			var value any
+			if v, ok := fileVals[name]; ok && v != nil && v != "" {
+				value = fmt.Sprint(v)
+			}
+			items = append(items, map[string]any{"name": name, "description": r.Description,
+				"group": "File values", "value": value, "fields": nil, "type": r.Type, "wholeFieldOnly": true})
 		}
 		for _, v := range ownVariables(store, id) {
 			items = append(items, map[string]any{"name": v.Name, "description": v.Description,
-				"group": "Workflow", "value": ownValue(v), "fields": nil})
+				"group": "Workflow", "value": ownValue(v), "fields": nil, "type": v.Type})
 		}
 		for _, p := range publishedVariables(store, id) { // FB1d: what a step before sets ("Set a variable")
 			items = append(items, map[string]any{"name": p.name, "description": p.words, "group": "Set by a step", "value": nil, "fields": nil})
@@ -70,6 +87,16 @@ func v2WorkflowVariables(api *http.ServeMux, store *jobs.Store) {
 			"variables": items,
 		})
 	})
+}
+
+// sortedReserved are the file's own names in one order (the map's order would change the list each time).
+func sortedReserved() []string {
+	out := make([]string, 0, len(workflow.ReservedNames))
+	for name := range workflow.ReservedNames {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // publishedVariables are the names the workflow's steps set for the steps after them, as its draft says

@@ -3,7 +3,9 @@
 // value here shows as empty in the example, as the page does for a file that has none.
 import type { Variable } from "../types/v2";
 
-export interface TemplateVar { name: string; description: string; group: string; value: string | null; fields: string[] | null }
+// type: the variable doc's word (string | number | bool | boolean | enum | path | secret) on Server, Workflow and File
+// values items; wholeFieldOnly: a whole field only, never inside text (the file's own values). Both absent on a built-in.
+export interface TemplateVar { name: string; description: string; group: string; value: string | null; fields: string[] | null; type?: string; wholeFieldOnly?: boolean }
 export interface VarList { sample: { path: string; builtIn: boolean }; variables: TemplateVar[] }
 
 const v = (name: string, group: string, description: string, value: string | null): TemplateVar => ({ name, description, group, value, fields: null });
