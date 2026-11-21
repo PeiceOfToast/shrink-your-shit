@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
@@ -76,7 +77,11 @@ var gpuRunning = worker.GPURunning
 // slots are the local worker's slots: processor (parallelJobs) and graphics. A graphics slot is in use
 // while a job encodes on the card, as the worker counts it (it read 0 always before: user bug 11-20).
 func (v *workerView) slots(cfg jobs.WorkerConfig, s Settings, working int, t doctor.Tools) map[string]any {
-	return map[string]any{"cpu": map[string]int{"used": working, "total": s.ParallelJobs}, "gpu": map[string]int{"used": gpuRunning(), "total": gpuSlotLimit(cfg, t)}}
+	gpu := gpuRunning()
+	if s.GPUJobsSeparate { // a job on the card is not a processor place: the two counts are told apart
+		working = max(working-gpu, 0)
+	}
+	return map[string]any{"cpu": map[string]int{"used": working, "total": s.ParallelJobs}, "gpu": map[string]int{"used": gpu, "total": gpuSlotLimit(cfg, t)}}
 }
 
 // gpuSlotLimit is how many graphics slots the local worker has: the person's setting (Workers page),
@@ -838,12 +843,13 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 		}
 		bad := func(msg string) { apiError(w, http.StatusBadRequest, "invalid_setting", msg+" Nothing was changed.") }
 		var cpu, gpu *int
+		gpuWords := fmt.Sprintf("Graphics slots are a whole number from 0 to %d.", worker.MaxGPUSlots)
 		if in.Slots != nil {
 			for _, f := range []struct {
 				raw  json.RawMessage
 				to   **int
 				what string
-			}{{in.Slots.CPU, &cpu, "Processor slots are a whole number from 1 to 8."}, {in.Slots.GPU, &gpu, "Graphics slots are a whole number from 0 to 8."}} {
+			}{{in.Slots.CPU, &cpu, "Processor slots are a whole number from 1 to 8."}, {in.Slots.GPU, &gpu, gpuWords}} {
 				if len(f.raw) == 0 || string(f.raw) == "null" {
 					continue
 				}
@@ -864,8 +870,8 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 			cfg.Name = name
 		}
 		if gpu != nil {
-			if n := *gpu; n < 0 || n > 8 {
-				bad("Graphics slots are a whole number from 0 to 8.")
+			if n := *gpu; n < 0 || n > worker.MaxGPUSlots {
+				bad(gpuWords)
 				return
 			}
 			cfg.GPUSlots = gpu
