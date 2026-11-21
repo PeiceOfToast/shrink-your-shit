@@ -24,12 +24,12 @@ func TestStaleStatsClearedOnReencodedStreamsOnly(t *testing.T) {
 	}
 	args := strings.Join(p.FFmpegArgs("i", "o"), " ")
 	for _, want := range []string{"-metadata:s:v:0 BPS= ", "-metadata:s:v:0 NUMBER_OF_BYTES= ", "-metadata:s:v:0 BPS-eng= ",
-		"-metadata:s:a:0 BPS= ", "-metadata:s:a:0 _STATISTICS_TAGS= ", "-metadata:s:a:2 BPS= ", "-metadata:s:s:0 BPS= "} {
+		"-metadata:s:a:0 BPS= ", "-metadata:s:a:0 _STATISTICS_TAGS= ", "-metadata:s:a:1 BPS= ", "-metadata:s:s:0 BPS= "} {
 		if !strings.Contains(args+" ", want) {
 			t.Errorf("re-encoded stream: %q missing from %s", want, args)
 		}
 	}
-	if strings.Contains(args, "-metadata:s:a:1 BPS") {
+	if strings.Contains(args, "-metadata:s:a:2 BPS") { // the copied track is a:2 now, after the added copy a:1
 		t.Errorf("a copied audio stream must keep its statistics: %s", args)
 	}
 	if strings.Contains(args, "-metadata:s:s:1 BPS") {

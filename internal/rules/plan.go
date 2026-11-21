@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -548,15 +549,66 @@ func (p Plan) trackArgs() []string {
 			args = append(args, "-map", "-0:"+strconv.Itoa(op.Index))
 		}
 	}
-	// the k-th audio track kept is a:k in the new file
-	k := 0
+	// The new file's audio and subtitles in the source's order, each track made from another (S6's stereo AAC
+	// next to surround) straight after the track it came from. ffmpeg numbers the output by map order, so when
+	// there is one, the streams after the earliest such source are taken out and mapped again behind it.
+	type outTrack struct {
+		idx          int
+		audio, added bool
+		op           TrackOp // the added copy's track; a kept stream reads p.Tracks
+	}
+	var outs []outTrack
 	for _, idx := range p.AudioOrder {
-		if dropped[idx] {
+		if !dropped[idx] {
+			outs = append(outs, outTrack{idx: idx, audio: true})
+		}
+	}
+	for _, idx := range p.SubtitleOrder {
+		if !dropped[idx] {
+			outs = append(outs, outTrack{idx: idx})
+		}
+	}
+	pivot := -1 // the earliest source of an added track; -1 when there is none
+	for _, op := range p.Tracks {
+		if op.Add {
+			outs = append(outs, outTrack{idx: op.Index, audio: true, added: true, op: op})
+			if pivot < 0 || op.Index < pivot {
+				pivot = op.Index
+			}
+		}
+	}
+	if pivot >= 0 {
+		sort.SliceStable(outs, func(a, b int) bool { return outs[a].idx < outs[b].idx })
+		for _, o := range outs {
+			if !o.added && o.idx > pivot {
+				args = append(args, "-map", "-0:"+strconv.Itoa(o.idx))
+			}
+		}
+		for _, o := range outs {
+			if o.added || o.idx > pivot {
+				args = append(args, "-map", "0:"+strconv.Itoa(o.idx))
+			}
+		}
+	}
+	// the k-th audio track of the new file is a:k, an added copy counted where it sits
+	k := 0
+	for _, o := range outs {
+		if !o.audio {
+			continue
+		}
+		a := "a:" + strconv.Itoa(k)
+		k++
+		if o.added {
+			op := o.op
+			args = append(args, "-c:"+a, op.Encoder, "-b:"+a, strconv.Itoa(op.Kbps)+"k", "-ac:"+a, strconv.Itoa(op.Channels))
+			if op.Title != "" && perTrack {
+				args = append(args, "-metadata:s:"+a, "title="+op.Title)
+			}
+			args = append(args, staleStatArgs(a)...) // a re-encode of another track: that track's statistics are stale (F9)
 			continue
 		}
 		for _, op := range p.Tracks {
-			if op.Index == idx && op.Encoder != "" && !op.Add {
-				a := "a:" + strconv.Itoa(k)
+			if op.Index == o.idx && op.Encoder != "" && !op.Add {
 				args = append(args, "-c:"+a, op.Encoder, "-b:"+a, strconv.Itoa(op.Kbps)+"k")
 				if op.Channels > 0 { // a downmix (S4's stereo AAC): never more channels than the track has
 					args = append(args, "-ac:"+a, strconv.Itoa(op.Channels))
@@ -566,19 +618,6 @@ func (p Plan) trackArgs() []string {
 				}
 				args = append(args, staleStatArgs(a)...) // re-encoded: the source's statistics are stale (F9)
 			}
-		}
-		k++
-	}
-	// tracks made from another (S6's stereo AAC next to surround): mapped again, after the kept ones
-	for _, op := range p.Tracks {
-		if op.Add {
-			a := "a:" + strconv.Itoa(k)
-			args = append(args, "-map", "0:"+strconv.Itoa(op.Index), "-c:"+a, op.Encoder, "-b:"+a, strconv.Itoa(op.Kbps)+"k", "-ac:"+a, strconv.Itoa(op.Channels))
-			if op.Title != "" && perTrack {
-				args = append(args, "-metadata:s:"+a, "title="+op.Title)
-			}
-			args = append(args, staleStatArgs(a)...) // a re-encode of another track: that track's statistics are stale (F9)
-			k++
 		}
 	}
 	// the k-th subtitle kept (not dropped, not saved as a file) is s:k in the new file
@@ -683,35 +722,48 @@ func (p Plan) expectTracks(e Expect) Expect {
 		return e
 	}
 	op := map[int]TrackOp{}
+	copies := map[int][]TrackOp{} // a track made from another sits straight after the track it came from
 	for _, o := range p.Tracks {
-		if !o.Add {
+		if o.Add {
+			copies[o.Index] = append(copies[o.Index], o)
+		} else {
 			op[o.Index] = o
 		}
 	}
 	order := map[string][]int{"audio": p.AudioOrder, "subtitle": p.SubtitleOrder}
 	seen := map[string]int{}
+	placed := map[int]bool{}
 	var out []StreamExpect
 	for _, s := range e.Streams {
+		src, gone := -1, false
 		if idx, ok := order[s.Type]; ok && seen[s.Type] < len(idx) {
-			o, has := op[idx[seen[s.Type]]]
+			src = idx[seen[s.Type]]
 			seen[s.Type]++
-			switch {
-			case has && o.Drop:
-				continue
-			case has && o.Codec != "":
-				s.Codec = o.Codec
-				if o.Channels > 0 {
-					s.Channels = o.Channels
-				}
-				if s.Type == "subtitle" && o.Codec != "mov_text" { // converted text (mov_text to SRT): its default flag kept too;
-					s.CheckDefault = true // MP4 has no default flag of its own (every track reads as default), so not for mov_text
+			if o, has := op[src]; has {
+				gone = o.Drop
+				if !o.Drop && o.Codec != "" {
+					s.Codec = o.Codec
+					if o.Channels > 0 {
+						s.Channels = o.Channels
+					}
+					if s.Type == "subtitle" && o.Codec != "mov_text" { // converted text (mov_text to SRT): its default flag kept too;
+						s.CheckDefault = true // MP4 has no default flag of its own (every track reads as default), so not for mov_text
+					}
 				}
 			}
 		}
-		out = append(out, s)
+		if !gone {
+			out = append(out, s)
+		}
+		if s.Type == "audio" && src >= 0 {
+			for _, o := range copies[src] {
+				out = append(out, StreamExpect{Type: "audio", Codec: o.Codec, Channels: o.Channels, Language: o.Language})
+				placed[src] = true
+			}
+		}
 	}
-	for _, o := range p.Tracks { // a track made from another: after the kept audio, in its language
-		if o.Add {
+	for _, o := range p.Tracks { // a made track whose source is not among the audio: after the rest, in its language
+		if o.Add && !placed[o.Index] {
 			out = append(out, StreamExpect{Type: "audio", Codec: o.Codec, Channels: o.Channels, Language: o.Language})
 		}
 	}

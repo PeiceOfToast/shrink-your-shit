@@ -54,7 +54,7 @@ func TestTitlePrecedence(t *testing.T) {
 		got := titlesByStream(base().trackArgs())
 		want := map[string][]string{
 			"-metadata:s:a:0": {"title=Surround 5.1 (E-AC-3)"},
-			"-metadata:s:a:2": {"title=Stereo (AAC)"},
+			"-metadata:s:a:1": {"title=Stereo (AAC)"}, // the copy sits straight after its source (slice 17)
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("own titles: %v, want %v (a titled source's kept title gets no title=)", got, want)

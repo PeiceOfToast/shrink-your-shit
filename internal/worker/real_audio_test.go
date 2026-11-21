@@ -53,7 +53,7 @@ func TestRealAudioAndSubtitles(t *testing.T) {
 		{"stereo_aac", "aac2 ac32"}, // the 96 kbps stereo AC-3 would not get smaller: copied (never bigger)
 		{"stereo_opus", "opus2 ac32"},
 		{"eac3_surround", "eac36 ac32"},            // the lossless surround becomes E-AC-3; the stereo AC-3 is copied
-		{"stereo_aac_surround", "flac6 ac32 aac2"}, // the surround copied with a stereo AAC added from it; the small AC-3 copied
+		{"stereo_aac_surround", "flac6 aac2 ac32"}, // the surround copied with a stereo AAC added from it, straight after it (slice 17); the small AC-3 copied
 	} {
 		t.Run(c.audio, func(t *testing.T) {
 			info := run(t, c.audio, "keep_all", "")
