@@ -567,6 +567,7 @@ type encodeReports struct {
 	atEnd    bool
 	ended    bool
 	gone     error
+	sendMu   sync.Mutex // serializes the finishing reports against progress=end (taken before mu)
 }
 
 // startRung clears the state of one ffmpeg run (a rung of the attempt ladder).
@@ -599,8 +600,11 @@ func (r *encodeReports) reportLocked() map[string]any {
 	return body
 }
 
-// end records progress=end: nothing after it is a converting report.
+// end records progress=end: nothing after it is a converting report. It takes sendMu too, so a finishing report
+// that is being sent finishes first and none starts after this returns.
 func (r *encodeReports) end() {
+	r.sendMu.Lock()
+	defer r.sendMu.Unlock()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.ended = true
@@ -622,7 +626,8 @@ func (r *encodeReports) lost() error {
 }
 
 // tick reports the finishing step every every, while the position is at the file's length and the encode has not
-// ended. It holds the lock across the report, so a report cannot follow progress=end's "checking".
+// ended. The report is built under mu and sent after it is released: a send that answers lease_gone calls lose,
+// which takes mu. sendMu keeps a send from running past end's "checking" (sendMu is taken before mu, always).
 func (r *encodeReports) tick(stop <-chan struct{}, every time.Duration, send func(map[string]any)) {
 	t := time.NewTicker(max(every, 10*time.Millisecond))
 	defer t.Stop()
@@ -631,13 +636,24 @@ func (r *encodeReports) tick(stop <-chan struct{}, every time.Duration, send fun
 		case <-stop:
 			return
 		case <-t.C:
-			r.mu.Lock()
-			if r.atEnd && !r.ended {
-				send(r.reportLocked())
+			r.sendMu.Lock()
+			if body := r.finishingReport(); body != nil {
+				send(body)
 			}
-			r.mu.Unlock()
+			r.sendMu.Unlock()
 		}
 	}
+}
+
+// finishingReport is the report tick sends: the finishing step's position and size, or nil when the position is
+// not at the file's length or the encode has ended.
+func (r *encodeReports) finishingReport() map[string]any {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.atEnd || r.ended {
+		return nil
+	}
+	return r.reportLocked()
 }
 
 // encoderArgs is the ffmpeg arguments for a plan on this worker: its main encoder's for the plan's format when
