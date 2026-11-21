@@ -1,0 +1,76 @@
+// Copyright (C) shrink-your-shit contributors. Licensed under AGPL-3.0-or-later.
+
+package jobs
+
+import (
+	"path/filepath"
+	"testing"
+)
+
+// Foundation slice 4 (migration 59): a database from before it opens, its jobs have no output_info, and
+// the store keeps one on a job once the check has read its new file.
+func TestMigration59AddsOutputInfoAndOldJobsHaveNone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "syp.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.Enqueue(Job{Path: "/m/old.mkv", DurationSec: 100, SizeBefore: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	db := rawDB(t, path) // back to version 58: as an install from before this left it
+	for _, q := range []string{`ALTER TABLE jobs DROP COLUMN output_info`, `PRAGMA user_version=58`} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(q, err)
+		}
+	}
+	db.Close()
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if raw, ok := s.OutputInfo(id); ok {
+		t.Errorf("an old job has output_info %q, want none", raw)
+	}
+	if err := s.SetOutputInfo(id, `{"videoCodec":"hevc"}`); err != nil {
+		t.Fatal(err)
+	}
+	if raw, ok := s.OutputInfo(id); !ok || raw != `{"videoCodec":"hevc"}` {
+		t.Errorf("output_info %q, %v; want the stored probe", raw, ok)
+	}
+}
+
+// SetStepWords replaces the latest step of that name (a retry adds another converted step) and leaves the
+// others alone.
+func TestSetStepWordsUpdatesTheLatestStepOfItsName(t *testing.T) {
+	s := open(t)
+	id, err := s.Enqueue(Job{Path: "/m/a.mkv"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, st := range [][2]string{{"converted", "Converted: HEVC · 10-bit · MKV."}, {"verified", "Checked."},
+		{"converted", "Converted: HEVC · 10-bit · MKV."}} { // a retry adds another converted step
+		if err := s.AddStep(id, st[0], true, st[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.SetStepWords(id, "converted", "Converted: HEVC · 8-bit · MKV."); err != nil {
+		t.Fatal(err)
+	}
+	steps, err := s.Steps(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"Converted: HEVC · 10-bit · MKV.", "Checked.", "Converted: HEVC · 8-bit · MKV."}
+	if len(steps) != len(want) {
+		t.Fatalf("steps %+v", steps)
+	}
+	for i := range want {
+		if steps[i].Words != want[i] {
+			t.Errorf("step %d %q, want %q", i, steps[i].Words, want[i])
+		}
+	}
+}

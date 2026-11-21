@@ -18,6 +18,7 @@ import (
 	"syscall"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
@@ -282,6 +283,7 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 			Args    []string // the ffmpeg arguments it ran
 			Steps   []jobs.RunStep
 			Failure *jobs.FailureSummary
+			Info    *media.Info // its probe of the new file it made (foundation slice 4); nil from an older worker
 		}
 		if !readJSON(w, r, &in) {
 			return
@@ -294,6 +296,9 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 		}
 		pl, _ := rj.Plan()
 		res := worker.RemoteResult{Stderr: in.Stderr, Command: in.Args, Code: in.Code}
+		if in.Info != nil {
+			res.Info = *in.Info // read as a probe: unknown fields are dropped, not passed on to the API
+		}
 		switch {
 		case in.Kept != "":
 			res.Kept = in.Kept

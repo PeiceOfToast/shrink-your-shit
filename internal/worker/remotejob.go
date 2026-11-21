@@ -41,6 +41,9 @@ type RemoteResult struct {
 	Code    string               // its failure's code when it is not the general one (slice 15: settings_rejected); "" from an older worker
 	Steps   []jobs.RunStep       // the run steps (encode, probe, check) with the remote's own timings
 	Failure *jobs.FailureSummary // the remote's failure summary (exit code, key lines, etc.)
+	// Info is the remote worker's own probe of the new file it made (foundation slice 4): an older
+	// worker sends none, and the server's check of the uploaded file measures it here instead.
+	Info media.Info
 }
 
 // remoteFailure is a remote worker's conversion failure with the code its result carried: "" from an
@@ -73,6 +76,9 @@ type RemoteJob struct {
 	result  chan RemoteResult
 	ended   chan struct{}
 	endErr  error
+	// measured is the probe the remote worker's own check took of the new file (foundation slice 4): a
+	// worker built before that sends none.
+	measured media.Info
 	// the remote encode, for the stall stop (row 17:40Z, orch-lead 19:13Z): judged only between the
 	// worker's "converting" (with its position) and its next stage, and only for a worker that sends one
 	judging bool
@@ -221,6 +227,9 @@ func (r *RemoteJob) convert(ctx context.Context, w *Worker, job jobs.Job, snap r
 				return "", nil, errLeaseLost
 			}
 		case res := <-r.result:
+			r.mu.Lock()
+			r.measured = res.Info
+			r.mu.Unlock()
 			switch {
 			case res.Kept != "":
 				return res.Stderr, res.Command, kept("%s", res.Kept)
@@ -230,6 +239,14 @@ func (r *RemoteJob) convert(ctx context.Context, w *Worker, job jobs.Job, snap r
 			return res.Stderr, res.Command, nil // the upload is in tmp already
 		}
 	}
+}
+
+// Measured is the probe the remote worker's own check took of the new file it made; empty when it sent
+// none (a worker built before foundation slice 4).
+func (r *RemoteJob) Measured() media.Info {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.measured
 }
 
 // RunRemote runs job, leased by a remote worker as rj.Lease, on this server until it ends: the lease
@@ -259,17 +276,18 @@ const remoteDecodeFull = 120
 // CheckResult runs the checks a local conversion's result gets (its shape, a decode, the picture check
 // at the plan's threshold) on the file at out, made from src: a remote worker's checks before it
 // uploads (Q4 a). A *KeptError: a check said no. The picture check's score is returned when it ran (nil
-// when none did), so the remote report can carry the job's check step.
-func CheckResult(ctx context.Context, x media.Exec, ffmpeg, ffprobe string, snap rules.Snapshot, src, out string) (*CheckScore, error) {
+// when none did), so the remote report can carry the job's check step; the probe of the file the check
+// read comes with it (empty when it read none), for the report's output_info (foundation slice 4).
+func CheckResult(ctx context.Context, x media.Exec, ffmpeg, ffprobe string, snap rules.Snapshot, src, out string) (*CheckScore, media.Info, error) {
 	if snap.Source == nil {
-		return nil, errors.New("the plan has no probe of the original")
+		return nil, media.Info{}, errors.New("the plan has no probe of the original")
 	}
 	st, err := os.Stat(src)
 	if err != nil {
-		return nil, err
+		return nil, media.Info{}, err
 	}
 	w := &Worker{Exec: x, FFmpeg: ffmpeg, FFprobe: ffprobe, MinSSIM: snap.Verify.MinSSIM, DecodeCheck: snap.Verify.DecodeCheck,
 		FullDecodeMaxSec: snap.Verify.FullDecodeMaxSec}
 	err = w.verify(ctx, *snap.Source, snap.Expect, src, out, st.Size())
-	return w.check, err
+	return w.check, w.verified, err
 }

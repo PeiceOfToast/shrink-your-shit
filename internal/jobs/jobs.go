@@ -556,6 +556,14 @@ func (s *Store) AddStep(id int64, step string, ok bool, words string) error {
 	return err
 }
 
+// SetStepWords replaces the words of job id's latest step named step: the converted step is first kept as
+// the prediction and, once the check has read the new file, says what it measured.
+func (s *Store) SetStepWords(id int64, step, words string) error {
+	_, err := s.db.Exec(`UPDATE job_steps SET words=? WHERE rowid=(SELECT rowid FROM job_steps
+WHERE job_id=? AND step=? ORDER BY rowid DESC LIMIT 1)`, words, id, step)
+	return err
+}
+
 // Steps is job id's step summary, in the order the steps happened.
 func (s *Store) Steps(id int64) ([]Step, error) {
 	rows, err := s.db.Query(`SELECT step,at,ok,words,node_id,port FROM job_steps WHERE job_id=? ORDER BY rowid`, id)
@@ -607,6 +615,23 @@ func (s *Store) ProbeOfSize(path string, size int64) (string, bool) {
 	var info string
 	err := s.db.QueryRow(`SELECT info FROM probes WHERE path=? AND size=?`, path, size).Scan(&info)
 	return info, err == nil
+}
+
+// SetOutputInfo keeps the probe (JSON media.Info) of the new file the check read, on the job: what the
+// job's detail shows as metadata.after, for a done and a kept job alike.
+func (s *Store) SetOutputInfo(id int64, info string) error {
+	_, err := s.db.Exec(`UPDATE jobs SET output_info=? WHERE id=?`, info, id)
+	return err
+}
+
+// OutputInfo is the stored probe (JSON) of job id's new file. false when none is stored: a job from
+// before the column, one whose check never read a file, or one not finished.
+func (s *Store) OutputInfo(id int64) (string, bool) {
+	var info sql.NullString
+	if err := s.db.QueryRow(`SELECT output_info FROM jobs WHERE id=?`, id).Scan(&info); err != nil {
+		return "", false
+	}
+	return info.String, info.Valid && info.String != ""
 }
 
 // jobsRemoved is called after jobs were deleted (stopped, skipped by their worker, removed with their

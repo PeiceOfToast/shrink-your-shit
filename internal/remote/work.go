@@ -236,12 +236,18 @@ func (c *Client) workOne(ctx context.Context, cv Converter) (did bool, err error
 		snap.Expect.MainVideo = snap.Plan.MainVideoRules(*snap.Source, rules.GraphicsEncoderIn(ran, snap.Plan.Video.Index))
 	}
 	checkStart := time.Now()
-	score, err := worker.CheckResult(ctx, cv.Exec, cv.FFmpeg, cv.FFprobe, snap, src, out)
+	score, info, err := worker.CheckResult(ctx, cv.Exec, cv.FFmpeg, cv.FFprobe, snap, src, out)
 	steps := checkSteps(checkStart, score, err) // the job's check step, as the server keeps a local one (Q1)
 	if err != nil {
 		var k *worker.KeptError
 		if errors.As(err, &k) {
-			return true, c.report(ctx, l, map[string]any{"kept": k.Reason, "stderr": stderr, "steps": steps, "args": ran})
+			body := map[string]any{"kept": k.Reason, "stderr": stderr, "steps": steps, "args": ran}
+			// the probe the check read: the job's output_info (foundation slice 4). A worker built before
+			// that field sends none, and the server's own check measures the uploaded file instead.
+			if info.Video() != nil {
+				body["info"] = info
+			}
+			return true, c.report(ctx, l, body)
 		}
 		return true, c.report(ctx, l, map[string]any{"ok": false, "message": "the checks didn't finish: " + err.Error(), "stderr": stderr, "steps": steps, "args": ran})
 	}
@@ -266,7 +272,11 @@ func (c *Client) workOne(ctx context.Context, cv Converter) (did bool, err error
 		subSums[strconv.Itoa(k)] = s
 	}
 	log.Printf("job %s: converted and checked; the server puts it in place", l.Job.ID)
-	return true, c.report(ctx, l, map[string]any{"ok": true, "sha256": sum, "bytes": size, "subs": subSums, "stderr": stderr, "steps": steps, "args": ran})
+	body := map[string]any{"ok": true, "sha256": sum, "bytes": size, "subs": subSums, "stderr": stderr, "steps": steps, "args": ran}
+	if info.Video() != nil {
+		body["info"] = info
+	}
+	return true, c.report(ctx, l, body)
 }
 
 // failureReport is what a failed conversion sends: its words, ffmpeg's lines and the arguments that ran, and

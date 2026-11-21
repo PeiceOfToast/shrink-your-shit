@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,6 +106,88 @@ func TestRemoteWorkerConvertsAFile(t *testing.T) {
 	info, err := media.Probe(context.Background(), media.OSExec{}, "ffprobe", src)
 	if err != nil || info.Video() == nil || info.Video().Codec != "hevc" {
 		t.Errorf("the new file: %+v %v", info.Video(), err)
+	}
+	// Foundation slice 4: the job keeps what the new file is, measured, and its converted step says it.
+	if raw, ok := st.OutputInfo(id); !ok || !strings.Contains(raw, `"videoCodec":"hevc"`) || !strings.Contains(raw, `"bitDepth":8`) {
+		t.Errorf("output_info %q, %v: want the new file's probe (HEVC, 8-bit)", raw, ok)
+	}
+	var converted string
+	if steps, err := st.Steps(id); err == nil {
+		for _, st := range steps {
+			if st.Step == "converted" {
+				converted = st.Words
+			}
+		}
+	}
+	if !strings.Contains(converted, "HEVC · 8-bit") {
+		t.Errorf("converted step %q, want what the check measured (HEVC · 8-bit)", converted)
+	}
+}
+
+// wrongCodecExec makes the encode write H.264 where the plan asks for HEVC, so the remote worker's own
+// check refuses the file by its codec: the job is kept, nothing is uploaded, and the probe the worker's
+// report carries is all the job has (foundation slice 4, mini-requirement 5).
+type wrongCodecExec struct{ media.Exec }
+
+func (x wrongCodecExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
+	if name == "ffmpeg" && filepath.Ext(args[len(args)-1]) == ".mkv" { // the encode, not a check (-f null -)
+		var in, out string
+		for i, a := range args {
+			if a == "-i" && i+1 < len(args) {
+				in = args[i+1]
+			}
+		}
+		out = args[len(args)-1]
+		return x.Exec.Stream(ctx, onLine, name, "-v", "error", "-y", "-nostdin", "-progress", "pipe:1", "-nostats",
+			"-i", in, "-map", "0:v:0", "-t", "4", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+			"-pix_fmt", "yuv420p", out)
+	}
+	return x.Exec.Stream(ctx, onLine, name, args...)
+}
+
+func TestRemoteWorkerKeepsARefusedFileAndStoresItsProbe(t *testing.T) {
+	needFFmpeg(t)
+	srv, st, lib := server(t)
+	src := filepath.Join(lib, "Movie.mkv")
+	if out, err := exec.Command("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=duration=4:size=640x360:rate=25",
+		"-c:v", "libx264", "-b:v", "3M", "-pix_fmt", "yuv420p", src).CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	original, _ := os.ReadFile(src)
+	l, err := st.AddLibrary("Movies", lib, rules.SliderTemplate(3), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _ := st.Enqueue(jobs.Job{Library: lib, LibraryID: l.ID, Path: src, DurationSec: 4, SizeBefore: int64(len(original))})
+	code, _, _ := st.NewPairing(time.Now())
+	c := &Client{Server: srv.URL, Version: "test"}
+	state, err := c.Pair(context.Background(), code, "Desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Token = state.Token
+	old := PlanPoll
+	PlanPoll = 100 * time.Millisecond
+	defer func() { PlanPoll = old }()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go c.Work(ctx, Converter{Exec: wrongCodecExec{media.OSExec{}}, FFmpeg: "ffmpeg", FFprobe: "ffprobe", Work: t.TempDir(),
+		FreeSpace: func(string) (uint64, error) { return 1 << 40, nil }})
+	var j jobs.Job
+	for end := time.Now().Add(2 * time.Minute); time.Now().Before(end); time.Sleep(200 * time.Millisecond) {
+		if j, _ = st.Get(id); j.Status != jobs.Queued && j.Status != jobs.Running {
+			break
+		}
+	}
+	if j.Status != jobs.Kept || j.Worker != state.WorkerID {
+		t.Fatalf("job %s by %q: %q", j.Status, j.Worker, j.Error)
+	}
+	// the probe says h264, the format of the file the worker made, not the plan's hevc
+	if raw, ok := st.OutputInfo(id); !ok || !strings.Contains(raw, `"videoCodec":"h264"`) {
+		t.Errorf("output_info %q, %v: want the probe of the file the worker's check refused (H.264)", raw, ok)
+	}
+	if b, _ := os.ReadFile(src); string(b) != string(original) {
+		t.Error("the original should be as it was: the new file was refused, not uploaded")
 	}
 }
 

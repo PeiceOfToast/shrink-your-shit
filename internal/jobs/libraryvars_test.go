@@ -115,7 +115,7 @@ func TestMigration58AddsTheLibraryVariablesKeepingTheRows(t *testing.T) {
 	s.Close()
 	// back to version 57: as an install from before W3 left it
 	db := rawDB(t, path)
-	for _, q := range []string{`ALTER TABLE libraries DROP COLUMN variables`, `PRAGMA user_version=57`} {
+	for _, q := range []string{`ALTER TABLE jobs DROP COLUMN output_info`, `ALTER TABLE libraries DROP COLUMN variables`, `PRAGMA user_version=57`} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}
