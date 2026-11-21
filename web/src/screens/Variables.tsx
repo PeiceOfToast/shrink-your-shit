@@ -97,13 +97,16 @@ function VariablesCard({ items, reload, said }: { items: WorkflowVar[]; reload: 
   const editRow = (r: Row) => { setAsking(null); setEdit({ key: r.key }); setFocusId(`${r.key}-name`); };
   const addRow = () => { const r = fresh(); setRows((rs) => [...rs, r]); setAsking(null); setPhase(null); setEdit({ key: r.key }); setFocusId(`${r.key}-name`); };
   // Done closes the form and returns focus to the row's Edit button; no choices keeps it open with an error.
-  const done = (key: string) => {
+  // A Choice with no choices can't be saved: the error goes by Choices and focus moves there.
+  const needChoices = (key: string) => {
     const r = rows.find((x) => x.key === key);
-    if (r && r.type === "enum" && !r.options.split(",").some((s) => s.trim())) {
-      setIssues((i) => ({ ...i, [key]: { msg: "Give it at least one choice.", field: "options" } }));
-      setFocusId(`${key}-options`);
-      return;
-    }
+    if (!r || r.type !== "enum" || r.options.split(",").some((s) => s.trim())) return false;
+    setIssues((i) => ({ ...i, [key]: { msg: "Give it at least one choice.", field: "options" } }));
+    setFocusId(`${key}-options`);
+    return true;
+  };
+  const done = (key: string) => {
+    if (needChoices(key)) return;
     setEdit(null); setFocusId(`${key}-edit`);
   };
   const cancelEdit = () => {
@@ -122,6 +125,7 @@ function VariablesCard({ items, reload, said }: { items: WorkflowVar[]; reload: 
   };
 
   const send = async (preview: boolean) => {
+    if (edit && needChoices(edit.key)) return; // the open form's Choices is checked before any preview or save
     setBusy(true); setLoose(""); setIssues({});
     let r: Answer<VarSave>;
     try { r = await saveWorkflowVars(rows.map(toVar), preview); } catch { setBusy(false); setLoose("Couldn't reach Shrink Your Shit. Try again."); return; }
