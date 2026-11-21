@@ -78,7 +78,7 @@ func Attempt(ctx context.Context, in AttemptInput, run RunFunc, hooks AttemptHoo
 		// Truncate, don't remove: the staged file is checked by identity (staged.intact), so the retry must
 		// write into the same file, not a new one that may get another inode.
 		if terr := os.Truncate(in.Tmp, 0); terr != nil {
-			res.Errors, res.Err = "", fmt.Errorf("clearing the partial output: %w", terr)
+			res.Err = fmt.Errorf("clearing the partial output: %w", terr)
 			return res
 		}
 		if r.Full {

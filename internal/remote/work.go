@@ -478,6 +478,13 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 	if note != "" {
 		c.note(ctx, l, note)
 	}
+	if !snap.Plan.Video.Copy { // the same Chosen line the local worker logs (a copy is not encoded, so no line)
+		why := "" // the processor was chosen: the note above says why, and this line does not repeat it (as local)
+		if enc != "" {
+			why = enc + " passed its test on this computer and can do this file"
+		}
+		c.note(ctx, l, worker.ChosenLine(snap.Plan, enc, args, why))
+	}
 	if e := report(map[string]any{"stage": "converting", "outTimeUs": 0, "encoder": enc}); leaseGone(e) {
 		return "", args, e
 	}

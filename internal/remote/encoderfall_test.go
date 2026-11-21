@@ -18,8 +18,9 @@ func TestRemoteDamagedSourceIsNotAFallBack(t *testing.T) {
 	if len(x.calls) != 1 {
 		t.Errorf("ffmpeg calls %d, want 1 (no processor retry)", len(x.calls))
 	}
-	if len(notes) != 0 {
-		t.Errorf("notes %q, want none", notes)
+	// The job log gets the Chosen line before the encode, and no step-down line: the source failed, not the encoder.
+	if want := "Chosen: Intel Quick Sync (graphics), H.264 — h264_qsv passed its test on this computer and can do this file. Settings: Encoder: h264_qsv"; len(notes) != 1 || !strings.HasPrefix(notes[0], want) {
+		t.Errorf("notes %q, want only the Chosen line %q", notes, want)
 	}
 }
 

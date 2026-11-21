@@ -1552,11 +1552,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 	}
 	if !plan.Video.Copy && w.remote == nil { // R5's last line: the encoder the real encode uses, why, and its settings
-		line := "Chosen: " + encoderWordsUsed(plan, gpu)
-		if chosenWhy != "" {
-			line += " — " + chosenWhy
-		}
-		w.logLine(job.ID, secEncode, jobs.LevelInfo, line+". Settings: "+encoderDetail(args))
+		w.logLine(job.ID, secEncode, jobs.LevelInfo, ChosenLine(plan, gpu, args, chosenWhy))
 	}
 	// The new file's rules, now that the encoder that runs is known: the main video by the plan's format,
 	// its height and width (±2 px) and the depth that encoder makes; every other stream as today.
