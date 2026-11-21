@@ -937,6 +937,7 @@ func (w *Worker) watchStall(id int64) func() {
 // job is stopped (stopStall, the same words and retry rules) when it hasn't moved on for stallAfter
 // while the worker says it is converting.
 func (w *Worker) watchRemoteStall(id int64, rj *RemoteJob) func() {
+	w.stopOver.Store(false) // a stop from an earlier local encode on this worker is not this stop's reason
 	after := w.stallAfter()
 	done := make(chan struct{})
 	go func() {
