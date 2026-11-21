@@ -435,19 +435,22 @@ function Limits({ w, onSaved }: { w: Worker; onSaved: (m: string) => void }) {
 
 // settings.gpuJobsSeparate (#623): the built-in worker only. Saves on change, like Commands in SettingsMore.
 function GpuSwitch({ onSaved, onErr }: { onSaved: (m: string) => void; onErr: (m: string) => void }) {
-  const st = useData(getSettings, []), [busy, setBusy] = useState(false), hint = useId();
-  const on = !!st.data?.gpuJobsSeparate;
+  const st = useData(getSettings, []), [busy, setBusy] = useState(false), [saved, setSaved] = useState<boolean | null>(null), hint = useId();
+  const on = saved ?? !!st.data?.gpuJobsSeparate; // the saved value shows at once; the reload then takes over
+  // not disabled while saving: a disabled control drops keyboard focus, so a second Space would do nothing
   const set = async (v: boolean) => {
+    if (busy) return;
     setBusy(true); onErr("");
     const r = await act(patchSettings({ gpuJobsSeparate: v }), onErr);
+    if (r) { setSaved(v); await st.reload(); setSaved(null); onSaved(gpuSaved(v)); }
     setBusy(false);
-    if (r) { st.reload(); onSaved(gpuSaved(v)); }
   };
   return (
     <div className="field">
-      <label className="row nw"><input id="gpu-sw" type="checkbox" role="switch" className="switch" checked={on} disabled={!st.data || busy} aria-describedby={hint} onChange={(e) => set(e.target.checked)} />
+      <label className="row nw"><input id="gpu-sw" type="checkbox" role="switch" className="switch" checked={on} disabled={!st.data} aria-busy={busy} aria-describedby={hint} onChange={(e) => set(e.target.checked)} />
         <span>{GPU_LABEL}</span></label>
       <span className="hint" id={hint}>{GPU_HINT}</span>
+      {st.error && !st.data && <span className="hint" role="alert">Could not load this setting.</span>}
     </div>
   );
 }
