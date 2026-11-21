@@ -247,12 +247,12 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 			// a job planned before that was recorded: its original's probe is still the one at its
 			// name only when the new file went elsewhere; after a replace at the same name it would be
 			// the new file's, so before stays null (dev-review 04:27Z)
-			if raw, ok := store.LatestProbe(j.Path); ok {
+			if raw, ok := store.ProbeOfSize(j.Path, j.SizeBefore); ok {
 				meta["before"] = json.RawMessage(raw)
 			}
 		}
 		if j.OutputPath != "" {
-			if raw, ok := store.LatestProbe(j.OutputPath); ok {
+			if raw, ok := store.ProbeOfSize(j.OutputPath, j.SizeAfter); ok {
 				meta["after"] = json.RawMessage(raw)
 			}
 		}
