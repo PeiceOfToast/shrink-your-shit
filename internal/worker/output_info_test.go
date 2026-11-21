@@ -113,7 +113,7 @@ func TestAnAllowed8BitEncodeIsRecordedAsWhatItMade(t *testing.T) {
 	sel := rules.DefaultSelectors(3)
 	sel.Format = "h264"
 	tmpl := sel.Template()
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.Encoder = func(c string, need10 bool, h *rules.HDR) (string, string) {
 		if c != "libx264" {
 			return "", ""
@@ -139,7 +139,7 @@ func TestAnAllowed8BitEncodeIsRecordedAsWhatItMade(t *testing.T) {
 func TestARemoteKeptJobStoresTheProbeItsWorkerSent(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
-	w.Template = func(jobs.Job) (rules.Template, error) { return rules.SliderTemplate(3), nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return rules.SliderTemplate(3), 0, nil }
 	job, err := s.store.Claim("remote-worker")
 	if err != nil {
 		t.Fatal(err)
