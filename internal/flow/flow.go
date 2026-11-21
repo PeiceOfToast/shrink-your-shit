@@ -110,6 +110,17 @@ func After(cards []rules.Card, st *State, env Env) (notes []Note, warnings []str
 		st.Vars = map[string]string{}
 	}
 	for _, c := range cards {
+		if c.Check != nil { // FB4b: a question after the save: its answer, then the cards on that port
+			yes, why := c.Check.AskResult(sizeVar(st, "size_bytes"), sizeVar(st, "new_size_bytes"))
+			notes = append(notes, Note{NodeID: c.NodeID, Name: nameOf(c), Words: map[bool]string{true: "Yes", false: "No"}[yes] + " (" + why + ")"})
+			next := c.No
+			if yes {
+				next = c.Yes
+			}
+			ns, ws := After(next, st, env)
+			notes, warnings = append(notes, ns...), append(warnings, ws...)
+			continue
+		}
 		n, err := run(c, st, env)
 		if err != nil {
 			n.Words, n.Failed = nameOf(c)+" didn't work: "+err.Error(), true
@@ -118,6 +129,13 @@ func After(cards []rules.Card, st *State, env Env) (notes []Note, warnings []str
 		notes = append(notes, n)
 	}
 	return notes, warnings
+}
+
+// sizeVar reads a size in bytes from the run's values (vars.EndValues writes them as plain digits); 0 when
+// it isn't there.
+func sizeVar(st *State, name string) int64 {
+	n, _ := strconv.ParseInt(st.Vars[name], 10, 64)
+	return n
 }
 
 // run does one card.
