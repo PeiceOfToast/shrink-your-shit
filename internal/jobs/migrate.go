@@ -550,6 +550,11 @@ ALTER TABLE libraries ADD COLUMN variables TEXT NOT NULL DEFAULT '[]';`},
 	{59, "job queued revision", `
 ALTER TABLE jobs ADD COLUMN queued_rev INTEGER NOT NULL DEFAULT 0;
 UPDATE jobs SET queued_rev = workflow_rev;`},
+	// Foundation slice 4: what the new file turned out to be, as the check's own probe read it (JSON
+	// media.Info). NULL for a job from before this, one whose check never read a file, and one that has
+	// not finished yet: the API then falls back to the probes table as it always did.
+	{60, "job output info", `
+ALTER TABLE jobs ADD COLUMN output_info TEXT;`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone

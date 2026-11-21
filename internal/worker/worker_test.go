@@ -231,7 +231,7 @@ func (s *scenario) handle(name string, args []string) (string, string, error) {
 		return s.outSpec.json(), "", nil
 	case "ffmpeg":
 		switch {
-		case (s.has(args, "libx265") || s.has(args, "-progress")) && !s.has(args, "-xerror"): // the encode (or a repackaging, S4: -c copy only); the playback test also passes -progress
+		case (s.has(args, "libx265") || s.has(args, "libx264") || s.has(args, "-progress")) && !s.has(args, "-xerror"): // the encode (or a repackaging, S4: -c copy only); the playback test also passes -progress
 			if s.onEncode != nil {
 				s.onEncode()
 			}

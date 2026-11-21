@@ -77,7 +77,7 @@ func TestMigration48AddsDecidedAtAndKeepsRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	dropLogSections(t, s)
-	for _, q := range []string{`ALTER TABLE jobs DROP COLUMN tags`, `ALTER TABLE files DROP COLUMN decided_at`, `ALTER TABLE jobs DROP COLUMN subtitle_files`, `ALTER TABLE jobs DROP COLUMN workflow_rev`, `ALTER TABLE jobs DROP COLUMN queued_rev`, `ALTER TABLE jobs DROP COLUMN output_gone_at`, `DROP INDEX IF EXISTS jobs_newest`, `PRAGMA user_version=47`} {
+	for _, q := range []string{`ALTER TABLE jobs DROP COLUMN tags`, `ALTER TABLE jobs DROP COLUMN output_info`, `ALTER TABLE files DROP COLUMN decided_at`, `ALTER TABLE jobs DROP COLUMN subtitle_files`, `ALTER TABLE jobs DROP COLUMN workflow_rev`, `ALTER TABLE jobs DROP COLUMN queued_rev`, `ALTER TABLE jobs DROP COLUMN output_gone_at`, `DROP INDEX IF EXISTS jobs_newest`, `PRAGMA user_version=47`} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}
@@ -114,8 +114,14 @@ func TestMigration48AddsDecidedAtAndKeepsRows(t *testing.T) {
 }
 
 // rewindDecidedAt takes away migration 48's column, for tests that set user_version below it (it runs again on the next open).
-func rewindDecidedAt(s *Store) {
-	s.db.Exec(`ALTER TABLE jobs DROP COLUMN tags`) // migration 57's column, which every rewind below it must take away
+func rewindDecidedAt(t *testing.T, s *Store) {
+	// each statement runs on its own: a second statement in one Exec is a bind argument, not SQL (review #608)
+	if _, err := s.db.Exec(`ALTER TABLE jobs DROP COLUMN tags`); err != nil { // migration 57's column, which every rewind below it must take away
+		t.Fatalf("dropping jobs.tags: %v", err)
+	}
+	if _, err := s.db.Exec(`ALTER TABLE jobs DROP COLUMN output_info`); err != nil { // migration 60's, which this rewind is below
+		t.Fatalf("dropping jobs.output_info: %v", err)
+	}
 	s.db.Exec(`ALTER TABLE files DROP COLUMN decided_at`)
 	s.db.Exec(`ALTER TABLE jobs DROP COLUMN workflow_rev`)   // migration 51's column, which rewinds past 50 must also take away
 	s.db.Exec(`ALTER TABLE jobs DROP COLUMN queued_rev`)     // so must migration 59's

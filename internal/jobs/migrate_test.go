@@ -396,8 +396,8 @@ func TestMigration7BackfillsSkipReasons(t *testing.T) {
 		`ALTER TABLE flows DROP COLUMN description`, `ALTER TABLE flows DROP COLUMN status`, `ALTER TABLE flows DROP COLUMN favourite`,
 		`ALTER TABLE flows DROP COLUMN tags`, `DROP TABLE workflow_revisions`, // and 20
 		`DROP TRIGGER events_job_insert`, `DROP TRIGGER events_job_status`, `DROP INDEX jobs_claim`, `DROP TABLE events`, `ALTER TABLE jobs DROP COLUMN priority`, // and 21
-		`ALTER TABLE jobs DROP COLUMN error_code`,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     // and 23
-		`DROP TABLE workers`, `ALTER TABLE shares DROP COLUMN mount_point`, `ALTER TABLE libraries DROP COLUMN override_folder`, `ALTER TABLE libraries DROP COLUMN priority`, `ALTER TABLE jobs DROP COLUMN original_gone_at`, `ALTER TABLE jobs DROP COLUMN original_changed`, `ALTER TABLE jobs DROP COLUMN original_disk`, `ALTER TABLE jobs DROP COLUMN route`, `ALTER TABLE job_steps DROP COLUMN node_id`, `ALTER TABLE job_steps DROP COLUMN port`, `ALTER TABLE jobs DROP COLUMN fallback`, `ALTER TABLE jobs DROP COLUMN lease_id`, `ALTER TABLE jobs DROP COLUMN lease_expires`, `ALTER TABLE files DROP COLUMN job_id`, `ALTER TABLE jobs DROP COLUMN again_from`, `ALTER TABLE jobs DROP COLUMN tags`, `DROP TABLE worker_pairings`, `DROP TABLE IF EXISTS worker_paths`, // and 24-27
+		`ALTER TABLE jobs DROP COLUMN error_code`,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 // and 23
+		`DROP TABLE workers`, `ALTER TABLE shares DROP COLUMN mount_point`, `ALTER TABLE libraries DROP COLUMN override_folder`, `ALTER TABLE libraries DROP COLUMN priority`, `ALTER TABLE jobs DROP COLUMN original_gone_at`, `ALTER TABLE jobs DROP COLUMN original_changed`, `ALTER TABLE jobs DROP COLUMN original_disk`, `ALTER TABLE jobs DROP COLUMN route`, `ALTER TABLE job_steps DROP COLUMN node_id`, `ALTER TABLE job_steps DROP COLUMN port`, `ALTER TABLE jobs DROP COLUMN fallback`, `ALTER TABLE jobs DROP COLUMN lease_id`, `ALTER TABLE jobs DROP COLUMN lease_expires`, `ALTER TABLE files DROP COLUMN job_id`, `ALTER TABLE jobs DROP COLUMN again_from`, `ALTER TABLE jobs DROP COLUMN tags`, `ALTER TABLE jobs DROP COLUMN output_info`, `DROP TABLE worker_pairings`, `DROP TABLE IF EXISTS worker_paths`, // and 24-27
 		`ALTER TABLE files DROP COLUMN decided_at`, `ALTER TABLE jobs DROP COLUMN subtitle_files`, `ALTER TABLE jobs DROP COLUMN workflow_rev`, `ALTER TABLE jobs DROP COLUMN queued_rev`, `ALTER TABLE jobs DROP COLUMN output_gone_at`, `DROP INDEX IF EXISTS jobs_newest`, `PRAGMA user_version=6`) {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
@@ -490,7 +490,7 @@ func TestAlwaysStandardizeMigration(t *testing.T) {
 		s.PutFile(File{Path: p, Decision: "skip: x", Reason: reason})
 	}
 	rewind15(s) // migration 15's columns go, so it can run again
-	rewindDecidedAt(s)
+	rewindDecidedAt(t, s)
 	rewind20(s)                           // migration 20's columns and table go, so it can run again
 	s.db.Exec(`PRAGMA user_version = 12`) // as an install from before always standardize left it
 	s.Close()
@@ -547,7 +547,7 @@ func TestWorkersStartStoppedMigration(t *testing.T) {
 		s.SetMeta("paused", paused)
 		s.db.Exec(`DELETE FROM app_meta WHERE key='stopped_by_update'`)
 		rewind15(s) // migration 15's columns go, so it can run again
-		rewindDecidedAt(s)
+		rewindDecidedAt(t, s)
 		rewind20(s)                           // migration 20's columns and table go, so it can run again
 		s.db.Exec(`PRAGMA user_version = 13`) // as an install from before S2 left it
 		s.Close()
@@ -576,8 +576,8 @@ func rewind20(s *Store) {
 	for _, q := range append(append([]string{}, rewindShareMigrations...), `ALTER TABLE flows DROP COLUMN description`, `ALTER TABLE flows DROP COLUMN status`,
 		`ALTER TABLE flows DROP COLUMN favourite`, `ALTER TABLE flows DROP COLUMN tags`, `DROP TABLE workflow_revisions`,
 		`DROP TRIGGER events_job_insert`, `DROP TRIGGER events_job_status`, `DROP TRIGGER events_job_removed`, `DROP INDEX jobs_claim`, `DROP TABLE events`, `ALTER TABLE jobs DROP COLUMN priority`, // and 21
-		`ALTER TABLE jobs DROP COLUMN error_code`,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       // and 23
-		`DROP TABLE workers`, `ALTER TABLE shares DROP COLUMN mount_point`, `ALTER TABLE libraries DROP COLUMN override_folder`, `ALTER TABLE libraries DROP COLUMN priority`, `ALTER TABLE jobs DROP COLUMN original_gone_at`, `ALTER TABLE jobs DROP COLUMN original_changed`, `ALTER TABLE jobs DROP COLUMN original_disk`, `ALTER TABLE jobs DROP COLUMN route`, `ALTER TABLE job_steps DROP COLUMN node_id`, `ALTER TABLE job_steps DROP COLUMN port`, `ALTER TABLE jobs DROP COLUMN fallback`, `ALTER TABLE jobs DROP COLUMN lease_id`, `ALTER TABLE jobs DROP COLUMN lease_expires`, `ALTER TABLE files DROP COLUMN job_id`, `ALTER TABLE jobs DROP COLUMN again_from`, `ALTER TABLE jobs DROP COLUMN tags`, `DROP TABLE worker_pairings`, `DROP TABLE IF EXISTS worker_paths`) { // and 24-27
+		`ALTER TABLE jobs DROP COLUMN error_code`,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   // and 23
+		`DROP TABLE workers`, `ALTER TABLE shares DROP COLUMN mount_point`, `ALTER TABLE libraries DROP COLUMN override_folder`, `ALTER TABLE libraries DROP COLUMN priority`, `ALTER TABLE jobs DROP COLUMN original_gone_at`, `ALTER TABLE jobs DROP COLUMN original_changed`, `ALTER TABLE jobs DROP COLUMN original_disk`, `ALTER TABLE jobs DROP COLUMN route`, `ALTER TABLE job_steps DROP COLUMN node_id`, `ALTER TABLE job_steps DROP COLUMN port`, `ALTER TABLE jobs DROP COLUMN fallback`, `ALTER TABLE jobs DROP COLUMN lease_id`, `ALTER TABLE jobs DROP COLUMN lease_expires`, `ALTER TABLE files DROP COLUMN job_id`, `ALTER TABLE jobs DROP COLUMN again_from`, `ALTER TABLE jobs DROP COLUMN tags`, `ALTER TABLE jobs DROP COLUMN output_info`, `DROP TABLE worker_pairings`, `DROP TABLE IF EXISTS worker_paths`) { // and 24-27
 		s.db.Exec(q)
 	}
 }
@@ -605,7 +605,7 @@ func TestExistingBasicFlowsMigration(t *testing.T) {
 	s.db.Exec(`DELETE FROM app_meta WHERE key='basic_changed_by_update'`)
 	s.PutFile(File{Path: "/m/hevc.mp4", Size: 1, Decision: "skip: x", Reason: "already_hevc"})
 	s.PutFile(File{Path: "/m/av1.mkv", Size: 1, Decision: "skip: x", Reason: "already_efficient_x"})
-	rewindDecidedAt(s)
+	rewindDecidedAt(t, s)
 	rewind20(s) // migration 20's columns and table go, so it can run again
 	s.db.Exec(`PRAGMA user_version = 15`)
 	s.Close()
@@ -649,7 +649,7 @@ func TestHDR10KeptMigration(t *testing.T) {
 	s.db.Exec(`UPDATE flows SET template=json_set(json_remove(template, '$.selectors.includeDolbyVision'), '$.selectors.skipHdr', json('false')) WHERE id=?`, b.FlowID)
 	s.PutFile(File{Path: "/a/hdr.mkv", Size: 1, Decision: "skip: x", Reason: "hdr_dv"})
 	s.PutFile(File{Path: "/a/x.mkv", Size: 1, Decision: "skip: x", Reason: "no_video"})
-	rewindDecidedAt(s)
+	rewindDecidedAt(t, s)
 	rewind20(s) // migration 20's columns and table go, so it can run again
 	s.db.Exec(`PRAGMA user_version = 16`)
 	s.Close()
@@ -699,7 +699,7 @@ func TestStandardReworkMigration(t *testing.T) {
 		}
 	}
 	s.PutFile(File{Path: "/a/x.mkv", Size: 1, Decision: "skip: x", Reason: "already_hevc"})
-	rewindDecidedAt(s)
+	rewindDecidedAt(t, s)
 	rewind20(s) // migration 20's columns and table go, so it can run again
 	s.db.Exec(`PRAGMA user_version = 18`)
 	s.Close()
@@ -739,7 +739,7 @@ func TestStandardReworkOpusMP4(t *testing.T) {
 	sel.Speed = "slower"
 	l, _ := s.AddLibrary("M", "/m", sel.Template(), true)
 	s.db.Exec(`UPDATE flows SET template=json_set(json_remove(template, '$.selectors.onlyMyLanguages'), '$.selectors.audio', 'opus', '$.selectors.fileType', 'mp4', '$.selectors.afterConverting', 'beside') WHERE id=?`, l.FlowID)
-	rewindDecidedAt(s)
+	rewindDecidedAt(t, s)
 	rewind20(s) // migration 20's columns and table go, so it can run again
 	s.db.Exec(`PRAGMA user_version = 18`)
 	s.Close()
@@ -777,7 +777,7 @@ func TestBitrateMeaningsMigration(t *testing.T) {
 		l, _ := s.AddLibrary("/"+name, "/"+name, sel.Template(), true)
 		ids[name] = l.FlowID
 	}
-	for _, q := range append([]string{`ALTER TABLE jobs DROP COLUMN tags`, `ALTER TABLE files DROP COLUMN decided_at`, `ALTER TABLE jobs DROP COLUMN subtitle_files`, `ALTER TABLE jobs DROP COLUMN workflow_rev`, `ALTER TABLE jobs DROP COLUMN queued_rev`, `ALTER TABLE jobs DROP COLUMN output_gone_at`, `DROP INDEX IF EXISTS jobs_newest`, `ALTER TABLE shares DROP COLUMN mount_point`, `ALTER TABLE workers DROP COLUMN primary_encoder`, `ALTER TABLE workers DROP COLUMN os`, `ALTER TABLE workers DROP COLUMN arch`}, rewindShareMigrations...) { // 42 and 41 run again on the next open
+	for _, q := range append([]string{`ALTER TABLE jobs DROP COLUMN tags`, `ALTER TABLE jobs DROP COLUMN output_info`, `ALTER TABLE files DROP COLUMN decided_at`, `ALTER TABLE jobs DROP COLUMN subtitle_files`, `ALTER TABLE jobs DROP COLUMN workflow_rev`, `ALTER TABLE jobs DROP COLUMN queued_rev`, `ALTER TABLE jobs DROP COLUMN output_gone_at`, `DROP INDEX IF EXISTS jobs_newest`, `ALTER TABLE shares DROP COLUMN mount_point`, `ALTER TABLE workers DROP COLUMN primary_encoder`, `ALTER TABLE workers DROP COLUMN os`, `ALTER TABLE workers DROP COLUMN arch`}, rewindShareMigrations...) { // 42 and 41 run again on the next open
 		s.db.Exec(q)
 	}
 	s.db.Exec(`PRAGMA user_version = 37`) // migration 38 runs on the next open

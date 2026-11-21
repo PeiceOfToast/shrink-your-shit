@@ -93,6 +93,11 @@ type Queue interface {
 	Skip(id int64, words, code string) error
 	// AddStep adds a line to a job's step summary (S5): converted, verified, kept, replaced.
 	AddStep(id int64, step string, ok bool, words string) error
+	// SetStepWords replaces the words of the job's latest step named step: the converted step says the
+	// prediction first and, once the check has read the new file, what it measured (foundation slice 4).
+	SetStepWords(id int64, step, words string) error
+	// SetOutputInfo stores the probe (JSON) of the new file the check read, on the job.
+	SetOutputInfo(id int64, info string) error
 	// AddDecision records a check's answer, or a card's words (FB1c), on the timeline with its node.
 	AddDecision(id int64, nodeID, port, words string) error
 	// PutProbe stores a file's probe (JSON) for its size and time: the new file's, for the Files view.
@@ -1527,8 +1532,17 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			args = ran
 		}
 		var k *KeptError
-		if errors.As(terr, &k) || errors.Is(terr, errLeaseLost) {
+		if errors.As(terr, &k) {
+			// Its check refused the file, so it is not uploaded: the probe it took is the only one
+			// (foundation slice 4: a kept job's detail says what the new file was).
+			w.storeOutputInfo(job.ID, w.remote.Measured())
 			return "", terr
+		}
+		if errors.Is(terr, errLeaseLost) {
+			return "", terr
+		}
+		if terr == nil { // what its check measured, until this server's check reads the uploaded file
+			w.storeOutputInfo(job.ID, w.remote.Measured())
 		}
 	} else {
 		encErr, encLog, decoded, terr = w.encodeRun(ctx, job, args)
@@ -1779,6 +1793,10 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	checkStart := w.now()
 	verr := w.verify(ctx, src, exp, srcPath, tmp, before.Size())
 	w.recordCheck(job.ID, checkStart, verr)
+	var keptErr *KeptError
+	if verr == nil || errors.As(verr, &keptErr) { // what the new file is, for a done and a kept job alike
+		w.recordOutput(job.ID, plan, verr == nil)
+	}
 	if err := verr; err != nil {
 		var k *KeptError
 		if errors.As(err, &k) && plan.Video.PeakLimitKbps > 0 && strings.HasPrefix(k.Reason, pictureTooDifferent) {
@@ -2596,6 +2614,42 @@ func newFileSize(st os.FileInfo, measured int64) (size int64, note string) {
 		return measured, fmt.Sprintf("The new file reported 0 bytes after it was put in place; using the size measured before the move (%d bytes).", measured)
 	}
 	return 0, "Couldn't read the new file's size after it was put in place; size unknown."
+}
+
+// recordOutput keeps what the new file turned out to be, from the probe the check read: the job's
+// output_info (the job detail's metadata.after), the converted step's words (the prediction until now)
+// and, on success, the log's "New file" line a kept job's record already has. Nothing is kept when the
+// check read no file: a job that never produced a readable new file stays null.
+func (w *Worker) recordOutput(id int64, plan rules.Plan, logLine bool) {
+	if w.Queue == nil || w.verified.Video() == nil {
+		return
+	}
+	w.storeOutputInfo(id, w.verified)
+	if logLine {
+		if err := w.Queue.AppendLogLine(id, 1, secOutput, jobs.LevelInfo, "check", "New file: "+fileSummary(w.verified)); err != nil {
+			log.Printf("worker %s: job %d: the new file's log line: %v", w.ID, id, err)
+		}
+	}
+	if words := convertedWords(plan, w.verified); words != "" {
+		if err := w.Queue.SetStepWords(id, "converted", "Converted: "+words+"."); err != nil {
+			log.Printf("worker %s: job %d: the converted step's words: %v", w.ID, id, err)
+		}
+	}
+}
+
+// storeOutputInfo keeps the probe of the new file the check read on the job (JSON).
+func (w *Worker) storeOutputInfo(id int64, info media.Info) {
+	if w.Queue == nil || info.Video() == nil {
+		return
+	}
+	b, err := json.Marshal(info)
+	if err != nil {
+		log.Printf("worker %s: job %d: the new file's probe: %v", w.ID, id, err)
+		return
+	}
+	if err := w.Queue.SetOutputInfo(id, string(b)); err != nil {
+		log.Printf("worker %s: job %d: storing the new file's probe: %v", w.ID, id, err)
+	}
 }
 
 // recordCheck keeps the job's check step: the picture score, when the check ran (w.check, set by the picture comparison).
