@@ -120,6 +120,33 @@ func TestRelativeFolderTemplateStopsTheJob(t *testing.T) {
 	}
 }
 
+// A folder setting saved before publish refused '..' beside a template (review-592 follow-up) can still fill
+// in to a path with a '..' segment: the job stops with plain words that name the setting, before anything
+// is made, and the original is untouched. Without the guard the file would land one level above the folder
+// the setting named.
+func TestFilledInFolderWithDotDotStopsTheJob(t *testing.T) {
+	s := newScenario(t)
+	root := filepath.Join(s.dir, "out")
+	w := selectorsWorker(s, func(sel *rules.Selectors) {
+		sel.AfterConverting, sel.OutputDir = "folder", root+"/{{title}}/.."
+	})
+	w.RunInfo = func(jobs.Job) (jobs.RunInfo, error) { return jobs.RunInfo{Library: "Films"}, nil }
+	w.RunOne(context.Background()) // the failure is the job's, checked below
+	j := s.job()
+	if j.Status != jobs.Failed || !strings.Contains(j.Error, `which has a '..' in it`) || !strings.Contains(j.Error, "Save the result step") {
+		t.Fatalf("status %s, error %q", j.Status, j.Error)
+	}
+	if read(s.src) != "original-bytes" {
+		t.Errorf("the original %q", read(s.src))
+	}
+	if _, err := os.Stat(root); err == nil {
+		t.Error("the folder was made")
+	}
+	if entries, _ := os.ReadDir(s.dir); len(entries) != 1 { // the original alone: nothing landed beside it either
+		t.Errorf("something was written: %v", entries)
+	}
+}
+
 // The never-overwrite checks run on the path the template resolved to: a stranger's file at that name
 // stops the job before anything is converted, and nothing is touched.
 func TestResolvedNameTakenStopsTheJob(t *testing.T) {

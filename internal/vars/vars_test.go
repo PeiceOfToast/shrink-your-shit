@@ -210,3 +210,14 @@ func TestValuesLanguageTags(t *testing.T) {
 		t.Errorf("resolution %q", got["resolution"])
 	}
 }
+
+// A filled-in folder with a segment that acts as ".." (review-592 follow-up): the same rule the publish
+// check uses for a templated setting.
+func TestHasDotDot(t *testing.T) {
+	for in, want := range map[string]bool{"/data/lib/..": true, "/data/lib/../out": true, "/data/lib/x..": true, "/data/lib/.. ": true, "/data/lib/...": true, "/data/lib/.. .": true, `C:\out\..\x`: true, "/data/lib/ ..": true,
+		"/data/lib": false, "/data/lib/..x": false, "/data/lib/.x": false, "/data/lib/a.b": false, "/data/lib/./x": false, "": false} {
+		if got := HasDotDot(in); got != want {
+			t.Errorf("HasDotDot(%q) = %v", in, got)
+		}
+	}
+}
