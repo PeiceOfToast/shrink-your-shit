@@ -56,6 +56,8 @@ const saved = (b?: number, a?: number) => {
   const pct = Math.round((100 * (b - a)) / b);
   return bytes(b) + " → " + bytes(a) + ", " + (pct >= 0 ? pct + "% smaller" : -pct + "% bigger");
 };
+// U10: a path wraps after each slash (or backslash), so a long one breaks between folders, not in the middle of a name
+const slashWrap = (p: string) => { const parts = p.replace(/[\\/]/g, (m) => m + "\u0000").split("\u0000"); if (parts[parts.length - 1] === "") parts.pop(); return parts.map((s, i) => <Fragment key={i}>{s}{i < parts.length - 1 && <wbr />}</Fragment>); };
 async function act<T>(p: Promise<Answer<T>>, say: (m: string) => void): Promise<T | null> {
   try { const r = await p; if (failed(r)) return (say(r.error.message), null); return r; } catch (e) { if (e instanceof SignedOut) return null; throw e; }
 }
@@ -267,7 +269,8 @@ export function readFound(lines: string[]) {
 }
 const copyBox = (title: string, ls: string[]) => ls.length > 0 && <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">{title}</span>
   <button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(ls.join("\n")).catch(() => {})}><Icon id="i-copy" />Copy</button></div><pre className="joblog sm">{ls.join("\n")}</pre></div>;
-const FoundRows = ({ rows }: { rows: [string, string][] }) => rows.length > 0 ? <dl className="kv">{rows.map(([k, v], i) => <Fragment key={i}><dt>{k}</dt><dd className="sm" style={{ whiteSpace: "pre-line", fontVariantNumeric: "tabular-nums" }}>{v}</dd></Fragment>)}</dl> : null;
+// U10: the drawer's two-column table (label, value); its styles are drawer-scoped (.drawer.jobd .jd-found)
+const FoundRows = ({ rows }: { rows: [string, string][] }) => rows.length > 0 ? <table className="jd-found"><tbody>{rows.map(([k, v], i) => <tr key={i}><th scope="row">{k}</th><td style={{ whiteSpace: "pre-line", fontVariantNumeric: "tabular-nums" }}>{v}</td></tr>)}</tbody></table> : null;
 const Driver = ({ ls }: { ls: string[] }) => ls.length > 0 ? <details><summary className="sm" style={{ cursor: "pointer" }}>Driver messages ({ls.length})</summary>{copyBox("Driver messages", ls)}</details> : null;
 // A kept job: its own neutral section (keeping the original is the safe outcome, not an error).
 function CheckFound({ lines, reason }: { lines: string[]; reason: string }) {
@@ -623,12 +626,20 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   const showResult = !!(before || after || subsRow || lenRow), lenText = (x?: { durationSec?: number }) => (x?.durationSec != null ? elapsed(x.durationSec) : "—");
   const found = (log.data?.steps ?? []).filter((st) => (st.found?.length ?? 0) > 0);
   const kept0 = !!state && keptOrig({ state, reason: j?.reason ?? own?.reason });
+  // U10: the header's size delta, the list row's wording; a failed or skipped job has none, nor a restored original
+  const delta = state === "completed" && own?.originalState !== "restored" ? saved(own?.beforeBytes, own?.afterBytes) : "";
   return (
     <div className="drawer-wrap" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <aside className="drawer jobd" ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="jd-h">
         <div className={"hd" + (state === "failed" && !kept0 ? " failed" : "")}>
           <button className="btn icon ghost" type="button" aria-label="Close" onClick={onClose}><Icon id="i-chev-l" /></button>
-          <div className="sp"><h2 id="jd-h" className="clamp2" title={name}><FileName n={name} /></h2>{state && <span style={{ alignSelf: "flex-start" }}><Pill j={{ state, retryAt: j?.retryAt ?? own?.retryAt, subState: own?.subState, reason: j?.reason ?? own?.reason, warning: j?.warning }} /></span>}</div>
+          {own && <span className="ltile codec">{tileOf(own)}</span>}
+          <div className="sp">
+            <h2 id="jd-h" className="clamp2" title={name}><FileName n={name} /></h2>
+            {delta && <p className="jd-delta">{delta}</p>}
+            {/* the header pill matches the list row: a kept-original job reads "Original kept" (review 572) */}
+            {state && <span style={{ alignSelf: "flex-start" }}><Pill j={{ state, retryAt: j?.retryAt ?? own?.retryAt, subState: own?.subState, reason: j?.reason ?? own?.reason, warning: j?.warning }} /></span>}
+          </div>
           {/* SCREENS V6b header: Retry, Cancel or Stop, and the job ID to copy (the body keeps the rest) */}
           <div className="row nw" style={{ gap: 6, flexWrap: "wrap" }}>
             {active && <button className="btn sm" type="button" onClick={() => run("cancel")}><Icon id="i-stop" />{state === "queued" || state === "retry_wait" ? "Cancel" : "Stop"}</button>}
@@ -636,6 +647,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           </div>
         </div>
         <div className="bd">
+          {kept0 && <p style={{ margin: 0 }}>{WORD.kept}</p>}
           {(done && ca?.possible) || (state === "skipped" || state === "cancelled" || state === "failed" || state === "retry_wait") ? <div className="row">
             {(state === "failed" || state === "retry_wait") && <button className="btn sm" type="button" onClick={() => run("retry")}><Icon id="i-refresh" />{state === "retry_wait" ? "Try now" : "Retry"}</button>}
             {done && ca?.possible && <button className="btn sm" type="button" aria-expanded={again} onClick={() => setAgain(!again)}><Icon id="i-arrow-r" />Convert again</button>}
@@ -656,7 +668,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
             : found.length ? <CheckFound lines={found.flatMap((st) => st.found!)} reason={reason} />
             : reason && <section><h3>Why</h3><p>{reason}</p></section>}
           <section><h3>File</h3><dl className="kv">
-            {(own?.path ?? j?.file?.path) && <><dt>Source</dt><dd className="mono sm">{own?.path ?? j?.file?.path}</dd></>} {/* review 54ff228: no '-' when the server doesn't keep the path (a removed library's job) */}
+            {(own?.path ?? j?.file?.path) && <><dt>Source</dt><dd className="mono sm">{slashWrap(own?.path ?? j?.file?.path ?? "")}</dd></>} {/* review 54ff228: no '-' when the server doesn't keep the path (a removed library's job) */}
             {(j?.library || own) && <><dt>Library</dt><dd>{j?.library?.name ?? own?.library}</dd></>}
             {own?.state === "completed" && <>{own.originalState !== "restored" && <><dt>Size</dt><dd>{saved(own.beforeBytes, own.afterBytes)}</dd>{(own.afterBytes ?? 0) > (own.beforeBytes ?? 0) && <><dt /><dd className="muted sm">Used because it passed every check, even though it is bigger.</dd></>}</>} {/* review 66edc3d P3: after a restore the file is the original again: no saving */}
               <dt>Original</dt><dd>{kept ? keptLine : own.originalState === "kept" ? keptWords(own.keptDaysLeft ?? 0) : own.originalState === "restored" ? "Put back in place. The smaller version was deleted." : own.originalState === "deleted" ? "Deleted. The new file replaced it." : own.originalState === "left_in_place" ? "Left where it was. The new file is in another folder." + freeNote : own.originalState === "kept_beside" ? "Kept next to the new file, in the same folder." + freeNote : "Left in place"}</dd></>}
