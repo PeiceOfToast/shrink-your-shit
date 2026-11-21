@@ -360,21 +360,43 @@ func TestTagCardsReadAndWriteTheRecord(t *testing.T) {
 	if j := s2.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "Not a remux") {
 		t.Errorf("no tags in the store: %s %q", j.Status, j.Error)
 	}
-	// review-542: a Tag card on a path without a tag question, on a store without tags: the card says so and the
-	// file is converted all the same
+	// the real store carries tags (migration 57, #545): a Tag card on the plain store changes the record itself,
+	// and the file is converted (review2-542: the compile-time check in worker.go keeps the two together)
 	s4 := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
 	tm4 := cardsTemplate()
-	(*tm4.Branches)[0].Before = append([]rules.Card{{NodeID: "tag", Type: workflow.TypeTag, Name: "Tag the file", Config: map[string]any{"add": "converting"}}}, (*tm4.Branches)[0].Before...)
+	(*tm4.Branches)[0].Before = append([]rules.Card{{NodeID: "tag", Type: workflow.TypeTag, Name: "Tag the file", Config: map[string]any{"add": "converting, {{title}}"}}}, (*tm4.Branches)[0].Before...)
 	w4 := s4.worker(Beside)
 	w4.Template = func(jobs.Job) (rules.Template, error) { return tm4, nil }
 	if _, err := w4.RunOne(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if j := s4.job(); j.Status != jobs.Done {
-		t.Errorf("a Tag card without a store must not fail the job: %s %q", j.Status, j.Error)
+		t.Errorf("a Tag card on the real store: %s %q", j.Status, j.Error)
 	}
-	if !noteOnTimeline(s4, "Tags not kept") {
+	if tags, err := s4.store.JobTags(s4.id); err != nil || !rules.HasTag(tags, "converting") || !rules.HasTag(tags, "Harrow.Lane.2019.Remux") {
+		t.Errorf("the record's tags after the card: %v %v", tags, err)
+	}
+	if !noteOnTimeline(s4, "Tags: “converting, Harrow.Lane.2019.Remux”") {
 		steps, _ := s4.store.Steps(s4.id)
 		t.Errorf("timeline: %+v", steps)
 	}
+	// a queue without tags (not this store) still makes the card say so and go on: the flow test covers the card;
+	// here the wrapper hides the store's tags
+	s6 := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
+	w6 := s6.worker(Beside)
+	w6.Queue = &noTagsQueue{Store: s6.store}
+	w6.Template = func(jobs.Job) (rules.Template, error) { return tm4, nil }
+	if _, err := w6.RunOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if j := s6.job(); j.Status != jobs.Done || !noteOnTimeline(s6, "Tags not kept") {
+		steps, _ := s6.store.Steps(s6.id)
+		t.Errorf("a queue without tags: %s %q %+v", j.Status, j.Error, steps)
+	}
 }
+
+// noTagsQueue is the store with its tag methods hidden, as a queue from before migration 57 would look to the
+// worker: the JobTagger assertion fails on it, so the cards take their no-store path.
+type noTagsQueue struct{ *jobs.Store }
+
+func (q *noTagsQueue) JobTags(int64, ...struct{}) {}

@@ -2468,6 +2468,10 @@ type JobTagger interface {
 	SetJobTags(id int64, add, remove []string) ([]string, error)
 }
 
+// The store carries tags since migration 57 (#545): the cards reach them through this interface; this line
+// keeps the two from drifting apart (review2-542).
+var _ JobTagger = (*jobs.Store)(nil)
+
 // tagger is Env.Tag for job id, or nil when the store has no tags yet.
 func (w *Worker) tagger(id int64) func(add, remove []string) ([]string, error) {
 	t, ok := w.Queue.(JobTagger)
